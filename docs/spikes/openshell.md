@@ -29,7 +29,7 @@ approval for risky actions.** Each step below has pass/fail criteria. A result i
 - A criterion that fails and passes on re-run after a platform fix is recorded as **pass after
   platform fix**, keeps its fail history, and the fix becomes a Koinon install requirement.
 - Claude asks Andre before any cluster-level change not listed here, including temporary ones.
-- The spike starts once Andre reports that **Zot** (`docs/dev/registry.md`) and **OpenBao** are
+- The spike starts once Andre reports that **Zot** (`docs/dev/maintainer-homelab.md`) and **OpenBao** are
   installed (both running since 2026-10-21) and gives the go-ahead. Nothing cluster-wide changes
   beyond the CRDs and namespaces listed below.
 - No paid model calls. Models come from the home-lab Ollama.

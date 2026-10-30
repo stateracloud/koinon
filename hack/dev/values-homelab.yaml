@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Tilt profile "homelab" (ADR 0039): the Talos cluster with Kata, the platform's CloudNativePG
-# operator, Zot as the dev registry (docs/dev/registry.md) and the existing OpenShell gateway.
+# operator, Zot as the dev registry (docs/dev/maintainer-homelab.md) and the existing OpenShell gateway.
 # Override single values with `tilt up -- --helm-set key=value`.
 image:
   registry: zot.apps.lab.example.invalid/koinon
 
-# Created once by hand, see docs/dev/registry.md.
+# Created once by hand, see docs/dev/maintainer-homelab.md.
 imagePullSecrets:
   - name: dev-registry
 
