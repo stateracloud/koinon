@@ -121,7 +121,7 @@ func TestNoFalsePositives(t *testing.T) {
 		"git object 3f9a2b1c4d5e6f7081920a1b2c3d4e5f607182 (38 chars)",
 		"id 123e4567-e89b-12d3-a456-426614174000",
 		"sha512-z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==",
-		"image ghcr.io/stateracloud/koinon@sha256:3f9a2b1c4d5e6f7081920a1b2c3d4e5f607182933f9a2b1c4d5e6f7081920a1b",
+		"image registry.example.com/koinon@sha256:3f9a2b1c4d5e6f7081920a1b2c3d4e5f607182933f9a2b1c4d5e6f7081920a1b",
 		"func (s *Scrubber) Content(in string, limit int) (out string, truncated bool)",
 		"github.com/stateracloud/koinon/internal/tracing/scrub/v2/aa0265f5",
 		"pod koinon-agentd-7c9d8f6b5-x2k4p ready",

@@ -198,6 +198,14 @@ check_image() { # check_image <name[:tag]@sha256:digest | name:tag>
 	else
 		host=registry-1.docker.io; repo=$name; [[ $repo == */* ]] || repo="library/$repo"
 	fi
+	# Reserved names (RFC 2606, RFC 6761) are test fixtures, never something a build pulls.
+	case "${host%%:*}" in
+	example.com | example.net | example.org | *.example.com | *.example.net | *.example.org | \
+		*.example | *.test | *.invalid | *.localhost)
+		echo "SKIP    image ${ref:0:70} (reserved test domain)"
+		return 0
+		;;
+	esac
 	rest=${digest:-${tag:-latest}}
 	if ! idx=$(image_manifest "$host" "$repo" "$rest"); then
 		report "image $ref" unknown "$host: manifest not readable anonymously"
