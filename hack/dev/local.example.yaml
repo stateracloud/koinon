@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Tilt on a cluster that is not kind (docs/dev/loop.md, "Remote cluster"). Copy this file to
+# hack/dev/local.yaml (git-ignored), edit it and run `tilt up --context <your context>`. kind needs
+# none of this: `make dev-kind-up`, then `tilt up`.
+#
+# Nothing secret belongs here. A registry login, a pull secret's contents and model keys stay in
+# your Docker config and your cluster; this file only names them.
+
+# Kube contexts Tilt may deploy to in this profile. Tilt refuses every other context.
+contexts: [my-dev-cluster]
+
+# Where Tilt pushes images, and where the cluster pulls them from (image.registry). The registry
+# path is followed by the image name, e.g. registry.example.com/koinon/koinon-api. Log in first
+# (`docker login registry.example.com`).
+registry: registry.example.com/koinon
+
+# Build platform for the cluster's nodes (default linux/amd64).
+platform: linux/amd64
+
+# Name of an image pull Secret in the koinon namespace, if the registry needs credentials to pull.
+# Create it yourself: kubectl -n koinon create secret docker-registry dev-registry ...
+# imagePullSecret: dev-registry
+
+# The OpenShell gateway and the sandbox runtime class (the chart's openshell.* values).
+openshell:
+  address: openshell.openshell.svc:8080
+  runtimeClassName: kata        # runc where the cluster has no VM runtime
+  namespace: openshell          # where the gateway runs; its client certificate is copied from here
+  clientTLSSecret: openshell-client-tls   # "" for a gateway without mTLS
+
+# Render the chart's cluster-wide sandbox ValidatingAdmissionPolicies (default false: they would
+# also deny writes in other OpenShell sandbox namespaces on a shared cluster). The sandbox observer
+# needs them and is rendered off together with them.
+sandboxPolicy: false
+
+# A manifest declaring the default org's model provider with a labelled Secret (ADR 0056), applied
+# by Tilt. Copy hack/dev/model-provider.example.yaml; keep your own copy out of git if it holds a
+# key. Leave out to add a provider in the UI instead.
+# modelProvider: hack/dev/model-provider.local.yaml
+
+# Extra chart values files, for example the network policy and egress hosts your model endpoint needs.
+# values:
+#   - hack/dev/values.local.yaml
+
+# Labels added to the koinon namespace (for example for a secret store that selects namespaces).
+# namespaceLabels:
+#   example.com/secret-store: "true"

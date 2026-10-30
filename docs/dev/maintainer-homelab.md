@@ -60,8 +60,24 @@ kubectl config use-context homelab
 tilt up --context homelab
 ```
 
-Tilt builds for `linux/amd64`. The home-lab profile assumes OpenShell at
-`openshell.openshell.svc:8080` and the `kata` RuntimeClass; change them without editing files:
+### Home-lab values in the remote profile
+
+The home lab is the generic remote profile ([loop.md](loop.md#remote-cluster)) with these values,
+checked in as `hack/dev/local.homelab.example.yaml`. When the context is `homelab` or `homelab-koinon`
+and there is no `hack/dev/local.yaml`, the Tiltfile uses that file, so the command above is unchanged.
+To change something, copy it to `hack/dev/local.yaml` (git-ignored) and edit the copy.
+
+| Home-lab value | Where it lives now |
+| --- | --- |
+| Zot, `zot.apps.lab.example.invalid/koinon` | `registry` |
+| the `dev-registry` pull secret | `imagePullSecret` |
+| OpenShell at `openshell.openshell.svc:8080`, runtime class `kata`, mTLS Secret `openshell-client-tls` | `openshell.*` |
+| the Ollama provider | `modelProvider: hack/dev/model-provider-homelab.yaml` |
+| Ollama egress host and network policy | `values: [hack/dev/values-homelab.yaml]` |
+| the `lab.example.invalid/openbao` namespace label | `namespaceLabels` (it is no longer on the kind namespace) |
+| sandbox policies off | `sandboxPolicy: false` |
+
+Tilt builds for `linux/amd64`. Change single values without editing files:
 
 ```sh
 tilt up --context homelab -- --helm-set openshell.address=openshell.other.svc:8080 --helm-set openshell.runtimeClassName=kata-qemu
@@ -69,31 +85,21 @@ tilt up --context homelab -- --openshell-tls-secret=   # no mTLS (the default co
 tilt up --context homelab -- --openshell-namespace=openshell
 ```
 
-The home-lab gateway requires mTLS (docs/spikes/openshell.md), so both profiles copy the Secret
-`openshell-client-tls` from the OpenShell namespace into `koinon`; `--openshell-tls-secret=` turns
-that off, another name picks another Secret.
+The home-lab gateway requires mTLS (docs/spikes/openshell.md), so the profile copies the Secret
+`openshell-client-tls` from the OpenShell namespace into `koinon`.
 
 ### Cluster-wide objects on the home lab
 
 The sandbox ValidatingAdmissionPolicies and their bindings (ADRs 0045, 0048) are cluster-wide and
 deny writes in every `openshell.ai/managed-by=openshell` namespace, which would reach the platform's
 existing sandboxes. The home-lab profile therefore renders them off. `tilt up -- --sandbox-policy`
-turns them on; that needs a Rivet request that Andre approves first. The kind profile always has them.
-The sandbox observer (ADR 0078) needs the policies, so the home-lab profile renders it off too
-(`sandboxObserver.enabled=false`): an image pull error shows as an unknown wait cause there.
+turns them on; that needs a Rivet request that Andre approves first. The sandbox observer (ADR 0078)
+needs the policies, so it is rendered off too.
 With them off, nothing at admission enforces the Kata runtime class on home-lab dev sandboxes: that
 rests on OpenShell's `default_runtime_class_name: kata` and the reconciler's `runtimeClassName`, so
 the escape suite's admission cases don't hold there.
 
-The cluster-scoped objects the home-lab profile still applies, both needed:
-
-- ClusterRole and ClusterRoleBinding `koinon-koinon-reconciler`: the reconciler gets, lists, watches
-  and deletes `sandboxes.agents.x-k8s.io`. The binding is cluster-wide, so this holds in every
-  namespace, not only the OpenShell workspace namespaces.
-- ClusterRole and ClusterRoleBinding `koinon-koinon-preflight`: read-only. `get` on the CRDs, the
-  Agent Sandbox controller, the RuntimeClass and the like that the install preflight checks, and
-  in cnpg mode `list` on `validatingwebhookconfigurations` and `endpointslices` cluster-wide.
-
+The cluster-scoped objects it still applies are listed in [loop.md](loop.md#remote-cluster).
 
 ## Docker config caveat
 
