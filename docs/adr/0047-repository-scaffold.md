@@ -47,7 +47,7 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
 5. **Personal orgs**: the org row is created at a user's first login; the namespace and OpenShell
    workspace are created lazily with the first agent.
 6. **Dev registry**: Zot v2.1.22 in namespace `zot` at `zot.apps.lab.example.invalid`, installed
-   by procoduck as part of the home-lab platform (`docs/dev/registry.md`). It is also the cluster's
+   by procoduck as part of the home-lab platform (`docs/dev/maintainer-homelab.md`, formerly `registry.md`). It is also the cluster's
    pull-through cache; anonymous reads cover only the mirrored upstreams, so `koinon/*` needs
    credentials for push and pull.
 
@@ -154,5 +154,5 @@ a healthy state.
 ## Links
 
 - ADR 0004, 0022, 0026, 0027, 0034, 0037, 0038, 0039
-- [docs/dev/registry.md](../dev/registry.md)
+- [docs/dev/maintainer-homelab.md](../dev/maintainer-homelab.md)
 - Issue [#2](https://github.com/stateracloud/koinon/issues/2)
