@@ -31,6 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/providerusage"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
@@ -154,7 +155,14 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		refusePort = hostPort(refuse)
 		// The fake provider type gets a usage source, as OpenRouter has, so a cut stream is provisional.
 		settling := &ledger.Ingester{DB: db, Log: ing.Log, Prices: ing.Prices, Sources: providerusage.Registry{"fake": &fakeSource{}}}
-		receiver := httptest.NewServer(ledger.Handler(settling, slog.New(slog.NewTextHandler(GinkgoWriter, nil))))
+		// The receiver requires the bearer token, as koinon-api's does: the gateway only gets its
+		// records through if it sends the token from its file.
+		tokenDir := GinkgoT().TempDir()
+		Expect(os.Chmod(tokenDir, 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(tokenDir, "token"), []byte("koinon_test_not-a-real-token-gateway-0001"), 0o644)).To(Succeed())
+		tokens, err := otlpauth.NewTokens(tokenDir, slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+		Expect(err).NotTo(HaveOccurred())
+		receiver := httptest.NewServer(otlpauth.Middleware(tokens, otlpauth.NewMetrics(nil))(ledger.Handler(settling, slog.New(slog.NewTextHandler(GinkgoWriter, nil)))))
 		DeferCleanup(receiver.Close)
 
 		key, err = gateway.NewKey(e.ref())
@@ -174,7 +182,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 
 		options := standalone.Options{
 			DatabaseURL:   "sqlite:///tmp/agentgateway.db?mode=rwc",
-			AccessLogOTLP: &standalone.OTLPExport{HostPort: fmt.Sprintf("%s:%d", testcontainers.HostInternal, hostPort(receiver))},
+			AccessLogOTLP: &standalone.OTLPExport{HostPort: fmt.Sprintf("%s:%d", testcontainers.HostInternal, hostPort(receiver)), TokenFile: "/secrets/otlp/token"},
 		}
 		cfgDir := GinkgoT().TempDir()
 		Expect(os.Chmod(cfgDir, 0o755)).To(Succeed())
@@ -188,7 +196,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 			testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
 			testcontainers.WithHostPortAccess(hostPort(upstream), hostPort(receiver), slowPort, cutPort, refusePort),
 			testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
-				hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro")
+				hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro", tokenDir+":/secrets/otlp:ro")
 			}),
 			testcontainers.WithWaitStrategyAndDeadline(time.Minute, wait.ForHTTP("/healthz/ready").WithPort("15021/tcp")),
 		)

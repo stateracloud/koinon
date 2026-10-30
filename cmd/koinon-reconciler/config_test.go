@@ -29,6 +29,7 @@ gateway:
   providerKeysSecret: koinon-gateway-providers
   providerKeysDir: /secrets/providers
   accessLogOtlp: koinon-api.koinon.svc:4318
+  accessLogOtlpTokenFile: /secrets/otlp/token
 openshell:
   address: openshell.openshell.svc:8080
   tls: /etc/koinon/openshell-tls
@@ -73,6 +74,7 @@ var _ = Describe("parseConfig for the sandbox observer", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(c.sandboxObserver).To(BeFalse())
 		Expect(c.openshellGateway).To(Equal("openshell"))
+		Expect(c.otlpTokenFile).To(Equal("/secrets/otlp/token"))
 	})
 
 	It("is off when the chart says enabled: false", func() {
@@ -174,6 +176,7 @@ gateway:
   url: http://koinon-gateway.koinon.svc.cluster.local:4000
   port: 4000
   accessLogOtlp: koinon-api.koinon.svc:4318
+  accessLogOtlpTokenSecret: koinon-otlp-token
   providerKeysSecret: koinon-gateway-providers
   providerKeysDir: /secrets/providers
 openshell:
@@ -189,6 +192,7 @@ openshell:
 		Expect(c.gatewayName).To(Equal("koinon-gateway"))
 		Expect(c.gatewayClass).To(Equal("agentgateway"))
 		Expect(c.gatewayPort).To(Equal(4000))
+		Expect(c.otlpTokenSecret).To(Equal("koinon-otlp-token"))
 		Expect(c.keySettle).To(Equal(2 * time.Second))
 
 		delete(env, "KOINON_CONFIG")

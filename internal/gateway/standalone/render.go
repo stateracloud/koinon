@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"slices"
 	"strconv"
@@ -56,6 +57,28 @@ type OTLPExport struct {
 	HostPort string
 	// Path defaults to /v1/logs.
 	Path string
+	// TokenFile is the file, as the gateway pod sees it, with the bearer token the receiver
+	// requires (standalone mode). The gateway reads it and sends it as "Authorization: Bearer".
+	// The token never enters the rendered config, which is a world-readable ConfigMap.
+	TokenFile string
+	// TokenSecret and TokenSecretKey name the Secret and its key that hold the same token
+	// (kubernetes mode: the controller reads the Secret and hands the value to the proxy).
+	TokenSecret    string
+	TokenSecretKey string
+}
+
+// SplitHostPort returns the receiver's host and numeric port, or an error for anything that is not
+// "host:port" (a scheme, a path, a missing or non-numeric port).
+func (e OTLPExport) SplitHostPort() (string, int, error) {
+	host, portStr, err := net.SplitHostPort(e.HostPort)
+	if err != nil || host == "" {
+		return "", 0, fmt.Errorf("the OTLP receiver %q is not host:port", e.HostPort)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0, fmt.Errorf("the OTLP receiver %q has no valid port", e.HostPort)
+	}
+	return host, port, nil
 }
 
 const (
@@ -233,9 +256,20 @@ type accessLog struct {
 }
 
 type otlpLog struct {
-	Host     string `yaml:"host"`
-	Protocol string `yaml:"protocol"`
-	Path     string `yaml:"path,omitempty"`
+	Host     string        `yaml:"host"`
+	Protocol string        `yaml:"protocol"`
+	Path     string        `yaml:"path,omitempty"`
+	Policies *otlpPolicies `yaml:"policies,omitempty"`
+}
+
+// otlpPolicies are the backend policies of the OTLP export: the bearer token, read from a file
+// (backendAuth.key places it in "Authorization: Bearer <value>" by default).
+type otlpPolicies struct {
+	BackendAuth backendKeyAuth `yaml:"backendAuth"`
+}
+
+type backendKeyAuth struct {
+	Key backendKey `yaml:"key"`
 }
 
 type listener struct {
@@ -518,6 +552,9 @@ func build(s gateway.State, o Options) document {
 		doc.FrontendPolicies.AccessLog.OTLP = &otlpLog{Host: o.AccessLogOTLP.HostPort, Protocol: "http", Path: o.AccessLogOTLP.Path}
 		if doc.FrontendPolicies.AccessLog.OTLP.Path == "/v1/logs" {
 			doc.FrontendPolicies.AccessLog.OTLP.Path = ""
+		}
+		if o.AccessLogOTLP.TokenFile != "" {
+			doc.FrontendPolicies.AccessLog.OTLP.Policies = &otlpPolicies{BackendAuth: backendKeyAuth{Key: backendKey{File: o.AccessLogOTLP.TokenFile}}}
 		}
 	}
 	if o.DatabaseURL != "" {

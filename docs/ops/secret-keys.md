@@ -78,6 +78,38 @@ Do it once a year, or when `keys status` warns. No downtime, no restart.
 
 DEKs need no schedule: every write makes a new one.
 
+## Rotate the OTLP receiver token
+
+koinon-api's internal OTLP listener (the gateway's access log, agentd's run spans) requires a bearer
+token: the Secret `koinon-otlp-token`, key `token` (or the Secret named by `api.otlpToken.existingSecret`).
+The ensure-secrets Job creates it and never changes it. Rotation has no downtime, because the listener
+also accepts the key `previous`:
+
+1. Put the current `token` value in a new key `previous` and a new value in `token` (`openssl rand -hex 32`;
+   at least 32 characters of A-Z a-z 0-9 . _ ~ + / = -). Keep the values off the command line, where they
+   would land in shell history and the process list: write a patch file only you can read, apply it, and
+   delete it.
+
+   ```sh
+   umask 077; p=$(mktemp)
+   old=$(kubectl -n koinon get secret koinon-otlp-token -o jsonpath='{.data.token}')   # already base64
+   printf '{"data":{"previous":"%s","token":"%s"}}' "$old" "$(openssl rand -hex 32 | base64 | tr -d '\n')" >"$p"
+   kubectl -n koinon patch secret koinon-otlp-token --type merge --patch-file "$p"; rm -f "$p"
+   ```
+
+   (`kubectl -n koinon edit secret koinon-otlp-token` works too.)
+2. Wait for kubelet to sync the mounted Secret (up to about a minute). Nothing is restarted: koinon-api and
+   koinon-agentd re-read their files every few seconds, and agentgateway watches the token file and
+   reloads it, so its next export carries the new token. In kubernetes mode the controller reads the Secret
+   and pushes the value to the proxy.
+3. Once every sender sends the new token, check `koinon_api_otlp_auth_rejected_total` stays flat, then
+   remove `previous`. A `previous` that is empty or not a valid token is ignored, and never blocks a new
+   `token`.
+
+If the token leaked, do the same and remove `previous` straight away: the old token is refused at once.
+Exports in the window between that and the gateway's reload (kubelet sync plus the reload) are rejected
+with a 401, and agentgateway does not retry them, so the spend ledger misses those records.
+
 ## Suspected compromise
 
 A KEK compromise means someone may hold a KEK and the database. Rotating the KEK is not enough: they
