@@ -56,7 +56,7 @@ gitr() {
   _repo=$1
   shift
   # shellcheck disable=SC2086
-  git -C "$_repo" -c core.fsmonitor=false -c core.hooksPath=/dev/null $gitcfg "$@"
+  git -C "$_repo" -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.excludesFile=/dev/null -c core.attributesFile=/dev/null $gitcfg "$@"
 }
 
 for g in "$dir/.git" "$dir"/*/.git "$dir"/*/*/.git; do
