@@ -24,6 +24,7 @@ const MinSecretLen = 8
 type Secrets struct {
 	nodes []acNode
 	count int
+	max   int // length of the longest pattern
 }
 
 type acEdge struct {
@@ -104,6 +105,9 @@ func NewSecrets(values ...string) *Secrets {
 		s.nodes[cur].out = len(p)
 	}
 	s.count = len(patterns)
+	for _, p := range patterns {
+		s.max = max(s.max, len(p))
+	}
 	s.link()
 	return s
 }
@@ -269,4 +273,12 @@ func asciiEscape(s string, upper bool) string {
 		}
 	}
 	return b.String()
+}
+
+// maxLen is the length of the longest pattern; 0 for a nil or empty set.
+func (s *Secrets) maxLen() int {
+	if s == nil {
+		return 0
+	}
+	return s.max
 }

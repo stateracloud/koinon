@@ -3,7 +3,6 @@
 package scrub
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,10 +26,16 @@ const TooDeepPlaceholder = `"[koinon: content too deeply nested]"`
 var errTooDeep = fmt.Errorf("%w: nested too deeply", ErrInvalidJSON)
 
 const (
+	// maxStructuralBytes and maxStructuralFailures bound the search for JSON inside text.
+	maxStructuralBytes    = 1 << 20
+	maxStructuralFailures = 64
+	// minGuard is the least number of bytes dropped from the end of a cut, scrubbed string.
+	minGuard = 512
 	// maxEmbeddedDepth is how many times a JSON document inside a JSON string is unpacked.
 	maxEmbeddedDepth = 3
-	// maxEmbeddedBytes is the largest string that is tried as an embedded JSON document.
-	maxEmbeddedBytes = 1 << 20
+	// maxEmbeddedBytes is the largest string that is tried as an embedded JSON document; a longer
+	// one is cut and scrubbed as text.
+	maxEmbeddedBytes = 64 << 10
 )
 
 type nodeKind uint8
@@ -52,29 +57,70 @@ type node struct {
 	keys []string
 	kids []*node // array elements, or object member values
 	size int     // encoded size, set by measure
+	// dirty is set by measure when this subtree dropped children (extra > 0 somewhere).
+	dirty bool
+	// extra is how many trailing children were dropped before truncation (see bound).
+	extra int
+	// s and e are the byte range of a string or number token in the parsed text, set only by
+	// parseAt.
+	s, e int
 }
 
 func parseJSON(raw []byte) (*node, error) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	n, err := parseValue(dec, 0)
-	if errors.Is(err, errTooDeep) {
-		return nil, errTooDeep
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidJSON, err)
-	}
-	if _, err := dec.Token(); err != io.EOF {
-		return nil, fmt.Errorf("%w: trailing data", ErrInvalidJSON)
-	}
-	return n, nil
+	n, _, err := parseAt(string(raw), 0, false)
+	return n, err
 }
 
-func parseValue(dec *json.Decoder, depth int) (*node, error) {
+// parseAt parses one JSON value from the start of src. With track, string and number nodes
+// record their byte ranges in src, offset by base. It returns the number of bytes consumed;
+// anything after the value is left alone when track is set and is an error otherwise.
+func parseAt(src string, base int, track bool) (*node, int, error) {
+	dec := json.NewDecoder(strings.NewReader(src))
+	dec.UseNumber()
+	p := &parser{dec: dec, src: src, base: base, track: track}
+	n, err := p.value(0)
+	if errors.Is(err, errTooDeep) {
+		return nil, 0, errTooDeep
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("%w: %w", ErrInvalidJSON, err)
+	}
+	used := int(dec.InputOffset())
+	if !track {
+		if _, err := dec.Token(); err != io.EOF {
+			return nil, 0, fmt.Errorf("%w: trailing data", ErrInvalidJSON)
+		}
+	}
+	return n, used, nil
+}
+
+type parser struct {
+	dec   *json.Decoder
+	src   string
+	base  int
+	track bool
+}
+
+// leaf records where the token just read sits: between off0 (end of the previous token, which
+// may be followed by blanks, a comma or a colon) and the decoder's current offset.
+func (p *parser) leaf(n *node, off0 int64) *node {
+	if p.track {
+		end := int(p.dec.InputOffset())
+		start := int(off0)
+		for start < end && strings.IndexByte(" \t\r\n,:", p.src[start]) >= 0 {
+			start++
+		}
+		n.s, n.e = p.base+start, p.base+end
+	}
+	return n
+}
+
+func (p *parser) value(depth int) (*node, error) {
 	if depth > maxJSONDepth {
 		return nil, errTooDeep
 	}
-	tok, err := dec.Token()
+	off0 := p.dec.InputOffset()
+	tok, err := p.dec.Token()
 	if err != nil {
 		return nil, err
 	}
@@ -82,21 +128,21 @@ func parseValue(dec *json.Decoder, depth int) (*node, error) {
 	case json.Delim:
 		if t == '[' {
 			n := &node{kind: arrNode}
-			for dec.More() {
-				k, err := parseValue(dec, depth+1)
+			for p.dec.More() {
+				k, err := p.value(depth + 1)
 				if err != nil {
 					return nil, err
 				}
 				n.kids = append(n.kids, k)
 			}
-			if _, err := dec.Token(); err != nil {
+			if _, err := p.dec.Token(); err != nil {
 				return nil, err
 			}
 			return n, nil
 		}
 		n := &node{kind: objNode}
-		for dec.More() {
-			kt, err := dec.Token()
+		for p.dec.More() {
+			kt, err := p.dec.Token()
 			if err != nil {
 				return nil, err
 			}
@@ -104,21 +150,21 @@ func parseValue(dec *json.Decoder, depth int) (*node, error) {
 			if !ok {
 				return nil, errors.New("object key is not a string")
 			}
-			v, err := parseValue(dec, depth+1)
+			v, err := p.value(depth + 1)
 			if err != nil {
 				return nil, err
 			}
 			n.keys = append(n.keys, key)
 			n.kids = append(n.kids, v)
 		}
-		if _, err := dec.Token(); err != nil {
+		if _, err := p.dec.Token(); err != nil {
 			return nil, err
 		}
 		return n, nil
 	case string:
-		return &node{kind: strNode, str: t}, nil
+		return p.leaf(&node{kind: strNode, str: t}, off0), nil
 	case json.Number:
-		return &node{kind: numNode, lit: t.String()}, nil
+		return p.leaf(&node{kind: numNode, lit: t.String()}, off0), nil
 	case bool:
 		if t {
 			return &node{kind: boolNode, lit: "true"}, nil
@@ -232,81 +278,159 @@ func (s *Scrubber) JSON(raw []byte) ([]byte, error) {
 	return n.appendTo(make([]byte, 0, len(raw))), nil
 }
 
-// scrubNode scrubs n in place. force is the kind to replace every scalar under n with, when the
-// scalar sits below a header key; embedded counts how many JSON strings deep n is.
-func (s *Scrubber) scrubNode(n *node, force Kind, embedded int) {
+// childForces returns, for each child of n, the kind its scalars are replaced with (""
+// for none), given the kind forced on n itself. It is the single place that knows which keys and
+// array shapes hold credentials, shared by scrubbing and by the span finder for text.
+func childForces(n *node, force Kind) []Kind {
+	out := make([]Kind, len(n.kids))
 	switch n.kind {
-	case strNode:
-		if force != "" {
-			if n.str != "" {
-				n.str = s.replaceAll(force)
-			}
-			return
-		}
-		if embedded < maxEmbeddedDepth && len(n.str) <= maxEmbeddedBytes {
-			if sub := s.embeddedJSON(n.str, embedded); sub != nil {
-				n.str = string(sub)
-				return
-			}
-		}
-		n.str = s.Text(n.str)
-	case numNode, boolNode:
-		switch {
-		case force != "":
-			n.kind, n.str = strNode, s.replaceAll(force)
-		case s.secrets.Len() > 0 || s.level == LevelRedacted:
-			// a numeric secret (a PIN), or a card number written as a JSON number
-			if out := s.Text(n.lit); out != n.lit {
-				n.kind, n.str = strNode, out
-			}
-		}
 	case arrNode:
-		kind := force
-		if kind == "" && len(n.kids) >= 2 && n.kids[0].kind == strNode {
-			// a [name, value] tuple, the way header lists are written
-			kind = headerKind(n.kids[0].str)
-			if kind != "" {
-				s.scrubNode(n.kids[0], "", embedded)
-				for _, k := range n.kids[1:] {
-					s.scrubNode(k, kind, embedded)
-				}
-				return
-			}
+		for i := range out {
+			out[i] = force
 		}
-		for _, k := range n.kids {
-			s.scrubNode(k, force, embedded)
+		if force == "" && len(n.kids) == 2 && n.kids[0].kind == strNode && n.kids[1].kind == strNode {
+			// a ["Authorization", "Basic abc"] header tuple: only when the value looks like a
+			// credential, so ["Authorization", "is a header"] stays readable
+			if kind := headerKind(n.kids[0].str); kind != "" && credLooking(n.kids[1].str) &&
+				(kind != KindCookie || strings.Contains(n.kids[1].str, "=")) {
+				out[1] = kind
+			}
 		}
 	case objNode:
 		pair := headerPair(n)
-		for i, k := range n.kids {
+		for i := range out {
 			kind := force
 			if kind == "" {
-				kind = headerKind(n.keys[i])
+				if kind = headerKind(n.keys[i]); kind == "" {
+					kind = credentialKind(n.keys[i])
+				}
 			}
 			if kind == "" && pair != "" {
 				if lk := strings.ToLower(strings.TrimSpace(n.keys[i])); lk == "value" || lk == "values" {
 					kind = pair
 				}
 			}
-			s.scrubNode(k, kind, embedded)
-			n.keys[i] = s.Text(n.keys[i])
+			out[i] = kind
 		}
 	}
+	return out
 }
 
-// embeddedJSON scrubs a string that holds a JSON object or array (tool output often does) as JSON
-// and returns it re-encoded as the string's new value, or nil when str is not such a document.
-func (s *Scrubber) embeddedJSON(str string, embedded int) []byte {
+// replaces reports whether a scalar under a key of kind force is replaced: header keys replace any
+// scalar; a credential-named key replaces strings only (a count named max_token is not a secret).
+func replaces(n *node, force Kind) bool {
+	if force == "" {
+		return false
+	}
+	if n.kind == strNode {
+		return n.str != ""
+	}
+	return force != KindCredential && (n.kind == numNode || n.kind == boolNode)
+}
+
+// scrubNode scrubs n in place and reports whether it changed anything. force is the kind to
+// replace the scalars under n with when n sits below a header or credential key; embedded
+// counts how many JSON strings deep n is. Strings longer than the scrubber's leaf cap are cut
+// before scrubbing (see capLeaf), so the work per string is bounded.
+func (s *Scrubber) scrubNode(n *node, force Kind, embedded int) bool {
+	switch n.kind {
+	case strNode:
+		if replaces(n, force) {
+			n.str = s.replaceAll(force)
+			return true
+		}
+		if embedded < maxEmbeddedDepth && len(n.str) <= maxEmbeddedBytes {
+			if out, ok := s.embeddedJSON(n.str, embedded); ok {
+				n.str = out
+				return true
+			}
+		}
+		out := s.capLeaf(n.str)
+		changed := out != n.str
+		n.str = out
+		return changed
+	case numNode, boolNode:
+		switch {
+		case replaces(n, force):
+			n.kind, n.str = strNode, s.replaceAll(force)
+			return true
+		case s.secrets.Len() > 0 || s.level == LevelRedacted:
+			// a numeric secret (a PIN), or a card number written as a JSON number
+			if out := s.Text(n.lit); out != n.lit {
+				n.kind, n.str = strNode, out
+				return true
+			}
+		}
+		return false
+	case arrNode, objNode:
+		forces := childForces(n, force)
+		changed := false
+		for i, k := range n.kids {
+			if s.scrubNode(k, forces[i], embedded) {
+				changed = true
+			}
+			if n.kind == objNode {
+				if key := s.Text(n.keys[i]); key != n.keys[i] {
+					n.keys[i], changed = key, true
+				}
+			}
+		}
+		return changed
+	}
+	return false
+}
+
+// embeddedJSON scrubs a string that holds a JSON object or array (tool output often does) as JSON.
+// It returns the new string value and true only when scrubbing changed something, so a document
+// with nothing to hide keeps its exact bytes (layout, escapes and all). A document nested too
+// deeply to parse becomes the fixed placeholder, never raw text.
+func (s *Scrubber) embeddedJSON(str string, embedded int) (string, bool) {
 	t := strings.TrimSpace(str)
 	if t == "" || (t[0] != '{' && t[0] != '[') {
-		return nil
+		return "", false
 	}
 	sub, err := parseJSON([]byte(t))
-	if err != nil {
-		return nil
+	if errors.Is(err, errTooDeep) {
+		return "[koinon: content too deeply nested]", true
 	}
-	s.scrubNode(sub, "", embedded+1)
-	return sub.appendTo(nil)
+	if err != nil {
+		return "", false
+	}
+	if !s.scrubNode(sub, "", embedded+1) {
+		// nothing in the leaves; the raw text may still hold something the leaves split
+		if out := s.Text(str); out != str {
+			return out, true
+		}
+		return "", false
+	}
+	return string(sub.appendTo(nil)), true
+}
+
+// capLeaf scrubs a string. One longer than the cap is cut to the cap first, scrubbed, and then
+// the last guard bytes of the result are dropped, because a credential cut in half by the cap
+// would survive as a fragment at the end. A cut string ends with TruncatedSuffix.
+func (s *Scrubber) capLeaf(str string) string {
+	if s.leafCap <= 0 || len(str) <= s.leafCap {
+		return s.Text(str)
+	}
+	out := s.Text(cutRunes(str, s.leafCap))
+	return cutRunes(out, max(0, len(out)-s.guard())) + TruncatedSuffix
+}
+
+// guard is how many trailing bytes of a cut, scrubbed prefix are dropped.
+func (s *Scrubber) guard() int {
+	return max(minGuard, s.secrets.maxLen()+16)
+}
+
+// cutRunes returns the longest prefix of s of at most n bytes that ends on a character boundary.
+func cutRunes(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // headerPair returns the header kind when the object names a header in "name", "key" or "header"
@@ -323,6 +447,52 @@ func headerPair(n *node) Kind {
 		}
 	}
 	return ""
+}
+
+// findForcedLeaves finds JSON objects and arrays written in text (a log line, NDJSON, a tool
+// result) and appends a span over every scalar that sits below a header or credential key, in
+// whatever order the members are written. A regular expression cannot see "value" before "name"
+// or a "in" member between them; the parsed structure can.
+func findForcedLeaves(in string, spans []span) []span {
+	if len(in) > maxStructuralBytes {
+		return spans
+	}
+	failures := 0
+	for i := 0; i < len(in) && failures < maxStructuralFailures; i++ {
+		if in[i] != '{' && in[i] != '[' {
+			continue
+		}
+		n, used, err := parseAt(in[i:], i, true)
+		if err != nil {
+			failures++
+			continue
+		}
+		collectForced(n, "", func(leaf *node, k Kind) {
+			a, b := leaf.s, leaf.e
+			if leaf.kind == strNode && b-a >= 2 { // the string's content, inside its quotes
+				a, b = a+1, b-1
+			}
+			if b > a {
+				spans = append(spans, span{a, b, k})
+			}
+		})
+		i += used - 1
+	}
+	return spans
+}
+
+func collectForced(n *node, force Kind, emit func(*node, Kind)) {
+	switch n.kind {
+	case strNode, numNode, boolNode:
+		if replaces(n, force) && n.e > n.s {
+			emit(n, force)
+		}
+	case arrNode, objNode:
+		forces := childForces(n, force)
+		for i, k := range n.kids {
+			collectForced(k, forces[i], emit)
+		}
+	}
 }
 
 func (s *Scrubber) replaceAll(k Kind) string {

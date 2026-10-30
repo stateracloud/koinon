@@ -170,7 +170,7 @@ func tokenLike(run string) bool {
 	if !upper && (n < MinLowerTokenLen || strings.ContainsAny(run, "-_/")) {
 		return false // lower-case slugs and resource names; only a plain [a-z0-9] run counts
 	}
-	if digitIslands(run) < minIslands(n) || camelCaseWords(run) {
+	if digitIslands(run) < minIslands(n) || camelCaseWords(run) || lowerWords(run) {
 		return false // a name with a version suffix, or words run together
 	}
 	return entropy(run) >= TokenEntropyBits
@@ -293,4 +293,22 @@ func publicID(s string) bool {
 		}
 	}
 	return strings.HasPrefix(s, "MEUCI") || strings.HasPrefix(s, "MEQCI") || strings.HasPrefix(s, "MEYCI")
+}
+
+// lowerWords reports whether at least 40% of the run is lower-case letters in stretches of four
+// or more, the way the words of an identifier (TestScrubJSON2Roundtrip4Cases) are; random
+// base64 has few such stretches.
+func lowerWords(s string) bool {
+	run, in := 0, 0
+	for i := 0; i <= len(s); i++ {
+		if i < len(s) && 'a' <= s[i] && s[i] <= 'z' {
+			run++
+			continue
+		}
+		if run >= 4 {
+			in += run
+		}
+		run = 0
+	}
+	return in*10 >= len(s)*4
 }

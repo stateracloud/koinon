@@ -58,7 +58,7 @@ func truncateNode(n *node, limit int) ([]byte, bool) {
 		limit = MinMaxBytes
 	}
 	measure(n)
-	if n.size <= limit {
+	if n.size <= limit && !n.dirty {
 		return n.appendTo(make([]byte, 0, n.size)), false
 	}
 	t := &truncator{}
@@ -71,6 +71,12 @@ func truncateNode(n *node, limit int) ([]byte, bool) {
 
 // measure fills node.size with the encoded size of every node.
 func measure(n *node) int {
+	n.dirty = n.extra > 0
+	defer func() {
+		if n.extra > 0 {
+			n.size += markerReserve
+		}
+	}()
 	switch n.kind {
 	case nullNode, boolNode, numNode:
 		n.size = len(n.lit)
@@ -80,6 +86,7 @@ func measure(n *node) int {
 		n.size = 2
 		for i, k := range n.kids {
 			n.size += measure(k)
+			n.dirty = n.dirty || k.dirty
 			if i > 0 {
 				n.size++
 			}
@@ -88,6 +95,7 @@ func measure(n *node) int {
 		n.size = 2
 		for i, k := range n.kids {
 			n.size += len(appendString(nil, n.keys[i])) + 1 + measure(k)
+			n.dirty = n.dirty || k.dirty
 			if i > 0 {
 				n.size++
 			}
@@ -100,7 +108,7 @@ type truncator struct{}
 
 // fit returns a node whose encoded size is at most budget (budget >= minShare).
 func (t *truncator) fit(n *node, budget int) *node {
-	if n.size <= budget {
+	if n.size <= budget && !n.dirty {
 		return n
 	}
 	switch n.kind {
@@ -166,7 +174,7 @@ func (t *truncator) fitContainer(n *node, budget int) *node {
 	if m == 0 {
 		return strLeaf("…")
 	}
-	dropped := k - m
+	dropped := k - m + n.extra
 	remaining := avail - commas(m)
 	if dropped > 0 {
 		remaining -= markerReserve
@@ -190,7 +198,7 @@ func (t *truncator) fitContainer(n *node, budget int) *node {
 	out := &node{kind: n.kind}
 	for i := 0; i < m; i++ {
 		var child *node
-		if n.kids[i].size <= give[i] {
+		if n.kids[i].size <= give[i] && !n.kids[i].dirty {
 			child = n.kids[i]
 		} else {
 			child = t.fit(n.kids[i], maxInt(give[i], minShare))
@@ -244,21 +252,76 @@ func TruncateText(s string, limit int) (string, bool) {
 	return s[:cut] + TruncatedSuffix, true
 }
 
+const (
+	// contentMargin is how much more than the limit Content scrubs before it cuts; scrubbing
+	// can shrink text (a key block becomes a short marker), so the cut has to be made beyond the limit.
+	contentMargin = 4 << 10
+	// maxContentBytes is the most of an input Content looks at.
+	maxContentBytes = 4 << 20
+)
+
 // Content scrubs and truncates one content attribute value. When s is a JSON object, array or
 // string it is scrubbed as JSON (structure kept) and truncated with TruncateJSON; otherwise it is
-// scrubbed as text and cut with TruncateText. Scrubbing comes first, so a secret cut in half by
-// the limit was already replaced. limit 0 means DefaultMaxBytes. truncated reports a cut.
+// scrubbed as text and cut with TruncateText. limit 0 means DefaultMaxBytes. truncated reports a cut.
+//
+// Work is bounded whatever the size of the input. Text is cut to the limit plus a margin before it
+// is scrubbed, and the last few bytes of the scrubbed prefix are dropped, because a credential cut
+// in half at the margin would otherwise survive as a fragment. In JSON, containers keep only
+// the children the limit could ever show and each string is cut the same way. Scrubbing still comes
+// before the final cut, so no half secret survives it either.
 func (s *Scrubber) Content(in string, limit int) (out string, truncated bool) {
+	if limit <= 0 {
+		limit = DefaultMaxBytes
+	}
+	limit = max(limit, MinMaxBytes)
+	sc := *s
+	sc.leafCap = limit + contentMargin
+	cut := false
+	if len(in) > maxContentBytes {
+		in, cut = cutRunes(in, maxContentBytes), true
+	}
 	if t := strings.TrimSpace(in); t != "" && (t[0] == '{' || t[0] == '[' || t[0] == '"') {
 		n, err := parseJSON([]byte(t))
 		if errors.Is(err, errTooDeep) {
 			return TooDeepPlaceholder, true
 		}
 		if err == nil {
-			s.scrubNode(n, "", 0)
-			b, cut := truncateNode(n, limit)
-			return string(b), cut
+			bound(n, limit/8+8)
+			sc.scrubNode(n, "", 0)
+			b, c := truncateNode(n, limit)
+			return string(b), c || cut
 		}
 	}
-	return TruncateText(s.Text(in), limit)
+	prefix := false
+	if len(in) > limit+contentMargin {
+		in, prefix = cutRunes(in, limit+contentMargin), true
+	}
+	res := sc.Text(in)
+	if prefix {
+		res = cutRunes(res, max(0, len(res)-sc.guard()))
+	}
+	if cut || prefix {
+		if len(res)+len(TruncatedSuffix) <= limit {
+			return res + TruncatedSuffix, true
+		}
+		res, _ = TruncateText(res, limit)
+		return res, true
+	}
+	return TruncateText(res, limit)
+}
+
+// bound drops the children of a container beyond the first maxKids, recording how many in
+// extra, so that truncation can still say "N more". The fair-share cut in fitContainer keeps a
+// prefix of at most limit/16 children, so the dropped ones could never have been shown.
+func bound(n *node, maxKids int) {
+	if len(n.kids) > maxKids {
+		n.extra += len(n.kids) - maxKids
+		n.kids = n.kids[:maxKids]
+		if n.keys != nil {
+			n.keys = n.keys[:maxKids]
+		}
+	}
+	for _, k := range n.kids {
+		bound(k, maxKids)
+	}
 }

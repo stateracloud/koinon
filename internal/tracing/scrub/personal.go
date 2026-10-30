@@ -273,6 +273,10 @@ func scanChain(in string, groups []group, spans []span) []span {
 	}
 	for a := 0; a < len(groups); {
 		best, digits := -1, 0
+		if glen(groups[a]) < 4 { // a card's first group is at least four digits
+			a++
+			continue
+		}
 		for b := a; b < len(groups) && groups[b].sepAfter != 'x'; b++ {
 			if digits += glen(groups[b]); digits > 19 {
 				break
@@ -290,6 +294,10 @@ func scanChain(in string, groups []group, spans []span) []span {
 	}
 	for a := 0; a < len(groups); {
 		best, digits := -1, 0
+		if used[a] || (glen(groups[a]) < 2 && !groups[a].plus && !groups[a].open) {
+			a++ // a phone number's first group has two digits or more, unless a + or ( opens it
+			continue
+		}
 		for b := a; b < len(groups) && groups[b].sepAfter != 'x' && !used[b]; b++ {
 			if digits += glen(groups[b]); digits > 15 {
 				break
@@ -413,6 +421,9 @@ func phoneWindow(in string, gs []group) bool {
 	if !plus && !paren {
 		if glen(gs[0]) > 5 || len(gs) > 6 || hasShortGroup(gs) || mixedSeparators(gs) {
 			return false // a list of numbers, an ID, a table row
+		}
+		if len(gs) == 2 && gs[0].sepAfter == '-' { // an ID such as 2026-001234 or 12345-67890
+			return false
 		}
 		if glen(gs[0]) == 8 && glen(gs[1]) == 4 { // a UUID that is all digits
 			return false

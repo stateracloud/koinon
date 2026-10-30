@@ -84,7 +84,9 @@ const (
 	KindPhone       Kind = "phone"
 	KindIBAN        Kind = "iban"
 	KindCard        Kind = "card"
-	KindToken       Kind = "token" // high-entropy token
+	KindToken       Kind = "token"       // high-entropy token
+	KindPrivateKey  Kind = "private-key" // a PEM private key block
+	KindCredential  Kind = "credential"  // the value of a key named password, token, secret ...
 )
 
 // Kinds lists every kind, for tests and metric pre-registration.
@@ -113,6 +115,9 @@ type Scrubber struct {
 	level   Level
 	secrets *Secrets
 	observe func(Kind)
+	// leafCap, when positive, is the longest string scrubbed whole (see capLeaf); Content sets it
+	// on a copy.
+	leafCap int
 }
 
 // New returns a Scrubber.
