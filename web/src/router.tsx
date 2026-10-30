@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { QueryClient } from '@tanstack/react-query'
-import { createRootRouteWithContext, createRoute, createRouter, Outlet, redirect, type RouterHistory } from '@tanstack/react-router'
+import { createRootRouteWithContext, createRoute, createRouter, lazyRouteComponent, Outlet, redirect, type RouterHistory } from '@tanstack/react-router'
 import { AgentPage } from '@/pages/agent-page'
 import { AgentsPage } from '@/pages/agents-page'
 import { AppLayout } from '@/pages/app-layout'
@@ -85,6 +85,62 @@ export const budgetsRoute = createRoute({ getParentRoute: () => appRoute, path: 
 export const platformBudgetsRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform/budgets', component: PlatformBudgetsPage })
 export const tokensRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/tokens', component: TokensPage })
 
+// The v2 UI preview (src/preview): the approved mockups as screens on mock data. It has no session check and makes
+// no API calls, so it renders without a backend. Every page is lazy-loaded, so the app's bundle does not carry it.
+const previewPages = {
+  shell: () => import('@/preview/pages/shell-screens'),
+  index: () => import('@/preview/pages/index'),
+  overview: () => import('@/preview/pages/overview'),
+  run: () => import('@/preview/pages/run'),
+  agents: () => import('@/preview/pages/agents'),
+  marketplace: () => import('@/preview/pages/marketplace'),
+  providers: () => import('@/preview/pages/providers'),
+  platform: () => import('@/preview/pages/platform'),
+  onboarding: () => import('@/preview/pages/onboarding'),
+}
+
+export const previewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/preview',
+  component: lazyRouteComponent(() => import('@/preview/shell/preview-root'), 'PreviewRoot'),
+})
+
+function previewChild<const TPath extends string>(path: TPath, component: ReturnType<typeof lazyRouteComponent>) {
+  return createRoute({ getParentRoute: () => previewRoute, path, component })
+}
+
+const previewRoutes = [
+  previewChild('/', lazyRouteComponent(previewPages.index, 'PreviewIndexPage')),
+  previewChild('sidebar', lazyRouteComponent(previewPages.shell, 'SidebarScreen')),
+  previewChild('runs', lazyRouteComponent(previewPages.shell, 'RunsPage')),
+  previewChild('commands', lazyRouteComponent(previewPages.shell, 'CommandsPage')),
+  previewChild('phone', lazyRouteComponent(previewPages.shell, 'PhoneFramePage')),
+  previewChild('overview', lazyRouteComponent(previewPages.overview, 'OverviewPage')),
+  previewChild('inbox', lazyRouteComponent(previewPages.overview, 'InboxPage')),
+  previewChild('runs/$runId', lazyRouteComponent(previewPages.run, 'RunPage')),
+  previewChild('agents/new', lazyRouteComponent(previewPages.agents, 'NewAgentGalleryPage')),
+  previewChild('agents/new/template', lazyRouteComponent(previewPages.agents, 'NewAgentTemplatePage')),
+  previewChild('agents/new/blank', lazyRouteComponent(previewPages.agents, 'NewAgentBlankPage')),
+  previewChild('agents/$agentId', lazyRouteComponent(previewPages.agents, 'AgentPage')),
+  previewChild('agents/$agentId/rollback', lazyRouteComponent(previewPages.agents, 'AgentRollbackPage')),
+  previewChild('marketplace', lazyRouteComponent(previewPages.marketplace, 'MarketplacePage')),
+  previewChild('skills/add', lazyRouteComponent(previewPages.marketplace, 'SkillAddPage')),
+  previewChild('skills/$skillId', lazyRouteComponent(previewPages.marketplace, 'SkillDetailPage')),
+  previewChild('providers', lazyRouteComponent(previewPages.providers, 'ProvidersPage')),
+  previewChild('providers/add', lazyRouteComponent(previewPages.providers, 'ProviderAddPage')),
+  previewChild('prices', lazyRouteComponent(previewPages.providers, 'PricesPage')),
+  previewChild('secrets', lazyRouteComponent(previewPages.providers, 'SecretsPage')),
+  previewChild('spend', lazyRouteComponent(previewPages.providers, 'SpendPage')),
+  previewChild('platform/orgs', lazyRouteComponent(previewPages.platform, 'PlatformOrgsPage')),
+  previewChild('platform/usage', lazyRouteComponent(previewPages.platform, 'PlatformUsagePage')),
+  previewChild('platform/shared', lazyRouteComponent(previewPages.platform, 'PlatformSharedPage')),
+  previewChild('platform/settings', lazyRouteComponent(previewPages.platform, 'PlatformSettingsPage')),
+  previewChild('platform/agents', lazyRouteComponent(previewPages.platform, 'PlatformAgentsPage')),
+  previewChild('welcome', lazyRouteComponent(previewPages.onboarding, 'FirstLoginPage')),
+  previewChild('idion', lazyRouteComponent(previewPages.onboarding, 'IdionHomePage')),
+  previewChild('idion/welcome', lazyRouteComponent(previewPages.onboarding, 'IdionFirstRunPage')),
+]
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   appRoute.addChildren([
@@ -107,6 +163,7 @@ const routeTree = rootRoute.addChildren([
     platformBudgetsRoute,
     tokensRoute,
   ]),
+  previewRoute.addChildren(previewRoutes),
 ])
 
 export function createAppRouter(queryClient: QueryClient, history?: RouterHistory) {
