@@ -43,7 +43,7 @@ make dev        # Tilt against the home lab, or kind after `make dev-kind-up` (d
   `buf breaking`, generated code up to date, migration lint, DCO, and the gitleaks secret scan.
 - `main` is protected by a ruleset: changes land only through pull requests, with the checks
   above passing and every review thread resolved; force-pushes and deletion are blocked, with no
-  bypass. Merge with a merge commit (keeps stacked pull requests intact) or squash; rebase merges
+  bypass. Merge with a merge commit (keeps stacked pull requests intact); squash and rebase merges
   are off. CODEOWNERS requests the other maintainer's review; approval is required on sensitive
   paths (workflows, ADRs, migrations, auth, gateway, secret store, sandbox policy).
 - Every pull request names its issue with `Closes #N`, and its author holds the claim on that issue

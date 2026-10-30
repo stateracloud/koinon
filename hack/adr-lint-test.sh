@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Tests hack/adr-lint.sh against throwaway ADR directories.
+# Tests hack/adr-lint.sh and hack/adr-index.sh against throwaway ADR directories.
 set -euo pipefail
 
-lint=$(cd "$(dirname "$0")" && pwd)/adr-lint.sh
+here=$(cd "$(dirname "$0")" && pwd)
+lint=$here/adr-lint.sh
+index=$here/adr-index.sh
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 fail=0
@@ -14,37 +16,39 @@ expect() { # expect <exit code> <description>
   "$lint" "$work" >/dev/null 2>&1 || got=$?
   if [[ $got -ne $1 ]]; then echo "FAIL: $2 (exit $got, want $1)"; fail=1; else echo "ok: $2"; fi
 }
+adr() { printf '# %s. %s\n\n- Status: %s\n' "$1" "$2" "${3:-Accepted}" >"$work/$1-$4.md"; }
 
-touch "$work/0000-template.md" "$work/0001-a.md" "$work/0002-b.md"
-cat >"$work/README.md" <<'R'
-| ADR | Title | Status |
-| --- | --- | --- |
-| [0001](0001-a.md) | A | Accepted |
-| [0002](0002-b.md) | B | Accepted |
-R
-expect 0 "consistent directory"
+printf '# 0000. T\n\n- Status: Proposed\n' >"$work/0000-template.md"
+adr 0001 "First | pipe" Accepted a
+adr 0002 Second "Accepted, amended by [0003](0003-c.md)" b
+printf '# ADRs\n\ntext\n\n## Index\n\nold\n' >"$work/README.md"
+expect 1 "stale index"
+"$index" "$work" >/dev/null
+expect 0 "generated index"
+if grep -qF '| [0001](0001-a.md) | First \| pipe | Accepted |' "$work/README.md"; then echo "ok: row rendered"; else echo "FAIL: row rendered"; fail=1; fi
+if grep -q '^text$' "$work/README.md"; then echo "ok: prose above the index kept"; else echo "FAIL: prose kept"; fail=1; fi
 
-touch "$work/0003-c.md"
-expect 1 "ADR without an index row"
-echo '| [0003](0003-c.md) | C | Accepted |' >>"$work/README.md"
-expect 0 "row added"
+adr 0003 Third Accepted c
+expect 1 "new ADR not in the index"
+"$index" "$work" >/dev/null
+expect 0 "index regenerated"
 
-touch "$work/0003-d.md"
+adr 0007 Seventh Accepted g
+"$index" "$work" >/dev/null
+expect 0 "gaps are allowed"
+
+adr 0003 Dup Accepted d
+"$index" "$work" >/dev/null
 expect 1 "duplicate number"
 rm "$work/0003-d.md"
+"$index" "$work" >/dev/null
 
-touch "$work/0005-e.md"
-echo '| [0005](0005-e.md) | E | Accepted |' >>"$work/README.md"
-expect 1 "gap in numbers"
-rm "$work/0005-e.md"
-sed -i.bak '/0005/d' "$work/README.md" && rm "$work/README.md.bak"
-expect 0 "gap closed"
+echo 'edited by hand' >>"$work/README.md"
+expect 1 "hand-edited index"
+"$index" "$work" >/dev/null
 
-echo '| [0004](0004-gone.md) | G | Accepted |' >>"$work/README.md"
-expect 1 "row for a missing file"
-sed -i.bak '/0004/d' "$work/README.md" && rm "$work/README.md.bak"
-
-echo '| [0002](0003-c.md) | mislabelled | Accepted |' >>"$work/README.md"
-expect 1 "row text does not match its link"
+printf 'no header\n' >"$work/0008-x.md"
+if "$index" "$work" >/dev/null 2>&1; then echo "FAIL: header required"; fail=1; else echo "ok: header required"; fi
+rm "$work/0008-x.md"
 
 exit "$fail"

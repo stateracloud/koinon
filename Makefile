@@ -69,6 +69,7 @@ adr-lint: ## Check ADR numbers and the README index; offline tests of hack/claim
 	hack/adr-lint-test.sh
 	hack/adr-lint.sh
 	hack/claim_test.sh
+	hack/migrate-renumber-test.sh
 
 .PHONY: migrate-lint
 migrate-lint: ## Check migration file names (and, with BASE=<ref>, that merged migrations are unchanged)
