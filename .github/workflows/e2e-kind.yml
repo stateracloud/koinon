@@ -34,7 +34,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Cheap: a checkout and a git diff. Manual dispatch always runs the suite.
+  # Cheap: a checkout, a git diff and one `go list`. Manual dispatch always runs the suite.
   decide:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
@@ -45,6 +45,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # the merge base with the base branch
+
+      # The rule asks `go list` which packages the binaries build.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
 
       - name: Does this change need the e2e?
         id: decide

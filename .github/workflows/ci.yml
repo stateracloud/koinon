@@ -255,10 +255,20 @@ jobs:
         with:
           fetch-depth: 0
       - run: hack/migrate-lint-test.sh
-      # Not migrations, but the same cheap script-test slot: the e2e decision rule and the remote runner.
+      - run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+
+  # Tests of the e2e tooling scripts: the decision rule (needs the Go toolchain for `go list`) and
+  # the remote runner (needs flock, so Linux).
+  scripts:
+    name: scripts
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
       - run: hack/needs-e2e-test.sh
       - run: hack/e2e-remote-test.sh
-      - run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
 
   # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
