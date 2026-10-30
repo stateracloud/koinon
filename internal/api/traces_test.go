@@ -121,18 +121,18 @@ var _ = Describe("TraceDestinationService", func() {
 	It("lets only an owner set the content level full", func(ctx SpecContext) {
 		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
 		_, err := traceClient(admin).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
-			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL, SampleRate: 1, PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
+			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL, SampleRate: new(float64(1)), PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
 		res, err := traceClient(admin).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
-			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_REDACTED, SampleRate: 0.5, PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
+			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_REDACTED, SampleRate: new(float64(0.5)), PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.GetSettings().GetContentLevel()).To(Equal(tracev1alpha1.ContentLevel_CONTENT_LEVEL_REDACTED))
 		Expect(res.GetSettings().GetSampleRate()).To(Equal(0.5))
 
 		res, err = traceClient(owner).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
-			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL, SampleRate: 0.5, PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
+			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL, SampleRate: new(float64(0.5)), PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.GetSettings().GetContentLevel()).To(Equal(tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL))
@@ -140,7 +140,7 @@ var _ = Describe("TraceDestinationService", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.GetSettings().GetContentLevel()).To(Equal(tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL))
 
-		_, err = traceClient(owner).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{OrgId: org, SampleRate: 1})
+		_, err = traceClient(owner).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{OrgId: org, SampleRate: new(float64(1))})
 		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "a level is required")
 	})
 
@@ -154,7 +154,7 @@ var _ = Describe("TraceDestinationService", func() {
 		Expect(hits.Load()).To(BeZero())
 
 		_, err = traceClient(owner).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
-			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL, SampleRate: 1, PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
+			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL, SampleRate: new(float64(1)), PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
 		})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -190,7 +190,7 @@ var _ = Describe("TraceDestinationService", func() {
 
 		By("the owner cannot raise the level above the ceiling")
 		_, err = traceClient(owner).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
-			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL, SampleRate: 1, PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
+			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL, SampleRate: new(float64(1)), PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 
@@ -201,6 +201,61 @@ var _ = Describe("TraceDestinationService", func() {
 		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events a JOIN users u ON u.personal_org_id = a.org_id
 			WHERE u.id = $1 AND a.action IN ('trace.platform_destination.set', 'trace.platform_ceiling.set')`, pa.userID).Scan(&n)).To(Succeed())
 		Expect(n).To(Equal(2))
+	})
+
+	It("does not let a platform admin choose what an org sends: they may lower its settings but not raise them", func(ctx SpecContext) {
+		_, otherOwner := e.newTeamOrg(ctx)
+		pa := otherOwner // a platform admin with no role in `org`
+		setPlatformAdmin(ctx, pa)
+		raise := func(level, copyLevel tracev1alpha1.ContentLevel) error {
+			_, err := traceClient(pa).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{OrgId: org, ContentLevel: level, PlatformCopyLevel: copyLevel})
+			return err
+		}
+		none, redacted, full := tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE, tracev1alpha1.ContentLevel_CONTENT_LEVEL_REDACTED, tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL
+		Expect(codeOf(raise(full, none))).To(Equal(connect.CodePermissionDenied))
+		Expect(codeOf(raise(redacted, none))).To(Equal(connect.CodePermissionDenied))
+		Expect(codeOf(raise(redacted, redacted))).To(Equal(connect.CodePermissionDenied))
+
+		By("the org's owner sets it, then the platform admin lowers it, leaving the stored rate alone")
+		_, err := traceClient(owner).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
+			OrgId: org, ContentLevel: full, SampleRate: new(float64(0.3)), PlatformCopyLevel: redacted,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(raise(none, none)).To(Succeed())
+		got, err := traceClient(owner).GetSettings(ctx, &tracev1alpha1.GetSettingsRequest{OrgId: org})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.GetSettings().GetContentLevel()).To(Equal(none))
+		Expect(got.GetSettings().GetSampleRate()).To(Equal(0.3))
+	})
+
+	It("refuses a stale form with ABORTED and a non-owner's new destination while the level is full", func(ctx SpecContext) {
+		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
+		created, err := traceClient(admin).CreateDestination(ctx, &tracev1alpha1.CreateDestinationRequest{OrgId: org, Destination: input("dd")})
+		Expect(err).NotTo(HaveOccurred())
+		d := created.GetDestination()
+		Expect(d.GetConfigVersion()).To(BeNumerically(">=", 1))
+
+		in := input("dd")
+		in.Secrets = nil
+		in.Enabled = false
+		first, err := traceClient(admin).UpdateDestination(ctx, &tracev1alpha1.UpdateDestinationRequest{
+			OrgId: org, DestinationId: d.GetId(), Destination: in, ExpectedVersion: new(d.GetConfigVersion()),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(first.GetDestination().GetConfigVersion()).To(Equal(d.GetConfigVersion() + 1))
+		_, err = traceClient(admin).UpdateDestination(ctx, &tracev1alpha1.UpdateDestinationRequest{
+			OrgId: org, DestinationId: d.GetId(), Destination: in, ExpectedVersion: new(d.GetConfigVersion()),
+		})
+		Expect(codeOf(err)).To(Equal(connect.CodeAborted))
+
+		_, err = traceClient(owner).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
+			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL, PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = traceClient(admin).CreateDestination(ctx, &tracev1alpha1.CreateDestinationRequest{OrgId: org, Destination: input("second")})
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		_, err = traceClient(owner).CreateDestination(ctx, &tracev1alpha1.CreateDestinationRequest{OrgId: org, Destination: input("second")})
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("decides once whether a run is traced", func(ctx SpecContext) {

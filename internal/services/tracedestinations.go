@@ -74,7 +74,7 @@ func traceDestinationProto(d tracedest.Destination) *tracev1alpha1.Destination {
 			LastSuccessAt: optTime(d.Health.LastSuccessAt), LastErrorAt: optTime(d.Health.LastErrorAt),
 			LastError: d.Health.LastError, SpansDropped: d.Health.SpansDropped,
 		},
-		CreatedAt: timestamppb.New(d.CreatedAt), UpdatedAt: timestamppb.New(d.UpdatedAt),
+		CreatedAt: timestamppb.New(d.CreatedAt), UpdatedAt: timestamppb.New(d.UpdatedAt), ConfigVersion: d.ConfigVersion,
 	}
 }
 
@@ -114,7 +114,7 @@ func (a traceAPI) traceError(err error) error {
 		return connect.NewError(connect.CodeAlreadyExists, "a destination with this name already exists")
 	case errors.Is(err, tracedest.ErrChanged):
 		return connect.NewError(connect.CodeAborted, err.Error())
-	case errors.Is(err, tracedest.ErrOwnerOnly):
+	case errors.Is(err, tracedest.ErrOwnerOnly), errors.Is(err, tracedest.ErrNotMember):
 		return connect.NewError(connect.CodePermissionDenied, err.Error())
 	case errors.Is(err, tracedest.ErrAboveCeiling):
 		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
@@ -122,6 +122,13 @@ func (a traceAPI) traceError(err error) error {
 		return connect.NewError(connect.CodeUnavailable, err.Error())
 	}
 	return a.s.dbError(err, "trace destination")
+}
+
+// authority is what the caller really is in the org. A platform admin counts as an owner for most
+// checks (caller.role), but not here: they may not choose what an org sends off to a backend.
+func (c caller) authority() tracedest.Authority {
+	role, member := c.p.RoleIn(c.org)
+	return tracedest.Authority{Member: member, Owner: member && role == store.OrgRoleOwner}
 }
 
 // orgCaller authorizes an admin call and checks the service is wired.
@@ -176,7 +183,7 @@ func (a traceAPI) CreateDestination(ctx context.Context, req *tracev1alpha1.Crea
 	if err != nil {
 		return nil, err
 	}
-	d, err := a.s.traces.Create(requestCtx(ctx), c.org, c.auditActor(), c.actor(), in)
+	d, err := a.s.traces.Create(requestCtx(ctx), c.org, c.auditActor(), c.actor(), c.authority(), in)
 	if err != nil {
 		return nil, a.traceError(err)
 	}
@@ -192,7 +199,7 @@ func (a traceAPI) UpdateDestination(ctx context.Context, req *tracev1alpha1.Upda
 	if err != nil {
 		return nil, err
 	}
-	d, err := a.s.traces.Update(requestCtx(ctx), c.org, c.auditActor(), req.GetDestinationId(), in)
+	d, err := a.s.traces.Update(requestCtx(ctx), c.org, c.auditActor(), c.authority(), req.GetDestinationId(), req.ExpectedVersion, in)
 	if err != nil {
 		return nil, a.traceError(err)
 	}
@@ -247,8 +254,8 @@ func (a traceAPI) UpdateSettings(ctx context.Context, req *tracev1alpha1.UpdateS
 	if level == "" || copyLevel == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, "content_level and platform_copy_level are required")
 	}
-	v, err := a.s.traces.UpdateSettings(requestCtx(ctx), c.org, c.auditActor(), c.role() == store.OrgRoleOwner, tracedest.SettingsInput{
-		ContentLevel: level, SampleRate: req.GetSampleRate(), PlatformCopyLevel: copyLevel,
+	v, err := a.s.traces.UpdateSettings(requestCtx(ctx), c.org, c.auditActor(), c.authority(), tracedest.SettingsInput{
+		ContentLevel: level, SampleRate: req.SampleRate, PlatformCopyLevel: copyLevel,
 	})
 	if err != nil {
 		return nil, a.traceError(err)

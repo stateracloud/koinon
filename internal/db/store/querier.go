@@ -456,8 +456,8 @@ type Querier interface {
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
 	InsertPriceOverride(ctx context.Context, arg InsertPriceOverrideParams) (PriceOverride, error)
-	// Starts the run's next turn with the given trace ID. seq is the previous turn's plus one, taken
-	// under the run's row lock so two writers cannot pick the same number.
+	// Starts the run's next turn with the given trace ID. seq comes from the run's counter, taken under
+	// the run's row lock (the way run_events.seq does), so concurrent writers cannot pick the same number.
 	InsertRunTurn(ctx context.Context, arg InsertRunTurnParams) (RunTurn, error)
 	InsertSandboxIncident(ctx context.Context, arg InsertSandboxIncidentParams) (SandboxIncident, error)
 	InsertSavedWork(ctx context.Context, arg InsertSavedWorkParams) (SavedWork, error)
@@ -872,6 +872,9 @@ type Querier interface {
 	// Sets or clears (NULL) the platform ceiling of an org, keeping its monthly cap.
 	SetOrgPlatformCeiling(ctx context.Context, arg SetOrgPlatformCeilingParams) (SetOrgPlatformCeilingRow, error)
 	SetPlatformTraceCeiling(ctx context.Context, arg SetPlatformTraceCeilingParams) (PlatformTraceSetting, error)
+	// Records the result of a re-test, only if the configuration is the one that was tested. A deleted
+	// destination matches nothing and is not brought back.
+	SetPlatformTraceDestinationTest(ctx context.Context, arg SetPlatformTraceDestinationTestParams) (int64, error)
 	SetProviderDisabled(ctx context.Context, arg SetProviderDisabledParams) error
 	// Records, before the prompt is sent, the task timeline seq through which
 	// the task's messages are in it.
@@ -894,6 +897,8 @@ type Querier interface {
 	SetTaskStateFrom(ctx context.Context, arg SetTaskStateFromParams) (Task, error)
 	// Stores the agent's end-of-turn summary. Fenced by the run epoch like SetTaskHarnessSession.
 	SetTaskSummary(ctx context.Context, arg SetTaskSummaryParams) (int64, error)
+	// Records the result of a re-test, only if the configuration is the one that was tested.
+	SetTraceDestinationTest(ctx context.Context, arg SetTraceDestinationTestParams) (int64, error)
 	// Makes a provisional entry final: with the provider's usage and cost, or (expired) as it is. The
 	// reserve is released either way. No row: the entry was not provisional (settled already).
 	SettleSpendEntry(ctx context.Context, arg SettleSpendEntryParams) (pgtype.UUID, error)
@@ -902,6 +907,9 @@ type Querier interface {
 	ShadowUIModels(ctx context.Context, arg ShadowUIModelsParams) error
 	// A declared provider of this name now exists: disable the UI ones.
 	ShadowUIProviders(ctx context.Context, arg ShadowUIProvidersParams) error
+	// Reads the ceiling and keeps it from being lowered until the transaction ends, without blocking
+	// other readers of it (org settings writes).
+	ShareLockPlatformTraceSettings(ctx context.Context) (PlatformTraceSetting, error)
 	// Spend of agents per model since @since, with estimated usage kept apart. System checks are
 	// reported by SpendSystemSince.
 	SpendReport(ctx context.Context, arg SpendReportParams) ([]SpendReportRow, error)
@@ -948,9 +956,10 @@ type Querier interface {
 	// api_key is written only when @set_api_key is true (the patch sets it): the caller read the row
 	// without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the envelope since.
 	UpdateProvider(ctx context.Context, arg UpdateProviderParams) (Provider, error)
-	// Replaces the settings of a destination and records the test that let the change be saved. The
-	// router's health columns stay. Applies only to the version the caller read (@expected_updated_at), so
-	// two admins editing at once do not overwrite each other's secrets.
+	// Replaces the settings of a destination. Applies only to the version the caller read
+	// (@expected_version), so two admins editing at once do not overwrite each other's secrets, and bumps
+	// config_version. @set_test says the change was tested and the test columns are recorded; otherwise the
+	// previous test result stays. The router's health columns stay.
 	UpdateTraceDestination(ctx context.Context, arg UpdateTraceDestinationParams) (TraceDestination, error)
 	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) error
 	// Grants the roles of every mapping that matches one of the user's groups,
@@ -959,7 +968,8 @@ type Querier interface {
 	UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsParams) (OrgSetting, error)
 	UpsertOrgTraceSettings(ctx context.Context, arg UpsertOrgTraceSettingsParams) (OrgTraceSetting, error)
 	UpsertOrgWorkspace(ctx context.Context, arg UpsertOrgWorkspaceParams) (OrgWorkspace, error)
-	// The platform destination has one writer at a time: a platform admin. Last write wins.
+	// The platform destination has one writer at a time: a platform admin. A change bumps config_version.
+	// @set_test as for UpdateTraceDestination.
 	UpsertPlatformTraceDestination(ctx context.Context, arg UpsertPlatformTraceDestinationParams) (PlatformTraceDestination, error)
 	// The latest echo check of a provider replaces the one before it.
 	UpsertProviderEchoCheck(ctx context.Context, arg UpsertProviderEchoCheckParams) (ProviderEchoCheck, error)

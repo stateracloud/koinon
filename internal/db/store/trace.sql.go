@@ -126,7 +126,7 @@ func (q *Queries) GetOrgTraceSettings(ctx context.Context, orgID pgtype.UUID) (O
 }
 
 const getPlatformTraceDestination = `-- name: GetPlatformTraceDestination :one
-SELECT singleton, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, updated_by, updated_at FROM platform_trace_destination
+SELECT singleton, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, updated_by, updated_at FROM platform_trace_destination
 WHERE singleton
 `
 
@@ -143,6 +143,7 @@ func (q *Queries) GetPlatformTraceDestination(ctx context.Context) (PlatformTrac
 		&i.SecretFields,
 		&i.ResourceAttributes,
 		&i.Enabled,
+		&i.ConfigVersion,
 		&i.LastTestAt,
 		&i.LastTestOk,
 		&i.LastTestMessage,
@@ -244,7 +245,7 @@ func (q *Queries) GetRunTurnByTrace(ctx context.Context, arg GetRunTurnByTracePa
 }
 
 const getTraceDestination = `-- name: GetTraceDestination :one
-SELECT org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at FROM trace_destinations
+SELECT org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at FROM trace_destinations
 WHERE org_id = $1 AND id = $2
 `
 
@@ -268,6 +269,7 @@ func (q *Queries) GetTraceDestination(ctx context.Context, arg GetTraceDestinati
 		&i.SecretFields,
 		&i.ResourceAttributes,
 		&i.Enabled,
+		&i.ConfigVersion,
 		&i.LastTestAt,
 		&i.LastTestOk,
 		&i.LastTestMessage,
@@ -283,29 +285,28 @@ func (q *Queries) GetTraceDestination(ctx context.Context, arg GetTraceDestinati
 }
 
 const insertRunTurn = `-- name: InsertRunTurn :one
-WITH locked AS (
-    SELECT r.org_id, r.id FROM runs r
-    WHERE r.org_id = $1 AND r.id = $2
-    FOR UPDATE
+WITH run AS (
+    UPDATE runs
+    SET last_turn_seq = last_turn_seq + 1
+    WHERE runs.org_id = $2 AND runs.id = $3
+    RETURNING runs.org_id, runs.id, runs.last_turn_seq
 )
 INSERT INTO run_turns (org_id, run_id, seq, trace_id)
-SELECT l.org_id, l.id,
-       coalesce((SELECT max(t.seq) FROM run_turns t WHERE t.org_id = $1 AND t.run_id = $2), 0) + 1,
-       $3
-FROM locked l
+SELECT run.org_id, run.id, run.last_turn_seq, $1
+FROM run
 RETURNING org_id, id, run_id, seq, trace_id, started_at, ended_at, end_reason
 `
 
 type InsertRunTurnParams struct {
+	TraceID []byte
 	OrgID   pgtype.UUID
 	RunID   pgtype.UUID
-	TraceID []byte
 }
 
-// Starts the run's next turn with the given trace ID. seq is the previous turn's plus one, taken
-// under the run's row lock so two writers cannot pick the same number.
+// Starts the run's next turn with the given trace ID. seq comes from the run's counter, taken under
+// the run's row lock (the way run_events.seq does), so concurrent writers cannot pick the same number.
 func (q *Queries) InsertRunTurn(ctx context.Context, arg InsertRunTurnParams) (RunTurn, error) {
-	row := q.db.QueryRow(ctx, insertRunTurn, arg.OrgID, arg.RunID, arg.TraceID)
+	row := q.db.QueryRow(ctx, insertRunTurn, arg.TraceID, arg.OrgID, arg.RunID)
 	var i RunTurn
 	err := row.Scan(
 		&i.OrgID,
@@ -325,7 +326,7 @@ INSERT INTO trace_destinations (org_id, id, name, backend, endpoint_url, params,
                                 resource_attributes, enabled, last_test_at, last_test_ok, last_test_message, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
         $9, $10, $11, $12, $13, $14)
-RETURNING org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at
+RETURNING org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at
 `
 
 type InsertTraceDestinationParams struct {
@@ -375,6 +376,7 @@ func (q *Queries) InsertTraceDestination(ctx context.Context, arg InsertTraceDes
 		&i.SecretFields,
 		&i.ResourceAttributes,
 		&i.Enabled,
+		&i.ConfigVersion,
 		&i.LastTestAt,
 		&i.LastTestOk,
 		&i.LastTestMessage,
@@ -431,7 +433,7 @@ func (q *Queries) ListRunTurns(ctx context.Context, arg ListRunTurnsParams) ([]R
 
 const listTraceDestinations = `-- name: ListTraceDestinations :many
 
-SELECT org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at FROM trace_destinations
+SELECT org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at FROM trace_destinations
 WHERE org_id = $1
 ORDER BY name
 `
@@ -461,6 +463,7 @@ func (q *Queries) ListTraceDestinations(ctx context.Context, orgID pgtype.UUID) 
 			&i.SecretFields,
 			&i.ResourceAttributes,
 			&i.Enabled,
+			&i.ConfigVersion,
 			&i.LastTestAt,
 			&i.LastTestOk,
 			&i.LastTestMessage,
@@ -650,14 +653,95 @@ func (q *Queries) SetPlatformTraceCeiling(ctx context.Context, arg SetPlatformTr
 	return i, err
 }
 
+const setPlatformTraceDestinationTest = `-- name: SetPlatformTraceDestinationTest :execrows
+UPDATE platform_trace_destination
+SET last_test_at = $1, last_test_ok = $2, last_test_message = $3
+WHERE singleton AND config_version = $4
+`
+
+type SetPlatformTraceDestinationTestParams struct {
+	LastTestAt      pgtype.Timestamptz
+	LastTestOk      pgtype.Bool
+	LastTestMessage pgtype.Text
+	ExpectedVersion int64
+}
+
+// Records the result of a re-test, only if the configuration is the one that was tested. A deleted
+// destination matches nothing and is not brought back.
+func (q *Queries) SetPlatformTraceDestinationTest(ctx context.Context, arg SetPlatformTraceDestinationTestParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setPlatformTraceDestinationTest,
+		arg.LastTestAt,
+		arg.LastTestOk,
+		arg.LastTestMessage,
+		arg.ExpectedVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setTraceDestinationTest = `-- name: SetTraceDestinationTest :execrows
+UPDATE trace_destinations
+SET last_test_at = $1, last_test_ok = $2, last_test_message = $3
+WHERE org_id = $4 AND id = $5 AND config_version = $6
+`
+
+type SetTraceDestinationTestParams struct {
+	LastTestAt      pgtype.Timestamptz
+	LastTestOk      pgtype.Bool
+	LastTestMessage pgtype.Text
+	OrgID           pgtype.UUID
+	ID              pgtype.UUID
+	ExpectedVersion int64
+}
+
+// Records the result of a re-test, only if the configuration is the one that was tested.
+func (q *Queries) SetTraceDestinationTest(ctx context.Context, arg SetTraceDestinationTestParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setTraceDestinationTest,
+		arg.LastTestAt,
+		arg.LastTestOk,
+		arg.LastTestMessage,
+		arg.OrgID,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const shareLockPlatformTraceSettings = `-- name: ShareLockPlatformTraceSettings :one
+SELECT singleton, content_ceiling, updated_by, updated_at FROM platform_trace_settings
+WHERE singleton
+FOR SHARE
+`
+
+// Reads the ceiling and keeps it from being lowered until the transaction ends, without blocking
+// other readers of it (org settings writes).
+func (q *Queries) ShareLockPlatformTraceSettings(ctx context.Context) (PlatformTraceSetting, error) {
+	row := q.db.QueryRow(ctx, shareLockPlatformTraceSettings)
+	var i PlatformTraceSetting
+	err := row.Scan(
+		&i.Singleton,
+		&i.ContentCeiling,
+		&i.UpdatedBy,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateTraceDestination = `-- name: UpdateTraceDestination :one
 UPDATE trace_destinations
 SET name = $1, backend = $2, endpoint_url = $3, params = $4,
     credentials = $5, secret_fields = $6, resource_attributes = $7,
-    enabled = $8, last_test_at = $9, last_test_ok = $10,
-    last_test_message = $11
-WHERE org_id = $12 AND id = $13 AND updated_at = $14
-RETURNING org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at
+    enabled = $8, config_version = config_version + 1,
+    last_test_at = CASE WHEN $9::boolean THEN $10 ELSE last_test_at END,
+    last_test_ok = CASE WHEN $9::boolean THEN $11 ELSE last_test_ok END,
+    last_test_message = CASE WHEN $9::boolean THEN $12 ELSE last_test_message END
+WHERE org_id = $13 AND id = $14 AND config_version = $15
+RETURNING org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at
 `
 
 type UpdateTraceDestinationParams struct {
@@ -669,17 +753,19 @@ type UpdateTraceDestinationParams struct {
 	SecretFields       []string
 	ResourceAttributes []byte
 	Enabled            bool
+	SetTest            bool
 	LastTestAt         pgtype.Timestamptz
 	LastTestOk         pgtype.Bool
 	LastTestMessage    pgtype.Text
 	OrgID              pgtype.UUID
 	ID                 pgtype.UUID
-	ExpectedUpdatedAt  pgtype.Timestamptz
+	ExpectedVersion    int64
 }
 
-// Replaces the settings of a destination and records the test that let the change be saved. The
-// router's health columns stay. Applies only to the version the caller read (@expected_updated_at), so
-// two admins editing at once do not overwrite each other's secrets.
+// Replaces the settings of a destination. Applies only to the version the caller read
+// (@expected_version), so two admins editing at once do not overwrite each other's secrets, and bumps
+// config_version. @set_test says the change was tested and the test columns are recorded; otherwise the
+// previous test result stays. The router's health columns stay.
 func (q *Queries) UpdateTraceDestination(ctx context.Context, arg UpdateTraceDestinationParams) (TraceDestination, error) {
 	row := q.db.QueryRow(ctx, updateTraceDestination,
 		arg.Name,
@@ -690,12 +776,13 @@ func (q *Queries) UpdateTraceDestination(ctx context.Context, arg UpdateTraceDes
 		arg.SecretFields,
 		arg.ResourceAttributes,
 		arg.Enabled,
+		arg.SetTest,
 		arg.LastTestAt,
 		arg.LastTestOk,
 		arg.LastTestMessage,
 		arg.OrgID,
 		arg.ID,
-		arg.ExpectedUpdatedAt,
+		arg.ExpectedVersion,
 	)
 	var i TraceDestination
 	err := row.Scan(
@@ -710,6 +797,7 @@ func (q *Queries) UpdateTraceDestination(ctx context.Context, arg UpdateTraceDes
 		&i.SecretFields,
 		&i.ResourceAttributes,
 		&i.Enabled,
+		&i.ConfigVersion,
 		&i.LastTestAt,
 		&i.LastTestOk,
 		&i.LastTestMessage,
@@ -771,9 +859,12 @@ ON CONFLICT (singleton) DO UPDATE
 SET backend = EXCLUDED.backend, endpoint_url = EXCLUDED.endpoint_url, params = EXCLUDED.params,
     credentials = EXCLUDED.credentials, secret_fields = EXCLUDED.secret_fields,
     resource_attributes = EXCLUDED.resource_attributes, enabled = EXCLUDED.enabled,
-    last_test_at = EXCLUDED.last_test_at, last_test_ok = EXCLUDED.last_test_ok,
-    last_test_message = EXCLUDED.last_test_message, updated_by = EXCLUDED.updated_by, updated_at = now()
-RETURNING singleton, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, updated_by, updated_at
+    config_version = platform_trace_destination.config_version + 1,
+    last_test_at = CASE WHEN $12::boolean THEN EXCLUDED.last_test_at ELSE platform_trace_destination.last_test_at END,
+    last_test_ok = CASE WHEN $12::boolean THEN EXCLUDED.last_test_ok ELSE platform_trace_destination.last_test_ok END,
+    last_test_message = CASE WHEN $12::boolean THEN EXCLUDED.last_test_message ELSE platform_trace_destination.last_test_message END,
+    updated_by = EXCLUDED.updated_by, updated_at = now()
+RETURNING singleton, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, updated_by, updated_at
 `
 
 type UpsertPlatformTraceDestinationParams struct {
@@ -788,9 +879,11 @@ type UpsertPlatformTraceDestinationParams struct {
 	LastTestOk         pgtype.Bool
 	LastTestMessage    pgtype.Text
 	UpdatedBy          string
+	SetTest            bool
 }
 
-// The platform destination has one writer at a time: a platform admin. Last write wins.
+// The platform destination has one writer at a time: a platform admin. A change bumps config_version.
+// @set_test as for UpdateTraceDestination.
 func (q *Queries) UpsertPlatformTraceDestination(ctx context.Context, arg UpsertPlatformTraceDestinationParams) (PlatformTraceDestination, error) {
 	row := q.db.QueryRow(ctx, upsertPlatformTraceDestination,
 		arg.Backend,
@@ -804,6 +897,7 @@ func (q *Queries) UpsertPlatformTraceDestination(ctx context.Context, arg Upsert
 		arg.LastTestOk,
 		arg.LastTestMessage,
 		arg.UpdatedBy,
+		arg.SetTest,
 	)
 	var i PlatformTraceDestination
 	err := row.Scan(
@@ -816,6 +910,7 @@ func (q *Queries) UpsertPlatformTraceDestination(ctx context.Context, arg Upsert
 		&i.SecretFields,
 		&i.ResourceAttributes,
 		&i.Enabled,
+		&i.ConfigVersion,
 		&i.LastTestAt,
 		&i.LastTestOk,
 		&i.LastTestMessage,

@@ -287,8 +287,11 @@ type Destination struct {
 	Health             *Health                `protobuf:"bytes,10,opt,name=health,proto3" json:"health,omitempty"`
 	CreatedAt          *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt          *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// config_version changes with every change of the configuration and with nothing the router records.
+	// Send it back as expected_version when updating.
+	ConfigVersion int64 `protobuf:"varint,13,opt,name=config_version,json=configVersion,proto3" json:"config_version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Destination) Reset() {
@@ -403,6 +406,13 @@ func (x *Destination) GetUpdatedAt() *timestamppb.Timestamp {
 		return x.UpdatedAt
 	}
 	return nil
+}
+
+func (x *Destination) GetConfigVersion() int64 {
+	if x != nil {
+		return x.ConfigVersion
+	}
+	return 0
 }
 
 // DestinationInput is what a caller writes.
@@ -699,8 +709,11 @@ type UpdateDestinationRequest struct {
 	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
 	DestinationId string                 `protobuf:"bytes,2,opt,name=destination_id,json=destinationId,proto3" json:"destination_id,omitempty"`
 	Destination   *DestinationInput      `protobuf:"bytes,3,opt,name=destination,proto3" json:"destination,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// expected_version is the config_version the form was loaded with. When set and the destination has
+	// changed since, the update fails with ABORTED. Left out, the update applies to the current version.
+	ExpectedVersion *int64 `protobuf:"varint,4,opt,name=expected_version,json=expectedVersion,proto3,oneof" json:"expected_version,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *UpdateDestinationRequest) Reset() {
@@ -752,6 +765,13 @@ func (x *UpdateDestinationRequest) GetDestination() *DestinationInput {
 		return x.Destination
 	}
 	return nil
+}
+
+func (x *UpdateDestinationRequest) GetExpectedVersion() int64 {
+	if x != nil && x.ExpectedVersion != nil {
+		return *x.ExpectedVersion
+	}
+	return 0
 }
 
 type UpdateDestinationResponse struct {
@@ -1177,11 +1197,13 @@ func (x *GetSettingsResponse) GetSettings() *Settings {
 }
 
 type UpdateSettingsRequest struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	OrgId             string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	ContentLevel      ContentLevel           `protobuf:"varint,2,opt,name=content_level,json=contentLevel,proto3,enum=koinon.trace.v1alpha1.ContentLevel" json:"content_level,omitempty"`
-	SampleRate        float64                `protobuf:"fixed64,3,opt,name=sample_rate,json=sampleRate,proto3" json:"sample_rate,omitempty"`
-	PlatformCopyLevel ContentLevel           `protobuf:"varint,4,opt,name=platform_copy_level,json=platformCopyLevel,proto3,enum=koinon.trace.v1alpha1.ContentLevel" json:"platform_copy_level,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	OrgId        string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	ContentLevel ContentLevel           `protobuf:"varint,2,opt,name=content_level,json=contentLevel,proto3,enum=koinon.trace.v1alpha1.ContentLevel" json:"content_level,omitempty"`
+	// sample_rate is the share of runs traced, 0 to 1. Left out, the stored value stays (1 for an org
+	// that never set one).
+	SampleRate        *float64     `protobuf:"fixed64,3,opt,name=sample_rate,json=sampleRate,proto3,oneof" json:"sample_rate,omitempty"`
+	PlatformCopyLevel ContentLevel `protobuf:"varint,4,opt,name=platform_copy_level,json=platformCopyLevel,proto3,enum=koinon.trace.v1alpha1.ContentLevel" json:"platform_copy_level,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -1231,8 +1253,8 @@ func (x *UpdateSettingsRequest) GetContentLevel() ContentLevel {
 }
 
 func (x *UpdateSettingsRequest) GetSampleRate() float64 {
-	if x != nil {
-		return x.SampleRate
+	if x != nil && x.SampleRate != nil {
+		return *x.SampleRate
 	}
 	return 0
 }
@@ -1737,7 +1759,7 @@ const file_koinon_trace_v1alpha1_trace_proto_rawDesc = "" +
 	"\rlast_error_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vlastErrorAt\x12\x1d\n" +
 	"\n" +
 	"last_error\x18\x03 \x01(\tR\tlastError\x12#\n" +
-	"\rspans_dropped\x18\x04 \x01(\x03R\fspansDropped\"\xf1\x05\n" +
+	"\rspans_dropped\x18\x04 \x01(\x03R\fspansDropped\"\x98\x06\n" +
 	"\vDestination\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x128\n" +
@@ -1753,7 +1775,8 @@ const file_koinon_trace_v1alpha1_trace_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x1a9\n" +
+	"updated_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12%\n" +
+	"\x0econfig_version\x18\r \x01(\x03R\rconfigVersion\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1aE\n" +
@@ -1786,11 +1809,13 @@ const file_koinon_trace_v1alpha1_trace_proto_rawDesc = "" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12I\n" +
 	"\vdestination\x18\x02 \x01(\v2'.koinon.trace.v1alpha1.DestinationInputR\vdestination\"a\n" +
 	"\x19CreateDestinationResponse\x12D\n" +
-	"\vdestination\x18\x01 \x01(\v2\".koinon.trace.v1alpha1.DestinationR\vdestination\"\xa3\x01\n" +
+	"\vdestination\x18\x01 \x01(\v2\".koinon.trace.v1alpha1.DestinationR\vdestination\"\xe8\x01\n" +
 	"\x18UpdateDestinationRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12%\n" +
 	"\x0edestination_id\x18\x02 \x01(\tR\rdestinationId\x12I\n" +
-	"\vdestination\x18\x03 \x01(\v2'.koinon.trace.v1alpha1.DestinationInputR\vdestination\"a\n" +
+	"\vdestination\x18\x03 \x01(\v2'.koinon.trace.v1alpha1.DestinationInputR\vdestination\x12.\n" +
+	"\x10expected_version\x18\x04 \x01(\x03H\x00R\x0fexpectedVersion\x88\x01\x01B\x13\n" +
+	"\x11_expected_version\"a\n" +
 	"\x19UpdateDestinationResponse\x12D\n" +
 	"\vdestination\x18\x01 \x01(\v2\".koinon.trace.v1alpha1.DestinationR\vdestination\"X\n" +
 	"\x18DeleteDestinationRequest\x12\x15\n" +
@@ -1817,13 +1842,14 @@ const file_koinon_trace_v1alpha1_trace_proto_rawDesc = "" +
 	"\x12GetSettingsRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"R\n" +
 	"\x13GetSettingsResponse\x12;\n" +
-	"\bsettings\x18\x01 \x01(\v2\x1f.koinon.trace.v1alpha1.SettingsR\bsettings\"\xee\x01\n" +
+	"\bsettings\x18\x01 \x01(\v2\x1f.koinon.trace.v1alpha1.SettingsR\bsettings\"\x83\x02\n" +
 	"\x15UpdateSettingsRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12H\n" +
-	"\rcontent_level\x18\x02 \x01(\x0e2#.koinon.trace.v1alpha1.ContentLevelR\fcontentLevel\x12\x1f\n" +
-	"\vsample_rate\x18\x03 \x01(\x01R\n" +
-	"sampleRate\x12S\n" +
-	"\x13platform_copy_level\x18\x04 \x01(\x0e2#.koinon.trace.v1alpha1.ContentLevelR\x11platformCopyLevel\"U\n" +
+	"\rcontent_level\x18\x02 \x01(\x0e2#.koinon.trace.v1alpha1.ContentLevelR\fcontentLevel\x12$\n" +
+	"\vsample_rate\x18\x03 \x01(\x01H\x00R\n" +
+	"sampleRate\x88\x01\x01\x12S\n" +
+	"\x13platform_copy_level\x18\x04 \x01(\x0e2#.koinon.trace.v1alpha1.ContentLevelR\x11platformCopyLevelB\x0e\n" +
+	"\f_sample_rate\"U\n" +
 	"\x16UpdateSettingsResponse\x12;\n" +
 	"\bsettings\x18\x01 \x01(\v2\x1f.koinon.trace.v1alpha1.SettingsR\bsettings\"\x14\n" +
 	"\x12GetPlatformRequest\"\x9a\x01\n" +
@@ -1998,6 +2024,8 @@ func file_koinon_trace_v1alpha1_trace_proto_init() {
 	if File_koinon_trace_v1alpha1_trace_proto != nil {
 		return
 	}
+	file_koinon_trace_v1alpha1_trace_proto_msgTypes[8].OneofWrappers = []any{}
+	file_koinon_trace_v1alpha1_trace_proto_msgTypes[17].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

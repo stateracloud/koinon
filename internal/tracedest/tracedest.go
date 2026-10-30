@@ -15,7 +15,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"slices"
@@ -45,6 +47,9 @@ var (
 	ErrChanged = errors.New("the destination changed since you loaded it; reload and try again")
 	// ErrOwnerOnly means the change needs an org owner (content level full).
 	ErrOwnerOnly = errors.New("only an org owner may set the content level full")
+	// ErrNotMember means the caller is not a member of the org (a platform admin acting from outside)
+	// and may lower its settings but not raise them.
+	ErrNotMember = errors.New("only a member of the org can raise its trace content level or the platform copy")
 	// ErrAboveCeiling means the level is above what the platform allows.
 	ErrAboveCeiling = errors.New("the content level is above the platform ceiling")
 )
@@ -171,9 +176,16 @@ type Destination struct {
 	Enabled            bool
 	LastTest           *TestResult
 	Health             Health
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	// ConfigVersion changes with every change of the configuration and with nothing the router records.
+	ConfigVersion int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
+
+// Authority is what the caller is in the org, from its real membership: a platform admin who is not
+// a member holds neither. Owner may set the content level full and add or re-point a destination
+// while the level is full; Member may raise the level and the platform copy.
+type Authority struct{ Owner, Member bool }
 
 // Input is what a caller writes. For an update, Secrets are merged into the stored ones by name and
 // RemoveSecrets clear names; changing Backend starts from no secrets.
@@ -214,6 +226,7 @@ func validateAttributes(attrs map[string]string) error {
 
 // prepared is an input checked and merged with what is stored, ready to test and save.
 type prepared struct {
+	endpoint string
 	dest     export.Destination
 	envelope []byte
 	fields   []string
@@ -245,7 +258,11 @@ func (s *Service) prepare(ctx context.Context, in Input, existing map[string]str
 		}
 		secrets[k] = v
 	}
-	d := export.Destination{Preset: preset, Endpoint: in.EndpointURL, Params: nonNil(in.Params), Secrets: secrets}
+	endpoint, err := s.endpoint(in.EndpointURL)
+	if err != nil {
+		return prepared{}, err
+	}
+	d := export.Destination{Preset: preset, Endpoint: endpoint, Params: nonNil(in.Params), Secrets: secrets}
 	if err := d.Validate(); err != nil {
 		var ie *export.InvalidError
 		if errors.As(err, &ie) {
@@ -253,10 +270,10 @@ func (s *Service) prepare(ctx context.Context, in Input, existing map[string]str
 		}
 		return prepared{}, err
 	}
-	if err := s.policy.Check(ctx, in.EndpointURL); err != nil {
+	if err := s.policy.Check(ctx, endpoint); err != nil {
 		return prepared{}, err
 	}
-	p := prepared{dest: d, in: in}
+	p := prepared{endpoint: endpoint, dest: d, in: in}
 	p.fields = make([]string, 0, len(secrets))
 	for k := range secrets {
 		p.fields = append(p.fields, k)
@@ -286,6 +303,63 @@ func (s *Service) prepare(ctx context.Context, in Input, existing map[string]str
 		return prepared{}, err
 	}
 	return p, nil
+}
+
+// endpoint normalises the endpoint and requires https, except for a host the platform lists in its
+// allowed hosts (a lab or test backend).
+func (s *Service) endpoint(raw string) (string, error) {
+	norm, err := export.NormalizeEndpoint(raw)
+	if err != nil {
+		var ie *export.InvalidError
+		if errors.As(err, &ie) {
+			return "", invalid("%s", ie.Msg)
+		}
+		return "", err
+	}
+	u, _ := url.Parse(norm)
+	if u.Scheme == "https" || s.allowedPlain(u) {
+		return norm, nil
+	}
+	return "", invalid("endpoint must be an https URL; plain http is allowed only for a host in the platform's allowed hosts")
+}
+
+func (s *Service) allowedPlain(u *url.URL) bool {
+	host := strings.ToLower(u.Hostname())
+	for _, a := range s.policy.AllowedHosts {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if a == host || a == strings.ToLower(u.Host) {
+			return true
+		}
+		if pfx, err := netip.ParsePrefix(a); err == nil {
+			if ip, err := netip.ParseAddr(host); err == nil && pfx.Contains(ip) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// connectionTouched says the change alters where or how the destination is reached: backend,
+// endpoint, settings or secrets. Only such a change is tested before saving.
+func connectionTouched(cur store.TraceDestination, endpoint string, in Input) bool {
+	return string(cur.Backend) != in.Backend || cur.EndpointUrl != endpoint ||
+		!maps.Equal(decodeMap(cur.Params), nonNil(in.Params)) || len(in.Secrets) > 0 || len(in.RemoveSecrets) > 0
+}
+
+// requireOwnerAtFull refuses a non-owner who adds or re-points a destination while the org's content
+// level is full: the destination would receive full content the caller may not choose to send.
+func (s *Service) requireOwnerAtFull(ctx context.Context, q *store.Queries, org pgtype.UUID, who Authority) error {
+	if who.Owner {
+		return nil
+	}
+	st, err := s.settings(ctx, q, org)
+	if err != nil {
+		return err
+	}
+	if MinLevel(st.ContentLevel, st.Ceiling) == LevelFull {
+		return ErrOwnerOnly
+	}
+	return nil
 }
 
 func nonNil(m map[string]string) map[string]string {
@@ -350,8 +424,8 @@ func toDestination(d store.TraceDestination) Destination {
 		ID: d.ID.String(), Name: d.Name, Backend: string(d.Backend), EndpointURL: d.EndpointUrl,
 		Params: decodeMap(d.Params), SecretFields: d.SecretFields, ResourceAttributes: decodeMap(d.ResourceAttributes),
 		Enabled: d.Enabled, LastTest: toTest(d.LastTestAt, d.LastTestOk, d.LastTestMessage),
-		Health:    Health{LastSuccessAt: optTime(d.LastSuccessAt), LastErrorAt: optTime(d.LastErrorAt), LastError: d.LastError.String, SpansDropped: d.SpansDropped},
-		CreatedAt: d.CreatedAt.Time, UpdatedAt: d.UpdatedAt.Time,
+		Health:        Health{LastSuccessAt: optTime(d.LastSuccessAt), LastErrorAt: optTime(d.LastErrorAt), LastError: d.LastError.String, SpansDropped: d.SpansDropped},
+		ConfigVersion: d.ConfigVersion, CreatedAt: d.CreatedAt.Time, UpdatedAt: d.UpdatedAt.Time,
 	}
 }
 
@@ -359,9 +433,9 @@ func toPlatform(d store.PlatformTraceDestination) Destination {
 	return Destination{
 		Backend: string(d.Backend), EndpointURL: d.EndpointUrl, Params: decodeMap(d.Params), SecretFields: d.SecretFields,
 		ResourceAttributes: decodeMap(d.ResourceAttributes), Enabled: d.Enabled,
-		LastTest:  toTest(d.LastTestAt, d.LastTestOk, d.LastTestMessage),
-		Health:    Health{LastSuccessAt: optTime(d.LastSuccessAt), LastErrorAt: optTime(d.LastErrorAt), LastError: d.LastError.String, SpansDropped: d.SpansDropped},
-		UpdatedAt: d.UpdatedAt.Time,
+		LastTest:      toTest(d.LastTestAt, d.LastTestOk, d.LastTestMessage),
+		Health:        Health{LastSuccessAt: optTime(d.LastSuccessAt), LastErrorAt: optTime(d.LastErrorAt), LastError: d.LastError.String, SpansDropped: d.SpansDropped},
+		ConfigVersion: d.ConfigVersion, UpdatedAt: d.UpdatedAt.Time,
 	}
 }
 
@@ -430,10 +504,14 @@ func testColumns(o export.Outcome, at time.Time) (pgtype.Timestamptz, pgtype.Boo
 }
 
 // Create tests, then saves, a new destination. The test trace carries the org's ID. A backend that
-// does not take it gives a *TestFailedError and nothing is saved.
-func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor, user pgtype.UUID, in Input) (Destination, error) {
+// does not take it gives a *TestFailedError and nothing is saved. While the org's content level is
+// full, only an owner may add a destination.
+func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor, user pgtype.UUID, who Authority, in Input) (Destination, error) {
 	if !namePattern.MatchString(in.Name) {
 		return Destination{}, invalid("name must be 1 to 64 characters of a-z, 0-9 and '-', starting and ending with a letter or digit")
+	}
+	if err := s.requireOwnerAtFull(ctx, store.New(s.pool), org, who); err != nil {
+		return Destination{}, err
 	}
 	id := pgtype.UUID{Bytes: uuid.Must(uuid.NewV7()), Valid: true}
 	p, err := s.prepare(ctx, in, nil, Binding(org, id))
@@ -447,8 +525,12 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	testAt, testOK, testMsg := testColumns(outcome, at)
 	var out Destination
 	err = s.tx(ctx, func(q *store.Queries) error {
+		// The level may have been raised while the test was on its way.
+		if err := s.requireOwnerAtFull(ctx, q, org, who); err != nil {
+			return err
+		}
 		row, err := q.InsertTraceDestination(ctx, store.InsertTraceDestinationParams{
-			OrgID: org, ID: id, Name: in.Name, Backend: store.TraceBackend(p.dest.Preset), EndpointUrl: in.EndpointURL,
+			OrgID: org, ID: id, Name: in.Name, Backend: store.TraceBackend(p.dest.Preset), EndpointUrl: p.endpoint,
 			Params: p.params, Credentials: p.envelope, SecretFields: p.fields, ResourceAttributes: p.attrs, Enabled: in.Enabled,
 			LastTestAt: testAt, LastTestOk: testOK, LastTestMessage: testMsg, CreatedBy: user,
 		})
@@ -467,8 +549,13 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	return out, err
 }
 
-// Update tests, then saves, the changes to a destination. Secrets in in are merged into the stored ones.
-func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor, id string, in Input) (Destination, error) {
+// Update saves the changes to a destination. Secrets in in are merged into the stored ones, but only
+// while backend and endpoint origin stay the same: a destination re-pointed elsewhere needs every
+// secret again, so stored credentials are never sent to an endpoint the admin just typed. A change to
+// the connection (backend, endpoint, settings, secrets) is tested first; one that touches none of
+// those (enabled, name, resource attributes) is saved untested, so a destination whose backend is
+// down can still be disabled. expectedVersion, when set, must be the ConfigVersion the caller read.
+func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor, who Authority, id string, expectedVersion *int64, in Input) (Destination, error) {
 	if !namePattern.MatchString(in.Name) {
 		return Destination{}, invalid("name must be 1 to 64 characters of a-z, 0-9 and '-', starting and ending with a letter or digit")
 	}
@@ -476,28 +563,51 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if err != nil {
 		return Destination{}, err
 	}
-	var existing map[string]string
-	if string(cur.Backend) == in.Backend {
-		if existing, err = s.open(cur.Credentials, Binding(org, cur.ID)); err != nil {
-			return Destination{}, err
-		}
+	if expectedVersion != nil && *expectedVersion != cur.ConfigVersion {
+		return Destination{}, ErrChanged
 	}
-	p, err := s.prepare(ctx, in, existing, Binding(org, cur.ID))
+	endpoint, err := s.endpoint(in.EndpointURL)
 	if err != nil {
 		return Destination{}, err
 	}
-	outcome, at := s.test(ctx, p.dest, org.String(), in.ResourceAttributes)
-	if !outcome.OK {
-		return Destination{}, &TestFailedError{Outcome: outcome}
+	touched := connectionTouched(cur, endpoint, in)
+	var p prepared
+	var outcome export.Outcome
+	var at time.Time
+	if touched {
+		if err := s.requireOwnerAtFull(ctx, store.New(s.pool), org, who); err != nil {
+			return Destination{}, err
+		}
+		var existing map[string]string
+		if string(cur.Backend) == in.Backend && export.SameOrigin(cur.EndpointUrl, endpoint) {
+			if existing, err = s.open(cur.Credentials, Binding(org, cur.ID)); err != nil {
+				return Destination{}, err
+			}
+		}
+		if p, err = s.prepare(ctx, in, existing, Binding(org, cur.ID)); err != nil {
+			return Destination{}, err
+		}
+		if outcome, at = s.test(ctx, p.dest, org.String(), in.ResourceAttributes); !outcome.OK {
+			return Destination{}, &TestFailedError{Outcome: outcome}
+		}
+	} else {
+		if err := validateAttributes(in.ResourceAttributes); err != nil {
+			return Destination{}, err
+		}
+		p = prepared{endpoint: cur.EndpointUrl, envelope: cur.Credentials, fields: cur.SecretFields, params: cur.Params}
+		p.dest.Preset = export.Preset(cur.Backend)
+		if p.attrs, err = json.Marshal(nonNil(in.ResourceAttributes)); err != nil {
+			return Destination{}, err
+		}
 	}
 	testAt, testOK, testMsg := testColumns(outcome, at)
 	before := toDestination(cur)
 	var out Destination
 	err = s.tx(ctx, func(q *store.Queries) error {
 		row, err := q.UpdateTraceDestination(ctx, store.UpdateTraceDestinationParams{
-			OrgID: org, ID: cur.ID, ExpectedUpdatedAt: cur.UpdatedAt, Name: in.Name, Backend: store.TraceBackend(p.dest.Preset),
-			EndpointUrl: in.EndpointURL, Params: p.params, Credentials: p.envelope, SecretFields: p.fields,
-			ResourceAttributes: p.attrs, Enabled: in.Enabled, LastTestAt: testAt, LastTestOk: testOK, LastTestMessage: testMsg,
+			OrgID: org, ID: cur.ID, ExpectedVersion: cur.ConfigVersion, Name: in.Name, Backend: store.TraceBackend(p.dest.Preset),
+			EndpointUrl: p.endpoint, Params: p.params, Credentials: p.envelope, SecretFields: p.fields,
+			ResourceAttributes: p.attrs, Enabled: in.Enabled, SetTest: touched, LastTestAt: testAt, LastTestOk: testOK, LastTestMessage: testMsg,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrChanged
@@ -534,8 +644,9 @@ func (s *Service) Delete(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	})
 }
 
-// Test sends the saved destination a synthetic trace again and keeps the result. A failure is the
-// outcome, not an error.
+// Test sends the saved destination a synthetic trace again and keeps the result, only if the
+// configuration is still the one that was tested: a destination deleted or changed meanwhile is
+// ErrNotFound or ErrChanged, and nothing is written back. A failure is the outcome, not an error.
 func (s *Service) Test(ctx context.Context, org pgtype.UUID, actor audit.Actor, id string) (Destination, export.Outcome, error) {
 	cur, err := s.row(ctx, store.New(s.pool), org, id)
 	if err != nil {
@@ -553,14 +664,19 @@ func (s *Service) Test(ctx context.Context, org pgtype.UUID, actor audit.Actor, 
 	testAt, testOK, testMsg := testColumns(outcome, at)
 	var out Destination
 	err = s.tx(ctx, func(q *store.Queries) error {
-		row, err := q.UpdateTraceDestination(ctx, store.UpdateTraceDestinationParams{
-			OrgID: org, ID: cur.ID, ExpectedUpdatedAt: cur.UpdatedAt, Name: cur.Name, Backend: cur.Backend, EndpointUrl: cur.EndpointUrl,
-			Params: cur.Params, Credentials: cur.Credentials, SecretFields: cur.SecretFields, ResourceAttributes: cur.ResourceAttributes,
-			Enabled: cur.Enabled, LastTestAt: testAt, LastTestOk: testOK, LastTestMessage: testMsg,
+		n, err := q.SetTraceDestinationTest(ctx, store.SetTraceDestinationTestParams{
+			OrgID: org, ID: cur.ID, ExpectedVersion: cur.ConfigVersion, LastTestAt: testAt, LastTestOk: testOK, LastTestMessage: testMsg,
 		})
-		if errors.Is(err, pgx.ErrNoRows) {
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := s.row(ctx, q, org, id); err != nil {
+				return err // deleted meanwhile: ErrNotFound
+			}
 			return ErrChanged
 		}
+		row, err := s.row(ctx, q, org, id)
 		if err != nil {
 			return err
 		}

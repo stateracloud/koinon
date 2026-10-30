@@ -78,7 +78,7 @@ var _ = Describe("Client", func() {
 					got[kv.GetKey()] = kv.GetValue().GetBoolValue()
 				case semconv.KoinonOrg:
 					Expect(kv.GetValue().GetStringValue()).To(Equal("org-1"))
-				case semconv.GenAIOperationName, semconv.GenAIAgentName, semconv.GenAIRequestModel:
+				case semconv.GenAIOperationName, semconv.GenAIAgentName, semconv.GenAIRequestModel, semconv.GenAIProviderName:
 				default:
 					Fail("a test span carries an unexpected attribute: " + kv.GetKey())
 				}
@@ -130,8 +130,18 @@ var _ = Describe("Client", func() {
 		Expect(out.OK).To(BeFalse())
 		Expect(out.Rejected).To(Equal(int64(1)))
 		Expect(out.Message).To(ContainSubstring("rejected 1 span"))
-		Expect(out.Message).NotTo(ContainSubstring(fakeKey), "a backend that echoes the credential is not repeated")
-		Expect(out.Message).To(ContainSubstring("[redacted]"))
+		Expect(out.Message).NotTo(ContainSubstring("span rejected"), "what the backend wrote is never quoted")
+	})
+
+	It("never quotes a failure body, even one that echoes the credentials in another form", func(ctx SpecContext) {
+		b.reply(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte("bad auth " + base64.StdEncoding.EncodeToString([]byte(fakePublic+":"+fakeKey))))
+		})
+		d := export.Destination{Preset: export.Langfuse, Endpoint: b.URL, Secrets: map[string]string{"public_key": fakePublic, "secret_key": fakeKey}}
+		out := client.Test(ctx, d, "", nil, time.Now())
+		Expect(out.OK).To(BeFalse())
+		Expect(out.Message).To(Equal("the backend answered HTTP 401 (the credentials were refused)"))
 	})
 
 	It("treats a 2xx without a protobuf body as accepted", func(ctx SpecContext) {
@@ -225,7 +235,6 @@ var _ = Describe("Destination", func() {
 		Entry("a non-http endpoint", export.Destination{Preset: export.Datadog, Endpoint: "ftp://a.example.com", Secrets: map[string]string{"api_key": fakeKey}}, "http(s)"),
 		Entry("credentials in the URL", export.Destination{Preset: export.Datadog, Endpoint: "https://u:p@a.example.com", Secrets: map[string]string{"api_key": fakeKey}}, "must not carry credentials"),
 		Entry("a missing key", export.Destination{Preset: export.Langfuse, Endpoint: "https://a.example.com", Secrets: map[string]string{"public_key": fakePublic}}, "needs secret_key"),
-		Entry("a missing Opik workspace", export.Destination{Preset: export.Opik, Endpoint: "https://a.example.com", Secrets: map[string]string{"api_key": fakeKey}}, "needs workspace"),
 		Entry("a setting the preset lacks", export.Destination{Preset: export.Datadog, Endpoint: "https://a.example.com", Secrets: map[string]string{"api_key": fakeKey}, Params: map[string]string{"x": "y"}}, "no setting"),
 		Entry("a secret the preset lacks", export.Destination{Preset: export.Datadog, Endpoint: "https://a.example.com", Secrets: map[string]string{"api_key": fakeKey, "other": "z"}}, "no secret"),
 		Entry("a generic destination without headers", export.Destination{Preset: export.Generic, Endpoint: "https://a.example.com"}, "at least one header"),
@@ -233,6 +242,23 @@ var _ = Describe("Destination", func() {
 		Entry("a header Koinon sets", export.Destination{Preset: export.Generic, Endpoint: "https://a.example.com", Secrets: map[string]string{"Content-Type": "x"}}, "set by Koinon"),
 		Entry("a header value with a newline", export.Destination{Preset: export.Generic, Endpoint: "https://a.example.com", Secrets: map[string]string{"X-A": "a\r\nX-B: b"}}, "control characters"),
 	)
+
+	It("lets a self-hosted Opik run without authentication", func() {
+		d := export.Destination{Preset: export.Opik, Endpoint: "http://opik.lab.example.com/api/v1/private/otel/v1/traces"}
+		h, err := d.Headers()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(h).To(BeEmpty())
+	})
+
+	It("normalises an endpoint and compares origins by scheme, host and port", func() {
+		n, err := export.NormalizeEndpoint("HTTPS://Cloud.Example.COM/Path?x=1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(Equal("https://cloud.example.com/Path?x=1"))
+		Expect(export.SameOrigin("https://a.example.com/x", "https://A.example.com:443/y")).To(BeTrue())
+		Expect(export.SameOrigin("https://a.example.com", "http://a.example.com")).To(BeFalse())
+		Expect(export.SameOrigin("https://a.example.com", "https://a.example.com:8443")).To(BeFalse())
+		Expect(export.SameOrigin("https://a.example.com", "https://evil.example.com")).To(BeFalse())
+	})
 
 	It("hides its secrets when printed", func() {
 		d := export.Destination{Preset: export.Datadog, Endpoint: "https://a.example.com/v1/traces?token=" + fakeKey, Secrets: map[string]string{"api_key": fakeKey}}
