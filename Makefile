@@ -139,6 +139,11 @@ test-admission: ## Run the escape suite's admission policy cases against envtest
 	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
 		KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -v ./test/escape/ -ginkgo.label-filter=admission
 
+.PHONY: test-chart-smoke
+test-chart-smoke: ## Start the chart's rendered Jobs and Deployments as containers (needs Docker, helm, Go)
+	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
+		KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -timeout 15m -v ./test/chartsmoke/
+
 .PHONY: test-escape
 test-escape: ## Run the escape suite's OpenShell cases against a real gateway (home lab)
 	@test -n "$$KOINON_OPENSHELL_ENDPOINT" || { echo "set KOINON_OPENSHELL_* (see test/escape)"; exit 1; }
