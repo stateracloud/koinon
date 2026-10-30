@@ -11,14 +11,26 @@
 name: e2e-kind
 
 on:
-  # The go suite on ready pull requests that change spend accounting, the gateway, the harness
-  # flavor or the e2e itself: the areas whose regressions only the full install catches.
+  # The go suite on ready pull requests that change what runs in the installed system: startup
+  # and flags, the chart, the control-plane services, migrations, the gateway and ledger, the
+  # harness flavor, tracing, and the e2e itself. Regressions there only the full install catches
+  # (#281 changed branch naming in githubtools; #284 a startup flag the chart's migrate Job lacked).
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - internal/ledger/**
+      - cmd/**
+      - charts/**
+      - internal/agentd/**
+      - internal/api/**
+      - internal/db/migrations/**
+      - internal/execution/**
       - internal/gateway/**
+      - internal/githubtools/**
+      - internal/ledger/**
+      - internal/reconciler/**
+      - internal/services/**
+      - internal/tracing/**
       - flavors/**
       - test/e2e/**
       - test/fakemodel/**
