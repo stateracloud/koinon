@@ -62,10 +62,10 @@ api:
   # Rotation: accepting the current and the previous token needs no downtime. Edit the Secret: copy
   # the old "token" value to a key "previous" and put a new random value (`openssl rand -hex 32`) in
   # "token". koinon-api and koinon-agentd pick the files up within about a minute (kubelet refreshes
-  # the mounted Secret; they re-read every few seconds). The gateway reads its file when it loads
-  # its config, so restart it once the kubelet has synced (standalone mode:
-  # `kubectl rollout restart deploy/<release>-gateway`; kubernetes mode: the controller reads the Secret
-  # and should push the new value to the proxy; restart the proxy pods if it does not). When every sender sends the new token, delete "previous".
+  # the mounted Secret; they re-read every few seconds). agentgateway watches the token file and
+  # reloads it, so the gateway's next export carries the new token without a restart (kubernetes
+  # mode: the controller reads the Secret and pushes the value to the proxy). When every sender sends
+  # the new token, delete "previous". See docs/ops/secret-keys.md.
   # With a Secret you manage (existingSecret), rotate the same way.
   otlpToken:
     existingSecret: ""

@@ -112,6 +112,36 @@ var _ = Describe("otlpauth", func() {
 		Expect(do("/v1/logs", "Bearer "+current).StatusCode).To(Equal(http.StatusOK))
 	})
 
+	It("treats an empty or whitespace-only previous as absent, at start and later", func() {
+		write(otlpauth.PreviousFile, " \n")
+		t2, err := otlpauth.NewTokens(dir, quiet)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(t2.Match(current)).To(BeTrue())
+		Expect(t2.Match("")).To(BeFalse())
+		Expect(t2.Match(previous)).To(BeFalse())
+		write(otlpauth.PreviousFile, "")
+		time.Sleep(5 * time.Millisecond)
+		Expect(do("/v1/logs", "Bearer "+current).StatusCode).To(Equal(http.StatusOK))
+	})
+
+	It("never lets a bad previous block a new token, and accepts the old one only through a valid previous", func() {
+		write(otlpauth.TokenFile, previous)
+		write(otlpauth.PreviousFile, "short")
+		time.Sleep(5 * time.Millisecond)
+		Expect(do("/v1/logs", "Bearer "+previous).StatusCode).To(Equal(http.StatusOK))
+		Expect(do("/v1/logs", "Bearer "+current).StatusCode).To(Equal(http.StatusUnauthorized))
+		write(otlpauth.PreviousFile, current)
+		time.Sleep(5 * time.Millisecond)
+		Expect(do("/v1/logs", "Bearer "+current).StatusCode).To(Equal(http.StatusOK))
+	})
+
+	It("starts with an invalid previous, ignoring it", func() {
+		write(otlpauth.PreviousFile, "bad value with spaces")
+		t2, err := otlpauth.NewTokens(dir, quiet)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(t2.Match(current)).To(BeTrue())
+	})
+
 	It("does not start without a valid token", func() {
 		_, err := otlpauth.NewTokens("", quiet)
 		Expect(err).To(HaveOccurred())

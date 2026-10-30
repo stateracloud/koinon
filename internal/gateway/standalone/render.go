@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"slices"
 	"strconv"
@@ -64,6 +65,20 @@ type OTLPExport struct {
 	// (kubernetes mode: the controller reads the Secret and hands the value to the proxy).
 	TokenSecret    string
 	TokenSecretKey string
+}
+
+// SplitHostPort returns the receiver's host and numeric port, or an error for anything that is not
+// "host:port" (a scheme, a path, a missing or non-numeric port).
+func (e OTLPExport) SplitHostPort() (string, int, error) {
+	host, portStr, err := net.SplitHostPort(e.HostPort)
+	if err != nil || host == "" {
+		return "", 0, fmt.Errorf("the OTLP receiver %q is not host:port", e.HostPort)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0, fmt.Errorf("the OTLP receiver %q has no valid port", e.HostPort)
+	}
+	return host, port, nil
 }
 
 const (
