@@ -146,3 +146,83 @@ export function askableMembersHandlers(): Handlers['unary'] {
     }),
   }
 }
+
+const trace = 'koinon.trace.v1alpha1.TraceDestinationService/'
+
+/**
+ * traceDestinationHandlers is an in-memory TraceDestinationService: a healthy Langfuse destination, one
+ * whose last test failed and a generic one, plus the org's settings and the platform's destination and
+ * ceiling. A write whose endpoint contains "refuse" is refused as a failed test would be. `seen`
+ * records the writes. Credentials are never returned.
+ */
+export function traceDestinationHandlers(opts: { level?: string; ceiling?: string; platform?: boolean } = {}) {
+  const at = new Date(Date.now() - 120_000).toISOString()
+  const destinations: Json[] = [
+    {
+      id: 'd-lf', name: 'langfuse', backend: 'BACKEND_LANGFUSE', endpointUrl: 'https://cloud.langfuse.com/api/public/otel/v1/traces', secretFields: ['public_key', 'secret_key'], enabled: true,
+      lastTest: { ok: true, testedAt: at }, health: { lastSuccessAt: at, spansDropped: '0' },
+    },
+    {
+      id: 'd-dd', name: 'datadog', backend: 'BACKEND_DATADOG', endpointUrl: 'https://api.datadoghq.com/api/intake/otlp/v1/traces', secretFields: ['api_key'], enabled: true,
+      lastTest: { ok: false, message: 'the backend answered 403 Forbidden', testedAt: at }, health: { lastSuccessAt: at, lastErrorAt: at, lastError: 'the backend answered 403 Forbidden', spansDropped: '1204' },
+    },
+    { id: 'd-g', name: 'collector', backend: 'BACKEND_GENERIC', endpointUrl: 'https://collector.example.com/v1/traces', secretFields: ['X-Api-Key'], enabled: false },
+  ]
+  let settings: Json = { contentLevel: opts.level ?? 'CONTENT_LEVEL_NONE', sampleRate: 0.5, platformCopyLevel: 'CONTENT_LEVEL_NONE', ceiling: opts.ceiling ?? 'CONTENT_LEVEL_FULL', hasPlatformDestination: opts.platform ?? true }
+  let platform: Json | undefined = opts.platform === false ? undefined : {
+    backend: 'BACKEND_DATADOG', endpointUrl: 'https://api.datadoghq.com/api/intake/otlp/v1/traces', secretFields: ['api_key'], enabled: true,
+    lastTest: { ok: true, testedAt: at }, health: { lastSuccessAt: at, spansDropped: '3' },
+  }
+  const seen: { create?: Json; update?: Json; test?: Json; settings?: Json; platformSet?: Json; ceiling?: Json } = {}
+  const refused = (input: Json | undefined) => String(input?.endpointUrl ?? '').includes('refuse')
+  const refusal = { error: { code: 'failed_precondition', message: 'the backend answered 401 Unauthorized' } }
+  const unary: Handlers['unary'] = {
+    [trace + 'ListDestinations']: () => ({ destinations }),
+    [trace + 'GetSettings']: () => ({ settings }),
+    [trace + 'CreateDestination']: (req) => {
+      seen.create = req
+      const input = req.destination as Json
+      if (refused(input)) return refusal
+      const d = { id: 'd-new', name: input.name, backend: input.backend, endpointUrl: input.endpointUrl, secretFields: Object.keys((input.secrets as Json) ?? {}), enabled: input.enabled ?? false, lastTest: { ok: true, testedAt: new Date().toISOString() } }
+      destinations.push(d)
+      return { destination: d }
+    },
+    [trace + 'UpdateDestination']: (req) => {
+      seen.update = req
+      const input = req.destination as Json
+      if (refused(input)) return refusal
+      const d = destinations.find((x) => x.id === req.destinationId)!
+      Object.assign(d, { endpointUrl: input.endpointUrl, enabled: input.enabled ?? false, lastTest: { ok: true, testedAt: new Date().toISOString() } })
+      return { destination: d }
+    },
+    [trace + 'DeleteDestination']: (req) => {
+      destinations.splice(destinations.findIndex((x) => x.id === req.destinationId), 1)
+      return {}
+    },
+    [trace + 'TestDestination']: (req) => {
+      seen.test = req
+      const d = destinations.find((x) => x.id === req.destinationId)!
+      d.lastTest = { ok: true, testedAt: new Date().toISOString() }
+      return { destination: d, result: d.lastTest }
+    },
+    [trace + 'UpdateSettings']: (req) => {
+      seen.settings = req
+      settings = { ...settings, contentLevel: req.contentLevel, sampleRate: req.sampleRate, platformCopyLevel: req.platformCopyLevel }
+      return { settings }
+    },
+    [trace + 'GetPlatform']: () => ({ destination: platform, ceiling: opts.ceiling ?? 'CONTENT_LEVEL_FULL' }),
+    [trace + 'SetPlatformDestination']: (req) => {
+      seen.platformSet = req
+      const input = req.destination as Json
+      if (refused(input)) return refusal
+      platform = { backend: input.backend, endpointUrl: input.endpointUrl, secretFields: Object.keys((input.secrets as Json) ?? {}), enabled: true, lastTest: { ok: true, testedAt: new Date().toISOString() } }
+      return { destination: platform }
+    },
+    [trace + 'SetPlatformCeiling']: (req) => {
+      seen.ceiling = req
+      opts.ceiling = req.ceiling as string
+      return { ceiling: req.ceiling, orgsLowered: 2 }
+    },
+  }
+  return { unary, seen }
+}
