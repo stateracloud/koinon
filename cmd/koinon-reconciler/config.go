@@ -42,6 +42,11 @@ type fileConfig struct {
 		ProviderKeysDir    string `yaml:"providerKeysDir"`
 		// AccessLogOTLP is koinon-api's OTLP/HTTP receiver as host:port (plan item L1).
 		AccessLogOTLP string `yaml:"accessLogOtlp"`
+		// AccessLogOTLPTokenFile is the file in the gateway pod with the receiver's bearer token
+		// (standalone mode); AccessLogOTLPTokenSecret is the Secret that holds it (kubernetes mode,
+		// key "token"). Names only: the token is never in this file.
+		AccessLogOTLPTokenFile   string `yaml:"accessLogOtlpTokenFile"`
+		AccessLogOTLPTokenSecret string `yaml:"accessLogOtlpTokenSecret"`
 		// Name and GatewayClassName are Koinon's Gateway and its class in kubernetes mode (plan item G2).
 		Name             string `yaml:"name"`
 		GatewayClassName string `yaml:"gatewayClassName"`
@@ -123,6 +128,8 @@ type config struct {
 	healthAddr         string
 	metricsAddr        string
 	accessLogOTLP      string
+	otlpTokenFile      string
+	otlpTokenSecret    string
 
 	idleTimeout    time.Duration
 	archiveAfter   time.Duration
@@ -170,6 +177,10 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.kekDir, "kek-dir", "", "directory with the mounted key-encryption keys Secret (files named by KEK ID plus \"active\")")
 	fs.StringVar(&c.accessLogOTLP, "gateway-access-log-otlp", "",
 		"host:port of koinon-api's OTLP/HTTP receiver, where agentgateway exports its access log for the spend ledger; empty exports nothing")
+	fs.StringVar(&c.otlpTokenFile, "gateway-access-log-otlp-token-file", "",
+		"file, as the standalone gateway pod sees it, with the bearer token the OTLP receiver requires; agentgateway reads it and sends it with the access log")
+	fs.StringVar(&c.otlpTokenSecret, "gateway-access-log-otlp-token-secret", "",
+		"Secret (key token) with the bearer token the OTLP receiver requires, for kubernetes mode: the agentgateway controller reads it and hands it to the proxy")
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort, "listen address of /metrics (Prometheus); empty disables it")
 	fs.StringVar(&c.healthAddr, "health-addr", ":8082", "listen address of /healthz and /readyz (not ready until the key-encryption keys are loaded); empty disables it")
 	fs.StringVar(&c.egressHosts, "egress-allowed-hosts", "", "comma-separated hosts (optionally host:port) providers and MCP servers may name although they are internal")
@@ -266,6 +277,8 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.providerKeysSecret, fc.Gateway.ProviderKeysSecret)
 	orDefault(&c.providerKeysDir, fc.Gateway.ProviderKeysDir)
 	orDefault(&c.accessLogOTLP, fc.Gateway.AccessLogOTLP)
+	orDefault(&c.otlpTokenFile, fc.Gateway.AccessLogOTLPTokenFile)
+	orDefault(&c.otlpTokenSecret, fc.Gateway.AccessLogOTLPTokenSecret)
 	orDefault(&c.homeRetention, fc.Reconciler.HomeRetention)
 	orDefault(&c.checkpoints, fc.Reconciler.Checkpoints)
 	if c.sandboxJobs == 0 {

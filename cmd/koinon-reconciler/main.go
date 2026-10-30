@@ -275,7 +275,10 @@ func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (
 			},
 		}
 		if cfg.accessLogOTLP != "" {
-			driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP}
+			if cfg.otlpTokenFile == "" {
+				return nil, errors.New("--gateway-access-log-otlp-token-file is required with --gateway-access-log-otlp: the OTLP receiver refuses requests without its bearer token")
+			}
+			driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP, TokenFile: cfg.otlpTokenFile}
 		} else {
 			log.Warn("no --gateway-access-log-otlp: the spend ledger records nothing and spend limits are not netted")
 		}
@@ -311,7 +314,10 @@ func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (
 			Log:    log,
 		}
 		if cfg.accessLogOTLP != "" {
-			driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP}
+			if cfg.otlpTokenSecret == "" {
+				return nil, errors.New("--gateway-access-log-otlp-token-secret is required with --gateway-access-log-otlp: the OTLP receiver refuses requests without its bearer token")
+			}
+			driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP, TokenSecret: cfg.otlpTokenSecret, TokenSecretKey: "token"}
 		} else {
 			log.Warn("no --gateway-access-log-otlp: the spend ledger records nothing, so budgets cannot revoke keys")
 		}

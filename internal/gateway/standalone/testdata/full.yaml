@@ -34,7 +34,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"dc0535e74f5a525c"'
+      koinon.config: '"b86f41b3bb280565"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -51,6 +51,10 @@ frontendPolicies:
     otlp:
       host: koinon-api.koinon.svc:4318
       protocol: http
+      policies:
+        backendAuth:
+          key:
+            file: /secrets/otlp/token
 gateways:
   default:
     port: 4000
@@ -100,7 +104,7 @@ llm:
             org: globex
           allowedModels:
             - deepseek/deepseek-v4.1-flash
-        - keyHash: sha256:d80c414bb9c4b91a6ccb66e7dcc8a69756d734ba7e0580dccb25b9d402ae1f87
+        - keyHash: sha256:28f3bbecb7ba71eeae880d833c62c6414ef852426bcb0f031085f3b000973767
           metadata:
             name: koinon-reload-probe
             agent: ""

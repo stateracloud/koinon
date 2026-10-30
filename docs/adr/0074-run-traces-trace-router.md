@@ -432,6 +432,15 @@ on an LLM route, held for the whole stream; ADR 0056 amendment 2026-10-29, point
 3. **Any future trace field that wants a body** must be weighed against that cost first; the
    per-response buffering is what a per-field status guard cannot avoid.
 
+## Amendment (2026-10-30): the internal OTLP listener is authenticated
+
+The context above (the access log "with no authentication and a NetworkPolicy in front") is superseded
+by the amendment of the same date in [0050](0050-spend-ledger-ingestion-and-net-limits.md). The whole
+internal OTLP listener, `/v1/logs` and `/v1/traces`, requires a bearer token from the Secret
+`koinon-otlp-token`. The gateway's log export and koinon-agentd's span export both send it
+(`--otlp-endpoint` and `--otlp-token-file` on koinon-agentd, `KOINON_OTLP_ENDPOINT` and
+`KOINON_OTLP_TOKEN_FILE` in the chart). This closes issue #52.
+
 ## Links
 
 - [0023](0023-observability-and-audit.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md),

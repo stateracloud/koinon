@@ -78,6 +78,26 @@ Do it once a year, or when `keys status` warns. No downtime, no restart.
 
 DEKs need no schedule: every write makes a new one.
 
+## Rotate the OTLP receiver token
+
+koinon-api's internal OTLP listener (the gateway's access log, agentd's run spans) requires a bearer
+token: the Secret `koinon-otlp-token`, key `token` (or the Secret named by `api.otlpToken.existingSecret`).
+The ensure-secrets Job creates it and never changes it. Rotation has no downtime, because the listener
+also accepts the key `previous`:
+
+1. Copy the current `token` value to a new key `previous`, and put a new value in `token`
+   (`openssl rand -hex 32`, at least 32 characters of A-Z a-z 0-9 . _ ~ + / = -):
+   `kubectl -n koinon patch secret koinon-otlp-token --type merge -p "{\"stringData\":{\"previous\":\"$OLD\",\"token\":\"$NEW\"}}"`.
+2. Wait about a minute for kubelet to sync the mounted Secret. koinon-api and koinon-agentd re-read their
+   files every few seconds, with no restart. The standalone gateway reads its file when it loads its
+   config: `kubectl -n koinon rollout restart deploy/koinon-gateway`. In kubernetes mode the controller
+   reads the Secret; restart the proxy pods if the new value has not reached them.
+3. Once every sender sends the new token, check `koinon_api_otlp_auth_rejected_total` stays flat, then
+   remove `previous`.
+
+If the token leaked, do the same and remove `previous` straight away (the old token is refused at once;
+the gateway's access log is dropped until it is restarted, and the ledger records nothing meanwhile).
+
 ## Suspected compromise
 
 A KEK compromise means someone may hold a KEK and the database. Rotating the KEK is not enough: they

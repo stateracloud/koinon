@@ -122,6 +122,9 @@ spec:
             - name: provider-keys
               mountPath: /secrets/providers
               readOnly: true
+            # The bearer token of koinon-api's OTLP listener, which agentgateway sends with its
+            # access log. A file, so it stays out of the config ConfigMap.
+            {{- include "koinon.otlpTokenVolumeMount" . | nindent 12 }}
       volumes:
         - name: config
           configMap:
@@ -136,6 +139,7 @@ spec:
           secret:
             secretName: {{ include "koinon.gatewayProvidersName" . }}
             defaultMode: 0444
+        {{- include "koinon.otlpTokenVolume" . | nindent 8 }}
       {{- with $gw.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
