@@ -117,7 +117,7 @@ puts it on after reading the checklist; the checklist is the substance.
 Only Andre may waive the cooldown for anything else, for example to pick up a feature early. The
 waiver is recorded in the PR: who decided, why, which version, how old it was, and what was verified
 (ADR 0052's OpenCode 2.2.0 amendment is the model). The mechanism is the PR label
-`dependency-age-waiver`. The CI job honours the label only when a maintainer listed in `MAINTAINERS.md` (read from the base branch) put it on, reads it
+`dependency-age-waiver`. The CI job honours the label only when the maintainer put it on, reads it
 each time it runs (re-run the job after labelling), and prints each waived version. pnpm waivers
 use the same exact-version exemption.
 
@@ -198,6 +198,17 @@ Checked on 2026-10-29:
   set explicitly; `minimumReleaseAgeExclude` accepts names, patterns and exact versions
   (`nx@21.6.5`); `minimumReleaseAgeExcludePrune`; `trustPolicy: no-downgrade`. The repository pins
   pnpm 12.14.0.
+
+## Amendment (2026-10-30): who may waive
+
+"Only Andre may waive the cooldown" (Waivers outside the fast path) is replaced by: the approvers are
+the maintainers listed in the table of `MAINTAINERS.md`. The CI job reads that table (the "GitHub"
+column of the first table under "# Maintainers", `hack/waiver-approvers.sh`) from the base branch, so
+a pull request cannot add itself, and only when the PR carries the `dependency-age-waiver` label.
+Handles elsewhere in the file are not approvers. Today the table lists only `@procoduck`, so the set is
+unchanged. `@ovirandunu` is in `.github/CODEOWNERS` (ADR 0082: an admin with full trust) but not in
+`MAINTAINERS.md`, so he cannot waive; adding him to the table is a governance decision for the
+project lead (ADR 0038).
 
 ## Links
 
