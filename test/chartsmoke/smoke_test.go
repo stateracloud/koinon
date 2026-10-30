@@ -5,10 +5,10 @@ package chartsmoke_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,7 +19,10 @@ import (
 	"github.com/testcontainers/testcontainers-go/network"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
@@ -29,31 +32,28 @@ import (
 const (
 	jobDeadline   = 60 * time.Second
 	probeDeadline = 60 * time.Second
+	// settleTime is how long the Deployments run after they are ready: a component that dies
+	// shortly after its first probe, or whose RBAC is missing a rule it only needs after
+	// starting, shows up in this window.
+	settleTime = 12 * time.Second
 )
-
-// dbSecretPassword is obviously fake, like every secret in the tests.
-const dbSecretPassword = "koinon_test_not-a-real-password"
 
 // thirdPartyDeployments are rendered Deployments the smoke test does not run: they are not
 // Koinon's binaries, so no Koinon flag or mount can break them. koinon-gateway is agentgateway,
 // whose configuration the reconciler writes at run time.
 var thirdPartyDeployments = []string{"koinon-gateway"}
 
+// platformJobs are Jobs that inspect the cluster platform (Agent Sandbox, OpenShell, Kata, the
+// gateway controller), which envtest does not have. They must run their checks and report: exit 1
+// with the report is the expected outcome here, a crash before the report (a flag or config error)
+// or a permission error is not.
+var platformJobs = map[string]struct{ report string }{
+	"koinon-preflight": {report: "Koinon install preflight"},
+}
+
 var _ = Describe("Rendered startup", Label("chartsmoke"), func() {
 	for _, vf := range valuesFiles() {
-		name := strings.TrimSuffix(filepath.Base(vf), "-values.yaml")
-		if mode := postgresMode(vf); mode != "external" {
-			// cnpg: the components' URIs use sslmode=verify-full against the CNPG cluster's CA and
-			// the host koinon-pg-rw.<ns>.svc, with the password in PGPASSWORD. A Postgres container
-			// with a CA of its own would test the TLS set-up, not the chart's startup contract,
-			// and the Koinon containers' flags, env and mounts are otherwise the same as in
-			// external mode (the same templates), which are covered.
-			It(name+" (postgres.mode="+mode+") is not run: its database needs CNPG's CA", func() {
-				Skip("covered by the external-database modes: same components, flags and mounts; only the DATABASE_URL differs")
-			})
-			continue
-		}
-		describeMode(name, vf)
+		describeMode(strings.TrimSuffix(filepath.Base(vf), "-values.yaml"), vf)
 	}
 })
 
@@ -63,8 +63,8 @@ func describeMode(name, valuesFile string) {
 			r  *rendered
 			cl *cluster
 			rn *runner
-			// ready records the Deployments whose containers answered their probes.
-			ready = map[string]*workload{}
+			// ready records the workloads of the Deployments that answered their probes.
+			ready = map[string][]*workload{}
 			// accounted collects the Deployments the specs ran or deliberately skipped.
 			accounted []string
 		)
@@ -78,71 +78,134 @@ func describeMode(name, valuesFile string) {
 			pg, err := postgres.Run(ctx, pgtest.Image,
 				postgres.WithDatabase("koinon"), postgres.WithUsername("koinon"), postgres.WithPassword(dbSecretPassword),
 				postgres.BasicWaitStrategies(), network.WithNetwork([]string{"postgres"}, nw))
+			if pg != nil {
+				DeferCleanup(func(ctx context.Context) { _ = testcontainers.TerminateContainer(pg) })
+			}
 			Expect(err).NotTo(HaveOccurred())
-			DeferCleanup(func(ctx context.Context) { _ = testcontainers.TerminateContainer(pg) })
 
 			cl = startCluster()
-			DeferCleanup(cl.Stop)
 
-			tmp, err := os.MkdirTemp("", "koinon-chartsmoke-")
+			docker, err := testcontainers.NewDockerClientWithOpts(ctx)
 			Expect(err).NotTo(HaveOccurred())
-			DeferCleanup(func() { _ = os.RemoveAll(tmp) })
-			rn = &runner{cl: cl, nwName: nw.Name, images: images, tmp: tmp}
+			rn = &runner{cl: cl, nwName: nw.Name, images: images, docker: docker, helperImage: pgtest.Image}
 			DeferCleanup(rn.Close)
 
-			applyChartObjects(ctx, cl, r)
-			provisionDatabaseSecret(ctx, cl, r)
+			// What exists before the install: the namespace, its default ServiceAccount (made by
+			// the cluster's controller) and the operator's Secrets.
+			_, err = cl.Admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = cl.Admin.CoreV1().ServiceAccounts(namespace).Create(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "default"}}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			AddReportEntry("operator Secrets", fmt.Sprint(provisionOperatorSecrets(ctx, cl, r)))
 		}, NodeTimeout(5*time.Minute))
 
 		AfterEach(func(ctx SpecContext) {
 			if CurrentSpecReport().Failed() {
-				for _, w := range ready {
-					AddReportEntry("log "+w.Name, w.Logs(ctx))
+				for _, ws := range ready {
+					for _, w := range ws {
+						AddReportEntry("log "+w.Name, w.Logs(ctx))
+					}
 				}
 			}
 		})
 
-		// The pre-install hook Jobs, in hook-weight order, the way Helm runs them: ensure-secrets
-		// creates the generated Secrets, then the migration applies the schema.
-		It("runs the ensure-secrets hook Job to completion and creates the Secrets", func(ctx SpecContext) {
-			job := r.job("koinon-ensure-secrets")
-			Expect(job).NotTo(BeNil(), "the values file renders the ensure-secrets Job")
-			runJob(ctx, rn, job)
-			// What the chart expects from it.
-			Expect(cl.Secret(ctx, "koinon-otlp-token")).NotTo(BeNil())
-			Expect(cl.Secret(ctx, "koinon-otlp-token").Data).To(HaveKey("token"))
-		})
-
-		It("runs the migrate Job to completion", func(ctx SpecContext) {
-			job := r.job("koinon-migrate")
-			Expect(job).NotTo(BeNil())
-			runJob(ctx, rn, job)
-		})
-
-		It("runs any other Job to completion", func(ctx SpecContext) {
+		// Helm runs the pre-install hooks before it creates any other object of the release, in
+		// ascending hook-weight order; Jobs of one weight finish before the next weight starts.
+		// So a hook Job can only use what the operator made before the install and the hook
+		// objects of its own or an earlier weight: ensure-secrets creates the generated Secrets,
+		// then the migration applies the schema.
+		It("runs the pre-install hooks in hook-weight order", func(ctx SpecContext) {
+			hooks := map[int][]runtime.Object{}
+			var weights []int
+			add := func(o runtime.Object) {
+				m := mustMeta(o)
+				if w, pre, hook := hookOf(m); hook {
+					Expect(pre).To(BeTrue(), "%s %s is a hook of a kind this suite does not run: %s", kindOf(o), m.GetName(), m.GetAnnotations()["helm.sh/hook"])
+					if _, ok := hooks[w]; !ok {
+						weights = append(weights, w)
+					}
+					hooks[w] = append(hooks[w], o)
+				}
+			}
+			for _, o := range r.Objects {
+				add(o)
+			}
 			for _, j := range r.Jobs {
-				if !slices.Contains([]string{"koinon-ensure-secrets", "koinon-migrate"}, j.Name) {
+				add(j)
+			}
+			sort.Ints(weights)
+
+			var ran []string
+			for _, w := range weights {
+				// Helm creates the non-Job objects of a weight with the Jobs; the Jobs' pods start
+				// once the API server has them all.
+				var jobs []*batchv1.Job
+				for _, o := range hooks[w] {
+					if j, ok := o.(*batchv1.Job); ok {
+						jobs = append(jobs, j)
+						continue
+					}
+					Expect(applyObject(ctx, cl, o)).To(Succeed())
+				}
+				sort.Slice(jobs, func(i, k int) bool { return jobs[i].Name < jobs[k].Name })
+				for _, j := range jobs {
+					By(fmt.Sprintf("hook weight %d: %s", w, j.Name))
+					runJob(ctx, rn, j)
+					ran = append(ran, j.Name)
+				}
+			}
+			AddReportEntry("hook Jobs, in order", fmt.Sprint(ran))
+			Expect(ran).To(ContainElement("koinon-migrate"), "the migrate Job is a pre-install hook")
+			if slices.Contains(ran, "koinon-ensure-secrets") {
+				// What the chart expects from it.
+				Expect(cl.Secret(ctx, "koinon-otlp-token")).NotTo(BeNil())
+				Expect(cl.Secret(ctx, "koinon-otlp-token").Data).To(HaveKey("token"))
+			}
+		}, SpecTimeout(5*time.Minute))
+
+		// The rest of the release: everything that is not a hook, then its Jobs that are not hooks.
+		It("creates the release's objects and runs its plain Jobs", func(ctx SpecContext) {
+			for _, o := range r.Objects {
+				if _, _, hook := hookOf(mustMeta(o)); !hook {
+					Expect(applyObject(ctx, cl, o)).To(Succeed())
+				}
+			}
+			for _, j := range r.Jobs {
+				if _, _, hook := hookOf(&j.ObjectMeta); !hook {
 					runJob(ctx, rn, j)
 				}
 			}
-		})
+		}, SpecTimeout(5*time.Minute))
 
 		It("starts koinon-api and answers its probes", func(ctx SpecContext) {
 			ready["koinon-api"] = startDeployment(ctx, rn, r, "koinon-api")
 			accounted = append(accounted, "koinon-api")
 			// The KEK Secret is created by the API on its first start (KOINON_KEK_CREATE).
-			Expect(cl.Secret(ctx, "koinon-kek")).NotTo(BeNil(), "koinon-api creates the key-encryption Secret")
-		})
+			Expect(cl.Secret(ctx, kekSecretName(r))).NotTo(BeNil(), "the key-encryption Secret exists")
+		}, SpecTimeout(3*time.Minute))
 
 		It("starts koinon-reconciler and answers its probes", func(ctx SpecContext) {
 			ready["koinon-reconciler"] = startDeployment(ctx, rn, r, "koinon-reconciler")
 			accounted = append(accounted, "koinon-reconciler")
-		})
+		}, SpecTimeout(3*time.Minute))
 
 		It("starts koinon-agentd and answers its probes", func(ctx SpecContext) {
 			ready["koinon-agentd"] = startDeployment(ctx, rn, r, "koinon-agentd")
 			accounted = append(accounted, "koinon-agentd")
-		})
+		}, SpecTimeout(3*time.Minute))
+
+		It("keeps every Deployment running and permitted", func(ctx SpecContext) {
+			time.Sleep(settleTime)
+			for name, ws := range ready {
+				for _, w := range ws {
+					logs := w.Logs(ctx)
+					Expect(w.Running(ctx)).To(BeTrue(), "%s (%s) stopped within %s of being ready (exit code %d); logs:\n%s", w.Name, name, settleTime, w.ExitCode(ctx), logs)
+					// No restarts happen here, so a running container has restart count 0.
+					Expect(strings.ToLower(logs)).NotTo(ContainSubstring("forbidden"),
+						"%s was denied by the API server: the chart's RBAC lacks a rule; logs:\n%s", w.Name, logs)
+				}
+			}
+		}, SpecTimeout(2*time.Minute))
 
 		It("accounts for every rendered Deployment", func() {
 			var all, skipped []string
@@ -163,12 +226,43 @@ func describeMode(name, valuesFile string) {
 	})
 }
 
-// platformJobs are Jobs that inspect the cluster platform (Agent Sandbox, OpenShell, Kata, the
-// gateway controller), which envtest does not have. They must run their checks and report: exit 1
-// with the report is the expected outcome here, a crash before the report (a flag or config error)
-// or a permission error is not.
-var platformJobs = map[string]struct{ report string }{
-	"koinon-preflight": {report: "Koinon install preflight"},
+// hookOf reads a Helm hook annotation: whether the object is a hook, whether it is a pre-install
+// hook, and its weight.
+func hookOf(m metav1.Object) (weight int, pre, hook bool) {
+	a := m.GetAnnotations()
+	h, ok := a["helm.sh/hook"]
+	if !ok {
+		return 0, false, false
+	}
+	pre = slices.Contains(strings.Split(h, ","), "pre-install")
+	if w := a["helm.sh/hook-weight"]; w != "" {
+		n, err := strconv.Atoi(w)
+		Expect(err).NotTo(HaveOccurred(), "hook weight of %s", m.GetName())
+		weight = n
+	}
+	return weight, pre, true
+}
+
+func mustMeta(o runtime.Object) metav1.Object {
+	m, err := apimeta.Accessor(o)
+	if err != nil {
+		panic(err)
+	}
+	return m
+}
+
+func kindOf(o runtime.Object) string { return fmt.Sprintf("%T", o) }
+
+// kekSecretName is the key-encryption Secret the API uses (KOINON_KEK_SECRET).
+func kekSecretName(r *rendered) string {
+	for _, c := range r.deployment("koinon-api").Spec.Template.Spec.Containers {
+		for _, e := range c.Env {
+			if e.Name == "KOINON_KEK_SECRET" {
+				return e.Value
+			}
+		}
+	}
+	panic("koinon-api has no KOINON_KEK_SECRET")
 }
 
 // runJob runs every container of the Job's pod template to completion and requires exit code 0
@@ -183,7 +277,7 @@ func runJob(ctx context.Context, rn *runner, job *batchv1.Job) {
 		AddReportEntry("log "+w.Name, logs, ReportEntryVisibilityFailureOrVerbose)
 		if p, ok := platformJobs[job.Name]; ok {
 			Expect(logs).To(ContainSubstring(p.report), "%s did not reach its checks (exit %d, args %q)", w.Name, code, c.Args)
-			Expect(logs).NotTo(ContainSubstring("forbidden"), "%s was denied by the API server: the chart's RBAC lacks a rule", w.Name)
+			Expect(strings.ToLower(logs)).NotTo(ContainSubstring("forbidden"), "%s was denied by the API server: the chart's RBAC lacks a rule", w.Name)
 			Expect(code).To(BeElementOf(0, 1), "%s exited with code %d", w.Name, code)
 			continue
 		}
@@ -194,20 +288,17 @@ func runJob(ctx context.Context, rn *runner, job *batchv1.Job) {
 // startDeployment starts each container of the Deployment's pod template and requires its
 // probes (startup, readiness, liveness) to answer within a minute. A container without HTTP
 // probes must serve /metrics on its "metrics" port instead, which the chart scrapes.
-func startDeployment(ctx context.Context, rn *runner, r *rendered, name string) *workload {
+func startDeployment(ctx context.Context, rn *runner, r *rendered, name string) []*workload {
 	GinkgoHelper()
 	d := r.deployment(name)
 	Expect(d).NotTo(BeNil(), "%s is rendered", name)
 	ps := d.Spec.Template.Spec
-	var first *workload
+	var started []*workload
 	for _, c := range ps.Containers {
 		w := rn.start(ctx, name, ps, c, 0)
-		if first == nil {
-			first = w
-		}
-		probes := []*corev1.Probe{c.StartupProbe, c.ReadinessProbe, c.LivenessProbe}
+		started = append(started, w)
 		any := false
-		for _, p := range probes {
+		for _, p := range []*corev1.Probe{c.StartupProbe, c.ReadinessProbe, c.LivenessProbe} {
 			if p == nil || p.HTTPGet == nil {
 				continue
 			}
@@ -222,82 +313,30 @@ func startDeployment(ctx context.Context, rn *runner, r *rendered, name string) 
 		}
 		Expect(w.Running(ctx)).To(BeTrue(), "%s is still running; logs:\n%s", w.Name, w.Logs(ctx))
 	}
-	return first
+	return started
 }
 
-// applyChartObjects creates what the chart renders besides the workloads: the namespace,
-// ServiceAccounts, RBAC, ConfigMaps and Secrets, in the API server. Hook annotations do not
-// matter here; the specs run the hook Jobs in the order Helm would.
-func applyChartObjects(ctx context.Context, cl *cluster, r *rendered) {
-	GinkgoHelper()
+// applyObject creates a ServiceAccount, Secret, ConfigMap or RBAC object in the API server.
+func applyObject(ctx context.Context, cl *cluster, o runtime.Object) error {
 	c := cl.Admin
-	_, err := c.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}, metav1.CreateOptions{})
-	Expect(err).NotTo(HaveOccurred())
-	create := func(err error) {
-		GinkgoHelper()
-		Expect(err).NotTo(HaveOccurred())
+	var err error
+	switch o := o.(type) {
+	case *corev1.ServiceAccount:
+		_, err = c.CoreV1().ServiceAccounts(namespace).Create(ctx, o, metav1.CreateOptions{})
+	case *corev1.ConfigMap:
+		_, err = c.CoreV1().ConfigMaps(namespace).Create(ctx, o, metav1.CreateOptions{})
+	case *corev1.Secret:
+		_, err = c.CoreV1().Secrets(namespace).Create(ctx, o, metav1.CreateOptions{})
+	case *rbacv1.Role:
+		_, err = c.RbacV1().Roles(namespace).Create(ctx, o, metav1.CreateOptions{})
+	case *rbacv1.RoleBinding:
+		_, err = c.RbacV1().RoleBindings(namespace).Create(ctx, o, metav1.CreateOptions{})
+	case *rbacv1.ClusterRole:
+		_, err = c.RbacV1().ClusterRoles().Create(ctx, o, metav1.CreateOptions{})
+	case *rbacv1.ClusterRoleBinding:
+		_, err = c.RbacV1().ClusterRoleBindings().Create(ctx, o, metav1.CreateOptions{})
+	default:
+		return fmt.Errorf("applyObject: %T is not modelled", o)
 	}
-	for _, o := range r.ServiceAcct {
-		_, err := c.CoreV1().ServiceAccounts(namespace).Create(ctx, o, metav1.CreateOptions{})
-		create(err)
-	}
-	for _, o := range r.ConfigMaps {
-		_, err := c.CoreV1().ConfigMaps(namespace).Create(ctx, o, metav1.CreateOptions{})
-		create(err)
-	}
-	for _, o := range r.Secrets {
-		_, err := c.CoreV1().Secrets(namespace).Create(ctx, o, metav1.CreateOptions{})
-		create(err)
-	}
-	for _, o := range r.Roles {
-		_, err := c.RbacV1().Roles(namespace).Create(ctx, o, metav1.CreateOptions{})
-		create(err)
-	}
-	for _, o := range r.RoleBindings {
-		_, err := c.RbacV1().RoleBindings(namespace).Create(ctx, o, metav1.CreateOptions{})
-		create(err)
-	}
-	for _, o := range r.ClusterRoles {
-		_, err := c.RbacV1().ClusterRoles().Create(ctx, o, metav1.CreateOptions{})
-		create(err)
-	}
-	for _, o := range r.CRBindings {
-		_, err := c.RbacV1().ClusterRoleBindings().Create(ctx, o, metav1.CreateOptions{})
-		create(err)
-	}
-}
-
-// provisionDatabaseSecret creates the Secret the operator provides in external mode
-// (postgres.external.secretName): one libpq URI per role, here all the same role, for the
-// Postgres container on the network. The Secret and keys are whatever the rendered containers
-// read DATABASE_URL from.
-func provisionDatabaseSecret(ctx context.Context, cl *cluster, r *rendered) {
-	GinkgoHelper()
-	dsn := fmt.Sprintf("postgres://koinon:%s@postgres:5432/koinon?sslmode=disable", dbSecretPassword)
-	secrets := map[string]map[string]string{}
-	visit := func(ps corev1.PodSpec) {
-		for _, c := range append(slices.Clone(ps.InitContainers), ps.Containers...) {
-			for _, e := range c.Env {
-				if e.Name == "DATABASE_URL" && e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil {
-					ref := e.ValueFrom.SecretKeyRef
-					if secrets[ref.Name] == nil {
-						secrets[ref.Name] = map[string]string{}
-					}
-					secrets[ref.Name][ref.Key] = dsn
-				}
-			}
-		}
-	}
-	for _, j := range r.Jobs {
-		visit(j.Spec.Template.Spec)
-	}
-	for _, d := range r.Deployments {
-		visit(d.Spec.Template.Spec)
-	}
-	Expect(secrets).NotTo(BeEmpty(), "external mode reads DATABASE_URL from a Secret")
-	for name, kv := range secrets {
-		s := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name}, StringData: kv}
-		_, err := cl.Admin.CoreV1().Secrets(namespace).Create(ctx, s, metav1.CreateOptions{})
-		Expect(err).NotTo(HaveOccurred())
-	}
+	return err
 }

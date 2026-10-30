@@ -3,18 +3,21 @@
 package chartsmoke_test
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -30,19 +33,25 @@ var metaGet = metav1.GetOptions{}
 // Docker daemon allows. What it models, from the rendered pod spec: the image (mapped to the
 // locally built one), command and args, env (secretKeyRef, configMapKeyRef, fieldRef and
 // resourceFieldRef resolved against the API server and the pod), the volumes (Secrets and
-// ConfigMaps written to files with their defaultMode, emptyDir as tmpfs, the ServiceAccount
-// token when it is mounted), the in-cluster environment, the memory limit and the container
-// security context (read-only root file system, dropped capabilities, no privilege escalation).
-// What it cannot model: the user and group (the container runs as the user running the test, so
-// that the mounted files are readable: the kubelet's fsGroup does that in a cluster), seccomp
-// profiles beyond Docker's default, NetworkPolicies, Services and probes' restart semantics.
+// ConfigMaps as files with their defaultMode, owned by root and the pod's fsGroup like the
+// kubelet makes them, in Docker volumes; emptyDir as tmpfs; the ServiceAccount token when it is
+// mounted), the in-cluster environment, the user (runAsUser, runAsGroup, fsGroup and
+// supplementalGroups), the memory limit and the container security context (read-only root
+// file system, dropped capabilities, no privilege escalation). Anything else in the spec that
+// the runner does not understand (envFrom, subPath, other volume sources, other fieldRefs)
+// panics, so that a chart change cannot slip past unmodelled.
+// What it cannot model: seccomp profiles beyond Docker's default, NetworkPolicies, Services and
+// the restart semantics of probes.
 type runner struct {
 	cl     *cluster
 	nwName string
 	images map[string]string
-	tmp    string
-	// started are the containers to remove when the spec group ends.
-	started []testcontainers.Container
+	docker *testcontainers.DockerClient
+	// helperImage is a local image with a shell, for populating volumes.
+	helperImage string
+	// started are the containers, and volumes the Docker volumes, to remove when the spec group ends.
+	started       []testcontainers.Container
+	dockerVolumes []string
 }
 
 // workload is a started container.
@@ -53,28 +62,43 @@ type workload struct {
 	Pod  corev1.PodSpec
 }
 
-// start creates the container of pod spec ps and starts it. With wait set it returns once the
+// start creates the container of pod spec ps and starts it. With exitWait set it returns once the
 // container has exited (a Job); otherwise as soon as it runs.
 func (r *runner) start(ctx context.Context, owner string, ps corev1.PodSpec, c corev1.Container, exitWait time.Duration) *workload {
 	ref := r.imageFor(c.Image)
+	if len(c.EnvFrom) > 0 {
+		panic(fmt.Sprintf("%s/%s: envFrom is not modelled; add it to runner.env", owner, c.Name))
+	}
+	// The pod cannot be created without its ServiceAccount (the kubelet would not start it).
+	sa := ps.ServiceAccountName
+	if sa == "" {
+		sa = "default"
+	}
+	if _, err := r.cl.Admin.CoreV1().ServiceAccounts(namespace).Get(ctx, sa, metaGet); err != nil {
+		panic(fmt.Sprintf("%s: ServiceAccount %q does not exist when the pod starts: %v", owner, sa, err))
+	}
 	vars, envList := r.env(ctx, owner, ps, c)
 	args := make([]string, 0, len(c.Args))
 	for _, a := range c.Args {
 		args = append(args, expand(a, vars))
 	}
-	binds, tmpfs := r.volumes(ctx, owner, ps, c)
+	mounts, tmpfs := r.volumes(ctx, owner, ps, c)
+	user, groups := runAs(ps, c)
 
 	opts := []testcontainers.ContainerCustomizer{
 		testcontainers.WithEnv(envList),
 		testcontainers.WithCmd(args...),
 		testcontainers.WithName(fmt.Sprintf("chartsmoke-%s-%s-%d", owner, c.Name, time.Now().UnixNano()%1_000_000)),
 		testcontainers.WithConfigModifier(func(cfg *container.Config) {
-			cfg.User = fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+			if user != "" {
+				cfg.User = user
+			}
 		}),
 		network.WithNetworkName([]string{owner}, r.nwName),
+		testcontainers.WithMounts(mounts...),
 		testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
-			hc.Binds = binds
 			hc.Tmpfs = tmpfs
+			hc.GroupAdd = groups
 			hc.ExtraHosts = append(hc.ExtraHosts, apiServerName+":host-gateway")
 			if sc := c.SecurityContext; sc != nil {
 				if sc.ReadOnlyRootFilesystem != nil && *sc.ReadOnlyRootFilesystem {
@@ -116,6 +140,40 @@ func (r *runner) start(ctx context.Context, owner string, ps corev1.PodSpec, c c
 		panic(fmt.Sprintf("start %s: %v\n%s", w.Name, err, w.Logs(ctx)))
 	}
 	return w
+}
+
+// runAs is the container's user ("uid" or "uid:gid", empty for the image's) and supplementary
+// groups: the pod's fsGroup and supplementalGroups, as the kubelet adds them.
+func runAs(ps corev1.PodSpec, c corev1.Container) (string, []string) {
+	var uid, gid *int64
+	if psc := ps.SecurityContext; psc != nil {
+		uid, gid = psc.RunAsUser, psc.RunAsGroup
+	}
+	if sc := c.SecurityContext; sc != nil {
+		if sc.RunAsUser != nil {
+			uid = sc.RunAsUser
+		}
+		if sc.RunAsGroup != nil {
+			gid = sc.RunAsGroup
+		}
+	}
+	user := ""
+	if uid != nil {
+		user = strconv.FormatInt(*uid, 10)
+		if gid != nil {
+			user += ":" + strconv.FormatInt(*gid, 10)
+		}
+	}
+	var groups []string
+	if psc := ps.SecurityContext; psc != nil {
+		if psc.FSGroup != nil {
+			groups = append(groups, strconv.FormatInt(*psc.FSGroup, 10))
+		}
+		for _, g := range psc.SupplementalGroups {
+			groups = append(groups, strconv.FormatInt(g, 10))
+		}
+	}
+	return user, groups
 }
 
 // imageFor maps a rendered Koinon image reference to the locally built image. Any other
@@ -187,7 +245,13 @@ func (w *workload) ProbeHTTP(ctx context.Context, pr *corev1.Probe, deadline tim
 	if err != nil {
 		return fmt.Sprintf("port %d is not published: %v", n, err)
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%s%s", mapped.Port(), h.Path)
+	scheme := "http"
+	if h.Scheme == corev1.URISchemeHTTPS {
+		scheme = "https"
+	}
+	url := fmt.Sprintf("%s://127.0.0.1:%s%s", scheme, mapped.Port(), h.Path)
+	// The kubelet does not verify a probe's certificate.
+	httpClient := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 	last := "no answer yet"
 	stop := time.Now().Add(deadline)
 	for time.Now().Before(stop) {
@@ -195,7 +259,14 @@ func (w *workload) ProbeHTTP(ctx context.Context, pr *corev1.Probe, deadline tim
 			return fmt.Sprintf("the container exited with code %d before %s answered", w.ExitCode(ctx), url)
 		}
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+		for _, hd := range h.HTTPHeaders {
+			if strings.EqualFold(hd.Name, "Host") {
+				req.Host = hd.Value
+			} else {
+				req.Header.Set(hd.Name, hd.Value)
+			}
+		}
+		resp, err := httpClient.Do(req)
 		if err == nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
@@ -324,21 +395,27 @@ func expand(s string, vars map[string]string) string {
 	return b.String()
 }
 
-// volumes materialises the container's volumeMounts: bind mounts of files written under r.tmp
-// and tmpfs mounts.
-func (r *runner) volumes(ctx context.Context, owner string, ps corev1.PodSpec, c corev1.Container) (binds []string, tmpfs map[string]string) {
+// volumes materialises the container's volumeMounts: Docker volumes filled with the files, and
+// tmpfs mounts for emptyDir.
+func (r *runner) volumes(ctx context.Context, owner string, ps corev1.PodSpec, c corev1.Container) (mounts testcontainers.ContainerMounts, tmpfs map[string]string) {
 	tmpfs = map[string]string{}
 	byName := map[string]corev1.Volume{}
 	for _, v := range ps.Volumes {
 		byName[v.Name] = v
 	}
-	podDir := filepath.Join(r.tmp, fmt.Sprintf("%s-%s-%d", owner, c.Name, time.Now().UnixNano()))
+	var fsGroup int
+	if ps.SecurityContext != nil && ps.SecurityContext.FSGroup != nil {
+		fsGroup = int(*ps.SecurityContext.FSGroup)
+	}
 	for _, m := range c.VolumeMounts {
 		v, ok := byName[m.Name]
 		if !ok {
 			panic(fmt.Sprintf("%s: volumeMount %q has no volume", owner, m.Name))
 		}
-		src := filepath.Join(podDir, m.Name)
+		if m.SubPath != "" || m.SubPathExpr != "" {
+			panic(fmt.Sprintf("%s: volumeMount %q uses subPath, which is not modelled", owner, m.Name))
+		}
+		var files map[string]volumeFile
 		switch {
 		case v.EmptyDir != nil:
 			opt := "rw,mode=1777"
@@ -356,7 +433,7 @@ func (r *runner) volumes(ctx context.Context, owner string, ps corev1.PodSpec, c
 			} else if s.Optional == nil || !*s.Optional {
 				panic(fmt.Sprintf("%s: Secret %s (volume %s) does not exist and is not optional; the pod would not start", owner, s.SecretName, v.Name))
 			}
-			writeVolume(src, data, s.Items, s.DefaultMode)
+			files = volumeFiles(data, s.Items, s.DefaultMode)
 		case v.ConfigMap != nil:
 			cm, err := r.cl.Admin.CoreV1().ConfigMaps(namespace).Get(ctx, v.ConfigMap.Name, metaGet)
 			data := map[string][]byte{}
@@ -370,61 +447,47 @@ func (r *runner) volumes(ctx context.Context, owner string, ps corev1.PodSpec, c
 			} else if v.ConfigMap.Optional == nil || !*v.ConfigMap.Optional {
 				panic(fmt.Sprintf("%s: ConfigMap %s (volume %s): %v; the pod would not start", owner, v.ConfigMap.Name, v.Name, err))
 			}
-			writeVolume(src, data, v.ConfigMap.Items, v.ConfigMap.DefaultMode)
+			files = volumeFiles(data, v.ConfigMap.Items, v.ConfigMap.DefaultMode)
 		default:
 			panic(fmt.Sprintf("%s: volume %s has a source this suite does not model; add it to runner.volumes", owner, v.Name))
 		}
-		hostPath := src
-		if m.SubPath != "" {
-			hostPath = filepath.Join(src, m.SubPath)
-		}
-		mode := "rw"
-		if m.ReadOnly {
-			mode = "ro"
-		}
-		binds = append(binds, fmt.Sprintf("%s:%s:%s", hostPath, m.MountPath, mode))
+		mounts = append(mounts, r.fileVolume(ctx, files, fsGroup, m.MountPath, m.ReadOnly))
 	}
 
 	if ps.AutomountServiceAccountToken == nil || *ps.AutomountServiceAccountToken {
-		dir := filepath.Join(podDir, "serviceaccount")
-		writeVolume(dir, map[string][]byte{
-			"token":     []byte(r.cl.Token(ctx, ps.ServiceAccountName)),
-			"ca.crt":    r.cl.CACert,
-			"namespace": []byte(namespace),
-		}, nil, nil)
-		binds = append(binds, dir+":/var/run/secrets/kubernetes.io/serviceaccount:ro")
+		sa := ps.ServiceAccountName
+		if sa == "" {
+			sa = "default"
+		}
+		files := map[string]volumeFile{
+			"token":     {[]byte(r.cl.Token(ctx, sa)), 0o644},
+			"ca.crt":    {r.cl.CACert, 0o644},
+			"namespace": {[]byte(namespace), 0o644},
+		}
+		mounts = append(mounts, r.fileVolume(ctx, files, fsGroup, "/var/run/secrets/kubernetes.io/serviceaccount", true))
 	}
-	sort.Strings(binds)
-	return binds, tmpfs
+	return mounts, tmpfs
 }
 
-// writeVolume writes a Secret's or ConfigMap's keys as files in dir, with defaultMode (0644
-// when unset). With items only the listed keys are projected, at their paths.
-func writeVolume(dir string, data map[string][]byte, items []corev1.KeyToPath, defaultMode *int32) {
-	mode := os.FileMode(0o644)
+// volumeFile is a file of a projected volume.
+type volumeFile struct {
+	data []byte
+	mode int64
+}
+
+// volumeFiles are a Secret's or ConfigMap's keys as files, with defaultMode (0644 when unset).
+// With items only the listed keys are projected, at their paths.
+func volumeFiles(data map[string][]byte, items []corev1.KeyToPath, defaultMode *int32) map[string]volumeFile {
+	mode := int64(0o644)
 	if defaultMode != nil {
-		mode = os.FileMode(*defaultMode)
+		mode = int64(*defaultMode)
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		panic(err)
-	}
-	write := func(path string, b []byte, m os.FileMode) {
-		p := filepath.Join(dir, path)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			panic(err)
-		}
-		if err := os.WriteFile(p, b, m); err != nil {
-			panic(err)
-		}
-		if err := os.Chmod(p, m); err != nil { // not subject to the umask
-			panic(err)
-		}
-	}
+	files := map[string]volumeFile{}
 	if len(items) == 0 {
 		for k, b := range data {
-			write(k, b, mode)
+			files[k] = volumeFile{b, mode}
 		}
-		return
+		return files
 	}
 	for _, it := range items {
 		b, ok := data[it.Key]
@@ -433,15 +496,66 @@ func writeVolume(dir string, data map[string][]byte, items []corev1.KeyToPath, d
 		}
 		m := mode
 		if it.Mode != nil {
-			m = os.FileMode(*it.Mode)
+			m = int64(*it.Mode)
 		}
-		write(it.Path, b, m)
+		files[it.Path] = volumeFile{b, m}
+	}
+	return files
+}
+
+// fileVolume creates a Docker volume holding the files, owned by root and group fsGroup as the
+// kubelet leaves a volume of a pod with an fsGroup (root and group 0 without one), and returns
+// its mount. Docker writes into a volume through a container, so a helper container that is
+// never started has the volume mounted while the files are copied in with their owners.
+func (r *runner) fileVolume(ctx context.Context, files map[string]volumeFile, fsGroup int, target string, readOnly bool) testcontainers.ContainerMount {
+	name := fmt.Sprintf("chartsmoke-%d", time.Now().UnixNano())
+	r.dockerVolumes = append(r.dockerVolumes, name)
+	helper, err := testcontainers.Run(ctx, r.helperImage,
+		testcontainers.WithNoStart(),
+		testcontainers.WithMounts(testcontainers.VolumeMount(name, "/vol")))
+	if helper != nil {
+		defer func() { _ = testcontainers.TerminateContainer(helper) }()
+	}
+	if err != nil {
+		panic(fmt.Sprintf("create the helper container for volume %s: %v", name, err))
+	}
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	dirs := map[string]bool{}
+	for _, p := range paths {
+		for d := path.Dir(p); d != "." && !dirs[d]; d = path.Dir(d) {
+			dirs[d] = true
+			must(tw.WriteHeader(&tar.Header{Typeflag: tar.TypeDir, Name: "vol/" + d + "/", Mode: 0o755, Gid: fsGroup}))
+		}
+		f := files[p]
+		must(tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: "vol/" + p, Mode: f.mode, Size: int64(len(f.data)), Gid: fsGroup}))
+		_, err := tw.Write(f.data)
+		must(err)
+	}
+	must(tw.Close())
+	if _, err := r.docker.CopyToContainer(ctx, helper.GetContainerID(), client.CopyToContainerOptions{DestinationPath: "/", Content: &buf}); err != nil {
+		panic(fmt.Sprintf("fill volume %s: %v", name, err))
+	}
+	return testcontainers.ContainerMount{Source: testcontainers.GenericVolumeMountSource{Name: name}, Target: testcontainers.ContainerMountTarget(target), ReadOnly: readOnly}
+}
+
+func must(err error) {
+	if err != nil {
+		panic(err)
 	}
 }
 
-// Close removes every container the runner started.
+// Close removes every container and Docker volume the runner created.
 func (r *runner) Close() {
 	for _, c := range r.started {
 		_ = testcontainers.TerminateContainer(c)
+	}
+	for _, v := range r.dockerVolumes {
+		_, _ = r.docker.VolumeRemove(context.Background(), v, client.VolumeRemoveOptions{Force: true})
 	}
 }

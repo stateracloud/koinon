@@ -2,6 +2,7 @@
 # Home checkpoints on (HC1): kubeconform and the duplicate-entry check see the extra volume, mount
 # and env of koinon-agentd. No client TLS Secret: the mesh provides mTLS (openshell.insecure).
 openshell:
+  address: openshell.openshell.svc:8080
   insecure: true
 gateway:
   mode: kubernetes

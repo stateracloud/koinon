@@ -11,16 +11,24 @@
 //     volumes and mounts, against a Postgres container and an envtest API server that enforces
 //     the chart's RBAC (see runner for what is and is not modelled).
 //
-// Covered: every ci values file with postgres.mode=external (external-kubernetes and
-// external-standalone: both gateway modes). The cnpg files are not run: their DATABASE_URL is
-// sslmode=verify-full against the CNPG cluster's CA, so a Postgres container would need a CA and
-// a server certificate of its own to test the TLS set-up, not the startup contract; the Koinon
-// containers' args, env and mounts come from the same templates in both. Not run either:
-// koinon-gateway (agentgateway, third-party). koinon-preflight inspects the platform (Agent
-// Sandbox, OpenShell, Kata, the gateway controller) that envtest does not have, so it must run
-// its checks and report (it fails them), without a flag error or a Forbidden answer. The
-// reconciler and agentd get an OpenShell address that nothing listens on: they need to start and
-// serve their probes, not to talk to a gateway (see smokeValues).
+// Covered: every charts/koinon/ci values file, with the database overridden to external (the
+// cnpg files' DATABASE_URL is sslmode=verify-full against the CNPG cluster's CA; a Postgres
+// container with a CA of its own would test that TLS set-up, not the startup contract, and the
+// rest of the pod specs does not depend on the database mode). The operator-supplied Secrets the
+// pods reference (database URIs, the OpenShell client certificate, OIDC client secret, existing
+// KEK, bootstrap-admin and OTLP token Secrets, the checkpoints' S3 credentials) are created with
+// fake data, so the mounts and keys they reach start for real. Helm's order is modelled: pre-install
+// hooks by weight, then the other objects, then the Deployments. Not run: koinon-gateway
+// (agentgateway, third-party). koinon-preflight inspects the platform (Agent Sandbox, OpenShell,
+// Kata, the gateway controller) that envtest does not have, so it must run its checks and report
+// (it fails them), without a flag error or a Forbidden answer. The reconciler and agentd get an
+// OpenShell address that nothing listens on: they need to start and serve their probes, not to talk
+// to a gateway. After their probes answer, the Deployments run for a few more seconds and must
+// still be running and free of "forbidden" in their logs (RBAC rules the chart lacks fail there).
+//
+// The envtest API server listens on all interfaces, because the containers reach the host through
+// host-gateway, which on Docker Desktop and OrbStack is not an address of a host interface. It is
+// short-lived and only answers authenticated requests (RBAC).
 //
 // What it proves, for example: reverting the migrateOnly check in cmd/koinon-api/main.go (#285)
 // makes "runs the migrate Job to completion" fail with "--otlp-token-dir is required with
@@ -34,6 +42,7 @@ package chartsmoke_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
@@ -58,8 +67,9 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 		Skip("Docker is not available")
 	}
 	images = buildImages(ctx, "../..")
+	DeferCleanup(func(ctx context.Context) { removeImages(ctx, images) })
 	Expect(images).To(HaveLen(len(koinonImages)))
-}, NodeTimeout(10*60*1e9))
+}, NodeTimeout(10*time.Minute))
 
 func dockerAvailable(ctx context.Context) bool {
 	p, err := testcontainers.NewDockerProvider()

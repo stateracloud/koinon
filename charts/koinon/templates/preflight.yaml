@@ -181,7 +181,7 @@ spec:
             - --agentgateway-namespace={{ .Values.preflight.agentgateway.namespace }}
             - --agentgateway-controller={{ .Values.preflight.agentgateway.controller }}
             - --runtime-class={{ .Values.openshell.runtimeClassName }}
-            - --openshell-address={{ .Values.openshell.address }}
+            - --openshell-address={{ include "koinon.openshellAddress" . }}
             {{- if .Values.openshell.clientTLSSecret }}
             - --openshell-tls-dir=/etc/koinon/openshell-tls
             {{- end }}

@@ -41,7 +41,7 @@ func buildImages(ctx context.Context, root string) map[string]string {
 	tags := map[string]string{}
 	for _, name := range koinonImages {
 		bin := filepath.Join(tmp, name)
-		build := exec.CommandContext(ctx, "go", "build", "-trimpath", "-ldflags=-s -w", "-o", bin, "./cmd/"+name)
+		build := exec.CommandContext(ctx, "go", "build", "-trimpath", "-buildvcs=false", "-ldflags=-s -w", "-o", bin, "./cmd/"+name)
 		build.Dir = root
 		build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+arch)
 		if out, err := build.CombinedOutput(); err != nil {
@@ -73,6 +73,14 @@ func buildImages(ctx context.Context, root string) map[string]string {
 		tags[name] = tag
 	}
 	return tags
+}
+
+// removeImages removes the images buildImages made. An image another run is using stays (docker
+// refuses), which is fine: that run removes it.
+func removeImages(ctx context.Context, tags map[string]string) {
+	for _, tag := range tags {
+		_ = exec.CommandContext(ctx, "docker", "rmi", tag).Run()
+	}
 }
 
 // dockerArch is the Go architecture name of the Docker daemon (a Linux VM on a Mac).

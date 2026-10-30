@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -33,13 +34,16 @@ const apiServerName = "kubernetes.default.svc"
 // cluster is an envtest API server that containers on the Docker network can reach, with RBAC
 // enforced (envtest's default) and the serving certificate valid for apiServerName.
 type cluster struct {
-	env    *envtest.Environment
+	env *envtest.Environment
+	// dir holds the serving certificates, which envtest does not remove when it did not create them.
+	dir    string
 	Admin  *kubernetes.Clientset
 	Port   string
 	CACert []byte
 }
 
-// startCluster starts the API server on all interfaces. envtest's own serving certificate names
+// startCluster (call it from a spec setup node; it registers its own cleanup, before anything
+// that can leave processes behind) starts the API server on all interfaces. envtest's own serving certificate names
 // only localhost, so the suite generates the one the pods verify: envtest uses the certificates
 // it finds in CertDir.
 func startCluster() *cluster {
@@ -47,6 +51,8 @@ func startCluster() *cluster {
 	if err != nil {
 		panic(err)
 	}
+	c := &cluster{dir: dir}
+	DeferCleanup(c.Stop)
 	caPEM := writeAPIServerCerts(dir)
 
 	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
@@ -57,6 +63,7 @@ func startCluster() *cluster {
 	_ = l.Close()
 
 	env := &envtest.Environment{}
+	c.env = env
 	api := env.ControlPlane.GetAPIServer()
 	api.CertDir = dir
 	api.Address = "0.0.0.0"
@@ -68,11 +75,15 @@ func startCluster() *cluster {
 	}
 	cfg.Host = "https://127.0.0.1:" + port
 	cfg.TLSClientConfig = rest.TLSClientConfig{CAData: caPEM, CertData: cfg.CertData, KeyData: cfg.KeyData}
-	return &cluster{env: env, Admin: kubernetes.NewForConfigOrDie(cfg), Port: port, CACert: caPEM}
+	c.Admin, c.Port, c.CACert = kubernetes.NewForConfigOrDie(cfg), port, caPEM
+	return c
 }
 
 func (c *cluster) Stop() {
-	_ = c.env.Stop()
+	if c.env != nil {
+		_ = c.env.Stop()
+	}
+	_ = os.RemoveAll(c.dir)
 }
 
 // Token is a ServiceAccount token as the kubelet would project it into a pod.

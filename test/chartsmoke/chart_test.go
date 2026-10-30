@@ -15,6 +15,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/yaml"
 )
@@ -27,26 +28,12 @@ const (
 
 // rendered is what `helm template` produced for one values file, sorted by kind.
 type rendered struct {
-	Jobs         []*batchv1.Job
-	Deployments  []*appsv1.Deployment
-	ConfigMaps   []*corev1.ConfigMap
-	Secrets      []*corev1.Secret
-	ServiceAcct  []*corev1.ServiceAccount
-	Roles        []*rbacv1.Role
-	RoleBindings []*rbacv1.RoleBinding
-	ClusterRoles []*rbacv1.ClusterRole
-	CRBindings   []*rbacv1.ClusterRoleBinding
+	Jobs        []*batchv1.Job
+	Deployments []*appsv1.Deployment
+	// Objects are the ServiceAccounts, Secrets, ConfigMaps and RBAC objects, in render order.
+	Objects []runtime.Object
 	// Ignored lists the kinds the smoke test does not apply (policies, Services, ...).
 	Ignored map[string]int
-}
-
-func (r *rendered) job(name string) *batchv1.Job {
-	for _, j := range r.Jobs {
-		if j.Name == name {
-			return j
-		}
-	}
-	return nil
 }
 
 func (r *rendered) deployment(name string) *appsv1.Deployment {
@@ -58,25 +45,28 @@ func (r *rendered) deployment(name string) *appsv1.Deployment {
 	return nil
 }
 
-// smokeValues are the operator inputs the CI values files leave open because rendering does not
-// need them, and the two preflight probes that create pods (envtest has no kubelet to run them).
-var smokeValues = []string{
-	// The reconciler and agentd refuse to start without an OpenShell address. Nothing listens
-	// there: the components must get past their configuration, not talk to a gateway.
-	"--set", "openshell.address=openshell.openshell.svc.cluster.local:8080",
+// externalDatabase turns any values file into one with an external database (and no pod probes in the preflight): the components'
+// DATABASE_URL then comes from a Secret that this suite fills with a URI for its Postgres
+// container. (The cnpg URIs use sslmode=verify-full against the CNPG cluster's CA; a Postgres
+// with a CA of its own would test that TLS set-up, not the chart's startup contract, and the
+// rest of the pod specs does not depend on the database mode.)
+var externalDatabase = []string{
+	"--set", "postgres.mode=external",
+	"--set", "postgres.external.secretName=koinon-db",
+	// The preflight's two probes create pods and wait for them to run; envtest has no kubelet.
 	"--set", "preflight.seccompProbe.enabled=false",
 	"--set", "preflight.networkPolicyProbe.enabled=false",
 }
 
-// helmRender renders the chart exactly as chart-check.sh and the install do: release and
-// namespace "koinon", the values file as given.
+// helmRender renders the chart as chart-check.sh and the install do: release and namespace
+// "koinon", the values file as given, with the database overridden to external.
 func helmRender(ctx context.Context, valuesFile string) *rendered {
 	helm, err := exec.LookPath(envOr("HELM", "helm"))
 	if err != nil {
 		panic(fmt.Sprintf("helm is required to render the chart (set HELM): %v", err))
 	}
 	var out, stderr bytes.Buffer
-	args := append([]string{"template", release, chartDir, "--namespace", namespace, "-f", valuesFile}, smokeValues...)
+	args := append([]string{"template", release, chartDir, "--namespace", namespace, "-f", valuesFile}, externalDatabase...)
 	cmd := exec.CommandContext(ctx, helm, args...)
 	cmd.Stdout, cmd.Stderr = &out, &stderr
 	if err := cmd.Run(); err != nil {
@@ -101,20 +91,9 @@ func helmRender(ctx context.Context, valuesFile string) *rendered {
 			r.Jobs = append(r.Jobs, o)
 		case *appsv1.Deployment:
 			r.Deployments = append(r.Deployments, o)
-		case *corev1.ConfigMap:
-			r.ConfigMaps = append(r.ConfigMaps, o)
-		case *corev1.Secret:
-			r.Secrets = append(r.Secrets, o)
-		case *corev1.ServiceAccount:
-			r.ServiceAcct = append(r.ServiceAcct, o)
-		case *rbacv1.Role:
-			r.Roles = append(r.Roles, o)
-		case *rbacv1.RoleBinding:
-			r.RoleBindings = append(r.RoleBindings, o)
-		case *rbacv1.ClusterRole:
-			r.ClusterRoles = append(r.ClusterRoles, o)
-		case *rbacv1.ClusterRoleBinding:
-			r.CRBindings = append(r.CRBindings, o)
+		case *corev1.ConfigMap, *corev1.Secret, *corev1.ServiceAccount, *rbacv1.Role, *rbacv1.RoleBinding,
+			*rbacv1.ClusterRole, *rbacv1.ClusterRoleBinding:
+			r.Objects = append(r.Objects, obj)
 		default:
 			r.Ignored[gvk.Kind]++
 		}
@@ -146,22 +125,4 @@ func valuesFiles() []string {
 		panic(fmt.Sprintf("no values files in %s/ci: %v", chartDir, err))
 	}
 	return files
-}
-
-// postgresMode is postgres.mode as the values file sets it (the chart's default is cnpg).
-func postgresMode(valuesFile string) string {
-	b, err := os.ReadFile(valuesFile)
-	if err != nil {
-		panic(err)
-	}
-	var v struct {
-		Postgres struct{ Mode string } `json:"postgres"`
-	}
-	if err := yaml.Unmarshal(b, &v); err != nil {
-		panic(fmt.Sprintf("%s: %v", valuesFile, err))
-	}
-	if v.Postgres.Mode == "" {
-		return "cnpg"
-	}
-	return v.Postgres.Mode
 }

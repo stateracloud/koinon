@@ -407,6 +407,14 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
   value: {{ .Values.github.apiUrl | default "https://api.github.com" | quote }}
 {{- end }}
 
+{{/*
+The OpenShell gateway's host:port. The reconciler and agentd refuse to start without it, so the
+chart refuses to render without it (the install would otherwise end in crash-looping pods).
+*/}}
+{{- define "koinon.openshellAddress" -}}
+{{- required "openshell.address is required: set it to the OpenShell gateway's host:port, for example openshell.openshell.svc:8080" .Values.openshell.address -}}
+{{- end }}
+
 {{/* OpenShell client certificate for components that call the OpenShell gateway. */}}
 {{- define "koinon.openshellVolumeMount" -}}
 {{- if .Values.openshell.clientTLSSecret -}}
@@ -674,7 +682,7 @@ it carries no credentials.
     fieldRef:
       fieldPath: metadata.name
 - name: KOINON_OPENSHELL_ADDRESS
-  value: {{ .Values.openshell.address | quote }}
+  value: {{ include "koinon.openshellAddress" . | quote }}
 {{- if .Values.openshell.clientTLSSecret }}
 - name: KOINON_OPENSHELL_TLS_DIR
   value: /etc/koinon/openshell-tls
