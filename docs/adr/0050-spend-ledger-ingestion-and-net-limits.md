@@ -178,7 +178,16 @@ koinon-agentd as well as the gateway.
   (`missing` or `invalid`) counts them. The token is never logged. Without `--otlp-token-dir` the
   receiver does not start (`--otlp-addr=` turns it off).
 - **Rotation** accepts two tokens: the Secret's optional `previous` key is accepted next to `token`, and the
-  files are re-read every few seconds. See `docs/ops/secret-keys.md`.
+  files are re-read every few seconds. `token` and `previous` are validated apart: a blank or invalid
+  `previous` is ignored (and logged without its value) and never blocks a new `token`. agentgateway
+  watches its token file and reloads it, so a rotation needs no restart anywhere; the gateway carries the
+  new token after the kubelet sync plus the reload. See `docs/ops/secret-keys.md`.
+- **Upgrade gap.** On the first upgrade to a chart with this token the new koinon-api enforces it as soon as
+  its pod is ready, while the running gateway still exports without it until the reconciler renders the
+  new config (standalone) or the controller applies the new policy (kubernetes). agentgateway does not retry
+  a 401, so the access-log records in that window are lost and their spend is not in the ledger. A
+  rotation that revokes `previous` early has the same effect. No grace period is built: it would be a
+  mode in which the listener is open.
 
 ## Open questions
 
