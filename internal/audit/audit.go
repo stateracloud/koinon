@@ -96,6 +96,8 @@ var allowed = map[string]bool{
 	"haskey": true, "keyfingerprint": true, "tokenid": true, "parenttokenid": true, "revokedtokenids": true, "tokenprefix": true, "secretname": true, "managedbysecret": true,
 	// MCP servers (plan item MC1): whether a credential is set, the name of its header, that it changed.
 	"hascredential": true, "credentialheader": true, "credentialchanged": true,
+	// Trace destinations (ADR 0074): the names of the secret fields that are set, never their values.
+	"secretfields": true,
 }
 
 func looksSecret(name string) bool {

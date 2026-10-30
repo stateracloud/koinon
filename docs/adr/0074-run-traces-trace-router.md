@@ -432,6 +432,30 @@ on an LLM route, held for the whole stream; ADR 0056 amendment 2026-10-29, point
 3. **Any future trace field that wants a body** must be weighed against that cost first; the
    per-response buffering is what a per-field status guard cannot avoid.
 
+## Amendment (2026-10-30): the destinations API and its defaults (rc.9)
+
+The foundation slice (schema, service layer, `TraceDestinationService`) fixes what decisions 6, 8 and 9
+left open.
+
+1. **The platform destination and ceiling are Connect calls, not `/admin/v1`.** Admin API tokens are
+   org-scoped (ADR 0056), so no token can act as a platform admin, and the platform ceiling for budgets
+   is a platform-admin call in the UI for the same reason. `TraceDestinationService` carries
+   `GetPlatform`, `SetPlatformDestination`, `DeletePlatformDestination`, `TestPlatformDestination` and
+   `SetPlatformCeiling`, for platform admins. `GET/PUT /admin/v1/trace-destinations` is not built; an
+   org-scoped REST face for an org's own destinations can be added on the same service layer.
+2. **Credentials.** A destination's secrets are one envelope (`trace_destinations.credentials`, bound to
+   org, table, row and column), a JSON object of the preset's secret fields or, for `generic`, header
+   name to value. The names of the fields that are set are stored in the clear (`secret_fields`) so the UI
+   can show them; values are never returned or audited.
+3. **The ceiling defaults to `full`** (no restriction until a platform admin lowers it). The owner-only
+   rule for `full` still applies. An org without a settings row has level `none`, every run sampled, and
+   nothing extra for the platform.
+4. **Audit.** The log has no org-less events (ADR 0023), so a change to the platform destination or
+   ceiling is recorded in the platform admin's personal org, and each org lowered by a new ceiling gets its
+   own `trace.settings.lowered` event.
+5. **Run tracing state.** `runs.traced` is NULL until agentd decides at claim and then never changes.
+   `run_turns` holds one row per turn with its `seq` and `trace_id`.
+
 ## Links
 
 - [0023](0023-observability-and-audit.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md),

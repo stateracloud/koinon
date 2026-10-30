@@ -87,6 +87,7 @@ import (
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/internal/triggers/schedule"
 	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
@@ -579,9 +580,14 @@ func run() error {
 	} else {
 		echo = modelcheck.New(pool, nil, prices.NewResolver(pricing.Embedded()))
 	}
+	// Run-trace destinations (ADR 0074). The client dials only what the egress policy allows.
+	traceSvc, err := tracedest.New(pool, catalogKeys, urlPolicy, slog.Default())
+	if err != nil {
+		return err
+	}
 	svc := services.New(pool, services.Options{
-		ModelCheck: echo,
-		Hub:        hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
+		ModelCheck: echo, Traces: traceSvc,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
 	// The notification of an opened question (the park that opens it commits in koinon-agentd).
 	safego.GoOrStop(bgCtx, slog.Default(), "question-sweeper", stop, func(ctx context.Context) { svc.QuestionSweeper(ctx, cfg.sweepInterval) })
