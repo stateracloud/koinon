@@ -24,7 +24,6 @@ const MinSecretLen = 8
 type Secrets struct {
 	nodes []acNode
 	count int
-	max   int // length of the longest pattern
 }
 
 type acEdge struct {
@@ -35,6 +34,7 @@ type acEdge struct {
 type acNode struct {
 	edges []acEdge // sorted by b
 	fail  int
+	depth int // length of the path from the root: the pattern prefix this node stands for
 	// out is the length of the longest pattern that ends at this node, directly or through
 	// the failure chain; 0 when none does.
 	out int
@@ -105,9 +105,6 @@ func NewSecrets(values ...string) *Secrets {
 		s.nodes[cur].out = len(p)
 	}
 	s.count = len(patterns)
-	for _, p := range patterns {
-		s.max = max(s.max, len(p))
-	}
 	s.link()
 	return s
 }
@@ -135,7 +132,7 @@ func (s *Secrets) child(n int, b byte, create bool) int {
 	if !create {
 		return -1
 	}
-	s.nodes = append(s.nodes, acNode{})
+	s.nodes = append(s.nodes, acNode{depth: s.nodes[n].depth + 1})
 	id := len(s.nodes) - 1
 	e := s.nodes[n].edges
 	e = append(e, acEdge{})
@@ -275,10 +272,26 @@ func asciiEscape(s string, upper bool) string {
 	return b.String()
 }
 
-// maxLen is the length of the longest pattern; 0 for a nil or empty set.
-func (s *Secrets) maxLen() int {
-	if s == nil {
-		return 0
+// openStart returns where in the text a pattern that is still open at its end began: the start of
+// the longest suffix of in that is a proper prefix of some pattern, or len(in) when there is none.
+// Cutting the text there leaves no fragment of a secret that the cut split.
+func (s *Secrets) openStart(in string) int {
+	if s == nil || s.count == 0 {
+		return len(in)
 	}
-	return s.max
+	cur := 0
+	for i := 0; i < len(in); i++ {
+		b := in[i]
+		for {
+			if c := s.child(cur, b, false); c >= 0 {
+				cur = c
+				break
+			}
+			if cur == 0 {
+				break
+			}
+			cur = s.nodes[cur].fail
+		}
+	}
+	return len(in) - s.nodes[cur].depth
 }

@@ -29,8 +29,6 @@ const (
 	// maxStructuralBytes and maxStructuralFailures bound the search for JSON inside text.
 	maxStructuralBytes    = 1 << 20
 	maxStructuralFailures = 64
-	// minGuard is the least number of bytes dropped from the end of a cut, scrubbed string.
-	minGuard = 512
 	// maxEmbeddedDepth is how many times a JSON document inside a JSON string is unpacked.
 	maxEmbeddedDepth = 3
 	// maxEmbeddedBytes is the largest string that is tried as an embedded JSON document; a longer
@@ -57,6 +55,8 @@ type node struct {
 	keys []string
 	kids []*node // array elements, or object member values
 	size int     // encoded size, set by measure
+	// cap, when positive, is the most bytes of this string that could be shown (see assignBudgets).
+	cap int
 	// dirty is set by measure when this subtree dropped children (extra > 0 somewhere).
 	dirty bool
 	// extra is how many trailing children were dropped before truncation (see bound).
@@ -323,7 +323,7 @@ func replaces(n *node, force Kind) bool {
 		return false
 	}
 	if n.kind == strNode {
-		return n.str != ""
+		return n.str != "" && (force != KindCredential || !notAValue(n.str))
 	}
 	return force != KindCredential && (n.kind == numNode || n.kind == boolNode)
 }
@@ -339,13 +339,23 @@ func (s *Scrubber) scrubNode(n *node, force Kind, embedded int) bool {
 			n.str = s.replaceAll(force)
 			return true
 		}
-		if embedded < maxEmbeddedDepth && len(n.str) <= maxEmbeddedBytes {
-			if out, ok := s.embeddedJSON(n.str, embedded); ok {
+		str := n.str
+		cut := false
+		if lim := s.leafLimit(n); lim > 0 && len(str) > lim {
+			// longer than it could ever be shown: cut first, so the work is bounded. The cut drops
+			// any partial credential at the end rather than leave a fragment of it.
+			str, cut = s.trimTail(cutRunes(str, lim)), true
+		}
+		if !cut && embedded < maxEmbeddedDepth && len(str) <= maxEmbeddedBytes {
+			if out, ok := s.embeddedJSON(str, embedded); ok {
 				n.str = out
 				return true
 			}
 		}
-		out := s.capLeaf(n.str)
+		out := s.Text(str)
+		if cut {
+			out += TruncatedSuffix
+		}
 		changed := out != n.str
 		n.str = out
 		return changed
@@ -406,20 +416,17 @@ func (s *Scrubber) embeddedJSON(str string, embedded int) (string, bool) {
 	return string(sub.appendTo(nil)), true
 }
 
-// capLeaf scrubs a string. One longer than the cap is cut to the cap first, scrubbed, and then
-// the last guard bytes of the result are dropped, because a credential cut in half by the cap
-// would survive as a fragment at the end. A cut string ends with TruncatedSuffix.
-func (s *Scrubber) capLeaf(str string) string {
-	if s.leafCap <= 0 || len(str) <= s.leafCap {
-		return s.Text(str)
-	}
-	out := s.Text(cutRunes(str, s.leafCap))
-	return cutRunes(out, max(0, len(out)-s.guard())) + TruncatedSuffix
-}
+// leafMargin is how much more than its budget a string keeps before scrubbing: scrubbing can
+// shorten text, so the cut is made beyond the budget.
+const leafMargin = 512
 
-// guard is how many trailing bytes of a cut, scrubbed prefix are dropped.
-func (s *Scrubber) guard() int {
-	return max(minGuard, s.secrets.maxLen()+16)
+// leafLimit is the most bytes of a string that are scrubbed: its own budget plus the margin, else
+// the scrubber's general cap, else unlimited (0).
+func (s *Scrubber) leafLimit(n *node) int {
+	if n.cap > 0 {
+		return n.cap + leafMargin
+	}
+	return s.leafCap
 }
 
 // cutRunes returns the longest prefix of s of at most n bytes that ends on a character boundary.
@@ -440,7 +447,7 @@ func headerPair(n *node) Kind {
 		switch strings.ToLower(strings.TrimSpace(k)) {
 		case "name", "key", "header":
 			if n.kids[i].kind == strNode {
-				if kind := headerKind(n.kids[i].str); kind != "" {
+				if kind := nameKind(n.kids[i].str); kind != "" {
 					return kind
 				}
 			}

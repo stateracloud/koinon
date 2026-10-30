@@ -92,7 +92,7 @@ const (
 // Kinds lists every kind, for tests and metric pre-registration.
 var Kinds = []Kind{
 	KindSecret, KindGatewayKey, KindPlaceholder, KindAuthHeader, KindCookie, KindBearer,
-	KindJWT, KindAPIKey, KindEmail, KindPhone, KindIBAN, KindCard, KindToken,
+	KindJWT, KindAPIKey, KindEmail, KindPhone, KindIBAN, KindCard, KindToken, KindPrivateKey, KindCredential,
 }
 
 // Replacement returns the text that replaces a match of kind k.
@@ -197,4 +197,32 @@ func (s *Scrubber) apply(in string, spans []span) string {
 	flush(cur)
 	b.WriteString(in[pos:])
 	return b.String()
+}
+
+// trimTail cuts the end of a text that has itself been cut from something longer, so that no
+// fragment of a credential remains: it drops the run of token characters at the end (a key split
+// by the cut), and the start of any known-secret pattern still open at the end, in the text and in
+// each decoded reading of it (a secret JSON-escaped or percent-encoded is split just the same).
+func (s *Scrubber) trimTail(in string) string {
+	cut := len(in)
+	j := len(in)
+	for j > 0 && tailChar(in[j-1]) {
+		j--
+	}
+	if len(in)-j <= 4096 {
+		cut = j
+	}
+	if s.secrets.Len() > 0 {
+		cut = min(cut, s.secrets.openStart(in))
+		eachView(in, func(v *view) {
+			if st := s.secrets.openStart(v.s); st < len(v.s) {
+				cut = min(cut, v.pos[st])
+			}
+		})
+	}
+	return cutRunes(in, cut)
+}
+
+func tailChar(b byte) bool {
+	return isAlnum(b) || b == '_' || b == '-' || b == '+' || b == '/' || b == '=' || b == '.' || b == '%'
 }
