@@ -50,6 +50,7 @@ import (
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/services"
+	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
 )
@@ -184,6 +185,7 @@ type envOptions struct {
 // env is one API server on its own database.
 type env struct {
 	pool     *pgxpool.Pool
+	traces   *tracedest.Service
 	clock    *clock
 	issuer   *oidctest.Issuer
 	srv      *httptest.Server
@@ -284,8 +286,13 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	if opts.keys != nil {
 		catalogKeys = opts.keys
 	}
+	tracePolicy := catalog.URLPolicy{Namespace: "koinon", AllowedHosts: opts.allowedHosts}
+	traces, err := tracedest.New(e.pool, catalogKeys, tracePolicy, slog.New(slog.NewTextHandler(logOut, nil)))
+	Expect(err).NotTo(HaveOccurred())
+	e.traces = traces
 	rpc := services.New(e.pool, services.Options{
 		Prices:     pricing.Embedded(),
+		Traces:     traces,
 		Catalog:    catalog.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
 		MCP:        mcpservers.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
 		ModelCheck: modelcheck.New(e.pool, opts.modelChat, prices.NewResolver(pricing.Embedded())),
