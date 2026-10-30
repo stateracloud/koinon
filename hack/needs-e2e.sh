@@ -7,6 +7,8 @@
 #   hack/needs-e2e.sh [base]     base defaults to origin/main; the changed files are
 #                                `git diff --name-only $(git merge-base base HEAD) HEAD`
 #   hack/needs-e2e.sh --stdin    read the changed paths from stdin, one per line (tests)
+#   --forced-only                only the FORCED set below (the e2e's own files): what makes a pull
+#                                request run the kind e2e by itself; needs no Go toolchain
 #
 # Needs the Go toolchain (it asks `go list` for the binaries' dependencies).
 # Exit 0 and print the paths that matter when the e2e is needed; exit 1 and print "not needed"
@@ -53,6 +55,7 @@ FORCED=(
   '^\.github/workflows/e2e-kind\.yml$'
   '^flavors/.*\.md$'        # agent prompts and instructions may be Markdown
   '^hack/docs-e1\.sh$'      # run.sh runs the quickstart blocks through it
+  '^hack/flavor-tag\.sh$'    # run.sh names the pulled flavor image with it
   '^docs/site/src/content/docs/quickstart\.md$'
 )
 IGNORED=(
@@ -101,20 +104,33 @@ classify() { # reads paths on stdin; prints the relevant ones
   while IFS= read -r p; do
     [[ -n $p ]] || continue
     if any_match "$p" "${FORCED[@]}"; then echo "$p"; continue; fi
+    [[ $forced_only == 1 ]] && continue
     if any_match "$p" "${IGNORED[@]}"; then continue; fi
     if any_match "$p" "${NEEDED[@]}"; then echo "$p"; continue; fi
     if in_build_graph "$p"; then echo "$p"; fi
   done
 }
 
+forced_only=0 stdin=0 base=origin/main
+for a in "$@"; do
+  case $a in
+  --forced-only) forced_only=1 ;;
+  --stdin) stdin=1 ;;
+  -*) echo "needs-e2e: unknown option $a" >&2; exit 2 ;;
+  *) base=$a ;;
+  esac
+done
+
 cd "$(git rev-parse --show-toplevel)"
-bin_dirs=$(godirs "${BINARIES[@]}") || exit 2
-drv_dirs=$(godirs -test ./test/e2e) || exit 2
-DEPDIRS=$'\n'$bin_dirs$'\n'$drv_dirs$'\n'
-if [[ ${1:-} == --stdin ]]; then
+DEPDIRS=""
+if [[ $forced_only == 0 ]]; then
+  bin_dirs=$(godirs "${BINARIES[@]}") || exit 2
+  drv_dirs=$(godirs -test ./test/e2e) || exit 2
+  DEPDIRS=$'\n'$bin_dirs$'\n'$drv_dirs$'\n'
+fi
+if [[ $stdin == 1 ]]; then
   files=$(cat)
 else
-  base=${1:-origin/main}
   mb=$(git merge-base "$base" HEAD 2>/dev/null) || { echo "needs-e2e: no merge base with $base (fetch it?)" >&2; exit 2; }
   files=$(git diff --name-only --no-renames "$mb" HEAD)
 fi

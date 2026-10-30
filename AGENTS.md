@@ -16,12 +16,19 @@ Instructions for coding agents working on Koinon.
 - Sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`): the escape suite,
   `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./test/escape/ -ginkgo.label-filter=admission`.
 - Migrations: `hack/migrate-lint.sh origin/main` (merged migrations unchanged, numbers contiguous).
-- Kind e2e: `hack/needs-e2e.sh` says whether your change needs it (the rule lives only there; CI's
-  `decide` job runs the same script). If it does, run `hack/e2e-remote.sh` (Andre's testbox) or
-  `hack/e2e-remote.sh --local` before pushing, and paste the timings table in the PR body. Merge only after
-  CI's e2e (the backstop, not required) is green too. Why: #281 (branch naming in githubtools) and
-  #284 (a startup flag the chart's migrate Job lacked) passed every package test and failed only in
-  a full install.
+- Testing layers. Every PR: unit and package tests, the smoke test and the scenarios (`make test`
+  and CI). The kind e2e (`test/e2e`, ~15-25 min) is not per PR: it runs on a PR only when the PR
+  changes the e2e's own files or carries the `e2e` label, and otherwise batched on main (each push
+  that changed something e2e-relevant, one running and the newest pending, plus nightly). Run it on
+  demand for a risky PR: `hack/needs-e2e.sh` says whether your change touches what only a full
+  install observes (the rule lives only there); if yes, run `hack/e2e-remote.sh` (Andre's testbox)
+  or `hack/e2e-remote.sh --local`, paste the timings table in the PR body, or add the `e2e` label.
+  `SUITE_LABEL=smoke` runs steps 1-6 only. The required check is `e2e result` (green when the e2e
+  was skipped). Why: #281 (branch naming in githubtools) and #284 (a startup flag the chart's
+  migrate Job lacked) passed every package test and failed only in a full install.
+- When main's kind e2e goes red, `hack/e2e-bisect.sh` opens an `e2e-regression` issue naming the
+  merge: fix forward within 2 hours, otherwise revert it. RC tags are cut only from a commit with a
+  green kind e2e run.
 - `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
 - Before pushing: `gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" .`. CI scans
   every commit of a pull request, so a leak fixed in a later commit still fails.
