@@ -184,7 +184,7 @@ names: in standalone mode the gateway pods carry `app.kubernetes.io/name=koinon`
 `gateway.networking.k8s.io/gateway-name` matches. Change `networkpolicies.yaml` if yours differ.
 Every container has requests and limits, runs non-root with a read-only root file system, and no pod
 mounts a service account token. The overlays rewrite the image names: `overlays/kind` uses `kind.local/rt1-<name>:dev` and the upstream images
-by digest; `overlays/remote` uses `registry.example.test/koinon/rt1-<name>`, a placeholder you replace when
+by digest; `overlays/remote` uses `registry.example.test/koinon/rt1-<name>` with the tag `dev` (nodes cache it: pin digests or use a new tag after a rebuild), a placeholder you replace when
 you render (`kustomize build overlays/remote | sed "s#registry.example.test/koinon#$REGISTRY/koinon#g"`);
 `overlays/homelab` pins the maintainer's Zot images by digest (its `rt1-fakemodel` digest is still a
 `sha256:TODO` placeholder until the build script's output is pasted in).
