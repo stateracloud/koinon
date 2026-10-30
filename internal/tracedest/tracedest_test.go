@@ -768,6 +768,16 @@ var _ = Describe("Service", func() {
 			Expect(err).NotTo(HaveOccurred())
 			v4, _ := svc.ConfigVersion(ctx, org)
 			Expect(v4).NotTo(Equal(v3), "the platform ceiling")
+
+			_, err = svc.SetPlatformDestination(ctx, auditor, actor, langfuse("plat-a"))
+			Expect(err).NotTo(HaveOccurred())
+			v5, _ := svc.ConfigVersion(ctx, org)
+			Expect(svc.DeletePlatformDestination(ctx, auditor, actor)).To(Succeed())
+			in := langfuse("plat-b")
+			_, err = svc.SetPlatformDestination(ctx, auditor, actor, in)
+			Expect(err).NotTo(HaveOccurred())
+			v6, _ := svc.ConfigVersion(ctx, org)
+			Expect(v6).NotTo(Equal(v5), "delete and recreate resets config_version; the fingerprint must still change")
 		})
 	})
 
