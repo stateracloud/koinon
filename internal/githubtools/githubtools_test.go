@@ -456,6 +456,7 @@ var _ = Describe("the branch namespace", func() {
 		func(name, want string) { Expect(githubtools.AgentNamespace(name, id)).To(Equal(want)) },
 		Entry("slugifies the display name", "Luna the Helper!", "luna-the-helper-89abcdef"),
 		Entry("falls back when nothing is left", "???", "agent-89abcdef"),
+		Entry("drops non-ASCII letters", "Lüna 月", "l-na-89abcdef"),
 		Entry("is bounded", "an agent with a very long display name indeed", "an-agent-with-a-very-lon-89abcdef"),
 	)
 
@@ -480,5 +481,12 @@ var _ = Describe("the branch namespace", func() {
 		Entry("a bad ref", "a..b"),
 		Entry("a .lock ref", "x.lock"),
 		Entry("a space", "a b"),
+		Entry("a reflog expression", "x@{1}"),
+		Entry("non-ASCII", "ünïcode"),
+		Entry("an empty segment", "/x"),
+		Entry("a trailing slash", "x/"),
+		Entry("a trailing dot", "x."),
+		Entry("a hidden segment", "deps/.x"),
+		Entry("a name too long for a ref", strings.Repeat("x", 200)),
 	)
 })

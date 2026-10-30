@@ -282,8 +282,9 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
 - Amendment 2026-10-30 (#268, branch namespace): Koinon, not the agent, owns the name of the branch
   `create_pull_request` creates. The agent suggests a short name; the tool server files it as
   `koinon/<agent>/<suggestion>`, where `<agent>` is the agent's display name slugified (at most 24
-  characters, for reading) plus the first eight characters of its ID (for uniqueness; Koinon has no agent
-  slug and display names are neither unique nor stable). A leading `koinon/` the agent already added is
+  characters, for reading) plus the last eight hex digits of its ID (for uniqueness: agent IDs are UUIDv7,
+  whose leading digits are a timestamp agents created together share; Koinon has no agent slug and display
+  names are neither unique nor stable). A leading `koinon/` the agent already added is
   dropped, so `koinon/upgrade-x` becomes `koinon/<agent>/upgrade-x`, and the result must be a valid git ref.
   The recorded arguments, their hash and the approval card carry the FINAL name, and the tool description
   tells the model the format. Several agents of one template that all suggest `upgrade-<date>` therefore
@@ -293,3 +294,8 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   cannot be asked does not block the call. The executor's check (the branch must carry this approval's
   trailer) stays as defence in depth for a branch that appears after the request. Saved work keeps its
   own `koinon/wip/` namespace; an agent's namespace always ends in an ID fragment, so the two cannot meet.
+  The same call made again in its run (a retry, or a repeat after the approval created the branch) is not
+  refused: it is answered with the request already recorded. Branch protection rules or rulesets an org
+  wrote for `koinon/*` must now match `koinon/**`, because the branch is two levels below `koinon/`. The
+  agent's display name is visible in the branch name to everyone who can read the repository, as the
+  requesting and approving people already are in the commit trailers.

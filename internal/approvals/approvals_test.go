@@ -409,6 +409,19 @@ var _ = Describe("Service", func() {
 			Expect(rows).To(BeEmpty(), "nothing for a human to approve")
 		})
 
+		It("answers the same call again with its request once the approval created the branch", func(ctx SpecContext) {
+			f := newFixture(ctx, "standard")
+			req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+			row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(row.Status).To(Equal(store.ApprovalStatusExecuted), row.Error.String)
+			Expect(f.gh.Snapshot("widgets").Refs).To(HaveKey(f.branch("fix-typo")))
+
+			again := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+			Expect(again.ID).To(Equal(req.ID), "the recorded call, not a refusal of its own branch")
+			Expect(again.Status).To(Equal(string(store.ApprovalStatusExecuted)))
+		})
+
 		It("records and shows the final branch name, whether or not the agent added koinon/", func(ctx SpecContext) {
 			f := newFixture(ctx, "standard")
 			for _, suggestion := range []string{"fix-typo", "koinon/fix-typo"} {

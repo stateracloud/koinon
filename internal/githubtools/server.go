@@ -298,11 +298,11 @@ func (s *Server) createPullRequest(ctx context.Context, req *mcp.CallToolRequest
 	if err := ValidatePullRequest(in, guard); err != nil {
 		return nil, Result{}, err
 	}
-	if err := s.checkBranchFree(ctx, c, in.Branch); err != nil {
-		return nil, Result{}, err
-	}
 	canonical, err := canonicalPullRequest(in)
 	if err != nil {
+		return nil, Result{}, err
+	}
+	if err := s.checkBranchFree(ctx, c, in.Branch, HashArgs(canonical)); err != nil {
 		return nil, Result{}, err
 	}
 	return s.record(ctx, req, ToolCreatePullRequest, canonical, AssessRisk(in))
@@ -311,8 +311,10 @@ func (s *Server) createPullRequest(ctx context.Context, req *mcp.CallToolRequest
 // checkBranchFree refuses, with an error the agent can act on, a branch that already exists on
 // the code host, so no human approves a call that cannot run. The executor checks again (a
 // branch can appear after approval, and only it knows the branch is not its own). A host that
-// cannot be asked does not block the call: the executor's check stands.
-func (s *Server) checkBranchFree(ctx context.Context, c caller, branch string) error {
+// cannot be asked does not block the call: the executor's check stands. The same call made
+// again in the run (a retry, or a repeat once the approval created the branch) is not refused:
+// record answers it with the request already recorded.
+func (s *Server) checkBranchFree(ctx context.Context, c caller, branch, argsSHA256 string) error {
 	if s.keys == nil {
 		return nil
 	}
@@ -360,6 +362,15 @@ func (s *Server) checkBranchFree(ctx context.Context, c caller, branch string) e
 		return skip("look the branch up", err)
 	}
 	if found {
+		_, err := s.q.GetApprovalRequestByCall(ctx, store.GetApprovalRequestByCallParams{
+			OrgID: c.org.ID, RunID: c.run.ID, Tool: ToolCreatePullRequest, Target: connector + ":" + b.Targets[0], ArgsSha256: argsSHA256,
+		})
+		switch {
+		case err == nil:
+			return nil // this very call, recorded before; record returns it
+		case !errors.Is(err, pgx.ErrNoRows):
+			return skip("look the request up", err)
+		}
 		return refuse([]string{fmt.Sprintf("branch %s already exists in %s and was not created for this request; choose another branch name", branch, repo)})
 	}
 	return nil
