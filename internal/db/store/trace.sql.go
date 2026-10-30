@@ -485,6 +485,39 @@ func (q *Queries) ListTraceDestinations(ctx context.Context, orgID pgtype.UUID) 
 	return items, nil
 }
 
+const lockPlatformTraceDestination = `-- name: LockPlatformTraceDestination :one
+SELECT singleton, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, updated_by, updated_at FROM platform_trace_destination
+WHERE singleton
+FOR UPDATE
+`
+
+func (q *Queries) LockPlatformTraceDestination(ctx context.Context) (PlatformTraceDestination, error) {
+	row := q.db.QueryRow(ctx, lockPlatformTraceDestination)
+	var i PlatformTraceDestination
+	err := row.Scan(
+		&i.Singleton,
+		&i.Backend,
+		&i.Protocol,
+		&i.EndpointUrl,
+		&i.Params,
+		&i.Credentials,
+		&i.SecretFields,
+		&i.ResourceAttributes,
+		&i.Enabled,
+		&i.ConfigVersion,
+		&i.LastTestAt,
+		&i.LastTestOk,
+		&i.LastTestMessage,
+		&i.LastSuccessAt,
+		&i.LastErrorAt,
+		&i.LastError,
+		&i.SpansDropped,
+		&i.UpdatedBy,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const lockPlatformTraceSettings = `-- name: LockPlatformTraceSettings :one
 SELECT singleton, content_ceiling, updated_by, updated_at FROM platform_trace_settings
 WHERE singleton
