@@ -1,0 +1,179 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Work claims (ADR 0082). The logic lives in hack/claim.sh so it can be tested and linted; this file
+# only schedules it.
+#   sweeper   every 15 minutes: mark stale claims, release dead ones (draft PRs are kept)
+#   release   when a pull request closes: release the claims that point at it
+#   claim     required check on every pull request: it names an issue whose claim its author holds
+#   updater   bring the oldest auto-merge pull request that is behind main up to date (strict required
+#             checks, no merge queue on a private Team-plan repository)
+#
+# pull_request_target: the `claim` and `release` jobs use the workflow file and the hack/claim.sh of
+# the base branch and never run the pull request's code, so a pull request cannot weaken its own
+# check. They check out the base commit only, with minimal permissions.
+#
+# The Project board writes and the updater need a GitHub App token (GITHUB_TOKEN cannot write an
+# organization project, and a push made with it does not start CI). The App ID and key are secrets of
+# the `claims-bot` Environment, which is limited to the main branch. While they are absent those jobs
+# skip with a notice, so CI stays green before the App exists. The `claim` check needs no App.
+name: claims
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review, closed, auto_merge_enabled]
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  sweeper:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    name: sweeper
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment: claims-bot
+    concurrency:
+      group: claims-sweeper
+      cancel-in-progress: false
+    env:
+      APP_ID: ${{ secrets.KOINON_BOT_APP_ID }}
+      APP_KEY: ${{ secrets.KOINON_BOT_PRIVATE_KEY }}
+    steps:
+      - id: gate
+        run: |
+          if [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; then
+            echo "::notice::KOINON_BOT_APP_ID / KOINON_BOT_PRIVATE_KEY are not set; the claim sweeper is skipped"
+            echo "enabled=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >>"$GITHUB_OUTPUT"
+          fi
+      - if: steps.gate.outputs.enabled == 'true'
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.KOINON_BOT_APP_ID }}
+          private-key: ${{ secrets.KOINON_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: read
+          permission-organization-projects: write
+      - if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: steps.gate.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          KOINON_CLAIM_REPO: ${{ github.repository }}
+        run: hack/claim.sh sweep
+
+  # One group per pull request: a release must not be cancelled or replaced by another one.
+  release:
+    if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
+    name: release claims
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment: claims-bot
+    concurrency:
+      group: claims-release-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    env:
+      APP_ID: ${{ secrets.KOINON_BOT_APP_ID }}
+      APP_KEY: ${{ secrets.KOINON_BOT_PRIVATE_KEY }}
+    steps:
+      - id: gate
+        run: |
+          if [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; then
+            echo "::notice::KOINON_BOT_APP_ID / KOINON_BOT_PRIVATE_KEY are not set; claims are not released on close"
+            echo "enabled=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >>"$GITHUB_OUTPUT"
+          fi
+      - if: steps.gate.outputs.enabled == 'true'
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.KOINON_BOT_APP_ID }}
+          private-key: ${{ secrets.KOINON_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: read
+          permission-organization-projects: write
+      # The base branch's script (the commit the pull request targets), never the pull request's own.
+      - if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - if: steps.gate.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          KOINON_CLAIM_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: hack/claim.sh release-pr "$PR"
+
+  # Required check (name: claim). Read-only token and no secrets; runs the base branch's script and
+  # never checks out or runs the pull request's code.
+  claim:
+    if: github.event_name == 'pull_request_target' && github.event.action != 'closed' && github.event.action != 'auto_merge_enabled'
+    name: claim
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          KOINON_CLAIM_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: hack/claim.sh check-pr "$PR"
+
+  # Triggers: a push to main, a finished ci run, auto-merge being enabled, and every 15 minutes (a
+  # missed event or an UNKNOWN merge state self-heals). One at a time.
+  updater:
+    if: >-
+      github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_run' ||
+      (github.event_name == 'pull_request_target' && github.event.action == 'auto_merge_enabled')
+    name: updater
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment: claims-bot
+    concurrency:
+      group: updater
+      cancel-in-progress: false
+    env:
+      APP_ID: ${{ secrets.KOINON_BOT_APP_ID }}
+      APP_KEY: ${{ secrets.KOINON_BOT_PRIVATE_KEY }}
+    steps:
+      - id: gate
+        run: |
+          if [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; then
+            echo "::notice::KOINON_BOT_APP_ID / KOINON_BOT_PRIVATE_KEY are not set; the branch updater is skipped"
+            echo "enabled=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >>"$GITHUB_OUTPUT"
+          fi
+      - if: steps.gate.outputs.enabled == 'true'
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.KOINON_BOT_APP_ID }}
+          private-key: ${{ secrets.KOINON_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+      - if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - if: steps.gate.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          KOINON_CLAIM_REPO: ${{ github.repository }}
+        run: hack/claim.sh update-oldest

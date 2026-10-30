@@ -46,7 +46,7 @@ test-web: ## Run web tests
 	cd web && $(PNPM) test
 
 .PHONY: lint
-lint: lint-go lint-web lint-proto migrate-lint ## Run all linters
+lint: lint-go lint-web lint-proto migrate-lint adr-lint ## Run all linters
 
 .PHONY: lint-go
 lint-go: ## Lint Go code
@@ -63,6 +63,13 @@ lint-proto: ## Lint protobuf definitions
 .PHONY: breaking
 breaking: ## Check protobuf changes against main
 	buf breaking --against '.git#branch=main'
+
+.PHONY: adr-lint
+adr-lint: ## Check ADR numbers and the README index; offline tests of hack/claim.sh
+	hack/adr-lint-test.sh
+	hack/adr-lint.sh
+	hack/claim_test.sh
+	hack/migrate-renumber-test.sh
 
 .PHONY: migrate-lint
 migrate-lint: ## Check migration file names (and, with BASE=<ref>, that merged migrations are unchanged)

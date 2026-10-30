@@ -257,6 +257,25 @@ jobs:
       - run: hack/migrate-lint-test.sh
       - run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
 
+  # ADR numbers unique and contiguous, README index in sync (hack/adr-lint.sh, ADR 0082).
+  adr-lint:
+    name: adr-lint
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: hack/adr-lint-test.sh
+      - run: hack/adr-lint.sh
+
+  # Offline unit tests of hack/claim.sh. The live tests need a scratch repository and never run
+  # here: CI must not mutate GitHub.
+  claim-tests:
+    name: claim-tests
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: hack/claim_test.sh
+      - run: hack/migrate-renumber-test.sh
+
   # Tests of the e2e tooling scripts: the decision rule (needs the Go toolchain for `go list`) and
   # the remote runner (needs flock, so Linux).
   scripts:
