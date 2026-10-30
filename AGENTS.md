@@ -19,16 +19,18 @@ Instructions for coding agents working on Koinon.
 - Testing layers. Every PR: unit and package tests, the smoke test and the scenarios (`make test`
   and CI). The kind e2e (`test/e2e`, ~15-25 min) is not per PR: it runs on a PR only when the PR
   changes the e2e's own files or carries the `e2e` label, and otherwise batched on main (each push
-  that changed something e2e-relevant, one running and the newest pending, plus nightly). Run it on
+  that changed something e2e-relevant, one running and the newest pending) and nightly, always,
+  to catch drift no commit explains. Run it on
   demand for a risky PR: `hack/needs-e2e.sh` says whether your change touches what only a full
   install observes (the rule lives only there); if yes, run `hack/e2e-remote.sh` (procoduck's testbox)
   or `hack/e2e-remote.sh --local`, paste the timings table in the PR body, or add the `e2e` label.
   `SUITE_LABEL=smoke` runs steps 1-6 only. The required check is `e2e result` (green when the e2e
   was skipped). Why: #281 (branch naming in githubtools) and #284 (a startup flag the chart's
   migrate Job lacked) passed every package test and failed only in a full install.
-- When main's kind e2e goes red, `hack/e2e-bisect.sh` opens an `e2e-regression` issue naming the
-  merge: fix forward within 2 hours, otherwise revert it. RC tags are cut only from a commit with a
-  green kind e2e run.
+- When main's kind e2e goes from green to red, `hack/e2e-bisect.sh` opens one `e2e-regression` issue
+  naming the merge (or the suspects): fix forward within 2 hours, otherwise revert it. RC and
+  release tags are cut only from a commit whose `quickstart` job concluded success
+  (`hack/release-gate.sh` checks it; dispatch e2e-kind on the commit if the batched run skipped it).
 - `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
 - Before pushing: `gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" .`. CI scans
   every commit of a pull request, so a leak fixed in a later commit still fails.

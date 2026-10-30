@@ -897,7 +897,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", string(patch))
 		kc("-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler")
-		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP=75s")
+		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP=2m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
 
