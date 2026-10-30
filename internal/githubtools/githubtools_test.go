@@ -22,6 +22,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/test/scenarios"
 )
 
 func file(p, content string) githubtools.FileChange {
@@ -291,6 +292,35 @@ var _ = Describe("Server", func() {
 		got, err := session(ctx, f.agentID).GetPrompt(ctx, &mcp.GetPromptParams{Name: gateway.ReadyPrompt})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.Messages).To(HaveLen(1))
+	})
+
+	// The kind e2e's repo-helper scenario (test/scenarios): the call the fake model makes is
+	// filed under the agent's namespace, which is the branch the e2e expects on the fake GitHub
+	// (#281 changed the naming and only the e2e noticed).
+	It("files the repo-helper scenario's pull request under the agent's namespace", func(ctx SpecContext) {
+		f := newFixture(ctx, standardGrant)
+		p := scenarios.PullRequest
+		args, err := json.Marshal(map[string]any{
+			"branch": p.Suggestion, "title": p.Title, "body": "Adds hello.md as requested in the task.",
+			"files": []map[string]string{{"path": p.File, "content": p.Content}},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		res, text := call(ctx, session(ctx, f.agentID), p.ParkingTool, json.RawMessage(args))
+		Expect(res.IsError).To(BeFalse(), text)
+
+		want, err := p.Branch("helper", f.agent.ID.String())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(want).To(HavePrefix(githubtools.BranchPrefix + githubtools.AgentNamespace("helper", f.agent.ID.String()) + "/"))
+		rows, err := q.ListApprovalRequestsForTask(ctx, store.ListApprovalRequestsForTaskParams{OrgID: f.org.ID, TaskID: f.run.TaskID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rows).To(HaveLen(1))
+		var recorded githubtools.PullRequestArgs
+		Expect(json.Unmarshal([]byte(rows[0].ArgsJson), &recorded)).To(Succeed())
+		Expect(recorded.Branch).To(Equal(want), "the approval shows the branch the e2e expects")
+		Expect(recorded.Title).To(Equal(p.Title))
+		Expect(recorded.Files).To(ConsistOf(file(p.File, p.Content)))
+		Expect(rows[0].Tool).To(Equal(p.ParkingTool))
+		Expect(rows[0].Status).To(Equal(store.ApprovalStatusPending), "the run parks on the approval")
 	})
 
 	It("records a pending approval with a stable hash and returns at once", func(ctx SpecContext) {
