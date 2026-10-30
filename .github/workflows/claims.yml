@@ -118,7 +118,9 @@ jobs:
   # Required check (name: claim). Read-only token and no secrets; runs the base branch's script and
   # never checks out or runs the pull request's code.
   claim:
-    if: github.event_name == 'pull_request_target' && github.event.action != 'closed' && github.event.action != 'auto_merge_enabled'
+    # Every event re-evaluates the check, auto_merge_enabled included: a required check's latest run
+    # wins, and a skipped run counts as passing, so skipping here would turn a failed claim green.
+    if: github.event_name == 'pull_request_target' && github.event.action != 'closed'
     name: claim
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
