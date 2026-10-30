@@ -316,7 +316,7 @@ so the router needs only that.
 | Datadog LLM Observability ([OTel](https://docs.datadoghq.com/llm_observability/instrumentation/otel_instrumentation/)) | Site-specific; `http/protobuf` | `dd-api-key`, `dd-otlp-source: llmobs` | GenAI 1.37+ and OpenInference; spans without `gen_ai.*` are dropped | `chat` → llm, `execute_tool` → tool, `invoke_agent` → agent; cross-trace links stored, not drawn | SaaS |
 | Honeycomb ([OTel](https://docs.honeycomb.io/send-data/opentelemetry/)) | `api.honeycomb.io/v1/traces` (EU `api.eu1`) | `x-honeycomb-team` | Any; no LLM view | Queries | SaaS |
 | LangSmith ([OTel](https://docs.langchain.com/langsmith/trace-with-opentelemetry)) | `api.smith.langchain.com/otel/v1/traces`; self-hosted `<api>/api/v1/otel` | `x-api-key`, `Langsmith-Project` | `gen_ai.*`, OpenInference, `langsmith.*` | `langsmith.trace.session_id` (the preset copies the run ID) | SaaS; self-hosted enterprise |
-| Opik ([OTel](https://www.comet.com/docs/opik/integrations/opentelemetry)) | `<host>/api/v1/private/otel/v1/traces`; HTTP only | `Authorization: <key>`, `Comet-Workspace`, `projectName` | `gen_ai.*` including `gen_ai.usage.cost`, OpenInference | `gen_ai.conversation.id` → thread | Cloud or self-hosted; Apache-2.0 |
+| Opik ([OTel](https://www.comet.com/docs/opik/integrations/opentelemetry)) | `<host>/api/v1/private/otel/v1/traces`; HTTP only | `Authorization: <key>`, `Comet-Workspace`, `projectName`; all optional, because self-hosted Opik runs without authentication | `gen_ai.*` including `gen_ai.usage.cost`, OpenInference | `gen_ai.conversation.id` → thread | Cloud or self-hosted; Apache-2.0 |
 
 ## Consequences
 
@@ -453,8 +453,30 @@ left open.
 4. **Audit.** The log has no org-less events (ADR 0023), so a change to the platform destination or
    ceiling is recorded in the platform admin's personal org, and each org lowered by a new ceiling gets its
    own `trace.settings.lowered` event.
-5. **Run tracing state.** `runs.traced` is NULL until agentd decides at claim and then never changes.
-   `run_turns` holds one row per turn with its `seq` and `trace_id`.
+5. **Run tracing state.** `runs.traced` is NULL until agentd decides at claim and then never changes;
+   the migration sets it to false for runs already past their queue, so a run is traced whole or not at
+   all. `run_turns` holds one row per turn with its `seq` (from `runs.last_turn_seq`, taken under the run's
+   row lock) and `trace_id`.
+6. **Stored credentials follow their endpoint.** Update keeps stored secrets only while the backend and
+   the endpoint's origin (scheme, host, port) are unchanged; otherwise every secret field must be entered
+   again, so a credential is never sent to an endpoint just typed in. Endpoints are stored normalised, and
+   must be https unless the host is in the platform's allowed hosts (a lab or test backend).
+7. **When a change is tested.** Only a change to the connection (backend, endpoint, settings, secrets) is
+   tested before saving. Enabled, name and resource attributes are saved untested, so a destination whose
+   backend is down can still be disabled. Backend response text is never quoted in a result (it can echo
+   the credentials in another encoding): the message is the status and a fixed description.
+8. **Versions.** `config_version` changes only with the configuration, never with the router's health
+   writes; an update may carry the version it was loaded with and fails with ABORTED when it is stale. A
+   re-test records its result only against the version it tested.
+9. **Who may send what.** `full`, and any raise of the content level or the platform copy, follows the
+   caller's real membership: a platform admin who is not a member of the org may lower its settings but not
+   raise them, and does not count as its owner. A non-owner admin could otherwise add a destination that
+   receives the org's chosen level, `full` included, so while the org's effective level is `full` only an
+   owner may add a destination or change its connection (turning one off or renaming it stays open to
+   admins). Not accepting that gap is the sustainable default.
+10. **Router resilience.** A destination whose credentials cannot be opened is skipped, logged and marked
+    with an error on its health; the org's other destinations still get its traces. `sample_rate` is
+    optional on update and the stored rate stays when it is left out.
 
 ## Amendment (2026-10-30): the internal OTLP listener is authenticated
 

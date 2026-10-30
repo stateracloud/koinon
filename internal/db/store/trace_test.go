@@ -3,6 +3,9 @@
 package store_test
 
 import (
+	"sort"
+	"sync"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	. "github.com/onsi/ginkgo/v2"
@@ -75,6 +78,38 @@ var _ = Describe("run traces", func() {
 		none, err := q.ListRunTurns(ctx, store.ListRunTurnsParams{OrgID: other.org, RunID: r.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(none).To(BeEmpty())
+	})
+
+	It("gives concurrent writers distinct, gap-free turn numbers", func(ctx SpecContext) {
+		f := newFixture(ctx)
+		r := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+		const writers = 8
+		seqs := make(chan int32, writers)
+		errs := make(chan error, writers)
+		var wg sync.WaitGroup
+		for i := range writers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				id := make([]byte, 16)
+				id[0], id[1] = byte(i+1), 0xAB
+				t, err := q.InsertRunTurn(ctx, store.InsertRunTurnParams{OrgID: f.org, RunID: r.ID, TraceID: id})
+				errs <- err
+				seqs <- t.Seq
+			}()
+		}
+		wg.Wait()
+		close(seqs)
+		close(errs)
+		for err := range errs {
+			Expect(err).NotTo(HaveOccurred())
+		}
+		var got []int
+		for sq := range seqs {
+			got = append(got, int(sq))
+		}
+		sort.Ints(got)
+		Expect(got).To(Equal([]int{1, 2, 3, 4, 5, 6, 7, 8}))
 	})
 
 	It("keeps a platform ceiling row, and org settings cannot send the platform more than their own level", func(ctx SpecContext) {

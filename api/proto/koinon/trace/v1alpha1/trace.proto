@@ -14,8 +14,13 @@ option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1
 //
 // Org calls need the admin role; only an owner may set the content level full. Platform calls need a
 // platform admin. Credentials are write-only: they are sealed in the secret store and never returned.
-// Creating or changing a destination first sends it one synthetic trace and saves only when the
-// backend accepts it (decision 9): a refusal is FAILED_PRECONDITION and the message says why.
+// Creating or changing a destination's connection (backend, endpoint, settings or secrets) first sends
+// it one synthetic trace and saves only when the backend accepts it (decision 9): a refusal is
+// FAILED_PRECONDITION and the message says why. A change that touches none of those (enabled, name,
+// resource attributes) is saved untested, so a destination whose backend is down can still be disabled.
+// Stored secrets are kept only while backend and endpoint origin stay the same; otherwise every secret
+// is required again. While the org's effective content level is full, only an owner may add a
+// destination or change its connection.
 service TraceDestinationService {
   rpc ListDestinations(ListDestinationsRequest) returns (ListDestinationsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
@@ -100,6 +105,9 @@ message Destination {
   Health health = 10;
   google.protobuf.Timestamp created_at = 11;
   google.protobuf.Timestamp updated_at = 12;
+  // config_version changes with every change of the configuration and with nothing the router records.
+  // Send it back as expected_version when updating.
+  int64 config_version = 13;
 }
 
 // DestinationInput is what a caller writes.
@@ -139,6 +147,9 @@ message UpdateDestinationRequest {
   string org_id = 1;
   string destination_id = 2;
   DestinationInput destination = 3;
+  // expected_version is the config_version the form was loaded with. When set and the destination has
+  // changed since, the update fails with ABORTED. Left out, the update applies to the current version.
+  optional int64 expected_version = 4;
 }
 
 message UpdateDestinationResponse {
@@ -189,7 +200,9 @@ message GetSettingsResponse {
 message UpdateSettingsRequest {
   string org_id = 1;
   ContentLevel content_level = 2;
-  double sample_rate = 3;
+  // sample_rate is the share of runs traced, 0 to 1. Left out, the stored value stays (1 for an org
+  // that never set one).
+  optional double sample_rate = 3;
   ContentLevel platform_copy_level = 4;
 }
 
