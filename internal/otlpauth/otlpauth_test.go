@@ -31,7 +31,10 @@ var _ = Describe("otlpauth", func() {
 		metrics *otlpauth.Metrics
 		srv     *httptest.Server
 		reached int
+		clock   time.Time
 	)
+	// advance moves the test clock past the reload interval, so the next request re-reads the files.
+	advance := func() { clock = clock.Add(time.Second) }
 	write := func(name, value string) {
 		Expect(os.WriteFile(filepath.Join(dir, name), []byte(value), 0o600)).To(Succeed())
 	}
@@ -55,7 +58,9 @@ var _ = Describe("otlpauth", func() {
 		var err error
 		tokens, err = otlpauth.NewTokens(dir, quiet)
 		Expect(err).NotTo(HaveOccurred())
-		tokens.Reload = time.Millisecond
+		clock = time.Unix(1_800_000_000, 0)
+		otlpauth.SetClock(tokens, func() time.Time { return clock })
+		tokens.Reload = time.Second
 		metrics = otlpauth.NewMetrics(prometheus.NewRegistry())
 		reached = 0
 		// One mux with two paths: the middleware wraps all of it, as it will wrap /v1/traces.
@@ -97,18 +102,19 @@ var _ = Describe("otlpauth", func() {
 	It("accepts the previous token during a rotation, and not once it is removed", func() {
 		write(otlpauth.TokenFile, previous)
 		write(otlpauth.PreviousFile, current)
+		advance()
 		Expect(do("/v1/logs", "Bearer "+previous).StatusCode).To(Equal(http.StatusOK))
 		Expect(do("/v1/logs", "Bearer "+current).StatusCode).To(Equal(http.StatusOK))
 
 		Expect(os.Remove(filepath.Join(dir, otlpauth.PreviousFile))).To(Succeed())
-		time.Sleep(5 * time.Millisecond)
+		advance()
 		Expect(do("/v1/logs", "Bearer "+previous).StatusCode).To(Equal(http.StatusOK))
 		Expect(do("/v1/logs", "Bearer "+current).StatusCode).To(Equal(http.StatusUnauthorized))
 	})
 
 	It("keeps the tokens it has when the files become unreadable", func() {
 		Expect(os.Remove(filepath.Join(dir, otlpauth.TokenFile))).To(Succeed())
-		time.Sleep(5 * time.Millisecond)
+		advance()
 		Expect(do("/v1/logs", "Bearer "+current).StatusCode).To(Equal(http.StatusOK))
 	})
 
@@ -120,18 +126,18 @@ var _ = Describe("otlpauth", func() {
 		Expect(t2.Match("")).To(BeFalse())
 		Expect(t2.Match(previous)).To(BeFalse())
 		write(otlpauth.PreviousFile, "")
-		time.Sleep(5 * time.Millisecond)
+		advance()
 		Expect(do("/v1/logs", "Bearer "+current).StatusCode).To(Equal(http.StatusOK))
 	})
 
 	It("never lets a bad previous block a new token, and accepts the old one only through a valid previous", func() {
 		write(otlpauth.TokenFile, previous)
 		write(otlpauth.PreviousFile, "short")
-		time.Sleep(5 * time.Millisecond)
+		advance()
 		Expect(do("/v1/logs", "Bearer "+previous).StatusCode).To(Equal(http.StatusOK))
 		Expect(do("/v1/logs", "Bearer "+current).StatusCode).To(Equal(http.StatusUnauthorized))
 		write(otlpauth.PreviousFile, current)
-		time.Sleep(5 * time.Millisecond)
+		advance()
 		Expect(do("/v1/logs", "Bearer "+current).StatusCode).To(Equal(http.StatusOK))
 	})
 
