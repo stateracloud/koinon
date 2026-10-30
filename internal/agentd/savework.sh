@@ -18,7 +18,8 @@
 # no system, global or home config (GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL=/dev/null, which also
 # ignores the home include file /etc/gitconfig names), core.fsmonitor and core.hooksPath forced off
 # on the command line, no external diff or textconv, and every filter driver the repository defines
-# emptied and not required (git runs no filter whose command is empty) so files are hashed as they are on disk. A
+# emptied and not required (git runs no filter whose command is empty) so files are hashed as they are on disk,
+# and no transport, so a partial clone cannot fetch from the promisor remote its config names. A
 # repository whose own config includes another file (include, includeIf) is skipped: git cannot be
 # told to ignore includes in the repository's config, and the files they name are not Koinon's to read.
 #
@@ -34,7 +35,11 @@ set -u
 export GIT_OPTIONAL_LOCKS=0
 export GIT_TERMINAL_PROMPT=0
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
-unset GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_CONFIG_SYSTEM GIT_EXTERNAL_DIFF GIT_DIR GIT_WORK_TREE \
+# No transport at all: a partial clone fetches missing objects from its promisor remote, which
+# the repository's config names together with its uploadpack, sshCommand or ext:: URL.
+# GIT_ALLOW_PROTOCOL overrides every protocol.*.allow; GIT_NO_LAZY_FETCH is git 2.45 and later.
+export GIT_ALLOW_PROTOCOL=none GIT_NO_LAZY_FETCH=1
+unset GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_CONFIG_SYSTEM GIT_EXTERNAL_DIFF GIT_DIR GIT_WORK_TREE \
   GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_ATTR_SOURCE GIT_SSH GIT_SSH_COMMAND GIT_ASKPASS
 dir=$1
 max=$2
@@ -72,12 +77,14 @@ while IFS= read -r r; do
     continue
   fi
   bad=
-  for k in $(grep -iE '^filter\.' "$tmp/keys" | sed -E 's/^filter\.(.*)\.[^.]*$/\1/' | sort -u); do
+  # One name per line, never split or globbed: a driver named * must not expand to file names.
+  grep -iE '^filter\.' "$tmp/keys" | sed -E 's/^filter\.(.*)\.[^.]*$/\1/' | sort -u >"$tmp/filters"
+  while IFS= read -r k; do
     case $k in
       *[!A-Za-z0-9_-]* | '') bad=1 ;;
       *) gitcfg="$gitcfg -c filter.$k.clean= -c filter.$k.smudge= -c filter.$k.process= -c filter.$k.required=false" ;;
     esac
-  done
+  done <"$tmp/filters"
   if [ -n "$bad" ]; then
     echo "S $r: the repository configuration has a filter Koinon cannot neutralise" >>"$tmp/skipped"
     continue
