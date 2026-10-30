@@ -138,3 +138,9 @@ OCI referrers; the script copies them only where they also exist under the `sha2
 referrers-API-only output is not copied. Install the mirrored chart with
 `helm install koinon oci://<registry>/charts/koinon --version <version> --set image.registry=<registry>`.
 
+
+## RT fixtures on the home lab
+
+`kubectl --context homelab apply -k test/fixtures/rt1/overlays/homelab` applies the story-test fixtures
+with the images from Zot pinned by digest; the Secrets come from OpenBao through ExternalSecrets.
+Everyone else uses `overlays/kind` or `overlays/remote` ([real-model-tests.md](real-model-tests.md)).
