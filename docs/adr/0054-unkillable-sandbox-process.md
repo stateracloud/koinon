@@ -138,8 +138,10 @@ The repositories are the agent's, and savework runs outside any turn, so it must
 agent's git configuration names. `savework.sh` ignores the system, global and home configuration
 (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL=/dev/null`; this includes the home include file that
 `/etc/gitconfig` names, which the agent can write), forces `core.fsmonitor` and `core.hooksPath`
-off, passes `--no-ext-diff --no-textconv`, and empties every filter driver the repository defines,
-so files are saved as they are on disk. A repository whose own configuration includes other files
+off, passes `--no-ext-diff --no-textconv`, empties every filter driver the repository defines,
+so files are saved as they are on disk, and allows no transport (`GIT_ALLOW_PROTOCOL`), so a
+partial clone cannot fetch a missing object from a promisor remote whose `uploadpack`,
+`core.sshCommand` or `ext::` URL the agent chose. A repository whose own configuration includes other files
 (`include`, `includeIf`) is skipped and reported, because git cannot be told to ignore includes in
 the repository's config. Global ignore rules no longer apply to what is saved.
 

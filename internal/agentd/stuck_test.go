@@ -540,6 +540,47 @@ var _ = Describe("savework.sh", func() {
 			Expect(works[0].Manifest.Files).To(HaveLen(2))
 		})
 
+		It("skips a repository with a filter driver named *, which must not expand to file names", func() {
+			setup()
+			c := script(GinkgoT().TempDir(), "canary")
+			put(".gitattributes", "*.txt filter=*\n")
+			git("config", "filter.*.clean", c)
+			// Run where a * matches names that are valid driver names, as / or the home would.
+			cwd := GinkgoT().TempDir()
+			for _, f := range []string{"bin", "etc", "work"} {
+				Expect(os.WriteFile(filepath.Join(cwd, f), nil, 0o600)).To(Succeed())
+			}
+			cmd := exec.Command("sh", "-c", agentd.SaveworkScript, "savework", work, "1000000")
+			cmd.Dir = cwd
+			out, err := cmd.Output()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ran()).To(BeEmpty())
+			works, skipped, err := agentd.ParseSaveOutput(out)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(works).To(BeEmpty())
+			Expect(skipped).To(ConsistOf(ContainSubstring("cannot neutralise")))
+		})
+
+		It("fetches nothing for a partial clone, whatever its promisor remote runs", func() {
+			setup()
+			// Not the cat-like canary: an upload-pack that waits on its input would hang the fetch.
+			c := filepath.Join(GinkgoT().TempDir(), "canary")
+			Expect(os.WriteFile(c, []byte("#!/bin/sh\necho \"$0 $*\" >> "+canary+"\nexit 1\n"), 0o700)).To(Succeed())
+			blob, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD:a.txt").Output()
+			Expect(err).NotTo(HaveOccurred())
+			id := strings.TrimSpace(string(blob))
+			Expect(os.Remove(filepath.Join(repo, ".git", "objects", id[:2], id[2:]))).To(Succeed())
+			for k, v := range map[string]string{
+				"core.repositoryformatversion": "1", "extensions.partialClone": "evil",
+				"remote.evil.url": GinkgoT().TempDir(), "remote.evil.promisor": "true", "remote.evil.uploadpack": c,
+			} {
+				git("config", k, v)
+			}
+			_, err = run()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ran()).To(BeEmpty(), "git fetched from the promisor remote")
+		})
+
 		It("skips a repository whose configuration includes another file, running nothing", func() {
 			setup()
 			tools := GinkgoT().TempDir()
