@@ -23,7 +23,7 @@ test('owner walks the Observability page: destinations, a refused test, adding o
   await page.goto('/')
   await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Observability' }).click()
   await expect(page.getByRole('heading', { name: 'Observability', level: 1 })).toBeVisible()
-  await expect(page.getByRole('region', { name: 'datadog' })).toContainText('The last test failed: the backend answered 403 Forbidden')
+  await expect(page.getByRole('region', { name: 'datadog' })).toContainText('The last test failed: the backend answered HTTP 403 (Forbidden)')
   await expectAccessible(page)
 
   await page.getByRole('button', { name: 'Test destination langfuse' }).click()
@@ -38,7 +38,7 @@ test('owner walks the Observability page: destinations, a refused test, adding o
   await form.getByLabel('Secret key').fill('koinon_test_not-a-real-token')
   await expectAccessible(page)
   await form.getByRole('button', { name: 'Test and add' }).click()
-  await expect(form.getByRole('alert')).toContainText('Not saved. the backend answered 401 Unauthorized')
+  await expect(form.getByRole('alert')).toContainText('Not saved. the backend answered HTTP 401 (Unauthorized)')
   await expect(form.getByLabel('Secret key')).toHaveValue('')
   await form.getByLabel('Traces endpoint').fill('https://lf.example.com/v1/traces')
   await form.getByLabel('Public key').fill('koinon_test_public')
@@ -54,9 +54,23 @@ test('owner walks the Observability page: destinations, a refused test, adding o
   expect(seen.settings).toBeUndefined()
   await expectAccessible(page)
   await settings.getByRole('button', { name: 'Send full content' }).click()
-  await expect.poll(() => seen.settings).toMatchObject({ orgId: org, contentLevel: 'CONTENT_LEVEL_FULL', sampleRate: 0.5 })
+  await expect.poll(() => seen.settings).toMatchObject({ orgId: org, contentLevel: 'CONTENT_LEVEL_FULL'})
+  expect(seen.settings).not.toHaveProperty('sampleRate')
   await expect(page.getByText('Full content').first()).toBeVisible()
   await expectAccessible(page)
+})
+
+test('disabling a destination whose backend is down saves without a test', async ({ page }) => {
+  const { handlers, seen } = api()
+  await mockApi(page, handlers)
+  await page.goto('/settings/observability')
+  await page.getByRole('button', { name: 'Edit destination datadog' }).click()
+  const form = page.getByRole('form', { name: 'Edit destination datadog' })
+  await form.getByRole('checkbox', { name: 'Enabled' }).uncheck()
+  await form.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'datadog' }).getByText('Disabled')).toBeVisible()
+  expect(seen.update).toMatchObject({ destinationId: 'd-dd' })
+  expect((seen.update as { destination: { enabled?: boolean } }).destination.enabled).toBeFalsy()
 })
 
 test('an admin cannot choose full and a member sees a notice', async ({ page }) => {

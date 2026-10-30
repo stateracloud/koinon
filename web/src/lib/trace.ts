@@ -60,8 +60,8 @@ export const presets: readonly Preset[] = [
     endpointExample: 'https://www.comet.com/opik/api/v1/private/otel/v1/traces',
     endpointHelp: 'The OTLP traces endpoint of Opik.',
     fields: [
-      { name: 'api_key', label: 'API key', secret: true, required: true },
-      { name: 'workspace', label: 'Workspace', secret: false, required: true },
+      { name: 'api_key', label: 'API key', secret: true, required: false, help: 'Optional: leave it empty for a self-hosted Opik without authentication.' },
+      { name: 'workspace', label: 'Workspace', secret: false, required: false, help: 'Optional.' },
       { name: 'project', label: 'Project', secret: false, required: false, help: 'Optional.' },
     ],
   },
@@ -110,6 +110,23 @@ export function initialForm(d?: Destination): DestinationFormState {
   }
 }
 
+/** originOf is scheme, host and port of an endpoint; '' when it is not a URL. */
+export function originOf(url: string): string {
+  try {
+    return new URL(url.trim()).origin
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * keepsSecrets says the stored secrets stay: the backend and the endpoint's origin are those the
+ * destination was saved with. Otherwise the server drops them and every secret must be given again.
+ */
+export function keepsSecrets(f: { backend: Backend; endpoint: string }, d: Destination | undefined): boolean {
+  return !!d && d.backend === f.backend && originOf(d.endpointUrl) === originOf(f.endpoint)
+}
+
 /** isStored says the destination already holds that secret (a preset field or a header name). */
 export function isStored(d: Destination | undefined, name: string): boolean {
   return !!d && d.secretFields.includes(name)
@@ -122,26 +139,28 @@ const headerPattern = /^[A-Za-z0-9!#$%&'*+.^_|~-]{1,128}$/
 /** formErrors validates what the server would refuse for shape alone; the backend's own verdict comes from the test. */
 export function formErrors(f: DestinationFormState, d: Destination | undefined, platform: boolean): FormErrors {
   const errors: FormErrors = { fields: {}, headers: {} }
-  if (!platform && !d) errors.name = destinationNameError(f.name)
+  if (!platform) errors.name = destinationNameError(f.name)
   errors.endpoint = endpointError(f.endpoint)
   const preset = presetOf(f.backend)
   for (const field of preset.fields) {
     if (!field.required) continue
     if (field.secret) {
-      if (!f.secrets[field.name]?.trim() && !(d?.backend === f.backend && isStored(d, field.name))) errors.fields[field.name] = `${field.label} is required.`
+      if (!f.secrets[field.name]?.trim() && !(keepsSecrets(f, d) && isStored(d, field.name))) errors.fields[field.name] = `${field.label} is required.`
     } else if (!f.params[field.name]?.trim()) {
       errors.fields[field.name] = `${field.label} is required.`
     }
   }
   if (f.backend === Backend.GENERIC) {
     const seen = new Set<string>()
+    const keeps = keepsSecrets(f, d)
     let kept = 0
     f.headers.forEach((h, i) => {
       if (h.stored && h.remove) return
       const name = h.name.trim()
+      const needsValue = !h.stored || !keeps
       if (!headerPattern.test(name)) errors.headers[i] = 'Header name must be letters, digits and the usual header symbols, such as X-Api-Key.'
       else if (seen.has(name.toLowerCase())) errors.headers[i] = 'Each header can be given once.'
-      else if (!h.stored && !h.value) errors.headers[i] = 'Header value is required.'
+      else if (needsValue && !h.value) errors.headers[i] = 'Header value is required.'
       seen.add(name.toLowerCase())
       kept++
     })
@@ -152,6 +171,25 @@ export function formErrors(f: DestinationFormState, d: Destination | undefined, 
 
 export function hasErrors(e: FormErrors): boolean {
   return !!e.name || !!e.endpoint || Object.keys(e.fields).length > 0 || Object.keys(e.headers).length > 0
+}
+
+/**
+ * connectionChanged says the form changes the connection (backend, endpoint, settings or secrets), which the
+ * API tests before saving. Anything else (enabled, name) is saved untested.
+ */
+export function connectionChanged(f: DestinationFormState, d: Destination | undefined): boolean {
+  if (!d) return true
+  if (f.backend !== d.backend || f.endpoint.trim() !== d.endpointUrl) return true
+  const preset = presetOf(f.backend)
+  for (const field of preset.fields) {
+    if (field.secret) {
+      if (f.secrets[field.name]?.trim()) return true
+    } else if ((f.params[field.name] ?? '').trim() !== (d.params[field.name] ?? '')) return true
+  }
+  if (f.backend === Backend.GENERIC) {
+    return f.headers.some((h) => !h.stored || h.remove || h.value !== '')
+  }
+  return false
 }
 
 export type DestinationWrite = {
@@ -190,7 +228,7 @@ export function buildInput(f: DestinationFormState, d?: Destination): Destinatio
     else if (h.value) secrets[name] = h.value
   }
   return {
-    name: d?.name ?? f.name,
+    name: f.name,
     backend: f.backend,
     endpointUrl: f.endpoint.trim(),
     params,
@@ -210,7 +248,7 @@ export const levels = [
   {
     value: ContentLevel.REDACTED,
     label: 'Redacted',
-    help: 'Content is included after Koinon removes credentials, email addresses, phone numbers, IBANs and card numbers from it. The scrubber can miss things.',
+    help: 'Content is included after Koinon removes credentials, email addresses, phone numbers, IBANs, card numbers and high-entropy tokens from it. The scrubber can miss things.',
   },
   {
     value: ContentLevel.FULL,
@@ -270,3 +308,6 @@ export function testNotice(name: string, r: TestResult | undefined): string {
   if (!r) return `Tested ${name}.`
   return r.ok ? `Test passed for ${name}. The backend accepted the test trace.` : `Test failed for ${name}${r.message ? `: ${r.message}` : '.'}`
 }
+
+/** settingsDeniedMessage explains a refused settings change by a platform admin who is not a member of the org. */
+export const settingsDeniedMessage = 'You are not a member of this org, so you can only lower its settings here, not raise them. Ask an org owner to raise them.'

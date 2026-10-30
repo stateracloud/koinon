@@ -41,6 +41,8 @@ function ObservabilityContent() {
   const list = destinations.data?.destinations ?? []
   const s = settings.data?.settings
   const full = s?.contentLevel === ContentLevel.FULL
+  // While the org sends full content, only an owner may add a destination or change a connection.
+  const locked = full && org.role !== OrgRole.OWNER
   const say = (m: string) => {
     setRefused(undefined)
     setNotice(m)
@@ -51,15 +53,21 @@ function ObservabilityContent() {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">Observability</h1>
         {full && <FullContentBadge />}
-        <Button size="sm" className="ml-auto" onClick={() => setEditing({ kind: 'new' })} disabled={editing?.kind === 'new'}>
+        <Button size="sm" className="ml-auto" onClick={() => setEditing({ kind: 'new' })} disabled={editing?.kind === 'new' || locked}>
           Add destination
         </Button>
       </div>
       <p className="text-muted-foreground text-sm">
         A destination is a trace backend, such as Langfuse or Datadog, that receives one trace for each run your agents make: the run, its turns, model calls and tool calls, with timings, status and cost. Content stays off unless you choose a level below. Koinon stores each destination&apos;s credentials encrypted and never shows them again.
       </p>
+      {locked && (
+        <p role="note" className="text-sm">
+          Your org sends full content, so only an org owner can add a destination or change a destination&apos;s connection. You can still rename a destination or turn it on or off.
+        </p>
+      )}
       {editing?.kind === 'new' && (
         <TraceDestinationForm
+          connectionLocked={locked}
           save={(input) => actions.createDestination(input).then((r) => r.destination!)}
           onDone={() => setEditing(undefined)}
           onSaved={(d) => say(`Saved ${d.name}. ${testNotice(d.name, d.lastTest)}`)}
@@ -107,7 +115,14 @@ function ObservabilityContent() {
                   editing?.kind === 'destination' && editing.id === d.id ? (
                     <TraceDestinationForm
                       destination={d}
-                      save={(input) => actions.updateDestination(d.id, input).then((r) => r.destination!)}
+                      save={(input) => actions.updateDestination(d.id, input, d.configVersion).then((r) => r.destination!)}
+                      connectionLocked={locked}
+                      onConflict={(m) => {
+                        setEditing(undefined)
+                        setNotice(undefined)
+                        setRefused(m)
+                        void actions.reload()
+                      }}
                       onDone={() => setEditing(undefined)}
                       onSaved={(saved) => say(`Saved ${saved.name}. ${testNotice(saved.name, saved.lastTest)}`)}
                     />
