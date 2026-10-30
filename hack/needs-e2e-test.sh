@@ -21,6 +21,7 @@ expect() {
 # Needed.
 expect 0 cmd/koinon-api/main.go
 expect 0 cmd/koinon-fakemcp/main.go
+expect 0 cmd/koinon-cli/main.go                   # not built by the e2e, but cmd/ is a backstop
 expect 0 internal/auth/token.go                   # derived: imported by a binary
 expect 0 internal/tracing/scrub/always.go          # derived: a nested package the api imports
 expect 0 charts/koinon/templates/migrate-job.yaml
@@ -58,12 +59,14 @@ expect 1 web/e2e/login.spec.ts
 expect 1 internal/agentd/run_test.go              # tests outside test/e2e
 expect 1 internal/services/agents/service_test.go
 expect 1 test/fakemodel/server_test.go
+expect 0 flavors/opencode/prompts/system.md   # flavors' Markdown can be prompts
+expect 0 Makefile
+expect 0 go.work
 expect 1 hack/chart-check.sh
 expect 1 hack/needs-e2e.sh
 expect 1 .github/workflows/ci.yml
 expect 1 internal/zzz-new-package/x.go            # a package no binary imports
 expect 1 internal/auth/testdata/fixture.json
-expect 1 cmd/koinon-cli/main.go                   # a command the e2e does not build (if it exists)
 expect 1 web/package.json docs/x.md
 expect 1 # empty change
 
@@ -78,18 +81,38 @@ while IFS= read -r p; do
   expect 0 "$p"
 done < <(grep -v '^ *#' test/e2e/run.sh | grep -oE 'hack/[A-Za-z0-9_.-]+\.sh' | sort -u)
 
-# Against git: a branch touching only a doc is "not needed", one touching cmd/ is "needed".
+# Against git, in a scratch module shaped like the repository: the six binaries and the driver.
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+g() { git -C "$tmp" -c user.name=t -c user.email=t@example.invalid "$@"; }
 git -C "$tmp" init -q -b main
-mkdir -p "$tmp/charts" "$tmp/docs"
-git -C "$tmp" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m base
+printf 'module example.invalid/m\n\ngo 1.21\n' >"$tmp/go.mod"
+while read -r b; do
+  mkdir -p "$tmp/cmd/$b"
+  printf 'package main\n\nfunc main() {}\n' >"$tmp/cmd/$b/main.go"
+done < <(sed -n '/^BINARIES=(/,/^)/p' hack/needs-e2e.sh | grep -oE 'koinon-[a-z]+')
+mkdir -p "$tmp/test/e2e" "$tmp/charts/k/templates" "$tmp/docs"
+printf 'package e2e\n' >"$tmp/test/e2e/e2e.go"
+echo a >"$tmp/charts/k/templates/job.yaml"
+g add -A && g commit -q -m base
+needs() { (cd "$tmp" && "$OLDPWD/hack/needs-e2e.sh" "$1" >/dev/null 2>&1); }
+
 echo x >"$tmp/docs/a.md"
-git -C "$tmp" add . && git -C "$tmp" -c user.name=t -c user.email=t@example.invalid commit -q -m doc
-if (cd "$tmp" && "$OLDPWD/hack/needs-e2e.sh" HEAD~1 >/dev/null); then echo "FAIL: doc-only diff needs e2e" >&2; fail=1; fi
+g add -A && g commit -q -m doc
+if needs HEAD~1; then echo "FAIL: doc-only diff needs e2e" >&2; fail=1; fi
 echo x >"$tmp/charts/m.yaml"
-git -C "$tmp" add . && git -C "$tmp" -c user.name=t -c user.email=t@example.invalid commit -q -m code
-(cd "$tmp" && "$OLDPWD/hack/needs-e2e.sh" HEAD~2 >/dev/null) || { echo "FAIL: chart diff does not need e2e" >&2; fail=1; }
+g add -A && g commit -q -m chart
+needs HEAD~2 || { echo "FAIL: chart diff does not need e2e" >&2; fail=1; }
+
+# A rename out of a needed tree counts: the old path is a change too.
+g mv charts/k/templates/job.yaml docs/job.yaml && g commit -q -m rename
+needs HEAD~1 || { echo "FAIL: moving a chart template to docs/ does not need e2e" >&2; fail=1; }
+
+# Fail closed: a broken build graph (a renamed binary directory) exits 2, not 1.
+g mv cmd/koinon-api cmd/koinon-apiserver && g commit -q -m rename-binary
+rc=0
+(cd "$tmp" && "$OLDPWD/hack/needs-e2e.sh" HEAD~1 >/dev/null 2>&1) || rc=$?
+[[ $rc -eq 2 ]] || { echo "FAIL: broken go list exited $rc, want 2" >&2; fail=1; }
 
 [[ $fail -eq 0 ]] && echo "needs-e2e tests passed"
 exit "$fail"
