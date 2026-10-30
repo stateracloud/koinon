@@ -502,7 +502,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("6a. Agent's notes on the task")
 	})
 
-	It("6a2. the saved-work upload Service exists and answers; the tools port does not serve it", func(ctx SpecContext) {
+	It("6a2. the saved-work upload Service exists and answers; the tools port does not serve it; the OTLP port needs a token", func(ctx SpecContext) {
 		t.begin()
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
 		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
@@ -520,6 +520,24 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(post(portForward(ctx, kubectl, "svc/koinon-api-saved-work", "8082"), "/internal/saved-work")).To(Equal(http.StatusUnauthorized))
 		// The tools port, which agentd cannot reach, does not serve the path at all.
 		Expect(post(portForward(ctx, kubectl, "svc/koinon-api-tools", "8081"), "/internal/saved-work")).To(Equal(http.StatusNotFound))
+		// The internal OTLP listener (the gateway's access log, agentd's spans) requires its bearer token:
+		// no token and a wrong one are refused, whatever the path. (The gateway's own exports carry the
+		// real token, which is what keeps the spend ledger filling in the steps above.)
+		otlp := portForward(ctx, kubectl, "svc/koinon-api", "4318")
+		for _, auth := range []string{"", "Bearer koinon_test_not-a-real-token-wrong-0000000"} {
+			for _, path := range []string{"/v1/logs", "/v1/traces"} {
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+otlp+path, strings.NewReader("x"))
+				Expect(err).NotTo(HaveOccurred())
+				req.Header.Set("Content-Type", "application/x-protobuf")
+				if auth != "" {
+					req.Header.Set("Authorization", auth)
+				}
+				res, err := http.DefaultClient.Do(req)
+				Expect(err).NotTo(HaveOccurred())
+				_ = res.Body.Close()
+				Expect(res.StatusCode).To(Equal(http.StatusUnauthorized), path+" with Authorization %q", auth)
+			}
+		}
 		t.end("6a2. Saved-work upload Service")
 	})
 

@@ -103,6 +103,11 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 			if t := strings.TrimSpace(string(existing.Data[TokenKey])); len(t) < 32 || !bearerRE.MatchString(t) {
 				return results, fmt.Errorf("the Secret %s/%s exists but its %q key is not a token of at least 32 characters; fix or delete it (it is not changed here)", namespace, sp.Name, TokenKey)
 			}
+			// "previous" is optional (a rotation in progress); when present and not blank it must be valid
+			// too, or the listener would ignore it and the old token would stop working unnoticed.
+			if p := strings.TrimSpace(string(existing.Data["previous"])); p != "" && (len(p) < 32 || !bearerRE.MatchString(p)) {
+				return results, fmt.Errorf("the Secret %s/%s exists but its \"previous\" key is not a token of at least 32 characters; fix it or remove the key (it is not changed here)", namespace, sp.Name)
+			}
 			results = append(results, Result{Name: sp.Name})
 			_, _ = fmt.Fprintf(out, "secret %s: kept\n", sp.Name)
 			continue

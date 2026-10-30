@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"net"
 	"net/url"
 	"path"
 	"slices"
@@ -153,6 +152,11 @@ func (o Options) withDefaults() Options {
 // agent's keys out of the key ConfigMap, which revokes them without a restart; the next Apply with
 // an amount above zero puts them back. This is the S2 fallback of plan item G2.
 func Render(s gateway.State, o Options) (Rendered, error) {
+	if ex := o.AccessLogOTLP; ex != nil && ex.TokenSecret != "" {
+		if _, _, err := ex.SplitHostPort(); err != nil {
+			return Rendered{}, fmt.Errorf("kubernetes: %w", err)
+		}
+	}
 	if err := s.Validate(); err != nil {
 		return Rendered{}, err
 	}
@@ -362,16 +366,12 @@ func (b *builder) gatewayObjects() {
 
 // otlpBackend adds the Backend for the OTLP receiver, with the bearer token from ex.TokenSecret as
 // its auth, and returns the reference the access-log policy names. It reports false for a
-// host:port it cannot split, which leaves the export unauthenticated and so refused by the
-// receiver, rather than silently dropping the token requirement.
+// host:port it cannot split; Render refuses such an Options first, so the token requirement is
+// never silently dropped.
 func (b *builder) otlpBackend(ex *standalone.OTLPExport) (map[string]any, bool) {
-	host, portStr, err := net.SplitHostPort(ex.HostPort)
+	host, port, err := ex.SplitHostPort()
 	if err != nil {
-		return nil, false
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return nil, false
+		return nil, false // Render has refused it already
 	}
 	key := ex.TokenSecretKey
 	if key == "" {
