@@ -9,6 +9,7 @@ import (
 	mrand "math/rand"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/stateracloud/koinon/internal/tracing/scrub"
@@ -268,6 +269,17 @@ func alwaysShapes(w string) []shape {
 		{"ghp_" + w + w, w},
 		{"sk-ant-api03-" + w + w, w},
 		{"AKIA" + strings.ToUpper(w[:16]), strings.ToUpper(w[:16])},
+		{pemBegin + "\nMII" + w + "\n" + pemEnd, w},
+		{"password=" + w, w},
+		{"PGPASSWORD=" + w, w},
+		{`{"access_token":"` + w + `"}`, w},
+		{`{"clientSecret": "` + w + `"}`, w},
+		{"api_key: " + w, w},
+		{"https://svc:" + w + "@host.example.test/p", w},
+		{"cu" + "rl -u svc:" + w + " https://host.example.test", w},
+		{"ya29." + w + w, w},
+		{"npm_" + w + w + w, w},
+		{"Authorization: Digest realm=\"r\", response=\"" + w + "\"", w},
 	}
 }
 
@@ -330,4 +342,172 @@ func FuzzAlwaysShapesNeverSurvive(f *testing.F) {
 			}
 		}
 	})
+}
+
+func fill(c byte, n int) string { return strings.Repeat(string(c), n) }
+
+// TestReview2Leaks are the leaks of the second adversarial review.
+func TestReview2Leaks(t *testing.T) {
+	pem := pemBegin + "\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nBKcwggSjAgEAAoIBAQC7notreal\n" + pemEnd
+	jb, _ := json.Marshal(map[string]string{"output": "key:\n" + pem + "\ndone"})
+	cases := []struct{ name, in, needle string }{
+		{"pem raw", "before\n" + pem + "\nafter", "MIIEvQIBADANBgkq"},
+		{"pem escaped newlines", `"` + strings.ReplaceAll(pem, "\n", `\n`) + `"`, "MIIEvQIBADANBgkq"},
+		{"pem in JSON", string(jb), "MIIEvQIBADANBgkq"},
+		{"pem rsa", strings.ReplaceAll(pem, "PRIVATE", "RSA PRIVATE"), "MIIEvQIBADANBgkq"},
+		{"pem encrypted", strings.ReplaceAll(pem, "BEGIN PRIVATE", "BEGIN ENCRYPTED PRIVATE"), "MIIEvQIBADANBgkq"},
+		{"pem without end", pemBegin + "\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nBKcw", "MIIEvQIBADANBgkq"},
+		{"json access_token", `{"access_token":"notreal-access-value"}`, "notreal-access-value"},
+		{"json accessToken", `{"accessToken":"notreal-access-value"}`, "notreal-access-value"},
+		{"json refresh_token", `{"refresh_token":"notreal-refresh"}`, "notreal-refresh"},
+		{"json id_token", `{"id_token":"notreal-idtoken"}`, "notreal-idtoken"},
+		{"json client_secret", `{"client_secret":"notreal-clientsec"}`, "notreal-clientsec"},
+		{"json password", `{"password":"notreal pw"}`, "notreal pw"},
+		{"json passwd", `{"passwd":"notreal-passwd"}`, "notreal-passwd"},
+		{"json secret", `{"secret":"notreal-secret"}`, "notreal-secret"},
+		{"json private_key", `{"private_key":"notreal-private"}`, "notreal-private"},
+		{"json apikey", `{"apikey":"notreal-apikey1"}`, "notreal-apikey1"},
+		{"json api_key", `{"api_key":"notreal-apikey2"}`, "notreal-apikey2"},
+		{"json x-access-token", `{"x-access-token":"notreal-xaccess"}`, "notreal-xaccess"},
+		{"json x-amz-security-token", `{"x-amz-security-token":"notreal-amzsec"}`, "notreal-amzsec"},
+		{"json aws_secret_access_key", `{"aws_secret_access_key":"notreal-awssec"}`, "notreal-awssec"},
+		{"nested under a credential key", `{"db":{"password":{"value":"notreal-nested"}}}`, "notreal-nested"},
+		{"text password=", "connect password=notreal-pw-text now", "notreal-pw-text"},
+		{"env PGPASSWORD", "PGPASSWORD=notreal-pgpass psql -h db", "notreal-pgpass"},
+		{"env AWS_SECRET_ACCESS_KEY", "export AWS_SECRET_ACCESS_KEY=notreal-awssecret", "notreal-awssecret"},
+		{"text api_key: yaml", "api_key: notreal-yamlkey", "notreal-yamlkey"},
+		{"text client_secret yaml", "client_secret: notreal-clientsecret", "notreal-clientsecret"},
+		{"text json-ish password with spaces", `log {"password": "notreal pw words"} end`, "pw words"},
+		{"text accessToken json", `log {"accessToken":"notreal-access-js"}`, "notreal-access-js"},
+		{"ya29", "t=ya29." + fill('a', 30), "ya29.aaaa"},
+		{"GOCSPX", "s=GOCSPX-" + fill('b', 28), "GOCSPX-bbbb"},
+		{"npm", "//registry/:_authToken=npm_" + fill('c', 36), "npm_cccc"},
+		{"glsa", "glsa_" + fill('d', 30), "glsa_dddd"},
+		{"dop_v1", "dop_v1_" + fill('e', 40), "dop_v1_eeee"},
+		{"url userinfo", "clone https://deploy:notreal-urlpw@git.example.test/x.git", "notreal-urlpw"},
+		{"basic user flag", "cu" + "rl -u admin:notreal-curlpw https://api.example.test", "notreal-curlpw"},
+		{"long user flag, quoted", "cu" + `rl --user "admin:notreal-curlpw2" https://api.example.test`, "notreal-curlpw2"},
+		{"cookie with escaped quote in text", `log: {"Cookie":"a=1; q=\"x\"; session=notreal_sess_value"} end`, "notreal_sess_value"},
+		{"pair value first", `log {"value":"Basic dXNlcjpwYXNzd29yZA==","name":"Authorization"} end`, "dXNlcjpwYXNzd29yZA"},
+		{"pair with a member between", `log {"name":"Authorization","in":"header","value":"Basic dXNlcjpwYXNzd29yZA=="}`, "dXNlcjpwYXNzd29yZA"},
+		{"digest", "Authorization: Digest username=\"u\", realm=\"r\", response=\"notreal-digestresp\"\nHost: x", "notreal-digestresp"},
+		{"sigv4", "Authorization: AWS4-HMAC-SHA256 Credential=AKIDx/20261030/eu/s3/aws4_request, SignedHeaders=host, Signature=notreal0sig0123456789\n", "notreal0sig0123456789"},
+		{"token token=", "Authorization: Token token=\"notreal-tokvalue\"\n", "notreal-tokvalue"},
+		{"obs-fold", "Authorization: Basic\r\n dXNlcjpwYXNzd29yZA==\r\nHost: x", "dXNlcjpwYXNzd29yZA"},
+		{"curl -H digest", `curl -H 'Authorization: Digest response="notreal-digestresp2"' https://x`, "notreal-digestresp2"},
+		{"fullwidth inside escapes", esc(`mail jane~uFF20example.com`), "jane"},
+		{"triple url-encoded email", "mail jane%252540example.com", "jane"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			level := scrub.LevelFull
+			if strings.HasPrefix(tc.name, "fullwidth") || strings.HasPrefix(tc.name, "triple") {
+				level = scrub.LevelRedacted
+			}
+			s := scrub.New(scrub.Config{Level: level})
+			out, _ := s.Content(tc.in, 0)
+			if strings.Contains(out, tc.needle) {
+				t.Errorf("Content left %q in %q", tc.needle, out)
+			}
+			if !strings.HasPrefix(strings.TrimSpace(tc.in), "[") && strings.Contains(s.Text(tc.in), tc.needle) {
+				t.Errorf("Text left %q", tc.needle)
+			}
+		})
+	}
+	t.Run("a pair's other members stay readable", func(t *testing.T) {
+		out := scrub.New(scrub.Config{Level: scrub.LevelFull}).Text(`log {"name":"Authorization","in":"header","value":"Basic dXNlcjpwYXNzd29yZA=="}`)
+		if !strings.Contains(out, `"in":"header"`) || !strings.Contains(out, `"name":"Authorization"`) {
+			t.Errorf("%q", out)
+		}
+	})
+}
+
+func TestTooDeepEmbeddedBecomesPlaceholder(t *testing.T) {
+	inner := strings.Repeat("[", 250) + `"` + esc(`kgw~u005fnotrealnotrealnotreal`) + `"` + strings.Repeat("]", 250)
+	doc, _ := json.Marshal(map[string]string{"a": inner})
+	out, _ := scrub.New(scrub.Config{Level: scrub.LevelFull}).Content(string(doc), 0)
+	if strings.Contains(out, "notreal") || !strings.Contains(out, "too deeply nested") {
+		t.Errorf("%q", out)
+	}
+}
+
+// Embedded JSON with nothing to hide keeps its exact bytes at full.
+func TestEmbeddedJSONKeepsItsBytes(t *testing.T) {
+	inner := "{\n  \"a\": \"<b> & c\",\n  \"n\": 1.50\n}"
+	doc, _ := json.Marshal(map[string]string{"out": inner})
+	out, _ := scrub.New(scrub.Config{Level: scrub.LevelFull}).Content(string(doc), 0)
+	var got map[string]string
+	if err := json.Unmarshal([]byte(out), &got); err != nil || got["out"] != inner {
+		t.Errorf("%q %v", out, err)
+	}
+	// and with a secret in it, the rest of the layout is still readable
+	inner2 := "{\n  \"a\": \"" + fakeGatewayKey + "\",\n  \"b\": 2\n}"
+	doc, _ = json.Marshal(map[string]string{"out": inner2})
+	out, _ = scrub.New(scrub.Config{Level: scrub.LevelFull}).Content(string(doc), 0)
+	if strings.Contains(out, fakeGatewayKey) {
+		t.Errorf("leak %q", out)
+	}
+}
+
+func TestReview2FalsePositives(t *testing.T) {
+	for _, in := range []string{
+		"TestScrubJSON2Roundtrip4Cases", "func TestScrubJSON2Roundtrip4Cases(t *testing.T) {",
+		"invoice 2026-001234", "order 12345-67890",
+		"the cookie: chocolate chip", "I like password: it is a word", "token: the next one",
+	} {
+		for _, lvl := range []scrub.Level{scrub.LevelFull, scrub.LevelRedacted} {
+			if out := scrub.New(scrub.Config{Level: lvl}).Text(in); out != in {
+				t.Errorf("%s: %q -> %q", lvl, in, out)
+			}
+		}
+	}
+	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
+	in := `["Authorization", "is a header"]`
+	if out, _ := s.Content(in, 0); out != `["Authorization","is a header"]` {
+		t.Errorf("tuple prose: %q", out)
+	}
+	if out, _ := s.Content(`["Authorization","Basic dXNlcjpwYXNzd29yZA=="]`, 0); strings.Contains(out, "dXNlcjpw") {
+		t.Errorf("tuple credential: %q", out)
+	}
+}
+
+// Cutting a huge input before scrubbing must not leave a fragment of a secret at the cut.
+func TestContentCutLeavesNoFragment(t *testing.T) {
+	secret := "koinon_test_not-a-real-planted-secret-0123456789"
+	s := scrub.New(scrub.Config{Level: scrub.LevelFull, Secrets: scrub.NewSecrets(secret)})
+	const limit = 1024
+	for off := limit + 4096 - 120; off < limit+4096+20; off += 3 {
+		in := strings.Repeat("x ", off/2) + secret + strings.Repeat(" y", 5000)
+		out, cut := s.Content(in, limit)
+		if !cut || len(out) > limit || strings.Contains(out, secret[:8]) {
+			t.Fatalf("off %d: cut %v len %d out tail %q", off, cut, len(out), out[max(0, len(out)-60):])
+		}
+		doc, _ := json.Marshal(map[string]any{"a": in, "b": []string{in, in}})
+		o2, _ := s.Content(string(doc), limit)
+		if len(o2) > limit || strings.Contains(o2, secret[:8]) || !json.Valid([]byte(o2)) {
+			t.Fatalf("json off %d: len %d %q", off, len(o2), o2)
+		}
+	}
+}
+
+// Work per call is bounded by the limit, not by the size of the input.
+func TestContentIsBoundedOnHugeInputs(t *testing.T) {
+	s := scrub.New(scrub.Config{Level: scrub.LevelRedacted, Secrets: scrub.NewSecrets("aaaaaaaaaaaaaaab")})
+	for name, in := range map[string]string{
+		"digits":  strings.Repeat("1 ", 2<<20),
+		"dashes":  strings.Repeat("1-", 2<<20),
+		"cookie":  strings.Repeat(`"cookie","`, 400000),
+		"at":      strings.Repeat("@a.a", 1<<20),
+		"json":    "[" + strings.Repeat(`"a",`, 1<<20) + `"a"]`,
+		"escapes": strings.Repeat(`A\n`, 1<<20),
+	} {
+		start := time.Now()
+		out, cut := s.Content(in, 0)
+		if d := time.Since(start); d > 2*time.Second {
+			t.Errorf("%s: %v", name, d)
+		}
+		if !cut || len(out) > scrub.DefaultMaxBytes {
+			t.Errorf("%s: cut %v len %d", name, cut, len(out))
+		}
+	}
 }

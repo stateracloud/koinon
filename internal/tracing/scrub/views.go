@@ -22,40 +22,49 @@ type view struct {
 // toOriginal maps the view range [a, b) to the original text.
 func (v *view) toOriginal(a, b int) (int, int) { return v.pos[a], v.pos[b] }
 
-// maxUnescapeRounds is how many times escapes are decoded in turn: JSON inside a JSON string
-// inside a log line escapes twice or three times.
-const maxUnescapeRounds = 3
+// maxViews bounds how many readings of one text are examined. Each reading is one decoding step
+// (JSON escapes, percent escapes, fullwidth folding) applied to an earlier reading, so JSON escaped
+// three times, URL-encoded text inside it, or a fullwidth character inside escaped JSON are all reached.
+const (
+	maxViews  = 14
+	maxRounds = 6
+)
 
 // detectViews appends the spans found in the views of in. detect is the detector set.
 func detectViews(in string, detect func(string, []span) []span, spans []span) []span {
 	if !needsViews(in) { // no escape, no fullwidth form: no other reading
 		return spans
 	}
-	run := func(v *view) {
-		for _, sp := range detect(v.s, nil) {
-			a, b := v.toOriginal(sp.start, sp.end)
-			if b > a {
-				spans = append(spans, span{a, b, sp.kind})
+	type item struct {
+		v     *view
+		round int
+	}
+	root := &view{s: in}
+	frontier := []item{{root, 0}}
+	seen := map[string]bool{in: true}
+	for made := 0; len(frontier) > 0 && made < maxViews; {
+		it := frontier[0]
+		frontier = frontier[1:]
+		if it.round >= maxRounds {
+			continue
+		}
+		for _, mk := range [...]func(string) (*view, bool){unescapeView, percentView, foldView} {
+			v, ok := mk(it.v.s)
+			if !ok || seen[v.s] || made >= maxViews {
+				continue
 			}
-		}
-	}
-	// escapes decoded once, twice, three times
-	var prev *view
-	cur := in
-	for round := 0; round < maxUnescapeRounds; round++ {
-		v, ok := unescapeView(cur)
-		if !ok {
-			break
-		}
-		if prev != nil {
-			v = prev.compose(v)
-		}
-		run(v)
-		prev, cur = v, v.s
-	}
-	for _, mk := range [...]func(string) (*view, bool){percentView, foldView} {
-		if v, ok := mk(in); ok {
-			run(v)
+			seen[v.s] = true
+			made++
+			if it.v != root {
+				v = it.v.compose(v)
+			}
+			for _, sp := range detect(v.s, nil) {
+				a, b := v.toOriginal(sp.start, sp.end)
+				if b > a {
+					spans = append(spans, span{a, b, sp.kind})
+				}
+			}
+			frontier = append(frontier, item{v, it.round + 1})
 		}
 	}
 	return spans
