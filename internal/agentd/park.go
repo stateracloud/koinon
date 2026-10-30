@@ -149,6 +149,7 @@ func (r *runner) endTurn(ctx context.Context) error {
 	r.srcSeq++
 	src := r.srcSeq
 	parked, waiting := false, false
+	var parkReason store.RunParkReason
 	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
 		q := r.q.WithTx(tx)
 		if len(r.delivered) > 0 {
@@ -237,6 +238,7 @@ func (r *runner) endTurn(ctx context.Context) error {
 		if asked {
 			reason = store.RunParkReasonInputRequired
 		}
+		parkReason = reason
 		qids := make([]string, 0, len(qs))
 		for _, row := range qs {
 			qids = append(qids, row.ID.String())
@@ -287,6 +289,7 @@ func (r *runner) endTurn(ctx context.Context) error {
 		return r.dbErr(ctx, "end the turn", err)
 	}
 	if parked {
+		r.tr.parked(parkReason)
 		r.p.cfg.Metrics.Finished.WithLabelValues(string(store.RunStateParked)).Inc()
 		r.log.Info("run parked on approvals", "waiting_on_human", waiting)
 	} else {

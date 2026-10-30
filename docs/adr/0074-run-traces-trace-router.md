@@ -465,6 +465,28 @@ internal OTLP listener, `/v1/logs` and `/v1/traces`, requires a bearer token fro
 (`--otlp-endpoint` and `--otlp-token-file` on koinon-agentd, `KOINON_OTLP_ENDPOINT` and
 `KOINON_OTLP_TOKEN_FILE` in the chart). This closes issue #52.
 
+## Amendment (2026-10-30): how koinon-agentd emits the run's spans (rc.9)
+
+1. **Root span IDs are derived.** The turn's trace ID is random and stored on `run_turns`; its root span
+   ID is the first 8 bytes of SHA-256(`"koinon.turn.root"` + trace ID). A later turn, a takeover or the
+   router can therefore name a turn's root (a span link, a parent) from the row alone.
+2. **A turn is one `session/prompt`.** A retry, a refusal note or a wrap-up prompt in the same
+   execution each start a turn of their own; the turn row's `end_reason` says how it ended (`end_turn`,
+   `park:<reason>`, `failed`, `canceled`, `wrap_up`, `refused`, `interrupted`, `fenced`, `shutdown`).
+   The `koinon.wait` event is added only when the previous turn ended in a park. A run that fails
+   before its first prompt has no turn and so no trace.
+3. **Content is marked.** A span that carries content has `koinon.content.attributes`, a string array
+   of the names of its content attributes (`gen_ai.input.messages`, `gen_ai.output.messages`,
+   `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`). agentd sets content only when the org's
+   level (held to the platform ceiling) is above `none`; the router strips or scrubs exactly the listed
+   attributes per destination level and removes the marker. agentd pre-caps each value at 64 KiB to
+   bound memory; a longer value becomes a JSON string of its cut-off text.
+4. **Tool names.** `gen_ai.tool.name` is the ACP title only when it is a plain identifier; free text
+   (which can carry arguments) falls back to the ACP kind.
+5. **Export.** A bounded queue (2048 spans) that drops when full, one worker, 256-span batches with a
+   5 s deadline; a failed batch is dropped. `koinon_agentd_trace_spans_dropped_total{reason}`
+   (`queue_full`, `export_failed`) and `..._exported_total` count them.
+
 ## Links
 
 - [0023](0023-observability-and-audit.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md),
