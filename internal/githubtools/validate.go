@@ -33,7 +33,7 @@ const (
 // PullRequestArgs are create_pull_request's arguments: the exact change the
 // approver sees and Koinon executes after approval.
 type PullRequestArgs struct {
-	Branch string       `json:"branch" jsonschema:"the new branch Koinon creates for the change; must start with koinon/, for example koinon/fix-readme-typo"`
+	Branch string       `json:"branch" jsonschema:"a short name for the change, for example fix-readme-typo; Koinon files the branch as koinon/<your agent>/<name> so agents never collide, and the approval shows the final name"`
 	Title  string       `json:"title" jsonschema:"pull request title, one line in the repository's commit style"`
 	Body   string       `json:"body,omitempty" jsonschema:"pull request description: what changed, why, how it was checked"`
 	Base   string       `json:"base,omitempty" jsonschema:"branch to merge into; empty means the repository's default branch"`
@@ -75,6 +75,50 @@ func refuse(reasons []string) error {
 		return nil
 	}
 	return &ValidationError{Reasons: reasons}
+}
+
+// AgentNamespace is the branch namespace of one agent: its display name slugified (for
+// reading) and the last eight hex digits of its ID (for uniqueness: agent IDs are UUIDv7, whose
+// leading digits are a timestamp that agents created together share; display names are not
+// unique and can change). Koinon has no agent slug, so the ID prefix is the stable part.
+func AgentNamespace(displayName, agentID string) string {
+	var b strings.Builder
+	dash := true
+	for _, r := range strings.ToLower(displayName) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			dash = false
+		case !dash:
+			b.WriteByte('-')
+			dash = true
+		}
+		if b.Len() >= 24 {
+			break
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		slug = "agent"
+	}
+	id := strings.ReplaceAll(agentID, "-", "")
+	if len(id) > 8 {
+		id = id[len(id)-8:]
+	}
+	return slug + "-" + id
+}
+
+// FinalBranch turns the agent's suggested branch into the branch Koinon creates:
+// koinon/<agent namespace>/<suggestion>. A leading koinon/ the agent already added is dropped,
+// so koinon/upgrade-x and upgrade-x both become koinon/<agent>/upgrade-x. It returns a
+// refusal when the result is not a valid git ref.
+func FinalBranch(namespace, suggestion string) (string, error) {
+	name := strings.TrimPrefix(strings.TrimSpace(suggestion), BranchPrefix)
+	final := BranchPrefix + namespace + "/" + name
+	if name == "" || !validRef(final) {
+		return "", refuse([]string{fmt.Sprintf("branch %q must be a short name for the change, for example fix-typo: letters, digits, . _ - and / only, no leading . or -, no .., no .lock suffix; Koinon files it as %s<your agent>/<name>", suggestion, BranchPrefix)})
+	}
+	return final, nil
 }
 
 var branchRE = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
