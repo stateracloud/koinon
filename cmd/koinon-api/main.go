@@ -35,6 +35,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -88,6 +89,9 @@ import (
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/internal/tracedest"
+	"github.com/stateracloud/koinon/internal/tracing/export"
+	tracerouter "github.com/stateracloud/koinon/internal/tracing/router"
 	"github.com/stateracloud/koinon/internal/triggers/schedule"
 	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
@@ -125,15 +129,18 @@ type config struct {
 	sweepInterval time.Duration
 	watchPoll     time.Duration
 
-	otlpAddr         string
-	otlpTokenDir     string
-	metricsAddr      string
-	toolsAddr        string
-	savedWorkAddr    string
-	savedWorkSecret  string
-	secretsNamespace string
-	kubeconfig       string
-	githubAPIURL     string
+	otlpAddr     string
+	otlpTokenDir string
+	// The trace router's byte budgets; 0 derives each from the container memory limit (its cgroup's,
+	// or KOINON_MEMORY_LIMIT_BYTES when that is lower; 20% queues, 5% intake, 3% held roots, 8% requests).
+	traceQueueBytes, traceIntakeBytes, traceHeldBytes, traceRequestBytes int
+	metricsAddr                                                          string
+	toolsAddr                                                            string
+	savedWorkAddr                                                        string
+	savedWorkSecret                                                      string
+	secretsNamespace                                                     string
+	kubeconfig                                                           string
+	githubAPIURL                                                         string
 
 	kekDir string
 	// kekSecret names the Secret with the key-encryption keys. koinon-api creates it on its first
@@ -210,6 +217,15 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.otlpTokenDir, "otlp-token-dir", "",
 		"directory with the OTLP receiver's bearer token (file token) and, during a rotation, the one it replaced (file previous); "+
 			"required with --otlp-addr")
+
+	fs.IntVar(&c.traceQueueBytes, "trace-queue-bytes", 0,
+		"bytes all run-trace destination queues may hold together (ADR 0074); 0 is 20% of the container memory limit (the cgroup's or KOINON_MEMORY_LIMIT_BYTES, the lower) (128 MiB without one)")
+	fs.IntVar(&c.traceIntakeBytes, "trace-intake-bytes", 0,
+		"bytes of spans the trace router may hold while attributing them; 0 is 5% of the memory limit (the cgroup's or KOINON_MEMORY_LIMIT_BYTES, the lower) (32 MiB without one)")
+	fs.IntVar(&c.traceHeldBytes, "trace-held-bytes", 0,
+		"bytes of turn root spans the trace router may hold for the ledger; 0 is 3% of the memory limit (the cgroup's or KOINON_MEMORY_LIMIT_BYTES, the lower) (16 MiB without one)")
+	fs.IntVar(&c.traceRequestBytes, "trace-request-bytes", 0,
+		"bytes of export requests the trace receiver may read and decode at once; 0 is 8% of the memory limit (the cgroup's or KOINON_MEMORY_LIMIT_BYTES, the lower) (64 MiB without one)")
 
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort,
 		"listen address of /metrics (Prometheus); empty disables it")
@@ -593,9 +609,14 @@ func run() error {
 	} else {
 		echo = modelcheck.New(pool, nil, prices.NewResolver(pricing.Embedded()))
 	}
+	// Run-trace destinations (ADR 0074). The client dials only what the egress policy allows.
+	traceSvc, err := tracedest.New(pool, catalogKeys, urlPolicy, slog.Default())
+	if err != nil {
+		return err
+	}
 	svc := services.New(pool, services.Options{
-		ModelCheck: echo,
-		Hub:        hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
+		ModelCheck: echo, Traces: traceSvc,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
 	// The notification of an opened question (the park that opens it commits in koinon-agentd).
 	safego.GoOrStop(bgCtx, slog.Default(), "question-sweeper", stop, func(ctx context.Context) { svc.QuestionSweeper(ctx, cfg.sweepInterval) })
@@ -628,9 +649,25 @@ func run() error {
 			return fmt.Errorf("--otlp-token-dir: %w", err)
 		}
 		otlpMetrics := otlpauth.NewMetrics(reg)
+		// The trace router (ADR 0074): agentd's spans arrive at /v1/traces, inside the token check.
+		exportClient, err := export.NewClient(urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second}), 0)
+		if err != nil {
+			return err
+		}
+		traceRouter, err := tracerouter.New(tracerouter.Config{
+			Store: tracerouter.NewPGStore(pool), Routes: traceSvc, Secrets: tracerouter.NewPGSecrets(pool, opener, slog.Default()),
+			Health: tracerouter.NewPGHealth(pool), Sender: exportClient, MemoryLimit: memlimit.Limit(),
+			QueueBytes: cfg.traceQueueBytes, IntakeBytes: cfg.traceIntakeBytes, MaxHeldBytes: cfg.traceHeldBytes, RequestBytes: cfg.traceRequestBytes,
+			Metrics: tracerouter.NewMetrics(reg), Log: slog.Default(),
+		})
+		if err != nil {
+			return err
+		}
+		traceRouter.Start(bgCtx)
+		defer traceRouter.Close()
 		safego.GoOrStop(ctx, slog.Default(), "ledger-otlp", stop, func(context.Context) {
 			slog.Info("starting the internal OTLP receiver", "addr", cfg.otlpAddr)
-			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), otlpauth.Middleware(otlpTokens, otlpMetrics)); err != nil {
+			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), otlpauth.Middleware(otlpTokens, otlpMetrics), traceRouter.Mount()); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
 				stop()
 			}

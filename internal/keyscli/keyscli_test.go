@@ -24,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/tracedest"
 )
 
 const ns = "koinon"
@@ -246,6 +247,44 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(json.Unmarshal(mcpAfter, &mb)).To(Succeed())
 		Expect(mb.Ciphertext).NotTo(Equal(ma.Ciphertext), "the MCP credential is sealed again")
 		openMCP(ctx, r, mcp)
+	})
+
+	It("rewraps and reencrypts trace destination credentials, the platform's single row included", func(ctx SpecContext) {
+		r := ring(ctx)
+		seal := func(b secretstore.Binding) []byte {
+			env, err := r.Seal(b, []byte(`{"api_key":"koinon_test_not-a-real-token"}`))
+			Expect(err).NotTo(HaveOccurred())
+			raw, err := json.Marshal(env)
+			Expect(err).NotTo(HaveOccurred())
+			return raw
+		}
+		var id pgtype.UUID
+		Expect(pool.QueryRow(ctx, `INSERT INTO trace_destinations (org_id, name, backend, endpoint_url) VALUES ($1, 'dd', 'datadog', 'https://otlp.example.com') RETURNING id`, org).Scan(&id)).To(Succeed())
+		_, err := pool.Exec(ctx, `UPDATE trace_destinations SET credentials = $3 WHERE org_id = $1 AND id = $2`, org, id, seal(tracedest.Binding(org, id)))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `INSERT INTO platform_trace_destination (backend, endpoint_url, credentials) VALUES ('datadog', 'https://otlp.example.com', $1)
+			ON CONFLICT (singleton) DO UPDATE SET credentials = EXCLUDED.credentials`, seal(tracedest.PlatformBinding()))
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _, _ = pool.Exec(ctx, `DELETE FROM platform_trace_destination`) })
+		Expect(usage(ctx)).To(Equal(map[string]int{"kek-20260101-aaaa": 2}))
+
+		Expect(tool.Add(ctx, "")).To(Succeed())
+		set, _ := ks.Load(ctx)
+		for k := range set.Keys {
+			if k != "kek-20260101-aaaa" {
+				Expect(tool.Activate(ctx, k)).To(Succeed())
+			}
+		}
+		Expect(tool.Rewrap(ctx)).To(Succeed())
+		Expect(out.String()).To(ContainSubstring("2 value(s) rewrapped"))
+		Expect(tool.Reencrypt(ctx)).To(Succeed())
+		var raw []byte
+		Expect(pool.QueryRow(ctx, `SELECT credentials FROM platform_trace_destination`).Scan(&raw)).To(Succeed())
+		var env secretstore.Envelope
+		Expect(json.Unmarshal(raw, &env)).To(Succeed())
+		plain, err := ring(ctx).Open(tracedest.PlatformBinding(), env)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(plain)).To(ContainSubstring("api_key"))
 	})
 
 	It("refuses to make a new KEK Secret when the database holds encrypted values", func(ctx SpecContext) {
