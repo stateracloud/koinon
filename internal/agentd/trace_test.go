@@ -3,6 +3,8 @@
 package agentd_test
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -76,6 +78,9 @@ type otlpReceiver struct {
 	schemas  []string
 	badAuth  int
 	requests atomic.Int64
+	// maxBody, when set, is the request cap on the wire: a larger request gets 413 and is counted.
+	maxBody  int64
+	tooLarge atomic.Int64
 	// reject, when set, is the number of spans every response says it rejected (a partial success).
 	reject int64
 	// block makes every request wait until it is closed (a dead or slow receiver).
@@ -105,7 +110,22 @@ func newReceiver() *otlpReceiver {
 			return
 		}
 		r.mu.Unlock()
-		body, _ := io.ReadAll(req.Body)
+		var rd io.Reader = req.Body
+		if r.maxBody > 0 {
+			rd = io.LimitReader(req.Body, r.maxBody+1)
+		}
+		body, _ := io.ReadAll(rd)
+		if r.maxBody > 0 && int64(len(body)) > r.maxBody {
+			r.tooLarge.Add(1)
+			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		if req.Header.Get("Content-Encoding") == "gzip" {
+			zr, err := gzip.NewReader(bytes.NewReader(body))
+			if err == nil {
+				body, _ = io.ReadAll(zr)
+			}
+		}
 		var msg coltracepb.ExportTraceServiceRequest
 		if err := proto.Unmarshal(body, &msg); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

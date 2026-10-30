@@ -88,6 +88,9 @@ type Tracing struct {
 	BatchSize int
 	// Interval is how long spans wait for a fuller batch. Default 2s.
 	Interval time.Duration
+	// BatchBytes bounds the estimated size of one export, so a batch of spans with large content stays
+	// under the receiver's request cap (4 MiB). Default 3 MiB.
+	BatchBytes int
 	// ExportTimeout bounds one export, retries included. Default 5s.
 	ExportTimeout time.Duration
 	// ContentPreCap bounds each content attribute in memory, in bytes. The router truncates to the
@@ -105,6 +108,7 @@ func (t *Tracing) defaults() error {
 	setDefault(&t.QueueSize, 2048)
 	setDefault(&t.BatchSize, 256)
 	setDefault(&t.Interval, 2*time.Second)
+	setDefault(&t.BatchBytes, 3<<20)
 	setDefault(&t.ExportTimeout, 5*time.Second)
 	setDefault(&t.ContentPreCap, 64<<10)
 	return nil
@@ -157,6 +161,7 @@ func otlpExporter(cfg *Tracing) (sdktrace.SpanExporter, error) {
 		otlptracehttp.WithEndpointURL(base+"/v1/traces"),
 		otlptracehttp.WithHTTPClient(&http.Client{Transport: tr}),
 		otlptracehttp.WithTimeout(cfg.ExportTimeout),
+		otlptracehttp.WithCompression(otlptracehttp.GzipCompression),
 		otlptracehttp.WithRetry(otlptracehttp.RetryConfig{
 			Enabled: true, InitialInterval: 500 * time.Millisecond, MaxInterval: 2 * time.Second, MaxElapsedTime: cfg.ExportTimeout,
 		}),
@@ -210,16 +215,17 @@ func (e otlpSpanExporter) takeRejected() int64 { return e.tr.rejected.Swap(0) }
 
 // dropProcessor is a span processor with a bounded queue that drops instead of waiting.
 type dropProcessor struct {
-	exp     sdktrace.SpanExporter
-	m       *Metrics
-	ch      chan sdktrace.ReadOnlySpan
-	flushCh chan chan struct{}
-	stop    chan struct{}
-	done    chan struct{}
-	batch   int
-	every   time.Duration
-	timeout time.Duration
-	log     *slog.Logger
+	exp      sdktrace.SpanExporter
+	m        *Metrics
+	ch       chan sdktrace.ReadOnlySpan
+	flushCh  chan chan struct{}
+	stop     chan struct{}
+	done     chan struct{}
+	batch    int
+	maxBytes int
+	every    time.Duration
+	timeout  time.Duration
+	log      *slog.Logger
 	// mu orders OnEnd against Shutdown: no span is queued once closed is set, so the worker's last
 	// drain sees every span that was accepted.
 	mu      sync.RWMutex
@@ -235,7 +241,7 @@ func newDropProcessor(exp sdktrace.SpanExporter, cfg *Tracing, m *Metrics, log *
 	p := &dropProcessor{
 		exp: exp, m: m, log: log, ch: make(chan sdktrace.ReadOnlySpan, cfg.QueueSize), flushCh: make(chan chan struct{}),
 		stop: make(chan struct{}), done: make(chan struct{}),
-		batch: cfg.BatchSize, every: cfg.Interval, timeout: cfg.ExportTimeout,
+		batch: cfg.BatchSize, maxBytes: cfg.BatchBytes, every: cfg.Interval, timeout: cfg.ExportTimeout,
 	}
 	go p.loop()
 	return p
@@ -264,7 +270,17 @@ func (p *dropProcessor) loop() {
 	var buf []sdktrace.ReadOnlySpan
 	flush := func() {
 		for len(buf) > 0 {
-			n := min(len(buf), p.batch)
+			// A batch ends at BatchSize spans or BatchBytes of estimated size, whichever comes first;
+			// a span larger than the byte bound goes alone.
+			n, size := 0, 0
+			for n < len(buf) && n < p.batch {
+				sz := spanSize(buf[n])
+				if n > 0 && size+sz > p.maxBytes {
+					break
+				}
+				size += sz
+				n++
+			}
 			p.export(buf[:n])
 			buf = buf[n:]
 		}
@@ -299,6 +315,26 @@ func (p *dropProcessor) loop() {
 			return
 		}
 	}
+}
+
+// spanSize estimates the size of a span on the wire: its text, which is what makes a span large.
+func spanSize(s sdktrace.ReadOnlySpan) int {
+	n := 256 + len(s.Name())
+	for _, kv := range s.Attributes() {
+		n += len(kv.Key) + 16
+		switch kv.Value.Type() {
+		case attribute.STRING:
+			n += len(kv.Value.AsString())
+		case attribute.STRINGSLICE:
+			for _, v := range kv.Value.AsStringSlice() {
+				n += len(v) + 4
+			}
+		}
+	}
+	for _, e := range s.Events() {
+		n += 64 + len(e.Name) + 32*len(e.Attributes)
+	}
+	return n + 64*len(s.Links())
 }
 
 func (p *dropProcessor) export(spans []sdktrace.ReadOnlySpan) {

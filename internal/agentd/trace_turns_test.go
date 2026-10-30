@@ -4,7 +4,10 @@ package agentd_test
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"time"
@@ -210,6 +213,39 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 			Expect(msgs[0]["parts"]).NotTo(BeEmpty())
 			Expect(a[k]).To(ContainSubstring("…[truncated]"))
 		}
+	})
+
+	It("exports 256 tool spans of 64 KiB content in several batches under the receiver's request cap, gzipped", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		blob := func() string {
+			b := make([]byte, 40<<10)
+			_, _ = rand.Read(b) // incompressible, so the wire size is real
+			return base64.StdEncoding.EncodeToString(b)
+		}
+		e.harness.set(func(h *harness) {
+			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
+				defer GinkgoRecover()
+				if !strings.Contains(text, markLong) {
+					return false
+				}
+				for i := range 256 {
+					id := sdk.ToolCallId(fmt.Sprintf("c%d", i))
+					Expect(say(sdk.StartToolCall(id, "read", sdk.WithStartKind(sdk.ToolKindRead), sdk.WithStartRawInput(map[string]any{"data": blob()})))).To(Succeed())
+					Expect(say(sdk.UpdateToolCall(id, sdk.WithUpdateStatus(sdk.ToolCallStatusCompleted), sdk.WithUpdateRawOutput(map[string]any{"data": blob()})))).To(Succeed())
+				}
+				return true
+			}
+		})
+		rcv := newReceiver()
+		rcv.maxBody = 4 << 20
+		reg := agentd.NewMetrics(nil)
+		r := e.enqueue(ctx, e.task(ctx, markLong))
+		e.pool("agentd-big", tracingOn(rcv, fakeDecider{traced: true, level: "full"}, func(t *agentd.Tracing) { t.QueueSize = 4096; t.BatchSize = 64; t.Interval = time.Second }), func(c *agentd.Config) { c.Metrics = reg })
+		Eventually(runState(ctx, r)).WithTimeout(60 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(rcv.count).WithTimeout(30 * time.Second).Should(Equal(257))
+		Expect(rcv.tooLarge.Load()).To(BeZero(), "no request was refused as too large")
+		Expect(rcv.requests.Load()).To(BeNumerically(">=", 3), "several batches")
+		Expect(testutil.ToFloat64(reg.TraceSpansDropped.WithLabelValues("export_failed"))).To(BeZero())
 	})
 
 	It("counts spans the receiver rejected in a partial success", func(ctx SpecContext) {
