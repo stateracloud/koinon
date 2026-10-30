@@ -53,6 +53,7 @@ jobs:
 
       - name: Does this change need the e2e?
         id: decide
+        shell: bash # -eo pipefail: tee must not hide the script's status
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.base_ref }}
@@ -72,11 +73,17 @@ jobs:
             cp hack/needs-e2e.sh "$script"
           fi
           chmod +x "$script"
-          if "$script" "origin/$BASE" | tee "$RUNNER_TEMP/decide.txt"; then
-            echo "needed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "needed=false" >> "$GITHUB_OUTPUT"
-          fi
+          # 0 needed, 1 not needed; anything else (git or go list failed) fails closed: run it.
+          rc=0
+          "$script" "origin/$BASE" 2>&1 | tee "$RUNNER_TEMP/decide.txt" || rc=$?
+          case $rc in
+            0) echo "needed=true" >> "$GITHUB_OUTPUT" ;;
+            1) echo "needed=false" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::warning::hack/needs-e2e.sh exited $rc; running the e2e to be safe"
+              echo "needed=true" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
           { echo '## Kind e2e'; echo; sed 's/^/    /' "$RUNNER_TEMP/decide.txt"; } >> "$GITHUB_STEP_SUMMARY"
 
   quickstart:

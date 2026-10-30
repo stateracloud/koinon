@@ -10,7 +10,7 @@
 #
 # Needs the Go toolchain (it asks `go list` for the binaries' dependencies).
 # Exit 0 and print the paths that matter when the e2e is needed; exit 1 and print "not needed"
-# otherwise. Exit 2 on a usage or git error.
+# otherwise. Exit 2 on a usage, git or `go list` error: callers must treat that as "needed".
 set -euo pipefail
 
 # --- The rule (the only place to change it) -------------------------------------------------------
@@ -37,16 +37,21 @@ BINARIES=(
 # Inputs of test/e2e/run.sh. Derive the hack/ entries by reading run.sh (hack/needs-e2e-test.sh
 # fails when run.sh calls a hack/ script that no pattern matches).
 NEEDED=(
+  '^cmd/'                   # backstop: a renamed binary directory breaks `go list` (also fails closed)
+  '^vendor/'
   '^charts/'
   '^internal/db/migrations/'
   '^flavors/'
   '^go\.(mod|sum)$'          # dependency changes reach the binaries
+  '^go\.work(\.sum)?$'
+  '^Makefile$'              # test-e2e-kind is `make test-e2e-kind`
   '^\.ko\.yaml$'            # how ko builds the six images
   '^release/versions\.yaml$' # the chart's image pins, if present
 )
 FORCED=(
   '^test/e2e/'              # the driver, run.sh, kind/ (up.sh, fakes, values)
   '^\.github/workflows/e2e-kind\.yml$'
+  '^flavors/.*\.md$'        # agent prompts and instructions may be Markdown
   '^hack/docs-e1\.sh$'      # run.sh runs the quickstart blocks through it
   '^docs/site/src/content/docs/quickstart\.md$'
 )
@@ -67,23 +72,22 @@ any_match() { # <path> <pattern>...
   return 1
 }
 
-# depdirs prints the repository-relative directory of every package of this module the binaries
-# build (one `go list`, evaluated lazily on first use).
-DEPDIRS=""
-depdirs() {
-  if [[ -z $DEPDIRS ]]; then
-    local root
-    root=$(pwd)
-    DEPDIRS=$'\n'$(go list -deps -f '{{if not .Standard}}{{.Dir}}{{end}}' "${BINARIES[@]}" |
-      awk -v r="$root/" 'index($0, r) == 1 { print substr($0, length(r) + 1) }')$'\n'
-  fi
+# DEPDIRS: the repository-relative directory of every package of this module the binaries build
+# (linux, no cgo, as ko builds them) or the driver (test/e2e, with its test dependencies) uses.
+# One `go list` each, always run, outside any condition: if it fails (a renamed binary directory,
+# no toolchain) the script exits 2, which callers read as "needed".
+godirs() { # <go list args...>
+  local root out
+  root=$(pwd)
+  out=$(GOOS=linux CGO_ENABLED=0 go list -deps -f '{{if not .Standard}}{{.Dir}}{{end}}' "$@") ||
+    { echo "needs-e2e: go list failed; cannot derive the build graph" >&2; exit 2; }
+  awk -v r="$root/" 'index($0, r) == 1 { print substr($0, length(r) + 1) }' <<<"$out"
 }
 
 # in_build_graph <path>: the file's directory, or an ancestor of it, is a package dir of a binary.
 in_build_graph() {
   local d=${1%/*}
   [[ $d != "$1" ]] || return 1 # a file in the repository root
-  depdirs
   while [[ $d != . && -n $d ]]; do
     [[ $DEPDIRS == *$'\n'"$d"$'\n'* ]] && return 0
     [[ $d == */* ]] || break
@@ -104,12 +108,15 @@ classify() { # reads paths on stdin; prints the relevant ones
 }
 
 cd "$(git rev-parse --show-toplevel)"
+bin_dirs=$(godirs "${BINARIES[@]}") || exit 2
+drv_dirs=$(godirs -test ./test/e2e) || exit 2
+DEPDIRS=$'\n'$bin_dirs$'\n'$drv_dirs$'\n'
 if [[ ${1:-} == --stdin ]]; then
   files=$(cat)
 else
   base=${1:-origin/main}
   mb=$(git merge-base "$base" HEAD 2>/dev/null) || { echo "needs-e2e: no merge base with $base (fetch it?)" >&2; exit 2; }
-  files=$(git diff --name-only "$mb" HEAD)
+  files=$(git diff --name-only --no-renames "$mb" HEAD)
 fi
 
 matched=$(classify <<<"$files")

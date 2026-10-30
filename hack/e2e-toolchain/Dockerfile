@@ -6,13 +6,15 @@
 # daemon: the script mounts the host's Docker socket, so kind nodes and ko/buildx builds run on the
 # host's Docker. Keep the versions here in step with the workflow (hack/e2e-remote-test.sh checks).
 #
-# GO_VERSION is passed by hack/e2e-remote.sh from go.mod; the default is only for a bare `docker build`.
+# GO_VERSION must equal go.mod's `go` line (hack/e2e-remote.sh refuses to build otherwise) and
+# GO_DIGEST is that tag's multi-arch index digest: bump both together.
 ARG GO_VERSION=1.27.3
+ARG GO_DIGEST=sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9
 
 FROM docker:29-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb AS dockercli
 FROM docker/buildx-bin:0.30.1@sha256:cc16bd35c1bbdde2c9d4ee08cf33be55b17e6ed2188816292dbde51064105e25 AS buildx
 
-FROM golang:${GO_VERSION}-bookworm
+FROM golang:${GO_VERSION}-bookworm@${GO_DIGEST}
 ARG TARGETARCH
 ARG KIND_VERSION=v0.33.0
 ARG KO_VERSION=0.19.1
