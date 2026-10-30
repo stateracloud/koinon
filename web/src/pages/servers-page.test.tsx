@@ -71,6 +71,7 @@ const tools = [
   create(ToolSchema, { serverId: 's-docs', name: 'legacy', tier: Tier.AUTO, present: false }),
   create(ToolSchema, { serverId: 's-docs', name: 'long_tool', description: 'Too long', tier: Tier.ASK, present: true, unavailable: 'unavailable: name too long for the gateway' }),
   create(ToolSchema, { serverId: 's-docs', name: 'sync', description: 'Sync pages', tier: Tier.AUTO, present: true }),
+  create(ToolSchema, { serverId: 's-docs', name: 'poisoned', description: 'Search…', tier: Tier.ASK, present: true, descriptionOriginalLength: 5000n, descriptionCapped: true, descriptionCleaned: true }),
   create(ToolSchema, { serverId: 's-sec', name: 'read', description: 'Read a page', tier: Tier.ASK, present: true }),
 ]
 
@@ -251,6 +252,14 @@ describe('Servers page', () => {
     expect(row.getByText(/unavailable: name too long for the gateway/)).toBeInTheDocument()
     expect(row.getByText(/Agents are not offered this tool/)).toBeInTheDocument()
     expect(row.getByRole('radio', { name: 'Ask' })).toBeEnabled()
+  })
+
+  it('says when Koinon sanitised a tool description', async () => {
+    setup()
+    const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
+    const row = within(tl.getByText('poisoned').closest('li')!)
+    expect(row.getByText(/hidden characters removed or lookalike tags escaped; cut to its length cap \(the server published 5000 characters\)/)).toBeInTheDocument()
+    expect(within(tl.getByText('sync').closest('li')!).queryByText(/Koinon sanitised/)).not.toBeInTheDocument()
   })
 
   it('hints that reviewing does not restore Auto', async () => {

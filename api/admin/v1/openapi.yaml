@@ -1134,7 +1134,7 @@ components:
         removeCredential: {type: boolean}
     McpTool:
       type: object
-      required: [serverId, name, description, readOnlyHint, tier, contentHash, present, firstSeenAt, lastSeenAt]
+      required: [serverId, name, description, readOnlyHint, tier, contentHash, descriptionOriginalLength, descriptionCapped, descriptionCleaned, present, firstSeenAt, lastSeenAt]
       properties:
         serverId: {type: string, format: uuid}
         name: {type: string}
@@ -1151,7 +1151,16 @@ components:
           description: A call in the ask tier needs two approvers.
         contentHash:
           type: string
-          description: SHA-256 of the description and input schema as last published.
+          description: SHA-256 of the sanitised description and input schema as last published.
+        descriptionOriginalLength:
+          type: integer
+          description: Length in characters of the description as the server published it. `description` is the sanitised text.
+        descriptionCapped:
+          type: boolean
+          description: The description, or a description in the input schema, was cut to its length cap.
+        descriptionCleaned:
+          type: boolean
+          description: Control, invisible or tag characters were removed, or harness-lookalike tags escaped, in the description or the input schema's strings.
         unavailable:
           type: string
           description: Why agents are not offered the tool, for example a name too long.

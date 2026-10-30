@@ -47,6 +47,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/mcpsanitize"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
@@ -211,6 +212,12 @@ type Tool struct {
 	RequiresTwoApprovers bool `json:"requiresTwoApprovers,omitempty"`
 	// ContentHash identifies the description and schema as they were last published.
 	ContentHash string `json:"contentHash"`
+	// DescriptionOriginalLength is the length in characters of the description as the server published
+	// it. Description is the sanitised text (internal/mcpsanitize); Capped and Cleaned say it was cut
+	// or had characters removed or tags escaped, in the description or in the input schema's strings.
+	DescriptionOriginalLength int  `json:"descriptionOriginalLength"`
+	DescriptionCapped         bool `json:"descriptionCapped"`
+	DescriptionCleaned        bool `json:"descriptionCleaned"`
 	// Unavailable says why agents cannot be offered the tool, for example a name too long.
 	Unavailable string     `json:"unavailable,omitempty"`
 	Present     bool       `json:"present"`
@@ -304,6 +311,7 @@ func toTool(t store.McpTool) Tool {
 		ServerID: t.ServerID.String(), Name: t.Name, Description: t.Description, ReadOnlyHint: t.ReadOnlyHint,
 		Tier: string(t.Tier), ReviewReason: t.ReviewReason.String, Present: t.Present,
 		RequiresTwoApprovers: t.RequiresTwoApprovers, ContentHash: t.ContentHash,
+		DescriptionOriginalLength: int(t.DescriptionOriginalLength), DescriptionCapped: t.DescriptionCapped, DescriptionCleaned: t.DescriptionCleaned,
 		FirstSeenAt: t.FirstSeenAt.Time, LastSeenAt: t.LastSeenAt.Time, TierSetBy: t.TierSetBy.String, TierSetAt: timePtr(t.TierSetAt),
 	}
 }
@@ -845,10 +853,11 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 			if len(schema) == 0 || !json.Valid(schema) || schema[0] != '{' {
 				schema = json.RawMessage(`{"type":"object"}`)
 			}
-			desc := lt.Description
-			if len(desc) > 20000 {
-				desc = desc[:20000]
-			}
+			// The description and the schema's strings reach the model verbatim, so what is stored,
+			// hashed and offered is the sanitised text (ADR 0057 amendment, #267).
+			desc, rep := mcpsanitize.Description(lt.Description)
+			schema, srep := mcpsanitize.Schema(schema)
+			rep.Capped, rep.Cleaned = rep.Capped || srep.Capped, rep.Cleaned || srep.Cleaned
 			names = append(names, lt.Name)
 			hash := ContentHash(desc, schema)
 			cur, ok := have[lt.Name]
@@ -856,6 +865,7 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 			case !ok:
 				if _, err := q.InsertMCPTool(ctx, store.InsertMCPToolParams{
 					OrgID: org, ServerID: serverID, Name: lt.Name, Description: desc, InputSchema: schema, ContentHash: hash, ReadOnlyHint: lt.ReadOnlyHint,
+					DescriptionOriginalLength: int64(rep.OriginalLen), DescriptionCapped: rep.Capped, DescriptionCleaned: rep.Cleaned,
 				}); err != nil {
 					return err
 				}
@@ -869,12 +879,16 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 				if _, err := q.UpdateMCPToolContent(ctx, store.UpdateMCPToolContentParams{
 					OrgID: org, ServerID: serverID, Name: lt.Name, Description: desc, InputSchema: schema, ContentHash: hash,
 					ReadOnlyHint: lt.ReadOnlyHint, ReviewReason: pgtype.Text{String: reason, Valid: true},
+					DescriptionOriginalLength: int64(rep.OriginalLen), DescriptionCapped: rep.Capped, DescriptionCleaned: rep.Cleaned,
 				}); err != nil {
 					return err
 				}
 				res.Changed = append(res.Changed, lt.Name)
 			default:
-				if err := q.TouchMCPTool(ctx, store.TouchMCPToolParams{OrgID: org, ServerID: serverID, Name: lt.Name, ReadOnlyHint: lt.ReadOnlyHint}); err != nil {
+				if err := q.TouchMCPTool(ctx, store.TouchMCPToolParams{
+					OrgID: org, ServerID: serverID, Name: lt.Name, ReadOnlyHint: lt.ReadOnlyHint,
+					DescriptionOriginalLength: int64(rep.OriginalLen), DescriptionCapped: rep.Capped, DescriptionCleaned: rep.Cleaned,
+				}); err != nil {
 					return err
 				}
 			}

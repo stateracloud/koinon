@@ -176,6 +176,44 @@ Verified in the gateway spec suite with the real binary:
   stops approved calls (they retry) until the next reconcile pass writes a new key.
 - Negative: one target-name clash between orgs leaves one server unserved until a name changes.
 
+## Amendment 2026-10-30: third-party descriptions are sanitised at sync (#267)
+
+A server's tool descriptions, and the description strings of its input schemas, reach the model verbatim,
+so they are untrusted input. `internal/mcpsanitize` normalises them when `SyncTools` records a tool:
+
+- ANSI escapes, control characters (newline and tab stay), zero-width and other invisible format
+  characters, bidi overrides and isolates, variation selectors and Unicode tag characters (U+E0000 to
+  U+E007F) are removed;
+- tags that imitate a harness or chat-role block (`<system>`, `<system-reminder>`, `<koinon-*>`,
+  `<untrusted_context`, `<tool_result>`, `<|im_start|>` and similar, opening or closing, also with a
+  fullwidth bracket or a Unicode space) have their `<` escaped to `&lt;`, so an admin still reads them.
+  This runs after the removals, so a zero-width character inside a name does not hide it. It is a list
+  of names: a homoglyph name (Cyrillic `ѕ`) or an ordinary `<b>` passes;
+- a tool description is cut to 1,024 characters and each `description` or `title` in the input schema to
+  256 (research TP22), ending in an ellipsis. This replaces the old 20,000 byte cut. Instance values in
+  the schema (`default`, `const`, `enum`, `examples`), names and numbers are left as published: they
+  are what the tool receives or compares against.
+
+What is stored, hashed (`content_hash`) and offered by the ask-tier proxy is the sanitised text, so the
+review flow is unchanged: a visible change flags the tool, and a change that only differs in removed
+characters does not. Both tool APIs (the admin API and `mcpserver.v1alpha1.Tool`) carry
+the original length and the capped and cleaned flags, and the servers page says when a tool's text was
+sanitised. Tools synced before this change get the values on their next sync.
+
+Upgrade: the first sync after this change compares the sanitised text with the stored raw text. A tool
+whose description was over 1,024 characters, whose schema had a description over 256, or whose text had
+anything removed or escaped (CRLF counts) hashes differently, so it is flagged for review and, if it was
+in the auto tier, moves to ask. That fails closed: calls to such a tool need approval until an admin
+reviews the sanitised text and sets the tier back. Tools with short, clean text are not affected.
+
+Limit: an **auto** tool is served by agentgateway, which federates the upstream server's `tools/list`
+unchanged. Koinon renders `mcpAuthorization` rules (allow or deny by tool name) and has no hook that
+rewrites a description, so the model sees the raw text of an auto tool. The sustainable fix is in the
+harness side of the path (research TP22, TP25): the harness (agentd's MCP bridge, or koinon-harness) applies
+the same `mcpsanitize` policy to what it hands the model, and pins each tool to the approved hash. Until
+then an admin sees the sanitised text and the flags at approval, and the ask tier is the safe choice for a
+server that is not trusted.
+
 ## Upstream verification
 
 Checked 2026-10-23 against agentgateway v1.6.0 and the MCP Registry; see the research report. The
