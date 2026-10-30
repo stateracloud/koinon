@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { Code, ConnectError } from '@connectrpc/connect'
 import { useState, type FormEvent } from 'react'
 import { FullContentBadge } from '@/components/trace-destination-card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -8,13 +8,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { ContentLevel, type Settings } from '@/gen/koinon/trace/v1alpha1/trace_pb'
-import { clampLevel, levelDisabledReason, levelLabel, levelRank, levels, normalLevel, percentToRate, rateToPercent, samplingError } from '@/lib/trace'
+import { settingsDeniedMessage, clampLevel, levelDisabledReason, levelLabel, levelRank, levels, normalLevel, percentToRate, rateToPercent, samplingError } from '@/lib/trace'
 
 export type TraceSettingsFormProps = {
   settings: Settings
   /** Only an org owner may choose full. */
   isOwner: boolean
-  save: (contentLevel: ContentLevel, sampleRate: number, platformCopyLevel: ContentLevel) => Promise<unknown>
+  save: (contentLevel: ContentLevel, sampleRate: number | undefined, platformCopyLevel: ContentLevel) => Promise<unknown>
   onSaved?: () => void
 }
 
@@ -41,17 +41,20 @@ export function TraceSettingsForm({ settings, isOwner, save, onSaved }: TraceSet
   async function commit() {
     const rate = percentToRate(percent)
     if (rate === undefined) return
+    // Sent only when the person changed it, so saving the level never rewrites the stored rate.
+    const changed = percent.trim() !== rateToPercent(settings.sampleRate)
     setPending(true)
     setRefused(undefined)
     setSaved(false)
     try {
-      await save(level, rate, settings.hasPlatformDestination ? copy : normalLevel(settings.platformCopyLevel))
+      await save(level, changed ? rate : undefined, settings.hasPlatformDestination ? copy : normalLevel(settings.platformCopyLevel))
       setConfirming(false)
       setSaved(true)
       onSaved?.()
     } catch (e) {
       setConfirming(false)
-      setRefused(ConnectError.from(e).rawMessage)
+      const err = ConnectError.from(e)
+      setRefused(err.code === Code.PermissionDenied ? `${settingsDeniedMessage} (${err.rawMessage})` : err.rawMessage)
     } finally {
       setPending(false)
     }

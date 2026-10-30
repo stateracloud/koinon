@@ -21,23 +21,25 @@ function useClientAndRefresh() {
       await refresh()
       return res
     }
-    return { client, done }
+    return { client, done, refresh }
   }, [transport, queryClient])
 }
 
 /** useTraceActions returns the write calls of TraceDestinationService for one org; each refreshes the queries. */
 export function useTraceActions(orgId: string) {
-  const { client, done } = useClientAndRefresh()
+  const { client, done, refresh } = useClientAndRefresh()
   return useMemo(
     () => ({
       createDestination: (destination: DestinationWrite) => done(client.createDestination({ orgId, destination })),
-      updateDestination: (destinationId: string, destination: DestinationWrite) => done(client.updateDestination({ orgId, destinationId, destination })),
+      updateDestination: (destinationId: string, destination: DestinationWrite, expectedVersion?: bigint) =>
+        done(client.updateDestination({ orgId, destinationId, destination, expectedVersion })),
+      reload: () => refresh(),
       deleteDestination: (destinationId: string) => done(client.deleteDestination({ orgId, destinationId })),
       testDestination: (destinationId: string) => done(client.testDestination({ orgId, destinationId })),
-      updateSettings: (contentLevel: ContentLevel, sampleRate: number, platformCopyLevel: ContentLevel) =>
+      updateSettings: (contentLevel: ContentLevel, sampleRate: number | undefined, platformCopyLevel: ContentLevel) =>
         done(client.updateSettings({ orgId, contentLevel, sampleRate, platformCopyLevel })),
     }),
-    [client, done, orgId],
+    [client, done, refresh, orgId],
   )
 }
 

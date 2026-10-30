@@ -3,7 +3,7 @@
 import { create } from '@bufbuild/protobuf'
 import { describe, expect, it } from 'vitest'
 import { Backend, ContentLevel, DestinationSchema } from '@/gen/koinon/trace/v1alpha1/trace_pb'
-import { buildInput, clampLevel, destinationNameError, formErrors, hasErrors, initialForm, levelDisabledReason, percentToRate, rateToPercent } from '@/lib/trace'
+import { buildInput, connectionChanged, clampLevel, destinationNameError, formErrors, hasErrors, initialForm, levelDisabledReason, percentToRate, rateToPercent } from '@/lib/trace'
 
 const not = 'koinon_test_not-a-real-token'
 
@@ -18,9 +18,29 @@ describe('destinationNameError', () => {
 
 describe('formErrors', () => {
   it('asks for the preset fields on a new destination', () => {
-    const f = { ...initialForm(), name: 'lf', endpoint: 'https://lf.example.com/x', backend: Backend.OPIK }
+    const f = { ...initialForm(), name: 'lf', endpoint: 'https://lf.example.com/x', backend: Backend.LANGFUSE }
     const e = formErrors(f, undefined, false)
-    expect(Object.keys(e.fields).sort()).toEqual(['api_key', 'workspace'])
+    expect(Object.keys(e.fields).sort()).toEqual(['public_key', 'secret_key'])
+  })
+  it('asks for nothing more for Opik: key, workspace and project are optional', () => {
+    const f = { ...initialForm(), name: 'o', endpoint: 'http://opik.local/x', backend: Backend.OPIK }
+    expect(hasErrors(formErrors(f, undefined, false))).toBe(false)
+  })
+  it('asks again for every secret when the endpoint origin changes, but not for a new path', () => {
+    const d = create(DestinationSchema, { id: 'd', name: 'lf', backend: Backend.LANGFUSE, endpointUrl: 'https://lf.example.com/a', secretFields: ['public_key', 'secret_key'] })
+    const samePath = { ...initialForm(d), endpoint: 'https://lf.example.com/b' }
+    expect(hasErrors(formErrors(samePath, d, false))).toBe(false)
+    for (const endpoint of ['https://other.example.com/a', 'https://lf.example.com:8443/a', 'http://lf.example.com/a']) {
+      expect(Object.keys(formErrors({ ...samePath, endpoint }, d, false).fields).sort()).toEqual(['public_key', 'secret_key'])
+    }
+  })
+  it('asks again for stored generic header values when the origin changes', () => {
+    const d = create(DestinationSchema, { id: 'd', name: 'g', backend: Backend.GENERIC, endpointUrl: 'https://c.example.com/v1', secretFields: ['X-A'] })
+    const f = { ...initialForm(d), endpoint: 'https://elsewhere.example.com/v1' }
+    expect(formErrors(f, d, false).headers[0]).toBeDefined()
+    f.headers[0].remove = true
+    f.headers.push({ name: 'X-B', value: 'v', stored: false, remove: false })
+    expect(hasErrors(formErrors(f, d, false))).toBe(false)
   })
   it('does not ask again for a stored secret', () => {
     const d = create(DestinationSchema, { id: 'd', name: 'lf', backend: Backend.LANGFUSE, endpointUrl: 'https://lf.example.com/x', secretFields: ['public_key', 'secret_key'] })
@@ -94,5 +114,19 @@ describe('sampling', () => {
   })
   it('refuses anything outside 0 to 100', () => {
     for (const bad of ['', 'x', '-1', '101']) expect(percentToRate(bad)).toBeUndefined()
+  })
+})
+
+describe('connectionChanged', () => {
+  const d = create(DestinationSchema, { id: 'd', name: 'o', backend: Backend.OPIK, endpointUrl: 'https://o.example.com/x', params: { workspace: 'w' }, secretFields: ['api_key'], enabled: true })
+  it('is false for enabled and name only', () => {
+    expect(connectionChanged({ ...initialForm(d), enabled: false, name: 'renamed' }, d)).toBe(false)
+  })
+  it('is true for a new destination, endpoint, backend, params and typed secrets', () => {
+    expect(connectionChanged(initialForm(), undefined)).toBe(true)
+    expect(connectionChanged({ ...initialForm(d), endpoint: 'https://o.example.com/y' }, d)).toBe(true)
+    expect(connectionChanged({ ...initialForm(d), backend: Backend.DATADOG }, d)).toBe(true)
+    expect(connectionChanged({ ...initialForm(d), params: { workspace: 'v' } }, d)).toBe(true)
+    expect(connectionChanged({ ...initialForm(d), secrets: { api_key: 'x' } }, d)).toBe(true)
   })
 })

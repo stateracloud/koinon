@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { Code, ConnectError } from '@connectrpc/connect'
 import { useState, type FormEvent } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -10,10 +10,12 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { Backend, type Destination } from '@/gen/koinon/trace/v1alpha1/trace_pb'
 import {
   buildInput,
+  connectionChanged,
   formErrors,
   hasErrors,
   initialForm,
   isStored,
+  keepsSecrets,
   maxDestinationNameLength,
   presetOf,
   presets,
@@ -31,6 +33,10 @@ export type TraceDestinationFormProps = {
   save: (input: DestinationWrite) => Promise<Destination>
   onDone: () => void
   onSaved?: (saved: Destination) => void
+  /** Called when the destination changed since the form loaded (ABORTED); the page reloads it. */
+  onConflict?: (message: string) => void
+  /** The connection cannot be added or changed by this viewer (full content and not an owner). */
+  connectionLocked?: boolean
 }
 
 /**
@@ -40,7 +46,7 @@ export type TraceDestinationFormProps = {
  * unless a new one is typed or its removal is asked for, and typed values are cleared from the page as
  * soon as they are sent.
  */
-export function TraceDestinationForm({ destination, platform = false, save, onDone, onSaved }: TraceDestinationFormProps) {
+export function TraceDestinationForm({ destination, platform = false, save, onDone, onSaved, onConflict, connectionLocked = false }: TraceDestinationFormProps) {
   const editing = !!destination
   const [f, setF] = useState(() => initialForm(destination))
   const [touched, setTouched] = useState(false)
@@ -52,7 +58,9 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
   const invalid = hasErrors(errors)
   const shown = <T,>(v: T | undefined) => (touched ? v : undefined)
   // Changing the backend of a saved destination starts from no secrets, so the form asks for them again.
-  const sameBackend = destination?.backend === f.backend
+  const keeps = keepsSecrets(f, destination)
+  const tested = connectionChanged(f, destination)
+  const droppedSecrets = !!destination && !keeps && destination.secretFields.length > 0
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -69,7 +77,12 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
       onSaved?.(saved)
       onDone()
     } catch (e2) {
-      const message = ConnectError.from(e2).rawMessage
+      const err = ConnectError.from(e2)
+      const message = err.rawMessage
+      if (err.code === Code.Aborted) {
+        onConflict?.('This destination was changed by someone else while you were editing. It has been reloaded; check it and make your change again.')
+        return
+      }
       setRefusal(typed ? `${message} The secrets were cleared from this page. Type them again.` : message)
     } finally {
       setPending(false)
@@ -89,14 +102,14 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
             id="dest-name"
             value={f.name}
             onChange={(e) => set({ name: e.target.value })}
-            disabled={editing}
+            disabled={connectionLocked && !editing}
             maxLength={maxDestinationNameLength}
             autoComplete="off"
             aria-invalid={!!shown(errors.name)}
             aria-describedby={['dest-name-help', shown(errors.name) && 'dest-name-error'].filter(Boolean).join(' ')}
           />
           <p id="dest-name-help" className="text-muted-foreground text-xs">
-            {editing ? 'A destination keeps its name.' : 'Lowercase letters, digits and dashes. It only labels the destination in Koinon.'}
+            {'Lowercase letters, digits and dashes. It only labels the destination in Koinon.'}
           </p>
           {shown(errors.name) && (
             <p id="dest-name-error" className="text-destructive text-xs">
@@ -105,6 +118,13 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
           )}
         </div>
       )}
+      {connectionLocked && (
+        <p role="note" className="text-sm">
+          Your org sends full content, so only an org owner can {editing ? 'change this destination\'s connection' : 'add a destination'}. You can still {editing ? 'rename it or turn it on or off' : 'cancel here'}.
+        </p>
+      )}
+      <fieldset disabled={connectionLocked} className="grid min-w-0 gap-4">
+        <legend className="sr-only">Connection</legend>
       <div className="grid gap-1.5">
         <Label htmlFor="dest-backend">Backend</Label>
         <NativeSelect
@@ -149,7 +169,8 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
       {preset.fields.map((field) => {
         const id = `dest-${field.name}`
         const error = shown(errors.fields[field.name])
-        const stored = field.secret && sameBackend && isStored(destination, field.name)
+        const stored = field.secret && keeps && isStored(destination, field.name)
+        const dropped = field.secret && !keeps && isStored(destination, field.name)
         return (
           <div key={field.name} className="grid gap-1.5">
             <Label htmlFor={id}>{field.label}</Label>
@@ -181,6 +202,7 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
                   ? 'Set. Leave empty to keep it, or type a new one to replace it. Koinon stores it encrypted and never shows it again.'
                   : 'Koinon stores it encrypted and never shows it again.'
                 : (field.help ?? '')}
+              {dropped && ' The endpoint changed, so the stored value is dropped. Type it again.'}
             </p>
             {error && (
               <p id={`${id}-error`} className="text-destructive text-xs">
@@ -193,7 +215,10 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
       {f.backend === Backend.GENERIC && (
         <fieldset className="grid gap-3">
           <legend className="text-sm font-medium">Headers</legend>
-          <p className="text-muted-foreground text-xs">Sent with every request. Values are stored encrypted and never shown again.</p>
+          <p className="text-muted-foreground text-xs">
+            Sent with every request. Values are stored encrypted and never shown again.
+            {droppedSecrets && ' The endpoint changed, so the stored values are dropped. Type each one again, or remove the header.'}
+          </p>
           {f.headers.map((h, i) => {
             const error = shown(errors.headers[i])
             return (
@@ -218,7 +243,7 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
                     value={h.value}
                     onChange={(e) => setHeader(i, { value: e.target.value })}
                     disabled={h.remove}
-                    placeholder={h.stored ? 'Set' : undefined}
+                    placeholder={h.stored && keeps ? 'Set' : undefined}
                     autoComplete="new-password"
                     spellCheck={false}
                     aria-invalid={!!error}
@@ -254,16 +279,24 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
           </div>
         </fieldset>
       )}
+      </fieldset>
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={f.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
         Enabled
       </label>
       <p className="text-muted-foreground text-xs">
-        Saving first sends the backend one test trace with no content. Koinon saves the destination only if the backend accepts it.
+        {tested
+          ? 'Saving first sends the backend one test trace with no content. Koinon saves the destination only if the backend accepts it.'
+          : 'Nothing about the connection changed, so this is saved without a test. The last test result stays.'}
       </p>
+      {droppedSecrets && (
+        <p role="note" className="text-sm">
+          The endpoint host, port or scheme changed, so Koinon will not send the stored secrets to the new address. Enter every secret again.
+        </p>
+      )}
       {pending && (
         <p role="status" className="text-sm">
-          Testing the backend, then saving…
+          {tested ? 'Testing the backend, then saving…' : 'Saving…'}
         </p>
       )}
       {refusal && (
@@ -275,8 +308,8 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
         <Button type="button" variant="outline" onClick={onDone} disabled={pending}>
           Cancel
         </Button>
-        <Button type="submit" disabled={pending}>
-          {editing ? 'Test and save' : 'Test and add'}
+        <Button type="submit" disabled={pending || (connectionLocked && tested)}>
+          {editing ? (tested ? 'Test and save' : 'Save') : 'Test and add'}
         </Button>
       </div>
     </form>
