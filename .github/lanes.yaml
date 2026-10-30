@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Lanes for `hack/claim.sh next --lane` (ADR 0082): the project Components each human's agents
+# pick up first. `login: Component, Component`. A lane is a preference, not a lock: `take` works on
+# any issue and only warns when another active claim shares the issue's `area:` label. Issues with
+# no Component stay visible in every lane. Components are the names of the board's Component field.
+procoduck: api, reconciler, agentd, flavors, charts, infra, ci
+ovirandunu: web, connectors/github, docs, test

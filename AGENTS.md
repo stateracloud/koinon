@@ -15,10 +15,37 @@ Instructions for coding agents working on Koinon.
   assertion for every chart behaviour you change.
 - Sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`): the escape suite,
   `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./test/escape/ -ginkgo.label-filter=admission`.
+- Claims: `hack/claim.sh help`; `hack/claim_test.sh` (offline). ADR numbers: `hack/adr-lint.sh`.
 - Migrations: `hack/migrate-lint.sh origin/main` (merged migrations unchanged, numbers contiguous).
 - `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
 - Before pushing: `gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" .`. CI scans
   every commit of a pull request, so a leak fixed in a later commit still fails.
+
+## Picking up work
+
+Several humans' agents share the backlog. Claim an issue before you work on it; the lock is a claim
+branch (ADR 0082), so two agents cannot hold one issue. Use `hack/claim.sh` (gh and jq only).
+
+1. `hack/claim.sh next --lane`: Ready, `agent-ok`, current-milestone, unblocked, unclaimed issues,
+   by Priority then age, in your human's lane. Only humans move issues to Ready; never start an
+   issue that is not listed unless your human names it.
+2. `hack/claim.sh take <N>`: one claim per session, four per human, 2 h lease. Exit 2: pick
+   another issue. It assigns your human and sets In Progress.
+3. Within 30 minutes: push `<type>/<N>-<slug>` and open a draft PR with `Closes #N`.
+4. `hack/claim.sh beat <N>` every 30 minutes and before long steps. Pushes and comments on the PR
+   also count as liveness.
+5. Exit code 3 from any claim command means the claim is lost (taken over or released): stop work
+   on that issue and tell your human.
+6. Blocked by another issue: `hack/claim.sh block <N> <M>` (adds "blocked by", releases). New work
+   you discover becomes a Backlog issue; do not start it.
+7. Finish: mark the PR ready, enable auto-merge, then `hack/claim.sh review <N>`. The claim is
+   released when the PR merges or closes. Never delete a claim branch: claims are only released.
+8. Hand off: `hack/claim.sh release <N> --note "<state, branch, next step>"`; keep the branch and
+   draft PR.
+9. Takeover only after the lease expired plus 15 minutes: `hack/claim.sh take <N> --takeover`,
+   then continue the existing branch and PR.
+10. Before auto-merge, merge `origin/main`, renumber any migration or ADR that collides, run
+    `make generate`, push. The other human approves PRs that touch sensitive paths (`CODEOWNERS`).
 
 ## Conventions
 
