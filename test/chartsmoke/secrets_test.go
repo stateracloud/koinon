@@ -14,12 +14,15 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 )
 
 // dbSecretPassword is obviously fake, like every secret in the tests.
@@ -30,6 +33,28 @@ const dbSecretPassword = "koinon_test_not-a-real-password"
 var wholeSecretKeys = map[string][]string{
 	"openshell-tls": {"tls.crt", "tls.key", "ca.crt"},
 	"otlp-token":    {"token"},
+}
+
+// databaseKeys are the keys of the operator's database Secret, as values.yaml documents them
+// (postgres.external.keys), not as the templates read them: a template that reads another key
+// must fail.
+func databaseKeys() []string {
+	b, err := os.ReadFile(filepath.Join(chartDir, "values.yaml"))
+	must(err)
+	var v struct {
+		Postgres struct {
+			External struct{ Keys map[string]string } `json:"external"`
+		} `json:"postgres"`
+	}
+	must(yaml.Unmarshal(b, &v))
+	var keys []string
+	for _, k := range v.Postgres.External.Keys {
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		panic("values.yaml has no postgres.external.keys")
+	}
+	return keys
 }
 
 // podSpecs are the pod templates of every rendered Job and Deployment.
@@ -101,11 +126,14 @@ func provisionOperatorSecrets(ctx context.Context, cl *cluster, r *rendered) []s
 					kekCreate = false
 				}
 				if ref := secretRef(e); ref != nil && (ref.Optional == nil || !*ref.Optional) {
-					v := fakeValue(ref.Key)
 					if e.Name == "DATABASE_URL" {
-						v = dsn
+						// Every documented key, whichever one this container reads.
+						for _, k := range databaseKeys() {
+							want(ref.Name, k, dsn)
+						}
+						continue
 					}
-					want(ref.Name, ref.Key, v)
+					want(ref.Name, ref.Key, fakeValue(ref.Key))
 				}
 			}
 		}
