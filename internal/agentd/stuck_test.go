@@ -461,6 +461,172 @@ var _ = Describe("savework.sh", func() {
 		Expect(ee.ExitCode()).To(Equal(3), string(over))
 	})
 
+	Describe("with a repository whose configuration runs code", func() {
+		// A canary appends to a file when git runs it and otherwise behaves like cat.
+		var work, repo, canary string
+		BeforeEach(func() {
+			if _, err := exec.LookPath("git"); err != nil {
+				Skip("git is not installed")
+			}
+			work = GinkgoT().TempDir()
+			repo = filepath.Join(work, "widgets")
+			canary = filepath.Join(GinkgoT().TempDir(), "ran")
+			Expect(os.MkdirAll(repo, 0o755)).To(Succeed())
+		})
+		script := func(dir, name string) string {
+			p := filepath.Join(dir, name)
+			Expect(os.WriteFile(p, []byte("#!/bin/sh\necho \"$0 $*\" >> "+canary+"\ncat\n"), 0o700)).To(Succeed())
+			return p
+		}
+		git := func(args ...string) {
+			c := exec.Command("git", append([]string{"-C", repo}, args...)...)
+			c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+				"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test")
+			out, err := c.CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(), string(out))
+		}
+		put := func(name, body string) {
+			Expect(os.WriteFile(filepath.Join(repo, name), []byte(body), 0o600)).To(Succeed())
+		}
+		setup := func() {
+			git("init", "-q", "-b", "main", ".")
+			put(".gitattributes", "*.txt filter=evil diff=evil\n")
+			put("a.txt", "one\n")
+			git("add", "-A")
+			git("commit", "-qm", "init")
+			git("remote", "add", "origin", "https://github.com/acme/widgets.git")
+			git("update-ref", "refs/remotes/origin/main", "HEAD")
+			put("a.txt", "one\nraw edit\n")
+			put("b.txt", "new\n")
+		}
+		run := func(env ...string) ([]byte, error) {
+			c := exec.Command("sh", "-c", agentd.SaveworkScript, "savework", work, "1000000")
+			c.Env = append(os.Environ(), env...)
+			return c.Output()
+		}
+		ran := func() string {
+			b, _ := os.ReadFile(canary)
+			return string(b)
+		}
+
+		It("runs none of the repository's fsmonitor, hooks, filters or diff drivers", func() {
+			setup()
+			tools := GinkgoT().TempDir()
+			hooks := filepath.Join(tools, "hooks")
+			Expect(os.MkdirAll(hooks, 0o755)).To(Succeed())
+			for _, h := range []string{"post-index-change", "pre-commit", "reference-transaction"} {
+				script(hooks, h)
+			}
+			c := script(tools, "canary")
+			for k, v := range map[string]string{
+				"core.fsmonitor": c, "core.hooksPath": hooks,
+				"filter.evil.clean": c, "filter.evil.smudge": c, "filter.evil.process": c, "filter.evil.required": "true",
+				"diff.evil.textconv": c, "diff.evil.command": c,
+				"core.pager": c, "core.sshCommand": c, "core.askPass": c,
+			} {
+				git("config", k, v)
+			}
+			git("config", "diff.external", c)
+
+			out, err := run()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ran()).To(BeEmpty(), "git ran something the repository's configuration names")
+			works, skipped, err := agentd.ParseSaveOutput(out)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(skipped).To(BeEmpty())
+			Expect(works).To(HaveLen(1))
+			Expect(string(works[0].Content["a.txt"])).To(Equal("one\nraw edit\n"), "files are read as they are on disk")
+			Expect(string(works[0].Content["b.txt"])).To(Equal("new\n"))
+			Expect(works[0].Manifest.Files).To(HaveLen(2))
+		})
+
+		It("skips a repository with a filter driver named *, which must not expand to file names", func() {
+			setup()
+			c := script(GinkgoT().TempDir(), "canary")
+			put(".gitattributes", "*.txt filter=*\n")
+			git("config", "filter.*.clean", c)
+			// Run where a * matches names that are valid driver names, as / or the home would.
+			cwd := GinkgoT().TempDir()
+			for _, f := range []string{"bin", "etc", "work"} {
+				Expect(os.WriteFile(filepath.Join(cwd, f), nil, 0o600)).To(Succeed())
+			}
+			cmd := exec.Command("sh", "-c", agentd.SaveworkScript, "savework", work, "1000000")
+			cmd.Dir = cwd
+			out, err := cmd.Output()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ran()).To(BeEmpty())
+			works, skipped, err := agentd.ParseSaveOutput(out)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(works).To(BeEmpty())
+			Expect(skipped).To(ConsistOf(ContainSubstring("cannot neutralise")))
+		})
+
+		It("fetches nothing for a partial clone, whatever its promisor remote runs", func() {
+			setup()
+			// Not the cat-like canary: an upload-pack that waits on its input would hang the fetch.
+			c := filepath.Join(GinkgoT().TempDir(), "canary")
+			Expect(os.WriteFile(c, []byte("#!/bin/sh\necho \"$0 $*\" >> "+canary+"\nexit 1\n"), 0o700)).To(Succeed())
+			blob, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD:a.txt").Output()
+			Expect(err).NotTo(HaveOccurred())
+			id := strings.TrimSpace(string(blob))
+			Expect(os.Remove(filepath.Join(repo, ".git", "objects", id[:2], id[2:]))).To(Succeed())
+			for k, v := range map[string]string{
+				"core.repositoryformatversion": "1", "extensions.partialClone": "evil",
+				"remote.evil.url": GinkgoT().TempDir(), "remote.evil.promisor": "true", "remote.evil.uploadpack": c,
+			} {
+				git("config", k, v)
+			}
+			_, err = run()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ran()).To(BeEmpty(), "git fetched from the promisor remote")
+		})
+
+		It("skips a repository whose configuration includes another file, running nothing", func() {
+			setup()
+			tools := GinkgoT().TempDir()
+			c := script(tools, "canary")
+			inc := filepath.Join(tools, "inc.cfg")
+			Expect(os.WriteFile(inc, []byte("[core]\n\tfsmonitor = "+c+"\n"), 0o600)).To(Succeed())
+			for _, args := range [][]string{{"include.path", inc}, {"includeIf.gitdir:" + repo + "/.path", inc}} {
+				git("config", args[0], args[1])
+				out, err := run()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(ran()).To(BeEmpty())
+				works, skipped, err := agentd.ParseSaveOutput(out)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(works).To(BeEmpty())
+				Expect(skipped).To(ConsistOf(ContainSubstring("includes other files")))
+				git("config", "--unset", args[0])
+			}
+		})
+
+		It("ignores the system, global and home configuration, including the include file the home git config is rendered into", func() {
+			setup()
+			tools := GinkgoT().TempDir()
+			c := script(tools, "canary")
+			// What the agent can write: the file /etc/gitconfig includes, ~/.gitconfig and XDG config.
+			home := filepath.Join(tools, "home")
+			Expect(os.MkdirAll(filepath.Join(home, ".config", "git"), 0o755)).To(Succeed())
+			koinon := filepath.Join(tools, "koinon-git-config")
+			evil := "[core]\n\tfsmonitor = " + c + "\n\thooksPath = " + tools + "\n[filter \"evil\"]\n\tclean = " + c + "\n"
+			for _, f := range []string{koinon, filepath.Join(home, ".gitconfig"), filepath.Join(home, ".config", "git", "config")} {
+				Expect(os.WriteFile(f, []byte(evil), 0o600)).To(Succeed())
+			}
+			system := filepath.Join(tools, "gitconfig")
+			Expect(os.WriteFile(system, []byte("[include]\n\tpath = "+koinon+"\n"), 0o600)).To(Succeed())
+
+			// Unset by the script's own export, so these would apply to any git that read them.
+			out, err := run("HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"), "GIT_CONFIG_SYSTEM="+system,
+				"GIT_CONFIG_GLOBAL="+filepath.Join(home, ".gitconfig"), "GIT_CONFIG_NOSYSTEM=0")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ran()).To(BeEmpty())
+			works, skipped, err := agentd.ParseSaveOutput(out)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(skipped).To(BeEmpty())
+			Expect(string(works[0].Content["a.txt"])).To(Equal("one\nraw edit\n"))
+		})
+	})
+
 	It("reads nothing from a repository whose origin is not GitHub, and says so", func() {
 		if _, err := exec.LookPath("git"); err != nil {
 			Skip("git is not installed")

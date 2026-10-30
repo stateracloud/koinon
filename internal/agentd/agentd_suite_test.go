@@ -183,6 +183,13 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 	if len(args) >= 4 && args[0] == "-c" && args[2] == "tar" && f.tar != nil {
 		return f.tar(args[3:], stdin, stdout, stderr)
 	}
+	if len(args) >= 4 && args[0] == "-c" && args[1] == agentd.RealpathScript {
+		// The sandbox has no links: every path is its own physical path.
+		for _, p := range args[3:] {
+			_, _ = fmt.Fprintln(stdout, p)
+		}
+		return 0
+	}
 	if len(args) < 4 || args[0] != "-c" {
 		_, _ = fmt.Fprintf(stderr, "unexpected sh %q", args)
 		return 2
