@@ -38,9 +38,9 @@ the network must be what the sandbox's proxy actually does.
    `test/escape`), never an expected code, in every case that expects a policy answer. The
    direct-egress cases still expect `000`, because there the sandbox refuses the connection
    itself. The two cases from #244 use hosts that resolve inside the sandbox:
-   `KOINON_ESCAPE_GATEWAY_HOST` (no default: a non-loopback name the proxy resolves with nothing
-   listening on 4000, such as a Service without endpoints, so an allowed request fails at connect
-   with 502 and a denied one gets 403; the case skips without it) and
+   `KOINON_ESCAPE_GATEWAY_HOST` (no default: a non-loopback name the proxy resolves, with a server on
+   4000; see the 2026-10-30 amendment: an allowed request gets the stand-in's 418 and a denied one
+   gets 403; the case skips without it) and
    `KOINON_ESCAPE_GITEA_URL` (default `https://example.com/gitea`; every request is denied by
    policy before the proxy connects). OpenShell cases run only where `KOINON_OPENSHELL_ENDPOINT`
    is set (the home lab) and skip everywhere else, kind and CI included, so nothing about the kind
@@ -55,6 +55,23 @@ the `subagent` action for every agent, `explore` included, so the model is not o
 contract suite checks the tool list. Allowing `explore` again needs agentd to advertise and record
 child updates and cancel to cascade to children.
 
+## Amendment 2026-10-30: the gateway stand-in is a real listener (issue #270)
+
+The rc.8 home-lab run showed that decision 4's stand-in does not work on OpenShell 0.1.5. With a
+Service without endpoints, an allowed request whose upstream refuses the connection does not reach
+the client as an HTTP 502: the sandbox sees a TCP failure (curl exit 7, code `000`). That is
+indistinguishable from a request that never reached the proxy, which is what `answered` exists to
+reject, so the allowed route could not be asserted.
+
+The stand-in is now a server that answers: `escape-gateway-standin` in `koinon-fixtures`
+(`test/fixtures/rt1/manifests/escape-gateway-standin.yaml`), `koinon-fakemodel -standin` on port 4000,
+answering every request with an empty 418 and `X-Koinon-Standin: 1`. Its NetworkPolicy admits only
+pods in OpenShell sandbox namespaces. The case expects 418 plus the marker for every model route
+(the request crossed the policy and the far end answered), 403 for everything else on the gateway
+(the policy denied it), and fails on anything else (`000`, 502, a 418 without the marker). The
+home lab sets `KOINON_ESCAPE_GATEWAY_HOST=escape-gateway-standin.koinon-fixtures.svc.cluster.local`. The
+kind and CI runs still skip OpenShell cases.
+
 ## Consequences
 
 - An agent without web egress cannot waste a turn on `webfetch`; its instructions point to MCP.
@@ -62,6 +79,6 @@ child updates and cancel to cascade to children.
   instructions following from it.
 - A DNS miss in the escape suite fails loudly with the reason instead of passing or failing
   with a bare `000`.
-- OpenShell always blocks loopback and link-local targets, so `localhost` cannot produce the 502
-  and is not a default. The gateway case needs `KOINON_ESCAPE_GATEWAY_HOST` set explicitly; the 502
-  with a real stand-in is still to be confirmed on the home lab.
+- OpenShell always blocks loopback and link-local targets, so `localhost` cannot reach a stand-in
+  and is not a default. The gateway case needs `KOINON_ESCAPE_GATEWAY_HOST` set explicitly. The 418
+  with the real stand-in is still to be confirmed on the home lab.
