@@ -396,8 +396,9 @@ func TestInflightBatchStaysInTheBudgetAndBatchesAreBoundedByBytes(t *testing.T) 
 	r.dispatch(context.Background(), pOrg, items...)
 	eventually(t, "the first attempt", func() bool { return snd.calls.Load() >= 1 })
 	size := int64(proto.Size(items[0]))
-	if got := r.queueBytes.Load(); got < 100*size-8*size { // the batch is in flight, not released
-		t.Errorf("queueBytes = %d with a batch in flight; the whole 100 spans (~%d) should still be counted", got, 100*size)
+	// The queue keeps its share (a quarter of the budget): the batch in flight and what waits are counted.
+	if got := r.queueBytes.Load(); got < 200<<10 || got > 256<<10+16*size {
+		t.Errorf("queueBytes = %d; want about the queue's 256 KiB share, counting the batch in flight", got)
 	}
 	r.dispatch(context.Background(), pOrg, items...)
 	if got := r.queueBytes.Load(); got > 1<<20 {
@@ -701,5 +702,89 @@ func TestPollIntervalIsNeverShorterThanTheTurnGrace(t *testing.T) {
 	r, _ := New(Config{Store: &pStore{}, Routes: &pRoutes{}, Health: pHealth{}, Sender: &pSender{}, PollInterval: 100 * time.Millisecond, TurnGrace: 3 * time.Second})
 	if r.cfg.PollInterval < r.cfg.TurnGrace {
 		t.Errorf("poll interval %v < turn grace %v", r.cfg.PollInterval, r.cfg.TurnGrace)
+	}
+}
+
+type cHealth struct{ ok, fail atomic.Int32 }
+
+func (h *cHealth) Success(context.Context, pgtype.UUID, tracedest.Route) error {
+	h.ok.Add(1)
+	return nil
+}
+
+func (h *cHealth) Failure(context.Context, pgtype.UUID, tracedest.Route, string, int64) error {
+	h.fail.Add(1)
+	return nil
+}
+
+type flakyRoutes struct {
+	pRoutes
+	broken atomic.Bool
+}
+
+func (f *flakyRoutes) ConfigVersion(ctx context.Context, org pgtype.UUID) (string, error) {
+	if f.broken.Load() {
+		return "", errors.New("database down")
+	}
+	return f.pRoutes.ConfigVersion(ctx, org)
+}
+
+// The database being down is not the destination's failure.
+func TestSettingsReadFailureIsNotTheDestinationsFailure(t *testing.T) {
+	rs := &flakyRoutes{pRoutes: pRoutes{routes: map[pgtype.UUID][]tracedest.Route{pOrg: {route("d1", "http://d1")}}}}
+	snd := &pSender{spans: map[string]int{}}
+	h := &cHealth{}
+	r := newRouter(t, Config{
+		Routes: rs, Sender: snd, Health: h, Linger: 60 * time.Millisecond, ConfigCheck: time.Millisecond,
+		BackoffBase: 5 * time.Millisecond, MaxAttempts: 2, BreakerThreshold: 1, BreakerBase: time.Hour,
+	})
+	r.dispatch(context.Background(), pOrg, span(pOrg, [16]byte{1}, false, 0))
+	rs.broken.Store(true) // during the linger, before the worker makes the copy
+	time.Sleep(300 * time.Millisecond)
+	if snd.calls.Load() != 0 {
+		t.Fatal("nothing can be sent while the settings cannot be read")
+	}
+	if h.fail.Load() != 0 {
+		t.Errorf("the destination's health recorded %d failures for the database's", h.fail.Load())
+	}
+	rs.broken.Store(false)
+	eventually(t, "the kept batch is sent once the settings can be read", func() bool {
+		snd.mu.Lock()
+		defer snd.mu.Unlock()
+		return snd.spans["http://d1"] == 1
+	})
+}
+
+// A failed batch is retried as it was; attempts start again when its head is no longer first.
+func TestRetryTakesTheFailedBatchAndResetsWhenItsHeadChanged(t *testing.T) {
+	r, _ := New(Config{Store: &pStore{}, Routes: &pRoutes{}, Health: pHealth{}, Sender: &pSender{}, BatchSize: 5})
+	mk := func(n int) []item {
+		var items []item
+		for i := range n {
+			items = append(items, item{sp: span(pOrg, [16]byte{byte(i + 1)}, false, 0), org: pOrg, size: 10})
+		}
+		return items
+	}
+	newQ := func(items []item) *queue {
+		q := &queue{r: r, kind: KindOrg, backend: "generic", items: items, droppedByOrg: map[pgtype.UUID]int64{}}
+		for _, it := range items {
+			q.queued += it.size
+			r.queueBytes.Add(int64(it.size))
+		}
+		return q
+	}
+
+	items := mk(8)
+	q := newQ(items)
+	q.attempts, q.retryN, q.retrySp = 2, 3, items[0].sp
+	if got := q.takeBatch(); len(got) != 3 || q.attempts != 2 {
+		t.Errorf("retry took %d items with attempts %d; want exactly the 3 that failed, attempts kept", len(got), q.attempts)
+	}
+
+	items = mk(8)
+	q = newQ(items[2:]) // the head was trimmed away
+	q.attempts, q.retryN, q.retrySp = 2, 3, items[0].sp
+	if got := q.takeBatch(); len(got) != 5 || q.attempts != 0 {
+		t.Errorf("after a trim: took %d items with attempts %d; want a normal batch of 5 and attempts reset", len(got), q.attempts)
 	}
 }

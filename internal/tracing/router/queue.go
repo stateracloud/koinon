@@ -70,7 +70,9 @@ type queue struct {
 
 	// Worker state; only the worker goroutine touches it.
 	failures   int
-	attempts   int       // consecutive failed sends of the batch at the head
+	attempts   int // consecutive failed sends of the batch at the head
+	retryN     int // the failed batch's item count, put back at the head, to be retried as it was
+	retrySp    *tracepb.Span
 	resumeAt   time.Time // no send before this: the retry backoff, or the breaker's pause
 	openUntil  time.Time
 	okDirty    bool
@@ -171,6 +173,25 @@ func (q *queue) take(n, maxBytes int) []item {
 	}
 	q.r.metrics.QueueDepth.WithLabelValues(q.kind, q.backend).Sub(float64(k))
 	return out
+}
+
+// takeBatch takes the next batch. A batch that failed and was put back is retried as it was (the same
+// items, so a trim of its head never lets attempts carry over to a different batch): when the item at
+// the head is no longer its first, the attempts start again.
+func (q *queue) takeBatch() []item {
+	cfg := q.r.cfg
+	n, maxBytes := cfg.BatchSize, cfg.BatchBytes
+	q.mu.Lock()
+	if q.retryN > 0 {
+		if q.depth() > 0 && q.items[q.head].sp == q.retrySp {
+			n, maxBytes = min(q.retryN, q.depth()), 1<<62
+		} else {
+			q.attempts = 0
+		}
+		q.retryN, q.retrySp = 0, nil
+	}
+	q.mu.Unlock()
+	return q.take(n, maxBytes)
 }
 
 // release frees the bytes of items that are finished with, however they ended.
@@ -322,7 +343,7 @@ func (q *queue) run() {
 			// Let a few more spans arrive, so a trace goes out in one request.
 			_ = q.r.sleep(q.ctx, cfg.Linger)
 		}
-		batch := q.take(cfg.BatchSize, cfg.BatchBytes)
+		batch := q.takeBatch()
 		if len(batch) == 0 {
 			continue
 		}
@@ -473,7 +494,7 @@ func (q *queue) send(batch []item) {
 		return
 	}
 	var (
-		retryable  = true
+		retryable  bool
 		retryAfter time.Duration
 		msg        string
 	)
@@ -483,7 +504,14 @@ func (q *queue) send(batch []item) {
 			stop()
 			return
 		}
-		msg = "the destination's settings could not be read"
+		// Not the destination's fault: its settings (the database) could not be read. The batch is kept
+		// and tried again soon, without counting an attempt, opening the breaker or touching the
+		// destination's health record.
+		q.resumeAt = q.r.now().Add(max(cfg.BackoffBase, cfg.ConfigCheck))
+		q.release(consumed)
+		q.putBack(nonGone(batch, consumed))
+		finished = false
+		return
 	} else {
 		if len(spans) == 0 {
 			delivered = true // nothing to say: every span was consumed
@@ -562,6 +590,11 @@ func (q *queue) send(batch []item) {
 	// The consumed items are done with; the rest wait in the queue, inside its share.
 	q.release(consumed)
 	q.putBack(live)
+	if len(live) > 0 {
+		q.mu.Lock()
+		q.retryN, q.retrySp = len(live), live[0].sp
+		q.mu.Unlock()
+	}
 	finished = false
 	q.flushHealth(false)
 }

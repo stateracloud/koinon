@@ -131,8 +131,8 @@ type config struct {
 
 	otlpAddr     string
 	otlpTokenDir string
-	// The trace router's byte budgets; 0 derives each from the container memory limit (20% queues, 5%
-	// intake, 3% held roots, 8% requests in progress).
+	// The trace router's byte budgets; 0 derives each from the container memory limit (its cgroup's,
+	// or KOINON_MEMORY_LIMIT_BYTES when that is lower; 20% queues, 5% intake, 3% held roots, 8% requests).
 	traceQueueBytes, traceIntakeBytes, traceHeldBytes, traceRequestBytes int
 	metricsAddr                                                          string
 	toolsAddr                                                            string
@@ -219,13 +219,13 @@ func parseFlags(args []string) (config, error) {
 			"required with --otlp-addr")
 
 	fs.IntVar(&c.traceQueueBytes, "trace-queue-bytes", 0,
-		"bytes all run-trace destination queues may hold together (ADR 0074); 0 is 20% of the container memory limit (128 MiB without one)")
+		"bytes all run-trace destination queues may hold together (ADR 0074); 0 is 20% of the container memory limit (the cgroup's or KOINON_MEMORY_LIMIT_BYTES, the lower) (128 MiB without one)")
 	fs.IntVar(&c.traceIntakeBytes, "trace-intake-bytes", 0,
-		"bytes of spans the trace router may hold while attributing them; 0 is 5% of the memory limit (32 MiB without one)")
+		"bytes of spans the trace router may hold while attributing them; 0 is 5% of the memory limit (the cgroup's or KOINON_MEMORY_LIMIT_BYTES, the lower) (32 MiB without one)")
 	fs.IntVar(&c.traceHeldBytes, "trace-held-bytes", 0,
-		"bytes of turn root spans the trace router may hold for the ledger; 0 is 3% of the memory limit (16 MiB without one)")
+		"bytes of turn root spans the trace router may hold for the ledger; 0 is 3% of the memory limit (the cgroup's or KOINON_MEMORY_LIMIT_BYTES, the lower) (16 MiB without one)")
 	fs.IntVar(&c.traceRequestBytes, "trace-request-bytes", 0,
-		"bytes of export requests the trace receiver may read and decode at once; 0 is 8% of the memory limit (64 MiB without one)")
+		"bytes of export requests the trace receiver may read and decode at once; 0 is 8% of the memory limit (the cgroup's or KOINON_MEMORY_LIMIT_BYTES, the lower) (64 MiB without one)")
 
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort,
 		"listen address of /metrics (Prometheus); empty disables it")
