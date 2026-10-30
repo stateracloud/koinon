@@ -101,9 +101,10 @@ jobs:
         # pull request cannot add itself.
         run: |
           label=dependency-age-waiver
-          approvers=$(git show "origin/$BASE:MAINTAINERS.md" | grep -oE '\]\(https://github.com/[A-Za-z0-9-]+\)' | sed -E 's#.*github.com/([^)]+)\)#\1#')
-          [[ -n $approvers ]] || { echo "::error::no maintainer handles found in MAINTAINERS.md on $BASE"; exit 1; }
           if gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '.[].name' | grep -qx "$label"; then
+            # Both the file and the parser come from the base branch.
+            approvers=$(bash <(git show "origin/$BASE:hack/waiver-approvers.sh") <(git show "origin/$BASE:MAINTAINERS.md"))
+            [[ -n $approvers ]] || { echo "::error::no maintainer handles found in the table of MAINTAINERS.md on $BASE"; exit 1; }
             actor=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/events" \
               --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$label\")] | last | .actor.login // empty" | tail -n1)
             if [[ -n $actor ]] && grep -qixF "$actor" <<<"$approvers"; then
