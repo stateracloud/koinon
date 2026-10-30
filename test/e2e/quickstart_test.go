@@ -203,7 +203,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 	AfterAll(func() { t.report() })
 
-	It("1. logs in as the bootstrap admin and sets a new password", func(ctx SpecContext) {
+	It("1. logs in as the bootstrap admin and sets a new password", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		password := os.Getenv("KOINON_E2E_PASSWORD")
 		Expect(password).NotTo(BeEmpty(), "KOINON_E2E_PASSWORD")
@@ -230,7 +230,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("1. Bootstrap login and password change")
 	})
 
-	It("1b. sees the model provider the quickstart declared, through the admin API", func(ctx SpecContext) {
+	It("1b. sees the model provider the quickstart declared, through the admin API", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		// The quickstart's model-provider.yaml is a labelled Secret that koinon-api imported at start.
 		// A token made with the session reads it back through /admin/v1, read-only.
@@ -287,7 +287,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("1b. Declared model provider and its price (admin API)")
 	})
 
-	It("2. creates and tests the GitHub connection", func(ctx SpecContext) {
+	It("2. creates and tests the GitHub connection", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		app := gh.app(ctx)
 		res, err := c.connections.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
@@ -303,7 +303,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("2. GitHub connection (create and test)")
 	})
 
-	It("3. creates a repo-helper agent bound to the repository and activates it", func(ctx SpecContext) {
+	It("3. creates a repo-helper agent bound to the repository and activates it", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		ts, err := c.templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
 		Expect(err).NotTo(HaveOccurred())
@@ -347,7 +347,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("3. Agent from template, activated")
 	})
 
-	It("4. creates a task, streams the run and parks on an approval", func(ctx SpecContext) {
+	It("4. creates a task, streams the run and parks on an approval", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 			OrgId: org, AgentId: agent.GetId(), Title: "Add hello.md",
@@ -427,7 +427,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("4. Task → run streamed → approval pending")
 	})
 
-	It("5. approves, and Koinon opens exactly one branch, commit and pull request", func(ctx SpecContext) {
+	It("5. approves, and Koinon opens exactly one branch, commit and pull request", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		_, err := c.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{
 			OrgId: org, ApprovalId: approval.GetId(), ArgsSha256: approval.GetArgsSha256(),
@@ -454,7 +454,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("5. Approve → branch, commit, PR on fake GitHub")
 	})
 
-	It("6. resumes the run, which posts the pull request URL on the task", func(ctx SpecContext) {
+	It("6. resumes the run, which posts the pull request URL on the task", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		run = w.until(ctx, c, org, run.GetId(), 5*time.Minute, &lastSeq, &kinds, func(r *runv1alpha1.Run) bool {
 			return r.GetState() == runv1alpha1.RunState_RUN_STATE_SUCCEEDED
@@ -478,7 +478,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("6. Run resumes → PR URL on the task")
 	})
 
-	It("6a. the agent's end-of-turn note is on the task, not in its timeline as a reply", func(ctx SpecContext) {
+	It("6a. the agent's end-of-turn note is on the task, not in its timeline as a reply", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		// The note is written after each turn (the run parked once, then finished: two turns), so
 		// it is there by the time the run has succeeded; the last one wins.
@@ -505,7 +505,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("6a. Agent's notes on the task")
 	})
 
-	It("6a2. the saved-work upload Service exists and answers; the tools port does not serve it; the OTLP port needs a token", func(ctx SpecContext) {
+	It("6a2. the saved-work upload Service exists and answers; the tools port does not serve it; the OTLP port needs a token", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
 		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")

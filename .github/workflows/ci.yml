@@ -281,6 +281,21 @@ jobs:
       - run: hack/claim_test.sh
       - run: hack/migrate-renumber-test.sh
 
+  # Tests of the e2e tooling scripts: the decision rule (needs the Go toolchain for `go list`) and
+  # the remote runner (needs flock, so Linux).
+  scripts:
+    name: scripts
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: hack/needs-e2e-test.sh
+      - run: hack/e2e-remote-test.sh
+      - run: hack/e2e-decide-test.sh
+      - run: hack/e2e-bisect-test.sh
+
   # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
   # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
@@ -312,3 +327,40 @@ jobs:
           restore-keys: flavors-
       - run: make flavors FLAVOR_CACHE=${{ runner.temp }}/flavor-cache
       - run: go test -count=1 ./test/flavors/...
+
+  # On main only: publish the flavor image under its content tag (hack/flavor-tag.sh) so the kind
+  # e2e pulls it instead of building it. A separate job, so only it holds packages: write and
+  # pull requests never do. The layer cache the flavors job just saved makes the build a cache hit.
+  flavor-publish:
+    name: flavor-publish
+    needs: [changes, flavors]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.flavors == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/flavor-cache
+          key: flavors-${{ hashFiles('flavors/**') }}
+          restore-keys: flavors-
+      - name: Push ghcr.io/<repo>/flavor-opencode:<content tag>
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          tag=$(hack/flavor-tag.sh opencode)
+          image="ghcr.io/$REPO/flavor-opencode:$tag"
+          if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
+            echo "$image already exists"
+            exit 0
+          fi
+          docker buildx build --push --build-context common=flavors/common \
+            --cache-from "type=local,src=$RUNNER_TEMP/flavor-cache/opencode" \
+            --tag "$image" flavors/opencode

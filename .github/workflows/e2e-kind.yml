@@ -2,39 +2,30 @@
 #
 # E1 quickstart e2e on kind (plan item E1): test/e2e/run.sh on a GitHub-hosted runner. Not on
 # Blacksmith like the other workflows (ADR 0047): its kernel has no Landlock, which the OpenShell
-# sandbox supervisor requires (issue #159). While the repository is private, where it spends the
-# plan's included Actions minutes, it runs on manual dispatch and on pull requests that touch the
-# paths the quickstart depends on most (ADR 0047 amendment); once it is public, it runs on every
-# pull request to main and nightly. Calls no external service besides
-# image and manifest downloads: the model is the fake model server and GitHub is the fake
-# GitHub, both in the cluster.
+# sandbox supervisor requires (issue #159). It calls no external service besides image and manifest
+# downloads: the model is the fake model server and GitHub is the fake GitHub, both in the cluster.
+#
+# When it runs (the `decide` job, hack/e2e-decide.sh):
+#   - pull requests: only if they change the e2e's own files (hack/needs-e2e.sh --forced-only) or
+#     carry the `e2e` label. A PR that is e2e-relevant by the full rule gets a hint in the summary
+#     to run hack/e2e-remote.sh or add the label.
+#   - pushes to main: batched (one running, the newest pending) when anything e2e-relevant changed
+#     since the last green run. Nightly: always, once a day, to catch drift nothing in the tree
+#     explains (upstream images, the runner image, downloads). A red run after a green one opens
+#     an issue naming the culprit merge (hack/e2e-bisect.sh): fix forward within 2 hours, else revert.
+#   - manual dispatch, optionally on one commit (the bisect uses it).
+# The `e2e result` job is the one to require: it passes when the e2e was skipped.
 name: e2e-kind
+run-name: e2e-kind${{ inputs.commit && format(' ({0}) bisect {1}', inputs.commit, inputs.bisect_id) || '' }}
 
 on:
-  # The go suite on ready pull requests that change what runs in the installed system: startup
-  # and flags, the chart, the control-plane services, migrations, the gateway and ledger, the
-  # harness flavor, tracing, and the e2e itself. Regressions there only the full install catches
-  # (#281 changed branch naming in githubtools; #284 a startup flag the chart's migrate Job lacked).
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - cmd/**
-      - charts/**
-      - internal/agentd/**
-      - internal/api/**
-      - internal/db/migrations/**
-      - internal/execution/**
-      - internal/gateway/**
-      - internal/githubtools/**
-      - internal/ledger/**
-      - internal/reconciler/**
-      - internal/services/**
-      - internal/tracing/**
-      - flavors/**
-      - test/e2e/**
-      - test/fakemodel/**
-      - .github/workflows/e2e-kind.yml
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
       suite:
@@ -42,17 +33,79 @@ on:
         type: choice
         options: [go, web]
         default: go
+      commit:
+        description: 'Run on this full commit sha instead of the ref (used by hack/e2e-bisect.sh).'
+        type: string
+        default: ''
+      bisect_id:
+        description: 'The bisect run that dispatched this one; it is in the run name so the bisect finds exactly its runs.'
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
+# Pull requests: a new push cancels the old run. Main: one running, one pending, the newest pending
+# replaces the older (batching). Everything else (dispatch, nightly) runs alone.
 concurrency:
-  group: e2e-kind-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'push' && 'e2e-main' || github.event_name == 'pull_request' && format('e2e-kind-pr-{0}-{1}', github.ref, (github.event.action == 'unlabeled' || (github.event.action == 'labeled' && github.event.label.name != 'e2e')) && 'label' || 'run') || format('e2e-kind-{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Cheap: a checkout, a git diff, one `go list`.
+  decide:
+    # Not for drafts, and only adding the `e2e` label starts a run: removing it, or any other
+    # label, only re-runs the result job, which mirrors the earlier result (so a red run cannot
+    # turn green by unlabelling).
+    if: >-
+      github.event_name != 'pull_request' || (!github.event.pull_request.draft
+      && !(github.event.action == 'unlabeled' || (github.event.action == 'labeled' && github.event.label.name != 'e2e')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # the last green run on main
+    outputs:
+      needed: ${{ steps.decide.outputs.needed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # merge bases, and the last green commit on main
+
+      # The rule asks `go list` which packages the binaries build.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Does this run need the e2e?
+        id: decide
+        shell: bash # -eo pipefail
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Run the base branch's copy of the rule and the decision: a pull request must not be
+          # able to change what decides whether it is tested. This PR's own copy only when the
+          # base has none (the commit that introduces them).
+          for f in needs-e2e e2e-decide; do
+            if [[ $EVENT == pull_request ]] && git show "origin/$BASE:hack/$f.sh" > "$RUNNER_TEMP/$f.sh" 2>/dev/null; then
+              echo "using hack/$f.sh from origin/$BASE"
+            else
+              cp "hack/$f.sh" "$RUNNER_TEMP/$f.sh"
+            fi
+            chmod +x "$RUNNER_TEMP/$f.sh"
+          done
+          NEEDS_E2E="$RUNNER_TEMP/needs-e2e.sh" "$RUNNER_TEMP/e2e-decide.sh"
+
   quickstart:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    needs: decide
+    if: needs.decide.outputs.needed == 'true'
+    permissions:
+      contents: read
+      packages: read # the flavor image CI's flavors job pushed to GHCR
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     defaults:
@@ -66,10 +119,27 @@ jobs:
       KO_SHA256: 635ac6ea3fd376c935fee597fbb29ab2c2449f49ef1655085fe3aa9c25fed7a5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }} # empty: the event's own ref
 
+      # cache: false, and an explicit cache with a fallback prefix: a new go.sum still starts from
+      # the last build cache (main saves one on every run), which is most of the ko and driver builds.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+
+      # Restored everywhere, saved only by pushes to main (below): a pull request, or a dispatch on
+      # an arbitrary commit, can never write the cache that main's runs read.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          restore-keys: |
+            e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            e2e-go-${{ runner.os }}-
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
@@ -117,12 +187,20 @@ jobs:
           tar xzf "$RUNNER_TEMP/ko.tgz" -C "$RUNNER_TEMP/bin" ko
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
+      - name: Log in to GHCR (reads the flavor image; a miss falls back to building it)
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin || true
+
       - name: Quickstart e2e (kind, images, helm install, driver or browser)
         env:
           OUT: ${{ runner.temp }}/e2e
           SUITE: ${{ inputs.suite || 'go' }}
           # The workflow deletes the cluster in its own step, after collecting resource use.
           KEEP: "1"
+          # Pull the flavor image the flavors job pushed for this flavors/ tree, if there is one.
+          FLAVOR_PULL_REPO: ghcr.io/${{ github.repository }}/flavor-opencode
         run: test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
 
       - name: Timings
@@ -158,3 +236,74 @@ jobs:
       - name: Delete cluster
         if: always()
         run: test/e2e/kind/down.sh
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+
+  # The one check to require. Passes when the e2e was skipped (nothing needed it, or a draft),
+  # fails when it failed or was cancelled (the composite-check pattern).
+  result:
+    name: e2e result
+    needs: [decide, quickstart]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Fail unless decide and quickstart succeeded or were skipped
+        env:
+          DECIDE: ${{ needs.decide.result }}
+          QUICKSTART: ${{ needs.quickstart.result }}
+          # Another label, or removing `e2e`, starts this workflow again but skips the e2e: a skip
+          # must not replace an earlier failure as this check's latest result, so mirror the last
+          # real run on the commit.
+          UNRELATED_LABEL: ${{ github.event_name == 'pull_request' && (github.event.action == 'unlabeled' || (github.event.action == 'labeled' && github.event.label.name != 'e2e')) }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ID: ${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          echo "decide: $DECIDE, quickstart: $QUICKSTART"
+          if [[ $UNRELATED_LABEL == true ]]; then
+            prev=$(gh run list --workflow e2e-kind.yml --event pull_request --commit "$HEAD_SHA" --limit 20 \
+              --json databaseId,conclusion,createdAt \
+              --jq "[.[] | select(.databaseId != $RUN_ID and .conclusion != \"\")] | sort_by(.createdAt) | last | .conclusion // \"none\"")
+            echo "previous completed run for this commit: $prev"
+            case $prev in failure | cancelled | timed_out) echo "::error::the e2e failed on this commit ($prev)"; exit 1 ;; esac
+            exit 0
+          fi
+          for r in "$DECIDE" "$QUICKSTART"; do
+            case $r in success | skipped) ;; *) echo "::error::the e2e did not pass ($r)"; exit 1 ;; esac
+          done
+
+  # A red run on main: find the merge that did it and open one issue (hack/e2e-bisect.sh).
+  bisect:
+    needs: quickstart
+    if: >-
+      always() && needs.quickstart.result == 'failure'
+      && (github.event_name == 'push' || github.event_name == 'schedule')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      issues: write # the issue naming the culprit
+      actions: write # dispatches the e2e on each candidate
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: hack/e2e-bisect.sh
