@@ -46,8 +46,7 @@ want true "push with no green run to compare with runs" EVENT=push
 want true "push with e2e-relevant changes since the last green run" EVENT=push STUB_COVERED=abc123 STUB_FULL=0
 want false "push without them does not" EVENT=push STUB_COVERED=abc123 STUB_FULL=1
 want true "push: a rule failure fails closed" EVENT=push STUB_COVERED=abc123 STUB_FULL=2
-want false "nightly with nothing new does not run" EVENT=schedule STUB_COVERED=abc123 STUB_FULL=1
-want true "nightly with changes runs" EVENT=schedule STUB_COVERED=abc123 STUB_FULL=0
+want true "nightly always runs (drift detection)" EVENT=schedule STUB_COVERED=abc123 STUB_FULL=1
 
 [[ $fail -eq 0 ]] && echo "e2e-decide tests passed"
 exit "$fail"

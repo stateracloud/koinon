@@ -9,8 +9,10 @@
 #   pull_request       needed when the PR touches the e2e's own files (needs-e2e.sh --forced-only)
 #                      or carries the `e2e` label. Otherwise not needed, and the summary says so
 #                      when the full rule (needs-e2e.sh) would have wanted it.
-#   push, schedule     (main) needed when the full rule matches anything since the last green e2e
+#   push               (main) needed when the full rule matches anything since the last green e2e
 #                      run on main (push or schedule), or when there is no such run.
+#   schedule           (nightly) always: drift no commit explains (upstream images, the runner
+#                      image, downloads) is what it is for.
 #   workflow_dispatch  always needed.
 #
 # Environment: EVENT, BASE (pull request base branch), LABELS (JSON array of the PR's label names),
@@ -69,7 +71,11 @@ pull_request)
 workflow_dispatch)
   emit true
   ;;
-push | schedule)
+schedule)
+  summary "Runs: the nightly run always runs, to catch drift nothing in the tree explains."
+  emit true
+  ;;
+push)
   covered=$("$GH" run list --workflow e2e-kind.yml --branch main --status success --limit 30 \
     --json headSha,event --jq '[.[] | select(.event == "push" or .event == "schedule")][0].headSha // empty' 2>/dev/null || true)
   if [[ -z $covered ]]; then
