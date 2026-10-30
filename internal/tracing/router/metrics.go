@@ -20,14 +20,17 @@ const (
 
 // Reasons a span is discarded before it reaches a destination queue.
 const (
-	discardIngestFull   = "ingest_full"   // the router's intake was full
-	discardUnattributed = "unattributed"  // no usable koinon.org or koinon.run, or a bad trace ID
-	discardUnknownRun   = "unknown_run"   // no such run in that org
-	discardUnknownTrace = "unknown_trace" // the trace is not one of that run's turns
-	discardUntraced     = "untraced"      // the run is not traced
-	discardNoRoute      = "no_destination"
-	discardLookup       = "lookup_failed" // the database could not answer; the span is dropped, not guessed
-	discardShutdown     = "shutdown"
+	discardIngestFull    = "ingest_full"   // the router's intake was full
+	discardUnattributed  = "unattributed"  // no usable koinon.org or koinon.run, or a bad trace ID
+	discardUnknownRun    = "unknown_run"   // no such run in that org
+	discardUnknownTrace  = "unknown_trace" // the trace is not one of that run's turns
+	discardUntraced      = "untraced"      // the run is not traced
+	discardNoRoute       = "no_destination"
+	discardLookup        = "lookup_failed" // the database could not answer; the span is dropped, not guessed
+	discardShutdown      = "shutdown"
+	discardInvalid       = "invalid"        // not a well-formed span
+	discardEnqueueFailed = "enqueue_failed" // no live queue could take the span
+	discardDuplicate     = "duplicate_root" // a root already held or finished
 )
 
 // Reasons a destination's span is dropped (koinon_api_trace_spans_dropped_total).
@@ -101,7 +104,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, s := range []string{SourceAgentd, SourceLedger} {
 		m.Received.WithLabelValues(s)
 	}
-	for _, r := range []string{discardIngestFull, discardUnattributed, discardUnknownRun, discardUnknownTrace, discardUntraced, discardNoRoute, discardLookup, discardShutdown} {
+	for _, r := range []string{discardIngestFull, discardUnattributed, discardUnknownRun, discardUnknownTrace, discardUntraced, discardNoRoute, discardLookup, discardShutdown, discardInvalid, discardEnqueueFailed, discardDuplicate} {
 		m.Discarded.WithLabelValues(r)
 	}
 	if reg != nil {

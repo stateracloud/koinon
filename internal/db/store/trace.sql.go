@@ -445,13 +445,15 @@ const listRunModelCalls = `-- name: ListRunModelCalls :many
 SELECT e.request_id, e.model, e.agent_id, e.task_id, e.input_tokens, e.output_tokens,
        e.cache_read_tokens, e.cache_write_tokens, e.reasoning_tokens,
        e.cost_usd, e.priced, e.gateway_cost_usd, e.provisional, e.estimated, e.upstream_status,
-       e.occurred_at, coalesce(p.type, '')::text AS provider_type
+       e.occurred_at, coalesce(p.type, '')::text AS provider_type, m.id AS model_id
 FROM spend_entries e
 JOIN orgs o ON o.id = e.org_id
 LEFT JOIN models m ON m.org_id = e.org_id AND (m.name = e.model OR o.slug || '/' || m.name = e.model)
 LEFT JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
 WHERE e.org_id = $1 AND e.run_id = $2
-  AND e.occurred_at >= $3 AND e.occurred_at <= $4
+  AND e.occurred_at >= $3 AND e.occurred_at < $4
+  AND e.occurred_at < coalesce((SELECT t.started_at FROM run_turns t
+                                WHERE t.org_id = e.org_id AND t.run_id = e.run_id AND t.seq = $5::integer + 1), CAST('infinity' AS timestamptz))
 ORDER BY e.occurred_at, e.request_id
 `
 
@@ -460,6 +462,7 @@ type ListRunModelCallsParams struct {
 	RunID    pgtype.UUID
 	FromTime pgtype.Timestamptz
 	ToTime   pgtype.Timestamptz
+	TurnSeq  int32
 }
 
 type ListRunModelCallsRow struct {
@@ -480,17 +483,20 @@ type ListRunModelCallsRow struct {
 	UpstreamStatus   pgtype.Int2
 	OccurredAt       pgtype.Timestamptz
 	ProviderType     string
+	ModelID          pgtype.UUID
 }
 
-// The model calls of a run in a window, for the trace router's model-call spans (ADR 0074, decision
-// 3): the ledger's rows with the provider type of the model the agent asked for. The model name is
-// the one the agent used, with or without the org slug the gateway prefixes.
+// The model calls of a run in a turn's window, for the trace router's model-call spans (ADR 0074,
+// decision 3): the ledger's rows with the provider type and ID of the model the agent asked for. The
+// model name is the one the agent used, with or without the org slug the gateway prefixes. A row at or
+// after the next turn's start belongs to that turn, so a boundary row counts once.
 func (q *Queries) ListRunModelCalls(ctx context.Context, arg ListRunModelCallsParams) ([]ListRunModelCallsRow, error) {
 	rows, err := q.db.Query(ctx, listRunModelCalls,
 		arg.OrgID,
 		arg.RunID,
 		arg.FromTime,
 		arg.ToTime,
+		arg.TurnSeq,
 	)
 	if err != nil {
 		return nil, err
@@ -517,6 +523,7 @@ func (q *Queries) ListRunModelCalls(ctx context.Context, arg ListRunModelCallsPa
 			&i.UpstreamStatus,
 			&i.OccurredAt,
 			&i.ProviderType,
+			&i.ModelID,
 		); err != nil {
 			return nil, err
 		}

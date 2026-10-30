@@ -19,8 +19,10 @@ type ModelCall struct {
 	// Provider is the type of the model's provider ("openrouter", "anthropic"); empty when the model
 	// is no longer in the catalog.
 	Provider string
-	AgentID  string
-	TaskID   string
+	// ModelID is the catalog model's ID; empty when the model is gone.
+	ModelID string
+	AgentID string
+	TaskID  string
 	// Token counts as the ledger keeps them: Input includes cache reads and writes, Output includes
 	// reasoning, which is what the GenAI conventions mean by the same names.
 	Input, Output, CacheRead, CacheWrite, Reasoning int64
@@ -45,6 +47,8 @@ type turnUsage struct {
 	Input, Output, CacheRead, CacheWrite, Reasoning int64
 	Cost                                            float64
 	Pending                                         bool
+	// ModelID is the first call's model ID, for the root.
+	ModelID string
 }
 
 // modelCallSpans makes the chat spans of a turn, children of its root, and the turn's totals. root
@@ -93,6 +97,9 @@ func modelCallSpans(root *tracepb.Span, trace [16]byte, seq int32, calls []Model
 			kvInt(semconv.GenAIUsageReasoningTokens, c.Reasoning),
 			kvStr(semconv.KoinonRequest, c.RequestID),
 		)
+		if c.ModelID != "" {
+			a = append(a, kvStr(semconv.KoinonModelID, c.ModelID))
+		}
 		if c.Cost != nil {
 			a = append(a, kvDouble(semconv.GenAIUsageCost, round12(*c.Cost)), kvDouble(semconv.KoinonCostUSD, round12(*c.Cost)))
 		}
@@ -112,6 +119,9 @@ func modelCallSpans(root *tracepb.Span, trace [16]byte, seq int32, calls []Model
 		sp.Attributes = a
 		spans = append(spans, sp)
 
+		if use.ModelID == "" {
+			use.ModelID = c.ModelID
+		}
 		use.Calls++
 		use.Input += c.Input
 		use.Output += c.Output
@@ -140,6 +150,9 @@ func putTotals(root *tracepb.Span, u turnUsage) {
 	a = setAttr(a, kvInt("koinon.model_calls", int64(u.Calls)))
 	if u.Pending {
 		a = setAttr(a, kvBool(semconv.KoinonCostPending, true))
+	}
+	if u.ModelID != "" {
+		a = setAttr(a, kvStr(semconv.KoinonModelID, u.ModelID))
 	}
 	root.Attributes = a
 }

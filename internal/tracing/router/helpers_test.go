@@ -211,7 +211,7 @@ func (s *fakeStore) Attribute(_ context.Context, org, run pgtype.UUID, trace [16
 	return t.turn, nil
 }
 
-func (s *fakeStore) ModelCalls(_ context.Context, _, _ pgtype.UUID, from, to time.Time) ([]router.ModelCall, error) {
+func (s *fakeStore) ModelCalls(_ context.Context, _, _ pgtype.UUID, _ int32, from, to time.Time) ([]router.ModelCall, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reads++
@@ -220,7 +220,7 @@ func (s *fakeStore) ModelCalls(_ context.Context, _, _ pgtype.UUID, from, to tim
 	}
 	var out []router.ModelCall
 	for _, c := range s.calls {
-		if !c.Time.Before(from) && !c.Time.After(to) {
+		if !c.Time.Before(from) && c.Time.Before(to) {
 			out = append(out, c)
 		}
 	}
@@ -228,13 +228,24 @@ func (s *fakeStore) ModelCalls(_ context.Context, _, _ pgtype.UUID, from, to tim
 }
 
 type fakeRoutes struct {
-	mu sync.Mutex
-	m  map[pgtype.UUID][]tracedest.Route
+	mu  sync.Mutex
+	m   map[pgtype.UUID][]tracedest.Route
+	ver int
+	// reads counts Routes calls, to see what the fingerprint saves.
+	reads int
+}
+
+// ConfigVersion changes whenever set is called, as the real fingerprint changes with the settings.
+func (f *fakeRoutes) ConfigVersion(context.Context, pgtype.UUID) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return strconv.Itoa(f.ver), nil
 }
 
 func (f *fakeRoutes) Routes(_ context.Context, org pgtype.UUID) ([]tracedest.Route, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.reads++
 	return f.m[org], nil
 }
 
@@ -244,19 +255,52 @@ func (f *fakeRoutes) set(org pgtype.UUID, r ...tracedest.Route) {
 	if f.m == nil {
 		f.m = map[pgtype.UUID][]tracedest.Route{}
 	}
+	f.ver++
 	f.m[org] = r
 }
 
+// fakeSecrets is the org secret store; Version changes with every set or failure change, as the
+// real fingerprint changes with the stored envelopes.
 type fakeSecrets struct {
-	sets map[pgtype.UUID][]string
-	err  error
+	mu        sync.Mutex
+	sets      map[pgtype.UUID][]string
+	err       error
+	ver       int
+	versioned bool
 }
 
-func (f fakeSecrets) Secrets(_ context.Context, org pgtype.UUID) (*scrub.Secrets, error) {
+func (f *fakeSecrets) Secrets(_ context.Context, org pgtype.UUID) (*scrub.Secrets, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.err != nil {
 		return nil, f.err
 	}
 	return scrub.NewSecrets(f.sets[org]...), nil
+}
+
+func (f *fakeSecrets) setErr(err error) {
+	f.mu.Lock()
+	f.err = err
+	f.mu.Unlock()
+}
+
+func (f *fakeSecrets) set(org pgtype.UUID, values ...string) {
+	f.mu.Lock()
+	f.sets[org] = values
+	f.ver++
+	f.mu.Unlock()
+}
+
+// versionedSecrets is a fakeSecrets that also fingerprints its content.
+type versionedSecrets struct{ *fakeSecrets }
+
+func (v versionedSecrets) Version(context.Context, pgtype.UUID) (string, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.err != nil {
+		return "", v.err
+	}
+	return strconv.Itoa(v.ver), nil
 }
 
 type fakeHealth struct {
@@ -323,7 +367,7 @@ func (c *clock) SetNow(t time.Time) {
 type env struct {
 	store   *fakeStore
 	routes  *fakeRoutes
-	secrets fakeSecrets
+	secrets *fakeSecrets
 	health  *fakeHealth
 	clock   *clock
 	r       *router.Router
@@ -332,14 +376,14 @@ type env struct {
 
 var t0 = time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 
-func newEnv(mod func(*router.Config), secrets fakeSecrets) *env {
+func newEnv(mod func(*router.Config), secrets *fakeSecrets) *env {
 	e := &env{store: newStore(), routes: &fakeRoutes{}, secrets: secrets, health: &fakeHealth{}, clock: newClock(t0.Add(time.Hour))}
 	client, err := export.NewClient((&net.Dialer{Timeout: time.Second}).DialContext, 2*time.Second)
 	Expect(err).NotTo(HaveOccurred())
 	cfg := router.Config{
-		Store: e.store, Routes: e.routes, Secrets: e.secrets, Health: e.health, Sender: client,
+		Store: e.store, Routes: e.routes, Secrets: secretSource(e.secrets), Health: e.health, Sender: client,
 		Now: e.clock.Now, Metrics: router.NewMetrics(nil),
-		Linger: 2 * time.Millisecond, FlushInterval: 5 * time.Millisecond, PollInterval: time.Hour,
+		Linger: 2 * time.Millisecond, FlushInterval: 5 * time.Millisecond, PollInterval: time.Hour, ConfigCheck: time.Millisecond, RecheckInterval: time.Hour,
 		BackoffBase: time.Millisecond, BackoffMax: 5 * time.Millisecond, RouteTTL: time.Millisecond,
 	}
 	if mod != nil {
@@ -457,6 +501,7 @@ func (t turn) tool(content bool) *tracepb.Span {
 func call(req string, at time.Duration, cost float64) router.ModelCall {
 	c := cost
 	return router.ModelCall{
+		ModelID:   "0192f5a0-0000-7000-8000-0000000000d1",
 		RequestID: req, Model: "claude-sonnet", Provider: "anthropic", Input: 1000, Output: 200, CacheRead: 600, CacheWrite: 100, Reasoning: 50,
 		Cost: &c, GatewayCost: &c, Time: t0.Add(at),
 	}
@@ -475,4 +520,19 @@ func httpDo(method, url, contentType string, body io.Reader) *http.Response {
 	resp, err := http.DefaultClient.Do(req)
 	Expect(err).NotTo(HaveOccurred())
 	return resp
+}
+
+// secretSource lets a test pick whether the secret store can be fingerprinted.
+func secretSource(f *fakeSecrets) router.SecretSource {
+	if f.versioned {
+		return versionedSecrets{f}
+	}
+	return f
+}
+
+// newBlockingBody is a request body that never ends until the writer is closed.
+func newBlockingBody() (*io.PipeReader, *io.PipeWriter) { return io.Pipe() }
+
+func strVal(s string) *commonpb.AnyValue {
+	return &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: s}}
 }

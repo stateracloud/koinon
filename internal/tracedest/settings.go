@@ -245,3 +245,18 @@ func (s *Service) Routes(ctx context.Context, org pgtype.UUID) ([]Route, error) 
 		ResourceAttributes: decodeMap(p.ResourceAttributes), Level: MinLevel(st.PlatformCopyLevel, MinLevel(st.ContentLevel, st.Ceiling)),
 	}), nil
 }
+
+// ConfigVersion is a cheap fingerprint of everything that decides where an org's spans go and at
+// which level: the platform ceiling, the org's settings, its destinations' configuration versions
+// and enabled flags, and the platform destination's. The router compares it before it sends a batch,
+// so a lowered level or a deleted destination applies to spans already queued. Health writes
+// (last success, last error, spans dropped) do not change it.
+func (s *Service) ConfigVersion(ctx context.Context, org pgtype.UUID) (string, error) {
+	var v string
+	err := s.pool.QueryRow(ctx, `SELECT concat_ws('|',
+		(SELECT content_ceiling::text || '@' || updated_at::text FROM platform_trace_settings),
+		coalesce((SELECT content_level::text || '/' || platform_copy_level::text || '@' || updated_at::text FROM org_trace_settings WHERE org_id = $1), ''),
+		coalesce((SELECT string_agg(id::text || ':' || config_version::text || ':' || enabled::text, ',' ORDER BY id) FROM trace_destinations WHERE org_id = $1), ''),
+		coalesce((SELECT config_version::text || ':' || enabled::text FROM platform_trace_destination), ''))`, org).Scan(&v)
+	return v, err
+}
