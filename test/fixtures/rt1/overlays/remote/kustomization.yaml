@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# RT1 fixtures on your own cluster, with the images in your registry. `registry.example.test/koinon`
+# is a placeholder for the registry and path you gave `hack/rt1-fixtures-build.sh REGISTRY`; replace
+# it when you render, so nothing in git names your registry:
+#   kustomize build test/fixtures/rt1/overlays/remote | sed "s#registry.example.test/koinon#$REGISTRY/koinon#g" |
+#     kubectl --context <your context> apply -f -
+# The Secrets are not here: create rt1-fakecicost-token and rt1-searxng-secrets yourself (the keys
+# are in ../kind/secrets.example.yaml) before the pods start. To pin the images by digest, add the
+# digests the build script prints to an `images:` block of your own.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../manifests
+images:
+  - name: rt1-motherduck
+    newName: registry.example.test/koinon/rt1-motherduck
+  - name: rt1-fakecicost
+    newName: registry.example.test/koinon/rt1-fakecicost
+  - name: rt1-promgen
+    newName: registry.example.test/koinon/rt1-promgen
+  - name: rt1-fakemodel
+    newName: registry.example.test/koinon/rt1-fakemodel
+  - name: rt1-prometheus-mcp
+    newName: registry.example.test/koinon/rt1-prometheus-mcp
+  - name: rt1-prometheus
+    newName: registry.example.test/koinon/rt1-prometheus
+  - name: rt1-searxng
+    newName: registry.example.test/koinon/rt1-searxng
+  - name: rt1-searxng-mcp
+    newName: registry.example.test/koinon/rt1-searxng-mcp

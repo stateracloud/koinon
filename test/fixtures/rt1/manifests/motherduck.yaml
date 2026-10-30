@@ -29,7 +29,7 @@ spec:
       containers:
         - name: motherduck
           # Placeholder tag: the digest is filled in at deploy (see kustomization.yaml).
-          image: zot.apps.lab.example.invalid/koinon/rt1-motherduck:dev
+          image: rt1-motherduck:dev
           ports:
             - {name: mcp, containerPort: 8000}
           securityContext:

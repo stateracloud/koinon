@@ -1,6 +1,6 @@
 # RT1 fixtures
 
-Test fixtures for the v0.1 home-lab story test (RT1, `docs/plans/v0.1.md`). The stories need tools
+Test fixtures for the v0.1 story test (RT1, `docs/plans/v0.1.md`), which anyone can run on their own cluster (`docs/dev/real-model-tests.md`). The stories need tools
 that agents reach only as remote MCP servers behind agentgateway. These fixtures stand in for three
 cost sources (the daily FinOps cost check) and for a company docs repository (the internal-research
 story) and for web research. Everything is synthetic or openly licensed and runs in namespace
@@ -111,7 +111,7 @@ Streamable HTTP mode with a static bearer token (`MCP_HTTP_HARDEN`, `MCP_HTTP_AU
 `manifests/searxng-settings.yml`: JSON and HTML formats, engines brave, wikipedia, github and
 stackoverflow (DuckDuckGo is out: it answers a CAPTCHA to a server-side client; mojeek and bing are out
 because SearXNG's defaults mark them inactive and disabled, so listing them in `keep_only` never ran them), limiter and image proxy off, no Valkey or Redis. Its secret key comes from the Secret
-(placeholder; set the real one out of band). Nothing is built: the build script copies both images to Zot
+(placeholder; set the real one out of band). Nothing is built: the build script copies both images to your registry
 by digest.
 
 - **Internet egress.** Unlike the other fixtures, this namespace's two web-research pods may reach the
@@ -168,13 +168,13 @@ chart's default `sandboxPolicy.namespaceSelector`). Run locally:
 
 An index and six pages of a fictional "Northwind platform handbook" (secret handling, access windows,
 backup and restore, dependency upgrades, incident policy, glossary). Push the directory's contents to
-a Gitea repository next to the real home-lab repository (for example `northwind/platform-handbook`), so
+a Gitea repository next to your own repository (for example `northwind/platform-handbook`), so
 the agent can compare the written policy with practice. The pages are not licensed from anyone and not
 real policy.
 
 ## Manifests (`manifests/`)
 
-`kubectl apply -k test/fixtures/rt1/manifests` creates namespace `koinon-fixtures`, five
+`manifests/` is the base: image names are bare (`rt1-motherduck:dev`) and an overlay says where the images come from. Apply an overlay, not the base: `overlays/kind` (`hack/rt1-fixtures-kind.sh`: images built locally and loaded into kind, fake Secrets), `overlays/remote` (your registry; see below) or `overlays/homelab` (the maintainer's Zot, pinned by digest). Together they create namespace `koinon-fixtures`, five
 Deployments and Services (motherduck, fakecicost, prometheus with its MCP sidecar, searxng, searxng-mcp, and
 the escape-gateway-standin), and these NetworkPolicies: default deny ingress; ingress to the MCP ports only from Koinon's gateway pods in
 namespace `koinon`; ingress to the stand-in's port 4000 only from OpenShell sandbox namespaces; egress DNS only, except the two web-research pods (public internet, private ranges
@@ -183,15 +183,18 @@ names: in standalone mode the gateway pods carry `app.kubernetes.io/name=koinon`
 `app.kubernetes.io/component=gateway`; in kubernetes mode any pod in `koinon` with the label
 `gateway.networking.k8s.io/gateway-name` matches. Change `networkpolicies.yaml` if yours differ.
 Every container has requests and limits, runs non-root with a read-only root file system, and no pod
-mounts a service account token. Image references are `zot.apps.lab.example.invalid/koinon/rt1-<name>:<tag>`; `kustomization.yaml` pins
-them by digest. The five built images carry `sha256:TODO-...` placeholders until the build script's output
-is pasted in; the three mirrored images already have their upstream digests.
+mounts a service account token. The overlays rewrite the image names: `overlays/kind` uses `kind.local/rt1-<name>:dev` and the upstream images
+by digest; `overlays/remote` uses `registry.example.test/koinon/rt1-<name>`, a placeholder you replace when
+you render (`kustomize build overlays/remote | sed "s#registry.example.test/koinon#$REGISTRY/koinon#g"`);
+`overlays/homelab` pins the maintainer's Zot images by digest (its `rt1-fakemodel` digest is still a
+`sha256:TODO` placeholder until the build script's output is pasted in).
 
 ### Secrets
 
-The kustomization contains **no Secrets** (Argo CD self-heal would revert them). The operator delivers
-them, from OpenBao with ExternalSecrets, before the pods start. `manifests/secrets.example.yaml`
-(not listed in the kustomization) has obviously fake values for a local or kind cluster.
+The base and the remote and home-lab overlays contain **no Secrets**: real values must not be in git, and
+an operator may revert hand-made ones. On a real cluster create them (or have your secret store deliver them)
+before the pods start. `overlays/kind/secrets.example.yaml` has obviously fake values and is part of
+`overlays/kind` only.
 
 | Secret | Key | Used by | Meaning |
 |---|---|---|---|
@@ -220,10 +223,10 @@ For fakecicost and rt1-searxng-mcp, give the server a bearer credential so agent
 
 ## Building images
 
-`hack/rt1-fixtures-build.sh REGISTRY [TAG]` builds four images for linux/amd64 (two with ko, two with docker buildx, or docker build and push when
+`hack/rt1-fixtures-build.sh REGISTRY [TAG]` (for `overlays/remote`; kind uses `hack/rt1-fixtures-kind.sh`) builds four images for linux/amd64 (two with ko, two with docker buildx, or docker build and push when
 buildx is missing) and mirrors three (Prometheus and the two web-research images) by digest. Afterwards it
 prints a ready-to-paste `images:` block with the digests for `kustomization.yaml`
-(`DRY_RUN=1` prints the commands only). By hand:
+(`DRY_RUN=1` prints the commands only; add the block to an overlay to pin the images). By hand:
 
 ```sh
 # Go images with ko (cmd/koinon-fakecicost, cmd/koinon-rt1-promgen, cmd/koinon-fakemodel)
