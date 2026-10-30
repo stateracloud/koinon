@@ -29,6 +29,7 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
+	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/thinking"
 )
 
@@ -37,9 +38,11 @@ import (
 const (
 	repoName   = "hello"
 	repository = "koinon-demo/" + repoName
-	prBranch   = "koinon/add-hello-md"
-	prFile     = "hello.md"
-	prContent  = "hello from koinon\n"
+	// prSuggestion is the branch the fake model suggests; Koinon files it under the agent's
+	// namespace (githubtools.FinalBranch), which prBranch holds once the agent exists.
+	prSuggestion = "koinon/add-hello-md"
+	prFile       = "hello.md"
+	prContent    = "hello from koinon\n"
 )
 
 // quickstartBudget is plan item E1's bound: the quickstart takes at most 15 minutes from
@@ -178,6 +181,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		lastSeq  int64
 		kinds    []string
 		approval *approvalv1alpha1.Approval
+		prBranch string
 		prURL    string
 		// admin calls /admin/v1 with a token made at step 1b.
 		admin func(ctx context.Context, method, path string, body ...string) (int, []byte)
@@ -319,6 +323,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		agent = created.GetAgent()
 		Expect(agent.GetStatus()).To(Equal(agentv1alpha1.AgentStatus_AGENT_STATUS_DRAFT))
+		prBranch, err = githubtools.FinalBranch(githubtools.AgentNamespace(agent.GetDisplayName(), agent.GetId()), prSuggestion)
+		Expect(err).NotTo(HaveOccurred())
 
 		activated, err := c.agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{
 			OrgId: org, AgentId: agent.GetId(), Version: agent.GetLatestVersion(),
