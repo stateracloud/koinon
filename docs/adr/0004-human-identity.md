@@ -1,6 +1,6 @@
 # 0004. Human identity: generic OIDC with roles in Postgres
 
-- Status: Accepted; amended 2026-10-23 and 2026-10-26 (below)
+- Status: Accepted; amended 2026-10-23, 2026-10-26 and 2026-10-30 (below)
 - Date: 2026-10-21
 - Decision: [design.md#4](../design.md)
 
@@ -79,3 +79,10 @@ Operators set it and log in once before they disable the bootstrap admin.
 
 - [0001](0001-full-multi-tenancy.md), [0019](0019-personal-agents-and-teams.md),
   [0022](0022-frontend-architecture.md)
+
+## Amendment (2026-10-30): the viewer role
+
+Orgs have four roles, viewer < member < admin < owner: the viewer role was in the data model from the
+scaffold ([0047](0047-repository-scaffold.md) decision 4, migration `00001_initial.sql`, commit eded3ae7),
+which the 2026-10-23 amendment above did not record. A viewer reads the org's work but cannot answer
+questions or decide approvals. "Org admins" means everyone with the admin or owner role.

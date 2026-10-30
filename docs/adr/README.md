@@ -23,16 +23,16 @@ are in [0046](0046-adr-conventions.md).
 | [0001](0001-full-multi-tenancy.md) | Full multi-tenancy from the start | Accepted |
 | [0002](0002-namespace-per-org-isolation.md) | One namespace per org, mapped to one OpenShell workspace | Accepted |
 | [0003](0003-postgres-source-of-truth.md) | Postgres via a Go API is the source of truth | Accepted; amended 2026-10-26 (below) |
-| [0004](0004-human-identity.md) | Human identity: generic OIDC with roles in Postgres | Accepted; amended 2026-10-23 and 2026-10-26 (below) |
+| [0004](0004-human-identity.md) | Human identity: generic OIDC with roles in Postgres | Accepted; amended 2026-10-23, 2026-10-26 and 2026-10-30 (below) |
 | [0005](0005-agent-identity.md) | Agents act as themselves | Accepted |
 | [0006](0006-identity-layers.md) | Identity layers: per-agent ServiceAccount, no usable token in the sandbox | Accepted; amended by [0043](0043-workload-identity-adapters-and-koinon-issuer.md), [0044](0044-in-sandbox-credential-exception.md), [0063](0063-forge-credential-classes.md), [0065](0065-work-model-tasks-inbox.md) and [0073](0073-agent-passport.md) |
 | [0007](0007-connector-model.md) | Connector model: type, connection, grant | Accepted |
 | [0008](0008-approvals-and-risk-tiers.md) | Approvals: risk tiers per scope, enforced at the boundary | Accepted; amended by [0042](0042-ask-tier-park-and-execute.md) |
-| [0009](0009-agent-runtime.md) | Agent runtime: persistent agent, ephemeral compute | Accepted |
+| [0009](0009-agent-runtime.md) | Agent runtime: persistent agent, ephemeral compute | Accepted; amended 2026-10-30 (below) |
 | [0010](0010-eventing.md) | Eventing: the ticket board is the queue | Superseded by [0065](0065-work-model-tasks-inbox.md) and [0066](0066-triggers-and-scheduling.md) |
 | [0011](0011-agent-to-agent.md) | Agent-to-agent: A2A, persisted as tickets | Accepted; amended by [0055](0055-chat-as-its-own-object.md), [0065](0065-work-model-tasks-inbox.md) |
 | [0012](0012-cross-org-sharing.md) | Cross-org sharing through links with exposure profiles | Accepted |
-| [0013](0013-model-access.md) | Model access through one gateway with hierarchical budgets | Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md) and [0044](0044-in-sandbox-credential-exception.md) |
+| [0013](0013-model-access.md) | Model access through one gateway with hierarchical budgets | Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0044](0044-in-sandbox-credential-exception.md) and 2026-10-30 (below) |
 | [0014](0014-mcp-and-tools.md) | MCP and tools: shared servers outside sandboxes, one progressive endpoint per agent | Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md) and [0057](0057-mcp-servers.md) |
 | [0015](0015-agent-environment-and-browser.md) | Agent environment and browser | Accepted; amended by [0044](0044-in-sandbox-credential-exception.md) |
 | [0016](0016-harness-and-deployment.md) | Harness and deployment: ExecutionBackend, agentd over ACP, dedicated agents cluster | Accepted |
@@ -60,7 +60,7 @@ are in [0046](0046-adr-conventions.md).
 | [0038](0038-governance.md) | Governance: BDFL with a written path to maintainership | Accepted |
 | [0039](0039-development-setup.md) | Development setup: Andre's Mac plus the home-lab Talos cluster | Accepted |
 | [0040](0040-agentgateway-model-and-mcp-gateway.md) | agentgateway as the model gateway and MCP gateway | Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 (below) |
-| [0041](0041-koinon-spend-ledger-and-budget-stops.md) | Koinon spend ledger and budget stops | Accepted |
+| [0041](0041-koinon-spend-ledger-and-budget-stops.md) | Koinon spend ledger and budget stops | Accepted; amended 2026-10-30 (below) |
 | [0042](0042-ask-tier-park-and-execute.md) | Ask tier: park the run, Koinon executes the approved call | Accepted; amended by [0048](0048-openshell-spike-results.md) and [0065](0065-work-model-tasks-inbox.md) |
 | [0043](0043-workload-identity-adapters-and-koinon-issuer.md) | Workload identity adapters and a Koinon OIDC issuer | Accepted |
 | [0044](0044-in-sandbox-credential-exception.md) | In-sandbox credentials as a gated exception | Accepted |
