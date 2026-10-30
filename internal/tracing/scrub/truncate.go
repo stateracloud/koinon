@@ -58,7 +58,7 @@ func truncateNode(n *node, limit int) ([]byte, bool) {
 		limit = MinMaxBytes
 	}
 	measure(n)
-	if n.size <= limit {
+	if n.size <= limit && !n.dirty {
 		return n.appendTo(make([]byte, 0, n.size)), false
 	}
 	t := &truncator{}
@@ -71,6 +71,12 @@ func truncateNode(n *node, limit int) ([]byte, bool) {
 
 // measure fills node.size with the encoded size of every node.
 func measure(n *node) int {
+	n.dirty = n.extra > 0
+	defer func() {
+		if n.extra > 0 {
+			n.size += markerReserve
+		}
+	}()
 	switch n.kind {
 	case nullNode, boolNode, numNode:
 		n.size = len(n.lit)
@@ -80,6 +86,7 @@ func measure(n *node) int {
 		n.size = 2
 		for i, k := range n.kids {
 			n.size += measure(k)
+			n.dirty = n.dirty || k.dirty
 			if i > 0 {
 				n.size++
 			}
@@ -88,6 +95,7 @@ func measure(n *node) int {
 		n.size = 2
 		for i, k := range n.kids {
 			n.size += len(appendString(nil, n.keys[i])) + 1 + measure(k)
+			n.dirty = n.dirty || k.dirty
 			if i > 0 {
 				n.size++
 			}
@@ -100,7 +108,7 @@ type truncator struct{}
 
 // fit returns a node whose encoded size is at most budget (budget >= minShare).
 func (t *truncator) fit(n *node, budget int) *node {
-	if n.size <= budget {
+	if n.size <= budget && !n.dirty {
 		return n
 	}
 	switch n.kind {
@@ -140,7 +148,10 @@ func cutString(s string, budget int) string {
 	return s[:end] + TruncatedSuffix
 }
 
-func (t *truncator) fitContainer(n *node, budget int) *node {
+// planContainer decides how a container's budget is shared: how many leading children are kept
+// (m, 0 when not even one fits) and how many bytes each kept child may use, by water-filling:
+// ascending by size, each takes its size or an equal share of what is left.
+func planContainer(n *node, budget int) (m int, give []int) {
 	isObj := n.kind == objNode
 	k := len(n.kids)
 	fixed := make([]int, k) // per-child bytes besides the value: the key and colon
@@ -150,8 +161,7 @@ func (t *truncator) fitContainer(n *node, budget int) *node {
 		}
 	}
 	avail := budget - 2
-	// keep as many leading children as can each have their minimum.
-	m, need := 0, 0
+	need := 0
 	for i := 0; i < k; i++ {
 		c := fixed[i] + minInt(n.kids[i].size, minShare)
 		if i > 0 {
@@ -164,33 +174,41 @@ func (t *truncator) fitContainer(n *node, budget int) *node {
 		m++
 	}
 	if m == 0 {
-		return strLeaf("…")
+		return 0, nil
 	}
-	dropped := k - m
 	remaining := avail - commas(m)
-	if dropped > 0 {
+	if k-m+n.extra > 0 {
 		remaining -= markerReserve
 	}
 	for i := 0; i < m; i++ {
 		remaining -= fixed[i]
 	}
-	// water-fill: ascending by size, each takes its size or an equal share of what is left.
 	order := make([]int, m)
 	for i := range order {
 		order[i] = i
 	}
 	sort.SliceStable(order, func(a, b int) bool { return n.kids[order[a]].size < n.kids[order[b]].size })
-	give := make([]int, m)
+	give = make([]int, m)
 	for idx, i := range order {
 		share := remaining / (m - idx)
 		g := minInt(n.kids[i].size, share)
 		give[i] = g
 		remaining -= g
 	}
+	return m, give
+}
+
+func (t *truncator) fitContainer(n *node, budget int) *node {
+	isObj := n.kind == objNode
+	m, give := planContainer(n, budget)
+	if m == 0 {
+		return strLeaf("…")
+	}
+	dropped := len(n.kids) - m + n.extra
 	out := &node{kind: n.kind}
 	for i := 0; i < m; i++ {
 		var child *node
-		if n.kids[i].size <= give[i] {
+		if n.kids[i].size <= give[i] && !n.kids[i].dirty {
 			child = n.kids[i]
 		} else {
 			child = t.fit(n.kids[i], maxInt(give[i], minShare))
@@ -209,6 +227,45 @@ func (t *truncator) fitContainer(n *node, budget int) *node {
 		}
 	}
 	return out
+}
+
+// assignBudgets walks the tree the way truncation will, on the raw sizes, and gives every string
+// the bytes it could ever show (cap), so scrubbing can cut long strings first and its work is
+// bounded by the limit, not by the input. Children that would be dropped are blanked: if scrubbing
+// shrinks the others, the cut may show a few more, and they must not appear unscrubbed.
+func assignBudgets(n *node, budget int) {
+	switch n.kind {
+	case strNode:
+		if n.size > budget {
+			n.cap = max(budget, minShare)
+		}
+	case arrNode, objNode:
+		if n.size <= budget && !n.dirty {
+			return
+		}
+		m, give := planContainer(n, budget)
+		for i, k := range n.kids {
+			if i >= m {
+				blank(k)
+				continue
+			}
+			assignBudgets(k, maxInt(give[i], minShare))
+		}
+	}
+}
+
+// blank empties a subtree that will not be shown.
+func blank(n *node) {
+	switch n.kind {
+	case strNode:
+		n.str = ""
+	case numNode, boolNode:
+		n.kind, n.lit = nullNode, "null"
+	case arrNode, objNode:
+		for _, k := range n.kids {
+			blank(k)
+		}
+	}
 }
 
 func commas(n int) int {
@@ -244,21 +301,120 @@ func TruncateText(s string, limit int) (string, bool) {
 	return s[:cut] + TruncatedSuffix, true
 }
 
+const (
+	// contentMargin is how much more than the limit Content scrubs before it cuts; scrubbing
+	// can shrink text (a key block becomes a short marker), so the cut has to be made beyond the limit.
+	contentMargin = 4 << 10
+	// maxContentBytes is the most of an input Content looks at.
+	maxContentBytes = 4 << 20
+	// maxLimit is the largest limit Content honours.
+	maxLimit = 1 << 20
+)
+
 // Content scrubs and truncates one content attribute value. When s is a JSON object, array or
 // string it is scrubbed as JSON (structure kept) and truncated with TruncateJSON; otherwise it is
-// scrubbed as text and cut with TruncateText. Scrubbing comes first, so a secret cut in half by
-// the limit was already replaced. limit 0 means DefaultMaxBytes. truncated reports a cut.
+// scrubbed as text and cut with TruncateText. limit 0 means DefaultMaxBytes; one above 1 MiB is
+// lowered to it. truncated reports a cut.
+//
+// Work is bounded by the limit, whatever the size of the input:
+//
+//   - Text is cut to the limit plus a margin before it is scrubbed. In JSON, containers keep only
+//     the children the limit could ever show, and each string is cut to the share of the limit it
+//     could ever show, plus a margin.
+//   - Every such cut first drops the partial credential at its end (trimTail), so the cut cannot
+//     leave a fragment of a secret, in the text or in any escaped reading of it.
+//   - A JSON document too large to parse (over 4 MiB) is scrubbed as text from its start and
+//     returned as one JSON string, so the output is still valid JSON.
+//
+// Scrubbing still comes before the final cut.
 func (s *Scrubber) Content(in string, limit int) (out string, truncated bool) {
-	if t := strings.TrimSpace(in); t != "" && (t[0] == '{' || t[0] == '[' || t[0] == '"') {
+	if limit <= 0 {
+		limit = DefaultMaxBytes
+	}
+	limit = min(max(limit, MinMaxBytes), maxLimit)
+	sc := *s
+	sc.leafCap = limit + contentMargin
+	t := strings.TrimSpace(in)
+	jsonShaped := t != "" && (t[0] == '{' || t[0] == '[' || t[0] == '"')
+	cut := false
+	if len(in) > maxContentBytes {
+		in, cut = sc.trimTail(cutRunes(in, maxContentBytes)), true
+	} else if jsonShaped {
 		n, err := parseJSON([]byte(t))
 		if errors.Is(err, errTooDeep) {
 			return TooDeepPlaceholder, true
 		}
 		if err == nil {
-			s.scrubNode(n, "", 0)
-			b, cut := truncateNode(n, limit)
-			return string(b), cut
+			bound(n, limit/8+8)
+			measure(n)
+			assignBudgets(n, limit+contentMargin)
+			sc.scrubNode(n, "", 0)
+			b, c := truncateNode(n, limit)
+			return string(b), c
 		}
 	}
-	return TruncateText(s.Text(in), limit)
+	prefix := false
+	if len(in) > limit+contentMargin {
+		in, prefix = sc.trimTail(cutRunes(in, limit+contentMargin)), true
+	}
+	res := sc.Text(in)
+	if cut || prefix {
+		res += TruncatedSuffix
+		truncated = true
+	}
+	if jsonShaped && cut {
+		// too large to parse: keep the output JSON by returning the scrubbed start as one string
+		enc := appendString(nil, res)
+		if len(enc) > limit {
+			enc = appendString(nil, cutString(res, limit))
+		}
+		return string(enc), true
+	}
+	if truncated {
+		if len(res) <= limit {
+			return res, true
+		}
+		res, _ = TruncateText(strings.TrimSuffix(res, TruncatedSuffix), limit)
+		return res, true
+	}
+	return TruncateText(res, limit)
+}
+
+// bound drops the children of a container beyond the first maxKids, recording how many in
+// extra, so that truncation can still say "N more". The fair-share cut in fitContainer keeps a
+// prefix of at most limit/16 children, so the dropped ones could never have been shown. Object
+// members named name, key or header are kept wherever they are: they say what a "value" member is.
+func bound(n *node, maxKids int) {
+	if len(n.kids) > maxKids {
+		keepIdx := make([]int, 0, maxKids+4)
+		for i := range n.kids {
+			if i < maxKids || (n.kind == objNode && isPairName(n.keys[i])) {
+				keepIdx = append(keepIdx, i)
+			}
+		}
+		n.extra += len(n.kids) - len(keepIdx)
+		kids := make([]*node, len(keepIdx))
+		var keys []string
+		if n.keys != nil {
+			keys = make([]string, len(keepIdx))
+		}
+		for j, i := range keepIdx {
+			kids[j] = n.kids[i]
+			if keys != nil {
+				keys[j] = n.keys[i]
+			}
+		}
+		n.kids, n.keys = kids, keys
+	}
+	for _, k := range n.kids {
+		bound(k, maxKids)
+	}
+}
+
+func isPairName(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "name", "key", "header":
+		return true
+	}
+	return false
 }

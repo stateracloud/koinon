@@ -34,6 +34,7 @@ type acEdge struct {
 type acNode struct {
 	edges []acEdge // sorted by b
 	fail  int
+	depth int // length of the path from the root: the pattern prefix this node stands for
 	// out is the length of the longest pattern that ends at this node, directly or through
 	// the failure chain; 0 when none does.
 	out int
@@ -131,7 +132,7 @@ func (s *Secrets) child(n int, b byte, create bool) int {
 	if !create {
 		return -1
 	}
-	s.nodes = append(s.nodes, acNode{})
+	s.nodes = append(s.nodes, acNode{depth: s.nodes[n].depth + 1})
 	id := len(s.nodes) - 1
 	e := s.nodes[n].edges
 	e = append(e, acEdge{})
@@ -269,4 +270,28 @@ func asciiEscape(s string, upper bool) string {
 		}
 	}
 	return b.String()
+}
+
+// openStart returns where in the text a pattern that is still open at its end began: the start of
+// the longest suffix of in that is a proper prefix of some pattern, or len(in) when there is none.
+// Cutting the text there leaves no fragment of a secret that the cut split.
+func (s *Secrets) openStart(in string) int {
+	if s == nil || s.count == 0 {
+		return len(in)
+	}
+	cur := 0
+	for i := 0; i < len(in); i++ {
+		b := in[i]
+		for {
+			if c := s.child(cur, b, false); c >= 0 {
+				cur = c
+				break
+			}
+			if cur == 0 {
+				break
+			}
+			cur = s.nodes[cur].fail
+		}
+	}
+	return len(in) - s.nodes[cur].depth
 }
