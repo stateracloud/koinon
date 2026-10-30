@@ -176,11 +176,27 @@ func (r *runner) endTurn(ctx context.Context) error {
 		// The agent canceled the task in this turn (cancel_task): there is nothing to wait for. The
 		// questions it asked are canceled instead of opened, and the approvals are canceled by the
 		// approvals sweep once the run has ended.
+		endRow := func(reason string) error {
+			turn, ok := r.tr.openRow()
+			if !ok {
+				return nil
+			}
+			_, err := q.EndRunTurn(ctx, store.EndRunTurnParams{
+				OrgID: r.run.OrgID, ID: turn, EndReason: pgtype.Text{String: reason, Valid: true},
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			return err
+		}
 		task, err := q.GetTask(ctx, store.GetTaskParams{OrgID: r.run.OrgID, ID: r.run.TaskID})
 		if err != nil {
 			return err
 		}
 		if task.State == store.TaskStateCanceled {
+			if err := endRow("end_turn"); err != nil {
+				return err
+			}
 			if _, err := questions.CancelForRun(ctx, q, r.run.OrgID, r.run.ID, "the task was canceled"); err != nil {
 				return err
 			}
@@ -199,6 +215,9 @@ func (r *runner) endTurn(ctx context.Context) error {
 			return err
 		}
 		if len(reqs) == 0 && len(qs) == 0 {
+			if err := endRow("end_turn"); err != nil {
+				return err
+			}
 			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "", nil)
 		}
 		parked = true
@@ -257,12 +276,8 @@ func (r *runner) endTurn(ctx context.Context) error {
 		}
 		// The turn's row ends with the park, in the same transaction, so a resume on another replica
 		// sees it ended and how long the run waited.
-		if turn, ok := r.tr.openRow(); ok {
-			if _, err := q.EndRunTurn(ctx, store.EndRunTurnParams{
-				OrgID: r.run.OrgID, ID: turn, EndReason: pgtype.Text{String: "park:" + string(reason), Valid: true},
-			}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
+		if err := endRow("park:" + string(reason)); err != nil {
+			return err
 		}
 		if asked {
 			if _, err := questions.OpenForRun(ctx, q, r.run.OrgID, r.run.ID, r.run.TaskID); err != nil {
