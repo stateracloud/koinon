@@ -5,6 +5,7 @@
 # test/fixtures/rt1/README.md):
 #   <registry>/koinon/rt1-fakecicost     ko, from cmd/koinon-fakecicost
 #   <registry>/koinon/rt1-promgen        ko, from cmd/koinon-rt1-promgen
+#   <registry>/koinon/rt1-fakemodel      ko, from cmd/koinon-fakemodel (run with -standin as the escape suite's gateway stand-in)
 #   <registry>/koinon/rt1-motherduck     docker buildx, from test/fixtures/rt1/motherduck
 #   <registry>/koinon/rt1-prometheus-mcp docker buildx, from test/fixtures/rt1/prometheus (Dockerfile.mcp)
 #   <registry>/koinon/rt1-prometheus     a copy of the pinned prom/prometheus image (promtool lives in it)
@@ -33,7 +34,7 @@ run() {
   if [ "${DRY_RUN:-}" != 1 ]; then "$@"; fi
 }
 
-for cmd in fakecicost:koinon-fakecicost promgen:koinon-rt1-promgen; do
+for cmd in fakecicost:koinon-fakecicost promgen:koinon-rt1-promgen fakemodel:koinon-fakemodel; do
   name="rt1-${cmd%%:*}"
   (cd "$root" && KO_DOCKER_REPO="$repo/$name" run ko build --bare --platform "$platform" --tags "$tag" "./cmd/${cmd##*:}")
 done
@@ -58,7 +59,7 @@ if [ "${DRY_RUN:-}" != 1 ]; then
   echo
   echo "# Paste into test/fixtures/rt1/manifests/kustomization.yaml (replaces its images: list):"
   echo "images:"
-  for ref in rt1-fakecicost:$tag rt1-promgen:$tag rt1-motherduck:$tag rt1-prometheus-mcp:$tag rt1-prometheus:v3.7.3 rt1-searxng:$searxng_tag rt1-searxng-mcp:$searxng_mcp_tag; do
+  for ref in rt1-fakecicost:$tag rt1-promgen:$tag rt1-fakemodel:$tag rt1-motherduck:$tag rt1-prometheus-mcp:$tag rt1-prometheus:v3.7.3 rt1-searxng:$searxng_tag rt1-searxng-mcp:$searxng_mcp_tag; do
     echo "  - name: $repo/${ref%%:*}"
     echo "    newTag: \"${ref##*:}\""
     echo "    digest: $(crane digest "$repo/$ref")"

@@ -211,3 +211,22 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: rt1-searxng
+---
+# The escape suite's gateway stand-in: only pods in OpenShell sandbox namespaces may connect. The
+# selector is the chart's default sandboxPolicy.namespaceSelector; change it if yours differs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandboxes-to-escape-gateway-standin
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: escape-gateway-standin
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {protocol: TCP, port: 4000}
+      from:
+        - namespaceSelector:
+            matchLabels:
+              openshell.ai/managed-by: openshell
