@@ -12,6 +12,10 @@ render_raw --set openshell.clientTLSSecret=tls >/dev/null 2>&1 || fail "a client
 render_raw --set openshell.insecure=true >/dev/null 2>&1 || fail "openshell.insecure=true alone must render"
 if render_raw --set openshell.clientTLSSecret=tls --set openshell.insecure=true >"$out/both.out" 2>"$out/both.err"; then fail "a client TLS Secret together with insecure must not render"; fi
 grep -q 'contradict' "$out/both.err" || fail "the TLS-plus-insecure error must say the options contradict"
+# openshell.address has no default: without it the reconciler and agentd would crash-loop.
+if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true >/dev/null 2>"$out/addr.err"; then fail "no openshell.address must not render"; fi
+grep -q 'openshell.address is required' "$out/addr.err" || fail "the missing-address error must name openshell.address"
+has "openshell.address reaches the reconciler config" 'address: "openshell.openshell.svc:8080"' --show-only templates/config.yaml
 has "TLS Secret reaches the reconciler config" 'tls: /etc/koinon/openshell-tls' --set openshell.insecure=false --set openshell.clientTLSSecret=tls --show-only templates/config.yaml
 has "insecure renders an empty tls dir (plaintext, warned by the components)" 'tls: ""' --show-only templates/config.yaml
 # The key-encryption keys (plan item PV1): a generated Secret kept on uninstall, or an existing one;

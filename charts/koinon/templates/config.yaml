@@ -43,7 +43,7 @@ data:
       providerKeysDir: /secrets/providers
       {{- end }}
     openshell:
-      address: {{ .Values.openshell.address | quote }}
+      address: {{ include "koinon.openshellAddress" . | quote }}
       tls: {{ if .Values.openshell.clientTLSSecret }}/etc/koinon/openshell-tls{{ else }}""{{ end }}
       runtimeClassName: {{ .Values.openshell.runtimeClassName }}
       gatewayId: {{ .Values.openshell.gatewayId | quote }}

@@ -52,7 +52,7 @@ done
 if render --set global.imageRegistry=https://art.example.com >/dev/null 2>&1; then fail "imageRegistry with a scheme must not render"; fi
 if render --set 'global.registryMirrors.ghcr\.io=https://art.example.com' >/dev/null 2>&1; then fail "a mirror with a scheme must not render"; fi
 # NOTES warn when image.registry is customised next to a global mirror (helm install prints them; template does not).
-notes=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set openshell.insecure=true --set image.registry=quay.io/m --set global.imageRegistry=art.example.com 2>&1) || true
+notes=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set openshell.insecure=true --set "$ADDRESS" --set image.registry=quay.io/m --set global.imageRegistry=art.example.com 2>&1) || true
 grep -q 'WARNING: image.registry is quay.io/m' <<<"$notes" || fail "no NOTES warning for image.registry with a global mirror"
 # An explicit image.registry is the upstream that the rewrite starts from.
 has "image.registry is rewritten too" 'image: art.example.com/ghcr-remote/mine/koinon-api:0.0.0$' \

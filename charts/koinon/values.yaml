@@ -389,6 +389,7 @@ flavorPrepull:
 
 # OpenShell gateway that the reconciler and agentd talk to over gRPC.
 openshell:
+  # host:port of the gateway. Required: the chart refuses to render without it.
   address: ""
   # Secret with the client certificate (tls.crt, tls.key, ca.crt) for mTLS. Required: the chart
   # refuses to render without it unless insecure is true.
