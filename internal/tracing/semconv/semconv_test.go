@@ -41,10 +41,11 @@ func TestPinned(t *testing.T) {
 // The router parents model-call spans on the root's derived ID and derives theirs from the request.
 func TestDerivedSpanIDs(t *testing.T) {
 	a, b := [16]byte{1}, [16]byte{2}
-	if semconv.RootSpanID(a) == semconv.RootSpanID(b) || semconv.RootSpanID(a) != semconv.RootSpanID(a) {
+	again := a
+	if semconv.RootSpanID(a) == semconv.RootSpanID(b) || semconv.RootSpanID(a) != semconv.RootSpanID(again) {
 		t.Fatal("RootSpanID is not a function of the trace ID")
 	}
-	if semconv.ModelCallSpanID(a, "r1") != semconv.ModelCallSpanID(a, "r1") ||
+	if semconv.ModelCallSpanID(a, "r1") != semconv.ModelCallSpanID(again, "r"+"1") ||
 		semconv.ModelCallSpanID(a, "r1") == semconv.ModelCallSpanID(a, "r2") ||
 		semconv.ModelCallSpanID(a, "r1") == semconv.ModelCallSpanID(b, "r1") {
 		t.Fatal("ModelCallSpanID must depend on the trace and the request, and on nothing else")

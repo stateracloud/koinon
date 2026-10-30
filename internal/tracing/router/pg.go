@@ -134,9 +134,11 @@ func parseUUID(s string) (pgtype.UUID, error) {
 	return id, nil
 }
 
-// secretColumn is one place an org's secrets are stored as an envelope.
+// secretColumn is one place an org's secrets are stored as an envelope. The binding comes from the
+// package that writes the column, so it cannot drift from what was sealed.
 type secretColumn struct {
 	table, column, key string
+	binding            func(org, id pgtype.UUID) secretstore.Binding
 	// values turns the opened plaintext into the secret values it holds.
 	values func(plain []byte) []string
 }
@@ -163,11 +165,11 @@ func connectionFields(plain []byte) []string {
 // to value). Saved work is files, not credentials, and is left out. internal/keyscli.Columns lists
 // every envelope; a new column that holds an org credential belongs here too.
 var secretColumns = []secretColumn{
-	{catalog.ProvidersTable, catalog.KeyColumn, "id", whole},
-	{connections.Table, connections.Column, "id", connectionFields},
-	{mcpservers.ServersTable, mcpservers.CredentialColumn, "id", whole},
-	{checkpoint.Table, checkpoint.Column, "agent_id", whole},
-	{tracedest.DestinationsTable, tracedest.CredentialsColumn, "id", func(plain []byte) []string {
+	{catalog.ProvidersTable, catalog.KeyColumn, "id", catalog.KeyBinding, whole},
+	{connections.Table, connections.Column, "id", connections.BindingFor, connectionFields},
+	{mcpservers.ServersTable, mcpservers.CredentialColumn, "id", mcpservers.CredentialBinding, whole},
+	{checkpoint.Table, checkpoint.Column, "agent_id", checkpoint.Binding, whole},
+	{tracedest.DestinationsTable, tracedest.CredentialsColumn, "id", tracedest.Binding, func(plain []byte) []string {
 		var m map[string]string
 		if json.Unmarshal(plain, &m) != nil {
 			return nil
@@ -223,7 +225,11 @@ func (s *PGSecrets) Secrets(ctx context.Context, org pgtype.UUID) (*scrub.Secret
 			if json.Unmarshal(raw, &env) != nil {
 				continue
 			}
-			plain, err := s.Keys.Open(secretstore.Binding{OrgID: org.String(), Table: c.table, RowID: id, Column: c.column}, env)
+			rowID, perr := parseUUID(id)
+			if perr != nil {
+				continue
+			}
+			plain, err := s.Keys.Open(c.binding(org, rowID), env)
 			if err != nil {
 				// One value that cannot be opened (a retired key) must not blind the scrubber to the others.
 				continue
