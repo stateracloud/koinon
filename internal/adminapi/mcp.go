@@ -50,7 +50,7 @@ func toMcpServer(m mcpservers.Server) McpServer {
 func toMcpTool(t mcpservers.Tool) McpTool {
 	out := McpTool{
 		ServerId: openapi_types.UUID(pgUUID(t.ServerID).Bytes), Name: t.Name, Description: t.Description, ReadOnlyHint: t.ReadOnlyHint,
-		Tier: McpToolTier(t.Tier), Present: t.Present, ContentHash: t.ContentHash, RequiresTwoApprovers: &t.RequiresTwoApprovers, FirstSeenAt: t.FirstSeenAt, LastSeenAt: t.LastSeenAt, TierSetAt: t.TierSetAt,
+		Tier: McpToolTier(t.Tier), Present: t.Present, ContentHash: t.ContentHash, DescriptionOriginalLength: t.DescriptionOriginalLength, DescriptionCapped: t.DescriptionCapped, DescriptionCleaned: t.DescriptionCleaned, RequiresTwoApprovers: &t.RequiresTwoApprovers, FirstSeenAt: t.FirstSeenAt, LastSeenAt: t.LastSeenAt, TierSetAt: t.TierSetAt,
 	}
 	if t.ReviewReason != "" {
 		out.ReviewReason = &t.ReviewReason

@@ -176,6 +176,34 @@ Verified in the gateway spec suite with the real binary:
   stops approved calls (they retry) until the next reconcile pass writes a new key.
 - Negative: one target-name clash between orgs leaves one server unserved until a name changes.
 
+## Amendment 2026-10-30: third-party descriptions are sanitised at sync (#267)
+
+A server's tool descriptions, and the description strings of its input schemas, reach the model verbatim,
+so they are untrusted input. `internal/mcpsanitize` normalises them when `SyncTools` records a tool:
+
+- ANSI escapes, control characters (newline and tab stay), zero-width and other invisible format
+  characters, bidi overrides and isolates, variation selectors and Unicode tag characters (U+E0000 to
+  U+E007F) are removed;
+- tags that imitate a harness or chat-role block (`<system>`, `<system-reminder>`, `<koinon-*>`,
+  `<untrusted_context`, `<tool_result>` and similar, opening or closing) have their `<` escaped to `&lt;`,
+  so an admin still reads them;
+- a tool description is cut to 1,024 characters and each `description` or `title` in the input schema to
+  256 (research TP22), ending in an ellipsis. This replaces the old 20,000 byte cut.
+
+What is stored, hashed (`content_hash`) and offered by the ask-tier proxy is the sanitised text, so the
+review flow is unchanged: a visible change flags the tool, and a change that only differs in removed
+characters does not. The tool API carries `descriptionOriginalLength`, `descriptionCapped` and
+`descriptionCleaned` for the approval screen. Tools synced before this change keep 0 and false until a sync
+changes their sanitised text; a description that needed cleaning is flagged for review then.
+
+Limit: an **auto** tool is served by agentgateway, which federates the upstream server's `tools/list`
+unchanged. Koinon renders `mcpAuthorization` rules (allow or deny by tool name) and has no hook that
+rewrites a description, so the model sees the raw text of an auto tool. The sustainable fix is in the
+harness side of the path (research TP22, TP25): the harness (agentd's MCP bridge, or koinon-harness) applies
+the same `mcpsanitize` policy to what it hands the model, and pins each tool to the approved hash. Until
+then an admin sees the sanitised text and the flags at approval, and the ask tier is the safe choice for a
+server that is not trusted.
+
 ## Upstream verification
 
 Checked 2026-10-23 against agentgateway v1.6.0 and the MCP Registry; see the research report. The

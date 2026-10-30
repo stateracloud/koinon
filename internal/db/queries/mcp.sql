@@ -115,8 +115,10 @@ SELECT * FROM mcp_tools
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name;
 
 -- name: InsertMCPTool :one
-INSERT INTO mcp_tools (org_id, server_id, name, description, input_schema, content_hash, read_only_hint)
-VALUES (@org_id, @server_id, @name, @description, @input_schema, @content_hash, @read_only_hint)
+INSERT INTO mcp_tools (org_id, server_id, name, description, input_schema, content_hash, read_only_hint,
+                       description_original_length, description_capped, description_cleaned)
+VALUES (@org_id, @server_id, @name, @description, @input_schema, @content_hash, @read_only_hint,
+        @description_original_length, @description_capped, @description_cleaned)
 RETURNING *;
 
 -- name: UpdateMCPToolContent :one
@@ -125,6 +127,8 @@ RETURNING *;
 UPDATE mcp_tools
 SET description = @description, input_schema = @input_schema, content_hash = @content_hash,
     read_only_hint = @read_only_hint, present = true, last_seen_at = now(),
+    description_original_length = @description_original_length, description_capped = @description_capped,
+    description_cleaned = @description_cleaned,
     review_reason = @review_reason,
     tier = CASE WHEN tier = 'auto' THEN 'ask'::mcp_tier ELSE tier END,
     tier_set_by = CASE WHEN tier = 'auto' THEN 'koinon (the tool changed)' ELSE tier_set_by END,

@@ -1559,21 +1559,24 @@ type McpServer struct {
 }
 
 type McpTool struct {
-	OrgID                pgtype.UUID
-	ServerID             pgtype.UUID
-	Name                 string
-	Description          string
-	InputSchema          []byte
-	ContentHash          string
-	ReadOnlyHint         bool
-	Tier                 McpTier
-	ReviewReason         pgtype.Text
-	Present              bool
-	FirstSeenAt          pgtype.Timestamptz
-	LastSeenAt           pgtype.Timestamptz
-	RequiresTwoApprovers bool
-	TierSetBy            pgtype.Text
-	TierSetAt            pgtype.Timestamptz
+	OrgID                     pgtype.UUID
+	ServerID                  pgtype.UUID
+	Name                      string
+	Description               string
+	InputSchema               []byte
+	ContentHash               string
+	ReadOnlyHint              bool
+	Tier                      McpTier
+	ReviewReason              pgtype.Text
+	Present                   bool
+	FirstSeenAt               pgtype.Timestamptz
+	LastSeenAt                pgtype.Timestamptz
+	RequiresTwoApprovers      bool
+	TierSetBy                 pgtype.Text
+	TierSetAt                 pgtype.Timestamptz
+	DescriptionOriginalLength int64
+	DescriptionCapped         bool
+	DescriptionCleaned        bool
 }
 
 type Model struct {
