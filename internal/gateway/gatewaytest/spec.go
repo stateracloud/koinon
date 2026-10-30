@@ -44,8 +44,9 @@ type Env struct {
 	// mode). In Kubernetes mode the ledger revokes the key instead, which that driver's own suite tests.
 	GatewayBudgets bool
 	// HeaderAllowlist is true when the gateway drops every client header outside
-	// gateway.ForwardedHeaders (standalone mode). Otherwise (Kubernetes mode, whose CRD cannot say
-	// so) it refuses with 403 a request that carries a gateway key in any header but Authorization.
+	// gateway.ForwardedHeaders (standalone mode); Kubernetes mode's CRD cannot say so. In both modes
+	// the gateway refuses with 403 a request that carries a gateway key in any header but
+	// Authorization.
 	HeaderAllowlist bool
 }
 
@@ -687,19 +688,28 @@ func mcpServersSpec(env Env) {
 			Expect(strings.Join(openLog.values("Authorization"), ",")).NotTo(ContainSubstring(gateway.KeyPrefix))
 		})
 
-		It("passes a server only the headers MCP needs, never one that carries the agent's key (#262)", func(ctx SpecContext) {
-			if !env.HeaderAllowlist {
-				Skip("the Kubernetes CRD cannot allowlist headers; the MCP route there only drops credential headers")
+		It("refuses an MCP request with the agent's key in any header but Authorization, and passes a server only the headers MCP needs (#262)", func(ctx SpecContext) {
+			connect := func(name, value string) (*mcp.ClientSession, error) {
+				client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0.0.1"}, nil)
+				return client.Connect(ctx, &mcp.StreamableClientTransport{
+					Endpoint:             llmURL + "/mcp",
+					HTTPClient:           &http.Client{Transport: headerSetter{key: keyAcme.Material, name: name, value: value, base: http.DefaultTransport}},
+					DisableStandaloneSSE: true, MaxRetries: -1,
+				}, nil)
 			}
-			client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0.0.1"}, nil)
-			s, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-				Endpoint: llmURL + "/mcp",
-				HTTPClient: &http.Client{Transport: headerSetter{
-					key: keyAcme.Material, name: "X-Canary",
-					value: "prefix-" + keyAcme.Material + "-suffix", base: http.DefaultTransport,
-				}},
-				DisableStandaloneSSE: true, MaxRetries: -1,
-			}, nil)
+			// A key in a header of the agent's choosing, or in one the allowlist keeps, is refused.
+			for _, h := range [][2]string{
+				{"X-Canary", "prefix-" + keyAcme.Material + "-suffix"},
+				{"User-Agent", "harness/1.0 (" + keyAcme.Material + ")"},
+			} {
+				s, err := connect(h[0], h[1])
+				if err == nil {
+					_ = s.Close()
+				}
+				Expect(err).To(HaveOccurred(), "the key in "+h[0]+" is refused")
+			}
+
+			s, err := connect("X-Canary", "hello")
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = s.Close() })
 			for _, tool := range []string{"acme-open_read_item", "acme-wiki_read_item"} {
@@ -707,8 +717,10 @@ func mcpServersSpec(env Env) {
 				Expect(err).NotTo(HaveOccurred())
 			}
 			for name, l := range map[string]*headerLog{"acme-open": openLog, "acme-wiki": acmeLog} {
-				Expect(l.values("X-Canary")).To(BeEmpty(), name+": a header the agent invented reached the server")
-				for _, h := range []string{"Authorization", "X-Canary", "Cookie"} {
+				if env.HeaderAllowlist {
+					Expect(l.values("X-Canary")).To(BeEmpty(), name+": a header the agent invented reached the server")
+				}
+				for _, h := range []string{"Authorization", "X-Canary", "Cookie", "User-Agent"} {
 					Expect(strings.Join(l.values(h), ",")).NotTo(ContainSubstring(gateway.KeyPrefix), name+": "+h)
 				}
 			}

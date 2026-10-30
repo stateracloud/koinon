@@ -159,6 +159,9 @@ var _ = Describe("Render", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(string(got)).To(ContainSubstring(
 				`replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id", "user-agent"])`))
+			Expect(string(got)).To(ContainSubstring(
+				"    authorization:\n      rules:\n        - '!toJson(request.headers.filterKeys(k, k != \"authorization\")).contains(\"kgw_\")'\n"),
+				"an MCP request with a key in a header but authorization is refused: the allowlisted headers carry what the client chose")
 		})
 
 		It("limits every key to its own org's plain model names", func() {
@@ -386,7 +389,7 @@ var _ = Describe("Render", func() {
 				Expect(p).To(HaveLen(1))
 				Expect(p[0].KeyHash).To(Equal(gateway.HashKey(standalone.ReloadProbeKey(rev))))
 				Expect(p[0].Metadata.Agent).To(BeEmpty())
-				Expect(d.LLM.Policies.Authorization.Rules).To(Equal([]string{`apiKey.name != "koinon-reload-probe" && !url.decode(request.pathAndQuery).contains("kgw_") && !has(llmRequest.mcp_servers)`}), "the probe is refused, and so are a key in the URL and mcp_servers")
+				Expect(d.LLM.Policies.Authorization.Rules).To(Equal([]string{`apiKey.name != "koinon-reload-probe" && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_") && !has(llmRequest.mcp_servers)`}), "the probe is refused, and so are a key in the URL or a header and mcp_servers")
 				if d.MCP != nil {
 					Expect(probes(d.MCP.Policies.APIKey.Keys)).To(BeEmpty())
 				}

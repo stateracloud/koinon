@@ -430,8 +430,8 @@ func (b *builder) models(s gateway.State) {
 			for _, f := range rd.Reject {
 				admit += " && !has(llmRequest." + f + ")"
 			}
-			// The CRD cannot allowlist headers (gateway.NoKeyInHeadersExpr), so a request that carries a
-			// gateway key anywhere but the key header is refused (#262).
+			// A request that carries a gateway key in the URL or in a header but the key header is refused
+			// (#262); the CRD cannot allowlist headers, so this is the only header guard here.
 			admit += " && " + gateway.NoKeyInURLExpr() + " && " + gateway.NoKeyInHeadersExpr()
 			policies := map[string]any{
 				"authorization": map[string]any{
@@ -636,7 +636,14 @@ func (b *builder) mcp(s gateway.State) {
 	// injected, while a Backend policy runs after it and would strip it.
 	b.add("", groupAgent+"/v1alpha1", KindPolicy, name, map[string]any{
 		"targetRefs": b.policyTargets(KindHTTPRoute, name),
-		"traffic":    map[string]any{"transformation": map[string]any{"request": request}},
+		"traffic": map[string]any{
+			"transformation": map[string]any{"request": request},
+			// A request that carries a gateway key in a header but the key header is refused (#262).
+			"authorization": map[string]any{
+				"action": "Require",
+				"policy": map[string]any{"matchExpressions": []any{gateway.NoKeyInHeadersExpr()}},
+			},
+		},
 	}, nil, nil)
 }
 

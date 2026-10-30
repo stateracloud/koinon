@@ -197,13 +197,23 @@ key in a URL query or path was forwarded the same way.
   these, the gateway sets itself (`Rendering.Headers`, the provider's credential, `x-koinon-org`).
   OpenRouter sticky routing is a body field, so it needs no header. If the expression ever fails to
   evaluate, agentgateway leaves the headers untouched; the expression reads only `request.headers` and
-  literals, and the real-gateway spec fails if it stops working.
+  literals, and the real-gateway spec fails if it stops working. Dropped with everything else: the
+  `traceparent` agentgateway inserts before its gateway policies run, so a model provider or MCP
+  target sees none (ADR 0074 does not rely on it; a traced MCP call gets one from the gateway's outbound
+  span).
+- **Both modes refuse a gateway key in any header but `authorization`.** The allowlist alone is not
+  enough: the headers it keeps carry whatever the client put in them (an agent chooses its own
+  `User-Agent`), and a replace that failed to evaluate would forward everything. So the LLM
+  authorization rule and an `authorization` rule on the MCP route refuse (403) a request whose other
+  headers contain `kgw_` (`gateway.NoKeyInHeadersExpr`); a failed authorization rule refuses, so this
+  half fails closed. A key the agent re-encodes first, or puts in a value that is not valid UTF-8
+  (agentgateway's CEL leaves such a header out of `request.headers`), evades the check; in standalone
+  mode the allowlist still drops it.
 - **Kubernetes mode cannot allowlist.** The v1.7.0 `AgentgatewayPolicy` CRD has no `replace` field
-  (the data plane has it). The sustainable fix is upstream, so the driver renders the strongest guard
-  the CRD allows: the model's authorization rule refuses (403) a request that carries a gateway key
-  in any header but `authorization` (`gateway.NoKeyInHeadersExpr`). That stops the accident and the
-  plain attack; a key the agent re-encodes first evades it. The MCP route there still only drops
-  credential headers. **Exit condition:** switch the driver to `replace` when the CRD exposes it.
+  (the data plane has it). The sustainable fix is upstream; until then the refusal above, on the
+  model's authorization rule and on the MCP route's traffic policy, is the only header guard there,
+  so a header without a key passes. **Exit condition:** switch the driver to `replace` when the CRD
+  exposes it.
 - **Both modes refuse a gateway key in the URL.** The LLM authorization rule includes
   `!url.decode(request.pathAndQuery).contains("kgw_")` (`gateway.NoKeyInURLExpr`), so the request is
   answered 403 before it reaches the upstream (agentgateway has no way to strip a query parameter by

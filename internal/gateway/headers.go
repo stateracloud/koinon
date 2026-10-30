@@ -46,11 +46,15 @@ func NoKeyInURLExpr() string {
 }
 
 // NoKeyInHeadersExpr is the CEL condition under which no request header but authorization (the one
-// that carries the key to the gateway) holds a gateway key. It is the Kubernetes driver's guard in
-// place of AllowHeadersExpr: agentgateway v1.7's AgentgatewayPolicy CRD has no way to replace the
-// header set (its data plane does, which the standalone driver uses), so an unknown header cannot be
-// dropped there, only refused when it carries a key. It stops the accident and the plain attack; a
-// key re-encoded by the agent evades it, which only the allowlist closes.
+// that carries the key to the gateway) holds a gateway key. Both drivers refuse a request that fails
+// it, on LLM and MCP routes alike. The allowlist (AllowHeadersExpr) alone is not enough: the headers
+// it keeps carry whatever the client put in them (an agent chooses its own User-Agent), and if the
+// replace expression ever failed to evaluate agentgateway would forward every header, while a failed
+// authorization rule refuses. In Kubernetes mode it is the only header guard: agentgateway v1.7's
+// AgentgatewayPolicy CRD has no way to replace the header set (its data plane does, which the
+// standalone driver uses), so an unknown header without a key passes there. A key the agent
+// re-encodes first, or puts in a value that is not valid UTF-8 (agentgateway's CEL leaves such a
+// header out of request.headers), evades this check; only the allowlist drops those.
 func NoKeyInHeadersExpr() string {
 	return `!toJson(request.headers.filterKeys(k, k != "authorization")).contains(` + strconv.Quote(KeyPrefix) + ")"
 }

@@ -383,6 +383,17 @@ var _ = Describe("Render", func() {
 		Expect(targets(gateway.State{MCP: []gateway.MCPTarget{{Name: "github", URL: "http://g.example.com/mcp"}}})).To(HaveLen(1))
 	})
 
+	It("refuses an MCP request with a gateway key in a header but authorization (#262)", func() {
+		r, err := gwk8s.Render(fullState(), opts())
+		Expect(err).NotTo(HaveOccurred())
+		spec := find(r, gwk8s.KindPolicy, "koinon-gateway-mcp").U.Object["spec"]
+		Expect(spec).To(HaveKeyWithValue("traffic", HaveKeyWithValue("authorization", And(
+			HaveKeyWithValue("action", "Require"),
+			HaveKeyWithValue("policy", HaveKeyWithValue("matchExpressions", ConsistOf(
+				`!toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")`)))))),
+			"the allowlisted headers carry what the client chose, and this CRD cannot allowlist at all")
+	})
+
 	It("refuses a provider key without a Secret to hold it", func() {
 		o := opts()
 		o.ProviderKeysSecret = ""
