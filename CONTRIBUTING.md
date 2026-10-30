@@ -16,25 +16,49 @@ with `git rebase --signoff main`. There is no CLA.
 
 ## Requirements
 
-- Go (version in `go.mod`), Docker (for Postgres tests)
-- Node 24 and pnpm (version in `web/package.json`)
-- [buf](https://buf.build/docs/installation), [golangci-lint](https://golangci-lint.run) v2
-- For the inner loop: [Tilt](https://tilt.dev), [ko](https://ko.build) and a Kubernetes cluster
+You need nothing from the maintainers' infrastructure: no registry login, no home lab, no model
+key. Everything below runs on your machine with anonymous image pulls. Versions are the ones CI
+uses; newer patch releases usually work, but if something differs from CI, match this table first.
 
-Code generators (protoc-gen-go, protoc-gen-connect-go, sqlc, goose) are pinned as Go tools in
-`go.mod` and run through `go tool`.
+| Tool | Version | Used for |
+| --- | --- | --- |
+| Go | `go.mod` (1.27.3) | build, tests, code generators (pinned as `go tool` entries) |
+| Docker | any recent, with buildx | Postgres tests (testcontainers), flavor images, kind |
+| Node | 24 | web UI |
+| pnpm | `web/package.json` `packageManager` (12.14.0) | web UI, docs site |
+| buf | current v1 (CI: `bufbuild/buf-action`) | `make lint-proto`, `make generate` |
+| golangci-lint | v2.15.0 | `make lint-go` |
+| Helm | v4.3.1 | `make chart-check`, `make docs-check`, admission tests, Tilt |
+| kind | v0.33.0 (Kubernetes 1.37.0) | `make dev-kind-up`, `make test-e2e-kind` |
+| kubectl | within one minor of 1.37 | kind loop, e2e |
+| ko | 0.19 or newer (CI: 0.19.1) | Koinon images for kind and Tilt |
+| Tilt | current | `make dev` |
+| gitleaks | 8.30.1 | secret scan before you push |
+| jq | any | e2e and kind scripts |
+
+Code generators (protoc-gen-go, protoc-gen-connect-go, sqlc, goose, oapi-codegen) are pinned as Go
+tools in `go.mod` and run through `go tool`. `setup-envtest` for the admission tests is fetched by
+`make test-admission`.
 
 ## Common tasks
 
 ```sh
-make web-deps   # install web dependencies (once)
+make web-deps   # install web dependencies (once; run it before make generate and make lint)
 make build      # build Go binaries and the web UI
-make test       # Go and web unit tests
+make test       # Go and web unit tests, the same set CI runs (without test/flavors)
+make test-flavors # build the flavor images, then run the flavor contract suite (Docker)
 make lint       # golangci-lint, oxlint, tsc, buf lint, migration lint
 make generate   # regenerate protobuf and sqlc code; commit the result
 make breaking   # buf breaking against main
-make dev        # Tilt against the home lab, or kind after `make dev-kind-up` (docs/dev/loop.md)
+make dev-kind-up # local kind cluster with Koinon's prerequisites (once)
+make dev        # Tilt on that cluster (docs/dev/loop.md)
+make test-escape-kind # the sandbox escape suite's OpenShell cases on that cluster
 ```
+
+The local development loop is kind: `make dev-kind-up`, then `make dev` (Tilt), and
+`make test-e2e-kind` for the quickstart end to end. [docs/dev/loop.md](docs/dev/loop.md) covers it,
+including how to point Tilt at a remote cluster of your own. The maintainer's home lab is described
+in [docs/dev/maintainer-homelab.md](docs/dev/maintainer-homelab.md); you do not need it.
 
 ## Pull requests
 

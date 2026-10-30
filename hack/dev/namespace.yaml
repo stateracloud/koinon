@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
+#
+# The Koinon namespace. The Tiltfile adds the labels in `namespaceLabels` of hack/dev/local.yaml on a
+# remote cluster (the maintainer's home lab uses that for its secret store).
 apiVersion: v1
 kind: Namespace
 metadata:
   name: koinon
   labels:
     app.kubernetes.io/part-of: koinon
-    # Home lab: lets the OpenBao ClusterSecretStore deliver the agentgateway
-    # management key (Secret agentgateway-mgmt) into this namespace.
-    lab.example.invalid/openbao: "true"

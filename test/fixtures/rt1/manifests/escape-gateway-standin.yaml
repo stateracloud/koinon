@@ -32,7 +32,7 @@ spec:
       containers:
         - name: standin
           # Placeholder tag: the digest is filled in at deploy (see kustomization.yaml).
-          image: zot.apps.lab.example.invalid/koinon/rt1-fakemodel:dev
+          image: rt1-fakemodel:dev
           args: ["-standin", "-addr=:4000"]
           ports:
             - {name: http, containerPort: 4000}
