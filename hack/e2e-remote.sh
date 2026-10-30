@@ -37,6 +37,7 @@
 #   KOINON_E2E_REMOTE_WORK  bare repository on the remote, relative to its home (default work/koinon-e2e.git)
 #   KOINON_E2E_OUT          where results land locally (default .e2e-out/<run id>); --out overrides
 #   KOINON_E2E_LOCK         lock file path on the host that runs the e2e
+#   SUITE_LABEL=smoke       run only the smoke specs (steps 1-6 of the quickstart), about half the time
 #
 # The container uses --network host: kind publishes the API server on the Docker host's loopback and
 # run.sh port-forwards there. That works on Linux Docker and OrbStack; Docker Desktop needs its
@@ -156,7 +157,7 @@ run_e2e() {
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v "$s:/work" -v "$outdir:/out" \
     -v koinon-e2e-gomod:/go/pkg/mod -v koinon-e2e-gocache:/root/.cache/go-build \
-    -e OUT=/out -e "CLUSTER=$CLUSTER" -e KEEP=0 \
+    -e OUT=/out -e "CLUSTER=$CLUSTER" -e KEEP=0 ${SUITE_LABEL:+-e "SUITE_LABEL=$SUITE_LABEL"} \
     "$image" make test-e2e-kind </dev/null 9>&- &
   run_pid=$!
   wait "$run_pid" || rc=$?

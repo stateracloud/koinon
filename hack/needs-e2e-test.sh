@@ -18,6 +18,18 @@ expect() {
   fi
 }
 
+# --forced-only: just the e2e's own files.
+forced() { local want=$1 got=0; shift; printf '%s\n' "$@" | hack/needs-e2e.sh --stdin --forced-only >/dev/null || got=$?; [[ $got -eq $want ]] || { echo "FAIL: --forced-only want $want got $got for: $*" >&2; fail=1; }; }
+forced 0 test/e2e/run.sh
+forced 0 test/e2e/kind/up.sh
+forced 0 .github/workflows/e2e-kind.yml
+forced 0 hack/docs-e1.sh
+forced 0 docs/site/src/content/docs/quickstart.md
+forced 0 flavors/opencode/prompt.md
+forced 1 internal/api/server.go
+forced 1 charts/koinon/values.yaml
+forced 1 go.mod
+
 # Needed.
 expect 0 cmd/koinon-api/main.go
 expect 0 cmd/koinon-fakemcp/main.go
