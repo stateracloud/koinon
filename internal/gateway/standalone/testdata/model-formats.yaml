@@ -35,7 +35,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"976a396b125ad1cd"'
+      koinon.config: '"734cb4f6352b9b04"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -70,15 +70,16 @@ llm:
             - claude-haiku-4-5
             - claude-haiku-5-5
             - open/model
-        - keyHash: sha256:0542f297cea6a3eaae78f445bbf73ec953166f1eefa43e8d3259bb7a399b0213
+        - keyHash: sha256:25ebfdae023c6a140b08a34d4cfaf4ed782062e7810a750e335d3fd4b106a2ac
           metadata:
             name: koinon-reload-probe
             agent: ""
     authorization:
       rules:
-        - apiKey.name != "koinon-reload-probe" && !has(llmRequest.mcp_servers)
+        - apiKey.name != "koinon-reload-probe" && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_") && !has(llmRequest.mcp_servers)
     transformations:
       request:
+        replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
         set:
           x-koinon-org: default(apiKey.org, "")
   models:

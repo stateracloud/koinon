@@ -211,7 +211,8 @@ var _ = Describe("Render", func() {
 		Expect(pol["transformations"]).To(ConsistOf(HaveKeyWithValue("field", "tools")),
 			"no stream_options; the agent's server tools are dropped")
 		Expect(pol["authorization"]).To(HaveKeyWithValue("policy", HaveKeyWithValue("matchExpressions", ConsistOf(
-			`apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-4-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers)`))), "mcp_servers is refused")
+			`apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-4-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers) && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")`))),
+			"mcp_servers is refused, and so is a gateway key in the URL or in a header but authorization (#262)")
 		Expect(pol["headers"]).To(Equal(map[string]any{"request": map[string]any{
 			"set": []any{
 				map[string]any{"name": "anthropic-version", "value": "2023-06-01"},
@@ -382,6 +383,17 @@ var _ = Describe("Render", func() {
 		Expect(targets(gateway.State{MCP: []gateway.MCPTarget{{Name: "github", URL: "http://g.example.com/mcp"}}})).To(HaveLen(1))
 	})
 
+	It("refuses an MCP request with a gateway key in a header but authorization (#262)", func() {
+		r, err := gwk8s.Render(fullState(), opts())
+		Expect(err).NotTo(HaveOccurred())
+		spec := find(r, gwk8s.KindPolicy, "koinon-gateway-mcp").U.Object["spec"]
+		Expect(spec).To(HaveKeyWithValue("traffic", HaveKeyWithValue("authorization", And(
+			HaveKeyWithValue("action", "Require"),
+			HaveKeyWithValue("policy", HaveKeyWithValue("matchExpressions", ConsistOf(
+				`!toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")`)))))),
+			"the allowlisted headers carry what the client chose, and this CRD cannot allowlist at all")
+	})
+
 	It("refuses a provider key without a Secret to hold it", func() {
 		o := opts()
 		o.ProviderKeysSecret = ""
@@ -392,7 +404,8 @@ var _ = Describe("Render", func() {
 	It("holds no key material, only hashes", func() {
 		r, err := gwk8s.Render(fullState(), opts())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(string(dump(r))).NotTo(ContainSubstring("kgw_"))
+		// The admission rules name the prefix (gateway.NoKeyInURLExpr); a key is the prefix and 43 characters.
+		Expect(string(dump(r))).NotTo(MatchRegexp(`kgw_[A-Za-z0-9_-]{43}`))
 	})
 })
 
