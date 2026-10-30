@@ -98,7 +98,7 @@ nocheck "$out" "would dispatch" "and runs nothing"
 git checkout -q -b feature "$green"
 commit charts/feature.yaml f "feat(chart): from a branch"
 git checkout -q main
-git merge --no-ff -q feature -m "Merge pull request #7 from org/feature" -m "feat(chart): the real PR title"
+g merge --no-ff -q feature -m "Merge pull request #7 from org/feature" -m "feat(chart): the real PR title"
 out=$(b --green "$(git rev-parse HEAD~1)" --head HEAD)
 check "$out" "feat(chart): the real PR title" "uses the PR title for a merge commit"
 nocheck "$out" "Merge pull request" "never the merge subject"
