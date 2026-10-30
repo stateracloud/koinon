@@ -1,0 +1,7 @@
+POST /v1/chat/completions HTTP/1.1
+Host: gateway.koinon.svc
+Authorization: Bearer kgw_koinon_test_not-a-real-key
+Cookie: sid=fake; theme=dark
+X-Request-Id: 3f2b8c1e-9a4d-4e7b-8c21-5d6f7a8b9c0d
+
+{"model":"fake","user":"jane.doe@example.com","password":"not-a-real-password-1"}

@@ -170,6 +170,9 @@ type runner struct {
 	sumMu sync.Mutex
 	sum   *summaryState
 
+	// tr is the run's tracing state; nil when the run is not traced (runtrace.go).
+	tr *runTrace
+
 	cmdMu      sync.Mutex
 	commands   []string      // the harness's last available_commands_update
 	cmdChanged chan struct{} // closed and replaced on every available_commands_update
@@ -241,6 +244,7 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 		log: log.With("org", run.OrgID.String(), "run", run.ID.String(), "epoch", run.Epoch),
 	}
 	r.log.Info("driving run", "state", run.State, "takeovers", run.Takeovers)
+	r.tr = p.traceStart(ctx, run, r.fenced, r.log)
 
 	hctx, stop := context.WithCancel(ctx)
 	var hb sync.WaitGroup
@@ -253,6 +257,9 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	}
 	stop()
 	hb.Wait()
+	// The turn's row ends before the run's state changes, so whoever sees the run finished sees the
+	// turn ended (a success ends it inside endTurn's transaction, a park likewise).
+	r.tr.finish(ctx, err, fence(r.fenceKind.Load()))
 	r.conclude(ctx, err)
 }
 
@@ -430,6 +437,7 @@ func (r *runner) execute(ctx context.Context) error {
 		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model with a price"}
 	}
 	r.model, r.modelSource = model, source
+	r.tr.identify(agent, version, task, model)
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
 	facts, err := r.modelFacts(fctx, model)
 	if err != nil {
@@ -726,8 +734,9 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 	done := make(chan promptResult, 1)
 	started := time.Now()
 	r.takeRefusals()
+	meta := r.tr.beginTurn(ctx, text)
 	go func() {
-		stop, err := conn.Prompt(ctx, session, text)
+		stop, err := conn.PromptMeta(ctx, session, text, meta)
 		done <- promptResult{stop, err}
 	}()
 	// Parked time does not count against the cap (ClaimNextRun adds it to parked_seconds).
@@ -878,6 +887,7 @@ func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc e
 			}
 		}
 		err := r.turn(ctx, conn, proc, stderr, session, text)
+		r.tr.noteTurnResult(err)
 		if errors.Is(err, errWrapUp) {
 			// A cancel can arrive with the cancelled turn, as in the refusal branch below.
 			if stop := r.stopped(ctx); stop != nil {
@@ -1354,6 +1364,7 @@ func (r *runner) release(ctx context.Context) {
 type handler struct{ r *runner }
 
 func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
+	at := time.Now() // for the trace, before the event write
 	if h.r.summaryUpdate(n) {
 		return nil // the summary prompt's reply is the task's note, not a run event
 	}
@@ -1372,6 +1383,7 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	if err := h.r.recordRaw(ctx, "acp."+updateKind(b), b); err != nil {
 		return err
 	}
+	h.r.tr.update(n, at)
 	if n.Update.ToolCall != nil {
 		h.r.markTool(string(n.Update.ToolCall.ToolCallId))
 	}
