@@ -50,9 +50,25 @@ api:
     digest: ""
   replicas: 1
   port: 8080
-  # The spend ledger's OTLP/HTTP receiver (plan item L1). agentgateway exports its access log
-  # here; the NetworkPolicy admits only the gateway, since the receiver has no authentication.
+  # The internal OTLP/HTTP receiver (spend ledger, plan item L1; run traces, ADR 0074).
+  # agentgateway exports its access log here and koinon-agentd exports run spans. Every request
+  # needs a bearer token; the NetworkPolicy admits only those two senders as a second layer.
   otlpPort: 4318
+  # The receiver's bearer token. By default the ensure-secrets hook Job generates the Secret
+  # koinon-otlp-token (key "token": 64 hex characters) and never changes it. koinon-api, koinon-agentd
+  # and the gateway mount it; sandboxes never see it. existingSecret names your own Secret with a
+  # "token" key instead.
+  #
+  # Rotation: accepting the current and the previous token needs no downtime. Edit the Secret: copy
+  # the old "token" value to a key "previous" and put a new random value (`openssl rand -hex 32`) in
+  # "token". koinon-api and koinon-agentd pick the files up within about a minute (kubelet refreshes
+  # the mounted Secret; they re-read every few seconds). agentgateway watches the token file and
+  # reloads it, so the gateway's next export carries the new token without a restart (kubernetes
+  # mode: the controller reads the Secret and pushes the value to the proxy). When every sender sends
+  # the new token, delete "previous". See docs/ops/secret-keys.md.
+  # With a Secret you manage (existingSecret), rotate the same way.
+  otlpToken:
+    existingSecret: ""
   # The GitHub tools MCP server (plan item C3): its own listener and Service, reachable only from
   # agentgateway (NetworkPolicy), never through the API Service or ingress.
   toolsPort: 8081

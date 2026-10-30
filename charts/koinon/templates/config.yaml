@@ -24,6 +24,8 @@ data:
       databaseUrl: sqlite:///data/agentgateway.db?mode=rwc
       # agentgateway exports its access log here, for the spend ledger (plan item L1).
       accessLogOtlp: {{ include "koinon.componentName" (list . "api") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.otlpPort }}
+      # The bearer token the receiver requires: a file in the gateway pod (the Secret is mounted there).
+      accessLogOtlpTokenFile: {{ include "koinon.otlpTokenDir" . }}/token
       # The reconciler writes the opened provider keys into this Secret; the gateway mounts it.
       providerKeysSecret: {{ include "koinon.gatewayProvidersName" . }}
       providerKeysDir: /secrets/providers
@@ -34,6 +36,8 @@ data:
       url: http://{{ include "koinon.gatewayHost" . }}:{{ .Values.gateway.kubernetes.port }}
       port: {{ .Values.gateway.kubernetes.port }}
       accessLogOtlp: {{ include "koinon.componentName" (list . "api") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.otlpPort }}
+      # The Secret (key token) with the bearer token the receiver requires; the controller reads it.
+      accessLogOtlpTokenSecret: {{ include "koinon.otlpTokenName" . }}
       # The Secret the proxy reads provider keys and MCP credentials from, through the controller.
       providerKeysSecret: {{ include "koinon.gatewayProvidersName" . }}
       providerKeysDir: /secrets/providers

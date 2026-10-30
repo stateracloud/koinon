@@ -152,6 +152,11 @@ func (o Options) withDefaults() Options {
 // agent's keys out of the key ConfigMap, which revokes them without a restart; the next Apply with
 // an amount above zero puts them back. This is the S2 fallback of plan item G2.
 func Render(s gateway.State, o Options) (Rendered, error) {
+	if ex := o.AccessLogOTLP; ex != nil && ex.TokenSecret != "" {
+		if _, _, err := ex.SplitHostPort(); err != nil {
+			return Rendered{}, fmt.Errorf("kubernetes: %w", err)
+		}
+	}
 	if err := s.Validate(); err != nil {
 		return Rendered{}, err
 	}
@@ -339,6 +344,15 @@ func (b *builder) gatewayObjects() {
 	access := map[string]any{"attributes": map[string]any{"add": attrs}}
 	if b.o.AccessLogOTLP != nil {
 		otlp := map[string]any{"url": "http://" + b.o.AccessLogOTLP.HostPort, "protocol": "HTTP"}
+		if ex := b.o.AccessLogOTLP; ex.TokenSecret != "" {
+			// The policy cannot carry a credential itself: the export goes through a Backend whose
+			// auth policy reads the token from the Secret (the controller hands it to the proxy,
+			// as with provider keys).
+			if ref, ok := b.otlpBackend(ex); ok {
+				delete(otlp, "url")
+				otlp["backendRef"] = ref
+			}
+		}
 		if p := b.o.AccessLogOTLP.Path; p != "" && p != "/v1/logs" {
 			otlp["path"] = p
 		}
@@ -348,6 +362,30 @@ func (b *builder) gatewayObjects() {
 		"targetRefs": b.policyTargets(KindGateway, name),
 		"frontend":   map[string]any{"accessLog": access},
 	}, nil, nil)
+}
+
+// otlpBackend adds the Backend for the OTLP receiver, with the bearer token from ex.TokenSecret as
+// its auth, and returns the reference the access-log policy names. It reports false for a
+// host:port it cannot split; Render refuses such an Options first, so the token requirement is
+// never silently dropped.
+func (b *builder) otlpBackend(ex *standalone.OTLPExport) (map[string]any, bool) {
+	host, port, err := ex.SplitHostPort()
+	if err != nil {
+		return nil, false // Render has refused it already
+	}
+	key := ex.TokenSecretKey
+	if key == "" {
+		key = "token"
+	}
+	name := b.name("otlp")
+	b.add("", groupAgent+"/v1alpha1", KindBackend, name, map[string]any{
+		"static": map[string]any{"host": host, "port": int64(port)},
+		"policies": map[string]any{"auth": map[string]any{
+			// Default location: "Authorization: Bearer <value>".
+			"secretRef": map[string]any{"name": ex.TokenSecret, "key": key},
+		}},
+	}, nil, nil)
+	return map[string]any{"group": groupAgent, "kind": KindBackend, "name": name}, true
 }
 
 func attr(name, expr string) any { return map[string]any{"name": name, "expression": expr} }
