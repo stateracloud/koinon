@@ -1400,10 +1400,13 @@ func (x *GetPlatformResponse) GetCeiling() ContentLevel {
 }
 
 type SetPlatformDestinationRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Destination   *DestinationInput      `protobuf:"bytes,1,opt,name=destination,proto3" json:"destination,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Destination *DestinationInput      `protobuf:"bytes,1,opt,name=destination,proto3" json:"destination,omitempty"`
+	// expected_version is the config_version the form was loaded with (0 when the platform has no
+	// destination yet). When set and the destination has changed since, the call fails with ABORTED.
+	ExpectedVersion *int64 `protobuf:"varint,2,opt,name=expected_version,json=expectedVersion,proto3,oneof" json:"expected_version,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *SetPlatformDestinationRequest) Reset() {
@@ -1441,6 +1444,13 @@ func (x *SetPlatformDestinationRequest) GetDestination() *DestinationInput {
 		return x.Destination
 	}
 	return nil
+}
+
+func (x *SetPlatformDestinationRequest) GetExpectedVersion() int64 {
+	if x != nil && x.ExpectedVersion != nil {
+		return *x.ExpectedVersion
+	}
+	return 0
 }
 
 type SetPlatformDestinationResponse struct {
@@ -1855,9 +1865,11 @@ const file_koinon_trace_v1alpha1_trace_proto_rawDesc = "" +
 	"\x12GetPlatformRequest\"\x9a\x01\n" +
 	"\x13GetPlatformResponse\x12D\n" +
 	"\vdestination\x18\x01 \x01(\v2\".koinon.trace.v1alpha1.DestinationR\vdestination\x12=\n" +
-	"\aceiling\x18\x02 \x01(\x0e2#.koinon.trace.v1alpha1.ContentLevelR\aceiling\"j\n" +
+	"\aceiling\x18\x02 \x01(\x0e2#.koinon.trace.v1alpha1.ContentLevelR\aceiling\"\xaf\x01\n" +
 	"\x1dSetPlatformDestinationRequest\x12I\n" +
-	"\vdestination\x18\x01 \x01(\v2'.koinon.trace.v1alpha1.DestinationInputR\vdestination\"f\n" +
+	"\vdestination\x18\x01 \x01(\v2'.koinon.trace.v1alpha1.DestinationInputR\vdestination\x12.\n" +
+	"\x10expected_version\x18\x02 \x01(\x03H\x00R\x0fexpectedVersion\x88\x01\x01B\x13\n" +
+	"\x11_expected_version\"f\n" +
 	"\x1eSetPlatformDestinationResponse\x12D\n" +
 	"\vdestination\x18\x01 \x01(\v2\".koinon.trace.v1alpha1.DestinationR\vdestination\"\"\n" +
 	" DeletePlatformDestinationRequest\"#\n" +
@@ -2026,6 +2038,7 @@ func file_koinon_trace_v1alpha1_trace_proto_init() {
 	}
 	file_koinon_trace_v1alpha1_trace_proto_msgTypes[8].OneofWrappers = []any{}
 	file_koinon_trace_v1alpha1_trace_proto_msgTypes[17].OneofWrappers = []any{}
+	file_koinon_trace_v1alpha1_trace_proto_msgTypes[21].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
