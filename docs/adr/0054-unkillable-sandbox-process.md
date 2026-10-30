@@ -143,7 +143,7 @@ so files are saved as they are on disk, and allows no transport (`GIT_ALLOW_PROT
 partial clone cannot fetch a missing object from a promisor remote whose `uploadpack`,
 `core.sshCommand` or `ext::` URL the agent chose. A repository whose own configuration includes other files
 (`include`, `includeIf`) is skipped and reported, because git cannot be told to ignore includes in
-the repository's config. Global ignore rules no longer apply to what is saved.
+the repository's config. Global and home ignore and attributes files (`core.excludesFile`, `core.attributesFile` and their XDG defaults) no longer apply to what is saved; only the repository's own `.gitignore` and `.gitattributes` do.
 
 Permission requests (ADR 0049): agentd never picks an "always" option (a request with no once option
 is cancelled), and the paths of a request are resolved in the sandbox, so a link inside the
