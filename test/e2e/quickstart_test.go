@@ -386,6 +386,9 @@ var _ = Describe("the quickstart", Ordered, func() {
 			g.Expect(err).NotTo(HaveOccurred())
 			cost = got.GetRun().GetCost()
 			g.Expect(cost.GetRequests()).To(BeNumerically(">", 0), "the ledger recorded the run's requests")
+			// The refused title request (no tokens) can reach the ledger before the streamed ones:
+			// wait until the streamed usage is in too, not only the first entry.
+			g.Expect(cost.GetInputTokens()).To(BeNumerically(">=", 1200), "the fake model's reported input tokens")
 		}, 60*time.Second, time.Second).Should(Succeed())
 		// The streamed requests carry usage through the gateway, so none is an estimate. The title
 		// request the fake model refuses (a 400 without usage) is the provider's refusal, and the
