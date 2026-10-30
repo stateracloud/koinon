@@ -1,0 +1,9 @@
+commit 3f2b8c1e9a4d4e7b8c215d6f7a8b9c0d1e2f3a4b
+Author: Jane Doe <jane.doe@example.com>
+Date:   Fri Oct 30 10:00:00 2026 +0000
+
+    fix(tracing): keep trace 3f2b8c1e-9a4d-4e7b-8c21-5d6f7a8b9c0d valid
+
+ internal/tracing/scrub/scrub.go | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+index 3f2b8c1..9a4d4e7 100644
