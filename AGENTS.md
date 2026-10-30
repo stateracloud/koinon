@@ -57,7 +57,8 @@ or adopts them.
    on that issue and tell your human. Exit 1 is an error (for example the network): retry.
 7. Blocked by another issue: `hack/claim.sh block <N> <M>` (adds "blocked by", releases). New work
    you discover becomes a Backlog issue; do not start it.
-8. Finish: mark the PR ready, enable auto-merge, then `hack/claim.sh review <N>`. The claim is
+8. Finish: mark the PR ready, enable auto-merge (unless it needs `e2e-kind` first, see "Merging" under
+   Working rules), then `hack/claim.sh review <N>`. The claim is
    released when the PR merges or closes. Never delete a claim branch: claims are only released.
 9. Hand off: `hack/claim.sh release <N> --note "<state, branch, next step>"`; keep the branch and
    draft PR.
@@ -68,7 +69,7 @@ or adopts them.
 11. A PR that conflicts with main while auto-merge is on gets the label `needs-update`: merge
     `origin/main` yourself (the updater bot never pushes code to your branch).
 12. Releases: either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay
-    procoduck's.
+    procoduck's. Tags are immutable by ruleset: fix a bad tag with the next rc (`docs/dev/releasing.md`).
 
 ## Working alongside another human
 
@@ -137,13 +138,15 @@ Lessons that cost time more than once. They apply to humans and agents alike.
 - **OpenShell exec stdin is capped.** More than about 4 MiB of stdin that the command does not read
   makes `exec` exit 74. Code that restores or uploads data through exec must chunk it and have the
   command consume each chunk.
-- **Merging.** The only merge method is a merge commit: `gh pr merge --auto --merge`. Auto-merge does
-  not wait for the kind e2e, which is not a required check. A pull request that changes startup
-  flags, chart Jobs or hooks, or anything the e2e expects must pass `e2e-kind` on the PR before
-  it merges: it runs on its own for the paths in `.github/workflows/e2e-kind.yml`, otherwise dispatch
-  it (`gh workflow run e2e-kind.yml --ref <branch>`) or run `make test-e2e-kind`.
-- **Tags.** Either human may push `-rc` tags on a green `main`. Final `vX.Y.Z` tags are procoduck's. Tags
-  are immutable by ruleset: fix a bad tag with the next rc (`docs/dev/releasing.md`).
+- **Merging.** The only merge method is a merge commit: `gh pr merge --auto --merge`. Auto-merge
+  does not wait for `e2e-kind`, which is not a required check. So a pull request that changes startup
+  flags, chart Jobs or hooks, or anything the e2e expects does not get auto-merge until `e2e-kind` is
+  green on the PR: it runs on its own for the paths in `.github/workflows/e2e-kind.yml`, otherwise
+  dispatch it (`gh workflow run e2e-kind.yml --ref <branch>`) or run `make test-e2e-kind`, then enable
+  auto-merge and `hack/claim.sh review <N>` (step 8 above).
+- **Root causes, not workarounds.** When you hit the same workaround twice, find out why and fix the
+  cause. An interim fix is allowed only with an issue that names the exit condition (when it can be
+  removed), linked from the code or doc that carries it.
 - **OpenShell upstream (NVIDIA/OpenShell).** Issues need a first-hand human user story, a repro that
   uses only an OpenShell deployment, and OpenShell-only framing. No AI attribution (no
   `Co-Authored-By`, no "generated with" footer) in anything posted upstream. A pull request needs a
