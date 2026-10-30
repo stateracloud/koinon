@@ -10,8 +10,8 @@ Your session directory is `/sandbox/work`. You can read and change files only un
 
 You have access to these repositories. A task names one as `owner/name`: clone it from the URL below, over HTTPS. Git already holds the credentials for the host, so do not ask for a token, and do not clone from any other host; it is not reachable.
 
-- `procoduck/homelab` on Gitea (connector `gitea`, host `git.example.test:3000`): `git clone https://git.example.test:3000/procoduck/homelab`
-- `procoduck/koinon-docs` on Gitea (connector `gitea`, host `git.example.test:3000`): `git clone https://git.example.test:3000/procoduck/koinon-docs`
+- `acme/infra` on Gitea (connector `gitea`, host `git.example.test:3000`): `git clone https://git.example.test:3000/acme/infra`
+- `acme/docs` on Gitea (connector `gitea`, host `git.example.test:3000`): `git clone https://git.example.test:3000/acme/docs`
 
 ## Web access
 

@@ -96,18 +96,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          # Waivers outside the security fast path are Andre's alone (ADR 0079).
-          APPROVER: procoduck
+          BASE: ${{ github.base_ref }}
+        # Waivers outside the security fast path are the maintainers' (ADR 0079). The approvers are
+        # the GitHub handles in the table of MAINTAINERS.md, read from the base branch so that a
+        # pull request cannot add itself.
         run: |
           label=dependency-age-waiver
           if gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '.[].name' | grep -qx "$label"; then
+            # Both the file and the parser come from the base branch.
+            approvers=$(bash <(git show "origin/$BASE:hack/waiver-approvers.sh") <(git show "origin/$BASE:MAINTAINERS.md"))
+            [[ -n $approvers ]] || { echo "::error::no maintainer handles found in the table of MAINTAINERS.md on $BASE"; exit 1; }
             actor=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/events" \
               --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$label\")] | last | .actor.login // empty" | tail -n1)
-            if [[ $actor == "$APPROVER" ]]; then
+            if [[ -n $actor ]] && grep -qixF "$actor" <<<"$approvers"; then
               echo "label $label was added by $actor: age failures are waived and listed below"
               echo "by=$actor" >>"$GITHUB_OUTPUT"
             else
-              echo "::error::label $label was added by '${actor:-unknown}', not by $APPROVER; it does not waive anything"
+              echo "::error::label $label was added by '${actor:-unknown}', not by a maintainer listed in MAINTAINERS.md ($(tr '\n' ' ' <<<"$approvers")); it does not waive anything"
             fi
           fi
       - name: versions are at least 3 days old
@@ -282,6 +287,25 @@ jobs:
           fetch-depth: 0
       - run: hack/migrate-lint-test.sh
       - run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+
+  # ADR numbers unique and contiguous, README index in sync (hack/adr-lint.sh, ADR 0082).
+  adr-lint:
+    name: adr-lint
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: hack/adr-lint-test.sh
+      - run: hack/adr-lint.sh
+
+  # Offline unit tests of hack/claim.sh. The live tests need a scratch repository and never run
+  # here: CI must not mutate GitHub.
+  claim-tests:
+    name: claim-tests
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: hack/claim_test.sh
+      - run: hack/migrate-renumber-test.sh
 
   # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as

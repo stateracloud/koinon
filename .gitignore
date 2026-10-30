@@ -27,3 +27,7 @@ docs/site/.astro/
 /koinon-fakemcp
 /koinon-fakecicost
 /koinon-rt1-promgen
+
+# Local Tilt profile and the files it names (hack/dev/local.example.yaml)
+/hack/dev/local.yaml
+/hack/dev/*.local.yaml

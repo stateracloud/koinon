@@ -10,7 +10,8 @@
 //	HELM                helm binary (default helm on PATH)
 //
 // Label "openshell": sandboxes on a real OpenShell gateway, rendered as the reconciler renders
-// them. Runs on the home lab only (make test-escape):
+// them. Runs on kind (make test-escape-kind, which sets the variables below) and on any other
+// cluster's gateway (make test-escape):
 //
 //	KOINON_OPENSHELL_ENDPOINT   gateway host:port, for example a port-forward (required)
 //	KOINON_OPENSHELL_MTLS_DIR   directory with tls.crt, tls.key and ca.crt (required)
