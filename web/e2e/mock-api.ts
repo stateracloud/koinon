@@ -11,7 +11,7 @@ type Json = Record<string, unknown>
 export type Stream = { messages: Json[]; error?: { code: string; message: string } }
 
 export type Handlers = {
-  unary: Record<string, (req: Json) => Json | { error: { code: string; message: string } }>
+  unary: Record<string, (req: Json) => Json | { error: { code: string; message: string; details?: { type: string; value: string }[] } }>
   stream: Record<string, (req: Json) => Stream>
 }
 
@@ -48,7 +48,7 @@ export async function mockApi(page: Page, h: Handlers) {
       expectHeader(req.headers(), 'connect-protocol-version', '1')
       const res = unary(body.length ? (JSON.parse(body.toString()) as Json) : {})
       if ('error' in res && res.error && typeof res.error === 'object') {
-        const err = res.error as { code: string; message: string }
+        const err = res.error as { code: string; message: string; details?: unknown }
         return route.fulfill({ status: httpStatus[err.code] ?? 500, contentType: 'application/json', body: JSON.stringify(err) })
       }
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(res) })
@@ -175,7 +175,19 @@ export function traceDestinationHandlers(opts: { level?: string; ceiling?: strin
   }
   const seen: { create?: Json; update?: Json; test?: Json; settings?: Json; platformSet?: Json; ceiling?: Json } = {}
   const refused = (input: Json | undefined) => String(input?.endpointUrl ?? '').includes('refuse')
-  const refusal = { error: { code: 'failed_precondition', message: 'the destination was not saved: the test trace failed: the backend answered HTTP 401 (the credentials were refused)' } }
+  // Length-delimited string fields by hand: the wire form of google.rpc.ErrorInfo and of TestResult.message.
+  const str = (field: number, v: string) => Buffer.concat([Buffer.from([(field << 3) | 2, Buffer.byteLength(v)]), Buffer.from(v)])
+  const outcome = 'the backend answered HTTP 401 (the credentials were refused)'
+  const refusal = {
+    error: {
+      code: 'failed_precondition',
+      message: `the destination was not saved: the test trace failed: ${outcome}`,
+      details: [
+        { type: 'google.rpc.ErrorInfo', value: Buffer.concat([str(1, 'TEST_FAILED'), str(2, 'koinon.dev')]).toString('base64') },
+        { type: 'koinon.trace.v1alpha1.TestResult', value: str(2, outcome).toString('base64') },
+      ],
+    },
+  }
   const unary: Handlers['unary'] = {
     [trace + 'ListDestinations']: () => ({ destinations }),
     [trace + 'GetSettings']: () => ({ settings }),

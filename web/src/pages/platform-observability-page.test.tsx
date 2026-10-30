@@ -15,7 +15,7 @@ import {
   type SetPlatformCeilingRequest,
   type SetPlatformDestinationRequest,
 } from '@/gen/koinon/trace/v1alpha1/trace_pb'
-import { renderApp, whoAmI } from '@/test-utils'
+import { reasoned, renderApp, whoAmI } from '@/test-utils'
 
 const fakeKey = 'koinon_test_not-a-real-token'
 const datadog = create(DestinationSchema, {
@@ -24,10 +24,11 @@ const datadog = create(DestinationSchema, {
   endpointUrl: 'https://api.datadoghq.com/api/intake/otlp/v1/traces',
   secretFields: ['api_key'],
   enabled: true,
+  configVersion: 5n,
   lastTest: create(TestResultSchema, { ok: true }),
 })
 
-function setup(opts: { platformAdmin?: boolean; destination?: boolean; ceiling?: ContentLevel; lowered?: number; failSave?: string } = {}) {
+function setup(opts: { platformAdmin?: boolean; destination?: boolean; ceiling?: ContentLevel; lowered?: number; failSave?: string; setError?: ConnectError; testError?: ConnectError } = {}) {
   const calls = { sets: [] as SetPlatformDestinationRequest[], ceilings: [] as SetPlatformCeilingRequest[], tests: 0, deletes: 0, gets: 0 }
   let destination = opts.destination ? datadog : undefined
   const transport = createRouterTransport(({ service }) => {
@@ -39,8 +40,9 @@ function setup(opts: { platformAdmin?: boolean; destination?: boolean; ceiling?:
       },
       setPlatformDestination: (req) => {
         calls.sets.push(req)
-        if (opts.failSave) throw new ConnectError(opts.failSave, Code.FailedPrecondition)
-        destination = create(DestinationSchema, { backend: req.destination?.backend, endpointUrl: req.destination?.endpointUrl, enabled: true, lastTest: create(TestResultSchema, { ok: true }) })
+        if (opts.setError) throw opts.setError
+        if (opts.failSave) throw reasoned('the destination was not saved: the test trace failed: ' + opts.failSave, Code.FailedPrecondition, 'TEST_FAILED', opts.failSave)
+        destination = create(DestinationSchema, { backend: req.destination?.backend, endpointUrl: req.destination?.endpointUrl, enabled: true, configVersion: 5n, secretFields: Object.keys(req.destination?.secrets ?? {}), lastTest: create(TestResultSchema, { ok: true }) })
         return { destination }
       },
       deletePlatformDestination: () => {
@@ -50,6 +52,7 @@ function setup(opts: { platformAdmin?: boolean; destination?: boolean; ceiling?:
       },
       testPlatformDestination: () => {
         calls.tests++
+        if (opts.testError) throw opts.testError
         return { destination, result: create(TestResultSchema, { ok: true }) }
       },
       setPlatformCeiling: (req) => {
@@ -97,7 +100,55 @@ describe('Platform observability page', () => {
     await userEvent.type(within(form).getByLabelText('Public key'), 'koinon_test_public')
     await userEvent.type(within(form).getByLabelText('Secret key'), fakeKey)
     await userEvent.click(within(form).getByRole('button', { name: 'Test and add' }))
-    expect(await within(form).findByRole('alert')).toHaveTextContent('Not saved. the backend answered HTTP 403 (the credentials were refused)')
+    expect(await within(form).findByRole('alert')).toHaveTextContent('Not saved. The backend answered HTTP 403 (the credentials were refused). The secrets were cleared')
+  })
+
+  it('sends expected_version 0 for a first destination and the Edit snapshot version for a change', async () => {
+    const calls = setup()
+    await userEvent.click(await screen.findByRole('button', { name: 'Set destination' }))
+    const form = screen.getByRole('form', { name: 'Add platform destination' })
+    await userEvent.selectOptions(within(form).getByLabelText('Backend'), 'Datadog')
+    await userEvent.type(within(form).getByLabelText('Traces endpoint'), 'https://api.datadoghq.com/x')
+    await userEvent.type(within(form).getByLabelText('API key'), fakeKey)
+    await userEvent.click(within(form).getByRole('button', { name: 'Test and add' }))
+    await waitFor(() => expect(calls.sets).toHaveLength(1))
+    expect(calls.sets[0].expectedVersion).toBe(0n)
+    const card = within(await screen.findByRole('region', { name: 'Platform destination' }))
+    await userEvent.click(card.getByRole('button', { name: 'Edit the platform destination' }))
+    const edit = screen.getByRole('form', { name: 'Edit platform destination' })
+    await userEvent.click(within(edit).getByRole('checkbox', { name: 'Enabled' }))
+    await userEvent.click(within(edit).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.sets).toHaveLength(2))
+    expect(calls.sets[1].expectedVersion).toBe(5n)
+  })
+
+  it('reloads and explains when the platform destination was changed by someone else', async () => {
+    const calls = setup({ destination: true, setError: reasoned('changed', Code.Aborted, 'CHANGED') })
+    const card = within(await screen.findByRole('region', { name: 'Platform destination' }))
+    const before = calls.gets
+    await userEvent.click(card.getByRole('button', { name: 'Edit the platform destination' }))
+    const edit = screen.getByRole('form', { name: 'Edit platform destination' })
+    await userEvent.click(within(edit).getByRole('checkbox', { name: 'Enabled' }))
+    await userEvent.click(within(edit).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText(/was changed by someone else/)).toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Edit platform destination' })).not.toBeInTheDocument()
+    await waitFor(() => expect(calls.gets).toBeGreaterThan(before))
+  })
+
+  it('a re-test that is ABORTED reloads', async () => {
+    const calls = setup({ destination: true, testError: reasoned('changed', Code.Aborted, 'CHANGED') })
+    const card = within(await screen.findByRole('region', { name: 'Platform destination' }))
+    const before = calls.gets
+    await userEvent.click(card.getByRole('button', { name: 'Test the platform destination' }))
+    expect(await screen.findByText(/was changed by someone else/)).toBeInTheDocument()
+    await waitFor(() => expect(calls.gets).toBeGreaterThan(before))
+  })
+
+  it('words a platform-admin refusal from its reason', async () => {
+    setup({ destination: true, testError: reasoned('server text', Code.PermissionDenied, 'PLATFORM_ADMIN_REQUIRED') })
+    const card = within(await screen.findByRole('region', { name: 'Platform destination' }))
+    await userEvent.click(card.getByRole('button', { name: 'Test the platform destination' }))
+    expect(await screen.findByText('Only platform admins can do that.')).toBeInTheDocument()
   })
 
   it('shows the destination, tests it and deletes it', async () => {

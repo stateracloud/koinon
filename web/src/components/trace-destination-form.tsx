@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Code, ConnectError } from '@connectrpc/connect'
 import { useState, type FormEvent } from 'react'
+import { describeTraceError } from '@/lib/trace-errors'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -78,13 +78,13 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
       onSaved?.(saved, tested)
       onDone()
     } catch (e2) {
-      const err = ConnectError.from(e2)
-      const message = err.rawMessage
-      if (err.code === Code.Aborted) {
-        onConflict?.('This destination was changed by someone else while you were editing. It has been reloaded; check it and make your change again.')
+      const refused = describeTraceError(e2)
+      if (refused.changed) {
+        onConflict?.(refused.message)
         return
       }
-      setRefusal(typed ? `${message} The secrets were cleared from this page. Type them again.` : message)
+      const text = refused.message.startsWith('Not saved.') ? refused.message : `Not saved. ${refused.message}`
+      setRefusal(typed ? `${text} The secrets were cleared from this page. Type them again.` : text)
     } finally {
       setPending(false)
     }
@@ -313,7 +313,7 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
       )}
       {refusal && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Not saved. {refusal}</AlertDescription>
+          <AlertDescription>{refusal}</AlertDescription>
         </Alert>
       )}
       <div className="flex justify-end gap-2">

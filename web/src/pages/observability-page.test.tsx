@@ -21,7 +21,7 @@ import {
   type UpdateDestinationRequest,
   type UpdateSettingsRequest,
 } from '@/gen/koinon/trace/v1alpha1/trace_pb'
-import { renderApp, whoAmI } from '@/test-utils'
+import { reasoned, renderApp, whoAmI } from '@/test-utils'
 
 const fakeKey = 'koinon_test_not-a-real-token'
 const at = timestampFromMs(Date.now() - 120_000)
@@ -56,8 +56,10 @@ type Opts = {
   platform?: boolean
   copy?: ContentLevel
   failSave?: string
-  updateCode?: Code
-  settingsCode?: Code
+  updateError?: ConnectError
+  settingsError?: ConnectError
+  testError?: ConnectError
+  createError?: ConnectError
   settingsFail?: string
 }
 
@@ -88,13 +90,14 @@ function setup(opts: Opts = {}) {
       getSettings: () => ({ settings: stored }),
       createDestination: (req) => {
         calls.creates.push(req)
-        if (opts.failSave) throw new ConnectError(opts.failSave, Code.FailedPrecondition)
+        if (opts.createError) throw opts.createError
+        if (opts.failSave) throw reasoned('the destination was not saved: the test trace failed: ' + opts.failSave, Code.FailedPrecondition, 'TEST_FAILED', opts.failSave)
         return { destination: create(DestinationSchema, { id: 'd-new', name: req.destination?.name, backend: req.destination?.backend, lastTest: create(TestResultSchema, { ok: true }) }) }
       },
       updateDestination: (req) => {
         calls.updates.push(req)
-        if (opts.updateCode) throw new ConnectError('refused', opts.updateCode)
-        if (opts.failSave) throw new ConnectError(opts.failSave, Code.FailedPrecondition)
+        if (opts.updateError) throw opts.updateError
+        if (opts.failSave) throw reasoned('the destination was not saved: the test trace failed: ' + opts.failSave, Code.FailedPrecondition, 'TEST_FAILED', opts.failSave)
         return { destination: langfuse }
       },
       deleteDestination: (req) => {
@@ -103,11 +106,12 @@ function setup(opts: Opts = {}) {
       },
       testDestination: (req) => {
         calls.tests.push(req)
+        if (opts.testError) throw opts.testError
         return { destination: broken, result: create(TestResultSchema, { ok: false, message: 'the backend answered HTTP 401 (the credentials were refused)' }) }
       },
       updateSettings: (req) => {
         calls.settings.push(req)
-        if (opts.settingsCode) throw new ConnectError('platform admins who are not members may only lower', opts.settingsCode)
+        if (opts.settingsError) throw opts.settingsError
         stored = create(SettingsSchema, { ...stored, contentLevel: req.contentLevel, sampleRate: req.sampleRate ?? stored.sampleRate, platformCopyLevel: req.platformCopyLevel })
         return { settings: stored }
       },
@@ -185,7 +189,7 @@ describe('Observability page', () => {
   })
 
   it('shows the backend message when the test fails, saves nothing, and clears the secrets', async () => {
-    const calls = setup({ failSave: 'the destination was not saved: the test trace failed: the backend answered HTTP 401 (the credentials were refused)' })
+    const calls = setup({ failSave: 'the backend answered HTTP 401 (the credentials were refused)' })
     await screen.findByRole('list', { name: 'Destinations' })
     await userEvent.click(screen.getByRole('button', { name: 'Add destination' }))
     const form = screen.getByRole('form', { name: 'Add destination' })
@@ -195,7 +199,7 @@ describe('Observability page', () => {
     await userEvent.type(within(form).getByLabelText('API key'), fakeKey)
     await userEvent.click(within(form).getByRole('button', { name: 'Test and add' }))
     const alert = await within(form).findByRole('alert')
-    expect(alert).toHaveTextContent('the test trace failed: the backend answered HTTP 401 (the credentials were refused)')
+    expect(alert).toHaveTextContent('Not saved. The backend answered HTTP 401 (the credentials were refused). The secrets were cleared from this page. Type them again.')
     expect(alert).toHaveTextContent('The secrets were cleared from this page')
     expect(within(form).getByLabelText('API key')).toHaveValue('')
     expect(calls.creates).toHaveLength(1)
@@ -282,7 +286,7 @@ describe('Observability page', () => {
   })
 
   it('reloads and does not overwrite when the destination was changed by someone else', async () => {
-    const calls = setup({ updateCode: Code.Aborted })
+    const calls = setup({ updateError: reasoned('changed', Code.Aborted, 'CHANGED') })
     await screen.findByRole('list', { name: 'Destinations' })
     const before = calls.listed
     await userEvent.click(screen.getByRole('button', { name: 'Edit destination langfuse' }))
@@ -295,7 +299,7 @@ describe('Observability page', () => {
   })
 
   it('shows the API message for a refused endpoint', async () => {
-    setup({ failSave: 'endpoint must use https' })
+    setup({ createError: new ConnectError('endpoint must use https unless the host is allowed', Code.InvalidArgument) })
     await screen.findByRole('list', { name: 'Destinations' })
     await userEvent.click(screen.getByRole('button', { name: 'Add destination' }))
     const form = screen.getByRole('form', { name: 'Add destination' })
@@ -304,7 +308,7 @@ describe('Observability page', () => {
     await userEvent.type(within(form).getByLabelText('Public key'), 'koinon_test_public')
     await userEvent.type(within(form).getByLabelText('Secret key'), fakeKey)
     await userEvent.click(within(form).getByRole('button', { name: 'Test and add' }))
-    expect(await within(form).findByRole('alert')).toHaveTextContent('endpoint must use https')
+    expect(await within(form).findByRole('alert')).toHaveTextContent('Not saved. endpoint must use https unless the host is allowed')
   })
 
   it('replaces and removes generic headers by name', async () => {
@@ -337,6 +341,56 @@ describe('Observability page', () => {
     expect(calls.deletes).toHaveLength(0)
     await userEvent.click(screen.getByRole('button', { name: 'Delete destination' }))
     await waitFor(() => expect(calls.deletes).toEqual([expect.objectContaining({ destinationId: 'd-lf' })]))
+  })
+
+  describe('refusals are worded from their reason, not their code', () => {
+    const cases: [string, Code, string, RegExp][] = [
+      ['ADMIN_REQUIRED', Code.PermissionDenied, 'ADMIN_REQUIRED', /Only org admins and owners can change observability/],
+      ['OWNER_ONLY', Code.PermissionDenied, 'OWNER_ONLY', /Only an org owner can choose full content/],
+      ['OWNER_AT_FULL', Code.PermissionDenied, 'OWNER_AT_FULL', /only an org owner can add a destination or change its connection/],
+      ['NOT_MEMBER', Code.PermissionDenied, 'NOT_MEMBER', /you can only lower its settings here/],
+      ['ABOVE_CEILING', Code.FailedPrecondition, 'ABOVE_CEILING', /above the platform ceiling/],
+    ]
+    for (const [name, code, reason, text] of cases) {
+      it(`settings: ${name}`, async () => {
+        setup({ settingsError: reasoned('server text that must not be shown', code, reason) })
+        const form = await screen.findByRole('form', { name: 'Trace settings' })
+        await userEvent.click(within(form).getByRole('radio', { name: /Redacted/ }))
+        await userEvent.click(within(form).getByRole('button', { name: 'Save settings' }))
+        const alert = await within(form).findByRole('alert')
+        expect(alert).toHaveTextContent(text)
+        expect(alert).not.toHaveTextContent('server text that must not be shown')
+      })
+    }
+
+    it('a plain NOT_FOUND without a reason shows the server message', async () => {
+      setup({ testError: new ConnectError('destination not found', Code.NotFound) })
+      await screen.findByRole('list', { name: 'Destinations' })
+      await userEvent.click(screen.getByRole('button', { name: 'Test destination langfuse' }))
+      expect(await screen.findByText('destination not found')).toBeInTheDocument()
+    })
+
+    it('a re-test that is ABORTED reloads the list and says why', async () => {
+      const calls = setup({ testError: reasoned('changed', Code.Aborted, 'CHANGED') })
+      await screen.findByRole('list', { name: 'Destinations' })
+      const before = calls.listed
+      await userEvent.click(screen.getByRole('button', { name: 'Test destination langfuse' }))
+      expect(await screen.findByText(/was changed by someone else/)).toBeInTheDocument()
+      await waitFor(() => expect(calls.listed).toBeGreaterThan(before))
+    })
+
+    it('a failed test with no outcome detail falls back to the server message', async () => {
+      setup({ createError: reasoned('the destination was not saved: the test trace failed: odd', Code.FailedPrecondition, 'TEST_FAILED') })
+      await screen.findByRole('list', { name: 'Destinations' })
+      await userEvent.click(screen.getByRole('button', { name: 'Add destination' }))
+      const form = screen.getByRole('form', { name: 'Add destination' })
+      await userEvent.type(within(form).getByLabelText('Name'), 'lf')
+      await userEvent.type(within(form).getByLabelText('Traces endpoint'), 'https://lf.example.com/x')
+      await userEvent.type(within(form).getByLabelText('Public key'), 'koinon_test_public')
+      await userEvent.type(within(form).getByLabelText('Secret key'), fakeKey)
+      await userEvent.click(within(form).getByRole('button', { name: 'Test and add' }))
+      expect(await within(form).findByRole('alert')).toHaveTextContent('Not saved. the destination was not saved: the test trace failed: odd')
+    })
   })
 
   describe('while the org sends full content', () => {
@@ -397,7 +451,7 @@ describe('Observability page', () => {
     })
 
     it('explains a refused raise by a platform admin who is not a member', async () => {
-      setup({ settingsCode: Code.PermissionDenied })
+      setup({ settingsError: reasoned('not a member', Code.PermissionDenied, 'NOT_MEMBER') })
       const form = await screen.findByRole('form', { name: 'Trace settings' })
       await userEvent.click(within(form).getByRole('radio', { name: /Redacted/ }))
       await userEvent.click(within(form).getByRole('button', { name: 'Save settings' }))

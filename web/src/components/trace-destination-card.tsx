@@ -29,7 +29,7 @@ export type TraceDestinationCardProps = {
   remove?: () => Promise<unknown>
   subject: string
   onRemoved?: () => void
-  onRefused: (message: string) => void
+  onRefused: (err: ConnectError) => void
   /** The edit form, shown in place of the buttons. */
   editing?: ReactNode
 }
@@ -43,7 +43,7 @@ export function TraceDestinationCard({ destination: d, title, full, test, edit, 
     try {
       await test()
     } catch (e) {
-      onRefused(ConnectError.from(e).rawMessage)
+      onRefused(ConnectError.from(e))
     } finally {
       setTesting(false)
     }
@@ -105,7 +105,7 @@ export function TraceDestinationCard({ destination: d, title, full, test, edit, 
                 await remove()
                 onRemoved?.()
               }}
-              onError={onRefused}
+              onError={(_, err) => onRefused(err)}
             />
           )}
         </div>
