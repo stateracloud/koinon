@@ -93,6 +93,12 @@ const (
 	// KoinonWaitSeconds is the attribute of the koinon.wait event.
 	KoinonWaitSeconds = "koinon.wait.seconds"
 
+	// KoinonContentAttributes lists, on a span, the names of its attributes that carry content (prompts,
+	// completions, thinking, tool arguments and results). agentd sets it on every span that has any,
+	// and only when the org's content level is above none; the router strips or scrubs exactly these
+	// attributes per destination level and drops the marker itself.
+	KoinonContentAttributes = "koinon.content.attributes"
+
 	// EventPark ends a turn's trace at an approval, ask_user or ask_agent.
 	EventPark = "koinon.park"
 	// EventWait is on the next turn's root: how long the run waited.
