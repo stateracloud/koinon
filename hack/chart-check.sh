@@ -23,8 +23,10 @@ trap 'rm -rf "$out"' EXIT
 value_files=("$CHART/values.yaml" "$CHART"/ci/*-values.yaml)
 # The chart requires openshell.clientTLSSecret or openshell.insecure=true (#103); the default
 # values set neither, so they are rendered with insecure, as are the assertions below (render).
+# The same goes for openshell.address (required, no default).
 # Value files choose for themselves. insecure_for <values file>: the extra helm arguments.
-insecure_for() { [[ $1 == "$CHART/values.yaml" ]] && echo "--set openshell.insecure=true" || true; }
+ADDRESS="openshell.address=openshell.openshell.svc:8080"
+insecure_for() { [[ $1 == "$CHART/values.yaml" ]] && echo "--set openshell.insecure=true --set $ADDRESS" || true; }
 
 for f in "${value_files[@]}"; do
 	name=$(basename "$f" .yaml)
@@ -36,9 +38,9 @@ for f in "${value_files[@]}"; do
 done
 
 # Assertions on rendered output: render with --set flags, then grep.
-render() { "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true "$@"; }
+render() { "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "$@"; }
 # render_raw renders without that default, for the assertions about the TLS choice itself.
-render_raw() { "$HELM" template koinon "$CHART" --namespace koinon "$@"; }
+render_raw() { "$HELM" template koinon "$CHART" --namespace koinon --set "$ADDRESS" "$@"; }
 # Assertions capture the rendering before grepping it: piping into grep -q under pipefail fails
 # the pipeline when grep exits on the first match and helm then dies of SIGPIPE.
 failures=0

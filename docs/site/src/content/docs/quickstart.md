@@ -23,7 +23,7 @@ clone of the repository, so run them from its root. If you install from a releas
 ## 1. Write your values
 
 Save this as `values.yaml`. It uses Kata. Set `image.registry` and `image.tag` to where the images
-are ([Get Koinon](#get-koinon)), and `openshell.address` if your gateway lives elsewhere.
+are ([Get Koinon](#get-koinon)), and `openshell.address` to where your gateway listens (the chart requires it).
 
 ```yaml chart-values
 # From a release these are the defaults (ghcr.io/stateracloud, the chart's own version), so you
