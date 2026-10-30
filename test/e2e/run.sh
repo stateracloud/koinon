@@ -178,6 +178,22 @@ if [[ $SUITE == go ]]; then
 fi
 done_step "Namespace, client certificate and model provider (quickstart blocks)"
 
+# Build what the drivers need before the clock starts: compiling the Go driver (a cold build cache
+# after a dependency change takes minutes) or installing the browser is not part of the quickstart
+# a user follows.
+case "$SUITE" in
+go)
+  step "build the quickstart driver (go test -c)"
+  go test -c -o "$OUT/bin/e2e.test" ./test/e2e/
+  done_step "Quickstart driver build"
+  ;;
+web)
+  step "install the browser suite (pnpm, playwright)"
+  (cd web && pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium)
+  done_step "Browser suite install"
+  ;;
+esac
+
 # The quickstart clock starts here (ADR 0049).
 step "quickstart: helm install"
 T0=$(date +%s)
@@ -209,12 +225,11 @@ go)
   KOINON_E2E_PASSWORD="$password" \
   KOINON_E2E_T0="$T0" \
   KOINON_E2E_REPORT="$OUT/quickstart-timings.md" \
-    go test -count=1 -timeout 30m ./test/e2e/ -ginkgo.v 2>&1 | tee "$OUT/driver.log"
+    bash -c 'cd "$1/test/e2e" && exec "$2" -test.timeout 30m -ginkgo.v' _ "$root" "$OUT/bin/e2e.test" 2>&1 | tee "$OUT/driver.log"
   done_step "Quickstart driver"
   ;;
 web)
   step "browser e2e (playwright, web/e2e-real)"
-  (cd web && pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium)
   (cd web && KOINON_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
     KOINON_E2E_PASSWORD="$password" \
