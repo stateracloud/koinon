@@ -11,8 +11,8 @@ End-to-end tests (kind), flavor contract tests and the sandbox escape suite (ADR
   `KOINON_E2E_API_URL` the Go suite skips. CI: `.github/workflows/e2e-kind.yml` (manual).
 
 - `flavors/`: flavor contract suite. Runs each flavor image in Docker as OpenShell would and drives
-  it over ACP against the fake model server. Skips without Docker or without the image
-  (`make test-flavors` builds it).
+  it over ACP against the fake model server. It needs the flavor images, so `make test` (and CI's
+  unit job) leave it out; `make test-flavors` builds the images and then runs it. Needs Docker.
 - `escape/`: sandbox escape suite (ADR 0025, plan item E2), in two parts:
   - `make test-admission` (label `admission`): the chart's ValidatingAdmissionPolicies, rendered
     with `helm template` and applied to a real API server from envtest. Pod creation by anyone but
