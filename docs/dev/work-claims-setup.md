@@ -69,6 +69,7 @@ current milestone a due date, and put Ready issues in it.
 3. Repository permissions: **Contents** read and write (claim refs), **Pull requests** read and
    write (update-branch, labels), **Issues** read and write (assignees, labels, comments),
    **Workflows** read and write (update-branch merge commits can carry workflow changes),
+   **Checks** read and **Commit statuses** read (the updater reads each PR's check rollup),
    **Metadata** read. Organization permissions: **Projects** read and write. Nothing else.
 4. "Where can this GitHub App be installed?": **Only on this account**. Create the App.
 5. Note the **App ID** (numeric, top of the App page). Generate a **private key** (a `.pem` downloads).
