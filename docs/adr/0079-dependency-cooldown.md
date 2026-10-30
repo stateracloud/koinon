@@ -199,6 +199,17 @@ Checked on 2026-10-29:
   (`nx@21.6.5`); `minimumReleaseAgeExcludePrune`; `trustPolicy: no-downgrade`. The repository pins
   pnpm 12.14.0.
 
+## Amendment (2026-10-30): who may waive
+
+"Only Andre may waive the cooldown" (Waivers outside the fast path) is replaced by: the approvers are
+the maintainers listed in the table of `MAINTAINERS.md`. The CI job reads that table (the "GitHub"
+column of the first table under "# Maintainers", `hack/waiver-approvers.sh`) from the base branch, so
+a pull request cannot add itself, and only when the PR carries the `dependency-age-waiver` label.
+Handles elsewhere in the file are not approvers. Today the table lists only `@procoduck`, so the set is
+unchanged. `@ovirandunu` is in `.github/CODEOWNERS` (ADR 0082: an admin with full trust) but not in
+`MAINTAINERS.md`, so he cannot waive; adding him to the table is a governance decision for the
+project lead (ADR 0038).
+
 ## Links
 
 - [0052](0052-opencode-v2-flavor.md), [0077](0077-pinned-openshell-and-installer.md)

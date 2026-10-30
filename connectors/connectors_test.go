@@ -232,7 +232,7 @@ var _ = Describe("Embedded connector types", func() {
 	It("validates targets", func() {
 		t := githubType()
 		Expect(t.ValidTarget("stateracloud/koinon")).To(BeTrue())
-		Expect(t.ValidTarget("procoduck")).To(BeFalse())
+		Expect(t.ValidTarget("acme")).To(BeFalse())
 		Expect(t.ValidTarget("a/b/c")).To(BeFalse())
 		Expect(t.ValidTarget("-bad/repo")).To(BeFalse())
 	})

@@ -130,12 +130,12 @@ var _ = Describe("Prompt shapes (golden)", func() {
 	It("the instruction file of an agent with repositories on a Gitea host", func() {
 		golden("instructions_file_repositories", agentd.InstructionsFile("You help with the task.", "/sandbox/work",
 			agentd.Repository{
-				Name: "procoduck/homelab", Connector: "gitea", Provider: "Gitea", Host: "git.example.test:3000",
-				CloneURL: "https://git.example.test:3000/procoduck/homelab",
+				Name: "acme/infra", Connector: "gitea", Provider: "Gitea", Host: "git.example.test:3000",
+				CloneURL: "https://git.example.test:3000/acme/infra",
 			},
 			agentd.Repository{
-				Name: "procoduck/koinon-docs", Connector: "gitea", Provider: "Gitea", Host: "git.example.test:3000",
-				CloneURL: "https://git.example.test:3000/procoduck/koinon-docs",
+				Name: "acme/docs", Connector: "gitea", Provider: "Gitea", Host: "git.example.test:3000",
+				CloneURL: "https://git.example.test:3000/acme/docs",
 			}))
 	})
 	It("the note after the harness cancelled a turn on refused requests", func() {
