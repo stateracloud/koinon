@@ -17,6 +17,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/network"
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -170,6 +171,12 @@ func describeMode(name, valuesFile string) {
 					Expect(applyObject(ctx, cl, o)).To(Succeed())
 				}
 			}
+			// The Deployments exist in the API server too (nothing runs their pods there; the
+			// containers are started below): the reconciler makes its ConfigMap owned by the
+			// gateway Deployment, so that Deployment has to be readable.
+			for _, d := range r.Deployments {
+				Expect(applyObject(ctx, cl, d)).To(Succeed())
+			}
 			for _, j := range r.Jobs {
 				if _, _, hook := hookOf(&j.ObjectMeta); !hook {
 					runJob(ctx, rn, j)
@@ -316,7 +323,7 @@ func startDeployment(ctx context.Context, rn *runner, r *rendered, name string) 
 	return started
 }
 
-// applyObject creates a ServiceAccount, Secret, ConfigMap or RBAC object in the API server.
+// applyObject creates a ServiceAccount, Secret, ConfigMap, Deployment or RBAC object in the API server.
 func applyObject(ctx context.Context, cl *cluster, o runtime.Object) error {
 	c := cl.Admin
 	var err error
@@ -327,6 +334,8 @@ func applyObject(ctx context.Context, cl *cluster, o runtime.Object) error {
 		_, err = c.CoreV1().ConfigMaps(namespace).Create(ctx, o, metav1.CreateOptions{})
 	case *corev1.Secret:
 		_, err = c.CoreV1().Secrets(namespace).Create(ctx, o, metav1.CreateOptions{})
+	case *appsv1.Deployment:
+		_, err = c.AppsV1().Deployments(namespace).Create(ctx, o, metav1.CreateOptions{})
 	case *rbacv1.Role:
 		_, err = c.RbacV1().Roles(namespace).Create(ctx, o, metav1.CreateOptions{})
 	case *rbacv1.RoleBinding:
