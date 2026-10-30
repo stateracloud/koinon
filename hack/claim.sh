@@ -847,11 +847,38 @@ write_adr_claim() { # NUMBER HOLDER HUMAN LEASE
   die "reservation failed: $TRY_OUT"
 }
 
+# open_prs prints the open pull requests in the shape of `gh pr list --json` (number, createdAt,
+# isDraft, headRefOid, labels, autoMergeRequest, mergeStateStatus, statusCheckRollup). It asks
+# GraphQL for the check fields it uses only: `gh pr list --json statusCheckRollup` also reads each
+# check's workflow run, which an App token without Actions read is refused.
+open_prs() {
+  # shellcheck disable=SC2016
+  gh api graphql -f o="$OWNER" -f n="$NAME" -f query='
+query($o: String!, $n: String!) {
+  repository(owner: $o, name: $n) {
+    pullRequests(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: ASC}) {
+      nodes {
+        number createdAt isDraft headRefOid mergeStateStatus
+        autoMergeRequest { enabledAt }
+        labels(first: 50) { nodes { name } }
+        commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
+          __typename
+          ... on CheckRun { name status startedAt }
+          ... on StatusContext { context state }
+        } } } } } }
+      }
+    }
+  }
+}' --jq '[.data.repository.pullRequests.nodes[] | {number, createdAt, isDraft, headRefOid, mergeStateStatus,
+    autoMergeRequest, labels: .labels.nodes,
+    statusCheckRollup: (.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])}]'
+}
+
 cmd_update_oldest() {
   local prs inflight target head tries=0 now
   now=$(server_now)
   while :; do
-    prs=$(gh pr list -R "$REPO" --state open --limit 100 --json number,createdAt,isDraft,headRefOid,labels,autoMergeRequest,mergeStateStatus,statusCheckRollup)
+    prs=$(open_prs)
     if ((tries < 3)) && jq -e '[.[] | select(.autoMergeRequest != null and .mergeStateStatus == "UNKNOWN")] | length > 0' <<<"$prs" >/dev/null; then
       tries=$((tries + 1)); sleep 5; continue
     fi
