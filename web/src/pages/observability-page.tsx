@@ -10,10 +10,10 @@ import { TraceSettingsForm } from '@/components/trace-settings-form'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { ContentLevel, TraceDestinationService } from '@/gen/koinon/trace/v1alpha1/trace_pb'
+import { ContentLevel, TraceDestinationService, type Destination } from '@/gen/koinon/trace/v1alpha1/trace_pb'
 import { useTraceActions } from '@/hooks/use-trace-actions'
 import { useOrg } from '@/lib/org-context'
-import { testNotice } from '@/lib/trace'
+import { savedNotice, testNotice } from '@/lib/trace'
 
 /** ObservabilityPage is where org admins send their runs' traces to a backend and choose what the traces carry (ADR 0074). */
 export function ObservabilityPage() {
@@ -26,7 +26,9 @@ export function ObservabilityPage() {
   )
 }
 
-type Editing = { kind: 'new' } | { kind: 'destination'; id: string }
+// The edit form gets the destination as it was when Edit was clicked, so a refetch while the form is open
+// cannot move the version the save is checked against.
+type Editing = { kind: 'new' } | { kind: 'destination'; snapshot: Destination }
 
 function ObservabilityContent() {
   const { org } = useOrg()
@@ -70,7 +72,7 @@ function ObservabilityContent() {
           connectionLocked={locked}
           save={(input) => actions.createDestination(input).then((r) => r.destination!)}
           onDone={() => setEditing(undefined)}
-          onSaved={(d) => say(`Saved ${d.name}. ${testNotice(d.name, d.lastTest)}`)}
+          onSaved={(d, tested) => say(savedNotice(d.name, d, tested))}
         />
       )}
       {refused && (
@@ -98,13 +100,13 @@ function ObservabilityContent() {
             <li key={d.id}>
               <TraceDestinationCard
                 destination={d}
-                full={full}
+                full={full && d.enabled}
                 subject={`destination ${d.name}`}
                 test={async () => {
                   const r = await actions.testDestination(d.id)
                   say(testNotice(d.name, r.result))
                 }}
-                edit={() => setEditing({ kind: 'destination', id: d.id })}
+                edit={() => setEditing({ kind: 'destination', snapshot: d })}
                 remove={() => actions.deleteDestination(d.id)}
                 onRemoved={() => say(`Deleted destination ${d.name}.`)}
                 onRefused={(m) => {
@@ -112,10 +114,10 @@ function ObservabilityContent() {
                   setRefused(m)
                 }}
                 editing={
-                  editing?.kind === 'destination' && editing.id === d.id ? (
+                  editing?.kind === 'destination' && editing.snapshot.id === d.id ? (
                     <TraceDestinationForm
-                      destination={d}
-                      save={(input) => actions.updateDestination(d.id, input, d.configVersion).then((r) => r.destination!)}
+                      destination={editing.snapshot}
+                      save={(input) => actions.updateDestination(d.id, input, editing.snapshot.configVersion).then((r) => r.destination!)}
                       connectionLocked={locked}
                       onConflict={(m) => {
                         setEditing(undefined)
@@ -124,7 +126,7 @@ function ObservabilityContent() {
                         void actions.reload()
                       }}
                       onDone={() => setEditing(undefined)}
-                      onSaved={(saved) => say(`Saved ${saved.name}. ${testNotice(saved.name, saved.lastTest)}`)}
+                      onSaved={(saved, tested) => say(savedNotice(saved.name, saved, tested))}
                     />
                   ) : undefined
                 }
@@ -136,7 +138,7 @@ function ObservabilityContent() {
       {settings.isPending ? (
         <p role="status">Loading settings…</p>
       ) : (
-        s && <TraceSettingsForm key={`${s.contentLevel}-${s.sampleRate}-${s.platformCopyLevel}-${s.ceiling}-${s.hasPlatformDestination}`} settings={s} isOwner={org.role === OrgRole.OWNER} save={actions.updateSettings} />
+        s && <TraceSettingsForm key={`${s.contentLevel}-${s.sampleRate}-${s.platformCopyLevel}-${s.ceiling}-${s.hasPlatformDestination}`} settings={s} isOwner={org.role === OrgRole.OWNER} save={actions.updateSettings} onSaved={() => say('Saved the settings.')} />
       )}
     </>
   )

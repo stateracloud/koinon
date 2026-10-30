@@ -32,7 +32,8 @@ export type TraceDestinationFormProps = {
   /** Tests the destination, then saves it; it rejects with the backend's reason when the test fails. */
   save: (input: DestinationWrite) => Promise<Destination>
   onDone: () => void
-  onSaved?: (saved: Destination) => void
+  /** tested says the save ran a test trace (a connection field changed). */
+  onSaved?: (saved: Destination, tested: boolean) => void
   /** Called when the destination changed since the form loaded (ABORTED); the page reloads it. */
   onConflict?: (message: string) => void
   /** The connection cannot be added or changed by this viewer (full content and not an owner). */
@@ -74,7 +75,7 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
     set({ secrets: {}, headers: f.headers.map((h) => ({ ...h, value: '' })) })
     try {
       const saved = await save(input)
-      onSaved?.(saved)
+      onSaved?.(saved, tested)
       onDone()
     } catch (e2) {
       const err = ConnectError.from(e2)
@@ -133,7 +134,7 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
           disabled={editing}
           onChange={(e) => {
             const backend = Number(e.target.value) as Backend
-            set({ backend, secrets: {}, params: {}, headers: backend === Backend.GENERIC ? [{ name: '', value: '', stored: false, remove: false }] : [] })
+            set({ backend, secrets: {}, removed: [], params: {}, headers: backend === Backend.GENERIC ? [{ name: '', value: '', stored: false, remove: false }] : [] })
           }}
         >
           {presets.map((p) => (
@@ -158,7 +159,7 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
           aria-describedby={['dest-endpoint-help', shown(errors.endpoint) && 'dest-endpoint-error'].filter(Boolean).join(' ')}
         />
         <p id="dest-endpoint-help" className="text-muted-foreground text-xs">
-          {preset.endpointHelp} Koinon refuses private, loopback and cluster-internal addresses unless a platform admin allows them, and does not follow redirects.
+          {preset.endpointHelp} It must use https unless a platform admin has allowed the host, which is meant for development. Koinon also refuses private, loopback and cluster-internal addresses unless a platform admin allows them, and does not follow redirects.
         </p>
         {shown(errors.endpoint) && (
           <p id="dest-endpoint-error" className="text-destructive text-xs">
@@ -183,6 +184,7 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
                 autoComplete="new-password"
                 spellCheck={false}
                 placeholder={stored ? 'Set' : undefined}
+                disabled={f.removed.includes(field.name)}
                 aria-invalid={!!error}
                 aria-describedby={[`${id}-help`, error && `${id}-error`].filter(Boolean).join(' ')}
               />
@@ -208,6 +210,16 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
               <p id={`${id}-error`} className="text-destructive text-xs">
                 {error}
               </p>
+            )}
+            {stored && !field.required && (
+              <label className="flex items-center gap-1.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={f.removed.includes(field.name)}
+                  onChange={(e) => set({ removed: e.target.checked ? [...f.removed, field.name] : f.removed.filter((n) => n !== field.name), secrets: { ...f.secrets, [field.name]: '' } })}
+                />
+                Remove {field.label}
+              </label>
             )}
           </div>
         )
