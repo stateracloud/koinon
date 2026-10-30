@@ -7,13 +7,20 @@
 # docs/dev/work-claims-setup.md. CODEOWNERS uses the last matching line.
 * @procoduck @ovirandunu
 
-# Sensitive paths.
+# Sensitive paths. This list is the single source: `hack/claim.sh sensitive-paths` prints the same
+# patterns for the main ruleset's required_reviewers rule (the section starts at the next line and
+# every `/path` line in it counts).
 /.github/ @procoduck @ovirandunu
 /AGENTS.md @procoduck @ovirandunu
+/docs/design.md @procoduck @ovirandunu
+/docs/dev/releasing.md @procoduck @ovirandunu
 /docs/adr/ @procoduck @ovirandunu
-/charts/koinon/templates/sandbox-policy.yaml @procoduck @ovirandunu
+/charts/ @procoduck @ovirandunu
 /internal/db/migrations/ @procoduck @ovirandunu
 /internal/gateway/ @procoduck @ovirandunu
+/internal/agentd/ @procoduck @ovirandunu
+/internal/reconciler/ @procoduck @ovirandunu
+/internal/ledger/ @procoduck @ovirandunu
 /internal/auth/ @procoduck @ovirandunu
 /internal/secretstore/ @procoduck @ovirandunu
 /internal/tracing/scrub/ @procoduck @ovirandunu
