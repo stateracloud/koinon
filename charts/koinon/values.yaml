@@ -81,7 +81,7 @@ api:
     enabled: false
   # 512Mi: a password hash or check holds 64 MiB, and at most two run at once (internal/auth).
   # The run-trace router (ADR 0074) holds spans in memory and sizes itself from this limit, which the
-  # chart passes as KOINON_MEMORY_LIMIT_BYTES: its destination queues take 20% of it, spans waiting for
+  # chart passes as KOINON_MEMORY_LIMIT_BYTES (or the container's cgroup limit, if lower): its destination queues take 20% of it, spans waiting for
   # attribution 5%, turn roots waiting for the ledger 3% and export requests being decoded 8%. It drops
   # spans, oldest first, rather than grow past them. Raise the limit before raising any of these
   # (--trace-queue-bytes, --trace-intake-bytes, --trace-held-bytes, --trace-request-bytes).

@@ -85,7 +85,8 @@ func (r *Router) Handler() http.Handler {
 			}
 			return
 		}
-		body, err := readBody(req, r.cfg.MaxRequestBytes)
+		// A gzip body's buffer is pre-sized at most to half of what is left of the request budget.
+		body, err := readBody(req, r.cfg.MaxRequestBytes, int(max((int64(r.cfg.RequestBytes)-r.reqBytes.Load())/2, 0)))
 		if err != nil {
 			if errors.Is(err, errTooLarge) {
 				refuse(reqBodyTooLarge, http.StatusRequestEntityTooLarge,
@@ -157,9 +158,10 @@ func (r *Router) Mount() func(http.Handler) http.Handler {
 
 var errTooLarge = errors.New("body too large")
 
-// readBody reads the request, gunzipping it if asked. Both the compressed and the decompressed size
-// are limited by limit (decompressed: four times it).
-func readBody(r *http.Request, limit int) ([]byte, error) {
+// readBody reads the request, gunzipping it if asked. The encoded size is limited by limit and the
+// decompressed size by four times it (16 MiB at the default; what the request budget allows in
+// practice is less: see Config.RequestBytes).
+func readBody(r *http.Request, limit, maxHint int) ([]byte, error) {
 	var src io.Reader = http.MaxBytesReader(nil, r.Body, int64(limit))
 	maxOut := limit
 	switch r.Header.Get("Content-Encoding") {
@@ -175,13 +177,15 @@ func readBody(r *http.Request, limit int) ([]byte, error) {
 	default:
 		return nil, errors.New("unsupported Content-Encoding")
 	}
-	// The buffer is sized from Content-Length (bounded) instead of growing by doubling, which would
-	// allocate about twice the body.
+	// The buffer is sized from Content-Length instead of growing by doubling, which would allocate about
+	// twice the body: exactly the length plus bytes.MinRead, so reading the end does not grow it. A gzip
+	// body is pre-sized for eight times its encoded length at most, never more than the decompressed
+	// ceiling or maxHint, and grows beyond that only as the data really is that large.
 	hint := 64 << 10
 	if cl := int(min(max(r.ContentLength, 0), int64(limit))); cl > 0 {
-		hint = cl
+		hint = cl + bytes.MinRead
 		if maxOut > limit {
-			hint = min(cl*8, maxOut)
+			hint = max(min(cl*8, maxOut, maxHint), 64<<10)
 		}
 	}
 	buf := bytes.NewBuffer(make([]byte, 0, hint))

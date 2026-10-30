@@ -118,6 +118,10 @@ var _ = Describe("Settings that change while spans wait", func() {
 		g.failing[ep] = &export.Error{Kind: export.KindServer, Status: 503, Message: "the backend answered HTTP 503 (the backend failed)"}
 		g.mu.Unlock()
 		e.post(named(tr.tool(false), "s0"))
+		// The post is asynchronous: first the batch is tried and lost, then the idle queue goes.
+		Eventually(func() float64 {
+			return testutil.ToFloat64(e.r.Metrics().Dropped.WithLabelValues("org", "generic", "export_failed"))
+		}, 3*time.Second).Should(Equal(1.0))
 		Eventually(e.r.QueueCount, 3*time.Second).Should(BeZero(), "the worker idled out")
 		_, fail, _ := e.health.counts()
 		Expect(fail).To(BeNumerically("<=", 2), "the error, and the drop; not one write per interval")
@@ -288,6 +292,7 @@ var _ = Describe("Hostile or repeated input", func() {
 	It("limits requests in progress", func() {
 		e := newEnv(func(c *router.Config) { c.MaxConcurrentRequests = 1 }, secretsFor(orgA))
 		pr, pw := newBlockingBody()
+		defer func() { _ = pw.Close() }() // never leave the request blocked if the spec fails: the server's Close would wait for it
 		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, e.srv.URL, pr)
 		req.Header.Set("Content-Type", "application/x-protobuf")
 		done := make(chan struct{})
@@ -301,7 +306,7 @@ var _ = Describe("Hostile or repeated input", func() {
 			resp := httpDo(http.MethodPost, e.srv.URL, "application/x-protobuf", bytes.NewReader(nil))
 			defer func() { _ = resp.Body.Close() }()
 			return resp.StatusCode
-		}).Should(Equal(http.StatusServiceUnavailable))
+		}, 5*time.Second).Should(Equal(http.StatusServiceUnavailable))
 		_ = pw.Close()
 		<-done
 	})

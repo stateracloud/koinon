@@ -995,11 +995,16 @@ func (r *Router) rebalance() {
 // queueFloor is the least a queue may hold, however many queues share the budget.
 const queueFloor = 256 << 10
 
-// queueCap is one queue's share of the queue budget: equal shares among the live queues, at least
-// queueFloor.
+// minShares is how many queues the budget is divided among at least: a lone queue never takes more than
+// a quarter of it, so the room for the next destination to appear is there before it does (a queue that
+// is down could otherwise have its whole batch in flight when the first healthy one arrives).
+const minShares = 4
+
+// queueCap is one queue's share of the queue budget: equal shares among the live queues (at least
+// minShares of them), and at least queueFloor.
 func (r *Router) queueCap() int {
 	r.qmu.Lock()
-	n := max(len(r.queues), 1)
+	n := max(len(r.queues), minShares)
 	r.qmu.Unlock()
 	return max(r.cfg.QueueBytes/n, queueFloor)
 }

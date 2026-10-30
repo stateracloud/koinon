@@ -656,20 +656,29 @@ router amendment above.
 ### Third review (2026-10-30)
 
 - A backend's `rejected_spans` is clamped to the batch before it is counted or shared among the orgs.
-- **Memory.** The byte budgets derive from the container's memory limit (`KOINON_MEMORY_LIMIT_BYTES`):
+- **Memory.** The byte budgets derive from the container's memory limit (the cgroup's `memory.max` or
+  `memory.limit_in_bytes`, or `KOINON_MEMORY_LIMIT_BYTES` when that is lower; a container without a limit
+  gets the node's allocatable memory in the variable but "max" in its cgroup, and then there is no limit
+  and the defaults below without a limit apply):
   queues 20%, spans waiting for attribution 5%, held roots 3%, requests being read and decoded 8% (128,
   32, 16 and 64 MiB without a limit), each overridable with `--trace-queue-bytes`, `--trace-intake-bytes`,
   `--trace-held-bytes` and `--trace-request-bytes`. Bytes are the encoded size plus 100 bytes for every
   attribute, event and link, which approximates the decoded objects. A request charges its encoded
   size, then four times its decompressed size before decoding; it is refused with 503 and `Retry-After`
-  when the budget is full, or 413 when it could never fit. The body buffer is sized from
-  `Content-Length`. Each refusal says why and is counted in
+  when the budget is full, or 413 when it could never fit. At the chart's 512 MiB limit the request
+  budget is about 41 MiB, so a body that decompresses to more than about 9 MiB (4 MiB encoded plus four
+  times the decompressed size) is refused as too large, below the 16 MiB hard ceiling. The body buffer is
+  sized from `Content-Length` plus `bytes.MinRead` (a gzip body's pre-sized for at most eight times its
+  length and half the remaining budget). Each refusal says why and is counted in
   `koinon_api_trace_requests_rejected_total{reason}`.
-- **Isolation (decision 7).** Each queue has an equal share of the queue budget (at least 256 KiB) and
+- **Isolation (decision 7).** Each queue has an equal share of the queue budget (at least 256 KiB, and no more than a quarter of the budget while fewer than four exist) and
   drops only its own oldest spans beyond it; in-flight bytes count toward the share. A batch that failed
   goes back to the front of its queue for its backoff or the breaker's pause instead of being held
   outside the budget, so a destination that is down loses its own oldest spans and nothing else. When a
   new queue shrinks the shares, queues above theirs trim themselves.
+- A failed batch is retried as the same items, and its attempts start again when its head was trimmed. A
+  failure to read the destination's settings from the database is not the destination's: it neither counts
+  as an attempt nor opens the breaker nor writes the destination's health; the batch waits and is retried.
 - Attribution reads share one read per key and remember a failure for a second; the turn row of a held
   root is read in the sweep, off the intake worker. A read that panics gives its waiters an error.
 - A destination whose stored credentials cannot be opened is listed as `Unreadable`, not left out: its
