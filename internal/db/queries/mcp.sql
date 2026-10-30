@@ -137,8 +137,12 @@ WHERE org_id = @org_id AND server_id = @server_id AND name = @name
 RETURNING *;
 
 -- name: TouchMCPTool :exec
+-- The sanitised content is unchanged; the report columns still follow what the server published, so a
+-- row synced before they existed gets its values on the next sync.
 UPDATE mcp_tools
-SET present = true, last_seen_at = now(), read_only_hint = @read_only_hint
+SET present = true, last_seen_at = now(), read_only_hint = @read_only_hint,
+    description_original_length = @description_original_length, description_capped = @description_capped,
+    description_cleaned = @description_cleaned
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name;
 
 -- name: MarkMCPToolsAbsent :exec

@@ -949,20 +949,30 @@ func (q *Queries) ShadowUIMCPServers(ctx context.Context, arg ShadowUIMCPServers
 
 const touchMCPTool = `-- name: TouchMCPTool :exec
 UPDATE mcp_tools
-SET present = true, last_seen_at = now(), read_only_hint = $1
-WHERE org_id = $2 AND server_id = $3 AND name = $4
+SET present = true, last_seen_at = now(), read_only_hint = $1,
+    description_original_length = $2, description_capped = $3,
+    description_cleaned = $4
+WHERE org_id = $5 AND server_id = $6 AND name = $7
 `
 
 type TouchMCPToolParams struct {
-	ReadOnlyHint bool
-	OrgID        pgtype.UUID
-	ServerID     pgtype.UUID
-	Name         string
+	ReadOnlyHint              bool
+	DescriptionOriginalLength int64
+	DescriptionCapped         bool
+	DescriptionCleaned        bool
+	OrgID                     pgtype.UUID
+	ServerID                  pgtype.UUID
+	Name                      string
 }
 
+// The sanitised content is unchanged; the report columns still follow what the server published, so a
+// row synced before they existed gets its values on the next sync.
 func (q *Queries) TouchMCPTool(ctx context.Context, arg TouchMCPToolParams) error {
 	_, err := q.db.Exec(ctx, touchMCPTool,
 		arg.ReadOnlyHint,
+		arg.DescriptionOriginalLength,
+		arg.DescriptionCapped,
+		arg.DescriptionCleaned,
 		arg.OrgID,
 		arg.ServerID,
 		arg.Name,

@@ -22,6 +22,7 @@
 package mcpsanitize
 
 import (
+	"bytes"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -36,8 +37,6 @@ const (
 	MaxParamDescription = 256
 	// ellipsis ends a capped text.
 	ellipsis = "…"
-	// maxSchemaDepth bounds the walk of an input schema.
-	maxSchemaDepth = 64
 )
 
 // Report says what sanitising did to one text, or to a set of them.
@@ -60,8 +59,10 @@ func (r *Report) merge(o Report) {
 var (
 	// ESC [ ... final byte (CSI), ESC ] ... BEL or ESC \ (OSC), and other two-byte escapes.
 	ansi = regexp.MustCompile("\x1b(?:\\[[0-?]*[ -/]*[@-~]|\\][^\x07\x1b]*(?:\x07|\x1b\\\\)?|[@-Z\\\\-_])")
-	// An opening "<" or "</" followed by a name that imitates a harness or chat-role block.
-	lookalike = regexp.MustCompile(`(?i)<(\s*/?\s*)(system|system[-_ ]reminder|koinon[-_a-z0-9]*|untrusted[-_]context|tool[-_]result|tool[-_]use|tool[-_]call|function[-_]calls?|invoke|antml:[a-z_]+|assistant|human|user|developer|instructions?|mcp[-_]tools|im_start|im_end|reminder)\b`)
+	// An opening "<" or "</" followed by a name that imitates a harness or chat-role block. The
+	// bracket may be its fullwidth or small form, the space any Unicode space, and a ChatML-style
+	// "|" or fullwidth "｜" may follow it (<|im_start|>).
+	lookalike = regexp.MustCompile(`(?i)[<＜﹤]([\s\p{Z}]*/?[\s\p{Z}]*[|｜]?[\s\p{Z}]*)(system|system[-_ ]reminder|koinon[-_a-z0-9]*|untrusted[-_]context|tool[-_]result|tool[-_]use|tool[-_]call|function[-_]calls?|invoke|antml:[a-z_]+|assistant|human|user|developer|instructions?|mcp[-_]tools|im_start|im_end|im_sep|reminder|thinking|tool[-_]response|function[-_]results?|parameters?)\b`)
 )
 
 // invisible reports runes that render as nothing or change text direction.
@@ -114,7 +115,12 @@ func Text(s string, limit int) (string, Report) {
 	if utf8.RuneCountInString(out) > limit {
 		rep.Capped = true
 		runes := []rune(out)
-		out = strings.TrimRightFunc(string(runes[:max(limit-1, 0)]), unicode.IsSpace) + ellipsis
+		cut := max(limit-1, 0)
+		// Cut before a combining mark or the emoji selector, so the last kept character is whole.
+		for cut > 0 && cut < len(runes) && (unicode.In(runes[cut], unicode.Mn, unicode.Me) || runes[cut] == '\ufe0f') {
+			cut--
+		}
+		out = strings.TrimRightFunc(string(runes[:cut]), unicode.IsSpace) + ellipsis
 	}
 	return out, rep
 }
@@ -129,44 +135,80 @@ func stripped(orig, cleaned string) bool {
 func Description(s string) (string, Report) { return Text(s, MaxToolDescription) }
 
 // Schema sanitises the "description" and "title" strings anywhere in a JSON input schema, with the
-// per-parameter cap, and returns the schema re-encoded. A schema that is not valid JSON is returned
+// per-parameter cap, and returns the schema re-encoded. Instance values (default, const, enum,
+// examples) are data the tool receives or compares against, not text for the model, and are left
+// as published; numbers keep their exact text. A schema that is not valid JSON is returned
 // unchanged with an empty report: the caller already replaces those.
 func Schema(raw json.RawMessage) (json.RawMessage, Report) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
 	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
+	if err := dec.Decode(&v); err != nil {
 		return raw, Report{}
 	}
 	var rep Report
-	v = walk(v, 0, &rep)
+	v = walk(v, &rep)
 	if !rep.Cleaned && !rep.Capped {
 		return raw, rep
 	}
-	out, err := json.Marshal(v)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false) // the stored schema stays readable: "&lt;system>", not "\u0026lt;system\u003e"
+	if err := enc.Encode(v); err != nil {
 		return raw, rep
 	}
-	return out, rep
+	return bytes.TrimRight(buf.Bytes(), "\n"), rep
 }
 
-func walk(v any, depth int, rep *Report) any {
-	if depth > maxSchemaDepth {
-		return v
-	}
+// instanceKeys hold instance values, which are never rewritten.
+var instanceKeys = map[string]bool{"default": true, "const": true, "enum": true, "examples": true, "example": true}
+
+// namedSchemas map a name chosen by the server (a parameter, a definition) to a schema, so their keys
+// are names, not keywords: a parameter called "default" or "description" is still a schema to walk.
+var namedSchemas = map[string]bool{
+	"properties": true, "patternProperties": true, "$defs": true, "definitions": true, "dependentSchemas": true,
+}
+
+// walk visits a schema. It has no depth limit of its own: encoding/json already refuses nesting
+// deeper than it can decode, and a limit here would let a description hide below it.
+func walk(v any, rep *Report) any {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, e := range t {
-			if s, ok := e.(string); ok && (k == "description" || k == "title") {
+			switch s, isString := e.(string); {
+			case instanceKeys[k]:
+			case isString && (k == "description" || k == "title"):
 				clean, r := Text(s, MaxParamDescription)
 				t[k] = clean
 				rep.merge(r)
-				continue
+			case namedSchemas[k]:
+				t[k] = walkNamed(e, rep)
+			default:
+				t[k] = walk(e, rep)
 			}
-			t[k] = walk(e, depth+1, rep)
 		}
 	case []any:
 		for i, e := range t {
-			t[i] = walk(e, depth+1, rep)
+			t[i] = walk(e, rep)
 		}
 	}
 	return v
+}
+
+// walkNamed visits a map of name to schema.
+func walkNamed(v any, rep *Report) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return walk(v, rep)
+	}
+	for k, e := range m {
+		if s, ok := e.(string); ok { // not a schema, but the model reads it all the same
+			clean, r := Text(s, MaxParamDescription)
+			m[k] = clean
+			rep.merge(r)
+			continue
+		}
+		m[k] = walk(e, rep)
+	}
+	return m
 }
