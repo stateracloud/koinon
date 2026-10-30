@@ -29,20 +29,20 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
-	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/thinking"
+	"github.com/stateracloud/koinon/test/scenarios"
 )
 
-// What the fake model script test/fakemodel/scripts/repo-helper.yaml does, and the fake
-// GitHub's repository (test/e2e/kind/fakes.yaml).
-const (
-	repoName   = "hello"
-	repository = "koinon-demo/" + repoName
-	// prSuggestion is the branch the fake model suggests; Koinon files it under the agent's
-	// namespace (githubtools.FinalBranch), which prBranch holds once the agent exists.
-	prSuggestion = "koinon/add-hello-md"
-	prFile       = "hello.md"
-	prContent    = "hello from koinon\n"
+// What the fake model script test/fakemodel/scripts/repo-helper.yaml does is test/scenarios'
+// PullRequest, which the owning packages' tests assert too; the fake GitHub's repository is
+// test/e2e/kind/fakes.yaml. prBranch holds the branch Koinon files the pull request under once the
+// agent exists (scenarios.PullRequest.Branch).
+var (
+	repository = scenarios.PullRequest.Repository
+	repoName   = repository[strings.LastIndex(repository, "/")+1:]
+	prFile     = scenarios.PullRequest.File
+	prContent  = scenarios.PullRequest.Content
+	ledger     = scenarios.PullRequest.Ledger
 )
 
 // quickstartBudget is plan item E1's bound: the quickstart takes at most 15 minutes from
@@ -323,7 +323,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		agent = created.GetAgent()
 		Expect(agent.GetStatus()).To(Equal(agentv1alpha1.AgentStatus_AGENT_STATUS_DRAFT))
-		prBranch, err = githubtools.FinalBranch(githubtools.AgentNamespace(agent.GetDisplayName(), agent.GetId()), prSuggestion)
+		prBranch, err = scenarios.PullRequest.Branch(agent.GetDisplayName(), agent.GetId())
 		Expect(err).NotTo(HaveOccurred())
 
 		activated, err := c.agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{
@@ -385,19 +385,16 @@ var _ = Describe("the quickstart", Ordered, func() {
 			got, err := c.runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run.GetId()})
 			g.Expect(err).NotTo(HaveOccurred())
 			cost = got.GetRun().GetCost()
-			g.Expect(cost.GetRequests()).To(BeNumerically(">", 0), "the ledger recorded the run's requests")
 			// The refused title request (no tokens) can reach the ledger before the streamed ones:
-			// wait until the streamed usage is in too, not only the first entry.
-			g.Expect(cost.GetInputTokens()).To(BeNumerically(">=", 1200), "the fake model's reported input tokens")
+			// wait until the streamed usage is in too, not only the first entry (#291).
+			g.Expect(ledger.Settled(totalsOf(cost))).To(BeTrue(), "the ledger has the streamed usage: %v", cost)
 		}, 60*time.Second, time.Second).Should(Succeed())
 		// The streamed requests carry usage through the gateway, so none is an estimate. The title
 		// request the fake model refuses (a 400 without usage) is the provider's refusal, and the
 		// quickstart's provider type, openai, does not bill one: the ledger keeps its entry with no
 		// tokens and no cost and marks the charge waived; it is not an estimate either (ADR 0056,
 		// amendment 2026-10-29, point 3; #241).
-		Expect(cost.GetEstimatedRequests()).To(BeZero(), "streamed requests reported their usage; a refusal is waived, not estimated")
-		Expect(cost.GetInputTokens()).To(BeNumerically(">=", 1200), "the fake model's reported input tokens")
-		Expect(cost.GetOutputTokens()).To(BeNumerically("<", 1000), "no output is charged for the refused request")
+		Expect(ledger.CheckTotals(totalsOf(cost))).To(Succeed())
 
 		By("the refused title request is in the ledger, with the provider's status, and charged nothing")
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
@@ -418,12 +415,9 @@ var _ = Describe("the quickstart", Ordered, func() {
 		// OpenCode asks for a title with each prompt until it has one, so the turn's prompt and the
 		// end-of-turn note's prompt make at most two such requests; a third would be a request nobody
 		// accounts for.
-		Expect(len(refused)).To(BeNumerically("<=", 2), "%v", refused)
+		Expect(len(refused)).To(BeNumerically("<=", ledger.MaxRefused), "%v", refused)
 		for _, r := range refused {
-			Expect(r.UpstreamStatus).To(Equal(http.StatusBadRequest), "%+v", r)
-			Expect(r.ChargeWaived).NotTo(BeEmpty(), "%+v", r)
-			Expect(r.Input+r.Output).To(BeZero(), "%+v", r)
-			Expect(r.Cost.Sign()).To(BeZero(), "%+v", r)
+			Expect(ledger.CheckRefused(r.entry())).To(Succeed(), "%+v", r)
 		}
 
 		By("nothing has reached GitHub before the approval")
@@ -581,8 +575,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		ap := got.GetApproval()
 		Expect(ap.GetConnector()).To(Equal("mcp"))
 		Expect(ap.GetTool()).To(Equal("write_item"))
-		Expect(ap.GetTarget()).To(Equal("mcp:tracker"))
-		Expect(ap.GetArgsJson()).To(Equal(`{"title":"from the e2e ask"}`))
+		Expect(ap.GetTarget()).To(Equal(scenarios.PullRequest.TrackerAskTarget))
+		Expect(ap.GetArgsJson()).To(Equal(scenarios.PullRequest.TrackerAskArgs))
 		Expect(ap.GetMcp().GetContentHash()).NotTo(BeEmpty())
 		Expect(ap.GetMcp().GetContentHash()).To(Equal(ap.GetMcp().GetCurrentContentHash()))
 		for _, r := range fakeMCPRequests(ctx, fake) {
@@ -606,7 +600,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			}
 		}
 		Expect(calls).To(HaveLen(1), "the server saw the approved call exactly once")
-		Expect(calls[0].Args).To(Equal(`{"title":"from the e2e ask"}`))
+		Expect(calls[0].Args).To(Equal(scenarios.PullRequest.TrackerAskArgs))
 		Expect(calls[0].Agent).To(Equal("default/mcp-exec"), "through the gateway, with the org's executor key")
 		Expect(calls[0].Authorized).To(BeTrue())
 
@@ -1011,6 +1005,13 @@ func fakeModelList(ctx context.Context, g Gomega, url, model string) []fakeReque
 }
 
 // ledgerRow is one spend ledger entry (spend_entries).
+func totalsOf(c *runv1alpha1.Cost) scenarios.Totals {
+	return scenarios.Totals{
+		Requests: c.GetRequests(), EstimatedRequests: c.GetEstimatedRequests(),
+		InputTokens: c.GetInputTokens(), OutputTokens: c.GetOutputTokens(),
+	}
+}
+
 type ledgerRow struct {
 	Model                                string
 	Input, Output, CacheRead, CacheWrite int64
@@ -1058,4 +1059,13 @@ func ledgerRows(ctx context.Context, g Gomega, kubectl, run string) []ledgerRow 
 func rate(perMillion string, tokens int64) *big.Rat {
 	p, _ := new(big.Rat).SetString(perMillion)
 	return p.Mul(p, big.NewRat(tokens, 1_000_000))
+}
+
+// entry is the row as test/scenarios checks it. The psql query does not read the estimated flag:
+// the run's EstimatedRequests total, checked beside it, is where an estimate shows.
+func (r ledgerRow) entry() scenarios.Entry {
+	return scenarios.Entry{
+		UpstreamStatus: r.UpstreamStatus, Input: r.Input, Output: r.Output,
+		CostZero: r.Cost.Sign() == 0, ChargeWaived: r.ChargeWaived,
+	}
 }

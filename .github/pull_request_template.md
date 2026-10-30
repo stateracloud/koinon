@@ -2,6 +2,8 @@
 
 ## What and why
 
+Closes #N (the issue you hold the claim on; see AGENTS.md, Picking up work)
+
 ## How it was tested
 
 ## Checklist
