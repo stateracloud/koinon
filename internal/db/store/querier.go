@@ -887,6 +887,8 @@ type Querier interface {
 	TakeOverExpiredRun(ctx context.Context, arg TakeOverExpiredRunParams) (Run, error)
 	// Records use, at most once a minute per token.
 	TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error
+	// The sanitised content is unchanged; the report columns still follow what the server published, so a
+	// row synced before they existed gets its values on the next sync.
 	TouchMCPTool(ctx context.Context, arg TouchMCPToolParams) error
 	// Returns the session if it is still valid at @now and extends its idle
 	// deadline, never past the absolute one.

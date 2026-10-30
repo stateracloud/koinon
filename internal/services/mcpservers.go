@@ -62,6 +62,7 @@ func mcpToolProto(t mcpservers.Tool) *mcpserverv1alpha1.Tool {
 		ReviewReason: t.ReviewReason, Present: t.Present, FirstSeenAt: timestamppb.New(t.FirstSeenAt),
 		LastSeenAt: timestamppb.New(t.LastSeenAt), TierSetBy: t.TierSetBy, TierSetAt: optTime(t.TierSetAt),
 		RequiresTwoApprovers: t.RequiresTwoApprovers, ContentHash: t.ContentHash, Unavailable: t.Unavailable,
+		DescriptionOriginalLength: int64(t.DescriptionOriginalLength), DescriptionCapped: t.DescriptionCapped, DescriptionCleaned: t.DescriptionCleaned,
 	}
 }
 
