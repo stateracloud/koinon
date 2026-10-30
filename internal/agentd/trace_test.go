@@ -48,6 +48,24 @@ func (d fakeDecider) DecideRun(context.Context, pgtype.UUID, pgtype.UUID) (bool,
 	return d.traced, nil
 }
 
+// levelDecider is a decider whose content level changes while a run is parked.
+type levelDecider struct {
+	mu    sync.Mutex
+	level string
+}
+
+func (d *levelDecider) set(l string) { d.mu.Lock(); d.level = l; d.mu.Unlock() }
+
+func (d *levelDecider) DecideRun(context.Context, pgtype.UUID, pgtype.UUID) (bool, error) {
+	return true, nil
+}
+
+func (d *levelDecider) ContentLevel(context.Context, pgtype.UUID) (string, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.level, nil
+}
+
 func (d fakeDecider) ContentLevel(context.Context, pgtype.UUID) (string, error) { return d.level, nil }
 
 // otlpReceiver is a fake of koinon-api's /v1/traces: it checks the bearer token and keeps the spans.
@@ -130,7 +148,7 @@ func tokenFile() string {
 }
 
 // tracingOn is a pool mutation that traces runs to rcv.
-func tracingOn(rcv *otlpReceiver, d fakeDecider, mutate ...func(*agentd.Tracing)) func(*agentd.Config) {
+func tracingOn(rcv *otlpReceiver, d agentd.TraceDecider, mutate ...func(*agentd.Tracing)) func(*agentd.Config) {
 	return func(c *agentd.Config) {
 		t := &agentd.Tracing{
 			Decider: d, Endpoint: rcv.URL, TokenFile: tokenFile(),
@@ -207,7 +225,12 @@ func traceScript(a *askEnv, qid *string) func(ctx context.Context, text string, 
 }
 
 // parkedRun runs the scripted task to its park, answers the question and waits for the run.
-func parkedRun(ctx SpecContext, a *askEnv, rcv *otlpReceiver, d fakeDecider, mutate ...func(*agentd.Tracing)) (store.Run, string) {
+func parkedRun(ctx SpecContext, a *askEnv, rcv *otlpReceiver, d agentd.TraceDecider, mutate ...func(*agentd.Tracing)) (store.Run, string) {
+	return parkedRunWith(ctx, a, rcv, d, nil, mutate...)
+}
+
+// parkedRunWith is parkedRun with between, which runs while the run is parked.
+func parkedRunWith(ctx SpecContext, a *askEnv, rcv *otlpReceiver, d agentd.TraceDecider, between func(), mutate ...func(*agentd.Tracing)) (store.Run, string) {
 	var qid string
 	a.harness.set(func(h *harness) { h.script = traceScript(a, &qid) })
 	t := a.task(ctx, markQuestion+": deploy the app")
@@ -215,6 +238,9 @@ func parkedRun(ctx SpecContext, a *askEnv, rcv *otlpReceiver, d fakeDecider, mut
 	a.pool("agentd-trace", tracingOn(rcv, d, mutate...))
 	Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
 	time.Sleep(300 * time.Millisecond) // a real wait between the turns
+	if between != nil {
+		between()
+	}
 	pool := a.serve()
 	Expect(resolveIn(ctx, pool, func(q *store.Queries) error {
 		_, err := questions.Respond(ctx, q, a.org, mustUUID(qid), a.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "us-east-1"})
@@ -367,6 +393,28 @@ var _ = Describe("run spans (ADR 0074)", func() {
 			root := agentd.RootSpanID(tid)
 			Expect(m["traceparent"]).To(Equal("00-" + hex.EncodeToString(tid[:]) + "-" + hex.EncodeToString(root[:]) + "-01"))
 		}
+	})
+
+	It("reads the content level for every turn: lowered while parked, the resumed turn sends no content", func(ctx SpecContext) {
+		a := newAskEnv(ctx)
+		rcv := newReceiver()
+		d := &levelDecider{level: "full"}
+		r, _ := parkedRunWith(ctx, a, rcv, d, func() { d.set("none") })
+		Eventually(rcv.count).WithTimeout(10 * time.Second).Should(Equal(4))
+		_ = r
+		for _, s := range rcv.snapshot() {
+			a := attrMap(s.Attributes)
+			if a[semconv.KoinonTurn] == "1" && s.Name == "execute_tool koinon_ask_user" {
+				Expect(a).To(HaveKey(semconv.GenAIToolCallArguments))
+			}
+			if a[semconv.KoinonTurn] == "2" {
+				for _, k := range []string{semconv.GenAIInputMessages, semconv.GenAIOutputMessages, semconv.GenAIToolCallArguments, semconv.KoinonContentAttributes} {
+					Expect(a).NotTo(HaveKey(k), s.Name)
+				}
+			}
+		}
+		Expect(allText(rcv.snapshot())).NotTo(ContainSubstring("Deploying now"))
+		Expect(allText(rcv.snapshot())).To(ContainSubstring("Asked you."), "turn 1 was sent at full")
 	})
 
 	It("emits nothing for a run that is not traced", func(ctx SpecContext) {
