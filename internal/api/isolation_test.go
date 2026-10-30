@@ -623,7 +623,7 @@ var isolationCases = map[string]isolationCase{
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
 			return traceClient(c).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
-				OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_REDACTED, SampleRate: 1, PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
+				OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_REDACTED, SampleRate: new(float64(1)), PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
 			})
 		},
 	},

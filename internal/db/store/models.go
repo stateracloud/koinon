@@ -1797,6 +1797,7 @@ type PlatformTraceDestination struct {
 	SecretFields       []string
 	ResourceAttributes []byte
 	Enabled            bool
+	ConfigVersion      int64
 	LastTestAt         pgtype.Timestamptz
 	LastTestOk         pgtype.Bool
 	LastTestMessage    pgtype.Text
@@ -1935,6 +1936,7 @@ type Run struct {
 	MaxModelRequests     pgtype.Int8
 	MaxSpendUsd          pgtype.Numeric
 	Traced               pgtype.Bool
+	LastTurnSeq          int32
 }
 
 type RunEvent struct {
@@ -2129,6 +2131,7 @@ type TraceDestination struct {
 	SecretFields       []string
 	ResourceAttributes []byte
 	Enabled            bool
+	ConfigVersion      int64
 	LastTestAt         pgtype.Timestamptz
 	LastTestOk         pgtype.Bool
 	LastTestMessage    pgtype.Text

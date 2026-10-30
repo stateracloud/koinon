@@ -104,8 +104,6 @@ type Result struct {
 	Status int
 	// Rejected is the number of spans the backend refused in a partial success.
 	Rejected int64
-	// Message is the backend's partial-success explanation, cleaned and cut; empty otherwise.
-	Message string
 }
 
 // Export sends req to d. It returns an *Error for a transport failure or a non-2xx answer. A 2xx
@@ -131,7 +129,6 @@ func (c *Client) Export(ctx context.Context, d Destination, req *coltracepb.Expo
 	hr.Header.Set("Accept", "application/x-protobuf")
 	hr.Header.Set("User-Agent", "koinon-trace-exporter")
 
-	secrets := secretValues(d)
 	resp, err := c.http.Do(hr)
 	if err != nil {
 		return Result{}, &Error{Kind: KindNetwork, Message: "could not send: " + networkReason(err)}
@@ -142,7 +139,7 @@ func (c *Client) Export(ctx context.Context, d Destination, req *coltracepb.Expo
 	status := resp.StatusCode
 	switch {
 	case status >= 200 && status < 300:
-		return parseSuccess(status, resp.Header.Get("Content-Type"), answer, secrets), nil
+		return parseSuccess(status, resp.Header.Get("Content-Type"), answer), nil
 	case status >= 300 && status < 400:
 		return Result{}, &Error{
 			Kind: KindRedirect, Status: status,
@@ -151,13 +148,13 @@ func (c *Client) Export(ctx context.Context, d Destination, req *coltracepb.Expo
 	case status == http.StatusTooManyRequests || status >= 500:
 		return Result{}, &Error{
 			Kind: KindServer, Status: status, RetryAfter: retryAfter(resp.Header.Get("Retry-After")),
-			Message: failureMessage(status, answer, secrets),
+			Message: failureMessage(status),
 		}
 	}
-	return Result{}, &Error{Kind: KindRejected, Status: status, Message: failureMessage(status, answer, secrets)}
+	return Result{}, &Error{Kind: KindRejected, Status: status, Message: failureMessage(status)}
 }
 
-func parseSuccess(status int, contentType string, answer []byte, secrets []string) Result {
+func parseSuccess(status int, contentType string, answer []byte) Result {
 	res := Result{Status: status}
 	// Only a protobuf answer is read; a backend that answers JSON or nothing accepted the batch.
 	if len(answer) == 0 || !strings.Contains(strings.ToLower(contentType), "protobuf") {
@@ -169,51 +166,25 @@ func parseSuccess(status int, contentType string, answer []byte, secrets []strin
 	}
 	if ps := out.GetPartialSuccess(); ps != nil {
 		res.Rejected = ps.GetRejectedSpans()
-		res.Message = clean(ps.GetErrorMessage(), secrets)
 	}
 	return res
 }
 
-// secretValues are the values that must never appear in a message.
-func secretValues(d Destination) []string {
-	out := make([]string, 0, len(d.Secrets))
-	for _, v := range d.Secrets {
-		if len(v) >= 4 {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
-// clean makes a backend's text fit for showing: secrets out, control characters out, cut short.
-func clean(s string, secrets []string) string {
-	for _, v := range secrets {
-		s = strings.ReplaceAll(s, v, "[redacted]")
-	}
-	s = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
-			return ' '
-		}
-		return r
-	}, s)
-	s = strings.TrimSpace(s)
-	if r := []rune(s); len(r) > 200 {
-		s = string(r[:200]) + "..."
-	}
-	return s
-}
-
-// failureMessage names the status and, when the backend sent a short text, quotes it cleaned.
-func failureMessage(status int, answer []byte, secrets []string) string {
+// failureMessage names the status and a fixed description. What the backend wrote is never quoted: it
+// may echo the credentials in a changed form (a Basic header decoded or re-encoded).
+func failureMessage(status int) string {
 	msg := fmt.Sprintf("the backend answered HTTP %d", status)
-	switch status {
-	case http.StatusUnauthorized, http.StatusForbidden:
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		msg += " (the credentials were refused)"
-	case http.StatusNotFound:
+	case status == http.StatusNotFound:
 		msg += " (check the endpoint URL)"
-	}
-	if t := clean(string(answer), secrets); t != "" && !strings.ContainsAny(t, "<>") {
-		msg += ": " + t
+	case status == http.StatusTooManyRequests:
+		msg += " (rate limited)"
+	case status >= 500:
+		msg += " (the backend failed)"
+	default:
+		msg += " (the request was refused)"
 	}
 	return msg
 }

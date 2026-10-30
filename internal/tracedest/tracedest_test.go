@@ -3,6 +3,7 @@
 package tracedest_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,6 +27,14 @@ import (
 	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/internal/tracing/export"
 )
+
+var (
+	own       = tracedest.Authority{Owner: true, Member: true}
+	adminOnly = tracedest.Authority{Member: true}
+	outsider  = tracedest.Authority{} // a platform admin who is not a member of the org
+)
+
+func rate(f float64) *float64 { return &f }
 
 const (
 	fakeKey    = "koinon_test_not-a-real-token"
@@ -99,6 +108,12 @@ func (b *fakeBackend) calls() int {
 	return b.hits
 }
 
+func uuidOf(s string) pgtype.UUID {
+	var id pgtype.UUID
+	Expect(id.Scan(s)).To(Succeed())
+	return id
+}
+
 var _ = Describe("Service", func() {
 	var (
 		svc     *tracedest.Service
@@ -146,7 +161,7 @@ var _ = Describe("Service", func() {
 
 	Describe("test before save", func() {
 		It("saves a destination the backend accepts, keeps the test result and seals the credentials", func(ctx SpecContext) {
-			d, err := svc.Create(ctx, org, actor, user, langfuse("lf"))
+			d, err := svc.Create(ctx, org, actor, user, own, langfuse("lf"))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(d.LastTest).NotTo(BeNil())
 			Expect(d.LastTest.OK).To(BeTrue())
@@ -183,7 +198,7 @@ var _ = Describe("Service", func() {
 		DescribeTable("saves nothing when the backend refuses the test trace",
 			func(ctx SpecContext, arrange func(b *fakeBackend), reason string) {
 				be.set(arrange)
-				_, err := svc.Create(ctx, org, actor, user, langfuse("refused"))
+				_, err := svc.Create(ctx, org, actor, user, own, langfuse("refused"))
 				var failed *tracedest.TestFailedError
 				Expect(err).To(HaveOccurred())
 				Expect(err).To(BeAssignableToTypeOf(failed))
@@ -203,7 +218,7 @@ var _ = Describe("Service", func() {
 		It("refuses a host the egress policy denies, without sending anything", func(ctx SpecContext) {
 			in := langfuse("denied")
 			in.EndpointURL = "http://169.254.169.254/latest"
-			_, err := svc.Create(ctx, org, actor, user, in)
+			_, err := svc.Create(ctx, org, actor, user, own, in)
 			var inv *tracedest.InvalidError
 			Expect(err).To(BeAssignableToTypeOf(inv))
 			Expect(be.calls()).To(BeZero())
@@ -216,7 +231,7 @@ var _ = Describe("Service", func() {
 				{Name: "x", Backend: "datadog", EndpointURL: be.URL}, // no api_key
 				{Name: "x", Backend: "datadog", EndpointURL: be.URL, Secrets: map[string]string{"api_key": fakeKey}, ResourceAttributes: map[string]string{"koinon.org": "other"}},
 			} {
-				_, err := svc.Create(ctx, org, actor, user, in)
+				_, err := svc.Create(ctx, org, actor, user, own, in)
 				var inv *tracedest.InvalidError
 				Expect(err).To(BeAssignableToTypeOf(inv), fmt.Sprint(in.Name, in.Backend))
 			}
@@ -224,23 +239,23 @@ var _ = Describe("Service", func() {
 		})
 
 		It("refuses a second destination with the same name", func(ctx SpecContext) {
-			_, err := svc.Create(ctx, org, actor, user, langfuse("dup"))
+			_, err := svc.Create(ctx, org, actor, user, own, langfuse("dup"))
 			Expect(err).NotTo(HaveOccurred())
-			_, err = svc.Create(ctx, org, actor, user, langfuse("dup"))
+			_, err = svc.Create(ctx, org, actor, user, own, langfuse("dup"))
 			Expect(err).To(MatchError(tracedest.ErrConflict))
 		})
 	})
 
 	Describe("update", func() {
 		It("merges secrets by name, tests the result and keeps the old version when the test fails", func(ctx SpecContext) {
-			d, err := svc.Create(ctx, org, actor, user, langfuse("upd"))
+			d, err := svc.Create(ctx, org, actor, user, own, langfuse("upd"))
 			Expect(err).NotTo(HaveOccurred())
 
 			By("a change without secrets keeps the stored ones")
 			in := langfuse("upd")
 			in.Secrets = nil
 			in.ResourceAttributes = map[string]string{"deployment.environment": "prod"}
-			d2, err := svc.Update(ctx, org, actor, d.ID, in)
+			d2, err := svc.Update(ctx, org, actor, own, d.ID, nil, in)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(d2.SecretFields).To(ConsistOf("public_key", "secret_key"))
 			Expect(d2.ResourceAttributes).To(HaveKeyWithValue("deployment.environment", "prod"))
@@ -249,7 +264,7 @@ var _ = Describe("Service", func() {
 
 			By("one secret is replaced and the other stays")
 			in.Secrets = map[string]string{"secret_key": fakeKeyTwo}
-			_, err = svc.Update(ctx, org, actor, d.ID, in)
+			_, err = svc.Update(ctx, org, actor, own, d.ID, nil, in)
 			Expect(err).NotTo(HaveOccurred())
 			routes, _ = svc.Routes(ctx, org)
 			Expect(routes[0].Destination.Secrets).To(HaveKeyWithValue("secret_key", fakeKeyTwo))
@@ -258,7 +273,7 @@ var _ = Describe("Service", func() {
 			By("a failing test leaves the saved version alone")
 			be.set(func(b *fakeBackend) { b.status = 403 })
 			in.Secrets = map[string]string{"secret_key": "koinon_test_not-a-real-bad"}
-			_, err = svc.Update(ctx, org, actor, d.ID, in)
+			_, err = svc.Update(ctx, org, actor, own, d.ID, nil, in)
 			var failed *tracedest.TestFailedError
 			Expect(err).To(BeAssignableToTypeOf(failed))
 			routes, _ = svc.Routes(ctx, org)
@@ -266,7 +281,7 @@ var _ = Describe("Service", func() {
 
 			By("changing the backend starts from no secrets")
 			be.set(func(b *fakeBackend) { b.status = 200 })
-			_, err = svc.Update(ctx, org, actor, d.ID, tracedest.Input{
+			_, err = svc.Update(ctx, org, actor, own, d.ID, nil, tracedest.Input{
 				Name: "upd", Backend: "datadog", EndpointURL: be.URL, Enabled: true, Secrets: map[string]string{"api_key": fakeKey},
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -281,24 +296,24 @@ var _ = Describe("Service", func() {
 		})
 
 		It("does not overwrite a change made meanwhile", func(ctx SpecContext) {
-			d, err := svc.Create(ctx, org, actor, user, langfuse("race"))
+			d, err := svc.Create(ctx, org, actor, user, own, langfuse("race"))
 			Expect(err).NotTo(HaveOccurred())
 			// Another admin saves while this update's test trace is on its way.
 			be.set(func(b *fakeBackend) {
 				b.onHit = func() {
-					_, err := pool.Exec(ctx, `UPDATE trace_destinations SET resource_attributes = '{"a":"b"}' WHERE org_id = $1 AND id = $2`, org, d.ID)
+					_, err := pool.Exec(ctx, `UPDATE trace_destinations SET resource_attributes = '{"a":"b"}', config_version = config_version + 1 WHERE org_id = $1 AND id = $2`, org, d.ID)
 					Expect(err).NotTo(HaveOccurred())
 				}
 			})
-			_, err = svc.Update(ctx, org, actor, d.ID, langfuse("race"))
+			_, err = svc.Update(ctx, org, actor, own, d.ID, nil, langfuse("race"))
 			Expect(err).To(MatchError(tracedest.ErrChanged))
 		})
 
 		It("does not touch another org's destination", func(ctx SpecContext) {
-			d, err := svc.Create(ctx, org, actor, user, langfuse("mine"))
+			d, err := svc.Create(ctx, org, actor, user, own, langfuse("mine"))
 			Expect(err).NotTo(HaveOccurred())
 			other, otherUser, _ := pgtest.NewOrg(ctx, pool)
-			_, err = svc.Update(ctx, other, audit.User(otherUser), d.ID, langfuse("mine"))
+			_, err = svc.Update(ctx, other, audit.User(otherUser), own, d.ID, nil, langfuse("mine"))
 			Expect(err).To(MatchError(tracedest.ErrNotFound))
 			Expect(svc.Delete(ctx, other, audit.User(otherUser), d.ID)).To(MatchError(tracedest.ErrNotFound))
 			_, _, err = svc.Test(ctx, other, audit.User(otherUser), d.ID)
@@ -308,8 +323,257 @@ var _ = Describe("Service", func() {
 		})
 	})
 
+	Describe("stored credentials and a changed endpoint", func() {
+		It("sends stored secrets only to the endpoint origin they were stored for", func(ctx SpecContext) {
+			d, err := svc.Create(ctx, org, actor, user, own, langfuse("keep"))
+			Expect(err).NotTo(HaveOccurred())
+			evil := newFakeBackend()
+			DeferCleanup(evil.Close)
+			evilHost, _, _ := net.SplitHostPort(evil.Listener.Addr().String())
+			_ = evilHost // same host, different port: a different origin
+
+			By("a new origin without the secrets is refused, and the evil backend receives nothing")
+			in := langfuse("keep")
+			in.EndpointURL = evil.URL + "/api/public/otel/v1/traces"
+			in.Secrets = nil
+			_, err = svc.Update(ctx, org, actor, own, d.ID, nil, in)
+			var inv *tracedest.InvalidError
+			Expect(err).To(BeAssignableToTypeOf(inv))
+			Expect(evil.calls()).To(BeZero())
+
+			By("only some secrets given: the others are not carried over")
+			in.Secrets = map[string]string{"secret_key": fakeKeyTwo}
+			_, err = svc.Update(ctx, org, actor, own, d.ID, nil, in)
+			Expect(err).To(BeAssignableToTypeOf(inv))
+			Expect(evil.calls()).To(BeZero())
+
+			By("all secrets given: the new endpoint gets exactly those")
+			in.Secrets = map[string]string{"public_key": "koinon_test_not-a-real-public-two", "secret_key": fakeKeyTwo}
+			_, err = svc.Update(ctx, org, actor, own, d.ID, nil, in)
+			Expect(err).NotTo(HaveOccurred())
+			evil.mu.Lock()
+			Expect(evil.hdr.Get("Authorization")).To(Equal("Basic " + base64.StdEncoding.EncodeToString([]byte("koinon_test_not-a-real-public-two:"+fakeKeyTwo))))
+			evil.mu.Unlock()
+
+			By("a path change on the same origin keeps the stored secrets")
+			in2 := langfuse("keep")
+			in2.EndpointURL = evil.URL + "/other/path"
+			in2.Secrets = nil
+			_, err = svc.Update(ctx, org, actor, own, d.ID, nil, in2)
+			Expect(err).NotTo(HaveOccurred())
+			routes, _ := svc.Routes(ctx, org)
+			Expect(routes[0].Destination.Secrets).To(HaveKeyWithValue("secret_key", fakeKeyTwo))
+
+			By("a changed backend needs its own secrets too")
+			_, err = svc.Update(ctx, org, actor, own, d.ID, nil, tracedest.Input{Name: "keep", Backend: "datadog", EndpointURL: in2.EndpointURL, Enabled: true})
+			Expect(err).To(BeAssignableToTypeOf(inv))
+		})
+
+		It("same for the platform destination", func(ctx SpecContext) {
+			_, err := svc.SetPlatformDestination(ctx, auditor, actor, langfuse("platform"))
+			Expect(err).NotTo(HaveOccurred())
+			evil := newFakeBackend()
+			DeferCleanup(evil.Close)
+			in := langfuse("platform")
+			in.EndpointURL = evil.URL
+			in.Secrets = nil
+			_, err = svc.SetPlatformDestination(ctx, auditor, actor, in)
+			var inv *tracedest.InvalidError
+			Expect(err).To(BeAssignableToTypeOf(inv))
+			Expect(evil.calls()).To(BeZero())
+		})
+	})
+
+	Describe("changes that touch no connection field", func() {
+		It("saves them untested, so a destination whose backend is down can be disabled", func(ctx SpecContext) {
+			d, err := svc.Create(ctx, org, actor, user, own, langfuse("down"))
+			Expect(err).NotTo(HaveOccurred())
+			be.set(func(b *fakeBackend) { b.status = 503 })
+			calls := be.calls()
+			in := langfuse("down")
+			in.Secrets = nil
+			in.Enabled = false
+			got, err := svc.Update(ctx, org, actor, own, d.ID, nil, in)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Enabled).To(BeFalse())
+			Expect(be.calls()).To(Equal(calls), "no test trace was sent")
+			Expect(got.LastTest).NotTo(BeNil())
+			Expect(got.LastTest.OK).To(BeTrue(), "the earlier test result stays")
+			Expect(got.SecretFields).To(ConsistOf("public_key", "secret_key"))
+			Expect(got.ConfigVersion).To(Equal(d.ConfigVersion + 1))
+
+			By("a changed endpoint is tested")
+			in.EndpointURL += "x"
+			_, err = svc.Update(ctx, org, actor, own, d.ID, nil, in)
+			var failed *tracedest.TestFailedError
+			Expect(err).To(BeAssignableToTypeOf(failed))
+		})
+	})
+
+	Describe("config versions", func() {
+		It("is not moved by the router's health writes, and a stale form is refused", func(ctx SpecContext) {
+			d, err := svc.Create(ctx, org, actor, user, own, langfuse("ver"))
+			Expect(err).NotTo(HaveOccurred())
+			q := store.New(pool)
+			id := uuidOf(d.ID)
+			Expect(q.RecordTraceDestinationSuccess(ctx, store.RecordTraceDestinationSuccessParams{OrgID: org, ID: id})).To(Succeed())
+			Expect(q.RecordTraceDestinationError(ctx, store.RecordTraceDestinationErrorParams{OrgID: org, ID: id, SpansDropped: 5})).To(Succeed())
+			got, err := svc.Get(ctx, org, d.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.ConfigVersion).To(Equal(d.ConfigVersion))
+			Expect(got.Health.SpansDropped).To(Equal(int64(5)))
+
+			in := langfuse("ver")
+			in.Secrets = nil
+			in.ResourceAttributes = map[string]string{"a": "b"}
+			stale := d.ConfigVersion
+			got, err = svc.Update(ctx, org, actor, own, d.ID, &stale, in)
+			Expect(err).NotTo(HaveOccurred(), "health writes did not make the form stale")
+			Expect(got.Health.SpansDropped).To(Equal(int64(5)), "an update keeps the router's health")
+
+			in.ResourceAttributes = map[string]string{"a": "c"}
+			_, err = svc.Update(ctx, org, actor, own, d.ID, &stale, in)
+			Expect(err).To(MatchError(tracedest.ErrChanged))
+		})
+
+		It("does not write a re-test back over a destination changed or deleted meanwhile", func(ctx SpecContext) {
+			d, err := svc.Create(ctx, org, actor, user, own, langfuse("retest"))
+			Expect(err).NotTo(HaveOccurred())
+			be.set(func(b *fakeBackend) {
+				b.onHit = func() {
+					_, err := pool.Exec(ctx, `UPDATE trace_destinations SET enabled = false, config_version = config_version + 1 WHERE org_id = $1 AND id = $2`, org, d.ID)
+					Expect(err).NotTo(HaveOccurred())
+				}
+			})
+			_, _, err = svc.Test(ctx, org, actor, d.ID)
+			Expect(err).To(MatchError(tracedest.ErrChanged))
+			got, _ := svc.Get(ctx, org, d.ID)
+			Expect(got.Enabled).To(BeFalse(), "the concurrent change stays")
+
+			be.set(func(b *fakeBackend) {
+				b.onHit = func() {
+					_, err := pool.Exec(ctx, `DELETE FROM trace_destinations WHERE org_id = $1 AND id = $2`, org, d.ID)
+					Expect(err).NotTo(HaveOccurred())
+				}
+			})
+			_, _, err = svc.Test(ctx, org, actor, d.ID)
+			Expect(err).To(MatchError(tracedest.ErrNotFound))
+			_, err = svc.Get(ctx, org, d.ID)
+			Expect(err).To(MatchError(tracedest.ErrNotFound), "a deleted destination is not brought back")
+		})
+
+		It("does not bring back a deleted platform destination", func(ctx SpecContext) {
+			_, err := svc.SetPlatformDestination(ctx, auditor, actor, langfuse("platform"))
+			Expect(err).NotTo(HaveOccurred())
+			be.set(func(b *fakeBackend) {
+				b.onHit = func() {
+					_, err := pool.Exec(ctx, `DELETE FROM platform_trace_destination`)
+					Expect(err).NotTo(HaveOccurred())
+				}
+			})
+			_, _, err = svc.TestPlatform(ctx, auditor, actor)
+			Expect(err).To(MatchError(tracedest.ErrNotFound))
+			p, err := svc.GetPlatform(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(p.Destination).To(BeNil())
+		})
+	})
+
+	Describe("endpoints", func() {
+		It("normalises the URL before it is checked and stored", func(ctx SpecContext) {
+			in := langfuse("upper")
+			in.EndpointURL = strings.Replace(be.URL, "http://", "HTTP://", 1) + "/v1/traces"
+			d, err := svc.Create(ctx, org, actor, user, own, in)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.EndpointURL).To(HavePrefix("http://"))
+		})
+		It("requires https unless the host is in the allowed hosts", func(ctx SpecContext) {
+			plain, err := tracedest.New(pool, ring, catalog.URLPolicy{Namespace: "koinon"}, nil)
+			Expect(err).NotTo(HaveOccurred())
+			in := langfuse("plain")
+			in.EndpointURL = "http://otlp.example.com/v1/traces"
+			_, err = plain.Create(ctx, org, actor, user, own, in)
+			var inv *tracedest.InvalidError
+			Expect(err).To(BeAssignableToTypeOf(inv))
+			Expect(err.Error()).To(ContainSubstring("https"))
+		})
+		It("lets Opik run without authentication", func(ctx SpecContext) {
+			d, err := svc.Create(ctx, org, actor, user, own, tracedest.Input{Name: "opik", Backend: "opik", EndpointURL: be.URL, Enabled: true})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.SecretFields).To(BeEmpty())
+		})
+	})
+
+	Describe("who may add a destination while the level is full", func() {
+		It("needs an owner to add or re-point one, not to disable or rename it", func(ctx SpecContext) {
+			d, err := svc.Create(ctx, org, actor, user, adminOnly, langfuse("lvl"))
+			Expect(err).NotTo(HaveOccurred(), "at level none an admin may add one")
+			_, err = svc.UpdateSettings(ctx, org, actor, own, tracedest.SettingsInput{ContentLevel: "full", PlatformCopyLevel: "none"})
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = svc.Create(ctx, org, actor, user, adminOnly, langfuse("second"))
+			Expect(err).To(MatchError(tracedest.ErrOwnerOnly))
+			in := langfuse("lvl")
+			in.EndpointURL += "2"
+			_, err = svc.Update(ctx, org, actor, adminOnly, d.ID, nil, in)
+			Expect(err).To(MatchError(tracedest.ErrOwnerOnly))
+
+			quiet := langfuse("lvl")
+			quiet.Secrets, quiet.Enabled = nil, false
+			_, err = svc.Update(ctx, org, actor, adminOnly, d.ID, nil, quiet)
+			Expect(err).NotTo(HaveOccurred(), "turning one off sends less")
+			_, err = svc.Create(ctx, org, actor, user, own, langfuse("second"))
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Describe("a platform admin outside the org", func() {
+		It("may lower the org's settings but not raise them", func(ctx SpecContext) {
+			_, err := svc.UpdateSettings(ctx, org, actor, outsider, tracedest.SettingsInput{ContentLevel: "full", PlatformCopyLevel: "none"})
+			Expect(err).To(MatchError(tracedest.ErrNotMember))
+			_, err = svc.UpdateSettings(ctx, org, actor, outsider, tracedest.SettingsInput{ContentLevel: "redacted", PlatformCopyLevel: "none"})
+			Expect(err).To(MatchError(tracedest.ErrNotMember))
+			_, err = svc.UpdateSettings(ctx, org, actor, own, tracedest.SettingsInput{ContentLevel: "full", PlatformCopyLevel: "redacted"})
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = svc.UpdateSettings(ctx, org, actor, outsider, tracedest.SettingsInput{ContentLevel: "full", PlatformCopyLevel: "full"})
+			Expect(err).To(MatchError(tracedest.ErrNotMember), "no raising the platform copy")
+			st, err := svc.UpdateSettings(ctx, org, actor, outsider, tracedest.SettingsInput{ContentLevel: "redacted", PlatformCopyLevel: "none"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(st.ContentLevel).To(Equal("redacted"))
+			Expect(st.PlatformCopyLevel).To(Equal("none"))
+		})
+	})
+
+	It("keeps the stored sample rate when an update leaves it out", func(ctx SpecContext) {
+		_, err := svc.UpdateSettings(ctx, org, actor, own, tracedest.SettingsInput{ContentLevel: "none", SampleRate: rate(0.4), PlatformCopyLevel: "none"})
+		Expect(err).NotTo(HaveOccurred())
+		st, err := svc.UpdateSettings(ctx, org, actor, own, tracedest.SettingsInput{ContentLevel: "redacted", PlatformCopyLevel: "none"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(st.SampleRate).To(Equal(0.4))
+		fresh, fu, _ := pgtest.NewOrg(ctx, pool)
+		st, err = svc.UpdateSettings(ctx, fresh, audit.User(fu), own, tracedest.SettingsInput{ContentLevel: "none", PlatformCopyLevel: "none"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(st.SampleRate).To(Equal(1.0), "an org that never set one is sampled in full")
+	})
+
+	It("skips a destination whose credentials cannot be opened and says so on its health", func(ctx SpecContext) {
+		bad, err := svc.Create(ctx, org, actor, user, own, langfuse("bad"))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = svc.Create(ctx, org, actor, user, own, langfuse("good"))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `UPDATE trace_destinations SET credentials = '{"fmt":1}'::jsonb WHERE org_id = $1 AND id = $2`, org, bad.ID)
+		Expect(err).NotTo(HaveOccurred())
+		routes, err := svc.Routes(ctx, org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(routes).To(HaveLen(1))
+		Expect(routes[0].Name).To(Equal("good"))
+		got, _ := svc.Get(ctx, org, bad.ID)
+		Expect(got.Health.LastError).To(ContainSubstring("cannot be opened"))
+	})
+
 	It("tests a saved destination again and keeps the result, even when it fails", func(ctx SpecContext) {
-		d, err := svc.Create(ctx, org, actor, user, langfuse("again"))
+		d, err := svc.Create(ctx, org, actor, user, own, langfuse("again"))
 		Expect(err).NotTo(HaveOccurred())
 		be.set(func(b *fakeBackend) { b.status = 500 })
 		got, outcome, err := svc.Test(ctx, org, actor, d.ID)
@@ -321,7 +585,7 @@ var _ = Describe("Service", func() {
 	})
 
 	It("deletes a destination and audits it", func(ctx SpecContext) {
-		d, err := svc.Create(ctx, org, actor, user, langfuse("gone"))
+		d, err := svc.Create(ctx, org, actor, user, own, langfuse("gone"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(svc.Delete(ctx, org, actor, d.ID)).To(Succeed())
 		_, err = svc.Get(ctx, org, d.ID)
@@ -340,26 +604,26 @@ var _ = Describe("Service", func() {
 		})
 
 		It("lets only an owner choose full, for the level and for the platform copy", func(ctx SpecContext) {
-			_, err := svc.UpdateSettings(ctx, org, actor, false, tracedest.SettingsInput{ContentLevel: "full", SampleRate: 1, PlatformCopyLevel: "none"})
+			_, err := svc.UpdateSettings(ctx, org, actor, adminOnly, tracedest.SettingsInput{ContentLevel: "full", SampleRate: rate(1), PlatformCopyLevel: "none"})
 			Expect(err).To(MatchError(tracedest.ErrOwnerOnly))
-			_, err = svc.UpdateSettings(ctx, org, actor, false, tracedest.SettingsInput{ContentLevel: "redacted", SampleRate: 0.5, PlatformCopyLevel: "redacted"})
+			_, err = svc.UpdateSettings(ctx, org, actor, adminOnly, tracedest.SettingsInput{ContentLevel: "redacted", SampleRate: rate(0.5), PlatformCopyLevel: "redacted"})
 			Expect(err).NotTo(HaveOccurred(), "an admin may choose redacted")
 
-			st, err := svc.UpdateSettings(ctx, org, actor, true, tracedest.SettingsInput{ContentLevel: "full", SampleRate: 0.5, PlatformCopyLevel: "none"})
+			st, err := svc.UpdateSettings(ctx, org, actor, own, tracedest.SettingsInput{ContentLevel: "full", SampleRate: rate(0.5), PlatformCopyLevel: "none"})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(st.ContentLevel).To(Equal("full"))
 			Expect(st.SampleRate).To(Equal(0.5))
 
 			By("an admin may lower it, and change sampling while it stays full")
-			_, err = svc.UpdateSettings(ctx, org, actor, false, tracedest.SettingsInput{ContentLevel: "full", SampleRate: 0.25, PlatformCopyLevel: "none"})
+			_, err = svc.UpdateSettings(ctx, org, actor, adminOnly, tracedest.SettingsInput{ContentLevel: "full", SampleRate: rate(0.25), PlatformCopyLevel: "none"})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = svc.UpdateSettings(ctx, org, actor, false, tracedest.SettingsInput{ContentLevel: "none", SampleRate: 0.25, PlatformCopyLevel: "none"})
+			_, err = svc.UpdateSettings(ctx, org, actor, adminOnly, tracedest.SettingsInput{ContentLevel: "none", SampleRate: rate(0.25), PlatformCopyLevel: "none"})
 			Expect(err).NotTo(HaveOccurred())
 
 			By("an owner may send the platform copy at full, but the copy never exceeds the org's own level")
-			_, err = svc.UpdateSettings(ctx, org, actor, true, tracedest.SettingsInput{ContentLevel: "full", SampleRate: 1, PlatformCopyLevel: "full"})
+			_, err = svc.UpdateSettings(ctx, org, actor, own, tracedest.SettingsInput{ContentLevel: "full", SampleRate: rate(1), PlatformCopyLevel: "full"})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = svc.UpdateSettings(ctx, org, actor, false, tracedest.SettingsInput{ContentLevel: "redacted", SampleRate: 1, PlatformCopyLevel: "full"})
+			_, err = svc.UpdateSettings(ctx, org, actor, adminOnly, tracedest.SettingsInput{ContentLevel: "redacted", SampleRate: rate(1), PlatformCopyLevel: "full"})
 			Expect(err).To(HaveOccurred(), "the platform copy cannot exceed the org's level")
 
 			Expect(events(ctx, org, "trace.settings.update")).To(HaveLen(5))
@@ -367,12 +631,12 @@ var _ = Describe("Service", func() {
 
 		It("validates levels and the rate", func(ctx SpecContext) {
 			for _, in := range []tracedest.SettingsInput{
-				{ContentLevel: "all", SampleRate: 1, PlatformCopyLevel: "none"},
-				{ContentLevel: "none", SampleRate: 1.5, PlatformCopyLevel: "none"},
-				{ContentLevel: "none", SampleRate: -0.1, PlatformCopyLevel: "none"},
-				{ContentLevel: "none", SampleRate: 1, PlatformCopyLevel: "redacted"},
+				{ContentLevel: "all", SampleRate: rate(1), PlatformCopyLevel: "none"},
+				{ContentLevel: "none", SampleRate: rate(1.5), PlatformCopyLevel: "none"},
+				{ContentLevel: "none", SampleRate: rate(-0.1), PlatformCopyLevel: "none"},
+				{ContentLevel: "none", SampleRate: rate(1), PlatformCopyLevel: "redacted"},
 			} {
-				_, err := svc.UpdateSettings(ctx, org, actor, true, in)
+				_, err := svc.UpdateSettings(ctx, org, actor, own, in)
 				var inv *tracedest.InvalidError
 				Expect(err).To(BeAssignableToTypeOf(inv), fmt.Sprintf("%+v", in))
 			}
@@ -381,11 +645,11 @@ var _ = Describe("Service", func() {
 		It("holds the level to the platform ceiling, and lowering the ceiling lowers every org above it", func(ctx SpecContext) {
 			other, otherUser, _ := pgtest.NewOrg(ctx, pool)
 			low, lowUser, _ := pgtest.NewOrg(ctx, pool)
-			_, err := svc.UpdateSettings(ctx, org, actor, true, tracedest.SettingsInput{ContentLevel: "full", SampleRate: 1, PlatformCopyLevel: "full"})
+			_, err := svc.UpdateSettings(ctx, org, actor, own, tracedest.SettingsInput{ContentLevel: "full", SampleRate: rate(1), PlatformCopyLevel: "full"})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = svc.UpdateSettings(ctx, other, audit.User(otherUser), true, tracedest.SettingsInput{ContentLevel: "redacted", SampleRate: 1, PlatformCopyLevel: "redacted"})
+			_, err = svc.UpdateSettings(ctx, other, audit.User(otherUser), own, tracedest.SettingsInput{ContentLevel: "redacted", SampleRate: rate(1), PlatformCopyLevel: "redacted"})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = svc.UpdateSettings(ctx, low, audit.User(lowUser), true, tracedest.SettingsInput{ContentLevel: "none", SampleRate: 1, PlatformCopyLevel: "none"})
+			_, err = svc.UpdateSettings(ctx, low, audit.User(lowUser), own, tracedest.SettingsInput{ContentLevel: "none", SampleRate: rate(1), PlatformCopyLevel: "none"})
 			Expect(err).NotTo(HaveOccurred())
 
 			n, err := svc.SetPlatformCeiling(ctx, auditor, actor, "redacted")
@@ -409,11 +673,11 @@ var _ = Describe("Service", func() {
 			Expect(events(ctx, auditor, "trace.platform_ceiling.set")).To(HaveLen(2), "the reset in BeforeEach and this change")
 
 			By("no org can pick a level above it")
-			_, err = svc.UpdateSettings(ctx, org, actor, true, tracedest.SettingsInput{ContentLevel: "full", SampleRate: 1, PlatformCopyLevel: "none"})
+			_, err = svc.UpdateSettings(ctx, org, actor, own, tracedest.SettingsInput{ContentLevel: "full", SampleRate: rate(1), PlatformCopyLevel: "none"})
 			Expect(err).To(MatchError(tracedest.ErrAboveCeiling))
 
 			By("the router sees the clamped level even for an org the ceiling had not reached yet")
-			_, err = svc.Create(ctx, org, actor, user, langfuse("clamp"))
+			_, err = svc.Create(ctx, org, actor, user, own, langfuse("clamp"))
 			Expect(err).NotTo(HaveOccurred())
 			routes, _ := svc.Routes(ctx, org)
 			Expect(routes[0].Level).To(Equal("redacted"))
@@ -460,7 +724,7 @@ var _ = Describe("Service", func() {
 			Expect(routes[0].Destination.Secrets).To(HaveKeyWithValue("secret_key", fakeKeyTwo))
 
 			By("the org's opt-in raises the platform's copy, up to its own level")
-			_, err = svc.UpdateSettings(ctx, org, actor, true, tracedest.SettingsInput{ContentLevel: "full", SampleRate: 1, PlatformCopyLevel: "redacted"})
+			_, err = svc.UpdateSettings(ctx, org, actor, own, tracedest.SettingsInput{ContentLevel: "full", SampleRate: rate(1), PlatformCopyLevel: "redacted"})
 			Expect(err).NotTo(HaveOccurred())
 			routes, _ = svc.Routes(ctx, org)
 			Expect(routes[0].Level).To(Equal("redacted"))
@@ -486,12 +750,12 @@ var _ = Describe("Service", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ok).To(BeFalse(), "no destination: nothing to trace for")
 
-			_, err = svc.Create(ctx, org, actor, user, langfuse("sampled"))
+			_, err = svc.Create(ctx, org, actor, user, own, langfuse("sampled"))
 			Expect(err).NotTo(HaveOccurred())
 			ok, _ = svc.WouldTrace(ctx, org, 0.999)
 			Expect(ok).To(BeTrue(), "the default is every run")
 
-			_, err = svc.UpdateSettings(ctx, org, actor, true, tracedest.SettingsInput{ContentLevel: "none", SampleRate: 0.3, PlatformCopyLevel: "none"})
+			_, err = svc.UpdateSettings(ctx, org, actor, own, tracedest.SettingsInput{ContentLevel: "none", SampleRate: rate(0.3), PlatformCopyLevel: "none"})
 			Expect(err).NotTo(HaveOccurred())
 			ok, _ = svc.WouldTrace(ctx, org, 0.29)
 			Expect(ok).To(BeTrue())
