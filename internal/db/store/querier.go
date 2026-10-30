@@ -698,6 +698,7 @@ type Querier interface {
 	// principal and sync IdP groups at login), always keyed by user_id.
 	// Serialises bootstrap across API replicas for the rest of the transaction.
 	LockBootstrap(ctx context.Context) error
+	LockPlatformTraceDestination(ctx context.Context) (PlatformTraceDestination, error)
 	// Reads the ceiling and holds the row until the transaction ends, so an org's level and a lowering
 	// of the ceiling cannot pass each other.
 	LockPlatformTraceSettings(ctx context.Context) (PlatformTraceSetting, error)

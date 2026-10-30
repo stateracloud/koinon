@@ -47,6 +47,9 @@ var (
 	ErrChanged = errors.New("the destination changed since you loaded it; reload and try again")
 	// ErrOwnerOnly means the change needs an org owner (content level full).
 	ErrOwnerOnly = errors.New("only an org owner may set the content level full")
+	// ErrOwnerAtFull means the org's level is full, so adding a destination or changing its connection
+	// needs an owner.
+	ErrOwnerAtFull = errors.New("the org's content level is full, so only an owner may add a destination or change where one sends")
 	// ErrNotMember means the caller is not a member of the org (a platform admin acting from outside)
 	// and may lower its settings but not raise them.
 	ErrNotMember = errors.New("only a member of the org can raise its trace content level or the platform copy")
@@ -357,7 +360,7 @@ func (s *Service) requireOwnerAtFull(ctx context.Context, q *store.Queries, org 
 		return err
 	}
 	if MinLevel(st.ContentLevel, st.Ceiling) == LevelFull {
-		return ErrOwnerOnly
+		return ErrOwnerAtFull
 	}
 	return nil
 }

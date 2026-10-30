@@ -21,6 +21,19 @@ option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1
 // Stored secrets are kept only while backend and endpoint origin stay the same; otherwise every secret
 // is required again. While the org's effective content level is full, only an owner may add a
 // destination or change its connection.
+//
+// Failures carry a machine-readable reason as a google.rpc.ErrorInfo error detail (domain "koinon.dev",
+// reason below, the human message stays in the error). Read it by unpacking the details of the error.
+//
+//	PERMISSION_DENIED  ADMIN_REQUIRED          the org call needs the admin role or higher
+//	                   PLATFORM_ADMIN_REQUIRED the platform call needs a platform admin
+//	                   OWNER_ONLY              only an org owner may set the content level or the platform copy to full
+//	                   OWNER_AT_FULL           the org's level is full, so only an owner may add a destination or change its connection
+//	                   NOT_MEMBER              raising a level needs membership of the org (a platform admin outside it may only lower)
+//	FAILED_PRECONDITION TEST_FAILED            the test trace was not accepted, nothing was saved; the details also hold a
+//	                                           koinon.trace.v1alpha1.TestResult with the outcome alone (no prefix)
+//	                   ABOVE_CEILING           the level is above the platform ceiling
+//	ABORTED            CHANGED                 the destination changed (or was deleted) since the form was loaded
 service TraceDestinationService {
   rpc ListDestinations(ListDestinationsRequest) returns (ListDestinationsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
@@ -220,6 +233,9 @@ message GetPlatformResponse {
 
 message SetPlatformDestinationRequest {
   DestinationInput destination = 1;
+  // expected_version is the config_version the form was loaded with (0 when the platform has no
+  // destination yet). When set and the destination has changed since, the call fails with ABORTED.
+  optional int64 expected_version = 2;
 }
 
 message SetPlatformDestinationResponse {
