@@ -89,6 +89,9 @@ const (
 	KoinonToolKind        = "koinon.tool.kind"
 	KoinonToolStatus      = "koinon.tool.status"
 	KoinonSpansDropped    = "koinon.spans_dropped"
+	// KoinonModelID is the ID of the catalog model a call used; the platform's copy carries it in place
+	// of the org's model name.
+	KoinonModelID = "koinon.model.id"
 	// KoinonTest marks the synthetic trace of the test before saving a destination.
 	KoinonTest = "koinon.test"
 	// KoinonParkReason is the attribute of the koinon.park event.

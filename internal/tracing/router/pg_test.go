@@ -118,7 +118,7 @@ var _ = Describe("Postgres", Ordered, func() {
 		insert("r3", "unknown-model", base.Add(3*time.Second), "0", false, false)
 		insert("r-outside", "sonnet", base.Add(time.Hour), "9", true, false)
 
-		calls, err := router.NewPGStore(pool).ModelCalls(ctx, org, run, base, base.Add(10*time.Second))
+		calls, err := router.NewPGStore(pool).ModelCalls(ctx, org, run, 1, base, base.Add(10*time.Second))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(calls).To(HaveLen(3))
 		Expect(calls[0].RequestID).To(Equal("r1"))
@@ -131,6 +131,21 @@ var _ = Describe("Postgres", Ordered, func() {
 		Expect(calls[2].Cost).To(BeNil(), "unpriced: no cost")
 		Expect(calls[2].Provider).To(BeEmpty())
 		Expect(calls[2].AgentID).To(Equal(agent.String()))
+		Expect(calls[0].ModelID).NotTo(BeEmpty())
+		Expect(calls[2].ModelID).To(BeEmpty())
+
+		By("a row on the boundary of two turns counts once, in the later turn")
+		turn2, err := q.InsertRunTurn(ctx, store.InsertRunTurnParams{OrgID: org, RunID: run, TraceID: []byte("0123456789abcdeX")})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `UPDATE run_turns SET started_at = $3 WHERE org_id = $1 AND id = $2`, org, turn2.ID, base.Add(2500*time.Millisecond))
+		Expect(err).NotTo(HaveOccurred())
+		first, err := router.NewPGStore(pool).ModelCalls(ctx, org, run, 1, base, base.Add(10*time.Second))
+		Expect(err).NotTo(HaveOccurred())
+		second, err := router.NewPGStore(pool).ModelCalls(ctx, org, run, 2, base.Add(2500*time.Millisecond), base.Add(10*time.Second))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(first).To(HaveLen(2))
+		Expect(second).To(HaveLen(1))
+		Expect(second[0].RequestID).To(Equal("r3"))
 	})
 
 	It("builds the org's secret set from its stored credentials, and no other org's", func(ctx SpecContext) {
@@ -144,13 +159,13 @@ var _ = Describe("Postgres", Ordered, func() {
 		_, err = pool.Exec(ctx, `UPDATE providers SET api_key = $3 WHERE org_id = $1 AND id = $2`, org, provider, raw)
 		Expect(err).NotTo(HaveOccurred())
 
-		set, err := router.NewPGSecrets(pool, ring).Secrets(ctx, org)
+		set, err := router.NewPGSecrets(pool, ring, nil).Secrets(ctx, org)
 		Expect(err).NotTo(HaveOccurred())
 		sc := scrub.New(scrub.Config{Level: scrub.LevelFull, Secrets: set})
 		Expect(sc.Text("key=" + providerKey)).To(Equal("key=[redacted:secret]"))
 
 		other, _, _ := pgtest.NewOrg(ctx, pool)
-		set, err = router.NewPGSecrets(pool, ring).Secrets(ctx, other)
+		set, err = router.NewPGSecrets(pool, ring, nil).Secrets(ctx, other)
 		Expect(err).NotTo(HaveOccurred())
 		sc = scrub.New(scrub.Config{Level: scrub.LevelFull, Secrets: set})
 		Expect(sc.Text("key=" + providerKey)).To(Equal("key=" + providerKey))

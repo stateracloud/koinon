@@ -643,7 +643,7 @@ func run() error {
 			return err
 		}
 		traceRouter, err := tracerouter.New(tracerouter.Config{
-			Store: tracerouter.NewPGStore(pool), Routes: traceSvc, Secrets: tracerouter.NewPGSecrets(pool, opener),
+			Store: tracerouter.NewPGStore(pool), Routes: traceSvc, Secrets: tracerouter.NewPGSecrets(pool, opener, slog.Default()),
 			Health: tracerouter.NewPGHealth(pool), Sender: exportClient, Metrics: tracerouter.NewMetrics(reg), Log: slog.Default(),
 		})
 		if err != nil {

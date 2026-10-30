@@ -47,8 +47,8 @@ func finishTurn(e *env) {
 	settle(e)
 }
 
-func secretsFor(orgs ...string) fakeSecrets {
-	f := fakeSecrets{sets: map[pgtype.UUID][]string{}}
+func secretsFor(orgs ...string) *fakeSecrets {
+	f := &fakeSecrets{sets: map[pgtype.UUID][]string{}}
 	for _, o := range orgs {
 		f.sets[uid(o)] = []string{fakeOrgSecret}
 	}
@@ -122,7 +122,7 @@ var _ = Describe("Router", func() {
 
 		It("sends no content when the org's secrets cannot be loaded", func() {
 			be := newBackend()
-			e := newEnv(nil, fakeSecrets{err: context.DeadlineExceeded})
+			e := newEnv(nil, &fakeSecrets{err: context.DeadlineExceeded})
 			e.routes.set(uid(orgA), be.route("d1", false, "full"))
 			tr := newTurn(e, orgA, runA, 1)
 			e.post(tr.tool(true))

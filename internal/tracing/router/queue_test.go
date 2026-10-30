@@ -244,7 +244,7 @@ var _ = Describe("Destination queues", func() {
 		Expect(ok).To(BeNumerically("<=", 4), "about 600 ms of traffic, one write per 300 ms")
 	})
 
-	It("stops sending to a destination that was removed", func() {
+	It("stops sending to a destination that was removed, even a request in flight", func() {
 		setup(nil)
 		ep := be.URL + "/v1/traces"
 		hold := make(chan struct{})
@@ -255,16 +255,16 @@ var _ = Describe("Destination queues", func() {
 		Eventually(func() int { return len(g.times(ep)) }).Should(Equal(1))
 		e.post(named(tr.tool(false), "s1")) // queued behind the stuck one
 		time.Sleep(20 * time.Millisecond)
-		e.routes.set(uid(orgA))      // the admin deletes the destination
-		e.clock.Advance(time.Second) // the router's route cache expires
+		e.routes.set(uid(orgA)) // the admin deletes the destination
+		e.clock.Advance(time.Second)
 		e.post(named(tr.tool(false), "s2"))
 		Eventually(func() float64 {
 			return testutil.ToFloat64(e.r.Metrics().Discarded.WithLabelValues("no_destination"))
 		}).Should(Equal(1.0))
-		close(hold)
-		Eventually(sentNames).Should(Equal([]string{"s0"}))
 		Eventually(func() float64 {
 			return testutil.ToFloat64(e.r.Metrics().Dropped.WithLabelValues("org", "generic", "destination_removed"))
-		}).Should(Equal(1.0))
+		}).Should(Equal(2.0), "the span in flight and the one behind it")
+		close(hold)
+		Consistently(sentNames, 100*time.Millisecond).Should(BeEmpty())
 	})
 })

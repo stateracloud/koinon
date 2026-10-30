@@ -24,6 +24,8 @@ var contentNames = map[string]bool{
 	semconv.GenAIOutputMessages:    true,
 	semconv.GenAIToolCallArguments: true,
 	semconv.GenAIToolCallResult:    true,
+	// The name of the agent a call was handed to is the org's own, and only known above level none.
+	semconv.GenAITransferTargetName: true,
 }
 
 // copyParams is what turns one span into the copy a destination receives.
@@ -143,40 +145,58 @@ func scrubValue(v *commonpb.AnyValue, s *scrub.Scrubber) {
 // mcpTool matches mcp__<server>__<tool>. The server's name is the org's.
 var mcpTool = regexp.MustCompile(`^mcp__[^_]+(?:_[^_]+)*__(.+)$`)
 
-// platformNames replaces what names an org's things with the IDs the span already carries
-// (decision 3: the platform's copy carries IDs only). The agent's name becomes its ID in the
-// attribute and in the span name; a transfer target's name (an agent) is removed; an MCP tool loses
-// its server's name.
+// platformNames replaces what names an org's things with the IDs the span carries (decision 3: the
+// platform's copy carries IDs only):
+//
+//   - the agent's name becomes its ID, in the attribute and in the name of a turn's root span, whatever
+//     the name was;
+//   - a model's name becomes the catalog model's ID (koinon.model.id) in gen_ai.request.model and in
+//     the name of a chat span, or is removed where the span has no ID (a model name is the org's);
+//   - an MCP tool loses its server's name, in the attribute and in the span name.
 func platformNames(sp *tracepb.Span) {
+	op, _ := attrString(sp.Attributes, semconv.GenAIOperationName)
 	agentID, _ := attrString(sp.Attributes, semconv.GenAIAgentID)
-	name, hadName := attrString(sp.Attributes, semconv.GenAIAgentName)
-	if hadName {
+	modelID, _ := attrString(sp.Attributes, semconv.KoinonModelID)
+
+	if _, ok := attrString(sp.Attributes, semconv.GenAIAgentName); ok {
 		repl := agentID
 		if repl == "" {
 			repl = "unknown"
 		}
-		if sp.Name == semconv.SpanName(semconv.OperationInvokeAgent, name) {
-			sp.Name = semconv.SpanName(semconv.OperationInvokeAgent, repl)
-		}
 		sp.Attributes = setAttr(sp.Attributes, kvStr(semconv.GenAIAgentName, repl))
 	}
 	out := sp.Attributes[:0]
+	toolName := ""
 	for _, kv := range sp.Attributes {
-		if kv.Key == semconv.GenAITransferTargetName {
+		switch kv.Key {
+		case semconv.GenAITransferTargetName:
 			continue
-		}
-		if kv.Key == semconv.GenAIToolName {
+		case semconv.GenAIRequestModel:
+			if modelID == "" {
+				continue
+			}
+			kv = kvStr(kv.Key, modelID)
+		case semconv.GenAIToolName:
 			if tool, ok := kv.Value.GetValue().(*commonpb.AnyValue_StringValue); ok {
 				if m := mcpTool.FindStringSubmatch(tool.StringValue); m != nil {
-					old := tool.StringValue
 					tool.StringValue = "mcp__" + m[1]
-					if sp.Name == semconv.SpanName(semconv.OperationExecuteTool, old) {
-						sp.Name = semconv.SpanName(semconv.OperationExecuteTool, tool.StringValue)
-					}
 				}
+				toolName = tool.StringValue
 			}
 		}
 		out = append(out, kv)
 	}
 	sp.Attributes = out
+
+	switch op {
+	case semconv.OperationInvokeAgent:
+		if agentID == "" {
+			agentID = "unknown"
+		}
+		sp.Name = semconv.SpanName(op, agentID)
+	case semconv.OperationChat:
+		sp.Name = semconv.SpanName(op, modelID)
+	case semconv.OperationExecuteTool:
+		sp.Name = semconv.SpanName(op, toolName)
+	}
 }

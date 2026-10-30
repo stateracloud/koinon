@@ -71,7 +71,7 @@
         {
           "key": "gen_ai.request.model",
           "value": {
-            "stringValue": "claude-sonnet"
+            "stringValue": "0192f5a0-0000-7000-8000-0000000000d1"
           }
         },
         {
@@ -120,6 +120,12 @@
           "key": "koinon.model_calls",
           "value": {
             "intValue": "2"
+          }
+        },
+        {
+          "key": "koinon.model.id",
+          "value": {
+            "stringValue": "0192f5a0-0000-7000-8000-0000000000d1"
           }
         }
       ],
@@ -249,7 +255,7 @@
         {
           "key": "gen_ai.request.model",
           "value": {
-            "stringValue": "claude-sonnet"
+            "stringValue": "0192f5a0-0000-7000-8000-0000000000d1"
           }
         },
         {
@@ -289,6 +295,12 @@
           }
         },
         {
+          "key": "koinon.model.id",
+          "value": {
+            "stringValue": "0192f5a0-0000-7000-8000-0000000000d1"
+          }
+        },
+        {
           "key": "gen_ai.usage.cost",
           "value": {
             "doubleValue": 0.25
@@ -309,7 +321,7 @@
       ],
       "endTimeUnixNano": "1793361602000000000",
       "kind": "SPAN_KIND_CLIENT",
-      "name": "chat claude-sonnet",
+      "name": "chat 0192f5a0-0000-7000-8000-0000000000d1",
       "parentSpanId": "dHTjj8zZn9Y=",
       "spanId": "bMOY8C8ufQA=",
       "startTimeUnixNano": "1793361602000000000",
@@ -380,7 +392,7 @@
         {
           "key": "gen_ai.request.model",
           "value": {
-            "stringValue": "claude-sonnet"
+            "stringValue": "0192f5a0-0000-7000-8000-0000000000d1"
           }
         },
         {
@@ -420,6 +432,12 @@
           }
         },
         {
+          "key": "koinon.model.id",
+          "value": {
+            "stringValue": "0192f5a0-0000-7000-8000-0000000000d1"
+          }
+        },
+        {
           "key": "gen_ai.usage.cost",
           "value": {
             "doubleValue": 0.125
@@ -440,7 +458,7 @@
       ],
       "endTimeUnixNano": "1793361606000000000",
       "kind": "SPAN_KIND_CLIENT",
-      "name": "chat claude-sonnet",
+      "name": "chat 0192f5a0-0000-7000-8000-0000000000d1",
       "parentSpanId": "dHTjj8zZn9Y=",
       "spanId": "n7q9XTksLow=",
       "startTimeUnixNano": "1793361606000000000",

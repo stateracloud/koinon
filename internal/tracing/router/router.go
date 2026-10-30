@@ -22,11 +22,13 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/internal/tracing/export"
@@ -54,14 +56,28 @@ type Store interface {
 	// Attribute checks that the run exists in org, is traced and that trace is one of its turns. It
 	// returns ErrUnknownRun, ErrUnknownTrace or ErrUntraced.
 	Attribute(ctx context.Context, org, run pgtype.UUID, trace [16]byte) (Turn, error)
-	// ModelCalls returns the run's ledger entries with from <= time <= to, in time order.
-	ModelCalls(ctx context.Context, org, run pgtype.UUID, from, to time.Time) ([]ModelCall, error)
+	// ModelCalls returns the run's ledger entries of turn seq: those with from <= time < to that are
+	// not at or after the next turn's start, in time order, so a row on a boundary counts once.
+	ModelCalls(ctx context.Context, org, run pgtype.UUID, seq int32, from, to time.Time) ([]ModelCall, error)
 }
 
 // RouteSource gives the enabled destinations of an org with their credentials opened.
 // *tracedest.Service is one.
 type RouteSource interface {
 	Routes(ctx context.Context, org pgtype.UUID) ([]tracedest.Route, error)
+}
+
+// RouteVersioner is implemented by a RouteSource that can fingerprint an org's destination settings
+// cheaply (*tracedest.Service does). The router checks it before every batch, so a change applies to
+// spans already queued. Without it routes are reloaded after RouteTTL.
+type RouteVersioner interface {
+	ConfigVersion(ctx context.Context, org pgtype.UUID) (string, error)
+}
+
+// SecretVersioner is implemented by a SecretSource that can fingerprint an org's stored credentials
+// cheaply (*PGSecrets does), so a changed credential is scrubbed from the next batch on.
+type SecretVersioner interface {
+	Version(ctx context.Context, org pgtype.UUID) (string, error)
 }
 
 // SecretSource gives the set of an org's known secret values for the scrubber. The values are never
@@ -125,8 +141,36 @@ type Config struct {
 	// ContentLimit is the most bytes one content attribute keeps (default 16 KiB).
 	ContentLimit int
 
-	// Cache lifetimes: attribution (default 10m; a refusal 30s), routes (15s), secrets (5m).
-	AttributionTTL, NegativeTTL, RouteTTL, SecretsTTL time.Duration
+	// Cache lifetimes: attribution (default 10m; a refusal 30s). A source that can be fingerprinted
+	// (RouteVersioner, SecretVersioner) is checked every ConfigCheck (default 1s) and reloaded when
+	// the fingerprint changes; one that cannot is reloaded after RouteTTL (15s) or SecretsTTL (5m).
+	AttributionTTL, NegativeTTL, RouteTTL, SecretsTTL, ConfigCheck time.Duration
+	// SecretsGrace is how long a secret set may be used after it could last be confirmed current
+	// when reloading it fails (default 1 minute). After that the org gets no content.
+	SecretsGrace time.Duration
+	// RecheckInterval is how often live queues re-read their destination's settings, so a quiet
+	// org's deleted destination is retired (default 15s), and expired cache entries are evicted.
+	RecheckInterval time.Duration
+	// TurnGrace is how long after a turn ends its ledger rows may still carry a time in it (default
+	// 2s); a row belongs to the turn whose window holds it, up to the next turn's start.
+	TurnGrace time.Duration
+	// FinishedTTL is how long a finished turn is remembered, so a duplicate root does not make its
+	// model calls twice (default 10m).
+	FinishedTTL time.Duration
+	// IntakeBytes and QueueBytes bound the memory of spans waiting for attribution and of all
+	// destination queues together (defaults 64 MiB and 256 MiB). A queue over the budget drops its
+	// own oldest spans.
+	IntakeBytes, QueueBytes int
+	// SweepParallel and SweepTimeout bound the ledger reads for held roots (defaults 8 and 5s), so
+	// one slow read does not hold the others past their 30 seconds.
+	SweepParallel int
+	SweepTimeout  time.Duration
+	// MaxRequestSpans bounds the spans in one request (default 1024; agentd sends 256), and
+	// MaxRequestBytes its size, compressed and decompressed (4 MiB and 16 MiB).
+	// MaxConcurrentRequests bounds requests in progress (default 8).
+	MaxRequestSpans       int
+	MaxRequestBytes       int
+	MaxConcurrentRequests int
 
 	// HealthInterval is the most often one destination writes its health (default 5s).
 	HealthInterval time.Duration
@@ -185,6 +229,18 @@ func (c *Config) defaults() error {
 	setDur(&c.NegativeTTL, 30*time.Second)
 	setDur(&c.RouteTTL, 15*time.Second)
 	setDur(&c.SecretsTTL, 5*time.Minute)
+	setDur(&c.ConfigCheck, time.Second)
+	setDur(&c.SecretsGrace, time.Minute)
+	setDur(&c.RecheckInterval, 15*time.Second)
+	setDur(&c.TurnGrace, 2*time.Second)
+	setDur(&c.FinishedTTL, 10*time.Minute)
+	setInt(&c.IntakeBytes, 64<<20)
+	setInt(&c.QueueBytes, 256<<20)
+	setInt(&c.SweepParallel, 8)
+	setDur(&c.SweepTimeout, 5*time.Second)
+	setInt(&c.MaxRequestSpans, 1024)
+	setInt(&c.MaxRequestBytes, 4<<20)
+	setInt(&c.MaxConcurrentRequests, 8)
 	setDur(&c.HealthInterval, 5*time.Second)
 	setInt(&c.MaxAttempts, 6)
 	setDur(&c.BackoffBase, time.Second)
@@ -222,12 +278,18 @@ type Router struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-	intake chan *tracepb.Span
+	intake chan intakeItem
+	// reqs limits the receiver's requests in progress.
+	reqs chan struct{}
 
-	cmu   sync.Mutex
-	attrs map[attrKey]attrEntry
-	rts   map[pgtype.UUID]routeEntry
-	scr   map[pgtype.UUID]secretEntry
+	intakeBytes atomic.Int64
+	queueBytes  atomic.Int64
+
+	cmu      sync.Mutex
+	attrs    map[attrKey]attrEntry
+	rts      map[pgtype.UUID]routeEntry
+	scr      map[pgtype.UUID]secretEntry
+	finished map[[16]byte]time.Time
 
 	qmu    sync.Mutex
 	queues map[string]*queue
@@ -235,6 +297,11 @@ type Router struct {
 	hmu       sync.Mutex
 	held      map[[16]byte]*heldRoot
 	heldBytes int
+}
+
+type intakeItem struct {
+	sp   *tracepb.Span
+	size int
 }
 
 // New returns a Router. It does nothing until Start.
@@ -246,9 +313,10 @@ func New(cfg Config) (*Router, error) {
 		cfg: cfg, log: cfg.Log, metrics: cfg.Metrics,
 		store: cfg.Store, routes: cfg.Routes, secrets: cfg.Secrets, health: cfg.Health, sender: cfg.Sender,
 		now: cfg.Now, sleep: cfg.Sleep,
-		intake: make(chan *tracepb.Span, cfg.IngestQueue),
-		attrs:  map[attrKey]attrEntry{}, rts: map[pgtype.UUID]routeEntry{}, scr: map[pgtype.UUID]secretEntry{},
-		queues: map[string]*queue{}, held: map[[16]byte]*heldRoot{},
+		intake: make(chan intakeItem, cfg.IngestQueue), reqs: make(chan struct{}, cfg.MaxConcurrentRequests),
+		attrs: map[attrKey]attrEntry{}, rts: map[pgtype.UUID]routeEntry{}, scr: map[pgtype.UUID]secretEntry{},
+		finished: map[[16]byte]time.Time{},
+		queues:   map[string]*queue{}, held: map[[16]byte]*heldRoot{},
 	}, nil
 }
 
@@ -262,7 +330,8 @@ func (r *Router) HeldRoots() int {
 // Metrics returns the router's metrics.
 func (r *Router) Metrics() *Metrics { return r.metrics }
 
-// Start runs the workers and the ledger poller until ctx ends or Close is called.
+// Start runs the workers, the ledger poller and the settings re-check until ctx ends or Close is
+// called.
 func (r *Router) Start(ctx context.Context) {
 	r.ctx, r.cancel = context.WithCancel(ctx)
 	for range r.cfg.Workers {
@@ -271,23 +340,29 @@ func (r *Router) Start(ctx context.Context) {
 			defer r.wg.Done()
 			for {
 				select {
-				case sp := <-r.intake:
-					r.process(r.ctx, sp)
+				case it := <-r.intake:
+					r.intakeBytes.Add(-int64(it.size))
+					r.process(r.ctx, it)
 				case <-r.ctx.Done():
 					return
 				}
 			}
 		}()
 	}
+	r.every(r.cfg.PollInterval, func() { r.Sweep(r.ctx, r.now()) })
+	r.every(r.cfg.RecheckInterval, func() { r.Recheck(r.ctx) })
+}
+
+func (r *Router) every(d time.Duration, f func()) {
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
-		t := time.NewTicker(r.cfg.PollInterval)
+		t := time.NewTicker(d)
 		defer t.Stop()
 		for {
 			select {
 			case <-t.C:
-				r.Sweep(r.ctx, r.now())
+				f()
 			case <-r.ctx.Done():
 				return
 			}
@@ -312,14 +387,28 @@ func (r *Router) Close() {
 	r.metrics.HeldRoots.Set(0)
 }
 
-// Submit hands spans of source to the router without blocking. It returns how many it could not take
-// because the intake was full; the receiver reports them as rejected.
+// Submit hands spans of source to the router without blocking. It returns how many it could not take:
+// spans that are not structurally valid, and spans the intake had no room for (by count or bytes).
+// The receiver reports them as rejected.
 func (r *Router) Submit(source string, spans []*tracepb.Span) (rejected int64) {
 	for _, sp := range spans {
 		r.metrics.Received.WithLabelValues(source).Inc()
+		if !validSpan(sp) {
+			rejected++
+			r.metrics.Discarded.WithLabelValues(discardInvalid).Inc()
+			continue
+		}
+		size := proto.Size(sp)
+		if r.intakeBytes.Add(int64(size)) > int64(r.cfg.IntakeBytes) {
+			r.intakeBytes.Add(-int64(size))
+			rejected++
+			r.metrics.Discarded.WithLabelValues(discardIngestFull).Inc()
+			continue
+		}
 		select {
-		case r.intake <- sp:
+		case r.intake <- intakeItem{sp: sp, size: size}:
 		default:
+			r.intakeBytes.Add(-int64(size))
 			rejected++
 			r.metrics.Discarded.WithLabelValues(discardIngestFull).Inc()
 		}
@@ -327,8 +416,30 @@ func (r *Router) Submit(source string, spans []*tracepb.Span) (rejected int64) {
 	return rejected
 }
 
+// Structural limits on one span: far above what agentd makes (content is pre-capped at 64 KiB), far
+// below what would cost real memory.
+const (
+	maxSpanBytes      = 1 << 20
+	maxSpanAttributes = 256
+	maxSpanEvents     = 256
+	maxSpanLinks      = 64
+)
+
+// validSpan checks what the router relies on before a span enters the intake: IDs of the right
+// length, a trace ID that is not all zero, and bounded size.
+func validSpan(sp *tracepb.Span) bool {
+	if sp == nil || len(sp.TraceId) != 16 || len(sp.SpanId) != 8 || len(sp.ParentSpanId) != 0 && len(sp.ParentSpanId) != 8 {
+		return false
+	}
+	if bytes.Equal(sp.TraceId, make([]byte, 16)) || bytes.Equal(sp.SpanId, make([]byte, 8)) {
+		return false
+	}
+	return len(sp.Attributes) <= maxSpanAttributes && len(sp.Events) <= maxSpanEvents && len(sp.Links) <= maxSpanLinks && proto.Size(sp) <= maxSpanBytes
+}
+
 // process attributes one span from agentd and routes it.
-func (r *Router) process(ctx context.Context, sp *tracepb.Span) {
+func (r *Router) process(ctx context.Context, in intakeItem) {
+	sp := in.sp
 	org, run, trace, ok := identify(sp)
 	if !ok {
 		r.metrics.Discarded.WithLabelValues(discardUnattributed).Inc()
@@ -346,8 +457,7 @@ func (r *Router) process(ctx context.Context, sp *tracepb.Span) {
 	sp.Attributes = setAttr(sp.Attributes, kvStr(semconv.KoinonOrg, org.String()))
 	sp.Attributes = setAttr(sp.Attributes, kvStr(semconv.KoinonRun, run.String()))
 
-	rootID := semconv.RootSpanID(trace)
-	if len(sp.ParentSpanId) == 0 && bytes.Equal(sp.SpanId, rootID[:]) {
+	if isRoot(sp) {
 		r.hold(ctx, &heldRoot{span: sp, org: org, run: run, trace: trace, turn: turn, since: r.now()})
 		return
 	}
@@ -439,35 +549,71 @@ func (r *Router) attribute(ctx context.Context, org, run pgtype.UUID, trace [16]
 
 type routeEntry struct {
 	routes  []tracedest.Route
-	expires time.Time
+	ver     string
+	checked time.Time // last confirmed current
+	expires time.Time // for a source without versions
 }
 
 type secretEntry struct {
 	set     *scrub.Secrets
-	expires time.Time
+	ver     string
+	checked time.Time // last confirmed current
+	expires time.Time // for a source without versions
 }
 
+// routesFor returns the org's destinations. With a versioned source the cache is confirmed against
+// the settings' fingerprint every ConfigCheck and reloaded the moment it changes; a failed check or
+// load is an error, never a stale answer, because a copy made from stale settings could carry more
+// than the org now allows.
 func (r *Router) routesFor(ctx context.Context, org pgtype.UUID) ([]tracedest.Route, error) {
 	now := r.now()
 	r.cmu.Lock()
-	if e, ok := r.rts[org]; ok && now.Before(e.expires) {
-		r.cmu.Unlock()
-		return e.routes, nil
-	}
+	e, ok := r.rts[org]
 	r.cmu.Unlock()
+	rv, versioned := r.routes.(RouteVersioner)
+	var ver string
+	if ok {
+		if !versioned && now.Before(e.expires) {
+			return e.routes, nil
+		}
+		if versioned {
+			if now.Sub(e.checked) < r.cfg.ConfigCheck {
+				return e.routes, nil
+			}
+			v, err := rv.ConfigVersion(ctx, org)
+			if err != nil {
+				return nil, err
+			}
+			if v == e.ver {
+				e.checked = now
+				r.cmu.Lock()
+				r.rts[org] = e
+				r.cmu.Unlock()
+				return e.routes, nil
+			}
+		}
+	}
+	if versioned {
+		v, err := rv.ConfigVersion(ctx, org) // before the load: a change in between is seen next time
+		if err != nil {
+			return nil, err
+		}
+		ver = v
+	}
 	routes, err := r.routes.Routes(ctx, org)
 	if err != nil {
 		return nil, err
 	}
 	r.cmu.Lock()
-	r.rts[org] = routeEntry{routes: routes, expires: now.Add(r.cfg.RouteTTL)}
+	r.rts[org] = routeEntry{routes: routes, ver: ver, checked: now, expires: now.Add(r.cfg.RouteTTL)}
 	r.cmu.Unlock()
 	r.syncQueues(org, routes)
 	return routes, nil
 }
 
-// secretsFor returns the org's secret set. When it cannot be loaded a stale set is used; with none at
-// all the error is returned and the caller fails closed (no content).
+// secretsFor returns the org's secret set. It is confirmed against the credentials' fingerprint like
+// the routes. When it cannot be loaded or confirmed, the last set is used for SecretsGrace at most;
+// after that the error is returned and the caller sends no content (fail closed).
 func (r *Router) secretsFor(ctx context.Context, org pgtype.UUID) (*scrub.Secrets, error) {
 	if r.secrets == nil {
 		return nil, nil
@@ -476,25 +622,51 @@ func (r *Router) secretsFor(ctx context.Context, org pgtype.UUID) (*scrub.Secret
 	r.cmu.Lock()
 	e, ok := r.scr[org]
 	r.cmu.Unlock()
-	if ok && now.Before(e.expires) {
-		return e.set, nil
-	}
-	set, err := r.secrets.Secrets(ctx, org)
-	if err != nil {
-		if ok {
+	sv, versioned := r.secrets.(SecretVersioner)
+	stale := func(err error) (*scrub.Secrets, error) {
+		valid := e.expires
+		if versioned {
+			valid = e.checked.Add(r.cfg.ConfigCheck)
+		}
+		if ok && now.Before(valid.Add(r.cfg.SecretsGrace)) {
 			return e.set, nil
 		}
 		return nil, err
 	}
+	var ver string
+	if versioned {
+		if ok && now.Sub(e.checked) < r.cfg.ConfigCheck {
+			return e.set, nil
+		}
+		v, err := sv.Version(ctx, org)
+		if err != nil {
+			return stale(err)
+		}
+		ver = v
+		if ok && v == e.ver {
+			e.checked = now
+			r.cmu.Lock()
+			r.scr[org] = e
+			r.cmu.Unlock()
+			return e.set, nil
+		}
+	} else if ok && now.Before(e.expires) {
+		return e.set, nil
+	}
+	set, err := r.secrets.Secrets(ctx, org)
+	if err != nil {
+		return stale(err)
+	}
 	r.cmu.Lock()
-	r.scr[org] = secretEntry{set: set, expires: now.Add(r.cfg.SecretsTTL)}
+	r.scr[org] = secretEntry{set: set, ver: ver, checked: now, expires: now.Add(r.cfg.SecretsTTL)}
 	r.cmu.Unlock()
 	return set, nil
 }
 
 // ---- fan-out ----
 
-// dispatch makes each destination's copy of spans and queues it. spans must belong to org.
+// dispatch queues spans for every destination the org has. spans must belong to org. The copy for a
+// destination is made when its batch is sent (see queue.prepare).
 func (r *Router) dispatch(ctx context.Context, org pgtype.UUID, spans ...*tracepb.Span) {
 	routes, err := r.routesFor(ctx, org)
 	if err != nil {
@@ -506,31 +678,21 @@ func (r *Router) dispatch(ctx context.Context, org pgtype.UUID, spans ...*tracep
 		r.metrics.Discarded.WithLabelValues(discardNoRoute).Add(float64(len(spans)))
 		return
 	}
-	secrets, serr := r.secretsFor(ctx, org)
-	if serr != nil {
-		r.log.Warn("trace router: the org's secrets cannot be loaded; sending no content", "err", serr)
+	items := make([]item, len(spans))
+	for i, sp := range spans {
+		items[i] = item{sp: sp, org: org, size: proto.Size(sp)}
 	}
 	for _, route := range routes {
-		level, _ := scrub.ParseLevel(route.Level)
-		if serr != nil {
-			level = scrub.LevelNone // fail closed
-		}
-		q := r.queueFor(org, route)
-		out := make([]*tracepb.Span, 0, len(spans))
-		for _, sp := range spans {
-			p := newCopyParams(level, secrets, r.cfg.ContentLimit, route.Platform, func(k scrub.Kind) {
-				r.metrics.Redactions.WithLabelValues(string(k)).Inc()
-			})
-			if isRoot(sp) {
-				p.Dropped = q.reportDropped()
-			}
-			out = append(out, copySpan(sp, p))
-		}
-		for tries := 0; tries < 3; tries++ {
-			if q.enqueue(route, out) {
+		queued := false
+		for range 3 {
+			if r.queueFor(org, route).enqueue(route, items) {
+				queued = true
 				break
 			}
-			q = r.queueFor(org, route) // the queue closed meanwhile (idle); take a fresh one
+			// The queue closed or was retired meanwhile; take a fresh one.
+		}
+		if !queued {
+			r.metrics.Discarded.WithLabelValues(discardEnqueueFailed).Add(float64(len(items)))
 		}
 	}
 }
@@ -548,23 +710,25 @@ func isRoot(sp *tracepb.Span) bool {
 // queueFor returns the queue of a destination, starting its worker on first use. The platform has one
 // queue for every org; an org destination has its own.
 func (r *Router) queueFor(org pgtype.UUID, route tracedest.Route) *queue {
-	key := "platform"
-	kind := KindPlatform
+	key, kind, destID := "platform", KindPlatform, ""
 	if !route.Platform {
-		key = org.String() + "/" + route.ID
-		kind = KindOrg
+		key, kind, destID = org.String()+"/"+route.ID, KindOrg, route.ID
 	}
 	r.qmu.Lock()
 	defer r.qmu.Unlock()
 	if q, ok := r.queues[key]; ok {
 		return q
 	}
-	q := &queue{r: r, key: key, org: org, platform: route.Platform, kind: kind, backend: string(route.Destination.Preset), route: route, wake: make(chan struct{}, 1)}
+	ctx, cancel := context.WithCancel(r.ctx)
+	q := &queue{
+		r: r, key: key, destID: destID, org: org, platform: route.Platform, kind: kind, backend: string(route.Destination.Preset),
+		route: route, wake: make(chan struct{}, 1), ctx: ctx, cancel: cancel, droppedByOrg: map[pgtype.UUID]int64{},
+	}
 	r.queues[key] = q
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
-		q.run(r.ctx)
+		q.run()
 	}()
 	return q
 }
@@ -583,12 +747,62 @@ func (r *Router) syncQueues(org pgtype.UUID, routes []tracedest.Route) {
 	}
 	r.qmu.Lock()
 	defer r.qmu.Unlock()
-	for key, q := range r.queues {
+	for _, q := range r.queues {
 		switch {
 		case q.platform && !platform:
 			q.retire()
-		case !q.platform && q.org == org && !have[key]:
+		case !q.platform && q.org == org && !have[q.key]:
 			q.retire()
+		}
+	}
+}
+
+// Recheck re-reads the settings of every live queue's org, which retires the queues of destinations
+// that were deleted or disabled even when their org sends no more spans, and evicts cache entries
+// that expired (deleted orgs, finished runs). The router calls it every RecheckInterval.
+func (r *Router) Recheck(ctx context.Context) {
+	r.qmu.Lock()
+	orgs := map[pgtype.UUID]bool{}
+	for _, q := range r.queues {
+		orgs[q.org] = true
+	}
+	r.qmu.Unlock()
+	for org := range orgs {
+		if ctx.Err() != nil {
+			return
+		}
+		cctx, cancel := context.WithTimeout(ctx, r.cfg.SweepTimeout)
+		if _, err := r.routesFor(cctx, org); err != nil {
+			r.log.Debug("trace router: re-checking a destination's settings failed", "err", err)
+		}
+		cancel()
+	}
+	r.evict()
+}
+
+// evict drops cache entries that are past their lifetime.
+func (r *Router) evict() {
+	now := r.now()
+	r.cmu.Lock()
+	defer r.cmu.Unlock()
+	for k, e := range r.attrs {
+		if !now.Before(e.expires) {
+			delete(r.attrs, k)
+		}
+	}
+	for org, e := range r.rts {
+		if now.Sub(e.checked) > 10*time.Minute {
+			delete(r.rts, org)
+		}
+	}
+	for org, e := range r.scr {
+		if now.Sub(e.checked) > 10*time.Minute {
+			delete(r.scr, org)
+		}
+	}
+	for t, exp := range r.finished {
+		if !now.Before(exp) {
+			delete(r.finished, t)
 		}
 	}
 }

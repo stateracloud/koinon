@@ -744,6 +744,33 @@ var _ = Describe("Service", func() {
 		})
 	})
 
+	Describe("the configuration fingerprint the router checks", func() {
+		It("changes with the settings, the destinations and the ceiling, and not with health writes", func(ctx SpecContext) {
+			v0, err := svc.ConfigVersion(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+
+			d, err := svc.Create(ctx, org, actor, user, own, langfuse("fp"))
+			Expect(err).NotTo(HaveOccurred())
+			v1, _ := svc.ConfigVersion(ctx, org)
+			Expect(v1).NotTo(Equal(v0), "a new destination")
+
+			_, err = pool.Exec(ctx, `UPDATE trace_destinations SET last_success_at = now(), last_error_at = now(), last_error = 'x', spans_dropped = spans_dropped + 5 WHERE org_id = $1 AND id = $2`, org, uuidOf(d.ID))
+			Expect(err).NotTo(HaveOccurred())
+			v2, _ := svc.ConfigVersion(ctx, org)
+			Expect(v2).To(Equal(v1), "the router's own health writes do not invalidate its cache")
+
+			_, err = svc.UpdateSettings(ctx, org, actor, own, tracedest.SettingsInput{ContentLevel: "redacted", SampleRate: rate(1), PlatformCopyLevel: "none"})
+			Expect(err).NotTo(HaveOccurred())
+			v3, _ := svc.ConfigVersion(ctx, org)
+			Expect(v3).NotTo(Equal(v2), "the org's level")
+
+			_, err = svc.SetPlatformCeiling(ctx, auditor, actor, "none")
+			Expect(err).NotTo(HaveOccurred())
+			v4, _ := svc.ConfigVersion(ctx, org)
+			Expect(v4).NotTo(Equal(v3), "the platform ceiling")
+		})
+	})
+
 	Describe("the decision whether a run is traced", func() {
 		It("traces nothing without a destination, every run with one, and a share when sampled", func(ctx SpecContext) {
 			ok, err := svc.WouldTrace(ctx, org, 0)

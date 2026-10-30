@@ -590,6 +590,49 @@ internal OTLP listener, `/v1/logs` and `/v1/traces`, requires a bearer token fro
    org's content appears in another's payload, and that the platform's copy has IDs and its own level. A
    golden file per level and for the platform's copy pins the emitted spans.
 
+## Amendment (2026-10-30): the router applies settings when it sends, and bounds its input
+
+A review of the first router found privacy and safety gaps. These replace the matching parts of the
+router amendment above.
+
+1. **The copy is made when a batch is sent.** A queue holds the span as received, with its org. Before
+   every attempt (a retry included) the worker reads the destination's settings as they are then and
+   makes the copy, so a level lowered to `none` while spans waited, in a breaker pause or a retry
+   backoff, applies to them. The settings are fingerprinted (`tracedest.Service.ConfigVersion`: ceiling,
+   the org's settings, each destination's `config_version` and enabled flag, the platform destination's;
+   health writes do not change it) and checked at most once a second per org, reloaded when the
+   fingerprint changes. A failed check or load sends nothing and retries: no stale answer is served. A
+   source that cannot be fingerprinted reloads after a TTL.
+2. **Deleted or disabled destinations stop at once.** Each queue has a context that its retirement
+   cancels, so a request or a sleep in progress ends, and the batch and the queue are dropped, not sent.
+   Retirement is checked before every attempt, and a periodic re-check (15 s) syncs the live queues of
+   orgs that send nothing.
+3. **Content names.** `gen_ai.transfer.target.name` is content: removed at `none` whether or not the span
+   lists it.
+4. **Health.** An error is written once per episode (the same message again changes nothing the admin
+   sees), so a failing destination no longer rewrites `last_error_at` every interval and its idle queue
+   can close. The breaker has its own failure count.
+5. **Input bounds.** A request is at most 4 MiB on the wire and 16 MiB decompressed, at most 1024 spans
+   (counted from the wire format before anything is decoded; agentd sends 256) and at most 8 are handled
+   at once (503 with `Retry-After` beyond). A span with IDs of the wrong length, a zero trace ID, or an
+   unreasonable size is rejected before the intake. The intake (64 MiB) and all queues together (256 MiB)
+   have byte budgets; a queue over budget drops its own oldest spans.
+6. **Duplicate roots.** A root whose trace is held, or finished within ten minutes, is dropped, so a
+   retried export does not make the model calls twice.
+7. **Secrets.** The set is fingerprinted by the org's stored envelopes (an md5 over provider keys,
+   connections, MCP credentials, home repository passwords and trace destination credentials), so a
+   changed credential applies within a second. If the set cannot be confirmed or reloaded it is used for
+   one minute at most, then the org gets no content. An envelope that cannot be opened is logged and
+   counted, and the org gets no content until it can. Generic destinations' header values also add the
+   token after a known auth scheme (and the decoded user and password of Basic).
+8. **Ledger window.** The turn row is read again when the root is held. The window is
+   `[started_at, ended_at + 2 s)`, never into the next turn, so a row on a boundary counts once.
+9. **Platform copy.** An agent's name is replaced by its ID and the root span is always renamed to
+   `invoke_agent <agent id>`; a chat span's model name is replaced by the catalog model's ID
+   (`koinon.model.id`, also set on the org's copy), or removed where the ID is unknown. `koinon.spans_dropped`
+   is counted per org on the shared platform queue. Ledger reads for held roots run in parallel (8) with a
+   5 s timeout each. A span no live queue could take is counted as discarded (`enqueue_failed`).
+
 ## Links
 
 - [0023](0023-observability-and-audit.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md),

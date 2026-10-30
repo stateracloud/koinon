@@ -4,9 +4,13 @@ package router
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -57,9 +61,9 @@ func (s *PGStore) Attribute(ctx context.Context, org, run pgtype.UUID, trace [16
 }
 
 // ModelCalls implements Store.
-func (s *PGStore) ModelCalls(ctx context.Context, org, run pgtype.UUID, from, to time.Time) ([]ModelCall, error) {
+func (s *PGStore) ModelCalls(ctx context.Context, org, run pgtype.UUID, seq int32, from, to time.Time) ([]ModelCall, error) {
 	rows, err := s.Q.ListRunModelCalls(ctx, store.ListRunModelCallsParams{
-		OrgID: org, RunID: run,
+		OrgID: org, RunID: run, TurnSeq: seq,
 		FromTime: pgtype.Timestamptz{Time: from, Valid: true}, ToTime: pgtype.Timestamptz{Time: to, Valid: true},
 	})
 	if err != nil {
@@ -71,6 +75,9 @@ func (s *PGStore) ModelCalls(ctx context.Context, org, run pgtype.UUID, from, to
 			RequestID: r.RequestID, Model: r.Model, Provider: r.ProviderType,
 			Input: r.InputTokens, Output: r.OutputTokens, CacheRead: r.CacheReadTokens, CacheWrite: r.CacheWriteTokens, Reasoning: r.ReasoningTokens,
 			Provisional: r.Provisional, Estimated: r.Estimated, UpstreamStatus: int(r.UpstreamStatus.Int16), Time: r.OccurredAt.Time,
+		}
+		if r.ModelID.Valid {
+			c.ModelID = r.ModelID.String()
 		}
 		if r.AgentID.Valid {
 			c.AgentID = r.AgentID.String()
@@ -143,7 +150,7 @@ type secretColumn struct {
 	values func(plain []byte) []string
 }
 
-func whole(plain []byte) []string { return []string{string(plain)} }
+func whole(plain []byte) []string { return withAuthParts(string(plain)) }
 
 // connectionFields: a connection's envelope is a JSON object of setup-guide field ID to value
 // (bytes, so base64 in JSON).
@@ -176,7 +183,7 @@ var secretColumns = []secretColumn{
 		}
 		out := make([]string, 0, len(m))
 		for _, v := range m {
-			out = append(out, v)
+			out = append(out, withAuthParts(v)...)
 		}
 		return out
 	}},
@@ -187,19 +194,40 @@ type Opener interface {
 	Open(b secretstore.Binding, e secretstore.Envelope) ([]byte, error)
 }
 
+// ErrUnopenable is returned by PGSecrets when a stored envelope cannot be opened: the set would miss
+// a value, so the router sends no content for the org until it can be built whole.
+var ErrUnopenable = errors.New("router: a stored credential of the org cannot be opened")
+
 // PGSecrets builds an org's secret set from its stored envelopes (ADR 0074, decision 6: the values
 // of the org's secret store and provider records).
 type PGSecrets struct {
 	DB interface {
 		Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+		QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 	}
 	Keys Opener
+	Log  *slog.Logger
 }
 
 // NewPGSecrets returns a SecretSource over pool. keys nil gives an empty set: without key-encryption
 // keys nothing is stored.
-func NewPGSecrets(pool *pgxpool.Pool, keys Opener) *PGSecrets {
-	return &PGSecrets{DB: pool, Keys: keys}
+func NewPGSecrets(pool *pgxpool.Pool, keys Opener, log *slog.Logger) *PGSecrets {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &PGSecrets{DB: pool, Keys: keys, Log: log}
+}
+
+// Version fingerprints the org's stored envelopes (an md5 of their text), so the router notices a
+// credential that was added, changed or removed by any writer without each writer telling it.
+func (s *PGSecrets) Version(ctx context.Context, org pgtype.UUID) (string, error) {
+	parts := make([]string, 0, len(secretColumns))
+	for _, c := range secretColumns {
+		parts = append(parts, fmt.Sprintf(`SELECT '%[1]s/' || %[3]s::text AS k, %[2]s::text AS v FROM %[1]s WHERE org_id = $1 AND %[2]s IS NOT NULL`, c.table, c.column, c.key))
+	}
+	var v string
+	err := s.DB.QueryRow(ctx, `SELECT md5(coalesce(string_agg(k || '=' || v, '|' ORDER BY k), '')) FROM (`+strings.Join(parts, ` UNION ALL `)+`) s`, org).Scan(&v)
+	return v, err
 }
 
 // Secrets implements SecretSource.
@@ -207,7 +235,10 @@ func (s *PGSecrets) Secrets(ctx context.Context, org pgtype.UUID) (*scrub.Secret
 	if s.Keys == nil {
 		return scrub.NewSecrets(), nil
 	}
-	var values []string
+	var (
+		values     []string
+		unopenable int
+	)
 	for _, c := range secretColumns {
 		// The identifiers are constants of this package.
 		rows, err := s.DB.Query(ctx, fmt.Sprintf(`SELECT %[3]s::text, %[2]s FROM %[1]s WHERE org_id = $1 AND %[2]s IS NOT NULL`, c.table, c.column, c.key), org)
@@ -222,16 +253,14 @@ func (s *PGSecrets) Secrets(ctx context.Context, org pgtype.UUID) (*scrub.Secret
 				return nil, fmt.Errorf("reading %s: %w", c.table, err)
 			}
 			var env secretstore.Envelope
-			if json.Unmarshal(raw, &env) != nil {
-				continue
-			}
 			rowID, perr := parseUUID(id)
-			if perr != nil {
+			if json.Unmarshal(raw, &env) != nil || perr != nil {
+				unopenable++
 				continue
 			}
 			plain, err := s.Keys.Open(c.binding(org, rowID), env)
 			if err != nil {
-				// One value that cannot be opened (a retired key) must not blind the scrubber to the others.
+				unopenable++
 				continue
 			}
 			values = append(values, c.values(plain)...)
@@ -242,5 +271,32 @@ func (s *PGSecrets) Secrets(ctx context.Context, org pgtype.UUID) (*scrub.Secret
 			return nil, fmt.Errorf("reading %s: %w", c.table, err)
 		}
 	}
+	if unopenable > 0 {
+		// A value the scrubber cannot know is a value it cannot remove: no content for this org until
+		// the envelope is readable again (a key-encryption key restored, the row fixed or deleted).
+		s.Log.Error("trace router: stored credentials cannot be opened; sending no trace content for the org", "org", org.String(), "envelopes", unopenable)
+		return nil, fmt.Errorf("%w (%d)", ErrUnopenable, unopenable)
+	}
 	return scrub.NewSecrets(values...), nil
+}
+
+// authScheme matches the value of an Authorization-style header: the scheme, then the token.
+var authScheme = regexp.MustCompile(`(?i)^(bearer|basic|token|apikey|api-key|digest)\s+(\S.*)$`)
+
+// withAuthParts adds the token after a known auth scheme (and, for Basic, the decoded user and
+// password), because a trace may carry the token alone, without the scheme word.
+func withAuthParts(v string) []string {
+	out := []string{v}
+	m := authScheme.FindStringSubmatch(strings.TrimSpace(v))
+	if m == nil {
+		return out
+	}
+	out = append(out, m[2])
+	if strings.EqualFold(m[1], "basic") {
+		if dec, err := base64.StdEncoding.DecodeString(m[2]); err == nil {
+			out = append(out, string(dec))
+			out = append(out, strings.Split(string(dec), ":")...)
+		}
+	}
+	return out
 }

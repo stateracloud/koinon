@@ -127,6 +127,12 @@
           "value": {
             "intValue": "2"
           }
+        },
+        {
+          "key": "koinon.model.id",
+          "value": {
+            "stringValue": "0192f5a0-0000-7000-8000-0000000000d1"
+          }
         }
       ],
       "endTimeUnixNano": "1793361610000000000",
@@ -307,6 +313,12 @@
           }
         },
         {
+          "key": "koinon.model.id",
+          "value": {
+            "stringValue": "0192f5a0-0000-7000-8000-0000000000d1"
+          }
+        },
+        {
           "key": "gen_ai.usage.cost",
           "value": {
             "doubleValue": 0.25
@@ -435,6 +447,12 @@
           "key": "koinon.request",
           "value": {
             "stringValue": "req-2"
+          }
+        },
+        {
+          "key": "koinon.model.id",
+          "value": {
+            "stringValue": "0192f5a0-0000-7000-8000-0000000000d1"
           }
         },
         {
