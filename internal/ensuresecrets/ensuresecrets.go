@@ -15,6 +15,7 @@ import (
 	"io"
 	"math/big"
 	"regexp"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,6 +32,14 @@ const UsernameKey = "username"
 // KeyKey is the data key that holds a generated AES-256 key (Spec.Kind KindAES256Key).
 const KeyKey = "key"
 
+// TokenKey is the data key that holds a generated bearer token (Spec.Kind KindBearerToken).
+const TokenKey = "token"
+
+// KindBearerToken is Spec.Kind of a Secret that holds a random 256-bit bearer token as 64 hex
+// characters under TokenKey (the internal OTLP listener's, ADR 0074). An operator rotates it by
+// moving the old value to a "previous" key and setting a new "token" (internal/otlpauth).
+const KindBearerToken = "bearer-token"
+
 // KindAES256Key is Spec.Kind of a Secret that holds a random 256-bit key as 64 hex characters under
 // KeyKey, the form agentgateway's SESSION_KEY takes, instead of a username and a password.
 const KindAES256Key = "aes256-key"
@@ -39,6 +48,9 @@ const KindAES256Key = "aes256-key"
 const PasswordLength = 32
 
 var hexKey = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// bearerRE is the characters of a header-safe bearer token.
+var bearerRE = regexp.MustCompile(`^[A-Za-z0-9._~+/=-]+$`)
 
 const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
@@ -73,7 +85,7 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		if sp.Name == "" {
 			return results, errors.New("a Secret spec has no name")
 		}
-		if sp.Kind != "" && sp.Kind != KindAES256Key {
+		if sp.Kind != "" && sp.Kind != KindAES256Key && sp.Kind != KindBearerToken {
 			return results, fmt.Errorf("the Secret spec %s has an unknown kind %q", sp.Name, sp.Kind)
 		}
 		existing, err := secrets.Get(ctx, sp.Name, metav1.GetOptions{})
@@ -81,6 +93,15 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		case err == nil && sp.Kind == KindAES256Key:
 			if k := string(existing.Data[KeyKey]); !hexKey.MatchString(k) {
 				return results, fmt.Errorf("the Secret %s/%s exists but its %q key is not 64 hex characters; fix or delete it (it is not changed here)", namespace, sp.Name, KeyKey)
+			}
+			results = append(results, Result{Name: sp.Name})
+			_, _ = fmt.Fprintf(out, "secret %s: kept\n", sp.Name)
+			continue
+		case err == nil && sp.Kind == KindBearerToken:
+			// Rotated by hand, so any header-safe token of enough length is kept: the format is
+			// not the generator's.
+			if t := strings.TrimSpace(string(existing.Data[TokenKey])); len(t) < 32 || !bearerRE.MatchString(t) {
+				return results, fmt.Errorf("the Secret %s/%s exists but its %q key is not a token of at least 32 characters; fix or delete it (it is not changed here)", namespace, sp.Name, TokenKey)
 			}
 			results = append(results, Result{Name: sp.Name})
 			_, _ = fmt.Fprintf(out, "secret %s: kept\n", sp.Name)
@@ -104,12 +125,16 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 			return results, fmt.Errorf("read the Secret %s/%s: %w", namespace, sp.Name, err)
 		}
 		data := map[string][]byte{}
-		if sp.Kind == KindAES256Key {
+		if sp.Kind == KindAES256Key || sp.Kind == KindBearerToken {
 			b := make([]byte, 32)
 			if _, err := rand.Read(b); err != nil {
 				return results, fmt.Errorf("generate a key: %w", err)
 			}
-			data[KeyKey] = []byte(hex.EncodeToString(b))
+			if sp.Kind == KindBearerToken {
+				data[TokenKey] = []byte(hex.EncodeToString(b))
+			} else {
+				data[KeyKey] = []byte(hex.EncodeToString(b))
+			}
 		} else {
 			password, err := NewPassword()
 			if err != nil {

@@ -456,6 +456,15 @@ left open.
 5. **Run tracing state.** `runs.traced` is NULL until agentd decides at claim and then never changes.
    `run_turns` holds one row per turn with its `seq` and `trace_id`.
 
+## Amendment (2026-10-30): the internal OTLP listener is authenticated
+
+The context above (the access log "with no authentication and a NetworkPolicy in front") is superseded
+by the amendment of the same date in [0050](0050-spend-ledger-ingestion-and-net-limits.md). The whole
+internal OTLP listener, `/v1/logs` and `/v1/traces`, requires a bearer token from the Secret
+`koinon-otlp-token`. The gateway's log export and koinon-agentd's span export both send it
+(`--otlp-endpoint` and `--otlp-token-file` on koinon-agentd, `KOINON_OTLP_ENDPOINT` and
+`KOINON_OTLP_TOKEN_FILE` in the chart). This closes issue #52.
+
 ## Links
 
 - [0023](0023-observability-and-audit.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md),

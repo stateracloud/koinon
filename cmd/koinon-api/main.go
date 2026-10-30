@@ -78,6 +78,7 @@ import (
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
@@ -126,6 +127,7 @@ type config struct {
 	watchPoll     time.Duration
 
 	otlpAddr         string
+	otlpTokenDir     string
 	metricsAddr      string
 	toolsAddr        string
 	savedWorkAddr    string
@@ -200,8 +202,11 @@ func parseFlags(args []string) (config, error) {
 	fs.DurationVar(&c.watchPoll, "watch-poll-interval", services.DefaultWatchPollInterval,
 		"how often a WatchRun stream re-reads its run without a notification (a backstop for missed NOTIFYs)")
 	fs.StringVar(&c.otlpAddr, "otlp-addr", ":4318",
-		"listen address of the spend ledger's OTLP/HTTP logs receiver, for agentgateway's access log; "+
-			"it has no authentication, so restrict it to agentgateway with a NetworkPolicy; empty disables it")
+		"listen address of the internal OTLP/HTTP receiver (the spend ledger's logs from agentgateway); "+
+			"every request needs the bearer token in --otlp-token-dir; empty disables it")
+	fs.StringVar(&c.otlpTokenDir, "otlp-token-dir", "",
+		"directory with the OTLP receiver's bearer token (file token) and, during a rotation, the one it replaced (file previous); "+
+			"required with --otlp-addr")
 
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort,
 		"listen address of /metrics (Prometheus); empty disables it")
@@ -241,6 +246,9 @@ func parseFlags(args []string) (config, error) {
 	}
 	if c.databaseURL == "" {
 		return c, errors.New("--database-url is required")
+	}
+	if c.otlpAddr != "" && c.otlpTokenDir == "" {
+		return c, errors.New("--otlp-token-dir is required with --otlp-addr: the OTLP receiver never runs without its bearer token (pass --otlp-addr= to turn the receiver off)")
 	}
 	if c.secretsNamespace == "" {
 		c.secretsNamespace = os.Getenv("POD_NAMESPACE")
@@ -615,9 +623,14 @@ func run() error {
 	if cfg.otlpAddr != "" {
 		// The spend ledger's receiver (plan item L1). It runs on its own listener, outside
 		// the session-authenticated API handler.
+		otlpTokens, err := otlpauth.NewTokens(cfg.otlpTokenDir, slog.Default())
+		if err != nil {
+			return fmt.Errorf("--otlp-token-dir: %w", err)
+		}
+		otlpMetrics := otlpauth.NewMetrics(reg)
 		safego.GoOrStop(ctx, slog.Default(), "ledger-otlp", stop, func(context.Context) {
-			slog.Info("starting the spend ledger's OTLP receiver", "addr", cfg.otlpAddr)
-			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default()); err != nil {
+			slog.Info("starting the internal OTLP receiver", "addr", cfg.otlpAddr)
+			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), otlpauth.Middleware(otlpTokens, otlpMetrics)); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
 				stop()
 			}

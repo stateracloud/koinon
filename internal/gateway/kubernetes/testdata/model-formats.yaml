@@ -1,4 +1,4 @@
-# Revision 67db22a29f02e17f
+# Revision 29b5efe9edbdee94
 apiVersion: v1
 data:
   catalog.json: '{"providers":{"acme.anthropic":{"models":{"claude-haiku-4-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}},"claude-haiku-5-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}}}},"acme.openrouter":{"models":{"open/model":{"rates":{"input":"1","output":"2"}}}}}}'
@@ -25,7 +25,7 @@ metadata:
 ---
 apiVersion: v1
 data:
-  koinon-reload-probe: '{"keyHash":"sha256:ab7cafbaba5087d5c14e77fac3aa43eaac61c64bcd7f9c7693594be764a4e737","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
+  koinon-reload-probe: '{"keyHash":"sha256:6206d66e1380f6bea3c5d5e6c8036174a18e62906672723f340720e328f923ca","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
 kind: ConfigMap
 metadata:
   labels:
@@ -80,6 +80,24 @@ spec:
       name: http
       port: 4000
       protocol: HTTP
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway-otlp
+  namespace: koinon
+spec:
+  policies:
+    auth:
+      secretRef:
+        key: token
+        name: koinon-otlp-token
+  static:
+    host: koinon-api.koinon.svc
+    port: 4318
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayModel
@@ -294,8 +312,11 @@ spec:
           - expression: default(proxy.upstreamDuration, "") != ""
             name: koinon.upstream
       otlp:
+        backendRef:
+          group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: koinon-gateway-otlp
         protocol: HTTP
-        url: http://koinon-api.koinon.svc:4318
   targetRefs:
     - group: gateway.networking.k8s.io
       kind: Gateway

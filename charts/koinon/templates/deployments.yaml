@@ -121,6 +121,7 @@ spec:
             {{- include "koinon.kekVolumeMount" $ | nindent 12 }}
             {{- end }}
             {{- if eq $component "agentd" }}
+            {{- include "koinon.otlpTokenVolumeMount" $ | nindent 12 }}
             {{- include "koinon.savedWorkVolumeMount" $ | nindent 12 }}
             {{- if $.Values.checkpoints.enabled }}
             - name: checkpoints
@@ -145,6 +146,7 @@ spec:
         {{- include "koinon.kekVolume" $ | nindent 8 }}
         {{- end }}
         {{- if eq $component "agentd" }}
+        {{- include "koinon.otlpTokenVolume" $ | nindent 8 }}
         {{- include "koinon.savedWorkVolume" $ | nindent 8 }}
         {{- if $.Values.checkpoints.enabled }}
         - name: checkpoints
