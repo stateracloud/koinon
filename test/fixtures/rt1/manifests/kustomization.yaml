@@ -22,23 +22,23 @@ configMapGenerator:
 # their upstream digests. The four built images were built from bfaab19 for linux/amd64 and pushed with
 # hack/rt1-fixtures-build.sh, which prints this block after a rebuild. The tag is informational.
 images:
-  - name: zot.apps.lab.example.invalid/koinon/rt1-motherduck
-    newTag: "rt1-bfaab19"
-    digest: sha256:ae71e987442c42e9d90281e489d563f737a8aed14f0ad8416e1b337018b50d38
   - name: zot.apps.lab.example.invalid/koinon/rt1-fakecicost
-    newTag: "rt1-bfaab19"
-    digest: sha256:015d90c0ad5cf3e337c4a6654b41a88758857a5e64b2d4928e060858c14a3d79
+    newTag: "dev"
+    digest: sha256:53fde42e556d4e48a43bd9b5f33b05c056003ecbe057fd86e78a02823a9f0866
   - name: zot.apps.lab.example.invalid/koinon/rt1-promgen
-    newTag: "rt1-bfaab19"
-    digest: sha256:d14b0e6e71ac5227dd415f0d06bcc52bd43abc0e5a5e954cee3c9a6afe6f2c02
+    newTag: "dev"
+    digest: sha256:b04ead78292de1e0840d5f93798298e1b3fd083999ca3090574f4923606bf4c0
   - name: zot.apps.lab.example.invalid/koinon/rt1-fakemodel
-    newTag: dev
-    digest: sha256:TODO-paste-the-digest-printed-by-hack-rt1-fixtures-build-sh
+    newTag: "dev"
+    digest: sha256:a751f334b6b354503db628faf44522265e9f8b32aeb8253841d1f365f827e337
+  - name: zot.apps.lab.example.invalid/koinon/rt1-motherduck
+    newTag: "dev"
+    digest: sha256:a0de96615edec1e8eabe686b3ee62aed9e173187462b743b2ad73334e957e52f
   - name: zot.apps.lab.example.invalid/koinon/rt1-prometheus-mcp
-    newTag: "rt1-bfaab19"
-    digest: sha256:fb2355b39fcecaeb38a03e2d0e73a45f8c13a1a4e11c7e862d232b50ad48e939
+    newTag: "dev"
+    digest: sha256:003fed920d36714a32702fe9e534e287c4134a10db0c7efcb962b4ddb3c4a9f6
   - name: zot.apps.lab.example.invalid/koinon/rt1-prometheus
-    newTag: v3.7.3
+    newTag: "v3.7.3"
     digest: sha256:49214755b6153f90a597adcbff0252cc61069f8ab69ce8411285cd4a560e8038
   - name: zot.apps.lab.example.invalid/koinon/rt1-searxng
     newTag: "2026.10.27"
