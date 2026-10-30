@@ -636,6 +636,7 @@ func run() error {
 	if cfg.toolsAddr != "" {
 		tools, err := githubtools.New(pool, githubtools.Options{
 			Hosts: hosts,
+			Keys:  opener,
 			// Trusted-preset calls run at once instead of on the next sweep.
 			Execute: func(ctx context.Context, org, id pgtype.UUID) {
 				ctx, cancel := context.WithTimeout(ctx, approvals.DefaultExecutionLease)
