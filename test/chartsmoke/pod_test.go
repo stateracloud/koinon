@@ -1,0 +1,447 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package chartsmoke_test
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/moby/moby/api/types/container"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/network"
+	"github.com/testcontainers/testcontainers-go/wait"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+)
+
+var metaGet = metav1.GetOptions{}
+
+// runner starts the containers of rendered pods the way the kubelet would, as far as a plain
+// Docker daemon allows. What it models, from the rendered pod spec: the image (mapped to the
+// locally built one), command and args, env (secretKeyRef, configMapKeyRef, fieldRef and
+// resourceFieldRef resolved against the API server and the pod), the volumes (Secrets and
+// ConfigMaps written to files with their defaultMode, emptyDir as tmpfs, the ServiceAccount
+// token when it is mounted), the in-cluster environment, the memory limit and the container
+// security context (read-only root file system, dropped capabilities, no privilege escalation).
+// What it cannot model: the user and group (the container runs as the user running the test, so
+// that the mounted files are readable: the kubelet's fsGroup does that in a cluster), seccomp
+// profiles beyond Docker's default, NetworkPolicies, Services and probes' restart semantics.
+type runner struct {
+	cl     *cluster
+	nwName string
+	images map[string]string
+	tmp    string
+	// started are the containers to remove when the spec group ends.
+	started []testcontainers.Container
+}
+
+// workload is a started container.
+type workload struct {
+	Name string
+	Ctr  testcontainers.Container
+	Spec corev1.Container
+	Pod  corev1.PodSpec
+}
+
+// start creates the container of pod spec ps and starts it. With wait set it returns once the
+// container has exited (a Job); otherwise as soon as it runs.
+func (r *runner) start(ctx context.Context, owner string, ps corev1.PodSpec, c corev1.Container, exitWait time.Duration) *workload {
+	ref := r.imageFor(c.Image)
+	vars, envList := r.env(ctx, owner, ps, c)
+	args := make([]string, 0, len(c.Args))
+	for _, a := range c.Args {
+		args = append(args, expand(a, vars))
+	}
+	binds, tmpfs := r.volumes(ctx, owner, ps, c)
+
+	opts := []testcontainers.ContainerCustomizer{
+		testcontainers.WithEnv(envList),
+		testcontainers.WithCmd(args...),
+		testcontainers.WithName(fmt.Sprintf("chartsmoke-%s-%s-%d", owner, c.Name, time.Now().UnixNano()%1_000_000)),
+		testcontainers.WithConfigModifier(func(cfg *container.Config) {
+			cfg.User = fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+		}),
+		network.WithNetworkName([]string{owner}, r.nwName),
+		testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
+			hc.Binds = binds
+			hc.Tmpfs = tmpfs
+			hc.ExtraHosts = append(hc.ExtraHosts, apiServerName+":host-gateway")
+			if sc := c.SecurityContext; sc != nil {
+				if sc.ReadOnlyRootFilesystem != nil && *sc.ReadOnlyRootFilesystem {
+					hc.ReadonlyRootfs = true
+				}
+				if sc.AllowPrivilegeEscalation != nil && !*sc.AllowPrivilegeEscalation {
+					hc.SecurityOpt = append(hc.SecurityOpt, "no-new-privileges")
+				}
+				if sc.Capabilities != nil {
+					for _, cp := range sc.Capabilities.Drop {
+						hc.CapDrop = append(hc.CapDrop, string(cp))
+					}
+				}
+			}
+			if m := c.Resources.Limits.Memory(); m != nil && !m.IsZero() {
+				hc.Memory = m.Value()
+			}
+		}),
+	}
+	if len(c.Command) > 0 {
+		opts = append(opts, testcontainers.WithEntrypoint(c.Command...))
+	}
+	var ports []string
+	for _, p := range c.Ports {
+		ports = append(ports, fmt.Sprintf("%d/tcp", p.ContainerPort))
+	}
+	if len(ports) > 0 {
+		opts = append(opts, testcontainers.WithExposedPorts(ports...))
+	}
+	if exitWait > 0 {
+		opts = append(opts, testcontainers.WithWaitStrategy(wait.ForExit().WithExitTimeout(exitWait)))
+	}
+	ctr, err := testcontainers.Run(ctx, ref, opts...)
+	w := &workload{Name: owner + "/" + c.Name, Ctr: ctr, Spec: c, Pod: ps}
+	if ctr != nil {
+		r.started = append(r.started, ctr)
+	}
+	if err != nil {
+		panic(fmt.Sprintf("start %s: %v\n%s", w.Name, err, w.Logs(ctx)))
+	}
+	return w
+}
+
+// imageFor maps a rendered Koinon image reference to the locally built image. Any other
+// koinon-* image is a component this suite does not know yet.
+func (r *runner) imageFor(ref string) string {
+	name := imageName(ref)
+	tag, ok := r.images[name]
+	if !ok {
+		panic(fmt.Sprintf("image %q is not one of %v: add the new image to koinonImages (or skip it as third-party)", ref, koinonImages))
+	}
+	return tag
+}
+
+// Logs returns the container's combined output.
+func (w *workload) Logs(ctx context.Context) string {
+	rc, err := w.Ctr.Logs(ctx)
+	if err != nil {
+		return "(no logs: " + err.Error() + ")"
+	}
+	defer func() { _ = rc.Close() }()
+	b, _ := io.ReadAll(rc)
+	return string(b)
+}
+
+// ExitCode is the container's exit code, or -1 while it runs.
+func (w *workload) ExitCode(ctx context.Context) int {
+	st, err := w.Ctr.State(ctx)
+	if err != nil || st.Running {
+		return -1
+	}
+	return st.ExitCode
+}
+
+// Running reports whether the container is still running.
+func (w *workload) Running(ctx context.Context) bool {
+	st, err := w.Ctr.State(ctx)
+	return err == nil && st.Running
+}
+
+// portNumber resolves a probe's port, by number or by the container's port name.
+func (w *workload) portNumber(p intOrName) int {
+	if p.name == "" {
+		return p.num
+	}
+	for _, cp := range w.Spec.Ports {
+		if cp.Name == p.name {
+			return int(cp.ContainerPort)
+		}
+	}
+	panic(fmt.Sprintf("%s: probe port %q is not a named container port", w.Name, p.name))
+}
+
+type intOrName struct {
+	num  int
+	name string
+}
+
+// ProbeHTTP polls an httpGet probe (path, port by name or number) on the mapped port until it
+// answers 2xx or 3xx, the way the kubelet judges it, or until the deadline. It gives up early
+// when the container has exited. It returns "" on success, else why not.
+func (w *workload) ProbeHTTP(ctx context.Context, pr *corev1.Probe, deadline time.Duration) string {
+	h := pr.HTTPGet
+	port := intOrName{num: h.Port.IntValue()}
+	if h.Port.Type == intstr.String {
+		port = intOrName{name: h.Port.StrVal}
+	}
+	n := w.portNumber(port)
+	mapped, err := w.Ctr.MappedPort(ctx, fmt.Sprintf("%d/tcp", n))
+	if err != nil {
+		return fmt.Sprintf("port %d is not published: %v", n, err)
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%s%s", mapped.Port(), h.Path)
+	last := "no answer yet"
+	stop := time.Now().Add(deadline)
+	for time.Now().Before(stop) {
+		if !w.Running(ctx) {
+			return fmt.Sprintf("the container exited with code %d before %s answered", w.ExitCode(ctx), url)
+		}
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+				return ""
+			}
+			last = fmt.Sprintf("%s answered %d", url, resp.StatusCode)
+		} else {
+			last = err.Error()
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Sprintf("%s did not become ready within %s: %s", url, deadline, last)
+}
+
+// env resolves the container's environment. It returns the variables by name (for $(NAME) in
+// args) and the final list.
+func (r *runner) env(ctx context.Context, owner string, ps corev1.PodSpec, c corev1.Container) (map[string]string, map[string]string) {
+	vars := map[string]string{}
+	set := func(k, v string) { vars[k] = v }
+	for _, e := range c.Env {
+		switch vf := e.ValueFrom; {
+		case vf == nil:
+			set(e.Name, expand(e.Value, vars))
+		case vf.SecretKeyRef != nil:
+			ref := vf.SecretKeyRef
+			s := r.cl.Secret(ctx, ref.Name)
+			if s == nil || s.Data[ref.Key] == nil {
+				if ref.Optional != nil && *ref.Optional {
+					continue
+				}
+				panic(fmt.Sprintf("%s: env %s: Secret %s has no key %q; the pod would not start (CreateContainerConfigError)", owner, e.Name, ref.Name, ref.Key))
+			}
+			set(e.Name, string(s.Data[ref.Key]))
+		case vf.ConfigMapKeyRef != nil:
+			ref := vf.ConfigMapKeyRef
+			cm, err := r.cl.Admin.CoreV1().ConfigMaps(namespace).Get(ctx, ref.Name, metaGet)
+			if err != nil || (cm.Data[ref.Key] == "" && cm.BinaryData[ref.Key] == nil) {
+				if ref.Optional != nil && *ref.Optional {
+					continue
+				}
+				panic(fmt.Sprintf("%s: env %s: ConfigMap %s has no key %q (%v)", owner, e.Name, ref.Name, ref.Key, err))
+			}
+			set(e.Name, cm.Data[ref.Key])
+		case vf.FieldRef != nil:
+			switch vf.FieldRef.FieldPath {
+			case "metadata.namespace":
+				set(e.Name, namespace)
+			case "metadata.name":
+				set(e.Name, owner+"-0")
+			case "spec.serviceAccountName":
+				set(e.Name, ps.ServiceAccountName)
+			case "spec.nodeName":
+				set(e.Name, "chartsmoke-node")
+			case "status.podIP", "status.hostIP":
+				set(e.Name, "127.0.0.1")
+			default:
+				panic(fmt.Sprintf("%s: env %s: fieldRef %q is not modelled; add it to runner.env", owner, e.Name, vf.FieldRef.FieldPath))
+			}
+		case vf.ResourceFieldRef != nil:
+			set(e.Name, resourceField(vf.ResourceFieldRef, c))
+		}
+	}
+	// What the kubelet adds to every container.
+	set("KUBERNETES_SERVICE_HOST", apiServerName)
+	set("KUBERNETES_SERVICE_PORT", r.cl.Port)
+	set("KUBERNETES_SERVICE_PORT_HTTPS", r.cl.Port)
+	return vars, vars
+}
+
+func resourceField(ref *corev1.ResourceFieldSelector, c corev1.Container) string {
+	var q resource.Quantity
+	switch ref.Resource {
+	case "limits.memory":
+		q = c.Resources.Limits[corev1.ResourceMemory]
+	case "requests.memory":
+		q = c.Resources.Requests[corev1.ResourceMemory]
+	case "limits.cpu":
+		q = c.Resources.Limits[corev1.ResourceCPU]
+	case "requests.cpu":
+		q = c.Resources.Requests[corev1.ResourceCPU]
+	default:
+		panic(fmt.Sprintf("resourceFieldRef %q is not modelled; add it to resourceField", ref.Resource))
+	}
+	div := ref.Divisor
+	if div.IsZero() {
+		div = resource.MustParse("1")
+	}
+	// Quantities round up to a whole number of divisors; limits unset read as the node's capacity
+	// in a cluster, which the chart never relies on (it sets limits).
+	if q.IsZero() {
+		return "0"
+	}
+	return strconv.FormatInt((q.MilliValue()+div.MilliValue()-1)/div.MilliValue(), 10)
+}
+
+// expand replaces $(NAME) with the variable's value, as the kubelet does in args and env values;
+// $$ is a literal $ and an unknown name is left as it is.
+func expand(s string, vars map[string]string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '$' || i+1 >= len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		switch s[i+1] {
+		case '$':
+			b.WriteByte('$')
+			i++
+		case '(':
+			if end := strings.IndexByte(s[i+2:], ')'); end >= 0 {
+				name := s[i+2 : i+2+end]
+				if v, ok := vars[name]; ok {
+					b.WriteString(v)
+				} else {
+					b.WriteString(s[i : i+3+end])
+				}
+				i += 2 + end
+				continue
+			}
+			b.WriteByte('$')
+		default:
+			b.WriteByte('$')
+		}
+	}
+	return b.String()
+}
+
+// volumes materialises the container's volumeMounts: bind mounts of files written under r.tmp
+// and tmpfs mounts.
+func (r *runner) volumes(ctx context.Context, owner string, ps corev1.PodSpec, c corev1.Container) (binds []string, tmpfs map[string]string) {
+	tmpfs = map[string]string{}
+	byName := map[string]corev1.Volume{}
+	for _, v := range ps.Volumes {
+		byName[v.Name] = v
+	}
+	podDir := filepath.Join(r.tmp, fmt.Sprintf("%s-%s-%d", owner, c.Name, time.Now().UnixNano()))
+	for _, m := range c.VolumeMounts {
+		v, ok := byName[m.Name]
+		if !ok {
+			panic(fmt.Sprintf("%s: volumeMount %q has no volume", owner, m.Name))
+		}
+		src := filepath.Join(podDir, m.Name)
+		switch {
+		case v.EmptyDir != nil:
+			opt := "rw,mode=1777"
+			if l := v.EmptyDir.SizeLimit; l != nil {
+				opt += fmt.Sprintf(",size=%d", l.Value())
+			}
+			tmpfs[m.MountPath] = opt
+			continue
+		case v.Secret != nil:
+			s := v.Secret
+			sec := r.cl.Secret(ctx, s.SecretName)
+			data := map[string][]byte{}
+			if sec != nil {
+				data = sec.Data
+			} else if s.Optional == nil || !*s.Optional {
+				panic(fmt.Sprintf("%s: Secret %s (volume %s) does not exist and is not optional; the pod would not start", owner, s.SecretName, v.Name))
+			}
+			writeVolume(src, data, s.Items, s.DefaultMode)
+		case v.ConfigMap != nil:
+			cm, err := r.cl.Admin.CoreV1().ConfigMaps(namespace).Get(ctx, v.ConfigMap.Name, metaGet)
+			data := map[string][]byte{}
+			if err == nil {
+				for k, val := range cm.Data {
+					data[k] = []byte(val)
+				}
+				for k, val := range cm.BinaryData {
+					data[k] = val
+				}
+			} else if v.ConfigMap.Optional == nil || !*v.ConfigMap.Optional {
+				panic(fmt.Sprintf("%s: ConfigMap %s (volume %s): %v; the pod would not start", owner, v.ConfigMap.Name, v.Name, err))
+			}
+			writeVolume(src, data, v.ConfigMap.Items, v.ConfigMap.DefaultMode)
+		default:
+			panic(fmt.Sprintf("%s: volume %s has a source this suite does not model; add it to runner.volumes", owner, v.Name))
+		}
+		hostPath := src
+		if m.SubPath != "" {
+			hostPath = filepath.Join(src, m.SubPath)
+		}
+		mode := "rw"
+		if m.ReadOnly {
+			mode = "ro"
+		}
+		binds = append(binds, fmt.Sprintf("%s:%s:%s", hostPath, m.MountPath, mode))
+	}
+
+	if ps.AutomountServiceAccountToken == nil || *ps.AutomountServiceAccountToken {
+		dir := filepath.Join(podDir, "serviceaccount")
+		writeVolume(dir, map[string][]byte{
+			"token":     []byte(r.cl.Token(ctx, ps.ServiceAccountName)),
+			"ca.crt":    r.cl.CACert,
+			"namespace": []byte(namespace),
+		}, nil, nil)
+		binds = append(binds, dir+":/var/run/secrets/kubernetes.io/serviceaccount:ro")
+	}
+	sort.Strings(binds)
+	return binds, tmpfs
+}
+
+// writeVolume writes a Secret's or ConfigMap's keys as files in dir, with defaultMode (0644
+// when unset). With items only the listed keys are projected, at their paths.
+func writeVolume(dir string, data map[string][]byte, items []corev1.KeyToPath, defaultMode *int32) {
+	mode := os.FileMode(0o644)
+	if defaultMode != nil {
+		mode = os.FileMode(*defaultMode)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		panic(err)
+	}
+	write := func(path string, b []byte, m os.FileMode) {
+		p := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			panic(err)
+		}
+		if err := os.WriteFile(p, b, m); err != nil {
+			panic(err)
+		}
+		if err := os.Chmod(p, m); err != nil { // not subject to the umask
+			panic(err)
+		}
+	}
+	if len(items) == 0 {
+		for k, b := range data {
+			write(k, b, mode)
+		}
+		return
+	}
+	for _, it := range items {
+		b, ok := data[it.Key]
+		if !ok {
+			panic(fmt.Sprintf("volume item %q is not in the source", it.Key))
+		}
+		m := mode
+		if it.Mode != nil {
+			m = os.FileMode(*it.Mode)
+		}
+		write(it.Path, b, m)
+	}
+}
+
+// Close removes every container the runner started.
+func (r *runner) Close() {
+	for _, c := range r.started {
+		_ = testcontainers.TerminateContainer(c)
+	}
+}

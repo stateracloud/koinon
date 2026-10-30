@@ -12,7 +12,11 @@ Instructions for coding agents working on Koinon.
 - After changing `.proto` files or `internal/db/queries/*.sql`, run `make generate` and commit the
   output. CI fails if generated code is stale.
 - Chart: `hack/chart-check.sh` (lint, every mode rendered, render assertions, kubeconform). Add an
-  assertion for every chart behaviour you change.
+  assertion for every chart behaviour you change. Anything that changes how a Koinon binary starts
+  (a flag or env var it requires, a mount, a Secret key, an RBAC rule) is covered by
+  `make test-chart-smoke` (`test/chartsmoke`: runs the rendered Jobs and Deployments as containers);
+  extend it when you add a component or a startup input, since a unit test of the flag parser
+  does not see what the chart really passes (#284).
 - Sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`): the escape suite,
   `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./test/escape/ -ginkgo.label-filter=admission`.
 - Migrations: `hack/migrate-lint.sh origin/main` (merged migrations unchanged, numbers contiguous).
