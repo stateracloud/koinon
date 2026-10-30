@@ -391,12 +391,12 @@ func runUpload(ctx context.Context, conn net.Conn, fingerprint string, plan []by
 
 	acks := newAckReader(ch)
 	if _, err := ch.Write(plan); err != nil {
-		return ctxErr(fmt.Errorf("sending the upload plan: %w", exit.explain(err, &stderr)))
+		return ctxErr(fmt.Errorf("sending the upload plan: %w", exit.explain(err, &stderr, stderrDone)))
 	}
 	// The first total, zero, means extraction started (upload.rs L8-9; cli transfer L288-304).
 	first, err := acks.first(ctx, uploadNegotiationTimeout)
 	if err != nil {
-		return ctxErr(exit.explain(err, &stderr))
+		return ctxErr(exit.explain(err, &stderr, stderrDone))
 	}
 	if first != 0 {
 		return fmt.Errorf("upload protocol failed: upload did not start at offset zero (got %d)", first)
@@ -408,11 +408,11 @@ func runUpload(ctx context.Context, conn net.Conn, fingerprint string, plan []by
 		if errors.As(err, &ae) {
 			return ae.err // the reader failed: leave without EOF so the extraction is not taken for complete
 		}
-		return ctxErr(exit.explain(err, &stderr))
+		return ctxErr(exit.explain(err, &stderr, stderrDone))
 	}
 	// EOF marks a complete archive. The final total arrives before the exit status.
 	if err := ch.CloseWrite(); err != nil {
-		return ctxErr(exit.explain(fmt.Errorf("sending end of file: %w", err), &stderr))
+		return ctxErr(exit.explain(fmt.Errorf("sending end of file: %w", err), &stderr, stderrDone))
 	}
 	acked, aerr := acks.wait(ctx)
 	code, ok := exit.wait(ctx, uploadExitWait)
@@ -700,13 +700,16 @@ func (e *exitWatch) wait(ctx context.Context, d time.Duration) (int, bool) {
 
 // explain adds the extractor's exit status and output to a transport failure: when the
 // supervisor ends the channel (for example status 74), the write that notices only fails with EOF.
-func (e *exitWatch) explain(err error, stderr *tailBuffer) error {
+func (e *exitWatch) explain(err error, stderr *tailBuffer, stderrDone <-chan struct{}) error {
 	t := time.NewTimer(time.Second)
 	defer t.Stop()
 	select {
 	case <-e.done:
 	case <-t.C:
 	}
+	// The extractor's output precedes the exit status on the channel, but the goroutine copying it
+	// into stderr may not have run yet: read it only once the channel has been drained.
+	<-waitOrTimeout(stderrDone, time.Second)
 	if code, ok := e.get(); ok {
 		if code == uploadWindowExceeded {
 			return fmt.Errorf("%w; the supervisor rejected the upload stream (exit %d): %s", err, code, stderr.String())
