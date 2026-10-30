@@ -351,9 +351,16 @@ type Tool struct {
 	ContentHash string `protobuf:"bytes,13,opt,name=content_hash,json=contentHash,proto3" json:"content_hash,omitempty"`
 	// unavailable says why agents are not offered the tool ("unavailable: name too long ..."); empty when
 	// they are.
-	Unavailable   string `protobuf:"bytes,14,opt,name=unavailable,proto3" json:"unavailable,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Unavailable string `protobuf:"bytes,14,opt,name=unavailable,proto3" json:"unavailable,omitempty"`
+	// description is the sanitised text (ADR 0057 amendment, #267). description_original_length is the
+	// length in characters of the description as the server published it; description_capped says it,
+	// or a description in the input schema, was cut to its cap; description_cleaned says control,
+	// invisible or tag characters were removed or harness-lookalike tags escaped.
+	DescriptionOriginalLength int64 `protobuf:"varint,15,opt,name=description_original_length,json=descriptionOriginalLength,proto3" json:"description_original_length,omitempty"`
+	DescriptionCapped         bool  `protobuf:"varint,16,opt,name=description_capped,json=descriptionCapped,proto3" json:"description_capped,omitempty"`
+	DescriptionCleaned        bool  `protobuf:"varint,17,opt,name=description_cleaned,json=descriptionCleaned,proto3" json:"description_cleaned,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *Tool) Reset() {
@@ -482,6 +489,27 @@ func (x *Tool) GetUnavailable() string {
 		return x.Unavailable
 	}
 	return ""
+}
+
+func (x *Tool) GetDescriptionOriginalLength() int64 {
+	if x != nil {
+		return x.DescriptionOriginalLength
+	}
+	return 0
+}
+
+func (x *Tool) GetDescriptionCapped() bool {
+	if x != nil {
+		return x.DescriptionCapped
+	}
+	return false
+}
+
+func (x *Tool) GetDescriptionCleaned() bool {
+	if x != nil {
+		return x.DescriptionCleaned
+	}
+	return false
 }
 
 // Allowance is a server an agent may use, optionally narrowed to some of its tools.
@@ -1652,7 +1680,7 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"created_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
 	"updated_at\x18\x12 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12%\n" +
-	"\x0egateway_target\x18\x13 \x01(\tR\rgatewayTarget\"\xc8\x04\n" +
+	"\x0egateway_target\x18\x13 \x01(\tR\rgatewayTarget\"\xe8\x05\n" +
 	"\x04Tool\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -1669,7 +1697,10 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\vtier_set_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\ttierSetAt\x124\n" +
 	"\x16requires_two_approvers\x18\f \x01(\bR\x14requiresTwoApprovers\x12!\n" +
 	"\fcontent_hash\x18\r \x01(\tR\vcontentHash\x12 \n" +
-	"\vunavailable\x18\x0e \x01(\tR\vunavailable\">\n" +
+	"\vunavailable\x18\x0e \x01(\tR\vunavailable\x12>\n" +
+	"\x1bdescription_original_length\x18\x0f \x01(\x03R\x19descriptionOriginalLength\x12-\n" +
+	"\x12description_capped\x18\x10 \x01(\bR\x11descriptionCapped\x12/\n" +
+	"\x13description_cleaned\x18\x11 \x01(\bR\x12descriptionCleaned\">\n" +
 	"\tAllowance\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x14\n" +
 	"\x05tools\x18\x02 \x03(\tR\x05tools\"+\n" +

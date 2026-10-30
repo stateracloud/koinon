@@ -6,8 +6,8 @@
 
 -- +goose Up
 
--- 0 on a row synced before this migration; the next sync that changes the sanitised text flags the
--- tool for review like any other change.
+-- 0 and false on a row synced before this migration until the next sync fills them in. A sync whose
+-- sanitised text differs from the stored text flags the tool for review like any other change.
 ALTER TABLE mcp_tools
     ADD COLUMN description_original_length bigint NOT NULL DEFAULT 0 CHECK (description_original_length >= 0),
     ADD COLUMN description_capped          boolean NOT NULL DEFAULT false,

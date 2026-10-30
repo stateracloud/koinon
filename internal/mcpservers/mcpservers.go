@@ -885,7 +885,10 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 				}
 				res.Changed = append(res.Changed, lt.Name)
 			default:
-				if err := q.TouchMCPTool(ctx, store.TouchMCPToolParams{OrgID: org, ServerID: serverID, Name: lt.Name, ReadOnlyHint: lt.ReadOnlyHint}); err != nil {
+				if err := q.TouchMCPTool(ctx, store.TouchMCPToolParams{
+					OrgID: org, ServerID: serverID, Name: lt.Name, ReadOnlyHint: lt.ReadOnlyHint,
+					DescriptionOriginalLength: int64(rep.OriginalLen), DescriptionCapped: rep.Capped, DescriptionCleaned: rep.Cleaned,
+				}); err != nil {
 					return err
 				}
 			}
