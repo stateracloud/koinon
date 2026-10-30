@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/moby/moby/api/types/container"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -36,6 +37,7 @@ import (
 	"github.com/stateracloud/koinon/internal/providerusage"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 	"github.com/stateracloud/koinon/pricing"
+	"github.com/stateracloud/koinon/test/scenarios"
 )
 
 // agentgatewayImage is the agentgateway release Koinon targets (ADR 0048).
@@ -203,9 +205,9 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		DeferCleanup(func(ctx context.Context) error { return testcontainers.TerminateContainer(ctr) })
 		Expect(err).NotTo(HaveOccurred())
 
-		llmURL, err = ctr.PortEndpoint(ctx, "4000/tcp", "http")
+		llmURL, err = ipv4Endpoint(ctx, ctr, "4000/tcp")
 		Expect(err).NotTo(HaveOccurred())
-		statsURL, err := ctr.PortEndpoint(ctx, "15020/tcp", "http")
+		statsURL, err := ipv4Endpoint(ctx, ctr, "15020/tcp")
 		Expect(err).NotTo(HaveOccurred())
 		driver = &standalone.Driver{
 			Options: options, Deliverer: file,
@@ -530,4 +532,84 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 			Expect(refusals).To(Equal(before), "only the provider's refusals carry an upstream status")
 		}, SpecTimeout(time.Minute))
 	})
+	// The quickstart's provider type is openai. Through the real gateway, the title request the fake
+	// model refuses (400, no usage) is waived and kept with the provider's status, and the streamed
+	// requests carry usage: the ledger shape of test/scenarios, in the order the e2e saw the refusal
+	// arrive first (#291). The ingester-level rules are in scenario_test.go.
+	Describe("the repo-helper scenario's ledger, as the gateway logs it", func() {
+		It("waives an openai 400 and records the answered requests with their usage", func(ctx SpecContext) {
+			sc := scenarios.PullRequest.Ledger
+			c := newEnv(ctx, uniq("org"), "", "100.00")
+			c.model(ctx, "openai", flash)
+			_, err := prices.New(db, nil, priceList).SetOverride(ctx, c.org, audit.User(c.user), prices.OverrideInput{
+				Entry: pricing.Entry{
+					ID: "scenario-openai", Provider: "openai", Match: pricing.Match{Glob: flash},
+					Spec:      pricing.Spec{Prices: pricing.Wire{Input: "0.20", Output: "2"}},
+					Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 1000000,
+				},
+				ValidFrom: time.Now().Add(-time.Hour),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			crun := c.startRun(ctx, c.task(ctx), time.Now().Add(-time.Minute))
+			ckey, err := gateway.NewKey(c.ref())
+			Expect(err).NotTo(HaveOccurred())
+			state.Providers = append(state.Providers, gateway.Provider{
+				Org: c.ref().Org, Name: "openai-refuser", Type: "openai",
+				BaseURL: fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, refusePort),
+				Models:  []gateway.Model{{Name: flash, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "0.20", Output: "2"}}},
+			})
+			state.AddKey(ckey.Key)
+			_, err = driver.Apply(ctx, state)
+			Expect(err).NotTo(HaveOccurred())
+
+			count := func() int {
+				var n int
+				Expect(db.QueryRow(ctx, `SELECT count(*) FROM spend_entries WHERE org_id = $1`, c.org).Scan(&n)).To(Succeed())
+				return n
+			}
+			refuseStatus.Store(int64(sc.RefusedStatus))
+			refuseBody.Store(`{"error":{"message":"no turn of the script matches","type":"invalid_request_error"}}`)
+			Expect(chat(ctx, ckey.Material, flash)).To(Equal(sc.RefusedStatus))
+			Eventually(count).WithTimeout(30 * time.Second).WithPolling(200 * time.Millisecond).Should(Equal(1))
+
+			refuseStatus.Store(http.StatusOK)
+			refuseBody.Store(fmt.Sprintf(`{"id":"x","object":"chat.completion","model":"m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":%d,"completion_tokens":60,"total_tokens":%d}}`,
+				sc.StreamedInputTokens, sc.StreamedInputTokens+60))
+			Expect(chat(ctx, ckey.Material, flash)).To(Equal(http.StatusOK))
+			Eventually(count).WithTimeout(30 * time.Second).WithPolling(200 * time.Millisecond).Should(Equal(2))
+
+			rows, err := db.Query(ctx, `SELECT coalesce(upstream_status, 0), input_tokens, output_tokens, cost_usd = 0, coalesce(estimate->>'charge_waived', ''), estimated
+				FROM spend_entries WHERE org_id = $1`, c.org)
+			Expect(err).NotTo(HaveOccurred())
+			defer rows.Close()
+			var refused, answered []scenarios.Entry
+			for rows.Next() {
+				var x scenarios.Entry
+				Expect(rows.Scan(&x.UpstreamStatus, &x.Input, &x.Output, &x.CostZero, &x.ChargeWaived, &x.Estimated)).To(Succeed())
+				if x.UpstreamStatus != 0 {
+					refused = append(refused, x)
+				} else {
+					answered = append(answered, x)
+				}
+			}
+			Expect(refused).To(HaveLen(1))
+			Expect(answered).To(HaveLen(1))
+			Expect(sc.CheckRefused(refused[0])).To(Succeed())
+			Expect(sc.CheckStreamed(answered[0])).To(Succeed())
+			Expect(sc.CheckTotals(func() scenarios.Totals {
+				r, err := q.SumRunCosts(ctx, store.SumRunCostsParams{OrgID: c.org, RunIds: []pgtype.UUID{crun.ID}})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(r).To(HaveLen(1))
+				return scenarios.Totals{Requests: r[0].Requests, EstimatedRequests: r[0].EstimatedRequests, InputTokens: r[0].InputTokens, OutputTokens: r[0].OutputTokens}
+			}())).To(Succeed())
+		}, SpecTimeout(2*time.Minute))
+	})
 })
+
+// ipv4Endpoint is the container port's URL on the IPv4 loopback. "localhost" resolves to ::1 first,
+// and Docker runtimes that publish the port on both families (OrbStack) accept a connection there
+// and reset it when the process listens on IPv4 only (#290).
+func ipv4Endpoint(ctx context.Context, ctr *testcontainers.DockerContainer, port string) (string, error) {
+	u, err := ctr.PortEndpoint(ctx, port, "http")
+	return strings.Replace(u, "//localhost:", "//127.0.0.1:", 1), err
+}
