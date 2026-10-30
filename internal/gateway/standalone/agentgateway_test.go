@@ -30,6 +30,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/gatewaytest"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/testing/containerhost"
 )
 
 // AgentgatewayImage is the agentgateway release Koinon targets (ADR 0048).
@@ -115,10 +116,10 @@ func startStandalone(ctx context.Context, hostPorts []int, files map[string]stri
 		b, _ := io.ReadAll(l)
 		return string(b)
 	}
-	if r.URL, err = ipv4Endpoint(ctx, ctr, "4000/tcp"); err != nil {
+	if r.URL, err = containerhost.Endpoint(ctx, ctr, "4000/tcp", "http"); err != nil {
 		return nil, err
 	}
-	if r.statsURL, err = ipv4Endpoint(ctx, ctr, "15020/tcp"); err != nil {
+	if r.statsURL, err = containerhost.Endpoint(ctx, ctr, "15020/tcp", "http"); err != nil {
 		return nil, err
 	}
 	r.driver = &standalone.Driver{
@@ -392,7 +393,7 @@ var _ = Describe("agentgateway v1.7.0 anthropic-version header (ADR 0069)", func
 		)
 		DeferCleanup(func(ctx context.Context) error { return testcontainers.TerminateContainer(ctr) })
 		Expect(err).NotTo(HaveOccurred())
-		url, err := ipv4Endpoint(ctx, ctr, "4000/tcp")
+		url, err := containerhost.Endpoint(ctx, ctr, "4000/tcp", "http")
 		Expect(err).NotTo(HaveOccurred())
 
 		for _, name := range []string{"pinned", "unpinned"} {
@@ -413,11 +414,3 @@ var _ = Describe("agentgateway v1.7.0 anthropic-version header (ADR 0069)", func
 		Expect(seen).To(HaveKeyWithValue("unpinned", "2099-01-01"), "v1.7 forwards the client's version when nothing pins it")
 	}, SpecTimeout(3*time.Minute))
 })
-
-// ipv4Endpoint is the container port's URL on the IPv4 loopback. "localhost" resolves to ::1 first,
-// and Docker runtimes that publish the port on both families (OrbStack) accept a connection there
-// and reset it when the process listens on IPv4 only (#290).
-func ipv4Endpoint(ctx context.Context, ctr *testcontainers.DockerContainer, port string) (string, error) {
-	u, err := ctr.PortEndpoint(ctx, port, "http")
-	return strings.Replace(u, "//localhost:", "//127.0.0.1:", 1), err
-}
