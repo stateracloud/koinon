@@ -168,6 +168,9 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
           permission-workflows: write
+          # The updater reads each PR's statusCheckRollup to skip PRs still running checks.
+          permission-checks: read
+          permission-statuses: read
       - if: steps.gate.outputs.enabled == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
