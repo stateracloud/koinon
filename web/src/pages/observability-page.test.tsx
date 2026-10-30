@@ -44,7 +44,7 @@ const broken = create(DestinationSchema, {
   endpointUrl: 'https://api.datadoghq.com/api/intake/otlp/v1/traces',
   secretFields: ['api_key'],
   enabled: true,
-  lastTest: create(TestResultSchema, { ok: false, message: 'the backend answered HTTP 403 (Forbidden)', testedAt: at }),
+  lastTest: create(TestResultSchema, { ok: false, message: 'the backend answered HTTP 403 (the credentials were refused)', testedAt: at }),
   health: create(HealthSchema, { lastErrorAt: at, lastError: 'status 403' }),
 })
 const generic = create(DestinationSchema, { id: 'd-g', name: 'collector', backend: Backend.GENERIC, endpointUrl: 'https://c.example.com/v1/traces', secretFields: ['X-Api-Key', 'X-Team'], enabled: false })
@@ -70,22 +70,22 @@ function setup(opts: Opts = {}) {
     settings: [] as UpdateSettingsRequest[],
     listed: 0,
   }
+  let stored = create(SettingsSchema, {
+    contentLevel: opts.level ?? ContentLevel.NONE,
+    sampleRate: 0.5,
+    platformCopyLevel: opts.copy ?? ContentLevel.NONE,
+    ceiling: opts.ceiling ?? ContentLevel.FULL,
+    hasPlatformDestination: opts.platform ?? false,
+  })
+  let version = 7n
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
     service(TraceDestinationService, {
       listDestinations: () => {
         calls.listed++
-        return { destinations: [langfuse, broken, generic] }
+        return { destinations: [create(DestinationSchema, { ...langfuse, configVersion: version }), broken, generic] }
       },
-      getSettings: () => ({
-        settings: create(SettingsSchema, {
-          contentLevel: opts.level ?? ContentLevel.NONE,
-          sampleRate: 0.5,
-          platformCopyLevel: opts.copy ?? ContentLevel.NONE,
-          ceiling: opts.ceiling ?? ContentLevel.FULL,
-          hasPlatformDestination: opts.platform ?? false,
-        }),
-      }),
+      getSettings: () => ({ settings: stored }),
       createDestination: (req) => {
         calls.creates.push(req)
         if (opts.failSave) throw new ConnectError(opts.failSave, Code.FailedPrecondition)
@@ -103,17 +103,18 @@ function setup(opts: Opts = {}) {
       },
       testDestination: (req) => {
         calls.tests.push(req)
-        return { destination: broken, result: create(TestResultSchema, { ok: false, message: 'the backend answered HTTP 401 (Unauthorized)' }) }
+        return { destination: broken, result: create(TestResultSchema, { ok: false, message: 'the backend answered HTTP 401 (the credentials were refused)' }) }
       },
       updateSettings: (req) => {
         calls.settings.push(req)
         if (opts.settingsCode) throw new ConnectError('platform admins who are not members may only lower', opts.settingsCode)
-        return { settings: create(SettingsSchema, { contentLevel: req.contentLevel, sampleRate: req.sampleRate, platformCopyLevel: req.platformCopyLevel, ceiling: opts.ceiling ?? ContentLevel.FULL }) }
+        stored = create(SettingsSchema, { ...stored, contentLevel: req.contentLevel, sampleRate: req.sampleRate ?? stored.sampleRate, platformCopyLevel: req.platformCopyLevel })
+        return { settings: stored }
       },
     })
   })
-  renderApp(transport, '/settings/observability')
-  return calls
+  const app = renderApp(transport, '/settings/observability')
+  return Object.assign(calls, { queryClient: app.queryClient, setVersion: (v: bigint) => (version = v) })
 }
 
 describe('Observability page', () => {
@@ -134,7 +135,7 @@ describe('Observability page', () => {
     expect(lf.getByText('1234')).toBeInTheDocument()
     const dd = within(within(list).getByRole('region', { name: 'datadog' }))
     expect(dd.getByText(/^Failed,/)).toBeInTheDocument()
-    expect(dd.getByText(/The last test failed: the backend answered HTTP 403 \(Forbidden\)/)).toBeInTheDocument()
+    expect(dd.getByText(/The last test failed: the backend answered HTTP 403 \(the credentials were refused\)/)).toBeInTheDocument()
     expect(dd.getByText(/status 403/)).toBeInTheDocument()
     expect(within(within(list).getByRole('region', { name: 'collector' })).getByText('Disabled')).toBeInTheDocument()
   })
@@ -148,8 +149,9 @@ describe('Observability page', () => {
   it('shows the Full content badge on the page and on each destination', async () => {
     setup({ level: ContentLevel.FULL })
     const list = await screen.findByRole('list', { name: 'Destinations' })
-    await waitFor(() => expect(screen.getAllByText('Full content')).toHaveLength(5))
+    await waitFor(() => expect(screen.getAllByText('Full content')).toHaveLength(4))
     expect(within(within(list).getByRole('region', { name: 'langfuse' })).getByText('Full content')).toBeInTheDocument()
+    expect(within(within(list).getByRole('region', { name: 'collector' })).queryByText('Full content')).not.toBeInTheDocument()
   })
 
   it('never renders a secret and shows the stored one as set', async () => {
@@ -183,7 +185,7 @@ describe('Observability page', () => {
   })
 
   it('shows the backend message when the test fails, saves nothing, and clears the secrets', async () => {
-    const calls = setup({ failSave: 'the backend answered HTTP 401 (Unauthorized)' })
+    const calls = setup({ failSave: 'the destination was not saved: the test trace failed: the backend answered HTTP 401 (the credentials were refused)' })
     await screen.findByRole('list', { name: 'Destinations' })
     await userEvent.click(screen.getByRole('button', { name: 'Add destination' }))
     const form = screen.getByRole('form', { name: 'Add destination' })
@@ -193,7 +195,7 @@ describe('Observability page', () => {
     await userEvent.type(within(form).getByLabelText('API key'), fakeKey)
     await userEvent.click(within(form).getByRole('button', { name: 'Test and add' }))
     const alert = await within(form).findByRole('alert')
-    expect(alert).toHaveTextContent('Not saved. the backend answered HTTP 401 (Unauthorized)')
+    expect(alert).toHaveTextContent('the test trace failed: the backend answered HTTP 401 (the credentials were refused)')
     expect(alert).toHaveTextContent('The secrets were cleared from this page')
     expect(within(form).getByLabelText('API key')).toHaveValue('')
     expect(calls.creates).toHaveLength(1)
@@ -255,6 +257,30 @@ describe('Observability page', () => {
     expect(calls.updates).toHaveLength(0)
   })
 
+  it('checks the save against the version Edit was clicked at, whatever a refetch brings', async () => {
+    const calls = setup()
+    await screen.findByRole('list', { name: 'Destinations' })
+    await userEvent.click(screen.getByRole('button', { name: 'Edit destination langfuse' }))
+    const form = screen.getByRole('form', { name: 'Edit destination langfuse' })
+    calls.setVersion(8n)
+    await calls.queryClient.invalidateQueries()
+    await waitFor(() => expect(calls.listed).toBeGreaterThan(1))
+    await userEvent.click(within(form).getByRole('checkbox', { name: 'Enabled' }))
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.updates).toHaveLength(1))
+    expect(calls.updates[0].expectedVersion).toBe(7n)
+  })
+
+  it('says nothing about a test after a save that ran none', async () => {
+    setup()
+    await screen.findByRole('list', { name: 'Destinations' })
+    await userEvent.click(screen.getByRole('button', { name: 'Edit destination langfuse' }))
+    const form = screen.getByRole('form', { name: 'Edit destination langfuse' })
+    await userEvent.click(within(form).getByRole('checkbox', { name: 'Enabled' }))
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Saved langfuse. It was not tested again.')).toBeInTheDocument()
+  })
+
   it('reloads and does not overwrite when the destination was changed by someone else', async () => {
     const calls = setup({ updateCode: Code.Aborted })
     await screen.findByRole('list', { name: 'Destinations' })
@@ -301,7 +327,7 @@ describe('Observability page', () => {
     await screen.findByRole('list', { name: 'Destinations' })
     await userEvent.click(screen.getByRole('button', { name: 'Test destination langfuse' }))
     await waitFor(() => expect(calls.tests).toEqual([expect.objectContaining({ orgId: 'org-1', destinationId: 'd-lf' })]))
-    expect(await screen.findByText('Test failed for langfuse: the backend answered HTTP 401 (Unauthorized)')).toBeInTheDocument()
+    expect(await screen.findByText('Test failed for langfuse: the backend answered HTTP 401 (the credentials were refused)')).toBeInTheDocument()
   })
 
   it('deletes after one confirmation', async () => {
@@ -336,6 +362,34 @@ describe('Observability page', () => {
   })
 
   describe('content level', () => {
+    it('says Saved. after a save, and keeps saying it when the settings come back changed', async () => {
+      setup()
+      const form = await screen.findByRole('form', { name: 'Trace settings' })
+      await userEvent.click(within(form).getByRole('radio', { name: /Redacted/ }))
+      await userEvent.click(within(form).getByRole('button', { name: 'Save settings' }))
+      expect(await screen.findByText('Saved the settings.')).toBeInTheDocument()
+      expect(within(await screen.findByRole('form', { name: 'Trace settings' })).getByRole('radio', { name: /Redacted/ })).toBeChecked()
+    })
+
+    it('sends the clamped platform copy when the level is lowered and the platform has no destination', async () => {
+      const calls = setup({ level: ContentLevel.REDACTED, copy: ContentLevel.REDACTED, platform: false })
+      const form = await screen.findByRole('form', { name: 'Trace settings' })
+      await userEvent.click(within(form).getByRole('radio', { name: /None/ }))
+      await userEvent.click(within(form).getByRole('button', { name: 'Save settings' }))
+      await waitFor(() => expect(calls.settings).toHaveLength(1))
+      expect(calls.settings[0]).toMatchObject({ contentLevel: ContentLevel.NONE, platformCopyLevel: ContentLevel.NONE })
+    })
+
+    it('moves focus to the full-content confirmation and back to Save when it is cancelled', async () => {
+      setup()
+      const form = await screen.findByRole('form', { name: 'Trace settings' })
+      await userEvent.click(within(form).getByRole('radio', { name: /Full/ }))
+      await userEvent.click(within(form).getByRole('button', { name: 'Save settings' }))
+      expect(within(form).getByRole('button', { name: 'Send full content' })).toHaveFocus()
+      await userEvent.click(within(form).getByRole('button', { name: 'Cancel' }))
+      expect(within(form).getByRole('button', { name: 'Save settings' })).toHaveFocus()
+    })
+
     it('says what each level removes and keeps', async () => {
       setup()
       const form = await screen.findByRole('form', { name: 'Trace settings' })
@@ -429,7 +483,7 @@ describe('Observability page', () => {
       const rate = within(form).getByLabelText('Share of runs traced (%)')
       await userEvent.clear(rate)
       await userEvent.type(rate, '150')
-      expect(within(form).getByText('Sampling must be a number from 0 to 100.')).toBeInTheDocument()
+      expect(within(form).getByText('Sampling must be a plain number from 0 to 100, with at most two decimals.')).toBeInTheDocument()
       await userEvent.click(within(form).getByRole('button', { name: 'Save settings' }))
       expect(calls.settings).toHaveLength(0)
     })

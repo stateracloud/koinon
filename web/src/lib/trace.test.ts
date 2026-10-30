@@ -3,7 +3,7 @@
 import { create } from '@bufbuild/protobuf'
 import { describe, expect, it } from 'vitest'
 import { Backend, ContentLevel, DestinationSchema } from '@/gen/koinon/trace/v1alpha1/trace_pb'
-import { buildInput, connectionChanged, clampLevel, destinationNameError, formErrors, hasErrors, initialForm, levelDisabledReason, percentToRate, rateToPercent } from '@/lib/trace'
+import { normalEndpoint, sameOrigin, buildInput, connectionChanged, clampLevel, destinationNameError, formErrors, hasErrors, initialForm, levelDisabledReason, percentToRate, rateToPercent } from '@/lib/trace'
 
 const not = 'koinon_test_not-a-real-token'
 
@@ -113,7 +113,7 @@ describe('sampling', () => {
     expect(rateToPercent(1)).toBe('100')
   })
   it('refuses anything outside 0 to 100', () => {
-    for (const bad of ['', 'x', '-1', '101']) expect(percentToRate(bad)).toBeUndefined()
+    for (const bad of ['', 'x', '-1', '101', '1e1', '0x10', ' 5', '5 ', '.5', '+5', '12.345', '1_0']) expect(percentToRate(bad)).toBeUndefined()
   })
 })
 
@@ -128,5 +128,40 @@ describe('connectionChanged', () => {
     expect(connectionChanged({ ...initialForm(d), backend: Backend.DATADOG }, d)).toBe(true)
     expect(connectionChanged({ ...initialForm(d), params: { workspace: 'v' } }, d)).toBe(true)
     expect(connectionChanged({ ...initialForm(d), secrets: { api_key: 'x' } }, d)).toBe(true)
+  })
+})
+
+describe('sameOrigin (mirrors export.SameOrigin)', () => {
+  it('compares scheme, host and port, case-insensitively, with default ports', () => {
+    expect(sameOrigin('https://Lf.Example.com/a', 'HTTPS://lf.example.com:443/b')).toBe(true)
+    expect(sameOrigin('http://lf.example.com/a', 'http://lf.example.com:80/a')).toBe(true)
+    expect(sameOrigin('https://lf.example.com/a', 'http://lf.example.com/a')).toBe(false)
+    expect(sameOrigin('https://lf.example.com/a', 'https://lf.example.com:8443/a')).toBe(false)
+    expect(sameOrigin('https://lf.example.com/a', 'https://lf.example.org/a')).toBe(false)
+  })
+  it('does not normalise the host the way a browser does', () => {
+    expect(sameOrigin('https://127.1/a', 'https://127.0.0.1/a')).toBe(false)
+    expect(sameOrigin('https://[::1]:8443/a', 'https://[::1]:8443/b')).toBe(true)
+    expect(sameOrigin('not a url', 'not a url')).toBe(false)
+  })
+})
+
+describe('normalEndpoint (mirrors export.NormalizeEndpoint)', () => {
+  it('lower-cases scheme and host only', () => {
+    expect(normalEndpoint('HTTPS://Lf.Example.com:8443/Api/V1')).toBe('https://lf.example.com:8443/Api/V1')
+  })
+  it('makes a case-only change to scheme or host no change of the connection', () => {
+    const d = create(DestinationSchema, { id: 'd', name: 'o', backend: Backend.LANGFUSE, endpointUrl: 'https://lf.example.com/x', secretFields: ['public_key', 'secret_key'] })
+    expect(connectionChanged({ ...initialForm(d), endpoint: 'HTTPS://LF.example.com/x' }, d)).toBe(false)
+    expect(connectionChanged({ ...initialForm(d), endpoint: 'https://lf.example.com/X' }, d)).toBe(true)
+  })
+})
+
+describe('clearing an optional stored secret', () => {
+  it('sends the name in removeSecrets and counts as a connection change', () => {
+    const d = create(DestinationSchema, { id: 'd', name: 'o', backend: Backend.OPIK, endpointUrl: 'https://o.example.com/x', secretFields: ['api_key'], enabled: true })
+    const f = { ...initialForm(d), removed: ['api_key'] }
+    expect(buildInput(f, d).removeSecrets).toEqual(['api_key'])
+    expect(connectionChanged(f, d)).toBe(true)
   })
 })

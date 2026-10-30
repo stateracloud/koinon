@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Code, ConnectError } from '@connectrpc/connect'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { FullContentBadge } from '@/components/trace-destination-card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -32,7 +32,17 @@ export function TraceSettingsForm({ settings, isOwner, save, onSaved }: TraceSet
   const [confirming, setConfirming] = useState(false)
   const [pending, setPending] = useState(false)
   const [refused, setRefused] = useState<string>()
-  const [saved, setSaved] = useState(false)
+  const confirmButton = useRef<HTMLButtonElement>(null)
+  const saveButton = useRef<HTMLButtonElement>(null)
+  const returnFocus = useRef(false)
+  // Focus follows the question: onto the confirm button when it opens, back onto Save when it is dismissed.
+  useEffect(() => {
+    if (confirming) confirmButton.current?.focus()
+    else if (returnFocus.current) {
+      returnFocus.current = false
+      saveButton.current?.focus()
+    }
+  }, [confirming])
   // The platform's copy never carries more than the org's own level.
   const copy = clampLevel(copyChoice, level)
   const copyReason = (l: ContentLevel) => levelDisabledReason(l, ceiling, isOwner, settings.platformCopyLevel)
@@ -45,11 +55,9 @@ export function TraceSettingsForm({ settings, isOwner, save, onSaved }: TraceSet
     const changed = percent.trim() !== rateToPercent(settings.sampleRate)
     setPending(true)
     setRefused(undefined)
-    setSaved(false)
     try {
-      await save(level, changed ? rate : undefined, settings.hasPlatformDestination ? copy : normalLevel(settings.platformCopyLevel))
+      await save(level, changed ? rate : undefined, copy)
       setConfirming(false)
-      setSaved(true)
       onSaved?.()
     } catch (e) {
       setConfirming(false)
@@ -95,7 +103,6 @@ export function TraceSettingsForm({ settings, isOwner, save, onSaved }: TraceSet
                 aria-describedby={`level-${l.value}-help`}
                 onChange={() => {
                   setLevel(l.value)
-                  setSaved(false)
                 }}
               />
               <span>
@@ -120,7 +127,6 @@ export function TraceSettingsForm({ settings, isOwner, save, onSaved }: TraceSet
           value={percent}
           onChange={(e) => {
             setPercent(e.target.value)
-            setSaved(false)
           }}
           aria-invalid={!!samplingProblem}
           aria-describedby="trace-sampling-help"
@@ -158,10 +164,19 @@ export function TraceSettingsForm({ settings, isOwner, save, onSaved }: TraceSet
               Send full content? Prompts, replies, tool arguments and results, and agent messages go to your destinations as they are, apart from credentials. Anyone with access to those backends can read them. The change is recorded in the audit log.
             </span>
             <span className="flex gap-2">
-              <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={() => void commit()}>
+              <Button ref={confirmButton} type="button" variant="destructive" size="sm" disabled={pending} onClick={() => void commit()}>
                 Send full content
               </Button>
-              <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => setConfirming(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={pending}
+                onClick={() => {
+                  returnFocus.current = true
+                  setConfirming(false)
+                }}
+              >
                 Cancel
               </Button>
             </span>
@@ -173,13 +188,8 @@ export function TraceSettingsForm({ settings, isOwner, save, onSaved }: TraceSet
           <AlertDescription>{refused}</AlertDescription>
         </Alert>
       )}
-      {saved && (
-        <p role="status" className="text-sm">
-          Saved.
-        </p>
-      )}
       <div className="flex justify-end">
-        <Button type="submit" disabled={pending || confirming}>
+        <Button ref={saveButton} type="submit" disabled={pending || confirming}>
           Save settings
         </Button>
       </div>

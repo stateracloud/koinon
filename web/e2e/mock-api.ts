@@ -164,7 +164,7 @@ export function traceDestinationHandlers(opts: { level?: string; ceiling?: strin
     },
     {
       id: 'd-dd', name: 'datadog', backend: 'BACKEND_DATADOG', endpointUrl: 'https://api.datadoghq.com/api/intake/otlp/v1/traces', secretFields: ['api_key'], enabled: true,
-      lastTest: { ok: false, message: 'the backend answered HTTP 403 (Forbidden)', testedAt: at }, health: { lastSuccessAt: at, lastErrorAt: at, lastError: 'the backend answered HTTP 403 (Forbidden)', spansDropped: '1204' },
+      lastTest: { ok: false, message: 'the backend answered HTTP 403 (the credentials were refused)', testedAt: at }, health: { lastSuccessAt: at, lastErrorAt: at, lastError: 'the backend answered HTTP 403 (the credentials were refused)', spansDropped: '1204' },
     },
     { id: 'd-g', name: 'collector', backend: 'BACKEND_GENERIC', endpointUrl: 'https://collector.example.com/v1/traces', secretFields: ['X-Api-Key'], enabled: false },
   ]
@@ -175,7 +175,7 @@ export function traceDestinationHandlers(opts: { level?: string; ceiling?: strin
   }
   const seen: { create?: Json; update?: Json; test?: Json; settings?: Json; platformSet?: Json; ceiling?: Json } = {}
   const refused = (input: Json | undefined) => String(input?.endpointUrl ?? '').includes('refuse')
-  const refusal = { error: { code: 'failed_precondition', message: 'the backend answered HTTP 401 (Unauthorized)' } }
+  const refusal = { error: { code: 'failed_precondition', message: 'the destination was not saved: the test trace failed: the backend answered HTTP 401 (the credentials were refused)' } }
   const unary: Handlers['unary'] = {
     [trace + 'ListDestinations']: () => ({ destinations }),
     [trace + 'GetSettings']: () => ({ settings }),

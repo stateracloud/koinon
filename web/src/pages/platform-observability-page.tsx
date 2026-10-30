@@ -8,9 +8,9 @@ import { TraceDestinationForm } from '@/components/trace-destination-form'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { ContentLevel, TraceDestinationService } from '@/gen/koinon/trace/v1alpha1/trace_pb'
+import { ContentLevel, TraceDestinationService, type Destination } from '@/gen/koinon/trace/v1alpha1/trace_pb'
 import { usePlatformTraceActions, type PlatformTraceActions } from '@/hooks/use-trace-actions'
-import { levelLabel, levelRank, levels, normalLevel, testNotice } from '@/lib/trace'
+import { levelLabel, levelRank, levels, normalLevel, savedNotice, testNotice } from '@/lib/trace'
 
 /**
  * PlatformObservabilityPage is where a platform admin sets the platform's trace destination and the
@@ -37,6 +37,8 @@ function PlatformObservability() {
   const platform = useQuery(TraceDestinationService.method.getPlatform, {})
   const actions = usePlatformTraceActions()
   const [editing, setEditing] = useState(false)
+  // The destination as it was when Edit was clicked; a refetch while the form is open does not change it.
+  const [snapshot, setSnapshot] = useState<Destination>()
   const [notice, setNotice] = useState<string>()
   const [refused, setRefused] = useState<string>()
   const d = platform.data?.destination
@@ -82,7 +84,7 @@ function PlatformObservability() {
               platform
               save={(input) => actions.setDestination(input).then((r) => r.destination!)}
               onDone={() => setEditing(false)}
-              onSaved={(saved) => say(`Saved the platform destination. ${testNotice('the platform destination', saved.lastTest)}`)}
+              onSaved={(saved, tested) => say(savedNotice('the platform destination', saved, tested))}
             />
           )}
           {d ? (
@@ -94,7 +96,10 @@ function PlatformObservability() {
                 const r = await actions.testDestination()
                 say(testNotice('the platform destination', r.result))
               }}
-              edit={() => setEditing(true)}
+              edit={() => {
+                setSnapshot(d)
+                setEditing(true)
+              }}
               remove={() => actions.deleteDestination()}
               onRemoved={() => say('Deleted the platform destination.')}
               onRefused={(m) => {
@@ -105,10 +110,10 @@ function PlatformObservability() {
                 editing ? (
                   <TraceDestinationForm
                     platform
-                    destination={d}
+                    destination={snapshot ?? d}
                     save={(input) => actions.setDestination(input).then((r) => r.destination!)}
                     onDone={() => setEditing(false)}
-                    onSaved={(saved) => say(`Saved the platform destination. ${testNotice('the platform destination', saved.lastTest)}`)}
+                    onSaved={(saved, tested) => say(savedNotice('the platform destination', saved, tested))}
                   />
                 ) : undefined
               }

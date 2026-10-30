@@ -92,6 +92,8 @@ export type DestinationFormState = {
   params: Record<string, string>
   /** Typed secret values of the preset, by field name; write-only, never prefilled. */
   secrets: Record<string, string>
+  /** Stored optional preset secrets to clear. */
+  removed: string[]
   /** Generic only. */
   headers: HeaderRow[]
   enabled: boolean
@@ -105,18 +107,38 @@ export function initialForm(d?: Destination): DestinationFormState {
     endpoint: d?.endpointUrl ?? '',
     params: { ...(d?.params ?? {}) },
     secrets: {},
+    removed: [],
     headers: backend === Backend.GENERIC ? (d?.secretFields ?? []).map((name) => ({ name, value: '', stored: true, remove: false })) : [],
     enabled: d?.enabled ?? true,
   }
 }
 
-/** originOf is scheme, host and port of an endpoint; '' when it is not a URL. */
-export function originOf(url: string): string {
-  try {
-    return new URL(url.trim()).origin
-  } catch {
-    return ''
-  }
+type Parts = { scheme: string; host: string; port: string; rest: string }
+
+// splitUrl reads scheme, host, port and the rest of an endpoint the way Go's url.Parse does for the shapes
+// the server accepts, without WHATWG normalisation: the host stays as typed, apart from case.
+function splitUrl(raw: string): Parts | undefined {
+  const m = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)(.*)$/s.exec(raw)
+  if (!m) return undefined
+  const authority = m[2].slice(m[2].lastIndexOf('@') + 1)
+  const hp = /^(\[[^\]]*\]|[^:]*)(?::(\d*))?$/.exec(authority)
+  if (!hp) return undefined
+  return { scheme: m[1], host: hp[1].replace(/^\[|\]$/g, ''), port: hp[2] ?? '', rest: m[3] }
+}
+
+/** sameOrigin mirrors export.SameOrigin: scheme, host and port (443 for https, else 80, when unset), case-insensitive. */
+export function sameOrigin(a: string, b: string): boolean {
+  const ua = splitUrl(a)
+  const ub = splitUrl(b)
+  if (!ua || !ub) return false
+  const port = (u: Parts) => u.port || (u.scheme.toLowerCase() === 'https' ? '443' : '80')
+  return ua.scheme.toLowerCase() === ub.scheme.toLowerCase() && ua.host.toLowerCase() === ub.host.toLowerCase() && port(ua) === port(ub)
+}
+
+/** normalEndpoint mirrors export.NormalizeEndpoint: lower-case scheme and host, nothing else. */
+export function normalEndpoint(raw: string): string {
+  const m = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)(.*)$/s.exec(raw.trim())
+  return m ? `${m[1].toLowerCase()}://${m[2].toLowerCase()}${m[3]}` : raw.trim()
 }
 
 /**
@@ -124,7 +146,7 @@ export function originOf(url: string): string {
  * destination was saved with. Otherwise the server drops them and every secret must be given again.
  */
 export function keepsSecrets(f: { backend: Backend; endpoint: string }, d: Destination | undefined): boolean {
-  return !!d && d.backend === f.backend && originOf(d.endpointUrl) === originOf(f.endpoint)
+  return !!d && d.backend === f.backend && sameOrigin(d.endpointUrl, f.endpoint)
 }
 
 /** isStored says the destination already holds that secret (a preset field or a header name). */
@@ -179,7 +201,8 @@ export function hasErrors(e: FormErrors): boolean {
  */
 export function connectionChanged(f: DestinationFormState, d: Destination | undefined): boolean {
   if (!d) return true
-  if (f.backend !== d.backend || f.endpoint.trim() !== d.endpointUrl) return true
+  if (f.backend !== d.backend || normalEndpoint(f.endpoint) !== normalEndpoint(d.endpointUrl)) return true
+  if (f.removed.length > 0) return true
   const preset = presetOf(f.backend)
   for (const field of preset.fields) {
     if (field.secret) {
@@ -222,6 +245,7 @@ export function buildInput(f: DestinationFormState, d?: Destination): Destinatio
       if (v) params[field.name] = v
     }
   }
+  for (const name of f.removed) if (!secrets[name]) removeSecrets.push(name)
   for (const h of f.headers) {
     const name = h.name.trim()
     if (h.stored && h.remove) removeSecrets.push(name)
@@ -286,8 +310,10 @@ export function levelDisabledReason(level: ContentLevel, ceiling: ContentLevel, 
 
 /** Sampling is edited as a percentage and stored as a share from 0 to 1. */
 export function percentToRate(percent: string): number | undefined {
+  // Plain decimals only: no exponents, hex, signs or spaces.
+  if (!/^\d{1,3}(\.\d{1,2})?$/.test(percent)) return undefined
   const n = Number(percent)
-  if (percent.trim() === '' || !Number.isFinite(n) || n < 0 || n > 100) return undefined
+  if (n > 100) return undefined
   return Math.round(n * 100) / 10000
 }
 
@@ -296,7 +322,7 @@ export function rateToPercent(rate: number): string {
 }
 
 export function samplingError(percent: string): string | undefined {
-  return percentToRate(percent) === undefined ? 'Sampling must be a number from 0 to 100.' : undefined
+  return percentToRate(percent) === undefined ? 'Sampling must be a plain number from 0 to 100, with at most two decimals.' : undefined
 }
 
 export function formatCount(n: bigint): string {
@@ -311,3 +337,8 @@ export function testNotice(name: string, r: TestResult | undefined): string {
 
 /** settingsDeniedMessage explains a refused settings change by a platform admin who is not a member of the org. */
 export const settingsDeniedMessage = 'You are not a member of this org, so you can only lower its settings here, not raise them. Ask an org owner to raise them.'
+
+/** savedNotice words a save: the test result is mentioned only when the save ran a test. */
+export function savedNotice(name: string, saved: Destination, tested: boolean): string {
+  return tested ? `Saved ${name}. ${testNotice(name, saved.lastTest)}` : `Saved ${name}. It was not tested again.`
+}

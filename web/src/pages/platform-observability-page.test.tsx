@@ -90,14 +90,14 @@ describe('Platform observability page', () => {
   })
 
   it('shows the backend message when the test refuses the destination', async () => {
-    setup({ failSave: 'the backend answered HTTP 403 (Forbidden)' })
+    setup({ failSave: 'the backend answered HTTP 403 (the credentials were refused)' })
     await userEvent.click(await screen.findByRole('button', { name: 'Set destination' }))
     const form = screen.getByRole('form', { name: 'Add platform destination' })
     await userEvent.type(within(form).getByLabelText('Traces endpoint'), 'https://api.datadoghq.com/x')
     await userEvent.type(within(form).getByLabelText('Public key'), 'koinon_test_public')
     await userEvent.type(within(form).getByLabelText('Secret key'), fakeKey)
     await userEvent.click(within(form).getByRole('button', { name: 'Test and add' }))
-    expect(await within(form).findByRole('alert')).toHaveTextContent('Not saved. the backend answered HTTP 403 (Forbidden)')
+    expect(await within(form).findByRole('alert')).toHaveTextContent('Not saved. the backend answered HTTP 403 (the credentials were refused)')
   })
 
   it('shows the destination, tests it and deletes it', async () => {

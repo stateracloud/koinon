@@ -23,7 +23,7 @@ test('owner walks the Observability page: destinations, a refused test, adding o
   await page.goto('/')
   await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Observability' }).click()
   await expect(page.getByRole('heading', { name: 'Observability', level: 1 })).toBeVisible()
-  await expect(page.getByRole('region', { name: 'datadog' })).toContainText('The last test failed: the backend answered HTTP 403 (Forbidden)')
+  await expect(page.getByRole('region', { name: 'datadog' })).toContainText('The last test failed: the backend answered HTTP 403 (the credentials were refused)')
   await expectAccessible(page)
 
   await page.getByRole('button', { name: 'Test destination langfuse' }).click()
@@ -38,7 +38,7 @@ test('owner walks the Observability page: destinations, a refused test, adding o
   await form.getByLabel('Secret key').fill('koinon_test_not-a-real-token')
   await expectAccessible(page)
   await form.getByRole('button', { name: 'Test and add' }).click()
-  await expect(form.getByRole('alert')).toContainText('Not saved. the backend answered HTTP 401 (Unauthorized)')
+  await expect(form.getByRole('alert')).toContainText('the test trace failed: the backend answered HTTP 401 (the credentials were refused)')
   await expect(form.getByLabel('Secret key')).toHaveValue('')
   await form.getByLabel('Traces endpoint').fill('https://lf.example.com/v1/traces')
   await form.getByLabel('Public key').fill('koinon_test_public')
@@ -52,6 +52,11 @@ test('owner walks the Observability page: destinations, a refused test, adding o
   await settings.getByRole('radio', { name: /Full/ }).check()
   await settings.getByRole('button', { name: 'Save settings' }).click()
   expect(seen.settings).toBeUndefined()
+  // Focus follows the question onto its confirm button, and back to Save when it is cancelled.
+  await expect(settings.getByRole('button', { name: 'Send full content' })).toBeFocused()
+  await settings.getByRole('button', { name: 'Cancel' }).click()
+  await expect(settings.getByRole('button', { name: 'Save settings' })).toBeFocused()
+  await settings.getByRole('button', { name: 'Save settings' }).click()
   await expectAccessible(page)
   await settings.getByRole('button', { name: 'Send full content' }).click()
   await expect.poll(() => seen.settings).toMatchObject({ orgId: org, contentLevel: 'CONTENT_LEVEL_FULL'})
@@ -71,6 +76,27 @@ test('disabling a destination whose backend is down saves without a test', async
   await expect(page.getByRole('region', { name: 'datadog' }).getByText('Disabled')).toBeVisible()
   expect(seen.update).toMatchObject({ destinationId: 'd-dd' })
   expect((seen.update as { destination: { enabled?: boolean } }).destination.enabled).toBeFalsy()
+})
+
+// The dark theme's destructive red is light: its text must still reach 4.5:1 (WCAG 1.4.3).
+test('both pages pass axe in the dark theme, with destructive buttons and badges showing', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' })
+  const { handlers } = api({ platformAdmin: true, level: 'CONTENT_LEVEL_FULL' })
+  await mockApi(page, handlers)
+  await page.goto('/settings/observability')
+  const settings = page.getByRole('form', { name: 'Trace settings' })
+  await expect(settings).toBeVisible()
+  await expect(page.getByText('Full content').first()).toBeVisible()
+  await expectAccessible(page)
+  await settings.getByRole('radio', { name: /None/ }).check()
+  await settings.getByRole('radio', { name: /Full/ }).check()
+  await page.getByRole('button', { name: 'Delete destination langfuse' }).click()
+  await expectAccessible(page)
+  await page.goto('/platform/observability')
+  const ceiling = page.getByRole('form', { name: 'Content ceiling' })
+  await ceiling.getByRole('radio', { name: /Redacted/ }).check()
+  await expect(ceiling.getByRole('button', { name: 'Lower the ceiling' })).toBeVisible()
+  await expectAccessible(page)
 })
 
 test('an admin cannot choose full and a member sees a notice', async ({ page }) => {
