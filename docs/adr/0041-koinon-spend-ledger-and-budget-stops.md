@@ -1,6 +1,6 @@
 # 0041. Koinon spend ledger and budget stops
 
-- Status: Accepted
+- Status: Accepted; amended 2026-10-30 (below)
 - Date: 2026-10-21
 - Amends: ADR 0013 (model access)
 - Amended by: [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), 2026-10-28 (below), [0081](0081-run-limits.md) (2026-10-29, the run level)
@@ -228,3 +228,10 @@ limit ("the minimum of run, ticket, agent, org and platform remaining") and it w
   spend-scope check after v0.1.0.
 - The model-request limit is not a key level; it is checked by the ledger only.
 
+## Amendment (2026-10-30): a spent budget stops the run
+
+A spent budget **stops** the run: it is canceled with failure class `budget` (and reason
+`spend_limit`, or `run_spend_cap` for a run's own limit). It does not park. The later decisions win
+over decision 4's "Koinon parks the run": this ADR's later "Stop before the key goes" (cancel, not park), ADR 0050
+and ADR 0081; the code cancels (`ledger.Stop`, agentd's `budgetStop`). The park reason `budget`
+(`PARK_REASON_BUDGET`) is reserved and unused; proto values are never removed. Wording only (GLOSSARY.md), no decision change.
