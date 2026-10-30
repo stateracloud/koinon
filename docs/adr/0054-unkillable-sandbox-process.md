@@ -131,3 +131,20 @@ per agent repository. That password is sealed with the secret store, so the rule
 does not mount the KEK Secret. koinon-api opens (or creates) the password and returns it to agentd
 per checkpoint, on the same listener and with the same kind of HMAC credential as saved work
 (`/internal/home-repository`).
+
+## Amendment (2026-10-30, #260): savework reads the repositories with an isolated git config
+
+The repositories are the agent's, and savework runs outside any turn, so it must not run code the
+agent's git configuration names. `savework.sh` ignores the system, global and home configuration
+(`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL=/dev/null`; this includes the home include file that
+`/etc/gitconfig` names, which the agent can write), forces `core.fsmonitor` and `core.hooksPath`
+off, passes `--no-ext-diff --no-textconv`, empties every filter driver the repository defines,
+so files are saved as they are on disk, and allows no transport (`GIT_ALLOW_PROTOCOL`), so a
+partial clone cannot fetch a missing object from a promisor remote whose `uploadpack`,
+`core.sshCommand` or `ext::` URL the agent chose. A repository whose own configuration includes other files
+(`include`, `includeIf`) is skipped and reported, because git cannot be told to ignore includes in
+the repository's config. Global and home ignore and attributes files (`core.excludesFile`, `core.attributesFile` and their XDG defaults) no longer apply to what is saved; only the repository's own `.gitignore` and `.gitattributes` do.
+
+Permission requests (ADR 0049): agentd never picks an "always" option (a request with no once option
+is cancelled), and the paths of a request are resolved in the sandbox, so a link inside the
+workspace that points outside is outside; a path that is itself a link is outside.
