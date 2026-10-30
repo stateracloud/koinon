@@ -683,3 +683,26 @@ func TestNestedEscapedJSONIsBounded(t *testing.T) {
 		t.Errorf("cut %v valid %v len %d", cut, json.Valid([]byte(out)), len(out))
 	}
 }
+
+// A long Authorization parameter escaped several levels deep is read whole, not by window.
+func TestLongDigestParameterThroughEscapes(t *testing.T) {
+	long := "00xo" + strings.Repeat("w", 1500) + "qq"
+	hdr := `Authorization: Digest realm="r", response="` + long + `", nc=00000001`
+	inner, _ := json.Marshal("/" + hdr)
+	b, _ := json.Marshal(string(inner))
+	level3, _ := json.Marshal(string(b))
+	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
+	for name, in := range map[string]string{
+		"plain":      "x " + hdr,
+		"two levels": `{"c":` + string(b) + `}`,
+		"three":      `{"c":` + string(level3) + `}`,
+		"raw text":   `{"c":` + string(b) + `}`,
+	} {
+		if out, _ := s.Content(in, 1<<20); strings.Contains(out, "wwwwwwww") || strings.Contains(out, "00xo") {
+			t.Errorf("%s: Content left the parameter", name)
+		}
+		if out := s.Text(in); strings.Contains(out, "wwwwwwww") || strings.Contains(out, "00xo") {
+			t.Errorf("%s: Text left the parameter", name)
+		}
+	}
+}
