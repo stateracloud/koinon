@@ -123,6 +123,11 @@ RETURNING *;
 SELECT * FROM platform_trace_destination
 WHERE singleton;
 
+-- name: LockPlatformTraceDestination :one
+SELECT * FROM platform_trace_destination
+WHERE singleton
+FOR UPDATE;
+
 -- name: UpsertPlatformTraceDestination :one
 -- The platform destination has one writer at a time: a platform admin. A change bumps config_version.
 -- @set_test as for UpdateTraceDestination.
