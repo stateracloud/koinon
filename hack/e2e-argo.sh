@@ -6,9 +6,10 @@
 # bundle of HEAD goes to an S3 bucket, the WorkflowTemplate is submitted through the Argo Server REST
 # API (no argo CLI needed) on the slot with the fewest unfinished runs, and the run is followed to the
 # end: stage lines while it runs, then the results archive (timings, logs, diagnostics) in --out and
-# the run's exit status. Ctrl-C stops the run.
+# the run's exit status. Ctrl-C stops the run. --repo names the checkout to test (default: the one
+# the current directory is in), so a worktree can be tested without changing directory.
 #
-#   hack/e2e-remote.sh [--argo] [--target T] [--slot S] [--out DIR] [--no-wait] [--dry-run]
+#   hack/e2e-remote.sh [--argo] [--repo DIR] [--target T] [--slot S] [--out DIR] [--no-wait] [--dry-run]
 #   hack/e2e-remote.sh --argo --follow <workflow name> [--out DIR]
 #
 # Credentials never appear in argv, logs or files: a credentials file (KOINON_E2E_ARGO_CREDS,
@@ -42,10 +43,11 @@ CREDS=${KOINON_E2E_ARGO_CREDS:-$here/e2e-argo-lab-creds.sh}
 POLL=${KOINON_E2E_ARGO_POLL:-30}
 AGENT=${KOINON_E2E_AGENT:-${KOINON_AGENT_SESSION:-${USER:-agent}}}
 
-target=test-e2e-kind slot="" out=${KOINON_E2E_OUT:-} wait=1 dry=0 follow=""
+target=test-e2e-kind slot="" out=${KOINON_E2E_OUT:-} wait=1 dry=0 follow="" repo=""
 while [[ $# -gt 0 ]]; do
   case $1 in
   --argo) ;;
+  --repo) repo=${2:?--repo needs a directory}; shift ;;
   --target) target=${2:?--target needs a make target}; shift ;;
   --slot) slot=${2:?--slot needs a slot name}; shift ;;
   --out) out=${2:?--out needs a directory}; shift ;;
@@ -205,7 +207,7 @@ if [[ -n $follow ]]; then
   exit
 fi
 
-root=$(git rev-parse --show-toplevel)
+root=$(git -C "${repo:-.}" rev-parse --show-toplevel)
 cd "$root"
 sha=$(git rev-parse HEAD)
 id="$(date -u +%Y%m%d-%H%M%S)-${sha:0:8}-$$"
