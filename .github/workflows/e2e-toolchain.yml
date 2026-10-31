@@ -1,26 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Publishes the images the home lab's Argo e2e queue (home-lab ADR 036) pulls by digest through its
-# registry mirror:
-#   ghcr.io/stateracloud/koinon-e2e-toolchain      hack/e2e-toolchain/Dockerfile, tag
-#       go<GO_VERSION>-<first 12 hex of the Dockerfile's sha256> (hack/e2e-remote.sh builds the
-#       same Dockerfile locally under the same tag, so a tag names exactly one Dockerfile)
-#   ghcr.io/stateracloud/koinon-e2e-toolchain-web  hack/e2e-toolchain/web.Dockerfile on top of that
-#       image (#358), tag <toolchain tag>-web-<first 12 hex of web.Dockerfile's sha256>
-#   ghcr.io/stateracloud/koinon-spike-probe        hack/spike/probe (#357), tag <first 12 hex of
-#       its git tree>: the escape suite's sandbox image, for test/escape/kind.sh without nvcr.io
-# A tag that already exists is not rebuilt, so its digest stays what the lab pinned. The digests
-# are in the job summary.
+# Publishes the kind e2e toolchain image (hack/e2e-toolchain/Dockerfile) to
+# ghcr.io/stateracloud/koinon-e2e-toolchain, for the home lab's Argo e2e queue (home-lab ADR 036),
+# which pulls it by digest through its registry mirror. hack/e2e-remote.sh keeps building the same
+# Dockerfile locally; both tag the image go<GO_VERSION>-<first 12 hex of the Dockerfile's sha256>,
+# so a tag names exactly one Dockerfile. The digest is in the job summary.
 #
-# Runs when one of them changes on main, and by hand. amd64 only: the e2e node is amd64.
+# Runs when the Dockerfile changes on main, and by hand. amd64 only: the e2e node is amd64.
 name: e2e-toolchain
 
 on:
   push:
     branches: [main]
     paths:
-      - hack/e2e-toolchain/**
-      - hack/spike/probe/**
+      - hack/e2e-toolchain/Dockerfile
       - .github/workflows/e2e-toolchain.yml
   workflow_dispatch:
 
@@ -50,34 +43,16 @@ jobs:
         run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
       - name: build and push
         env:
-          OWNER: ghcr.io/stateracloud
+          REPO: ghcr.io/stateracloud/koinon-e2e-toolchain
           SHA: ${{ github.sha }}
         run: |
-          # publish <repo> <tag> <context> [build args...]: build and push unless the tag exists;
-          # prints the digest either way.
-          publish() {
-            local repo=$1 tag=$2 ctx=$3; shift 3
-            if docker buildx imagetools inspect "${repo}:${tag}" >/dev/null 2>&1; then
-              docker buildx imagetools inspect "${repo}:${tag}" --format '{{json .Manifest}}' | jq -r .digest
-              return
-            fi
-            docker buildx build --platform linux/amd64 --provenance=mode=max --sbom=true \
-              --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
-              --label "org.opencontainers.image.revision=${SHA}" \
-              --metadata-file /tmp/meta.json -t "${repo}:${tag}" --push "$@" "$ctx" >&2
-            jq -r '."containerimage.digest"' /tmp/meta.json
-          }
           gov=$(sed -n 's/^ARG GO_VERSION=//p' hack/e2e-toolchain/Dockerfile)
-          tag="go${gov}-$(sha256sum hack/e2e-toolchain/Dockerfile | cut -c1-12)"
-          base=$(publish "$OWNER/koinon-e2e-toolchain" "$tag" hack/e2e-toolchain)
-          webtag="${tag}-web-$(sha256sum hack/e2e-toolchain/web.Dockerfile | cut -c1-12)"
-          web=$(publish "$OWNER/koinon-e2e-toolchain-web" "$webtag" hack/e2e-toolchain \
-            -f hack/e2e-toolchain/web.Dockerfile --build-arg "BASE=$OWNER/koinon-e2e-toolchain:${tag}@${base}")
-          ptag=$(git rev-parse HEAD:hack/spike/probe | cut -c1-12)
-          probe=$(publish "$OWNER/koinon-spike-probe" "$ptag" hack/spike/probe)
-          {
-            echo "Images (commit ${SHA}):"
-            echo "- **$OWNER/koinon-e2e-toolchain:${tag}@${base}**"
-            echo "- **$OWNER/koinon-e2e-toolchain-web:${webtag}@${web}**"
-            echo "- **$OWNER/koinon-spike-probe:${ptag}@${probe}**"
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+          dsum=$(sha256sum hack/e2e-toolchain/Dockerfile | cut -c1-12)
+          tag="go${gov}-${dsum}"
+          docker buildx build --platform linux/amd64 --provenance=mode=max --sbom=true \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${SHA}" \
+            --metadata-file /tmp/meta.json -t "${REPO}:${tag}" --push hack/e2e-toolchain
+          digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
+          echo "toolchain image: ${REPO}:${tag}@${digest}"
+          echo "**${REPO}:${tag}@${digest}** (commit ${SHA})" >>"$GITHUB_STEP_SUMMARY"
