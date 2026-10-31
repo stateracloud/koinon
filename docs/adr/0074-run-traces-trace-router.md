@@ -723,28 +723,27 @@ event classes. The code lands in #344 (items), #345 (business and diagnostic eve
    (messages, thoughts and tool calls) and stores those. ACP chunks are live-only: streamed to the
    UI, never stored.
 2. **Business and diagnostic events.** Events are split in two classes:
-   - **Business events** are state the run depends on. A failed write may fence the run.
-   - **Diagnostic events** are everything else, such as the stored items of point 1 kept for reading
-     later. A failed write is logged and counted and never fences the run.
-3. **Per-org retention of stored run content.** Stored run content has a retention rule per org: the
-   default is 30 days, configurable per org. A purge job removes content older than the org's
-   retention (#346).
+   - **Business events** are state the run depends on. A failed write may fence the run. Classes
+     (Andre, 2026-11-01): run state changes, park and resume, approvals and `ask_user` answers, task
+     status, and the final reply.
+   - **Diagnostic events** are everything else. A failed write is logged and counted and never fences
+     the run. Classes: thoughts, tool-call items and progress, usage notes, and debug events.
+3. **Per-org retention of stored run content** (Andre, 2026-11-01). Org admins set the retention
+   from 1 to 365 days; the default is 30. A platform admin can set a lower platform maximum. Every
+   change is audited (old and new value). A purge job removes content older than the org's retention
+   (#346).
 4. **What retention does not touch.** Run traces (this ADR's router and its destinations) and the
    spend ledger are unaffected; the ledger stays append-only ([0041](0041-koinon-spend-ledger-and-budget-stops.md)).
-5. **Content level.** Today the content stored in `run_events` does not depend on the org's trace
-   content level (decision 6), which governs only what the router exports. This amendment does not
-   change that; see the first open question.
+   Audit records are not covered by run-content retention either: audit retention is its own policy
+   (#345), and run-content retention never deletes audit records (Andre, 2026-11-01).
+6. **A purge removes content only** (Andre, 2026-11-01). Message, thought and tool payloads are
+   deleted; event rows keep type, time, state and cost, so the timeline, the costs and the audit links
+   keep working. The UI shows "content expired after N days" for a run past retention.
+5. **Content level** (Andre, 2026-11-01). Stored run content is independent of the trace content
+   level (decision 6): items are always stored, with the always-on secret scrubber, and the trace level
+   governs only what the router exports to trace destinations. Retention is the privacy control for
+   stored content.
 
 ### Open questions
 
-- How stored run content interacts with the trace content level. The issue asks it be written down
-  and the comments do not decide it: whether an org at `none` stores items at all, stores them
-  scrubbed, or stores them in full for the UI as today.
-- Which events are business and which diagnostic, class by class. The decision fixes the rule (a
-  diagnostic write never fences); #345 lists the classes against the code.
-- Who may change an org's retention (org owner or admin), the allowed range, whether a platform
-  maximum applies like the content level ceiling, and whether the change is audited.
-- Whether the purge deletes rows or only their content, and what the UI shows for a run past
-  retention.
-- Whether audit events ([0023](0023-observability-and-audit.md)) are in scope of retention. The
-  decision names "stored run content" only; audit stays hash-chained and is assumed unaffected.
+- The metric name for failed diagnostic writes (see the 0023 amendment); #345 names it against the code.

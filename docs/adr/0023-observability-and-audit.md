@@ -170,16 +170,20 @@ the parts that belong to this ADR:
 
 - **Business and diagnostic events.** A run's events are business events (state the run depends on;
   a failed write may fence the run) or diagnostic events (a failed write is logged and counted,
-  never fences). The count is a metric under the label rule of the metrics amendment: a fixed label
-  set, no org, agent, user, ticket or run IDs.
+  never fences). Business: run state changes, park and resume, approvals and `ask_user` answers, task
+  status, the final reply. Diagnostic: thoughts, tool-call items and progress, usage notes, debug
+  events (Andre, 2026-11-01). The count is a metric under the label rule of the metrics amendment: a
+  fixed label set, no org, agent, user, ticket or run IDs.
 - **Stored run content is items, not chunks.** `run_events` holds completed messages, thoughts and
-  tool calls; ACP chunks are live-only.
-- **Retention.** Stored run content is kept per org for 30 days by default, configurable per org.
-  The hash-chained audit log, run traces and the spend ledger are not stored run content and are
-  unaffected.
+  tool calls; ACP chunks are live-only. Items are always stored, with the always-on secret scrubber,
+  whatever the trace content level; retention is the privacy control (Andre, 2026-11-01).
+- **Retention.** Stored run content is kept per org for 30 days by default; org admins set 1 to 365
+  days, a platform admin can set a lower platform maximum, and every change is audited (old and new).
+  A purge removes content only: event rows keep type, time, state and cost. The hash-chained audit
+  log, run traces and the spend ledger are not stored run content and are unaffected. Audit records
+  are never deleted by run-content retention; audit retention is its own policy (#345).
 
-Open: whether the audit log needs its own retention statement (the decision does not say), and the
-metric name for failed diagnostic writes. Both are left to #345.
+Open: the metric name for failed diagnostic writes, left to #345.
 
 ## Open questions
 
