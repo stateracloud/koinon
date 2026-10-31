@@ -1256,11 +1256,47 @@ func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outc
 		return err
 	}
 	if outcome == store.RunStateSucceeded {
-		return r.postReply(ctx, q)
-	}
-	_, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+		if err := r.postReply(ctx, q); err != nil {
+			return err
+		}
+	} else if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 		OrgID: r.run.OrgID, TaskID: r.run.TaskID, RunID: r.run.ID,
 		Kind: "run." + string(outcome), ActorKind: store.TaskActorKindSystem, Payload: payload,
+	}); err != nil {
+		return err
+	}
+	// The task's end comes after the reply or the failure on its timeline.
+	return r.endTask(ctx, q, outcome, class)
+}
+
+// endTask moves the run's task to the run's outcome (ADR 0065): a run that succeeded completes it, a
+// run that failed fatally fails it, whether or not the run parked on the way. Other failures leave the
+// task open (a person can retry them with a message), and a task that is canceled, already ended or
+// has another run queued (a follow-up message) stays as it is.
+func (r *runner) endTask(ctx context.Context, q *store.Queries, outcome store.RunState, class store.RunFailureClass) error {
+	var to store.TaskState
+	switch {
+	case outcome == store.RunStateSucceeded:
+		to = store.TaskStateCompleted
+	case outcome == store.RunStateFailed && class == store.RunFailureClassFatal:
+		to = store.TaskStateFailed
+	default:
+		return nil
+	}
+	t, err := q.EndTaskFrom(ctx, store.EndTaskFromParams{
+		OrgID: r.run.OrgID, ID: r.run.TaskID, ToState: to,
+		FromStates: []string{string(store.TaskStateSubmitted), string(store.TaskStateWorking), string(store.TaskStateInputRequired)},
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{"to": string(t.State), "reason": "run_" + string(outcome)})
+	_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+		OrgID: r.run.OrgID, TaskID: r.run.TaskID, RunID: r.run.ID,
+		Kind: "status.changed", ActorKind: store.TaskActorKindSystem, Payload: payload,
 	})
 	return err
 }
@@ -1280,7 +1316,7 @@ func (r *runner) postReply(ctx context.Context, q *store.Queries) error {
 	return err
 }
 
-// reply is the agent's message text of the run since its last park, across every epoch.
+// reply is the agent's last message of the run since its last park (interim narration before a tool call is left out).
 func (r *runner) reply(ctx context.Context, q *store.Queries) (string, error) {
 	return runreply.Reply(ctx, q, r.run.OrgID, r.run.ID)
 }

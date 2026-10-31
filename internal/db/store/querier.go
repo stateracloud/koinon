@@ -236,6 +236,10 @@ type Querier interface {
 	DisableModelsOfProvider(ctx context.Context, arg DisableModelsOfProviderParams) error
 	EnableModel(ctx context.Context, arg EnableModelParams) error
 	EndRunTurn(ctx context.Context, arg EndRunTurnParams) (RunTurn, error)
+	// Ends a task with its run's outcome (completed, or failed), only if it is in one of from_states and
+	// no run of it is queued (a follow-up message already asked for another turn). No row: the task is
+	// elsewhere (canceled, ended by a person) or has more work queued.
+	EndTaskFrom(ctx context.Context, arg EndTaskFromParams) (Task, error)
 	// pending -> expired once expires_at has passed (ADR 0049: 7 days).
 	ExpirePendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	// Saved work is kept for 14 days; the sealed files go with it.
@@ -482,6 +486,10 @@ type Querier interface {
 	// Whether the user may answer questions in the org: role member or higher.
 	IsOrgMember(ctx context.Context, arg IsOrgMemberParams) (bool, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
+	// The newest complete checkpoint of the home's lineage, whichever sandbox took it. A sandbox no
+	// harness ever ran in (home_dirtied_at NULL) holds exactly what this checkpoint holds, so it is
+	// the restore of a recreation or archive of that sandbox.
+	LatestCompleteHomeCheckpointOfGeneration(ctx context.Context, arg LatestCompleteHomeCheckpointOfGenerationParams) (HomeCheckpoint, error)
 	// The newest complete checkpoint (hourly, stop or recreate) taken for this sandbox. The recreate
 	// gate uses it for a sandbox that cannot be read (phase Error or Completed), which no new
 	// checkpoint can be taken of.

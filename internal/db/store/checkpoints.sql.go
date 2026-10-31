@@ -64,7 +64,7 @@ UPDATE agent_sandboxes
 SET restore_claimed_at = now()
 WHERE org_id = $1 AND agent_id = $2 AND restore_checkpoint_id IS NOT NULL
   AND (restore_claimed_at IS NULL OR restore_claimed_at < now() - make_interval(secs => $3::int))
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
 `
 
 type ClaimSandboxRestoreParams struct {
@@ -106,6 +106,7 @@ func (q *Queries) ClaimSandboxRestore(ctx context.Context, arg ClaimSandboxResto
 		&i.RestoreClaimedAt,
 		&i.ArchivedAt,
 		&i.Reason,
+		&i.HomeDirtiedAt,
 	)
 	return i, err
 }
@@ -385,6 +386,45 @@ func (q *Queries) InsertHomeRepository(ctx context.Context, arg InsertHomeReposi
 		&i.Prefix,
 		&i.PasswordEnvelope,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const latestCompleteHomeCheckpointOfGeneration = `-- name: LatestCompleteHomeCheckpointOfGeneration :one
+SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at FROM home_checkpoints
+WHERE org_id = $1 AND agent_id = $2 AND generation = $3 AND status = 'complete'
+ORDER BY finished_at DESC, id DESC
+LIMIT 1
+`
+
+type LatestCompleteHomeCheckpointOfGenerationParams struct {
+	OrgID      pgtype.UUID
+	AgentID    pgtype.UUID
+	Generation string
+}
+
+// The newest complete checkpoint of the home's lineage, whichever sandbox took it. A sandbox no
+// harness ever ran in (home_dirtied_at NULL) holds exactly what this checkpoint holds, so it is
+// the restore of a recreation or archive of that sandbox.
+func (q *Queries) LatestCompleteHomeCheckpointOfGeneration(ctx context.Context, arg LatestCompleteHomeCheckpointOfGenerationParams) (HomeCheckpoint, error) {
+	row := q.db.QueryRow(ctx, latestCompleteHomeCheckpointOfGeneration, arg.OrgID, arg.AgentID, arg.Generation)
+	var i HomeCheckpoint
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.AgentID,
+		&i.Reason,
+		&i.Status,
+		&i.SandboxID,
+		&i.Generation,
+		&i.Epoch,
+		&i.SnapshotID,
+		&i.SizeBytes,
+		&i.Attempts,
+		&i.Error,
+		&i.RequestedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
 	)
 	return i, err
 }
@@ -706,7 +746,7 @@ const setSandboxRestore = `-- name: SetSandboxRestore :one
 UPDATE agent_sandboxes
 SET restore_checkpoint_id = $1, restore_claimed_at = NULL
 WHERE org_id = $2 AND agent_id = $3
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
 `
 
 type SetSandboxRestoreParams struct {
@@ -748,6 +788,7 @@ func (q *Queries) SetSandboxRestore(ctx context.Context, arg SetSandboxRestorePa
 		&i.RestoreClaimedAt,
 		&i.ArchivedAt,
 		&i.Reason,
+		&i.HomeDirtiedAt,
 	)
 	return i, err
 }
