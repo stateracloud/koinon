@@ -61,7 +61,7 @@ are in [0046](0046-adr-conventions.md).
 | [0039](0039-development-setup.md) | Development setup: Andre's Mac plus the home-lab Talos cluster | Accepted |
 | [0040](0040-agentgateway-model-and-mcp-gateway.md) | agentgateway as the model gateway and MCP gateway | Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 (below) |
 | [0041](0041-koinon-spend-ledger-and-budget-stops.md) | Koinon spend ledger and budget stops | Accepted; amended 2026-10-30 (below) |
-| [0042](0042-ask-tier-park-and-execute.md) | Ask tier: park the run, Koinon executes the approved call | Accepted; amended by [0048](0048-openshell-spike-results.md) and [0065](0065-work-model-tasks-inbox.md) |
+| [0042](0042-ask-tier-park-and-execute.md) | Ask tier: park the run, Koinon executes the approved call | Accepted; amended by [0048](0048-openshell-spike-results.md), [0065](0065-work-model-tasks-inbox.md) and [0084](0084-leak-guard.md) |
 | [0043](0043-workload-identity-adapters-and-koinon-issuer.md) | Workload identity adapters and a Koinon OIDC issuer | Accepted |
 | [0044](0044-in-sandbox-credential-exception.md) | In-sandbox credentials as a gated exception | Accepted |
 | [0045](0045-openshell-hardening-defaults.md) | OpenShell hardening defaults | Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md) |
@@ -76,7 +76,7 @@ are in [0046](0046-adr-conventions.md).
 | [0054](0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is recreated | Accepted; amended 2026-10-24 (below): detection, saving the work, the loop guard |
 | [0055](0055-chat-as-its-own-object.md) | Chat is its own object | Accepted |
 | [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted; amended 2026-10-23, 2026-10-24 and 2026-10-28 (below) |
-| [0057](0057-mcp-servers.md) | MCP servers: remote and container, catalog, allowlists and discovery | Accepted; amended 2026-10-24 (below) |
+| [0057](0057-mcp-servers.md) | MCP servers: remote and container, catalog, allowlists and discovery | Accepted; amended 2026-10-24, 2026-10-30 and 2026-10-31 by [0084](0084-leak-guard.md) (below) |
 | [0058](0058-gateway-modes.md) | Gateway modes: standalone, kubernetes and shared | Accepted; amended 2026-10-25 and 2026-10-26 (below) |
 | [0059](0059-v01-opencode-only.md) | v0.1 ships one harness: OpenCode v2 | Accepted |
 | [0060](0060-migrations-as-a-job.md) | Migrations run as a Job, not on start; an Argo CD Sync hook under Argo | Accepted |
@@ -103,3 +103,4 @@ are in [0046](0046-adr-conventions.md).
 | [0081](0081-run-limits.md) | Run limits: model requests, spend and time; tokens are reported, not enforced | Accepted |
 | [0082](0082-work-claims-and-ready-queue.md) | Work claims and the ready queue: a claim branch is the lock, the board is the queue | Accepted |
 | [0083](0083-sandbox-resources.md) | Sandbox resources: template defaults, platform bounds, requests and limits | Accepted |
+| [0084](0084-leak-guard.md) | Leak guard: a taint check on every MCP tool call, in koinon-api | Accepted (decisions by Andre, 2026-10-31; delivery before v0.1.0) |
