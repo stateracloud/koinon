@@ -235,6 +235,11 @@ check "--slot is passed through" has 'slot=c' "$tmp/argo3/submitted"
 check "--no-wait prints how to follow" has 'hack/e2e-remote.sh --argo --follow koinon-make-t1' "$tmp/log9"
 check "--no-wait keeps the login (the token must outlive the submit)" sh -c "! grep -q 'creds closed' '$FAKE_LOG'"
 
+argo_env "$tmp/argo4"
+rc=0
+(unset KOINON_E2E_REMOTE; cd "$tmp" && "$tmp/repo/hack/e2e-remote.sh" --repo "$tmp/repo" --no-wait >"$tmp/log10" 2>&1) || rc=$?
+check "--repo tests that checkout from outside it" sh -c "test $rc -eq 0 && grep -q 'ref=$argo_sha' '$tmp/argo4/submitted'"
+
 # 6. The toolchain image pins what the workflow pins.
 wf="$repo/.github/workflows/e2e-kind.yml" df="$repo/hack/e2e-toolchain/Dockerfile"
 pin() { sed -n "s/^ *$1: *//p" "$wf" | head -1; }
