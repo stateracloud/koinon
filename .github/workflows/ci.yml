@@ -319,6 +319,8 @@ jobs:
           go-version-file: go.mod
       - run: hack/needs-e2e-test.sh
       - run: hack/e2e-remote-test.sh
+      - run: hack/ship-test.sh
+      - run: hack/preflight-test.sh
       - run: hack/e2e-decide-test.sh
       - run: hack/e2e-bisect-test.sh
 
