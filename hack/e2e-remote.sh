@@ -71,7 +71,7 @@ while [[ $# -gt 0 ]]; do
   --local) mode=local ;;
   --ssh) mode=remote ;;
   --argo) mode=argo ;;
-  --no-wait | --target | --slot | --follow) mode=${mode:-argo}; [[ $mode == argo ]] || { echo "e2e-remote: $1 is an --argo option" >&2; exit 2; }
+  --no-wait | --target | --slot | --follow | --repo | --lane) mode=${mode:-argo}; [[ $mode == argo ]] || { echo "e2e-remote: $1 is an --argo option" >&2; exit 2; }
     break ;;
   --out) out=${2:?--out needs a directory}; shift ;;
   --dry-run) dry=1 ;;

@@ -148,6 +148,7 @@ check "the directory lock is released" test ! -d "$tmp/lock.d"
 # credentials file a fake. The bundle reaches S3, the least busy slot is picked from the template's
 # enum, the run is followed and its results unpacked, and no credential is ever in curl's argv.
 cp "$repo/hack/e2e-argo.sh" "$tmp/repo/hack/"
+cp -R "$repo/hack/lab" "$tmp/repo/hack/"
 git -C "$tmp/repo" checkout -q --detach "$sha"
 argo_sha=$(git -C "$tmp/repo" rev-parse HEAD)
 cat >"$tmp/creds.sh" <<'SH'
@@ -179,6 +180,7 @@ PUT:*/e2e-bundles/*) cp "$upload" "$ARGO_DIR/last.bundle"; [[ -z $w ]] || printf
 */workflow-templates/*) echo '{"spec":{"arguments":{"parameters":[{"name":"slot","enum":["a","b","c"]}]}}}' ;;
 *'/workflows/koinon-e2e?'*) if [[ -n ${FAKE_LIST:-} ]]; then echo "$FAKE_LIST"; else echo '{}'; fi ;;
 POST:*/submit) printf '%s' "$body" >"$ARGO_DIR/submitted"; echo '{"metadata":{"name":"koinon-make-t1"}}' ;;
+POST:*/api/v1/workflows/koinon-e2e) printf '%s' "$body" >"$ARGO_DIR/created"; echo '{"metadata":{"name":"koinon-make-t1"}}' ;;
 PUT:*/stop) echo stopped >>"$ARGO_DIR/stopped"; echo '{}' ;;
 *'/koinon-make-t1?fields='*)
   n=$(cat "$ARGO_DIR/polls" 2>/dev/null || echo 0); echo $((n + 1)) >"$ARGO_DIR/polls"
@@ -226,6 +228,12 @@ rc=0
 check "--argo passes the e2e's exit status through" test "$rc" -eq 7
 check "results unpacked on failure" test -f "$tmp/out8/quickstart-timings.md"
 
+argo_env "$tmp/argo2b"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_RESULT_RC=0 hack/e2e-remote.sh --argo --out "$tmp/out8b" >"$tmp/log8b" 2>&1) || rc=$?
+check "a run Failed after its target passed (result.txt rc=0) counts as passed" test "$rc" -eq 0
+check "... and says so" has 'after its target passed' "$tmp/log8b"
+
 argo_env "$tmp/argo3"
 : >"$FAKE_LOG"
 rc=0
@@ -234,6 +242,28 @@ check "--no-wait returns after the submit" test "$rc" -eq 0 -a ! -e "$tmp/argo3/
 check "--slot is passed through" has 'slot=c' "$tmp/argo3/submitted"
 check "--no-wait prints how to follow" has 'hack/e2e-remote.sh --argo --follow koinon-make-t1' "$tmp/log9"
 check "--no-wait keeps the login (the token must outlive the submit)" sh -c "! grep -q 'creds closed' '$FAKE_LOG'"
+
+argo_env "$tmp/argo4"
+rc=0
+(unset KOINON_E2E_REMOTE; cd "$tmp" && "$tmp/repo/hack/e2e-remote.sh" --repo "$tmp/repo" --no-wait >"$tmp/log10" 2>&1) || rc=$?
+check "--repo tests that checkout from outside it" sh -c "test $rc -eq 0 && grep -q 'ref=$argo_sha' '$tmp/argo4/submitted'"
+
+# 7b. --lane light: the manifest goes in as an inline Workflow with its parameters filled in, on the
+# least busy light slot; light-run.sh refuses a target that is not a light one.
+argo_env "$tmp/argo5"
+rc=0
+(unset KOINON_E2E_REMOTE
+  FAKE_LIST='{"items":[{"spec":{"arguments":{"parameters":[{"name":"slot","value":"light-1"}]}}}]}' \
+    hack/e2e-remote.sh --lane light --out "$tmp/out11" >"$tmp/log11" 2>&1) || rc=$?
+check "--lane light passes" test "$rc" -eq 0
+check "--lane light creates an inline Workflow, not a template submit" test -f "$tmp/argo5/created" -a ! -e "$tmp/argo5/submitted"
+param() { jq -r --arg n "$1" '.workflow.spec.arguments.parameters[] | select(.name == $n) | .value' "$tmp/argo5/created"; }
+check "--lane light defaults to test-go" test "$(param target)" = test-go
+check "--lane light submits the commit" test "$(param ref)" = "$argo_sha"
+check "--lane light picks the least busy light slot" test "$(param slot)" = light-2
+check "the manifest's comment key is not sent" test "$(jq 'has("//") or (.workflow | has("//"))' "$tmp/argo5/created")" = false
+check "the slot's Block volume is in podSpecPatch" sh -c "jq -r '.workflow.spec.templates[0].podSpecPatch' '$tmp/argo5/created' | grep -q 'e2e-cache-{{workflow.parameters.slot}}'"
+check "light-run.sh refuses a target that is not a light one" sh -c "! OUT='$tmp/out12' '$repo/hack/lab/light-run.sh' test-e2e-kind 2>/dev/null"
 
 # 6. The toolchain image pins what the workflow pins.
 wf="$repo/.github/workflows/e2e-kind.yml" df="$repo/hack/e2e-toolchain/Dockerfile"
@@ -245,6 +275,14 @@ check "ko sha256 matches the workflow" has "ARG KO_SHA256_amd64=$(pin KO_SHA256)
 helm=$(sed -n '/setup-helm/,/version:/s/^ *version: *//p' "$wf" | head -1)
 check "helm version matches the workflow" has "ARG HELM_VERSION=$helm\$" "$df"
 check "Go matches go.mod" test "$(sed -n 's/^ARG GO_VERSION=//p' "$df")" = "$(awk '/^go /{print $2; exit}' "$repo/go.mod")"
+# The web variant (#358) pins what the web suite uses: a mismatch makes the run download a browser.
+wdf="$repo/hack/e2e-toolchain/web.Dockerfile" pkg="$repo/web/package.json"
+check "web image: Node major matches CI's setup-node" \
+  test "$(sed -n 's/^ARG NODE_VERSION=\([0-9]*\)\..*/\1/p' "$wdf")" = "$(sed -n 's/^ *node-version: *//p' "$repo/.github/workflows/ci.yml" | sort -u)"
+check "web image: pnpm matches web/package.json" \
+  test "pnpm@$(sed -n 's/^ARG PNPM_VERSION=//p' "$wdf")" = "$(jq -r .packageManager "$pkg")"
+check "web image: Playwright matches web/package.json" \
+  test "$(sed -n 's/^ARG PLAYWRIGHT_VERSION=//p' "$wdf")" = "$(jq -r '.devDependencies["@playwright/test"] // .dependencies["@playwright/test"]' "$pkg")"
 
 [[ $fail -eq 0 ]] && echo "e2e-remote tests passed"
 exit "$fail"
