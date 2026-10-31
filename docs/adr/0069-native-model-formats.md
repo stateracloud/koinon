@@ -1,6 +1,6 @@
 # 0069. Models speak their family's native API format
 
-- Status: Accepted. The OpenRouter live check (decision 7) passed in the rc.7 home-lab re-run on 2026-10-29 (`anthropic/claude-haiku-5.5` in the `anthropic` format, 5 requests, charged 31% of the uncached list price so cache reads were priced, no `run.uncached` events), and the OpenRouter pin rows are deleted (#242): OpenRouter `anthropic/*` models default to `anthropic` like every other Claude model. Thinking: see the amendment of 2026-10-29.
+- Status: Accepted. The OpenRouter live check (decision 7) passed in the rc.7 home-lab re-run on 2026-10-29 (`anthropic/claude-haiku-5.5` in the `anthropic` format, 5 requests, charged 31% of the uncached list price so cache reads were priced, no `run.uncached` events), and the OpenRouter pin rows are deleted (#242): OpenRouter `anthropic/*` models default to `anthropic` like every other Claude model. Thinking: see the amendments of 2026-10-29 and 2026-10-31.
 - Date: 2026-10-28
 - Relates to: [#148](https://github.com/stateracloud/koinon/issues/148), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0045](0045-openshell-hardening-defaults.md), [0048](0048-openshell-spike-results.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0058](0058-gateway-modes.md), [0068](0068-prompt-caching-always-on.md)
 
@@ -386,7 +386,9 @@ tokens are billed as output).
      It is not in the table because nothing renders it yet: no flavor switch would turn it on or off,
      and a mode the UI offers but no harness honours would be a lie. It joins as a mode with a row and
      a case in the flavor's entry script, and until then those models are `none` ("not supported by this
-     model"). Their hidden-thinking flag in the price list is unchanged.
+     model"). Their hidden-thinking flag in the price list is unchanged. **Superseded by the
+     amendment of 2026-10-31: every catalog model thinks, and chat-completions models have rows
+     (`effort-none` off form for Luna and DeepSeek on OpenRouter).**
 3. **The gateway pins the beta per model, from the catalog.** The Messages rendering sets
    `anthropic-beta` to the model's mode betas (`gateway.Model.Thinking`, set by the reconciler from
    `thinking.Of`) and removes the client's header only for a model that needs none. It never passes the
@@ -421,14 +423,16 @@ tokens are billed as output).
    OpenCode send adaptive thinking with the binding the gateway's beta covers; `none`, or no switch,
    is `supportsThinkingBlockBinding: false`, which sends no `thinking` field. `supportsEffortUpdates`
    is `false` in both, since per-turn effort adds `output_config` and a beta of its own. OpenCode's ID
-   regex never decides. `flavors/opencode/README.md` is corrected.
+   regex never decides. `flavors/opencode/README.md` is corrected. **Amended 2026-10-31: on and off
+   are both sent explicitly, per row; see below.**
 6. **Cost.** Thinking tokens are billed as output: agentgateway and Anthropic report them inside
    `output_tokens`, and `pricing.Split` already bills the reasoning part at the output rate unless the
    price names a reasoning rate (ADR 0056). Nothing about the ledger changes except visibility: the spend
    report line gains `reasoningTokens` (the part providers report separately, inside `outputTokens`).
    Anthropic Messages reports no such split, so for direct and OpenRouter Claude models the line is
    `null` ("not reported"), never 0: a 0 would read as "no thinking happened" (#240 comment 2), and the
-   thinking is in `outputTokens`. It is a number once any request of the model reported a split. The
+   thinking is in `outputTokens`. **Corrected 2026-10-31: Anthropic does report the split; agentgateway
+   v1.7.0 does not read it. See below.** It is a number once any request of the model reported a split. The
    price list marks every thinking-capable model `hidden_thinking` (Haiku 5.5 lacked it; list version
    `2026-10-29.1`), so a cut stream's output is flagged `thinking_unmeasured`, and a test keeps the
    price list and the catalog in step. The budget reserve of a cut stream is the request's `max_tokens`
@@ -477,3 +481,89 @@ tokens are billed as output).
 - Open questions are listed in the pull request: the OpenAI-style effort mode, no CLI in this
   repository to carry the setting, and the beta pin for OpenRouter.
 
+## Amendment (2026-10-31): one row per model and route, on and off sent explicitly (#316)
+
+### Context
+
+The rc.9 home-lab window (finding F-3) showed two faults in the 2026-10-29 table. (a) Direct-Anthropic
+`claude-haiku-5-5` with thinking on streamed no thinking text in any run: Claude 5.x on the Anthropic
+API defaults `display` to `omitted`, so the thinking was billed in full and never shown or traced,
+while OpenRouter's Messages route summarizes by default. (b) GPT-6 Luna and DeepSeek v4.1 flash were
+catalogued "cannot think" (decision 2 put every chat-completions model at `none`), yet reported 5k to
+49k reasoning tokens per run: on OpenRouter they think by default. Deep dive G4 (research store,
+`g4-thinking-controls`) found that every catalog model thinks, and that thinking can really be turned
+off for only three model and route pairs. Relying on "send nothing" leaves the decision to provider
+defaults that differ per route.
+
+### Decision (procoduck, 2026-10-31)
+
+1. **The table has one row per catalog model and route** (`internal/thinking`), with: whether the model
+   thinks (`never`, `optional`, `always`), the on form, the off form or none ("cannot"), how the
+   thinking comes back (display), the betas, and where the provider reports the thinking split. A test
+   fails when an entry of `pricing/default.yaml` has no row. Ollama stays "not supported" (`never`).
+   This supersedes the "not built" note of decision 2 above.
+
+   | Model and route | Thinks | On form | Off form | Display | Split reported in |
+   | --- | --- | --- | --- | --- | --- |
+   | Claude Haiku 5.x, Anthropic and OpenRouter Messages | optional | `adaptive-summarized` | `disabled` | summarized | `thinking_tokens` |
+   | Claude Sonnet 5.x, both routes | always (`between_tools` is not off) | `adaptive-summarized` | cannot | summarized | `thinking_tokens` |
+   | Claude Opus 5.x and Fable 5.x, both routes | always | `adaptive-summarized` | cannot | summarized | `thinking_tokens` |
+   | GPT-6 Luna, DeepSeek v4.1 flash, OpenRouter chat completions | optional | `default` | `effort-none` | visible | `reasoning_tokens` |
+   | GPT-6 Astra, OpenRouter chat completions | always | `default` | cannot | visible | `reasoning_tokens` |
+   | GPT-6 Astra and GPT-6 Luna, OpenAI chat completions | always | `default` | cannot | hidden | `reasoning_tokens` |
+   | Ollama, any model | never | `none` | none | | |
+
+   GPT-6 Luna on OpenAI's own API documents `reasoning_effort: "none"`, but no live check has covered
+   it and no flavor sends that field, so its row offers no off until one does.
+2. **Decision 5 amended: on and off are both sent explicitly, per row.** The forms are
+   `adaptive-summarized` (`thinking: {"type": "adaptive", "display": "summarized"}`), `disabled`
+   (`thinking: {"type": "disabled"}`), `effort-none` (`reasoning: {"effort": "none"}`), `default` (no
+   field: a chat-completions model thinks by default) and `none` (no field: the model does not think).
+   agentd passes the form as `--thinking`; the OpenCode entry script keeps OpenCode's own block off
+   (`supportsThinkingBlockBinding: false`, `supportsEffortUpdates: false`) and puts the field in the
+   provider-level `body` overlay, the mechanism that carries OpenRouter's `session_id`. No form has a
+   beta-only field (`block_binding` was OpenCode's choice, not Koinon's), so no row pins a beta: the
+   gateway drops the client's `anthropic-beta`. The pin of decision 3 stays for a row that needs one.
+3. **Off exists only where the model can stop.** The API refuses `off` for an agent whose next-run
+   model always thinks, with "this model always thinks", and the agent page shows that text instead of
+   an off choice. A stored `off` (the agent's or its version's) on a model that later turns out to
+   always think runs with thinking on: the run never fails for it, a model change is never refused for
+   it, and the stored value is kept, so a later model that can stop gets it back. The thinking state
+   reports it (`alwaysThinks`, `offOverridden`, and the notice "this model always thinks; your off
+   setting doesn't apply").
+4. **Decision 6 corrected.** Anthropic does report the thinking split, as
+   `usage.output_tokens_details.thinking_tokens` (on the last `message_delta` when streaming).
+   agentgateway v1.7.0's Messages parser does not read it, so the ledger still has no split for Claude
+   models; reading it is #377. Until then the trace exporter leaves `gen_ai.usage.reasoning.output_tokens`
+   out of a model-call span and a turn root when no call reported a split, instead of writing 0. The
+   ledger column stays `NOT NULL DEFAULT 0`, so 0 and "not reported" are one value there; the spend
+   report already reads a split as reported only when it is above 0.
+
+### Tests
+
+- `internal/thinking`: the truth table above over real IDs on every route, the explicit forms, the
+  stored-off override, and that every price-list entry has a row.
+- The strict fake model knows the per-model rules: of the Claude 5.x families only Haiku takes
+  `disabled`, Opus and Fable take only `adaptive`; `display` is `summarized` or `omitted`; on chat
+  completions it checks the `reasoning` object and refuses `effort: none` for a model whose reasoning
+  is mandatory (GPT-6 Astra, Claude Sonnet, Opus and Fable on OpenRouter). It lists each request's
+  thinking display and reasoning effort.
+- The flavor spec asserts the exact on and off body for Haiku, Sonnet, Opus and Fable on both Claude
+  routes and Luna and DeepSeek on chat completions, driven by `thinking.Of`.
+- The admin API refuses `off` for a model that always thinks and reports a stored `off` overridden
+  after a model change; agentd launches with the explicit forms; the trace exporter omits the
+  reasoning attribute when unreported; the agent page shows the always-thinks text and the notice.
+- The kind e2e (step 8) asserts `adaptive` with display `summarized` and no beta when on, and
+  `disabled` when off, through the real gateway to the strict fake.
+
+### Consequences
+
+- Direct-Anthropic thinking is now summarized, so it reaches the run trace at the redacted+ level
+  (ADR 0074); summaries are not billed.
+- Turning thinking off now costs less where it can be turned off (Haiku, Luna, DeepSeek), and is
+  refused where it never could: the setting no longer promises what the model does not do.
+- An agent whose template says `thinking: off` on a model that always thinks keeps running with
+  thinking on; the agent page says so.
+- A live check in the next home-lab window confirms the forms: OpenRouter Messages Haiku with
+  `disabled`, direct Haiku with `adaptive` and `display: summarized`, Luna and DeepSeek with
+  `effort: none` reporting no reasoning tokens.
