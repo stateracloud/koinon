@@ -1,6 +1,6 @@
 # 0042. Ask tier: park the run, Koinon executes the approved call
 
-- Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and [0065](0065-work-model-tasks-inbox.md)
+- Status: Accepted; amended by [0048](0048-openshell-spike-results.md), [0065](0065-work-model-tasks-inbox.md) and [0084](0084-leak-guard.md)
 - Date: 2026-10-21
 - Amends: ADR 0008 (approvals)
 - Verification: Pending: agentgateway spike (routing ask-tier tools) and OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))
@@ -132,6 +132,23 @@ Plan item AP1 builds the scopes above (migration `00028_approval_scopes.sql`):
 - **Lifecycle.** A scope shows in the agent's page next to its grants (`ListApprovalScopes`), can be
   revoked by an admin (`RevokeApprovalScope`; calls already approved keep running), and ends at its
   date. Creating and revoking a scope are audited (`approval_scope.create`, `approval_scope.revoke`).
+
+## Amendment (2026-10-31, #347): the leak guard is a second source of approvals
+
+[0084](0084-leak-guard.md) adds a source of approval requests besides the ask tier:
+
+- **A leak becomes an approval.** agentgateway calls koinon-api's leak guard (ExtMcp
+  `mcpGuardrails`, failClosed) on every MCP tool call, auto tier included. A call whose arguments
+  contain private data from the agent's home generation (24 normalised characters by default) is
+  blocked and becomes an approval request for that exact call; the card shows what would leave. A
+  call that does not match adds no approval.
+- **The ask tier is not forced on outbound tools.** Forcing ask on every outbound call of an agent
+  with untrusted input, private data and an outbound tool was rejected (approval fatigue).
+- **Routing.** The guard uses the ExtMcp callout; the ask tier keeps the `<target>-ask` route of
+  ADR 0057. For v0.1 that settles the routing open question above: both mechanisms, each for its
+  own job.
+- Open in 0084: the agent-facing result of a blocked call (a block, or "approval requested" with
+  park and execute), and whether an approval scope may cover a leak approval.
 
 ## Links
 
