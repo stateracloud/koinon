@@ -245,6 +245,14 @@ check "ko sha256 matches the workflow" has "ARG KO_SHA256_amd64=$(pin KO_SHA256)
 helm=$(sed -n '/setup-helm/,/version:/s/^ *version: *//p' "$wf" | head -1)
 check "helm version matches the workflow" has "ARG HELM_VERSION=$helm\$" "$df"
 check "Go matches go.mod" test "$(sed -n 's/^ARG GO_VERSION=//p' "$df")" = "$(awk '/^go /{print $2; exit}' "$repo/go.mod")"
+# The web variant (#358) pins what the web suite uses: a mismatch makes the run download a browser.
+wdf="$repo/hack/e2e-toolchain/web.Dockerfile" pkg="$repo/web/package.json"
+check "web image: Node major matches CI's setup-node" \
+  test "$(sed -n 's/^ARG NODE_VERSION=\([0-9]*\)\..*/\1/p' "$wdf")" = "$(sed -n 's/^ *node-version: *//p' "$repo/.github/workflows/ci.yml" | sort -u)"
+check "web image: pnpm matches web/package.json" \
+  test "pnpm@$(sed -n 's/^ARG PNPM_VERSION=//p' "$wdf")" = "$(jq -r .packageManager "$pkg")"
+check "web image: Playwright matches web/package.json" \
+  test "$(sed -n 's/^ARG PLAYWRIGHT_VERSION=//p' "$wdf")" = "$(jq -r '.devDependencies["@playwright/test"] // .dependencies["@playwright/test"]' "$pkg")"
 
 [[ $fail -eq 0 ]] && echo "e2e-remote tests passed"
 exit "$fail"
