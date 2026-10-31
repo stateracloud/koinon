@@ -42,3 +42,4 @@ carries only the task, the worktree and the scope.
 
 ## For parents
 - Every spawn prompt names this brief, a model, the worktree and the scope.
+- Spawns are checked by `hack/hooks/agent-spawn-check.sh` (a PreToolUse hook in `.claude/settings.json`): a model and this brief are required (#397).
