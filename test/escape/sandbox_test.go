@@ -140,8 +140,12 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	BeforeAll(func(ctx SpecContext) {
 		g = dialGateway(ctx)
 
+		// OpenShell binds every network rule to its binaries and checks the caller at connect():
+		// the flavor's harness plus /usr/bin/curl, which sends the gateway requests below. Without
+		// curl the connect is refused with EACCES before anything leaves the pod (#322).
+		gwBinaries := append(slices.Clone(reconciler.DefaultBinaries[store.AgentFlavorOpencode]), "/usr/bin/curl")
 		key := reconciler.GatewayProfile(store.AgentFlavorOpencode,
-			reconciler.Flavor{Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+			reconciler.Flavor{Binaries: gwBinaries},
 			reconciler.Endpoint{Host: gwHost, Port: 4000}, true)
 		key.ID = fmt.Sprintf("koinon-escape-agentgateway-%d", n)
 		g.provider(ctx, execution.Provider{
@@ -219,6 +223,11 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		denied("POST", "/v1/responses")
 		denied("GET", "/v1/models")
 		denied("POST", "/config_dump")
+
+		By("a binary the gateway profile does not list (the probe's python3) is refused at connect")
+		res := probe(ctx, tcp(target{gwHost, 4000}))
+		Expect(res["tcp "+target{gwHost, 4000}.String()]).To(Equal("EACCES"),
+			"the gateway rule is bound to the flavor's binaries and curl; python3 must not reach "+gwHost+":4000")
 	}, NodeTimeout(2*time.Minute))
 
 	It("denies DNS to any resolver but the sandbox's own, which answers only synthetic addresses", func(ctx SpecContext) {
@@ -377,10 +386,12 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 			Name: other, Policy: reconciler.SandboxPolicy(nil),
 			Command: []string{"python3", "-m", "http.server", "8099", "--bind", "0.0.0.0"},
 		})
-		res := probeIn(ctx, other,
-			check{"id": "local", "op": "tcp", "host": "127.0.0.1", "port": 8099},
-		)
-		Expect(res["local"]).To(Equal("open"), "control: the second sandbox's listener is up")
+		// The command starts with the sandbox, so its listener can come up after the sandbox reports
+		// ready: wait for it, or the isolation check below would be skipped by a lost race (#323).
+		Eventually(func() any {
+			return probeIn(ctx, other, check{"id": "local", "op": "tcp", "host": "127.0.0.1", "port": 8099})["local"]
+		}).WithContext(ctx).WithTimeout(90*time.Second).WithPolling(2*time.Second).
+			Should(Equal("open"), "control: the second sandbox's listener is up")
 		out, stderr, code := g.exec(ctx, other, "", "python3", "-c", "import socket;print(socket.gethostbyname(socket.gethostname()))")
 		Expect(code).To(Equal(0), stderr)
 		ip := strings.TrimSpace(out)

@@ -28,8 +28,10 @@ import (
 // rendered for (default https://example.com/gitea, with a sub-path, which exercises the prefix).
 // The host must resolve inside the sandbox: a name that fails DNS (such as one under .invalid)
 // never reaches the proxy, so the specs would see curl code 000 and no policy decision (issue
-// #244). example.com is IANA's reserved example domain; nothing is sent to it, because every
-// request is denied before the proxy connects. What a real Gitea does with the read token behind the policy (a push refused for the
+// #244). example.com is IANA's reserved example domain. No request below reaches it, but the
+// proxy does open a TCP connection to it: OpenShell admits the connect at L4 and dials upstream
+// before its L7 relay judges the request, so example.com:443 must be reachable or curl times out
+// (code 000) instead of getting the 403. #371 replaces it with an in-cluster TLS stand-in. What a real Gitea does with the read token behind the policy (a push refused for the
 // token's missing write scope, 404 for a repository the bot is not a collaborator on) is covered by
 // the fake Gitea, which enforces both (internal/testing/fakegitea), and is confirmed on the home lab.
 var _ = Describe("Gitea read grant", Label("escape", "openshell"), Ordered, func() {
