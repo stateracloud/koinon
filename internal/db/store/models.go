@@ -1439,6 +1439,7 @@ type AgentSandbox struct {
 	RestoreClaimedAt    pgtype.Timestamptz
 	ArchivedAt          pgtype.Timestamptz
 	Reason              string
+	HomeDirtiedAt       pgtype.Timestamptz
 }
 
 type AgentVersion struct {

@@ -1101,7 +1101,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// recreated at once, parked runs included: they stay parked in Postgres and resume in the new
 		// sandbox through the reset path (ADR 0051). The new sandbox has a new ID, which clears the
 		// mark (RecordAgentSandbox).
-		if ok, note, err := r.homeGate(ctx, w, ws, sb, activitySince(w.sb, act)); err != nil || !ok {
+		if ok, note, err := r.homeGate(ctx, w, ws, sb, homeDirtiedSince(w.sb)); err != nil || !ok {
 			if err != nil {
 				return err
 			}
@@ -1126,7 +1126,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// left to fail; a starting run has not started the harness and waits for the new sandbox
 		// (agentd waits on Error and Deleting). With no running run, delete it so the next pass
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
-		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, activitySince(w.sb, act))
+		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, homeDirtiedSince(w.sb))
 	}
 	if sb.Labels[LabelSpecHash] != hash {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
@@ -1138,7 +1138,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		if act.HasHeld {
 			return r.record(ctx, w, sb, hash, "sandbox spec changed; recreating it after the active and parked runs finish")
 		}
-		if ok, note, err := r.homeGate(ctx, w, ws, sb, activitySince(w.sb, act)); err != nil || !ok {
+		if ok, note, err := r.homeGate(ctx, w, ws, sb, homeDirtiedSince(w.sb)); err != nil || !ok {
 			if err != nil {
 				return err
 			}
@@ -1159,7 +1159,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 		if !act.HasActive && !act.HasDemand && r.idle(w.sb, act, tune) {
 			// The home is backed up before the stop (practice B3).
-			if ok, err := r.stopGate(ctx, w, sb, activitySince(w.sb, act)); err != nil {
+			if ok, err := r.stopGate(ctx, w, sb); err != nil {
 				return err
 			} else if !ok {
 				return r.record(ctx, w, sb, hash, "waiting for the home backup before stopping")
@@ -1243,10 +1243,11 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// activitySince is the latest activity of the agent's sandbox, the clock the idle stop counts
-// from. Activity is the latest of the sandbox's last start, the last run that finished or parked,
-// and the last pre-wake signal (package wake). A run that is active or claimable keeps the
-// sandbox up regardless (the caller checks HasActive and HasDemand).
+// activitySince is the latest activity of the agent's sandbox, the clock the idle stop and the
+// archive count from. Activity is the latest of the sandbox's last start, the last run that
+// finished or parked, and the last pre-wake signal (package wake). A run that is active or
+// claimable keeps the sandbox up regardless (the caller checks HasActive and HasDemand). It is an
+// idle clock, not "the home was written": the checkpoint gates use homeDirtiedSince.
 func activitySince(sb store.AgentSandbox, act store.GetAgentRunActivityRow) time.Time {
 	var since time.Time
 	for _, t := range []pgtype.Timestamptz{sb.StartedAt, act.LastActivity, sb.WokenAt} {

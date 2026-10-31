@@ -165,6 +165,17 @@ func claimRun(ctx context.Context, org pgtype.UUID) store.Run {
 	return run
 }
 
+// dirtyHome plays a harness that ran in the agent's sandbox and ended: a run goes starting ->
+// running -> succeeded, which stamps agent_sandboxes.home_dirtied_at (issue #329).
+func dirtyHome(ctx context.Context, org, user, agent pgtype.UUID) store.Run {
+	GinkgoHelper()
+	queueRun(ctx, org, user, agent)
+	run := claimRun(ctx, org)
+	run, err := q.FinishRun(ctx, store.FinishRunParams{Outcome: store.RunStateSucceeded, OrgID: org, ID: run.ID, Epoch: run.Epoch})
+	Expect(err).NotTo(HaveOccurred())
+	return run
+}
+
 // fakeModelGateway issues real keys and records every applied state.
 type fakeModelGateway struct {
 	mu      sync.Mutex

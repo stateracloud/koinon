@@ -6,8 +6,12 @@ package reconciler
 //
 // koinon-agentd writes the checkpoints; the reconciler only asks for them and waits. A sandbox is
 // deleted for a recreation (a changed spec, a stuck or failed sandbox) or an archive only after a
-// checkpoint taken since its last activity is complete. The checkpoint then becomes the sandbox's
-// restore (SetSandboxRestore): the next sandbox keeps the home generation, and the first run
+// checkpoint taken since its home was last written is complete. The home is written by a harness,
+// so that clock is agent_sandboxes.home_dirtied_at (a run entering or leaving running in this
+// sandbox; issue #329), not the idle clock: a wake or a start does not write the home. A sandbox no
+// harness ever ran in (the clock is zero) holds what the newest checkpoint of its home generation
+// holds, so it is recreated or archived without a new backup: that checkpoint, if there is one,
+// becomes its restore. Otherwise the checkpoint becomes the sandbox's restore (SetSandboxRestore): the next sandbox keeps the home generation, and the first run
 // restores the home before the harness starts (agentd). A failed backup blocks the recreation and
 // marks the agent unhealthy with the reason, until an admin resumes it. An idle stop is also
 // preceded by a checkpoint, but a failed one only delays the stop (stopping keeps the volume).
@@ -34,7 +38,38 @@ func (r *Reconciler) checkpointsOn(w *work) bool {
 	return r.cfg.Checkpoints && !agentconfig.IsEphemeral(w.cfg)
 }
 
-// fresh reports whether a complete checkpoint was finished since the sandbox's last activity.
+// homeDirtiedSince is when the home of the agent's current sandbox was last written: the last time
+// a harness in it started or stopped running. Zero: no harness ever ran in this sandbox.
+func homeDirtiedSince(sb store.AgentSandbox) time.Time {
+	if sb.HomeDirtiedAt.Valid {
+		return sb.HomeDirtiedAt.Time
+	}
+	return time.Time{}
+}
+
+// restoreUntouched points the next sandbox's restore at the newest complete checkpoint of the home
+// generation, for a sandbox no harness ran in. No checkpoint: nothing to restore, the new sandbox
+// starts with the (empty or image) home this one has.
+func (r *Reconciler) restoreUntouched(ctx context.Context, w *work) error {
+	if w.sb.HomeGeneration.String == "" {
+		return nil
+	}
+	cp, err := r.q.LatestCompleteHomeCheckpointOfGeneration(ctx, store.LatestCompleteHomeCheckpointOfGenerationParams{
+		OrgID: w.org.ID, AgentID: w.agent.ID, Generation: w.sb.HomeGeneration.String,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the newest home checkpoint of the generation: %w", err)
+	}
+	if _, err := r.q.SetSandboxRestore(ctx, store.SetSandboxRestoreParams{OrgID: w.org.ID, AgentID: w.agent.ID, CheckpointID: cp.ID}); err != nil {
+		return fmt.Errorf("record the home restore: %w", err)
+	}
+	return nil
+}
+
+// fresh reports whether a complete checkpoint was finished since the home was last written.
 func fresh(cp store.HomeCheckpoint, since time.Time) bool {
 	return cp.Status == store.CheckpointStatusComplete && cp.FinishedAt.Valid && !cp.FinishedAt.Time.Before(since)
 }
@@ -58,7 +93,8 @@ func (r *Reconciler) requestCheckpoint(ctx context.Context, w *work, sb executio
 
 // homeGate decides whether the sandbox may be deleted (a recreation or an archive). It returns
 // true when it may, after pointing the next sandbox's restore at the checkpoint; otherwise it
-// returns the note to record while the recreation waits. since is the sandbox's last activity.
+// returns the note to record while the recreation waits. since is when the home was last written
+// (homeDirtiedSince); zero means no harness ever ran in the sandbox.
 func (r *Reconciler) homeGate(ctx context.Context, w *work, ws string, sb execution.Sandbox, since time.Time) (proceed bool, note string, err error) {
 	if !r.checkpointsOn(w) {
 		return true, "", nil
@@ -67,6 +103,10 @@ func (r *Reconciler) homeGate(ctx context.Context, w *work, ws string, sb execut
 		// The previous recreation's home has not been restored into this sandbox yet: it is
 		// still in that checkpoint, and the sandbox holds nothing newer.
 		return true, "", nil
+	}
+	if since.IsZero() {
+		// Nothing wrote the home: no new backup is needed, whatever the phase.
+		return true, "", r.restoreUntouched(ctx, w)
 	}
 	if sb.Phase == execution.PhaseError || sb.Phase == execution.PhaseCompleted {
 		return r.unreadableGate(ctx, w, sb, since)
@@ -98,7 +138,7 @@ func (r *Reconciler) homeGate(ctx context.Context, w *work, ws string, sb execut
 // unreadableGate is the gate for a sandbox in phase Error or Completed. agentd reads a home only
 // from a ready sandbox, so a request filed now would never be claimed; instead the newest complete
 // checkpoint of the sandbox (hourly, stop or recreate) is used when it was taken since the
-// sandbox's last activity, and otherwise the recreation is blocked at once: the home is kept and
+// home was last written, and otherwise the recreation is blocked at once: the home is kept and
 // the agent is marked unhealthy with the reason. Stopgap until the fallback pod that reads the
 // volume directly exists (ADR 0032).
 func (r *Reconciler) unreadableGate(ctx context.Context, w *work, sb execution.Sandbox, since time.Time) (bool, string, error) {
@@ -113,7 +153,7 @@ func (r *Reconciler) unreadableGate(ctx context.Context, w *work, sb execution.S
 		}
 		return true, "", nil
 	}
-	reason := fmt.Sprintf("the sandbox is in phase %s, so its home cannot be read and has no backup since its last activity; it is not recreated and its home is kept", sb.Phase)
+	reason := fmt.Sprintf("the sandbox is in phase %s, so its home cannot be read and has no backup since the home was last written; it is not recreated and its home is kept", sb.Phase)
 	if hasCP {
 		reason += fmt.Sprintf(" (the last backup is from %s)", cp.FinishedAt.Time.UTC().Format(time.RFC3339))
 	}
@@ -158,11 +198,15 @@ func (r *Reconciler) markBlocked(ctx context.Context, w *work, sb execution.Sand
 	})
 }
 
-// stopGate returns true when the idle sandbox may be stopped: its home was checkpointed since its
-// last activity, or the checkpoint failed or is taking longer than CheckpointStopWait (a stop
+// stopGate returns true when the idle sandbox may be stopped: its home was checkpointed since it
+// was last written (a sandbox no harness ran in has nothing to back up), or the checkpoint failed or is taking longer than CheckpointStopWait (a stop
 // keeps the volume, so it does not wait for a backup that will not come).
-func (r *Reconciler) stopGate(ctx context.Context, w *work, sb execution.Sandbox, since time.Time) (bool, error) {
+func (r *Reconciler) stopGate(ctx context.Context, w *work, sb execution.Sandbox) (bool, error) {
 	if !r.checkpointsOn(w) || w.sb.RestoreCheckpointID.Valid {
+		return true, nil
+	}
+	since := homeDirtiedSince(w.sb)
+	if since.IsZero() {
 		return true, nil
 	}
 	cp, err := r.q.LatestHomeCheckpointOfSandbox(ctx, store.LatestHomeCheckpointOfSandboxParams{OrgID: w.org.ID, AgentID: w.agent.ID, SandboxID: sb.ID})
