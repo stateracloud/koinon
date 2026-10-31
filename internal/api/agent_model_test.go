@@ -215,7 +215,7 @@ var _ = Describe("the agent's thinking setting", func() {
 	It("is on by default, and says so only for a model that can think", func(ctx SpecContext) {
 		pick(ctx, "claude-haiku-5-5")
 		Expect(get(ctx)).To(And(
-			HaveField("Setting", ""), HaveField("Effective", "on"), HaveField("Supported", true), HaveField("Mode", "adaptive")))
+			HaveField("Setting", ""), HaveField("Effective", "on"), HaveField("Supported", true), HaveField("Mode", "adaptive-summarized")))
 		pick(ctx, "vendor/plain")
 		Expect(get(ctx)).To(And(
 			HaveField("Effective", "on"), HaveField("Supported", false), HaveField("Mode", "none")),
@@ -227,14 +227,14 @@ var _ = Describe("the agent's thinking setting", func() {
 		res, err := set(ctx, owner, "off")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.GetModel().GetThinking()).To(And(
-			HaveField("Setting", "off"), HaveField("Effective", "off"), HaveField("Supported", true), HaveField("Mode", "none")))
+			HaveField("Setting", "off"), HaveField("Effective", "off"), HaveField("Supported", true), HaveField("Mode", "disabled")))
 		got, err := owner.agents.GetAgent(ctx, &agentv1alpha1.GetAgentRequest{OrgId: org, AgentId: agent.GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.GetAgent().GetLatestVersion()).To(Equal(agent.GetLatestVersion()), "a setting is not a new version")
 
 		res, err = set(ctx, owner, "on")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.GetModel().GetThinking()).To(And(HaveField("Setting", "on"), HaveField("Mode", "adaptive")))
+		Expect(res.GetModel().GetThinking()).To(And(HaveField("Setting", "on"), HaveField("Mode", "adaptive-summarized")))
 		res, err = set(ctx, owner, "default")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.GetModel().GetThinking().GetSetting()).To(BeEmpty())
