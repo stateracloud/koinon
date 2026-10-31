@@ -114,6 +114,7 @@ var _ = Describe("Reconciler ephemeral agents with checkpoints on", func() {
 		persistent := execution.AgentSandboxName(org.Bytes, agent.ID.Bytes)
 		pass(ctx)
 		Expect(osg.Sandbox(ws, persistent)).NotTo(BeNil())
+		dirtyHome(ctx, org, user, agent.ID)
 
 		version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
 			OrgID: org, AgentID: agent.ID, Config: []byte(`{"instructions":"help","ephemeral":true}`), CreatedBy: user,

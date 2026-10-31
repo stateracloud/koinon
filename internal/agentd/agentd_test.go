@@ -825,6 +825,7 @@ var _ = Describe("Pool", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal("sandbox error: image pull failed"))
+		Expect(getRun(ctx, r).FailureClass.RunFailureClass).To(Equal(store.RunFailureClassSandboxUnavailable))
 	})
 
 	It("records a retried event once", func(ctx SpecContext) {

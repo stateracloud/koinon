@@ -482,6 +482,10 @@ type Querier interface {
 	// Whether the user may answer questions in the org: role member or higher.
 	IsOrgMember(ctx context.Context, arg IsOrgMemberParams) (bool, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
+	// The newest complete checkpoint of the home's lineage, whichever sandbox took it. A sandbox no
+	// harness ever ran in (home_dirtied_at NULL) holds exactly what this checkpoint holds, so it is
+	// the restore of a recreation or archive of that sandbox.
+	LatestCompleteHomeCheckpointOfGeneration(ctx context.Context, arg LatestCompleteHomeCheckpointOfGenerationParams) (HomeCheckpoint, error)
 	// The newest complete checkpoint (hourly, stop or recreate) taken for this sandbox. The recreate
 	// gate uses it for a sandbox that cannot be read (phase Error or Completed), which no new
 	// checkpoint can be taken of.

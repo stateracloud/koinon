@@ -75,7 +75,7 @@ func (r *Reconciler) ephemeralTurn(ctx context.Context, w *work, ws string, act 
 				// carries over into a task sandbox, the checkpoint is kept for a later persistent version.
 				pw := *w
 				pw.cfg.Ephemeral = false
-				ok, note, err := r.homeGate(ctx, &pw, ws, sb, activitySince(w.sb, act))
+				ok, note, err := r.homeGate(ctx, &pw, ws, sb, homeDirtiedSince(w.sb))
 				if err != nil {
 					return false, err
 				}
