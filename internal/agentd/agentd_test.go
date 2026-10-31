@@ -135,12 +135,12 @@ var _ = Describe("Pool", func() {
 		Expect(final.PromptThroughSeq.Int64).To(BeEquivalentTo(1))
 		Expect(final.FinishedAt.Valid).To(BeTrue())
 
-		// The agent's reply lands on the task.
+		// The agent's reply lands on the task: its last message, without the narration before its tool calls.
 		tevs := taskEvents(ctx, e, t)
 		Expect(tevs).To(HaveLen(2))
 		Expect(tevs[1].Kind).To(Equal("message"))
 		Expect(tevs[1].ActorKind).To(Equal(store.TaskActorKindAgent))
-		Expect(string(tevs[1].Payload)).To(ContainSubstring("asking: edit=allow,fetch=reject"))
+		Expect(string(tevs[1].Payload)).To(Equal(`{"text": "edit=allow,fetch=reject"}`))
 	})
 
 	It("sends a trigger's instruction, a system message carrying its source, as the first prompt", func(ctx SpecContext) {
