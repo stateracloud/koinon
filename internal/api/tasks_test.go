@@ -122,6 +122,18 @@ var _ = Describe("TaskService", func() {
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 	})
 
+	It("reopens a completed task for a follow-up message (#324)", func(ctx SpecContext) {
+		t, _ := create(ctx, member, "chat")
+		_, err := e.pool.Exec(ctx, `UPDATE tasks SET state = 'completed', finished_at = now() WHERE org_id = $1 AND id = $2`, org, t.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		res, err := member.tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{OrgId: org, TaskId: t.GetId(), Text: "one more thing"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetEvent().GetKind()).To(Equal("message"))
+		got, err := member.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: t.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.GetTask().GetState()).To(Equal(taskv1alpha1.TaskState_TASK_STATE_SUBMITTED))
+	})
+
 	It("cancels a task: its queued runs are canceled, its running run is not touched, and it cannot be canceled twice", func(ctx SpecContext) {
 		create(ctx, member, "blocker")
 		running := ad.mustClaim(ctx, org)
