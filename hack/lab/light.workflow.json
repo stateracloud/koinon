@@ -5,7 +5,9 @@
     "no kind cluster (Go tests with testcontainers, chart checks, admission tests, docs-check), on a light",
     "slot with its own Go cache and Docker cache. hack/e2e-argo.sh --lane light fills in the parameters",
     "and submits this as an inline Workflow; the target runs as hack/lab/light-run.sh of the bundled",
-    "commit. The slot's Block volume is in podSpecPatch (Argo adds workflow volumes only for mounts)."
+    "commit. The slot's Block volume is in podSpecPatch (Argo adds workflow volumes only for mounts).",
+    "TMPDIR is on the work volume, which dind mounts at the same path: the daemon resolves a test's bind",
+    "mounts (t.TempDir) in its own filesystem."
   ],
   "metadata": {
     "generateName": "koinon-light-",
@@ -85,13 +87,14 @@
             {"name": "OUT", "value": "/work/out"},
             {"name": "GOCACHE", "value": "/gocache/build"},
             {"name": "GOMODCACHE", "value": "/gocache/mod"},
-            {"name": "LC_ALL", "value": "C"}
+            {"name": "LC_ALL", "value": "C"},
+            {"name": "TMPDIR", "value": "/work/tmp"}
           ],
           "volumeMounts": [{"name": "work", "mountPath": "/work"}, {"name": "gocache", "mountPath": "/gocache"}],
           "resources": {"requests": {"cpu": "2", "memory": "4Gi"}, "limits": {"cpu": "4", "memory": "8Gi"}},
           "command": ["bash", "-c"],
           "args": [
-            "set -euo pipefail\nmkdir -p /work/out\nfor _ in $(seq 1 180); do [ -e /work/dockerd-ready ] && break; sleep 1; done\n[ -e /work/dockerd-ready ] || { echo \"dockerd not ready after 180 s\"; cp /work/dockerd.log /work/out/ || true; exit 1; }\n# The submitted values arrive as env, never pasted into this script\n[[ $E2E_REF =~ ^[0-9a-f]{40}$ ]] || { echo \"ref must be a full 40-hex commit SHA\"; exit 2; }\ngit clone -q --no-checkout /work/in/koinon.bundle /work/koinon\ncd /work/koinon\ngit checkout -q --detach \"$E2E_REF\"\ntest \"$(git rev-parse HEAD)\" = \"$E2E_REF\"\nexec hack/lab/light-run.sh \"$E2E_TARGET\"\n"
+            "set -euo pipefail\nmkdir -p /work/out /work/tmp\nfor _ in $(seq 1 180); do [ -e /work/dockerd-ready ] && break; sleep 1; done\n[ -e /work/dockerd-ready ] || { echo \"dockerd not ready after 180 s\"; cp /work/dockerd.log /work/out/ || true; exit 1; }\n# The submitted values arrive as env, never pasted into this script\n[[ $E2E_REF =~ ^[0-9a-f]{40}$ ]] || { echo \"ref must be a full 40-hex commit SHA\"; exit 2; }\ngit clone -q --no-checkout /work/in/koinon.bundle /work/koinon\ncd /work/koinon\ngit checkout -q --detach \"$E2E_REF\"\ntest \"$(git rev-parse HEAD)\" = \"$E2E_REF\"\nexec hack/lab/light-run.sh \"$E2E_TARGET\"\n"
           ]
         }
       }
