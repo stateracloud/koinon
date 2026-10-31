@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Run the kind e2e (`make test-e2e-kind`, the go suite) on a remote Docker host, or on the local
-# Docker with --local. Both run it inside the pinned toolchain image of hack/e2e-toolchain (the Go
-# from go.mod and the kind, ko, helm and kubectl versions CI uses), against that host's Docker
-# socket, so the result does not depend on what is installed on the machine you type this on.
+# Run the kind e2e (`make test-e2e-kind`, the go suite) of the committed HEAD somewhere other than
+# your shell's toolchain, three ways:
 #
-#   hack/e2e-remote.sh [--out DIR] [--dry-run]     remote: procoduck's testbox, or $KOINON_E2E_REMOTE
-#   hack/e2e-remote.sh --local [--out DIR]         the same container on the local Docker
+#   hack/e2e-remote.sh [--argo] [--out DIR] [--no-wait] [--dry-run]   an Argo Workflows queue (default)
+#   hack/e2e-remote.sh --ssh [--out DIR] [--dry-run]                  a Docker host over SSH ($KOINON_E2E_REMOTE)
+#   hack/e2e-remote.sh --local [--out DIR]                            the local Docker
 #
-# Remote: pushes the current HEAD (committed work only) to a unique ref (refs/e2e/<run id>) of a bare
+# --argo (hack/e2e-argo.sh, see its header for options and settings): the maintainers' home-lab
+# queue by default (Kata pods, two or more runs in parallel, about 18 min warm); needs its
+# credentials, so contributors use --local, their own queue, or the `e2e` label on the PR.
+# --ssh and --local run the pinned toolchain image of hack/e2e-toolchain (the Go from go.mod and the
+# kind, ko, helm and kubectl versions CI uses) against that host's Docker socket, so the result does
+# not depend on what is installed on the machine you type this on. Setting KOINON_E2E_REMOTE alone
+# also selects --ssh.
+#
+# SSH: pushes the current HEAD (committed work only) to a unique ref (refs/e2e/<run id>) of a bare
 # repository in the remote user's home, then over SSH takes the host-wide e2e lock, checks that
 # commit out, builds the toolchain image if missing and runs the e2e. Output streams back; the
 # timings, logs and diagnostics are copied to --out; the exit status is the e2e's. hack/needs-e2e.sh
@@ -17,7 +24,7 @@
 #
 # ACCEPTED RISK: the e2e builds and runs the code under test as root, in a container that has the
 # host's Docker socket and the host network (kind needs both). Run it only on a host you would let
-# that code run on (the testbox, your own machine), never on one with secrets. The Go module and
+# that code run on (a throwaway VM, your own machine), never on one with secrets. The Go module and
 # build caches (Docker volumes koinon-e2e-gomod, koinon-e2e-gocache) are shared between runs, so
 # one run's code can poison the next one's cache. Nothing secret is sent to the remote: the e2e
 # needs none (fake model, fake GitHub).
@@ -33,7 +40,7 @@
 # directory lock (/tmp/koinon-e2e.lock.d) where flock does not exist (macOS).
 #
 # Environment:
-#   KOINON_E2E_REMOTE       ssh target (default koinon@testbox.lab.example.invalid)
+#   KOINON_E2E_REMOTE       ssh target for --ssh (no default)
 #   KOINON_E2E_REMOTE_WORK  bare repository on the remote, relative to its home (default work/koinon-e2e.git)
 #   KOINON_E2E_OUT          where results land locally (default .e2e-out/<run id>); --out overrides
 #   KOINON_E2E_LOCK         lock file path on the host that runs the e2e
@@ -46,11 +53,12 @@
 set -euo pipefail
 
 SELF=$(cd "$(dirname "$0")" && pwd)/$(basename "$0") # absolute: we cd later
-REMOTE=${KOINON_E2E_REMOTE:-koinon@testbox.lab.example.invalid}
+REMOTE=${KOINON_E2E_REMOTE:-}
 WORK=${KOINON_E2E_REMOTE_WORK:-work/koinon-e2e.git}
 LOCK=${KOINON_E2E_LOCK:-/tmp/koinon-e2e.lock}
 CLUSTER=koinon-e2e-runner # dedicated: cleanup never touches a human's koinon-e1
-mode=remote
+mode=""
+[[ -z $REMOTE ]] || mode=remote
 out=${KOINON_E2E_OUT:-}
 dry=0
 # stage-only arguments, and globals the EXIT traps use
@@ -61,6 +69,10 @@ usage() { sed -n '4,/^set -e/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 while [[ $# -gt 0 ]]; do
   case $1 in
   --local) mode=local ;;
+  --ssh) mode=remote ;;
+  --argo) mode=argo ;;
+  --no-wait | --target | --slot | --follow) mode=${mode:-argo}; [[ $mode == argo ]] || { echo "e2e-remote: $1 is an --argo option" >&2; exit 2; }
+    break ;;
   --out) out=${2:?--out needs a directory}; shift ;;
   --dry-run) dry=1 ;;
   --stage) mode=stage ;; # internal: runs on the remote, the script is piped in over ssh
@@ -324,8 +336,15 @@ client_local() {
   return "$rc"
 }
 
-case $mode in
-remote) client_remote ;;
+case ${mode:-argo} in
+argo)
+  args=()
+  [[ -z $out ]] || args+=(--out "$out")
+  [[ $dry == 0 ]] || args+=(--dry-run)
+  exec "$(dirname "$SELF")/e2e-argo.sh" ${args[@]+"${args[@]}"} "$@" ;;
+remote)
+  [[ -n $REMOTE ]] || { echo "e2e-remote: --ssh needs KOINON_E2E_REMOTE (user@host)" >&2; exit 2; }
+  client_remote ;;
 local) client_local ;;
 stage) stage ;;
 esac
