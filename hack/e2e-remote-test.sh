@@ -154,6 +154,7 @@ cat >"$tmp/creds.sh" <<'SH'
 e2e_creds_open() { echo "creds open" >>"$FAKE_LOG"; }
 e2e_creds_argo_token() { echo koinon_test_not-a-real-token; }
 e2e_creds_s3() { echo koinon_test_id:koinon_test_not-a-real-secret; }
+e2e_creds_results() { echo koinon_test_reader:koinon_test_not-a-real-reader; }
 e2e_creds_close() { echo "creds closed" >>"$FAKE_LOG"; }
 SH
 cat >"$tmp/bin/curl" <<'SH'
@@ -183,8 +184,9 @@ PUT:*/stop) echo stopped >>"$ARGO_DIR/stopped"; echo '{}' ;;
   n=$(cat "$ARGO_DIR/polls" 2>/dev/null || echo 0); echo $((n + 1)) >"$ARGO_DIR/polls"
   if [[ $n -lt 1 ]]; then echo '{"status":{"phase":"Running"}}'; else echo "{\"status\":{\"phase\":\"${FAKE_PHASE:-Succeeded}\"}}"; fi ;;
 */koinon-make-t1/log?*) echo '{"result":{"content":"== 12:00:00Z prerequisites (kind/up.sh)"}}' ;;
-*/workflows/koinon-e2e/koinon-make-t1) echo '{"status":{"nodes":{"koinon-make-t1":{"id":"koinon-make-t1","type":"Pod"}}}}' ;;
-*/artifact-files/*)
+*/workflows/koinon-e2e/koinon-make-t1) echo '{"status":{"nodes":{"koinon-make-t1":{"id":"koinon-make-t1","type":"Pod","outputs":{"artifacts":[{"name":"results","s3":{"key":"koinon-make-t1/koinon-make-t1/results.tgz"}}]}}}}}' ;;
+*/e2e-artifacts/koinon-make-t1/koinon-make-t1/results.tgz | */artifact-files/*)
+  echo "$url" >>"$ARGO_DIR/results-from"
   d=$(mktemp -d); mkdir -p "$d/out"; echo "| Phase | s |" >"$d/out/quickstart-timings.md"
   echo "target=test-e2e-kind ref=x rc=${FAKE_RESULT_RC:-0} seconds=1" >"$d/out/result.txt"
   tar -czf "$o" -C "$d" out; rm -rf "$d" ;;
@@ -212,6 +214,8 @@ check "picks the least busy slot of the template's enum" has 'slot=b' "$tmp/argo
 check "the agent label is a valid label value" has 'agent=agent-koinon-1' "$tmp/argo1/submitted"
 check "prints the run's stage lines" has '== 12:00:00Z prerequisites' "$tmp/log7"
 check "results unpacked" test -f "$tmp/out7/quickstart-timings.md"
+check "results come from the results bucket, not the Argo Server" has '/e2e-artifacts/koinon-make-t1/' "$tmp/argo1/results-from"
+check "the results key reached curl only on stdin" has 'koinon_test_not-a-real-reader' "$tmp/argo1/cfg"
 check "the credentials are closed after the run" has 'creds closed' "$FAKE_LOG"
 check "the token reached curl only on stdin" has 'koinon_test_not-a-real-token' "$tmp/argo1/cfg"
 check "no credential in curl's argv" sh -c "! grep -q 'koinon_test_not-a-real' '$FAKE_LOG'"

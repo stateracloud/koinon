@@ -13,7 +13,8 @@
 #
 # Credentials never appear in argv, logs or files: a credentials file (KOINON_E2E_ARGO_CREDS,
 # sourced) defines e2e_creds_open, e2e_creds_argo_token (prints a bearer token),
-# e2e_creds_s3 (prints ACCESS_KEY_ID:SECRET_KEY) and e2e_creds_close; the values stay in shell
+# e2e_creds_s3 (prints ACCESS_KEY_ID:SECRET_KEY for the bundle bucket), optionally
+# e2e_creds_results (the same for a read-only key on the results bucket) and e2e_creds_close; the values stay in shell
 # variables and reach curl as a config on stdin (-K -). The default file, hack/e2e-argo-lab-creds.sh,
 # reads them from the maintainers' OpenBao and only works for them; use your own file and endpoints
 # for your own Argo, or --local.
@@ -23,6 +24,7 @@
 #   KOINON_E2E_ARGO_NAMESPACE  namespace of the template and runs (koinon-e2e)
 #   KOINON_E2E_ARGO_TEMPLATE   WorkflowTemplate (koinon-make); parameters target, ref, bundle, agent, slot
 #   KOINON_E2E_BUNDLE_URL      S3 bucket URL for the bundles (https://s3.apps.lab.example.invalid/e2e-bundles)
+#   KOINON_E2E_RESULTS_URL     S3 bucket URL of the run results (https://s3.apps.lab.example.invalid/e2e-artifacts)
 #   KOINON_E2E_S3_REGION       SigV4 region (garage)
 #   KOINON_E2E_ARGO_CREDS      credentials file (hack/e2e-argo-lab-creds.sh)
 #   KOINON_E2E_ARGO_POLL       seconds between status polls (30)
@@ -34,6 +36,7 @@ SERVER=${KOINON_E2E_ARGO_SERVER:-https://argo.apps.lab.example.invalid}
 NS=${KOINON_E2E_ARGO_NAMESPACE:-koinon-e2e}
 TEMPLATE=${KOINON_E2E_ARGO_TEMPLATE:-koinon-make}
 BUNDLE_URL=${KOINON_E2E_BUNDLE_URL:-https://s3.apps.lab.example.invalid/e2e-bundles}
+RESULTS_URL=${KOINON_E2E_RESULTS_URL:-https://s3.apps.lab.example.invalid/e2e-artifacts}
 REGION=${KOINON_E2E_S3_REGION:-garage}
 CREDS=${KOINON_E2E_ARGO_CREDS:-$here/e2e-argo-lab-creds.sh}
 POLL=${KOINON_E2E_ARGO_POLL:-30}
@@ -131,14 +134,26 @@ stage_lines() {
 }
 
 # fetch_results <dir>: the run's results archive (timings, driver.log, diagnostics, result.txt).
+# With a results key (e2e_creds_results) it is read from the results bucket directly: in client auth
+# mode the Argo Server reads the artifact repository's Secret as the caller, which a submit token
+# must not be able to. Without one, through the server's /artifact-files.
 fetch_results() {
-  local dir=$1 node tgz
+  local dir=$1 status node key tgz reader="" ok=1
   mkdir -p "$dir"
-  node=$(api GET "/api/v1/workflows/$NS/$name" | jq -r '[.status.nodes[]? | select(.type == "Pod")][0].id // empty')
+  status=$(api GET "/api/v1/workflows/$NS/$name")
+  node=$(jq -r '[.status.nodes[]? | select(.type == "Pod")][0].id // empty' <<<"$status")
   [[ -n $node ]] || { echo "e2e-remote --argo: the run has no pod; no results" >&2; return 0; }
+  key=$(jq -r --arg n "$node" '.status.nodes[$n].outputs.artifacts[]? | select(.name == "results") | .s3.key // empty' <<<"$status")
   tgz=$(mktemp "${TMPDIR:-/tmp}/koinon-e2e-results.XXXXXX")
-  if printf 'header = "Authorization: Bearer %s"\n' "$token" |
-    curl -K - -sS --fail -o "$tgz" "$SERVER/artifact-files/$NS/workflows/$name/$node/outputs/results"; then
+  if [[ -n $key ]] && declare -F e2e_creds_results >/dev/null; then
+    reader=$(e2e_creds_results)
+    printf 'user = "%s"\n' "$reader" | curl -K - -sS --fail -o "$tgz" \
+      --aws-sigv4 "aws:amz:$REGION:s3" -H 'x-amz-content-sha256: UNSIGNED-PAYLOAD' "$RESULTS_URL/$key" || ok=0
+  else
+    printf 'header = "Authorization: Bearer %s"\n' "$token" |
+      curl -K - -sS --fail -o "$tgz" "$SERVER/artifact-files/$NS/workflows/$name/$node/outputs/results" || ok=0
+  fi
+  if [[ $ok == 1 ]]; then
     tar -xzf "$tgz" -C "$dir" 2>/dev/null || tar -xf "$tgz" -C "$dir" 2>/dev/null ||
       echo "e2e-remote --argo: could not unpack the results archive" >&2
     # The archive holds the out directory itself; flatten it.
