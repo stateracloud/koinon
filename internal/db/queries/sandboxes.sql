@@ -84,8 +84,8 @@ SET state = @state::sandbox_state,
     sandbox_id = coalesce(nullif(@home_generation::text, ''), agent_sandboxes.sandbox_id),
     -- The home-written clock belongs to one sandbox: a new sandbox ID has had no harness in it.
     home_dirtied_at = CASE WHEN nullif(@home_generation::text, '') IS NOT NULL
-                            AND @home_generation::text IS DISTINCT FROM agent_sandboxes.sandbox_id
-                           THEN NULL ELSE agent_sandboxes.home_dirtied_at END,
+                            AND @home_generation::text IS DISTINCT FROM sandbox_id
+                           THEN NULL ELSE home_dirtied_at END,
     started_at = CASE WHEN @state::sandbox_state = 'ready' AND agent_sandboxes.state <> 'ready'
                       THEN now() ELSE agent_sandboxes.started_at END,
     stopped_at = CASE WHEN @state::sandbox_state = 'stopped' AND agent_sandboxes.state <> 'stopped'
