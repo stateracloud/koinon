@@ -136,6 +136,62 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 	return i, err
 }
 
+const endTaskFrom = `-- name: EndTaskFrom :one
+UPDATE tasks
+SET state = $1::task_state,
+    finished_at = coalesce(finished_at, now())
+WHERE tasks.org_id = $2 AND tasks.id = $3 AND tasks.state = ANY(($4::text[])::task_state[])
+  AND $1::task_state IN ('completed', 'failed')
+  AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.org_id = tasks.org_id AND runs.task_id = tasks.id AND runs.state = 'queued')
+RETURNING org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id
+`
+
+type EndTaskFromParams struct {
+	ToState    TaskState
+	OrgID      pgtype.UUID
+	ID         pgtype.UUID
+	FromStates []string
+}
+
+// Ends a task with its run's outcome (completed, or failed), only if it is in one of from_states and
+// no run of it is queued (a follow-up message already asked for another turn). No row: the task is
+// elsewhere (canceled, ended by a person) or has more work queued.
+func (q *Queries) EndTaskFrom(ctx context.Context, arg EndTaskFromParams) (Task, error) {
+	row := q.db.QueryRow(ctx, endTaskFrom,
+		arg.ToState,
+		arg.OrgID,
+		arg.ID,
+		arg.FromStates,
+	)
+	var i Task
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Title,
+		&i.AgentID,
+		&i.CreatedByUserID,
+		&i.HarnessSessionID,
+		&i.HarnessSessionCwd,
+		&i.LastEventSeq,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HarnessSessionGeneration,
+		&i.AgentSummary,
+		&i.AgentSummaryAt,
+		&i.SessionRestartPending,
+		&i.State,
+		&i.CreatedByKind,
+		&i.CreatedByAgentID,
+		&i.CreatedByTriggerID,
+		&i.NotifyKind,
+		&i.NotifyUserID,
+		&i.NotifyRole,
+		&i.NotifyChannelID,
+	)
+	return i, err
+}
+
 const getTask = `-- name: GetTask :one
 SELECT org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id FROM tasks
 WHERE org_id = $1 AND id = $2

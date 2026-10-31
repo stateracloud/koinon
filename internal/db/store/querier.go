@@ -236,6 +236,10 @@ type Querier interface {
 	DisableModelsOfProvider(ctx context.Context, arg DisableModelsOfProviderParams) error
 	EnableModel(ctx context.Context, arg EnableModelParams) error
 	EndRunTurn(ctx context.Context, arg EndRunTurnParams) (RunTurn, error)
+	// Ends a task with its run's outcome (completed, or failed), only if it is in one of from_states and
+	// no run of it is queued (a follow-up message already asked for another turn). No row: the task is
+	// elsewhere (canceled, ended by a person) or has more work queued.
+	EndTaskFrom(ctx context.Context, arg EndTaskFromParams) (Task, error)
 	// pending -> expired once expires_at has passed (ADR 0049: 7 days).
 	ExpirePendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	// Saved work is kept for 14 days; the sealed files go with it.
