@@ -164,6 +164,7 @@ func run() error {
 			ProviderKeySettle: cfg.keySettle,
 			Flavors:           cfg.flavors(),
 			RuntimeClassName:  cfg.runtimeClass,
+			SandboxResources:  &cfg.sandboxResources,
 			IdleTimeout:       cfg.idleTimeout,
 			ParkWarm:          cfg.parkWarm,
 			ArchiveAfter:      cfg.archiveAfter,
