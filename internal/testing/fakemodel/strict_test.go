@@ -97,6 +97,87 @@ var _ = Describe("strict Messages mode", func() {
 		Expect(message(out)).To(ContainSubstring("thinking.type"))
 	})
 
+	It("takes display summarized or omitted, and refuses display on disabled thinking", func(ctx SpecContext) {
+		for _, d := range []string{"summarized", "omitted"} {
+			code, out := send(ctx, body(map[string]any{"thinking": map[string]any{"type": "adaptive", "display": d}}))
+			Expect(code).To(Equal(http.StatusOK), "%s: %v", d, out)
+		}
+		code, out := send(ctx, body(map[string]any{"thinking": map[string]any{"type": "adaptive", "display": "raw"}}))
+		Expect(code).To(Equal(http.StatusBadRequest))
+		Expect(message(out)).To(ContainSubstring("thinking.adaptive.display"))
+		code, out = send(ctx, body(map[string]any{"thinking": map[string]any{"type": "disabled", "display": "summarized"}}))
+		Expect(code).To(Equal(http.StatusBadRequest))
+		Expect(message(out)).To(Equal("thinking.disabled.display: Extra inputs are not permitted"))
+	})
+
+	// #316: of the Claude 5.x families only Haiku can stop thinking.
+	DescribeTable("refuses the thinking types a Claude 5.x family does not take",
+		func(ctx SpecContext, model string, accepted, refused []string) {
+			Expect(srv.Register(fakemodel.Script{Model: model, Turns: []fakemodel.Turn{{Text: "ok"}}})).To(Succeed())
+			for _, typ := range accepted {
+				b := body(map[string]any{"model": model, "thinking": map[string]any{"type": typ}})
+				if typ == "enabled" {
+					b["thinking"].(map[string]any)["budget_tokens"] = 2048
+				}
+				code, out := send(ctx, b)
+				Expect(code).To(Equal(http.StatusOK), "%s %s: %v", model, typ, out)
+			}
+			for _, typ := range refused {
+				code, out := send(ctx, body(map[string]any{"model": model, "thinking": map[string]any{"type": typ}}))
+				Expect(code).To(Equal(http.StatusBadRequest), "%s %s", model, typ)
+				Expect(message(out)).To(Equal("thinking.type: '" + typ + "' is not supported for this model"))
+			}
+		},
+		Entry("Haiku 5.5 takes all three", "claude-haiku-5-5", []string{"adaptive", "enabled", "disabled"}, nil),
+		Entry("Haiku 5.5 on OpenRouter's Messages route", "anthropic/claude-haiku-5.5", []string{"adaptive", "disabled"}, nil),
+		Entry("Sonnet 5.5 cannot stop", "claude-sonnet-5-5", []string{"adaptive", "enabled"}, []string{"disabled"}),
+		Entry("Opus 5.5 thinks adaptively only", "anthropic/claude-opus-5.5", []string{"adaptive"}, []string{"disabled", "enabled"}),
+		Entry("Fable 5.1 thinks adaptively only", "claude-fable-5-1", []string{"adaptive"}, []string{"disabled", "enabled"}),
+		Entry("a model of no listed family takes every type", "claude-test", []string{"adaptive", "disabled"}, nil),
+	)
+
+	Describe("chat completions", func() {
+		chat := func(ctx SpecContext, model string, reasoning map[string]any) (int, map[string]any) {
+			GinkgoHelper()
+			Expect(srv.Register(fakemodel.Script{Model: model, Turns: []fakemodel.Turn{{Text: "ok"}}})).To(Succeed())
+			b := map[string]any{"model": model, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+			if reasoning != nil {
+				b["reasoning"] = reasoning
+			}
+			resp := post(ctx, url+"/v1/chat/completions", b)
+			var out map[string]any
+			decode(resp, &out)
+			return resp.StatusCode, out
+		}
+		errMessage := func(out map[string]any) string {
+			GinkgoHelper()
+			return out["error"].(map[string]any)["message"].(string)
+		}
+
+		It("takes reasoning effort none for a model that can stop, and refuses it where reasoning is mandatory", func(ctx SpecContext) {
+			for _, m := range []string{"openai/gpt-6-luna", "deepseek/deepseek-v4.1-flash"} {
+				code, out := chat(ctx, m, map[string]any{"effort": "none"})
+				Expect(code).To(Equal(http.StatusOK), "%s: %v", m, out)
+			}
+			code, out := chat(ctx, "openai/gpt-6-astra", map[string]any{"effort": "none"})
+			Expect(code).To(Equal(http.StatusBadRequest))
+			Expect(errMessage(out)).To(ContainSubstring("mandatory"))
+			code, _ = chat(ctx, "openai/gpt-6-astra", map[string]any{"enabled": false})
+			Expect(code).To(Equal(http.StatusBadRequest))
+			code, out = chat(ctx, "openai/gpt-6-astra", nil)
+			Expect(code).To(Equal(http.StatusOK), "%v", out)
+		})
+
+		It("refuses an unknown reasoning field or effort", func(ctx SpecContext) {
+			code, out := chat(ctx, "openai/gpt-6-luna", map[string]any{"effort": "extreme"})
+			Expect(code).To(Equal(http.StatusBadRequest))
+			Expect(errMessage(out)).To(ContainSubstring("reasoning.effort"))
+			code, out = chat(ctx, "openai/gpt-6-luna", map[string]any{"budget": 1})
+			Expect(code).To(Equal(http.StatusBadRequest))
+			Expect(errMessage(out)).To(ContainSubstring("reasoning.budget"))
+		})
+	})
+
 	It("requires anthropic-version", func(ctx SpecContext) {
 		resp := post(ctx, url+"/v1/messages", body(nil))
 		var out map[string]any

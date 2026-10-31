@@ -27,8 +27,8 @@ type endpoints struct {
 	// CacheMarker is the cache-marker format the model's provider needs (prices.CacheMode.Marker),
 	// or "" when it needs none.
 	CacheMarker string
-	// Thinking is the thinking mode Koinon decided for the run (thinking.Capability.Effective): none
-	// or the model's mode. Empty leaves the switch out. The harness renders it; its own guess from
+	// Thinking is the thinking form Koinon decided for the run (thinking.Capability.Effective): none,
+	// or the model's on or off form. Empty leaves the switch out. The harness renders it; its own guess from
 	// the model ID never decides (ADR 0069 amendment 2026-10-29).
 	Thinking thinking.Mode
 	// SessionID is the run ID to send to OpenRouter as session_id (sticky routing), or "".

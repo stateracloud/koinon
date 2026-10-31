@@ -546,6 +546,7 @@ func agentModelProto(v agentmodel.View) *agentv1alpha1.GetAgentModelResponse {
 		Thinking: &agentv1alpha1.ThinkingState{
 			Setting: string(v.Thinking.Setting), VersionSetting: string(v.Thinking.VersionSetting),
 			Effective: string(v.Thinking.Effective), Supported: v.Thinking.Supported(), Mode: string(v.Thinking.Mode()),
+			AlwaysThinks: v.Thinking.AlwaysThinks(), OffOverridden: v.Thinking.OffOverridden(), Notice: v.Thinking.Notice(),
 		},
 	}
 	for _, m := range v.Available {

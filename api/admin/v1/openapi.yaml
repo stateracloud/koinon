@@ -728,6 +728,9 @@ paths:
         the agent, not a new version: it applies to the next run. Precedence: this setting, then
         the active version's value (a template's `spec.model.thinking`), then the default, on. A
         model that cannot think ignores the setting; the response says so (`thinking.supported`).
+        `off` is refused with "this model always thinks" when the model the next run would use
+        always thinks (`thinking.alwaysThinks`); an `off` stored earlier, or a version's `off`, then
+        runs with thinking on and the response says so (`thinking.offOverridden`).
         The change is audited with the old and new value. Reasoning tokens are billed as output.
       requestBody:
         required: true
@@ -983,7 +986,7 @@ components:
     ThinkingState:
       type: object
       description: The agent's thinking setting and what it resolves to (ADR 0069 amendment 2026-10-29).
-      required: [setting, effective, supported, mode]
+      required: [setting, effective, supported, mode, alwaysThinks, offOverridden]
       properties:
         setting:
           type: string
@@ -1002,8 +1005,26 @@ components:
           description: Whether the effective model can think. When false the setting has no effect and a UI says "not supported by this model".
         mode:
           type: string
-          enum: [none, adaptive]
-          description: The mode the next run uses.
+          enum: [none, default, adaptive-summarized, disabled, effort-none]
+          description: >-
+            The form the next run sends: `none` when the model does not think, `adaptive-summarized`
+            or `default` for thinking on, `disabled` or `effort-none` for thinking off (ADR 0069
+            amendment 2026-10-31).
+        alwaysThinks:
+          type: boolean
+          description: >-
+            Whether the effective model thinks whatever the setting. A UI then offers no off choice
+            and says "this model always thinks"; setting `off` is refused with that message.
+        offOverridden:
+          type: boolean
+          description: >-
+            Whether the setting resolves to off and the model thinks anyway (it always thinks). The
+            setting is kept for a model that can stop; runs think.
+        notice:
+          type: string
+          description: >-
+            What a UI shows about the setting: "this model always thinks; your off setting doesn't
+            apply" when `offOverridden`, unset otherwise.
     AgentThinkingUpdate:
       type: object
       required: [thinking]
