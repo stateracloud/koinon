@@ -49,6 +49,13 @@ diagnostics() {
   (( rc == 0 )) || {
     echo "== diagnostics (failed run)" >&2
     "${K[@]}" -n koinon-fixtures logs deploy/escape-gitea-standin --tail=50 >&2 || true
+    echo "-- pods not Running in openshell/sandbox namespaces" >&2
+    "${K[@]}" get pods -A -o wide 2>&1 | awk 'NR==1 || (($1 ~ /openshell|sandbox/) && $4 != "Running")' >&2 || true
+    "${K[@]}" get pods -A --no-headers 2>/dev/null | awk '($1 ~ /openshell|sandbox/) && $4 != "Running" && $4 != "Completed" {print $1, $2}' |
+      while read -r ns pod; do
+        echo "-- describe $ns/$pod (events)" >&2
+        "${K[@]}" -n "$ns" describe pod "$pod" 2>&1 | sed -n '/^Events:/,$p' | tail -15 >&2 || true
+      done
     "${K[@]}" get pods -A --no-headers 2>/dev/null | awk '$2 ~ /^os-supervisor-/ {print $1, $2}' |
       while read -r ns pod; do
         echo "-- $ns/$pod" >&2
@@ -125,7 +132,8 @@ if (( need_gitea )); then
   os_version=$(sed -n 's/^OS_VERSION=//p' "$root/test/e2e/kind/up.sh")
   os_digest=$(sed -n 's/^OS_DIGEST=//p' "$root/test/e2e/kind/up.sh")
   sup_src=ghcr.io/nvidia/openshell/supervisor:$os_version
-  sup_repo=koinon/escape-supervisor sup_tag=$os_version-escape-ca
+  sup_reg=kind.local sup_repo=koinon/escape-supervisor sup_tag=$os_version-escape-ca
+  sup_ref=$sup_reg/$sup_repo:$sup_tag # built, loaded and rendered by the chart under exactly this name
   echo "== supervisor image $sup_src + throwaway CA"
   mkdir -p "$tmp/sup"
   docker pull -q "$sup_src" >/dev/null
@@ -134,13 +142,13 @@ if (( need_gitea )); then
   docker rm "$cid" >/dev/null
   cat "$pki/ca.crt" >>"$tmp/sup/ca-certificates.crt"
   printf 'FROM %s\nCOPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt\n' "$sup_src" >"$tmp/sup/Dockerfile"
-  docker build -q -t "$sup_repo:$sup_tag" "$tmp/sup" >/dev/null
-  kind load docker-image --name "$CLUSTER" "$sup_repo:$sup_tag"
+  docker build -q -t "$sup_ref" "$tmp/sup" >/dev/null
+  kind load docker-image --name "$CLUSTER" "$sup_ref"
   # supervisor.image.{registry,repository,tag,pullPolicy} are the 0.1.5 chart's keys (values.yaml);
   # the registry is set so the image is kind.local/..., never pulled from anywhere.
   helm --kube-context "$CTX" upgrade openshell "oci://ghcr.io/nvidia/openshell/helm-chart@${os_digest}" \
     --version "$os_version" --namespace openshell --reuse-values \
-    --set supervisor.image.registry=kind.local --set "supervisor.image.repository=$sup_repo" \
+    --set "supervisor.image.registry=$sup_reg" --set "supervisor.image.repository=$sup_repo" \
     --set "supervisor.image.tag=$sup_tag" --set supervisor.image.pullPolicy=IfNotPresent \
     --wait --timeout 5m
   export KOINON_ESCAPE_GITEA_URL="https://$gitea_host/gitea"
