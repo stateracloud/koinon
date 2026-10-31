@@ -193,19 +193,12 @@ func renderSandbox(workspace string, s execution.SandboxSpec) (*openshellv1.Crea
 		return nil, err
 	}
 	tmpl := &openshellv1.SandboxTemplate{Image: s.Image, RuntimeClassName: s.RuntimeClassName}
-	if s.CPU != "" || s.Memory != "" {
-		limits := map[string]any{}
-		if s.CPU != "" {
-			limits["cpu"] = s.CPU
-		}
-		if s.Memory != "" {
-			limits["memory"] = s.Memory
-		}
-		res, err := structpb.NewStruct(map[string]any{"limits": limits})
+	if res := resourcesStruct(s); len(res) > 0 {
+		st, err := structpb.NewStruct(res)
 		if err != nil {
 			return nil, err
 		}
-		tmpl.Resources = res
+		tmpl.Resources = st
 	}
 	return &openshellv1.CreateSandboxRequest{
 		WorkspaceScope: scope(workspace),
@@ -252,6 +245,27 @@ func sandboxFromProto(s *openshellv1.Sandbox) execution.Sandbox {
 		if c.GetStatus() != "True" {
 			out.Reason, out.Message = c.GetReason(), c.GetMessage()
 			break
+		}
+	}
+	return out
+}
+
+// resourcesStruct is SandboxTemplate.resources: {requests: {cpu, memory}, limits: {cpu, memory}},
+// with the empty values and the empty maps left out (ADR 0083).
+func resourcesStruct(s execution.SandboxSpec) map[string]any {
+	out := map[string]any{}
+	for key, v := range map[string]map[string]string{
+		"requests": {"cpu": s.CPURequest, "memory": s.MemoryRequest},
+		"limits":   {"cpu": s.CPULimit, "memory": s.MemoryLimit},
+	} {
+		m := map[string]any{}
+		for name, q := range v {
+			if q != "" {
+				m[name] = q
+			}
+		}
+		if len(m) > 0 {
+			out[key] = m
 		}
 	}
 	return out

@@ -22,6 +22,7 @@ import (
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 )
 
 // fileConfig is the part of the chart's config.yaml (charts/koinon/templates/config.yaml) the
@@ -75,6 +76,25 @@ type fileConfig struct {
 		HomeRetention  string `yaml:"homeRetention"`
 		Checkpoints    bool   `yaml:"checkpoints"`
 	} `yaml:"reconciler"`
+	// SandboxResources is the chart's sandbox.resources (ADR 0083). Values left out keep
+	// sandboxres.DefaultPolicy's.
+	SandboxResources struct {
+		Default struct {
+			CPU    quantitiesConfig `yaml:"cpu"`
+			Memory quantitiesConfig `yaml:"memory"`
+		} `yaml:"default"`
+		Bounds struct {
+			CPU struct {
+				Request rangeConfig `yaml:"request"`
+				Limit   rangeConfig `yaml:"limit"`
+			} `yaml:"cpu"`
+			Memory struct {
+				Request rangeConfig `yaml:"request"`
+				Limit   rangeConfig `yaml:"limit"`
+			} `yaml:"memory"`
+		} `yaml:"bounds"`
+		MemoryRequestEqualsLimit *bool `yaml:"memoryRequestEqualsLimit"`
+	} `yaml:"sandboxResources"`
 	Flavors map[string]struct {
 		Image string `yaml:"image"`
 	} `yaml:"flavors"`
@@ -89,6 +109,48 @@ type fileConfig struct {
 	MCPAsk struct {
 		URL string `yaml:"url"`
 	} `yaml:"mcpAsk"`
+}
+
+type quantitiesConfig struct {
+	Request string `yaml:"request"`
+	Limit   string `yaml:"limit"`
+}
+
+type rangeConfig struct {
+	Min string `yaml:"min"`
+	Max string `yaml:"max"`
+}
+
+// policy lays the file's sandbox resources over sandboxres.DefaultPolicy: a value the file leaves
+// empty keeps the default.
+func (fc fileConfig) policy() sandboxres.Policy {
+	p := sandboxres.DefaultPolicy()
+	set := func(dst *string, v string) {
+		if v != "" {
+			*dst = v
+		}
+	}
+	sr := fc.SandboxResources
+	set(&p.Default.CPU.Request, sr.Default.CPU.Request)
+	set(&p.Default.CPU.Limit, sr.Default.CPU.Limit)
+	set(&p.Default.Memory.Request, sr.Default.Memory.Request)
+	set(&p.Default.Memory.Limit, sr.Default.Memory.Limit)
+	for _, r := range []struct {
+		dst *sandboxres.Range
+		src rangeConfig
+	}{
+		{&p.Bounds.CPURequest, sr.Bounds.CPU.Request},
+		{&p.Bounds.CPULimit, sr.Bounds.CPU.Limit},
+		{&p.Bounds.MemoryRequest, sr.Bounds.Memory.Request},
+		{&p.Bounds.MemoryLimit, sr.Bounds.Memory.Limit},
+	} {
+		set(&r.dst.Min, r.src.Min)
+		set(&r.dst.Max, r.src.Max)
+	}
+	if sr.MemoryRequestEqualsLimit != nil {
+		p.MemoryRequestEqualsLimit = *sr.MemoryRequestEqualsLimit
+	}
+	return p
 }
 
 // config is the reconciler's effective configuration: the config file, overridden by flags
@@ -139,6 +201,9 @@ type config struct {
 	homeRetention  string
 	checkpoints    bool
 	flavorImages   map[string]string
+
+	// sandboxResources is the platform's sandbox sizing, from the config file's sandboxResources.
+	sandboxResources sandboxres.Policy
 
 	githubToolsURL string
 	mcpAskURL      string
@@ -299,6 +364,7 @@ func (c *config) fill(fc fileConfig) error {
 			*d.dst = v
 		}
 	}
+	c.sandboxResources = fc.policy()
 	c.flavorImages = map[string]string{}
 	for name, f := range fc.Flavors {
 		c.flavorImages[name] = f.Image
@@ -329,6 +395,9 @@ func (c *config) validate() error {
 	}
 	if c.gatewayMode == project.GatewayKubernetes && c.gatewayName == "" {
 		return errors.New("--gateway-name is required in kubernetes mode")
+	}
+	if err := c.sandboxResources.Validate(); err != nil {
+		return fmt.Errorf("config sandboxResources: %w", err)
 	}
 	return nil
 }
