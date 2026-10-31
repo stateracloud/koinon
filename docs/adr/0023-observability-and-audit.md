@@ -1,6 +1,6 @@
 # 0023. Optional observability, hash-chained audit on by default
 
-- Status: Accepted; amended 2026-10-26, 2026-10-28 and 2026-10-30 (below); run traces by [0074](0074-run-traces-trace-router.md)
+- Status: Accepted; amended 2026-10-26, 2026-10-28, 2026-10-30 and 2026-10-31 (below); run traces by [0074](0074-run-traces-trace-router.md)
 - Date: 2026-10-21
 - Decision: [design.md#23](../design.md)
 
@@ -161,6 +161,25 @@ proxy pods, selected by the controller's `gateway-name` label, and the install n
 CRD unless `skipCapabilityCheck` is set. The label rule holds: agentgateway's series are labelled by
 gateway, listener, route, backend, status and model, with no key or agent ID. `networkPolicy.metricsFrom`
 still decides who may reach the port, and a non-operator scraper works with the monitors off.
+
+## Amendment (2026-10-31, #343): business and diagnostic run events, retention
+
+Decision of Andre, 2026-10-31 ([#264](https://github.com/stateracloud/koinon/issues/264)). The
+details and the open questions are in the [0074 amendment of the same date](0074-run-traces-trace-router.md);
+the parts that belong to this ADR:
+
+- **Business and diagnostic events.** A run's events are business events (state the run depends on;
+  a failed write may fence the run) or diagnostic events (a failed write is logged and counted,
+  never fences). The count is a metric under the label rule of the metrics amendment: a fixed label
+  set, no org, agent, user, ticket or run IDs.
+- **Stored run content is items, not chunks.** `run_events` holds completed messages, thoughts and
+  tool calls; ACP chunks are live-only.
+- **Retention.** Stored run content is kept per org for 30 days by default, configurable per org.
+  The hash-chained audit log, run traces and the spend ledger are not stored run content and are
+  unaffected.
+
+Open: whether the audit log needs its own retention statement (the decision does not say), and the
+metric name for failed diagnostic writes. Both are left to #345.
 
 ## Open questions
 

@@ -1,6 +1,6 @@
 # 0074. Run traces: a Koinon trace router to each org's OTLP backend
 
-- Status: Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9
+- Status: Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9; amended 2026-10-30 and 2026-10-31 (below)
 - Date: 2026-10-28
 - Amends: [0023](0023-observability-and-audit.md) (run traces, deferred there)
 - Relates to: [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0049](0049-v01-scope-decisions.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0059](0059-v01-opencode-only.md), [0065](0065-work-model-tasks-inbox.md), [0072](0072-agent-model-run-now-echo-check.md), [0073](0073-agent-passport.md), [#213](https://github.com/stateracloud/koinon/issues/213)
@@ -708,3 +708,43 @@ session: one per task, spanning its runs, reloaded by each run (ADR 0029, 0051).
 "The session is the run and its task" names something else: the **trace session**, the grouping a
 tracing backend builds from `session.id` and `gen_ai.conversation.id`, which Koinon sets to the run
 ID. Read "session" in this ADR's trace attributes as "trace session".
+
+## Amendment (2026-10-31, #343): stored run content is items, diagnostic events never fence, per-org retention
+
+Decision of Andre, 2026-10-31 ([#264](https://github.com/stateracloud/koinon/issues/264)): as
+proposed, shipping in v0.1.x at P1, with a 30-day default retention. The finding: agentd writes every
+ACP chunk as a synchronous `run_events` row and fences the run if a write fails; at about 9,000 rows a
+run and 10k runs a day that is about 90 M rows a day, and the content is stored whatever the org's
+trace content level. [0023](0023-observability-and-audit.md) carries the matching amendment for the
+event classes. The code lands in #344 (items), #345 (business and diagnostic events) and #346
+(retention and purge), which point here.
+
+1. **`run_events` stores completed items.** agentd coalesces ACP chunks into completed items
+   (messages, thoughts and tool calls) and stores those. ACP chunks are live-only: streamed to the
+   UI, never stored.
+2. **Business and diagnostic events.** Events are split in two classes:
+   - **Business events** are state the run depends on. A failed write may fence the run.
+   - **Diagnostic events** are everything else, such as the stored items of point 1 kept for reading
+     later. A failed write is logged and counted and never fences the run.
+3. **Per-org retention of stored run content.** Stored run content has a retention rule per org: the
+   default is 30 days, configurable per org. A purge job removes content older than the org's
+   retention (#346).
+4. **What retention does not touch.** Run traces (this ADR's router and its destinations) and the
+   spend ledger are unaffected; the ledger stays append-only ([0041](0041-koinon-spend-ledger-and-budget-stops.md)).
+5. **Content level.** Today the content stored in `run_events` does not depend on the org's trace
+   content level (decision 6), which governs only what the router exports. This amendment does not
+   change that; see the first open question.
+
+### Open questions
+
+- How stored run content interacts with the trace content level. The issue asks it be written down
+  and the comments do not decide it: whether an org at `none` stores items at all, stores them
+  scrubbed, or stores them in full for the UI as today.
+- Which events are business and which diagnostic, class by class. The decision fixes the rule (a
+  diagnostic write never fences); #345 lists the classes against the code.
+- Who may change an org's retention (org owner or admin), the allowed range, whether a platform
+  maximum applies like the content level ceiling, and whether the change is audited.
+- Whether the purge deletes rows or only their content, and what the UI shows for a run past
+  retention.
+- Whether audit events ([0023](0023-observability-and-audit.md)) are in scope of retention. The
+  decision names "stored run content" only; audit stays hash-chained and is assumed unaffected.
