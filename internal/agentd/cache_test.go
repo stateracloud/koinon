@@ -117,7 +117,7 @@ var _ = Describe("prompt caching of the default price list", func() {
 	})
 
 	It("passes the thinking mode Koinon decided, and nothing when none was", func() {
-		for _, mode := range []thinking.Mode{thinking.None, thinking.Adaptive} {
+		for _, mode := range thinking.Modes() {
 			cmd, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{
 				ModelBaseURL: "http://gw.test/v1", Model: "claude-haiku-5-5", MCPURL: "http://gw.test/mcp", Format: modelformat.Anthropic, Thinking: mode,
 			})

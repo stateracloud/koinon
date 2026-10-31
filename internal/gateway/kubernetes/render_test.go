@@ -81,8 +81,11 @@ func formatsState() gateway.State {
 			APIKeyFile: "/secrets/providers/acme-claude", AnthropicWorkspaceID: "wrkspc_01ExampleExample",
 			Models: []gateway.Model{
 				{Name: "claude-haiku-4-5", Format: modelformat.Anthropic, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
-				// A model the catalog says can think: the gateway pins the beta its mode needs.
-				{Name: "claude-haiku-5-5", Format: modelformat.Anthropic, Thinking: thinking.Of("anthropic", "claude-haiku-5-5", modelformat.Anthropic), Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
+				// A model whose thinking row pins a beta: the gateway sets it. No catalog row pins one
+				// since the explicit forms of #316, so the capability is spelled out here.
+				{Name: "claude-haiku-5-5", Format: modelformat.Anthropic, Thinking: thinking.Capability{
+					Thinks: thinking.Always, On: thinking.AdaptiveSummarized, Betas: []string{thinking.BindingBeta},
+				}, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
 			},
 		},
 		{
@@ -230,7 +233,7 @@ var _ = Describe("Render", func() {
 			"remove": []any{"anthropic-beta"},
 		}}))
 
-		By("a model that can think gets the catalog's beta pinned, replacing whatever the client sends")
+		By("a model whose row pins a beta gets it set, replacing whatever the client sends")
 		think := spec("claude-haiku-5-5")["policies"].(map[string]any)
 		Expect(think["headers"]).To(Equal(map[string]any{"request": map[string]any{
 			"set": []any{

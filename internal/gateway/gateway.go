@@ -375,7 +375,7 @@ type Model struct {
 	// (Rendering). It is required.
 	Format modelformat.Format
 	// Thinking is what the catalog says about the model's thinking (internal/thinking). The
-	// rendering pins the anthropic-beta its mode needs and never passes the client's header
+	// rendering pins the anthropic-beta its row needs and never passes the client's header
 	// through (ADR 0069 amendment 2026-10-29). The zero value is a model that does not think.
 	Thinking thinking.Capability
 	// Guard turns on the routing guard (ADR 0048): the gateway forces GuardOverrides
@@ -722,8 +722,8 @@ func (s State) Validate() error {
 			} else if _, err := RenderingOf(m); err != nil {
 				errs = append(errs, fmt.Errorf("model %q of provider %q: %w", m.Name, ref, err))
 			}
-			if m.Thinking.Mode != "" && !thinking.Known(m.Thinking.Mode) {
-				errs = append(errs, fmt.Errorf("model %q of provider %q: unknown thinking mode %q", m.Name, ref, m.Thinking.Mode))
+			if err := m.Thinking.Validate(); err != nil {
+				errs = append(errs, fmt.Errorf("model %q of provider %q: %w", m.Name, ref, err))
 			}
 			for _, b := range m.Thinking.Betas {
 				// A beta becomes a header value the gateway sets.

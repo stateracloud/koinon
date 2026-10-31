@@ -16,7 +16,7 @@ the remaining workarounds are in ADR 0052 (amendment 2026-10-28). The bundled ru
 
 | Item (ADR 0035) | OpenCode flavor |
 | --- | --- |
-| ACP command | `/usr/local/bin/koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs] [--model-format openai|anthropic] [--cache-anthropic|--cache-alibaba] [--thinking none|adaptive] [--session-id RUN_ID] [--no-web-tools]`, run as UID 10001 in a session working directory under `/sandbox`. agentd adds `--plugin-installs` only for an agent whose template sets `harness.pluginInstalls: true` (see [Plugins](#plugins)). It always adds `--model-format` (the model's wire format, ADR 0069): `openai` (chat completions, provider entry `koinon`) or `anthropic` (Messages, entry `koinon-anthropic`, which posts to `<gateway>/v1/messages` with the key as `Authorization: Bearer`); `internal/flavor` holds the format-to-entry table. It adds `--cache-anthropic` or `--cache-alibaba` for a chat-completions model whose provider needs explicit prompt-cache markers (ADR 0068); the entry script then sets `providers.koinon.compatibility.cacheFormat` through `OPENCODE_CONFIG_CONTENT`. An `anthropic`-format model gets no such switch: OpenCode places up to four `cache_control` breakpoints itself. It always adds `--thinking` (the thinking mode Koinon decided for the run, see [Thinking](#thinking-koinon-decides-not-the-model-id-adr-0069-amendment-2026-10-29)). For an OpenRouter model agentd also passes `--session-id` with the run ID, sent as the request body field `session_id` on whichever entry the run uses (OpenRouter sticky routing: a run stays on one upstream, so its cache stays warm). agentd adds `--no-web-tools` for every agent without web egress (all of them today, ADR 0080): the built-in `webfetch` is then not offered to the model (see the table of switched-off features below). The config also caps every tool result at 24576 bytes / 600 lines (`tool_output`); the full text goes to the tool-output directory |
+| ACP command | `/usr/local/bin/koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs] [--model-format openai|anthropic] [--cache-anthropic|--cache-alibaba] [--thinking none|default|adaptive-summarized|disabled|effort-none] [--session-id RUN_ID] [--no-web-tools]`, run as UID 10001 in a session working directory under `/sandbox`. agentd adds `--plugin-installs` only for an agent whose template sets `harness.pluginInstalls: true` (see [Plugins](#plugins)). It always adds `--model-format` (the model's wire format, ADR 0069): `openai` (chat completions, provider entry `koinon`) or `anthropic` (Messages, entry `koinon-anthropic`, which posts to `<gateway>/v1/messages` with the key as `Authorization: Bearer`); `internal/flavor` holds the format-to-entry table. It adds `--cache-anthropic` or `--cache-alibaba` for a chat-completions model whose provider needs explicit prompt-cache markers (ADR 0068); the entry script then sets `providers.koinon.compatibility.cacheFormat` through `OPENCODE_CONFIG_CONTENT`. An `anthropic`-format model gets no such switch: OpenCode places up to four `cache_control` breakpoints itself. It always adds `--thinking` (the thinking form Koinon decided for the run, see [Thinking](#thinking-koinon-decides-not-the-model-id-adr-0069-amendments-2026-10-29-and-2026-10-31)). For an OpenRouter model agentd also passes `--session-id` with the run ID, sent as the request body field `session_id` on whichever entry the run uses (OpenRouter sticky routing: a run stays on one upstream, so its cache stays warm). agentd adds `--no-web-tools` for every agent without web egress (all of them today, ADR 0080): the built-in `webfetch` is then not offered to the model (see the table of switched-off features below). The config also caps every tool result at 24576 bytes / 600 lines (`tool_output`); the full text goes to the tool-output directory |
 | Instructions | `/sandbox/.koinon/AGENTS.md`, named by the `instructions` key of the read-only config, written by koinon-agentd before every harness start from the run's agent version, and checked before every prompt. The entry script refuses to start (exit 64) when it is missing, empty or a symbolic link |
 | Session start | After `session/new` or `session/load`, agentd waits for the command `koinon:github_koinon-ready`, then selects the model with `session/set_config_option` (`configId` `model`, value `<entry>/<model>`: `koinon/<model>` or `koinon-anthropic/<model>`) |
 | Resume mode | `session/load` (replays history). OpenCode also advertises `session/resume`; Koinon does not rely on it |
@@ -179,7 +179,7 @@ rewrites the placeholder (it does so in any header) and the gateway's key policy
 Anthropic provider's default `x-api-key` is not used. `--model-format anthropic` also sets the
 config's default model to `koinon-anthropic/<model>` through `OPENCODE_CONFIG_CONTENT`.
 
-### Thinking: Koinon decides, not the model ID (ADR 0069 amendment 2026-10-29)
+### Thinking: Koinon decides, not the model ID (ADR 0069 amendments 2026-10-29 and 2026-10-31)
 
 OpenCode 2.2.0 gives every Messages request a thinking block of its own accord. When the model ID
 parses as Claude 5.1 or later (`supportsThinkingBlockBinding`, `packages/ai/src/protocols/utils/
@@ -191,25 +191,32 @@ always adds `interleaved-thinking-2025-05-14`. The regex matches `claude-haiku-5
 `thinking` block is sent"; that was wrong, and with the beta removed by the gateway direct Anthropic
 refused every request (`thinking.adaptive.block_binding: Extra inputs are not permitted`).
 
-Koinon now states the choice, so the ID never decides. koinon-agentd passes `--thinking none|adaptive`
-(`internal/flavor` `ThinkingArg`), the mode from the model's catalog capability and the agent's
-setting (`internal/thinking`), and the entry script renders it into the model's `compatibility` in
-`OPENCODE_CONFIG_CONTENT`, which overrides the ID heuristic
-(`packages/schema/src/model-compatibility.ts`):
+Koinon states the choice, so neither the ID nor a provider default decides. koinon-agentd passes
+`--thinking` (`internal/flavor` `ThinkingArg`) with the form from the model's row in
+`internal/thinking` and the agent's setting. Thinking on and off are both sent explicitly (#316):
+provider defaults differ per route (direct Anthropic defaults Claude 5.x to `display: omitted`, which
+bills the thinking and returns empty thinking blocks; OpenRouter summarizes). The entry script turns
+OpenCode's own thinking block off with the model's `compatibility` in `OPENCODE_CONFIG_CONTENT`
+(`supportsThinkingBlockBinding: false`, `supportsEffortUpdates: false`, which override the ID
+heuristic, `packages/schema/src/model-compatibility.ts`) and puts Koinon's field in the
+provider-level `body` overlay, the mechanism that already carries OpenRouter's `session_id`:
 
-| `--thinking` | `supportsThinkingBlockBinding` | `supportsEffortUpdates` | Request |
+| `--thinking` | Format | Request body | Rows |
 | --- | --- | --- | --- |
-| `adaptive` | `true` | `false` | `thinking: {type: adaptive, block_binding}` and the binding beta |
-| `none`, or no switch | `false` | `false` | no `thinking` field, no `output_config` |
+| `adaptive-summarized` | `anthropic` | `thinking: {"type": "adaptive", "display": "summarized"}` | Claude 5.x on, both routes |
+| `disabled` | `anthropic` | `thinking: {"type": "disabled"}` | Claude Haiku 5.x off, both routes |
+| `effort-none` | `openai` | `reasoning: {"effort": "none"}` | GPT-6 Luna and DeepSeek v4.1 flash off, OpenRouter |
+| `default` | either | nothing: the model thinks by default | chat-completions models on |
+| `none`, or no switch | either | nothing | models that do not think through Koinon |
 
-`supportsEffortUpdates` is `false` in both rows: per-turn effort adds `output_config` and a beta of its
-own, which Koinon does not pin. Only the `anthropic` format takes the switch; chat completions has no
-thinking block. The gateway sets `anthropic-beta` itself, from the same catalog row, and drops the
-client's header (ADR 0069 amendment), so the binding beta reaches Anthropic only for a model that
-can think. `test/flavors/thinking_test.go` runs real Claude IDs (`claude-haiku-5-5`,
-`anthropic/claude-haiku-5.5`, `claude-opus-5-5`, an older one and the contract ID) with thinking on
-and off against the fake model in strict Messages mode, which refuses a body field without its beta
-as Anthropic does.
+The entry script refuses a form on the wrong format (exit 64). A model that always thinks (Claude
+Sonnet, Opus and Fable 5.x, GPT-6 Astra) has no off form: the API refuses "off" for it, and a stored
+"off" runs as on. No form carries a beta-only field, so the gateway pins no beta and drops the
+client's `anthropic-beta`, OpenCode's interleaved-thinking value included.
+`test/flavors/thinking_test.go` runs real model IDs on both formats (Haiku, Sonnet, Opus and Fable
+5.x on both Claude routes, Luna and DeepSeek on chat completions, an older Claude and the contract
+ID) and asserts the exact body for on and off against the fake model in strict mode, which refuses
+a thinking type the model does not take as Anthropic and OpenRouter do.
 
 A session saved under one entry loads under the other (measured with OpenCode 2.2.0, both
 directions, `test/flavors/anthropic_test.go`): the replayed history is complete, a turn with a tool

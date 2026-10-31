@@ -286,12 +286,21 @@ message ThinkingState {
   string version_setting = 2;
   // What the layers resolve to, "on" or "off", whether or not the model can think.
   string effective = 3;
-  // Whether the effective model can think. When false the setting has no effect and the UI says
+  // Whether the effective model thinks. When false the setting has no effect and the UI says
   // "not supported by this model".
   bool supported = 4;
-  // The mode the next run uses: "adaptive" when the model can think and the setting resolves to
-  // on, "none" otherwise.
+  // The form the next run sends (internal/thinking.Mode): "none" when the model does not think,
+  // "adaptive-summarized" or "default" for thinking on, "disabled" or "effort-none" for thinking off.
   string mode = 5;
+  // Whether the effective model thinks whatever the setting. A UI then offers no off choice and says
+  // "this model always thinks"; setting "off" is refused with that message.
+  bool always_thinks = 6;
+  // Whether the setting resolves to off and the model thinks anyway (it always thinks). The setting
+  // is kept for a model that can stop; runs think.
+  bool off_overridden = 7;
+  // What a UI shows about the setting: "this model always thinks; your off setting doesn't apply"
+  // when off_overridden, empty otherwise.
+  string notice = 8;
 }
 
 // SetAgentModelRequest sets the agent's model.

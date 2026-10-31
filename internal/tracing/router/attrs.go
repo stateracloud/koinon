@@ -3,6 +3,8 @@
 package router
 
 import (
+	"slices"
+
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 )
 
@@ -45,6 +47,11 @@ func setAttr(attrs []*commonpb.KeyValue, kv *commonpb.KeyValue) []*commonpb.KeyV
 		}
 	}
 	return append(attrs, kv)
+}
+
+// delAttr removes attribute k.
+func delAttr(attrs []*commonpb.KeyValue, k string) []*commonpb.KeyValue {
+	return slices.DeleteFunc(attrs, func(kv *commonpb.KeyValue) bool { return kv.GetKey() == k })
 }
 
 // stringList returns the strings of an array attribute.

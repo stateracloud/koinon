@@ -116,6 +116,7 @@ var _ = Describe("agents in the admin API (rc.6)", func() {
 			Expect(st).To(Equal(http.StatusOK), string(raw))
 			Expect(decode[map[string]any](raw)["thinking"]).To(Equal(map[string]any{
 				"setting": "default", "effective": "on", "supported": false, "mode": "none",
+				"alwaysThinks": false, "offOverridden": false,
 			}), "on by default; a model the catalog does not list ignores it")
 
 			st, raw = e.call(ctx, e.token, http.MethodPut, "/agents/"+agent+"/thinking", map[string]any{"thinking": "off"})
@@ -137,6 +138,35 @@ var _ = Describe("agents in the admin API (rc.6)", func() {
 
 			st, _ = e.call(ctx, e.token, http.MethodPut, "/agents/019a0000-0000-7000-8000-00000000ffff/thinking", map[string]any{"thinking": "off"})
 			Expect(st).To(Equal(http.StatusNotFound))
+		})
+
+		// #316: off exists only where the model can really stop thinking.
+		It("refuses off for a model that always thinks, and keeps a stored off that a later model change overrides", func(ctx SpecContext) {
+			serveModel(ctx, e, "vendor/a-model", true)
+			serveModel(ctx, e, "gpt-6-astra", true)
+			agent := agentWith(ctx, e, `{"instructions":"x","model":"gpt-6-astra"}`)
+
+			st, raw := e.call(ctx, e.token, http.MethodGet, "/agents/"+agent+"/model", nil)
+			Expect(st).To(Equal(http.StatusOK), string(raw))
+			Expect(decode[map[string]any](raw)["thinking"]).To(Equal(map[string]any{
+				"setting": "default", "effective": "on", "supported": true, "mode": "default",
+				"alwaysThinks": true, "offOverridden": false,
+			}))
+			st, raw = e.call(ctx, e.token, http.MethodPut, "/agents/"+agent+"/thinking", map[string]any{"thinking": "off"})
+			Expect(st).To(Equal(http.StatusBadRequest), string(raw))
+			Expect(string(raw)).To(ContainSubstring("this model always thinks"))
+
+			By("off is stored while the model cannot think, and a change to a model that always thinks is not refused")
+			st, raw = e.call(ctx, e.token, http.MethodPut, "/agents/"+agent+"/model", map[string]any{"model": "vendor/a-model"})
+			Expect(st).To(Equal(http.StatusOK), string(raw))
+			st, raw = e.call(ctx, e.token, http.MethodPut, "/agents/"+agent+"/thinking", map[string]any{"thinking": "off"})
+			Expect(st).To(Equal(http.StatusOK), string(raw))
+			st, raw = e.call(ctx, e.token, http.MethodPut, "/agents/"+agent+"/model", map[string]any{"model": "gpt-6-astra"})
+			Expect(st).To(Equal(http.StatusOK), string(raw))
+			Expect(decode[map[string]any](raw)["thinking"]).To(Equal(map[string]any{
+				"setting": "off", "effective": "off", "supported": true, "mode": "default",
+				"alwaysThinks": true, "offOverridden": true, "notice": "this model always thinks; your off setting doesn't apply",
+			}), "the stored off is kept and runs think")
 		})
 	})
 
