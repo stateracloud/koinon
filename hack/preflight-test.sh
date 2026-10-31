@@ -26,13 +26,14 @@ stub go 'case "$1 $2" in
 "mod tidy") [[ -z ${FAKE_TIDY_CHANGE:-} ]] || echo "// changed" >>go.mod ;;
 "list ./...") echo example.com/m/a; echo example.com/m/test/flavors ;;
 "test "*) [[ ${FAKE_GO_TEST_RC:-0} -eq 0 ]] || echo "--- FAIL: TestX"; exit "${FAKE_GO_TEST_RC:-0}" ;;
-"run mvdan.cc/gofumpt@latest") [[ -z ${FAKE_GOFUMPT_OUT:-} ]] || echo "$FAKE_GOFUMPT_OUT" ;;
+"run mvdan.cc/gofumpt@v0.12.0") [[ -z ${FAKE_GOFUMPT_OUT:-} ]] || echo "$FAKE_GOFUMPT_OUT" ;;
 esac
 exit 0'
 stub golangci-lint 'exit "${FAKE_LINT_RC:-0}"'
 stub make '[[ -z ${FAKE_GEN_CHANGE:-} ]] || echo gen >>generated.txt'
 stub pnpm 'exit 0'
 stub shellcheck 'exit 0'
+stub buf 'exit "${FAKE_BUF_RC:-0}"'
 stub gitleaks '[[ ${FAKE_GITLEAKS_RC:-0} -eq 0 ]] || echo "Finding: fake"; exit "${FAKE_GITLEAKS_RC:-0}"'
 export PATH="$tmp/bin:$PATH"
 
@@ -42,7 +43,7 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/internal/foo" "$seed/charts/koinon" "$seed/web" "$seed/docs/adr" "$seed/internal/db/queries" "$seed/internal/db/migrations"
-for s in migrate-lint adr-lint docs-check chart-check; do
+for s in migrate-lint adr-lint docs-check chart-check dep-age-check; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
 printf '#!/usr/bin/env bash\necho "needs-e2e.sh $*" >>"$FAKE_LOG"\nrc=${FAKE_NEEDS_RC:-1}\n[[ $rc -ne 0 ]] || echo "kind e2e needed"\nexit "$rc"\n' >"$seed/hack/needs-e2e.sh"
@@ -62,7 +63,7 @@ fresh() { # a fresh clone on a feature branch, echoes its path
 	git -C "$w" checkout -q -b feat/x
 	echo "$w"
 }
-reset_state() { : >"$FAKE_LOG"; unset FAKE_TIDY_CHANGE FAKE_GO_TEST_RC FAKE_LINT_RC FAKE_GITLEAKS_RC FAKE_GEN_CHANGE FAKE_NEEDS_RC FAKE_GOFUMPT_OUT FAKE_MIGRATE_LINT_RC FAKE_CHART_CHECK_RC || true; rm -rf "$tmp/tmpdir"/*; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_TIDY_CHANGE FAKE_GO_TEST_RC FAKE_LINT_RC FAKE_GITLEAKS_RC FAKE_GEN_CHANGE FAKE_NEEDS_RC FAKE_GOFUMPT_OUT FAKE_MIGRATE_LINT_RC FAKE_CHART_CHECK_RC FAKE_DEP_AGE_CHECK_RC FAKE_BUF_RC || true; rm -rf "$tmp/tmpdir"/*; }
 
 fail=0 pass=0
 check() { # <description> <command...>
@@ -162,7 +163,7 @@ mv "$tmp/bin/golangci-lint" "$tmp/golangci-lint.off"
 PATH="$tmp/bin:$tmp/limited" "$repo/hack/preflight.sh" --only go >"$tmp/r2" 2>&1 || rc=$?
 mv "$tmp/golangci-lint.off" "$tmp/bin/golangci-lint"
 check "no golangci-lint: exit 0" eq "$rc" 0
-check "falls back to gofumpt" has '^go run mvdan.cc/gofumpt@latest -l internal/foo/a.go' "$FAKE_LOG"
+check "falls back to gofumpt" has '^go run mvdan.cc/gofumpt@v0.12.0 -l internal/foo/a.go' "$FAKE_LOG"
 check "falls back to go vet" has '^go vet ./internal/foo ' "$FAKE_LOG"
 check "no golangci-lint call" hasnt '^golangci-lint' "$FAKE_LOG"
 
@@ -239,6 +240,42 @@ rc=$(pf "$tmp/c2")
 check "a failing checker fails preflight" eq "$rc" 1
 check "chart FAIL line" has '^chart FAIL' "$tmp/c2"
 unset FAKE_CHART_CHECK_RC
+
+# 8. deps and proto gates
+reset_state
+w=$(fresh); cd "$w"
+echo "x" >>README.txt; commit_all
+pf "$tmp/d0" --list >/dev/null
+check "no manifest change: deps not selected" hasnt '^deps:' "$tmp/d0"
+check "no proto change: proto not selected" hasnt '^proto:' "$tmp/d0"
+reset_state
+w=$(fresh); cd "$w"
+echo "require example.com/x v1.0.0" >>go.mod
+echo '{}' >web/package.json
+echo "FROM scratch" >Dockerfile
+echo "syntax = 'proto3';" >api.proto
+commit_all
+pf "$tmp/d1" --list >/dev/null
+check "go.mod selects deps" has '^deps:' "$tmp/d1"
+check "proto change selects proto" has '^proto:' "$tmp/d1"
+rc=$(pf "$tmp/d2" --only deps,proto)
+check "deps and proto pass: exit 0" eq "$rc" 0
+check "dep-age-check gets the base" has '^dep-age-check.sh origin/main' "$FAKE_LOG"
+check "buf lint ran" has '^buf lint' "$FAKE_LOG"
+check "buf breaking against the base branch" has '^buf breaking --against .git#branch=main' "$FAKE_LOG"
+export FAKE_DEP_AGE_CHECK_RC=1
+rc=$(pf "$tmp/d3" --only deps)
+check "dep-age failure fails preflight" eq "$rc" 1
+check "deps FAIL line" has '^deps FAIL' "$tmp/d3"
+unset FAKE_DEP_AGE_CHECK_RC
+export FAKE_BUF_RC=1
+rc=$(pf "$tmp/d4" --only proto)
+check "buf failure fails preflight" eq "$rc" 1
+unset FAKE_BUF_RC
+rc=0
+PATH="$tmp/limited" "$repo/hack/preflight.sh" --only proto >"$tmp/d5" 2>&1 || rc=$?
+check "no buf: proto skipped, exit 0" eq "$rc" 0
+check "no buf: skip line" has '^proto skip' "$tmp/d5"
 
 echo "$pass passed, $fail failed"
 exit $((fail > 0))

@@ -12,14 +12,15 @@
 #   --list        print which gates would run and why, then exit
 #   -v            print each gate's full output
 #
-# Gates: go tidy generate migrate adr docs chart web shell e2e gitleaks.
+# Gates: go tidy deps generate proto migrate adr docs chart web shell e2e gitleaks.
 # One line per gate: `go ok 12s`, or `go FAIL 3s log=<path>` followed by at most 5 lines of the
 # error. Full logs are under ${TMPDIR:-/tmp}/koinon-preflight/. The e2e gate only reports the verdict
 # of hack/needs-e2e.sh and never fails. Gates never touch a cluster (KUBECONFIG=/dev/null).
 # Exit 0 when every gate that ran passed, 1 when one failed, 2 on a usage error.
 set -uo pipefail
 
-ALL="go tidy generate migrate adr docs chart web shell e2e gitleaks"
+ALL="go tidy deps generate proto migrate adr docs chart web shell e2e gitleaks"
+GOFUMPT_VERSION=v0.12.0 # newest release at least 3 days old when pinned (ADR 0079)
 base=origin/main only="" list=0 verbose=0
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -62,6 +63,8 @@ reason() {
 	case $1 in
 	go) n=$(count '\.go$'); [[ $n -gt 0 ]] && echo "$n Go files changed" ;;
 	tidy) match '\.go$|^go\.(mod|sum)$' && echo "Go files or go.mod/go.sum changed" ;;
+	deps) match '(^|/)(go\.mod|go\.sum|package\.json|pnpm-lock\.yaml|package-lock\.json|yarn\.lock|Dockerfile[^/]*)$' && echo "dependency manifests, lockfiles or Dockerfiles changed" ;;
+	proto) match '\.proto$' && echo "proto files changed" ;;
 	generate) match '\.proto$|^internal/db/queries/.*\.sql$|^sqlc\.yaml$' && echo "proto or sqlc queries changed" ;;
 	migrate) match '^internal/db/migrations/' && echo "migrations changed" ;;
 	adr) match '^docs/adr/' && echo "docs/adr changed" ;;
@@ -119,7 +122,7 @@ g_go() {
 		files=$(existing '\.go$')
 		if [[ -n $files ]]; then
 			# shellcheck disable=SC2086
-			out=$(go run mvdan.cc/gofumpt@latest -l $files)
+			out=$(go run mvdan.cc/gofumpt@$GOFUMPT_VERSION -l $files)
 			if [[ -n $out ]]; then echo "gofumpt would change:"; echo "$out"; return 1; fi
 		fi
 		# shellcheck disable=SC2086
@@ -141,6 +144,13 @@ g_tidy() {
 	[[ -f $tmp/go.sum ]] && cp "$tmp/go.sum" go.sum
 	rm -rf "$tmp"
 	return $rc
+}
+
+g_deps() { hack/dep-age-check.sh "$base"; }
+
+g_proto() {
+	buf lint
+	buf breaking --against ".git#branch=${base#origin/}"
 }
 
 tree_state() { git status --porcelain; git diff | cksum; }
@@ -178,6 +188,7 @@ run_gate() { # <gate>
 	local g=$1 log=$logdir/$1.log start rc
 	case $g in
 	web) command -v pnpm >/dev/null || { echo "web skip (pnpm not installed)"; return; } ;;
+	proto) command -v buf >/dev/null || { echo "proto skip (buf not installed)"; return; } ;;
 	shell) command -v shellcheck >/dev/null || { echo "shell skip (shellcheck not installed)"; return; } ;;
 	esac
 	ran=$((ran + 1))
