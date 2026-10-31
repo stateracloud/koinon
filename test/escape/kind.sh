@@ -8,6 +8,10 @@
 # nvcr.io or apt at run time, #357) and loaded into the node; the gateway is reached through a
 # port-forward with the client certificate it generated.
 #
+# The gateway-route case needs a stand-in for agentgateway on port 4000 (ADR 0080, #270): unless
+# KOINON_ESCAPE_GATEWAY_HOST already names one, or KOINON_ESCAPE_STANDIN=0, it is built from
+# cmd/koinon-fakemodel with ko and run in namespace koinon-fixtures, as the RT1 fixtures do.
+#
 # kind runs sandboxes under runc, so the Kata guest case skips (it needs KOINON_ESCAPE_HOST_KERNEL
 # and a Kata node, the maintainer's release gate). Cases that need other fixtures skip with their
 # reason; the rest run. Every kubectl call names the kind context and nothing else is touched.
@@ -49,6 +53,18 @@ else
   docker build -q -t "$IMAGE" "$root/hack/spike/probe" >/dev/null
 fi
 kind load docker-image --name "$CLUSTER" "$IMAGE"
+
+if [[ -z ${KOINON_ESCAPE_GATEWAY_HOST:-} && ${KOINON_ESCAPE_STANDIN:-1} != 0 ]]; then
+  echo "== gateway stand-in (koinon-fakemodel -standin) in koinon-fixtures"
+  img=$(cd "$root" && KO_DOCKER_REPO=kind.local/rt1-fakemodel KIND_CLUSTER_NAME="$CLUSTER" \
+    ko build --bare --platform "linux/$(go env GOARCH)" --tags escape ./cmd/koinon-fakemodel 2>"$tmp/ko.log") ||
+    { cat "$tmp/ko.log" >&2; exit 1; }
+  "${K[@]}" create namespace koinon-fixtures --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null
+  sed "s|image: rt1-fakemodel:dev|image: $img|" "$root/test/fixtures/rt1/manifests/escape-gateway-standin.yaml" |
+    "${K[@]}" -n koinon-fixtures apply -f - >/dev/null
+  "${K[@]}" -n koinon-fixtures rollout status deploy/escape-gateway-standin --timeout=180s
+  export KOINON_ESCAPE_GATEWAY_HOST=escape-gateway-standin.koinon-fixtures.svc.cluster.local
+fi
 
 echo "== client certificate"
 for k in tls.crt tls.key ca.crt; do
