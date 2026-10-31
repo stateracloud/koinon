@@ -102,3 +102,4 @@ are in [0046](0046-adr-conventions.md).
 | [0080](0080-tool-set-matches-egress-and-escape-hosts.md) | The tool set matches the sandbox's egress, and escape cases observe proxy decisions | Accepted |
 | [0081](0081-run-limits.md) | Run limits: model requests, spend and time; tokens are reported, not enforced | Accepted |
 | [0082](0082-work-claims-and-ready-queue.md) | Work claims and the ready queue: a claim branch is the lock, the board is the queue | Accepted |
+| [0083](0083-sandbox-resources.md) | Sandbox resources: template defaults, platform bounds, requests and limits | Accepted |

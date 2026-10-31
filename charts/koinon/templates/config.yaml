@@ -61,6 +61,19 @@ data:
       resyncInterval: {{ .Values.reconciler.resyncInterval }}
       homeRetention: {{ .Values.reconciler.homeRetention }}
       checkpoints: {{ .Values.checkpoints.enabled }}
+    # Sandbox sizing (ADR 0083): the default, the bounds and the Kata memory rule.
+    sandboxResources:
+      default:
+        cpu: {request: {{ .Values.sandbox.resources.default.cpu.request | quote }}, limit: {{ .Values.sandbox.resources.default.cpu.limit | quote }}}
+        memory: {request: {{ .Values.sandbox.resources.default.memory.request | quote }}, limit: {{ .Values.sandbox.resources.default.memory.limit | quote }}}
+      bounds:
+        cpu:
+          request: {min: {{ .Values.sandbox.resources.bounds.cpu.request.min | quote }}, max: {{ .Values.sandbox.resources.bounds.cpu.request.max | quote }}}
+          limit: {min: {{ .Values.sandbox.resources.bounds.cpu.limit.min | quote }}, max: {{ .Values.sandbox.resources.bounds.cpu.limit.max | quote }}}
+        memory:
+          request: {min: {{ .Values.sandbox.resources.bounds.memory.request.min | quote }}, max: {{ .Values.sandbox.resources.bounds.memory.request.max | quote }}}
+          limit: {min: {{ .Values.sandbox.resources.bounds.memory.limit.min | quote }}, max: {{ .Values.sandbox.resources.bounds.memory.limit.max | quote }}}
+      memoryRequestEqualsLimit: {{ .Values.sandbox.resources.memoryRequestEqualsLimit }}
     mcpAsk:
       url: http://{{ include "koinon.componentName" (list . "api-tools") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.toolsPort }}/mcp-ask
     koinonTools:

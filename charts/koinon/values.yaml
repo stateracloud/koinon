@@ -550,6 +550,38 @@ metrics:
 sandboxObserver:
   enabled: true
 
+# Size of every agent sandbox (ADR 0083): CPU and memory requests and limits on the agent container.
+# A template may set its own (spec.resources); a value it leaves out takes the default below, and
+# the bounds clamp every value, the template's included (the reconciler logs a warning when one is
+# clamped). The supervisor pod of OpenShell 0.1.5 stays unsized (BestEffort): see the ADR. Changing
+# a value recreates the sandboxes it applies to once, restoring their homes from the checkpoint.
+# Kubernetes quantities: 250m, 2, 1Gi. A bound left empty is not set; the reconciler refuses to
+# start on a bad quantity, a minimum above its maximum, or a default request above its limit.
+#
+# Recommended values per isolation tier (ADR 0075):
+#   vm (Kata, the default): memory 512Mi-8Gi, cpu request 100m-2, cpu limit up to 4, and
+#     memoryRequestEqualsLimit: true (the defaults below).
+#   hardened (gVisor or runc with the hardened policy): memory 256Mi-8Gi, a request may be below
+#     its limit (memoryRequestEqualsLimit: false).
+#   dev (kind, a laptop): requests of 50m cpu and 256Mi memory, a memory limit of 1Gi, so a dozen
+#     sandboxes fit.
+sandbox:
+  resources:
+    default:
+      cpu: {request: 250m, limit: "2"}
+      memory: {request: 1Gi, limit: 2Gi}
+    bounds:
+      cpu:
+        request: {min: 100m, max: "2"}
+        limit: {min: 100m, max: "4"}
+      memory:
+        request: {min: 512Mi, max: 8Gi}
+        limit: {min: 512Mi, max: 8Gi}
+    # Raise the memory request to the limit. The default runtime class is Kata, and a Kata guest
+    # never returns memory to the host, so a request below the limit lets the node be
+    # over-committed on memory that cannot be reclaimed. Turn it off for runtimes that can.
+    memoryRequestEqualsLimit: true
+
 # ValidatingAdmissionPolicy for OpenShell sandbox namespaces (ADRs 0045, 0048).
 sandboxPolicy:
   enabled: true
