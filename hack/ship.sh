@@ -136,7 +136,11 @@ else
 	say "gitleaks ok ($n commits)"
 
 	# 6. push
-	git push -q -u origin "$branch"
+	# git prints the server's "remote:" banner on stderr even with -q; keep it out of the step lines.
+	if ! pushlog=$(git push -q -u origin "$branch" 2>&1); then
+		printf '%s\n' "$pushlog" >&2
+		fail "push failed"
+	fi
 	say "pushed $branch"
 fi
 
