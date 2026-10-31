@@ -1280,7 +1280,7 @@ func (r *runner) postReply(ctx context.Context, q *store.Queries) error {
 	return err
 }
 
-// reply is the agent's message text of the run since its last park, across every epoch.
+// reply is the agent's last message of the run since its last park (interim narration before a tool call is left out).
 func (r *runner) reply(ctx context.Context, q *store.Queries) (string, error) {
 	return runreply.Reply(ctx, q, r.run.OrgID, r.run.ID)
 }
