@@ -91,7 +91,7 @@
             {"name": "TMPDIR", "value": "/work/tmp"}
           ],
           "volumeMounts": [{"name": "work", "mountPath": "/work"}, {"name": "gocache", "mountPath": "/gocache"}],
-          "resources": {"requests": {"cpu": "2", "memory": "4Gi"}, "limits": {"cpu": "4", "memory": "8Gi"}},
+          "resources": {"requests": {"cpu": "4", "memory": "4Gi"}, "limits": {"cpu": "6", "memory": "8Gi"}},
           "command": ["bash", "-c"],
           "args": [
             "set -euo pipefail\nmkdir -p /work/out /work/tmp\nfor _ in $(seq 1 180); do [ -e /work/dockerd-ready ] && break; sleep 1; done\n[ -e /work/dockerd-ready ] || { echo \"dockerd not ready after 180 s\"; cp /work/dockerd.log /work/out/ || true; exit 1; }\n# The submitted values arrive as env, never pasted into this script\n[[ $E2E_REF =~ ^[0-9a-f]{40}$ ]] || { echo \"ref must be a full 40-hex commit SHA\"; exit 2; }\ngit clone -q --no-checkout /work/in/koinon.bundle /work/koinon\ncd /work/koinon\ngit checkout -q --detach \"$E2E_REF\"\ntest \"$(git rev-parse HEAD)\" = \"$E2E_REF\"\nexec hack/lab/light-run.sh \"$E2E_TARGET\"\n"
