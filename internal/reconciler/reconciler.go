@@ -59,6 +59,7 @@ import (
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 )
 
 // Retention decides what happens to an archived agent's home volume.
@@ -135,6 +136,9 @@ type Config struct {
 	// RuntimeClassName is the sandbox runtime class (ADR 0045: kata). Empty uses the
 	// gateway's default.
 	RuntimeClassName string
+	// SandboxResources is the platform's sandbox CPU and memory sizing: the default, the bounds
+	// and the Kata memory rule (ADR 0083). Nil is sandboxres.DefaultPolicy.
+	SandboxResources *sandboxres.Policy
 	// IdleTimeout stops a sandbox after this long without activity (see package wake), for an org
 	// that has not set idle_timeout_seconds. Default 10 minutes.
 	IdleTimeout time.Duration
@@ -189,6 +193,10 @@ type Reconciler struct {
 	// keyWrittenAt is when each provider key file written by this process was written, until it
 	// has had ProviderKeySettle to reach the gateway.
 	keyWrittenAt map[string]time.Time
+	// clampMu guards clampLogged: the clamps last logged per agent, so a pass that changes nothing
+	// logs nothing.
+	clampMu     sync.Mutex
+	clampLogged map[string]string
 	// lastLimit is the budget last pushed per agent key, so one agent whose budget cannot be
 	// computed keeps it (and never gets more) instead of stopping the pass for everyone.
 	lastLimit map[gateway.AgentRef]gateway.Limit
@@ -237,6 +245,12 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.ResyncInterval == 0 {
 		cfg.ResyncInterval = DefaultResyncInterval
+	}
+	if cfg.SandboxResources == nil {
+		p := sandboxres.DefaultPolicy()
+		cfg.SandboxResources = &p
+	} else if err := cfg.SandboxResources.Validate(); err != nil {
+		return nil, fmt.Errorf("reconciler: sandbox resources: %w", err)
 	}
 	switch cfg.HomeRetention {
 	case "":
@@ -1049,7 +1063,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	}
 	names = w.names()
 
-	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor, providers, network)
+	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor, providers, network, r.sandboxResources(w))
 	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm})
 	if err != nil {
 		return fmt.Errorf("read org settings: %w", err)

@@ -95,6 +95,15 @@
             "expireAfter": { "type": "string", "pattern": "^[1-9][0-9]*(h|m|s)$" }
           }
         },
+        "resources": {
+          "description": "CPU and memory requests and limits of the agent's sandbox (ADR 0083), Kubernetes quantities such as 250m or 1Gi. Every value is optional; an unset one takes the platform default, and the platform bounds clamp all of them. A request must not exceed its limit.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": { "$ref": "#/$defs/quantities" },
+            "memory": { "$ref": "#/$defs/quantities" }
+          }
+        },
         "harness": {
           "description": "Harness settings beyond the flavor choice. Omitted means every setting is off.",
           "type": "object",
@@ -173,6 +182,14 @@
     }
   },
   "$defs": {
+    "quantities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|Ki|Mi|Gi|Ti|M|G|T)?$" },
+        "limit": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|Ki|Mi|Gi|Ti|M|G|T)?$" }
+      }
+    },
     "trigger": {
       "type": "object",
       "additionalProperties": false,

@@ -27,6 +27,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"go.yaml.in/yaml/v3"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/flavor"
@@ -120,6 +121,57 @@ type Spec struct {
 	// Questions sets when a question an agent asked with ask_user gets its reminder and when it
 	// expires (ADR 0065 decision 10). Unset values take the defaults: 24h and 7d.
 	Questions QuestionTimers `json:"questions,omitzero"`
+	// Resources are the CPU and memory requests and limits of the agent's sandbox (ADR 0083). Every
+	// value is optional: an unset one takes the platform default, and the platform bounds clamp
+	// all of them.
+	Resources Resources `json:"resources,omitzero"`
+}
+
+// Resources are Kubernetes resource quantities for the agent container of a sandbox (ADR 0083).
+type Resources struct {
+	CPU    Quantities `json:"cpu,omitzero"`
+	Memory Quantities `json:"memory,omitzero"`
+}
+
+// Quantities are the request and the limit of one resource, as Kubernetes quantity strings such
+// as "250m" or "1Gi". An empty string is unset.
+type Quantities struct {
+	Request string `json:"request,omitempty"`
+	Limit   string `json:"limit,omitempty"`
+}
+
+// Validate checks that both values are quantities and that the request does not exceed the limit.
+// name is the resource, for the messages.
+func (q Quantities) Validate(name string) error {
+	var req, lim resource.Quantity
+	for _, v := range []struct {
+		field, val string
+		dst        *resource.Quantity
+	}{{"request", q.Request, &req}, {"limit", q.Limit, &lim}} {
+		if v.val == "" {
+			continue
+		}
+		parsed, err := resource.ParseQuantity(v.val)
+		if err != nil {
+			return fmt.Errorf("%s.%s %q: %w", name, v.field, v.val, err)
+		}
+		if parsed.Sign() <= 0 {
+			return fmt.Errorf("%s.%s %q must be greater than zero", name, v.field, v.val)
+		}
+		*v.dst = parsed
+	}
+	if q.Request != "" && q.Limit != "" && req.Cmp(lim) > 0 {
+		return fmt.Errorf("%s.request %s is greater than %s.limit %s", name, q.Request, name, q.Limit)
+	}
+	return nil
+}
+
+// Validate checks both resources.
+func (r Resources) Validate() error {
+	if err := r.CPU.Validate("cpu"); err != nil {
+		return err
+	}
+	return r.Memory.Validate("memory")
 }
 
 // QuestionTimers are the reminder and expiry of the questions an agent asks (ADR 0065 decision
@@ -378,6 +430,9 @@ func (t *Template) check() error {
 	}
 	if err := t.Spec.Questions.Validate(); err != nil {
 		return fmt.Errorf("spec.%w", err)
+	}
+	if err := t.Spec.Resources.Validate(); err != nil {
+		return fmt.Errorf("spec.resources.%w", err)
 	}
 	if err := ValidateTriggers(t.Spec.Triggers); err != nil {
 		return fmt.Errorf("spec.%w", err)
