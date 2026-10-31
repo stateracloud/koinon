@@ -206,9 +206,11 @@ type SandboxSpec struct {
 	Providers []string
 	Policy    Policy
 	Labels    map[string]string
-	// CPU and Memory are Kubernetes quantities used as limits, for example "1" and "2Gi".
-	CPU    string
-	Memory string
+	// The agent container's CPU and memory requests and limits, as Kubernetes quantities such as
+	// "250m" and "2Gi" (ADR 0083). An empty value is left out. OpenShell mirrors a limit into the
+	// request when the request is absent, so a spec that gives limits only reserves its limits.
+	CPURequest, CPULimit       string
+	MemoryRequest, MemoryLimit string
 }
 
 // Sandbox is the observed state of a sandbox.

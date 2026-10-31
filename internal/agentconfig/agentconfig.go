@@ -60,6 +60,10 @@ type Config struct {
 	// Questions sets the reminder and expiry of the questions the agent asks (ADR 0065 decision
 	// 10); unset values take the defaults, see QuestionTimers.
 	Questions templates.QuestionTimers `json:"questions,omitzero"`
+	// Resources are the template's sandbox CPU and memory requests and limits (ADR 0083). Unset
+	// values, and every value of a version stored before this field existed, take the platform
+	// default in the reconciler (internal/sandboxres).
+	Resources templates.Resources `json:"resources,omitzero"`
 }
 
 // Defaults for the questions an agent asks (ADR 0065 decision 10).
@@ -144,6 +148,7 @@ func FromTemplate(t *templates.Template, contentHash string) Config {
 		Harness:      t.Spec.Harness,
 		Ephemeral:    t.Spec.Ephemeral,
 		Questions:    t.Spec.Questions,
+		Resources:    t.Spec.Resources,
 	}
 }
 

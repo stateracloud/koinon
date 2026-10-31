@@ -401,3 +401,40 @@ var _ = Describe("Load", func() {
 		Expect(ts[1].Metadata.ID).To(Equal("fixture"))
 	})
 })
+
+var _ = Describe("Resources", func() {
+	It("accepts every shipped template's resources, request within limit", func() {
+		ts, err := templates.All()
+		Expect(err).NotTo(HaveOccurred())
+		for _, t := range ts {
+			Expect(t.Spec.Resources.Validate()).To(Succeed(), t.Metadata.ID)
+		}
+	})
+
+	DescribeTable("Quantities.Validate",
+		func(q templates.Quantities, want string) {
+			err := q.Validate("cpu")
+			if want == "" {
+				Expect(err).NotTo(HaveOccurred())
+				return
+			}
+			Expect(err).To(MatchError(ContainSubstring(want)))
+		},
+		Entry("unset", templates.Quantities{}, ""),
+		Entry("request only", templates.Quantities{Request: "250m"}, ""),
+		Entry("equal", templates.Quantities{Request: "1", Limit: "1000m"}, ""),
+		Entry("not a quantity", templates.Quantities{Limit: "lots"}, `cpu.limit "lots"`),
+		Entry("zero", templates.Quantities{Request: "0"}, "greater than zero"),
+		Entry("request over limit", templates.Quantities{Request: "2", Limit: "500m"}, "cpu.request 2 is greater than cpu.limit 500m"),
+	)
+
+	It("is part of the content hash", func() {
+		valid := readFile("testdata/valid.yaml")
+		a, err := templates.Parse(valid)
+		Expect(err).NotTo(HaveOccurred())
+		b, err := templates.Parse([]byte(strings.Replace(string(valid), "  model:\n", "  resources:\n    cpu: {limit: \"1\"}\n  model:\n", 1)))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(b.Spec.Resources.CPU.Limit).To(Equal("1"))
+		Expect(b.Hash).NotTo(Equal(a.Hash))
+	})
+})

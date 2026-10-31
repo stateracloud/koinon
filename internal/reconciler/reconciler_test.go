@@ -243,6 +243,11 @@ var _ = Describe("Reconciler", func() {
 			Expect(sb).NotTo(BeNil())
 			Expect(sb.GetSpec().GetTemplate().GetImage()).To(Equal(image))
 			Expect(sb.GetSpec().GetTemplate().GetRuntimeClassName()).To(Equal("kata"))
+			// No template size: the platform default, with the Kata memory request equal to its limit (ADR 0083).
+			Expect(sb.GetSpec().GetTemplate().GetResources().AsMap()).To(Equal(map[string]any{
+				"requests": map[string]any{"cpu": "250m", "memory": "2Gi"},
+				"limits":   map[string]any{"cpu": "2", "memory": "2Gi"},
+			}))
 			Expect(sb.GetSpec().GetProviders()).To(Equal([]string{names.Provider}))
 			Expect(sb.GetMetadata().GetLabels()).To(HaveKeyWithValue(reconciler.LabelManagedBy, reconciler.ManagedByValue))
 			Expect(sb.GetMetadata().GetLabels()).To(HaveKey(reconciler.LabelSpecHash))
