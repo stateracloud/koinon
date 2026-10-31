@@ -62,8 +62,10 @@ func (p Policy) Validate() error {
 		name string
 		rng  Range
 	}{
-		{"cpuRequest", p.Bounds.CPURequest}, {"cpuLimit", p.Bounds.CPULimit},
-		{"memoryRequest", p.Bounds.MemoryRequest}, {"memoryLimit", p.Bounds.MemoryLimit},
+		{"cpuRequest", p.Bounds.CPURequest},
+		{"cpuLimit", p.Bounds.CPULimit},
+		{"memoryRequest", p.Bounds.MemoryRequest},
+		{"memoryLimit", p.Bounds.MemoryLimit},
 	} {
 		lo, err := parse(r.rng.Min)
 		if err != nil {
