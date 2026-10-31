@@ -108,6 +108,32 @@ claim ref could be deleted by hand.
 Exit codes of `hack/claim.sh`: 0 success; 1 error; 2 refused (held by someone else, not takeable yet,
 a cap, lost the race): pick another issue; 3 lost claim: stop and tell your human.
 
+## Amendment: session lanes (issue #379)
+
+Decision 5 caps a session at one claim. A session that runs several agents in parallel, one issue
+each in its own worktree, could therefore work only one issue at a time. The cap is now counted per
+**lane**: at most one claim per (session, lane).
+
+- A lane is a short name chosen by the session's parent agent: `--lane L` on `take`, `beat`, `review`,
+  `release`, `limits` and `mine`, or `KOINON_CLAIM_LANE` in the environment (the flag wins). `L`
+  matches `^[a-z0-9][a-z0-9-]{0,15}$`.
+- With a lane the holder is `<login>/<host>/<session>#<L>`; without one it stays
+  `<login>/<host>/<session>`, which is its own lane, so behaviour without `--lane` is unchanged.
+  Session ids never contain `#`, so the first `#` of the last holder segment starts the lane.
+- A claim is yours only under the lane that took it: `beat`, `review` and `release` from another lane
+  (or with no lane) exit 3, like any claim that is not yours. Takeover, leases, the sweeper and the PR
+  `claim` check are unchanged; they read the login and the lease, and the lane is only part of the
+  holder's identity. `--human` claims have no lane.
+- The **human cap stays four** and counts every claim of the human, lanes or not. So one session holds
+  up to four claims, one per lane. When `take` is refused by the session cap the message lists the
+  claims the session already holds in that lane (with their pull requests) and suggests `--lane` or
+  `release`.
+- **Subagents still never call `claim.sh`** and never set a session id or a lane. The parent takes
+  one lane per subagent (`take <N> --lane <name>`), passes the issue and branch to the subagent, and
+  does all the heartbeats, reviews and releases itself, with the same `--lane`.
+- These lanes are about *who holds* a claim. They are not the exclusive component lanes rejected under
+  Alternatives considered: a lane locks nothing but the session's own cap.
+
 ## Alternatives considered
 
 - **Assignee or label as the lock.** Last-write-wins: two agents both succeed. _(reconstructed)_
