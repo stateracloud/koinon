@@ -5,6 +5,7 @@ package fakemodel
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -22,8 +23,14 @@ import (
 //     permitted"),
 //   - so is a field of the thinking object it does not have,
 //   - a field that exists only behind a beta is refused unless the anthropic-beta header names that
-//     beta, and
+//     beta,
+//   - a thinking type the model does not take is refused: of the Claude 5.x families only Haiku
+//     takes "disabled", and Opus and Fable take only "adaptive" (#316, see claudeThinkingTypes), and
 //   - anthropic-version must be present.
+//
+// Strict mode also checks the reasoning object of a chat-completions request the way OpenRouter
+// does: its fields, the effort values, and that a model whose reasoning is mandatory refuses to
+// turn it off (checkStrictReasoning).
 //
 // Only the top level and thinking are checked field by field: messages, system and tools carry
 // arbitrary content, and the specs that need them strict assert on them directly. The tables below
@@ -40,11 +47,50 @@ var messagesFields = []string{
 	"context_management", "speed",
 }
 
-// thinkingFields are the fields of the thinking object. The type values are enabled, disabled and
-// adaptive.
-var thinkingFields = []string{"type", "budget_tokens", "block_binding"}
+// thinkingFields are the fields of the thinking object per type.
+var thinkingFields = map[string][]string{
+	"enabled":  {"type", "budget_tokens", "display"},
+	"adaptive": {"type", "display", "block_binding"},
+	"disabled": {"type"},
+}
 
 var thinkingTypes = []string{"enabled", "disabled", "adaptive"}
+
+// thinkingDisplays are the values of thinking.display.
+var thinkingDisplays = []string{"summarized", "omitted"}
+
+// claudeThinkingTypes are the thinking types each Claude 5.x family takes, by the start of the
+// normalized model name (see claudeName); a model of no listed family takes every type. Sonnet 5.5
+// refuses "disabled"; Opus 5.5 and Fable 5.1 think always and refuse both "enabled" and
+// "disabled" (deep dive G4 of #316, 2026-10-31). The fake keeps its own list rather than reading
+// internal/thinking, so a wrong row there fails a spec here.
+var claudeThinkingTypes = []struct {
+	prefix string
+	types  []string
+}{
+	{"claude-haiku-5-", []string{"enabled", "disabled", "adaptive"}},
+	{"claude-sonnet-5-", []string{"enabled", "adaptive"}},
+	{"claude-opus-5-", []string{"adaptive"}},
+	{"claude-fable-5-", []string{"adaptive"}},
+}
+
+// claudeName lowercases a model name, drops OpenRouter's anthropic/ prefix and writes the version
+// with dashes.
+func claudeName(model string) string {
+	n := strings.TrimPrefix(strings.ToLower(model), "anthropic/")
+	return strings.ReplaceAll(n, ".", "-")
+}
+
+// takesThinkingType reports whether the model accepts the thinking type.
+func takesThinkingType(model, typ string) bool {
+	name := claudeName(model)
+	for _, f := range claudeThinkingTypes {
+		if strings.HasPrefix(name, f.prefix) {
+			return slices.Contains(f.types, typ)
+		}
+	}
+	return true
+}
 
 // betaField is a request field that exists only behind a beta. Prefix is matched against the
 // values of the anthropic-beta header, so a dated beta needs no new entry per date unless the field
@@ -63,7 +109,8 @@ var betaFields = []betaField{
 	{Path: "speed", Beta: "fast-mode-", Prefix: true},
 }
 
-// SetStrictMessages turns strict Messages mode on or off for requests to /v1/messages.
+// SetStrictMessages turns strict mode on or off: the Messages checks for requests to /v1/messages
+// and the reasoning checks for chat completions.
 func (s *Server) SetStrictMessages(on bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -144,14 +191,72 @@ func checkStrictMessages(body []byte, h http.Header) error {
 		return fmt.Errorf("thinking.type: Input should be 'enabled', 'disabled' or 'adaptive'")
 	}
 	for _, k := range sortedKeys(th) {
-		if !slices.Contains(thinkingFields, k) {
+		if !slices.Contains(thinkingFields[typ], k) {
 			return extraInput("thinking." + typ + "." + k)
 		}
+	}
+	if raw, ok := th["display"]; ok {
+		var d string
+		if json.Unmarshal(raw, &d) != nil || !slices.Contains(thinkingDisplays, d) {
+			return fmt.Errorf("thinking.%s.display: Input should be 'summarized' or 'omitted'", typ)
+		}
+	}
+	var model string
+	_ = json.Unmarshal(top["model"], &model)
+	if !takesThinkingType(model, typ) {
+		return fmt.Errorf("thinking.type: '%s' is not supported for this model", typ)
 	}
 	for _, f := range betaFields {
 		if k, ok := strings.CutPrefix(f.Path, "thinking."); ok && th[k] != nil && !hasBeta(have, f) {
 			return extraInput("thinking." + typ + "." + k)
 		}
+	}
+	return nil
+}
+
+// reasoningFields are the fields of OpenRouter's reasoning object, and reasoningEfforts its effort
+// values (https://openrouter.ai/docs/use-cases/reasoning-tokens).
+var (
+	reasoningFields  = []string{"effort", "max_tokens", "exclude", "enabled"}
+	reasoningEfforts = []string{"none", "minimal", "low", "medium", "high", "xhigh"}
+)
+
+// mandatoryReasoning are the chat-completions models whose reasoning cannot be turned off
+// (reasoning.mandatory in OpenRouter's models API, 2026-10-31), by the start of the lowercased name.
+var mandatoryReasoning = []string{"openai/gpt-6-astra", "anthropic/claude-sonnet-5", "anthropic/claude-opus-5", "anthropic/claude-fable-5"}
+
+// checkStrictReasoning validates the reasoning object of a chat-completions body. It returns the
+// message of the 400.
+func checkStrictReasoning(body []byte) error {
+	var top struct {
+		Model     string                     `json:"model"`
+		Reasoning map[string]json.RawMessage `json:"reasoning"`
+	}
+	if err := json.Unmarshal(body, &top); err != nil {
+		return fmt.Errorf("invalid JSON body: %w", err)
+	}
+	if top.Reasoning == nil {
+		return nil
+	}
+	for _, k := range sortedKeys(top.Reasoning) {
+		if !slices.Contains(reasoningFields, k) {
+			return fmt.Errorf("reasoning.%s: unrecognized field", k)
+		}
+	}
+	var effort string
+	if raw, ok := top.Reasoning["effort"]; ok {
+		if json.Unmarshal(raw, &effort) != nil || !slices.Contains(reasoningEfforts, effort) {
+			return fmt.Errorf("reasoning.effort: must be one of %s", strings.Join(reasoningEfforts, ", "))
+		}
+	}
+	var enabled *bool
+	if raw, ok := top.Reasoning["enabled"]; ok {
+		_ = json.Unmarshal(raw, &enabled)
+	}
+	off := effort == "none" || (enabled != nil && !*enabled)
+	name := strings.ToLower(top.Model)
+	if off && slices.ContainsFunc(mandatoryReasoning, func(p string) bool { return strings.HasPrefix(name, p) }) {
+		return errors.New("reasoning is mandatory for this endpoint and cannot be disabled")
 	}
 	return nil
 }

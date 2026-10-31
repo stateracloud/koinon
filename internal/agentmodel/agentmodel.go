@@ -243,22 +243,31 @@ func (s *Service) Load(ctx context.Context, org, agent pgtype.UUID, at time.Time
 	} else if err != nil {
 		return store.Agent{}, View{}, err
 	}
-	versions, err := q.ListAgentVersions(ctx, store.ListAgentVersionsParams{OrgID: org, AgentID: agent})
+	versionModel, versionThinking, err := versionSettings(ctx, q, a)
 	if err != nil {
 		return store.Agent{}, View{}, err
 	}
-	var versionModel, versionThinking string
+	view, err := Describe(ctx, s.prices, q, a, versionModel, versionThinking, s.platformDefault, at)
+	return a, view, err
+}
+
+// versionSettings returns the model and thinking setting of agent a's active version, or of its
+// latest version when it is not yet activated.
+func versionSettings(ctx context.Context, q *store.Queries, a store.Agent) (model, thinking string, err error) {
+	versions, err := q.ListAgentVersions(ctx, store.ListAgentVersionsParams{OrgID: a.OrgID, AgentID: a.ID})
+	if err != nil {
+		return "", "", err
+	}
 	for _, v := range versions {
 		if v.ID == a.ActiveVersionID || (!a.ActiveVersionID.Valid && v.Version == a.LatestVersion) {
 			cfg, err := agentconfig.Parse(v.Config)
 			if err != nil {
-				return store.Agent{}, View{}, err
+				return "", "", err
 			}
-			versionModel, versionThinking = cfg.Model, cfg.Thinking
+			model, thinking = cfg.Model, cfg.Thinking
 		}
 	}
-	view, err := Describe(ctx, s.prices, q, a, versionModel, versionThinking, s.platformDefault, at)
-	return a, view, err
+	return model, thinking, nil
 }
 
 // ErrNotFound means the agent does not exist in the org.

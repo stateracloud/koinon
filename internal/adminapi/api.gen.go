@@ -377,14 +377,23 @@ func (e ThinkingStateEffective) Valid() bool {
 
 // Defines values for ThinkingStateMode.
 const (
-	ThinkingStateModeAdaptive ThinkingStateMode = "adaptive"
-	ThinkingStateModeNone     ThinkingStateMode = "none"
+	ThinkingStateModeAdaptiveSummarized ThinkingStateMode = "adaptive-summarized"
+	ThinkingStateModeDefault            ThinkingStateMode = "default"
+	ThinkingStateModeDisabled           ThinkingStateMode = "disabled"
+	ThinkingStateModeEffortNone         ThinkingStateMode = "effort-none"
+	ThinkingStateModeNone               ThinkingStateMode = "none"
 )
 
 // Valid indicates whether the value is a known member of the ThinkingStateMode enum.
 func (e ThinkingStateMode) Valid() bool {
 	switch e {
-	case ThinkingStateModeAdaptive:
+	case ThinkingStateModeAdaptiveSummarized:
+		return true
+	case ThinkingStateModeDefault:
+		return true
+	case ThinkingStateModeDisabled:
+		return true
+	case ThinkingStateModeEffortNone:
 		return true
 	case ThinkingStateModeNone:
 		return true
@@ -1180,11 +1189,20 @@ type SpendReport struct {
 
 // ThinkingState The agent's thinking setting and what it resolves to (ADR 0069 amendment 2026-10-29).
 type ThinkingState struct {
+	// AlwaysThinks Whether the effective model thinks whatever the setting. A UI then offers no off choice and says "this model always thinks"; setting `off` is refused with that message.
+	AlwaysThinks bool `json:"alwaysThinks"`
+
 	// Effective What the layers resolve to, whether or not the model can think.
 	Effective ThinkingStateEffective `json:"effective"`
 
-	// Mode The mode the next run uses.
+	// Mode The form the next run sends: `none` when the model does not think, `adaptive-summarized` or `default` for thinking on, `disabled` or `effort-none` for thinking off (ADR 0069 amendment 2026-10-31).
 	Mode ThinkingStateMode `json:"mode"`
+
+	// Notice What a UI shows about the setting: "this model always thinks; your off setting doesn't apply" when `offOverridden`, unset otherwise.
+	Notice *string `json:"notice,omitempty"`
+
+	// OffOverridden Whether the setting resolves to off and the model thinks anyway (it always thinks). The setting is kept for a model that can stop; runs think.
+	OffOverridden bool `json:"offOverridden"`
 
 	// Setting The agent's own setting; `default` when it has none.
 	Setting ThinkingStateSetting `json:"setting"`
@@ -1199,7 +1217,7 @@ type ThinkingState struct {
 // ThinkingStateEffective What the layers resolve to, whether or not the model can think.
 type ThinkingStateEffective string
 
-// ThinkingStateMode The mode the next run uses.
+// ThinkingStateMode The form the next run sends: `none` when the model does not think, `adaptive-summarized` or `default` for thinking on, `disabled` or `effort-none` for thinking off (ADR 0069 amendment 2026-10-31).
 type ThinkingStateMode string
 
 // ThinkingStateSetting The agent's own setting; `default` when it has none.

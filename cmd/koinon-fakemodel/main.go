@@ -25,7 +25,7 @@ import (
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	scripts := flag.String("scripts", "", "directory of YAML scripts (default: the example scripts built into the binary)")
-	strict := flag.Bool("strict-messages", false, "refuse Messages requests the way Anthropic does: unknown fields, and beta-only fields without their anthropic-beta")
+	strict := flag.Bool("strict-messages", false, "refuse Messages requests the way Anthropic does (unknown fields, beta-only fields without their anthropic-beta, thinking types the model does not take) and chat-completions reasoning the way OpenRouter does")
 	standin := flag.Bool("standin", false, "serve no model: answer every request with an empty 418 and X-Koinon-Standin: 1 (a stand-in for agentgateway in the escape suite, ADR 0080)")
 	flag.Parse()
 

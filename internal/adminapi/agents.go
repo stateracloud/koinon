@@ -167,6 +167,10 @@ func toThinkingState(t agentmodel.ThinkingView) ThinkingState {
 	out := ThinkingState{
 		Setting: ThinkingStateSetting(settingLabel(string(t.Setting))), Effective: ThinkingStateEffective(t.Effective),
 		Supported: t.Supported(), Mode: ThinkingStateMode(t.Mode()),
+		AlwaysThinks: t.AlwaysThinks(), OffOverridden: t.OffOverridden(),
+	}
+	if n := t.Notice(); n != "" {
+		out.Notice = &n
 	}
 	if t.VersionSetting != "" {
 		v := ThinkingStateVersionSetting(t.VersionSetting)
