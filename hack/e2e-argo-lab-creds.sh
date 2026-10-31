@@ -36,6 +36,14 @@ e2e_creds_s3() {
   printf '%s:%s\n' "$id" "$key"
 }
 
+# A read-only key on the results bucket (e2e-artifacts).
+e2e_creds_results() {
+  local id key
+  id=$(BAO_TOKEN=$_e2e_bao bao kv get -field=AWS_ACCESS_KEY_ID koinon/shared/e2e-artifacts-reader)
+  key=$(BAO_TOKEN=$_e2e_bao bao kv get -field=AWS_SECRET_ACCESS_KEY koinon/shared/e2e-artifacts-reader)
+  printf '%s:%s\n' "$id" "$key"
+}
+
 e2e_creds_close() {
   [[ -z $_e2e_bao ]] || BAO_TOKEN=$_e2e_bao bao token revoke -self >/dev/null 2>&1 || true
   _e2e_bao=""
