@@ -3,8 +3,10 @@
 #
 # The escape suite's OpenShell cases (ADR 0025) against the OpenShell gateway that
 # `make dev-kind-up` installs on kind-koinon-dev (or DEV_KIND_CLUSTER). No registry, no home lab:
-# the probe image is built from hack/spike/probe and loaded into the node; the gateway is reached
-# through a port-forward with the client certificate it generated.
+# the probe image is built from hack/spike/probe (or, when KOINON_OPENSHELL_IMAGE names an image that
+# pulls, e.g. the published ghcr.io/stateracloud/koinon-spike-probe by digest, pulled instead: no
+# nvcr.io or apt at run time, #357) and loaded into the node; the gateway is reached through a
+# port-forward with the client certificate it generated.
 #
 # kind runs sandboxes under runc, so the Kata guest case skips (it needs KOINON_ESCAPE_HOST_KERNEL
 # and a Kata node, the maintainer's release gate). Cases that need other fixtures skip with their
@@ -31,8 +33,21 @@ tmp=$(mktemp -d)
 pf=
 trap '[[ -z $pf ]] || { kill "$pf" 2>/dev/null; wait "$pf" 2>/dev/null; } || true; rm -rf "$tmp"' EXIT
 
-echo "== probe image $IMAGE (hack/spike/probe)"
-docker build -q -t "$IMAGE" "$root/hack/spike/probe" >/dev/null
+if [[ -n ${KOINON_OPENSHELL_IMAGE:-} ]] && docker pull -q "$IMAGE" >"$tmp/pull.log" 2>&1; then
+  # kind loads by name: a digest-only reference gets a local tag the sandboxes then use.
+  if [[ $IMAGE == *@* ]]; then
+    docker tag "$IMAGE" koinon/spike-probe:pulled
+    IMAGE=koinon/spike-probe:pulled
+  fi
+  echo "== probe image $IMAGE (pulled $KOINON_OPENSHELL_IMAGE)"
+else
+  if [[ -n ${KOINON_OPENSHELL_IMAGE:-} ]]; then
+    echo "== could not pull $KOINON_OPENSHELL_IMAGE ($(tail -1 "$tmp/pull.log")); building it instead"
+    [[ $IMAGE != *@* ]] || IMAGE=koinon/spike-probe:1
+  fi
+  echo "== probe image $IMAGE (built from hack/spike/probe)"
+  docker build -q -t "$IMAGE" "$root/hack/spike/probe" >/dev/null
+fi
 kind load docker-image --name "$CLUSTER" "$IMAGE"
 
 echo "== client certificate"
