@@ -101,7 +101,8 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
   // 4. Agent from the repo-helper template, bound to the repository, activated.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Agents' }).click()
   await page.getByRole('link', { name: 'New agent' }).click()
-  await page.getByRole('radio', { name: /Repo helper/ }).check()
+  // Anchored: "Repo helper (Gitea)" is a template too (#370).
+  await page.getByRole('radio', { name: /^Repo helper v/ }).check()
   await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('radio', { name: /OpenCode/ }).check()
   await page.getByRole('button', { name: 'Next' }).click()
@@ -109,7 +110,7 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
   await page.getByRole('option', { name: new RegExp(repository) }).click()
   await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('button', { name: 'Create draft' }).click()
-  await expect(page.getByRole('heading', { name: 'Repo helper' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Repo helper', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Activate' }).click()
   await expect(page.getByText('Activated.')).toBeVisible()
 
