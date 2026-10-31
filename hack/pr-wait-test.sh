@@ -111,6 +111,29 @@ run 7 --timeout 2s --interval 1
 expect "timeout" 2 "checks 0/1 pending: go
 TIMEOUT"
 
+# 10. --require: missing, skipped, failed, green
+usage_line="usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK] [--timeout DURATION] [--interval SECONDS]"
+e2e_ok=$(cr "e2e result" COMPLETED SUCCESS 14)
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"
+run 7 --checks --require "e2e result" --interval 0
+expect "required check missing" 1 "REQUIRED e2e result missing"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$(cr "e2e result" COMPLETED SKIPPED 14)")"
+run 7 --checks --require "e2e result" --interval 0
+expect "required check skipped" 1 "REQUIRED e2e result skipped"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$(cr "e2e result" COMPLETED FAILURE 14)")"
+run 7 --checks --require "e2e result" --interval 0
+expect "required check failed" 1 "FAILED e2e result (run 14)
+REQUIRED e2e result failed"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_p")" "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"
+run 7 --checks --require "e2e result" --require go --interval 0
+expect "required waits for the others, then reports missing" 1 "checks 1/2 pending: go
+REQUIRED e2e result missing"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$e2e_ok")"
+run 7 --checks --require "e2e result" --require go --interval 0
+expect "required checks green" 0 "checks 3/3 green"
+run 7 --require go --interval 0
+expect "--require needs --checks" 64 "$usage_line"
+
 # 8. a transient gh failure is retried
 rm -rf "$FAKE_DIR"
 mkdir -p "$FAKE_DIR"
@@ -126,8 +149,8 @@ expect "transient gh failure" 0 "MERGED 1234567"
 
 # 9. usage
 run
-expect "no PR is a usage error" 64 "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--timeout DURATION] [--interval SECONDS]"
+expect "no PR is a usage error" 64 "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK] [--timeout DURATION] [--interval SECONDS]"
 run 7 --timeout soon
-expect "bad timeout is a usage error" 64 "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--timeout DURATION] [--interval SECONDS]"
+expect "bad timeout is a usage error" 64 "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK] [--timeout DURATION] [--interval SECONDS]"
 
 exit "$fail"

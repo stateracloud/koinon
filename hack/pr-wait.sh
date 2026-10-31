@@ -5,21 +5,23 @@
 # state change, so it is cheap to run in the background and read later. It only reports: it never
 # merges, never marks ready and never enables auto-merge.
 #
-# Usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--timeout DURATION] [--interval SECONDS]
+# Usage: hack/pr-wait.sh <PR> [--merged] [--checks [--require CHECK]...] [--timeout DURATION] [--interval SECONDS]
 #   --merged   (default) wait until the PR is merged or closed
 #   --checks   wait until every check has finished
+#   --require  (repeatable, with --checks) a check that must be green: once the others finish, a
+#              required check that is missing, skipped or not green exits 1 (`REQUIRED <name> missing|skipped|failed`)
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
 #   --interval 20 seconds by default
 #
 # Output lines: `checks 7/9 pending: go,web`, `FAILED go (run 123)`, `MERGED abc1234`,
-# `needs-update`, `CLOSED`, `checks 9/9 green`, `TIMEOUT`.
+# `needs-update`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
 # Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout,
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 64 usage.
 set -euo pipefail
 export GH_PAGER=cat PAGER=cat
 
 usage() {
-  echo "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--timeout DURATION] [--interval SECONDS]" >&2
+  echo "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK] [--timeout DURATION] [--interval SECONDS]" >&2
   exit 64
 }
 
@@ -35,10 +37,16 @@ duration() { # 90m | 30s | 2h | 45 -> seconds
 }
 
 pr="" mode=merged timeout=5400 interval=20
+required=()
 while [ $# -gt 0 ]; do
   case $1 in
   --merged) mode=merged ;;
   --checks) mode=checks ;;
+  --require)
+    [ $# -ge 2 ] || usage
+    required+=("$2")
+    shift
+    ;;
   --timeout)
     [ $# -ge 2 ] || usage
     timeout=$(duration "$2") || usage
@@ -58,12 +66,14 @@ while [ $# -gt 0 ]; do
   shift
 done
 case $pr in '' | *[!0-9]*) usage ;; esac
+[ ${#required[@]} -eq 0 ] || [ "$mode" = checks ] || usage
 
 # One normalised row per check: CheckRuns (status/conclusion) and commit statuses (state) alike.
 norm='[(.statusCheckRollup // [])[] | {
   name: (.name // .context // "?"),
   url: (.detailsUrl // .targetUrl // ""),
   done: ((.status == "COMPLETED") or ((.state // "") | IN("SUCCESS", "FAILURE", "ERROR"))),
+  skipped: ((.conclusion // "") == "SKIPPED"),
   bad: ((.conclusion // .state // "") | IN("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"))
 }]'
 
@@ -95,6 +105,7 @@ while :; do
     if [ -n "$failed" ]; then
       while IFS=$'\t' read -r name run; do
         if [ -n "$run" ]; then echo "FAILED $name (run $run)"; else echo "FAILED $name"; fi
+        for r in ${required[@]+"${required[@]}"}; do [ "$r" != "$name" ] || echo "REQUIRED $name failed"; done
       done <<<"$failed"
       exit 1
     fi
@@ -106,6 +117,17 @@ while :; do
     pending=$(jq -r "$norm | [.[] | select(.done | not) | .name] | sort | join(\",\")" <<<"$json")
     ndone=$(jq "$norm | [.[] | select(.done)] | length" <<<"$json")
     if [ "$total" -gt 0 ] && [ -z "$pending" ]; then
+      if [ "$mode" = checks ] && [ ${#required[@]} -gt 0 ]; then
+        reqfail=0
+        for name in "${required[@]}"; do
+          why=$(jq -r --arg n "$name" "$norm | [.[] | select(.name == \$n)] | if length == 0 then \"missing\" elif any(.[]; .skipped) then \"skipped\" else \"\" end" <<<"$json")
+          if [ -n "$why" ]; then
+            echo "REQUIRED $name $why"
+            reqfail=1
+          fi
+        done
+        [ "$reqfail" -eq 0 ] || exit 1
+      fi
       if [ "$mode" = checks ]; then
         echo "checks $total/$total green"
         exit 0
