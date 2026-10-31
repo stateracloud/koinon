@@ -19,8 +19,11 @@ carries only the task, the worktree and the scope.
 - Never call `hack/claim.sh`: the parent owns claims (one lane per subagent, ADR 0082).
 - No cluster: `KUBECONFIG=/dev/null` for every test. CI never calls paid models; neither do you.
 - macOS shells run bash 3.2: no `declare -A`, `mapfile` or `${v,,}`. Use `/bin/ls`, not `ls`.
-- No standalone `sleep`: run long commands in the background, or poll inside one command with an
-  `until … ; do sleep N; done` loop.
+- No standalone `sleep`, and no `until … sleep` loop in the foreground. To wait on a pull request use
+  `hack/pr-wait.sh`; for anything else use `run_in_background`.
+- The shell tool is named `Bash`. The Monitor tool needs a `description`.
+- In a worktree use absolute paths or `git -C <worktree>`.
+- Never `git stash`: it is shared across worktrees. Commit, or leave the change in place.
 
 ## Check and ship
 - `hack/preflight.sh` runs the gates your change touches (lint with gofumpt, vet, tests, tidy,
@@ -33,6 +36,9 @@ carries only the task, the worktree and the scope.
 ## Hand back
 - At most 40 lines: what changed (files grouped), the commits, each check with its real result,
   what you could not run and why, and where you deviated from the prompt.
-- Put anything longer in a file and give its path.
+- Return the content in the hand-back itself. Write a report file only when the prompt names the path.
 - If a tool call is refused, stop and say which one and why. Do not look for another way to do the
   same thing.
+
+## For parents
+- Every spawn prompt names this brief, a model, the worktree and the scope.
