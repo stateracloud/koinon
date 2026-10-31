@@ -6,10 +6,14 @@
 # bundle of HEAD goes to an S3 bucket, the WorkflowTemplate is submitted through the Argo Server REST
 # API (no argo CLI needed) on the slot with the fewest unfinished runs, and the run is followed to the
 # end: stage lines while it runs, then the results archive (timings, logs, diagnostics) in --out and
-# the run's exit status. Ctrl-C stops the run. --repo names the checkout to test (default: the one
+# the run's exit status. Ctrl-C stops the run.
+#
+# Lanes: kind (default) submits the queue's WorkflowTemplate (koinon-make; target test-e2e-kind);
+# light submits hack/lab/light.workflow.json as an inline Workflow for targets without a kind
+# cluster (default test-go; hack/lab/light-run.sh lists them) on its own light slots and caches. --repo names the checkout to test (default: the one
 # the current directory is in), so a worktree can be tested without changing directory.
 #
-#   hack/e2e-remote.sh [--argo] [--repo DIR] [--target T] [--slot S] [--out DIR] [--no-wait] [--dry-run]
+#   hack/e2e-remote.sh [--argo] [--lane kind|light] [--repo DIR] [--target T] [--slot S] [--out DIR] [--no-wait] [--dry-run]
 #   hack/e2e-remote.sh --argo --follow <workflow name> [--out DIR]
 #
 # Credentials never appear in argv, logs or files: a credentials file (KOINON_E2E_ARGO_CREDS,
@@ -43,10 +47,11 @@ CREDS=${KOINON_E2E_ARGO_CREDS:-$here/e2e-argo-lab-creds.sh}
 POLL=${KOINON_E2E_ARGO_POLL:-30}
 AGENT=${KOINON_E2E_AGENT:-${KOINON_AGENT_SESSION:-${USER:-agent}}}
 
-target=test-e2e-kind slot="" out=${KOINON_E2E_OUT:-} wait=1 dry=0 follow="" repo=""
+lane=kind target="" slot="" out=${KOINON_E2E_OUT:-} wait=1 dry=0 follow="" repo=""
 while [[ $# -gt 0 ]]; do
   case $1 in
   --argo) ;;
+  --lane) lane=${2:?--lane needs kind or light}; shift ;;
   --repo) repo=${2:?--repo needs a directory}; shift ;;
   --target) target=${2:?--target needs a make target}; shift ;;
   --slot) slot=${2:?--slot needs a slot name}; shift ;;
@@ -58,6 +63,12 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+case $lane in
+kind) target=${target:-test-e2e-kind} ;;
+light) target=${target:-test-go} ;;
+*) echo "e2e-remote --argo: --lane is kind or light" >&2; exit 2 ;;
+esac
+MANIFEST=$here/lab/light.workflow.json
 if [[ -n ${SUITE_LABEL:-} ]]; then
   echo "e2e-remote --argo: SUITE_LABEL is not supported by the queue's template; use --local" >&2
   exit 2
@@ -109,9 +120,14 @@ s3_put() {
   [[ $code == 200 ]] || { echo "e2e-remote --argo: bundle upload returned HTTP $code" >&2; return 1; }
 }
 
-# slots prints the template's slot names (its enum), "a b" if it has none.
+# slots prints the lane's slot names: the enum of the template's (kind) or the manifest's (light)
+# slot parameter; "a b" if the template has none.
 slots() {
   local s
+  if [[ $lane == light ]]; then
+    jq -r '[.spec.arguments.parameters[] | select(.name == "slot") | .enum[]] | join(" ")' "$MANIFEST"
+    return
+  fi
   s=$(api GET "/api/v1/workflow-templates/$NS/$TEMPLATE" |
     jq -r '[.spec.arguments.parameters[]? | select(.name == "slot") | .enum[]?] | join(" ")')
   echo "${s:-a b}"
@@ -217,7 +233,7 @@ if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
 fi
 if [[ $dry == 1 ]]; then
   echo "+ git bundle of ${sha:0:12} -> $BUNDLE_URL/$object"
-  echo "+ submit $NS/$TEMPLATE target=$target ref=$sha bundle=$object agent=$label slot=${slot:-<least busy>}"
+  echo "+ submit ($lane lane) $NS/$([[ $lane == light ]] && echo inline || echo "$TEMPLATE") target=$target ref=$sha bundle=$object agent=$label slot=${slot:-<least busy>}"
   [[ $wait == 0 ]] || echo "+ follow the run, results to ${out:-.e2e-out/<run>}"
   exit 0
 fi
@@ -235,11 +251,21 @@ s3_put "$bundle" "$object" || { rm -f "$bundle"; exit 1; }
 rm -f "$bundle"
 
 [[ -n $slot ]] || slot=$(pick_slot)
-body=$(jq -nc --arg t "$TEMPLATE" --arg target "$target" --arg ref "$sha" --arg b "$object" \
-  --arg a "$label" --arg s "$slot" '{resourceKind: "WorkflowTemplate", resourceName: $t,
-    submitOptions: {parameters: ["target=\($target)", "ref=\($ref)", "bundle=\($b)", "agent=\($a)", "slot=\($s)"],
-                    labels: "koinon.dev/session=\($a)"}}')
-name=$(api POST "/api/v1/workflows/$NS/submit" "$body" | jq -r '.metadata.name // empty')
+if [[ $lane == light ]]; then
+  # The manifest with its parameters filled in; "//" holds its comments and is not a Workflow field.
+  body=$(jq -c --arg target "$target" --arg ref "$sha" --arg b "$object" --arg a "$label" --arg s "$slot" '
+    del(."//")
+    | .metadata.labels["koinon.dev/session"] = $a
+    | .spec.arguments.parameters |= map(.value = ({target: $target, ref: $ref, bundle: $b, agent: $a, slot: $s}[.name]))
+    | {workflow: .}' "$MANIFEST")
+  name=$(api POST "/api/v1/workflows/$NS" "$body" | jq -r '.metadata.name // empty')
+else
+  body=$(jq -nc --arg t "$TEMPLATE" --arg target "$target" --arg ref "$sha" --arg b "$object" \
+    --arg a "$label" --arg s "$slot" '{resourceKind: "WorkflowTemplate", resourceName: $t,
+      submitOptions: {parameters: ["target=\($target)", "ref=\($ref)", "bundle=\($b)", "agent=\($a)", "slot=\($s)"],
+                      labels: "koinon.dev/session=\($a)"}}')
+  name=$(api POST "/api/v1/workflows/$NS/submit" "$body" | jq -r '.metadata.name // empty')
+fi
 [[ -n $name ]] || { echo "e2e-remote --argo: the submit returned no workflow name" >&2; exit 1; }
 echo "== submitted $name: $target at ${sha:0:12}, slot $slot"
 
