@@ -15,8 +15,11 @@
 # The Gitea read-grant specs need a TLS server behind the host their grant names, because the proxy
 # dials an allowed host before it judges the request (#371). Unless KOINON_ESCAPE_GITEA_URL is set,
 # or KOINON_ESCAPE_STANDIN=0, a stand-in (koinon-fakemodel -standin over TLS, in koinon-fixtures)
-# gets a certificate from a throwaway CA, and the probe image the sandboxes run is rebuilt with that
-# CA in its trust store so the proxy's upstream handshake verifies. Nothing leaves the cluster.
+# gets a certificate from a throwaway CA. OpenShell 0.1.5's supervisor (its own container and image,
+# not the sandbox image) verifies upstream TLS against webpki roots plus the supervisor image's
+# /etc/ssl/certs/ca-certificates.crt, so the gateway is re-pointed at a supervisor image derived
+# with that CA appended. Interim until OpenShell >= 0.1.7 (supervisor.network.additionalCaConfigMapName),
+# #394. Nothing leaves the cluster.
 #
 # kind runs sandboxes under runc, so the Kata guest case skips (it needs KOINON_ESCAPE_HOST_KERNEL
 # and a Kata node, the maintainer's release gate). Cases that need other fixtures skip with their
@@ -41,7 +44,20 @@ K=(kubectl --context "$CTX")
 
 tmp=$(mktemp -d)
 pf=
-trap '[[ -z $pf ]] || { kill "$pf" 2>/dev/null; wait "$pf" 2>/dev/null; } || true; rm -rf "$tmp"' EXIT
+diagnostics() {
+  local rc=$?
+  (( rc == 0 )) || {
+    echo "== diagnostics (failed run)" >&2
+    "${K[@]}" -n koinon-fixtures logs deploy/escape-gitea-standin --tail=50 >&2 || true
+    "${K[@]}" get pods -A --no-headers 2>/dev/null | awk '$2 ~ /^os-supervisor-/ {print $1, $2}' |
+      while read -r ns pod; do
+        echo "-- $ns/$pod" >&2
+        "${K[@]}" -n "$ns" logs "$pod" --all-containers --tail=200 2>&1 | grep -E -i 'certificate|UnknownIssuer|upstream' >&2 || true
+      done
+  }
+  return 0
+}
+trap 'diagnostics; [[ -z $pf ]] || { kill "$pf" 2>/dev/null; wait "$pf" 2>/dev/null; } || true; rm -rf "$tmp"' EXIT
 
 if [[ -n ${KOINON_OPENSHELL_IMAGE:-} ]] && docker pull -q "$IMAGE" >"$tmp/pull.log" 2>&1; then
   # kind loads by name: a digest-only reference gets a local tag the sandboxes then use.
@@ -100,15 +116,33 @@ if (( need_gitea )); then
     "${K[@]}" -n koinon-fixtures apply -f - >/dev/null
   "${K[@]}" -n koinon-fixtures rollout status deploy/escape-gitea-standin --timeout=180s
 
-  # The sandboxes' proxy verifies the upstream certificate against the image's trust store: derive
-  # an image that also trusts the throwaway CA (the published probe image is left untouched).
-  mkdir -p "$tmp/trust"
-  cp "$pki/ca.crt" "$tmp/trust/koinon-escape-standin-ca.crt"
-  printf 'FROM %s\nCOPY koinon-escape-standin-ca.crt /usr/local/share/ca-certificates/\nUSER root\nRUN update-ca-certificates\n' \
-    "$IMAGE" >"$tmp/trust/Dockerfile"
-  docker build -q -t koinon/spike-probe:escape-trust "$tmp/trust" >/dev/null
-  IMAGE=koinon/spike-probe:escape-trust
-  kind load docker-image --name "$CLUSTER" "$IMAGE"
+  # OpenShell 0.1.5's supervisor verifies the upstream certificate against webpki roots plus
+  # /etc/ssl/certs/ca-certificates.crt in the SUPERVISOR image (distroless, no shell), not in the
+  # sandbox image. Derive a supervisor image from the exact one the install runs, with the throwaway
+  # CA appended, and point the gateway at it. Interim, until OpenShell >= 0.1.7 can take an extra CA
+  # (supervisor.network.additionalCaConfigMapName): #394 removes this block. The chart ref is the one
+  # test/e2e/kind/up.sh installs.
+  os_version=$(sed -n 's/^OS_VERSION=//p' "$root/test/e2e/kind/up.sh")
+  os_digest=$(sed -n 's/^OS_DIGEST=//p' "$root/test/e2e/kind/up.sh")
+  sup_src=ghcr.io/nvidia/openshell/supervisor:$os_version
+  sup_repo=koinon/escape-supervisor sup_tag=$os_version-escape-ca
+  echo "== supervisor image $sup_src + throwaway CA"
+  mkdir -p "$tmp/sup"
+  docker pull -q "$sup_src" >/dev/null
+  cid=$(docker create "$sup_src" /bin/true)
+  docker cp "$cid:/etc/ssl/certs/ca-certificates.crt" "$tmp/sup/ca-certificates.crt" || { docker rm "$cid" >/dev/null; exit 1; }
+  docker rm "$cid" >/dev/null
+  cat "$pki/ca.crt" >>"$tmp/sup/ca-certificates.crt"
+  printf 'FROM %s\nCOPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt\n' "$sup_src" >"$tmp/sup/Dockerfile"
+  docker build -q -t "$sup_repo:$sup_tag" "$tmp/sup" >/dev/null
+  kind load docker-image --name "$CLUSTER" "$sup_repo:$sup_tag"
+  # supervisor.image.{registry,repository,tag,pullPolicy} are the 0.1.5 chart's keys (values.yaml);
+  # the registry is set so the image is kind.local/..., never pulled from anywhere.
+  helm --kube-context "$CTX" upgrade openshell "oci://ghcr.io/nvidia/openshell/helm-chart@${os_digest}" \
+    --version "$os_version" --namespace openshell --reuse-values \
+    --set supervisor.image.registry=kind.local --set "supervisor.image.repository=$sup_repo" \
+    --set "supervisor.image.tag=$sup_tag" --set supervisor.image.pullPolicy=IfNotPresent \
+    --wait --timeout 5m
   export KOINON_ESCAPE_GITEA_URL="https://$gitea_host/gitea"
 fi
 
