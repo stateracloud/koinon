@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Tests hack/e2e-remote.sh without a real remote or e2e: `ssh` and `docker` are shims on PATH. The
+# Tests hack/e2e-remote.sh without a real remote or e2e: `ssh`, `docker` and `curl` are shims on PATH. The
 # ssh shim runs the remote command in a local shell with HOME set to a scratch "remote home", so the
 # push, the lock, the checkout, the run, the copy-back and the exit status are all exercised. The
 # lock test needs flock (Linux): on macOS run this in the toolchain image:
@@ -143,6 +143,93 @@ KOINON_E2E_FORCE_MKDIR_LOCK=1 hack/e2e-remote.sh --local --out "$tmp/out5" >"$tm
 check "the directory lock made --local wait" has 'waiting for the e2e lock' "$tmp/log5"
 check "--local ran after the owner went away" test "$rc" -eq 0
 check "the directory lock is released" test ! -d "$tmp/lock.d"
+
+# 7. --argo (the default without KOINON_E2E_REMOTE): `curl` is a fake Argo Server and S3, the
+# credentials file a fake. The bundle reaches S3, the least busy slot is picked from the template's
+# enum, the run is followed and its results unpacked, and no credential is ever in curl's argv.
+cp "$repo/hack/e2e-argo.sh" "$tmp/repo/hack/"
+git -C "$tmp/repo" checkout -q --detach "$sha"
+argo_sha=$(git -C "$tmp/repo" rev-parse HEAD)
+cat >"$tmp/creds.sh" <<'SH'
+e2e_creds_open() { echo "creds open" >>"$FAKE_LOG"; }
+e2e_creds_argo_token() { echo koinon_test_not-a-real-token; }
+e2e_creds_s3() { echo koinon_test_id:koinon_test_not-a-real-secret; }
+e2e_creds_close() { echo "creds closed" >>"$FAKE_LOG"; }
+SH
+cat >"$tmp/bin/curl" <<'SH'
+#!/usr/bin/env bash
+cat >>"$FAKE_CFG" # the -K - config: credentials arrive here, never in argv
+echo "curl $*" >>"$FAKE_LOG"
+method=GET url="" body="" o="" w="" upload=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+  -X) method=$2; shift ;;
+  --data-binary) body=$2; shift ;;
+  -o) o=$2; shift ;;
+  -w) w=$2; shift ;;
+  -T) method=PUT; upload=$2; shift ;;
+  -H | -K | --aws-sigv4) shift ;;
+  http*) url=$1 ;;
+  esac
+  shift
+done
+case $method:$url in
+PUT:*/e2e-bundles/*) cp "$upload" "$ARGO_DIR/last.bundle"; [[ -z $w ]] || printf 200 ;;
+*/workflow-templates/*) echo '{"spec":{"arguments":{"parameters":[{"name":"slot","enum":["a","b","c"]}]}}}' ;;
+*'/workflows/koinon-e2e?'*) if [[ -n ${FAKE_LIST:-} ]]; then echo "$FAKE_LIST"; else echo '{}'; fi ;;
+POST:*/submit) printf '%s' "$body" >"$ARGO_DIR/submitted"; echo '{"metadata":{"name":"koinon-make-t1"}}' ;;
+PUT:*/stop) echo stopped >>"$ARGO_DIR/stopped"; echo '{}' ;;
+*'/koinon-make-t1?fields='*)
+  n=$(cat "$ARGO_DIR/polls" 2>/dev/null || echo 0); echo $((n + 1)) >"$ARGO_DIR/polls"
+  if [[ $n -lt 1 ]]; then echo '{"status":{"phase":"Running"}}'; else echo "{\"status\":{\"phase\":\"${FAKE_PHASE:-Succeeded}\"}}"; fi ;;
+*/koinon-make-t1/log?*) echo '{"result":{"content":"== 12:00:00Z prerequisites (kind/up.sh)"}}' ;;
+*/workflows/koinon-e2e/koinon-make-t1) echo '{"status":{"nodes":{"koinon-make-t1":{"id":"koinon-make-t1","type":"Pod"}}}}' ;;
+*/artifact-files/*)
+  d=$(mktemp -d); mkdir -p "$d/out"; echo "| Phase | s |" >"$d/out/quickstart-timings.md"
+  echo "target=test-e2e-kind ref=x rc=${FAKE_RESULT_RC:-0} seconds=1" >"$d/out/result.txt"
+  tar -czf "$o" -C "$d" out; rm -rf "$d" ;;
+*) echo "fake curl: unexpected $method $url" >&2; exit 22 ;;
+esac
+SH
+chmod +x "$tmp/bin/curl"
+argo_env() { # <dir>: a fresh fake server state
+  rm -rf "$1"; mkdir -p "$1"
+  export ARGO_DIR=$1 FAKE_CFG=$1/cfg KOINON_E2E_ARGO_CREDS="$tmp/creds.sh" KOINON_E2E_ARGO_POLL=0
+}
+
+argo_env "$tmp/argo1"
+: >"$FAKE_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE
+  FAKE_LIST='{"items":[{"spec":{"arguments":{"parameters":[{"name":"slot","value":"a"}]}}}]}' \
+    KOINON_E2E_AGENT='agent koinon/1' hack/e2e-remote.sh --out "$tmp/out7" >"$tmp/log7" 2>&1) || rc=$?
+check "--argo is the default and passes" test "$rc" -eq 0
+check "the bundle holds the commit" sh -c "git clone -q --no-checkout '$tmp/argo1/last.bundle' '$tmp/argo1/clone' && git -C '$tmp/argo1/clone' cat-file -e $argo_sha"
+check "no temporary branch is left" test -z "$(git -C "$tmp/repo" for-each-ref 'refs/heads/e2e-bundle-*')"
+check "submits the commit" has "ref=$argo_sha" "$tmp/argo1/submitted"
+check "submits the kind e2e" has 'target=test-e2e-kind' "$tmp/argo1/submitted"
+check "picks the least busy slot of the template's enum" has 'slot=b' "$tmp/argo1/submitted"
+check "the agent label is a valid label value" has 'agent=agent-koinon-1' "$tmp/argo1/submitted"
+check "prints the run's stage lines" has '== 12:00:00Z prerequisites' "$tmp/log7"
+check "results unpacked" test -f "$tmp/out7/quickstart-timings.md"
+check "the credentials are closed after the run" has 'creds closed' "$FAKE_LOG"
+check "the token reached curl only on stdin" has 'koinon_test_not-a-real-token' "$tmp/argo1/cfg"
+check "no credential in curl's argv" sh -c "! grep -q 'koinon_test_not-a-real' '$FAKE_LOG'"
+
+argo_env "$tmp/argo2"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_RESULT_RC=7 hack/e2e-remote.sh --argo --out "$tmp/out8" >"$tmp/log8" 2>&1) || rc=$?
+check "--argo passes the e2e's exit status through" test "$rc" -eq 7
+check "results unpacked on failure" test -f "$tmp/out8/quickstart-timings.md"
+
+argo_env "$tmp/argo3"
+: >"$FAKE_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --no-wait --slot c >"$tmp/log9" 2>&1) || rc=$?
+check "--no-wait returns after the submit" test "$rc" -eq 0 -a ! -e "$tmp/argo3/polls"
+check "--slot is passed through" has 'slot=c' "$tmp/argo3/submitted"
+check "--no-wait prints how to follow" has 'hack/e2e-remote.sh --argo --follow koinon-make-t1' "$tmp/log9"
+check "--no-wait keeps the login (the token must outlive the submit)" sh -c "! grep -q 'creds closed' '$FAKE_LOG'"
 
 # 6. The toolchain image pins what the workflow pins.
 wf="$repo/.github/workflows/e2e-kind.yml" df="$repo/hack/e2e-toolchain/Dockerfile"
