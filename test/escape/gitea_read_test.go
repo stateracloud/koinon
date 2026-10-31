@@ -28,7 +28,9 @@ import (
 // dials (and TLS-handshakes) it before its L7 relay judges the request. KOINON_ESCAPE_GITEA_URL
 // names the base URL the grant is rendered for; test/escape/kind.sh sets it to the in-cluster TLS
 // stand-in (escape-gitea-standin, koinon-fakemodel -standin over TLS, with a sub-path, which
-// exercises the prefix) and builds the probe image with its throwaway CA, so nothing leaves the
+// exercises the prefix), with a throwaway CA that it appends to the trust bundle of a supervisor
+// image the gateway is re-pointed at (OpenShell 0.1.5's supervisor verifies upstream TLS against
+// the bundle in its own image, not the sandbox's; interim until #394), so nothing leaves the
 // cluster (#371). A request that reached the stand-in would get its 418, not the proxy's 403. The
 // default, https://example.com/gitea, is for a cluster that can reach example.com:443 (IANA's
 // reserved example domain, which resolves inside the sandbox: a name that fails DNS, such as one
