@@ -431,6 +431,32 @@
         "gatewayId": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,30}[a-z0-9])?$"}
       }
     },
+    "sandbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"cpu": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": ["string", "number"]}, "limit": {"type": ["string", "number"]}}}, "memory": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": ["string", "number"]}, "limit": {"type": ["string", "number"]}}}}
+            },
+            "bounds": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cpu": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "additionalProperties": false, "properties": {"min": {"type": ["string", "number"]}, "max": {"type": ["string", "number"]}}}, "limit": {"type": "object", "additionalProperties": false, "properties": {"min": {"type": ["string", "number"]}, "max": {"type": ["string", "number"]}}}}},
+                "memory": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "additionalProperties": false, "properties": {"min": {"type": ["string", "number"]}, "max": {"type": ["string", "number"]}}}, "limit": {"type": "object", "additionalProperties": false, "properties": {"min": {"type": ["string", "number"]}, "max": {"type": ["string", "number"]}}}}}
+              }
+            },
+            "memoryRequestEqualsLimit": {"type": "boolean"}
+          }
+        }
+      }
+    },
     "sandboxObserver": {
       "type": "object",
       "additionalProperties": false,
