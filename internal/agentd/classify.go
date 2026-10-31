@@ -29,7 +29,8 @@ const (
 	classBudget          = store.RunFailureClassBudget
 	classPolicy          = store.RunFailureClassPolicy
 	classFatal           = store.RunFailureClassFatal
-	// classSandboxUnavailable: the sandbox never became ready within the org's cap; not retried.
+	// classSandboxUnavailable: the sandbox never became ready within the org's cap, or is in a state
+	// the reconciler will not repair (error, deleted or retained, with the agent unhealthy); not retried.
 	classSandboxUnavailable = store.RunFailureClassSandboxUnavailable
 )
 

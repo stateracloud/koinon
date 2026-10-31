@@ -160,7 +160,8 @@ restore 7.2 s on a 186 MB home.
   points: the hourly point and the stop point cover them.
 - **Rules (practice B3):**
   - A sandbox is deleted for a recreation (changed spec, stuck, failed) only after a checkpoint
-    taken since its last activity is complete. The reconciler asks (`home_checkpoints` request),
+    taken since the home was last written is complete (see the 2026-10-31 amendment: not the idle
+    clock). The reconciler asks (`home_checkpoints` request),
     agentd writes it, and a stopped sandbox is started to be read.
   - A failed latest backup (three attempts, growing delay) blocks the recreation and marks the
     agent unhealthy with the reason; an admin resumes it and a new backup is requested.
@@ -192,8 +193,8 @@ restore 7.2 s on a 186 MB home.
     one password for one agent and the lifetime is a minute.
   - *A sandbox that cannot be read* (phase Error or Completed) files no request, since agentd
     reads a home only from a ready sandbox and the request would never be claimed. The recreation
-    uses the sandbox's newest complete checkpoint if it was taken since the sandbox's last
-    activity, and otherwise is blocked at once: the agent is marked unhealthy with the reason and
+    uses the sandbox's newest complete checkpoint if it was taken since the home was last
+    written, and otherwise is blocked at once: the agent is marked unhealthy with the reason and
     the home is kept. A resume repeats this until the fallback pod exists.
   - *Restore claim and scratch space.* The restore claim lasts as long as the run waits for it
     (`Timeout * (tries * (1 + fallbacks) + 1)`), so a second run never extracts into the same
@@ -303,8 +304,8 @@ The archive tier above is built in the reconciler (`internal/reconciler/archive.
   volume. Needs `checkpoints.enabled`; a negative value turns the tier off. Conservative choice: the
   window is one platform value (chart and `--archive-after`), not an org setting; a per-org
   override can be added to `org_settings` later without changing the rules below.
-- **Gate (practice B3).** The sandbox's latest checkpoint must be complete and finished since its
-  last activity (`fresh`, the freshness rule of `homeGate`). A failed, requested, running or
+- **Gate (practice B3).** The sandbox's latest checkpoint must be complete and finished since the
+  home was last written (`fresh`, the freshness rule of `homeGate`; the 2026-10-31 amendment). A failed, requested, running or
   older checkpoint means no archive. Unlike a recreation, the archive never starts the sandbox,
   files a request or marks the agent unhealthy: it waits for the next stop backup. A sandbox that
   still owes a restore (`restore_checkpoint_id`) holds nothing newer than that checkpoint and may
@@ -322,3 +323,28 @@ The archive tier above is built in the reconciler (`internal/reconciler/archive.
   keeps the home generation; the first run restores the home (HC1, unchanged) and reloads the same
   session. Any observed starting, ready, stopping, stopped or error sandbox clears `archived_at`.
 - **Shown** on the agent page ("archived, restores on next run", `Agent.sandbox_archived_at`).
+
+## Amendment (2026-10-31, #329): the gates count from when the home was last written
+
+Every gate (recreate, repair of a stuck or failed sandbox, idle stop, archive) compared its
+checkpoint with `activitySince`: the latest of the sandbox's start, the last run activity and the
+last pre-wake. That is the idle clock, not "the home was written". A wake or a start writes
+nothing, yet it made the hourly backup look stale, and a sandbox in phase Error (unreadable, so no
+new backup is possible) was then blocked and its agent marked unhealthy, although its home held
+exactly what the backup holds.
+
+- **The clock** is `agent_sandboxes.home_dirtied_at` (migration 00043): the last time a harness in
+  the current sandbox started or stopped running (a run entering or leaving `running`, set by a
+  trigger on `runs`). NULL means no harness ever ran in this sandbox. A new sandbox ID resets it
+  (`RecordAgentSandbox`, `SetAgentSandboxName`). A run that fails from `starting` never ran a
+  harness and does not count.
+- **Wake and start count only toward idle.** `activitySince` stays the clock of the idle stop and of
+  the archive window; the gates use `homeDirtiedSince`.
+- **An untouched home recreates freely.** With the clock NULL no new backup is requested, waited
+  for or required, whatever the sandbox's phase, and an idle stop goes ahead. The newest complete
+  checkpoint of the sandbox's home generation (`LatestCompleteHomeCheckpointOfGeneration`) becomes
+  the restore, so the lineage is kept; with none, the next sandbox starts without a restore.
+  Visible change: a sandbox no harness ever ran in is stopped, recreated or archived without
+  checkpoints, and an unreadable one is recreated at once instead of blocking the agent.
+- agentd fails a run whose sandbox is in Error, Deleted or Retained with the agent unhealthy with
+  the class `sandbox_unavailable` (it was `fatal`).

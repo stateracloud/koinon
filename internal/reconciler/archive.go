@@ -6,7 +6,8 @@ package reconciler
 //
 // A sandbox that has been stopped for ArchiveAfter is deleted together with its volume, but only
 // when its home's latest checkpoint is complete and was taken since the sandbox's last activity
-// (the same freshness rule as homeGate). That checkpoint becomes the sandbox's restore, so the
+// (the same freshness rule as homeGate: since the home was last written; a sandbox no harness ran
+// in is archived without a new backup). That checkpoint becomes the sandbox's restore, so the
 // next sandbox keeps the home generation and the first run restores the home before the harness
 // starts (HC1, unchanged); agentd then reloads the same harness session (session/load).
 //
@@ -58,10 +59,15 @@ func (r *Reconciler) archive(ctx context.Context, w *work, ws string, sb executi
 	if !r.archiveDue(w, since) {
 		return false, nil
 	}
-	if !w.sb.RestoreCheckpointID.Valid {
+	if dirtied := homeDirtiedSince(w.sb); !w.sb.RestoreCheckpointID.Valid && dirtied.IsZero() {
+		// No harness ran in this sandbox: its home is what the generation's newest checkpoint holds.
+		if err := r.restoreUntouched(ctx, w); err != nil {
+			return false, err
+		}
+	} else if !w.sb.RestoreCheckpointID.Valid {
 		// Otherwise the sandbox holds nothing newer than the checkpoint it was restored from.
 		cp, err := r.q.LatestHomeCheckpointOfSandbox(ctx, store.LatestHomeCheckpointOfSandboxParams{OrgID: w.org.ID, AgentID: w.agent.ID, SandboxID: sb.ID})
-		if errors.Is(err, pgx.ErrNoRows) || err == nil && !fresh(cp, since) {
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && !fresh(cp, dirtied) {
 			r.log.Debug("not archiving a stopped sandbox: its latest home backup is not complete", w.logAttrs()...)
 			return false, nil
 		}
