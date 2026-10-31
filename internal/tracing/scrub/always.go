@@ -375,10 +375,82 @@ func findHeaders(in string, spans []span) (_ []span, sawWord bool) {
 		if !ok || skipHeaderValue(kind, in[vs:ve]) {
 			continue
 		}
+		if kind == KindCredential && in[sepE-1] != '"' && in[sepE-1] != '\'' && proseOrLocation(in, nameS, e, sepE, ve) {
+			continue
+		}
 		spans = append(spans, span{vs, ve, kind})
 		i = ve - 1 // what follows is inside the value
 	}
 	return spans, sawWord
+}
+
+// proseOrLocation reports a credential-word match that is prose or a source location, not a
+// key-value pair: "Leaked secret: found it first", "bin/kc-secret:1-20", "kc-secret:`bin/env.sh:1-20`".
+// It applies only to a colon (an "=" or a quoted value is a real assignment) and rejects only
+// what no credential looks like: a short (up to 8) all-letter word that continues into more lower-case words,
+// a bare line range after a path, or a code span that is a path:line reference. Anything with a
+// digit and a symbol, or a longer token, is still redacted.
+func proseOrLocation(in string, nameS, nameE, sepE, ve int) bool {
+	sep := in[nameE:sepE]
+	idx := strings.IndexAny(sep, ":=,")
+	if idx < 0 || sep[idx] != ':' {
+		return false
+	}
+	v := in[sepE:ve]
+	if strings.HasPrefix(v, "`") {
+		return pathLine(strings.Trim(v, "`"))
+	}
+	b := nameS
+	for b > 0 && strings.IndexByte(" \t\r\n\"'`(", in[b-1]) < 0 {
+		b--
+	}
+	if strings.IndexByte(in[b:nameS], '/') >= 0 && lineRange(v) {
+		return true
+	}
+	if sepE == nameE+idx+1 || len(v) > 8 || !allLetters(v) { // "word: ", with the blank
+		return false
+	}
+	j := skipSet(in, ve, " ", 1)
+	if j == ve {
+		return false
+	}
+	k := j
+	for k < len(in) && in[k] >= 'a' && in[k] <= 'z' {
+		k++
+	}
+	return k-j >= 2
+}
+
+// lineRange reports "12", "1-20" or "12:5": a position in a file.
+func lineRange(v string) bool {
+	if v == "" || !isDigit(v[0]) {
+		return false
+	}
+	for i := 0; i < len(v); i++ {
+		if !isDigit(v[i]) && v[i] != '-' && v[i] != ':' && v[i] != ',' {
+			return false
+		}
+	}
+	return true
+}
+
+// pathLine reports "dir/file.ext:1-20" or "file.go:12".
+func pathLine(v string) bool {
+	c := strings.LastIndexByte(v, ':')
+	if c <= 0 || !lineRange(v[c+1:]) {
+		return false
+	}
+	p := v[:c]
+	return strings.IndexByte(p, '/') >= 0 || strings.IndexByte(p, '.') > 0
+}
+
+func allLetters(v string) bool {
+	for i := 0; i < len(v); i++ {
+		if !isAlpha(v[i]) {
+			return false
+		}
+	}
+	return v != ""
 }
 
 // separatorEnd parses what may follow a name: blanks, up to three quote or backslash characters
