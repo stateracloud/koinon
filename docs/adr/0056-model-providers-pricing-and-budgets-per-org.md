@@ -589,37 +589,52 @@ streamed. The code lands in #340 (ledger), #341 (agentd) and #342 (gateway), whi
    request bytes (decision 6.2 of the 2026-10-24 amendment) and nothing for output. They are no longer
    charged at `max_tokens`. Providers do not bill output they never generated, and a retried 5xx must
    not burn the run's budget on one bad minute. The entry keeps `estimated` and `usage_missing`.
-2. **What is still charged at `max_tokens`.** An aborted response that did stream is not covered by
-   point 1 and is settled as before. Issue #339 names it as the case that stays at `max_tokens`;
-   the 2026-10-28 amendment (RT1 on rc.5) says a response cut short is charged the usage the gateway
-   logged and never `max_tokens`. See the first open question.
+2. **A cut-short response is never charged at `max_tokens`** (procoduck, 2026-11-01). A response cut
+   short (an aborted stream, a closed connection) is charged its input plus the output actually
+   streamed, estimated when the provider did not report usage. This replaces the sentence of issue
+   #339 that an aborted response which did stream stays at `max_tokens`, and agrees with the
+   2026-10-28 amendment (RT1 on rc.5).
 3. **One layer retries model calls.** Exactly one layer retries a failed model request. Koinon
-   configures it: the retry count, the backoff and the longest `Retry-After` it will honour. agentd
+   configures it (defaults below, procoduck, 2026-11-01). agentd
    skips its own turn retry for a flavor whose harness already retries model calls (a flavor-contract
    flag such as `retriesModelRequests`), and the harness gets its retry settings from Koinon, not from
-   its own defaults. The run's request cap (`maxModelRequests`) and the ledger
+   its own defaults. Defaults of the single layer: up to 3 tries (2 retries), exponential backoff of
+   1 s then 2 s with jitter; a `Retry-After` up to 60 s is honoured, a longer one fails the turn as
+   throttled (the run may be retried later by the run-level policy). A per-org override is a later
+   option. The run's request cap (`maxModelRequests`) and the ledger
    keep counting every attempt.
 4. **The gateway marks its own refusals do-not-retry.** A refusal the gateway itself generates (the
    budget `429 budget_exceeded`, a bad key, a model the key may not use: `koinon.upstream` false, see
    the 2026-10-29 amendment) carries a do-not-retry marking, for example `x-should-retry: false`, so
-   a harness does not retry it. A provider's own answer is not marked.
-5. **Ledger records are unchanged otherwise.** Entries stay append-only; history is not rewritten.
+   a harness does not retry it. A provider's own answer is not marked. Research, 2026-11-01:
+   agentgateway v1.7.0 can set the header on its own errors and direct responses. In
+   `crates/agentgateway/src/proxy/httpproxy.rs` the response policies are built outside
+   `proxy_internal` "so we have can unconditionally run them even on errors or direct responses", and
+   the route and backend `responseHeaderModifier` run in `ResponsePolicies::apply` on that path
+   (`tests/tests/direct_response.rs` pairs a direct response with a response header modifier). The
+   limit: a policy applies only once the request has reached the stage that selects it, so a failure
+   before route selection (route not found) cannot carry it; #342 asserts the marking for each refusal
+   Koinon lists. OpenCode 2.2.0 honours it: `isRetryable` in `packages/ai/src/provider-error.ts` returns
+   false for `x-should-retry: false` and true for `true`, before any status rule
+   ([agentgateway v1.7.0](https://github.com/agentgateway/agentgateway/tree/v1.7.0),
+   [opencode v2.2.0](https://github.com/anomalyco/opencode/tree/v2.2.0)).
+6. **Aggregator 403s are refusals** (procoduck, 2026-11-01). A 403 from an aggregator such as OpenRouter
+   is a policy refusal: it is marked do-not-retry and surfaced. Koinon sets no OpenRouter provider
+   routing in v0.1 (`provider.order`, `allow_fallbacks`): the aggregator's defaults apply. Routing may
+   become a model-catalog field later.
+7. **Ledger records are unchanged otherwise.** Entries stay append-only; history is not rewritten.
 
 ### Open questions
 
-- Which cases remain at `max_tokens`. Issue #339 says an aborted response that did stream; the
-  2026-10-28 amendment replaced `max_tokens` for responses cut short. #340 reconciles the two against
-  the ledger code, and this ADR is then corrected.
-- Whether agentgateway v1.7.0 can set headers on responses it generates itself (issue #263 asks to
-  check); #342 verifies it. If it cannot, the marking needs another mechanism, to be decided then.
-- Whether OpenCode 2.2.x exposes a retry setting. Until it does, the harness-side count cannot be
-  set from Koinon and the single-layer rule is met by agentd skipping its own retry.
-- The retry policy for an aggregator's 403 (not always permanent: one OpenRouter provider can refuse
-  a request another serves) and OpenRouter provider preferences per model (`provider.order`,
-  `allow_fallbacks`). Raised on #263 on 2026-10-29 as "consider", not decided; neither is part of
-  this amendment.
-- The default values for the retry count, the backoff and the longest `Retry-After`. The decision
-  says Koinon sets them; the numbers are not decided.
+- Whether OpenCode 2.2.x can be given the retry count and backoff. Found, 2026-11-01: it cannot by
+  config. The schedule is fixed in `packages/core/src/model-retry.ts` at v2.2.0 (exponential from 2 s,
+  10 s cap per gap, `Schedule.recurs(10)`, `Retry-After` capped at 15 minutes; the prose in
+  `specs/v2/session.md` says four retries and differs from the code), and no key in
+  `packages/core/src/config.ts` sets it. The only levers are the `x-should-retry` response header and a
+  plugin `session.retry` hook (`packages/core/src/session/runner/retry.ts` lets a hook change the
+  decision and delay), which nothing here has exercised. Until a lever is chosen, the single-layer rule
+  is met by the gateway marking refusals and agentd skipping its own retry; #341 decides whether the
+  flavor uses a plugin hook.
 
 ## Open questions
 
