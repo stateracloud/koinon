@@ -666,19 +666,32 @@ func TestNestedEscapedJSONIsBounded(t *testing.T) {
 		`"env":[{"name":"DB_PASSWORD","value":"notreal-dbpw"}],"password":"notreal-pw","text":"Authorization: Bearer abcdefghijklmnop1234 token=notreal-t"}`
 	level1, _ := json.Marshal(strings.Repeat(leaf+"\n", 40))
 	level2, _ := json.Marshal(map[string]string{"output": string(level1)})
-	var items []string
-	total := 0
-	for total < 4<<20 {
-		items = append(items, string(level2))
-		total += len(level2)
+	build := func(size int) []byte {
+		var items []string
+		for total := 0; total < size; total += len(level2) {
+			items = append(items, string(level2))
+		}
+		doc, _ := json.Marshal(map[string]any{"calls": items})
+		return doc
 	}
-	doc, _ := json.Marshal(map[string]any{"calls": items})
+	doc, quarter := build(4<<20), build(1<<20)
 	s := scrub.New(scrub.Config{Level: scrub.LevelRedacted, Secrets: scrub.NewSecrets("notreal-dbpw")})
-	start := time.Now()
-	out, cut := s.Content(string(doc), 0)
-	if d := time.Since(start); d > 200*time.Millisecond*raceSlowdown {
-		t.Errorf("took %v", d)
+	// The bound is relative to the machine (#366): the full document must cost under 6x a
+	// quarter-size one (linear is 4x, plus margin). The best of several runs of each keeps
+	// scheduler noise out; a superlinear blow-up grows by far more than 6x.
+	best := func(in []byte) time.Duration {
+		d := time.Duration(1<<63 - 1)
+		for range 5 {
+			start := time.Now()
+			s.Content(string(in), 0)
+			d = min(d, time.Since(start))
+		}
+		return d
 	}
+	if small, full := best(quarter), best(doc); full > 6*small {
+		t.Errorf("full %v for %d bytes against %v for %d: not linear", full, len(doc), small, len(quarter))
+	}
+	out, cut := s.Content(string(doc), 0)
 	if !cut || !json.Valid([]byte(out)) || strings.Contains(out, "dXNlcjpw") || strings.Contains(out, "notreal-dbpw") {
 		t.Errorf("cut %v valid %v len %d", cut, json.Valid([]byte(out)), len(out))
 	}
@@ -703,6 +716,37 @@ func TestLongDigestParameterThroughEscapes(t *testing.T) {
 		}
 		if out := s.Text(in); strings.Contains(out, "wwwwwwww") || strings.Contains(out, "00xo") {
 			t.Errorf("%s: Text left the parameter", name)
+		}
+	}
+}
+
+// Prose that has a credential word before a colon is not a key-value pair (#325); real values
+// next to the same words still are.
+func TestCredentialWordInProse(t *testing.T) {
+	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
+	for _, in := range []string{
+		"Leaked secret: found it first, then clean up",
+		"the token: abcdef then more",
+		"bin/kc-secret:1-20 `bin/env.sh:1-20`",
+		"see bin/kc-secret:12 for it",
+		"kc-secret:`bin/env.sh:1-20` ok",
+	} {
+		if out := s.Text(in); out != in {
+			t.Errorf("%q became %q", in, out)
+		}
+	}
+	for _, in := range []string{
+		"password: koinon_test_not-a-real-token",
+		"the token: koinon_test_not-a-real-token then more",
+		"secret: notreal1234 and more words",
+		"password: hunter2222",
+		"secret: abcdefghijklmnop and more",
+		"token:123456",
+		"password=found it first",
+		"kc-secret:`koinon_test_not-a-real-token`",
+	} {
+		if out := s.Text(in); !strings.Contains(out, "[redacted:credential]") || strings.Contains(out, "not-a-real") || strings.Contains(out, "hunter") {
+			t.Errorf("%q became %q", in, out)
 		}
 	}
 }
