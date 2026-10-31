@@ -42,7 +42,7 @@ are in [0046](0046-adr-conventions.md).
 | [0020](0020-agent-builder-and-templates.md) | Agent builder proposes, admins activate | Accepted |
 | [0021](0021-connector-setup-guides.md) | Machine-readable connector setup guides and secure inputs | Accepted |
 | [0022](0022-frontend-architecture.md) | React SPA served by the Go API over connect-rpc | Accepted |
-| [0023](0023-observability-and-audit.md) | Optional observability, hash-chained audit on by default | Accepted; amended 2026-10-26, 2026-10-28 and 2026-10-30 (below); run traces by [0074](0074-run-traces-trace-router.md) |
+| [0023](0023-observability-and-audit.md) | Optional observability, hash-chained audit on by default | Accepted; amended 2026-10-26, 2026-10-28, 2026-10-30 and 2026-10-31 (below); run traces by [0074](0074-run-traces-trace-router.md) |
 | [0024](0024-roadmap.md) | Release roadmap from v0.1 to v1.0 | Accepted |
 | [0025](0025-testing-strategy.md) | Deterministic, free CI with a continuous sandbox escape suite | Accepted |
 | [0026](0026-home-lab-and-license.md) | Home lab for real isolation testing; Apache-2.0 with DCO | Accepted |
@@ -75,7 +75,7 @@ are in [0046](0046-adr-conventions.md).
 | [0053](0053-hermes-context-file-patch.md) | Hermes context-file build patch: redo on every upgrade, with a guard test | Superseded by [0059](0059-v01-opencode-only.md) |
 | [0054](0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is recreated | Accepted; amended 2026-10-24 (below): detection, saving the work, the loop guard |
 | [0055](0055-chat-as-its-own-object.md) | Chat is its own object | Accepted |
-| [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted; amended 2026-10-23, 2026-10-24 and 2026-10-28 (below) |
+| [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29 and 2026-10-31 (below) |
 | [0057](0057-mcp-servers.md) | MCP servers: remote and container, catalog, allowlists and discovery | Accepted; amended 2026-10-24, 2026-10-30 and 2026-10-31 by [0084](0084-leak-guard.md) (below) |
 | [0058](0058-gateway-modes.md) | Gateway modes: standalone, kubernetes and shared | Accepted; amended 2026-10-25 and 2026-10-26 (below) |
 | [0059](0059-v01-opencode-only.md) | v0.1 ships one harness: OpenCode v2 | Accepted |
@@ -93,7 +93,7 @@ are in [0046](0046-adr-conventions.md).
 | [0071](0071-skill-library.md) | The skill library: pinned, scanned skills delivered by agentd | Accepted (procoduck, 2026-10-28; built with the UI milestone after v0.1.0) |
 | [0072](0072-agent-model-run-now-echo-check.md) | The agent's model setting, "run now" for schedules, and the provider echo check | Accepted |
 | [0073](0073-agent-passport.md) | Agent passport: a verifiable identity for every agent call | Accepted (delivery after v0.1.0) |
-| [0074](0074-run-traces-trace-router.md) | Run traces: a Koinon trace router to each org's OTLP backend | Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9 |
+| [0074](0074-run-traces-trace-router.md) | Run traces: a Koinon trace router to each org's OTLP backend | Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9; amended 2026-10-30 and 2026-10-31 (below) |
 | [0075](0075-isolation-tiers.md) | Isolation tiers: vm, hardened and dev | Accepted (pending qualification on Bottlerocket) |
 | [0076](0076-database-modes.md) | Database modes: bring your own, existing CNPG, or standalone Postgres | Accepted (delivery after v0.1.0, in v0.1.x) |
 | [0077](0077-pinned-openshell-and-installer.md) | Koinon pins OpenShell and Agent Sandbox per release, and ships an installer | Accepted (delivery after v0.1.0, in v0.1.x) |
