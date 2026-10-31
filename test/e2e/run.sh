@@ -203,7 +203,14 @@ go)
   ;;
 web)
   step "install the browser suite (pnpm, playwright)"
-  (cd web && pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium)
+  # The web toolchain image (hack/e2e-toolchain/web.Dockerfile) has Chromium and its system packages
+  # under PLAYWRIGHT_BROWSERS_PATH: then only check the browser (a no-op at the same Playwright
+  # version), without --with-deps, which would run apt.
+  if [[ -n ${PLAYWRIGHT_BROWSERS_PATH:-} ]] && compgen -G "$PLAYWRIGHT_BROWSERS_PATH/chromium-*" >/dev/null; then
+    (cd web && pnpm install --frozen-lockfile && pnpm exec playwright install chromium)
+  else
+    (cd web && pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium)
+  fi
   done_step "Browser suite install"
   ;;
 esac
