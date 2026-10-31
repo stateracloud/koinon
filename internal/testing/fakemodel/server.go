@@ -80,8 +80,8 @@ func New(scripts ...Script) (*Server, error) {
 
 // listRequests answers GET /_fake/requests with the path and model of every request received, in
 // arrival order, so a test that reaches the binary over the network (e2e) can check which API a
-// harness used, and for a Messages request the thinking type of the body and its anthropic-beta
-// values. Full bodies stay in-process ([Server.Requests]). With ?detail=1 each item also carries the
+// harness used, for a Messages request the thinking type and display of the body and its
+// anthropic-beta values, and for a chat-completions request its reasoning effort. Full bodies stay in-process ([Server.Requests]). With ?detail=1 each item also carries the
 // raw query and every request header, to assert what a gateway let through; the default output is
 // unchanged. A test only: the fake keeps the headers it receives, so never point a real key at it.
 func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) {
@@ -89,8 +89,12 @@ func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) {
 	type item struct {
 		Path  string `json:"path"`
 		Model string `json:"model"`
-		// Thinking is the type of the body's thinking object, "" when it has none.
-		Thinking string `json:"thinking,omitempty"`
+		// Thinking is the type of the body's thinking object, "" when it has none, and
+		// ThinkingDisplay its display.
+		Thinking        string `json:"thinking,omitempty"`
+		ThinkingDisplay string `json:"thinkingDisplay,omitempty"`
+		// ReasoningEffort is the effort of a chat-completions body's reasoning object.
+		ReasoningEffort string `json:"reasoningEffort,omitempty"`
 		// Betas are the values of the anthropic-beta header.
 		Betas []string `json:"betas,omitempty"`
 		// Query and Headers are set with ?detail=1.
@@ -101,11 +105,18 @@ func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) {
 	for _, rq := range s.Requests() {
 		var body struct {
 			Thinking struct {
-				Type string `json:"type"`
+				Type    string `json:"type"`
+				Display string `json:"display"`
 			} `json:"thinking"`
+			Reasoning struct {
+				Effort string `json:"effort"`
+			} `json:"reasoning"`
 		}
 		_ = json.Unmarshal(rq.Body, &body)
-		it := item{Path: rq.Path, Model: rq.Model, Thinking: body.Thinking.Type, Betas: betas(rq.Header)}
+		it := item{
+			Path: rq.Path, Model: rq.Model, Thinking: body.Thinking.Type, ThinkingDisplay: body.Thinking.Display,
+			ReasoningEffort: body.Reasoning.Effort, Betas: betas(rq.Header),
+		}
 		if detail {
 			it.Query, it.Headers = rq.Query, rq.Header
 		}

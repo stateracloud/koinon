@@ -697,12 +697,13 @@ var _ = Describe("the quickstart", Ordered, func() {
 			"the quickstart took %s from helm install, more than the plan's %s", total.Round(time.Second), quickstartBudget)
 	})
 
-	It("8. (not part of the quickstart, after its time check) adaptive thinking on and off crosses the real gateway to the strict fake model (rc.7, #240)", func(ctx SpecContext) {
+	It("8. (not part of the quickstart, after its time check) explicit thinking on and off crosses the real gateway to the strict fake model (rc.7, #240, #316)", func(ctx SpecContext) {
 		t.begin()
 		// The fake model server runs with -strict-messages (test/e2e/kind/fakes.yaml): it answers 400
-		// to a body field whose beta is missing, as api.anthropic.com does, so a run that succeeds
-		// shows OpenCode's real body and the gateway's pinned beta agree. claude-haiku-5-5 is an ID
-		// the thinking table matches (internal/thinking); claude-e2e of 6d is not.
+		// to a body field whose beta is missing or a thinking type the model does not take, as
+		// api.anthropic.com does, so a run that succeeds shows OpenCode's real body is one Anthropic
+		// takes. claude-haiku-5-5 is an ID the thinking table matches (internal/thinking) and one that
+		// can stop thinking; claude-e2e of 6d is not.
 		const model = "claude-haiku-5-5"
 		code, body := admin(ctx, http.MethodPost, "/prices", `{"name":"fake-claude-haiku-5-5","provider":"anthropic","match":{"glob":"`+model+`"},`+
 			`"prices":{"input":"3.00","output":"15.00","cacheRead":"0.30","cacheWrite":"3.75"},"maxOutput":4096}`)
@@ -745,7 +746,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			return n
 		}
 
-		By("thinking on: every request carries adaptive thinking, and the beta the gateway pins is the only one")
+		By("thinking on: every request carries adaptive thinking with a summary, and no beta reaches the model")
 		code, body = admin(ctx, http.MethodPut, thinkingPath, `{"thinking":"on"}`)
 		Expect(code).To(Equal(http.StatusOK), string(body))
 		runTask("Thinking on")
@@ -757,10 +758,11 @@ var _ = Describe("the quickstart", Ordered, func() {
 		for _, r := range on {
 			Expect(r.Path).To(Equal("/v1/messages"))
 			Expect(r.Thinking).To(Equal("adaptive"), "%+v", r)
-			Expect(r.Betas).To(Equal([]string{thinking.BindingBeta}), "the gateway replaces the client's betas: %+v", r)
+			Expect(r.ThinkingDisplay).To(Equal("summarized"), "%+v", r)
+			Expect(r.Betas).To(BeEmpty(), "no row pins a beta and the gateway drops the client's: %+v", r)
 		}
 
-		By("thinking off: no request carries a thinking block")
+		By("thinking off: every request turns thinking off explicitly")
 		before := count()
 		code, body = admin(ctx, http.MethodPut, thinkingPath, `{"thinking":"off"}`)
 		Expect(code).To(Equal(http.StatusOK), string(body))
@@ -772,7 +774,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
 		for _, r := range all[before:] {
 			Expect(r.Path).To(Equal("/v1/messages"))
-			Expect(r.Thinking).To(BeEmpty(), "%+v", r)
+			Expect(r.Thinking).To(Equal(string(thinking.Disabled)), "%+v", r)
 		}
 		t.end("8. Adaptive thinking on and off: strict fake behind the real gateway")
 	})
@@ -966,11 +968,11 @@ func fakeModelPaths(ctx context.Context, g Gomega, base, model string) []string 
 	return out
 }
 
-// fakeRequest is one request the fake model server received: the path, the thinking type of the
-// body ("" for none) and the anthropic-beta values.
+// fakeRequest is one request the fake model server received: the path, the thinking type and
+// display of the body ("" for none) and the anthropic-beta values.
 type fakeRequest struct {
-	Path, Model, Thinking string
-	Betas                 []string
+	Path, Model, Thinking, ThinkingDisplay string
+	Betas                                  []string
 	// Query and Headers are filled by fakeModelDetail (?detail=1).
 	Query   string
 	Headers http.Header

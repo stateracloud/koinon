@@ -177,8 +177,9 @@ var _ = Describe("The agent's model setting", func() {
 	})
 
 	// Koinon decides whether the model thinks, and the harness renders that (rc.8, ADR 0069 amendment
-	// 2026-10-29): thinking is on unless the agent, or its version, turns it off, and a model whose
-	// catalog capability says it cannot think runs with none.
+	// 2026-10-29): thinking is on unless the agent, or its version, turns it off, a model whose
+	// catalog capability says it cannot think runs with none, and on and off are sent explicitly
+	// (#316).
 	Describe("The agent's thinking setting", func() {
 		serveClaude := func(ctx context.Context, e *env, name string) {
 			GinkgoHelper()
@@ -218,7 +219,7 @@ var _ = Describe("The agent's model setting", func() {
 			e := newEnv(ctx, store.AgentFlavorOpencode)
 			serveClaude(ctx, e, "claude-haiku-5-5")
 			setModel(ctx, e, "claude-haiku-5-5")
-			Expect(thinkingArg(ctx, e)).To(Equal("adaptive"))
+			Expect(thinkingArg(ctx, e)).To(Equal("adaptive-summarized"))
 		})
 
 		It("is off when the agent turns it off, and on again when it turns it on over its version's off", func(ctx SpecContext) {
@@ -226,7 +227,15 @@ var _ = Describe("The agent's model setting", func() {
 			serveClaude(ctx, e, "claude-haiku-5-5")
 			setModel(ctx, e, "claude-haiku-5-5")
 			setThinking(ctx, e, "off")
-			Expect(thinkingArg(ctx, e)).To(Equal("none"))
+			Expect(thinkingArg(ctx, e)).To(Equal("disabled"), "off is sent explicitly")
+		})
+
+		It("runs a stored off with thinking on for a model that always thinks (#316)", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			serveClaude(ctx, e, "claude-opus-5-5")
+			setModel(ctx, e, "claude-opus-5-5")
+			setThinking(ctx, e, "off")
+			Expect(thinkingArg(ctx, e)).To(Equal("adaptive-summarized"))
 		})
 
 		It("follows the version's value until the agent sets its own", func(ctx SpecContext) {
@@ -234,13 +243,13 @@ var _ = Describe("The agent's model setting", func() {
 				return `{"model":"claude-haiku-5-5","thinking":"off","instructions":"x"}`
 			})
 			serveClaude(ctx, e, "claude-haiku-5-5")
-			Expect(thinkingArg(ctx, e)).To(Equal("none"))
+			Expect(thinkingArg(ctx, e)).To(Equal("disabled"))
 			setThinking(ctx, e, "on")
 			second := e.enqueue(ctx, e.task(ctx, "again"))
 			Eventually(runState(ctx, second)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 			_, _, _, args := e.harness.snapshot()
 			Expect(args).To(HaveLen(2))
-			Expect(args[1][slices.Index(args[1], "--thinking")+1]).To(Equal("adaptive"))
+			Expect(args[1][slices.Index(args[1], "--thinking")+1]).To(Equal("adaptive-summarized"))
 		})
 
 		It("is none for a model the catalog says cannot think, whatever the setting", func(ctx SpecContext) {

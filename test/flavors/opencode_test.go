@@ -428,17 +428,23 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 	})
 
 	It("puts the overlay on the entry of --model-format, and makes it the default model", func(ctx SpecContext) {
-		// The Messages entry always states the model's thinking compatibility (ADR 0069 amendment
-		// 2026-10-29), off unless --thinking adaptive; the chat-completions entry has none.
+		// The Messages entry always turns OpenCode's own thinking block off (ADR 0069 amendment
+		// 2026-10-29); Koinon's form goes in the body overlay (#316). The chat-completions entry has
+		// no compatibility overlay.
 		const off = `"models":{"m-1":{"compatibility":{"supportsThinkingBlockBinding":false,"supportsEffortUpdates":false}}}`
-		const on = `"models":{"m-1":{"compatibility":{"supportsThinkingBlockBinding":true,"supportsEffortUpdates":false}}}`
 		Expect(entryEnv(ctx, "--model-format", "anthropic", "--session-id", "01234567-run")).To(ContainSubstring(
 			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{"body":{"session_id":"01234567-run"},` + off + `}}}` + "\n"))
 		Expect(entryEnv(ctx, "--model-format", "anthropic")).To(ContainSubstring(
 			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{` + off + `}}}` + "\n"))
-		Expect(entryEnv(ctx, "--model-format", "anthropic", "--thinking", "none")).To(ContainSubstring(off))
-		Expect(entryEnv(ctx, "--model-format", "anthropic", "--thinking", "adaptive")).To(ContainSubstring(
-			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{` + on + `}}}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "anthropic", "--thinking", "none")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{` + off + `}}}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "anthropic", "--thinking", "adaptive-summarized", "--session-id", "run-1")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{"body":{"session_id":"run-1","thinking":{"type":"adaptive","display":"summarized"}},` + off + `}}}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "anthropic", "--thinking", "disabled")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{"body":{"thinking":{"type":"disabled"}},` + off + `}}}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "openai", "--thinking", "effort-none")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"body":{"reasoning":{"effort":"none"}}}}}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "openai", "--thinking", "default")).NotTo(ContainSubstring("OPENCODE_CONFIG_CONTENT"))
 		Expect(entryEnv(ctx, "--model-format", "openai", "--cache-alibaba")).To(ContainSubstring(
 			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"compatibility":{"cacheFormat":"alibaba"}}}}` + "\n"))
 	})
