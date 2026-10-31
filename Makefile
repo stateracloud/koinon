@@ -71,6 +71,7 @@ adr-lint: ## Check ADR numbers and the README index; offline tests of hack/claim
 	hack/claim_test.sh
 	hack/waiver-approvers-test.sh
 	hack/migrate-renumber-test.sh
+	hack/hooks/agent-spawn-check_test.sh
 
 .PHONY: migrate-lint
 migrate-lint: ## Check migration file names (and, with BASE=<ref>, that merged migrations are unchanged)
