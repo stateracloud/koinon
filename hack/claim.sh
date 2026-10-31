@@ -12,19 +12,33 @@
 #
 # Usage:
 #   claim.sh next [--label L]         Ready, agent-ok, current-milestone, unblocked, unclaimed issues
-#   claim.sh take <N>... [--takeover] [--human]
+#   claim.sh take <N>... [--takeover] [--human] [--lane L]
 #                                     claim issue(s) N as one unit (several only for one PR that
 #                                     closes them all). --takeover: the holder is dead (lease and
 #                                     PR activity + grace). --human: a 3-day claim by a person.
-#   claim.sh beat <N>... [--pr P]     extend the lease (every 30 min and before long steps; PR
+#                                     --lane L: claim in lane L (see Lanes below).
+#   claim.sh beat <N>... [--pr P] [--lane L]
+#                                     extend the lease (every 30 min and before long steps; PR
 #                                     pushes alone are not liveness). Human claims: daily.
-#   claim.sh review <N>               the PR is ready: Status In Review, lease extended
-#   claim.sh release <N> --note TEXT  hand the issue back (keep the branch and draft PR)
+#   claim.sh review <N> [--lane L]    the PR is ready: Status In Review, lease extended
+#   claim.sh release <N> --note TEXT [--lane L]
+#                                     hand the issue back (keep the branch and draft PR)
 #   claim.sh block <N> <M>            N waits for issue M: add "blocked by", release, Status Ready
-#   claim.sh show <N> | mine | limits
+#   claim.sh show <N> | mine [--lane L] | limits [--lane L]
 #   claim.sh adr                      reserve the next free ADR number (claim/adr-NNNN) and print it
 #   claim.sh sensitive-paths          the ruleset patterns for CODEOWNERS' sensitive section
 #   claim.sh sweep | check-pr <PR> | release-pr <PR> | update-oldest     (used by claims.yml)
+#
+# Lanes (ADR 0082, amendment):
+#   The session cap is one claim per (session, lane). A session that runs several agents at once,
+#   one issue each in its own worktree, gives each agent a lane: `--lane L` on take, beat, review,
+#   release, limits and mine, or KOINON_CLAIM_LANE in the environment (the flag wins). L matches
+#   ^[a-z0-9][a-z0-9-]{0,15}$. With a lane the holder is `<login>/<host>/<session>#<L>`; without
+#   one it is `<login>/<host>/<session>`, which is its own lane. A claim is yours only under the
+#   lane that took it: a lane never beats, reviews or releases another lane's claim. The human cap
+#   (default 4) still counts every claim of the human, lanes or not. Subagents still never call
+#   claim.sh: the parent takes one lane per subagent and does all the bookkeeping. --human claims
+#   have no lane.
 #
 # Exit codes:
 #   0  success
@@ -46,7 +60,8 @@
 #                               worktree's git dir. Claude subagents share the parent's id: only the
 #                               parent takes claims. Other agents must export KOINON_AGENT_SESSION.
 #   KOINON_CLAIM_LEASE_SECONDS (7200), _HUMAN_LEASE_SECONDS (259200), _GRACE_SECONDS (900),
-#   _HUMAN_CAP (4), _SESSION_CAP (1),
+#   _HUMAN_CAP (4), _SESSION_CAP (1: per session and lane),
+#   KOINON_CLAIM_LANE           the lane (same as --lane)
 #   _STALE_RELEASE_SECONDS (7200: the sweeper releases this long after the lease ran out)
 set -euo pipefail
 
@@ -122,9 +137,44 @@ next_adr_number() {
   printf '%04d' $((max + 1))
 }
 
-# holder_login HOLDER, holder_session HOLDER: holder is `<login>/<host>/<session>`.
+# holder is `<login>/<host>/<session>` or, in a lane, `<login>/<host>/<session>#<lane>`. Session ids
+# never contain `#` (my_holder maps it to `-`), so the first `#` of the last segment starts the lane.
+# holder_login HOLDER, holder_session HOLDER (without the lane), holder_lane HOLDER (empty: no lane),
+# holder_key HOLDER (session and lane: what the session cap counts).
 holder_login() { echo "${1%%/*}"; }
-holder_session() { echo "${1##*/}"; }
+holder_key() { echo "${1##*/}"; }
+holder_session() { local k=${1##*/}; echo "${k%%#*}"; }
+holder_lane() { local k=${1##*/}; if [[ $k == *'#'* ]]; then echo "${k#*#}"; fi; }
+
+# lane_label HOLDER: "lane x" or "no lane", for messages.
+lane_label() { local l; l=$(holder_lane "$1"); if [[ -n $l ]]; then echo "lane $l"; else echo "no lane"; fi; }
+
+# valid_lane LANE: ^[a-z0-9][a-z0-9-]{0,15}$
+valid_lane() { [[ $1 =~ ^[a-z0-9][a-z0-9-]{0,15}$ ]]; }
+
+# LANE: this invocation's lane ("" = none); KOINON_CLAIM_LANE, overridden by --lane (split_globals).
+LANE=${KOINON_CLAIM_LANE:-}
+
+# split_globals ARGS...: takes --human and --lane L out of the arguments. Sets HUMAN_MODE, LANE and
+# REST (the other arguments). Returns 1 with a message on a bad lane.
+REST=()
+split_globals() {
+  REST=()
+  while (($#)); do
+    case $1 in
+      --human) HUMAN_MODE=1; shift ;;
+      --lane)
+        if (($# < 2)); then echo "claim: --lane needs a name" >&2; return 1; fi
+        LANE=$2; shift 2 ;;
+      *) REST+=("$1"); shift ;;
+    esac
+  done
+  if [[ -n $LANE ]] && ! valid_lane "$LANE"; then
+    echo "claim: bad lane '$LANE': use 1 to 16 characters of a-z, 0-9 and -, starting with a letter or digit" >&2
+    return 1
+  fi
+  return 0
+}
 
 # title_exempt TITLE: chore, ci and build(deps) titles may skip a claim (only when the pull request
 # touches no code, see pr_touches_code: the title alone is spoofable).
@@ -144,8 +194,10 @@ humans_list() {
   grep -E '^\*[[:space:]]' "$1" | head -1 | tr -s ' \t' '\n' | grep '^@' | sed 's/^@//' | tr '[:upper:]' '[:lower:]' || true
 }
 
-# same_holder A B: same login and session (the host name can change, e.g. macOS hostname -s).
-same_holder() { [[ $(holder_login "$1") == "$(holder_login "$2")" && $(holder_session "$1") == "$(holder_session "$2")" ]]; }
+# same_holder A B: same login, session and lane (the host name can change, e.g. macOS hostname -s).
+same_holder() {
+  [[ $(holder_login "$1") == "$(holder_login "$2")" && $(holder_key "$1") == "$(holder_key "$2")" ]]
+}
 
 # parse_lease LEASE_UNTIL -> epoch, or fail on anything that is not RFC 3339 UTC.
 parse_lease() {
@@ -209,10 +261,16 @@ human_login() {
 
 host_short() { hostname -s 2>/dev/null || echo host; }
 
-# my_holder -> `<login>/<host>/<session>`. The session is KOINON_AGENT_SESSION, then Claude Code's
+# my_holder -> `<login>/<host>/<session>`, plus `#<lane>` when a lane is set (human claims have none). The session is KOINON_AGENT_SESSION, then Claude Code's
 # CLAUDE_CODE_SESSION_ID. Without either, one holder is generated per worktree and stored whole under
 # that worktree's git dir (never the shared .git/config: worktrees would share one id).
 my_holder() {
+  local h
+  h=$(my_base_holder) || return 1
+  if [[ -n $LANE && $h != */human ]]; then echo "$h#$LANE"; else echo "$h"; fi
+}
+
+my_base_holder() {
   local login s gd f
   login=$(human_login)
   if ((HUMAN_MODE)); then echo "$login/$(host_short)/human"; return; fi
@@ -226,7 +284,7 @@ my_holder() {
   echo "$s"
 }
 
-session_id() { local h; h=$(my_holder) || return 1; holder_session "$h"; }
+session_id() { local h; h=$(my_holder) || return 1; holder_key "$h"; }
 
 # read_claim N -> JSON {issue,sha,state,holder,human,lease_until,pr,note}.
 # Returns 0 found, 1 no claim ref, 4 API error (message on stderr). Callers must tell 1 from 4: a
@@ -409,11 +467,21 @@ rerun_claim_check() {
 # Commands
 # ---------------------------------------------------------------------------------------------
 
-active_counts() { # CLAIMS_JSON NOW HUMAN SESSION -> "human_count session_count"
+active_counts() { # CLAIMS_JSON NOW HUMAN KEY -> "human_count key_count"; KEY is session[#lane] (holder_key)
   jq -r --argjson now "$2" --arg h "$3" --arg s "$4" '
     [.[] | select(.state == "held" and (.lease_until | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$")))] as $held
     | ($held | map(select((.lease_until | fromdateiso8601) >= $now))) as $act
     | "\($act | map(select(.human == $h)) | length) \($act | map(select((.holder | split("/") | last) == $s and $s != "human")) | length)"' <<<"$1"
+}
+
+# held_by_key CLAIMS_JSON NOW KEY -> the active claims of that session and lane, one per line:
+# "#12 (PR #34)" or "#12" when no pull request is known.
+held_by_key() {
+  jq -r --argjson now "$2" --arg s "$3" '
+    .[] | select(.state == "held" and (.lease_until | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$"))
+                 and (.lease_until | fromdateiso8601) >= $now
+                 and (.holder | split("/") | last) == $s and $s != "human")
+    | "#\(.issue)" + (if .pr != "" then " (PR #\(.pr))" else "" end)' <<<"$1"
 }
 
 cmd_limits() {
@@ -421,7 +489,7 @@ cmd_limits() {
   claims=$(list_claims); now=$(server_now); human=$(human_login); sess=$(session_id)
   counts=$(active_counts "$claims" "$now" "$human" "$sess")
   echo "human:    $human (${counts% *} of $HUMAN_CAP held claims)"
-  echo "session:  $sess (${counts#* } of $SESSION_CAP)"
+  echo "session:  ${sess%%#*} (${counts#* } of $SESSION_CAP${LANE:+ in lane $LANE})"
   echo "lease:    agent ${LEASE}s, heartbeat every 1800s; human claim (--human) ${HUMAN_LEASE}s, heartbeat daily"
   echo "takeover: after lease + ${GRACE}s grace, and never while the linked PR is open and not draft"
   echo "sweeper:  stale mark after the lease + ${GRACE}s; release ${RELEASE_AFTER}s after the lease ran out"
@@ -430,8 +498,9 @@ cmd_limits() {
 cmd_mine() {
   local claims now human
   claims=$(list_claims); now=$(server_now); human=$(human_login)
-  jq -r --argjson now "$now" --arg h "$human" '
-    .[] | select(.state == "held" and .human == $h and (.lease_until | test("^[0-9]{4}-")))
+  jq -r --argjson now "$now" --arg h "$human" --arg lane "$LANE" '
+    .[] | select(.state == "held" and .human == $h and (.lease_until | test("^[0-9]{4}-"))
+                 and ($lane == "" or ((.holder | split("/") | last | split("#") | .[1:] | first // "") == $lane)))
     | "#\(.issue)\t\(if (.lease_until | fromdateiso8601) >= $now then "active" else "expired" end)\tlease \(.lease_until)\tpr \(.pr)\t\(.holder)"' <<<"$claims"
 }
 
@@ -550,16 +619,17 @@ cmd_take() {
     case $a in
       --takeover) takeover=1 ;;
       [0-9]*) [[ $a =~ ^[0-9]+$ ]] || die "bad issue number $a"; issues+=("$a") ;;
-      *) die "usage: take <N>... [--takeover] [--human]" ;;
+      *) die "usage: take <N>... [--takeover] [--human] [--lane L]" ;;
     esac
   done
-  ((${#issues[@]})) || die "usage: take <N>... [--takeover] [--human]"
-  local human holder sess claims now counts taken=() n rc t
-  human=$(human_login); holder=$(my_holder); sess=$(holder_session "$holder")
+  ((${#issues[@]})) || die "usage: take <N>... [--takeover] [--human] [--lane L]"
+  local human holder sess claims now counts taken=() n rc t held
+  human=$(human_login); holder=$(my_holder); sess=$(holder_key "$holder")
   claims=$(list_claims); now=$(server_now)
   counts=$(active_counts "$claims" "$now" "$human" "$sess")
   if ((!HUMAN_MODE)) && ((${counts#* } >= SESSION_CAP)); then
-    CLAIM_EXIT=2 die "this session already holds ${counts#* } claim(s) (cap $SESSION_CAP). Finish or release one first."
+    held=$(held_by_key "$claims" "$now" "$sess" | paste -sd, - | sed 's/,/, /g')
+    CLAIM_EXIT=2 die "this session already holds ${counts#* } claim(s) in $(lane_label "$holder") (cap $SESSION_CAP): ${held:-none listed}. Finish or \`release\` one first, or take this issue in its own lane with --lane <name> (or KOINON_CLAIM_LANE); the human cap of $HUMAN_CAP still applies."
   fi
   if ((${counts% *} + ${#issues[@]} > HUMAN_CAP)); then
     CLAIM_EXIT=2 die "$human holds ${counts% *} claims; ${#issues[@]} more would pass the cap of $HUMAN_CAP."
@@ -625,16 +695,16 @@ cmd_beat() {
   while (($#)); do
     case $1 in
       --pr) pr=${2:-}; [[ $pr =~ ^[0-9]+$ ]] || die "--pr needs a pull request number"; shift 2 ;;
-      *) [[ $1 =~ ^[0-9]+$ ]] || die "usage: beat <N>... [--pr P]"; ns+=("$1"); shift ;;
+      *) [[ $1 =~ ^[0-9]+$ ]] || die "usage: beat <N>... [--pr P] [--lane L]"; ns+=("$1"); shift ;;
     esac
   done
-  ((${#ns[@]})) || die "usage: beat <N>... [--pr P]"
+  ((${#ns[@]})) || die "usage: beat <N>... [--pr P] [--lane L]"
   for a in "${ns[@]}"; do beat_one "$a" "$pr"; done
 }
 
 cmd_review() {
   local n=${1:-}
-  [[ $n =~ ^[0-9]+$ ]] || die "usage: review <N>"
+  [[ $n =~ ^[0-9]+$ ]] || die "usage: review <N> [--lane L]"
   require_mine "$n"
   local pr lease_until
   pr=$(jq -r .pr <<<"$C")
@@ -670,7 +740,7 @@ do_release_claim() {
 
 cmd_release() {
   local n=${1:-} note="" force=0
-  [[ $n =~ ^[0-9]+$ ]] || die "usage: release <N> --note TEXT"
+  [[ $n =~ ^[0-9]+$ ]] || die "usage: release <N> --note TEXT [--lane L]"
   shift
   while (($#)); do
     case $1 in
@@ -911,21 +981,19 @@ cmd_update_oldest() {
   else die "update-branch failed for #$target: $TRY_OUT"; fi
 }
 
-usage() { sed -n '4,60p' "$0" | sed -n '1,/^set -euo/p' | sed '$d' | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '4,90p' "$0" | sed -n '1,/^set -euo/p' | sed '$d' | sed 's/^# \{0,1\}//'; }
 
 main() {
   command -v gh >/dev/null || die "gh is required"
   command -v jq >/dev/null || die "jq is required"
-  local cmd=${1:-} a rest=()
+  local cmd=${1:-}
   [[ -n $cmd ]] || { usage; exit 1; }
   shift || true
   case $cmd in
     -h | --help | help) usage; exit 0 ;;
   esac
-  for a in "$@"; do
-    if [[ $a == --human ]]; then HUMAN_MODE=1; else rest+=("$a"); fi
-  done
-  if ((${#rest[@]})); then set -- "${rest[@]}"; else set --; fi
+  split_globals "$@" || exit 1
+  if ((${#REST[@]})); then set -- "${REST[@]}"; else set --; fi
   init_repo
   case $cmd in
     next) cmd_next "$@" ;;
