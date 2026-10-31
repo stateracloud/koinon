@@ -209,7 +209,14 @@ follow_run() {
   rc=0
   if [[ $phase != Succeeded ]]; then
     rc=$(sed -n 's/.* rc=\([0-9]*\) .*/\1/p' "$out/result.txt" 2>/dev/null || true)
-    [[ -n $rc && $rc != 0 ]] || rc=1
+    if [[ $rc == 0 ]]; then
+      # The target finished and its results were archived, then the pod ended badly: the lab has
+      # seen the Kata VM's agent die after a run, reporting 255 for every container. result.txt is
+      # the target's own verdict.
+      echo "note: the run ended $phase after its target passed (result.txt: rc=0); counting it as passed" >&2
+    else
+      [[ -n $rc ]] || rc=1
+    fi
   fi
   echo "e2e ($target) $phase, exit status $rc"
   return "$rc"
