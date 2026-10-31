@@ -34,9 +34,10 @@ Instructions for coding agents working on Koinon.
   that changed something e2e-relevant, one running and the newest pending) and nightly, always,
   to catch drift no commit explains. Run it on
   demand for a risky PR: `hack/needs-e2e.sh` says whether your change touches what only a full
-  install observes (the rule lives only there); if yes, run `hack/e2e-remote.sh` (Andre's testbox)
-  or `hack/e2e-remote.sh --local`, paste the timings table in the PR body, or add the `e2e` label.
-  `SUITE_LABEL=smoke` runs steps 1-6 only. The required check is `e2e result` (green when the e2e
+  install observes (the rule lives only there); if yes, run `hack/e2e-remote.sh` (the maintainers'
+  home-lab Argo queue: submit, keep working, `--no-wait` and `--follow <run>` to come back later; it
+  needs the maintainers' credentials) or `hack/e2e-remote.sh --local`, paste the timings table in the
+  PR body, or add the `e2e` label. `SUITE_LABEL=smoke` (only with `--local` or `--ssh`) runs steps 1-6 only. The required check is `e2e result` (green when the e2e
   was skipped). Why: #281 (branch naming in githubtools) and #284 (a startup flag the chart's
   migrate Job lacked) passed every package test and failed only in a full install.
 - When main's kind e2e goes from green to red, `hack/e2e-bisect.sh` opens one `e2e-regression` issue
