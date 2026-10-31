@@ -19,7 +19,8 @@
 set -euo pipefail
 export GH_PAGER=cat PAGER=cat
 
-root=${KOINON_WT_ROOT:-${TMPDIR:-/tmp}/kw}
+tmp=${TMPDIR:-/tmp}
+root=${KOINON_WT_ROOT:-${tmp%/}/kw}
 root=${root%/}
 
 die() {

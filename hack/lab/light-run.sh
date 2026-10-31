@@ -19,7 +19,9 @@ mkdir -p "$out"
 echo "== $(date -u +%H:%M:%SZ) make $target"
 start=$(date +%s)
 set +e
-make "$target" 2>&1 | tee "$out/driver.log"
+# A run shares the e2e node's cores with others; go test's default 10-minute per-package timeout
+# fails slow-but-passing packages under contention (agentd, api in the 2026-10-31 load test).
+GOFLAGS="${GOFLAGS:+$GOFLAGS }-timeout=25m" make "$target" 2>&1 | tee "$out/driver.log"
 rc=${PIPESTATUS[0]}
 set -e
 echo "target=$target ref=$(git rev-parse HEAD) rc=$rc seconds=$(($(date +%s) - start))" | tee "$out/result.txt"
