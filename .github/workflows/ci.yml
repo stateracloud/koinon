@@ -322,6 +322,8 @@ jobs:
       - run: hack/pr-wait-test.sh
       - run: hack/ci-fail-test.sh
       - run: hack/wt-test.sh
+      - run: hack/ship-test.sh
+      - run: hack/preflight-test.sh
       - run: hack/e2e-decide-test.sh
       - run: hack/e2e-bisect-test.sh
 
