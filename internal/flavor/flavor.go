@@ -53,7 +53,7 @@ type Descriptor struct {
 	// matching entry. "" when the flavor has one entry only.
 	FormatArg string
 	// ThinkingArg is the launch switch that takes the thinking mode Koinon decided for the run
-	// (internal/thinking.Mode: "none" or "adaptive"), so the harness renders it instead of guessing
+	// (internal/thinking.Mode, the exact form for on or off), so the harness renders it instead of guessing
 	// from the model's ID. "" when the flavor takes none. The entry script turns it into the
 	// harness's own setting (ADR 0069 amendment 2026-10-29).
 	ThinkingArg string

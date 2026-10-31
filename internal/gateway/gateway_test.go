@@ -131,7 +131,7 @@ var _ = Describe("State", func() {
 		}
 	})
 
-	It("refuses a thinking mode it does not know and a beta that cannot be a header value", func() {
+	It("refuses a thinking capability the table could not hold and a beta that cannot be a header value", func() {
 		model := func(c thinking.Capability) gateway.State {
 			return gateway.State{Providers: []gateway.Provider{{
 				Org: "acme", Name: "p", Type: "anthropic", BaseURL: "http://p/v1",
@@ -140,9 +140,10 @@ var _ = Describe("State", func() {
 		}
 		Expect(model(thinking.Of("anthropic", "claude-haiku-5-5", modelformat.Anthropic)).Validate()).To(Succeed())
 		Expect(model(thinking.Capability{}).Validate()).To(Succeed(), "the zero value is a model that does not think")
-		Expect(model(thinking.Capability{Mode: "extreme"}).Validate()).To(MatchError(ContainSubstring(`thinking mode "extreme"`)))
+		Expect(model(thinking.Capability{Thinks: thinking.Always, On: "extreme"}).Validate()).To(MatchError(ContainSubstring(`thinking mode "extreme"`)))
+		Expect(model(thinking.Capability{Thinks: thinking.Always, On: thinking.AdaptiveSummarized, Off: thinking.Disabled}).Validate()).To(MatchError(ContainSubstring("no off form")))
 		for _, bad := range []string{"", "a b", "x\r\nevil: 1", "UPPER", strings.Repeat("a", 200)} {
-			Expect(model(thinking.Capability{Mode: thinking.Adaptive, Betas: []string{bad}}).Validate()).To(MatchError(ContainSubstring("invalid anthropic beta")), bad)
+			Expect(model(thinking.Capability{Thinks: thinking.Always, On: thinking.AdaptiveSummarized, Betas: []string{bad}}).Validate()).To(MatchError(ContainSubstring("invalid anthropic beta")), bad)
 		}
 	})
 
