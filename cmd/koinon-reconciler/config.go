@@ -139,8 +139,10 @@ func (fc fileConfig) policy() sandboxres.Policy {
 		dst *sandboxres.Range
 		src rangeConfig
 	}{
-		{&p.Bounds.CPURequest, sr.Bounds.CPU.Request}, {&p.Bounds.CPULimit, sr.Bounds.CPU.Limit},
-		{&p.Bounds.MemoryRequest, sr.Bounds.Memory.Request}, {&p.Bounds.MemoryLimit, sr.Bounds.Memory.Limit},
+		{&p.Bounds.CPURequest, sr.Bounds.CPU.Request},
+		{&p.Bounds.CPULimit, sr.Bounds.CPU.Limit},
+		{&p.Bounds.MemoryRequest, sr.Bounds.Memory.Request},
+		{&p.Bounds.MemoryLimit, sr.Bounds.Memory.Limit},
 	} {
 		set(&r.dst.Min, r.src.Min)
 		set(&r.dst.Max, r.src.Max)
