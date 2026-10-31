@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Tests hack/ci-fail.sh offline: `gh` is a stub on PATH serving canned PR check rollups, run job lists
+# and --log-failed logs (with ANSI codes, timestamps and noise to filter).
+set -euo pipefail
+
+repo=$(cd "$(dirname "$0")/.." && pwd)
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/bin"
+export PATH="$tmp/bin:$PATH" FAKE_CALLS="$tmp/calls"
+
+url=https://github.com/o/r/actions/runs
+cat >"$tmp/rollup-fail.json" <<JSON
+{"statusCheckRollup":[
+ {"name":"lint","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"$url/100/job/1"},
+ {"name":"go","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"$url/200/job/21"},
+ {"name":"web","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"$url/200/job/22"},
+ {"context":"claim","state":"FAILURE","targetUrl":"https://example.invalid/claim"}]}
+JSON
+cat >"$tmp/rollup-ok.json" <<JSON
+{"statusCheckRollup":[{"name":"lint","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"$url/100/job/1"}]}
+JSON
+cat >"$tmp/jobs.json" <<JSON
+{"jobs":[{"name":"go","conclusion":"failure","databaseId":21,"url":"$url/200/job/21"},
+ {"name":"web","conclusion":"success","databaseId":22,"url":"$url/200/job/22"}]}
+JSON
+
+# The go job log: tab separated job/step/timestamp prefix, ANSI colour, noise and Ginkgo/Go output.
+esc=$(printf '\033')
+t=$(printf '\t')
+{
+  p="go${t}Test${t}2026-10-31T10:00:0"
+  echo "${p}1.1234567Z go: downloading github.com/x/y v1.2.3"
+  echo "${p}2.0000000Z ${esc}[31m--- FAIL: TestThing (0.01s)${esc}[0m"
+  echo "${p}3.0000000Z irrelevant chatter"
+  echo "${p}4.0000000Z [FAIL] Reconciler creates a sandbox [It] sizes it"
+  echo "${p}5.0000000Z   Expected"
+  echo "${p}5.0000001Z       <int>: 1"
+  echo "${p}5.0000002Z   to equal"
+  echo "${p}5.0000003Z       <int>: 2"
+  echo "${p}6.0000000Z ./internal/foo/foo.go:12:3: undefined: bar"
+  echo "${p}7.0000000Z panic: boom"
+  echo "${p}8.0000000Z FAIL${t}github.com/stateracloud/koinon/internal/foo${t}0.123s"
+  echo "${p}9.0000000Z ##[error]Process completed with exit code 1."
+  echo "${p}9.0000001Z ##[error]Process completed with exit code 1."
+} >"$tmp/log-go.txt"
+{
+  for i in $(seq 1 60); do echo "web${t}Test${t}2026-10-31T10:00:00.0000000Z --- FAIL: TestMany$i (0.00s)"; done
+} >"$tmp/log-many.txt"
+echo "web${t}Lint${t}2026-10-31T10:00:00.0000000Z nothing recognisable here" >"$tmp/log-web.txt"
+
+cat >"$tmp/bin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "$*" >>"$FAKE_CALLS"
+t=$(dirname "$0")/..
+case "$1 $2" in
+"pr view") cat "$t/${FAKE_ROLLUP:-rollup-fail}.json" ;;
+"run view")
+  case "$*" in
+  *--json*) cat "$t/jobs.json" ;;
+  *"--job 21"*) cat "$t/log-${FAKE_GOLOG:-go}.txt" ;;
+  *"--job 22"*) cat "$t/log-web.txt" ;;
+  *) exit 9 ;;
+  esac ;;
+*) exit 9 ;;
+esac
+SH
+chmod +x "$tmp/bin/gh"
+
+fail=0
+run() {
+  rc=0
+  out=$("$repo/hack/ci-fail.sh" "$@" 2>&1) || rc=$?
+}
+check() { # <description> <condition command...>
+  local d=$1
+  shift
+  if "$@"; then echo "ok: $d"; else
+    echo "FAIL: $d" >&2
+    printf '%s\n' "$out" >&2
+    fail=1
+  fi
+}
+# shellcheck disable=SC2329 # called through check
+has() { printf '%s\n' "$out" | grep -qF -- "$1"; }
+# shellcheck disable=SC2329 # called through check
+hasnt() { ! has "$1"; }
+
+run 7
+check "PR with failures exits 1" test "$rc" = 1
+check "lists the failing jobs" has "job go"
+check "lists the second failing job" has "job web"
+check "run link printed" has "run $url/200/job/21"
+check "non-actions status noted" has "no GitHub Actions run: https://example.invalid/claim"
+check "passing job is not listed" hasnt "job lint"
+check "keeps --- FAIL" has "--- FAIL: TestThing (0.01s)"
+check "keeps [FAIL] block" has "[FAIL] Reconciler creates a sandbox [It] sizes it"
+check "keeps Expected/to equal" has "to equal"
+check "keeps expected values" has "<int>: 2"
+check "keeps compiler error" has "./internal/foo/foo.go:12:3: undefined: bar"
+check "keeps panic" has "panic: boom"
+check "keeps FAIL<TAB>pkg" has "FAIL${t}github.com/stateracloud/koinon/internal/foo${t}0.123s"
+check "keeps ##[error] once" test "$(printf '%s\n' "$out" | grep -c '##\[error\]')" = 1
+check "drops go: downloading" hasnt "go: downloading"
+check "drops chatter" hasnt "irrelevant chatter"
+check "strips ANSI" hasnt "$esc"
+check "strips timestamps" hasnt "2026-10-31"
+check "strips job/step prefix" hasnt "go${t}Test"
+check "fallback shows the tail when nothing matches" has "nothing recognisable here"
+check "uses --job to fetch one job's log" grep -q -- '--job 21' "$FAKE_CALLS"
+
+run 7 --job web
+check "--job filters" test "$rc" = 1
+check "--job drops the other job" hasnt "job go"
+check "--job keeps the named one" has "job web"
+
+# at most 30 lines per job
+cp "$tmp/log-many.txt" "$tmp/log-go.txt"
+run 200000000 --job go
+check "run id: exit 1" test "$rc" = 1
+check "run id: only the failed job" hasnt "job web"
+check "at most 30 lines per job" test "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -le 30
+check "run id fetched via --json jobs" grep -q -- 'run view 200000000 --json jobs' "$FAKE_CALLS"
+
+FAKE_ROLLUP=rollup-ok run 7
+check "nothing failed: exit 0" test "$rc" = 0
+check "nothing failed: no output" test -z "$out"
+
+run
+check "no argument is a usage error" test "$rc" = 64
+
+exit "$fail"
