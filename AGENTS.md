@@ -26,6 +26,10 @@ Instructions for coding agents working on Koinon.
   needs the maintainers' home lab, registry or secret store; see CONTRIBUTING.md and `docs/dev/loop.md`.
   Real-model runs on your own cluster and budget: `docs/dev/real-model-tests.md`.
 - Claims: `hack/claim.sh help`; `hack/claim_test.sh` (offline). ADRs: `hack/adr-lint.sh`, `hack/adr-index.sh`.
+- Before you hand over or push: `hack/preflight.sh` (the gates your change touches, one line each).
+  Ship a branch with `hack/ship.sh` (sign-off, blob and gitleaks checks, merge of `origin/main`,
+  push, PR, board, optional auto-merge and `claim.sh review`). Wait on a PR with `hack/pr-wait.sh`
+  (in the background); read why CI failed with `hack/ci-fail.sh <PR>`. Worktrees: `hack/wt.sh`.
 - Migrations: `hack/migrate-lint.sh origin/main` (merged migrations unchanged, numbers contiguous);
   after merging main, `hack/migrate-renumber.sh` renumbers your branch's migrations.
 - Testing layers. Every PR: unit and package tests, the smoke test and the scenarios (`make test`
@@ -90,6 +94,17 @@ or adopts them.
     `origin/main` yourself (the updater bot never pushes code to your branch).
 12. Releases: either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay
     procoduck's. Tags are immutable by ruleset: fix a bad tag with the next rc (`docs/dev/releasing.md`).
+
+### Several agents in one session (lanes)
+
+A session that runs agents in parallel gives each one a lane (ADR 0082): the parent takes the claim
+with `hack/claim.sh take N --lane L`, creates the lane's worktree with `hack/wt.sh new`, and hands
+the agent the issue, the worktree and `docs/agents/subagent-brief.md`. One issue per lane, at most
+four claims per human. The parent beats, ships (`hack/ship.sh`) and releases; agents never call
+`claim.sh`. On the home-lab queue each lane runs `hack/e2e-remote.sh --repo <its worktree>` with
+`KOINON_E2E_AGENT=<session>-<lane>`, submits with `--no-wait` and follows later, keeps at most one
+kind run waiting, and uses `--lane light` for unit tests. Its notifications carry the agent label as
+an ntfy tag (`?tags=<agent>`).
 
 ## Working alongside another human
 
