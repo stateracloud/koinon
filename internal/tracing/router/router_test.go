@@ -234,9 +234,11 @@ var _ = Describe("Router", func() {
 			}
 			e.store.setCalls([]router.ModelCall{unsplit("req-1", 2*time.Second), unsplit("req-2", 5*time.Second)})
 			e.post(tr.root(false))
-			settle(e)
-			e.clock.Advance(2 * time.Second)
-			settle(e)
+			// The root is held asynchronously after the POST returns. A sweep that runs
+			// before it is held finds nothing, and the fake clock never sweeps again, so
+			// the spec would wait for spans that no later sweep releases (#396).
+			Eventually(func() int { return e.r.HeldRoots() }).Should(Equal(1))
+			finishTurn(e)
 			Eventually(func() int { return len(be.spans()) }).Should(Equal(3))
 			for _, sp := range be.spans() {
 				Expect(has(sp, semconv.GenAIUsageReasoningTokens)).To(BeFalse(), sp.Name)
