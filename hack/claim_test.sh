@@ -10,6 +10,10 @@
 #                                 it opens and closes issues and creates claim refs there (claim refs
 #                                 are never deleted). Never point it at stateracloud/koinon. Not run
 #                                 in CI: CI must not mutate GitHub.
+# The lane tests stub functions of the sourced script and run commands in subshells:
+# SC2016 single quotes for bash -c, SC2329 stubs are called indirectly, SC2030/SC2031 subshell
+# assignments are intended, SC2034 caps are read by the sourced script.
+# shellcheck disable=SC2016,SC2329,SC2030,SC2031,SC2034
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -98,6 +102,150 @@ eq "priority then age" "$ranked" '"P09,P20,P21,0"'
 holder=alice/host.local/sess-1
 eq "holder login" "$(holder_login "$holder")" alice
 eq "holder session" "$(holder_session "$holder")" sess-1
+
+# ---- lanes (ADR 0082 amendment), offline: gh and the GitHub-facing functions are stubbed ----
+eq "holder login with a lane" "$(holder_login alice/h/s1#x)" alice
+eq "holder session drops the lane" "$(holder_session alice/h/s1#x)" s1
+eq "holder session without a lane" "$(holder_session alice/h/s1)" s1
+eq "holder lane" "$(holder_lane alice/h/s1#x)" x
+eq "holder lane when none" "$(holder_lane alice/h/s1)" ""
+eq "holder key with a lane" "$(holder_key alice/h/s1#x)" "s1#x"
+eq "holder key without a lane" "$(holder_key alice/h/s1)" "s1"
+eq "same holder, same lane, other host" "$(same_holder a/h1/s1#x a/h2/s1#x && echo y || echo n)" y
+eq "same session, other lane" "$(same_holder a/h/s1#x a/h/s1#y && echo y || echo n)" n
+eq "laned holder is not the no-lane holder" "$(same_holder a/h/s1#x a/h/s1 && echo y || echo n)" n
+eq "no-lane holder is not a laned holder" "$(same_holder a/h/s1 a/h/s1#x && echo y || echo n)" n
+eq "agent lease with a lane" "$(lease_for_holder a/h/s1#x)" 7200
+eq "human lease" "$(lease_for_holder a/h/human)" 259200
+for l in a x1 0 a-b abcdefghijklmnop; do
+  if valid_lane "$l"; then ok "valid lane: $l"; else bad "valid lane: $l"; fi
+done
+for l in "" -a A a_b abcdefghijklmnopq "a b" 'a#b' 'a/b'; do
+  if valid_lane "$l"; then bad "invalid lane: '$l'"; else ok "invalid lane: '$l'"; fi
+done
+LANE=
+split_globals take 5 --lane foo 6 --human
+eq "split_globals takes the lane out" "${REST[*]}" "take 5 6"
+eq "split_globals sets the lane" "$LANE" foo
+eq "split_globals sets human mode" "$HUMAN_MODE" 1
+HUMAN_MODE=0
+LANE=
+eq "split_globals rejects a bad lane" "$(split_globals take 5 --lane Bad 2>/dev/null && echo y || echo n)" n
+LANE=
+eq "split_globals rejects a missing lane" "$(split_globals take 5 --lane 2>/dev/null && echo y || echo n)" n
+LANE=
+
+# The environment variable equals the flag, and the flag wins over the variable.
+holder_env() { env -u CLAUDE_CODE_SESSION_ID KOINON_AGENT_SESSION=s1 KOINON_CLAIM_HUMAN=alice "$@" bash -c 'CLAIM_LIB_ONLY=1; source "$1"; shift; "$@"' _ "$claim" my_holder; }
+h_env=$(holder_env KOINON_CLAIM_LANE=zed)
+h_flag=$(env -u CLAUDE_CODE_SESSION_ID -u KOINON_CLAIM_LANE KOINON_AGENT_SESSION=s1 KOINON_CLAIM_HUMAN=alice bash -c 'CLAIM_LIB_ONLY=1; source "$1"; split_globals --lane zed; my_holder' _ "$claim")
+h_both=$(env -u CLAUDE_CODE_SESSION_ID KOINON_CLAIM_LANE=other KOINON_AGENT_SESSION=s1 KOINON_CLAIM_HUMAN=alice bash -c 'CLAIM_LIB_ONLY=1; source "$1"; split_globals --lane zed; my_holder' _ "$claim")
+h_none=$(env -u CLAUDE_CODE_SESSION_ID -u KOINON_CLAIM_LANE KOINON_AGENT_SESSION=s1 KOINON_CLAIM_HUMAN=alice bash -c 'CLAIM_LIB_ONLY=1; source "$1"; my_holder' _ "$claim")
+h_human=$(env -u CLAUDE_CODE_SESSION_ID KOINON_CLAIM_LANE=zed KOINON_AGENT_SESSION=s1 KOINON_CLAIM_HUMAN=alice bash -c 'CLAIM_LIB_ONLY=1; source "$1"; split_globals --human; my_holder' _ "$claim")
+eq "env lane equals --lane" "$h_env" "$h_flag"
+eq "holder ends with the lane" "${h_env##*/}" "s1#zed"
+eq "--lane wins over the environment" "$h_both" "$h_flag"
+eq "no lane: the plain holder" "${h_none##*/}" "s1"
+eq "a human claim has no lane" "${h_human##*/}" "human"
+
+LNOW=$(iso_to_epoch 2026-10-30T16:00:00Z)
+FIX='[
+ {"issue":10,"sha":"s10","state":"held","holder":"alice/mac/s1","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"100","note":""},
+ {"issue":11,"sha":"s11","state":"held","holder":"alice/mac/s1#y","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"","note":""},
+ {"issue":12,"sha":"s12","state":"held","holder":"alice/mac/s1#x","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"120","note":""},
+ {"issue":13,"sha":"s13","state":"released","holder":"alice/mac/s1#z","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"","note":""},
+ {"issue":14,"sha":"s14","state":"held","holder":"alice/mac/s1#z","human":"alice","lease_until":"2026-10-30T15:00:00Z","pr":"","note":""},
+ {"issue":15,"sha":"s15","state":"held","holder":"bob/mac/s9","human":"bob","lease_until":"2026-10-30T17:00:00Z","pr":"","note":""},
+ {"issue":16,"sha":"s16","state":"held","holder":"alice/mac/human","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"","note":""}]'
+eq "counts: no lane" "$(active_counts "$FIX" "$LNOW" alice s1)" "4 1"
+eq "counts: lane x" "$(active_counts "$FIX" "$LNOW" alice 's1#x')" "4 1"
+eq "counts: lane z ignores released and expired" "$(active_counts "$FIX" "$LNOW" alice 's1#z')" "4 0"
+eq "counts: another session" "$(active_counts "$FIX" "$LNOW" bob s9)" "1 1"
+eq "counts: the human holder never fills a session cap" "$(active_counts "$FIX" "$LNOW" alice human)" "4 0"
+eq "held_by_key names issue and PR" "$(held_by_key "$FIX" "$LNOW" s1)" "#10 (PR #100)"
+eq "held_by_key without a PR" "$(held_by_key "$FIX" "$LNOW" 's1#y')" "#11"
+
+# Stubs: nothing below talks to GitHub.
+LOG=$(mktemp)
+stub_github() {
+  server_now() { echo "$LNOW"; }
+  human_login() { echo alice; }
+  list_claims() { echo "$FIX"; }
+  issue_json() { echo '{"number":1,"state":"open","pull":false,"labels":["agent-ok"],"milestone":""}'; }
+  load_claim() { C=$(jq -c --argjson n "$1" '.[] | select(.issue == $n)' <<<"$FIX"); [[ -n $C ]] || return 1; }
+  find_pr() { :; }
+  pr_is_open() { return 1; }
+  write_claim() { echo "write $1 $2 $3" >>"$LOG"; return 0; }
+  warn_area_overlap() { :; }
+  mirror_held() { :; }
+  unassign() { :; }
+  drop_label() { :; }
+  upsert_comment() { :; }
+  set_status() { :; }
+  gh() { echo 0; }
+}
+# lanecmd FIX_JSON ARGS...: run claim.sh's command through the global-flag parser, in a subshell,
+# as session s1 of alice; prints the output and the exit status.
+lanecmd() {
+  local fx=$1 rc=0 out
+  shift
+  out=$( {
+    FIX=$fx; export KOINON_AGENT_SESSION=s1; unset CLAUDE_CODE_SESSION_ID KOINON_CLAIM_LANE
+    stub_github
+    LANE=; HUMAN_CAP=4; SESSION_CAP=1
+    split_globals "$@" || exit 1
+    set -- "${REST[@]}"
+    cmd=$1; shift
+    "cmd_$cmd" "$@"
+  } 2>&1) || rc=$?
+  echo "$out"
+  echo "rc=$rc"
+}
+rc_of() { sed -n 's/^rc=//p' <<<"$1"; }
+
+mine_only='[{"issue":10,"sha":"s10","state":"held","holder":"alice/mac/s1","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"100","note":""}]'
+: >"$LOG"
+r=$(lanecmd "$mine_only" take 20 --lane x)
+eq "take on a second lane succeeds" "$(rc_of "$r")" 0
+eq "take on a second lane writes the laned holder" "$(sed 's#alice/[^/]*/#alice/HOST/#' "$LOG")" "write 20 held alice/HOST/s1#x"
+# shellcheck disable=SC2016
+x_only='[{"issue":12,"sha":"s12","state":"held","holder":"alice/mac/s1#x","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"120","note":""}]'
+r=$(lanecmd "$x_only" take 21)
+eq "take with no lane while only lane x is held succeeds" "$(rc_of "$r")" 0
+r=$(lanecmd "$x_only" take 21 --lane x)
+eq "second claim on the same lane is refused" "$(rc_of "$r")" 2
+if grep -q '#12 (PR #120)' <<<"$r" && grep -q -- '--lane' <<<"$r" && grep -q 'release' <<<"$r"; then ok "refusal names the held claim and suggests --lane or release"; else bad "refusal text: $r"; fi
+r=$(lanecmd "$mine_only" take 21)
+eq "second claim with no lane is refused" "$(rc_of "$r")" 2
+if grep -q '#10 (PR #100)' <<<"$r" && grep -q 'no lane' <<<"$r"; then ok "no-lane refusal names the no-lane claim"; else bad "no-lane refusal text: $r"; fi
+two_lanes=$(jq -c '[.[] | select(.issue == 10 or .issue == 11 or .issue == 12 or .issue == 15)]' <<<"$FIX")
+r=$(lanecmd "$two_lanes" take 22 --lane w)
+eq "a third lane succeeds under the human cap" "$(rc_of "$r")" 0
+four=$(jq -c '. + [{"issue":17,"sha":"s17","state":"held","holder":"alice/mac/s1#v","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"","note":""}]' <<<"$(jq -c '[.[] | select(.issue == 10 or .issue == 11 or .issue == 12)]' <<<"$FIX")")
+r=$(lanecmd "$four" take 23 --lane w)
+eq "the human cap refuses the 5th claim" "$(rc_of "$r")" 2
+if grep -q 'cap of 4' <<<"$r"; then ok "human cap message"; else bad "human cap message: $r"; fi
+r=$(lanecmd "$four" take 23 --lane w --human)
+eq "a human claim is not stopped by the session cap but by the human cap" "$(rc_of "$r")" 2
+eq "a bad lane is an error" "$(rc_of "$(lanecmd "$mine_only" take 24 --lane NO)")" 1
+
+# beat, review and release with --lane touch only that lane's claim.
+: >"$LOG"
+eq "beat in the owning lane" "$(rc_of "$(lanecmd "$FIX" beat 12 --lane x)")" 0
+eq "beat writes lane x's claim" "$(cut -d' ' -f1,2,3 "$LOG")" "write 12 held"
+eq "beat from another lane is a lost claim" "$(rc_of "$(lanecmd "$FIX" beat 12 --lane y)")" 3
+eq "beat with no lane cannot touch a laned claim" "$(rc_of "$(lanecmd "$FIX" beat 12)")" 3
+eq "beat in a lane cannot touch the no-lane claim" "$(rc_of "$(lanecmd "$FIX" beat 10 --lane x)")" 3
+eq "beat with no lane keeps working" "$(rc_of "$(lanecmd "$FIX" beat 10)")" 0
+eq "review in the owning lane" "$(rc_of "$(lanecmd "$FIX" review 11 --lane y)")" 0
+eq "review from another lane is a lost claim" "$(rc_of "$(lanecmd "$FIX" review 11 --lane x)")" 3
+: >"$LOG"
+eq "release in the owning lane" "$(rc_of "$(lanecmd "$FIX" release 12 --lane x --note finished)")" 0
+eq "release writes only that issue" "$(cut -d' ' -f1,2,3 "$LOG")" "write 12 released"
+: >"$LOG"
+eq "release from another lane is a lost claim" "$(rc_of "$(lanecmd "$FIX" release 12 --lane y --note finished)")" 3
+eq "a refused release writes nothing" "$(wc -l <"$LOG" | tr -d ' ')" 0
+rm -f "$LOG"
 
 if [[ -z ${KOINON_CLAIM_TEST_REPO:-} ]]; then
   echo "(set KOINON_CLAIM_TEST_REPO=owner/scratch-repo to run the live tests)"
