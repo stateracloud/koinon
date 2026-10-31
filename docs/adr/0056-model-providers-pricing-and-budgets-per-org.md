@@ -1,6 +1,6 @@
 # 0056. Model providers, models, pricing and budgets per org
 
-- Status: Accepted; amended 2026-10-23, 2026-10-24 and 2026-10-28 (below)
+- Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29 and 2026-10-31 (below)
 - Date: 2026-10-23
 - Amends: [0049](0049-v01-scope-decisions.md) (the single Helm-configured upstream, now dropped, and
   template-only budgets), [0007](0007-connector-model.md) and [0021](0021-connector-setup-guides.md)
@@ -573,6 +573,53 @@ the last (the gateway's refusals) sentences of the 2026-10-24 decision (3) and o
    row data, not labels.
 9. **History is not rewritten.** Entries recorded before this change (the rc.7 phantom charges) stay
    as they were; a ledger is append-only (ADR 0041).
+
+## Amendment (2026-10-31, #339): failed model calls cost input only, one retry layer, do-not-retry refusals
+
+Decision of Andre, 2026-10-31 ([#263](https://github.com/stateracloud/koinon/issues/263), all three
+parts). The finding behind it (harness research round 3): OpenCode 2.2.0 retries a failed model call
+up to 10 times and agentd then repeats the turn up to 3 more times, so one failed step can reach about
+44 gateway requests, and decision 6.3 of the 2026-10-24 amendment charged every retried 5xx at
+`max_tokens`, the same pattern [#241](https://github.com/stateracloud/koinon/issues/241) fixed for
+refused 4xx (af162cb2). This amendment changes decision 6.3 for 5xx and for a stream cut with nothing
+streamed. The code lands in #340 (ledger), #341 (agentd) and #342 (gateway), which point here.
+
+1. **A failed call with nothing streamed costs its input estimate only.** An upstream 5xx without
+   usage, and a stream cut before any output was streamed, are charged the input estimated from the
+   request bytes (decision 6.2 of the 2026-10-24 amendment) and nothing for output. They are no longer
+   charged at `max_tokens`. Providers do not bill output they never generated, and a retried 5xx must
+   not burn the run's budget on one bad minute. The entry keeps `estimated` and `usage_missing`.
+2. **What is still charged at `max_tokens`.** An aborted response that did stream is not covered by
+   point 1 and is settled as before. Issue #339 names it as the case that stays at `max_tokens`;
+   the 2026-10-28 amendment (RT1 on rc.5) says a response cut short is charged the usage the gateway
+   logged and never `max_tokens`. See the first open question.
+3. **One layer retries model calls.** Exactly one layer retries a failed model request. Koinon
+   configures it: the retry count, the backoff and the longest `Retry-After` it will honour. agentd
+   skips its own turn retry for a flavor whose harness already retries model calls (a flavor-contract
+   flag such as `retriesModelRequests`), and the harness gets its retry settings from Koinon, not from
+   its own defaults. The run's request cap (`maxModelRequests`) and the ledger
+   keep counting every attempt.
+4. **The gateway marks its own refusals do-not-retry.** A refusal the gateway itself generates (the
+   budget `429 budget_exceeded`, a bad key, a model the key may not use: `koinon.upstream` false, see
+   the 2026-10-29 amendment) carries a do-not-retry marking, for example `x-should-retry: false`, so
+   a harness does not retry it. A provider's own answer is not marked.
+5. **Ledger records are unchanged otherwise.** Entries stay append-only; history is not rewritten.
+
+### Open questions
+
+- Which cases remain at `max_tokens`. Issue #339 says an aborted response that did stream; the
+  2026-10-28 amendment replaced `max_tokens` for responses cut short. #340 reconciles the two against
+  the ledger code, and this ADR is then corrected.
+- Whether agentgateway v1.7.0 can set headers on responses it generates itself (issue #263 asks to
+  check); #342 verifies it. If it cannot, the marking needs another mechanism, to be decided then.
+- Whether OpenCode 2.2.x exposes a retry setting. Until it does, the harness-side count cannot be
+  set from Koinon and the single-layer rule is met by agentd skipping its own retry.
+- The retry policy for an aggregator's 403 (not always permanent: one OpenRouter provider can refuse
+  a request another serves) and OpenRouter provider preferences per model (`provider.order`,
+  `allow_fallbacks`). Raised on #263 on 2026-10-29 as "consider", not decided; neither is part of
+  this amendment.
+- The default values for the retry count, the backoff and the longest `Retry-After`. The decision
+  says Koinon sets them; the numbers are not decided.
 
 ## Open questions
 
