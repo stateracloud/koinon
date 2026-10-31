@@ -184,6 +184,10 @@ title_exempt() { [[ $1 =~ ^(chore|ci)(\([^\)]*\))?!?: || $1 =~ ^build\(deps(-dev
 is_dependabot() { [[ $1 =~ ^(app/)?dependabot(\[bot\])?$ ]]; }
 
 # pr_touches_code: reads changed file names on stdin; exit 0 when any is source a claim must cover.
+# lower S: S in lower case (bash 3.2 has no ${S,,}). The PR check compares logins with it; without
+# it both sides were empty and any author passed.
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
 pr_touches_code() {
   grep -qE '\.(go|ts|tsx|js|jsx|mjs|proto|sql|py|sh|yaml|yml|tpl|css)$|^go\.(mod|sum)$|(^|/)(Dockerfile|Makefile)$|^charts/' || return 1
 }
