@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The default org's model provider for a remote cluster, declared with a labelled Secret that
+# koinon-api imports (ADR 0056). Copy to hack/dev/model-provider.local.yaml (git-ignored), edit, and
+# name it as `modelProvider` in hack/dev/local.yaml. For a provider that needs a key, add `apiKey`
+# in your copy only; this example holds no secret.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-provider
+  namespace: koinon
+  labels:
+    koinon.dev/secret-type: model-provider
+    koinon.dev/org: default
+stringData:
+  name: ollama
+  provider: ollama
+  url: http://ollama.example.test:11434/v1
+  models: |
+    # A model without a price is not served; local models cost nothing per token.
+    - name: "qwen3.5:4b"

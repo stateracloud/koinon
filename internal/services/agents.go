@@ -5,19 +5,23 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/templates"
 )
@@ -43,6 +47,7 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 		ArchivedAt:      tsProto(a.ArchivedAt),
 		UnhealthyAt:     tsProto(a.UnhealthyAt),
 		UnhealthyReason: a.UnhealthyReason.String,
+		ModelSetting:    a.Model.String,
 	}
 	if archived != nil {
 		out.SandboxArchivedAt = tsProto(archived[a.ID])
@@ -80,8 +85,12 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 			out.Instructions = cfg.Instructions
 			out.Model = cfg.Model
 			out.Ephemeral = agentconfig.IsEphemeral(cfg)
-			wall, tokens := cfg.RunCaps()
-			out.RunLimits = &templatev1alpha1.RunLimits{MaxDurationSeconds: int64(wall.Seconds()), MaxTokens: tokens}
+			// The limits a run queued now gets: the version's, with the admin's override on top.
+			o, err := runlimits.GetOverride(ctx, q, a.OrgID, a.ID)
+			if err != nil {
+				return nil, err
+			}
+			out.RunLimits = runLimitsProto(o.Apply(cfg.RunLimits()))
 		}
 		if v.ID == a.ActiveVersionID {
 			out.ActiveVersion = v.Version
@@ -329,6 +338,9 @@ func triggerAudit(ts []templates.Trigger, withInstruction bool) []map[string]any
 		if withInstruction {
 			m["instruction"] = t.Instruction
 		}
+		if t.Notify != nil {
+			m["notify"] = t.Notify
+		}
 		out = append(out, m)
 	}
 	return out
@@ -352,6 +364,20 @@ func (s *Server) SetAgentTriggers(ctx context.Context, req *agentv1alpha1.SetAge
 	}
 	var out *agentv1alpha1.Agent
 	err = s.inTx(ctx, func(q *store.Queries) error {
+		// A person who is asked must be a member who can answer (member or higher).
+		for i, t := range triggers {
+			if t.Notify == nil || t.Notify.Kind != templates.NotifyUser {
+				continue
+			}
+			m, err := q.FindOrgMemberByIdent(ctx, store.FindOrgMemberByIdentParams{OrgID: c.org, Ident: t.Notify.User})
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && m.Role == store.OrgRoleViewer) {
+				return connect.NewError(connect.CodeInvalidArgument,
+					fmt.Sprintf("triggers[%d]: notify: %s is not a member who can answer questions", i, t.Notify.User))
+			}
+			if err != nil {
+				return err
+			}
+		}
 		// The row lock makes the base_version check and the new version one step: a concurrent
 		// proposal waits, then fails the check against the version this one created.
 		a, err := q.GetAgentForUpdate(ctx, store.GetAgentForUpdateParams{OrgID: c.org, ID: id})
@@ -432,6 +458,11 @@ func (s *Server) ResumeAgent(ctx context.Context, req *agentv1alpha1.ResumeAgent
 		if err != nil {
 			return err
 		}
+		// Every queued run of the agent starts a fresh sandbox wait: without this a resumed agent's
+		// runs would hit the sandbox wait cap again at once (ADR 0066 amendment 2026-10-28).
+		if _, err := q.ClearSandboxWaitForAgent(ctx, store.ClearSandboxWaitForAgentParams{OrgID: c.org, AgentID: id}); err != nil {
+			return err
+		}
 		// The sandbox that kept getting stuck is recreated; the reconciler is woken below.
 		if _, err := q.MarkSandboxUnhealthy(ctx, store.MarkSandboxUnhealthyParams{
 			OrgID: c.org, AgentID: id, Reason: "the agent was resumed after its sandbox kept getting stuck",
@@ -499,4 +530,94 @@ func (s *Server) ArchiveAgent(ctx context.Context, req *agentv1alpha1.ArchiveAge
 		return nil, s.dbError(err, "agent")
 	}
 	return &agentv1alpha1.ArchiveAgentResponse{Agent: out}, nil
+}
+
+var modelSourceProto = map[agentmodel.Source]agentv1alpha1.ModelSource{
+	agentmodel.SourceAgent:      agentv1alpha1.ModelSource_MODEL_SOURCE_AGENT,
+	agentmodel.SourceVersion:    agentv1alpha1.ModelSource_MODEL_SOURCE_VERSION,
+	agentmodel.SourceOrgDefault: agentv1alpha1.ModelSource_MODEL_SOURCE_ORG_DEFAULT,
+	agentmodel.SourceNone:       agentv1alpha1.ModelSource_MODEL_SOURCE_NONE,
+}
+
+func agentModelProto(v agentmodel.View) *agentv1alpha1.GetAgentModelResponse {
+	out := &agentv1alpha1.GetAgentModelResponse{
+		Setting: v.Setting, VersionModel: v.VersionModel, Effective: v.Effective,
+		Source: modelSourceProto[v.Source], Problem: v.Problem,
+		Thinking: &agentv1alpha1.ThinkingState{
+			Setting: string(v.Thinking.Setting), VersionSetting: string(v.Thinking.VersionSetting),
+			Effective: string(v.Thinking.Effective), Supported: v.Thinking.Supported(), Mode: string(v.Thinking.Mode()),
+		},
+	}
+	for _, m := range v.Available {
+		out.Available = append(out.Available, &agentv1alpha1.ServedModel{Name: m.Name, Provider: m.Provider})
+	}
+	return out
+}
+
+func (s *Server) agentModelError(err error) error {
+	var inv *agentmodel.InvalidError
+	switch {
+	case errors.As(err, &inv):
+		return connect.NewError(connect.CodeInvalidArgument, inv.Msg)
+	case errors.Is(err, agentmodel.ErrNotFound):
+		return connect.NewError(connect.CodeNotFound, "agent not found")
+	}
+	return s.dbError(err, "agent")
+}
+
+// GetAgentModel implements AgentService. Admins and owners.
+func (s *Server) GetAgentModel(ctx context.Context, req *agentv1alpha1.GetAgentModelRequest) (*agentv1alpha1.GetAgentModelResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	_, v, err := s.agentModels.Load(ctx, c.org, id, time.Now())
+	if err != nil {
+		return nil, s.agentModelError(err)
+	}
+	return agentModelProto(v), nil
+}
+
+// SetAgentModel implements AgentService. Admins and owners.
+func (s *Server) SetAgentModel(ctx context.Context, req *agentv1alpha1.SetAgentModelRequest) (*agentv1alpha1.SetAgentModelResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.agentModels.Set(requestCtx(ctx), c.org, id, c.auditActor(), req.GetModel(), time.Now()); err != nil {
+		return nil, s.agentModelError(err)
+	}
+	_, v, err := s.agentModels.Load(ctx, c.org, id, time.Now())
+	if err != nil {
+		return nil, s.agentModelError(err)
+	}
+	return &agentv1alpha1.SetAgentModelResponse{Model: agentModelProto(v)}, nil
+}
+
+// SetAgentThinking implements AgentService. Admins and owners.
+func (s *Server) SetAgentThinking(ctx context.Context, req *agentv1alpha1.SetAgentThinkingRequest) (*agentv1alpha1.SetAgentThinkingResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.agentModels.SetThinking(requestCtx(ctx), c.org, id, c.auditActor(), req.GetThinking()); err != nil {
+		return nil, s.agentModelError(err)
+	}
+	_, v, err := s.agentModels.Load(ctx, c.org, id, time.Now())
+	if err != nil {
+		return nil, s.agentModelError(err)
+	}
+	return &agentv1alpha1.SetAgentThinkingResponse{Model: agentModelProto(v)}, nil
 }

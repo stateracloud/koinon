@@ -66,7 +66,7 @@ func newGiteaEnv(ctx context.Context) *ghEnv {
 	Expect(db.QueryRow(ctx, `SELECT slug FROM orgs WHERE id = $1`, g.org).Scan(&g.slug)).To(Succeed())
 	log := slog.New(slog.NewTextHandler(GinkgoWriter, nil))
 	g.svc = approvals.New(db, approvals.Options{Keys: ring, Logger: log})
-	tools, err := githubtools.New(db, githubtools.Options{Logger: log})
+	tools, err := githubtools.New(db, githubtools.Options{Logger: log, Keys: ring})
 	Expect(err).NotTo(HaveOccurred())
 	g.tools = httptest.NewServer(tools.Handler())
 	DeferCleanup(g.tools.Close)
@@ -130,10 +130,11 @@ var _ = Describe("A repo-helper agent on Gitea", func() {
 
 		snap := g.gt.Snapshot("widgets")
 		Expect(snap.Pulls).To(HaveLen(1))
-		Expect(snap.Pulls[0].Head).To(Equal("koinon/fix-typo"))
+		branch := githubtools.BranchPrefix + githubtools.AgentNamespace(g.agent.DisplayName, g.agent.ID.String()) + "/fix-typo"
+		Expect(snap.Pulls[0].Head).To(Equal(branch))
 		Expect(snap.Pulls[0].Base).To(Equal("main"))
-		Expect(snap.Branches).To(HaveKey("koinon/fix-typo"))
-		Expect(snap.Branches["main"]).NotTo(Equal(snap.Branches["koinon/fix-typo"]), "the default branch is untouched")
+		Expect(snap.Branches).To(HaveKey(branch))
+		Expect(snap.Branches["main"]).NotTo(Equal(snap.Branches[branch]), "the default branch is untouched")
 		url := g.gt.URL() + "/acme/widgets/pulls/1"
 
 		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -141,6 +142,11 @@ var _ = Describe("A repo-helper agent on Gitea", func() {
 		Expect(prompts).To(HaveLen(2))
 		Expect(prompts[1]).To(ContainSubstring("approved and executed by Koinon: " + url))
 		Expect(g.gt.Snapshot("secrets").Calls).To(BeEmpty(), "no other repository was touched")
+
+		By("the instructions list the granted repository with the connection's clone URL")
+		written, _ := g.files.get(instructionsFile)
+		Expect(string(written)).To(ContainSubstring("`acme/widgets` on Gitea (connector `gitea`, host `127.0.0.1:"))
+		Expect(string(written)).To(ContainSubstring("`git clone " + g.gt.URL() + "/acme/widgets`"))
 
 		By("the sandbox received its Gitea host and CA, and no token")
 		all := g.everythingInTheSandbox()

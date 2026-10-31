@@ -30,7 +30,8 @@ spec:
               {{- toYaml $release | nindent 14 }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
-    # The spend ledger's OTLP receiver has no authentication: only agentgateway may send to it.
+    # The internal OTLP receiver needs a bearer token (koinon.otlpTokenName). As a second layer only
+    # its two senders may reach it: agentgateway (access log) and koinon-agentd (run spans).
     - ports:
         - port: otlp
       from:
@@ -41,6 +42,9 @@ spec:
               {{- else }}
               {{- include "koinon.proxySelectorLabels" . | nindent 14 }}
               {{- end }}
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "agentd") | nindent 14 }}
     # Saved work from a stuck sandbox: koinon-agentd, which holds no key-encryption key, posts it here
     # to be sealed (an HMAC credential per upload). Home checkpoints (ADR 0032) also ask here for
     # each repository's password, which koinon-api opens with the KEK (an HMAC credential per request). Its own port, so agentd cannot reach the tools

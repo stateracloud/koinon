@@ -28,6 +28,7 @@ security:
   - bearerAuth: []
 tags:
   - name: providers
+  - name: agents
   - name: models
   - name: mcp
   - name: tokens
@@ -110,6 +111,36 @@ paths:
       responses:
         "204":
           description: Deleted.
+        default:
+          $ref: "#/components/responses/Error"
+  /providers/{providerId}/echo-check:
+    parameters:
+      - $ref: "#/components/parameters/providerId"
+    post:
+      tags: [providers]
+      operationId: checkProviderEcho
+      summary: Check whether the provider changes the text it is sent.
+      description: |
+        Sends one tiny chat request through the gateway to the given model of the provider, asking
+        it to repeat a fixed line (a name, an address-like string and a Kubernetes namespace)
+        exactly, and compares the reply with the line. A provider-side setting that masks personal
+        data, such as OpenRouter's, changes the line, and masking corrupts agent work: names, paths
+        and namespaces in prompts and tool calls are no longer the ones the agent meant. The request
+        is metered like any request. It runs only when called; nothing schedules it. The latest
+        result is kept on the provider (`echoCheck`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EchoCheckRequest"
+      responses:
+        "200":
+          description: The result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EchoCheck"
         default:
           $ref: "#/components/responses/Error"
   /mcp-servers:
@@ -345,7 +376,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Model"
+                $ref: "#/components/schemas/ModelCreated"
         default:
           $ref: "#/components/responses/Error"
   /models/{modelId}:
@@ -474,7 +505,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PriceVersion"
+                $ref: "#/components/schemas/PriceSaved"
         default:
           $ref: "#/components/responses/Error"
   /prices/{name}:
@@ -638,6 +669,111 @@ paths:
                 $ref: "#/components/schemas/AgentBudget"
         default:
           $ref: "#/components/responses/Error"
+  /agents/{agentId}/model:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [agents]
+      operationId: getAgentModel
+      summary: The model an agent's next run uses, and where that choice comes from.
+      responses:
+        "200":
+          description: The agent's model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModel"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [agents]
+      operationId: setAgentModel
+      summary: Set an agent's model, or clear it with `default`.
+      description: |
+        A setting of the agent, not a new version: it applies to the next run. The model must be
+        one the org serves and has a price for. The change is audited with the old and new value.
+        Precedence: this setting, then the active version's model, then the org default. If the
+        model later stops being served or priced, the agent's runs fail with a reason that says so,
+        until the setting is changed; they never fall back to another model.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentModelUpdate"
+      responses:
+        "200":
+          description: The agent's model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModel"
+        default:
+          $ref: "#/components/responses/Error"
+  /agents/{agentId}/thinking:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    put:
+      tags: [agents]
+      operationId: setAgentThinking
+      summary: Turn an agent's thinking on or off, or clear the setting.
+      description: |
+        Thinking is on unless somebody turns it off (ADR 0069 amendment 2026-10-29). A setting of
+        the agent, not a new version: it applies to the next run. Precedence: this setting, then
+        the active version's value (a template's `spec.model.thinking`), then the default, on. A
+        model that cannot think ignores the setting; the response says so (`thinking.supported`).
+        The change is audited with the old and new value. Reasoning tokens are billed as output.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentThinkingUpdate"
+      responses:
+        "200":
+          description: The agent's model, with its thinking state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModel"
+        default:
+          $ref: "#/components/responses/Error"
+  /agents/{agentId}/triggers/{triggerId}/run:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: triggerId
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$'}
+    post:
+      tags: [agents]
+      operationId: runAgentTrigger
+      summary: Fire a schedule trigger now ("run now").
+      description: |
+        Fires one schedule trigger of the agent's active version immediately, through the same path
+        the scheduler uses: a task created by the trigger, with the trigger's instruction and a
+        queued run. The agent's status, health, concurrency limit and budgets apply as they do to
+        a scheduled fire. The task's events record `fire: manual`, so reports can tell the two
+        apart. Answers 409 when the agent cannot take a run (not active, or unhealthy) and 404 when
+        the active version has no such schedule trigger.
+      responses:
+        "202":
+          description: The task that was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerRun"
+        default:
+          $ref: "#/components/responses/Error"
   /audit:
     get:
       tags: [audit]
@@ -752,7 +888,7 @@ components:
       description: '`secret` entries are declared by a Kubernetes Secret and read-only here.'
     Provider:
       type: object
-      required: [id, name, type, url, hasKey, source, createdAt, updatedAt]
+      required: [id, name, type, url, hasKey, formats, source, createdAt, updatedAt]
       properties:
         id: {type: string, format: uuid}
         name: {type: string, example: openrouter}
@@ -764,6 +900,14 @@ components:
         hasKey:
           type: boolean
           description: Whether an API key is stored. The key itself is never returned.
+        anthropicWorkspaceId:
+          type: string
+          example: wrkspc_01AbCdEf
+          description: The Anthropic workspace the gateway names for this provider's models. Only for type `anthropic`; unset when not given.
+        formats:
+          type: array
+          items: {$ref: "#/components/schemas/ModelFormat"}
+          description: The model formats the provider's type offers, preferred first (ADR 0069).
         source: {$ref: "#/components/schemas/Source"}
         managedBySecret:
           type: string
@@ -771,8 +915,122 @@ components:
         disabledReason:
           type: string
           description: Set while a declared provider of the same name shadows this one; it is not served.
+        echoCheck: {$ref: "#/components/schemas/EchoCheck"}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+    EchoCheckRequest:
+      type: object
+      required: [model]
+      properties:
+        model:
+          type: string
+          description: A model of the provider that the org serves and has a price for.
+    EchoCheck:
+      type: object
+      required: [model, unchanged, sent, received, diff, checkedAt]
+      description: The latest echo check of a provider.
+      properties:
+        model: {type: string}
+        unchanged:
+          type: boolean
+          description: True when the reply was the line, character for character.
+        sent: {type: string, description: The line the model was asked to repeat.}
+        received: {type: string, description: The model's reply.}
+        diff:
+          type: array
+          description: The difference between the line and the reply, in order.
+          items:
+            type: object
+            required: [op, text]
+            properties:
+              op:
+                type: string
+                enum: [equal, deleted, inserted]
+                description: "`deleted` is in the line but not in the reply, `inserted` the other way."
+              text: {type: string}
+        checkedAt: {type: string, format: date-time}
+    AgentModel:
+      type: object
+      required: [setting, effective, source, available]
+      properties:
+        setting:
+          type: string
+          description: The agent's own setting; `default` when it has none.
+        versionModel:
+          type: string
+          description: The active version's model; unset when it names none.
+        effective:
+          type: string
+          description: The model the next run uses; empty when `source` is `none`.
+        source:
+          type: string
+          enum: [agent, version, org_default, none]
+          description: Where `effective` comes from, in order of precedence.
+        problem:
+          type: string
+          description: Set when the agent's setting is no longer served or priced; runs fail until it is changed.
+        available:
+          type: array
+          description: The models the org serves and has a price for.
+          items:
+            type: object
+            required: [name, provider]
+            properties:
+              name: {type: string}
+              provider: {type: string}
+        thinking:
+          $ref: "#/components/schemas/ThinkingState"
+    ThinkingState:
+      type: object
+      description: The agent's thinking setting and what it resolves to (ADR 0069 amendment 2026-10-29).
+      required: [setting, effective, supported, mode]
+      properties:
+        setting:
+          type: string
+          enum: [default, "on", "off"]
+          description: The agent's own setting; `default` when it has none.
+        versionSetting:
+          type: string
+          enum: ["on", "off"]
+          description: The active version's value (a template's `spec.model.thinking`); unset when it names none.
+        effective:
+          type: string
+          enum: ["on", "off"]
+          description: What the layers resolve to, whether or not the model can think.
+        supported:
+          type: boolean
+          description: Whether the effective model can think. When false the setting has no effect and a UI says "not supported by this model".
+        mode:
+          type: string
+          enum: [none, adaptive]
+          description: The mode the next run uses.
+    AgentThinkingUpdate:
+      type: object
+      required: [thinking]
+      properties:
+        thinking:
+          type: string
+          enum: [default, "on", "off"]
+          description: "`default` clears the setting."
+    AgentModelUpdate:
+      type: object
+      required: [model]
+      properties:
+        model:
+          type: string
+          description: "`default`, or a model the org serves and has a price for."
+    TriggerRun:
+      type: object
+      required: [taskId]
+      properties:
+        taskId: {type: string, format: uuid}
+    ModelFormat:
+      type: string
+      example: anthropic
+      description: |
+        A model's wire format (ADR 0069). The set is open and grows with the formats Koinon supports;
+        today `openai` is chat completions and `anthropic` is the Messages API. A provider's `formats`
+        lists the values it accepts.
     ProviderList:
       type: object
       required: [providers]
@@ -794,6 +1052,10 @@ components:
         apiKey:
           type: string
           description: Omit for keyless upstreams such as Ollama.
+        anthropicWorkspaceId:
+          type: string
+          pattern: '^wrkspc_[A-Za-z0-9]+$'
+          description: Only for type `anthropic`.
     ProviderUpdate:
       type: object
       properties:
@@ -802,6 +1064,9 @@ components:
         apiKey:
           type: string
           description: Replaces the key; an empty string removes it.
+        anthropicWorkspaceId:
+          type: string
+          description: Replaces the workspace ID; an empty string removes it. Only for type `anthropic`.
     McpServer:
       type: object
       required: [id, name, url, transport, hasCredential, source, health, createdAt, updatedAt]
@@ -869,7 +1134,7 @@ components:
         removeCredential: {type: boolean}
     McpTool:
       type: object
-      required: [serverId, name, description, readOnlyHint, tier, contentHash, present, firstSeenAt, lastSeenAt]
+      required: [serverId, name, description, readOnlyHint, tier, contentHash, descriptionOriginalLength, descriptionCapped, descriptionCleaned, present, firstSeenAt, lastSeenAt]
       properties:
         serverId: {type: string, format: uuid}
         name: {type: string}
@@ -886,7 +1151,16 @@ components:
           description: A call in the ask tier needs two approvers.
         contentHash:
           type: string
-          description: SHA-256 of the description and input schema as last published.
+          description: SHA-256 of the sanitised description and input schema as last published.
+        descriptionOriginalLength:
+          type: integer
+          description: Length in characters of the description as the server published it. `description` is the sanitised text.
+        descriptionCapped:
+          type: boolean
+          description: The description, or a description in the input schema, was cut to its length cap.
+        descriptionCleaned:
+          type: boolean
+          description: Control, invisible or tag characters were removed, or harness-lookalike tags escaped, in the description or the input schema's strings.
         unavailable:
           type: string
           description: Why agents are not offered the tool, for example a name too long.
@@ -942,7 +1216,7 @@ components:
         cacheRead: {type: string, example: "0.03"}
     Model:
       type: object
-      required: [id, providerId, name, guard, source, createdAt, updatedAt]
+      required: [id, providerId, name, guard, format, formatOverridden, source, createdAt, updatedAt]
       properties:
         id: {type: string, format: uuid}
         providerId: {type: string, format: uuid}
@@ -953,11 +1227,25 @@ components:
           type: boolean
           description: The routing guard (ADR 0048), for OpenRouter providers.
         rates: {$ref: "#/components/schemas/Rates", deprecated: true}
+        format: {$ref: "#/components/schemas/ModelFormat"}
+        formatOverridden:
+          type: boolean
+          description: Whether an admin set the format. Otherwise it follows the default and is re-derived when the default changes.
         source: {$ref: "#/components/schemas/Source"}
         managedBySecret: {type: string}
         disabledReason: {type: string}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+    ModelCreated:
+      description: The model just created, with the warnings of the save.
+      allOf:
+        - $ref: "#/components/schemas/Model"
+        - type: object
+          properties:
+            warnings:
+              type: array
+              items: {type: string}
+              description: Only on this response. For example, the model's price has a cache_read price but its provider format cannot cache, so it runs uncached (ADR 0068).
     ModelList:
       type: object
       required: [models]
@@ -972,11 +1260,17 @@ components:
         providerId: {type: string, format: uuid}
         name: {type: string}
         guard: {type: boolean}
+        format:
+          type: string
+          description: A `ModelFormat` within what the provider offers. Omit for the default.
         rates: {$ref: "#/components/schemas/Rates", deprecated: true}
     ModelUpdate:
       type: object
       properties:
         guard: {type: boolean}
+        format:
+          type: string
+          description: Overrides the format with a `ModelFormat` within what the provider offers. An empty string goes back to the default.
         rates: {$ref: "#/components/schemas/Rates", deprecated: true}
         clearRates:
           type: boolean
@@ -1108,6 +1402,16 @@ components:
         retiredAt: {type: string, format: date-time}
         createdBy: {type: string}
         createdAt: {type: string, format: date-time}
+    PriceSaved:
+      description: The price version just saved, with the warnings of the save.
+      allOf:
+        - $ref: "#/components/schemas/PriceVersion"
+        - type: object
+          properties:
+            warnings:
+              type: array
+              items: {type: string}
+              description: Only on this response. For example, a cache_read price whose provider format cannot cache runs uncached (ADR 0068).
     PriceList:
       type: object
       required: [prices]
@@ -1166,23 +1470,48 @@ components:
           items: {$ref: "#/components/schemas/FlaggedPrice"}
     SpendLine:
       type: object
-      required: [model, requests, inputTokens, outputTokens, reportedUsd, estimatedUsd, estimatedRequests]
+      required: [model, requests, inputTokens, outputTokens, reasoningTokens, reportedUsd, estimatedUsd, estimatedRequests, estimatedOutputTokens, gatewayRequests, gatewayUsd, gatewayComparedUsd, flaggedRequests, provisionalRequests, reservedUsd]
       properties:
         model: {type: string}
         requests: {type: integer, format: int64}
         inputTokens: {type: integer, format: int64}
-        outputTokens: {type: integer, format: int64}
+        outputTokens: {type: integer, format: int64, description: "Output tokens, reasoning (thinking) tokens included."}
+        reasoningTokens:
+          type: [integer, "null"]
+          format: int64
+          description: "The part of outputTokens the provider reported as reasoning, or null when no request of the model reported a split. Null does not mean the model did not think: Anthropic Messages has no separate reasoning count and counts thinking inside outputTokens. Thinking is billed as output: at the output rate unless the price names a reasoning rate (ADR 0069 amendment 2026-10-29)."
         reportedUsd: {type: string, description: "Cost of requests whose usage the provider reported."}
         estimatedUsd: {type: string, description: "Cost of requests whose usage was estimated. Counts toward limits."}
         estimatedRequests: {type: integer, format: int64}
+        estimatedOutputTokens:
+          type: integer
+          format: int64
+          description: "Output tokens of the estimated requests: for a response cut short, the output usage the gateway logged before the cut (none for a chat-completion stream)."
+        gatewayRequests: {type: integer, format: int64, description: "Requests agentgateway priced itself."}
+        gatewayUsd: {type: string, description: "agentgateway's own cost of those requests."}
+        gatewayComparedUsd: {type: string, description: "Koinon's cost of the same requests, to compare with gatewayUsd."}
+        flaggedRequests: {type: integer, format: int64, description: "Requests flagged for review (cost differs from the gateway's by more than 1%, usage missing, or an unusable price)."}
+        provisionalRequests: {type: integer, format: int64, description: "Responses cut short whose provider figure is pending; their cost is the usage the gateway logged until the provider reports."}
+        reservedUsd: {type: string, description: "What the provisional requests hold back from the gateway keys' limits (their max_tokens bound minus the charge). Not a cost and not counted by budgets; released when they settle."}
     SpendReport:
       type: object
-      required: [since, models]
+      required: [since, models, systemChecks]
       properties:
         since: {type: string, format: date-time}
         models:
           type: array
+          description: Spend of agents, per model.
           items: {$ref: "#/components/schemas/SpendLine"}
+        systemChecks:
+          type: object
+          description: |
+            Requests Koinon made itself, such as the provider echo check, which belong to no agent.
+            They are billed like any request and count toward the org's monthly cap and the platform
+            ceiling, but not toward any agent's limit.
+          required: [requests, costUsd]
+          properties:
+            requests: {type: integer, format: int64}
+            costUsd: {type: string}
     AuditEvent:
       type: object
       required: [id, actorKind, actorId, action, targetKind, targetId, summary, requestId, createdAt, chainSeq, prevHash, hash]

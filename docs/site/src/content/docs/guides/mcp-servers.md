@@ -12,6 +12,13 @@ Agents never see a server's credential. They talk to agentgateway; agentgateway 
 to the request it sends to the server. Each org has its own servers, and an agent only ever sees the
 tools of servers of its own org that it was allowed.
 
+## Web access goes through MCP servers
+
+An agent's sandbox cannot reach the web: its network policy opens only the hosts of its grants. So the
+harness's built-in web fetch is not offered to the agent, and its instructions say that web access goes
+through the org's MCP tools. To let agents search or read pages, connect an MCP server that does it
+(a search server such as one in front of SearXNG), and allow it for the agent.
+
 ## Add a server in the UI
 
 Org admins and owners open **Servers** in the sidebar. Members do not see it.
@@ -137,4 +144,4 @@ policy on, in `networkPolicy.gatewayEgressTo`. Public servers need neither.
   resource metadata URL) and refuses it with a message. v0.2.
 
 See [ADR 0057](https://github.com/stateracloud/koinon/blob/main/docs/adr/0057-mcp-servers.md) for the
-decisions and what agentgateway v1.6.0 does.
+decisions and what agentgateway v1.7.0 does.

@@ -115,7 +115,7 @@ func newFixture(ctx context.Context, config string) fixture {
 	Expect(err).NotTo(HaveOccurred())
 	t, err := q.CreateTask(ctx, store.CreateTaskParams{OrgID: orgID, Title: "fix the typo", AgentID: f.agent.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: user})
 	Expect(err).NotTo(HaveOccurred())
-	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: orgID, AgentID: f.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000})
+	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: orgID, AgentID: f.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800})
 	Expect(err).NotTo(HaveOccurred())
 	run, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: orgID, OwnerID: "agentd-test", LeaseSeconds: 60})
 	Expect(err).NotTo(HaveOccurred())

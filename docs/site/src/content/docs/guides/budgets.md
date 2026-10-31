@@ -1,6 +1,6 @@
 ---
 title: Budgets
-description: Set the org's monthly cap and each agent's daily limit, and read the notices.
+description: Set the org's monthly cap, each agent's daily limit and the limits of one run, and read the notices.
 ---
 
 Budgets stop spending, not just report it. There are three limits, and the first one reached stops the
@@ -23,7 +23,36 @@ every open run of the org stops. The platform ceiling is shown on the same page,
 
 A new agent starts with the spend limit of its template as its own daily limit. The list shows each agent's limit, its
 template default and what it spent today. **Change limit** sets another limit for that agent; the
-template is not touched.
+template is not touched. When an agent's limit is reached, every open run of that agent stops, including
+runs still queued or waiting on a person, and the task's timeline names the limit. Lowering a limit below
+what the agent already spent today stops its runs the same way.
+
+## Run limits
+
+A single run has its own limits, so one loop cannot spend a day's budget. **The first one reached ends
+the run**:
+
+- **Model requests**: every request through the agent's key counts, including the harness's own title,
+  summary and compaction calls. It is the same on every model and still stops a run on a model priced
+  at zero.
+- **Spend**: the run's cost in US dollars, as the ledger records it (cache reads, thinking and the
+  provider's settled figure included). It joins the daily limit and the monthly cap in the limit the
+  gateway enforces on the agent's key, so a run is also refused between ledger checks.
+- **Time**: the wall clock of the run, without the time it is parked.
+
+The template sets the defaults (the agent and template pages show them as "Run limits"). A template
+may leave the request and spend limits out, as one written before run limits does with only `maxTokens`:
+its runs then get the platform defaults of 200 requests and $5.00. The shipped templates set their own. An org admin
+can change them for one agent; the change applies to runs queued afterwards. The task's timeline shows each run's
+use of its limits (requests, spend and time), and names the limit a run stopped at.
+
+At about 80% of the nearest limit the agent is told to wrap up: it is asked to say what it finished,
+what is left and the next step, and that reply is posted on the task when the run stops.
+
+Tokens are **reported, not limited**. A run's cost shows the tokens by type (input, cache read, cache
+write, output and reasoning), and no total of tokens ends a run. The old `maxTokens` setting in
+templates is ignored. The reasons are in
+[ADR 0081](https://github.com/stateracloud/koinon/blob/main/docs/adr/0081-run-limits.md).
 
 ## Notices
 
@@ -37,5 +66,42 @@ says so, with the limit and the amount.
 Platform admins set the ceiling under **Platform** in the sidebar. The page lists every org with its ceiling,
 cap and spend this month, and each ceiling is edited in place.
 
-Overshoot is bounded by the responses in flight when a limit is reached. The details are in
-[ADR 0056](https://github.com/stateracloud/koinon/blob/main/docs/adr/0056-model-providers-pricing-and-budgets-per-org.md).
+Overshoot is bounded by the responses in flight when a limit is reached: one per running agent, since an
+agent runs one task at a time. When several limits are reached at once, the stop names the broadest one
+(platform ceiling, then the org's cap, then the agent's limit).
+
+## Requests the provider refuses
+
+A provider can refuse a request: it is invalid, or the provider's moderation flagged it. Anthropic,
+OpenRouter and OpenAI do not bill a request they refuse, so Koinon charges **nothing** for it and it
+does not count toward a run's token cap. The request stays in the spend report with a zero cost,
+marked `rejected_by_upstream`, so you can still see it happened; the entry keeps the HTTP status. Koinon
+does not keep the provider's error text: the gateway reads no response bodies, because that would make
+it hold every response in memory. For a provider Koinon has no billing information for (Ollama, a
+custom or unknown OpenAI-compatible API) a refused request, whatever its status, is charged the input it
+probably cost, which can only overstate spend. Requests that the gateway itself refuses (a revoked key, a model the key may not use, a
+spent limit) never reach a provider and are never charged. A server error from the provider is
+charged what it streamed, as before.
+
+When a run fails because the provider refused a request, the run says so ("the model provider
+(openrouter) refused the request (HTTP 403)"), followed by what the agent's harness reported, and a refusal of the provider's own API key is
+reported as a fault of the provider's key in the catalog, not of the agent's gateway key. Koinon works
+this out from the gateway's record of the request, because some harnesses report both as
+"authentication required". Because the gateway exports that record in batches, a run that failed with
+an authentication error can take up to 20 seconds to finish while Koinon waits for it.
+
+## Responses cut short
+
+Stopping a run cuts its response short, and a response cut short usually carries no usage. Koinon
+charges what the gateway saw, never the response's maximum output: usually an estimate of the prompt
+and no output. When the provider can say what it billed for that response (OpenRouter can), the charge
+is provisional: Koinon asks the provider for up to
+an hour and replaces the charge with the provider's figure, keeping the old and new figures in the
+entry's history. Until then the gateway holds back the most the response could cost (its maximum
+output) from the agent's key, so the agent cannot spend past a limit while the figure is pending; the
+hold is released when the figure arrives. The hold is not spend: what the Budgets page shows, the
+notices and the stops count the charges only. The spend report shows provisional requests and the
+amount held apart from the cost. With a provider that cannot report, that charge is final. The
+details are in
+[ADR 0041](https://github.com/stateracloud/koinon/blob/main/docs/adr/0041-koinon-spend-ledger-and-budget-stops.md)
+and [ADR 0056](https://github.com/stateracloud/koinon/blob/main/docs/adr/0056-model-providers-pricing-and-budgets-per-org.md).

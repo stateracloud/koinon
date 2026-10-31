@@ -17,9 +17,14 @@ type Querier interface {
 	// (a concurrent duplicate activation re-evaluates the WHERE clause and gets no row).
 	ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error)
 	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
-	// Adds reported token usage to an unfinished run. The caller cancels the run
-	// when tokens_used reaches max_tokens. No row: the run is finished or absent.
+	// The question's recipients, when it is created (waiting_since stays NULL until it is opened).
+	AddQuestionRecipients(ctx context.Context, arg AddQuestionRecipientsParams) error
+	// Adds reported token usage to an unfinished run. Tokens are reported, not enforced (ADR 0081):
+	// the run limits are requests, spend and time. No row: the run is finished or absent.
 	AddRunTokens(ctx context.Context, arg AddRunTokensParams) (Run, error)
+	// The people a question is retargeted to start waiting now (a new recipient's age starts when the
+	// item starts waiting on them). Returns the rows that were new.
+	AddWaitingQuestionRecipients(ctx context.Context, arg AddWaitingQuestionRecipientsParams) ([]pgtype.UUID, error)
 	// Appends an event from the control plane (API, scheduler) without an epoch,
 	// for example a cancel notice. Stamped with the run's current epoch.
 	AppendRunControlEvent(ctx context.Context, arg AppendRunControlEventParams) (RunEvent, error)
@@ -66,6 +71,9 @@ type Querier interface {
 	// effect. A concurrent claim of the same key waits for the first transaction, so exactly one
 	// claims it; if that one rolls back, the waiting one claims it.
 	ClaimDedupeKey(ctx context.Context, arg ClaimDedupeKeyParams) (DedupeRecord, error)
+	// The org's provisional entries due for an attempt, locked for this settler; another settler skips
+	// them. The row is the work item; the entry is read with it.
+	ClaimDueSettlements(ctx context.Context, arg ClaimDueSettlementsParams) ([]ClaimDueSettlementsRow, error)
 	// The writer's next request: a requested one that is due, or a running one whose writer died
 	// (started more than @lease_seconds ago), for an agent whose sandbox is ready. No row: nothing to
 	// do.
@@ -91,6 +99,10 @@ type Querier interface {
 	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)
 	ClearConnectionSecretName(ctx context.Context, arg ClearConnectionSecretNameParams) error
 	ClearSandboxRestore(ctx context.Context, arg ClearSandboxRestoreParams) error
+	// The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
+	// run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
+	// runs_sandbox_waiting.
+	ClearSandboxWaitForAgent(ctx context.Context, arg ClearSandboxWaitForAgentParams) (int64, error)
 	// approved -> executed | failed, by the executor that claimed it (fenced on
 	// executions). No row: another executor took it over.
 	CompleteApprovalExecution(ctx context.Context, arg CompleteApprovalExecutionParams) (ApprovalRequest, error)
@@ -101,6 +113,7 @@ type Querier interface {
 	// Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
 	// no org-owned row, so it takes no @org_id.
 	CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error)
+	CountEnabledTraceDestinations(ctx context.Context, orgID pgtype.UUID) (int64, error)
 	// Questions of the run that still wait for a person (asked or open).
 	CountOpenQuestionsForRun(ctx context.Context, arg CountOpenQuestionsForRunParams) (int64, error)
 	// Recreations in the last 24 hours, since the agent was last resumed: ADR 0054's loop guard,
@@ -168,6 +181,7 @@ type Querier interface {
 	CreateProvider(ctx context.Context, arg CreateProviderParams) (Provider, error)
 	// Records a question as 'asked'. No row for the same call in the same run: use
 	// GetQuestionByCall.
+	// asked_to is deprecated (00036): written for a user target, NULL otherwise, and never read.
 	CreateQuestion(ctx context.Context, arg CreateQuestionParams) (Question, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -193,7 +207,13 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// pending -> approved | denied by a human. No row: already decided.
 	DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error)
+	// Stores whether the run is traced, once: a run decided earlier keeps its decision (a resume after a
+	// park claims the run again). Returns the stored decision.
+	DecideRunTraced(ctx context.Context, arg DecideRunTracedParams) (bool, error)
+	// The provider had no figure yet (or failed): try again later.
+	DeferSpendSettlement(ctx context.Context, arg DeferSpendSettlementParams) error
 	DeleteAgentMCPServers(ctx context.Context, arg DeleteAgentMCPServersParams) error
+	DeleteAgentRunLimits(ctx context.Context, arg DeleteAgentRunLimitsParams) (int64, error)
 	DeleteConnection(ctx context.Context, arg DeleteConnectionParams) (int64, error)
 	// Sweeps records older than the cutoff; sources keep redelivering for a bounded time only.
 	DeleteDedupeRecordsBefore(ctx context.Context, arg DeleteDedupeRecordsBeforeParams) (int64, error)
@@ -205,13 +225,17 @@ type Querier interface {
 	DeleteModel(ctx context.Context, arg DeleteModelParams) (int64, error)
 	// A nonce only matters while its token could still be good (5 minutes); older ones go.
 	DeleteOldUploadNonces(ctx context.Context, orgID pgtype.UUID) (int64, error)
+	DeletePlatformTraceDestination(ctx context.Context) (int64, error)
 	DeleteProvider(ctx context.Context, arg DeleteProviderParams) (int64, error)
+	DeleteSpendSettlement(ctx context.Context, arg DeleteSpendSettlementParams) error
 	// Drops IdP-sourced memberships from this issuer whose group the user no
 	// longer has, or whose org stopped using the IdP.
 	DeleteStaleGroupMemberships(ctx context.Context, arg DeleteStaleGroupMembershipsParams) error
+	DeleteTraceDestination(ctx context.Context, arg DeleteTraceDestinationParams) (int64, error)
 	DisableModelsOfDisabledProviders(ctx context.Context, arg DisableModelsOfDisabledProvidersParams) error
 	DisableModelsOfProvider(ctx context.Context, arg DisableModelsOfProviderParams) error
 	EnableModel(ctx context.Context, arg EnableModelParams) error
+	EndRunTurn(ctx context.Context, arg EndRunTurnParams) (RunTurn, error)
 	// pending -> expired once expires_at has passed (ADR 0049: 7 days).
 	ExpirePendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	// Saved work is kept for 14 days; the sealed files go with it.
@@ -239,11 +263,16 @@ type Querier interface {
 	//
 	// Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
-	// The run an agent was executing at @at: the latest-started run that had
-	// started by then and had not finished more than @grace_seconds earlier. One
-	// run per agent is owned at a time (ADR 0009), so the latest start wins when a
-	// parked run's window overlaps a later run. The grace covers a response that
-	// completes just after its run was canceled (for example by the token cap).
+	// The run an agent was executing at @at. A run that was claimed by then and is still executing
+	// (starting or running) wins over one that finished inside the grace: a parked run that resumes
+	// right after another run of the agent ended keeps its first started_at, which is older than the
+	// finished run's, and its requests are its own (claimed_at is set on every claim, resume included;
+	// ADR 0081). Among the rest the latest-started run that had started by then and had not finished
+	// more than @grace_seconds earlier wins. One run per agent is owned at a time (ADR 0009), so the
+	// latest start wins when a parked run's window overlaps a later run. The grace covers a response
+	// that completes just after its run was canceled (for example by a run limit).
+	// state and finished_at tell whether that run was canceled by the record's time, which marks a
+	// streamed response logged then as cut (ADR 0056, amendment 2026-10-28).
 	FindRunAt(ctx context.Context, arg FindRunAtParams) (FindRunAtRow, error)
 	// The owner ends the run: running -> succeeded | failed | canceled, or
 	// starting -> failed | canceled. No row: stale epoch or illegal transition.
@@ -258,6 +287,9 @@ type Querier interface {
 	// Locks the agent row for the rest of the transaction (serialises read-check-write on versions).
 	GetAgentForUpdate(ctx context.Context, arg GetAgentForUpdateParams) (Agent, error)
 	GetAgentMCPServer(ctx context.Context, arg GetAgentMCPServerParams) (AgentMcpServer, error)
+	// What provisional entries of an agent since @since hold back from its gateway key's limit (ADR
+	// 0056, amendment 2026-10-28). Only the limit pushed to the gateway counts it.
+	GetAgentReserveSince(ctx context.Context, arg GetAgentReserveSinceParams) (string, error)
 	// What the idle timeout and start-on-demand need (ADR 0049): whether a run
 	// holds the agent, whether one can be claimed now (queued, or parked with its
 	// park resolved, and run_claimable: not behind an unhealthy agent or a
@@ -265,8 +297,16 @@ type Querier interface {
 	// do not keep the sandbox up, but they hold off its recreation (has_held):
 	// a parked run resumes its session in the same home volume.
 	GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivityParams) (GetAgentRunActivityRow, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Run limits (ADR 0081): an agent's overrides of the template's limits, and a run's usage against
+	// them. Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	// The agent's overrides; a NULL column falls back to the agent version's value.
+	GetAgentRunLimits(ctx context.Context, arg GetAgentRunLimitsParams) (GetAgentRunLimitsRow, error)
 	GetAgentSandbox(ctx context.Context, arg GetAgentSandboxParams) (AgentSandbox, error)
-	// An agent's recorded USD spend since @since, for its spend limit.
+	// An agent's recorded USD spend since @since, for its spend limit: the charges only. Reserves
+	// gate the gateway key alone (GetAgentReserveSince).
 	GetAgentSpendSince(ctx context.Context, arg GetAgentSpendSinceParams) (string, error)
 	GetAgentVersion(ctx context.Context, arg GetAgentVersionParams) (AgentVersion, error)
 	GetApprovalRequest(ctx context.Context, arg GetApprovalRequestParams) (ApprovalRequest, error)
@@ -298,13 +338,18 @@ type Querier interface {
 	//
 	// Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
 	GetHomeRepository(ctx context.Context, arg GetHomeRepositoryParams) (HomeRepository, error)
+	// The last request of a run that its provider answered with an error status at or after @since: the
+	// gateway's own record of why a model request failed (agentd reads it when a harness reports an
+	// error without a status). Only the statuses in @statuses count. No row when the provider
+	// refused nothing in the window.
+	GetLastUpstreamRefusal(ctx context.Context, arg GetLastUpstreamRefusalParams) (GetLastUpstreamRefusalRow, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	GetMCPServer(ctx context.Context, arg GetMCPServerParams) (McpServer, error)
 	GetMCPTool(ctx context.Context, arg GetMCPToolParams) (McpTool, error)
 	GetModel(ctx context.Context, arg GetModelParams) (Model, error)
-	// The enabled model an agent asks for by its plain name, with its provider's type, for
-	// finding its price.
+	// The enabled model an agent asks for by its plain name, with its provider's type, id and URL and its
+	// wire format, for finding its price and its cache mode.
 	GetModelForPricing(ctx context.Context, arg GetModelForPricingParams) (GetModelForPricingRow, error)
 	// koinon-agentd, before a run starts its harness: the org's enabled model of this name, its
 	// provider and whether the gateway serves it (gateway_served_models). Enabled models have unique
@@ -320,6 +365,8 @@ type Querier interface {
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
 	// The part of an org's spend since @since that came from estimated usage.
 	GetOrgEstimatedSpendSince(ctx context.Context, arg GetOrgEstimatedSpendSinceParams) (string, error)
+	// What provisional entries of an org since @since hold back from every key's org-level limit.
+	GetOrgReserveSince(ctx context.Context, arg GetOrgReserveSinceParams) (string, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Per-org latency tunables (plan item LT1). A NULL column is the platform default.
@@ -327,9 +374,15 @@ type Querier interface {
 	// The slug of the org the caller is acting in, for names derived from it (gateway targets).
 	GetOrgSlug(ctx context.Context, orgID pgtype.UUID) (string, error)
 	// An org's recorded USD spend since @since (the start of the calendar month in UTC), for its
-	// monthly cap and the platform ceiling.
+	// monthly cap and the platform ceiling: the charges only.
 	GetOrgSpendSince(ctx context.Context, arg GetOrgSpendSinceParams) (string, error)
+	GetOrgTraceSettings(ctx context.Context, orgID pgtype.UUID) (OrgTraceSetting, error)
 	GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWorkspace, error)
+	// The run an agent's key is serving now: the starting or running run (one per agent, ADR 0009).
+	// Its spend limit is the "run" level of the key's net limit (ADR 0041, decision 5). No row: none.
+	GetOwnedRunOfAgent(ctx context.Context, arg GetOwnedRunOfAgentParams) (Run, error)
+	GetPlatformTraceDestination(ctx context.Context) (PlatformTraceDestination, error)
+	GetPlatformTraceSettings(ctx context.Context) (PlatformTraceSetting, error)
 	GetPriceOverride(ctx context.Context, arg GetPriceOverrideParams) (PriceOverride, error)
 	GetProvider(ctx context.Context, arg GetProviderParams) (Provider, error)
 	GetQuestion(ctx context.Context, arg GetQuestionParams) (Question, error)
@@ -338,6 +391,15 @@ type Querier interface {
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
 	// The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
 	GetRunForUpload(ctx context.Context, arg GetRunForUploadParams) (Run, error)
+	GetRunTraced(ctx context.Context, arg GetRunTracedParams) (pgtype.Bool, error)
+	GetRunTurn(ctx context.Context, arg GetRunTurnParams) (RunTurn, error)
+	GetRunTurnByTrace(ctx context.Context, arg GetRunTurnByTraceParams) (RunTurn, error)
+	// What a run has used, from its ledger entries: one entry per model request through the agent's
+	// key (the harness's own title, summary and compaction calls included), their settled cost, and
+	// the tokens by type. input_tokens includes the cache reads and writes (the gateway's convention);
+	// the uncached part is input minus the two. reserve_usd is what provisional entries hold back from
+	// the gateway key (not a cost).
+	GetRunUsage(ctx context.Context, arg GetRunUsageParams) (GetRunUsageRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Ask-tier approval requests (plan item C3, ADR 0042). C3 records them; P1
@@ -353,6 +415,8 @@ type Querier interface {
 	// Everything but the sealed files.
 	GetSavedWorkManifest(ctx context.Context, arg GetSavedWorkManifestParams) (GetSavedWorkManifestRow, error)
 	GetServedMCPServerByName(ctx context.Context, arg GetServedMCPServerByNameParams) (McpServer, error)
+	// An org's recorded USD spend of its system key since @since, for the key's daily budget.
+	GetSystemSpendSince(ctx context.Context, arg GetSystemSpendSinceParams) (string, error)
 	GetTask(ctx context.Context, arg GetTaskParams) (Task, error)
 	// Like GetTask, and locks the row until the transaction ends, so a read-then-change of the state
 	// cannot interleave with another one.
@@ -361,7 +425,9 @@ type Querier interface {
 	// other runs; messages after it are new for the next run.
 	GetTaskPromptedThrough(ctx context.Context, arg GetTaskPromptedThroughParams) (int64, error)
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
+	GetTraceDestination(ctx context.Context, arg GetTraceDestinationParams) (TraceDestination, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
+	GetUserDisplayName(ctx context.Context, id pgtype.UUID) (string, error)
 	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error
 	// The OIDC login grants platform admin to a user in one of oidc.platformAdminGroups. It returns
 	// no row when the user already is a platform admin (from any source), which keeps that source.
@@ -389,16 +455,30 @@ type Querier interface {
 	InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error)
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
+	// InsertRunTurn for the run's current owner only (the epoch matches and the run is starting or
+	// running), so a fenced replica cannot add a turn. A turn row the previous owner left open (it died or
+	// lost the run) is ended as interrupted in the same statement, before the new one starts.
+	InsertOwnedRunTurn(ctx context.Context, arg InsertOwnedRunTurnParams) (RunTurn, error)
 	InsertPriceOverride(ctx context.Context, arg InsertPriceOverrideParams) (PriceOverride, error)
+	// Starts the run's next turn with the given trace ID. seq comes from the run's counter, taken under
+	// the run's row lock (the way run_events.seq does), so concurrent writers cannot pick the same number.
+	InsertRunTurn(ctx context.Context, arg InsertRunTurnParams) (RunTurn, error)
 	InsertSandboxIncident(ctx context.Context, arg InsertSandboxIncidentParams) (SandboxIncident, error)
 	InsertSavedWork(ctx context.Context, arg InsertSavedWorkParams) (SavedWork, error)
-	// Records one request. Returns no row when the request id is already
+	// Records one request of an agent (principal 'agent', agent_id set) or of a system key of the org
+	// (principal 'system', no agent and no run: the provider echo check). Returns no row when the request id is already
 	// recorded, so a replayed export is not charged twice. cost_usd is Koinon's
 	// own computation from the raw usage and the dated price; gateway_cost_usd is
-	// what agentgateway logged (NULL when it could not price the request).
+	// what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
+	// for every entry that is not provisional, so a caller that holds nothing passes nothing.
 	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
+	InsertSpendEntryRevision(ctx context.Context, arg InsertSpendEntryRevisionParams) error
+	// Queues a provisional entry for the settler. Without a response ID it is a hold until the deadline.
+	InsertSpendSettlement(ctx context.Context, arg InsertSpendSettlementParams) error
+	InsertTraceDestination(ctx context.Context, arg InsertTraceDestinationParams) (TraceDestination, error)
 	// Zero rows: the nonce was used before (a replay).
 	InsertUploadNonce(ctx context.Context, arg InsertUploadNonceParams) (int64, error)
+	IsActiveQuestionRecipient(ctx context.Context, arg IsActiveQuestionRecipientParams) (bool, error)
 	// Whether the user may answer questions in the org: role member or higher.
 	IsOrgMember(ctx context.Context, arg IsOrgMemberParams) (bool, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
@@ -412,6 +492,9 @@ type Querier interface {
 	LatestHomeCheckpointOfSandbox(ctx context.Context, arg LatestHomeCheckpointOfSandboxParams) (HomeCheckpoint, error)
 	// The person who wrote the task's latest user message (the person on the other end of a chat thread).
 	LatestUserMessageActor(ctx context.Context, arg LatestUserMessageActorParams) (pgtype.UUID, error)
+	// A claimed settlement is not due again until @until, so the provider is asked outside any
+	// transaction and another settler does not ask it at the same time.
+	LeaseSpendSettlement(ctx context.Context, arg LeaseSpendSettlementParams) error
 	ListAPITokens(ctx context.Context, orgID pgtype.UUID) ([]ApiToken, error)
 	// The active version of each active agent, for the triggers they define (ADR 0066). A draft
 	// agent, an archived one and a proposed version are not included.
@@ -419,6 +502,10 @@ type Querier interface {
 	// ListActiveAgentVersions across every live org, for the scheduler (ADR 0066).
 	ListActiveAgentVersionsAllOrgs(ctx context.Context) ([]ListActiveAgentVersionsAllOrgsRow, error)
 	ListActiveApprovalScopesForAgent(ctx context.Context, arg ListActiveApprovalScopesForAgentParams) ([]ApprovalScope, error)
+	// The recipients who can still answer: active rows whose user is not deleted and still has role
+	// member or higher in the org (the IsOrgMember rule). A recipient who left the org or became a
+	// viewer is not notified, reminded or counted as waited on.
+	ListActiveQuestionRecipientIDs(ctx context.Context, arg ListActiveQuestionRecipientIDsParams) ([]pgtype.UUID, error)
 	// The config of each agent's active version, for the template default of its daily limit.
 	ListActiveVersionConfigs(ctx context.Context, orgID pgtype.UUID) ([]ListActiveVersionConfigsRow, error)
 	// When each active agent's current version was activated, across every live org, so the schedule
@@ -427,6 +514,7 @@ type Querier interface {
 	ListAgentBudgets(ctx context.Context, orgID pgtype.UUID) ([]ListAgentBudgetsRow, error)
 	ListAgentMCPServers(ctx context.Context, orgID pgtype.UUID) ([]AgentMcpServer, error)
 	ListAgentMCPServersOfAgent(ctx context.Context, arg ListAgentMCPServersOfAgentParams) ([]AgentMcpServer, error)
+	ListAgentRunLimits(ctx context.Context, orgID pgtype.UUID) ([]ListAgentRunLimitsRow, error)
 	// Every agent's recorded USD spend since @since, for the budgets list.
 	ListAgentSpendSince(ctx context.Context, arg ListAgentSpendSinceParams) ([]ListAgentSpendSinceRow, error)
 	ListAgentVersions(ctx context.Context, arg ListAgentVersionsParams) ([]AgentVersion, error)
@@ -441,6 +529,8 @@ type Querier interface {
 	ListApprovalRequestsForTask(ctx context.Context, arg ListApprovalRequestsForTaskParams) ([]ApprovalRequest, error)
 	// Which of an org's agents have their sandbox archived (plan item AR1), for one read of a list.
 	ListArchivedAgentSandboxes(ctx context.Context, orgID pgtype.UUID) ([]ListArchivedAgentSandboxesRow, error)
+	// Members who can answer questions (member or higher), highest role per user.
+	ListAskableMembers(ctx context.Context, orgID pgtype.UUID) ([]ListAskableMembersRow, error)
 	// Every org that has a chain, for the verifier.
 	ListAuditChainOrgs(ctx context.Context) ([]pgtype.UUID, error)
 	// One page of an org's chain in chain order, with the fields the hash covers as text, so the
@@ -484,11 +574,17 @@ type Querier interface {
 	ListMCPTools(ctx context.Context, orgID pgtype.UUID) ([]McpTool, error)
 	ListMCPToolsOfServer(ctx context.Context, arg ListMCPToolsOfServerParams) ([]McpTool, error)
 	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
+	// Every model no admin set the format of, in every live org, with its provider's type (startup:
+	// catalog.RederiveFormats applies internal/modelformat to them).
+	ListModelsToRederiveFormat(ctx context.Context) ([]ListModelsToRederiveFormatRow, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
-	// The inbox: open questions asked to the user, newest first.
+	// The inbox: open questions the user is an active recipient of, longest waiting on the user last
+	// (newest first), with the time it started waiting on the user.
 	// Only those whose run is still parked: a question outlives no run (the sweep closes it, this
 	// hides it meanwhile).
-	ListOpenQuestionsForUser(ctx context.Context, arg ListOpenQuestionsForUserParams) ([]Question, error)
+	ListOpenQuestionsForUser(ctx context.Context, arg ListOpenQuestionsForUserParams) ([]ListOpenQuestionsForUserRow, error)
+	// Runs that can still be canceled, when the agent's daily limit is reached.
+	ListOpenRunsOfAgent(ctx context.Context, arg ListOpenRunsOfAgentParams) ([]Run, error)
 	// Runs that can still be canceled, when an org-wide limit is reached.
 	ListOpenRunsOfOrg(ctx context.Context, orgID pgtype.UUID) ([]Run, error)
 	// The users who are told about an org's budget: owners and admins.
@@ -498,6 +594,8 @@ type Querier interface {
 	// Every live org, for control-plane sweeps and workers that then work org by
 	// org (koinon-agentd claims runs org by org, so each claim stays org-scoped).
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
+	// Users whose highest role in the org is at least @min_role (deleted users excluded).
+	ListOrgMemberIDsWithRole(ctx context.Context, arg ListOrgMemberIDsWithRoleParams) ([]pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Execution state rendered by koinon-reconciler (plan item R2) and read by
@@ -509,10 +607,18 @@ type Querier interface {
 	ListOrgsToReconcile(ctx context.Context) ([]ListOrgsToReconcileRow, error)
 	// Orgs with an open question past its expiry at @now or a reminder due at @now.
 	ListOrgsWithDueQuestions(ctx context.Context, now pgtype.Timestamptz) ([]pgtype.UUID, error)
+	// The settler: every org with a provisional entry due for an attempt, the longest waiting first.
+	ListOrgsWithDueSettlements(ctx context.Context, now pgtype.Timestamptz) ([]pgtype.UUID, error)
+	// Orgs with an open question, for the sweep that gives orphaned questions to the org's admins.
+	ListOrgsWithOpenQuestions(ctx context.Context) ([]pgtype.UUID, error)
 	// Orgs with a question whose run ended (the sweeper then queries per org).
 	ListOrgsWithQuestionsOfFinishedRuns(ctx context.Context) ([]pgtype.UUID, error)
 	// Orgs that have at least one opened question to notify about (the sweeper then queries per org).
 	ListOrgsWithQuestionsToNotify(ctx context.Context) ([]pgtype.UUID, error)
+	// Open questions (run still parked) with no recipient who can still answer, because everyone left
+	// the org or lost the role, with the notify target of their task (NULL kind: the org's default). The rows are locked, and a question that is being resolved or canceled is
+	// skipped, so a question closed meanwhile gets no recipients, notification or audit row.
+	ListOrphanedQuestions(ctx context.Context, orgID pgtype.UUID) ([]ListOrphanedQuestionsRow, error)
 	// The org's requests waiting for a human (input_required), oldest first.
 	// Trusted-preset calls are recorded as approved and never listed here.
 	ListPendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
@@ -527,12 +633,15 @@ type Querier interface {
 	// (plan item PV2). Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
 	ListPriceOverrides(ctx context.Context, orgID pgtype.UUID) ([]PriceOverride, error)
+	ListProviderEchoChecks(ctx context.Context, orgID pgtype.UUID) ([]ProviderEchoCheck, error)
 	ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
-	// Who the open questions of these tasks wait on (only where the run is still parked), for the
-	// inbox: a task waiting on someone else's question is not its creator's to act on.
-	ListQuestionAddresseesForTasks(ctx context.Context, arg ListQuestionAddresseesForTasksParams) ([]ListQuestionAddresseesForTasksRow, error)
+	// The active recipients of these questions, with names, for the API.
+	ListQuestionRecipients(ctx context.Context, arg ListQuestionRecipientsParams) ([]ListQuestionRecipientsRow, error)
 	// Runs that ended while a question of theirs was still asked or open.
 	ListQuestionRunsOfFinishedRuns(ctx context.Context, orgID pgtype.UUID) ([]pgtype.UUID, error)
+	// The open questions of these tasks whose run is still parked, oldest first, with their target and
+	// recipients, for the inbox (ListTasks/GetTask waiting_on_*).
+	ListQuestionWaitersForTasks(ctx context.Context, arg ListQuestionWaitersForTasksParams) ([]ListQuestionWaitersForTasksRow, error)
 	ListQuestionsForTask(ctx context.Context, arg ListQuestionsForTaskParams) ([]Question, error)
 	// Opened questions whose notification has not gone out, oldest first.
 	ListQuestionsToNotify(ctx context.Context, arg ListQuestionsToNotifyParams) ([]Question, error)
@@ -543,6 +652,12 @@ type Querier interface {
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
 	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)
+	// The model calls of a run in a turn's window, for the trace router's model-call spans (ADR 0074,
+	// decision 3): the ledger's rows with the provider type and ID of the model the agent asked for. The
+	// model name is the one the agent used, with or without the org slug the gateway prefixes. A row at or
+	// after the next turn's start belongs to that turn, so a boundary row counts once.
+	ListRunModelCalls(ctx context.Context, arg ListRunModelCallsParams) ([]ListRunModelCallsRow, error)
+	ListRunTurns(ctx context.Context, arg ListRunTurnsParams) ([]RunTurn, error)
 	ListRunsForTask(ctx context.Context, arg ListRunsForTaskParams) ([]Run, error)
 	// Every enabled provider of the org with its enabled models, for the gateway.
 	ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]ListServedCatalogRow, error)
@@ -550,6 +665,7 @@ type Querier interface {
 	ListServedMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpServer, error)
 	// Enabled providers (with or without models), for key delivery.
 	ListServedProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
+	ListSpendEntryRevisions(ctx context.Context, arg ListSpendEntryRevisionsParams) ([]SpendEntryRevision, error)
 	// The timeline after a sequence number (0 for the start), in order.
 	ListTaskEvents(ctx context.Context, arg ListTaskEventsParams) ([]TaskEvent, error)
 	// The users' messages on the task after a timeline seq, in order: what
@@ -564,6 +680,11 @@ type Querier interface {
 	ListTasksWithParkedRunOfAgent(ctx context.Context, arg ListTasksWithParkedRunOfAgentParams) ([]pgtype.UUID, error)
 	// Tasks with a queued or parked run of the agent: they wait while the agent is unhealthy.
 	ListTasksWithWaitingRunOfAgent(ctx context.Context, arg ListTasksWithWaitingRunOfAgentParams) ([]pgtype.UUID, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Run traces (rc.9, ADR 0074): destinations, content levels, sampling, the traced flag of a run and
+	// the turns of a run. Every query on an org-owned table takes @org_id (TestQueriesAreOrgScoped).
+	ListTraceDestinations(ctx context.Context, orgID pgtype.UUID) ([]TraceDestination, error)
 	// The servers an agent may use that are down or disabled right now, for the note agentd gives the
 	// agent when a session starts.
 	ListUnavailableMCPServersOfAgent(ctx context.Context, arg ListUnavailableMCPServersOfAgentParams) ([]ListUnavailableMCPServersOfAgentRow, error)
@@ -586,10 +707,17 @@ type Querier interface {
 	// principal and sync IdP groups at login), always keyed by user_id.
 	// Serialises bootstrap across API replicas for the rest of the transaction.
 	LockBootstrap(ctx context.Context) error
+	LockPlatformTraceDestination(ctx context.Context) (PlatformTraceDestination, error)
+	// Reads the ceiling and holds the row until the transaction ends, so an org's level and a lowering
+	// of the ceiling cannot pass each other.
+	LockPlatformTraceSettings(ctx context.Context) (PlatformTraceSetting, error)
 	LockQuestion(ctx context.Context, arg LockQuestionParams) (Question, error)
 	// Serialises a park decision (agentd) with the resolution of the run's
 	// approvals (the executor), so neither misses the other.
 	LockRun(ctx context.Context, arg LockRunParams) (Run, error)
+	// Lowers every org above a new platform ceiling to it, and the platform copies that follow, in the
+	// caller's transaction. Returns the orgs it changed with their levels before, for the audit log.
+	LowerOrgTraceLevels(ctx context.Context, arg LowerOrgTraceLevelsParams) ([]LowerOrgTraceLevelsRow, error)
 	MarkAgentUnhealthy(ctx context.Context, arg MarkAgentUnhealthyParams) (Agent, error)
 	// Records that the outcomes were sent to the agent.
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
@@ -608,6 +736,12 @@ type Querier interface {
 	MarkQuestionsDelivered(ctx context.Context, arg MarkQuestionsDeliveredParams) (int64, error)
 	// starting -> running once the harness session is ready.
 	MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) (Run, error)
+	// Records when the run started waiting for its sandbox, once per wait (the first requeue keeps it).
+	// Fenced by the epoch. Returns the recorded start.
+	MarkRunSandboxWait(ctx context.Context, arg MarkRunSandboxWaitParams) (pgtype.Timestamptz, error)
+	// Disarms the wrap-up notice (sent, or suppressed because the harness ignored the cancel); once per
+	// run. Only a sent notice has a run.wrap_up_notice event. Fenced by the epoch.
+	MarkRunWrapUpNotice(ctx context.Context, arg MarkRunWrapUpNoticeParams) (int64, error)
 	// The sandbox and its volume were deleted for the archive tier; the home is in the checkpoint
 	// that restore_checkpoint_id names.
 	MarkSandboxArchived(ctx context.Context, arg MarkSandboxArchivedParams) (AgentSandbox, error)
@@ -646,11 +780,17 @@ type Querier interface {
 	// One probe's result. Three failures in a row make a server unhealthy; one success makes it
 	// healthy again. health_since moves only when the health changes.
 	RecordMCPServerProbe(ctx context.Context, arg RecordMCPServerProbeParams) (McpServer, error)
+	RecordPlatformTraceDestinationError(ctx context.Context, arg RecordPlatformTraceDestinationErrorParams) error
+	RecordPlatformTraceDestinationSuccess(ctx context.Context) error
 	// One failed delivery of the notification. At @give_up failures the question counts as notified
 	// (notified_at is set), so the sweep stops re-sending it; the caller logs that it gave up.
 	RecordQuestionNotifyFailure(ctx context.Context, arg RecordQuestionNotifyFailureParams) (Question, error)
 	// One failed delivery of the reminder. At @give_up failures the question counts as reminded.
 	RecordQuestionRemindFailure(ctx context.Context, arg RecordQuestionRemindFailureParams) (Question, error)
+	// The router's health: a batch failed, or spans were dropped. The message is secret-free.
+	RecordTraceDestinationError(ctx context.Context, arg RecordTraceDestinationErrorParams) error
+	// The router's health: a batch was accepted.
+	RecordTraceDestinationSuccess(ctx context.Context, arg RecordTraceDestinationSuccessParams) error
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
 	ReenableUIMCPServers(ctx context.Context, orgID pgtype.UUID) error
 	// Re-enable UI models whose provider is enabled and that no declared model shadows.
@@ -676,7 +816,9 @@ type Querier interface {
 	RequestSessionRestartForAgent(ctx context.Context, arg RequestSessionRestartForAgentParams) ([]pgtype.UUID, error)
 	// starting -> queued, for the owner (epoch compare-and-set): the sandbox was not ready within the
 	// org's wait (LT1, ADR 0066), so the run waits in the queue instead of failing. It goes to the back
-	// of its origin's queue (ready_at = now) and the next claim gives it a new epoch. The time since the
+	// of its origin's queue (ready_at = now) and the next claim gives it a new epoch.
+	// sandbox_wait_started_at is kept, so the total wait is capped (ADR 0066 amendment
+	// 2026-10-28). The time since the
 	// claim was spent waiting for the sandbox, so it is credited to parked_seconds and does not count
 	// against the wall-clock cap.
 	RequeueRun(ctx context.Context, arg RequeueRunParams) (Run, error)
@@ -704,6 +846,10 @@ type Querier interface {
 	RevokeSessionReturningUser(ctx context.Context, arg RevokeSessionReturningUserParams) (pgtype.UUID, error)
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
+	// An agent's model setting (NULL: use the version's model, then the org default). Not a new version.
+	SetAgentModel(ctx context.Context, arg SetAgentModelParams) (Agent, error)
+	// Replaces the agent's overrides. A NULL argument clears that override.
+	SetAgentRunLimits(ctx context.Context, arg SetAgentRunLimitsParams) (SetAgentRunLimitsRow, error)
 	// Records a newly issued agentgateway key by ID and hash.
 	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
 	// Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the
@@ -711,6 +857,8 @@ type Querier interface {
 	// reconciler waits for its deletion first). The unhealthy mark and any pending home restore belonged
 	// to that sandbox: a task sandbox starts its own lineage and nothing carries over between tasks.
 	SetAgentSandboxName(ctx context.Context, arg SetAgentSandboxNameParams) (AgentSandbox, error)
+	// An agent's thinking setting (NULL: use the version's value, then the default, on). Not a new version.
+	SetAgentThinking(ctx context.Context, arg SetAgentThinkingParams) (Agent, error)
 	// The first of two approvals: remembered, the request stays pending.
 	SetApprovalFirstApprover(ctx context.Context, arg SetApprovalFirstApproverParams) (ApprovalRequest, error)
 	SetApprovalRequestScope(ctx context.Context, arg SetApprovalRequestScopeParams) error
@@ -720,6 +868,9 @@ type Querier interface {
 	SetConnectionEnvelope(ctx context.Context, arg SetConnectionEnvelopeParams) (Connection, error)
 	// Names what a claimed key produced, in the same transaction as the claim.
 	SetDedupeEffect(ctx context.Context, arg SetDedupeEffectParams) error
+	// Changes the format of a model that is still not overridden, so a save that raced the startup
+	// re-derivation wins.
+	SetDerivedModelFormat(ctx context.Context, arg SetDerivedModelFormatParams) (int64, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
 	SetMCPToolTier(ctx context.Context, arg SetMCPToolTierParams) (McpTool, error)
@@ -730,6 +881,10 @@ type Querier interface {
 	SetOrgMonthlyCap(ctx context.Context, arg SetOrgMonthlyCapParams) (SetOrgMonthlyCapRow, error)
 	// Sets or clears (NULL) the platform ceiling of an org, keeping its monthly cap.
 	SetOrgPlatformCeiling(ctx context.Context, arg SetOrgPlatformCeilingParams) (SetOrgPlatformCeilingRow, error)
+	SetPlatformTraceCeiling(ctx context.Context, arg SetPlatformTraceCeilingParams) (PlatformTraceSetting, error)
+	// Records the result of a re-test, only if the configuration is the one that was tested. A deleted
+	// destination matches nothing and is not brought back.
+	SetPlatformTraceDestinationTest(ctx context.Context, arg SetPlatformTraceDestinationTestParams) (int64, error)
 	SetProviderDisabled(ctx context.Context, arg SetProviderDisabledParams) error
 	// Records, before the prompt is sent, the task timeline seq through which
 	// the task's messages are in it.
@@ -752,13 +907,27 @@ type Querier interface {
 	SetTaskStateFrom(ctx context.Context, arg SetTaskStateFromParams) (Task, error)
 	// Stores the agent's end-of-turn summary. Fenced by the run epoch like SetTaskHarnessSession.
 	SetTaskSummary(ctx context.Context, arg SetTaskSummaryParams) (int64, error)
+	// Records the result of a re-test, only if the configuration is the one that was tested.
+	SetTraceDestinationTest(ctx context.Context, arg SetTraceDestinationTestParams) (int64, error)
+	// Makes a provisional entry final: with the provider's usage and cost, or (expired) as it is. The
+	// reserve is released either way. No row: the entry was not provisional (settled already).
+	SettleSpendEntry(ctx context.Context, arg SettleSpendEntryParams) (pgtype.UUID, error)
 	// A declared server of this name now exists: disable the UI ones.
 	ShadowUIMCPServers(ctx context.Context, arg ShadowUIMCPServersParams) error
 	ShadowUIModels(ctx context.Context, arg ShadowUIModelsParams) error
 	// A declared provider of this name now exists: disable the UI ones.
 	ShadowUIProviders(ctx context.Context, arg ShadowUIProvidersParams) error
-	// Spend per model since @since, with estimated usage kept apart.
+	// Reads the ceiling and keeps it from being lowered until the transaction ends, without blocking
+	// other readers of it (org settings writes).
+	ShareLockPlatformTraceSettings(ctx context.Context) (PlatformTraceSetting, error)
+	// Spend of agents per model since @since, with estimated usage kept apart. System checks are
+	// reported by SpendSystemSince.
 	SpendReport(ctx context.Context, arg SpendReportParams) ([]SpendReportRow, error)
+	// The system checks of an org since @since: requests and cost. They count against the org's
+	// monthly cap and the platform ceiling.
+	SpendSystemSince(ctx context.Context, arg SpendSystemSinceParams) (SpendSystemSinceRow, error)
+	// The questions became visible: their recipients start waiting now.
+	StartQuestionRecipientsWaiting(ctx context.Context, arg StartQuestionRecipientsWaitingParams) error
 	// Totals per run, for the runs in @run_ids that have spend.
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
 	// Totals per task, for the tasks in @task_ids that have spend.
@@ -773,6 +942,8 @@ type Querier interface {
 	TakeOverExpiredRun(ctx context.Context, arg TakeOverExpiredRunParams) (Run, error)
 	// Records use, at most once a minute per token.
 	TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error
+	// The sanitised content is unchanged; the report columns still follow what the server published, so a
+	// row synced before they existed gets its values on the next sync.
 	TouchMCPTool(ctx context.Context, arg TouchMCPToolParams) error
 	// Returns the session if it is still valid at @now and extends its idle
 	// deadline, never past the absolute one.
@@ -795,12 +966,23 @@ type Querier interface {
 	// api_key is written only when @set_api_key is true (the patch sets it): the caller read the row
 	// without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the envelope since.
 	UpdateProvider(ctx context.Context, arg UpdateProviderParams) (Provider, error)
+	// Replaces the settings of a destination. Applies only to the version the caller read
+	// (@expected_version), so two admins editing at once do not overwrite each other's secrets, and bumps
+	// config_version. @set_test says the change was tested and the test columns are recorded; otherwise the
+	// previous test result stays. The router's health columns stay.
+	UpdateTraceDestination(ctx context.Context, arg UpdateTraceDestinationParams) (TraceDestination, error)
 	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) error
 	// Grants the roles of every mapping that matches one of the user's groups,
 	// in orgs whose identity mode uses the IdP.
 	UpsertGroupMemberships(ctx context.Context, arg UpsertGroupMembershipsParams) error
 	UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsParams) (OrgSetting, error)
+	UpsertOrgTraceSettings(ctx context.Context, arg UpsertOrgTraceSettingsParams) (OrgTraceSetting, error)
 	UpsertOrgWorkspace(ctx context.Context, arg UpsertOrgWorkspaceParams) (OrgWorkspace, error)
+	// The platform destination has one writer at a time: a platform admin. A change bumps config_version.
+	// @set_test as for UpdateTraceDestination.
+	UpsertPlatformTraceDestination(ctx context.Context, arg UpsertPlatformTraceDestinationParams) (PlatformTraceDestination, error)
+	// The latest echo check of a provider replaces the one before it.
+	UpsertProviderEchoCheck(ctx context.Context, arg UpsertProviderEchoCheckParams) (ProviderEchoCheck, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Templates are platform data (not org-owned); see 00002_agents.sql.

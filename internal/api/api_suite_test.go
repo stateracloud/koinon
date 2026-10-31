@@ -44,10 +44,14 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/modelcheck"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/services"
+	"github.com/stateracloud/koinon/internal/tracedest"
+	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -149,6 +153,8 @@ type envOptions struct {
 	// watchPoll is WatchRun's backstop poll interval; tests that check
 	// NOTIFY delivery set it long so that polling cannot hide a failure.
 	watchPoll time.Duration
+	// watchHeartbeat is WatchRun's idle heartbeat interval; 0 keeps the default.
+	watchHeartbeat time.Duration
 	// ui is the web UI to serve, if any.
 	ui fs.FS
 	// keys and github back ConnectionService and the repository binding
@@ -169,11 +175,17 @@ type envOptions struct {
 	username string
 	// directMessages delivers direct messages through a DBOS queue (TR3), if set.
 	directMessages *services.DirectMessageQueue
+	// runNow fires schedule triggers by hand through a DBOS queue, if set.
+	runNow *services.RunNowQueue
+	// modelChat is what the provider echo check sends its request through; nil means the check
+	// finds no gateway.
+	modelChat modelcheck.Chat
 }
 
 // env is one API server on its own database.
 type env struct {
 	pool     *pgxpool.Pool
+	traces   *tracedest.Service
 	clock    *clock
 	issuer   *oidctest.Issuer
 	srv      *httptest.Server
@@ -274,10 +286,17 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	if opts.keys != nil {
 		catalogKeys = opts.keys
 	}
+	tracePolicy := catalog.URLPolicy{Namespace: "koinon", AllowedHosts: opts.allowedHosts}
+	traces, err := tracedest.New(e.pool, catalogKeys, tracePolicy, slog.New(slog.NewTextHandler(logOut, nil)))
+	Expect(err).NotTo(HaveOccurred())
+	e.traces = traces
 	rpc := services.New(e.pool, services.Options{
-		Catalog: catalog.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
-		MCP:     mcpservers.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
-		Hub:     e.hub, WatchPollInterval: opts.watchPoll, DirectMessages: opts.directMessages,
+		Prices:     pricing.Embedded(),
+		Traces:     traces,
+		Catalog:    catalog.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
+		MCP:        mcpservers.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
+		ModelCheck: modelcheck.New(e.pool, opts.modelChat, prices.NewResolver(pricing.Embedded())),
+		Hub:        e.hub, WatchPollInterval: opts.watchPoll, WatchHeartbeatInterval: opts.watchHeartbeat, DirectMessages: opts.directMessages, RunNow: opts.runNow,
 		Logger: slog.New(slog.NewTextHandler(logOut, nil)),
 		Keys:   servicesKeys(opts.keys), GitHub: opts.github,
 		URLPolicy: catalog.URLPolicy{Namespace: "koinon", AllowedHosts: opts.allowedHosts},

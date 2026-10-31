@@ -66,7 +66,7 @@ func (f *fixture) nextRun(ctx context.Context) {
 	Expect(err).NotTo(HaveOccurred())
 	f.task, err = q.CreateTask(ctx, store.CreateTaskParams{OrgID: f.org, Title: "weekly update", AgentID: f.agent.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: f.owner})
 	Expect(err).NotTo(HaveOccurred())
-	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: f.org, AgentID: f.agent.ID, TaskID: f.task.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000})
+	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: f.org, AgentID: f.agent.ID, TaskID: f.task.ID, MaxWallClockSeconds: 1800})
 	Expect(err).NotTo(HaveOccurred())
 	run, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: f.org, OwnerID: "agentd-test", LeaseSeconds: 600})
 	Expect(err).NotTo(HaveOccurred())
@@ -148,7 +148,7 @@ var _ = Describe("Scoped approvals", func() {
 		Expect(requested).To(HaveKeyWithValue("scope_id", sc.ID.String()))
 		Expect(requested).To(HaveKeyWithValue("scope_kind", "agent"))
 		Expect(f.gh.Snapshot("widgets").Pulls).To(HaveLen(2))
-		Expect(f.gh.Snapshot("widgets").Commits[f.gh.Snapshot("widgets").Refs["koinon/lcm-week-2"]].Message).To(ContainSubstring("(scoped approval)"))
+		Expect(f.gh.Snapshot("widgets").Commits[f.gh.Snapshot("widgets").Refs[f.branch("lcm-week-2")]].Message).To(ContainSubstring("(scoped approval)"))
 
 		By("a different tool, or a call that could push and run code, still needs a person")
 		comment := f.call(ctx, githubtools.ToolCommentOnIssue, map[string]any{"issue_number": 3, "body": "hi"})

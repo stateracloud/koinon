@@ -25,7 +25,8 @@ service RunService {
   // and in seq order. To resume after a dropped stream, call again with the
   // last seq received. The first message is a snapshot of the run; another
   // snapshot follows whenever its state changes. The stream ends after the
-  // run has finished and every event has been sent. Viewers and above.
+  // run has finished and every event has been sent. Heartbeat messages keep a quiet
+  // stream open. Viewers and above.
   rpc WatchRun(WatchRunRequest) returns (stream WatchRunResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -62,12 +63,15 @@ enum FailureClass {
   FAILURE_CLASS_THROTTLED = 2;
   // The input does not fit the model's context window.
   FAILURE_CLASS_CONTEXT_OVERFLOW = 3;
-  // A token or spend limit stopped the run.
+  // A run limit (model requests or spend) or a spend limit (agent, org or platform) stopped the
+  // run.
   FAILURE_CLASS_BUDGET = 4;
   // A policy denied the request; never retried.
   FAILURE_CLASS_POLICY = 5;
   // Anything unknown; never retried.
   FAILURE_CLASS_FATAL = 6;
+  // The sandbox never became ready within the org's cap; never retried.
+  FAILURE_CLASS_SANDBOX_UNAVAILABLE = 7;
 }
 
 // Run is one execution of an agent for a ticket.
@@ -81,9 +85,12 @@ message Run {
   ParkReason park_reason = 7;
   // Why the run failed or was canceled.
   string outcome_reason = 8;
-  // Caps copied from the agent's template when the run was queued.
+  // Limits copied from the agent's version (or the agent's override) when the run was queued.
   int64 max_wall_clock_seconds = 9;
-  int64 max_tokens = 10;
+  // Deprecated: tokens are reported, not enforced (ADR 0081). Zero on new runs.
+  int64 max_tokens = 10 [deprecated = true];
+  // Tokens the run's requests used, input plus output as the gateway reports them (cache reads
+  // and writes are part of the input). The split by type is in cost.
   int64 tokens_used = 11;
   // The seq of the newest event.
   int64 last_event_seq = 12;
@@ -96,6 +103,12 @@ message Run {
   // The class of the error that failed or stopped the run. Unspecified when the run did not
   // fail, or failed before classes existed.
   FailureClass failure_class = 17;
+  // The run's request limit: 0 for a run queued before run limits existed (ADR 0081). Progress is
+  // cost.requests.
+  int64 max_model_requests = 18;
+  // The run's spend limit in USD as a decimal string; empty when the run has none. Progress is
+  // cost.usd.
+  string max_spend_usd = 19;
 }
 
 // Cost is model spend recorded by the spend ledger from agentgateway's access
@@ -113,6 +126,12 @@ message Cost {
   // Requests whose usage the provider did not report and Koinon estimated (included in
   // requests, tokens and usd). Zero when every request reported its usage.
   int64 estimated_requests = 6;
+  // input_tokens is the total input, cache reads and writes included. The split by type: the
+  // uncached input is input_tokens - cache_read_tokens - cache_write_tokens. reasoning_tokens is
+  // part of output_tokens where the provider reports it.
+  int64 cache_read_tokens = 7;
+  int64 cache_write_tokens = 8;
+  int64 reasoning_tokens = 9;
 }
 
 // RunEvent is one session update or lifecycle note of a run.
@@ -158,10 +177,16 @@ message WatchRunRequest {
   int64 after_seq = 3;
 }
 
-// WatchRunResponse carries either a run snapshot or one event.
+// WatchRunResponse carries a run snapshot, one event or a heartbeat.
 message WatchRunResponse {
   oneof item {
     Run run = 1;
     RunEvent event = 2;
+    // Sent every 30 seconds while the stream has sent nothing else, so a proxy or load
+    // balancer does not cut a quiet run's stream as idle. Clients ignore it.
+    Heartbeat heartbeat = 3;
   }
 }
+
+// Heartbeat is an empty keep-alive message.
+message Heartbeat {}

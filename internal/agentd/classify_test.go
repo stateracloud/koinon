@@ -38,6 +38,53 @@ var _ = Describe("Error classification", func() {
 		Entry("unknown errors are fatal", errors.New("nope"), "fatal"),
 	)
 
+	DescribeTable("errors that may be the gateway refusing a spent budget's key",
+		func(err error, gateway bool) { Expect(agentd.ClassifyGateway(err)).To(Equal(gateway)) },
+		Entry("a structured 401", rpc("Authentication required", map[string]any{"statusCode": 401}), true),
+		Entry("OpenCode's 401 without a status",
+			rpc("Authentication required: provider authentication required", nil), true),
+		Entry("a structured 429", rpc("slow down", map[string]any{"status": 429}), true),
+		Entry("a 429 in the text", errors.New("429 Too Many Requests"), true),
+		Entry("a provider's rate limit phrase", errors.New("rate limit exceeded"), true),
+		Entry("a 403", rpc("denied", map[string]any{"statusCode": 403}), false),
+		Entry("a 503", rpc("boom", map[string]any{"statusCode": 503}), false),
+		Entry("an unknown error", errors.New("nope"), false),
+	)
+
+	DescribeTable("errors the gateway's record can improve (an authentication failure worded by the harness)",
+		func(err error, want bool) { Expect(agentd.IsAuthLike(err)).To(Equal(want)) },
+		Entry("OpenCode's error without a status", rpc("Authentication required: provider authentication required", nil), true),
+		Entry("a structured 401", rpc("Authentication required", map[string]any{"statusCode": 401}), true),
+		Entry("a 403 names itself", rpc("denied", map[string]any{"statusCode": 403}), false),
+		Entry("a 429", rpc("slow down", map[string]any{"status": 429}), false),
+		Entry("an unknown error", errors.New("nope"), false),
+	)
+
+	Describe("the gateway's record of the provider refusing the request", func() {
+		opencode := rpc("Authentication required: provider authentication required", nil)
+
+		It("makes a provider 403 a policy failure, not a gateway-key fault", func() {
+			class, gateway, reason := agentd.RefusedByProvider(opencode, 403, "openrouter")
+			Expect(class).To(Equal("policy"))
+			Expect(gateway).To(BeFalse(), "a spent budget's check must not take it")
+			Expect(reason).To(HavePrefix("The model provider (openrouter) refused the request (HTTP 403) [as reported by the harness: "))
+			Expect(reason).To(ContainSubstring("Authentication required: provider authentication required"), "the harness's own words stay, labelled as such")
+		})
+
+		It("makes a provider 401 a provider-key fault, fatal, not the agent's gateway key", func() {
+			class, gateway, reason := agentd.RefusedByProvider(opencode, 401, "anthropic")
+			Expect(class).To(Equal("fatal"))
+			Expect(gateway).To(BeFalse())
+			Expect(reason).To(And(ContainSubstring("rejected the API key Koinon holds for it (HTTP 401)"), ContainSubstring("provider's key in the catalog")))
+			Expect(reason).NotTo(ContainSubstring("gateway key"))
+		})
+
+		It("names the provider only when it is known", func() {
+			_, _, reason := agentd.RefusedByProvider(opencode, 403, "")
+			Expect(reason).To(HavePrefix("The model provider refused the request (HTTP 403) [as reported by the harness: "))
+		})
+	})
+
 	DescribeTable("ACP stop reasons",
 		func(stop acp.StopReason, want string) { Expect(agentd.StopClass(stop)).To(Equal(want)) },
 		Entry("refusal is policy", acp.StopRefusal, "policy"),

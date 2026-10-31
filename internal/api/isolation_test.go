@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -51,6 +53,8 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
+	tracev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1/tracev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 )
@@ -108,6 +112,26 @@ var isolationCases = map[string]isolationCase{
 			return c.agents.ResumeAgent(ctx, &agentv1alpha1.ResumeAgentRequest{OrgId: org, AgentId: f.agent.GetId()})
 		},
 	},
+	agentv1alpha1connect.AgentServiceGetAgentModelProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.GetAgentModel(ctx, &agentv1alpha1.GetAgentModelRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	agentv1alpha1connect.AgentServiceSetAgentModelProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.SetAgentModel(ctx, &agentv1alpha1.SetAgentModelRequest{OrgId: org, AgentId: f.agent.GetId(), Model: "default"})
+		},
+	},
+	agentv1alpha1connect.AgentServiceSetAgentThinkingProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.SetAgentThinking(ctx, &agentv1alpha1.SetAgentThinkingRequest{OrgId: org, AgentId: f.agent.GetId(), Thinking: "default"})
+		},
+	},
+	agentv1alpha1connect.AgentServiceRunAgentTriggerProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.RunAgentTrigger(ctx, &agentv1alpha1.RunAgentTriggerRequest{OrgId: org, AgentId: f.agent.GetId(), TriggerId: "daily-check"})
+		},
+	},
 	agentv1alpha1connect.AgentServiceArchiveAgentProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.agents.ArchiveAgent(ctx, &agentv1alpha1.ArchiveAgentRequest{OrgId: org, AgentId: f.agent.GetId()})
@@ -151,6 +175,12 @@ var isolationCases = map[string]isolationCase{
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.questions.ListQuestions(ctx, &questionv1alpha1.ListQuestionsRequest{OrgId: org})
+		},
+	},
+	questionv1alpha1connect.QuestionServiceListAskableMembersProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.questions.ListAskableMembers(ctx, &questionv1alpha1.ListAskableMembersRequest{OrgId: org})
 		},
 	},
 	questionv1alpha1connect.QuestionServiceAnswerQuestionProcedure: {
@@ -360,6 +390,18 @@ var isolationCases = map[string]isolationCase{
 			return budgetClient(c).SetAgentBudget(ctx, &budgetv1alpha1.SetAgentBudgetRequest{OrgId: org, AgentId: f.agent.GetId(), DailyLimitUsd: "1"})
 		},
 	},
+	budgetv1alpha1connect.BudgetServiceGetAgentRunLimitsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return budgetClient(c).GetAgentRunLimits(ctx, &budgetv1alpha1.GetAgentRunLimitsRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	budgetv1alpha1connect.BudgetServiceSetAgentRunLimitsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return budgetClient(c).SetAgentRunLimits(ctx, &budgetv1alpha1.SetAgentRunLimitsRequest{
+				OrgId: org, AgentId: f.agent.GetId(), Override: &budgetv1alpha1.RunLimitValues{MaxModelRequests: 10},
+			})
+		},
+	},
 	budgetv1alpha1connect.BudgetServiceListNotificationsProcedure: {
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
@@ -430,6 +472,11 @@ var isolationCases = map[string]isolationCase{
 			})
 		},
 	},
+	providerv1alpha1connect.ProviderServiceCheckProviderEchoProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.providers.CheckProviderEcho(ctx, &providerv1alpha1.CheckProviderEchoRequest{OrgId: org, ProviderId: f.provider, Model: "any"})
+		},
+	},
 	providerv1alpha1connect.ProviderServiceDeleteProviderProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.providers.DeleteProvider(ctx, &providerv1alpha1.DeleteProviderRequest{OrgId: org, ProviderId: f.provider})
@@ -451,6 +498,17 @@ var isolationCases = map[string]isolationCase{
 	providerv1alpha1connect.ProviderServiceUpdateModelProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: f.model, Guard: new(false)})
+		},
+	},
+	providerv1alpha1connect.ProviderServiceModelFormatsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.providers.ModelFormats(ctx, &providerv1alpha1.ModelFormatsRequest{OrgId: org, ProviderId: f.provider, Name: "intruder"})
+		},
+	},
+	providerv1alpha1connect.ProviderServiceProviderTypeInfoProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.providers.ProviderTypeInfo(ctx, &providerv1alpha1.ProviderTypeInfoRequest{OrgId: org, Type: "anthropic"})
 		},
 	},
 	providerv1alpha1connect.ProviderServiceDeleteModelProcedure: {
@@ -520,6 +578,84 @@ var isolationCases = map[string]isolationCase{
 		},
 	},
 
+	tracev1alpha1connect.TraceDestinationServiceListDestinationsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return traceClient(c).ListDestinations(ctx, &tracev1alpha1.ListDestinationsRequest{OrgId: org})
+		},
+	},
+	tracev1alpha1connect.TraceDestinationServiceCreateDestinationProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			otlp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+			defer otlp.Close()
+			return traceClient(c).CreateDestination(ctx, &tracev1alpha1.CreateDestinationRequest{OrgId: org, Destination: &tracev1alpha1.DestinationInput{
+				Name: fmt.Sprintf("intruder-%d", dbSeq.Add(1)), Backend: tracev1alpha1.Backend_BACKEND_GENERIC, EndpointUrl: otlp.URL,
+				Secrets: map[string]string{"X-Token": "koinon_test_not-a-real-token"},
+			}})
+		},
+	},
+	tracev1alpha1connect.TraceDestinationServiceUpdateDestinationProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return traceClient(c).UpdateDestination(ctx, &tracev1alpha1.UpdateDestinationRequest{OrgId: org, DestinationId: f.traceDest, Destination: &tracev1alpha1.DestinationInput{
+				Name: "intruder", Backend: tracev1alpha1.Backend_BACKEND_GENERIC, EndpointUrl: "https://intruder.example.com/v1/traces",
+				Secrets: map[string]string{"X-Token": "koinon_test_not-a-real-token"},
+			}})
+		},
+	},
+	tracev1alpha1connect.TraceDestinationServiceDeleteDestinationProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return traceClient(c).DeleteDestination(ctx, &tracev1alpha1.DeleteDestinationRequest{OrgId: org, DestinationId: f.traceDest})
+		},
+	},
+	tracev1alpha1connect.TraceDestinationServiceTestDestinationProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return traceClient(c).TestDestination(ctx, &tracev1alpha1.TestDestinationRequest{OrgId: org, DestinationId: f.traceDest})
+		},
+	},
+	tracev1alpha1connect.TraceDestinationServiceGetSettingsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return traceClient(c).GetSettings(ctx, &tracev1alpha1.GetSettingsRequest{OrgId: org})
+		},
+	},
+	tracev1alpha1connect.TraceDestinationServiceUpdateSettingsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return traceClient(c).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
+				OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_REDACTED, SampleRate: new(float64(1)), PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
+			})
+		},
+	},
+	tracev1alpha1connect.TraceDestinationServiceGetPlatformProcedure: {
+		call: func(ctx context.Context, c *client, _ string, _ orgFixture) (proto.Message, error) {
+			return traceClient(c).GetPlatform(ctx, &tracev1alpha1.GetPlatformRequest{})
+		},
+	},
+	tracev1alpha1connect.TraceDestinationServiceSetPlatformDestinationProcedure: {
+		call: func(ctx context.Context, c *client, _ string, _ orgFixture) (proto.Message, error) {
+			return traceClient(c).SetPlatformDestination(ctx, &tracev1alpha1.SetPlatformDestinationRequest{Destination: &tracev1alpha1.DestinationInput{
+				Backend: tracev1alpha1.Backend_BACKEND_GENERIC, EndpointUrl: "https://intruder.example.com/v1/traces",
+				Secrets: map[string]string{"X-Token": "koinon_test_not-a-real-token"},
+			}})
+		},
+	},
+	tracev1alpha1connect.TraceDestinationServiceDeletePlatformDestinationProcedure: {
+		call: func(ctx context.Context, c *client, _ string, _ orgFixture) (proto.Message, error) {
+			return traceClient(c).DeletePlatformDestination(ctx, &tracev1alpha1.DeletePlatformDestinationRequest{})
+		},
+	},
+	tracev1alpha1connect.TraceDestinationServiceTestPlatformDestinationProcedure: {
+		call: func(ctx context.Context, c *client, _ string, _ orgFixture) (proto.Message, error) {
+			return traceClient(c).TestPlatformDestination(ctx, &tracev1alpha1.TestPlatformDestinationRequest{})
+		},
+	},
+	tracev1alpha1connect.TraceDestinationServiceSetPlatformCeilingProcedure: {
+		call: func(ctx context.Context, c *client, _ string, _ orgFixture) (proto.Message, error) {
+			return traceClient(c).SetPlatformCeiling(ctx, &tracev1alpha1.SetPlatformCeilingRequest{Ceiling: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE})
+		},
+	},
+
 	runv1alpha1connect.RunServiceWatchRunProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			stream, err := c.runs.WatchRun(ctx, &runv1alpha1.WatchRunRequest{OrgId: org, RunId: f.run.GetId()})
@@ -552,6 +688,8 @@ var _ = Describe("org isolation", func() {
 			keys:   secretstoretest.Keyring(),
 			github: github.NewClient(github.Options{BaseURL: gh.URL()}),
 			ghFake: gh,
+			// The create case sends a test trace to a server on 127.0.0.1.
+			allowedHosts: []string{"127.0.0.1"},
 		})
 		a := e.newIsolationFixture(ctx, gh.PEM)
 		b := e.newIsolationFixture(ctx, gh.PEM)
@@ -628,6 +766,10 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	Expect(orgID.Scan(f.org)).To(Succeed())
 	_, err = mcpservers.New(e.pool, nil, nil).SyncTools(ctx, orgID, sid, []mcpservers.ListedTool{{Name: f.mcpTool, Description: "Search"}})
 	Expect(err).NotTo(HaveOccurred())
+	// A trace destination, inserted directly: the isolation cases only name it.
+	Expect(e.pool.QueryRow(ctx,
+		`INSERT INTO trace_destinations (org_id, name, backend, endpoint_url) VALUES ($1, 'isolated', 'generic', 'https://otlp.example.com/v1/traces') RETURNING id`,
+		f.org).Scan(&f.traceDest)).To(Succeed())
 	return f
 }
 
@@ -658,6 +800,8 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND url = 'https://mcp.example.com/mcp'`, org),
 		count(ctx, e, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND tier = 'ask' AND review_reason IS NULL`, org),
 		count(ctx, e, `SELECT count(*) FROM agent_mcp_servers WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM trace_destinations WHERE org_id = $1 AND name = 'isolated'`, org),
+		count(ctx, e, `SELECT count(*) FROM org_trace_settings WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND requires_two_approvers`, org),
 	}
 }

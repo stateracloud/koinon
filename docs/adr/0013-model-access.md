@@ -1,6 +1,6 @@
 # 0013. Model access through one gateway with hierarchical budgets
 
-- Status: Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md) and [0044](0044-in-sandbox-credential-exception.md)
+- Status: Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0044](0044-in-sandbox-credential-exception.md) and 2026-10-30 (below)
 - Date: 2026-10-21
 - Decision: [design.md#13](../design.md)
 
@@ -103,3 +103,11 @@ flowchart LR
 - [0040](0040-agentgateway-model-and-mcp-gateway.md),
   [0041](0041-koinon-spend-ledger-and-budget-stops.md),
   [0044](0044-in-sandbox-credential-exception.md), [0006](0006-identity-layers.md)
+
+## Amendment (2026-10-30): a spent budget stops the run
+
+A spent budget **stops** the run: it is canceled with failure class `budget` (and reason
+`spend_limit`, or `run_spend_cap` for a run's own limit). It does not park. The later decisions win
+over the "hard 100% (run parks)" above: ADR 0041's "Stop before the key goes" (cancel, not park), ADR 0050
+and ADR 0081; the code cancels (`ledger.Stop`, agentd's `budgetStop`). The park reason `budget`
+(`PARK_REASON_BUDGET`) is reserved and unused; proto values are never removed. Wording only (GLOSSARY.md), no decision change.

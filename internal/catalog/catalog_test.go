@@ -35,7 +35,7 @@ var _ = Describe("URLPolicy", func() {
 	}
 	p := catalog.URLPolicy{
 		Namespace:    "koinon",
-		AllowedHosts: []string{"localhost:11434", "ollama.lab.example.com", "10.20.0.0/24", "fakemodel.fakes.svc:8080", "192.168.7.7"},
+		AllowedHosts: []string{"localhost:11434", "ollama.lab.example.com", "10.20.0.0/24", "fakemodel.fakes.svc:8080", "192.168.7.7", "[fd00::7]:11434"},
 		Resolver: resolver(map[string][]string{
 			"api.openai.com":          {"104.18.6.192"},
 			"ollama.lab.example.com":  {"127.0.0.1"},
@@ -50,6 +50,26 @@ var _ = Describe("URLPolicy", func() {
 			"v6.example.com":          {"fe80::1"},
 		}),
 	}
+	DescribeTable("refuses a pattern host, strict or not",
+		func(ctx SpecContext, u string) {
+			for _, check := range []func(context.Context, string) error{p.Check, p.CheckStrict} {
+				err := check(ctx, u)
+				var inv *catalog.InvalidError
+				Expect(errors.As(err, &inv)).To(BeTrue(), u)
+				Expect(err.Error()).To(ContainSubstring("DNS exfiltration"))
+			}
+		},
+		Entry("wildcard label", "https://*.example.com/v1"),
+		Entry("bare star", "https://*/v1"),
+		Entry("inner glob", "https://api.*.example.com"),
+	)
+	It("refuses a pattern in the platform allow list", func() {
+		Expect(catalog.ValidateAllowedHosts([]string{"ollama.lab.example.com:11434", "10.20.0.0/24"})).To(Succeed())
+		Expect(catalog.ValidateAllowedHosts([]string{"[fd00::1]", "[fd00::1]:11434", "fd00::1", "fd00::/8"})).To(Succeed())
+		for _, bad := range []string{"*.lab.example.com", "[ab].lab.example.com", "[fd00::1]*", "[fd00::1]:[1-9]", "[*]:80"} {
+			Expect(catalog.ValidateAllowedHosts([]string{bad})).To(MatchError(ContainSubstring("is a pattern")), bad)
+		}
+	})
 	DescribeTable("denies",
 		func(ctx SpecContext, u string) {
 			err := p.Check(ctx, u)
@@ -113,6 +133,8 @@ var _ = Describe("URLPolicy", func() {
 		Entry("an IP inside an allow-listed CIDR", "http://10.20.0.5:11434/v1"),
 		Entry("a name that resolves into an allow-listed CIDR", "http://allowed-net.example.com/v1"),
 		Entry("an allow-listed IP", "http://192.168.7.7:11434/v1"),
+		Entry("a public IPv6 literal (brackets are not a pattern)", "http://[2606:4700::1111]/v1"),
+		Entry("an allow-listed IPv6 literal with its port", "http://[fd00::7]:11434/v1"),
 		Entry("a name that does not resolve (checked again at render)", "https://future.example.com/v1"),
 	)
 	DescribeTable("rejects non-ASCII hosts", func(ctx SpecContext, u string) {
@@ -333,6 +355,148 @@ var _ = Describe("Service", func() {
 			_, err = svc.CreateModel(ctx, other, audit.User(otherUser), otherUser, catalog.ModelInput{ProviderID: p.ID, Name: "m"})
 			Expect(err).To(MatchError(catalog.ErrNotFound))
 			Expect(svc.DeleteProvider(ctx, other, audit.User(otherUser), p.ID)).To(MatchError(catalog.ErrNotFound))
+		})
+	})
+
+	Describe("model formats (ADR 0069)", func() {
+		mk := func(ctx SpecContext, name, typ, url string) catalog.Provider {
+			GinkgoHelper()
+			p, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: name, Type: typ, URL: url})
+			Expect(err).NotTo(HaveOccurred())
+			return p
+		}
+		model := func(ctx SpecContext, p catalog.Provider, name, format string) catalog.Model {
+			GinkgoHelper()
+			m, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: name, Format: format})
+			Expect(err).NotTo(HaveOccurred())
+			return m
+		}
+
+		It("defaults from the table, and an override marks the model and is validated", func(ctx SpecContext) {
+			direct := mk(ctx, "anthropic", "anthropic", "https://api.anthropic.com/v1")
+			router := create(ctx, "openrouter", "")
+			Expect(model(ctx, direct, "claude-haiku-4-5", "")).To(And(HaveField("Format", "anthropic"), HaveField("FormatOverridden", false)))
+			Expect(model(ctx, router, "deepseek/flash", "")).To(HaveField("Format", "openai"))
+			// OpenRouter's Claude models speak Messages like any other Claude (#242).
+			routed := model(ctx, router, "anthropic/claude-haiku-5.5", "")
+			Expect(routed).To(And(HaveField("Format", "anthropic"), HaveField("FormatOverridden", false)))
+
+			oai := "openai"
+			upd, err := svc.UpdateModel(ctx, org, actor, routed.ID, catalog.ModelPatch{Format: &oai})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(upd).To(And(HaveField("Format", "openai"), HaveField("FormatOverridden", true)))
+
+			_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: direct.ID, Name: "x", Format: "openai"})
+			var inv *catalog.InvalidError
+			Expect(errors.As(err, &inv)).To(BeTrue())
+			Expect(err).To(MatchError(ContainSubstring("does not offer")))
+			bad := "gemini"
+			_, err = svc.UpdateModel(ctx, org, actor, routed.ID, catalog.ModelPatch{Format: &bad})
+			Expect(err).To(MatchError(ContainSubstring("unknown model format")))
+			Expect(events(ctx, "model.update")[0].Summary).To(ContainSubstring("formatOverridden"))
+		})
+
+		It("re-derives only models that are not overridden, audited as koinon-api", func(ctx SpecContext) {
+			router := create(ctx, "openrouter", "")
+			follows := model(ctx, router, "deepseek/flash", "")
+			overridden := model(ctx, router, "anthropic/claude-a", "anthropic")
+			current := model(ctx, router, "plain", "")
+			// A default that changed since the row was written: the table says openai, the row anthropic.
+			_, err := pool.Exec(ctx, `UPDATE models SET format = 'anthropic' WHERE org_id = $1 AND id = $2`, org, mustUUID(follows.ID))
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE models SET format = 'openai' WHERE org_id = $1 AND id = $2`, org, mustUUID(overridden.ID))
+			Expect(err).NotTo(HaveOccurred())
+
+			n, err := svc.RederiveFormats(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(BeNumerically(">=", 1))
+			got := func(m catalog.Model) catalog.Model {
+				r, err := svc.GetModel(ctx, org, m.ID)
+				Expect(err).NotTo(HaveOccurred())
+				return r
+			}
+			Expect(got(follows)).To(And(HaveField("Format", "openai"), HaveField("FormatOverridden", false)))
+			Expect(got(overridden)).To(And(HaveField("Format", "openai"), HaveField("FormatOverridden", true)))
+			Expect(got(current).Format).To(Equal("openai"))
+
+			ev := events(ctx, "model.format_rederived")
+			Expect(ev).To(HaveLen(1))
+			Expect(ev[0].ActorKind).To(Equal("system"))
+			Expect(ev[0].ActorID).To(Equal("koinon-api"))
+			Expect(ev[0].TargetID).To(Equal(follows.ID))
+
+			n, err = svc.RederiveFormats(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(events(ctx, "model.format_rederived")).To(HaveLen(1), "a second run changes nothing (%d)", n)
+		})
+
+		It("leaves the models of a deleted org alone", func(ctx SpecContext) {
+			router := create(ctx, "openrouter", "")
+			m := model(ctx, router, "deepseek/flash", "")
+			_, err := pool.Exec(ctx, `UPDATE models SET format = 'anthropic' WHERE org_id = $1 AND id = $2`, org, mustUUID(m.ID))
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE orgs SET deleted_at = now() WHERE id = $1`, org)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.RederiveFormats(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			var f string
+			Expect(pool.QueryRow(ctx, `SELECT format FROM models WHERE org_id = $1 AND id = $2`, org, mustUUID(m.ID)).Scan(&f)).To(Succeed())
+			Expect(f).To(Equal("anthropic"))
+		})
+
+		It("keeps formats within what a provider's new type offers", func(ctx SpecContext) {
+			router := create(ctx, "openrouter", "")
+			m := model(ctx, router, "anthropic/claude-a", "anthropic")
+			openai := "openai"
+			_, err := svc.UpdateProvider(ctx, org, actor, router.ID, catalog.ProviderPatch{Type: &openai})
+			Expect(err).To(MatchError(ContainSubstring("does not offer")))
+			back := ""
+			_, err = svc.UpdateModel(ctx, org, actor, m.ID, catalog.ModelPatch{Format: &back})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.UpdateProvider(ctx, org, actor, router.ID, catalog.ProviderPatch{Type: &openai})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("stores the workspace ID for anthropic providers only", func(ctx SpecContext) {
+			_, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "o", Type: "openai", URL: "https://api.openai.com/v1", AnthropicWorkspaceID: "wrkspc_01"})
+			Expect(err).To(MatchError(ContainSubstring("anthropic providers only")))
+			for _, id := range []string{"wrkspc_", "wrkspc_a-b", "ws_01", "wrkspc_01 "} {
+				_, err = svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "a", Type: "anthropic", URL: "https://api.anthropic.com/v1", AnthropicWorkspaceID: id})
+				Expect(err).To(MatchError(ContainSubstring("wrkspc_")), id)
+			}
+			p, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "a", Type: "anthropic", URL: "https://api.anthropic.com/v1", AnthropicWorkspaceID: "wrkspc_01Ab"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(p.AnthropicWorkspaceID).To(Equal("wrkspc_01Ab"))
+			// The database refuses it for other types too, whatever the service does.
+			_, err = pool.Exec(ctx, `UPDATE providers SET anthropic_workspace_id = 'wrkspc_01' WHERE org_id = $1 AND id = $2`, org, mustUUID(create(ctx, "other", "").ID))
+			Expect(err).To(MatchError(ContainSubstring("providers_anthropic_workspace_id_type")))
+		})
+
+		It("applies declared formats: an override is kept, a missing format follows the default", func(ctx SpecContext) {
+			d := catalog.DeclaredProvider{
+				SecretName: "anthropic-secret", Version: "v1", Name: "anthropic", Type: "anthropic", URL: "https://api.anthropic.com/v1",
+				AnthropicWorkspaceID: "wrkspc_01Ab",
+				Models:               []catalog.DeclaredModel{{Name: "claude-haiku-4-5"}, {Name: "claude-opus", Format: "anthropic"}},
+			}
+			_, err := svc.ApplyDeclaredProvider(ctx, org, d)
+			Expect(err).NotTo(HaveOccurred())
+			models, _ := svc.ListModels(ctx, org)
+			Expect(models).To(ConsistOf(
+				And(HaveField("Name", "claude-haiku-4-5"), HaveField("Format", "anthropic"), HaveField("FormatOverridden", false)),
+				And(HaveField("Name", "claude-opus"), HaveField("Format", "anthropic"), HaveField("FormatOverridden", true)),
+			))
+			ps, _ := svc.ListProviders(ctx, org)
+			Expect(ps[0].AnthropicWorkspaceID).To(Equal("wrkspc_01Ab"))
+
+			bad := d
+			bad.Version = "v2"
+			bad.Models = []catalog.DeclaredModel{{Name: "m", Format: "openai"}}
+			_, err = svc.ApplyDeclaredProvider(ctx, org, bad)
+			Expect(err).To(MatchError(ContainSubstring("does not offer")))
+			bad.Models = nil
+			bad.Type, bad.URL = "openai", "https://api.openai.com/v1"
+			_, err = svc.ApplyDeclaredProvider(ctx, org, bad)
+			Expect(err).To(MatchError(ContainSubstring("anthropic providers only")))
 		})
 	})
 

@@ -252,6 +252,7 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
         </p>
       )}
       {t.description && <p className="text-muted-foreground text-sm">{t.description}</p>}
+      {(t.descriptionCapped || t.descriptionCleaned) && <SanitisedNote tool={t} />}
       <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-1" disabled={pending}>
         <legend className="sr-only">Tier of {t.name}</legend>
         {tiers.map((x) => (
@@ -286,7 +287,7 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
       {suggestsAuto(t) && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span>Suggested read-only: the server marks this tool as read-only. That is its own claim, so the tier stays as it is until you choose.</span>
-          <Button variant="outline" size="sm" disabled={pending} aria-label={`Set ${t.name} to Auto`} onClick={() => void run(actions.setToolTier(server.id, t.name, Tier.AUTO))}>
+          <Button variant="outline" size="sm" disabled={pending} aria-label={`Set to Auto: ${t.name}`} onClick={() => void run(actions.setToolTier(server.id, t.name, Tier.AUTO))}>
             Set to Auto
           </Button>
         </div>
@@ -294,12 +295,30 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
       {t.reviewReason && (
         <div className="flex flex-wrap items-center gap-2 text-sm" role="note">
           <span>Review: {t.reviewReason}.</span>
-          <Button variant="outline" size="sm" disabled={pending} aria-label={`Mark ${t.name} reviewed`} onClick={() => void run(actions.acknowledgeReview(server.id, t.name))}>
+          <Button variant="outline" size="sm" disabled={pending} aria-label={`Mark reviewed: ${t.name}`} onClick={() => void run(actions.acknowledgeReview(server.id, t.name))}>
             Mark reviewed
           </Button>
           <p className="text-muted-foreground w-full text-xs">Reviewing keeps the tool in Ask; set it back to Auto yourself if you trust the new version.</p>
         </div>
       )}
     </div>
+  )
+}
+
+/** SanitisedNote says Koinon changed what the server published before showing it to agents (ADR 0057, #267). */
+function SanitisedNote({ tool }: { tool: Tool }) {
+  const parts: string[] = []
+  if (tool.descriptionCleaned) parts.push('hidden characters removed or lookalike tags escaped')
+  if (tool.descriptionCapped) {
+    parts.push(
+      tool.descriptionOriginalLength > 0n
+        ? `cut to its length cap (the server published ${tool.descriptionOriginalLength} characters)`
+        : 'cut to its length cap',
+    )
+  }
+  return (
+    <p role="note" className="text-muted-foreground text-xs">
+      Koinon sanitised this tool's text: {parts.join('; ')}. Agents see the text shown here.
+    </p>
   )
 }

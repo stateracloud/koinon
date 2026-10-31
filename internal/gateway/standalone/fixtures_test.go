@@ -7,6 +7,9 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 var (
@@ -33,14 +36,14 @@ func fixtures() []fixture {
 				Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: "https://openrouter.ai/api/v1",
 				APIKeyFile: "/secrets/upstream/api_key",
 				Models: []gateway.Model{
-					{Name: "deepseek/deepseek-v4.1-flash", Guard: true, Price: &gateway.Price{Input: "0.30", Output: "1.20", CacheRead: "0.006"}},
-					{Name: "open/model", Price: &gateway.Price{Input: "1", Output: "2"}},
-					{Name: "unpriced/model"},
+					{Name: "deepseek/deepseek-v4.1-flash", Format: modelformat.OpenAI, Guard: true, Price: &gateway.Price{Input: "0.30", Output: "1.20", CacheRead: "0.006"}},
+					{Name: "open/model", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "2"}},
+					{Name: "unpriced/model", Format: modelformat.OpenAI},
 				},
 			},
 			{
 				Org: "globex", Name: "local", Type: "ollama", BaseURL: "http://ollama.globex.internal:11434/v1",
-				Models: []gateway.Model{{Name: "deepseek/deepseek-v4.1-flash", Price: &gateway.Price{Input: "0", Output: "0"}}},
+				Models: []gateway.Model{{Name: "deepseek/deepseek-v4.1-flash", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "0", Output: "0"}}},
 			},
 		},
 		MCP: []gateway.MCPTarget{
@@ -51,8 +54,8 @@ func fixtures() []fixture {
 	full.AddKey(fixedKey("k-bbbbbbbbbbbb", agentB, "test-b"))
 	full.AddKey(fixedKey("k-gggggggggggg", agentG, "test-g"))
 	full.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
-	full.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 4.25, Window: 24 * time.Hour, Generation: "1792627200-750000000"})
-	full.SetLimit(agentB, &gateway.Limit{Unit: gateway.Tokens, Amount: 200000, Window: 30 * 24 * time.Hour})
+	full.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("4.25"), Generation: "1792627200-750000000"})
+	full.SetLimit(agentB, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("200"), Window: 30 * 24 * time.Hour})
 	full.GrantTools(agentA,
 		gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}},
 		gateway.ToolGrant{Target: "docs", Tools: []string{"search"}},
@@ -61,7 +64,7 @@ func fixtures() []fixture {
 	modelsOnly := gateway.State{Providers: []gateway.Provider{{
 		Org: "acme", Name: "ollama", Type: "ollama",
 		BaseURL: "http://ollama.example.internal:11434/v1",
-		Models:  []gateway.Model{{Name: "qwen3.5:4b", Price: &gateway.Price{Input: "0", Output: "0"}}},
+		Models:  []gateway.Model{{Name: "qwen3.5:4b", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "0", Output: "0"}}},
 	}}}
 	modelsOnly.AddKey(fixedKey("k-cccccccccccc", agentA, "test-c"))
 
@@ -84,14 +87,47 @@ func fixtures() []fixture {
 	)
 	mcpServers.GrantTools(agentG, gateway.ToolGrant{Target: "globex-search", Tools: []string{"query"}})
 
+	// ADR 0069: one org with a model of each format, the Anthropic one on a workspace-scoped provider.
+	formats := gateway.State{Providers: []gateway.Provider{
+		{
+			Org: "acme", Name: "claude", Type: "anthropic", BaseURL: "https://api.anthropic.com/v1",
+			APIKeyFile: "/secrets/upstream/api_key", AnthropicWorkspaceID: "wrkspc_01ExampleExample",
+			Models: []gateway.Model{
+				{Name: "claude-haiku-4-5", Format: modelformat.Anthropic, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
+				// A model the catalog says can think: the gateway pins the beta its mode needs.
+				{Name: "claude-haiku-5-5", Format: modelformat.Anthropic, Thinking: thinking.Of("anthropic", "claude-haiku-5-5", modelformat.Anthropic), Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
+			},
+		},
+		{
+			Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: "https://openrouter.ai/api/v1",
+			APIKeyFile: "/secrets/upstream/api_key",
+			Models:     []gateway.Model{{Name: "open/model", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "2"}}},
+		},
+	}}
+	formats.AddKey(fixedKey("k-eeeeeeeeeeee", agentA, "test-e"))
+
+	// Issue #245: the limits the ledger pushed in the rc.7 home-lab run, net of spends with ten and
+	// twelve fraction digits, and one that float64 prints with an exponent.
+	budgets := gateway.State{}
+	budgets.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
+	budgets.AddKey(fixedKey("k-bbbbbbbbbbbb", agentB, "test-b"))
+	budgets.AddKey(fixedKey("k-gggggggggggg", agentG, "test-g"))
+	five := money.MustParse("5")
+	for ref, spent := range map[gateway.AgentRef]string{agentA: "0.0172757592", agentB: "0.000000123456", agentG: "4.99995"} {
+		l := gateway.USDLimit(five.SubFloor(money.MustParse(spent)), 24*time.Hour, "1792627200-0123456789abcdef")
+		budgets.SetLimit(ref, &l)
+	}
+
 	return []fixture{
 		{name: "empty", state: gateway.State{}},
 		{name: "models-only", state: modelsOnly, options: standalone.Options{Port: 8080}},
 		{name: "full", state: full, options: standalone.Options{
 			DatabaseURL:   "sqlite:///data/agentgateway.db?mode=rwc",
-			AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318"},
+			AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318", TokenFile: "/secrets/otlp/token"},
 		}},
 		{name: "mcp-no-grants", state: mcpNoGrants},
 		{name: "mcp-servers", state: mcpServers},
+		{name: "model-formats", state: formats},
+		{name: "budgets-precision", state: budgets, options: standalone.Options{DatabaseURL: "sqlite:///data/agentgateway.db?mode=rwc"}},
 	}
 }

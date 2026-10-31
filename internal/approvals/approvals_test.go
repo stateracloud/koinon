@@ -53,7 +53,7 @@ var _ = Describe("Service", func() {
 		Expect(row.DecisionNote.String).To(Equal("looks good"))
 		res := result(row)
 		Expect(res).To(HaveKeyWithValue("url", "https://github.test/acme/widgets/pull/1"))
-		Expect(res).To(HaveKeyWithValue("branch", "koinon/fix-typo"))
+		Expect(res).To(HaveKeyWithValue("branch", f.branch("fix-typo")))
 		Expect(res).To(HaveKeyWithValue("base", "main"))
 
 		By("one branch, one commit on top of main, one pull request")
@@ -64,16 +64,16 @@ var _ = Describe("Service", func() {
 		}))
 		Expect(repo.Pulls).To(HaveLen(1))
 		pr := repo.Pulls[0]
-		Expect(pr.Head).To(Equal("koinon/fix-typo"))
+		Expect(pr.Head).To(Equal(f.branch("fix-typo")))
 		Expect(pr.Base).To(Equal("main"))
 		Expect(pr.Title).To(Equal("Fix the typo"))
 		Expect(pr.Body).To(Equal("Fixes the typo in the docs."))
-		head := repo.Commits[repo.Refs["koinon/fix-typo"]]
+		head := repo.Commits[repo.Refs[f.branch("fix-typo")]]
 		Expect(head.Parents).To(Equal([]string{repo.Refs["main"]}))
 		Expect(pr.HeadSHA).To(Equal(head.SHA))
 
 		By("the commit holds exactly the approved files, byte for byte")
-		Expect(f.gh.Files("widgets", "koinon/fix-typo")).To(Equal(map[string][]byte{
+		Expect(f.gh.Files("widgets", f.branch("fix-typo"))).To(Equal(map[string][]byte{
 			"docs/guide.md":    []byte("# Guide\r\n\tcafé ☕ — no newline at the end"),
 			"scripts/check.sh": []byte("#!/bin/sh\nexit 0\n"),
 		}))
@@ -120,7 +120,7 @@ var _ = Describe("Service", func() {
 		row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "looks good")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(row.Status).To(Equal(store.ApprovalStatusExecuted), row.Error.String)
-		Expect(result(row)).To(HaveKeyWithValue("branch", "koinon/fix-typo"))
+		Expect(result(row)).To(HaveKeyWithValue("branch", f.branch("fix-typo")))
 
 		By("the token was minted at the GHES, and the branch, commit and pull request are there")
 		Expect(f.gh.Mints()).To(Equal(1))
@@ -129,7 +129,7 @@ var _ = Describe("Service", func() {
 			"POST git/blobs": 2, "POST git/trees": 1, "POST git/commits": 1, "POST git/refs": 1, "POST pulls": 1,
 		}))
 		Expect(repo.Pulls).To(HaveLen(1))
-		Expect(f.gh.Files("widgets", "koinon/fix-typo")).To(HaveKey("docs/guide.md"))
+		Expect(f.gh.Files("widgets", f.branch("fix-typo"))).To(HaveKey("docs/guide.md"))
 		Expect(f.logs.String()).NotTo(ContainSubstring("ghs_"))
 	})
 
@@ -166,7 +166,7 @@ var _ = Describe("Service", func() {
 		row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(row.Status).To(Equal(store.ApprovalStatusExecuted), row.Error.String)
-		Expect(f.gh.FileModes("widgets", "koinon/add-check")).To(Equal(map[string]string{
+		Expect(f.gh.FileModes("widgets", f.branch("add-check"))).To(Equal(map[string]string{
 			"README.md":        "100644",
 			"scripts/check.sh": "100755",
 			"scripts/lib.sh":   "100644",
@@ -194,7 +194,7 @@ var _ = Describe("Service", func() {
 			row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(row.Status).To(Equal(store.ApprovalStatusExecuted), row.Error.String)
-			Expect(f.gh.FileModes("widgets", "koinon/edit-scripts")).To(Equal(map[string]string{
+			Expect(f.gh.FileModes("widgets", f.branch("edit-scripts"))).To(Equal(map[string]string{
 				"README.md":          "100644",
 				"scripts/run.sh":     "100755", // was executable, not marked: stays executable
 				"tools/deep/x/build": "100755",
@@ -353,7 +353,7 @@ var _ = Describe("Service", func() {
 		Expect(pending).To(BeEmpty(), "no card")
 		head := f.gh.Snapshot("widgets")
 		Expect(head.Pulls).To(HaveLen(1))
-		Expect(head.Commits[head.Refs["koinon/fix-typo"]].Message).To(ContainSubstring("Approved-by: Koinon Trusted preset"))
+		Expect(head.Commits[head.Refs[f.branch("fix-typo")]].Message).To(ContainSubstring("Approved-by: Koinon Trusted preset"))
 
 		By("the sweeper executes an allowed call the tool server could not")
 		f2 := newFixture(ctx, "trusted")
@@ -384,16 +384,73 @@ var _ = Describe("Service", func() {
 		Expect(comments[0].Body).To(Equal("Opened a PR.\n\n" + approvals.CommentMarker(req.ID)))
 	})
 
-	It("fails, without touching it, when the branch belongs to someone else", func(ctx SpecContext) {
+	It("fails, without touching it, when the branch appears after the request, owned by someone else", func(ctx SpecContext) {
 		f := newFixture(ctx, "standard")
-		f.gh.SetBranch("widgets", "koinon/fix-typo", "a human's commit", map[string]string{"x.txt": "x"})
 		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+		f.gh.SetBranch("widgets", f.branch("fix-typo"), "a human's commit", map[string]string{"x.txt": "x"})
 		row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(row.Status).To(Equal(store.ApprovalStatusFailed))
 		Expect(row.Error.String).To(ContainSubstring("was not created for this approval"))
 		Expect(f.gh.Snapshot("widgets").Calls).To(BeEmpty())
 		Expect(kinds(f.taskEvents(ctx))).To(ContainElement(approvals.KindFailed))
+	})
+
+	Describe("the branch namespace (#268)", func() {
+		It("refuses, before any approval exists, a branch that is already on the code host", func(ctx SpecContext) {
+			f := newFixture(ctx, "standard")
+			f.gh.SetBranch("widgets", f.branch("fix-typo"), "a human's commit", map[string]string{"x.txt": "x"})
+			reason := f.callRefused(ctx, githubtools.ToolCreatePullRequest, prArgs())
+			Expect(reason).To(ContainSubstring(f.branch("fix-typo")))
+			Expect(reason).To(ContainSubstring("already exists"))
+			Expect(reason).To(ContainSubstring("choose another branch name"))
+			rows, err := q.ListApprovalRequestsForTask(ctx, store.ListApprovalRequestsForTaskParams{OrgID: f.org, TaskID: f.task.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rows).To(BeEmpty(), "nothing for a human to approve")
+		})
+
+		It("answers the same call again with its request once the approval created the branch", func(ctx SpecContext) {
+			f := newFixture(ctx, "standard")
+			req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+			row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(row.Status).To(Equal(store.ApprovalStatusExecuted), row.Error.String)
+			Expect(f.gh.Snapshot("widgets").Refs).To(HaveKey(f.branch("fix-typo")))
+
+			again := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+			Expect(again.ID).To(Equal(req.ID), "the recorded call, not a refusal of its own branch")
+			Expect(again.Status).To(Equal(string(store.ApprovalStatusExecuted)))
+		})
+
+		It("records and shows the final branch name, whether or not the agent added koinon/", func(ctx SpecContext) {
+			f := newFixture(ctx, "standard")
+			for _, suggestion := range []string{"fix-typo", "koinon/fix-typo"} {
+				args := prArgs()
+				args["branch"] = suggestion
+				req := f.call(ctx, githubtools.ToolCreatePullRequest, args)
+				row := f.get(ctx, req.ID)
+				call, err := githubtools.DecodeCall(row.Tool, []byte(row.ArgsJson))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(call.(*githubtools.PullRequestArgs).Branch).To(Equal(f.branch("fix-typo")))
+			}
+		})
+
+		It("creates both pull requests when two agents suggest the same branch", func(ctx SpecContext) {
+			a := newFixture(ctx, "standard")
+			b := newFixtureOn(ctx, "standard", a.gh, false)
+			reqA := a.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+			reqB := b.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+			Expect(a.branch("fix-typo")).NotTo(Equal(b.branch("fix-typo")))
+
+			rowA, err := a.svc.Approve(ctx, a.org, mustID(reqA.ID), a.admin, reqA.ArgsSHA256, "")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rowA.Status).To(Equal(store.ApprovalStatusExecuted), rowA.Error.String)
+			rowB, err := b.svc.Approve(ctx, b.org, mustID(reqB.ID), b.admin, reqB.ArgsSHA256, "")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rowB.Status).To(Equal(store.ApprovalStatusExecuted), rowB.Error.String)
+			Expect(a.gh.Snapshot("widgets").Pulls).To(HaveLen(2))
+			Expect(a.gh.Snapshot("widgets").Refs).To(And(HaveKey(a.branch("fix-typo")), HaveKey(b.branch("fix-typo"))))
+		})
 	})
 
 	It("expires a request nobody decided and cancels its parked run with a task event", func(ctx SpecContext) {
@@ -442,7 +499,8 @@ var _ = Describe("Service", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		qrow, _, err := questions.Create(ctx, q, questions.Ask{
-			Org: f.org, Task: f.task.ID, Run: f.run.ID, Agent: f.agent.ID, To: f.owner,
+			Org: f.org, Task: f.task.ID, Run: f.run.ID, Agent: f.agent.ID,
+			Target: questions.Target{Kind: store.NotifyTargetKindUser, User: f.owner}, Recipients: []pgtype.UUID{f.owner},
 			Question: "Which region?", Default: "eu-west-1", ExpiresAt: time.Now().Add(24 * time.Hour),
 		})
 		Expect(err).NotTo(HaveOccurred())

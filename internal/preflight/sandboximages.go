@@ -20,6 +20,9 @@ const (
 	checkSandboxPulls    = "Sandbox image pull secrets"
 	checkSupervisorImage = "Sandbox supervisor image"
 	checkGatewayConfig   = "OpenShell gateway configuration"
+	checkGatewayID       = "OpenShell gateway ID"
+	checkWorkspaceMode   = "OpenShell workspace mode"
+	checkSandboxObserver = "Sandbox observer"
 )
 
 var (
@@ -28,7 +31,14 @@ var (
 	pullSecretsKey = regexp.MustCompile(`(?m)^\s*image_pull_secrets\s*=\s*\[([^\]]*)\]`)
 	supervisorKey  = regexp.MustCompile(`(?m)^\s*supervisor_image\s*=\s*(?:"([^"]*)"|'([^']*)')`)
 	quotedString   = regexp.MustCompile(`"([^"]*)"|'([^']*)'`)
+	// A table header, "[openshell.drivers.kubernetes]" (not an array of tables, "[[...]]").
+	tableHeader = regexp.MustCompile(`^\s*\[([^\[\]]+)\]\s*$`)
+	stringKey   = regexp.MustCompile(`^\s*([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')\s*$`)
 )
+
+// kubernetesDriverTable is the table of OpenShell's gateway.toml that holds the Kubernetes driver's
+// settings. gateway_id also appears under [openshell.gateway.gateway_jwt], so it is read by section.
+const kubernetesDriverTable = "openshell.drivers.kubernetes"
 
 const (
 	setOnOpenShell = "set server.sandboxImagePullSecrets: [{name: <Secret>}] on the OpenShell release, with the docker-registry Secret in its namespace"
@@ -39,6 +49,9 @@ const (
 type gatewayImages struct {
 	pullSecrets     []string
 	supervisorImage string
+	// gatewayID and workspaceMode are the keys of [openshell.drivers.kubernetes]; empty when unset.
+	gatewayID     string
+	workspaceMode string
 }
 
 // stripComment cuts a line at the first # that is outside a basic ("...") or literal ('...') string.
@@ -78,6 +91,24 @@ func parseGatewayConfig(toml string) gatewayImages {
 	if m := supervisorKey.FindStringSubmatch(text); m != nil {
 		g.supervisorImage = m[1] + m[2]
 	}
+	table := ""
+	for line := range strings.SplitSeq(text, "\n") {
+		if m := tableHeader.FindStringSubmatch(line); m != nil {
+			table = strings.TrimSpace(m[1])
+			continue
+		}
+		if table != kubernetesDriverTable {
+			continue
+		}
+		if m := stringKey.FindStringSubmatch(line); m != nil {
+			switch m[1] {
+			case "gateway_id":
+				g.gatewayID = m[2] + m[3]
+			case "workspace_mode":
+				g.workspaceMode = m[2] + m[3]
+			}
+		}
+	}
 	return g
 }
 
@@ -93,7 +124,8 @@ func parseGatewayConfig(toml string) gatewayImages {
 func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 	wantSecrets := c.Config.ExpectSandboxPullSecrets
 	wantSupervisor := len(c.Config.SupervisorImages) > 0
-	if (!wantSecrets && !wantSupervisor) || c.Config.OpenShellConfigMap == "" {
+	wantGatewayID := c.Config.OpenShellGatewayID != ""
+	if (!wantSecrets && !wantSupervisor && !wantGatewayID) || c.Config.OpenShellConfigMap == "" {
 		return nil
 	}
 	ns, name := c.Config.OpenShellConfigNamespace, c.Config.OpenShellConfigMap
@@ -110,10 +142,10 @@ func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 	if cause != "" {
 		return []Result{{
 			Check: checkGatewayConfig, Status: Warn,
-			Message: cause + ", so the gateway's sandbox pull secrets and supervisor image are not checked",
+			Message: cause + ", so the gateway's sandbox pull secrets, supervisor image and gateway ID are not checked",
 			Fix: "set preflight.openshell.namespace and .configMap to the OpenShell release's gateway ConfigMap " +
 				"(<fullname>-config), or check by hand that the OpenShell release has server.sandboxImagePullSecrets and " +
-				"a supervisor image that sandboxPolicy.supervisorImages lists" + seeGuide,
+				"a supervisor image that sandboxPolicy.supervisorImages lists, and a gateway_id that equals openshell.gatewayId" + seeGuide,
 		}}
 	}
 	g := parseGatewayConfig(cm.Data[gatewayConfigKey])
@@ -153,5 +185,53 @@ func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 		}
 		results = append(results, r)
 	}
+	if wantGatewayID {
+		results = append(results, c.gatewayIDResults(g)...)
+	}
 	return results
+}
+
+// gatewayIDResults compares openshell.gatewayId with the gateway's gateway_id and checks the workspace
+// mode: the sandbox observer finds a workspace's namespace as openshell-<gateway_id>-<workspace>, and
+// the chart's policy admits its RoleBinding only in namespaces labelled with that gateway ID (ADR 0078).
+func (c *Checker) gatewayIDResults(g gatewayImages) []Result {
+	want := c.Config.OpenShellGatewayID
+	r := Result{Check: checkGatewayID}
+	switch {
+	case g.gatewayID == "":
+		r.Status = Warn
+		r.Message = fmt.Sprintf("the OpenShell gateway configuration does not set gateway_id under [%s], so it is not compared with openshell.gatewayId=%s", kubernetesDriverTable, want)
+		r.Fix = "check by hand that the OpenShell release's gatewayId equals openshell.gatewayId"
+	case g.gatewayID != want:
+		r.Status = Warn
+		r.Message = fmt.Sprintf("the OpenShell gateway's gateway_id is %q but openshell.gatewayId is %q: the sandbox observer would look for "+
+			"sandbox pods in the wrong namespaces, and the sandbox policy would refuse its RoleBinding there", g.gatewayID, want)
+		r.Fix = "set openshell.gatewayId=" + g.gatewayID + " on the Koinon release (or the OpenShell release's gatewayId to " + want + ")"
+	default:
+		r.Status = Pass
+		r.Message = fmt.Sprintf("openshell.gatewayId matches the gateway's gateway_id (%s)", want)
+	}
+	results := []Result{r}
+	if g.workspaceMode != "" && g.workspaceMode != "managed" {
+		results = append(results, Result{
+			Check: checkWorkspaceMode, Status: Warn,
+			Message: fmt.Sprintf("the OpenShell gateway's workspace_mode is %q: Koinon expects managed (ADR 0002), where OpenShell creates a namespace per workspace", g.workspaceMode),
+			Fix:     "set the OpenShell release's workspaceMode to managed",
+		})
+	}
+	return results
+}
+
+// checkSandboxObserver warns when the observer is off: a sandbox that cannot pull its image or keeps
+// crashing then shows only OpenShell's reason, so its wait cause is unknown (ADR 0078).
+func (c *Checker) checkSandboxObserver() []Result {
+	if !c.Config.SandboxObserverDisabled {
+		return nil
+	}
+	return []Result{{
+		Check: checkSandboxObserver, Status: Warn,
+		Message: "sandboxObserver.enabled is false: when a sandbox cannot pull its image or keeps crashing, OpenShell reports only " +
+			"ConfigurationPending, so the run fails with the cause \"unknown\" instead of image_pull or crash_loop",
+		Fix: "set sandboxObserver.enabled=true (the default) to let the reconciler read sandbox pods with get; see the guide \"Agent health\"",
+	}}
 }

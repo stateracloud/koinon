@@ -5,13 +5,15 @@ syntax = "proto3";
 package koinon.question.v1alpha1;
 
 import "google/protobuf/timestamp.proto";
+import "koinon/auth/v1alpha1/auth.proto";
+import "koinon/template/v1alpha1/template.proto";
 
 option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1;questionv1alpha1";
 
 // QuestionService is what an agent asks a person with the ask_user tool (ADR 0065 decisions 8 and
-// 10a). A question is addressed to one member of the org; only that member sees it in the inbox
-// and only that member can answer or dismiss it. Every request names the org it acts in; IDs from
-// another org are not found.
+// 10a). A question is addressed to a target, a person or a role, resolved to its recipients when it
+// is asked. Every recipient sees it in the inbox and can answer or dismiss it. The first answer
+// wins. Every request names the org it acts in; IDs from another org are not found.
 service QuestionService {
   // ListQuestions returns the open questions addressed to the caller, newest first, or with a
   // task_id every question of that task (any state) that is visible to the caller. Viewers and
@@ -28,6 +30,12 @@ service QuestionService {
   // DismissQuestion dismisses an open question addressed to the caller: its safe default becomes
   // the answer and the agent is told. Members and above.
   rpc DismissQuestion(DismissQuestionRequest) returns (DismissQuestionResponse);
+
+  // ListAskableMembers lists the org's members who can answer questions (member role or higher), for
+  // picking a trigger's notify target. Admins and above.
+  rpc ListAskableMembers(ListAskableMembersRequest) returns (ListAskableMembersResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 // QuestionState is where a question stands.
@@ -66,8 +74,8 @@ message Question {
   string task_id = 3;
   string run_id = 4;
   string agent_id = 5;
-  // The member the question is addressed to.
-  string asked_to = 6;
+  // Deprecated: use recipients / waiting_on_user_ids. Set to the first recipient, for older clients.
+  string asked_to = 6 [deprecated = true];
   string question = 7;
   // Answers offered as buttons; empty means free text only.
   repeated string choices = 8;
@@ -85,6 +93,24 @@ message Question {
   google.protobuf.Timestamp created_at = 18;
   // Whether the caller can answer or dismiss it now.
   bool can_answer = 19;
+  // Who the question was addressed to, as resolved when it was asked.
+  koinon.template.v1alpha1.NotifyTarget target = 20;
+  // The target in plain words: a person's name, "the org's admins", "the org's owners", "the org's members".
+  string target_label = 21;
+  // Everyone it waits on. The first answer wins.
+  repeated Recipient recipients = 22;
+  // When it started waiting on the caller (unset when the caller is not a recipient). The inbox ages
+  // items from this; a reminder does not change it.
+  google.protobuf.Timestamp waiting_since = 23;
+  // The display name of answered_by.
+  string answered_by_name = 24;
+}
+
+// Recipient is one person a question waits on.
+message Recipient {
+  string user_id = 1;
+  string display_name = 2;
+  google.protobuf.Timestamp waiting_since = 3;
 }
 
 // ListQuestionsRequest names the org and optionally a task.
@@ -126,4 +152,22 @@ message DismissQuestionRequest {
 // DismissQuestionResponse holds the resolved question.
 message DismissQuestionResponse {
   Question question = 1;
+}
+
+// ListAskableMembersRequest names the org.
+message ListAskableMembersRequest {
+  string org_id = 1;
+}
+
+// AskableMember is a member who can answer questions.
+message AskableMember {
+  string user_id = 1;
+  string email = 2;
+  string display_name = 3;
+  koinon.auth.v1alpha1.OrgRole role = 4;
+}
+
+// ListAskableMembersResponse lists them.
+message ListAskableMembersResponse {
+  repeated AskableMember members = 1;
 }

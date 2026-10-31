@@ -26,6 +26,8 @@ import (
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
 )
 
 // otlpSink is the spend ledger's OTLP/HTTP receiver in miniature: it decodes the access log with the
@@ -137,8 +139,8 @@ var _ = Describe("kubernetes mode: fallback budgets (plan items S2 and G2)", Ord
 		// $50 per million tokens: 20 tokens cost $0.001.
 		price := &gateway.Price{Input: "50", Output: "50"}
 		state = gateway.State{Providers: []gateway.Provider{
-			{Org: "acme", Name: "up", Type: "fake", BaseURL: base, Models: []gateway.Model{{Name: model, Price: price}}},
-			{Org: "globex", Name: "up", Type: "fake", BaseURL: base, Models: []gateway.Model{{Name: model, Price: price}}},
+			{Org: "acme", Name: "up", Type: "fake", BaseURL: base, Models: []gateway.Model{{Name: model, Format: modelformat.OpenAI, Price: price}}},
+			{Org: "globex", Name: "up", Type: "fake", BaseURL: base, Models: []gateway.Model{{Name: model, Format: modelformat.OpenAI, Price: price}}},
 		}}
 		for _, k := range []gateway.IssuedKey{keyA, keyB, kC} {
 			state.AddKey(k.Key)
@@ -153,7 +155,7 @@ var _ = Describe("kubernetes mode: fallback budgets (plan items S2 and G2)", Ord
 		}
 	})
 
-	limit := func(agents map[gateway.AgentRef]float64) gateway.State {
+	limit := func(agents map[gateway.AgentRef]money.USD) gateway.State {
 		s := state
 		s.Limits = nil
 		for a, amount := range agents {
@@ -180,7 +182,7 @@ var _ = Describe("kubernetes mode: fallback budgets (plan items S2 and G2)", Ord
 
 	It("revokes the keys of an agent whose limit is spent, without touching others, and restores them", func(ctx SpecContext) {
 		start := time.Now()
-		_, err := g.driver.Apply(ctx, limit(map[gateway.AgentRef]float64{agentA: 0, agentB: 1}))
+		_, err := g.driver.Apply(ctx, limit(map[gateway.AgentRef]money.USD{agentA: 0, agentB: money.FromCents(100)}))
 		Expect(err).NotTo(HaveOccurred())
 		AddReportEntry("revoke: Apply returned after", time.Since(start).String())
 		Expect(chat(ctx, keyA.Material)).To(Equal(http.StatusUnauthorized))
@@ -188,13 +190,13 @@ var _ = Describe("kubernetes mode: fallback budgets (plan items S2 and G2)", Ord
 		Expect(chat(ctx, kC.Material)).To(Equal(http.StatusOK))
 
 		// The limit is raised (or its window resets): the next Apply puts the key back.
-		_, err = g.driver.Apply(ctx, limit(map[gateway.AgentRef]float64{agentA: 0.5}))
+		_, err = g.driver.Apply(ctx, limit(map[gateway.AgentRef]money.USD{agentA: money.FromCents(50)}))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(chat(ctx, keyA.Material)).To(Equal(http.StatusOK))
 	}, SpecTimeout(2*time.Minute))
 
 	It("revokes every key of an org whose cap is spent", func(ctx SpecContext) {
-		_, err := g.driver.Apply(ctx, limit(map[gateway.AgentRef]float64{agentA: 0, agentB: 0, agentC: 1}))
+		_, err := g.driver.Apply(ctx, limit(map[gateway.AgentRef]money.USD{agentA: 0, agentB: 0, agentC: money.FromCents(100)}))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(chat(ctx, keyA.Material)).To(Equal(http.StatusUnauthorized))
 		Expect(chat(ctx, keyB.Material)).To(Equal(http.StatusUnauthorized))
@@ -236,7 +238,7 @@ var _ = Describe("kubernetes mode: fallback budgets (plan items S2 and G2)", Ord
 			mu.Unlock()
 			if cross {
 				go func() {
-					_, err := g.driver.Apply(context.WithoutCancel(ctx), limit(map[gateway.AgentRef]float64{agentB: 0}))
+					_, err := g.driver.Apply(context.WithoutCancel(ctx), limit(map[gateway.AgentRef]money.USD{agentB: 0}))
 					mu.Lock()
 					defer mu.Unlock()
 					if err == nil {
@@ -284,7 +286,7 @@ var _ = Describe("kubernetes mode: fallback budgets (plan items S2 and G2)", Ord
 	It("keeps a revoked key revoked across a proxy pod replacement", func(ctx SpecContext) {
 		// Spend truth lives in the ledger and the key list in a ConfigMap, so nothing in the proxy
 		// pod can hand a key its limit back.
-		_, err := g.driver.Apply(ctx, limit(map[gateway.AgentRef]float64{agentA: 0}))
+		_, err := g.driver.Apply(ctx, limit(map[gateway.AgentRef]money.USD{agentA: 0}))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(chat(ctx, keyA.Material)).To(Equal(http.StatusUnauthorized))
 
@@ -323,7 +325,7 @@ var _ = Describe("kubernetes mode: fallback budgets (plan items S2 and G2)", Ord
 		Expect(chat(ctx, keyA.Material)).To(Equal(http.StatusUnauthorized), "the new pod does not hand the key back")
 		Expect(chat(ctx, keyB.Material)).To(Equal(http.StatusOK), "other keys survive the replacement")
 		// An Apply after the replacement is confirmed against the new pod.
-		_, err = g.driver.Apply(ctx, limit(map[gateway.AgentRef]float64{agentA: 0}))
+		_, err = g.driver.Apply(ctx, limit(map[gateway.AgentRef]money.USD{agentA: 0}))
 		Expect(err).NotTo(HaveOccurred())
 		_, err = g.driver.Apply(ctx, state)
 		Expect(err).NotTo(HaveOccurred())

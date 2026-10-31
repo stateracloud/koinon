@@ -57,7 +57,8 @@ var _ = Describe("reminders and expiry (TK4)", func() {
 		sends = restart()
 		Expect(tx(ctx, func(q *store.Queries) (err error) {
 			row, _, err = questions.Create(ctx, q, questions.Ask{
-				Org: w.org, Task: w.task, Run: w.run.ID, Agent: w.agent, To: w.user,
+				Org: w.org, Task: w.task, Run: w.run.ID, Agent: w.agent,
+				Target: questions.Target{Kind: store.NotifyTargetKindUser, User: w.user}, Recipients: []pgtype.UUID{w.user},
 				Question: "Post the reply?", Choices: []string{"post", "do not post"}, Default: "do not post",
 				ExpiresAt: base.Add(questions.DefaultTTL), RemindAt: base.Add(questions.DefaultReminder),
 			})
@@ -170,7 +171,7 @@ var _ = Describe("reminders and expiry (TK4)", func() {
 	})
 
 	It("refuses a reminder that is not before the expiry", func() {
-		a := questions.Ask{Question: "q", Default: "d", ExpiresAt: base.Add(time.Hour), RemindAt: base.Add(time.Hour)}
+		a := questions.Ask{Recipients: []pgtype.UUID{{Valid: true}}, Question: "q", Default: "d", ExpiresAt: base.Add(time.Hour), RemindAt: base.Add(time.Hour)}
 		Expect(a.Validate()).To(MatchError(ContainSubstring("before the expiry")))
 	})
 })

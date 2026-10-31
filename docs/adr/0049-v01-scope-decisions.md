@@ -6,7 +6,9 @@
   connection secrets; the Helm model values are dropped),
   [0058](0058-gateway-modes.md) (gateway modes), [0051](0051-session-home-generations.md), and on 2026-10-26 by
   [0062](0062-code-host-connectors.md), [0063](0063-forge-credential-classes.md),
-  [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md) (v0.1 Foundation)
+  [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md) (v0.1 Foundation),
+  and on 2026-10-28 by [0076](0076-database-modes.md) (database modes) and
+  [0077](0077-pinned-openshell-and-installer.md) (pinned prerequisites and the installer)
 - Amends: [0007](0007-connector-model.md), [0016](0016-harness-and-deployment.md),
   [0036](0036-v01-demo.md); extends [0048](0048-openshell-spike-results.md) (PR 15 in the previous repository)
 - Verification: agentgateway Kubernetes-mode `rawConfig` budgets verified by spike S2
@@ -292,3 +294,40 @@ Checked 2026-10-22:
   [0020](0020-agent-builder-and-templates.md), [0036](0036-v01-demo.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md),
   [0042](0042-ask-tier-park-and-execute.md), [0048](0048-openshell-spike-results.md)
 - Spike results: `hack/spike/results/` (PR 15 in the previous repository)
+
+## Amendment (2026-10-28): agentgateway v1.7.0
+
+The pinned release is v1.7.0 (image `sha256:60216aaf...`, `agentgateway-crds` digest
+`sha256:946b739c0fcda4d47a72d1589d184b6fd507772e733cbedf02789bafd0468064`, `agentgateway`
+chart digest `sha256:40340d639e35206317c934e9af3e29575cf7c5377b2940679732baac6e108c15`), checked
+against the registry on 2026-10-28; the two-week wait was waived. Its breaking changes:
+
+- **MCP session encryption.** Standalone always encrypts MCP session IDs. The gateway Deployment gets
+  `SESSION_KEY` (the upstream-recommended form, not `config.session.key`, which would put the key in
+  the config ConfigMap) from the Secret `<release>-gateway-session-key`, key `key`, 64 hex characters.
+  The ensure-secrets hook Job generates it (`kind: aes256-key`) and never changes it;
+  `gateway.standalone.sessionKey.existingSecret` supplies one instead. Without it v1.7.0 would write a
+  key into the config file when it is writable, or leave sessions unencrypted when it is not.
+- **Prompt guards** now also inspect tool output. Koinon configures no prompt guard, so nothing
+  changes; a future guard must say which of request, response and tool output it covers.
+- **Dynamic backends** cannot reach loopback or link-local addresses. Koinon's backends are static
+  (the `127.0.0.1:9` placeholder MCP target is static and never contacted), and the suites reach
+  their fakes through the host address, so nothing changes.
+- **`anthropic-version`** is forwarded, not replaced: see ADR 0069's amendment.
+
+Gaps it closes: ADR 0058 (MCP isolation in Kubernetes mode) and ADR 0041 (budgets without a window).
+
+## Amendment (2026-10-28): database modes
+
+[0076](0076-database-modes.md) replaces "Postgres: `cnpg` … or `external` … No bundled StatefulSet".
+`postgres.mode` takes `external` (any Postgres 18 or newer), `cnpg` (an existing operator; Koinon
+never installs it) or `standalone`: Koinon's own single-replica StatefulSet on the official
+`postgres:18` image, pinned by digest, with a `pg_dump` CronJob that also backs up the KEK. There
+is no default: the install fails until `postgres.mode` is set.
+
+## Amendment (2026-10-28): pinned prerequisites and the installer
+
+[0077](0077-pinned-openshell-and-installer.md) keeps the quickstart clock at `helm install`, but
+Agent Sandbox and OpenShell are no longer manual prerequisites: each Koinon release pins their
+versions in `release/versions.yaml`. They install as separate Helm releases, either with plain
+`helm install` in a documented order or with `koinon install`, which runs the same steps. Kata, the CNPG operator and the NetworkPolicy engine stay prerequisites.

@@ -89,3 +89,16 @@ func UUIDString(b [16]byte) string {
 	hex.Encode(out[24:], b[10:16])
 	return string(out[:])
 }
+
+// DefaultGatewayID is OpenShell's chart default for gateway_id (openshell.gatewayId).
+const DefaultGatewayID = "openshell"
+
+// WorkspaceNamespace is the Kubernetes namespace OpenShell's managed workspace mode gives a
+// workspace: "openshell-{gateway_id}-{workspace}" (OpenShell's documented convention; its API does
+// not return the namespace). The sandbox observer (ADR 0078) reads pods there.
+func WorkspaceNamespace(gatewayID, workspace string) string {
+	if gatewayID == "" {
+		gatewayID = DefaultGatewayID
+	}
+	return "openshell-" + gatewayID + "-" + workspace
+}

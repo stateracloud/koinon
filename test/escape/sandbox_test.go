@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	modelgw "github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/templates"
 )
@@ -88,6 +89,15 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		gatewayKey = fmt.Sprintf("koinon-escape-key-%d-%x", n, time.Now().UnixNano())
 		githubKey  = fmt.Sprintf("koinon-escape-gh-%d-%x", n, time.Now().UnixNano())
 		clusterDNS = envOr("KOINON_ESCAPE_CLUSTER_DNS", "10.96.0.10")
+		// A model gateway stand-in with no default (ADR 0080): a name the proxy resolves to a
+		// non-loopback address (OpenShell always blocks loopback and link-local) with a server on
+		// port 4000 that answers every request 418 with X-Koinon-Standin: 1 (koinon-fakemodel
+		// -standin; test/fixtures/rt1/manifests/escape-gateway-standin.yaml). A name that fails
+		// DNS never reaches the proxy (issue #244), and a refused connection reaches the client
+		// as a TCP failure, not a 502 (issue #270). The gateway spec skips without it; the
+		// provider record below only needs some host to bind the key to.
+		gwStandIn = os.Getenv("KOINON_ESCAPE_GATEWAY_HOST")
+		gwHost    = envOr("KOINON_ESCAPE_GATEWAY_HOST", "agentgateway.koinon-escape.invalid")
 	)
 
 	// probe runs checks in the sandbox and returns each check's result by id.
@@ -132,7 +142,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 
 		key := reconciler.GatewayProfile(store.AgentFlavorOpencode,
 			reconciler.Flavor{Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
-			reconciler.Endpoint{Host: "agentgateway.koinon-escape.invalid", Port: 4000}, true)
+			reconciler.Endpoint{Host: gwHost, Port: 4000}, true)
 		key.ID = fmt.Sprintf("koinon-escape-agentgateway-%d", n)
 		g.provider(ctx, execution.Provider{
 			Name: keyRecord, Profile: key, Credentials: map[string]string{reconciler.GatewayKeyEnvVar: gatewayKey},
@@ -179,6 +189,37 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 			Expect(exit).NotTo(Equal(0), url)
 		}
 	}, NodeTimeout(3*time.Minute))
+
+	It("lets the sandbox post to the gateway's model routes and nothing else on it (ADR 0069)", func(ctx SpecContext) {
+		if gwStandIn == "" {
+			Skip("KOINON_ESCAPE_GATEWAY_HOST is not set: name the stand-in (escape-gateway-standin.koinon-fixtures.svc.cluster.local), a non-loopback host the proxy resolves with a server on port 4000 that answers 418 and X-Koinon-Standin: 1")
+		}
+		// The stand-in answers every request 418 with the marker header, so an allowed request is
+		// recognisable by what the far end said, a denied one by the proxy's 403, and anything
+		// else (curl code 000 from a DNS or connect failure, a 502 from the proxy) means the
+		// request did not cross the policy and the stand-in is not what answered. Runs against a
+		// real OpenShell only (KOINON_OPENSHELL_ENDPOINT=... make test-escape).
+		gw := "http://" + net.JoinHostPort(gwHost, "4000")
+		for _, path := range modelgw.RoutePaths() {
+			code, body, header := g.curlGatewayHeaders(ctx, sandbox, "POST", gw+path)
+			answered(code, body)
+			Expect(code).To(Equal("418"), "POST "+path+" should pass the policy and reach the stand-in at "+gwHost+":4000 (418); 403 is a policy denial, 502 or 000 means it did not get there: "+body)
+			Expect(strings.ToLower(header)).To(ContainSubstring(strings.ToLower(standinMarker)), "POST "+path+": a 418 without the stand-in's marker header did not come from it")
+		}
+		denied := func(method, path string) {
+			GinkgoHelper()
+			code, body := g.curlGateway(ctx, sandbox, method, gw+path)
+			answered(code, body)
+			Expect(code).To(Equal("403"), method+" "+path)
+			Expect(body).To(ContainSubstring("policy"), method+" "+path)
+		}
+		denied("GET", "/v1/messages")
+		denied("POST", "/v1/messages/count_tokens")
+		denied("POST", "/v1/messages/batches")
+		denied("POST", "/v1/responses")
+		denied("GET", "/v1/models")
+		denied("POST", "/config_dump")
+	}, NodeTimeout(2*time.Minute))
 
 	It("denies DNS to any resolver but the sandbox's own, which answers only synthetic addresses", func(ctx SpecContext) {
 		resolvers := []string{"8.8.8.8", "1.1.1.1", clusterDNS}

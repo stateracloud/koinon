@@ -38,6 +38,29 @@ function shortId(id: string): string {
   return id.slice(0, 8)
 }
 
+/** humanSeconds formats a duration like agentd's runreply.Human: "1h", "1h30m", "30m", "45s". */
+function humanSeconds(total: number): string {
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = Math.floor(total % 60)
+  return `${h > 0 ? `${h}h` : ''}${m > 0 ? `${m}m` : ''}${s > 0 ? `${s}s` : ''}` || '0s'
+}
+
+/** num shows a count from an event payload, or a question mark when the payload has none. */
+function num(v: unknown): string {
+  return typeof v === 'number' ? String(v) : '?'
+}
+
+/** The words for why a sandbox never became ready; the same as execution.SandboxWaitCause.Describe. */
+const sandboxCauses: Record<string, string> = {
+  image_pull: 'the image could not be pulled',
+  admission: "the cluster's admission policy refused the sandbox",
+  no_nodes: 'no node can run the sandbox',
+  crash_loop: 'a container in the sandbox keeps crashing',
+  container_create: 'a container in the sandbox could not be created',
+  unknown: 'the cause is unknown',
+}
+
 function approvalTarget(p: JsonObject): string {
   const tool = str(p.tool) ?? 'tool call'
   // Targets are "<connector>:<resource>", e.g. "github:owner/repo".
@@ -135,8 +158,51 @@ function taskItem(ev: TaskEvent): TimelineItem {
       }
       return { key, at, type: 'note', text: str(p.message) || fallback[ev.kind], runId }
     }
+    case 'question.asked':
+      return { key, at, type: 'note', text: `Asked ${str(p.to_label) ?? 'someone'}: ${str(p.question) ?? ''}`.trim(), runId }
+    case 'question.answered':
+      return { key, at, type: 'note', text: `${str(p.answered_by_name) || 'Someone'} answered: ${str(p.answer) ?? ''}`.trim(), runId }
+    case 'question.dismissed':
+      return { key, at, type: 'note', text: `${str(p.answered_by_name) || 'Someone'} dismissed the question; the default applied: ${str(p.answer) ?? ''}`.trim(), runId }
+    case 'question.expired':
+      return { key, at, type: 'note', text: `Nobody answered in time; the default applied: ${str(p.answer) ?? ''}`.trim(), runId }
+    case 'question.canceled':
+      return { key, at, type: 'note', text: 'The question was closed: the run ended', runId }
+    case 'question.retargeted':
+      return { key, at, type: 'note', text: `Nobody it was asked to can answer any more; now asked ${str(p.to_label) ?? 'the org\'s admins'}`, runId }
     case 'run.canceled':
     case 'run.failed': {
+      if (ev.kind === 'run.canceled' && str(p.reason) === 'wall_clock_cap') {
+        // agentd and the api's sweep write the same note: {reason, message, maxWallClockSeconds, summary?, summarySource}.
+        const limit = typeof p.maxWallClockSeconds === 'number' ? ` of ${humanSeconds(p.maxWallClockSeconds)}` : ''
+        const summary = str(p.summary)
+        const source = str(p.summarySource) === 'notes' ? " (from the agent's notes)" : ''
+        return {
+          key,
+          at,
+          type: 'note',
+          text: `Run ${shortId(ev.runId)} stopped at the time limit${limit}.${summary ? `\n\nLast summary${source}:\n${summary}` : ''}`,
+          runId,
+        }
+      }
+      // The ledger ends a run at its model-request or spend limit (ADR 0081) with the same note as
+      // the time limit: {reason, message, limit, ..., summary?, summarySource?}.
+      if (ev.kind === 'run.canceled' && (str(p.reason) === 'request_cap' || str(p.reason) === 'run_spend_cap')) {
+        const what = str(p.reason) === 'request_cap' ? 'model request limit' : 'spend limit'
+        const summary = str(p.summary)
+        const source = str(p.summarySource) === 'notes' ? " (from the agent's notes)" : ''
+        return {
+          key,
+          at,
+          type: 'note',
+          text: `Run ${shortId(ev.runId)} stopped at its ${what}: ${str(p.message) ?? 'the limit was reached'}.${summary ? `\n\nLast summary${source}:\n${summary}` : ''}`,
+          runId,
+        }
+      }
+      if (ev.kind === 'run.failed' && str(p.failureClass) === 'sandbox_unavailable') {
+        const cause = sandboxCauses[str(p.sandboxCause) ?? ''] ?? sandboxCauses.unknown
+        return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} failed: the sandbox never became ready (${cause})`, runId }
+      }
       // scheduler.RecordCancel writes {reason, message}; agentd's finish writes {reason}.
       // A spend limit reached (the ledger, ADR 0056) says which limit and what was spent in its message.
       if (str(p.reason) === 'spend_limit') {
@@ -184,10 +250,29 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
       const reason = str(p.reason)
       return { key, at, type: 'note', text: `Run ${shortId(runId)} lost its harness${reason ? `: ${reason}` : ''}`, runId }
     }
+    case 'run.wrap_up_notice': {
+      // agentd told the agent a run limit is near: {limit, remainingSeconds, maxWallClockSeconds} and,
+      // for the request and spend limits, {modelRequests, maxModelRequests} or {spentUSD, maxSpendUSD}.
+      const limit = str(p.limit)
+      if (limit === 'requests') {
+        return { key, at, type: 'note', text: `Run ${shortId(runId)}: ${num(p.modelRequests)} of ${num(p.maxModelRequests)} model requests used; the agent was asked to wrap up`, runId }
+      }
+      if (limit === 'spend') {
+        return { key, at, type: 'note', text: `Run ${shortId(runId)}: $${str(p.spentUSD) ?? '?'} of $${str(p.maxSpendUSD) ?? '?'} spent; the agent was asked to wrap up`, runId }
+      }
+      const mins = Math.max(1, Math.round((typeof p.remainingSeconds === 'number' ? p.remainingSeconds : 0) / 60))
+      return { key, at, type: 'note', text: `Run ${shortId(runId)}: about ${mins} ${mins === 1 ? 'minute' : 'minutes'} left; the agent was asked to wrap up`, runId }
+    }
     case 'run.requeued': {
       // agentd put the run back in the queue because its sandbox was not ready in time (ADR 0066).
       const reason = str(p.reason)
       return { key, at, type: 'note', text: `Run ${shortId(runId)} is waiting for a sandbox${reason ? ` (${reason})` : ''}`, runId }
+    }
+    case 'run.uncached': {
+      // agentd: the model has a cache_read price but Koinon has no prompt-cache mode for its
+      // provider format, so the run costs the uncached price (ADR 0068). {model, reason}.
+      const model = str(p.model)
+      return { key, at, type: 'note', text: `Run ${shortId(runId)} runs without prompt caching${model ? ` (model ${model})` : ''}: ${str(p.reason) ?? 'no cache mode for the provider format'}`, runId }
     }
     case 'run.waiting_for_model': {
       // agentd waits before it starts the harness until the gateway serves the run's model: a new

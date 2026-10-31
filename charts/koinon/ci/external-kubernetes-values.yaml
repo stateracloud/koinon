@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # No client TLS Secret: the mesh provides mTLS (openshell.insecure).
 openshell:
+  address: openshell.openshell.svc:8080
   insecure: true
 postgres:
   mode: external
@@ -11,6 +12,9 @@ gateway:
 networkPolicy:
   enabled: false
 sandboxPolicy:
+  enabled: false
+# The observer needs the policy.
+sandboxObserver:
   enabled: false
 preflight:
   seccompProbe:

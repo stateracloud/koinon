@@ -4,47 +4,75 @@
 # the flavor images with `make flavor-*`, and deploys charts/koinon (values: hack/dev/values*.yaml)
 # into the namespace `koinon`. Two profiles, chosen by the kube context:
 #
-#   homelab  context homelab or homelab-koinon: Zot as registry, Kata, the existing OpenShell, Ollama.
 #   kind     context kind-koinon-*: images loaded into the node, runc, the fake model server and the
-#            fake GitHub. Prerequisites: `make dev-kind-up`.
+#            fake GitHub. Prerequisites: `make dev-kind-up`. Needs no configuration.
+#   remote   any other context listed in the git-ignored hack/dev/local.yaml (template:
+#            hack/dev/local.example.yaml): your registry, model provider, runtime class and OpenShell.
+#            The maintainer's home lab is one example (hack/dev/local.homelab.example.yaml).
 #
 # `tilt up`, or for example `tilt up -- --flavors=opencode`. See docs/dev/loop.md.
 
-config.define_string('mode', usage='homelab or kind; default: from the kube context')
+config.define_string('mode', usage='kind or remote; default: from the kube context (homelab is an alias of remote)')
 config.define_string('flavors', usage='comma-separated flavor images to build (default: opencode)')
-config.define_string('platform', usage='linux/amd64 or linux/arm64; default: amd64 on homelab, the host on kind')
-config.define_string('openshell-tls-secret', usage='Secret in the openshell namespace holding the client certificate (tls.crt, tls.key, ca.crt); copied into koinon. Empty: no mTLS')
-config.define_string('openshell-namespace', usage='namespace of the OpenShell gateway (default: openshell)')
+config.define_string('platform', usage='linux/amd64 or linux/arm64; default: local.yaml platform (else amd64) on remote, the host on kind')
+config.define_string('openshell-tls-secret', usage='Secret in the openshell namespace holding the client certificate (tls.crt, tls.key, ca.crt); copied into koinon. Empty: no mTLS (default: openshell.clientTLSSecret of local.yaml, else openshell-client-tls)')
+config.define_string('openshell-namespace', usage='namespace of the OpenShell gateway (default: openshell.namespace of local.yaml, else openshell)')
 config.define_string_list('helm-set', usage='extra chart values, key=value (helm --set)')
-config.define_bool('sandbox-policy', usage='render the chart\'s cluster-wide sandbox ValidatingAdmissionPolicies on the home lab (needs an approved Rivet request; always on for kind)')
+config.define_bool('sandbox-policy', usage='render the chart\'s cluster-wide sandbox ValidatingAdmissionPolicies on a remote cluster (default: sandboxPolicy of local.yaml, else off; always on for kind)')
 config.define_bool('web', usage='run the Vite dev server for web/ (default: true)')
 cfg = config.parse()
 
 ctx = k8s_context()
-HOMELAB_CONTEXTS = ['homelab', 'homelab-koinon']
+
+# The remote profile reads hack/dev/local.yaml (git-ignored; see local.example.yaml for every key).
+# The maintainer's home-lab contexts keep working without a local.yaml: they fall back to the
+# checked-in example for the home lab.
+LOCAL_FILE = 'hack/dev/local.yaml'
+LEGACY_FILE = 'hack/dev/local.homelab.example.yaml'
+LEGACY_CONTEXTS = ['homelab', 'homelab-koinon']
+local_cfg = {}
+if os.path.exists(LOCAL_FILE):
+    local_cfg = read_yaml(LOCAL_FILE) or {}
+    watch_file(LOCAL_FILE)
+elif ctx in LEGACY_CONTEXTS:
+    local_cfg = read_yaml(LEGACY_FILE) or {}
+    print('no %s: using %s for the context %s' % (LOCAL_FILE, LEGACY_FILE, ctx))
+    watch_file(LEGACY_FILE)
+remote_contexts = local_cfg.get('contexts', [])
+if type(remote_contexts) != 'list':
+    # `in` on a string is a substring match, so a bare name would also allow its prefixes.
+    fail('`contexts` in the local profile must be a list of kube context names, e.g. contexts: [my-dev-cluster]')
 
 mode = cfg.get('mode', '')
+if mode == 'homelab':
+    mode = 'remote'
 if not mode:
-    if ctx in HOMELAB_CONTEXTS:
-        mode = 'homelab'
-    elif ctx.startswith('kind-koinon-'):
+    if ctx.startswith('kind-koinon-'):
         mode = 'kind'
-if mode == 'homelab' and ctx not in HOMELAB_CONTEXTS:
-    fail('mode homelab needs the kube context homelab or homelab-koinon, not %s' % ctx)
+    elif ctx in remote_contexts:
+        mode = 'remote'
+if mode == 'remote' and ctx not in remote_contexts:
+    fail('mode remote needs the kube context to be listed under `contexts` in %s (copy hack/dev/local.example.yaml), not %s' % (LOCAL_FILE, ctx))
 if mode == 'kind' and not ctx.startswith('kind-koinon-'):
     fail('mode kind needs a kube context named kind-koinon-* (make dev-kind-up creates kind-koinon-dev), not %s' % ctx)
-if mode not in ['homelab', 'kind']:
-    fail('kube context %s is not a Koinon dev cluster: use homelab, homelab-koinon or kind-koinon-*' % ctx)
+if mode not in ['remote', 'kind']:
+    fail('kube context %s is not a Koinon dev cluster: use kind-koinon-* (make dev-kind-up), or list the context under `contexts` in %s (template: hack/dev/local.example.yaml)' % (ctx, LOCAL_FILE))
 
-allow_k8s_contexts(HOMELAB_CONTEXTS + [ctx] if mode == 'kind' else HOMELAB_CONTEXTS)
+allow_k8s_contexts([ctx])
 
 NS = 'koinon'
 KIND = mode == 'kind'
-platform = cfg.get('platform', '') or ('linux/' + str(local('go env GOARCH', quiet=True)).strip() if KIND else 'linux/amd64')
-registry = 'kind.local' if KIND else 'zot.apps.lab.example.invalid/koinon'
+os_cfg = local_cfg.get('openshell', {})
+platform = cfg.get('platform', '') or ('linux/' + str(local('go env GOARCH', quiet=True)).strip() if KIND else local_cfg.get('platform', 'linux/amd64'))
+registry = 'kind.local' if KIND else local_cfg.get('registry', '')
+if not KIND and not os_cfg.get('address'):
+    fail('%s needs `openshell.address` (the OpenShell gateway, e.g. openshell.openshell.svc:8080)' % LOCAL_FILE)
+if not KIND and not registry:
+    fail('%s needs `registry` (the registry and path Tilt pushes images to, e.g. registry.example.com/koinon)' % LOCAL_FILE)
 kind_cluster = ctx[len('kind-'):]
-os_ns = cfg.get('openshell-namespace', 'openshell')
-os_tls = cfg.get('openshell-tls-secret', 'openshell-client-tls')
+os_ns = cfg.get('openshell-namespace', os_cfg.get('namespace', 'openshell'))
+os_tls = cfg.get('openshell-tls-secret', os_cfg.get('clientTLSSecret', 'openshell-client-tls'))
+sandbox_policy = KIND or cfg.get('sandbox-policy', local_cfg.get('sandboxPolicy', False))
 flavors = [f for f in cfg.get('flavors', 'opencode').split(',') if f]
 ALL_FLAVORS = ['opencode']
 for f in flavors:
@@ -55,7 +83,7 @@ for f in flavors:
 
 # ko builds a distroless image per binary. The unique tag is what Tilt injects into the pod specs;
 # `dev` is the chart's image.tag, which the preflight Job's probe pods use. On kind ko loads the
-# image into the node itself (KIND_CLUSTER_NAME); on the home lab it pushes to Zot.
+# image into the node itself (KIND_CLUSTER_NAME); on a remote cluster it pushes to your registry.
 def ko_image(name):
     repo = registry + '/' + name
     ref_file = '.tilt-ko-' + name
@@ -128,7 +156,11 @@ if KIND:
 
 # ---- manifests ------------------------------------------------------------------------------
 
-k8s_yaml('hack/dev/namespace.yaml')
+watch_file('hack/dev/namespace.yaml')
+namespace_obj = decode_yaml(read_file('hack/dev/namespace.yaml'))
+for k, v in local_cfg.get('namespaceLabels', {}).items():
+    namespace_obj['metadata']['labels'][k] = v
+k8s_yaml(encode_yaml(namespace_obj))
 k8s_resource(new_name='namespace', objects=['koinon:namespace'], labels=['platform'])
 
 if KIND:
@@ -143,12 +175,29 @@ if KIND:
 # hook Job, which creates the database and bootstrap-admin passwords, is applied as an ordinary
 # resource below, before the database. The namespace is added to what the chart leaves without
 # one, because Tilt applies the objects one by one.
-values = ['hack/dev/values.yaml', 'hack/dev/values-%s.yaml' % mode]
+values = ['hack/dev/values.yaml']
 sets = ['image.tag=dev']
-if not KIND and not cfg.get('sandbox-policy', False):
+if KIND:
+    values.append('hack/dev/values-kind.yaml')
+    # Extra values files of a local.yaml apply on kind too (for example hack/dev/values-rt1.example.yaml
+    # for the RT fixtures); the file's other keys are for remote clusters.
+    values += local_cfg.get('values', [])
+else:
+    sets.append('image.registry=' + registry)
+    if local_cfg.get('imagePullSecret'):
+        sets.append('imagePullSecrets[0].name=' + local_cfg['imagePullSecret'])
+    sets.append('openshell.address=' + os_cfg['address'])
+    if os_cfg.get('runtimeClassName'):
+        sets.append('openshell.runtimeClassName=' + os_cfg['runtimeClassName'])
+    # Extra values files for what the keys above do not cover (network policy, egress hosts, ...).
+    values += local_cfg.get('values', [])
+if not sandbox_policy:
     # The policy's ValidatingAdmissionPolicy bindings are cluster-wide and would also deny writes in
-    # the platform's existing OpenShell sandbox namespaces.
+    # the OpenShell sandbox namespaces the cluster already has.
     sets.append('sandboxPolicy.enabled=false')
+    # The sandbox observer's RoleBinding policy (ADR 0078) needs the sandbox policy: the chart refuses to
+    # render one without the other.
+    sets.append('sandboxObserver.enabled=false')
 for f in ALL_FLAVORS:
     if f in flavors:
         sets.append('flavors.%s.image.tag=%s' % (f, flavor_tags[f]))
@@ -203,13 +252,15 @@ if os_tls:
 # ---- resources ------------------------------------------------------------------------------
 
 # The default org's model provider, declared with a labelled Secret that koinon-api imports (ADR 0056,
-# plan item PV1): the fake model on kind, the lab's keyless Ollama on the home lab.
-provider_file = 'test/e2e/kind/model-provider.yaml' if KIND else 'hack/dev/model-provider-homelab.yaml'
-watch_file(provider_file)
-provider_objs = decode_yaml_stream(read_file(provider_file))
-k8s_yaml(encode_yaml_stream(provider_objs))
-k8s_resource(new_name='model-provider', objects=['%s:secret' % o['metadata']['name'] for o in provider_objs],
-             resource_deps=['namespace'], labels=['koinon'])
+# plan item PV1): the fake model on kind; on a remote cluster the manifest named by `modelProvider` in
+# local.yaml (none: add a provider in the UI).
+provider_file = 'test/e2e/kind/model-provider.yaml' if KIND else local_cfg.get('modelProvider', '')
+if provider_file:
+    watch_file(provider_file)
+    provider_objs = decode_yaml_stream(read_file(provider_file))
+    k8s_yaml(encode_yaml_stream(provider_objs))
+    k8s_resource(new_name='model-provider', objects=['%s:secret' % o['metadata']['name'] for o in provider_objs],
+                 resource_deps=['namespace'], labels=['koinon'])
 
 k8s_resource(new_name='koinon-config', objects=config_objs, resource_deps=['namespace'], labels=['koinon'])
 # The generated passwords: created by `koinon-api ensure-secrets` (the chart's pre-install hook Job,

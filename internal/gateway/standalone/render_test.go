@@ -15,6 +15,9 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 var _ = Describe("Render", func() {
@@ -33,6 +36,40 @@ var _ = Describe("Render", func() {
 			Expect(string(got)).To(Equal(string(want)))
 		})
 	}
+
+	It("logs who answered, with no \"$\" the config loader would expand (ADR 0056 amendment 2026-10-29)", func() {
+		f := fixtures()[2]
+		got, _, err := standalone.Render(f.state, f.options)
+		Expect(err).NotTo(HaveOccurred())
+		var doc struct {
+			Frontend struct {
+				AccessLog struct {
+					Add map[string]string `yaml:"add"`
+				} `yaml:"accessLog"`
+			} `yaml:"frontendPolicies"`
+		}
+		Expect(yaml.Unmarshal(got, &doc)).To(Succeed())
+		add := doc.Frontend.AccessLog.Add
+		Expect(add).To(HaveKeyWithValue(gateway.LogFieldUpstream, gateway.UpstreamCEL))
+		for name, expr := range add {
+			Expect(expr).NotTo(ContainSubstring("$"), name+": agentgateway expands $ in its config file as an environment variable")
+		}
+	})
+
+	// agentgateway v1.7.0 detects a reference to response.body or response.bodyPrefix from the
+	// expression TEXT (crates/policy-core/src/expression.rs, telemetry/log.rs) and then records the
+	// body of EVERY response on the listener (cel/mod.rs, called for each response in
+	// proxy/httpproxy.rs), whatever its status and however the expression is guarded: up to 32 MiB
+	// per LLM response held for the whole stream, and 2 MiB per MCP SSE stream for its lifetime.
+	// Koinon's gateway has 512Mi and was designed to buffer nothing (ADR 0056 amendment 2026-10-29),
+	// so no rendered log or tracer expression may read a response body.
+	It("renders no expression that reads a response body", func() {
+		for _, f := range fixtures() {
+			got, _, err := standalone.Render(f.state, f.options)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(got)).NotTo(ContainSubstring("response.body"), f.name)
+		}
+	})
 
 	It("is deterministic and independent of key order", func() {
 		f := fixtures()[2]
@@ -76,7 +113,10 @@ var _ = Describe("Render", func() {
 						Keys []apiKey `yaml:"keys"`
 					} `yaml:"apiKey"`
 					Transformations struct {
-						Request struct{ Set map[string]string }
+						Request struct {
+							Replace string
+							Set     map[string]string
+						}
 					}
 				}
 				Models []model
@@ -109,6 +149,21 @@ var _ = Describe("Render", func() {
 			Expect(render().LLM.Policies.Transformations.Request.Set).To(HaveKeyWithValue(gateway.OrgHeader, `default(apiKey.org, "")`))
 		})
 
+		It("keeps only the allowlisted client headers on LLM and MCP routes (#262)", func() {
+			d := render()
+			Expect(d.LLM.Policies.Transformations.Request.Replace).To(Equal(
+				`request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])`))
+			Expect(d.LLM.Policies.Transformations.Request.Set).To(HaveKey(gateway.OrgHeader), "the org header is set after the replace")
+
+			got, _, err := standalone.Render(fixtures()[2].state, fixtures()[2].options)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(got)).To(ContainSubstring(
+				`replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id", "user-agent"])`))
+			Expect(string(got)).To(ContainSubstring(
+				"    authorization:\n      rules:\n        - '!toJson(request.headers.filterKeys(k, k != \"authorization\")).contains(\"kgw_\")'\n"),
+				"an MCP request with a key in a header but authorization is refused: the allowlisted headers carry what the client chose")
+		})
+
 		It("limits every key to its own org's plain model names", func() {
 			byName := map[string]apiKey{}
 			for _, k := range render().LLM.Policies.APIKey.Keys {
@@ -119,6 +174,45 @@ var _ = Describe("Render", func() {
 			Expect(byName["k-gggggggggggg"].Metadata.Org).To(Equal("globex"))
 			// The probe key is refused before routing; it has no list to be checked against.
 			Expect(byName[gateway.ReloadProbeKeyName].AllowedModels).To(BeNil())
+		})
+
+		It("limits the model-check key to the models State.Models names, and a restricted agent likewise", func() {
+			check := gateway.AgentRef{Org: "acme", Name: gateway.ModelCheckAgentName}
+			s := fixtures()[2].state
+			s.AddKey(fixedKey("k-cccccccccccc", check, "test-c"))
+			s.RestrictModels(check, "open/model", "unserved/model")
+			s.RestrictModels(gateway.AgentRef{Org: "acme", Name: "narrow"}, "open/model")
+			s.AddKey(fixedKey("k-dddddddddddd", gateway.AgentRef{Org: "acme", Name: "narrow"}, "test-d"))
+			out, _, err := standalone.Render(s, fixtures()[2].options)
+			Expect(err).NotTo(HaveOccurred())
+			var d struct {
+				LLM struct {
+					Policies struct {
+						APIKey struct {
+							Keys []apiKey `yaml:"keys"`
+						} `yaml:"apiKey"`
+					} `yaml:"policies"`
+				} `yaml:"llm"`
+			}
+			Expect(yaml.Unmarshal(out, &d)).To(Succeed())
+			byName := map[string]apiKey{}
+			for _, k := range d.LLM.Policies.APIKey.Keys {
+				byName[k.Metadata.Name] = k
+			}
+			Expect(*byName["k-cccccccccccc"].AllowedModels).To(Equal([]string{"open/model"}))
+			Expect(*byName["k-dddddddddddd"].AllowedModels).To(Equal([]string{"open/model"}))
+			Expect(*byName["k-aaaaaaaaaaaa"].AllowedModels).To(ContainElement("deepseek/deepseek-v4.1-flash"))
+
+			By("a model-check key without an entry may request nothing")
+			s.RestrictModels(check)
+			out, _, err = standalone.Render(s, fixtures()[2].options)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(yaml.Unmarshal(out, &d)).To(Succeed())
+			for _, k := range d.LLM.Policies.APIKey.Keys {
+				if k.Metadata.Name == "k-cccccccccccc" {
+					Expect(*k.AllowedModels).To(BeEmpty())
+				}
+			}
 		})
 
 		It("denies every model to a key of an org that serves none", func() {
@@ -139,10 +233,62 @@ var _ = Describe("Render", func() {
 			}
 		})
 
+		It("renders a model in its format (ADR 0069)", func() {
+			f := fixtures()[5]
+			Expect(f.name).To(Equal("model-formats"))
+			out, _, err := standalone.Render(f.state, f.options)
+			Expect(err).NotTo(HaveOccurred())
+			var d struct {
+				LLM struct {
+					Models []struct {
+						ID       string
+						Provider struct {
+							Custom struct {
+								ProviderOverride string `yaml:"providerOverride"`
+								Formats          []struct{ Type string }
+							}
+						}
+						RequestHeaders struct {
+							Set    map[string]string
+							Remove []string
+						} `yaml:"requestHeaders"`
+						Transformation map[string]string
+					}
+				}
+			}
+			Expect(yaml.Unmarshal(out, &d)).To(Succeed())
+			formats := map[string]string{}
+			for _, m := range d.LLM.Models {
+				formats[m.ID] = m.Provider.Custom.Formats[0].Type
+				if m.ID == "acme/claude-haiku-4-5" {
+					Expect(m.Transformation).To(And(HaveLen(1), HaveKey("tools")),
+						"no stream_options; the agent's server tools are dropped")
+					Expect(m.RequestHeaders.Remove).To(Equal([]string{"anthropic-beta"}))
+					Expect(m.RequestHeaders.Set).To(Equal(map[string]string{
+						"anthropic-version": "2023-06-01", "anthropic-workspace-id": "wrkspc_01ExampleExample",
+					}))
+					Expect(m.Provider.Custom.ProviderOverride).To(Equal("acme.anthropic"))
+					continue
+				}
+				if m.ID == "acme/claude-haiku-5-5" {
+					Expect(m.RequestHeaders.Remove).To(BeEmpty(), "the pinned beta replaces the client's")
+					Expect(m.RequestHeaders.Set).To(Equal(map[string]string{
+						"anthropic-version": "2023-06-01", "anthropic-workspace-id": "wrkspc_01ExampleExample",
+						"anthropic-beta": thinking.BindingBeta,
+					}))
+					continue
+				}
+				Expect(m.Transformation).To(HaveKey("stream_options"), m.ID)
+				Expect(m.RequestHeaders.Set).To(BeEmpty(), m.ID)
+			}
+			Expect(formats).To(HaveKeyWithValue("acme/claude-haiku-4-5", "messages"))
+			Expect(formats).To(HaveKeyWithValue("acme/open/model", "completions"))
+		})
+
 		It("rejects the same model served twice in one org", func() {
 			s := gateway.State{Providers: []gateway.Provider{
-				{Org: "acme", Name: "a", Type: "x", BaseURL: "http://a/v1", Models: []gateway.Model{{Name: "m", Price: &gateway.Price{}}}},
-				{Org: "acme", Name: "b", Type: "x", BaseURL: "http://b/v1", Models: []gateway.Model{{Name: "m", Price: &gateway.Price{}}}},
+				{Org: "acme", Name: "a", Type: "x", BaseURL: "http://a/v1", Models: []gateway.Model{{Name: "m", Format: modelformat.OpenAI, Price: &gateway.Price{}}}},
+				{Org: "acme", Name: "b", Type: "x", BaseURL: "http://b/v1", Models: []gateway.Model{{Name: "m", Format: modelformat.OpenAI, Price: &gateway.Price{}}}},
 			}}
 			_, _, err := standalone.Render(s, standalone.Options{})
 			Expect(err).To(MatchError(ContainSubstring("served twice")))
@@ -180,7 +326,7 @@ var _ = Describe("Render", func() {
 		Expect(string(out)).NotTo(ContainSubstring("unpriced/model"))
 
 		onlyUnpriced := gateway.State{Providers: []gateway.Provider{{
-			Org: "acme", Name: "x", Type: "x", BaseURL: "http://x/v1", Models: []gateway.Model{{Name: "free"}},
+			Org: "acme", Name: "x", Type: "x", BaseURL: "http://x/v1", Models: []gateway.Model{{Name: "free", Format: modelformat.OpenAI}},
 		}}}
 		out, _, err = standalone.Render(onlyUnpriced, standalone.Options{})
 		Expect(err).NotTo(HaveOccurred())
@@ -243,7 +389,7 @@ var _ = Describe("Render", func() {
 				Expect(p).To(HaveLen(1))
 				Expect(p[0].KeyHash).To(Equal(gateway.HashKey(standalone.ReloadProbeKey(rev))))
 				Expect(p[0].Metadata.Agent).To(BeEmpty())
-				Expect(d.LLM.Policies.Authorization.Rules).To(Equal([]string{`apiKey.name != "koinon-reload-probe"`}))
+				Expect(d.LLM.Policies.Authorization.Rules).To(Equal([]string{`apiKey.name != "koinon-reload-probe" && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_") && !has(llmRequest.mcp_servers)`}), "the probe is refused, and so are a key in the URL or a header and mcp_servers")
 				if d.MCP != nil {
 					Expect(probes(d.MCP.Policies.APIKey.Keys)).To(BeEmpty())
 				}
@@ -274,23 +420,101 @@ var _ = Describe("Render", func() {
 		})
 	})
 
+	It("gives a lone org target a placeholder that cannot collide with a server name", func() {
+		s := gateway.State{MCP: []gateway.MCPTarget{{Name: "koinon-placeholder", Org: "koinon", URL: "http://k.example.com/mcp"}}}
+		body, _, err := standalone.Render(s, standalone.Options{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(body)).To(ContainSubstring("name: koinon.placeholder"))
+		Expect(strings.Count(string(body), "name: koinon-placeholder")).To(Equal(1))
+	})
+
+	It("renders a limit with a window, and one without", func() {
+		s := gateway.State{}
+		s.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("1"), Window: 24 * time.Hour})
+		o := standalone.Options{DatabaseURL: "sqlite:///tmp/x.db"}
+		a, _, err := standalone.Render(s, o)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(a)).To(ContainSubstring("rolling: 24h"))
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("1")})
+		b, _, err := standalone.Render(s, o)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(strings.Count(string(b), "rolling:")).To(Equal(1), "only the reload probe keeps a window")
+	})
+
+	It("renders every USD limit fixed-point with at most nine fraction digits, rounded down, never an exponent (issue #245)", func() {
+		o := standalone.Options{DatabaseURL: "sqlite:///tmp/x.db"}
+		for _, c := range []struct{ spent, want string }{
+			{"0.0172757592", "4.98272424"},    // a DeepSeek charge: ten digits
+			{"0.000000123456", "4.999999876"}, // a twelve-digit reserve
+			{"4.99995", "0.00005"},            // float64 prints 5e-05
+			{"0.0000000004", "4.999999999"},   // below a nano: rounded down
+			{"5", "0.0"},
+		} {
+			s := gateway.State{}
+			s.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
+			l := gateway.USDLimit(money.MustParse("5").SubFloor(money.MustParse(c.spent)), 24*time.Hour, "g1")
+			s.SetLimit(agentA, &l)
+			body, _, err := standalone.Render(s, o)
+			Expect(err).NotTo(HaveOccurred(), c.spent)
+			var doc struct {
+				LLM struct {
+					Policies struct {
+						APIKey struct {
+							Keys []struct {
+								Budgets []struct {
+									Limit struct {
+										Unit   string `yaml:"unit"`
+										Amount string `yaml:"amount"`
+									} `yaml:"limit"`
+								} `yaml:"budgets"`
+							} `yaml:"keys"`
+						} `yaml:"apiKey"`
+					} `yaml:"policies"`
+				} `yaml:"llm"`
+			}
+			Expect(yaml.Unmarshal(body, &doc)).To(Succeed())
+			var usd []string
+			for _, k := range doc.LLM.Policies.APIKey.Keys {
+				for _, b := range k.Budgets {
+					if b.Limit.Unit == "USD" {
+						usd = append(usd, b.Limit.Amount)
+					}
+				}
+			}
+			Expect(usd).To(HaveLen(1))
+			Expect(usd[0]).To(MatchRegexp(`^\d+\.\d{1,9}$`))
+			Expect(usd[0]).NotTo(ContainSubstring("e"))
+			Expect(usd[0]).To(Equal(c.want), "spent %s", c.spent)
+			Expect(money.MustParse(usd[0])).To(BeNumerically("<=", money.MustParse("5").SubFloor(money.MustParse(c.spent))), "never more than the remainder")
+		}
+	})
+
+	It("refuses an unrounded amount instead of writing one agentgateway would reject", func() {
+		s := gateway.State{}
+		s.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("4.9827242408"), Window: 24 * time.Hour})
+		_, _, err := standalone.Render(s, standalone.Options{DatabaseURL: "sqlite:///tmp/x.db"})
+		Expect(err).To(MatchError(ContainSubstring("fraction digits")))
+	})
+
 	It("names the budget after the limit's generation", func() {
 		s := gateway.State{Providers: fixtures()[2].state.Providers}
 		s.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
-		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: 24 * time.Hour, Generation: "g1"})
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("1"), Window: 24 * time.Hour, Generation: "g1"})
 		o := standalone.Options{DatabaseURL: "sqlite:///tmp/x.db"}
 		a, _, err := standalone.Render(s, o)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(a)).To(ContainSubstring("name: koinon-agent-limit-g1\n"))
 
-		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: 24 * time.Hour, Generation: "Bad_Gen"})
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("1"), Window: 24 * time.Hour, Generation: "Bad_Gen"})
 		_, _, err = standalone.Render(s, o)
 		Expect(err).To(MatchError(ContainSubstring("generation")))
 	})
 
 	It("requires a database for limits", func() {
 		s := gateway.State{}
-		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: time.Hour})
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("1"), Window: time.Hour})
 		_, _, err := standalone.Render(s, standalone.Options{})
 		Expect(err).To(MatchError(ContainSubstring("DatabaseURL")))
 	})

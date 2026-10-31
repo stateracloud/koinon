@@ -24,6 +24,61 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type EchoDiffSegment_Op int32
+
+const (
+	EchoDiffSegment_OP_UNSPECIFIED EchoDiffSegment_Op = 0
+	// In both.
+	EchoDiffSegment_OP_EQUAL EchoDiffSegment_Op = 1
+	// In the line sent but not in the reply: the provider removed or replaced it.
+	EchoDiffSegment_OP_DELETED EchoDiffSegment_Op = 2
+	// In the reply but not in the line sent.
+	EchoDiffSegment_OP_INSERTED EchoDiffSegment_Op = 3
+)
+
+// Enum value maps for EchoDiffSegment_Op.
+var (
+	EchoDiffSegment_Op_name = map[int32]string{
+		0: "OP_UNSPECIFIED",
+		1: "OP_EQUAL",
+		2: "OP_DELETED",
+		3: "OP_INSERTED",
+	}
+	EchoDiffSegment_Op_value = map[string]int32{
+		"OP_UNSPECIFIED": 0,
+		"OP_EQUAL":       1,
+		"OP_DELETED":     2,
+		"OP_INSERTED":    3,
+	}
+)
+
+func (x EchoDiffSegment_Op) Enum() *EchoDiffSegment_Op {
+	p := new(EchoDiffSegment_Op)
+	*p = x
+	return p
+}
+
+func (x EchoDiffSegment_Op) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (EchoDiffSegment_Op) Descriptor() protoreflect.EnumDescriptor {
+	return file_koinon_provider_v1alpha1_provider_proto_enumTypes[0].Descriptor()
+}
+
+func (EchoDiffSegment_Op) Type() protoreflect.EnumType {
+	return &file_koinon_provider_v1alpha1_provider_proto_enumTypes[0]
+}
+
+func (x EchoDiffSegment_Op) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use EchoDiffSegment_Op.Descriptor instead.
+func (EchoDiffSegment_Op) EnumDescriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{2, 0}
+}
+
 // Provider is an upstream model API of the org. It never holds the key.
 type Provider struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -40,9 +95,16 @@ type Provider struct {
 	// disabled_reason says why the provider is not served, empty when it is.
 	DisabledReason string `protobuf:"bytes,8,opt,name=disabled_reason,json=disabledReason,proto3" json:"disabled_reason,omitempty"`
 	// removed is set when the declaring Secret was deleted.
-	Removed       bool                   `protobuf:"varint,9,opt,name=removed,proto3" json:"removed,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Removed   bool                   `protobuf:"varint,9,opt,name=removed,proto3" json:"removed,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// anthropic_workspace_id is the Anthropic workspace the gateway names for the provider's models,
+	// for an API key not scoped to a workspace. Empty when unset. An identifier, not a credential.
+	AnthropicWorkspaceId string `protobuf:"bytes,12,opt,name=anthropic_workspace_id,json=anthropicWorkspaceId,proto3" json:"anthropic_workspace_id,omitempty"`
+	// formats are the model formats the provider's type offers, preferred first (ADR 0069).
+	Formats []*ModelFormat `protobuf:"bytes,13,rep,name=formats,proto3" json:"formats,omitempty"`
+	// echo_check is the latest echo check of the provider; unset when none ran.
+	EchoCheck     *EchoCheck `protobuf:"bytes,14,opt,name=echo_check,json=echoCheck,proto3" json:"echo_check,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -154,6 +216,330 @@ func (x *Provider) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Provider) GetAnthropicWorkspaceId() string {
+	if x != nil {
+		return x.AnthropicWorkspaceId
+	}
+	return ""
+}
+
+func (x *Provider) GetFormats() []*ModelFormat {
+	if x != nil {
+		return x.Formats
+	}
+	return nil
+}
+
+func (x *Provider) GetEchoCheck() *EchoCheck {
+	if x != nil {
+		return x.EchoCheck
+	}
+	return nil
+}
+
+// EchoCheck is the result of an echo check (CheckProviderEcho).
+type EchoCheck struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The model the check used.
+	Model string `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	// True when the reply was the line, character for character.
+	Unchanged bool `protobuf:"varint,2,opt,name=unchanged,proto3" json:"unchanged,omitempty"`
+	// The line sent and the reply received.
+	Sent     string `protobuf:"bytes,3,opt,name=sent,proto3" json:"sent,omitempty"`
+	Received string `protobuf:"bytes,4,opt,name=received,proto3" json:"received,omitempty"`
+	// The difference between them, in order; every segment of an unchanged result is EQUAL.
+	Diff          []*EchoDiffSegment     `protobuf:"bytes,5,rep,name=diff,proto3" json:"diff,omitempty"`
+	CheckedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=checked_at,json=checkedAt,proto3" json:"checked_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EchoCheck) Reset() {
+	*x = EchoCheck{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EchoCheck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EchoCheck) ProtoMessage() {}
+
+func (x *EchoCheck) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EchoCheck.ProtoReflect.Descriptor instead.
+func (*EchoCheck) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *EchoCheck) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *EchoCheck) GetUnchanged() bool {
+	if x != nil {
+		return x.Unchanged
+	}
+	return false
+}
+
+func (x *EchoCheck) GetSent() string {
+	if x != nil {
+		return x.Sent
+	}
+	return ""
+}
+
+func (x *EchoCheck) GetReceived() string {
+	if x != nil {
+		return x.Received
+	}
+	return ""
+}
+
+func (x *EchoCheck) GetDiff() []*EchoDiffSegment {
+	if x != nil {
+		return x.Diff
+	}
+	return nil
+}
+
+func (x *EchoCheck) GetCheckedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CheckedAt
+	}
+	return nil
+}
+
+// EchoDiffSegment is a run of characters in the sent line, the reply or both.
+type EchoDiffSegment struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Op            EchoDiffSegment_Op     `protobuf:"varint,1,opt,name=op,proto3,enum=koinon.provider.v1alpha1.EchoDiffSegment_Op" json:"op,omitempty"`
+	Text          string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EchoDiffSegment) Reset() {
+	*x = EchoDiffSegment{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EchoDiffSegment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EchoDiffSegment) ProtoMessage() {}
+
+func (x *EchoDiffSegment) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EchoDiffSegment.ProtoReflect.Descriptor instead.
+func (*EchoDiffSegment) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *EchoDiffSegment) GetOp() EchoDiffSegment_Op {
+	if x != nil {
+		return x.Op
+	}
+	return EchoDiffSegment_OP_UNSPECIFIED
+}
+
+func (x *EchoDiffSegment) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+// CheckProviderEchoRequest names the provider and one of its models.
+type CheckProviderEchoRequest struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	OrgId      string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	ProviderId string                 `protobuf:"bytes,2,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	// A model of the provider that the org serves and has a price for.
+	Model         string `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckProviderEchoRequest) Reset() {
+	*x = CheckProviderEchoRequest{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckProviderEchoRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckProviderEchoRequest) ProtoMessage() {}
+
+func (x *CheckProviderEchoRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckProviderEchoRequest.ProtoReflect.Descriptor instead.
+func (*CheckProviderEchoRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *CheckProviderEchoRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *CheckProviderEchoRequest) GetProviderId() string {
+	if x != nil {
+		return x.ProviderId
+	}
+	return ""
+}
+
+func (x *CheckProviderEchoRequest) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+// CheckProviderEchoResponse holds the result.
+type CheckProviderEchoResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EchoCheck     *EchoCheck             `protobuf:"bytes,1,opt,name=echo_check,json=echoCheck,proto3" json:"echo_check,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckProviderEchoResponse) Reset() {
+	*x = CheckProviderEchoResponse{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckProviderEchoResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckProviderEchoResponse) ProtoMessage() {}
+
+func (x *CheckProviderEchoResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckProviderEchoResponse.ProtoReflect.Descriptor instead.
+func (*CheckProviderEchoResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *CheckProviderEchoResponse) GetEchoCheck() *EchoCheck {
+	if x != nil {
+		return x.EchoCheck
+	}
+	return nil
+}
+
+// ModelFormat is a model wire format as the server's format table names it: id is the stored value,
+// label how it reads to a person. The set is open and grows with the formats Koinon supports.
+type ModelFormat struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Label         string                 `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelFormat) Reset() {
+	*x = ModelFormat{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelFormat) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelFormat) ProtoMessage() {}
+
+func (x *ModelFormat) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelFormat.ProtoReflect.Descriptor instead.
+func (*ModelFormat) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ModelFormat) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ModelFormat) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
 // Rates are deprecated: per-model rates were folded into org prices (PriceService, ADR 0056). The
 // message stays for wire compatibility; the server never fills it and refuses requests that set it.
 type Rates struct {
@@ -167,7 +553,7 @@ type Rates struct {
 
 func (x *Rates) Reset() {
 	*x = Rates{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[1]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -179,7 +565,7 @@ func (x *Rates) String() string {
 func (*Rates) ProtoMessage() {}
 
 func (x *Rates) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[1]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -192,7 +578,7 @@ func (x *Rates) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Rates.ProtoReflect.Descriptor instead.
 func (*Rates) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{1}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Rates) GetInput() string {
@@ -233,13 +619,19 @@ type Model struct {
 	DisabledReason  string                 `protobuf:"bytes,8,opt,name=disabled_reason,json=disabledReason,proto3" json:"disabled_reason,omitempty"`
 	CreatedAt       *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt       *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// format is the model's wire format: "openai" (chat completions) or "anthropic" (Messages)
+	// (ADR 0069).
+	Format string `protobuf:"bytes,11,opt,name=format,proto3" json:"format,omitempty"`
+	// format_overridden is set when an admin chose the format; otherwise it follows the default and
+	// is re-derived when the default changes.
+	FormatOverridden bool `protobuf:"varint,12,opt,name=format_overridden,json=formatOverridden,proto3" json:"format_overridden,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Model) Reset() {
 	*x = Model{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[2]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -251,7 +643,7 @@ func (x *Model) String() string {
 func (*Model) ProtoMessage() {}
 
 func (x *Model) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[2]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -264,7 +656,7 @@ func (x *Model) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Model.ProtoReflect.Descriptor instead.
 func (*Model) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{2}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Model) GetId() string {
@@ -338,6 +730,20 @@ func (x *Model) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Model) GetFormat() string {
+	if x != nil {
+		return x.Format
+	}
+	return ""
+}
+
+func (x *Model) GetFormatOverridden() bool {
+	if x != nil {
+		return x.FormatOverridden
+	}
+	return false
+}
+
 type ListProvidersRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
@@ -347,7 +753,7 @@ type ListProvidersRequest struct {
 
 func (x *ListProvidersRequest) Reset() {
 	*x = ListProvidersRequest{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[3]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -359,7 +765,7 @@ func (x *ListProvidersRequest) String() string {
 func (*ListProvidersRequest) ProtoMessage() {}
 
 func (x *ListProvidersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[3]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -372,7 +778,7 @@ func (x *ListProvidersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProvidersRequest.ProtoReflect.Descriptor instead.
 func (*ListProvidersRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{3}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListProvidersRequest) GetOrgId() string {
@@ -391,7 +797,7 @@ type ListProvidersResponse struct {
 
 func (x *ListProvidersResponse) Reset() {
 	*x = ListProvidersResponse{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[4]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -403,7 +809,7 @@ func (x *ListProvidersResponse) String() string {
 func (*ListProvidersResponse) ProtoMessage() {}
 
 func (x *ListProvidersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[4]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -416,7 +822,7 @@ func (x *ListProvidersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProvidersResponse.ProtoReflect.Descriptor instead.
 func (*ListProvidersResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{4}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ListProvidersResponse) GetProviders() []*Provider {
@@ -433,14 +839,16 @@ type CreateProviderRequest struct {
 	Type  string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
 	Url   string                 `protobuf:"bytes,4,opt,name=url,proto3" json:"url,omitempty"`
 	// api_key is empty for keyless upstreams such as Ollama.
-	ApiKey        string `protobuf:"bytes,5,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ApiKey string `protobuf:"bytes,5,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
+	// anthropic_workspace_id is allowed for type "anthropic" only: wrkspc_ followed by letters and digits.
+	AnthropicWorkspaceId string `protobuf:"bytes,6,opt,name=anthropic_workspace_id,json=anthropicWorkspaceId,proto3" json:"anthropic_workspace_id,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *CreateProviderRequest) Reset() {
 	*x = CreateProviderRequest{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[5]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -452,7 +860,7 @@ func (x *CreateProviderRequest) String() string {
 func (*CreateProviderRequest) ProtoMessage() {}
 
 func (x *CreateProviderRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[5]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -465,7 +873,7 @@ func (x *CreateProviderRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateProviderRequest.ProtoReflect.Descriptor instead.
 func (*CreateProviderRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{5}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CreateProviderRequest) GetOrgId() string {
@@ -503,6 +911,13 @@ func (x *CreateProviderRequest) GetApiKey() string {
 	return ""
 }
 
+func (x *CreateProviderRequest) GetAnthropicWorkspaceId() string {
+	if x != nil {
+		return x.AnthropicWorkspaceId
+	}
+	return ""
+}
+
 type CreateProviderResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Provider      *Provider              `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
@@ -512,7 +927,7 @@ type CreateProviderResponse struct {
 
 func (x *CreateProviderResponse) Reset() {
 	*x = CreateProviderResponse{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[6]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -524,7 +939,7 @@ func (x *CreateProviderResponse) String() string {
 func (*CreateProviderResponse) ProtoMessage() {}
 
 func (x *CreateProviderResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[6]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -537,7 +952,7 @@ func (x *CreateProviderResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateProviderResponse.ProtoReflect.Descriptor instead.
 func (*CreateProviderResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{6}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CreateProviderResponse) GetProvider() *Provider {
@@ -555,14 +970,16 @@ type UpdateProviderRequest struct {
 	Type *string `protobuf:"bytes,3,opt,name=type,proto3,oneof" json:"type,omitempty"`
 	Url  *string `protobuf:"bytes,4,opt,name=url,proto3,oneof" json:"url,omitempty"`
 	// api_key replaces the key; set to "" it removes the key.
-	ApiKey        *string `protobuf:"bytes,5,opt,name=api_key,json=apiKey,proto3,oneof" json:"api_key,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ApiKey *string `protobuf:"bytes,5,opt,name=api_key,json=apiKey,proto3,oneof" json:"api_key,omitempty"`
+	// anthropic_workspace_id replaces the workspace ID; set to "" it removes it.
+	AnthropicWorkspaceId *string `protobuf:"bytes,6,opt,name=anthropic_workspace_id,json=anthropicWorkspaceId,proto3,oneof" json:"anthropic_workspace_id,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *UpdateProviderRequest) Reset() {
 	*x = UpdateProviderRequest{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[7]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -574,7 +991,7 @@ func (x *UpdateProviderRequest) String() string {
 func (*UpdateProviderRequest) ProtoMessage() {}
 
 func (x *UpdateProviderRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[7]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -587,7 +1004,7 @@ func (x *UpdateProviderRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateProviderRequest.ProtoReflect.Descriptor instead.
 func (*UpdateProviderRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{7}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *UpdateProviderRequest) GetOrgId() string {
@@ -625,6 +1042,13 @@ func (x *UpdateProviderRequest) GetApiKey() string {
 	return ""
 }
 
+func (x *UpdateProviderRequest) GetAnthropicWorkspaceId() string {
+	if x != nil && x.AnthropicWorkspaceId != nil {
+		return *x.AnthropicWorkspaceId
+	}
+	return ""
+}
+
 type UpdateProviderResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Provider      *Provider              `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
@@ -634,7 +1058,7 @@ type UpdateProviderResponse struct {
 
 func (x *UpdateProviderResponse) Reset() {
 	*x = UpdateProviderResponse{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[8]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -646,7 +1070,7 @@ func (x *UpdateProviderResponse) String() string {
 func (*UpdateProviderResponse) ProtoMessage() {}
 
 func (x *UpdateProviderResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[8]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -659,7 +1083,7 @@ func (x *UpdateProviderResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateProviderResponse.ProtoReflect.Descriptor instead.
 func (*UpdateProviderResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{8}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *UpdateProviderResponse) GetProvider() *Provider {
@@ -679,7 +1103,7 @@ type DeleteProviderRequest struct {
 
 func (x *DeleteProviderRequest) Reset() {
 	*x = DeleteProviderRequest{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[9]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -691,7 +1115,7 @@ func (x *DeleteProviderRequest) String() string {
 func (*DeleteProviderRequest) ProtoMessage() {}
 
 func (x *DeleteProviderRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[9]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -704,7 +1128,7 @@ func (x *DeleteProviderRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteProviderRequest.ProtoReflect.Descriptor instead.
 func (*DeleteProviderRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{9}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DeleteProviderRequest) GetOrgId() string {
@@ -729,7 +1153,7 @@ type DeleteProviderResponse struct {
 
 func (x *DeleteProviderResponse) Reset() {
 	*x = DeleteProviderResponse{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[10]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -741,7 +1165,7 @@ func (x *DeleteProviderResponse) String() string {
 func (*DeleteProviderResponse) ProtoMessage() {}
 
 func (x *DeleteProviderResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[10]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -754,7 +1178,7 @@ func (x *DeleteProviderResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteProviderResponse.ProtoReflect.Descriptor instead.
 func (*DeleteProviderResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{10}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{15}
 }
 
 type ListModelsRequest struct {
@@ -766,7 +1190,7 @@ type ListModelsRequest struct {
 
 func (x *ListModelsRequest) Reset() {
 	*x = ListModelsRequest{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[11]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -778,7 +1202,7 @@ func (x *ListModelsRequest) String() string {
 func (*ListModelsRequest) ProtoMessage() {}
 
 func (x *ListModelsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[11]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -791,7 +1215,7 @@ func (x *ListModelsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListModelsRequest.ProtoReflect.Descriptor instead.
 func (*ListModelsRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{11}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ListModelsRequest) GetOrgId() string {
@@ -810,7 +1234,7 @@ type ListModelsResponse struct {
 
 func (x *ListModelsResponse) Reset() {
 	*x = ListModelsResponse{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[12]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -822,7 +1246,7 @@ func (x *ListModelsResponse) String() string {
 func (*ListModelsResponse) ProtoMessage() {}
 
 func (x *ListModelsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[12]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -835,7 +1259,7 @@ func (x *ListModelsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListModelsResponse.ProtoReflect.Descriptor instead.
 func (*ListModelsResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{12}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ListModelsResponse) GetModels() []*Model {
@@ -855,14 +1279,17 @@ type CreateModelRequest struct {
 	// PriceService.SetPrice instead.
 	//
 	// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
-	Rates         *Rates `protobuf:"bytes,5,opt,name=rates,proto3" json:"rates,omitempty"`
+	Rates *Rates `protobuf:"bytes,5,opt,name=rates,proto3" json:"rates,omitempty"`
+	// format is the model's wire format, within what the provider offers. Empty means the default
+	// (ADR 0069); a value marks the model as overridden.
+	Format        string `protobuf:"bytes,6,opt,name=format,proto3" json:"format,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateModelRequest) Reset() {
 	*x = CreateModelRequest{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[13]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -874,7 +1301,7 @@ func (x *CreateModelRequest) String() string {
 func (*CreateModelRequest) ProtoMessage() {}
 
 func (x *CreateModelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[13]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -887,7 +1314,7 @@ func (x *CreateModelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateModelRequest.ProtoReflect.Descriptor instead.
 func (*CreateModelRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{13}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CreateModelRequest) GetOrgId() string {
@@ -926,16 +1353,26 @@ func (x *CreateModelRequest) GetRates() *Rates {
 	return nil
 }
 
+func (x *CreateModelRequest) GetFormat() string {
+	if x != nil {
+		return x.Format
+	}
+	return ""
+}
+
 type CreateModelResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Model         *Model                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Model *Model                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	// warnings are non-fatal notes, for example that the model runs without prompt caching because
+	// Koinon has no cache mode for its provider format (ADR 0068).
+	Warnings      []string `protobuf:"bytes,2,rep,name=warnings,proto3" json:"warnings,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateModelResponse) Reset() {
 	*x = CreateModelResponse{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[14]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -947,7 +1384,7 @@ func (x *CreateModelResponse) String() string {
 func (*CreateModelResponse) ProtoMessage() {}
 
 func (x *CreateModelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[14]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -960,12 +1397,19 @@ func (x *CreateModelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateModelResponse.ProtoReflect.Descriptor instead.
 func (*CreateModelResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{14}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *CreateModelResponse) GetModel() *Model {
 	if x != nil {
 		return x.Model
+	}
+	return nil
+}
+
+func (x *CreateModelResponse) GetWarnings() []string {
+	if x != nil {
+		return x.Warnings
 	}
 	return nil
 }
@@ -980,14 +1424,17 @@ type UpdateModelRequest struct {
 	// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
 	Rates *Rates `protobuf:"bytes,4,opt,name=rates,proto3" json:"rates,omitempty"`
 	// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
-	ClearRates    bool `protobuf:"varint,5,opt,name=clear_rates,json=clearRates,proto3" json:"clear_rates,omitempty"`
+	ClearRates bool `protobuf:"varint,5,opt,name=clear_rates,json=clearRates,proto3" json:"clear_rates,omitempty"`
+	// format overrides the model's wire format, within what the provider offers; set to "" it goes
+	// back to the default and is no longer overridden.
+	Format        *string `protobuf:"bytes,6,opt,name=format,proto3,oneof" json:"format,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateModelRequest) Reset() {
 	*x = UpdateModelRequest{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[15]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -999,7 +1446,7 @@ func (x *UpdateModelRequest) String() string {
 func (*UpdateModelRequest) ProtoMessage() {}
 
 func (x *UpdateModelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[15]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1012,7 +1459,7 @@ func (x *UpdateModelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateModelRequest.ProtoReflect.Descriptor instead.
 func (*UpdateModelRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{15}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *UpdateModelRequest) GetOrgId() string {
@@ -1052,6 +1499,13 @@ func (x *UpdateModelRequest) GetClearRates() bool {
 	return false
 }
 
+func (x *UpdateModelRequest) GetFormat() string {
+	if x != nil && x.Format != nil {
+		return *x.Format
+	}
+	return ""
+}
+
 type UpdateModelResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Model         *Model                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
@@ -1061,7 +1515,7 @@ type UpdateModelResponse struct {
 
 func (x *UpdateModelResponse) Reset() {
 	*x = UpdateModelResponse{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[16]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1073,7 +1527,7 @@ func (x *UpdateModelResponse) String() string {
 func (*UpdateModelResponse) ProtoMessage() {}
 
 func (x *UpdateModelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[16]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1086,7 +1540,7 @@ func (x *UpdateModelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateModelResponse.ProtoReflect.Descriptor instead.
 func (*UpdateModelResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{16}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *UpdateModelResponse) GetModel() *Model {
@@ -1106,7 +1560,7 @@ type DeleteModelRequest struct {
 
 func (x *DeleteModelRequest) Reset() {
 	*x = DeleteModelRequest{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[17]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1118,7 +1572,7 @@ func (x *DeleteModelRequest) String() string {
 func (*DeleteModelRequest) ProtoMessage() {}
 
 func (x *DeleteModelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[17]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1131,7 +1585,7 @@ func (x *DeleteModelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteModelRequest.ProtoReflect.Descriptor instead.
 func (*DeleteModelRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{17}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *DeleteModelRequest) GetOrgId() string {
@@ -1156,7 +1610,7 @@ type DeleteModelResponse struct {
 
 func (x *DeleteModelResponse) Reset() {
 	*x = DeleteModelResponse{}
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[18]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1168,7 +1622,7 @@ func (x *DeleteModelResponse) String() string {
 func (*DeleteModelResponse) ProtoMessage() {}
 
 func (x *DeleteModelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[18]
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1181,14 +1635,227 @@ func (x *DeleteModelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteModelResponse.ProtoReflect.Descriptor instead.
 func (*DeleteModelResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{18}
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{23}
+}
+
+type ModelFormatsRequest struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	OrgId      string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	ProviderId string                 `protobuf:"bytes,2,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	// name is the model name; the default depends on its family.
+	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelFormatsRequest) Reset() {
+	*x = ModelFormatsRequest{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelFormatsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelFormatsRequest) ProtoMessage() {}
+
+func (x *ModelFormatsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelFormatsRequest.ProtoReflect.Descriptor instead.
+func (*ModelFormatsRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *ModelFormatsRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *ModelFormatsRequest) GetProviderId() string {
+	if x != nil {
+		return x.ProviderId
+	}
+	return ""
+}
+
+func (x *ModelFormatsRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type ModelFormatsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// default_format is the id of the format the model gets unless overridden. The formats the
+	// provider offers are Provider.formats.
+	DefaultFormat string `protobuf:"bytes,1,opt,name=default_format,json=defaultFormat,proto3" json:"default_format,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelFormatsResponse) Reset() {
+	*x = ModelFormatsResponse{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelFormatsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelFormatsResponse) ProtoMessage() {}
+
+func (x *ModelFormatsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelFormatsResponse.ProtoReflect.Descriptor instead.
+func (*ModelFormatsResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *ModelFormatsResponse) GetDefaultFormat() string {
+	if x != nil {
+		return x.DefaultFormat
+	}
+	return ""
+}
+
+type ProviderTypeInfoRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProviderTypeInfoRequest) Reset() {
+	*x = ProviderTypeInfoRequest{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProviderTypeInfoRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProviderTypeInfoRequest) ProtoMessage() {}
+
+func (x *ProviderTypeInfoRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProviderTypeInfoRequest.ProtoReflect.Descriptor instead.
+func (*ProviderTypeInfoRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ProviderTypeInfoRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *ProviderTypeInfoRequest) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+type ProviderTypeInfoResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// formats are the model formats the type offers, preferred first.
+	Formats []*ModelFormat `protobuf:"bytes,1,rep,name=formats,proto3" json:"formats,omitempty"`
+	// takes_workspace_id is set when the type takes an Anthropic workspace ID.
+	TakesWorkspaceId bool `protobuf:"varint,2,opt,name=takes_workspace_id,json=takesWorkspaceId,proto3" json:"takes_workspace_id,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ProviderTypeInfoResponse) Reset() {
+	*x = ProviderTypeInfoResponse{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProviderTypeInfoResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProviderTypeInfoResponse) ProtoMessage() {}
+
+func (x *ProviderTypeInfoResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProviderTypeInfoResponse.ProtoReflect.Descriptor instead.
+func (*ProviderTypeInfoResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ProviderTypeInfoResponse) GetFormats() []*ModelFormat {
+	if x != nil {
+		return x.Formats
+	}
+	return nil
+}
+
+func (x *ProviderTypeInfoResponse) GetTakesWorkspaceId() bool {
+	if x != nil {
+		return x.TakesWorkspaceId
+	}
+	return false
 }
 
 var File_koinon_provider_v1alpha1_provider_proto protoreflect.FileDescriptor
 
 const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"\n" +
-	"'koinon/provider/v1alpha1/provider.proto\x12\x18koinon.provider.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xea\x02\n" +
+	"'koinon/provider/v1alpha1/provider.proto\x12\x18koinon.provider.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa5\x04\n" +
 	"\bProvider\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1203,12 +1870,44 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"created_at\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"T\n" +
+	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x124\n" +
+	"\x16anthropic_workspace_id\x18\f \x01(\tR\x14anthropicWorkspaceId\x12?\n" +
+	"\aformats\x18\r \x03(\v2%.koinon.provider.v1alpha1.ModelFormatR\aformats\x12B\n" +
+	"\n" +
+	"echo_check\x18\x0e \x01(\v2#.koinon.provider.v1alpha1.EchoCheckR\techoCheck\"\xe9\x01\n" +
+	"\tEchoCheck\x12\x14\n" +
+	"\x05model\x18\x01 \x01(\tR\x05model\x12\x1c\n" +
+	"\tunchanged\x18\x02 \x01(\bR\tunchanged\x12\x12\n" +
+	"\x04sent\x18\x03 \x01(\tR\x04sent\x12\x1a\n" +
+	"\breceived\x18\x04 \x01(\tR\breceived\x12=\n" +
+	"\x04diff\x18\x05 \x03(\v2).koinon.provider.v1alpha1.EchoDiffSegmentR\x04diff\x129\n" +
+	"\n" +
+	"checked_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcheckedAt\"\xac\x01\n" +
+	"\x0fEchoDiffSegment\x12<\n" +
+	"\x02op\x18\x01 \x01(\x0e2,.koinon.provider.v1alpha1.EchoDiffSegment.OpR\x02op\x12\x12\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"G\n" +
+	"\x02Op\x12\x12\n" +
+	"\x0eOP_UNSPECIFIED\x10\x00\x12\f\n" +
+	"\bOP_EQUAL\x10\x01\x12\x0e\n" +
+	"\n" +
+	"OP_DELETED\x10\x02\x12\x0f\n" +
+	"\vOP_INSERTED\x10\x03\"h\n" +
+	"\x18CheckProviderEchoRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
+	"\vprovider_id\x18\x02 \x01(\tR\n" +
+	"providerId\x12\x14\n" +
+	"\x05model\x18\x03 \x01(\tR\x05model\"_\n" +
+	"\x19CheckProviderEchoResponse\x12B\n" +
+	"\n" +
+	"echo_check\x18\x01 \x01(\v2#.koinon.provider.v1alpha1.EchoCheckR\techoCheck\"3\n" +
+	"\vModelFormat\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
+	"\x05label\x18\x02 \x01(\tR\x05label\"T\n" +
 	"\x05Rates\x12\x14\n" +
 	"\x05input\x18\x01 \x01(\tR\x05input\x12\x16\n" +
 	"\x06output\x18\x02 \x01(\tR\x06output\x12\x1d\n" +
 	"\n" +
-	"cache_read\x18\x03 \x01(\tR\tcacheRead\"\x80\x03\n" +
+	"cache_read\x18\x03 \x01(\tR\tcacheRead\"\xc5\x03\n" +
 	"\x05Model\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\vprovider_id\x18\x02 \x01(\tR\n" +
@@ -1223,30 +1922,35 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"created_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
 	"updated_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"-\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x16\n" +
+	"\x06format\x18\v \x01(\tR\x06format\x12+\n" +
+	"\x11format_overridden\x18\f \x01(\bR\x10formatOverridden\"-\n" +
 	"\x14ListProvidersRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"Y\n" +
 	"\x15ListProvidersResponse\x12@\n" +
-	"\tproviders\x18\x01 \x03(\v2\".koinon.provider.v1alpha1.ProviderR\tproviders\"\x86\x01\n" +
+	"\tproviders\x18\x01 \x03(\v2\".koinon.provider.v1alpha1.ProviderR\tproviders\"\xbc\x01\n" +
 	"\x15CreateProviderRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x03 \x01(\tR\x04type\x12\x10\n" +
 	"\x03url\x18\x04 \x01(\tR\x03url\x12\x1c\n" +
-	"\aapi_key\x18\x05 \x01(\tB\x03\x80\x01\x01R\x06apiKey\"X\n" +
+	"\aapi_key\x18\x05 \x01(\tB\x03\x80\x01\x01R\x06apiKey\x124\n" +
+	"\x16anthropic_workspace_id\x18\x06 \x01(\tR\x14anthropicWorkspaceId\"X\n" +
 	"\x16CreateProviderResponse\x12>\n" +
-	"\bprovider\x18\x01 \x01(\v2\".koinon.provider.v1alpha1.ProviderR\bprovider\"\xbf\x01\n" +
+	"\bprovider\x18\x01 \x01(\v2\".koinon.provider.v1alpha1.ProviderR\bprovider\"\x95\x02\n" +
 	"\x15UpdateProviderRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vprovider_id\x18\x02 \x01(\tR\n" +
 	"providerId\x12\x17\n" +
 	"\x04type\x18\x03 \x01(\tH\x00R\x04type\x88\x01\x01\x12\x15\n" +
 	"\x03url\x18\x04 \x01(\tH\x01R\x03url\x88\x01\x01\x12!\n" +
-	"\aapi_key\x18\x05 \x01(\tB\x03\x80\x01\x01H\x02R\x06apiKey\x88\x01\x01B\a\n" +
+	"\aapi_key\x18\x05 \x01(\tB\x03\x80\x01\x01H\x02R\x06apiKey\x88\x01\x01\x129\n" +
+	"\x16anthropic_workspace_id\x18\x06 \x01(\tH\x03R\x14anthropicWorkspaceId\x88\x01\x01B\a\n" +
 	"\x05_typeB\x06\n" +
 	"\x04_urlB\n" +
 	"\n" +
-	"\b_api_key\"X\n" +
+	"\b_api_keyB\x19\n" +
+	"\x17_anthropic_workspace_id\"X\n" +
 	"\x16UpdateProviderResponse\x12>\n" +
 	"\bprovider\x18\x01 \x01(\v2\".koinon.provider.v1alpha1.ProviderR\bprovider\"O\n" +
 	"\x15DeleteProviderRequest\x12\x15\n" +
@@ -1257,30 +1961,48 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"\x11ListModelsRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"M\n" +
 	"\x12ListModelsResponse\x127\n" +
-	"\x06models\x18\x01 \x03(\v2\x1f.koinon.provider.v1alpha1.ModelR\x06models\"\xb1\x01\n" +
+	"\x06models\x18\x01 \x03(\v2\x1f.koinon.provider.v1alpha1.ModelR\x06models\"\xc9\x01\n" +
 	"\x12CreateModelRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vprovider_id\x18\x02 \x01(\tR\n" +
 	"providerId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
 	"\x05guard\x18\x04 \x01(\bR\x05guard\x129\n" +
-	"\x05rates\x18\x05 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesB\x02\x18\x01R\x05rates\"L\n" +
+	"\x05rates\x18\x05 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesB\x02\x18\x01R\x05rates\x12\x16\n" +
+	"\x06format\x18\x06 \x01(\tR\x06format\"h\n" +
 	"\x13CreateModelResponse\x125\n" +
-	"\x05model\x18\x01 \x01(\v2\x1f.koinon.provider.v1alpha1.ModelR\x05model\"\xcb\x01\n" +
+	"\x05model\x18\x01 \x01(\v2\x1f.koinon.provider.v1alpha1.ModelR\x05model\x12\x1a\n" +
+	"\bwarnings\x18\x02 \x03(\tR\bwarnings\"\xf3\x01\n" +
 	"\x12UpdateModelRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\bmodel_id\x18\x02 \x01(\tR\amodelId\x12\x19\n" +
 	"\x05guard\x18\x03 \x01(\bH\x00R\x05guard\x88\x01\x01\x129\n" +
 	"\x05rates\x18\x04 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesB\x02\x18\x01R\x05rates\x12#\n" +
 	"\vclear_rates\x18\x05 \x01(\bB\x02\x18\x01R\n" +
-	"clearRatesB\b\n" +
-	"\x06_guard\"L\n" +
+	"clearRates\x12\x1b\n" +
+	"\x06format\x18\x06 \x01(\tH\x01R\x06format\x88\x01\x01B\b\n" +
+	"\x06_guardB\t\n" +
+	"\a_format\"L\n" +
 	"\x13UpdateModelResponse\x125\n" +
 	"\x05model\x18\x01 \x01(\v2\x1f.koinon.provider.v1alpha1.ModelR\x05model\"F\n" +
 	"\x12DeleteModelRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\bmodel_id\x18\x02 \x01(\tR\amodelId\"\x15\n" +
-	"\x13DeleteModelResponse2\x99\a\n" +
+	"\x13DeleteModelResponse\"a\n" +
+	"\x13ModelFormatsRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
+	"\vprovider_id\x18\x02 \x01(\tR\n" +
+	"providerId\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"=\n" +
+	"\x14ModelFormatsResponse\x12%\n" +
+	"\x0edefault_format\x18\x01 \x01(\tR\rdefaultFormat\"D\n" +
+	"\x17ProviderTypeInfoRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\"\x89\x01\n" +
+	"\x18ProviderTypeInfoResponse\x12?\n" +
+	"\aformats\x18\x01 \x03(\v2%.koinon.provider.v1alpha1.ModelFormatR\aformats\x12,\n" +
+	"\x12takes_workspace_id\x18\x02 \x01(\bR\x10takesWorkspaceId2\x8b\n" +
+	"\n" +
 	"\x0fProviderService\x12u\n" +
 	"\rListProviders\x12..koinon.provider.v1alpha1.ListProvidersRequest\x1a/.koinon.provider.v1alpha1.ListProvidersResponse\"\x03\x90\x02\x01\x12s\n" +
 	"\x0eCreateProvider\x12/.koinon.provider.v1alpha1.CreateProviderRequest\x1a0.koinon.provider.v1alpha1.CreateProviderResponse\x12s\n" +
@@ -1290,7 +2012,10 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"ListModels\x12+.koinon.provider.v1alpha1.ListModelsRequest\x1a,.koinon.provider.v1alpha1.ListModelsResponse\"\x03\x90\x02\x01\x12j\n" +
 	"\vCreateModel\x12,.koinon.provider.v1alpha1.CreateModelRequest\x1a-.koinon.provider.v1alpha1.CreateModelResponse\x12j\n" +
 	"\vUpdateModel\x12,.koinon.provider.v1alpha1.UpdateModelRequest\x1a-.koinon.provider.v1alpha1.UpdateModelResponse\x12j\n" +
-	"\vDeleteModel\x12,.koinon.provider.v1alpha1.DeleteModelRequest\x1a-.koinon.provider.v1alpha1.DeleteModelResponseBWZUgithub.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1;providerv1alpha1b\x06proto3"
+	"\vDeleteModel\x12,.koinon.provider.v1alpha1.DeleteModelRequest\x1a-.koinon.provider.v1alpha1.DeleteModelResponse\x12r\n" +
+	"\fModelFormats\x12-.koinon.provider.v1alpha1.ModelFormatsRequest\x1a..koinon.provider.v1alpha1.ModelFormatsResponse\"\x03\x90\x02\x01\x12|\n" +
+	"\x11CheckProviderEcho\x122.koinon.provider.v1alpha1.CheckProviderEchoRequest\x1a3.koinon.provider.v1alpha1.CheckProviderEchoResponse\x12~\n" +
+	"\x10ProviderTypeInfo\x121.koinon.provider.v1alpha1.ProviderTypeInfoRequest\x1a2.koinon.provider.v1alpha1.ProviderTypeInfoResponse\"\x03\x90\x02\x01BWZUgithub.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1;providerv1alpha1b\x06proto3"
 
 var (
 	file_koinon_provider_v1alpha1_provider_proto_rawDescOnce sync.Once
@@ -1304,64 +2029,88 @@ func file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP() []byte {
 	return file_koinon_provider_v1alpha1_provider_proto_rawDescData
 }
 
-var file_koinon_provider_v1alpha1_provider_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_koinon_provider_v1alpha1_provider_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_koinon_provider_v1alpha1_provider_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_koinon_provider_v1alpha1_provider_proto_goTypes = []any{
-	(*Provider)(nil),               // 0: koinon.provider.v1alpha1.Provider
-	(*Rates)(nil),                  // 1: koinon.provider.v1alpha1.Rates
-	(*Model)(nil),                  // 2: koinon.provider.v1alpha1.Model
-	(*ListProvidersRequest)(nil),   // 3: koinon.provider.v1alpha1.ListProvidersRequest
-	(*ListProvidersResponse)(nil),  // 4: koinon.provider.v1alpha1.ListProvidersResponse
-	(*CreateProviderRequest)(nil),  // 5: koinon.provider.v1alpha1.CreateProviderRequest
-	(*CreateProviderResponse)(nil), // 6: koinon.provider.v1alpha1.CreateProviderResponse
-	(*UpdateProviderRequest)(nil),  // 7: koinon.provider.v1alpha1.UpdateProviderRequest
-	(*UpdateProviderResponse)(nil), // 8: koinon.provider.v1alpha1.UpdateProviderResponse
-	(*DeleteProviderRequest)(nil),  // 9: koinon.provider.v1alpha1.DeleteProviderRequest
-	(*DeleteProviderResponse)(nil), // 10: koinon.provider.v1alpha1.DeleteProviderResponse
-	(*ListModelsRequest)(nil),      // 11: koinon.provider.v1alpha1.ListModelsRequest
-	(*ListModelsResponse)(nil),     // 12: koinon.provider.v1alpha1.ListModelsResponse
-	(*CreateModelRequest)(nil),     // 13: koinon.provider.v1alpha1.CreateModelRequest
-	(*CreateModelResponse)(nil),    // 14: koinon.provider.v1alpha1.CreateModelResponse
-	(*UpdateModelRequest)(nil),     // 15: koinon.provider.v1alpha1.UpdateModelRequest
-	(*UpdateModelResponse)(nil),    // 16: koinon.provider.v1alpha1.UpdateModelResponse
-	(*DeleteModelRequest)(nil),     // 17: koinon.provider.v1alpha1.DeleteModelRequest
-	(*DeleteModelResponse)(nil),    // 18: koinon.provider.v1alpha1.DeleteModelResponse
-	(*timestamppb.Timestamp)(nil),  // 19: google.protobuf.Timestamp
+	(EchoDiffSegment_Op)(0),           // 0: koinon.provider.v1alpha1.EchoDiffSegment.Op
+	(*Provider)(nil),                  // 1: koinon.provider.v1alpha1.Provider
+	(*EchoCheck)(nil),                 // 2: koinon.provider.v1alpha1.EchoCheck
+	(*EchoDiffSegment)(nil),           // 3: koinon.provider.v1alpha1.EchoDiffSegment
+	(*CheckProviderEchoRequest)(nil),  // 4: koinon.provider.v1alpha1.CheckProviderEchoRequest
+	(*CheckProviderEchoResponse)(nil), // 5: koinon.provider.v1alpha1.CheckProviderEchoResponse
+	(*ModelFormat)(nil),               // 6: koinon.provider.v1alpha1.ModelFormat
+	(*Rates)(nil),                     // 7: koinon.provider.v1alpha1.Rates
+	(*Model)(nil),                     // 8: koinon.provider.v1alpha1.Model
+	(*ListProvidersRequest)(nil),      // 9: koinon.provider.v1alpha1.ListProvidersRequest
+	(*ListProvidersResponse)(nil),     // 10: koinon.provider.v1alpha1.ListProvidersResponse
+	(*CreateProviderRequest)(nil),     // 11: koinon.provider.v1alpha1.CreateProviderRequest
+	(*CreateProviderResponse)(nil),    // 12: koinon.provider.v1alpha1.CreateProviderResponse
+	(*UpdateProviderRequest)(nil),     // 13: koinon.provider.v1alpha1.UpdateProviderRequest
+	(*UpdateProviderResponse)(nil),    // 14: koinon.provider.v1alpha1.UpdateProviderResponse
+	(*DeleteProviderRequest)(nil),     // 15: koinon.provider.v1alpha1.DeleteProviderRequest
+	(*DeleteProviderResponse)(nil),    // 16: koinon.provider.v1alpha1.DeleteProviderResponse
+	(*ListModelsRequest)(nil),         // 17: koinon.provider.v1alpha1.ListModelsRequest
+	(*ListModelsResponse)(nil),        // 18: koinon.provider.v1alpha1.ListModelsResponse
+	(*CreateModelRequest)(nil),        // 19: koinon.provider.v1alpha1.CreateModelRequest
+	(*CreateModelResponse)(nil),       // 20: koinon.provider.v1alpha1.CreateModelResponse
+	(*UpdateModelRequest)(nil),        // 21: koinon.provider.v1alpha1.UpdateModelRequest
+	(*UpdateModelResponse)(nil),       // 22: koinon.provider.v1alpha1.UpdateModelResponse
+	(*DeleteModelRequest)(nil),        // 23: koinon.provider.v1alpha1.DeleteModelRequest
+	(*DeleteModelResponse)(nil),       // 24: koinon.provider.v1alpha1.DeleteModelResponse
+	(*ModelFormatsRequest)(nil),       // 25: koinon.provider.v1alpha1.ModelFormatsRequest
+	(*ModelFormatsResponse)(nil),      // 26: koinon.provider.v1alpha1.ModelFormatsResponse
+	(*ProviderTypeInfoRequest)(nil),   // 27: koinon.provider.v1alpha1.ProviderTypeInfoRequest
+	(*ProviderTypeInfoResponse)(nil),  // 28: koinon.provider.v1alpha1.ProviderTypeInfoResponse
+	(*timestamppb.Timestamp)(nil),     // 29: google.protobuf.Timestamp
 }
 var file_koinon_provider_v1alpha1_provider_proto_depIdxs = []int32{
-	19, // 0: koinon.provider.v1alpha1.Provider.created_at:type_name -> google.protobuf.Timestamp
-	19, // 1: koinon.provider.v1alpha1.Provider.updated_at:type_name -> google.protobuf.Timestamp
-	1,  // 2: koinon.provider.v1alpha1.Model.rates:type_name -> koinon.provider.v1alpha1.Rates
-	19, // 3: koinon.provider.v1alpha1.Model.created_at:type_name -> google.protobuf.Timestamp
-	19, // 4: koinon.provider.v1alpha1.Model.updated_at:type_name -> google.protobuf.Timestamp
-	0,  // 5: koinon.provider.v1alpha1.ListProvidersResponse.providers:type_name -> koinon.provider.v1alpha1.Provider
-	0,  // 6: koinon.provider.v1alpha1.CreateProviderResponse.provider:type_name -> koinon.provider.v1alpha1.Provider
-	0,  // 7: koinon.provider.v1alpha1.UpdateProviderResponse.provider:type_name -> koinon.provider.v1alpha1.Provider
-	2,  // 8: koinon.provider.v1alpha1.ListModelsResponse.models:type_name -> koinon.provider.v1alpha1.Model
-	1,  // 9: koinon.provider.v1alpha1.CreateModelRequest.rates:type_name -> koinon.provider.v1alpha1.Rates
-	2,  // 10: koinon.provider.v1alpha1.CreateModelResponse.model:type_name -> koinon.provider.v1alpha1.Model
-	1,  // 11: koinon.provider.v1alpha1.UpdateModelRequest.rates:type_name -> koinon.provider.v1alpha1.Rates
-	2,  // 12: koinon.provider.v1alpha1.UpdateModelResponse.model:type_name -> koinon.provider.v1alpha1.Model
-	3,  // 13: koinon.provider.v1alpha1.ProviderService.ListProviders:input_type -> koinon.provider.v1alpha1.ListProvidersRequest
-	5,  // 14: koinon.provider.v1alpha1.ProviderService.CreateProvider:input_type -> koinon.provider.v1alpha1.CreateProviderRequest
-	7,  // 15: koinon.provider.v1alpha1.ProviderService.UpdateProvider:input_type -> koinon.provider.v1alpha1.UpdateProviderRequest
-	9,  // 16: koinon.provider.v1alpha1.ProviderService.DeleteProvider:input_type -> koinon.provider.v1alpha1.DeleteProviderRequest
-	11, // 17: koinon.provider.v1alpha1.ProviderService.ListModels:input_type -> koinon.provider.v1alpha1.ListModelsRequest
-	13, // 18: koinon.provider.v1alpha1.ProviderService.CreateModel:input_type -> koinon.provider.v1alpha1.CreateModelRequest
-	15, // 19: koinon.provider.v1alpha1.ProviderService.UpdateModel:input_type -> koinon.provider.v1alpha1.UpdateModelRequest
-	17, // 20: koinon.provider.v1alpha1.ProviderService.DeleteModel:input_type -> koinon.provider.v1alpha1.DeleteModelRequest
-	4,  // 21: koinon.provider.v1alpha1.ProviderService.ListProviders:output_type -> koinon.provider.v1alpha1.ListProvidersResponse
-	6,  // 22: koinon.provider.v1alpha1.ProviderService.CreateProvider:output_type -> koinon.provider.v1alpha1.CreateProviderResponse
-	8,  // 23: koinon.provider.v1alpha1.ProviderService.UpdateProvider:output_type -> koinon.provider.v1alpha1.UpdateProviderResponse
-	10, // 24: koinon.provider.v1alpha1.ProviderService.DeleteProvider:output_type -> koinon.provider.v1alpha1.DeleteProviderResponse
-	12, // 25: koinon.provider.v1alpha1.ProviderService.ListModels:output_type -> koinon.provider.v1alpha1.ListModelsResponse
-	14, // 26: koinon.provider.v1alpha1.ProviderService.CreateModel:output_type -> koinon.provider.v1alpha1.CreateModelResponse
-	16, // 27: koinon.provider.v1alpha1.ProviderService.UpdateModel:output_type -> koinon.provider.v1alpha1.UpdateModelResponse
-	18, // 28: koinon.provider.v1alpha1.ProviderService.DeleteModel:output_type -> koinon.provider.v1alpha1.DeleteModelResponse
-	21, // [21:29] is the sub-list for method output_type
-	13, // [13:21] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	29, // 0: koinon.provider.v1alpha1.Provider.created_at:type_name -> google.protobuf.Timestamp
+	29, // 1: koinon.provider.v1alpha1.Provider.updated_at:type_name -> google.protobuf.Timestamp
+	6,  // 2: koinon.provider.v1alpha1.Provider.formats:type_name -> koinon.provider.v1alpha1.ModelFormat
+	2,  // 3: koinon.provider.v1alpha1.Provider.echo_check:type_name -> koinon.provider.v1alpha1.EchoCheck
+	3,  // 4: koinon.provider.v1alpha1.EchoCheck.diff:type_name -> koinon.provider.v1alpha1.EchoDiffSegment
+	29, // 5: koinon.provider.v1alpha1.EchoCheck.checked_at:type_name -> google.protobuf.Timestamp
+	0,  // 6: koinon.provider.v1alpha1.EchoDiffSegment.op:type_name -> koinon.provider.v1alpha1.EchoDiffSegment.Op
+	2,  // 7: koinon.provider.v1alpha1.CheckProviderEchoResponse.echo_check:type_name -> koinon.provider.v1alpha1.EchoCheck
+	7,  // 8: koinon.provider.v1alpha1.Model.rates:type_name -> koinon.provider.v1alpha1.Rates
+	29, // 9: koinon.provider.v1alpha1.Model.created_at:type_name -> google.protobuf.Timestamp
+	29, // 10: koinon.provider.v1alpha1.Model.updated_at:type_name -> google.protobuf.Timestamp
+	1,  // 11: koinon.provider.v1alpha1.ListProvidersResponse.providers:type_name -> koinon.provider.v1alpha1.Provider
+	1,  // 12: koinon.provider.v1alpha1.CreateProviderResponse.provider:type_name -> koinon.provider.v1alpha1.Provider
+	1,  // 13: koinon.provider.v1alpha1.UpdateProviderResponse.provider:type_name -> koinon.provider.v1alpha1.Provider
+	8,  // 14: koinon.provider.v1alpha1.ListModelsResponse.models:type_name -> koinon.provider.v1alpha1.Model
+	7,  // 15: koinon.provider.v1alpha1.CreateModelRequest.rates:type_name -> koinon.provider.v1alpha1.Rates
+	8,  // 16: koinon.provider.v1alpha1.CreateModelResponse.model:type_name -> koinon.provider.v1alpha1.Model
+	7,  // 17: koinon.provider.v1alpha1.UpdateModelRequest.rates:type_name -> koinon.provider.v1alpha1.Rates
+	8,  // 18: koinon.provider.v1alpha1.UpdateModelResponse.model:type_name -> koinon.provider.v1alpha1.Model
+	6,  // 19: koinon.provider.v1alpha1.ProviderTypeInfoResponse.formats:type_name -> koinon.provider.v1alpha1.ModelFormat
+	9,  // 20: koinon.provider.v1alpha1.ProviderService.ListProviders:input_type -> koinon.provider.v1alpha1.ListProvidersRequest
+	11, // 21: koinon.provider.v1alpha1.ProviderService.CreateProvider:input_type -> koinon.provider.v1alpha1.CreateProviderRequest
+	13, // 22: koinon.provider.v1alpha1.ProviderService.UpdateProvider:input_type -> koinon.provider.v1alpha1.UpdateProviderRequest
+	15, // 23: koinon.provider.v1alpha1.ProviderService.DeleteProvider:input_type -> koinon.provider.v1alpha1.DeleteProviderRequest
+	17, // 24: koinon.provider.v1alpha1.ProviderService.ListModels:input_type -> koinon.provider.v1alpha1.ListModelsRequest
+	19, // 25: koinon.provider.v1alpha1.ProviderService.CreateModel:input_type -> koinon.provider.v1alpha1.CreateModelRequest
+	21, // 26: koinon.provider.v1alpha1.ProviderService.UpdateModel:input_type -> koinon.provider.v1alpha1.UpdateModelRequest
+	23, // 27: koinon.provider.v1alpha1.ProviderService.DeleteModel:input_type -> koinon.provider.v1alpha1.DeleteModelRequest
+	25, // 28: koinon.provider.v1alpha1.ProviderService.ModelFormats:input_type -> koinon.provider.v1alpha1.ModelFormatsRequest
+	4,  // 29: koinon.provider.v1alpha1.ProviderService.CheckProviderEcho:input_type -> koinon.provider.v1alpha1.CheckProviderEchoRequest
+	27, // 30: koinon.provider.v1alpha1.ProviderService.ProviderTypeInfo:input_type -> koinon.provider.v1alpha1.ProviderTypeInfoRequest
+	10, // 31: koinon.provider.v1alpha1.ProviderService.ListProviders:output_type -> koinon.provider.v1alpha1.ListProvidersResponse
+	12, // 32: koinon.provider.v1alpha1.ProviderService.CreateProvider:output_type -> koinon.provider.v1alpha1.CreateProviderResponse
+	14, // 33: koinon.provider.v1alpha1.ProviderService.UpdateProvider:output_type -> koinon.provider.v1alpha1.UpdateProviderResponse
+	16, // 34: koinon.provider.v1alpha1.ProviderService.DeleteProvider:output_type -> koinon.provider.v1alpha1.DeleteProviderResponse
+	18, // 35: koinon.provider.v1alpha1.ProviderService.ListModels:output_type -> koinon.provider.v1alpha1.ListModelsResponse
+	20, // 36: koinon.provider.v1alpha1.ProviderService.CreateModel:output_type -> koinon.provider.v1alpha1.CreateModelResponse
+	22, // 37: koinon.provider.v1alpha1.ProviderService.UpdateModel:output_type -> koinon.provider.v1alpha1.UpdateModelResponse
+	24, // 38: koinon.provider.v1alpha1.ProviderService.DeleteModel:output_type -> koinon.provider.v1alpha1.DeleteModelResponse
+	26, // 39: koinon.provider.v1alpha1.ProviderService.ModelFormats:output_type -> koinon.provider.v1alpha1.ModelFormatsResponse
+	5,  // 40: koinon.provider.v1alpha1.ProviderService.CheckProviderEcho:output_type -> koinon.provider.v1alpha1.CheckProviderEchoResponse
+	28, // 41: koinon.provider.v1alpha1.ProviderService.ProviderTypeInfo:output_type -> koinon.provider.v1alpha1.ProviderTypeInfoResponse
+	31, // [31:42] is the sub-list for method output_type
+	20, // [20:31] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_koinon_provider_v1alpha1_provider_proto_init() }
@@ -1369,20 +2118,21 @@ func file_koinon_provider_v1alpha1_provider_proto_init() {
 	if File_koinon_provider_v1alpha1_provider_proto != nil {
 		return
 	}
-	file_koinon_provider_v1alpha1_provider_proto_msgTypes[7].OneofWrappers = []any{}
-	file_koinon_provider_v1alpha1_provider_proto_msgTypes[15].OneofWrappers = []any{}
+	file_koinon_provider_v1alpha1_provider_proto_msgTypes[12].OneofWrappers = []any{}
+	file_koinon_provider_v1alpha1_provider_proto_msgTypes[20].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_provider_v1alpha1_provider_proto_rawDesc), len(file_koinon_provider_v1alpha1_provider_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   19,
+			NumEnums:      1,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_koinon_provider_v1alpha1_provider_proto_goTypes,
 		DependencyIndexes: file_koinon_provider_v1alpha1_provider_proto_depIdxs,
+		EnumInfos:         file_koinon_provider_v1alpha1_provider_proto_enumTypes,
 		MessageInfos:      file_koinon_provider_v1alpha1_provider_proto_msgTypes,
 	}.Build()
 	File_koinon_provider_v1alpha1_provider_proto = out.File

@@ -9,6 +9,8 @@
 package questionv1alpha1
 
 import (
+	v1alpha11 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
+	v1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -159,7 +161,9 @@ type Question struct {
 	TaskId  string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	RunId   string                 `protobuf:"bytes,4,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
 	AgentId string                 `protobuf:"bytes,5,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	// The member the question is addressed to.
+	// Deprecated: use recipients / waiting_on_user_ids. Set to the first recipient, for older clients.
+	//
+	// Deprecated: Marked as deprecated in koinon/question/v1alpha1/question.proto.
 	AskedTo  string `protobuf:"bytes,6,opt,name=asked_to,json=askedTo,proto3" json:"asked_to,omitempty"`
 	Question string `protobuf:"bytes,7,opt,name=question,proto3" json:"question,omitempty"`
 	// Answers offered as buttons; empty means free text only.
@@ -177,9 +181,20 @@ type Question struct {
 	ResolvedAt    *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=resolved_at,json=resolvedAt,proto3" json:"resolved_at,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,18,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// Whether the caller can answer or dismiss it now.
-	CanAnswer     bool `protobuf:"varint,19,opt,name=can_answer,json=canAnswer,proto3" json:"can_answer,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	CanAnswer bool `protobuf:"varint,19,opt,name=can_answer,json=canAnswer,proto3" json:"can_answer,omitempty"`
+	// Who the question was addressed to, as resolved when it was asked.
+	Target *v1alpha1.NotifyTarget `protobuf:"bytes,20,opt,name=target,proto3" json:"target,omitempty"`
+	// The target in plain words: a person's name, "the org's admins", "the org's owners", "the org's members".
+	TargetLabel string `protobuf:"bytes,21,opt,name=target_label,json=targetLabel,proto3" json:"target_label,omitempty"`
+	// Everyone it waits on. The first answer wins.
+	Recipients []*Recipient `protobuf:"bytes,22,rep,name=recipients,proto3" json:"recipients,omitempty"`
+	// When it started waiting on the caller (unset when the caller is not a recipient). The inbox ages
+	// items from this; a reminder does not change it.
+	WaitingSince *timestamppb.Timestamp `protobuf:"bytes,23,opt,name=waiting_since,json=waitingSince,proto3" json:"waiting_since,omitempty"`
+	// The display name of answered_by.
+	AnsweredByName string `protobuf:"bytes,24,opt,name=answered_by_name,json=answeredByName,proto3" json:"answered_by_name,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Question) Reset() {
@@ -247,6 +262,7 @@ func (x *Question) GetAgentId() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in koinon/question/v1alpha1/question.proto.
 func (x *Question) GetAskedTo() string {
 	if x != nil {
 		return x.AskedTo
@@ -345,6 +361,102 @@ func (x *Question) GetCanAnswer() bool {
 	return false
 }
 
+func (x *Question) GetTarget() *v1alpha1.NotifyTarget {
+	if x != nil {
+		return x.Target
+	}
+	return nil
+}
+
+func (x *Question) GetTargetLabel() string {
+	if x != nil {
+		return x.TargetLabel
+	}
+	return ""
+}
+
+func (x *Question) GetRecipients() []*Recipient {
+	if x != nil {
+		return x.Recipients
+	}
+	return nil
+}
+
+func (x *Question) GetWaitingSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.WaitingSince
+	}
+	return nil
+}
+
+func (x *Question) GetAnsweredByName() string {
+	if x != nil {
+		return x.AnsweredByName
+	}
+	return ""
+}
+
+// Recipient is one person a question waits on.
+type Recipient struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	DisplayName   string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	WaitingSince  *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=waiting_since,json=waitingSince,proto3" json:"waiting_since,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Recipient) Reset() {
+	*x = Recipient{}
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Recipient) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Recipient) ProtoMessage() {}
+
+func (x *Recipient) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Recipient.ProtoReflect.Descriptor instead.
+func (*Recipient) Descriptor() ([]byte, []int) {
+	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Recipient) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *Recipient) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *Recipient) GetWaitingSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.WaitingSince
+	}
+	return nil
+}
+
 // ListQuestionsRequest names the org and optionally a task.
 type ListQuestionsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -357,7 +469,7 @@ type ListQuestionsRequest struct {
 
 func (x *ListQuestionsRequest) Reset() {
 	*x = ListQuestionsRequest{}
-	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[1]
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -369,7 +481,7 @@ func (x *ListQuestionsRequest) String() string {
 func (*ListQuestionsRequest) ProtoMessage() {}
 
 func (x *ListQuestionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[1]
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -382,7 +494,7 @@ func (x *ListQuestionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListQuestionsRequest.ProtoReflect.Descriptor instead.
 func (*ListQuestionsRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{1}
+	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ListQuestionsRequest) GetOrgId() string {
@@ -409,7 +521,7 @@ type ListQuestionsResponse struct {
 
 func (x *ListQuestionsResponse) Reset() {
 	*x = ListQuestionsResponse{}
-	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[2]
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -421,7 +533,7 @@ func (x *ListQuestionsResponse) String() string {
 func (*ListQuestionsResponse) ProtoMessage() {}
 
 func (x *ListQuestionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[2]
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -434,7 +546,7 @@ func (x *ListQuestionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListQuestionsResponse.ProtoReflect.Descriptor instead.
 func (*ListQuestionsResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{2}
+	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ListQuestionsResponse) GetQuestions() []*Question {
@@ -461,7 +573,7 @@ type AnswerQuestionRequest struct {
 
 func (x *AnswerQuestionRequest) Reset() {
 	*x = AnswerQuestionRequest{}
-	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[3]
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -473,7 +585,7 @@ func (x *AnswerQuestionRequest) String() string {
 func (*AnswerQuestionRequest) ProtoMessage() {}
 
 func (x *AnswerQuestionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[3]
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -486,7 +598,7 @@ func (x *AnswerQuestionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerQuestionRequest.ProtoReflect.Descriptor instead.
 func (*AnswerQuestionRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{3}
+	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *AnswerQuestionRequest) GetOrgId() string {
@@ -571,7 +683,7 @@ type AnswerQuestionResponse struct {
 
 func (x *AnswerQuestionResponse) Reset() {
 	*x = AnswerQuestionResponse{}
-	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[4]
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -583,7 +695,7 @@ func (x *AnswerQuestionResponse) String() string {
 func (*AnswerQuestionResponse) ProtoMessage() {}
 
 func (x *AnswerQuestionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[4]
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -596,7 +708,7 @@ func (x *AnswerQuestionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerQuestionResponse.ProtoReflect.Descriptor instead.
 func (*AnswerQuestionResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{4}
+	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *AnswerQuestionResponse) GetQuestion() *Question {
@@ -617,7 +729,7 @@ type DismissQuestionRequest struct {
 
 func (x *DismissQuestionRequest) Reset() {
 	*x = DismissQuestionRequest{}
-	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[5]
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -629,7 +741,7 @@ func (x *DismissQuestionRequest) String() string {
 func (*DismissQuestionRequest) ProtoMessage() {}
 
 func (x *DismissQuestionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[5]
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -642,7 +754,7 @@ func (x *DismissQuestionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DismissQuestionRequest.ProtoReflect.Descriptor instead.
 func (*DismissQuestionRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{5}
+	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DismissQuestionRequest) GetOrgId() string {
@@ -669,7 +781,7 @@ type DismissQuestionResponse struct {
 
 func (x *DismissQuestionResponse) Reset() {
 	*x = DismissQuestionResponse{}
-	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[6]
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -681,7 +793,7 @@ func (x *DismissQuestionResponse) String() string {
 func (*DismissQuestionResponse) ProtoMessage() {}
 
 func (x *DismissQuestionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[6]
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -694,7 +806,7 @@ func (x *DismissQuestionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DismissQuestionResponse.ProtoReflect.Descriptor instead.
 func (*DismissQuestionResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{6}
+	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DismissQuestionResponse) GetQuestion() *Question {
@@ -704,18 +816,177 @@ func (x *DismissQuestionResponse) GetQuestion() *Question {
 	return nil
 }
 
+// ListAskableMembersRequest names the org.
+type ListAskableMembersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAskableMembersRequest) Reset() {
+	*x = ListAskableMembersRequest{}
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAskableMembersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAskableMembersRequest) ProtoMessage() {}
+
+func (x *ListAskableMembersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAskableMembersRequest.ProtoReflect.Descriptor instead.
+func (*ListAskableMembersRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ListAskableMembersRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+// AskableMember is a member who can answer questions.
+type AskableMember struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Email         string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
+	DisplayName   string                 `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Role          v1alpha11.OrgRole      `protobuf:"varint,4,opt,name=role,proto3,enum=koinon.auth.v1alpha1.OrgRole" json:"role,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AskableMember) Reset() {
+	*x = AskableMember{}
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AskableMember) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AskableMember) ProtoMessage() {}
+
+func (x *AskableMember) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AskableMember.ProtoReflect.Descriptor instead.
+func (*AskableMember) Descriptor() ([]byte, []int) {
+	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *AskableMember) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *AskableMember) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *AskableMember) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *AskableMember) GetRole() v1alpha11.OrgRole {
+	if x != nil {
+		return x.Role
+	}
+	return v1alpha11.OrgRole(0)
+}
+
+// ListAskableMembersResponse lists them.
+type ListAskableMembersResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Members       []*AskableMember       `protobuf:"bytes,1,rep,name=members,proto3" json:"members,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAskableMembersResponse) Reset() {
+	*x = ListAskableMembersResponse{}
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAskableMembersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAskableMembersResponse) ProtoMessage() {}
+
+func (x *ListAskableMembersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_question_v1alpha1_question_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAskableMembersResponse.ProtoReflect.Descriptor instead.
+func (*ListAskableMembersResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_question_v1alpha1_question_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListAskableMembersResponse) GetMembers() []*AskableMember {
+	if x != nil {
+		return x.Members
+	}
+	return nil
+}
+
 var File_koinon_question_v1alpha1_question_proto protoreflect.FileDescriptor
 
 const file_koinon_question_v1alpha1_question_proto_rawDesc = "" +
 	"\n" +
-	"'koinon/question/v1alpha1/question.proto\x12\x18koinon.question.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd4\x05\n" +
+	"'koinon/question/v1alpha1/question.proto\x12\x18koinon.question.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1fkoinon/auth/v1alpha1/auth.proto\x1a'koinon/template/v1alpha1/template.proto\"\xeb\a\n" +
 	"\bQuestion\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12\x17\n" +
 	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x15\n" +
 	"\x06run_id\x18\x04 \x01(\tR\x05runId\x12\x19\n" +
-	"\bagent_id\x18\x05 \x01(\tR\aagentId\x12\x19\n" +
-	"\basked_to\x18\x06 \x01(\tR\aaskedTo\x12\x1a\n" +
+	"\bagent_id\x18\x05 \x01(\tR\aagentId\x12\x1d\n" +
+	"\basked_to\x18\x06 \x01(\tB\x02\x18\x01R\aaskedTo\x12\x1a\n" +
 	"\bquestion\x18\a \x01(\tR\bquestion\x12\x18\n" +
 	"\achoices\x18\b \x03(\tR\achoices\x12\x14\n" +
 	"\x05draft\x18\t \x01(\tR\x05draft\x12%\n" +
@@ -735,7 +1006,18 @@ const file_koinon_question_v1alpha1_question_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x12 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x1d\n" +
 	"\n" +
-	"can_answer\x18\x13 \x01(\bR\tcanAnswer\"F\n" +
+	"can_answer\x18\x13 \x01(\bR\tcanAnswer\x12>\n" +
+	"\x06target\x18\x14 \x01(\v2&.koinon.template.v1alpha1.NotifyTargetR\x06target\x12!\n" +
+	"\ftarget_label\x18\x15 \x01(\tR\vtargetLabel\x12C\n" +
+	"\n" +
+	"recipients\x18\x16 \x03(\v2#.koinon.question.v1alpha1.RecipientR\n" +
+	"recipients\x12?\n" +
+	"\rwaiting_since\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\fwaitingSince\x12(\n" +
+	"\x10answered_by_name\x18\x18 \x01(\tR\x0eansweredByName\"\x88\x01\n" +
+	"\tRecipient\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12!\n" +
+	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12?\n" +
+	"\rwaiting_since\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\fwaitingSince\"F\n" +
 	"\x14ListQuestionsRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\"Y\n" +
@@ -756,7 +1038,16 @@ const file_koinon_question_v1alpha1_question_proto_rawDesc = "" +
 	"\vquestion_id\x18\x02 \x01(\tR\n" +
 	"questionId\"Y\n" +
 	"\x17DismissQuestionResponse\x12>\n" +
-	"\bquestion\x18\x01 \x01(\v2\".koinon.question.v1alpha1.QuestionR\bquestion*\xd6\x01\n" +
+	"\bquestion\x18\x01 \x01(\v2\".koinon.question.v1alpha1.QuestionR\bquestion\"2\n" +
+	"\x19ListAskableMembersRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"\x94\x01\n" +
+	"\rAskableMember\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05email\x18\x02 \x01(\tR\x05email\x12!\n" +
+	"\fdisplay_name\x18\x03 \x01(\tR\vdisplayName\x121\n" +
+	"\x04role\x18\x04 \x01(\x0e2\x1d.koinon.auth.v1alpha1.OrgRoleR\x04role\"_\n" +
+	"\x1aListAskableMembersResponse\x12A\n" +
+	"\amembers\x18\x01 \x03(\v2'.koinon.question.v1alpha1.AskableMemberR\amembers*\xd6\x01\n" +
 	"\rQuestionState\x12\x1e\n" +
 	"\x1aQUESTION_STATE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14QUESTION_STATE_ASKED\x10\x01\x12\x17\n" +
@@ -771,11 +1062,12 @@ const file_koinon_question_v1alpha1_question_proto_rawDesc = "" +
 	"\x12ANSWER_KIND_CHOICE\x10\x01\x12\x15\n" +
 	"\x11ANSWER_KIND_DRAFT\x10\x02\x12\x14\n" +
 	"\x10ANSWER_KIND_TEXT\x10\x03\x12\x17\n" +
-	"\x13ANSWER_KIND_DEFAULT\x10\x042\xf5\x02\n" +
+	"\x13ANSWER_KIND_DEFAULT\x10\x042\xfc\x03\n" +
 	"\x0fQuestionService\x12u\n" +
 	"\rListQuestions\x12..koinon.question.v1alpha1.ListQuestionsRequest\x1a/.koinon.question.v1alpha1.ListQuestionsResponse\"\x03\x90\x02\x01\x12s\n" +
 	"\x0eAnswerQuestion\x12/.koinon.question.v1alpha1.AnswerQuestionRequest\x1a0.koinon.question.v1alpha1.AnswerQuestionResponse\x12v\n" +
-	"\x0fDismissQuestion\x120.koinon.question.v1alpha1.DismissQuestionRequest\x1a1.koinon.question.v1alpha1.DismissQuestionResponseBWZUgithub.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1;questionv1alpha1b\x06proto3"
+	"\x0fDismissQuestion\x120.koinon.question.v1alpha1.DismissQuestionRequest\x1a1.koinon.question.v1alpha1.DismissQuestionResponse\x12\x84\x01\n" +
+	"\x12ListAskableMembers\x123.koinon.question.v1alpha1.ListAskableMembersRequest\x1a4.koinon.question.v1alpha1.ListAskableMembersResponse\"\x03\x90\x02\x01BWZUgithub.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1;questionv1alpha1b\x06proto3"
 
 var (
 	file_koinon_question_v1alpha1_question_proto_rawDescOnce sync.Once
@@ -790,40 +1082,54 @@ func file_koinon_question_v1alpha1_question_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_question_v1alpha1_question_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_koinon_question_v1alpha1_question_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_koinon_question_v1alpha1_question_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_koinon_question_v1alpha1_question_proto_goTypes = []any{
-	(QuestionState)(0),              // 0: koinon.question.v1alpha1.QuestionState
-	(AnswerKind)(0),                 // 1: koinon.question.v1alpha1.AnswerKind
-	(*Question)(nil),                // 2: koinon.question.v1alpha1.Question
-	(*ListQuestionsRequest)(nil),    // 3: koinon.question.v1alpha1.ListQuestionsRequest
-	(*ListQuestionsResponse)(nil),   // 4: koinon.question.v1alpha1.ListQuestionsResponse
-	(*AnswerQuestionRequest)(nil),   // 5: koinon.question.v1alpha1.AnswerQuestionRequest
-	(*AnswerQuestionResponse)(nil),  // 6: koinon.question.v1alpha1.AnswerQuestionResponse
-	(*DismissQuestionRequest)(nil),  // 7: koinon.question.v1alpha1.DismissQuestionRequest
-	(*DismissQuestionResponse)(nil), // 8: koinon.question.v1alpha1.DismissQuestionResponse
-	(*timestamppb.Timestamp)(nil),   // 9: google.protobuf.Timestamp
+	(QuestionState)(0),                 // 0: koinon.question.v1alpha1.QuestionState
+	(AnswerKind)(0),                    // 1: koinon.question.v1alpha1.AnswerKind
+	(*Question)(nil),                   // 2: koinon.question.v1alpha1.Question
+	(*Recipient)(nil),                  // 3: koinon.question.v1alpha1.Recipient
+	(*ListQuestionsRequest)(nil),       // 4: koinon.question.v1alpha1.ListQuestionsRequest
+	(*ListQuestionsResponse)(nil),      // 5: koinon.question.v1alpha1.ListQuestionsResponse
+	(*AnswerQuestionRequest)(nil),      // 6: koinon.question.v1alpha1.AnswerQuestionRequest
+	(*AnswerQuestionResponse)(nil),     // 7: koinon.question.v1alpha1.AnswerQuestionResponse
+	(*DismissQuestionRequest)(nil),     // 8: koinon.question.v1alpha1.DismissQuestionRequest
+	(*DismissQuestionResponse)(nil),    // 9: koinon.question.v1alpha1.DismissQuestionResponse
+	(*ListAskableMembersRequest)(nil),  // 10: koinon.question.v1alpha1.ListAskableMembersRequest
+	(*AskableMember)(nil),              // 11: koinon.question.v1alpha1.AskableMember
+	(*ListAskableMembersResponse)(nil), // 12: koinon.question.v1alpha1.ListAskableMembersResponse
+	(*timestamppb.Timestamp)(nil),      // 13: google.protobuf.Timestamp
+	(*v1alpha1.NotifyTarget)(nil),      // 14: koinon.template.v1alpha1.NotifyTarget
+	(v1alpha11.OrgRole)(0),             // 15: koinon.auth.v1alpha1.OrgRole
 }
 var file_koinon_question_v1alpha1_question_proto_depIdxs = []int32{
 	0,  // 0: koinon.question.v1alpha1.Question.state:type_name -> koinon.question.v1alpha1.QuestionState
 	1,  // 1: koinon.question.v1alpha1.Question.answer_kind:type_name -> koinon.question.v1alpha1.AnswerKind
-	9,  // 2: koinon.question.v1alpha1.Question.expires_at:type_name -> google.protobuf.Timestamp
-	9,  // 3: koinon.question.v1alpha1.Question.opened_at:type_name -> google.protobuf.Timestamp
-	9,  // 4: koinon.question.v1alpha1.Question.resolved_at:type_name -> google.protobuf.Timestamp
-	9,  // 5: koinon.question.v1alpha1.Question.created_at:type_name -> google.protobuf.Timestamp
-	2,  // 6: koinon.question.v1alpha1.ListQuestionsResponse.questions:type_name -> koinon.question.v1alpha1.Question
-	2,  // 7: koinon.question.v1alpha1.AnswerQuestionResponse.question:type_name -> koinon.question.v1alpha1.Question
-	2,  // 8: koinon.question.v1alpha1.DismissQuestionResponse.question:type_name -> koinon.question.v1alpha1.Question
-	3,  // 9: koinon.question.v1alpha1.QuestionService.ListQuestions:input_type -> koinon.question.v1alpha1.ListQuestionsRequest
-	5,  // 10: koinon.question.v1alpha1.QuestionService.AnswerQuestion:input_type -> koinon.question.v1alpha1.AnswerQuestionRequest
-	7,  // 11: koinon.question.v1alpha1.QuestionService.DismissQuestion:input_type -> koinon.question.v1alpha1.DismissQuestionRequest
-	4,  // 12: koinon.question.v1alpha1.QuestionService.ListQuestions:output_type -> koinon.question.v1alpha1.ListQuestionsResponse
-	6,  // 13: koinon.question.v1alpha1.QuestionService.AnswerQuestion:output_type -> koinon.question.v1alpha1.AnswerQuestionResponse
-	8,  // 14: koinon.question.v1alpha1.QuestionService.DismissQuestion:output_type -> koinon.question.v1alpha1.DismissQuestionResponse
-	12, // [12:15] is the sub-list for method output_type
-	9,  // [9:12] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	13, // 2: koinon.question.v1alpha1.Question.expires_at:type_name -> google.protobuf.Timestamp
+	13, // 3: koinon.question.v1alpha1.Question.opened_at:type_name -> google.protobuf.Timestamp
+	13, // 4: koinon.question.v1alpha1.Question.resolved_at:type_name -> google.protobuf.Timestamp
+	13, // 5: koinon.question.v1alpha1.Question.created_at:type_name -> google.protobuf.Timestamp
+	14, // 6: koinon.question.v1alpha1.Question.target:type_name -> koinon.template.v1alpha1.NotifyTarget
+	3,  // 7: koinon.question.v1alpha1.Question.recipients:type_name -> koinon.question.v1alpha1.Recipient
+	13, // 8: koinon.question.v1alpha1.Question.waiting_since:type_name -> google.protobuf.Timestamp
+	13, // 9: koinon.question.v1alpha1.Recipient.waiting_since:type_name -> google.protobuf.Timestamp
+	2,  // 10: koinon.question.v1alpha1.ListQuestionsResponse.questions:type_name -> koinon.question.v1alpha1.Question
+	2,  // 11: koinon.question.v1alpha1.AnswerQuestionResponse.question:type_name -> koinon.question.v1alpha1.Question
+	2,  // 12: koinon.question.v1alpha1.DismissQuestionResponse.question:type_name -> koinon.question.v1alpha1.Question
+	15, // 13: koinon.question.v1alpha1.AskableMember.role:type_name -> koinon.auth.v1alpha1.OrgRole
+	11, // 14: koinon.question.v1alpha1.ListAskableMembersResponse.members:type_name -> koinon.question.v1alpha1.AskableMember
+	4,  // 15: koinon.question.v1alpha1.QuestionService.ListQuestions:input_type -> koinon.question.v1alpha1.ListQuestionsRequest
+	6,  // 16: koinon.question.v1alpha1.QuestionService.AnswerQuestion:input_type -> koinon.question.v1alpha1.AnswerQuestionRequest
+	8,  // 17: koinon.question.v1alpha1.QuestionService.DismissQuestion:input_type -> koinon.question.v1alpha1.DismissQuestionRequest
+	10, // 18: koinon.question.v1alpha1.QuestionService.ListAskableMembers:input_type -> koinon.question.v1alpha1.ListAskableMembersRequest
+	5,  // 19: koinon.question.v1alpha1.QuestionService.ListQuestions:output_type -> koinon.question.v1alpha1.ListQuestionsResponse
+	7,  // 20: koinon.question.v1alpha1.QuestionService.AnswerQuestion:output_type -> koinon.question.v1alpha1.AnswerQuestionResponse
+	9,  // 21: koinon.question.v1alpha1.QuestionService.DismissQuestion:output_type -> koinon.question.v1alpha1.DismissQuestionResponse
+	12, // 22: koinon.question.v1alpha1.QuestionService.ListAskableMembers:output_type -> koinon.question.v1alpha1.ListAskableMembersResponse
+	19, // [19:23] is the sub-list for method output_type
+	15, // [15:19] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_koinon_question_v1alpha1_question_proto_init() }
@@ -831,7 +1137,7 @@ func file_koinon_question_v1alpha1_question_proto_init() {
 	if File_koinon_question_v1alpha1_question_proto != nil {
 		return
 	}
-	file_koinon_question_v1alpha1_question_proto_msgTypes[3].OneofWrappers = []any{
+	file_koinon_question_v1alpha1_question_proto_msgTypes[4].OneofWrappers = []any{
 		(*AnswerQuestionRequest_Choice)(nil),
 		(*AnswerQuestionRequest_Draft)(nil),
 		(*AnswerQuestionRequest_Text)(nil),
@@ -842,7 +1148,7 @@ func file_koinon_question_v1alpha1_question_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_question_v1alpha1_question_proto_rawDesc), len(file_koinon_question_v1alpha1_question_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   7,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -21,7 +21,9 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // Provider keys reach the gateway as files (plan item PV1, ADR 0056). The reconciler opens
@@ -166,7 +168,7 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 					skip[id] = true
 					continue
 				}
-				p = &gateway.Provider{Org: org.Slug, Name: row.ProviderName, Type: row.ProviderType, BaseURL: row.Url}
+				p = &gateway.Provider{Org: org.Slug, Name: row.ProviderName, Type: row.ProviderType, BaseURL: row.Url, AnthropicWorkspaceID: row.AnthropicWorkspaceID.String}
 				if len(row.ApiKey) > 0 {
 					key, err := catalog.OpenKey(r.cfg.Keys, org.ID, row.ProviderID, row.ApiKey)
 					if err != nil {
@@ -185,12 +187,14 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 				pidOf[id] = row.ProviderID
 				order = append(order, id)
 			}
-			m := gateway.Model{Name: row.ModelName, Guard: row.Guard}
+			// The beta the gateway pins comes from the catalog's thinking capability, never from a client
+			// (ADR 0069 amendment 2026-10-29).
+			m := gateway.Model{Name: row.ModelName, Guard: row.Guard, Format: modelformat.Format(row.ModelFormat), Thinking: thinking.Of(row.ProviderType, row.ModelName, modelformat.Format(row.ModelFormat))}
 			// The price valid now: the org's price entries, else the default list (plan item PV2).
 			// A model with no price is not served.
-			pm := prices.Model{ID: row.ModelID.String(), Name: row.ModelName, ProviderType: row.ProviderType}
+			pm := prices.Model{ID: row.ModelID.String(), Name: row.ModelName, ProviderType: row.ProviderType, Format: modelformat.Format(row.ModelFormat)}
 			var badPrice *prices.BadPriceError
-			switch res, err := prices.Resolve(ctx, r.q, org.ID, pm, r.cfg.Now()); {
+			switch res, err := r.cfg.Prices.Resolve(ctx, r.q, org.ID, pm, r.cfg.Now()); {
 			case err == nil:
 				gp := res.Price.Gateway()
 				m.Price = &gp

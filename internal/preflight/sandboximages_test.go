@@ -102,6 +102,96 @@ var _ = Describe("Sandbox image checks", func() {
 		Entry("no gateway.toml", &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "openshell-config", Namespace: "openshell"}}, ""),
 	)
 
+	Describe("the gateway ID (ADR 0078)", func() {
+		// OpenShell 0.1.5 on kind: gateway_id appears twice, under the Kubernetes driver and under
+		// gateway_jwt, and only the first is the one that names the namespaces.
+		gatewayToml := func(driverID, jwtID, mode string) *corev1.ConfigMap {
+			return &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "openshell-config", Namespace: "openshell"},
+				Data: map[string]string{"gateway.toml": `[openshell]
+version = 2
+[openshell.drivers.kubernetes]
+allow_driver_config = false
+gateway_id = "` + driverID + `"
+namespace = "openshell"
+workspace_mode = "` + mode + `"
+[openshell.drivers.kubernetes.managed_ssh_ingress]
+enabled = true
+[openshell.gateway]
+name = "openshell"
+[openshell.gateway.gateway_jwt]
+gateway_id = "` + jwtID + `"
+kid_path = "/etc/openshell-jwt/kid"
+`},
+			}
+		}
+		withID := func(cm *corev1.ConfigMap, id string) *cluster {
+			return withConfig(cm, func(c *preflight.Config) { c.OpenShellGatewayID = id })
+		}
+
+		It("passes when openshell.gatewayId matches the Kubernetes driver's gateway_id", func(ctx SpecContext) {
+			results := withID(gatewayToml("openshell", "other", "managed"), "openshell").run(ctx)
+			Expect(find(results, "OpenShell gateway ID").Status).To(Equal(preflight.Pass))
+			Expect(checks(results)).NotTo(ContainElement("OpenShell workspace mode"))
+		})
+
+		It("reads the driver's gateway_id and not the one under gateway_jwt", func(ctx SpecContext) {
+			r := find(withID(gatewayToml("prod", "openshell", "managed"), "openshell").run(ctx), "OpenShell gateway ID")
+			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Message).To(And(ContainSubstring(`"prod"`), ContainSubstring(`"openshell"`)))
+			Expect(r.Fix).To(ContainSubstring("openshell.gatewayId=prod"))
+		})
+
+		It("warns, without failing, when gateway_id is missing from the driver table", func(ctx SpecContext) {
+			cm := openshellConfig("")
+			cm.Data["gateway.toml"] += "[openshell.gateway.gateway_jwt]\ngateway_id = \"openshell\"\n"
+			results := withID(cm, "openshell").run(ctx)
+			Expect(find(results, "OpenShell gateway ID").Status).To(Equal(preflight.Warn))
+			Expect(find(results, "OpenShell gateway ID").Message).To(ContainSubstring("does not set gateway_id"))
+			Expect(preflight.Write(&discard{}, results)).To(BeZero())
+		})
+
+		It("warns when the workspace mode is not managed", func(ctx SpecContext) {
+			r := find(withID(gatewayToml("openshell", "openshell", "operator"), "openshell").run(ctx), "OpenShell workspace mode")
+			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Message).To(ContainSubstring(`"operator"`))
+		})
+
+		It("is not checked without openshell.gatewayId", func(ctx SpecContext) {
+			Expect(checks(withID(gatewayToml("prod", "prod", "managed"), "").run(ctx))).NotTo(ContainElement("OpenShell gateway ID"))
+		})
+	})
+
+	Describe("the sandbox observer", func() {
+		It("warns, without failing, when it is off", func(ctx SpecContext) {
+			c := withConfig(nil, func(c *preflight.Config) { c.SandboxObserverDisabled = true })
+			results := c.run(ctx)
+			r := find(results, "Sandbox observer")
+			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Message).To(And(ContainSubstring("sandboxObserver.enabled is false"), ContainSubstring("unknown")))
+			Expect(r.Fix).To(ContainSubstring("sandboxObserver.enabled=true"))
+			Expect(preflight.Write(&discard{}, results)).To(BeZero())
+		})
+
+		It("says nothing when it is on", func(ctx SpecContext) {
+			Expect(checks(withConfig(nil, func(*preflight.Config) {}).run(ctx))).NotTo(ContainElement("Sandbox observer"))
+		})
+	})
+
+	DescribeTable("reads the gateway ID and workspace mode out of gateway.toml, by section",
+		func(toml, id, mode string) {
+			gotID, gotMode := preflight.ParseGatewayKubernetesDriver(toml)
+			Expect([]string{gotID, gotMode}).To(Equal([]string{id, mode}))
+		},
+		Entry("the driver table", "[openshell.drivers.kubernetes]\ngateway_id = \"a\"\nworkspace_mode = \"managed\"", "a", "managed"),
+		Entry("the same key in another table is ignored", "[openshell.gateway.gateway_jwt]\ngateway_id = \"jwt\"\n[openshell.drivers.kubernetes]\ngateway_id = \"a\"", "a", ""),
+		Entry("only the other table has it", "[openshell.gateway.gateway_jwt]\ngateway_id = \"jwt\"", "", ""),
+		Entry("a sub-table of the driver does not count", "[openshell.drivers.kubernetes.resource_admission]\ngateway_id = \"sub\"", "", ""),
+		Entry("after a sub-table the driver's keys are not read again", "[openshell.drivers.kubernetes]\ngateway_id = \"a\"\n[openshell.drivers.kubernetes.managed_ssh_ingress]\ngateway_id = \"sub\"", "a", ""),
+		Entry("comments and single quotes", "[openshell.drivers.kubernetes] # driver\n  gateway_id = 'a' # id\n# workspace_mode = \"operator\"", "a", ""),
+		Entry("a key that merely ends in the name", "[openshell.drivers.kubernetes]\nother_gateway_id = \"x\"", "", ""),
+	)
+
 	DescribeTable("reads the settings out of gateway.toml",
 		func(toml string, secrets []string, image string) {
 			gotSecrets, gotImage := preflight.ParseGatewayConfig(toml)

@@ -5,6 +5,7 @@ secrets:
     existingSecret: koinon-kek-gitops
 openshell:
   address: openshell.openshell.svc:8080
+  address: openshell.openshell.svc:8080
   clientTLSSecret: koinon-openshell-client
 ingress:
   enabled: true

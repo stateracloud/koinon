@@ -26,6 +26,8 @@
 # Only the kube context kind-$CLUSTER is used; every kubectl/helm call names it. The cluster is
 # deleted at the end unless KEEP=1.
 #
+#   SUITE_LABEL=smoke runs only the Ginkgo specs with that label (SUITE=go; smoke is steps 1-6).
+#   FLAVOR_PULL_REPO=<repo> pulls the flavor image <repo>:<hack/flavor-tag.sh tag> instead of building it.
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 #
 # The quickstart opens the API on localhost:8080 (the doc's port-forward block), so that port must be
@@ -46,7 +48,8 @@ SKIP_BUILD=${SKIP_BUILD:-0}
 API_PORT=${API_PORT:-8080}
 GH_PORT=${GH_PORT:-18090}
 MCP_PORT=${MCP_PORT:-18091}
-for port in "$API_PORT" "$GH_PORT" "$MCP_PORT"; do
+MODEL_PORT=${MODEL_PORT:-18092}
+for port in "$API_PORT" "$GH_PORT" "$MCP_PORT" "$MODEL_PORT"; do
   if nc -z 127.0.0.1 "$port" 2>/dev/null; then echo "port $port is in use; run.sh port-forwards to it" >&2; exit 1; fi
 done
 
@@ -151,11 +154,23 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
     ./cmd/koinon-fakemodel ./cmd/koinon-fakegithub ./cmd/koinon-fakemcp
   done_step "Images: ko build and load (6 binaries)"
 
-  step "OpenCode flavor (buildx) into kind"
-  docker buildx build --load --build-context common=flavors/common \
-    --tag kind.local/flavor-opencode:e2e flavors/opencode
+  step "OpenCode flavor into kind"
+  # The flavor image is a pure function of flavors/ (hack/flavor-tag.sh). When CI's flavors job has
+  # pushed that tag to FLAVOR_PULL_REPO (GHCR, on main), pull it instead of building: the build is
+  # minutes. Anything missing falls back to the build.
+  flavor_tag=""
+  if [[ -n ${FLAVOR_PULL_REPO:-} ]]; then
+    flavor_tag=$("$root/hack/flavor-tag.sh" opencode 2>/dev/null || true)
+  fi
+  if [[ -n $flavor_tag ]] && docker pull -q "$FLAVOR_PULL_REPO:$flavor_tag" >/dev/null 2>&1; then
+    echo "flavor image $FLAVOR_PULL_REPO:$flavor_tag pulled"
+    docker tag "$FLAVOR_PULL_REPO:$flavor_tag" kind.local/flavor-opencode:e2e
+  else
+    docker buildx build --load --build-context common=flavors/common \
+      --tag kind.local/flavor-opencode:e2e flavors/opencode
+  fi
   kind load docker-image --name "$CLUSTER" kind.local/flavor-opencode:e2e
-  done_step "Image: OpenCode flavor buildx and kind load"
+  done_step "Image: OpenCode flavor (pull or buildx) and kind load"
 fi
 
 step "fakes ($FAKES)"
@@ -172,8 +187,33 @@ e1 namespace
 e1 client-cert
 if [[ $SUITE == go ]]; then
   e1 model-provider
+  # A second, direct Anthropic provider on the same fake server (ADR 0069): not part of the quickstart.
+  "${K[@]}" apply -f "$here/kind/model-provider-anthropic.yaml"
 fi
 done_step "Namespace, client certificate and model provider (quickstart blocks)"
+
+# Build what the drivers need before the clock starts: compiling the Go driver (a cold build cache
+# after a dependency change takes minutes) or installing the browser is not part of the quickstart
+# a user follows.
+case "$SUITE" in
+go)
+  step "build the quickstart driver (go test -c)"
+  go test -c -o "$OUT/bin/e2e.test" ./test/e2e/
+  done_step "Quickstart driver build"
+  ;;
+web)
+  step "install the browser suite (pnpm, playwright)"
+  # The web toolchain image (hack/e2e-toolchain/web.Dockerfile) has Chromium and its system packages
+  # under PLAYWRIGHT_BROWSERS_PATH: then only check the browser (a no-op at the same Playwright
+  # version), without --with-deps, which would run apt.
+  if [[ -n ${PLAYWRIGHT_BROWSERS_PATH:-} ]] && compgen -G "$PLAYWRIGHT_BROWSERS_PATH/chromium-*" >/dev/null; then
+    (cd web && pnpm install --frozen-lockfile && pnpm exec playwright install chromium)
+  else
+    (cd web && pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium)
+  fi
+  done_step "Browser suite install"
+  ;;
+esac
 
 # The quickstart clock starts here (ADR 0049).
 step "quickstart: helm install"
@@ -187,7 +227,9 @@ pids+=($!)
 pids+=($!)
 "${K[@]}" -n "$FAKES" port-forward svc/fakemcp "$MCP_PORT:8080" >"$OUT/pf-fakemcp.log" 2>&1 &
 pids+=($!)
-for port in "$API_PORT" "$GH_PORT" "$MCP_PORT"; do
+"${K[@]}" -n "$FAKES" port-forward svc/fakemodel "$MODEL_PORT:8080" >"$OUT/pf-fakemodel.log" 2>&1 &
+pids+=($!)
+for port in "$API_PORT" "$GH_PORT" "$MCP_PORT" "$MODEL_PORT"; do
   for _ in $(seq 60); do nc -z 127.0.0.1 "$port" 2>/dev/null && break; sleep 0.5; done
   nc -z 127.0.0.1 "$port" || { echo "port-forward to $port did not come up" >&2; exit 1; }
 done
@@ -199,16 +241,16 @@ go)
   KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
   KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
   KOINON_E2E_FAKEMCP_URL="http://127.0.0.1:$MCP_PORT" \
+  KOINON_E2E_FAKEMODEL_URL="http://127.0.0.1:$MODEL_PORT" \
   KOINON_E2E_KUBECTL="$OUT/bin/kubectl" \
   KOINON_E2E_PASSWORD="$password" \
   KOINON_E2E_T0="$T0" \
   KOINON_E2E_REPORT="$OUT/quickstart-timings.md" \
-    go test -count=1 -timeout 30m ./test/e2e/ -ginkgo.v 2>&1 | tee "$OUT/driver.log"
+    bash -c 'cd "$1/test/e2e" && exec "$2" -test.timeout 30m -ginkgo.v ${3:+-ginkgo.label-filter="$3"}' _ "$root" "$OUT/bin/e2e.test" "${SUITE_LABEL:-}" 2>&1 | tee "$OUT/driver.log"
   done_step "Quickstart driver"
   ;;
 web)
   step "browser e2e (playwright, web/e2e-real)"
-  (cd web && pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium)
   (cd web && KOINON_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
     KOINON_E2E_PASSWORD="$password" \

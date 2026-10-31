@@ -15,7 +15,9 @@ import (
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/questions"
 	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/triggers"
 	"github.com/stateracloud/koinon/internal/wake"
+	"github.com/stateracloud/koinon/templates"
 )
 
 // ErrAgentInactive is returned when a task is created for an agent that is not active. It is a
@@ -93,6 +95,28 @@ type TriggeredTask struct {
 	Message     string
 	// Origin is the run's origin; empty means scheduled, which interactive work outranks.
 	Origin store.RunOrigin
+	// Fire says how the trigger fired (triggers.FireScheduled, triggers.FireManual); it is recorded
+	// in the task's events. Empty means scheduled.
+	Fire string
+	// FiredBy is the user who fired the trigger by hand; recorded with a manual fire.
+	FiredBy pgtype.UUID
+	// Notify is the trigger's notify target, copied to the task (tasks.notify_*) so a later version
+	// change does not move the task's questions. Nil: the org's default.
+	Notify *templates.NotifyTarget
+	// OnCreate, when set, runs in the creating transaction once the task and its run exist, so a
+	// record of the fire (an audit event) commits with it or not at all. It is not called for a
+	// replay.
+	OnCreate func(ctx context.Context, q *store.Queries, task store.Task) error
+}
+
+// eventPayload adds to p what the events of a triggered task record about the fire: its source,
+// how it fired and, for a manual fire, who fired it.
+func (in TriggeredTask) eventPayload(fire string, p map[string]any) map[string]any {
+	p["source"], p["fire"] = in.Source, fire
+	if fire == triggers.FireManual && in.FiredBy.Valid {
+		p["firedBy"] = in.FiredBy.String()
+	}
+	return p
 }
 
 // CreateTriggeredTask creates a task for a trigger fire at most once per (org, Source, Key): the
@@ -103,6 +127,10 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 	origin := in.Origin
 	if origin == "" {
 		origin = store.RunOriginScheduled
+	}
+	fire := in.Fire
+	if fire == "" {
+		fire = triggers.FireScheduled
 	}
 	err = s.commit(ctx, func(q *store.Queries) ([]durable.Notification, error) {
 		var notes []durable.Notification
@@ -117,26 +145,32 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 			t, err := q.CreateTask(ctx, store.CreateTaskParams{
 				OrgID: in.Org, Title: in.Title, AgentID: agent.ID,
 				CreatedByKind: store.TaskCreatorKindTrigger, CreatedByTriggerID: in.Trigger,
+				NotifyKind: notifyKindOf(in.Notify), NotifyUserID: notifyUserOf(in.Notify), NotifyRole: notifyRoleOf(in.Notify),
 			})
 			if err != nil {
 				return "", pgtype.UUID{}, err
 			}
 			if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 				OrgID: in.Org, TaskID: t.ID, Kind: KindTaskCreated, ActorKind: store.TaskActorKindSystem,
-				Payload: jsonPayload(map[string]any{"title": in.Title, "source": in.Source}),
+				Payload: jsonPayload(in.eventPayload(fire, map[string]any{"title": in.Title})),
 			}); err != nil {
 				return "", pgtype.UUID{}, err
 			}
 			if in.Message != "" {
 				if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 					OrgID: in.Org, TaskID: t.ID, Kind: KindMessage, ActorKind: store.TaskActorKindSystem,
-					Payload: jsonPayload(map[string]any{"text": in.Message, "source": in.Source}),
+					Payload: jsonPayload(in.eventPayload(fire, map[string]any{"text": in.Message})),
 				}); err != nil {
 					return "", pgtype.UUID{}, err
 				}
 			}
 			if _, _, err := scheduler.EnqueueOrigin(ctx, q, t, origin); err != nil {
 				return "", pgtype.UUID{}, err
+			}
+			if in.OnCreate != nil {
+				if err := in.OnCreate(ctx, q, t); err != nil {
+					return "", pgtype.UUID{}, err
+				}
 			}
 			return "task", t.ID, nil
 		})
@@ -157,4 +191,31 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 		return notes, nil
 	})
 	return task, created, s.sendFailed(err, "waking the agent's sandbox for a triggered task failed")
+}
+
+// notifyKindOf, notifyUserOf and notifyRoleOf are the task columns of a trigger's notify target. A
+// channel target is not stored in v0.1 (the API refuses it), so it is the default.
+func notifyKindOf(n *templates.NotifyTarget) store.NullNotifyTargetKind {
+	switch {
+	case n != nil && n.Kind == templates.NotifyUser:
+		return store.NullNotifyTargetKind{NotifyTargetKind: store.NotifyTargetKindUser, Valid: true}
+	case n != nil && n.Kind == templates.NotifyRole:
+		return store.NullNotifyTargetKind{NotifyTargetKind: store.NotifyTargetKindRole, Valid: true}
+	}
+	return store.NullNotifyTargetKind{}
+}
+
+func notifyUserOf(n *templates.NotifyTarget) pgtype.UUID {
+	var id pgtype.UUID
+	if n != nil && n.Kind == templates.NotifyUser {
+		_ = id.Scan(n.User)
+	}
+	return id
+}
+
+func notifyRoleOf(n *templates.NotifyTarget) store.NullOrgRole {
+	if n != nil && n.Kind == templates.NotifyRole {
+		return store.NullOrgRole{OrgRole: n.Role, Valid: true}
+	}
+	return store.NullOrgRole{}
 }

@@ -16,11 +16,11 @@ the remaining workarounds are in ADR 0052 (amendment 2026-10-28). The bundled ru
 
 | Item (ADR 0035) | OpenCode flavor |
 | --- | --- |
-| ACP command | `/usr/local/bin/koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs]`, run as UID 10001 in a session working directory under `/sandbox`. agentd adds `--plugin-installs` only for an agent whose template sets `harness.pluginInstalls: true` (see [Plugins](#plugins)) |
+| ACP command | `/usr/local/bin/koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs] [--model-format openai|anthropic] [--cache-anthropic|--cache-alibaba] [--thinking none|adaptive] [--session-id RUN_ID] [--no-web-tools]`, run as UID 10001 in a session working directory under `/sandbox`. agentd adds `--plugin-installs` only for an agent whose template sets `harness.pluginInstalls: true` (see [Plugins](#plugins)). It always adds `--model-format` (the model's wire format, ADR 0069): `openai` (chat completions, provider entry `koinon`) or `anthropic` (Messages, entry `koinon-anthropic`, which posts to `<gateway>/v1/messages` with the key as `Authorization: Bearer`); `internal/flavor` holds the format-to-entry table. It adds `--cache-anthropic` or `--cache-alibaba` for a chat-completions model whose provider needs explicit prompt-cache markers (ADR 0068); the entry script then sets `providers.koinon.compatibility.cacheFormat` through `OPENCODE_CONFIG_CONTENT`. An `anthropic`-format model gets no such switch: OpenCode places up to four `cache_control` breakpoints itself. It always adds `--thinking` (the thinking mode Koinon decided for the run, see [Thinking](#thinking-koinon-decides-not-the-model-id-adr-0069-amendment-2026-10-29)). For an OpenRouter model agentd also passes `--session-id` with the run ID, sent as the request body field `session_id` on whichever entry the run uses (OpenRouter sticky routing: a run stays on one upstream, so its cache stays warm). agentd adds `--no-web-tools` for every agent without web egress (all of them today, ADR 0080): the built-in `webfetch` is then not offered to the model (see the table of switched-off features below). The config also caps every tool result at 24576 bytes / 600 lines (`tool_output`); the full text goes to the tool-output directory |
 | Instructions | `/sandbox/.koinon/AGENTS.md`, named by the `instructions` key of the read-only config, written by koinon-agentd before every harness start from the run's agent version, and checked before every prompt. The entry script refuses to start (exit 64) when it is missing, empty or a symbolic link |
-| Session start | After `session/new` or `session/load`, agentd waits for the command `koinon:github_koinon-ready`, then selects the model with `session/set_config_option` (`configId` `model`, value `koinon/<model>`) |
+| Session start | After `session/new` or `session/load`, agentd waits for the command `koinon:github_koinon-ready`, then selects the model with `session/set_config_option` (`configId` `model`, value `<entry>/<model>`: `koinon/<model>` or `koinon-anthropic/<model>`) |
 | Resume mode | `session/load` (replays history). OpenCode also advertises `session/resume`; Koinon does not rely on it |
-| Model endpoint | `--model-base-url` (agentgateway's OpenAI-compatible base, ending in `/v1`) and `--model` (the gateway's model name); key from `$OPENAI_API_KEY` |
+| Model endpoint | `--model-base-url` (agentgateway's LLM base, ending in `/v1`; the `koinon` entry posts to `/chat/completions` and `koinon-anthropic` to `/messages`, ADR 0069) and `--model` (the gateway's model name); key from `$OPENAI_API_KEY` |
 | MCP | `--mcp-url` (agentgateway's MCP route), server `koinon` in OpenCode's own config, `Authorization: Bearer <key>`; tools reach the model one by one as `koinon_<tool>` (`codemode: false`) |
 | Project configuration | Off (`OPENCODE_DISABLE_PROJECT_CONFIG=1`): a repository's `opencode.json(c)`, `.opencode/`, `.claude/`, `.agents/` and its top-level `AGENTS.md` have no effect |
 | State | `/sandbox/.local/share/opencode` (sessions in `opencode.db`), `/sandbox/.local/state/opencode` |
@@ -79,7 +79,13 @@ mechanism for a flavor that needs one).
   `packages/core/src/config/plugin/instruction.ts:39`), and Koinon's template instructions tell the
   agent to read it, `CONTRIBUTING.md` and the `README` before changing code
   (`templates/repo-helper.yaml`). OpenCode still attaches an `AGENTS.md` from a subdirectory when
-  the agent reads a file there (`packages/core/src/tool/plugin/read.ts`).
+  the agent reads a file there (`packages/core/src/tool/plugin/read.ts:82-103`, issue #267).
+  There is no switch in 2.2.0: the read tool walks up from the file to the project root, exclusive,
+  and calls `SessionInstructions.load` unconditionally (`session/instructions.ts`), which publishes the
+  file's text as a synthetic `Instructions from: <path>` message. Nothing in that path reads a flag,
+  an environment variable or the configuration. A repository's subdirectory file is therefore repository text at instruction weight.
+  Koinon does not patch OpenCode. It is a requirement on koinon-harness (#249): subdirectory
+  `AGENTS.md` files are returned as data inside the read result, or not at all, never as instructions.
 
 ### Global config directory
 
@@ -110,6 +116,34 @@ agent, explore included (`packages/core/src/config/plugin/agent.ts:83-91`), so t
 there too. The config repeats them under `agents.explore.permissions` as defence in depth only. The contract suite's permission specs fail without this
 block.
 
+A rejected request ends the turn. ACP's permission response carries an option and no message, and
+OpenCode answers a plain reject with `Permission.DeclinedError`, which `assert` turns into a defect
+on purpose ("Deliberate defect tunnel", `packages/core/src/permission.ts:241-249`), so the step is
+interrupted and `session/prompt` returns `cancelled` (a decline with feedback, or a `deny` rule, are
+the only recoverable forms: `CorrectedError`, `BlockedError`; the ACP agent can send neither). A
+`deny` rule, or the plugin hook `permission.evaluate` returning `{effect: "deny", message}`, gives a
+`BlockedError` with that message, which the model sees as a tool error and the turn goes on. But it
+is OpenCode-only, and agentd would no longer see or record the request (a bare `deny` rule shows the
+model only "Permission denied"). koinon-agentd therefore keeps `ask` and uses the generic re-prompt: when the
+turn ends cancelled after it refused a request it prompts the session again with a note naming the
+refused action and the session directory (`internal/agentd/refusal.go`, run event `run.refusal`).
+The contract suite's `answers the harness's permission requests` spec covers it.
+
+**Subagents are off for every agent** (issue #261). OpenCode 2.2.0's `subagent` tool is live by
+default (depth 1; `explore` is the one configured subagent). A child session outlives a cancelled
+turn (`packages/cli/src/acp/turn.ts:303-311`), so the wall clock (#243) and the wrap-up notice (#183)
+would leave work running, and its messages reach agentd only through the private extension
+`opencode/session/child_update` (gated on `_meta["opencode/child-session-updates"]`, which agentd
+does not advertise), so ADR 0074 traces would miss it. The config therefore ends the top-level
+`permissions` with `{action: subagent, resource: "*", effect: deny}` and repeats it under
+`agents.explore.permissions`. The action name is the tool name (`packages/core/src/tool/plugin/subagent.ts:17`,
+asserted at `:140`). `Tool.snapshot` drops a tool whose last matching rule has resource `*` and
+effect deny (`packages/core/src/tool.ts:255`, `:326-329`), so the model is not offered the tool, the
+same way it is not offered `webfetch`. Keep the rule last for its action. The contract suite checks
+the tool list and that a scripted `subagent` call starts no child. Allowing `explore` per template
+waits for agentd to advertise and record child updates and for cancel to cascade to children
+(verified by a flavor test).
+
 OpenCode's permission gate is not a security boundary: rules saved by an "always" answer live in
 the agent-writable `opencode.db` and can turn `ask` into `allow`, and the shell is unrestricted.
 OpenShell and Kata are the boundary. koinon-agentd answers each request once and saves nothing.
@@ -129,9 +163,60 @@ then waits one more second: OpenCode registers the server's tools after a 100 ms
 ## Model selection
 
 A new session reports a model OpenCode picked from its own catalog (for example
-`opencode/fledge-alpha-free`) until one is selected. agentd always selects `koinon/<model>` with
+`opencode/fledge-alpha-free`) until one is selected. agentd always selects `<entry>/<model>` with
 `session/set_config_option` (`packages/cli/src/acp/config-option.ts`; OpenCode has no
 `session/set_model`) and fails the run unless the answer shows that model.
+
+### Two provider entries (ADR 0069)
+
+`opencode.jsonc` has two static providers on the same gateway URL: `koinon`
+(`aisdk:@ai-sdk/openai-compatible`, chat completions, `apiKey`) and `koinon-anthropic`
+(`aisdk:@ai-sdk/anthropic`, Messages, `authToken`). Both send the agent's key as
+`Authorization: Bearer <placeholder>`, the header the sandbox's gateway profile names
+(`internal/reconciler`, `GatewayProfile`: `authStyle bearer`, `authorization`), so OpenShell
+rewrites the placeholder (it does so in any header) and the gateway's key policy reads the same header. Never set
+`apiKey` and `authToken` together (`packages/ai/src/providers/anthropic.ts` refuses it), and the
+Anthropic provider's default `x-api-key` is not used. `--model-format anthropic` also sets the
+config's default model to `koinon-anthropic/<model>` through `OPENCODE_CONFIG_CONTENT`.
+
+### Thinking: Koinon decides, not the model ID (ADR 0069 amendment 2026-10-29)
+
+OpenCode 2.2.0 gives every Messages request a thinking block of its own accord. When the model ID
+parses as Claude 5.1 or later (`supportsThinkingBlockBinding`, `packages/ai/src/protocols/utils/
+claude-model.ts`, applied by `applyThinkingBindingDefault` in `anthropic-messages.ts`), the request
+carries `thinking: {"type": "adaptive", "block_binding": {...}}` even though the config asks for no
+thinking, and `requiredBetaHeaders` adds `thinking-binding-controls-2026-08-01` for it. It also
+always adds `interleaved-thinking-2025-05-14`. The regex matches `claude-haiku-5-5` and
+`anthropic/claude-haiku-5.5` alike. rc.7 assumed that "the model declares no reasoning, so no
+`thinking` block is sent"; that was wrong, and with the beta removed by the gateway direct Anthropic
+refused every request (`thinking.adaptive.block_binding: Extra inputs are not permitted`).
+
+Koinon now states the choice, so the ID never decides. koinon-agentd passes `--thinking none|adaptive`
+(`internal/flavor` `ThinkingArg`), the mode from the model's catalog capability and the agent's
+setting (`internal/thinking`), and the entry script renders it into the model's `compatibility` in
+`OPENCODE_CONFIG_CONTENT`, which overrides the ID heuristic
+(`packages/schema/src/model-compatibility.ts`):
+
+| `--thinking` | `supportsThinkingBlockBinding` | `supportsEffortUpdates` | Request |
+| --- | --- | --- | --- |
+| `adaptive` | `true` | `false` | `thinking: {type: adaptive, block_binding}` and the binding beta |
+| `none`, or no switch | `false` | `false` | no `thinking` field, no `output_config` |
+
+`supportsEffortUpdates` is `false` in both rows: per-turn effort adds `output_config` and a beta of its
+own, which Koinon does not pin. Only the `anthropic` format takes the switch; chat completions has no
+thinking block. The gateway sets `anthropic-beta` itself, from the same catalog row, and drops the
+client's header (ADR 0069 amendment), so the binding beta reaches Anthropic only for a model that
+can think. `test/flavors/thinking_test.go` runs real Claude IDs (`claude-haiku-5-5`,
+`anthropic/claude-haiku-5.5`, `claude-opus-5-5`, an older one and the contract ID) with thinking on
+and off against the fake model in strict Messages mode, which refuses a body field without its beta
+as Anthropic does.
+
+A session saved under one entry loads under the other (measured with OpenCode 2.2.0, both
+directions, `test/flavors/anthropic_test.go`): the replayed history is complete, a turn with a tool
+call included, the model receives it on the next request, and that request is in the new entry's
+format. agentd therefore needs no new session when a task's model changes format. OpenCode rewrites
+characters outside `[a-zA-Z0-9_-]` in a tool-call ID to `_` for Messages (`scrubToolCallID`), so a
+session whose call was `functions.write:0` replays as `functions_write_0`; the spec checks it.
 
 ## Phone-home, updates, telemetry and plugins
 
@@ -141,8 +226,11 @@ A new session reports a model OpenCode picked from its own catalog (for example
 | Model catalog refresh (`models.opencode.ai`) | `OPENCODE_DISABLE_MODELS_FETCH=1`; the bundled snapshot is used | `packages/cli/src/server-process.ts`, `packages/core/src/models-dev.ts` |
 | Project configuration from the session directory upward | `OPENCODE_DISABLE_PROJECT_CONFIG=1` | `packages/cli/src/server-process.ts`, `packages/core/src/config/discovery.ts` |
 | Skills from `~/.claude` and `~/.agents` | plugin `-opencode.config.compatibility` | `packages/core/src/config/plugin/compatibility.ts` |
+| Built-in skills `opencode` and `report` (`report` files issues with the GitHub CLI) | plugin `-opencode.skill`; the permission `skill` `*` deny (allow a skill by ID to deliver it) is a second layer | `packages/core/src/plugin/skill.ts`, `packages/core/src/skill.ts` |
 | Built-in provider plugins (Copilot, Bedrock, OpenRouter, …) | plugin `-opencode.provider.*`; `opencode.provider.opencode` is guarded and stays (see below) | `packages/core/src/plugin/provider/`, `packages/core/src/plugin/internal.ts` |
 | Web search | plugins `-opencode.websearch.*`, `-opencode.tool.websearch` | `packages/core/src/tool/plugin/websearch.ts` |
+| Built-in `webfetch`, for an agent without web egress | `--no-web-tools` (set by koinon-agentd unless `agentconfig.Config.WebEgress`, ADR 0080) adds the permission rule `webfetch` `*` deny to the config overlay; a denied tool is not offered to the model, so the agent uses the org's MCP tools, which its instructions name. The contract suite checks the tool list with and without the switch | `packages/core/src/permission.ts` |
+| Subagents (`subagent` tool) | the permission rule `subagent` `*` deny in the config, top level and `agents.explore`; a denied tool is not offered to the model. Children outlive a cancelled turn and agentd does not see their events (issue #261) | `packages/core/src/tool.ts`, `packages/core/src/tool/plugin/subagent.ts` |
 | Logins for well-known integrations | plugin `-opencode.wellknown` | `packages/core/src/wellknown/plugin.ts` |
 | ripgrep download from GitHub | `rg` installed; OpenCode uses `rg` from `PATH` | `packages/core/src/ripgrep/binary.ts` |
 | Telemetry | OpenTelemetry export only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, which the entry script unsets | `packages/util/src/observability/otlp.ts` |

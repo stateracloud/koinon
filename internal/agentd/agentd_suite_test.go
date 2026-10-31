@@ -29,6 +29,8 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // postgresImage is the minimum supported Postgres version (ADR 0047).
@@ -181,6 +183,13 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 	if len(args) >= 4 && args[0] == "-c" && args[2] == "tar" && f.tar != nil {
 		return f.tar(args[3:], stdin, stdout, stderr)
 	}
+	if len(args) >= 4 && args[0] == "-c" && args[1] == agentd.RealpathScript {
+		// The sandbox has no links: every path is its own physical path.
+		for _, p := range args[3:] {
+			_, _ = fmt.Fprintln(stdout, p)
+		}
+		return 0
+	}
 	if len(args) < 4 || args[0] != "-c" {
 		_, _ = fmt.Fprintf(stderr, "unexpected sh %q", args)
 		return 2
@@ -331,8 +340,14 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 // recordSandbox writes the sandbox state as koinon-reconciler would, with the sandbox's
 // OpenShell ID as its home generation.
 func (e *env) recordSandbox(ctx context.Context, state store.SandboxState, message string) {
+	e.recordSandboxWith(ctx, state, "", message)
+}
+
+// recordSandboxWith is recordSandbox with the reason of the condition that is not true, as the
+// reconciler records it (ErrImagePull, Unschedulable).
+func (e *env) recordSandboxWith(ctx context.Context, state store.SandboxState, reason, message string) {
 	_, err := q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
-		OrgID: e.org, AgentID: e.agent.ID, State: state, Phase: "", Message: message,
+		OrgID: e.org, AgentID: e.agent.ID, State: state, Phase: "", Message: message, Reason: reason,
 		HomeGeneration: e.gw.Sandbox(e.workspace, e.sandbox).GetMetadata().GetId(),
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -367,7 +382,7 @@ func (e *env) message(ctx context.Context, t store.Task, text string) {
 
 func (e *env) enqueue(ctx context.Context, t store.Task) store.Run {
 	r, err := q.CreateRun(ctx, store.CreateRunParams{
-		OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 100_000,
+		OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return r
@@ -382,6 +397,7 @@ func (e *env) pool(name string, mutate ...func(*agentd.Config)) (stop func()) {
 // poolOn is pool on its own connection pool, like a separate agentd process on the same Postgres.
 func (e *env) poolOn(conns *pgxpool.Pool, name string, mutate ...func(*agentd.Config)) (stop func()) {
 	cfg := agentd.Config{
+		Prices:         prices.NewResolver(pricing.Embedded()),
 		OwnerID:        name,
 		Workers:        2,
 		Lease:          2 * time.Second,
@@ -393,6 +409,8 @@ func (e *env) poolOn(conns *pgxpool.Pool, name string, mutate ...func(*agentd.Co
 		SandboxTimeout: 10 * time.Second,
 		ReadyTimeout:   2 * time.Second,
 		ReadySettle:    10 * time.Millisecond,
+		// Specs that fail a run with an authentication error have no access-log record to wait for.
+		GatewayRecordWait: 300 * time.Millisecond,
 	}
 	for _, m := range mutate {
 		m(&cfg)

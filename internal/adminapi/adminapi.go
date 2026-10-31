@@ -27,20 +27,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	adminv1 "github.com/stateracloud/koinon/api/admin/v1"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/modelcheck"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/internal/triggers"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // BasePath is where the API is mounted.
@@ -56,18 +62,23 @@ type Server struct {
 	tokens  *tokens.Service
 	prices  *prices.Service
 	budgets *budget.Service
-	log     *slog.Logger
-	limiter *limiter
+	// agentModels sets and describes agents' models; triggers fires a schedule trigger now;
+	// modelCheck runs the provider echo check.
+	agentModels *agentmodel.Service
+	triggers    TriggerRunner
+	modelCheck  *modelcheck.Service
+	log         *slog.Logger
+	limiter     *limiter
 }
 
 var _ StrictServerInterface = (*Server)(nil)
 
 // New returns a Server.
-func New(pool *pgxpool.Pool, c *catalog.Service, t *tokens.Service, log *slog.Logger) *Server {
+func New(pool *pgxpool.Pool, c *catalog.Service, t *tokens.Service, log *slog.Logger, src pricing.ListSource) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{pool: pool, catalog: c, tokens: t, prices: prices.New(pool, log), budgets: budget.New(pool), log: log, limiter: newLimiter()}
+	return &Server{pool: pool, catalog: c, tokens: t, prices: prices.New(pool, log, src), budgets: budget.New(pool), agentModels: agentmodel.New(pool, prices.NewResolver(src)), log: log, limiter: newLimiter()}
 }
 
 type principalKey struct{}
@@ -190,11 +201,15 @@ func writeError(w http.ResponseWriter, status int, code ErrorCode, msg string) {
 // problem maps a service-layer error.
 func (s *Server) problem(err error) (int, Error) {
 	var (
-		e   Error
-		inv *catalog.InvalidError
-		tin *tokens.InvalidError
-		pin *prices.InvalidError
-		bin *budget.InvalidError
+		e    Error
+		inv  *catalog.InvalidError
+		tin  *tokens.InvalidError
+		pin  *prices.InvalidError
+		bin  *budget.InvalidError
+		ain  *agentmodel.InvalidError
+		min  *modelcheck.InvalidError
+		mun  *modelcheck.UnavailableError
+		busy *modelcheck.BusyError
 	)
 	set := func(status int, code ErrorCode, msg string) (int, Error) {
 		e.Error.Code, e.Error.Message = code, msg
@@ -211,6 +226,20 @@ func (s *Server) problem(err error) (int, Error) {
 		return set(http.StatusBadRequest, InvalidRequest, bin.Msg)
 	case errors.Is(err, audit.ErrBadFilter):
 		return set(http.StatusBadRequest, InvalidRequest, err.Error())
+	case errors.As(err, &ain):
+		return set(http.StatusBadRequest, InvalidRequest, ain.Msg)
+	case errors.As(err, &min):
+		return set(http.StatusBadRequest, InvalidRequest, min.Msg)
+	case errors.As(err, &busy):
+		return set(http.StatusConflict, Conflict, busy.Error())
+	case errors.As(err, &mun):
+		return set(http.StatusServiceUnavailable, Internal, mun.Msg)
+	case errors.Is(err, agentmodel.ErrNotFound), errors.Is(err, modelcheck.ErrNotFound), errors.Is(err, pgx.ErrNoRows):
+		return set(http.StatusNotFound, NotFound, "not found")
+	case errors.Is(err, triggers.ErrTriggerNotFound):
+		return set(http.StatusNotFound, NotFound, err.Error())
+	case errors.Is(err, triggers.ErrCannotRun):
+		return set(http.StatusConflict, Conflict, err.Error())
 	case errors.Is(err, budget.ErrForbidden):
 		return set(http.StatusForbidden, PermissionDenied, err.Error())
 	case errors.Is(err, prices.ErrNotFound), errors.Is(err, budget.ErrNotFound):
@@ -247,12 +276,17 @@ func toProvider(p catalog.Provider) Provider {
 	if p.DisabledReason != "" {
 		out.DisabledReason = &p.DisabledReason
 	}
+	if p.AnthropicWorkspaceID != "" {
+		out.AnthropicWorkspaceId = &p.AnthropicWorkspaceID
+	}
+	out.Formats = append([]ModelFormat{}, p.Formats...)
 	return out
 }
 
 func toModel(m catalog.Model) Model {
 	out := Model{
 		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt, Guard: m.Guard, Name: m.Name, Source: Source(m.Source),
+		Format: m.Format, FormatOverridden: m.FormatOverridden,
 		Id: openapi_types.UUID(pgUUID(m.ID).Bytes), ProviderId: openapi_types.UUID(pgUUID(m.ProviderID).Bytes),
 	}
 	if m.ManagedBySecret != "" {
@@ -289,9 +323,19 @@ func (s *Server) ListProviders(ctx context.Context, _ ListProvidersRequestObject
 		st, e := s.problem(err)
 		return ListProvidersdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
+	checks, err := s.echoChecks(ctx, p.Org)
+	if err != nil {
+		st, e := s.problem(err)
+		return ListProvidersdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
 	out := ListProviders200JSONResponse{Providers: []Provider{}}
 	for _, x := range list {
-		out.Providers = append(out.Providers, toProvider(x))
+		pv := toProvider(x)
+		if r, ok := checks[pgUUID(x.ID)]; ok {
+			e := toEchoCheck(r)
+			pv.EchoCheck = &e
+		}
+		out.Providers = append(out.Providers, pv)
 	}
 	return out, nil
 }
@@ -302,6 +346,9 @@ func (s *Server) CreateProvider(ctx context.Context, req CreateProviderRequestOb
 	in := catalog.ProviderInput{Name: req.Body.Name, Type: req.Body.Type, URL: req.Body.Url}
 	if req.Body.ApiKey != nil {
 		in.APIKey = *req.Body.ApiKey
+	}
+	if req.Body.AnthropicWorkspaceId != nil {
+		in.AnthropicWorkspaceID = *req.Body.AnthropicWorkspaceId
 	}
 	got, err := s.catalog.CreateProvider(ctx, p.Org, actor, pgtype.UUID{}, in)
 	if err != nil {
@@ -319,14 +366,22 @@ func (s *Server) GetProvider(ctx context.Context, req GetProviderRequestObject) 
 		st, e := s.problem(err)
 		return GetProviderdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
-	return GetProvider200JSONResponse(toProvider(got)), nil
+	pv := toProvider(got)
+	if checks, err := s.echoChecks(ctx, p.Org); err != nil {
+		st, e := s.problem(err)
+		return GetProviderdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	} else if r, ok := checks[pgUUID(got.ID)]; ok {
+		e := toEchoCheck(r)
+		pv.EchoCheck = &e
+	}
+	return GetProvider200JSONResponse(pv), nil
 }
 
 // UpdateProvider implements StrictServerInterface.
 func (s *Server) UpdateProvider(ctx context.Context, req UpdateProviderRequestObject) (UpdateProviderResponseObject, error) {
 	p, actor := s.actor(ctx)
 	got, err := s.catalog.UpdateProvider(ctx, p.Org, actor, uid(req.ProviderId),
-		catalog.ProviderPatch{Type: req.Body.Type, URL: req.Body.Url, APIKey: req.Body.ApiKey})
+		catalog.ProviderPatch{Type: req.Body.Type, URL: req.Body.Url, APIKey: req.Body.ApiKey, AnthropicWorkspaceID: req.Body.AnthropicWorkspaceId})
 	if err != nil {
 		st, e := s.problem(err)
 		return UpdateProviderdefaultJSONResponse{Body: e, StatusCode: st}, nil
@@ -366,12 +421,23 @@ func (s *Server) CreateModel(ctx context.Context, req CreateModelRequestObject) 
 	if req.Body.Guard != nil {
 		in.Guard = *req.Body.Guard
 	}
+	if req.Body.Format != nil {
+		in.Format = *req.Body.Format
+	}
 	got, err := s.catalog.CreateModel(ctx, p.Org, actor, pgtype.UUID{}, in)
 	if err != nil {
 		st, e := s.problem(err)
 		return CreateModeldefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
-	return CreateModel201JSONResponse(toModel(got)), nil
+	var out ModelCreated
+	if err := via(toModel(got), &out); err != nil {
+		st, e := s.problem(err)
+		return CreateModeldefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	if w := s.prices.ModelWarnings(ctx, p.Org, pgUUID(got.ProviderID), got.Name, modelformat.Format(got.Format)); len(w) > 0 {
+		out.Warnings = &w
+	}
+	return CreateModel201JSONResponse(out), nil
 }
 
 // GetModel implements StrictServerInterface.
@@ -388,7 +454,7 @@ func (s *Server) GetModel(ctx context.Context, req GetModelRequestObject) (GetMo
 // UpdateModel implements StrictServerInterface.
 func (s *Server) UpdateModel(ctx context.Context, req UpdateModelRequestObject) (UpdateModelResponseObject, error) {
 	p, actor := s.actor(ctx)
-	patch := catalog.ModelPatch{Guard: req.Body.Guard, Rates: fromRates(req.Body.Rates)}
+	patch := catalog.ModelPatch{Guard: req.Body.Guard, Format: req.Body.Format, Rates: fromRates(req.Body.Rates)}
 	patch.ClearRates = req.Body.ClearRates != nil && *req.Body.ClearRates
 	got, err := s.catalog.UpdateModel(ctx, p.Org, actor, uid(req.ModelId), patch)
 	if err != nil {

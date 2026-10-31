@@ -467,7 +467,7 @@ func renderSandboxPolicy(ctx context.Context, extraArgs ...string) ([]*admission
 	var out, stderr bytes.Buffer
 	args := append([]string{
 		"template", "koinon", "../../charts/koinon", "--namespace", "koinon",
-		"--set", "openshell.insecure=true", "--show-only", "templates/sandbox-policy.yaml",
+		"--set", "openshell.insecure=true", "--set", "openshell.address=openshell.openshell.svc:8080", "--show-only", "templates/sandbox-policy.yaml",
 	}, extraArgs...)
 	cmd := exec.CommandContext(ctx, helm, args...)
 	cmd.Stdout, cmd.Stderr = &out, &stderr

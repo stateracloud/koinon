@@ -17,8 +17,11 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/gateway"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 var _ = Describe("Reconciler metrics", func() {
@@ -45,6 +48,7 @@ var _ = Describe("Reconciler metrics", func() {
 		addProvider(ctx, org, user, "upstream", "", "fake")
 		r, err = reconciler.New(pool, openshell.New(conn), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace},
 			reconciler.Config{
+				Prices:         prices.NewResolver(pricing.Embedded()),
 				Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 				Keys:           ring,
 				ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: "koinon-gateway-providers"},
@@ -84,6 +88,22 @@ var _ = Describe("Reconciler metrics", func() {
 		Expect(testutil.ToFloat64(m.PassErrors.WithLabelValues("gateway_apply"))).To(Equal(1.0))
 		Expect(testutil.ToFloat64(m.PassErrors.WithLabelValues("gateway_rejected"))).To(Equal(0.0))
 		Expect(testutil.ToFloat64(m.AgentsHeldBack)).To(Equal(1.0), "the new agent's key is not live")
+	})
+
+	It("counts a refused config as kind gateway_config, raises the rejected gauge and clears it on the next good pass", func(ctx SpecContext) {
+		newAgent(ctx, org, user)
+		mg.fail = &gateway.ConfigRejectedError{Revision: "abc", Reason: "USD budget limits support at most 9 fractional digits"}
+		Expect(r.ReconcileAll(ctx)).To(MatchError(gateway.ErrConfigRejected))
+
+		Expect(testutil.ToFloat64(m.PassErrors.WithLabelValues("gateway_config"))).To(Equal(1.0))
+		Expect(testutil.ToFloat64(m.PassErrors.WithLabelValues("gateway_apply"))).To(Equal(0.0), "a refusal is not an unreachable gateway")
+		Expect(testutil.ToFloat64(m.GatewayConfigRejected)).To(Equal(1.0))
+		Expect(testutil.ToFloat64(m.AgentsHeldBack)).To(Equal(1.0))
+
+		mg.fail = nil
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		Expect(testutil.ToFloat64(m.GatewayConfigRejected)).To(Equal(0.0))
+		Expect(testutil.ToFloat64(m.PassErrors.WithLabelValues("gateway_config"))).To(Equal(1.0), "a counter does not go back")
 	})
 
 	It("counts sandbox repairs and agents marked unhealthy", func(ctx SpecContext) {

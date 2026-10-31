@@ -78,6 +78,66 @@ func (AgentStatus) EnumDescriptor() ([]byte, []int) {
 	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{0}
 }
 
+// ModelSource says where an agent's effective model comes from, in order of precedence.
+type ModelSource int32
+
+const (
+	ModelSource_MODEL_SOURCE_UNSPECIFIED ModelSource = 0
+	// The agent's own setting (SetAgentModel).
+	ModelSource_MODEL_SOURCE_AGENT ModelSource = 1
+	// The model of the agent's active version (a template's spec.model).
+	ModelSource_MODEL_SOURCE_VERSION ModelSource = 2
+	// The org default: the first model the org serves and has a price for.
+	ModelSource_MODEL_SOURCE_ORG_DEFAULT ModelSource = 3
+	// Nothing: the org serves no priced model, so a run would fail.
+	ModelSource_MODEL_SOURCE_NONE ModelSource = 4
+)
+
+// Enum value maps for ModelSource.
+var (
+	ModelSource_name = map[int32]string{
+		0: "MODEL_SOURCE_UNSPECIFIED",
+		1: "MODEL_SOURCE_AGENT",
+		2: "MODEL_SOURCE_VERSION",
+		3: "MODEL_SOURCE_ORG_DEFAULT",
+		4: "MODEL_SOURCE_NONE",
+	}
+	ModelSource_value = map[string]int32{
+		"MODEL_SOURCE_UNSPECIFIED": 0,
+		"MODEL_SOURCE_AGENT":       1,
+		"MODEL_SOURCE_VERSION":     2,
+		"MODEL_SOURCE_ORG_DEFAULT": 3,
+		"MODEL_SOURCE_NONE":        4,
+	}
+)
+
+func (x ModelSource) Enum() *ModelSource {
+	p := new(ModelSource)
+	*p = x
+	return p
+}
+
+func (x ModelSource) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ModelSource) Descriptor() protoreflect.EnumDescriptor {
+	return file_koinon_agent_v1alpha1_agent_proto_enumTypes[1].Descriptor()
+}
+
+func (ModelSource) Type() protoreflect.EnumType {
+	return &file_koinon_agent_v1alpha1_agent_proto_enumTypes[1]
+}
+
+func (x ModelSource) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ModelSource.Descriptor instead.
+func (ModelSource) EnumDescriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{1}
+}
+
 // Agent is an agent and the definition it runs.
 type Agent struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
@@ -117,8 +177,11 @@ type Agent struct {
 	// Set while the agent's sandbox and volume are archived (ADR 0032 amendment): the home is in
 	// its last checkpoint and the next run restores it into a fresh sandbox.
 	SandboxArchivedAt *timestamppb.Timestamp `protobuf:"bytes,23,opt,name=sandbox_archived_at,json=sandboxArchivedAt,proto3" json:"sandbox_archived_at,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// The agent's own model setting (SetAgentModel); empty when it follows the version and the org
+	// default. When set it wins over `model`, which is the latest version's.
+	ModelSetting  string `protobuf:"bytes,24,opt,name=model_setting,json=modelSetting,proto3" json:"model_setting,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Agent) Reset() {
@@ -310,6 +373,13 @@ func (x *Agent) GetSandboxArchivedAt() *timestamppb.Timestamp {
 		return x.SandboxArchivedAt
 	}
 	return nil
+}
+
+func (x *Agent) GetModelSetting() string {
+	if x != nil {
+		return x.ModelSetting
+	}
+	return ""
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -1145,11 +1215,622 @@ func (x *SetAgentTriggersResponse) GetAgent() *Agent {
 	return nil
 }
 
+// GetAgentModelRequest names an agent.
+type GetAgentModelRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	AgentId       string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAgentModelRequest) Reset() {
+	*x = GetAgentModelRequest{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAgentModelRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAgentModelRequest) ProtoMessage() {}
+
+func (x *GetAgentModelRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAgentModelRequest.ProtoReflect.Descriptor instead.
+func (*GetAgentModelRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetAgentModelRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *GetAgentModelRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+// ServedModel is a model the org serves and has a price for.
+type ServedModel struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Provider      string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServedModel) Reset() {
+	*x = ServedModel{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServedModel) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServedModel) ProtoMessage() {}
+
+func (x *ServedModel) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServedModel.ProtoReflect.Descriptor instead.
+func (*ServedModel) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ServedModel) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ServedModel) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+// GetAgentModelResponse is the agent's model setting and what it resolves to.
+type GetAgentModelResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The agent's setting; empty for default.
+	Setting string `protobuf:"bytes,1,opt,name=setting,proto3" json:"setting,omitempty"`
+	// The active version's model; empty when the version names none ("default" in a template).
+	VersionModel string `protobuf:"bytes,2,opt,name=version_model,json=versionModel,proto3" json:"version_model,omitempty"`
+	// The model the next run uses; empty with MODEL_SOURCE_NONE.
+	Effective string      `protobuf:"bytes,3,opt,name=effective,proto3" json:"effective,omitempty"`
+	Source    ModelSource `protobuf:"varint,4,opt,name=source,proto3,enum=koinon.agent.v1alpha1.ModelSource" json:"source,omitempty"`
+	// Set when the agent's setting is no longer served or priced: runs fail until it is changed.
+	Problem string `protobuf:"bytes,5,opt,name=problem,proto3" json:"problem,omitempty"`
+	// Models the org serves and has a price for, by provider and name: the picker's choices.
+	Available []*ServedModel `protobuf:"bytes,6,rep,name=available,proto3" json:"available,omitempty"`
+	// The agent's thinking setting for the effective model.
+	Thinking      *ThinkingState `protobuf:"bytes,7,opt,name=thinking,proto3" json:"thinking,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAgentModelResponse) Reset() {
+	*x = GetAgentModelResponse{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAgentModelResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAgentModelResponse) ProtoMessage() {}
+
+func (x *GetAgentModelResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAgentModelResponse.ProtoReflect.Descriptor instead.
+func (*GetAgentModelResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *GetAgentModelResponse) GetSetting() string {
+	if x != nil {
+		return x.Setting
+	}
+	return ""
+}
+
+func (x *GetAgentModelResponse) GetVersionModel() string {
+	if x != nil {
+		return x.VersionModel
+	}
+	return ""
+}
+
+func (x *GetAgentModelResponse) GetEffective() string {
+	if x != nil {
+		return x.Effective
+	}
+	return ""
+}
+
+func (x *GetAgentModelResponse) GetSource() ModelSource {
+	if x != nil {
+		return x.Source
+	}
+	return ModelSource_MODEL_SOURCE_UNSPECIFIED
+}
+
+func (x *GetAgentModelResponse) GetProblem() string {
+	if x != nil {
+		return x.Problem
+	}
+	return ""
+}
+
+func (x *GetAgentModelResponse) GetAvailable() []*ServedModel {
+	if x != nil {
+		return x.Available
+	}
+	return nil
+}
+
+func (x *GetAgentModelResponse) GetThinking() *ThinkingState {
+	if x != nil {
+		return x.Thinking
+	}
+	return nil
+}
+
+// ThinkingState is the agent's thinking setting and what it resolves to (ADR 0069 amendment
+// 2026-10-29).
+type ThinkingState struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The agent's own setting: "on", "off", or empty when it follows the version and the default.
+	Setting string `protobuf:"bytes,1,opt,name=setting,proto3" json:"setting,omitempty"`
+	// The active version's value (a template's spec.model.thinking); empty when it names none.
+	VersionSetting string `protobuf:"bytes,2,opt,name=version_setting,json=versionSetting,proto3" json:"version_setting,omitempty"`
+	// What the layers resolve to, "on" or "off", whether or not the model can think.
+	Effective string `protobuf:"bytes,3,opt,name=effective,proto3" json:"effective,omitempty"`
+	// Whether the effective model can think. When false the setting has no effect and the UI says
+	// "not supported by this model".
+	Supported bool `protobuf:"varint,4,opt,name=supported,proto3" json:"supported,omitempty"`
+	// The mode the next run uses: "adaptive" when the model can think and the setting resolves to
+	// on, "none" otherwise.
+	Mode          string `protobuf:"bytes,5,opt,name=mode,proto3" json:"mode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ThinkingState) Reset() {
+	*x = ThinkingState{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ThinkingState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ThinkingState) ProtoMessage() {}
+
+func (x *ThinkingState) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ThinkingState.ProtoReflect.Descriptor instead.
+func (*ThinkingState) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ThinkingState) GetSetting() string {
+	if x != nil {
+		return x.Setting
+	}
+	return ""
+}
+
+func (x *ThinkingState) GetVersionSetting() string {
+	if x != nil {
+		return x.VersionSetting
+	}
+	return ""
+}
+
+func (x *ThinkingState) GetEffective() string {
+	if x != nil {
+		return x.Effective
+	}
+	return ""
+}
+
+func (x *ThinkingState) GetSupported() bool {
+	if x != nil {
+		return x.Supported
+	}
+	return false
+}
+
+func (x *ThinkingState) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
+// SetAgentModelRequest sets the agent's model.
+type SetAgentModelRequest struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	OrgId   string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	AgentId string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	// "default" (or empty) clears the setting; otherwise a model the org serves and has a price for.
+	Model         string `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAgentModelRequest) Reset() {
+	*x = SetAgentModelRequest{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAgentModelRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAgentModelRequest) ProtoMessage() {}
+
+func (x *SetAgentModelRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAgentModelRequest.ProtoReflect.Descriptor instead.
+func (*SetAgentModelRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *SetAgentModelRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *SetAgentModelRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *SetAgentModelRequest) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+// SetAgentModelResponse holds the result, as GetAgentModel would return it.
+type SetAgentModelResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Model         *GetAgentModelResponse `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAgentModelResponse) Reset() {
+	*x = SetAgentModelResponse{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAgentModelResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAgentModelResponse) ProtoMessage() {}
+
+func (x *SetAgentModelResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAgentModelResponse.ProtoReflect.Descriptor instead.
+func (*SetAgentModelResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *SetAgentModelResponse) GetModel() *GetAgentModelResponse {
+	if x != nil {
+		return x.Model
+	}
+	return nil
+}
+
+// SetAgentThinkingRequest sets the agent's thinking setting.
+type SetAgentThinkingRequest struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	OrgId   string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	AgentId string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	// "on" or "off"; empty clears the setting.
+	Thinking      string `protobuf:"bytes,3,opt,name=thinking,proto3" json:"thinking,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAgentThinkingRequest) Reset() {
+	*x = SetAgentThinkingRequest{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAgentThinkingRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAgentThinkingRequest) ProtoMessage() {}
+
+func (x *SetAgentThinkingRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAgentThinkingRequest.ProtoReflect.Descriptor instead.
+func (*SetAgentThinkingRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *SetAgentThinkingRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *SetAgentThinkingRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *SetAgentThinkingRequest) GetThinking() string {
+	if x != nil {
+		return x.Thinking
+	}
+	return ""
+}
+
+// SetAgentThinkingResponse holds the result, as GetAgentModel would return it.
+type SetAgentThinkingResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Model         *GetAgentModelResponse `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAgentThinkingResponse) Reset() {
+	*x = SetAgentThinkingResponse{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAgentThinkingResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAgentThinkingResponse) ProtoMessage() {}
+
+func (x *SetAgentThinkingResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAgentThinkingResponse.ProtoReflect.Descriptor instead.
+func (*SetAgentThinkingResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *SetAgentThinkingResponse) GetModel() *GetAgentModelResponse {
+	if x != nil {
+		return x.Model
+	}
+	return nil
+}
+
+// RunAgentTriggerRequest names the trigger to fire.
+type RunAgentTriggerRequest struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	OrgId   string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	AgentId string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	// The trigger's ID in the agent's active version. It must be a schedule trigger.
+	TriggerId     string `protobuf:"bytes,3,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunAgentTriggerRequest) Reset() {
+	*x = RunAgentTriggerRequest{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunAgentTriggerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunAgentTriggerRequest) ProtoMessage() {}
+
+func (x *RunAgentTriggerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunAgentTriggerRequest.ProtoReflect.Descriptor instead.
+func (*RunAgentTriggerRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *RunAgentTriggerRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *RunAgentTriggerRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *RunAgentTriggerRequest) GetTriggerId() string {
+	if x != nil {
+		return x.TriggerId
+	}
+	return ""
+}
+
+// RunAgentTriggerResponse names the task the fire created.
+type RunAgentTriggerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunAgentTriggerResponse) Reset() {
+	*x = RunAgentTriggerResponse{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunAgentTriggerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunAgentTriggerResponse) ProtoMessage() {}
+
+func (x *RunAgentTriggerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunAgentTriggerResponse.ProtoReflect.Descriptor instead.
+func (*RunAgentTriggerResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *RunAgentTriggerResponse) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
 var File_koinon_agent_v1alpha1_agent_proto protoreflect.FileDescriptor
 
 const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\n" +
-	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'koinon/template/v1alpha1/template.proto\"\x98\t\n" +
+	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'koinon/template/v1alpha1/template.proto\"\xbd\t\n" +
 	"\x05Agent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12!\n" +
@@ -1178,7 +1859,8 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\x11proposed_triggers\x18\x14 \x03(\v2!.koinon.template.v1alpha1.TriggerR\x10proposedTriggers\x12N\n" +
 	"\x11approved_triggers\x18\x15 \x03(\v2!.koinon.template.v1alpha1.TriggerR\x10approvedTriggers\x12\x1c\n" +
 	"\tephemeral\x18\x16 \x01(\bR\tephemeral\x12J\n" +
-	"\x13sandbox_archived_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x11sandboxArchivedAt\"\xa3\x02\n" +
+	"\x13sandbox_archived_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x11sandboxArchivedAt\x12#\n" +
+	"\rmodel_setting\x18\x18 \x01(\tR\fmodelSetting\"\xa3\x02\n" +
 	"\x1eCreateAgentFromTemplateRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vtemplate_id\x18\x02 \x01(\tR\n" +
@@ -1228,12 +1910,57 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\fbase_version\x18\x03 \x01(\x05R\vbaseVersion\x12=\n" +
 	"\btriggers\x18\x04 \x03(\v2!.koinon.template.v1alpha1.TriggerR\btriggers\"N\n" +
 	"\x18SetAgentTriggersResponse\x122\n" +
-	"\x05agent\x18\x01 \x01(\v2\x1c.koinon.agent.v1alpha1.AgentR\x05agent*w\n" +
+	"\x05agent\x18\x01 \x01(\v2\x1c.koinon.agent.v1alpha1.AgentR\x05agent\"H\n" +
+	"\x14GetAgentModelRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\"=\n" +
+	"\vServedModel\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
+	"\bprovider\x18\x02 \x01(\tR\bprovider\"\xce\x02\n" +
+	"\x15GetAgentModelResponse\x12\x18\n" +
+	"\asetting\x18\x01 \x01(\tR\asetting\x12#\n" +
+	"\rversion_model\x18\x02 \x01(\tR\fversionModel\x12\x1c\n" +
+	"\teffective\x18\x03 \x01(\tR\teffective\x12:\n" +
+	"\x06source\x18\x04 \x01(\x0e2\".koinon.agent.v1alpha1.ModelSourceR\x06source\x12\x18\n" +
+	"\aproblem\x18\x05 \x01(\tR\aproblem\x12@\n" +
+	"\tavailable\x18\x06 \x03(\v2\".koinon.agent.v1alpha1.ServedModelR\tavailable\x12@\n" +
+	"\bthinking\x18\a \x01(\v2$.koinon.agent.v1alpha1.ThinkingStateR\bthinking\"\xa2\x01\n" +
+	"\rThinkingState\x12\x18\n" +
+	"\asetting\x18\x01 \x01(\tR\asetting\x12'\n" +
+	"\x0fversion_setting\x18\x02 \x01(\tR\x0eversionSetting\x12\x1c\n" +
+	"\teffective\x18\x03 \x01(\tR\teffective\x12\x1c\n" +
+	"\tsupported\x18\x04 \x01(\bR\tsupported\x12\x12\n" +
+	"\x04mode\x18\x05 \x01(\tR\x04mode\"^\n" +
+	"\x14SetAgentModelRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x14\n" +
+	"\x05model\x18\x03 \x01(\tR\x05model\"[\n" +
+	"\x15SetAgentModelResponse\x12B\n" +
+	"\x05model\x18\x01 \x01(\v2,.koinon.agent.v1alpha1.GetAgentModelResponseR\x05model\"g\n" +
+	"\x17SetAgentThinkingRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x1a\n" +
+	"\bthinking\x18\x03 \x01(\tR\bthinking\"^\n" +
+	"\x18SetAgentThinkingResponse\x12B\n" +
+	"\x05model\x18\x01 \x01(\v2,.koinon.agent.v1alpha1.GetAgentModelResponseR\x05model\"i\n" +
+	"\x16RunAgentTriggerRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x1d\n" +
+	"\n" +
+	"trigger_id\x18\x03 \x01(\tR\ttriggerId\"2\n" +
+	"\x17RunAgentTriggerResponse\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId*w\n" +
 	"\vAgentStatus\x12\x1c\n" +
 	"\x18AGENT_STATUS_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12AGENT_STATUS_DRAFT\x10\x01\x12\x17\n" +
 	"\x13AGENT_STATUS_ACTIVE\x10\x02\x12\x19\n" +
-	"\x15AGENT_STATUS_ARCHIVED\x10\x032\x93\x06\n" +
+	"\x15AGENT_STATUS_ARCHIVED\x10\x03*\x92\x01\n" +
+	"\vModelSource\x12\x1c\n" +
+	"\x18MODEL_SOURCE_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12MODEL_SOURCE_AGENT\x10\x01\x12\x18\n" +
+	"\x14MODEL_SOURCE_VERSION\x10\x02\x12\x1c\n" +
+	"\x18MODEL_SOURCE_ORG_DEFAULT\x10\x03\x12\x15\n" +
+	"\x11MODEL_SOURCE_NONE\x10\x042\xd7\t\n" +
 	"\fAgentService\x12\x88\x01\n" +
 	"\x17CreateAgentFromTemplate\x125.koinon.agent.v1alpha1.CreateAgentFromTemplateRequest\x1a6.koinon.agent.v1alpha1.CreateAgentFromTemplateResponse\x12`\n" +
 	"\bGetAgent\x12&.koinon.agent.v1alpha1.GetAgentRequest\x1a'.koinon.agent.v1alpha1.GetAgentResponse\"\x03\x90\x02\x01\x12f\n" +
@@ -1241,7 +1968,11 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"ListAgents\x12(.koinon.agent.v1alpha1.ListAgentsRequest\x1a).koinon.agent.v1alpha1.ListAgentsResponse\"\x03\x90\x02\x01\x12j\n" +
 	"\rActivateAgent\x12+.koinon.agent.v1alpha1.ActivateAgentRequest\x1a,.koinon.agent.v1alpha1.ActivateAgentResponse\x12s\n" +
 	"\x10SetAgentTriggers\x12..koinon.agent.v1alpha1.SetAgentTriggersRequest\x1a/.koinon.agent.v1alpha1.SetAgentTriggersResponse\x12d\n" +
-	"\vResumeAgent\x12).koinon.agent.v1alpha1.ResumeAgentRequest\x1a*.koinon.agent.v1alpha1.ResumeAgentResponse\x12g\n" +
+	"\vResumeAgent\x12).koinon.agent.v1alpha1.ResumeAgentRequest\x1a*.koinon.agent.v1alpha1.ResumeAgentResponse\x12o\n" +
+	"\rGetAgentModel\x12+.koinon.agent.v1alpha1.GetAgentModelRequest\x1a,.koinon.agent.v1alpha1.GetAgentModelResponse\"\x03\x90\x02\x01\x12j\n" +
+	"\rSetAgentModel\x12+.koinon.agent.v1alpha1.SetAgentModelRequest\x1a,.koinon.agent.v1alpha1.SetAgentModelResponse\x12s\n" +
+	"\x10SetAgentThinking\x12..koinon.agent.v1alpha1.SetAgentThinkingRequest\x1a/.koinon.agent.v1alpha1.SetAgentThinkingResponse\x12p\n" +
+	"\x0fRunAgentTrigger\x12-.koinon.agent.v1alpha1.RunAgentTriggerRequest\x1a..koinon.agent.v1alpha1.RunAgentTriggerResponse\x12g\n" +
 	"\fArchiveAgent\x12*.koinon.agent.v1alpha1.ArchiveAgentRequest\x1a+.koinon.agent.v1alpha1.ArchiveAgentResponseBQZOgithub.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1;agentv1alpha1b\x06proto3"
 
 var (
@@ -1256,74 +1987,98 @@ func file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP() []byte {
 	return file_koinon_agent_v1alpha1_agent_proto_rawDescData
 }
 
-var file_koinon_agent_v1alpha1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_koinon_agent_v1alpha1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_koinon_agent_v1alpha1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_koinon_agent_v1alpha1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_koinon_agent_v1alpha1_agent_proto_goTypes = []any{
 	(AgentStatus)(0),                        // 0: koinon.agent.v1alpha1.AgentStatus
-	(*Agent)(nil),                           // 1: koinon.agent.v1alpha1.Agent
-	(*CreateAgentFromTemplateRequest)(nil),  // 2: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
-	(*GrantBinding)(nil),                    // 3: koinon.agent.v1alpha1.GrantBinding
-	(*CreateAgentFromTemplateResponse)(nil), // 4: koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
-	(*GetAgentRequest)(nil),                 // 5: koinon.agent.v1alpha1.GetAgentRequest
-	(*GetAgentResponse)(nil),                // 6: koinon.agent.v1alpha1.GetAgentResponse
-	(*ListAgentsRequest)(nil),               // 7: koinon.agent.v1alpha1.ListAgentsRequest
-	(*ListAgentsResponse)(nil),              // 8: koinon.agent.v1alpha1.ListAgentsResponse
-	(*ActivateAgentRequest)(nil),            // 9: koinon.agent.v1alpha1.ActivateAgentRequest
-	(*ActivateAgentResponse)(nil),           // 10: koinon.agent.v1alpha1.ActivateAgentResponse
-	(*ResumeAgentRequest)(nil),              // 11: koinon.agent.v1alpha1.ResumeAgentRequest
-	(*ResumeAgentResponse)(nil),             // 12: koinon.agent.v1alpha1.ResumeAgentResponse
-	(*ArchiveAgentRequest)(nil),             // 13: koinon.agent.v1alpha1.ArchiveAgentRequest
-	(*ArchiveAgentResponse)(nil),            // 14: koinon.agent.v1alpha1.ArchiveAgentResponse
-	(*SetAgentTriggersRequest)(nil),         // 15: koinon.agent.v1alpha1.SetAgentTriggersRequest
-	(*SetAgentTriggersResponse)(nil),        // 16: koinon.agent.v1alpha1.SetAgentTriggersResponse
-	(v1alpha1.Flavor)(0),                    // 17: koinon.template.v1alpha1.Flavor
-	(*v1alpha1.Grant)(nil),                  // 18: koinon.template.v1alpha1.Grant
-	(*v1alpha1.RunLimits)(nil),              // 19: koinon.template.v1alpha1.RunLimits
-	(*timestamppb.Timestamp)(nil),           // 20: google.protobuf.Timestamp
-	(*v1alpha1.Trigger)(nil),                // 21: koinon.template.v1alpha1.Trigger
+	(ModelSource)(0),                        // 1: koinon.agent.v1alpha1.ModelSource
+	(*Agent)(nil),                           // 2: koinon.agent.v1alpha1.Agent
+	(*CreateAgentFromTemplateRequest)(nil),  // 3: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
+	(*GrantBinding)(nil),                    // 4: koinon.agent.v1alpha1.GrantBinding
+	(*CreateAgentFromTemplateResponse)(nil), // 5: koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
+	(*GetAgentRequest)(nil),                 // 6: koinon.agent.v1alpha1.GetAgentRequest
+	(*GetAgentResponse)(nil),                // 7: koinon.agent.v1alpha1.GetAgentResponse
+	(*ListAgentsRequest)(nil),               // 8: koinon.agent.v1alpha1.ListAgentsRequest
+	(*ListAgentsResponse)(nil),              // 9: koinon.agent.v1alpha1.ListAgentsResponse
+	(*ActivateAgentRequest)(nil),            // 10: koinon.agent.v1alpha1.ActivateAgentRequest
+	(*ActivateAgentResponse)(nil),           // 11: koinon.agent.v1alpha1.ActivateAgentResponse
+	(*ResumeAgentRequest)(nil),              // 12: koinon.agent.v1alpha1.ResumeAgentRequest
+	(*ResumeAgentResponse)(nil),             // 13: koinon.agent.v1alpha1.ResumeAgentResponse
+	(*ArchiveAgentRequest)(nil),             // 14: koinon.agent.v1alpha1.ArchiveAgentRequest
+	(*ArchiveAgentResponse)(nil),            // 15: koinon.agent.v1alpha1.ArchiveAgentResponse
+	(*SetAgentTriggersRequest)(nil),         // 16: koinon.agent.v1alpha1.SetAgentTriggersRequest
+	(*SetAgentTriggersResponse)(nil),        // 17: koinon.agent.v1alpha1.SetAgentTriggersResponse
+	(*GetAgentModelRequest)(nil),            // 18: koinon.agent.v1alpha1.GetAgentModelRequest
+	(*ServedModel)(nil),                     // 19: koinon.agent.v1alpha1.ServedModel
+	(*GetAgentModelResponse)(nil),           // 20: koinon.agent.v1alpha1.GetAgentModelResponse
+	(*ThinkingState)(nil),                   // 21: koinon.agent.v1alpha1.ThinkingState
+	(*SetAgentModelRequest)(nil),            // 22: koinon.agent.v1alpha1.SetAgentModelRequest
+	(*SetAgentModelResponse)(nil),           // 23: koinon.agent.v1alpha1.SetAgentModelResponse
+	(*SetAgentThinkingRequest)(nil),         // 24: koinon.agent.v1alpha1.SetAgentThinkingRequest
+	(*SetAgentThinkingResponse)(nil),        // 25: koinon.agent.v1alpha1.SetAgentThinkingResponse
+	(*RunAgentTriggerRequest)(nil),          // 26: koinon.agent.v1alpha1.RunAgentTriggerRequest
+	(*RunAgentTriggerResponse)(nil),         // 27: koinon.agent.v1alpha1.RunAgentTriggerResponse
+	(v1alpha1.Flavor)(0),                    // 28: koinon.template.v1alpha1.Flavor
+	(*v1alpha1.Grant)(nil),                  // 29: koinon.template.v1alpha1.Grant
+	(*v1alpha1.RunLimits)(nil),              // 30: koinon.template.v1alpha1.RunLimits
+	(*timestamppb.Timestamp)(nil),           // 31: google.protobuf.Timestamp
+	(*v1alpha1.Trigger)(nil),                // 32: koinon.template.v1alpha1.Trigger
 }
 var file_koinon_agent_v1alpha1_agent_proto_depIdxs = []int32{
 	0,  // 0: koinon.agent.v1alpha1.Agent.status:type_name -> koinon.agent.v1alpha1.AgentStatus
-	17, // 1: koinon.agent.v1alpha1.Agent.flavor:type_name -> koinon.template.v1alpha1.Flavor
-	18, // 2: koinon.agent.v1alpha1.Agent.proposed_grants:type_name -> koinon.template.v1alpha1.Grant
-	18, // 3: koinon.agent.v1alpha1.Agent.approved_grants:type_name -> koinon.template.v1alpha1.Grant
-	19, // 4: koinon.agent.v1alpha1.Agent.run_limits:type_name -> koinon.template.v1alpha1.RunLimits
-	20, // 5: koinon.agent.v1alpha1.Agent.created_at:type_name -> google.protobuf.Timestamp
-	20, // 6: koinon.agent.v1alpha1.Agent.activated_at:type_name -> google.protobuf.Timestamp
-	20, // 7: koinon.agent.v1alpha1.Agent.archived_at:type_name -> google.protobuf.Timestamp
-	20, // 8: koinon.agent.v1alpha1.Agent.unhealthy_at:type_name -> google.protobuf.Timestamp
-	21, // 9: koinon.agent.v1alpha1.Agent.proposed_triggers:type_name -> koinon.template.v1alpha1.Trigger
-	21, // 10: koinon.agent.v1alpha1.Agent.approved_triggers:type_name -> koinon.template.v1alpha1.Trigger
-	20, // 11: koinon.agent.v1alpha1.Agent.sandbox_archived_at:type_name -> google.protobuf.Timestamp
-	17, // 12: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.flavor:type_name -> koinon.template.v1alpha1.Flavor
-	3,  // 13: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.grants:type_name -> koinon.agent.v1alpha1.GrantBinding
-	1,  // 14: koinon.agent.v1alpha1.CreateAgentFromTemplateResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 15: koinon.agent.v1alpha1.GetAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 16: koinon.agent.v1alpha1.ListAgentsResponse.agents:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 17: koinon.agent.v1alpha1.ActivateAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 18: koinon.agent.v1alpha1.ResumeAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 19: koinon.agent.v1alpha1.ArchiveAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	21, // 20: koinon.agent.v1alpha1.SetAgentTriggersRequest.triggers:type_name -> koinon.template.v1alpha1.Trigger
-	1,  // 21: koinon.agent.v1alpha1.SetAgentTriggersResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	2,  // 22: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:input_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
-	5,  // 23: koinon.agent.v1alpha1.AgentService.GetAgent:input_type -> koinon.agent.v1alpha1.GetAgentRequest
-	7,  // 24: koinon.agent.v1alpha1.AgentService.ListAgents:input_type -> koinon.agent.v1alpha1.ListAgentsRequest
-	9,  // 25: koinon.agent.v1alpha1.AgentService.ActivateAgent:input_type -> koinon.agent.v1alpha1.ActivateAgentRequest
-	15, // 26: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:input_type -> koinon.agent.v1alpha1.SetAgentTriggersRequest
-	11, // 27: koinon.agent.v1alpha1.AgentService.ResumeAgent:input_type -> koinon.agent.v1alpha1.ResumeAgentRequest
-	13, // 28: koinon.agent.v1alpha1.AgentService.ArchiveAgent:input_type -> koinon.agent.v1alpha1.ArchiveAgentRequest
-	4,  // 29: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:output_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
-	6,  // 30: koinon.agent.v1alpha1.AgentService.GetAgent:output_type -> koinon.agent.v1alpha1.GetAgentResponse
-	8,  // 31: koinon.agent.v1alpha1.AgentService.ListAgents:output_type -> koinon.agent.v1alpha1.ListAgentsResponse
-	10, // 32: koinon.agent.v1alpha1.AgentService.ActivateAgent:output_type -> koinon.agent.v1alpha1.ActivateAgentResponse
-	16, // 33: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:output_type -> koinon.agent.v1alpha1.SetAgentTriggersResponse
-	12, // 34: koinon.agent.v1alpha1.AgentService.ResumeAgent:output_type -> koinon.agent.v1alpha1.ResumeAgentResponse
-	14, // 35: koinon.agent.v1alpha1.AgentService.ArchiveAgent:output_type -> koinon.agent.v1alpha1.ArchiveAgentResponse
-	29, // [29:36] is the sub-list for method output_type
-	22, // [22:29] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	28, // 1: koinon.agent.v1alpha1.Agent.flavor:type_name -> koinon.template.v1alpha1.Flavor
+	29, // 2: koinon.agent.v1alpha1.Agent.proposed_grants:type_name -> koinon.template.v1alpha1.Grant
+	29, // 3: koinon.agent.v1alpha1.Agent.approved_grants:type_name -> koinon.template.v1alpha1.Grant
+	30, // 4: koinon.agent.v1alpha1.Agent.run_limits:type_name -> koinon.template.v1alpha1.RunLimits
+	31, // 5: koinon.agent.v1alpha1.Agent.created_at:type_name -> google.protobuf.Timestamp
+	31, // 6: koinon.agent.v1alpha1.Agent.activated_at:type_name -> google.protobuf.Timestamp
+	31, // 7: koinon.agent.v1alpha1.Agent.archived_at:type_name -> google.protobuf.Timestamp
+	31, // 8: koinon.agent.v1alpha1.Agent.unhealthy_at:type_name -> google.protobuf.Timestamp
+	32, // 9: koinon.agent.v1alpha1.Agent.proposed_triggers:type_name -> koinon.template.v1alpha1.Trigger
+	32, // 10: koinon.agent.v1alpha1.Agent.approved_triggers:type_name -> koinon.template.v1alpha1.Trigger
+	31, // 11: koinon.agent.v1alpha1.Agent.sandbox_archived_at:type_name -> google.protobuf.Timestamp
+	28, // 12: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.flavor:type_name -> koinon.template.v1alpha1.Flavor
+	4,  // 13: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.grants:type_name -> koinon.agent.v1alpha1.GrantBinding
+	2,  // 14: koinon.agent.v1alpha1.CreateAgentFromTemplateResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	2,  // 15: koinon.agent.v1alpha1.GetAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	2,  // 16: koinon.agent.v1alpha1.ListAgentsResponse.agents:type_name -> koinon.agent.v1alpha1.Agent
+	2,  // 17: koinon.agent.v1alpha1.ActivateAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	2,  // 18: koinon.agent.v1alpha1.ResumeAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	2,  // 19: koinon.agent.v1alpha1.ArchiveAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	32, // 20: koinon.agent.v1alpha1.SetAgentTriggersRequest.triggers:type_name -> koinon.template.v1alpha1.Trigger
+	2,  // 21: koinon.agent.v1alpha1.SetAgentTriggersResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	1,  // 22: koinon.agent.v1alpha1.GetAgentModelResponse.source:type_name -> koinon.agent.v1alpha1.ModelSource
+	19, // 23: koinon.agent.v1alpha1.GetAgentModelResponse.available:type_name -> koinon.agent.v1alpha1.ServedModel
+	21, // 24: koinon.agent.v1alpha1.GetAgentModelResponse.thinking:type_name -> koinon.agent.v1alpha1.ThinkingState
+	20, // 25: koinon.agent.v1alpha1.SetAgentModelResponse.model:type_name -> koinon.agent.v1alpha1.GetAgentModelResponse
+	20, // 26: koinon.agent.v1alpha1.SetAgentThinkingResponse.model:type_name -> koinon.agent.v1alpha1.GetAgentModelResponse
+	3,  // 27: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:input_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
+	6,  // 28: koinon.agent.v1alpha1.AgentService.GetAgent:input_type -> koinon.agent.v1alpha1.GetAgentRequest
+	8,  // 29: koinon.agent.v1alpha1.AgentService.ListAgents:input_type -> koinon.agent.v1alpha1.ListAgentsRequest
+	10, // 30: koinon.agent.v1alpha1.AgentService.ActivateAgent:input_type -> koinon.agent.v1alpha1.ActivateAgentRequest
+	16, // 31: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:input_type -> koinon.agent.v1alpha1.SetAgentTriggersRequest
+	12, // 32: koinon.agent.v1alpha1.AgentService.ResumeAgent:input_type -> koinon.agent.v1alpha1.ResumeAgentRequest
+	18, // 33: koinon.agent.v1alpha1.AgentService.GetAgentModel:input_type -> koinon.agent.v1alpha1.GetAgentModelRequest
+	22, // 34: koinon.agent.v1alpha1.AgentService.SetAgentModel:input_type -> koinon.agent.v1alpha1.SetAgentModelRequest
+	24, // 35: koinon.agent.v1alpha1.AgentService.SetAgentThinking:input_type -> koinon.agent.v1alpha1.SetAgentThinkingRequest
+	26, // 36: koinon.agent.v1alpha1.AgentService.RunAgentTrigger:input_type -> koinon.agent.v1alpha1.RunAgentTriggerRequest
+	14, // 37: koinon.agent.v1alpha1.AgentService.ArchiveAgent:input_type -> koinon.agent.v1alpha1.ArchiveAgentRequest
+	5,  // 38: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:output_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
+	7,  // 39: koinon.agent.v1alpha1.AgentService.GetAgent:output_type -> koinon.agent.v1alpha1.GetAgentResponse
+	9,  // 40: koinon.agent.v1alpha1.AgentService.ListAgents:output_type -> koinon.agent.v1alpha1.ListAgentsResponse
+	11, // 41: koinon.agent.v1alpha1.AgentService.ActivateAgent:output_type -> koinon.agent.v1alpha1.ActivateAgentResponse
+	17, // 42: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:output_type -> koinon.agent.v1alpha1.SetAgentTriggersResponse
+	13, // 43: koinon.agent.v1alpha1.AgentService.ResumeAgent:output_type -> koinon.agent.v1alpha1.ResumeAgentResponse
+	20, // 44: koinon.agent.v1alpha1.AgentService.GetAgentModel:output_type -> koinon.agent.v1alpha1.GetAgentModelResponse
+	23, // 45: koinon.agent.v1alpha1.AgentService.SetAgentModel:output_type -> koinon.agent.v1alpha1.SetAgentModelResponse
+	25, // 46: koinon.agent.v1alpha1.AgentService.SetAgentThinking:output_type -> koinon.agent.v1alpha1.SetAgentThinkingResponse
+	27, // 47: koinon.agent.v1alpha1.AgentService.RunAgentTrigger:output_type -> koinon.agent.v1alpha1.RunAgentTriggerResponse
+	15, // 48: koinon.agent.v1alpha1.AgentService.ArchiveAgent:output_type -> koinon.agent.v1alpha1.ArchiveAgentResponse
+	38, // [38:49] is the sub-list for method output_type
+	27, // [27:38] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_koinon_agent_v1alpha1_agent_proto_init() }
@@ -1337,8 +2092,8 @@ func file_koinon_agent_v1alpha1_agent_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_agent_v1alpha1_agent_proto_rawDesc), len(file_koinon_agent_v1alpha1_agent_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   16,
+			NumEnums:      2,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

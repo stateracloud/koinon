@@ -32,10 +32,11 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/questions"
+	"github.com/stateracloud/koinon/internal/runreply"
 )
 
 // kindParked is the run and task event of a run parking on approvals.
-const kindParked = "run.parked"
+const kindParked = runreply.KindParked
 
 // parkResumeNote opens the prompt of a run resumed after its approvals were decided.
 const parkResumeNote = "[Koinon] Your run was paused while a human decided on your approval requests, " +
@@ -148,6 +149,7 @@ func (r *runner) endTurn(ctx context.Context) error {
 	r.srcSeq++
 	src := r.srcSeq
 	parked, waiting := false, false
+	var parkReason store.RunParkReason
 	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
 		q := r.q.WithTx(tx)
 		if len(r.delivered) > 0 {
@@ -174,15 +176,31 @@ func (r *runner) endTurn(ctx context.Context) error {
 		// The agent canceled the task in this turn (cancel_task): there is nothing to wait for. The
 		// questions it asked are canceled instead of opened, and the approvals are canceled by the
 		// approvals sweep once the run has ended.
+		endRow := func(reason string) error {
+			turn, ok := r.tr.openRow()
+			if !ok {
+				return nil
+			}
+			_, err := q.EndRunTurn(ctx, store.EndRunTurnParams{
+				OrgID: r.run.OrgID, ID: turn, EndReason: pgtype.Text{String: reason, Valid: true},
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			return err
+		}
 		task, err := q.GetTask(ctx, store.GetTaskParams{OrgID: r.run.OrgID, ID: r.run.TaskID})
 		if err != nil {
 			return err
 		}
 		if task.State == store.TaskStateCanceled {
+			if err := endRow("end_turn"); err != nil {
+				return err
+			}
 			if _, err := questions.CancelForRun(ctx, q, r.run.OrgID, r.run.ID, "the task was canceled"); err != nil {
 				return err
 			}
-			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "")
+			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "", nil)
 		}
 		reqs, err := q.ListUndeliveredApprovalRequestsForRun(ctx, store.ListUndeliveredApprovalRequestsForRunParams{
 			OrgID: r.run.OrgID, RunID: r.run.ID,
@@ -197,7 +215,10 @@ func (r *runner) endTurn(ctx context.Context) error {
 			return err
 		}
 		if len(reqs) == 0 && len(qs) == 0 {
-			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "")
+			if err := endRow("end_turn"); err != nil {
+				return err
+			}
+			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "", nil)
 		}
 		parked = true
 		ids := make([]string, 0, len(reqs))
@@ -236,6 +257,7 @@ func (r *runner) endTurn(ctx context.Context) error {
 		if asked {
 			reason = store.RunParkReasonInputRequired
 		}
+		parkReason = reason
 		qids := make([]string, 0, len(qs))
 		for _, row := range qs {
 			qids = append(qids, row.ID.String())
@@ -250,6 +272,11 @@ func (r *runner) endTurn(ctx context.Context) error {
 			OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch,
 			ParkReason: reason, ParkExpiresAt: expires,
 		}); err != nil {
+			return err
+		}
+		// The turn's row ends with the park, in the same transaction, so a resume on another replica
+		// sees it ended and how long the run waited.
+		if err := endRow("park:" + string(reason)); err != nil {
 			return err
 		}
 		if asked {
@@ -286,6 +313,7 @@ func (r *runner) endTurn(ctx context.Context) error {
 		return r.dbErr(ctx, "end the turn", err)
 	}
 	if parked {
+		r.tr.parked(parkReason)
 		r.p.cfg.Metrics.Finished.WithLabelValues(string(store.RunStateParked)).Inc()
 		r.log.Info("run parked on approvals", "waiting_on_human", waiting)
 	} else {

@@ -79,3 +79,82 @@ func TestReachedAndFraction(t *testing.T) {
 		t.Fatal("at the limit counts as reached")
 	}
 }
+
+func TestPickNamesTheBroadestLimitReachedInItsCurrentWindow(t *testing.T) {
+	now := time.Date(2026, 10, 28, 9, 0, 0, 0, time.UTC)
+	day, month := budget.DayStart(now), budget.MonthStart(now)
+	at := func(l budget.Level, start time.Time) budget.Level { l.WindowStart = start; return l }
+	agent := at(lv(budget.AgentDaily, "2.75", "2.91"), day)
+	org := at(lv(budget.OrgMonthly, "3.50", "3.60"), month)
+	ceiling := at(lv(budget.PlatformCeiling, "3.55", "3.60"), month)
+
+	for _, c := range []struct {
+		name   string
+		levels []budget.Level
+		want   string
+	}{
+		{"agent only", []budget.Level{agent, at(lv(budget.OrgMonthly, "10", "3.60"), month)}, budget.AgentDaily},
+		{"org over agent", []budget.Level{agent, org}, budget.OrgMonthly},
+		{"ceiling over org and agent, whatever the order", []budget.Level{agent, org, ceiling}, budget.PlatformCeiling},
+		{"ceiling first in the list", []budget.Level{ceiling, agent}, budget.PlatformCeiling},
+		// Last month's cap reached by a late entry names nothing this month.
+		{"stale window ignored", []budget.Level{agent, at(lv(budget.OrgMonthly, "3.50", "3.60"), month.AddDate(0, -1, 0))}, budget.AgentDaily},
+	} {
+		got, ok := budget.Status{Levels: c.levels}.Pick(now)
+		if !ok || got.Name != c.want {
+			t.Errorf("%s: got %q (%v), want %q", c.name, got.Name, ok, c.want)
+		}
+	}
+	if _, ok := (budget.Status{Levels: []budget.Level{at(lv(budget.AgentDaily, "10", "1"), day)}}).Pick(now); ok {
+		t.Error("nothing reached: nothing picked")
+	}
+	if _, ok := (budget.Status{Levels: []budget.Level{at(lv(budget.AgentDaily, "1", "2"), day.AddDate(0, 0, -1))}}).Pick(now); ok {
+		t.Error("yesterday's limit: nothing picked")
+	}
+}
+
+func TestStopMessageAndDetailNameTheLevel(t *testing.T) {
+	l := lv(budget.OrgMonthly, "3.50", "3.6")
+	l.WindowStart = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	if got := l.StopMessage(); got != "org monthly cap reached ($3.60 of $3.50 since 2026-10-01 00:00 UTC)" {
+		t.Fatal(got)
+	}
+	d := l.StopDetail()
+	if d["limit"] != budget.OrgMonthly || d["spend_limit_usd"] != "3.50" || d["spent_usd"] != "3.60" || d["window_start"] != "2026-10-01T00:00:00Z" {
+		t.Fatalf("%v", d)
+	}
+	if (budget.Level{Name: budget.AgentDaily}).Title() != "agent daily limit" || (budget.Level{Name: budget.PlatformCeiling}).Title() != "platform ceiling" {
+		t.Fatal("titles")
+	}
+}
+
+func TestRunSpendLevel(t *testing.T) {
+	now := time.Date(2026, 10, 29, 15, 0, 0, 0, time.UTC)
+	run := lv(budget.RunSpend, "2", "2.01")
+	run.WindowStart = now.Add(-time.Hour)
+
+	// The run's level is current while the run is open, whatever its start, and covers one run.
+	if got := (budget.Status{Levels: []budget.Level{run}}).Current(now); len(got) != 1 {
+		t.Fatalf("%v", got)
+	}
+	// It is the narrowest scope: the agent's daily limit names the stop when both are reached.
+	day := lv(budget.AgentDaily, "1", "1.5")
+	day.WindowStart = budget.DayStart(now)
+	if got, ok := (budget.Status{Levels: []budget.Level{run, day}}).Pick(now); !ok || got.Name != budget.AgentDaily {
+		t.Fatalf("%v %v", got, ok)
+	}
+	if got, ok := (budget.Status{Levels: []budget.Level{run}}).Pick(now); !ok || got.Name != budget.RunSpend {
+		t.Fatalf("%v %v", got, ok)
+	}
+	// It joins the net key limit as the smallest remaining.
+	st := budget.Status{Levels: []budget.Level{lv(budget.AgentDaily, "10", "1"), lv(budget.RunSpend, "0.50", "0.20")}}
+	if net, binding, _ := st.Net(); net != money.MustParse("0.30") || binding != budget.RunSpend {
+		t.Fatalf("%v %v", net, binding)
+	}
+	if got := run.StopMessage(); got != "run spend limit reached ($2.01 of $2.00)" {
+		t.Fatal(got)
+	}
+	if d := run.StopDetail(); d["limit"] != budget.RunSpend || d["window_start"] != nil {
+		t.Fatalf("%v", d)
+	}
+}

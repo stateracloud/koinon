@@ -267,6 +267,8 @@ type orgFixture struct {
 	provider, model string
 	// mcpServer is a remote MCP server of the org, with the tool "search"; mcpTool is its name.
 	mcpServer, mcpTool string
+	// traceDest is a trace destination of the org.
+	traceDest string
 }
 
 func (e *env) newOrgFixture(ctx context.Context) orgFixture {
@@ -339,7 +341,7 @@ func ticketKinds(res *ticketv1alpha1.GetTicketResponse) []string {
 func sweep(ctx context.Context, e *env) (int, error) { return scheduler.SweepWallClock(ctx, e.pool) }
 
 func recordTokens(ctx context.Context, e *env, r store.Run, tokens int64) (store.Run, error) {
-	return scheduler.RecordTokenUsage(ctx, e.pool, r.OrgID, r.ID, tokens)
+	return scheduler.RecordUsage(ctx, e.pool, r.OrgID, r.ID, tokens)
 }
 
 func mustUUID(s string) pgtype.UUID {

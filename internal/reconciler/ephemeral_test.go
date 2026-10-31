@@ -15,7 +15,9 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // Ephemeral agents (plan item EP1, ADR 0065 decision 13c): a sandbox per task, deleted with its
@@ -57,6 +59,7 @@ var _ = Describe("Reconciler ephemeral agents", func() {
 		ws = execution.WorkspaceName(org.Bytes)
 		addProvider(ctx, org, user, "upstream", "", "fake")
 		r, err = reconciler.New(pool, openshell.New(conn), &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
+			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: fake.NewClientset(), Namespace: namespace, Name: "koinon-gateway-providers"},
@@ -141,7 +144,7 @@ var _ = Describe("Reconciler ephemeral agents", func() {
 
 		// A follow-up message: a second run on the same task.
 		_, err := q.CreateRun(ctx, store.CreateRunParams{
-			OrgID: org, AgentID: agent.ID, TaskID: a.TaskID, MaxWallClockSeconds: 1800, MaxTokens: 200_000,
+			OrgID: org, AgentID: agent.ID, TaskID: a.TaskID, MaxWallClockSeconds: 1800,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		pass(ctx)

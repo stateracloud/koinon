@@ -60,6 +60,11 @@ func renderEndpoints(in []execution.Endpoint) ([]*sandboxv1.NetworkEndpoint, err
 		if e.Host == "" || e.Port == 0 {
 			return nil, errors.New("endpoint needs a host and a port")
 		}
+		// Defence in depth: the API refuses wildcard hosts where they enter, and nothing
+		// below it may render one (ADR 0075, decision 13).
+		if err := execution.CheckEgressHost(e.Host); err != nil {
+			return nil, err
+		}
 		access, err := renderAccess(e.Access)
 		if err != nil {
 			return nil, err

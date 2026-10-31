@@ -35,7 +35,7 @@ function setup(opts: { role?: OrgRole; platformAdmin?: boolean; ceiling?: string
       getOrgBudget: () => {
         calls.listed++
         return {
-          budget: create(OrgBudgetSchema, { monthlyCapUsd: '100.00', spentThisMonthUsd: '40.00', estimatedThisMonthUsd: '10.00', platformCeilingUsd: opts.ceiling ?? '', monthStart: timestampFromMs(monthStart.getTime()) }),
+          budget: create(OrgBudgetSchema, { monthlyCapUsd: '100.00', spentThisMonthUsd: '40.00', estimatedThisMonthUsd: '10.00', systemChecksThisMonthUsd: '0.30', platformCeilingUsd: opts.ceiling ?? '', monthStart: timestampFromMs(monthStart.getTime()) }),
         }
       },
       listAgentBudgets: () => ({
@@ -87,6 +87,7 @@ describe('Budgets page', () => {
     expect(within(cap).getByText(/\$500.00. Platform admins set it/)).toBeInTheDocument()
     expect(within(cap).queryByLabelText(/ceiling/i)).not.toBeInTheDocument()
     expect(within(cap).getByLabelText('Share of the monthly cap spent')).toHaveAttribute('value', '40')
+    expect(within(cap).getByText('System checks').nextElementSibling).toHaveTextContent('$0.30')
   })
 
   it('sets the cap, and refuses a bad amount before sending', async () => {
@@ -112,7 +113,7 @@ describe('Budgets page', () => {
     expect(within(row).getByText('Changed from the template')).toBeInTheDocument()
     expect(within(row).getByText('$1.25')).toBeInTheDocument()
     expect(within(list).getByRole('heading', { name: 'Docs bot' }).closest('li')).toHaveTextContent('Template default')
-    await userEvent.click(within(row).getByRole('button', { name: 'Change daily limit of Repo helper' }))
+    await userEvent.click(within(row).getByRole('button', { name: 'Change limit of Repo helper' }))
     const input = within(row).getByLabelText('Daily limit for Repo helper, in US dollars')
     await userEvent.clear(input)
     await userEvent.type(input, '7.5')
@@ -200,7 +201,7 @@ describe('Platform ceilings', () => {
     expect(within(acme).getByText('$500.00')).toBeInTheDocument()
     const def = within(list).getByRole('heading', { name: 'Default' }).closest('li')!
     expect(within(def).getByText('$100.00')).toBeInTheDocument()
-    await userEvent.click(within(def).getByRole('button', { name: 'Set ceiling of Default' }))
+    await userEvent.click(within(def).getByRole('button', { name: 'Set a ceiling of Default' }))
     await userEvent.type(within(def).getByLabelText('Ceiling for Default, in US dollars'), '1000')
     await userEvent.click(within(def).getByRole('button', { name: 'Save ceiling for Default' }))
     await waitFor(() => expect(calls.ceilings).toEqual([expect.objectContaining({ orgId: 'org-1', platformCeilingUsd: '1000' })]))

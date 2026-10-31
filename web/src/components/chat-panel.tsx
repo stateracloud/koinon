@@ -113,7 +113,7 @@ function Conversation({ orgId, task, agentName, agent, canEdit }: { orgId: strin
       {canEdit && parked && (
         <p role="status" className="text-muted-foreground text-sm">
           {waitingOn
-            ? `Waiting on ${waitingOn}'s answer to a question in the inbox. A reply here does not answer it.`
+            ? `Waiting on an answer from ${waitingOn} in the inbox. A reply here does not answer it.`
             : 'Waiting on an approval above. Decide it before replying.'}
         </p>
       )}

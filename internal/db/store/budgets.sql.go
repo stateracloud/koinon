@@ -211,8 +211,76 @@ func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsPa
 	return items, nil
 }
 
+const listOpenRunsOfAgent = `-- name: ListOpenRunsOfAgent :many
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd, traced, last_turn_seq FROM runs
+WHERE org_id = $1 AND agent_id = $2 AND state IN ('queued', 'starting', 'running', 'parked')
+`
+
+type ListOpenRunsOfAgentParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// Runs that can still be canceled, when the agent's daily limit is reached.
+func (q *Queries) ListOpenRunsOfAgent(ctx context.Context, arg ListOpenRunsOfAgentParams) ([]Run, error) {
+	rows, err := q.db.Query(ctx, listOpenRunsOfAgent, arg.OrgID, arg.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Run
+	for rows.Next() {
+		var i Run
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.AgentID,
+			&i.AgentVersionID,
+			&i.TaskID,
+			&i.State,
+			&i.Epoch,
+			&i.OwnerID,
+			&i.LeaseExpiresAt,
+			&i.HeartbeatAt,
+			&i.ReadyAt,
+			&i.ParkReason,
+			&i.ParkedAt,
+			&i.ParkExpiresAt,
+			&i.OutcomeReason,
+			&i.MaxWallClockSeconds,
+			&i.MaxTokens,
+			&i.LastEventSeq,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParkedSeconds,
+			&i.TokensUsed,
+			&i.PromptThroughSeq,
+			&i.Takeovers,
+			&i.Summarizing,
+			&i.FailureClass,
+			&i.Origin,
+			&i.ClaimedAt,
+			&i.SandboxWaitStartedAt,
+			&i.WrapUpNoticeAt,
+			&i.MaxModelRequests,
+			&i.MaxSpendUsd,
+			&i.Traced,
+			&i.LastTurnSeq,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenRunsOfOrg = `-- name: ListOpenRunsOfOrg :many
-SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at FROM runs
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd, traced, last_turn_seq FROM runs
 WHERE org_id = $1 AND state IN ('queued', 'starting', 'running', 'parked')
 `
 
@@ -257,6 +325,12 @@ func (q *Queries) ListOpenRunsOfOrg(ctx context.Context, orgID pgtype.UUID) ([]R
 			&i.FailureClass,
 			&i.Origin,
 			&i.ClaimedAt,
+			&i.SandboxWaitStartedAt,
+			&i.WrapUpNoticeAt,
+			&i.MaxModelRequests,
+			&i.MaxSpendUsd,
+			&i.Traced,
+			&i.LastTurnSeq,
 		); err != nil {
 			return nil, err
 		}

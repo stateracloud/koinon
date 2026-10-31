@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"net/url"
@@ -68,6 +69,36 @@ func deniedAddr(a netip.Addr) bool {
 	return a.IsLoopback() || a.IsUnspecified() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
 		a.IsMulticast() || a.IsPrivate() || slices.Contains(metadataAddrs, a) ||
 		slices.ContainsFunc(deniedPrefixes, func(p netip.Prefix) bool { return p.Contains(a) })
+}
+
+// ValidateAllowedHosts refuses an AllowedHosts entry that is a pattern. Entries are matched
+// exactly, so a wildcard never matched anything; failing at startup tells the operator instead of
+// leaving a setting that looks like it allows a whole domain (ADR 0075, decision 13). A bracketed
+// IPv6 literal, with or without a port ("[fd00::1]:11434", as written in a URL), is exact.
+func ValidateAllowedHosts(entries []string) error {
+	for _, e := range entries {
+		e = strings.TrimSpace(e)
+		if strings.ContainsAny(withoutIPv6Literal(e), "*?[]{}") {
+			return fmt.Errorf("egress.allowedInternalHosts entry %q is a pattern; list each host exactly (an IP or a CIDR is fine)", e)
+		}
+	}
+	return nil
+}
+
+// withoutIPv6Literal returns e without a leading bracketed IPv6 address, so that the brackets of
+// "[fd00::1]" or "[fd00::1]:11434" are not read as a glob class. Anything else is returned as is.
+func withoutIPv6Literal(e string) string {
+	if !strings.HasPrefix(e, "[") {
+		return e
+	}
+	end := strings.IndexByte(e, ']')
+	if end < 0 {
+		return e
+	}
+	if a, err := netip.ParseAddr(e[1:end]); err != nil || !a.Is6() {
+		return e
+	}
+	return e[end+1:]
 }
 
 // allowedAddr reports whether an AllowedHosts entry (an IP or a CIDR) covers a.
@@ -231,6 +262,11 @@ func (p URLPolicy) check(ctx context.Context, rawURL string, strict bool) error 
 		if host[i] >= 0x80 {
 			return invalid("the url's host must be ASCII; write an internationalised name in its xn-- form")
 		}
+	}
+	if strings.ContainsAny(host, "*?[]{}") {
+		// Never an exact host, and never allow-listable: a pattern is how the DNS exfiltration
+		// channel of a wildcard egress rule opens (ADR 0075, decision 13).
+		return invalid("the url's host %q is a pattern; name the host exactly, because wildcard hosts reopen a DNS exfiltration channel", host)
 	}
 	if p.allowedName(strings.TrimSuffix(host, "."), strings.ToLower(u.Host)) {
 		return nil

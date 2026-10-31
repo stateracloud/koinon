@@ -16,3 +16,19 @@ tilt_modules/
 docs/site/node_modules/
 docs/site/dist/
 docs/site/.astro/
+
+# Binaries built into the repo root with go build ./cmd/<name>
+/koinon-api
+/koinon-agentd
+/koinon-reconciler
+/koinon-fakemodel
+/koinon-fakegithub
+/koinon-fakegitea
+/koinon-fakemcp
+/koinon-fakecicost
+/koinon-rt1-promgen
+/.e2e-out/
+
+# Local Tilt profile and the files it names (hack/dev/local.example.yaml)
+/hack/dev/local.yaml
+/hack/dev/*.local.yaml

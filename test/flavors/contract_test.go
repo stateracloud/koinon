@@ -51,6 +51,10 @@ type flavor struct {
 	allow, reject []acp.PermissionOptionKind
 	// agentdVerdict is how koinon-agentd's default tier mapping answers permissionCall.
 	agentdVerdict string
+	// rejectEndsTurn is whether the harness ends the turn as cancelled when a permission request
+	// is rejected, instead of handing the model a tool error. koinon-agentd then continues the
+	// run with a note (internal/agentd/refusal.go).
+	rejectEndsTurn bool
 	// unknownSession is part of the error session/load returns for an unknown session ID.
 	unknownSession string
 	// instructionsInSystem is whether the harness puts the instruction file koinon-agentd

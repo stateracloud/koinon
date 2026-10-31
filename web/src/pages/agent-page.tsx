@@ -8,6 +8,8 @@ import { getRouteApi, Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { AgentApprovalScopes } from '@/components/agent-approval-scopes'
 import { AgentMcpServers } from '@/components/agent-mcp-servers'
+import { AgentModel } from '@/components/agent-model'
+import { AgentRunLimits } from '@/components/agent-run-limits'
 import { AgentTriggers } from '@/components/agent-triggers'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -16,6 +18,7 @@ import { Label } from '@/components/ui/label'
 import { AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import type { Grant } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { runLimitsLabel } from '@/lib/cost'
 import { agentStatusLabel, flavorLabel, presetLabel } from '@/lib/labels'
 import { isApprover } from '@/lib/approvals'
 import { useOrg } from '@/lib/org-context'
@@ -99,7 +102,7 @@ export function AgentPage() {
           <dt className="text-muted-foreground">Flavor</dt>
           <dd>{flavorLabel(a.flavor)}</dd>
           <dt className="text-muted-foreground">Model</dt>
-          <dd>{a.model || 'default'}</dd>
+          <dd>{a.modelSetting ? `${a.modelSetting} (set on this agent)` : a.model || 'default'}</dd>
           <dt className="text-muted-foreground">Sandbox</dt>
           <dd>
             {a.ephemeral ? 'Ephemeral: fresh sandbox per task, no home' : 'Persistent home'}
@@ -114,7 +117,7 @@ export function AgentPage() {
             <>
               <dt className="text-muted-foreground">Run limits</dt>
               <dd>
-                {Math.round(Number(a.runLimits.maxDurationSeconds) / 60)} min, {Number(a.runLimits.maxTokens).toLocaleString()} tokens per run
+                {runLimitsLabel(a.runLimits)} per run
               </dd>
             </>
           )}
@@ -122,6 +125,8 @@ export function AgentPage() {
         <h2 className="mt-2 font-semibold">{draft || pendingVersion ? 'Proposed grants' : 'Approved grants'}</h2>
         {grants.length === 0 ? <p className="text-muted-foreground">None.</p> : grants.map((g, i) => <GrantSummary key={i} grant={g} connectionName={connName} />)}
       </section>
+      {isApprover(org.role) && <AgentModel agent={a} />}
+      {isApprover(org.role) && a.status !== AgentStatus.ARCHIVED && <AgentRunLimits agent={a} />}
       <AgentTriggers agent={a} canEdit={isApprover(org.role)} />
       {!draft && <AgentApprovalScopes agentId={a.id} canRevoke={isApprover(org.role)} />}
       {isApprover(org.role) && <AgentMcpServers agentId={a.id} />}

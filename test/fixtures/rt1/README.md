@@ -1,6 +1,6 @@
 # RT1 fixtures
 
-Test fixtures for the v0.1 home-lab story test (RT1, `docs/plans/v0.1.md`). The stories need tools
+Test fixtures for the v0.1 story test (RT1, `docs/plans/v0.1.md`), which anyone can run on their own cluster (`docs/dev/real-model-tests.md`). The stories need tools
 that agents reach only as remote MCP servers behind agentgateway. These fixtures stand in for three
 cost sources (the daily FinOps cost check) and for a company docs repository (the internal-research
 story) and for web research. Everything is synthetic or openly licensed and runs in namespace
@@ -13,6 +13,7 @@ web-research pods have internet egress (see Web research).
 | CI cost | `cmd/koinon-fakecicost` | REST `GET /v1/costs` and the tool `ci_costs`, bearer token required | `http://rt1-fakecicost.koinon-fixtures.svc.cluster.local:8080/mcp` |
 | Inference spend | `prometheus/`, `cmd/koinon-rt1-promgen` | Prometheus with 30 days of backfilled LLM metrics, behind prometheus-mcp-server | `http://rt1-prometheus.koinon-fixtures.svc.cluster.local:8080/mcp` |
 | Web research | `manifests/searxng.yaml` | SearXNG (search) and `web_url_read` (page to Markdown) via mcp-searxng, bearer token required | `http://rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080/mcp` |
+| Escape-suite gateway stand-in | `manifests/escape-gateway-standin.yaml` | Answers every request on :4000 with an empty 418 and `X-Koinon-Standin: 1` | n/a (see Escape gateway stand-in) |
 | Internal docs | `docs-repo/` | A fictional platform handbook to push to Gitea | n/a (Gitea MCP) |
 | Manifests | `manifests/` | Deployments, Services, NetworkPolicies, kustomization | n/a |
 
@@ -107,9 +108,10 @@ An unmodified SearXNG (image `searxng/searxng`, pinned by digest `sha256:0f48ffe
 2026.10.27) behind `ihor-sokoliuk/mcp-searxng` 2.9.0 (MIT, image by digest `sha256:8f1dd92a...`) in
 Streamable HTTP mode with a static bearer token (`MCP_HTTP_HARDEN`, `MCP_HTTP_AUTH_TOKEN` from Secret
 `rt1-searxng-secrets`, stateless). Tools: `searxng_web_search` and `web_url_read`. SearXNG's config is
-`manifests/searxng-settings.yml`: JSON and HTML formats, engines duckduckgo, bing, wikipedia, github and
-stackoverflow, limiter and image proxy off, no Valkey or Redis. Its secret key comes from the Secret
-(placeholder; set the real one out of band). Nothing is built: the build script copies both images to Zot
+`manifests/searxng-settings.yml`: JSON and HTML formats, engines brave, wikipedia, github and
+stackoverflow (DuckDuckGo is out: it answers a CAPTCHA to a server-side client; mojeek and bing are out
+because SearXNG's defaults mark them inactive and disabled, so listing them in `keep_only` never ran them), limiter and image proxy off, no Valkey or Redis. Its secret key comes from the Secret
+(placeholder; set the real one out of band). Nothing is built: the build script copies both images to your registry
 by digest.
 
 - **Internet egress.** Unlike the other fixtures, this namespace's two web-research pods may reach the
@@ -118,10 +120,17 @@ by digest.
   127/8 (IPv4 only), so a URL cannot send them into the cluster, the LAN or a metadata service. SearXNG
   accepts connections only from mcp-searxng, and mcp-searxng only from the gateway. DNS is allowed for
   everything.
+- **Limits.** Every agent's calls come from the gateway's single pod IP, so mcp-searxng's per-IP
+  stateless in-flight limit (default 8) caps all agents together. The fixture sets
+  `MCP_HTTP_STATELESS_MAX_IN_FLIGHT_PER_IP=16` and `MCP_HTTP_STATELESS_MAX_IN_FLIGHT=32` (the global
+  limit must stay above the per-IP one, or the per-IP value is reduced to the global cap). The
+  separate, queue-less tool ceiling `MCP_TOOL_MAX_IN_FLIGHT` (default 16) is set to 32.
+  `URL_READ_MAX_CHARS=8000` is only the default page length when a call omits `maxLength`; an
+  explicit `maxLength` always wins.
 - **Licence.** SearXNG is AGPL-3.0. We run the upstream image unmodified as a separate service for
   testing; its code is not vendored, patched or bundled into any Koinon image, and `searxng-settings.yml`
   is configuration only. Keep it that way. Do not ship it as a Koinon component.
-- Duckduckgo and others may answer a CAPTCHA to a home IP; wikipedia, github and bing normally work.
+- Duckduckgo and others may answer a CAPTCHA to a home IP; wikipedia, github, brave and stackoverflow normally work.
 
 Run locally (public internet needed):
 
@@ -141,34 +150,51 @@ curl -s localhost:8081/mcp -H "Authorization: Bearer $MCP_TOKEN" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"web_url_read","arguments":{"url":"https://example.com"}}}'
 ```
 
+## Escape gateway stand-in (`manifests/escape-gateway-standin.yaml`)
+
+`escape-gateway-standin` is `koinon-fakemodel -standin` (the `rt1-fakemodel` image, built by
+`hack/rt1-fixtures-build.sh`): an HTTP server on port 4000 that serves no model and answers every
+request, any method and path, with an empty 418 and the header `X-Koinon-Standin: 1`. The escape suite
+(`test/escape`, ADR 0080) uses it as the model gateway, because OpenShell 0.1.5 shows an upstream
+connection refusal to the sandbox as a TCP failure (curl 7), not an HTTP 502, so a stand-in with no
+listener cannot prove that a request crossed the policy. Set
+`KOINON_ESCAPE_GATEWAY_HOST=escape-gateway-standin.koinon-fixtures.svc.cluster.local`. The suite expects
+418 plus the marker on the allowed model routes and 403 (from the sandbox proxy) on the rest.
+Its NetworkPolicy admits only pods in namespaces labelled `openshell.ai/managed-by: openshell` (the
+chart's default `sandboxPolicy.namespaceSelector`). Run locally:
+`go run ./cmd/koinon-fakemodel -standin -addr :4000`.
+
 ## Internal docs (`docs-repo/`)
 
 An index and six pages of a fictional "Northwind platform handbook" (secret handling, access windows,
 backup and restore, dependency upgrades, incident policy, glossary). Push the directory's contents to
-a Gitea repository next to the real home-lab repository (for example `northwind/platform-handbook`), so
+a Gitea repository next to your own repository (for example `northwind/platform-handbook`), so
 the agent can compare the written policy with practice. The pages are not licensed from anyone and not
 real policy.
 
 ## Manifests (`manifests/`)
 
-`kubectl apply -k test/fixtures/rt1/manifests` creates namespace `koinon-fixtures`, five
-Deployments and Services (motherduck, fakecicost, prometheus with its MCP sidecar, searxng, searxng-mcp), and
-these NetworkPolicies: default deny ingress; ingress to the MCP ports only from Koinon's gateway pods in
-namespace `koinon`; egress DNS only, except the two web-research pods (public internet, private ranges
+`manifests/` is the base: image names are bare (`rt1-motherduck:dev`) and an overlay says where the images come from. Apply an overlay, not the base: `overlays/kind` (`hack/rt1-fixtures-kind.sh`: images built locally and loaded into kind, fake Secrets), `overlays/remote` (your registry; see below) or `overlays/homelab` (the maintainer's Zot, pinned by digest). Together they create namespace `koinon-fixtures`, five
+Deployments and Services (motherduck, fakecicost, prometheus with its MCP sidecar, searxng, searxng-mcp, and
+the escape-gateway-standin), and these NetworkPolicies: default deny ingress; ingress to the MCP ports only from Koinon's gateway pods in
+namespace `koinon`; ingress to the stand-in's port 4000 only from OpenShell sandbox namespaces; egress DNS only, except the two web-research pods (public internet, private ranges
 excluded). The gateway selectors assume Koinon is installed in namespace `koinon` with the chart's default
 names: in standalone mode the gateway pods carry `app.kubernetes.io/name=koinon` (no `nameOverride`) and
 `app.kubernetes.io/component=gateway`; in kubernetes mode any pod in `koinon` with the label
 `gateway.networking.k8s.io/gateway-name` matches. Change `networkpolicies.yaml` if yours differ.
 Every container has requests and limits, runs non-root with a read-only root file system, and no pod
-mounts a service account token. Image references are `zot.apps.lab.example.invalid/koinon/rt1-<name>:<tag>`; `kustomization.yaml` pins
-them by digest. The four built images carry `sha256:TODO-...` placeholders until the build script's output
-is pasted in; the three mirrored images already have their upstream digests.
+mounts a service account token. The overlays rewrite the image names: `overlays/kind` uses `kind.local/rt1-<name>:dev` and the upstream images
+by digest; `overlays/remote` uses `registry.example.test/koinon/rt1-<name>` with the tag `dev` (nodes cache it: pin digests or use a new tag after a rebuild), a placeholder you replace when
+you render (`kustomize build overlays/remote | sed "s#registry.example.test/koinon#$REGISTRY/koinon#g"`);
+`overlays/homelab` pins the maintainer's Zot images by digest (its `rt1-fakemodel` digest is still a
+`sha256:TODO` placeholder until the build script's output is pasted in).
 
 ### Secrets
 
-The kustomization contains **no Secrets** (Argo CD self-heal would revert them). The operator delivers
-them, from OpenBao with ExternalSecrets, before the pods start. `manifests/secrets.example.yaml`
-(not listed in the kustomization) has obviously fake values for a local or kind cluster.
+The base and the remote and home-lab overlays contain **no Secrets**: real values must not be in git, and
+an operator may revert hand-made ones. On a real cluster create them (or have your secret store deliver them)
+before the pods start. `overlays/kind/secrets.example.yaml` has obviously fake values and is part of
+`overlays/kind` only.
 
 | Secret | Key | Used by | Meaning |
 |---|---|---|---|
@@ -183,7 +209,8 @@ The two tokens are the credentials registered for the MCP servers in Koinon.
 | rt1-motherduck | motherduck 192Mi (about 75 MiB measured) | 192Mi |
 | rt1-fakecicost | fakecicost 64Mi | 64Mi |
 | rt1-searxng | searxng 256Mi (about 87 MiB measured) | 256Mi |
-| rt1-searxng-mcp | mcp-searxng 128Mi (about 43 MiB) | 128Mi |
+| rt1-searxng-mcp | mcp-searxng 256Mi (about 43 MiB at rest; CPU limit 2; readiness and liveness probes time out after 5 s) | 256Mi |
+| escape-gateway-standin | standin 32Mi (about 10 MiB expected) | 32Mi |
 | rt1-prometheus | prometheus 128Mi (31 MiB idle, 57 MiB under a 30-day query loop), prometheus-mcp 112Mi (about 78 MiB); init: promgen 64Mi, promtool 256Mi | 240Mi at run time |
 
 To let agents use them, the gateway must be allowed to reach the four hosts
@@ -196,15 +223,16 @@ For fakecicost and rt1-searxng-mcp, give the server a bearer credential so agent
 
 ## Building images
 
-`hack/rt1-fixtures-build.sh REGISTRY [TAG]` builds four images for linux/amd64 (two with ko, two with docker buildx, or docker build and push when
+`hack/rt1-fixtures-build.sh REGISTRY [TAG]` (for `overlays/remote`; kind uses `hack/rt1-fixtures-kind.sh`) builds four images for linux/amd64 (two with ko, two with docker buildx, or docker build and push when
 buildx is missing) and mirrors three (Prometheus and the two web-research images) by digest. Afterwards it
 prints a ready-to-paste `images:` block with the digests for `kustomization.yaml`
-(`DRY_RUN=1` prints the commands only). By hand:
+(`DRY_RUN=1` prints the commands only; add the block to an overlay to pin the images). By hand:
 
 ```sh
-# Go images with ko (cmd/koinon-fakecicost, cmd/koinon-rt1-promgen)
+# Go images with ko (cmd/koinon-fakecicost, cmd/koinon-rt1-promgen, cmd/koinon-fakemodel)
 KO_DOCKER_REPO=<registry>/koinon/rt1-fakecicost ko build --bare --platform linux/amd64 --tags dev ./cmd/koinon-fakecicost
 KO_DOCKER_REPO=<registry>/koinon/rt1-promgen    ko build --bare --platform linux/amd64 --tags dev ./cmd/koinon-rt1-promgen
+KO_DOCKER_REPO=<registry>/koinon/rt1-fakemodel  ko build --bare --platform linux/amd64 --tags dev ./cmd/koinon-fakemodel
 # Python images with docker buildx
 docker buildx build --platform linux/amd64 --push -t <registry>/koinon/rt1-motherduck:dev test/fixtures/rt1/motherduck
 docker buildx build --platform linux/amd64 --push -f test/fixtures/rt1/prometheus/Dockerfile.mcp \

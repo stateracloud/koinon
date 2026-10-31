@@ -25,6 +25,7 @@ jobs:
       web: ${{ steps.paths.outputs.web }}
       generate: ${{ steps.paths.outputs.generate }}
       chart: ${{ steps.paths.outputs.chart }}
+      chartsmoke: ${{ steps.paths.outputs.chartsmoke }}
       docs: ${{ steps.paths.outputs.docs }}
       escape: ${{ steps.paths.outputs.escape }}
       flavors: ${{ steps.paths.outputs.flavors }}
@@ -60,6 +61,65 @@ jobs:
       - run: go test $(go list ./... | grep -v '/test/flavors$')
       # The reconciler runs per-sandbox jobs concurrently (LT1); keep its state guarded.
       - run: go test -race -count=1 ./internal/reconciler/
+
+  # Known vulnerabilities in the Go dependencies, by reachability (ADR 0079): a reachable finding
+  # is what lets a fix take the security fast path instead of waiting out the cooldown.
+  govulncheck:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    name: govulncheck
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  # Dependency cooldown (ADR 0079): versions this pull request adds must be at least 3 days old.
+  # Public endpoints only. The waiver is the label `dependency-age-waiver`, honoured only when
+  # the maintainer put it on; the job reads the label when it runs, so re-run the job after
+  # labelling. Timestamps guard against accidents, they are not proof.
+  dep-age:
+    name: dependency age
+    if: github.event_name == 'pull_request'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: waiver
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.base_ref }}
+        # Waivers outside the security fast path are the maintainers' (ADR 0079). The approvers are
+        # the GitHub handles in the table of MAINTAINERS.md, read from the base branch so that a
+        # pull request cannot add itself.
+        run: |
+          label=dependency-age-waiver
+          if gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '.[].name' | grep -qx "$label"; then
+            # Both the file and the parser come from the base branch.
+            approvers=$(bash <(git show "origin/$BASE:hack/waiver-approvers.sh") <(git show "origin/$BASE:MAINTAINERS.md"))
+            [[ -n $approvers ]] || { echo "::error::no maintainer handles found in the table of MAINTAINERS.md on $BASE"; exit 1; }
+            actor=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/events" \
+              --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$label\")] | last | .actor.login // empty" | tail -n1)
+            if [[ -n $actor ]] && grep -qixF "$actor" <<<"$approvers"; then
+              echo "label $label was added by $actor: age failures are waived and listed below"
+              echo "by=$actor" >>"$GITHUB_OUTPUT"
+            else
+              echo "::error::label $label was added by '${actor:-unknown}', not by a maintainer listed in MAINTAINERS.md ($(tr '\n' ' ' <<<"$approvers")); it does not waive anything"
+            fi
+          fi
+      - name: versions are at least 3 days old
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEP_AGE_WAIVER: ${{ steps.waiver.outputs.by }}
+        run: hack/dep-age-check.sh "origin/${{ github.base_ref }}"
 
   web:
     needs: changes
@@ -152,6 +212,31 @@ jobs:
       # helm lint, helm template for each mode and kubeconform; render only, no cluster.
       - run: make chart-check
 
+  # Rendered startup smoke test (#284): the chart's Jobs and Deployments run as containers, with
+  # the rendered args, env and mounts, against Postgres and envtest. See test/chartsmoke.
+  chart-smoke:
+    needs: changes
+    if: needs.changes.outputs.chartsmoke == 'true'
+    name: chart smoke
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # Above the test's own timeouts (go test 20m, ginkgo 15m), so a hang fails the test and cleans up.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+      # setup-envtest downloads the API server binaries into this directory; Go's own caches come
+      # from setup-go.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/kubebuilder-envtest
+          key: envtest-1.37.0
+      - run: make test-chart-smoke
+
   # Docs site (plan item DOC1): builds the Starlight site and checks the quickstart against
   # test/e2e, the chart and the web spec. No deploy while the repository is private. Not a
   # required check.
@@ -203,6 +288,40 @@ jobs:
       - run: hack/migrate-lint-test.sh
       - run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
 
+  # ADR numbers unique and contiguous, README index in sync (hack/adr-lint.sh, ADR 0082).
+  adr-lint:
+    name: adr-lint
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: hack/adr-lint-test.sh
+      - run: hack/adr-lint.sh
+
+  # Offline unit tests of hack/claim.sh. The live tests need a scratch repository and never run
+  # here: CI must not mutate GitHub.
+  claim-tests:
+    name: claim-tests
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: hack/claim_test.sh
+      - run: hack/migrate-renumber-test.sh
+
+  # Tests of the e2e tooling scripts: the decision rule (needs the Go toolchain for `go list`) and
+  # the remote runner (needs flock, so Linux).
+  scripts:
+    name: scripts
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: hack/needs-e2e-test.sh
+      - run: hack/e2e-remote-test.sh
+      - run: hack/e2e-decide-test.sh
+      - run: hack/e2e-bisect-test.sh
+
   # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
   # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
@@ -234,3 +353,40 @@ jobs:
           restore-keys: flavors-
       - run: make flavors FLAVOR_CACHE=${{ runner.temp }}/flavor-cache
       - run: go test -count=1 ./test/flavors/...
+
+  # On main only: publish the flavor image under its content tag (hack/flavor-tag.sh) so the kind
+  # e2e pulls it instead of building it. A separate job, so only it holds packages: write and
+  # pull requests never do. The layer cache the flavors job just saved makes the build a cache hit.
+  flavor-publish:
+    name: flavor-publish
+    needs: [changes, flavors]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.flavors == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/flavor-cache
+          key: flavors-${{ hashFiles('flavors/**') }}
+          restore-keys: flavors-
+      - name: Push ghcr.io/<repo>/flavor-opencode:<content tag>
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          tag=$(hack/flavor-tag.sh opencode)
+          image="ghcr.io/$REPO/flavor-opencode:$tag"
+          if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
+            echo "$image already exists"
+            exit 0
+          fi
+          docker buildx build --push --build-context common=flavors/common \
+            --cache-from "type=local,src=$RUNNER_TEMP/flavor-cache/opencode" \
+            --tag "$image" flavors/opencode

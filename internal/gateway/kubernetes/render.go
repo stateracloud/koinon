@@ -11,7 +11,7 @@
 // local config file (research/agentgateway-k8s-crds.md): in this mode the spend ledger enforces
 // budgets by revoking a key that has none left (see Render).
 //
-// Controller API: agentgateway v1.6.0, controller/api/v1alpha1/agentgateway. Research:
+// Controller API: agentgateway v1.7.0, controller/api/v1alpha1/agentgateway. Research:
 // docs/research/agentgateway-k8s-crds.md.
 package kubernetes
 
@@ -76,6 +76,8 @@ const (
 	catalogKey = "catalog.json"
 	// mcpPath is where the proxy serves MCP, as in standalone mode.
 	mcpPath = "/mcp"
+	// placeholderTarget is the never-contacted partner of a lone org target (see mcp).
+	placeholderTarget = "koinon.placeholder"
 
 	groupGateway = "gateway.networking.k8s.io"
 	groupAgent   = "agentgateway.dev"
@@ -150,6 +152,11 @@ func (o Options) withDefaults() Options {
 // agent's keys out of the key ConfigMap, which revokes them without a restart; the next Apply with
 // an amount above zero puts them back. This is the S2 fallback of plan item G2.
 func Render(s gateway.State, o Options) (Rendered, error) {
+	if ex := o.AccessLogOTLP; ex != nil && ex.TokenSecret != "" {
+		if _, _, err := ex.SplitHostPort(); err != nil {
+			return Rendered{}, fmt.Errorf("kubernetes: %w", err)
+		}
+	}
 	if err := s.Validate(); err != nil {
 		return Rendered{}, err
 	}
@@ -325,13 +332,27 @@ func (b *builder) gatewayObjects() {
 		attr(gateway.LogFieldCacheRead, `llm.cachedInputTokens`),
 		attr(gateway.LogFieldCacheWrite, `llm.cacheCreationInputTokens`),
 		attr(gateway.LogFieldReasoning, `llm.reasoningTokens`),
+		attr(gateway.LogFieldFormat, gateway.FormatLogExpr()),
+		attr(gateway.LogFieldStream, `llm.streaming`),
+		attr(gateway.LogFieldError, `proxy.error.reason`),
 		attr(gateway.LogFieldStatus, `response.code`),
 		attr(gateway.LogFieldMaxTokens, `llm.params.max_tokens`),
 		attr(gateway.LogFieldRequestBytes, `int(request.headers["content-length"])`),
+		attr(gateway.LogFieldResponseID, gateway.ResponseIDCEL),
+		attr(gateway.LogFieldUpstream, gateway.UpstreamCEL),
 	}
 	access := map[string]any{"attributes": map[string]any{"add": attrs}}
 	if b.o.AccessLogOTLP != nil {
 		otlp := map[string]any{"url": "http://" + b.o.AccessLogOTLP.HostPort, "protocol": "HTTP"}
+		if ex := b.o.AccessLogOTLP; ex.TokenSecret != "" {
+			// The policy cannot carry a credential itself: the export goes through a Backend whose
+			// auth policy reads the token from the Secret (the controller hands it to the proxy,
+			// as with provider keys).
+			if ref, ok := b.otlpBackend(ex); ok {
+				delete(otlp, "url")
+				otlp["backendRef"] = ref
+			}
+		}
 		if p := b.o.AccessLogOTLP.Path; p != "" && p != "/v1/logs" {
 			otlp["path"] = p
 		}
@@ -341,6 +362,30 @@ func (b *builder) gatewayObjects() {
 		"targetRefs": b.policyTargets(KindGateway, name),
 		"frontend":   map[string]any{"accessLog": access},
 	}, nil, nil)
+}
+
+// otlpBackend adds the Backend for the OTLP receiver, with the bearer token from ex.TokenSecret as
+// its auth, and returns the reference the access-log policy names. It reports false for a
+// host:port it cannot split; Render refuses such an Options first, so the token requirement is
+// never silently dropped.
+func (b *builder) otlpBackend(ex *standalone.OTLPExport) (map[string]any, bool) {
+	host, port, err := ex.SplitHostPort()
+	if err != nil {
+		return nil, false // Render has refused it already
+	}
+	key := ex.TokenSecretKey
+	if key == "" {
+		key = "token"
+	}
+	name := b.name("otlp")
+	b.add("", groupAgent+"/v1alpha1", KindBackend, name, map[string]any{
+		"static": map[string]any{"host": host, "port": int64(port)},
+		"policies": map[string]any{"auth": map[string]any{
+			// Default location: "Authorization: Bearer <value>".
+			"secretRef": map[string]any{"name": ex.TokenSecret, "key": key},
+		}},
+	}, nil, nil)
+	return map[string]any{"group": groupAgent, "kind": KindBackend, "name": name}, true
 }
 
 func attr(name, expr string) any { return map[string]any{"name": name, "expression": expr} }
@@ -367,7 +412,7 @@ func (b *builder) keys(s gateway.State) []string {
 			revoked = append(revoked, k.ID)
 			continue
 		}
-		byOrg[k.Agent.Org][k.ID] = keyEntry(k)
+		byOrg[k.Agent.Org][k.ID] = keyEntry(k, s)
 	}
 	slices.Sort(revoked)
 	for org, data := range byOrg {
@@ -378,14 +423,18 @@ func (b *builder) keys(s gateway.State) []string {
 
 // keyEntry is the JSON agentgateway reads from a key ConfigMap: the hash and the metadata CEL sees
 // as apiKey.*.
-func keyEntry(k gateway.Key) string {
-	raw, _ := json.Marshal(map[string]any{
-		"keyHash": k.Hash,
-		"metadata": map[string]any{
-			"name": k.ID, "agent": k.Agent.String(), "org": k.Agent.Org,
-			"internal": gateway.IsInternalAgent(k.Agent),
-		},
-	})
+func keyEntry(k gateway.Key, s gateway.State) string {
+	meta := map[string]any{
+		"name": k.ID, "agent": k.Agent.String(), "org": k.Agent.Org,
+		"internal": gateway.IsInternalAgent(k.Agent),
+	}
+	// A key with a model list of its own carries it, and the models' authorization checks it. Other
+	// keys carry nothing extra, so their entries (and the gateway's revision) do not change.
+	if s.Restricted(k.Agent) {
+		meta["restricted"] = true
+		meta["models"] = s.AllowedModels(k.Agent, s.ServedModels(k.Agent.Org))
+	}
+	raw, _ := json.Marshal(map[string]any{"keyHash": k.Hash, "metadata": meta})
 	return string(raw)
 }
 
@@ -399,12 +448,9 @@ func (b *builder) probeKey(rev gateway.Revision) {
 	b.add("", "v1", KindConfigMap, b.name("probe"), nil, map[string]any{gateway.ReloadProbeKeyName: string(raw)}, map[string]any{LabelKeys: b.o.GatewayName})
 }
 
-// streamUsageExpr: see standalone's streamUsageExpr.
-const streamUsageExpr = `has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null`
-
 // models adds one AgentgatewayModel per served model and the catalog ConfigMap. A model carries the
 // authorization `apiKey.org == "<org>"`, so several orgs can serve the same plain model name and the
-// router picks the one the key's org is allowed (verified against controller v1.6.0 on kind).
+// router picks the one the key's org is allowed (verified against controller v1.7.0 on kind).
 func (b *builder) models(s gateway.State) {
 	catalog := map[string]any{}
 	for _, p := range sortedProviders(s) {
@@ -413,12 +459,40 @@ func (b *builder) models(s gateway.State) {
 				continue // unpriced models are not served (ADR 0041)
 			}
 			override := p.Org + "." + p.Type
+			// State.Validate accepted the format, so it has a rendering.
+			rd, _ := gateway.RenderingOf(m)
+			// A key with a model list of its own (State.Models) must name the model; other keys need
+			// nothing more.
+			admit := "apiKey.org == " + strconv.Quote(p.Org) + " && !apiKey.internal && " +
+				"(!default(apiKey.restricted, false) || " + strconv.Quote(m.Name) + " in default(apiKey.models, []))"
+			for _, f := range rd.Reject {
+				admit += " && !has(llmRequest." + f + ")"
+			}
+			// A request that carries a gateway key in the URL or in a header but the key header is refused
+			// (#262); the CRD cannot allowlist headers, so this is the only header guard here.
+			admit += " && " + gateway.NoKeyInURLExpr() + " && " + gateway.NoKeyInHeadersExpr()
 			policies := map[string]any{
 				"authorization": map[string]any{
 					"action": "Require",
-					"policy": map[string]any{"matchExpressions": []any{"apiKey.org == " + strconv.Quote(p.Org) + " && !apiKey.internal"}},
+					"policy": map[string]any{"matchExpressions": []any{admit}},
 				},
-				"transformations": b.modelTransformations(m),
+			}
+			if t := b.modelTransformations(m, rd); len(t) > 0 {
+				policies["transformations"] = t
+			}
+			if hs, rm := rd.RequestHeaders(p, m), rd.RemoveHeaders(p, m); len(hs) > 0 || len(rm) > 0 {
+				req := map[string]any{}
+				if len(hs) > 0 {
+					set := make([]any, len(hs))
+					for i, h := range hs {
+						set[i] = map[string]any{"name": h.Name, "value": h.Value}
+					}
+					req["set"] = set
+				}
+				if len(rm) > 0 {
+					req["remove"] = anySlice(rm)
+				}
+				policies["headers"] = map[string]any{"request": req}
 			}
 			if p.APIKeyFile != "" {
 				policies["auth"] = map[string]any{"credentials": []any{map[string]any{
@@ -433,7 +507,7 @@ func (b *builder) models(s gateway.State) {
 				"baseURL":    p.BaseURL,
 				"custom": map[string]any{
 					"providerOverride": override,
-					"formats":          []any{map[string]any{"type": "Completions"}},
+					"formats":          []any{map[string]any{"type": rd.Kubernetes}},
 				},
 				"policies": policies,
 			}, nil, nil)
@@ -457,8 +531,11 @@ func modelObjectName(org, model string) string {
 	return "m-" + hex.EncodeToString(sum[:10])
 }
 
-func (b *builder) modelTransformations(m gateway.Model) []any {
-	t := []any{map[string]any{"field": "stream_options", "expression": streamUsageExpr}}
+func (b *builder) modelTransformations(m gateway.Model, rd gateway.Rendering) []any {
+	var t []any
+	for _, f := range rd.Body {
+		t = append(t, map[string]any{"field": f.Field, "expression": f.Expression})
+	}
 	if m.Guard {
 		for _, k := range slices.Sorted(maps.Keys(gateway.GuardOverrides())) {
 			t = append(t, map[string]any{"field": k, "expression": celLiteral(gateway.GuardOverrides()[k])})
@@ -517,10 +594,10 @@ func rates(in, out, cr, cw, rs string) map[string]any {
 
 // mcp adds the MCP Backend, its route and, on the Backend, the per-agent tool rules.
 //
-// Isolation differs from standalone mode: there is no per-target condition natively, so an org's
-// server is a target for every key. The tool rules deny any call to a target the agent holds no
-// grant for, and tools/list shows only granted tools, but another org's initialize, ping or list
-// can reach the server (with its owner's credential). ADR 0058 records the decision.
+// An org's server carries the same per-target condition as in standalone mode (agentgateway v1.7
+// added it to the CRDs), so the gateway does not contact it for another org's key. The tool rules
+// stay as a second layer: they deny any call to a target the agent holds no grant for. ADR 0058
+// records the decision and its 2026-10-28 amendment.
 func (b *builder) mcp(s gateway.State) {
 	if len(s.MCP) == 0 {
 		return
@@ -546,7 +623,19 @@ func (b *builder) mcp(s gateway.State) {
 				"secretRef": map[string]any{"name": b.o.ProviderKeysSecret, "key": path.Base(t.CredentialFile)},
 			}}}
 		}
-		targets = append(targets, map[string]any{"name": t.Name, "static": st})
+		target := map[string]any{"name": t.Name, "static": st}
+		if t.Org != "" {
+			target["condition"] = "apiKey.org == " + strconv.Quote(t.Org)
+		}
+		targets = append(targets, target)
+	}
+	if len(targets) == 1 && targets[0].(map[string]any)["condition"] != nil {
+		// The CRD refuses a condition on a lone target. A partner whose condition is false for
+		// every key is never contacted (as in standalone mode).
+		targets = append(targets, map[string]any{
+			"name": placeholderTarget, "condition": "false",
+			"static": map[string]any{"host": "127.0.0.1", "port": int64(9), "protocol": "StreamableHTTP", "path": "/mcp"},
+		})
 	}
 	name := b.name("mcp")
 	b.add("", groupAgent+"/v1alpha1", KindBackend, name, map[string]any{
@@ -585,12 +674,19 @@ func (b *builder) mcp(s gateway.State) {
 	// injected, while a Backend policy runs after it and would strip it.
 	b.add("", groupAgent+"/v1alpha1", KindPolicy, name, map[string]any{
 		"targetRefs": b.policyTargets(KindHTTPRoute, name),
-		"traffic":    map[string]any{"transformation": map[string]any{"request": request}},
+		"traffic": map[string]any{
+			"transformation": map[string]any{"request": request},
+			// A request that carries a gateway key in a header but the key header is refused (#262).
+			"authorization": map[string]any{
+				"action": "Require",
+				"policy": map[string]any{"matchExpressions": []any{gateway.NoKeyInHeadersExpr()}},
+			},
+		},
 	}, nil, nil)
 }
 
-// ownTargets drops the grants that name another org's server: there is no per-target condition to
-// hide it natively, so the tool rules are what keeps an agent from calling it (ADR 0058).
+// ownTargets drops the grants that name another org's server, so the tool rules never allow a call
+// to it even if the target condition were bypassed (ADR 0058).
 func ownTargets(s gateway.State) map[gateway.AgentRef][]gateway.ToolGrant {
 	org := map[string]string{}
 	for _, t := range s.MCP {

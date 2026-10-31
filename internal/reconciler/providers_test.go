@@ -21,7 +21,12 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // Provider delivery (plan item PV1): the reconciler opens each org's provider keys into one
@@ -44,6 +49,7 @@ var _ = Describe("Provider delivery", func() {
 		kube = fake.NewClientset()
 		svc = catalog.New(pool, ring, nil)
 		r, err = reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
@@ -90,6 +96,66 @@ var _ = Describe("Provider delivery", func() {
 		Expect(rows.Err()).NotTo(HaveOccurred())
 		return out
 	}
+
+	It("gives an org that serves a priced model its model-check key: restricted, budgeted, in a Secret koinon-api reads", func(ctx SpecContext) {
+		org, user := newOrg(ctx)
+		p := addProvider(ctx, org, user, "openrouter", "sk-upstream-secret", "deepseek/flash")
+		cleanup(ctx, org, p.ID)
+		slug := orgSlug(ctx, org)
+		check := gateway.AgentRef{Org: slug, Name: gateway.ModelCheckAgentName}
+
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+
+		st := mg.last()
+		var key gateway.Key
+		for _, k := range st.Keys {
+			if k.Agent == check {
+				key = k
+			}
+		}
+		Expect(key.ID).NotTo(BeEmpty())
+		Expect(st.Models[check]).To(Equal([]string{"deepseek/flash"}))
+		Expect(st.AllowedModels(check, st.ServedModels(slug))).To(Equal([]string{"deepseek/flash"}))
+		l := st.Limits[check]
+		Expect(l.Unit).To(Equal(gateway.USD))
+		Expect(l.Amount).To(Equal(money.MustParse("0.10")), "the system key's small daily budget")
+		Expect(l.Window).To(Equal(24 * time.Hour))
+		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, mcpservers.ModelCheckSecretName(org), metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(gateway.HashKey(string(sec.Data[mcpservers.ExecKeyDataKey]))).To(Equal(key.Hash))
+		Expect(fmt.Sprintf("%+v", st)).NotTo(ContainSubstring(string(sec.Data[mcpservers.ExecKeyDataKey])))
+
+		By("the same key is kept, and an org's spend today shrinks the budget")
+		_, err = pool.Exec(ctx, `INSERT INTO spend_entries (org_id, principal, request_id, key_id, model, input_tokens, output_tokens, cost_usd, priced, occurred_at)
+			VALUES ($1, 'system', 'r-1', $2, 'deepseek/flash', 1, 1, 0.04, true, now())`, org, key.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		again := mg.last()
+		Expect(again.Limits[check].Amount).To(Equal(money.MustParse("0.06")))
+		for _, k := range again.Keys {
+			if k.Agent == check {
+				Expect(k.ID).To(Equal(key.ID))
+			}
+		}
+
+		By("a spent budget leaves the amount at zero, which takes the key out in both modes")
+		_, err = pool.Exec(ctx, `INSERT INTO spend_entries (org_id, principal, request_id, key_id, model, input_tokens, output_tokens, cost_usd, priced, occurred_at)
+			VALUES ($1, 'system', 'r-2', $2, 'deepseek/flash', 1, 1, 0.07, true, now())`, org, key.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		Expect(mg.last().Limits[check].Amount).To(BeZero())
+	})
+
+	It("issues no model-check key to an org that serves no priced model", func(ctx SpecContext) {
+		org, _ := newOrg(ctx)
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		slug := orgSlug(ctx, org)
+		for _, k := range mg.last().Keys {
+			Expect(k.Agent).NotTo(Equal(gateway.AgentRef{Org: slug, Name: gateway.ModelCheckAgentName}))
+		}
+		_, err := kube.CoreV1().Secrets(namespace).Get(ctx, mcpservers.ModelCheckSecretName(org), metav1.GetOptions{})
+		Expect(err).To(HaveOccurred())
+	})
 
 	It("writes the opened key to the gateway Secret and renders its file, never the key", func(ctx SpecContext) {
 		org, user := newOrg(ctx)
@@ -174,6 +240,48 @@ var _ = Describe("Provider delivery", func() {
 		Expect(pb.Models[0].Name).To(Equal("shared-name"))
 		Expect(pa.APIKeyFile).To(BeEmpty()) // keyless
 		Expect(st.Validate()).To(Succeed())
+	})
+
+	It("renders each model's format and its provider's workspace ID (ADR 0069)", func(ctx SpecContext) {
+		org, user := newOrg(ctx)
+		actor := audit.User(user)
+		const workspace = "wrkspc_01ExampleExample"
+		direct, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{
+			Name: "claude", Type: "anthropic", URL: "http://fakemodel.example.com:8080/v1", AnthropicWorkspaceID: workspace,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		cleanup(ctx, org, direct.ID)
+		other := addProvider(ctx, org, user, "up", "", "plain-model")
+		cleanup(ctx, org, other.ID)
+		_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: direct.ID, Name: "claude-haiku-test"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = prices.New(pool, nil, pricing.Embedded()).SetOverride(ctx, org, actor, prices.OverrideInput{
+			Entry: pricing.Entry{
+				ID: "price-claude-haiku-test", Provider: "anthropic", Match: pricing.Match{Glob: "claude-haiku-test"},
+				Spec:      pricing.Spec{Prices: pricing.Wire{Input: "1", Output: "2"}},
+				Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 4096,
+			},
+			ValidFrom: time.Now().Add(-time.Hour),
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+
+		st := mg.last()
+		Expect(st.Validate()).To(Succeed())
+		formats := map[string]modelformat.Format{}
+		workspaces := map[string]string{}
+		for _, p := range st.Providers {
+			if p.Org != orgSlug(ctx, org) {
+				continue
+			}
+			workspaces[p.Name] = p.AnthropicWorkspaceID
+			for _, m := range p.Models {
+				formats[m.Name] = m.Format
+			}
+		}
+		Expect(formats).To(Equal(map[string]modelformat.Format{"claude-haiku-test": modelformat.Anthropic, "plain-model": modelformat.OpenAI}))
+		Expect(workspaces).To(Equal(map[string]string{"claude": workspace, "up": ""}))
 	})
 
 	It("checks the URL policy again at render and serves no provider that now names a denied host", func(ctx SpecContext) {
@@ -309,6 +417,7 @@ var _ = Describe("Provider delivery", func() {
 			newR = func() *reconciler.Reconciler {
 				GinkgoHelper()
 				r, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+					Prices:  prices.NewResolver(pricing.Embedded()),
 					Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 					Keys:    ring, ProviderKeys: reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
 					ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy, ProviderKeySettle: time.Minute,

@@ -28,6 +28,7 @@ var _ = Describe("the chart and the gateway config", func() {
 		cmd := exec.Command(helm, append([]string{
 			"template", "koinon", chart, "--namespace", "koinon",
 			"--set", "gateway.mode=standalone", "--set", "openshell.insecure=true",
+			"--set", "openshell.address=openshell.openshell.svc:8080",
 		}, args...)...)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr

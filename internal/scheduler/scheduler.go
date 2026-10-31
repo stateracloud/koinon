@@ -5,9 +5,10 @@
 //   - One active run per agent; further runs queue in FIFO order. Queueing
 //     only inserts a queued run: agentd claims runs with store.ClaimNextRun,
 //     which enforces the order and the one-active-run rule.
-//   - A run gets the caps of the agent version it executes (from the
-//     template): a wall-clock cap enforced by Sweeper and a token cap enforced
-//     by RecordTokenUsage, which whoever records usage calls.
+//   - A run gets the limits of the agent version it executes (from the template, or the
+//     agent's override): a wall-clock limit enforced by Sweeper, and a model-request limit and a
+//     spend limit enforced by CheckRunLimits, which whoever records a ledger entry calls (ADR
+//     0081). Tokens are reported by RecordUsage, not enforced.
 //   - Every cancel writes a run event and a task event saying why.
 //
 // Functions taking a *store.Queries run inside the caller's transaction.
@@ -25,7 +26,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/runlimits"
+	"github.com/stateracloud/koinon/internal/runreply"
 )
 
 // Event kinds written by the scheduler, on both the run and the task.
@@ -45,7 +49,14 @@ const (
 	ReasonTaskDone      CancelReason = "ticket_done"
 	ReasonAgentArchived CancelReason = "agent_archived"
 	ReasonWallClockCap  CancelReason = "wall_clock_cap"
-	ReasonTokenCap      CancelReason = "token_cap"
+	// ReasonTokenCap: the token cap of runs before ADR 0081. It cancels nothing now; old events
+	// carry it.
+	ReasonTokenCap CancelReason = "token_cap"
+	// ReasonRequestCap: the run made as many model requests as its limit allows (ADR 0081).
+	ReasonRequestCap CancelReason = "request_cap"
+	// ReasonRunSpendCap: the run spent its spend limit (ADR 0081). The agent's, org's and platform's
+	// budgets cancel with ReasonSpendLimit.
+	ReasonRunSpendCap CancelReason = "run_spend_cap"
 	// ReasonSpendLimit: the agent reached its spend limit (plan item L1).
 	ReasonSpendLimit CancelReason = "spend_limit"
 	// ReasonApprovalExpired: the run was parked on an approval nobody decided in time
@@ -111,12 +122,16 @@ func EnqueueOrigin(ctx context.Context, q *store.Queries, task store.Task, origi
 	if err != nil {
 		return store.Run{}, false, err
 	}
-	wallClock, maxTokens := cfg.RunCaps()
+	limits, err := runlimits.ForAgent(ctx, q, org, agent.ID, cfg)
+	if err != nil {
+		return store.Run{}, false, err
+	}
 	run, err := q.CreateRun(ctx, store.CreateRunParams{
 		OrgID: org, AgentID: agent.ID, TaskID: task.ID,
 		Origin:              store.NullRunOrigin{RunOrigin: origin, Valid: true},
-		MaxWallClockSeconds: int32(wallClock / time.Second), //nolint:gosec // bounded by templates.MaxRunDuration
-		MaxTokens:           maxTokens,
+		MaxWallClockSeconds: int32(limits.WallClock / time.Second), //nolint:gosec // bounded by templates.MaxRunDuration
+		MaxModelRequests:    pgtype.Int8{Int64: limits.MaxModelRequests, Valid: true},
+		MaxSpendUsd:         pgtype.Text{String: limits.MaxSpend.Numeric(), Valid: true},
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return store.Run{}, false, ErrAgentNotActive
@@ -126,7 +141,8 @@ func EnqueueOrigin(ctx context.Context, q *store.Queries, task store.Task, origi
 	}
 	payload := mustJSON(map[string]any{
 		"max_wall_clock_seconds": run.MaxWallClockSeconds,
-		"max_tokens":             run.MaxTokens,
+		"max_model_requests":     run.MaxModelRequests.Int64,
+		"max_spend_usd":          limits.MaxSpend.String(),
 	})
 	ev, err := q.AppendRunControlEvent(ctx, store.AppendRunControlEventParams{
 		OrgID: org, RunID: run.ID, Kind: KindRunQueued, Payload: payload,
@@ -228,13 +244,12 @@ type DB interface {
 	store.DBTX
 }
 
-// RecordTokenUsage is the token-cap hook: whoever learns a run's token usage
-// (agentd from ACP usage updates, or the spend ledger from agentgateway's
-// access log) calls it with the tokens used since the last report. When the
-// run's total reaches its cap, the run is canceled with a task event. It
-// returns the updated run; pgx.ErrNoRows means the run has finished or does
-// not exist in the org, and the usage is dropped.
-func RecordTokenUsage(ctx context.Context, db DB, org, runID pgtype.UUID, tokens int64) (store.Run, error) {
+// RecordUsage adds tokens to a run's reported total and checks its limits (CheckRunLimits).
+// Whoever learns a run's token usage (the spend ledger, from agentgateway's access log) calls it
+// with the tokens used since the last report. Tokens are reported, not enforced (ADR 0081): the
+// limits that can end the run are its model requests and its spend. It returns the updated run;
+// pgx.ErrNoRows means the run has finished or does not exist in the org, and the usage is dropped.
+func RecordUsage(ctx context.Context, db DB, org, runID pgtype.UUID, tokens int64) (store.Run, error) {
 	if tokens < 0 {
 		return store.Run{}, fmt.Errorf("negative token usage %d", tokens)
 	}
@@ -245,24 +260,103 @@ func RecordTokenUsage(ctx context.Context, db DB, org, runID pgtype.UUID, tokens
 		if err != nil {
 			return err
 		}
-		out = run
-		if run.TokensUsed < run.MaxTokens {
-			return nil
-		}
-		msg := fmt.Sprintf("token cap exceeded (%d of %d tokens)", run.TokensUsed, run.MaxTokens)
-		canceled, err := q.CancelRun(ctx, store.CancelRunParams{
-			OrgID: org, ID: runID, OutcomeReason: msg,
-			FailureClass: store.NullRunFailureClass{RunFailureClass: store.RunFailureClassBudget, Valid: true},
-		})
-		if err != nil {
-			return err
-		}
-		out, err = RecordCancel(ctx, q, canceled, ReasonTokenCap, msg, System, map[string]any{
-			"max_tokens": run.MaxTokens, "tokens_used": run.TokensUsed,
-		})
+		out, err = checkRunLimits(ctx, tx, run)
 		return err
 	})
 	return out, err
+}
+
+// CheckRunLimits cancels the run if it has reached its model-request limit or a spend limit of
+// its scope (ADR 0081). Whoever records or changes a ledger entry of the run calls it after the
+// write, in the same transaction: a new entry, and a settlement that raises an entry's cost. It
+// returns the run, canceled or not; pgx.ErrNoRows means the run has finished or does not exist.
+//
+// The run row is locked first and the lock is held to the end of the enclosing transaction, so
+// that concurrent writers of one run's entries are serialised: each counts the entries the
+// others committed before it. Without the lock two requests recorded at once could both count
+// N-1 entries and overshoot the request limit.
+func CheckRunLimits(ctx context.Context, db DB, org, runID pgtype.UUID) (store.Run, error) {
+	var out store.Run
+	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		run, err := q.LockRun(ctx, store.LockRunParams{OrgID: org, ID: runID})
+		if err != nil {
+			return err
+		}
+		if !isOpen(run) {
+			return pgx.ErrNoRows
+		}
+		out, err = checkRunLimits(ctx, tx, run)
+		return err
+	})
+	return out, err
+}
+
+func isOpen(r store.Run) bool {
+	switch r.State {
+	case store.RunStateQueued, store.RunStateStarting, store.RunStateRunning, store.RunStateParked:
+		return true
+	}
+	return false
+}
+
+// spendScope reads one spend limit that covers a run, as a budget level, with the spend inside it.
+// ok is false when the run is not in that scope. Run is the scope of rc.8; the per-task cap of
+// #183 is another entry of spendScopes (a level named for the task, summing the task's entries),
+// and the check and the cancel below need no change.
+type spendScope func(ctx context.Context, q *store.Queries, run store.Run) (l budget.Level, ok bool, err error)
+
+var spendScopes = []spendScope{budget.RunLevel}
+
+func checkRunLimits(ctx context.Context, tx pgx.Tx, run store.Run) (store.Run, error) {
+	q := store.New(tx)
+	limits, err := runlimits.Of(run)
+	if err != nil {
+		return run, err
+	}
+	usage, err := runlimits.ReadUsage(ctx, q, run.OrgID, run.ID)
+	if err != nil {
+		return run, err
+	}
+	reason, msg, extra := CancelReason(""), "", map[string]any(nil)
+	if r, hit := limits.CheckRequests(usage); hit {
+		reason, msg, extra = ReasonRequestCap, r.Message(), r.Detail()
+	}
+	if reason == "" {
+		for _, scope := range spendScopes {
+			l, ok, err := scope(ctx, q, run)
+			if err != nil {
+				return run, err
+			}
+			if ok && l.Reached() {
+				reason, msg, extra = ReasonRunSpendCap, l.StopMessage(), l.StopDetail()
+				break
+			}
+		}
+	}
+	if reason == "" {
+		return run, nil
+	}
+	canceled, err := q.CancelRun(ctx, store.CancelRunParams{
+		OrgID: run.OrgID, ID: run.ID, OutcomeReason: msg,
+		FailureClass: store.NullRunFailureClass{RunFailureClass: store.RunFailureClassBudget, Valid: true},
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return run, nil // finished meanwhile
+	} else if err != nil {
+		return run, err
+	}
+	extra["model_requests"], extra["spent_usd"] = usage.Requests, usage.Spend.String()
+	// What the agent last said travels with the cancel, as at the time limit (ADR 0066 amendment
+	// 2026-10-28): a failure to read it leaves the summary out, the cancel must not wait on it.
+	summary, source, serr := summaryIn(ctx, tx, canceled)
+	if serr != nil {
+		slog.Warn("reading the agent's last reply for the limit note failed", "run", run.ID.String(), "err", serr)
+	}
+	if summary != "" {
+		extra["summary"], extra["summarySource"] = summary, source
+	}
+	return RecordCancel(ctx, q, canceled, reason, msg, System, extra)
 }
 
 // SweepWallClock cancels every owned run past its wall-clock cap, org by org,
@@ -284,11 +378,16 @@ func SweepWallClock(ctx context.Context, db DB) (int, error) {
 				return err
 			}
 			for _, r := range runs {
-				capd := time.Duration(r.MaxWallClockSeconds) * time.Second
-				msg := fmt.Sprintf("wall-clock cap exceeded (%s)", capd)
-				if _, err := RecordCancel(ctx, q, r, ReasonWallClockCap, msg, System, map[string]any{
-					"max_wall_clock_seconds": r.MaxWallClockSeconds,
-				}); err != nil {
+				// The same note agentd writes when it stops the run at its time limit: the agent's
+				// text since its last park, or the task's notes. A failure to read it leaves the
+				// summary out; the cancel must not wait on it. The read runs in a savepoint: a failed
+				// statement aborts a Postgres transaction, and the cancel would then fail with it.
+				note, nerr := timeLimitNote(ctx, tx, r)
+				if nerr != nil {
+					slog.Warn("reading the agent's last reply for the time-limit note failed", "run", r.ID.String(), "err", nerr)
+				}
+				msg, _ := note["message"].(string)
+				if _, err := RecordCancel(ctx, q, r, ReasonWallClockCap, msg, System, note); err != nil {
 					return err
 				}
 			}
@@ -300,6 +399,36 @@ func SweepWallClock(ctx context.Context, db DB) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+// summaryIn reads runreply.Summary inside a savepoint of tx, so that a failed read is rolled back
+// and leaves tx usable.
+func summaryIn(ctx context.Context, tx pgx.Tx, r store.Run) (summary, source string, err error) {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	summary, source, err = runreply.Summary(ctx, store.New(sp), r)
+	if err != nil {
+		_ = sp.Rollback(ctx)
+		return "", "", err
+	}
+	return summary, source, sp.Commit(ctx)
+}
+
+// timeLimitNote reads runreply.TimeLimitNote inside a savepoint of tx, so that a failed read is
+// rolled back and leaves tx usable. On an error the note is still returned, without a summary.
+func timeLimitNote(ctx context.Context, tx pgx.Tx, r store.Run) (map[string]any, error) {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return runreply.TimeLimitNoteBase(r), err
+	}
+	note, err := runreply.TimeLimitNote(ctx, store.New(sp), r)
+	if err != nil {
+		_ = sp.Rollback(ctx)
+		return note, err
+	}
+	return note, sp.Commit(ctx)
 }
 
 // Sweeper runs SweepWallClock every interval until ctx ends.

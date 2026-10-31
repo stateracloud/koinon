@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Publishes the kind e2e toolchain image (hack/e2e-toolchain/Dockerfile) to
+# ghcr.io/stateracloud/koinon-e2e-toolchain, for the home lab's Argo e2e queue (home-lab ADR 036),
+# which pulls it by digest through its registry mirror. hack/e2e-remote.sh keeps building the same
+# Dockerfile locally; both tag the image go<GO_VERSION>-<first 12 hex of the Dockerfile's sha256>,
+# so a tag names exactly one Dockerfile. The digest is in the job summary.
+#
+# Runs when the Dockerfile changes on main, and by hand. amd64 only: the e2e node is amd64.
+name: e2e-toolchain
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - hack/e2e-toolchain/Dockerfile
+      - .github/workflows/e2e-toolchain.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: e2e-toolchain
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write # pushes the toolchain image
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # the job never uses git auth
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: log in to ghcr.io
+        env:
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+      - name: build and push
+        env:
+          REPO: ghcr.io/stateracloud/koinon-e2e-toolchain
+          SHA: ${{ github.sha }}
+        run: |
+          gov=$(sed -n 's/^ARG GO_VERSION=//p' hack/e2e-toolchain/Dockerfile)
+          dsum=$(sha256sum hack/e2e-toolchain/Dockerfile | cut -c1-12)
+          tag="go${gov}-${dsum}"
+          docker buildx build --platform linux/amd64 --provenance=mode=max --sbom=true \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${SHA}" \
+            --metadata-file /tmp/meta.json -t "${REPO}:${tag}" --push hack/e2e-toolchain
+          digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
+          echo "toolchain image: ${REPO}:${tag}@${digest}"
+          echo "**${REPO}:${tag}@${digest}** (commit ${SHA})" >>"$GITHUB_STEP_SUMMARY"

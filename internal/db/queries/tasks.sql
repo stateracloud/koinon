@@ -5,10 +5,12 @@
 
 -- name: CreateTask :one
 INSERT INTO tasks (org_id, title, agent_id, created_by_kind, created_by_user_id,
-                   created_by_agent_id, created_by_trigger_id)
+                   created_by_agent_id, created_by_trigger_id,
+                   notify_kind, notify_user_id, notify_role)
 VALUES (@org_id, @title, sqlc.narg(agent_id), @created_by_kind,
         sqlc.narg(created_by_user_id), sqlc.narg(created_by_agent_id),
-        sqlc.narg(created_by_trigger_id))
+        sqlc.narg(created_by_trigger_id),
+        sqlc.narg(notify_kind), sqlc.narg(notify_user_id), sqlc.narg(notify_role))
 RETURNING *;
 
 -- name: GetTask :one

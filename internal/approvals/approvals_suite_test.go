@@ -29,6 +29,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
@@ -165,11 +166,12 @@ func newFixtureOn(ctx context.Context, preset string, gh *githubtest.Fake, ghes 
 	env, err := connections.SealFields(ring, f.org, connPG, map[string][]byte{connections.GitHubPrivateKeyField: f.gh.PEM})
 	Expect(err).NotTo(HaveOccurred())
 	gc := connections.GitHubConfig{AppID: f.gh.AppID, InstallationID: f.gh.InstallationID}
-	client := github.NewClient(github.Options{BaseURL: f.gh.URL()})
+	newClient := func() *github.Client { return github.NewClient(github.Options{BaseURL: f.gh.URL()}) }
 	if ghes {
+		newClient = func() *github.Client { return github.NewClient(github.Options{}) }
 		gc.Site = codehost.Site{BaseURL: f.gh.WebURL(), CABundle: f.gh.CAPEM()}
-		client = github.NewClient(github.Options{})
 	}
+	client := newClient()
 	cfg, _ := json.Marshal(gc)
 	_, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
 		OrgID: f.org, ID: connPG, Connector: "github", DisplayName: "acme",
@@ -187,7 +189,7 @@ func newFixtureOn(ctx context.Context, preset string, gh *githubtest.Fake, ghes 
 	Expect(err).NotTo(HaveOccurred())
 	f.task, err = q.CreateTask(ctx, store.CreateTaskParams{OrgID: f.org, Title: "fix the typo", AgentID: f.agent.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: f.owner})
 	Expect(err).NotTo(HaveOccurred())
-	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: f.org, AgentID: f.agent.ID, TaskID: f.task.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000})
+	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: f.org, AgentID: f.agent.ID, TaskID: f.task.ID, MaxWallClockSeconds: 1800})
 	Expect(err).NotTo(HaveOccurred())
 	run, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: f.org, OwnerID: "agentd-test", LeaseSeconds: 600})
 	Expect(err).NotTo(HaveOccurred())
@@ -201,7 +203,7 @@ func newFixtureOn(ctx context.Context, preset string, gh *githubtest.Fake, ghes 
 		ExecutionLease: 2 * time.Second,
 	})
 	tools, err := githubtools.New(pool, githubtools.Options{
-		Logger: log,
+		Logger: log, Keys: ring, Hosts: providers.New(newClient()), // its own token cache, as in koinon-api's separate tool server
 		Execute: func(ctx context.Context, org, id pgtype.UUID) {
 			_, _ = f.svc.Execute(ctx, org, id)
 		},
@@ -261,7 +263,15 @@ func (f *fixture) call(ctx context.Context, tool string, args any) githubtools.R
 	Expect(err).NotTo(HaveOccurred())
 	var out githubtools.Result
 	Expect(json.Unmarshal(b, &out)).To(Succeed())
+	// Recording a pull request checks the branch with a read token of its own; the specs count
+	// what the executor does, so forget that.
+	f.gh.ResetTokens()
 	return out
+}
+
+// branch is the branch Koinon files the agent's suggestion under (ADR 0062).
+func (f *fixture) branch(name string) string {
+	return githubtools.BranchPrefix + githubtools.AgentNamespace("helper", f.agent.ID.String()) + "/" + name
 }
 
 func (f *fixture) get(ctx context.Context, id string) store.ApprovalRequest {

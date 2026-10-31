@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest'
 import { TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { buildInbox } from '@/lib/inbox'
 import { QuestionState } from '@/gen/koinon/question/v1alpha1/question_pb'
-import { approval, question, task } from '@/test-utils'
+import { AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { agent, approval, question, task } from '@/test-utils'
 
 const names = new Map([['a-1', 'Repo helper']])
 
@@ -43,7 +44,7 @@ describe('buildInbox', () => {
 
   it('shows no task-input item for a task waiting on someone else\'s question', () => {
     const t = task('t-1', 'Deploy', TaskState.INPUT_REQUIRED)
-    t.waitingOnUserId = 'u-2'
+    t.waitingOnUserIds = ['u-2']
     t.waitingOnName = 'Sam'
     expect(buildInbox({ tasks: [t], approvals: [], agentNames: names, userId: 'u-1' })).toEqual([])
   })
@@ -73,5 +74,43 @@ describe('buildInbox', () => {
       userId: 'u-1',
     })
     expect(items).toEqual([])
+  })
+
+  it('ages a question from when it started waiting on the viewer, not from when it opened', () => {
+    const items = buildInbox({
+      tasks: [task('t-1', 'Deploy the app', TaskState.INPUT_REQUIRED)],
+      approvals: [],
+      questions: [question('q-1', 't-1', { waitingSinceMs: 5_000_000, openedAtMs: 1_000_000 })],
+      agentNames: names,
+      userId: 'u-1',
+    })
+    expect(items[0].at).toBe(5_000_000)
+  })
+
+  it('leaves a task waiting on several people to them', () => {
+    const t = task('t-1', 'Deploy', TaskState.INPUT_REQUIRED)
+    t.waitingOnUserIds = ['u-2', 'u-3']
+    expect(buildInbox({ tasks: [t], approvals: [], agentNames: names, userId: 'u-1' })).toEqual([])
+    // The creator is not a recipient; a recipient who is the creator does get it.
+    t.waitingOnUserIds = ['u-1', 'u-3']
+    expect(buildInbox({ tasks: [t], approvals: [], agentNames: names, userId: 'u-1' }).map((i) => i.key)).toEqual(['task-input:t-1'])
+  })
+
+  describe('unhealthy agents', () => {
+    const sick = agent('a-1', 'Repo helper', AgentStatus.ACTIVE, { atMs: 2_000_000, reason: 'its sandbox never became ready' })
+    it('gives an admin an item for an unhealthy agent', () => {
+      const items = buildInbox({ tasks: [], approvals: [], agents: [sick], isAdmin: true, agentNames: names, userId: 'u-1' })
+      expect(items).toHaveLength(1)
+      expect(items[0]).toMatchObject({ kind: 'agent-unhealthy', key: 'agent-unhealthy:a-1', agentId: 'a-1', reason: 'its sandbox never became ready', at: 2_000_000 })
+    })
+
+    it('gives a member none', () => {
+      expect(buildInbox({ tasks: [], approvals: [], agents: [sick], isAdmin: false, agentNames: names, userId: 'u-1' })).toEqual([])
+    })
+
+    it('gives none for an archived agent, which cannot be resumed', () => {
+      const archived = agent('a-2', 'Old', AgentStatus.ARCHIVED, { atMs: 1, reason: 'x' })
+      expect(buildInbox({ tasks: [], approvals: [], agents: [archived], isAdmin: true, agentNames: names, userId: 'u-1' })).toEqual([])
+    })
   })
 })

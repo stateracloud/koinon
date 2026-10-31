@@ -16,7 +16,9 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // Ephemeral agents with home checkpoints on (HC1 with EP1, ADR 0032 and 0065 decision 13c): a task
@@ -46,6 +48,7 @@ var _ = Describe("Reconciler ephemeral agents with checkpoints on", func() {
 		ws = execution.WorkspaceName(org.Bytes)
 		addProvider(ctx, org, user, "upstream", "", "fake")
 		cfg = reconciler.Config{
+			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: fake.NewClientset(), Namespace: namespace, Name: "koinon-gateway-providers"},

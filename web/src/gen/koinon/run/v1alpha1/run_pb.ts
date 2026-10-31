@@ -15,7 +15,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file koinon/run/v1alpha1/run.proto.
  */
 export const file_koinon_run_v1alpha1_run: GenFile = /*@__PURE__*/
-  fileDesc("Ch1rb2lub24vcnVuL3YxYWxwaGExL3J1bi5wcm90bxITa29pbm9uLnJ1bi52MWFscGhhMSKxBAoDUnVuEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgl0aWNrZXRfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkSGAoQYWdlbnRfdmVyc2lvbl9pZBgFIAEoCRIsCgVzdGF0ZRgGIAEoDjIdLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuU3RhdGUSNAoLcGFya19yZWFzb24YByABKA4yHy5rb2lub24ucnVuLnYxYWxwaGExLlBhcmtSZWFzb24SFgoOb3V0Y29tZV9yZWFzb24YCCABKAkSHgoWbWF4X3dhbGxfY2xvY2tfc2Vjb25kcxgJIAEoAxISCgptYXhfdG9rZW5zGAogASgDEhMKC3Rva2Vuc191c2VkGAsgASgDEhYKDmxhc3RfZXZlbnRfc2VxGAwgASgDEi4KCmNyZWF0ZWRfYXQYDSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnN0YXJ0ZWRfYXQYDiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBInCgRjb3N0GBAgASgLMhkua29pbm9uLnJ1bi52MWFscGhhMS5Db3N0EjgKDWZhaWx1cmVfY2xhc3MYESABKA4yIS5rb2lub24ucnVuLnYxYWxwaGExLkZhaWx1cmVDbGFzcyJ+CgRDb3N0EhAKCHJlcXVlc3RzGAEgASgDEhQKDGlucHV0X3Rva2VucxgCIAEoAxIVCg1vdXRwdXRfdG9rZW5zGAMgASgDEgsKA3VzZBgEIAEoCRIOCgZwcmljZWQYBSABKAgSGgoSZXN0aW1hdGVkX3JlcXVlc3RzGAYgASgDIo8BCghSdW5FdmVudBIOCgZydW5faWQYASABKAkSCwoDc2VxGAIgASgDEgwKBGtpbmQYAyABKAkSKAoHcGF5bG9hZBgEIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiLwoNR2V0UnVuUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJIjcKDkdldFJ1blJlc3BvbnNlEiUKA3J1bhgBIAEoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuIkIKEENhbmNlbFJ1blJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCRIOCgZyZWFzb24YAyABKAkiOgoRQ2FuY2VsUnVuUmVzcG9uc2USJQoDcnVuGAEgASgLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW4iRAoPV2F0Y2hSdW5SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSEQoJYWZ0ZXJfc2VxGAMgASgDInMKEFdhdGNoUnVuUmVzcG9uc2USJwoDcnVuGAEgASgLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW5IABIuCgVldmVudBgCIAEoCzIdLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuRXZlbnRIAEIGCgRpdGVtKscBCghSdW5TdGF0ZRIZChVSVU5fU1RBVEVfVU5TUEVDSUZJRUQQABIUChBSVU5fU1RBVEVfUVVFVUVEEAESFgoSUlVOX1NUQVRFX1NUQVJUSU5HEAISFQoRUlVOX1NUQVRFX1JVTk5JTkcQAxIUChBSVU5fU1RBVEVfUEFSS0VEEAQSFwoTUlVOX1NUQVRFX1NVQ0NFRURFRBAFEhQKEFJVTl9TVEFURV9GQUlMRUQQBhIWChJSVU5fU1RBVEVfQ0FOQ0VMRUQQByqQAQoKUGFya1JlYXNvbhIbChdQQVJLX1JFQVNPTl9VTlNQRUNJRklFRBAAEhgKFFBBUktfUkVBU09OX0FQUFJPVkFMEAESFgoSUEFSS19SRUFTT05fQlVER0VUEAISEwoPUEFSS19SRUFTT05fQTJBEAMSHgoaUEFSS19SRUFTT05fSU5QVVRfUkVRVUlSRUQQBCrYAQoMRmFpbHVyZUNsYXNzEh0KGUZBSUxVUkVfQ0xBU1NfVU5TUEVDSUZJRUQQABIbChdGQUlMVVJFX0NMQVNTX1RSQU5TSUVOVBABEhsKF0ZBSUxVUkVfQ0xBU1NfVEhST1RUTEVEEAISIgoeRkFJTFVSRV9DTEFTU19DT05URVhUX09WRVJGTE9XEAMSGAoURkFJTFVSRV9DTEFTU19CVURHRVQQBBIYChRGQUlMVVJFX0NMQVNTX1BPTElDWRAFEhcKE0ZBSUxVUkVfQ0xBU1NfRkFUQUwQBjKgAgoKUnVuU2VydmljZRJWCgZHZXRSdW4SIi5rb2lub24ucnVuLnYxYWxwaGExLkdldFJ1blJlcXVlc3QaIy5rb2lub24ucnVuLnYxYWxwaGExLkdldFJ1blJlc3BvbnNlIgOQAgESWgoJQ2FuY2VsUnVuEiUua29pbm9uLnJ1bi52MWFscGhhMS5DYW5jZWxSdW5SZXF1ZXN0GiYua29pbm9uLnJ1bi52MWFscGhhMS5DYW5jZWxSdW5SZXNwb25zZRJeCghXYXRjaFJ1bhIkLmtvaW5vbi5ydW4udjFhbHBoYTEuV2F0Y2hSdW5SZXF1ZXN0GiUua29pbm9uLnJ1bi52MWFscGhhMS5XYXRjaFJ1blJlc3BvbnNlIgOQAgEwAUJNWktnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9ydW4vdjFhbHBoYTE7cnVudjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
+  fileDesc("Ch1rb2lub24vcnVuL3YxYWxwaGExL3J1bi5wcm90bxITa29pbm9uLnJ1bi52MWFscGhhMSLoBAoDUnVuEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgl0aWNrZXRfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkSGAoQYWdlbnRfdmVyc2lvbl9pZBgFIAEoCRIsCgVzdGF0ZRgGIAEoDjIdLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuU3RhdGUSNAoLcGFya19yZWFzb24YByABKA4yHy5rb2lub24ucnVuLnYxYWxwaGExLlBhcmtSZWFzb24SFgoOb3V0Y29tZV9yZWFzb24YCCABKAkSHgoWbWF4X3dhbGxfY2xvY2tfc2Vjb25kcxgJIAEoAxIWCgptYXhfdG9rZW5zGAogASgDQgIYARITCgt0b2tlbnNfdXNlZBgLIAEoAxIWCg5sYXN0X2V2ZW50X3NlcRgMIAEoAxIuCgpjcmVhdGVkX2F0GA0gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpzdGFydGVkX2F0GA4gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIvCgtmaW5pc2hlZF9hdBgPIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASJwoEY29zdBgQIAEoCzIZLmtvaW5vbi5ydW4udjFhbHBoYTEuQ29zdBI4Cg1mYWlsdXJlX2NsYXNzGBEgASgOMiEua29pbm9uLnJ1bi52MWFscGhhMS5GYWlsdXJlQ2xhc3MSGgoSbWF4X21vZGVsX3JlcXVlc3RzGBIgASgDEhUKDW1heF9zcGVuZF91c2QYEyABKAkizwEKBENvc3QSEAoIcmVxdWVzdHMYASABKAMSFAoMaW5wdXRfdG9rZW5zGAIgASgDEhUKDW91dHB1dF90b2tlbnMYAyABKAMSCwoDdXNkGAQgASgJEg4KBnByaWNlZBgFIAEoCBIaChJlc3RpbWF0ZWRfcmVxdWVzdHMYBiABKAMSGQoRY2FjaGVfcmVhZF90b2tlbnMYByABKAMSGgoSY2FjaGVfd3JpdGVfdG9rZW5zGAggASgDEhgKEHJlYXNvbmluZ190b2tlbnMYCSABKAMijwEKCFJ1bkV2ZW50Eg4KBnJ1bl9pZBgBIAEoCRILCgNzZXEYAiABKAMSDAoEa2luZBgDIAEoCRIoCgdwYXlsb2FkGAQgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBIuCgpjcmVhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCIvCg1HZXRSdW5SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIOCgZydW5faWQYAiABKAkiNwoOR2V0UnVuUmVzcG9uc2USJQoDcnVuGAEgASgLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW4iQgoQQ2FuY2VsUnVuUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEg4KBnJlYXNvbhgDIAEoCSI6ChFDYW5jZWxSdW5SZXNwb25zZRIlCgNydW4YASABKAsyGC5rb2lub24ucnVuLnYxYWxwaGExLlJ1biJECg9XYXRjaFJ1blJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCRIRCglhZnRlcl9zZXEYAyABKAMiqAEKEFdhdGNoUnVuUmVzcG9uc2USJwoDcnVuGAEgASgLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW5IABIuCgVldmVudBgCIAEoCzIdLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuRXZlbnRIABIzCgloZWFydGJlYXQYAyABKAsyHi5rb2lub24ucnVuLnYxYWxwaGExLkhlYXJ0YmVhdEgAQgYKBGl0ZW0iCwoJSGVhcnRiZWF0KscBCghSdW5TdGF0ZRIZChVSVU5fU1RBVEVfVU5TUEVDSUZJRUQQABIUChBSVU5fU1RBVEVfUVVFVUVEEAESFgoSUlVOX1NUQVRFX1NUQVJUSU5HEAISFQoRUlVOX1NUQVRFX1JVTk5JTkcQAxIUChBSVU5fU1RBVEVfUEFSS0VEEAQSFwoTUlVOX1NUQVRFX1NVQ0NFRURFRBAFEhQKEFJVTl9TVEFURV9GQUlMRUQQBhIWChJSVU5fU1RBVEVfQ0FOQ0VMRUQQByqQAQoKUGFya1JlYXNvbhIbChdQQVJLX1JFQVNPTl9VTlNQRUNJRklFRBAAEhgKFFBBUktfUkVBU09OX0FQUFJPVkFMEAESFgoSUEFSS19SRUFTT05fQlVER0VUEAISEwoPUEFSS19SRUFTT05fQTJBEAMSHgoaUEFSS19SRUFTT05fSU5QVVRfUkVRVUlSRUQQBCr/AQoMRmFpbHVyZUNsYXNzEh0KGUZBSUxVUkVfQ0xBU1NfVU5TUEVDSUZJRUQQABIbChdGQUlMVVJFX0NMQVNTX1RSQU5TSUVOVBABEhsKF0ZBSUxVUkVfQ0xBU1NfVEhST1RUTEVEEAISIgoeRkFJTFVSRV9DTEFTU19DT05URVhUX09WRVJGTE9XEAMSGAoURkFJTFVSRV9DTEFTU19CVURHRVQQBBIYChRGQUlMVVJFX0NMQVNTX1BPTElDWRAFEhcKE0ZBSUxVUkVfQ0xBU1NfRkFUQUwQBhIlCiFGQUlMVVJFX0NMQVNTX1NBTkRCT1hfVU5BVkFJTEFCTEUQBzKgAgoKUnVuU2VydmljZRJWCgZHZXRSdW4SIi5rb2lub24ucnVuLnYxYWxwaGExLkdldFJ1blJlcXVlc3QaIy5rb2lub24ucnVuLnYxYWxwaGExLkdldFJ1blJlc3BvbnNlIgOQAgESWgoJQ2FuY2VsUnVuEiUua29pbm9uLnJ1bi52MWFscGhhMS5DYW5jZWxSdW5SZXF1ZXN0GiYua29pbm9uLnJ1bi52MWFscGhhMS5DYW5jZWxSdW5SZXNwb25zZRJeCghXYXRjaFJ1bhIkLmtvaW5vbi5ydW4udjFhbHBoYTEuV2F0Y2hSdW5SZXF1ZXN0GiUua29pbm9uLnJ1bi52MWFscGhhMS5XYXRjaFJ1blJlc3BvbnNlIgOQAgEwAUJNWktnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9ydW4vdjFhbHBoYTE7cnVudjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
 
 /**
  * Run is one execution of an agent for a ticket.
@@ -66,18 +66,24 @@ export type Run = Message<"koinon.run.v1alpha1.Run"> & {
   outcomeReason: string;
 
   /**
-   * Caps copied from the agent's template when the run was queued.
+   * Limits copied from the agent's version (or the agent's override) when the run was queued.
    *
    * @generated from field: int64 max_wall_clock_seconds = 9;
    */
   maxWallClockSeconds: bigint;
 
   /**
-   * @generated from field: int64 max_tokens = 10;
+   * Deprecated: tokens are reported, not enforced (ADR 0081). Zero on new runs.
+   *
+   * @generated from field: int64 max_tokens = 10 [deprecated = true];
+   * @deprecated
    */
   maxTokens: bigint;
 
   /**
+   * Tokens the run's requests used, input plus output as the gateway reports them (cache reads
+   * and writes are part of the input). The split by type is in cost.
+   *
    * @generated from field: int64 tokens_used = 11;
    */
   tokensUsed: bigint;
@@ -119,6 +125,22 @@ export type Run = Message<"koinon.run.v1alpha1.Run"> & {
    * @generated from field: koinon.run.v1alpha1.FailureClass failure_class = 17;
    */
   failureClass: FailureClass;
+
+  /**
+   * The run's request limit: 0 for a run queued before run limits existed (ADR 0081). Progress is
+   * cost.requests.
+   *
+   * @generated from field: int64 max_model_requests = 18;
+   */
+  maxModelRequests: bigint;
+
+  /**
+   * The run's spend limit in USD as a decimal string; empty when the run has none. Progress is
+   * cost.usd.
+   *
+   * @generated from field: string max_spend_usd = 19;
+   */
+  maxSpendUsd: string;
 };
 
 /**
@@ -174,6 +196,25 @@ export type Cost = Message<"koinon.run.v1alpha1.Cost"> & {
    * @generated from field: int64 estimated_requests = 6;
    */
   estimatedRequests: bigint;
+
+  /**
+   * input_tokens is the total input, cache reads and writes included. The split by type: the
+   * uncached input is input_tokens - cache_read_tokens - cache_write_tokens. reasoning_tokens is
+   * part of output_tokens where the provider reports it.
+   *
+   * @generated from field: int64 cache_read_tokens = 7;
+   */
+  cacheReadTokens: bigint;
+
+  /**
+   * @generated from field: int64 cache_write_tokens = 8;
+   */
+  cacheWriteTokens: bigint;
+
+  /**
+   * @generated from field: int64 reasoning_tokens = 9;
+   */
+  reasoningTokens: bigint;
 };
 
 /**
@@ -351,7 +392,7 @@ export const WatchRunRequestSchema: GenMessage<WatchRunRequest> = /*@__PURE__*/
   messageDesc(file_koinon_run_v1alpha1_run, 7);
 
 /**
- * WatchRunResponse carries either a run snapshot or one event.
+ * WatchRunResponse carries a run snapshot, one event or a heartbeat.
  *
  * @generated from message koinon.run.v1alpha1.WatchRunResponse
  */
@@ -371,6 +412,15 @@ export type WatchRunResponse = Message<"koinon.run.v1alpha1.WatchRunResponse"> &
      */
     value: RunEvent;
     case: "event";
+  } | {
+    /**
+     * Sent every 30 seconds while the stream has sent nothing else, so a proxy or load
+     * balancer does not cut a quiet run's stream as idle. Clients ignore it.
+     *
+     * @generated from field: koinon.run.v1alpha1.Heartbeat heartbeat = 3;
+     */
+    value: Heartbeat;
+    case: "heartbeat";
   } | { case: undefined; value?: undefined };
 };
 
@@ -380,6 +430,21 @@ export type WatchRunResponse = Message<"koinon.run.v1alpha1.WatchRunResponse"> &
  */
 export const WatchRunResponseSchema: GenMessage<WatchRunResponse> = /*@__PURE__*/
   messageDesc(file_koinon_run_v1alpha1_run, 8);
+
+/**
+ * Heartbeat is an empty keep-alive message.
+ *
+ * @generated from message koinon.run.v1alpha1.Heartbeat
+ */
+export type Heartbeat = Message<"koinon.run.v1alpha1.Heartbeat"> & {
+};
+
+/**
+ * Describes the message koinon.run.v1alpha1.Heartbeat.
+ * Use `create(HeartbeatSchema)` to create a new message.
+ */
+export const HeartbeatSchema: GenMessage<Heartbeat> = /*@__PURE__*/
+  messageDesc(file_koinon_run_v1alpha1_run, 9);
 
 /**
  * RunState is the ADR 0030 state machine.
@@ -506,7 +571,8 @@ export enum FailureClass {
   CONTEXT_OVERFLOW = 3,
 
   /**
-   * A token or spend limit stopped the run.
+   * A run limit (model requests or spend) or a spend limit (agent, org or platform) stopped the
+   * run.
    *
    * @generated from enum value: FAILURE_CLASS_BUDGET = 4;
    */
@@ -525,6 +591,13 @@ export enum FailureClass {
    * @generated from enum value: FAILURE_CLASS_FATAL = 6;
    */
   FATAL = 6,
+
+  /**
+   * The sandbox never became ready within the org's cap; never retried.
+   *
+   * @generated from enum value: FAILURE_CLASS_SANDBOX_UNAVAILABLE = 7;
+   */
+  SANDBOX_UNAVAILABLE = 7,
 }
 
 /**
@@ -566,7 +639,8 @@ export const RunService: GenService<{
    * and in seq order. To resume after a dropped stream, call again with the
    * last seq received. The first message is a snapshot of the run; another
    * snapshot follows whenever its state changes. The stream ends after the
-   * run has finished and every event has been sent. Viewers and above.
+   * run has finished and every event has been sent. Heartbeat messages keep a quiet
+   * stream open. Viewers and above.
    *
    * @generated from rpc koinon.run.v1alpha1.RunService.WatchRun
    */

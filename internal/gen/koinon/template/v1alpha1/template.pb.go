@@ -9,6 +9,7 @@
 package templatev1alpha1
 
 import (
+	v1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -192,6 +193,62 @@ func (TriggerType) EnumDescriptor() ([]byte, []int) {
 	return file_koinon_template_v1alpha1_template_proto_rawDescGZIP(), []int{2}
 }
 
+// NotifyTargetKind says who a trigger's task asks (ADR 0066 amendment 2026-10-28).
+type NotifyTargetKind int32
+
+const (
+	NotifyTargetKind_NOTIFY_TARGET_KIND_UNSPECIFIED NotifyTargetKind = 0
+	// One member of the org.
+	NotifyTargetKind_NOTIFY_TARGET_KIND_USER NotifyTargetKind = 1
+	// Everyone with the role or higher (member, admin or owner).
+	NotifyTargetKind_NOTIFY_TARGET_KIND_ROLE NotifyTargetKind = 2
+	// A chat channel. Reserved for v0.2; refused until chat connectors exist.
+	NotifyTargetKind_NOTIFY_TARGET_KIND_CHANNEL NotifyTargetKind = 3
+)
+
+// Enum value maps for NotifyTargetKind.
+var (
+	NotifyTargetKind_name = map[int32]string{
+		0: "NOTIFY_TARGET_KIND_UNSPECIFIED",
+		1: "NOTIFY_TARGET_KIND_USER",
+		2: "NOTIFY_TARGET_KIND_ROLE",
+		3: "NOTIFY_TARGET_KIND_CHANNEL",
+	}
+	NotifyTargetKind_value = map[string]int32{
+		"NOTIFY_TARGET_KIND_UNSPECIFIED": 0,
+		"NOTIFY_TARGET_KIND_USER":        1,
+		"NOTIFY_TARGET_KIND_ROLE":        2,
+		"NOTIFY_TARGET_KIND_CHANNEL":     3,
+	}
+)
+
+func (x NotifyTargetKind) Enum() *NotifyTargetKind {
+	p := new(NotifyTargetKind)
+	*p = x
+	return p
+}
+
+func (x NotifyTargetKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (NotifyTargetKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_koinon_template_v1alpha1_template_proto_enumTypes[3].Descriptor()
+}
+
+func (NotifyTargetKind) Type() protoreflect.EnumType {
+	return &file_koinon_template_v1alpha1_template_proto_enumTypes[3]
+}
+
+func (x NotifyTargetKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use NotifyTargetKind.Descriptor instead.
+func (NotifyTargetKind) EnumDescriptor() ([]byte, []int) {
+	return file_koinon_template_v1alpha1_template_proto_rawDescGZIP(), []int{3}
+}
+
 // Grant is a grant on a connector type. On a template or a draft agent it is a
 // proposal; activating the agent approves it.
 type Grant struct {
@@ -300,14 +357,23 @@ func (x *Grant) GetRepositories() []string {
 	return nil
 }
 
-// RunLimits cap a single run; hitting one cancels the run (plan item A4).
+// RunLimits cap a single run; the first one reached cancels it (plan item A4, ADR 0081).
 type RunLimits struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Wall-clock time a run may be owned (starting or running), in seconds.
 	MaxDurationSeconds int64 `protobuf:"varint,1,opt,name=max_duration_seconds,json=maxDurationSeconds,proto3" json:"max_duration_seconds,omitempty"`
-	MaxTokens          int64 `protobuf:"varint,2,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Deprecated: tokens are reported, not enforced (ADR 0081). Kept so older clients and stored
+	// templates still decode; it caps nothing and is zero on new templates and agents.
+	//
+	// Deprecated: Marked as deprecated in koinon/template/v1alpha1/template.proto.
+	MaxTokens int64 `protobuf:"varint,2,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
+	// Model requests a run may make: every request through the agent's key counts, the harness's
+	// own title, summary and compaction calls included.
+	MaxModelRequests int64 `protobuf:"varint,3,opt,name=max_model_requests,json=maxModelRequests,proto3" json:"max_model_requests,omitempty"`
+	// USD a run may spend, by the ledger's settled cost, as an exact decimal string such as "2.00".
+	MaxSpendUsd   string `protobuf:"bytes,4,opt,name=max_spend_usd,json=maxSpendUsd,proto3" json:"max_spend_usd,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RunLimits) Reset() {
@@ -347,11 +413,26 @@ func (x *RunLimits) GetMaxDurationSeconds() int64 {
 	return 0
 }
 
+// Deprecated: Marked as deprecated in koinon/template/v1alpha1/template.proto.
 func (x *RunLimits) GetMaxTokens() int64 {
 	if x != nil {
 		return x.MaxTokens
 	}
 	return 0
+}
+
+func (x *RunLimits) GetMaxModelRequests() int64 {
+	if x != nil {
+		return x.MaxModelRequests
+	}
+	return 0
+}
+
+func (x *RunLimits) GetMaxSpendUsd() string {
+	if x != nil {
+		return x.MaxSpendUsd
+	}
+	return ""
 }
 
 // Trigger is one way work starts on an agent, with the instruction it gets when the trigger fires.
@@ -366,7 +447,10 @@ type Trigger struct {
 	// Schedule only: an IANA zone name, for example "Europe/Tallinn".
 	Timezone string `protobuf:"bytes,4,opt,name=timezone,proto3" json:"timezone,omitempty"`
 	// Text given to the agent when the trigger fires.
-	Instruction   string `protobuf:"bytes,5,opt,name=instruction,proto3" json:"instruction,omitempty"`
+	Instruction string `protobuf:"bytes,5,opt,name=instruction,proto3" json:"instruction,omitempty"`
+	// Who is asked when the agent asks a person without naming one. Every type but direct_message
+	// (which asks the person in the chat). Unset: the org's default, today its admins and owners.
+	Notify        *NotifyTarget `protobuf:"bytes,6,opt,name=notify,proto3" json:"notify,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -436,6 +520,85 @@ func (x *Trigger) GetInstruction() string {
 	return ""
 }
 
+func (x *Trigger) GetNotify() *NotifyTarget {
+	if x != nil {
+		return x.Notify
+	}
+	return nil
+}
+
+// NotifyTarget is who is asked when the agent asks a person without naming one.
+type NotifyTarget struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kind  NotifyTargetKind       `protobuf:"varint,1,opt,name=kind,proto3,enum=koinon.template.v1alpha1.NotifyTargetKind" json:"kind,omitempty"`
+	// Kind USER: the user's ID.
+	UserId string `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// Kind ROLE: MEMBER, ADMIN or OWNER.
+	Role v1alpha1.OrgRole `protobuf:"varint,3,opt,name=role,proto3,enum=koinon.auth.v1alpha1.OrgRole" json:"role,omitempty"`
+	// Kind CHANNEL (v0.2): must be empty until then.
+	ChannelId     string `protobuf:"bytes,4,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NotifyTarget) Reset() {
+	*x = NotifyTarget{}
+	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NotifyTarget) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NotifyTarget) ProtoMessage() {}
+
+func (x *NotifyTarget) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NotifyTarget.ProtoReflect.Descriptor instead.
+func (*NotifyTarget) Descriptor() ([]byte, []int) {
+	return file_koinon_template_v1alpha1_template_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *NotifyTarget) GetKind() NotifyTargetKind {
+	if x != nil {
+		return x.Kind
+	}
+	return NotifyTargetKind_NOTIFY_TARGET_KIND_UNSPECIFIED
+}
+
+func (x *NotifyTarget) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *NotifyTarget) GetRole() v1alpha1.OrgRole {
+	if x != nil {
+		return x.Role
+	}
+	return v1alpha1.OrgRole(0)
+}
+
+func (x *NotifyTarget) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
 // Template is one version of an agent template.
 type Template struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -461,14 +624,17 @@ type Template struct {
 	Triggers      []*Trigger `protobuf:"bytes,14,rep,name=triggers,proto3" json:"triggers,omitempty"`
 	// Agents made from the template are ephemeral by default: each task gets a fresh sandbox
 	// without a home, deleted when the task ends (ADR 0065 decision 13c).
-	Ephemeral     bool `protobuf:"varint,15,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	Ephemeral bool `protobuf:"varint,15,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	// The starting value of the agent's thinking setting, "on" or "off"; empty when the template
+	// names none, which is the default, on (ADR 0069 amendment 2026-10-29).
+	Thinking      string `protobuf:"bytes,16,opt,name=thinking,proto3" json:"thinking,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Template) Reset() {
 	*x = Template{}
-	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[3]
+	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -480,7 +646,7 @@ func (x *Template) String() string {
 func (*Template) ProtoMessage() {}
 
 func (x *Template) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[3]
+	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -493,7 +659,7 @@ func (x *Template) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Template.ProtoReflect.Descriptor instead.
 func (*Template) Descriptor() ([]byte, []int) {
-	return file_koinon_template_v1alpha1_template_proto_rawDescGZIP(), []int{3}
+	return file_koinon_template_v1alpha1_template_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Template) GetId() string {
@@ -601,6 +767,13 @@ func (x *Template) GetEphemeral() bool {
 	return false
 }
 
+func (x *Template) GetThinking() string {
+	if x != nil {
+		return x.Thinking
+	}
+	return ""
+}
+
 // ListTemplatesRequest is empty.
 type ListTemplatesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -610,7 +783,7 @@ type ListTemplatesRequest struct {
 
 func (x *ListTemplatesRequest) Reset() {
 	*x = ListTemplatesRequest{}
-	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[4]
+	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -622,7 +795,7 @@ func (x *ListTemplatesRequest) String() string {
 func (*ListTemplatesRequest) ProtoMessage() {}
 
 func (x *ListTemplatesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[4]
+	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -635,7 +808,7 @@ func (x *ListTemplatesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTemplatesRequest.ProtoReflect.Descriptor instead.
 func (*ListTemplatesRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_template_v1alpha1_template_proto_rawDescGZIP(), []int{4}
+	return file_koinon_template_v1alpha1_template_proto_rawDescGZIP(), []int{5}
 }
 
 // ListTemplatesResponse lists the templates, sorted by slug.
@@ -648,7 +821,7 @@ type ListTemplatesResponse struct {
 
 func (x *ListTemplatesResponse) Reset() {
 	*x = ListTemplatesResponse{}
-	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[5]
+	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -660,7 +833,7 @@ func (x *ListTemplatesResponse) String() string {
 func (*ListTemplatesResponse) ProtoMessage() {}
 
 func (x *ListTemplatesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[5]
+	mi := &file_koinon_template_v1alpha1_template_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -673,7 +846,7 @@ func (x *ListTemplatesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTemplatesResponse.ProtoReflect.Descriptor instead.
 func (*ListTemplatesResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_template_v1alpha1_template_proto_rawDescGZIP(), []int{5}
+	return file_koinon_template_v1alpha1_template_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListTemplatesResponse) GetTemplates() []*Template {
@@ -687,7 +860,7 @@ var File_koinon_template_v1alpha1_template_proto protoreflect.FileDescriptor
 
 const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"\n" +
-	"'koinon/template/v1alpha1/template.proto\x12\x18koinon.template.v1alpha1\"\x9c\x02\n" +
+	"'koinon/template/v1alpha1/template.proto\x12\x18koinon.template.v1alpha1\x1a\x1fkoinon/auth/v1alpha1/auth.proto\"\x9c\x02\n" +
 	"\x05Grant\x12\x1c\n" +
 	"\tconnector\x18\x01 \x01(\tR\tconnector\x12\x16\n" +
 	"\x06scopes\x18\x02 \x03(\tR\x06scopes\x128\n" +
@@ -698,17 +871,26 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"targetsMax\x12\x18\n" +
 	"\apurpose\x18\x06 \x01(\tR\apurpose\x12#\n" +
 	"\rconnection_id\x18\a \x01(\tR\fconnectionId\x12\"\n" +
-	"\frepositories\x18\b \x03(\tR\frepositories\"\\\n" +
+	"\frepositories\x18\b \x03(\tR\frepositories\"\xb2\x01\n" +
 	"\tRunLimits\x120\n" +
-	"\x14max_duration_seconds\x18\x01 \x01(\x03R\x12maxDurationSeconds\x12\x1d\n" +
+	"\x14max_duration_seconds\x18\x01 \x01(\x03R\x12maxDurationSeconds\x12!\n" +
 	"\n" +
-	"max_tokens\x18\x02 \x01(\x03R\tmaxTokens\"\xa6\x01\n" +
+	"max_tokens\x18\x02 \x01(\x03B\x02\x18\x01R\tmaxTokens\x12,\n" +
+	"\x12max_model_requests\x18\x03 \x01(\x03R\x10maxModelRequests\x12\"\n" +
+	"\rmax_spend_usd\x18\x04 \x01(\tR\vmaxSpendUsd\"\xe6\x01\n" +
 	"\aTrigger\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x129\n" +
 	"\x04type\x18\x02 \x01(\x0e2%.koinon.template.v1alpha1.TriggerTypeR\x04type\x12\x12\n" +
 	"\x04cron\x18\x03 \x01(\tR\x04cron\x12\x1a\n" +
 	"\btimezone\x18\x04 \x01(\tR\btimezone\x12 \n" +
-	"\vinstruction\x18\x05 \x01(\tR\vinstruction\"\x80\x05\n" +
+	"\vinstruction\x18\x05 \x01(\tR\vinstruction\x12>\n" +
+	"\x06notify\x18\x06 \x01(\v2&.koinon.template.v1alpha1.NotifyTargetR\x06notify\"\xb9\x01\n" +
+	"\fNotifyTarget\x12>\n" +
+	"\x04kind\x18\x01 \x01(\x0e2*.koinon.template.v1alpha1.NotifyTargetKindR\x04kind\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x121\n" +
+	"\x04role\x18\x03 \x01(\x0e2\x1d.koinon.auth.v1alpha1.OrgRoleR\x04role\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x04 \x01(\tR\tchannelId\"\x9c\x05\n" +
 	"\bTemplate\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04slug\x18\x02 \x01(\tR\x04slug\x12!\n" +
@@ -726,7 +908,8 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"run_limits\x18\f \x01(\v2#.koinon.template.v1alpha1.RunLimitsR\trunLimits\x12&\n" +
 	"\x0fspend_limit_usd\x18\r \x01(\tR\rspendLimitUsd\x12=\n" +
 	"\btriggers\x18\x0e \x03(\v2!.koinon.template.v1alpha1.TriggerR\btriggers\x12\x1c\n" +
-	"\tephemeral\x18\x0f \x01(\bR\tephemeral\"\x16\n" +
+	"\tephemeral\x18\x0f \x01(\bR\tephemeral\x12\x1a\n" +
+	"\bthinking\x18\x10 \x01(\tR\bthinking\"\x16\n" +
 	"\x14ListTemplatesRequest\"Y\n" +
 	"\x15ListTemplatesResponse\x12@\n" +
 	"\ttemplates\x18\x01 \x03(\v2\".koinon.template.v1alpha1.TemplateR\ttemplates*_\n" +
@@ -745,7 +928,12 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"\x15TRIGGER_TYPE_SCHEDULE\x10\x01\x12\x1f\n" +
 	"\x1bTRIGGER_TYPE_DIRECT_MESSAGE\x10\x02\x12 \n" +
 	"\x1cTRIGGER_TYPE_CODE_HOST_EVENT\x10\x03\x12\x1e\n" +
-	"\x1aTRIGGER_TYPE_CHANNEL_EVENT\x10\x042\x88\x01\n" +
+	"\x1aTRIGGER_TYPE_CHANNEL_EVENT\x10\x04*\x90\x01\n" +
+	"\x10NotifyTargetKind\x12\"\n" +
+	"\x1eNOTIFY_TARGET_KIND_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17NOTIFY_TARGET_KIND_USER\x10\x01\x12\x1b\n" +
+	"\x17NOTIFY_TARGET_KIND_ROLE\x10\x02\x12\x1e\n" +
+	"\x1aNOTIFY_TARGET_KIND_CHANNEL\x10\x032\x88\x01\n" +
 	"\x0fTemplateService\x12u\n" +
 	"\rListTemplates\x12..koinon.template.v1alpha1.ListTemplatesRequest\x1a/.koinon.template.v1alpha1.ListTemplatesResponse\"\x03\x90\x02\x01BWZUgithub.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1;templatev1alpha1b\x06proto3"
 
@@ -761,35 +949,41 @@ func file_koinon_template_v1alpha1_template_proto_rawDescGZIP() []byte {
 	return file_koinon_template_v1alpha1_template_proto_rawDescData
 }
 
-var file_koinon_template_v1alpha1_template_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_koinon_template_v1alpha1_template_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_koinon_template_v1alpha1_template_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_koinon_template_v1alpha1_template_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_koinon_template_v1alpha1_template_proto_goTypes = []any{
 	(Flavor)(0),                   // 0: koinon.template.v1alpha1.Flavor
 	(Preset)(0),                   // 1: koinon.template.v1alpha1.Preset
 	(TriggerType)(0),              // 2: koinon.template.v1alpha1.TriggerType
-	(*Grant)(nil),                 // 3: koinon.template.v1alpha1.Grant
-	(*RunLimits)(nil),             // 4: koinon.template.v1alpha1.RunLimits
-	(*Trigger)(nil),               // 5: koinon.template.v1alpha1.Trigger
-	(*Template)(nil),              // 6: koinon.template.v1alpha1.Template
-	(*ListTemplatesRequest)(nil),  // 7: koinon.template.v1alpha1.ListTemplatesRequest
-	(*ListTemplatesResponse)(nil), // 8: koinon.template.v1alpha1.ListTemplatesResponse
+	(NotifyTargetKind)(0),         // 3: koinon.template.v1alpha1.NotifyTargetKind
+	(*Grant)(nil),                 // 4: koinon.template.v1alpha1.Grant
+	(*RunLimits)(nil),             // 5: koinon.template.v1alpha1.RunLimits
+	(*Trigger)(nil),               // 6: koinon.template.v1alpha1.Trigger
+	(*NotifyTarget)(nil),          // 7: koinon.template.v1alpha1.NotifyTarget
+	(*Template)(nil),              // 8: koinon.template.v1alpha1.Template
+	(*ListTemplatesRequest)(nil),  // 9: koinon.template.v1alpha1.ListTemplatesRequest
+	(*ListTemplatesResponse)(nil), // 10: koinon.template.v1alpha1.ListTemplatesResponse
+	(v1alpha1.OrgRole)(0),         // 11: koinon.auth.v1alpha1.OrgRole
 }
 var file_koinon_template_v1alpha1_template_proto_depIdxs = []int32{
-	1, // 0: koinon.template.v1alpha1.Grant.preset:type_name -> koinon.template.v1alpha1.Preset
-	2, // 1: koinon.template.v1alpha1.Trigger.type:type_name -> koinon.template.v1alpha1.TriggerType
-	0, // 2: koinon.template.v1alpha1.Template.allowed_flavors:type_name -> koinon.template.v1alpha1.Flavor
-	0, // 3: koinon.template.v1alpha1.Template.default_flavor:type_name -> koinon.template.v1alpha1.Flavor
-	3, // 4: koinon.template.v1alpha1.Template.grants:type_name -> koinon.template.v1alpha1.Grant
-	4, // 5: koinon.template.v1alpha1.Template.run_limits:type_name -> koinon.template.v1alpha1.RunLimits
-	5, // 6: koinon.template.v1alpha1.Template.triggers:type_name -> koinon.template.v1alpha1.Trigger
-	6, // 7: koinon.template.v1alpha1.ListTemplatesResponse.templates:type_name -> koinon.template.v1alpha1.Template
-	7, // 8: koinon.template.v1alpha1.TemplateService.ListTemplates:input_type -> koinon.template.v1alpha1.ListTemplatesRequest
-	8, // 9: koinon.template.v1alpha1.TemplateService.ListTemplates:output_type -> koinon.template.v1alpha1.ListTemplatesResponse
-	9, // [9:10] is the sub-list for method output_type
-	8, // [8:9] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	1,  // 0: koinon.template.v1alpha1.Grant.preset:type_name -> koinon.template.v1alpha1.Preset
+	2,  // 1: koinon.template.v1alpha1.Trigger.type:type_name -> koinon.template.v1alpha1.TriggerType
+	7,  // 2: koinon.template.v1alpha1.Trigger.notify:type_name -> koinon.template.v1alpha1.NotifyTarget
+	3,  // 3: koinon.template.v1alpha1.NotifyTarget.kind:type_name -> koinon.template.v1alpha1.NotifyTargetKind
+	11, // 4: koinon.template.v1alpha1.NotifyTarget.role:type_name -> koinon.auth.v1alpha1.OrgRole
+	0,  // 5: koinon.template.v1alpha1.Template.allowed_flavors:type_name -> koinon.template.v1alpha1.Flavor
+	0,  // 6: koinon.template.v1alpha1.Template.default_flavor:type_name -> koinon.template.v1alpha1.Flavor
+	4,  // 7: koinon.template.v1alpha1.Template.grants:type_name -> koinon.template.v1alpha1.Grant
+	5,  // 8: koinon.template.v1alpha1.Template.run_limits:type_name -> koinon.template.v1alpha1.RunLimits
+	6,  // 9: koinon.template.v1alpha1.Template.triggers:type_name -> koinon.template.v1alpha1.Trigger
+	8,  // 10: koinon.template.v1alpha1.ListTemplatesResponse.templates:type_name -> koinon.template.v1alpha1.Template
+	9,  // 11: koinon.template.v1alpha1.TemplateService.ListTemplates:input_type -> koinon.template.v1alpha1.ListTemplatesRequest
+	10, // 12: koinon.template.v1alpha1.TemplateService.ListTemplates:output_type -> koinon.template.v1alpha1.ListTemplatesResponse
+	12, // [12:13] is the sub-list for method output_type
+	11, // [11:12] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_koinon_template_v1alpha1_template_proto_init() }
@@ -802,8 +996,8 @@ func file_koinon_template_v1alpha1_template_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_template_v1alpha1_template_proto_rawDesc), len(file_koinon_template_v1alpha1_template_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   6,
+			NumEnums:      4,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

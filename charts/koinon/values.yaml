@@ -50,9 +50,25 @@ api:
     digest: ""
   replicas: 1
   port: 8080
-  # The spend ledger's OTLP/HTTP receiver (plan item L1). agentgateway exports its access log
-  # here; the NetworkPolicy admits only the gateway, since the receiver has no authentication.
+  # The internal OTLP/HTTP receiver (spend ledger, plan item L1; run traces, ADR 0074).
+  # agentgateway exports its access log here and koinon-agentd exports run spans. Every request
+  # needs a bearer token; the NetworkPolicy admits only those two senders as a second layer.
   otlpPort: 4318
+  # The receiver's bearer token. By default the ensure-secrets hook Job generates the Secret
+  # koinon-otlp-token (key "token": 64 hex characters) and never changes it. koinon-api, koinon-agentd
+  # and the gateway mount it; sandboxes never see it. existingSecret names your own Secret with a
+  # "token" key instead.
+  #
+  # Rotation: accepting the current and the previous token needs no downtime. Edit the Secret: copy
+  # the old "token" value to a key "previous" and put a new random value (`openssl rand -hex 32`) in
+  # "token". koinon-api and koinon-agentd pick the files up within about a minute (kubelet refreshes
+  # the mounted Secret; they re-read every few seconds). agentgateway watches the token file and
+  # reloads it, so the gateway's next export carries the new token without a restart (kubernetes
+  # mode: the controller reads the Secret and pushes the value to the proxy). When every sender sends
+  # the new token, delete "previous". See docs/ops/secret-keys.md.
+  # With a Secret you manage (existingSecret), rotate the same way.
+  otlpToken:
+    existingSecret: ""
   # The GitHub tools MCP server (plan item C3): its own listener and Service, reachable only from
   # agentgateway (NetworkPolicy), never through the API Service or ingress.
   toolsPort: 8081
@@ -64,6 +80,11 @@ api:
   durable:
     enabled: false
   # 512Mi: a password hash or check holds 64 MiB, and at most two run at once (internal/auth).
+  # The run-trace router (ADR 0074) holds spans in memory and sizes itself from this limit, which the
+  # chart passes as KOINON_MEMORY_LIMIT_BYTES (or the container's cgroup limit, if lower): its destination queues take 20% of it, spans waiting for
+  # attribution 5%, turn roots waiting for the ledger 3% and export requests being decoded 8%. It drops
+  # spans, oldest first, rather than grow past them. Raise the limit before raising any of these
+  # (--trace-queue-bytes, --trace-intake-bytes, --trace-held-bytes, --trace-request-bytes).
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {memory: 512Mi}
@@ -160,7 +181,7 @@ preflight:
   agentSandbox:
     namespace: agent-sandbox-system
     controller: agent-sandbox-controller
-  # Where agentgateway's controller runs (gateway.mode=kubernetes); its image tag must be v1.6.x. The
+  # Where agentgateway's controller runs (gateway.mode=kubernetes); its image tag must be v1.7.x. The
   # proxy's NetworkPolicy also admits egress to this namespace, where the proxy fetches its xDS
   # configuration.
   agentgateway:
@@ -225,7 +246,7 @@ postgres:
 gateway:
   # The gateway modes are decided in ADR 0049 and ADR 0058.
   # standalone: the chart installs agentgateway, configured by the reconciler.
-  # kubernetes: use an existing agentgateway controller (v1.6.x, with its CRDs, and a GatewayClass).
+  # kubernetes: use an existing agentgateway controller (v1.7.x, with its CRDs, and a GatewayClass).
   # The chart renders no gateway; the reconciler creates Koinon's own Gateway, AgentgatewayModels,
   # AgentgatewayPolicies, AgentgatewayBackend, HTTPRoute and key ConfigMaps in this namespace and never
   # touches other gateways (plan item G2). There is no fallback to standalone: the install preflight
@@ -235,10 +256,16 @@ gateway:
   standalone:
     image:
       repository: ghcr.io/agentgateway/agentgateway
-      tag: v1.6.0
-      digest: sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c
+      tag: v1.7.0
+      digest: sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b
     # LLM and MCP listener.
     port: 8080
+    # The key that encrypts MCP session IDs (agentgateway v1.7 always encrypts them; SESSION_KEY).
+    # By default the ensure-secrets hook Job generates the Secret koinon-gateway-session-key (key
+    # "key": 64 hex characters, `openssl rand -hex 32`) and never changes it. existingSecret names
+    # your own Secret with that key instead.
+    sessionKey:
+      existingSecret: ""
     # SQLite budget store; one replica only.
     persistence:
       size: 1Gi
@@ -362,6 +389,7 @@ flavorPrepull:
 
 # OpenShell gateway that the reconciler and agentd talk to over gRPC.
 openshell:
+  # host:port of the gateway. Required: the chart refuses to render without it.
   address: ""
   # Secret with the client certificate (tls.crt, tls.key, ca.crt) for mTLS. Required: the chart
   # refuses to render without it unless insecure is true.
@@ -372,6 +400,11 @@ openshell:
   insecure: false
   # Default sandbox runtime class (ADR 0045).
   runtimeClassName: kata
+  # The OpenShell gateway's gateway_id (its chart's gatewayId; the default there is openshell). In
+  # managed mode OpenShell names each workspace's namespace openshell-<gatewayId>-<workspace> and
+  # labels it openshell.ai/gateway-id; the sandbox observer reads pods there. The preflight compares
+  # it with the gateway's gateway.toml.
+  gatewayId: openshell
 
 # URL browsers reach Koinon at, for example https://koinon.example.com. Its scheme sets the
 # session cookies' Secure attribute (http:// turns it off, so logins work without TLS) and it is
@@ -462,7 +495,9 @@ networkPolicy:
   # Extra peers allowed to reach the API port (for example the ingress controller's or Gateway's namespace).
   # Empty allows every source.
   apiFrom: []
-  # Peers allowed to scrape agentgateway's stats port.
+  # Peers allowed to scrape agentgateway's stats port (15020). Like metrics.allowFrom, this only
+  # opens the port; it works with any scraper (prometheus-operator, a VictoriaMetrics VMServiceScrape,
+  # a plain Prometheus config), with metrics.serviceMonitor.enabled left false.
   metricsFrom: []
   # Egress rules added to agentgateway's, for internal model upstreams (it may otherwise reach DNS,
   # koinon-api and the public internet only). Each item is a NetworkPolicy egress rule, for example
@@ -482,10 +517,16 @@ metrics:
   #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
   # Empty (the default) admits nobody, so with networkPolicy.enabled the metrics are not scrapable
   # until you name the scraper. (networkPolicy.metricsFrom is separate: agentgateway's stats port.)
+  # This only opens the port. A scraper that is not prometheus-operator (for example VictoriaMetrics'
+  # VMServiceScrape) needs no ServiceMonitor: leave serviceMonitor.enabled false, list its namespace
+  # here and in networkPolicy.metricsFrom, and point it at the <release>-koinon-<component>-metrics
+  # Services (port "metrics").
   allowFrom: []
   serviceMonitor:
-    # A prometheus-operator ServiceMonitor per component. Needs the monitoring.coreos.com/v1
-    # ServiceMonitor CRD: enabling it without the CRD fails the install.
+    # A prometheus-operator ServiceMonitor per component, plus one for agentgateway's stats port
+    # (gateway.mode=standalone) or a PodMonitor on the controller's proxy pods (kubernetes). Needs
+    # the monitoring.coreos.com/v1 ServiceMonitor CRD, and in kubernetes mode the PodMonitor CRD:
+    # enabling it without them fails the install.
     enabled: false
     # Extra labels on the ServiceMonitors, for example the release label your Prometheus selects on.
     labels: {}
@@ -495,6 +536,19 @@ metrics:
     skipCapabilityCheck: false
     # Scrape interval, for example 30s; empty uses the Prometheus default.
     interval: ""
+
+# The sandbox observer (ADR 0078): when OpenShell says only "ConfigurationPending" about a sandbox
+# that never became ready, the reconciler reads the sandbox's pod (get only, by name) to find out why:
+# an image that cannot be pulled, a container that keeps crashing, a refused pod. On by default.
+# Cluster-scoped objects it renders (templates/sandbox-observer.yaml): a ClusterRole with get on pods
+# and agents.x-k8s.io sandboxes, a ClusterRole that lets the reconciler create RoleBindings and bind
+# that one ClusterRole, and a ValidatingAdmissionPolicy that limits those bindings to OpenShell
+# workspace namespaces of openshell.gatewayId, with the fixed name, role and subject. It needs
+# sandboxPolicy.enabled. Off, the chart renders none of it, the reconciler reads nothing, and a pull
+# error stays an "unknown" wait cause (the preflight warns). Planned to go away once OpenShell
+# surfaces pod failures itself.
+sandboxObserver:
+  enabled: true
 
 # ValidatingAdmissionPolicy for OpenShell sandbox namespaces (ADRs 0045, 0048).
 sandboxPolicy:

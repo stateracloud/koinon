@@ -75,9 +75,11 @@ i=0
 while IFS= read -r -d '' f; do
   i=$((i + 1))
   # A block that is an overlay (it does not choose between openshell.clientTLSSecret and
-  # openshell.insecure) is checked as if the base block's choice were made.
+  # openshell.insecure) is checked as if the base block's choice were made; likewise for
+  # openshell.address, which the chart requires.
   tls=(--set openshell.insecure=true)
   if grep -qE 'clientTLSSecret|insecure' "$f"; then tls=(); fi
+  if ! grep -qE '^\s+address:' "$f"; then tls+=(--set openshell.address=openshell.openshell.svc:8080); fi
   if "$HELM" lint --strict charts/koinon -f "$f" ${tls[@]+"${tls[@]}"} >"$tmp/lint.out" 2>&1 && \
     "$HELM" template koinon charts/koinon --namespace koinon -f "$f" ${tls[@]+"${tls[@]}"} >/dev/null 2>"$tmp/tpl.out"; then
     :

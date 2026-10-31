@@ -12,22 +12,24 @@ import (
 )
 
 const createModel = `-- name: CreateModel :one
-INSERT INTO models (org_id, id, provider_id, name, guard, source, managed_by_secret, disabled_reason, created_by)
-VALUES ($1, $2, $3, $4, $5,
-        $6, $7, $8, $9)
-RETURNING org_id, id, provider_id, name, guard, input_rate, output_rate, cache_read_rate, source, managed_by_secret, disabled_reason, created_by, created_at, updated_at
+INSERT INTO models (org_id, id, provider_id, name, guard, format, format_overridden, source, managed_by_secret, disabled_reason, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7,
+        $8, $9, $10, $11)
+RETURNING org_id, id, provider_id, name, guard, input_rate, output_rate, cache_read_rate, source, managed_by_secret, disabled_reason, created_by, created_at, updated_at, format, format_overridden
 `
 
 type CreateModelParams struct {
-	OrgID           pgtype.UUID
-	ID              pgtype.UUID
-	ProviderID      pgtype.UUID
-	Name            string
-	Guard           bool
-	Source          ConfigSource
-	ManagedBySecret pgtype.Text
-	DisabledReason  pgtype.Text
-	CreatedBy       pgtype.UUID
+	OrgID            pgtype.UUID
+	ID               pgtype.UUID
+	ProviderID       pgtype.UUID
+	Name             string
+	Guard            bool
+	Format           string
+	FormatOverridden bool
+	Source           ConfigSource
+	ManagedBySecret  pgtype.Text
+	DisabledReason   pgtype.Text
+	CreatedBy        pgtype.UUID
 }
 
 func (q *Queries) CreateModel(ctx context.Context, arg CreateModelParams) (Model, error) {
@@ -37,6 +39,8 @@ func (q *Queries) CreateModel(ctx context.Context, arg CreateModelParams) (Model
 		arg.ProviderID,
 		arg.Name,
 		arg.Guard,
+		arg.Format,
+		arg.FormatOverridden,
 		arg.Source,
 		arg.ManagedBySecret,
 		arg.DisabledReason,
@@ -58,29 +62,32 @@ func (q *Queries) CreateModel(ctx context.Context, arg CreateModelParams) (Model
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Format,
+		&i.FormatOverridden,
 	)
 	return i, err
 }
 
 const createProvider = `-- name: CreateProvider :one
 
-INSERT INTO providers (org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, disabled_reason, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at
+INSERT INTO providers (org_id, id, name, type, url, api_key, anthropic_workspace_id, source, managed_by_secret, declared_version, disabled_reason, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id
 `
 
 type CreateProviderParams struct {
-	OrgID           pgtype.UUID
-	ID              pgtype.UUID
-	Name            string
-	Type            string
-	Url             string
-	ApiKey          []byte
-	Source          ConfigSource
-	ManagedBySecret pgtype.Text
-	DeclaredVersion pgtype.Text
-	DisabledReason  pgtype.Text
-	CreatedBy       pgtype.UUID
+	OrgID                pgtype.UUID
+	ID                   pgtype.UUID
+	Name                 string
+	Type                 string
+	Url                  string
+	ApiKey               []byte
+	AnthropicWorkspaceID pgtype.Text
+	Source               ConfigSource
+	ManagedBySecret      pgtype.Text
+	DeclaredVersion      pgtype.Text
+	DisabledReason       pgtype.Text
+	CreatedBy            pgtype.UUID
 }
 
 // SPDX-License-Identifier: Apache-2.0
@@ -98,6 +105,7 @@ func (q *Queries) CreateProvider(ctx context.Context, arg CreateProviderParams) 
 		arg.Type,
 		arg.Url,
 		arg.ApiKey,
+		arg.AnthropicWorkspaceID,
 		arg.Source,
 		arg.ManagedBySecret,
 		arg.DeclaredVersion,
@@ -120,6 +128,7 @@ func (q *Queries) CreateProvider(ctx context.Context, arg CreateProviderParams) 
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AnthropicWorkspaceID,
 	)
 	return i, err
 }
@@ -232,7 +241,7 @@ func (q *Queries) GetGatewayServedKeyFile(ctx context.Context, arg GetGatewaySer
 }
 
 const getModel = `-- name: GetModel :one
-SELECT org_id, id, provider_id, name, guard, input_rate, output_rate, cache_read_rate, source, managed_by_secret, disabled_reason, created_by, created_at, updated_at FROM models
+SELECT org_id, id, provider_id, name, guard, input_rate, output_rate, cache_read_rate, source, managed_by_secret, disabled_reason, created_by, created_at, updated_at, format, format_overridden FROM models
 WHERE org_id = $1 AND id = $2
 `
 
@@ -259,6 +268,8 @@ func (q *Queries) GetModel(ctx context.Context, arg GetModelParams) (Model, erro
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Format,
+		&i.FormatOverridden,
 	)
 	return i, err
 }
@@ -304,7 +315,7 @@ func (q *Queries) GetModelServing(ctx context.Context, arg GetModelServingParams
 }
 
 const getProvider = `-- name: GetProvider :one
-SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at FROM providers
+SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id FROM providers
 WHERE org_id = $1 AND id = $2
 `
 
@@ -331,12 +342,13 @@ func (q *Queries) GetProvider(ctx context.Context, arg GetProviderParams) (Provi
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AnthropicWorkspaceID,
 	)
 	return i, err
 }
 
 const listModels = `-- name: ListModels :many
-SELECT org_id, id, provider_id, name, guard, input_rate, output_rate, cache_read_rate, source, managed_by_secret, disabled_reason, created_by, created_at, updated_at FROM models
+SELECT org_id, id, provider_id, name, guard, input_rate, output_rate, cache_read_rate, source, managed_by_secret, disabled_reason, created_by, created_at, updated_at, format, format_overridden FROM models
 WHERE org_id = $1
 ORDER BY name, source, id
 `
@@ -365,6 +377,88 @@ func (q *Queries) ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, e
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Format,
+			&i.FormatOverridden,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listModelsToRederiveFormat = `-- name: ListModelsToRederiveFormat :many
+SELECT m.org_id, m.id, m.name, m.format, p.type AS provider_type
+FROM models m
+JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
+JOIN orgs o ON o.id = m.org_id
+WHERE NOT m.format_overridden AND o.deleted_at IS NULL
+ORDER BY m.org_id, m.id
+`
+
+type ListModelsToRederiveFormatRow struct {
+	OrgID        pgtype.UUID
+	ID           pgtype.UUID
+	Name         string
+	Format       string
+	ProviderType string
+}
+
+// Every model no admin set the format of, in every live org, with its provider's type (startup:
+// catalog.RederiveFormats applies internal/modelformat to them).
+func (q *Queries) ListModelsToRederiveFormat(ctx context.Context) ([]ListModelsToRederiveFormatRow, error) {
+	rows, err := q.db.Query(ctx, listModelsToRederiveFormat)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListModelsToRederiveFormatRow
+	for rows.Next() {
+		var i ListModelsToRederiveFormatRow
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.Name,
+			&i.Format,
+			&i.ProviderType,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProviderEchoChecks = `-- name: ListProviderEchoChecks :many
+SELECT org_id, provider_id, model, unchanged, sent, received, checked_at, checked_by FROM provider_echo_checks
+WHERE org_id = $1
+ORDER BY provider_id
+`
+
+func (q *Queries) ListProviderEchoChecks(ctx context.Context, orgID pgtype.UUID) ([]ProviderEchoCheck, error) {
+	rows, err := q.db.Query(ctx, listProviderEchoChecks, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ProviderEchoCheck
+	for rows.Next() {
+		var i ProviderEchoCheck
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ProviderID,
+			&i.Model,
+			&i.Unchanged,
+			&i.Sent,
+			&i.Received,
+			&i.CheckedAt,
+			&i.CheckedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -377,7 +471,7 @@ func (q *Queries) ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, e
 }
 
 const listProviders = `-- name: ListProviders :many
-SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at FROM providers
+SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id FROM providers
 WHERE org_id = $1
 ORDER BY name, source, id
 `
@@ -406,6 +500,7 @@ func (q *Queries) ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provi
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AnthropicWorkspaceID,
 		); err != nil {
 			return nil, err
 		}
@@ -419,7 +514,7 @@ func (q *Queries) ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provi
 
 const listServedCatalog = `-- name: ListServedCatalog :many
 SELECT p.id AS provider_id, p.name AS provider_name, p.type AS provider_type, p.url, p.api_key,
-       m.id AS model_id, m.name AS model_name, m.guard
+       p.anthropic_workspace_id, m.id AS model_id, m.name AS model_name, m.guard, m.format AS model_format
 FROM providers p
 JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
 WHERE p.org_id = $1 AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND m.disabled_reason IS NULL
@@ -427,14 +522,16 @@ ORDER BY p.name, m.name
 `
 
 type ListServedCatalogRow struct {
-	ProviderID   pgtype.UUID
-	ProviderName string
-	ProviderType string
-	Url          string
-	ApiKey       []byte
-	ModelID      pgtype.UUID
-	ModelName    string
-	Guard        bool
+	ProviderID           pgtype.UUID
+	ProviderName         string
+	ProviderType         string
+	Url                  string
+	ApiKey               []byte
+	AnthropicWorkspaceID pgtype.Text
+	ModelID              pgtype.UUID
+	ModelName            string
+	Guard                bool
+	ModelFormat          string
 }
 
 // Every enabled provider of the org with its enabled models, for the gateway.
@@ -453,9 +550,11 @@ func (q *Queries) ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]L
 			&i.ProviderType,
 			&i.Url,
 			&i.ApiKey,
+			&i.AnthropicWorkspaceID,
 			&i.ModelID,
 			&i.ModelName,
 			&i.Guard,
+			&i.ModelFormat,
 		); err != nil {
 			return nil, err
 		}
@@ -468,7 +567,7 @@ func (q *Queries) ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]L
 }
 
 const listServedProviders = `-- name: ListServedProviders :many
-SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at FROM providers
+SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id FROM providers
 WHERE org_id = $1 AND disabled_reason IS NULL AND removed_at IS NULL
 ORDER BY name
 `
@@ -498,6 +597,7 @@ func (q *Queries) ListServedProviders(ctx context.Context, orgID pgtype.UUID) ([
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AnthropicWorkspaceID,
 		); err != nil {
 			return nil, err
 		}
@@ -572,6 +672,28 @@ WHERE p.org_id = $1 AND p.source = 'ui' AND p.disabled_reason IS NOT NULL
 func (q *Queries) ReenableUIProviders(ctx context.Context, orgID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, reenableUIProviders, orgID)
 	return err
+}
+
+const setDerivedModelFormat = `-- name: SetDerivedModelFormat :execrows
+UPDATE models
+SET format = $1
+WHERE org_id = $2 AND id = $3 AND NOT format_overridden AND format <> $1
+`
+
+type SetDerivedModelFormatParams struct {
+	Format string
+	OrgID  pgtype.UUID
+	ID     pgtype.UUID
+}
+
+// Changes the format of a model that is still not overridden, so a save that raced the startup
+// re-derivation wins.
+func (q *Queries) SetDerivedModelFormat(ctx context.Context, arg SetDerivedModelFormatParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setDerivedModelFormat, arg.Format, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setModelDisabled = `-- name: SetModelDisabled :exec
@@ -674,19 +796,20 @@ func (q *Queries) SyncGatewayServedModels(ctx context.Context, arg SyncGatewaySe
 
 const updateDeclaredProvider = `-- name: UpdateDeclaredProvider :one
 UPDATE providers
-SET type = $1, url = $2, api_key = $3, declared_version = $4,
+SET type = $1, url = $2, api_key = $3, anthropic_workspace_id = $4, declared_version = $5,
     removed_at = NULL, disabled_reason = NULL
-WHERE org_id = $5 AND id = $6 AND source = 'secret'
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at
+WHERE org_id = $6 AND id = $7 AND source = 'secret'
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id
 `
 
 type UpdateDeclaredProviderParams struct {
-	Type            string
-	Url             string
-	ApiKey          []byte
-	DeclaredVersion pgtype.Text
-	OrgID           pgtype.UUID
-	ID              pgtype.UUID
+	Type                 string
+	Url                  string
+	ApiKey               []byte
+	AnthropicWorkspaceID pgtype.Text
+	DeclaredVersion      pgtype.Text
+	OrgID                pgtype.UUID
+	ID                   pgtype.UUID
 }
 
 func (q *Queries) UpdateDeclaredProvider(ctx context.Context, arg UpdateDeclaredProviderParams) (Provider, error) {
@@ -694,6 +817,7 @@ func (q *Queries) UpdateDeclaredProvider(ctx context.Context, arg UpdateDeclared
 		arg.Type,
 		arg.Url,
 		arg.ApiKey,
+		arg.AnthropicWorkspaceID,
 		arg.DeclaredVersion,
 		arg.OrgID,
 		arg.ID,
@@ -714,25 +838,34 @@ func (q *Queries) UpdateDeclaredProvider(ctx context.Context, arg UpdateDeclared
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AnthropicWorkspaceID,
 	)
 	return i, err
 }
 
 const updateModel = `-- name: UpdateModel :one
 UPDATE models
-SET guard = $1
-WHERE org_id = $2 AND id = $3
-RETURNING org_id, id, provider_id, name, guard, input_rate, output_rate, cache_read_rate, source, managed_by_secret, disabled_reason, created_by, created_at, updated_at
+SET guard = $1, format = $2, format_overridden = $3
+WHERE org_id = $4 AND id = $5
+RETURNING org_id, id, provider_id, name, guard, input_rate, output_rate, cache_read_rate, source, managed_by_secret, disabled_reason, created_by, created_at, updated_at, format, format_overridden
 `
 
 type UpdateModelParams struct {
-	Guard bool
-	OrgID pgtype.UUID
-	ID    pgtype.UUID
+	Guard            bool
+	Format           string
+	FormatOverridden bool
+	OrgID            pgtype.UUID
+	ID               pgtype.UUID
 }
 
 func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model, error) {
-	row := q.db.QueryRow(ctx, updateModel, arg.Guard, arg.OrgID, arg.ID)
+	row := q.db.QueryRow(ctx, updateModel,
+		arg.Guard,
+		arg.Format,
+		arg.FormatOverridden,
+		arg.OrgID,
+		arg.ID,
+	)
 	var i Model
 	err := row.Scan(
 		&i.OrgID,
@@ -749,25 +882,28 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Format,
+		&i.FormatOverridden,
 	)
 	return i, err
 }
 
 const updateProvider = `-- name: UpdateProvider :one
 UPDATE providers
-SET type = $1, url = $2,
-    api_key = CASE WHEN $3::boolean THEN $4 ELSE api_key END
-WHERE org_id = $5 AND id = $6
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at
+SET type = $1, url = $2, anthropic_workspace_id = $3,
+    api_key = CASE WHEN $4::boolean THEN $5 ELSE api_key END
+WHERE org_id = $6 AND id = $7
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id
 `
 
 type UpdateProviderParams struct {
-	Type      string
-	Url       string
-	SetApiKey bool
-	ApiKey    []byte
-	OrgID     pgtype.UUID
-	ID        pgtype.UUID
+	Type                 string
+	Url                  string
+	AnthropicWorkspaceID pgtype.Text
+	SetApiKey            bool
+	ApiKey               []byte
+	OrgID                pgtype.UUID
+	ID                   pgtype.UUID
 }
 
 // api_key is written only when @set_api_key is true (the patch sets it): the caller read the row
@@ -776,6 +912,7 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 	row := q.db.QueryRow(ctx, updateProvider,
 		arg.Type,
 		arg.Url,
+		arg.AnthropicWorkspaceID,
 		arg.SetApiKey,
 		arg.ApiKey,
 		arg.OrgID,
@@ -797,6 +934,51 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AnthropicWorkspaceID,
+	)
+	return i, err
+}
+
+const upsertProviderEchoCheck = `-- name: UpsertProviderEchoCheck :one
+INSERT INTO provider_echo_checks (org_id, provider_id, model, unchanged, sent, received, checked_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (org_id, provider_id) DO UPDATE
+SET model = EXCLUDED.model, unchanged = EXCLUDED.unchanged, sent = EXCLUDED.sent,
+    received = EXCLUDED.received, checked_at = now(), checked_by = EXCLUDED.checked_by
+RETURNING org_id, provider_id, model, unchanged, sent, received, checked_at, checked_by
+`
+
+type UpsertProviderEchoCheckParams struct {
+	OrgID      pgtype.UUID
+	ProviderID pgtype.UUID
+	Model      string
+	Unchanged  bool
+	Sent       string
+	Received   string
+	CheckedBy  pgtype.UUID
+}
+
+// The latest echo check of a provider replaces the one before it.
+func (q *Queries) UpsertProviderEchoCheck(ctx context.Context, arg UpsertProviderEchoCheckParams) (ProviderEchoCheck, error) {
+	row := q.db.QueryRow(ctx, upsertProviderEchoCheck,
+		arg.OrgID,
+		arg.ProviderID,
+		arg.Model,
+		arg.Unchanged,
+		arg.Sent,
+		arg.Received,
+		arg.CheckedBy,
+	)
+	var i ProviderEchoCheck
+	err := row.Scan(
+		&i.OrgID,
+		&i.ProviderID,
+		&i.Model,
+		&i.Unchanged,
+		&i.Sent,
+		&i.Received,
+		&i.CheckedAt,
+		&i.CheckedBy,
 	)
 	return i, err
 }

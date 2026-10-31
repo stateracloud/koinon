@@ -77,6 +77,13 @@ describe('buildTimeline', () => {
     ])
   })
 
+  it('shows an uncached run as a note', () => {
+    const items = buildTimeline([], { [run]: [runEvent(1, 'run.uncached', { model: 'google/gemini-x', reason: 'no cache mode for the provider format' })] })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456 runs without prompt caching (model google/gemini-x): no cache mode for the provider format',
+    ])
+  })
+
   it('shows a park and its approval task events', () => {
     const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', args_sha256: 'ab' }
     const items = buildTimeline(
@@ -227,5 +234,67 @@ describe('a spend limit', () => {
       {},
     )
     expect(items.map((i) => (i.type === 'note' ? i.text : ''))).toEqual(['Moved from Submitted to Input required', 'Moved from Input required to Completed', 'Task created: Old'])
+  })
+
+  describe('time limit, sandbox cap and question notes', () => {
+    const noteText = (ev: ReturnType<typeof taskEvent> | ReturnType<typeof runEvent>) => {
+      const items = buildTimeline(ev.$typeName === 'koinon.task.v1alpha1.TaskEvent' ? [ev as ReturnType<typeof taskEvent>] : [], ev.$typeName === 'koinon.run.v1alpha1.RunEvent' ? { [run]: [ev as ReturnType<typeof runEvent>] } : {})
+      return items.map((i) => ('text' in i ? i.text : ''))
+    }
+
+    it('says a run stopped at the time limit, with the last summary', () => {
+      const [text] = noteText(taskEvent(1, 100, 'run.canceled', { reason: 'wall_clock_cap', maxWallClockSeconds: 1800, summary: 'S', summarySource: 'reply' }))
+      expect(text).toContain('stopped at the time limit of 30m')
+      expect(text).toContain('Last summary:\nS')
+    })
+
+    it('says when the summary came from the agent\'s notes', () => {
+      const [text] = noteText(taskEvent(1, 100, 'run.canceled', { reason: 'wall_clock_cap', maxWallClockSeconds: 1800, summary: 'S', summarySource: 'notes' }))
+      expect(text).toContain("(from the agent's notes)")
+    })
+
+    it('says a run stopped at its model request or spend limit, with the last summary (ADR 0081)', () => {
+      const [req] = noteText(taskEvent(1, 100, 'run.canceled', { reason: 'request_cap', message: 'model request limit reached (150 of 150 requests)', summary: 'S', summarySource: 'reply' }))
+      expect(req).toContain('stopped at its model request limit: model request limit reached (150 of 150 requests)')
+      expect(req).toContain('Last summary:\nS')
+      const [spend] = noteText(taskEvent(1, 100, 'run.canceled', { reason: 'run_spend_cap', message: 'run spend limit reached ($2.01 of $2.00)' }))
+      expect(spend).toContain('stopped at its spend limit: run spend limit reached ($2.01 of $2.00)')
+    })
+
+    it('names why a sandbox never became ready', () => {
+      const [text] = noteText(taskEvent(1, 100, 'run.failed', { reason: 'x', failureClass: 'sandbox_unavailable', sandboxCause: 'no_nodes' }))
+      expect(text).toContain('no node can run the sandbox')
+    })
+
+    it('names a crash loop, an image pull and an unknown cause', () => {
+      const text = (cause: string) => noteText(taskEvent(1, 100, 'run.failed', { reason: 'x', failureClass: 'sandbox_unavailable', sandboxCause: cause }))[0]
+      expect(text('crash_loop')).toContain('a container in the sandbox keeps crashing')
+      expect(text('container_create')).toContain('a container in the sandbox could not be created')
+      expect(text('image_pull')).toContain('the image could not be pulled')
+      expect(text('unknown')).toContain('the cause is unknown')
+    })
+
+    it('shows who answered a question', () => {
+      expect(noteText(taskEvent(1, 100, 'question.answered', { answered_by_name: 'Ana', answer: 'Yes' }))).toEqual(['Ana answered: Yes'])
+    })
+
+    it('shows the other ends of a question', () => {
+      expect(noteText(taskEvent(1, 100, 'question.asked', { to_label: "the org's admins", question: 'Ship it?' }))).toEqual(["Asked the org's admins: Ship it?"])
+      expect(noteText(taskEvent(1, 100, 'question.dismissed', { answered_by_name: 'Ana', answer: 'No' }))).toEqual(['Ana dismissed the question; the default applied: No'])
+      expect(noteText(taskEvent(1, 100, 'question.expired', { answer: 'No' }))).toEqual(['Nobody answered in time; the default applied: No'])
+      expect(noteText(taskEvent(1, 100, 'question.canceled', {}))).toEqual(['The question was closed: the run ended'])
+      expect(noteText(taskEvent(1, 100, 'question.retargeted', { to_label: "the org's admins" }))[0]).toContain("now asked the org's admins")
+    })
+
+    it('shows the wrap-up notice', () => {
+      const [text] = noteText(runEvent(1, 'run.wrap_up_notice', { remainingSeconds: 300, maxWallClockSeconds: 1800 }))
+      expect(text).toContain('asked to wrap up')
+      expect(text).toContain('about 5 minutes left')
+    })
+
+    it('shows the wrap-up notice of a request or spend limit', () => {
+      expect(noteText(runEvent(1, 'run.wrap_up_notice', { limit: 'requests', modelRequests: 120, maxModelRequests: 150 }))[0]).toContain('120 of 150 model requests used')
+      expect(noteText(runEvent(1, 'run.wrap_up_notice', { limit: 'spend', spentUSD: '1.62', maxSpendUSD: '2.00' }))[0]).toContain('$1.62 of $2.00 spent')
+    })
   })
 })
