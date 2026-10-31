@@ -228,6 +228,12 @@ rc=0
 check "--argo passes the e2e's exit status through" test "$rc" -eq 7
 check "results unpacked on failure" test -f "$tmp/out8/quickstart-timings.md"
 
+argo_env "$tmp/argo2b"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_RESULT_RC=0 hack/e2e-remote.sh --argo --out "$tmp/out8b" >"$tmp/log8b" 2>&1) || rc=$?
+check "a run Failed after its target passed (result.txt rc=0) counts as passed" test "$rc" -eq 0
+check "... and says so" has 'after its target passed' "$tmp/log8b"
+
 argo_env "$tmp/argo3"
 : >"$FAKE_LOG"
 rc=0
