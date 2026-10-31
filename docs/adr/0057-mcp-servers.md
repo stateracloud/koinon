@@ -1,6 +1,6 @@
 # 0057. MCP servers: remote and container, catalog, allowlists and discovery
 
-- Status: Accepted; amended 2026-10-24 (below)
+- Status: Accepted; amended 2026-10-24, 2026-10-30 and 2026-10-31 by [0084](0084-leak-guard.md) (below)
 - Date: 2026-10-23
 - Amends: [0014](0014-mcp-and-tools.md) (how MCP servers are provided and allowed per agent)
 - Delivery: remote MCP servers and per-agent allowlists land in v0.1. Container servers, the
@@ -213,6 +213,25 @@ harness side of the path (research TP22, TP25): the harness (agentd's MCP bridge
 the same `mcpsanitize` policy to what it hands the model, and pins each tool to the approved hash. Until
 then an admin sees the sanitised text and the flags at approval, and the ask tier is the safe choice for a
 server that is not trusted.
+
+## Amendment 2026-10-31: the leak guard on every org route (#347)
+
+[0084](0084-leak-guard.md) puts a leak guard in front of every MCP tool call:
+
+- **Every org's MCP route carries `mcpGuardrails`** (ExtMcp, remote, `failClosed`) pointing at
+  koinon-api's guard. This is a separate setting from the targets' `failureMode: failOpen` (decision 5
+  and item 4 of the 2026-10-24 amendment): an unreachable *server* is still skipped, but when the
+  *guard* is unreachable every MCP call on the route is refused. The guard fingerprints MCP results
+  into the home generation's taint store and blocks a call whose arguments carry private data; a
+  match becomes an ADR 0042 approval.
+- **The auto tier is no longer unchecked.** An auto tool still runs without a person, but its
+  arguments pass the taint check and, for fetch URLs and search queries, an automatic
+  shape-and-budget URL rule. Hosts exempt from the rule are on a per-org fetch-trusted host list,
+  empty by default.
+- **Servers declare a data class and kind.** Each server record says which of untrusted input,
+  private data and outbound tool it carries, and its kind (for example fetch or search), so the
+  guard and the templates test read a declaration rather than a name (#350). The identifiers and
+  the class existing servers migrate to are open in 0084.
 
 ## Upstream verification
 
