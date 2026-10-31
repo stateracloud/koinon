@@ -226,6 +226,24 @@ var _ = Describe("Router", func() {
 			Expect(testutil.ToFloat64(e.r.Metrics().Received.WithLabelValues("ledger"))).To(Equal(2.0))
 		})
 
+		It("leaves the reasoning tokens out when no call reported a split, rather than write 0 (#316)", func() {
+			unsplit := func(id string, at time.Duration) router.ModelCall {
+				c := call(id, at, 0.25)
+				c.Reasoning = 0
+				return c
+			}
+			e.store.setCalls([]router.ModelCall{unsplit("req-1", 2*time.Second), unsplit("req-2", 5*time.Second)})
+			e.post(tr.root(false))
+			settle(e)
+			e.clock.Advance(2 * time.Second)
+			settle(e)
+			Eventually(func() int { return len(be.spans()) }).Should(Equal(3))
+			for _, sp := range be.spans() {
+				Expect(has(sp, semconv.GenAIUsageReasoningTokens)).To(BeFalse(), sp.Name)
+			}
+			Expect(av(be.named("invoke_agent Support Bot"), semconv.GenAIUsageOutputTokens)).NotTo(BeEmpty(), "the output tokens, thinking included, are still there")
+		})
+
 		It("waits up to 30 seconds for a late row and marks a cost still missing as pending", func() {
 			nocost := call("req-late", 3*time.Second, 0)
 			nocost.Cost = nil
