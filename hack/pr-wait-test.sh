@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Tests hack/pr-wait.sh offline: `gh` is a stub on PATH that answers `gh pr view` with the next JSON
+# state of a scripted sequence (the last one repeats) and records every call.
+set -euo pipefail
+
+repo=$(cd "$(dirname "$0")/.." && pwd)
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/bin"
+export FAKE_DIR="$tmp/seq" PATH="$tmp/bin:$PATH"
+
+cat >"$tmp/bin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "$*" >>"$FAKE_DIR/calls"
+[ "$1 $2" = "pr view" ] || exit 9
+n=$(($(cat "$FAKE_DIR/n" 2>/dev/null || echo 0) + 1))
+echo "$n" >"$FAKE_DIR/n"
+f="$FAKE_DIR/$n.json"
+[ -f "$f" ] || f=$(ls "$FAKE_DIR"/*.json | sort -V | tail -n 1)
+cat "$f"
+SH
+chmod +x "$tmp/bin/gh"
+
+fail=0
+# seq <json>...: a fresh scripted sequence.
+seq_set() {
+  rm -rf "$FAKE_DIR"
+  mkdir -p "$FAKE_DIR"
+  local i=0 j
+  for j in "$@"; do
+    i=$((i + 1))
+    printf '%s' "$j" >"$FAKE_DIR/$i.json"
+  done
+}
+# run <args...>: sets $out and $rc.
+run() {
+  rc=0
+  out=$("$repo/hack/pr-wait.sh" "$@" 2>&1) || rc=$?
+}
+expect() { # <description> <want rc> <want output>
+  if [ "$rc" = "$2" ] && [ "$out" = "$3" ]; then
+    echo "ok: $1"
+  else
+    printf 'FAIL: %s\n  want rc=%s out=%q\n  got  rc=%s out=%q\n' "$1" "$2" "$3" "$rc" "$out" >&2
+    fail=1
+  fi
+}
+
+cr() { # <name> <status> <conclusion> <run id>
+  printf '{"name":"%s","status":"%s","conclusion":"%s","detailsUrl":"https://github.com/o/r/actions/runs/%s/job/9"}' "$1" "$2" "$3" "$4"
+}
+pr() {
+  local mc=null
+  [ -z "$3" ] || mc="{\"oid\":\"$3\"}"
+  printf '{"state":"%s","mergeStateStatus":"%s","mergeCommit":%s,"statusCheckRollup":[%s]}' "$1" "$2" "$mc" "$4"
+}
+
+go_p=$(cr go IN_PROGRESS "" 11)
+web_p=$(cr web QUEUED "" 12)
+lint_ok=$(cr lint COMPLETED SUCCESS 13)
+go_ok=$(cr go COMPLETED SUCCESS 11)
+web_ok=$(cr web COMPLETED SUCCESS 12)
+
+# 1. merged after progress; repeated identical states print once
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_p,$web_p")" "$(pr OPEN CLEAN "" "$lint_ok,$go_p,$web_p")" \
+  "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_p")" "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" \
+  "$(pr MERGED CLEAN abc1234def "$lint_ok,$go_ok,$web_ok")"
+run 7 --interval 0
+expect "merged: one line per change" 0 "checks 1/3 pending: go,web
+checks 2/3 pending: web
+checks 3/3 green
+MERGED abc1234"
+if grep -q -v '^pr view 7 --json' "$FAKE_DIR/calls"; then
+  echo "FAIL: only gh pr view is called" >&2
+  fail=1
+else echo "ok: only gh pr view is called"; fi
+
+# 2. --checks exits 0 when all finished, before the merge
+seq_set "$(pr OPEN BLOCKED "" "$lint_ok,$go_p")" "$(pr OPEN BLOCKED "" "$lint_ok,$go_ok")"
+run 7 --checks --interval 0
+expect "--checks all green" 0 "checks 1/2 pending: go
+checks 2/2 green"
+
+# 3. a failed check: exit 1 with the run id
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_p")" "$(pr OPEN CLEAN "" "$lint_ok,$(cr go COMPLETED FAILURE 123)")"
+run 7 --interval 0
+expect "failed check" 1 "checks 1/2 pending: go
+FAILED go (run 123)"
+
+# 4. a failed commit status (no run url)
+seq_set "$(pr OPEN CLEAN "" '{"context":"claim","state":"FAILURE","targetUrl":"https://example.invalid/x"}')"
+run 7 --checks --interval 0
+expect "failed status context" 1 "FAILED claim"
+
+# 5. closed without merge
+seq_set "$(pr OPEN CLEAN "" "$go_p")" "$(pr CLOSED UNKNOWN "" "$go_p")"
+run 7 --interval 0
+expect "closed" 3 "checks 0/1 pending: go
+CLOSED"
+
+# 6. merge conflict
+seq_set "$(pr OPEN DIRTY "" "$go_p")"
+run 7 --interval 0
+expect "conflict" 4 "needs-update"
+
+# 7. timeout (still pending)
+seq_set "$(pr OPEN BLOCKED "" "$go_p")"
+run 7 --timeout 2s --interval 1
+expect "timeout" 2 "checks 0/1 pending: go
+TIMEOUT"
+
+# 8. a transient gh failure is retried
+rm -rf "$FAKE_DIR"
+mkdir -p "$FAKE_DIR"
+cat >"$tmp/bin/gh" <<'SH'
+#!/usr/bin/env bash
+n=$(($(cat "$FAKE_DIR/n" 2>/dev/null || echo 0) + 1))
+echo "$n" >"$FAKE_DIR/n"
+[ "$n" -gt 1 ] || exit 1
+echo '{"state":"MERGED","mergeStateStatus":"CLEAN","mergeCommit":{"oid":"1234567890"},"statusCheckRollup":[]}'
+SH
+run 7 --interval 0
+expect "transient gh failure" 0 "MERGED 1234567"
+
+# 9. usage
+run
+expect "no PR is a usage error" 64 "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--timeout DURATION] [--interval SECONDS]"
+run 7 --timeout soon
+expect "bad timeout is a usage error" 64 "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--timeout DURATION] [--interval SECONDS]"
+
+exit "$fail"
