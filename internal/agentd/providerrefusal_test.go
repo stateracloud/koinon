@@ -56,6 +56,9 @@ var _ = Describe("Who refused the model request", func() {
 		got := getRun(ctx, r)
 		Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassPolicy))
 		Expect(got.OutcomeReason.String).To(HavePrefix("The model provider refused the request (HTTP 403) [as reported by the harness: "))
+		task, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: r.TaskID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(task.State).To(Equal(store.TaskStateSubmitted), "a policy failure leaves the task open")
 	})
 
 	It("fails a provider's 401 as a provider-key fault", func(ctx SpecContext) {
@@ -67,6 +70,9 @@ var _ = Describe("Who refused the model request", func() {
 		Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassFatal))
 		Expect(got.OutcomeReason.String).To(ContainSubstring("rejected the API key Koinon holds for it (HTTP 401)"))
 		Expect(got.OutcomeReason.String).To(ContainSubstring("provider's key in the catalog"))
+		task, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: r.TaskID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(task.State).To(Equal(store.TaskStateFailed), "a fatal run fails its task (#324)")
 	})
 
 	It("keeps a gateway-key fault when the gateway has no record of the provider refusing anything", func(ctx SpecContext) {

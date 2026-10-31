@@ -109,3 +109,15 @@ SET state = @to_state::task_state
 WHERE org_id = @org_id AND id = @id AND state = ANY((@from_states::text[])::task_state[])
   AND @to_state::task_state NOT IN ('completed', 'canceled', 'failed')
 RETURNING *;
+
+-- name: EndTaskFrom :one
+-- Ends a task with its run's outcome (completed, or failed), only if it is in one of from_states and
+-- no run of it is queued (a follow-up message already asked for another turn). No row: the task is
+-- elsewhere (canceled, ended by a person) or has more work queued.
+UPDATE tasks
+SET state = @to_state::task_state,
+    finished_at = coalesce(finished_at, now())
+WHERE tasks.org_id = @org_id AND tasks.id = @id AND tasks.state = ANY((@from_states::text[])::task_state[])
+  AND @to_state::task_state IN ('completed', 'failed')
+  AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.org_id = tasks.org_id AND runs.task_id = tasks.id AND runs.state = 'queued')
+RETURNING *;

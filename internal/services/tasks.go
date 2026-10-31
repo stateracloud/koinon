@@ -227,8 +227,10 @@ func (s *Server) listTasks(ctx context.Context, c caller, states []store.TaskSta
 	return tasks, costs, err
 }
 
-// appendMessage adds a user message to a task and queues a run unless one is queued already.
-func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, msg string) (store.TaskEvent, *runv1alpha1.Run, error) {
+// appendMessage adds a user message to a task and queues a run unless one is queued already. With
+// reopen, a message on a completed task reopens it; without, a completed task refuses it (the deprecated
+// ticket API, where Done is a board column a person chose).
+func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, msg string, reopen bool) (store.TaskEvent, *runv1alpha1.Run, error) {
 	var (
 		ev  store.TaskEvent
 		run *runv1alpha1.Run
@@ -239,6 +241,19 @@ func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, ms
 		t, err := q.GetTaskForUpdate(ctx, store.GetTaskForUpdateParams{OrgID: c.org, ID: id})
 		if err != nil {
 			return nil, err
+		}
+		if reopen && t.State == store.TaskStateCompleted {
+			// A run that succeeded completes its task (ADR 0065); a follow-up reopens it, as it
+			// does a direct-message thread (ADR 0066).
+			if t, err = q.SetTaskState(ctx, store.SetTaskStateParams{OrgID: c.org, ID: id, State: store.TaskStateSubmitted}); err != nil {
+				return nil, err
+			}
+			if _, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+				OrgID: c.org, TaskID: id, Kind: KindStatusChanged, ActorKind: store.TaskActorKindUser, ActorUserID: c.actor(),
+				Payload: jsonPayload(map[string]any{"from": string(store.TaskStateCompleted), "to": string(store.TaskStateSubmitted), "reason": reasonFollowUp}),
+			}); err != nil {
+				return nil, err
+			}
 		}
 		if isEnded(t.State) {
 			return nil, errTaskEnded
@@ -466,7 +481,7 @@ func (a taskAPI) AppendMessage(ctx context.Context, req *taskv1alpha1.AppendMess
 	if err != nil {
 		return nil, err
 	}
-	ev, run, err := a.appendMessage(ctx, c, id, msg)
+	ev, run, err := a.appendMessage(ctx, c, id, msg, true)
 	if errors.Is(err, errTaskEnded) {
 		err = connect.NewError(connect.CodeFailedPrecondition, "task has ended")
 	}
