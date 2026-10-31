@@ -1,0 +1,103 @@
+{
+  "//": [
+    "SPDX-License-Identifier: Apache-2.0",
+    "The light lane of the home-lab Argo e2e queue (#361; homelab ADR 036): one make target that needs",
+    "no kind cluster (Go tests with testcontainers, chart checks, admission tests, docs-check), on a light",
+    "slot with its own Go cache and Docker cache. hack/e2e-argo.sh --lane light fills in the parameters",
+    "and submits this as an inline Workflow; the target runs as hack/lab/light-run.sh of the bundled",
+    "commit. The slot's Block volume is in podSpecPatch (Argo adds workflow volumes only for mounts).",
+    "TMPDIR is on the work volume, which dind mounts at the same path: the daemon resolves a test's bind",
+    "mounts (t.TempDir) in its own filesystem."
+  ],
+  "metadata": {
+    "generateName": "koinon-light-",
+    "labels": {"lab.example.invalid/lane": "light"}
+  },
+  "spec": {
+    "entrypoint": "run",
+    "arguments": {
+      "parameters": [
+        {"name": "target"},
+        {"name": "ref"},
+        {"name": "bundle"},
+        {"name": "agent"},
+        {"name": "slot", "value": "light-1", "enum": ["light-1", "light-2"]}
+      ]
+    },
+    "workflowMetadata": {
+      "labels": {
+        "lab.example.invalid/agent": "{{workflow.parameters.agent}}",
+        "lab.example.invalid/target": "{{workflow.parameters.target}}"
+      }
+    },
+    "synchronization": {"mutexes": [{"name": "e2e-{{workflow.parameters.slot}}"}]},
+    "activeDeadlineSeconds": 3600,
+    "podGC": {"strategy": "OnPodCompletion", "deleteDelayDuration": "10m"},
+    "volumes": [
+      {"name": "work", "emptyDir": {}},
+      {"name": "gocache", "persistentVolumeClaim": {"claimName": "e2e-gocache-{{workflow.parameters.slot}}"}}
+    ],
+    "templates": [
+      {
+        "name": "run",
+        "podSpecPatch": "{\"runtimeClassName\": \"kata\", \"volumes\": [{\"name\": \"cache\", \"persistentVolumeClaim\": {\"claimName\": \"e2e-cache-{{workflow.parameters.slot}}\"}}]}",
+        "inputs": {
+          "artifacts": [
+            {
+              "name": "bundle",
+              "path": "/work/in/koinon.bundle",
+              "s3": {
+                "endpoint": "garage-admin.garage.svc:3900",
+                "insecure": true,
+                "bucket": "e2e-bundles",
+                "key": "{{workflow.parameters.bundle}}",
+                "region": "garage",
+                "accessKeySecret": {"name": "e2e-bundles-reader-s3", "key": "AWS_ACCESS_KEY_ID"},
+                "secretKeySecret": {"name": "e2e-bundles-reader-s3", "key": "AWS_SECRET_ACCESS_KEY"}
+              }
+            }
+          ]
+        },
+        "outputs": {
+          "artifacts": [{"name": "results", "path": "/work/out", "optional": true, "archive": {"tar": {}}}]
+        },
+        "sidecars": [
+          {
+            "name": "dind",
+            "image": "docker.io/library/docker:29.9.2-dind@sha256:9e79b879b177fbd72c34376a3dd3d91747da5db49e1f560f76aea59561471977",
+            "securityContext": {"privileged": true},
+            "env": [{"name": "DOCKER_TLS_CERTDIR", "value": ""}],
+            "volumeDevices": [{"name": "cache", "devicePath": "/dev/docker-cache"}],
+            "volumeMounts": [{"name": "work", "mountPath": "/work"}],
+            "resources": {"requests": {"cpu": "1", "memory": "2Gi"}, "limits": {"cpu": "2", "memory": "4Gi"}},
+            "command": ["sh", "-c"],
+            "args": [
+              "set -eu\ndev=/dev/docker-cache\n# Kata hot-plugs the pod's memory a few seconds after start\nfor _ in $(seq 1 60); do [ \"$(free -m | awk '/Mem/{print $2}')\" -gt 9000 ] && break; sleep 2; done\n# First use of the slot only: format it (busybox blkid exits 0 without a filesystem: test its output)\nif [ -z \"$(blkid \"$dev\")\" ]; then apk add -q e2fsprogs; mkfs.ext4 -q -L docker-cache \"$dev\"; fi\nmount -t ext4 \"$dev\" /var/lib/docker\ndockerd-entrypoint.sh dockerd --host=tcp://127.0.0.1:2375 --insecure-registry=zot.zot.svc.cluster.local:5000 >/work/dockerd.log 2>&1 &\nfor _ in $(seq 1 60); do docker -H tcp://127.0.0.1:2375 info >/dev/null 2>&1 && break; sleep 1; done\nexport DOCKER_HOST=tcp://127.0.0.1:2375\n# Every run starts with no containers, networks or volumes left over; images stay cached\ndocker rm -f $(docker ps -aq) >/dev/null 2>&1 || true\ndocker network prune -f >/dev/null; docker volume prune -af >/dev/null; docker image prune -f >/dev/null\ntouch /work/dockerd-ready\necho \"dockerd ready: $(docker images -q | wc -l) cached images\"\nwait\n"
+            ]
+          }
+        ],
+        "container": {
+          "image": "zot.apps.lab.example.invalid/ghcr.io/stateracloud/koinon-e2e-toolchain@sha256:264fc7ef10d6f619a954fb5de2de8ae20bfe6d1d4c1c36d38fbf9724c7f93d00",
+          "env": [
+            {"name": "DOCKER_HOST", "value": "tcp://127.0.0.1:2375"},
+            {"name": "TESTCONTAINERS_HOST_OVERRIDE", "value": "127.0.0.1"},
+            {"name": "TESTCONTAINERS_RYUK_DISABLED", "value": "true"},
+            {"name": "E2E_TARGET", "value": "{{workflow.parameters.target}}"},
+            {"name": "E2E_REF", "value": "{{workflow.parameters.ref}}"},
+            {"name": "OUT", "value": "/work/out"},
+            {"name": "GOCACHE", "value": "/gocache/build"},
+            {"name": "GOMODCACHE", "value": "/gocache/mod"},
+            {"name": "LC_ALL", "value": "C"},
+            {"name": "TMPDIR", "value": "/work/tmp"}
+          ],
+          "volumeMounts": [{"name": "work", "mountPath": "/work"}, {"name": "gocache", "mountPath": "/gocache"}],
+          "resources": {"requests": {"cpu": "2", "memory": "4Gi"}, "limits": {"cpu": "4", "memory": "8Gi"}},
+          "command": ["bash", "-c"],
+          "args": [
+            "set -euo pipefail\nmkdir -p /work/out /work/tmp\nfor _ in $(seq 1 180); do [ -e /work/dockerd-ready ] && break; sleep 1; done\n[ -e /work/dockerd-ready ] || { echo \"dockerd not ready after 180 s\"; cp /work/dockerd.log /work/out/ || true; exit 1; }\n# The submitted values arrive as env, never pasted into this script\n[[ $E2E_REF =~ ^[0-9a-f]{40}$ ]] || { echo \"ref must be a full 40-hex commit SHA\"; exit 2; }\ngit clone -q --no-checkout /work/in/koinon.bundle /work/koinon\ncd /work/koinon\ngit checkout -q --detach \"$E2E_REF\"\ntest \"$(git rev-parse HEAD)\" = \"$E2E_REF\"\nexec hack/lab/light-run.sh \"$E2E_TARGET\"\n"
+          ]
+        }
+      }
+    ]
+  }
+}
