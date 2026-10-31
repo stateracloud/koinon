@@ -226,6 +226,10 @@ if [[ -n $follow ]]; then
   name=$follow
   [[ $dry == 0 ]] || { echo "+ follow $name"; exit 0; }
   open_creds
+  # The run's own target, for the last line (the default is the kind lane's).
+  target=$(api GET "/api/v1/workflows/$NS/$name?fields=spec.arguments.parameters" 2>/dev/null |
+    jq -r '[.spec.arguments.parameters[]? | select(.name == "target") | .value][0] // empty' 2>/dev/null || true)
+  target=${target:-run}
   follow_run
   exit
 fi
