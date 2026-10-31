@@ -1430,12 +1430,21 @@ type ThinkingState struct {
 	VersionSetting string `protobuf:"bytes,2,opt,name=version_setting,json=versionSetting,proto3" json:"version_setting,omitempty"`
 	// What the layers resolve to, "on" or "off", whether or not the model can think.
 	Effective string `protobuf:"bytes,3,opt,name=effective,proto3" json:"effective,omitempty"`
-	// Whether the effective model can think. When false the setting has no effect and the UI says
+	// Whether the effective model thinks. When false the setting has no effect and the UI says
 	// "not supported by this model".
 	Supported bool `protobuf:"varint,4,opt,name=supported,proto3" json:"supported,omitempty"`
-	// The mode the next run uses: "adaptive" when the model can think and the setting resolves to
-	// on, "none" otherwise.
-	Mode          string `protobuf:"bytes,5,opt,name=mode,proto3" json:"mode,omitempty"`
+	// The form the next run sends (internal/thinking.Mode): "none" when the model does not think,
+	// "adaptive-summarized" or "default" for thinking on, "disabled" or "effort-none" for thinking off.
+	Mode string `protobuf:"bytes,5,opt,name=mode,proto3" json:"mode,omitempty"`
+	// Whether the effective model thinks whatever the setting. A UI then offers no off choice and says
+	// "this model always thinks"; setting "off" is refused with that message.
+	AlwaysThinks bool `protobuf:"varint,6,opt,name=always_thinks,json=alwaysThinks,proto3" json:"always_thinks,omitempty"`
+	// Whether the setting resolves to off and the model thinks anyway (it always thinks). The setting
+	// is kept for a model that can stop; runs think.
+	OffOverridden bool `protobuf:"varint,7,opt,name=off_overridden,json=offOverridden,proto3" json:"off_overridden,omitempty"`
+	// What a UI shows about the setting: "this model always thinks; your off setting doesn't apply"
+	// when off_overridden, empty otherwise.
+	Notice        string `protobuf:"bytes,8,opt,name=notice,proto3" json:"notice,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1501,6 +1510,27 @@ func (x *ThinkingState) GetSupported() bool {
 func (x *ThinkingState) GetMode() string {
 	if x != nil {
 		return x.Mode
+	}
+	return ""
+}
+
+func (x *ThinkingState) GetAlwaysThinks() bool {
+	if x != nil {
+		return x.AlwaysThinks
+	}
+	return false
+}
+
+func (x *ThinkingState) GetOffOverridden() bool {
+	if x != nil {
+		return x.OffOverridden
+	}
+	return false
+}
+
+func (x *ThinkingState) GetNotice() string {
+	if x != nil {
+		return x.Notice
 	}
 	return ""
 }
@@ -1924,13 +1954,16 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\x06source\x18\x04 \x01(\x0e2\".koinon.agent.v1alpha1.ModelSourceR\x06source\x12\x18\n" +
 	"\aproblem\x18\x05 \x01(\tR\aproblem\x12@\n" +
 	"\tavailable\x18\x06 \x03(\v2\".koinon.agent.v1alpha1.ServedModelR\tavailable\x12@\n" +
-	"\bthinking\x18\a \x01(\v2$.koinon.agent.v1alpha1.ThinkingStateR\bthinking\"\xa2\x01\n" +
+	"\bthinking\x18\a \x01(\v2$.koinon.agent.v1alpha1.ThinkingStateR\bthinking\"\x86\x02\n" +
 	"\rThinkingState\x12\x18\n" +
 	"\asetting\x18\x01 \x01(\tR\asetting\x12'\n" +
 	"\x0fversion_setting\x18\x02 \x01(\tR\x0eversionSetting\x12\x1c\n" +
 	"\teffective\x18\x03 \x01(\tR\teffective\x12\x1c\n" +
 	"\tsupported\x18\x04 \x01(\bR\tsupported\x12\x12\n" +
-	"\x04mode\x18\x05 \x01(\tR\x04mode\"^\n" +
+	"\x04mode\x18\x05 \x01(\tR\x04mode\x12#\n" +
+	"\ralways_thinks\x18\x06 \x01(\bR\falwaysThinks\x12%\n" +
+	"\x0eoff_overridden\x18\a \x01(\bR\roffOverridden\x12\x16\n" +
+	"\x06notice\x18\b \x01(\tR\x06notice\"^\n" +
 	"\x14SetAgentModelRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x14\n" +

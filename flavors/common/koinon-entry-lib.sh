@@ -37,9 +37,11 @@ koinon_extra_arg() { return 1; }
 # koinon_parse_args "$@": reads --model-base-url, --model and --mcp-url into base_url, model and
 # mcp_url (and the optional --session-id into session_id and --model-format into model_format,
 # default openai: the model's wire format, ADR 0069; the entry script maps it to a provider entry
-# and refuses a format it has none for; and --thinking into thinking, none or adaptive: the thinking
-# mode Koinon decided for the run, ADR 0069 amendment 2026-10-29, which the entry script renders so
-# the harness never guesses it from the model's ID), checks them, and sets koinon_shift to the number of arguments consumed (a trailing
+# and refuses a format it has none for; and --thinking into thinking: the thinking form Koinon
+# decided for the run, internal/thinking.Mode, ADR 0069 amendments 2026-10-29 and 2026-10-31, which
+# the entry script renders so the harness never guesses it from the model's ID: none, default,
+# adaptive-summarized, disabled or effort-none, the last three only on the format they belong to),
+# checks them, and sets koinon_shift to the number of arguments consumed (a trailing
 # -- included). The caller then runs `shift "$koinon_shift"`, which leaves the arguments for the
 # harness.
 koinon_parse_args() {
@@ -68,8 +70,14 @@ koinon_parse_args() {
   koinon_check_url --mcp-url "$mcp_url"
   check --model-format "$model_format"
   case $thinking in
-    '' | none | adaptive) ;;
-    *) koinon_die "--thinking must be none or adaptive: '$thinking'" ;;
+    '' | none | default) ;;
+    adaptive-summarized | disabled)
+      [ "$model_format" = anthropic ] || koinon_die "--thinking $thinking applies to --model-format anthropic only"
+      ;;
+    effort-none)
+      [ "$model_format" = openai ] || koinon_die "--thinking $thinking applies to --model-format openai only"
+      ;;
+    *) koinon_die "--thinking must be none, default, adaptive-summarized, disabled or effort-none: '$thinking'" ;;
   esac
   if [ -n "$session_id" ]; then
     check --session-id "$session_id"

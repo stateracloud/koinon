@@ -94,7 +94,7 @@ describe('AgentModel', () => {
 })
 
 describe('AgentThinking', () => {
-  const supported = { setting: '', versionSetting: '', effective: 'on', supported: true, mode: 'adaptive' }
+  const supported = { setting: '', versionSetting: '', effective: 'on', supported: true, mode: 'adaptive-summarized' }
 
   function setupThinking(thinking: MessageInitShape<typeof ThinkingStateSchema>) {
     const sets: SetAgentThinkingRequest[] = []
@@ -109,7 +109,7 @@ describe('AgentThinking', () => {
         setAgentThinking: (req) => {
           sets.push(req)
           const on = req.thinking === 'on'
-          current = { ...current, thinking: create(ThinkingStateSchema, { setting: req.thinking, versionSetting: '', effective: req.thinking, supported: true, mode: on ? 'adaptive' : 'none' }) }
+          current = { ...current, thinking: create(ThinkingStateSchema, { setting: req.thinking, versionSetting: '', effective: req.thinking, supported: true, mode: on ? 'adaptive-summarized' : 'disabled' }) }
           return { model: create(GetAgentModelResponseSchema, current) }
         },
       })
@@ -136,9 +136,33 @@ describe('AgentThinking', () => {
   })
 
   it("follows the version's value", async () => {
-    setupThinking({ setting: '', versionSetting: 'off', effective: 'off', supported: true, mode: 'none' })
+    setupThinking({ setting: '', versionSetting: 'off', effective: 'off', supported: true, mode: 'disabled' })
     expect(await screen.findByLabelText('Thinking')).toHaveValue('off')
     expect(screen.getByText(/From the agent's version \(its template\): off\./)).toBeInTheDocument()
+  })
+
+  it('says "this model always thinks" and offers no off choice for a model that always thinks', async () => {
+    setupThinking({ setting: '', versionSetting: '', effective: 'on', supported: true, mode: 'adaptive-summarized', alwaysThinks: true })
+    expect(await screen.findByText('This model always thinks.')).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Off' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save thinking' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/your off setting/)).not.toBeInTheDocument()
+  })
+
+  it("says a stored off doesn't apply when the model always thinks", async () => {
+    setupThinking({
+      setting: 'off',
+      versionSetting: '',
+      effective: 'off',
+      supported: true,
+      mode: 'adaptive-summarized',
+      alwaysThinks: true,
+      offOverridden: true,
+      notice: "this model always thinks; your off setting doesn't apply",
+    })
+    expect(await screen.findByText("This model always thinks; your off setting doesn't apply.")).toBeInTheDocument()
+    expect(screen.getByText('This model always thinks.')).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Off' })).not.toBeInTheDocument()
   })
 
   it('says "not supported by this model" and offers no choice for a model that cannot think', async () => {

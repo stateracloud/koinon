@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { AgentService, AgentStatus, ModelSource, type Agent, type GetAgentModelResponse } from '@/gen/koinon/agent/v1alpha1/agent_pb'
-import { defaultModelChoice, modelChoices, modelSourceLabel, thinkingSourceLabel } from '@/lib/agent-model'
+import { alwaysThinksText, defaultModelChoice, modelChoices, modelSourceLabel, offOverriddenText, sentence, thinkingSourceLabel } from '@/lib/agent-model'
 
 /**
  * AgentModel is where an admin or owner picks the model an agent runs on, and sees which model the
@@ -90,8 +90,9 @@ export function AgentModel({ agent }: { agent: Agent }) {
 /**
  * AgentThinking turns the agent's thinking on or off. Thinking is on unless somebody turns it off
  * (ADR 0069 amendment 2026-10-29). Like the model it is a setting of the agent, not a new version,
- * and it applies to the next run. A model that cannot think ignores it, and the section says so.
- * Thinking is billed as output.
+ * and it applies to the next run. A model that cannot think ignores it, and the section says so. A
+ * model that always thinks offers no off choice; an off stored earlier is kept for a model that can
+ * stop, and the section says it does not apply (#316). Thinking is billed as output.
  */
 function AgentThinking({ agent, model, archived }: { agent: Agent; model: GetAgentModelResponse; archived: boolean }) {
   const queryClient = useQueryClient()
@@ -113,6 +114,15 @@ function AgentThinking({ agent, model, archived }: { agent: Agent; model: GetAge
         <p id="agent-thinking-help" className="text-muted-foreground">
           Not supported by this model.
         </p>
+      ) : t.alwaysThinks ? (
+        <div id="agent-thinking-help" className="grid gap-1.5">
+          <p className="text-muted-foreground">{sentence(alwaysThinksText)}</p>
+          {t.offOverridden && (
+            <Alert role="status">
+              <AlertDescription>{sentence(t.notice || offOverriddenText)}</AlertDescription>
+            </Alert>
+          )}
+        </div>
       ) : (
         <>
           <NativeSelect id="agent-thinking-pick" value={value} onChange={(e) => setPicked(e.target.value)} disabled={archived} aria-describedby="agent-thinking-help">
