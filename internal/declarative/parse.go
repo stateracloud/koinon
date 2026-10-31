@@ -54,6 +54,8 @@ const (
 	KeyAPIKey   = "apiKey"
 	KeyProvider = "provider"
 	KeyModels   = "models"
+	// KeyAnthropicWorkspaceID is optional, for provider anthropic only (ADR 0069).
+	KeyAnthropicWorkspaceID = "anthropicWorkspaceId"
 )
 
 // Data keys of a connection Secret.
@@ -75,7 +77,9 @@ const maxValue = 64 << 10
 type modelEntry struct {
 	Name  string `yaml:"name"`
 	Guard bool   `yaml:"guard"`
-	Rates *struct {
+	// Format overrides the model's wire format; omitted means the default (ADR 0069).
+	Format string `yaml:"format"`
+	Rates  *struct {
 		Input     string `yaml:"input"`
 		Output    string `yaml:"output"`
 		CacheRead string `yaml:"cacheRead"`
@@ -88,6 +92,7 @@ func ParseProvider(sec *corev1.Secret, version string) (catalog.DeclaredProvider
 	d := catalog.DeclaredProvider{
 		SecretName: sec.Name, Version: version,
 		Name: get(KeyName), Type: get(KeyProvider), URL: get(KeyURL), APIKey: get(KeyAPIKey),
+		AnthropicWorkspaceID: get(KeyAnthropicWorkspaceID),
 	}
 	var errs []error
 	for _, k := range []string{KeyName, KeyURL, KeyProvider} {
@@ -99,6 +104,9 @@ func ParseProvider(sec *corev1.Secret, version string) (catalog.DeclaredProvider
 		if err := catalog.ValidateProvider(d.Name, d.Type, d.URL); err != nil {
 			errs = append(errs, err)
 		}
+		if err := catalog.ValidateWorkspaceID(d.Type, d.AnthropicWorkspaceID); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if raw := sec.Data[KeyModels]; len(bytes.TrimSpace(raw)) > 0 {
 		if len(raw) > maxValue {
@@ -108,13 +116,13 @@ func ParseProvider(sec *corev1.Secret, version string) (catalog.DeclaredProvider
 			dec := yaml.NewDecoder(bytes.NewReader(raw))
 			dec.KnownFields(true)
 			if err := dec.Decode(&entries); err != nil {
-				errs = append(errs, fmt.Errorf("%s is not a YAML list of {name, guard, rates}: %w", KeyModels, yamlErr(err)))
+				errs = append(errs, fmt.Errorf("%s is not a YAML list of {name, guard, format}: %w", KeyModels, yamlErr(err)))
 			}
 			for _, e := range entries {
 				if e.Rates != nil {
 					d.Warnings = append(d.Warnings, fmt.Sprintf("model %q: rates are ignored; per-model rates were replaced by org prices (add one on the Prices page)", e.Name))
 				}
-				d.Models = append(d.Models, catalog.DeclaredModel{Name: e.Name, Guard: e.Guard})
+				d.Models = append(d.Models, catalog.DeclaredModel{Name: e.Name, Guard: e.Guard, Format: e.Format})
 			}
 		}
 	}
@@ -122,6 +130,9 @@ func ParseProvider(sec *corev1.Secret, version string) (catalog.DeclaredProvider
 		// Validate the models now, so an invalid Secret is reported before anything is applied.
 		for _, m := range d.Models {
 			if err := catalog.ValidateModel(m.Name, m.Guard, d.Type); err != nil {
+				errs = append(errs, fmt.Errorf("model %q: %w", m.Name, err))
+			}
+			if err := catalog.ValidateModelFormat(d.Type, m.Format); err != nil {
 				errs = append(errs, fmt.Errorf("model %q: %w", m.Name, err))
 			}
 		}

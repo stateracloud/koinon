@@ -15,11 +15,29 @@ type Endpoints = endpoints
 
 var LaunchCommand = launchCommand
 
+// ModelOption exposes the model value agentd selects for the session.
+var ModelOption = modelOption
+
 // ClassifyError and StopClass expose the failure classification to the external test package.
 func ClassifyError(err error) (class string, retryAfter time.Duration) {
 	c := classifyPromptError(err)
 	return string(c.class), c.retryAfter
 }
+
+// ClassifyGateway reports whether the error is a gateway refusal (401 or 429).
+func ClassifyGateway(err error) bool { return classifyPromptError(err).gateway }
+
+// RefusedByProvider applies the gateway's record of a provider refusal to the failure the harness's
+// error classifies as, and returns the class, whether it still counts as a gateway refusal, and the
+// reason.
+func RefusedByProvider(err error, status int, providerType string) (class string, gateway bool, reason string) {
+	f := classFailure("session/prompt", err)
+	f = refusedByProvider(f, providerRefusal{status: status, providerType: providerType})
+	return string(f.class), f.gateway, f.reason
+}
+
+// IsAuthLike reports whether the error is one the gateway's record can improve.
+func IsAuthLike(err error) bool { return classFailure("session/prompt", err).authLike }
 
 func StopClass(stop acp.StopReason) string { return string(stopFailure(stop).class) }
 
@@ -58,4 +76,19 @@ func RetryNote(class string) string { return fmt.Sprintf(retryNote, class) }
 
 // InstructionsFile exposes the instruction file's content for a version's instructions to the
 // golden tests.
-func InstructionsFile(instructions string) string { return string(instructionsFile(instructions)) }
+func InstructionsFile(instructions, cwd string, repos ...Repository) string {
+	return string(instructionsFile(instructions, cwd, repos, false))
+}
+
+// InstructionsFileWithWeb is InstructionsFile for an agent with web egress.
+func InstructionsFileWithWeb(instructions, cwd string, repos ...Repository) string {
+	return string(instructionsFile(instructions, cwd, repos, true))
+}
+
+// Repository is a granted repository as the instruction file lists it.
+type Repository = repository
+
+// RefusalNote and Refusal expose the prompt that continues a turn after refused requests.
+type Refusal = refusal
+
+func RefusalNote(refs []Refusal, cwd string) string { return refusalNote(refs, cwd) }

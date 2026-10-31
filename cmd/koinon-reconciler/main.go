@@ -35,12 +35,15 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 func main() {
@@ -135,14 +138,25 @@ func run() error {
 	ready.Store(true)
 	safego.GoOrStop(ctx, log, "keyring-watch-dir", stop, func(ctx context.Context) { keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log) })
 
+	observer, err := newSandboxObserver(cfg, kube, log)
+	if err != nil {
+		return err
+	}
+
 	reg := metrics.NewRegistry()
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, log); err != nil {
+		return err
+	}
+	// One price list for the reconciler and the settler.
+	priceResolver := prices.NewResolver(pricing.Embedded())
+	if err := catalog.ValidateAllowedHosts(splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)); err != nil {
 		return err
 	}
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
 			Gateway:           endpoint,
+			Prices:            priceResolver,
 			Keys:              keyring,
 			ProviderKeys:      reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
 			ProviderKeyDir:    cfg.providerKeysDir,
@@ -165,12 +179,20 @@ func run() error {
 				Keys:   keyring,
 				Client: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL}),
 			},
-			Logger:  log,
-			Metrics: reconciler.NewMetrics(reg),
+			Observer: observer,
+			Logger:   log,
+			Metrics:  reconciler.NewMetrics(reg),
 		})
 	if err != nil {
 		return err
 	}
+	// Responses cut short are settled with their provider's own usage (ADR 0056, amendment
+	// 2026-10-28). It runs on every replica: a settlement is claimed with SKIP LOCKED.
+	settler := &ledger.Settler{DB: pool, Keys: keyring, Prices: priceResolver, Log: log}
+	if err := settler.Validate(); err != nil {
+		return err
+	}
+	safego.Go(ctx, log, "spend-settler", settler.Run)
 	err = r.Run(ctx)
 	log.Info("stopping koinon-reconciler")
 	return err
@@ -190,6 +212,26 @@ func restConfig(kubeconfig string) (*rest.Config, error) {
 		return nil, fmt.Errorf("kubernetes client config: %w", err)
 	}
 	return rc, nil
+}
+
+// newSandboxObserver builds the sandbox observer (ADR 0078), or nil when it is off.
+func newSandboxObserver(cfg config, kube kubernetes.Interface, log *slog.Logger) (*reconciler.SandboxObserver, error) {
+	if !cfg.sandboxObserver {
+		log.Warn("the sandbox observer is off: a sandbox that cannot pull its image or keeps crashing shows only OpenShell's reason, so its wait cause stays unknown")
+		return nil, nil
+	}
+	rc, err := restConfig(cfg.kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+	dyn, err := dynamic.NewForConfig(rc)
+	if err != nil {
+		return nil, err
+	}
+	return &reconciler.SandboxObserver{
+		Kube: kube, Dynamic: dyn, GatewayID: cfg.openshellGateway, ClusterRole: cfg.sandboxObserverClusterRole,
+		ServiceAccount: cfg.sandboxObserverServiceAccount, ServiceAccountNamespace: cfg.namespace, Log: log,
+	}, nil
 }
 
 func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
@@ -233,13 +275,21 @@ func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (
 			},
 		}
 		if cfg.accessLogOTLP != "" {
-			driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP}
+			if cfg.otlpTokenFile == "" {
+				return nil, errors.New("--gateway-access-log-otlp-token-file is required with --gateway-access-log-otlp: the OTLP receiver refuses requests without its bearer token")
+			}
+			driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP, TokenFile: cfg.otlpTokenFile}
 		} else {
 			log.Warn("no --gateway-access-log-otlp: the spend ledger records nothing and spend limits are not netted")
 		}
 		// Reloads are detected on the data plane, with the revision's probe key; agentgateway's
 		// admin listener stays on localhost.
-		driver.Waiter = standalone.ProbeWaiter{GatewayURL: cfg.gatewayURL, StatsURL: cfg.gatewayStatsURL, Log: log}
+		// agentgateway reports a refused config only in its log, so the waiter reads the gateway
+		// pods' logs for the reason (ADR 0050, amendment 2026-10-29).
+		driver.Waiter = standalone.ProbeWaiter{
+			GatewayURL: cfg.gatewayURL, StatsURL: cfg.gatewayStatsURL, Log: log,
+			Reload: standalone.PodLogReload{Client: kube, Namespace: cfg.namespace, Deployment: cfg.gatewayDeployment},
+		}
 		return driver, nil
 	case project.GatewayKubernetes:
 		rc, err := restConfig(cfg.kubeconfig)
@@ -264,7 +314,14 @@ func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (
 			Log:    log,
 		}
 		if cfg.accessLogOTLP != "" {
-			driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP}
+			if cfg.otlpTokenSecret == "" {
+				return nil, errors.New("--gateway-access-log-otlp-token-secret is required with --gateway-access-log-otlp: the OTLP receiver refuses requests without its bearer token")
+			}
+			export := &standalone.OTLPExport{HostPort: cfg.accessLogOTLP, TokenSecret: cfg.otlpTokenSecret, TokenSecretKey: "token"}
+			if _, _, err := export.SplitHostPort(); err != nil {
+				return nil, fmt.Errorf("--gateway-access-log-otlp: %w; the token cannot be attached to a malformed receiver", err)
+			}
+			driver.Options.AccessLogOTLP = export
 		} else {
 			log.Warn("no --gateway-access-log-otlp: the spend ledger records nothing, so budgets cannot revoke keys")
 		}

@@ -47,7 +47,7 @@ func (q *Queries) ListActiveVersionConfigs(ctx context.Context, orgID pgtype.UUI
 const listAgentSpendSince = `-- name: ListAgentSpendSince :many
 SELECT agent_id, coalesce(sum(cost_usd), 0)::text AS cost_usd
 FROM spend_entries
-WHERE org_id = $1 AND occurred_at >= $2
+WHERE org_id = $1 AND principal = 'agent' AND occurred_at >= $2
 GROUP BY agent_id
 `
 

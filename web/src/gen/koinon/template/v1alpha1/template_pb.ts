@@ -7,13 +7,15 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { OrgRole } from "../../auth/v1alpha1/auth_pb";
+import { file_koinon_auth_v1alpha1_auth } from "../../auth/v1alpha1/auth_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file koinon/template/v1alpha1/template.proto.
  */
 export const file_koinon_template_v1alpha1_template: GenFile = /*@__PURE__*/
-  fileDesc("Cidrb2lub24vdGVtcGxhdGUvdjFhbHBoYTEvdGVtcGxhdGUucHJvdG8SGGtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMSLEAQoFR3JhbnQSEQoJY29ubmVjdG9yGAEgASgJEg4KBnNjb3BlcxgCIAMoCRIwCgZwcmVzZXQYAyABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUHJlc2V0EhMKC3RhcmdldHNfbWluGAQgASgFEhMKC3RhcmdldHNfbWF4GAUgASgFEg8KB3B1cnBvc2UYBiABKAkSFQoNY29ubmVjdGlvbl9pZBgHIAEoCRIUCgxyZXBvc2l0b3JpZXMYCCADKAkiPQoJUnVuTGltaXRzEhwKFG1heF9kdXJhdGlvbl9zZWNvbmRzGAEgASgDEhIKCm1heF90b2tlbnMYAiABKAMifwoHVHJpZ2dlchIKCgJpZBgBIAEoCRIzCgR0eXBlGAIgASgOMiUua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLlRyaWdnZXJUeXBlEgwKBGNyb24YAyABKAkSEAoIdGltZXpvbmUYBCABKAkSEwoLaW5zdHJ1Y3Rpb24YBSABKAki2wMKCFRlbXBsYXRlEgoKAmlkGAEgASgJEgwKBHNsdWcYAiABKAkSFAoMY29udGVudF9oYXNoGAMgASgJEg8KB3ZlcnNpb24YBCABKAkSFAoMZGlzcGxheV9uYW1lGAUgASgJEhMKC2Rlc2NyaXB0aW9uGAYgASgJEjkKD2FsbG93ZWRfZmxhdm9ycxgHIAMoDjIgLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5GbGF2b3ISOAoOZGVmYXVsdF9mbGF2b3IYCCABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuRmxhdm9yEg0KBW1vZGVsGAkgASgJEhQKDGluc3RydWN0aW9ucxgKIAEoCRIvCgZncmFudHMYCyADKAsyHy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuR3JhbnQSNwoKcnVuX2xpbWl0cxgMIAEoCzIjLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5SdW5MaW1pdHMSFwoPc3BlbmRfbGltaXRfdXNkGA0gASgJEjMKCHRyaWdnZXJzGA4gAygLMiEua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLlRyaWdnZXISEQoJZXBoZW1lcmFsGA8gASgIIhYKFExpc3RUZW1wbGF0ZXNSZXF1ZXN0Ik4KFUxpc3RUZW1wbGF0ZXNSZXNwb25zZRI1Cgl0ZW1wbGF0ZXMYASADKAsyIi5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuVGVtcGxhdGUqXwoGRmxhdm9yEhYKEkZMQVZPUl9VTlNQRUNJRklFRBAAEhMKD0ZMQVZPUl9PUEVOQ09ERRABEhUKDUZMQVZPUl9IRVJNRVMQAhoCCAESEQoJRkxBVk9SX1BJEAMaAggBKl8KBlByZXNldBIWChJQUkVTRVRfVU5TUEVDSUZJRUQQABIUChBQUkVTRVRfUkVBRF9PTkxZEAESEwoPUFJFU0VUX1NUQU5EQVJEEAISEgoOUFJFU0VUX1RSVVNURUQQAyqpAQoLVHJpZ2dlclR5cGUSHAoYVFJJR0dFUl9UWVBFX1VOU1BFQ0lGSUVEEAASGQoVVFJJR0dFUl9UWVBFX1NDSEVEVUxFEAESHwobVFJJR0dFUl9UWVBFX0RJUkVDVF9NRVNTQUdFEAISIAocVFJJR0dFUl9UWVBFX0NPREVfSE9TVF9FVkVOVBADEh4KGlRSSUdHRVJfVFlQRV9DSEFOTkVMX0VWRU5UEAQyiAEKD1RlbXBsYXRlU2VydmljZRJ1Cg1MaXN0VGVtcGxhdGVzEi4ua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkxpc3RUZW1wbGF0ZXNSZXF1ZXN0Gi8ua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkxpc3RUZW1wbGF0ZXNSZXNwb25zZSIDkAIBQldaVWdpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL3RlbXBsYXRlL3YxYWxwaGExO3RlbXBsYXRldjFhbHBoYTFiBnByb3RvMw");
+  fileDesc("Cidrb2lub24vdGVtcGxhdGUvdjFhbHBoYTEvdGVtcGxhdGUucHJvdG8SGGtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMSLEAQoFR3JhbnQSEQoJY29ubmVjdG9yGAEgASgJEg4KBnNjb3BlcxgCIAMoCRIwCgZwcmVzZXQYAyABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUHJlc2V0EhMKC3RhcmdldHNfbWluGAQgASgFEhMKC3RhcmdldHNfbWF4GAUgASgFEg8KB3B1cnBvc2UYBiABKAkSFQoNY29ubmVjdGlvbl9pZBgHIAEoCRIUCgxyZXBvc2l0b3JpZXMYCCADKAkidAoJUnVuTGltaXRzEhwKFG1heF9kdXJhdGlvbl9zZWNvbmRzGAEgASgDEhYKCm1heF90b2tlbnMYAiABKANCAhgBEhoKEm1heF9tb2RlbF9yZXF1ZXN0cxgDIAEoAxIVCg1tYXhfc3BlbmRfdXNkGAQgASgJIrcBCgdUcmlnZ2VyEgoKAmlkGAEgASgJEjMKBHR5cGUYAiABKA4yJS5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuVHJpZ2dlclR5cGUSDAoEY3JvbhgDIAEoCRIQCgh0aW1lem9uZRgEIAEoCRITCgtpbnN0cnVjdGlvbhgFIAEoCRI2CgZub3RpZnkYBiABKAsyJi5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuTm90aWZ5VGFyZ2V0IpoBCgxOb3RpZnlUYXJnZXQSOAoEa2luZBgBIAEoDjIqLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5Ob3RpZnlUYXJnZXRLaW5kEg8KB3VzZXJfaWQYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmtvaW5vbi5hdXRoLnYxYWxwaGExLk9yZ1JvbGUSEgoKY2hhbm5lbF9pZBgEIAEoCSLtAwoIVGVtcGxhdGUSCgoCaWQYASABKAkSDAoEc2x1ZxgCIAEoCRIUCgxjb250ZW50X2hhc2gYAyABKAkSDwoHdmVyc2lvbhgEIAEoCRIUCgxkaXNwbGF5X25hbWUYBSABKAkSEwoLZGVzY3JpcHRpb24YBiABKAkSOQoPYWxsb3dlZF9mbGF2b3JzGAcgAygOMiAua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkZsYXZvchI4Cg5kZWZhdWx0X2ZsYXZvchgIIAEoDjIgLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5GbGF2b3ISDQoFbW9kZWwYCSABKAkSFAoMaW5zdHJ1Y3Rpb25zGAogASgJEi8KBmdyYW50cxgLIAMoCzIfLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5HcmFudBI3CgpydW5fbGltaXRzGAwgASgLMiMua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLlJ1bkxpbWl0cxIXCg9zcGVuZF9saW1pdF91c2QYDSABKAkSMwoIdHJpZ2dlcnMYDiADKAsyIS5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuVHJpZ2dlchIRCgllcGhlbWVyYWwYDyABKAgSEAoIdGhpbmtpbmcYECABKAkiFgoUTGlzdFRlbXBsYXRlc1JlcXVlc3QiTgoVTGlzdFRlbXBsYXRlc1Jlc3BvbnNlEjUKCXRlbXBsYXRlcxgBIAMoCzIiLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5UZW1wbGF0ZSpfCgZGbGF2b3ISFgoSRkxBVk9SX1VOU1BFQ0lGSUVEEAASEwoPRkxBVk9SX09QRU5DT0RFEAESFQoNRkxBVk9SX0hFUk1FUxACGgIIARIRCglGTEFWT1JfUEkQAxoCCAEqXwoGUHJlc2V0EhYKElBSRVNFVF9VTlNQRUNJRklFRBAAEhQKEFBSRVNFVF9SRUFEX09OTFkQARITCg9QUkVTRVRfU1RBTkRBUkQQAhISCg5QUkVTRVRfVFJVU1RFRBADKqkBCgtUcmlnZ2VyVHlwZRIcChhUUklHR0VSX1RZUEVfVU5TUEVDSUZJRUQQABIZChVUUklHR0VSX1RZUEVfU0NIRURVTEUQARIfChtUUklHR0VSX1RZUEVfRElSRUNUX01FU1NBR0UQAhIgChxUUklHR0VSX1RZUEVfQ09ERV9IT1NUX0VWRU5UEAMSHgoaVFJJR0dFUl9UWVBFX0NIQU5ORUxfRVZFTlQQBCqQAQoQTm90aWZ5VGFyZ2V0S2luZBIiCh5OT1RJRllfVEFSR0VUX0tJTkRfVU5TUEVDSUZJRUQQABIbChdOT1RJRllfVEFSR0VUX0tJTkRfVVNFUhABEhsKF05PVElGWV9UQVJHRVRfS0lORF9ST0xFEAISHgoaTk9USUZZX1RBUkdFVF9LSU5EX0NIQU5ORUwQAzKIAQoPVGVtcGxhdGVTZXJ2aWNlEnUKDUxpc3RUZW1wbGF0ZXMSLi5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuTGlzdFRlbXBsYXRlc1JlcXVlc3QaLy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuTGlzdFRlbXBsYXRlc1Jlc3BvbnNlIgOQAgFCV1pVZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vdGVtcGxhdGUvdjFhbHBoYTE7dGVtcGxhdGV2MWFscGhhMWIGcHJvdG8z", [file_koinon_auth_v1alpha1_auth]);
 
 /**
  * Grant is a grant on a connector type. On a template or a draft agent it is a
@@ -80,7 +82,7 @@ export const GrantSchema: GenMessage<Grant> = /*@__PURE__*/
   messageDesc(file_koinon_template_v1alpha1_template, 0);
 
 /**
- * RunLimits cap a single run; hitting one cancels the run (plan item A4).
+ * RunLimits cap a single run; the first one reached cancels it (plan item A4, ADR 0081).
  *
  * @generated from message koinon.template.v1alpha1.RunLimits
  */
@@ -93,9 +95,28 @@ export type RunLimits = Message<"koinon.template.v1alpha1.RunLimits"> & {
   maxDurationSeconds: bigint;
 
   /**
-   * @generated from field: int64 max_tokens = 2;
+   * Deprecated: tokens are reported, not enforced (ADR 0081). Kept so older clients and stored
+   * templates still decode; it caps nothing and is zero on new templates and agents.
+   *
+   * @generated from field: int64 max_tokens = 2 [deprecated = true];
+   * @deprecated
    */
   maxTokens: bigint;
+
+  /**
+   * Model requests a run may make: every request through the agent's key counts, the harness's
+   * own title, summary and compaction calls included.
+   *
+   * @generated from field: int64 max_model_requests = 3;
+   */
+  maxModelRequests: bigint;
+
+  /**
+   * USD a run may spend, by the ledger's settled cost, as an exact decimal string such as "2.00".
+   *
+   * @generated from field: string max_spend_usd = 4;
+   */
+  maxSpendUsd: string;
 };
 
 /**
@@ -144,6 +165,14 @@ export type Trigger = Message<"koinon.template.v1alpha1.Trigger"> & {
    * @generated from field: string instruction = 5;
    */
   instruction: string;
+
+  /**
+   * Who is asked when the agent asks a person without naming one. Every type but direct_message
+   * (which asks the person in the chat). Unset: the org's default, today its admins and owners.
+   *
+   * @generated from field: koinon.template.v1alpha1.NotifyTarget notify = 6;
+   */
+  notify?: NotifyTarget | undefined;
 };
 
 /**
@@ -152,6 +181,46 @@ export type Trigger = Message<"koinon.template.v1alpha1.Trigger"> & {
  */
 export const TriggerSchema: GenMessage<Trigger> = /*@__PURE__*/
   messageDesc(file_koinon_template_v1alpha1_template, 2);
+
+/**
+ * NotifyTarget is who is asked when the agent asks a person without naming one.
+ *
+ * @generated from message koinon.template.v1alpha1.NotifyTarget
+ */
+export type NotifyTarget = Message<"koinon.template.v1alpha1.NotifyTarget"> & {
+  /**
+   * @generated from field: koinon.template.v1alpha1.NotifyTargetKind kind = 1;
+   */
+  kind: NotifyTargetKind;
+
+  /**
+   * Kind USER: the user's ID.
+   *
+   * @generated from field: string user_id = 2;
+   */
+  userId: string;
+
+  /**
+   * Kind ROLE: MEMBER, ADMIN or OWNER.
+   *
+   * @generated from field: koinon.auth.v1alpha1.OrgRole role = 3;
+   */
+  role: OrgRole;
+
+  /**
+   * Kind CHANNEL (v0.2): must be empty until then.
+   *
+   * @generated from field: string channel_id = 4;
+   */
+  channelId: string;
+};
+
+/**
+ * Describes the message koinon.template.v1alpha1.NotifyTarget.
+ * Use `create(NotifyTargetSchema)` to create a new message.
+ */
+export const NotifyTargetSchema: GenMessage<NotifyTarget> = /*@__PURE__*/
+  messageDesc(file_koinon_template_v1alpha1_template, 3);
 
 /**
  * Template is one version of an agent template.
@@ -248,6 +317,14 @@ export type Template = Message<"koinon.template.v1alpha1.Template"> & {
    * @generated from field: bool ephemeral = 15;
    */
   ephemeral: boolean;
+
+  /**
+   * The starting value of the agent's thinking setting, "on" or "off"; empty when the template
+   * names none, which is the default, on (ADR 0069 amendment 2026-10-29).
+   *
+   * @generated from field: string thinking = 16;
+   */
+  thinking: string;
 };
 
 /**
@@ -255,7 +332,7 @@ export type Template = Message<"koinon.template.v1alpha1.Template"> & {
  * Use `create(TemplateSchema)` to create a new message.
  */
 export const TemplateSchema: GenMessage<Template> = /*@__PURE__*/
-  messageDesc(file_koinon_template_v1alpha1_template, 3);
+  messageDesc(file_koinon_template_v1alpha1_template, 4);
 
 /**
  * ListTemplatesRequest is empty.
@@ -270,7 +347,7 @@ export type ListTemplatesRequest = Message<"koinon.template.v1alpha1.ListTemplat
  * Use `create(ListTemplatesRequestSchema)` to create a new message.
  */
 export const ListTemplatesRequestSchema: GenMessage<ListTemplatesRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_template_v1alpha1_template, 4);
+  messageDesc(file_koinon_template_v1alpha1_template, 5);
 
 /**
  * ListTemplatesResponse lists the templates, sorted by slug.
@@ -289,7 +366,7 @@ export type ListTemplatesResponse = Message<"koinon.template.v1alpha1.ListTempla
  * Use `create(ListTemplatesResponseSchema)` to create a new message.
  */
 export const ListTemplatesResponseSchema: GenMessage<ListTemplatesResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_template_v1alpha1_template, 5);
+  messageDesc(file_koinon_template_v1alpha1_template, 6);
 
 /**
  * Flavor is the harness an agent runs on (ADR 0035).
@@ -403,6 +480,45 @@ export enum TriggerType {
  */
 export const TriggerTypeSchema: GenEnum<TriggerType> = /*@__PURE__*/
   enumDesc(file_koinon_template_v1alpha1_template, 2);
+
+/**
+ * NotifyTargetKind says who a trigger's task asks (ADR 0066 amendment 2026-10-28).
+ *
+ * @generated from enum koinon.template.v1alpha1.NotifyTargetKind
+ */
+export enum NotifyTargetKind {
+  /**
+   * @generated from enum value: NOTIFY_TARGET_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * One member of the org.
+   *
+   * @generated from enum value: NOTIFY_TARGET_KIND_USER = 1;
+   */
+  USER = 1,
+
+  /**
+   * Everyone with the role or higher (member, admin or owner).
+   *
+   * @generated from enum value: NOTIFY_TARGET_KIND_ROLE = 2;
+   */
+  ROLE = 2,
+
+  /**
+   * A chat channel. Reserved for v0.2; refused until chat connectors exist.
+   *
+   * @generated from enum value: NOTIFY_TARGET_KIND_CHANNEL = 3;
+   */
+  CHANNEL = 3,
+}
+
+/**
+ * Describes the enum koinon.template.v1alpha1.NotifyTargetKind.
+ */
+export const NotifyTargetKindSchema: GenEnum<NotifyTargetKind> = /*@__PURE__*/
+  enumDesc(file_koinon_template_v1alpha1_template, 3);
 
 /**
  * TemplateService lists the agent templates shipped with Koinon (ADR 0020).

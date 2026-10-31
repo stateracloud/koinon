@@ -12,11 +12,14 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/triggers"
 	"github.com/stateracloud/koinon/internal/triggers/schedule"
+	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -32,7 +35,7 @@ type replica struct {
 func startReplica(ctx context.Context, start time.Time) *replica {
 	GinkgoHelper()
 	r := startUnbound(ctx, start)
-	r.sched.Bind(services.New(pool, services.Options{}))
+	r.sched.Bind(services.New(pool, services.Options{Prices: pricing.Embedded()}))
 	return r
 }
 
@@ -174,6 +177,40 @@ var _ = Describe("schedule triggers", func() {
 		Eventually(func() int { return tasksOf(ctx, org) }, "20s", "100ms").Should(Equal(2))
 	}, SpecTimeout(2*time.Minute))
 
+	It("creates a manual fire's task exactly as a scheduled fire's, apart from the marker", func(ctx SpecContext) {
+		agent := newAgent(ctx, org, cronTrigger("hourly", "0 * * * *"))
+		due := hourAfterNow()
+		start := due.Add(schedule.Jitter(agent.ID, due))
+		r := startReplica(ctx, due.Add(-time.Minute))
+		DeferCleanup(r.stop)
+		r.tick(ctx, due.Add(-time.Minute))
+		r.tick(ctx, start.Add(time.Second))
+		Eventually(func() int { return tasksOf(ctx, org) }, "20s", "100ms").Should(Equal(1))
+
+		svc := services.New(pool, services.Options{Prices: pricing.Embedded()})
+		manual, err := svc.RunScheduleTrigger(ctx, triggers.RunNow{Org: org, Agent: agent.ID, Trigger: "hourly", Actor: audit.System()})
+		Expect(err).NotTo(HaveOccurred())
+
+		shape := func(task pgtype.UUID) map[string]string {
+			out := map[string]string{}
+			var creator, origin, trigger, text, fire, state string
+			Expect(pool.QueryRow(ctx, `SELECT t.created_by_kind::text, coalesce(t.created_by_trigger_id::text, ''), r.origin::text, r.state::text
+				FROM tasks t JOIN runs r ON r.org_id = t.org_id AND r.task_id = t.id WHERE t.id = $1`, task).Scan(&creator, &trigger, &origin, &state)).To(Succeed())
+			Expect(pool.QueryRow(ctx, `SELECT payload->>'text', coalesce(payload->>'fire', '') FROM task_events WHERE task_id = $1 AND kind = 'message'`, task).Scan(&text, &fire)).To(Succeed())
+			out["creator"], out["trigger"], out["origin"], out["text"], out["fire"], out["state"] = creator, trigger, origin, text, fire, state
+			return out
+		}
+		var scheduled pgtype.UUID
+		Expect(pool.QueryRow(ctx, `SELECT id FROM tasks WHERE org_id = $1 AND id <> $2`, org, manual.ID).Scan(&scheduled)).To(Succeed())
+		sched, man := shape(scheduled), shape(manual.ID)
+		Expect(sched["fire"]).To(Equal(triggers.FireScheduled))
+		Expect(man["fire"]).To(Equal(triggers.FireManual))
+		delete(sched, "fire")
+		delete(man, "fire")
+		Expect(man).To(Equal(sched), "creator trigger, the same trigger, scheduled origin, queued, the trigger's instruction")
+		Expect(man["trigger"]).To(Equal(triggers.UUID(agent.ID, "hourly").String()))
+	}, SpecTimeout(2*time.Minute))
+
 	It("starts many agents due in the same minute spread over 30 seconds, not all at once", func(ctx SpecContext) {
 		const n = 30
 		agents := make([]store.Agent, n)
@@ -278,8 +315,41 @@ var _ = Describe("schedule triggers", func() {
 		_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: v.ID})
 		Expect(err).NotTo(HaveOccurred())
 
-		r.sched.Bind(services.New(pool, services.Options{}))
+		r.sched.Bind(services.New(pool, services.Options{Prices: pricing.Embedded()}))
 		Eventually(func() int { return tasksOf(ctx, org) }, "20s", "100ms").Should(Equal(1))
+	}, SpecTimeout(time.Minute))
+
+	It("gives the task the notify target of the trigger in effect at the fire, not at the enqueue", func(ctx SpecContext) {
+		withNotify := func(n *templates.NotifyTarget) templates.Trigger {
+			tr := cronTrigger("hourly", "0 * * * *")
+			tr.Notify = n
+			return tr
+		}
+		agent := newAgent(ctx, org, withNotify(&templates.NotifyTarget{Kind: templates.NotifyRole, Role: store.OrgRoleAdmin}))
+		due := hourAfterNow()
+		start := due.Add(schedule.Jitter(agent.ID, due))
+		r := startUnbound(ctx, due.Add(-time.Minute))
+		DeferCleanup(r.stop)
+		r.tick(ctx, due.Add(-time.Minute))
+		r.tick(ctx, start.Add(time.Second)) // enqueued; the fire waits for the creator
+
+		// A new version with the same cron, timezone and instruction, and another notify target.
+		raw, err := agentconfig.Config{Instructions: "do the job", Triggers: []templates.Trigger{
+			withNotify(&templates.NotifyTarget{Kind: templates.NotifyRole, Role: store.OrgRoleOwner}),
+		}}.Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		q := store.New(pool)
+		v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: agent.ID, Config: raw})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: v.ID})
+		Expect(err).NotTo(HaveOccurred())
+
+		r.sched.Bind(services.New(pool, services.Options{Prices: pricing.Embedded()}))
+		Eventually(func() int { return tasksOf(ctx, org) }, "20s", "100ms").Should(Equal(1))
+		var kind, role string
+		Expect(pool.QueryRow(ctx, `SELECT notify_kind::text, notify_role::text FROM tasks WHERE org_id = $1`, org).Scan(&kind, &role)).To(Succeed())
+		Expect(kind).To(Equal("role"))
+		Expect(role).To(Equal("owner"))
 	}, SpecTimeout(time.Minute))
 
 	It("skips an agent whose config does not parse instead of failing the tick", func(ctx SpecContext) {
@@ -308,14 +378,14 @@ var _ = Describe("schedule triggers", func() {
 	})
 })
 
-var _ = Describe("Jitter and TriggerUUID", func() {
+var _ = Describe("Jitter and the trigger UUID", func() {
 	It("are deterministic and keyed by the agent", func() {
 		a, b := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}, pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
 		due := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
 		Expect(schedule.Jitter(a, due)).To(Equal(schedule.Jitter(a, due)))
 		Expect(schedule.Jitter(a, due)).NotTo(Equal(schedule.Jitter(b, due)))
-		Expect(schedule.TriggerUUID(a, "x")).To(Equal(schedule.TriggerUUID(a, "x")))
-		Expect(schedule.TriggerUUID(a, "x")).NotTo(Equal(schedule.TriggerUUID(b, "x")))
-		Expect(schedule.TriggerUUID(a, "x")).NotTo(Equal(schedule.TriggerUUID(a, "y")))
+		Expect(triggers.UUID(a, "x")).To(Equal(triggers.UUID(a, "x")))
+		Expect(triggers.UUID(a, "x")).NotTo(Equal(triggers.UUID(b, "x")))
+		Expect(triggers.UUID(a, "x")).NotTo(Equal(triggers.UUID(a, "y")))
 	})
 })

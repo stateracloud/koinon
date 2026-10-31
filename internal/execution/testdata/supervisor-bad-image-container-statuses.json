@@ -1,0 +1,39 @@
+[
+    {
+        "image": "kind.local/koinon-escape/supervisor:nope",
+        "imageID": "",
+        "lastState": {},
+        "name": "supervisor",
+        "ready": false,
+        "restartCount": 0,
+        "started": false,
+        "state": {
+            "waiting": {
+                "message": "failed to pull and unpack image \"kind.local/koinon-escape/supervisor:nope\": failed to resolve reference \"kind.local/koinon-escape/supervisor:nope\": failed to do request: Head \"https://kind.local/v2/koinon-escape/supervisor/manifests/nope\": dial tcp: lookup kind.local on 0.250.250.254:53: server misbehaving",
+                "reason": "ErrImagePull"
+            }
+        },
+        "volumeMounts": [
+            {
+                "mountPath": "/.openshell/supervisor",
+                "name": "bootstrap",
+                "readOnly": true,
+                "recursiveReadOnly": "Disabled"
+            },
+            {
+                "mountPath": "/var/run/secrets/openshell",
+                "name": "sa-token",
+                "readOnly": true,
+                "recursiveReadOnly": "Disabled"
+            },
+            {
+                "mountPath": "/run/openshell",
+                "name": "run"
+            },
+            {
+                "mountPath": "/var/log",
+                "name": "logs"
+            }
+        ]
+    }
+]

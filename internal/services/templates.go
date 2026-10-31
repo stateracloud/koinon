@@ -10,6 +10,7 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 
+	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/db/store"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
@@ -64,13 +65,12 @@ func templateProto(row store.Template, t *templates.Template) *templatev1alpha1.
 		DisplayName:  row.DisplayName,
 		Description:  row.Description,
 		Model:        t.Spec.Model.Name,
+		Thinking:     t.Spec.Model.Thinking,
 		Instructions: t.Spec.Instructions,
 		Grants:       grantsProto(t.Spec.Grants),
 		Triggers:     triggersProto(t.Spec.Triggers),
-		RunLimits: &templatev1alpha1.RunLimits{
-			MaxDurationSeconds: int64(t.Spec.Limits.Run.MaxDuration.Seconds()),
-			MaxTokens:          t.Spec.Limits.Run.MaxTokens,
-		},
+		// The limits a run would get, the platform defaults filling what the template leaves out.
+		RunLimits:     runLimitsProto(agentconfig.FromTemplate(t, row.ContentHash).RunLimits()),
 		SpendLimitUsd: t.Spec.Limits.SpendUSD.String(),
 		DefaultFlavor: flavorProto(string(t.Spec.Flavors.Default)),
 		Ephemeral:     t.Spec.Ephemeral,
@@ -101,4 +101,11 @@ func (s *Server) ListTemplates(ctx context.Context, _ *templatev1alpha1.ListTemp
 		res.Templates = append(res.Templates, templateProto(row, t))
 	}
 	return res, nil
+}
+
+// runLimitsProto is the limits a run of an agent version gets.
+func runLimitsProto(l agentconfig.RunLimits) *templatev1alpha1.RunLimits {
+	return &templatev1alpha1.RunLimits{
+		MaxDurationSeconds: int64(l.WallClock.Seconds()), MaxModelRequests: l.MaxModelRequests, MaxSpendUsd: l.MaxSpend.String(),
+	}
 }

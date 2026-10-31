@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/safego"
 )
 
@@ -36,10 +37,11 @@ const (
 	attrCostTotal    = "agw.ai.usage.cost.total"
 )
 
-// refusedBeforeUpstream are the statuses agentgateway sets itself, before it calls the provider
-// (bad or missing key, model not allowed or unknown, request too large, its own budget or rate
-// limit). A record with one of them and no usage was never charged.
-var refusedBeforeUpstream = map[int64]bool{401: true, 403: true, 404: true, 405: true, 413: true, 415: true, 429: true}
+// gatewayStatuses are the statuses agentgateway sets itself, before it calls the provider (bad or
+// missing key, model not allowed or unknown, request too large, its own budget or rate limit). A
+// record from a config that does not log koinon.upstream cannot say who answered, so such a record
+// with one of these statuses and no usage is taken as the gateway's and never charged.
+var gatewayStatuses = map[int64]bool{401: true, 403: true, 404: true, 405: true, 413: true, 415: true, 429: true}
 
 func isZeroDecimal(s string) bool { return strings.Trim(s, "0.") == "" }
 
@@ -105,10 +107,14 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 				if model == "" {
 					continue // not an LLM request (MCP, or refused before the model)
 				}
+				upstreamKnown := attrs[gateway.LogFieldUpstream] != nil
+				upstream := boolValue(attrs[gateway.LogFieldUpstream])
 				if !usage {
 					switch {
-					case statusOK && refusedBeforeUpstream[status]:
-						continue // answered by the gateway itself, never reached the provider
+					case statusOK && upstreamKnown && !upstream:
+						continue // answered by the gateway itself (a refused key, its own budget): never reached the provider
+					case statusOK && !upstreamKnown && gatewayStatuses[status]:
+						continue // a config that cannot say who answered: these statuses are the gateway's
 					case statusOK, hasReqBytes:
 						// A 2xx without usage (an aborted stream, a provider that reports none), any
 						// other non-2xx, or no status at all (the client disconnected before the
@@ -133,6 +139,7 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 					InputKnown:   inOK, OutputKnown: outOK,
 					CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite, ReasoningTokens: reasoning,
 					CostUSD: cost, Status: status,
+					UpstreamKnown: upstreamKnown, Upstream: upstream,
 					RequestBytes: -1, ResponseBytes: -1,
 					Time: recordTime(lr.GetTimeUnixNano(), lr.GetObservedTimeUnixNano()),
 				}
@@ -140,6 +147,15 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 				if hasReqBytes && reqBytes >= 0 {
 					e.RequestBytes = reqBytes
 				}
+				if id := stringValue(attrs[gateway.LogFieldResponseID]); len(id) <= 256 {
+					e.ResponseID = id
+				}
+				e.Format = modelformat.OpenAI
+				if f := stringValue(attrs[gateway.LogFieldFormat]); f != "" {
+					e.Format = modelformat.Format(f)
+				}
+				e.Stream = boolValue(attrs[gateway.LogFieldStream])
+				e.Error = stringValue(attrs[gateway.LogFieldError])
 				org, name, ok := strings.Cut(agent, "/")
 				e.Agent = gateway.AgentRef{Org: org, Name: name}
 				switch {
@@ -173,6 +189,17 @@ func recordTime(t, observed uint64) time.Time {
 		}
 	}
 	return time.Now().UTC()
+}
+
+// boolValue reads a boolean attribute, or the strings "true" and "false" (CEL may log either).
+func boolValue(v *commonpb.AnyValue) bool {
+	switch x := v.GetValue().(type) {
+	case *commonpb.AnyValue_BoolValue:
+		return x.BoolValue
+	case *commonpb.AnyValue_StringValue:
+		return x.StringValue == "true"
+	}
+	return false
 }
 
 func stringValue(v *commonpb.AnyValue) string {
@@ -305,9 +332,18 @@ func readBody(r *http.Request) ([]byte, error) {
 	return b, nil
 }
 
-// Serve runs the OTLP receiver on addr until ctx ends.
-func Serve(ctx context.Context, addr string, in *Ingester, log *slog.Logger) error {
-	srv := &http.Server{Addr: addr, Handler: Handler(in, log), ReadHeaderTimeout: 10 * time.Second}
+// Serve runs the OTLP receiver on addr until ctx ends. Each wrap wraps the whole handler, the
+// first one outermost; koinon-api passes the bearer-token check (internal/otlpauth), which must
+// cover every path of the listener.
+func Serve(ctx context.Context, addr string, in *Ingester, log *slog.Logger, wrap ...func(http.Handler) http.Handler) error {
+	if err := in.Validate(); err != nil {
+		return err
+	}
+	h := Handler(in, log)
+	for i := len(wrap) - 1; i >= 0; i-- {
+		h = wrap[i](h)
+	}
+	srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
 	safego.Go(ctx, log, "otlp-shutdown", func(context.Context) {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)

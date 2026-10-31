@@ -38,6 +38,10 @@ const (
 	Column = "password_envelope"
 )
 
+// Binding is the AAD binding of an agent's repository password (the trace router reads it to know
+// the values to scrub).
+func Binding(org, agent pgtype.UUID) secretstore.Binding { return binding(org, agent) }
+
 func binding(org, agent pgtype.UUID) secretstore.Binding {
 	return secretstore.Binding{OrgID: org.String(), Table: Table, RowID: agent.String(), Column: Column}
 }

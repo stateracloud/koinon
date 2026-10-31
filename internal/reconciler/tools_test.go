@@ -15,7 +15,9 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -75,6 +77,7 @@ var _ = Describe("Reconciler with the GitHub tool server", func() {
 		DeferCleanup(func() { _ = conn.Close(); osg.Stop() })
 		mg := &fakeModelGateway{}
 		cfg := reconciler.Config{
+			Prices:      prices.NewResolver(pricing.Embedded()),
 			Gateway:     reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			ToolServers: map[string]string{"github": toolsURL},
 			Flavors: map[store.AgentFlavor]reconciler.Flavor{
@@ -110,7 +113,8 @@ var _ = Describe("Reconciler with the GitHub tool server", func() {
 		for _, rule := range osg.Profile(ws, "koinon-agentgateway-opencode").GetEndpoints()[0].GetRules() {
 			paths = append(paths, rule.GetAllow().GetMethod()+" "+rule.GetAllow().GetPath())
 		}
-		Expect(paths).To(ContainElements("POST /v1/chat/completions", "POST /mcp", "GET /mcp", "DELETE /mcp"))
+		Expect(paths).To(ConsistOf("POST /v1/chat/completions", "POST /v1/messages", "POST /mcp", "GET /mcp", "DELETE /mcp"),
+			"both model routes and the MCP routes, and nothing else (/v1/messages/count_tokens stays closed)")
 	})
 })
 

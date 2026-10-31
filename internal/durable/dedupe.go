@@ -24,6 +24,10 @@ const (
 	SourceSlack = "slack"
 	// SourceTrigger keys on a trigger plus its fire time: see TriggerFireKey.
 	SourceTrigger = "trigger"
+	// SourceManualTrigger keys on a trigger plus the second an admin fired it by hand ("run now").
+	// It is a source of its own so that a manual fire never counts as the scheduled fire of the
+	// same second.
+	SourceManualTrigger = "trigger_manual"
 	// SourceQuestion keys on an ask_user question ID.
 	SourceQuestion = "question"
 	// SourceChildTask keys on a child task ID.

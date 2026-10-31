@@ -26,6 +26,8 @@ import (
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // koinon-agentd driving each real flavor image: Postgres in a container, the flavor in the
@@ -119,6 +121,7 @@ func describeAgentd(f flavor) bool {
 
 			backend = &dockerBackend{sb: sb}
 			p, err := agentd.New(db, backend, agentd.Config{
+				Prices:  prices.NewResolver(pricing.Embedded()),
 				OwnerID: "agentd-flavors", Workers: 1, Lease: 10 * time.Second, Poll: 100 * time.Millisecond,
 				GatewayURL: gw.url(""), Logger: newLogger(),
 			})
@@ -141,7 +144,7 @@ func describeAgentd(f flavor) bool {
 				ActorUserID: user, Payload: []byte(fmt.Sprintf(`{"text":%q}`, text)),
 			})
 			Expect(err).NotTo(HaveOccurred())
-			r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TaskID: task.ID, MaxWallClockSeconds: 300, MaxTokens: 100_000})
+			r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TaskID: task.ID, MaxWallClockSeconds: 300})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() store.RunState {
 				got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: r.ID})
@@ -268,6 +271,21 @@ func describeAgentd(f flavor) bool {
 			Expect(string(perms[0].Payload)).To(ContainSubstring(`"verdict": "` + f.agentdVerdict + `"`))
 			if f.agentdVerdict == "allow" {
 				Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
+			}
+			// A refusal costs the agent a tool call, not the run: a harness that ends the turn on a
+			// rejection is prompted again with agentd's note (issue #186).
+			if f.agentdVerdict == "reject" {
+				Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
+				var refusals int
+				for _, e := range eventsOf(ctx, r) {
+					if e.Kind == "run.refusal" {
+						refusals++
+					}
+				}
+				if f.rejectEndsTurn {
+					Expect(refusals).To(Equal(1), "agentd continued the cancelled turn with its note")
+					Expect(gw.modelBodies()).To(ContainElement(ContainSubstring("is outside your session directory")))
+				}
 			}
 		}, SpecTimeout(4*time.Minute))
 	})

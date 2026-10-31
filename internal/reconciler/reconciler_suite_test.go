@@ -150,7 +150,7 @@ func queueRun(ctx context.Context, org, user, agent pgtype.UUID) store.Run {
 	t, err := q.CreateTask(ctx, store.CreateTaskParams{OrgID: org, Title: uniq("task"), AgentID: agent, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: user})
 	Expect(err).NotTo(HaveOccurred())
 	run, err := q.CreateRun(ctx, store.CreateRunParams{
-		OrgID: org, AgentID: agent, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000,
+		OrgID: org, AgentID: agent, TaskID: t.ID, MaxWallClockSeconds: 1800,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return run
@@ -177,6 +177,8 @@ type fakeModelGateway struct {
 	entered chan struct{}
 	// ledgerBudgets makes the fake report that only a limit of zero binds (Kubernetes mode).
 	ledgerBudgets bool
+	// onApply, when set, sees each state as the gateway receives it, before it is recorded.
+	onApply func(gateway.State)
 }
 
 func (f *fakeModelGateway) IssueKey(_ context.Context, agent gateway.AgentRef) (gateway.IssuedKey, error) {
@@ -205,6 +207,9 @@ func (f *fakeModelGateway) Apply(_ context.Context, s gateway.State) (gateway.Re
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.onApply != nil {
+		f.onApply(s)
+	}
 	var rej *gateway.RejectedError
 	if f.fail != nil && !errors.As(f.fail, &rej) {
 		return "", f.fail
@@ -264,7 +269,7 @@ func addProvider(ctx context.Context, org, user pgtype.UUID, name, key, model st
 		ProviderID: p.ID, Name: model,
 	})
 	Expect(err).NotTo(HaveOccurred())
-	_, err = prices.New(pool, nil).SetOverride(ctx, org, actor, prices.OverrideInput{
+	_, err = prices.New(pool, nil, pricing.Embedded()).SetOverride(ctx, org, actor, prices.OverrideInput{
 		Entry: pricing.Entry{
 			ID: "price-" + strings.NewReplacer("/", "-", "_", "-").Replace(strings.ToLower(model)), Provider: "openai", Match: pricing.Match{Glob: model},
 			Spec:      pricing.Spec{Prices: pricing.Wire{Input: "1", Output: "2"}},

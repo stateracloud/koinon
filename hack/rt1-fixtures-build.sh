@@ -5,16 +5,17 @@
 # test/fixtures/rt1/README.md):
 #   <registry>/koinon/rt1-fakecicost     ko, from cmd/koinon-fakecicost
 #   <registry>/koinon/rt1-promgen        ko, from cmd/koinon-rt1-promgen
+#   <registry>/koinon/rt1-fakemodel      ko, from cmd/koinon-fakemodel (run with -standin as the escape suite's gateway stand-in)
 #   <registry>/koinon/rt1-motherduck     docker buildx, from test/fixtures/rt1/motherduck
 #   <registry>/koinon/rt1-prometheus-mcp docker buildx, from test/fixtures/rt1/prometheus (Dockerfile.mcp)
 #   <registry>/koinon/rt1-prometheus     a copy of the pinned prom/prometheus image (promtool lives in it)
 #   <registry>/koinon/rt1-searxng        a copy, by digest, of searxng/searxng (AGPL-3.0, unmodified)
 #   <registry>/koinon/rt1-searxng-mcp    a copy, by digest, of isokoliuk/mcp-searxng
 #
-# Usage: hack/rt1-fixtures-build.sh REGISTRY [TAG]     e.g. zot.apps.lab.example.invalid, TAG defaults to dev
+# Usage: hack/rt1-fixtures-build.sh REGISTRY [TAG]     e.g. registry.example.com, TAG defaults to dev
 # DRY_RUN=1 prints the commands and pushes nothing. You must be logged in to the registry (docker login
 # or a DOCKER_CONFIG that has it). Prints a ready-to-paste kustomize images: block with digests at the end
-# (names use REGISTRY; the manifests expect zot.apps.lab.example.invalid).
+# (names use REGISTRY; see test/fixtures/rt1/overlays/remote for the matching overlay).
 set -euo pipefail
 
 registry="${1:?usage: $0 REGISTRY [TAG]}"
@@ -33,7 +34,7 @@ run() {
   if [ "${DRY_RUN:-}" != 1 ]; then "$@"; fi
 }
 
-for cmd in fakecicost:koinon-fakecicost promgen:koinon-rt1-promgen; do
+for cmd in fakecicost:koinon-fakecicost promgen:koinon-rt1-promgen fakemodel:koinon-fakemodel; do
   name="rt1-${cmd%%:*}"
   (cd "$root" && KO_DOCKER_REPO="$repo/$name" run ko build --bare --platform "$platform" --tags "$tag" "./cmd/${cmd##*:}")
 done
@@ -56,9 +57,9 @@ run crane copy "$searxng_mcp" "$repo/rt1-searxng-mcp:$searxng_mcp_tag"
 
 if [ "${DRY_RUN:-}" != 1 ]; then
   echo
-  echo "# Paste into test/fixtures/rt1/manifests/kustomization.yaml (replaces its images: list):"
+  echo "# Pin these in an images: block (test/fixtures/rt1/overlays/homelab/kustomization.yaml is the example):"
   echo "images:"
-  for ref in rt1-fakecicost:$tag rt1-promgen:$tag rt1-motherduck:$tag rt1-prometheus-mcp:$tag rt1-prometheus:v3.7.3 rt1-searxng:$searxng_tag rt1-searxng-mcp:$searxng_mcp_tag; do
+  for ref in rt1-fakecicost:$tag rt1-promgen:$tag rt1-fakemodel:$tag rt1-motherduck:$tag rt1-prometheus-mcp:$tag rt1-prometheus:v3.7.3 rt1-searxng:$searxng_tag rt1-searxng-mcp:$searxng_mcp_tag; do
     echo "  - name: $repo/${ref%%:*}"
     echo "    newTag: \"${ref##*:}\""
     echo "    digest: $(crane digest "$repo/$ref")"

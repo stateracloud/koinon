@@ -74,6 +74,15 @@ function OrgCap({ budget: b, actions }: { budget: OrgBudget; actions: Actions })
         <dd>{b.monthlyCapUsd ? formatUSD(b.monthlyCapUsd) : 'No cap'}</dd>
         <dt className="text-muted-foreground">Spent this month</dt>
         <dd>{formatUSD(b.spentThisMonthUsd)}</dd>
+        {Number(b.systemChecksThisMonthUsd) > 0 && (
+          <>
+            <dt className="text-muted-foreground">System checks</dt>
+            <dd>
+              {formatUSD(b.systemChecksThisMonthUsd)}
+              <span className="text-muted-foreground"> Koinon&apos;s own requests, such as the provider echo check. Included in the spend above; they belong to no agent.</span>
+            </dd>
+          </>
+        )}
         {left !== undefined && (
           <>
             <dt className="text-muted-foreground">Remaining</dt>
@@ -168,7 +177,7 @@ function AgentLimits({ loading, list, actions }: { loading: boolean; list: Agent
                 />
               ) : (
                 <div>
-                  <Button variant="outline" size="sm" aria-label={`Change daily limit of ${a.agentName || 'the agent'}`} onClick={() => setEditing(a.agentId)}>
+                  <Button variant="outline" size="sm" aria-label={`Change limit of ${a.agentName || 'the agent'}`} onClick={() => setEditing(a.agentId)}>
                     Change limit
                   </Button>
                 </div>

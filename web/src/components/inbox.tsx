@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { approveLabel } from '@/lib/approvals'
-import type { ApprovalItem, InboxItem, QuestionItem, TaskInputItem } from '@/lib/inbox'
+import type { AgentHealthItem, ApprovalItem, InboxItem, QuestionItem, TaskInputItem } from '@/lib/inbox'
+import { age } from '@/lib/time'
 
 /** What the inbox does with an approval item; the page wires these to the API. */
 export type ApprovalActions = {
@@ -41,6 +42,7 @@ const renderers: Renderers = {
   approval: (item, actions) => <ApprovalRow item={item} actions={actions} />,
   question: (item, actions) => <QuestionRow item={item} actions={actions} />,
   'task-input': (item) => <TaskInputRow item={item} />,
+  'agent-unhealthy': (item) => <AgentHealthRow item={item} />,
 }
 
 function render<K extends InboxItem['kind']>(item: Extract<InboxItem, { kind: K }>, actions: InboxActions): ReactNode {
@@ -64,6 +66,7 @@ export function Inbox({ items, ...actions }: InboxProps) {
 }
 
 function Meta({ item }: { item: InboxItem }) {
+  if (item.kind === 'agent-unhealthy') return null
   return (
     <p className="text-muted-foreground mt-1 text-xs">
       <Link to="/tasks/$taskId" params={{ taskId: item.taskId }} className="hover:underline">
@@ -114,6 +117,22 @@ function TaskInputRow({ item }: { item: TaskInputItem }) {
   )
 }
 
+function AgentHealthRow({ item }: { item: AgentHealthItem }) {
+  return (
+    <div className="grid gap-1">
+      <p>
+        <strong className="font-medium">{item.agentName}</strong> is unhealthy and takes no runs.
+      </p>
+      {item.reason !== '' && <p className="text-muted-foreground text-xs">{item.reason}</p>}
+      <p>
+        <Link to="/agents/$agentId" params={{ agentId: item.agentId }} className="text-sm hover:underline">
+          Open the agent
+        </Link>
+      </p>
+    </div>
+  )
+}
+
 /**
  * QuestionRow shows an agent's question with what the agent offered: choices as buttons, a draft to
  * accept or edit, and a free-text answer. Dismissing applies the safe default the agent named, which
@@ -131,6 +150,9 @@ function QuestionRow({ item, actions }: { item: QuestionItem; actions: InboxActi
       <div>
         <p className="font-medium">{q.question}</p>
         <Meta item={item} />
+        <p className="text-muted-foreground mt-1 text-xs">
+          {`Asked to ${q.targetLabel}${q.recipients.length > 1 ? ` (${q.recipients.length} people; the first answer counts)` : ''} · waiting ${age(item.at)}`}
+        </p>
       </div>
       {q.choices.length > 0 && (
         <div role="group" aria-label="Choices" className="flex flex-wrap gap-2">

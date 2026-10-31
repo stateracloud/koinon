@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,6 +26,8 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // postgresImage is the minimum supported Postgres version (ADR 0047).
@@ -34,6 +37,8 @@ var (
 	db  *pgxpool.Pool
 	q   *store.Queries
 	ing *ledger.Ingester
+	// priceList is the default list the specs run against.
+	priceList pricing.ListSource
 )
 
 func TestLedger(t *testing.T) {
@@ -58,6 +63,14 @@ func needDocker() {
 }
 
 var _ = BeforeSuite(func(ctx SpecContext) {
+	// The specs assert exact money values, so they price against their own fixed list, never the
+	// embedded default one that changes with every provider price update.
+	list, err := os.ReadFile("testdata/prices.yaml")
+	Expect(err).NotTo(HaveOccurred())
+	l, rs, err := pricing.ParseList(list)
+	Expect(err).NotTo(HaveOccurred())
+	priceList = pricing.Static(l, rs)
+
 	if err := dockerAvailable(ctx); err != nil {
 		GinkgoWriter.Println("Docker is not available; Postgres specs are skipped:", err)
 		return
@@ -78,7 +91,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	_, err = provider.Up(ctx)
 	Expect(err).NotTo(HaveOccurred())
 	q = store.New(db)
-	ing = &ledger.Ingester{DB: db, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	ing = &ledger.Ingester{DB: db, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Prices: prices.NewResolver(priceList)}
 }, NodeTimeout(3*time.Minute))
 
 var seq atomic.Int64
@@ -94,7 +107,7 @@ type env struct {
 }
 
 // newEnv creates the org and agent. agentID may be empty for a generated ID.
-func newEnv(ctx context.Context, slug, agentID, spendUSD string, maxTokens int64) *env {
+func newEnv(ctx context.Context, slug, agentID, spendUSD string) *env {
 	e := &env{slug: slug}
 	// The org needs a manual owner by commit.
 	Expect(pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
@@ -116,7 +129,7 @@ func newEnv(ctx context.Context, slug, agentID, spendUSD string, maxTokens int64
 		`INSERT INTO agents (org_id, id, display_name, flavor, created_by)
 		 VALUES ($1, coalesce(nullif($2, '')::uuid, uuidv7()), $3, 'opencode', $4) RETURNING id`,
 		e.org, agentID, uniq("agent"), e.user).Scan(&id)).To(Succeed())
-	cfg := fmt.Sprintf(`{"instructions":"","limits":{"run":{"maxDuration":"30m","maxTokens":%d},"spendUSD":%q}}`, maxTokens, spendUSD)
+	cfg := fmt.Sprintf(`{"instructions":"","limits":{"run":{"maxDuration":"30m","maxModelRequests":200,"maxSpendUSD":"5.00"},"spendUSD":%q}}`, spendUSD)
 	version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
 		OrgID: e.org, AgentID: id, Config: []byte(cfg), CreatedBy: e.user,
 	})
@@ -147,10 +160,26 @@ func (e *env) task(ctx context.Context) store.Task {
 }
 
 // startRun queues a run for t and moves it to running as of startedAt, as agentd would.
-func (e *env) startRun(ctx context.Context, t store.Task, maxTokens int64, startedAt time.Time) store.Run {
-	r, err := q.CreateRun(ctx, store.CreateRunParams{
-		OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: maxTokens,
-	})
+func (e *env) startRun(ctx context.Context, t store.Task, startedAt time.Time) store.Run {
+	return e.startLimitedRun(ctx, t, runLimits{}, startedAt)
+}
+
+// runLimits are the request and spend limits of a test run; zero is none.
+type runLimits struct {
+	requests int64
+	spendUSD string
+}
+
+// startLimitedRun is startRun for a run queued with limits (ADR 0081).
+func (e *env) startLimitedRun(ctx context.Context, t store.Task, l runLimits, startedAt time.Time) store.Run {
+	p := store.CreateRunParams{OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800}
+	if l.requests > 0 {
+		p.MaxModelRequests = pgtype.Int8{Int64: l.requests, Valid: true}
+	}
+	if l.spendUSD != "" {
+		p.MaxSpendUsd = pgtype.Text{String: l.spendUSD, Valid: true}
+	}
+	r, err := q.CreateRun(ctx, p)
 	Expect(err).NotTo(HaveOccurred())
 	_, err = db.Exec(ctx, `UPDATE runs SET state = 'starting', owner_id = 'test', lease_expires_at = now() + interval '1 hour',
 		ready_at = NULL, started_at = $3 WHERE org_id = $1 AND id = $2`, e.org, r.ID, startedAt)

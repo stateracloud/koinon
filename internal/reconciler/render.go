@@ -14,6 +14,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/flavor"
+	"github.com/stateracloud/koinon/internal/gateway"
 )
 
 // Flavor is what the reconciler needs to know about a harness flavor (ADR 0035).
@@ -59,7 +60,13 @@ func (r *Reconciler) profile(flavor store.AgentFlavor, f Flavor) execution.Provi
 // the /mcp route allowed when tools is set. Exported for the escape suite, which attaches the
 // same profile to a sandbox on a real gateway.
 func GatewayProfile(flavor store.AgentFlavor, f Flavor, gw Endpoint, tools bool) execution.ProviderProfile {
-	allow := []execution.L7Rule{{Method: "POST", Path: "/v1/chat/completions"}}
+	// One route per model format (ADR 0069 decision 6), from the same table the gateway renders:
+	// the same host, credential and enforcement. The profile is per flavor, so adding a model changes
+	// nothing here. Anything else on the gateway (/v1/messages/count_tokens included) stays closed.
+	var allow []execution.L7Rule
+	for _, p := range gateway.RoutePaths() {
+		allow = append(allow, execution.L7Rule{Method: "POST", Path: p})
+	}
 	if tools {
 		// MCP Streamable HTTP on agentgateway's /mcp route (agentd passes <gateway>/mcp to
 		// the harness): POST for messages, GET for the server stream, DELETE to end the

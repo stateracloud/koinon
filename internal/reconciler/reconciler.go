@@ -57,6 +57,7 @@ import (
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/safego"
 )
 
@@ -99,6 +100,8 @@ type Config struct {
 	ProviderKeys ProviderKeyStore
 	// ProviderKeyDir is where the gateway mounts ProviderKeys, for the rendered config.
 	ProviderKeyDir string
+	// Prices finds the price of each served model; required (prices.NewResolver).
+	Prices prices.Resolver
 	// AgentLimit computes an agent's budget; nil is ledger.AgentLimit. It is a seam for tests.
 	AgentLimit func(ctx context.Context, q *store.Queries, agent store.Agent, now time.Time) (*gateway.Limit, error)
 	// URLPolicy is checked again, with a fresh lookup, for every provider URL before it is served.
@@ -155,6 +158,9 @@ type Config struct {
 	ArchiveAfter time.Duration
 	// HomeRetention decides the home volume's fate on archive. Default RetentionDelete.
 	HomeRetention Retention
+	// Observer explains sandboxes that never become ready by reading their pods (ADR 0078). Nil turns
+	// it off (sandboxObserver.enabled=false): the recorded reason is then OpenShell's.
+	Observer *SandboxObserver
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Metrics receives the pass metrics; nil keeps them unexported.
@@ -211,6 +217,9 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	if cfg.Gateway.Host == "" || cfg.Gateway.Port == 0 {
 		return nil, errors.New("reconciler: the agentgateway endpoint is required")
 	}
+	if cfg.Prices.IsZero() {
+		return nil, errors.New("reconciler: Prices is required (prices.NewResolver)")
+	}
 	if cfg.ArchiveAfter == 0 {
 		cfg.ArchiveAfter = DefaultArchiveAfter
 	}
@@ -247,6 +256,15 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.GitBinaries == nil {
 		cfg.GitBinaries = DefaultGitBinaries
+	}
+	if cfg.Observer != nil {
+		if err := cfg.Observer.validate(); err != nil {
+			return nil, err
+		}
+		cfg.Observer.Errors = cfg.Metrics.ObserverErrors
+		if cfg.Observer.Log == nil {
+			cfg.Observer.Log = cfg.Logger
+		}
 	}
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
@@ -410,6 +428,18 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		}
 		r.rememberLimit(w.key.Agent, l)
 		state.SetLimit(w.key.Agent, l)
+		// A budget with nothing left stops the agent's runs (or the org's) with the budget reason
+		// before the Apply below blocks or revokes the key, so a run in flight records the budget
+		// stop and not the gateway's 401 or 429 (issue #188). A limit that could not be computed
+		// fails closed above but stops nothing: it is not known to be spent.
+		if l != nil && l.Amount <= 0 {
+			if n, err := ledger.StopSpent(ctx, r.pool, w.agent, now); err != nil {
+				r.m.PassErrors.WithLabelValues(errKindSpendLimit).Inc()
+				errs = append(errs, fmt.Errorf("stop the runs of spent agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
+			} else if n > 0 {
+				r.log.Info("budget spent: runs stopped before the key is blocked", append(w.logAttrs(), "runs", n)...)
+			}
+		}
 	}
 	// Provider key files first, then the config that names them; files no provider uses go last.
 	// One provider's new key file still travelling to the gateway pod never holds back the others:
@@ -434,6 +464,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		r.m.PassErrors.WithLabelValues(errKindMCP).Inc()
 		return errors.Join(append(errs, err)...)
 	}
+	errs = append(errs, r.applyModelCheck(ctx, &state, orgs, now)...)
 	// Sandbox work is per-sandbox jobs, outside the sequential pass (plan item LT1, practice B4).
 	// An agent whose key the gateway already serves does not depend on the Apply below, which may
 	// wait for agentgateway's hot reload for about a minute: its sandbox starts and stops now,
@@ -453,6 +484,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 
 	var rejections []gateway.Rejection
 	applyFailed := false
+	rejectedReason := ""
 	applyStart := time.Now()
 	_, applyErr := r.gw.Apply(ctx, state)
 	r.m.GatewayApply.Observe(time.Since(applyStart).Seconds())
@@ -465,7 +497,21 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			// depend on it (start on demand, idle stop), so it goes on, except for agents whose
 			// new key is not live yet. Nothing is recorded as applied and nothing is pruned.
 			applyFailed = true
-			r.m.PassErrors.WithLabelValues(errKindGatewayApply).Inc()
+			var cfgRej *gateway.ConfigRejectedError
+			if errors.As(err, &cfgRej) {
+				// The whole file was refused and the gateway keeps its previous config, so no key,
+				// revocation, model or limit of this pass is live. Its reason is only in the gateway's
+				// log; say it here, on the agents waiting for it and in the metrics (ADR 0050).
+				rejectedReason = cfgRej.Reason
+				if rejectedReason == "" {
+					rejectedReason = "the reason could not be read from the gateway's log"
+				}
+				r.m.PassErrors.WithLabelValues(errKindGatewayConfig).Inc()
+				r.log.Error("agentgateway rejected the config; it keeps serving the previous one, so no change of this pass is live",
+					"revision", string(cfgRej.Revision), "reason", rejectedReason)
+			} else {
+				r.m.PassErrors.WithLabelValues(errKindGatewayApply).Inc()
+			}
 			errs = append(errs, fmt.Errorf("reconciler: apply gateway state: %w", err))
 		} else {
 			rejections = rej.Rejected
@@ -476,8 +522,9 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("reconciler: %w", rej))
 		}
 	}
+	r.m.GatewayConfigRejected.Set(b2f(rejectedReason != ""))
 	if !applyFailed {
-		r.keysLive(state)
+		r.keysLive(state, rejections)
 		r.recordApplied(served, state, rejections)
 		if err := r.recordServed(ctx, orgs, served, state, rejections); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
@@ -496,9 +543,13 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	defer func() { r.m.AgentsHeldBack.Set(float64(heldBack)) }()
 	var lateRun []*work
 	for _, w := range late {
-		if applyFailed {
+		if applyFailed || r.keyNotLive(w.key.ID) {
 			r.log.Warn("the gateway does not serve the agent's new key yet; its sandbox work waits", w.logAttrs()...)
-			r.recordMessage(ctx, w, errors.New("waiting for the gateway to serve the agent's new key"))
+			msg := "waiting for the gateway to serve the agent's new key"
+			if rejectedReason != "" {
+				msg += ": agentgateway rejected the config: " + rejectedReason
+			}
+			r.recordMessage(ctx, w, errors.New(msg))
 			heldBack++
 			continue
 		}
@@ -573,12 +624,20 @@ func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[s
 }
 
 // keysLive records that the applied state carries its keys.
-func (r *Reconciler) keysLive(s gateway.State) {
+func (r *Reconciler) keysLive(s gateway.State, rejected []gateway.Rejection) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.appliedSinceStart = true
+	refused := map[string]bool{}
+	for _, x := range rejected {
+		if x.Kind == "Key" {
+			refused[x.Name] = true
+		}
+	}
 	for _, k := range s.Keys {
-		delete(r.notLive, k.ID)
+		if !refused[k.ID] {
+			delete(r.notLive, k.ID)
+		}
 	}
 }
 
@@ -915,6 +974,10 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 		return "", fmt.Errorf("reconciler: record workspace of org %s: %w", org.Slug, err)
 	}
 	done[id] = name
+	if r.cfg.Observer != nil && ws.Active {
+		// The observer only adds detail to a wait: a failure is counted and logged there, never fatal here.
+		_ = r.cfg.Observer.EnsureAccess(ctx, name)
+	}
 	return name, nil
 }
 
@@ -1286,11 +1349,15 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 // deletes the home volume with the sandbox, so a new sandbox (a new ID) means a new, empty home,
 // while stop and start keep both.
 func (r *Reconciler) record(ctx context.Context, w *work, sb execution.Sandbox, hash, note string) error {
-	msg := sb.Message
+	msg, reason := sb.Message, sb.Reason
 	if note != "" {
 		msg = note
+	} else if r.cfg.Observer != nil && sb.Phase == execution.PhaseProvisioning && execution.OpaqueWaitReason(sb.Reason) && sb.Workspace != "" {
+		// OpenShell hides the pod's pull and crash errors behind ConfigurationPending (ADR 0078): read the
+		// pod, only for such a reason, and keep OpenShell's words when the pod says nothing.
+		reason, msg = execution.ExplainWait(sb.Reason, sb.Message, r.cfg.Observer.Explain(ctx, sb.Workspace, sb.Name, sb.ID))
 	}
-	return r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, hash, sb.ID)
+	return r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID)
 }
 
 // recordState stores a state without an observed sandbox; the recorded home generation is kept.
@@ -1299,13 +1366,13 @@ func (r *Reconciler) recordState(ctx context.Context, w *work, state store.Sandb
 	if len(hash) > 0 {
 		h = hash[0]
 	}
-	return r.recordRow(ctx, w, state, phase, msg, h, "")
+	return r.recordRow(ctx, w, state, phase, msg, "", h, "")
 }
 
-func (r *Reconciler) recordRow(ctx context.Context, w *work, state store.SandboxState, phase, msg, hash, generation string) error {
+func (r *Reconciler) recordRow(ctx context.Context, w *work, state store.SandboxState, phase, msg, reason, hash, generation string) error {
 	sb, err := r.q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
 		OrgID: w.org.ID, AgentID: w.agent.ID,
-		State: state, Phase: phase, Message: msg, SpecHash: hash, HomeGeneration: generation,
+		State: state, Phase: phase, Message: msg, Reason: reason, SpecHash: hash, HomeGeneration: generation,
 	})
 	if err != nil {
 		return fmt.Errorf("record sandbox state: %w", err)
@@ -1319,7 +1386,8 @@ func (r *Reconciler) recordMessage(ctx context.Context, w *work, err error) {
 	if w.sb.SandboxName == "" {
 		return
 	}
-	_ = r.recordState(ctx, w, w.sb.State, w.sb.Phase, err.Error())
+	// The message is for operators; the reason of the latest condition stays as observed.
+	_ = r.recordRow(ctx, w, w.sb.State, w.sb.Phase, err.Error(), w.sb.Reason, w.sb.SpecHash, "")
 }
 
 // rememberLimit records the budget pushed for agent.
@@ -1356,4 +1424,11 @@ func (r *Reconciler) failClosedLimit(agent gateway.AgentRef, now time.Time) *gat
 		}
 	}
 	return &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: ledger.Window, Generation: "failed"}
+}
+
+func b2f(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
 }

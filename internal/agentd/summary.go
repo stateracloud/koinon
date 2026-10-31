@@ -27,10 +27,10 @@ import (
 	"context"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/runreply"
 )
 
 // Sizes. A token is estimated as 3 bytes, the same estimate the handoff uses.
@@ -56,17 +56,7 @@ type summaryState struct {
 }
 
 // truncateSummary trims s and cuts it to summaryMaxBytes on a character boundary.
-func truncateSummary(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= summaryMaxBytes {
-		return s
-	}
-	cut := summaryMaxBytes - len(summaryTruncated)
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return strings.TrimSpace(s[:cut]) + summaryTruncated
-}
+func truncateSummary(s string) string { return runreply.Truncate(s, summaryMaxBytes) }
 
 // summarize asks the agent for its note and stores it on the task. It never fails the run.
 func (r *runner) summarize(ctx context.Context, conn *acp.Conn, session acp.SessionID) {

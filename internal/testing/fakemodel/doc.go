@@ -12,6 +12,9 @@
 //     GET /v1/models answers in Anthropic's list shape when the request carries an
 //     anthropic-version header.
 //
+// GET /_fake/requests lists the path and model of every request received (for tests that reach the
+// binary over the network).
+//
 // Responses come from a [Script] selected by the request's model name. A script is an ordered
 // list of [Turn]s; for each request the first turn whose [When] condition holds is answered.
 // Selection is stateless (it looks only at the request's conversation), so retries and parallel

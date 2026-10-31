@@ -26,7 +26,9 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // Remote MCP servers (plan item MC1): the reconciler renders each org's servers as gateway targets
@@ -53,6 +55,7 @@ var _ = Describe("Org MCP servers", func() {
 		kube = fake.NewClientset()
 		svc = mcpservers.New(pool, ring, nil).WithURLPolicy(testPolicy)
 		r, err = reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
@@ -229,6 +232,7 @@ var _ = Describe("Org MCP servers", func() {
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
 			rr, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+				Prices:  prices.NewResolver(pricing.Embedded()),
 				Gateway: reconciler.Endpoint{Host: host, Port: uint32(port)}, Keys: ring,
 				ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
 				ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy, Logger: slog.New(slog.DiscardHandler),

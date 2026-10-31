@@ -100,11 +100,14 @@ type ToolCall struct {
 // Usage is the token usage reported for a turn.
 type Usage struct {
 	// InputTokens is the full prompt size, cached tokens included (OpenAI prompt_tokens).
-	// Anthropic responses report InputTokens-CachedInputTokens as input_tokens.
+	// Anthropic responses report InputTokens-CachedInputTokens-CacheWriteTokens as input_tokens.
 	InputTokens int `yaml:"inputTokens,omitempty"`
 	// CachedInputTokens is the part of InputTokens read from the prompt cache.
 	CachedInputTokens int `yaml:"cachedInputTokens,omitempty"`
-	OutputTokens      int `yaml:"outputTokens,omitempty"`
+	// CacheWriteTokens is the part of InputTokens written to the prompt cache. Anthropic responses
+	// report it as cache_creation_input_tokens; chat completions have no field for it.
+	CacheWriteTokens int `yaml:"cacheWriteTokens,omitempty"`
+	OutputTokens     int `yaml:"outputTokens,omitempty"`
 }
 
 // Validate reports problems that would make the script unusable.
@@ -129,8 +132,8 @@ func (s Script) Validate() error {
 			}
 		}
 		u := t.Usage
-		if u.InputTokens < 0 || u.OutputTokens < 0 || u.CachedInputTokens < 0 ||
-			u.CachedInputTokens > u.InputTokens {
+		if u.InputTokens < 0 || u.OutputTokens < 0 || u.CachedInputTokens < 0 || u.CacheWriteTokens < 0 ||
+			u.CachedInputTokens+u.CacheWriteTokens > u.InputTokens {
 			errs = append(errs, fmt.Errorf("turn %d: invalid usage", i))
 		}
 	}

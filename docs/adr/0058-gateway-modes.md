@@ -158,3 +158,66 @@ pod waits until the reconciler's next pass (at most the resync, 30 s by default)
 - ADRs [0040](0040-agentgateway-model-and-mcp-gateway.md), [0049](0049-v01-scope-decisions.md),
   [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0057](0057-mcp-servers.md)
 - Research: [agentgateway Kubernetes CRDs](../research/agentgateway-k8s-crds.md)
+
+## Amendment (2026-10-28): MCP isolation in Kubernetes mode is closed (agentgateway v1.7.0)
+
+agentgateway v1.7.0 adds MCP conditional targets to the Kubernetes CRDs
+(`AgentgatewayBackend.spec.mcp.targets[].condition`, a CEL expression evaluated per request). The
+"MCP isolation, stated plainly" gap above is closed:
+
+- the driver renders `apiKey.org == "<org>"` on every org-owned static target, the same expression
+  standalone mode uses; platform servers have no condition and stay visible to every key;
+- the tool rules still drop grants that name another org's server, as a second layer;
+- another org's `initialize`, `ping` and list requests no longer reach the server, so MCP isolation
+  is no longer a difference between the modes. The shared gateway spec asserts it for both, and
+  `hack/g2-kind.sh` runs it against controller v1.7.0 on kind.
+
+**The placeholder target is a deliberate workaround.** Upstream refuses a condition on a lone target
+(the CRD rule "mcp target condition requires at least two targets unless the target uses selector",
+and `local.rs` in standalone mode). When the only MCP server is an org's, both drivers add a partner
+named `koinon.placeholder` (condition `false`, host `127.0.0.1:9`, never contacted). The dot keeps the
+name from colliding with an org's `<org>-<server>` name, since slugs and server names never contain
+one. Remove it when upstream allows a condition on a lone target. No upstream issue will be filed
+(procoduck's decision).
+
+## Amendment (2026-10-30, #262): the gateway forwards an allowlist of client headers
+
+An agent holds its gateway key (`kgw_...`) and is untrusted. Until now the gateway removed named
+headers (`anthropic-beta`, a target's credential header) and passed every other client header to the
+model's upstream or the MCP target, so an agent, or a command in its shell, could put the key in a
+header of its own (`X-Canary: kgw_...`, or embedded in a value) and a third party would log it. The
+key in a URL query or path was forwarded the same way.
+
+- **Standalone mode** replaces the header set with an allowlist. agentgateway's `transformations.request.replace`
+  (a CEL map of the headers to keep, applied before `set` and `remove`) is rendered on the `llm` and
+  `mcp` policies as `request.headers.filterKeys(k, k in [...])`. LLM routes keep `accept`,
+  `content-length`, `content-type` and `user-agent` (`gateway.ForwardedHeaders`); MCP routes add the
+  headers the gateway's own MCP handling reads after the transformation (`mcp-session-id`,
+  `mcp-protocol-version`, `last-event-id`; `gateway.MCPForwardedHeaders`). What a format needs beyond
+  these, the gateway sets itself (`Rendering.Headers`, the provider's credential, `x-koinon-org`).
+  OpenRouter sticky routing is a body field, so it needs no header. If the expression ever fails to
+  evaluate, agentgateway leaves the headers untouched; the expression reads only `request.headers` and
+  literals, and the real-gateway spec fails if it stops working. Dropped with everything else: the
+  `traceparent` agentgateway inserts before its gateway policies run, so a model provider or MCP
+  target sees none (ADR 0074 does not rely on it; a traced MCP call gets one from the gateway's outbound
+  span).
+- **Both modes refuse a gateway key in any header but `authorization`.** The allowlist alone is not
+  enough: the headers it keeps carry whatever the client put in them (an agent chooses its own
+  `User-Agent`), and a replace that failed to evaluate would forward everything. So the LLM
+  authorization rule and an `authorization` rule on the MCP route refuse (403) a request whose other
+  headers contain `kgw_` (`gateway.NoKeyInHeadersExpr`); a failed authorization rule refuses, so this
+  half fails closed. A key the agent re-encodes first, or puts in a value that is not valid UTF-8
+  (agentgateway's CEL leaves such a header out of `request.headers`), evades the check; in standalone
+  mode the allowlist still drops it.
+- **Kubernetes mode cannot allowlist.** The v1.7.0 `AgentgatewayPolicy` CRD has no `replace` field
+  (the data plane has it). The sustainable fix is upstream; until then the refusal above, on the
+  model's authorization rule and on the MCP route's traffic policy, is the only header guard there,
+  so a header without a key passes. **Exit condition:** switch the driver to `replace` when the CRD
+  exposes it.
+- **Both modes refuse a gateway key in the URL.** The LLM authorization rule includes
+  `!url.decode(request.pathAndQuery).contains("kgw_")` (`gateway.NoKeyInURLExpr`), so the request is
+  answered 403 before it reaches the upstream (agentgateway has no way to strip a query parameter by
+  pattern, and a refusal is louder than a silent rewrite). A key encoded twice evades it.
+- The shared gateway spec asserts all of this against both modes (`Env.HeaderAllowlist`), and the
+  e2e (`test/e2e`, step 8) sends the same requests through the real gateway to the fake model server,
+  whose `/_fake/requests?detail=1` lists the query and headers it received.

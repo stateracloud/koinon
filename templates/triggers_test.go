@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -41,6 +42,33 @@ var _ = Describe("Triggers", func() {
 		Entry("a reserved type", []templates.Trigger{{ID: "a", Type: templates.TriggerChannelEvent, Instruction: "x"}}, "reserved"),
 		Entry("a long instruction", []templates.Trigger{{ID: "a", Type: templates.TriggerDirectMessage, Instruction: strings.Repeat("x", 4097)}}, "longer"),
 	)
+
+	Describe("notify", func() {
+		withNotify := func(n *templates.NotifyTarget) []templates.Trigger {
+			tr := sched("0 9 * * *", "UTC")
+			tr.Notify = n
+			return []templates.Trigger{tr}
+		}
+		It("accepts a role and a person on a schedule", func() {
+			Expect(templates.ValidateTriggers(withNotify(&templates.NotifyTarget{Kind: templates.NotifyRole, Role: store.OrgRoleAdmin}))).To(Succeed())
+			Expect(templates.ValidateTriggers(withNotify(&templates.NotifyTarget{
+				Kind: templates.NotifyUser, User: "00000000-0000-7000-8000-00000000a001",
+			}))).To(Succeed())
+		})
+		DescribeTable("rejects",
+			func(ts []templates.Trigger, want string) {
+				Expect(templates.ValidateTriggers(ts)).To(MatchError(ContainSubstring(want)))
+			},
+			Entry("a notify on a direct message", []templates.Trigger{{
+				ID: "a", Type: templates.TriggerDirectMessage, Instruction: "x",
+				Notify: &templates.NotifyTarget{Kind: templates.NotifyRole, Role: store.OrgRoleAdmin},
+			}}, "takes no notify"),
+			Entry("the viewer role", withNotify(&templates.NotifyTarget{Kind: templates.NotifyRole, Role: store.OrgRoleViewer}), "member, admin or owner"),
+			Entry("a user that is not an ID", withNotify(&templates.NotifyTarget{Kind: templates.NotifyUser, User: "ana"}), "user must be a user ID"),
+			Entry("a channel", withNotify(&templates.NotifyTarget{Kind: templates.NotifyChannel, Channel: "00000000-0000-7000-8000-00000000c001"}), "available from v0.2"),
+			Entry("an unknown kind", withNotify(&templates.NotifyTarget{Kind: "group"}), "unknown kind"),
+		)
+	})
 
 	It("computes the next firing in the trigger's zone", func() {
 		next, ok := sched("0 9 * * *", "Europe/Tallinn").Next(time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))

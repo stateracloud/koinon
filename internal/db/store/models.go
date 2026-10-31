@@ -653,6 +653,49 @@ func (ns NullMembershipSource) Value() (driver.Value, error) {
 	return string(ns.MembershipSource), nil
 }
 
+type NotifyTargetKind string
+
+const (
+	NotifyTargetKindUser    NotifyTargetKind = "user"
+	NotifyTargetKindRole    NotifyTargetKind = "role"
+	NotifyTargetKindChannel NotifyTargetKind = "channel"
+)
+
+func (e *NotifyTargetKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = NotifyTargetKind(s)
+	case string:
+		*e = NotifyTargetKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for NotifyTargetKind: %T", src)
+	}
+	return nil
+}
+
+type NullNotifyTargetKind struct {
+	NotifyTargetKind NotifyTargetKind
+	Valid            bool // Valid is true if NotifyTargetKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullNotifyTargetKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.NotifyTargetKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.NotifyTargetKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullNotifyTargetKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.NotifyTargetKind), nil
+}
+
 type OrgKind string
 
 const (
@@ -874,12 +917,13 @@ func (ns NullQuestionState) Value() (driver.Value, error) {
 type RunFailureClass string
 
 const (
-	RunFailureClassTransient       RunFailureClass = "transient"
-	RunFailureClassThrottled       RunFailureClass = "throttled"
-	RunFailureClassContextOverflow RunFailureClass = "context_overflow"
-	RunFailureClassBudget          RunFailureClass = "budget"
-	RunFailureClassPolicy          RunFailureClass = "policy"
-	RunFailureClassFatal           RunFailureClass = "fatal"
+	RunFailureClassTransient          RunFailureClass = "transient"
+	RunFailureClassThrottled          RunFailureClass = "throttled"
+	RunFailureClassContextOverflow    RunFailureClass = "context_overflow"
+	RunFailureClassBudget             RunFailureClass = "budget"
+	RunFailureClassPolicy             RunFailureClass = "policy"
+	RunFailureClassFatal              RunFailureClass = "fatal"
+	RunFailureClassSandboxUnavailable RunFailureClass = "sandbox_unavailable"
 )
 
 func (e *RunFailureClass) Scan(src interface{}) error {
@@ -1231,6 +1275,94 @@ func (ns NullTaskState) Value() (driver.Value, error) {
 	return string(ns.TaskState), nil
 }
 
+type TraceBackend string
+
+const (
+	TraceBackendLangfuse  TraceBackend = "langfuse"
+	TraceBackendDatadog   TraceBackend = "datadog"
+	TraceBackendLangsmith TraceBackend = "langsmith"
+	TraceBackendOpik      TraceBackend = "opik"
+	TraceBackendGeneric   TraceBackend = "generic"
+)
+
+func (e *TraceBackend) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TraceBackend(s)
+	case string:
+		*e = TraceBackend(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TraceBackend: %T", src)
+	}
+	return nil
+}
+
+type NullTraceBackend struct {
+	TraceBackend TraceBackend
+	Valid        bool // Valid is true if TraceBackend is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTraceBackend) Scan(value interface{}) error {
+	if value == nil {
+		ns.TraceBackend, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TraceBackend.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTraceBackend) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TraceBackend), nil
+}
+
+type TraceContentLevel string
+
+const (
+	TraceContentLevelNone     TraceContentLevel = "none"
+	TraceContentLevelRedacted TraceContentLevel = "redacted"
+	TraceContentLevelFull     TraceContentLevel = "full"
+)
+
+func (e *TraceContentLevel) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TraceContentLevel(s)
+	case string:
+		*e = TraceContentLevel(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TraceContentLevel: %T", src)
+	}
+	return nil
+}
+
+type NullTraceContentLevel struct {
+	TraceContentLevel TraceContentLevel
+	Valid             bool // Valid is true if TraceContentLevel is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTraceContentLevel) Scan(value interface{}) error {
+	if value == nil {
+		ns.TraceContentLevel, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TraceContentLevel.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTraceContentLevel) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TraceContentLevel), nil
+}
+
 type Agent struct {
 	OrgID           pgtype.UUID
 	ID              pgtype.UUID
@@ -1250,6 +1382,8 @@ type Agent struct {
 	UnhealthyAt     pgtype.Timestamptz
 	UnhealthyReason pgtype.Text
 	ResumedAt       pgtype.Timestamptz
+	Model           pgtype.Text
+	Thinking        pgtype.Text
 }
 
 type AgentBudget struct {
@@ -1265,6 +1399,16 @@ type AgentMcpServer struct {
 	AgentID  pgtype.UUID
 	ServerID pgtype.UUID
 	Tools    []string
+}
+
+type AgentRunLimit struct {
+	OrgID            pgtype.UUID
+	AgentID          pgtype.UUID
+	MaxModelRequests pgtype.Int8
+	MaxSpendUsd      pgtype.Numeric
+	MaxDurationSecs  pgtype.Int4
+	UpdatedBy        string
+	UpdatedAt        pgtype.Timestamptz
 }
 
 type AgentSandbox struct {
@@ -1294,6 +1438,7 @@ type AgentSandbox struct {
 	RestoreCheckpointID pgtype.UUID
 	RestoreClaimedAt    pgtype.Timestamptz
 	ArchivedAt          pgtype.Timestamptz
+	Reason              string
 }
 
 type AgentVersion struct {
@@ -1502,21 +1647,24 @@ type McpServer struct {
 }
 
 type McpTool struct {
-	OrgID                pgtype.UUID
-	ServerID             pgtype.UUID
-	Name                 string
-	Description          string
-	InputSchema          []byte
-	ContentHash          string
-	ReadOnlyHint         bool
-	Tier                 McpTier
-	ReviewReason         pgtype.Text
-	Present              bool
-	FirstSeenAt          pgtype.Timestamptz
-	LastSeenAt           pgtype.Timestamptz
-	RequiresTwoApprovers bool
-	TierSetBy            pgtype.Text
-	TierSetAt            pgtype.Timestamptz
+	OrgID                     pgtype.UUID
+	ServerID                  pgtype.UUID
+	Name                      string
+	Description               string
+	InputSchema               []byte
+	ContentHash               string
+	ReadOnlyHint              bool
+	Tier                      McpTier
+	ReviewReason              pgtype.Text
+	Present                   bool
+	FirstSeenAt               pgtype.Timestamptz
+	LastSeenAt                pgtype.Timestamptz
+	RequiresTwoApprovers      bool
+	TierSetBy                 pgtype.Text
+	TierSetAt                 pgtype.Timestamptz
+	DescriptionOriginalLength int64
+	DescriptionCapped         bool
+	DescriptionCleaned        bool
 }
 
 type Model struct {
@@ -1530,13 +1678,15 @@ type Model struct {
 	// Deprecated and unread since migration 00014. Dropped later.
 	OutputRate pgtype.Text
 	// Deprecated and unread since migration 00014. Dropped later.
-	CacheReadRate   pgtype.Text
-	Source          ConfigSource
-	ManagedBySecret pgtype.Text
-	DisabledReason  pgtype.Text
-	CreatedBy       pgtype.UUID
-	CreatedAt       pgtype.Timestamptz
-	UpdatedAt       pgtype.Timestamptz
+	CacheReadRate    pgtype.Text
+	Source           ConfigSource
+	ManagedBySecret  pgtype.Text
+	DisabledReason   pgtype.Text
+	CreatedBy        pgtype.UUID
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	Format           string
+	FormatOverridden bool
 }
 
 type Notification struct {
@@ -1600,15 +1750,26 @@ type OrgMembership struct {
 }
 
 type OrgSetting struct {
-	OrgID                pgtype.UUID
-	IdleTimeoutSeconds   pgtype.Int4
-	ParkWarmSeconds      pgtype.Int4
-	QueueWaitSeconds     pgtype.Int4
-	CreatedAt            pgtype.Timestamptz
-	UpdatedAt            pgtype.Timestamptz
-	MaxConcurrentRuns    pgtype.Int4
-	TriggerConcurrency   pgtype.Int4
-	TriggerRatePerMinute pgtype.Int4
+	OrgID                 pgtype.UUID
+	IdleTimeoutSeconds    pgtype.Int4
+	ParkWarmSeconds       pgtype.Int4
+	QueueWaitSeconds      pgtype.Int4
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+	MaxConcurrentRuns     pgtype.Int4
+	TriggerConcurrency    pgtype.Int4
+	TriggerRatePerMinute  pgtype.Int4
+	SandboxWaitCapSeconds pgtype.Int4
+}
+
+type OrgTraceSetting struct {
+	OrgID             pgtype.UUID
+	ContentLevel      TraceContentLevel
+	SampleRate        pgtype.Numeric
+	PlatformCopyLevel TraceContentLevel
+	UpdatedBy         string
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
 }
 
 type OrgWorkspace struct {
@@ -1626,6 +1787,35 @@ type PlatformAdmin struct {
 	Source    PlatformAdminSource
 }
 
+type PlatformTraceDestination struct {
+	Singleton          bool
+	Backend            TraceBackend
+	Protocol           string
+	EndpointUrl        string
+	Params             []byte
+	Credentials        []byte
+	SecretFields       []string
+	ResourceAttributes []byte
+	Enabled            bool
+	ConfigVersion      int64
+	LastTestAt         pgtype.Timestamptz
+	LastTestOk         pgtype.Bool
+	LastTestMessage    pgtype.Text
+	LastSuccessAt      pgtype.Timestamptz
+	LastErrorAt        pgtype.Timestamptz
+	LastError          pgtype.Text
+	SpansDropped       int64
+	UpdatedBy          string
+	UpdatedAt          pgtype.Timestamptz
+}
+
+type PlatformTraceSetting struct {
+	Singleton      bool
+	ContentCeiling TraceContentLevel
+	UpdatedBy      string
+	UpdatedAt      pgtype.Timestamptz
+}
+
 type PriceOverride struct {
 	OrgID     pgtype.UUID
 	ID        pgtype.UUID
@@ -1638,82 +1828,115 @@ type PriceOverride struct {
 }
 
 type Provider struct {
-	OrgID           pgtype.UUID
-	ID              pgtype.UUID
-	Name            string
-	Type            string
-	Url             string
-	ApiKey          []byte
-	Source          ConfigSource
-	ManagedBySecret pgtype.Text
-	DeclaredVersion pgtype.Text
-	RemovedAt       pgtype.Timestamptz
-	DisabledReason  pgtype.Text
-	CreatedBy       pgtype.UUID
-	CreatedAt       pgtype.Timestamptz
-	UpdatedAt       pgtype.Timestamptz
+	OrgID                pgtype.UUID
+	ID                   pgtype.UUID
+	Name                 string
+	Type                 string
+	Url                  string
+	ApiKey               []byte
+	Source               ConfigSource
+	ManagedBySecret      pgtype.Text
+	DeclaredVersion      pgtype.Text
+	RemovedAt            pgtype.Timestamptz
+	DisabledReason       pgtype.Text
+	CreatedBy            pgtype.UUID
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	AnthropicWorkspaceID pgtype.Text
+}
+
+type ProviderEchoCheck struct {
+	OrgID      pgtype.UUID
+	ProviderID pgtype.UUID
+	Model      string
+	Unchanged  bool
+	Sent       string
+	Received   string
+	CheckedAt  pgtype.Timestamptz
+	CheckedBy  pgtype.UUID
 }
 
 type Question struct {
-	OrgID          pgtype.UUID
-	ID             pgtype.UUID
-	TaskID         pgtype.UUID
-	RunID          pgtype.UUID
-	AgentID        pgtype.UUID
-	AskedTo        pgtype.UUID
-	Question       string
-	Choices        []byte
-	Draft          pgtype.Text
-	DefaultAnswer  string
-	State          QuestionState
-	Answer         pgtype.Text
-	AnswerKind     NullQuestionAnswerKind
-	AnsweredBy     pgtype.UUID
-	CallSha256     string
-	ExpiresAt      pgtype.Timestamptz
-	OpenedAt       pgtype.Timestamptz
-	NotifiedAt     pgtype.Timestamptz
-	NotifyFailures int32
-	ResolvedAt     pgtype.Timestamptz
-	DeliveredAt    pgtype.Timestamptz
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
-	RemindAt       pgtype.Timestamptz
-	RemindedAt     pgtype.Timestamptz
-	RemindFailures int32
+	OrgID   pgtype.UUID
+	ID      pgtype.UUID
+	TaskID  pgtype.UUID
+	RunID   pgtype.UUID
+	AgentID pgtype.UUID
+	// Deprecated (00036): read target_* and question_recipients. Dropped after v0.1.0.
+	AskedTo         pgtype.UUID
+	Question        string
+	Choices         []byte
+	Draft           pgtype.Text
+	DefaultAnswer   string
+	State           QuestionState
+	Answer          pgtype.Text
+	AnswerKind      NullQuestionAnswerKind
+	AnsweredBy      pgtype.UUID
+	CallSha256      string
+	ExpiresAt       pgtype.Timestamptz
+	OpenedAt        pgtype.Timestamptz
+	NotifiedAt      pgtype.Timestamptz
+	NotifyFailures  int32
+	ResolvedAt      pgtype.Timestamptz
+	DeliveredAt     pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+	RemindAt        pgtype.Timestamptz
+	RemindedAt      pgtype.Timestamptz
+	RemindFailures  int32
+	TargetKind      NotifyTargetKind
+	TargetUserID    pgtype.UUID
+	TargetRole      NullOrgRole
+	TargetChannelID pgtype.UUID
+}
+
+type QuestionRecipient struct {
+	OrgID        pgtype.UUID
+	ID           pgtype.UUID
+	QuestionID   pgtype.UUID
+	UserID       pgtype.UUID
+	WaitingSince pgtype.Timestamptz
+	RemovedAt    pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
 }
 
 type Run struct {
-	OrgID               pgtype.UUID
-	ID                  pgtype.UUID
-	AgentID             pgtype.UUID
-	AgentVersionID      pgtype.UUID
-	TaskID              pgtype.UUID
-	State               RunState
-	Epoch               int64
-	OwnerID             pgtype.Text
-	LeaseExpiresAt      pgtype.Timestamptz
-	HeartbeatAt         pgtype.Timestamptz
-	ReadyAt             pgtype.Timestamptz
-	ParkReason          NullRunParkReason
-	ParkedAt            pgtype.Timestamptz
-	ParkExpiresAt       pgtype.Timestamptz
-	OutcomeReason       pgtype.Text
-	MaxWallClockSeconds int32
-	MaxTokens           int64
-	LastEventSeq        int64
-	StartedAt           pgtype.Timestamptz
-	FinishedAt          pgtype.Timestamptz
-	CreatedAt           pgtype.Timestamptz
-	UpdatedAt           pgtype.Timestamptz
-	ParkedSeconds       int64
-	TokensUsed          int64
-	PromptThroughSeq    pgtype.Int8
-	Takeovers           int32
-	Summarizing         bool
-	FailureClass        NullRunFailureClass
-	Origin              RunOrigin
-	ClaimedAt           pgtype.Timestamptz
+	OrgID                pgtype.UUID
+	ID                   pgtype.UUID
+	AgentID              pgtype.UUID
+	AgentVersionID       pgtype.UUID
+	TaskID               pgtype.UUID
+	State                RunState
+	Epoch                int64
+	OwnerID              pgtype.Text
+	LeaseExpiresAt       pgtype.Timestamptz
+	HeartbeatAt          pgtype.Timestamptz
+	ReadyAt              pgtype.Timestamptz
+	ParkReason           NullRunParkReason
+	ParkedAt             pgtype.Timestamptz
+	ParkExpiresAt        pgtype.Timestamptz
+	OutcomeReason        pgtype.Text
+	MaxWallClockSeconds  int32
+	MaxTokens            pgtype.Int8
+	LastEventSeq         int64
+	StartedAt            pgtype.Timestamptz
+	FinishedAt           pgtype.Timestamptz
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	ParkedSeconds        int64
+	TokensUsed           int64
+	PromptThroughSeq     pgtype.Int8
+	Takeovers            int32
+	Summarizing          bool
+	FailureClass         NullRunFailureClass
+	Origin               RunOrigin
+	ClaimedAt            pgtype.Timestamptz
+	SandboxWaitStartedAt pgtype.Timestamptz
+	WrapUpNoticeAt       pgtype.Timestamptz
+	MaxModelRequests     pgtype.Int8
+	MaxSpendUsd          pgtype.Numeric
+	Traced               pgtype.Bool
+	LastTurnSeq          int32
 }
 
 type RunEvent struct {
@@ -1726,6 +1949,17 @@ type RunEvent struct {
 	Payload   []byte
 	CreatedAt pgtype.Timestamptz
 	SourceSeq pgtype.Int8
+}
+
+type RunTurn struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	RunID     pgtype.UUID
+	Seq       int32
+	TraceID   []byte
+	StartedAt pgtype.Timestamptz
+	EndedAt   pgtype.Timestamptz
+	EndReason pgtype.Text
 }
 
 type SandboxIncident struct {
@@ -1803,6 +2037,35 @@ type SpendEntry struct {
 	CostFlagged      bool
 	RequestBytes     pgtype.Int8
 	ResponseBytes    pgtype.Int8
+	Provisional      bool
+	ReserveUsd       pgtype.Numeric
+	ResponseID       pgtype.Text
+	Principal        string
+	UpstreamStatus   pgtype.Int2
+}
+
+type SpendEntryRevision struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	EntryID   pgtype.UUID
+	Reason    string
+	Source    string
+	Before    []byte
+	After     []byte
+	RevisedAt pgtype.Timestamptz
+}
+
+type SpendSettlement struct {
+	OrgID         pgtype.UUID
+	EntryID       pgtype.UUID
+	ProviderID    pgtype.UUID
+	ProviderType  string
+	ResponseID    pgtype.Text
+	Attempts      int32
+	NextAttemptAt pgtype.Timestamptz
+	Deadline      pgtype.Timestamptz
+	LastError     pgtype.Text
+	CreatedAt     pgtype.Timestamptz
 }
 
 type Task struct {
@@ -1825,6 +2088,10 @@ type Task struct {
 	CreatedByKind            TaskCreatorKind
 	CreatedByAgentID         pgtype.UUID
 	CreatedByTriggerID       pgtype.UUID
+	NotifyKind               NullNotifyTargetKind
+	NotifyUserID             pgtype.UUID
+	NotifyRole               NullOrgRole
+	NotifyChannelID          pgtype.UUID
 }
 
 type TaskEvent struct {
@@ -1850,6 +2117,31 @@ type Template struct {
 	Spec         []byte
 	CreatedAt    pgtype.Timestamptz
 	LastSyncedAt pgtype.Timestamptz
+}
+
+type TraceDestination struct {
+	OrgID              pgtype.UUID
+	ID                 pgtype.UUID
+	Name               string
+	Backend            TraceBackend
+	Protocol           string
+	EndpointUrl        string
+	Params             []byte
+	Credentials        []byte
+	SecretFields       []string
+	ResourceAttributes []byte
+	Enabled            bool
+	ConfigVersion      int64
+	LastTestAt         pgtype.Timestamptz
+	LastTestOk         pgtype.Bool
+	LastTestMessage    pgtype.Text
+	LastSuccessAt      pgtype.Timestamptz
+	LastErrorAt        pgtype.Timestamptz
+	LastError          pgtype.Text
+	SpansDropped       int64
+	CreatedBy          pgtype.UUID
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
 }
 
 type User struct {

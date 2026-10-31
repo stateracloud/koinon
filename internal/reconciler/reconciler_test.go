@@ -4,19 +4,31 @@ package reconciler_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"regexp"
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"google.golang.org/protobuf/encoding/protojson"
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
@@ -26,7 +38,10 @@ import (
 	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 const (
@@ -109,6 +124,7 @@ var _ = Describe("Reconciler", func() {
 		logs = &syncBuffer{}
 		now.Store(nil)
 		cfg = reconciler.Config{
+			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: "koinon-gateway-providers"},
@@ -200,9 +216,9 @@ var _ = Describe("Reconciler", func() {
 			Expect(secret.Labels).To(HaveKeyWithValue(reconciler.LabelManagedBy, reconciler.ManagedByValue))
 			Expect(secret.Labels).To(HaveKey(reconciler.LabelAgent))
 			state := mg.last()
-			Expect(state.Keys).To(ConsistOf(gateway.Key{
+			Expect(agentKeys(state)).To(ConsistOf(gateway.Key{
 				ID: row.GatewayKeyID.String, Hash: row.GatewayKeyHash.String,
-				Agent: gateway.AgentRef{Org: state.Keys[0].Agent.Org, Name: state.Keys[0].Agent.Name},
+				Agent: gateway.AgentRef{Org: agentKeys(state)[0].Agent.Org, Name: agentKeys(state)[0].Agent.Name},
 			}))
 			Expect(state.Providers).To(HaveLen(1))
 			Expect(state.Providers[0].Models).To(HaveLen(1))
@@ -273,7 +289,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
 			Expect(osg.Calls("StopSandbox")).To(Equal(0))
 			Expect(osg.Policies(row.Workspace, names.Sandbox)).To(HaveLen(1))
-			Expect(mg.issuedCount()).To(Equal(1))
+			Expect(mg.issuedCount()).To(Equal(2), "the agent's key and the org's model-check key, each once")
 			Expect(sandboxRow(ctx, agent.ID).GatewayKeyID).To(Equal(row.GatewayKeyID))
 		})
 
@@ -311,8 +327,8 @@ var _ = Describe("Reconciler", func() {
 			newKey := material(ctx, rotated)
 			Expect(rotated.GatewayKeyHash.String).To(Equal(gateway.HashKey(newKey)))
 			Expect(osg.Provider(ws, names.Provider).GetCredentials()).To(HaveKeyWithValue("OPENAI_API_KEY", newKey))
-			Expect(mg.last().Keys).To(HaveLen(1))
-			Expect(mg.last().Keys[0].ID).To(Equal(rotated.GatewayKeyID.String))
+			Expect(agentKeys(mg.last())).To(HaveLen(1))
+			Expect(agentKeys(mg.last())[0].ID).To(Equal(rotated.GatewayKeyID.String))
 			Expect(osg.Calls("CreateSandbox")).To(Equal(1))
 
 			By("a deleted sandbox is recreated")
@@ -445,6 +461,196 @@ var _ = Describe("Reconciler", func() {
 			pass(ctx, r)
 			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
 			Expect(sandboxRow(ctx, agent.ID).UnhealthyAt.Valid).To(BeFalse(), "recording the new home clears the stale mark")
+		})
+
+		It("records the reason and message of the sandbox's condition that is not true", func(ctx SpecContext) {
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			osg.SetCondition(row.Workspace, names.Sandbox, "ErrImagePull", "boom")
+			pass(ctx, r)
+			got := sandboxRow(ctx, agent.ID)
+			Expect(got.Reason).To(Equal("ErrImagePull"))
+			Expect(got.Message).To(Equal("boom"))
+		})
+
+		Describe("the sandbox observer (ADR 0078)", func() {
+			var (
+				names   execution.AgentNames
+				dyn     *dynamicfake.FakeDynamicClient
+				metrics *reconciler.Metrics
+				ns      string
+				obsNow  atomic.Pointer[time.Time]
+			)
+			const osReason, osMessage = "ConfigurationPending", "Waiting for effective configuration validation before workload activation"
+			imagePullPod := func() *corev1.Pod {
+				// The captured wc-img pod status (internal/execution/testdata).
+				data, err := os.ReadFile("../execution/testdata/wc-img-init-container-statuses.json")
+				Expect(err).NotTo(HaveOccurred())
+				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: names.Sandbox, Namespace: ns}}
+				Expect(json.Unmarshal(data, &pod.Status.InitContainerStatuses)).To(Succeed())
+				return pod
+			}
+			BeforeEach(func() {
+				names = execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+				ns = execution.WorkspaceNamespace("openshell", row.Workspace)
+				scheme := runtime.NewScheme()
+				dyn = dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+					{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"}: "SandboxList",
+				})
+				metrics = reconciler.NewMetrics(nil)
+				cfg.Metrics = metrics
+				cfg.Observer = &reconciler.SandboxObserver{
+					Kube: kube, Dynamic: dyn, GatewayID: "openshell", ClusterRole: "koinon-koinon-sandbox-observer",
+					ServiceAccount: "koinon-reconciler", ServiceAccountNamespace: namespace,
+					Now: func() time.Time { return *obsNow.Load() },
+				}
+				t0 := time.Now()
+				obsNow.Store(&t0)
+				r = newReconciler()
+			})
+			provisioning := func() {
+				osg.SetPhase(row.Workspace, names.Sandbox, openshellv1.SandboxPhase_SANDBOX_PHASE_PROVISIONING)
+				osg.SetCondition(row.Workspace, names.Sandbox, osReason, osMessage)
+			}
+
+			It("binds the observer role once per workspace namespace", func(ctx SpecContext) {
+				pass(ctx, r)
+				pass(ctx, r)
+				bindings, err := kube.RbacV1().RoleBindings(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(bindings.Items).To(HaveLen(1))
+				b := bindings.Items[0]
+				Expect(b.Name).To(Equal("koinon-koinon-sandbox-observer"))
+				Expect(b.RoleRef).To(Equal(rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "koinon-koinon-sandbox-observer"}))
+				Expect(b.Subjects).To(Equal([]rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: "koinon-reconciler", Namespace: namespace}}))
+			})
+
+			It("records the pod's pull error in place of OpenShell's opaque reason", func(ctx SpecContext) {
+				_, err := kube.CoreV1().Pods(ns).Create(ctx, imagePullPod(), metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				provisioning()
+				pass(ctx, r)
+				got := sandboxRow(ctx, agent.ID)
+				Expect(got.Reason).To(Equal("ImagePullBackOff"))
+				Expect(got.Message).To(HavePrefix(`Back-off pulling image "kind.local/koinon-escape/agent:nope"`))
+				Expect(execution.ClassifySandboxWait(got.Reason, got.Message)).To(Equal(execution.WaitCauseImagePull))
+			})
+
+			It("reads the supervisor pod, by the sandbox's ID, when the workload pod says nothing", func(ctx SpecContext) {
+				// Captured on kind (OpenShell 0.1.5, supervisor_image that cannot be pulled): the workload pod
+				// ended with nothing waiting, the supervisor pod was in ErrImagePull, and OpenShell said
+				// ConfigurationPending.
+				workload := imagePullPod()
+				workload.Status.InitContainerStatuses = nil
+				_, err := kube.CoreV1().Pods(ns).Create(ctx, workload, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				data, err := os.ReadFile("../execution/testdata/supervisor-bad-image-container-statuses.json")
+				Expect(err).NotTo(HaveOccurred())
+				sup := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: execution.SupervisorPodName(sandboxRow(ctx, agent.ID).HomeGeneration.String), Namespace: ns}}
+				Expect(json.Unmarshal(data, &sup.Status.ContainerStatuses)).To(Succeed())
+				_, err = kube.CoreV1().Pods(ns).Create(ctx, sup, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				provisioning()
+				pass(ctx, r)
+				got := sandboxRow(ctx, agent.ID)
+				Expect(got.Reason).To(Equal("ErrImagePull"))
+				Expect(got.Message).To(HavePrefix("supervisor pod: failed to pull and unpack image"))
+				Expect(execution.ClassifySandboxWait(got.Reason, got.Message)).To(Equal(execution.WaitCauseImagePull))
+			})
+
+			It("reads the Agent Sandbox object when the pod is missing", func(ctx SpecContext) {
+				cr := &unstructured.Unstructured{Object: map[string]any{
+					"apiVersion": "agents.x-k8s.io/v1beta1", "kind": "Sandbox",
+					"metadata": map[string]any{"name": names.Sandbox, "namespace": ns},
+					"status": map[string]any{"conditions": []any{map[string]any{
+						"type": "Ready", "status": "False", "reason": "ReconcilerError",
+						"message": `Error seen: pods "x" is forbidden: ValidatingAdmissionPolicy 'p' with binding 'b' denied request: no`,
+					}}},
+				}}
+				_, err := dyn.Resource(schema.GroupVersionResource{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"}).
+					Namespace(ns).Create(ctx, cr, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				provisioning()
+				pass(ctx, r)
+				got := sandboxRow(ctx, agent.ID)
+				Expect(got.Reason).To(Equal("ReconcilerError"))
+				Expect(execution.ClassifySandboxWait(got.Reason, got.Message)).To(Equal(execution.WaitCauseAdmission))
+			})
+
+			It("keeps OpenShell's words when the pod says nothing, and reads nothing for an informative reason", func(ctx SpecContext) {
+				pod := imagePullPod()
+				pod.Status.InitContainerStatuses = nil
+				_, err := kube.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				provisioning()
+				pass(ctx, r)
+				Expect(sandboxRow(ctx, agent.ID).Reason).To(Equal(osReason))
+
+				_, err = kube.CoreV1().Pods(ns).Update(ctx, imagePullPod(), metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				osg.SetCondition(row.Workspace, names.Sandbox, "Unschedulable", "0/1 nodes are available: 1 Insufficient cpu.")
+				pass(ctx, r)
+				Expect(sandboxRow(ctx, agent.ID).Reason).To(Equal("Unschedulable"))
+			})
+
+			It("counts a forbidden read, keeps OpenShell's reason and does not fail the pass", func(ctx SpecContext) {
+				kube.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, names.Sandbox, errors.New("no"))
+				})
+				provisioning()
+				pass(ctx, r)
+				Expect(sandboxRow(ctx, agent.ID).Reason).To(Equal(osReason))
+				Expect(testutil.ToFloat64(metrics.ObserverErrors.WithLabelValues("forbidden"))).To(BeNumerically(">=", 1))
+			})
+
+			It("counts a refused RoleBinding and retries it after the backoff", func(ctx SpecContext) {
+				var refuse atomic.Bool
+				refuse.Store(true)
+				kube.PrependReactor("create", "rolebindings", func(k8stesting.Action) (bool, runtime.Object, error) {
+					if refuse.Load() {
+						return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "rolebindings"}, "b", errors.New("policy"))
+					}
+					return false, nil, nil
+				})
+				pass(ctx, r)
+				Expect(testutil.ToFloat64(metrics.ObserverErrors.WithLabelValues("forbidden"))).To(BeNumerically(">=", 1))
+				By("the next pass does not ask again inside the backoff")
+				before := len(kube.Actions())
+				pass(ctx, r)
+				creates := 0
+				for _, a := range kube.Actions()[before:] {
+					if a.Matches("create", "rolebindings") {
+						creates++
+					}
+				}
+				Expect(creates).To(BeZero())
+				refuse.Store(false)
+				later := obsNow.Load().Add(11 * time.Second)
+				obsNow.Store(&later)
+				pass(ctx, r)
+				bindings, err := kube.RbacV1().RoleBindings(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(bindings.Items).To(HaveLen(1))
+			})
+
+			It("treats AlreadyExists as done", func(ctx SpecContext) {
+				_, err := kube.RbacV1().RoleBindings(ns).Create(ctx, &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "koinon-koinon-sandbox-observer", Namespace: ns}}, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				pass(ctx, r)
+				Expect(testutil.ToFloat64(metrics.ObserverErrors.WithLabelValues("other"))).To(BeZero())
+			})
+
+			It("is off when no observer is configured", func(ctx SpecContext) {
+				cfg.Observer = nil
+				r = newReconciler()
+				_, err := kube.CoreV1().Pods(ns).Create(ctx, imagePullPod(), metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				provisioning()
+				pass(ctx, r)
+				Expect(sandboxRow(ctx, agent.ID).Reason).To(Equal(osReason))
+				bindings, err := kube.RbacV1().RoleBindings(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(bindings.Items).To(BeEmpty())
+			})
 		})
 
 		Describe("a sandbox in Error or Completed", func() {
@@ -638,7 +844,7 @@ var _ = Describe("Reconciler", func() {
 			pass(ctx, r)
 			Expect(osg.Sandbox(row.Workspace, names.Sandbox).GetStatus().GetPhase()).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED))
 			Expect(osg.Provider(row.Workspace, names.Provider)).NotTo(BeNil())
-			Expect(mg.last().Keys).To(HaveLen(1), "the key survives for re-activation")
+			Expect(agentKeys(mg.last())).To(HaveLen(1), "the key survives for re-activation")
 		})
 
 		It("cleans up everything on archive", func(ctx SpecContext) {
@@ -651,7 +857,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(osg.Provider(row.Workspace, names.Provider)).To(BeNil())
 			_, err = kube.CoreV1().Secrets(namespace).Get(ctx, row.KeySecretName, metav1.GetOptions{})
 			Expect(err).To(HaveOccurred())
-			Expect(mg.last().Keys).To(BeEmpty(), "the key is revoked")
+			Expect(agentKeys(mg.last())).To(BeEmpty(), "the key is revoked")
 			done := sandboxRow(ctx, agent.ID)
 			Expect(done.State).To(Equal(store.SandboxStateDeleted))
 			Expect(done.GatewayKeyID.Valid).To(BeFalse())
@@ -672,7 +878,7 @@ var _ = Describe("Reconciler", func() {
 
 			Expect(osg.Sandbox(row.Workspace, names.Sandbox).GetStatus().GetPhase()).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED))
 			Expect(osg.Provider(row.Workspace, names.Provider)).To(BeNil())
-			Expect(mg.last().Keys).To(BeEmpty())
+			Expect(agentKeys(mg.last())).To(BeEmpty())
 			Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateRetained))
 		})
 	})
@@ -682,11 +888,11 @@ var _ = Describe("Reconciler", func() {
 		r := newReconciler()
 		pass(ctx, r)
 		row := sandboxRow(ctx, agent.ID)
-		ref := mg.last().Keys[0].Agent
+		ref := agentKeys(mg.last())[0].Agent
 		full := mg.last().Limits[ref]
 		Expect(full.Unit).To(Equal(gateway.USD))
-		Expect(full.Amount).To(BeNumerically("==", 10))
-		Expect(full.Window).To(Equal(ledger.Window))
+		Expect(full.Amount).To(Equal(money.MustParse("10")))
+		Expect(full.Window).To(Equal(ledger.Window), "windowed, so agentgateway can drop expired counters")
 
 		By("recorded spend lowers the pushed amount and starts a new gateway counter")
 		_, err := pool.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model,
@@ -695,13 +901,13 @@ var _ = Describe("Reconciler", func() {
 		Expect(err).NotTo(HaveOccurred())
 		pass(ctx, r)
 		net := mg.last().Limits[ref]
-		Expect(net.Amount).To(BeNumerically("==", 7.5))
+		Expect(net.Amount).To(Equal(money.MustParse("7.5")))
 		Expect(net.Generation).NotTo(Equal(full.Generation))
 
 		By("a rotated key gets the remainder, not the full limit")
 		Expect(kube.CoreV1().Secrets(namespace).Delete(ctx, row.KeySecretName, metav1.DeleteOptions{})).To(Succeed())
 		pass(ctx, r)
-		Expect(mg.last().Keys[0].ID).NotTo(Equal(row.GatewayKeyID.String))
+		Expect(agentKeys(mg.last())[0].ID).NotTo(Equal(row.GatewayKeyID.String))
 		Expect(mg.last().Limits[ref]).To(Equal(net))
 	})
 
@@ -726,7 +932,7 @@ var _ = Describe("Reconciler", func() {
 		for _, k := range st.Keys {
 			byAgent[k.Agent.Name] = st.Limits[k.Agent]
 		}
-		Expect(byAgent[good.ID.String()].Amount).To(BeNumerically("==", 10), "the other agent is served with its budget")
+		Expect(byAgent[good.ID.String()].Amount).To(Equal(money.MustParse("10")), "the other agent is served with its budget")
 		Expect(byAgent[broken.ID.String()].Amount).To(BeZero(), "no earlier limit: the key is blocked")
 	})
 
@@ -743,12 +949,12 @@ var _ = Describe("Reconciler", func() {
 		r, err := reconciler.New(pool, backend, mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg2)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
-		ref := mg.last().Keys[0].Agent
-		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10))
+		ref := agentKeys(mg.last())[0].Agent
+		Expect(mg.last().Limits[ref].Amount).To(Equal(money.MustParse("10")))
 
 		failing = true
 		Expect(r.ReconcileAll(ctx)).NotTo(Succeed())
-		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10), "the same day: the last pushed limit stands")
+		Expect(mg.last().Limits[ref].Amount).To(Equal(money.MustParse("10")), "the same day: the last pushed limit stands")
 
 		advance(26 * time.Hour)
 		Expect(r.ReconcileAll(ctx)).NotTo(Succeed())
@@ -769,12 +975,60 @@ var _ = Describe("Reconciler", func() {
 		r, err := reconciler.New(pool, backend, mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg2)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
-		ref := mg.last().Keys[0].Agent
-		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10))
+		ref := agentKeys(mg.last())[0].Agent
+		Expect(mg.last().Limits[ref].Amount).To(Equal(money.MustParse("10")))
 
 		failing = true
 		Expect(r.ReconcileAll(ctx)).NotTo(Succeed())
 		Expect(mg.last().Limits[ref].Amount).To(BeZero(), "a positive last limit would not bind: the key is revoked")
+	})
+
+	It("stops a spent agent's runs with the budget reason before the key is revoked (#188)", func(ctx SpecContext) {
+		agent := newAgentWithConfig(ctx, org, user, `{"instructions":"help","limits":{"spendUSD":"1.00"}}`)
+		mg.ledgerBudgets = true
+		r := newReconciler()
+		pass(ctx, r)
+		row := sandboxRow(ctx, agent.ID)
+		first := queueRun(ctx, org, user, agent.ID)
+		running := claimRun(ctx, org)
+		Expect(running.ID).To(Equal(first.ID))
+		queued := queueRun(ctx, org, user, agent.ID)
+
+		// The limit runs out without an entry that reaches it in the ledger (an admin lowered it
+		// below the spend, or the spend has no run), so only the reconciler sees it.
+		_, err := pool.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model,
+			input_tokens, output_tokens, cost_usd, priced, occurred_at)
+			VALUES ($1, $2, $3, $4, 'm', 1, 1, 1.25, true, now())`, org, agent.ID, uniq("req"), row.GatewayKeyID.String)
+		Expect(err).NotTo(HaveOccurred())
+
+		var atRevoke []store.RunState
+		mg.onApply = func(s gateway.State) {
+			for ref, l := range s.Limits {
+				if ref.Name == agent.ID.String() && l.Amount <= 0 {
+					for _, id := range []pgtype.UUID{running.ID, queued.ID} {
+						got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: id})
+						Expect(err).NotTo(HaveOccurred())
+						atRevoke = append(atRevoke, got.State)
+					}
+				}
+			}
+		}
+		pass(ctx, r)
+		Expect(atRevoke).To(Equal([]store.RunState{store.RunStateCanceled, store.RunStateCanceled}),
+			"both runs are stopped when the gateway is told to revoke the key")
+		for _, id := range []pgtype.UUID{running.ID, queued.ID} {
+			got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: id})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
+			Expect(got.OutcomeReason.String).To(HavePrefix("agent daily limit reached ($1.25 of $1.00"))
+		}
+
+		By("the owner's late report of the gateway's 401 changes nothing")
+		_, err = q.FinishRun(ctx, store.FinishRunParams{
+			Outcome: store.RunStateFailed, OutcomeReason: pgtype.Text{String: "provider authentication required", Valid: true},
+			OrgID: org, ID: running.ID, Epoch: running.Epoch,
+		})
+		Expect(err).To(MatchError(pgx.ErrNoRows))
 	})
 
 	It("joins several rejections of one org into one message", func(ctx SpecContext) {
@@ -802,7 +1056,7 @@ var _ = Describe("Reconciler", func() {
 		row3, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: org2, AgentID: a3.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(row3.Workspace).To(Equal(execution.WorkspaceName(org2.Bytes)))
-		Expect(mg.last().Keys).To(HaveLen(3))
+		Expect(agentKeys(mg.last())).To(HaveLen(3))
 	})
 
 	It("does not touch OpenShell when the gateway rejects the state", func(ctx SpecContext) {
@@ -862,6 +1116,59 @@ var _ = Describe("Reconciler", func() {
 			now.Store(nil)
 			pass(ctx, r)
 			Expect(osg.Calls("CreateSandbox")).To(Equal(2))
+			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
+		It("names agentgateway's reason on the agents it holds back when the whole config is refused (issue #245)", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			mg.fail = &gateway.ConfigRejectedError{Revision: "abc", Reason: "USD budget limits support at most 9 fractional digits"}
+			fresh := newAgent(ctx, org, user)
+			advance(11 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(MatchError(gateway.ErrConfigRejected))
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1), "the fresh agent's key is not live")
+			msg := sandboxRow(ctx, fresh.ID).Message
+			Expect(msg).To(ContainSubstring("waiting for the gateway"))
+			Expect(msg).To(ContainSubstring("USD budget limits support at most 9 fractional digits"))
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateStopped), "an agent with a live key is still converged")
+
+			By("a good file loads")
+			mg.fail = nil
+			now.Store(nil)
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
+		It("keeps a key the gateway refused not live and holds its agent back, while served keys are converged (issue #245)", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			served := map[string]bool{}
+			for _, k := range mg.last().Keys {
+				served[k.ID] = true
+			}
+			fresh := newAgent(ctx, org, user)
+			// The gateway judges the new key alone: everything else of the state is live.
+			mg.onApply = func(s gateway.State) {
+				for _, k := range s.Keys {
+					if !served[k.ID] {
+						mg.fail = &gateway.RejectedError{Rejected: []gateway.Rejection{
+							{Kind: "Key", Name: k.ID, Reason: "USD budget limits support at most 9 fractional digits"},
+						}}
+					}
+				}
+			}
+			advance(11 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1), "the refused key is not live: no sandbox for the fresh agent")
+			Expect(sandboxRow(ctx, fresh.ID).Message).To(ContainSubstring("waiting for the gateway"))
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateStopped), "the live key's agent is converged")
+
+			By("the key is accepted")
+			mg.onApply, mg.fail = nil, nil
+			now.Store(nil)
+			pass(ctx, r)
 			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
 		})
 
@@ -929,3 +1236,15 @@ var _ = Describe("Reconciler", func() {
 		}).WithTimeout(5 * time.Second).Should(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
 	})
 })
+
+// agentKeys are the state's keys of agents: the system keys of the orgs (the model-check key of an
+// org that serves a priced model) are not part of what these specs are about.
+func agentKeys(st gateway.State) []gateway.Key {
+	var out []gateway.Key
+	for _, k := range st.Keys {
+		if !gateway.IsSystemAgent(k.Agent) {
+			out = append(out, k)
+		}
+	}
+	return out
+}

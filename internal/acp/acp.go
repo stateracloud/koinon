@@ -215,7 +215,12 @@ func (c *Conn) SetModel(ctx context.Context, id SessionID, model string) error {
 
 // Prompt sends a user message and blocks until the turn ends.
 func (c *Conn) Prompt(ctx context.Context, id SessionID, text string) (StopReason, error) {
-	r, err := c.c.Prompt(ctx, sdk.PromptRequest{SessionId: id, Prompt: []sdk.ContentBlock{sdk.TextBlock(text)}})
+	return c.PromptMeta(ctx, id, text, nil)
+}
+
+// PromptMeta is Prompt with meta in the request's _meta (for example a traceparent, ADR 0074).
+func (c *Conn) PromptMeta(ctx context.Context, id SessionID, text string, meta map[string]any) (StopReason, error) {
+	r, err := c.c.Prompt(ctx, sdk.PromptRequest{Meta: meta, SessionId: id, Prompt: []sdk.ContentBlock{sdk.TextBlock(text)}})
 	if err != nil {
 		return "", err
 	}

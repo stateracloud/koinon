@@ -6,7 +6,9 @@
 # Secret rt1-searxng-secrets (keys secret_key and mcp_token) is delivered by the operator, not by this
 # kustomization; see secrets.example.yaml and ../README.md.
 # Memory: searxng request 96Mi / limit 256Mi (about 87 MiB measured), mcp-searxng request 48Mi / limit
-# 128Mi (about 43 MiB measured).
+# 256Mi (about 43 MiB measured at rest) and CPU limit 2, with 5 s probe timeouts, as fixed on the home
+# lab on 2026-10-29: web_url_read converts whole pages and the old limits (500m, 128Mi, default 1 s
+# probe timeout) did not leave /health room under load.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,7 +38,7 @@ spec:
         - name: searxng
           # A mirror of docker.io/searxng/searxng@sha256:0f48ffe2152f388f5eaede27f96b610449cebfc890d0ad457304475a54ad7b6e
           # (2026.10.27-b5ed73fcb), unmodified. The tag is a placeholder: the digest is filled in at deploy.
-          image: zot.apps.lab.example.invalid/koinon/rt1-searxng:2026.10.27
+          image: rt1-searxng:2026.10.27
           env:
             - name: SEARXNG_SECRET
               valueFrom:
@@ -111,7 +113,7 @@ spec:
         - name: mcp-searxng
           # A mirror of docker.io/isokoliuk/mcp-searxng@sha256:8f1dd92a9e2875cb4e8df7036785ec4c088b7600cefb611de472a352a3dcba60
           # (2.9.0). The tag is a placeholder: the digest is filled in at deploy.
-          image: zot.apps.lab.example.invalid/koinon/rt1-searxng-mcp:2.9.0
+          image: rt1-searxng-mcp:2.9.0
           env:
             - {name: SEARXNG_URL, value: "http://rt1-searxng:8080"}
             - {name: MCP_HTTP_PORT, value: "8080"}
@@ -122,6 +124,15 @@ spec:
             - {name: MCP_HTTP_HARDEN, value: "true"}
             # Sessionless: agentgateway does not keep the MCP server's legacy sessions.
             - {name: MCP_HTTP_STATELESS, value: "true"}
+            # Every agent's calls reach this pod from the gateway's single pod IP, so the per-IP in-flight
+            # limit (default 8) is effectively the global one. Raise it, and keep the global limit above
+            # it (a per-IP value above the global one is reduced to the global cap). The tool ceiling
+            # (MCP_TOOL_MAX_IN_FLIGHT, default 16, no queue) is separate. URL_READ_MAX_CHARS is only the
+            # default page length when a call omits maxLength; an explicit maxLength wins.
+            - {name: MCP_HTTP_STATELESS_MAX_IN_FLIGHT_PER_IP, value: "16"}
+            - {name: MCP_HTTP_STATELESS_MAX_IN_FLIGHT, value: "32"}
+            - {name: MCP_TOOL_MAX_IN_FLIGHT, value: "32"}
+            - {name: URL_READ_MAX_CHARS, value: "8000"}
             - {name: MCP_HTTP_ALLOWED_HOSTS, value: "rt1-searxng-mcp:8080,rt1-searxng-mcp,rt1-searxng-mcp.koinon-fixtures:8080,rt1-searxng-mcp.koinon-fixtures,rt1-searxng-mcp.koinon-fixtures.svc:8080,rt1-searxng-mcp.koinon-fixtures.svc,rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080,rt1-searxng-mcp.koinon-fixtures.svc.cluster.local"}
             - {name: MCP_HTTP_ALLOWED_ORIGINS, value: "http://rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080"}
             - name: MCP_HTTP_AUTH_TOKEN
@@ -135,13 +146,15 @@ spec:
             capabilities: {drop: [ALL]}
           resources:
             requests: {cpu: 20m, memory: 48Mi}
-            limits: {cpu: 500m, memory: 128Mi}
+            limits: {cpu: "2", memory: 256Mi}
           readinessProbe:
             httpGet: {path: /health, port: mcp}
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             httpGet: {path: /health, port: mcp}
             periodSeconds: 30
+            timeoutSeconds: 5
           volumeMounts:
             - {name: tmp, mountPath: /tmp}
       volumes:

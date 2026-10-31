@@ -23,6 +23,8 @@ import (
 	. "github.com/onsi/gomega"    //nolint:staticcheck // see above
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
 )
 
 // Env is one driver under test.
@@ -41,9 +43,11 @@ type Env struct {
 	// GatewayBudgets is true when the gateway itself blocks a key over its limit with 429 (standalone
 	// mode). In Kubernetes mode the ledger revokes the key instead, which that driver's own suite tests.
 	GatewayBudgets bool
-	// OrgTargetsNotContacted is true when an org's MCP server is not contacted at all for another
-	// org's key (standalone: a per-target condition). Without it only tool calls are denied.
-	OrgTargetsNotContacted bool
+	// HeaderAllowlist is true when the gateway drops every client header outside
+	// gateway.ForwardedHeaders (standalone mode); Kubernetes mode's CRD cannot say so. In both modes
+	// the gateway refuses with 403 a request that carries a gateway key in any header but
+	// Authorization.
+	HeaderAllowlist bool
 }
 
 // Gateway is a started gateway under test.
@@ -68,6 +72,7 @@ var (
 // Register adds the G1 specs for env to the current Ginkgo tree.
 func Register(env Env) {
 	llmSpec(env)
+	anthropicSpec(env)
 	mcpServersSpec(env)
 	loneTargetSpec(env)
 }
@@ -82,6 +87,7 @@ func llmSpec(env Env) {
 			keyA   gateway.IssuedKey // limited agent
 			keyB   gateway.IssuedKey // unlimited agent, no tool grants
 			keyG   gateway.IssuedKey // an agent of the second org, globex
+			keyC   gateway.IssuedKey // globex's model-check system key, restricted to open-model
 			ups    map[string]*taggedUpstream
 			// redirector answers 307 to the "private" upstream; redirects counts what it was asked.
 			redirector *httptest.Server
@@ -156,6 +162,8 @@ func llmSpec(env Env) {
 			Expect(err).NotTo(HaveOccurred())
 			keyG, err = gateway.NewKey(agentG)
 			Expect(err).NotTo(HaveOccurred())
+			keyC, err = gateway.NewKey(gateway.AgentRef{Org: "globex", Name: gateway.ModelCheckAgentName})
+			Expect(err).NotTo(HaveOccurred())
 
 			hostURL := func(p int) string { return fmt.Sprintf("http://%s:%d/v1", env.Host, p) }
 			state = gateway.State{
@@ -164,27 +172,27 @@ func llmSpec(env Env) {
 						Org: "acme", Name: "upstream", Type: "fake", BaseURL: hostURL(port(upstream)),
 						// $50 per 1M tokens: 20 tokens cost $0.001 per request.
 						Models: []gateway.Model{
-							{Name: testModel, Price: &gateway.Price{Input: "50", Output: "50"}},
-							{Name: "acme-only", Price: &gateway.Price{Input: "1", Output: "1"}},
+							{Name: testModel, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "50", Output: "50"}},
+							{Name: "acme-only", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}},
 							// A plain name that is spelled like globex's gateway-wide id.
-							{Name: "globex/" + testModel, Price: &gateway.Price{Input: "1", Output: "1"}},
-							{Name: "unpriced"},
+							{Name: "globex/" + testModel, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}},
+							{Name: "unpriced", Format: modelformat.OpenAI},
 						},
 					},
 					{
 						Org: "acme", Name: "redirecting", Type: "fake", BaseURL: hostURL(port(redirector)),
-						Models: []gateway.Model{{Name: "redirect-model", Price: &gateway.Price{Input: "1", Output: "1"}}},
+						Models: []gateway.Model{{Name: "redirect-model", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}}},
 					},
 					{
 						Org: "globex", Name: "upstream", Type: "fake", BaseURL: hostURL(port(ups["globex"].Server)),
 						APIKeyFile: env.KeyFile("globex_key"),
-						Models:     []gateway.Model{{Name: testModel, Price: &gateway.Price{Input: "1", Output: "1"}}},
+						Models:     []gateway.Model{{Name: testModel, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}}},
 					},
 					{
 						Org: "globex", Name: "guarded", Type: "openrouter", BaseURL: hostURL(port(ups["guarded"].Server)),
 						Models: []gateway.Model{
-							{Name: "guarded-model", Guard: true, Price: &gateway.Price{Input: "1", Output: "1"}},
-							{Name: "open-model", Price: &gateway.Price{Input: "1", Output: "1"}},
+							{Name: "guarded-model", Format: modelformat.OpenAI, Guard: true, Price: &gateway.Price{Input: "1", Output: "1"}},
+							{Name: "open-model", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}},
 						},
 					},
 				},
@@ -196,7 +204,9 @@ func llmSpec(env Env) {
 			state.AddKey(keyA.Key)
 			state.AddKey(keyB.Key)
 			state.AddKey(keyG.Key)
-			state.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 0.0015, Window: 24 * time.Hour})
+			state.AddKey(keyC.Key)
+			state.RestrictModels(keyC.Agent, "open-model")
+			state.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("0.0015"), Window: 24 * time.Hour})
 			state.GrantTools(agentA, gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}})
 
 			gw, err := env.Start(ctx, []int{port(upstream), port(tools), port(ups["globex"].Server), port(ups["guarded"].Server), port(ups["private"].Server), port(redirector)},
@@ -297,6 +307,19 @@ func llmSpec(env Env) {
 				Expect(string(b)).NotTo(ContainSubstring("globex"))
 			})
 
+			It("restricts a system key to its own models and leaves agent keys alone", func(ctx SpecContext) {
+				code, body := chatModel(ctx, keyC.Material, "open-model")
+				Expect(code).To(Equal(http.StatusOK), body)
+				for _, m := range []string{testModel, "guarded-model", "acme-only"} {
+					code, body = chatModel(ctx, keyC.Material, m)
+					Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), m+": "+body)
+				}
+				for _, m := range []string{testModel, "guarded-model", "open-model"} {
+					code, body = chatModel(ctx, keyG.Material, m)
+					Expect(code).To(Equal(http.StatusOK), m+": "+body)
+				}
+			})
+
 			It("serves no unpriced model", func(ctx SpecContext) {
 				code, body := chatModel(ctx, keyB.Material, "unpriced")
 				Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), body)
@@ -347,6 +370,43 @@ func llmSpec(env Env) {
 				Expect(upstreamOptions()).To(BeNil(), "not streamed: no stream_options goes upstream")
 				send(`{"model":"open-model",` + msgs + `}`)
 				Expect(upstreamOptions()).To(BeNil())
+			})
+
+			It("passes cache_control markers through to the upstream unchanged (ADR 0068)", func(ctx SpecContext) {
+				marker := map[string]any{"type": "ephemeral"}
+				block := func(text string) map[string]any {
+					return map[string]any{"type": "text", "text": text, "cache_control": marker}
+				}
+				sent := map[string]any{
+					"model": "open-model", "session_id": "01234567-run",
+					"messages": []any{
+						map[string]any{"role": "system", "content": []any{block("You are a helpful agent.")}},
+						map[string]any{"role": "user", "content": []any{block("first question")}},
+						map[string]any{"role": "assistant", "content": "answer"},
+						map[string]any{"role": "user", "content": []any{block("second question")}},
+					},
+					"tools": []any{map[string]any{
+						"type": "function", "cache_control": marker,
+						"function": map[string]any{"name": "lookup", "parameters": map[string]any{"type": "object"}},
+					}},
+				}
+				raw, err := json.Marshal(sent)
+				Expect(err).NotTo(HaveOccurred())
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/chat/completions", bytes.NewReader(raw))
+				Expect(err).NotTo(HaveOccurred())
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer "+keyG.Material)
+				resp, err := http.DefaultClient.Do(req)
+				Expect(err).NotTo(HaveOccurred())
+				b, _ := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				Expect(resp.StatusCode).To(Equal(http.StatusOK), string(b))
+
+				var got map[string]any
+				Expect(json.Unmarshal([]byte(ups["guarded"].lastBody()), &got)).To(Succeed())
+				Expect(got["messages"]).To(Equal(sent["messages"]), "the content blocks and their cache_control reach the upstream as sent")
+				Expect(got).To(HaveKeyWithValue("session_id", "01234567-run"), "OpenRouter's sticky-routing field reaches the upstream")
+				Expect(got["tools"]).To(Equal(sent["tools"]), "the tool's cache_control reaches the upstream as sent")
 			})
 
 			It("sends the provider's key file content as the upstream credential", func(ctx SpecContext) {
@@ -584,14 +644,10 @@ func mcpServersSpec(env Env) {
 					Expect(res.IsError).To(BeTrue(), tool)
 				}
 			}
-			if env.OrgTargetsNotContacted {
-				// The globex server was not even contacted for the other org's key.
-				Expect(globexLog.values("X-Api-Key")).To(HaveLen(before))
-			} else {
-				// Kubernetes mode has no per-target condition (ADR 0058): the server may see the other
-				// org's initialize and list, with its owner's credential, but no tool call.
-				Expect(globexLog.values("Mcp-Method")).NotTo(ContainElement("tools/call"), "no call reached the server; saw %d requests", len(globexLog.values("Mcp-Method"))-callsBefore)
-			}
+			// The globex server was not even contacted for the other org's key (a per-target
+			// condition in both modes since agentgateway v1.7, ADR 0058).
+			Expect(globexLog.values("X-Api-Key")).To(HaveLen(before))
+			Expect(globexLog.values("Mcp-Method")).NotTo(ContainElement("tools/call"), "no call reached the server; saw %d requests", len(globexLog.values("Mcp-Method"))-callsBefore)
 		})
 
 		It("injects the credential header at the gateway and does not let the agent set it", func(ctx SpecContext) {
@@ -630,6 +686,44 @@ func mcpServersSpec(env Env) {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.Content[0].(*mcp.TextContent).Text).To(Equal("acme-open saw "))
 			Expect(strings.Join(openLog.values("Authorization"), ",")).NotTo(ContainSubstring(gateway.KeyPrefix))
+		})
+
+		It("refuses an MCP request with the agent's key in any header but Authorization, and passes a server only the headers MCP needs (#262)", func(ctx SpecContext) {
+			connect := func(name, value string) (*mcp.ClientSession, error) {
+				client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0.0.1"}, nil)
+				return client.Connect(ctx, &mcp.StreamableClientTransport{
+					Endpoint:             llmURL + "/mcp",
+					HTTPClient:           &http.Client{Transport: headerSetter{key: keyAcme.Material, name: name, value: value, base: http.DefaultTransport}},
+					DisableStandaloneSSE: true, MaxRetries: -1,
+				}, nil)
+			}
+			// A key in a header of the agent's choosing, or in one the allowlist keeps, is refused.
+			for _, h := range [][2]string{
+				{"X-Canary", "prefix-" + keyAcme.Material + "-suffix"},
+				{"User-Agent", "harness/1.0 (" + keyAcme.Material + ")"},
+			} {
+				s, err := connect(h[0], h[1])
+				if err == nil {
+					_ = s.Close()
+				}
+				Expect(err).To(HaveOccurred(), "the key in "+h[0]+" is refused")
+			}
+
+			s, err := connect("X-Canary", "hello")
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() { _ = s.Close() })
+			for _, tool := range []string{"acme-open_read_item", "acme-wiki_read_item"} {
+				_, err = s.CallTool(ctx, &mcp.CallToolParams{Name: tool})
+				Expect(err).NotTo(HaveOccurred())
+			}
+			for name, l := range map[string]*headerLog{"acme-open": openLog, "acme-wiki": acmeLog} {
+				if env.HeaderAllowlist {
+					Expect(l.values("X-Canary")).To(BeEmpty(), name+": a header the agent invented reached the server")
+				}
+				for _, h := range []string{"Authorization", "X-Canary", "Cookie", "User-Agent"} {
+					Expect(strings.Join(l.values(h), ",")).NotTo(ContainSubstring(gateway.KeyPrefix), name+": "+h)
+				}
+			}
 		})
 
 		It("drops a credential header the agent sent to a server that has none", func(ctx SpecContext) {
@@ -730,9 +824,7 @@ func loneTargetSpec(env Env) {
 			res, err := s.ListTools(ctx, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.Tools).To(BeEmpty())
-			if env.OrgTargetsNotContacted {
-				Expect(log.values("Mcp-Method")).To(HaveLen(before), "the server was not contacted for the other org's key")
-			}
+			Expect(log.values("Mcp-Method")).To(HaveLen(before), "the server was not contacted for the other org's key")
 			_, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "acme-only_read_item"})
 			if err == nil {
 				Expect(log.values("Mcp-Method")).NotTo(ContainElement("tools/call"))

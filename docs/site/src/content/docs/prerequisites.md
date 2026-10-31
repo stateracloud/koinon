@@ -125,6 +125,13 @@ the same place, and the two agree; otherwise list your reference in `sandboxPoli
 For a private registry, set `server.sandboxImagePullSecrets` on the OpenShell release. See
 [Private registries and mirrors](/guides/private-registries/).
 
+Koinon needs OpenShell's `gatewayId` (its chart default is `openshell`) as `openshell.gatewayId`: workspace
+namespaces are named `openshell-<gatewayId>-<workspace>`, and the sandbox observer reads sandbox pods there.
+The observer is a small cluster-scoped grant, on by default: the reconciler may create one RoleBinding per
+workspace namespace and bind one ClusterRole (`get` on pods and Sandboxes), fenced by a ValidatingAdmissionPolicy.
+Platform teams that refuse it set `sandboxObserver.enabled: false`; see
+[Agent health](/guides/agent-health/#how-koinon-finds-the-cause).
+
 ## The preflight
 
 `helm install` runs a pre-install Job, `koinon-api preflight`. It fails the release when it finds
@@ -134,10 +141,11 @@ any of these:
 - The OpenShell gateway is not reachable at `openshell.address`, or its version is not 0.1.5.
 - The RuntimeClass in `openshell.runtimeClassName` does not exist.
 - The CloudNativePG operator is missing (when `postgres.mode` is `cnpg`).
-- The agentgateway `GatewayClass`, its `agentgateway.dev` CRDs or a v1.6.x controller are missing (when `gateway.mode` is `kubernetes`; see [Gateway modes](/guides/gateway-modes/)).
+- The agentgateway `GatewayClass`, its `agentgateway.dev` CRDs or a v1.7.x controller are missing (when `gateway.mode` is `kubernetes`; see [Gateway modes](/guides/gateway-modes/)).
 
-It warns, and does not fail, when Kata guest seccomp is off (ADR 0048), or when your cluster does
-not enforce NetworkPolicy. Turn the seccomp probe off with `preflight.seccompProbe.enabled: false`
+It warns, and does not fail, when Kata guest seccomp is off (ADR 0048), when your cluster does
+not enforce NetworkPolicy, when `openshell.gatewayId` differs from the gateway's `gateway_id`, or when
+`sandboxObserver.enabled` is false. Turn the seccomp probe off with `preflight.seccompProbe.enabled: false`
 on `runc`, where it does not apply.
 
 ## Koinon's images and chart

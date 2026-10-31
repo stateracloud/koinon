@@ -351,8 +351,8 @@ type Entry struct {
 	// HiddenThinking marks models that bill thinking tokens the response may not show, so an
 	// aborted request cannot be measured from its text (estimate rule 3).
 	HiddenThinking bool `json:"hiddenThinking,omitempty" yaml:"hidden_thinking,omitempty"`
-	// MaxOutput is the model's largest output in tokens. An aborted response without usage
-	// settles output at the request's max_tokens, or at this when the request's limit was not
+	// MaxOutput is the model's largest output in tokens. It caps the max_tokens bound a response
+	// cut short holds back from the gateway key, and stands in when the request's limit was not
 	// logged (for example OpenAI's max_completion_tokens).
 	MaxOutput int    `json:"maxOutput,omitempty" yaml:"max_output,omitempty"`
 	Source    Source `json:"source" yaml:"source"`

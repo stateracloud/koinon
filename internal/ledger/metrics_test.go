@@ -17,15 +17,16 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/prices"
 )
 
 var _ = Describe("metrics", func() {
 	It("counts ingested and rejected records, and observes the ingest lag", func(ctx SpecContext) {
 		needDocker()
-		e := newEnv(ctx, uniq("metrics"), "", "10.00", 100_000)
+		e := newEnv(ctx, uniq("metrics"), "", "10.00")
 		reg := prometheus.NewRegistry()
 		m := ledger.NewMetrics(reg)
-		srv := httptest.NewServer(ledger.Handler(&ledger.Ingester{DB: db, Metrics: m}, slog.New(slog.NewTextHandler(io.Discard, nil))))
+		srv := httptest.NewServer(ledger.Handler(&ledger.Ingester{DB: db, Metrics: m, Prices: prices.NewResolver(priceList)}, slog.New(slog.NewTextHandler(io.Discard, nil))))
 		DeferCleanup(srv.Close)
 
 		agent := e.slug + "/" + e.agent.ID.String()
@@ -47,7 +48,7 @@ var _ = Describe("metrics", func() {
 		}
 		post()
 
-		Expect(testutil.ToFloat64(m.Ingested)).To(Equal(2.0))
+		Expect(testutil.ToFloat64(m.Ingested.WithLabelValues("agent"))).To(Equal(2.0))
 		Expect(testutil.ToFloat64(m.Rejected.WithLabelValues("missing_key"))).To(Equal(1.0))
 		Expect(testutil.ToFloat64(m.Rejected.WithLabelValues("unattributed"))).To(Equal(1.0))
 		Expect(testutil.ToFloat64(m.Rejected.WithLabelValues("invalid_agent"))).To(Equal(0.0))
@@ -57,6 +58,6 @@ var _ = Describe("metrics", func() {
 
 		By("a replay records nothing new and adds no lag observation")
 		post()
-		Expect(testutil.ToFloat64(m.Ingested)).To(Equal(2.0))
+		Expect(testutil.ToFloat64(m.Ingested.WithLabelValues("agent"))).To(Equal(2.0))
 	})
 })

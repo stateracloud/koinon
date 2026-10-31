@@ -80,14 +80,13 @@ weaker than a GitHub App's. All presets (Read only, Standard, Trusted) stay avai
 
 Two more templates work on Gitea. **Researcher** has a read-only grant on one to five repositories
 (`repo.read` only, so it cannot push or propose anything) and answers a question over several runs with
-a cited Markdown report; it keeps its notes in its home. **LCM upgrader** checks one repository every
-Monday at 07:00 UTC for outdated Helm charts, images, Argo CD apps and dependencies, then asks "Create
+a cited Markdown report; it keeps its notes in `notes/` in its working directory (`/sandbox/work`). **LCM upgrader** checks
+one repository every Monday at 07:00 UTC for outdated Helm charts, images, Argo CD apps and dependencies, then asks "Create
 the PR?" with up to three low-risk upgrades and opens a pull request only after a yes (you approve that
 pull request too). Both read release notes and the web only through MCP servers you allow for the agent
 ([MCP servers](/guides/mcp-servers/)). A scheduled task has no creator, so the trigger's instruction is a form: on Edit triggers
-([Triggers](/guides/triggers/)) set the `Repository:` line (LCM upgrader) and replace `Ask: none` with
-`Ask: name@example.com`, the person whose inbox gets the question. With `none` the agent lists its
-proposal in its reply instead.
+([Triggers](/guides/triggers/)) set the `Repository:` line (LCM upgrader) and choose who is asked in the
+trigger's *Who is asked* field (by default the org's admins), whose inbox gets the question.
 
 ## Workflow files
 

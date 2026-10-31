@@ -120,12 +120,12 @@ func (r reply) stopReason() string {
 
 func (r reply) messageID() string { return fmt.Sprintf("msg_fake_%d", r.seq) }
 
-// anthropicUsage reports uncached input as input_tokens and cache reads separately, as the
-// Messages API does.
+// anthropicUsage reports uncached input as input_tokens and cache reads and writes separately, as
+// the Messages API does.
 func anthropicUsage(u Usage, outputTokens int) map[string]any {
 	return map[string]any{
-		"input_tokens":                u.InputTokens - u.CachedInputTokens,
-		"cache_creation_input_tokens": 0,
+		"input_tokens":                u.InputTokens - u.CachedInputTokens - u.CacheWriteTokens,
+		"cache_creation_input_tokens": u.CacheWriteTokens,
 		"cache_read_input_tokens":     u.CachedInputTokens,
 		"output_tokens":               outputTokens,
 	}
@@ -138,7 +138,14 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicError(w, err)
 		return
 	}
-	rep, err := s.plan(r.URL.Path, req.Model, body, req.conversation())
+	if s.strict() {
+		if err := checkStrictMessages(body, r.Header); err != nil {
+			s.record(r.URL.Path, r.Header, req.Model, body)
+			writeAnthropicError(w, &apiError{kind: errBadRequest, message: err.Error()})
+			return
+		}
+	}
+	rep, err := s.plan(r.URL.Path, r.URL.RawQuery, r.Header, req.Model, body, req.conversation())
 	if err != nil {
 		writeAnthropicError(w, err)
 		return

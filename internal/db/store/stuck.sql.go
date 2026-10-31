@@ -172,7 +172,7 @@ func (q *Queries) ExpireSavedWork(ctx context.Context, orgID pgtype.UUID) ([]Exp
 }
 
 const getRunForUpload = `-- name: GetRunForUpload :one
-SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at FROM runs
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd, traced, last_turn_seq FROM runs
 WHERE org_id = $1 AND id = $2 AND epoch = $3 AND state IN ('starting', 'running')
 `
 
@@ -217,6 +217,12 @@ func (q *Queries) GetRunForUpload(ctx context.Context, arg GetRunForUploadParams
 		&i.FailureClass,
 		&i.Origin,
 		&i.ClaimedAt,
+		&i.SandboxWaitStartedAt,
+		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
+		&i.Traced,
+		&i.LastTurnSeq,
 	)
 	return i, err
 }
@@ -538,7 +544,7 @@ const markAgentUnhealthy = `-- name: MarkAgentUnhealthy :one
 UPDATE agents
 SET unhealthy_at = now(), unhealthy_reason = $1::text
 WHERE org_id = $2 AND id = $3 AND unhealthy_at IS NULL
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at
+RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking
 `
 
 type MarkAgentUnhealthyParams struct {
@@ -569,6 +575,8 @@ func (q *Queries) MarkAgentUnhealthy(ctx context.Context, arg MarkAgentUnhealthy
 		&i.UnhealthyAt,
 		&i.UnhealthyReason,
 		&i.ResumedAt,
+		&i.Model,
+		&i.Thinking,
 	)
 	return i, err
 }
@@ -578,7 +586,7 @@ const markSandboxUnhealthy = `-- name: MarkSandboxUnhealthy :one
 UPDATE agent_sandboxes
 SET unhealthy_at = now(), unhealthy_reason = $1::text, unhealthy_generation = coalesce(nullif($2::text, ''), sandbox_id, home_generation, '')
 WHERE org_id = $3 AND agent_id = $4
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason
 `
 
 type MarkSandboxUnhealthyParams struct {
@@ -631,6 +639,7 @@ func (q *Queries) MarkSandboxUnhealthy(ctx context.Context, arg MarkSandboxUnhea
 		&i.RestoreCheckpointID,
 		&i.RestoreClaimedAt,
 		&i.ArchivedAt,
+		&i.Reason,
 	)
 	return i, err
 }
@@ -693,7 +702,7 @@ const resumeAgent = `-- name: ResumeAgent :one
 UPDATE agents
 SET unhealthy_at = NULL, unhealthy_reason = NULL, resumed_at = now()
 WHERE org_id = $1 AND id = $2 AND unhealthy_at IS NOT NULL
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at
+RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking
 `
 
 type ResumeAgentParams struct {
@@ -724,6 +733,8 @@ func (q *Queries) ResumeAgent(ctx context.Context, arg ResumeAgentParams) (Agent
 		&i.UnhealthyAt,
 		&i.UnhealthyReason,
 		&i.ResumedAt,
+		&i.Model,
+		&i.Thinking,
 	)
 	return i, err
 }

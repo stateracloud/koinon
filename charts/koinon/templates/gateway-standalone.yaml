@@ -1,6 +1,6 @@
 {{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
 {{- /*
-gateway.mode=standalone: agentgateway v1.6.0 without CRDs or controller (ADR 0048). One replica,
+gateway.mode=standalone: agentgateway v1.7.0 without CRDs or controller (ADR 0048). One replica,
 because the budget store is SQLite on a PVC.
 
 The config ConfigMap (koinon.gatewayConfigName) is not rendered. The reconciler (plan item G1)
@@ -9,6 +9,10 @@ per-agent key hashes, budgets and MCP routes; agentgateway hot-reloads it. Rende
 reset it on every render that cannot read the live object (helm template, Argo CD, Flux), and all
 agent traffic would be refused until the next reconcile. The pod below waits (ContainerCreating)
 until the ConfigMap exists.
+
+MCP sessions: agentgateway v1.7 always encrypts MCP session IDs. SESSION_KEY comes from a Secret the
+ensure-secrets hook Job generates (a template cannot: a random value changes on every render), as an
+env var so it stays out of the config ConfigMap. A fixed key keeps sessions valid across restarts.
 */ -}}
 {{- if eq .Values.gateway.mode "standalone" }}
 {{- $name := include "koinon.componentName" (list . "gateway") }}
@@ -85,6 +89,12 @@ spec:
           image: {{ include "koinon.imageRef" (list . (printf "%s:%s%s" $gw.image.repository $gw.image.tag (ternary (printf "@%s" $gw.image.digest) "" (not (empty $gw.image.digest))))) }}
           imagePullPolicy: IfNotPresent
           args: ["-f", "/config/config.yaml"]
+          env:
+            - name: SESSION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "koinon.gatewaySessionKeyName" . }}
+                  key: key
           ports:
             - name: llm
               containerPort: {{ $gw.port }}
@@ -112,6 +122,9 @@ spec:
             - name: provider-keys
               mountPath: /secrets/providers
               readOnly: true
+            # The bearer token of koinon-api's OTLP listener, which agentgateway sends with its
+            # access log. A file, so it stays out of the config ConfigMap.
+            {{- include "koinon.otlpTokenVolumeMount" . | nindent 12 }}
       volumes:
         - name: config
           configMap:
@@ -126,6 +139,7 @@ spec:
           secret:
             secretName: {{ include "koinon.gatewayProvidersName" . }}
             defaultMode: 0444
+        {{- include "koinon.otlpTokenVolume" . | nindent 8 }}
       {{- with $gw.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

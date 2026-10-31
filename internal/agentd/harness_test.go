@@ -12,6 +12,7 @@ import (
 	"time"
 
 	sdk "github.com/coder/acp-go-sdk"
+	. "github.com/onsi/ginkgo/v2"
 )
 
 // Prompt markers that script the fake harness.
@@ -29,6 +30,17 @@ const (
 	// markOutside: ask permission for reads and an edit inside and outside the session
 	// directory, all with ordinary kinds, then report the answers.
 	markOutside = "OUTSIDE"
+	// markRefuse: ask permission for an edit outside the session directory; when it is rejected
+	// end the turn as cancelled, as OpenCode 2.2.0 does (a plain decline interrupts the step).
+	// The prompt that continues the turn carries agentd's note instead.
+	markRefuse = "REFUSE-PATH"
+	// wrapUpMarker opens agentd's wrap-up notice (a prompt of its own, or the start of a resumed
+	// turn's prompt). The fake answers it with wrapUpReply and waits for the next cancel.
+	wrapUpMarker = "[Koinon] About"
+	// limitWrapUpMarker opens the notice of a request or spend limit (ADR 0081).
+	limitWrapUpMarker = "[Koinon] This run has"
+	// wrapUpReply is what the fake writes when it is told to wrap up.
+	wrapUpReply = "Done so far: A. Left: B."
 	// resumeMarker is how the fake harness recognises agentd's resume note.
 	resumeMarker = "[Koinon]"
 	// summaryMarker opens agentd's end-of-turn summary prompt.
@@ -65,6 +77,10 @@ type harness struct {
 	// onPrompt, if set, may answer a prompt itself (for example by calling Koinon's tools as
 	// the agent would): it returns the reply and true, or false to fall through.
 	onPrompt func(ctx context.Context, text string) (string, bool)
+	// script, if set, may drive a prompt itself with session updates (tool calls, thinking): it
+	// returns true when it answered, and the turn then ends with end_turn.
+	metas  []map[string]any
+	script func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool
 	// modelFault, if set, runs before every prompt is answered, as the harness's request to its
 	// model would: a non-nil error is what the prompt fails with.
 	modelFault func(ctx context.Context, text string) error
@@ -72,8 +88,29 @@ type harness struct {
 	models []string
 	// silent: announce no ready command; stubborn: keep its own model.
 	silent, stubborn bool
+	// refuseAll makes every prompt but the summary ask for an outside edit and end cancelled when
+	// it is rejected, so a run never gets past its refusals.
+	refuseAll bool
+	// refuseOn refuses the prompts with these 1-based positions (the summary prompt does not count).
+	refuseOn map[int]bool
+	// onRefuse runs when a refusing prompt is about to end cancelled.
+	onRefuse func()
 	// lingers: keep running after end-of-file on stdin, until the exec is closed.
 	lingers bool
+	// ignoreCancel makes a markWait turn ignore session/cancel (it ends only when the stream goes
+	// away); endOnCancel makes it answer a cancel with end_turn, as a turn that ended on its own at
+	// that moment does.
+	ignoreCancel, endOnCancel bool
+	// lateCancel makes a markWait turn honour session/cancel only this long after it arrived.
+	lateCancel time.Duration
+	// refuseAfterCancel makes a markWait turn, once cancelled, ask for an outside edit (which
+	// agentd refuses) before it ends cancelled.
+	refuseAfterCancel bool
+	// noChunk makes a markWait turn stream nothing before it waits.
+	noChunk bool
+	// promptsSeen counts the prompts that arrived (the summary does not count) and inFlight how
+	// many are being answered; maxInFlight is the most there ever were at once.
+	inFlight, maxInFlight int
 }
 
 func newHarness() *harness {
@@ -103,6 +140,19 @@ func (h *harness) command(ctx context.Context, args []string, stdin io.Reader, s
 	case <-p.crash:
 		return 137
 	}
+}
+
+func (h *harness) scriptHook() func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.script
+}
+
+// promptMetas are the _meta of the prompts that arrived, in order.
+func (h *harness) promptMetas() []map[string]any {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.metas)
 }
 
 func (h *harness) selectedModels() []string {
@@ -152,7 +202,7 @@ func (p *process) summary(ctx context.Context, id sdk.SessionId, text string) (s
 	end := sdk.PromptResponse{StopReason: sdk.StopReasonEndTurn}
 	if hang {
 		select {
-		case <-p.cancelled:
+		case <-p.cancelCh():
 		case <-ctx.Done():
 		}
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
@@ -262,12 +312,16 @@ func (p *process) LoadSession(ctx context.Context, r sdk.LoadSessionRequest) (sd
 }
 
 func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptResponse, error) {
+	// The callbacks a spec installs (modelFault, onPrompt, onRefuse, onSummary) run here, on the
+	// ACP SDK's goroutine: a failed Expect in one fails the spec instead of crashing the binary.
+	defer GinkgoRecover()
 	text := r.Prompt[0].Text.Text
 	if strings.HasPrefix(text, summaryMarker) {
 		return p.summary(ctx, r.SessionId, text)
 	}
 	p.h.mu.Lock()
 	p.h.prompts = append(p.h.prompts, text)
+	p.h.metas = append(p.h.metas, r.Meta)
 	p.h.sessions[string(r.SessionId)] = append(p.h.sessions[string(r.SessionId)], sdk.UpdateUserMessageText(text))
 	firstCrash := strings.Contains(text, markCrash) && !p.h.crashed
 	if firstCrash {
@@ -277,8 +331,17 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	if firstHang {
 		p.h.hung = true
 	}
+	p.h.inFlight++
+	p.h.maxInFlight = max(p.h.maxInFlight, p.h.inFlight)
+	defer func() {
+		p.h.mu.Lock()
+		p.h.inFlight--
+		p.h.mu.Unlock()
+	}()
 	onPrompt := p.h.onPrompt
 	modelFault := p.h.modelFault
+	refuseAll := p.h.refuseAll || p.h.refuseOn[len(p.h.prompts)]
+	onRefuse := p.h.onRefuse
 	p.h.mu.Unlock()
 	id := r.SessionId
 	end := sdk.PromptResponse{StopReason: sdk.StopReasonEndTurn}
@@ -286,6 +349,11 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	if modelFault != nil {
 		if err := modelFault(ctx, text); err != nil {
 			return sdk.PromptResponse{}, err
+		}
+	}
+	if script := p.h.scriptHook(); script != nil {
+		if script(ctx, text, func(u sdk.SessionUpdate) error { return p.say(ctx, id, u) }) {
+			return end, nil
 		}
 	}
 	if onPrompt != nil {
@@ -298,6 +366,45 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	}
 
 	switch {
+	case strings.Contains(text, markRefuse) || refuseAll:
+		tid, name, k := sdk.ToolCallId("refuse-"+fmt.Sprint(len(text))), "write", sdk.ToolKindEdit
+		if err := p.say(ctx, id, sdk.StartToolCall(tid, name, sdk.WithStartKind(k))); err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		res, err := p.agent().RequestPermission(ctx, sdk.RequestPermissionRequest{
+			SessionId: id,
+			ToolCall: sdk.ToolCallUpdate{
+				ToolCallId: tid, Title: &name, Kind: &k,
+				Locations: []sdk.ToolCallLocation{{Path: "/sandbox/.koinon/notes/external/report.md"}},
+			},
+			Options: []sdk.PermissionOption{
+				{OptionId: "allow", Name: "Allow", Kind: sdk.PermissionOptionKindAllowOnce},
+				{OptionId: "reject", Name: "Reject", Kind: sdk.PermissionOptionKindRejectOnce},
+			},
+		})
+		if err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		if res.Outcome.Selected != nil && res.Outcome.Selected.OptionId != "reject" {
+			return end, nil
+		}
+		if onRefuse != nil {
+			onRefuse()
+		}
+		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
+
+	case strings.HasPrefix(text, wrapUpMarker), strings.HasPrefix(text, limitWrapUpMarker):
+		// Told to wrap up: say where things stand, then wait for the next cancel (the time limit).
+		p.resetCancel()
+		if err := p.say(ctx, id, sdk.UpdateAgentMessageText(wrapUpReply)); err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		select {
+		case <-p.cancelCh():
+		case <-ctx.Done():
+		}
+		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
+
 	case strings.Contains(text, resumeMarker):
 		if err := p.say(ctx, id, sdk.UpdateAgentMessageText("resumed")); err != nil {
 			return sdk.PromptResponse{}, err
@@ -323,12 +430,52 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 		return sdk.PromptResponse{}, ctx.Err()
 
 	case strings.Contains(text, markWait):
-		if err := p.say(ctx, id, sdk.UpdateAgentMessageText("working")); err != nil {
-			return sdk.PromptResponse{}, err
+		p.h.mu.Lock()
+		ignore, endOnCancel, noChunk := p.h.ignoreCancel, p.h.endOnCancel, p.h.noChunk
+		p.h.mu.Unlock()
+		if !noChunk {
+			if err := p.say(ctx, id, sdk.UpdateAgentMessageText("working")); err != nil {
+				return sdk.PromptResponse{}, err
+			}
+		}
+		if ignore {
+			// The SDK cancels ctx on session/cancel; a harness that ignores the cancel keeps the
+			// turn open until the connection goes away.
+			<-p.agent().Done()
+			return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
 		}
 		select {
-		case <-p.cancelled:
+		case <-p.cancelCh():
 		case <-ctx.Done():
+		}
+		p.h.mu.Lock()
+		late := p.h.lateCancel
+		p.h.mu.Unlock()
+		time.Sleep(late)
+		p.h.mu.Lock()
+		refuseAfter := p.h.refuseAfterCancel
+		p.h.mu.Unlock()
+		if refuseAfter {
+			tid, name, k := sdk.ToolCallId("refuse-after-cancel"), "write", sdk.ToolKindEdit
+			if err := p.say(context.WithoutCancel(ctx), id, sdk.StartToolCall(tid, name, sdk.WithStartKind(k))); err != nil {
+				return sdk.PromptResponse{}, err
+			}
+			if _, err := p.agent().RequestPermission(context.WithoutCancel(ctx), sdk.RequestPermissionRequest{
+				SessionId: id,
+				ToolCall: sdk.ToolCallUpdate{
+					ToolCallId: tid, Title: &name, Kind: &k,
+					Locations: []sdk.ToolCallLocation{{Path: "/sandbox/.koinon/notes/external/report.md"}},
+				},
+				Options: []sdk.PermissionOption{
+					{OptionId: "allow", Name: "Allow", Kind: sdk.PermissionOptionKindAllowOnce},
+					{OptionId: "reject", Name: "Reject", Kind: sdk.PermissionOptionKindRejectOnce},
+				},
+			}); err != nil {
+				return sdk.PromptResponse{}, err
+			}
+		}
+		if endOnCancel {
+			return end, nil
 		}
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
 
@@ -417,14 +564,35 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 
 func (p *process) Cancel(context.Context, sdk.CancelNotification) error {
 	p.h.mu.Lock()
+	defer p.h.mu.Unlock()
 	p.h.cancels++
-	p.h.mu.Unlock()
 	select {
 	case <-p.cancelled:
 	default:
 		close(p.cancelled)
 	}
 	return nil
+}
+
+// cancelCh is the channel a session/cancel closes.
+func (p *process) cancelCh() <-chan struct{} {
+	p.h.mu.Lock()
+	defer p.h.mu.Unlock()
+	return p.cancelled
+}
+
+// resetCancel arms the channel again, so a turn after a cancelled one can be cancelled in its turn.
+func (p *process) resetCancel() {
+	p.h.mu.Lock()
+	defer p.h.mu.Unlock()
+	p.cancelled = make(chan struct{})
+}
+
+// maxPromptsInFlight is the most prompts the fake ever had open at once.
+func (h *harness) maxPromptsInFlight() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.maxInFlight
 }
 
 func (p *process) Authenticate(context.Context, sdk.AuthenticateRequest) (sdk.AuthenticateResponse, error) {

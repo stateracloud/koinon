@@ -3,6 +3,7 @@
 package money_test
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/stateracloud/koinon/internal/money"
@@ -81,5 +82,56 @@ func TestCents(t *testing.T) {
 	}
 	if s := money.MustParse("1").SubFloor(money.MustParse("2")); s != 0 {
 		t.Fatal(s)
+	}
+}
+
+func TestFromRatRoundsHalfUpAtThePicoUSD(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"0.0001234", "0.0001234"},
+		{"1.234e-4", "0.0001234"},
+		{"0.0000000000005", "0.000000000001"},
+		{"0.0000000000004", "0.00"},
+		{"3", "3.00"},
+	} {
+		r, _ := new(big.Rat).SetString(c.in)
+		got, err := money.FromRat(r)
+		if err != nil || got.String() != c.want {
+			t.Errorf("%s: %v %v, want %s", c.in, got, err, c.want)
+		}
+	}
+	if _, err := money.FromRat(big.NewRat(-1, 1)); err == nil {
+		t.Error("negative accepted")
+	}
+	if _, err := money.FromRat(new(big.Rat).SetInt64(1 << 62)); err == nil {
+		t.Error("overflow accepted")
+	}
+}
+
+func TestFloorAndFixed(t *testing.T) {
+	for _, c := range []struct {
+		in     string
+		digits int
+		floor  string
+	}{
+		{"4.9827242408", 9, "4.98272424"},
+		{"4.999999876544", 9, "4.999999876"},
+		{"4.25", 9, "4.25"},
+		{"0.0000000004", 9, "0"},
+		{"7.99", 0, "7"},
+	} {
+		if got, want := money.MustParse(c.in).Floor(c.digits), money.MustParse(c.floor); got != want {
+			t.Errorf("Floor(%s, %d) = %s, want %s", c.in, c.digits, got.Numeric(), want.Numeric())
+		}
+	}
+	for in, want := range map[string]string{
+		"4.9827242408": "4.98272424", "0.00005": "0.00005", "5": "5.0", "0": "0.0",
+		"0.000000001": "0.000000001", "0.0000000004": "0.0", "999999.123456789987": "999999.123456789",
+	} {
+		if got := money.MustParse(in).Fixed(9); got != want {
+			t.Errorf("Fixed(%s) = %q, want %q", in, got, want)
+		}
+	}
+	if !money.MustParse("0.123456789").HasFractionDigits(9) || money.MustParse("0.1234567891").HasFractionDigits(9) {
+		t.Error("HasFractionDigits(9)")
 	}
 }

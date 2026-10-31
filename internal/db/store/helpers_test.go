@@ -89,7 +89,7 @@ func newFixture(ctx context.Context) fixture {
 // enqueue queues a run of agent for task.
 func enqueue(ctx context.Context, org, agent, task pgtype.UUID) store.Run {
 	r, err := q.CreateRun(ctx, store.CreateRunParams{
-		OrgID: org, AgentID: agent, TaskID: task, MaxWallClockSeconds: 1800, MaxTokens: maxTokens,
+		OrgID: org, AgentID: agent, TaskID: task, MaxWallClockSeconds: 1800,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(r.State).To(Equal(store.RunStateQueued))
@@ -173,4 +173,12 @@ func expireLease(ctx context.Context, r store.Run) {
 		`UPDATE runs SET lease_expires_at = now() - interval '1 second' WHERE org_id = $1 AND id = $2`,
 		r.OrgID, r.ID)
 	Expect(err).NotTo(HaveOccurred())
+}
+
+func pgText(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
+
+func numeric(s string) pgtype.Numeric {
+	var n pgtype.Numeric
+	Expect(n.Scan(s)).To(Succeed())
+	return n
 }

@@ -107,7 +107,15 @@ func (s *Server) SetPrice(ctx context.Context, req SetPriceRequestObject) (SetPr
 		st, er := s.problem(err)
 		return SetPricedefaultJSONResponse{Body: er, StatusCode: st}, nil
 	}
-	return SetPrice201JSONResponse(v), nil
+	var saved PriceSaved
+	if err := via(v, &saved); err != nil {
+		st, er := s.problem(err)
+		return SetPricedefaultJSONResponse{Body: er, StatusCode: st}, nil
+	}
+	if w := prices.EntryWarnings(in.Entry); len(w) > 0 {
+		saved.Warnings = &w
+	}
+	return SetPrice201JSONResponse(saved), nil
 }
 
 // RetirePrice implements StrictServerInterface.
@@ -205,11 +213,24 @@ func (s *Server) GetSpendReport(ctx context.Context, req GetSpendReportRequestOb
 		st, e := s.problem(err)
 		return GetSpendReportdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
+	sys, err := store.New(s.pool).SpendSystemSince(ctx, store.SpendSystemSinceParams{OrgID: p.Org, Since: pgtype.Timestamptz{Time: since, Valid: true}})
+	if err != nil {
+		st, e := s.problem(err)
+		return GetSpendReportdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
 	out := GetSpendReport200JSONResponse{Since: since, Models: []SpendLine{}}
+	out.SystemChecks.Requests, out.SystemChecks.CostUsd = sys.Requests, ledgerUSD(sys.CostUsd)
 	for _, r := range rows {
+		var reasoning *int64
+		if r.ReasoningReported {
+			reasoning = &r.ReasoningTokens
+		}
 		out.Models = append(out.Models, SpendLine{
-			Model: r.Model, Requests: r.Requests, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens,
+			Model: r.Model, Requests: r.Requests, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens, ReasoningTokens: reasoning,
 			ReportedUsd: ledgerUSD(r.ReportedUsd), EstimatedUsd: ledgerUSD(r.EstimatedUsd), EstimatedRequests: r.EstimatedRequests,
+			EstimatedOutputTokens: r.EstimatedOutputTokens, GatewayRequests: r.GatewayRequests,
+			GatewayUsd: ledgerUSD(r.GatewayUsd), GatewayComparedUsd: ledgerUSD(r.GatewayComparedUsd), FlaggedRequests: r.FlaggedRequests,
+			ProvisionalRequests: r.ProvisionalRequests, ReservedUsd: ledgerUSD(r.ReservedUsd),
 		})
 	}
 	return out, nil

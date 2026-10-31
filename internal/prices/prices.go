@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/estimate"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -37,6 +38,12 @@ const (
 // Model is the model a request asked for.
 type Model struct {
 	ID, Name, ProviderType string
+	// ProviderID is the provider that serves the model, at ProviderURL.
+	ProviderID  pgtype.UUID
+	ProviderURL string
+	// Format is the model's wire format (models.format). Pricing ignores it; the cache mode
+	// depends on it.
+	Format modelformat.Format
 }
 
 // Resolution is the price found for a model at a time.
@@ -73,7 +80,7 @@ func Lookup(ctx context.Context, q *store.Queries, org pgtype.UUID, name string)
 	} else if err != nil {
 		return Model{}, err
 	}
-	return Model{ID: row.ID.String(), Name: row.Name, ProviderType: row.ProviderType}, nil
+	return Model{ID: row.ID.String(), Name: row.Name, ProviderType: row.ProviderType, ProviderID: row.ProviderID, ProviderURL: row.ProviderUrl, Format: modelformat.Format(row.Format)}, nil
 }
 
 // BadPriceError means a stored price cannot be used (a rate that does not parse, an override
@@ -86,13 +93,32 @@ func (e *BadPriceError) Unwrap() error { return e.Err }
 
 func bad(err error) error { return &BadPriceError{Err: err} }
 
-// Resolve finds m's price at time at. A stored price that cannot be used is a *BadPriceError.
-func Resolve(ctx context.Context, q *store.Queries, org pgtype.UUID, m Model, at time.Time) (Resolution, error) {
-	return resolveEntries(ctx, q, org, m, at)
+// Resolver finds prices: the org's entries first, then those of its ListSource. Build one with
+// NewResolver; the zero Resolver has no source and fails every lookup.
+type Resolver struct{ src pricing.ListSource }
+
+// NewResolver returns a Resolver over src (pricing.Embedded in production). The source is
+// required: a nil one is a wiring mistake and panics here instead of pricing from a list nobody chose.
+func NewResolver(src pricing.ListSource) Resolver {
+	if src == nil {
+		panic("prices: NewResolver needs a pricing.ListSource")
+	}
+	return Resolver{src: src}
 }
 
-// resolveEntries finds the org's or the default list's entry for m.
-func resolveEntries(ctx context.Context, q *store.Queries, org pgtype.UUID, m Model, at time.Time) (Resolution, error) {
+// IsZero reports whether r was not built with NewResolver.
+func (rv Resolver) IsZero() bool { return rv.src == nil }
+
+// Resolve finds m's price at time at. A stored price that cannot be used is a *BadPriceError.
+func (rv Resolver) Resolve(ctx context.Context, q *store.Queries, org pgtype.UUID, m Model, at time.Time) (Resolution, error) {
+	return rv.resolveEntries(ctx, q, org, m, at)
+}
+
+// resolveEntries finds the org's or the source's entry for m.
+func (rv Resolver) resolveEntries(ctx context.Context, q *store.Queries, org pgtype.UUID, m Model, at time.Time) (Resolution, error) {
+	if rv.src == nil {
+		return Resolution{}, errors.New("prices: the Resolver has no pricing.ListSource")
+	}
 	rows, err := q.ListPriceOverrides(ctx, org)
 	if err != nil {
 		return Resolution{}, err
@@ -123,7 +149,7 @@ func resolveEntries(ctx context.Context, q *store.Queries, org pgtype.UUID, m Mo
 		if r, ok := pricing.Select(rs, m.ProviderType, m.Name, t); ok {
 			return Resolution{Ref: "org#" + r.Entry.ID, Source: SourceOrg, Entry: r.Entry, Price: r.Price, Fallback: fallback}, nil
 		}
-		list, defs := pricing.Default()
+		list, defs := rv.src.Current()
 		if r, ok := pricing.Select(defs, m.ProviderType, m.Name, t); ok {
 			return Resolution{
 				Ref: pricing.Ref(list.Version, r.Entry.ID), Source: SourceDefault, ListVersion: list.Version,
@@ -155,20 +181,23 @@ const MinCalibrationSamples = 20
 type Service struct {
 	pool *pgxpool.Pool
 	log  *slog.Logger
+	src  pricing.ListSource
+	res  Resolver
 }
 
-// New returns a Service.
-func New(pool *pgxpool.Pool, log *slog.Logger) *Service {
+// New returns a Service whose default list is src (pricing.Embedded in production). A nil src
+// panics, like NewResolver.
+func New(pool *pgxpool.Pool, log *slog.Logger, src pricing.ListSource) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{pool: pool, log: log}
+	return &Service{pool: pool, log: log, src: src, res: NewResolver(src)}
 }
 
 // SyncDefaults records the embedded list's version, so admins can later see what an upgrade
 // changed. It is idempotent and safe from every replica.
 func (s *Service) SyncDefaults(ctx context.Context) error {
-	list, _ := pricing.Default()
+	list, _ := s.src.Current()
 	raw, err := json.Marshal(list.Entries)
 	if err != nil {
 		return err
@@ -306,7 +335,7 @@ type DefaultsStatus struct {
 
 // Defaults returns the embedded list and the list versions this installation has run.
 func (s *Service) Defaults(ctx context.Context) (DefaultsStatus, error) {
-	list, _ := pricing.Default()
+	list, _ := s.src.Current()
 	rows, err := store.New(s.pool).ListDefaultPriceLists(ctx)
 	if err != nil {
 		return DefaultsStatus{}, err
@@ -325,7 +354,7 @@ func (s *Service) Defaults(ctx context.Context) (DefaultsStatus, error) {
 func (s *Service) DefaultsDiff(ctx context.Context, from, to string) (fromV, toV string, changes []pricing.Change, err error) {
 	q := store.New(s.pool)
 	if to == "" {
-		l, _ := pricing.Default()
+		l, _ := s.src.Current()
 		to = l.Version
 	}
 	rows, err := q.ListDefaultPriceLists(ctx)

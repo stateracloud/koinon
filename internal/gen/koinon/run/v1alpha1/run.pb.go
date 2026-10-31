@@ -158,12 +158,15 @@ const (
 	FailureClass_FAILURE_CLASS_THROTTLED FailureClass = 2
 	// The input does not fit the model's context window.
 	FailureClass_FAILURE_CLASS_CONTEXT_OVERFLOW FailureClass = 3
-	// A token or spend limit stopped the run.
+	// A run limit (model requests or spend) or a spend limit (agent, org or platform) stopped the
+	// run.
 	FailureClass_FAILURE_CLASS_BUDGET FailureClass = 4
 	// A policy denied the request; never retried.
 	FailureClass_FAILURE_CLASS_POLICY FailureClass = 5
 	// Anything unknown; never retried.
 	FailureClass_FAILURE_CLASS_FATAL FailureClass = 6
+	// The sandbox never became ready within the org's cap; never retried.
+	FailureClass_FAILURE_CLASS_SANDBOX_UNAVAILABLE FailureClass = 7
 )
 
 // Enum value maps for FailureClass.
@@ -176,15 +179,17 @@ var (
 		4: "FAILURE_CLASS_BUDGET",
 		5: "FAILURE_CLASS_POLICY",
 		6: "FAILURE_CLASS_FATAL",
+		7: "FAILURE_CLASS_SANDBOX_UNAVAILABLE",
 	}
 	FailureClass_value = map[string]int32{
-		"FAILURE_CLASS_UNSPECIFIED":      0,
-		"FAILURE_CLASS_TRANSIENT":        1,
-		"FAILURE_CLASS_THROTTLED":        2,
-		"FAILURE_CLASS_CONTEXT_OVERFLOW": 3,
-		"FAILURE_CLASS_BUDGET":           4,
-		"FAILURE_CLASS_POLICY":           5,
-		"FAILURE_CLASS_FATAL":            6,
+		"FAILURE_CLASS_UNSPECIFIED":         0,
+		"FAILURE_CLASS_TRANSIENT":           1,
+		"FAILURE_CLASS_THROTTLED":           2,
+		"FAILURE_CLASS_CONTEXT_OVERFLOW":    3,
+		"FAILURE_CLASS_BUDGET":              4,
+		"FAILURE_CLASS_POLICY":              5,
+		"FAILURE_CLASS_FATAL":               6,
+		"FAILURE_CLASS_SANDBOX_UNAVAILABLE": 7,
 	}
 )
 
@@ -227,10 +232,15 @@ type Run struct {
 	ParkReason     ParkReason             `protobuf:"varint,7,opt,name=park_reason,json=parkReason,proto3,enum=koinon.run.v1alpha1.ParkReason" json:"park_reason,omitempty"`
 	// Why the run failed or was canceled.
 	OutcomeReason string `protobuf:"bytes,8,opt,name=outcome_reason,json=outcomeReason,proto3" json:"outcome_reason,omitempty"`
-	// Caps copied from the agent's template when the run was queued.
+	// Limits copied from the agent's version (or the agent's override) when the run was queued.
 	MaxWallClockSeconds int64 `protobuf:"varint,9,opt,name=max_wall_clock_seconds,json=maxWallClockSeconds,proto3" json:"max_wall_clock_seconds,omitempty"`
-	MaxTokens           int64 `protobuf:"varint,10,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
-	TokensUsed          int64 `protobuf:"varint,11,opt,name=tokens_used,json=tokensUsed,proto3" json:"tokens_used,omitempty"`
+	// Deprecated: tokens are reported, not enforced (ADR 0081). Zero on new runs.
+	//
+	// Deprecated: Marked as deprecated in koinon/run/v1alpha1/run.proto.
+	MaxTokens int64 `protobuf:"varint,10,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
+	// Tokens the run's requests used, input plus output as the gateway reports them (cache reads
+	// and writes are part of the input). The split by type is in cost.
+	TokensUsed int64 `protobuf:"varint,11,opt,name=tokens_used,json=tokensUsed,proto3" json:"tokens_used,omitempty"`
 	// The seq of the newest event.
 	LastEventSeq int64                  `protobuf:"varint,12,opt,name=last_event_seq,json=lastEventSeq,proto3" json:"last_event_seq,omitempty"`
 	CreatedAt    *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
@@ -241,7 +251,13 @@ type Run struct {
 	Cost *Cost `protobuf:"bytes,16,opt,name=cost,proto3" json:"cost,omitempty"`
 	// The class of the error that failed or stopped the run. Unspecified when the run did not
 	// fail, or failed before classes existed.
-	FailureClass  FailureClass `protobuf:"varint,17,opt,name=failure_class,json=failureClass,proto3,enum=koinon.run.v1alpha1.FailureClass" json:"failure_class,omitempty"`
+	FailureClass FailureClass `protobuf:"varint,17,opt,name=failure_class,json=failureClass,proto3,enum=koinon.run.v1alpha1.FailureClass" json:"failure_class,omitempty"`
+	// The run's request limit: 0 for a run queued before run limits existed (ADR 0081). Progress is
+	// cost.requests.
+	MaxModelRequests int64 `protobuf:"varint,18,opt,name=max_model_requests,json=maxModelRequests,proto3" json:"max_model_requests,omitempty"`
+	// The run's spend limit in USD as a decimal string; empty when the run has none. Progress is
+	// cost.usd.
+	MaxSpendUsd   string `protobuf:"bytes,19,opt,name=max_spend_usd,json=maxSpendUsd,proto3" json:"max_spend_usd,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -339,6 +355,7 @@ func (x *Run) GetMaxWallClockSeconds() int64 {
 	return 0
 }
 
+// Deprecated: Marked as deprecated in koinon/run/v1alpha1/run.proto.
 func (x *Run) GetMaxTokens() int64 {
 	if x != nil {
 		return x.MaxTokens
@@ -395,6 +412,20 @@ func (x *Run) GetFailureClass() FailureClass {
 	return FailureClass_FAILURE_CLASS_UNSPECIFIED
 }
 
+func (x *Run) GetMaxModelRequests() int64 {
+	if x != nil {
+		return x.MaxModelRequests
+	}
+	return 0
+}
+
+func (x *Run) GetMaxSpendUsd() string {
+	if x != nil {
+		return x.MaxSpendUsd
+	}
+	return ""
+}
+
 // Cost is model spend recorded by the spend ledger from agentgateway's access
 // log (plan item L1).
 type Cost struct {
@@ -411,8 +442,14 @@ type Cost struct {
 	// Requests whose usage the provider did not report and Koinon estimated (included in
 	// requests, tokens and usd). Zero when every request reported its usage.
 	EstimatedRequests int64 `protobuf:"varint,6,opt,name=estimated_requests,json=estimatedRequests,proto3" json:"estimated_requests,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// input_tokens is the total input, cache reads and writes included. The split by type: the
+	// uncached input is input_tokens - cache_read_tokens - cache_write_tokens. reasoning_tokens is
+	// part of output_tokens where the provider reports it.
+	CacheReadTokens  int64 `protobuf:"varint,7,opt,name=cache_read_tokens,json=cacheReadTokens,proto3" json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64 `protobuf:"varint,8,opt,name=cache_write_tokens,json=cacheWriteTokens,proto3" json:"cache_write_tokens,omitempty"`
+	ReasoningTokens  int64 `protobuf:"varint,9,opt,name=reasoning_tokens,json=reasoningTokens,proto3" json:"reasoning_tokens,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Cost) Reset() {
@@ -483,6 +520,27 @@ func (x *Cost) GetPriced() bool {
 func (x *Cost) GetEstimatedRequests() int64 {
 	if x != nil {
 		return x.EstimatedRequests
+	}
+	return 0
+}
+
+func (x *Cost) GetCacheReadTokens() int64 {
+	if x != nil {
+		return x.CacheReadTokens
+	}
+	return 0
+}
+
+func (x *Cost) GetCacheWriteTokens() int64 {
+	if x != nil {
+		return x.CacheWriteTokens
+	}
+	return 0
+}
+
+func (x *Cost) GetReasoningTokens() int64 {
+	if x != nil {
+		return x.ReasoningTokens
 	}
 	return 0
 }
@@ -833,13 +891,14 @@ func (x *WatchRunRequest) GetAfterSeq() int64 {
 	return 0
 }
 
-// WatchRunResponse carries either a run snapshot or one event.
+// WatchRunResponse carries a run snapshot, one event or a heartbeat.
 type WatchRunResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Item:
 	//
 	//	*WatchRunResponse_Run
 	//	*WatchRunResponse_Event
+	//	*WatchRunResponse_Heartbeat
 	Item          isWatchRunResponse_Item `protobuf_oneof:"item"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -900,6 +959,15 @@ func (x *WatchRunResponse) GetEvent() *RunEvent {
 	return nil
 }
 
+func (x *WatchRunResponse) GetHeartbeat() *Heartbeat {
+	if x != nil {
+		if x, ok := x.Item.(*WatchRunResponse_Heartbeat); ok {
+			return x.Heartbeat
+		}
+	}
+	return nil
+}
+
 type isWatchRunResponse_Item interface {
 	isWatchRunResponse_Item()
 }
@@ -912,15 +980,60 @@ type WatchRunResponse_Event struct {
 	Event *RunEvent `protobuf:"bytes,2,opt,name=event,proto3,oneof"`
 }
 
+type WatchRunResponse_Heartbeat struct {
+	// Sent every 30 seconds while the stream has sent nothing else, so a proxy or load
+	// balancer does not cut a quiet run's stream as idle. Clients ignore it.
+	Heartbeat *Heartbeat `protobuf:"bytes,3,opt,name=heartbeat,proto3,oneof"`
+}
+
 func (*WatchRunResponse_Run) isWatchRunResponse_Item() {}
 
 func (*WatchRunResponse_Event) isWatchRunResponse_Item() {}
+
+func (*WatchRunResponse_Heartbeat) isWatchRunResponse_Item() {}
+
+// Heartbeat is an empty keep-alive message.
+type Heartbeat struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Heartbeat) Reset() {
+	*x = Heartbeat{}
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Heartbeat) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Heartbeat) ProtoMessage() {}
+
+func (x *Heartbeat) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
+func (*Heartbeat) Descriptor() ([]byte, []int) {
+	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{9}
+}
 
 var File_koinon_run_v1alpha1_run_proto protoreflect.FileDescriptor
 
 const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\n" +
-	"\x1dkoinon/run/v1alpha1/run.proto\x12\x13koinon.run.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf1\x05\n" +
+	"\x1dkoinon/run/v1alpha1/run.proto\x12\x13koinon.run.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc7\x06\n" +
 	"\x03Run\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12\x1b\n" +
@@ -931,10 +1044,10 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\vpark_reason\x18\a \x01(\x0e2\x1f.koinon.run.v1alpha1.ParkReasonR\n" +
 	"parkReason\x12%\n" +
 	"\x0eoutcome_reason\x18\b \x01(\tR\routcomeReason\x123\n" +
-	"\x16max_wall_clock_seconds\x18\t \x01(\x03R\x13maxWallClockSeconds\x12\x1d\n" +
+	"\x16max_wall_clock_seconds\x18\t \x01(\x03R\x13maxWallClockSeconds\x12!\n" +
 	"\n" +
 	"max_tokens\x18\n" +
-	" \x01(\x03R\tmaxTokens\x12\x1f\n" +
+	" \x01(\x03B\x02\x18\x01R\tmaxTokens\x12\x1f\n" +
 	"\vtokens_used\x18\v \x01(\x03R\n" +
 	"tokensUsed\x12$\n" +
 	"\x0elast_event_seq\x18\f \x01(\x03R\flastEventSeq\x129\n" +
@@ -945,14 +1058,19 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\vfinished_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"finishedAt\x12-\n" +
 	"\x04cost\x18\x10 \x01(\v2\x19.koinon.run.v1alpha1.CostR\x04cost\x12F\n" +
-	"\rfailure_class\x18\x11 \x01(\x0e2!.koinon.run.v1alpha1.FailureClassR\ffailureClass\"\xc3\x01\n" +
+	"\rfailure_class\x18\x11 \x01(\x0e2!.koinon.run.v1alpha1.FailureClassR\ffailureClass\x12,\n" +
+	"\x12max_model_requests\x18\x12 \x01(\x03R\x10maxModelRequests\x12\"\n" +
+	"\rmax_spend_usd\x18\x13 \x01(\tR\vmaxSpendUsd\"\xc8\x02\n" +
 	"\x04Cost\x12\x1a\n" +
 	"\brequests\x18\x01 \x01(\x03R\brequests\x12!\n" +
 	"\finput_tokens\x18\x02 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x03 \x01(\x03R\foutputTokens\x12\x10\n" +
 	"\x03usd\x18\x04 \x01(\tR\x03usd\x12\x16\n" +
 	"\x06priced\x18\x05 \x01(\bR\x06priced\x12-\n" +
-	"\x12estimated_requests\x18\x06 \x01(\x03R\x11estimatedRequests\"\xb5\x01\n" +
+	"\x12estimated_requests\x18\x06 \x01(\x03R\x11estimatedRequests\x12*\n" +
+	"\x11cache_read_tokens\x18\a \x01(\x03R\x0fcacheReadTokens\x12,\n" +
+	"\x12cache_write_tokens\x18\b \x01(\x03R\x10cacheWriteTokens\x12)\n" +
+	"\x10reasoning_tokens\x18\t \x01(\x03R\x0freasoningTokens\"\xb5\x01\n" +
 	"\bRunEvent\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x03R\x03seq\x12\x12\n" +
@@ -974,11 +1092,13 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\x0fWatchRunRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x15\n" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12\x1b\n" +
-	"\tafter_seq\x18\x03 \x01(\x03R\bafterSeq\"\x7f\n" +
+	"\tafter_seq\x18\x03 \x01(\x03R\bafterSeq\"\xbf\x01\n" +
 	"\x10WatchRunResponse\x12,\n" +
 	"\x03run\x18\x01 \x01(\v2\x18.koinon.run.v1alpha1.RunH\x00R\x03run\x125\n" +
-	"\x05event\x18\x02 \x01(\v2\x1d.koinon.run.v1alpha1.RunEventH\x00R\x05eventB\x06\n" +
-	"\x04item*\xc7\x01\n" +
+	"\x05event\x18\x02 \x01(\v2\x1d.koinon.run.v1alpha1.RunEventH\x00R\x05event\x12>\n" +
+	"\theartbeat\x18\x03 \x01(\v2\x1e.koinon.run.v1alpha1.HeartbeatH\x00R\theartbeatB\x06\n" +
+	"\x04item\"\v\n" +
+	"\tHeartbeat*\xc7\x01\n" +
 	"\bRunState\x12\x19\n" +
 	"\x15RUN_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10RUN_STATE_QUEUED\x10\x01\x12\x16\n" +
@@ -994,7 +1114,7 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\x14PARK_REASON_APPROVAL\x10\x01\x12\x16\n" +
 	"\x12PARK_REASON_BUDGET\x10\x02\x12\x13\n" +
 	"\x0fPARK_REASON_A2A\x10\x03\x12\x1e\n" +
-	"\x1aPARK_REASON_INPUT_REQUIRED\x10\x04*\xd8\x01\n" +
+	"\x1aPARK_REASON_INPUT_REQUIRED\x10\x04*\xff\x01\n" +
 	"\fFailureClass\x12\x1d\n" +
 	"\x19FAILURE_CLASS_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17FAILURE_CLASS_TRANSIENT\x10\x01\x12\x1b\n" +
@@ -1002,7 +1122,8 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\x1eFAILURE_CLASS_CONTEXT_OVERFLOW\x10\x03\x12\x18\n" +
 	"\x14FAILURE_CLASS_BUDGET\x10\x04\x12\x18\n" +
 	"\x14FAILURE_CLASS_POLICY\x10\x05\x12\x17\n" +
-	"\x13FAILURE_CLASS_FATAL\x10\x062\xa0\x02\n" +
+	"\x13FAILURE_CLASS_FATAL\x10\x06\x12%\n" +
+	"!FAILURE_CLASS_SANDBOX_UNAVAILABLE\x10\a2\xa0\x02\n" +
 	"\n" +
 	"RunService\x12V\n" +
 	"\x06GetRun\x12\".koinon.run.v1alpha1.GetRunRequest\x1a#.koinon.run.v1alpha1.GetRunResponse\"\x03\x90\x02\x01\x12Z\n" +
@@ -1022,7 +1143,7 @@ func file_koinon_run_v1alpha1_run_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_run_v1alpha1_run_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_koinon_run_v1alpha1_run_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_koinon_run_v1alpha1_run_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_koinon_run_v1alpha1_run_proto_goTypes = []any{
 	(RunState)(0),                 // 0: koinon.run.v1alpha1.RunState
 	(ParkReason)(0),               // 1: koinon.run.v1alpha1.ParkReason
@@ -1036,34 +1157,36 @@ var file_koinon_run_v1alpha1_run_proto_goTypes = []any{
 	(*CancelRunResponse)(nil),     // 9: koinon.run.v1alpha1.CancelRunResponse
 	(*WatchRunRequest)(nil),       // 10: koinon.run.v1alpha1.WatchRunRequest
 	(*WatchRunResponse)(nil),      // 11: koinon.run.v1alpha1.WatchRunResponse
-	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),       // 13: google.protobuf.Struct
+	(*Heartbeat)(nil),             // 12: koinon.run.v1alpha1.Heartbeat
+	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),       // 14: google.protobuf.Struct
 }
 var file_koinon_run_v1alpha1_run_proto_depIdxs = []int32{
 	0,  // 0: koinon.run.v1alpha1.Run.state:type_name -> koinon.run.v1alpha1.RunState
 	1,  // 1: koinon.run.v1alpha1.Run.park_reason:type_name -> koinon.run.v1alpha1.ParkReason
-	12, // 2: koinon.run.v1alpha1.Run.created_at:type_name -> google.protobuf.Timestamp
-	12, // 3: koinon.run.v1alpha1.Run.started_at:type_name -> google.protobuf.Timestamp
-	12, // 4: koinon.run.v1alpha1.Run.finished_at:type_name -> google.protobuf.Timestamp
+	13, // 2: koinon.run.v1alpha1.Run.created_at:type_name -> google.protobuf.Timestamp
+	13, // 3: koinon.run.v1alpha1.Run.started_at:type_name -> google.protobuf.Timestamp
+	13, // 4: koinon.run.v1alpha1.Run.finished_at:type_name -> google.protobuf.Timestamp
 	4,  // 5: koinon.run.v1alpha1.Run.cost:type_name -> koinon.run.v1alpha1.Cost
 	2,  // 6: koinon.run.v1alpha1.Run.failure_class:type_name -> koinon.run.v1alpha1.FailureClass
-	13, // 7: koinon.run.v1alpha1.RunEvent.payload:type_name -> google.protobuf.Struct
-	12, // 8: koinon.run.v1alpha1.RunEvent.created_at:type_name -> google.protobuf.Timestamp
+	14, // 7: koinon.run.v1alpha1.RunEvent.payload:type_name -> google.protobuf.Struct
+	13, // 8: koinon.run.v1alpha1.RunEvent.created_at:type_name -> google.protobuf.Timestamp
 	3,  // 9: koinon.run.v1alpha1.GetRunResponse.run:type_name -> koinon.run.v1alpha1.Run
 	3,  // 10: koinon.run.v1alpha1.CancelRunResponse.run:type_name -> koinon.run.v1alpha1.Run
 	3,  // 11: koinon.run.v1alpha1.WatchRunResponse.run:type_name -> koinon.run.v1alpha1.Run
 	5,  // 12: koinon.run.v1alpha1.WatchRunResponse.event:type_name -> koinon.run.v1alpha1.RunEvent
-	6,  // 13: koinon.run.v1alpha1.RunService.GetRun:input_type -> koinon.run.v1alpha1.GetRunRequest
-	8,  // 14: koinon.run.v1alpha1.RunService.CancelRun:input_type -> koinon.run.v1alpha1.CancelRunRequest
-	10, // 15: koinon.run.v1alpha1.RunService.WatchRun:input_type -> koinon.run.v1alpha1.WatchRunRequest
-	7,  // 16: koinon.run.v1alpha1.RunService.GetRun:output_type -> koinon.run.v1alpha1.GetRunResponse
-	9,  // 17: koinon.run.v1alpha1.RunService.CancelRun:output_type -> koinon.run.v1alpha1.CancelRunResponse
-	11, // 18: koinon.run.v1alpha1.RunService.WatchRun:output_type -> koinon.run.v1alpha1.WatchRunResponse
-	16, // [16:19] is the sub-list for method output_type
-	13, // [13:16] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	12, // 13: koinon.run.v1alpha1.WatchRunResponse.heartbeat:type_name -> koinon.run.v1alpha1.Heartbeat
+	6,  // 14: koinon.run.v1alpha1.RunService.GetRun:input_type -> koinon.run.v1alpha1.GetRunRequest
+	8,  // 15: koinon.run.v1alpha1.RunService.CancelRun:input_type -> koinon.run.v1alpha1.CancelRunRequest
+	10, // 16: koinon.run.v1alpha1.RunService.WatchRun:input_type -> koinon.run.v1alpha1.WatchRunRequest
+	7,  // 17: koinon.run.v1alpha1.RunService.GetRun:output_type -> koinon.run.v1alpha1.GetRunResponse
+	9,  // 18: koinon.run.v1alpha1.RunService.CancelRun:output_type -> koinon.run.v1alpha1.CancelRunResponse
+	11, // 19: koinon.run.v1alpha1.RunService.WatchRun:output_type -> koinon.run.v1alpha1.WatchRunResponse
+	17, // [17:20] is the sub-list for method output_type
+	14, // [14:17] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_koinon_run_v1alpha1_run_proto_init() }
@@ -1074,6 +1197,7 @@ func file_koinon_run_v1alpha1_run_proto_init() {
 	file_koinon_run_v1alpha1_run_proto_msgTypes[8].OneofWrappers = []any{
 		(*WatchRunResponse_Run)(nil),
 		(*WatchRunResponse_Event)(nil),
+		(*WatchRunResponse_Heartbeat)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1081,7 +1205,7 @@ func file_koinon_run_v1alpha1_run_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_run_v1alpha1_run_proto_rawDesc), len(file_koinon_run_v1alpha1_run_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

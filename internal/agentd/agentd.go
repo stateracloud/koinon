@@ -50,6 +50,8 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/safego"
 )
 
@@ -67,6 +69,9 @@ var _ Backend = execution.Backend(nil)
 
 // Config configures a [Pool]. Zero durations and counts take the defaults below.
 type Config struct {
+	// Prices finds the price of each model a run uses; required
+	// (prices.NewResolver).
+	Prices prices.Resolver
 	// OwnerID names this replica, for example the pod name. Workers own runs as
 	// "<OwnerID>/<n>".
 	OwnerID string
@@ -84,6 +89,18 @@ type Config struct {
 	// goes back to the queue instead of failing (ADR 0066), so a burst beyond the cluster's
 	// capacity waits.
 	SandboxTimeout time.Duration
+	// SandboxWaitCap is the total time a run waits for its sandbox, across requeues, for an org that
+	// has not set its own (ADR 0066 amendment 2026-10-28).
+	SandboxWaitCap time.Duration
+	// WrapUpNotice is how long before the run's time limit the agent is told to wrap up (ADR 0066
+	// amendment 2026-10-28).
+	WrapUpNotice time.Duration
+	// WrapUpFraction is how far through its model-request or spend limit a run is when the agent is
+	// told to wrap up (ADR 0081); runlimits.WrapUpFraction (80%) by default, a negative value turns
+	// the notice off for these two limits.
+	WrapUpFraction float64
+	// UsagePoll is how often a running turn reads the run's ledger usage for that notice.
+	UsagePoll time.Duration
 	// Now defaults to time.Now; tests move it forward to pass SandboxTimeout.
 	Now func() time.Time
 	// ModelServeTimeout bounds the wait, before a run starts its harness, for the gateway to serve
@@ -104,6 +121,10 @@ type Config struct {
 	// registers the tools after a 100 ms debounce, separately from the command (ADR 0052).
 	// Default 1s.
 	ReadySettle time.Duration
+	// GatewayRecordWait bounds the wait, after a harness reports an authentication failure, for the
+	// gateway's record of the request to reach the spend ledger (providerrefusal.go): the access log is
+	// exported in batches. A negative value does not wait. Default 20s.
+	GatewayRecordWait time.Duration
 	// SummaryTimeout bounds the end-of-turn summary prompt (summary.go). Default 2m.
 	SummaryTimeout time.Duration
 	// StuckAfter is how long a process may outlive the sweep's last SIGKILL before the sandbox
@@ -125,6 +146,9 @@ type Config struct {
 	// ModelRetries is how often a turn is repeated after a transient or throttled model
 	// error (ADR 0030, failure classes) before the run fails. Default 3.
 	ModelRetries int
+	// MaxRefusedTurns is how often a run continues a turn the harness cancelled after agentd
+	// refused a permission request (refusal.go) before it fails. Default 5.
+	MaxRefusedTurns int
 	// RetryBackoff is the first wait before a transient retry; it doubles per retry up to a
 	// minute. Default 2s.
 	RetryBackoff time.Duration
@@ -149,6 +173,8 @@ type Config struct {
 	KeepLeaseOnShutdown bool
 	// Checkpoints turns on home checkpoints (checkpoint.go); nil leaves them off.
 	Checkpoints *Checkpoints
+	// Tracing turns on run spans (ADR 0074); nil leaves them off.
+	Tracing *Tracing
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Metrics receives the pool's metrics; nil keeps them unexported.
@@ -175,6 +201,10 @@ func (c *Config) defaults() error {
 	setDefault(&c.Heartbeat, c.Lease/3)
 	setDefault(&c.Poll, time.Second)
 	setDefault(&c.SandboxTimeout, orgsettings.DefaultQueueWait)
+	setDefault(&c.SandboxWaitCap, orgsettings.DefaultSandboxWaitCap)
+	setDefault(&c.WrapUpNotice, 5*time.Minute)
+	setDefault(&c.WrapUpFraction, runlimits.WrapUpFraction)
+	setDefault(&c.UsagePoll, 5*time.Second)
 	if c.Now == nil {
 		c.Now = time.Now
 	}
@@ -185,8 +215,10 @@ func (c *Config) defaults() error {
 	setDefault(&c.ReadySettle, time.Second)
 	setDefault(&c.MaxTakeovers, 5)
 	setDefault(&c.ModelRetries, 3)
+	setDefault(&c.MaxRefusedTurns, 5)
 	setDefault(&c.RetryBackoff, 2*time.Second)
 	setDefault(&c.MaxRetryAfter, 5*time.Minute)
+	setDefault(&c.GatewayRecordWait, defaultGatewayRecordWait)
 	setDefault(&c.SummaryTimeout, defaultSummaryWait)
 	setDefault(&c.StuckAfter, defaultStuckAfter)
 	setDefault(&c.StuckPoll, defaultStuckPoll)
@@ -197,6 +229,9 @@ func (c *Config) defaults() error {
 	}
 	if c.Lease < time.Second {
 		return errors.New("agentd: Lease must be at least 1s")
+	}
+	if c.Prices.IsZero() {
+		return errors.New("agentd: Prices is required (prices.NewResolver)")
 	}
 	if c.Permissions == nil {
 		c.Permissions = DefaultPermissions()
@@ -212,6 +247,11 @@ func (c *Config) defaults() error {
 	}
 	if c.Metrics == nil {
 		c.Metrics = NewMetrics(nil)
+	}
+	if c.Tracing != nil {
+		if err := c.Tracing.defaults(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -233,6 +273,8 @@ type Pool struct {
 	// saveSem lets one save run at a time: a bundle is up to 50 MB.
 	saveSem chan struct{}
 	http    *http.Client
+	// sink exports run spans; nil when tracing is off.
+	sink *traceSink
 }
 
 // New returns a pool. Run starts it.
@@ -240,10 +282,18 @@ func New(db *pgxpool.Pool, backend Backend, cfg Config) (*Pool, error) {
 	if err := cfg.defaults(); err != nil {
 		return nil, err
 	}
-	return &Pool{
+	p := &Pool{
 		db: db, q: store.New(db), backend: backend, cfg: cfg, log: cfg.Logger,
 		saveSem: make(chan struct{}, 1), http: &http.Client{Timeout: cfg.SaveTimeout},
-	}, nil
+	}
+	if cfg.Tracing != nil {
+		sink, err := newTraceSink(cfg.Tracing, cfg.Metrics, cfg.Logger)
+		if err != nil {
+			return nil, fmt.Errorf("agentd: tracing: %w", err)
+		}
+		p.sink = sink
+	}
+	return p, nil
 }
 
 // Run drives runs until ctx ends, then waits for the workers to stop.
@@ -256,6 +306,12 @@ func (p *Pool) Run(ctx context.Context) error {
 		wg.Go(func() { p.work(ctx, p.cfg.OwnerID+"/"+strconv.Itoa(i)) })
 	}
 	wg.Wait()
+	if p.sink != nil {
+		// Spans of runs that just ended; bounded, so a dead receiver cannot hold the shutdown.
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.cfg.Tracing.ExportTimeout+time.Second)
+		p.sink.shutdown(sctx)
+		cancel()
+	}
 	return nil
 }
 

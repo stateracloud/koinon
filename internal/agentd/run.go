@@ -20,10 +20,15 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/runlimits"
+	"github.com/stateracloud/koinon/internal/runreply"
 	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // How a driven run ends, besides success (nil).
@@ -46,6 +51,25 @@ type failure struct {
 	class store.RunFailureClass
 	// retryAfter is the provider's Retry-After of a throttled request.
 	retryAfter time.Duration
+	// gateway: the gateway answered the harness's model request with 401 or 429 (classify.go).
+	gateway bool
+	// authLike: the harness reported an authentication failure; the gateway's record says who
+	// refused it (providerRefusal, providerrefusal.go).
+	authLike bool
+	// modelNotFound: the gateway answered 404 or model_not_found for the run's model.
+	modelNotFound bool
+	// sandbox is set when the sandbox never became ready within the org's cap (sandbox.go).
+	sandbox *sandboxUnavailable
+}
+
+// sandboxUnavailable is why and how long a sandbox never became ready.
+type sandboxUnavailable struct {
+	cause  execution.SandboxWaitCause
+	detail string
+	waited time.Duration
+	// cap is the org's sandbox wait cap the wait applied, read once; every text about the failure
+	// uses it, so they all agree with the run's failure reason.
+	cap time.Duration
 }
 
 func (f *failure) Error() string { return f.reason }
@@ -55,8 +79,18 @@ type requeued struct{ reason string }
 
 func (q *requeued) Error() string { return q.reason }
 
-// canceled cancels the run as its owner, for example at the wall-clock cap.
-type canceled struct{ reason string }
+// canceled cancels the run as its owner, for example at the wall-clock cap, or on a spent
+// budget (budgetstop.go).
+type canceled struct {
+	reason string
+	// class is the failure class recorded with the cancel; empty for none.
+	class store.RunFailureClass
+	// extra is merged into the payload of the run's closing events.
+	extra map[string]any
+	// timeLimit: the run was stopped at its wall-clock cap; the closing events carry the note of
+	// runreply.TimeLimitNote.
+	timeLimit bool
+}
 
 func (c *canceled) Error() string { return c.reason }
 
@@ -93,6 +127,12 @@ type runner struct {
 	srcSeq    int64
 	replaying atomic.Bool
 
+	// wrapUpSent: this owner sent (or found sent) the wrap-up notice. Only the run goroutine
+	// touches it.
+	wrapUpSent bool
+	// wrapUpCause is the limit the turn was interrupted for; turnWithRetry reads it after errWrapUp.
+	wrapUpCause wrapUpCause
+
 	toolsMu sync.Mutex
 	tools   map[string]chan struct{} // tool call IDs; closed once the tool call is recorded
 
@@ -102,9 +142,21 @@ type runner struct {
 	// deliveredQ are the resolved questions whose outcomes this turn's prompt carries.
 	deliveredQ []pgtype.UUID
 
+	// refusals are the permission requests agentd rejected in the turn in progress (refusal.go).
+	refMu    sync.Mutex
+	refusals []refusal
+
 	// cwd is the session directory, set before the harness starts; permission requests for
 	// paths outside it are rejected.
 	cwd string
+	// sbWorkspace and sbName are the sandbox the harness runs in, set with cwd; permission
+	// requests resolve their paths in it.
+	sbWorkspace, sbName string
+
+	// model and modelSource are the model the run uses and the layer it came from
+	// (internal/agentmodel).
+	model       string
+	modelSource agentmodel.Source
 
 	// vcfg and home are the run's version config and the sandbox's home generation, for
 	// handling a stuck sandbox (stuck.go).
@@ -117,6 +169,9 @@ type runner struct {
 	// sum is the summary prompt in progress (summary.go), nil otherwise.
 	sumMu sync.Mutex
 	sum   *summaryState
+
+	// tr is the run's tracing state; nil when the run is not traced (runtrace.go).
+	tr *runTrace
 
 	cmdMu      sync.Mutex
 	commands   []string      // the harness's last available_commands_update
@@ -189,6 +244,7 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 		log: log.With("org", run.OrgID.String(), "run", run.ID.String(), "epoch", run.Epoch),
 	}
 	r.log.Info("driving run", "state", run.State, "takeovers", run.Takeovers)
+	r.tr = p.traceStart(ctx, run, r.fenced, r.log)
 
 	hctx, stop := context.WithCancel(ctx)
 	var hb sync.WaitGroup
@@ -201,6 +257,9 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	}
 	stop()
 	hb.Wait()
+	// The turn's row ends before the run's state changes, so whoever sees the run finished sees the
+	// turn ended (a success ends it inside endTurn's transaction, a park likewise).
+	r.tr.finish(ctx, err, fence(r.fenceKind.Load()))
 	r.conclude(ctx, err)
 }
 
@@ -284,6 +343,21 @@ func (r *runner) stopped(ctx context.Context) error {
 	return nil
 }
 
+// modelGone turns the gateway's 404 for the agent's own model into the reason a run that began with
+// the model gone gets: the check at the start passed, and the provider or its price was removed
+// before the request. Any other error, and a model that still checks out, stay as they are.
+func (r *runner) modelGone(ctx context.Context, err error) error {
+	var f *failure
+	if r.modelSource != agentmodel.SourceAgent || !errors.As(err, &f) || !f.modelNotFound {
+		return err
+	}
+	var unusable *agentmodel.UnusableError
+	if cerr := agentmodel.Check(ctx, r.p.cfg.Prices, r.q, r.run.OrgID, r.model, time.Now()); errors.As(cerr, &unusable) {
+		return &failure{reason: unusable.RunReason()}
+	}
+	return err
+}
+
 // dbErr classifies a database error of the run's own writes and reads.
 func (r *runner) dbErr(ctx context.Context, what string, err error) error {
 	if stop := r.stopped(ctx); stop != nil {
@@ -338,30 +412,54 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return &failure{reason: "the agent version's config is unreadable: " + err.Error()}
 	}
-	model := versionModel(vc)
-	if model == "" {
-		model = cfg.DefaultModel
+	// The agent's own setting wins over the version's model, which wins over the org default
+	// (internal/agentmodel). A set model that is no longer served or priced fails the run: falling
+	// back would run the agent on a model nobody chose.
+	model, source := agentmodel.Choose(agent.Model.String, versionModel(vc), cfg.DefaultModel)
+	if source == agentmodel.SourceAgent {
+		var unusable *agentmodel.UnusableError
+		switch err := agentmodel.Check(fctx, r.p.cfg.Prices, r.q, r.run.OrgID, model, time.Now()); {
+		case errors.As(err, &unusable):
+			return &failure{reason: unusable.RunReason()}
+		case err != nil:
+			return r.dbErr(ctx, "check the agent's model", err)
+		}
 	}
 	if model == "" {
 		// The org's first served model: providers by name, then models by name (PV1).
-		served, err := r.q.ListServedCatalog(fctx, r.run.OrgID)
-		if err != nil {
+		var err error
+		if model, err = agentmodel.OrgDefault(fctx, r.p.cfg.Prices, r.q, r.run.OrgID, time.Now()); err != nil {
 			return r.dbErr(ctx, "load the org's models", err)
 		}
-		for _, m := range served {
-			// Only a priced model is served (the gateway answers 404 for the rest).
-			pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType}
-			if _, err := prices.Resolve(fctx, r.q, r.run.OrgID, pm, time.Now()); err == nil {
-				model = m.ModelName
-				break
-			}
-		}
+		source = agentmodel.SourceOrgDefault
 	}
 	if model == "" {
 		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model with a price"}
 	}
+	r.model, r.modelSource = model, source
+	r.tr.identify(agent, version, task, model)
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
-	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp"})
+	facts, err := r.modelFacts(fctx, model)
+	if err != nil {
+		return r.dbErr(ctx, "look up the model", err)
+	}
+	r.log.Info("the run's model", "model", model, "source", string(source), "format", string(facts.Format))
+	ptype, format := facts.ProviderType, facts.Format
+	marker, unknown := cacheMarker(facts.Cache)
+	if unknown {
+		r.log.Warn("the model has a cache price but its provider format cannot be cached by Koinon; it runs without prompt caching", "model", model)
+	}
+	// OpenRouter keeps a session on one upstream, so the run's cache stays warm. Only the run ID
+	// is sent, and only to OpenRouter.
+	sessionID := ""
+	if ptype == "openrouter" {
+		sessionID = r.run.ID.String()
+	}
+	// Koinon decides whether the model thinks, from the catalog and the agent's setting; the harness
+	// renders that and never guesses from the model ID (ADR 0069 amendment 2026-10-29).
+	thinkMode := thinking.Of(ptype, model, format).Effective(agentmodel.ChooseThinking(agent.Thinking.String, vc.Thinking))
+	r.log.Info("the run's thinking", "model", model, "mode", string(thinkMode))
+	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker, Thinking: thinkMode, SessionID: sessionID})
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}
@@ -413,6 +511,12 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	workspace, sandbox := sb.Workspace, sb.SandboxName
 	log := r.log.With("sandbox", sandbox)
+	if unknown {
+		// Visible on the task timeline: the run is costlier than the price list suggests.
+		if err := r.record(fctx, "run.uncached", map[string]any{"model": model, "reason": prices.UncachedReason(ptype, model)}); err != nil {
+			return r.dbErr(ctx, "record the uncached run", err)
+		}
+	}
 	if len(ended) > 0 {
 		log.Warn("ended processes left in the sandbox", "pids", ended, "main", main)
 		if err := r.record(fctx, "run.sandbox_swept", map[string]any{"pids": ended, "main": main}); err != nil {
@@ -443,9 +547,14 @@ func (r *runner) execute(ctx context.Context) error {
 		return r.execErr(ctx, "prepare the session directory", err)
 	}
 	r.cwd = cwd
+	r.sbWorkspace, r.sbName = workspace, sandbox
 	// The run's own version decides the instructions, so a version bump applies at the next
 	// run without recreating the sandbox.
-	instructions := instructionsFile(vc.Instructions)
+	repos, err := r.repositories(fctx)
+	if err != nil {
+		return r.execErr(ctx, "read the code host of the agent's repositories", err)
+	}
+	instructions := instructionsFile(vc.Instructions, cwd, repos, vc.WebEgress())
 	if err := r.writeInstructions(fctx, workspace, sandbox, instructions); err != nil {
 		return r.execErr(ctx, "write the instructions", err)
 	}
@@ -520,7 +629,7 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	// The harness may report a model of its own choosing; agentd selects the agent's model
 	// and never relies on what the session reports.
-	if value := modelOption(agent.Flavor, model); value != "" {
+	if value := modelOption(agent.Flavor, format, model); value != "" {
 		if err := conn.SetModel(fctx, session, value); err != nil {
 			return harnessErr("select the model "+value, err)
 		}
@@ -623,41 +732,132 @@ type promptResult struct {
 // pool to stop.
 func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, session acp.SessionID, text string) error {
 	done := make(chan promptResult, 1)
+	started := time.Now()
+	r.takeRefusals()
+	meta := r.tr.beginTurn(ctx, text)
 	go func() {
-		stop, err := conn.Prompt(ctx, session, text)
+		stop, err := conn.PromptMeta(ctx, session, text, meta)
 		done <- promptResult{stop, err}
 	}()
 	// Parked time does not count against the cap (ClaimNextRun adds it to parked_seconds).
-	capd := time.Duration(r.run.MaxWallClockSeconds)*time.Second + time.Duration(r.run.ParkedSeconds)*time.Second
-	deadline := time.Until(r.run.StartedAt.Time.Add(capd))
-	capTimer := time.NewTimer(max(deadline, 0))
+	end := r.capEnd()
+	capTimer := time.NewTimer(max(time.Until(end), 0))
 	defer capTimer.Stop()
+	// The wrap-up notice interrupts the turn WrapUpNotice before the time cap, or when the run's
+	// model requests or spend reach WrapUpFraction of their limit. A turn that starts inside a
+	// window gets the notice prepended instead (turnWithRetry).
+	var notice <-chan time.Time
+	if r.wantsWrapUp() && r.timeNotice() && time.Until(end) > r.p.cfg.WrapUpNotice {
+		t := time.NewTimer(time.Until(end.Add(-r.p.cfg.WrapUpNotice)))
+		defer t.Stop()
+		notice = t.C
+	}
+	var usageNotice <-chan wrapUpCause
+	if r.wantsWrapUp() && r.countLimits() && r.p.cfg.WrapUpFraction > 0 {
+		ch := make(chan wrapUpCause, 1)
+		wctx, stop := context.WithCancel(ctx)
+		defer stop()
+		go r.watchUsage(wctx, ch)
+		usageNotice = ch
+	}
 
-	select {
-	case res := <-done:
-		if res.err != nil {
-			return r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err)
+	// cancelSent: the wrap-up cancel went out and the harness ignored it for CancelGrace.
+	cancelSent := false
+	capCanceled := func() error {
+		return &canceled{
+			reason:    fmt.Sprintf("wall-clock cap of %s reached", time.Duration(r.run.MaxWallClockSeconds)*time.Second),
+			timeLimit: true,
 		}
-		switch res.stop {
-		case acp.StopEndTurn:
-			return errEndTurn
-		case acp.StopCancelled:
-			return &failure{reason: "the harness cancelled the turn"}
-		default:
-			return stopFailure(res.stop)
+	}
+	// wrapUp interrupts the turn to tell the agent that c's limit is near. stop is set when turn
+	// returns err.
+	wrapUp := func(c wrapUpCause) (stop bool, err error) {
+		r.log.Info("run limit near; interrupting the turn to ask the agent to wrap up", "limit", c.kind)
+		r.wrapUpCause = c
+		res, ended := r.cancelTurn(ctx, conn, session, done)
+		switch {
+		case ended && (res.stop == acp.StopCancelled || res.err != nil):
+			// A refused tool call may be why the turn ended; the agent must still be told.
+			if refs := r.takeRefusals(); len(refs) > 0 {
+				return true, &refused{refusals: refs}
+			}
+			return true, errWrapUp
+		case ended:
+			// The turn ended on its own while the timer fired (for example end_turn after an
+			// ask_user, where the run must park and must not get another prompt). Honour it; if a
+			// next turn starts inside the window, it gets the notice prepended.
+			return true, r.turnResult(ctx, conn, proc, stderr, res, started)
 		}
-	case <-r.fenced:
-		if fence(r.fenceKind.Load()) == fenceCanceled {
-			r.log.Info("run canceled; cancelling the turn")
+		// The harness ignored session/cancel: a second session/prompt must not overlap the first.
+		// Arm no new notice; the run ends at the limit as it does without one.
+		cancelSent = true
+		if err := r.suppressWrapUp(ctx); err != nil {
+			return true, err
+		}
+		r.log.Warn("the harness did not end its turn for the wrap-up notice; no notice is sent")
+		return false, nil
+	}
+	for {
+		select {
+		case res := <-done:
+			if cancelSent && res.err == nil && res.stop == acp.StopCancelled {
+				if refs := r.takeRefusals(); len(refs) > 0 {
+					return &refused{refusals: refs}
+				}
+				// The harness honoured Koinon's own cancel late. No second prompt is sent; the run
+				// ends at the cap as it does without a notice, not as a failed turn.
+				r.log.Info("the harness ended the cancelled turn late; waiting for the cap")
+				select {
+				case <-capTimer.C:
+					return capCanceled()
+				case <-r.fenced:
+					return errFenced
+				case <-ctx.Done():
+					return errShutdown
+				}
+			}
+			return r.turnResult(ctx, conn, proc, stderr, res, started)
+		case <-r.fenced:
+			if fence(r.fenceKind.Load()) == fenceCanceled {
+				r.log.Info("run canceled; cancelling the turn")
+				r.cancelTurn(ctx, conn, session, done)
+			}
+			return errFenced
+		case <-capTimer.C:
+			r.log.Info("wall-clock cap reached; cancelling the turn")
 			r.cancelTurn(ctx, conn, session, done)
+			return capCanceled()
+		case <-notice:
+			notice = nil
+			if stop, err := wrapUp(wrapUpCause{kind: runlimits.KindTime, remaining: time.Until(end)}); stop {
+				return err
+			}
+		case c := <-usageNotice:
+			usageNotice = nil
+			if stop, err := wrapUp(c); stop {
+				return err
+			}
+		case <-ctx.Done():
+			return errShutdown
 		}
-		return errFenced
-	case <-capTimer.C:
-		r.log.Info("wall-clock cap reached; cancelling the turn")
-		r.cancelTurn(ctx, conn, session, done)
-		return &canceled{reason: fmt.Sprintf("wall-clock cap of %s reached", time.Duration(r.run.MaxWallClockSeconds)*time.Second)}
-	case <-ctx.Done():
-		return errShutdown
+	}
+}
+
+// turnResult acts on how the prompt of a turn ended.
+func (r *runner) turnResult(ctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, res promptResult, since time.Time) error {
+	if res.err != nil {
+		return r.modelGone(ctx, r.providerRefusal(ctx, r.budgetStop(ctx, r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err)), since))
+	}
+	switch res.stop {
+	case acp.StopEndTurn:
+		return errEndTurn
+	case acp.StopCancelled:
+		if refs := r.takeRefusals(); len(refs) > 0 {
+			return &refused{refusals: refs}
+		}
+		return &failure{reason: "the harness cancelled the turn"}
+	default:
+		return stopFailure(res.stop)
 	}
 }
 
@@ -667,8 +867,71 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 // is fenced or stops.
 func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, session acp.SessionID, text string) error {
 	cfg := r.p.cfg
+	refusedTurns := 0
+	limit := time.Duration(r.run.MaxWallClockSeconds) * time.Second
 	for attempt := 0; ; attempt++ {
+		// A turn that starts inside a limit's window (a resume, a retry or a takeover) is not
+		// interrupted: the notice is recorded first and prepended only by the owner that recorded it,
+		// so two owners never both send it. A run already past its time cap (taken over after its
+		// lease expired) gets none: its turn is cancelled at once, so the agent could not act on it,
+		// and the event and the metric must mean the agent was told.
+		if r.wantsWrapUp() {
+			if c, due := r.wrapUpDue(fctx); due {
+				recorded, merr := r.markWrapUp(fctx, c)
+				if merr != nil {
+					return merr
+				}
+				if recorded {
+					text = wrapUpNote(c, limit) + "\n\n" + text
+				}
+			}
+		}
 		err := r.turn(ctx, conn, proc, stderr, session, text)
+		r.tr.noteTurnResult(err)
+		if errors.Is(err, errWrapUp) {
+			// A cancel can arrive with the cancelled turn, as in the refusal branch below.
+			if stop := r.stopped(ctx); stop != nil {
+				return stop
+			}
+			c := r.wrapUpCause
+			if c.kind == runlimits.KindTime {
+				c.remaining = time.Until(r.capEnd())
+			}
+			recorded, merr := r.markWrapUp(fctx, c)
+			if merr != nil {
+				return merr
+			}
+			if !recorded {
+				return errFenced // another owner holds the run
+			}
+			// Like a refusal, this is not a retry and does not reset refusedTurns.
+			text = wrapUpNote(c, limit)
+			attempt--
+			continue
+		}
+		var ref *refused
+		if !errors.As(err, &ref) {
+			// Only consecutive refused turns count: any other outcome is progress.
+			refusedTurns = 0
+		} else {
+			// The harness ended the turn because agentd refused a request: tell the agent what
+			// was refused and let it go on. This is not a retry of a failed model request.
+			// A cancel (a person's, the budget's) can reach the worker after the harness ended
+			// the turn as cancelled; it must not be answered with another prompt.
+			if stop := r.stopped(ctx); stop != nil {
+				return stop
+			}
+			if refusedTurns >= cfg.MaxRefusedTurns {
+				return &failure{reason: fmt.Sprintf("%s (the agent kept asking after %d refusals)", ref.Error(), refusedTurns), class: classPolicy}
+			}
+			refusedTurns++
+			attempt--
+			if rerr := r.record(fctx, "run.refusal", map[string]any{"refusals": ref.refusals, "count": refusedTurns, "cwd": r.cwd}); rerr != nil {
+				return r.dbErr(ctx, "record the refusal", rerr)
+			}
+			text = refusalNote(ref.refusals, r.cwd)
+			continue
+		}
 		var f *failure
 		if !errors.As(err, &f) || !f.retryable() {
 			return err
@@ -692,18 +955,22 @@ func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc e
 
 // cancelTurn sends session/cancel and gives the harness CancelGrace to end the turn, so it
 // can save its session. The stream is closed afterwards either way.
-func (r *runner) cancelTurn(ctx context.Context, conn *acp.Conn, session acp.SessionID, done <-chan promptResult) {
+// ended is false when the harness did not end its turn in time (or the cancel failed); res is
+// then empty.
+func (r *runner) cancelTurn(ctx context.Context, conn *acp.Conn, session acp.SessionID, done <-chan promptResult) (res promptResult, ended bool) {
 	if err := conn.Cancel(ctx, session); err != nil {
 		r.log.Warn("session/cancel failed", "err", err)
-		return
+		return promptResult{}, false
 	}
 	select {
 	case res := <-done:
 		r.log.Info("turn ended after cancel", "stop", res.stop, "err", res.err)
+		return res, true
 	case <-time.After(r.p.cfg.CancelGrace):
 		r.log.Warn("the harness did not end its turn after session/cancel")
 	case <-ctx.Done():
 	}
+	return promptResult{}, false
 }
 
 // execErr classifies an error of the execution backend.
@@ -941,12 +1208,18 @@ func (r *runner) recordRaw(ctx context.Context, kind string, payload []byte) err
 // finish ends the run as its owner, with a closing run event and a task event, in one
 // transaction. On success the task event is the agent's reply.
 func (r *runner) finish(ctx context.Context, outcome store.RunState, reason string, class store.RunFailureClass) error {
+	return r.finishWith(ctx, outcome, reason, class, nil)
+}
+
+// finishWith is finish with more fields in the closing events' payload; extra does not override
+// the reason and the failure class.
+func (r *runner) finishWith(ctx context.Context, outcome store.RunState, reason string, class store.RunFailureClass, extra map[string]any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.srcSeq++
 	src := r.srcSeq
 	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
-		return r.finishIn(ctx, r.q.WithTx(tx), src, outcome, reason, class)
+		return r.finishIn(ctx, r.q.WithTx(tx), src, outcome, reason, class, extra)
 	})
 	if err != nil {
 		return r.dbErr(ctx, "finish the run", err)
@@ -957,8 +1230,14 @@ func (r *runner) finish(ctx context.Context, outcome store.RunState, reason stri
 }
 
 // finishIn ends the run in the caller's transaction.
-func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outcome store.RunState, reason string, class store.RunFailureClass) error {
-	body := map[string]string{"reason": reason}
+func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outcome store.RunState, reason string, class store.RunFailureClass, extra map[string]any) error {
+	body := map[string]any{}
+	for k, v := range extra {
+		body[k] = v
+	}
+	if _, ok := body["reason"]; !ok {
+		body["reason"] = reason
+	}
 	if class != "" {
 		body["failureClass"] = string(class)
 	}
@@ -1003,38 +1282,7 @@ func (r *runner) postReply(ctx context.Context, q *store.Queries) error {
 
 // reply is the agent's message text of the run since its last park, across every epoch.
 func (r *runner) reply(ctx context.Context, q *store.Queries) (string, error) {
-	var b strings.Builder
-	var after int64
-	for {
-		evs, err := q.ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{
-			OrgID: r.run.OrgID, RunID: r.run.ID, AfterSeq: after, MaxEvents: 500,
-		})
-		if err != nil {
-			return "", err
-		}
-		for _, e := range evs {
-			after = e.Seq
-			if e.Kind == kindParked {
-				// Posted when the run parked.
-				b.Reset()
-				continue
-			}
-			if e.Kind != "acp.agent_message_chunk" {
-				continue
-			}
-			var u struct {
-				Content struct {
-					Text string `json:"text"`
-				} `json:"content"`
-			}
-			if json.Unmarshal(e.Payload, &u) == nil {
-				b.WriteString(u.Content.Text)
-			}
-		}
-		if len(evs) < 500 {
-			return strings.TrimSpace(b.String()), nil
-		}
-	}
+	return runreply.Reply(ctx, q, r.run.OrgID, r.run.ID)
 }
 
 // conclude acts on how execute ended.
@@ -1051,13 +1299,32 @@ func (r *runner) conclude(ctx context.Context, err error) {
 		} else if rerr != nil {
 			r.log.Warn("requeueing the run failed; its lease expires and a worker takes it over", "reason", rq.reason, "err", rerr)
 		}
+	case errors.As(err, &f) && f.sandbox != nil:
+		if ferr := r.failSandboxUnavailable(ctx, f); ferr != nil {
+			r.log.Warn("failing the run failed", "reason", f.reason, "err", ferr)
+		}
 	case errors.As(err, &f):
 		if ferr := r.finish(ctx, store.RunStateFailed, f.reason, cmp.Or(f.class, classFatal)); ferr != nil {
 			r.log.Warn("failing the run failed", "reason", f.reason, "err", ferr)
 		}
 	case errors.As(err, &c):
-		if ferr := r.finish(ctx, store.RunStateCanceled, c.reason, ""); ferr != nil {
+		extra := c.extra
+		if c.timeLimit {
+			// The note of a run stopped at its time limit: what the agent last said (or its notes),
+			// the same payload the api's sweep writes. A failure to read it leaves the summary out.
+			note, nerr := runreply.TimeLimitNote(ctx, r.q, r.run)
+			if nerr != nil {
+				r.log.Warn("reading the agent's last reply for the time-limit note failed", "err", nerr)
+			}
+			for k, v := range c.extra {
+				note[k] = v
+			}
+			extra = note
+		}
+		if ferr := r.finishWith(ctx, store.RunStateCanceled, c.reason, c.class, extra); ferr != nil {
 			r.log.Warn("canceling the run failed", "reason", c.reason, "err", ferr)
+		} else if c.timeLimit {
+			r.p.cfg.Metrics.TimeLimitStops.Inc()
 		}
 	case errors.Is(err, errFenced):
 		switch fence(r.fenceKind.Load()) {
@@ -1097,6 +1364,7 @@ func (r *runner) release(ctx context.Context) {
 type handler struct{ r *runner }
 
 func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
+	at := time.Now() // for the trace, before the event write
 	if h.r.summaryUpdate(n) {
 		return nil // the summary prompt's reply is the task's note, not a run event
 	}
@@ -1115,11 +1383,13 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	if err := h.r.recordRaw(ctx, "acp."+updateKind(b), b); err != nil {
 		return err
 	}
+	h.r.tr.update(n, at)
 	if n.Update.ToolCall != nil {
 		h.r.markTool(string(n.Update.ToolCall.ToolCallId))
 	}
-	// The token cap (#27) is fed by the spend ledger (package ledger, plan item L1), which calls
-	// scheduler.RecordTokenUsage for every request agentgateway logs. ACP cannot feed it: the
+	// A run's tokens are reported by the spend ledger (package ledger, plan item L1), which adds
+	// them to the run for every request agentgateway logs (tokens are reported, not enforced:
+	// ADR 0081). ACP cannot report them: the
 	// only usage update (usage_update, unstable in acp-go-sdk v0.13.5) reports the context
 	// window's occupancy (used/size) and a cost, which rise and fall with compaction and cannot
 	// be summed into tokens used, and the unstable PromptResponse.usage arrives only when the turn,
@@ -1137,11 +1407,14 @@ func (h handler) RequestPermission(ctx context.Context, req acp.PermissionReques
 	if h.r.summarizingNow() {
 		// The summary prompt does nothing: every permission request is refused.
 		h.r.log.Warn("permission refused during the end-of-turn summary")
-		return acp.Choose(req, acp.RejectOnce, acp.RejectAlways), nil
+		return acp.Choose(req, acp.RejectOnce), nil
 	}
-	d := h.r.p.cfg.Permissions.decide(req, h.r.cwd)
 	if h.r.replaying.Load() {
 		return acp.Decision{}, nil
+	}
+	d := h.r.p.cfg.Permissions.decide(req, h.r.cwd, h.r.pathResolver(ctx))
+	if d.Verdict == Reject {
+		h.r.noteRefusal(req, d)
 	}
 	select {
 	case <-h.r.toolSeen(string(req.ToolCall.ToolCallId)):
@@ -1174,4 +1447,32 @@ func updateKind(update []byte) string {
 		return "unknown"
 	}
 	return b.String()
+}
+
+// modelFacts is what the run needs to know about the model it uses.
+type modelFacts struct {
+	ProviderType string
+	// Format is the model's wire format; the harness uses the provider entry for it (ADR 0069).
+	Format modelformat.Format
+	// Cache is the model's prompt-cache mode (ADR 0068, 0069).
+	Cache prices.CacheMode
+}
+
+// modelFacts looks the model up by its plain name. A model that is not there (or has no price) runs
+// as before, with chat completions and no cache: the gateway refuses it anyway. Only a database
+// error is returned.
+func (r *runner) modelFacts(ctx context.Context, name string) (modelFacts, error) {
+	m, err := prices.Lookup(ctx, r.q, r.run.OrgID, name)
+	if errors.Is(err, prices.ErrUnpriced) {
+		return modelFacts{Format: modelformat.OpenAI, Cache: prices.CacheNone}, nil
+	} else if err != nil {
+		return modelFacts{}, err
+	}
+	f := modelFacts{ProviderType: m.ProviderType, Format: m.Format, Cache: prices.CacheNone}
+	res, err := r.p.cfg.Prices.Resolve(ctx, r.q, r.run.OrgID, m, time.Now())
+	if err != nil {
+		return f, nil
+	}
+	f.Cache = prices.CacheModeFor(m.ProviderType, m.Name, f.Format, res.Price)
+	return f, nil
 }

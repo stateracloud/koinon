@@ -4,8 +4,11 @@
 use_default_settings:
   engines:
     keep_only:
-      - duckduckgo
-      - bing
+      # DuckDuckGo is out: it answers a CAPTCHA to a server-side client (home lab, 2026-10-29).
+      # mojeek and bing are not listed: SearXNG's defaults ship mojeek `inactive: true` and bing
+      # `disabled: true`, so keep_only alone never ran them. brave, wikipedia, github and stackoverflow
+      # returned good results in the rc.8 window.
+      - brave
       - wikipedia
       - github
       - stackoverflow

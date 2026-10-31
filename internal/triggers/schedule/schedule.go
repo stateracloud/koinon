@@ -174,17 +174,6 @@ func Jitter(agent pgtype.UUID, due time.Time) time.Duration {
 	return time.Duration(binary.BigEndian.Uint64(sum[:8])%uint64(JitterWindow/time.Millisecond)) * time.Millisecond
 }
 
-// TriggerUUID names a trigger in the task's creator field and the dedupe key: a trigger ID is a
-// slug that is unique only within its agent, so the UUID is derived from both.
-func TriggerUUID(agent pgtype.UUID, trigger string) pgtype.UUID {
-	sum := sha256.Sum256(append(append([]byte("koinon-trigger/"), agent.Bytes[:]...), trigger...))
-	var id [16]byte
-	copy(id[:], sum[:16])
-	id[6] = id[6]&0x0f | 0x50
-	id[8] = id[8]&0x3f | 0x80
-	return pgtype.UUID{Bytes: id, Valid: true}
-}
-
 // Tick processes the window from the previous tick (or, the first time, CatchUp back) to now.
 // The window only advances when the tick succeeded.
 func (s *Scheduler) Tick(ctx context.Context, now time.Time) error {
@@ -235,7 +224,7 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) error {
 			Org: tr.OrgID.String(), Agent: tr.AgentID.String(), Trigger: tr.ID, Version: tr.Version,
 			Cron: tr.Filter.Cron, Timezone: tr.Filter.Timezone, Instruction: tr.Instruction, Due: fire.Unix(),
 		}
-		key := durable.TriggerFireKey(TriggerUUID(tr.AgentID, tr.ID).String(), fire)
+		key := durable.TriggerFireKey(triggers.UUID(tr.AgentID, tr.ID).String(), fire)
 		if _, err := durable.EnqueueForOrg[string](ctx, s.work, in.Org, FireWorkflow, in, dbos.WithEnqueueWorkflowID("trigger-fire:"+in.Org+":"+key)); err != nil {
 			return fmt.Errorf("enqueue fire of %s/%s: %w", in.Agent, tr.ID, err)
 		}
@@ -309,7 +298,7 @@ func (s *Scheduler) createTask(ctx context.Context, in FireInput) (string, error
 		return "", nil
 	}
 	due := time.Unix(in.Due, 0).UTC()
-	trig := TriggerUUID(agent, in.Trigger)
+	trig := triggers.UUID(agent, in.Trigger)
 	_, loc, perr := templates.ParseSchedule(tr.Filter.Cron, tr.Filter.Timezone)
 	if perr != nil {
 		loc = time.UTC
@@ -317,9 +306,12 @@ func (s *Scheduler) createTask(ctx context.Context, in FireInput) (string, error
 	task, _, err := s.tasks.CreateTriggeredTask(ctx, services.TriggeredTask{
 		Org: org, Agent: agent, Trigger: trig,
 		Source: durable.SourceTrigger, Key: durable.TriggerFireKey(trig.String(), due),
-		Title:   TaskTitle(in.Trigger, due, loc),
+		Title:   triggers.ScheduleTaskTitle(in.Trigger, due, loc),
 		Message: tr.Instruction,
-		Origin:  store.RunOriginScheduled,
+		// The target is the one of the version in effect at the fire, like the instruction.
+		Notify: tr.Notify,
+		Origin: store.RunOriginScheduled,
+		Fire:   triggers.FireScheduled,
 	})
 	if errors.Is(err, services.ErrAgentInactive) {
 		return "", nil // permanent: the agent was paused or archived since
@@ -328,12 +320,6 @@ func (s *Scheduler) createTask(ctx context.Context, in FireInput) (string, error
 		return "", err
 	}
 	return task.ID.String(), nil
-}
-
-// TaskTitle is the title of the task a schedule trigger creates: the trigger's name and the due
-// time in the trigger's time zone.
-func TaskTitle(trigger string, due time.Time, loc *time.Location) string {
-	return fmt.Sprintf("Scheduled: %s, %s", trigger, due.In(loc).Format("2006-01-02 15:04 MST"))
 }
 
 func sameSchedule(t templates.Trigger, in FireInput) bool {

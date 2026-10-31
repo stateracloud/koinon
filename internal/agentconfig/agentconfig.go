@@ -10,14 +10,20 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/templates"
 )
 
-// Defaults for versions whose config sets no run caps (plan item A4, ADR 0049).
+// Defaults for versions whose config sets no run limits (plan item A4, ADR 0049, ADR 0081): the
+// versions made before run limits existed. Shipped templates set their own, calibrated per
+// template (ADR 0081).
 const (
-	DefaultMaxWallClock = 30 * time.Minute
-	DefaultMaxTokens    = int64(2_000_000)
+	DefaultMaxWallClock     = 30 * time.Minute
+	DefaultMaxModelRequests = int64(200)
 )
+
+// DefaultMaxSpend is the run spend limit of a version that sets none: $5.
+var DefaultMaxSpend = money.FromCents(500)
 
 // TemplateRef records the template content a version was made from.
 type TemplateRef struct {
@@ -29,10 +35,13 @@ type TemplateRef struct {
 // Config is one agent version's definition. Treat it as immutable once
 // stored: edits add a version.
 type Config struct {
-	Template     *TemplateRef      `json:"template,omitempty"`
-	Instructions string            `json:"instructions"`
-	Model        string            `json:"model,omitempty"`
-	Grants       []templates.Grant `json:"grants,omitempty"`
+	Template     *TemplateRef `json:"template,omitempty"`
+	Instructions string       `json:"instructions"`
+	Model        string       `json:"model,omitempty"`
+	// Thinking is the template's starting value for the thinking setting, "on" or "off", "" when
+	// it names none (internal/thinking.Choose reads it after the agent's own setting).
+	Thinking string            `json:"thinking,omitempty"`
+	Grants   []templates.Grant `json:"grants,omitempty"`
 	// Bindings tie grants to an org's connections and targets (for GitHub:
 	// the repositories). The grant says what the agent may do; its binding
 	// says where. Set from CreateAgentFromTemplate's grants (plan item C2).
@@ -75,6 +84,15 @@ func (c Config) QuestionTimers() (reminder, expiry time.Duration) {
 	}
 	return reminder, expiry
 }
+
+// WebEgress reports whether a sandbox running this version may reach arbitrary web hosts, which
+// is what a harness's built-in web fetch needs. It is the one predicate behind the tool set
+// matching the egress (ADR 0080): koinon-agentd offers the built-in web tools only when it is
+// true, and says so in the instructions it writes. No grant opens arbitrary hosts today (a
+// connector grant opens its connection's host, the npm registry follows harness.pluginInstalls,
+// and web research goes through an MCP tool the gateway runs), so it is false for every version;
+// a grant type that opens the web adds its case here.
+func (c Config) WebEgress() bool { return false }
 
 // IsEphemeral reports whether the agent version with config c is ephemeral. It is the one
 // predicate behind every ephemeral special case: the reconciler's sandbox-per-task lifecycle and
@@ -119,6 +137,7 @@ func FromTemplate(t *templates.Template, contentHash string) Config {
 		},
 		Instructions: t.Spec.Instructions,
 		Model:        t.Spec.Model.Name,
+		Thinking:     t.Spec.Model.Thinking,
 		Grants:       t.Spec.Grants,
 		Limits:       t.Spec.Limits,
 		Triggers:     t.Spec.Triggers,
@@ -144,15 +163,32 @@ func Parse(raw []byte) (Config, error) {
 // Marshal encodes c for storage.
 func (c Config) Marshal() ([]byte, error) { return json.Marshal(c) }
 
-// RunCaps returns the caps a run of this version gets, with defaults for
-// unset values.
-func (c Config) RunCaps() (wallClock time.Duration, maxTokens int64) {
-	wallClock, maxTokens = c.Limits.Run.MaxDuration.Duration, c.Limits.Run.MaxTokens
-	if wallClock <= 0 {
-		wallClock = DefaultMaxWallClock
+// RunLimits are the limits one run gets (ADR 0081): the first reached ends the run.
+type RunLimits struct {
+	// WallClock is the time a run may be owned.
+	WallClock time.Duration
+	// MaxModelRequests counts every model request through the agent's key.
+	MaxModelRequests int64
+	// MaxSpend is the run's spend by the ledger's settled cost.
+	MaxSpend money.USD
+}
+
+// RunLimits returns the limits a run of this version gets, with defaults for unset values. An
+// admin's override of the agent (package budget's run-limit overrides) is applied on top of it.
+func (c Config) RunLimits() RunLimits {
+	l := RunLimits{
+		WallClock:        c.Limits.Run.MaxDuration.Duration,
+		MaxModelRequests: c.Limits.Run.MaxModelRequests,
+		MaxSpend:         money.FromCents(c.Limits.Run.MaxSpendUSD.Cents()),
 	}
-	if maxTokens <= 0 {
-		maxTokens = DefaultMaxTokens
+	if l.WallClock <= 0 {
+		l.WallClock = DefaultMaxWallClock
 	}
-	return wallClock, maxTokens
+	if l.MaxModelRequests <= 0 {
+		l.MaxModelRequests = DefaultMaxModelRequests
+	}
+	if l.MaxSpend <= 0 {
+		l.MaxSpend = DefaultMaxSpend
+	}
+	return l
 }

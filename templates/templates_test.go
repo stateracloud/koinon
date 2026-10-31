@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing/fstest"
 	"time"
@@ -13,6 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -110,9 +112,10 @@ var _ = Describe("Embedded templates", func() {
 			Expect(g.Targets).To(Equal(&templates.Targets{Min: 1, Max: 1}))
 		})
 
-		It("caps runs at 30 minutes and a token budget, with a spend limit", func() {
+		It("caps runs at 30 minutes, a model-request count and a run spend, with a daily spend limit", func() {
 			Expect(t.Spec.Limits.Run.MaxDuration.Duration).To(Equal(30 * time.Minute))
-			Expect(t.Spec.Limits.Run.MaxTokens).To(BeNumerically(">", 0))
+			Expect(t.Spec.Limits.Run.MaxModelRequests).To(BeNumerically(">", 0))
+			Expect(t.Spec.Limits.Run.MaxSpendUSD.Cents()).To(BeNumerically(">", 0))
 			Expect(t.Spec.Limits.SpendUSD.Cents()).To(BeNumerically(">", 0))
 		})
 
@@ -139,13 +142,16 @@ var _ = Describe("Embedded templates", func() {
 			t, ok := templates.Get("finops-analyst")
 			Expect(ok).To(BeTrue())
 			Expect(t.Spec.Grants).To(BeEmpty())
+			Expect(t.Spec.Instructions).To(ContainSubstring("without `to`"))
+			Expect(t.Spec.Instructions).To(ContainSubstring("used or not used"))
 			Expect(t.Spec.Triggers).To(HaveLen(1))
 			tr := t.Spec.Triggers[0]
 			Expect(tr.Type).To(Equal(templates.TriggerSchedule))
 			Expect(tr.Filter).To(Equal(templates.TriggerFilter{Cron: "0 7 * * *", Timezone: "UTC"}))
 			Expect(t.Spec.Limits.Run.MaxDuration.Duration).To(Equal(20 * time.Minute))
 			Expect(t.Spec.Limits.SpendUSD.String()).To(Equal("1.00"))
-			Expect(tr.Instruction).To(ContainSubstring("Ask:"))
+			Expect(tr.Instruction).NotTo(ContainSubstring("Ask:"))
+			Expect(tr.Notify).To(Equal(&templates.NotifyTarget{Kind: templates.NotifyRole, Role: store.OrgRoleAdmin}))
 			Expect(t.Spec.Instructions).To(ContainSubstring("ask_user"))
 			Expect(t.Metadata.Description).To(ContainSubstring("MCP servers you allow"))
 		})
@@ -164,8 +170,21 @@ var _ = Describe("Embedded templates", func() {
 			Expect(t.Spec.Triggers).To(BeEmpty())
 			Expect(t.Spec.Limits.Run.MaxDuration.Duration).To(Equal(30 * time.Minute))
 			Expect(t.Spec.Limits.SpendUSD.String()).To(Equal("3.00"))
-			Expect(t.Spec.Instructions).To(ContainSubstring("~/notes/"))
+			Expect(t.Spec.Instructions).To(ContainSubstring("`notes/<task-slug>.md` in your working directory, `/sandbox/work`"))
 			Expect(t.Spec.Instructions).NotTo(ContainSubstring("create_pull_request"))
+			Expect(t.Spec.Instructions).To(ContainSubstring("about 5 minutes remain"))
+			Expect(t.Spec.Instructions).NotTo(ContainSubstring("date -u"))
+			Expect(t.Spec.Limits.Run.MaxModelRequests).To(BeEquivalentTo(200))
+			Expect(t.Spec.Limits.Run.MaxSpendUSD.String()).To(Equal("2.00"))
+			Expect(t.Spec.Limits.Run.MaxTokens).To(BeZero(), "the token cap is deprecated and no shipped template sets it")
+		})
+
+		It("keeps notes only under /sandbox/work, in every shipped template", func() {
+			all, err := templates.All()
+			Expect(err).NotTo(HaveOccurred())
+			for _, t := range all {
+				Expect(t.Spec.Instructions).NotTo(ContainSubstring("~/notes"), t.Metadata.ID)
+			}
 		})
 	})
 
@@ -181,8 +200,10 @@ var _ = Describe("Embedded templates", func() {
 			Expect(t.Spec.Triggers).To(HaveLen(1))
 			Expect(t.Spec.Triggers[0].Filter).To(Equal(templates.TriggerFilter{Cron: "0 7 * * 1", Timezone: "UTC"}))
 			Expect(t.Spec.Limits.SpendUSD.String()).To(Equal("2.00"))
-			Expect(t.Spec.Triggers[0].Instruction).To(ContainSubstring("Ask:"))
+			Expect(t.Spec.Triggers[0].Instruction).NotTo(ContainSubstring("Ask:"))
+			Expect(t.Spec.Triggers[0].Notify).To(Equal(&templates.NotifyTarget{Kind: templates.NotifyRole, Role: store.OrgRoleAdmin}))
 			Expect(t.Spec.Triggers[0].Instruction).To(ContainSubstring("Repository:"))
+			Expect(t.Spec.Instructions).To(ContainSubstring("without `to`"))
 			Expect(t.Spec.Questions.ReminderAfter.Duration).To(Equal(24 * time.Hour))
 			Expect(t.Spec.Questions.ExpireAfter.Duration).To(Equal(144 * time.Hour))
 			text := t.Spec.Instructions
@@ -237,6 +258,19 @@ var _ = Describe("Parse", func() {
 		Expect(t.Spec.Ephemeral).To(BeTrue())
 	})
 
+	It("takes the starting value of the agent's thinking setting, on or off, and nothing else", func() {
+		t, err := templates.Parse(valid)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(t.Spec.Model.Thinking).To(BeEmpty(), "unset is the default, on")
+		for _, v := range []string{"on", "off"} {
+			t, err = templates.Parse([]byte(strings.Replace(string(valid), "    name: default\n", "    name: default\n    thinking: "+v+"\n", 1)))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(t.Spec.Model.Thinking).To(Equal(v))
+		}
+		_, err = templates.Parse([]byte(strings.Replace(string(valid), "    name: default\n", "    name: default\n    thinking: high\n", 1)))
+		Expect(err).To(HaveOccurred())
+	})
+
 	It("takes question timers, with the defaults when omitted", func() {
 		t, err := templates.Parse(valid)
 		Expect(err).NotTo(HaveOccurred())
@@ -264,6 +298,39 @@ var _ = Describe("Parse", func() {
 			"  model:\n", "  harness:\n    pluginInstalls: true\n  model:\n", 1)))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(t.Spec.Harness.PluginInstalls).To(BeTrue())
+	})
+
+	Describe("optional run limits (ADR 0081)", func() {
+		withLimits := func(lines string) string {
+			return regexp.MustCompile(`(?s)    run:\n.*?    spendUSD`).ReplaceAllString(string(valid),
+				"    run:\n      maxDuration: 30m\n"+lines+"    spendUSD")
+		}
+
+		It("accepts a template that sets only the deprecated maxTokens", func() {
+			t, err := templates.Parse([]byte(withLimits("      maxTokens: 2000000\n")))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(t.Spec.Limits.Run.MaxModelRequests).To(BeZero())
+			Expect(t.Spec.Limits.Run.MaxSpendUSD).To(BeZero())
+		})
+
+		It("accepts a template that sets neither limit", func() {
+			_, err := templates.Parse([]byte(withLimits("")))
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("keeps explicit values", func() {
+			t, err := templates.Parse([]byte(withLimits("      maxModelRequests: 150\n      maxSpendUSD: \"1.50\"\n")))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(t.Spec.Limits.Run.MaxModelRequests).To(BeEquivalentTo(150))
+			Expect(t.Spec.Limits.Run.MaxSpendUSD.String()).To(Equal("1.50"))
+		})
+
+		It("still refuses an explicit zero", func() {
+			_, err := templates.Parse([]byte(withLimits("      maxSpendUSD: \"0.00\"\n")))
+			Expect(err).To(HaveOccurred())
+			_, err = templates.Parse([]byte(withLimits("      maxModelRequests: 0\n")))
+			Expect(err).To(HaveOccurred())
+		})
 	})
 
 	DescribeTable("rejects invalid fixtures",

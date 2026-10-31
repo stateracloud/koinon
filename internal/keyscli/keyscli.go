@@ -35,6 +35,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/tracedest"
 )
 
 // DefaultActivePeriod is how long a KEK stays active before status warns (a year, like AWS KMS's
@@ -64,7 +65,14 @@ var Columns = []Column{
 	{Table: mcpservers.ServersTable, Column: mcpservers.CredentialColumn},
 	// Agent home repository passwords (ADR 0032); keyed by agent_id, see rowKey.
 	{Table: checkpoint.Table, Column: checkpoint.Column},
+	// Run-trace destination credentials (ADR 0074): the org's, and the platform's single row.
+	{Table: tracedest.DestinationsTable, Column: tracedest.CredentialsColumn},
+	{Table: tracedest.PlatformTable, Column: tracedest.CredentialsColumn},
 }
+
+// singleton is the platform's one-row table: it has no org_id or id, and its binding names the org
+// and row "platform".
+func (c Column) singleton() bool { return c.Table == tracedest.PlatformTable }
 
 // rowKey is the column that names a row in the binding's RowID: id, except where the table is
 // keyed by the agent (one row per agent).
@@ -332,6 +340,13 @@ func (t *Tool) each(ctx context.Context, verb string, fn rowFn) error {
 type rowRef struct{ org, id string }
 
 func (t *Tool) rowIDs(ctx context.Context, c Column) ([]rowRef, error) {
+	if c.singleton() {
+		var found bool
+		if err := t.Pool.QueryRow(ctx, fmt.Sprintf(`SELECT EXISTS (SELECT 1 FROM %s WHERE %s IS NOT NULL)`, c.Table, c.Column)).Scan(&found); err != nil || !found {
+			return nil, err
+		}
+		return []rowRef{{org: "platform", id: "platform"}}, nil
+	}
 	rows, err := t.Pool.Query(ctx, fmt.Sprintf(
 		`SELECT org_id::text, %[3]s::text FROM %[1]s WHERE %[2]s IS NOT NULL ORDER BY org_id, %[3]s`, c.Table, c.Column, c.rowKey()))
 	if err != nil {
@@ -353,8 +368,12 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 	changed := false
 	err := pgx.BeginFunc(ctx, t.Pool, func(tx pgx.Tx) error {
 		var raw []byte
+		sel, upd := `WHERE org_id = $1 AND %[3]s = $2`, `WHERE org_id = $1 AND %[3]s = $2`
+		if c.singleton() {
+			sel, upd = `WHERE singleton AND $1 = $2`, `WHERE singleton AND $1 = $2`
+		}
 		err := tx.QueryRow(ctx, fmt.Sprintf(
-			`SELECT %[2]s FROM %[1]s WHERE org_id = $1 AND %[3]s = $2 FOR UPDATE`, c.Table, c.Column, c.rowKey()), r.org, r.id).Scan(&raw)
+			`SELECT %[2]s FROM %[1]s `+sel+` FOR UPDATE`, c.Table, c.Column, c.rowKey()), r.org, r.id).Scan(&raw)
 		if errors.Is(err, pgx.ErrNoRows) || raw == nil {
 			return nil // deleted meanwhile
 		}
@@ -377,7 +396,7 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 			return err
 		}
 		if _, err := tx.Exec(ctx, fmt.Sprintf(
-			`UPDATE %[1]s SET %[2]s = $3 WHERE org_id = $1 AND %[3]s = $2`, c.Table, c.Column, c.rowKey()), r.org, r.id, nb); err != nil {
+			`UPDATE %[1]s SET %[2]s = $3 `+upd, c.Table, c.Column, c.rowKey()), r.org, r.id, nb); err != nil {
 			return err
 		}
 		changed = true

@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,10 +29,16 @@ gateway:
   providerKeysSecret: koinon-gateway-providers
   providerKeysDir: /secrets/providers
   accessLogOtlp: koinon-api.koinon.svc:4318
+  accessLogOtlpTokenFile: /secrets/otlp/token
 openshell:
   address: openshell.openshell.svc:8080
   tls: /etc/koinon/openshell-tls
   runtimeClassName: kata
+  gatewayId: prod
+sandboxObserver:
+  enabled: true
+  clusterRole: koinon-koinon-sandbox-observer
+  serviceAccount: koinon-reconciler
 reconciler:
   idleTimeout: 10m
   resyncInterval: 30s
@@ -52,6 +59,68 @@ func TestReconcilerCommand(t *testing.T) {
 	RunSpecs(t, "koinon-reconciler Suite")
 }
 
+var _ = Describe("parseConfig for the sandbox observer", func() {
+	parse := func(file string, args ...string) (config, error) {
+		path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
+		Expect(os.WriteFile(path, []byte(file), 0o600)).To(Succeed())
+		env := map[string]string{
+			"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k",
+		}
+		return parseConfig(args, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	}
+
+	It("is off and uses OpenShell's default gateway ID when the chart does not set them", func() {
+		c, err := parse(stripObserver(chartConfig))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.sandboxObserver).To(BeFalse())
+		Expect(c.openshellGateway).To(Equal("openshell"))
+		Expect(c.otlpTokenFile).To(Equal("/secrets/otlp/token"))
+	})
+
+	It("is off when the chart says enabled: false", func() {
+		c, err := parse(stripObserver(chartConfig) + "sandboxObserver:\n  enabled: false\n")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.sandboxObserver).To(BeFalse())
+	})
+
+	It("lets an explicit flag or variable override the file in both directions", func() {
+		c, err := parse(chartConfig, "--sandbox-observer=false")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.sandboxObserver).To(BeFalse(), "the flag turns off what the file turns on")
+
+		c, err = parse(chartConfig)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.sandboxObserver).To(BeTrue(), "no flag: the file")
+
+		c, err = parse(stripObserver(chartConfig)+"sandboxObserver:\n  enabled: false\n  clusterRole: r\n  serviceAccount: s\n", "--sandbox-observer")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.sandboxObserver).To(BeTrue(), "the flag turns on what the file turns off")
+	})
+
+	It("lets KOINON_SANDBOX_OBSERVER override the file", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
+		Expect(os.WriteFile(path, []byte(chartConfig), 0o600)).To(Succeed())
+		env := map[string]string{
+			"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k",
+			"KOINON_SANDBOX_OBSERVER": "false",
+		}
+		c, err := parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.sandboxObserver).To(BeFalse())
+	})
+
+	It("needs its ClusterRole and ServiceAccount", func() {
+		_, err := parse(stripObserver(chartConfig), "--sandbox-observer")
+		Expect(err).To(MatchError(ContainSubstring("--sandbox-observer-cluster-role")))
+	})
+})
+
+// stripObserver removes the sandboxObserver block and the gateway ID from chartConfig.
+func stripObserver(cfg string) string {
+	out := strings.Replace(cfg, "  gatewayId: prod\n", "", 1)
+	return strings.Replace(out, "sandboxObserver:\n  enabled: true\n  clusterRole: koinon-koinon-sandbox-observer\n  serviceAccount: koinon-reconciler\n", "", 1)
+}
+
 var _ = Describe("parseConfig", func() {
 	It("reads the config file as the chart renders it, with env overriding the file", func() {
 		path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
@@ -70,6 +139,10 @@ var _ = Describe("parseConfig", func() {
 		Expect(c.homeRetention).To(Equal("delete"))
 		Expect(c.runtimeClass).To(Equal("kata"))
 		Expect(c.openshellTLSDir).To(Equal("/etc/koinon/openshell-tls"))
+		Expect(c.openshellGateway).To(Equal("prod"))
+		Expect(c.sandboxObserver).To(BeTrue())
+		Expect(c.sandboxObserverClusterRole).To(Equal("koinon-koinon-sandbox-observer"))
+		Expect(c.sandboxObserverServiceAccount).To(Equal("koinon-reconciler"))
 		Expect(c.accessLogOTLP).To(Equal("koinon-api.koinon.svc:4318"))
 		Expect(c.gatewayURL).To(Equal("http://koinon-gateway.koinon.svc:8080"))
 		Expect(c.gatewayStatsURL).To(Equal("http://koinon-gateway.koinon.svc:15020"))
@@ -103,6 +176,7 @@ gateway:
   url: http://koinon-gateway.koinon.svc.cluster.local:4000
   port: 4000
   accessLogOtlp: koinon-api.koinon.svc:4318
+  accessLogOtlpTokenSecret: koinon-otlp-token
   providerKeysSecret: koinon-gateway-providers
   providerKeysDir: /secrets/providers
 openshell:
@@ -118,6 +192,7 @@ openshell:
 		Expect(c.gatewayName).To(Equal("koinon-gateway"))
 		Expect(c.gatewayClass).To(Equal("agentgateway"))
 		Expect(c.gatewayPort).To(Equal(4000))
+		Expect(c.otlpTokenSecret).To(Equal("koinon-otlp-token"))
 		Expect(c.keySettle).To(Equal(2 * time.Second))
 
 		delete(env, "KOINON_CONFIG")

@@ -167,6 +167,10 @@ type Flavors struct {
 // when an agent is created. "default" is the install's default model.
 type Model struct {
 	Name string `json:"name"`
+	// Thinking is the template's starting value for the agent's thinking setting: "on" or "off".
+	// Unset means the default, on. An admin changes the agent's own setting later; the model's
+	// catalog capability decides whether it has any effect (internal/thinking, ADR 0069 amendment).
+	Thinking string `json:"thinking,omitempty"`
 }
 
 // Grant is a suggested grant on a connector type (ADR 0007). It is a
@@ -192,10 +196,21 @@ type Limits struct {
 	SpendUSD USD       `json:"spendUSD"`
 }
 
-// RunLimits cap a single run; hitting one cancels the run.
+// RunLimits cap a single run; the first one reached cancels it (ADR 0081).
 type RunLimits struct {
+	// MaxDuration is the wall-clock limit.
 	MaxDuration Duration `json:"maxDuration"`
-	MaxTokens   int64    `json:"maxTokens"`
+	// MaxModelRequests counts every model request through the agent's key, the harness's own title,
+	// summary and compaction calls included. Optional: zero means unset, and a run gets the platform
+	// default (ADR 0081). The schema refuses an explicit zero.
+	MaxModelRequests int64 `json:"maxModelRequests,omitempty"`
+	// MaxSpendUSD is the run's spend by the ledger's settled cost. Optional like MaxModelRequests.
+	MaxSpendUSD USD `json:"maxSpendUSD,omitempty"`
+	// MaxTokens is deprecated: tokens are reported, not enforced (ADR 0081). A template may still
+	// carry it; nothing reads it.
+	//
+	// Deprecated: tokens are reported, not enforced.
+	MaxTokens int64 `json:"maxTokens,omitempty"`
 }
 
 // Duration is a time.Duration written as a Go duration string.
@@ -366,6 +381,16 @@ func (t *Template) check() error {
 	}
 	if err := ValidateTriggers(t.Spec.Triggers); err != nil {
 		return fmt.Errorf("spec.%w", err)
+	}
+	for i, tr := range t.Spec.Triggers {
+		// A person and a channel both belong to one org. From v0.2 a template reaches the org's
+		// channel through the default, so templates never take a channel, now or later.
+		switch {
+		case tr.Notify != nil && tr.Notify.Kind == NotifyUser:
+			return fmt.Errorf("spec.triggers[%d]: notify: a template cannot name a person; use a role and pick the person on the agent's Edit triggers page", i)
+		case tr.Notify != nil && tr.Notify.Kind == NotifyChannel:
+			return fmt.Errorf("spec.triggers[%d]: notify: a template cannot name a chat channel; leave notify out to use the org's notify channel", i)
+		}
 	}
 	seen := map[string]bool{}
 	for i, g := range t.Spec.Grants {

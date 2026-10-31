@@ -2,7 +2,14 @@
 #
 # Weekly, grouped version updates: one pull request per ecosystem, so CI runs a few times a
 # week at most. Security updates are separate and immediate (enabled in the repository settings).
-# Flavor Dockerfiles get a docker entry once they land on main (flavors/*).
+#
+# Dependency cooldown (ADR 0079): every entry waits 3 days after a release before Dependabot
+# proposes it, including major versions. `default-days` is the one key that every ecosystem here
+# supports (docker and github-actions do not take the semver-*-days keys); it also covers
+# major, minor and patch. Security updates ignore the cooldown by design and take the fast path of
+# ADR 0079, which a human reviews.
+# The docker entries only see FROM lines; the digests that live in ARG defaults (flavors,
+# fixtures) are checked by hack/dep-age-check.sh in CI instead.
 version: 2
 updates:
   - package-ecosystem: gomod
@@ -10,6 +17,7 @@ updates:
     schedule: {interval: weekly, day: monday}
     open-pull-requests-limit: 5
     commit-message: {prefix: "chore(deps)"}
+    cooldown: {default-days: 3}
     groups:
       go:
         patterns: ["*"]
@@ -18,6 +26,7 @@ updates:
     schedule: {interval: weekly, day: monday}
     open-pull-requests-limit: 5
     commit-message: {prefix: "chore(deps)"}
+    cooldown: {default-days: 3}
     groups:
       web:
         patterns: ["*"]
@@ -26,6 +35,25 @@ updates:
     schedule: {interval: weekly, day: monday}
     open-pull-requests-limit: 5
     commit-message: {prefix: "chore(ci)"}
+    cooldown: {default-days: 3}
     groups:
       actions:
         patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /flavors/opencode
+    schedule: {interval: weekly, day: monday}
+    open-pull-requests-limit: 5
+    commit-message: {prefix: "chore(deps)"}
+    cooldown: {default-days: 3}
+  - package-ecosystem: docker
+    directory: /test/fixtures/rt1/motherduck
+    schedule: {interval: weekly, day: monday}
+    open-pull-requests-limit: 5
+    commit-message: {prefix: "chore(deps)"}
+    cooldown: {default-days: 3}
+  - package-ecosystem: docker
+    directory: /test/fixtures/rt1/prometheus
+    schedule: {interval: weekly, day: monday}
+    open-pull-requests-limit: 5
+    commit-message: {prefix: "chore(deps)"}
+    cooldown: {default-days: 3}

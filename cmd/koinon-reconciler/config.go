@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
@@ -41,6 +42,11 @@ type fileConfig struct {
 		ProviderKeysDir    string `yaml:"providerKeysDir"`
 		// AccessLogOTLP is koinon-api's OTLP/HTTP receiver as host:port (plan item L1).
 		AccessLogOTLP string `yaml:"accessLogOtlp"`
+		// AccessLogOTLPTokenFile is the file in the gateway pod with the receiver's bearer token
+		// (standalone mode); AccessLogOTLPTokenSecret is the Secret that holds it (kubernetes mode,
+		// key "token"). Names only: the token is never in this file.
+		AccessLogOTLPTokenFile   string `yaml:"accessLogOtlpTokenFile"`
+		AccessLogOTLPTokenSecret string `yaml:"accessLogOtlpTokenSecret"`
 		// Name and GatewayClassName are Koinon's Gateway and its class in kubernetes mode (plan item G2).
 		Name             string `yaml:"name"`
 		GatewayClassName string `yaml:"gatewayClassName"`
@@ -49,7 +55,17 @@ type fileConfig struct {
 		Address          string `yaml:"address"`
 		TLS              string `yaml:"tls"`
 		RuntimeClassName string `yaml:"runtimeClassName"`
+		// GatewayID is OpenShell's gateway_id, which names the workspace namespaces.
+		GatewayID string `yaml:"gatewayId"`
 	} `yaml:"openshell"`
+	// SandboxObserver is the chart's sandboxObserver (ADR 0078).
+	SandboxObserver struct {
+		Enabled bool `yaml:"enabled"`
+		// ClusterRole is the observer ClusterRole, and the name of the RoleBinding to it.
+		ClusterRole string `yaml:"clusterRole"`
+		// ServiceAccount is the reconciler's, the RoleBinding's subject.
+		ServiceAccount string `yaml:"serviceAccount"`
+	} `yaml:"sandboxObserver"`
 	Reconciler struct {
 		IdleTimeout    string `yaml:"idleTimeout"`
 		ParkWarm       string `yaml:"parkWarm"`
@@ -87,6 +103,12 @@ type config struct {
 	openshellAddress string
 	openshellTLSDir  string
 	runtimeClass     string
+	openshellGateway string
+
+	sandboxObserver               bool
+	sandboxObserverSet            bool // --sandbox-observer (or KOINON_SANDBOX_OBSERVER) was given: it wins over the config file
+	sandboxObserverClusterRole    string
+	sandboxObserverServiceAccount string
 
 	gatewayMode        project.GatewayMode
 	gatewayURL         string
@@ -106,6 +128,8 @@ type config struct {
 	healthAddr         string
 	metricsAddr        string
 	accessLogOTLP      string
+	otlpTokenFile      string
+	otlpTokenSecret    string
 
 	idleTimeout    time.Duration
 	archiveAfter   time.Duration
@@ -135,6 +159,10 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.openshellAddress, "openshell-address", "", "OpenShell gateway host:port")
 	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "", "directory with tls.crt, tls.key and ca.crt for mTLS; empty connects without TLS")
 	fs.StringVar(&c.runtimeClass, "runtime-class", "", "sandbox runtime class (ADR 0045: kata)")
+	fs.StringVar(&c.openshellGateway, "openshell-gateway-id", "", "OpenShell's gateway_id, which names the workspace namespaces (default openshell)")
+	fs.BoolVar(&c.sandboxObserver, "sandbox-observer", false, "read the pods of sandboxes that never became ready, to say why (ADR 0078); needs the chart's observer ClusterRole")
+	fs.StringVar(&c.sandboxObserverClusterRole, "sandbox-observer-cluster-role", "", "the observer ClusterRole, and the name of the RoleBinding to it in each workspace namespace")
+	fs.StringVar(&c.sandboxObserverServiceAccount, "sandbox-observer-service-account", "", "the reconciler's ServiceAccount, the subject of those RoleBindings")
 	fs.Var(&c.gatewayMode, "gateway-mode", "standalone or kubernetes (default standalone)")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it; the reconciler also sends its reload probe there")
 	fs.StringVar(&c.gatewayConfigMap, "gateway-config-map", "", "ConfigMap holding the standalone agentgateway config; created when missing")
@@ -149,6 +177,10 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.kekDir, "kek-dir", "", "directory with the mounted key-encryption keys Secret (files named by KEK ID plus \"active\")")
 	fs.StringVar(&c.accessLogOTLP, "gateway-access-log-otlp", "",
 		"host:port of koinon-api's OTLP/HTTP receiver, where agentgateway exports its access log for the spend ledger; empty exports nothing")
+	fs.StringVar(&c.otlpTokenFile, "gateway-access-log-otlp-token-file", "",
+		"file, as the standalone gateway pod sees it, with the bearer token the OTLP receiver requires; agentgateway reads it and sends it with the access log")
+	fs.StringVar(&c.otlpTokenSecret, "gateway-access-log-otlp-token-secret", "",
+		"Secret (key token) with the bearer token the OTLP receiver requires, for kubernetes mode: the agentgateway controller reads it and hands it to the proxy")
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort, "listen address of /metrics (Prometheus); empty disables it")
 	fs.StringVar(&c.healthAddr, "health-addr", ":8082", "listen address of /healthz and /readyz (not ready until the key-encryption keys are loaded); empty disables it")
 	fs.StringVar(&c.egressHosts, "egress-allowed-hosts", "", "comma-separated hosts (optionally host:port) providers and MCP servers may name although they are internal")
@@ -176,6 +208,15 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	if fs.NArg() > 0 {
 		return c, fmt.Errorf("unexpected arguments %q", fs.Args())
 	}
+	// BindEnv sets flags without marking them visited, so the variable is looked at too.
+	if _, ok := getenv(cli.EnvName("sandbox-observer")); ok {
+		c.sandboxObserverSet = true
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "sandbox-observer" {
+			c.sandboxObserverSet = true
+		}
+	})
 	if c.databaseURL == "" {
 		c.databaseURL, _ = getenv("DATABASE_URL")
 	}
@@ -210,6 +251,14 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.openshellAddress, fc.OpenShell.Address)
 	orDefault(&c.openshellTLSDir, fc.OpenShell.TLS)
 	orDefault(&c.runtimeClass, fc.OpenShell.RuntimeClassName)
+	orDefault(&c.openshellGateway, fc.OpenShell.GatewayID)
+	orDefault(&c.openshellGateway, execution.DefaultGatewayID)
+	// An explicit flag or variable wins over the file in both directions: flag > file > default (off).
+	if !c.sandboxObserverSet {
+		c.sandboxObserver = fc.SandboxObserver.Enabled
+	}
+	orDefault(&c.sandboxObserverClusterRole, fc.SandboxObserver.ClusterRole)
+	orDefault(&c.sandboxObserverServiceAccount, fc.SandboxObserver.ServiceAccount)
 	orDefault(&c.gatewayMode, fc.Gateway.Mode)
 	orDefault(&c.gatewayMode, project.GatewayStandalone)
 	orDefault(&c.gatewayURL, fc.Gateway.URL)
@@ -228,6 +277,8 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.providerKeysSecret, fc.Gateway.ProviderKeysSecret)
 	orDefault(&c.providerKeysDir, fc.Gateway.ProviderKeysDir)
 	orDefault(&c.accessLogOTLP, fc.Gateway.AccessLogOTLP)
+	orDefault(&c.otlpTokenFile, fc.Gateway.AccessLogOTLPTokenFile)
+	orDefault(&c.otlpTokenSecret, fc.Gateway.AccessLogOTLPTokenSecret)
 	orDefault(&c.homeRetention, fc.Reconciler.HomeRetention)
 	orDefault(&c.checkpoints, fc.Reconciler.Checkpoints)
 	if c.sandboxJobs == 0 {
@@ -269,6 +320,9 @@ func (c *config) validate() error {
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required settings: %s", strings.Join(missing, ", "))
+	}
+	if c.sandboxObserver && (c.sandboxObserverClusterRole == "" || c.sandboxObserverServiceAccount == "") {
+		return errors.New("--sandbox-observer-cluster-role and --sandbox-observer-service-account are required with --sandbox-observer")
 	}
 	if c.gatewayMode == project.GatewayStandalone && c.gatewayConfigMap == "" {
 		return errors.New("--gateway-config-map is required in standalone mode")

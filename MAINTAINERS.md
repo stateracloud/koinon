@@ -6,6 +6,10 @@ Koinon is run by a benevolent dictator for life (BDFL) while the project is smal
 | --- | --- | --- |
 | procoduck | [@procoduck](https://github.com/procoduck) | Project lead (BDFL) |
 
+The GitHub handles in this table are the people whose `dependency-age-waiver` label the CI age check
+honours (ADR 0079); the check reads this file from the base branch, so adding a row takes effect only
+once that pull request is merged.
+
 ## Roles
 
 - **Contributor**: anyone whose pull request has been merged.

@@ -7,7 +7,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-jobs=(go web generate chart docs escape flavors)
+jobs=(go web generate chart chartsmoke docs escape flavors)
 base=${1:-}
 if [[ -z $base ]]; then
 	for j in "${jobs[@]}"; do echo "$j=true"; done
@@ -28,6 +28,9 @@ pattern() {
 	web) echo '^(web/|api/proto/)' ;;
 	generate) echo '^(api/proto/|internal/db/(queries|migrations)/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/)' ;;
 	chart) echo '^(charts/|hack/chart-check\.sh|hack/chartlint/)' ;;
+	# The binaries the chart starts, their flags and everything they import (the Go packages
+	# outside internal/ and cmd/) count too.
+	chartsmoke) echo '^(charts/|cmd/|internal/|pricing/|connectors/|templates/|api/|web/|test/chartsmoke/|go\.(mod|sum))' ;;
 	docs) echo '^(docs/|test/e2e/|charts/|web/e2e-real/|hack/docs-|README\.md)' ;;
 	escape) echo '^(charts/|test/escape/)' ;;
 	flavors) echo '^(flavors/|internal/(agentd|flavor|acp)/|test/flavors/|hack/flavor-tag\.sh|templates/)' ;;

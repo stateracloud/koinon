@@ -1,0 +1,150 @@
+# Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.
+# Keys appear only as hashes; key material lives in Kubernetes Secrets.
+config:
+  adminAddr: localhost:15000
+  statsAddr: '[::]:15020'
+  readinessAddr: '[::]:15021'
+  logging:
+    format: json
+  modelCatalog:
+    - inline:
+        providers:
+          acme.anthropic:
+            models:
+              claude-haiku-4-5:
+                rates:
+                  input: "1"
+                  output: "5"
+                  cacheRead: "0.1"
+                  cacheWrite: "1.25"
+              claude-haiku-5-5:
+                rates:
+                  input: "1"
+                  output: "5"
+                  cacheRead: "0.1"
+                  cacheWrite: "1.25"
+          acme.openrouter:
+            models:
+              open/model:
+                rates:
+                  input: "1"
+                  output: "2"
+frontendPolicies:
+  accessLog:
+    add:
+      koinon.agent: default(apiKey.agent, "")
+      koinon.cache_read: llm.cachedInputTokens
+      koinon.cache_write: llm.cacheCreationInputTokens
+      koinon.config: '"734cb4f6352b9b04"'
+      koinon.error: proxy.error.reason
+      koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
+      koinon.in: llm.inputTokens
+      koinon.key: default(apiKey.name, "")
+      koinon.max_tokens: llm.params.max_tokens
+      koinon.out: llm.outputTokens
+      koinon.reasoning: llm.reasoningTokens
+      koinon.req_bytes: int(request.headers["content-length"])
+      koinon.request: uuid()
+      koinon.response_id: coalesce(response.headers["x-generation-id"])
+      koinon.status: response.code
+      koinon.stream: llm.streaming
+      koinon.upstream: default(proxy.upstreamDuration, "") != ""
+gateways:
+  default:
+    port: 4000
+llm:
+  policies:
+    apiKey:
+      mode: strict
+      location:
+        header:
+          name: authorization
+          prefix: 'Bearer '
+      keys:
+        - keyHash: sha256:014273a1a1fe57ae17d55ad2d6362277e04d38c5fb94f994c520a5392cc5f4fd
+          metadata:
+            name: k-eeeeeeeeeeee
+            agent: acme/repo-helper
+            org: acme
+          allowedModels:
+            - claude-haiku-4-5
+            - claude-haiku-5-5
+            - open/model
+        - keyHash: sha256:25ebfdae023c6a140b08a34d4cfaf4ed782062e7810a750e335d3fd4b106a2ac
+          metadata:
+            name: koinon-reload-probe
+            agent: ""
+    authorization:
+      rules:
+        - apiKey.name != "koinon-reload-probe" && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_") && !has(llmRequest.mcp_servers)
+    transformations:
+      request:
+        replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
+        set:
+          x-koinon-org: default(apiKey.org, "")
+  models:
+    - id: acme/claude-haiku-4-5
+      name: claude-haiku-4-5
+      matches:
+        - headers:
+            - name: x-koinon-org
+              value:
+                exact: acme
+      provider:
+        custom:
+          providerOverride: acme.anthropic
+          formats:
+            - type: messages
+      params:
+        baseUrl: https://api.anthropic.com/v1
+        apiKey:
+          file: /secrets/upstream/api_key
+      requestHeaders:
+        set:
+          anthropic-version: "2023-06-01"
+          anthropic-workspace-id: wrkspc_01ExampleExample
+        remove:
+          - anthropic-beta
+      transformation:
+        tools: 'has(llmRequest.tools) ? (request.path == "/v1/messages" ? llmRequest.tools.filter(t, !has(t.type) || t.type == "custom") : llmRequest.tools) : null'
+    - id: acme/claude-haiku-5-5
+      name: claude-haiku-5-5
+      matches:
+        - headers:
+            - name: x-koinon-org
+              value:
+                exact: acme
+      provider:
+        custom:
+          providerOverride: acme.anthropic
+          formats:
+            - type: messages
+      params:
+        baseUrl: https://api.anthropic.com/v1
+        apiKey:
+          file: /secrets/upstream/api_key
+      requestHeaders:
+        set:
+          anthropic-beta: thinking-binding-controls-2026-08-01
+          anthropic-version: "2023-06-01"
+          anthropic-workspace-id: wrkspc_01ExampleExample
+      transformation:
+        tools: 'has(llmRequest.tools) ? (request.path == "/v1/messages" ? llmRequest.tools.filter(t, !has(t.type) || t.type == "custom") : llmRequest.tools) : null'
+    - id: acme/open/model
+      name: open/model
+      matches:
+        - headers:
+            - name: x-koinon-org
+              value:
+                exact: acme
+      provider:
+        custom:
+          providerOverride: acme.openrouter
+          formats:
+            - type: completions
+      params:
+        baseUrl: https://openrouter.ai/api/v1
+        apiKey:
+          file: /secrets/upstream/api_key
+      transformation:
+        stream_options: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'

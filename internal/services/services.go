@@ -2,7 +2,7 @@
 
 // Package services implements Koinon's org-facing connect-rpc services
 // (plan item A3): AgentService, TicketService, RunService,
-// TemplateService, ConnectionService, ApprovalService, TokenService and ProviderService, on the sqlc store and with the caller's Principal from the
+// TemplateService, ConnectionService, ApprovalService, TokenService, ProviderService and TraceDestinationService, on the sqlc store and with the caller's Principal from the
 // auth interceptor.
 //
 // Every org-owned call names its org in the request. The caller must hold a
@@ -11,7 +11,7 @@
 //
 //	viewer  Get*, List*, WatchRun
 //	member  CreateAgentFromTemplate, CreateTicket, AppendMessage, MoveTicket, CancelRun
-//	admin   AuditService.List (a platform admin may also read every org), ProviderService (every call), ActivateAgent (approves the version's grants), ArchiveAgent,
+//	admin   TraceDestinationService (org calls; the content level full needs an owner; the platform calls need a platform admin), AuditService.List (a platform admin may also read every org), ProviderService (every call), ActivateAgent (approves the version's grants), ArchiveAgent,
 //	        CreateGitHubConnection, CreateGiteaConnection, TestConnection, CreateToken, ListTokens, RevokeToken, Approve, Deny (ADR 0049:
 //	        approvers are admins and owners)
 //
@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/budget"
@@ -53,10 +54,14 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1/tracev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/internal/tracedest"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // Keys is the secret store as the services use it.
@@ -69,14 +74,22 @@ type Keys interface {
 // without a wake-up, as a backstop for missed notifications.
 const DefaultWatchPollInterval = 5 * time.Second
 
+// DefaultWatchHeartbeatInterval is how often a WatchRun stream that has sent nothing else sends
+// a heartbeat, so proxies and load balancers keep a quiet run's stream open (issue #141).
+const DefaultWatchHeartbeatInterval = 30 * time.Second
+
 // Options configures a Server.
 type Options struct {
 	// Hub wakes WatchRun streams. Required.
 	Hub *runwatch.Hub
 	// WatchPollInterval defaults to DefaultWatchPollInterval.
 	WatchPollInterval time.Duration
+	// WatchHeartbeatInterval defaults to DefaultWatchHeartbeatInterval.
+	WatchHeartbeatInterval time.Duration
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
+	// Prices is the default price list; required (pricing.Embedded in production).
+	Prices pricing.ListSource
 	// Keys seals and opens connections' secret fields (the secret store). Nil means Koinon
 	// runs without key-encryption keys, and creating connections fails.
 	Keys Keys
@@ -102,10 +115,19 @@ type Options struct {
 	// DirectMessages delivers direct messages through the org-partitioned DBOS queue (TR3). Nil
 	// means inline, in one transaction. koinon-api passes one with --durable.
 	DirectMessages *DirectMessageQueue
+	// RunNow fires schedule triggers by hand through the org queue (api.durable.enabled). Nil means
+	// inline.
+	RunNow *RunNowQueue
+	// ModelCheck runs the provider echo check (rc.6). Nil means CheckProviderEcho answers
+	// UNIMPLEMENTED.
+	ModelCheck *modelcheck.Service
 	// URLPolicy decides which hosts a connection's base URL may name (the platform's egress
 	// policy, as for providers and MCP servers). The zero policy still denies private and internal
 	// addresses.
 	URLPolicy catalog.URLPolicy
+	// Traces manages run-trace destinations, content levels and the platform ceiling (ADR 0074). Nil
+	// means TraceDestinationService answers UNIMPLEMENTED.
+	Traces *tracedest.Service
 }
 
 // Server implements the four services.
@@ -114,7 +136,9 @@ type Server struct {
 	q    *store.Queries
 	hub  *runwatch.Hub
 	poll time.Duration
-	log  *slog.Logger
+	// heartbeat is the idle interval after which WatchRun sends a heartbeat.
+	heartbeat time.Duration
+	log       *slog.Logger
 
 	keys      Keys
 	tokens    *tokens.Service
@@ -128,12 +152,20 @@ type Server struct {
 	notifier  *durable.Notifier
 	dm        *DirectMessageQueue
 	urlPolicy catalog.URLPolicy
+	// agentModels changes agents' model settings; modelCheck runs the provider echo check.
+	agentModels *agentmodel.Service
+	modelCheck  *modelcheck.Service
+	runNow      *RunNowQueue
+	traces      *tracedest.Service
 }
 
 // New returns a Server backed by pool.
 func New(pool *pgxpool.Pool, opts Options) *Server {
 	if opts.WatchPollInterval <= 0 {
 		opts.WatchPollInterval = DefaultWatchPollInterval
+	}
+	if opts.WatchHeartbeatInterval <= 0 {
+		opts.WatchHeartbeatInterval = DefaultWatchHeartbeatInterval
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
@@ -151,12 +183,16 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	s := &Server{
 		dm:       opts.DirectMessages,
 		notifier: opts.Notifier, urlPolicy: opts.URLPolicy,
-		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, log: opts.Logger,
+		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, log: opts.Logger,
 		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
-		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger),
+		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
+		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces,
 	}
 	if s.dm != nil {
 		s.dm.bind(s)
+	}
+	if s.runNow != nil {
+		s.runNow.bind(s)
 	}
 	return s
 }
@@ -177,6 +213,7 @@ func (s *Server) Register(server *connect.Server) {
 	providerv1alpha1connect.RegisterProviderServiceHandler(server, s)
 	mcpserverv1alpha1connect.RegisterMcpServerServiceHandler(server, s)
 	auditv1alpha1connect.RegisterAuditServiceHandler(server, s)
+	tracev1alpha1connect.RegisterTraceDestinationServiceHandler(server, traceAPI{s})
 }
 
 var (

@@ -15,6 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/estimate"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/providertype"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -33,6 +34,29 @@ type priced struct {
 	priced, estimated, flagged bool
 	estimate                   []byte
 	reqBytes, respBytes        pgtype.Int8
+	// aborted is a response cut short: charged the usage the gateway logged. reserve is what the
+	// request's max_tokens bound costs on top of that, held back from the gateway key while the
+	// provider's figure is pending (ADR 0056, amendment 2026-10-28).
+	aborted bool
+	reserve money.USD
+	// model is the served model, when Koinon knows it (its provider settles the entry).
+	model prices.Model
+	// waived: the provider refused the request and does not bill that; nothing is charged.
+	waived bool
+}
+
+// rejectedByUpstream: the provider answered with a 4xx and reported no usage, so it refused the
+// request (invalid, flagged, not authorised, rate limited).
+func (e Entry) rejectedByUpstream() bool {
+	return !e.InputKnown && !e.OutputKnown && e.Status >= 400 && e.Status < 500
+}
+
+// waivesRejected reports whether a request the provider refused is charged nothing: only when the
+// model's provider type documents that it does not bill refused requests, an explicit per-type
+// catalog flag (package providertype, issue #241). A request whose provider Koinon cannot tell (no
+// priced model, a custom or unknown type) keeps the conservative charge, whatever the status.
+func waivesRejected(m prices.Model) bool {
+	return m.ProviderType != "" && !providertype.For(m.ProviderType).BillsRejectedRequests
 }
 
 // price computes the request's cost from its usage (estimated when missing) and the price valid
@@ -62,8 +86,9 @@ func (in *Ingester) price(ctx context.Context, q *store.Queries, org pgtype.UUID
 
 	model, err := prices.Lookup(ctx, q, org, e.Model)
 	if err == nil {
+		p.model = model
 		var res prices.Resolution
-		res, err = prices.Resolve(ctx, q, org, model, e.Time)
+		res, err = in.Prices.Resolve(ctx, q, org, model, e.Time)
 		if err == nil {
 			out, perr := in.priceWith(ctx, q, org, e, p, res, gw)
 			var badPrice *prices.BadPriceError
@@ -112,7 +137,9 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		if err != nil {
 			return p, err
 		}
-		x := estimate.Input{Aborted: !e.OutputKnown, MaxTokens: e.MaxTokens, Rejected: !e.InputKnown && !e.OutputKnown && e.Status >= 400 && e.Status < 500}
+		// Unknown output is the cut signal of a completions stream; a logged proxy error covers a
+		// Messages stream, whose message_start already logged output.
+		x := estimate.Input{Aborted: !e.OutputKnown || e.Error != "", MaxTokens: e.MaxTokens, Rejected: e.rejectedByUpstream()}
 		if e.RequestBytes > 0 {
 			x.RequestBytes = e.RequestBytes
 		}
@@ -126,17 +153,54 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 			x.ReportedOutput = &e.OutputTokens
 		}
 		r := estimate.Estimate(params, x)
-		if !e.OutputKnown {
-			// A 2xx without usage: say why the request was charged at max, and flag it.
+		switch {
+		case x.Rejected && waivesRejected(p.model):
+			// The provider refused the request and is known not to bill that (ADR 0056, amendment
+			// 2026-10-29): nothing is charged and no tokens count, but the entry stays, flagged
+			// rejected_by_upstream, with the input the estimate would have charged. It is not a
+			// price problem, so the price report does not flag it.
+			meta["rejected_by_upstream"] = true
+			meta["charge_waived"] = "provider type " + p.model.ProviderType + " does not bill refused requests"
+			meta["waived_input_tokens"] = r.InputTokens
+			p.waived = true
+			r.InputTokens, r.OutputTokens = 0, 0
+		case !e.OutputKnown:
+			// A response without usage: say why it was estimated, and flag it.
 			meta["usage_missing"] = true
 			meta["rejected_by_upstream"] = x.Rejected
 			p.flagged = true
 		}
-		p.inTokens, p.outTokens, p.estimated = r.InputTokens, r.OutputTokens, true
+		p.inTokens, p.outTokens, p.estimated = r.InputTokens, r.OutputTokens, !p.waived
+		p.aborted = x.Aborted && !x.Rejected
 		meta["estimate"] = map[string]any{
 			"method": r.Method, "input_reported": r.InputReported, "output_reported": r.OutputReported,
 			"thinking_unmeasured": r.ThinkingUnmeasured, "max_output_fallback": r.MaxOutputFallback, "max_output_capped": r.MaxOutputCapped, "ratio_static": r.RatioStatic, "ratio_effective": r.RatioEffective,
 			"learned_p90_tokens_per_byte": r.LearnedP90TokensPerByte, "overhead_tokens": r.OverheadTokens,
+			"reserve_output_tokens": r.ReserveOutputTokens,
+		}
+		if p.aborted && r.ReserveOutputTokens > p.outTokens {
+			// The bound the gateway key holds back while the provider's figure is pending; never charged.
+			_, bound, err := res.Price.Cost(pricing.Split(p.inTokens, p.cacheRead, p.cacheWrite, r.ReserveOutputTokens, p.reasoning))
+			if err != nil {
+				return p, &prices.BadPriceError{Err: fmt.Errorf("price request %s: %w", e.RequestID, err)}
+			}
+			p.reserve = bound // the charge is subtracted below, once it is known
+		}
+	}
+	if e.Cut && e.InputKnown && e.OutputKnown {
+		// A streamed Anthropic-format response its run's cancel cut short: message_start logged
+		// usage that looks complete but is not. It is charged as logged, flagged usage_partial, and
+		// the max_tokens bound is held back from the key until the provider's figure or the deadline.
+		bound, fallback, capped := estimate.ReserveOutput(int64(res.Entry.MaxOutput), e.MaxTokens)
+		p.aborted, p.flagged = true, true
+		meta["usage_partial"] = true
+		meta["estimate"] = map[string]any{"method": "partial", "reserve_output_tokens": bound, "max_output_fallback": fallback, "max_output_capped": capped}
+		if bound > p.outTokens {
+			_, b, err := res.Price.Cost(pricing.Split(p.inTokens, p.cacheRead, p.cacheWrite, bound, p.reasoning))
+			if err != nil {
+				return p, &prices.BadPriceError{Err: fmt.Errorf("price request %s: %w", e.RequestID, err)}
+			}
+			p.reserve = b
 		}
 	}
 	u := pricing.Split(p.inTokens, p.cacheRead, p.cacheWrite, p.outTokens, p.reasoning)
@@ -145,6 +209,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		return p, &prices.BadPriceError{Err: fmt.Errorf("price request %s: %w", e.RequestID, err)}
 	}
 	p.cost = cost
+	p.reserve = p.reserve.SubFloor(cost)
 	// Cost truth: our cost counts. A real (not estimated) request whose cost the gateway also
 	// logged is compared with it.
 	if !p.estimated && p.gatewayCost.Valid && differs(cost, gw) {
@@ -155,7 +220,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 	if err != nil {
 		return p, err
 	}
-	if p.estimated || p.flagged || res.Fallback {
+	if p.estimated || p.flagged || res.Fallback || p.aborted || p.waived {
 		p.estimate = raw
 	}
 	return p, nil
@@ -182,10 +247,5 @@ func gatewayCost(s string) (money.USD, error) {
 	if !ok || !decimalRE.MatchString(s) {
 		return 0, fmt.Errorf("ledger: invalid gateway cost %q", s)
 	}
-	r.Mul(r, big.NewRat(money.PerUSD, 1))
-	n := new(big.Int).Quo(new(big.Int).Add(new(big.Int).Mul(r.Num(), big.NewInt(2)), r.Denom()), new(big.Int).Mul(r.Denom(), big.NewInt(2)))
-	if !n.IsInt64() {
-		return 0, money.ErrOverflow
-	}
-	return money.USD(n.Int64()), nil
+	return money.FromRat(r)
 }

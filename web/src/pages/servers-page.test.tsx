@@ -71,6 +71,7 @@ const tools = [
   create(ToolSchema, { serverId: 's-docs', name: 'legacy', tier: Tier.AUTO, present: false }),
   create(ToolSchema, { serverId: 's-docs', name: 'long_tool', description: 'Too long', tier: Tier.ASK, present: true, unavailable: 'unavailable: name too long for the gateway' }),
   create(ToolSchema, { serverId: 's-docs', name: 'sync', description: 'Sync pages', tier: Tier.AUTO, present: true }),
+  create(ToolSchema, { serverId: 's-docs', name: 'poisoned', description: 'Search…', tier: Tier.ASK, present: true, descriptionOriginalLength: 5000n, descriptionCapped: true, descriptionCleaned: true }),
   create(ToolSchema, { serverId: 's-sec', name: 'read', description: 'Read a page', tier: Tier.ASK, present: true }),
 ]
 
@@ -216,17 +217,17 @@ describe('Servers page', () => {
     expect(search.getByText(/Suggested read-only/)).toBeInTheDocument()
     expect(search.getByRole('radio', { name: 'Ask' })).toBeChecked()
     expect(calls.tiers).toHaveLength(0)
-    await userEvent.click(search.getByRole('button', { name: 'Set search to Auto' }))
+    await userEvent.click(search.getByRole('button', { name: 'Set to Auto: search' }))
     await waitFor(() => expect(calls.tiers).toEqual([expect.objectContaining({ tool: 'search', tier: Tier.AUTO })]))
   })
 
   it('acknowledges a review without changing the tier', async () => {
     const calls = setup()
     const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
-    await userEvent.click(tl.getByRole('button', { name: 'Mark edit reviewed' }))
+    await userEvent.click(tl.getByRole('button', { name: 'Mark reviewed: edit' }))
     await waitFor(() => expect(calls.acks).toEqual([expect.objectContaining({ serverId: 's-docs', tool: 'edit' })]))
     expect(calls.tiers).toHaveLength(0)
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Mark edit reviewed' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Mark reviewed: edit' })).not.toBeInTheDocument())
   })
 
   it('sets Require two approvers in the Ask tier and disables it elsewhere', async () => {
@@ -251,6 +252,14 @@ describe('Servers page', () => {
     expect(row.getByText(/unavailable: name too long for the gateway/)).toBeInTheDocument()
     expect(row.getByText(/Agents are not offered this tool/)).toBeInTheDocument()
     expect(row.getByRole('radio', { name: 'Ask' })).toBeEnabled()
+  })
+
+  it('says when Koinon sanitised a tool description', async () => {
+    setup()
+    const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
+    const row = within(tl.getByText('poisoned').closest('li')!)
+    expect(row.getByText(/hidden characters removed or lookalike tags escaped; cut to its length cap \(the server published 5000 characters\)/)).toBeInTheDocument()
+    expect(within(tl.getByText('sync').closest('li')!).queryByText(/Koinon sanitised/)).not.toBeInTheDocument()
   })
 
   it('hints that reviewing does not restore Auto', async () => {

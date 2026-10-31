@@ -12,7 +12,9 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"cbb9daa4d186d189"'
+      koinon.config: '"e641b9bcb407262c"'
+      koinon.error: proxy.error.reason
+      koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
       koinon.max_tokens: llm.params.max_tokens
@@ -20,7 +22,10 @@ frontendPolicies:
       koinon.reasoning: llm.reasoningTokens
       koinon.req_bytes: int(request.headers["content-length"])
       koinon.request: uuid()
+      koinon.response_id: coalesce(response.headers["x-generation-id"])
       koinon.status: response.code
+      koinon.stream: llm.streaming
+      koinon.upstream: default(proxy.upstreamDuration, "") != ""
 gateways:
   default:
     port: 4000
@@ -33,15 +38,16 @@ llm:
           name: authorization
           prefix: 'Bearer '
       keys:
-        - keyHash: sha256:7f57f7bd2d7abbb102c5b950304a6e5708d16b7f46638b9114667571655a2087
+        - keyHash: sha256:1890f2786d74432414afdc56d401c64d489b99294726da77ab9a8ad5ca170291
           metadata:
             name: koinon-reload-probe
             agent: ""
     authorization:
       rules:
-        - apiKey.name != "koinon-reload-probe"
+        - apiKey.name != "koinon-reload-probe" && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_") && !has(llmRequest.mcp_servers)
     transformations:
       request:
+        replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
         set:
           x-koinon-org: default(apiKey.org, "")
   models: []

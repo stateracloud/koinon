@@ -4,7 +4,7 @@
 // mode (ADR 0048, ADR 0049): Koinon renders agentgateway's whole local config
 // file, writes it into a ConfigMap and waits for agentgateway's hot reload.
 //
-// Config schema: agentgateway v1.6.0 schema/config.md (llm, mcp, frontendPolicies,
+// Config schema: agentgateway v1.7.0 schema/config.md (llm, mcp, frontendPolicies,
 // config.modelCatalog) and schema/cel.md (apiKey, mcp.tool.*), plus the working
 // spike config hack/spike/agentgateway/platform-config.yaml.
 package standalone
@@ -15,6 +15,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,7 +48,7 @@ type Options struct {
 
 // OTLPExport is an OTLP/HTTP (protobuf) logs endpoint.
 //
-// agentgateway v1.6.0 schema/config.md: frontendPolicies.accessLog.otlp takes
+// agentgateway v1.7.0 schema/config.md: frontendPolicies.accessLog.otlp takes
 // a backend reference (`host`: "host:port"), `protocol` (grpc, the default, or
 // http) and `path` (default /v1/logs). With `otlp.fields` unset, the export
 // carries the same `add` fields as the stdout log.
@@ -55,6 +57,28 @@ type OTLPExport struct {
 	HostPort string
 	// Path defaults to /v1/logs.
 	Path string
+	// TokenFile is the file, as the gateway pod sees it, with the bearer token the receiver
+	// requires (standalone mode). The gateway reads it and sends it as "Authorization: Bearer".
+	// The token never enters the rendered config, which is a world-readable ConfigMap.
+	TokenFile string
+	// TokenSecret and TokenSecretKey name the Secret and its key that hold the same token
+	// (kubernetes mode: the controller reads the Secret and hands the value to the proxy).
+	TokenSecret    string
+	TokenSecretKey string
+}
+
+// SplitHostPort returns the receiver's host and numeric port, or an error for anything that is not
+// "host:port" (a scheme, a path, a missing or non-numeric port).
+func (e OTLPExport) SplitHostPort() (string, int, error) {
+	host, portStr, err := net.SplitHostPort(e.HostPort)
+	if err != nil || host == "" {
+		return "", 0, fmt.Errorf("the OTLP receiver %q is not host:port", e.HostPort)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0, fmt.Errorf("the OTLP receiver %q has no valid port", e.HostPort)
+	}
+	return host, port, nil
 }
 
 const (
@@ -78,16 +102,27 @@ const (
 	ReloadProbeModel = "koinon/reload-probe"
 
 	// probeRule is the llm authorization rule that refuses the probe key with
-	// 403 before routing. agentgateway v1.6.0 checks budgets first, so with a
+	// 403 before routing. agentgateway v1.7.0 checks budgets first, so with a
 	// database the zero budget answers (429); without one, this rule does.
 	probeRule = `apiKey.name != "` + gateway.ReloadProbeKeyName + `"`
 
 	// placeholderTarget is added next to a lone org target (see build).
-	placeholderTarget = "koinon-placeholder"
+	placeholderTarget = "koinon.placeholder"
 
 	header = "# Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.\n" +
 		"# Keys appear only as hashes; key material lives in Kubernetes Secrets.\n"
 )
+
+// admitRule is probeRule, narrowed by the body fields no format admits (gateway.RejectExpr) and by a
+// gateway key in the URL or in a header but authorization (gateway.NoKeyInURLExpr,
+// gateway.NoKeyInHeadersExpr).
+func admitRule() string {
+	rule := probeRule + " && " + gateway.NoKeyInURLExpr() + " && " + gateway.NoKeyInHeadersExpr()
+	if e := gateway.RejectExpr(); e != "" {
+		rule += " && " + e
+	}
+	return rule
+}
 
 // Render returns agentgateway's config file for s and its revision. It is a
 // pure function: equal inputs give byte-identical output.
@@ -99,6 +134,9 @@ func Render(s gateway.State, o Options) ([]byte, gateway.Revision, error) {
 		return nil, "", errors.New("standalone: limits need Options.DatabaseURL (agentgateway keeps budgets in a database)")
 	}
 	doc := build(s, o)
+	if err := checkDocument(doc); err != nil {
+		return nil, "", fmt.Errorf("standalone: rendered config would be rejected: %w", err)
+	}
 	body, err := marshal(doc)
 	if err != nil {
 		return nil, "", err
@@ -150,7 +188,7 @@ func marshal(doc document) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// The types below mirror the subset of agentgateway's v1.6 LocalConfig that
+// The types below mirror the subset of agentgateway's v1.7 LocalConfig that
 // Koinon writes. Field order is the output order.
 
 type document struct {
@@ -218,9 +256,20 @@ type accessLog struct {
 }
 
 type otlpLog struct {
-	Host     string `yaml:"host"`
-	Protocol string `yaml:"protocol"`
-	Path     string `yaml:"path,omitempty"`
+	Host     string        `yaml:"host"`
+	Protocol string        `yaml:"protocol"`
+	Path     string        `yaml:"path,omitempty"`
+	Policies *otlpPolicies `yaml:"policies,omitempty"`
+}
+
+// otlpPolicies are the backend policies of the OTLP export: the bearer token, read from a file
+// (backendAuth.key places it in "Authorization: Bearer <value>" by default).
+type otlpPolicies struct {
+	BackendAuth backendKeyAuth `yaml:"backendAuth"`
+}
+
+type backendKeyAuth struct {
+	Key backendKey `yaml:"key"`
 }
 
 type listener struct {
@@ -246,7 +295,7 @@ type apiKey struct {
 	KeyHash  string      `yaml:"keyHash"`
 	Metadata keyMetadata `yaml:"metadata"`
 	// AllowedModels lists the plain model names the key may request (llm only). A pointer so
-	// an empty list is rendered: it denies every model. agentgateway v1.6.0 schema/config.md
+	// an empty list is rendered: it denies every model. agentgateway v1.7.0 schema/config.md
 	// llm.policies.apiKey.keys[].allowedModels.
 	AllowedModels *[]string `yaml:"allowedModels,omitempty"`
 	Budgets       []budget  `yaml:"budgets,omitempty"`
@@ -262,13 +311,49 @@ type keyMetadata struct {
 type budget struct {
 	Name             string      `yaml:"name"`
 	Limit            budgetLimit `yaml:"limit"`
-	Window           window      `yaml:"window"`
+	Window           *window     `yaml:"window,omitempty"`
 	OnBudgetExceeded string      `yaml:"onBudgetExceeded"`
 }
 
 type budgetLimit struct {
 	Unit   string  `yaml:"unit"`
-	Amount float64 `yaml:"amount"`
+	Amount decimal `yaml:"amount"`
+}
+
+// decimal is a number (a whole one is an integer, as the Tokens budget takes) written exactly as it is held, in fixed-point notation: a float would write
+// its shortest round-trip form, which can have an exponent ("5e-05") or more digits than
+// agentgateway accepts (issue #245).
+type decimal string
+
+// MarshalYAML implements yaml.Marshaler.
+func (d decimal) MarshalYAML() (any, error) {
+	tag := "!!int"
+	if strings.Contains(string(d), ".") {
+		tag = "!!float"
+	}
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: string(d)}, nil
+}
+
+// usdAmountRE is what agentgateway v1.7.0 accepts for a USD budget: fixed-point, at most
+// gateway.BudgetFractionDigits fraction digits, no sign, no exponent.
+var usdAmountRE = regexp.MustCompile(`^[0-9]+\.[0-9]{1,` + strconv.Itoa(gateway.BudgetFractionDigits) + `}$`)
+
+// checkDocument applies the checks agentgateway makes when it loads the file that Koinon can make
+// itself, so a file agentgateway would refuse as a whole is never delivered.
+func checkDocument(doc document) error {
+	if doc.LLM == nil {
+		return nil
+	}
+	var errs []error
+	for _, k := range doc.LLM.Policies.APIKey.Keys {
+		for _, b := range k.Budgets {
+			if b.Limit.Unit == string(gateway.USD) && !usdAmountRE.MatchString(string(b.Limit.Amount)) {
+				errs = append(errs, fmt.Errorf("key %q budget %q: USD amount %q is not fixed-point with at most %d fraction digits",
+					k.Metadata.Name, b.Name, b.Limit.Amount, gateway.BudgetFractionDigits))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 type window struct {
@@ -303,18 +388,18 @@ type llmModel struct {
 	Provider  llmProvider    `yaml:"provider"`
 	Params    llmParams      `yaml:"params"`
 	Overrides map[string]any `yaml:"overrides,omitempty"`
+	// RequestHeaders sets headers on the upstream request, replacing the client's
+	// (schema/config.md llm.models[].requestHeaders).
+	RequestHeaders *headerSet `yaml:"requestHeaders,omitempty"`
 	// Transformation sets request body fields from CEL expressions, replacing client values
 	// (schema/config.md llm.models[].transformation).
 	Transformation map[string]string `yaml:"transformation,omitempty"`
 }
 
-// streamUsageExpr makes every streamed chat completion ask the upstream for usage. agentgateway
-// v1.6.0 adds stream_options.include_usage itself only when the client sent no stream_options at
-// all (llm/mod.rs, process_completions_request), so a client sending {"include_usage": false} or
-// an empty object would otherwise get its streamed requests charged without usage. For a request
-// that is not streamed the expression is null, which OpenAI-compatible upstreams accept and
-// which drops the field (stream_options is an error without stream).
-const streamUsageExpr = `has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null`
+type headerSet struct {
+	Set    map[string]string `yaml:"set,omitempty"`
+	Remove []string          `yaml:"remove,omitempty"`
+}
 
 type modelMatch struct {
 	Headers []headerMatch `yaml:"headers"`
@@ -363,7 +448,10 @@ type mcpSection struct {
 }
 
 type mcpPolicies struct {
-	APIKey           apiKeyPolicy     `yaml:"apiKey"`
+	APIKey apiKeyPolicy `yaml:"apiKey"`
+	// Authorization refuses (403) a request that carries a gateway key in a header but authorization
+	// (gateway.NoKeyInHeadersExpr). It runs after apiKey and before Transformations.
+	Authorization    authorization    `yaml:"authorization"`
 	MCPAuthorization mcpAuthorization `yaml:"mcpAuthorization"`
 	Transformations  transformations  `yaml:"transformations"`
 }
@@ -373,6 +461,9 @@ type transformations struct {
 }
 
 type headerTransform struct {
+	// Replace is a CEL expression for the whole header set, evaluated before Set and Remove: the
+	// request keeps exactly the headers it names (gateway.AllowHeadersExpr), whatever the client sent.
+	Replace string `yaml:"replace,omitempty"`
 	// Set replaces a header, so a client cannot supply its own value.
 	Set map[string]string `yaml:"set"`
 	// Remove drops headers a client sent, before any target policy runs: a client-supplied copy of
@@ -387,7 +478,7 @@ type mcpAuthorization struct {
 type mcpTarget struct {
 	Name string `yaml:"name"`
 	// Condition hides the target from keys it returns false for: the target is not contacted for
-	// them (agentgateway v1.6.0 mcp/README.md, target conditions).
+	// them (agentgateway v1.7.0 mcp/README.md, target conditions).
 	Condition string          `yaml:"condition,omitempty"`
 	MCP       *mcpEndpoint    `yaml:"mcp,omitempty"`
 	SSE       *mcpEndpoint    `yaml:"sse,omitempty"`
@@ -403,7 +494,7 @@ type targetPolicies struct {
 }
 
 // backendAuth injects a static credential read from a file when the config loads (agentgateway
-// v1.6.0 http/auth BackendAuthKind key; the key is a file source like llm params.apiKey).
+// v1.7.0 http/auth BackendAuthKind key; the key is a file source like llm params.apiKey).
 type backendAuth struct {
 	Credentials []backendCredential `yaml:"credentials"`
 }
@@ -443,10 +534,17 @@ func build(s gateway.State, o Options) document {
 			gateway.LogFieldCacheRead:    `llm.cachedInputTokens`,
 			gateway.LogFieldCacheWrite:   `llm.cacheCreationInputTokens`,
 			gateway.LogFieldReasoning:    `llm.reasoningTokens`,
+			gateway.LogFieldFormat:       gateway.FormatLogExpr(),
+			gateway.LogFieldStream:       `llm.streaming`,
+			gateway.LogFieldError:        `proxy.error.reason`,
 			gateway.LogFieldStatus:       `response.code`,
 			gateway.LogFieldMaxTokens:    `llm.params.max_tokens`,
 			gateway.LogFieldRequestBytes: `int(request.headers["content-length"])`,
-			MarkerField:                  `""`,
+			// The provider's response ID, to settle a stream cut short (ADR 0056, amendment 2026-10-28).
+			gateway.LogFieldResponseID: gateway.ResponseIDCEL,
+			// Who answered (ADR 0056, amendment 2026-10-29). No field reads a response body.
+			gateway.LogFieldUpstream: gateway.UpstreamCEL,
+			MarkerField:              `""`,
 		}}},
 		Gateways: map[string]listener{"default": {Port: o.Port}},
 	}
@@ -454,6 +552,9 @@ func build(s gateway.State, o Options) document {
 		doc.FrontendPolicies.AccessLog.OTLP = &otlpLog{Host: o.AccessLogOTLP.HostPort, Protocol: "http", Path: o.AccessLogOTLP.Path}
 		if doc.FrontendPolicies.AccessLog.OTLP.Path == "/v1/logs" {
 			doc.FrontendPolicies.AccessLog.OTLP.Path = ""
+		}
+		if o.AccessLogOTLP.TokenFile != "" {
+			doc.FrontendPolicies.AccessLog.OTLP.Policies = &otlpPolicies{BackendAuth: backendKeyAuth{Key: backendKey{File: o.AccessLogOTLP.TokenFile}}}
 		}
 	}
 	if o.DatabaseURL != "" {
@@ -480,11 +581,13 @@ func build(s gateway.State, o Options) document {
 	// the reload probe key (stamp fills in its hash).
 	doc.LLM = &llmSection{
 		Policies: llmPolicies{
-			APIKey:        keyPolicy(keys, s.Limits, allowed),
-			Authorization: authorization{Rules: []string{probeRule}},
-			Transformations: transformations{Request: headerTransform{Set: map[string]string{
-				gateway.OrgHeader: `default(apiKey.org, "")`,
-			}}},
+			APIKey:        keyPolicy(keys, s, allowed),
+			Authorization: authorization{Rules: []string{admitRule()}},
+			// Only the allowlisted client headers go on (#262); the org header is set after.
+			Transformations: transformations{Request: headerTransform{
+				Replace: gateway.AllowHeadersExpr(gateway.ForwardedHeaders),
+				Set:     map[string]string{gateway.OrgHeader: `default(apiKey.org, "")`},
+			}},
 		},
 		Models: []llmModel{},
 	}
@@ -503,16 +606,32 @@ func build(s gateway.State, o Options) document {
 				continue
 			}
 			override := p.Org + "." + p.Type
+			// Validate (Render) accepted the format, so it has a rendering.
+			rd, _ := gateway.RenderingOf(m)
 			lm := llmModel{
 				ID:      gateway.ModelRef(p.Org, m.Name),
 				Name:    m.Name,
 				Matches: []modelMatch{{Headers: []headerMatch{{Name: gateway.OrgHeader, Value: exactValue{Exact: p.Org}}}}},
 				Provider: llmProvider{Custom: customProvider{
 					ProviderOverride: override,
-					Formats:          []format{{Type: "completions"}},
+					Formats:          []format{{Type: rd.Standalone}},
 				}},
-				Params:         llmParams{BaseURL: p.BaseURL},
-				Transformation: map[string]string{"stream_options": streamUsageExpr},
+				Params: llmParams{BaseURL: p.BaseURL},
+			}
+			if hs, rm := rd.RequestHeaders(p, m), rd.RemoveHeaders(p, m); len(hs) > 0 || len(rm) > 0 {
+				lm.RequestHeaders = &headerSet{Remove: rm}
+				if len(hs) > 0 {
+					lm.RequestHeaders.Set = map[string]string{}
+				}
+				for _, h := range hs {
+					lm.RequestHeaders.Set[h.Name] = h.Value
+				}
+			}
+			for _, f := range rd.Body {
+				if lm.Transformation == nil {
+					lm.Transformation = map[string]string{}
+				}
+				lm.Transformation[f.Field] = f.Expression
 			}
 			if p.APIKeyFile != "" {
 				lm.Params.APIKey = &fileSource{File: p.APIKeyFile}
@@ -550,13 +669,15 @@ func build(s gateway.State, o Options) document {
 			FailureMode: "failOpen",
 			PrefixMode:  "always",
 			Policies: mcpPolicies{
-				APIKey:           keyPolicy(keys, nil, nil),
+				APIKey:           keyPolicy(keys, gateway.State{}, nil),
+				Authorization:    authorization{Rules: []string{gateway.NoKeyInHeadersExpr()}},
 				MCPAuthorization: mcpAuthorization{Rules: toolRules(s.Tools)},
 				// Targets learn which agent calls from this header (gateway.AgentHeader);
 				// set overwrites whatever the client sent.
 				Transformations: transformations{Request: headerTransform{
-					Set:    map[string]string{strings.ToLower(gateway.AgentHeader): "apiKey.agent"},
-					Remove: credentialHeaders(s.MCP),
+					Replace: gateway.AllowHeadersExpr(gateway.MCPForwardedHeaders),
+					Set:     map[string]string{strings.ToLower(gateway.AgentHeader): "apiKey.agent"},
+					Remove:  credentialHeaders(s.MCP),
 				}},
 			},
 		}
@@ -588,8 +709,11 @@ func build(s gateway.State, o Options) document {
 	return doc
 }
 
+// tokensUnit is agentgateway's token budget unit, used by the reload probe's zero budget only.
+const tokensUnit = "Tokens"
+
 // probeKey is the reload probe's llm key entry, without its hash.
-// agentgateway v1.6.0 refuses a config with budgets but no config.database,
+// agentgateway v1.7.0 refuses a config with budgets but no config.database,
 // so the zero budget (429 before routing) is rendered only with a database;
 // the authorization rule (403) covers both cases.
 func probeKey(withBudget bool) apiKey {
@@ -597,15 +721,16 @@ func probeKey(withBudget bool) apiKey {
 	if withBudget {
 		k.Budgets = []budget{{
 			Name:             gateway.ReloadProbeKeyName,
-			Limit:            budgetLimit{Unit: string(gateway.Tokens), Amount: 0},
-			Window:           window{Rolling: "24h"},
+			Limit:            budgetLimit{Unit: tokensUnit, Amount: "0"},
+			Window:           &window{Rolling: "24h"},
 			OnBudgetExceeded: "Block",
 		}}
 	}
 	return k
 }
 
-func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit, allowed map[string][]string) apiKeyPolicy {
+func keyPolicy(keys []gateway.Key, s gateway.State, allowed map[string][]string) apiKeyPolicy {
+	limits := s.Limits
 	p := apiKeyPolicy{
 		Mode:     "strict",
 		Location: keyLocation{Header: headerLocation{Name: "authorization", Prefix: "Bearer "}},
@@ -615,11 +740,9 @@ func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit, al
 		ak := apiKey{KeyHash: k.Hash, Metadata: keyMetadata{Name: k.ID, Agent: k.Agent.String(), Org: k.Agent.Org}}
 		if allowed != nil {
 			// An org without served models gets the empty list: it can request nothing. Koinon's own
-			// MCP keys (the prober's and the executor's) request no model.
-			names := append([]string{}, allowed[k.Agent.Org]...)
-			if gateway.IsInternalAgent(k.Agent) {
-				names = []string{}
-			}
+			// MCP keys (the prober's and the executor's) request no model; a system key requests the
+			// models State.Models names, and a key with an entry there only those.
+			names := s.AllowedModels(k.Agent, allowed[k.Agent.Org])
 			ak.AllowedModels = &names
 		}
 		if l, ok := limits[k.Agent]; ok {
@@ -631,10 +754,14 @@ func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit, al
 			}
 			ak.Budgets = []budget{{
 				Name:             name,
-				Limit:            budgetLimit{Unit: string(l.Unit), Amount: l.Amount},
-				Window:           window{Rolling: formatWindow(l.Window)},
+				Limit:            budgetLimit{Unit: string(l.Unit), Amount: decimal(l.Amount.Fixed(gateway.BudgetFractionDigits))},
 				OnBudgetExceeded: "Block",
 			}}
+			// No window: the counter accumulates for its lifetime (agentgateway v1.7), so a
+			// generation, not the gateway's clock, decides when spend starts over.
+			if l.Window > 0 {
+				ak.Budgets[0].Window = &window{Rolling: formatWindow(l.Window)}
+			}
 		}
 		p.Keys = append(p.Keys, ak)
 	}

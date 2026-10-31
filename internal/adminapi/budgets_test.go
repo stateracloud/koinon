@@ -8,10 +8,23 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 var _ = Describe("prices and budgets", func() {
+	It("warns about a cache_read price whose provider format has no cache mode (ADR 0068)", func(ctx SpecContext) {
+		e := newEnv(ctx)
+		body := map[string]any{
+			"name": "gemini", "provider": "openrouter", "match": map[string]any{"glob": "google/*"},
+			"prices": map[string]any{"input": "1", "output": "2", "cacheRead": "0.1"}, "maxOutput": 4096,
+		}
+		st, raw := e.call(ctx, e.token, http.MethodPost, "/prices", body)
+		Expect(st).To(Equal(http.StatusCreated), string(raw))
+		Expect(decode[map[string]any](raw)["warnings"]).To(ConsistOf(ContainSubstring("without caching")))
+	})
+
 	It("versions org prices, shows the default list and its changes", func(ctx SpecContext) {
 		e := newEnv(ctx)
 		body := map[string]any{
@@ -23,6 +36,7 @@ var _ = Describe("prices and budgets", func() {
 		Expect(st).To(Equal(http.StatusCreated), string(raw))
 		first := decode[map[string]any](raw)
 		Expect(first["name"]).To(Equal("contract"))
+		Expect(first).NotTo(HaveKey("warnings"), "deepseek caches by itself")
 
 		// A bad price is refused with a reason.
 		bad := map[string]any{"name": "x", "provider": "openrouter", "match": map[string]any{"glob": "a", "regex": "b"}, "prices": map[string]any{"input": "1", "output": "1"}}
@@ -48,7 +62,7 @@ var _ = Describe("prices and budgets", func() {
 		st, _ = e.call(ctx, e.token, http.MethodDelete, "/prices/nothing", nil)
 		Expect(st).To(Equal(http.StatusNotFound))
 
-		Expect(prices.New(pool, nil).SyncDefaults(ctx)).To(Succeed())
+		Expect(prices.New(pool, nil, pricing.Embedded()).SyncDefaults(ctx)).To(Succeed())
 		st, raw = e.call(ctx, e.token, http.MethodGet, "/prices/defaults", nil)
 		Expect(st).To(Equal(http.StatusOK))
 		defs := decode[struct {
@@ -84,6 +98,39 @@ var _ = Describe("prices and budgets", func() {
 
 		st, raw = e.call(ctx, e.token, http.MethodGet, "/spend", nil)
 		Expect(st).To(Equal(http.StatusOK), string(raw))
+
+		By("the spend report puts the gateway's cost and the estimated output next to Koinon's cost")
+		agent, err := store.New(pool).CreateAgent(ctx, store.CreateAgentParams{OrgID: e.org, DisplayName: "a", Flavor: store.AgentFlavorOpencode, CreatedBy: e.user})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model,
+			input_tokens, output_tokens, cost_usd, gateway_cost_usd, priced, estimated, cost_flagged, occurred_at) VALUES
+			($1, $2, 'r1', 'k', 'm', 100, 10, 0.50, 0.50, true, false, false, now()),
+			($1, $2, 'r2', 'k', 'm', 100, 10, 0.30, 0.20, true, false, true, now()),
+			($1, $2, 'r3', 'k', 'm', 100, 32000, 0.08, NULL, true, true, true, now())`, e.org, agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+		st, raw = e.call(ctx, e.token, http.MethodGet, "/spend", nil)
+		Expect(st).To(Equal(http.StatusOK), string(raw))
+		lines := decode[struct{ Models []map[string]any }](raw).Models
+		Expect(lines).To(HaveLen(1))
+		Expect(lines[0]).To(HaveKeyWithValue("reportedUsd", "0.80"))
+		Expect(lines[0]).To(HaveKeyWithValue("estimatedUsd", "0.08"))
+		Expect(lines[0]).To(HaveKeyWithValue("estimatedOutputTokens", BeNumerically("==", 32000)))
+		Expect(lines[0]).To(HaveKeyWithValue("gatewayRequests", BeNumerically("==", 2)))
+		Expect(lines[0]).To(HaveKeyWithValue("gatewayUsd", "0.70"))
+		Expect(lines[0]).To(HaveKeyWithValue("gatewayComparedUsd", "0.80"))
+		Expect(lines[0]).To(HaveKeyWithValue("flaggedRequests", BeNumerically("==", 2)))
+		Expect(lines[0]).To(HaveKeyWithValue("provisionalRequests", BeNumerically("==", 0)))
+		Expect(lines[0]).To(HaveKeyWithValue("reservedUsd", "0.00"))
+
+		By("system checks are one row of their own, and are not in the models")
+		Expect(decode[map[string]any](raw)["systemChecks"]).To(Equal(map[string]any{"requests": float64(0), "costUsd": "0.00"}))
+		_, err = pool.Exec(ctx, `INSERT INTO spend_entries (org_id, principal, request_id, key_id, model, input_tokens, output_tokens, cost_usd, priced, occurred_at)
+			VALUES ($1, 'system', 'sys-1', 'k', 'm', 100, 10, 0.02, true, now())`, e.org)
+		Expect(err).NotTo(HaveOccurred())
+		st, raw = e.call(ctx, e.token, http.MethodGet, "/spend", nil)
+		Expect(st).To(Equal(http.StatusOK), string(raw))
+		Expect(decode[map[string]any](raw)["systemChecks"]).To(Equal(map[string]any{"requests": float64(1), "costUsd": "0.02"}))
+		Expect(decode[struct{ Models []map[string]any }](raw).Models).To(HaveLen(1))
 
 		var n int
 		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'budget.org_cap.set'`, e.org).Scan(&n)).To(Succeed())

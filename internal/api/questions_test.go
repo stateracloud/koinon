@@ -8,6 +8,7 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -27,7 +28,7 @@ func (e *env) openQuestion(ctx context.Context, f orgFixture) store.Question {
 		var err error
 		row, _, err = questions.Create(ctx, qq, questions.Ask{
 			Org: uuid(f.org), Task: uuid(f.ticket.GetId()), Run: uuid(f.run.GetId()), Agent: uuid(f.agent.GetId()),
-			To: uuid(f.owner.userID), Question: "Post the reply?", Draft: "Fixed in 1.2.",
+			Target: questions.Target{Kind: store.NotifyTargetKindUser, User: uuid(f.owner.userID)}, Recipients: []pgtype.UUID{uuid(f.owner.userID)}, Question: "Post the reply?", Draft: "Fixed in 1.2.",
 			Choices: []string{"post", "do not post"}, Default: "do not post", ExpiresAt: time.Now().Add(time.Hour),
 		})
 		if err != nil {

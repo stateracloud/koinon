@@ -49,6 +49,9 @@ const (
 	KindDismissed = "question.dismissed"
 	KindExpired   = "question.expired"
 	KindCanceled  = "question.canceled"
+	// KindRetargeted: nobody a question was addressed to can answer any more, so the org's admins
+	// were added as recipients (RetargetOrphaned).
+	KindRetargeted = "question.retargeted"
 )
 
 // Limits on a question's text.
@@ -72,8 +75,8 @@ const (
 var (
 	// ErrNotOpen: the question was already answered, dismissed or expired, or is not yet visible.
 	ErrNotOpen = errors.New("question is not open")
-	// ErrNotAskedTo: only the person a question is addressed to may resolve it.
-	ErrNotAskedTo = errors.New("this question is addressed to someone else")
+	// ErrNotAskedTo: only a recipient of a question may resolve it.
+	ErrNotAskedTo = errors.New("this question is not addressed to you")
 	// ErrNotMember: the person named is not a member of the org.
 	ErrNotMember = errors.New("no such member in this org")
 	// ErrInvalid wraps a refusal of the question's or the answer's content.
@@ -84,13 +87,75 @@ func invalid(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, args...))
 }
 
+// Target is who a question is addressed to (ADR 0065 amendment 2026-10-28).
+type Target struct {
+	Kind    store.NotifyTargetKind
+	User    pgtype.UUID   // kind user
+	Role    store.OrgRole // kind role
+	Channel string        // kind channel (v0.2)
+}
+
+// DefaultTarget is the org's default target: today the org's admins (role admin or higher).
+var DefaultTarget = Target{Kind: store.NotifyTargetKindRole, Role: store.OrgRoleAdmin}
+
+// Key identifies the target in the call hash. A user target hashes as before (its UUID string), so
+// a question asked before 00036 and asked again after it is still the same question.
+func (t Target) Key() string {
+	switch t.Kind {
+	case store.NotifyTargetKindRole:
+		return "role:" + string(t.Role)
+	case store.NotifyTargetKindChannel:
+		return "channel:" + t.Channel
+	}
+	return t.User.String()
+}
+
+// Label is the target in plain words; name is the user's display name for kind user.
+func Label(t Target, name string) string {
+	switch t.Kind {
+	case store.NotifyTargetKindRole:
+		switch t.Role {
+		case store.OrgRoleOwner:
+			return "the org's owners"
+		case store.OrgRoleMember:
+			return "the org's members"
+		}
+		return "the org's admins"
+	case store.NotifyTargetKindChannel:
+		return "a chat channel"
+	}
+	return name
+}
+
+// Recipients resolves a target to the users who can answer: the person (when still a member with
+// role member or higher), or everyone with the role or higher. A channel resolves to the org's admins
+// (the inbox item is always created; v0.2 adds the channel message).
+func Recipients(ctx context.Context, q *store.Queries, org pgtype.UUID, t Target) ([]pgtype.UUID, error) {
+	switch t.Kind {
+	case store.NotifyTargetKindUser:
+		ok, err := q.IsOrgMember(ctx, store.IsOrgMemberParams{OrgID: org, UserID: t.User})
+		if err != nil || !ok {
+			return nil, err
+		}
+		return []pgtype.UUID{t.User}, nil
+	case store.NotifyTargetKindRole:
+		return q.ListOrgMemberIDsWithRole(ctx, store.ListOrgMemberIDsWithRoleParams{OrgID: org, MinRole: t.Role})
+	case store.NotifyTargetKindChannel:
+		return q.ListOrgMemberIDsWithRole(ctx, store.ListOrgMemberIDsWithRoleParams{OrgID: org, MinRole: store.OrgRoleAdmin})
+	}
+	return nil, invalid("unknown target kind %q", t.Kind)
+}
+
 // Ask is a question as the agent made it.
 type Ask struct {
 	Org, Task, Run, Agent pgtype.UUID
-	To                    pgtype.UUID
-	Question              string
-	Choices               []string
-	Draft                 string
+	// Target is who the question is addressed to, and Recipients the users it resolved to (see
+	// Recipients). It is asked of each of them; the first answer wins.
+	Target     Target
+	Recipients []pgtype.UUID
+	Question   string
+	Choices    []string
+	Draft      string
 	// Default is the safe default: the answer used when the question is dismissed or expires.
 	Default string
 	// ExpiresAt defaults to DefaultTTL from now.
@@ -105,6 +170,8 @@ func (a *Ask) Validate() error {
 	a.Question = strings.TrimSpace(a.Question)
 	a.Default = strings.TrimSpace(a.Default)
 	switch {
+	case len(a.Recipients) == 0:
+		return invalid("nobody in this org can answer it")
 	case a.Question == "":
 		return invalid("question is required")
 	case len(a.Question) > MaxQuestionBytes || !utf8.ValidString(a.Question):
@@ -141,7 +208,7 @@ func (a *Ask) Validate() error {
 
 // callHash identifies the call: the same question to the same person in one run is one question.
 func (a Ask) callHash() string {
-	b, _ := json.Marshal([]any{a.To.String(), a.Question, a.Choices, a.Draft, a.Default})
+	b, _ := json.Marshal([]any{a.Target.Key(), a.Question, a.Choices, a.Draft, a.Default})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
@@ -153,29 +220,45 @@ func Create(ctx context.Context, q *store.Queries, a Ask) (store.Question, bool,
 	if err := a.Validate(); err != nil {
 		return store.Question{}, false, err
 	}
-	member, err := q.IsOrgMember(ctx, store.IsOrgMemberParams{OrgID: a.Org, UserID: a.To})
-	if err != nil {
-		return store.Question{}, false, err
-	}
-	if !member {
-		return store.Question{}, false, ErrNotMember
+	for _, u := range a.Recipients {
+		member, err := q.IsOrgMember(ctx, store.IsOrgMemberParams{OrgID: a.Org, UserID: u})
+		if err != nil {
+			return store.Question{}, false, err
+		}
+		if !member {
+			return store.Question{}, false, ErrNotMember
+		}
 	}
 	choices, _ := json.Marshal(append([]string{}, a.Choices...))
 	if a.ExpiresAt.IsZero() {
 		a.ExpiresAt = time.Now().Add(DefaultTTL)
 	}
-	row, err := q.CreateQuestion(ctx, store.CreateQuestionParams{
-		OrgID: a.Org, TaskID: a.Task, RunID: a.Run, AgentID: a.Agent, AskedTo: a.To,
+	params := store.CreateQuestionParams{
+		OrgID: a.Org, TaskID: a.Task, RunID: a.Run, AgentID: a.Agent, TargetKind: a.Target.Kind,
 		Question: a.Question, Choices: choices, Draft: pgtype.Text{String: a.Draft, Valid: a.Draft != ""},
 		DefaultAnswer: a.Default, CallSha256: a.callHash(),
 		ExpiresAt: pgtype.Timestamptz{Time: a.ExpiresAt, Valid: true},
 		RemindAt:  pgtype.Timestamptz{Time: a.RemindAt, Valid: !a.RemindAt.IsZero()},
-	})
+	}
+	switch a.Target.Kind {
+	case store.NotifyTargetKindUser:
+		// asked_to is deprecated (00036): written for a user target, NULL otherwise, never read.
+		params.AskedTo, params.TargetUserID = a.Target.User, a.Target.User
+	case store.NotifyTargetKindRole:
+		params.TargetRole = store.NullOrgRole{OrgRole: a.Target.Role, Valid: true}
+	}
+	row, err := q.CreateQuestion(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {
 		row, err = q.GetQuestionByCall(ctx, store.GetQuestionByCallParams{OrgID: a.Org, RunID: a.Run, CallSha256: a.callHash()})
 		return row, false, err
 	}
-	return row, err == nil, err
+	if err != nil {
+		return row, false, err
+	}
+	if err := q.AddQuestionRecipients(ctx, store.AddQuestionRecipientsParams{OrgID: a.Org, QuestionID: row.ID, UserIds: a.Recipients}); err != nil {
+		return row, false, err
+	}
+	return row, true, nil
 }
 
 // ChoicesOf decodes a question's choices.
@@ -198,13 +281,41 @@ func OpenForRun(ctx context.Context, q *store.Queries, org, run, task pgtype.UUI
 	if err != nil {
 		return nil, err
 	}
+	if len(opened) > 0 {
+		ids := make([]pgtype.UUID, 0, len(opened))
+		for _, row := range opened {
+			ids = append(ids, row.ID)
+		}
+		// The questions became visible: their recipients start waiting now.
+		if err := q.StartQuestionRecipientsWaiting(ctx, store.StartQuestionRecipientsWaitingParams{OrgID: org, QuestionIds: ids}); err != nil {
+			return nil, err
+		}
+	}
 	for _, row := range opened {
+		recipients, err := q.ListActiveQuestionRecipientIDs(ctx, store.ListActiveQuestionRecipientIDsParams{OrgID: org, QuestionID: row.ID})
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]string, 0, len(recipients))
+		for _, u := range recipients {
+			ids = append(ids, u.String())
+		}
+		target := TargetOf(row)
+		name := ""
+		if target.Kind == store.NotifyTargetKindUser {
+			if name, err = q.GetUserDisplayName(ctx, target.User); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return nil, err
+			}
+		}
 		if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 			OrgID: org, TaskID: task, RunID: run, Kind: KindAsked, ActorKind: store.TaskActorKindAgent,
 			ActorAgentID: row.AgentID,
 			Payload: mustJSON(map[string]any{
-				"question_id": row.ID.String(), "to": row.AskedTo.String(), "question": row.Question,
-				"choices": ChoicesOf(row), "has_draft": row.Draft.Valid, "default": row.DefaultAnswer,
+				"question_id": row.ID.String(), "question": row.Question,
+				"target":     map[string]any{"kind": string(target.Kind), "user": target.User.String(), "role": string(target.Role)},
+				"to_label":   Label(target, name),
+				"recipients": ids,
+				"choices":    ChoicesOf(row), "has_draft": row.Draft.Valid, "default": row.DefaultAnswer,
 				"expires_at": row.ExpiresAt.Time,
 			}),
 		}); err != nil {
@@ -212,6 +323,18 @@ func OpenForRun(ctx context.Context, q *store.Queries, org, run, task pgtype.UUI
 		}
 	}
 	return opened, nil
+}
+
+// TargetOf is the target a question row was addressed to.
+func TargetOf(row store.Question) Target {
+	t := Target{Kind: row.TargetKind, User: row.TargetUserID}
+	if row.TargetRole.Valid {
+		t.Role = row.TargetRole.OrgRole
+	}
+	if row.TargetChannelID.Valid {
+		t.Channel = row.TargetChannelID.String()
+	}
+	return t
 }
 
 // Answer is a person's answer.
@@ -276,8 +399,21 @@ func resolve(ctx context.Context, q *store.Queries, org, id pgtype.UUID, by pgty
 	if cur.State != store.QuestionStateOpen {
 		return cur, ErrNotOpen
 	}
-	if by.Valid && by != cur.AskedTo {
-		return cur, ErrNotAskedTo
+	// Only a recipient who can still answer may resolve it. The first answer wins: the run's lock
+	// and then the question's lock order two answers, and the second finds the question no longer
+	// open (ErrNotOpen).
+	if by.Valid {
+		recipient, err := q.IsActiveQuestionRecipient(ctx, store.IsActiveQuestionRecipientParams{OrgID: org, QuestionID: id, UserID: by})
+		if err != nil {
+			return cur, err
+		}
+		member, err := q.IsOrgMember(ctx, store.IsOrgMemberParams{OrgID: org, UserID: by})
+		if err != nil {
+			return cur, err
+		}
+		if !recipient || !member {
+			return cur, ErrNotAskedTo
+		}
 	}
 	ans, err := check(cur)
 	if err != nil {
@@ -304,19 +440,29 @@ func resolve(ctx context.Context, q *store.Queries, org, id pgtype.UUID, by pgty
 			"default_applied": ans.Kind == store.QuestionAnswerKindDefault,
 		}),
 	}
+	after := map[string]any{
+		"state": string(row.State), "answerKind": string(ans.Kind), "runId": row.RunID.String(),
+		"taskId": row.TaskID.String(), "agentId": row.AgentID.String(), "targetKind": string(row.TargetKind),
+	}
 	if by.Valid {
 		actor = audit.User(by)
 		ev.ActorKind, ev.ActorUserID = store.TaskActorKindUser, by
+		name, err := q.GetUserDisplayName(ctx, by)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return cur, err
+		}
+		payload := map[string]any{
+			"question_id": row.ID.String(), "answer_kind": string(ans.Kind), "answer": ans.Text,
+			"default_applied": ans.Kind == store.QuestionAnswerKindDefault, "answered_by_name": name,
+		}
+		ev.Payload = mustJSON(payload)
 	}
 	if _, err := q.AppendTaskEvent(ctx, ev); err != nil {
 		return cur, err
 	}
 	if err := audit.RecordErr(ctx, q, audit.Event{
 		Org: org, Actor: actor, Action: action, TargetKind: "question", TargetID: row.ID.String(),
-		After: map[string]any{
-			"state": string(row.State), "answerKind": string(ans.Kind), "runId": row.RunID.String(),
-			"taskId": row.TaskID.String(), "agentId": row.AgentID.String(),
-		},
+		After: after,
 	}); err != nil {
 		return cur, err
 	}
@@ -324,8 +470,8 @@ func resolve(ctx context.Context, q *store.Queries, org, id pgtype.UUID, by pgty
 	return row, approvals.ResolveRun(ctx, q, org, row.RunID)
 }
 
-// Respond records a person's answer and resumes the run. Only the person the question is addressed
-// to may answer. An answer to a question that is no longer open returns ErrNotOpen and changes
+// Respond records a person's answer and resumes the run. Only a recipient of the question may
+// answer, and the first answer wins. An answer to a question that is no longer open returns ErrNotOpen and changes
 // nothing.
 func Respond(ctx context.Context, q *store.Queries, org, id, by pgtype.UUID, ans Answer) (store.Question, error) {
 	return resolve(ctx, q, org, id, by, store.QuestionStateAnswered, ans.check)
@@ -335,8 +481,8 @@ func defaultOf(row store.Question) (Answer, error) {
 	return Answer{Kind: store.QuestionAnswerKindDefault, Text: row.DefaultAnswer}, nil
 }
 
-// Dismiss dismisses the question: its safe default is the answer, and the agent is told so. Only
-// the person it is addressed to may dismiss it.
+// Dismiss dismisses the question: its safe default is the answer, and the agent is told so. Only a
+// recipient may dismiss it, and a dismissal is an answer: the default applies for every recipient.
 func Dismiss(ctx context.Context, q *store.Queries, org, id, by pgtype.UUID) (store.Question, error) {
 	return resolve(ctx, q, org, id, by, store.QuestionStateDismissed, func(r store.Question) (Answer, error) { return defaultOf(r) })
 }

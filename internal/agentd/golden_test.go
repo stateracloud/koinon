@@ -15,7 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
-	"github.com/stateracloud/koinon/internal/triggers/schedule"
+	"github.com/stateracloud/koinon/internal/triggers"
 )
 
 // update rewrites the golden files: go test ./internal/agentd -update.
@@ -101,7 +101,7 @@ var _ = Describe("Prompt shapes (golden)", func() {
 		loc, err := time.LoadLocation("Europe/Tallinn")
 		Expect(err).NotTo(HaveOccurred())
 		due := time.Date(2026, 10, 27, 6, 0, 0, 0, time.UTC)
-		golden("prompt_scheduled_task", agentd.AssemblePrompt(agentd.PromptNew, schedule.TaskTitle("morning-triage", due, loc), "[Koinon] MCP notice.",
+		golden("prompt_scheduled_task", agentd.AssemblePrompt(agentd.PromptNew, triggers.ScheduleTaskTitle("morning-triage", due, loc), "[Koinon] MCP notice.",
 			[]string{"Triage the new issues and summarise them for the team."}, ""))
 	})
 	It("a reset session with the outcomes after the messages", func() {
@@ -121,9 +121,30 @@ var _ = Describe("Prompt shapes (golden)", func() {
 			[]string{"First reply.", "Second reply."}, []string{"Please fix the typo.", "Also the footer."}, out))
 	})
 	It("the instruction file of an agent version", func() {
-		golden("instructions_file", agentd.InstructionsFile("You help with the task."))
+		golden("instructions_file", agentd.InstructionsFile("You help with the task.", "/sandbox/work"))
+	})
+	It("the instruction file of an agent with web egress has no web section", func() {
+		Expect(agentd.InstructionsFileWithWeb("You help with the task.", "/sandbox/work")).NotTo(ContainSubstring("## Web access"))
+		Expect(agentd.InstructionsFile("You help with the task.", "/sandbox/work")).To(ContainSubstring("MCP tools"))
+	})
+	It("the instruction file of an agent with repositories on a Gitea host", func() {
+		golden("instructions_file_repositories", agentd.InstructionsFile("You help with the task.", "/sandbox/work",
+			agentd.Repository{
+				Name: "acme/infra", Connector: "gitea", Provider: "Gitea", Host: "git.example.test:3000",
+				CloneURL: "https://git.example.test:3000/acme/infra",
+			},
+			agentd.Repository{
+				Name: "acme/docs", Connector: "gitea", Provider: "Gitea", Host: "git.example.test:3000",
+				CloneURL: "https://git.example.test:3000/acme/docs",
+			}))
+	})
+	It("the note after the harness cancelled a turn on refused requests", func() {
+		golden("refusal_note", agentd.RefusalNote([]agentd.Refusal{
+			{Kind: "edit", Title: "write", Outside: "/sandbox/.koinon/notes/external/report.md"},
+			{Kind: "fetch", Title: "webfetch"},
+		}, "/sandbox/work"))
 	})
 	It("the instruction file of an agent version without instructions", func() {
-		golden("instructions_file_empty", agentd.InstructionsFile(" \n"))
+		golden("instructions_file_empty", agentd.InstructionsFile(" \n", "/sandbox/work"))
 	})
 })

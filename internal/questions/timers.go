@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
 )
@@ -93,9 +94,7 @@ func deliverReminder(ctx context.Context, pool *pgxpool.Pool, note durable.Notif
 			"message": fmt.Sprintf("Reminder: a question is still waiting for your answer: %s If nobody answers by %s, the default (%s) applies.",
 				clip(row.Question, 200), row.ExpiresAt.Time.UTC().Format("2006-01-02 15:04 UTC"), clip(row.DefaultAnswer, 100)),
 		})
-		if _, err := q.InsertNotification(ctx, store.InsertNotificationParams{
-			OrgID: org, UserID: row.AskedTo, Kind: ReminderNotificationKind, DedupeKey: "question-reminder:" + row.ID.String(), Payload: body,
-		}); err != nil {
+		if err := notifyRecipients(ctx, q, row, ReminderNotificationKind, "question-reminder:"+row.ID.String(), body); err != nil {
 			return err
 		}
 	}
@@ -177,4 +176,133 @@ func clip(s string, n int) string {
 		return s
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// TaskTarget is the notify target a task carries (copied from its trigger when it was created), or
+// the org's default (DefaultTarget, the admins) when it has none.
+func TaskTarget(kind store.NullNotifyTargetKind, user pgtype.UUID, role store.NullOrgRole) Target {
+	if !kind.Valid {
+		return DefaultTarget
+	}
+	t := Target{Kind: kind.NotifyTargetKind, User: user}
+	if role.Valid {
+		t.Role = role.OrgRole
+	}
+	return t
+}
+
+// RetargetOrphaned gives the open questions that nobody can answer any more to the task's notify
+// target (the trigger's, by default the org's admins), and returns how many questions it changed. A
+// recipient counts only while they can answer (not deleted, role member or higher); when the last one
+// leaves the org or becomes a viewer, the question would otherwise wait on nobody until it expires.
+// The target resolves as it does when a question is asked: a notify person who can no longer answer
+// falls back to the default (recorded as requestedTarget and fallbackReason); a role nobody holds
+// gets no recipients and the question is left alone. The new recipients get the question.asked
+// notification and their age starts then (ADR 0065 amendment 2026-10-28). Who may answer is an
+// authorization change, so each question that changes is audited as question.retarget, by the system,
+// in the same transaction. An org with nobody to give the question to changes nothing, and the
+// question expires as before.
+func RetargetOrphaned(ctx context.Context, pool *pgxpool.Pool) (int, error) {
+	orgs, err := store.New(pool).ListOrgsWithOpenQuestions(ctx)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	var errs []error
+	for _, org := range orgs {
+		n := 0
+		err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			q := store.New(tx)
+			orphans, err := q.ListOrphanedQuestions(ctx, org)
+			if err != nil {
+				return err
+			}
+			n = 0
+			for _, o := range orphans {
+				target := TaskTarget(o.NotifyKind, o.NotifyUserID, o.NotifyRole)
+				people, err := Recipients(ctx, q, org, target)
+				if err != nil {
+					return err
+				}
+				var fallback map[string]any
+				if target.Kind == store.NotifyTargetKindUser && len(people) == 0 {
+					// As on the ask path: only a notify person who can no longer answer falls back to
+					// the default. A role nobody holds stays empty: the question is not widened to
+					// the admins, and (as ask_user refuses it) stays as it is until it expires.
+					fallback = map[string]any{
+						"requestedTarget": map[string]any{"kind": "user", "user": target.User.String()},
+						"fallbackReason":  "the trigger's notify person is no longer a member who can answer",
+					}
+					target = DefaultTarget
+					if people, err = Recipients(ctx, q, org, target); err != nil {
+						return err
+					}
+				}
+				if len(people) == 0 {
+					continue
+				}
+				added, err := q.AddWaitingQuestionRecipients(ctx, store.AddWaitingQuestionRecipientsParams{OrgID: org, QuestionID: o.ID, UserIds: people})
+				if err != nil {
+					return err
+				}
+				if len(added) == 0 {
+					continue
+				}
+				qn, err := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: org, ID: o.ID})
+				if err != nil {
+					return err
+				}
+				body, _ := json.Marshal(map[string]any{
+					"question_id": qn.ID.String(), "task_id": qn.TaskID.String(), "question": qn.Question,
+				})
+				ids := make([]string, 0, len(added))
+				for _, u := range added {
+					ids = append(ids, u.String())
+					if _, err := q.InsertNotification(ctx, store.InsertNotificationParams{
+						OrgID: org, UserID: u, Kind: NotificationKind, DedupeKey: "question:" + qn.ID.String(), Payload: body,
+					}); err != nil {
+						return err
+					}
+				}
+				name := ""
+				if target.Kind == store.NotifyTargetKindUser {
+					if name, err = q.GetUserDisplayName(ctx, target.User); err != nil {
+						return err
+					}
+				}
+				toLabel := Label(target, name)
+				payload := map[string]any{
+					"question_id": qn.ID.String(), "to_label": toLabel, "recipients": ids,
+					"reason": "nobody it was addressed to can answer any more",
+				}
+				after := map[string]any{
+					"toLabel": toLabel, "recipients": ids, "reason": "nobody it was addressed to can answer any more",
+					"taskId": qn.TaskID.String(), "runId": qn.RunID.String(), "agentId": o.AgentID.String(),
+				}
+				for k, v := range fallback {
+					payload[k], after[k] = v, v
+				}
+				if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+					OrgID: org, TaskID: qn.TaskID, RunID: qn.RunID, Kind: KindRetargeted, ActorKind: store.TaskActorKindSystem,
+					Payload: mustJSON(payload),
+				}); err != nil {
+					return err
+				}
+				if err := audit.RecordErr(ctx, q, audit.Event{
+					Org: org, Actor: audit.System(), Action: "question.retarget", TargetKind: "question", TargetID: qn.ID.String(),
+					After: after,
+				}); err != nil {
+					return err
+				}
+				n++
+			}
+			return nil
+		})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("retarget questions of org %s: %w", org, err))
+			continue
+		}
+		total += n
+	}
+	return total, errors.Join(errs...)
 }

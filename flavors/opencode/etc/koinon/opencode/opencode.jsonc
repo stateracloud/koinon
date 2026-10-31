@@ -26,12 +26,33 @@
   // exempted: truncated tool and shell output in the data directory, its temporary directory and
   // this config directory. Later rules win. The top-level rules are appended to every agent,
   // explore included, after its own; the explore block below repeats them as defence in depth.
+  // Tool results over these limits are cut to their start; the full text goes to the tool-output
+  // directory allowed below, for the agent to page through (OpenCode 2.2.0 defaults: 51200 bytes,
+  // 2000 lines; packages/schema/src/config/tool-output.ts). About 6k tokens per result at most,
+  // which keeps a run's re-sent history small (issue #148).
+  "tool_output": { "max_bytes": 24576, "max_lines": 600 },
   "permissions": [
     { "action": "external_directory", "resource": "*", "effect": "ask" },
     { "action": "external_directory", "resource": "/sandbox/.local/share/opencode/shell/*/*", "effect": "allow" },
     { "action": "external_directory", "resource": "/sandbox/.local/share/opencode/tool-output/*", "effect": "allow" },
     { "action": "external_directory", "resource": "/tmp/opencode/*", "effect": "allow" },
-    { "action": "external_directory", "resource": "/etc/koinon/opencode/*", "effect": "allow" }
+    { "action": "external_directory", "resource": "/etc/koinon/opencode/*", "effect": "allow" },
+    // Skills are denied unless a later rule allows one by ID (ADR 0071 delivers them); the last
+    // matching rule wins, so an agent block's rules can override this deny and must allow by ID only,
+    // never with "*". Skill.available
+    // drops denied skills from the prompt, and the skill tool asserts action "skill" before loading
+    // one (packages/core/src/skill.ts:33-34, packages/core/src/tool/plugin/skill.ts:50-55).
+    { "action": "skill", "resource": "*", "effect": "deny" },
+    // No subagents (issue #261). OpenCode 2.2.0's subagent tool is on for every agent (depth 1),
+    // its children outlive a cancelled turn (packages/cli/src/acp/turn.ts:303-311) and their
+    // messages reach agentd only through a private extension it does not advertise, so a wall-clock
+    // cancel (#243) or wrap-up notice (#183) would leave work running that no trace shows. Tool.snapshot
+    // drops a tool whose last matching rule has resource "*" and effect deny, so the model is not
+    // offered it (packages/core/src/tool.ts:255, :326-329); the tool also asserts action "subagent"
+    // before it starts a child (packages/core/src/tool/plugin/subagent.ts:140). Keep this rule last
+    // for the action: a later "subagent" allow would bring the tool back. Allowing "explore" again
+    // waits for agentd to record child updates and cancel to cascade.
+    { "action": "subagent", "resource": "*", "effect": "deny" }
   ],
   "agents": {
     "explore": {
@@ -40,15 +61,19 @@
         { "action": "external_directory", "resource": "/sandbox/.local/share/opencode/shell/*/*", "effect": "allow" },
         { "action": "external_directory", "resource": "/sandbox/.local/share/opencode/tool-output/*", "effect": "allow" },
         { "action": "external_directory", "resource": "/tmp/opencode/*", "effect": "allow" },
-        { "action": "external_directory", "resource": "/etc/koinon/opencode/*", "effect": "allow" }
+        { "action": "external_directory", "resource": "/etc/koinon/opencode/*", "effect": "allow" },
+        { "action": "subagent", "resource": "*", "effect": "deny" }
       ]
     }
   },
-  // Built-in plugins Koinon turns off: skills from ~/.claude and ~/.agents, the provider plugins
-  // (the koinon provider is defined below; opencode.provider.opencode cannot be removed), web
-  // search, and logins for well-known integrations.
+  // Built-in plugins Koinon turns off: skills from ~/.claude and ~/.agents, the built-in skills
+  // "opencode" and "report" (opencode.skill registers both, packages/core/src/plugin/skill.ts;
+  // "report" tells the agent to file issues with the GitHub CLI), the provider plugins (the koinon
+  // provider is defined below; opencode.provider.opencode cannot be removed), web search, and
+  // logins for well-known integrations.
   "plugins": [
     "-opencode.config.compatibility",
+    "-opencode.skill",
     "-opencode.provider.*",
     "-opencode.websearch.*",
     "-opencode.tool.websearch",
@@ -61,6 +86,23 @@
       "settings": {
         "baseURL": "{env:KOINON_MODEL_BASE_URL}",
         "apiKey": "{env:KOINON_MODEL_KEY}"
+      },
+      "models": {
+        "{env:KOINON_MODEL}": {}
+      }
+    },
+    // The same gateway, for a model whose format is Anthropic Messages (ADR 0069). The base URL is
+    // the same <gateway>/v1; the provider posts to <baseURL>/messages. authToken makes it send
+    // "Authorization: Bearer", the header OpenShell rewrites the placeholder in and the gateway's
+    // key policy reads. Never set apiKey as well: the provider refuses both
+    // (packages/ai/src/providers/anthropic.ts). The entry script and koinon-agentd choose the entry
+    // from the model's format (--model-format, internal/flavor).
+    "koinon-anthropic": {
+      "name": "Koinon agentgateway (Anthropic Messages)",
+      "package": "aisdk:@ai-sdk/anthropic",
+      "settings": {
+        "baseURL": "{env:KOINON_MODEL_BASE_URL}",
+        "authToken": "{env:KOINON_MODEL_KEY}"
       },
       "models": {
         "{env:KOINON_MODEL}": {}

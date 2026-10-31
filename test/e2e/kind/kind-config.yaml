@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The e2e's kind cluster. The kubelet refreshes mounted Secrets and ConfigMaps every syncFrequency
+# (default 1m, plus its cache TTL); the MCP spec (6b) waits for the gateway to see a changed Secret,
+# which took almost four minutes. Five seconds cuts that wait without changing what is tested.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: KubeletConfiguration
+        syncFrequency: 5s

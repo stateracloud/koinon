@@ -181,12 +181,16 @@ spec:
             - --agentgateway-namespace={{ .Values.preflight.agentgateway.namespace }}
             - --agentgateway-controller={{ .Values.preflight.agentgateway.controller }}
             - --runtime-class={{ .Values.openshell.runtimeClassName }}
-            - --openshell-address={{ .Values.openshell.address }}
+            - --openshell-address={{ include "koinon.openshellAddress" . }}
             {{- if .Values.openshell.clientTLSSecret }}
             - --openshell-tls-dir=/etc/koinon/openshell-tls
             {{- end }}
             - --openshell-config-namespace={{ .Values.preflight.openshell.namespace }}
             - --openshell-config-map={{ .Values.preflight.openshell.configMap }}
+            - --openshell-gateway-id={{ .Values.openshell.gatewayId }}
+            {{- if not .Values.sandboxObserver.enabled }}
+            - --sandbox-observer-disabled
+            {{- end }}
             {{- if include "koinon.expectSandboxPullSecrets" . }}
             - --expect-sandbox-pull-secrets
             {{- end }}
