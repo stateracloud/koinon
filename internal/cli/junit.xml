@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+  <testsuites tests="15" disabled="0" errors="0" failures="0" time="0.04507525">
+      <testsuite name="CLI Suite" package="/tmp/claude-502/kw/l456/internal/cli" tests="15" disabled="0" skipped="0" errors="0" failures="0" time="0.04507525" timestamp="2026-11-01T15:46:58">
+          <properties>
+              <property name="SuiteSucceeded" value="true"></property>
+              <property name="SuiteHasProgrammaticFocus" value="false"></property>
+              <property name="SpecialSuiteFailureReason" value=""></property>
+              <property name="SuiteLabels" value="[]"></property>
+              <property name="SuiteSemVerConstraints" value="[]"></property>
+              <property name="SuiteComponentSemVerConstraints" value="[]"></property>
+              <property name="RandomSeed" value="1793544418"></property>
+              <property name="RandomizeAllSpecs" value="false"></property>
+              <property name="LabelFilter" value=""></property>
+              <property name="SemVerFilter" value=""></property>
+              <property name="FocusStrings" value=""></property>
+              <property name="SkipStrings" value=""></property>
+              <property name="FocusFiles" value=""></property>
+              <property name="SkipFiles" value=""></property>
+              <property name="FailOnPending" value="false"></property>
+              <property name="FailOnEmpty" value="true"></property>
+              <property name="FailFast" value="false"></property>
+              <property name="FlakeAttempts" value="0"></property>
+              <property name="DryRun" value="false"></property>
+              <property name="ParallelTotal" value="1"></property>
+              <property name="OutputInterceptorMode" value=""></property>
+          </properties>
+          <testcase name="[It] BindEnv names a flag&#39;s variable KOINON_ and the flag in upper case with underscores" classname="CLI Suite" status="passed" time="0.000141167">
+              <system-err>&gt; Enter [BeforeEach] BindEnv - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:36 @ 11/01/26 15:46:58.429&#xA;&lt; Exit [BeforeEach] BindEnv - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:36 @ 11/01/26 15:46:58.429 (0s)&#xA;&gt; Enter [It] names a flag&#39;s variable KOINON_ and the flag in upper case with underscores - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:43 @ 11/01/26 15:46:58.429&#xA;&lt; Exit [It] names a flag&#39;s variable KOINON_ and the flag in upper case with underscores - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:43 @ 11/01/26 15:46:58.429 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] BindEnv sets flags from the environment, and command-line flags win" classname="CLI Suite" status="passed" time="0.000137584">
+              <system-err>&gt; Enter [BeforeEach] BindEnv - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:36 @ 11/01/26 15:46:58.429&#xA;&lt; Exit [BeforeEach] BindEnv - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:36 @ 11/01/26 15:46:58.429 (0s)&#xA;&gt; Enter [It] sets flags from the environment, and command-line flags win - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:47 @ 11/01/26 15:46:58.429&#xA;&lt; Exit [It] sets flags from the environment, and command-line flags win - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:47 @ 11/01/26 15:46:58.429 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] BindEnv names the variable whose value does not parse" classname="CLI Suite" status="passed" time="2.3417e-05">
+              <system-err>&gt; Enter [BeforeEach] BindEnv - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:36 @ 11/01/26 15:46:58.429&#xA;&lt; Exit [BeforeEach] BindEnv - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:36 @ 11/01/26 15:46:58.429 (0s)&#xA;&gt; Enter [It] names the variable whose value does not parse - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:57 @ 11/01/26 15:46:58.429&#xA;&lt; Exit [It] names the variable whose value does not parse - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:57 @ 11/01/26 15:46:58.429 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] BindEnv reads the process environment without a getenv" classname="CLI Suite" status="passed" time="0.000131333">
+              <system-err>&gt; Enter [BeforeEach] BindEnv - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:36 @ 11/01/26 15:46:58.429&#xA;&lt; Exit [BeforeEach] BindEnv - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:36 @ 11/01/26 15:46:58.429 (0s)&#xA;&gt; Enter [It] reads the process environment without a getenv - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:62 @ 11/01/26 15:46:58.429&#xA;&lt; Exit [It] reads the process environment without a getenv - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:62 @ 11/01/26 15:46:58.429 (0s)&#xA;&gt; Enter [DeferCleanup (Each)] BindEnv - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:63 @ 11/01/26 15:46:58.429&#xA;&lt; Exit [DeferCleanup (Each)] BindEnv - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:63 @ 11/01/26 15:46:58.429 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] the command stack sets flags from the environment, and command-line flags win" classname="CLI Suite" status="passed" time="0.000321833">
+              <system-err>&gt; Enter [It] sets flags from the environment, and command-line flags win - /tmp/claude-502/kw/l456/internal/cli/command_test.go:45 @ 11/01/26 15:46:58.429&#xA;&lt; Exit [It] sets flags from the environment, and command-line flags win - /tmp/claude-502/kw/l456/internal/cli/command_test.go:45 @ 11/01/26 15:46:58.429 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] the command stack reads the aliases after the KOINON_ variable" classname="CLI Suite" status="passed" time="6.2375e-05">
+              <system-err>&gt; Enter [It] reads the aliases after the KOINON_ variable - /tmp/claude-502/kw/l456/internal/cli/command_test.go:53 @ 11/01/26 15:46:58.429&#xA;&lt; Exit [It] reads the aliases after the KOINON_ variable - /tmp/claude-502/kw/l456/internal/cli/command_test.go:53 @ 11/01/26 15:46:58.429 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] the command stack treats an empty variable as set" classname="CLI Suite" status="passed" time="4.15e-05">
+              <system-err>&gt; Enter [It] treats an empty variable as set - /tmp/claude-502/kw/l456/internal/cli/command_test.go:60 @ 11/01/26 15:46:58.429&#xA;&lt; Exit [It] treats an empty variable as set - /tmp/claude-502/kw/l456/internal/cli/command_test.go:60 @ 11/01/26 15:46:58.43 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] the command stack checks the required flags after the environment was read" classname="CLI Suite" status="passed" time="8.0291e-05">
+              <system-err>&gt; Enter [It] checks the required flags after the environment was read - /tmp/claude-502/kw/l456/internal/cli/command_test.go:65 @ 11/01/26 15:46:58.43&#xA;&lt; Exit [It] checks the required flags after the environment was read - /tmp/claude-502/kw/l456/internal/cli/command_test.go:65 @ 11/01/26 15:46:58.43 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] the command stack names the variable whose value does not parse" classname="CLI Suite" status="passed" time="3.4041e-05">
+              <system-err>&gt; Enter [It] names the variable whose value does not parse - /tmp/claude-502/kw/l456/internal/cli/command_test.go:69 @ 11/01/26 15:46:58.43&#xA;&lt; Exit [It] names the variable whose value does not parse - /tmp/claude-502/kw/l456/internal/cli/command_test.go:69 @ 11/01/26 15:46:58.43 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] the command stack refuses KOINON_ variables the command does not read" classname="CLI Suite" status="passed" time="1.5667e-05">
+              <system-err>&gt; Enter [It] refuses KOINON_ variables the command does not read - /tmp/claude-502/kw/l456/internal/cli/command_test.go:74 @ 11/01/26 15:46:58.43&#xA;&lt; Exit [It] refuses KOINON_ variables the command does not read - /tmp/claude-502/kw/l456/internal/cli/command_test.go:74 @ 11/01/26 15:46:58.43 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] the command stack falls back to the default subcommand only without one" classname="CLI Suite" status="passed" time="4.1125e-05">
+              <system-err>&gt; Enter [It] falls back to the default subcommand only without one - /tmp/claude-502/kw/l456/internal/cli/command_test.go:78 @ 11/01/26 15:46:58.43&#xA;&lt; Exit [It] falls back to the default subcommand only without one - /tmp/claude-502/kw/l456/internal/cli/command_test.go:78 @ 11/01/26 15:46:58.43 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] the command stack reads a config file below the environment and above the default" classname="CLI Suite" status="passed" time="0.041506417">
+              <system-err>&gt; Enter [It] reads a config file below the environment and above the default - /tmp/claude-502/kw/l456/internal/cli/command_test.go:85 @ 11/01/26 15:46:58.43&#xA;&lt; Exit [It] reads a config file below the environment and above the default - /tmp/claude-502/kw/l456/internal/cli/command_test.go:85 @ 11/01/26 15:46:58.465 (36ms)&#xA;&gt; Enter [DeferCleanup (Each)] the command stack - /tmp/claude-502/kw/l456/internal/cli/command_test.go:95 @ 11/01/26 15:46:58.465&#xA;&lt; Exit [DeferCleanup (Each)] the command stack - /tmp/claude-502/kw/l456/internal/cli/command_test.go:95 @ 11/01/26 15:46:58.465 (0s)&#xA;&gt; Enter [DeferCleanup (Each)] the command stack - /home/user/go/pkg/mod/github.com/onsi/ginkgo/v2@v2.33.1/internal/testingtproxy/testing_t_proxy.go:179 @ 11/01/26 15:46:58.465&#xA;&lt; Exit [DeferCleanup (Each)] the command stack - /home/user/go/pkg/mod/github.com/onsi/ginkgo/v2@v2.33.1/internal/testingtproxy/testing_t_proxy.go:179 @ 11/01/26 15:46:58.471 (6ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] the command stack styles output only on a terminal without NO_COLOR" classname="CLI Suite" status="passed" time="7.0042e-05">
+              <system-err>&gt; Enter [It] styles output only on a terminal without NO_COLOR - /tmp/claude-502/kw/l456/internal/cli/command_test.go:101 @ 11/01/26 15:46:58.471&#xA;&lt; Exit [It] styles output only on a terminal without NO_COLOR - /tmp/claude-502/kw/l456/internal/cli/command_test.go:101 @ 11/01/26 15:46:58.471 (0s)&#xA;&gt; Enter [DeferCleanup (Each)] the command stack - /tmp/claude-502/kw/l456/internal/cli/command_test.go:102 @ 11/01/26 15:46:58.471&#xA;&lt; Exit [DeferCleanup (Each)] the command stack - /tmp/claude-502/kw/l456/internal/cli/command_test.go:102 @ 11/01/26 15:46:58.471 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] OpenShell.Dial connects without TLS when no TLS directory is set" classname="CLI Suite" status="passed" time="0.001253292">
+              <system-err>&gt; Enter [It] connects without TLS when no TLS directory is set - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:70 @ 11/01/26 15:46:58.471&#xA;&lt; Exit [It] connects without TLS when no TLS directory is set - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:70 @ 11/01/26 15:46:58.473 (1ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] OpenShell.Dial loads the client bundle from the TLS directory" classname="CLI Suite" status="passed" time="0.000842042">
+              <system-err>&gt; Enter [It] loads the client bundle from the TLS directory - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:76 @ 11/01/26 15:46:58.473&#xA;&lt; Exit [It] loads the client bundle from the TLS directory - /tmp/claude-502/kw/l456/internal/cli/cli_test.go:76 @ 11/01/26 15:46:58.473 (1ms)&#xA;&gt; Enter [DeferCleanup (Each)] OpenShell.Dial - /home/user/go/pkg/mod/github.com/onsi/ginkgo/v2@v2.33.1/internal/testingtproxy/testing_t_proxy.go:179 @ 11/01/26 15:46:58.473&#xA;&lt; Exit [DeferCleanup (Each)] OpenShell.Dial - /home/user/go/pkg/mod/github.com/onsi/ginkgo/v2@v2.33.1/internal/testingtproxy/testing_t_proxy.go:179 @ 11/01/26 15:46:58.474 (0s)&#xA;</system-err>
+          </testcase>
+      </testsuite>
+  </testsuites>

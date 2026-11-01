@@ -15,7 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 )
 
-// NewRootCommand is koinon-api's command tree (ADR 0087). Every command declares its own flags and
+// NewRootCommand is koinon-api's command tree (ADR 0088). Every command declares its own flags and
 // the ones it requires, so a check that only the server needs cannot reach "migrate"; the chart's
 // contract test (test/chartsmoke) builds this tree to check what each rendered container passes.
 // Settings come from the flag, then KOINON_<FLAG>, then the default (internal/cli).

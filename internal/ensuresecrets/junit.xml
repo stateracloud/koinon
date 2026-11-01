@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+  <testsuites tests="11" disabled="0" errors="0" failures="0" time="0.060602625">
+      <testsuite name="Ensure Secrets Suite" package="/tmp/claude-502/kw/l456/internal/ensuresecrets" tests="11" disabled="0" skipped="0" errors="0" failures="0" time="0.060602625" timestamp="2026-11-01T15:47:35">
+          <properties>
+              <property name="SuiteSucceeded" value="true"></property>
+              <property name="SuiteHasProgrammaticFocus" value="false"></property>
+              <property name="SpecialSuiteFailureReason" value=""></property>
+              <property name="SuiteLabels" value="[]"></property>
+              <property name="SuiteSemVerConstraints" value="[]"></property>
+              <property name="SuiteComponentSemVerConstraints" value="[]"></property>
+              <property name="RandomSeed" value="1793544455"></property>
+              <property name="RandomizeAllSpecs" value="false"></property>
+              <property name="LabelFilter" value=""></property>
+              <property name="SemVerFilter" value=""></property>
+              <property name="FocusStrings" value=""></property>
+              <property name="SkipStrings" value=""></property>
+              <property name="FocusFiles" value=""></property>
+              <property name="SkipFiles" value=""></property>
+              <property name="FailOnPending" value="false"></property>
+              <property name="FailOnEmpty" value="true"></property>
+              <property name="FailFast" value="false"></property>
+              <property name="FlakeAttempts" value="0"></property>
+              <property name="DryRun" value="false"></property>
+              <property name="ParallelTotal" value="1"></property>
+              <property name="OutputInterceptorMode" value=""></property>
+          </properties>
+          <testcase name="[It] Ensure creates a missing Secret with the type, labels, username and a random password" classname="Ensure Secrets Suite" status="passed" time="0.056790083">
+              <system-err>&gt; Enter [BeforeEach] Ensure - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:27 @ 11/01/26 15:47:35.658&#xA;&lt; Exit [BeforeEach] Ensure - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:27 @ 11/01/26 15:47:35.658 (0s)&#xA;&gt; Enter [It] creates a missing Secret with the type, labels, username and a random password - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:29 @ 11/01/26 15:47:35.658&#xA;&lt; Exit [It] creates a missing Secret with the type, labels, username and a random password - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:29 @ 11/01/26 15:47:35.715 (57ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Ensure keeps an existing Secret and its password" classname="Ensure Secrets Suite" status="passed" time="5.8375e-05">
+              <system-err>&gt; Enter [BeforeEach] Ensure - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:27 @ 11/01/26 15:47:35.715&#xA;&lt; Exit [BeforeEach] Ensure - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:27 @ 11/01/26 15:47:35.715 (0s)&#xA;&gt; Enter [It] keeps an existing Secret and its password - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:51 @ 11/01/26 15:47:35.715&#xA;&lt; Exit [It] keeps an existing Secret and its password - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:51 @ 11/01/26 15:47:35.715 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Ensure fails on an existing Secret without a password and changes nothing" classname="Ensure Secrets Suite" status="passed" time="5.8834e-05">
+              <system-err>&gt; Enter [BeforeEach] Ensure - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:27 @ 11/01/26 15:47:35.715&#xA;&lt; Exit [BeforeEach] Ensure - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:27 @ 11/01/26 15:47:35.715 (0s)&#xA;&gt; Enter [It] fails on an existing Secret without a password and changes nothing - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:68 @ 11/01/26 15:47:35.715&#xA;&lt; Exit [It] fails on an existing Secret without a password and changes nothing - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:68 @ 11/01/26 15:47:35.715 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Ensure fails on an existing database role Secret with another username or type" classname="Ensure Secrets Suite" status="passed" time="9.975e-05">
+              <system-err>&gt; Enter [BeforeEach] Ensure - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:27 @ 11/01/26 15:47:35.715&#xA;&lt; Exit [BeforeEach] Ensure - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:27 @ 11/01/26 15:47:35.715 (0s)&#xA;&gt; Enter [It] fails on an existing database role Secret with another username or type - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:82 @ 11/01/26 15:47:35.715&#xA;&lt; Exit [It] fails on an existing database role Secret with another username or type - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:82 @ 11/01/26 15:47:35.715 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Ensure treats AlreadyExists on create as success" classname="Ensure Secrets Suite" status="passed" time="6.8083e-05">
+              <system-err>&gt; Enter [BeforeEach] Ensure - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:27 @ 11/01/26 15:47:35.715&#xA;&lt; Exit [BeforeEach] Ensure - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:27 @ 11/01/26 15:47:35.715 (0s)&#xA;&gt; Enter [It] treats AlreadyExists on create as success - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:100 @ 11/01/26 15:47:35.715&#xA;&lt; Exit [It] treats AlreadyExists on create as success - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:100 @ 11/01/26 15:47:35.715 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Ensure generates different passwords" classname="Ensure Secrets Suite" status="passed" time="0.000201083">
+              <system-err>&gt; Enter [BeforeEach] Ensure - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:27 @ 11/01/26 15:47:35.715&#xA;&lt; Exit [BeforeEach] Ensure - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:27 @ 11/01/26 15:47:35.715 (0s)&#xA;&gt; Enter [It] generates different passwords - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:110 @ 11/01/26 15:47:35.715&#xA;&lt; Exit [It] generates different passwords - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:110 @ 11/01/26 15:47:35.715 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Ensure with an AES key creates a 64-hex-character key and no password, and never logs it" classname="Ensure Secrets Suite" status="passed" time="0.001080333">
+              <system-err>&gt; Enter [It] creates a 64-hex-character key and no password, and never logs it - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:122 @ 11/01/26 15:47:35.715&#xA;&lt; Exit [It] creates a 64-hex-character key and no password, and never logs it - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:122 @ 11/01/26 15:47:35.716 (1ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Ensure with an AES key keeps a valid key and rejects a malformed one without changing it" classname="Ensure Secrets Suite" status="passed" time="2.9916e-05">
+              <system-err>&gt; Enter [It] keeps a valid key and rejects a malformed one without changing it - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:134 @ 11/01/26 15:47:35.716&#xA;&lt; Exit [It] keeps a valid key and rejects a malformed one without changing it - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:134 @ 11/01/26 15:47:35.716 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Ensure with an unknown kind fails instead of creating a password" classname="Ensure Secrets Suite" status="passed" time="4.0625e-05">
+              <system-err>&gt; Enter [It] fails instead of creating a password - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:209 @ 11/01/26 15:47:35.716&#xA;&lt; Exit [It] fails instead of creating a password - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:209 @ 11/01/26 15:47:35.716 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Ensure with a bearer token creates a 64-hex-character token under token, and never logs it" classname="Ensure Secrets Suite" status="passed" time="0.0015375">
+              <system-err>&gt; Enter [It] creates a 64-hex-character token under token, and never logs it - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:158 @ 11/01/26 15:47:35.716&#xA;&lt; Exit [It] creates a 64-hex-character token under token, and never logs it - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:158 @ 11/01/26 15:47:35.718 (2ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Ensure with a bearer token keeps a rotated token and its previous key, and rejects a short one unchanged" classname="Ensure Secrets Suite" status="passed" time="7.9792e-05">
+              <system-err>&gt; Enter [It] keeps a rotated token and its previous key, and rejects a short one unchanged - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:170 @ 11/01/26 15:47:35.718&#xA;&lt; Exit [It] keeps a rotated token and its previous key, and rejects a short one unchanged - /tmp/claude-502/kw/l456/internal/ensuresecrets/ensuresecrets_test.go:170 @ 11/01/26 15:47:35.718 (0s)&#xA;</system-err>
+          </testcase>
+      </testsuite>
+  </testsuites>

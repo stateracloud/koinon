@@ -1,0 +1,327 @@
+<?xml version="1.0" encoding="UTF-8"?>
+  <testsuites tests="83" disabled="50" errors="0" failures="0" time="0.178325292">
+      <testsuite name="Kubernetes Gateway Suite" package="/tmp/claude-502/kw/l456/internal/gateway/kubernetes" tests="83" disabled="0" skipped="50" errors="0" failures="0" time="0.178325292" timestamp="2026-11-01T15:47:38">
+          <properties>
+              <property name="SuiteSucceeded" value="true"></property>
+              <property name="SuiteHasProgrammaticFocus" value="false"></property>
+              <property name="SpecialSuiteFailureReason" value=""></property>
+              <property name="SuiteLabels" value="[]"></property>
+              <property name="SuiteSemVerConstraints" value="[]"></property>
+              <property name="SuiteComponentSemVerConstraints" value="[]"></property>
+              <property name="RandomSeed" value="1793544458"></property>
+              <property name="RandomizeAllSpecs" value="false"></property>
+              <property name="LabelFilter" value=""></property>
+              <property name="SemVerFilter" value=""></property>
+              <property name="FocusStrings" value=""></property>
+              <property name="SkipStrings" value=""></property>
+              <property name="FocusFiles" value=""></property>
+              <property name="SkipFiles" value=""></property>
+              <property name="FailOnPending" value="false"></property>
+              <property name="FailOnEmpty" value="true"></property>
+              <property name="FailFast" value="false"></property>
+              <property name="FlakeAttempts" value="0"></property>
+              <property name="DryRun" value="false"></property>
+              <property name="ParallelTotal" value="1"></property>
+              <property name="OutputInterceptorMode" value=""></property>
+          </properties>
+          <testcase name="[It] kubernetes: models in the Messages format (ADR 0069) passes cache_control on system, tool and message blocks to the upstream unchanged" classname="Kubernetes Gateway Suite" status="skipped" time="0.00141725">
+              <skipped message="skipped - KOINON_KIND_KUBECONFIG and KOINON_KIND_HOST are not set: run hack/g2-kind.sh"></skipped>
+              <system-err>&gt; Enter [BeforeAll] kubernetes: models in the Messages format (ADR 0069) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:104 @ 11/01/26 15:47:38.004&#xA;[SKIPPED] KOINON_KIND_KUBECONFIG and KOINON_KIND_HOST are not set: run hack/g2-kind.sh&#xA;In [BeforeAll] at: /tmp/claude-502/kw/l456/internal/gateway/kubernetes/kind_test.go:77 @ 11/01/26 15:47:38.005&#xA;&lt; Exit [BeforeAll] kubernetes: models in the Messages format (ADR 0069) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:104 @ 11/01/26 15:47:38.005 (1ms)&#xA;&gt; Enter [AfterEach] kubernetes: models in the Messages format (ADR 0069) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:181 @ 11/01/26 15:47:38.005&#xA;&lt; Exit [AfterEach] kubernetes: models in the Messages format (ADR 0069) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:181 @ 11/01/26 15:47:38.005 (0s)&#xA;&gt; Enter [DeferCleanup (All)] kubernetes: models in the Messages format (ADR 0069) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:121 @ 11/01/26 15:47:38.005&#xA;&lt; Exit [DeferCleanup (All)] kubernetes: models in the Messages format (ADR 0069) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:121 @ 11/01/26 15:47:38.005 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models in the Messages format (ADR 0069) sends the upstream the provider key, the pinned version and the workspace, never the agent&#39;s key" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:206 @ 11/01/26 15:47:38.005&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models in the Messages format (ADR 0069) drops the headers and body fields that let an agent reach beyond its org or the sandbox" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:229 @ 11/01/26 15:47:38.005&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models in the Messages format (ADR 0069) sends the catalog&#39;s explicit on and off forms to a strict upstream, without any beta (#316)" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:289 @ 11/01/26 15:47:38.005&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models in the Messages format (ADR 0069) pins a row&#39;s beta, so a beta-only field reaches a strict upstream (rc.7, #240)" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:316 @ 11/01/26 15:47:38.005&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models in the Messages format (ADR 0069) drops the client&#39;s anthropic-beta for a model that thinks without a pinned beta (OpenRouter, #240)" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:340 @ 11/01/26 15:47:38.005&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models in the Messages format (ADR 0069) keeps the tools of a chat-completions request sent to an anthropic model" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:364 @ 11/01/26 15:47:38.005&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models in the Messages format (ADR 0069) adds no stream_options to a streamed Messages request" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:375 @ 11/01/26 15:47:38.005&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models in the Messages format (ADR 0069) serves an openai model of the same org beside it, still asking for streamed usage" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:382 @ 11/01/26 15:47:38.005&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models in the Messages format (ADR 0069) refuses a request with the agent&#39;s key in any header but Authorization, and sends the upstream only the headers a format needs (#262)" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:394 @ 11/01/26 15:47:38.005&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models in the Messages format (ADR 0069) keeps another org&#39;s key off the model" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:460 @ 11/01/26 15:47:38.005&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models in the Messages format (ADR 0069) logs a Messages stream that was cut: its format, that it streamed, and why it ended" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:483 @ 11/01/26 15:47:38.005&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models in the Messages format (ADR 0069) logs the cache tokens, with the input including both" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/anthropic.go:516 @ 11/01/26 15:47:38.005&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes mode: fallback budgets (plan items S2 and G2) sends the ledger what it needs in the access log" classname="Kubernetes Gateway Suite" status="skipped" time="0.000103125">
+              <skipped message="skipped - KOINON_KIND_KUBECONFIG and KOINON_KIND_HOST are not set: run hack/g2-kind.sh"></skipped>
+              <system-err>&gt; Enter [BeforeAll] kubernetes mode: fallback budgets (plan items S2 and G2) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/budgets_test.go:115 @ 11/01/26 15:47:38.005&#xA;[SKIPPED] KOINON_KIND_KUBECONFIG and KOINON_KIND_HOST are not set: run hack/g2-kind.sh&#xA;In [BeforeAll] at: /tmp/claude-502/kw/l456/internal/gateway/kubernetes/kind_test.go:77 @ 11/01/26 15:47:38.006&#xA;&lt; Exit [BeforeAll] kubernetes mode: fallback budgets (plan items S2 and G2) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/budgets_test.go:115 @ 11/01/26 15:47:38.006 (0s)&#xA;&gt; Enter [AfterEach] kubernetes mode: fallback budgets (plan items S2 and G2) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/budgets_test.go:152 @ 11/01/26 15:47:38.006&#xA;&lt; Exit [AfterEach] kubernetes mode: fallback budgets (plan items S2 and G2) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/budgets_test.go:152 @ 11/01/26 15:47:38.006 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes mode: fallback budgets (plan items S2 and G2) revokes the keys of an agent whose limit is spent, without touching others, and restores them" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/kubernetes/budgets_test.go:183 @ 11/01/26 15:47:38.006&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes mode: fallback budgets (plan items S2 and G2) revokes every key of an org whose cap is spent" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/kubernetes/budgets_test.go:198 @ 11/01/26 15:47:38.006&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes mode: fallback budgets (plan items S2 and G2) measures how far a key overspends before the ledger loop revokes it" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/kubernetes/budgets_test.go:208 @ 11/01/26 15:47:38.006&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes mode: fallback budgets (plan items S2 and G2) keeps a revoked key revoked across a proxy pod replacement" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/kubernetes/budgets_test.go:286 @ 11/01/26 15:47:38.006&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Evaluate waits for a status of the current generation" classname="Kubernetes Gateway Suite" status="passed" time="0.000113708">
+              <system-err>&gt; Enter [It] waits for a status of the current generation - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:358 @ 11/01/26 15:47:38.006&#xA;&lt; Exit [It] waits for a status of the current generation - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:358 @ 11/01/26 15:47:38.006 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Evaluate ignores other controllers&#39; entries" classname="Kubernetes Gateway Suite" status="passed" time="1.15e-05">
+              <system-err>&gt; Enter [It] ignores other controllers&#39; entries - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:366 @ 11/01/26 15:47:38.006&#xA;&lt; Exit [It] ignores other controllers&#39; entries - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:366 @ 11/01/26 15:47:38.006 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Evaluate refuses a False condition with the controller&#39;s message" classname="Kubernetes Gateway Suite" status="passed" time="1.2583e-05">
+              <system-err>&gt; Enter [It] refuses a False condition with the controller&#39;s message - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:370 @ 11/01/26 15:47:38.006&#xA;&lt; Exit [It] refuses a False condition with the controller&#39;s message - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:370 @ 11/01/26 15:47:38.006 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Evaluate takes a ConfigMap as accepted: its policy reports it" classname="Kubernetes Gateway Suite" status="passed" time="6.459e-06">
+              <system-err>&gt; Enter [It] takes a ConfigMap as accepted: its policy reports it - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:377 @ 11/01/26 15:47:38.006&#xA;&lt; Exit [It] takes a ConfigMap as accepted: its policy reports it - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:377 @ 11/01/26 15:47:38.006 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render refuses a malformed OTLP receiver when a token Secret is set, instead of exporting without the token" classname="Kubernetes Gateway Suite" status="passed" time="0.000117125">
+              <system-err>&gt; Enter [It] refuses a malformed OTLP receiver when a token Secret is set, instead of exporting without the token - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:133 @ 11/01/26 15:47:38.006&#xA;&lt; Exit [It] refuses a malformed OTLP receiver when a token Secret is set, instead of exporting without the token - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:133 @ 11/01/26 15:47:38.006 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render matches the golden file" classname="Kubernetes Gateway Suite" status="passed" time="0.015072583">
+              <system-err>&gt; Enter [It] matches the golden file - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:142 @ 11/01/26 15:47:38.006&#xA;&lt; Exit [It] matches the golden file - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:142 @ 11/01/26 15:47:38.021 (15ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render matches the golden file for models in each format (ADR 0069)" classname="Kubernetes Gateway Suite" status="passed" time="0.005047834">
+              <system-err>&gt; Enter [It] matches the golden file for models in each format (ADR 0069) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:143 @ 11/01/26 15:47:38.021&#xA;&lt; Exit [It] matches the golden file for models in each format (ADR 0069) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:143 @ 11/01/26 15:47:38.026 (5ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render logs who answered (ADR 0056 amendment 2026-10-29)" classname="Kubernetes Gateway Suite" status="passed" time="0.000879833">
+              <system-err>&gt; Enter [It] logs who answered (ADR 0056 amendment 2026-10-29) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:145 @ 11/01/26 15:47:38.026&#xA;&lt; Exit [It] logs who answered (ADR 0056 amendment 2026-10-29) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:145 @ 11/01/26 15:47:38.027 (1ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render renders no expression that reads a response body" classname="Kubernetes Gateway Suite" status="passed" time="0.002533709">
+              <system-err>&gt; Enter [It] renders no expression that reads a response body - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:155 @ 11/01/26 15:47:38.027&#xA;&lt; Exit [It] renders no expression that reads a response body - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:155 @ 11/01/26 15:47:38.029 (3ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render is deterministic and independent of input order" classname="Kubernetes Gateway Suite" status="passed" time="0.002552333">
+              <system-err>&gt; Enter [It] is deterministic and independent of input order - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:163 @ 11/01/26 15:47:38.03&#xA;&lt; Exit [It] is deterministic and independent of input order - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:163 @ 11/01/26 15:47:38.032 (3ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render leaves the keys of an exhausted limit out, and puts them back" classname="Kubernetes Gateway Suite" status="passed" time="0.000394209">
+              <system-err>&gt; Enter [It] leaves the keys of an exhausted limit out, and puts them back - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:186 @ 11/01/26 15:47:38.032&#xA;&lt; Exit [It] leaves the keys of an exhausted limit out, and puts them back - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:186 @ 11/01/26 15:47:38.032 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render renders a model in its format: Messages with the Anthropic headers and no stream_options, completions with it (ADR 0069)" classname="Kubernetes Gateway Suite" status="passed" time="0.000157667">
+              <system-err>&gt; Enter [It] renders a model in its format: Messages with the Anthropic headers and no stream_options, completions with it (ADR 0069) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:203 @ 11/01/26 15:47:38.032&#xA;STEP: a model whose row pins a beta gets it set, replacing whatever the client sends - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:236 @ 11/01/26 15:47:38.033&#xA;&lt; Exit [It] renders a model in its format: Messages with the Anthropic headers and no stream_options, completions with it (ADR 0069) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:203 @ 11/01/26 15:47:38.033 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render sets no workspace header and drops the client&#39;s when the provider has no workspace ID" classname="Kubernetes Gateway Suite" status="passed" time="0.00011075">
+              <system-err>&gt; Enter [It] sets no workspace header and drops the client&#39;s when the provider has no workspace ID - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:253 @ 11/01/26 15:47:38.033&#xA;&lt; Exit [It] sets no workspace header and drops the client&#39;s when the provider has no workspace ID - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:253 @ 11/01/26 15:47:38.033 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render gives the model-check key its own model list, and no other key one" classname="Kubernetes Gateway Suite" status="passed" time="0.000296667">
+              <system-err>&gt; Enter [It] gives the model-check key its own model list, and no other key one - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:276 @ 11/01/26 15:47:38.033&#xA;STEP: without an entry it may request nothing - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:294 @ 11/01/26 15:47:38.033&#xA;&lt; Exit [It] gives the model-check key its own model list, and no other key one - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:276 @ 11/01/26 15:47:38.033 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render renders an empty key ConfigMap when an org&#39;s last key is revoked, so that the revocation is an update" classname="Kubernetes Gateway Suite" status="passed" time="0.001168667">
+              <system-err>&gt; Enter [It] renders an empty key ConfigMap when an org&#39;s last key is revoked, so that the revocation is an update - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:302 @ 11/01/26 15:47:38.033&#xA;&lt; Exit [It] renders an empty key ConfigMap when an org&#39;s last key is revoked, so that the revocation is an update - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:302 @ 11/01/26 15:47:38.034 (1ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render never names two objects alike, whatever an org is called" classname="Kubernetes Gateway Suite" status="passed" time="0.0020965">
+              <system-err>&gt; Enter [It] never names two objects alike, whatever an org is called - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:320 @ 11/01/26 15:47:38.034&#xA;&lt; Exit [It] never names two objects alike, whatever an org is called - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:320 @ 11/01/26 15:47:38.036 (2ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render serves only priced models, each only to its own org" classname="Kubernetes Gateway Suite" status="passed" time="0.00014775">
+              <system-err>&gt; Enter [It] serves only priced models, each only to its own org - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:344 @ 11/01/26 15:47:38.036&#xA;&lt; Exit [It] serves only priced models, each only to its own org - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:344 @ 11/01/26 15:47:38.037 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render hides an org&#39;s MCP server from other orgs&#39; keys with a target condition (agentgateway v1.7)" classname="Kubernetes Gateway Suite" status="passed" time="0.000311625">
+              <system-err>&gt; Enter [It] hides an org&#39;s MCP server from other orgs&#39; keys with a target condition (agentgateway v1.7) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:364 @ 11/01/26 15:47:38.037&#xA;&lt; Exit [It] hides an org&#39;s MCP server from other orgs&#39; keys with a target condition (agentgateway v1.7) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:364 @ 11/01/26 15:47:38.037 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render refuses an MCP request with a gateway key in a header but authorization (#262)" classname="Kubernetes Gateway Suite" status="passed" time="0.000172708">
+              <system-err>&gt; Enter [It] refuses an MCP request with a gateway key in a header but authorization (#262) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:398 @ 11/01/26 15:47:38.037&#xA;&lt; Exit [It] refuses an MCP request with a gateway key in a header but authorization (#262) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:398 @ 11/01/26 15:47:38.037 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render refuses a provider key without a Secret to hold it" classname="Kubernetes Gateway Suite" status="passed" time="2.3541e-05">
+              <system-err>&gt; Enter [It] refuses a provider key without a Secret to hold it - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:409 @ 11/01/26 15:47:38.037&#xA;&lt; Exit [It] refuses a provider key without a Secret to hold it - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:409 @ 11/01/26 15:47:38.037 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Render holds no key material, only hashes" classname="Kubernetes Gateway Suite" status="passed" time="0.000579959">
+              <system-err>&gt; Enter [It] holds no key material, only hashes - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:416 @ 11/01/26 15:47:38.037&#xA;&lt; Exit [It] holds no key material, only hashes - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/render_test.go:416 @ 11/01/26 15:47:38.038 (1ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) org-scoped models (plan item PV1) routes each org&#39;s plain model name to its own provider" classname="Kubernetes Gateway Suite" status="skipped" time="0.002538542">
+              <skipped message="skipped - KOINON_KIND_KUBECONFIG and KOINON_KIND_HOST are not set: run hack/g2-kind.sh"></skipped>
+              <system-err>&gt; Enter [BeforeAll] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:141 @ 11/01/26 15:47:38.038&#xA;[SKIPPED] KOINON_KIND_KUBECONFIG and KOINON_KIND_HOST are not set: run hack/g2-kind.sh&#xA;In [BeforeAll] at: /tmp/claude-502/kw/l456/internal/gateway/kubernetes/kind_test.go:77 @ 11/01/26 15:47:38.04&#xA;&lt; Exit [BeforeAll] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:141 @ 11/01/26 15:47:38.04 (2ms)&#xA;&gt; Enter [AfterEach] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:221 @ 11/01/26 15:47:38.04&#xA;&lt; Exit [AfterEach] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:221 @ 11/01/26 15:47:38.04 (0s)&#xA;&gt; Enter [DeferCleanup (All)] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:156 @ 11/01/26 15:47:38.04&#xA;&lt; Exit [DeferCleanup (All)] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:156 @ 11/01/26 15:47:38.04 (0s)&#xA;&gt; Enter [DeferCleanup (All)] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:153 @ 11/01/26 15:47:38.04&#xA;&lt; Exit [DeferCleanup (All)] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:153 @ 11/01/26 15:47:38.04 (0s)&#xA;&gt; Enter [DeferCleanup (All)] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:153 @ 11/01/26 15:47:38.04&#xA;&lt; Exit [DeferCleanup (All)] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:153 @ 11/01/26 15:47:38.04 (0s)&#xA;&gt; Enter [DeferCleanup (All)] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:153 @ 11/01/26 15:47:38.04&#xA;&lt; Exit [DeferCleanup (All)] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:153 @ 11/01/26 15:47:38.04 (0s)&#xA;&gt; Enter [DeferCleanup (All)] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:151 @ 11/01/26 15:47:38.04&#xA;&lt; Exit [DeferCleanup (All)] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:151 @ 11/01/26 15:47:38.04 (0s)&#xA;&gt; Enter [DeferCleanup (All)] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:143 @ 11/01/26 15:47:38.04&#xA;&lt; Exit [DeferCleanup (All)] kubernetes: models, keys and tools (G1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:143 @ 11/01/26 15:47:38.04 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) org-scoped models (plan item PV1) keeps an org&#39;s key off another org&#39;s models" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:237 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) org-scoped models (plan item PV1) does not serve another org&#39;s gateway-wide id to a key, however the name is spelled" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:248 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) org-scoped models (plan item PV1) does not follow a redirect from a provider to another address" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:275 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) org-scoped models (plan item PV1) does not let the client pick another org by header" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:296 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) org-scoped models (plan item PV1) restricts a system key to its own models and leaves agent keys alone" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:310 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) org-scoped models (plan item PV1) serves no unpriced model" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:323 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) org-scoped models (plan item PV1) forces the routing guard into the request only for guarded models" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:328 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) org-scoped models (plan item PV1) always asks a streaming upstream for usage, whatever the client sent" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:342 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) org-scoped models (plan item PV1) passes cache_control markers through to the upstream unchanged (ADR 0068)" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:375 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) org-scoped models (plan item PV1) sends the provider&#39;s key file content as the upstream credential" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:412 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) rejects requests without a key" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:420 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) serves a valid key and reports usage" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:427 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) shows each agent only its granted tools" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:455 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) lists the readiness prompt to every agent, and no other prompt" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:476 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) tells the target which agent calls, overwriting a client-supplied header" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:491 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) rejects MCP requests without a key" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:503 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: models, keys and tools (G1) rejects a revoked key after re-render and reload" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:508 @ 11/01/26 15:47:38.04&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Driver without a cluster applies, waits for the proxy with the revision&#39;s probe key, and prunes what is no longer rendered" classname="Kubernetes Gateway Suite" status="passed" time="0.001389083">
+              <system-err>&gt; Enter [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.04&#xA;&lt; Exit [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.04 (0s)&#xA;&gt; Enter [It] applies, waits for the proxy with the revision&#39;s probe key, and prunes what is no longer rendered - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:142 @ 11/01/26 15:47:38.04&#xA;&lt; Exit [It] applies, waits for the proxy with the revision&#39;s probe key, and prunes what is no longer rendered - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:142 @ 11/01/26 15:47:38.042 (1ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Driver without a cluster returns the revision with a RejectedError for the refused objects only" classname="Kubernetes Gateway Suite" status="passed" time="0.000335208">
+              <system-err>&gt; Enter [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.042&#xA;&lt; Exit [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.042 (0s)&#xA;&gt; Enter [It] returns the revision with a RejectedError for the refused objects only - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:160 @ 11/01/26 15:47:38.042&#xA;&lt; Exit [It] returns the revision with a RejectedError for the refused objects only - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:160 @ 11/01/26 15:47:38.042 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Driver without a cluster attributes a policy&#39;s PartiallyValid key entries to the org whose ConfigMap it names" classname="Kubernetes Gateway Suite" status="passed" time="0.000272666">
+              <system-err>&gt; Enter [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.042&#xA;&lt; Exit [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.042 (0s)&#xA;&gt; Enter [It] attributes a policy&#39;s PartiallyValid key entries to the org whose ConfigMap it names - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:179 @ 11/01/26 15:47:38.042&#xA;&lt; Exit [It] attributes a policy&#39;s PartiallyValid key entries to the org whose ConfigMap it names - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:179 @ 11/01/26 15:47:38.042 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Driver without a cluster reports an org&#39;s object that gets no status after the grace period, and fails on a platform object that does not" classname="Kubernetes Gateway Suite" status="passed" time="0.131328792">
+              <system-err>&gt; Enter [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.042&#xA;&lt; Exit [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.042 (0s)&#xA;&gt; Enter [It] reports an org&#39;s object that gets no status after the grace period, and fails on a platform object that does not - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:196 @ 11/01/26 15:47:38.042&#xA;&lt; Exit [It] reports an org&#39;s object that gets no status after the grace period, and fails on a platform object that does not - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:196 @ 11/01/26 15:47:38.174 (131ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Driver without a cluster reports an object the API server finds invalid on its org, and fails on an invalid platform object" classname="Kubernetes Gateway Suite" status="passed" time="0.000949208">
+              <system-err>&gt; Enter [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.174&#xA;&lt; Exit [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.174 (0s)&#xA;&gt; Enter [It] reports an object the API server finds invalid on its org, and fails on an invalid platform object - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:220 @ 11/01/26 15:47:38.174&#xA;&lt; Exit [It] reports an object the API server finds invalid on its org, and fails on an invalid platform object - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:220 @ 11/01/26 15:47:38.175 (1ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Driver without a cluster revokes the last key of an org during the apply, and still prunes when another object fails to apply" classname="Kubernetes Gateway Suite" status="passed" time="0.001957459">
+              <system-err>&gt; Enter [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.175&#xA;&lt; Exit [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.175 (0s)&#xA;&gt; Enter [It] revokes the last key of an org during the apply, and still prunes when another object fails to apply - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:240 @ 11/01/26 15:47:38.175&#xA;&lt; Exit [It] revokes the last key of an org during the apply, and still prunes when another object fails to apply - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:240 @ 11/01/26 15:47:38.177 (2ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Driver without a cluster fails when the API server refuses a key ConfigMap, whose old keys would stay live" classname="Kubernetes Gateway Suite" status="passed" time="0.000262084">
+              <system-err>&gt; Enter [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.177&#xA;&lt; Exit [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.177 (0s)&#xA;&gt; Enter [It] fails when the API server refuses a key ConfigMap, whose old keys would stay live - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:266 @ 11/01/26 15:47:38.177&#xA;&lt; Exit [It] fails when the API server refuses a key ConfigMap, whose old keys would stay live - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:266 @ 11/01/26 15:47:38.177 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Driver without a cluster does not wait for a proxy that never serves the revision" classname="Kubernetes Gateway Suite" status="passed" time="0.000288375">
+              <system-err>&gt; Enter [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.177&#xA;&lt; Exit [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.177 (0s)&#xA;&gt; Enter [It] does not wait for a proxy that never serves the revision - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:279 @ 11/01/26 15:47:38.177&#xA;&lt; Exit [It] does not wait for a proxy that never serves the revision - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:279 @ 11/01/26 15:47:38.177 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] Driver without a cluster maps the controller&#39;s NACK events to the objects they name" classname="Kubernetes Gateway Suite" status="passed" time="0.000704167">
+              <system-err>&gt; Enter [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.177&#xA;&lt; Exit [BeforeEach] Driver without a cluster - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:135 @ 11/01/26 15:47:38.177 (0s)&#xA;&gt; Enter [It] maps the controller&#39;s NACK events to the objects they name - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:285 @ 11/01/26 15:47:38.177&#xA;&lt; Exit [It] maps the controller&#39;s NACK events to the objects they name - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:285 @ 11/01/26 15:47:38.178 (1ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes mode: a rejected object (plan item G2) reports an object the controller refuses on its org and keeps serving the others" classname="Kubernetes Gateway Suite" status="skipped" time="0.000111291">
+              <skipped message="skipped - KOINON_KIND_KUBECONFIG and KOINON_KIND_HOST are not set: run hack/g2-kind.sh"></skipped>
+              <system-err>&gt; Enter [BeforeAll] kubernetes mode: a rejected object (plan item G2) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/rejection_test.go:61 @ 11/01/26 15:47:38.178&#xA;[SKIPPED] KOINON_KIND_KUBECONFIG and KOINON_KIND_HOST are not set: run hack/g2-kind.sh&#xA;In [BeforeAll] at: /tmp/claude-502/kw/l456/internal/gateway/kubernetes/kind_test.go:77 @ 11/01/26 15:47:38.178&#xA;&lt; Exit [BeforeAll] kubernetes mode: a rejected object (plan item G2) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/rejection_test.go:61 @ 11/01/26 15:47:38.178 (0s)&#xA;&gt; Enter [AfterEach] kubernetes mode: a rejected object (plan item G2) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/rejection_test.go:92 @ 11/01/26 15:47:38.178&#xA;&lt; Exit [AfterEach] kubernetes mode: a rejected object (plan item G2) - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/rejection_test.go:92 @ 11/01/26 15:47:38.178 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes mode: a rejected object (plan item G2) reports an object the controller never picks up on its org, after a grace period" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/kubernetes/rejection_test.go:119 @ 11/01/26 15:47:38.178&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes mode: a rejected object (plan item G2) recovers when the object is fixed" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/kubernetes/rejection_test.go:135 @ 11/01/26 15:47:38.178&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes mode: a rejected object (plan item G2) reports an object the API server refuses on its org" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/kubernetes/rejection_test.go:143 @ 11/01/26 15:47:38.178&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] NACK attribution picks the object a message names, not every object that shares its prefix, and finds ConfigMaps" classname="Kubernetes Gateway Suite" status="passed" time="0.000347792">
+              <system-err>&gt; Enter [It] picks the object a message names, not every object that shares its prefix, and finds ConfigMaps - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:326 @ 11/01/26 15:47:38.178&#xA;&lt; Exit [It] picks the object a message names, not every object that shares its prefix, and finds ConfigMaps - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:326 @ 11/01/26 15:47:38.178 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] NACK attribution does not take a longer name for a shorter one" classname="Kubernetes Gateway Suite" status="passed" time="0.00026175">
+              <system-err>&gt; Enter [It] does not take a longer name for a shorter one - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:334 @ 11/01/26 15:47:38.178&#xA;&lt; Exit [It] does not take a longer name for a shorter one - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:334 @ 11/01/26 15:47:38.179 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] NACK attribution attributes a message that names only the Gateway to the platform" classname="Kubernetes Gateway Suite" status="passed" time="0.000270584">
+              <system-err>&gt; Enter [It] attributes a message that names only the Gateway to the platform - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:342 @ 11/01/26 15:47:38.179&#xA;&lt; Exit [It] attributes a message that names only the Gateway to the platform - /tmp/claude-502/kw/l456/internal/gateway/kubernetes/driver_test.go:342 @ 11/01/26 15:47:38.179 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: one org MCP server and no credential prefixes the tool whatever number of targets a key sees, and does not forward the gateway key" classname="Kubernetes Gateway Suite" status="skipped" time="0.000375709">
+              <skipped message="skipped - KOINON_KIND_KUBECONFIG and KOINON_KIND_HOST are not set: run hack/g2-kind.sh"></skipped>
+              <system-err>&gt; Enter [BeforeAll] kubernetes: one org MCP server and no credential - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:777 @ 11/01/26 15:47:38.179&#xA;[SKIPPED] KOINON_KIND_KUBECONFIG and KOINON_KIND_HOST are not set: run hack/g2-kind.sh&#xA;In [BeforeAll] at: /tmp/claude-502/kw/l456/internal/gateway/kubernetes/kind_test.go:77 @ 11/01/26 15:47:38.179&#xA;&lt; Exit [BeforeAll] kubernetes: one org MCP server and no credential - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:777 @ 11/01/26 15:47:38.179 (0s)&#xA;&gt; Enter [DeferCleanup (All)] kubernetes: one org MCP server and no credential - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:779 @ 11/01/26 15:47:38.179&#xA;&lt; Exit [DeferCleanup (All)] kubernetes: one org MCP server and no credential - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:779 @ 11/01/26 15:47:38.179 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: one org MCP server and no credential shows the lone org target to no other org" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:821 @ 11/01/26 15:47:38.179&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: org MCP servers (MC1) lists an agent only the granted tools of its own org&#39;s servers" classname="Kubernetes Gateway Suite" status="skipped" time="0.001110875">
+              <skipped message="skipped - KOINON_KIND_KUBECONFIG and KOINON_KIND_HOST are not set: run hack/g2-kind.sh"></skipped>
+              <system-err>&gt; Enter [BeforeAll] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:568 @ 11/01/26 15:47:38.179&#xA;[SKIPPED] KOINON_KIND_KUBECONFIG and KOINON_KIND_HOST are not set: run hack/g2-kind.sh&#xA;In [BeforeAll] at: /tmp/claude-502/kw/l456/internal/gateway/kubernetes/kind_test.go:77 @ 11/01/26 15:47:38.18&#xA;&lt; Exit [BeforeAll] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:568 @ 11/01/26 15:47:38.18 (1ms)&#xA;&gt; Enter [AfterEach] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:622 @ 11/01/26 15:47:38.18&#xA;&lt; Exit [AfterEach] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:622 @ 11/01/26 15:47:38.18 (0s)&#xA;&gt; Enter [DeferCleanup (All)] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:578 @ 11/01/26 15:47:38.18&#xA;&lt; Exit [DeferCleanup (All)] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:578 @ 11/01/26 15:47:38.18 (0s)&#xA;&gt; Enter [DeferCleanup (All)] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:577 @ 11/01/26 15:47:38.18&#xA;&lt; Exit [DeferCleanup (All)] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:577 @ 11/01/26 15:47:38.18 (0s)&#xA;&gt; Enter [DeferCleanup (All)] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:576 @ 11/01/26 15:47:38.18&#xA;&lt; Exit [DeferCleanup (All)] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:576 @ 11/01/26 15:47:38.18 (0s)&#xA;&gt; Enter [DeferCleanup (All)] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:575 @ 11/01/26 15:47:38.18&#xA;&lt; Exit [DeferCleanup (All)] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:575 @ 11/01/26 15:47:38.18 (0s)&#xA;&gt; Enter [DeferCleanup (All)] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:573 @ 11/01/26 15:47:38.18&#xA;&lt; Exit [DeferCleanup (All)] kubernetes: org MCP servers (MC1) - /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:573 @ 11/01/26 15:47:38.18 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: org MCP servers (MC1) never shows or serves another org&#39;s server, even to an agent granted it" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:637 @ 11/01/26 15:47:38.18&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: org MCP servers (MC1) injects the credential header at the gateway and does not let the agent set it" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:653 @ 11/01/26 15:47:38.18&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: org MCP servers (MC1) does not forward the agent&#39;s gateway key to a server without a credential" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:684 @ 11/01/26 15:47:38.18&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: org MCP servers (MC1) refuses an MCP request with the agent&#39;s key in any header but Authorization, and passes a server only the headers MCP needs (#262)" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:691 @ 11/01/26 15:47:38.18&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: org MCP servers (MC1) drops a credential header the agent sent to a server that has none" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:729 @ 11/01/26 15:47:38.18&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: org MCP servers (MC1) does not expose the credential to the agent in what it receives" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:744 @ 11/01/26 15:47:38.18&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] kubernetes: org MCP servers (MC1) keeps serving the other servers while one is down" classname="Kubernetes Gateway Suite" status="skipped" time="0">
+              <skipped message="skipped - Spec skipped because Skip() was called in BeforeAll"></skipped>
+              <system-err>[SKIPPED] Spec skipped because Skip() was called in BeforeAll&#xA;In [It] at: /tmp/claude-502/kw/l456/internal/gateway/gatewaytest/spec.go:762 @ 11/01/26 15:47:38.181&#xA;</system-err>
+          </testcase>
+      </testsuite>
+  </testsuites>

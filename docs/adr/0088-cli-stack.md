@@ -1,4 +1,4 @@
-# 0087. The command-line stack: cobra, pflag and viper, with Charm on a terminal only
+# 0088. The command-line stack: cobra, pflag and viper, with Charm on a terminal only
 
 - Status: Accepted
 - Date: 2026-11-01
