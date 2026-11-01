@@ -31,14 +31,10 @@
 package reconciler
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
-	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -50,7 +46,6 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/audit"
-	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
@@ -59,6 +54,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/reconciler/gatewayplan"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/sandboxres"
 )
@@ -202,36 +198,14 @@ type Reconciler struct {
 	wsMu sync.Mutex
 	// githubRevs is the token revision last pushed per GitHub provider record, to log refreshes.
 	githubRevs map[string]string
-	// unpricedLogged is the unpriced model set last logged.
-	unpricedLogged string
-	// keyWrittenAt is when each provider key file written by this process was written, until it
-	// has had ProviderKeySettle to reach the gateway.
-	keyWrittenAt map[string]time.Time
 	// clampMu guards clampLogged: the clamps last logged per agent, so a pass that changes nothing
 	// logs nothing.
 	clampMu     sync.Mutex
 	clampLogged map[string]string
-	// lastLimit is the budget last pushed per agent key, so one agent whose budget cannot be
-	// computed keeps it (and never gets more) instead of stopping the pass for everyone.
-	lastLimit map[gateway.AgentRef]gateway.Limit
-	// notLive holds the IDs of keys issued by this process that no applied gateway state has
-	// carried yet. While the gateway refuses state, an agent with such a key gets no sandbox
-	// work: its provider record would name a key the gateway does not know.
-	notLive map[string]bool
-	// appliedSinceStart is set once a gateway state has been applied by this process. Before
-	// that, notLive is empty after a restart whatever the gateway serves, so a failing Apply holds
-	// back every active agent.
-	appliedSinceStart bool
-	// appliedFile is the key file (data key) each provider ID was last applied with.
-	appliedFile map[string]string
-	// appliedMCPFile is the same for org MCP servers, by server ID.
-	appliedMCPFile map[string]string
-	// probeKeys are the prober's gateway keys, in memory only; probes are the servers the last
-	// applied state lets the prober list.
-	probeKeys map[gateway.AgentRef]gateway.IssuedKey
-	probes    []mcpProbe
-	mcp       *mcpservers.Service
-	m         *Metrics
+	// plan is the gateway side of a pass and its memory (internal/reconciler/gatewayplan).
+	plan *gatewayplan.Planner
+	mcp  *mcpservers.Service
+	m    *Metrics
 
 	// supMu guards the supervisor image read from the gateway (supervisor.go).
 	supMu    sync.Mutex
@@ -312,6 +286,10 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{},
 		mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
+		plan: gatewayplan.New(gatewayplan.Config{
+			KeyDir: cfg.ProviderKeyDir, KeySettle: cfg.ProviderKeySettle, ToolServers: cfg.ToolServers,
+			MCPAskURL: cfg.MCPAskURL, Logger: cfg.Logger,
+		}),
 	}, nil
 }
 
@@ -392,9 +370,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	workspaces := map[string]string{} // org ID -> workspace, ensured in this pass
 	var (
 		items []*work
-		keys  []gateway.Key
 		errs  []error
-		tools = map[gateway.AgentRef][]gateway.ToolGrant{}
 	)
 	for _, org := range orgs {
 		agents, err := r.q.ListAgentsToReconcile(ctx, org.ID)
@@ -425,12 +401,6 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 				warm++
 			}
 			items = append(items, w)
-			if w.key.ID != "" {
-				keys = append(keys, w.key)
-			}
-			if len(w.tools) > 0 {
-				tools[agentRef(org, a.ID)] = w.tools
-			}
 		}
 	}
 
@@ -452,45 +422,59 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	r.m.PassErrors.WithLabelValues(errKindMCP).Add(float64(len(mcpErrs)))
 	errs = append(errs, mcpErrs...)
 
-	// One gateway state for every agent: keys of archived agents are revoked by omission.
-	state := gateway.State{Keys: keys, Providers: served.providers, MCP: r.mcpTargets(), Tools: tools}
-	r.warnUnpriced(state)
-	// Spend limits net of recorded spend (plan item L1), recomputed every pass, so a key
-	// rotation or a gateway that lost its budget counters gets the remainder, not the full
-	// limit. An agent whose budget cannot be computed fails closed (its last pushed limit, or
-	// zero) and is reported; it never stops the pass for the other agents and orgs.
+	// The gateway side is decided by the plan (internal/reconciler/gatewayplan): one state for every
+	// agent, keys of archived agents revoked by omission. The reconciler loads its inputs and runs its
+	// steps in the order it returns them.
+	//
+	// Spend limits net of recorded spend (plan item L1) are recomputed every pass, so a key rotation or
+	// a gateway that lost its budget counters gets the remainder, not the full limit.
 	now := r.cfg.Now()
-	for _, w := range items {
-		if w.key.ID == "" {
-			continue
+	limitFor := r.cfg.AgentLimit
+	if limitFor == nil {
+		limitFor = ledger.AgentLimit
+	}
+	agents := make([]gatewayplan.Agent, len(items))
+	for i, w := range items {
+		agents[i] = gatewayplan.Agent{
+			Org: gatewayplan.Org{ID: w.org.ID, Slug: w.org.Slug}, ID: w.agent.ID, Ref: agentRef(w.org, w.agent.ID),
+			Active: w.agent.Status == store.AgentStatusActive, Key: w.key, Tools: w.tools,
 		}
-		limitFor := r.cfg.AgentLimit
-		if limitFor == nil {
-			limitFor = ledger.AgentLimit
+		if w.key.ID != "" {
+			agents[i].Limit, agents[i].LimitErr = limitFor(ctx, r.q, w.agent, now)
 		}
-		l, err := limitFor(ctx, r.q, w.agent, now)
-		if err != nil {
+	}
+	orgRefs := make([]gatewayplan.Org, len(orgs))
+	for i, o := range orgs {
+		orgRefs[i] = gatewayplan.Org{ID: o.ID, Slug: o.Slug}
+	}
+	ledgerEnforces := false
+	if g, ok := r.gw.(gateway.LedgerBudgets); ok {
+		ledgerEnforces = g.LedgerEnforcesBudgets()
+	}
+	draft := r.plan.Begin(gatewayplan.Input{
+		Now: now, Orgs: orgRefs, Agents: agents,
+		Providers: served.providers, ProviderFiles: served.files, ModelIDs: served.modelIDs,
+		MCP: mcpServed.servers, MCPFiles: mcpServed.files, LedgerEnforcesBudgets: ledgerEnforces,
+	})
+	// An agent whose budget cannot be computed fails closed (its last pushed limit, or zero) and is
+	// reported; it never stops the pass for the other agents and orgs.
+	for _, lf := range draft.LimitFailures {
+		w := items[lf.Agent]
+		r.m.PassErrors.WithLabelValues(errKindSpendLimit).Inc()
+		r.log.Error("agent budget not computed; its key keeps its last pushed limit, or zero if it had none",
+			"agent", execution.UUIDString(w.agent.ID.Bytes), "org", w.key.Agent.Org, "err", lf.Err)
+		errs = append(errs, fmt.Errorf("spend limit of agent %s not computed (key fails closed): %w", execution.UUIDString(w.agent.ID.Bytes), lf.Err))
+	}
+	// A budget with nothing left stops the agent's runs (or the org's) with the budget reason before
+	// the Apply below blocks or revokes the key, so a run in flight records the budget stop and not the
+	// gateway's 401 or 429 (issue #188).
+	for _, i := range draft.Stops {
+		w := items[i]
+		if n, err := ledger.StopSpent(ctx, r.pool, w.agent, now); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindSpendLimit).Inc()
-			failed := r.failClosedLimit(w.key.Agent, now)
-			r.log.Error("agent budget not computed; its key keeps its last pushed limit, or zero if it had none",
-				"agent", execution.UUIDString(w.agent.ID.Bytes), "org", w.key.Agent.Org, "err", err)
-			errs = append(errs, fmt.Errorf("spend limit of agent %s not computed (key fails closed): %w", execution.UUIDString(w.agent.ID.Bytes), err))
-			state.SetLimit(w.key.Agent, failed)
-			continue
-		}
-		r.rememberLimit(w.key.Agent, l)
-		state.SetLimit(w.key.Agent, l)
-		// A budget with nothing left stops the agent's runs (or the org's) with the budget reason
-		// before the Apply below blocks or revokes the key, so a run in flight records the budget
-		// stop and not the gateway's 401 or 429 (issue #188). A limit that could not be computed
-		// fails closed above but stops nothing: it is not known to be spent.
-		if l != nil && l.Amount <= 0 {
-			if n, err := ledger.StopSpent(ctx, r.pool, w.agent, now); err != nil {
-				r.m.PassErrors.WithLabelValues(errKindSpendLimit).Inc()
-				errs = append(errs, fmt.Errorf("stop the runs of spent agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
-			} else if n > 0 {
-				r.log.Info("budget spent: runs stopped before the key is blocked", append(w.logAttrs(), "runs", n)...)
-			}
+			errs = append(errs, fmt.Errorf("stop the runs of spent agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
+		} else if n > 0 {
+			r.log.Info("budget spent: runs stopped before the key is blocked", append(w.logAttrs(), "runs", n)...)
 		}
 	}
 	// Provider key files first, then the config that names them; files no provider uses go last.
@@ -498,47 +482,47 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	// that provider keeps serving with its previous file, or is left out until the file has arrived.
 	var written []string
 	var present map[string]bool
-	files := map[string][]byte{}
-	maps.Copy(files, served.files)
-	maps.Copy(files, mcpServed.files)
-	if len(files) > 0 {
+	if len(draft.Files) > 0 {
 		var err error
-		if written, present, err = r.cfg.ProviderKeys.Put(ctx, files); err != nil {
+		if written, present, err = r.cfg.ProviderKeys.Put(ctx, draft.Files); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindProviderKeys).Inc()
 			return errors.Join(append(errs, fmt.Errorf("reconciler: deliver provider keys: %w", err))...)
 		}
 	}
-	settling := r.keysSettling(written, now)
-	keep := r.settleProviders(&state, served, settling, r.recordedFiles(ctx, served, settling, present))
-	maps.Copy(keep, r.settleMCP(&mcpServed, settling))
-	probes, err := r.applyMCP(ctx, &state, &mcpServed, items)
+	if len(mcpServed.servers) > 0 {
+		var err error
+		if draft.Allowances, err = r.mcpAllowancesOf(ctx, items); err != nil {
+			r.m.PassErrors.WithLabelValues(errKindMCP).Inc()
+			return errors.Join(append(errs, err)...)
+		}
+	}
+	plan, err := draft.Settle(ctx, written, present, planLookups{r})
 	if err != nil {
 		r.m.PassErrors.WithLabelValues(errKindMCP).Inc()
 		return errors.Join(append(errs, err)...)
 	}
-	errs = append(errs, r.applyModelCheck(ctx, &state, orgs, now)...)
+	for _, pr := range plan.Problems {
+		kind := errKindProvider
+		if pr.Kind == gatewayplan.ProblemSpendLimit {
+			kind = errKindSpendLimit
+		}
+		r.m.PassErrors.WithLabelValues(kind).Inc()
+		errs = append(errs, pr.Err)
+	}
 	// Sandbox work is per-sandbox jobs, outside the sequential pass (plan item LT1, practice B4).
 	// An agent whose key the gateway already serves does not depend on the Apply below, which may
 	// wait for agentgateway's hot reload for about a minute: its sandbox starts and stops now,
 	// concurrently with it. An agent with a new key waits for the Apply, as before.
-	var early, late []*work
-	for _, w := range items {
-		if w.agent.Status == store.AgentStatusActive && w.key.ID != "" && r.keyNotLive(w.key.ID) {
-			late = append(late, w)
-			continue
-		}
-		early = append(early, w)
-	}
+	early := workOf(items, plan.Early)
 	// One semaphore for the whole pass, so the early and the late jobs together stay within
 	// SandboxJobs.
 	sem := make(chan struct{}, r.cfg.SandboxJobs)
 	earlyJobs := r.startJobs(ctx, early, workspaces, sem)
 
-	var rejections []gateway.Rejection
-	applyFailed := false
+	var res gatewayplan.ApplyResult
 	rejectedReason := ""
 	applyStart := time.Now()
-	_, applyErr := r.gw.Apply(ctx, state)
+	_, applyErr := r.gw.Apply(ctx, plan.State)
 	r.m.GatewayApply.Observe(time.Since(applyStart).Seconds())
 	if err := applyErr; err != nil {
 		// A Kubernetes-mode gateway judges objects one by one: the revision is live for everything
@@ -548,7 +532,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			// The gateway is unreachable or the reload did not complete. Sandbox work does not
 			// depend on it (start on demand, idle stop), so it goes on, except for agents whose
 			// new key is not live yet. Nothing is recorded as applied and nothing is pruned.
-			applyFailed = true
+			res.Failed = true
 			var cfgRej *gateway.ConfigRejectedError
 			if errors.As(err, &cfgRej) {
 				// The whole file was refused and the gateway keeps its previous config, so no key,
@@ -566,7 +550,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			}
 			errs = append(errs, fmt.Errorf("reconciler: apply gateway state: %w", err))
 		} else {
-			rejections = rej.Rejected
+			res.Rejections = rej.Rejected
 			r.m.PassErrors.WithLabelValues(errKindGatewayRejected).Inc()
 			for _, x := range rej.Rejected {
 				r.log.Error("the gateway rejected an object; the rest is live", "org", x.Org, "kind", x.Kind, "object", x.Name, "reason", x.Reason)
@@ -575,16 +559,14 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		}
 	}
 	r.m.GatewayConfigRejected.Set(b2f(rejectedReason != ""))
-	if !applyFailed {
-		r.keysLive(state, rejections)
-		r.recordApplied(served, state, rejections)
-		if err := r.recordServed(ctx, orgs, served, state, rejections); err != nil {
+	outcome := plan.Applied(res)
+	if !res.Failed {
+		if err := r.recordServed(ctx, outcome.Served); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 			errs = append(errs, err)
 		}
-		r.recordAppliedMCP(mcpServed, probes)
 		if r.cfg.ProviderKeys != nil && len(provErrs) == 0 && len(mcpErrs) == 0 {
-			if err := r.cfg.ProviderKeys.Prune(ctx, keep); err != nil {
+			if err := r.cfg.ProviderKeys.Prune(ctx, plan.Keep); err != nil {
 				r.m.PassErrors.WithLabelValues(errKindProviderKeys).Inc()
 				errs = append(errs, fmt.Errorf("reconciler: prune provider keys: %w", err))
 			}
@@ -593,21 +575,17 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 
 	heldBack := 0
 	defer func() { r.m.AgentsHeldBack.Set(float64(heldBack)) }()
-	var lateRun []*work
-	for _, w := range late {
-		if applyFailed || r.keyNotLive(w.key.ID) {
-			r.log.Warn("the gateway does not serve the agent's new key yet; its sandbox work waits", w.logAttrs()...)
-			msg := "waiting for the gateway to serve the agent's new key"
-			if rejectedReason != "" {
-				msg += ": agentgateway rejected the config: " + rejectedReason
-			}
-			r.recordMessage(ctx, w, errors.New(msg))
-			heldBack++
-			continue
+	for _, w := range workOf(items, outcome.Held) {
+		r.log.Warn("the gateway does not serve the agent's new key yet; its sandbox work waits", w.logAttrs()...)
+		msg := "waiting for the gateway to serve the agent's new key"
+		if rejectedReason != "" {
+			msg += ": agentgateway rejected the config: " + rejectedReason
 		}
-		lateRun = append(lateRun, w)
+		r.recordMessage(ctx, w, errors.New(msg))
+		heldBack++
 	}
-	errs = append(errs, r.startJobs(ctx, lateRun, workspaces, sem).wait()...)
+	rejections := res.Rejections
+	errs = append(errs, r.startJobs(ctx, workOf(items, outcome.Run), workspaces, sem).wait()...)
 	errs = append(errs, earlyJobs.wait()...)
 	// Each rejected object is reported on its org's agents, after their own pass has recorded its state.
 	// Several rejections of one org are joined into one message, not overwritten.
@@ -675,216 +653,78 @@ func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[s
 	return j
 }
 
-// keysLive records that the applied state carries its keys.
-func (r *Reconciler) keysLive(s gateway.State, rejected []gateway.Rejection) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.appliedSinceStart = true
-	refused := map[string]bool{}
-	for _, x := range rejected {
-		if x.Kind == "Key" {
-			refused[x.Name] = true
-		}
-	}
-	for _, k := range s.Keys {
-		if !refused[k.ID] {
-			delete(r.notLive, k.ID)
-		}
-	}
-}
-
-// keyNotLive reports whether the gateway may not serve key id yet. Until this process has applied
-// a state, it cannot tell, so every key counts as not live.
-func (r *Reconciler) keyNotLive(id string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return !r.appliedSinceStart || r.notLive[id]
-}
-
-// recordedFiles returns, for each provider whose key file is settling and that this process has not
-// applied, the key file gateway_served_models says it was last served with, when that file is still in
-// the provider keys Secret: a key rotated while the reconciler was down (or before a new leader took
-// over) keeps being served with the previous file instead of the provider being dropped. A failed
-// read only loses the fallback.
-func (r *Reconciler) recordedFiles(ctx context.Context, served servedProviders, settling, present map[string]bool) map[string]string {
-	out := map[string]string{}
-	if len(settling) == 0 {
-		return out
-	}
-	for i, id := range served.ids {
-		name := served.fileNames[i]
-		if name == "" || !settling[name] {
-			continue
-		}
-		r.mu.Lock()
-		applied := r.appliedFile[id]
-		r.mu.Unlock()
-		if applied != "" {
-			continue
-		}
-		file, err := r.q.GetGatewayServedKeyFile(ctx, store.GetGatewayServedKeyFileParams{OrgID: served.orgIDs[i], ProviderID: served.pids[i]})
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-		case err != nil:
-			r.log.Warn("reading the key file a provider was last served with failed", "provider", id, "err", err)
-		case file != name && present[file]:
-			out[id] = file
-		}
+// workOf returns the items at the given indexes.
+func workOf(items []*work, idx []int) []*work {
+	out := make([]*work, 0, len(idx))
+	for _, i := range idx {
+		out = append(out, items[i])
 	}
 	return out
 }
 
-// settleProviders handles providers whose key file is still settling: with a previously applied
-// file (this process's, else the recorded one) the provider keeps using it, without one it is left
-// out of state. It returns the data keys to keep in the provider keys Secret.
-func (r *Reconciler) settleProviders(state *gateway.State, served servedProviders, settling map[string]bool, recorded map[string]string) map[string]bool {
-	keep := map[string]bool{}
-	for name := range served.files {
-		keep[name] = true
-	}
-	if len(settling) == 0 {
-		return keep
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var out []gateway.Provider
-	for i, p := range served.providers {
-		name := served.fileNames[i]
-		if name == "" || !settling[name] {
-			out = append(out, p)
+// mcpAllowancesOf reads the MCP allowlists of the orgs that have an active agent with a key, once per org.
+func (r *Reconciler) mcpAllowancesOf(ctx context.Context, items []*work) (map[string]map[pgtype.UUID][]gatewayplan.Allowed, error) {
+	out := map[string]map[pgtype.UUID][]gatewayplan.Allowed{}
+	for _, w := range items {
+		if w.agent.Status != store.AgentStatusActive || w.key.ID == "" {
 			continue
 		}
-		if prev := cmp.Or(r.appliedFile[served.ids[i]], recorded[served.ids[i]]); prev != "" {
-			p.APIKeyFile = path.Join(r.cfg.ProviderKeyDir, prev)
-			keep[prev] = true
-			out = append(out, p)
-			r.log.Info("a new provider key is still reaching the gateway; serving with the previous one", "org", p.Org, "provider", p.Name)
+		if _, ok := out[w.org.Slug]; ok {
 			continue
 		}
-		r.log.Info("a new provider key is still reaching the gateway; the provider is not served until it has", "org", p.Org, "provider", p.Name)
-	}
-	state.Providers = out
-	return keep
-}
-
-// recordApplied remembers which key file each served provider was applied with. A provider of an org
-// whose model object the gateway rejected was not applied, so its file is not recorded.
-func (r *Reconciler) recordApplied(served servedProviders, state gateway.State, rejections []gateway.Rejection) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	rejected := map[string]bool{}
-	for _, x := range rejections {
-		if x.Kind == "AgentgatewayModel" {
-			rejected[x.Org] = true
+		a, err := r.mcpAllowances(ctx, w.org.ID)
+		if err != nil {
+			return nil, err
 		}
+		out[w.org.Slug] = a
 	}
-	next := map[string]string{}
-	for i, id := range served.ids {
-		if rejected[served.providers[i].Org] {
-			continue
-		}
-		for _, p := range state.Providers {
-			if p.Org == served.providers[i].Org && p.Name == served.providers[i].Name && p.APIKeyFile != "" {
-				next[id] = path.Base(p.APIKeyFile)
-			}
-		}
-	}
-	r.appliedFile = next
+	return out, nil
 }
 
 // recordServed writes, for every org, the models the applied state serves to gateway_served_models,
-// which koinon-agentd waits on before a run starts its harness (issue #174). A provider whose new key
-// file is still reaching the gateway pod and that has no previous file is not in state, so its models
-// are not recorded; one that keeps serving with its previous file stays recorded. An org whose model
-// objects the gateway rejected gets nothing new recorded (as in recordApplied), but models no longer
-// in state are removed. Only the leader reconciles, so only the leader writes.
-func (r *Reconciler) recordServed(ctx context.Context, orgs []store.ListOrgsToReconcileRow, served servedProviders, state gateway.State, rejections []gateway.Rejection) error {
-	rejected := map[string]bool{}
-	for _, x := range rejections {
-		if x.Kind == "AgentgatewayModel" {
-			rejected[x.Org] = true
-		}
-	}
-	type entries struct {
-		ids   []pgtype.UUID
-		files []string
-	}
-	byOrg := map[string]*entries{}
-	for _, p := range state.Providers {
-		e := byOrg[p.Org]
-		if e == nil {
-			e = &entries{}
-			byOrg[p.Org] = e
-		}
-		file := ""
-		if p.APIKeyFile != "" {
-			file = path.Base(p.APIKeyFile)
-		}
-		for _, m := range p.Models {
-			if m.Price == nil {
-				continue // not served (ADR 0041)
-			}
-			if id, ok := served.modelIDs[gateway.ModelRef(p.Org, m.Name)]; ok {
-				e.ids = append(e.ids, id)
-				e.files = append(e.files, file)
-			}
-		}
-	}
+// which koinon-agentd waits on before a run starts its harness (issue #174). An org whose model objects
+// the gateway rejected gets nothing new recorded, but models no longer in state are removed. Only the
+// leader reconciles, so only the leader writes.
+func (r *Reconciler) recordServed(ctx context.Context, served []gatewayplan.ServedModels) error {
 	var errs []error
-	for _, org := range orgs {
-		// Never nil: pgx sends a nil slice as NULL, and "<> ALL (NULL)" would remove nothing.
-		e := entries{ids: []pgtype.UUID{}, files: []string{}}
-		if got := byOrg[org.Slug]; got != nil {
-			e.ids, e.files = append(e.ids, got.ids...), append(e.files, got.files...)
-		}
+	for _, s := range served {
 		var err error
-		if rejected[org.Slug] {
-			err = r.q.PruneGatewayServedModels(ctx, store.PruneGatewayServedModelsParams{OrgID: org.ID, ModelIds: e.ids})
+		if s.PruneOnly {
+			err = r.q.PruneGatewayServedModels(ctx, store.PruneGatewayServedModelsParams{OrgID: s.Org.ID, ModelIds: s.IDs})
 		} else {
-			err = r.q.SyncGatewayServedModels(ctx, store.SyncGatewayServedModelsParams{OrgID: org.ID, ModelIds: e.ids, KeyFiles: e.files})
+			err = r.q.SyncGatewayServedModels(ctx, store.SyncGatewayServedModelsParams{OrgID: s.Org.ID, ModelIds: s.IDs, KeyFiles: s.Files})
 		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			errs = append(errs, fmt.Errorf("reconciler: record the models the gateway serves for org %s: %w", org.Slug, err))
+			errs = append(errs, fmt.Errorf("reconciler: record the models the gateway serves for org %s: %w", s.Org.Slug, err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// keysSettling records the files written in this pass and returns the data keys that have not yet
-// had ProviderKeySettle to reach the gateway pod.
-func (r *Reconciler) keysSettling(written []string, now time.Time) map[string]bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.keyWrittenAt == nil {
-		r.keyWrittenAt = map[string]time.Time{}
-	}
-	for _, name := range written {
-		r.keyWrittenAt[name] = now
-	}
-	settling := map[string]bool{}
-	for name, at := range r.keyWrittenAt {
-		if r.cfg.ProviderKeySettle-now.Sub(at) > 0 {
-			settling[name] = true
-		} else {
-			delete(r.keyWrittenAt, name)
-		}
-	}
-	return settling
+// planLookups are the reads the gateway plan makes while it settles a pass.
+type planLookups struct{ r *Reconciler }
+
+func (l planLookups) SystemKey(ctx context.Context, secret string, org gatewayplan.Org, ref gateway.AgentRef) (gateway.Key, error) {
+	return l.r.systemKey(ctx, secret, org.ID, ref)
 }
 
-// warnUnpriced logs the models the gateway does not serve for lack of a price, once per set.
-func (r *Reconciler) warnUnpriced(s gateway.State) {
-	unpriced := s.Unpriced()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	key := fmt.Sprint(unpriced)
-	if len(unpriced) > 0 && key != r.unpricedLogged {
-		r.log.Warn("models without a price are not served; give free models a zero price", "models", unpriced)
+func (l planLookups) IssueKey(ctx context.Context, ref gateway.AgentRef) (gateway.IssuedKey, error) {
+	return l.r.gw.IssueKey(ctx, ref)
+}
+
+func (l planLookups) SystemLimit(ctx context.Context, org gatewayplan.Org, now time.Time) (*gateway.Limit, error) {
+	return ledger.SystemLimit(ctx, l.r.q, org.ID, now)
+}
+
+func (l planLookups) ServedKeyFile(ctx context.Context, org, provider pgtype.UUID) (string, bool, error) {
+	file, err := l.r.q.GetGatewayServedKeyFile(ctx, store.GetGatewayServedKeyFileParams{OrgID: org, ProviderID: provider})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
 	}
-	r.unpricedLogged = key
+	return file, err == nil, err
 }
 
 // prepare loads or creates the agent's row and, for an active agent, its key. It returns nil
@@ -992,12 +832,7 @@ func (r *Reconciler) ensureKey(ctx context.Context, w *work) (gateway.Key, strin
 		return gateway.Key{}, "", fmt.Errorf("record gateway key: %w", err)
 	}
 	w.sb = sb
-	r.mu.Lock()
-	if r.notLive == nil {
-		r.notLive = map[string]bool{}
-	}
-	r.notLive[issued.ID] = true
-	r.mu.Unlock()
+	r.plan.KeyIssued(issued.ID)
 	r.log.Info("issued agentgateway key", append(w.logAttrs(), "key_id", issued.ID, "reason", reason)...)
 	return issued.Key, issued.Material, nil
 }
@@ -1451,42 +1286,6 @@ func (r *Reconciler) recordMessage(ctx context.Context, w *work, err error) {
 	}
 	// The message is for operators; the reason of the latest condition stays as observed.
 	_ = r.recordRow(ctx, w, w.sb.State, w.sb.Phase, err.Error(), w.sb.Reason, w.sb.SpecHash, "")
-}
-
-// rememberLimit records the budget pushed for agent.
-func (r *Reconciler) rememberLimit(agent gateway.AgentRef, l *gateway.Limit) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.lastLimit == nil {
-		r.lastLimit = map[gateway.AgentRef]gateway.Limit{}
-	}
-	if l == nil {
-		delete(r.lastLimit, agent)
-		return
-	}
-	r.lastLimit[agent] = *l
-}
-
-// failClosedLimit is the budget for an agent whose budget could not be computed: the last one
-// pushed while it is still from the current UTC day, else zero. A pushed limit only ever shrinks
-// as the gateway charges against it, but it must not be regranted every day by a computation that
-// keeps failing; zero blocks the key until a pass computes it.
-//
-// A gateway that does not enforce limits itself (Kubernetes mode: the ledger revokes the key when
-// the amount is zero) cannot make a positive last limit bind, so there the key fails closed to zero.
-func (r *Reconciler) failClosedLimit(agent gateway.AgentRef, now time.Time) *gateway.Limit {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if g, ok := r.gw.(gateway.LedgerBudgets); ok && g.LedgerEnforcesBudgets() {
-		return &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: ledger.Window, Generation: "failed"}
-	}
-	if l, ok := r.lastLimit[agent]; ok {
-		day, _, _ := strings.Cut(l.Generation, "-")
-		if day == strconv.FormatInt(budget.DayStart(now).Unix(), 10) {
-			return &l
-		}
-	}
-	return &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: ledger.Window, Generation: "failed"}
 }
 
 func b2f(b bool) float64 {
