@@ -352,6 +352,9 @@ func (r *runner) stopped(ctx context.Context) error {
 	switch {
 	case r.isFenced():
 		return errFenced
+	case r.turnState.Load() == turnHandedOff:
+		// The pool stopped while the run was still setting up and cut it short.
+		return errShutdown
 	case ctx.Err() != nil:
 		return errShutdown
 	}
