@@ -31,7 +31,7 @@ var eraseCompat = regexp.MustCompile(`(?i)\b(DELETE\s+FROM|TRUNCATE(\s+TABLE)?(\
 var minReader = regexp.MustCompile(`(?i)min_reader_version`)
 
 // TestCompatDeclarations records the compatibility decision a migration makes. Only a migration
-// that breaks the previous release may write schema_compat.min_reader_version after 00045, and it
+// that breaks the previous release may write schema_compat.min_reader_version after 00046, and it
 // must be an UPDATE that names its own version: an expand migration cannot lock the older
 // releases out by accident.
 func TestCompatDeclarations(t *testing.T) {
@@ -46,7 +46,7 @@ func TestCompatDeclarations(t *testing.T) {
 			continue
 		}
 		v, _ := strconv.ParseInt(num, 10, 64)
-		if v <= 45 {
+		if v <= 46 {
 			continue
 		}
 		body, err := fs.ReadFile(migrations.FS, e.Name())

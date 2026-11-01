@@ -175,7 +175,7 @@ section says what the recommended option would have bought.
 8. **Binaries gate on the schema version** (procoduck, 2026-11-01). Each binary declares the range of
    goose versions it supports and stays not Ready, with a clear log line, outside it. The migration
    Job's own check (refusing to migrate past what running pods support) can follow.
-   Implemented (#408): the schema declares who can read it. Migration 00045 adds the one-row table
+   Implemented (#408): the schema declares who can read it. Migration 00046 adds the one-row table
    `schema_compat(min_reader_version)`, and `internal/schemagate` re-reads it and `goose_db_version`
    every 15 s. A binary is Ready iff the goose version is at least `migrations.MinSupported` (the
    oldest schema its code works against) and `min_reader_version` is at most the newest migration
