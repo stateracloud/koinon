@@ -155,7 +155,7 @@ func (r *Reconciler) sandboxSpec(org, agent pgtype.UUID, names execution.AgentNa
 	// The supervisor image is not in the hash: an unknown or unreadable image must not stop the
 	// other spec changes from recreating a sandbox. It has its own label, compared separately.
 	if img, known := r.supervisorImage(); known {
-		spec.Labels[LabelSupervisorImage] = img
+		spec.Labels[LabelSupervisorImage] = supervisorDigest(img)
 	}
 	return spec, hash
 }

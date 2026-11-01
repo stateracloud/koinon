@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/stateracloud/koinon/internal/execution"
@@ -52,7 +53,7 @@ func TestSpecHashLeavesTheSupervisorImageOut(t *testing.T) {
 	if h1 != h2 {
 		t.Error("a new supervisor image changes the spec hash")
 	}
-	if s1.Labels[LabelSupervisorImage] != "supervisor:1" || s2.Labels[LabelSupervisorImage] != "supervisor:2" {
+	if s1.Labels[LabelSupervisorImage] != supervisorDigest("supervisor:1") || s2.Labels[LabelSupervisorImage] != supervisorDigest("supervisor:2") || s1.Labels[LabelSupervisorImage] == s2.Labels[LabelSupervisorImage] {
 		t.Errorf("supervisor labels = %q, %q", s1.Labels[LabelSupervisorImage], s2.Labels[LabelSupervisorImage])
 	}
 }
@@ -61,7 +62,7 @@ func TestSupervisorChanged(t *testing.T) {
 	src := &stubSupervisor{err: errors.New("forbidden")}
 	r := testReconciler(src)
 	r.refreshSupervisor(t.Context())
-	old := execution.Sandbox{Labels: map[string]string{LabelSupervisorImage: "supervisor:1"}}
+	old := execution.Sandbox{Labels: map[string]string{LabelSupervisorImage: supervisorDigest("supervisor:1")}}
 	if r.supervisorChanged(old) {
 		t.Fatal("an unknown image must not drive a recreate")
 	}
@@ -73,8 +74,8 @@ func TestSupervisorChanged(t *testing.T) {
 	if r.supervisorChanged(old) {
 		t.Error("the same image is a change")
 	}
-	if r.supervisorChanged(execution.Sandbox{Labels: map[string]string{}}) {
-		t.Error("a sandbox without the label is recreated for a supervisor change")
+	if !r.supervisorChanged(execution.Sandbox{Labels: map[string]string{}}) {
+		t.Error("a sandbox without the label is not recreated once the image is known")
 	}
 	src.image = "supervisor:2"
 	r.refreshSupervisor(t.Context())
@@ -85,6 +86,28 @@ func TestSupervisorChanged(t *testing.T) {
 	r.refreshSupervisor(t.Context())
 	if img, _ := r.supervisorImage(); img != "supervisor:2" {
 		t.Errorf("image after a failed read = %q, want the last one read", img)
+	}
+}
+
+func TestSupervisorLabelIsAValidLabelValue(t *testing.T) {
+	long := "registry.example.internal:5000/some/long/organisation/path/openshell/supervisor-image:0.1.5-rc.1@sha256:" +
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	r := testReconciler(&stubSupervisor{image: long})
+	r.refreshSupervisor(t.Context())
+	spec, _ := r.sandboxSpec(zeroUUID, zeroUUID, execution.AgentNames{Sandbox: "sb"}, Flavor{Image: "img"}, nil, nil, defaultRes)
+	v := spec.Labels[LabelSupervisorImage]
+	if errs := validation.IsValidLabelValue(v); len(errs) > 0 || v == "" || len(v) != 16 {
+		t.Errorf("label value %q is not a short valid label value: %v", v, errs)
+	}
+	if r.supervisorChanged(execution.Sandbox{Labels: spec.Labels}) {
+		t.Error("a sandbox created with the current image reads as changed")
+	}
+	if supervisorDigest("") != "" {
+		t.Error("an empty image must stay empty")
+	}
+	r2 := testReconciler(nil)
+	if r2.supervisorChanged(execution.Sandbox{Labels: map[string]string{}}) {
+		t.Error("with no supervisor configured a sandbox without the label is recreated")
 	}
 }
 

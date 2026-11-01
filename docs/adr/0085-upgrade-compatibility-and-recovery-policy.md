@@ -187,6 +187,17 @@ section says what the recommended option would have bought.
    create and start (`crates/openshell-driver-kubernetes/src/driver.rs:2551` and `:3368` at v0.1.5)
    and never touches running supervisor pods. So a recreated sandbox always gets the gateway's
    current image, and only a recreate moves a sandbox to a new supervisor.
+   *Amendment (#410).* The image is kept out of `specHash`, so an unreadable ConfigMap never hides a
+   flavor, resource, provider or filesystem change and existing hashes stay valid. The sandbox
+   carries a separate label, `<domain>/supervisor-image`, holding the first 16 hex characters of
+   the sha256 of the image ref (the ref has `/` and `:` and can pass 63 characters, so it is not a
+   valid label value); the reconciler compares digests. A recreate takes a slot from
+   `maxRecreatesPerPass` (default 4) before the home gate, so at most that many checkpoints and wakes
+   start per pass. While the ConfigMap cannot be read, the last image read is kept; before the first
+   successful read the image is unknown and only supervisor-driven recreates wait, while creating,
+   starting, stopping and other spec changes go on. Once an image is known, a sandbox without the
+   label (created before it, or while the image was unreadable) counts as changed and is recreated
+   once, so an existing fleet converges; with no `supervisor_image` configured nothing is recreated.
 10. **OpenShell N and N-1** (procoduck, 2026-11-01). Each Koinon release supports its pinned OpenShell
     (ADR 0077) and the previous pin, tested in CI against both. Either can be upgraded first.
 

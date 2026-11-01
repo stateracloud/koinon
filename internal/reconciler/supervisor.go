@@ -4,6 +4,8 @@ package reconciler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -85,15 +87,32 @@ func (r *Reconciler) supervisorImage() (img string, known bool) {
 	return r.supImage, r.supKnown
 }
 
+// supervisorDigest is the label value for a supervisor image: the first 16 hex characters of its
+// sha256, so the value is a valid Kubernetes label value whatever the registry path (an image ref
+// has '/' and ':' and can pass 63 characters). An empty image (none configured) stays empty.
+func supervisorDigest(img string) string {
+	if img == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(img))
+	return hex.EncodeToString(sum[:8])
+}
+
 // supervisorChanged says whether a sandbox runs a supervisor other than the gateway's current one.
-// False while the current image is unknown, and for a sandbox without the label (created before it).
+// False while the current image is unknown. A sandbox without the label (created before it, or while
+// the image was unreadable) counts as changed once an image is configured, so an existing fleet
+// converges with one recreate each, under the per-pass cap and the usual gates.
 func (r *Reconciler) supervisorChanged(sb execution.Sandbox) bool {
 	img, known := r.supervisorImage()
 	if !known {
 		return false
 	}
+	want := supervisorDigest(img)
 	have, ok := sb.Labels[LabelSupervisorImage]
-	return ok && have != img
+	if !ok {
+		return want != ""
+	}
+	return have != want
 }
 
 // takeRecreate spends one of the pass's recreates; false when the cap is used up (ADR 0085
