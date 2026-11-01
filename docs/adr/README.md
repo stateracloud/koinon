@@ -104,4 +104,4 @@ are in [0046](0046-adr-conventions.md).
 | [0082](0082-work-claims-and-ready-queue.md) | Work claims and the ready queue: a claim branch is the lock, the board is the queue | Accepted |
 | [0083](0083-sandbox-resources.md) | Sandbox resources: template defaults, platform bounds, requests and limits | Accepted |
 | [0084](0084-leak-guard.md) | Leak guard: a taint check on every MCP tool call, in koinon-api | Accepted (decisions by procoduck, 2026-10-31; delivery before v0.1.0) |
-| [0085](0085-upgrade-compatibility-and-recovery-policy.md) | Upgrade, compatibility and recovery policy | Proposed (scope decided by procoduck, 2026-10-31; the open questions below wait for his decisions; a v0.1.0 gate) |
+| [0085](0085-upgrade-compatibility-and-recovery-policy.md) | Upgrade, compatibility and recovery policy | Accepted (scope decided by procoduck, 2026-10-31; decisions of 2026-11-01; a v0.1.0 gate) |
