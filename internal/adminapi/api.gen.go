@@ -1527,7 +1527,6 @@ type MiddlewareFunc func(http.Handler) http.Handler
 
 // GetAgentBudget operation middleware
 func (siw *ServerInterfaceWrapper) GetAgentBudget(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -1553,7 +1552,6 @@ func (siw *ServerInterfaceWrapper) GetAgentBudget(w http.ResponseWriter, r *http
 
 // SetAgentBudget operation middleware
 func (siw *ServerInterfaceWrapper) SetAgentBudget(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -1579,7 +1577,6 @@ func (siw *ServerInterfaceWrapper) SetAgentBudget(w http.ResponseWriter, r *http
 
 // GetAgentMcpServers operation middleware
 func (siw *ServerInterfaceWrapper) GetAgentMcpServers(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -1605,7 +1602,6 @@ func (siw *ServerInterfaceWrapper) GetAgentMcpServers(w http.ResponseWriter, r *
 
 // SetAgentMcpServers operation middleware
 func (siw *ServerInterfaceWrapper) SetAgentMcpServers(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -1631,7 +1627,6 @@ func (siw *ServerInterfaceWrapper) SetAgentMcpServers(w http.ResponseWriter, r *
 
 // GetAgentModel operation middleware
 func (siw *ServerInterfaceWrapper) GetAgentModel(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -1657,7 +1652,6 @@ func (siw *ServerInterfaceWrapper) GetAgentModel(w http.ResponseWriter, r *http.
 
 // SetAgentModel operation middleware
 func (siw *ServerInterfaceWrapper) SetAgentModel(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -1683,7 +1677,6 @@ func (siw *ServerInterfaceWrapper) SetAgentModel(w http.ResponseWriter, r *http.
 
 // SetAgentThinking operation middleware
 func (siw *ServerInterfaceWrapper) SetAgentThinking(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -1709,7 +1702,6 @@ func (siw *ServerInterfaceWrapper) SetAgentThinking(w http.ResponseWriter, r *ht
 
 // RunAgentTrigger operation middleware
 func (siw *ServerInterfaceWrapper) RunAgentTrigger(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -1744,7 +1736,6 @@ func (siw *ServerInterfaceWrapper) RunAgentTrigger(w http.ResponseWriter, r *htt
 
 // ListAuditEvents operation middleware
 func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -1855,7 +1846,6 @@ func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *htt
 
 // GetBudget operation middleware
 func (siw *ServerInterfaceWrapper) GetBudget(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetBudget(w, r)
 	}))
@@ -1869,7 +1859,6 @@ func (siw *ServerInterfaceWrapper) GetBudget(w http.ResponseWriter, r *http.Requ
 
 // SetBudget operation middleware
 func (siw *ServerInterfaceWrapper) SetBudget(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetBudget(w, r)
 	}))
@@ -1883,7 +1872,6 @@ func (siw *ServerInterfaceWrapper) SetBudget(w http.ResponseWriter, r *http.Requ
 
 // GetDefaultModel operation middleware
 func (siw *ServerInterfaceWrapper) GetDefaultModel(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetDefaultModel(w, r)
 	}))
@@ -1897,7 +1885,6 @@ func (siw *ServerInterfaceWrapper) GetDefaultModel(w http.ResponseWriter, r *htt
 
 // SetDefaultModel operation middleware
 func (siw *ServerInterfaceWrapper) SetDefaultModel(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetDefaultModel(w, r)
 	}))
@@ -1911,7 +1898,6 @@ func (siw *ServerInterfaceWrapper) SetDefaultModel(w http.ResponseWriter, r *htt
 
 // ListMcpServers operation middleware
 func (siw *ServerInterfaceWrapper) ListMcpServers(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListMcpServers(w, r)
 	}))
@@ -1925,7 +1911,6 @@ func (siw *ServerInterfaceWrapper) ListMcpServers(w http.ResponseWriter, r *http
 
 // CreateMcpServer operation middleware
 func (siw *ServerInterfaceWrapper) CreateMcpServer(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateMcpServer(w, r)
 	}))
@@ -1939,7 +1924,6 @@ func (siw *ServerInterfaceWrapper) CreateMcpServer(w http.ResponseWriter, r *htt
 
 // DeleteMcpServer operation middleware
 func (siw *ServerInterfaceWrapper) DeleteMcpServer(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -1965,7 +1949,6 @@ func (siw *ServerInterfaceWrapper) DeleteMcpServer(w http.ResponseWriter, r *htt
 
 // GetMcpServer operation middleware
 func (siw *ServerInterfaceWrapper) GetMcpServer(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -1991,7 +1974,6 @@ func (siw *ServerInterfaceWrapper) GetMcpServer(w http.ResponseWriter, r *http.R
 
 // UpdateMcpServer operation middleware
 func (siw *ServerInterfaceWrapper) UpdateMcpServer(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2017,7 +1999,6 @@ func (siw *ServerInterfaceWrapper) UpdateMcpServer(w http.ResponseWriter, r *htt
 
 // ListMcpTools operation middleware
 func (siw *ServerInterfaceWrapper) ListMcpTools(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2043,7 +2024,6 @@ func (siw *ServerInterfaceWrapper) ListMcpTools(w http.ResponseWriter, r *http.R
 
 // AcknowledgeMcpToolReview operation middleware
 func (siw *ServerInterfaceWrapper) AcknowledgeMcpToolReview(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2078,7 +2058,6 @@ func (siw *ServerInterfaceWrapper) AcknowledgeMcpToolReview(w http.ResponseWrite
 
 // SetMcpToolTier operation middleware
 func (siw *ServerInterfaceWrapper) SetMcpToolTier(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2113,7 +2092,6 @@ func (siw *ServerInterfaceWrapper) SetMcpToolTier(w http.ResponseWriter, r *http
 
 // SetMcpToolTwoApprovers operation middleware
 func (siw *ServerInterfaceWrapper) SetMcpToolTwoApprovers(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2148,7 +2126,6 @@ func (siw *ServerInterfaceWrapper) SetMcpToolTwoApprovers(w http.ResponseWriter,
 
 // ListModels operation middleware
 func (siw *ServerInterfaceWrapper) ListModels(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListModels(w, r)
 	}))
@@ -2162,7 +2139,6 @@ func (siw *ServerInterfaceWrapper) ListModels(w http.ResponseWriter, r *http.Req
 
 // CreateModel operation middleware
 func (siw *ServerInterfaceWrapper) CreateModel(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateModel(w, r)
 	}))
@@ -2176,7 +2152,6 @@ func (siw *ServerInterfaceWrapper) CreateModel(w http.ResponseWriter, r *http.Re
 
 // DeleteModel operation middleware
 func (siw *ServerInterfaceWrapper) DeleteModel(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2202,7 +2177,6 @@ func (siw *ServerInterfaceWrapper) DeleteModel(w http.ResponseWriter, r *http.Re
 
 // GetModel operation middleware
 func (siw *ServerInterfaceWrapper) GetModel(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2228,7 +2202,6 @@ func (siw *ServerInterfaceWrapper) GetModel(w http.ResponseWriter, r *http.Reque
 
 // UpdateModel operation middleware
 func (siw *ServerInterfaceWrapper) UpdateModel(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2254,7 +2227,6 @@ func (siw *ServerInterfaceWrapper) UpdateModel(w http.ResponseWriter, r *http.Re
 
 // ListPrices operation middleware
 func (siw *ServerInterfaceWrapper) ListPrices(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListPrices(w, r)
 	}))
@@ -2268,7 +2240,6 @@ func (siw *ServerInterfaceWrapper) ListPrices(w http.ResponseWriter, r *http.Req
 
 // SetPrice operation middleware
 func (siw *ServerInterfaceWrapper) SetPrice(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetPrice(w, r)
 	}))
@@ -2282,7 +2253,6 @@ func (siw *ServerInterfaceWrapper) SetPrice(w http.ResponseWriter, r *http.Reque
 
 // GetDefaultPrices operation middleware
 func (siw *ServerInterfaceWrapper) GetDefaultPrices(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetDefaultPrices(w, r)
 	}))
@@ -2296,7 +2266,6 @@ func (siw *ServerInterfaceWrapper) GetDefaultPrices(w http.ResponseWriter, r *ht
 
 // GetDefaultPriceChanges operation middleware
 func (siw *ServerInterfaceWrapper) GetDefaultPriceChanges(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2342,7 +2311,6 @@ func (siw *ServerInterfaceWrapper) GetDefaultPriceChanges(w http.ResponseWriter,
 
 // ListFlaggedPrices operation middleware
 func (siw *ServerInterfaceWrapper) ListFlaggedPrices(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2375,7 +2343,6 @@ func (siw *ServerInterfaceWrapper) ListFlaggedPrices(w http.ResponseWriter, r *h
 
 // RetirePrice operation middleware
 func (siw *ServerInterfaceWrapper) RetirePrice(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2401,7 +2368,6 @@ func (siw *ServerInterfaceWrapper) RetirePrice(w http.ResponseWriter, r *http.Re
 
 // ListProviders operation middleware
 func (siw *ServerInterfaceWrapper) ListProviders(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListProviders(w, r)
 	}))
@@ -2415,7 +2381,6 @@ func (siw *ServerInterfaceWrapper) ListProviders(w http.ResponseWriter, r *http.
 
 // CreateProvider operation middleware
 func (siw *ServerInterfaceWrapper) CreateProvider(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateProvider(w, r)
 	}))
@@ -2429,7 +2394,6 @@ func (siw *ServerInterfaceWrapper) CreateProvider(w http.ResponseWriter, r *http
 
 // DeleteProvider operation middleware
 func (siw *ServerInterfaceWrapper) DeleteProvider(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2455,7 +2419,6 @@ func (siw *ServerInterfaceWrapper) DeleteProvider(w http.ResponseWriter, r *http
 
 // GetProvider operation middleware
 func (siw *ServerInterfaceWrapper) GetProvider(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2481,7 +2444,6 @@ func (siw *ServerInterfaceWrapper) GetProvider(w http.ResponseWriter, r *http.Re
 
 // UpdateProvider operation middleware
 func (siw *ServerInterfaceWrapper) UpdateProvider(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2507,7 +2469,6 @@ func (siw *ServerInterfaceWrapper) UpdateProvider(w http.ResponseWriter, r *http
 
 // CheckProviderEcho operation middleware
 func (siw *ServerInterfaceWrapper) CheckProviderEcho(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2533,7 +2494,6 @@ func (siw *ServerInterfaceWrapper) CheckProviderEcho(w http.ResponseWriter, r *h
 
 // GetSpendReport operation middleware
 func (siw *ServerInterfaceWrapper) GetSpendReport(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2566,7 +2526,6 @@ func (siw *ServerInterfaceWrapper) GetSpendReport(w http.ResponseWriter, r *http
 
 // ListTokens operation middleware
 func (siw *ServerInterfaceWrapper) ListTokens(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListTokens(w, r)
 	}))
@@ -2580,7 +2539,6 @@ func (siw *ServerInterfaceWrapper) ListTokens(w http.ResponseWriter, r *http.Req
 
 // CreateToken operation middleware
 func (siw *ServerInterfaceWrapper) CreateToken(w http.ResponseWriter, r *http.Request) {
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateToken(w, r)
 	}))
@@ -2594,7 +2552,6 @@ func (siw *ServerInterfaceWrapper) CreateToken(w http.ResponseWriter, r *http.Re
 
 // RevokeToken operation middleware
 func (siw *ServerInterfaceWrapper) RevokeToken(w http.ResponseWriter, r *http.Request) {
-
 	var err error
 	_ = err
 
@@ -2798,7 +2755,6 @@ type GetAgentBudgetResponseObject interface {
 type GetAgentBudget200JSONResponse AgentBudget
 
 func (response GetAgentBudget200JSONResponse) VisitGetAgentBudgetResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -2815,7 +2771,6 @@ type GetAgentBudgetdefaultJSONResponse struct {
 }
 
 func (response GetAgentBudgetdefaultJSONResponse) VisitGetAgentBudgetResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -2838,7 +2793,6 @@ type SetAgentBudgetResponseObject interface {
 type SetAgentBudget200JSONResponse AgentBudget
 
 func (response SetAgentBudget200JSONResponse) VisitSetAgentBudgetResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -2855,7 +2809,6 @@ type SetAgentBudgetdefaultJSONResponse struct {
 }
 
 func (response SetAgentBudgetdefaultJSONResponse) VisitSetAgentBudgetResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -2877,7 +2830,6 @@ type GetAgentMcpServersResponseObject interface {
 type GetAgentMcpServers200JSONResponse AgentMcpServers
 
 func (response GetAgentMcpServers200JSONResponse) VisitGetAgentMcpServersResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -2894,7 +2846,6 @@ type GetAgentMcpServersdefaultJSONResponse struct {
 }
 
 func (response GetAgentMcpServersdefaultJSONResponse) VisitGetAgentMcpServersResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -2917,7 +2868,6 @@ type SetAgentMcpServersResponseObject interface {
 type SetAgentMcpServers200JSONResponse AgentMcpServers
 
 func (response SetAgentMcpServers200JSONResponse) VisitSetAgentMcpServersResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -2934,7 +2884,6 @@ type SetAgentMcpServersdefaultJSONResponse struct {
 }
 
 func (response SetAgentMcpServersdefaultJSONResponse) VisitSetAgentMcpServersResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -2956,7 +2905,6 @@ type GetAgentModelResponseObject interface {
 type GetAgentModel200JSONResponse AgentModel
 
 func (response GetAgentModel200JSONResponse) VisitGetAgentModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -2973,7 +2921,6 @@ type GetAgentModeldefaultJSONResponse struct {
 }
 
 func (response GetAgentModeldefaultJSONResponse) VisitGetAgentModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -2996,7 +2943,6 @@ type SetAgentModelResponseObject interface {
 type SetAgentModel200JSONResponse AgentModel
 
 func (response SetAgentModel200JSONResponse) VisitSetAgentModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3013,7 +2959,6 @@ type SetAgentModeldefaultJSONResponse struct {
 }
 
 func (response SetAgentModeldefaultJSONResponse) VisitSetAgentModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3036,7 +2981,6 @@ type SetAgentThinkingResponseObject interface {
 type SetAgentThinking200JSONResponse AgentModel
 
 func (response SetAgentThinking200JSONResponse) VisitSetAgentThinkingResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3053,7 +2997,6 @@ type SetAgentThinkingdefaultJSONResponse struct {
 }
 
 func (response SetAgentThinkingdefaultJSONResponse) VisitSetAgentThinkingResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3076,7 +3019,6 @@ type RunAgentTriggerResponseObject interface {
 type RunAgentTrigger202JSONResponse TriggerRun
 
 func (response RunAgentTrigger202JSONResponse) VisitRunAgentTriggerResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3093,7 +3035,6 @@ type RunAgentTriggerdefaultJSONResponse struct {
 }
 
 func (response RunAgentTriggerdefaultJSONResponse) VisitRunAgentTriggerResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3115,7 +3056,6 @@ type ListAuditEventsResponseObject interface {
 type ListAuditEvents200JSONResponse AuditEventList
 
 func (response ListAuditEvents200JSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3132,7 +3072,6 @@ type ListAuditEventsdefaultJSONResponse struct {
 }
 
 func (response ListAuditEventsdefaultJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3143,8 +3082,7 @@ func (response ListAuditEventsdefaultJSONResponse) VisitListAuditEventsResponse(
 	return err
 }
 
-type GetBudgetRequestObject struct {
-}
+type GetBudgetRequestObject struct{}
 
 type GetBudgetResponseObject interface {
 	VisitGetBudgetResponse(w http.ResponseWriter) error
@@ -3153,7 +3091,6 @@ type GetBudgetResponseObject interface {
 type GetBudget200JSONResponse OrgBudget
 
 func (response GetBudget200JSONResponse) VisitGetBudgetResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3170,7 +3107,6 @@ type GetBudgetdefaultJSONResponse struct {
 }
 
 func (response GetBudgetdefaultJSONResponse) VisitGetBudgetResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3192,7 +3128,6 @@ type SetBudgetResponseObject interface {
 type SetBudget200JSONResponse OrgBudget
 
 func (response SetBudget200JSONResponse) VisitSetBudgetResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3209,7 +3144,6 @@ type SetBudgetdefaultJSONResponse struct {
 }
 
 func (response SetBudgetdefaultJSONResponse) VisitSetBudgetResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3220,8 +3154,7 @@ func (response SetBudgetdefaultJSONResponse) VisitSetBudgetResponse(w http.Respo
 	return err
 }
 
-type GetDefaultModelRequestObject struct {
-}
+type GetDefaultModelRequestObject struct{}
 
 type GetDefaultModelResponseObject interface {
 	VisitGetDefaultModelResponse(w http.ResponseWriter) error
@@ -3230,7 +3163,6 @@ type GetDefaultModelResponseObject interface {
 type GetDefaultModel200JSONResponse DefaultModel
 
 func (response GetDefaultModel200JSONResponse) VisitGetDefaultModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3247,7 +3179,6 @@ type GetDefaultModeldefaultJSONResponse struct {
 }
 
 func (response GetDefaultModeldefaultJSONResponse) VisitGetDefaultModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3269,7 +3200,6 @@ type SetDefaultModelResponseObject interface {
 type SetDefaultModel200JSONResponse DefaultModel
 
 func (response SetDefaultModel200JSONResponse) VisitSetDefaultModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3286,7 +3216,6 @@ type SetDefaultModeldefaultJSONResponse struct {
 }
 
 func (response SetDefaultModeldefaultJSONResponse) VisitSetDefaultModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3297,8 +3226,7 @@ func (response SetDefaultModeldefaultJSONResponse) VisitSetDefaultModelResponse(
 	return err
 }
 
-type ListMcpServersRequestObject struct {
-}
+type ListMcpServersRequestObject struct{}
 
 type ListMcpServersResponseObject interface {
 	VisitListMcpServersResponse(w http.ResponseWriter) error
@@ -3307,7 +3235,6 @@ type ListMcpServersResponseObject interface {
 type ListMcpServers200JSONResponse McpServerList
 
 func (response ListMcpServers200JSONResponse) VisitListMcpServersResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3324,7 +3251,6 @@ type ListMcpServersdefaultJSONResponse struct {
 }
 
 func (response ListMcpServersdefaultJSONResponse) VisitListMcpServersResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3346,7 +3272,6 @@ type CreateMcpServerResponseObject interface {
 type CreateMcpServer201JSONResponse McpServer
 
 func (response CreateMcpServer201JSONResponse) VisitCreateMcpServerResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3363,7 +3288,6 @@ type CreateMcpServerdefaultJSONResponse struct {
 }
 
 func (response CreateMcpServerdefaultJSONResponse) VisitCreateMcpServerResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3382,8 +3306,7 @@ type DeleteMcpServerResponseObject interface {
 	VisitDeleteMcpServerResponse(w http.ResponseWriter) error
 }
 
-type DeleteMcpServer204Response struct {
-}
+type DeleteMcpServer204Response struct{}
 
 func (response DeleteMcpServer204Response) VisitDeleteMcpServerResponse(w http.ResponseWriter) error {
 	w.WriteHeader(204)
@@ -3396,7 +3319,6 @@ type DeleteMcpServerdefaultJSONResponse struct {
 }
 
 func (response DeleteMcpServerdefaultJSONResponse) VisitDeleteMcpServerResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3418,7 +3340,6 @@ type GetMcpServerResponseObject interface {
 type GetMcpServer200JSONResponse McpServer
 
 func (response GetMcpServer200JSONResponse) VisitGetMcpServerResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3435,7 +3356,6 @@ type GetMcpServerdefaultJSONResponse struct {
 }
 
 func (response GetMcpServerdefaultJSONResponse) VisitGetMcpServerResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3458,7 +3378,6 @@ type UpdateMcpServerResponseObject interface {
 type UpdateMcpServer200JSONResponse McpServer
 
 func (response UpdateMcpServer200JSONResponse) VisitUpdateMcpServerResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3475,7 +3394,6 @@ type UpdateMcpServerdefaultJSONResponse struct {
 }
 
 func (response UpdateMcpServerdefaultJSONResponse) VisitUpdateMcpServerResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3497,7 +3415,6 @@ type ListMcpToolsResponseObject interface {
 type ListMcpTools200JSONResponse McpToolList
 
 func (response ListMcpTools200JSONResponse) VisitListMcpToolsResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3514,7 +3431,6 @@ type ListMcpToolsdefaultJSONResponse struct {
 }
 
 func (response ListMcpToolsdefaultJSONResponse) VisitListMcpToolsResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3537,7 +3453,6 @@ type AcknowledgeMcpToolReviewResponseObject interface {
 type AcknowledgeMcpToolReview200JSONResponse McpTool
 
 func (response AcknowledgeMcpToolReview200JSONResponse) VisitAcknowledgeMcpToolReviewResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3554,7 +3469,6 @@ type AcknowledgeMcpToolReviewdefaultJSONResponse struct {
 }
 
 func (response AcknowledgeMcpToolReviewdefaultJSONResponse) VisitAcknowledgeMcpToolReviewResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3578,7 +3492,6 @@ type SetMcpToolTierResponseObject interface {
 type SetMcpToolTier200JSONResponse McpTool
 
 func (response SetMcpToolTier200JSONResponse) VisitSetMcpToolTierResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3595,7 +3508,6 @@ type SetMcpToolTierdefaultJSONResponse struct {
 }
 
 func (response SetMcpToolTierdefaultJSONResponse) VisitSetMcpToolTierResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3619,7 +3531,6 @@ type SetMcpToolTwoApproversResponseObject interface {
 type SetMcpToolTwoApprovers200JSONResponse McpTool
 
 func (response SetMcpToolTwoApprovers200JSONResponse) VisitSetMcpToolTwoApproversResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3636,7 +3547,6 @@ type SetMcpToolTwoApproversdefaultJSONResponse struct {
 }
 
 func (response SetMcpToolTwoApproversdefaultJSONResponse) VisitSetMcpToolTwoApproversResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3647,8 +3557,7 @@ func (response SetMcpToolTwoApproversdefaultJSONResponse) VisitSetMcpToolTwoAppr
 	return err
 }
 
-type ListModelsRequestObject struct {
-}
+type ListModelsRequestObject struct{}
 
 type ListModelsResponseObject interface {
 	VisitListModelsResponse(w http.ResponseWriter) error
@@ -3657,7 +3566,6 @@ type ListModelsResponseObject interface {
 type ListModels200JSONResponse ModelList
 
 func (response ListModels200JSONResponse) VisitListModelsResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3674,7 +3582,6 @@ type ListModelsdefaultJSONResponse struct {
 }
 
 func (response ListModelsdefaultJSONResponse) VisitListModelsResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3696,7 +3603,6 @@ type CreateModelResponseObject interface {
 type CreateModel201JSONResponse ModelCreated
 
 func (response CreateModel201JSONResponse) VisitCreateModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3713,7 +3619,6 @@ type CreateModeldefaultJSONResponse struct {
 }
 
 func (response CreateModeldefaultJSONResponse) VisitCreateModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3732,8 +3637,7 @@ type DeleteModelResponseObject interface {
 	VisitDeleteModelResponse(w http.ResponseWriter) error
 }
 
-type DeleteModel204Response struct {
-}
+type DeleteModel204Response struct{}
 
 func (response DeleteModel204Response) VisitDeleteModelResponse(w http.ResponseWriter) error {
 	w.WriteHeader(204)
@@ -3746,7 +3650,6 @@ type DeleteModeldefaultJSONResponse struct {
 }
 
 func (response DeleteModeldefaultJSONResponse) VisitDeleteModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3768,7 +3671,6 @@ type GetModelResponseObject interface {
 type GetModel200JSONResponse Model
 
 func (response GetModel200JSONResponse) VisitGetModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3785,7 +3687,6 @@ type GetModeldefaultJSONResponse struct {
 }
 
 func (response GetModeldefaultJSONResponse) VisitGetModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3808,7 +3709,6 @@ type UpdateModelResponseObject interface {
 type UpdateModel200JSONResponse Model
 
 func (response UpdateModel200JSONResponse) VisitUpdateModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3825,7 +3725,6 @@ type UpdateModeldefaultJSONResponse struct {
 }
 
 func (response UpdateModeldefaultJSONResponse) VisitUpdateModelResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3836,8 +3735,7 @@ func (response UpdateModeldefaultJSONResponse) VisitUpdateModelResponse(w http.R
 	return err
 }
 
-type ListPricesRequestObject struct {
-}
+type ListPricesRequestObject struct{}
 
 type ListPricesResponseObject interface {
 	VisitListPricesResponse(w http.ResponseWriter) error
@@ -3846,7 +3744,6 @@ type ListPricesResponseObject interface {
 type ListPrices200JSONResponse PriceList
 
 func (response ListPrices200JSONResponse) VisitListPricesResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3863,7 +3760,6 @@ type ListPricesdefaultJSONResponse struct {
 }
 
 func (response ListPricesdefaultJSONResponse) VisitListPricesResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3885,7 +3781,6 @@ type SetPriceResponseObject interface {
 type SetPrice201JSONResponse PriceSaved
 
 func (response SetPrice201JSONResponse) VisitSetPriceResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3902,7 +3797,6 @@ type SetPricedefaultJSONResponse struct {
 }
 
 func (response SetPricedefaultJSONResponse) VisitSetPriceResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3913,8 +3807,7 @@ func (response SetPricedefaultJSONResponse) VisitSetPriceResponse(w http.Respons
 	return err
 }
 
-type GetDefaultPricesRequestObject struct {
-}
+type GetDefaultPricesRequestObject struct{}
 
 type GetDefaultPricesResponseObject interface {
 	VisitGetDefaultPricesResponse(w http.ResponseWriter) error
@@ -3923,7 +3816,6 @@ type GetDefaultPricesResponseObject interface {
 type GetDefaultPrices200JSONResponse DefaultPrices
 
 func (response GetDefaultPrices200JSONResponse) VisitGetDefaultPricesResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3940,7 +3832,6 @@ type GetDefaultPricesdefaultJSONResponse struct {
 }
 
 func (response GetDefaultPricesdefaultJSONResponse) VisitGetDefaultPricesResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -3962,7 +3853,6 @@ type GetDefaultPriceChangesResponseObject interface {
 type GetDefaultPriceChanges200JSONResponse DefaultPriceChanges
 
 func (response GetDefaultPriceChanges200JSONResponse) VisitGetDefaultPriceChangesResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -3979,7 +3869,6 @@ type GetDefaultPriceChangesdefaultJSONResponse struct {
 }
 
 func (response GetDefaultPriceChangesdefaultJSONResponse) VisitGetDefaultPriceChangesResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -4001,7 +3890,6 @@ type ListFlaggedPricesResponseObject interface {
 type ListFlaggedPrices200JSONResponse FlaggedPriceList
 
 func (response ListFlaggedPrices200JSONResponse) VisitListFlaggedPricesResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -4018,7 +3906,6 @@ type ListFlaggedPricesdefaultJSONResponse struct {
 }
 
 func (response ListFlaggedPricesdefaultJSONResponse) VisitListFlaggedPricesResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -4037,8 +3924,7 @@ type RetirePriceResponseObject interface {
 	VisitRetirePriceResponse(w http.ResponseWriter) error
 }
 
-type RetirePrice204Response struct {
-}
+type RetirePrice204Response struct{}
 
 func (response RetirePrice204Response) VisitRetirePriceResponse(w http.ResponseWriter) error {
 	w.WriteHeader(204)
@@ -4051,7 +3937,6 @@ type RetirePricedefaultJSONResponse struct {
 }
 
 func (response RetirePricedefaultJSONResponse) VisitRetirePriceResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -4062,8 +3947,7 @@ func (response RetirePricedefaultJSONResponse) VisitRetirePriceResponse(w http.R
 	return err
 }
 
-type ListProvidersRequestObject struct {
-}
+type ListProvidersRequestObject struct{}
 
 type ListProvidersResponseObject interface {
 	VisitListProvidersResponse(w http.ResponseWriter) error
@@ -4072,7 +3956,6 @@ type ListProvidersResponseObject interface {
 type ListProviders200JSONResponse ProviderList
 
 func (response ListProviders200JSONResponse) VisitListProvidersResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -4089,7 +3972,6 @@ type ListProvidersdefaultJSONResponse struct {
 }
 
 func (response ListProvidersdefaultJSONResponse) VisitListProvidersResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -4111,7 +3993,6 @@ type CreateProviderResponseObject interface {
 type CreateProvider201JSONResponse Provider
 
 func (response CreateProvider201JSONResponse) VisitCreateProviderResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -4128,7 +4009,6 @@ type CreateProviderdefaultJSONResponse struct {
 }
 
 func (response CreateProviderdefaultJSONResponse) VisitCreateProviderResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -4147,8 +4027,7 @@ type DeleteProviderResponseObject interface {
 	VisitDeleteProviderResponse(w http.ResponseWriter) error
 }
 
-type DeleteProvider204Response struct {
-}
+type DeleteProvider204Response struct{}
 
 func (response DeleteProvider204Response) VisitDeleteProviderResponse(w http.ResponseWriter) error {
 	w.WriteHeader(204)
@@ -4161,7 +4040,6 @@ type DeleteProviderdefaultJSONResponse struct {
 }
 
 func (response DeleteProviderdefaultJSONResponse) VisitDeleteProviderResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -4183,7 +4061,6 @@ type GetProviderResponseObject interface {
 type GetProvider200JSONResponse Provider
 
 func (response GetProvider200JSONResponse) VisitGetProviderResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -4200,7 +4077,6 @@ type GetProviderdefaultJSONResponse struct {
 }
 
 func (response GetProviderdefaultJSONResponse) VisitGetProviderResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -4223,7 +4099,6 @@ type UpdateProviderResponseObject interface {
 type UpdateProvider200JSONResponse Provider
 
 func (response UpdateProvider200JSONResponse) VisitUpdateProviderResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -4240,7 +4115,6 @@ type UpdateProviderdefaultJSONResponse struct {
 }
 
 func (response UpdateProviderdefaultJSONResponse) VisitUpdateProviderResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -4263,7 +4137,6 @@ type CheckProviderEchoResponseObject interface {
 type CheckProviderEcho200JSONResponse EchoCheck
 
 func (response CheckProviderEcho200JSONResponse) VisitCheckProviderEchoResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -4280,7 +4153,6 @@ type CheckProviderEchodefaultJSONResponse struct {
 }
 
 func (response CheckProviderEchodefaultJSONResponse) VisitCheckProviderEchoResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -4302,7 +4174,6 @@ type GetSpendReportResponseObject interface {
 type GetSpendReport200JSONResponse SpendReport
 
 func (response GetSpendReport200JSONResponse) VisitGetSpendReportResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -4319,7 +4190,6 @@ type GetSpendReportdefaultJSONResponse struct {
 }
 
 func (response GetSpendReportdefaultJSONResponse) VisitGetSpendReportResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -4330,8 +4200,7 @@ func (response GetSpendReportdefaultJSONResponse) VisitGetSpendReportResponse(w 
 	return err
 }
 
-type ListTokensRequestObject struct {
-}
+type ListTokensRequestObject struct{}
 
 type ListTokensResponseObject interface {
 	VisitListTokensResponse(w http.ResponseWriter) error
@@ -4340,7 +4209,6 @@ type ListTokensResponseObject interface {
 type ListTokens200JSONResponse TokenList
 
 func (response ListTokens200JSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -4357,7 +4225,6 @@ type ListTokensdefaultJSONResponse struct {
 }
 
 func (response ListTokensdefaultJSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -4379,7 +4246,6 @@ type CreateTokenResponseObject interface {
 type CreateToken201JSONResponse TokenCreated
 
 func (response CreateToken201JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
@@ -4396,7 +4262,6 @@ type CreateTokendefaultJSONResponse struct {
 }
 
 func (response CreateTokendefaultJSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -4415,8 +4280,7 @@ type RevokeTokenResponseObject interface {
 	VisitRevokeTokenResponse(w http.ResponseWriter) error
 }
 
-type RevokeToken204Response struct {
-}
+type RevokeToken204Response struct{}
 
 func (response RevokeToken204Response) VisitRevokeTokenResponse(w http.ResponseWriter) error {
 	w.WriteHeader(204)
@@ -4429,7 +4293,6 @@ type RevokeTokendefaultJSONResponse struct {
 }
 
 func (response RevokeTokendefaultJSONResponse) VisitRevokeTokenResponse(w http.ResponseWriter) error {
-
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
@@ -4578,8 +4441,10 @@ type StrictServerInterface interface {
 	RevokeToken(ctx context.Context, request RevokeTokenRequestObject) (RevokeTokenResponseObject, error)
 }
 
-type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
-type StrictMiddlewareFunc func(f StrictHandlerFunc, operationID string) StrictHandlerFunc
+type (
+	StrictHandlerFunc    func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
+	StrictMiddlewareFunc func(f StrictHandlerFunc, operationID string) StrictHandlerFunc
+)
 
 type StrictHTTPServerOptions struct {
 	RequestErrorHandlerFunc  func(w http.ResponseWriter, r *http.Request, err error)
