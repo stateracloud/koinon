@@ -8,11 +8,11 @@
 #            fake GitHub. Prerequisites: `make dev-kind-up`. Needs no configuration.
 #   remote   any other context listed in the git-ignored hack/dev/local.yaml (template:
 #            hack/dev/local.example.yaml): your registry, model provider, runtime class and OpenShell.
-#            The maintainer's home lab is one example (hack/dev/local.homelab.example.yaml).
+#            A maintainer's own lab is one example: keep its profile in the git-ignored local.yaml.
 #
 # `tilt up`, or for example `tilt up -- --flavors=opencode`. See docs/dev/loop.md.
 
-config.define_string('mode', usage='kind or remote; default: from the kube context (homelab is an alias of remote)')
+config.define_string('mode', usage='kind or remote; default: from the kube context')
 config.define_string('flavors', usage='comma-separated flavor images to build (default: opencode)')
 config.define_string('platform', usage='linux/amd64 or linux/arm64; default: local.yaml platform (else amd64) on remote, the host on kind')
 config.define_string('openshell-tls-secret', usage='Secret in the openshell namespace holding the client certificate (tls.crt, tls.key, ca.crt); copied into koinon. Empty: no mTLS (default: openshell.clientTLSSecret of local.yaml, else openshell-client-tls)')
@@ -25,27 +25,17 @@ cfg = config.parse()
 ctx = k8s_context()
 
 # The remote profile reads hack/dev/local.yaml (git-ignored; see local.example.yaml for every key).
-# The maintainer's home-lab contexts keep working without a local.yaml: they fall back to the
-# checked-in example for the home lab.
 LOCAL_FILE = 'hack/dev/local.yaml'
-LEGACY_FILE = 'hack/dev/local.homelab.example.yaml'
-LEGACY_CONTEXTS = ['homelab', 'homelab-koinon']
 local_cfg = {}
 if os.path.exists(LOCAL_FILE):
     local_cfg = read_yaml(LOCAL_FILE) or {}
     watch_file(LOCAL_FILE)
-elif ctx in LEGACY_CONTEXTS:
-    local_cfg = read_yaml(LEGACY_FILE) or {}
-    print('no %s: using %s for the context %s' % (LOCAL_FILE, LEGACY_FILE, ctx))
-    watch_file(LEGACY_FILE)
 remote_contexts = local_cfg.get('contexts', [])
 if type(remote_contexts) != 'list':
     # `in` on a string is a substring match, so a bare name would also allow its prefixes.
     fail('`contexts` in the local profile must be a list of kube context names, e.g. contexts: [my-dev-cluster]')
 
 mode = cfg.get('mode', '')
-if mode == 'homelab':
-    mode = 'remote'
 if not mode:
     if ctx.startswith('kind-koinon-'):
         mode = 'kind'
