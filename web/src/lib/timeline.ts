@@ -8,7 +8,7 @@ import type { JsonObject } from '@bufbuild/protobuf'
 import { timestampMs, type Timestamp } from '@bufbuild/protobuf/wkt'
 import type { RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { ActorKind, type TaskEvent } from '@/gen/koinon/task/v1alpha1/task_pb'
-import { obj, str } from '@/lib/json'
+import { arr, obj, str } from '@/lib/json'
 import { stateLabel, taskStateFromName } from '@/lib/labels'
 
 export type TimelineItem =
@@ -144,7 +144,7 @@ function taskItem(ev: TaskEvent): TimelineItem {
       // agentd starts a new harness session when the sandbox's home volume was
       // replaced since the task's session was stored: {message,
       // previousSessionId, sessionId}.
-      return { key, at, type: 'note', text: str(p.message) || "The agent's workspace was reset, so this run starts a new session.", runId }
+      return { key, at, type: 'note', text: str(p.message) || "The agent's home was reset, so this run starts a new session.", runId }
     case 'sandbox.recreated':
     case 'sandbox.work_lost':
     case 'agent.unhealthy':
@@ -282,6 +282,19 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
       const what = provider ? `the model provider ${provider}` : 'the model provider'
       return { key, at, type: 'note', text: `Run ${shortId(runId)} is waiting for ${what} to reach the gateway${model ? ` (model ${model})` : ''}`, runId }
     }
+    case 'run.mcp_server_missing': {
+      // agentd found an MCP server the agent may use not serving tools before it started the harness
+      // (#326). {attempt, servers: [{name, reason}], reason}: the first miss is retried, the second
+      // fails the run.
+      const names = arr(p.servers)
+        .map((s) => str(obj(s)?.name))
+        .filter((n): n is string => !!n)
+      const what = names.length > 0 ? `the MCP server${names.length > 1 ? 's' : ''} ${names.join(', ')}` : 'an MCP server'
+      const tail = p.attempt === 2 ? ' again' : ' and will check once more before it starts'
+      return { key, at, type: 'note', text: `Run ${shortId(runId)} found ${what} not serving tools${tail}`, runId }
+    }
+    case 'run.mcp_server_recovered':
+      return { key, at, type: 'note', text: `Run ${shortId(runId)} found its MCP servers serving tools again and started`, runId }
     case 'run.retry': {
       // agentd retries a turn after a transient model fault: {failureClass, attempt, delaySeconds, reason}.
       const attempt = typeof p.attempt === 'number' ? ` (attempt ${p.attempt})` : ''

@@ -31,18 +31,18 @@ export function AgentApprovalScopes({ agentId, canRevoke }: { agentId: string; c
   return (
     <section aria-labelledby="agent-approval-scopes" className="bg-card grid gap-3 rounded-lg border p-4 text-sm">
       <h2 id="agent-approval-scopes" className="font-semibold">
-        Standing approvals
+        Scoped approvals
       </h2>
       {list.isPending ? (
-        <p role="status">Loading standing approvals…</p>
+        <p role="status">Loading scoped approvals…</p>
       ) : list.isError ? (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not load standing approvals: {ConnectError.from(list.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not load scoped approvals: {ConnectError.from(list.error).rawMessage}</AlertDescription>
         </Alert>
       ) : scopes.length === 0 ? (
         <p className="text-muted-foreground">None. Every call that needs approval asks first.</p>
       ) : (
-        <ul className="grid gap-2" aria-label="Active standing approvals">
+        <ul className="grid gap-2" aria-label="Active scoped approvals">
           {scopes.map((s) => (
             <li key={s.id} className="flex flex-wrap items-center gap-2 border-t pt-2 first:border-t-0 first:pt-0" data-testid="approval-scope">
               <div className="grid gap-0.5">

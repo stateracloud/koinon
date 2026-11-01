@@ -260,8 +260,11 @@ Implementation-level unknowns, to settle in the sub-issues:
   is not gets a dedupe key or a version bump rule before v0.1.0.
 - The exact shape of the key-wrapping interface (wrap, unwrap, key identity and reachability
   probe) and how an adapter's credentials reach koinon-api without entering a sandbox.
-- How the release-branch rule of decision 6 is detected by the lint (branch name, or the version
-  line in a marker file).
+- Resolved (detection of the decision 6 rule): the lint reads a marker file, `hack/migrate-patch-line`
+  (`none` or the shipped minor line, for example `v0.1`), at the merge base. Patch tags are cut from
+  `main` (the release gate requires an ancestor of `origin/main`), so the marker, not a branch name,
+  makes the rule bite: it is set when a minor line's `.0` ships and reset to `none` in the change that
+  opens the next minor. A base ref named `release/*` and `MIGRATE_LINT_PATCH_LINE=1` also enable it.
 
 ## Alternatives considered
 

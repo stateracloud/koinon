@@ -620,6 +620,58 @@ func (q *Queries) ListMCPToolsOfServer(ctx context.Context, arg ListMCPToolsOfSe
 	return items, nil
 }
 
+const listMissingMCPServersOfAgent = `-- name: ListMissingMCPServersOfAgent :many
+SELECT s.name, s.health::text AS health, s.health_reason, s.consecutive_failures
+FROM agent_mcp_servers a
+JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
+WHERE a.org_id = $1 AND a.agent_id = $2
+  AND s.disabled_reason IS NULL AND s.removed_at IS NULL
+  AND (s.health = 'unhealthy' OR (s.health = 'healthy' AND s.consecutive_failures > 0))
+ORDER BY s.name
+`
+
+type ListMissingMCPServersOfAgentParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+type ListMissingMCPServersOfAgentRow struct {
+	Name                string
+	Health              string
+	HealthReason        pgtype.Text
+	ConsecutiveFailures int32
+}
+
+// The servers an agent may use that Koinon has found not serving tools right now, and has not
+// withdrawn on purpose (a disabled or removed server is only mentioned in the note, see
+// ListUnavailableMCPServersOfAgent): unhealthy, or failing probes that have not yet reached the
+// threshold, which is what a server overloaded for a minute looks like (issue #326). agentd checks
+// this before it starts the harness; a server never probed (unknown) is not a miss.
+func (q *Queries) ListMissingMCPServersOfAgent(ctx context.Context, arg ListMissingMCPServersOfAgentParams) ([]ListMissingMCPServersOfAgentRow, error) {
+	rows, err := q.db.Query(ctx, listMissingMCPServersOfAgent, arg.OrgID, arg.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMissingMCPServersOfAgentRow
+	for rows.Next() {
+		var i ListMissingMCPServersOfAgentRow
+		if err := rows.Scan(
+			&i.Name,
+			&i.Health,
+			&i.HealthReason,
+			&i.ConsecutiveFailures,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listServedMCPServers = `-- name: ListServedMCPServers :many
 SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at FROM mcp_servers
 WHERE org_id = $1 AND disabled_reason IS NULL AND removed_at IS NULL
