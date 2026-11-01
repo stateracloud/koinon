@@ -84,6 +84,7 @@ var _ = Describe("The repo.read grant of a Gitea connection", func() {
 		Expect(err).NotTo(HaveOccurred())
 		agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: version.ID, ActivatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
+		keepWarm(ctx, org, agent.ID)
 
 		// The shipped token source: no network, a Gitea token is static.
 		r, err = reconciler.New(pool, openshell.New(cc), &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
