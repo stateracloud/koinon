@@ -143,6 +143,10 @@ agentd:
   workers: 8
   # Run lease; when a replica dies, another takes its runs over after this long.
   lease: 30s
+  # On SIGTERM (a rollout, a node drain) a replica lets the turns in progress finish for up to this
+  # many seconds before it hands the runs over (ADR 0085). The pod's terminationGracePeriodSeconds is
+  # this plus 30, so Kubernetes never kills the drain.
+  drainDeadlineSeconds: 300
   # agentgateway's base URL as sandboxes reach it. Empty uses the gateway Service: the chart's own in
   # standalone mode, the one the controller creates for Koinon's Gateway in kubernetes mode.
   gatewayURL: ""
