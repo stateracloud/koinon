@@ -504,14 +504,15 @@ func (r *runner) execute(ctx context.Context) error {
 	if err := r.waitModel(fctx, model); err != nil {
 		return r.execErr(ctx, "wait for the model", err)
 	}
-	// An allowed MCP server that is not serving tools is recorded, retried once and then fails the
-	// run (mcpwait.go, issue #326).
-	if err := r.waitMCPServers(fctx); err != nil {
-		return r.execErr(ctx, "check the agent's MCP servers", err)
-	}
 	sb, err := r.waitSandbox(fctx)
 	if err != nil {
 		return r.execErr(ctx, "sandbox", err)
+	}
+	// An allowed MCP server that is not serving tools is recorded, retried once and then fails the
+	// run (mcpwait.go, issues #326 and #488). It runs once the sandbox is ready: the live check
+	// uses the agent's key, which exists by then.
+	if err := r.waitMCPServers(fctx); err != nil {
+		return r.execErr(ctx, "check the agent's MCP servers", err)
 	}
 	// Nothing of an earlier run may still be running when this one starts (sweep.go); a
 	// sweep that cannot end everything fails the run, unless processes that will not die make

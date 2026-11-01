@@ -1,6 +1,6 @@
 # 0057. MCP servers: remote and container, catalog, allowlists and discovery
 
-- Status: Accepted; amended 2026-10-24, 2026-10-30 and 2026-10-31 by [0084](0084-leak-guard.md) (below)
+- Status: Accepted; amended 2026-10-24, 2026-10-30, 2026-10-31 and 2026-11-01 by [0084](0084-leak-guard.md) (below)
 - Date: 2026-10-23
 - Amends: [0014](0014-mcp-and-tools.md) (how MCP servers are provided and allowed per agent)
 - Delivery: remote MCP servers and per-agent allowlists land in v0.1. Container servers, the
@@ -232,6 +232,44 @@ server that is not trusted.
   private data and outbound tool it carries, and its kind (for example fetch or search), so the
   guard and the templates test read a declaration rather than a name (#350). The identifiers and
   the class existing servers migrate to are open in 0084.
+
+## Amendment 2026-11-01: a live check with the agent's own key (#488)
+
+The health record of decision 8 is up to one probe interval (60 s) old, and agentgateway runs `failOpen`,
+so a server that drops between two probes is left out of the agent's tool list without a word (the rc.9
+incident). Before the harness starts, agentd (#326, `mcpwait.go`) therefore also asks the gateway what it
+lists to the agent right now.
+
+- **The credential is the agent's own gateway key.** `tools/list` under that key shows exactly what the
+  harness will see, so it proves the agent's actual grants (an unreachable server, a rejected server
+  credential and a missing grant all look the same: none of the server's tools). It needs no new
+  credential. Rejected: a Koinon check key with every MCP grant (a cross-org privileged credential that
+  would not prove the agent's own grants), and a harness report over ACP (it needs a Koinon ACP
+  extension, and runs only after the harness is up).
+- **agentd never holds the key.** The key lives in the agent's key Secret, which koinon-api can already
+  read by name (it reads the executor keys the same way). agentd asks koinon-api over the saved-work
+  listener (`POST /internal/mcp-tools`, package `mcpcheck`), signed with the HMAC key it already holds,
+  over a domain-separated message good for one agent for 30 s, as for the home repository password
+  (ADR 0054 amendment). koinon-api lists the tools through the gateway as the agent and answers with the
+  tool names only. The key is not in the request, the reply, an error, a log line, a trace or a run
+  event, and it never reaches a sandbox, an environment variable, an image or a home volume.
+  The check runs once the sandbox is ready, when the key exists.
+- **What counts as a miss.** For each allowed, served server that is not unhealthy (the health record
+  already covers those) and has present tools in the auto or ask tier within the agent's allowlist, the
+  gateway must list at least one of them under `<org>-<server>_<tool>` (auto) or
+  `<org>-<server>-ask_<tool>` (ask). A server with none to offer is not expected to list anything.
+- **Miss handling is #326's, not a second path.** The live misses join the health-record misses in the
+  one `waitMCPServers`: the `run.mcp_server_missing` event, the `koinon.mcp.missing_servers` trace
+  attribute, one retry after `MCPRetryDelay`, a failed run on the second miss. The reason says the
+  gateway does not list the server's tools and, as the gateway does not say why, names the causes.
+- **A check that cannot be made is not a miss.** If koinon-api or the gateway cannot be reached, or the
+  agent has no key yet, agentd logs it and relies on the health record: the harness's own connection
+  would fail the same way, and a failed check must not fail a run whose servers may be fine.
+- Cost: one `tools/list` per run, plus one per retry. The check runs on every run, not only when the
+  health record is old: the call is cheap and the record's age is not a safe test of a drop.
+- Negative: koinon-api now sends the agent's key to the gateway on agentd's request. Only agentd's
+  signed request triggers it, the listener is reachable by koinon-agentd only, and what comes back is
+  names.
 
 ## Upstream verification
 

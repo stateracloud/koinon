@@ -5,11 +5,23 @@ package agentd
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 )
+
+// MCPTools lists the MCP tools the gateway offers an agent right now, as the agent itself sees them
+// (names with the gateway's <target>_ prefix). Its implementation holds or reaches the agent's own
+// gateway key; koinon-agentd never sees that key (issue #488, ADR 0057 amendment 2026-11-01), so
+// the interface returns names only. mcpcheck.Remote asks koinon-api.
+type MCPTools interface {
+	Tools(ctx context.Context, org, agent pgtype.UUID) ([]string, error)
+}
 
 // DefaultMCPRetryDelay is how long a run waits before it checks again for an allowed MCP server that
 // was missing: a probe interval (60 s) plus slack, so the prober has had one more pass.
@@ -32,11 +44,87 @@ type missingMCPServer struct {
 	Reason string `json:"reason"`
 }
 
-// missingMCPServers lists the servers the agent may use that Koinon has found not serving tools (see
-// ListMissingMCPServersOfAgent). It reads the control plane's health record, which the reconciler's
-// prober refreshes every 60 s, so a server that drops between two probes (agentgateway runs failOpen
-// and leaves it out silently) is not caught until the next probe marks it.
+// reasonNotListed is the reason of a server the gateway does not list to the agent. The gateway runs
+// failOpen, so it does not say whether the server is down, rejected its credential, or the agent's
+// key lacks the grant.
+const reasonNotListed = "the gateway does not list its tools to this agent: the server is unreachable or the agent's key lacks the grant (the gateway does not say which)"
+
+// missingMCPServers lists the servers the agent may use that are not serving tools: the control
+// plane's health record (healthRecordMisses) and, when the live check is configured, the gateway's
+// own list for the agent (liveMisses). The health record is refreshed every 60 s, so a server that
+// drops between two probes (agentgateway runs failOpen and leaves it out silently) is caught by the
+// live check only.
 func (r *runner) missingMCPServers(ctx context.Context) ([]missingMCPServer, error) {
+	out, err := r.healthRecordMisses(ctx)
+	if err != nil {
+		return nil, err
+	}
+	live, err := r.liveMisses(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range live {
+		if !slices.ContainsFunc(out, func(o missingMCPServer) bool { return o.Name == m.Name }) {
+			out = append(out, m)
+		}
+	}
+	slices.SortFunc(out, func(a, b missingMCPServer) int { return strings.Compare(a.Name, b.Name) })
+	return out, nil
+}
+
+// liveMisses asks the gateway, as the agent (the agent's own key, held by koinon-api, never by
+// agentd), which tools it lists, and returns each allowed, served server of which none of its tools
+// appear. A check that cannot be made (koinon-api or the gateway unreachable, no key yet) is logged
+// and counts as no miss: the harness's own connection would fail the same way, and the health record
+// still applies.
+func (r *runner) liveMisses(ctx context.Context) ([]missingMCPServer, error) {
+	if r.p.cfg.MCPTools == nil {
+		return nil, nil
+	}
+	rows, err := r.q.ListMCPServersToCheckLive(ctx, store.ListMCPServersToCheckLiveParams{
+		OrgID: r.run.OrgID, AgentID: r.run.AgentID,
+	})
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	listed, err := r.p.cfg.MCPTools.Tools(ctx, r.run.OrgID, r.run.AgentID)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		r.log.Warn("the live check of the agent's MCP tools could not be made; relying on the health record", "err", err)
+		return nil, nil
+	}
+	return liveMissing(rows, listed), nil
+}
+
+// liveMissing compares what the gateway listed with the tools each server should offer. Tools carry
+// the gateway's prefix: <org>-<server>_<tool> (auto tier) or <org>-<server>-ask_<tool> (ask tier).
+func liveMissing(rows []store.ListMCPServersToCheckLiveRow, listed []string) []missingMCPServer {
+	var out []missingMCPServer
+	for _, s := range rows {
+		var want []string
+		for _, t := range s.AutoTools {
+			if mcpservers.ToolNameProblem(s.OrgSlug, s.Name, t) == "" {
+				want = append(want, mcpservers.TargetName(s.OrgSlug, s.Name)+"_"+t)
+			}
+		}
+		for _, t := range s.AskTools {
+			if mcpservers.ToolNameProblem(s.OrgSlug, s.Name, t) == "" {
+				want = append(want, mcpservers.AskTargetName(s.OrgSlug, s.Name)+"_"+t)
+			}
+		}
+		if len(want) == 0 || slices.ContainsFunc(want, func(w string) bool { return slices.Contains(listed, w) }) {
+			continue
+		}
+		out = append(out, missingMCPServer{Name: s.Name, Reason: reasonNotListed})
+	}
+	return out
+}
+
+// healthRecordMisses lists the servers the control plane's health record says are not serving tools
+// (see ListMissingMCPServersOfAgent).
+func (r *runner) healthRecordMisses(ctx context.Context) ([]missingMCPServer, error) {
 	rows, err := r.q.ListMissingMCPServersOfAgent(ctx, store.ListMissingMCPServersOfAgentParams{
 		OrgID: r.run.OrgID, AgentID: r.run.AgentID,
 	})
