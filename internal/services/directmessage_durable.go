@@ -22,6 +22,10 @@ import (
 // another org's work.
 const DirectMessageWorkflow = "koinon.direct-message"
 
+const stepDeliverDirectMessage = "deliver-direct-message"
+
+var _ = durable.DeclareSteps(DirectMessageWorkflow, stepDeliverDirectMessage)
+
 // directMessageWait bounds how long a request waits for its message to leave the queue. The work
 // is not lost when it runs out: the message ID makes the client's retry the same workflow.
 const directMessageWait = 30 * time.Second
@@ -108,7 +112,7 @@ func (d *DirectMessageQueue) workflow(c dbos.Context, in dmInput) (dmOutput, err
 			out.Seq = res.Event.Seq
 		}
 		return out, nil
-	}, dbos.WithStepName("deliver-direct-message"), dbos.WithStepMaxRetries(3))
+	}, dbos.WithStepName(stepDeliverDirectMessage), dbos.WithStepMaxRetries(3))
 }
 
 // deliver enqueues the message for its org and waits for the result. The workflow ID is derived
