@@ -9,7 +9,10 @@
 #   --merged   (default) wait until the PR is merged or closed
 #   --checks   wait until every check has finished
 #   --require  (repeatable, with --checks) a check that must be green: once the others finish, a
-#              required check that is missing, skipped or not green exits 1 (`REQUIRED <name> missing|skipped|failed`)
+#              required check that is missing, skipped or not green exits 1 (`REQUIRED <name> missing|skipped|failed`).
+#              Only the newest check run of that name on the head counts: a later success supersedes an
+#              earlier skip or cancel. If the newest is skipped or cancelled, the next line suggests
+#              `gh workflow run e2e-kind.yml --ref <branch>`.
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
 #   --interval 20 seconds by default
 #
@@ -69,13 +72,20 @@ case $pr in '' | *[!0-9]*) usage ;; esac
 [ ${#required[@]} -eq 0 ] || [ "$mode" = checks ] || usage
 
 # One normalised row per check: CheckRuns (status/conclusion) and commit statuses (state) alike.
+# A required check is judged on its newest run only (by start time; rollup order breaks ties).
+# shellcheck disable=SC2016 # $req is a jq variable, bound by jqn
 norm='[(.statusCheckRollup // [])[] | {
   name: (.name // .context // "?"),
+  ts: (.startedAt // .completedAt // ""),
+  cancelled: ((.conclusion // "") == "CANCELLED"),
   url: (.detailsUrl // .targetUrl // ""),
   done: ((.status == "COMPLETED") or ((.state // "") | IN("SUCCESS", "FAILURE", "ERROR"))),
   skipped: ((.conclusion // "") == "SKIPPED"),
   bad: ((.conclusion // .state // "") | IN("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"))
-}]'
+}] | group_by(.name) | map(if (.[0].name | IN($req[])) then [sort_by(.ts) | last] else . end) | add // []'
+
+reqjson=$(printf '%s\n' ${required[@]+"${required[@]}"} | jq -R . | jq -sc .)
+jqn() { jq --argjson req "$reqjson" "$@"; }
 
 last=""
 emit() { # print only when the line differs from the previous one
@@ -87,7 +97,7 @@ emit() { # print only when the line differs from the previous one
 
 start=$SECONDS
 while :; do
-  if json=$(gh pr view "$pr" --json state,mergeStateStatus,mergeCommit,statusCheckRollup 2>/dev/null) && [ -n "$json" ]; then
+  if json=$(gh pr view "$pr" --json state,mergeStateStatus,mergeCommit,statusCheckRollup,headRefName 2>/dev/null) && [ -n "$json" ]; then
     state=$(jq -r '.state // ""' <<<"$json")
     mstate=$(jq -r '.mergeStateStatus // ""' <<<"$json")
     case $state in
@@ -101,11 +111,17 @@ while :; do
       exit 3
       ;;
     esac
-    failed=$(jq -r "$norm | .[] | select(.bad) | [.name, ((.url | capture(\"/runs/(?<r>[0-9]+)\")? | .r) // \"\")] | @tsv" <<<"$json")
+    branch=$(jq -r '.headRefName // "<branch>"' <<<"$json")
+    failed=$(jqn -r "$norm | .[] | select(.bad) | [.name, .cancelled, ((.url | capture(\"/runs/(?<r>[0-9]+)\")? | .r) // \"\")] | @tsv" <<<"$json")
     if [ -n "$failed" ]; then
-      while IFS=$'\t' read -r name run; do
+      while IFS=$'\t' read -r name cancelled run; do
         if [ -n "$run" ]; then echo "FAILED $name (run $run)"; else echo "FAILED $name"; fi
-        for r in ${required[@]+"${required[@]}"}; do [ "$r" != "$name" ] || echo "REQUIRED $name failed"; done
+        for r in ${required[@]+"${required[@]}"}; do
+          [ "$r" != "$name" ] || echo "REQUIRED $name failed"
+          if [ "$r" = "$name" ] && [ "$cancelled" = true ]; then
+            echo "only cancelled runs of $name on this head; run: gh workflow run e2e-kind.yml --ref $branch"
+          fi
+        done
       done <<<"$failed"
       exit 1
     fi
@@ -113,16 +129,19 @@ while :; do
       echo "needs-update"
       exit 4
     fi
-    total=$(jq "$norm | length" <<<"$json")
-    pending=$(jq -r "$norm | [.[] | select(.done | not) | .name] | sort | join(\",\")" <<<"$json")
-    ndone=$(jq "$norm | [.[] | select(.done)] | length" <<<"$json")
+    total=$(jqn "$norm | length" <<<"$json")
+    pending=$(jqn -r "$norm | [.[] | select(.done | not) | .name] | sort | join(\",\")" <<<"$json")
+    ndone=$(jqn "$norm | [.[] | select(.done)] | length" <<<"$json")
     if [ "$total" -gt 0 ] && [ -z "$pending" ]; then
       if [ "$mode" = checks ] && [ ${#required[@]} -gt 0 ]; then
         reqfail=0
         for name in "${required[@]}"; do
-          why=$(jq -r --arg n "$name" "$norm | [.[] | select(.name == \$n)] | if length == 0 then \"missing\" elif any(.[]; .skipped) then \"skipped\" else \"\" end" <<<"$json")
+          why=$(jqn -r --arg n "$name" "$norm | [.[] | select(.name == \$n)] | if length == 0 then \"missing\" elif any(.[]; .skipped) then \"skipped\" else \"\" end" <<<"$json")
           if [ -n "$why" ]; then
             echo "REQUIRED $name $why"
+            if [ "$why" = skipped ]; then
+              echo "only skipped runs of $name on this head; run: gh workflow run e2e-kind.yml --ref $branch"
+            fi
             reqfail=1
           fi
         done
