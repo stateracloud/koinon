@@ -93,11 +93,16 @@ type Querier interface {
 	// claim would still see it as claimable, bump the agent's epoch, and then
 	// update no run: the next owner would get a skipped epoch.
 	ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run, error)
+	// Takes an org's pending backfill; a concurrent replica waits on the row and then finds it taken.
+	ClaimOrgDefaultModelBackfill(ctx context.Context, orgID pgtype.UUID) (int64, error)
 	// One run restores at a time; a claim older than @lease_seconds is taken over. No row: nothing
 	// to restore, or another run is restoring.
 	ClaimSandboxRestore(ctx context.Context, arg ClaimSandboxRestoreParams) (AgentSandbox, error)
 	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)
 	ClearConnectionSecretName(ctx context.Context, arg ClearConnectionSecretNameParams) error
+	// Clears the org's default model when no model of that name is left (it was deleted); the old value
+	// comes back for the audit event. No row: the default stays (or there was none).
+	ClearOrgDefaultModelIfGone(ctx context.Context, orgID pgtype.UUID) (string, error)
 	ClearSandboxRestore(ctx context.Context, arg ClearSandboxRestoreParams) error
 	// The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
 	// run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
@@ -367,6 +372,8 @@ type Querier interface {
 	GetOrgBudget(ctx context.Context, orgID pgtype.UUID) (GetOrgBudgetRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
+	// The model agents without a model setting run on (#256); '' when the org has none.
+	GetOrgDefaultModel(ctx context.Context, orgID pgtype.UUID) (string, error)
 	// The part of an org's spend since @since that came from estimated usage.
 	GetOrgEstimatedSpendSince(ctx context.Context, arg GetOrgEstimatedSpendSinceParams) (string, error)
 	// What provisional entries of an org since @since hold back from every key's org-level limit.
@@ -610,6 +617,8 @@ type Querier interface {
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
 	// Users whose highest role in the org is at least @min_role (deleted users excluded).
 	ListOrgMemberIDsWithRole(ctx context.Context, arg ListOrgMemberIDsWithRoleParams) ([]pgtype.UUID, error)
+	// Orgs whose default model migration 00045 left for BackfillDefaults.
+	ListOrgsPendingDefaultModel(ctx context.Context) ([]pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Execution state rendered by koinon-reconciler (plan item R2) and read by
@@ -893,6 +902,10 @@ type Querier interface {
 	SetMCPToolTier(ctx context.Context, arg SetMCPToolTierParams) (McpTool, error)
 	SetMCPToolTwoApprovers(ctx context.Context, arg SetMCPToolTwoApproversParams) (McpTool, error)
 	SetModelDisabled(ctx context.Context, arg SetModelDisabledParams) error
+	// Sets or clears ('') the org's default model. The old value comes back for the audit event.
+	SetOrgDefaultModel(ctx context.Context, arg SetOrgDefaultModelParams) (string, error)
+	// The org's first model becomes its default; a default that is set stays.
+	SetOrgDefaultModelIfUnset(ctx context.Context, arg SetOrgDefaultModelIfUnsetParams) (int64, error)
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
 	// Sets or clears (NULL) the org's monthly cap, keeping its platform ceiling.
 	SetOrgMonthlyCap(ctx context.Context, arg SetOrgMonthlyCapParams) (SetOrgMonthlyCapRow, error)

@@ -263,8 +263,9 @@ type orgFixture struct {
 	question store.Question
 	// token is an admin API token of the org; set by newIsolationFixture.
 	token string
-	// provider and model are a provider and a model of the org, for the isolation suite.
-	provider, model string
+	// provider and model are a provider and a model of the org, for the isolation suite;
+	// modelName is the model's name, unique across orgs.
+	provider, model, modelName string
 	// mcpServer is a remote MCP server of the org, with the tool "search"; mcpTool is its name.
 	mcpServer, mcpTool string
 	// traceDest is a trace destination of the org.

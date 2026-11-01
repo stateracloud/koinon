@@ -163,14 +163,65 @@ func ListServed(ctx context.Context, rv prices.Resolver, q *store.Queries, org p
 	return out, nil
 }
 
-// OrgDefault is the org default: the first served priced model, providers by name, then models by
-// name. "" when the org serves none.
-func OrgDefault(ctx context.Context, rv prices.Resolver, q *store.Queries, org pgtype.UUID, at time.Time) (string, error) {
-	list, err := ListServed(ctx, rv, q, org, at)
-	if err != nil || len(list) == 0 {
-		return "", err
+// OrgDefault is the org's stored default model (orgs.default_model, #256): the model agents with
+// no model setting run on. It is set by the org's first model or by an admin (Service.SetDefault)
+// and nothing else changes it. "" when the org has none.
+func OrgDefault(ctx context.Context, q *store.Queries, org pgtype.UUID) (string, error) {
+	m, err := q.GetOrgDefaultModel(ctx, org)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
 	}
-	return list[0].Name, nil
+	return m, err
+}
+
+// NoDefaultMessage says what to do when an agent names no model and the org has no default model.
+const NoDefaultMessage = "the agent names no model and its org has no default model; add a provider and a model with a price, or set the org's default model"
+
+// GetDefault returns the org's default model, "" for none.
+func (s *Service) GetDefault(ctx context.Context, org pgtype.UUID) (string, error) {
+	return OrgDefault(ctx, store.New(s.pool), org)
+}
+
+// ListServed returns the models the org's default may be set to: the ones it serves and has a
+// price for.
+func (s *Service) ListServed(ctx context.Context, org pgtype.UUID, at time.Time) ([]Served, error) {
+	return ListServed(ctx, s.prices, store.New(s.pool), org, at)
+}
+
+// SetDefault sets the org's default model, or clears it with "". The model must pass Check. The
+// change and its audit event, with the old and new value, commit together; setting the value it
+// already has writes no event.
+func (s *Service) SetDefault(ctx context.Context, org pgtype.UUID, actor audit.Actor, model string, at time.Time) error {
+	if len(model) > 256 {
+		return &InvalidError{Msg: "the model name is longer than 256 characters"}
+	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		if model != "" {
+			var u *UnusableError
+			if err := Check(ctx, s.prices, q, org, model, at); errors.As(err, &u) && u.Reason == "not_served" {
+				// Another org's model reads exactly like one that does not exist (org isolation).
+				return fmt.Errorf("%w: the org serves no model named %q", ErrNotFound, model)
+			} else if errors.As(err, &u) {
+				return &InvalidError{Msg: u.Error() + "; pick a model the org serves and has a price for"}
+			} else if err != nil {
+				return err
+			}
+		}
+		old, err := q.SetOrgDefaultModel(ctx, store.SetOrgDefaultModelParams{OrgID: org, DefaultModel: model})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if old == model {
+			return nil
+		}
+		return audit.RecordErr(ctx, q, audit.Event{
+			Org: org, Actor: actor, Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
+			Before: map[string]any{"model": old}, After: map[string]any{"model": model},
+		})
+	})
 }
 
 // View is an agent's model setting and what it resolves to.
@@ -227,8 +278,23 @@ func describeModel(ctx context.Context, rv prices.Resolver, q *store.Queries, a 
 			return View{}, err
 		}
 	}
-	if v.Source == SourceNone && len(v.Available) > 0 {
-		v.Effective, v.Source = v.Available[0].Name, SourceOrgDefault
+	if v.Source == SourceNone {
+		def, err := OrgDefault(ctx, q, a.OrgID)
+		if err != nil {
+			return View{}, err
+		}
+		if def == "" {
+			v.Problem = NoDefaultMessage
+			return v, nil
+		}
+		v.Effective, v.Source = def, SourceOrgDefault
+		var u *UnusableError
+		switch err := Check(ctx, rv, q, a.OrgID, def, at); {
+		case errors.As(err, &u):
+			v.Problem = "The org's default model is not usable (" + u.Error() + "); pick another default model."
+		case err != nil:
+			return View{}, err
+		}
 	}
 	return v, nil
 }
@@ -283,7 +349,7 @@ type Service struct {
 	pool   *pgxpool.Pool
 	prices prices.Resolver
 	// platformDefault is koinon-agentd's --default-model, which the API cannot see; the chart leaves
-	// it unset, so the org default is the first served priced model.
+	// it unset, so the org default is the stored one (OrgDefault).
 	platformDefault string
 }
 
@@ -340,4 +406,48 @@ func settingLabel(m string) string {
 		return Default
 	}
 	return m
+}
+
+// BackfillDefaults gives each org that existed when migration 00045 ran the default model it ran on
+// before the default was stored: the first model ListServed returns (the first one Check accepts,
+// by provider and model name). It runs once per org (the migration's default_model_pending mark),
+// is safe from every replica, and records org.default_model.set with the reason "migrated". An org
+// with no usable model yet gets none and falls back to its first model (catalog adoptDefaultModel).
+// It returns how many defaults it set.
+func BackfillDefaults(ctx context.Context, pool *pgxpool.Pool, rv prices.Resolver, at time.Time) (int, error) {
+	ids, err := store.New(pool).ListOrgsPendingDefaultModel(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, org := range ids {
+		set := false
+		err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			set = false
+			q := store.New(tx)
+			if claimed, err := q.ClaimOrgDefaultModelBackfill(ctx, org); err != nil || claimed == 0 {
+				return err
+			}
+			list, err := ListServed(ctx, rv, q, org, at)
+			if err != nil || len(list) == 0 {
+				return err
+			}
+			rows, err := q.SetOrgDefaultModelIfUnset(ctx, store.SetOrgDefaultModelIfUnsetParams{OrgID: org, DefaultModel: list[0].Name})
+			if err != nil || rows == 0 {
+				return err
+			}
+			set = true
+			return audit.RecordErr(ctx, q, audit.Event{
+				Org: org, Actor: audit.System(), Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
+				Before: map[string]any{"model": ""}, After: map[string]any{"model": list[0].Name, "reason": "migrated"},
+			})
+		})
+		if err != nil {
+			return n, err
+		}
+		if set {
+			n++
+		}
+	}
+	return n, nil
 }

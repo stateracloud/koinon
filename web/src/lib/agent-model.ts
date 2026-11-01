@@ -13,7 +13,7 @@ export function modelSourceLabel(source: ModelSource): string {
     case ModelSource.VERSION:
       return "from the agent's version (its template)"
     case ModelSource.ORG_DEFAULT:
-      return "the org default (the first model the org serves with a price)"
+      return "the org default (the org's stored default model)"
     default:
       return 'none'
   }

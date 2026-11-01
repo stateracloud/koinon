@@ -242,9 +242,11 @@ enum ModelSource {
   MODEL_SOURCE_AGENT = 1;
   // The model of the agent's active version (a template's spec.model).
   MODEL_SOURCE_VERSION = 2;
-  // The org default: the first model the org serves and has a price for.
+  // The default model: the org's stored default model (ADR 0086), or the platform's
+  // --default-model when the org has none.
   MODEL_SOURCE_ORG_DEFAULT = 3;
-  // Nothing: the org serves no priced model, so a run would fail.
+  // Nothing: the agent, its version and the platform name no model and the org has no default
+  // model, so a run would fail until an admin sets one.
   MODEL_SOURCE_NONE = 4;
 }
 
