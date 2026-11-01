@@ -34,10 +34,12 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    pull requests only, so the gate reads that check from the head commit of the pull request that
    merged the tag's commit.
 
-   Patch releases (vX.Y.Z, Z > 0) are cut from a `release/vX.Y` branch, not from `main`. A pull
-   request into that branch runs the `migrations` check with the patch-line rule (ADR 0085): its
-   new migrations must not rename, drop or retype anything, so the previous patch release keeps
-   working on the new schema. A new minor line starts on `main`, which may contract.
+   Patch releases (vX.Y.Z, Z > 0) are tagged on `main` like every other release. Once a minor
+   line has shipped its `.0`, set `hack/migrate-patch-line` to that line (for example `v0.1`); from
+   then on the `migrations` check applies the patch-line rule (ADR 0085) to every migration a pull
+   request adds: no rename, drop or retype, so the previous patch release keeps working on the new
+   schema. The change that opens the next minor line resets the file to `none`, which lets it
+   contract. The file is read at the merge base, so the same change cannot lift the rule.
 4. Check that every job succeeded: `release` and `flavor` run side by side after `gate`, so a failed
    `flavor` still leaves a draft release and a chart whose default flavor image does not exist, and
    it skips `sign`. Then open the draft release and read the notes. `-rc.N` releases are already
