@@ -1,0 +1,15 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /* A node drain evicts agentd replicas one at a time (ADR 0085). One replica has nothing to protect: a budget of 0 would block every drain. */}}
+{{- if gt (int .Values.agentd.replicas) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "koinon.componentName" (list $ "agentd") }}
+  labels:
+    {{- include "koinon.labels" (list $ "agentd") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.agentd.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list $ "agentd") | nindent 6 }}
+{{- end }}
