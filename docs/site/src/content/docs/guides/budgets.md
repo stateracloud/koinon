@@ -1,6 +1,6 @@
 ---
 title: Budgets
-description: Set the org's monthly cap, each agent's daily limit and the limits of one run, and read the notices.
+description: Set the org's monthly cap, each agent's daily limit and the limits of one run, and read the notifications.
 ---
 
 Budgets stop spending, not just report it. There are three limits, and the first one reached stops the
@@ -54,10 +54,10 @@ write, output and reasoning), and no total of tokens ends a run. The old `maxTok
 templates is ignored. The reasons are in
 [ADR 0081](https://github.com/stateracloud/koinon/blob/main/docs/adr/0081-run-limits.md).
 
-## Notices
+## Notifications
 
-At 80% and at 100% of a limit, org owners and admins get a notice. A banner shows the unread notices of
-the current month or day on every page, and the 100% notice replaces the 80% one. **Notifications** on the
+At 80% and at 100% of a limit, org admins get a notification. A banner shows the unread notifications of
+the current month or day on every page, and the 100% notification replaces the 80% one. **Notifications** on the
 Budgets page lists them; **Mark as read** clears one. When a run stops at a limit, the task's timeline
 says so, with the limit and the amount.
 
@@ -100,7 +100,7 @@ an hour and replaces the charge with the provider's figure, keeping the old and 
 entry's history. Until then the gateway holds back the most the response could cost (its maximum
 output) from the agent's key, so the agent cannot spend past a limit while the figure is pending; the
 hold is released when the figure arrives. The hold is not spend: what the Budgets page shows, the
-notices and the stops count the charges only. The spend report shows provisional requests and the
+notifications and the stops count the charges only. The spend report shows provisional requests and the
 amount held apart from the cost. With a provider that cannot report, that charge is final. The
 details are in
 [ADR 0041](https://github.com/stateracloud/koinon/blob/main/docs/adr/0041-koinon-spend-ledger-and-budget-stops.md)
