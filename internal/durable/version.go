@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -61,8 +63,8 @@ func DeclaredSteps() map[string][]string {
 	return out
 }
 
-// CarryOver forks every pending, enqueued or delayed workflow whose application version is not this
-// runtime's from step 0 under this runtime's version, on the queue it was on, and cancels the
+// CarryOver forks every pending, enqueued or delayed workflow whose application version is older than this
+// runtime's (see olderVersion) from step 0 under this runtime's version, on the queue it was on, and cancels the
 // original. The fork's ID is derived from the original's, so two processes that sweep at once, or a
 // sweep that stopped between the fork and the cancel, produce one fork. It returns how many
 // workflows it carried over; the error joins the ones it could not.
@@ -74,7 +76,7 @@ func (r *Runtime) CarryOver(ctx context.Context) (int, error) {
 		return 0, errors.New("durable: CarryOver before Launch")
 	}
 	version := r.version()
-	old, err := listOtherVersions(dctx, version)
+	old, err := listOtherVersions(dctx, version, r.cfg.Logger)
 	if err != nil {
 		return 0, err
 	}
@@ -115,10 +117,28 @@ func carryOverID(original, version string) string {
 	return original + "~v" + version
 }
 
-// listOtherVersions lists the workflows that wait for a process of another version, oldest first.
+// olderVersion reports whether a workflow of version wf is to be carried over by a runtime of
+// version cur. WorkflowVersion is an integer string, so a workflow is carried over only when its
+// version is lower. A version that is not an integer (the legacy release versions such as
+// 0.1.0-rc.N, which no current process runs) counts as older. A newer version belongs to a
+// process of a rolling upgrade or to a rollback target and is never touched: forking it back would
+// run new step layouts on old code and ping-pong between the two versions.
+func olderVersion(wf, cur string) bool {
+	w, err := strconv.ParseUint(wf, 10, 64)
+	if err != nil {
+		return true
+	}
+	c, err := strconv.ParseUint(cur, 10, 64)
+	if err != nil {
+		return false
+	}
+	return w < c
+}
+
+// listOtherVersions lists the workflows of an older version that wait for a process of this one, oldest first.
 // DBOS cannot filter on "not this version", so it lists by status and filters here; the list is
 // complete before any is changed, so paging is not disturbed by the cancels.
-func listOtherVersions(dctx dbos.Context, version string) ([]dbos.WorkflowStatus, error) {
+func listOtherVersions(dctx dbos.Context, version string, logger *slog.Logger) ([]dbos.WorkflowStatus, error) {
 	const page = 500
 	var out []dbos.WorkflowStatus
 	for offset := 0; ; offset += page {
@@ -130,9 +150,15 @@ func listOtherVersions(dctx dbos.Context, version string) ([]dbos.WorkflowStatus
 			return nil, fmt.Errorf("durable: list pending workflows: %w", err)
 		}
 		for _, wf := range got {
-			if wf.ApplicationVersion != version {
-				out = append(out, wf)
+			if wf.ApplicationVersion == version {
+				continue
 			}
+			if !olderVersion(wf.ApplicationVersion, version) {
+				logger.Info("durable: leaving a pending workflow of a newer or incomparable version alone",
+					"workflow", wf.Name, "id", wf.ID, "version", wf.ApplicationVersion, "this_version", version)
+				continue
+			}
+			out = append(out, wf)
 		}
 		if len(got) < page {
 			break

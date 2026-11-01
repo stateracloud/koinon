@@ -48,7 +48,7 @@ func TestWorkflowSteps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(stepsFile, append(out, '\n'), 0o644); err != nil { //nolint:gosec // a test fixture
+		if err := os.WriteFile(stepsFile, append(out, '\n'), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		return
