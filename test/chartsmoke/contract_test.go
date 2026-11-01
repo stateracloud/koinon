@@ -12,14 +12,16 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/cmd/koinonagentd"
 	"github.com/stateracloud/koinon/internal/cmd/koinonapi"
 )
 
 // commandTrees are the binaries whose command tree the contract test knows (ADR 0088). A binary
 // that has moved to the shared CLI stack adds itself here; until then its containers are not
-// checked (the reconciler and agentd: #457, #458).
+// checked (the reconciler: #457).
 var commandTrees = map[string]func() *cobra.Command{
-	"koinon-api": koinonapi.NewRootCommand,
+	"koinon-api":    koinonapi.NewRootCommand,
+	"koinon-agentd": koinonagentd.NewRootCommand,
 }
 
 // TestChartContract is the chart's side of the startup contract, without Docker or a cluster. It
