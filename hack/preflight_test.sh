@@ -3,6 +3,7 @@
 #
 # Offline tests for hack/preflight.sh (#391): per-worktree log directories, the pid file and --stop
 # stopping only its own worktree's run. Each fixture repo carries a stub hack/adr-lint.sh.
+# shellcheck disable=SC2015,SC2329 # "A && ok || bad" is the test idiom; cleanup runs from a trap
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
