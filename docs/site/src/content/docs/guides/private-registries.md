@@ -120,6 +120,8 @@ something else, list it: an explicit list is used exactly as written. The prefli
 the `supervisor_image` in OpenShell's gateway ConfigMap and warns when they differ, because every
 sandbox would then be denied.
 
+The ConfigMap read itself is a failure, not a warning: when a supervisor image is configured (the chart always passes one) and the preflight cannot read the ConfigMap, or it has no `gateway.toml`, the release fails, because Koinon could not tell whether sandboxes would be admitted.
+
 ## Components the chart does not install
 
 Koinon's chart cannot change another release's values. Point these at the mirror in their own charts:

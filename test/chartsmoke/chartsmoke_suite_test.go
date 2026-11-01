@@ -30,8 +30,8 @@
 // host-gateway, which on Docker Desktop and OrbStack is not an address of a host interface. It is
 // short-lived and only answers authenticated requests (RBAC).
 //
-// What it proves, for example: reverting the migrateOnly check in cmd/koinon-api/main.go (#285)
-// makes "runs the migrate Job to completion" fail with "--otlp-token-dir is required with
+// What it proves, for example: moving the serve-only OTLP token check from serve to the root of
+// internal/cmd/koinonapi (#285) makes "runs the migrate Job to completion" fail with "--otlp-token-dir is required with
 // --otlp-addr", the install failure of #284.
 //
 // Needs Docker, helm, Go (to build the images) and KUBEBUILDER_ASSETS (setup-envtest, as for
