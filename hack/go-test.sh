@@ -12,8 +12,8 @@
 # the same for the rest. Pass extra Ginkgo flags with GINKGO_FLAGS, a process count with PROCS.
 #
 # Per-spec reports (#221): JUnit XML goes to REPORT_DIR (default reports/go, git-ignored), one file
-# per Ginkgo suite from `ginkgo --junit-report` and go-test.xml from `gotestsum --junitfile` for the
-# plain half, so a local run and CI produce the same files. CI uploads the directory as an artifact.
+# per Ginkgo suite from `ginkgo --junit-report` (parallel and serial suites alike, one testcase per
+# spec) and go-test.xml from `gotestsum --junitfile` for the packages with only plain tests, so a local run and CI produce the same files. CI uploads the directory as an artifact.
 # The reports only record; nothing reruns a failed spec.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -42,17 +42,32 @@ rc=0
 # shellcheck disable=SC2086 # GINKGO_FLAGS is a word list
 go tool ginkgo "${procs[@]}" --junit-report=junit.xml --keep-separate-reports --output-dir="$report_dir" --keep-going --randomize-all --fail-on-empty ${GINKGO_FLAGS:-} "${PARALLEL_SUITES[@]}" || rc=$?
 
-rest=()
-while IFS= read -r pkg; do
+# Every other Ginkgo suite runs serially through ginkgo too (--procs=1, so isolation is unchanged)
+# to get per-spec JUnit; gotestsum would see one testcase per suite. Plain `func Test` packages go
+# to gotestsum.
+ginkgo_rest=()
+plain=()
+while IFS= read -r dir; do
+	[[ $dir == ./test/flavors ]] && continue # needs the flavor images, see make test-flavors
 	skip=0
 	for s in "${PARALLEL_SUITES[@]}"; do
-		[[ $pkg == "github.com/stateracloud/koinon/${s#./}" ]] && skip=1
+		[[ $dir == "$s" ]] && skip=1
 	done
-	[[ $pkg == */test/flavors ]] && skip=1 # needs the flavor images, see make test-flavors
-	[[ $skip == 1 ]] || rest+=("$pkg")
-done < <(go list ./...)
+	[[ $skip == 1 ]] && continue
+	if compgen -G "$dir/*_test.go" >/dev/null && grep -lqs 'RunSpecs(' "$dir"/*_test.go; then
+		ginkgo_rest+=("$dir")
+	else
+		plain+=("$dir")
+	fi
+done < <(go list -f '{{.Dir}}' ./... | sed "s|^$PWD|.|")
 
-# Run both halves so one CI run reports every failing package.
-go tool gotestsum --junitfile "$report_dir/go-test.xml" --format pkgname -- "${rest[@]}" || rc=$?
+# Run all halves so one CI run reports every failing package.
+if ((${#ginkgo_rest[@]})); then
+	# shellcheck disable=SC2086 # GINKGO_FLAGS is a word list
+	go tool ginkgo --procs=1 --junit-report=junit.xml --keep-separate-reports --output-dir="$report_dir" --keep-going ${GINKGO_FLAGS:-} "${ginkgo_rest[@]}" || rc=$?
+fi
+if ((${#plain[@]})); then
+	go tool gotestsum --junitfile "$report_dir/go-test.xml" --format pkgname -- "${plain[@]}" || rc=$?
+fi
 
 exit "$rc"
