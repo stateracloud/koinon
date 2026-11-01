@@ -1,6 +1,6 @@
 # 0074. Run traces: a Koinon trace router to each org's OTLP backend
 
-- Status: Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9
+- Status: Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9; amended 2026-10-30 and 2026-10-31 (below)
 - Date: 2026-10-28
 - Amends: [0023](0023-observability-and-audit.md) (run traces, deferred there)
 - Relates to: [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0049](0049-v01-scope-decisions.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0059](0059-v01-opencode-only.md), [0065](0065-work-model-tasks-inbox.md), [0072](0072-agent-model-run-now-echo-check.md), [0073](0073-agent-passport.md), [#213](https://github.com/stateracloud/koinon/issues/213)
@@ -708,3 +708,42 @@ session: one per task, spanning its runs, reloaded by each run (ADR 0029, 0051).
 "The session is the run and its task" names something else: the **trace session**, the grouping a
 tracing backend builds from `session.id` and `gen_ai.conversation.id`, which Koinon sets to the run
 ID. Read "session" in this ADR's trace attributes as "trace session".
+
+## Amendment (2026-10-31, #343): stored run content is items, diagnostic events never fence, per-org retention
+
+Decision of Andre, 2026-10-31 ([#264](https://github.com/stateracloud/koinon/issues/264)): as
+proposed, shipping in v0.1.x at P1, with a 30-day default retention. The finding: agentd writes every
+ACP chunk as a synchronous `run_events` row and fences the run if a write fails; at about 9,000 rows a
+run and 10k runs a day that is about 90 M rows a day, and the content is stored whatever the org's
+trace content level. [0023](0023-observability-and-audit.md) carries the matching amendment for the
+event classes. The code lands in #344 (items), #345 (business and diagnostic events) and #346
+(retention and purge), which point here.
+
+1. **`run_events` stores completed items.** agentd coalesces ACP chunks into completed items
+   (messages, thoughts and tool calls) and stores those. ACP chunks are live-only: streamed to the
+   UI, never stored.
+2. **Business and diagnostic events.** Events are split in two classes:
+   - **Business events** are state the run depends on. A failed write may fence the run. Classes
+     (Andre, 2026-11-01): run state changes, park and resume, approvals and `ask_user` answers, task
+     status, and the final reply.
+   - **Diagnostic events** are everything else. A failed write is logged and counted and never fences
+     the run. Classes: thoughts, tool-call items and progress, usage notes, and debug events.
+3. **Per-org retention of stored run content** (Andre, 2026-11-01). Org admins set the retention
+   from 1 to 365 days; the default is 30. A platform admin can set a lower platform maximum. Every
+   change is audited (old and new value). A purge job removes content older than the org's retention
+   (#346).
+4. **What retention does not touch.** Run traces (this ADR's router and its destinations) and the
+   spend ledger are unaffected; the ledger stays append-only ([0041](0041-koinon-spend-ledger-and-budget-stops.md)).
+   Audit records are not covered by run-content retention either: audit retention is its own policy
+   (#345), and run-content retention never deletes audit records (Andre, 2026-11-01).
+6. **A purge removes content only** (Andre, 2026-11-01). Message, thought and tool payloads are
+   deleted; event rows keep type, time, state and cost, so the timeline, the costs and the audit links
+   keep working. The UI shows "content expired after N days" for a run past retention.
+5. **Content level** (Andre, 2026-11-01). Stored run content is independent of the trace content
+   level (decision 6): items are always stored, with the always-on secret scrubber, and the trace level
+   governs only what the router exports to trace destinations. Retention is the privacy control for
+   stored content.
+
+### Open questions
+
+- The metric name for failed diagnostic writes (see the 0023 amendment); #345 names it against the code.

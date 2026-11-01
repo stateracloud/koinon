@@ -36,4 +36,13 @@ var _ = Describe("standin mode", func() {
 			Expect(body).To(BeEmpty(), c.method+" "+c.path)
 		}
 	})
+
+	It("serves over TLS with a given certificate", func() {
+		srv := httptest.NewTLSServer(standinHandler())
+		DeferCleanup(srv.Close)
+		res, err := srv.Client().Get(srv.URL + "/gitea/api/v1/user")
+		Expect(err).NotTo(HaveOccurred())
+		_ = res.Body.Close()
+		Expect(res.StatusCode).To(Equal(http.StatusTeapot))
+	})
 })
