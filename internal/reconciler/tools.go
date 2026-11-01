@@ -5,8 +5,6 @@ package reconciler
 import (
 	"context"
 	"fmt"
-	"slices"
-	"strings"
 
 	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/agentconfig"
@@ -14,16 +12,6 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
 )
-
-// mcpTargets renders the configured tool servers as agentgateway MCP targets, sorted by name.
-func (r *Reconciler) mcpTargets() []gateway.MCPTarget {
-	var out []gateway.MCPTarget
-	for name, url := range r.cfg.ToolServers {
-		out = append(out, gateway.MCPTarget{Name: name, URL: url})
-	}
-	slices.SortFunc(out, func(a, b gateway.MCPTarget) int { return strings.Compare(a.Name, b.Name) })
-	return out
-}
 
 // activeConfig reads the agent's active version: its grants and their bindings.
 func (r *Reconciler) activeConfig(ctx context.Context, a store.Agent) (agentconfig.Config, error) {

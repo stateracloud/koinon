@@ -547,6 +547,7 @@ jobs:
       - run: hack/ci-web-gate-test.sh
       - run: hack/go-test-test.sh
       - run: hack/wt-test.sh
+      - run: hack/tmp-safety-test.sh
       - run: hack/wt-install-test.sh
       - run: hack/ship-test.sh
       - run: hack/preflight-test.sh
