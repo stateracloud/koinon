@@ -44,6 +44,6 @@ granted it.
 
 ## See and revoke
 
-The agent's page lists its standing approvals next to its grants. An admin can revoke one there. Calls
+The agent's page lists its scoped approvals next to its grants. An admin can revoke one there. Calls
 already approved keep running; the next call asks again. Granting and revoking are audited
 (`approval_scope.create`, `approval_scope.revoke`).

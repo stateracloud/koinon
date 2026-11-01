@@ -26,7 +26,7 @@ export function NoticeBanner({ orgId, platformAdmin }: { orgId: string; platform
   const names = useMemo(() => new Map((agents.data?.budgets ?? []).map((a) => [a.agentId, a.agentName])), [agents.data])
   if (shown.length === 0) return null
   return (
-    <div className="grid gap-2 px-4 pt-3 md:px-6" role="region" aria-label="Notices">
+    <div className="grid gap-2 px-4 pt-3 md:px-6" role="region" aria-label="Notifications">
       {shown.map((n) => {
         const unhealthy = isAgentUnhealthy(n)
         const urgent = unhealthy || n.threshold >= 100
