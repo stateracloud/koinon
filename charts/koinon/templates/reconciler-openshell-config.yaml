@@ -1,0 +1,34 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+The reconciler reads OpenShell's gateway ConfigMap for the supervisor image that is part of the sandbox
+spec hash (ADR 0085 decision 9). Cluster-scoped because the ConfigMap is in OpenShell's namespace;
+resourceNames pins the one object and get is the only verb. rbac.yaml stays free of ClusterRoles.
+*/ -}}
+{{- $name := include "koinon.componentName" (list . "reconciler") }}
+{{- $oscm := printf "%s-%s-openshell-config" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $oscm }}
+  labels:
+    {{- include "koinon.labels" (list . "reconciler") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [{{ .Values.preflight.openshell.configMap }}]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $oscm }}
+  labels:
+    {{- include "koinon.labels" (list . "reconciler") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $oscm }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}

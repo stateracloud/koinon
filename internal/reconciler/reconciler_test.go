@@ -38,6 +38,7 @@ import (
 	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/pricing"
@@ -163,6 +164,7 @@ var _ = Describe("Reconciler", func() {
 				OrgID: org, ID: agent.ID, VersionID: version.ID, ActivatedBy: user,
 			})
 			Expect(err).NotTo(HaveOccurred())
+			keepWarm(ctx, org, agent.ID)
 			pass(ctx, newReconciler())
 
 			row := sandboxRow(ctx, agent.ID)
@@ -242,6 +244,11 @@ var _ = Describe("Reconciler", func() {
 			Expect(sb).NotTo(BeNil())
 			Expect(sb.GetSpec().GetTemplate().GetImage()).To(Equal(image))
 			Expect(sb.GetSpec().GetTemplate().GetRuntimeClassName()).To(Equal("kata"))
+			// No template size: the platform default, with the Kata memory request equal to its limit (ADR 0083).
+			Expect(sb.GetSpec().GetTemplate().GetResources().AsMap()).To(Equal(map[string]any{
+				"requests": map[string]any{"cpu": "250m", "memory": "2Gi"},
+				"limits":   map[string]any{"cpu": "2", "memory": "2Gi"},
+			}))
 			Expect(sb.GetSpec().GetProviders()).To(Equal([]string{names.Provider}))
 			Expect(sb.GetMetadata().GetLabels()).To(HaveKeyWithValue(reconciler.LabelManagedBy, reconciler.ManagedByValue))
 			Expect(sb.GetMetadata().GetLabels()).To(HaveKey(reconciler.LabelSpecHash))
@@ -359,7 +366,83 @@ var _ = Describe("Reconciler", func() {
 			Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateReady))
 		})
 
+		It("recreates the sandbox when the gateway's supervisor image changes, and keeps the last image when the gateway cannot be read", func(ctx SpecContext) {
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			sup := &fakeSupervisor{image: "ghcr.io/nvidia/openshell/supervisor:0.1.5"}
+			cfg.Supervisor = sup
+			r = newReconciler()
+			// The sandbox made before the supervisor label is recreated once (the next test); this one
+			// starts from a sandbox that carries it.
+			Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+			pass(ctx, r)
+			pass(ctx, r)
+			baseline := osg.Calls("DeleteSandbox")
+
+			By("an unreadable gateway ConfigMap changes nothing")
+			sup.err = errors.New("forbidden")
+			pass(ctx, r)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(baseline))
+
+			By("the same image changes nothing")
+			sup.err = nil
+			pass(ctx, r)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(baseline))
+
+			By("a new image recreates the sandbox through the usual path")
+			sup.image = "ghcr.io/nvidia/openshell/supervisor:0.1.6"
+			pass(ctx, r) // deletes
+			pass(ctx, r) // creates
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(baseline + 1))
+			Expect(osg.Sandbox(row.Workspace, names.Sandbox)).NotTo(BeNil())
+			Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
+		It("recreates a sandbox that has no supervisor label once the image is known, then settles", func(ctx SpecContext) {
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			sup := &fakeSupervisor{err: errors.New("forbidden")}
+			cfg.Supervisor = sup
+			r = newReconciler()
+			Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+			pass(ctx, r) // created while the image is unreadable: no label
+			Expect(osg.Sandbox(row.Workspace, names.Sandbox)).NotTo(BeNil())
+			baseline := osg.Calls("DeleteSandbox")
+
+			sup.err, sup.image = nil, "ghcr.io/nvidia/openshell/supervisor:0.1.5"
+			pass(ctx, r) // deletes
+			pass(ctx, r) // creates, with the label
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(baseline + 1))
+			pass(ctx, r)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(baseline + 1))
+		})
+
+		It("still recreates the sandbox for a changed flavor image when the gateway ConfigMap can never be read", func(ctx SpecContext) {
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			cfg.Supervisor = &fakeSupervisor{err: errors.New("forbidden")}
+			r = newReconciler()
+			pass(ctx, r)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+
+			cfg.Flavors[store.AgentFlavorOpencode] = reconciler.Flavor{
+				Image: image + "-2", Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode],
+			}
+			r = newReconciler()
+			pass(ctx, r) // deletes
+			pass(ctx, r) // creates
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			Expect(osg.Sandbox(row.Workspace, names.Sandbox).GetSpec().GetTemplate().GetImage()).To(Equal(image + "-2"))
+		})
+
+		It("still creates a sandbox when the gateway ConfigMap can never be read", func(ctx SpecContext) {
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			cfg.Supervisor = &fakeSupervisor{err: errors.New("forbidden")}
+			r = newReconciler()
+			Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+			pass(ctx, r)
+			Expect(osg.Sandbox(row.Workspace, names.Sandbox)).NotTo(BeNil())
+		})
+
 		It("records the sandbox's OpenShell ID as its home generation, new for a recreated sandbox", func(ctx SpecContext) {
+			coolDown(ctx, org, agent.ID)
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			id := osg.Sandbox(row.Workspace, names.Sandbox).GetMetadata().GetId()
 			Expect(id).NotTo(BeEmpty())
@@ -787,6 +870,7 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("stops after the idle timeout and starts again for a queued run", func(ctx SpecContext) {
+			coolDown(ctx, org, agent.ID)
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			phase := func() openshellv1.SandboxPhase {
 				return osg.Sandbox(row.Workspace, names.Sandbox).GetStatus().GetPhase()
@@ -890,7 +974,7 @@ var _ = Describe("Reconciler", func() {
 		ref := agentKeys(mg.last())[0].Agent
 		full := mg.last().Limits[ref]
 		Expect(full.Unit).To(Equal(gateway.USD))
-		Expect(full.Amount).To(BeNumerically("==", 10))
+		Expect(full.Amount).To(Equal(money.MustParse("10")))
 		Expect(full.Window).To(Equal(ledger.Window), "windowed, so agentgateway can drop expired counters")
 
 		By("recorded spend lowers the pushed amount and starts a new gateway counter")
@@ -900,7 +984,7 @@ var _ = Describe("Reconciler", func() {
 		Expect(err).NotTo(HaveOccurred())
 		pass(ctx, r)
 		net := mg.last().Limits[ref]
-		Expect(net.Amount).To(BeNumerically("==", 7.5))
+		Expect(net.Amount).To(Equal(money.MustParse("7.5")))
 		Expect(net.Generation).NotTo(Equal(full.Generation))
 
 		By("a rotated key gets the remainder, not the full limit")
@@ -931,7 +1015,7 @@ var _ = Describe("Reconciler", func() {
 		for _, k := range st.Keys {
 			byAgent[k.Agent.Name] = st.Limits[k.Agent]
 		}
-		Expect(byAgent[good.ID.String()].Amount).To(BeNumerically("==", 10), "the other agent is served with its budget")
+		Expect(byAgent[good.ID.String()].Amount).To(Equal(money.MustParse("10")), "the other agent is served with its budget")
 		Expect(byAgent[broken.ID.String()].Amount).To(BeZero(), "no earlier limit: the key is blocked")
 	})
 
@@ -949,11 +1033,11 @@ var _ = Describe("Reconciler", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
 		ref := agentKeys(mg.last())[0].Agent
-		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10))
+		Expect(mg.last().Limits[ref].Amount).To(Equal(money.MustParse("10")))
 
 		failing = true
 		Expect(r.ReconcileAll(ctx)).NotTo(Succeed())
-		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10), "the same day: the last pushed limit stands")
+		Expect(mg.last().Limits[ref].Amount).To(Equal(money.MustParse("10")), "the same day: the last pushed limit stands")
 
 		advance(26 * time.Hour)
 		Expect(r.ReconcileAll(ctx)).NotTo(Succeed())
@@ -975,7 +1059,7 @@ var _ = Describe("Reconciler", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
 		ref := agentKeys(mg.last())[0].Agent
-		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10))
+		Expect(mg.last().Limits[ref].Amount).To(Equal(money.MustParse("10")))
 
 		failing = true
 		Expect(r.ReconcileAll(ctx)).NotTo(Succeed())
@@ -1077,6 +1161,7 @@ var _ = Describe("Reconciler", func() {
 			b := newAgent(ctx, org, user)
 			r := newReconciler()
 			pass(ctx, r)
+			coolDown(ctx, org, a.ID, b.ID)
 			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
 
 			mg.fail = errors.New("gateway unreachable")
@@ -1097,6 +1182,7 @@ var _ = Describe("Reconciler", func() {
 			a := newAgent(ctx, org, user)
 			r := newReconciler()
 			pass(ctx, r)
+			coolDown(ctx, org, a.ID)
 			keyBefore := sandboxRow(ctx, a.ID).GatewayKeyID
 			Expect(osg.Calls("CreateSandbox")).To(Equal(1))
 
@@ -1118,9 +1204,65 @@ var _ = Describe("Reconciler", func() {
 			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
 		})
 
+		It("names agentgateway's reason on the agents it holds back when the whole config is refused (issue #245)", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			coolDown(ctx, org, a.ID)
+			mg.fail = &gateway.ConfigRejectedError{Revision: "abc", Reason: "USD budget limits support at most 9 fractional digits"}
+			fresh := newAgent(ctx, org, user)
+			advance(11 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(MatchError(gateway.ErrConfigRejected))
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1), "the fresh agent's key is not live")
+			msg := sandboxRow(ctx, fresh.ID).Message
+			Expect(msg).To(ContainSubstring("waiting for the gateway"))
+			Expect(msg).To(ContainSubstring("USD budget limits support at most 9 fractional digits"))
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateStopped), "an agent with a live key is still converged")
+
+			By("a good file loads")
+			mg.fail = nil
+			now.Store(nil)
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
+		It("keeps a key the gateway refused not live and holds its agent back, while served keys are converged (issue #245)", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			coolDown(ctx, org, a.ID)
+			served := map[string]bool{}
+			for _, k := range mg.last().Keys {
+				served[k.ID] = true
+			}
+			fresh := newAgent(ctx, org, user)
+			// The gateway judges the new key alone: everything else of the state is live.
+			mg.onApply = func(s gateway.State) {
+				for _, k := range s.Keys {
+					if !served[k.ID] {
+						mg.fail = &gateway.RejectedError{Rejected: []gateway.Rejection{
+							{Kind: "Key", Name: k.ID, Reason: "USD budget limits support at most 9 fractional digits"},
+						}}
+					}
+				}
+			}
+			advance(11 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1), "the refused key is not live: no sandbox for the fresh agent")
+			Expect(sandboxRow(ctx, fresh.ID).Message).To(ContainSubstring("waiting for the gateway"))
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateStopped), "the live key's agent is converged")
+
+			By("the key is accepted")
+			mg.onApply, mg.fail = nil, nil
+			now.Store(nil)
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
 		It("holds back every agent after a restart until one Apply has succeeded", func(ctx SpecContext) {
 			a := newAgent(ctx, org, user)
 			pass(ctx, newReconciler())
+			coolDown(ctx, org, a.ID)
 			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
 
 			restarted := newReconciler()
@@ -1164,6 +1306,7 @@ var _ = Describe("Reconciler", func() {
 		advance(time.Hour) // the first pass creates the sandbox; the next one stops it as idle
 		r := newReconciler()
 		pass(ctx, r)
+		coolDown(ctx, org, agent.ID)
 		pass(ctx, r)
 		names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 		ws := execution.WorkspaceName(org.Bytes)
@@ -1194,3 +1337,11 @@ func agentKeys(st gateway.State) []gateway.Key {
 	}
 	return out
 }
+
+// fakeSupervisor is a reconciler.SupervisorSource a test moves.
+type fakeSupervisor struct {
+	image string
+	err   error
+}
+
+func (f *fakeSupervisor) SupervisorImage(context.Context) (string, error) { return f.image, f.err }

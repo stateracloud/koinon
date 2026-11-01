@@ -35,6 +35,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -55,6 +56,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/stateracloud/koinon/internal/adminapi"
+	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/api"
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/askuser"
@@ -78,15 +80,20 @@ import (
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/schemagate"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/internal/tracedest"
+	"github.com/stateracloud/koinon/internal/tracing/export"
+	tracerouter "github.com/stateracloud/koinon/internal/tracing/router"
 	"github.com/stateracloud/koinon/internal/triggers/schedule"
 	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
@@ -98,6 +105,7 @@ type config struct {
 	databaseURL    string
 	migrate        bool
 	durable        bool
+	executorID     string
 	wait           time.Duration
 	trustedOrigins string
 	args           []string
@@ -124,14 +132,18 @@ type config struct {
 	sweepInterval time.Duration
 	watchPoll     time.Duration
 
-	otlpAddr         string
-	metricsAddr      string
-	toolsAddr        string
-	savedWorkAddr    string
-	savedWorkSecret  string
-	secretsNamespace string
-	kubeconfig       string
-	githubAPIURL     string
+	otlpAddr     string
+	otlpTokenDir string
+	// The trace router's byte budgets; 0 derives each from the container memory limit (its cgroup's,
+	// or KOINON_MEMORY_LIMIT_BYTES when that is lower; 20% queues, 5% intake, 3% held roots, 8% requests).
+	traceQueueBytes, traceIntakeBytes, traceHeldBytes, traceRequestBytes int
+	metricsAddr                                                          string
+	toolsAddr                                                            string
+	savedWorkAddr                                                        string
+	savedWorkSecret                                                      string
+	secretsNamespace                                                     string
+	kubeconfig                                                           string
+	githubAPIURL                                                         string
 
 	kekDir string
 	// kekSecret names the Secret with the key-encryption keys. koinon-api creates it on its first
@@ -149,6 +161,10 @@ type config struct {
 	providerAllowedHosts string
 }
 
+// migrateOnly reports whether the command is the migrate subcommand, which applies the migrations
+// and exits without serving.
+func (c config) migrateOnly() bool { return len(c.args) == 1 && c.args[0] == "migrate" }
+
 func parseFlags(args []string) (config, error) {
 	var c config
 	fs := flag.NewFlagSet("koinon-api", flag.ContinueOnError)
@@ -158,6 +174,10 @@ func parseFlags(args []string) (config, error) {
 	fs.BoolVar(&c.durable, "durable", false,
 		"run the DBOS runtime (schedules, durable timers; ADR 0066); needs the DBOS tables that "+
 			"\"koinon-api -durable migrate\" creates (the migrate subcommand creates them only with this flag)")
+	fs.StringVar(&c.executorID, "executor-id", "",
+		"this process's DBOS executor ID, unique among the replicas and never reused (the chart passes the pod name); "+
+			"the executors heartbeat into a table and one of them recovers the workflows of a dead one (ADR 0085). "+
+			"Empty is DBOS's default, \"local\", which is right for one process only")
 	fs.DurationVar(&c.wait, "wait", 5*time.Minute, "how long migrations wait for the database to come up")
 	fs.StringVar(&c.trustedOrigins, "trusted-origins", "",
 		"comma-separated extra origins allowed to make state-changing requests (CSRF)")
@@ -199,8 +219,20 @@ func parseFlags(args []string) (config, error) {
 	fs.DurationVar(&c.watchPoll, "watch-poll-interval", services.DefaultWatchPollInterval,
 		"how often a WatchRun stream re-reads its run without a notification (a backstop for missed NOTIFYs)")
 	fs.StringVar(&c.otlpAddr, "otlp-addr", ":4318",
-		"listen address of the spend ledger's OTLP/HTTP logs receiver, for agentgateway's access log; "+
-			"it has no authentication, so restrict it to agentgateway with a NetworkPolicy; empty disables it")
+		"listen address of the internal OTLP/HTTP receiver (the spend ledger's logs from agentgateway); "+
+			"every request needs the bearer token in --otlp-token-dir; empty disables it")
+	fs.StringVar(&c.otlpTokenDir, "otlp-token-dir", "",
+		"directory with the OTLP receiver's bearer token (file token) and, during a rotation, the one it replaced (file previous); "+
+			"required with --otlp-addr")
+
+	fs.IntVar(&c.traceQueueBytes, "trace-queue-bytes", 0,
+		"bytes all run-trace destination queues may hold together (ADR 0074); 0 is 20% of the container memory limit (the cgroup's or KOINON_MEMORY_LIMIT_BYTES, the lower) (128 MiB without one)")
+	fs.IntVar(&c.traceIntakeBytes, "trace-intake-bytes", 0,
+		"bytes of spans the trace router may hold while attributing them; 0 is 5% of the memory limit (the cgroup's or KOINON_MEMORY_LIMIT_BYTES, the lower) (32 MiB without one)")
+	fs.IntVar(&c.traceHeldBytes, "trace-held-bytes", 0,
+		"bytes of turn root spans the trace router may hold for the ledger; 0 is 3% of the memory limit (the cgroup's or KOINON_MEMORY_LIMIT_BYTES, the lower) (16 MiB without one)")
+	fs.IntVar(&c.traceRequestBytes, "trace-request-bytes", 0,
+		"bytes of export requests the trace receiver may read and decode at once; 0 is 8% of the memory limit (the cgroup's or KOINON_MEMORY_LIMIT_BYTES, the lower) (64 MiB without one)")
 
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort,
 		"listen address of /metrics (Prometheus); empty disables it")
@@ -240,6 +272,11 @@ func parseFlags(args []string) (config, error) {
 	}
 	if c.databaseURL == "" {
 		return c, errors.New("--database-url is required")
+	}
+	// Only the server opens the OTLP receiver; the migrate subcommand (the chart's migrate Job,
+	// which mounts no token) must not need its token.
+	if c.otlpAddr != "" && c.otlpTokenDir == "" && !c.migrateOnly() {
+		return c, errors.New("--otlp-token-dir is required with --otlp-addr: the OTLP receiver never runs without its bearer token (pass --otlp-addr= to turn the receiver off)")
 	}
 	if c.secretsNamespace == "" {
 		c.secretsNamespace = os.Getenv("POD_NAMESPACE")
@@ -324,7 +361,7 @@ func run() error {
 	defer stop()
 
 	switch {
-	case len(cfg.args) == 1 && cfg.args[0] == "migrate":
+	case cfg.migrateOnly():
 		return migrate(ctx, cfg.databaseURL, cfg.wait, cfg.durable)
 	case len(cfg.args) > 0:
 		return fmt.Errorf("unknown arguments %q; the subcommands are \"migrate\", \"preflight\", \"ensure-secrets\", \"keys\" and \"audit\" (first)", cfg.args)
@@ -338,6 +375,11 @@ func run() error {
 		return fmt.Errorf("connect to postgres: %w", err)
 	}
 	defer pool.Close()
+
+	// Not Ready (/readyz) while the schema is outside the goose range this build supports
+	// (ADR 0085): after an app-only rollback the older pods would otherwise fail at their first query.
+	gate := schemagate.New(pool, schemagate.Range{Min: migrations.MinSupported, Latest: migrations.MustLatest()}, slog.Default())
+	safego.Go(ctx, slog.Default(), "schema-gate", gate.Run)
 
 	mode, err := auth.ParseIdentityMode(cfg.defaultOrgMode)
 	if err != nil {
@@ -419,6 +461,12 @@ func run() error {
 	if _, err := priceSvc.CompleteMigrated(ctx); err != nil {
 		return err
 	}
+	// Orgs that existed before the stored default model (migration 00045) get the model they ran on.
+	if n, err := agentmodel.BackfillDefaults(ctx, pool, prices.NewResolver(pricing.Embedded()), time.Now()); err != nil {
+		return err
+	} else if n > 0 {
+		slog.Info("backfilled org default models", "orgs", n)
+	}
 	// Every model no admin set the format of follows the format table (ADR 0069).
 	if _, err := catalog.New(pool, nil, slog.Default()).RederiveFormats(ctx); err != nil {
 		return err
@@ -438,6 +486,7 @@ func run() error {
 	// Notifications that follow a commit (pre-wakes) are DBOS steps with --durable, and inline
 	// best effort without it (ADR 0066, practice B2).
 	var notifier *durable.Notifier
+	var durableRT *durable.Runtime // for its metrics, registered once the registry exists
 	var sched *schedule.Scheduler
 	if !cfg.durable {
 		slog.Warn("schedule triggers do not fire: they run on the DBOS runtime (api.durable.enabled, --durable)")
@@ -448,10 +497,13 @@ func run() error {
 		// The tables come from the migration Job (ADR 0060): DBOS only verifies them here, so a
 		// missing schema fails the start instead of the API running without its timers.
 		rt := durable.New(durable.Config{
-			DatabaseURL:        cfg.databaseURL,
-			ApplicationVersion: project.Version,
-			Logger:             slog.Default(),
+			DatabaseURL: cfg.databaseURL,
+			ExecutorID:  cfg.executorID,
+			// The default ApplicationVersion is durable.WorkflowVersion, not the release version:
+			// an upgrade must not orphan pending workflows (ADR 0085).
+			Logger: slog.Default(),
 		})
+		durableRT = rt
 		notifier = durable.NewNotifier(rt, slog.Default())
 		services.RegisterNotifications(notifier, pool)
 		if err := rt.Register(notifier.Registrar()); err != nil {
@@ -547,6 +599,9 @@ func run() error {
 	// One egress policy for everything an org points the gateway or Koinon at: model providers and
 	// remote MCP servers.
 	urlPolicy := catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.egressAllowedHosts + "," + cfg.providerAllowedHosts)}
+	if err := catalog.ValidateAllowedHosts(urlPolicy.AllowedHosts); err != nil {
+		return err
+	}
 	approvalOpts := approvals.Options{Keys: opener, Hosts: hosts, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default()}
 	if kube != nil {
 		// Approved calls to remote MCP servers go through the gateway with the org's executor key,
@@ -576,9 +631,14 @@ func run() error {
 	} else {
 		echo = modelcheck.New(pool, nil, prices.NewResolver(pricing.Embedded()))
 	}
+	// Run-trace destinations (ADR 0074). The client dials only what the egress policy allows.
+	traceSvc, err := tracedest.New(pool, catalogKeys, urlPolicy, slog.Default())
+	if err != nil {
+		return err
+	}
 	svc := services.New(pool, services.Options{
-		ModelCheck: echo,
-		Hub:        hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
+		ModelCheck: echo, Traces: traceSvc,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
 	// The notification of an opened question (the park that opens it commits in koinon-agentd).
 	safego.GoOrStop(bgCtx, slog.Default(), "question-sweeper", stop, func(ctx context.Context) { svc.QuestionSweeper(ctx, cfg.sweepInterval) })
@@ -600,15 +660,40 @@ func run() error {
 	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithTriggers(svc).WithModelCheck(echo)
 
 	reg := metrics.NewRegistry()
+	if durableRT != nil {
+		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
+		reg.MustRegister(durableRT.Collector())
+	}
 	if err := metrics.Serve(bgCtx, cfg.metricsAddr, reg, slog.Default()); err != nil {
 		return err
 	}
 	if cfg.otlpAddr != "" {
 		// The spend ledger's receiver (plan item L1). It runs on its own listener, outside
 		// the session-authenticated API handler.
+		otlpTokens, err := otlpauth.NewTokens(cfg.otlpTokenDir, slog.Default())
+		if err != nil {
+			return fmt.Errorf("--otlp-token-dir: %w", err)
+		}
+		otlpMetrics := otlpauth.NewMetrics(reg)
+		// The trace router (ADR 0074): agentd's spans arrive at /v1/traces, inside the token check.
+		exportClient, err := export.NewClient(urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second}), 0)
+		if err != nil {
+			return err
+		}
+		traceRouter, err := tracerouter.New(tracerouter.Config{
+			Store: tracerouter.NewPGStore(pool), Routes: traceSvc, Secrets: tracerouter.NewPGSecrets(pool, opener, slog.Default()),
+			Health: tracerouter.NewPGHealth(pool), Sender: exportClient, MemoryLimit: memlimit.Limit(),
+			QueueBytes: cfg.traceQueueBytes, IntakeBytes: cfg.traceIntakeBytes, MaxHeldBytes: cfg.traceHeldBytes, RequestBytes: cfg.traceRequestBytes,
+			Metrics: tracerouter.NewMetrics(reg), Log: slog.Default(),
+		})
+		if err != nil {
+			return err
+		}
+		traceRouter.Start(bgCtx)
+		defer traceRouter.Close()
 		safego.GoOrStop(ctx, slog.Default(), "ledger-otlp", stop, func(context.Context) {
-			slog.Info("starting the spend ledger's OTLP receiver", "addr", cfg.otlpAddr)
-			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default()); err != nil {
+			slog.Info("starting the internal OTLP receiver", "addr", cfg.otlpAddr)
+			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), otlpauth.Middleware(otlpTokens, otlpMetrics), traceRouter.Mount()); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
 				stop()
 			}
@@ -623,6 +708,7 @@ func run() error {
 		Services:       []func(*connect.Server){svc.Register},
 		UI:             web.Dist(),
 		Mounts:         []func(*http.ServeMux){adminSvc.Mount},
+		Ready:          gate.ReadyHandler(),
 	})
 	if err != nil {
 		return err
@@ -633,6 +719,7 @@ func run() error {
 	if cfg.toolsAddr != "" {
 		tools, err := githubtools.New(pool, githubtools.Options{
 			Hosts: hosts,
+			Keys:  opener,
 			// Trusted-preset calls run at once instead of on the next sweep.
 			Execute: func(ctx context.Context, org, id pgtype.UUID) {
 				ctx, cancel := context.WithTimeout(ctx, approvals.DefaultExecutionLease)

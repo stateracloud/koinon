@@ -1,6 +1,6 @@
 # 0057. MCP servers: remote and container, catalog, allowlists and discovery
 
-- Status: Accepted; amended 2026-10-24 (below)
+- Status: Accepted; amended 2026-10-24, 2026-10-30 and 2026-10-31 by [0084](0084-leak-guard.md) (below)
 - Date: 2026-10-23
 - Amends: [0014](0014-mcp-and-tools.md) (how MCP servers are provided and allowed per agent)
 - Delivery: remote MCP servers and per-agent allowlists land in v0.1. Container servers, the
@@ -175,6 +175,63 @@ Verified in the gateway spec suite with the real binary:
 - Negative: a rotated executor key and a restarted reconciler cost nothing, but a Secret deleted by hand
   stops approved calls (they retry) until the next reconcile pass writes a new key.
 - Negative: one target-name clash between orgs leaves one server unserved until a name changes.
+
+## Amendment 2026-10-30: third-party descriptions are sanitised at sync (#267)
+
+A server's tool descriptions, and the description strings of its input schemas, reach the model verbatim,
+so they are untrusted input. `internal/mcpsanitize` normalises them when `SyncTools` records a tool:
+
+- ANSI escapes, control characters (newline and tab stay), zero-width and other invisible format
+  characters, bidi overrides and isolates, variation selectors and Unicode tag characters (U+E0000 to
+  U+E007F) are removed;
+- tags that imitate a harness or chat-role block (`<system>`, `<system-reminder>`, `<koinon-*>`,
+  `<untrusted_context`, `<tool_result>`, `<|im_start|>` and similar, opening or closing, also with a
+  fullwidth bracket or a Unicode space) have their `<` escaped to `&lt;`, so an admin still reads them.
+  This runs after the removals, so a zero-width character inside a name does not hide it. It is a list
+  of names: a homoglyph name (Cyrillic `ѕ`) or an ordinary `<b>` passes;
+- a tool description is cut to 1,024 characters and each `description` or `title` in the input schema to
+  256 (research TP22), ending in an ellipsis. This replaces the old 20,000 byte cut. Instance values in
+  the schema (`default`, `const`, `enum`, `examples`), names and numbers are left as published: they
+  are what the tool receives or compares against.
+
+What is stored, hashed (`content_hash`) and offered by the ask-tier proxy is the sanitised text, so the
+review flow is unchanged: a visible change flags the tool, and a change that only differs in removed
+characters does not. Both tool APIs (the admin API and `mcpserver.v1alpha1.Tool`) carry
+the original length and the capped and cleaned flags, and the servers page says when a tool's text was
+sanitised. Tools synced before this change get the values on their next sync.
+
+Upgrade: the first sync after this change compares the sanitised text with the stored raw text. A tool
+whose description was over 1,024 characters, whose schema had a description over 256, or whose text had
+anything removed or escaped (CRLF counts) hashes differently, so it is flagged for review and, if it was
+in the auto tier, moves to ask. That fails closed: calls to such a tool need approval until an admin
+reviews the sanitised text and sets the tier back. Tools with short, clean text are not affected.
+
+Limit: an **auto** tool is served by agentgateway, which federates the upstream server's `tools/list`
+unchanged. Koinon renders `mcpAuthorization` rules (allow or deny by tool name) and has no hook that
+rewrites a description, so the model sees the raw text of an auto tool. The sustainable fix is in the
+harness side of the path (research TP22, TP25): the harness (agentd's MCP bridge, or koinon-harness) applies
+the same `mcpsanitize` policy to what it hands the model, and pins each tool to the approved hash. Until
+then an admin sees the sanitised text and the flags at approval, and the ask tier is the safe choice for a
+server that is not trusted.
+
+## Amendment 2026-10-31: the leak guard on every org route (#347)
+
+[0084](0084-leak-guard.md) puts a leak guard in front of every MCP tool call:
+
+- **Every org's MCP route carries `mcpGuardrails`** (ExtMcp, remote, `failClosed`) pointing at
+  koinon-api's guard. This is a separate setting from the targets' `failureMode: failOpen` (decision 5
+  and item 4 of the 2026-10-24 amendment): an unreachable *server* is still skipped, but when the
+  *guard* is unreachable every MCP call on the route is refused. The guard fingerprints MCP results
+  into the home generation's taint store and blocks a call whose arguments carry private data; a
+  match becomes an ADR 0042 approval.
+- **The auto tier is no longer unchecked.** An auto tool still runs without a person, but its
+  arguments pass the taint check and, for fetch URLs and search queries, an automatic
+  shape-and-budget URL rule. Hosts exempt from the rule are on a per-org fetch-trusted host list,
+  empty by default.
+- **Servers declare a data class and kind.** Each server record says which of untrusted input,
+  private data and outbound tool it carries, and its kind (for example fetch or search), so the
+  guard and the templates test read a declaration rather than a name (#350). The identifiers and
+  the class existing servers migrate to are open in 0084.
 
 ## Upstream verification
 

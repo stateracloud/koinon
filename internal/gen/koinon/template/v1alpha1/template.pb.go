@@ -357,14 +357,23 @@ func (x *Grant) GetRepositories() []string {
 	return nil
 }
 
-// RunLimits cap a single run; hitting one cancels the run (plan item A4).
+// RunLimits cap a single run; the first one reached cancels it (plan item A4, ADR 0081).
 type RunLimits struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Wall-clock time a run may be owned (starting or running), in seconds.
 	MaxDurationSeconds int64 `protobuf:"varint,1,opt,name=max_duration_seconds,json=maxDurationSeconds,proto3" json:"max_duration_seconds,omitempty"`
-	MaxTokens          int64 `protobuf:"varint,2,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Deprecated: tokens are reported, not enforced (ADR 0081). Kept so older clients and stored
+	// templates still decode; it caps nothing and is zero on new templates and agents.
+	//
+	// Deprecated: Marked as deprecated in koinon/template/v1alpha1/template.proto.
+	MaxTokens int64 `protobuf:"varint,2,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
+	// Model requests a run may make: every request through the agent's key counts, the harness's
+	// own title, summary and compaction calls included.
+	MaxModelRequests int64 `protobuf:"varint,3,opt,name=max_model_requests,json=maxModelRequests,proto3" json:"max_model_requests,omitempty"`
+	// USD a run may spend, by the ledger's settled cost, as an exact decimal string such as "2.00".
+	MaxSpendUsd   string `protobuf:"bytes,4,opt,name=max_spend_usd,json=maxSpendUsd,proto3" json:"max_spend_usd,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RunLimits) Reset() {
@@ -404,11 +413,26 @@ func (x *RunLimits) GetMaxDurationSeconds() int64 {
 	return 0
 }
 
+// Deprecated: Marked as deprecated in koinon/template/v1alpha1/template.proto.
 func (x *RunLimits) GetMaxTokens() int64 {
 	if x != nil {
 		return x.MaxTokens
 	}
 	return 0
+}
+
+func (x *RunLimits) GetMaxModelRequests() int64 {
+	if x != nil {
+		return x.MaxModelRequests
+	}
+	return 0
+}
+
+func (x *RunLimits) GetMaxSpendUsd() string {
+	if x != nil {
+		return x.MaxSpendUsd
+	}
+	return ""
 }
 
 // Trigger is one way work starts on an agent, with the instruction it gets when the trigger fires.
@@ -600,7 +624,10 @@ type Template struct {
 	Triggers      []*Trigger `protobuf:"bytes,14,rep,name=triggers,proto3" json:"triggers,omitempty"`
 	// Agents made from the template are ephemeral by default: each task gets a fresh sandbox
 	// without a home, deleted when the task ends (ADR 0065 decision 13c).
-	Ephemeral     bool `protobuf:"varint,15,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	Ephemeral bool `protobuf:"varint,15,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	// The starting value of the agent's thinking setting, "on" or "off"; empty when the template
+	// names none, which is the default, on (ADR 0069 amendment 2026-10-29).
+	Thinking      string `protobuf:"bytes,16,opt,name=thinking,proto3" json:"thinking,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -740,6 +767,13 @@ func (x *Template) GetEphemeral() bool {
 	return false
 }
 
+func (x *Template) GetThinking() string {
+	if x != nil {
+		return x.Thinking
+	}
+	return ""
+}
+
 // ListTemplatesRequest is empty.
 type ListTemplatesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -837,11 +871,13 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"targetsMax\x12\x18\n" +
 	"\apurpose\x18\x06 \x01(\tR\apurpose\x12#\n" +
 	"\rconnection_id\x18\a \x01(\tR\fconnectionId\x12\"\n" +
-	"\frepositories\x18\b \x03(\tR\frepositories\"\\\n" +
+	"\frepositories\x18\b \x03(\tR\frepositories\"\xb2\x01\n" +
 	"\tRunLimits\x120\n" +
-	"\x14max_duration_seconds\x18\x01 \x01(\x03R\x12maxDurationSeconds\x12\x1d\n" +
+	"\x14max_duration_seconds\x18\x01 \x01(\x03R\x12maxDurationSeconds\x12!\n" +
 	"\n" +
-	"max_tokens\x18\x02 \x01(\x03R\tmaxTokens\"\xe6\x01\n" +
+	"max_tokens\x18\x02 \x01(\x03B\x02\x18\x01R\tmaxTokens\x12,\n" +
+	"\x12max_model_requests\x18\x03 \x01(\x03R\x10maxModelRequests\x12\"\n" +
+	"\rmax_spend_usd\x18\x04 \x01(\tR\vmaxSpendUsd\"\xe6\x01\n" +
 	"\aTrigger\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x129\n" +
 	"\x04type\x18\x02 \x01(\x0e2%.koinon.template.v1alpha1.TriggerTypeR\x04type\x12\x12\n" +
@@ -854,7 +890,7 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x121\n" +
 	"\x04role\x18\x03 \x01(\x0e2\x1d.koinon.auth.v1alpha1.OrgRoleR\x04role\x12\x1d\n" +
 	"\n" +
-	"channel_id\x18\x04 \x01(\tR\tchannelId\"\x80\x05\n" +
+	"channel_id\x18\x04 \x01(\tR\tchannelId\"\x9c\x05\n" +
 	"\bTemplate\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04slug\x18\x02 \x01(\tR\x04slug\x12!\n" +
@@ -872,7 +908,8 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"run_limits\x18\f \x01(\v2#.koinon.template.v1alpha1.RunLimitsR\trunLimits\x12&\n" +
 	"\x0fspend_limit_usd\x18\r \x01(\tR\rspendLimitUsd\x12=\n" +
 	"\btriggers\x18\x0e \x03(\v2!.koinon.template.v1alpha1.TriggerR\btriggers\x12\x1c\n" +
-	"\tephemeral\x18\x0f \x01(\bR\tephemeral\"\x16\n" +
+	"\tephemeral\x18\x0f \x01(\bR\tephemeral\x12\x1a\n" +
+	"\bthinking\x18\x10 \x01(\tR\bthinking\"\x16\n" +
 	"\x14ListTemplatesRequest\"Y\n" +
 	"\x15ListTemplatesResponse\x12@\n" +
 	"\ttemplates\x18\x01 \x03(\v2\".koinon.template.v1alpha1.TemplateR\ttemplates*_\n" +

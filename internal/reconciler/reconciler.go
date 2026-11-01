@@ -41,6 +41,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -59,6 +60,7 @@ import (
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 )
 
 // Retention decides what happens to an archived agent's home volume.
@@ -77,7 +79,9 @@ const (
 
 // Defaults.
 const (
-	DefaultIdleTimeout    = 10 * time.Minute
+	DefaultIdleTimeout = 10 * time.Minute
+	// DefaultKeepWarmPerOrg is the default cap of keep-warm sandboxes per org (#315).
+	DefaultKeepWarmPerOrg = 2
 	DefaultResyncInterval = 30 * time.Second
 	// DefaultMCPProbeInterval is how often each org MCP server is probed (plan item MC1).
 	DefaultMCPProbeInterval = 60 * time.Second
@@ -135,6 +139,9 @@ type Config struct {
 	// RuntimeClassName is the sandbox runtime class (ADR 0045: kata). Empty uses the
 	// gateway's default.
 	RuntimeClassName string
+	// SandboxResources is the platform's sandbox CPU and memory sizing: the default, the bounds
+	// and the Kata memory rule (ADR 0083). Nil is sandboxres.DefaultPolicy.
+	SandboxResources *sandboxres.Policy
 	// IdleTimeout stops a sandbox after this long without activity (see package wake), for an org
 	// that has not set idle_timeout_seconds. Default 10 minutes.
 	IdleTimeout time.Duration
@@ -143,6 +150,9 @@ type Config struct {
 	ParkWarm time.Duration
 	// SandboxJobs bounds the per-sandbox jobs running at once. Default 8.
 	SandboxJobs int
+	// KeepWarmPerOrg caps the sandboxes an org's admins can keep warm (agents.keep_warm, #315).
+	// Default 2; a negative value grants none. Over the cap the oldest agents win.
+	KeepWarmPerOrg int
 	// ResyncInterval is the time between passes without a wake-up. Default 30 seconds.
 	ResyncInterval time.Duration
 	// Checkpoints turns on home checkpoints (checkpoint.go): a sandbox is stopped, recreated or
@@ -165,6 +175,14 @@ type Config struct {
 	Logger *slog.Logger
 	// Metrics receives the pass metrics; nil keeps them unexported.
 	Metrics *Metrics
+	// Supervisor says which supervisor image the OpenShell gateway starts sandboxes with. It is part
+	// of the sandbox spec hash, so an OpenShell upgrade recreates each sandbox through the usual path
+	// (ADR 0085 decision 9). Nil leaves it out of the hash.
+	Supervisor SupervisorSource
+	// MaxRecreatesPerPass caps the sandboxes one pass deletes to recreate them with a changed spec
+	// (a new supervisor, image or resources); the others wait for a later pass. Zero is
+	// DefaultMaxRecreatesPerPass; negative is no cap.
+	MaxRecreatesPerPass int
 	// Now defaults to time.Now; tests move it forward to pass the idle timeout.
 	Now func() time.Time
 }
@@ -189,6 +207,10 @@ type Reconciler struct {
 	// keyWrittenAt is when each provider key file written by this process was written, until it
 	// has had ProviderKeySettle to reach the gateway.
 	keyWrittenAt map[string]time.Time
+	// clampMu guards clampLogged: the clamps last logged per agent, so a pass that changes nothing
+	// logs nothing.
+	clampMu     sync.Mutex
+	clampLogged map[string]string
 	// lastLimit is the budget last pushed per agent key, so one agent whose budget cannot be
 	// computed keeps it (and never gets more) instead of stopping the pass for everyone.
 	lastLimit map[gateway.AgentRef]gateway.Limit
@@ -210,6 +232,14 @@ type Reconciler struct {
 	probes    []mcpProbe
 	mcp       *mcpservers.Service
 	m         *Metrics
+
+	// supMu guards the supervisor image read from the gateway (supervisor.go).
+	supMu    sync.Mutex
+	supImage string
+	supKnown bool
+	supErr   error
+	// recreates counts this pass's spec-change recreates against MaxRecreatesPerPass.
+	recreates atomic.Int32
 }
 
 // New returns a Reconciler.
@@ -232,11 +262,23 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	if cfg.SandboxJobs <= 0 {
 		cfg.SandboxJobs = 8
 	}
+	if cfg.MaxRecreatesPerPass == 0 {
+		cfg.MaxRecreatesPerPass = DefaultMaxRecreatesPerPass
+	}
+	if cfg.KeepWarmPerOrg == 0 {
+		cfg.KeepWarmPerOrg = DefaultKeepWarmPerOrg
+	}
 	if cfg.MCPProbeInterval == 0 {
 		cfg.MCPProbeInterval = DefaultMCPProbeInterval
 	}
 	if cfg.ResyncInterval == 0 {
 		cfg.ResyncInterval = DefaultResyncInterval
+	}
+	if cfg.SandboxResources == nil {
+		p := sandboxres.DefaultPolicy()
+		cfg.SandboxResources = &p
+	} else if err := cfg.SandboxResources.Validate(); err != nil {
+		return nil, fmt.Errorf("reconciler: sandbox resources: %w", err)
 	}
 	switch cfg.HomeRetention {
 	case "":
@@ -289,6 +331,8 @@ type work struct {
 	cfg agentconfig.Config
 	// tools are the MCP tools the active version's grants allow.
 	tools []gateway.ToolGrant
+	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (#315).
+	keepWarm bool
 }
 
 // names are the agent's object names: the recorded ones, and the GitHub ones derived from the
@@ -338,6 +382,8 @@ func (r *Reconciler) observeSandboxes(ctx context.Context) {
 }
 
 func (r *Reconciler) reconcileAll(ctx context.Context) error {
+	r.recreates.Store(0)
+	r.refreshSupervisor(ctx)
 	orgs, err := r.q.ListOrgsToReconcile(ctx)
 	if err != nil {
 		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
@@ -357,6 +403,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 			return fmt.Errorf("reconciler: list agents of org %s: %w", org.Slug, err)
 		}
+		warm := 0
 		for _, a := range agents {
 			w, err := r.prepare(ctx, org, a, workspaces)
 			if errors.Is(err, errAbortPass) {
@@ -371,6 +418,11 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			}
 			if w == nil {
 				continue
+			}
+			if a.KeepWarm && a.Status == store.AgentStatusActive && warm < r.cfg.KeepWarmPerOrg {
+				// The list is oldest first, so the cap keeps the same agents from pass to pass.
+				w.keepWarm = true
+				warm++
 			}
 			items = append(items, w)
 			if w.key.ID != "" {
@@ -484,6 +536,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 
 	var rejections []gateway.Rejection
 	applyFailed := false
+	rejectedReason := ""
 	applyStart := time.Now()
 	_, applyErr := r.gw.Apply(ctx, state)
 	r.m.GatewayApply.Observe(time.Since(applyStart).Seconds())
@@ -496,7 +549,21 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			// depend on it (start on demand, idle stop), so it goes on, except for agents whose
 			// new key is not live yet. Nothing is recorded as applied and nothing is pruned.
 			applyFailed = true
-			r.m.PassErrors.WithLabelValues(errKindGatewayApply).Inc()
+			var cfgRej *gateway.ConfigRejectedError
+			if errors.As(err, &cfgRej) {
+				// The whole file was refused and the gateway keeps its previous config, so no key,
+				// revocation, model or limit of this pass is live. Its reason is only in the gateway's
+				// log; say it here, on the agents waiting for it and in the metrics (ADR 0050).
+				rejectedReason = cfgRej.Reason
+				if rejectedReason == "" {
+					rejectedReason = "the reason could not be read from the gateway's log"
+				}
+				r.m.PassErrors.WithLabelValues(errKindGatewayConfig).Inc()
+				r.log.Error("agentgateway rejected the config; it keeps serving the previous one, so no change of this pass is live",
+					"revision", string(cfgRej.Revision), "reason", rejectedReason)
+			} else {
+				r.m.PassErrors.WithLabelValues(errKindGatewayApply).Inc()
+			}
 			errs = append(errs, fmt.Errorf("reconciler: apply gateway state: %w", err))
 		} else {
 			rejections = rej.Rejected
@@ -507,8 +574,9 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("reconciler: %w", rej))
 		}
 	}
+	r.m.GatewayConfigRejected.Set(b2f(rejectedReason != ""))
 	if !applyFailed {
-		r.keysLive(state)
+		r.keysLive(state, rejections)
 		r.recordApplied(served, state, rejections)
 		if err := r.recordServed(ctx, orgs, served, state, rejections); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
@@ -527,9 +595,13 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	defer func() { r.m.AgentsHeldBack.Set(float64(heldBack)) }()
 	var lateRun []*work
 	for _, w := range late {
-		if applyFailed {
+		if applyFailed || r.keyNotLive(w.key.ID) {
 			r.log.Warn("the gateway does not serve the agent's new key yet; its sandbox work waits", w.logAttrs()...)
-			r.recordMessage(ctx, w, errors.New("waiting for the gateway to serve the agent's new key"))
+			msg := "waiting for the gateway to serve the agent's new key"
+			if rejectedReason != "" {
+				msg += ": agentgateway rejected the config: " + rejectedReason
+			}
+			r.recordMessage(ctx, w, errors.New(msg))
 			heldBack++
 			continue
 		}
@@ -604,12 +676,20 @@ func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[s
 }
 
 // keysLive records that the applied state carries its keys.
-func (r *Reconciler) keysLive(s gateway.State) {
+func (r *Reconciler) keysLive(s gateway.State, rejected []gateway.Rejection) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.appliedSinceStart = true
+	refused := map[string]bool{}
+	for _, x := range rejected {
+		if x.Kind == "Key" {
+			refused[x.Name] = true
+		}
+	}
 	for _, k := range s.Keys {
-		delete(r.notLive, k.ID)
+		if !refused[k.ID] {
+			delete(r.notLive, k.ID)
+		}
 	}
 }
 
@@ -1021,7 +1101,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	}
 	names = w.names()
 
-	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor, providers, network)
+	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor, providers, network, r.sandboxResources(w))
 	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm})
 	if err != nil {
 		return fmt.Errorf("read org settings: %w", err)
@@ -1029,10 +1109,14 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 
 	sb, err := r.backend.GetSandbox(ctx, ws, names.Sandbox)
 	if errors.Is(err, execution.ErrNotFound) {
-		if w.sb.ArchivedAt.Valid && !act.HasActive && !act.HasDemand && !r.woken(w.sb, tune) {
-			// Archived (archive.go): nothing wants the agent, so no sandbox is created. A run,
-			// a claimable park or a pre-wake signal creates one; the first run restores the home.
-			return r.recordState(ctx, w, store.SandboxStateDeleting, archivedPhase, archivedMessage)
+		if !act.HasActive && !act.HasDemand && !r.woken(w.sb, tune) && !w.keepWarm {
+			// Nothing wants the agent, so no sandbox is created: it starts on demand (#315). A
+			// run, a claimable park, a pre-wake signal or a keep-warm setting creates one. An
+			// archived agent (archive.go) restores its home on the first run.
+			if w.sb.ArchivedAt.Valid {
+				return r.recordState(ctx, w, store.SandboxStateDeleting, archivedPhase, archivedMessage)
+			}
+			return r.recordState(ctx, w, store.SandboxStateDeleting, idlePhase, idleMessage)
 		}
 		if !hasRead {
 			// No sandbox references a GitHub record now: drop one left by a removed grant.
@@ -1059,7 +1143,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// recreated at once, parked runs included: they stay parked in Postgres and resume in the new
 		// sandbox through the reset path (ADR 0051). The new sandbox has a new ID, which clears the
 		// mark (RecordAgentSandbox).
-		if ok, note, err := r.homeGate(ctx, w, ws, sb, activitySince(w.sb, act)); err != nil || !ok {
+		if ok, note, err := r.homeGate(ctx, w, ws, sb, homeDirtiedSince(w.sb)); err != nil || !ok {
 			if err != nil {
 				return err
 			}
@@ -1084,9 +1168,9 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// left to fail; a starting run has not started the harness and waits for the new sandbox
 		// (agentd waits on Error and Deleting). With no running run, delete it so the next pass
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
-		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, activitySince(w.sb, act))
+		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, homeDirtiedSince(w.sb))
 	}
-	if sb.Labels[LabelSpecHash] != hash {
+	if sb.Labels[LabelSpecHash] != hash || r.supervisorChanged(sb) {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
 		// hand): OpenShell cannot change those in place, so the sandbox is recreated, which
 		// also replaces its home volume. Never while a run holds the agent, parked runs
@@ -1096,7 +1180,13 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		if act.HasHeld {
 			return r.record(ctx, w, sb, hash, "sandbox spec changed; recreating it after the active and parked runs finish")
 		}
-		if ok, note, err := r.homeGate(ctx, w, ws, sb, activitySince(w.sb, act)); err != nil || !ok {
+		if !r.takeRecreate() {
+			// The cap keeps an OpenShell upgrade from recreating the whole fleet in one pass. It is
+			// taken before the home gate, which requests checkpoints and wakes stopped sandboxes: a
+			// sandbox whose gate is still waiting keeps its slot, so at most the cap starts per pass.
+			return r.record(ctx, w, sb, hash, "sandbox spec changed; waiting for a free recreate slot of this pass")
+		}
+		if ok, note, err := r.homeGate(ctx, w, ws, sb, homeDirtiedSince(w.sb)); err != nil || !ok {
 			if err != nil {
 				return err
 			}
@@ -1115,9 +1205,9 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		if _, err := r.backend.EnsurePolicy(ctx, ws, names.Sandbox, spec.Policy); err != nil {
 			return err
 		}
-		if !act.HasActive && !act.HasDemand && r.idle(w.sb, act, tune) {
+		if !act.HasActive && !act.HasDemand && !w.keepWarm && r.idle(w.sb, act, tune) {
 			// The home is backed up before the stop (practice B3).
-			if ok, err := r.stopGate(ctx, w, sb, activitySince(w.sb, act)); err != nil {
+			if ok, err := r.stopGate(ctx, w, sb); err != nil {
 				return err
 			} else if !ok {
 				return r.record(ctx, w, sb, hash, "waiting for the home backup before stopping")
@@ -1128,7 +1218,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			r.log.Info("stopped idle sandbox", w.logAttrs()...)
 		}
 	case execution.PhaseStopped:
-		if act.HasActive || act.HasDemand || r.woken(w.sb, tune) {
+		if act.HasActive || act.HasDemand || w.keepWarm || r.woken(w.sb, tune) {
 			if sb, err = r.backend.StartSandbox(ctx, ws, names.Sandbox); err != nil {
 				return err
 			}
@@ -1201,10 +1291,11 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// activitySince is the latest activity of the agent's sandbox, the clock the idle stop counts
-// from. Activity is the latest of the sandbox's last start, the last run that finished or parked,
-// and the last pre-wake signal (package wake). A run that is active or claimable keeps the
-// sandbox up regardless (the caller checks HasActive and HasDemand).
+// activitySince is the latest activity of the agent's sandbox, the clock the idle stop and the
+// archive count from. Activity is the latest of the sandbox's last start, the last run that
+// finished or parked, and the last pre-wake signal (package wake). A run that is active or
+// claimable keeps the sandbox up regardless (the caller checks HasActive and HasDemand). It is an
+// idle clock, not "the home was written": the checkpoint gates use homeDirtiedSince.
 func activitySince(sb store.AgentSandbox, act store.GetAgentRunActivityRow) time.Time {
 	var since time.Time
 	for _, t := range []pgtype.Timestamptz{sb.StartedAt, act.LastActivity, sb.WokenAt} {
@@ -1396,4 +1487,11 @@ func (r *Reconciler) failClosedLimit(agent gateway.AgentRef, now time.Time) *gat
 		}
 	}
 	return &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: ledger.Window, Generation: "failed"}
+}
+
+func b2f(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
 }

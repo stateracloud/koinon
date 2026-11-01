@@ -1,0 +1,399 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package chartsmoke_test
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/network"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
+
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
+)
+
+// Deadlines from the brief: a Job finishes, and a Deployment's probes answer, within a minute.
+const (
+	jobDeadline   = 60 * time.Second
+	probeDeadline = 60 * time.Second
+	// settleTime is how long the Deployments run after they are ready: a component that dies
+	// shortly after its first probe, or whose RBAC is missing a rule it only needs after
+	// starting, shows up in this window.
+	settleTime = 12 * time.Second
+)
+
+// thirdPartyDeployments are rendered Deployments the smoke test does not run: they are not
+// Koinon's binaries, so no Koinon flag or mount can break them. koinon-gateway is agentgateway,
+// whose configuration the reconciler writes at run time.
+var thirdPartyDeployments = []string{"koinon-gateway"}
+
+// platformJobs are Jobs that inspect the cluster platform (Agent Sandbox, OpenShell, Kata, the
+// gateway controller), which envtest does not have. They must run their checks and report: exit 1
+// with the report is the expected outcome here, a crash before the report (a flag or config error)
+// or a permission error is not.
+var platformJobs = map[string]struct{ report string }{
+	"koinon-preflight": {report: "Koinon install preflight"},
+}
+
+var _ = Describe("Rendered startup", Label("chartsmoke"), func() {
+	for _, vf := range valuesFiles() {
+		describeMode(strings.TrimSuffix(filepath.Base(vf), "-values.yaml"), vf)
+	}
+})
+
+func describeMode(name, valuesFile string) {
+	Describe(name, Ordered, func() {
+		var (
+			r  *rendered
+			cl *cluster
+			rn *runner
+			// ready records the workloads of the Deployments that answered their probes.
+			ready = map[string][]*workload{}
+			// accounted collects the Deployments the specs ran or deliberately skipped.
+			accounted []string
+		)
+
+		BeforeAll(func(ctx SpecContext) {
+			r = helmRender(ctx, valuesFile)
+
+			nw, err := network.New(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx context.Context) { _ = nw.Remove(ctx) })
+			pg, err := postgres.Run(ctx, pgtest.Image,
+				postgres.WithDatabase("koinon"), postgres.WithUsername("koinon"), postgres.WithPassword(dbSecretPassword),
+				postgres.BasicWaitStrategies(), network.WithNetwork([]string{"postgres"}, nw))
+			if pg != nil {
+				DeferCleanup(func(ctx context.Context) { _ = testcontainers.TerminateContainer(pg) })
+			}
+			Expect(err).NotTo(HaveOccurred())
+
+			cl = startCluster()
+
+			docker, err := testcontainers.NewDockerClientWithOpts(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			rn = &runner{cl: cl, nwName: nw.Name, images: images, docker: docker, helperImage: pgtest.Image}
+			DeferCleanup(rn.Close)
+
+			// What exists before the install: the namespace, its default ServiceAccount (made by
+			// the cluster's controller) and the operator's Secrets.
+			_, err = cl.Admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = cl.Admin.CoreV1().ServiceAccounts(namespace).Create(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "default"}}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			AddReportEntry("operator Secrets", fmt.Sprint(provisionOperatorSecrets(ctx, cl, r)))
+		}, NodeTimeout(5*time.Minute))
+
+		AfterEach(func(ctx SpecContext) {
+			if CurrentSpecReport().Failed() {
+				for _, ws := range ready {
+					for _, w := range ws {
+						AddReportEntry("log "+w.Name, w.Logs(ctx))
+					}
+				}
+			}
+		})
+
+		// Helm runs the pre-install hooks before it creates any other object of the release, in
+		// ascending hook-weight order; Jobs of one weight finish before the next weight starts.
+		// So a hook Job can only use what the operator made before the install and the hook
+		// objects of its own or an earlier weight: ensure-secrets creates the generated Secrets,
+		// then the migration applies the schema.
+		It("runs the pre-install hooks in hook-weight order", func(ctx SpecContext) {
+			hooks := map[int][]runtime.Object{}
+			var weights []int
+			add := func(o runtime.Object) {
+				m := mustMeta(o)
+				if w, pre, hook := hookOf(m); hook {
+					Expect(pre).To(BeTrue(), "%s %s is a hook of a kind this suite does not run: %s", kindOf(o), m.GetName(), m.GetAnnotations()["helm.sh/hook"])
+					if _, ok := hooks[w]; !ok {
+						weights = append(weights, w)
+					}
+					hooks[w] = append(hooks[w], o)
+				}
+			}
+			for _, o := range r.Objects {
+				add(o)
+			}
+			for _, j := range r.Jobs {
+				add(j)
+			}
+			sort.Ints(weights)
+
+			var ran []string
+			for _, w := range weights {
+				// Helm creates the non-Job objects of a weight with the Jobs; the Jobs' pods start
+				// once the API server has them all.
+				var jobs []*batchv1.Job
+				for _, o := range hooks[w] {
+					if j, ok := o.(*batchv1.Job); ok {
+						jobs = append(jobs, j)
+						continue
+					}
+					Expect(applyObject(ctx, cl, o)).To(Succeed())
+				}
+				sort.Slice(jobs, func(i, k int) bool { return jobs[i].Name < jobs[k].Name })
+				for _, j := range jobs {
+					By(fmt.Sprintf("hook weight %d: %s", w, j.Name))
+					runJob(ctx, rn, j)
+					ran = append(ran, j.Name)
+				}
+			}
+			AddReportEntry("hook Jobs, in order", fmt.Sprint(ran))
+			Expect(ran).To(ContainElement("koinon-migrate"), "the migrate Job is a pre-install hook")
+			if slices.Contains(ran, "koinon-ensure-secrets") {
+				// What the chart expects from it.
+				Expect(cl.Secret(ctx, "koinon-otlp-token")).NotTo(BeNil())
+				Expect(cl.Secret(ctx, "koinon-otlp-token").Data).To(HaveKey("token"))
+			}
+		}, SpecTimeout(5*time.Minute))
+
+		// The rest of the release: everything that is not a hook, then its Jobs that are not hooks.
+		It("creates the release's objects and runs its plain Jobs", func(ctx SpecContext) {
+			for _, o := range r.Objects {
+				if _, _, hook := hookOf(mustMeta(o)); !hook {
+					Expect(applyObject(ctx, cl, o)).To(Succeed())
+				}
+			}
+			// The Deployments exist in the API server too (nothing runs their pods there; the
+			// containers are started below): the reconciler makes its ConfigMap owned by the
+			// gateway Deployment, so that Deployment has to be readable.
+			for _, d := range r.Deployments {
+				Expect(applyObject(ctx, cl, d)).To(Succeed())
+			}
+			for _, j := range r.Jobs {
+				if _, _, hook := hookOf(&j.ObjectMeta); !hook {
+					runJob(ctx, rn, j)
+				}
+			}
+		}, SpecTimeout(5*time.Minute))
+
+		// With the DBOS runtime on (ADR 0085), the executor ID is the pod name from the downward API,
+		// and the migrate Job (a pre-install hook, so it ran above) creates the tables the runtime
+		// needs before koinon-api starts.
+		It("gives a durable koinon-api its pod name as the executor ID", func() {
+			api := r.deployment("koinon-api")
+			Expect(api).NotTo(BeNil())
+			c := api.Spec.Template.Spec.Containers[0]
+			if !slices.Contains(c.Args, "-durable") {
+				Skip("api.durable is off in this mode")
+			}
+			var ref *corev1.EnvVar
+			for i := range c.Env {
+				if c.Env[i].Name == "KOINON_EXECUTOR_ID" {
+					ref = &c.Env[i]
+				}
+			}
+			Expect(ref).NotTo(BeNil(), "koinon-api has KOINON_EXECUTOR_ID")
+			Expect(ref.ValueFrom).NotTo(BeNil())
+			Expect(ref.ValueFrom.FieldRef).NotTo(BeNil())
+			Expect(ref.ValueFrom.FieldRef.FieldPath).To(Equal("metadata.name"))
+			for _, j := range r.Jobs {
+				if j.Name != "koinon-migrate" {
+					continue
+				}
+				_, pre, hook := hookOf(j)
+				Expect(hook && pre).To(BeTrue(), "the migrate Job runs before koinon-api exists")
+				Expect(j.Spec.Template.Spec.Containers[0].Args).To(ContainElement("-durable"), "the migrate Job creates the DBOS tables")
+			}
+		})
+
+		It("starts koinon-api and answers its probes", func(ctx SpecContext) {
+			ready["koinon-api"] = startDeployment(ctx, rn, r, "koinon-api")
+			accounted = append(accounted, "koinon-api")
+			// The KEK Secret is created by the API on its first start (KOINON_KEK_CREATE).
+			Expect(cl.Secret(ctx, kekSecretName(r))).NotTo(BeNil(), "the key-encryption Secret exists")
+		}, SpecTimeout(3*time.Minute))
+
+		It("starts koinon-reconciler and answers its probes", func(ctx SpecContext) {
+			ready["koinon-reconciler"] = startDeployment(ctx, rn, r, "koinon-reconciler")
+			accounted = append(accounted, "koinon-reconciler")
+		}, SpecTimeout(3*time.Minute))
+
+		It("starts koinon-agentd and answers its probes", func(ctx SpecContext) {
+			ready["koinon-agentd"] = startDeployment(ctx, rn, r, "koinon-agentd")
+			accounted = append(accounted, "koinon-agentd")
+			// Its readiness probe is /readyz on the health port: the schema gate (ADR 0085, #408)
+			// reads goose_db_version and schema_compat of the migrated database and must find the schema supported.
+			// The drain on SIGTERM must fit in the pod's grace period (ADR 0085): the kubelet
+			// would otherwise kill agentd mid-drain and the leases would not be released.
+			ps := r.deployment("koinon-agentd").Spec.Template.Spec
+			var drain time.Duration
+			for _, c := range ps.Containers {
+				for _, e := range c.Env {
+					if e.Name == "KOINON_DRAIN_DEADLINE" {
+						d, err := time.ParseDuration(e.Value)
+						Expect(err).NotTo(HaveOccurred())
+						drain = d
+					}
+				}
+			}
+			Expect(drain).To(BeNumerically(">", 0), "koinon-agentd gets KOINON_DRAIN_DEADLINE")
+			Expect(ps.TerminationGracePeriodSeconds).NotTo(BeNil())
+			Expect(time.Duration(*ps.TerminationGracePeriodSeconds) * time.Second).To(BeNumerically(">=", drain+30*time.Second))
+		}, SpecTimeout(3*time.Minute))
+
+		It("keeps every Deployment running and permitted", func(ctx SpecContext) {
+			time.Sleep(settleTime)
+			for name, ws := range ready {
+				for _, w := range ws {
+					logs := w.Logs(ctx)
+					Expect(w.Running(ctx)).To(BeTrue(), "%s (%s) stopped within %s of being ready (exit code %d); logs:\n%s", w.Name, name, settleTime, w.ExitCode(ctx), logs)
+					// No restarts happen here, so a running container has restart count 0.
+					Expect(strings.ToLower(logs)).NotTo(ContainSubstring("forbidden"),
+						"%s was denied by the API server: the chart's RBAC lacks a rule; logs:\n%s", w.Name, logs)
+				}
+			}
+		}, SpecTimeout(2*time.Minute))
+
+		It("accounts for every rendered Deployment", func() {
+			var all, skipped []string
+			for _, d := range r.Deployments {
+				all = append(all, d.Name)
+				if slices.Contains(thirdPartyDeployments, d.Name) {
+					accounted = append(accounted, d.Name)
+					skipped = append(skipped, d.Name)
+				}
+			}
+			sort.Strings(all)
+			sort.Strings(accounted)
+			// A Deployment added to the chart must be started here or declared third-party.
+			Expect(slices.Compact(accounted)).To(Equal(all), "run new Deployments in this suite, or add them to thirdPartyDeployments")
+			AddReportEntry("not run (third-party)", fmt.Sprint(skipped))
+			AddReportEntry("not applied (not needed to start)", fmt.Sprint(r.Ignored))
+		})
+	})
+}
+
+// hookOf reads a Helm hook annotation: whether the object is a hook, whether it is a pre-install
+// hook, and its weight.
+func hookOf(m metav1.Object) (weight int, pre, hook bool) {
+	a := m.GetAnnotations()
+	h, ok := a["helm.sh/hook"]
+	if !ok {
+		return 0, false, false
+	}
+	pre = slices.Contains(strings.Split(h, ","), "pre-install")
+	if w := a["helm.sh/hook-weight"]; w != "" {
+		n, err := strconv.Atoi(w)
+		Expect(err).NotTo(HaveOccurred(), "hook weight of %s", m.GetName())
+		weight = n
+	}
+	return weight, pre, true
+}
+
+func mustMeta(o runtime.Object) metav1.Object {
+	m, err := apimeta.Accessor(o)
+	if err != nil {
+		panic(err)
+	}
+	return m
+}
+
+func kindOf(o runtime.Object) string { return fmt.Sprintf("%T", o) }
+
+// kekSecretName is the key-encryption Secret the API uses (KOINON_KEK_SECRET).
+func kekSecretName(r *rendered) string {
+	for _, c := range r.deployment("koinon-api").Spec.Template.Spec.Containers {
+		for _, e := range c.Env {
+			if e.Name == "KOINON_KEK_SECRET" {
+				return e.Value
+			}
+		}
+	}
+	panic("koinon-api has no KOINON_KEK_SECRET")
+}
+
+// runJob runs every container of the Job's pod template to completion and requires exit code 0
+// (for a platform Job: its report, and no Forbidden answer from the API server, which would mean
+// the chart's RBAC lacks a rule).
+func runJob(ctx context.Context, rn *runner, job *batchv1.Job) {
+	GinkgoHelper()
+	ps := job.Spec.Template.Spec
+	for _, c := range append(slices.Clone(ps.InitContainers), ps.Containers...) {
+		w := rn.start(ctx, job.Name, ps, c, jobDeadline)
+		code, logs := w.ExitCode(ctx), w.Logs(ctx)
+		AddReportEntry("log "+w.Name, logs, ReportEntryVisibilityFailureOrVerbose)
+		if p, ok := platformJobs[job.Name]; ok {
+			Expect(logs).To(ContainSubstring(p.report), "%s did not reach its checks (exit %d, args %q)", w.Name, code, c.Args)
+			Expect(strings.ToLower(logs)).NotTo(ContainSubstring("forbidden"), "%s was denied by the API server: the chart's RBAC lacks a rule", w.Name)
+			Expect(code).To(BeElementOf(0, 1), "%s exited with code %d", w.Name, code)
+			continue
+		}
+		Expect(code).To(Equal(0), "%s exited with code %d (args %q); logs:\n%s", w.Name, code, c.Args, logs)
+	}
+}
+
+// startDeployment starts each container of the Deployment's pod template and requires its
+// probes (startup, readiness, liveness) to answer within a minute. A container without HTTP
+// probes must serve /metrics on its "metrics" port instead, which the chart scrapes.
+func startDeployment(ctx context.Context, rn *runner, r *rendered, name string) []*workload {
+	GinkgoHelper()
+	d := r.deployment(name)
+	Expect(d).NotTo(BeNil(), "%s is rendered", name)
+	ps := d.Spec.Template.Spec
+	var started []*workload
+	for _, c := range ps.Containers {
+		w := rn.start(ctx, name, ps, c, 0)
+		started = append(started, w)
+		any := false
+		for _, p := range []*corev1.Probe{c.StartupProbe, c.ReadinessProbe, c.LivenessProbe} {
+			if p == nil || p.HTTPGet == nil {
+				continue
+			}
+			any = true
+			Expect(w.ProbeHTTP(ctx, p, probeDeadline)).To(BeEmpty(), "%s probe; logs:\n%s", w.Name, w.Logs(ctx))
+		}
+		if !any {
+			Expect(slices.IndexFunc(c.Ports, func(p corev1.ContainerPort) bool { return p.Name == "metrics" })).To(BeNumerically(">=", 0),
+				"%s has no HTTP probe and no metrics port to check", w.Name)
+			probe := &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/metrics", Port: intstr.FromString("metrics")}}}
+			Expect(w.ProbeHTTP(ctx, probe, probeDeadline)).To(BeEmpty(), "%s /metrics; logs:\n%s", w.Name, w.Logs(ctx))
+		}
+		Expect(w.Running(ctx)).To(BeTrue(), "%s is still running; logs:\n%s", w.Name, w.Logs(ctx))
+	}
+	return started
+}
+
+// applyObject creates a ServiceAccount, Secret, ConfigMap, Deployment or RBAC object in the API server.
+func applyObject(ctx context.Context, cl *cluster, o runtime.Object) error {
+	c := cl.Admin
+	var err error
+	switch o := o.(type) {
+	case *corev1.ServiceAccount:
+		_, err = c.CoreV1().ServiceAccounts(namespace).Create(ctx, o, metav1.CreateOptions{})
+	case *corev1.ConfigMap:
+		_, err = c.CoreV1().ConfigMaps(namespace).Create(ctx, o, metav1.CreateOptions{})
+	case *corev1.Secret:
+		_, err = c.CoreV1().Secrets(namespace).Create(ctx, o, metav1.CreateOptions{})
+	case *appsv1.Deployment:
+		_, err = c.AppsV1().Deployments(namespace).Create(ctx, o, metav1.CreateOptions{})
+	case *rbacv1.Role:
+		_, err = c.RbacV1().Roles(namespace).Create(ctx, o, metav1.CreateOptions{})
+	case *rbacv1.RoleBinding:
+		_, err = c.RbacV1().RoleBindings(namespace).Create(ctx, o, metav1.CreateOptions{})
+	case *rbacv1.ClusterRole:
+		_, err = c.RbacV1().ClusterRoles().Create(ctx, o, metav1.CreateOptions{})
+	case *rbacv1.ClusterRoleBinding:
+		_, err = c.RbacV1().ClusterRoleBindings().Create(ctx, o, metav1.CreateOptions{})
+	default:
+		return fmt.Errorf("applyObject: %T is not modelled", o)
+	}
+	return err
+}

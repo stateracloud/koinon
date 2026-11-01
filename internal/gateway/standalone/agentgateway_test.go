@@ -5,6 +5,7 @@ package standalone_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,7 +13,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +30,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/gatewaytest"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/testing/containerhost"
 )
 
 // AgentgatewayImage is the agentgateway release Koinon targets (ADR 0048).
@@ -112,10 +116,10 @@ func startStandalone(ctx context.Context, hostPorts []int, files map[string]stri
 		b, _ := io.ReadAll(l)
 		return string(b)
 	}
-	if r.URL, err = ctr.PortEndpoint(ctx, "4000/tcp", "http"); err != nil {
+	if r.URL, err = containerhost.Endpoint(ctx, ctr, "4000/tcp", "http"); err != nil {
 		return nil, err
 	}
-	if r.statsURL, err = ctr.PortEndpoint(ctx, "15020/tcp", "http"); err != nil {
+	if r.statsURL, err = containerhost.Endpoint(ctx, ctr, "15020/tcp", "http"); err != nil {
 		return nil, err
 	}
 	r.driver = &standalone.Driver{
@@ -140,7 +144,8 @@ var _ = func() bool {
 			}
 			return &r.Gateway, nil
 		},
-		GatewayBudgets: true,
+		GatewayBudgets:  true,
+		HeaderAllowlist: true,
 	})
 	return true
 }()
@@ -227,16 +232,72 @@ var _ = Describe("agentgateway v1.7.0 reload detection (standalone only)", Order
 		Expect(err).NotTo(HaveOccurred())
 	}, SpecTimeout(2*time.Minute))
 
-	It("reports a config agentgateway rejects", func(ctx SpecContext) {
+	// reloadLog reads the reload errors from the container's own log, in agentgateway's real format.
+	reloadLog := func() standalone.ReloadLog { return containerReloadLog{logs: r.Logs} }
+
+	It("reports a config agentgateway rejects, with its reason", func(ctx SpecContext) {
+		w := standalone.ProbeWaiter{GatewayURL: r.URL, StatsURL: r.statsURL, Interval: 200 * time.Millisecond, Reload: reloadLog()}
+		prepared := w.Prepare(ctx)
 		Expect(r.file.Deliver(ctx, []byte("llm: {models: [{name: 1, provider: nope}]}\n"), "")).To(Succeed())
-		err := r.driver.Waiter.Wait(ctx, "never-rendered")
+		err := w.Wait(prepared, "never-rendered")
 		Expect(err).To(MatchError(standalone.ErrConfigRejected))
+		var rej *standalone.ConfigRejectedError
+		Expect(errors.As(err, &rej)).To(BeTrue())
+		Expect(rej.Reason).NotTo(BeEmpty(), "agentgateway's reload error is read from its log")
 
 		// The last good config keeps serving, and the next Apply recovers.
 		_, err = r.driver.Apply(ctx, state)
 		Expect(err).NotTo(HaveOccurred())
 	}, SpecTimeout(time.Minute))
+
+	It("reports a good file that arrives long after a rejected one as live (issue #245)", func(ctx SpecContext) {
+		// A ConfigMap delivers a file 60 to 80 s after the write; the gauge reads 0 from the earlier
+		// rejection until then.
+		Expect(r.file.Deliver(ctx, []byte("llm: {models: [{name: 1, provider: nope}]}\n"), "")).To(Succeed())
+		failures := func() int { return strings.Count(r.Logs(ctx), "Failed to reload config") }
+		Eventually(failures).WithTimeout(30 * time.Second).Should(BeNumerically(">", 0))
+		// The file watcher can report one rename twice; let the second reload finish.
+		time.Sleep(time.Second)
+
+		extra, err := gateway.NewKey(agent)
+		Expect(err).NotTo(HaveOccurred())
+		next := state
+		next.Keys = append(slices.Clone(state.Keys), extra.Key)
+		slow := &standalone.Driver{
+			Options:   options,
+			Deliverer: delayedDeliverer{inner: r.file, delay: 8 * time.Second},
+			Waiter:    standalone.ProbeWaiter{GatewayURL: r.URL, StatsURL: r.statsURL, Interval: 200 * time.Millisecond, Reload: reloadLog(), RejectAfter: 30 * time.Second},
+		}
+		_, err = slow.Apply(ctx, next)
+		Expect(err).NotTo(HaveOccurred(), "four polls (3.5 s) used to call this rejected")
+		code, body := chat(ctx, extra.Material, model)
+		Expect(code).To(Equal(http.StatusOK), body)
+	}, SpecTimeout(2*time.Minute))
 })
+
+// delayedDeliverer writes the file after delay, as a kubelet that syncs a ConfigMap volume late.
+type delayedDeliverer struct {
+	inner standalone.Deliverer
+	delay time.Duration
+}
+
+func (d delayedDeliverer) Deliver(ctx context.Context, config []byte, rev gateway.Revision) error {
+	go func() {
+		select {
+		case <-time.After(d.delay):
+			_ = d.inner.Deliver(context.WithoutCancel(ctx), config, rev)
+		case <-ctx.Done():
+		}
+	}()
+	return nil
+}
+
+// containerReloadLog is a standalone.ReloadLog over a container's log.
+type containerReloadLog struct{ logs func(context.Context) string }
+
+func (c containerReloadLog) LatestReloadFailure(ctx context.Context, after time.Time) (standalone.ReloadFailure, bool, error) {
+	return standalone.ParseReloadFailure(strings.NewReader(c.logs(ctx)), after)
+}
 
 func portOf(s *httptest.Server) int {
 	_, p, _ := net.SplitHostPort(s.Listener.Addr().String())
@@ -255,11 +316,15 @@ var _ = Describe("golden files", func() {
 		for _, name := range []string{"api_key", "mcp_wiki", "mcp_search"} {
 			Expect(os.WriteFile(filepath.Join(secrets, name), []byte("not-a-real-key"), 0o644)).To(Succeed())
 		}
+		// And the OTLP bearer token file.
+		otlp := GinkgoT().TempDir()
+		Expect(os.Chmod(otlp, 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(otlp, "token"), []byte("koinon_test_not-a-real-token"), 0o644)).To(Succeed())
 		for _, f := range fixtures() {
 			ctr, err := testcontainers.Run(ctx, AgentgatewayImage,
 				testcontainers.WithCmd("--validate-only", "-f", "/cfg/"+f.name+".yaml"),
 				testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
-					hc.Binds = append(hc.Binds, dir+":/cfg:ro", secrets+":/secrets/upstream:ro")
+					hc.Binds = append(hc.Binds, dir+":/cfg:ro", secrets+":/secrets/upstream:ro", otlp+":/secrets/otlp:ro")
 				}),
 				testcontainers.WithWaitStrategyAndDeadline(time.Minute, wait.ForExit()),
 			)
@@ -328,7 +393,7 @@ var _ = Describe("agentgateway v1.7.0 anthropic-version header (ADR 0069)", func
 		)
 		DeferCleanup(func(ctx context.Context) error { return testcontainers.TerminateContainer(ctr) })
 		Expect(err).NotTo(HaveOccurred())
-		url, err := ctr.PortEndpoint(ctx, "4000/tcp", "http")
+		url, err := containerhost.Endpoint(ctx, ctr, "4000/tcp", "http")
 		Expect(err).NotTo(HaveOccurred())
 
 		for _, name := range []string{"pinned", "unpinned"} {

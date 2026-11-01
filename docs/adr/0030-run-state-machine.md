@@ -194,3 +194,42 @@ timers the amendment adds: `runs.sandbox_wait_started_at` (when the current wait
 began; kept across requeues, cleared when any run of the agent finds the sandbox ready or the agent is
 resumed) and `runs.wrap_up_notice_at` (set when the wrap-up notice is no longer armed: it was sent, or it was suppressed because the harness ignored the cancel; the `run.wrap_up_notice` event is the record that the agent was told). There are no new
 states or transitions.
+
+## Amendment (2026-10-29, issue #246): who refused the model request
+
+OpenCode 2.2.0 reports a provider's 401 and 403 alike as `-32000 "Authentication required: provider
+authentication required"`, with no status. The text heuristic (`classify.go`) read it as the gateway
+rejecting the agent's key, class `fatal`, and the run's failure sent people to debug a key that was
+fine. In the rc.7 re-run the cause was OpenRouter's moderation `403` on pasted HTML.
+
+The gateway knows better, and its record already reaches the spend ledger (ADR 0056 amendment
+2026-10-29: `spend_entries.upstream_status`). When the harness words a failure as an authentication
+error (`failure.authLike`), agentd asks the ledger for the run's last provider `401` or `403` since the
+turn began, polling for up to `GatewayRecordWait` (default 20 s, because the access log is exported in
+batches), and decides:
+
+| The gateway's record | Class | Reason shown |
+| --- | --- | --- |
+| provider `403` | `policy` | "The model provider (openrouter) refused the request (HTTP 403) [as reported by the harness: ...]" |
+| provider `401` | `fatal` | "The model provider ... rejected the API key Koinon holds for it (HTTP 401); check the provider's key in the catalog [as reported by the harness: ...]" |
+| none | `fatal`, gateway fault | the error text as before |
+
+- **No record means the gateway refused the key itself.** A bad or revoked key is answered before any
+  provider is called, and has no agent to attribute a record to, so the absence of a provider record
+  is the evidence. This costs the full wait before such a run fails; it is a failing run either way.
+- **A spent budget is checked first.** The budget stop (ADR 0050) reads the ledger's limits before this
+  lookup, so a revoked key of a spent limit still ends as a budget stop at once. A provider refusal
+  is no longer a gateway refusal for that check (`failure.gateway` is cleared).
+- **A cancel wins.** If the run is fenced or canceled while the record is awaited, that decides.
+- **The gateway's record has the status, not the provider's words.** The gateway logs no response
+  body (ADR 0056 amendment 2026-10-29, point 6: agentgateway would buffer every response). The
+  harness's own error text is appended, labelled "as reported by the harness", redacted and capped
+  at 512 characters (`errbody.Excerpt`), so the reason may be shown to the person and written to the
+  run's events.
+- **Not retried.** `policy` and `fatal` are not retried (the table above).
+- **Upstream.** OpenCode should put the status code and error body in the ACP error `data`; the
+  structured `statusCode` is already read first (`structured`). The ledger lookup is the fallback
+  that stays correct whatever the harness reports, and for any harness that words errors vaguely.
+- **Limits.** Only a `401` or `403` is looked up; other statuses already arrive with a code or a
+  recognisable text. The lookup needs the run to be attributed (the key's agent, the record's time
+  inside the run, `ledger.RunGrace`), which holds for every request an agent's key makes.

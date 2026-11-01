@@ -23,16 +23,25 @@ import (
 // against a real gateway. With the read token's placeholder, push is denied and so are repositories
 // outside the binding, whatever the server would say.
 //
-// Every request below is refused by OpenShell's L7 policy in the sandbox's proxy, before it reaches
-// the server, so the suite needs no Gitea: KOINON_ESCAPE_GITEA_URL names the base URL the grant is
-// rendered for (default https://gitea.escape.invalid/gitea, with a sub-path, which exercises the
-// prefix). What a real Gitea does with the read token behind the policy (a push refused for the
-// token's missing write scope, 404 for a repository the bot is not a collaborator on) is covered by
+// Every request below is refused by OpenShell's L7 policy in the sandbox's proxy, so the suite needs
+// no Gitea, only something to dial: OpenShell 0.1.5 admits the connect to an allowed host at L4 and
+// dials (and TLS-handshakes) it before its L7 relay judges the request. KOINON_ESCAPE_GITEA_URL
+// names the base URL the grant is rendered for; test/escape/kind.sh sets it to the in-cluster TLS
+// stand-in (escape-gitea-standin, koinon-fakemodel -standin over TLS, with a sub-path, which
+// exercises the prefix), with a throwaway CA that it appends to the trust bundle of a supervisor
+// image the gateway is re-pointed at (OpenShell 0.1.5's supervisor verifies upstream TLS against
+// the bundle in its own image, not the sandbox's; interim until #394), so nothing leaves the
+// cluster (#371). A request that reached the stand-in would get its 418, not the proxy's 403. The
+// default, https://example.com/gitea, is for a cluster that can reach example.com:443 (IANA's
+// reserved example domain, which resolves inside the sandbox: a name that fails DNS, such as one
+// under .invalid, never reaches the proxy and the specs would see curl code 000, issue #244).
+// What a real Gitea does with the read token behind the policy (a push refused for the token's
+// missing write scope, 404 for a repository the bot is not a collaborator on) is covered by
 // the fake Gitea, which enforces both (internal/testing/fakegitea), and is confirmed on the home lab.
 var _ = Describe("Gitea read grant", Label("escape", "openshell"), Ordered, func() {
 	var (
 		g         *gateway
-		base      = strings.TrimRight(envOr("KOINON_ESCAPE_GITEA_URL", "https://gitea.escape.invalid/gitea"), "/")
+		base      = strings.TrimRight(envOr("KOINON_ESCAPE_GITEA_URL", "https://example.com/gitea"), "/")
 		repo      = envOr("KOINON_ESCAPE_GITEA_REPO", "koinon-demo/hello")
 		other     = envOr("KOINON_ESCAPE_GITEA_OTHER_REPO", "koinon-demo/secrets")
 		n         = suffix()
@@ -52,6 +61,7 @@ var _ = Describe("Gitea read grant", Label("escape", "openshell"), Ordered, func
 	}
 	refusedByPolicy := func(code, body string) {
 		GinkgoHelper()
+		answered(code, body)
 		Expect(code).To(Equal("403"))
 		Expect(body).To(ContainSubstring("policy"))
 	}

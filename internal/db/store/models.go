@@ -1275,6 +1275,94 @@ func (ns NullTaskState) Value() (driver.Value, error) {
 	return string(ns.TaskState), nil
 }
 
+type TraceBackend string
+
+const (
+	TraceBackendLangfuse  TraceBackend = "langfuse"
+	TraceBackendDatadog   TraceBackend = "datadog"
+	TraceBackendLangsmith TraceBackend = "langsmith"
+	TraceBackendOpik      TraceBackend = "opik"
+	TraceBackendGeneric   TraceBackend = "generic"
+)
+
+func (e *TraceBackend) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TraceBackend(s)
+	case string:
+		*e = TraceBackend(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TraceBackend: %T", src)
+	}
+	return nil
+}
+
+type NullTraceBackend struct {
+	TraceBackend TraceBackend
+	Valid        bool // Valid is true if TraceBackend is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTraceBackend) Scan(value interface{}) error {
+	if value == nil {
+		ns.TraceBackend, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TraceBackend.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTraceBackend) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TraceBackend), nil
+}
+
+type TraceContentLevel string
+
+const (
+	TraceContentLevelNone     TraceContentLevel = "none"
+	TraceContentLevelRedacted TraceContentLevel = "redacted"
+	TraceContentLevelFull     TraceContentLevel = "full"
+)
+
+func (e *TraceContentLevel) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TraceContentLevel(s)
+	case string:
+		*e = TraceContentLevel(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TraceContentLevel: %T", src)
+	}
+	return nil
+}
+
+type NullTraceContentLevel struct {
+	TraceContentLevel TraceContentLevel
+	Valid             bool // Valid is true if TraceContentLevel is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTraceContentLevel) Scan(value interface{}) error {
+	if value == nil {
+		ns.TraceContentLevel, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TraceContentLevel.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTraceContentLevel) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TraceContentLevel), nil
+}
+
 type Agent struct {
 	OrgID           pgtype.UUID
 	ID              pgtype.UUID
@@ -1295,6 +1383,8 @@ type Agent struct {
 	UnhealthyReason pgtype.Text
 	ResumedAt       pgtype.Timestamptz
 	Model           pgtype.Text
+	Thinking        pgtype.Text
+	KeepWarm        bool
 }
 
 type AgentBudget struct {
@@ -1310,6 +1400,16 @@ type AgentMcpServer struct {
 	AgentID  pgtype.UUID
 	ServerID pgtype.UUID
 	Tools    []string
+}
+
+type AgentRunLimit struct {
+	OrgID            pgtype.UUID
+	AgentID          pgtype.UUID
+	MaxModelRequests pgtype.Int8
+	MaxSpendUsd      pgtype.Numeric
+	MaxDurationSecs  pgtype.Int4
+	UpdatedBy        string
+	UpdatedAt        pgtype.Timestamptz
 }
 
 type AgentSandbox struct {
@@ -1340,6 +1440,7 @@ type AgentSandbox struct {
 	RestoreClaimedAt    pgtype.Timestamptz
 	ArchivedAt          pgtype.Timestamptz
 	Reason              string
+	HomeDirtiedAt       pgtype.Timestamptz
 }
 
 type AgentVersion struct {
@@ -1548,21 +1649,24 @@ type McpServer struct {
 }
 
 type McpTool struct {
-	OrgID                pgtype.UUID
-	ServerID             pgtype.UUID
-	Name                 string
-	Description          string
-	InputSchema          []byte
-	ContentHash          string
-	ReadOnlyHint         bool
-	Tier                 McpTier
-	ReviewReason         pgtype.Text
-	Present              bool
-	FirstSeenAt          pgtype.Timestamptz
-	LastSeenAt           pgtype.Timestamptz
-	RequiresTwoApprovers bool
-	TierSetBy            pgtype.Text
-	TierSetAt            pgtype.Timestamptz
+	OrgID                     pgtype.UUID
+	ServerID                  pgtype.UUID
+	Name                      string
+	Description               string
+	InputSchema               []byte
+	ContentHash               string
+	ReadOnlyHint              bool
+	Tier                      McpTier
+	ReviewReason              pgtype.Text
+	Present                   bool
+	FirstSeenAt               pgtype.Timestamptz
+	LastSeenAt                pgtype.Timestamptz
+	RequiresTwoApprovers      bool
+	TierSetBy                 pgtype.Text
+	TierSetAt                 pgtype.Timestamptz
+	DescriptionOriginalLength int64
+	DescriptionCapped         bool
+	DescriptionCleaned        bool
 }
 
 type Model struct {
@@ -1608,14 +1712,16 @@ type OidcLoginFlow struct {
 }
 
 type Org struct {
-	ID           pgtype.UUID
-	Slug         string
-	DisplayName  string
-	Kind         OrgKind
-	IdentityMode IdentityMode
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
-	DeletedAt    pgtype.Timestamptz
+	ID                  pgtype.UUID
+	Slug                string
+	DisplayName         string
+	Kind                OrgKind
+	IdentityMode        IdentityMode
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+	DeletedAt           pgtype.Timestamptz
+	DefaultModel        pgtype.Text
+	DefaultModelPending bool
 }
 
 type OrgBudget struct {
@@ -1660,6 +1766,16 @@ type OrgSetting struct {
 	SandboxWaitCapSeconds pgtype.Int4
 }
 
+type OrgTraceSetting struct {
+	OrgID             pgtype.UUID
+	ContentLevel      TraceContentLevel
+	SampleRate        pgtype.Numeric
+	PlatformCopyLevel TraceContentLevel
+	UpdatedBy         string
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+}
+
 type OrgWorkspace struct {
 	OrgID       pgtype.UUID
 	Workspace   string
@@ -1673,6 +1789,35 @@ type PlatformAdmin struct {
 	GrantedBy pgtype.UUID
 	GrantedAt pgtype.Timestamptz
 	Source    PlatformAdminSource
+}
+
+type PlatformTraceDestination struct {
+	Singleton          bool
+	Backend            TraceBackend
+	Protocol           string
+	EndpointUrl        string
+	Params             []byte
+	Credentials        []byte
+	SecretFields       []string
+	ResourceAttributes []byte
+	Enabled            bool
+	ConfigVersion      int64
+	LastTestAt         pgtype.Timestamptz
+	LastTestOk         pgtype.Bool
+	LastTestMessage    pgtype.Text
+	LastSuccessAt      pgtype.Timestamptz
+	LastErrorAt        pgtype.Timestamptz
+	LastError          pgtype.Text
+	SpansDropped       int64
+	UpdatedBy          string
+	UpdatedAt          pgtype.Timestamptz
+}
+
+type PlatformTraceSetting struct {
+	Singleton      bool
+	ContentCeiling TraceContentLevel
+	UpdatedBy      string
+	UpdatedAt      pgtype.Timestamptz
 }
 
 type PriceOverride struct {
@@ -1776,7 +1921,7 @@ type Run struct {
 	ParkExpiresAt        pgtype.Timestamptz
 	OutcomeReason        pgtype.Text
 	MaxWallClockSeconds  int32
-	MaxTokens            int64
+	MaxTokens            pgtype.Int8
 	LastEventSeq         int64
 	StartedAt            pgtype.Timestamptz
 	FinishedAt           pgtype.Timestamptz
@@ -1792,6 +1937,10 @@ type Run struct {
 	ClaimedAt            pgtype.Timestamptz
 	SandboxWaitStartedAt pgtype.Timestamptz
 	WrapUpNoticeAt       pgtype.Timestamptz
+	MaxModelRequests     pgtype.Int8
+	MaxSpendUsd          pgtype.Numeric
+	Traced               pgtype.Bool
+	LastTurnSeq          int32
 }
 
 type RunEvent struct {
@@ -1804,6 +1953,17 @@ type RunEvent struct {
 	Payload   []byte
 	CreatedAt pgtype.Timestamptz
 	SourceSeq pgtype.Int8
+}
+
+type RunTurn struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	RunID     pgtype.UUID
+	Seq       int32
+	TraceID   []byte
+	StartedAt pgtype.Timestamptz
+	EndedAt   pgtype.Timestamptz
+	EndReason pgtype.Text
 }
 
 type SandboxIncident struct {
@@ -1842,6 +2002,11 @@ type SavedWorkUploadNonce struct {
 	RunID     pgtype.UUID
 	Nonce     string
 	CreatedAt pgtype.Timestamptz
+}
+
+type SchemaCompat struct {
+	Singleton        bool
+	MinReaderVersion int64
 }
 
 type Session struct {
@@ -1885,6 +2050,7 @@ type SpendEntry struct {
 	ReserveUsd       pgtype.Numeric
 	ResponseID       pgtype.Text
 	Principal        string
+	UpstreamStatus   pgtype.Int2
 }
 
 type SpendEntryRevision struct {
@@ -1960,6 +2126,31 @@ type Template struct {
 	Spec         []byte
 	CreatedAt    pgtype.Timestamptz
 	LastSyncedAt pgtype.Timestamptz
+}
+
+type TraceDestination struct {
+	OrgID              pgtype.UUID
+	ID                 pgtype.UUID
+	Name               string
+	Backend            TraceBackend
+	Protocol           string
+	EndpointUrl        string
+	Params             []byte
+	Credentials        []byte
+	SecretFields       []string
+	ResourceAttributes []byte
+	Enabled            bool
+	ConfigVersion      int64
+	LastTestAt         pgtype.Timestamptz
+	LastTestOk         pgtype.Bool
+	LastTestMessage    pgtype.Text
+	LastSuccessAt      pgtype.Timestamptz
+	LastErrorAt        pgtype.Timestamptz
+	LastError          pgtype.Text
+	SpansDropped       int64
+	CreatedBy          pgtype.UUID
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
 }
 
 type User struct {

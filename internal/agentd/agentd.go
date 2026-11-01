@@ -51,6 +51,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/safego"
 )
 
@@ -94,6 +95,12 @@ type Config struct {
 	// WrapUpNotice is how long before the run's time limit the agent is told to wrap up (ADR 0066
 	// amendment 2026-10-28).
 	WrapUpNotice time.Duration
+	// WrapUpFraction is how far through its model-request or spend limit a run is when the agent is
+	// told to wrap up (ADR 0081); runlimits.WrapUpFraction (80%) by default, a negative value turns
+	// the notice off for these two limits.
+	WrapUpFraction float64
+	// UsagePoll is how often a running turn reads the run's ledger usage for that notice.
+	UsagePoll time.Duration
 	// Now defaults to time.Now; tests move it forward to pass SandboxTimeout.
 	Now func() time.Time
 	// ModelServeTimeout bounds the wait, before a run starts its harness, for the gateway to serve
@@ -101,6 +108,11 @@ type Config struct {
 	// whose model is not served in time fails with a reason that names the provider. Default
 	// DefaultModelServeTimeout.
 	ModelServeTimeout time.Duration
+	// MCPRetryDelay is how long a run waits, before it starts its harness, between finding an MCP
+	// server it may use not serving tools and looking again; a second miss fails the run (issue
+	// #326). A miss is what Koinon's health record of the server says (probed every 60 s), so a drop
+	// between two probes is not caught. Default DefaultMCPRetryDelay.
+	MCPRetryDelay time.Duration
 	// ReconcileNudge is how often a worker waiting for a sandbox NOTIFYs the reconciler.
 	// Default 5s.
 	ReconcileNudge time.Duration
@@ -114,6 +126,10 @@ type Config struct {
 	// registers the tools after a 100 ms debounce, separately from the command (ADR 0052).
 	// Default 1s.
 	ReadySettle time.Duration
+	// GatewayRecordWait bounds the wait, after a harness reports an authentication failure, for the
+	// gateway's record of the request to reach the spend ledger (providerrefusal.go): the access log is
+	// exported in batches. A negative value does not wait. Default 20s.
+	GatewayRecordWait time.Duration
 	// SummaryTimeout bounds the end-of-turn summary prompt (summary.go). Default 2m.
 	SummaryTimeout time.Duration
 	// StuckAfter is how long a process may outlive the sweep's last SIGKILL before the sandbox
@@ -149,19 +165,26 @@ type Config struct {
 	// <GatewayURL>/mcp for tools. Required; it must not carry credentials.
 	GatewayURL string
 	// DefaultModel is the model of agents whose version names none, or "default", when set;
-	// otherwise the org's first served model is used (plan item PV1).
+	// otherwise the org's stored default model is used (#256).
 	DefaultModel string
 	// SessionCwd is the harness session's working directory in the sandbox. Default
 	// /sandbox/work.
 	SessionCwd string
 	// Permissions answers the harness's permission requests. Default DefaultPermissions.
 	Permissions *PermissionPolicy
+	// DrainDeadline is how long a stopping pool (its Run context ended: SIGTERM) lets the turns in
+	// progress finish before it hands their runs off (ADR 0085 decision 2). From the stop on, no
+	// worker claims a run, a run that has not begun its turn is handed off at once, and the
+	// heartbeats go on. Default 5m. The pod's terminationGracePeriodSeconds must be this plus 30s.
+	DrainDeadline time.Duration
 	// KeepLeaseOnShutdown leaves the leases of runs in progress to expire when the pool
 	// stops, as if the process had been killed. By default they are released so another
 	// replica resumes at once. Tests set it to emulate a killed pod.
 	KeepLeaseOnShutdown bool
 	// Checkpoints turns on home checkpoints (checkpoint.go); nil leaves them off.
 	Checkpoints *Checkpoints
+	// Tracing turns on run spans (ADR 0074); nil leaves them off.
+	Tracing *Tracing
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Metrics receives the pool's metrics; nil keeps them unexported.
@@ -185,16 +208,20 @@ func (c *Config) defaults() error {
 	}
 	setDefault(&c.Workers, 8)
 	setDefault(&c.Lease, 30*time.Second)
+	setDefault(&c.DrainDeadline, DefaultDrainDeadline)
 	setDefault(&c.Heartbeat, c.Lease/3)
 	setDefault(&c.Poll, time.Second)
 	setDefault(&c.SandboxTimeout, orgsettings.DefaultQueueWait)
 	setDefault(&c.SandboxWaitCap, orgsettings.DefaultSandboxWaitCap)
 	setDefault(&c.WrapUpNotice, 5*time.Minute)
+	setDefault(&c.WrapUpFraction, runlimits.WrapUpFraction)
+	setDefault(&c.UsagePoll, 5*time.Second)
 	if c.Now == nil {
 		c.Now = time.Now
 	}
 	setDefault(&c.ReconcileNudge, 5*time.Second)
 	setDefault(&c.ModelServeTimeout, DefaultModelServeTimeout)
+	setDefault(&c.MCPRetryDelay, DefaultMCPRetryDelay)
 	setDefault(&c.CancelGrace, 10*time.Second)
 	setDefault(&c.ReadyTimeout, time.Minute)
 	setDefault(&c.ReadySettle, time.Second)
@@ -203,6 +230,7 @@ func (c *Config) defaults() error {
 	setDefault(&c.MaxRefusedTurns, 5)
 	setDefault(&c.RetryBackoff, 2*time.Second)
 	setDefault(&c.MaxRetryAfter, 5*time.Minute)
+	setDefault(&c.GatewayRecordWait, defaultGatewayRecordWait)
 	setDefault(&c.SummaryTimeout, defaultSummaryWait)
 	setDefault(&c.StuckAfter, defaultStuckAfter)
 	setDefault(&c.StuckPoll, defaultStuckPoll)
@@ -232,6 +260,11 @@ func (c *Config) defaults() error {
 	if c.Metrics == nil {
 		c.Metrics = NewMetrics(nil)
 	}
+	if c.Tracing != nil {
+		if err := c.Tracing.defaults(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -252,40 +285,92 @@ type Pool struct {
 	// saveSem lets one save run at a time: a bundle is up to 50 MB.
 	saveSem chan struct{}
 	http    *http.Client
+	// sink exports run spans; nil when tracing is off.
+	sink *traceSink
+	// stopping is closed when Run's context ends: the pool drains. Nil (never closed) before Run.
+	stopping <-chan struct{}
 }
+
+// DefaultDrainDeadline is Config.DrainDeadline's default.
+const DefaultDrainDeadline = 5 * time.Minute
 
 // New returns a pool. Run starts it.
 func New(db *pgxpool.Pool, backend Backend, cfg Config) (*Pool, error) {
 	if err := cfg.defaults(); err != nil {
 		return nil, err
 	}
-	return &Pool{
+	p := &Pool{
 		db: db, q: store.New(db), backend: backend, cfg: cfg, log: cfg.Logger,
 		saveSem: make(chan struct{}, 1), http: &http.Client{Timeout: cfg.SaveTimeout},
-	}, nil
+	}
+	if cfg.Tracing != nil {
+		sink, err := newTraceSink(cfg.Tracing, cfg.Metrics, cfg.Logger)
+		if err != nil {
+			return nil, fmt.Errorf("agentd: tracing: %w", err)
+		}
+		p.sink = sink
+	}
+	return p, nil
 }
 
-// Run drives runs until ctx ends, then waits for the workers to stop.
+// Run drives runs until ctx ends, then drains: it claims nothing more, lets the turns in
+// progress finish for up to Config.DrainDeadline (the heartbeats go on), hands the runs still
+// going off, and waits for the workers to stop (ADR 0085 decision 2).
 func (p *Pool) Run(ctx context.Context) error {
+	// runCtx drives the runs. It outlives ctx by the drain deadline.
+	runCtx, cancelRuns := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelRuns()
+	p.stopping = ctx.Done()
+	go func() {
+		select {
+		case <-runCtx.Done():
+			return
+		case <-ctx.Done():
+		}
+		if p.cfg.KeepLeaseOnShutdown { // a simulated kill: no drain
+			cancelRuns()
+			return
+		}
+		p.log.Info("stopping: no new runs are claimed; turns in progress get to finish", "drain_deadline", p.cfg.DrainDeadline.String())
+		t := time.NewTimer(p.cfg.DrainDeadline)
+		defer t.Stop()
+		select {
+		case <-runCtx.Done():
+		case <-t.C:
+			p.log.Warn("the drain deadline passed; handing the runs in progress off", "drain_deadline", p.cfg.DrainDeadline.String())
+			cancelRuns()
+		}
+	}()
+
 	var wg sync.WaitGroup
 	if p.cfg.Checkpoints != nil {
 		wg.Go(func() { p.checkpointLoop(ctx) })
 	}
 	for i := range p.cfg.Workers {
-		wg.Go(func() { p.work(ctx, p.cfg.OwnerID+"/"+strconv.Itoa(i)) })
+		wg.Go(func() { p.work(ctx, runCtx, p.cfg.OwnerID+"/"+strconv.Itoa(i)) })
 	}
 	wg.Wait()
+	if p.sink != nil {
+		// Spans of runs that just ended; bounded, so a dead receiver cannot hold the shutdown.
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.cfg.Tracing.ExportTimeout+time.Second)
+		p.sink.shutdown(sctx)
+		cancel()
+	}
 	return nil
 }
 
-func (p *Pool) work(ctx context.Context, owner string) {
+// work claims and drives runs. ctx ends when the pool stops (no more claims); runCtx ends when the
+// drain deadline passes (the runs in progress are handed off).
+func (p *Pool) work(ctx, runCtx context.Context, owner string) {
 	log := p.log.With("owner", owner)
 	for ctx.Err() == nil {
 		// One iteration at a time, so a panic in a run is logged and the worker goes on: the run's
 		// lease expires and another worker takes it over (bounded by MaxTakeovers).
 		panicked := safego.Do(log, "agentd-worker", func() {
-			run, ok, err := p.claim(ctx, owner)
-			if err != nil && ctx.Err() == nil {
+			// Claimed with runCtx, so a claim that commits is never abandoned half-way; a run claimed
+			// as the pool stops is handed off at once (execute).
+			run, ok, err := p.claim(runCtx, owner)
+			if err != nil && runCtx.Err() == nil {
 				log.Warn("claiming a run failed", "err", err)
 			}
 			if !ok {
@@ -293,7 +378,7 @@ func (p *Pool) work(ctx context.Context, owner string) {
 				sleep(ctx, p.cfg.Poll/2+rand.N(p.cfg.Poll)) //nolint:gosec // jitter, not security
 				return
 			}
-			p.drive(ctx, run, log)
+			p.drive(runCtx, run, log)
 		})
 		if panicked {
 			// Back off after a panic, so a bad row does not spin the worker and flood the log.

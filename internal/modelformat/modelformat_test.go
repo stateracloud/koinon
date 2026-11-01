@@ -23,8 +23,8 @@ func TestDefault(t *testing.T) {
 		{"anthropic", "anything", modelformat.Anthropic}, // the only format offered
 		{"openrouter", "deepseek/deepseek-v4", modelformat.OpenAI},
 		{"openrouter", "openai/gpt-5", modelformat.OpenAI},
-		{"openrouter", "anthropic/claude-sonnet-4", modelformat.OpenAI}, // pinned until the flip (decision 4)
-		{"openrouter", "claude-sonnet-4", modelformat.OpenAI},           // pinned too
+		{"openrouter", "anthropic/claude-sonnet-4", modelformat.Anthropic}, // the live Messages check passed (#242)
+		{"openrouter", "claude-sonnet-4", modelformat.Anthropic},
 		{"ollama", "claude-sonnet-4", modelformat.OpenAI},
 		{"custom-vendor", "Claude-Opus", modelformat.OpenAI},
 	}
@@ -39,8 +39,8 @@ func TestPreferredIgnoresWhatIsOffered(t *testing.T) {
 	if got := modelformat.Preferred("openai", "claude-sonnet-4"); got != modelformat.Anthropic {
 		t.Errorf("Preferred = %s, want anthropic", got)
 	}
-	if got := modelformat.Preferred("openrouter", "anthropic/claude-sonnet-4"); got != modelformat.OpenAI {
-		t.Errorf("Preferred = %s, want the openrouter pin (openai)", got)
+	if got := modelformat.Preferred("openrouter", "anthropic/claude-sonnet-4"); got != modelformat.Anthropic {
+		t.Errorf("Preferred = %s, want anthropic (the OpenRouter pin is gone, #242)", got)
 	}
 	if got := modelformat.Preferred("x", "anthropic/claude-sonnet-4"); got != modelformat.Anthropic {
 		t.Errorf("Preferred = %s, want anthropic", got)
@@ -72,11 +72,11 @@ func TestValidate(t *testing.T) {
 
 func TestResolve(t *testing.T) {
 	f, over, err := modelformat.Resolve("openrouter", "anthropic/claude-sonnet-4", "")
-	if err != nil || over || f != modelformat.OpenAI {
+	if err != nil || over || f != modelformat.Anthropic {
 		t.Errorf("default: %s %v %v", f, over, err)
 	}
-	f, over, err = modelformat.Resolve("openrouter", "anthropic/claude-sonnet-4", "anthropic")
-	if err != nil || !over || f != modelformat.Anthropic {
+	f, over, err = modelformat.Resolve("openrouter", "anthropic/claude-sonnet-4", "openai")
+	if err != nil || !over || f != modelformat.OpenAI {
 		t.Errorf("override: %s %v %v", f, over, err)
 	}
 	if _, _, err = modelformat.Resolve("openai", "gpt-5", "anthropic"); err == nil {

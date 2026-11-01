@@ -127,3 +127,34 @@ func TestStopMessageAndDetailNameTheLevel(t *testing.T) {
 		t.Fatal("titles")
 	}
 }
+
+func TestRunSpendLevel(t *testing.T) {
+	now := time.Date(2026, 10, 29, 15, 0, 0, 0, time.UTC)
+	run := lv(budget.RunSpend, "2", "2.01")
+	run.WindowStart = now.Add(-time.Hour)
+
+	// The run's level is current while the run is open, whatever its start, and covers one run.
+	if got := (budget.Status{Levels: []budget.Level{run}}).Current(now); len(got) != 1 {
+		t.Fatalf("%v", got)
+	}
+	// It is the narrowest scope: the agent's daily limit names the stop when both are reached.
+	day := lv(budget.AgentDaily, "1", "1.5")
+	day.WindowStart = budget.DayStart(now)
+	if got, ok := (budget.Status{Levels: []budget.Level{run, day}}).Pick(now); !ok || got.Name != budget.AgentDaily {
+		t.Fatalf("%v %v", got, ok)
+	}
+	if got, ok := (budget.Status{Levels: []budget.Level{run}}).Pick(now); !ok || got.Name != budget.RunSpend {
+		t.Fatalf("%v %v", got, ok)
+	}
+	// It joins the net key limit as the smallest remaining.
+	st := budget.Status{Levels: []budget.Level{lv(budget.AgentDaily, "10", "1"), lv(budget.RunSpend, "0.50", "0.20")}}
+	if net, binding, _ := st.Net(); net != money.MustParse("0.30") || binding != budget.RunSpend {
+		t.Fatalf("%v %v", net, binding)
+	}
+	if got := run.StopMessage(); got != "run spend limit reached ($2.01 of $2.00)" {
+		t.Fatal(got)
+	}
+	if d := run.StopDetail(); d["limit"] != budget.RunSpend || d["window_start"] != nil {
+		t.Fatalf("%v", d)
+	}
+}

@@ -52,6 +52,11 @@ type Descriptor struct {
 	// FormatArg is the launch switch that takes the model's format, so the entry script uses the
 	// matching entry. "" when the flavor has one entry only.
 	FormatArg string
+	// ThinkingArg is the launch switch that takes the thinking mode Koinon decided for the run
+	// (internal/thinking.Mode, the exact form for on or off), so the harness renders it instead of guessing
+	// from the model's ID. "" when the flavor takes none. The entry script turns it into the
+	// harness's own setting (ADR 0069 amendment 2026-10-29).
+	ThinkingArg string
 	// InstructionLink is the path the flavor's harness reads its instructions from: a symbolic
 	// link to the instruction file, which agentd restores before every prompt. "" when the
 	// flavor needs none.
@@ -72,6 +77,11 @@ type Descriptor struct {
 	// format missing here cannot be cached on this flavor. A model whose format has its own markers
 	// (prices.CacheNative) needs no switch: the harness places them.
 	CacheArgs map[string]string
+	// NoWebToolsArg is the launch switch that removes the harness's built-in web tools (fetch and
+	// search) from the tools offered to the model. koinon-agentd passes it when the agent has no
+	// web egress (agentconfig.Config.WebEgress), so the tool set matches the sandbox's network
+	// policy (ADR 0080). "" when the flavor has no such tools.
+	NoWebToolsArg string
 	// SessionArg is the launch switch that takes the run ID, which the harness sends to
 	// OpenRouter as session_id so a run stays on one upstream and its cache stays warm. "" when
 	// the flavor cannot.
@@ -91,6 +101,9 @@ var table = []Descriptor{
 			modelformat.Anthropic: "koinon-anthropic",
 		},
 		FormatArg: "--model-format",
+		// The entry script renders the mode into the model's compatibility flags, so OpenCode's own
+		// model-ID heuristic never decides whether the request carries a thinking block.
+		ThinkingArg: "--thinking",
 		// None: OpenCode 2.2.0 reads the instruction file through the "instructions" key of its
 		// read-only config (flavors/opencode/README.md, ADR 0052 amendment 2026-10-28).
 		DefaultBinaries:   []string{"/usr/local/bin/opencode"},
@@ -98,8 +111,9 @@ var table = []Descriptor{
 		PluginInstallsArg: "--plugin-installs",
 		// The entry script turns each into compatibility.cacheFormat of the koinon provider
 		// (OpenCode 2.2.0, packages/schema/src/model-compatibility.ts).
-		CacheArgs:  map[string]string{"anthropic": "--cache-anthropic", "alibaba": "--cache-alibaba"},
-		SessionArg: "--session-id",
+		CacheArgs:     map[string]string{"anthropic": "--cache-anthropic", "alibaba": "--cache-alibaba"},
+		NoWebToolsArg: "--no-web-tools",
+		SessionArg:    "--session-id",
 	},
 }
 

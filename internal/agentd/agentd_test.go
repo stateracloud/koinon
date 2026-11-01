@@ -80,7 +80,7 @@ var _ = Describe("Pool", func() {
 		// The launch command and its endpoints, run in the session directory.
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(Equal([][]string{{
-			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-format", "openai",
+			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-format", "openai", "--thinking", "none", "--no-web-tools",
 		}}))
 		// The sweep, mkdir, the instruction file and its check, the git configuration and the CA
 		// file's removal (no custom host), the harness, the instruction file's check
@@ -135,12 +135,14 @@ var _ = Describe("Pool", func() {
 		Expect(final.PromptThroughSeq.Int64).To(BeEquivalentTo(1))
 		Expect(final.FinishedAt.Valid).To(BeTrue())
 
-		// The agent's reply lands on the task.
+		// The agent's reply lands on the task: its last message, without the narration before its tool calls.
 		tevs := taskEvents(ctx, e, t)
-		Expect(tevs).To(HaveLen(2))
+		Expect(tevs).To(HaveLen(3))
+		Expect(tevs[2].Kind).To(Equal("status.changed"), "the run's success completes the task (#324)")
+		Expect(string(tevs[2].Payload)).To(ContainSubstring(`"completed"`))
 		Expect(tevs[1].Kind).To(Equal("message"))
 		Expect(tevs[1].ActorKind).To(Equal(store.TaskActorKindAgent))
-		Expect(string(tevs[1].Payload)).To(ContainSubstring("asking: edit=allow,fetch=reject"))
+		Expect(string(tevs[1].Payload)).To(Equal(`{"text": "edit=allow,fetch=reject"}`))
 	})
 
 	It("sends a trigger's instruction, a system message carrying its source, as the first prompt", func(ctx SpecContext) {
@@ -363,7 +365,7 @@ var _ = Describe("Pool", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		t := e.task(ctx, markWait)
 		r, err := q.CreateRun(ctx, store.CreateRunParams{
-			OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 2, MaxTokens: 1000,
+			OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 2,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		e.pool("agentd-a")
@@ -455,7 +457,8 @@ var _ = Describe("Pool", func() {
 		Expect(final.OutcomeReason.String).To(HavePrefix("session/load: "))
 		Expect(kinds(events(ctx, r))).To(Equal([]string{"run.failed"}))
 		tevs := taskEvents(ctx, e, t)
-		Expect(tevs[len(tevs)-1].Kind).To(Equal("run.failed"))
+		Expect(tevs[len(tevs)-2].Kind).To(Equal("run.failed"))
+		Expect(tevs[len(tevs)-1].Kind).To(Equal("status.changed"), "a fatal run fails its task (#324)")
 	})
 
 	DescribeTable("runs each flavor's entry script with the agent's endpoints",
@@ -470,7 +473,7 @@ var _ = Describe("Pool", func() {
 			Eventually(e.gw.Execs).WithTimeout(10 * time.Second).Should(HaveLen(9))
 			execs := e.gw.Execs()
 			Expect(execs[6].GetCommand()).To(Equal([]string{
-				script, "--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-format", "openai",
+				script, "--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-format", "openai", "--thinking", "none", "--no-web-tools",
 			}))
 			Expect(execs[6].GetWorkdir()).To(Equal("/sandbox/work"))
 		},
@@ -825,6 +828,7 @@ var _ = Describe("Pool", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal("sandbox error: image pull failed"))
+		Expect(getRun(ctx, r).FailureClass.RunFailureClass).To(Equal(store.RunFailureClassSandboxUnavailable))
 	})
 
 	It("records a retried event once", func(ctx SpecContext) {

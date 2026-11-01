@@ -208,11 +208,22 @@ var _ = Describe("Backend", func() {
 	})
 
 	Describe("sandbox lifecycle", func() {
+		It("renders only the resource values that are set", func(ctx SpecContext) {
+			_, err := b.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "limits-only", Image: "img", MemoryLimit: "1Gi"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gw.Sandbox(ws, "limits-only").GetSpec().GetTemplate().GetResources().AsMap()).To(Equal(map[string]any{
+				"limits": map[string]any{"memory": "1Gi"},
+			}))
+			_, err = b.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "none", Image: "img"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gw.Sandbox(ws, "none").GetSpec().GetTemplate().GetResources()).To(BeNil())
+		})
+
 		spec := func() execution.SandboxSpec {
 			return execution.SandboxSpec{
 				Name: "agent-1", Image: "ghcr.io/stateracloud/koinon-opencode:dev",
 				Command: []string{"sleep", "infinity"}, Policy: harnessPolicy(),
-				Labels: map[string]string{agentLabel: "a1"}, CPU: "1", Memory: "2Gi",
+				Labels: map[string]string{agentLabel: "a1"}, CPURequest: "250m", CPULimit: "1", MemoryRequest: "1Gi", MemoryLimit: "2Gi",
 			}
 		}
 
@@ -225,7 +236,8 @@ var _ = Describe("Backend", func() {
 			Expect(stored.GetTemplate().GetEnvironment()).To(BeEmpty())
 			Expect(stored.GetTemplate().GetImage()).To(Equal("ghcr.io/stateracloud/koinon-opencode:dev"))
 			Expect(stored.GetTemplate().GetResources().AsMap()).To(Equal(map[string]any{
-				"limits": map[string]any{"cpu": "1", "memory": "2Gi"},
+				"requests": map[string]any{"cpu": "250m", "memory": "1Gi"},
+				"limits":   map[string]any{"cpu": "1", "memory": "2Gi"},
 			}))
 
 			policy := stored.GetPolicy()
@@ -282,6 +294,23 @@ var _ = Describe("Backend", func() {
 			gw.SetPhase(ws, "agent-1", openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
 			_, err = b.StartSandbox(ctx, ws, "agent-1")
 			Expect(err).To(MatchError(execution.ErrFailedPrecondition))
+		})
+
+		It("refuses a wildcard egress host in a policy", func(ctx SpecContext) {
+			_, err := b.CreateSandbox(ctx, ws, spec())
+			Expect(err).NotTo(HaveOccurred())
+			before := len(gw.Policies(ws, "agent-1"))
+
+			for _, host := range []string{"*.example.com", "*", "api.*.example.com"} {
+				p := harnessPolicy()
+				p.Network["wild"] = execution.NetworkRule{
+					Endpoints: []execution.Endpoint{{Host: host, Port: 443, Protocol: "rest", Access: execution.AccessReadOnly}},
+					Binaries:  []string{"/usr/bin/curl"},
+				}
+				_, err = b.EnsurePolicy(ctx, ws, "agent-1", p)
+				Expect(err).To(MatchError(ContainSubstring("DNS exfiltration")), host)
+				Expect(gw.Policies(ws, "agent-1")).To(HaveLen(before))
+			}
 		})
 
 		It("keeps the policy version for an unchanged policy and bumps it for new network rules", func(ctx SpecContext) {

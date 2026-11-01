@@ -89,6 +89,15 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		gatewayKey = fmt.Sprintf("koinon-escape-key-%d-%x", n, time.Now().UnixNano())
 		githubKey  = fmt.Sprintf("koinon-escape-gh-%d-%x", n, time.Now().UnixNano())
 		clusterDNS = envOr("KOINON_ESCAPE_CLUSTER_DNS", "10.96.0.10")
+		// A model gateway stand-in with no default (ADR 0080): a name the proxy resolves to a
+		// non-loopback address (OpenShell always blocks loopback and link-local) with a server on
+		// port 4000 that answers every request 418 with X-Koinon-Standin: 1 (koinon-fakemodel
+		// -standin; test/fixtures/rt1/manifests/escape-gateway-standin.yaml). A name that fails
+		// DNS never reaches the proxy (issue #244), and a refused connection reaches the client
+		// as a TCP failure, not a 502 (issue #270). The gateway spec skips without it; the
+		// provider record below only needs some host to bind the key to.
+		gwStandIn = os.Getenv("KOINON_ESCAPE_GATEWAY_HOST")
+		gwHost    = envOr("KOINON_ESCAPE_GATEWAY_HOST", "agentgateway.koinon-escape.invalid")
 	)
 
 	// probe runs checks in the sandbox and returns each check's result by id.
@@ -131,9 +140,13 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	BeforeAll(func(ctx SpecContext) {
 		g = dialGateway(ctx)
 
+		// OpenShell binds every network rule to its binaries and checks the caller at connect():
+		// the flavor's harness plus /usr/bin/curl, which sends the gateway requests below. Without
+		// curl the connect is refused with EACCES before anything leaves the pod (#322).
+		gwBinaries := append(slices.Clone(reconciler.DefaultBinaries[store.AgentFlavorOpencode]), "/usr/bin/curl")
 		key := reconciler.GatewayProfile(store.AgentFlavorOpencode,
-			reconciler.Flavor{Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
-			reconciler.Endpoint{Host: "agentgateway.koinon-escape.invalid", Port: 4000}, true)
+			reconciler.Flavor{Binaries: gwBinaries},
+			reconciler.Endpoint{Host: gwHost, Port: 4000}, true)
 		key.ID = fmt.Sprintf("koinon-escape-agentgateway-%d", n)
 		g.provider(ctx, execution.Provider{
 			Name: keyRecord, Profile: key, Credentials: map[string]string{reconciler.GatewayKeyEnvVar: gatewayKey},
@@ -182,18 +195,25 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	}, NodeTimeout(3*time.Minute))
 
 	It("lets the sandbox post to the gateway's model routes and nothing else on it (ADR 0069)", func(ctx SpecContext) {
-		// The gateway host does not resolve here, so a request the policy allows fails when the proxy
-		// tries to connect (502, Bad Gateway) and a denied one is answered 403 by the policy itself.
-		// Runs against the home-lab OpenShell only (KOINON_OPENSHELL_ENDPOINT=... make test-escape);
-		// the connect-failure code below is the one to confirm there.
-		const gw = "http://agentgateway.koinon-escape.invalid:4000"
+		if gwStandIn == "" {
+			Skip("KOINON_ESCAPE_GATEWAY_HOST is not set: name the stand-in (escape-gateway-standin.koinon-fixtures.svc.cluster.local), a non-loopback host the proxy resolves with a server on port 4000 that answers 418 and X-Koinon-Standin: 1")
+		}
+		// The stand-in answers every request 418 with the marker header, so an allowed request is
+		// recognisable by what the far end said, a denied one by the proxy's 403, and anything
+		// else (curl code 000 from a DNS or connect failure, a 502 from the proxy) means the
+		// request did not cross the policy and the stand-in is not what answered. Runs against a
+		// real OpenShell only (KOINON_OPENSHELL_ENDPOINT=... make test-escape).
+		gw := "http://" + net.JoinHostPort(gwHost, "4000")
 		for _, path := range modelgw.RoutePaths() {
-			code, body := g.curlGateway(ctx, sandbox, "POST", gw+path)
-			Expect(code).To(Equal("502"), "POST "+path+" passes the policy and fails to connect: "+body)
+			code, body, header := g.curlGatewayHeaders(ctx, sandbox, "POST", gw+path)
+			answered(code, body)
+			Expect(code).To(Equal("418"), "POST "+path+" should pass the policy and reach the stand-in at "+gwHost+":4000 (418); 403 is a policy denial, 502 or 000 means it did not get there: "+body)
+			Expect(strings.ToLower(header)).To(ContainSubstring(strings.ToLower(standinMarker)), "POST "+path+": a 418 without the stand-in's marker header did not come from it")
 		}
 		denied := func(method, path string) {
 			GinkgoHelper()
 			code, body := g.curlGateway(ctx, sandbox, method, gw+path)
+			answered(code, body)
 			Expect(code).To(Equal("403"), method+" "+path)
 			Expect(body).To(ContainSubstring("policy"), method+" "+path)
 		}
@@ -203,6 +223,11 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		denied("POST", "/v1/responses")
 		denied("GET", "/v1/models")
 		denied("POST", "/config_dump")
+
+		By("a binary the gateway profile does not list (the probe's python3) is refused at connect")
+		res := probe(ctx, tcp(target{gwHost, 4000}))
+		Expect(res["tcp "+target{gwHost, 4000}.String()]).To(Equal("EACCES"),
+			"the gateway rule is bound to the flavor's binaries and curl; python3 must not reach "+gwHost+":4000")
 	}, NodeTimeout(2*time.Minute))
 
 	It("denies DNS to any resolver but the sandbox's own, which answers only synthetic addresses", func(ctx SpecContext) {
@@ -361,10 +386,12 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 			Name: other, Policy: reconciler.SandboxPolicy(nil),
 			Command: []string{"python3", "-m", "http.server", "8099", "--bind", "0.0.0.0"},
 		})
-		res := probeIn(ctx, other,
-			check{"id": "local", "op": "tcp", "host": "127.0.0.1", "port": 8099},
-		)
-		Expect(res["local"]).To(Equal("open"), "control: the second sandbox's listener is up")
+		// The command starts with the sandbox, so its listener can come up after the sandbox reports
+		// ready: wait for it, or the isolation check below would be skipped by a lost race (#323).
+		Eventually(func() any {
+			return probeIn(ctx, other, check{"id": "local", "op": "tcp", "host": "127.0.0.1", "port": 8099})["local"]
+		}).WithContext(ctx).WithTimeout(90*time.Second).WithPolling(2*time.Second).
+			Should(Equal("open"), "control: the second sandbox's listener is up")
 		out, stderr, code := g.exec(ctx, other, "", "python3", "-c", "import socket;print(socket.gethostbyname(socket.gethostname()))")
 		Expect(code).To(Equal(0), stderr)
 		ip := strings.TrimSpace(out)

@@ -414,6 +414,38 @@ func (s *Server) ListModels(ctx context.Context, _ ListModelsRequestObject) (Lis
 	return out, nil
 }
 
+// GetDefaultModel implements StrictServerInterface.
+func (s *Server) GetDefaultModel(ctx context.Context, _ GetDefaultModelRequestObject) (GetDefaultModelResponseObject, error) {
+	p, _ := s.actor(ctx)
+	m, err := s.agentModels.GetDefault(ctx, p.Org)
+	if err != nil {
+		st, e := s.problem(err)
+		return GetDefaultModeldefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	return GetDefaultModel200JSONResponse(defaultModel(m)), nil
+}
+
+// SetDefaultModel implements StrictServerInterface.
+func (s *Server) SetDefaultModel(ctx context.Context, req SetDefaultModelRequestObject) (SetDefaultModelResponseObject, error) {
+	p, actor := s.actor(ctx)
+	want := ""
+	if req.Body.Model != nil {
+		want = *req.Body.Model
+	}
+	if err := s.agentModels.SetDefault(ctx, p.Org, actor, want, time.Now()); err != nil {
+		st, e := s.problem(err)
+		return SetDefaultModeldefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	return SetDefaultModel200JSONResponse(defaultModel(want)), nil
+}
+
+func defaultModel(m string) DefaultModel {
+	if m == "" {
+		return DefaultModel{}
+	}
+	return DefaultModel{Model: &m}
+}
+
 // CreateModel implements StrictServerInterface.
 func (s *Server) CreateModel(ctx context.Context, req CreateModelRequestObject) (CreateModelResponseObject, error) {
 	p, actor := s.actor(ctx)

@@ -62,6 +62,7 @@ var _ = Describe("Plugin installs in the sandbox policy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: version.ID, ActivatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
+		keepWarm(ctx, org, agent.ID)
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
 
 		ws, sb := execution.WorkspaceName(org.Bytes), execution.AgentObjectNames(org.Bytes, agent.ID.Bytes).Sandbox

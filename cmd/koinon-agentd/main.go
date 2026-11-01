@@ -14,7 +14,9 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -23,12 +25,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
+	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/schemagate"
+	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -39,7 +47,13 @@ type config struct {
 	openshellName    string
 	savedWorkKeyFile string
 	metricsAddr      string
-	pool             agentd.Config
+	healthAddr       string
+
+	// The internal OTLP listener of koinon-api, where run spans go (ADR 0074): its base URL and
+	// the file with the bearer token it requires. Validated at start; the exporter uses them.
+	otlpEndpoint  string
+	otlpTokenFile string
+	pool          agentd.Config
 
 	// Home checkpoints (plan item HC1). koinon-agentd is the writer: it holds the S3 credentials
 	// (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY) but no key-encryption key: it asks koinon-api
@@ -60,6 +74,11 @@ func parseFlags(args []string) (config, error) {
 		"directory with the OpenShell client bundle (tls.crt, tls.key, ca.crt); empty connects without TLS")
 	fs.StringVar(&c.openshellName, "openshell-server-name", "", "name checked against the gateway's certificate")
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort, "listen address of /metrics (Prometheus); empty disables it")
+	fs.StringVar(&c.healthAddr, "health-addr", ":8082", "listen address of /healthz and /readyz (not ready while the database schema is outside the supported goose range, ADR 0085); empty disables it")
+	fs.StringVar(&c.otlpEndpoint, "otlp-endpoint", "",
+		"base URL of koinon-api's internal OTLP/HTTP listener (for example http://koinon-api.koinon.svc:4318), where run spans are exported; empty: not exported")
+	fs.StringVar(&c.otlpTokenFile, "otlp-token-file", "",
+		"file with the bearer token that listener requires (the Secret koinon-otlp-token, key token, mounted read-only); required with --otlp-endpoint")
 	fs.StringVar(&c.savedWorkKeyFile, "saved-work-key-file", "", "file with the key that signs saved-work posts (the Secret koinon-api creates, mounted read-only)")
 	fs.StringVar(&c.pool.SavedWorkURL, "saved-work-url", "",
 		"koinon-api's tools listener, where the uncommitted work of a stuck sandbox is posted to be sealed (ADR 0054); empty: not saved")
@@ -69,6 +88,8 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.pool.OwnerID, "owner-id", "", "this replica's name in run leases (default $POD_NAME, else the host name)")
 	fs.IntVar(&c.pool.Workers, "workers", 8, "runs driven at once")
 	fs.DurationVar(&c.pool.Lease, "lease", 30*time.Second, "run lease; another replica takes a run over when it expires")
+	fs.DurationVar(&c.pool.DrainDeadline, "drain-deadline", agentd.DefaultDrainDeadline,
+		"on SIGTERM, how long turns in progress get to finish before their runs are handed off (ADR 0085); the pod's terminationGracePeriodSeconds must be this plus 30s")
 	fs.DurationVar(&c.pool.Heartbeat, "heartbeat", 0, "lease renewal and cancel check interval (default lease/3)")
 	fs.DurationVar(&c.pool.Poll, "poll", time.Second, "how often idle workers look for runs")
 	fs.DurationVar(&c.pool.SandboxTimeout, "sandbox-timeout", 5*time.Minute, "how long a run waits for its sandbox")
@@ -103,6 +124,11 @@ func parseFlags(args []string) (config, error) {
 		}
 		c.pool.OwnerID = h
 	}
+	if c.otlpEndpoint != "" || c.otlpTokenFile != "" {
+		if err := validateOTLP(c.otlpEndpoint, c.otlpTokenFile); err != nil {
+			return c, err
+		}
+	}
 	switch {
 	case c.databaseURL == "":
 		return c, errors.New("--database-url is required")
@@ -114,6 +140,23 @@ func parseFlags(args []string) (config, error) {
 		return c, errors.New("--saved-work-url and --saved-work-key-file are required with --checkpoints: koinon-api hands out the repository passwords")
 	}
 	return c, nil
+}
+
+// validateOTLP checks the exporter's settings at start, so a missing token fails the pod instead of
+// every export: the endpoint is an http(s) URL without a path (the exporter adds /v1/traces) and
+// the token file holds a valid token. The value is never reported.
+func validateOTLP(endpoint, tokenFile string) error {
+	if endpoint == "" || tokenFile == "" {
+		return errors.New("--otlp-endpoint and --otlp-token-file are required together: the OTLP listener refuses requests without its bearer token")
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil {
+		return errors.New("--otlp-endpoint must be an http(s) URL with a host and no path, for example http://koinon-api.koinon.svc:4318")
+	}
+	if _, err := otlpauth.ReadToken(tokenFile); err != nil {
+		return fmt.Errorf("--otlp-token-file: %w", err)
+	}
+	return nil
 }
 
 func main() {
@@ -162,12 +205,28 @@ func run() error {
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, slog.Default()); err != nil {
 		return err
 	}
+	// The health listener outlives SIGTERM: agentd drains for up to the drain deadline, and a
+	// liveness probe that fails meanwhile gets the pod killed. It stops once the drain is over.
+	healthCtx, stopHealth := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopHealth()
+	if _, err := serveHealth(healthCtx, ctx, cfg.healthAddr, db, slog.Default()); err != nil {
+		return err
+	}
+	if cfg.otlpEndpoint != "" {
+		// Run spans (ADR 0074). The service only reads settings and decides runs: agentd holds no
+		// key-encryption key and dials no destination; the router in koinon-api does.
+		cfg.pool.Tracing = &agentd.Tracing{
+			Decider:  agentd.TraceDeciderFrom(tracedest.NewWithClient(db, nil, catalog.URLPolicy{}, nil, slog.Default())),
+			Endpoint: cfg.otlpEndpoint, TokenFile: cfg.otlpTokenFile,
+		}
+	}
 	pool, err := agentd.New(db, backend, cfg.pool)
 	if err != nil {
 		return err
 	}
 	slog.Info("starting koinon-agentd", "version", project.Version, "owner", cfg.pool.OwnerID, "workers", cfg.pool.Workers)
 	err = pool.Run(ctx)
+	stopHealth()
 	slog.Info("stopping koinon-agentd")
 	return err
 }
@@ -197,4 +256,47 @@ func checkpointsFrom(cfg config) (*agentd.Checkpoints, error) {
 		},
 		Interval: cfg.checkpointInterval,
 	}, nil
+}
+
+// serveHealth serves /healthz and /readyz on addr and returns the address it listens on (empty
+// when addr is empty and nothing is served). koinon-agentd is not Ready while the database
+// schema is outside the goose range this build supports (ADR 0085): a rollout of a release the
+// schema has outgrown then stalls on the new pod instead of replacing working ones.
+//
+// The listener runs until life ends. term is the termination signal: from then on /readyz answers
+// 503 (the pod leaves the Service) but /healthz keeps answering, because agentd is still draining
+// and the kubelet must not kill a pod that is busy finishing its runs.
+func serveHealth(life, term context.Context, addr string, db schemagate.Querier, log *slog.Logger) (string, error) {
+	if addr == "" {
+		return "", nil
+	}
+	gate := schemagate.New(db, schemagate.Range{Min: migrations.MinSupported, Latest: migrations.MustLatest()}, log)
+	safego.Go(life, log, "schema-gate", gate.Run)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	ready := gate.ReadyHandler()
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		if term.Err() != nil {
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
+		ready(w, r)
+	})
+	ln, err := (&net.ListenConfig{}).Listen(life, "tcp", addr)
+	if err != nil {
+		return "", fmt.Errorf("health listener: %w", err)
+	}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	safego.Go(life, log, "health-shutdown", func(context.Context) {
+		<-life.Done()
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(life), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(sctx)
+	})
+	safego.Go(life, log, "health-listener", func(context.Context) {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("health listener failed", "addr", addr, "err", err)
+		}
+	})
+	return ln.Addr().String(), nil
 }

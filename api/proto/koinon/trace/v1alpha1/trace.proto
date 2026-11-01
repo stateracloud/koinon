@@ -1,0 +1,264 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.trace.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1;tracev1alpha1";
+
+// TraceDestinationService manages where run traces go (ADR 0074): an org's OTLP destinations, its
+// content level and sampling, and, for platform admins, the platform's destination and the ceiling on
+// content levels.
+//
+// Org calls need the admin role; only an owner may set the content level full. Platform calls need a
+// platform admin. Credentials are write-only: they are sealed in the secret store and never returned.
+// Creating or changing a destination's connection (backend, endpoint, settings or secrets) first sends
+// it one synthetic trace and saves only when the backend accepts it (decision 9): a refusal is
+// FAILED_PRECONDITION and the message says why. A change that touches none of those (enabled, name,
+// resource attributes) is saved untested, so a destination whose backend is down can still be disabled.
+// Stored secrets are kept only while backend and endpoint origin stay the same; otherwise every secret
+// is required again. While the org's effective content level is full, only an owner may add a
+// destination or change its connection.
+//
+// Failures carry a machine-readable reason as a google.rpc.ErrorInfo error detail (domain "koinon.dev",
+// reason below, the human message stays in the error). Read it by unpacking the details of the error.
+//
+//	PERMISSION_DENIED  ADMIN_REQUIRED          the org call needs the admin role or higher
+//	                   PLATFORM_ADMIN_REQUIRED the platform call needs a platform admin
+//	                   OWNER_ONLY              only an org owner may set the content level or the platform copy to full
+//	                   OWNER_AT_FULL           the org's level is full, so only an owner may add a destination or change its connection
+//	                   NOT_MEMBER              raising a level needs membership of the org (a platform admin outside it may only lower)
+//	FAILED_PRECONDITION TEST_FAILED            the test trace was not accepted, nothing was saved; the details also hold a
+//	                                           koinon.trace.v1alpha1.TestResult with the outcome alone (no prefix)
+//	                   ABOVE_CEILING           the level is above the platform ceiling
+//	ABORTED            CHANGED                 the destination changed (or was deleted) since the form was loaded
+service TraceDestinationService {
+  rpc ListDestinations(ListDestinationsRequest) returns (ListDestinationsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc CreateDestination(CreateDestinationRequest) returns (CreateDestinationResponse);
+  // UpdateDestination replaces the destination's settings. Secrets are merged by name: a name in
+  // secrets is set, a name in remove_secrets is cleared and the rest stay.
+  rpc UpdateDestination(UpdateDestinationRequest) returns (UpdateDestinationResponse);
+  rpc DeleteDestination(DeleteDestinationRequest) returns (DeleteDestinationResponse);
+  // TestDestination sends the saved destination a synthetic trace again and keeps the result.
+  rpc TestDestination(TestDestinationRequest) returns (TestDestinationResponse);
+
+  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // UpdateSettings sets the org's content level, sampling and platform opt-in.
+  rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse);
+
+  // GetPlatform returns the platform destination and ceiling. Platform admins only.
+  rpc GetPlatform(GetPlatformRequest) returns (GetPlatformResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // SetPlatformDestination tests, then saves, the platform destination. Platform admins only.
+  rpc SetPlatformDestination(SetPlatformDestinationRequest) returns (SetPlatformDestinationResponse);
+  rpc DeletePlatformDestination(DeletePlatformDestinationRequest) returns (DeletePlatformDestinationResponse);
+  rpc TestPlatformDestination(TestPlatformDestinationRequest) returns (TestPlatformDestinationResponse);
+  // SetPlatformCeiling sets the highest content level an org may pick. Lowering it lowers every org
+  // above it in the same transaction. Platform admins only.
+  rpc SetPlatformCeiling(SetPlatformCeilingRequest) returns (SetPlatformCeilingResponse);
+}
+
+enum Backend {
+  BACKEND_UNSPECIFIED = 0;
+  BACKEND_LANGFUSE = 1;
+  BACKEND_DATADOG = 2;
+  BACKEND_LANGSMITH = 3;
+  BACKEND_OPIK = 4;
+  // GENERIC sends the headers as given: every key in secrets is a header name.
+  BACKEND_GENERIC = 5;
+}
+
+enum ContentLevel {
+  CONTENT_LEVEL_UNSPECIFIED = 0;
+  // NONE: names, IDs, counts, timings, statuses and cost; no content. The default.
+  CONTENT_LEVEL_NONE = 1;
+  // REDACTED: content after the scrubber.
+  CONTENT_LEVEL_REDACTED = 2;
+  // FULL: content as is, apart from credentials. Only an org owner may choose it.
+  CONTENT_LEVEL_FULL = 3;
+}
+
+// TestResult is what the last synthetic trace showed.
+message TestResult {
+  bool ok = 1;
+  // message is a short, secret-free explanation; empty when ok.
+  string message = 2;
+  google.protobuf.Timestamp tested_at = 3;
+}
+
+// Health is what the router recorded for the destination (decision 7).
+message Health {
+  google.protobuf.Timestamp last_success_at = 1;
+  google.protobuf.Timestamp last_error_at = 2;
+  string last_error = 3;
+  int64 spans_dropped = 4;
+}
+
+// Destination is a destination as stored. It never holds a credential.
+message Destination {
+  // id is empty for the platform destination.
+  string id = 1;
+  string name = 2;
+  Backend backend = 3;
+  string endpoint_url = 4;
+  // params are the preset's settings that are not secret, such as a LangSmith project.
+  map<string, string> params = 5;
+  // secret_fields names the secrets that are set, never their values.
+  repeated string secret_fields = 6;
+  map<string, string> resource_attributes = 7;
+  bool enabled = 8;
+  TestResult last_test = 9;
+  Health health = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+  // config_version changes with every change of the configuration and with nothing the router records.
+  // Send it back as expected_version when updating.
+  int64 config_version = 13;
+}
+
+// DestinationInput is what a caller writes.
+message DestinationInput {
+  // name is a DNS label; the platform destination has none.
+  string name = 1;
+  Backend backend = 2;
+  // endpoint_url is the OTLP/HTTP traces endpoint, for example https://cloud.langfuse.com/api/public/otel/v1/traces.
+  string endpoint_url = 3;
+  map<string, string> params = 4;
+  // secrets are the preset's secret fields (langfuse: public_key, secret_key; datadog, langsmith and
+  // opik: api_key), or the headers of a generic destination.
+  map<string, string> secrets = 5 [debug_redact = true];
+  repeated string remove_secrets = 6;
+  map<string, string> resource_attributes = 7;
+  bool enabled = 8;
+}
+
+message ListDestinationsRequest {
+  string org_id = 1;
+}
+
+message ListDestinationsResponse {
+  repeated Destination destinations = 1;
+}
+
+message CreateDestinationRequest {
+  string org_id = 1;
+  DestinationInput destination = 2;
+}
+
+message CreateDestinationResponse {
+  Destination destination = 1;
+}
+
+message UpdateDestinationRequest {
+  string org_id = 1;
+  string destination_id = 2;
+  DestinationInput destination = 3;
+  // expected_version is the config_version the form was loaded with. When set and the destination has
+  // changed since, the update fails with ABORTED. Left out, the update applies to the current version.
+  optional int64 expected_version = 4;
+}
+
+message UpdateDestinationResponse {
+  Destination destination = 1;
+}
+
+message DeleteDestinationRequest {
+  string org_id = 1;
+  string destination_id = 2;
+}
+
+message DeleteDestinationResponse {}
+
+message TestDestinationRequest {
+  string org_id = 1;
+  string destination_id = 2;
+}
+
+message TestDestinationResponse {
+  Destination destination = 1;
+  TestResult result = 2;
+}
+
+// Settings are an org's trace settings.
+message Settings {
+  ContentLevel content_level = 1;
+  // sample_rate is the share of runs traced, 0 to 1; 1 traces every run.
+  double sample_rate = 2;
+  // platform_copy_level is the highest level the platform's copy may carry for this org; never above
+  // content_level.
+  ContentLevel platform_copy_level = 3;
+  // ceiling is the highest level the platform lets an org pick.
+  ContentLevel ceiling = 4;
+  // has_platform_destination says the platform has a destination, so platform_copy_level matters.
+  bool has_platform_destination = 5;
+  google.protobuf.Timestamp updated_at = 6;
+  string updated_by = 7;
+}
+
+message GetSettingsRequest {
+  string org_id = 1;
+}
+
+message GetSettingsResponse {
+  Settings settings = 1;
+}
+
+message UpdateSettingsRequest {
+  string org_id = 1;
+  ContentLevel content_level = 2;
+  // sample_rate is the share of runs traced, 0 to 1. Left out, the stored value stays (1 for an org
+  // that never set one).
+  optional double sample_rate = 3;
+  ContentLevel platform_copy_level = 4;
+}
+
+message UpdateSettingsResponse {
+  Settings settings = 1;
+}
+
+message GetPlatformRequest {}
+
+message GetPlatformResponse {
+  // destination is unset while the platform has none.
+  Destination destination = 1;
+  ContentLevel ceiling = 2;
+}
+
+message SetPlatformDestinationRequest {
+  DestinationInput destination = 1;
+  // expected_version is the config_version the form was loaded with (0 when the platform has no
+  // destination yet). When set and the destination has changed since, the call fails with ABORTED.
+  optional int64 expected_version = 2;
+}
+
+message SetPlatformDestinationResponse {
+  Destination destination = 1;
+}
+
+message DeletePlatformDestinationRequest {}
+
+message DeletePlatformDestinationResponse {}
+
+message TestPlatformDestinationRequest {}
+
+message TestPlatformDestinationResponse {
+  Destination destination = 1;
+  TestResult result = 2;
+}
+
+message SetPlatformCeilingRequest {
+  ContentLevel ceiling = 1;
+}
+
+message SetPlatformCeilingResponse {
+  ContentLevel ceiling = 1;
+  // orgs_lowered is how many orgs were above the new ceiling and were lowered to it.
+  int32 orgs_lowered = 2;
+}

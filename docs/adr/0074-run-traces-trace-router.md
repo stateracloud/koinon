@@ -1,6 +1,6 @@
 # 0074. Run traces: a Koinon trace router to each org's OTLP backend
 
-- Status: Accepted (delivery after v0.1.0)
+- Status: Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9; amended 2026-10-30 and 2026-10-31 (below)
 - Date: 2026-10-28
 - Amends: [0023](0023-observability-and-audit.md) (run traces, deferred there)
 - Relates to: [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0049](0049-v01-scope-decisions.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0059](0059-v01-opencode-only.md), [0065](0065-work-model-tasks-inbox.md), [0072](0072-agent-model-run-now-echo-check.md), [0073](0073-agent-passport.md), [#213](https://github.com/stateracloud/koinon/issues/213)
@@ -316,7 +316,7 @@ so the router needs only that.
 | Datadog LLM Observability ([OTel](https://docs.datadoghq.com/llm_observability/instrumentation/otel_instrumentation/)) | Site-specific; `http/protobuf` | `dd-api-key`, `dd-otlp-source: llmobs` | GenAI 1.37+ and OpenInference; spans without `gen_ai.*` are dropped | `chat` → llm, `execute_tool` → tool, `invoke_agent` → agent; cross-trace links stored, not drawn | SaaS |
 | Honeycomb ([OTel](https://docs.honeycomb.io/send-data/opentelemetry/)) | `api.honeycomb.io/v1/traces` (EU `api.eu1`) | `x-honeycomb-team` | Any; no LLM view | Queries | SaaS |
 | LangSmith ([OTel](https://docs.langchain.com/langsmith/trace-with-opentelemetry)) | `api.smith.langchain.com/otel/v1/traces`; self-hosted `<api>/api/v1/otel` | `x-api-key`, `Langsmith-Project` | `gen_ai.*`, OpenInference, `langsmith.*` | `langsmith.trace.session_id` (the preset copies the run ID) | SaaS; self-hosted enterprise |
-| Opik ([OTel](https://www.comet.com/docs/opik/integrations/opentelemetry)) | `<host>/api/v1/private/otel/v1/traces`; HTTP only | `Authorization: <key>`, `Comet-Workspace`, `projectName` | `gen_ai.*` including `gen_ai.usage.cost`, OpenInference | `gen_ai.conversation.id` → thread | Cloud or self-hosted; Apache-2.0 |
+| Opik ([OTel](https://www.comet.com/docs/opik/integrations/opentelemetry)) | `<host>/api/v1/private/otel/v1/traces`; HTTP only | `Authorization: <key>`, `Comet-Workspace`, `projectName`; all optional, because self-hosted Opik runs without authentication | `gen_ai.*` including `gen_ai.usage.cost`, OpenInference | `gen_ai.conversation.id` → thread | Cloud or self-hosted; Apache-2.0 |
 
 ## Consequences
 
@@ -414,6 +414,277 @@ so the router needs only that.
   table, and the prior-art pages in the Context.
 - OpenShell passing a harness's `traceparent` header to the gateway: not yet tested (decision 2).
 
+## Amendment (2026-10-29): the gateway logs no response body
+
+Decision 6 says an org at `none` sends no content off the gateway at all. A first version of the
+failed-response log field (`koinon.error_body`, ADR 0056 amendment 2026-10-29) did not meet that: a
+provider that echoes the prompt (OpenRouter's `metadata.flagged_input`) put it in the gateway's stdout
+log and in the OTLP export. Redacting it in CEL would have fixed that, but reading agentgateway v1.7.0
+showed a larger fault: any log or tracer expression that references `response.body` or
+`response.bodyPrefix` makes the gateway record the body of every response on the listener (up to 32 MiB
+on an LLM route, held for the whole stream; ADR 0056 amendment 2026-10-29, point 6).
+
+1. **No rendered expression reads a response body**, in the access log or in a tracer field, in either
+   driver. The field and `errbody.GatewayExpr` are removed, and a render spec in each driver fails if
+   `response.body` appears in any rendered output.
+2. **Content level is unaffected.** The gateway's log and the OTLP export hold provider status and
+   metadata only, never the request, the completion or an error body, so `none` stays true to its word.
+3. **Any future trace field that wants a body** must be weighed against that cost first; the
+   per-response buffering is what a per-field status guard cannot avoid.
+
+## Amendment (2026-10-30): the destinations API and its defaults (rc.9)
+
+The foundation slice (schema, service layer, `TraceDestinationService`) fixes what decisions 6, 8 and 9
+left open.
+
+1. **The platform destination and ceiling are Connect calls, not `/admin/v1`.** Admin API tokens are
+   org-scoped (ADR 0056), so no token can act as a platform admin, and the platform ceiling for budgets
+   is a platform-admin call in the UI for the same reason. `TraceDestinationService` carries
+   `GetPlatform`, `SetPlatformDestination`, `DeletePlatformDestination`, `TestPlatformDestination` and
+   `SetPlatformCeiling`, for platform admins. `GET/PUT /admin/v1/trace-destinations` is not built; an
+   org-scoped REST face for an org's own destinations can be added on the same service layer.
+2. **Credentials.** A destination's secrets are one envelope (`trace_destinations.credentials`, bound to
+   org, table, row and column), a JSON object of the preset's secret fields or, for `generic`, header
+   name to value. The names of the fields that are set are stored in the clear (`secret_fields`) so the UI
+   can show them; values are never returned or audited.
+3. **The ceiling defaults to `full`** (no restriction until a platform admin lowers it). The owner-only
+   rule for `full` still applies. An org without a settings row has level `none`, every run sampled, and
+   nothing extra for the platform.
+4. **Audit.** The log has no org-less events (ADR 0023), so a change to the platform destination or
+   ceiling is recorded in the platform admin's personal org, and each org lowered by a new ceiling gets its
+   own `trace.settings.lowered` event.
+5. **Run tracing state.** `runs.traced` is NULL until agentd decides at claim and then never changes;
+   the migration sets it to false for runs already past their queue, so a run is traced whole or not at
+   all. `run_turns` holds one row per turn with its `seq` (from `runs.last_turn_seq`, taken under the run's
+   row lock) and `trace_id`.
+6. **Stored credentials follow their endpoint.** Update keeps stored secrets only while the backend and
+   the endpoint's origin (scheme, host, port) are unchanged; otherwise every secret field must be entered
+   again, so a credential is never sent to an endpoint just typed in. Endpoints are stored normalised, and
+   must be https unless the host is in the platform's allowed hosts (a lab or test backend).
+7. **When a change is tested.** Only a change to the connection (backend, endpoint, settings, secrets) is
+   tested before saving. Enabled, name and resource attributes are saved untested, so a destination whose
+   backend is down can still be disabled. Backend response text is never quoted in a result (it can echo
+   the credentials in another encoding): the message is the status and a fixed description.
+8. **Versions.** `config_version` changes only with the configuration, never with the router's health
+   writes; an update may carry the version it was loaded with and fails with ABORTED when it is stale. A
+   re-test records its result only against the version it tested.
+9. **Who may send what.** `full`, and any raise of the content level or the platform copy, follows the
+   caller's real membership: a platform admin who is not a member of the org may lower its settings but not
+   raise them, and does not count as its owner. A non-owner admin could otherwise add a destination that
+   receives the org's chosen level, `full` included, so while the org's effective level is `full` only an
+   owner may add a destination or change its connection (turning one off or renaming it stays open to
+   admins). Not accepting that gap is the sustainable default.
+10. **Router resilience.** A destination whose credentials cannot be opened is skipped, logged and marked
+    with an error on its health; the org's other destinations still get its traces. `sample_rate` is
+    optional on update and the stored rate stays when it is left out.
+
+## Amendment (2026-10-30): the internal OTLP listener is authenticated
+
+The context above (the access log "with no authentication and a NetworkPolicy in front") is superseded
+by the amendment of the same date in [0050](0050-spend-ledger-ingestion-and-net-limits.md). The whole
+internal OTLP listener, `/v1/logs` and `/v1/traces`, requires a bearer token from the Secret
+`koinon-otlp-token`. The gateway's log export and koinon-agentd's span export both send it
+(`--otlp-endpoint` and `--otlp-token-file` on koinon-agentd, `KOINON_OTLP_ENDPOINT` and
+`KOINON_OTLP_TOKEN_FILE` in the chart). This closes issue #52.
+
+## Amendment (2026-10-30): how koinon-agentd emits the run's spans (rc.9)
+
+1. **Root span IDs are derived.** The turn's trace ID is random and stored on `run_turns`; its root span
+   ID is the first 8 bytes of SHA-256(`"koinon.turn.root"` + trace ID). A later turn, a takeover or the
+   router can therefore name a turn's root (a span link, a parent) from the row alone.
+2. **A turn is one `session/prompt`.** A retry, a refusal note or a wrap-up prompt in the same
+   execution each start a turn of their own; the turn row's `end_reason` says how it ended (`end_turn`,
+   `park:<reason>`, `failed`, `canceled`, `wrap_up`, `refused`, `interrupted`, `fenced`, `shutdown`).
+   The `koinon.wait` event is added only when the previous turn ended in a park. A run that fails
+   before its first prompt has no turn and so no trace.
+3. **Content is marked.** A span that carries content has `koinon.content.attributes`, a string array
+   of the names of its content attributes (`gen_ai.input.messages`, `gen_ai.output.messages`,
+   `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`). agentd sets content only when the org's
+   level (held to the platform ceiling) is above `none`; the router strips or scrubs exactly the listed
+   attributes per destination level and removes the marker. agentd pre-caps each value at 64 KiB to
+   bound memory; a longer value becomes a JSON string of its cut-off text.
+4. **Tool names.** A tool call is named by its first message and never renamed: OpenCode fills in a file
+   path or URL as the title of a finished call. `gen_ai.tool.name` and the span name use the ACP title
+   only if it is a known tool name (the harness's built-ins, `koinon_*` or `mcp__*`); anything else
+   falls back to the ACP kind. `gen_ai.transfer.target.name` is set only above content level `none`.
+5. **Turn rows.** A turn row is inserted only by the run's current owner (`InsertOwnedRunTurn`: the epoch
+   matches and the run is starting or running), and the same statement ends any row a previous owner
+   left open as `interrupted`. The park transaction ends the turn's row with `park:<reason>`, so a fast
+   resume on another replica sees it. A control-plane cancel ends the last turn as `canceled`.
+6. **Content JSON.** Over the pre-cap, the leaf strings of `gen_ai.input.messages` and
+   `gen_ai.output.messages` are cut, so they stay the messages array; only an opaque tool value falls
+   back to a JSON string of its cut-off text.
+7. **Export.** A bounded queue (2048 spans) that drops when full, one worker, 256-span batches with a
+   5 s deadline; a failed batch is dropped, spans the listener rejected in a partial success are counted
+   apart, and errors are logged at most every 30 s. `koinon_agentd_trace_spans_dropped_total{reason}`
+   (`queue_full`, `export_failed`, `rejected`, `shutdown`) and `..._exported_total` count them.
+8. **Provisional: `ask_agent`.** The tool does not exist yet. The span's `gen_ai.transfer.*` attributes
+   and the link to the child run's first turn read guessed argument and result fields (`agent`/`to`,
+   `runId`/`run`); revisit when the tool is built.
+
+## Amendment (2026-10-30): how the trace router works in rc.9
+
+`internal/tracing/router` in koinon-api fills in what decisions 1, 3 to 8 and 10 left open.
+
+1. **Receiver.** `POST /v1/traces` on the internal OTLP listener, inside the bearer-token check, OTLP/HTTP
+   protobuf only (gzip allowed, 32 MiB bound). It hands the spans to a bounded intake (8192) without
+   waiting and answers at once; spans that do not fit are counted and reported as `rejected_spans` in
+   the partial success. OTLP JSON is refused with 415: it writes trace and span IDs as hex where proto3
+   JSON writes base64, so a generic decoder would mangle every ID, and agentd sends protobuf.
+2. **Attribution (decision 4, agentd spans).** A span is kept only if its run exists in the org it names,
+   `runs.traced` is true and its trace ID is one of that run's `run_turns`. The answer is cached (ten
+   minutes; a refusal 30 seconds, so a flood of forged spans costs one query). Everything else is
+   discarded and counted by reason (`unattributed`, `unknown_run`, `unknown_trace`, `untraced`,
+   `lookup_failed`). A database error drops the span rather than guessing. The org and run on the
+   exported copy are the canonical forms of what was proven.
+3. **Model-call spans (decision 3, last bullet; decision 5).**
+   - The root span of a turn triggers them. The router reads the run's `spend_entries` rows whose time
+     is in the turn's `[started_at, ended_at]` window (the root's end time while the row is open) and
+     makes one `chat {model}` CLIENT span per row, parented under the root. Span IDs are derived from
+     the trace ID and the request ID, so a replayed root makes the same spans.
+   - `gen_ai.provider.name` is the provider's type, found through the model catalog (`_OTHER` when the
+     model is gone). Tokens are the ledger's (input includes cache, output includes reasoning, as the
+     conventions mean them). `gen_ai.usage.cost` and `koinon.cost_usd` are the ledger's cost,
+     `koinon.gateway_cost_usd` the gateway's, `koinon.request` the join key. The ledger knows when the
+     gateway logged a request, not how long it took, so a span is a point at that time (start = end);
+     option D brings the real timing.
+   - **Waiting.** The root is held until two polls two seconds apart find the same rows and none is
+     pending (no cost, or a provider figure still awaited), or 30 seconds after it arrived. At the
+     deadline a span whose cost is missing or provisional carries `koinon.cost_pending = true` (and no
+     cost if it has none), and so does the root.
+   - **Totals on the root, not a summary span.** The root carries the turn's `gen_ai.usage.*`,
+     `gen_ai.usage.cost`, `koinon.cost_usd` and `koinon.model_calls`, as decision 3 says. Holding only
+     the root keeps memory bounded: tool spans and the rest go out at once, and one small span per open
+     turn waits at most 30 seconds. The hold is bounded by count (2048) and bytes (32 MiB), because a
+     root can carry content; a root that does not fit is released at once with the ledger as it stands.
+     A child summary span would have held nothing, but no backend would show the turn's cost on the turn.
+     If the ledger cannot be read, the root goes out without totals rather than being lost.
+4. **A copy per destination (decisions 3, 6 and 8).** At `none` every attribute listed in
+   `koinon.content.attributes`, and the four known content names even when unlisted, is removed. At
+   `redacted` and `full` each is scrubbed with `scrub.Content` at that level and cut to 16 KiB. The marker
+   never leaves. Every other string (attributes, events, links, the span name and status message) goes
+   through the always tier, so a credential in a tool name or an error message is removed at every level.
+   Content that is not a string is removed. The org's known secrets are the values of its provider keys,
+   connection fields, remote MCP credentials, agent home repository passwords and its own trace
+   destination credentials, opened with the key-encryption keys and cached for five minutes. If they
+   cannot be loaded the router sends no content (fail closed). On the platform's copy the agent's name
+   becomes its ID (attribute and span name), a transfer target's name is removed and an MCP tool loses its
+   server's name.
+5. **Queues (decision 7).** One queue per org destination and one for the platform, started on first use
+   and stopped when idle for five minutes or when its destination is disabled or deleted (what is queued
+   is then dropped, not sent). 10,000 spans, drop-oldest, 512-span batches. A retryable failure backs off
+   from one second to a minute and honours `Retry-After`; a batch is dropped after six attempts, or at
+   once for a refusal retrying cannot fix. The circuit breaker opens after three failures in a row and
+   pauses 30 seconds, doubling with each further failure up to ten minutes; it also holds back the next
+   batches. Health is written by the destination's own worker at most every five seconds (success, last
+   error, spans dropped). A span count lost since the last root is added to that destination's next root
+   as `koinon.spans_dropped`, once.
+6. **Metrics (decision 10).** `koinon_api_trace_spans_received_total{source}` (`agentd`, `ledger`;
+   the ledger-made spans, where the ADR said `gateway`, which is option D),
+   `..._discarded_total{reason}` before any destination, `..._exported_total`, `..._dropped_total{reason}`
+   and `..._rejected_total{reason}` by `destination_kind` and `backend`,
+   `koinon_api_trace_export_duration_seconds{outcome}`, `koinon_api_trace_queue_depth` and
+   `koinon_api_trace_redactions_total{kind}`. No ID is a label.
+7. **Test.** The isolation suite runs two orgs, each with its own fake backend, and a platform
+   destination, and asserts that every exported span's `koinon.org` is its destination's org, that no
+   org's content appears in another's payload, and that the platform's copy has IDs and its own level. A
+   golden file per level and for the platform's copy pins the emitted spans.
+
+## Amendment (2026-10-30): the router applies settings when it sends, and bounds its input
+
+A review of the first router found privacy and safety gaps. These replace the matching parts of the
+router amendment above.
+
+1. **The copy is made when a batch is sent.** A queue holds the span as received, with its org. Before
+   every attempt (a retry included) the worker reads the destination's settings as they are then and
+   makes the copy, so a level lowered to `none` while spans waited, in a breaker pause or a retry
+   backoff, applies to them. The settings are fingerprinted (`tracedest.Service.ConfigVersion`: ceiling,
+   the org's settings, each destination's `config_version` and enabled flag, the platform destination's;
+   health writes do not change it) and checked at most once a second per org, reloaded when the
+   fingerprint changes. A failed check or load sends nothing and retries: no stale answer is served. A
+   source that cannot be fingerprinted reloads after a TTL.
+2. **Deleted or disabled destinations stop at once.** Each queue has a context that its retirement
+   cancels, so a request or a sleep in progress ends, and the batch and the queue are dropped, not sent.
+   Retirement is checked before every attempt, and a periodic re-check (15 s) syncs the live queues of
+   orgs that send nothing.
+3. **Content names.** `gen_ai.transfer.target.name` is content: removed at `none` whether or not the span
+   lists it.
+4. **Health.** An error is written once per episode (the same message again changes nothing the admin
+   sees), so a failing destination no longer rewrites `last_error_at` every interval and its idle queue
+   can close. The breaker has its own failure count.
+5. **Input bounds.** A request is at most 4 MiB on the wire and 16 MiB decompressed, at most 1024 spans
+   (counted from the wire format before anything is decoded; agentd sends 256) and at most 8 are handled
+   at once (503 with `Retry-After` beyond). A span with IDs of the wrong length, a zero trace ID, or an
+   unreasonable size is rejected before the intake. The intake (64 MiB) and all queues together (256 MiB)
+   have byte budgets; a queue over budget drops its own oldest spans.
+6. **Duplicate roots.** A root whose trace is held, or finished within ten minutes, is dropped, so a
+   retried export does not make the model calls twice.
+7. **Secrets.** The set is fingerprinted by the org's stored envelopes (an md5 over provider keys,
+   connections, MCP credentials, home repository passwords and trace destination credentials), so a
+   changed credential applies within a second. If the set cannot be confirmed or reloaded it is used for
+   one minute at most, then the org gets no content. An envelope that cannot be opened is logged and
+   counted, and the org gets no content until it can. Generic destinations' header values also add the
+   token after a known auth scheme (and the decoded user and password of Basic).
+8. **Ledger window.** The turn row is read again when the root is held. The window is
+   `[started_at, ended_at + 2 s)`, never into the next turn, so a row on a boundary counts once.
+9. **Platform copy.** An agent's name is replaced by its ID and the root span is always renamed to
+   `invoke_agent <agent id>`; a chat span's model name is replaced by the catalog model's ID
+   (`koinon.model.id`, also set on the org's copy), or removed where the ID is unknown. `koinon.spans_dropped`
+   is counted per org on the shared platform queue. Ledger reads for held roots run in parallel (8) with a
+   5 s timeout each. A span no live queue could take is counted as discarded (`enqueue_failed`).
+
+### Second review (2026-10-30)
+
+- The platform destination's fingerprint includes its `updated_at`, because deleting and recreating it
+  resets `config_version`.
+- The pre-scan walks the whole request on the wire and rejects it before decoding when it has more than
+  262,144 sub-messages, 64 resources or scopes, the span cap, or values nested deeper than 16.
+- A trace is claimed (for ten minutes after it finishes) in the same critical section as the duplicate
+  check, so two roots arriving together make the model calls once.
+- A batch stays in the byte budget until its final outcome, and a batch is bounded by 4 MiB as well as
+  512 spans. When the global budget is full, the queue holding the most bytes drops its oldest spans, so
+  a destination that is down does not take the memory of a healthy one.
+- The last secret set is used for the grace only when the credentials' fingerprint cannot be read. Once it
+  says they changed, or an envelope cannot be opened, a failed reload sends no content.
+- Every database read on the path of a span has a deadline (3 s), runs once per org at a time, and a
+  failure is remembered for a second, still failing closed.
+- A retired queue leaves the router at once; a partial rejection is shared among the batch's orgs by
+  their spans; the drop count a lost batch's root carried is not lost; an older load never replaces a
+  newer one. A held root settles only after its window (turn end + 2 s) has closed, and the poll interval
+  is never shorter than that grace.
+
+### Third review (2026-10-30)
+
+- A backend's `rejected_spans` is clamped to the batch before it is counted or shared among the orgs.
+- **Memory.** The byte budgets derive from the container's memory limit (the cgroup's `memory.max` or
+  `memory.limit_in_bytes`, or `KOINON_MEMORY_LIMIT_BYTES` when that is lower; a container without a limit
+  gets the node's allocatable memory in the variable but "max" in its cgroup, and then there is no limit
+  and the defaults below without a limit apply):
+  queues 20%, spans waiting for attribution 5%, held roots 3%, requests being read and decoded 8% (128,
+  32, 16 and 64 MiB without a limit), each overridable with `--trace-queue-bytes`, `--trace-intake-bytes`,
+  `--trace-held-bytes` and `--trace-request-bytes`. Bytes are the encoded size plus 100 bytes for every
+  attribute, event and link, which approximates the decoded objects. A request charges its encoded
+  size, then four times its decompressed size before decoding; it is refused with 503 and `Retry-After`
+  when the budget is full, or 413 when it could never fit. At the chart's 512 MiB limit the request
+  budget is about 41 MiB, so a body that decompresses to more than about 9 MiB (4 MiB encoded plus four
+  times the decompressed size) is refused as too large, below the 16 MiB hard ceiling. The body buffer is
+  sized from `Content-Length` plus `bytes.MinRead` (a gzip body's pre-sized for at most eight times its
+  length and half the remaining budget). Each refusal says why and is counted in
+  `koinon_api_trace_requests_rejected_total{reason}`.
+- **Isolation (decision 7).** Each queue has an equal share of the queue budget (at least 256 KiB, and no more than a quarter of the budget while fewer than four exist) and
+  drops only its own oldest spans beyond it; in-flight bytes count toward the share. A batch that failed
+  goes back to the front of its queue for its backoff or the breaker's pause instead of being held
+  outside the budget, so a destination that is down loses its own oldest spans and nothing else. When a
+  new queue shrinks the shares, queues above theirs trim themselves.
+- A failed batch is retried as the same items, and its attempts start again when its head was trimmed. A
+  failure to read the destination's settings from the database is not the destination's: it neither counts
+  as an attempt nor opens the breaker nor writes the destination's health; the batch waits and is retried.
+- Attribution reads share one read per key and remember a failure for a second; the turn row of a held
+  root is read in the sweep, off the intake worker. A read that panics gives its waiters an error.
+- A destination whose stored credentials cannot be opened is listed as `Unreadable`, not left out: its
+  queue is kept, what would go to it is counted as dropped (`credentials_unreadable`), and it is not
+  mistaken for a deleted destination.
+
 ## Links
 
 - [0023](0023-observability-and-audit.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md),
@@ -421,3 +692,58 @@ so the router needs only that.
   [0073](0073-agent-passport.md)
 - https://github.com/open-telemetry/semantic-conventions-genai
 - https://agentgateway.dev/docs/standalone/main/documentation/observability/traces/attribute-reference/
+
+## Amendment (2026-10-30): delivered before v0.1.0
+
+Decision 11 placed the first step after v0.1.0. On 2026-10-29 Andre moved it ahead of v0.1.0, into
+rc.9. The rc.7 re-run showed that models behave very differently, and traces show the thinking, the
+tool calls and each turn's cost. rc.9 ships option C as amended above: agentd's spans, model-call
+spans built from the ledger, destinations with test-before-save, the router's queues, and the content
+levels with the scrubber. The spikes and option D (the gateway's own spans) still follow v0.1.0.
+
+## Amendment (2026-10-30): "session" means the harness session
+
+Wording only, no decision change. In Koinon's vocabulary (GLOSSARY.md) a **session** is the harness
+session: one per task, spanning its runs, reloaded by each run (ADR 0029, 0051). Decision 2's
+"The session is the run and its task" names something else: the **trace session**, the grouping a
+tracing backend builds from `session.id` and `gen_ai.conversation.id`, which Koinon sets to the run
+ID. Read "session" in this ADR's trace attributes as "trace session".
+
+## Amendment (2026-10-31, #343): stored run content is items, diagnostic events never fence, per-org retention
+
+Decision of Andre, 2026-10-31 ([#264](https://github.com/stateracloud/koinon/issues/264)): as
+proposed, shipping in v0.1.x at P1, with a 30-day default retention. The finding: agentd writes every
+ACP chunk as a synchronous `run_events` row and fences the run if a write fails; at about 9,000 rows a
+run and 10k runs a day that is about 90 M rows a day, and the content is stored whatever the org's
+trace content level. [0023](0023-observability-and-audit.md) carries the matching amendment for the
+event classes. The code lands in #344 (items), #345 (business and diagnostic events) and #346
+(retention and purge), which point here.
+
+1. **`run_events` stores completed items.** agentd coalesces ACP chunks into completed items
+   (messages, thoughts and tool calls) and stores those. ACP chunks are live-only: streamed to the
+   UI, never stored.
+2. **Business and diagnostic events.** Events are split in two classes:
+   - **Business events** are state the run depends on. A failed write may fence the run. Classes
+     (Andre, 2026-11-01): run state changes, park and resume, approvals and `ask_user` answers, task
+     status, and the final reply.
+   - **Diagnostic events** are everything else. A failed write is logged and counted and never fences
+     the run. Classes: thoughts, tool-call items and progress, usage notes, and debug events.
+3. **Per-org retention of stored run content** (Andre, 2026-11-01). Org admins set the retention
+   from 1 to 365 days; the default is 30. A platform admin can set a lower platform maximum. Every
+   change is audited (old and new value). A purge job removes content older than the org's retention
+   (#346).
+4. **What retention does not touch.** Run traces (this ADR's router and its destinations) and the
+   spend ledger are unaffected; the ledger stays append-only ([0041](0041-koinon-spend-ledger-and-budget-stops.md)).
+   Audit records are not covered by run-content retention either: audit retention is its own policy
+   (#345), and run-content retention never deletes audit records (Andre, 2026-11-01).
+6. **A purge removes content only** (Andre, 2026-11-01). Message, thought and tool payloads are
+   deleted; event rows keep type, time, state and cost, so the timeline, the costs and the audit links
+   keep working. The UI shows "content expired after N days" for a run past retention.
+5. **Content level** (Andre, 2026-11-01). Stored run content is independent of the trace content
+   level (decision 6): items are always stored, with the always-on secret scrubber, and the trace level
+   governs only what the router exports to trace destinations. Retention is the privacy control for
+   stored content.
+
+### Open questions
+
+- The metric name for failed diagnostic writes (see the 0023 amendment); #345 names it against the code.

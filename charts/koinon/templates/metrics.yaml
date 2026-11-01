@@ -4,10 +4,20 @@ Prometheus metrics (ADR 0023, amendment 2026-10-26). Each component serves /metr
 "metrics" port; a Service of its own (like the API's tools and saved-work Services) keeps the port
 off the API Service the ingress exposes. metrics.serviceMonitor.enabled adds a prometheus-operator
 ServiceMonitor per component. The NetworkPolicy side is metrics.allowFrom (networkpolicy.yaml).
+
+agentgateway's own stats port (15020) is scraped too, when the monitor is enabled: standalone mode
+adds a ServiceMonitor on the gateway Service's "stats" port (that Service is in gateway-standalone.yaml).
+In kubernetes mode the controller owns the proxy and its Service, which exposes only the listener
+port, so the chart renders a PodMonitor on the proxy pods instead (chart-owned, not created by the
+reconciler). Its NetworkPolicy side is networkPolicy.metricsFrom. agentgateway's series carry
+gateway, listener, route, backend, status and model labels, never a key or an agent ID (ADR 0023).
 */ -}}
 {{- $sm := .Values.metrics.serviceMonitor }}
 {{- if and $sm.enabled (not $sm.skipCapabilityCheck) (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor")) }}
 {{- fail "metrics.serviceMonitor.enabled is true but the cluster has no monitoring.coreos.com/v1 ServiceMonitor CRD; install prometheus-operator (or kube-prometheus-stack), set metrics.serviceMonitor.skipCapabilityCheck=true when the CRD arrives later or the renderer cannot report it, or leave metrics.serviceMonitor.enabled=false and scrape the metrics Services another way" }}
+{{- end }}
+{{- if and $sm.enabled (not $sm.skipCapabilityCheck) (eq .Values.gateway.mode "kubernetes") (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PodMonitor")) }}
+{{- fail "metrics.serviceMonitor.enabled is true and gateway.mode is kubernetes, but the cluster has no monitoring.coreos.com/v1 PodMonitor CRD (the chart scrapes the controller's proxy pods with a PodMonitor); install prometheus-operator (or kube-prometheus-stack), or set metrics.serviceMonitor.skipCapabilityCheck=true" }}
 {{- end }}
 {{- range $component := list "api" "reconciler" "agentd" }}
 ---
@@ -45,6 +55,55 @@ spec:
     matchNames: [{{ $.Release.Namespace | quote }}]
   endpoints:
     - port: metrics
+      path: /metrics
+      {{- with $sm.interval }}
+      interval: {{ . | quote }}
+      {{- end }}
+{{- end }}
+{{- end }}
+{{- if $sm.enabled }}
+{{- if eq .Values.gateway.mode "standalone" }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "koinon.componentName" (list . "gateway") }}
+  labels:
+    {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+    {{- with $sm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "gateway") | nindent 6 }}
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace | quote }}]
+  endpoints:
+    - port: stats
+      path: /metrics
+      {{- with $sm.interval }}
+      interval: {{ . | quote }}
+      {{- end }}
+{{- else }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "koinon.componentName" (list . "gateway") }}
+  labels:
+    {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+    {{- with $sm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "koinon.proxySelectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace | quote }}]
+  podMetricsEndpoints:
+    - portNumber: 15020
       path: /metrics
       {{- with $sm.interval }}
       interval: {{ . | quote }}

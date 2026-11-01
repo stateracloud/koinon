@@ -15,6 +15,8 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/sandboxres"
+	"github.com/stateracloud/koinon/templates"
 )
 
 // chartConfig is config.yaml as charts/koinon renders it (standalone gateway).
@@ -29,6 +31,7 @@ gateway:
   providerKeysSecret: koinon-gateway-providers
   providerKeysDir: /secrets/providers
   accessLogOtlp: koinon-api.koinon.svc:4318
+  accessLogOtlpTokenFile: /secrets/otlp/token
 openshell:
   address: openshell.openshell.svc:8080
   tls: /etc/koinon/openshell-tls
@@ -73,6 +76,7 @@ var _ = Describe("parseConfig for the sandbox observer", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(c.sandboxObserver).To(BeFalse())
 		Expect(c.openshellGateway).To(Equal("openshell"))
+		Expect(c.otlpTokenFile).To(Equal("/secrets/otlp/token"))
 	})
 
 	It("is off when the chart says enabled: false", func() {
@@ -174,6 +178,7 @@ gateway:
   url: http://koinon-gateway.koinon.svc.cluster.local:4000
   port: 4000
   accessLogOtlp: koinon-api.koinon.svc:4318
+  accessLogOtlpTokenSecret: koinon-otlp-token
   providerKeysSecret: koinon-gateway-providers
   providerKeysDir: /secrets/providers
 openshell:
@@ -189,6 +194,7 @@ openshell:
 		Expect(c.gatewayName).To(Equal("koinon-gateway"))
 		Expect(c.gatewayClass).To(Equal("agentgateway"))
 		Expect(c.gatewayPort).To(Equal(4000))
+		Expect(c.otlpTokenSecret).To(Equal("koinon-otlp-token"))
 		Expect(c.keySettle).To(Equal(2 * time.Second))
 
 		delete(env, "KOINON_CONFIG")
@@ -227,4 +233,54 @@ openshell:
 		_, err := parseConfig(nil, func(string) (string, bool) { return "", false })
 		Expect(err).To(HaveOccurred())
 	})
+})
+
+var _ = Describe("parseConfig for the sandbox resources", func() {
+	parse := func(file string) (config, error) {
+		path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
+		Expect(os.WriteFile(path, []byte(file), 0o600)).To(Succeed())
+		env := map[string]string{
+			"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k",
+		}
+		return parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	}
+
+	It("uses the built-in policy when the file has no sandboxResources", func() {
+		c, err := parse(chartConfig)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.sandboxResources).To(Equal(sandboxres.DefaultPolicy()))
+	})
+
+	It("lays the file's values over the defaults", func() {
+		c, err := parse(chartConfig + `
+sandboxResources:
+  default:
+    cpu: {request: 500m}
+    memory: {limit: 4Gi}
+  bounds:
+    cpu:
+      limit: {max: "8"}
+    memory:
+      request: {min: 256Mi}
+  memoryRequestEqualsLimit: false
+`)
+		Expect(err).NotTo(HaveOccurred())
+		p := c.sandboxResources
+		Expect(p.Default.CPU).To(Equal(templates.Quantities{Request: "500m", Limit: "2"}))
+		Expect(p.Default.Memory).To(Equal(templates.Quantities{Request: "1Gi", Limit: "4Gi"}))
+		Expect(p.Bounds.CPULimit).To(Equal(sandboxres.Range{Max: "8"}))
+		Expect(p.Bounds.MemoryRequest).To(Equal(sandboxres.Range{Min: "256Mi", Max: "8Gi"}))
+		Expect(p.MemoryRequestEqualsLimit).To(BeFalse())
+	})
+
+	DescribeTable("refuses to start on",
+		func(section, want string) {
+			_, err := parse(chartConfig + section)
+			Expect(err).To(MatchError(ContainSubstring(want)))
+		},
+		Entry("a bad quantity", "sandboxResources:\n  default:\n    memory: {limit: 2 gigs}\n", "memory.limit"),
+		Entry("a bad bound", "sandboxResources:\n  bounds:\n    cpu:\n      limit: {max: lots}\n", `bounds.cpuLimit.max "lots"`),
+		Entry("a minimum above the maximum", "sandboxResources:\n  bounds:\n    memory:\n      limit: {min: 16Gi}\n", "bounds.memoryLimit: min 16Gi is greater than max 8Gi"),
+		Entry("a default request above its limit", "sandboxResources:\n  default:\n    cpu: {request: 4}\n", "cpu.request 4 is greater than cpu.limit 2"),
+	)
 })

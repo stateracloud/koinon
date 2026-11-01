@@ -115,8 +115,10 @@ SELECT * FROM mcp_tools
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name;
 
 -- name: InsertMCPTool :one
-INSERT INTO mcp_tools (org_id, server_id, name, description, input_schema, content_hash, read_only_hint)
-VALUES (@org_id, @server_id, @name, @description, @input_schema, @content_hash, @read_only_hint)
+INSERT INTO mcp_tools (org_id, server_id, name, description, input_schema, content_hash, read_only_hint,
+                       description_original_length, description_capped, description_cleaned)
+VALUES (@org_id, @server_id, @name, @description, @input_schema, @content_hash, @read_only_hint,
+        @description_original_length, @description_capped, @description_cleaned)
 RETURNING *;
 
 -- name: UpdateMCPToolContent :one
@@ -125,6 +127,8 @@ RETURNING *;
 UPDATE mcp_tools
 SET description = @description, input_schema = @input_schema, content_hash = @content_hash,
     read_only_hint = @read_only_hint, present = true, last_seen_at = now(),
+    description_original_length = @description_original_length, description_capped = @description_capped,
+    description_cleaned = @description_cleaned,
     review_reason = @review_reason,
     tier = CASE WHEN tier = 'auto' THEN 'ask'::mcp_tier ELSE tier END,
     tier_set_by = CASE WHEN tier = 'auto' THEN 'koinon (the tool changed)' ELSE tier_set_by END,
@@ -133,8 +137,12 @@ WHERE org_id = @org_id AND server_id = @server_id AND name = @name
 RETURNING *;
 
 -- name: TouchMCPTool :exec
+-- The sanitised content is unchanged; the report columns still follow what the server published, so a
+-- row synced before they existed gets its values on the next sync.
 UPDATE mcp_tools
-SET present = true, last_seen_at = now(), read_only_hint = @read_only_hint
+SET present = true, last_seen_at = now(), read_only_hint = @read_only_hint,
+    description_original_length = @description_original_length, description_capped = @description_capped,
+    description_cleaned = @description_cleaned
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name;
 
 -- name: MarkMCPToolsAbsent :exec
@@ -193,6 +201,20 @@ FROM agent_mcp_servers a
 JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
 WHERE a.org_id = @org_id AND a.agent_id = @agent_id
   AND (s.health = 'unhealthy' OR s.disabled_reason IS NOT NULL OR s.removed_at IS NOT NULL)
+ORDER BY s.name;
+
+-- name: ListMissingMCPServersOfAgent :many
+-- The servers an agent may use that Koinon has found not serving tools right now, and has not
+-- withdrawn on purpose (a disabled or removed server is only mentioned in the note, see
+-- ListUnavailableMCPServersOfAgent): unhealthy, or failing probes that have not yet reached the
+-- threshold, which is what a server overloaded for a minute looks like (issue #326). agentd checks
+-- this before it starts the harness; a server never probed (unknown) is not a miss.
+SELECT s.name, s.health::text AS health, s.health_reason, s.consecutive_failures
+FROM agent_mcp_servers a
+JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
+WHERE a.org_id = @org_id AND a.agent_id = @agent_id
+  AND s.disabled_reason IS NULL AND s.removed_at IS NULL
+  AND (s.health = 'unhealthy' OR (s.health = 'healthy' AND s.consecutive_failures > 0))
 ORDER BY s.name;
 
 -- name: SetMCPToolTwoApprovers :one

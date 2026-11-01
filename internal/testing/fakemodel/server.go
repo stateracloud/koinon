@@ -24,7 +24,9 @@ const maxRequestBytes = 32 << 20
 // Request is a model request the server received, kept for test assertions.
 type Request struct {
 	// Path is the URL path, for example /v1/chat/completions.
-	Path  string
+	Path string
+	// Query is the raw query string, without the leading "?".
+	Query string
 	Model string
 	// Body is the raw request body.
 	Body []byte
@@ -40,7 +42,9 @@ type Server struct {
 	scripts  map[string]*entry
 	requests []Request
 	seq      int
-	created  int64
+	// strictMessages makes /v1/messages check bodies and headers as Anthropic does (strict.go).
+	strictMessages bool
+	created        int64
 }
 
 type entry struct {
@@ -76,15 +80,47 @@ func New(scripts ...Script) (*Server, error) {
 
 // listRequests answers GET /_fake/requests with the path and model of every request received, in
 // arrival order, so a test that reaches the binary over the network (e2e) can check which API a
-// harness used. Bodies and headers stay in-process ([Server.Requests]).
-func (s *Server) listRequests(w http.ResponseWriter, _ *http.Request) {
+// harness used, for a Messages request the thinking type and display of the body and its
+// anthropic-beta values, and for a chat-completions request its reasoning effort. Full bodies stay in-process ([Server.Requests]). With ?detail=1 each item also carries the
+// raw query and every request header, to assert what a gateway let through; the default output is
+// unchanged. A test only: the fake keeps the headers it receives, so never point a real key at it.
+func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) {
+	detail := r.URL.Query().Get("detail") == "1"
 	type item struct {
 		Path  string `json:"path"`
 		Model string `json:"model"`
+		// Thinking is the type of the body's thinking object, "" when it has none, and
+		// ThinkingDisplay its display.
+		Thinking        string `json:"thinking,omitempty"`
+		ThinkingDisplay string `json:"thinkingDisplay,omitempty"`
+		// ReasoningEffort is the effort of a chat-completions body's reasoning object.
+		ReasoningEffort string `json:"reasoningEffort,omitempty"`
+		// Betas are the values of the anthropic-beta header.
+		Betas []string `json:"betas,omitempty"`
+		// Query and Headers are set with ?detail=1.
+		Query   string      `json:"query,omitempty"`
+		Headers http.Header `json:"headers,omitempty"`
 	}
 	out := []item{}
-	for _, r := range s.Requests() {
-		out = append(out, item{Path: r.Path, Model: r.Model})
+	for _, rq := range s.Requests() {
+		var body struct {
+			Thinking struct {
+				Type    string `json:"type"`
+				Display string `json:"display"`
+			} `json:"thinking"`
+			Reasoning struct {
+				Effort string `json:"effort"`
+			} `json:"reasoning"`
+		}
+		_ = json.Unmarshal(rq.Body, &body)
+		it := item{
+			Path: rq.Path, Model: rq.Model, Thinking: body.Thinking.Type, ThinkingDisplay: body.Thinking.Display,
+			ReasoningEffort: body.Reasoning.Effort, Betas: betas(rq.Header),
+		}
+		if detail {
+			it.Query, it.Headers = rq.Query, rq.Header
+		}
+		out = append(out, it)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
@@ -264,10 +300,10 @@ func (s *Server) readBody(w http.ResponseWriter, r *http.Request, v any) ([]byte
 }
 
 // plan records the request, applies Faults.Unavailable and selects the turn.
-func (s *Server) plan(path string, header http.Header, model string, body []byte, conv conversation) (reply, error) {
+func (s *Server) plan(path, query string, header http.Header, model string, body []byte, conv conversation) (reply, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.requests = append(s.requests, Request{Path: path, Model: model, Body: body, Header: header.Clone()})
+	s.requests = append(s.requests, Request{Path: path, Query: query, Model: model, Body: body, Header: header.Clone()})
 	e, ok := s.scripts[model]
 	if !ok {
 		return reply{}, &apiError{kind: errNotFound, message: fmt.Sprintf("The model `%s` does not exist or you do not have access to it.", model)}

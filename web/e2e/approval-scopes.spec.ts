@@ -101,7 +101,7 @@ test('approve a pull request for this agent until a date, see it on the agent pa
   expect(typeof (approves[0].scopeUntil as string)).toBe('string')
 
   await page.goto('/agents/a-1')
-  const section = page.getByRole('region', { name: 'Standing approvals' })
+  const section = page.getByRole('region', { name: 'Scoped approvals' })
   const row = section.getByTestId('approval-scope')
   await expect(row).toContainText('create_pull_request on acme/widgets')
   await expect(row).toContainText('For this agent, until')

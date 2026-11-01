@@ -146,7 +146,14 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, err)
 		return
 	}
-	rep, err := s.plan(r.URL.Path, r.Header, req.Model, body, req.conversation())
+	if s.strict() {
+		if err := checkStrictReasoning(body); err != nil {
+			s.record(r.URL.Path, r.Header, req.Model, body)
+			writeOpenAIError(w, &apiError{kind: errBadRequest, message: err.Error()})
+			return
+		}
+	}
+	rep, err := s.plan(r.URL.Path, r.URL.RawQuery, r.Header, req.Model, body, req.conversation())
 	if err != nil {
 		writeOpenAIError(w, err)
 		return

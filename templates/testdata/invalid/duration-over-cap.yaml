@@ -21,7 +21,8 @@ spec:
   limits:
     run:
       maxDuration: 25h
-      maxTokens: 2000000
+      maxModelRequests: 150
+      maxSpendUSD: "5.00"
     spendUSD: "10.00"
   instructions: |
     Do the thing.

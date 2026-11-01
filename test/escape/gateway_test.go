@@ -27,6 +27,15 @@ func envOr(key, def string) string {
 	return def
 }
 
+// answered fails a spec whose request got no HTTP answer from the sandbox proxy: curl's code 000
+// means DNS or the connection failed before the proxy decided anything, so the spec observed no
+// policy decision (issue #244). It is a test error, never an expected code. Specs that expect no
+// answer (direct egress, which the sandbox refuses at connect) do not call it.
+func answered(code, body string) {
+	GinkgoHelper()
+	Expect(code).NotTo(Equal("000"), "no HTTP answer from the sandbox proxy (DNS or connect failure, not a policy decision): "+body)
+}
+
 // gateway is a real OpenShell gateway from the KOINON_OPENSHELL_* variables.
 type gateway struct {
 	b         *openshell.Backend
@@ -136,14 +145,28 @@ func (g *gateway) curl(ctx context.Context, sandbox, method, url string) (string
 	return code, body, exit
 }
 
+// standinMarker is the header line koinon-fakemodel -standin adds to every answer.
+const standinMarker = "X-Koinon-Standin: 1"
+
 // curlGateway is curl with the gateway key's placeholder (reconciler.GatewayKeyEnvVar) in the
 // Authorization header, as the agent's harness sends it.
 func (g *gateway) curlGateway(ctx context.Context, sandbox, method, url string) (string, string) {
 	GinkgoHelper()
-	out, stderr, exit := g.sh(ctx, sandbox, fmt.Sprintf(
-		`curl -sS -m 20 -X %s -H "Authorization: Bearer $%s" -o /tmp/body -w '%%{http_code}' '%s'; rc=$?; echo; cat /tmp/body 2>/dev/null; rm -f /tmp/body; exit $rc`,
-		method, reconciler.GatewayKeyEnvVar, url))
-	code, body, _ := strings.Cut(out, "\n")
-	GinkgoWriter.Printf("%s %s -> %s (curl %d) %s %s\n", method, url, code, exit, body, stderr)
+	code, body, _ := g.curlGatewayHeaders(ctx, sandbox, method, url)
 	return code, body
 }
+
+// curlGatewayHeaders is curlGateway that also returns the response headers, one per line.
+func (g *gateway) curlGatewayHeaders(ctx context.Context, sandbox, method, url string) (code, body, header string) {
+	GinkgoHelper()
+	out, stderr, exit := g.sh(ctx, sandbox, fmt.Sprintf(
+		`curl -sS -m 20 -X %s -H "Authorization: Bearer $%s" -D /tmp/header -o /tmp/body -w '%%{http_code}' '%s'; rc=$?; echo; cat /tmp/body 2>/dev/null; echo; echo %s; cat /tmp/header 2>/dev/null; rm -f /tmp/body /tmp/header; exit $rc`,
+		method, reconciler.GatewayKeyEnvVar, url, headerMark))
+	code, rest, _ := strings.Cut(out, "\n")
+	body, header, _ = strings.Cut(rest, "\n"+headerMark+"\n")
+	GinkgoWriter.Printf("%s %s -> %s (curl %d) %s %s\n", method, url, code, exit, body, stderr)
+	return code, body, strings.ReplaceAll(header, "\r", "")
+}
+
+// headerMark separates the body from the headers in curlGatewayHeaders' output.
+const headerMark = "--koinon-headers--"

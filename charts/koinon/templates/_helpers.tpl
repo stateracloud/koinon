@@ -308,12 +308,23 @@ koinon-api's login settings (plan items A1, A2), as KOINON_* environment variabl
 Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environment.
 */}}
 {{- define "koinon.apiEnv" -}}
+{{- if .Values.api.durable.enabled }}
+# The DBOS executor ID is the pod name: unique per replica and never reused, so a replica that dies
+# can be told from the one that replaces it, and the survivors recover its workflows (ADR 0085).
+- name: KOINON_EXECUTOR_ID
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.name
+{{- end }}
 # Approved calls to remote MCP servers go through the gateway (ADR 0057): it holds the credentials.
 - name: KOINON_GATEWAY_MCP_URL
   value: {{ printf "http://%s:%s/mcp" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) | quote }}
 # The provider echo check (rc.6) sends one request through the gateway's LLM listener.
 - name: KOINON_GATEWAY_URL
   value: {{ printf "http://%s:%s" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) | quote }}
+# Every request to the internal OTLP listener needs the bearer token in this directory.
+- name: KOINON_OTLP_TOKEN_DIR
+  value: {{ include "koinon.otlpTokenDir" . | quote }}
 - name: KOINON_KEK_ACTIVE_PERIOD
   value: {{ .Values.secrets.kek.activePeriod | quote }}
 {{- with include "koinon.publicUrl" . }}
@@ -365,6 +376,7 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 {{- end }}
 
 {{- define "koinon.apiSecretVolumeMounts" -}}
+{{ include "koinon.otlpTokenVolumeMount" . }}
 {{- if .Values.bootstrapAdmin.enabled }}
 - name: bootstrap-admin
   mountPath: /etc/koinon/bootstrap-admin
@@ -378,6 +390,7 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 {{- end }}
 
 {{- define "koinon.apiSecretVolumes" -}}
+{{ include "koinon.otlpTokenVolume" . }}
 {{- if .Values.bootstrapAdmin.enabled }}
 - name: bootstrap-admin
   secret:
@@ -400,6 +413,14 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 {{- define "koinon.githubEnv" -}}
 - name: KOINON_GITHUB_API_URL
   value: {{ .Values.github.apiUrl | default "https://api.github.com" | quote }}
+{{- end }}
+
+{{/*
+The OpenShell gateway's host:port. The reconciler and agentd refuse to start without it, so the
+chart refuses to render without it (the install would otherwise end in crash-looping pods).
+*/}}
+{{- define "koinon.openshellAddress" -}}
+{{- required "openshell.address is required: set it to the OpenShell gateway's host:port, for example openshell.openshell.svc:8080" .Values.openshell.address -}}
 {{- end }}
 
 {{/* OpenShell client certificate for components that call the OpenShell gateway. */}}
@@ -455,7 +476,37 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- if and (eq .Values.gateway.mode "standalone") (not .Values.gateway.standalone.sessionKey.existingSecret) -}}
 {{- $specs = append $specs (dict "name" (include "koinon.gatewaySessionKeyName" .) "type" "Opaque" "kind" "aes256-key" "labels" (fromYaml (include "koinon.generatedLabels" (list . "gateway")))) -}}
 {{- end -}}
+{{- if not .Values.api.otlpToken.existingSecret -}}
+{{- $specs = append $specs (dict "name" (include "koinon.otlpTokenName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "api")))) -}}
+{{- end -}}
 {{- $specs | toJson -}}
+{{- end }}
+
+{{/*
+The Secret with the bearer token of koinon-api's internal OTLP listener (ADR 0074, issue #52): key
+"token", plus "previous" during a rotation. koinon-api and koinon-agentd mount it; the standalone
+gateway mounts it too, and in kubernetes mode the agentgateway controller reads it by name. Never
+mounted into a sandbox.
+*/}}
+{{- define "koinon.otlpTokenName" -}}
+{{- .Values.api.otlpToken.existingSecret | default (include "koinon.componentName" (list . "otlp-token")) }}
+{{- end }}
+
+{{/* Where the OTLP token Secret is mounted (a directory, not subPath, so a rotation reaches the pod). */}}
+{{- define "koinon.otlpTokenDir" -}}/secrets/otlp{{- end }}
+
+{{- define "koinon.otlpTokenVolumeMount" -}}
+- name: otlp-token
+  mountPath: {{ include "koinon.otlpTokenDir" . }}
+  readOnly: true
+{{- end }}
+
+{{- define "koinon.otlpTokenVolume" -}}
+- name: otlp-token
+  secret:
+    secretName: {{ include "koinon.otlpTokenName" . }}
+    # The keys are the files: token, and previous while a rotation is under way.
+    defaultMode: 0440
 {{- end }}
 
 {{/* The Secret with the standalone gateway's MCP session key (agentgateway SESSION_KEY, key "key"). */}}
@@ -624,6 +675,11 @@ it carries no credentials.
 {{- end }}
 
 {{- define "koinon.agentdEnv" -}}
+{{- /* The internal OTLP listener, for the run spans agentd exports (ADR 0074): its address and the bearer token it requires. */}}
+- name: KOINON_OTLP_ENDPOINT
+  value: {{ printf "http://%s.%s.svc.%s:%v" (include "koinon.componentName" (list . "api")) .Release.Namespace (.Values.clusterDomain | default "cluster.local") .Values.api.otlpPort | quote }}
+- name: KOINON_OTLP_TOKEN_FILE
+  value: {{ printf "%s/token" (include "koinon.otlpTokenDir" .) | quote }}
 {{- /* The uncommitted work of a stuck sandbox is posted here to be sealed; agentd holds no KEK (ADR 0054). */}}
 - name: KOINON_SAVED_WORK_KEY_FILE
   value: /secrets/saved-work/key
@@ -634,7 +690,7 @@ it carries no credentials.
     fieldRef:
       fieldPath: metadata.name
 - name: KOINON_OPENSHELL_ADDRESS
-  value: {{ .Values.openshell.address | quote }}
+  value: {{ include "koinon.openshellAddress" . | quote }}
 {{- if .Values.openshell.clientTLSSecret }}
 - name: KOINON_OPENSHELL_TLS_DIR
   value: /etc/koinon/openshell-tls
@@ -651,6 +707,8 @@ it carries no credentials.
   value: {{ .Values.agentd.workers | default 8 | quote }}
 - name: KOINON_LEASE
   value: {{ .Values.agentd.lease | default "30s" | quote }}
+- name: KOINON_DRAIN_DEADLINE
+  value: {{ printf "%ds" (int (.Values.agentd.drainDeadlineSeconds | default 300)) | quote }}
 {{- if .Values.checkpoints.enabled }}
 {{- /* Home checkpoints: agentd is the writer, the only holder of the S3 credentials, and holds no KEK: koinon-api hands it each repository password (ADR 0032, 0054). */}}
 - name: KOINON_CHECKPOINTS

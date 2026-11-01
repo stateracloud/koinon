@@ -52,6 +52,14 @@ service AgentService {
   // serves and has a price for. Audited, with the old and the new value. Admins and owners only.
   rpc SetAgentModel(SetAgentModelRequest) returns (SetAgentModelResponse);
 
+  // SetAgentThinking sets whether the agent's model thinks: "on" or "off", or clears the setting
+  // with an empty value so the version's value (a template's spec.model.thinking) and then the
+  // default, on, apply. Thinking is on unless somebody turns it off (ADR 0069 amendment
+  // 2026-10-29). Like the model it is a setting of the agent, not a new version, and applies to the
+  // next run. A model that cannot think ignores it (GetAgentModel says so). Audited, with the old
+  // and the new value. Admins and owners only.
+  rpc SetAgentThinking(SetAgentThinkingRequest) returns (SetAgentThinkingResponse);
+
   // RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would
   // at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited.
   // Admins and owners only.
@@ -234,9 +242,11 @@ enum ModelSource {
   MODEL_SOURCE_AGENT = 1;
   // The model of the agent's active version (a template's spec.model).
   MODEL_SOURCE_VERSION = 2;
-  // The org default: the first model the org serves and has a price for.
+  // The default model: the org's stored default model (ADR 0086), or the platform's
+  // --default-model when the org has none.
   MODEL_SOURCE_ORG_DEFAULT = 3;
-  // Nothing: the org serves no priced model, so a run would fail.
+  // Nothing: the agent, its version and the platform name no model and the org has no default
+  // model, so a run would fail until an admin sets one.
   MODEL_SOURCE_NONE = 4;
 }
 
@@ -265,6 +275,34 @@ message GetAgentModelResponse {
   string problem = 5;
   // Models the org serves and has a price for, by provider and name: the picker's choices.
   repeated ServedModel available = 6;
+  // The agent's thinking setting for the effective model.
+  ThinkingState thinking = 7;
+}
+
+// ThinkingState is the agent's thinking setting and what it resolves to (ADR 0069 amendment
+// 2026-10-29).
+message ThinkingState {
+  // The agent's own setting: "on", "off", or empty when it follows the version and the default.
+  string setting = 1;
+  // The active version's value (a template's spec.model.thinking); empty when it names none.
+  string version_setting = 2;
+  // What the layers resolve to, "on" or "off", whether or not the model can think.
+  string effective = 3;
+  // Whether the effective model thinks. When false the setting has no effect and the UI says
+  // "not supported by this model".
+  bool supported = 4;
+  // The form the next run sends (internal/thinking.Mode): "none" when the model does not think,
+  // "adaptive-summarized" or "default" for thinking on, "disabled" or "effort-none" for thinking off.
+  string mode = 5;
+  // Whether the effective model thinks whatever the setting. A UI then offers no off choice and says
+  // "this model always thinks"; setting "off" is refused with that message.
+  bool always_thinks = 6;
+  // Whether the setting resolves to off and the model thinks anyway (it always thinks). The setting
+  // is kept for a model that can stop; runs think.
+  bool off_overridden = 7;
+  // What a UI shows about the setting: "this model always thinks; your off setting doesn't apply"
+  // when off_overridden, empty otherwise.
+  string notice = 8;
 }
 
 // SetAgentModelRequest sets the agent's model.
@@ -277,6 +315,19 @@ message SetAgentModelRequest {
 
 // SetAgentModelResponse holds the result, as GetAgentModel would return it.
 message SetAgentModelResponse {
+  GetAgentModelResponse model = 1;
+}
+
+// SetAgentThinkingRequest sets the agent's thinking setting.
+message SetAgentThinkingRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  // "on" or "off"; empty clears the setting.
+  string thinking = 3;
+}
+
+// SetAgentThinkingResponse holds the result, as GetAgentModel would return it.
+message SetAgentThinkingResponse {
   GetAgentModelResponse model = 1;
 }
 

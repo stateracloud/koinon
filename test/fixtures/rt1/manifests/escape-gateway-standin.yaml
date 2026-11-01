@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Stand-in for agentgateway in the escape suite (ADR 0080, issue #270): an HTTP server on :4000
+# that answers every request with an empty 418 and the header X-Koinon-Standin: 1. It is
+# koinon-fakemodel in -standin mode, so it serves no model and holds no data. The escape suite's
+# KOINON_ESCAPE_GATEWAY_HOST is escape-gateway-standin.koinon-fixtures.svc.cluster.local. A request
+# the sandbox policy allows gets 418 and the marker; a denied one gets 403 from the sandbox proxy.
+# Memory: a small Go binary, about 10 MiB; request 16Mi, limit 32Mi.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: escape-gateway-standin
+  labels: &labels
+    app.kubernetes.io/name: escape-gateway-standin
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: escape-gateway-standin
+  template:
+    metadata:
+      labels: *labels
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: standin
+          # Placeholder tag: the digest is filled in at deploy (see kustomization.yaml).
+          image: rt1-fakemodel:dev
+          args: ["-standin", "-addr=:4000"]
+          ports:
+            - {name: http, containerPort: 4000}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
+          readinessProbe:
+            tcpSocket: {port: http}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: http}
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: escape-gateway-standin
+  labels:
+    app.kubernetes.io/name: escape-gateway-standin
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  selector:
+    app.kubernetes.io/name: escape-gateway-standin
+  ports:
+    - {name: http, port: 4000, targetPort: http}

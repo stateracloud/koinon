@@ -50,9 +50,25 @@ api:
     digest: ""
   replicas: 1
   port: 8080
-  # The spend ledger's OTLP/HTTP receiver (plan item L1). agentgateway exports its access log
-  # here; the NetworkPolicy admits only the gateway, since the receiver has no authentication.
+  # The internal OTLP/HTTP receiver (spend ledger, plan item L1; run traces, ADR 0074).
+  # agentgateway exports its access log here and koinon-agentd exports run spans. Every request
+  # needs a bearer token; the NetworkPolicy admits only those two senders as a second layer.
   otlpPort: 4318
+  # The receiver's bearer token. By default the ensure-secrets hook Job generates the Secret
+  # koinon-otlp-token (key "token": 64 hex characters) and never changes it. koinon-api, koinon-agentd
+  # and the gateway mount it; sandboxes never see it. existingSecret names your own Secret with a
+  # "token" key instead.
+  #
+  # Rotation: accepting the current and the previous token needs no downtime. Edit the Secret: copy
+  # the old "token" value to a key "previous" and put a new random value (`openssl rand -hex 32`) in
+  # "token". koinon-api and koinon-agentd pick the files up within about a minute (kubelet refreshes
+  # the mounted Secret; they re-read every few seconds). agentgateway watches the token file and
+  # reloads it, so the gateway's next export carries the new token without a restart (kubernetes
+  # mode: the controller reads the Secret and pushes the value to the proxy). When every sender sends
+  # the new token, delete "previous". See docs/ops/secret-keys.md.
+  # With a Secret you manage (existingSecret), rotate the same way.
+  otlpToken:
+    existingSecret: ""
   # The GitHub tools MCP server (plan item C3): its own listener and Service, reachable only from
   # agentgateway (NetworkPolicy), never through the API Service or ingress.
   toolsPort: 8081
@@ -64,6 +80,11 @@ api:
   durable:
     enabled: false
   # 512Mi: a password hash or check holds 64 MiB, and at most two run at once (internal/auth).
+  # The run-trace router (ADR 0074) holds spans in memory and sizes itself from this limit, which the
+  # chart passes as KOINON_MEMORY_LIMIT_BYTES (or the container's cgroup limit, if lower): its destination queues take 20% of it, spans waiting for
+  # attribution 5%, turn roots waiting for the ledger 3% and export requests being decoded 8%. It drops
+  # spans, oldest first, rather than grow past them. Raise the limit before raising any of these
+  # (--trace-queue-bytes, --trace-intake-bytes, --trace-held-bytes, --trace-request-bytes).
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {memory: 512Mi}
@@ -94,6 +115,16 @@ reconciler:
   archiveAfter: 168h
   # Sandbox start/stop jobs that run at once, outside the gateway update (plan item LT1).
   sandboxJobs: 8
+  # A sandbox starts on demand (the first run, claimable work or a pre-wake signal), not when its
+  # agent is activated. An org admin can mark an agent keep-warm; this caps the keep-warm sandboxes
+  # per org (the oldest agents win). 0 is the default of 2; a negative value grants none (#315).
+  keepWarmPerOrg: 2
+  # A changed sandbox spec (a new OpenShell supervisor image, flavor image or resources) recreates
+  # each sandbox through the usual path: held runs finish, the home gate passes, a checkpoint is taken
+  # first. This caps the recreates per reconcile pass, so an OpenShell upgrade does not recreate the
+  # whole fleet at once (ADR 0085 decision 9). 0 is the default of 4; a negative value is no cap. The
+  # supervisor image is read from the OpenShell gateway ConfigMap named by preflight.openshell.
+  maxRecreatesPerPass: 4
   # Time between full passes. Postgres NOTIFY wakes the reconciler earlier for new runs and
   # agent changes; the timer covers idle timeouts and drift.
   resyncInterval: 30s
@@ -114,10 +145,19 @@ agentd:
     tag: ""
     digest: ""
   replicas: 1
+  # PodDisruptionBudget, rendered only when replicas > 1 (ADR 0085). maxUnavailable rather than
+  # minAvailable: each evicted replica drains for up to drainDeadlineSeconds, so a node drain takes
+  # them one at a time at any replica count; minAvailable: 1 would let it evict all but one together.
+  podDisruptionBudget:
+    maxUnavailable: 1
   # Runs each replica drives at once (one exec stream each).
   workers: 8
   # Run lease; when a replica dies, another takes its runs over after this long.
   lease: 30s
+  # On SIGTERM (a rollout, a node drain) a replica lets the turns in progress finish for up to this
+  # many seconds before it hands the runs over (ADR 0085). The pod's terminationGracePeriodSeconds is
+  # this plus 30, so Kubernetes never kills the drain.
+  drainDeadlineSeconds: 300
   # agentgateway's base URL as sandboxes reach it. Empty uses the gateway Service: the chart's own in
   # standalone mode, the one the controller creates for Koinon's Gateway in kubernetes mode.
   gatewayURL: ""
@@ -368,6 +408,7 @@ flavorPrepull:
 
 # OpenShell gateway that the reconciler and agentd talk to over gRPC.
 openshell:
+  # host:port of the gateway. Required: the chart refuses to render without it.
   address: ""
   # Secret with the client certificate (tls.crt, tls.key, ca.crt) for mTLS. Required: the chart
   # refuses to render without it unless insecure is true.
@@ -473,7 +514,9 @@ networkPolicy:
   # Extra peers allowed to reach the API port (for example the ingress controller's or Gateway's namespace).
   # Empty allows every source.
   apiFrom: []
-  # Peers allowed to scrape agentgateway's stats port.
+  # Peers allowed to scrape agentgateway's stats port (15020). Like metrics.allowFrom, this only
+  # opens the port; it works with any scraper (prometheus-operator, a VictoriaMetrics VMServiceScrape,
+  # a plain Prometheus config), with metrics.serviceMonitor.enabled left false.
   metricsFrom: []
   # Egress rules added to agentgateway's, for internal model upstreams (it may otherwise reach DNS,
   # koinon-api and the public internet only). Each item is a NetworkPolicy egress rule, for example
@@ -493,10 +536,16 @@ metrics:
   #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
   # Empty (the default) admits nobody, so with networkPolicy.enabled the metrics are not scrapable
   # until you name the scraper. (networkPolicy.metricsFrom is separate: agentgateway's stats port.)
+  # This only opens the port. A scraper that is not prometheus-operator (for example VictoriaMetrics'
+  # VMServiceScrape) needs no ServiceMonitor: leave serviceMonitor.enabled false, list its namespace
+  # here and in networkPolicy.metricsFrom, and point it at the <release>-koinon-<component>-metrics
+  # Services (port "metrics").
   allowFrom: []
   serviceMonitor:
-    # A prometheus-operator ServiceMonitor per component. Needs the monitoring.coreos.com/v1
-    # ServiceMonitor CRD: enabling it without the CRD fails the install.
+    # A prometheus-operator ServiceMonitor per component, plus one for agentgateway's stats port
+    # (gateway.mode=standalone) or a PodMonitor on the controller's proxy pods (kubernetes). Needs
+    # the monitoring.coreos.com/v1 ServiceMonitor CRD, and in kubernetes mode the PodMonitor CRD:
+    # enabling it without them fails the install.
     enabled: false
     # Extra labels on the ServiceMonitors, for example the release label your Prometheus selects on.
     labels: {}
@@ -506,6 +555,18 @@ metrics:
     skipCapabilityCheck: false
     # Scrape interval, for example 30s; empty uses the Prometheus default.
     interval: ""
+  prometheusRule:
+    # Alerting rules as a prometheus-operator PrometheusRule (templates/prometheusrule.yaml; the
+    # rules are documented in the metrics guide). Needs the monitoring.coreos.com/v1 PrometheusRule
+    # CRD: enabling it without the CRD fails the install, unless skipCapabilityCheck is set.
+    enabled: false
+    # Extra labels, for example the release label your Prometheus selects rules on.
+    labels: {}
+    skipCapabilityCheck: false
+    # How long durable workflows may wait for a version no koinon-api runs before the alert fires.
+    # It covers a rolling upgrade, where the new pods carry the old version's workflows over within
+    # a sweep (a minute).
+    durableStrandedFor: 15m
 
 # The sandbox observer (ADR 0078): when OpenShell says only "ConfigurationPending" about a sandbox
 # that never became ready, the reconciler reads the sandbox's pod (get only, by name) to find out why:
@@ -520,14 +581,50 @@ metrics:
 sandboxObserver:
   enabled: true
 
+# Size of every agent sandbox (ADR 0083): CPU and memory requests and limits on the agent container.
+# A template may set its own (spec.resources); a value it leaves out takes the default below, and
+# the bounds clamp every value, the template's included (the reconciler logs a warning when one is
+# clamped). The supervisor pod of OpenShell 0.1.5 stays unsized (BestEffort): see the ADR. Changing
+# a value recreates the sandboxes it applies to once, restoring their homes from the checkpoint.
+# Kubernetes quantities: 250m, 2, 1Gi. A bound left empty is not set; the reconciler refuses to
+# start on a bad quantity, a minimum above its maximum, or a default request above its limit.
+#
+# Recommended values per isolation tier (ADR 0075):
+#   vm (Kata, the default): memory 512Mi-8Gi, cpu request 100m-2, cpu limit up to 4, and
+#     memoryRequestEqualsLimit: true (the defaults below).
+#   hardened (gVisor or runc with the hardened policy): memory 256Mi-8Gi, a request may be below
+#     its limit (memoryRequestEqualsLimit: false).
+#   dev (kind, a laptop): requests of 50m cpu and 256Mi memory, a memory limit of 1Gi, so a dozen
+#     sandboxes fit.
+sandbox:
+  resources:
+    default:
+      cpu: {request: 250m, limit: "2"}
+      memory: {request: 1Gi, limit: 2Gi}
+    bounds:
+      cpu:
+        request: {min: 100m, max: "2"}
+        limit: {min: 100m, max: "4"}
+      memory:
+        request: {min: 512Mi, max: 8Gi}
+        limit: {min: 512Mi, max: 8Gi}
+    # Raise the memory request to the limit. The default runtime class is Kata, and a Kata guest
+    # never returns memory to the host, so a request below the limit lets the node be
+    # over-committed on memory that cannot be reclaimed. Turn it off for runtimes that can.
+    memoryRequestEqualsLimit: true
+
 # ValidatingAdmissionPolicy for OpenShell sandbox namespaces (ADRs 0045, 0048).
 sandboxPolicy:
   enabled: true
   namespaceSelector:
     matchLabels:
       openshell.ai/managed-by: openshell
-  # Runtime classes allowed for sandbox workload pods.
-  runtimeClasses: [kata, kata-qemu]
+  # Runtime classes allowed for sandbox workload pods (the vm tier, ADR 0075). Any class not
+  # listed here is refused by the policy. kata-qemu-runtime-rs is the Rust runtime that Kata 4.x's
+  # kata-deploy (4.3.1) creates by default; it marks the Go-runtime kata-qemu deprecated (#442).
+  # openshell.runtimeClassName, the class the reconciler requests, must be one of these: the chart
+  # fails the render when it is not.
+  runtimeClasses: [kata, kata-qemu, kata-qemu-runtime-rs]
   # Images allowed in OpenShell supervisor pods (label openshell.ai/boundary-role=supervisor),
   # for every container and init container (ADR 0045: a pinned supervisor image). Empty uses
   # OpenShell 0.1.5's own, ghcr.io/nvidia/openshell/supervisor:0.1.5, rewritten by

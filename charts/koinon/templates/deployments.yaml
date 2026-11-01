@@ -16,6 +16,14 @@ metadata:
     argocd.argoproj.io/sync-wave: "2"
 spec:
   replicas: {{ $v.replicas }}
+  {{- if eq $component "agentd" }}
+  {{- /* ADR 0085: a rollout starts the new worker before the old one drains, and never lowers the ready count. */}}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  {{- end }}
   selector:
     matchLabels:
       {{- include "koinon.selectorLabels" (list $ $component) | nindent 6 }}
@@ -35,6 +43,10 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ $name }}
+      {{- if eq $component "agentd" }}
+      {{- /* The drain on SIGTERM lasts up to drainDeadlineSeconds (ADR 0085); the grace period must outlast it or the kubelet kills the pod mid-drain. */}}
+      terminationGracePeriodSeconds: {{ add (int ($.Values.agentd.drainDeadlineSeconds | default 300)) 30 }}
+      {{- end }}
       {{- /* The reconciler renders key Secrets; the API imports declarative Secrets and manages the KEK Secret (PV1). */}}
       automountServiceAccountToken: {{ has $component (list "reconciler" "api") }}
       enableServiceLinks: false
@@ -76,15 +88,24 @@ spec:
             httpGet: {path: /healthz, port: http}
             periodSeconds: 2
             failureThreshold: 150
+          # Not ready while the database schema is outside the goose range this build supports (ADR 0085);
+          # liveness stays /healthz so the pod waits instead of restarting.
           readinessProbe:
-            httpGet: {path: /healthz, port: http}
+            httpGet: {path: /readyz, port: http}
           livenessProbe:
             httpGet: {path: /healthz, port: http}
           {{- end }}
           {{- if eq $component "agentd" }}
           ports:
+            - name: health
+              containerPort: 8082
             - name: metrics
               containerPort: {{ $.Values.metrics.port }}
+          # Not ready while the database schema is outside the goose range this build supports (ADR 0085).
+          readinessProbe:
+            httpGet: {path: /readyz, port: health}
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
           {{- end }}
           env:
             # Prometheus /metrics, on its own port (values: metrics).
@@ -121,6 +142,7 @@ spec:
             {{- include "koinon.kekVolumeMount" $ | nindent 12 }}
             {{- end }}
             {{- if eq $component "agentd" }}
+            {{- include "koinon.otlpTokenVolumeMount" $ | nindent 12 }}
             {{- include "koinon.savedWorkVolumeMount" $ | nindent 12 }}
             {{- if $.Values.checkpoints.enabled }}
             - name: checkpoints
@@ -145,6 +167,7 @@ spec:
         {{- include "koinon.kekVolume" $ | nindent 8 }}
         {{- end }}
         {{- if eq $component "agentd" }}
+        {{- include "koinon.otlpTokenVolume" $ | nindent 8 }}
         {{- include "koinon.savedWorkVolume" $ | nindent 8 }}
         {{- if $.Values.checkpoints.enabled }}
         - name: checkpoints

@@ -20,7 +20,9 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // anthropicSpec is ADR 0069 decision 8: a model in the Messages format, served beside an openai one in
@@ -103,12 +105,18 @@ func anthropicSpec(env Env) {
 			var err error
 			upstrm, err = fakemodel.New(
 				fakemodel.Script{Model: "claude-test", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
+				fakemodel.Script{Model: "claude-haiku-5-5", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
+				fakemodel.Script{Model: "claude-pinned", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
+				fakemodel.Script{Model: "anthropic/claude-haiku-5.5", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
 				fakemodel.Script{Model: "claude-nows", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
 				fakemodel.Script{Model: "gpt-test", Turns: []fakemodel.Turn{{Text: "ok", Usage: fakemodel.Usage{InputTokens: 10, OutputTokens: 10}}}},
 				fakemodel.Script{Model: "claude-cut", Faults: fakemodel.Faults{Truncate: true}, Turns: []fakemodel.Turn{{Text: "a long answer that is cut", Usage: usage}}},
 				fakemodel.Script{Model: "globex-model", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
 			)
 			Expect(err).NotTo(HaveOccurred())
+			// The upstream refuses what Anthropic refuses (unknown fields, beta-only fields without their
+			// beta), so a body the gateway cannot vouch for fails here the way it does on api.anthropic.com.
+			upstrm.SetStrictMessages(true)
 			srv := newServer(upstrm)
 			DeferCleanup(srv.Close)
 
@@ -125,7 +133,23 @@ func anthropicSpec(env Env) {
 					Models: []gateway.Model{
 						{Name: "claude-test", Format: modelformat.Anthropic, Price: price},
 						{Name: "claude-cut", Format: modelformat.Anthropic, Price: price},
+						// A Claude-shaped ID the catalog says can think; claude-test has the same shape of
+						// provider and no thinking capability.
+						{Name: "claude-haiku-5-5", Format: modelformat.Anthropic, Thinking: thinking.Of("anthropic", "claude-haiku-5-5", modelformat.Anthropic), Price: price},
+						// No catalog row pins a beta today (#316); this model's capability does, so the pin
+						// itself stays covered for the row that will.
+						{Name: "claude-pinned", Format: modelformat.Anthropic, Thinking: thinking.Capability{
+							Thinks: thinking.Always, On: thinking.AdaptiveSummarized, Betas: []string{thinking.BindingBeta},
+						}, Price: price},
 					},
+				},
+				{
+					// OpenRouter's Messages route: the catalog says adaptive thinking and pins no beta.
+					Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: url, APIKeyFile: env.KeyFile("provider_key"),
+					Models: []gateway.Model{{
+						Name: "anthropic/claude-haiku-5.5", Format: modelformat.Anthropic,
+						Thinking: thinking.Of("openrouter", "anthropic/claude-haiku-5.5", modelformat.Anthropic), Price: price,
+					}},
 				},
 				{
 					Org: "acme", Name: "claude-unscoped", Type: "anthropic", BaseURL: url, APIKeyFile: env.KeyFile("provider_key"),
@@ -144,7 +168,7 @@ func anthropicSpec(env Env) {
 			state.AddKey(keyL.Key)
 			state.AddKey(keyG.Key)
 			// One request costs about $0.0044, so a limit of $0.006 lets two through.
-			state.SetLimit(agentL, &gateway.Limit{Unit: gateway.USD, Amount: 0.006, Window: 24 * time.Hour})
+			state.SetLimit(agentL, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("0.006"), Window: 24 * time.Hour})
 
 			gw, err := env.Start(ctx, []int{port(srv)}, map[string]string{"provider_key": providerKey})
 			Expect(err).NotTo(HaveOccurred())
@@ -262,6 +286,81 @@ func anthropicSpec(env Env) {
 			Expect(string(lastUpstream("claude-test").Body)).NotTo(ContainSubstring("mcp_servers"), "no field is added to a plain request")
 		})
 
+		It("sends the catalog's explicit on and off forms to a strict upstream, without any beta (#316)", func(ctx SpecContext) {
+			withThinking := func(model string, th map[string]any) map[string]any {
+				b := msgBody(model, false)
+				b["thinking"] = th
+				return b
+			}
+			on := map[string]any{"type": "adaptive", "display": "summarized"}
+			code, out := post(ctx, "/v1/messages", keyC.Material, withThinking("claude-haiku-5-5", on),
+				"anthropic-version", clientDate, "anthropic-beta", "mcp-client-2025-04-04,interleaved-thinking-2025-05-14")
+			Expect(code).To(Equal(http.StatusOK), out)
+			up := lastUpstream("claude-haiku-5-5")
+			Expect(up.Header).NotTo(HaveKey("Anthropic-Beta"), "the row pins none and the client's never passes")
+			Expect(string(up.Body)).To(And(ContainSubstring(`"adaptive"`), ContainSubstring(`"summarized"`)))
+
+			By("thinking off is sent explicitly, and Haiku 5.5 takes it")
+			code, out = post(ctx, "/v1/messages", keyC.Material, withThinking("claude-haiku-5-5", map[string]any{"type": "disabled"}), "anthropic-version", clientDate)
+			Expect(code).To(Equal(http.StatusOK), out)
+			Expect(string(lastUpstream("claude-haiku-5-5").Body)).To(ContainSubstring(`"disabled"`))
+
+			By("OpenCode's own block_binding is refused as Anthropic refuses it: no beta covers it")
+			code, out = post(ctx, "/v1/messages", keyC.Material, withThinking("claude-haiku-5-5", map[string]any{
+				"type": "adaptive", "block_binding": map[string]any{"prefix_mismatch_behavior": "drop_block"},
+			}), "anthropic-version", clientDate, "anthropic-beta", thinking.BindingBeta)
+			Expect(code).To(Equal(http.StatusBadRequest), out)
+			Expect(out).To(ContainSubstring("thinking.adaptive.block_binding: Extra inputs are not permitted"))
+		})
+
+		It("pins a row's beta, so a beta-only field reaches a strict upstream (rc.7, #240)", func(ctx SpecContext) {
+			adaptive := func(model string) map[string]any {
+				b := msgBody(model, false)
+				b["thinking"] = map[string]any{"type": "adaptive", "block_binding": map[string]any{"prefix_mismatch_behavior": "drop_block"}}
+				return b
+			}
+			code, out := post(ctx, "/v1/messages", keyC.Material, adaptive("claude-pinned"), "anthropic-version", clientDate)
+			Expect(code).To(Equal(http.StatusOK), out)
+			up := lastUpstream("claude-pinned")
+			Expect(up.Header.Values("anthropic-beta")).To(Equal([]string{thinking.BindingBeta}))
+
+			By("the client's own beta never passes: the pinned value replaces it")
+			code, out = post(ctx, "/v1/messages", keyC.Material, adaptive("claude-pinned"),
+				"anthropic-version", clientDate, "anthropic-beta", "mcp-client-2025-04-04,interleaved-thinking-2025-05-14")
+			Expect(code).To(Equal(http.StatusOK), out)
+			Expect(lastUpstream("claude-pinned").Header.Values("anthropic-beta")).To(Equal([]string{thinking.BindingBeta}))
+
+			By("a model the catalog says cannot think gets no beta, and a thinking body is refused as Anthropic refuses it")
+			code, out = post(ctx, "/v1/messages", keyC.Material, adaptive("claude-test"), "anthropic-version", clientDate)
+			Expect(code).To(Equal(http.StatusBadRequest), out)
+			Expect(out).To(ContainSubstring("thinking.adaptive.block_binding: Extra inputs are not permitted"))
+			Expect(lastUpstream("claude-test").Header).NotTo(HaveKey("Anthropic-Beta"))
+		})
+
+		It("drops the client's anthropic-beta for a model that thinks without a pinned beta (OpenRouter, #240)", func(ctx SpecContext) {
+			// The catalog says the model thinks and lists no beta, so nothing replaces the client's
+			// header and the gateway must remove it: otherwise OpenCode's own betas reach the upstream
+			// and hide a request that only works because of them (rc.7).
+			const model = "anthropic/claude-haiku-5.5"
+			Expect(thinking.Of("openrouter", model, modelformat.Anthropic)).To(
+				And(HaveField("On", thinking.AdaptiveSummarized), HaveField("Betas", BeEmpty())))
+			body := msgBody(model, false)
+			body["thinking"] = map[string]any{"type": "adaptive", "display": "summarized"}
+			code, out := post(ctx, "/v1/messages", keyC.Material, body, "anthropic-version", clientDate,
+				"anthropic-beta", "interleaved-thinking-2025-05-14,"+thinking.BindingBeta)
+			Expect(code).To(Equal(http.StatusOK), out)
+			up := lastUpstream(model)
+			Expect(up.Header).NotTo(HaveKey("Anthropic-Beta"))
+			Expect(string(up.Body)).To(ContainSubstring(`"adaptive"`))
+
+			By("a beta-only field is then refused by the strict upstream, as it would be if the client's beta leaked or were missing")
+			body["thinking"] = map[string]any{"type": "adaptive", "block_binding": map[string]any{"prefix_mismatch_behavior": "drop_block"}}
+			code, out = post(ctx, "/v1/messages", keyC.Material, body, "anthropic-version", clientDate,
+				"anthropic-beta", thinking.BindingBeta)
+			Expect(code).To(Equal(http.StatusBadRequest), out)
+			Expect(lastUpstream(model).Header).NotTo(HaveKey("Anthropic-Beta"), "the client's beta never passes")
+		})
+
 		It("keeps the tools of a chat-completions request sent to an anthropic model", func(ctx SpecContext) {
 			// The tools filter is a per-model body field; it must not touch the type "function" tools of
 			// another route.
@@ -290,6 +389,72 @@ func anthropicSpec(env Env) {
 			Expect(string(up.Body)).To(ContainSubstring(`"stream_options":{"include_usage":true}`))
 			Expect(up.Header.Get("Authorization")).To(Equal("Bearer " + providerKey))
 			Expect(up.Header).NotTo(HaveKey("Anthropic-Version"), "an openai model gets no Anthropic headers")
+		})
+
+		It("refuses a request with the agent's key in any header but Authorization, and sends the upstream only the headers a format needs (#262)", func(ctx SpecContext) {
+			// An agent is untrusted and holds its gateway key, so it can put the key in any header or in
+			// the query. The upstream is a third party that logs what it receives. Both modes refuse a key
+			// in a header but Authorization, including one the allowlist keeps (a client chooses its
+			// User-Agent); standalone mode also passes only gateway.ForwardedHeaders, whatever else the
+			// client sent.
+			keyed := [][2]string{
+				{"X-Canary", keyC.Material},
+				{"X-Embedded", "prefix-" + keyC.Material + "-suffix"},
+				{"X-Api-Key", keyC.Material},
+				{"Cookie", "session=" + keyC.Material},
+				{"Proxy-Authorization", "Basic " + keyC.Material},
+				{"User-Agent", "harness/1.0 (" + keyC.Material + ")"},
+				{"Accept", "application/json, " + keyC.Material},
+			}
+			allowed := map[string]bool{}
+			for _, h := range gateway.ForwardedHeaders {
+				allowed[http.CanonicalHeaderKey(h)] = true
+			}
+			// What the gateway and the HTTP stack add themselves.
+			for _, h := range []string{
+				"Host", "Authorization", "Anthropic-Version", "Anthropic-Workspace-Id", "Anthropic-Beta",
+				gateway.OrgHeader, "Traceparent", "Tracestate", "Content-Length", "Accept-Encoding", "Connection", "Transfer-Encoding",
+			} {
+				allowed[http.CanonicalHeaderKey(h)] = true
+			}
+			for _, tc := range []struct{ model, path string }{
+				{"claude-test", "/v1/messages"},
+				{"gpt-test", "/v1/chat/completions"},
+			} {
+				body := map[string]any{"model": tc.model, "max_tokens": 16, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+				before := len(upstrm.Requests())
+				for _, h := range keyed {
+					code, out := post(ctx, tc.path, keyC.Material, body, h[0], h[1])
+					Expect(code).To(Equal(http.StatusForbidden), tc.model+": the key in "+h[0]+" is refused: "+out)
+				}
+				Expect(upstrm.Requests()).To(HaveLen(before), tc.model+": no request with a key in a header reached the upstream")
+
+				// Headers of the agent's own choosing without a key pass in Kubernetes mode and are
+				// dropped in standalone mode.
+				code, out := post(ctx, tc.path, keyC.Material, body,
+					"User-Agent", "koinon-test", "Accept", "application/json", "X-Forwarded-For", "203.0.113.9", "X-Custom", "hello")
+				Expect(code).To(Equal(http.StatusOK), tc.model+": "+out)
+				up := lastUpstream(tc.model)
+				for name, values := range up.Header {
+					if env.HeaderAllowlist {
+						Expect(allowed).To(HaveKey(name), tc.model+": a header outside the allowlist reached the upstream")
+					}
+					for _, v := range values {
+						Expect(v).NotTo(ContainSubstring(gateway.KeyPrefix), tc.model+": header "+name)
+					}
+				}
+				Expect(up.Header.Get("Authorization")).To(Equal("Bearer "+providerKey), "the provider's key replaces the agent's")
+				Expect(up.Header.Get("Content-Type")).To(Equal("application/json"), "a header the format needs still passes")
+				Expect(up.Header.Get("User-Agent")).To(Equal("koinon-test"), "an allowlisted header without a key still passes")
+
+				By(tc.model + ": a request with the key in the query is refused before it reaches the upstream")
+				before = len(upstrm.Requests())
+				code, out = post(ctx, tc.path+"?canary="+keyC.Material, keyC.Material, body)
+				Expect(code).To(Equal(http.StatusForbidden), out)
+				code, out = post(ctx, tc.path+"?canary="+strings.Replace(keyC.Material, "_", "%5F", 1), keyC.Material, body)
+				Expect(code).To(Equal(http.StatusForbidden), "a percent-encoded key: "+out)
+				Expect(upstrm.Requests()).To(HaveLen(before))
+			}
 		})
 
 		It("keeps another org's key off the model", func(ctx SpecContext) {

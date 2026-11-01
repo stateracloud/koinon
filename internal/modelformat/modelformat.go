@@ -73,12 +73,6 @@ type preference struct {
 // preferences is the family preference, most specific rows first. Names that match no row prefer
 // OpenAI (fallbackPreference).
 var preferences = []preference{
-	// ADR 0069 decision 4: OpenRouter Claude models (anthropic/* and claude-*) stay on chat completions, with ADR 0068's
-	// cacheFormat markers, until the live check passes. The follow-up PR deletes these rows, which
-	// flips them to the rows below; the startup re-derivation then moves every model that is not
-	// overridden.
-	{Provider: ProviderOpenRouter, Prefix: "anthropic/", Format: OpenAI},
-	{Provider: ProviderOpenRouter, Prefix: "claude-", Format: OpenAI},
 	{Prefix: "claude-", Format: Anthropic},
 	{Prefix: "anthropic/", Format: Anthropic},
 }

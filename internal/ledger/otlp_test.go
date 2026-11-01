@@ -171,6 +171,56 @@ var _ = Describe("Decode", func() {
 		Expect(got["r-200"].RequestBytes).To(Equal(int64(900)))
 	})
 
+	Describe("who answered a request without usage (koinon.upstream, ADR 0056 amendment 2026-10-29)", func() {
+		boolean := func(k string, v bool) *commonpb.KeyValue {
+			return &commonpb.KeyValue{Key: k, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_BoolValue{BoolValue: v}}}
+		}
+		noUsage := func(r *logspb.LogRecord) *logspb.LogRecord {
+			r.Attributes = append(withoutAttrs(r.Attributes, "gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens", "agw.ai.usage.cost.total"), str("agw.ai.usage.cost.total", "0"))
+			return r
+		}
+		decode := func(recs ...*logspb.LogRecord) map[string]ledger.Entry {
+			GinkgoHelper()
+			entries, rejected, reason := ledger.Decode(export(recs...))
+			Expect(rejected).To(BeZero(), reason)
+			got := map[string]ledger.Entry{}
+			for _, e := range entries {
+				got[e.RequestID] = e
+			}
+			return got
+		}
+		id := func(n string) *commonpb.KeyValue { return str(gateway.LogFieldRequest, n) }
+
+		It("keeps a status the provider answered, even one the gateway also uses", func() {
+			got := decode(
+				noUsage(llmRecord(id("up-403"), num(gateway.LogFieldStatus, 403), boolean(gateway.LogFieldUpstream, true))),
+				noUsage(llmRecord(id("up-401"), num(gateway.LogFieldStatus, 401), boolean(gateway.LogFieldUpstream, true))),
+				noUsage(llmRecord(id("up-400"), num(gateway.LogFieldStatus, 400), boolean(gateway.LogFieldUpstream, true), num(gateway.LogFieldRequestBytes, 10))),
+			)
+			Expect(got).To(HaveLen(3))
+			Expect(got["up-403"]).To(And(HaveField("Upstream", true), HaveField("UpstreamKnown", true), HaveField("Status", int64(403))))
+		})
+
+		It("skips a status the gateway made itself", func() {
+			got := decode(
+				noUsage(llmRecord(id("gw-403"), num(gateway.LogFieldStatus, 403), boolean(gateway.LogFieldUpstream, false))),
+				noUsage(llmRecord(id("gw-429"), num(gateway.LogFieldStatus, 429), boolean(gateway.LogFieldUpstream, false))),
+				// a gateway 400 (an unparsable body) never reached the provider: it is not charged
+				noUsage(llmRecord(id("gw-400"), num(gateway.LogFieldStatus, 400), boolean(gateway.LogFieldUpstream, false), num(gateway.LogFieldRequestBytes, 10))),
+			)
+			Expect(got).To(BeEmpty())
+		})
+
+		It("reads a record from a config that does not say as before: the gateway's statuses are skipped, the rest estimated", func() {
+			got := decode(
+				noUsage(llmRecord(id("old-403"), num(gateway.LogFieldStatus, 403))),
+				noUsage(llmRecord(id("old-400"), num(gateway.LogFieldStatus, 400), num(gateway.LogFieldRequestBytes, 10))),
+			)
+			Expect(got).To(HaveLen(1))
+			Expect(got["old-400"].UpstreamKnown).To(BeFalse())
+		})
+	})
+
 	It("reads the format, stream and error fields, with an absent one as OpenAI, unstreamed, no error", func() {
 		id := func(n string) *commonpb.KeyValue { return str(gateway.LogFieldRequest, n) }
 		streamed := &commonpb.KeyValue{Key: gateway.LogFieldStream, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_BoolValue{BoolValue: true}}}
@@ -242,7 +292,7 @@ var _ = Describe("Handler", func() {
 
 	It("records the captured export once, however often it is replayed", func(ctx SpecContext) {
 		needDocker()
-		e := newEnv(ctx, "acme", fixtureAgent, "10.00", 100_000)
+		e := newEnv(ctx, "acme", fixtureAgent, "10.00")
 
 		resp, out := post(ctx, fixture(), nil)
 		Expect(resp.StatusCode).To(Equal(http.StatusOK))
@@ -274,9 +324,9 @@ var _ = Describe("Handler", func() {
 
 	It("stores nothing for the reload probe: no spend entry, run match or token usage", func(ctx SpecContext) {
 		needDocker()
-		e := newEnv(ctx, uniq("probe"), "", "10.00", 100_000)
+		e := newEnv(ctx, uniq("probe"), "", "10.00")
 		at := time.Date(2026, 10, 22, 3, 0, 0, 0, time.UTC) // llmRecord's time
-		run := e.startRun(ctx, e.task(ctx), 100_000, at.Add(-time.Minute))
+		run := e.startRun(ctx, e.task(ctx), at.Add(-time.Minute))
 
 		body, err := proto.Marshal(export(llmRecord(
 			str(gateway.LogFieldKey, gateway.ReloadProbeKeyName),

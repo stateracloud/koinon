@@ -214,7 +214,8 @@ var _ = Describe("Parking on approvals", func() {
 		final, err := q.GetApprovalRequest(ctx, store.GetApprovalRequestParams{OrgID: g.org, ID: row.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(final.DeliveredAt.Valid).To(BeTrue())
-		Expect(g.taskStatus(ctx, t)()).To(Equal(store.TaskStateWorking))
+		By("the task follows the run's outcome after the park, like a run that never parked (#324)")
+		Expect(g.taskStatus(ctx, t)()).To(Equal(store.TaskStateCompleted))
 		Expect(getRun(ctx, r).ParkedSeconds).To(BeNumerically(">=", 0))
 		Expect(g.gh.Snapshot("widgets").Pulls).To(HaveLen(1))
 	})
@@ -236,6 +237,7 @@ var _ = Describe("Parking on approvals", func() {
 		Expect(prompts[1]).To(ContainSubstring("denied by the approver, who wrote: touch only the docs"))
 		Expect(chunks(events(ctx, r))).To(ContainElement(ContainSubstring("status=denied")))
 		Expect(g.gh.Mints()).To(BeZero(), "nothing reached GitHub")
+		Expect(g.taskStatus(ctx, t)()).To(Equal(store.TaskStateCompleted))
 	})
 
 	It("does not wait when the request was decided before the turn ended", func(ctx SpecContext) {

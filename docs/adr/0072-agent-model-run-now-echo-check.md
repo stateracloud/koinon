@@ -20,8 +20,8 @@ namespaces come back altered), with nothing in Koinon able to say so.
    version: an admin changes it with `AgentService.SetAgentModel` or `PUT /admin/v1/agents/{id}/model`
    and it applies to the next run. Every change writes `agent.model.set` with the old and new value
    in the same transaction; setting the value it already has writes nothing.
-2. **Precedence:** the agent's setting, then the active version's model, then the org default (the
-   first model the org serves and has a price for, as before). `agentmodel.Choose` is that order;
+2. **Precedence:** the agent's setting, then the active version's model, then the org default (the org's stored
+   default model, see [ADR 0086](0086-stored-org-default-model.md)). `agentmodel.Choose` is that order;
    koinon-agentd applies it at run start and the agent page shows the result with its source.
 3. A set model must be one the org serves (an enabled provider and model) and has a usable price
    for. `agentmodel.Check` is that test, used when the model is set and again when a run starts,
@@ -74,3 +74,13 @@ namespaces come back altered), with nothing in Koinon able to say so.
 Run now creates the task with the trigger's notify target (`Trigger.notify`, ADR 0066 amendment
 2026-10-28), like a scheduled fire. `firedBy` is recorded but is not a recipient, so a test fire behaves
 like the real one.
+
+## Amendment (2026-10-29, rc.8): the thinking setting
+
+The agent gets a second mutable setting beside its model: `agents.thinking` (migration 00039), `on`,
+`off` or unset, with the same shape as the model setting: not part of a version, applied to the next
+run, audited (`agent.thinking.set`, old and new value, one transaction, a repeat writes nothing), on
+`AgentService.SetAgentThinking` and `PUT /admin/v1/agents/{id}/thinking`, and shown on the agent page
+beside the model. The precedence is the agent's setting, then the template's `spec.model.thinking`,
+then **on**. The decision, the catalog and the flavor are in ADR 0069's amendment of the same date.
+`agentmodel.View` carries the thinking state, resolved for the effective model.

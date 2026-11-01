@@ -205,6 +205,7 @@ var _ = Describe("Embedded connector types", func() {
 			for _, bad := range []string{
 				"http://ghes.example.test", "https://ghes.example.test/sub", "https://u:p@ghes.example.test",
 				"https://ghes.example.test?x=1", "ghes.example.test", "https://", "https://ghes.example.test:99999", "https://-bad-",
+				"https://*.example.test", "https://*", "https://ghes.*.test", "https://gh?s.example.test",
 			} {
 				_, err := githubType().Locate(bad)
 				Expect(err).To(HaveOccurred(), bad)
@@ -231,7 +232,7 @@ var _ = Describe("Embedded connector types", func() {
 	It("validates targets", func() {
 		t := githubType()
 		Expect(t.ValidTarget("stateracloud/koinon")).To(BeTrue())
-		Expect(t.ValidTarget("procoduck")).To(BeFalse())
+		Expect(t.ValidTarget("acme")).To(BeFalse())
 		Expect(t.ValidTarget("a/b/c")).To(BeFalse())
 		Expect(t.ValidTarget("-bad/repo")).To(BeFalse())
 	})
@@ -307,6 +308,10 @@ var _ = DescribeTable("Parse rejects",
 		"only read-tier scopes may have network rules"),
 	Entry("a network host outside spec.hosts", "        - host: api.github.com\n          methods: [GET]",
 		"        - host: evil.example.com\n          methods: [GET]", "not in spec.hosts"),
+	Entry("a wildcard network host", "        - host: api.github.com\n          methods: [GET]",
+		"        - host: '*.github.com'\n          methods: [GET]", "schema"),
+	Entry("a glob network host", "        - host: api.github.com\n          methods: [GET]",
+		"        - host: '**'\n          methods: [GET]", "schema"),
 	Entry("a scope permission the app lacks", "        issues: write\n      tools", "        actions: write\n      tools",
 		"not among auth.permissions"),
 	Entry("a forbidden permission on a scope", "        issues: write\n      tools", "        workflows: write\n      tools",

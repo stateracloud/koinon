@@ -137,7 +137,7 @@ var _ = Describe("The provider echo check end to end", func() {
 
 		By("the key's daily budget is enforced: spent, the amount pushed is zero")
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
-		Expect(mg.last().Limits[check].Amount).To(BeNumerically("~", 0.05, 1e-9))
+		Expect(mg.last().Limits[check].Amount).To(Equal(money.MustParse("0.05")))
 		_, err = ing.Ingest(ctx, []ledger.Entry{entry("check-2", 50_000)})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.ReconcileAll(ctx)).To(Succeed())

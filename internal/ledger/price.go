@@ -15,6 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/estimate"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/providertype"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -40,6 +41,22 @@ type priced struct {
 	reserve money.USD
 	// model is the served model, when Koinon knows it (its provider settles the entry).
 	model prices.Model
+	// waived: the provider refused the request and does not bill that; nothing is charged.
+	waived bool
+}
+
+// rejectedByUpstream: the provider answered with a 4xx and reported no usage, so it refused the
+// request (invalid, flagged, not authorised, rate limited).
+func (e Entry) rejectedByUpstream() bool {
+	return !e.InputKnown && !e.OutputKnown && e.Status >= 400 && e.Status < 500
+}
+
+// waivesRejected reports whether a request the provider refused is charged nothing: only when the
+// model's provider type documents that it does not bill refused requests, an explicit per-type
+// catalog flag (package providertype, issue #241). A request whose provider Koinon cannot tell (no
+// priced model, a custom or unknown type) keeps the conservative charge, whatever the status.
+func waivesRejected(m prices.Model) bool {
+	return m.ProviderType != "" && !providertype.For(m.ProviderType).BillsRejectedRequests
 }
 
 // price computes the request's cost from its usage (estimated when missing) and the price valid
@@ -122,7 +139,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		}
 		// Unknown output is the cut signal of a completions stream; a logged proxy error covers a
 		// Messages stream, whose message_start already logged output.
-		x := estimate.Input{Aborted: !e.OutputKnown || e.Error != "", MaxTokens: e.MaxTokens, Rejected: !e.InputKnown && !e.OutputKnown && e.Status >= 400 && e.Status < 500}
+		x := estimate.Input{Aborted: !e.OutputKnown || e.Error != "", MaxTokens: e.MaxTokens, Rejected: e.rejectedByUpstream()}
 		if e.RequestBytes > 0 {
 			x.RequestBytes = e.RequestBytes
 		}
@@ -136,13 +153,24 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 			x.ReportedOutput = &e.OutputTokens
 		}
 		r := estimate.Estimate(params, x)
-		if !e.OutputKnown {
+		switch {
+		case x.Rejected && waivesRejected(p.model):
+			// The provider refused the request and is known not to bill that (ADR 0056, amendment
+			// 2026-10-29): nothing is charged and no tokens count, but the entry stays, flagged
+			// rejected_by_upstream, with the input the estimate would have charged. It is not a
+			// price problem, so the price report does not flag it.
+			meta["rejected_by_upstream"] = true
+			meta["charge_waived"] = "provider type " + p.model.ProviderType + " does not bill refused requests"
+			meta["waived_input_tokens"] = r.InputTokens
+			p.waived = true
+			r.InputTokens, r.OutputTokens = 0, 0
+		case !e.OutputKnown:
 			// A response without usage: say why it was estimated, and flag it.
 			meta["usage_missing"] = true
 			meta["rejected_by_upstream"] = x.Rejected
 			p.flagged = true
 		}
-		p.inTokens, p.outTokens, p.estimated = r.InputTokens, r.OutputTokens, true
+		p.inTokens, p.outTokens, p.estimated = r.InputTokens, r.OutputTokens, !p.waived
 		p.aborted = x.Aborted && !x.Rejected
 		meta["estimate"] = map[string]any{
 			"method": r.Method, "input_reported": r.InputReported, "output_reported": r.OutputReported,
@@ -192,7 +220,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 	if err != nil {
 		return p, err
 	}
-	if p.estimated || p.flagged || res.Fallback || p.aborted {
+	if p.estimated || p.flagged || res.Fallback || p.aborted || p.waived {
 		p.estimate = raw
 	}
 	return p, nil

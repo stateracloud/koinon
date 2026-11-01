@@ -27,38 +27,71 @@ const MaxSummaryBytes = 6000
 
 const truncated = "\n[truncated]"
 
-// Reply is the agent's message text of the run since its last park, across every epoch.
+// Reply is the agent's last message of the run since its last park, across every epoch: the text
+// of the final run of message chunks that no tool call interrupts. Interim narration ("I'll pull
+// the data ...") that came before a tool call is not part of it. When the last message is empty
+// (the turn ended on a tool call) the one before it is used.
 func Reply(ctx context.Context, q *store.Queries, org, run pgtype.UUID) (string, error) {
+	msgs, err := messages(ctx, q, org, run)
+	if err != nil {
+		return "", err
+	}
+	if len(msgs) == 0 {
+		return "", nil
+	}
+	return msgs[len(msgs)-1], nil
+}
+
+// Transcript is everything the agent said since its last park: its messages, interim narration
+// included, separated by a blank line. The time-limit note uses it, where progress matters.
+func Transcript(ctx context.Context, q *store.Queries, org, run pgtype.UUID) (string, error) {
+	msgs, err := messages(ctx, q, org, run)
+	return strings.Join(msgs, "\n\n"), err
+}
+
+// messages splits the agent's chunks since the last park into messages. A tool call or its update
+// ends the message before it (ACP gives chunks no boundary of their own; the agent's text and its
+// tool calls alternate within a turn). Messages are trimmed; empty ones are dropped.
+func messages(ctx context.Context, q *store.Queries, org, run pgtype.UUID) ([]string, error) {
+	var msgs []string
 	var b strings.Builder
+	flush := func() {
+		if t := strings.TrimSpace(b.String()); t != "" {
+			msgs = append(msgs, t)
+		}
+		b.Reset()
+	}
 	var after int64
 	for {
 		evs, err := q.ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{
 			OrgID: org, RunID: run, AfterSeq: after, MaxEvents: 500,
 		})
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		for _, e := range evs {
 			after = e.Seq
-			if e.Kind == KindParked {
+			switch e.Kind {
+			case KindParked:
 				// Posted when the run parked.
 				b.Reset()
-				continue
-			}
-			if e.Kind != "acp.agent_message_chunk" {
-				continue
-			}
-			var u struct {
-				Content struct {
-					Text string `json:"text"`
-				} `json:"content"`
-			}
-			if json.Unmarshal(e.Payload, &u) == nil {
-				b.WriteString(u.Content.Text)
+				msgs = nil
+			case "acp.tool_call", "acp.tool_call_update":
+				flush()
+			case "acp.agent_message_chunk":
+				var u struct {
+					Content struct {
+						Text string `json:"text"`
+					} `json:"content"`
+				}
+				if json.Unmarshal(e.Payload, &u) == nil {
+					b.WriteString(u.Content.Text)
+				}
 			}
 		}
 		if len(evs) < 500 {
-			return strings.TrimSpace(b.String()), nil
+			flush()
+			return msgs, nil
 		}
 	}
 }
@@ -132,20 +165,30 @@ func TimeLimitNoteBase(run store.Run) map[string]any {
 // the caller can use it as the fallback.
 func TimeLimitNote(ctx context.Context, q *store.Queries, run store.Run) (map[string]any, error) {
 	note := TimeLimitNoteBase(run)
-	reply, err := Reply(ctx, q, run.OrgID, run.ID)
+	summary, source, err := Summary(ctx, q, run)
+	if summary != "" {
+		note["summary"], note["summarySource"] = summary, source
+	}
+	return note, err
+}
+
+// Summary is what the agent last said on a run that was stopped: its text since its last park
+// (source "reply"), else the task's last end-of-turn summary (source "notes"), cut to
+// MaxSummaryBytes. It is empty when the agent said nothing.
+func Summary(ctx context.Context, q *store.Queries, run store.Run) (summary, source string, err error) {
+	reply, err := Transcript(ctx, q, run.OrgID, run.ID)
 	if err != nil {
-		return note, fmt.Errorf("read the agent's reply: %w", err)
+		return "", "", fmt.Errorf("read the agent's reply: %w", err)
 	}
 	if reply != "" {
-		note["summary"], note["summarySource"] = TruncateTail(reply, MaxSummaryBytes), "reply"
-		return note, nil
+		return TruncateTail(reply, MaxSummaryBytes), "reply", nil
 	}
 	t, err := q.GetTask(ctx, store.GetTaskParams{OrgID: run.OrgID, ID: run.TaskID})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return note, fmt.Errorf("read the task's notes: %w", err)
+		return "", "", fmt.Errorf("read the task's notes: %w", err)
 	}
 	if err == nil && strings.TrimSpace(t.AgentSummary.String) != "" {
-		note["summary"], note["summarySource"] = Truncate(t.AgentSummary.String, MaxSummaryBytes), "notes"
+		return Truncate(t.AgentSummary.String, MaxSummaryBytes), "notes", nil
 	}
-	return note, nil
+	return "", "", nil
 }

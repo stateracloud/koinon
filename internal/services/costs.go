@@ -14,13 +14,18 @@ import (
 
 // Spend totals from the spend ledger (plan item L1).
 
-func costProto(requests, in, out int64, usd string, priced bool, estimated int64) *runv1alpha1.Cost {
+// tokenSplit is the tokens of a total by type (ADR 0081): InputTokens of the proto stays the total
+// input, cache reads and writes included.
+type tokenSplit struct{ cacheRead, cacheWrite, reasoning int64 }
+
+func costProto(requests, in, out int64, split tokenSplit, usd string, priced bool, estimated int64) *runv1alpha1.Cost {
 	return &runv1alpha1.Cost{
 		Requests: requests, InputTokens: in, OutputTokens: out, Usd: ledger.FormatUSD(usd), Priced: priced, EstimatedRequests: estimated,
+		CacheReadTokens: split.cacheRead, CacheWriteTokens: split.cacheWrite, ReasoningTokens: split.reasoning,
 	}
 }
 
-func noCost() *runv1alpha1.Cost { return costProto(0, 0, 0, "0", true, 0) }
+func noCost() *runv1alpha1.Cost { return costProto(0, 0, 0, tokenSplit{}, "0", true, 0) }
 
 // setRunCosts sets Cost on each run.
 func setRunCosts(ctx context.Context, q *store.Queries, org pgtype.UUID, runs []*runv1alpha1.Run) error {
@@ -41,7 +46,7 @@ func setRunCosts(ctx context.Context, q *store.Queries, org pgtype.UUID, runs []
 	}
 	byID := map[string]*runv1alpha1.Cost{}
 	for _, row := range rows {
-		byID[idString(row.RunID)] = costProto(row.Requests, row.InputTokens, row.OutputTokens, row.CostUsd, row.Priced, row.EstimatedRequests)
+		byID[idString(row.RunID)] = costProto(row.Requests, row.InputTokens, row.OutputTokens, tokenSplit{row.CacheReadTokens, row.CacheWriteTokens, row.ReasoningTokens}, row.CostUsd, row.Priced, row.EstimatedRequests)
 	}
 	for _, r := range runs {
 		if c, ok := byID[r.GetId()]; ok {
@@ -64,7 +69,7 @@ func sumTaskCosts(ctx context.Context, q *store.Queries, org pgtype.UUID, ids []
 		return nil, err
 	}
 	for _, row := range rows {
-		byID[idString(row.TaskID)] = costProto(row.Requests, row.InputTokens, row.OutputTokens, row.CostUsd, row.Priced, row.EstimatedRequests)
+		byID[idString(row.TaskID)] = costProto(row.Requests, row.InputTokens, row.OutputTokens, tokenSplit{row.CacheReadTokens, row.CacheWriteTokens, row.ReasoningTokens}, row.CostUsd, row.Priced, row.EstimatedRequests)
 	}
 	return byID, nil
 }

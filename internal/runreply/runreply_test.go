@@ -46,6 +46,52 @@ var _ = Describe("Reply", func() {
 		Expect(got).To(Equal("after the park"))
 	})
 
+	tool := func(ctx SpecContext) {
+		GinkgoHelper()
+		event(ctx, "acp.tool_call", `{"sessionUpdate":"tool_call","toolCallId":"t1","title":"read"}`)
+		event(ctx, "acp.tool_call_update", `{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed"}`)
+	}
+
+	It("replies with the last message, not the narration before tool calls (finops-haiku)", func(ctx SpecContext) {
+		chunk(ctx, "I'll pull cost data ")
+		chunk(ctx, "first.")
+		tool(ctx)
+		chunk(ctx, "The metrics view works. Next I'll draft the report.")
+		tool(ctx)
+		chunk(ctx, "# Daily cost report")
+		got, err := runreply.Reply(ctx, q, run.OrgID, run.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("# Daily cost report"))
+	})
+
+	It("replies with the last message, not the narration before tool calls (internal-sonnet)", func(ctx SpecContext) {
+		chunk(ctx, "Fresh start.")
+		tool(ctx)
+		chunk(ctx, "Fix a few line refs, then write the comparison.")
+		tool(ctx)
+		chunk(ctx, "# How it compares")
+		got, err := runreply.Reply(ctx, q, run.OrgID, run.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("# How it compares"))
+	})
+
+	It("uses the message before when the turn ended on a tool call", func(ctx SpecContext) {
+		chunk(ctx, "All done.")
+		tool(ctx)
+		got, err := runreply.Reply(ctx, q, run.OrgID, run.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("All done."))
+	})
+
+	It("separates the messages in the time-limit transcript", func(ctx SpecContext) {
+		chunk(ctx, "Fresh start.")
+		tool(ctx)
+		chunk(ctx, "Half done.")
+		got, err := runreply.Transcript(ctx, q, run.OrgID, run.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("Fresh start.\n\nHalf done."))
+	})
+
 	It("says what the agent said in the time-limit note, from its reply", func(ctx SpecContext) {
 		chunk(ctx, "Done so far: A.")
 		note, err := runreply.TimeLimitNote(ctx, q, run)

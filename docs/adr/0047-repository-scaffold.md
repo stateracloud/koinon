@@ -47,7 +47,7 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
 5. **Personal orgs**: the org row is created at a user's first login; the namespace and OpenShell
    workspace are created lazily with the first agent.
 6. **Dev registry**: Zot v2.1.22 in namespace `zot` at `zot.apps.lab.example.invalid`, installed
-   by Andre as part of the home-lab platform (`docs/dev/registry.md`). It is also the cluster's
+   by Andre as part of the home-lab platform (`docs/dev/maintainer-homelab.md`, formerly `registry.md`). It is also the cluster's
    pull-through cache; anonymous reads cover only the mirrored upstreams, so `koinon/*` needs
    credentials for push and pull.
 
@@ -104,6 +104,13 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
   hand (about 22 minutes of the plan's included minutes per run); once it is public it runs on every
   pull request to main and nightly. `g2-kind.yml` keeps Blacksmith: it creates no OpenShell
   sandbox. `spike-kind.yml` is a draft that has never run; its removal is tracked in issue #234.
+- _Amended (2026-10-29, later):_ while the repository is private, `e2e-kind.yml` also runs its go
+  suite on ready (non-draft) pull requests to main that touch `internal/ledger`, `internal/gateway`,
+  `flavors`, `test/e2e`, `test/fakemodel` or the workflow itself. Dispatching it only per release
+  candidate let #253 and #254 merge with e2e regressions that surfaced at the rc.8 tag, two rounds
+  late. Those paths are where the full install catches what unit and flavor tests miss: spend
+  accounting, the rendered gateway config and the harness launch. Every other change still relies
+  on the dispatch before a tag. Each run costs about 22 of the plan's included minutes.
 
 ## Alternatives considered
 
@@ -147,5 +154,5 @@ a healthy state.
 ## Links
 
 - ADR 0004, 0022, 0026, 0027, 0034, 0037, 0038, 0039
-- [docs/dev/registry.md](../dev/registry.md)
+- [docs/dev/maintainer-homelab.md](../dev/maintainer-homelab.md)
 - Issue [#2](https://github.com/stateracloud/koinon/issues/2)

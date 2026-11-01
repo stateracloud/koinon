@@ -15,6 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/flavor"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/templates"
 )
 
 // Flavor is what the reconciler needs to know about a harness flavor (ADR 0035).
@@ -133,8 +134,10 @@ func SandboxPolicy(network map[string]execution.NetworkRule) execution.Policy {
 // providers are the provider records the sandbox attaches; they are part of the hash, so adding
 // or removing the GitHub record of a read grant recreates the sandbox (OpenShell 0.1.5 can attach
 // providers at runtime, but Koinon keeps the attached set fixed per sandbox). network are the
-// grant-derived policy entries, updated in place.
-func (r *Reconciler) sandboxSpec(org, agent pgtype.UUID, names execution.AgentNames, f Flavor, providers []string, network map[string]execution.NetworkRule) (execution.SandboxSpec, string) {
+// grant-derived policy entries, updated in place. res are the effective resources (sandboxResources);
+// they are part of the hash, so a changed template or platform setting recreates the sandbox, as a
+// changed image does (ADR 0083).
+func (r *Reconciler) sandboxSpec(org, agent pgtype.UUID, names execution.AgentNames, f Flavor, providers []string, network map[string]execution.NetworkRule, res templates.Resources) (execution.SandboxSpec, string) {
 	spec := execution.SandboxSpec{
 		Name:             names.Sandbox,
 		Image:            f.Image,
@@ -142,22 +145,36 @@ func (r *Reconciler) sandboxSpec(org, agent pgtype.UUID, names execution.AgentNa
 		Providers:        providers,
 		Policy:           policy(network),
 		Labels:           ownerLabels(org, agent),
+		CPURequest:       res.CPU.Request,
+		CPULimit:         res.CPU.Limit,
+		MemoryRequest:    res.Memory.Request,
+		MemoryLimit:      res.Memory.Limit,
 	}
 	hash := specHash(spec)
 	spec.Labels[LabelSpecHash] = hash
+	// The supervisor image is not in the hash: an unknown or unreadable image must not stop the
+	// other spec changes from recreating a sandbox. It has its own label, compared separately.
+	if img, known := r.supervisorImage(); known {
+		spec.Labels[LabelSupervisorImage] = supervisorDigest(img)
+	}
 	return spec, hash
 }
 
 // specHash covers the fields OpenShell cannot change on an existing sandbox. Network rules are
-// left out: they are updated in place.
+// left out: they are updated in place. The OpenShell supervisor image (ADR 0085 decision 9) is
+// left out too: it has its own label (LabelSupervisorImage), so an image that cannot be read never
+// hides a change in the fields above, and the hashes of existing sandboxes stay valid.
 func specHash(s execution.SandboxSpec) string {
 	b, err := json.Marshal(struct {
-		Image, RuntimeClassName, CPU, Memory string
-		Command, Providers                   []string
-		Filesystem                           execution.FilesystemPolicy
-		Labels                               map[string]string
+		Image, RuntimeClassName    string
+		CPURequest, CPULimit       string
+		MemoryRequest, MemoryLimit string
+		Command, Providers         []string
+		Filesystem                 execution.FilesystemPolicy
+		Labels                     map[string]string
 	}{
-		s.Image, s.RuntimeClassName, s.CPU, s.Memory,
+		s.Image, s.RuntimeClassName,
+		s.CPURequest, s.CPULimit, s.MemoryRequest, s.MemoryLimit,
 		s.Command, s.Providers, s.Policy.Filesystem, maps.Clone(s.Labels),
 	})
 	if err != nil {
@@ -165,6 +182,32 @@ func specHash(s execution.SandboxSpec) string {
 	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
+}
+
+// sandboxResources is the agent's effective sandbox size: its version's template values or the
+// platform default, clamped to the platform bounds (sandboxres). A clamp is logged once per
+// change, not once per pass.
+func (r *Reconciler) sandboxResources(w *work) templates.Resources {
+	res, clamps := r.cfg.SandboxResources.Effective(w.cfg.Resources)
+	id := execution.UUIDString(w.agent.ID.Bytes)
+	var msg string
+	for _, c := range clamps {
+		msg += c.String() + "; "
+	}
+	r.clampMu.Lock()
+	defer r.clampMu.Unlock()
+	if r.clampLogged == nil {
+		r.clampLogged = map[string]string{}
+	}
+	if r.clampLogged[id] != msg {
+		if msg == "" {
+			delete(r.clampLogged, id)
+		} else {
+			r.clampLogged[id] = msg
+			r.log.Warn("the sandbox resources were clamped to the platform bounds", "org", w.org.Slug, "agent", id, "clamped", msg)
+		}
+	}
+	return res
 }
 
 // sandboxState maps an OpenShell phase to the state agentd reads.

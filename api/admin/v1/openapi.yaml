@@ -423,6 +423,42 @@ paths:
           description: Deleted.
         default:
           $ref: "#/components/responses/Error"
+  /default-model:
+    get:
+      tags: [models]
+      operationId: getDefaultModel
+      summary: The org's default model, which agents without a model setting run on.
+      responses:
+        "200":
+          description: The default model; `model` is absent when the org has none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DefaultModel"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [models]
+      operationId: setDefaultModel
+      summary: Set the org's default model, or clear it by leaving `model` out. Audited.
+      description: |
+        The model must be one the org serves and has a price for. The org's first model becomes its
+        default on its own; nothing else changes it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DefaultModel"
+      responses:
+        "200":
+          description: The default model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DefaultModel"
+        default:
+          $ref: "#/components/responses/Error"
   /tokens:
     get:
       tags: [tokens]
@@ -713,6 +749,40 @@ paths:
                 $ref: "#/components/schemas/AgentModel"
         default:
           $ref: "#/components/responses/Error"
+  /agents/{agentId}/thinking:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    put:
+      tags: [agents]
+      operationId: setAgentThinking
+      summary: Turn an agent's thinking on or off, or clear the setting.
+      description: |
+        Thinking is on unless somebody turns it off (ADR 0069 amendment 2026-10-29). A setting of
+        the agent, not a new version: it applies to the next run. Precedence: this setting, then
+        the active version's value (a template's `spec.model.thinking`), then the default, on. A
+        model that cannot think ignores the setting; the response says so (`thinking.supported`).
+        `off` is refused with "this model always thinks" when the model the next run would use
+        always thinks (`thinking.alwaysThinks`); an `off` stored earlier, or a version's `off`, then
+        runs with thinking on and the response says so (`thinking.offOverridden`).
+        The change is audited with the old and new value. Reasoning tokens are billed as output.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentThinkingUpdate"
+      responses:
+        "200":
+          description: The agent's model, with its thinking state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModel"
+        default:
+          $ref: "#/components/responses/Error"
   /agents/{agentId}/triggers/{triggerId}/run:
     parameters:
       - name: agentId
@@ -947,6 +1017,58 @@ components:
             properties:
               name: {type: string}
               provider: {type: string}
+        thinking:
+          $ref: "#/components/schemas/ThinkingState"
+    ThinkingState:
+      type: object
+      description: The agent's thinking setting and what it resolves to (ADR 0069 amendment 2026-10-29).
+      required: [setting, effective, supported, mode, alwaysThinks, offOverridden]
+      properties:
+        setting:
+          type: string
+          enum: [default, "on", "off"]
+          description: The agent's own setting; `default` when it has none.
+        versionSetting:
+          type: string
+          enum: ["on", "off"]
+          description: The active version's value (a template's `spec.model.thinking`); unset when it names none.
+        effective:
+          type: string
+          enum: ["on", "off"]
+          description: What the layers resolve to, whether or not the model can think.
+        supported:
+          type: boolean
+          description: Whether the effective model can think. When false the setting has no effect and a UI says "not supported by this model".
+        mode:
+          type: string
+          enum: [none, default, adaptive-summarized, disabled, effort-none]
+          description: >-
+            The form the next run sends: `none` when the model does not think, `adaptive-summarized`
+            or `default` for thinking on, `disabled` or `effort-none` for thinking off (ADR 0069
+            amendment 2026-10-31).
+        alwaysThinks:
+          type: boolean
+          description: >-
+            Whether the effective model thinks whatever the setting. A UI then offers no off choice
+            and says "this model always thinks"; setting `off` is refused with that message.
+        offOverridden:
+          type: boolean
+          description: >-
+            Whether the setting resolves to off and the model thinks anyway (it always thinks). The
+            setting is kept for a model that can stop; runs think.
+        notice:
+          type: string
+          description: >-
+            What a UI shows about the setting: "this model always thinks; your off setting doesn't
+            apply" when `offOverridden`, unset otherwise.
+    AgentThinkingUpdate:
+      type: object
+      required: [thinking]
+      properties:
+        thinking:
+          type: string
+          enum: [default, "on", "off"]
+          description: "`default` clears the setting."
     AgentModelUpdate:
       type: object
       required: [model]
@@ -1069,7 +1191,7 @@ components:
         removeCredential: {type: boolean}
     McpTool:
       type: object
-      required: [serverId, name, description, readOnlyHint, tier, contentHash, present, firstSeenAt, lastSeenAt]
+      required: [serverId, name, description, readOnlyHint, tier, contentHash, descriptionOriginalLength, descriptionCapped, descriptionCleaned, present, firstSeenAt, lastSeenAt]
       properties:
         serverId: {type: string, format: uuid}
         name: {type: string}
@@ -1086,7 +1208,16 @@ components:
           description: A call in the ask tier needs two approvers.
         contentHash:
           type: string
-          description: SHA-256 of the description and input schema as last published.
+          description: SHA-256 of the sanitised description and input schema as last published.
+        descriptionOriginalLength:
+          type: integer
+          description: Length in characters of the description as the server published it. `description` is the sanitised text.
+        descriptionCapped:
+          type: boolean
+          description: The description, or a description in the input schema, was cut to its length cap.
+        descriptionCleaned:
+          type: boolean
+          description: Control, invisible or tag characters were removed, or harness-lookalike tags escaped, in the description or the input schema's strings.
         unavailable:
           type: string
           description: Why agents are not offered the tool, for example a name too long.
@@ -1396,12 +1527,16 @@ components:
           items: {$ref: "#/components/schemas/FlaggedPrice"}
     SpendLine:
       type: object
-      required: [model, requests, inputTokens, outputTokens, reportedUsd, estimatedUsd, estimatedRequests, estimatedOutputTokens, gatewayRequests, gatewayUsd, gatewayComparedUsd, flaggedRequests, provisionalRequests, reservedUsd]
+      required: [model, requests, inputTokens, outputTokens, reasoningTokens, reportedUsd, estimatedUsd, estimatedRequests, estimatedOutputTokens, gatewayRequests, gatewayUsd, gatewayComparedUsd, flaggedRequests, provisionalRequests, reservedUsd]
       properties:
         model: {type: string}
         requests: {type: integer, format: int64}
         inputTokens: {type: integer, format: int64}
-        outputTokens: {type: integer, format: int64}
+        outputTokens: {type: integer, format: int64, description: "Output tokens, reasoning (thinking) tokens included."}
+        reasoningTokens:
+          type: [integer, "null"]
+          format: int64
+          description: "The part of outputTokens the provider reported as reasoning, or null when no request of the model reported a split. Null does not mean the model did not think: Anthropic Messages has no separate reasoning count and counts thinking inside outputTokens. Thinking is billed as output: at the output rate unless the price names a reasoning rate (ADR 0069 amendment 2026-10-29)."
         reportedUsd: {type: string, description: "Cost of requests whose usage the provider reported."}
         estimatedUsd: {type: string, description: "Cost of requests whose usage was estimated. Counts toward limits."}
         estimatedRequests: {type: integer, format: int64}
@@ -1458,6 +1593,10 @@ components:
           type: array
           items: {$ref: "#/components/schemas/AuditEvent"}
         nextPageToken: {type: string, description: "Absent on the last page."}
+    DefaultModel:
+      type: object
+      properties:
+        model: {type: string, description: "The model name. Absent: the org has no default model."}
     OrgBudget:
       type: object
       required: [spentThisMonthUsd, monthStart]

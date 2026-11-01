@@ -117,13 +117,16 @@ function Shell({ who }: { who: WhoAmIResponse }) {
               Providers
             </Link>
             <Link to="/servers" className={navLink} activeProps={active}>
-              Servers
+              MCP servers
             </Link>
             <Link to="/settings/prices" className={navLink} activeProps={active}>
               Prices
             </Link>
             <Link to="/settings/budgets" className={navLink} activeProps={active}>
               Budgets
+            </Link>
+            <Link to="/settings/observability" className={navLink} activeProps={active}>
+              Observability
             </Link>
             <Link to="/settings/tokens" className={navLink} activeProps={active}>
               API tokens
@@ -138,6 +141,9 @@ function Shell({ who }: { who: WhoAmIResponse }) {
             <Link to="/platform/budgets" className={navLink} activeProps={active}>
               Budget ceilings
             </Link>
+            <Link to="/platform/observability" className={navLink} activeProps={active}>
+              Observability
+            </Link>
           </nav>
         )}
       </aside>
@@ -145,7 +151,7 @@ function Shell({ who }: { who: WhoAmIResponse }) {
         <header className="flex flex-wrap items-center justify-end gap-3 border-b px-4 py-3 text-sm">
           {memberships.length > 1 ? (
             <Select value={org.orgId} onValueChange={setOrgId}>
-              <SelectTrigger size="sm" aria-label="Organization">
+              <SelectTrigger size="sm" aria-label="Org">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

@@ -38,6 +38,15 @@ service ProviderService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  // GetDefaultModel returns the org's default model (ADR 0086), which agents without a model
+  // setting run on, and the models it may be set to: the ones the org serves and has a price for.
+  rpc GetDefaultModel(GetDefaultModelRequest) returns (GetDefaultModelResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // SetDefaultModel sets the org's default model, or clears it with an empty model. The model must
+  // be one the org serves and has a price for. Audited as org.default_model.set.
+  rpc SetDefaultModel(SetDefaultModelRequest) returns (SetDefaultModelResponse);
+
   // CheckProviderEcho runs the echo check on one model of the provider: one tiny chat request
   // through the gateway asking the model to repeat a fixed line exactly, to catch masking of names
   // and addresses on the provider's side. It is metered like any request, runs only when called
@@ -277,4 +286,32 @@ message ProviderTypeInfoResponse {
   repeated ModelFormat formats = 1;
   // takes_workspace_id is set when the type takes an Anthropic workspace ID.
   bool takes_workspace_id = 2;
+}
+
+message GetDefaultModelRequest {
+  string org_id = 1;
+}
+
+// DefaultModelChoice is a model the org serves and has a price for.
+message DefaultModelChoice {
+  string name = 1;
+  string provider = 2;
+}
+
+message GetDefaultModelResponse {
+  // model is the org's default model; empty when the org has none.
+  string model = 1;
+  // available are the models the default may be set to.
+  repeated DefaultModelChoice available = 2;
+}
+
+message SetDefaultModelRequest {
+  string org_id = 1;
+  // model is the new default model; empty clears the default.
+  string model = 2;
+}
+
+message SetDefaultModelResponse {
+  // model is the org's default model after the change; empty when it has none.
+  string model = 1;
 }

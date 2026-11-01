@@ -25,6 +25,7 @@ jobs:
       web: ${{ steps.paths.outputs.web }}
       generate: ${{ steps.paths.outputs.generate }}
       chart: ${{ steps.paths.outputs.chart }}
+      chartsmoke: ${{ steps.paths.outputs.chartsmoke }}
       docs: ${{ steps.paths.outputs.docs }}
       escape: ${{ steps.paths.outputs.escape }}
       flavors: ${{ steps.paths.outputs.flavors }}
@@ -37,29 +38,166 @@ jobs:
           BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
         run: hack/ci-changes.sh "$BASE" >>"$GITHUB_OUTPUT"
 
-  go:
+  # The Go checks run as parallel jobs (#217). They share one module and build cache, keyed on the
+  # Go version and go.sum. Only go-test saves it, because it compiles the most; the others restore
+  # it (actions/cache/restore) and never save, so a job that builds little cannot fill the entry
+  # first and leave go-test and go-race with nothing compiled. go-race adds -race objects the cache
+  # does not hold. Each job is its own check. `go` below aggregates them and keeps the required
+  # check name stable: branch protection names `go`, not the parts.
+  go-tidy:
     needs: changes
     if: needs.changes.outputs.go == 'true'
-    name: go
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    name: go-tidy
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       - name: go.mod and go.sum are tidy
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
+
+  go-lint:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    name: go-lint
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.15.0
+
+  go-vet:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    name: go-vet
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       - run: go vet ./...
+
+  go-test:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    name: go-test
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       # Postgres tests use testcontainers; Docker is available on ubuntu runners.
       # test/flavors needs the flavor images, which the flavors job builds and tests.
-      - run: go test $(go list ./... | grep -v '/test/flavors$')
+      - run: hack/go-test.sh
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: go-test-reports
+          path: reports/go/*.xml
+          if-no-files-found: warn
+          retention-days: 30
+
+  go-race:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    name: go-race
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       # The reconciler runs per-sandbox jobs concurrently (LT1); keep its state guarded.
-      - run: go test -race -count=1 ./internal/reconciler/
+      # A Ginkgo suite: ginkgo writes one testcase per spec to the report.
+      - run: mkdir -p reports/go && go tool ginkgo -race --procs=1 --junit-report=go-race.xml --output-dir=reports/go ./internal/reconciler/
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: go-race-reports
+          path: reports/go/*.xml
+          if-no-files-found: warn
+          retention-days: 30
+
+  # The required check `go`: green when every Go job above is green, or when the change touches no
+  # Go (then the parts are skipped and `changes` says so). A skipped part of a Go change is a
+  # failure, so a skipped job cannot pass the gate. hack/ci-go-gate-test.sh keeps this list whole.
+  go:
+    name: go
+    needs: [changes, go-tidy, go-lint, go-vet, go-test, go-race]
+    if: ${{ !cancelled() }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          GO: ${{ needs.changes.outputs.go }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
+          [[ $GO == true ]] || { echo "no Go changes: nothing to gate"; exit 0; }
+          for r in $RESULTS; do
+            [[ $r == success ]] || { echo "::error::a Go job finished $r (results: $RESULTS)"; exit 1; }
+          done
 
   # Known vulnerabilities in the Go dependencies, by reachability (ADR 0079): a reachable finding
   # is what lets a fix take the security fast path instead of waiting out the cooldown.
@@ -95,18 +233,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          # Waivers outside the security fast path are Andre's alone (ADR 0079).
-          APPROVER: procoduck
+          BASE: ${{ github.base_ref }}
+        # Waivers outside the security fast path are the maintainers' (ADR 0079). The approvers are
+        # the GitHub handles in the table of MAINTAINERS.md, read from the base branch so that a
+        # pull request cannot add itself.
         run: |
           label=dependency-age-waiver
           if gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '.[].name' | grep -qx "$label"; then
+            # Both the file and the parser come from the base branch.
+            approvers=$(bash <(git show "origin/$BASE:hack/waiver-approvers.sh") <(git show "origin/$BASE:MAINTAINERS.md"))
+            [[ -n $approvers ]] || { echo "::error::no maintainer handles found in the table of MAINTAINERS.md on $BASE"; exit 1; }
             actor=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/events" \
               --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$label\")] | last | .actor.login // empty" | tail -n1)
-            if [[ $actor == "$APPROVER" ]]; then
+            if [[ -n $actor ]] && grep -qixF "$actor" <<<"$approvers"; then
               echo "label $label was added by $actor: age failures are waived and listed below"
               echo "by=$actor" >>"$GITHUB_OUTPUT"
             else
-              echo "::error::label $label was added by '${actor:-unknown}', not by $APPROVER; it does not waive anything"
+              echo "::error::label $label was added by '${actor:-unknown}', not by a maintainer listed in MAINTAINERS.md ($(tr '\n' ' ' <<<"$approvers")); it does not waive anything"
             fi
           fi
       - name: versions are at least 3 days old
@@ -115,10 +258,12 @@ jobs:
           DEP_AGE_WAIVER: ${{ steps.waiver.outputs.by }}
         run: hack/dep-age-check.sh "origin/${{ github.base_ref }}"
 
-  web:
+  # The web checks run as parallel jobs (#218), each its own check; `web` below aggregates them and
+  # keeps the required check name stable.
+  web-lint:
     needs: changes
     if: needs.changes.outputs.web == 'true'
-    name: web
+    name: web-lint
     runs-on: blacksmith-2vcpu-ubuntu-2404
     defaults:
       run:
@@ -136,11 +281,86 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+
+  web-test:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    name: web-test
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
       - run: pnpm test
-      - run: pnpm build
-      # The Playwright test fakes the API in the browser; E1 covers the real path.
-      - run: pnpm exec playwright install --with-deps chromium
+
+  # Playwright builds the app once and serves the build with `vite preview` (KOINON_PW_PREVIEW, see
+  # web/playwright.config.ts), on 2 workers. The API is faked in the browser; E1 covers the real path.
+  # The browser download is cached by @playwright/test version; system libraries are installed on
+  # every run (cheap), the browser binary only on a cache miss.
+  web-e2e:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    name: web-e2e
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - id: pw
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >>"$GITHUB_OUTPUT"
+      - id: pwcache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
+      - if: steps.pwcache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps chromium
+      - if: steps.pwcache.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps chromium
+      - run: pnpm exec vite build
       - run: pnpm test:e2e
+        env:
+          KOINON_PW_PREVIEW: "1"
+
+  # The required check `web`: green when every web job above is green, or when the change touches no
+  # web code (then the parts are skipped and `changes` says so). A skipped part of a web change is a
+  # failure. hack/ci-web-gate-test.sh keeps this list whole.
+  web:
+    name: web
+    needs: [changes, web-lint, web-test, web-e2e]
+    if: ${{ !cancelled() }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          WEB: ${{ needs.changes.outputs.web }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
+          [[ $WEB == true ]] || { echo "no web changes: nothing to gate"; exit 0; }
+          for r in $RESULTS; do
+            [[ $r == success ]] || { echo "::error::a web job finished $r (results: $RESULTS)"; exit 1; }
+          done
 
   proto:
     name: proto
@@ -206,6 +426,31 @@ jobs:
       # helm lint, helm template for each mode and kubeconform; render only, no cluster.
       - run: make chart-check
 
+  # Rendered startup smoke test (#284): the chart's Jobs and Deployments run as containers, with
+  # the rendered args, env and mounts, against Postgres and envtest. See test/chartsmoke.
+  chart-smoke:
+    needs: changes
+    if: needs.changes.outputs.chartsmoke == 'true'
+    name: chart smoke
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # Above the test's own timeouts (go test 20m, ginkgo 15m), so a hang fails the test and cleans up.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+      # setup-envtest downloads the API server binaries into this directory; Go's own caches come
+      # from setup-go.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/kubebuilder-envtest
+          key: envtest-1.37.0
+      - run: make test-chart-smoke
+
   # Docs site (plan item DOC1): builds the Starlight site and checks the quickstart against
   # test/e2e, the chart and the web spec. No deploy while the repository is private. Not a
   # required check.
@@ -257,6 +502,55 @@ jobs:
       - run: hack/migrate-lint-test.sh
       - run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
 
+  # ADR numbers unique and contiguous, README index in sync (hack/adr-lint.sh, ADR 0082).
+  adr-lint:
+    name: adr-lint
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: hack/adr-lint-test.sh
+      - run: hack/adr-lint.sh
+
+  # Offline unit tests of hack/claim.sh. The live tests need a scratch repository and never run
+  # here: CI must not mutate GitHub.
+  claim-tests:
+    name: claim-tests
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: hack/claim_test.sh
+      - run: hack/migrate-renumber-test.sh
+
+  # Tests of the e2e tooling scripts: the decision rule (needs the Go toolchain for `go list`) and
+  # the remote runner (needs flock, so Linux).
+  scripts:
+    name: scripts
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: hack/needs-e2e-test.sh
+      - name: flavor-tag-test (needs a UTF-8 locale with its own collation)
+        run: |
+          sudo locale-gen en_US.UTF-8
+          hack/flavor-tag-test.sh
+      - run: hack/e2e-remote-test.sh
+      - run: hack/pr-wait-test.sh
+      - run: hack/ci-fail-test.sh
+      - run: hack/ci-go-gate-test.sh
+      - run: hack/ci-web-gate-test.sh
+      - run: hack/go-test-test.sh
+      - run: hack/wt-test.sh
+      - run: hack/wt-install-test.sh
+      - run: hack/ship-test.sh
+      - run: hack/preflight-test.sh
+      - run: hack/preflight-stop-test.sh
+      - run: hack/e2e-decide-test.sh
+      - run: hack/e2e-bisect-test.sh
+      - run: hack/hooks/agent-spawn-check_test.sh
+
   # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
   # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
@@ -288,3 +582,40 @@ jobs:
           restore-keys: flavors-
       - run: make flavors FLAVOR_CACHE=${{ runner.temp }}/flavor-cache
       - run: go test -count=1 ./test/flavors/...
+
+  # On main only: publish the flavor image under its content tag (hack/flavor-tag.sh) so the kind
+  # e2e pulls it instead of building it. A separate job, so only it holds packages: write and
+  # pull requests never do. The layer cache the flavors job just saved makes the build a cache hit.
+  flavor-publish:
+    name: flavor-publish
+    needs: [changes, flavors]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.flavors == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/flavor-cache
+          key: flavors-${{ hashFiles('flavors/**') }}
+          restore-keys: flavors-
+      - name: Push ghcr.io/<repo>/flavor-opencode:<content tag>
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          tag=$(hack/flavor-tag.sh opencode)
+          image="ghcr.io/$REPO/flavor-opencode:$tag"
+          if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
+            echo "$image already exists"
+            exit 0
+          fi
+          docker buildx build --push --build-context common=flavors/common \
+            --cache-from "type=local,src=$RUNNER_TEMP/flavor-cache/opencode" \
+            --tag "$image" flavors/opencode

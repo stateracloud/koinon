@@ -1,0 +1,11 @@
+[
+  {"role": "system", "content": "You are a careful assistant. Contact ops@example.com for help."},
+  {"role": "user", "parts": [
+    {"type": "text", "text": "My card is 4111 1111 1111 1111 and my IBAN is DE89 3704 0044 0532 0130 00."},
+    {"type": "text", "text": "Use koinon_test_not-a-real-token to log in."}
+  ]},
+  {"role": "tool", "headers": {"Authorization": "Basic Zm9v", "Accept": "application/json", "Set-Cookie": ["sid=fake", "b=c"]}},
+  {"role": "tool", "headers": [{"name": "Cookie", "value": "sid=fake"}, {"name": "Accept", "value": "text/plain"}]},
+  {"role": "tool", "result": {"count": 3, "ok": true, "none": null, "ratio": 0.25, "card": 4111111111111111, "id": "3f2b8c1e-9a4d-4e7b-8c21-5d6f7a8b9c0d"}},
+  {"role": "assistant", "content": "Done. Phone +1 (555) 010-0199 noted.", "jwt": "eyJhbGci.eyJzdWIi.c2ln", "zk3pQ9vL2xT7mW4bN8cR5dY1hG6jF0sA": 1}
+]

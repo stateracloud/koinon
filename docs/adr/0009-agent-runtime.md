@@ -1,6 +1,6 @@
 # 0009. Agent runtime: persistent agent, ephemeral compute
 
-- Status: Accepted
+- Status: Accepted; amended 2026-10-30 (below)
 - Date: 2026-10-21
 - Decision: [design.md#9](../design.md)
 
@@ -77,3 +77,11 @@ stateDiagram-v2
 
 - [0016](0016-harness-and-deployment.md), [0029](0029-run-level-resume.md), [0030](0030-run-state-machine.md),
   [0032](0032-agent-home-checkpoints.md)
+
+## Amendment (2026-10-30): a spent budget stops the run
+
+A spent budget **stops** the run: it is canceled with failure class `budget` (and reason
+`spend_limit`, or `run_spend_cap` for a run's own limit). It does not park. The later decisions win
+over the "Parked: waiting on ... budget" state in the diagram above: ADR 0041's "Stop before the key goes" (cancel, not park), ADR 0050
+and ADR 0081; the code cancels (`ledger.Stop`, agentd's `budgetStop`). The park reason `budget`
+(`PARK_REASON_BUDGET`) is reserved and unused; proto values are never removed. Wording only (GLOSSARY.md), no decision change.

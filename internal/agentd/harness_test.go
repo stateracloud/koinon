@@ -12,6 +12,7 @@ import (
 	"time"
 
 	sdk "github.com/coder/acp-go-sdk"
+	. "github.com/onsi/ginkgo/v2"
 )
 
 // Prompt markers that script the fake harness.
@@ -36,6 +37,8 @@ const (
 	// wrapUpMarker opens agentd's wrap-up notice (a prompt of its own, or the start of a resumed
 	// turn's prompt). The fake answers it with wrapUpReply and waits for the next cancel.
 	wrapUpMarker = "[Koinon] About"
+	// limitWrapUpMarker opens the notice of a request or spend limit (ADR 0081).
+	limitWrapUpMarker = "[Koinon] This run has"
 	// wrapUpReply is what the fake writes when it is told to wrap up.
 	wrapUpReply = "Done so far: A. Left: B."
 	// resumeMarker is how the fake harness recognises agentd's resume note.
@@ -74,6 +77,10 @@ type harness struct {
 	// onPrompt, if set, may answer a prompt itself (for example by calling Koinon's tools as
 	// the agent would): it returns the reply and true, or false to fall through.
 	onPrompt func(ctx context.Context, text string) (string, bool)
+	// script, if set, may drive a prompt itself with session updates (tool calls, thinking): it
+	// returns true when it answered, and the turn then ends with end_turn.
+	metas  []map[string]any
+	script func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool
 	// modelFault, if set, runs before every prompt is answered, as the harness's request to its
 	// model would: a non-nil error is what the prompt fails with.
 	modelFault func(ctx context.Context, text string) error
@@ -133,6 +140,19 @@ func (h *harness) command(ctx context.Context, args []string, stdin io.Reader, s
 	case <-p.crash:
 		return 137
 	}
+}
+
+func (h *harness) scriptHook() func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.script
+}
+
+// promptMetas are the _meta of the prompts that arrived, in order.
+func (h *harness) promptMetas() []map[string]any {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.metas)
 }
 
 func (h *harness) selectedModels() []string {
@@ -292,12 +312,16 @@ func (p *process) LoadSession(ctx context.Context, r sdk.LoadSessionRequest) (sd
 }
 
 func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptResponse, error) {
+	// The callbacks a spec installs (modelFault, onPrompt, onRefuse, onSummary) run here, on the
+	// ACP SDK's goroutine: a failed Expect in one fails the spec instead of crashing the binary.
+	defer GinkgoRecover()
 	text := r.Prompt[0].Text.Text
 	if strings.HasPrefix(text, summaryMarker) {
 		return p.summary(ctx, r.SessionId, text)
 	}
 	p.h.mu.Lock()
 	p.h.prompts = append(p.h.prompts, text)
+	p.h.metas = append(p.h.metas, r.Meta)
 	p.h.sessions[string(r.SessionId)] = append(p.h.sessions[string(r.SessionId)], sdk.UpdateUserMessageText(text))
 	firstCrash := strings.Contains(text, markCrash) && !p.h.crashed
 	if firstCrash {
@@ -325,6 +349,11 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	if modelFault != nil {
 		if err := modelFault(ctx, text); err != nil {
 			return sdk.PromptResponse{}, err
+		}
+	}
+	if script := p.h.scriptHook(); script != nil {
+		if script(ctx, text, func(u sdk.SessionUpdate) error { return p.say(ctx, id, u) }) {
+			return end, nil
 		}
 	}
 	if onPrompt != nil {
@@ -364,7 +393,7 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 		}
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
 
-	case strings.HasPrefix(text, wrapUpMarker):
+	case strings.HasPrefix(text, wrapUpMarker), strings.HasPrefix(text, limitWrapUpMarker):
 		// Told to wrap up: say where things stand, then wait for the next cancel (the time limit).
 		p.resetCancel()
 		if err := p.say(ctx, id, sdk.UpdateAgentMessageText(wrapUpReply)); err != nil {

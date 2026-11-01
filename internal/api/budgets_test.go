@@ -66,6 +66,51 @@ var _ = Describe("BudgetService and PriceService", func() {
 		Expect(n).To(Equal(2))
 	})
 
+	It("lets admins override an agent's run limits, and runs queued afterwards get them (ADR 0081)", func(ctx SpecContext) {
+		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
+		member := e.userIn(ctx, org, store.OrgRoleMember)
+		a := owner.activeAgent(ctx, org)
+
+		got, err := budgets(admin).GetAgentRunLimits(ctx, &budgetv1alpha1.GetAgentRunLimitsRequest{OrgId: org, AgentId: a.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		l := got.GetLimits()
+		Expect(l.GetTemplateDefault().GetMaxModelRequests()).To(Equal(int64(300)), "the template's default")
+		Expect(l.GetTemplateDefault().GetMaxSpendUsd()).To(Equal("5.00"))
+		Expect(l.GetEffective()).To(Equal(l.GetTemplateDefault()), "no override: the template's values")
+		Expect(l.GetOverride().GetMaxModelRequests()).To(BeZero())
+
+		_, err = budgets(member).SetAgentRunLimits(ctx, &budgetv1alpha1.SetAgentRunLimitsRequest{OrgId: org, AgentId: a.GetId(), Override: &budgetv1alpha1.RunLimitValues{MaxModelRequests: 10}})
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		for _, bad := range []*budgetv1alpha1.RunLimitValues{
+			{MaxModelRequests: -1}, {MaxModelRequests: 100_001}, {MaxSpendUsd: "abc"}, {MaxSpendUsd: "-1"}, {MaxDurationSeconds: 90_000},
+		} {
+			_, err = budgets(admin).SetAgentRunLimits(ctx, &budgetv1alpha1.SetAgentRunLimitsRequest{OrgId: org, AgentId: a.GetId(), Override: bad})
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), bad.String())
+		}
+
+		set, err := budgets(admin).SetAgentRunLimits(ctx, &budgetv1alpha1.SetAgentRunLimitsRequest{
+			OrgId: org, AgentId: a.GetId(), Override: &budgetv1alpha1.RunLimitValues{MaxModelRequests: 40, MaxSpendUsd: "0.25"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(set.GetLimits().GetEffective().GetMaxModelRequests()).To(Equal(int64(40)))
+		Expect(set.GetLimits().GetEffective().GetMaxSpendUsd()).To(Equal("0.25"))
+		Expect(set.GetLimits().GetEffective().GetMaxDurationSeconds()).To(Equal(l.GetTemplateDefault().GetMaxDurationSeconds()), "an unset field follows the template")
+		Expect(set.GetLimits().GetTemplateDefault()).To(Equal(l.GetTemplateDefault()))
+
+		By("a run queued afterwards carries the override")
+		_, r := owner.createTicket(ctx, org, a.GetId(), "limited")
+		Expect(r.GetMaxModelRequests()).To(Equal(int64(40)))
+		Expect(r.GetMaxSpendUsd()).To(Equal("0.25"))
+
+		By("clearing every field removes the override")
+		cleared, err := budgets(admin).SetAgentRunLimits(ctx, &budgetv1alpha1.SetAgentRunLimitsRequest{OrgId: org, AgentId: a.GetId(), Override: &budgetv1alpha1.RunLimitValues{}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cleared.GetLimits().GetEffective()).To(Equal(l.GetTemplateDefault()))
+		var n int
+		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'budget.agent_run_limits.set'`, org).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(2))
+	})
+
 	It("lists every org's cap, ceiling and spend for platform admins only", func(ctx SpecContext) {
 		_, err := budgets(owner).ListOrgBudgets(ctx, &budgetv1alpha1.ListOrgBudgetsRequest{})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))

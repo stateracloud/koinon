@@ -22,6 +22,8 @@ import (
 // another org's work.
 const DirectMessageWorkflow = "koinon.direct-message"
 
+const stepDeliverDirectMessage = "deliver-direct-message"
+
 // directMessageWait bounds how long a request waits for its message to leave the queue. The work
 // is not lost when it runs out: the message ID makes the client's retry the same workflow.
 const directMessageWait = 30 * time.Second
@@ -108,7 +110,7 @@ func (d *DirectMessageQueue) workflow(c dbos.Context, in dmInput) (dmOutput, err
 			out.Seq = res.Event.Seq
 		}
 		return out, nil
-	}, dbos.WithStepName("deliver-direct-message"), dbos.WithStepMaxRetries(3))
+	}, dbos.WithStepName(stepDeliverDirectMessage), dbos.WithStepMaxRetries(3))
 }
 
 // deliver enqueues the message for its org and waits for the result. The workflow ID is derived
@@ -116,12 +118,12 @@ func (d *DirectMessageQueue) workflow(c dbos.Context, in dmInput) (dmOutput, err
 func (d *DirectMessageQueue) deliver(ctx context.Context, in DirectMessage) (DirectMessageResult, error) {
 	org := idString(in.Org)
 	input := dmInput{Org: org, Agent: idString(in.Agent), Task: idString(in.Task), User: idString(in.User), MessageID: in.MessageID, Text: in.Text}
-	h, err := durable.EnqueueForOrg[dmOutput](ctx, d.work, org, DirectMessageWorkflow, input,
-		dbos.WithEnqueueWorkflowID("dm:"+org+":"+in.MessageID))
+	wfID := "dm:" + org + ":" + in.MessageID
+	h, err := durable.EnqueueForOrg[dmOutput](ctx, d.work, org, DirectMessageWorkflow, input, dbos.WithEnqueueWorkflowID(wfID))
 	if err != nil {
 		return DirectMessageResult{}, err
 	}
-	out, err := h.GetResult(dbos.WithHandleTimeout(directMessageWait))
+	out, err := durable.AwaitResult(d.work.Runtime(), h, wfID, directMessageWait)
 	if err != nil {
 		if errors.Is(err, dbos.ErrTimeout) {
 			return DirectMessageResult{}, connect.NewError(connect.CodeUnavailable, "the organisation's queue is busy; send the message again in a moment")

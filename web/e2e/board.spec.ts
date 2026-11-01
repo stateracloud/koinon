@@ -95,7 +95,7 @@ test('sign in, create a task and watch the run stream, across a dropped connecti
   // The inbox is the home screen; chat with agents sits next to it.
   await expect(page.getByRole('heading', { level: 1, name: 'Inbox' })).toBeVisible()
   await expect(page.getByRole('heading', { level: 2, name: /^Waiting on you/ })).toBeVisible()
-  await expect(page.getByRole('heading', { level: 2, name: 'Chat with agents' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 2, name: 'Messages to agents' })).toBeVisible()
   await page.getByLabel('Title').fill('Say hello')
   await page.getByLabel('First message (optional)').fill('Please say hello')
   await page.getByRole('button', { name: 'Create task' }).click()

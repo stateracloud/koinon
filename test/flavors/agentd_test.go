@@ -16,17 +16,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/pressly/goose/v3"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/stateracloud/koinon/internal/agentd"
-	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -60,20 +57,7 @@ func describeAgentd(f flavor) bool {
 			}
 			ensureImage(f)
 
-			ctr, err := postgres.Run(ctx, "postgres:18-alpine", postgres.WithDatabase("koinon"), postgres.BasicWaitStrategies())
-			Expect(err).NotTo(HaveOccurred())
-			DeferCleanup(func(ctx context.Context) error { return ctr.Terminate(ctx) })
-			dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
-			Expect(err).NotTo(HaveOccurred())
-			db, err = pgxpool.New(ctx, dsn)
-			Expect(err).NotTo(HaveOccurred())
-			DeferCleanup(db.Close)
-			sqlDB := stdlib.OpenDBFromPool(db)
-			DeferCleanup(sqlDB.Close)
-			provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.FS)
-			Expect(err).NotTo(HaveOccurred())
-			_, err = provider.Up(ctx)
-			Expect(err).NotTo(HaveOccurred())
+			db = pgtest.Start(ctx)
 			q = store.New(db)
 
 			Expect(pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
@@ -144,7 +128,7 @@ func describeAgentd(f flavor) bool {
 				ActorUserID: user, Payload: []byte(fmt.Sprintf(`{"text":%q}`, text)),
 			})
 			Expect(err).NotTo(HaveOccurred())
-			r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TaskID: task.ID, MaxWallClockSeconds: 300, MaxTokens: 100_000})
+			r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TaskID: task.ID, MaxWallClockSeconds: 300})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() store.RunState {
 				got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: r.ID})

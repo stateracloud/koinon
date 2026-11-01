@@ -22,4 +22,4 @@ func TestAudit(t *testing.T) {
 	RunSpecs(t, "Audit Suite")
 }
 
-var _ = BeforeSuite(func(ctx SpecContext) { pool = pgtest.Start(ctx) }, NodeTimeout(3*time.Minute))
+var _ = BeforeSuite(func(ctx SpecContext) { pool = pgtest.Start(ctx, pgtest.Durable()) }, NodeTimeout(3*time.Minute))

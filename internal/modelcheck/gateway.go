@@ -39,22 +39,17 @@ func (g GatewayChat) Complete(ctx context.Context, org pgtype.UUID, model string
 	if err != nil {
 		return "", err
 	}
+	// The check sends no sampling parameters (temperature, top_p, ...): it only compares the reply
+	// with the line it asked for, and newer models reject them outright (Anthropic answers 400
+	// "temperature is deprecated for this model"). Keep the body to what every model accepts.
 	path, payload := "/v1/chat/completions", map[string]any{
-		"model":       model,
-		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		"max_tokens":  200,
-		"temperature": 0,
-		"stream":      false,
+		"model":      model,
+		"messages":   []map[string]string{{"role": "user", "content": prompt}},
+		"max_tokens": 200,
+		"stream":     false,
 	}
 	if format == modelformat.Anthropic {
 		path = "/v1/messages"
-		payload = map[string]any{
-			"model":       model,
-			"messages":    []map[string]string{{"role": "user", "content": prompt}},
-			"max_tokens":  200,
-			"temperature": 0,
-			"stream":      false,
-		}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

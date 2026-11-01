@@ -32,6 +32,7 @@ function setup(opts: { last?: EchoCheck; result?: EchoCheck; fail?: string; noMo
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: OrgRole.ADMIN }) })
     service(ProviderService, {
+      getDefaultModel: () => ({ model: '', available: [] }),
       listProviders: () => ({ providers: [provider()] }),
       listModels: () => ({
         models: opts.noModels ? [] : [create(ModelSchema, { id: 'm-1', providerId: 'p-1', name: 'vendor/a-model', source: 'ui', format: 'openai' }), create(ModelSchema, { id: 'm-2', providerId: 'p-1', name: 'vendor/b-model', source: 'ui', format: 'openai' })],
