@@ -14,5 +14,6 @@ if [[ $jobs != "$needs" ]]; then
   echo "jobs:"; echo "$jobs"; echo "needs:"; echo "$needs"
   exit 1
 fi
+# shellcheck disable=SC2016 # literal GitHub expression, not a shell expansion
 grep -qF '    if: ${{ !cancelled() }}' <(sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go gate must run if: !cancelled() (runs when a part fails, not on a superseded run)"; exit 1; }
 echo "ok: go gate covers $(echo "$jobs" | tr '\n' ' ')"
