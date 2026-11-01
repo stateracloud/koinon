@@ -124,7 +124,7 @@ func judge(dir string, reports []types.Report, required string) result {
 				}
 			case s.State == types.SpecStatePassed && s.LeafNodeType == types.NodeTypeIt:
 				res.passed++
-			case s.State == types.SpecStateSkipped && s.Failure.Message != "":
+			case s.State == types.SpecStateSkipped && s.Failure.Message != "" && !propagated(s.Failure.Message):
 				if n, ok := requirement(s.Failure.Message); ok {
 					reqs[n] = true
 				} else if undeclared == "" {
@@ -159,6 +159,11 @@ func judge(dir string, reports []types.Report, required string) result {
 	}
 	return res
 }
+
+// propagated reports whether Ginkgo wrote the message for a spec it skipped because another node
+// skipped or failed ("Spec skipped because Skip() was called in BeforeAll"); that node's own
+// report carries the reason, so these say nothing about it.
+func propagated(msg string) bool { return strings.HasPrefix(msg, "Spec skipped because ") }
 
 // requirement returns the name in a testenv skip message ("koinon:requires=docker: ...").
 func requirement(msg string) (string, bool) {
