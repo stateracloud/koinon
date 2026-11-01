@@ -16,22 +16,32 @@ import (
 )
 
 func TestJudge(t *testing.T) {
-	r := schemagate.Range{Min: 10, Max: 12}
-	for v, want := range map[int64]string{9: "older", 10: "", 11: "", 12: "", 13: "newer", 0: "older"} {
-		err := schemagate.Judge(v, r)
+	r := schemagate.Range{Min: 10, Latest: 12}
+	for name, c := range map[string]struct {
+		s    schemagate.Schema
+		want string
+	}{
+		"below min":          {schemagate.Schema{Version: 9, MinReader: 5}, "older"},
+		"empty database":     {schemagate.Schema{}, "older"},
+		"at min":             {schemagate.Schema{Version: 10}, ""},
+		"newer expand-only":  {schemagate.Schema{Version: 15, MinReader: 11}, ""},
+		"reader is latest":   {schemagate.Schema{Version: 14, MinReader: 12}, ""},
+		"breaking migration": {schemagate.Schema{Version: 14, MinReader: 13}, "older release"},
+	} {
+		err := schemagate.Judge(c.s, r)
 		switch {
-		case want == "" && err != nil:
-			t.Errorf("version %d: %v", v, err)
-		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
-			t.Errorf("version %d: got %v, want an error saying %q", v, err, want)
+		case c.want == "" && err != nil:
+			t.Errorf("%s: %v", name, err)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%s: got %v, want an error saying %q", name, err, c.want)
 		}
 	}
 }
 
 func TestGateFollowsTheSchema(t *testing.T) {
 	var logs bytes.Buffer
-	version, readErr := int64(11), error(nil)
-	g := schemagate.NewFunc(func(context.Context) (int64, error) { return version, readErr }, schemagate.Range{Min: 10, Max: 12},
+	sc, readErr := schemagate.Schema{Version: 11, MinReader: 5}, error(nil)
+	g := schemagate.NewFunc(func(context.Context) (schemagate.Schema, error) { return sc, readErr }, schemagate.Range{Min: 10, Latest: 12},
 		slog.New(slog.NewTextHandler(&logs, nil)))
 
 	if g.Ready() == nil {
@@ -39,7 +49,8 @@ func TestGateFollowsTheSchema(t *testing.T) {
 	}
 	status := func() int {
 		rec := httptest.NewRecorder()
-		g.ReadyHandler()(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/readyz", nil)
+		g.ReadyHandler()(rec, req)
 		return rec.Code
 	}
 	if status() != http.StatusServiceUnavailable {
@@ -48,14 +59,19 @@ func TestGateFollowsTheSchema(t *testing.T) {
 
 	_ = g.Check(t.Context())
 	if g.Ready() != nil || status() != http.StatusOK {
-		t.Fatalf("version 11 in 10..12 must be ready: %v", g.Ready())
+		t.Fatalf("a schema this build can read must be ready: %v", g.Ready())
 	}
 
-	version = 13 // an older release after an app-only rollback
-	if g.Check(t.Context()) == nil || g.Ready() == nil || status() != http.StatusServiceUnavailable {
-		t.Fatal("a schema newer than the range must be not ready")
+	sc = schemagate.Schema{Version: 20, MinReader: 11} // a later patch release added expand migrations
+	if g.Check(t.Context()) != nil || g.Ready() != nil {
+		t.Fatal("a newer expand-only schema must stay ready for the older release")
 	}
-	if !strings.Contains(logs.String(), "level=ERROR") || !strings.Contains(logs.String(), "newer than the 12") {
+
+	sc = schemagate.Schema{Version: 20, MinReader: 20} // a breaking migration in a new minor line
+	if g.Check(t.Context()) == nil || g.Ready() == nil || status() != http.StatusServiceUnavailable {
+		t.Fatal("a schema that declares a newer minimum reader must be not ready")
+	}
+	if !strings.Contains(logs.String(), "level=ERROR") || !strings.Contains(logs.String(), "knows up to 12") {
 		t.Fatalf("no clear log line: %s", logs.String())
 	}
 	logs.Reset()
@@ -64,18 +80,18 @@ func TestGateFollowsTheSchema(t *testing.T) {
 		t.Fatalf("an unchanged verdict must not log again: %s", logs.String())
 	}
 
-	version = 9 // a restore from an older backup
+	sc = schemagate.Schema{Version: 9} // a restore from an older backup
 	if g.Check(t.Context()) == nil || !strings.Contains(g.Ready().Error(), "older") {
-		t.Fatal("a schema older than the range must be not ready")
+		t.Fatal("a schema older than the minimum must be not ready")
 	}
 
 	readErr = errors.New("connection refused")
 	if g.Check(t.Context()) == nil || g.Ready() == nil {
-		t.Fatal("an unreadable schema version must be not ready")
+		t.Fatal("an unreadable schema must be not ready")
 	}
 
-	version, readErr = 12, nil
+	sc, readErr = schemagate.Schema{Version: 12}, nil
 	if g.Check(t.Context()) != nil || g.Ready() != nil {
-		t.Fatal("must recover when the schema is back in range")
+		t.Fatal("must recover when the schema is readable again")
 	}
 }

@@ -9,24 +9,22 @@ import (
 	"strings"
 )
 
-// The range of goose schema versions this build runs against (ADR 0085, item 8). koinon-api,
-// koinon-agentd and koinon-reconciler read the version the database is at and stay not Ready,
-// with a log line that says why, outside [MinSupported, MaxSupported]; see internal/schemagate.
+// What this build requires of the schema (ADR 0085, item 8). koinon-api, koinon-agentd and
+// koinon-reconciler read the schema at startup and every 15 s (internal/schemagate) and stay not
+// Ready, with a log line that says why, unless both hold:
 //
-//   - MinSupported is the oldest schema the code works against: raise it in the commit whose code
-//     reads something a new migration adds. A schema below it means the migration Job has not run.
-//   - MaxSupported is the newest schema this build tolerates. A migration that follows
-//     expand/contract (nothing the older code reads is renamed, dropped or retyped) may raise it,
-//     so that an app-only rollback within a minor line stays Ready. A migration that breaks the
-//     previous release leaves it where it is: the older pods then refuse the new schema at start
-//     instead of failing at their first query.
+//   - the goose version is at least MinSupported, the oldest schema the code works against. Raise
+//     it in the commit whose code reads something a new migration adds. A schema below it means the
+//     migration Job has not run.
+//   - the schema's min_reader_version (table schema_compat, written by migrations) is at most
+//     Latest(), the newest migration this build embeds. The newer schema declares who can still
+//     read it, so a release that shipped earlier needs no prediction: an expand migration leaves
+//     min_reader_version alone and every older release in the minor line stays Ready (an image
+//     rollback works); a breaking migration sets it to its own version in the same file.
 //
-// TestSupportedRange keeps both inside what the embedded files can say, so adding a migration
-// fails the test until the author has chosen.
-const (
-	MinSupported int64 = 44
-	MaxSupported int64 = 44
-)
+// TestSupportedRange keeps MinSupported inside what the embedded files can say, and
+// TestCompatDeclarations pins min_reader_version to the migrations that write it.
+const MinSupported int64 = 45
 
 // Latest returns the highest version among the embedded migration files.
 func Latest() (int64, error) {
@@ -47,4 +45,14 @@ func Latest() (int64, error) {
 		latest = max(latest, v)
 	}
 	return latest, nil
+}
+
+// MustLatest is Latest for a binary's startup: the embedded files are fixed at build time, so an
+// error means a broken build.
+func MustLatest() int64 {
+	v, err := Latest()
+	if err != nil {
+		panic(err)
+	}
+	return v
 }
