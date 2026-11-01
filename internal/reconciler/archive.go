@@ -34,6 +34,9 @@ const DefaultArchiveAfter = 7 * 24 * time.Hour
 const (
 	archivedPhase   = "Archived"
 	archivedMessage = "archived, restores on next run"
+	// idlePhase is recorded for an active agent whose sandbox is not created yet (#315).
+	idlePhase   = "Idle"
+	idleMessage = "no sandbox yet, it starts with the first run"
 )
 
 // archiveDue reports whether the stopped sandbox has been stopped long enough to archive.
