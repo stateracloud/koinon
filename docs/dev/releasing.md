@@ -33,6 +33,11 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    (admission)) has not concluded `success` on it. It reruns no tests. The `dco` workflow runs on
    pull requests only, so the gate reads that check from the head commit of the pull request that
    merged the tag's commit.
+
+   Patch releases (vX.Y.Z, Z > 0) are cut from a `release/vX.Y` branch, not from `main`. A pull
+   request into that branch runs the `migrations` check with the patch-line rule (ADR 0085): its
+   new migrations must not rename, drop or retype anything, so the previous patch release keeps
+   working on the new schema. A new minor line starts on `main`, which may contract.
 4. Check that every job succeeded: `release` and `flavor` run side by side after `gate`, so a failed
    `flavor` still leaves a draft release and a chart whose default flavor image does not exist, and
    it skips `sign`. Then open the draft release and read the notes. `-rc.N` releases are already
