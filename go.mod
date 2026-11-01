@@ -5,6 +5,7 @@ go 1.27.3
 tool (
 	connectrpc.com/connect/v2/cmd/protoc-gen-connect-go
 	github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen
+	github.com/onsi/ginkgo/v2/ginkgo
 	github.com/pressly/goose/v3/cmd/goose
 	github.com/sqlc-dev/sqlc/cmd/sqlc
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc
