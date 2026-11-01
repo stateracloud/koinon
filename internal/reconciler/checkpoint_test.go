@@ -353,6 +353,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		})
 
 		It("stops an idle sandbox no harness ran in without a backup request", func(ctx SpecContext) {
+			coolDown(ctx, org, agent.ID)
 			now = time.Now().Add(11 * time.Minute)
 			pass(ctx)
 			Expect(osg.Calls("StopSandbox")).To(Equal(1))
@@ -362,6 +363,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 	})
 
 	Describe("the idle stop", func() {
+		BeforeEach(func(ctx SpecContext) { coolDown(ctx, org, agent.ID) }) // no keep-warm: idle stops apply
 		It("is preceded by a backup", func(ctx SpecContext) {
 			dirtyHome(ctx, org, user, agent.ID)
 			now = time.Now().Add(11 * time.Minute)
@@ -412,6 +414,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 	// The archive tier (plan item AR1, ADR 0032): a long-stopped sandbox with a complete backup is
 	// deleted with its volume; the next run gets a fresh sandbox that keeps the home generation.
 	Describe("the archive tier", func() {
+		BeforeEach(func(ctx SpecContext) { coolDown(ctx, org, agent.ID) }) // no keep-warm: idle stops apply
 		stopWith := func(ctx context.Context, ok bool) {
 			GinkgoHelper()
 			dirtyHome(ctx, org, user, agent.ID)

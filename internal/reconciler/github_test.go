@@ -94,6 +94,7 @@ var _ = Describe("The repo.read grant in the sandbox", func() {
 		Expect(err).NotTo(HaveOccurred())
 		agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: version.ID, ActivatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
+		keepWarm(ctx, org, agent.ID)
 		return agent
 	}
 
