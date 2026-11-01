@@ -72,6 +72,7 @@ type fileConfig struct {
 		ParkWarm       string `yaml:"parkWarm"`
 		ArchiveAfter   string `yaml:"archiveAfter"`
 		SandboxJobs    int    `yaml:"sandboxJobs"`
+		KeepWarmPerOrg int    `yaml:"keepWarmPerOrg"`
 		ResyncInterval string `yaml:"resyncInterval"`
 		HomeRetention  string `yaml:"homeRetention"`
 		Checkpoints    bool   `yaml:"checkpoints"`
@@ -197,6 +198,7 @@ type config struct {
 	archiveAfter   time.Duration
 	parkWarm       time.Duration
 	sandboxJobs    int
+	keepWarmPerOrg int
 	resyncInterval time.Duration
 	homeRetention  string
 	checkpoints    bool
@@ -255,6 +257,7 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.DurationVar(&c.archiveAfter, "archive-after", 0, "archive a sandbox (delete it and its volume, home checkpointed) after this long stopped (default 168h; negative turns it off; needs checkpoints)")
 	fs.DurationVar(&c.idleTimeout, "idle-timeout", 0, "stop a sandbox after this long without an active run (default 10m)")
 	fs.DurationVar(&c.parkWarm, "park-warm", 0, "keep a sandbox up this long after its run parked on a2a or input_required (default 15m)")
+	fs.IntVar(&c.keepWarmPerOrg, "keep-warm-per-org", 0, "keep-warm sandboxes an org may have (default 2; negative grants none)")
 	fs.IntVar(&c.sandboxJobs, "sandbox-jobs", 0, "sandbox start/stop jobs that run at once (default 8)")
 	fs.DurationVar(&c.resyncInterval, "resync-interval", 0, "time between passes without a wake-up (default 30s)")
 	fs.BoolVar(&c.checkpoints, "checkpoints", false, "stop, recreate and restore sandboxes around home checkpoints (koinon-agentd writes them; ADR 0032)")
@@ -348,6 +351,9 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.checkpoints, fc.Reconciler.Checkpoints)
 	if c.sandboxJobs == 0 {
 		c.sandboxJobs = fc.Reconciler.SandboxJobs
+	}
+	if c.keepWarmPerOrg == 0 {
+		c.keepWarmPerOrg = fc.Reconciler.KeepWarmPerOrg
 	}
 	orDefault(&c.githubToolsURL, fc.GitHubTools.URL)
 	orDefault(&c.mcpAskURL, fc.MCPAsk.URL)
