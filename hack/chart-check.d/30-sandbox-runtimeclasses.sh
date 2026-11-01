@@ -10,8 +10,8 @@ has "the denial message names the three classes" 'runtimeClassName kata or kata-
 has "an override of the list renders" 'object.spec.runtimeClassName in \["kata"\]' --set 'sandboxPolicy.runtimeClasses={kata}' --show-only $pol
 lacks "runc is not admitted by default" '"runc"' --show-only $pol
 
-# Only Kata classes (and runc for the dev tier) pass the schema; gvisor and an empty list do not.
-if render --set 'sandboxPolicy.runtimeClasses={kata,gvisor}' >/dev/null 2>&1; then fail "a non-Kata RuntimeClass must not render"; fi
-if render --set 'sandboxPolicy.runtimeClasses={katafake}' >/dev/null 2>&1; then fail "a name that only starts with kata must not render"; fi
+# The policy, not the schema, refuses unknown classes: the default never lists runc or gvisor,
+# and the list may name other classes (microvm, koinon-hardened) when an operator sets them.
+lacks "gvisor is not admitted by default" '"gvisor"' --show-only $pol
 if render --set 'sandboxPolicy.runtimeClasses={}' >/dev/null 2>&1; then fail "an empty RuntimeClass list must not render"; fi
-render --set 'sandboxPolicy.runtimeClasses={kata-clh}' >/dev/null 2>&1 || fail "another Kata class (kata-clh) must render"
+render --set 'sandboxPolicy.runtimeClasses={microvm}' >/dev/null 2>&1 || fail "a non-kata class (microvm) must render"

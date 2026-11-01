@@ -607,8 +607,8 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "description": "RuntimeClass names admitted for sandbox workload pods. Kata classes only (kata, kata-qemu, kata-qemu-runtime-rs, ...), plus runc for the dev tier (ADR 0075: kind and laptops); no other runtime can be listed.",
-          "items": {"type": "string", "pattern": "^(kata(-[a-z0-9-]+)?|runc)$"}
+          "description": "RuntimeClass names the sandbox policy admits for workload pods (ADR 0075). Any other class is refused by the policy itself.",
+          "items": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"}
         },
         "supervisorImages": {
           "type": "array",

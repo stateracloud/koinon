@@ -347,8 +347,10 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
 
 Kata 3.x registers a third QEMU handler, `kata-qemu-runtime-rs` (the Rust runtime). The `vm` tier's
 `sandboxPolicy.runtimeClasses` now defaults to `[kata, kata-qemu, kata-qemu-runtime-rs]`, so a
-cluster that uses it needs no override. The values schema accepts only names matching
-`^kata(-[a-z0-9-]+)?$` and, for the `dev` tier on kind, `runc`; the list cannot be empty, so no
-other runtime (gVisor, a lookalike) is admitted by configuration. Enforcement stays `enforce`
+cluster that uses it needs no override. The values schema only requires DNS-style names and a non-empty list, so the other
+decisions here (GKE Sandbox `microvm`, the rendered `koinon-hardened` class, per-org pool classes)
+stay expressible. What refuses an unknown RuntimeClass (runc, gVisor) is the policy: it admits only
+the listed names, and the chart default plus the escape suite (`runc` and `gvisor` denied,
+`kata-qemu-runtime-rs` admitted) cover that. Enforcement stays `enforce`
 (ADR 0045). The reconciler still requests `openshell.runtimeClassName` (default `kata`), which must
 be one of the admitted classes; its default is unchanged.
