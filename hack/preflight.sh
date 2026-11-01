@@ -5,35 +5,65 @@
 # AGENTS.md name; this picks them from the changed files so nobody runs them by hand one by one.
 #
 #   hack/preflight.sh [--base origin/main] [--only g1,g2] [--list] [-v]
+#   hack/preflight.sh --stop
 #
 #   --base REF    compare against REF (default origin/main); the changed files are
 #                 `git diff --name-only REF...HEAD` plus uncommitted and untracked files
 #   --only LIST   run exactly these gates (comma list), whether or not the change triggers them
 #   --list        print which gates would run and why, then exit
 #   -v            print each gate's full output
+#   --stop        stop this worktree's running preflight (pid file in its log directory) and exit;
+#                 never touches another worktree's run. Do not pkill/pgrep by script name instead.
 #
 # Gates: go tidy deps generate proto migrate adr docs chart web shell e2e gitleaks.
 # One line per gate: `go ok 12s`, or `go FAIL 3s log=<path>` followed by at most 5 lines of the
-# error. Full logs are under ${TMPDIR:-/tmp}/koinon-preflight/. The e2e gate only reports the verdict
+# error. Full logs are under ${TMPDIR:-/tmp}/koinon-preflight/<hash of the repo root>/, one directory
+# per worktree, so parallel lanes never mix logs. The e2e gate only reports the verdict
 # of hack/needs-e2e.sh and never fails. Gates never touch a cluster (KUBECONFIG=/dev/null).
 # Exit 0 when every gate that ran passed, 1 when one failed, 2 on a usage error.
 set -uo pipefail
 
 ALL="go tidy deps generate proto migrate adr docs chart web shell e2e gitleaks"
 GOFUMPT_VERSION=v0.12.0 # newest release at least 3 days old when pinned (ADR 0079)
-base=origin/main only="" list=0 verbose=0
+base=origin/main only="" list=0 verbose=0 stop=0
 while [[ $# -gt 0 ]]; do
 	case $1 in
 	--base) [[ $# -ge 2 ]] || { echo "preflight: --base needs a ref" >&2; exit 2; }; base=$2; shift 2 ;;
 	--only) [[ $# -ge 2 ]] || { echo "preflight: --only needs a list" >&2; exit 2; }; only=$2; shift 2 ;;
 	--list) list=1; shift ;;
 	-v) verbose=1; shift ;;
-	-h | --help) sed -n 4,19p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	--stop) stop=1; shift ;;
+	-h | --help) sed -n 4,22p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "preflight: unknown argument $1 (see --help)" >&2; exit 2 ;;
 	esac
 done
 
 cd "$(git rev-parse --show-toplevel)" || exit 2
+# One log directory and pid file per worktree: a hash of the repo root keys it.
+root=$(pwd -P)
+rootkey=$(printf '%s' "$root" | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-12)
+logdir=${TMPDIR:-/tmp}/koinon-preflight/$rootkey
+pidfile=$logdir/preflight.pid
+
+kill_tree() { # <pid>: SIGTERM the process and its descendants (found by parent pid, never by name)
+	local c
+	for c in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$c"; done
+	kill "$1" 2>/dev/null || true
+}
+
+if [[ $stop == 1 ]]; then
+	pid=$(cat "$pidfile" 2>/dev/null || true)
+	if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
+		kill_tree "$pid"
+		rm -f "$pidfile"
+		echo "preflight: stopped run $pid of $root"
+	else
+		rm -f "$pidfile"
+		echo "preflight: no run in progress for $root"
+	fi
+	exit 0
+fi
+
 git rev-parse --verify --quiet "$base^{commit}" >/dev/null || { echo "preflight: unknown base $base (git fetch origin?)" >&2; exit 2; }
 
 if [[ -n $only ]]; then
@@ -180,8 +210,14 @@ g_shell() {
 }
 g_gitleaks() { gitleaks git --redact --no-banner --log-opts="$base..HEAD" .; }
 
-logdir=${TMPDIR:-/tmp}/koinon-preflight
 mkdir -p "$logdir"
+oldpid=$(cat "$pidfile" 2>/dev/null || true)
+if [[ -n $oldpid ]] && kill -0 "$oldpid" 2>/dev/null; then
+	echo "preflight: a run ($oldpid) is already in progress for $root (hack/preflight.sh --stop)" >&2
+	exit 2
+fi
+echo $$ >"$pidfile"
+trap 'rm -f "$pidfile"' EXIT
 failed="" ran=0
 
 run_gate() { # <gate>
