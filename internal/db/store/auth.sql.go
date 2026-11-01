@@ -99,7 +99,7 @@ func (q *Queries) CreateOIDCLoginFlow(ctx context.Context, arg CreateOIDCLoginFl
 const createOrg = `-- name: CreateOrg :one
 INSERT INTO orgs (slug, display_name, kind, identity_mode)
 VALUES ($1, $2, $3, $4)
-RETURNING id, slug, display_name, kind, identity_mode, created_at, updated_at, deleted_at
+RETURNING id, slug, display_name, kind, identity_mode, created_at, updated_at, deleted_at, default_model, default_model_pending
 `
 
 type CreateOrgParams struct {
@@ -126,6 +126,8 @@ func (q *Queries) CreateOrg(ctx context.Context, arg CreateOrgParams) (Org, erro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.DefaultModel,
+		&i.DefaultModelPending,
 	)
 	return i, err
 }

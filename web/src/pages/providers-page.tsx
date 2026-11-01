@@ -6,6 +6,7 @@ import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
 import { ModelForm } from '@/components/model-form'
+import { OrgDefaultModel } from '@/components/org-default-model'
 import { ProviderEchoCheck } from '@/components/provider-echo-check'
 import { ProviderForm } from '@/components/provider-form'
 import { RequireAdmin } from '@/components/require-admin'
@@ -62,6 +63,7 @@ function ProvidersContent() {
       <p className="text-muted-foreground text-sm">
         A provider is the model API your agents call, such as OpenRouter or Ollama. Koinon keeps its key encrypted and hands it only to the gateway; sandboxes never see it. Providers can also be declared with a Kubernetes Secret, which are read-only here. A new or changed API key reaches the gateway through Kubernetes, which takes about three minutes; an agent run that starts sooner can fail.
       </p>
+      <OrgDefaultModel orgId={orgId} />
       {editing?.kind === 'new-provider' && <ProviderForm onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={done} onSaved={() => saved()} />}
       {refused && (
         <Alert variant="destructive" role="alert">

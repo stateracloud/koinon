@@ -1712,14 +1712,16 @@ type OidcLoginFlow struct {
 }
 
 type Org struct {
-	ID           pgtype.UUID
-	Slug         string
-	DisplayName  string
-	Kind         OrgKind
-	IdentityMode IdentityMode
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
-	DeletedAt    pgtype.Timestamptz
+	ID                  pgtype.UUID
+	Slug                string
+	DisplayName         string
+	Kind                OrgKind
+	IdentityMode        IdentityMode
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+	DeletedAt           pgtype.Timestamptz
+	DefaultModel        pgtype.Text
+	DefaultModelPending bool
 }
 
 type OrgBudget struct {

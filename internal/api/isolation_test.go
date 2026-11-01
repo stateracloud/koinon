@@ -516,6 +516,18 @@ var isolationCases = map[string]isolationCase{
 			return c.providers.DeleteModel(ctx, &providerv1alpha1.DeleteModelRequest{OrgId: org, ModelId: f.model})
 		},
 	},
+	providerv1alpha1connect.ProviderServiceGetDefaultModelProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.providers.GetDefaultModel(ctx, &providerv1alpha1.GetDefaultModelRequest{OrgId: org})
+		},
+	},
+	providerv1alpha1connect.ProviderServiceSetDefaultModelProcedure: {
+		// The model name is the org-owned input: another org's model is never served here.
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.providers.SetDefaultModel(ctx, &providerv1alpha1.SetDefaultModelRequest{OrgId: org, Model: f.modelName})
+		},
+	},
 
 	mcpserverv1alpha1connect.McpServerServiceListServersProcedure: {
 		ownOrgOK: true,
@@ -750,8 +762,9 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	})
 	Expect(err).NotTo(HaveOccurred())
 	f.provider = prov.GetProvider().GetId()
+	f.modelName = fmt.Sprintf("isolated-model-%d", dbSeq.Add(1))
 	mod, err := f.owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{
-		OrgId: f.org, ProviderId: f.provider, Name: "isolated-model",
+		OrgId: f.org, ProviderId: f.provider, Name: f.modelName,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	f.model = mod.GetModel().GetId()
