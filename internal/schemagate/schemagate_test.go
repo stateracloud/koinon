@@ -6,12 +6,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stateracloud/koinon/internal/schemagate"
 )
 
@@ -93,5 +96,26 @@ func TestGateFollowsTheSchema(t *testing.T) {
 	sc, readErr = schemagate.Schema{Version: 12}, nil
 	if g.Check(t.Context()) != nil || g.Ready() != nil {
 		t.Fatal("must recover when the schema is readable again")
+	}
+}
+
+type errRow struct{ err error }
+
+func (r errRow) Scan(...any) error { return r.err }
+
+type errQuerier struct{ err error }
+
+func (q errQuerier) QueryRow(context.Context, string, ...any) pgx.Row { return errRow{q.err} }
+
+func TestReadMissingGooseTableIsVersionZero(t *testing.T) {
+	s, err := schemagate.Read(t.Context(), errQuerier{fmt.Errorf("wrapped: %w", &pgconn.PgError{Code: "42P01", Message: "some other wording"})})
+	if err != nil || s != (schemagate.Schema{}) {
+		t.Fatalf("a missing goose_db_version table must read as version 0, got %+v, %v", s, err)
+	}
+	if _, err := schemagate.Read(t.Context(), errQuerier{&pgconn.PgError{Code: "42501", Message: "undefined_table"}}); err == nil {
+		t.Fatal("another SQL error must stay an error, whatever its message says")
+	}
+	if _, err := schemagate.Read(t.Context(), errQuerier{errors.New("connection refused")}); err == nil {
+		t.Fatal("a connection error must stay an error")
 	}
 }
