@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# The DBOS runtime on (ADR 0066, 0085): koinon-api gets its pod name as the executor ID and the
+# migrate Job creates the DBOS tables and the executor heartbeat table. No client TLS Secret: the mesh
+# provides mTLS (openshell.insecure).
+openshell:
+  address: openshell.openshell.svc:8080
+  insecure: true
+postgres:
+  mode: external
+  external:
+    secretName: koinon-db
+gateway:
+  mode: kubernetes
+networkPolicy:
+  enabled: false
+sandboxPolicy:
+  enabled: false
+# The observer needs the policy.
+sandboxObserver:
+  enabled: false
+preflight:
+  seccompProbe:
+    enabled: false
+api:
+  durable:
+    enabled: true

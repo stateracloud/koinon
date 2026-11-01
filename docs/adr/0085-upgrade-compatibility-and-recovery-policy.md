@@ -187,6 +187,17 @@ section says what the recommended option would have bought.
    create and start (`crates/openshell-driver-kubernetes/src/driver.rs:2551` and `:3368` at v0.1.5)
    and never touches running supervisor pods. So a recreated sandbox always gets the gateway's
    current image, and only a recreate moves a sandbox to a new supervisor.
+   *Amendment (#410).* The image is kept out of `specHash`, so an unreadable ConfigMap never hides a
+   flavor, resource, provider or filesystem change and existing hashes stay valid. The sandbox
+   carries a separate label, `<domain>/supervisor-image`, holding the first 16 hex characters of
+   the sha256 of the image ref (the ref has `/` and `:` and can pass 63 characters, so it is not a
+   valid label value); the reconciler compares digests. A recreate takes a slot from
+   `maxRecreatesPerPass` (default 4) before the home gate, so at most that many checkpoints and wakes
+   start per pass. While the ConfigMap cannot be read, the last image read is kept; before the first
+   successful read the image is unknown and only supervisor-driven recreates wait, while creating,
+   starting, stopping and other spec changes go on. Once an image is known, a sandbox without the
+   label (created before it, or while the image was unreadable) counts as changed and is recreated
+   once, so an existing fleet converges; with no `supervisor_image` configured nothing is recreated.
 10. **OpenShell N and N-1** (procoduck, 2026-11-01). Each Koinon release supports its pinned OpenShell
     (ADR 0077) and the previous pin, tested in CI against both. Either can be upgraded first.
 
@@ -245,8 +256,28 @@ section says what the recommended option would have bought.
 
 Implementation-level unknowns, to settle in the sub-issues:
 
-- Whether all four registered workflows are idempotent from step 0 (decision 11); a workflow that
-  is not gets a dedupe key or a version bump rule before v0.1.0.
+- Resolved (#412, decision 11): all four registered workflows are idempotent from step 0. Each is a
+  single step whose effect carries its own key, so a carried-over run finds the first run's record:
+  - `koinon.trigger-fire` (`create-task`): `CreateTriggeredTask` under dedupe source `trigger`, key
+    `TriggerFireKey(trigger, due)`.
+  - `koinon.trigger-run-now` (`run-trigger-now`): the manual-trigger source and the second fixed in
+    the input (`Now`), so a replay is the same key.
+  - `koinon.direct-message` (`deliver-direct-message`): dedupe source `direct_message`, key the
+    client's message ID.
+  - `koinon.notify` (`deliver:<kind>`): the wake handler is a state update plus a reconciler notify;
+    the question handlers insert notifications under a per-user dedupe key and re-check the
+    question's state first.
+  The rule for a new workflow is on `durable.WorkflowVersion`. `durable.CarryOver` runs at launch
+  and every minute (an older pod that still runs during a rolling upgrade can enqueue after the
+  first sweep); the fork ID is `<original>~v<version>`, so concurrent sweeps make one fork. The
+  step lists are recorded in `internal/durable/testdata/workflow_steps.json`, and
+  `TestWorkflowSteps` fails on a change without a bump. Done under decision 11 (#413): the executor
+  ID is the pod name (`-executor-id`, `KOINON_EXECUTOR_ID` from the downward API when
+  `api.durable.enabled`); each executor heartbeats into `dbos.koinon_executors` (created by the
+  migrate step); the holder of a Postgres advisory lock recovers the pending workflows of executors
+  of its own version whose heartbeat is older than 90 s (`durable.Runtime.RecoverDeadExecutors`),
+  forgets stale executors of older versions (the carry-over forks their workflows) and leaves those
+  of newer versions to a process of that version. Still to do: the pending-by-version metric.
 - The exact shape of the key-wrapping interface (wrap, unwrap, key identity and reachability
   probe) and how an adapter's credentials reach koinon-api without entering a sandbox.
 - Resolved (detection of the decision 6 rule): the lint reads a marker file, `hack/migrate-patch-line`

@@ -96,6 +96,9 @@ func NewOrgWork(rt *Runtime, cfg OrgQueueConfig) (*OrgWork, error) {
 	return w, nil
 }
 
+// Runtime is the runtime the work is enqueued on.
+func (w *OrgWork) Runtime() *Runtime { return w.rt }
+
 func (w *OrgWork) resolve(ctx context.Context, org string) (OrgLimits, error) {
 	l := OrgLimits{}
 	if w.cfg.Limits != nil {

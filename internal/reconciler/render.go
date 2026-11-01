@@ -152,11 +152,18 @@ func (r *Reconciler) sandboxSpec(org, agent pgtype.UUID, names execution.AgentNa
 	}
 	hash := specHash(spec)
 	spec.Labels[LabelSpecHash] = hash
+	// The supervisor image is not in the hash: an unknown or unreadable image must not stop the
+	// other spec changes from recreating a sandbox. It has its own label, compared separately.
+	if img, known := r.supervisorImage(); known {
+		spec.Labels[LabelSupervisorImage] = supervisorDigest(img)
+	}
 	return spec, hash
 }
 
 // specHash covers the fields OpenShell cannot change on an existing sandbox. Network rules are
-// left out: they are updated in place.
+// left out: they are updated in place. The OpenShell supervisor image (ADR 0085 decision 9) is
+// left out too: it has its own label (LabelSupervisorImage), so an image that cannot be read never
+// hides a change in the fields above, and the hashes of existing sandboxes stay valid.
 func specHash(s execution.SandboxSpec) string {
 	b, err := json.Marshal(struct {
 		Image, RuntimeClassName    string
