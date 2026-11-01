@@ -94,6 +94,44 @@ and the log line says the reason could not be read.
 
 The admin API under `/admin/v1` is plain HTTP, not Connect, and is not counted yet.
 
+### Durable workflows
+
+With `api.durable.enabled`, koinon-api runs its timers and triggers as durable (DBOS) workflows. A
+workflow waits for a process of its own *workflow version* (`durable.WorkflowVersion`, an integer that
+changes only when a workflow's steps change incompatibly, not on every release). When an upgrade bumps
+it, the first new koinon-api carries the older version's pending workflows over, re-running them from
+step 0. These gauges show what waits for which version:
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `koinon_durable_workflows_pending` | gauge | `version`: the workflow version (`legacy` for the release-version strings older builds used) | Workflows pending, enqueued or delayed, that wait for a process of that version. The running version always has a series, `0` when nothing waits. |
+| `koinon_durable_executors` | gauge | `version` | koinon-api replicas with a fresh heartbeat, by the version they run. |
+| `koinon_durable_metrics_read_failing` | gauge | none | 1 while this replica cannot read the counts from the database; the two gauges above are then missing, not zero. |
+
+Every replica reads the same database rows, so every replica reports the same value. Aggregate with
+`max by (version)`, never `sum`, or the number is multiplied by the replica count. The values are cached
+for 15 seconds.
+
+A rolling upgrade shows the old version's count falling to zero as the carry-over completes. Pending
+work that stays at a version with no live executor is stranded: a rollback target that is gone, or a
+carry-over that keeps failing (the koinon-api log says why). The chart renders this alert when
+`metrics.prometheusRule.enabled` is true (it needs the prometheus-operator `PrometheusRule` CRD;
+`metrics.prometheusRule.durableStrandedFor` sets the wait, 15 minutes by default):
+
+```yaml
+- alert: KoinonDurableWorkflowsStranded
+  expr: |
+    max by (version) (koinon_durable_workflows_pending) > 0
+    unless on (version)
+    max by (version) (koinon_durable_executors > 0)
+  for: 15m
+- alert: KoinonDurableMetricsUnreadable
+  expr: max(koinon_durable_metrics_read_failing) == 1
+  for: 10m
+```
+
+Without prometheus-operator, load the same two rules into your own Prometheus.
+
 ## Scraping
 
 The chart gives each component a metrics Service, `<release>-koinon-<component>-metrics` (port
