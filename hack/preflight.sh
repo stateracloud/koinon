@@ -164,7 +164,7 @@ g_go() {
 
 g_tidy() {
 	local tmp rc=0
-	tmp=$(mktemp -d) || return 1
+	tmp=$(mktemp -d "${TMPDIR:-/tmp}/preflight-tidy.XXXXXX") || return 1
 	cp go.mod "$tmp/go.mod"
 	[[ -f go.sum ]] && cp go.sum "$tmp/go.sum"
 	go mod tidy || rc=$?

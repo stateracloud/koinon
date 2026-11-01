@@ -7,7 +7,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 lint=$here/adr-lint.sh
 index=$here/adr-index.sh
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/adr-lint-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 fail=0
 
