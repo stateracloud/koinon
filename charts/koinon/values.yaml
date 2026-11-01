@@ -550,6 +550,18 @@ metrics:
     skipCapabilityCheck: false
     # Scrape interval, for example 30s; empty uses the Prometheus default.
     interval: ""
+  prometheusRule:
+    # Alerting rules as a prometheus-operator PrometheusRule (templates/prometheusrule.yaml; the
+    # rules are documented in the metrics guide). Needs the monitoring.coreos.com/v1 PrometheusRule
+    # CRD: enabling it without the CRD fails the install, unless skipCapabilityCheck is set.
+    enabled: false
+    # Extra labels, for example the release label your Prometheus selects rules on.
+    labels: {}
+    skipCapabilityCheck: false
+    # How long durable workflows may wait for a version no koinon-api runs before the alert fires.
+    # It covers a rolling upgrade, where the new pods carry the old version's workflows over within
+    # a sweep (a minute).
+    durableStrandedFor: 15m
 
 # The sandbox observer (ADR 0078): when OpenShell says only "ConfigurationPending" about a sandbox
 # that never became ready, the reconciler reads the sandbox's pod (get only, by name) to find out why:
