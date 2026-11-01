@@ -144,7 +144,7 @@ function taskItem(ev: TaskEvent): TimelineItem {
       // agentd starts a new harness session when the sandbox's home volume was
       // replaced since the task's session was stored: {message,
       // previousSessionId, sessionId}.
-      return { key, at, type: 'note', text: str(p.message) || "The agent's workspace was reset, so this run starts a new session.", runId }
+      return { key, at, type: 'note', text: str(p.message) || "The agent's home was reset, so this run starts a new session.", runId }
     case 'sandbox.recreated':
     case 'sandbox.work_lost':
     case 'agent.unhealthy':

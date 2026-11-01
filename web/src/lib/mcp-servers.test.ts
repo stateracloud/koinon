@@ -71,7 +71,7 @@ describe('buildUpdateRequest', () => {
 
 describe('labels', () => {
   it('names tiers and health states', () => {
-    expect([Tier.ASK, Tier.AUTO, Tier.NEVER].map(tierLabel)).toEqual(['Ask', 'Auto', 'Never'])
+    expect([Tier.ASK, Tier.AUTO, Tier.NEVER].map(tierLabel)).toEqual(['Ask', 'Allow', 'Deny'])
     expect([Health.HEALTHY, Health.UNHEALTHY, Health.UNKNOWN, Health.UNSPECIFIED].map(healthLabel)).toEqual(['Healthy', 'Unhealthy', 'Unknown', 'Unknown'])
   })
   it('places a server refusal at its field', () => {
