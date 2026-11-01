@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Offline tests for hack/preflight.sh (#391): per-worktree log directories, the pid file and --stop
+# stopping only its own worktree's run. Each fixture repo carries a stub hack/adr-lint.sh.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+pre=$here/preflight.sh
+fail=0
+ok() { echo "ok: $1"; }
+bad() { echo "FAIL: $1"; fail=1; }
+eq() { if [[ $2 == "$3" ]]; then ok "$1"; else bad "$1 (got '$2', want '$3')"; fi; }
+
+tmp=$(mktemp -d)
+pids=""
+cleanup() {
+	local p
+	for p in $pids; do kill "$p" 2>/dev/null || true; done
+	rm -rf "$tmp"
+}
+trap cleanup EXIT
+export KUBECONFIG=/dev/null TMPDIR=$tmp/tmp GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
+mkdir -p "$TMPDIR"
+
+mkrepo() { # <name> <adr-lint body>
+	local d=$tmp/$1
+	mkdir -p "$d/hack" "$d/docs/adr"
+	printf '#!/usr/bin/env bash\n%s\n' "$2" >"$d/hack/adr-lint.sh"
+	chmod +x "$d/hack/adr-lint.sh"
+	echo x >"$d/docs/adr/0001-x.md"
+	git -C "$d" init -q
+	git -C "$d" add -A
+	git -C "$d" commit -q -m init
+	git -C "$d" update-ref refs/remotes/origin/main HEAD
+	echo x >>"$d/docs/adr/0001-x.md" # uncommitted change selects the adr gate
+}
+
+mkrepo a 'echo log-a'
+mkrepo b 'echo log-b'
+mkrepo slowa 'sleep 60'
+mkrepo slowb 'sleep 60'
+
+(cd "$tmp/a" && "$pre" --only adr >"$tmp/a.out")
+(cd "$tmp/b" && "$pre" --only adr >"$tmp/b.out")
+eq "run passes" "$(tail -1 "$tmp/a.out")" "preflight ok (1 gates)"
+dirs=$(find "$TMPDIR/koinon-preflight" -name adr.log | wc -l | tr -d ' ')
+eq "two worktrees, two log directories" "$dirs" "2"
+la=$(sed -n 's/.*log=\(.*\)/\1/p' "$tmp/a.out" | head -1)
+[[ -z $la ]] && la=$(find "$TMPDIR/koinon-preflight" -name adr.log -exec grep -l log-a {} +)
+eq "a's log holds only a's output" "$(cat "$la")" "log-a"
+[[ -z $(find "$TMPDIR/koinon-preflight" -name preflight.pid) ]] && ok "pid file removed after a run" || bad "stale pid file"
+
+# --stop with nothing running
+eq "stop with no run" "$(cd "$tmp/a" && "$pre" --stop)" "preflight: no run in progress for $(cd "$tmp/a" && pwd -P)"
+
+# --stop stops only this worktree's run
+(cd "$tmp/slowa" && exec "$pre" --only adr >/dev/null 2>&1) &
+pa=$!
+(cd "$tmp/slowb" && exec "$pre" --only adr >/dev/null 2>&1) &
+pb=$!
+pids="$pa $pb"
+for _ in $(seq 1 100); do
+	[[ $(find "$TMPDIR/koinon-preflight" -name preflight.pid | wc -l | tr -d ' ') -ge 2 ]] && break
+	python3 -c 'import time; time.sleep(0.1)'
+done
+eq "both runs have pid files" "$(find "$TMPDIR/koinon-preflight" -name preflight.pid | wc -l | tr -d ' ')" "2"
+(cd "$tmp/slowa" && "$pre" --stop) >/dev/null
+for _ in $(seq 1 50); do
+	kill -0 "$pa" 2>/dev/null || break
+	python3 -c 'import time; time.sleep(0.1)'
+done
+kill -0 "$pa" 2>/dev/null && bad "--stop did not stop its own run" || ok "--stop stops its own run"
+kill -0 "$pb" 2>/dev/null && ok "--stop leaves the other worktree's run" || bad "--stop killed another worktree's run"
+
+# a second run in a worktree that is already running is refused
+rc=0
+(cd "$tmp/slowb" && "$pre" --only adr >/dev/null 2>&1) || rc=$?
+eq "second concurrent run is refused" "$rc" "2"
+(cd "$tmp/slowb" && "$pre" --stop) >/dev/null
+
+[[ $fail -eq 0 ]] && echo "all ok"
+exit "$fail"

@@ -30,7 +30,9 @@ carries only the task, the worktree and the scope. The shell tool is `Bash`.
   `hack/pr-wait.sh`. For anything else: `run_in_background`, then keep working or end the turn; wait
   on a condition with Monitor and an until-loop that tests it (the Monitor tool needs a
   `description`). Never sleep-then-read, never Monitor a bare sleep, and never `pgrep`/`pkill`
-  another lane's processes.
+  another lane's processes. Never `pkill`/`pgrep` by script name (`pkill -f hack/preflight.sh` kills
+  every lane's run): stop your own preflight with `hack/preflight.sh --stop`, which uses the pid file
+  of your worktree's log directory.
 - Never `git stash`: it is shared across worktrees. Commit, or leave the change in place.
 
 ## Check and ship
