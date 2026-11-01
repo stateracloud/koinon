@@ -9,8 +9,8 @@
 ## Context
 
 ADR 0045 makes Kata the default runtime class. The chart ships
-`openshell.runtimeClassName: kata`, and the sandbox VAP admits only `[kata, kata-qemu]`
-(`charts/koinon/values.yaml:380`, `:512`). In practice Kata is the only supported path: the docs
+`openshell.runtimeClassName: kata`, and the sandbox VAP admits `[kata, kata-qemu, kata-qemu-runtime-rs]`
+(since the 2026-11-01 amendment, #442; `charts/koinon/values.yaml:380`, `:512`). In practice Kata is the only supported path: the docs
 allow `runc` only on kind ("Do not use it for real work", `prerequisites.md:101`).
 
 Andre's target users are platform teams on managed clusters. Most EKS organisations run Bottlerocket,
@@ -342,3 +342,16 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
 - https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/
 - https://kubernetes.io/docs/concepts/containers/runtime-class/#scheduling
 - https://github.com/bottlerocket-os/bottlerocket/issues/4070
+
+## Amendment (2026-11-01): kata-qemu-runtime-rs in the vm tier (#442)
+
+Kata 4.x's kata-deploy (4.3.1) creates `kata-qemu-runtime-rs` (the Rust runtime) by default and marks
+the Go-runtime `kata-qemu` deprecated. The `vm` tier's
+`sandboxPolicy.runtimeClasses` now defaults to `[kata, kata-qemu, kata-qemu-runtime-rs]`, so a
+cluster that uses it needs no override. The values schema only requires DNS-style names and a non-empty list, so the other
+decisions here (GKE Sandbox `microvm`, the rendered `koinon-hardened` class, per-org pool classes)
+stay expressible. What refuses an unknown RuntimeClass (runc, gVisor) is the policy: it admits only
+the listed names, and the chart default plus the escape suite (`runc` and `gvisor` denied,
+`kata-qemu-runtime-rs` admitted) cover that. Enforcement stays `enforce`
+(ADR 0045). The reconciler still requests `openshell.runtimeClassName` (default `kata`), which must
+be one of the admitted classes (the chart fails the render otherwise); its default is unchanged.

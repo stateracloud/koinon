@@ -606,6 +606,8 @@
         "runtimeClasses": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
+          "description": "RuntimeClass names the sandbox policy admits for workload pods (ADR 0075). Any other class is refused by the policy itself.",
           "items": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"}
         },
         "supervisorImages": {

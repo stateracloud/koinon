@@ -127,7 +127,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			as[user] = kubernetes.NewForConfigOrDie(c)
 			asDynamic[user] = dynamic.NewForConfigOrDie(c)
 		}
-		for name, handler := range map[string]string{"kata": "kata", "kata-qemu": "kata-qemu", "runc": "runc"} {
+		for name, handler := range map[string]string{"kata": "kata", "kata-qemu": "kata-qemu", "kata-qemu-runtime-rs": "kata-qemu-runtime-rs", "runc": "runc", "gvisor": "runsc"} {
 			_, err := admin.NodeV1().RuntimeClasses().Create(ctx, &nodev1.RuntimeClass{
 				ObjectMeta: metav1.ObjectMeta{Name: name}, Handler: handler,
 			}, metav1.CreateOptions{})
@@ -173,6 +173,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 	It("admits a compliant workload pod from the Agent Sandbox controller (control)", func(ctx SpecContext) {
 		Expect(createPod(ctx, controllerUser, ns, workload("ok"))).To(Succeed())
 		Expect(createPod(ctx, controllerUser, ns, workload("ok-qemu", func(p *corev1.Pod) { p.Spec.RuntimeClassName = new("kata-qemu") }))).To(Succeed())
+		Expect(createPod(ctx, controllerUser, ns, workload("ok-qemu-rs", func(p *corev1.Pod) { p.Spec.RuntimeClassName = new("kata-qemu-runtime-rs") }))).To(Succeed())
 	})
 
 	It("applies only in sandbox namespaces (control)", func(ctx SpecContext) {
@@ -204,8 +205,9 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 	})
 
 	It("denies workload pods without an allowed runtime class", func(ctx SpecContext) {
-		denied(createPod(ctx, controllerUser, ns, workload("runc", func(p *corev1.Pod) { p.Spec.RuntimeClassName = new("runc") })), "must use runtimeClassName kata or kata-qemu")
-		denied(createPod(ctx, controllerUser, ns, workload("default-runtime", func(p *corev1.Pod) { p.Spec.RuntimeClassName = nil })), "must use runtimeClassName kata or kata-qemu")
+		denied(createPod(ctx, controllerUser, ns, workload("runc", func(p *corev1.Pod) { p.Spec.RuntimeClassName = new("runc") })), "must use runtimeClassName kata or kata-qemu or kata-qemu-runtime-rs")
+		denied(createPod(ctx, controllerUser, ns, workload("gvisor", func(p *corev1.Pod) { p.Spec.RuntimeClassName = new("gvisor") })), "must use runtimeClassName kata or kata-qemu or kata-qemu-runtime-rs")
+		denied(createPod(ctx, controllerUser, ns, workload("default-runtime", func(p *corev1.Pod) { p.Spec.RuntimeClassName = nil })), "must use runtimeClassName kata or kata-qemu or kata-qemu-runtime-rs")
 	})
 
 	It("denies host namespaces, hostPath volumes and privileged containers", func(ctx SpecContext) {
