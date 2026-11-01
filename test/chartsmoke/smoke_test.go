@@ -199,6 +199,22 @@ func describeMode(name, valuesFile string) {
 		It("starts koinon-agentd and answers its probes", func(ctx SpecContext) {
 			ready["koinon-agentd"] = startDeployment(ctx, rn, r, "koinon-agentd")
 			accounted = append(accounted, "koinon-agentd")
+			// The drain on SIGTERM must fit in the pod's grace period (ADR 0085): the kubelet
+			// would otherwise kill agentd mid-drain and the leases would not be released.
+			ps := r.deployment("koinon-agentd").Spec.Template.Spec
+			var drain time.Duration
+			for _, c := range ps.Containers {
+				for _, e := range c.Env {
+					if e.Name == "KOINON_DRAIN_DEADLINE" {
+						d, err := time.ParseDuration(e.Value)
+						Expect(err).NotTo(HaveOccurred())
+						drain = d
+					}
+				}
+			}
+			Expect(drain).To(BeNumerically(">", 0), "koinon-agentd gets KOINON_DRAIN_DEADLINE")
+			Expect(ps.TerminationGracePeriodSeconds).NotTo(BeNil())
+			Expect(time.Duration(*ps.TerminationGracePeriodSeconds) * time.Second).To(BeNumerically(">=", drain+30*time.Second))
 		}, SpecTimeout(3*time.Minute))
 
 		It("keeps every Deployment running and permitted", func(ctx SpecContext) {

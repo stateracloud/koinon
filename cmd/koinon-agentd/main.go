@@ -82,6 +82,8 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.pool.OwnerID, "owner-id", "", "this replica's name in run leases (default $POD_NAME, else the host name)")
 	fs.IntVar(&c.pool.Workers, "workers", 8, "runs driven at once")
 	fs.DurationVar(&c.pool.Lease, "lease", 30*time.Second, "run lease; another replica takes a run over when it expires")
+	fs.DurationVar(&c.pool.DrainDeadline, "drain-deadline", agentd.DefaultDrainDeadline,
+		"on SIGTERM, how long turns in progress get to finish before their runs are handed off (ADR 0085); the pod's terminationGracePeriodSeconds must be this plus 30s")
 	fs.DurationVar(&c.pool.Heartbeat, "heartbeat", 0, "lease renewal and cancel check interval (default lease/3)")
 	fs.DurationVar(&c.pool.Poll, "poll", time.Second, "how often idle workers look for runs")
 	fs.DurationVar(&c.pool.SandboxTimeout, "sandbox-timeout", 5*time.Minute, "how long a run waits for its sandbox")

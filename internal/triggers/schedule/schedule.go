@@ -259,6 +259,8 @@ func (s *Scheduler) plan(tr triggers.Active, sched cron.Schedule, loc *time.Loca
 	return fire, wakeAgent
 }
 
+const stepCreateTask = "create-task"
+
 // fire is the workflow of one due time.
 func (s *Scheduler) fire(c dbos.Context, in FireInput) (string, error) {
 	select {
@@ -267,7 +269,7 @@ func (s *Scheduler) fire(c dbos.Context, in FireInput) (string, error) {
 		return "", c.Err()
 	}
 	id, err := dbos.RunAsStep(c, func(ctx context.Context) (string, error) { return s.createTask(ctx, in) },
-		dbos.WithStepName("create-task"), dbos.WithStepMaxRetries(5))
+		dbos.WithStepName(stepCreateTask), dbos.WithStepMaxRetries(5))
 	return id, err
 }
 

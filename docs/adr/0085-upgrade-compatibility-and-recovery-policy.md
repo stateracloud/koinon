@@ -245,8 +245,23 @@ section says what the recommended option would have bought.
 
 Implementation-level unknowns, to settle in the sub-issues:
 
-- Whether all four registered workflows are idempotent from step 0 (decision 11); a workflow that
-  is not gets a dedupe key or a version bump rule before v0.1.0.
+- Resolved (#412, decision 11): all four registered workflows are idempotent from step 0. Each is a
+  single step whose effect carries its own key, so a carried-over run finds the first run's record:
+  - `koinon.trigger-fire` (`create-task`): `CreateTriggeredTask` under dedupe source `trigger`, key
+    `TriggerFireKey(trigger, due)`.
+  - `koinon.trigger-run-now` (`run-trigger-now`): the manual-trigger source and the second fixed in
+    the input (`Now`), so a replay is the same key.
+  - `koinon.direct-message` (`deliver-direct-message`): dedupe source `direct_message`, key the
+    client's message ID.
+  - `koinon.notify` (`deliver:<kind>`): the wake handler is a state update plus a reconciler notify;
+    the question handlers insert notifications under a per-user dedupe key and re-check the
+    question's state first.
+  The rule for a new workflow is on `durable.WorkflowVersion`. `durable.CarryOver` runs at launch
+  and every minute (an older pod that still runs during a rolling upgrade can enqueue after the
+  first sweep); the fork ID is `<original>~v<version>`, so concurrent sweeps make one fork. The
+  step lists are recorded in `internal/durable/testdata/workflow_steps.json`, and
+  `TestWorkflowSteps` fails on a change without a bump. Still to do under decision 11: the executor
+  ID, its heartbeat and the stale-executor recovery job, and the pending-by-version metric.
 - The exact shape of the key-wrapping interface (wrap, unwrap, key identity and reachability
   probe) and how an adapter's credentials reach koinon-api without entering a sandbox.
 - Resolved (detection of the decision 6 rule): the lint reads a marker file, `hack/migrate-patch-line`
