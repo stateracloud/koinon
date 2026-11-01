@@ -158,8 +158,14 @@ g_go() {
 		# shellcheck disable=SC2086
 		go vet $pkgs
 	fi
+	# hack/go-test.sh, not bare go test: its verdict reports a suite that skipped for a missing
+	# requirement (no Docker in a sandbox) as SKIPPED and one that did not run as a failure (#507).
+	local reports rc=0
+	reports=$(mktemp -d "${TMPDIR:-/tmp}/preflight-go.XXXXXX") || return 1
 	# shellcheck disable=SC2086
-	go test $pkgs
+	REPORT_DIR=$reports hack/go-test.sh $pkgs || rc=$?
+	rm -rf "$reports"
+	return "$rc"
 }
 
 g_tidy() {

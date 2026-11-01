@@ -46,6 +46,8 @@ mkdir -p "$seed/hack" "$seed/internal/foo" "$seed/charts/koinon" "$seed/web" "$s
 for s in migrate-lint adr-lint docs-check chart-check dep-age-check; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
+# The Go gate runs hack/go-test.sh (and its verdict, #507), not bare go test.
+printf '#!/usr/bin/env bash\necho "go-test.sh $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\n[[ ${FAKE_GO_TEST_RC:-0} -eq 0 ]] || echo "--- FAIL: TestX"\nexit "${FAKE_GO_TEST_RC:-0}"\n' >"$seed/hack/go-test.sh"
 printf '#!/usr/bin/env bash\necho "needs-e2e.sh $*" >>"$FAKE_LOG"\nrc=${FAKE_NEEDS_RC:-1}\n[[ $rc -ne 0 ]] || echo "kind e2e needed"\nexit "$rc"\n' >"$seed/hack/needs-e2e.sh"
 chmod +x "$seed/hack/"*.sh
 printf 'module example.com/m\n\ngo 1.25\n' >"$seed/go.mod"
@@ -156,7 +158,7 @@ check "gitleaks ok line" has '^gitleaks ok [0-9]*s$' "$tmp/r1"
 check "e2e verdict printed, not failing" has '^e2e info not needed' "$tmp/r1"
 check "summary line" has '^preflight ok (' "$tmp/r1"
 check "golangci-lint on the changed package" has '^golangci-lint run ./internal/foo ' "$FAKE_LOG"
-check "go test on the changed package" has '^go test ./internal/foo ' "$FAKE_LOG"
+check "go-test.sh (with its verdict, #507) on the changed package" has '^go-test.sh ./internal/foo ' "$FAKE_LOG"
 check "every gate ran with KUBECONFIG=/dev/null" hasnt 'KUBECONFIG=\]' "$FAKE_LOG"
 check "gitleaks scans base..HEAD" has 'gitleaks git --redact --no-banner --log-opts=origin/main..HEAD' "$FAKE_LOG"
 check "chart gate did not run" hasnt 'chart-check' "$FAKE_LOG"
@@ -247,7 +249,7 @@ check "docs-check ran" has '^docs-check.sh' "$FAKE_LOG"
 check "chart-check ran" has '^chart-check.sh' "$FAKE_LOG"
 check "pnpm ran for web" has '^pnpm ' "$FAKE_LOG"
 check "shellcheck on the changed script" has '^shellcheck hack/new.sh' "$FAKE_LOG"
-check "no Go change: no go test" hasnt '^go test' "$FAKE_LOG"
+check "no Go change: no go test" hasnt '^go-test.sh' "$FAKE_LOG"
 export FAKE_CHART_CHECK_RC=1
 rc=$(pf "$tmp/c2")
 check "a failing checker fails preflight" eq "$rc" 1
