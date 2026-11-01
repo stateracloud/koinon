@@ -100,19 +100,30 @@ func (r *runner) liveMisses(ctx context.Context) ([]missingMCPServer, error) {
 
 // liveMissing compares what the gateway listed with the tools each server should offer. Tools carry
 // the gateway's prefix: <org>-<server>_<tool> (auto tier) or <org>-<server>-ask_<tool> (ask tier).
+//
+// Reachability is judged by the auto target only: it points at the remote server, so its tools are
+// listed only when the server answered. The ask target points at koinon-api's /mcp-ask proxy, which
+// lists the tools from Postgres and never contacts the remote server, so a listed ask tool proves
+// the grant but not that the server is up. A server with auto-tier tools therefore needs at least one
+// of them listed. A server with ask-tier tools only gets the ask tools as a grant check; it is not
+// proven reachable (the health record still applies).
 func liveMissing(rows []store.ListMCPServersToCheckLiveRow, listed []string) []missingMCPServer {
 	var out []missingMCPServer
 	for _, s := range rows {
-		var want []string
+		var auto, ask []string
 		for _, t := range s.AutoTools {
 			if mcpservers.ToolNameProblem(s.OrgSlug, s.Name, t) == "" {
-				want = append(want, mcpservers.TargetName(s.OrgSlug, s.Name)+"_"+t)
+				auto = append(auto, mcpservers.TargetName(s.OrgSlug, s.Name)+"_"+t)
 			}
 		}
 		for _, t := range s.AskTools {
 			if mcpservers.ToolNameProblem(s.OrgSlug, s.Name, t) == "" {
-				want = append(want, mcpservers.AskTargetName(s.OrgSlug, s.Name)+"_"+t)
+				ask = append(ask, mcpservers.AskTargetName(s.OrgSlug, s.Name)+"_"+t)
 			}
+		}
+		want := auto
+		if len(auto) == 0 {
+			want = ask
 		}
 		if len(want) == 0 || slices.ContainsFunc(want, func(w string) bool { return slices.Contains(listed, w) }) {
 			continue

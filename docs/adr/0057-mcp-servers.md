@@ -242,7 +242,12 @@ lists to the agent right now.
 
 - **The credential is the agent's own gateway key.** `tools/list` under that key shows exactly what the
   harness will see, so it proves the agent's actual grants (an unreachable server, a rejected server
-  credential and a missing grant all look the same: none of the server's tools). It needs no new
+  credential and a missing grant all look the same: none of the server's auto-tier tools). Reachability
+  is judged by the auto target only: the ask target (`<org>-<server>-ask`) is koinon-api's `/mcp-ask`
+  proxy, which lists the tools from Postgres and never contacts the remote server, so a listed ask tool
+  proves the grant, not that the server is up. A server with auto-tier tools must have one listed; a
+  server with ask-tier tools only is checked for the grant and is not proven reachable (the health
+  record still applies). It needs no new
   credential. Rejected: a Koinon check key with every MCP grant (a cross-org privileged credential that
   would not prove the agent's own grants), and a harness report over ACP (it needs a Koinon ACP
   extension, and runs only after the harness is up).
