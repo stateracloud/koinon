@@ -245,7 +245,7 @@ func (o *Owner) end(ctx context.Context, turn Turn, outcome store.RunState, reas
 		return o.finishIn(ctx, q, src, outcome, reason, class, extra)
 	})
 	if err != nil {
-		return o.Err(ctx, "finish the run", err)
+		return o.failed(ctx, turn, "finish the run", err)
 	}
 	o.finished(outcome)
 	o.cfg.Log.Info("run finished", "outcome", outcome, "reason", reason)
@@ -359,10 +359,14 @@ func (o *Owner) Requeue(ctx context.Context, turn Turn, reason string) error {
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
+		o.FenceFromDB(ctx)
+		if k := o.FenceKind(); k != FenceLost && k != FenceAbandon {
+			o.CloseTurn(ctx, turn)
+		}
 		return ErrFenced
 	}
 	if err != nil {
-		return o.Err(ctx, "requeue the run", err)
+		return o.failed(ctx, turn, "requeue the run", err)
 	}
 	if o.cfg.Metrics != nil {
 		o.cfg.Metrics.Requeued()
@@ -465,7 +469,7 @@ func (o *Owner) SandboxUnavailable(ctx context.Context, turn Turn, u Unavailable
 		return nil
 	})
 	if err != nil {
-		return o.Err(ctx, "fail the run", err)
+		return o.failed(ctx, turn, "fail the run", err)
 	}
 	o.finished(store.RunStateFailed)
 	if o.cfg.Metrics != nil {

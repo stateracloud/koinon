@@ -254,6 +254,30 @@ var _ = Describe("Fail", func() {
 	})
 })
 
+var _ = Describe("a verb that loses the race with a cancel", func() {
+	It("still ends the turn row when Fail or Requeue is fenced as canceled", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		turn := w.openTurn(ctx)
+		_, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: w.org, ID: w.run.ID, OutcomeReason: "user canceled"})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(w.own.Fail(ctx, turn, "late", store.RunFailureClassFatal)).To(MatchError(runoutcome.ErrFenced))
+		Expect(w.own.FenceKind()).To(Equal(runoutcome.FenceCanceled))
+		Expect(w.turnRow(ctx).EndedAt.Valid).To(BeTrue())
+		Expect(w.turnRow(ctx).EndReason.String).To(Equal("failed"))
+	})
+
+	It("ends the turn row of a requeue fenced by a cancel", func(ctx SpecContext) {
+		w := newWorld(ctx, false)
+		turn := w.openTurn(ctx)
+		_, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: w.org, ID: w.run.ID, OutcomeReason: "user canceled"})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(w.own.Requeue(ctx, turn, "late")).To(MatchError(runoutcome.ErrFenced))
+		Expect(w.turnRow(ctx).EndedAt.Valid).To(BeTrue())
+	})
+})
+
 var _ = Describe("Cancel", func() {
 	It("cancels with the failure class and the extra fields, which do not override the class", func(ctx SpecContext) {
 		w := newWorld(ctx, true)
