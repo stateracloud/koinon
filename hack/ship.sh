@@ -57,6 +57,9 @@ say() { echo "$*"; }
 cd "$(git rev-parse --show-toplevel)"
 branch=$(git symbolic-ref --short -q HEAD) || fail "detached HEAD; check out a feature branch"
 [[ $branch != main && $branch != master ]] || fail "refusing to ship from $branch; use a feature branch"
+# A branch is <type>/<N>-<slug> (the claim and the PR hang off N). A stray name, such as the one a
+# broken test helper once checked out in a real worktree (#485), is refused before anything is pushed.
+[[ $branch =~ ^[a-z]+/[0-9]+-[a-z0-9][a-z0-9._-]*$ ]] || fail "branch '$branch' is not <type>/<N>-<slug>; rename it (git branch -m) before shipping"
 
 # Identity: commits and the merge commit use git config; refuse an address that is not allowed.
 name=$(git config user.name || true)
