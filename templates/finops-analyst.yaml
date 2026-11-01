@@ -18,6 +18,10 @@ spec:
     default: opencode
   harness:
     pluginInstalls: false
+  # Sandbox size (ADR 0083): an estimate for this agent's work; the platform bounds clamp it.
+  resources:
+    cpu: {request: 250m, limit: "2"}
+    memory: {request: 1536Mi, limit: 2Gi}
   model:
     name: default
   grants: []
@@ -38,7 +42,8 @@ spec:
   limits:
     run:
       maxDuration: 20m
-      maxTokens: 1000000
+      maxModelRequests: 100
+      maxSpendUSD: "0.75"
     spendUSD: "1.00"
   instructions: |
     # FinOps analyst

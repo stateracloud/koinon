@@ -198,6 +198,14 @@ check_image() { # check_image <name[:tag]@sha256:digest | name:tag>
 	else
 		host=registry-1.docker.io; repo=$name; [[ $repo == */* ]] || repo="library/$repo"
 	fi
+	# Reserved names (RFC 2606, RFC 6761) are test fixtures, never something a build pulls.
+	case "${host%%:*}" in
+	example.com | example.net | example.org | *.example.com | *.example.net | *.example.org | \
+		*.example | *.test | *.invalid | *.localhost)
+		echo "SKIP    image ${ref:0:70} (reserved test domain)"
+		return 0
+		;;
+	esac
 	rest=${digest:-${tag:-latest}}
 	if ! idx=$(image_manifest "$host" "$repo" "$rest"); then
 		report "image $ref" unknown "$host: manifest not readable anonymously"
@@ -309,9 +317,25 @@ while IFS=$'\t' read -r file line; do
 	done
 done < <(added_lines . ':!*.md' ':!*.lock' ':!*pnpm-lock.yaml' ':!go.sum' ':!docs/' ':!**/testdata/**' ':!.github/dependabot.yml' ':!*.json')
 
+# expand_vars <file> <url>: replaces ${NAME} and $NAME in a URL with the default the same file gives
+# NAME (`ARG NAME=…`, `ENV NAME=…`, `NAME=…` or `: "${NAME:=…}"`), so a version kept in a variable is
+# dated. A name the file does not define is left as it is, and dating it then fails (fail closed).
+expand_vars() {
+	local file=$1 url=$2 name val
+	while [[ $url =~ \$\{?([A-Za-z_][A-Za-z0-9_]*)\}? ]]; do
+		name=${BASH_REMATCH[1]}
+		val=$(sed -nE "s/^[[:space:]]*(ARG|ENV)?[[:space:]]*${name}=[\"']?([^\"' ]+)[\"']?.*/\\2/p; s/.*\\\$\\{${name}:=([^}]+)\\}.*/\\1/p" "$file" 2>/dev/null | head -1)
+		[[ -n $val ]] || break
+		url=${url//"\${$name}"/$val}
+		url=${url//"\$$name"/$val}
+	done
+	printf '%s' "$url"
+}
+
 # 4. Release assets, raw tags and npm tarballs fetched by Dockerfiles and scripts.
 while IFS=$'\t' read -r file line; do
 	for url in $(grep -Eo 'https://(github\.com/[^/ ]+/[^/ ]+/releases/download/[^ ]+|raw\.githubusercontent\.com/[^ ]+|registry\.npmjs\.org/[^ ]+\.tgz)' <<<"$line" | sed 's/[\\"]*$//'); do
+		url=$(expand_vars "$file" "$url")
 		once "url $url" && check_url "$url"
 	done
 done < <(added_lines '**/Dockerfile*' 'Dockerfile*' 'hack/*.sh' 'test/e2e/**/*.sh')

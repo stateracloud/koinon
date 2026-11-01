@@ -9,8 +9,8 @@
 ## Context
 
 ADR 0045 makes Kata the default runtime class. The chart ships
-`openshell.runtimeClassName: kata`, and the sandbox VAP admits only `[kata, kata-qemu]`
-(`charts/koinon/values.yaml:380`, `:512`). In practice Kata is the only supported path: the docs
+`openshell.runtimeClassName: kata`, and the sandbox VAP admits `[kata, kata-qemu, kata-qemu-runtime-rs]`
+(since the 2026-11-01 amendment, #442; `charts/koinon/values.yaml:380`, `:512`). In practice Kata is the only supported path: the docs
 allow `runc` only on kind ("Do not use it for real work", `prerequisites.md:101`).
 
 procoduck's target users are platform teams on managed clusters. Most EKS organisations run Bottlerocket,
@@ -242,6 +242,27 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
     The Rivet request is drafted after the rc.6 re-run (procoduck, 2026-10-28). The status stays
     "pending qualification" until the run passes.
 
+### Amendment 2026-10-30: no wildcard egress hosts
+
+13. **The `vm` and `hardened` tiers refuse wildcard egress hosts.**
+    - OpenShell documents that a wildcard host rule (`*.example.com`, `**`, any glob) reopens a
+      DNS-label channel: a sandbox can resolve `<secret>.attacker.example` and the lookup leaks the
+      data without a connection (`network-rules.mdx@v0.1.5:634-656`, issue #266).
+    - **Where it is refused.** Every host that reaches a sandbox policy is an exact name today:
+      connector hosts come from a base URL that must be a bare `https` host
+      (`connectors.Locate`) and from `connector.schema.json`, whose `networkRule.host` now has the
+      same pattern as `host.host`; the gateway and the npm registry are constants. The checks:
+      1. the API refuses a pattern base URL, provider URL or MCP server URL with a message that
+         names the host and says to write it exactly (`catalog.URLPolicy`, `connectors.Locate`);
+      2. koinon-api and koinon-reconciler refuse to start with a pattern in
+         `egress.allowedInternalHosts` (`catalog.ValidateAllowedHosts`);
+      3. the OpenShell backend refuses to render a policy or provider profile with a pattern host
+         (`execution.CheckEgressHost`), as defence in depth.
+    - **Today the refusal is unconditional.** The tier setting is not wired into the Go services
+      yet, and no feature needs a wildcard. When a tier needs one, only `dev` may admit it, by an
+      explicit setting that names the tier; the refusal message then names the tier and the setting
+      (decision 8, "Refusals").
+
 ## Consequences
 
 - **Koinon runs on the clusters platform teams have.** Bottlerocket, EKS Auto Mode and ordinary
@@ -321,3 +342,16 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
 - https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/
 - https://kubernetes.io/docs/concepts/containers/runtime-class/#scheduling
 - https://github.com/bottlerocket-os/bottlerocket/issues/4070
+
+## Amendment (2026-11-01): kata-qemu-runtime-rs in the vm tier (#442)
+
+Kata 4.x's kata-deploy (4.3.1) creates `kata-qemu-runtime-rs` (the Rust runtime) by default and marks
+the Go-runtime `kata-qemu` deprecated. The `vm` tier's
+`sandboxPolicy.runtimeClasses` now defaults to `[kata, kata-qemu, kata-qemu-runtime-rs]`, so a
+cluster that uses it needs no override. The values schema only requires DNS-style names and a non-empty list, so the other
+decisions here (GKE Sandbox `microvm`, the rendered `koinon-hardened` class, per-org pool classes)
+stay expressible. What refuses an unknown RuntimeClass (runc, gVisor) is the policy: it admits only
+the listed names, and the chart default plus the escape suite (`runc` and `gvisor` denied,
+`kata-qemu-runtime-rs` admitted) cover that. Enforcement stays `enforce`
+(ADR 0045). The reconciler still requests `openshell.runtimeClassName` (default `kata`), which must
+be one of the admitted classes (the chart fails the render otherwise); its default is unchanged.

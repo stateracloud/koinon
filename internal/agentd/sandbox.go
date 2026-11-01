@@ -105,7 +105,7 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 			if sb.Message != "" {
 				reason += ": " + sb.Message
 			}
-			return store.AgentSandbox{}, &failure{reason: reason}
+			return store.AgentSandbox{}, &failure{reason: reason, class: classSandboxUnavailable}
 		default: // pending, starting, stopping, stopped, deleting
 			// Deleting is a recreation in progress: for a changed spec, a stuck sandbox (ADR 0054)
 			// or one found in Error or Completed. The next pass creates the new sandbox, so the

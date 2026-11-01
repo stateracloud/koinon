@@ -18,6 +18,8 @@ import (
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // update rewrites golden files: go test ./internal/gateway/kubernetes -args -update
@@ -59,7 +61,7 @@ func fullState() gateway.State {
 	s.AddKey(fixedKey("k-bbbbbbbbbbbb", agentB, "test-b"))
 	s.AddKey(fixedKey("k-gggggggggggg", agentG, "test-g"))
 	s.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
-	s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 4.25, Window: 24 * time.Hour, Generation: "1792627200-750000000"})
+	s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("4.25"), Window: 24 * time.Hour, Generation: "1792627200-750000000"})
 	s.SetLimit(agentB, &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: 24 * time.Hour, Generation: "failed"})
 	s.GrantTools(agentA,
 		gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request"}},
@@ -77,7 +79,14 @@ func formatsState() gateway.State {
 		{
 			Org: "acme", Name: "claude", Type: "anthropic", BaseURL: "https://api.anthropic.com/v1",
 			APIKeyFile: "/secrets/providers/acme-claude", AnthropicWorkspaceID: "wrkspc_01ExampleExample",
-			Models: []gateway.Model{{Name: "claude-haiku-4-5", Format: modelformat.Anthropic, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}}},
+			Models: []gateway.Model{
+				{Name: "claude-haiku-4-5", Format: modelformat.Anthropic, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
+				// A model whose thinking row pins a beta: the gateway sets it. No catalog row pins one
+				// since the explicit forms of #316, so the capability is spelled out here.
+				{Name: "claude-haiku-5-5", Format: modelformat.Anthropic, Thinking: thinking.Capability{
+					Thinks: thinking.Always, On: thinking.AdaptiveSummarized, Betas: []string{thinking.BindingBeta},
+				}, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
+			},
 		},
 		{
 			Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: "https://openrouter.ai/api/v1",
@@ -92,7 +101,7 @@ func formatsState() gateway.State {
 func opts() gwk8s.Options {
 	return gwk8s.Options{
 		Namespace: "koinon", ProviderKeysSecret: "koinon-gateway-providers",
-		AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318"},
+		AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318", TokenSecret: "koinon-otlp-token", TokenSecretKey: "token"},
 	}
 }
 
@@ -121,8 +130,35 @@ var _ = Describe("Render", func() {
 		Expect(string(dump(r))).To(Equal(string(want)))
 	}
 
+	It("refuses a malformed OTLP receiver when a token Secret is set, instead of exporting without the token", func() {
+		for _, bad := range []string{"http://koinon-api.koinon.svc:4318", "koinon-api.koinon.svc", "koinon-api.koinon.svc:http", ":4318"} {
+			o := opts()
+			o.AccessLogOTLP = &standalone.OTLPExport{HostPort: bad, TokenSecret: "koinon-otlp-token", TokenSecretKey: "token"}
+			_, err := gwk8s.Render(fullState(), o)
+			Expect(err).To(MatchError(ContainSubstring("OTLP receiver")), bad)
+		}
+	})
+
 	It("matches the golden file", func() { golden(fullState(), "full") })
 	It("matches the golden file for models in each format (ADR 0069)", func() { golden(formatsState(), "model-formats") })
+
+	It("logs who answered (ADR 0056 amendment 2026-10-29)", func() {
+		r, err := gwk8s.Render(fullState(), opts())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(dump(r))).To(ContainSubstring("name: " + gateway.LogFieldUpstream))
+	})
+
+	// agentgateway v1.7.0 records the body of EVERY response on a listener (up to 32 MiB per LLM
+	// response, held for the whole stream) as soon as any log or tracer expression mentions
+	// response.body or response.bodyPrefix, detected from the expression text and not narrowed by a
+	// status guard. Koinon's gateway has 512Mi and buffers nothing (ADR 0056 amendment 2026-10-29).
+	It("renders no expression that reads a response body", func() {
+		for name, s := range map[string]gateway.State{"full": fullState(), "model-formats": formatsState()} {
+			r, err := gwk8s.Render(s, opts())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(dump(r))).NotTo(ContainSubstring("response.body"), name)
+		}
+	})
 
 	It("is deterministic and independent of input order", func() {
 		a, err := gwk8s.Render(fullState(), opts())
@@ -156,7 +192,7 @@ var _ = Describe("Render", func() {
 		Expect(cm.U.Object["data"]).NotTo(HaveKey("k-bbbbbbbbbbbb"))
 
 		s := fullState()
-		s.SetLimit(agentB, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: 24 * time.Hour})
+		s.SetLimit(agentB, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("1"), Window: 24 * time.Hour})
 		again, err := gwk8s.Render(s, opts())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(again.Revoked).To(BeEmpty())
@@ -187,7 +223,8 @@ var _ = Describe("Render", func() {
 		Expect(pol["transformations"]).To(ConsistOf(HaveKeyWithValue("field", "tools")),
 			"no stream_options; the agent's server tools are dropped")
 		Expect(pol["authorization"]).To(HaveKeyWithValue("policy", HaveKeyWithValue("matchExpressions", ConsistOf(
-			`apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-4-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers)`))), "mcp_servers is refused")
+			`apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-4-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers) && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")`))),
+			"mcp_servers is refused, and so is a gateway key in the URL or in a header but authorization (#262)")
 		Expect(pol["headers"]).To(Equal(map[string]any{"request": map[string]any{
 			"set": []any{
 				map[string]any{"name": "anthropic-version", "value": "2023-06-01"},
@@ -195,6 +232,16 @@ var _ = Describe("Render", func() {
 			},
 			"remove": []any{"anthropic-beta"},
 		}}))
+
+		By("a model whose row pins a beta gets it set, replacing whatever the client sends")
+		think := spec("claude-haiku-5-5")["policies"].(map[string]any)
+		Expect(think["headers"]).To(Equal(map[string]any{"request": map[string]any{
+			"set": []any{
+				map[string]any{"name": "anthropic-version", "value": "2023-06-01"},
+				map[string]any{"name": "anthropic-workspace-id", "value": "wrkspc_01ExampleExample"},
+				map[string]any{"name": "anthropic-beta", "value": thinking.BindingBeta},
+			},
+		}}), "a set replaces the client's header, so nothing is removed")
 
 		chat := spec("open/model")
 		Expect(chat["custom"]).To(HaveKeyWithValue("formats", []any{map[string]any{"type": "Completions"}}))
@@ -230,7 +277,7 @@ var _ = Describe("Render", func() {
 		check := gateway.AgentRef{Org: "acme", Name: gateway.ModelCheckAgentName}
 		s := fullState()
 		s.AddKey(fixedKey("k-cccccccccccc", check, "test-check"))
-		s.SetLimit(check, &gateway.Limit{Unit: gateway.USD, Amount: 0.10, Window: 24 * time.Hour, Generation: "d"})
+		s.SetLimit(check, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("0.10"), Window: 24 * time.Hour, Generation: "d"})
 		s.RestrictModels(check, "deepseek/deepseek-v4.1-flash", "not-served/model")
 		r, err := gwk8s.Render(s, opts())
 		Expect(err).NotTo(HaveOccurred())
@@ -348,6 +395,17 @@ var _ = Describe("Render", func() {
 		Expect(targets(gateway.State{MCP: []gateway.MCPTarget{{Name: "github", URL: "http://g.example.com/mcp"}}})).To(HaveLen(1))
 	})
 
+	It("refuses an MCP request with a gateway key in a header but authorization (#262)", func() {
+		r, err := gwk8s.Render(fullState(), opts())
+		Expect(err).NotTo(HaveOccurred())
+		spec := find(r, gwk8s.KindPolicy, "koinon-gateway-mcp").U.Object["spec"]
+		Expect(spec).To(HaveKeyWithValue("traffic", HaveKeyWithValue("authorization", And(
+			HaveKeyWithValue("action", "Require"),
+			HaveKeyWithValue("policy", HaveKeyWithValue("matchExpressions", ConsistOf(
+				`!toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")`)))))),
+			"the allowlisted headers carry what the client chose, and this CRD cannot allowlist at all")
+	})
+
 	It("refuses a provider key without a Secret to hold it", func() {
 		o := opts()
 		o.ProviderKeysSecret = ""
@@ -358,7 +416,8 @@ var _ = Describe("Render", func() {
 	It("holds no key material, only hashes", func() {
 		r, err := gwk8s.Render(fullState(), opts())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(string(dump(r))).NotTo(ContainSubstring("kgw_"))
+		// The admission rules name the prefix (gateway.NoKeyInURLExpr); a key is the prefix and 43 characters.
+		Expect(string(dump(r))).NotTo(MatchRegexp(`kgw_[A-Za-z0-9_-]{43}`))
 	})
 })
 

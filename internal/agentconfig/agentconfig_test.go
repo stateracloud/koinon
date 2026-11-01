@@ -41,6 +41,33 @@ var _ = Describe("Harness settings", func() {
 	})
 })
 
+var _ = Describe("The thinking setting", func() {
+	It("copies the template's starting value and leaves it out when the template names none", func() {
+		raw, err := agentconfig.FromTemplate(&templates.Template{Spec: templates.Spec{Model: templates.Model{Name: "default", Thinking: "off"}}}, "sha256:x").Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).To(ContainSubstring(`"thinking":"off"`))
+		cfg, err := agentconfig.Parse(raw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.Thinking).To(Equal("off"))
+
+		raw, err = agentconfig.FromTemplate(&templates.Template{}, "sha256:x").Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).NotTo(ContainSubstring("thinking"))
+	})
+})
+
+var _ = Describe("WebEgress", func() {
+	// No grant opens arbitrary web hosts yet (ADR 0080); a grant type that does adds its case here.
+	It("is false for a version with the usual grants", func() {
+		c := agentconfig.Config{
+			Grants:  []templates.Grant{{Connector: "github", Scopes: []string{"repo.read"}, Preset: templates.PresetStandard}},
+			Harness: templates.Harness{PluginInstalls: true},
+		}
+		Expect(c.WebEgress()).To(BeFalse())
+		Expect(agentconfig.Config{}.WebEgress()).To(BeFalse())
+	})
+})
+
 var _ = Describe("IsEphemeral", func() {
 	It("is off by default, including for a config stored before it existed", func() {
 		cfg, err := agentconfig.Parse([]byte(`{"instructions":"x"}`))
@@ -118,5 +145,31 @@ var _ = Describe("QuestionTimers", func() {
 		r, e := cfg.QuestionTimers()
 		Expect(r).To(BeZero())
 		Expect(e).To(Equal(6 * time.Hour))
+	})
+})
+
+var _ = Describe("RunLimits", func() {
+	It("gives a template that sets only the deprecated maxTokens the platform defaults", func() {
+		t := &templates.Template{Spec: templates.Spec{Limits: templates.Limits{
+			Run: templates.RunLimits{MaxDuration: templates.Duration{Duration: 10 * time.Minute}, MaxTokens: 2_000_000}, //nolint:staticcheck // the deprecated field is the case under test
+		}}}
+		raw, err := agentconfig.FromTemplate(t, "sha256:x").Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		cfg, err := agentconfig.Parse(raw)
+		Expect(err).NotTo(HaveOccurred())
+		l := cfg.RunLimits()
+		Expect(l.WallClock).To(Equal(10 * time.Minute))
+		Expect(l.MaxModelRequests).To(Equal(int64(200)))
+		Expect(l.MaxSpend.String()).To(Equal(agentconfig.DefaultMaxSpend.String()))
+		Expect(l.MaxSpend.String()).To(Equal("5.00"))
+	})
+
+	It("keeps a template's explicit values", func() {
+		t := &templates.Template{Spec: templates.Spec{Limits: templates.Limits{
+			Run: templates.RunLimits{MaxModelRequests: 100, MaxSpendUSD: templates.USD(75)},
+		}}}
+		l := agentconfig.FromTemplate(t, "sha256:x").RunLimits()
+		Expect(l.MaxModelRequests).To(Equal(int64(100)))
+		Expect(l.MaxSpend.String()).To(Equal("0.75"))
 	})
 })

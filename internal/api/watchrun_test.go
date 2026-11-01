@@ -113,11 +113,15 @@ var _ = Describe("WatchRun", func() {
 
 		ev := w.nextEvent(time.Second)
 		Expect(ev.GetKind()).To(Equal("run.canceled"))
+		// The final message is a terminal snapshot that follows the last event (#140):
+		// the server reads events, then the run; a snapshot sent before the event is not enough.
 		var last *runv1alpha1.WatchRunResponse
 		for msg := range w.items {
+			Expect(msg.GetEvent()).To(BeNil(), "no event after run.canceled")
 			last = msg
 		}
 		Expect(<-w.done).To(Succeed())
+		Expect(last).NotTo(BeNil(), "a run snapshot follows the last event")
 		Expect(last.GetRun().GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_CANCELED))
 	})
 

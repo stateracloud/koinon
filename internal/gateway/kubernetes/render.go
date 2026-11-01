@@ -152,6 +152,11 @@ func (o Options) withDefaults() Options {
 // agent's keys out of the key ConfigMap, which revokes them without a restart; the next Apply with
 // an amount above zero puts them back. This is the S2 fallback of plan item G2.
 func Render(s gateway.State, o Options) (Rendered, error) {
+	if ex := o.AccessLogOTLP; ex != nil && ex.TokenSecret != "" {
+		if _, _, err := ex.SplitHostPort(); err != nil {
+			return Rendered{}, fmt.Errorf("kubernetes: %w", err)
+		}
+	}
 	if err := s.Validate(); err != nil {
 		return Rendered{}, err
 	}
@@ -334,10 +339,20 @@ func (b *builder) gatewayObjects() {
 		attr(gateway.LogFieldMaxTokens, `llm.params.max_tokens`),
 		attr(gateway.LogFieldRequestBytes, `int(request.headers["content-length"])`),
 		attr(gateway.LogFieldResponseID, gateway.ResponseIDCEL),
+		attr(gateway.LogFieldUpstream, gateway.UpstreamCEL),
 	}
 	access := map[string]any{"attributes": map[string]any{"add": attrs}}
 	if b.o.AccessLogOTLP != nil {
 		otlp := map[string]any{"url": "http://" + b.o.AccessLogOTLP.HostPort, "protocol": "HTTP"}
+		if ex := b.o.AccessLogOTLP; ex.TokenSecret != "" {
+			// The policy cannot carry a credential itself: the export goes through a Backend whose
+			// auth policy reads the token from the Secret (the controller hands it to the proxy,
+			// as with provider keys).
+			if ref, ok := b.otlpBackend(ex); ok {
+				delete(otlp, "url")
+				otlp["backendRef"] = ref
+			}
+		}
 		if p := b.o.AccessLogOTLP.Path; p != "" && p != "/v1/logs" {
 			otlp["path"] = p
 		}
@@ -347,6 +362,30 @@ func (b *builder) gatewayObjects() {
 		"targetRefs": b.policyTargets(KindGateway, name),
 		"frontend":   map[string]any{"accessLog": access},
 	}, nil, nil)
+}
+
+// otlpBackend adds the Backend for the OTLP receiver, with the bearer token from ex.TokenSecret as
+// its auth, and returns the reference the access-log policy names. It reports false for a
+// host:port it cannot split; Render refuses such an Options first, so the token requirement is
+// never silently dropped.
+func (b *builder) otlpBackend(ex *standalone.OTLPExport) (map[string]any, bool) {
+	host, port, err := ex.SplitHostPort()
+	if err != nil {
+		return nil, false // Render has refused it already
+	}
+	key := ex.TokenSecretKey
+	if key == "" {
+		key = "token"
+	}
+	name := b.name("otlp")
+	b.add("", groupAgent+"/v1alpha1", KindBackend, name, map[string]any{
+		"static": map[string]any{"host": host, "port": int64(port)},
+		"policies": map[string]any{"auth": map[string]any{
+			// Default location: "Authorization: Bearer <value>".
+			"secretRef": map[string]any{"name": ex.TokenSecret, "key": key},
+		}},
+	}, nil, nil)
+	return map[string]any{"group": groupAgent, "kind": KindBackend, "name": name}, true
 }
 
 func attr(name, expr string) any { return map[string]any{"name": name, "expression": expr} }
@@ -429,6 +468,9 @@ func (b *builder) models(s gateway.State) {
 			for _, f := range rd.Reject {
 				admit += " && !has(llmRequest." + f + ")"
 			}
+			// A request that carries a gateway key in the URL or in a header but the key header is refused
+			// (#262); the CRD cannot allowlist headers, so this is the only header guard here.
+			admit += " && " + gateway.NoKeyInURLExpr() + " && " + gateway.NoKeyInHeadersExpr()
 			policies := map[string]any{
 				"authorization": map[string]any{
 					"action": "Require",
@@ -438,7 +480,7 @@ func (b *builder) models(s gateway.State) {
 			if t := b.modelTransformations(m, rd); len(t) > 0 {
 				policies["transformations"] = t
 			}
-			if hs, rm := rd.RequestHeaders(p), rd.RemoveHeaders(p); len(hs) > 0 || len(rm) > 0 {
+			if hs, rm := rd.RequestHeaders(p, m), rd.RemoveHeaders(p, m); len(hs) > 0 || len(rm) > 0 {
 				req := map[string]any{}
 				if len(hs) > 0 {
 					set := make([]any, len(hs))
@@ -632,7 +674,14 @@ func (b *builder) mcp(s gateway.State) {
 	// injected, while a Backend policy runs after it and would strip it.
 	b.add("", groupAgent+"/v1alpha1", KindPolicy, name, map[string]any{
 		"targetRefs": b.policyTargets(KindHTTPRoute, name),
-		"traffic":    map[string]any{"transformation": map[string]any{"request": request}},
+		"traffic": map[string]any{
+			"transformation": map[string]any{"request": request},
+			// A request that carries a gateway key in a header but the key header is refused (#262).
+			"authorization": map[string]any{
+				"action": "Require",
+				"policy": map[string]any{"matchExpressions": []any{gateway.NoKeyInHeadersExpr()}},
+			},
+		},
 	}, nil, nil)
 }
 

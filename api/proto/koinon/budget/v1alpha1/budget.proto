@@ -46,6 +46,16 @@ service BudgetService {
   // a new agent.
   rpc SetAgentBudget(SetAgentBudgetRequest) returns (SetAgentBudgetResponse);
 
+  // GetAgentRunLimits returns the limits a run of the agent gets: the effective values, the
+  // template's defaults and the admin's overrides (ADR 0081).
+  rpc GetAgentRunLimits(GetAgentRunLimitsRequest) returns (GetAgentRunLimitsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // SetAgentRunLimits replaces the agent's overrides of its run limits. A zero value clears that
+  // override; all zero clears them all. It applies to runs queued afterwards.
+  rpc SetAgentRunLimits(SetAgentRunLimitsRequest) returns (SetAgentRunLimitsResponse);
+
   // ListNotifications returns the caller's notifications in this org, newest first: budget
   // warnings at 80% and stops at 100%. Owners and admins receive them; platform admins also
   // those about the platform ceiling.
@@ -150,6 +160,46 @@ message SetAgentBudgetRequest {
 
 message SetAgentBudgetResponse {
   AgentBudget budget = 1;
+}
+
+// RunLimitValues are the limits of one run. Zero (or empty) means unset.
+message RunLimitValues {
+  // max_model_requests counts every model request through the agent's key.
+  int64 max_model_requests = 1;
+  // max_spend_usd is a USD decimal string.
+  string max_spend_usd = 2;
+  // max_duration_seconds is the wall-clock limit.
+  int64 max_duration_seconds = 3;
+}
+
+message AgentRunLimits {
+  string agent_id = 1;
+  string agent_name = 2;
+  // effective is what a run queued now gets: the override, else the template's value.
+  RunLimitValues effective = 3;
+  // template_default is the agent's active version (the template's values).
+  RunLimitValues template_default = 4;
+  // override is what an admin set; unset fields follow the template.
+  RunLimitValues override = 5;
+}
+
+message GetAgentRunLimitsRequest {
+  string org_id = 1;
+  string agent_id = 2;
+}
+
+message GetAgentRunLimitsResponse {
+  AgentRunLimits limits = 1;
+}
+
+message SetAgentRunLimitsRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  RunLimitValues override = 3;
+}
+
+message SetAgentRunLimitsResponse {
+  AgentRunLimits limits = 1;
 }
 
 message Notification {

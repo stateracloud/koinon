@@ -22,7 +22,7 @@ import (
 // budgetStop returns the cancellation that records err as a budget stop when err is a gateway
 // refusal (401 or 429) and a limit of the run's scope is reached, and err itself otherwise. The
 // limits are the ledger's: the agent's daily limit, the org's monthly cap and the platform
-// ceiling, in their current windows. A ledger that cannot be read leaves err as it is.
+// ceiling, in their current windows, and the run's own spend limit. A ledger that cannot be read leaves err as it is.
 func (r *runner) budgetStop(ctx context.Context, err error) error {
 	var f *failure
 	if !errors.As(err, &f) || !f.gateway {
@@ -31,6 +31,11 @@ func (r *runner) budgetStop(ctx context.Context, err error) error {
 	st, berr := budget.Compute(ctx, r.q, r.run.OrgID, r.run.AgentID, money.FromCents(r.vcfg.Limits.SpendUSD.Cents()), time.Now())
 	if berr != nil {
 		r.log.Warn("checking the budget after a gateway refusal failed", "err", berr)
+		return err
+	}
+	// The run's own spend limit is a level of the key too (ADR 0081).
+	if st, berr = st.WithRun(ctx, r.q, r.run); berr != nil {
+		r.log.Warn("checking the run's spend after a gateway refusal failed", "err", berr)
 		return err
 	}
 	// The limit the ledger and the reconciler name (budget.Status.Pick): the widest one reached.
@@ -42,6 +47,9 @@ func (r *runner) budgetStop(ctx context.Context, err error) error {
 	msg := l.StopMessage()
 	extra := l.StopDetail()
 	extra["reason"] = string(scheduler.ReasonSpendLimit)
+	if l.Name == budget.RunSpend {
+		extra["reason"] = string(scheduler.ReasonRunSpendCap)
+	}
 	extra["message"] = msg
 	return &canceled{reason: msg, class: classBudget, extra: extra}
 }

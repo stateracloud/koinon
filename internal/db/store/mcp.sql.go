@@ -15,7 +15,7 @@ const acknowledgeMCPToolReview = `-- name: AcknowledgeMCPToolReview :one
 UPDATE mcp_tools
 SET review_reason = NULL
 WHERE org_id = $1 AND server_id = $2 AND name = $3
-RETURNING org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at
+RETURNING org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at, description_original_length, description_capped, description_cleaned
 `
 
 type AcknowledgeMCPToolReviewParams struct {
@@ -43,6 +43,9 @@ func (q *Queries) AcknowledgeMCPToolReview(ctx context.Context, arg AcknowledgeM
 		&i.RequiresTwoApprovers,
 		&i.TierSetBy,
 		&i.TierSetAt,
+		&i.DescriptionOriginalLength,
+		&i.DescriptionCapped,
+		&i.DescriptionCleaned,
 	)
 	return i, err
 }
@@ -220,7 +223,7 @@ func (q *Queries) GetMCPServer(ctx context.Context, arg GetMCPServerParams) (Mcp
 }
 
 const getMCPTool = `-- name: GetMCPTool :one
-SELECT org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at FROM mcp_tools
+SELECT org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at, description_original_length, description_capped, description_cleaned FROM mcp_tools
 WHERE org_id = $1 AND server_id = $2 AND name = $3
 `
 
@@ -249,6 +252,9 @@ func (q *Queries) GetMCPTool(ctx context.Context, arg GetMCPToolParams) (McpTool
 		&i.RequiresTwoApprovers,
 		&i.TierSetBy,
 		&i.TierSetAt,
+		&i.DescriptionOriginalLength,
+		&i.DescriptionCapped,
+		&i.DescriptionCleaned,
 	)
 	return i, err
 }
@@ -316,19 +322,24 @@ func (q *Queries) InsertAgentMCPServer(ctx context.Context, arg InsertAgentMCPSe
 }
 
 const insertMCPTool = `-- name: InsertMCPTool :one
-INSERT INTO mcp_tools (org_id, server_id, name, description, input_schema, content_hash, read_only_hint)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at
+INSERT INTO mcp_tools (org_id, server_id, name, description, input_schema, content_hash, read_only_hint,
+                       description_original_length, description_capped, description_cleaned)
+VALUES ($1, $2, $3, $4, $5, $6, $7,
+        $8, $9, $10)
+RETURNING org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at, description_original_length, description_capped, description_cleaned
 `
 
 type InsertMCPToolParams struct {
-	OrgID        pgtype.UUID
-	ServerID     pgtype.UUID
-	Name         string
-	Description  string
-	InputSchema  []byte
-	ContentHash  string
-	ReadOnlyHint bool
+	OrgID                     pgtype.UUID
+	ServerID                  pgtype.UUID
+	Name                      string
+	Description               string
+	InputSchema               []byte
+	ContentHash               string
+	ReadOnlyHint              bool
+	DescriptionOriginalLength int64
+	DescriptionCapped         bool
+	DescriptionCleaned        bool
 }
 
 func (q *Queries) InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error) {
@@ -340,6 +351,9 @@ func (q *Queries) InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (M
 		arg.InputSchema,
 		arg.ContentHash,
 		arg.ReadOnlyHint,
+		arg.DescriptionOriginalLength,
+		arg.DescriptionCapped,
+		arg.DescriptionCleaned,
 	)
 	var i McpTool
 	err := row.Scan(
@@ -358,6 +372,9 @@ func (q *Queries) InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (M
 		&i.RequiresTwoApprovers,
 		&i.TierSetBy,
 		&i.TierSetAt,
+		&i.DescriptionOriginalLength,
+		&i.DescriptionCapped,
+		&i.DescriptionCleaned,
 	)
 	return i, err
 }
@@ -509,7 +526,7 @@ func (q *Queries) ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpS
 }
 
 const listMCPTools = `-- name: ListMCPTools :many
-SELECT org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at FROM mcp_tools
+SELECT org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at, description_original_length, description_capped, description_cleaned FROM mcp_tools
 WHERE org_id = $1
 ORDER BY server_id, name
 `
@@ -539,6 +556,9 @@ func (q *Queries) ListMCPTools(ctx context.Context, orgID pgtype.UUID) ([]McpToo
 			&i.RequiresTwoApprovers,
 			&i.TierSetBy,
 			&i.TierSetAt,
+			&i.DescriptionOriginalLength,
+			&i.DescriptionCapped,
+			&i.DescriptionCleaned,
 		); err != nil {
 			return nil, err
 		}
@@ -551,7 +571,7 @@ func (q *Queries) ListMCPTools(ctx context.Context, orgID pgtype.UUID) ([]McpToo
 }
 
 const listMCPToolsOfServer = `-- name: ListMCPToolsOfServer :many
-SELECT org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at FROM mcp_tools
+SELECT org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at, description_original_length, description_capped, description_cleaned FROM mcp_tools
 WHERE org_id = $1 AND server_id = $2
 ORDER BY name
 `
@@ -586,6 +606,61 @@ func (q *Queries) ListMCPToolsOfServer(ctx context.Context, arg ListMCPToolsOfSe
 			&i.RequiresTwoApprovers,
 			&i.TierSetBy,
 			&i.TierSetAt,
+			&i.DescriptionOriginalLength,
+			&i.DescriptionCapped,
+			&i.DescriptionCleaned,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMissingMCPServersOfAgent = `-- name: ListMissingMCPServersOfAgent :many
+SELECT s.name, s.health::text AS health, s.health_reason, s.consecutive_failures
+FROM agent_mcp_servers a
+JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
+WHERE a.org_id = $1 AND a.agent_id = $2
+  AND s.disabled_reason IS NULL AND s.removed_at IS NULL
+  AND (s.health = 'unhealthy' OR (s.health = 'healthy' AND s.consecutive_failures > 0))
+ORDER BY s.name
+`
+
+type ListMissingMCPServersOfAgentParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+type ListMissingMCPServersOfAgentRow struct {
+	Name                string
+	Health              string
+	HealthReason        pgtype.Text
+	ConsecutiveFailures int32
+}
+
+// The servers an agent may use that Koinon has found not serving tools right now, and has not
+// withdrawn on purpose (a disabled or removed server is only mentioned in the note, see
+// ListUnavailableMCPServersOfAgent): unhealthy, or failing probes that have not yet reached the
+// threshold, which is what a server overloaded for a minute looks like (issue #326). agentd checks
+// this before it starts the harness; a server never probed (unknown) is not a miss.
+func (q *Queries) ListMissingMCPServersOfAgent(ctx context.Context, arg ListMissingMCPServersOfAgentParams) ([]ListMissingMCPServersOfAgentRow, error) {
+	rows, err := q.db.Query(ctx, listMissingMCPServersOfAgent, arg.OrgID, arg.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMissingMCPServersOfAgentRow
+	for rows.Next() {
+		var i ListMissingMCPServersOfAgentRow
+		if err := rows.Scan(
+			&i.Name,
+			&i.Health,
+			&i.HealthReason,
+			&i.ConsecutiveFailures,
 		); err != nil {
 			return nil, err
 		}
@@ -818,7 +893,7 @@ const setMCPToolTier = `-- name: SetMCPToolTier :one
 UPDATE mcp_tools
 SET tier = $1, review_reason = NULL, tier_set_by = $2, tier_set_at = now()
 WHERE org_id = $3 AND server_id = $4 AND name = $5
-RETURNING org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at
+RETURNING org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at, description_original_length, description_capped, description_cleaned
 `
 
 type SetMCPToolTierParams struct {
@@ -854,6 +929,9 @@ func (q *Queries) SetMCPToolTier(ctx context.Context, arg SetMCPToolTierParams) 
 		&i.RequiresTwoApprovers,
 		&i.TierSetBy,
 		&i.TierSetAt,
+		&i.DescriptionOriginalLength,
+		&i.DescriptionCapped,
+		&i.DescriptionCleaned,
 	)
 	return i, err
 }
@@ -862,7 +940,7 @@ const setMCPToolTwoApprovers = `-- name: SetMCPToolTwoApprovers :one
 UPDATE mcp_tools
 SET requires_two_approvers = $1
 WHERE org_id = $2 AND server_id = $3 AND name = $4
-RETURNING org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at
+RETURNING org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at, description_original_length, description_capped, description_cleaned
 `
 
 type SetMCPToolTwoApproversParams struct {
@@ -896,6 +974,9 @@ func (q *Queries) SetMCPToolTwoApprovers(ctx context.Context, arg SetMCPToolTwoA
 		&i.RequiresTwoApprovers,
 		&i.TierSetBy,
 		&i.TierSetAt,
+		&i.DescriptionOriginalLength,
+		&i.DescriptionCapped,
+		&i.DescriptionCleaned,
 	)
 	return i, err
 }
@@ -920,20 +1001,30 @@ func (q *Queries) ShadowUIMCPServers(ctx context.Context, arg ShadowUIMCPServers
 
 const touchMCPTool = `-- name: TouchMCPTool :exec
 UPDATE mcp_tools
-SET present = true, last_seen_at = now(), read_only_hint = $1
-WHERE org_id = $2 AND server_id = $3 AND name = $4
+SET present = true, last_seen_at = now(), read_only_hint = $1,
+    description_original_length = $2, description_capped = $3,
+    description_cleaned = $4
+WHERE org_id = $5 AND server_id = $6 AND name = $7
 `
 
 type TouchMCPToolParams struct {
-	ReadOnlyHint bool
-	OrgID        pgtype.UUID
-	ServerID     pgtype.UUID
-	Name         string
+	ReadOnlyHint              bool
+	DescriptionOriginalLength int64
+	DescriptionCapped         bool
+	DescriptionCleaned        bool
+	OrgID                     pgtype.UUID
+	ServerID                  pgtype.UUID
+	Name                      string
 }
 
+// The sanitised content is unchanged; the report columns still follow what the server published, so a
+// row synced before they existed gets its values on the next sync.
 func (q *Queries) TouchMCPTool(ctx context.Context, arg TouchMCPToolParams) error {
 	_, err := q.db.Exec(ctx, touchMCPTool,
 		arg.ReadOnlyHint,
+		arg.DescriptionOriginalLength,
+		arg.DescriptionCapped,
+		arg.DescriptionCleaned,
 		arg.OrgID,
 		arg.ServerID,
 		arg.Name,
@@ -1075,23 +1166,28 @@ const updateMCPToolContent = `-- name: UpdateMCPToolContent :one
 UPDATE mcp_tools
 SET description = $1, input_schema = $2, content_hash = $3,
     read_only_hint = $4, present = true, last_seen_at = now(),
-    review_reason = $5,
+    description_original_length = $5, description_capped = $6,
+    description_cleaned = $7,
+    review_reason = $8,
     tier = CASE WHEN tier = 'auto' THEN 'ask'::mcp_tier ELSE tier END,
     tier_set_by = CASE WHEN tier = 'auto' THEN 'koinon (the tool changed)' ELSE tier_set_by END,
     tier_set_at = CASE WHEN tier = 'auto' THEN now() ELSE tier_set_at END
-WHERE org_id = $6 AND server_id = $7 AND name = $8
-RETURNING org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at
+WHERE org_id = $9 AND server_id = $10 AND name = $11
+RETURNING org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at, description_original_length, description_capped, description_cleaned
 `
 
 type UpdateMCPToolContentParams struct {
-	Description  string
-	InputSchema  []byte
-	ContentHash  string
-	ReadOnlyHint bool
-	ReviewReason pgtype.Text
-	OrgID        pgtype.UUID
-	ServerID     pgtype.UUID
-	Name         string
+	Description               string
+	InputSchema               []byte
+	ContentHash               string
+	ReadOnlyHint              bool
+	DescriptionOriginalLength int64
+	DescriptionCapped         bool
+	DescriptionCleaned        bool
+	ReviewReason              pgtype.Text
+	OrgID                     pgtype.UUID
+	ServerID                  pgtype.UUID
+	Name                      string
 }
 
 // The server published a different description or schema for a known tool: remember it and flag
@@ -1102,6 +1198,9 @@ func (q *Queries) UpdateMCPToolContent(ctx context.Context, arg UpdateMCPToolCon
 		arg.InputSchema,
 		arg.ContentHash,
 		arg.ReadOnlyHint,
+		arg.DescriptionOriginalLength,
+		arg.DescriptionCapped,
+		arg.DescriptionCleaned,
 		arg.ReviewReason,
 		arg.OrgID,
 		arg.ServerID,
@@ -1124,6 +1223,9 @@ func (q *Queries) UpdateMCPToolContent(ctx context.Context, arg UpdateMCPToolCon
 		&i.RequiresTwoApprovers,
 		&i.TierSetBy,
 		&i.TierSetAt,
+		&i.DescriptionOriginalLength,
+		&i.DescriptionCapped,
+		&i.DescriptionCleaned,
 	)
 	return i, err
 }

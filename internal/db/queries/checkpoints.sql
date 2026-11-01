@@ -50,6 +50,15 @@ WHERE org_id = @org_id AND agent_id = @agent_id AND sandbox_id = @sandbox_id AND
 ORDER BY finished_at DESC, id DESC
 LIMIT 1;
 
+-- name: LatestCompleteHomeCheckpointOfGeneration :one
+-- The newest complete checkpoint of the home's lineage, whichever sandbox took it. A sandbox no
+-- harness ever ran in (home_dirtied_at NULL) holds exactly what this checkpoint holds, so it is
+-- the restore of a recreation or archive of that sandbox.
+SELECT * FROM home_checkpoints
+WHERE org_id = @org_id AND agent_id = @agent_id AND generation = @generation AND status = 'complete'
+ORDER BY finished_at DESC, id DESC
+LIMIT 1;
+
 -- name: ListCompleteHomeCheckpoints :many
 -- Newest first, for the restore. A checkpoint from a higher ownership epoch than any run of the
 -- agent has seen is not restored (ADR 0032).

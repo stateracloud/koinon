@@ -13,9 +13,9 @@
 -- active.
 -- origin is interactive unless the caller says scheduled (LT1: interactive work is claimed first).
 INSERT INTO runs (org_id, agent_id, agent_version_id, task_id, ready_at,
-                  max_wall_clock_seconds, max_tokens, origin)
+                  max_wall_clock_seconds, max_model_requests, max_spend_usd, origin)
 SELECT a.org_id, a.id, a.active_version_id, @task_id, now(),
-       @max_wall_clock_seconds, @max_tokens,
+       @max_wall_clock_seconds, sqlc.narg(max_model_requests), (sqlc.narg(max_spend_usd)::text)::numeric,
        coalesce(sqlc.narg(origin)::run_origin, 'interactive')
 FROM agents a
 WHERE a.org_id = @org_id AND a.id = @agent_id AND a.status = 'active'
@@ -286,8 +286,8 @@ WHERE org_id = @org_id
 RETURNING *;
 
 -- name: AddRunTokens :one
--- Adds reported token usage to an unfinished run. The caller cancels the run
--- when tokens_used reaches max_tokens. No row: the run is finished or absent.
+-- Adds reported token usage to an unfinished run. Tokens are reported, not enforced (ADR 0081):
+-- the run limits are requests, spend and time. No row: the run is finished or absent.
 UPDATE runs
 SET tokens_used = tokens_used + @tokens::bigint
 WHERE org_id = @org_id AND id = @id

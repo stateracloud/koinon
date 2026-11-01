@@ -220,13 +220,17 @@ file on 2026-10-26):
 - ~~DBOS's system tables: a separate schema or a separate database in the same cluster, and which
   Koinon processes run DBOS workers.~~ Answered by the 2026-10-26 (DB1) amendment: schema `dbos`,
   workers in `koinon-api` only.
-- DBOS executor identity and upgrades (prerequisite for TR2/TK4, before any workflow is registered):
+- ~~DBOS executor identity and upgrades (prerequisite for TR2/TK4, before any workflow is registered):
   DBOS recovers pending workflows for its own executor ID on Launch, and the API leaves the ID at
   the default `local`, so with `api.replicas` > 1 or a surge during a rolling update a new pod
   re-runs workflows another live pod is still running. Each replica needs a unique, stable executor
-  ID (for example the pod name) or the durable runtime must stay at one replica. The other side:
-  `ApplicationVersion` is the release version, so workflows left pending by the previous release
-  (a long durable timer) are not recovered after an upgrade; decide how they are carried over.
+  ID (for example the pod name) or the durable runtime must stay at one replica.~~
+  Answered by ADR 0085 (#413): the executor ID is the pod name (downward API), and a leader recovers
+  the workflows of executors whose heartbeat went stale.
+- ~~`ApplicationVersion` is the release version, so workflows left pending by the previous release
+  (a long durable timer) are not recovered after an upgrade; decide how they are carried over.~~
+  Answered by ADR 0085, decision 11 (#412): a fixed `durable.WorkflowVersion`, bumped only when a
+  workflow's steps change, and `durable.CarryOver` forks older pending workflows from step 0.
 - ~~Where per-org concurrency is enforced for runs: DBOS queues, `run_claimable`, or both.~~ Answered by
   the 2026-10-27 (DB2) amendment: `run_claimable`.
 - The burst window length, the pre-warm lead time and the jitter range.
@@ -493,6 +497,9 @@ thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0
    - At the cap, both agentd and the api's sweep write the same `run.canceled` payload: reason
      `wall_clock_cap`, a message, and the agent's text since its last park as `summary`, or the task's
      notes when it said nothing.
+   - *Generalised by [ADR 0081](0081-run-limits.md) (2026-10-29): the same notice also fires at about 80%
+     of the run's model-request limit and of its spend limit, whichever limit is nearest names it, and
+     the ledger's cancel at those limits carries the same `summary`. The event gains `limit`.*
    - Continuation runs (after v0.1.0: at most 3 per task, set per template or agent, only with budget
      left, then the task goes to input-required "blocked on you") build on this note and on
      the `run.wrap_up_notice` event (`wrap_up_notice_at` alone also covers a suppressed notice). They need only additive columns (a per-task continuation count, and a

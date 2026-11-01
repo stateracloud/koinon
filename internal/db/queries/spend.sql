@@ -7,11 +7,14 @@
 -- (TestQueriesAreOrgScoped).
 
 -- name: FindRunAt :one
--- The run an agent was executing at @at: the latest-started run that had
--- started by then and had not finished more than @grace_seconds earlier. One
--- run per agent is owned at a time (ADR 0009), so the latest start wins when a
--- parked run's window overlaps a later run. The grace covers a response that
--- completes just after its run was canceled (for example by the token cap).
+-- The run an agent was executing at @at. A run that was claimed by then and is still executing
+-- (starting or running) wins over one that finished inside the grace: a parked run that resumes
+-- right after another run of the agent ended keeps its first started_at, which is older than the
+-- finished run's, and its requests are its own (claimed_at is set on every claim, resume included;
+-- ADR 0081). Among the rest the latest-started run that had started by then and had not finished
+-- more than @grace_seconds earlier wins. One run per agent is owned at a time (ADR 0009), so the
+-- latest start wins when a parked run's window overlaps a later run. The grace covers a response
+-- that completes just after its run was canceled (for example by a run limit).
 -- state and finished_at tell whether that run was canceled by the record's time, which marks a
 -- streamed response logged then as cut (ADR 0056, amendment 2026-10-28).
 SELECT id, task_id, agent_version_id, state, finished_at FROM runs
@@ -19,7 +22,9 @@ WHERE org_id = @org_id AND agent_id = @agent_id
   AND started_at IS NOT NULL AND started_at <= sqlc.arg(at)::timestamptz
   AND (finished_at IS NULL
        OR finished_at >= sqlc.arg(at)::timestamptz - make_interval(secs => sqlc.arg(grace_seconds)::integer))
-ORDER BY started_at DESC, id DESC
+ORDER BY (finished_at IS NULL AND state IN ('starting', 'running')
+          AND coalesce(claimed_at, started_at) <= sqlc.arg(at)::timestamptz) DESC,
+         started_at DESC, id DESC
 LIMIT 1;
 
 -- name: InsertSpendEntry :one
@@ -33,17 +38,30 @@ INSERT INTO spend_entries (
     org_id, agent_id, principal, run_id, task_id, request_id, key_id, model,
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
-    request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id
+    request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id,
+    upstream_status
 ) VALUES (
     @org_id, sqlc.narg(agent_id), @principal, sqlc.narg(run_id), sqlc.narg(task_id), @request_id, @key_id, @model,
     @input_tokens, @output_tokens, @cache_read_tokens, @cache_write_tokens, @reasoning_tokens,
     (sqlc.arg(cost_usd)::text)::numeric, (sqlc.narg(gateway_cost_usd)::text)::numeric,
     sqlc.narg(price_ref), @priced, @estimated, sqlc.narg(estimate)::jsonb, @cost_flagged,
     sqlc.narg(request_bytes), sqlc.narg(response_bytes), @occurred_at,
-    @provisional, coalesce((sqlc.narg(reserve_usd)::text)::numeric, 0), sqlc.narg(response_id)
+    @provisional, coalesce((sqlc.narg(reserve_usd)::text)::numeric, 0), sqlc.narg(response_id),
+    sqlc.narg(upstream_status)
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id;
+
+-- name: GetLastUpstreamRefusal :one
+-- The last request of a run that its provider answered with an error status at or after @since: the
+-- gateway's own record of why a model request failed (agentd reads it when a harness reports an
+-- error without a status). Only the statuses in @statuses count. No row when the provider
+-- refused nothing in the window.
+SELECT upstream_status::int AS status, model, occurred_at
+FROM spend_entries
+WHERE org_id = @org_id AND run_id = @run_id AND upstream_status = ANY(@statuses::int[]) AND occurred_at >= @since
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1;
 
 -- name: GetAgentSpendSince :one
 -- An agent's recorded USD spend since @since, for its spend limit: the charges only. Reserves
@@ -72,6 +90,9 @@ SELECT run_id::uuid AS run_id,
        count(*)::bigint AS requests,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
+       coalesce(sum(cache_read_tokens), 0)::bigint AS cache_read_tokens,
+       coalesce(sum(cache_write_tokens), 0)::bigint AS cache_write_tokens,
+       coalesce(sum(reasoning_tokens), 0)::bigint AS reasoning_tokens,
        coalesce(sum(cost_usd), 0)::text AS cost_usd,
        bool_and(priced) AS priced,
        count(*) FILTER (WHERE estimated)::bigint AS estimated_requests
@@ -85,6 +106,9 @@ SELECT task_id::uuid AS task_id,
        count(*)::bigint AS requests,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
+       coalesce(sum(cache_read_tokens), 0)::bigint AS cache_read_tokens,
+       coalesce(sum(cache_write_tokens), 0)::bigint AS cache_write_tokens,
+       coalesce(sum(reasoning_tokens), 0)::bigint AS reasoning_tokens,
        coalesce(sum(cost_usd), 0)::text AS cost_usd,
        bool_and(priced) AS priced,
        count(*) FILTER (WHERE estimated)::bigint AS estimated_requests
@@ -145,6 +169,12 @@ SELECT model,
        count(*)::bigint AS requests,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
+       -- Reasoning (thinking) tokens are part of output_tokens, billed at the output rate unless the
+       -- price names a reasoning rate; this is the part the provider reported separately.
+       coalesce(sum(reasoning_tokens), 0)::bigint AS reasoning_tokens,
+       -- False when no request reported a split (Anthropic Messages never does), so the report says
+       -- "not reported" instead of 0.
+       coalesce(bool_or(reasoning_tokens > 0), false)::boolean AS reasoning_reported,
        coalesce(sum(cost_usd) FILTER (WHERE NOT estimated), 0)::text AS reported_usd,
        coalesce(sum(cost_usd) FILTER (WHERE estimated), 0)::text AS estimated_usd,
        count(*) FILTER (WHERE estimated)::bigint AS estimated_requests,
@@ -179,7 +209,7 @@ ORDER BY min(next_attempt_at), org_id;
 -- The org's provisional entries due for an attempt, locked for this settler; another settler skips
 -- them. The row is the work item; the entry is read with it.
 SELECT st.entry_id, st.provider_id, st.provider_type, st.response_id, st.attempts, st.deadline,
-       e.run_id, e.model, e.occurred_at, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_write_tokens,
+       e.agent_id, e.run_id, e.model, e.occurred_at, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_write_tokens,
        e.reasoning_tokens, e.cost_usd::text AS cost_usd, e.reserve_usd::text AS reserve_usd, e.estimate,
        coalesce(e.price_ref, '')::text AS price_ref
 FROM spend_settlements st

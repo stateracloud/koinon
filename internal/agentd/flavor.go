@@ -11,6 +11,7 @@ import (
 	"github.com/stateracloud/koinon/internal/flavor"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // endpoints are the per-agent values a flavor's launch command takes. None is a secret:
@@ -26,6 +27,10 @@ type endpoints struct {
 	// CacheMarker is the cache-marker format the model's provider needs (prices.CacheMode.Marker),
 	// or "" when it needs none.
 	CacheMarker string
+	// Thinking is the thinking form Koinon decided for the run (thinking.Capability.Effective): none,
+	// or the model's on or off form. Empty leaves the switch out. The harness renders it; its own guess from
+	// the model ID never decides (ADR 0069 amendment 2026-10-29).
+	Thinking thinking.Mode
 	// SessionID is the run ID to send to OpenRouter as session_id (sticky routing), or "".
 	SessionID string
 }
@@ -50,6 +55,9 @@ func launchCommand(f store.AgentFlavor, e endpoints) ([]string, error) {
 		if d.FormatArg != "" {
 			cmd = append(cmd, d.FormatArg, string(e.Format))
 		}
+	}
+	if e.Thinking != "" && d.ThinkingArg != "" {
+		cmd = append(cmd, d.ThinkingArg, string(e.Thinking))
 	}
 	if e.CacheMarker != "" {
 		arg, ok := d.CacheArgs[e.CacheMarker]
@@ -108,11 +116,20 @@ func versionModel(c agentconfig.Config) string {
 // settings ({"harness": {"pluginInstalls": true}}, copied from the template). Only flavors
 // with the option have one (OpenCode: --plugin-installs lets it load external plugins,
 // flavors/opencode/README.md); the reconciler opens the npm registry for the same agents.
+//
+// A flavor with built-in web tools also gets its NoWebToolsArg unless the version has web egress
+// (agentconfig.Config.WebEgress): a tool the sandbox's network policy would only fail is not
+// offered, so the model uses the org's MCP tools instead (ADR 0080).
 func harnessArgs(f store.AgentFlavor, c agentconfig.Config) []string {
-	if d, _ := flavor.Lookup(f); c.Harness.PluginInstalls && d.PluginInstalls {
-		return []string{d.PluginInstallsArg}
+	d, _ := flavor.Lookup(f)
+	var args []string
+	if c.Harness.PluginInstalls && d.PluginInstalls {
+		args = append(args, d.PluginInstallsArg)
 	}
-	return nil
+	if d.NoWebToolsArg != "" && !c.WebEgress() {
+		args = append(args, d.NoWebToolsArg)
+	}
+	return args
 }
 
 // cacheMarker is the cache-marker format to start the harness with for a model (ADR 0068): ""

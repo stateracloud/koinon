@@ -74,6 +74,10 @@
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
               "maxLength": 128
+            },
+            "thinking": {
+              "description": "The starting value of the agent's thinking setting. Thinking is on unless an agent turns it off; a model that cannot think ignores the setting.",
+              "enum": ["on", "off"]
             }
           }
         },
@@ -89,6 +93,15 @@
           "properties": {
             "reminderAfter": { "type": "string", "pattern": "^[1-9][0-9]*(h|m|s)$" },
             "expireAfter": { "type": "string", "pattern": "^[1-9][0-9]*(h|m|s)$" }
+          }
+        },
+        "resources": {
+          "description": "CPU and memory requests and limits of the agent's sandbox (ADR 0083), Kubernetes quantities such as 250m or 1Gi. Every value is optional; an unset one takes the platform default, and the platform bounds clamp all of them. A request must not exceed its limit.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": { "$ref": "#/$defs/quantities" },
+            "memory": { "$ref": "#/$defs/quantities" }
           }
         },
         "harness": {
@@ -127,21 +140,34 @@
           "required": ["run", "spendUSD"],
           "properties": {
             "run": {
-              "description": "Per-run caps (ADR 0049). Hitting one cancels the run with a ticket event.",
+              "description": "Per-run limits (ADR 0049, ADR 0081). The first one reached cancels the run with a ticket event; the agent is told at about 80% of the nearest.",
               "type": "object",
               "additionalProperties": false,
-              "required": ["maxDuration", "maxTokens"],
+              "required": ["maxDuration"],
               "properties": {
                 "maxDuration": {
                   "description": "Wall-clock cap as a Go duration in whole hours, minutes or seconds, for example 30m. At most 24h.",
                   "type": "string",
                   "pattern": "^[1-9][0-9]*(h|m|s)$"
                 },
+                "maxModelRequests": {
+                  "description": "Model requests per run (ADR 0081). Optional: without it a run gets the platform default of 200. Every request through the agent's key counts, the harness's own title, summary and compaction calls included, so it is the same on every model and binds on models priced at zero.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100000
+                },
+                "maxSpendUSD": {
+                  "description": "USD a single run may spend, by the ledger's settled cost (ADR 0081). Optional: without it a run gets the platform default of $5.00. A decimal string with at most two fraction digits. The gateway enforces it between ledger passes as the run level of the agent's key limit.",
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,5})(\\.[0-9]{1,2})?$",
+                  "not": {"pattern": "^0(\\.0{1,2})?$"}
+                },
                 "maxTokens": {
-                  "description": "Total model tokens (input plus output) per run.",
+                  "description": "Deprecated and ignored: tokens are reported, not enforced (ADR 0081). Still accepted, so a template that sets only it validates; the platform defaults then apply to its runs.",
                   "type": "integer",
                   "minimum": 1000,
-                  "maximum": 100000000
+                  "maximum": 100000000,
+                  "deprecated": true
                 }
               }
             },
@@ -156,6 +182,14 @@
     }
   },
   "$defs": {
+    "quantities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|Ki|Mi|Gi|Ti|M|G|T)?$" },
+        "limit": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|Ki|Mi|Gi|Ti|M|G|T)?$" }
+      }
+    },
     "trigger": {
       "type": "object",
       "additionalProperties": false,

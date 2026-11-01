@@ -27,3 +27,15 @@ docs/site/.astro/
 /koinon-fakemcp
 /koinon-fakecicost
 /koinon-rt1-promgen
+/.e2e-out/
+
+# Local Tilt profile and the files it names (hack/dev/local.example.yaml)
+/hack/dev/local.yaml
+/hack/dev/*.local.yaml
+
+# Compiled test binaries (go test -c, ginkgo build)
+*.test
+
+# Per-spec JUnit reports of hack/go-test.sh (#221)
+/reports/
+/junit.xml

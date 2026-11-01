@@ -1,0 +1,13 @@
+package main
+
+import "github.com/stateracloud/koinon/internal/tracing/scrub"
+
+const endpoint = "https://api.example.com/v1/traces?org=acme&limit=100&cursor=42"
+
+func main() {
+	s := scrub.New(scrub.Config{Level: scrub.LevelRedacted})
+	for i := 0; i < 1000000; i++ {
+		_ = s.Text("hello 12345678 world")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+}

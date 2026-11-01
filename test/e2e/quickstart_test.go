@@ -29,16 +29,20 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
+	"github.com/stateracloud/koinon/internal/thinking"
+	"github.com/stateracloud/koinon/test/scenarios"
 )
 
-// What the fake model script test/fakemodel/scripts/repo-helper.yaml does, and the fake
-// GitHub's repository (test/e2e/kind/fakes.yaml).
-const (
-	repoName   = "hello"
-	repository = "koinon-demo/" + repoName
-	prBranch   = "koinon/add-hello-md"
-	prFile     = "hello.md"
-	prContent  = "hello from koinon\n"
+// What the fake model script test/fakemodel/scripts/repo-helper.yaml does is test/scenarios'
+// PullRequest, which the owning packages' tests assert too; the fake GitHub's repository is
+// test/e2e/kind/fakes.yaml. prBranch holds the branch Koinon files the pull request under once the
+// agent exists (scenarios.PullRequest.Branch).
+var (
+	repository = scenarios.PullRequest.Repository
+	repoName   = repository[strings.LastIndex(repository, "/")+1:]
+	prFile     = scenarios.PullRequest.File
+	prContent  = scenarios.PullRequest.Content
+	ledger     = scenarios.PullRequest.Ledger
 )
 
 // quickstartBudget is plan item E1's bound: the quickstart takes at most 15 minutes from
@@ -177,6 +181,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		lastSeq  int64
 		kinds    []string
 		approval *approvalv1alpha1.Approval
+		prBranch string
 		prURL    string
 		// admin calls /admin/v1 with a token made at step 1b.
 		admin func(ctx context.Context, method, path string, body ...string) (int, []byte)
@@ -198,7 +203,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 	AfterAll(func() { t.report() })
 
-	It("1. logs in as the bootstrap admin and sets a new password", func(ctx SpecContext) {
+	It("1. logs in as the bootstrap admin and sets a new password", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		password := os.Getenv("KOINON_E2E_PASSWORD")
 		Expect(password).NotTo(BeEmpty(), "KOINON_E2E_PASSWORD")
@@ -225,7 +230,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("1. Bootstrap login and password change")
 	})
 
-	It("1b. sees the model provider the quickstart declared, through the admin API", func(ctx SpecContext) {
+	It("1b. sees the model provider the quickstart declared, through the admin API", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		// The quickstart's model-provider.yaml is a labelled Secret that koinon-api imported at start.
 		// A token made with the session reads it back through /admin/v1, read-only.
@@ -270,8 +275,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		fake := providers.Providers[byName["fake"]]
 		Expect(fake.Source).To(Equal("secret"))
 		Expect(fake.ManagedBySecret).To(Equal("fake-model"))
-		Expect(byName).To(HaveKey("anthropic-fake"))
-		Expect(providers.Providers[byName["anthropic-fake"]].ManagedBySecret).To(Equal("fake-anthropic"))
+		Expect(byName).To(HaveKey("fake-anthropic"))
+		Expect(providers.Providers[byName["fake-anthropic"]].ManagedBySecret).To(Equal("fake-anthropic"))
 		code, body := admin(ctx, http.MethodDelete, "/providers/"+fake.ID)
 		Expect(code).To(Equal(http.StatusConflict), "declared providers are read-only: %s", body)
 		// A model has no rates of its own; its price is an org price (or a default one). The fake model
@@ -282,7 +287,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("1b. Declared model provider and its price (admin API)")
 	})
 
-	It("2. creates and tests the GitHub connection", func(ctx SpecContext) {
+	It("2. creates and tests the GitHub connection", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		app := gh.app(ctx)
 		res, err := c.connections.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
@@ -298,7 +303,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("2. GitHub connection (create and test)")
 	})
 
-	It("3. creates a repo-helper agent bound to the repository and activates it", func(ctx SpecContext) {
+	It("3. creates a repo-helper agent bound to the repository and activates it", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		ts, err := c.templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
 		Expect(err).NotTo(HaveOccurred())
@@ -318,6 +323,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		agent = created.GetAgent()
 		Expect(agent.GetStatus()).To(Equal(agentv1alpha1.AgentStatus_AGENT_STATUS_DRAFT))
+		prBranch, err = scenarios.PullRequest.Branch(agent.GetDisplayName(), agent.GetId())
+		Expect(err).NotTo(HaveOccurred())
 
 		activated, err := c.agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{
 			OrgId: org, AgentId: agent.GetId(), Version: agent.GetLatestVersion(),
@@ -325,10 +332,27 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		agent = activated.GetAgent()
 		Expect(agent.GetStatus()).To(Equal(agentv1alpha1.AgentStatus_AGENT_STATUS_ACTIVE))
+
+		// The template names no model, so the run takes the org default, and the quickstart steps need
+		// it to be the quickstart's model (repo-helper's script makes the tool call step 4 parks on).
+		// The org's first model sets the default on its own, but which model is first depends on the
+		// order the importer reads the declared Secrets (creation time, one-second resolution, then
+		// name), which this test must not rely on: it states the default, as an admin does. repo-helper
+		// is priced since 1b.
+		code, body := admin(ctx, http.MethodPut, "/default-model", `{"model":"repo-helper"}`)
+		Expect(code).To(Equal(http.StatusOK), string(body))
+		Eventually(func(g Gomega) {
+			code, body := admin(ctx, http.MethodGet, "/agents/"+agent.GetId()+"/model")
+			g.Expect(code).To(Equal(http.StatusOK), string(body))
+			var m struct{ Effective, Source string }
+			g.Expect(json.Unmarshal(body, &m)).To(Succeed())
+			g.Expect(m.Source).To(Equal("org_default"), string(body))
+			g.Expect(m.Effective).To(Equal("repo-helper"), string(body))
+		}).WithContext(ctx).WithTimeout(30 * time.Second).WithPolling(time.Second).Should(Succeed())
 		t.end("3. Agent from template, activated")
 	})
 
-	It("4. creates a task, streams the run and parks on an approval", func(ctx SpecContext) {
+	It("4. creates a task, streams the run and parks on an approval", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 			OrgId: org, AgentId: agent.GetId(), Title: "Add hello.md",
@@ -366,17 +390,40 @@ var _ = Describe("the quickstart", Ordered, func() {
 			got, err := c.runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run.GetId()})
 			g.Expect(err).NotTo(HaveOccurred())
 			cost = got.GetRun().GetCost()
-			g.Expect(cost.GetRequests()).To(BeNumerically(">", 0), "the ledger recorded the run's requests")
+			// The refused title request (no tokens) can reach the ledger before the streamed ones:
+			// wait until the streamed usage is in too, not only the first entry (#291).
+			g.Expect(ledger.Settled(totalsOf(cost))).To(BeTrue(), "the ledger has the streamed usage: %v", cost)
 		}, 60*time.Second, time.Second).Should(Succeed())
-		// The streamed requests carry usage through the gateway; the title request the fake model
-		// refuses (a 400 without usage) is charged its input only. OpenCode asks for a title with each
-		// prompt until it has one, so the turn's prompt and the end-of-turn note's prompt make exactly
-		// two such requests; a third would be a request nobody accounts for.
-		Expect(cost.GetRequests()-cost.GetEstimatedRequests()).To(BeNumerically(">=", 1), "streamed requests reported their usage")
-		Expect(cost.GetEstimatedRequests()).To(BeNumerically("<=", 2))
-		Expect(cost.GetEstimatedRequests()).To(BeNumerically(">=", 1))
-		Expect(cost.GetInputTokens()).To(BeNumerically(">=", 1200), "the fake model's reported input tokens")
-		Expect(cost.GetOutputTokens()).To(BeNumerically("<", 1000), "no output is charged for the refused request")
+		// The streamed requests carry usage through the gateway, so none is an estimate. The title
+		// request the fake model refuses (a 400 without usage) is the provider's refusal, and the
+		// quickstart's provider type, openai, does not bill one: the ledger keeps its entry with no
+		// tokens and no cost and marks the charge waived; it is not an estimate either (ADR 0056,
+		// amendment 2026-10-29, point 3; #241).
+		Expect(ledger.CheckTotals(totalsOf(cost))).To(Succeed())
+
+		By("the refused title request is in the ledger, with the provider's status, and charged nothing")
+		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
+		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+		var refused, answered []ledgerRow
+		Eventually(func(g Gomega) {
+			refused, answered = nil, nil
+			for _, r := range ledgerRows(ctx, g, kubectl, run.GetId()) {
+				if r.UpstreamStatus != 0 {
+					refused = append(refused, r)
+				} else {
+					answered = append(answered, r)
+				}
+			}
+			g.Expect(refused).NotTo(BeEmpty(), "the title request the fake model refuses")
+		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+		Expect(answered).NotTo(BeEmpty(), "the streamed requests")
+		// OpenCode asks for a title with each prompt until it has one, so the turn's prompt and the
+		// end-of-turn note's prompt make at most two such requests; a third would be a request nobody
+		// accounts for.
+		Expect(len(refused)).To(BeNumerically("<=", ledger.MaxRefused), "%v", refused)
+		for _, r := range refused {
+			Expect(ledger.CheckRefused(r.entry())).To(Succeed(), "%+v", r)
+		}
 
 		By("nothing has reached GitHub before the approval")
 		repo := gh.repo(ctx, repoName)
@@ -385,7 +432,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("4. Task → run streamed → approval pending")
 	})
 
-	It("5. approves, and Koinon opens exactly one branch, commit and pull request", func(ctx SpecContext) {
+	It("5. approves, and Koinon opens exactly one branch, commit and pull request", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		_, err := c.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{
 			OrgId: org, ApprovalId: approval.GetId(), ArgsSha256: approval.GetArgsSha256(),
@@ -412,7 +459,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("5. Approve → branch, commit, PR on fake GitHub")
 	})
 
-	It("6. resumes the run, which posts the pull request URL on the task", func(ctx SpecContext) {
+	It("6. resumes the run, which posts the pull request URL on the task", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		run = w.until(ctx, c, org, run.GetId(), 5*time.Minute, &lastSeq, &kinds, func(r *runv1alpha1.Run) bool {
 			return r.GetState() == runv1alpha1.RunState_RUN_STATE_SUCCEEDED
@@ -436,7 +483,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("6. Run resumes → PR URL on the task")
 	})
 
-	It("6a. the agent's end-of-turn note is on the task, not in its timeline as a reply", func(ctx SpecContext) {
+	It("6a. the agent's end-of-turn note is on the task, not in its timeline as a reply", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		// The note is written after each turn (the run parked once, then finished: two turns), so
 		// it is there by the time the run has succeeded; the last one wins.
@@ -463,7 +510,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("6a. Agent's notes on the task")
 	})
 
-	It("6a2. the saved-work upload Service exists and answers; the tools port does not serve it", func(ctx SpecContext) {
+	It("6a2. the saved-work upload Service exists and answers; the tools port does not serve it; the OTLP port needs a token", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
 		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
@@ -481,6 +528,24 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(post(portForward(ctx, kubectl, "svc/koinon-api-saved-work", "8082"), "/internal/saved-work")).To(Equal(http.StatusUnauthorized))
 		// The tools port, which agentd cannot reach, does not serve the path at all.
 		Expect(post(portForward(ctx, kubectl, "svc/koinon-api-tools", "8081"), "/internal/saved-work")).To(Equal(http.StatusNotFound))
+		// The internal OTLP listener (the gateway's access log, agentd's spans) requires its bearer token:
+		// no token and a wrong one are refused, whatever the path. (The gateway's own exports carry the
+		// real token, which is what keeps the spend ledger filling in the steps above.)
+		otlp := portForward(ctx, kubectl, "svc/koinon-api", "4318")
+		for _, auth := range []string{"", "Bearer koinon_test_not-a-real-token-wrong-0000000"} {
+			for _, path := range []string{"/v1/logs", "/v1/traces"} {
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+otlp+path, strings.NewReader("x"))
+				Expect(err).NotTo(HaveOccurred())
+				req.Header.Set("Content-Type", "application/x-protobuf")
+				if auth != "" {
+					req.Header.Set("Authorization", auth)
+				}
+				res, err := http.DefaultClient.Do(req)
+				Expect(err).NotTo(HaveOccurred())
+				_ = res.Body.Close()
+				Expect(res.StatusCode).To(Equal(http.StatusUnauthorized), path+" with Authorization %q", auth)
+			}
+		}
 		t.end("6a2. Saved-work upload Service")
 	})
 
@@ -515,8 +580,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		ap := got.GetApproval()
 		Expect(ap.GetConnector()).To(Equal("mcp"))
 		Expect(ap.GetTool()).To(Equal("write_item"))
-		Expect(ap.GetTarget()).To(Equal("mcp:tracker"))
-		Expect(ap.GetArgsJson()).To(Equal(`{"title":"from the e2e ask"}`))
+		Expect(ap.GetTarget()).To(Equal(scenarios.PullRequest.TrackerAskTarget))
+		Expect(ap.GetArgsJson()).To(Equal(scenarios.PullRequest.TrackerAskArgs))
 		Expect(ap.GetMcp().GetContentHash()).NotTo(BeEmpty())
 		Expect(ap.GetMcp().GetContentHash()).To(Equal(ap.GetMcp().GetCurrentContentHash()))
 		for _, r := range fakeMCPRequests(ctx, fake) {
@@ -540,7 +605,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			}
 		}
 		Expect(calls).To(HaveLen(1), "the server saw the approved call exactly once")
-		Expect(calls[0].Args).To(Equal(`{"title":"from the e2e ask"}`))
+		Expect(calls[0].Args).To(Equal(scenarios.PullRequest.TrackerAskArgs))
 		Expect(calls[0].Agent).To(Equal("default/mcp-exec"), "through the gateway, with the org's executor key")
 		Expect(calls[0].Authorized).To(BeTrue())
 
@@ -636,6 +701,175 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(total).To(BeNumerically("<=", quickstartBudget),
 			"the quickstart took %s from helm install, more than the plan's %s", total.Round(time.Second), quickstartBudget)
 	})
+
+	It("8. (not part of the quickstart, after its time check) explicit thinking on and off crosses the real gateway to the strict fake model (rc.7, #240, #316)", func(ctx SpecContext) {
+		t.begin()
+		// The fake model server runs with -strict-messages (test/e2e/kind/fakes.yaml): it answers 400
+		// to a body field whose beta is missing or a thinking type the model does not take, as
+		// api.anthropic.com does, so a run that succeeds shows OpenCode's real body is one Anthropic
+		// takes. claude-haiku-5-5 is an ID the thinking table matches (internal/thinking) and one that
+		// can stop thinking; claude-e2e of 6d is not.
+		const model = "claude-haiku-5-5"
+		code, body := admin(ctx, http.MethodPost, "/prices", `{"name":"fake-claude-haiku-5-5","provider":"anthropic","match":{"glob":"`+model+`"},`+
+			`"prices":{"input":"3.00","output":"15.00","cacheRead":"0.30","cacheWrite":"3.75"},"maxOutput":4096}`)
+		Expect(code).To(Equal(http.StatusCreated), string(body))
+
+		modelPath := "/agents/" + agent.GetId() + "/model"
+		thinkingPath := "/agents/" + agent.GetId() + "/thinking"
+		DeferCleanup(func(ctx context.Context) {
+			code, body := admin(ctx, http.MethodPut, thinkingPath, `{"thinking":"default"}`)
+			Expect(code).To(Equal(http.StatusOK), string(body))
+			code, body = admin(ctx, http.MethodPut, modelPath, `{"model":"default"}`)
+			Expect(code).To(Equal(http.StatusOK), string(body))
+		})
+		Eventually(func(g Gomega) {
+			code, body := admin(ctx, http.MethodPut, modelPath, `{"model":"`+model+`"}`)
+			g.Expect(code).To(Equal(http.StatusOK), string(body))
+		}).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
+
+		fakeModel := strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMODEL_URL"), "/")
+		Expect(fakeModel).NotTo(BeEmpty(), "KOINON_E2E_FAKEMODEL_URL")
+		runTask := func(title string) {
+			GinkgoHelper()
+			res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+				OrgId: org, AgentId: agent.GetId(), Title: title, Message: "Run the cache probe and say when it is done.",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			var seq int64
+			var evKinds []string
+			cw := watchRun(context.WithoutCancel(ctx), c, org, res.GetRun().GetId(), 0)
+			done := cw.until(ctx, c, org, res.GetRun().GetId(), 8*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
+				return terminal(r.GetState())
+			})
+			Expect(done.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_SUCCEEDED), done.GetOutcomeReason())
+		}
+		count := func() int {
+			var n int
+			Eventually(func(g Gomega) {
+				n = len(fakeModelRequests(ctx, g, fakeModel, model))
+			}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+			return n
+		}
+
+		By("thinking on: every request carries adaptive thinking with a summary, and no beta reaches the model")
+		code, body = admin(ctx, http.MethodPut, thinkingPath, `{"thinking":"on"}`)
+		Expect(code).To(Equal(http.StatusOK), string(body))
+		runTask("Thinking on")
+		var on []fakeRequest
+		Eventually(func(g Gomega) {
+			on = fakeModelRequests(ctx, g, fakeModel, model)
+			g.Expect(len(on)).To(BeNumerically(">=", 2), "the task's request and the end-of-turn note")
+		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+		for _, r := range on {
+			Expect(r.Path).To(Equal("/v1/messages"))
+			Expect(r.Thinking).To(Equal("adaptive"), "%+v", r)
+			Expect(r.ThinkingDisplay).To(Equal("summarized"), "%+v", r)
+			Expect(r.Betas).To(BeEmpty(), "no row pins a beta and the gateway drops the client's: %+v", r)
+		}
+
+		By("thinking off: every request turns thinking off explicitly")
+		before := count()
+		code, body = admin(ctx, http.MethodPut, thinkingPath, `{"thinking":"off"}`)
+		Expect(code).To(Equal(http.StatusOK), string(body))
+		runTask("Thinking off")
+		var all []fakeRequest
+		Eventually(func(g Gomega) {
+			all = fakeModelRequests(ctx, g, fakeModel, model)
+			g.Expect(len(all)).To(BeNumerically(">=", before+2))
+		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+		for _, r := range all[before:] {
+			Expect(r.Path).To(Equal("/v1/messages"))
+			Expect(r.Thinking).To(Equal(string(thinking.Disabled)), "%+v", r)
+		}
+		t.end("8. Adaptive thinking on and off: strict fake behind the real gateway")
+	})
+	// Not part of the quickstart (#262). An agent holds its gateway key and is untrusted, so it can put
+	// the key in a header of its own or in the URL; the upstream is a third party that logs both.
+	It("8. the gateway sends the model upstream only the headers a format needs, and refuses an agent key in a header or the URL (#262)", func(ctx SpecContext) {
+		t.begin()
+		// Step 8 priced claude-haiku-5-5 and the reconciler serves it. The request is what a sandbox
+		// would send, from here through the gateway's Service with the agent's own key.
+		const model = "claude-haiku-5-5"
+		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
+		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+		fakeModel := strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMODEL_URL"), "/")
+		Expect(fakeModel).NotTo(BeEmpty(), "KOINON_E2E_FAKEMODEL_URL")
+		key := agentGatewayKey(ctx, kubectl, org, agent.GetId())
+		local := portForward(ctx, kubectl, "svc/koinon-gateway", "8080")
+
+		send := func(query string, header ...string) (int, string) {
+			GinkgoHelper()
+			body := `{"model":"` + model + `","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+local+"/v1/messages"+query, strings.NewReader(body))
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+key)
+			for i := 0; i+1 < len(header); i += 2 {
+				req.Header.Set(header[i], header[i+1])
+			}
+			res, err := http.DefaultClient.Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = res.Body.Close() }()
+			out, _ := io.ReadAll(res.Body)
+			return res.StatusCode, string(out)
+		}
+		count := func() int {
+			var n int
+			Eventually(func(g Gomega) { n = len(fakeModelRequests(ctx, g, fakeModel, model)) }).
+				WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+			return n
+		}
+
+		By("a request with headers of the agent's own choosing reaches the model without them")
+		before := count()
+		Eventually(func(g Gomega) {
+			code, out := send("", "X-Custom", "hello", "X-Forwarded-For", "203.0.113.9", "User-Agent", "koinon-e2e")
+			g.Expect(code).To(Equal(http.StatusOK), out)
+		}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+		var got []fakeRequest
+		Eventually(func(g Gomega) {
+			got = fakeModelDetail(ctx, g, fakeModel, model)
+			g.Expect(len(got)).To(BeNumerically(">", before))
+		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+		for _, r := range got[before:] {
+			for name, values := range r.Headers {
+				for _, v := range values {
+					Expect(v).NotTo(ContainSubstring("kgw_"), "header %s reached the upstream: %+v", name, r.Headers)
+				}
+			}
+			for _, name := range []string{"X-Custom", "X-Forwarded-For"} {
+				Expect(r.Headers).NotTo(HaveKey(name), "the upstream got the header the agent invented")
+			}
+			Expect(r.Headers.Get("Content-Type")).To(Equal("application/json"))
+		}
+
+		By("a request with the key in any header but Authorization is refused before it reaches the model")
+		n := count()
+		for _, h := range [][2]string{
+			{"X-Canary", key},
+			{"X-Embedded", "prefix-" + key + "-suffix"},
+			{"X-Api-Key", key},
+			{"Cookie", "session=" + key},
+			{"User-Agent", "harness/1.0 (" + key + ")"},
+		} {
+			code, out := send("", h[0], h[1])
+			Expect(code).To(Equal(http.StatusForbidden), h[0]+": "+out)
+		}
+		Expect(count()).To(Equal(n), "nothing reached the upstream")
+
+		By("a request with the key in the query or the path is refused before it reaches the model")
+		n = count()
+		for _, q := range []string{"?canary=" + key, "?canary=" + strings.Replace(key, "_", "%5F", 1)} {
+			code, out := send(q)
+			Expect(code).To(Equal(http.StatusForbidden), out)
+		}
+		Expect(count()).To(Equal(n), "nothing reached the upstream")
+		for _, r := range fakeModelDetail(ctx, Default, fakeModel, model) {
+			Expect(r.Query).NotTo(ContainSubstring("kgw_"))
+		}
+		t.end("8. Gateway header allowlist and key-in-header/URL refusal")
+	})
+
 	// Not part of the quickstart, and after its time check: the flavor image is broken for the rest of
 	// the run (the cluster is deleted afterwards).
 	It("8. a flavor image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
@@ -732,28 +966,67 @@ var _ = Describe("the quickstart", Ordered, func() {
 // fakeModelPaths returns the URL paths of the requests the fake model server received for model,
 // from its /_fake/requests listing.
 func fakeModelPaths(ctx context.Context, g Gomega, base, model string) []string {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/_fake/requests", nil)
+	var out []string
+	for _, r := range fakeModelRequests(ctx, g, base, model) {
+		out = append(out, r.Path)
+	}
+	return out
+}
+
+// fakeRequest is one request the fake model server received: the path, the thinking type and
+// display of the body ("" for none) and the anthropic-beta values.
+type fakeRequest struct {
+	Path, Model, Thinking, ThinkingDisplay string
+	Betas                                  []string
+	// Query and Headers are filled by fakeModelDetail (?detail=1).
+	Query   string
+	Headers http.Header
+}
+
+// fakeModelRequests returns the requests the fake model server got for model, in arrival order.
+func fakeModelRequests(ctx context.Context, g Gomega, base, model string) []fakeRequest {
+	return fakeModelList(ctx, g, base+"/_fake/requests", model)
+}
+
+// fakeModelDetail is fakeModelRequests with the query and every header of each request.
+func fakeModelDetail(ctx context.Context, g Gomega, base, model string) []fakeRequest {
+	return fakeModelList(ctx, g, base+"/_fake/requests?detail=1", model)
+}
+
+func fakeModelList(ctx context.Context, g Gomega, url, model string) []fakeRequest {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	g.Expect(err).NotTo(HaveOccurred())
 	res, err := http.DefaultClient.Do(req)
 	g.Expect(err).NotTo(HaveOccurred())
 	defer func() { _ = res.Body.Close() }()
 	g.Expect(res.StatusCode).To(Equal(http.StatusOK))
-	var list []struct{ Path, Model string }
+	var list []fakeRequest
 	g.Expect(json.NewDecoder(res.Body).Decode(&list)).To(Succeed())
-	var out []string
+	var out []fakeRequest
 	for _, r := range list {
 		if r.Model == model {
-			out = append(out, r.Path)
+			out = append(out, r)
 		}
 	}
 	return out
 }
 
 // ledgerRow is one spend ledger entry (spend_entries).
+func totalsOf(c *runv1alpha1.Cost) scenarios.Totals {
+	return scenarios.Totals{
+		Requests: c.GetRequests(), EstimatedRequests: c.GetEstimatedRequests(),
+		InputTokens: c.GetInputTokens(), OutputTokens: c.GetOutputTokens(),
+	}
+}
+
 type ledgerRow struct {
 	Model                                string
 	Input, Output, CacheRead, CacheWrite int64
 	Cost                                 *big.Rat
+	// UpstreamStatus is the provider's error status, 0 when it answered (ADR 0056 amendment
+	// 2026-10-29); ChargeWaived says why a refusal was charged nothing, "" when it was not waived.
+	UpstreamStatus int
+	ChargeWaived   string
 }
 
 // ledgerRows reads the run's spend entries straight from the primary Postgres pod, as its local
@@ -762,14 +1035,14 @@ func ledgerRows(ctx context.Context, g Gomega, kubectl, run string) []ledgerRow 
 	pod, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "pod", "-l", "cnpg.io/instanceRole=primary", "-o", "name").Output()
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(strings.TrimSpace(string(pod))).NotTo(BeEmpty(), "the primary Postgres pod")
-	query := "SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd::text FROM spend_entries WHERE run_id = '" + run + "' ORDER BY occurred_at"
+	query := "SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd::text, coalesce(upstream_status, 0), coalesce(estimate->>'charge_waived', '') FROM spend_entries WHERE run_id = '" + run + "' ORDER BY occurred_at"
 	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "exec", strings.TrimSpace(string(pod)), "-c", "postgres", "--",
 		"psql", "-U", "postgres", "-d", "koinon", "-At", "-F", "|", "-c", query).CombinedOutput()
 	g.Expect(err).NotTo(HaveOccurred(), string(out))
 	var rows []ledgerRow
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		f := strings.Split(line, "|")
-		if len(f) != 6 {
+		if len(f) != 8 {
 			continue
 		}
 		r := ledgerRow{Model: f[0]}
@@ -781,6 +1054,9 @@ func ledgerRows(ctx context.Context, g Gomega, kubectl, run string) []ledgerRow 
 		var ok bool
 		r.Cost, ok = new(big.Rat).SetString(f[5])
 		g.Expect(ok).To(BeTrue(), line)
+		r.UpstreamStatus, err = strconv.Atoi(f[6])
+		g.Expect(err).NotTo(HaveOccurred())
+		r.ChargeWaived = f[7]
 		rows = append(rows, r)
 	}
 	return rows
@@ -790,4 +1066,13 @@ func ledgerRows(ctx context.Context, g Gomega, kubectl, run string) []ledgerRow 
 func rate(perMillion string, tokens int64) *big.Rat {
 	p, _ := new(big.Rat).SetString(perMillion)
 	return p.Mul(p, big.NewRat(tokens, 1_000_000))
+}
+
+// entry is the row as test/scenarios checks it. The psql query does not read the estimated flag:
+// the run's EstimatedRequests total, checked beside it, is where an estimate shows.
+func (r ledgerRow) entry() scenarios.Entry {
+	return scenarios.Entry{
+		UpstreamStatus: r.UpstreamStatus, Input: r.Input, Output: r.Output,
+		CostZero: r.Cost.Sign() == 0, ChargeWaived: r.ChargeWaived,
+	}
 }

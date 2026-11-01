@@ -27,6 +27,9 @@ A CEL error denies under failurePolicy Fail; test against real OpenShell pods be
 */ -}}
 {{- if .Values.sandboxPolicy.enabled }}
 {{- $p := .Values.sandboxPolicy }}
+{{- if not (has .Values.openshell.runtimeClassName $p.runtimeClasses) }}
+{{- fail (printf "openshell.runtimeClassName %q is not in sandboxPolicy.runtimeClasses %v: the sandbox policy would refuse every sandbox pod the reconciler creates. Add it to sandboxPolicy.runtimeClasses, set openshell.runtimeClassName to one of them, or disable sandboxPolicy.enabled" .Values.openshell.runtimeClassName $p.runtimeClasses) }}
+{{- end }}
 {{- $base := printf "%s-%s" .Release.Namespace (include "koinon.fullname" .) }}
 {{- $pods := printf "%s-sandbox-pods" $base }}
 {{- $objects := printf "%s-sandbox-objects" $base }}

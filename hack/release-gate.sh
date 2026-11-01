@@ -59,5 +59,15 @@ for name in "${required[@]}"; do
 		failed=1
 	fi
 done
+# The kind e2e is not a required check (it is batched on main, and `e2e result` passes when it is
+# skipped), so a release asks for the `quickstart` job itself to have concluded success on this very
+# commit. If main's batched run skipped or never reached it, dispatch e2e-kind on the commit first.
+got=$(conclusion_of "$SHA" quickstart)
+if [[ $got == success ]]; then
+	echo "ok: kind e2e (quickstart)"
+else
+	echo "FAIL: kind e2e (quickstart job): ${got:-no run on this commit}; run the e2e-kind workflow on $SHA" >&2
+	failed=1
+fi
 ((failed == 0)) || fail "required checks have not all succeeded on $SHA"
 echo "release gate passed for $TAG at $SHA"

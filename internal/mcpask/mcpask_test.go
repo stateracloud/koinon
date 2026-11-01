@@ -113,7 +113,7 @@ var _ = Describe("the ask-tier proxy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		t, err := q.CreateTask(ctx, store.CreateTaskParams{OrgID: org, Title: "fix", AgentID: agent.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: user})
 		Expect(err).NotTo(HaveOccurred())
-		_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000})
+		_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800})
 		Expect(err).NotTo(HaveOccurred())
 		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: org, OwnerID: "test", LeaseSeconds: 60})
 		Expect(err).NotTo(HaveOccurred())

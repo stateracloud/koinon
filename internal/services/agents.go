@@ -21,6 +21,7 @@ import (
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/templates"
 )
@@ -84,8 +85,12 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 			out.Instructions = cfg.Instructions
 			out.Model = cfg.Model
 			out.Ephemeral = agentconfig.IsEphemeral(cfg)
-			wall, tokens := cfg.RunCaps()
-			out.RunLimits = &templatev1alpha1.RunLimits{MaxDurationSeconds: int64(wall.Seconds()), MaxTokens: tokens}
+			// The limits a run queued now gets: the version's, with the admin's override on top.
+			o, err := runlimits.GetOverride(ctx, q, a.OrgID, a.ID)
+			if err != nil {
+				return nil, err
+			}
+			out.RunLimits = runLimitsProto(o.Apply(cfg.RunLimits()))
 		}
 		if v.ID == a.ActiveVersionID {
 			out.ActiveVersion = v.Version
@@ -538,6 +543,11 @@ func agentModelProto(v agentmodel.View) *agentv1alpha1.GetAgentModelResponse {
 	out := &agentv1alpha1.GetAgentModelResponse{
 		Setting: v.Setting, VersionModel: v.VersionModel, Effective: v.Effective,
 		Source: modelSourceProto[v.Source], Problem: v.Problem,
+		Thinking: &agentv1alpha1.ThinkingState{
+			Setting: string(v.Thinking.Setting), VersionSetting: string(v.Thinking.VersionSetting),
+			Effective: string(v.Thinking.Effective), Supported: v.Thinking.Supported(), Mode: string(v.Thinking.Mode()),
+			AlwaysThinks: v.Thinking.AlwaysThinks(), OffOverridden: v.Thinking.OffOverridden(), Notice: v.Thinking.Notice(),
+		},
 	}
 	for _, m := range v.Available {
 		out.Available = append(out.Available, &agentv1alpha1.ServedModel{Name: m.Name, Provider: m.Provider})
@@ -591,4 +601,24 @@ func (s *Server) SetAgentModel(ctx context.Context, req *agentv1alpha1.SetAgentM
 		return nil, s.agentModelError(err)
 	}
 	return &agentv1alpha1.SetAgentModelResponse{Model: agentModelProto(v)}, nil
+}
+
+// SetAgentThinking implements AgentService. Admins and owners.
+func (s *Server) SetAgentThinking(ctx context.Context, req *agentv1alpha1.SetAgentThinkingRequest) (*agentv1alpha1.SetAgentThinkingResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.agentModels.SetThinking(requestCtx(ctx), c.org, id, c.auditActor(), req.GetThinking()); err != nil {
+		return nil, s.agentModelError(err)
+	}
+	_, v, err := s.agentModels.Load(ctx, c.org, id, time.Now())
+	if err != nil {
+		return nil, s.agentModelError(err)
+	}
+	return &agentv1alpha1.SetAgentThinkingResponse{Model: agentModelProto(v)}, nil
 }

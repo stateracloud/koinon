@@ -45,7 +45,7 @@ const template = {
   defaultFlavor: 'FLAVOR_OPENCODE',
   model: 'default',
   grants: [{ connector: 'github', scopes: ['repo.read', 'pull_request.create', 'issue.comment'], preset: 'PRESET_STANDARD', targetsMin: 1, targetsMax: 1 }],
-  runLimits: { maxDurationSeconds: '1800', maxTokens: '2000000' },
+  runLimits: { maxDurationSeconds: '1800', maxModelRequests: '300', maxSpendUsd: '5.00' },
 }
 
 test('connect GitHub, create and activate an agent, then approve its pull request', async ({ page }) => {

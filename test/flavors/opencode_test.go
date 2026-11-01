@@ -4,6 +4,8 @@ package flavors_test
 
 import (
 	"context"
+	"encoding/json"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -112,6 +114,96 @@ func lastBody(gw *gateway) string {
 	Expect(b).NotTo(BeEmpty())
 	return b[len(b)-1]
 }
+
+// The tool set matches the egress (ADR 0080, issue #247): without web egress the model is not
+// offered OpenCode's built-in webfetch, so it uses the org's MCP tools; with it (no switch) it is.
+var _ = Describe("koinon-opencode web tools", func() {
+	// offered reports which of the tools the model was offered in the first turn.
+	offered := func(ctx SpecContext, tools []string, extra ...string) map[string]bool {
+		gw := newGateway(contractScript(opencode))
+		sb := newOpencodeSandbox(ctx, instructionsMarker+"\n")
+		h, session := opencodeHarness(ctx, sb, gw, extra...)
+		_, err := h.conn.Prompt(ctx, session, helloPrompt)
+		Expect(err).NotTo(HaveOccurred())
+		body := lastBody(gw)
+		Expect(body).To(ContainSubstring(opencode.mcpToolName), "the request lists the tools")
+		got := map[string]bool{}
+		for _, t := range tools {
+			got[t] = regexp.MustCompile(`"name":\s*"` + regexp.QuoteMeta(t) + `"`).MatchString(body)
+		}
+		return got
+	}
+	It("offers webfetch without the switch (control) and never websearch", func(ctx SpecContext) {
+		Expect(offered(ctx, []string{"webfetch", "websearch"})).To(Equal(map[string]bool{"webfetch": true, "websearch": false}))
+	}, SpecTimeout(3*time.Minute))
+	It("offers neither with --no-web-tools", func(ctx SpecContext) {
+		Expect(offered(ctx, []string{"webfetch", "websearch"}, "--no-web-tools")).To(Equal(map[string]bool{"webfetch": false, "websearch": false}))
+	}, SpecTimeout(3*time.Minute))
+})
+
+// Subagents are off for every agent (issue #261): OpenCode 2.2.0's children outlive a cancelled
+// turn and agentd records none of their events. The permission rule `subagent` `*` deny in the
+// config removes the tool from what the model is offered, and a call to it anyway starts no child.
+var _ = Describe("koinon-opencode subagents", func() {
+	const (
+		subagentMarker = "KOINON-SUBAGENT"
+		// The text OpenCode puts at the start of a child session's first prompt
+		// (packages/core/src/tool/plugin/subagent.ts).
+		childPrompt = "You are a subagent spawned by another session"
+	)
+	script := fakemodel.Script{Model: contractModel, Turns: []fakemodel.Turn{
+		{When: fakemodel.When{ToolResult: fakemodel.AnyTool, UserContains: subagentMarker}, Text: helloReply},
+		{
+			When: fakemodel.When{UserContains: subagentMarker},
+			ToolCalls: []fakemodel.ToolCall{{Name: "subagent", Arguments: map[string]any{
+				"agent": "explore", "description": "List files", "prompt": "List the files.", "background": true,
+			}}},
+		},
+		{Text: helloReply},
+	}}
+	// offeredTools are the names in the request's "tools" list; the history may name other tools.
+	offeredTools := func(body string) []string {
+		var req struct {
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		Expect(json.Unmarshal([]byte(body), &req)).To(Succeed())
+		var names []string
+		for _, t := range req.Tools {
+			names = append(names, t.Function.Name)
+		}
+		return names
+	}
+
+	It("does not offer the subagent tool, and refuses a scripted call without starting a child", func(ctx SpecContext) {
+		gw := newGateway(script)
+		sb := newOpencodeSandbox(ctx, instructionsMarker+"\n")
+		h, session := opencodeHarness(ctx, sb, gw)
+
+		stop, err := h.conn.Prompt(ctx, session, subagentMarker+" delegate this.")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(stop).To(BeElementOf(acp.StopEndTurn, acp.StopCancelled))
+		h.client.take()
+
+		// The agent's own requests carry the tool list; the session title request does not.
+		var agent []string
+		for _, body := range gw.modelBodies() {
+			Expect(body).NotTo(ContainSubstring(childPrompt), "a child session sent a request")
+			if slices.Contains(offeredTools(body), opencode.mcpToolName) {
+				agent = append(agent, body)
+			}
+		}
+		// One request offered the tools and one returned the refused call's error.
+		Expect(len(agent)).To(BeNumerically(">=", 2), "the model was asked again after the call")
+		for _, body := range agent {
+			Expect(offeredTools(body)).NotTo(ContainElement("subagent"), "the model is offered the subagent tool")
+			Expect(body).NotTo(ContainSubstring("Available subagents"))
+		}
+	}, SpecTimeout(3*time.Minute))
+})
 
 var _ = Describe("koinon-opencode instructions", func() {
 	It("delivers an edit of the instruction file to the model at the next turn", func(ctx SpecContext) {
@@ -322,16 +414,37 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 			`OPENCODE_CONFIG_CONTENT={"plugins":["/sandbox/.config/opencode/plugins/one"],"providers":{"koinon":{"compatibility":{"cacheFormat":"alibaba"}}}}` + "\n"))
 	})
 
+	It("denies the built-in webfetch with --no-web-tools, next to the other overlays", func(ctx SpecContext) {
+		deny := `"permissions":[{"action":"webfetch","resource":"*","effect":"deny"}]`
+		Expect(entryEnv(ctx, "--no-web-tools")).To(ContainSubstring(`OPENCODE_CONFIG_CONTENT={` + deny + `}` + "\n"))
+		Expect(entryEnv(ctx, "--plugin-installs", "--no-web-tools", "--cache-alibaba")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"plugins":["/sandbox/.config/opencode/plugins/one"],` + deny +
+				`,"providers":{"koinon":{"compatibility":{"cacheFormat":"alibaba"}}}}` + "\n"))
+	})
+
 	It("sends the run ID as the body field session_id with --session-id", func(ctx SpecContext) {
 		Expect(entryEnv(ctx, "--session-id", "01234567-run")).To(ContainSubstring(
 			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"body":{"session_id":"01234567-run"}}}}` + "\n"))
 	})
 
 	It("puts the overlay on the entry of --model-format, and makes it the default model", func(ctx SpecContext) {
+		// The Messages entry always turns OpenCode's own thinking block off (ADR 0069 amendment
+		// 2026-10-29); Koinon's form goes in the body overlay (#316). The chat-completions entry has
+		// no compatibility overlay.
+		const off = `"models":{"m-1":{"compatibility":{"supportsThinkingBlockBinding":false,"supportsEffortUpdates":false}}}`
 		Expect(entryEnv(ctx, "--model-format", "anthropic", "--session-id", "01234567-run")).To(ContainSubstring(
-			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{"body":{"session_id":"01234567-run"}}}}` + "\n"))
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{"body":{"session_id":"01234567-run"},` + off + `}}}` + "\n"))
 		Expect(entryEnv(ctx, "--model-format", "anthropic")).To(ContainSubstring(
-			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1"}` + "\n"))
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{` + off + `}}}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "anthropic", "--thinking", "none")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{` + off + `}}}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "anthropic", "--thinking", "adaptive-summarized", "--session-id", "run-1")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{"body":{"session_id":"run-1","thinking":{"type":"adaptive","display":"summarized"}},` + off + `}}}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "anthropic", "--thinking", "disabled")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{"body":{"thinking":{"type":"disabled"}},` + off + `}}}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "openai", "--thinking", "effort-none")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"body":{"reasoning":{"effort":"none"}}}}}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "openai", "--thinking", "default")).NotTo(ContainSubstring("OPENCODE_CONFIG_CONTENT"))
 		Expect(entryEnv(ctx, "--model-format", "openai", "--cache-alibaba")).To(ContainSubstring(
 			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"compatibility":{"cacheFormat":"alibaba"}}}}` + "\n"))
 	})
@@ -343,7 +456,7 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 			entry := d.ModelEntries[f]
 			Expect(entry).NotTo(BeEmpty(), "no entry for the %s format", f)
 			Expect(entryEnv(ctx, "--model-format", string(f), "--session-id", "run-1")).To(
-				ContainSubstring(`"providers":{"`+entry+`":{"body":{"session_id":"run-1"}}}`), "format %s", f)
+				ContainSubstring(`"providers":{"`+entry+`":{"body":{"session_id":"run-1"}`), "format %s", f)
 		}
 	})
 

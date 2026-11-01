@@ -158,7 +158,8 @@ const (
 	FailureClass_FAILURE_CLASS_THROTTLED FailureClass = 2
 	// The input does not fit the model's context window.
 	FailureClass_FAILURE_CLASS_CONTEXT_OVERFLOW FailureClass = 3
-	// A token or spend limit stopped the run.
+	// A run limit (model requests or spend) or a spend limit (agent, org or platform) stopped the
+	// run.
 	FailureClass_FAILURE_CLASS_BUDGET FailureClass = 4
 	// A policy denied the request; never retried.
 	FailureClass_FAILURE_CLASS_POLICY FailureClass = 5
@@ -231,10 +232,15 @@ type Run struct {
 	ParkReason     ParkReason             `protobuf:"varint,7,opt,name=park_reason,json=parkReason,proto3,enum=koinon.run.v1alpha1.ParkReason" json:"park_reason,omitempty"`
 	// Why the run failed or was canceled.
 	OutcomeReason string `protobuf:"bytes,8,opt,name=outcome_reason,json=outcomeReason,proto3" json:"outcome_reason,omitempty"`
-	// Caps copied from the agent's template when the run was queued.
+	// Limits copied from the agent's version (or the agent's override) when the run was queued.
 	MaxWallClockSeconds int64 `protobuf:"varint,9,opt,name=max_wall_clock_seconds,json=maxWallClockSeconds,proto3" json:"max_wall_clock_seconds,omitempty"`
-	MaxTokens           int64 `protobuf:"varint,10,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
-	TokensUsed          int64 `protobuf:"varint,11,opt,name=tokens_used,json=tokensUsed,proto3" json:"tokens_used,omitempty"`
+	// Deprecated: tokens are reported, not enforced (ADR 0081). Zero on new runs.
+	//
+	// Deprecated: Marked as deprecated in koinon/run/v1alpha1/run.proto.
+	MaxTokens int64 `protobuf:"varint,10,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
+	// Tokens the run's requests used, input plus output as the gateway reports them (cache reads
+	// and writes are part of the input). The split by type is in cost.
+	TokensUsed int64 `protobuf:"varint,11,opt,name=tokens_used,json=tokensUsed,proto3" json:"tokens_used,omitempty"`
 	// The seq of the newest event.
 	LastEventSeq int64                  `protobuf:"varint,12,opt,name=last_event_seq,json=lastEventSeq,proto3" json:"last_event_seq,omitempty"`
 	CreatedAt    *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
@@ -245,7 +251,13 @@ type Run struct {
 	Cost *Cost `protobuf:"bytes,16,opt,name=cost,proto3" json:"cost,omitempty"`
 	// The class of the error that failed or stopped the run. Unspecified when the run did not
 	// fail, or failed before classes existed.
-	FailureClass  FailureClass `protobuf:"varint,17,opt,name=failure_class,json=failureClass,proto3,enum=koinon.run.v1alpha1.FailureClass" json:"failure_class,omitempty"`
+	FailureClass FailureClass `protobuf:"varint,17,opt,name=failure_class,json=failureClass,proto3,enum=koinon.run.v1alpha1.FailureClass" json:"failure_class,omitempty"`
+	// The run's request limit: 0 for a run queued before run limits existed (ADR 0081). Progress is
+	// cost.requests.
+	MaxModelRequests int64 `protobuf:"varint,18,opt,name=max_model_requests,json=maxModelRequests,proto3" json:"max_model_requests,omitempty"`
+	// The run's spend limit in USD as a decimal string; empty when the run has none. Progress is
+	// cost.usd.
+	MaxSpendUsd   string `protobuf:"bytes,19,opt,name=max_spend_usd,json=maxSpendUsd,proto3" json:"max_spend_usd,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -343,6 +355,7 @@ func (x *Run) GetMaxWallClockSeconds() int64 {
 	return 0
 }
 
+// Deprecated: Marked as deprecated in koinon/run/v1alpha1/run.proto.
 func (x *Run) GetMaxTokens() int64 {
 	if x != nil {
 		return x.MaxTokens
@@ -399,6 +412,20 @@ func (x *Run) GetFailureClass() FailureClass {
 	return FailureClass_FAILURE_CLASS_UNSPECIFIED
 }
 
+func (x *Run) GetMaxModelRequests() int64 {
+	if x != nil {
+		return x.MaxModelRequests
+	}
+	return 0
+}
+
+func (x *Run) GetMaxSpendUsd() string {
+	if x != nil {
+		return x.MaxSpendUsd
+	}
+	return ""
+}
+
 // Cost is model spend recorded by the spend ledger from agentgateway's access
 // log (plan item L1).
 type Cost struct {
@@ -415,8 +442,14 @@ type Cost struct {
 	// Requests whose usage the provider did not report and Koinon estimated (included in
 	// requests, tokens and usd). Zero when every request reported its usage.
 	EstimatedRequests int64 `protobuf:"varint,6,opt,name=estimated_requests,json=estimatedRequests,proto3" json:"estimated_requests,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// input_tokens is the total input, cache reads and writes included. The split by type: the
+	// uncached input is input_tokens - cache_read_tokens - cache_write_tokens. reasoning_tokens is
+	// part of output_tokens where the provider reports it.
+	CacheReadTokens  int64 `protobuf:"varint,7,opt,name=cache_read_tokens,json=cacheReadTokens,proto3" json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64 `protobuf:"varint,8,opt,name=cache_write_tokens,json=cacheWriteTokens,proto3" json:"cache_write_tokens,omitempty"`
+	ReasoningTokens  int64 `protobuf:"varint,9,opt,name=reasoning_tokens,json=reasoningTokens,proto3" json:"reasoning_tokens,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Cost) Reset() {
@@ -487,6 +520,27 @@ func (x *Cost) GetPriced() bool {
 func (x *Cost) GetEstimatedRequests() int64 {
 	if x != nil {
 		return x.EstimatedRequests
+	}
+	return 0
+}
+
+func (x *Cost) GetCacheReadTokens() int64 {
+	if x != nil {
+		return x.CacheReadTokens
+	}
+	return 0
+}
+
+func (x *Cost) GetCacheWriteTokens() int64 {
+	if x != nil {
+		return x.CacheWriteTokens
+	}
+	return 0
+}
+
+func (x *Cost) GetReasoningTokens() int64 {
+	if x != nil {
+		return x.ReasoningTokens
 	}
 	return 0
 }
@@ -979,7 +1033,7 @@ var File_koinon_run_v1alpha1_run_proto protoreflect.FileDescriptor
 
 const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\n" +
-	"\x1dkoinon/run/v1alpha1/run.proto\x12\x13koinon.run.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf1\x05\n" +
+	"\x1dkoinon/run/v1alpha1/run.proto\x12\x13koinon.run.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc7\x06\n" +
 	"\x03Run\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12\x1b\n" +
@@ -990,10 +1044,10 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\vpark_reason\x18\a \x01(\x0e2\x1f.koinon.run.v1alpha1.ParkReasonR\n" +
 	"parkReason\x12%\n" +
 	"\x0eoutcome_reason\x18\b \x01(\tR\routcomeReason\x123\n" +
-	"\x16max_wall_clock_seconds\x18\t \x01(\x03R\x13maxWallClockSeconds\x12\x1d\n" +
+	"\x16max_wall_clock_seconds\x18\t \x01(\x03R\x13maxWallClockSeconds\x12!\n" +
 	"\n" +
 	"max_tokens\x18\n" +
-	" \x01(\x03R\tmaxTokens\x12\x1f\n" +
+	" \x01(\x03B\x02\x18\x01R\tmaxTokens\x12\x1f\n" +
 	"\vtokens_used\x18\v \x01(\x03R\n" +
 	"tokensUsed\x12$\n" +
 	"\x0elast_event_seq\x18\f \x01(\x03R\flastEventSeq\x129\n" +
@@ -1004,14 +1058,19 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\vfinished_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"finishedAt\x12-\n" +
 	"\x04cost\x18\x10 \x01(\v2\x19.koinon.run.v1alpha1.CostR\x04cost\x12F\n" +
-	"\rfailure_class\x18\x11 \x01(\x0e2!.koinon.run.v1alpha1.FailureClassR\ffailureClass\"\xc3\x01\n" +
+	"\rfailure_class\x18\x11 \x01(\x0e2!.koinon.run.v1alpha1.FailureClassR\ffailureClass\x12,\n" +
+	"\x12max_model_requests\x18\x12 \x01(\x03R\x10maxModelRequests\x12\"\n" +
+	"\rmax_spend_usd\x18\x13 \x01(\tR\vmaxSpendUsd\"\xc8\x02\n" +
 	"\x04Cost\x12\x1a\n" +
 	"\brequests\x18\x01 \x01(\x03R\brequests\x12!\n" +
 	"\finput_tokens\x18\x02 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x03 \x01(\x03R\foutputTokens\x12\x10\n" +
 	"\x03usd\x18\x04 \x01(\tR\x03usd\x12\x16\n" +
 	"\x06priced\x18\x05 \x01(\bR\x06priced\x12-\n" +
-	"\x12estimated_requests\x18\x06 \x01(\x03R\x11estimatedRequests\"\xb5\x01\n" +
+	"\x12estimated_requests\x18\x06 \x01(\x03R\x11estimatedRequests\x12*\n" +
+	"\x11cache_read_tokens\x18\a \x01(\x03R\x0fcacheReadTokens\x12,\n" +
+	"\x12cache_write_tokens\x18\b \x01(\x03R\x10cacheWriteTokens\x12)\n" +
+	"\x10reasoning_tokens\x18\t \x01(\x03R\x0freasoningTokens\"\xb5\x01\n" +
 	"\bRunEvent\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x03R\x03seq\x12\x12\n" +

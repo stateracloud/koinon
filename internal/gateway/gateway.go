@@ -29,6 +29,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // ModelGateway is implemented by each gateway driver.
@@ -93,6 +94,31 @@ func (e *RejectedError) Orgs() []string {
 	slices.Sort(out)
 	return slices.Compact(out)
 }
+
+// ErrConfigRejected means the gateway failed to load the whole config it was given and keeps
+// serving its previous one (standalone mode). Unlike a RejectedError, nothing in the new config
+// is live.
+var ErrConfigRejected = errors.New("standalone: agentgateway rejected the config")
+
+// ConfigRejectedError is ErrConfigRejected with the revision and the gateway's own reason
+// ("USD budget limits support at most 9 fractional digits"), so an operator does not have to read
+// the gateway's log to learn it. errors.Is(err, ErrConfigRejected) matches it.
+type ConfigRejectedError struct {
+	Revision Revision
+	// Reason is the gateway's reload error, or empty when it could not be read.
+	Reason string
+}
+
+func (e *ConfigRejectedError) Error() string {
+	msg := fmt.Sprintf("%s (revision %s)", ErrConfigRejected.Error(), e.Revision)
+	if e.Reason != "" {
+		msg += ": " + e.Reason
+	}
+	return msg
+}
+
+// Is makes errors.Is(err, ErrConfigRejected) true.
+func (e *ConfigRejectedError) Is(target error) bool { return target == ErrConfigRejected }
 
 // LedgerBudgets is implemented by a driver whose gateway cannot enforce a spend limit itself: the
 // only limit it honours is an amount of zero, which it enforces by revoking the agent's keys (the
@@ -262,19 +288,23 @@ func HashKey(material string) string {
 // LimitUnit is the unit of a spend limit.
 type LimitUnit string
 
-const (
-	// USD limits spend priced by the gateway's model cost catalog.
-	USD LimitUnit = "USD"
-	// Tokens limits input plus output tokens.
-	Tokens LimitUnit = "Tokens"
-)
+// USD limits spend priced by the gateway's model cost catalog. It is the only unit a Limit
+// carries: Koinon budgets money, and the amount is an exact money.USD (issue #245).
+const USD LimitUnit = "USD"
+
+// BudgetFractionDigits is how many fraction digits of a USD limit the gateway accepts: standalone
+// agentgateway v1.7.0 rejects its whole config for a budget with more ("USD budget limits support
+// at most 9 fractional digits"). A gateway upgrade revisits it (ADR 0050, amendment 2026-10-29).
+const BudgetFractionDigits = 9
 
 // Limit is a per-agent spend limit enforced in the request path. Spend is
 // charged after a response completes, so a limit can be overshot by up to one
 // in-flight response (ADR 0041).
 type Limit struct {
-	Unit   LimitUnit
-	Amount float64
+	Unit LimitUnit
+	// Amount is exact, in USD with at most BudgetFractionDigits fraction digits (USDLimit rounds
+	// down to it; Validate rejects more).
+	Amount money.USD
 	// Window is the accounting window. agentgateway aligns windows to the Unix
 	// epoch (24h starts at midnight UTC). Zero means no window: since agentgateway
 	// v1.7 the counter then accumulates for the lifetime of its name and never
@@ -291,10 +321,28 @@ type Limit struct {
 	Generation string
 }
 
-// USDLimit returns a USD limit of amount per window. It is the edge where Koinon's exact
-// money type (package money) becomes the number agentgateway's budget config takes.
+// USDLimit returns a USD limit of amount per window. It is the edge where Koinon's exact money
+// type (package money) meets the gateway's precision: the amount is rounded down to
+// BudgetFractionDigits, which never hands out more than the remainder. The generation is not
+// derived from the amount, so the rounding does not change which counter the gateway uses.
 func USDLimit(amount money.USD, window time.Duration, generation string) Limit {
-	return Limit{Unit: USD, Amount: amount.Float64(), Window: window, Generation: generation}
+	return Limit{Unit: USD, Amount: amount.Floor(BudgetFractionDigits), Window: window, Generation: generation}
+}
+
+// Validate reports why the gateway cannot take the limit, or nil. A limit that fails it is
+// quarantined with its key by drivers that can (standalone: one bad limit must not freeze the file).
+func (l Limit) Validate() error {
+	switch {
+	case l.Unit != USD:
+		return fmt.Errorf("unknown unit %q", l.Unit)
+	case l.Amount < 0 || l.Window < 0:
+		return errors.New("amount and window must be >= 0")
+	case !l.Amount.HasFractionDigits(BudgetFractionDigits):
+		return fmt.Errorf("amount %s has more than %d fraction digits", l.Amount.Numeric(), BudgetFractionDigits)
+	case !generation.MatchString(l.Generation):
+		return errors.New("generation must be at most 64 of [a-z0-9-]")
+	}
+	return nil
 }
 
 // Provider is one OpenAI-compatible upstream of an org (ADR 0056, plan item PV1). Drivers
@@ -326,6 +374,10 @@ type Model struct {
 	// Format is the model's wire format (ADR 0069); the drivers render it through one table
 	// (Rendering). It is required.
 	Format modelformat.Format
+	// Thinking is what the catalog says about the model's thinking (internal/thinking). The
+	// rendering pins the anthropic-beta its row needs and never passes the client's header
+	// through (ADR 0069 amendment 2026-10-29). The zero value is a model that does not think.
+	Thinking thinking.Capability
 	// Guard turns on the routing guard (ADR 0048): the gateway forces GuardOverrides
 	// into every request body.
 	Guard bool
@@ -425,6 +477,43 @@ type State struct {
 	Models map[AgentRef][]string
 }
 
+// WithoutInvalidLimits returns s without the keys and limits of agents whose Limit fails
+// Limit.Validate, and one Rejection per dropped key. A driver that serves the rest of the state
+// uses it so that one agent's bad limit fails that agent's key (it is not served: fail closed)
+// and not the whole config.
+func (s State) WithoutInvalidLimits() (State, []Rejection) {
+	var bad map[AgentRef]error
+	for a, l := range s.Limits {
+		if err := l.Validate(); err != nil {
+			if bad == nil {
+				bad = map[AgentRef]error{}
+			}
+			bad[a] = err
+		}
+	}
+	if bad == nil {
+		return s, nil
+	}
+	out := s
+	out.Limits = map[AgentRef]Limit{}
+	for a, l := range s.Limits {
+		if _, ok := bad[a]; !ok {
+			out.Limits[a] = l
+		}
+	}
+	out.Keys = nil
+	var rej []Rejection
+	for _, k := range s.Keys {
+		if err, ok := bad[k.Agent]; ok {
+			rej = append(rej, Rejection{Org: k.Agent.Org, Kind: "Key", Name: k.ID, Reason: "limit: " + err.Error()})
+			continue
+		}
+		out.Keys = append(out.Keys, k)
+	}
+	slices.SortFunc(rej, func(a, b Rejection) int { return strings.Compare(a.Name, b.Name) })
+	return out, rej
+}
+
 // AddKey adds k to the State.
 func (s *State) AddKey(k Key) { s.Keys = append(s.Keys, k) }
 
@@ -521,6 +610,8 @@ var (
 	keyID      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	keyHash    = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	modelName  = regexp.MustCompile(`^[A-Za-z0-9_.:/@-]{1,256}$`)
+	// betaValue is one anthropic-beta value, a dated feature name such as thinking-binding-controls-2026-08-01.
+	betaValue = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
 	// providerType is an agentgateway providerOverride.
 	providerType = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 	keyPath      = regexp.MustCompile(`^/[A-Za-z0-9_./-]{1,256}$`)
@@ -596,14 +687,8 @@ func (s State) Validate() error {
 		if err := a.Validate(); err != nil {
 			errs = append(errs, err)
 		}
-		if l.Unit != USD && l.Unit != Tokens {
-			errs = append(errs, fmt.Errorf("limit for %s: unknown unit %q", a, l.Unit))
-		}
-		if l.Amount < 0 || l.Window < 0 {
-			errs = append(errs, fmt.Errorf("limit for %s: amount and window must be >= 0", a))
-		}
-		if !generation.MatchString(l.Generation) {
-			errs = append(errs, fmt.Errorf("limit for %s: generation must be at most 64 of [a-z0-9-]", a))
+		if err := l.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("limit for %s: %w", a, err))
 		}
 	}
 	seenModel := map[string]bool{}
@@ -636,6 +721,15 @@ func (s State) Validate() error {
 				errs = append(errs, fmt.Errorf("model %q of provider %q: unknown or unset format %q", m.Name, ref, m.Format))
 			} else if _, err := RenderingOf(m); err != nil {
 				errs = append(errs, fmt.Errorf("model %q of provider %q: %w", m.Name, ref, err))
+			}
+			if err := m.Thinking.Validate(); err != nil {
+				errs = append(errs, fmt.Errorf("model %q of provider %q: %w", m.Name, ref, err))
+			}
+			for _, b := range m.Thinking.Betas {
+				// A beta becomes a header value the gateway sets.
+				if !betaValue.MatchString(b) {
+					errs = append(errs, fmt.Errorf("model %q of provider %q: invalid anthropic beta %q", m.Name, ref, b))
+				}
 			}
 			if !modelName.MatchString(m.Name) {
 				errs = append(errs, fmt.Errorf("model %q of provider %q: invalid name", m.Name, ref))
@@ -744,7 +838,18 @@ const (
 	// generation ID, x-generation-id), so the ledger can ask the provider later what it billed for a
 	// response cut short (ADR 0056, amendment 2026-10-28). See ResponseIDCEL.
 	LogFieldResponseID = "koinon.response_id"
+	// LogFieldUpstream is whether the gateway called the provider for this request (a boolean,
+	// UpstreamCEL). It tells a status the provider answered from one the gateway made itself (a bad
+	// or revoked key, a model the key may not use, its own budget): the ledger charges and attributes
+	// the first and ignores the second (ADR 0056, amendment 2026-10-29). A record without the field
+	// comes from a config that predates it.
+	LogFieldUpstream = "koinon.upstream"
 )
+
+// UpstreamCEL is the CEL of LogFieldUpstream. proxy.upstreamDuration is the time spent waiting for
+// the outbound call, so it exists exactly when the gateway made one (verified against v1.7.0: a
+// provider's 403 has it, a gateway 401 or model_not_allowed 403 does not).
+const UpstreamCEL = `default(proxy.upstreamDuration, "") != ""`
 
 // ResponseIDHeaders are the response headers that carry a provider's response ID, in the order
 // tried. OpenRouter returns x-generation-id on every endpoint; the ID is what its generation

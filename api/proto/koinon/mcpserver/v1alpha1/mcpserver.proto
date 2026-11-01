@@ -118,6 +118,13 @@ message Tool {
   // unavailable says why agents are not offered the tool ("unavailable: name too long ..."); empty when
   // they are.
   string unavailable = 14;
+  // description is the sanitised text (ADR 0057 amendment, #267). description_original_length is the
+  // length in characters of the description as the server published it; description_capped says it,
+  // or a description in the input schema, was cut to its cap; description_cleaned says control,
+  // invisible or tag characters were removed or harness-lookalike tags escaped.
+  int64 description_original_length = 15;
+  bool description_capped = 16;
+  bool description_cleaned = 17;
 }
 
 // Allowance is a server an agent may use, optionally narrowed to some of its tools.

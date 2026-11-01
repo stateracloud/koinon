@@ -20,6 +20,10 @@ spec:
     default: opencode
   harness:
     pluginInstalls: false
+  # Sandbox size (ADR 0083): an estimate for this agent's work; the platform bounds clamp it.
+  resources:
+    cpu: {request: 250m, limit: "2"}
+    memory: {request: 1Gi, limit: 1536Mi}
   model:
     name: default
   questions:
@@ -52,7 +56,8 @@ spec:
   limits:
     run:
       maxDuration: 30m
-      maxTokens: 2000000
+      maxModelRequests: 150
+      maxSpendUSD: "1.00"
     spendUSD: "2.00"
   instructions: |
     # LCM upgrader

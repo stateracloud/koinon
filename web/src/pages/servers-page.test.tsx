@@ -71,6 +71,7 @@ const tools = [
   create(ToolSchema, { serverId: 's-docs', name: 'legacy', tier: Tier.AUTO, present: false }),
   create(ToolSchema, { serverId: 's-docs', name: 'long_tool', description: 'Too long', tier: Tier.ASK, present: true, unavailable: 'unavailable: name too long for the gateway' }),
   create(ToolSchema, { serverId: 's-docs', name: 'sync', description: 'Sync pages', tier: Tier.AUTO, present: true }),
+  create(ToolSchema, { serverId: 's-docs', name: 'poisoned', description: 'Search…', tier: Tier.ASK, present: true, descriptionOriginalLength: 5000n, descriptionCapped: true, descriptionCleaned: true }),
   create(ToolSchema, { serverId: 's-sec', name: 'read', description: 'Read a page', tier: Tier.ASK, present: true }),
 ]
 
@@ -187,7 +188,7 @@ describe('Servers page', () => {
     expect(search.getByText('Search the docs')).toBeInTheDocument()
     expect(search.getByRole('radio', { name: 'Ask' })).toBeChecked()
     const publish = within(tl.getByText('publish').closest('li')!)
-    expect(publish.getByRole('radio', { name: 'Never' })).toBeChecked()
+    expect(publish.getByRole('radio', { name: 'Deny' })).toBeChecked()
     expect(tl.getByText('no longer listed')).toBeInTheDocument()
     const edit = within(tl.getByText('edit').closest('li')!)
     expect(edit.getByText('Review', { selector: '[data-slot=badge]' })).toBeInTheDocument()
@@ -197,7 +198,7 @@ describe('Servers page', () => {
   it('sets a tool tier with SetToolTier', async () => {
     const calls = setup()
     const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
-    await userEvent.click(within(tl.getByText('publish').closest('li')!).getByRole('radio', { name: 'Auto' }))
+    await userEvent.click(within(tl.getByText('publish').closest('li')!).getByRole('radio', { name: 'Allow' }))
     await waitFor(() => expect(calls.tiers).toHaveLength(1))
     expect(calls.tiers[0]).toMatchObject({ orgId: 'org-1', serverId: 's-docs', tool: 'publish', tier: Tier.AUTO })
   })
@@ -205,18 +206,18 @@ describe('Servers page', () => {
   it('sets the tier of a tool on a Secret-managed server', async () => {
     const calls = setup()
     const tl = within(await screen.findByRole('list', { name: 'Tools of wiki' }))
-    await userEvent.click(tl.getByRole('radio', { name: 'Never' }))
+    await userEvent.click(tl.getByRole('radio', { name: 'Deny' }))
     await waitFor(() => expect(calls.tiers).toEqual([expect.objectContaining({ serverId: 's-sec', tool: 'read', tier: Tier.NEVER })]))
   })
 
-  it('only suggests Auto for a read-only tool until the admin confirms', async () => {
+  it('only suggests Allow for a read-only tool until the admin confirms', async () => {
     const calls = setup()
     const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
     const search = within(tl.getByText('search').closest('li')!)
     expect(search.getByText(/Suggested read-only/)).toBeInTheDocument()
     expect(search.getByRole('radio', { name: 'Ask' })).toBeChecked()
     expect(calls.tiers).toHaveLength(0)
-    await userEvent.click(search.getByRole('button', { name: 'Set to Auto: search' }))
+    await userEvent.click(search.getByRole('button', { name: 'Set to Allow: search' }))
     await waitFor(() => expect(calls.tiers).toEqual([expect.objectContaining({ tool: 'search', tier: Tier.AUTO })]))
   })
 
@@ -253,10 +254,18 @@ describe('Servers page', () => {
     expect(row.getByRole('radio', { name: 'Ask' })).toBeEnabled()
   })
 
-  it('hints that reviewing does not restore Auto', async () => {
+  it('says when Koinon sanitised a tool description', async () => {
     setup()
     const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
-    expect(tl.getByText('Reviewing keeps the tool in Ask; set it back to Auto yourself if you trust the new version.')).toBeInTheDocument()
+    const row = within(tl.getByText('poisoned').closest('li')!)
+    expect(row.getByText(/hidden characters removed or lookalike tags escaped; cut to its length cap \(the server published 5000 characters\)/)).toBeInTheDocument()
+    expect(within(tl.getByText('sync').closest('li')!).queryByText(/Koinon sanitised/)).not.toBeInTheDocument()
+  })
+
+  it('hints that reviewing does not restore Allow', async () => {
+    setup()
+    const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
+    expect(tl.getByText('Reviewing keeps the tool in Ask; set it back to Allow yourself if you trust the new version.')).toBeInTheDocument()
   })
 
   it('adds a server with a bearer token and clears the secret from the page', async () => {
@@ -330,7 +339,7 @@ describe('Servers page', () => {
     const calls = setup({ role: OrgRole.MEMBER })
     expect(await screen.findByRole('alert')).toHaveTextContent('Only org admins and owners can manage remote MCP servers.')
     expect(calls.listed).toBe(0)
-    expect(screen.queryByRole('link', { name: 'Servers' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'MCP servers' })).not.toBeInTheDocument()
   })
 })
 

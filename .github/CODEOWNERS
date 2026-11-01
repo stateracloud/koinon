@@ -1,5 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Every path is owned by the maintainer. GitHub requests their review on each pull request;
-# the main ruleset does not require an approval while there is a single maintainer.
-* @procoduck
+# Both maintainers own the tree, so GitHub requests the other one's review on a pull request (an
+# author cannot approve their own). Sensitive paths are listed again below so the intent is
+# explicit and so either maintainer can approve the other's change there (ADR 0082). Approval is
+# required on those paths only; how that is enforced is described in ADR 0082 and
+# docs/dev/work-claims-setup.md. CODEOWNERS uses the last matching line.
+* @procoduck @ovirandunu
+
+# Sensitive paths. This list is the single source: `hack/claim.sh sensitive-paths` prints the same
+# patterns for the main ruleset's required_reviewers rule (the section starts at the next line and
+# every `/path` line in it counts).
+/.github/ @procoduck @ovirandunu
+/AGENTS.md @procoduck @ovirandunu
+/docs/design.md @procoduck @ovirandunu
+/docs/dev/releasing.md @procoduck @ovirandunu
+/docs/adr/ @procoduck @ovirandunu
+/charts/ @procoduck @ovirandunu
+/internal/db/migrations/ @procoduck @ovirandunu
+/internal/gateway/ @procoduck @ovirandunu
+/internal/agentd/ @procoduck @ovirandunu
+/internal/reconciler/ @procoduck @ovirandunu
+/internal/ledger/ @procoduck @ovirandunu
+/internal/auth/ @procoduck @ovirandunu
+/internal/secretstore/ @procoduck @ovirandunu
+/internal/tracing/scrub/ @procoduck @ovirandunu
+/hack/claim.sh @procoduck @ovirandunu
+/hack/migrate-patch-line @procoduck @ovirandunu

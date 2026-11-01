@@ -22,6 +22,7 @@ import (
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 )
 
 // fileConfig is the part of the chart's config.yaml (charts/koinon/templates/config.yaml) the
@@ -42,6 +43,11 @@ type fileConfig struct {
 		ProviderKeysDir    string `yaml:"providerKeysDir"`
 		// AccessLogOTLP is koinon-api's OTLP/HTTP receiver as host:port (plan item L1).
 		AccessLogOTLP string `yaml:"accessLogOtlp"`
+		// AccessLogOTLPTokenFile is the file in the gateway pod with the receiver's bearer token
+		// (standalone mode); AccessLogOTLPTokenSecret is the Secret that holds it (kubernetes mode,
+		// key "token"). Names only: the token is never in this file.
+		AccessLogOTLPTokenFile   string `yaml:"accessLogOtlpTokenFile"`
+		AccessLogOTLPTokenSecret string `yaml:"accessLogOtlpTokenSecret"`
 		// Name and GatewayClassName are Koinon's Gateway and its class in kubernetes mode (plan item G2).
 		Name             string `yaml:"name"`
 		GatewayClassName string `yaml:"gatewayClassName"`
@@ -52,6 +58,12 @@ type fileConfig struct {
 		RuntimeClassName string `yaml:"runtimeClassName"`
 		// GatewayID is OpenShell's gateway_id, which names the workspace namespaces.
 		GatewayID string `yaml:"gatewayId"`
+		// GatewayConfig locates OpenShell's gateway ConfigMap, whose supervisor_image is part of the
+		// sandbox spec hash (ADR 0085 decision 9). Empty leaves it out.
+		GatewayConfig struct {
+			Namespace string `yaml:"namespace"`
+			ConfigMap string `yaml:"configMap"`
+		} `yaml:"gatewayConfig"`
 	} `yaml:"openshell"`
 	// SandboxObserver is the chart's sandboxObserver (ADR 0078).
 	SandboxObserver struct {
@@ -66,10 +78,32 @@ type fileConfig struct {
 		ParkWarm       string `yaml:"parkWarm"`
 		ArchiveAfter   string `yaml:"archiveAfter"`
 		SandboxJobs    int    `yaml:"sandboxJobs"`
-		ResyncInterval string `yaml:"resyncInterval"`
-		HomeRetention  string `yaml:"homeRetention"`
-		Checkpoints    bool   `yaml:"checkpoints"`
+		KeepWarmPerOrg int    `yaml:"keepWarmPerOrg"`
+		// MaxRecreatesPerPass caps the sandboxes recreated with a changed spec per pass.
+		MaxRecreatesPerPass int    `yaml:"maxRecreatesPerPass"`
+		ResyncInterval      string `yaml:"resyncInterval"`
+		HomeRetention       string `yaml:"homeRetention"`
+		Checkpoints         bool   `yaml:"checkpoints"`
 	} `yaml:"reconciler"`
+	// SandboxResources is the chart's sandbox.resources (ADR 0083). Values left out keep
+	// sandboxres.DefaultPolicy's.
+	SandboxResources struct {
+		Default struct {
+			CPU    quantitiesConfig `yaml:"cpu"`
+			Memory quantitiesConfig `yaml:"memory"`
+		} `yaml:"default"`
+		Bounds struct {
+			CPU struct {
+				Request rangeConfig `yaml:"request"`
+				Limit   rangeConfig `yaml:"limit"`
+			} `yaml:"cpu"`
+			Memory struct {
+				Request rangeConfig `yaml:"request"`
+				Limit   rangeConfig `yaml:"limit"`
+			} `yaml:"memory"`
+		} `yaml:"bounds"`
+		MemoryRequestEqualsLimit *bool `yaml:"memoryRequestEqualsLimit"`
+	} `yaml:"sandboxResources"`
 	Flavors map[string]struct {
 		Image string `yaml:"image"`
 	} `yaml:"flavors"`
@@ -84,6 +118,48 @@ type fileConfig struct {
 	MCPAsk struct {
 		URL string `yaml:"url"`
 	} `yaml:"mcpAsk"`
+}
+
+type quantitiesConfig struct {
+	Request string `yaml:"request"`
+	Limit   string `yaml:"limit"`
+}
+
+type rangeConfig struct {
+	Min string `yaml:"min"`
+	Max string `yaml:"max"`
+}
+
+// policy lays the file's sandbox resources over sandboxres.DefaultPolicy: a value the file leaves
+// empty keeps the default.
+func (fc fileConfig) policy() sandboxres.Policy {
+	p := sandboxres.DefaultPolicy()
+	set := func(dst *string, v string) {
+		if v != "" {
+			*dst = v
+		}
+	}
+	sr := fc.SandboxResources
+	set(&p.Default.CPU.Request, sr.Default.CPU.Request)
+	set(&p.Default.CPU.Limit, sr.Default.CPU.Limit)
+	set(&p.Default.Memory.Request, sr.Default.Memory.Request)
+	set(&p.Default.Memory.Limit, sr.Default.Memory.Limit)
+	for _, r := range []struct {
+		dst *sandboxres.Range
+		src rangeConfig
+	}{
+		{&p.Bounds.CPURequest, sr.Bounds.CPU.Request},
+		{&p.Bounds.CPULimit, sr.Bounds.CPU.Limit},
+		{&p.Bounds.MemoryRequest, sr.Bounds.Memory.Request},
+		{&p.Bounds.MemoryLimit, sr.Bounds.Memory.Limit},
+	} {
+		set(&r.dst.Min, r.src.Min)
+		set(&r.dst.Max, r.src.Max)
+	}
+	if sr.MemoryRequestEqualsLimit != nil {
+		p.MemoryRequestEqualsLimit = *sr.MemoryRequestEqualsLimit
+	}
+	return p
 }
 
 // config is the reconciler's effective configuration: the config file, overridden by flags
@@ -123,15 +199,25 @@ type config struct {
 	healthAddr         string
 	metricsAddr        string
 	accessLogOTLP      string
+	otlpTokenFile      string
+	otlpTokenSecret    string
 
 	idleTimeout    time.Duration
 	archiveAfter   time.Duration
 	parkWarm       time.Duration
 	sandboxJobs    int
-	resyncInterval time.Duration
-	homeRetention  string
-	checkpoints    bool
-	flavorImages   map[string]string
+	keepWarmPerOrg int
+	// maxRecreates is the cap on spec-change recreates per pass; openshellConfigNS and
+	// openshellConfigMap locate the gateway ConfigMap that names the supervisor image.
+	maxRecreates                          int
+	openshellConfigNS, openshellConfigMap string
+	resyncInterval                        time.Duration
+	homeRetention                         string
+	checkpoints                           bool
+	flavorImages                          map[string]string
+
+	// sandboxResources is the platform's sandbox sizing, from the config file's sandboxResources.
+	sandboxResources sandboxres.Policy
 
 	githubToolsURL string
 	mcpAskURL      string
@@ -170,8 +256,12 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.kekDir, "kek-dir", "", "directory with the mounted key-encryption keys Secret (files named by KEK ID plus \"active\")")
 	fs.StringVar(&c.accessLogOTLP, "gateway-access-log-otlp", "",
 		"host:port of koinon-api's OTLP/HTTP receiver, where agentgateway exports its access log for the spend ledger; empty exports nothing")
+	fs.StringVar(&c.otlpTokenFile, "gateway-access-log-otlp-token-file", "",
+		"file, as the standalone gateway pod sees it, with the bearer token the OTLP receiver requires; agentgateway reads it and sends it with the access log")
+	fs.StringVar(&c.otlpTokenSecret, "gateway-access-log-otlp-token-secret", "",
+		"Secret (key token) with the bearer token the OTLP receiver requires, for kubernetes mode: the agentgateway controller reads it and hands it to the proxy")
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort, "listen address of /metrics (Prometheus); empty disables it")
-	fs.StringVar(&c.healthAddr, "health-addr", ":8082", "listen address of /healthz and /readyz (not ready until the key-encryption keys are loaded); empty disables it")
+	fs.StringVar(&c.healthAddr, "health-addr", ":8082", "listen address of /healthz and /readyz (not ready until the key-encryption keys are loaded and the schema version is supported); empty disables it")
 	fs.StringVar(&c.egressHosts, "egress-allowed-hosts", "", "comma-separated hosts (optionally host:port) providers and MCP servers may name although they are internal")
 	fs.StringVar(&c.allowedHosts, "provider-allowed-hosts", "", "deprecated alias of --egress-allowed-hosts, kept for one release")
 	fs.DurationVar(&c.keySettle, "provider-key-settle", 0,
@@ -179,6 +269,10 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.DurationVar(&c.archiveAfter, "archive-after", 0, "archive a sandbox (delete it and its volume, home checkpointed) after this long stopped (default 168h; negative turns it off; needs checkpoints)")
 	fs.DurationVar(&c.idleTimeout, "idle-timeout", 0, "stop a sandbox after this long without an active run (default 10m)")
 	fs.DurationVar(&c.parkWarm, "park-warm", 0, "keep a sandbox up this long after its run parked on a2a or input_required (default 15m)")
+	fs.IntVar(&c.keepWarmPerOrg, "keep-warm-per-org", 0, "keep-warm sandboxes an org may have (default 2; negative grants none)")
+	fs.IntVar(&c.maxRecreates, "max-recreates-per-pass", 0, "sandboxes one pass may recreate with a changed spec, such as a new supervisor image (default 4; negative is no cap)")
+	fs.StringVar(&c.openshellConfigNS, "openshell-config-namespace", "", "namespace of OpenShell's gateway ConfigMap, to read its supervisor image")
+	fs.StringVar(&c.openshellConfigMap, "openshell-config-map", "", "OpenShell's gateway ConfigMap (<fullname>-config); empty leaves the supervisor image out of the sandbox spec hash")
 	fs.IntVar(&c.sandboxJobs, "sandbox-jobs", 0, "sandbox start/stop jobs that run at once (default 8)")
 	fs.DurationVar(&c.resyncInterval, "resync-interval", 0, "time between passes without a wake-up (default 30s)")
 	fs.BoolVar(&c.checkpoints, "checkpoints", false, "stop, recreate and restore sandboxes around home checkpoints (koinon-agentd writes them; ADR 0032)")
@@ -241,6 +335,9 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.openshellTLSDir, fc.OpenShell.TLS)
 	orDefault(&c.runtimeClass, fc.OpenShell.RuntimeClassName)
 	orDefault(&c.openshellGateway, fc.OpenShell.GatewayID)
+	orDefault(&c.openshellConfigNS, fc.OpenShell.GatewayConfig.Namespace)
+	orDefault(&c.openshellConfigMap, fc.OpenShell.GatewayConfig.ConfigMap)
+	orDefault(&c.maxRecreates, fc.Reconciler.MaxRecreatesPerPass)
 	orDefault(&c.openshellGateway, execution.DefaultGatewayID)
 	// An explicit flag or variable wins over the file in both directions: flag > file > default (off).
 	if !c.sandboxObserverSet {
@@ -266,10 +363,15 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.providerKeysSecret, fc.Gateway.ProviderKeysSecret)
 	orDefault(&c.providerKeysDir, fc.Gateway.ProviderKeysDir)
 	orDefault(&c.accessLogOTLP, fc.Gateway.AccessLogOTLP)
+	orDefault(&c.otlpTokenFile, fc.Gateway.AccessLogOTLPTokenFile)
+	orDefault(&c.otlpTokenSecret, fc.Gateway.AccessLogOTLPTokenSecret)
 	orDefault(&c.homeRetention, fc.Reconciler.HomeRetention)
 	orDefault(&c.checkpoints, fc.Reconciler.Checkpoints)
 	if c.sandboxJobs == 0 {
 		c.sandboxJobs = fc.Reconciler.SandboxJobs
+	}
+	if c.keepWarmPerOrg == 0 {
+		c.keepWarmPerOrg = fc.Reconciler.KeepWarmPerOrg
 	}
 	orDefault(&c.githubToolsURL, fc.GitHubTools.URL)
 	orDefault(&c.mcpAskURL, fc.MCPAsk.URL)
@@ -286,6 +388,7 @@ func (c *config) fill(fc fileConfig) error {
 			*d.dst = v
 		}
 	}
+	c.sandboxResources = fc.policy()
 	c.flavorImages = map[string]string{}
 	for name, f := range fc.Flavors {
 		c.flavorImages[name] = f.Image
@@ -316,6 +419,9 @@ func (c *config) validate() error {
 	}
 	if c.gatewayMode == project.GatewayKubernetes && c.gatewayName == "" {
 		return errors.New("--gateway-name is required in kubernetes mode")
+	}
+	if err := c.sandboxResources.Validate(); err != nil {
+		return fmt.Errorf("config sandboxResources: %w", err)
 	}
 	return nil
 }

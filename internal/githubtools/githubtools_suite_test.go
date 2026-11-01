@@ -12,19 +12,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/pressly/goose/v3"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
-
-// postgresImage is the minimum supported Postgres version (ADR 0047).
-const postgresImage = "postgres:18-alpine"
 
 var (
 	pool *pgxpool.Pool
@@ -50,20 +44,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 		dbErr = err
 		return
 	}
-	ctr, err := postgres.Run(ctx, postgresImage, postgres.WithDatabase("koinon"), postgres.BasicWaitStrategies())
-	Expect(err).NotTo(HaveOccurred())
-	DeferCleanup(func(ctx context.Context) error { return ctr.Terminate(ctx) })
-	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	Expect(err).NotTo(HaveOccurred())
-	pool, err = pgxpool.New(ctx, dsn)
-	Expect(err).NotTo(HaveOccurred())
-	DeferCleanup(pool.Close)
-	db := stdlib.OpenDBFromPool(pool)
-	DeferCleanup(db.Close)
-	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
-	Expect(err).NotTo(HaveOccurred())
-	_, err = provider.Up(ctx)
-	Expect(err).NotTo(HaveOccurred())
+	pool = pgtest.Start(ctx)
 	q = store.New(pool)
 }, NodeTimeout(3*time.Minute))
 
@@ -115,7 +96,7 @@ func newFixture(ctx context.Context, config string) fixture {
 	Expect(err).NotTo(HaveOccurred())
 	t, err := q.CreateTask(ctx, store.CreateTaskParams{OrgID: orgID, Title: "fix the typo", AgentID: f.agent.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: user})
 	Expect(err).NotTo(HaveOccurred())
-	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: orgID, AgentID: f.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000})
+	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: orgID, AgentID: f.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800})
 	Expect(err).NotTo(HaveOccurred())
 	run, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: orgID, OwnerID: "agentd-test", LeaseSeconds: 60})
 	Expect(err).NotTo(HaveOccurred())

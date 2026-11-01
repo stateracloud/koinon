@@ -44,7 +44,7 @@ step "kind create cluster $CLUSTER"
 if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
   echo "cluster $CLUSTER exists; reusing it"
 else
-  kind create cluster --name "$CLUSTER" --image "$NODE_IMAGE" --wait 120s
+  kind create cluster --name "$CLUSTER" --image "$NODE_IMAGE" --config "$here/kind-config.yaml" --wait 120s
 fi
 done_step kind
 

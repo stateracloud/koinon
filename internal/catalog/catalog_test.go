@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
@@ -35,7 +36,7 @@ var _ = Describe("URLPolicy", func() {
 	}
 	p := catalog.URLPolicy{
 		Namespace:    "koinon",
-		AllowedHosts: []string{"localhost:11434", "ollama.lab.example.com", "10.20.0.0/24", "fakemodel.fakes.svc:8080", "192.168.7.7"},
+		AllowedHosts: []string{"localhost:11434", "ollama.lab.example.com", "10.20.0.0/24", "fakemodel.fakes.svc:8080", "192.168.7.7", "[fd00::7]:11434"},
 		Resolver: resolver(map[string][]string{
 			"api.openai.com":          {"104.18.6.192"},
 			"ollama.lab.example.com":  {"127.0.0.1"},
@@ -50,6 +51,26 @@ var _ = Describe("URLPolicy", func() {
 			"v6.example.com":          {"fe80::1"},
 		}),
 	}
+	DescribeTable("refuses a pattern host, strict or not",
+		func(ctx SpecContext, u string) {
+			for _, check := range []func(context.Context, string) error{p.Check, p.CheckStrict} {
+				err := check(ctx, u)
+				var inv *catalog.InvalidError
+				Expect(errors.As(err, &inv)).To(BeTrue(), u)
+				Expect(err.Error()).To(ContainSubstring("DNS exfiltration"))
+			}
+		},
+		Entry("wildcard label", "https://*.example.com/v1"),
+		Entry("bare star", "https://*/v1"),
+		Entry("inner glob", "https://api.*.example.com"),
+	)
+	It("refuses a pattern in the platform allow list", func() {
+		Expect(catalog.ValidateAllowedHosts([]string{"ollama.lab.example.com:11434", "10.20.0.0/24"})).To(Succeed())
+		Expect(catalog.ValidateAllowedHosts([]string{"[fd00::1]", "[fd00::1]:11434", "fd00::1", "fd00::/8"})).To(Succeed())
+		for _, bad := range []string{"*.lab.example.com", "[ab].lab.example.com", "[fd00::1]*", "[fd00::1]:[1-9]", "[*]:80"} {
+			Expect(catalog.ValidateAllowedHosts([]string{bad})).To(MatchError(ContainSubstring("is a pattern")), bad)
+		}
+	})
 	DescribeTable("denies",
 		func(ctx SpecContext, u string) {
 			err := p.Check(ctx, u)
@@ -113,6 +134,8 @@ var _ = Describe("URLPolicy", func() {
 		Entry("an IP inside an allow-listed CIDR", "http://10.20.0.5:11434/v1"),
 		Entry("a name that resolves into an allow-listed CIDR", "http://allowed-net.example.com/v1"),
 		Entry("an allow-listed IP", "http://192.168.7.7:11434/v1"),
+		Entry("a public IPv6 literal (brackets are not a pattern)", "http://[2606:4700::1111]/v1"),
+		Entry("an allow-listed IPv6 literal with its port", "http://[fd00::7]:11434/v1"),
 		Entry("a name that does not resolve (checked again at render)", "https://future.example.com/v1"),
 	)
 	DescribeTable("rejects non-ASCII hosts", func(ctx SpecContext, u string) {
@@ -310,6 +333,107 @@ var _ = Describe("Service", func() {
 			Expect(errors.As(err, &inv)).To(BeTrue())
 		})
 
+		It("makes the org's first model its default model and never moves it (#256)", func(ctx SpecContext) {
+			q := store.New(pool)
+			def := func() string {
+				GinkgoHelper()
+				d, err := q.GetOrgDefaultModel(ctx, org)
+				Expect(err).NotTo(HaveOccurred())
+				return d
+			}
+			Expect(def()).To(BeEmpty())
+			z, a := create(ctx, "z-first", ""), create(ctx, "a-second", "")
+			_, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: z.ID, Name: "zz"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(def()).To(Equal("zz"))
+			_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: a.ID, Name: "aa"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(def()).To(Equal("zz"), "a model that sorts first does not take the default")
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'org.default_model.set'`, org).Scan(&n)).To(Succeed())
+			Expect(n).To(Equal(1))
+		})
+
+		Describe("deleting the default model (#256)", func() {
+			var q *store.Queries
+			def := func(ctx SpecContext) string {
+				GinkgoHelper()
+				d, err := q.GetOrgDefaultModel(ctx, org)
+				Expect(err).NotTo(HaveOccurred())
+				return d
+			}
+			// clearedEvent expects exactly one audit event that moved the default from old to none.
+			clearedEvent := func(ctx SpecContext, old string) {
+				GinkgoHelper()
+				ev := events(ctx, "org.default_model.set")
+				Expect(ev).To(HaveLen(2), "the first model set it, the deletion cleared it")
+				var last struct{ Before, After map[string]any }
+				for _, e := range ev {
+					var s struct{ Before, After map[string]any }
+					Expect(json.Unmarshal(e.Summary, &s)).To(Succeed())
+					if s.After["reason"] == "model deleted" {
+						last = s
+					}
+				}
+				Expect(last.Before).To(HaveKeyWithValue("model", old))
+				Expect(last.After).To(HaveKeyWithValue("model", ""))
+			}
+			BeforeEach(func() { q = store.New(pool) })
+
+			It("clears it when the model is deleted, picks no other, and leaves other deletes alone", func(ctx SpecContext) {
+				p := create(ctx, "p", "")
+				first, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: "first"})
+				Expect(err).NotTo(HaveOccurred())
+				second, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: "second"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(svc.DeleteModel(ctx, org, actor, second.ID)).To(Succeed())
+				Expect(def(ctx)).To(Equal("first"), "deleting another model keeps the default")
+				Expect(events(ctx, "org.default_model.set")).To(HaveLen(1))
+				_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: "third"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(svc.DeleteModel(ctx, org, actor, first.ID)).To(Succeed())
+				Expect(def(ctx)).To(BeEmpty(), "no other model is picked silently")
+				clearedEvent(ctx, "first")
+			})
+
+			It("clears it when the provider that serves it is deleted", func(ctx SpecContext) {
+				p := create(ctx, "p", "")
+				_, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: "first"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(svc.DeleteProvider(ctx, org, actor, p.ID)).To(Succeed())
+				Expect(def(ctx)).To(BeEmpty())
+				clearedEvent(ctx, "first")
+			})
+
+			It("clears it when a declared model is dropped from its Secret", func(ctx SpecContext) {
+				d := catalog.DeclaredProvider{
+					SecretName: "openrouter-secret", Version: "v1", Name: "openrouter", Type: "openrouter",
+					URL: "https://openrouter.ai/api/v1", APIKey: "sk-declared",
+					Models: []catalog.DeclaredModel{{Name: "deepseek/flash", Guard: true}},
+				}
+				_, err := svc.ApplyDeclaredProvider(ctx, org, d)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(def(ctx)).To(Equal("deepseek/flash"))
+				d.Version = "v2"
+				d.Models = []catalog.DeclaredModel{{Name: "deepseek/other", Guard: true}}
+				_, err = svc.ApplyDeclaredProvider(ctx, org, d)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(def(ctx)).To(BeEmpty())
+				clearedEvent(ctx, "deepseek/flash")
+			})
+		})
+
+		It("adopts a first model whose name is the longest the catalog accepts", func(ctx SpecContext) {
+			p := create(ctx, "long", "")
+			name := strings.Repeat("m", 256)
+			_, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: name})
+			Expect(err).NotTo(HaveOccurred())
+			var d *string
+			Expect(pool.QueryRow(ctx, `SELECT default_model FROM orgs WHERE id = $1`, org).Scan(&d)).To(Succeed())
+			Expect(d).NotTo(BeNil())
+			Expect(*d).To(Equal(name))
+		})
+
 		It("keeps model names unique per org across providers", func(ctx SpecContext) {
 			a, b := create(ctx, "a", ""), create(ctx, "b", "")
 			_, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: a.ID, Name: "m"})
@@ -355,20 +479,21 @@ var _ = Describe("Service", func() {
 			router := create(ctx, "openrouter", "")
 			Expect(model(ctx, direct, "claude-haiku-4-5", "")).To(And(HaveField("Format", "anthropic"), HaveField("FormatOverridden", false)))
 			Expect(model(ctx, router, "deepseek/flash", "")).To(HaveField("Format", "openai"))
-			pinned := model(ctx, router, "anthropic/claude-haiku-5.5", "")
-			Expect(pinned).To(And(HaveField("Format", "openai"), HaveField("FormatOverridden", false)))
+			// OpenRouter's Claude models speak Messages like any other Claude (#242).
+			routed := model(ctx, router, "anthropic/claude-haiku-5.5", "")
+			Expect(routed).To(And(HaveField("Format", "anthropic"), HaveField("FormatOverridden", false)))
 
-			anth := "anthropic"
-			upd, err := svc.UpdateModel(ctx, org, actor, pinned.ID, catalog.ModelPatch{Format: &anth})
+			oai := "openai"
+			upd, err := svc.UpdateModel(ctx, org, actor, routed.ID, catalog.ModelPatch{Format: &oai})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(upd).To(And(HaveField("Format", "anthropic"), HaveField("FormatOverridden", true)))
+			Expect(upd).To(And(HaveField("Format", "openai"), HaveField("FormatOverridden", true)))
 
 			_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: direct.ID, Name: "x", Format: "openai"})
 			var inv *catalog.InvalidError
 			Expect(errors.As(err, &inv)).To(BeTrue())
 			Expect(err).To(MatchError(ContainSubstring("does not offer")))
 			bad := "gemini"
-			_, err = svc.UpdateModel(ctx, org, actor, pinned.ID, catalog.ModelPatch{Format: &bad})
+			_, err = svc.UpdateModel(ctx, org, actor, routed.ID, catalog.ModelPatch{Format: &bad})
 			Expect(err).To(MatchError(ContainSubstring("unknown model format")))
 			Expect(events(ctx, "model.update")[0].Summary).To(ContainSubstring("formatOverridden"))
 		})

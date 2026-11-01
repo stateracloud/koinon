@@ -21,5 +21,5 @@ func TestDurable(t *testing.T) {
 }
 
 var _ = BeforeSuite(func(ctx context.Context) {
-	pool = pgtest.Start(ctx)
+	pool = pgtest.Start(ctx, pgtest.Durable())
 })

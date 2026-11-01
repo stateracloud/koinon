@@ -1,7 +1,7 @@
-# Revision ac75592fa7042980
+# Revision 29b5efe9edbdee94
 apiVersion: v1
 data:
-  catalog.json: '{"providers":{"acme.anthropic":{"models":{"claude-haiku-4-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}}}},"acme.openrouter":{"models":{"open/model":{"rates":{"input":"1","output":"2"}}}}}}'
+  catalog.json: '{"providers":{"acme.anthropic":{"models":{"claude-haiku-4-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}},"claude-haiku-5-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}}}},"acme.openrouter":{"models":{"open/model":{"rates":{"input":"1","output":"2"}}}}}}'
 kind: ConfigMap
 metadata:
   labels:
@@ -25,7 +25,7 @@ metadata:
 ---
 apiVersion: v1
 data:
-  koinon-reload-probe: '{"keyHash":"sha256:84f8d162255fd6bf527f70f7f9b77ff08bfe938ada678f069bee0d47706dbbd1","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
+  koinon-reload-probe: '{"keyHash":"sha256:6206d66e1380f6bea3c5d5e6c8036174a18e62906672723f340720e328f923ca","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
 kind: ConfigMap
 metadata:
   labels:
@@ -82,6 +82,24 @@ spec:
       protocol: HTTP
 ---
 apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway-otlp
+  namespace: koinon
+spec:
+  policies:
+    auth:
+      secretRef:
+        key: token
+        name: koinon-otlp-token
+  static:
+    host: koinon-api.koinon.svc
+    port: 4318
+---
+apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayModel
 metadata:
   labels:
@@ -116,7 +134,7 @@ spec:
       action: Require
       policy:
         matchExpressions:
-          - apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "open/model" in default(apiKey.models, []))
+          - apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "open/model" in default(apiKey.models, [])) && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")
     transformations:
       - expression: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'
         field: stream_options
@@ -157,7 +175,7 @@ spec:
       action: Require
       policy:
         matchExpressions:
-          - apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-4-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers)
+          - apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-4-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers) && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")
     headers:
       request:
         remove:
@@ -167,6 +185,56 @@ spec:
             value: "2023-06-01"
           - name: anthropic-workspace-id
             value: wrkspc_01ExampleExample
+    transformations:
+      - expression: 'has(llmRequest.tools) ? (request.path == "/v1/messages" ? llmRequest.tools.filter(t, !has(t.type) || t.type == "custom") : llmRequest.tools) : null'
+        field: tools
+  provider: Custom
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+    koinon.dev/org: acme
+  name: m-f4bc0aee2c51fb514344
+  namespace: koinon
+spec:
+  baseURL: https://api.anthropic.com/v1
+  custom:
+    formats:
+      - type: Messages
+    providerOverride: acme.anthropic
+  match:
+    model: claude-haiku-5-5
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: koinon-gateway
+  policies:
+    auth:
+      credentials:
+        - location:
+            header:
+              name: Authorization
+              prefix: 'Bearer '
+          secretRef:
+            key: acme-claude
+            name: koinon-gateway-providers
+    authorization:
+      action: Require
+      policy:
+        matchExpressions:
+          - apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-5-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers) && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")
+    headers:
+      request:
+        set:
+          - name: anthropic-version
+            value: "2023-06-01"
+          - name: anthropic-workspace-id
+            value: wrkspc_01ExampleExample
+          - name: anthropic-beta
+            value: thinking-binding-controls-2026-08-01
     transformations:
       - expression: 'has(llmRequest.tools) ? (request.path == "/v1/messages" ? llmRequest.tools.filter(t, !has(t.type) || t.type == "custom") : llmRequest.tools) : null'
         field: tools
@@ -241,9 +309,14 @@ spec:
             name: koinon.req_bytes
           - expression: coalesce(response.headers["x-generation-id"])
             name: koinon.response_id
+          - expression: default(proxy.upstreamDuration, "") != ""
+            name: koinon.upstream
       otlp:
+        backendRef:
+          group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: koinon-gateway-otlp
         protocol: HTTP
-        url: http://koinon-api.koinon.svc:4318
   targetRefs:
     - group: gateway.networking.k8s.io
       kind: Gateway

@@ -77,6 +77,21 @@ describe('buildTimeline', () => {
     ])
   })
 
+  it('shows a missing MCP server and its recovery as notes', () => {
+    const items = buildTimeline([], {
+      [run]: [
+        runEvent(1, 'run.mcp_server_missing', { attempt: 1, servers: [{ name: 'metrics', reason: 'x' }, { name: 'wiki', reason: 'y' }] }),
+        runEvent(2, 'run.mcp_server_recovered', { servers: ['metrics', 'wiki'] }),
+        runEvent(3, 'run.mcp_server_missing', { attempt: 2, servers: [{ name: 'metrics', reason: 'x' }] }),
+      ],
+    })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456 found the MCP servers metrics, wiki not serving tools and will check once more before it starts',
+      'Run r-123456 found its MCP servers serving tools again and started',
+      'Run r-123456 found the MCP server metrics not serving tools again',
+    ])
+  })
+
   it('shows an uncached run as a note', () => {
     const items = buildTimeline([], { [run]: [runEvent(1, 'run.uncached', { model: 'google/gemini-x', reason: 'no cache mode for the provider format' })] })
     expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
@@ -138,7 +153,7 @@ describe('buildTimeline', () => {
   })
 
   it('shows a session reset as a note', () => {
-    const message = "The agent's workspace was reset, so this run starts a new session."
+    const message = "The agent's home was reset, so this run starts a new session."
     const items = buildTimeline(
       [
         taskEvent(1, 100, 'run.session_reset', { message, previousSessionId: 'ses_1', sessionId: 'ses_2' }),
@@ -253,6 +268,14 @@ describe('a spend limit', () => {
       expect(text).toContain("(from the agent's notes)")
     })
 
+    it('says a run stopped at its model request or spend limit, with the last summary (ADR 0081)', () => {
+      const [req] = noteText(taskEvent(1, 100, 'run.canceled', { reason: 'request_cap', message: 'model request limit reached (150 of 150 requests)', summary: 'S', summarySource: 'reply' }))
+      expect(req).toContain('stopped at its model request limit: model request limit reached (150 of 150 requests)')
+      expect(req).toContain('Last summary:\nS')
+      const [spend] = noteText(taskEvent(1, 100, 'run.canceled', { reason: 'run_spend_cap', message: 'run spend limit reached ($2.01 of $2.00)' }))
+      expect(spend).toContain('stopped at its spend limit: run spend limit reached ($2.01 of $2.00)')
+    })
+
     it('names why a sandbox never became ready', () => {
       const [text] = noteText(taskEvent(1, 100, 'run.failed', { reason: 'x', failureClass: 'sandbox_unavailable', sandboxCause: 'no_nodes' }))
       expect(text).toContain('no node can run the sandbox')
@@ -282,6 +305,11 @@ describe('a spend limit', () => {
       const [text] = noteText(runEvent(1, 'run.wrap_up_notice', { remainingSeconds: 300, maxWallClockSeconds: 1800 }))
       expect(text).toContain('asked to wrap up')
       expect(text).toContain('about 5 minutes left')
+    })
+
+    it('shows the wrap-up notice of a request or spend limit', () => {
+      expect(noteText(runEvent(1, 'run.wrap_up_notice', { limit: 'requests', modelRequests: 120, maxModelRequests: 150 }))[0]).toContain('120 of 150 model requests used')
+      expect(noteText(runEvent(1, 'run.wrap_up_notice', { limit: 'spend', spentUSD: '1.62', maxSpendUSD: '2.00' }))[0]).toContain('$1.62 of $2.00 spent')
     })
   })
 })

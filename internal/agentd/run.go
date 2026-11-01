@@ -25,8 +25,10 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/runreply"
 	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // How a driven run ends, besides success (nil).
@@ -51,6 +53,9 @@ type failure struct {
 	retryAfter time.Duration
 	// gateway: the gateway answered the harness's model request with 401 or 429 (classify.go).
 	gateway bool
+	// authLike: the harness reported an authentication failure; the gateway's record says who
+	// refused it (providerRefusal, providerrefusal.go).
+	authLike bool
 	// modelNotFound: the gateway answered 404 or model_not_found for the run's model.
 	modelNotFound bool
 	// sandbox is set when the sandbox never became ready within the org's cap (sandbox.go).
@@ -117,6 +122,8 @@ type runner struct {
 	fenceOnce sync.Once
 	fenced    chan struct{}
 	fenceKind atomic.Int32
+	// turnState is the run's phase for a draining pool (turnSetup, turnRunning, turnHandedOff).
+	turnState atomic.Int32
 
 	mu        sync.Mutex // serialises appends and srcSeq
 	srcSeq    int64
@@ -125,6 +132,8 @@ type runner struct {
 	// wrapUpSent: this owner sent (or found sent) the wrap-up notice. Only the run goroutine
 	// touches it.
 	wrapUpSent bool
+	// wrapUpCause is the limit the turn was interrupted for; turnWithRetry reads it after errWrapUp.
+	wrapUpCause wrapUpCause
 
 	toolsMu sync.Mutex
 	tools   map[string]chan struct{} // tool call IDs; closed once the tool call is recorded
@@ -142,6 +151,9 @@ type runner struct {
 	// cwd is the session directory, set before the harness starts; permission requests for
 	// paths outside it are rejected.
 	cwd string
+	// sbWorkspace and sbName are the sandbox the harness runs in, set with cwd; permission
+	// requests resolve their paths in it.
+	sbWorkspace, sbName string
 
 	// model and modelSource are the model the run uses and the layer it came from
 	// (internal/agentmodel).
@@ -159,6 +171,9 @@ type runner struct {
 	// sum is the summary prompt in progress (summary.go), nil otherwise.
 	sumMu sync.Mutex
 	sum   *summaryState
+
+	// tr is the run's tracing state; nil when the run is not traced (runtrace.go).
+	tr *runTrace
 
 	cmdMu      sync.Mutex
 	commands   []string      // the harness's last available_commands_update
@@ -225,12 +240,21 @@ func (r *runner) markTool(id string) {
 	}
 }
 
+// Phases of a run's turn, for a draining pool: set up (a stop hands the run off), running (a stop
+// waits for the turn, up to the drain deadline), or handed off during the setup.
+const (
+	turnSetup int32 = iota
+	turnRunning
+	turnHandedOff
+)
+
 func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	r := &runner{
 		p: p, q: p.q, run: run, fenced: make(chan struct{}), cmdChanged: make(chan struct{}),
 		log: log.With("org", run.OrgID.String(), "run", run.ID.String(), "epoch", run.Epoch),
 	}
 	r.log.Info("driving run", "state", run.State, "takeovers", run.Takeovers)
+	r.tr = p.traceStart(ctx, run, r.fenced, r.log)
 
 	hctx, stop := context.WithCancel(ctx)
 	var hb sync.WaitGroup
@@ -241,8 +265,16 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	if safego.Do(r.log, "run", func() { err = r.execute(ctx) }) {
 		err = &failure{reason: "internal error: the run panicked"}
 	}
+	if r.turnState.Load() == turnHandedOff && !errors.Is(err, errFenced) {
+		// The pool stopped before the turn began and cut the run's setup short: whatever error that
+		// caused, the run goes back to the queue.
+		err = errShutdown
+	}
 	stop()
 	hb.Wait()
+	// The turn's row ends before the run's state changes, so whoever sees the run finished sees the
+	// turn ended (a success ends it inside endTurn's transaction, a park likewise).
+	r.tr.finish(ctx, err, fence(r.fenceKind.Load()))
 	r.conclude(ctx, err)
 }
 
@@ -320,6 +352,9 @@ func (r *runner) stopped(ctx context.Context) error {
 	switch {
 	case r.isFenced():
 		return errFenced
+	case r.turnState.Load() == turnHandedOff:
+		// The pool stopped while the run was still setting up and cut it short.
+		return errShutdown
 	case ctx.Err() != nil:
 		return errShutdown
 	}
@@ -365,10 +400,25 @@ func (r *runner) execute(ctx context.Context) error {
 	fctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
-		select {
-		case <-r.fenced:
-			cancel()
-		case <-fctx.Done():
+		stopping := r.p.stopping
+		for {
+			select {
+			case <-r.fenced:
+				cancel()
+				return
+			case <-stopping:
+				// The pool is draining (ADR 0085 decision 2): a run still setting up has no turn to
+				// finish, so it is handed off at once. A turn that began finishes up to the deadline,
+				// and keeps watching for a fence meanwhile.
+				stopping = nil
+				if r.turnState.CompareAndSwap(turnSetup, turnHandedOff) {
+					r.log.Info("the pool is stopping before the turn began; handing the run off")
+					cancel()
+					return
+				}
+			case <-fctx.Done():
+				return
+			}
 		}
 	}()
 
@@ -409,17 +459,25 @@ func (r *runner) execute(ctx context.Context) error {
 		}
 	}
 	if model == "" {
-		// The org's first served model: providers by name, then models by name (PV1).
+		// The org's stored default model (#256); it is never derived from what the org serves.
 		var err error
-		if model, err = agentmodel.OrgDefault(fctx, r.p.cfg.Prices, r.q, r.run.OrgID, time.Now()); err != nil {
-			return r.dbErr(ctx, "load the org's models", err)
+		if model, err = agentmodel.OrgDefault(fctx, r.q, r.run.OrgID); err != nil {
+			return r.dbErr(ctx, "load the org's default model", err)
 		}
 		source = agentmodel.SourceOrgDefault
-	}
-	if model == "" {
-		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model with a price"}
+		if model == "" {
+			return &failure{reason: agentmodel.NoDefaultMessage}
+		}
+		var unusable *agentmodel.UnusableError
+		switch err := agentmodel.Check(fctx, r.p.cfg.Prices, r.q, r.run.OrgID, model, time.Now()); {
+		case errors.As(err, &unusable):
+			return &failure{reason: "the org's default model is not usable: " + unusable.Error() + "; set another default model"}
+		case err != nil:
+			return r.dbErr(ctx, "check the org's default model", err)
+		}
 	}
 	r.model, r.modelSource = model, source
+	r.tr.identify(agent, version, task, model)
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
 	facts, err := r.modelFacts(fctx, model)
 	if err != nil {
@@ -437,7 +495,11 @@ func (r *runner) execute(ctx context.Context) error {
 	if ptype == "openrouter" {
 		sessionID = r.run.ID.String()
 	}
-	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker, SessionID: sessionID})
+	// Koinon decides whether the model thinks, from the catalog and the agent's setting; the harness
+	// renders that and never guesses from the model ID (ADR 0069 amendment 2026-10-29).
+	thinkMode := thinking.Of(ptype, model, format).Effective(agentmodel.ChooseThinking(agent.Thinking.String, vc.Thinking))
+	r.log.Info("the run's thinking", "model", model, "mode", string(thinkMode))
+	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker, Thinking: thinkMode, SessionID: sessionID})
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}
@@ -448,6 +510,11 @@ func (r *runner) execute(ctx context.Context) error {
 	// demand for it, so the two waits overlap.
 	if err := r.waitModel(fctx, model); err != nil {
 		return r.execErr(ctx, "wait for the model", err)
+	}
+	// An allowed MCP server that is not serving tools is recorded, retried once and then fails the
+	// run (mcpwait.go, issue #326).
+	if err := r.waitMCPServers(fctx); err != nil {
+		return r.execErr(ctx, "check the agent's MCP servers", err)
 	}
 	sb, err := r.waitSandbox(fctx)
 	if err != nil {
@@ -525,13 +592,14 @@ func (r *runner) execute(ctx context.Context) error {
 		return r.execErr(ctx, "prepare the session directory", err)
 	}
 	r.cwd = cwd
+	r.sbWorkspace, r.sbName = workspace, sandbox
 	// The run's own version decides the instructions, so a version bump applies at the next
 	// run without recreating the sandbox.
 	repos, err := r.repositories(fctx)
 	if err != nil {
 		return r.execErr(ctx, "read the code host of the agent's repositories", err)
 	}
-	instructions := instructionsFile(vc.Instructions, cwd, repos)
+	instructions := instructionsFile(vc.Instructions, cwd, repos, vc.WebEgress())
 	if err := r.writeInstructions(fctx, workspace, sandbox, instructions); err != nil {
 		return r.execErr(ctx, "write the instructions", err)
 	}
@@ -643,6 +711,9 @@ func (r *runner) execute(ctx context.Context) error {
 	if err := r.checkInstructions(fctx, workspace, sandbox, agent.Flavor, instructions); err != nil {
 		return r.execErr(ctx, "check the instructions", err)
 	}
+	if !r.turnState.CompareAndSwap(turnSetup, turnRunning) {
+		return errShutdown // the pool began to stop first
+	}
 	err = r.turnWithRetry(ctx, fctx, conn, proc, &stderr, session, text)
 	if !errors.Is(err, errEndTurn) {
 		return err
@@ -709,22 +780,33 @@ type promptResult struct {
 // pool to stop.
 func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, session acp.SessionID, text string) error {
 	done := make(chan promptResult, 1)
+	started := time.Now()
 	r.takeRefusals()
+	meta := r.tr.beginTurn(ctx, text)
 	go func() {
-		stop, err := conn.Prompt(ctx, session, text)
+		stop, err := conn.PromptMeta(ctx, session, text, meta)
 		done <- promptResult{stop, err}
 	}()
 	// Parked time does not count against the cap (ClaimNextRun adds it to parked_seconds).
 	end := r.capEnd()
 	capTimer := time.NewTimer(max(time.Until(end), 0))
 	defer capTimer.Stop()
-	// The wrap-up notice interrupts the turn WrapUpNotice before the cap. A turn that starts inside
-	// the window gets the notice prepended instead (turnWithRetry).
+	// The wrap-up notice interrupts the turn WrapUpNotice before the time cap, or when the run's
+	// model requests or spend reach WrapUpFraction of their limit. A turn that starts inside a
+	// window gets the notice prepended instead (turnWithRetry).
 	var notice <-chan time.Time
-	if r.wantsWrapUp() && time.Until(end) > r.p.cfg.WrapUpNotice {
+	if r.wantsWrapUp() && r.timeNotice() && time.Until(end) > r.p.cfg.WrapUpNotice {
 		t := time.NewTimer(time.Until(end.Add(-r.p.cfg.WrapUpNotice)))
 		defer t.Stop()
 		notice = t.C
+	}
+	var usageNotice <-chan wrapUpCause
+	if r.wantsWrapUp() && r.countLimits() && r.p.cfg.WrapUpFraction > 0 {
+		ch := make(chan wrapUpCause, 1)
+		wctx, stop := context.WithCancel(ctx)
+		defer stop()
+		go r.watchUsage(wctx, ch)
+		usageNotice = ch
 	}
 
 	// cancelSent: the wrap-up cancel went out and the harness ignored it for CancelGrace.
@@ -734,6 +816,34 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 			reason:    fmt.Sprintf("wall-clock cap of %s reached", time.Duration(r.run.MaxWallClockSeconds)*time.Second),
 			timeLimit: true,
 		}
+	}
+	// wrapUp interrupts the turn to tell the agent that c's limit is near. stop is set when turn
+	// returns err.
+	wrapUp := func(c wrapUpCause) (stop bool, err error) {
+		r.log.Info("run limit near; interrupting the turn to ask the agent to wrap up", "limit", c.kind)
+		r.wrapUpCause = c
+		res, ended := r.cancelTurn(ctx, conn, session, done)
+		switch {
+		case ended && (res.stop == acp.StopCancelled || res.err != nil):
+			// A refused tool call may be why the turn ended; the agent must still be told.
+			if refs := r.takeRefusals(); len(refs) > 0 {
+				return true, &refused{refusals: refs}
+			}
+			return true, errWrapUp
+		case ended:
+			// The turn ended on its own while the timer fired (for example end_turn after an
+			// ask_user, where the run must park and must not get another prompt). Honour it; if a
+			// next turn starts inside the window, it gets the notice prepended.
+			return true, r.turnResult(ctx, conn, proc, stderr, res, started)
+		}
+		// The harness ignored session/cancel: a second session/prompt must not overlap the first.
+		// Arm no new notice; the run ends at the limit as it does without one.
+		cancelSent = true
+		if err := r.suppressWrapUp(ctx); err != nil {
+			return true, err
+		}
+		r.log.Warn("the harness did not end its turn for the wrap-up notice; no notice is sent")
+		return false, nil
 	}
 	for {
 		select {
@@ -754,7 +864,7 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 					return errShutdown
 				}
 			}
-			return r.turnResult(ctx, conn, proc, stderr, res)
+			return r.turnResult(ctx, conn, proc, stderr, res, started)
 		case <-r.fenced:
 			if fence(r.fenceKind.Load()) == fenceCanceled {
 				r.log.Info("run canceled; cancelling the turn")
@@ -767,28 +877,14 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 			return capCanceled()
 		case <-notice:
 			notice = nil
-			r.log.Info("time limit near; interrupting the turn to ask the agent to wrap up")
-			res, ended := r.cancelTurn(ctx, conn, session, done)
-			switch {
-			case ended && (res.stop == acp.StopCancelled || res.err != nil):
-				// A refused tool call may be why the turn ended; the agent must still be told.
-				if refs := r.takeRefusals(); len(refs) > 0 {
-					return &refused{refusals: refs}
-				}
-				return errWrapUp
-			case ended:
-				// The turn ended on its own while the timer fired (for example end_turn after an
-				// ask_user, where the run must park and must not get another prompt). Honour it; if a
-				// next turn starts inside the window, it gets the notice prepended.
-				return r.turnResult(ctx, conn, proc, stderr, res)
-			}
-			// The harness ignored session/cancel: a second session/prompt must not overlap the first.
-			// Arm no new notice; the run ends at the cap as it does without one.
-			cancelSent = true
-			if err := r.suppressWrapUp(ctx); err != nil {
+			if stop, err := wrapUp(wrapUpCause{kind: runlimits.KindTime, remaining: time.Until(end)}); stop {
 				return err
 			}
-			r.log.Warn("the harness did not end its turn for the wrap-up notice; no notice is sent")
+		case c := <-usageNotice:
+			usageNotice = nil
+			if stop, err := wrapUp(c); stop {
+				return err
+			}
 		case <-ctx.Done():
 			return errShutdown
 		}
@@ -796,9 +892,9 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 }
 
 // turnResult acts on how the prompt of a turn ended.
-func (r *runner) turnResult(ctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, res promptResult) error {
+func (r *runner) turnResult(ctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, res promptResult, since time.Time) error {
 	if res.err != nil {
-		return r.modelGone(ctx, r.budgetStop(ctx, r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err)))
+		return r.modelGone(ctx, r.providerRefusal(ctx, r.budgetStop(ctx, r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err)), since))
 	}
 	switch res.stop {
 	case acp.StopEndTurn:
@@ -822,29 +918,34 @@ func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc e
 	refusedTurns := 0
 	limit := time.Duration(r.run.MaxWallClockSeconds) * time.Second
 	for attempt := 0; ; attempt++ {
-		// The window is the last WrapUpNotice before the cap. A run already past its cap (taken over
-		// after its lease expired) gets no notice: its turn is cancelled at once, so the agent could
-		// not act on it, and the event and the metric must mean the agent was told.
-		if remaining := time.Until(r.capEnd()); r.wantsWrapUp() && remaining > 0 && remaining <= cfg.WrapUpNotice {
-			// The turn starts inside the window (a resume, a retry or a takeover), so it is not
-			// interrupted. The notice is recorded first and prepended only by the owner that
-			// recorded it, so two owners never both send it.
-			recorded, merr := r.markWrapUp(fctx, remaining)
-			if merr != nil {
-				return merr
-			}
-			if recorded {
-				text = wrapUpNote(remaining, limit) + "\n\n" + text
+		// A turn that starts inside a limit's window (a resume, a retry or a takeover) is not
+		// interrupted: the notice is recorded first and prepended only by the owner that recorded it,
+		// so two owners never both send it. A run already past its time cap (taken over after its
+		// lease expired) gets none: its turn is cancelled at once, so the agent could not act on it,
+		// and the event and the metric must mean the agent was told.
+		if r.wantsWrapUp() {
+			if c, due := r.wrapUpDue(fctx); due {
+				recorded, merr := r.markWrapUp(fctx, c)
+				if merr != nil {
+					return merr
+				}
+				if recorded {
+					text = wrapUpNote(c, limit) + "\n\n" + text
+				}
 			}
 		}
 		err := r.turn(ctx, conn, proc, stderr, session, text)
+		r.tr.noteTurnResult(err)
 		if errors.Is(err, errWrapUp) {
 			// A cancel can arrive with the cancelled turn, as in the refusal branch below.
 			if stop := r.stopped(ctx); stop != nil {
 				return stop
 			}
-			remaining := time.Until(r.capEnd())
-			recorded, merr := r.markWrapUp(fctx, remaining)
+			c := r.wrapUpCause
+			if c.kind == runlimits.KindTime {
+				c.remaining = time.Until(r.capEnd())
+			}
+			recorded, merr := r.markWrapUp(fctx, c)
 			if merr != nil {
 				return merr
 			}
@@ -852,7 +953,7 @@ func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc e
 				return errFenced // another owner holds the run
 			}
 			// Like a refusal, this is not a retry and does not reset refusedTurns.
-			text = wrapUpNote(remaining, limit)
+			text = wrapUpNote(c, limit)
 			attempt--
 			continue
 		}
@@ -1203,11 +1304,47 @@ func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outc
 		return err
 	}
 	if outcome == store.RunStateSucceeded {
-		return r.postReply(ctx, q)
-	}
-	_, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+		if err := r.postReply(ctx, q); err != nil {
+			return err
+		}
+	} else if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 		OrgID: r.run.OrgID, TaskID: r.run.TaskID, RunID: r.run.ID,
 		Kind: "run." + string(outcome), ActorKind: store.TaskActorKindSystem, Payload: payload,
+	}); err != nil {
+		return err
+	}
+	// The task's end comes after the reply or the failure on its timeline.
+	return r.endTask(ctx, q, outcome, class)
+}
+
+// endTask moves the run's task to the run's outcome (ADR 0065): a run that succeeded completes it, a
+// run that failed fatally fails it, whether or not the run parked on the way. Other failures leave the
+// task open (a person can retry them with a message), and a task that is canceled, already ended or
+// has another run queued (a follow-up message) stays as it is.
+func (r *runner) endTask(ctx context.Context, q *store.Queries, outcome store.RunState, class store.RunFailureClass) error {
+	var to store.TaskState
+	switch {
+	case outcome == store.RunStateSucceeded:
+		to = store.TaskStateCompleted
+	case outcome == store.RunStateFailed && class == store.RunFailureClassFatal:
+		to = store.TaskStateFailed
+	default:
+		return nil
+	}
+	t, err := q.EndTaskFrom(ctx, store.EndTaskFromParams{
+		OrgID: r.run.OrgID, ID: r.run.TaskID, ToState: to,
+		FromStates: []string{string(store.TaskStateSubmitted), string(store.TaskStateWorking), string(store.TaskStateInputRequired)},
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{"to": string(t.State), "reason": "run_" + string(outcome)})
+	_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+		OrgID: r.run.OrgID, TaskID: r.run.TaskID, RunID: r.run.ID,
+		Kind: "status.changed", ActorKind: store.TaskActorKindSystem, Payload: payload,
 	})
 	return err
 }
@@ -1227,7 +1364,7 @@ func (r *runner) postReply(ctx context.Context, q *store.Queries) error {
 	return err
 }
 
-// reply is the agent's message text of the run since its last park, across every epoch.
+// reply is the agent's last message of the run since its last park (interim narration before a tool call is left out).
 func (r *runner) reply(ctx context.Context, q *store.Queries) (string, error) {
 	return runreply.Reply(ctx, q, r.run.OrgID, r.run.ID)
 }
@@ -1311,6 +1448,7 @@ func (r *runner) release(ctx context.Context) {
 type handler struct{ r *runner }
 
 func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
+	at := time.Now() // for the trace, before the event write
 	if h.r.summaryUpdate(n) {
 		return nil // the summary prompt's reply is the task's note, not a run event
 	}
@@ -1329,11 +1467,13 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	if err := h.r.recordRaw(ctx, "acp."+updateKind(b), b); err != nil {
 		return err
 	}
+	h.r.tr.update(n, at)
 	if n.Update.ToolCall != nil {
 		h.r.markTool(string(n.Update.ToolCall.ToolCallId))
 	}
-	// The token cap (#27) is fed by the spend ledger (package ledger, plan item L1), which calls
-	// scheduler.RecordTokenUsage for every request agentgateway logs. ACP cannot feed it: the
+	// A run's tokens are reported by the spend ledger (package ledger, plan item L1), which adds
+	// them to the run for every request agentgateway logs (tokens are reported, not enforced:
+	// ADR 0081). ACP cannot report them: the
 	// only usage update (usage_update, unstable in acp-go-sdk v0.13.5) reports the context
 	// window's occupancy (used/size) and a cost, which rise and fall with compaction and cannot
 	// be summed into tokens used, and the unstable PromptResponse.usage arrives only when the turn,
@@ -1351,12 +1491,12 @@ func (h handler) RequestPermission(ctx context.Context, req acp.PermissionReques
 	if h.r.summarizingNow() {
 		// The summary prompt does nothing: every permission request is refused.
 		h.r.log.Warn("permission refused during the end-of-turn summary")
-		return acp.Choose(req, acp.RejectOnce, acp.RejectAlways), nil
+		return acp.Choose(req, acp.RejectOnce), nil
 	}
-	d := h.r.p.cfg.Permissions.decide(req, h.r.cwd)
 	if h.r.replaying.Load() {
 		return acp.Decision{}, nil
 	}
+	d := h.r.p.cfg.Permissions.decide(req, h.r.cwd, h.r.pathResolver(ctx))
 	if d.Verdict == Reject {
 		h.r.noteRefusal(req, d)
 	}

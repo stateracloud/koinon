@@ -44,7 +44,7 @@ func newRun(ctx context.Context) (store.Run, pgtype.UUID) {
 	Expect(err).NotTo(HaveOccurred())
 	t, err := q.CreateTask(ctx, store.CreateTaskParams{OrgID: org, Title: "t", AgentID: a.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: user})
 	Expect(err).NotTo(HaveOccurred())
-	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: a.ID, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 1000})
+	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: a.ID, TaskID: t.ID, MaxWallClockSeconds: 1800})
 	Expect(err).NotTo(HaveOccurred())
 	run, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: org, OwnerID: "test", LeaseSeconds: 60})
 	Expect(err).NotTo(HaveOccurred())

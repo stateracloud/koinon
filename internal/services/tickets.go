@@ -227,7 +227,7 @@ func (s *Server) AppendMessage(ctx context.Context, req *ticketv1alpha1.AppendMe
 	if err != nil {
 		return nil, err
 	}
-	ev, run, err := s.appendMessage(ctx, c, id, msg)
+	ev, run, err := s.appendMessage(ctx, c, id, msg, false)
 	if errors.Is(err, errTaskEnded) {
 		err = connect.NewError(connect.CodeFailedPrecondition, "ticket is done; move it back to a board column first")
 	}

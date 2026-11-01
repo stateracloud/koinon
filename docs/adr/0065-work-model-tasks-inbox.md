@@ -493,3 +493,19 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
    derived from `Agent.unhealthy_at`, with a link to the agent.
 4. *13d failure classes.* Add `sandbox_unavailable`: the sandbox never became ready within the org's cap.
    It is never retried, and the agent is marked unhealthy.
+
+## Amendment (2026-10-31, #324): a run's outcome ends its task
+
+The TK1 interim ("runs do not end tasks") is over. A park already moved a task to `input-required` and
+its decision back to `working`, but nothing moved it on when the run ended, so a task whose run parked
+and then succeeded stayed `working`, while one that never parked stayed `submitted`. agentd now ends
+the task in the transaction that finishes the run (`runner.endTask`): a run that **succeeded**
+completes its task and a run that failed with class **fatal** fails it, whether or not the run
+parked. The other failure classes (`transient`, `throttled`, `context_overflow`, `budget`, `policy`,
+`sandbox_unavailable`) leave the task open, since a person can still retry them with a message. A
+task that is canceled or already ended, or that has another run queued (a follow-up message arrived
+meanwhile), is left alone. The change is a `status.changed` task event with `reason` `run_succeeded`
+or `run_failed`.
+
+A message on a completed task reopens it (`completed` to `submitted`, reason `follow_up`), for every
+task as ADR 0066 already does for direct-message threads; canceled and failed tasks still take none.

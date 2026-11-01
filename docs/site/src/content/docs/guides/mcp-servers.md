@@ -12,9 +12,16 @@ Agents never see a server's credential. They talk to agentgateway; agentgateway 
 to the request it sends to the server. Each org has its own servers, and an agent only ever sees the
 tools of servers of its own org that it was allowed.
 
+## Web access goes through MCP servers
+
+An agent's sandbox cannot reach the web: its network policy opens only the hosts of its grants. So the
+harness's built-in web fetch is not offered to the agent, and its instructions say that web access goes
+through the org's MCP tools. To let agents search or read pages, connect an MCP server that does it
+(a search server such as one in front of SearXNG), and allow it for the agent.
+
 ## Add a server in the UI
 
-Org admins and owners open **Servers** in the sidebar. Members do not see it.
+Org admins and owners open **MCP servers** in the sidebar. Members do not see it.
 
 - **Add server** takes a **name**, the **URL**, the **transport** (Streamable HTTP, or SSE for older
   servers) and, if the server needs one, a **credential**: a bearer token, or a custom header with a value.
@@ -77,21 +84,21 @@ as you would grant cluster administration.
 
 ## Which tools an agent may call
 
-Every tool a server lists enters the **ask** tier. You decide, tool by tool, on the **Servers** page:
+Every tool a server lists starts at **Ask**. You decide, tool by tool, on the **MCP servers** page:
 
 | Tier | What happens when an agent calls the tool |
 | --- | --- |
 | **Ask** (the default) | The call is recorded with its exact arguments as an approval card on the task, and the run pauses. After a human approves, Koinon calls the server itself and the run resumes with the result. |
-| **Auto** | The agent calls the tool directly through the gateway. |
-| **Never** | No agent can call it. |
+| **Allow** | The agent calls the tool directly through the gateway. |
+| **Deny** | No agent can call it. |
 
 - A tool with the MCP `readOnlyHint` annotation shows "Suggested read-only". It is only the server's
-  claim. Move it to Auto yourself if you agree.
+  claim. Move it to Allow yourself if you agree.
 - A tool the server adds later enters the ask tier for every agent that allows the whole server.
 - If a tool's **description or input schema changes**, it shows a **Review** flag. A changed description
-  is how a hostile server could try to steer an agent. An **Auto** tool that changes is **moved to Ask**
-  until you review it; **Mark reviewed** clears the flag but keeps it in Ask, and you set Auto again if
-  you trust the new version. Ask and Never tools only get the flag. An approval request is tied to the
+  is how a hostile server could try to steer an agent. An **Allow** tool that changes is **moved to Ask**
+  until you review it; **Mark reviewed** clears the flag but keeps it in Ask, and you set Allow again if
+  you trust the new version. Ask and Deny tools only get the flag. An approval request is tied to the
   version of the tool it was made against: if the tool changes before a human approves, Koinon will not
   run it.
 - **Require two approvers** (per tool, off by default): the call needs two different admins or owners,
@@ -115,7 +122,7 @@ here, and replies with a three-part report. Allow those servers on the agent's p
 Koinon checks every server every 60 seconds through the gateway: it connects like an agent would and
 lists the tools. The result also keeps the tool list up to date.
 
-- After **three failed checks in a row** the server is **Unhealthy**: the Servers page shows why
+- After **three failed checks in a row** the server is **Unhealthy**: the MCP servers page shows why
   (the gateway got no tools back: the server is unreachable, rejected the credential, or lists none), and its tools leave every
   agent's tool list. Other servers are not affected.
 - At the start of a session, Koinon tells an agent which of its allowed servers are down.

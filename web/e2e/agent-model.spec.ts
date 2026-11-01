@@ -78,6 +78,7 @@ function api() {
       'koinon.provider.v1alpha1.ProviderService/ListProviders': () => ({
         providers: [{ id: 'p-1', name: 'openrouter', type: 'openrouter', url: 'https://openrouter.ai/api/v1', hasKey: true, source: 'ui', createdAt: at(-86_400_000), updatedAt: at(-86_400_000), ...(echo ? { echoCheck: echo } : {}) }],
       }),
+      'koinon.provider.v1alpha1.ProviderService/GetDefaultModel': () => ({ model: '', available: [] }),
       'koinon.provider.v1alpha1.ProviderService/ListModels': () => ({
         models: [{ id: 'm-1', providerId: 'p-1', name: 'vendor/a-model', source: 'ui', format: 'openai' }],
       }),

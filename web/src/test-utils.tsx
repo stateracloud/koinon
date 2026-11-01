@@ -2,7 +2,9 @@
 
 import { create } from '@bufbuild/protobuf'
 import { timestampFromMs } from '@bufbuild/protobuf/wkt'
-import type { Transport } from '@connectrpc/connect'
+import { ConnectError, type Code, type Transport } from '@connectrpc/connect'
+import { ErrorInfoSchema } from '@/gen/google/rpc/error_details_pb'
+import { TestResultSchema } from '@/gen/koinon/trace/v1alpha1/trace_pb'
 import { QueryClient } from '@tanstack/react-query'
 import { createMemoryHistory } from '@tanstack/react-router'
 import { render } from '@testing-library/react'
@@ -121,4 +123,15 @@ export function dmThread(id: string, title: string, state: TaskState, agentId = 
   t.createdBy = create(CreatorSchema, { kind: CreatorKind.TRIGGER, triggerId: 'trg-1' })
   t.directMessageThread = true
   return t
+}
+
+/**
+ * reasoned is an error as TraceDestinationService sends it: a google.rpc.ErrorInfo (domain koinon.dev) with
+ * the reason and, for a failed test, a TestResult detail holding the outcome alone.
+ */
+export function reasoned(message: string, code: Code, reason: string, outcome?: string) {
+  return new ConnectError(message, code, undefined, [
+    { desc: ErrorInfoSchema, value: { reason, domain: 'koinon.dev' } },
+    ...(outcome ? [{ desc: TestResultSchema, value: { message: outcome } }] : []),
+  ])
 }

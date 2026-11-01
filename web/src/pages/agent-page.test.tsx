@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentSchema, AgentService, AgentStatus, type ActivateAgentRequest, type ResumeAgentRequest } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { ApprovalScopeSchema, ApprovalService, ScopeKind, type RevokeApprovalScopeRequest } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { BudgetService, type SetAgentRunLimitsRequest } from '@/gen/koinon/budget/v1alpha1/budget_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { orgId, renderApp, whoAmI } from '@/test-utils'
 
@@ -30,6 +31,9 @@ function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; res
       ]
     : []
   const activates: ActivateAgentRequest[] = []
+  const runLimitSets: SetAgentRunLimitsRequest[] = []
+  let runOverride = { maxModelRequests: 0n, maxSpendUsd: '', maxDurationSeconds: 0n }
+  const template = { maxModelRequests: 300n, maxSpendUsd: '5.00', maxDurationSeconds: 1800n }
   let unhealthyAt = opts.unhealthy ? timestampFromMs(Date.now() - 60_000) : undefined
   let status = opts.draft ? AgentStatus.DRAFT : AgentStatus.ACTIVE
   const current = () =>
@@ -44,9 +48,27 @@ function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; res
       unhealthyAt,
       unhealthyReason: unhealthyAt ? 'its sandbox was recreated three times in a row' : '',
     })
+  const runLimitsView = () => ({
+    agentId: 'a-1',
+    templateDefault: template,
+    override: runOverride,
+    effective: {
+      maxModelRequests: runOverride.maxModelRequests || template.maxModelRequests,
+      maxSpendUsd: runOverride.maxSpendUsd || template.maxSpendUsd,
+      maxDurationSeconds: runOverride.maxDurationSeconds || template.maxDurationSeconds,
+    },
+  })
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
     service(ConnectionService, { listConnections: () => ({ connections: [] }) })
+    service(BudgetService, {
+      getAgentRunLimits: () => ({ limits: runLimitsView() }),
+      setAgentRunLimits: (req) => {
+        runLimitSets.push(req)
+        runOverride = { maxModelRequests: req.override?.maxModelRequests ?? 0n, maxSpendUsd: req.override?.maxSpendUsd ?? '', maxDurationSeconds: req.override?.maxDurationSeconds ?? 0n }
+        return { limits: runLimitsView() }
+      },
+    })
     service(ApprovalService, {
       listApprovalScopes: () => ({ scopes }),
       revokeApprovalScope: (req) => {
@@ -72,7 +94,7 @@ function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; res
     })
   })
   renderApp(transport, '/agents/a-1')
-  return { resumes, activates, revokes }
+  return { resumes, activates, revokes, runLimitSets }
 }
 
 describe('AgentPage unhealthy', () => {
@@ -158,10 +180,10 @@ describe('AgentPage activation', () => {
   })
 })
 
-describe('AgentPage standing approvals', () => {
+describe('AgentPage scoped approvals', () => {
   it('lists the agent\'s active scopes and lets an admin revoke one', async () => {
     const { revokes } = setup({ scopes: true })
-    const section = await screen.findByRole('region', { name: 'Standing approvals' })
+    const section = await screen.findByRole('region', { name: 'Scoped approvals' })
     const row = await within(section).findByTestId('approval-scope')
     expect(row).toHaveTextContent('create_pull_request on acme/widgets')
     expect(row).toHaveTextContent('For this agent, until')
@@ -173,8 +195,44 @@ describe('AgentPage standing approvals', () => {
 
   it('shows scopes to a member without a revoke button', async () => {
     setup({ scopes: true, role: OrgRole.MEMBER })
-    const section = await screen.findByRole('region', { name: 'Standing approvals' })
+    const section = await screen.findByRole('region', { name: 'Scoped approvals' })
     await within(section).findByTestId('approval-scope')
     expect(within(section).queryByRole('button', { name: /Revoke/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('AgentPage run limits (ADR 0081)', () => {
+  it('shows an admin the limits of a run and lets them override the template, leaving a field empty to follow it', async () => {
+    const { runLimitSets } = setup({ role: OrgRole.ADMIN })
+    const region = await screen.findByRole('region', { name: 'Run limits' })
+    expect(await within(region).findByText(/30m, 300 model requests, \$5\.00 per run/)).toBeInTheDocument()
+    expect(region).toHaveTextContent('These are the template’s values')
+
+    await userEvent.click(within(region).getByRole('button', { name: 'Change run limits' }))
+    const form = within(region).getByRole('form', { name: 'Change run limits' })
+    await userEvent.type(within(form).getByLabelText('Model requests'), '40')
+    await userEvent.type(within(form).getByLabelText('Spend (USD)'), '0.25')
+    await userEvent.click(within(form).getByRole('button', { name: 'Save run limits' }))
+
+    await waitFor(() => expect(runLimitSets).toHaveLength(1))
+    expect(runLimitSets[0]).toMatchObject({ orgId, agentId: 'a-1', override: { maxModelRequests: 40n, maxSpendUsd: '0.25', maxDurationSeconds: 0n } })
+    expect(await within(region).findByText(/30m, 40 model requests, \$0\.25 per run/)).toBeInTheDocument()
+    expect(region).toHaveTextContent("Changed from the template's 30m, 300 model requests, $5.00")
+  })
+
+  it('refuses a bad value before calling the server', async () => {
+    const { runLimitSets } = setup({ role: OrgRole.ADMIN })
+    const region = await screen.findByRole('region', { name: 'Run limits' })
+    await userEvent.click(await within(region).findByRole('button', { name: 'Change run limits' }))
+    await userEvent.type(within(region).getByLabelText('Model requests'), '0')
+    await userEvent.click(within(region).getByRole('button', { name: 'Save run limits' }))
+    expect(await within(region).findByText(/Model requests must be a whole number from 1 to 100,000/)).toBeInTheDocument()
+    expect(runLimitSets).toHaveLength(0)
+  })
+
+  it('shows a member no editor', async () => {
+    setup({ role: OrgRole.MEMBER })
+    await screen.findByRole('heading', { name: 'Repo helper' })
+    expect(screen.queryByRole('region', { name: 'Run limits' })).not.toBeInTheDocument()
   })
 })

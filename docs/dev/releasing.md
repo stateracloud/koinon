@@ -33,6 +33,13 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    (admission)) has not concluded `success` on it. It reruns no tests. The `dco` workflow runs on
    pull requests only, so the gate reads that check from the head commit of the pull request that
    merged the tag's commit.
+
+   Patch releases (vX.Y.Z, Z > 0) are tagged on `main` like every other release. Once a minor
+   line has shipped its `.0`, set `hack/migrate-patch-line` to that line (for example `v0.1`); from
+   then on the `migrations` check applies the patch-line rule (ADR 0085) to every migration a pull
+   request adds: no rename, drop or retype, so the previous patch release keeps working on the new
+   schema. The change that opens the next minor line resets the file to `none`, which lets it
+   contract. The file is read at the merge base, so the same change cannot lift the rule.
 4. Check that every job succeeded: `release` and `flavor` run side by side after `gate`, so a failed
    `flavor` still leaves a draft release and a chart whose default flavor image does not exist, and
    it skips `sign`. Then open the draft release and read the notes. `-rc.N` releases are already
@@ -46,6 +53,10 @@ with a new digest) and the chart tag is overwritten. Do not move a tag that was 
 
 Same steps with `vX.Y.Z` after the last rc was exercised (REL2). The final release also moves the
 `latest` image tag and is not marked as a prerelease.
+
+Checklist step for every `vX.Y.0`: after the final tag is published, open a pull request that sets
+`hack/migrate-patch-line` to `vX.Y` (for v0.1.0: `v0.1`). Until it merges, main can still contract
+the schema that the shipped release runs on (ADR 0085).
 
 ## Signing and SBOM attestations
 
@@ -81,20 +92,12 @@ They are separate because a ruleset's bypass covers all of its rules: one rulese
 bypass would let admins move or delete a published tag. To fix a bad tag, cut the next `rc.N`; only
 disabling the `immutable` ruleset in the repository settings lets anyone move or delete one.
 
-## Mirror a release to the home lab
+## Mirror a release to a registry
 
-REL2 run A installs the rc from the home-lab Zot ([registry.md](registry.md)), not from ghcr.io.
-With `crane` and `jq` installed and `docker login` done for both registries:
-
-```sh
-hack/mirror-release.sh 0.1.0-rc.1 zot.apps.lab.example.invalid/koinon
-```
-
-It copies the four images (the three Go images and `flavor-opencode`, every platform, plus any
-cosign signature, attestation and SBOM tags) and the chart to `<registry>/<name>:<version>` and `<registry>/charts/koinon:<version>`. The script
-uses the credentials in the docker config and never prints them. Cosign 3 stores its bundles as
-OCI referrers; the script copies them only where they also exist under the `sha256-<hex>` tag, so
-referrers-API-only output is not copied. Install the mirrored chart with
+`hack/mirror-release.sh <version> <registry>` copies a release's images and chart to another
+registry, for example to test an rc from a registry your cluster can reach. The maintainer does this
+for the home lab: see [maintainer-homelab.md](maintainer-homelab.md#mirror-a-release-to-the-home-lab).
+Install the mirrored chart with
 `helm install koinon oci://<registry>/charts/koinon --version <version> --set image.registry=<registry>`.
 
 ### The flavor image when installing a release

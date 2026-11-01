@@ -120,6 +120,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 	It("keeps the sandbox until its home is backed up, then recreates it with the same home generation", func(ctx SpecContext) {
 		lineage, oldID := row(ctx).HomeGeneration.String, sandboxID()
 		Expect(lineage).To(Equal(oldID))
+		dirtyHome(ctx, org, user, agent.ID)
 		bump()
 
 		By("a changed spec asks for a backup and deletes nothing")
@@ -150,6 +151,50 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
 	})
 
+	It("starts at most MaxRecreatesPerPass home checkpoints per pass after a supervisor change", func(ctx SpecContext) {
+		sup := &fakeSupervisor{image: "ghcr.io/nvidia/openshell/supervisor:0.1.5"}
+		cfg.Supervisor = sup
+		cfg.MaxRecreatesPerPass = 1
+		var err error
+		r, err = reconciler.New(pool, backend, &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, cfg)
+		Expect(err).NotTo(HaveOccurred())
+
+		// The BeforeEach sandbox was made without the label, so it counts as changed once the image is
+		// known and is recreated (clean home, no checkpoint). Let it converge first, then give it a
+		// dirty home too: otherwise it takes the pass's one slot below and is deleted without a
+		// checkpoint, and nothing tests the cap in front of the gate.
+		pass(ctx) // deletes
+		pass(ctx) // creates, with the label
+		Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+		Expect(row(ctx).State).To(Equal(store.SandboxStateReady))
+		dirtyHome(ctx, org, user, agent.ID)
+
+		// Agents created now get sandboxes that carry the supervisor label. Their homes are dirtied
+		// only once the sandboxes exist: home_dirtied_at belongs to the current sandbox, so a run
+		// before the sandbox leaves the home looking untouched and the gate lets it go unbacked.
+		orgs := []pgtype.UUID{org}
+		type owner struct{ org, user, agent pgtype.UUID }
+		var more []owner
+		for range 3 {
+			o, u := newOrg(ctx)
+			addProvider(ctx, o, u, "upstream", "", "fake")
+			a := newAgent(ctx, o, u)
+			more = append(more, owner{o, u, a.ID})
+			orgs = append(orgs, o)
+		}
+		pass(ctx)
+		pass(ctx)
+		for _, m := range more {
+			dirtyHome(ctx, m.org, m.user, m.agent)
+		}
+
+		sup.image = "ghcr.io/nvidia/openshell/supervisor:0.1.6"
+		pass(ctx)
+		var n int
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM home_checkpoints WHERE org_id = ANY($1) AND reason = 'recreate'`, orgs).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1), "the pass's one slot is taken before the gate asks for a checkpoint")
+	})
+
 	It("a sandbox recreated without a checkpoint gets a new generation", func(ctx SpecContext) {
 		cfg.Checkpoints = false
 		old := row(ctx).HomeGeneration.String
@@ -161,6 +206,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 
 	It("blocks the recreation when the backup fails, says why on the agent, and tries again after a resume", func(ctx SpecContext) {
 		oldID := sandboxID()
+		dirtyHome(ctx, org, user, agent.ID)
 		bump()
 		pass(ctx)
 		finish(ctx, false)
@@ -190,6 +236,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 
 	It("recreates a sandbox found stuck only after its backup, and the new one keeps the generation", func(ctx SpecContext) {
 		lineage, oldID := row(ctx).HomeGeneration.String, sandboxID()
+		dirtyHome(ctx, org, user, agent.ID)
 		_, err := q.MarkSandboxUnhealthy(ctx, store.MarkSandboxUnhealthyParams{OrgID: org, AgentID: agent.ID, Reason: "a process could not be ended", Generation: oldID})
 		Expect(err).NotTo(HaveOccurred())
 		pass(ctx)
@@ -205,6 +252,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 	})
 
 	It("does not ask again while the previous recreation's restore is pending", func(ctx SpecContext) {
+		dirtyHome(ctx, org, user, agent.ID)
 		bump()
 		pass(ctx)
 		finish(ctx, true)
@@ -229,6 +277,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		}
 
 		It("is not recreated and no unclaimable request is filed when no backup is fresh", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
 			fail()
 			pass(ctx)
 			pass(ctx)
@@ -242,6 +291,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		})
 
 		It("is recreated from the newest complete backup taken since its last activity", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
 			_, err := q.RequestHomeCheckpoint(ctx, store.RequestHomeCheckpointParams{
 				OrgID: org, AgentID: agent.ID, Reason: store.CheckpointReasonHourly, SandboxID: sandboxID(), Generation: row(ctx).HomeGeneration.String,
 			})
@@ -254,8 +304,112 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		})
 	})
 
+	// The gates count from when the home was last written (a harness ran), not from the sandbox's
+	// last activity (issue #329, ADR 0032 amendment): a wake or a start writes nothing.
+	Describe("the home-written clock", func() {
+		fail := func() {
+			GinkgoHelper()
+			osg.SetPhase(row(context.Background()).Workspace, names.Sandbox, openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
+		}
+		hourly := func(ctx context.Context) store.HomeCheckpoint {
+			GinkgoHelper()
+			_, err := q.RequestHomeCheckpoint(ctx, store.RequestHomeCheckpointParams{
+				OrgID: org, AgentID: agent.ID, Reason: store.CheckpointReasonHourly, SandboxID: sandboxID(), Generation: row(ctx).HomeGeneration.String,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			return finish(ctx, true)
+		}
+		healthy := func(ctx context.Context) bool {
+			GinkgoHelper()
+			a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			return !a.UnhealthyAt.Valid
+		}
+
+		It("recreates an unreadable sandbox from a backup that a later wake and start did not make stale", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
+			done := hourly(ctx)
+			_, err := q.WakeAgentSandbox(ctx, store.WakeAgentSandboxParams{OrgID: org, AgentID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE agent_sandboxes SET started_at = now() + interval '1 second' WHERE org_id = $1`, org)
+			Expect(err).NotTo(HaveOccurred())
+			fail()
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			Expect(row(ctx).RestoreCheckpointID).To(Equal(pgtype.UUID{Bytes: done.ID.Bytes, Valid: true}))
+			Expect(healthy(ctx)).To(BeTrue())
+		})
+
+		It("recreates an unreadable sandbox no harness ran in, freely and without a restore", func(ctx SpecContext) {
+			fail()
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			Expect(row(ctx).RestoreCheckpointID.Valid).To(BeFalse())
+			Expect(healthy(ctx)).To(BeTrue())
+			pass(ctx)
+			Expect(row(ctx).State).To(Equal(store.SandboxStateReady))
+		})
+
+		It("restores a recreated, untouched sandbox from the generation's newest backup", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
+			Expect(row(ctx).HomeDirtiedAt.Valid).To(BeTrue())
+			bump()
+			pass(ctx)
+			done := finish(ctx, true)
+			pass(ctx)
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			Expect(row(ctx).HomeDirtiedAt.Valid).To(BeFalse(), "a new sandbox ID starts the clock over")
+			Expect(q.ClearSandboxRestore(ctx, store.ClearSandboxRestoreParams{OrgID: org, AgentID: agent.ID})).To(Succeed())
+
+			fail()
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(2))
+			Expect(row(ctx).RestoreCheckpointID).To(Equal(pgtype.UUID{Bytes: done.ID.Bytes, Valid: true}))
+			Expect(healthy(ctx)).To(BeTrue())
+		})
+
+		It("still blocks when a harness wrote the home after the last backup", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
+			hourly(ctx)
+			dirtyHome(ctx, org, user, agent.ID)
+			fail()
+			pass(ctx)
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+			Expect(healthy(ctx)).To(BeFalse())
+		})
+
+		It("does not count a run that failed from starting as a write", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
+			done := hourly(ctx)
+			queueRun(ctx, org, user, agent.ID)
+			run, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: org, OwnerID: "agentd-test", LeaseSeconds: 60})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = q.FinishRun(ctx, store.FinishRunParams{
+				Outcome: store.RunStateFailed, OutcomeReason: pgtype.Text{String: "sandbox error", Valid: true}, OrgID: org, ID: run.ID, Epoch: run.Epoch,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			fail()
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			Expect(row(ctx).RestoreCheckpointID).To(Equal(pgtype.UUID{Bytes: done.ID.Bytes, Valid: true}))
+		})
+
+		It("stops an idle sandbox no harness ran in without a backup request", func(ctx SpecContext) {
+			coolDown(ctx, org, agent.ID)
+			now = time.Now().Add(11 * time.Minute)
+			pass(ctx)
+			Expect(osg.Calls("StopSandbox")).To(Equal(1))
+			_, err := q.GetOpenHomeCheckpoint(ctx, store.GetOpenHomeCheckpointParams{OrgID: org, AgentID: agent.ID})
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
 	Describe("the idle stop", func() {
+		BeforeEach(func(ctx SpecContext) { coolDown(ctx, org, agent.ID) }) // no keep-warm: idle stops apply
 		It("is preceded by a backup", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
 			now = time.Now().Add(11 * time.Minute)
 			pass(ctx)
 			Expect(open(ctx).Reason).To(Equal(store.CheckpointReasonStop))
@@ -267,6 +421,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		})
 
 		It("goes ahead when the backup failed, because a stop keeps the volume", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
 			now = time.Now().Add(11 * time.Minute)
 			pass(ctx)
 			finish(ctx, false)
@@ -275,6 +430,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		})
 
 		It("does not wait for ever for a backup that is not taken", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
 			now = time.Now().Add(11 * time.Minute)
 			pass(ctx)
 			pass(ctx)
@@ -285,6 +441,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		})
 
 		It("lets a stopped sandbox be recreated on its stop backup, without a new one", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
 			now = time.Now().Add(11 * time.Minute)
 			pass(ctx)
 			finish(ctx, true)
@@ -301,8 +458,10 @@ var _ = Describe("Reconciler home checkpoints", func() {
 	// The archive tier (plan item AR1, ADR 0032): a long-stopped sandbox with a complete backup is
 	// deleted with its volume; the next run gets a fresh sandbox that keeps the home generation.
 	Describe("the archive tier", func() {
+		BeforeEach(func(ctx SpecContext) { coolDown(ctx, org, agent.ID) }) // no keep-warm: idle stops apply
 		stopWith := func(ctx context.Context, ok bool) {
 			GinkgoHelper()
+			dirtyHome(ctx, org, user, agent.ID)
 			now = time.Now().Add(11 * time.Minute)
 			pass(ctx)
 			finish(ctx, ok)
@@ -389,6 +548,8 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		})
 
 		It("never archives an ephemeral agent: its sandbox belongs to a task", func(ctx SpecContext) {
+			// The suite's own agent has no backup after this run, so it is not archived either.
+			dirtyHome(ctx, org, user, agent.ID)
 			eph := newAgentWithConfig(ctx, org, user, `{"instructions":"help","ephemeral":true}`)
 			pass(ctx)
 			now = time.Now().Add(30 * 24 * time.Hour)

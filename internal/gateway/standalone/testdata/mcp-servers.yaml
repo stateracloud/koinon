@@ -12,7 +12,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"eb99b5964c198e04"'
+      koinon.config: '"2383903cada50774"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -25,6 +25,7 @@ frontendPolicies:
       koinon.response_id: coalesce(response.headers["x-generation-id"])
       koinon.status: response.code
       koinon.stream: llm.streaming
+      koinon.upstream: default(proxy.upstreamDuration, "") != ""
 gateways:
   default:
     port: 4000
@@ -49,15 +50,16 @@ llm:
             agent: globex/analyst
             org: globex
           allowedModels: []
-        - keyHash: sha256:d5cd608f26bf6eab54ecd4387ded4d95c881342e7a6ede12778228653454f908
+        - keyHash: sha256:b664f4de07929b04ae70743a9333a8f3885c5437eb9f79edd16a5bb8615a2f8f
           metadata:
             name: koinon-reload-probe
             agent: ""
     authorization:
       rules:
-        - apiKey.name != "koinon-reload-probe" && !has(llmRequest.mcp_servers)
+        - apiKey.name != "koinon-reload-probe" && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_") && !has(llmRequest.mcp_servers)
     transformations:
       request:
+        replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
         set:
           x-koinon-org: default(apiKey.org, "")
   models: []
@@ -82,6 +84,9 @@ mcp:
             name: k-gggggggggggg
             agent: globex/analyst
             org: globex
+    authorization:
+      rules:
+        - '!toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")'
     mcpAuthorization:
       rules:
         - apiKey.agent == "acme/repo-helper" && ((mcp.tool.target == "acme-wiki" && mcp.tool.name in ["read_page", "search"]) || (mcp.tool.target == "acme-legacy" && mcp.tool.name in ["ping"]))
@@ -89,6 +94,7 @@ mcp:
         - mcp.prompt.name == "koinon-ready"
     transformations:
       request:
+        replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id", "user-agent"])
         set:
           x-koinon-agent: apiKey.agent
         remove:

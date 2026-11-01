@@ -32,6 +32,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
@@ -42,6 +43,7 @@ import (
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/schemagate"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/pricing"
 )
@@ -103,15 +105,18 @@ func run() error {
 	// (or mounted) yet: wait for it.
 	// The pod is not ready while it waits, and the wait is logged at warn level every minute.
 	var ready atomic.Bool
+	// Also not ready while the schema is outside the goose range this build supports (ADR 0085).
+	gate := schemagate.New(pool, schemagate.Range{Min: migrations.MinSupported, Latest: migrations.MustLatest()}, log)
+	safego.Go(ctx, log, "schema-gate", gate.Run)
 	if cfg.healthAddr != "" {
 		mux := http.NewServeMux()
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-		mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 			if !ready.Load() {
 				http.Error(w, "waiting for the key-encryption keys", http.StatusServiceUnavailable)
 				return
 			}
-			w.WriteHeader(http.StatusOK)
+			gate.ReadyHandler()(w, r)
 		})
 		health := &http.Server{Addr: cfg.healthAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		safego.Go(ctx, log, "health-listener", func(context.Context) {
@@ -149,27 +154,40 @@ func run() error {
 	}
 	// One price list for the reconciler and the settler.
 	priceResolver := prices.NewResolver(pricing.Embedded())
+	if err := catalog.ValidateAllowedHosts(splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)); err != nil {
+		return err
+	}
+	var supervisor reconciler.SupervisorSource
+	if cfg.openshellConfigMap != "" {
+		supervisor = reconciler.KubeSupervisorImage{Client: kube, Namespace: cfg.openshellConfigNS, ConfigMap: cfg.openshellConfigMap}
+	} else {
+		log.Warn("no OpenShell gateway ConfigMap is configured: a new supervisor image does not recreate existing sandboxes")
+	}
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
-			Gateway:           endpoint,
-			Prices:            priceResolver,
-			Keys:              keyring,
-			ProviderKeys:      reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
-			ProviderKeyDir:    cfg.providerKeysDir,
-			URLPolicy:         catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)},
-			ProviderKeySettle: cfg.keySettle,
-			Flavors:           cfg.flavors(),
-			RuntimeClassName:  cfg.runtimeClass,
-			IdleTimeout:       cfg.idleTimeout,
-			ParkWarm:          cfg.parkWarm,
-			ArchiveAfter:      cfg.archiveAfter,
-			SandboxJobs:       cfg.sandboxJobs,
-			ResyncInterval:    cfg.resyncInterval,
-			HomeRetention:     reconciler.Retention(cfg.homeRetention),
-			Checkpoints:       cfg.checkpoints,
-			ToolServers:       cfg.toolServers(),
-			MCPAskURL:         cfg.mcpAskURL,
+			Gateway:             endpoint,
+			Prices:              priceResolver,
+			Keys:                keyring,
+			ProviderKeys:        reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
+			ProviderKeyDir:      cfg.providerKeysDir,
+			URLPolicy:           catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)},
+			ProviderKeySettle:   cfg.keySettle,
+			Flavors:             cfg.flavors(),
+			RuntimeClassName:    cfg.runtimeClass,
+			SandboxResources:    &cfg.sandboxResources,
+			IdleTimeout:         cfg.idleTimeout,
+			ParkWarm:            cfg.parkWarm,
+			ArchiveAfter:        cfg.archiveAfter,
+			SandboxJobs:         cfg.sandboxJobs,
+			KeepWarmPerOrg:      cfg.keepWarmPerOrg,
+			Supervisor:          supervisor,
+			MaxRecreatesPerPass: cfg.maxRecreates,
+			ResyncInterval:      cfg.resyncInterval,
+			HomeRetention:       reconciler.Retention(cfg.homeRetention),
+			Checkpoints:         cfg.checkpoints,
+			ToolServers:         cfg.toolServers(),
+			MCPAskURL:           cfg.mcpAskURL,
 			// repo.read grants (plan item C2): tokens minted with the App key opened from the
 			// connection's stored secret fields.
 			GitHub: reconciler.GitHubApps{
@@ -272,13 +290,21 @@ func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (
 			},
 		}
 		if cfg.accessLogOTLP != "" {
-			driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP}
+			if cfg.otlpTokenFile == "" {
+				return nil, errors.New("--gateway-access-log-otlp-token-file is required with --gateway-access-log-otlp: the OTLP receiver refuses requests without its bearer token")
+			}
+			driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP, TokenFile: cfg.otlpTokenFile}
 		} else {
 			log.Warn("no --gateway-access-log-otlp: the spend ledger records nothing and spend limits are not netted")
 		}
 		// Reloads are detected on the data plane, with the revision's probe key; agentgateway's
 		// admin listener stays on localhost.
-		driver.Waiter = standalone.ProbeWaiter{GatewayURL: cfg.gatewayURL, StatsURL: cfg.gatewayStatsURL, Log: log}
+		// agentgateway reports a refused config only in its log, so the waiter reads the gateway
+		// pods' logs for the reason (ADR 0050, amendment 2026-10-29).
+		driver.Waiter = standalone.ProbeWaiter{
+			GatewayURL: cfg.gatewayURL, StatsURL: cfg.gatewayStatsURL, Log: log,
+			Reload: standalone.PodLogReload{Client: kube, Namespace: cfg.namespace, Deployment: cfg.gatewayDeployment},
+		}
 		return driver, nil
 	case project.GatewayKubernetes:
 		rc, err := restConfig(cfg.kubeconfig)
@@ -303,7 +329,14 @@ func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (
 			Log:    log,
 		}
 		if cfg.accessLogOTLP != "" {
-			driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP}
+			if cfg.otlpTokenSecret == "" {
+				return nil, errors.New("--gateway-access-log-otlp-token-secret is required with --gateway-access-log-otlp: the OTLP receiver refuses requests without its bearer token")
+			}
+			export := &standalone.OTLPExport{HostPort: cfg.accessLogOTLP, TokenSecret: cfg.otlpTokenSecret, TokenSecretKey: "token"}
+			if _, _, err := export.SplitHostPort(); err != nil {
+				return nil, fmt.Errorf("--gateway-access-log-otlp: %w; the token cannot be attached to a malformed receiver", err)
+			}
+			driver.Options.AccessLogOTLP = export
 		} else {
 			log.Warn("no --gateway-access-log-otlp: the spend ledger records nothing, so budgets cannot revoke keys")
 		}

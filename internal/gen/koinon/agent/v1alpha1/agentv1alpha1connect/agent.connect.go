@@ -44,6 +44,9 @@ const (
 	AgentServiceGetAgentModelProcedure = "/koinon.agent.v1alpha1.AgentService/GetAgentModel"
 	// AgentServiceSetAgentModelProcedure is the procedure name of the AgentService's SetAgentModel RPC.
 	AgentServiceSetAgentModelProcedure = "/koinon.agent.v1alpha1.AgentService/SetAgentModel"
+	// AgentServiceSetAgentThinkingProcedure is the procedure name of the AgentService's
+	// SetAgentThinking RPC.
+	AgentServiceSetAgentThinkingProcedure = "/koinon.agent.v1alpha1.AgentService/SetAgentThinking"
 	// AgentServiceRunAgentTriggerProcedure is the procedure name of the AgentService's RunAgentTrigger
 	// RPC.
 	AgentServiceRunAgentTriggerProcedure = "/koinon.agent.v1alpha1.AgentService/RunAgentTrigger"
@@ -111,6 +114,13 @@ var (
 			Procedure:  AgentServiceSetAgentModelProcedure,
 		}
 	})
+	agentServiceSetAgentThinkingSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_agent_v1alpha1_agent_proto.Services().ByName("AgentService").Methods().ByName("SetAgentThinking"),
+			Procedure:  AgentServiceSetAgentThinkingProcedure,
+		}
+	})
 	agentServiceRunAgentTriggerSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType: connect.StreamTypeUnary,
@@ -155,6 +165,13 @@ type AgentServiceClient interface {
 	// agent, not a new version: it applies to the agent's next run. The model must be one the org
 	// serves and has a price for. Audited, with the old and the new value. Admins and owners only.
 	SetAgentModel(context.Context, *v1alpha1.SetAgentModelRequest) (*v1alpha1.SetAgentModelResponse, error)
+	// SetAgentThinking sets whether the agent's model thinks: "on" or "off", or clears the setting
+	// with an empty value so the version's value (a template's spec.model.thinking) and then the
+	// default, on, apply. Thinking is on unless somebody turns it off (ADR 0069 amendment
+	// 2026-10-29). Like the model it is a setting of the agent, not a new version, and applies to the
+	// next run. A model that cannot think ignores it (GetAgentModel says so). Audited, with the old
+	// and the new value. Admins and owners only.
+	SetAgentThinking(context.Context, *v1alpha1.SetAgentThinkingRequest) (*v1alpha1.SetAgentThinkingResponse, error)
 	// RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would
 	// at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited.
 	// Admins and owners only.
@@ -198,6 +215,13 @@ type AgentServiceHandler interface {
 	// agent, not a new version: it applies to the agent's next run. The model must be one the org
 	// serves and has a price for. Audited, with the old and the new value. Admins and owners only.
 	SetAgentModel(context.Context, *v1alpha1.SetAgentModelRequest) (*v1alpha1.SetAgentModelResponse, error)
+	// SetAgentThinking sets whether the agent's model thinks: "on" or "off", or clears the setting
+	// with an empty value so the version's value (a template's spec.model.thinking) and then the
+	// default, on, apply. Thinking is on unless somebody turns it off (ADR 0069 amendment
+	// 2026-10-29). Like the model it is a setting of the agent, not a new version, and applies to the
+	// next run. A model that cannot think ignores it (GetAgentModel says so). Audited, with the old
+	// and the new value. Admins and owners only.
+	SetAgentThinking(context.Context, *v1alpha1.SetAgentThinkingRequest) (*v1alpha1.SetAgentThinkingResponse, error)
 	// RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would
 	// at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited.
 	// Admins and owners only.
@@ -220,6 +244,7 @@ func RegisterAgentServiceHandler(server *connect.Server, svc AgentServiceHandler
 		connect.Method{Spec: agentServiceResumeAgentSpec(), Handler: adapter.resumeAgent},
 		connect.Method{Spec: agentServiceGetAgentModelSpec(), Handler: adapter.getAgentModel},
 		connect.Method{Spec: agentServiceSetAgentModelSpec(), Handler: adapter.setAgentModel},
+		connect.Method{Spec: agentServiceSetAgentThinkingSpec(), Handler: adapter.setAgentThinking},
 		connect.Method{Spec: agentServiceRunAgentTriggerSpec(), Handler: adapter.runAgentTrigger},
 		connect.Method{Spec: agentServiceArchiveAgentSpec(), Handler: adapter.archiveAgent},
 	)
@@ -258,6 +283,10 @@ func (UnimplementedAgentServiceHandler) GetAgentModel(context.Context, *v1alpha1
 
 func (UnimplementedAgentServiceHandler) SetAgentModel(context.Context, *v1alpha1.SetAgentModelRequest) (*v1alpha1.SetAgentModelResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.SetAgentModel is not implemented")
+}
+
+func (UnimplementedAgentServiceHandler) SetAgentThinking(context.Context, *v1alpha1.SetAgentThinkingRequest) (*v1alpha1.SetAgentThinkingResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.SetAgentThinking is not implemented")
 }
 
 func (UnimplementedAgentServiceHandler) RunAgentTrigger(context.Context, *v1alpha1.RunAgentTriggerRequest) (*v1alpha1.RunAgentTriggerResponse, error) {
@@ -331,6 +360,14 @@ func (c *agentServiceClient) GetAgentModel(ctx context.Context, req *v1alpha1.Ge
 func (c *agentServiceClient) SetAgentModel(ctx context.Context, req *v1alpha1.SetAgentModelRequest) (*v1alpha1.SetAgentModelResponse, error) {
 	var res v1alpha1.SetAgentModelResponse
 	if err := c.client.CallUnary(ctx, agentServiceSetAgentModelSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *agentServiceClient) SetAgentThinking(ctx context.Context, req *v1alpha1.SetAgentThinkingRequest) (*v1alpha1.SetAgentThinkingResponse, error) {
+	var res v1alpha1.SetAgentThinkingResponse
+	if err := c.client.CallUnary(ctx, agentServiceSetAgentThinkingSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -444,6 +481,18 @@ func (h agentServiceHandler) setAgentModel(ctx context.Context, _ connect.Spec, 
 		return err
 	}
 	res, err := h.svc.SetAgentModel(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h agentServiceHandler) setAgentThinking(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetAgentThinkingRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetAgentThinking(ctx, &req)
 	if err != nil {
 		return err
 	}

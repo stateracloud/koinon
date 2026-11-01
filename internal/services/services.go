@@ -2,7 +2,7 @@
 
 // Package services implements Koinon's org-facing connect-rpc services
 // (plan item A3): AgentService, TicketService, RunService,
-// TemplateService, ConnectionService, ApprovalService, TokenService and ProviderService, on the sqlc store and with the caller's Principal from the
+// TemplateService, ConnectionService, ApprovalService, TokenService, ProviderService and TraceDestinationService, on the sqlc store and with the caller's Principal from the
 // auth interceptor.
 //
 // Every org-owned call names its org in the request. The caller must hold a
@@ -11,7 +11,7 @@
 //
 //	viewer  Get*, List*, WatchRun
 //	member  CreateAgentFromTemplate, CreateTicket, AppendMessage, MoveTicket, CancelRun
-//	admin   AuditService.List (a platform admin may also read every org), ProviderService (every call), ActivateAgent (approves the version's grants), ArchiveAgent,
+//	admin   TraceDestinationService (org calls; the content level full needs an owner; the platform calls need a platform admin), AuditService.List (a platform admin may also read every org), ProviderService (every call), ActivateAgent (approves the version's grants), ArchiveAgent,
 //	        CreateGitHubConnection, CreateGiteaConnection, TestConnection, CreateToken, ListTokens, RevokeToken, Approve, Deny (ADR 0049:
 //	        approvers are admins and owners)
 //
@@ -54,11 +54,13 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1/tracev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -123,6 +125,9 @@ type Options struct {
 	// policy, as for providers and MCP servers). The zero policy still denies private and internal
 	// addresses.
 	URLPolicy catalog.URLPolicy
+	// Traces manages run-trace destinations, content levels and the platform ceiling (ADR 0074). Nil
+	// means TraceDestinationService answers UNIMPLEMENTED.
+	Traces *tracedest.Service
 }
 
 // Server implements the four services.
@@ -151,6 +156,7 @@ type Server struct {
 	agentModels *agentmodel.Service
 	modelCheck  *modelcheck.Service
 	runNow      *RunNowQueue
+	traces      *tracedest.Service
 }
 
 // New returns a Server backed by pool.
@@ -180,7 +186,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, log: opts.Logger,
 		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
-		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow,
+		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces,
 	}
 	if s.dm != nil {
 		s.dm.bind(s)
@@ -207,6 +213,7 @@ func (s *Server) Register(server *connect.Server) {
 	providerv1alpha1connect.RegisterProviderServiceHandler(server, s)
 	mcpserverv1alpha1connect.RegisterMcpServerServiceHandler(server, s)
 	auditv1alpha1connect.RegisterAuditServiceHandler(server, s)
+	tracev1alpha1connect.RegisterTraceDestinationServiceHandler(server, traceAPI{s})
 }
 
 var (

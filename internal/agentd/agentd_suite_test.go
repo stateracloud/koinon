@@ -16,25 +16,19 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/pressly/goose/v3"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/stateracloud/koinon/internal/agentd"
-	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/pricing"
 )
-
-// postgresImage is the minimum supported Postgres version (ADR 0047).
-const postgresImage = "postgres:18-alpine"
 
 var (
 	db *pgxpool.Pool
@@ -48,21 +42,7 @@ func TestAgentd(t *testing.T) {
 }
 
 var _ = BeforeSuite(func(ctx SpecContext) {
-	ctr, err := postgres.Run(ctx, postgresImage, postgres.WithDatabase("koinon"), postgres.BasicWaitStrategies())
-	Expect(err).NotTo(HaveOccurred())
-	DeferCleanup(func(ctx context.Context) error { return ctr.Terminate(ctx) })
-	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	Expect(err).NotTo(HaveOccurred())
-	db, err = pgxpool.New(ctx, dsn)
-	Expect(err).NotTo(HaveOccurred())
-	DeferCleanup(db.Close)
-
-	sqlDB := stdlib.OpenDBFromPool(db)
-	DeferCleanup(sqlDB.Close)
-	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.FS)
-	Expect(err).NotTo(HaveOccurred())
-	_, err = provider.Up(ctx)
-	Expect(err).NotTo(HaveOccurred())
+	db = pgtest.Start(ctx)
 	q = store.New(db)
 }, NodeTimeout(3*time.Minute))
 
@@ -182,6 +162,13 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 	}
 	if len(args) >= 4 && args[0] == "-c" && args[2] == "tar" && f.tar != nil {
 		return f.tar(args[3:], stdin, stdout, stderr)
+	}
+	if len(args) >= 4 && args[0] == "-c" && args[1] == agentd.RealpathScript {
+		// The sandbox has no links: every path is its own physical path.
+		for _, p := range args[3:] {
+			_, _ = fmt.Fprintln(stdout, p)
+		}
+		return 0
 	}
 	if len(args) < 4 || args[0] != "-c" {
 		_, _ = fmt.Fprintf(stderr, "unexpected sh %q", args)
@@ -375,7 +362,7 @@ func (e *env) message(ctx context.Context, t store.Task, text string) {
 
 func (e *env) enqueue(ctx context.Context, t store.Task) store.Run {
 	r, err := q.CreateRun(ctx, store.CreateRunParams{
-		OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 100_000,
+		OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return r
@@ -402,6 +389,11 @@ func (e *env) poolOn(conns *pgxpool.Pool, name string, mutate ...func(*agentd.Co
 		SandboxTimeout: 10 * time.Second,
 		ReadyTimeout:   2 * time.Second,
 		ReadySettle:    10 * time.Millisecond,
+		// Specs that fail a run with an authentication error have no access-log record to wait for.
+		GatewayRecordWait: 300 * time.Millisecond,
+		// A short drain, so a spec that ends with a turn in progress does not wait out the default
+		// 5 minutes; the drain specs set their own.
+		DrainDeadline: 200 * time.Millisecond,
 	}
 	for _, m := range mutate {
 		m(&cfg)
