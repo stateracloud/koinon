@@ -261,8 +261,6 @@ func (s *Scheduler) plan(tr triggers.Active, sched cron.Schedule, loc *time.Loca
 
 const stepCreateTask = "create-task"
 
-var _ = durable.DeclareSteps(FireWorkflow, stepCreateTask)
-
 // fire is the workflow of one due time.
 func (s *Scheduler) fire(c dbos.Context, in FireInput) (string, error) {
 	select {

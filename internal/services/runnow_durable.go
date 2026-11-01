@@ -54,8 +54,6 @@ type runNowOutput struct {
 
 const stepRunNow = "run-trigger-now"
 
-var _ = durable.DeclareSteps(RunNowWorkflow, stepRunNow)
-
 // RegisterRunNow registers the run-now workflow on rt.
 func RegisterRunNow(rt *durable.Runtime, work *durable.OrgWork) (*RunNowQueue, error) {
 	q := &RunNowQueue{work: work, ready: make(chan struct{})}
@@ -130,7 +128,7 @@ func (q *RunNowQueue) fire(ctx context.Context, in triggers.RunNow) (store.Task,
 	if err != nil {
 		return store.Task{}, err
 	}
-	out, err := durable.AwaitResult(q.work.Runtime(), h, id, dbos.WithHandleTimeout(runNowWait))
+	out, err := durable.AwaitResult(q.work.Runtime(), h, id, runNowWait)
 	if err != nil {
 		if errors.Is(err, dbos.ErrTimeout) {
 			return store.Task{}, connect.NewError(connect.CodeUnavailable, "the organisation's queue is busy; run the trigger again in a moment")

@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"sort"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -32,36 +31,6 @@ const WorkflowVersion = "1"
 // version. The first look is at Launch; later ones catch workflows that an older process, still
 // running during a rolling upgrade, enqueues after that.
 const DefaultCarryOverInterval = time.Minute
-
-var (
-	stepsMu  sync.Mutex
-	stepList = map[string][]string{}
-)
-
-// DeclareSteps records the steps of a registered workflow, in order, and returns steps. Call it
-// once per workflow, next to the code that runs the steps, and use the same constants for the
-// step names (dbos.WithStepName), so the record and the code cannot drift apart unnoticed. The
-// records feed TestWorkflowSteps, which compares them with testdata/workflow_steps.json.
-func DeclareSteps(workflow string, steps ...string) []string {
-	stepsMu.Lock()
-	defer stepsMu.Unlock()
-	if _, dup := stepList[workflow]; dup {
-		panic("durable: steps of workflow " + workflow + " declared twice")
-	}
-	stepList[workflow] = append([]string(nil), steps...)
-	return steps
-}
-
-// DeclaredSteps returns a copy of the declared step lists, by workflow name.
-func DeclaredSteps() map[string][]string {
-	stepsMu.Lock()
-	defer stepsMu.Unlock()
-	out := make(map[string][]string, len(stepList))
-	for k, v := range stepList {
-		out[k] = append([]string(nil), v...)
-	}
-	return out
-}
 
 // CarryOver forks every pending, enqueued or delayed workflow whose application version is older than this
 // runtime's (see olderVersion) from step 0 under this runtime's version, on the queue it was on, and cancels the
@@ -124,25 +93,69 @@ func (r *Runtime) CarriedOverID(id string) string {
 	return carryOverID(id, r.version())
 }
 
-// AwaitResult waits for the result of h, the handle of workflow id. When the workflow was
-// cancelled by CarryOver, whether before the call (a client retry enqueues under the original ID
-// and DBOS hands back the cancelled workflow) or while it waited, the result is the fork's, so the
-// caller sees what the carried-over run produced instead of a cancellation error. Any other error,
-// and a cancellation with no fork, is returned as it is.
-func AwaitResult[R any](r *Runtime, h dbos.WorkflowHandle[R], id string, opts ...dbos.GetResultOption) (R, error) {
-	out, err := h.GetResult(opts...)
-	if err == nil || !(errors.Is(err, dbos.ErrWorkflowCancelled) || errors.Is(err, dbos.ErrAwaitedWorkflowCancelled)) {
-		return out, err
+// maxCarryOverHops bounds how far AwaitResult follows a chain of carry-overs (one per bump of
+// WorkflowVersion that the workflow lived through).
+const maxCarryOverHops = 8
+
+// AwaitResult waits for the result of h, the handle of workflow id, for at most timeout in all
+// (zero or less waits without limit). When the workflow was cancelled by CarryOver, whether before
+// the call (a client retry enqueues under the original ID and DBOS hands back the cancelled
+// workflow) or while it waited, the result is the fork's, so the caller sees what the carried-over
+// run produced instead of a cancellation error. A workflow that lived through several bumps was
+// forked more than once (id~v2~v3); AwaitResult follows the chain, at most maxCarryOverHops
+// forks, while the newest one is cancelled too. One deadline covers the whole wait. Any other
+// error, and a cancellation with no fork, is returned as it is.
+func AwaitResult[R any](r *Runtime, h dbos.WorkflowHandle[R], id string, timeout time.Duration) (R, error) {
+	var deadline time.Time
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
 	}
-	dctx := r.Context()
-	if dctx == nil {
-		return out, err
+	cur := id
+	for hop := 0; ; hop++ {
+		var opts []dbos.GetResultOption
+		if !deadline.IsZero() {
+			left := time.Until(deadline)
+			if left <= 0 {
+				var zero R
+				return zero, fmt.Errorf("durable: waiting for workflow %s: %w", cur, dbos.ErrTimeout)
+			}
+			opts = append(opts, dbos.WithHandleTimeout(left))
+		}
+		out, err := h.GetResult(opts...)
+		if err == nil || (!errors.Is(err, dbos.ErrWorkflowCancelled) && !errors.Is(err, dbos.ErrAwaitedWorkflowCancelled)) {
+			return out, err
+		}
+		dctx := r.Context()
+		if dctx == nil || hop >= maxCarryOverHops {
+			return out, err
+		}
+		next, ok := newestFork(dctx, cur)
+		if !ok {
+			return out, err
+		}
+		fork, ferr := dbos.RetrieveWorkflow[R](dctx, next)
+		if ferr != nil {
+			return out, err
+		}
+		h, cur = fork, next
 	}
-	fork, ferr := dbos.RetrieveWorkflow[R](dctx, r.CarriedOverID(id))
-	if ferr != nil {
-		return out, err
+}
+
+// newestFork returns the ID of the most recently created carry-over fork below workflow id
+// (id~v2, or id~v2~v3 when the fork was carried over again).
+func newestFork(dctx dbos.Context, id string) (string, bool) {
+	found, err := dbos.ListWorkflows(dctx, dbos.WithFilterWorkflowIDPrefix(id+"~v"),
+		dbos.WithFilterLoadInput(false), dbos.WithFilterLoadOutput(false))
+	if err != nil || len(found) == 0 {
+		return "", false
 	}
-	return fork.GetResult(opts...)
+	newest := found[0]
+	for _, wf := range found[1:] {
+		if wf.CreatedAt.After(newest.CreatedAt) {
+			newest = wf
+		}
+	}
+	return newest.ID, newest.ID != id
 }
 
 // olderVersion reports whether a workflow of version wf is to be carried over by a runtime of
