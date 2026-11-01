@@ -680,7 +680,7 @@ func TestNestedEscapedJSONIsBounded(t *testing.T) {
 	s := scrub.New(scrub.Config{Level: scrub.LevelRedacted, Secrets: scrub.NewSecrets("notreal-dbpw")})
 	// The bound is on work, not on time (#474): wall-clock ratios flake on shared CI runners, while
 	// the bytes the detectors read are the same on every machine. A parsed document is read
-	// linearly: the reads per input byte of a document four times larger stay within 1.5x those of
+	// linearly: the reads per input byte of a document four times larger stay within 1.1x those of
 	// the small one (a quadratic path grows by the size ratio), and no input byte is read more than
 	// once on average (the escaped readings are of cut strings). A document past the parse cap is
 	// cut to a prefix first, so its reads depend on the limit alone.
@@ -690,7 +690,7 @@ func TestNestedEscapedJSONIsBounded(t *testing.T) {
 	}
 	small, large, cutText := reads(parsedQuarter), reads(parsed), reads(doc)
 	t.Logf("detector reads: %d (%d B), %d (%d B), %d (%d B)", small, len(parsedQuarter), large, len(parsed), cutText, len(doc))
-	if float64(large)/float64(len(parsed)) > 1.5*float64(small)/float64(len(parsedQuarter)) {
+	if float64(large)/float64(len(parsed)) > 1.1*float64(small)/float64(len(parsedQuarter)) {
 		t.Errorf("%d reads for %d bytes against %d for %d: not linear", large, len(parsed), small, len(parsedQuarter))
 	}
 	if large > len(parsed) || small > len(parsedQuarter) {
