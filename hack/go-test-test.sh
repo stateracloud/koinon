@@ -22,3 +22,31 @@ for s in $suites; do
 	fi
 done
 echo "ok: $(echo "$suites" | tr '\n' ' ')"
+
+# Per-spec reports (#221): the script writes them and CI uploads them even when tests fail.
+grep -q -- '--junit-report' hack/go-test.sh || { echo "FAIL: go-test.sh writes no Ginkgo JUnit report"; exit 1; }
+grep -q -- 'gotestsum --junitfile' hack/go-test.sh || { echo "FAIL: go-test.sh writes no gotestsum JUnit file"; exit 1; }
+wf=.github/workflows/ci.yml
+for job in go-test go-race; do
+	body=$(sed -n "/^  $job:\$/,/^  [a-z-]*:\$/p" "$wf")
+	grep -q 'upload-artifact@' <<<"$body" || { echo "FAIL: $job does not upload its reports"; exit 1; }
+	grep -q 'if: always()' <<<"$body" || { echo "FAIL: $job uploads reports only on success (needs if: always())"; exit 1; }
+done
+echo "ok: per-spec reports written and uploaded"
+
+# Every Ginkgo suite gets per-spec rows: the serial ones go through go test with -ginkgo.junit-report (keeping package parallelism).
+grep -q 'ginkgo_rest' hack/go-test.sh || { echo "FAIL: go-test.sh does not report the serial Ginkgo suites"; exit 1; }
+grep -q -- '-ginkgo.junit-report' hack/go-test.sh || { echo "FAIL: serial Ginkgo suites do not write -ginkgo.junit-report"; exit 1; }
+! grep -q -- '--procs=1' hack/go-test.sh || { echo "FAIL: serial suites run one at a time through ginkgo --procs=1 (loses package parallelism)"; exit 1; }
+grep -q 'ginkgo -race.*--junit-report' .github/workflows/ci.yml || { echo "FAIL: go-race does not use ginkgo for its per-spec report"; exit 1; }
+echo "ok: serial Ginkgo suites and go-race report per spec"
+
+# Behaviour check, opt-in because it runs the suites (needs Docker): a Ginkgo suite outside
+# PARALLEL_SUITES must leave a report with more than one testcase.
+if [[ ${GO_TEST_TEST_RUN:-} == 1 ]]; then
+	d=$(mktemp -d)
+	REPORT_DIR=$d hack/go-test.sh >/dev/null 2>&1 || true
+	f=$(find "$d" -name 'junit_*reconciler*.xml' | head -1)
+	[[ -n $f && $(grep -c '<testcase' "$f") -gt 1 ]] || { echo "FAIL: reconciler report has no per-spec testcases"; exit 1; }
+	echo "ok: serial Ginkgo suite report has per-spec testcases"
+fi
