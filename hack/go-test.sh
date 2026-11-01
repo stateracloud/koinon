@@ -12,8 +12,14 @@
 # under -p a suite whose processes exit before reporting prints "Test Suite Passed" with no report.
 # So every Ginkgo suite also writes a JSON report, and hack/testverdict gives each one PASS, FAIL,
 # SKIPPED (a missing requirement declared with internal/testing/testenv, e.g. no Docker) or NOT RUN
-# (no report, or no spec ran without a declared reason). FAIL and NOT RUN fail the run; SKIPPED
-# prints a banner and fails only when KOINON_REQUIRE lists the requirement (CI sets it).
+# (no report, or no spec ran without a declared reason), PASS (partly skipped) when only some specs
+# skipped. FAIL and NOT RUN fail the run; a requirement listed in KOINON_REQUIRE (CI sets it) turns
+# a skip into a failure.
+#
+# Exit codes: 0 ok, 1 failed, 3 incomplete: an expected requirement (docker, git, helm by default;
+# KOINON_EXPECT overrides, a comma list) was missing, so some suites or specs skipped and the run
+# proved less than it should. Requirements that are not expected are opt-in (e2e, openshell,
+# envtest, ...) and are only listed.
 #
 # Usage: hack/go-test.sh [PKG...] (default ./...; the parallel suites among PKG still run with -p).
 # Pass extra Ginkgo flags with GINKGO_FLAGS, a process count with PROCS.
@@ -96,7 +102,16 @@ fi
 # The verdict over every Ginkgo suite of this run; it fails the run for a suite that did not run.
 suites=(${parallel[@]+"${parallel[@]}"} ${ginkgo_rest[@]+"${ginkgo_rest[@]}"}) # bash 3.2: empty arrays under set -u
 if ((${#suites[@]})); then
-	go run ./hack/testverdict -reports "$report_dir" -name go-test "${suites[@]}" || rc=1
+	# Built, not `go run`: go run reports any non-zero exit of the program as 1, hiding the 3.
+	go build -o "$report_dir/testverdict.bin" ./hack/testverdict || exit 1
+	vrc=0
+	"$report_dir/testverdict.bin" -reports "$report_dir" -name go-test -expect "${KOINON_EXPECT:-docker,git,helm}" "${suites[@]}" || vrc=$?
+	rm -f "$report_dir/testverdict.bin"
+	if [[ $vrc == 3 && $rc == 0 ]]; then
+		rc=3
+	elif [[ $vrc != 0 && $vrc != 3 ]]; then
+		rc=1
+	fi
 fi
 
 exit "$rc"

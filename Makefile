@@ -156,7 +156,7 @@ test-chart-smoke: ## Start the chart's rendered Jobs and Deployments as containe
 		mkdir -p reports/chartsmoke && rm -f reports/chartsmoke/*.json && \
 		{ rc=0; \
 		KOINON_REQUIRE=$${KOINON_REQUIRE:-docker,envtest} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -timeout 20m -v ./test/chartsmoke/ -ginkgo.timeout=15m -ginkgo.json-report=$(CURDIR)/reports/chartsmoke/report.json || rc=1; \
-		$(GO) run ./hack/testverdict -reports reports/chartsmoke -name chart-smoke ./test/chartsmoke || rc=1; \
+		$(GO) run ./hack/testverdict -reports reports/chartsmoke -name chart-smoke -expect docker,envtest ./test/chartsmoke || rc=1; \
 		exit $$rc; }
 
 .PHONY: test-escape

@@ -4,6 +4,7 @@ package testenv
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -76,5 +77,43 @@ var _ = Describe("requirements", func() {
 		Expect(Envtest.Err()).To(HaveOccurred())
 		GinkgoT().Setenv("KUBEBUILDER_ASSETS", GinkgoT().TempDir())
 		Expect(Envtest.Err()).To(Succeed())
+	})
+})
+
+// fakeT records what RequireT does; the embedded nil TB is never called otherwise.
+type fakeT struct {
+	testing.TB
+	skipped, failed string
+}
+
+func (f *fakeT) Helper()        {}
+func (f *fakeT) Skip(a ...any)  { f.skipped = fmt.Sprint(a...) }
+func (f *fakeT) Fatal(a ...any) { f.failed = fmt.Sprint(a...) }
+
+var _ = Describe("RequireT", func() {
+	BeforeEach(func() { GinkgoT().Setenv(UnavailableVar, "") })
+
+	It("skips, fails under KOINON_REQUIRE, and does nothing when met", func() {
+		f := &fakeT{}
+		GinkgoT().Setenv(RequireVar, "")
+		RequireT(f, missing("helm"))
+		Expect(f.skipped).To(HavePrefix("koinon:requires=helm: not here"))
+		Expect(f.failed).To(BeEmpty())
+
+		f = &fakeT{}
+		GinkgoT().Setenv(RequireVar, "helm")
+		RequireT(f, missing("helm"))
+		Expect(f.failed).To(ContainSubstring("KOINON_REQUIRE=helm makes this a failure"))
+		Expect(f.skipped).To(BeEmpty())
+
+		f = &fakeT{}
+		RequireT(f, Requirement{Name: "helm", check: func() error { return nil }})
+		Expect(f.skipped + f.failed).To(BeEmpty())
+	})
+
+	It("BinaryNamed keeps the name apart from the executable", func() {
+		r := BinaryNamed("helm", "koinon-no-such-binary")
+		Expect(r.Name).To(Equal("helm"))
+		Expect(r.Err()).To(MatchError(ContainSubstring("koinon-no-such-binary is not on PATH")))
 	})
 })

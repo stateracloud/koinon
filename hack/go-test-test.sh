@@ -44,7 +44,7 @@ echo "ok: serial Ginkgo suites and go-race report per spec"
 # Behaviour check, opt-in because it runs the suites (needs Docker): a Ginkgo suite outside
 # PARALLEL_SUITES must leave a report with more than one testcase.
 if [[ ${GO_TEST_TEST_RUN:-} == 1 ]]; then
-	d=$(mktemp -d)
+	d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
 	REPORT_DIR=$d hack/go-test.sh >/dev/null 2>&1 || true
 	f=$(find "$d" -name 'junit_*reconciler*.xml' | head -1)
 	[[ -n $f && $(grep -c '<testcase' "$f") -gt 1 ]] || { echo "FAIL: reconciler report has no per-spec testcases"; exit 1; }
@@ -54,17 +54,16 @@ fi
 # #507: a Ginkgo suite where no spec ran is not a pass. ./internal/runoutcome has Postgres specs
 # only, so without Docker every one of them skips through testenv.Require. A dead DOCKER_HOST does
 # not simulate that (testcontainers falls back to the default socket), KOINON_TESTENV_UNAVAILABLE does.
-d=$(mktemp -d)
-out=$(KOINON_TESTENV_UNAVAILABLE=docker REPORT_DIR=$d hack/go-test.sh ./internal/runoutcome 2>&1) || {
-	echo "$out" | tail -20
-	echo "FAIL: a suite that skips for a missing requirement must exit 0 (SKIPPED), not fail"; exit 1
-}
+d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+rc=0
+out=$(KOINON_TESTENV_UNAVAILABLE=docker REPORT_DIR=$d hack/go-test.sh ./internal/runoutcome 2>&1) || rc=$?
+[[ $rc == 3 ]] || { echo "$out" | tail -20; echo "FAIL: a suite that skips for a missing expected requirement must exit 3 (incomplete), got $rc"; exit 1; }
 grep -q 'SKIPPED, NOT PASSED' <<<"$out" || { echo "$out" | tail -20; echo "FAIL: a suite skipped for a missing requirement is not reported as SKIPPED, NOT PASSED"; exit 1; }
-d=$(mktemp -d)
+d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
 if KOINON_REQUIRE=docker KOINON_TESTENV_UNAVAILABLE=docker REPORT_DIR=$d hack/go-test.sh ./internal/runoutcome >/dev/null 2>&1; then
 	echo "FAIL: KOINON_REQUIRE=docker must fail a suite whose Docker is missing"; exit 1
 fi
-d=$(mktemp -d)
+d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
 if out=$(go run ./hack/testverdict -reports "$d" ./internal/runoutcome 2>&1); then
 	echo "FAIL: testverdict passed a suite that left no report"; exit 1
 fi
