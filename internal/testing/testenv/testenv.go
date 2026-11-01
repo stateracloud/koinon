@@ -153,7 +153,7 @@ func envtestErr() error {
 	if dir == "" {
 		return errors.New("KUBEBUILDER_ASSETS is not set (setup-envtest use -p path)")
 	}
-	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() { // #nosec G703 -- only checks the test runner's own setting
 		return fmt.Errorf("KUBEBUILDER_ASSETS=%s is not a directory", dir)
 	}
 	return nil

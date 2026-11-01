@@ -5,6 +5,7 @@
 # gates call (go, make, golangci-lint, pnpm, shellcheck, gitleaks, the hack/ checkers) as a stub that
 # logs its call. Nothing is built or linted for real, and no cluster is touched.
 # shellcheck disable=SC2016 # the stubs are written with single quotes on purpose
+# shellcheck disable=SC2317 # has/hasnt/eq are called indirectly, through check
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
