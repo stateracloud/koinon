@@ -38,3 +38,4 @@ docs/site/.astro/
 
 # Per-spec JUnit reports of hack/go-test.sh (#221)
 /reports/
+/junit.xml
