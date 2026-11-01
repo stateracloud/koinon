@@ -102,9 +102,8 @@ cluster-wide) and `koinon-koinon-preflight` (read-only: the CRDs, the Agent Sand
 RuntimeClass and so on that the preflight checks; in cnpg mode `list` on
 `validatingwebhookconfigurations` and `endpointslices`).
 
-The maintainer's home lab is one such configuration: `hack/dev/local.homelab.example.yaml`, used
-automatically for the contexts `homelab` and `homelab-koinon` when there is no `local.yaml`
-([maintainer-homelab.md](maintainer-homelab.md)).
+The maintainer's home lab is one such configuration; its profile is kept outside the repository
+and copied to `hack/dev/local.yaml` ([maintainer-homelab.md](maintainer-homelab.md)).
 
 ## Logging in
 

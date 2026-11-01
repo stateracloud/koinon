@@ -69,7 +69,7 @@ func TestDocumentedSecretsParse(t *testing.T) {
 	if n < 2 {
 		t.Errorf("found %d yaml model-provider blocks in the docs, want at least 2", n)
 	}
-	for _, f := range []string{"test/e2e/kind/model-provider.yaml", "hack/dev/model-provider-homelab.yaml"} {
+	for _, f := range []string{"test/e2e/kind/model-provider.yaml", "hack/dev/model-provider.example.yaml"} {
 		raw, err := os.ReadFile(filepath.Join(root, f))
 		if err != nil {
 			t.Fatal(err)

@@ -165,11 +165,11 @@ test-escape-kind: ## Run the escape suite's OpenShell cases on the kind-koinon-d
 	CLUSTER=$(DEV_KIND_CLUSTER) test/escape/kind.sh
 
 # Dev loop (ADR 0039, docs/dev/loop.md). `make dev` picks the profile from the kube context:
-# homelab/homelab-koinon, or kind-koinon-dev after `make dev-kind-up`.
+# kind-koinon-dev after `make dev-kind-up`, or a cluster of yours listed in hack/dev/local.yaml.
 DEV_KIND_CLUSTER ?= koinon-dev
 
 .PHONY: dev
-dev: ## Run the inner loop with Tilt against the current kube context (home lab or dev-kind-up's kind)
+dev: ## Run the inner loop with Tilt against the current kube context (dev-kind-up's kind, or a cluster listed in hack/dev/local.yaml)
 	tilt up
 
 .PHONY: dev-kind-up

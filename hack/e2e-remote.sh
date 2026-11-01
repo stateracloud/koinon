@@ -4,13 +4,14 @@
 # Run the kind e2e (`make test-e2e-kind`, the go suite) of the committed HEAD somewhere other than
 # your shell's toolchain, three ways:
 #
-#   hack/e2e-remote.sh [--argo] [--out DIR] [--no-wait] [--dry-run]   an Argo Workflows queue (default)
+#   hack/e2e-remote.sh [--local] [--out DIR]                          the local Docker (default)
 #   hack/e2e-remote.sh --ssh [--out DIR] [--dry-run]                  a Docker host over SSH ($KOINON_E2E_REMOTE)
-#   hack/e2e-remote.sh --local [--out DIR]                            the local Docker
+#   hack/e2e-remote.sh --argo [--out DIR] [--no-wait] [--dry-run]     an Argo Workflows queue you operate
 #
-# --argo (hack/e2e-argo.sh, see its header for options and settings): the maintainers' home-lab
-# queue by default (Kata pods, two or more runs in parallel, about 18 min warm); needs its
-# credentials, so contributors use --local, their own queue, or the `e2e` label on the PR.
+# --argo (hack/e2e-argo.sh, see its header for options and settings): an Argo queue of your own, for
+# example a maintainer's home lab. Its endpoints and credentials are not in the repository: set them
+# in the environment or in the untracked lab config (hack/lab/lab.env.example); without them it
+# exits 2. Its options (--no-wait, --follow, --lane, ...) are --argo options and need --argo.
 # --ssh and --local run the pinned toolchain image of hack/e2e-toolchain (the Go from go.mod and the
 # kind, ko, helm and kubectl versions CI uses) against that host's Docker socket, so the result does
 # not depend on what is installed on the machine you type this on. Setting KOINON_E2E_REMOTE alone
@@ -58,7 +59,7 @@ WORK=${KOINON_E2E_REMOTE_WORK:-work/koinon-e2e.git}
 LOCK=${KOINON_E2E_LOCK:-/tmp/koinon-e2e.lock}
 CLUSTER=koinon-e2e-runner # dedicated: cleanup never touches a human's koinon-e1
 mode=""
-[[ -z $REMOTE ]] || mode=remote
+[[ -z $REMOTE ]] || mode=remote # KOINON_E2E_REMOTE alone selects --ssh
 out=${KOINON_E2E_OUT:-}
 dry=0
 # stage-only arguments, and globals the EXIT traps use
@@ -71,7 +72,8 @@ while [[ $# -gt 0 ]]; do
   --local) mode=local ;;
   --ssh) mode=remote ;;
   --argo) mode=argo ;;
-  --no-wait | --target | --slot | --follow | --repo | --lane) mode=${mode:-argo}; [[ $mode == argo ]] || { echo "e2e-remote: $1 is an --argo option" >&2; exit 2; }
+  --no-wait | --target | --slot | --follow | --repo | --lane)
+    [[ ${mode:-} == argo ]] || { echo "e2e-remote: $1 is an --argo option; add --argo" >&2; exit 2; }
     break ;;
   --out) out=${2:?--out needs a directory}; shift ;;
   --dry-run) dry=1 ;;
@@ -336,7 +338,7 @@ client_local() {
   return "$rc"
 }
 
-case ${mode:-argo} in
+case ${mode:-local} in
 argo)
   args=()
   [[ -z $out ]] || args+=(--out "$out")
