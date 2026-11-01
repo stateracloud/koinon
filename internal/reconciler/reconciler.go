@@ -1101,9 +1101,6 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	}
 	names = w.names()
 
-	if err := r.supervisorReady(); err != nil {
-		return err
-	}
 	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor, providers, network, r.sandboxResources(w))
 	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm})
 	if err != nil {
@@ -1173,7 +1170,11 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
 		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, homeDirtiedSince(w.sb))
 	}
-	if sb.Labels[LabelSpecHash] != hash {
+	if sb.Labels[LabelSpecHash] != hash && !r.supervisorKnown() {
+		// The gateway's supervisor image was never read, so the hash lacks it and a mismatch
+		// proves nothing. Recreating now would recreate every sandbox once the image is known.
+		r.log.Debug("not comparing the sandbox spec hash: the OpenShell supervisor image is not known yet", w.logAttrs()...)
+	} else if sb.Labels[LabelSpecHash] != hash {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
 		// hand): OpenShell cannot change those in place, so the sandbox is recreated, which
 		// also replaces its home volume. Never while a run holds the agent, parked runs
