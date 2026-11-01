@@ -25,6 +25,25 @@ func (q *Queries) ClaimOrgDefaultModelBackfill(ctx context.Context, orgID pgtype
 	return result.RowsAffected(), nil
 }
 
+const clearOrgDefaultModelIfGone = `-- name: ClearOrgDefaultModelIfGone :one
+UPDATE orgs o
+SET default_model = NULL
+FROM (SELECT x.id, x.default_model AS old FROM orgs x
+      WHERE x.id = $1 AND x.default_model IS NOT NULL AND x.deleted_at IS NULL FOR UPDATE) cur
+WHERE o.id = cur.id
+  AND NOT EXISTS (SELECT 1 FROM models m WHERE m.org_id = $1 AND m.name = cur.old)
+RETURNING cur.old::text AS old_default_model
+`
+
+// Clears the org's default model when no model of that name is left (it was deleted); the old value
+// comes back for the audit event. No row: the default stays (or there was none).
+func (q *Queries) ClearOrgDefaultModelIfGone(ctx context.Context, orgID pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, clearOrgDefaultModelIfGone, orgID)
+	var old_default_model string
+	err := row.Scan(&old_default_model)
+	return old_default_model, err
+}
+
 const getOrgBySlug = `-- name: GetOrgBySlug :one
 
 SELECT id, slug, display_name, kind, identity_mode, created_at, updated_at, deleted_at, default_model, default_model_pending FROM orgs
@@ -134,7 +153,7 @@ func (q *Queries) ListOrgsPendingDefaultModel(ctx context.Context) ([]pgtype.UUI
 const setOrgDefaultModel = `-- name: SetOrgDefaultModel :one
 UPDATE orgs o
 SET default_model = nullif($1::text, '')
-FROM (SELECT x.id, coalesce(x.default_model, '')::text AS old FROM orgs x WHERE x.id = $2 FOR UPDATE) cur
+FROM (SELECT x.id, coalesce(x.default_model, '')::text AS old FROM orgs x WHERE x.id = $2 AND x.deleted_at IS NULL FOR UPDATE) cur
 WHERE o.id = cur.id
 RETURNING cur.old::text AS old_default_model
 `

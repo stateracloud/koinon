@@ -5,6 +5,8 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
+	"time"
 
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -212,6 +214,40 @@ func (s *Server) DeleteModel(ctx context.Context, req *providerv1alpha1.DeleteMo
 		return nil, s.catalogError(err)
 	}
 	return &providerv1alpha1.DeleteModelResponse{}, nil
+}
+
+// GetDefaultModel implements ProviderService. Admins and owners.
+func (s *Server) GetDefaultModel(ctx context.Context, req *providerv1alpha1.GetDefaultModelRequest) (*providerv1alpha1.GetDefaultModelResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	m, err := s.agentModels.GetDefault(ctx, c.org)
+	if err != nil {
+		return nil, s.agentModelError(err)
+	}
+	served, err := s.agentModels.ListServed(ctx, c.org, time.Now())
+	if err != nil {
+		return nil, s.agentModelError(err)
+	}
+	res := &providerv1alpha1.GetDefaultModelResponse{Model: m}
+	for _, x := range served {
+		res.Available = append(res.Available, &providerv1alpha1.DefaultModelChoice{Name: x.Name, Provider: x.Provider})
+	}
+	return res, nil
+}
+
+// SetDefaultModel implements ProviderService. Admins and owners.
+func (s *Server) SetDefaultModel(ctx context.Context, req *providerv1alpha1.SetDefaultModelRequest) (*providerv1alpha1.SetDefaultModelResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	want := strings.TrimSpace(req.GetModel())
+	if err := s.agentModels.SetDefault(requestCtx(ctx), c.org, c.auditActor(), want, time.Now()); err != nil {
+		return nil, s.agentModelError(err)
+	}
+	return &providerv1alpha1.SetDefaultModelResponse{Model: want}, nil
 }
 
 // CheckProviderEcho implements ProviderService. Admins and owners.

@@ -100,6 +100,9 @@ type Querier interface {
 	ClaimSandboxRestore(ctx context.Context, arg ClaimSandboxRestoreParams) (AgentSandbox, error)
 	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)
 	ClearConnectionSecretName(ctx context.Context, arg ClearConnectionSecretNameParams) error
+	// Clears the org's default model when no model of that name is left (it was deleted); the old value
+	// comes back for the audit event. No row: the default stays (or there was none).
+	ClearOrgDefaultModelIfGone(ctx context.Context, orgID pgtype.UUID) (string, error)
 	ClearSandboxRestore(ctx context.Context, arg ClearSandboxRestoreParams) error
 	// The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
 	// run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses

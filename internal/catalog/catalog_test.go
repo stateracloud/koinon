@@ -354,6 +354,75 @@ var _ = Describe("Service", func() {
 			Expect(n).To(Equal(1))
 		})
 
+		Describe("deleting the default model (#256)", func() {
+			var q *store.Queries
+			def := func(ctx SpecContext) string {
+				GinkgoHelper()
+				d, err := q.GetOrgDefaultModel(ctx, org)
+				Expect(err).NotTo(HaveOccurred())
+				return d
+			}
+			// clearedEvent expects exactly one audit event that moved the default from old to none.
+			clearedEvent := func(ctx SpecContext, old string) {
+				GinkgoHelper()
+				ev := events(ctx, "org.default_model.set")
+				Expect(ev).To(HaveLen(2), "the first model set it, the deletion cleared it")
+				var last struct{ Before, After map[string]any }
+				for _, e := range ev {
+					var s struct{ Before, After map[string]any }
+					Expect(json.Unmarshal(e.Summary, &s)).To(Succeed())
+					if s.After["reason"] == "model deleted" {
+						last = s
+					}
+				}
+				Expect(last.Before).To(HaveKeyWithValue("model", old))
+				Expect(last.After).To(HaveKeyWithValue("model", ""))
+			}
+			BeforeEach(func() { q = store.New(pool) })
+
+			It("clears it when the model is deleted, picks no other, and leaves other deletes alone", func(ctx SpecContext) {
+				p := create(ctx, "p", "")
+				first, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: "first"})
+				Expect(err).NotTo(HaveOccurred())
+				second, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: "second"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(svc.DeleteModel(ctx, org, actor, second.ID)).To(Succeed())
+				Expect(def(ctx)).To(Equal("first"), "deleting another model keeps the default")
+				Expect(events(ctx, "org.default_model.set")).To(HaveLen(1))
+				_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: "third"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(svc.DeleteModel(ctx, org, actor, first.ID)).To(Succeed())
+				Expect(def(ctx)).To(BeEmpty(), "no other model is picked silently")
+				clearedEvent(ctx, "first")
+			})
+
+			It("clears it when the provider that serves it is deleted", func(ctx SpecContext) {
+				p := create(ctx, "p", "")
+				_, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: "first"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(svc.DeleteProvider(ctx, org, actor, p.ID)).To(Succeed())
+				Expect(def(ctx)).To(BeEmpty())
+				clearedEvent(ctx, "first")
+			})
+
+			It("clears it when a declared model is dropped from its Secret", func(ctx SpecContext) {
+				d := catalog.DeclaredProvider{
+					SecretName: "openrouter-secret", Version: "v1", Name: "openrouter", Type: "openrouter",
+					URL: "https://openrouter.ai/api/v1", APIKey: "sk-declared",
+					Models: []catalog.DeclaredModel{{Name: "deepseek/flash", Guard: true}},
+				}
+				_, err := svc.ApplyDeclaredProvider(ctx, org, d)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(def(ctx)).To(Equal("deepseek/flash"))
+				d.Version = "v2"
+				d.Models = []catalog.DeclaredModel{{Name: "deepseek/other", Guard: true}}
+				_, err = svc.ApplyDeclaredProvider(ctx, org, d)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(def(ctx)).To(BeEmpty())
+				clearedEvent(ctx, "deepseek/flash")
+			})
+		})
+
 		It("adopts a first model whose name is the longest the catalog accepts", func(ctx SpecContext) {
 			p := create(ctx, "long", "")
 			name := strings.Repeat("m", 256)

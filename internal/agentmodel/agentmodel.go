@@ -182,6 +182,12 @@ func (s *Service) GetDefault(ctx context.Context, org pgtype.UUID) (string, erro
 	return OrgDefault(ctx, store.New(s.pool), org)
 }
 
+// ListServed returns the models the org's default may be set to: the ones it serves and has a
+// price for.
+func (s *Service) ListServed(ctx context.Context, org pgtype.UUID, at time.Time) ([]Served, error) {
+	return ListServed(ctx, s.prices, store.New(s.pool), org, at)
+}
+
 // SetDefault sets the org's default model, or clears it with "". The model must pass Check. The
 // change and its audit event, with the old and new value, commit together; setting the value it
 // already has writes no event.

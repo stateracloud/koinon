@@ -209,6 +209,9 @@ func (s *Service) syncDeclaredModels(ctx context.Context, q *store.Queries, org 
 			return err
 		}
 	}
+	if len(have) > 0 {
+		return clearDefaultIfGone(ctx, q, org, actor)
+	}
 	return nil
 }
 
