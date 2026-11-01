@@ -78,6 +78,33 @@ Do it once a year, or when `keys status` warns. No downtime, no restart.
 
 DEKs need no schedule: every write makes a new one.
 
+### Interactive form
+
+In a terminal (`kubectl exec -it`), `keys activate`, `keys retire`, `keys rewrap` and `keys reencrypt`
+can ask instead of taking everything on the command line. The flag forms above work the same; the
+prompts only fill in what you left out and confirm what is hard to undo.
+
+```sh
+kubectl -n koinon exec -it deploy/koinon-api -- koinon-api keys activate
+kubectl -n koinon exec -it deploy/koinon-api -- koinon-api keys rewrap
+kubectl -n koinon exec -it deploy/koinon-api -- koinon-api keys retire
+```
+
+- `keys activate` without an ID lists the inactive KEKs (age, and the values each wraps) and asks
+  "Activate `<id>`?" before it changes the Secret.
+- `keys retire` without an ID lists the KEKs; the ones that cannot be retired now (the active one, one that
+  values still use, or any while the active KEK is under five minutes old) are shown with the reason and
+  cannot be picked. It asks again, with the escrow reminder, before it removes the key.
+- `keys rewrap` asks with the number of values it will change.
+- `keys reencrypt` asks you to type the active KEK's ID, because it decrypts every payload.
+- `--yes` skips the questions you would be asked (it never picks a KEK for you).
+
+Without a terminal (no `-t`, a script, CI, a pod's own command), or with `--no-input`
+(`KOINON_NO_INPUT=true`), nothing is ever asked: a missing ID is the usual error
+(`accepts 1 arg(s), received 0`) and nothing needs `--yes`. `--no-input` is a flag of every Koinon
+binary; `kubectl exec -it ... keys retire --no-input <id>` runs the plain form on a terminal. The chart
+does not set it. With `TERM=dumb` the questions are plain lines, one per answer.
+
 ## Rotate the OTLP receiver token
 
 koinon-api's internal OTLP listener (the gateway's access log, agentd's run spans) requires a bearer
