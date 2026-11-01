@@ -175,4 +175,36 @@ var _ = Describe("the org default model", Ordered, func() {
 		Expect(got).To(Equal("acme/flash"))
 		Expect(src).To(Equal(agentmodel.SourceAgent))
 	})
+
+	It("backfills an org marked by migration 00045 with the model the derived rule picked, not an unpriced one", func(ctx SpecContext) {
+		old, _, _ := pgtest.NewOrg(ctx, pool)
+		add := func(provName, model string) {
+			var pid pgtype.UUID
+			Expect(pool.QueryRow(ctx, `INSERT INTO providers (org_id, name, type, url) VALUES ($1, $2, 'openrouter', 'https://example.com/v1') RETURNING id`,
+				old, provName).Scan(&pid)).To(Succeed())
+			_, err := pool.Exec(ctx, `INSERT INTO models (org_id, provider_id, name) VALUES ($1, $2, $3)`, old, pid, model)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		add("aaa", "acme/unpriced")
+		add("bbb", "acme/flash")
+		_, err := pool.Exec(ctx, `UPDATE orgs SET default_model = NULL, default_model_pending = true WHERE id = $1`, old)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = agentmodel.BackfillDefaults(ctx, pool, rv, at)
+		Expect(err).NotTo(HaveOccurred())
+		got, err := agentmodel.OrgDefault(ctx, store.New(pool), old)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("acme/flash"))
+		var reason string
+		Expect(pool.QueryRow(ctx, `SELECT summary->'after'->>'reason' FROM audit_events WHERE org_id = $1 AND action = 'org.default_model.set'`, old).Scan(&reason)).To(Succeed())
+		Expect(reason).To(Equal("migrated"))
+
+		// Once only: a cleared default stays cleared on the next start.
+		Expect(svc.SetDefault(ctx, old, audit.User(user), "", at)).To(Succeed())
+		n, err := agentmodel.BackfillDefaults(ctx, pool, rv, at)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(BeZero())
+		got, _ = agentmodel.OrgDefault(ctx, store.New(pool), old)
+		Expect(got).To(BeEmpty())
+	})
 })

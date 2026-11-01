@@ -11,9 +11,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimOrgDefaultModelBackfill = `-- name: ClaimOrgDefaultModelBackfill :execrows
+UPDATE orgs SET default_model_pending = false
+WHERE id = $1 AND default_model_pending
+`
+
+// Takes an org's pending backfill; a concurrent replica waits on the row and then finds it taken.
+func (q *Queries) ClaimOrgDefaultModelBackfill(ctx context.Context, orgID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, claimOrgDefaultModelBackfill, orgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getOrgBySlug = `-- name: GetOrgBySlug :one
 
-SELECT id, slug, display_name, kind, identity_mode, created_at, updated_at, deleted_at, default_model FROM orgs
+SELECT id, slug, display_name, kind, identity_mode, created_at, updated_at, deleted_at, default_model, default_model_pending FROM orgs
 WHERE slug = $1 AND deleted_at IS NULL
 `
 
@@ -31,6 +45,7 @@ func (q *Queries) GetOrgBySlug(ctx context.Context, slug string) (Org, error) {
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.DefaultModel,
+		&i.DefaultModelPending,
 	)
 	return i, err
 }
@@ -71,6 +86,33 @@ ORDER BY id
 // org (koinon-agentd claims runs org by org, so each claim stays org-scoped).
 func (q *Queries) ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listOrgIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgsPendingDefaultModel = `-- name: ListOrgsPendingDefaultModel :many
+SELECT id FROM orgs
+WHERE default_model_pending AND deleted_at IS NULL
+ORDER BY id
+`
+
+// Orgs whose default model migration 00045 left for BackfillDefaults.
+func (q *Queries) ListOrgsPendingDefaultModel(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgsPendingDefaultModel)
 	if err != nil {
 		return nil, err
 	}

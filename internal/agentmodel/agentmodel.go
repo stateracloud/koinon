@@ -398,3 +398,47 @@ func settingLabel(m string) string {
 	}
 	return m
 }
+
+// BackfillDefaults gives each org that existed when migration 00045 ran the default model it ran on
+// before the default was stored: the first model ListServed returns (the first one Check accepts,
+// by provider and model name). It runs once per org (the migration's default_model_pending mark),
+// is safe from every replica, and records org.default_model.set with the reason "migrated". An org
+// with no usable model yet gets none and falls back to its first model (catalog adoptDefaultModel).
+// It returns how many defaults it set.
+func BackfillDefaults(ctx context.Context, pool *pgxpool.Pool, rv prices.Resolver, at time.Time) (int, error) {
+	ids, err := store.New(pool).ListOrgsPendingDefaultModel(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, org := range ids {
+		set := false
+		err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			set = false
+			q := store.New(tx)
+			if claimed, err := q.ClaimOrgDefaultModelBackfill(ctx, org); err != nil || claimed == 0 {
+				return err
+			}
+			list, err := ListServed(ctx, rv, q, org, at)
+			if err != nil || len(list) == 0 {
+				return err
+			}
+			rows, err := q.SetOrgDefaultModelIfUnset(ctx, store.SetOrgDefaultModelIfUnsetParams{OrgID: org, DefaultModel: list[0].Name})
+			if err != nil || rows == 0 {
+				return err
+			}
+			set = true
+			return audit.RecordErr(ctx, q, audit.Event{
+				Org: org, Actor: audit.System(), Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
+				Before: map[string]any{"model": ""}, After: map[string]any{"model": list[0].Name, "reason": "migrated"},
+			})
+		})
+		if err != nil {
+			return n, err
+		}
+		if set {
+			n++
+		}
+	}
+	return n, nil
+}

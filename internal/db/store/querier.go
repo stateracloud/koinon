@@ -93,6 +93,8 @@ type Querier interface {
 	// claim would still see it as claimable, bump the agent's epoch, and then
 	// update no run: the next owner would get a skipped epoch.
 	ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run, error)
+	// Takes an org's pending backfill; a concurrent replica waits on the row and then finds it taken.
+	ClaimOrgDefaultModelBackfill(ctx context.Context, orgID pgtype.UUID) (int64, error)
 	// One run restores at a time; a claim older than @lease_seconds is taken over. No row: nothing
 	// to restore, or another run is restoring.
 	ClaimSandboxRestore(ctx context.Context, arg ClaimSandboxRestoreParams) (AgentSandbox, error)
@@ -612,6 +614,8 @@ type Querier interface {
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
 	// Users whose highest role in the org is at least @min_role (deleted users excluded).
 	ListOrgMemberIDsWithRole(ctx context.Context, arg ListOrgMemberIDsWithRoleParams) ([]pgtype.UUID, error)
+	// Orgs whose default model migration 00045 left for BackfillDefaults.
+	ListOrgsPendingDefaultModel(ctx context.Context) ([]pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Execution state rendered by koinon-reconciler (plan item R2) and read by

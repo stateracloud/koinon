@@ -13,13 +13,10 @@
 ALTER TABLE orgs
     ADD COLUMN default_model text CHECK (default_model IS NULL OR length(default_model) BETWEEN 1 AND 200);
 
--- Orgs keep what they run on today: the model the derived rule picks now.
-UPDATE orgs o
-SET default_model = (
-    SELECT m.name
-    FROM providers p
-    JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
-    WHERE p.org_id = o.id AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND m.disabled_reason IS NULL
-    ORDER BY p.name, m.name
-    LIMIT 1
-);
+-- Orgs keep what they run on today, the model the derived rule picks now (the first model that
+-- passes agentmodel.Check, by provider and model name). That rule needs the price resolver, which
+-- SQL does not have, so the migration only marks the orgs that exist and koinon-api fills them once at
+-- start (agentmodel.BackfillDefaults, audited with reason "migrated"), the way prices.CompleteMigrated
+-- completes migration 00014.
+ALTER TABLE orgs ADD COLUMN default_model_pending boolean NOT NULL DEFAULT false;
+UPDATE orgs SET default_model_pending = true WHERE deleted_at IS NULL AND default_model IS NULL;
