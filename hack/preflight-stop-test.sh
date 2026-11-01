@@ -13,7 +13,7 @@ ok() { echo "ok: $1"; }
 bad() { echo "FAIL: $1"; fail=1; }
 eq() { if [[ $2 == "$3" ]]; then ok "$1"; else bad "$1 (got '$2', want '$3')"; fi; }
 
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/preflight-stop-test.XXXXXX")
 pids=""
 cleanup() {
 	local p

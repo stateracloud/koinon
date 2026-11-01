@@ -236,25 +236,9 @@ func classFailure(what string, err error) *failure {
 	return f
 }
 
-// retryable: the class is one Koinon retries by itself.
-func (f *failure) retryable() bool {
-	return f.class == classTransient || f.class == classThrottled
-}
-
 // retryNote opens the prompt of a turn repeated after a model request failed.
 const retryNote = "[Koinon] A request to the model failed with a temporary error (%s) and is " +
 	"retried. Continue the task from where you stopped. Do not repeat actions that already succeeded."
-
-// retryDelay is how long to wait before retry number attempt (from 0): the provider's
-// Retry-After for a throttled run, otherwise the exponential backoff from the configured base,
-// capped at one minute.
-func retryDelay(f *failure, attempt int, base time.Duration) time.Duration {
-	if f.class == classThrottled && f.retryAfter > 0 {
-		return f.retryAfter
-	}
-	d := base << min(attempt, 10)
-	return min(d, time.Minute)
-}
 
 func exhausted(f *failure, retries int, maxWait time.Duration) *failure {
 	out := *f

@@ -32,7 +32,7 @@ table() {
   done
 }
 
-want=$(mktemp)
+want=$(mktemp "${TMPDIR:-/tmp}/adr-index.XXXXXX")
 trap 'rm -f "$want"' EXIT
 {
   sed -n '1,/^## Index$/p' "$readme"
