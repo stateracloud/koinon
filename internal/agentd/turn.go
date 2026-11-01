@@ -168,13 +168,13 @@ func (d *turnDriver) record(a turnpolicy.Action) error {
 	r := d.r
 	switch a.Record {
 	case turnpolicy.RecordRefusal:
-		if err := r.record(d.fctx, "run.refusal", map[string]any{"refusals": d.refs, "count": a.Count, "cwd": r.cwd}); err != nil {
+		if err := r.own.Record(d.fctx, "run.refusal", map[string]any{"refusals": d.refs, "count": a.Count, "cwd": r.cwd}); err != nil {
 			return r.dbErr(d.ctx, "record the refusal", err)
 		}
 	case turnpolicy.RecordRetry:
 		f := d.failure
 		r.log.Info("retrying the turn", "class", f.class, "attempt", a.Attempt, "delay", a.Delay)
-		if err := r.record(d.fctx, "run.retry", map[string]any{
+		if err := r.own.Record(d.fctx, "run.retry", map[string]any{
 			"failureClass": f.class, "attempt": a.Attempt, "delaySeconds": a.Delay.Seconds(), "reason": f.reason,
 		}); err != nil {
 			return r.dbErr(d.ctx, "record the retry", err)
@@ -230,8 +230,8 @@ func (d *turnDriver) await(a turnpolicy.Action) turnpolicy.Event {
 		select {
 		case res := <-d.done:
 			return d.promptDone(res)
-		case <-r.fenced:
-			return turnpolicy.Event{Kind: turnpolicy.EvFenced, FenceCanceled: fence(r.fenceKind.Load()) == fenceCanceled}
+		case <-r.own.Fenced():
+			return turnpolicy.Event{Kind: turnpolicy.EvFenced, FenceCanceled: r.own.FenceKind() == fenceCanceled}
 		case <-deadline:
 			return turnpolicy.Event{Kind: turnpolicy.EvTick}
 		case <-poll:
