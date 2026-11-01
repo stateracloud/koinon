@@ -39,13 +39,13 @@ success commit; the task left working after a park; and three more).
    reads the ending from the error `execute` returns (`failure`, `canceled`, `requeued` and the
    fence and shutdown sentinels), which the turn driver builds from the turn policy's typed outcome
    (ADR 0087). Switching `conclude` on the typed outcome directly, with the setup-phase failures as
-   typed values of their own, is a follow-up: those errors are also what the run's trace reads.
+   typed values of their own, is deferred to Backlog issue #SENTINEL-ISSUE (exit condition: `conclude` switches on `turnpolicy.Outcome` and `turnDriver.outcome` is deleted); those errors are also what the run's trace reads.
    A verb whose transaction fails ends the turn row on its own, best effort, unless another owner took
    the run over, so a run canceled meanwhile does not keep a turn that looks running.
 7. **The module is tested against real Postgres**, one group of specs per verb: the order of the
    timeline, the fence of a stale epoch, and the race between park and approval. No fake harness and no
-   agentd pool. The agentd specs stay as the regression net; a follow-up replaces the ones the module
-   specs cover with a few smoke specs.
+   agentd pool. The agentd specs stay as the regression net; Backlog issue #SMOKE-ISSUE replaces the ones the module
+   specs cover with a few smoke specs (exit condition: no agentd spec repeats a module spec).
 
 ## Consequences
 

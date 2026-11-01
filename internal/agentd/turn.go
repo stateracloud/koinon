@@ -323,7 +323,9 @@ func (d *turnDriver) takeRefusals(out *turnpolicy.Result) {
 	}
 }
 
-// outcome maps the policy's outcome to the error that conclude and endTurn read.
+// outcome maps the policy's outcome to the error that conclude and endTurn read. Interim: conclude
+// should switch on the typed outcome and this adapter go away; exit condition and issue in the run-outcome-writer ADR
+// decision 6 (docs/adr/XXXX-run-outcome-writer.md, Backlog issue #SENTINEL-ISSUE).
 func (d *turnDriver) outcome(o turnpolicy.Outcome) error {
 	r := d.r
 	switch o.Kind {
