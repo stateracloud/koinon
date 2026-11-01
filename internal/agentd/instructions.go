@@ -246,7 +246,7 @@ func (r *runner) checkInstructionFile(ctx context.Context, workspace, sandbox st
 	if found != "" {
 		payload["foundSha256"] = found
 	}
-	return r.record(ctx, "run.instructions_restored", payload)
+	return r.own.Record(ctx, "run.instructions_restored", payload)
 }
 
 // checkInstructionLink restores link, the flavor's path to the instruction file, if it is no
@@ -271,7 +271,7 @@ func (r *runner) checkInstructionLink(ctx context.Context, workspace, sandbox, l
 	if len(found) > 0 {
 		payload["foundTarget"] = string(found)
 	}
-	return r.record(ctx, "run.instructions_restored", payload)
+	return r.own.Record(ctx, "run.instructions_restored", payload)
 }
 
 func dirOf(path string) string { return path[:strings.LastIndexByte(path, '/')] }

@@ -81,7 +81,7 @@ func (r *runner) waitMCPServers(ctx context.Context) error {
 	r.log.Warn("an MCP server the agent may use is not serving tools; checking again before the harness starts",
 		"servers", mcpServerNames(missing), "retry_in", delay)
 	r.tr.noteMCPMissing(mcpServerNames(missing), 1)
-	if err := r.record(ctx, mcpMissingKind, map[string]any{
+	if err := r.own.Record(ctx, mcpMissingKind, map[string]any{
 		"attempt": 1, "servers": missing, "retry_in_seconds": int(delay.Seconds()),
 		"reason": "an MCP server the agent may use is not serving tools: " + describeMCPServers(missing),
 	}); err != nil {
@@ -96,12 +96,12 @@ func (r *runner) waitMCPServers(ctx context.Context) error {
 	}
 	if len(again) == 0 {
 		r.log.Info("the MCP servers are serving tools again", "servers", mcpServerNames(missing))
-		return r.record(ctx, mcpRecoveredKind, map[string]any{"servers": mcpServerNames(missing)})
+		return r.own.Record(ctx, mcpRecoveredKind, map[string]any{"servers": mcpServerNames(missing)})
 	}
 	r.tr.noteMCPMissing(mcpServerNames(again), 2)
 	reason := "an MCP server the agent may use is not serving tools, and still was not after " + delay.String() +
 		": " + describeMCPServers(again) + ". Check the servers on the MCP servers page, then run the task again"
-	if err := r.record(ctx, mcpMissingKind, map[string]any{"attempt": 2, "servers": again, "reason": reason}); err != nil {
+	if err := r.own.Record(ctx, mcpMissingKind, map[string]any{"attempt": 2, "servers": again, "reason": reason}); err != nil {
 		return err
 	}
 	return &failure{reason: reason}

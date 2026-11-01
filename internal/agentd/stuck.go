@@ -37,6 +37,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 )
 
 // Stuck-sandbox defaults and limits.
@@ -51,12 +52,12 @@ const (
 // Task event kinds of a stuck sandbox.
 const (
 	kindSandboxRecreated = "sandbox.recreated"
-	kindAgentUnhealthy   = "agent.unhealthy"
+	kindAgentUnhealthy   = runoutcome.KindAgentUnhealthy
 	kindWorkLost         = "sandbox.work_lost"
 )
 
 // NotificationAgentUnhealthy is the in-app notification kind for owners and admins.
-const NotificationAgentUnhealthy = "agent.unhealthy"
+const NotificationAgentUnhealthy = runoutcome.NotificationAgentUnhealthy
 
 type survivor struct{ pid, start string }
 
@@ -154,7 +155,7 @@ func (r *runner) watch(ctx context.Context, workspace, sandbox string, sv []surv
 			return procs, read, false
 		}
 		select {
-		case <-r.fenced:
+		case <-r.own.Fenced():
 			return nil, read, true
 		default:
 		}
@@ -323,38 +324,10 @@ func (r *runner) recreateStuck(ctx context.Context, workspace, sandbox string, p
 
 // taskNote appends a system event with a message to a task's timeline.
 func (r *runner) taskNote(ctx context.Context, q *store.Queries, task pgtype.UUID, kind, message string) error {
-	payload, err := json.Marshal(map[string]string{"message": message})
-	if err != nil {
-		return err
-	}
-	_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
-		OrgID: r.run.OrgID, TaskID: task, Kind: kind, ActorKind: store.TaskActorKindSystem, Payload: payload,
-	})
-	return err
+	return runoutcome.TaskNote(ctx, q, r.run.OrgID, task, kind, message)
 }
 
-// notifyUnhealthy tells the org's owners and admins, once per dedupe key. The payload carries the
-// message and whatever else the notification needs; agent_id is always set.
+// notifyUnhealthy tells the org's owners and admins, once per dedupe key (internal/runoutcome).
 func (r *runner) notifyUnhealthy(ctx context.Context, q *store.Queries, dedupe string, fields map[string]string) error {
-	users, err := q.ListOrgBudgetRecipients(ctx, r.run.OrgID)
-	if err != nil {
-		return err
-	}
-	payload := map[string]string{}
-	for k, v := range fields {
-		payload[k] = v
-	}
-	payload["agent_id"] = r.run.AgentID.String()
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	for _, u := range users {
-		if _, err := q.InsertNotification(ctx, store.InsertNotificationParams{
-			OrgID: r.run.OrgID, UserID: u, Kind: NotificationAgentUnhealthy, DedupeKey: dedupe, Payload: raw,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runoutcome.NotifyUnhealthy(ctx, q, r.run, dedupe, fields)
 }

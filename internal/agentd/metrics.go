@@ -95,3 +95,16 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	return m
 }
+
+// outcomeMetrics counts what the run owner's verbs did (internal/runoutcome).
+type outcomeMetrics struct{ m *Metrics }
+
+func (o outcomeMetrics) Finished(state store.RunState) {
+	o.m.Finished.WithLabelValues(string(state)).Inc()
+}
+
+func (o outcomeMetrics) Requeued() { o.m.Requeued.Inc() }
+
+func (o outcomeMetrics) SandboxWaitCap(cause execution.SandboxWaitCause) {
+	o.m.SandboxWaitCap.WithLabelValues(string(cause)).Inc()
+}

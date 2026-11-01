@@ -22,21 +22,14 @@ package agentd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
-	"github.com/stateracloud/koinon/internal/questions"
-	"github.com/stateracloud/koinon/internal/runreply"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 )
-
-// kindParked is the run and task event of a run parking on approvals.
-const kindParked = runreply.KindParked
 
 // parkResumeNote opens the prompt of a run resumed after its approvals were decided.
 const parkResumeNote = "[Koinon] Your run was paused while a human decided on your approval requests, " +
@@ -139,186 +132,19 @@ func outcomeText(a store.ApprovalRequest) string {
 	}
 }
 
-// endTurn ends a turn that stopped normally: the run succeeds, or parks while approval
-// requests the agent made are open or their outcomes unsent. Both happen in one transaction
-// under the run's row lock, which orders the decision against the approval service's
-// resolution of the park.
+// endTurn ends a turn that stopped normally: the run's owner succeeds the run, or parks it while
+// approval requests the agent made are open or their outcomes unsent (internal/runoutcome).
 func (r *runner) endTurn(ctx context.Context) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.srcSeq++
-	src := r.srcSeq
-	parked, waiting := false, false
-	var parkReason store.RunParkReason
-	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
-		q := r.q.WithTx(tx)
-		if len(r.delivered) > 0 {
-			if _, err := q.MarkApprovalRequestsDelivered(ctx, store.MarkApprovalRequestsDeliveredParams{
-				OrgID: r.run.OrgID, Ids: r.delivered,
-			}); err != nil {
-				return err
-			}
-		}
-		if len(r.deliveredQ) > 0 {
-			if _, err := q.MarkQuestionsDelivered(ctx, store.MarkQuestionsDeliveredParams{
-				OrgID: r.run.OrgID, Ids: r.deliveredQ,
-			}); err != nil {
-				return err
-			}
-		}
-		run, err := q.LockRun(ctx, store.LockRunParams{OrgID: r.run.OrgID, ID: r.run.ID})
-		if err != nil {
-			return err
-		}
-		if run.Epoch != r.run.Epoch || run.State != store.RunStateRunning {
-			return pgx.ErrNoRows // fenced
-		}
-		// The agent canceled the task in this turn (cancel_task): there is nothing to wait for. The
-		// questions it asked are canceled instead of opened, and the approvals are canceled by the
-		// approvals sweep once the run has ended.
-		endRow := func(reason string) error {
-			turn, ok := r.tr.openRow()
-			if !ok {
-				return nil
-			}
-			_, err := q.EndRunTurn(ctx, store.EndRunTurnParams{
-				OrgID: r.run.OrgID, ID: turn, EndReason: pgtype.Text{String: reason, Valid: true},
-			})
-			if errors.Is(err, pgx.ErrNoRows) {
-				return nil
-			}
-			return err
-		}
-		task, err := q.GetTask(ctx, store.GetTaskParams{OrgID: r.run.OrgID, ID: r.run.TaskID})
-		if err != nil {
-			return err
-		}
-		if task.State == store.TaskStateCanceled {
-			if err := endRow("end_turn"); err != nil {
-				return err
-			}
-			if _, err := questions.CancelForRun(ctx, q, r.run.OrgID, r.run.ID, "the task was canceled"); err != nil {
-				return err
-			}
-			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "", nil)
-		}
-		reqs, err := q.ListUndeliveredApprovalRequestsForRun(ctx, store.ListUndeliveredApprovalRequestsForRunParams{
-			OrgID: r.run.OrgID, RunID: r.run.ID,
-		})
-		if err != nil {
-			return err
-		}
-		qs, err := q.ListUndeliveredQuestionsForRun(ctx, store.ListUndeliveredQuestionsForRunParams{
-			OrgID: r.run.OrgID, RunID: r.run.ID,
-		})
-		if err != nil {
-			return err
-		}
-		if len(reqs) == 0 && len(qs) == 0 {
-			if err := endRow("end_turn"); err != nil {
-				return err
-			}
-			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "", nil)
-		}
-		parked = true
-		ids := make([]string, 0, len(reqs))
-		var expires pgtype.Timestamptz
-		// Questions the agent asked this turn become visible now, in this transaction.
-		asked := false
-		for _, row := range qs {
-			switch row.State {
-			case store.QuestionStateAsked, store.QuestionStateOpen:
-				asked = true
-				if !expires.Valid || row.ExpiresAt.Time.Before(expires.Time) {
-					expires = row.ExpiresAt
-				}
-			}
-		}
-		waiting = asked
-		for _, a := range reqs {
-			ids = append(ids, a.ID.String())
-			if a.Status == store.ApprovalStatusPending {
-				waiting = true
-				if !expires.Valid || a.ExpiresAt.Time.Before(expires.Time) {
-					expires = a.ExpiresAt
-				}
-			}
-		}
-		if !expires.Valid {
-			// Nothing waits for a human; the park is resolved below or by the executor.
-			expires = pgtype.Timestamptz{Time: r.p.cfg.Now().Add(7 * 24 * time.Hour), Valid: true}
-		}
-		// What the agent said before it parked goes on the task now, before the park note
-		// (and before run.parked, after which reply starts afresh).
-		if err := r.postReply(ctx, q); err != nil {
-			return err
-		}
-		reason := store.RunParkReasonApproval
-		if asked {
-			reason = store.RunParkReasonInputRequired
-		}
-		parkReason = reason
-		qids := make([]string, 0, len(qs))
-		for _, row := range qs {
-			qids = append(qids, row.ID.String())
-		}
-		payload, _ := json.Marshal(map[string]any{"reason": string(reason), "approvals": ids, "questions": qids})
-		if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
-			OrgID: r.run.OrgID, RunID: r.run.ID, Epoch: r.run.Epoch, Kind: kindParked, Payload: payload, SourceSeq: src,
-		}); err != nil {
-			return err
-		}
-		if _, err := q.ParkRun(ctx, store.ParkRunParams{
-			OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch,
-			ParkReason: reason, ParkExpiresAt: expires,
-		}); err != nil {
-			return err
-		}
-		// The turn's row ends with the park, in the same transaction, so a resume on another replica
-		// sees it ended and how long the run waited.
-		if err := endRow("park:" + string(reason)); err != nil {
-			return err
-		}
-		if asked {
-			if _, err := questions.OpenForRun(ctx, q, r.run.OrgID, r.run.ID, r.run.TaskID); err != nil {
-				return err
-			}
-		}
-		if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
-			OrgID: r.run.OrgID, TaskID: r.run.TaskID, RunID: r.run.ID,
-			Kind: kindParked, ActorKind: store.TaskActorKindSystem, Payload: payload,
-		}); err != nil {
-			return err
-		}
-		if waiting {
-			_, err := q.SetTaskStateFrom(ctx, store.SetTaskStateFromParams{
-				OrgID: r.run.OrgID, ID: r.run.TaskID, ToState: store.TaskStateInputRequired,
-				FromStates: []string{string(store.TaskStateSubmitted), string(store.TaskStateWorking)},
-			})
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
-			return nil
-		}
-		for _, a := range reqs {
-			if a.Status.Open() {
-				return nil // approved, being executed: the executor resolves the park
-			}
-		}
-		// Every request and question was decided while the turn ran: resume at once.
-		_, err = q.ResolveRunPark(ctx, store.ResolveRunParkParams{OrgID: r.run.OrgID, ID: r.run.ID})
-		return err
-	})
-	if err != nil {
-		return r.dbErr(ctx, "end the turn", err)
+	turn := runoutcome.Turn{}
+	if id, ok := r.tr.openRow(); ok {
+		turn.ID = id
 	}
-	if parked {
-		r.tr.parked(parkReason)
-		r.p.cfg.Metrics.Finished.WithLabelValues(string(store.RunStateParked)).Inc()
-		r.log.Info("run parked on approvals", "waiting_on_human", waiting)
-	} else {
-		r.p.cfg.Metrics.Finished.WithLabelValues(string(store.RunStateSucceeded)).Inc()
-		r.log.Info("run finished", "outcome", store.RunStateSucceeded)
+	end, err := r.own.EndTurn(ctx, runoutcome.Delivered{Approvals: r.delivered, Questions: r.deliveredQ}, turn)
+	if err != nil {
+		return err
+	}
+	if end.Parked {
+		r.tr.parked(end.ParkReason)
 	}
 	return nil
 }

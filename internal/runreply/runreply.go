@@ -19,7 +19,8 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
-// KindParked is the run event of a park; a reply restarts after it. agentd's kindParked aliases it.
+// KindParked is the run event of a park; a reply restarts after it.
+// runoutcome.KindParked, which agentd uses, aliases it.
 const KindParked = "run.parked"
 
 // MaxSummaryBytes caps the summary in the note (the end-of-turn summary's cap, 6000 bytes).
