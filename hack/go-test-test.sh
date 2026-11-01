@@ -22,3 +22,14 @@ for s in $suites; do
 	fi
 done
 echo "ok: $(echo "$suites" | tr '\n' ' ')"
+
+# Per-spec reports (#221): the script writes them and CI uploads them even when tests fail.
+grep -q -- '--junit-report' hack/go-test.sh || { echo "FAIL: go-test.sh writes no Ginkgo JUnit report"; exit 1; }
+grep -q -- 'gotestsum --junitfile' hack/go-test.sh || { echo "FAIL: go-test.sh writes no gotestsum JUnit file"; exit 1; }
+wf=.github/workflows/ci.yml
+for job in go-test go-race; do
+	body=$(sed -n "/^  $job:\$/,/^  [a-z-]*:\$/p" "$wf")
+	grep -q 'upload-artifact@' <<<"$body" || { echo "FAIL: $job does not upload its reports"; exit 1; }
+	grep -q 'if: always()' <<<"$body" || { echo "FAIL: $job uploads reports only on success (needs if: always())"; exit 1; }
+done
+echo "ok: per-spec reports written and uploaded"
