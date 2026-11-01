@@ -54,6 +54,9 @@ func TestGateFollowsTheSchema(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/readyz", nil)
 		g.ReadyHandler()(rec, req)
+		if rec.Code != http.StatusOK && strings.TrimSpace(rec.Body.String()) != "not ready" {
+			t.Fatalf("the 503 body must be generic, got %q", rec.Body.String())
+		}
 		return rec.Code
 	}
 	if status() != http.StatusServiceUnavailable {

@@ -146,11 +146,13 @@ func (g *Gate) Ready() error {
 	return g.err
 }
 
-// ReadyHandler answers 200 while Ready and 503 with the reason otherwise.
+// ReadyHandler answers 200 while Ready and 503 "not ready" otherwise. The body is generic on
+// purpose: the reason names schema versions, and it goes to the log (Check) instead.
 func (g *Gate) ReadyHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		if err := g.Ready(); err != nil {
-			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			// The reason (schema versions) is in the log line; the public listener says nothing of it.
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
