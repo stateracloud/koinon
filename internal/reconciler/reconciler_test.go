@@ -371,8 +371,8 @@ var _ = Describe("Reconciler", func() {
 			sup := &fakeSupervisor{image: "ghcr.io/nvidia/openshell/supervisor:0.1.5"}
 			cfg.Supervisor = sup
 			r = newReconciler()
-			// A sandbox made before the supervisor label is not recreated for a supervisor change, so the
-			// test starts from one that carries it.
+			// The sandbox made before the supervisor label is recreated once (the next test); this one
+			// starts from a sandbox that carries it.
 			Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
 			pass(ctx, r)
 			pass(ctx, r)
@@ -395,6 +395,24 @@ var _ = Describe("Reconciler", func() {
 			Expect(osg.Calls("DeleteSandbox")).To(Equal(baseline + 1))
 			Expect(osg.Sandbox(row.Workspace, names.Sandbox)).NotTo(BeNil())
 			Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
+		It("recreates a sandbox that has no supervisor label once the image is known, then settles", func(ctx SpecContext) {
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			sup := &fakeSupervisor{err: errors.New("forbidden")}
+			cfg.Supervisor = sup
+			r = newReconciler()
+			Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+			pass(ctx, r) // created while the image is unreadable: no label
+			Expect(osg.Sandbox(row.Workspace, names.Sandbox)).NotTo(BeNil())
+			baseline := osg.Calls("DeleteSandbox")
+
+			sup.err, sup.image = nil, "ghcr.io/nvidia/openshell/supervisor:0.1.5"
+			pass(ctx, r) // deletes
+			pass(ctx, r) // creates, with the label
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(baseline + 1))
+			pass(ctx, r)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(baseline + 1))
 		})
 
 		It("still recreates the sandbox for a changed flavor image when the gateway ConfigMap can never be read", func(ctx SpecContext) {
