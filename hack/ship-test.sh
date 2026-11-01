@@ -258,6 +258,25 @@ check "auto-merge on line" has '^auto-merge on$' "$tmp/o11b"
 check "gh pr merge --auto --merge" has 'gh pr merge .* --auto --merge' "$FAKE_LOG"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/x
 
+# 11c. (#392) --e2e: the label goes on an open PR before the push, on a new PR at creation
+reset_state
+unset FAKE_PR_URL
+w=$(newwork); cd "$w"
+echo e3 >e3.txt
+rc=$(run "$tmp/o11c" -m "feat: e3" --pr-title "t" --pr-body "$tmp/body.md" --e2e)
+check "--e2e new PR: exit 0" eq "$rc" 0
+check "--e2e new PR: created with the label" has 'gh pr create .*--label e2e' "$FAKE_LOG"
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/x
+reset_state
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123
+echo e4 >e4.txt
+rc=$(run "$tmp/o11d" -m "feat: e4" --pr-title "t" --pr-body "$tmp/body.md" --e2e)
+check "--e2e open PR: exit 0" eq "$rc" 0
+check "--e2e open PR: label added" has 'gh pr edit .* --add-label e2e' "$FAKE_LOG"
+check "--e2e open PR: label step before the push" has '^label e2e$' "$tmp/o11d"
+unset FAKE_PR_URL
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/x
+
 # 12. claim review, and a lost claim
 reset_state
 w=$(newwork); cd "$w"
