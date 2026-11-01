@@ -33,6 +33,13 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    (admission)) has not concluded `success` on it. It reruns no tests. The `dco` workflow runs on
    pull requests only, so the gate reads that check from the head commit of the pull request that
    merged the tag's commit.
+
+   Patch releases (vX.Y.Z, Z > 0) are tagged on `main` like every other release. Once a minor
+   line has shipped its `.0`, set `hack/migrate-patch-line` to that line (for example `v0.1`); from
+   then on the `migrations` check applies the patch-line rule (ADR 0085) to every migration a pull
+   request adds: no rename, drop or retype, so the previous patch release keeps working on the new
+   schema. The change that opens the next minor line resets the file to `none`, which lets it
+   contract. The file is read at the merge base, so the same change cannot lift the rule.
 4. Check that every job succeeded: `release` and `flavor` run side by side after `gate`, so a failed
    `flavor` still leaves a draft release and a chart whose default flavor image does not exist, and
    it skips `sign`. Then open the draft release and read the notes. `-rc.N` releases are already
@@ -46,6 +53,10 @@ with a new digest) and the chart tag is overwritten. Do not move a tag that was 
 
 Same steps with `vX.Y.Z` after the last rc was exercised (REL2). The final release also moves the
 `latest` image tag and is not marked as a prerelease.
+
+Checklist step for every `vX.Y.0`: after the final tag is published, open a pull request that sets
+`hack/migrate-patch-line` to `vX.Y` (for v0.1.0: `v0.1`). Until it merges, main can still contract
+the schema that the shipped release runs on (ADR 0085).
 
 ## Signing and SBOM attestations
 
