@@ -5,7 +5,7 @@
 # origin/main, gitleaks, push, pull request, board, ready, auto-merge, claim review. One line per step.
 #
 #   hack/ship.sh [--message-file F | -m SUBJECT] [--pr-title T --pr-body FILE] [--draft] [--ready]
-#                [--e2e] [--auto-merge] [--hold] [--review N[,M]] [--dry-run]
+#                [--e2e] [--auto-merge] [--hold] [--review N[,M]] [--no-issue] [--dry-run]
 #
 # Before the push it looks up the branch's PR. A MERGED or CLOSED one is a refusal (exit 1): a push
 # cannot reach main through it; the message says how to continue on a new branch. Pushing to an open
@@ -13,7 +13,10 @@
 # commits); --hold turns auto-merge off before the push and prints the command that turns it back on.
 # --e2e adds the `e2e` label before the push (an open PR) or at PR creation, so one run carries it.
 #
-# Run it inside a checkout or worktree on a feature branch. Environment:
+# Run it inside a checkout or worktree on a feature branch named <type>/<N>-<slug> (the claim and the
+# PR hang off N); any other name is refused before anything is pushed (#485). Work that needs no issue
+# (the claim check exempts chore/ci/build(deps) PRs without source changes, and PRs labelled
+# unclaimed-ok) passes --no-issue, which accepts <type>/<slug> instead. Environment:
 #   KOINON_SHIP_ALLOWED_EMAILS  comma list of user.email values that may commit (default: any)
 #   KOINON_COMMIT_FOOTER        text appended to the commit message (attribution lines)
 #   KOINON_SHIP_MAX_BLOB_MIB    blob size limit in MiB (default 5)
@@ -24,7 +27,7 @@
 # The gitleaks gate is never skipped and nothing is ever force-pushed.
 set -euo pipefail
 
-msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 review="" dry=0
+msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 review="" dry=0 no_issue=0
 need() { [[ $# -ge 2 ]] || { echo "ship: $1 needs a value" >&2; exit 2; }; }
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -38,8 +41,9 @@ while [[ $# -gt 0 ]]; do
 	--auto-merge) auto=1; shift ;;
 	--hold) hold=1; shift ;;
 	--review) need "$@"; review=$2; shift 2 ;;
+	--no-issue) no_issue=1; shift ;;
 	--dry-run) dry=1; shift ;;
-	-h | --help) sed -n 4,26p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h | --help) sed -n 4,27p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "ship: unknown argument $1 (see --help)" >&2; exit 2 ;;
 	esac
 done
@@ -57,6 +61,14 @@ say() { echo "$*"; }
 cd "$(git rev-parse --show-toplevel)"
 branch=$(git symbolic-ref --short -q HEAD) || fail "detached HEAD; check out a feature branch"
 [[ $branch != main && $branch != master ]] || fail "refusing to ship from $branch; use a feature branch"
+# A branch is <type>/<N>-<slug> (the claim and the PR hang off N), or <type>/<slug> with --no-issue for
+# work the claim check exempts. A stray name, such as the one a broken test helper once checked out in
+# a real worktree (#485), is refused before anything is pushed.
+if [[ $no_issue == 1 ]]; then
+	[[ $branch =~ ^[a-z]+/[a-z0-9][a-z0-9._-]{2,}$ ]] || fail "branch '$branch' is not <type>/<slug>; rename it (git branch -m) before shipping"
+else
+	[[ $branch =~ ^[a-z]+/[0-9]+-[a-z0-9][a-z0-9._-]*$ ]] || fail "branch '$branch' is not <type>/<N>-<slug>; rename it (git branch -m), or pass --no-issue for work without an issue"
+fi
 
 # Identity: commits and the merge commit use git config; refuse an address that is not allowed.
 name=$(git config user.name || true)
@@ -90,7 +102,7 @@ if [[ $dirty == 1 ]]; then
 			size=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
 			[[ $size -le $limit ]] || { git reset -q; fail "blobs: $f is $((size / 1024 / 1024)) MiB, over the $limit_mib MiB limit (not committed)"; }
 		done < <(git diff --cached --name-only --diff-filter=AM -z)
-		tmp=$(mktemp)
+		tmp=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
 		trap 'rm -f "$tmp"' EXIT
 		if [[ -n $msg_file ]]; then cat "$msg_file" >"$tmp"; else printf '%s\n' "$subject" >"$tmp"; fi
 		if [[ -n ${KOINON_COMMIT_FOOTER:-} ]]; then printf '\n%s\n' "$KOINON_COMMIT_FOOTER" >>"$tmp"; fi
@@ -158,7 +170,7 @@ else
 	# 5. gitleaks over every commit CI will scan
 	command -v gitleaks >/dev/null || fail "gitleaks is not installed"
 	n=$(git rev-list --count origin/main..HEAD)
-	glog=$(mktemp)
+	glog=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
 	if ! gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" . >"$glog" 2>&1; then
 		tail -n 8 "$glog" >&2
 		rm -f "$glog"
