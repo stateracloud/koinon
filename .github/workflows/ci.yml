@@ -137,7 +137,7 @@ jobs:
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       # Postgres tests use testcontainers; Docker is available on ubuntu runners.
       # test/flavors needs the flavor images, which the flavors job builds and tests.
-      - run: go test $(go list ./... | grep -v '/test/flavors$')
+      - run: hack/go-test.sh
 
   go-race:
     needs: changes
@@ -446,6 +446,7 @@ jobs:
       - run: hack/pr-wait-test.sh
       - run: hack/ci-fail-test.sh
       - run: hack/ci-go-gate-test.sh
+      - run: hack/go-test-test.sh
       - run: hack/wt-test.sh
       - run: hack/wt-install-test.sh
       - run: hack/ship-test.sh

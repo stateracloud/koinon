@@ -285,8 +285,13 @@ Implementation-level unknowns, to settle in the sub-issues:
   and every minute (an older pod that still runs during a rolling upgrade can enqueue after the
   first sweep); the fork ID is `<original>~v<version>`, so concurrent sweeps make one fork. The
   step lists are recorded in `internal/durable/testdata/workflow_steps.json`, and
-  `TestWorkflowSteps` fails on a change without a bump. Still to do under decision 11: the executor
-  ID, its heartbeat and the stale-executor recovery job, and the pending-by-version metric.
+  `TestWorkflowSteps` fails on a change without a bump. Done under decision 11 (#413): the executor
+  ID is the pod name (`-executor-id`, `KOINON_EXECUTOR_ID` from the downward API when
+  `api.durable.enabled`); each executor heartbeats into `dbos.koinon_executors` (created by the
+  migrate step); the holder of a Postgres advisory lock recovers the pending workflows of executors
+  of its own version whose heartbeat is older than 90 s (`durable.Runtime.RecoverDeadExecutors`),
+  forgets stale executors of older versions (the carry-over forks their workflows) and leaves those
+  of newer versions to a process of that version. Still to do: the pending-by-version metric.
 - The exact shape of the key-wrapping interface (wrap, unwrap, key identity and reachability
   probe) and how an adapter's credentials reach koinon-api without entering a sandbox.
 - Resolved (detection of the decision 6 rule): the lint reads a marker file, `hack/migrate-patch-line`

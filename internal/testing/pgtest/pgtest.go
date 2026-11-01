@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package pgtest starts a migrated Postgres for a Ginkgo suite with testcontainers.
+//
+// Parallel Ginkgo (-p, hack/go-test.sh) runs a suite's BeforeSuite in every process, so Run, Start
+// and StartTemplate give every process its own container (random host port, removed when that
+// process's suite ends): no database, port or row is shared between processes. A suite that is run
+// in parallel must start Postgres in BeforeSuite (not in an init or a package variable) and may not
+// rely on state outside the process other than that database.
 package pgtest
 
 import (

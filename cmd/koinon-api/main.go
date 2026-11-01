@@ -104,6 +104,7 @@ type config struct {
 	databaseURL    string
 	migrate        bool
 	durable        bool
+	executorID     string
 	wait           time.Duration
 	trustedOrigins string
 	args           []string
@@ -172,6 +173,10 @@ func parseFlags(args []string) (config, error) {
 	fs.BoolVar(&c.durable, "durable", false,
 		"run the DBOS runtime (schedules, durable timers; ADR 0066); needs the DBOS tables that "+
 			"\"koinon-api -durable migrate\" creates (the migrate subcommand creates them only with this flag)")
+	fs.StringVar(&c.executorID, "executor-id", "",
+		"this process's DBOS executor ID, unique among the replicas and never reused (the chart passes the pod name); "+
+			"the executors heartbeat into a table and one of them recovers the workflows of a dead one (ADR 0085). "+
+			"Empty is DBOS's default, \"local\", which is right for one process only")
 	fs.DurationVar(&c.wait, "wait", 5*time.Minute, "how long migrations wait for the database to come up")
 	fs.StringVar(&c.trustedOrigins, "trusted-origins", "",
 		"comma-separated extra origins allowed to make state-changing requests (CSRF)")
@@ -485,6 +490,7 @@ func run() error {
 		// missing schema fails the start instead of the API running without its timers.
 		rt := durable.New(durable.Config{
 			DatabaseURL: cfg.databaseURL,
+			ExecutorID:  cfg.executorID,
 			// The default ApplicationVersion is durable.WorkflowVersion, not the release version:
 			// an upgrade must not orphan pending workflows (ADR 0085).
 			Logger: slog.Default(),

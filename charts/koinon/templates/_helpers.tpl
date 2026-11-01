@@ -308,6 +308,14 @@ koinon-api's login settings (plan items A1, A2), as KOINON_* environment variabl
 Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environment.
 */}}
 {{- define "koinon.apiEnv" -}}
+{{- if .Values.api.durable.enabled }}
+# The DBOS executor ID is the pod name: unique per replica and never reused, so a replica that dies
+# can be told from the one that replaces it, and the survivors recover its workflows (ADR 0085).
+- name: KOINON_EXECUTOR_ID
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.name
+{{- end }}
 # Approved calls to remote MCP servers go through the gateway (ADR 0057): it holds the credentials.
 - name: KOINON_GATEWAY_MCP_URL
   value: {{ printf "http://%s:%s/mcp" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) | quote }}
