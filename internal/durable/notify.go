@@ -31,11 +31,9 @@ import (
 const NotifyWorkflow = "koinon.notify"
 
 // notifyStep names the one step of the notification workflow: "deliver:<kind>", one per handler kind.
-// The record has the prefix with a placeholder, because a new kind is a new workflow input, not a
+// TestWorkflowSteps records the name with a placeholder, because a new kind is a new workflow input, not a
 // change to the steps of workflows already recorded.
 const notifyStepPrefix = "deliver:"
-
-var _ = DeclareSteps(NotifyWorkflow, notifyStepPrefix+"<kind>")
 
 // notifyRetries is how often a failing handler is retried inside the step, with DBOS's default
 // backoff (100 ms doubling to 5 s); after that the workflow ends in error and is visible in DBOS.

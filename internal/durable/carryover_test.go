@@ -110,9 +110,103 @@ var _ = Describe("CarryOver (ADR 0085, decision 11)", func() {
 		_, err = h.GetResult()
 		Expect(err).To(HaveOccurred())
 
-		out, err := durable.AwaitResult(next, h, "dm:org:msg-1")
+		out, err := durable.AwaitResult(next, h, "dm:org:msg-1", 30*time.Second)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(out).To(Equal("done x"))
+	}, SpecTimeout(2*time.Minute))
+
+	It("follows a chain of carry-overs to the current version", func(ctx SpecContext) {
+		dsn := newDatabase(ctx)
+		Expect(durable.Migrate(ctx, dsn, nil)).To(Succeed())
+
+		entered := make(chan struct{}, 8)
+		stuck := true
+		work := func(c dbos.Context, label string) (string, error) {
+			if stuck {
+				entered <- struct{}{}
+				_, err := dbos.Sleep(c, time.Minute)
+				return "", err
+			}
+			return "done " + label, nil
+		}
+		newRuntime := func(version string) *durable.Runtime {
+			rt := durable.New(durable.Config{DatabaseURL: dsn, ApplicationVersion: version, CarryOverInterval: -1})
+			Expect(rt.Register(func(c dbos.Context) error {
+				dbos.RegisterWorkflow(c, work, dbos.WithWorkflowName("test.work"))
+				return nil
+			})).To(Succeed())
+			return rt
+		}
+		v1 := newRuntime("1")
+		Expect(v1.Launch(ctx)).To(Succeed())
+		_, err := dbos.RunWorkflow(v1.Context(), work, "x", dbos.WithWorkflowID("wf"))
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(entered).Should(Receive())
+		_ = v1.Shutdown(time.Second)
+
+		// Version 2 carries it over (wf~v2), starts it, and goes away with it still pending.
+		v2 := newRuntime("2")
+		Expect(v2.Launch(ctx)).To(Succeed())
+		Eventually(entered, 30*time.Second).Should(Receive())
+		_ = v2.Shutdown(time.Second)
+		stuck = false
+
+		v3 := newRuntime("3")
+		Expect(v3.Launch(ctx)).To(Succeed())
+		DeferCleanup(func() { _ = v3.Shutdown(5 * time.Second) })
+
+		// The client retry under the original ID gets the cancelled original; two forks deep is
+		// where the result is.
+		h, err := dbos.RunWorkflow(v3.Context(), work, "x", dbos.WithWorkflowID("wf"))
+		Expect(err).NotTo(HaveOccurred())
+		out, err := durable.AwaitResult(v3, h, "wf", 30*time.Second)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out).To(Equal("done x"))
+		_, err = dbos.RetrieveWorkflow[string](v3.Context(), "wf~v2~v3")
+		Expect(err).NotTo(HaveOccurred())
+	}, SpecTimeout(2*time.Minute))
+
+	It("bounds the whole wait, not each of the two waits", func(ctx SpecContext) {
+		dsn := newDatabase(ctx)
+		Expect(durable.Migrate(ctx, dsn, nil)).To(Succeed())
+
+		entered := make(chan struct{}, 8)
+		work := func(c dbos.Context, label string) (string, error) { // never finishes
+			entered <- struct{}{}
+			_, err := dbos.Sleep(c, time.Minute)
+			return "", err
+		}
+		newRuntime := func(version string) *durable.Runtime {
+			rt := durable.New(durable.Config{DatabaseURL: dsn, ApplicationVersion: version, CarryOverInterval: -1})
+			Expect(rt.Register(func(c dbos.Context) error {
+				dbos.RegisterWorkflow(c, work, dbos.WithWorkflowName("test.work"))
+				return nil
+			})).To(Succeed())
+			return rt
+		}
+		v1 := newRuntime("1")
+		Expect(v1.Launch(ctx)).To(Succeed())
+		DeferCleanup(func() { _ = v1.Shutdown(5 * time.Second) })
+		h, err := dbos.RunWorkflow(v1.Context(), work, "x", dbos.WithWorkflowID("wf"))
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(entered).Should(Receive())
+
+		// After 2 s of a 6 s wait a version 2 process carries the workflow over; its fork never
+		// finishes, so the wait must end at 6 s in all, not at 8 s.
+		start := time.Now()
+		launched := make(chan *durable.Runtime, 1)
+		go func() {
+			defer GinkgoRecover()
+			time.Sleep(2 * time.Second)
+			v2 := newRuntime("2")
+			Expect(v2.Launch(ctx)).To(Succeed())
+			launched <- v2
+		}()
+		_, err = durable.AwaitResult(v1, h, "wf", 6*time.Second)
+		Expect(err).To(MatchError(dbos.ErrTimeout))
+		Expect(time.Since(start)).To(BeNumerically("<", 7500*time.Millisecond))
+		v2 := <-launched
+		DeferCleanup(func() { _ = v2.Shutdown(5 * time.Second) })
 	}, SpecTimeout(2*time.Minute))
 
 	It("leaves a pending workflow of a newer version alone and carries over a lower integer one", func(ctx SpecContext) {

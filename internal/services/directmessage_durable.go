@@ -24,8 +24,6 @@ const DirectMessageWorkflow = "koinon.direct-message"
 
 const stepDeliverDirectMessage = "deliver-direct-message"
 
-var _ = durable.DeclareSteps(DirectMessageWorkflow, stepDeliverDirectMessage)
-
 // directMessageWait bounds how long a request waits for its message to leave the queue. The work
 // is not lost when it runs out: the message ID makes the client's retry the same workflow.
 const directMessageWait = 30 * time.Second
@@ -125,7 +123,7 @@ func (d *DirectMessageQueue) deliver(ctx context.Context, in DirectMessage) (Dir
 	if err != nil {
 		return DirectMessageResult{}, err
 	}
-	out, err := durable.AwaitResult(d.work.Runtime(), h, wfID, dbos.WithHandleTimeout(directMessageWait))
+	out, err := durable.AwaitResult(d.work.Runtime(), h, wfID, directMessageWait)
 	if err != nil {
 		if errors.Is(err, dbos.ErrTimeout) {
 			return DirectMessageResult{}, connect.NewError(connect.CodeUnavailable, "the organisation's queue is busy; send the message again in a moment")
