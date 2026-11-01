@@ -159,8 +159,18 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		r, err = reconciler.New(pool, backend, &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, cfg)
 		Expect(err).NotTo(HaveOccurred())
 
+		// The BeforeEach sandbox was made without the label, so it counts as changed once the image is
+		// known and is recreated (clean home, no checkpoint). Let it converge first, then give it a
+		// dirty home too: otherwise it takes the pass's one slot below and is deleted without a
+		// checkpoint, and nothing tests the cap in front of the gate.
+		pass(ctx) // deletes
+		pass(ctx) // creates, with the label
+		Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+		Expect(row(ctx).State).To(Equal(store.SandboxStateReady))
+		dirtyHome(ctx, org, user, agent.ID)
+
 		// Agents created now get sandboxes that carry the supervisor label.
-		var orgs []pgtype.UUID
+		orgs := []pgtype.UUID{org}
 		for range 3 {
 			o, u := newOrg(ctx)
 			addProvider(ctx, o, u, "upstream", "", "fake")
