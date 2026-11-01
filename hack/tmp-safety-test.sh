@@ -21,6 +21,14 @@ else
 	ok "static: no cd/pushd into \$(mktemp ...)"
 fi
 
+# 2. every script that assigns from mktemp must run under set -e, or an empty result goes on unchecked.
+for t in "$repo"/hack/*.sh; do
+	[[ $(basename "$t") == "$self" ]] && continue
+	if grep -E '^[[:space:]]*[a-zA-Z_]+=\$\([[:space:]]*mktemp' "$t" | grep -vq '||' && ! grep -qE '^set -[a-zA-Z]*e' "$t"; then
+		bad "static: $(basename "$t") assigns from mktemp without set -e"
+	fi
+done
+
 base=$(mktemp -d "${TMPDIR:-/tmp}/tmp-safety.XXXXXX") || exit 1
 base=$(cd "$base" && pwd -P)
 trap 'chmod -R u+w "$base" 2>/dev/null; rm -rf "$base"' EXIT
