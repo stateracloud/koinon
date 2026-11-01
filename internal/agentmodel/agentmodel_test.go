@@ -20,7 +20,7 @@ var _ = DescribeTable("Choose: the agent's setting, then the version's model, th
 	Entry("'default' is no setting", "default", "v", "", "v", agentmodel.SourceVersion),
 	Entry("a version that says default falls through", "", "default", "p", "p", agentmodel.SourceOrgDefault),
 	Entry("padded names are trimmed", " a ", "", "", "a", agentmodel.SourceAgent),
-	Entry("nothing names a model: the caller takes the org's first served one", "", "default", "", "", agentmodel.SourceNone),
+	Entry("nothing names a model: the caller reads the org's stored default", "", "default", "", "", agentmodel.SourceNone),
 )
 
 var _ = Describe("UnusableError", func() {

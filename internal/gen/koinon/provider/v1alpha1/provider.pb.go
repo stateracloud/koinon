@@ -1851,6 +1851,255 @@ func (x *ProviderTypeInfoResponse) GetTakesWorkspaceId() bool {
 	return false
 }
 
+type GetDefaultModelRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDefaultModelRequest) Reset() {
+	*x = GetDefaultModelRequest{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDefaultModelRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDefaultModelRequest) ProtoMessage() {}
+
+func (x *GetDefaultModelRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDefaultModelRequest.ProtoReflect.Descriptor instead.
+func (*GetDefaultModelRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *GetDefaultModelRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+// DefaultModelChoice is a model the org serves and has a price for.
+type DefaultModelChoice struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Provider      string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DefaultModelChoice) Reset() {
+	*x = DefaultModelChoice{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DefaultModelChoice) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DefaultModelChoice) ProtoMessage() {}
+
+func (x *DefaultModelChoice) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DefaultModelChoice.ProtoReflect.Descriptor instead.
+func (*DefaultModelChoice) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *DefaultModelChoice) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DefaultModelChoice) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+type GetDefaultModelResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// model is the org's default model; empty when the org has none.
+	Model string `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	// available are the models the default may be set to.
+	Available     []*DefaultModelChoice `protobuf:"bytes,2,rep,name=available,proto3" json:"available,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDefaultModelResponse) Reset() {
+	*x = GetDefaultModelResponse{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDefaultModelResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDefaultModelResponse) ProtoMessage() {}
+
+func (x *GetDefaultModelResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDefaultModelResponse.ProtoReflect.Descriptor instead.
+func (*GetDefaultModelResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *GetDefaultModelResponse) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *GetDefaultModelResponse) GetAvailable() []*DefaultModelChoice {
+	if x != nil {
+		return x.Available
+	}
+	return nil
+}
+
+type SetDefaultModelRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	OrgId string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	// model is the new default model; empty clears the default.
+	Model         string `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetDefaultModelRequest) Reset() {
+	*x = SetDefaultModelRequest{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetDefaultModelRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetDefaultModelRequest) ProtoMessage() {}
+
+func (x *SetDefaultModelRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetDefaultModelRequest.ProtoReflect.Descriptor instead.
+func (*SetDefaultModelRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *SetDefaultModelRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *SetDefaultModelRequest) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+type SetDefaultModelResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// model is the org's default model after the change; empty when it has none.
+	Model         string `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetDefaultModelResponse) Reset() {
+	*x = SetDefaultModelResponse{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetDefaultModelResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetDefaultModelResponse) ProtoMessage() {}
+
+func (x *SetDefaultModelResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetDefaultModelResponse.ProtoReflect.Descriptor instead.
+func (*SetDefaultModelResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *SetDefaultModelResponse) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
 var File_koinon_provider_v1alpha1_provider_proto protoreflect.FileDescriptor
 
 const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
@@ -2001,8 +2250,20 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"\x04type\x18\x02 \x01(\tR\x04type\"\x89\x01\n" +
 	"\x18ProviderTypeInfoResponse\x12?\n" +
 	"\aformats\x18\x01 \x03(\v2%.koinon.provider.v1alpha1.ModelFormatR\aformats\x12,\n" +
-	"\x12takes_workspace_id\x18\x02 \x01(\bR\x10takesWorkspaceId2\x8b\n" +
-	"\n" +
+	"\x12takes_workspace_id\x18\x02 \x01(\bR\x10takesWorkspaceId\"/\n" +
+	"\x16GetDefaultModelRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"D\n" +
+	"\x12DefaultModelChoice\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
+	"\bprovider\x18\x02 \x01(\tR\bprovider\"{\n" +
+	"\x17GetDefaultModelResponse\x12\x14\n" +
+	"\x05model\x18\x01 \x01(\tR\x05model\x12J\n" +
+	"\tavailable\x18\x02 \x03(\v2,.koinon.provider.v1alpha1.DefaultModelChoiceR\tavailable\"E\n" +
+	"\x16SetDefaultModelRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x14\n" +
+	"\x05model\x18\x02 \x01(\tR\x05model\"/\n" +
+	"\x17SetDefaultModelResponse\x12\x14\n" +
+	"\x05model\x18\x01 \x01(\tR\x05model2\x80\f\n" +
 	"\x0fProviderService\x12u\n" +
 	"\rListProviders\x12..koinon.provider.v1alpha1.ListProvidersRequest\x1a/.koinon.provider.v1alpha1.ListProvidersResponse\"\x03\x90\x02\x01\x12s\n" +
 	"\x0eCreateProvider\x12/.koinon.provider.v1alpha1.CreateProviderRequest\x1a0.koinon.provider.v1alpha1.CreateProviderResponse\x12s\n" +
@@ -2013,7 +2274,9 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"\vCreateModel\x12,.koinon.provider.v1alpha1.CreateModelRequest\x1a-.koinon.provider.v1alpha1.CreateModelResponse\x12j\n" +
 	"\vUpdateModel\x12,.koinon.provider.v1alpha1.UpdateModelRequest\x1a-.koinon.provider.v1alpha1.UpdateModelResponse\x12j\n" +
 	"\vDeleteModel\x12,.koinon.provider.v1alpha1.DeleteModelRequest\x1a-.koinon.provider.v1alpha1.DeleteModelResponse\x12r\n" +
-	"\fModelFormats\x12-.koinon.provider.v1alpha1.ModelFormatsRequest\x1a..koinon.provider.v1alpha1.ModelFormatsResponse\"\x03\x90\x02\x01\x12|\n" +
+	"\fModelFormats\x12-.koinon.provider.v1alpha1.ModelFormatsRequest\x1a..koinon.provider.v1alpha1.ModelFormatsResponse\"\x03\x90\x02\x01\x12{\n" +
+	"\x0fGetDefaultModel\x120.koinon.provider.v1alpha1.GetDefaultModelRequest\x1a1.koinon.provider.v1alpha1.GetDefaultModelResponse\"\x03\x90\x02\x01\x12v\n" +
+	"\x0fSetDefaultModel\x120.koinon.provider.v1alpha1.SetDefaultModelRequest\x1a1.koinon.provider.v1alpha1.SetDefaultModelResponse\x12|\n" +
 	"\x11CheckProviderEcho\x122.koinon.provider.v1alpha1.CheckProviderEchoRequest\x1a3.koinon.provider.v1alpha1.CheckProviderEchoResponse\x12~\n" +
 	"\x10ProviderTypeInfo\x121.koinon.provider.v1alpha1.ProviderTypeInfoRequest\x1a2.koinon.provider.v1alpha1.ProviderTypeInfoResponse\"\x03\x90\x02\x01BWZUgithub.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1;providerv1alpha1b\x06proto3"
 
@@ -2030,7 +2293,7 @@ func file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_provider_v1alpha1_provider_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_koinon_provider_v1alpha1_provider_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_koinon_provider_v1alpha1_provider_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_koinon_provider_v1alpha1_provider_proto_goTypes = []any{
 	(EchoDiffSegment_Op)(0),           // 0: koinon.provider.v1alpha1.EchoDiffSegment.Op
 	(*Provider)(nil),                  // 1: koinon.provider.v1alpha1.Provider
@@ -2061,20 +2324,25 @@ var file_koinon_provider_v1alpha1_provider_proto_goTypes = []any{
 	(*ModelFormatsResponse)(nil),      // 26: koinon.provider.v1alpha1.ModelFormatsResponse
 	(*ProviderTypeInfoRequest)(nil),   // 27: koinon.provider.v1alpha1.ProviderTypeInfoRequest
 	(*ProviderTypeInfoResponse)(nil),  // 28: koinon.provider.v1alpha1.ProviderTypeInfoResponse
-	(*timestamppb.Timestamp)(nil),     // 29: google.protobuf.Timestamp
+	(*GetDefaultModelRequest)(nil),    // 29: koinon.provider.v1alpha1.GetDefaultModelRequest
+	(*DefaultModelChoice)(nil),        // 30: koinon.provider.v1alpha1.DefaultModelChoice
+	(*GetDefaultModelResponse)(nil),   // 31: koinon.provider.v1alpha1.GetDefaultModelResponse
+	(*SetDefaultModelRequest)(nil),    // 32: koinon.provider.v1alpha1.SetDefaultModelRequest
+	(*SetDefaultModelResponse)(nil),   // 33: koinon.provider.v1alpha1.SetDefaultModelResponse
+	(*timestamppb.Timestamp)(nil),     // 34: google.protobuf.Timestamp
 }
 var file_koinon_provider_v1alpha1_provider_proto_depIdxs = []int32{
-	29, // 0: koinon.provider.v1alpha1.Provider.created_at:type_name -> google.protobuf.Timestamp
-	29, // 1: koinon.provider.v1alpha1.Provider.updated_at:type_name -> google.protobuf.Timestamp
+	34, // 0: koinon.provider.v1alpha1.Provider.created_at:type_name -> google.protobuf.Timestamp
+	34, // 1: koinon.provider.v1alpha1.Provider.updated_at:type_name -> google.protobuf.Timestamp
 	6,  // 2: koinon.provider.v1alpha1.Provider.formats:type_name -> koinon.provider.v1alpha1.ModelFormat
 	2,  // 3: koinon.provider.v1alpha1.Provider.echo_check:type_name -> koinon.provider.v1alpha1.EchoCheck
 	3,  // 4: koinon.provider.v1alpha1.EchoCheck.diff:type_name -> koinon.provider.v1alpha1.EchoDiffSegment
-	29, // 5: koinon.provider.v1alpha1.EchoCheck.checked_at:type_name -> google.protobuf.Timestamp
+	34, // 5: koinon.provider.v1alpha1.EchoCheck.checked_at:type_name -> google.protobuf.Timestamp
 	0,  // 6: koinon.provider.v1alpha1.EchoDiffSegment.op:type_name -> koinon.provider.v1alpha1.EchoDiffSegment.Op
 	2,  // 7: koinon.provider.v1alpha1.CheckProviderEchoResponse.echo_check:type_name -> koinon.provider.v1alpha1.EchoCheck
 	7,  // 8: koinon.provider.v1alpha1.Model.rates:type_name -> koinon.provider.v1alpha1.Rates
-	29, // 9: koinon.provider.v1alpha1.Model.created_at:type_name -> google.protobuf.Timestamp
-	29, // 10: koinon.provider.v1alpha1.Model.updated_at:type_name -> google.protobuf.Timestamp
+	34, // 9: koinon.provider.v1alpha1.Model.created_at:type_name -> google.protobuf.Timestamp
+	34, // 10: koinon.provider.v1alpha1.Model.updated_at:type_name -> google.protobuf.Timestamp
 	1,  // 11: koinon.provider.v1alpha1.ListProvidersResponse.providers:type_name -> koinon.provider.v1alpha1.Provider
 	1,  // 12: koinon.provider.v1alpha1.CreateProviderResponse.provider:type_name -> koinon.provider.v1alpha1.Provider
 	1,  // 13: koinon.provider.v1alpha1.UpdateProviderResponse.provider:type_name -> koinon.provider.v1alpha1.Provider
@@ -2084,33 +2352,38 @@ var file_koinon_provider_v1alpha1_provider_proto_depIdxs = []int32{
 	7,  // 17: koinon.provider.v1alpha1.UpdateModelRequest.rates:type_name -> koinon.provider.v1alpha1.Rates
 	8,  // 18: koinon.provider.v1alpha1.UpdateModelResponse.model:type_name -> koinon.provider.v1alpha1.Model
 	6,  // 19: koinon.provider.v1alpha1.ProviderTypeInfoResponse.formats:type_name -> koinon.provider.v1alpha1.ModelFormat
-	9,  // 20: koinon.provider.v1alpha1.ProviderService.ListProviders:input_type -> koinon.provider.v1alpha1.ListProvidersRequest
-	11, // 21: koinon.provider.v1alpha1.ProviderService.CreateProvider:input_type -> koinon.provider.v1alpha1.CreateProviderRequest
-	13, // 22: koinon.provider.v1alpha1.ProviderService.UpdateProvider:input_type -> koinon.provider.v1alpha1.UpdateProviderRequest
-	15, // 23: koinon.provider.v1alpha1.ProviderService.DeleteProvider:input_type -> koinon.provider.v1alpha1.DeleteProviderRequest
-	17, // 24: koinon.provider.v1alpha1.ProviderService.ListModels:input_type -> koinon.provider.v1alpha1.ListModelsRequest
-	19, // 25: koinon.provider.v1alpha1.ProviderService.CreateModel:input_type -> koinon.provider.v1alpha1.CreateModelRequest
-	21, // 26: koinon.provider.v1alpha1.ProviderService.UpdateModel:input_type -> koinon.provider.v1alpha1.UpdateModelRequest
-	23, // 27: koinon.provider.v1alpha1.ProviderService.DeleteModel:input_type -> koinon.provider.v1alpha1.DeleteModelRequest
-	25, // 28: koinon.provider.v1alpha1.ProviderService.ModelFormats:input_type -> koinon.provider.v1alpha1.ModelFormatsRequest
-	4,  // 29: koinon.provider.v1alpha1.ProviderService.CheckProviderEcho:input_type -> koinon.provider.v1alpha1.CheckProviderEchoRequest
-	27, // 30: koinon.provider.v1alpha1.ProviderService.ProviderTypeInfo:input_type -> koinon.provider.v1alpha1.ProviderTypeInfoRequest
-	10, // 31: koinon.provider.v1alpha1.ProviderService.ListProviders:output_type -> koinon.provider.v1alpha1.ListProvidersResponse
-	12, // 32: koinon.provider.v1alpha1.ProviderService.CreateProvider:output_type -> koinon.provider.v1alpha1.CreateProviderResponse
-	14, // 33: koinon.provider.v1alpha1.ProviderService.UpdateProvider:output_type -> koinon.provider.v1alpha1.UpdateProviderResponse
-	16, // 34: koinon.provider.v1alpha1.ProviderService.DeleteProvider:output_type -> koinon.provider.v1alpha1.DeleteProviderResponse
-	18, // 35: koinon.provider.v1alpha1.ProviderService.ListModels:output_type -> koinon.provider.v1alpha1.ListModelsResponse
-	20, // 36: koinon.provider.v1alpha1.ProviderService.CreateModel:output_type -> koinon.provider.v1alpha1.CreateModelResponse
-	22, // 37: koinon.provider.v1alpha1.ProviderService.UpdateModel:output_type -> koinon.provider.v1alpha1.UpdateModelResponse
-	24, // 38: koinon.provider.v1alpha1.ProviderService.DeleteModel:output_type -> koinon.provider.v1alpha1.DeleteModelResponse
-	26, // 39: koinon.provider.v1alpha1.ProviderService.ModelFormats:output_type -> koinon.provider.v1alpha1.ModelFormatsResponse
-	5,  // 40: koinon.provider.v1alpha1.ProviderService.CheckProviderEcho:output_type -> koinon.provider.v1alpha1.CheckProviderEchoResponse
-	28, // 41: koinon.provider.v1alpha1.ProviderService.ProviderTypeInfo:output_type -> koinon.provider.v1alpha1.ProviderTypeInfoResponse
-	31, // [31:42] is the sub-list for method output_type
-	20, // [20:31] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	30, // 20: koinon.provider.v1alpha1.GetDefaultModelResponse.available:type_name -> koinon.provider.v1alpha1.DefaultModelChoice
+	9,  // 21: koinon.provider.v1alpha1.ProviderService.ListProviders:input_type -> koinon.provider.v1alpha1.ListProvidersRequest
+	11, // 22: koinon.provider.v1alpha1.ProviderService.CreateProvider:input_type -> koinon.provider.v1alpha1.CreateProviderRequest
+	13, // 23: koinon.provider.v1alpha1.ProviderService.UpdateProvider:input_type -> koinon.provider.v1alpha1.UpdateProviderRequest
+	15, // 24: koinon.provider.v1alpha1.ProviderService.DeleteProvider:input_type -> koinon.provider.v1alpha1.DeleteProviderRequest
+	17, // 25: koinon.provider.v1alpha1.ProviderService.ListModels:input_type -> koinon.provider.v1alpha1.ListModelsRequest
+	19, // 26: koinon.provider.v1alpha1.ProviderService.CreateModel:input_type -> koinon.provider.v1alpha1.CreateModelRequest
+	21, // 27: koinon.provider.v1alpha1.ProviderService.UpdateModel:input_type -> koinon.provider.v1alpha1.UpdateModelRequest
+	23, // 28: koinon.provider.v1alpha1.ProviderService.DeleteModel:input_type -> koinon.provider.v1alpha1.DeleteModelRequest
+	25, // 29: koinon.provider.v1alpha1.ProviderService.ModelFormats:input_type -> koinon.provider.v1alpha1.ModelFormatsRequest
+	29, // 30: koinon.provider.v1alpha1.ProviderService.GetDefaultModel:input_type -> koinon.provider.v1alpha1.GetDefaultModelRequest
+	32, // 31: koinon.provider.v1alpha1.ProviderService.SetDefaultModel:input_type -> koinon.provider.v1alpha1.SetDefaultModelRequest
+	4,  // 32: koinon.provider.v1alpha1.ProviderService.CheckProviderEcho:input_type -> koinon.provider.v1alpha1.CheckProviderEchoRequest
+	27, // 33: koinon.provider.v1alpha1.ProviderService.ProviderTypeInfo:input_type -> koinon.provider.v1alpha1.ProviderTypeInfoRequest
+	10, // 34: koinon.provider.v1alpha1.ProviderService.ListProviders:output_type -> koinon.provider.v1alpha1.ListProvidersResponse
+	12, // 35: koinon.provider.v1alpha1.ProviderService.CreateProvider:output_type -> koinon.provider.v1alpha1.CreateProviderResponse
+	14, // 36: koinon.provider.v1alpha1.ProviderService.UpdateProvider:output_type -> koinon.provider.v1alpha1.UpdateProviderResponse
+	16, // 37: koinon.provider.v1alpha1.ProviderService.DeleteProvider:output_type -> koinon.provider.v1alpha1.DeleteProviderResponse
+	18, // 38: koinon.provider.v1alpha1.ProviderService.ListModels:output_type -> koinon.provider.v1alpha1.ListModelsResponse
+	20, // 39: koinon.provider.v1alpha1.ProviderService.CreateModel:output_type -> koinon.provider.v1alpha1.CreateModelResponse
+	22, // 40: koinon.provider.v1alpha1.ProviderService.UpdateModel:output_type -> koinon.provider.v1alpha1.UpdateModelResponse
+	24, // 41: koinon.provider.v1alpha1.ProviderService.DeleteModel:output_type -> koinon.provider.v1alpha1.DeleteModelResponse
+	26, // 42: koinon.provider.v1alpha1.ProviderService.ModelFormats:output_type -> koinon.provider.v1alpha1.ModelFormatsResponse
+	31, // 43: koinon.provider.v1alpha1.ProviderService.GetDefaultModel:output_type -> koinon.provider.v1alpha1.GetDefaultModelResponse
+	33, // 44: koinon.provider.v1alpha1.ProviderService.SetDefaultModel:output_type -> koinon.provider.v1alpha1.SetDefaultModelResponse
+	5,  // 45: koinon.provider.v1alpha1.ProviderService.CheckProviderEcho:output_type -> koinon.provider.v1alpha1.CheckProviderEchoResponse
+	28, // 46: koinon.provider.v1alpha1.ProviderService.ProviderTypeInfo:output_type -> koinon.provider.v1alpha1.ProviderTypeInfoResponse
+	34, // [34:47] is the sub-list for method output_type
+	21, // [21:34] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_koinon_provider_v1alpha1_provider_proto_init() }
@@ -2126,7 +2399,7 @@ func file_koinon_provider_v1alpha1_provider_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_provider_v1alpha1_provider_proto_rawDesc), len(file_koinon_provider_v1alpha1_provider_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   28,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
