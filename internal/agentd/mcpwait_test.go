@@ -230,6 +230,18 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 			Expect(missing(ctx, r)()).To(BeEmpty())
 		})
 
+		It("counts a server as missing when only its ask tools are listed, since the ask target is koinon-api's proxy", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			allow(ctx, e, "tracker", "healthy", 0, "") // one auto tool: create_issue
+			tool(ctx, e, "tracker", "close_issue", "ask")
+			liveTools.set([]string{slug(ctx, e) + "-tracker-ask_close_issue"}, nil)
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withLive)
+			Eventually(missing(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
+			Expect(payload(missing(ctx, r)()[0])["servers"]).To(ConsistOf(HaveKeyWithValue("name", "tracker")))
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		})
+
 		It("does not expect tools of a server with none to offer", func(ctx SpecContext) {
 			e := newEnv(ctx, store.AgentFlavorOpencode)
 			allow(ctx, e, "tracker", "unknown", 0, "")
