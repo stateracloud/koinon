@@ -39,7 +39,7 @@ test: test-go test-web ## Run all unit tests
 
 .PHONY: test-go
 test-go: ## Run Go tests like CI (Postgres tests need Docker); test/flavors needs images, see test-flavors
-	$(GO) test $$($(GO) list ./... | grep -v '/test/flavors$$')
+	hack/go-test.sh
 
 .PHONY: test-web
 test-web: ## Run web tests
