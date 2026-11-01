@@ -150,17 +150,21 @@ func (r *Reconciler) sandboxSpec(org, agent pgtype.UUID, names execution.AgentNa
 		MemoryRequest:    res.Memory.Request,
 		MemoryLimit:      res.Memory.Limit,
 	}
-	hash := specHash(spec, r.supervisorImage())
+	hash := specHash(spec)
 	spec.Labels[LabelSpecHash] = hash
+	// The supervisor image is not in the hash: an unknown or unreadable image must not stop the
+	// other spec changes from recreating a sandbox. It has its own label, compared separately.
+	if img, known := r.supervisorImage(); known {
+		spec.Labels[LabelSupervisorImage] = img
+	}
 	return spec, hash
 }
 
 // specHash covers the fields OpenShell cannot change on an existing sandbox. Network rules are
-// left out: they are updated in place. supervisor is the OpenShell gateway's supervisor image
-// (ADR 0085 decision 9): OpenShell reads it when it creates or starts a sandbox and never touches a
-// running supervisor, so only a recreate moves a sandbox to a new one. Empty (not configured, or the
-// gateway does not set it) is left out of the hash, which keeps every earlier hash.
-func specHash(s execution.SandboxSpec, supervisor string) string {
+// left out: they are updated in place. The OpenShell supervisor image (ADR 0085 decision 9) is
+// left out too: it has its own label (LabelSupervisorImage), so an image that cannot be read never
+// hides a change in the fields above, and the hashes of existing sandboxes stay valid.
+func specHash(s execution.SandboxSpec) string {
 	b, err := json.Marshal(struct {
 		Image, RuntimeClassName    string
 		CPURequest, CPULimit       string
@@ -168,11 +172,10 @@ func specHash(s execution.SandboxSpec, supervisor string) string {
 		Command, Providers         []string
 		Filesystem                 execution.FilesystemPolicy
 		Labels                     map[string]string
-		SupervisorImage            string `json:",omitempty"`
 	}{
 		s.Image, s.RuntimeClassName,
 		s.CPURequest, s.CPULimit, s.MemoryRequest, s.MemoryLimit,
-		s.Command, s.Providers, s.Policy.Filesystem, maps.Clone(s.Labels), supervisor,
+		s.Command, s.Providers, s.Policy.Filesystem, maps.Clone(s.Labels),
 	})
 	if err != nil {
 		panic(err) // plain strings and slices always marshal

@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/preflight"
 )
 
@@ -51,7 +52,7 @@ func (k KubeSupervisorImage) SupervisorImage(ctx context.Context) (string, error
 
 // refreshSupervisor reads the gateway's supervisor image once per pass. A failed read keeps the
 // last image read: dropping it would change every sandbox's spec hash and recreate the fleet.
-// Before the first successful read the image is unknown, and spec-change recreates wait (supervisorKnown).
+// Before the first successful read the image is unknown, and supervisor-driven recreates wait.
 func (r *Reconciler) refreshSupervisor(ctx context.Context) {
 	if r.cfg.Supervisor == nil {
 		return
@@ -71,24 +72,28 @@ func (r *Reconciler) refreshSupervisor(ctx context.Context) {
 	r.supImage, r.supKnown = img, true
 }
 
-// supervisorImage is the image last read; empty when none is configured or known.
-func (r *Reconciler) supervisorImage() string {
-	r.supMu.Lock()
-	defer r.supMu.Unlock()
-	return r.supImage
-}
-
-// supervisorKnown says whether the spec hash can be trusted to include the supervisor image: true
-// without a source, and after the first successful read. Until then only the recreate decision
-// waits (a hash without the image would recreate every sandbox once it is known); creating,
+// supervisorImage is the image last read and whether one was read. Without a source nothing is
+// configured: the image is empty and counts as known. Until the first successful read it is unknown,
+// and only supervisor-driven recreates wait (supervisorChanged); every other spec change, creating,
 // starting, stopping and policy work go on, so an unreadable ConfigMap never blocks the fleet.
-func (r *Reconciler) supervisorKnown() bool {
+func (r *Reconciler) supervisorImage() (img string, known bool) {
 	if r.cfg.Supervisor == nil {
-		return true
+		return "", true
 	}
 	r.supMu.Lock()
 	defer r.supMu.Unlock()
-	return r.supKnown
+	return r.supImage, r.supKnown
+}
+
+// supervisorChanged says whether a sandbox runs a supervisor other than the gateway's current one.
+// False while the current image is unknown, and for a sandbox without the label (created before it).
+func (r *Reconciler) supervisorChanged(sb execution.Sandbox) bool {
+	img, known := r.supervisorImage()
+	if !known {
+		return false
+	}
+	have, ok := sb.Labels[LabelSupervisorImage]
+	return ok && have != img
 }
 
 // takeRecreate spends one of the pass's recreates; false when the cap is used up (ADR 0085

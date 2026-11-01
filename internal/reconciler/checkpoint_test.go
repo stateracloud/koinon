@@ -151,6 +151,33 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
 	})
 
+	It("starts at most MaxRecreatesPerPass home checkpoints per pass after a supervisor change", func(ctx SpecContext) {
+		sup := &fakeSupervisor{image: "ghcr.io/nvidia/openshell/supervisor:0.1.5"}
+		cfg.Supervisor = sup
+		cfg.MaxRecreatesPerPass = 1
+		var err error
+		r, err = reconciler.New(pool, backend, &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, cfg)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Agents created now get sandboxes that carry the supervisor label.
+		var orgs []pgtype.UUID
+		for range 3 {
+			o, u := newOrg(ctx)
+			addProvider(ctx, o, u, "upstream", "", "fake")
+			a := newAgent(ctx, o, u)
+			dirtyHome(ctx, o, u, a.ID)
+			orgs = append(orgs, o)
+		}
+		pass(ctx)
+		pass(ctx)
+
+		sup.image = "ghcr.io/nvidia/openshell/supervisor:0.1.6"
+		pass(ctx)
+		var n int
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM home_checkpoints WHERE org_id = ANY($1) AND reason = 'recreate'`, orgs).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1), "the pass's one slot is taken before the gate asks for a checkpoint")
+	})
+
 	It("a sandbox recreated without a checkpoint gets a new generation", func(ctx SpecContext) {
 		cfg.Checkpoints = false
 		old := row(ctx).HomeGeneration.String
