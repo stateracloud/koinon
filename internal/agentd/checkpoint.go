@@ -357,7 +357,7 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 		for try := 1; try <= c.RestoreTries; try++ {
 			err := r.restoreOne(ctx, sb, repo, cp)
 			if err == nil {
-				if recErr := r.record(ctx, "run.home_restored", map[string]any{
+				if recErr := r.own.Record(ctx, "run.home_restored", map[string]any{
 					"checkpoint": cp.ID.String(), "snapshot": cp.SnapshotID.String, "newer_failed": i,
 					"taken_at": cp.FinishedAt.Time.UTC().Format(time.RFC3339),
 				}); recErr != nil {

@@ -17,6 +17,9 @@ const (
 
 func (m GatewayMode) String() string { return string(m) }
 
+// Type implements pflag.Value.
+func (GatewayMode) Type() string { return "gateway-mode" }
+
 // Set implements flag.Value and accepts only the gateway modes.
 func (m *GatewayMode) Set(s string) error {
 	switch v := GatewayMode(s); v {
@@ -42,6 +45,9 @@ const (
 )
 
 func (m PostgresMode) String() string { return string(m) }
+
+// Type implements pflag.Value.
+func (PostgresMode) Type() string { return "postgres-mode" }
 
 // Set implements flag.Value and accepts only the Postgres modes.
 func (m *PostgresMode) Set(s string) error {
