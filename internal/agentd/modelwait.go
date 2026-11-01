@@ -85,7 +85,7 @@ func (r *runner) waitModel(ctx context.Context, model string) error {
 			}
 			recorded = true
 			r.log.Info("waiting for the model provider to reach the gateway", "model", model, "provider", m.ProviderName)
-			if err := r.record(ctx, modelWaitKind, map[string]any{
+			if err := r.own.Record(ctx, modelWaitKind, map[string]any{
 				"model": model, "provider": m.ProviderName,
 				"reason": fmt.Sprintf("waiting for the model provider %q to reach the gateway", m.ProviderName),
 			}); err != nil {

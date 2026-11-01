@@ -4,7 +4,6 @@ package agentd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
-	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/orgsettings"
@@ -284,110 +282,4 @@ func (t *tail) String() string {
 func (r *runner) agentHealthy(ctx context.Context) bool {
 	a, err := r.q.GetAgent(ctx, store.GetAgentParams{OrgID: r.run.OrgID, ID: r.run.AgentID})
 	return err == nil && !a.UnhealthyAt.Valid
-}
-
-// requeue puts the run back in the queue: its sandbox was not ready in time. It is the run's
-// owner's last write; the next claim gives the run a new epoch.
-func (r *runner) requeue(ctx context.Context, reason string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.srcSeq++
-	src := r.srcSeq
-	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
-		q := r.q.WithTx(tx)
-		payload, _ := json.Marshal(map[string]string{"reason": reason})
-		if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
-			OrgID: r.run.OrgID, RunID: r.run.ID, Epoch: r.run.Epoch,
-			Kind: "run.requeued", Payload: payload, SourceSeq: src,
-		}); err != nil {
-			return err
-		}
-		_, err := q.RequeueRun(ctx, store.RequeueRunParams{OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch})
-		return err
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return errFenced // taken over, canceled or finished meanwhile
-	}
-	if err != nil {
-		return r.dbErr(ctx, "requeue the run", err)
-	}
-	r.p.cfg.Metrics.Requeued.Inc()
-	r.log.Info("run back in the queue", "reason", reason)
-	return nil
-}
-
-// failSandboxUnavailable fails a run whose sandbox never became ready within the org's cap, in one
-// transaction: the run's end, the agent's unhealthy mark with its audit event, the notification of
-// the org's owners and admins, and a note on every task with a run waiting on the agent (ADR 0066
-// amendment 2026-10-28). The agent's other queued runs stop being claimable at the same moment
-// (ClaimNextRun skips unhealthy agents), so their tasks must say why they stopped moving.
-func (r *runner) failSandboxUnavailable(ctx context.Context, f *failure) error {
-	su := f.sandbox
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.srcSeq++
-	src := r.srcSeq
-	capd := su.cap
-	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
-		q := r.q.WithTx(tx)
-		if err := r.finishIn(ctx, q, src, store.RunStateFailed, f.reason, classSandboxUnavailable, map[string]any{
-			"sandboxCause": string(su.cause), "waitedSeconds": int64(su.waited.Seconds()), "detail": su.detail,
-		}); err != nil {
-			return err
-		}
-		a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: r.run.OrgID, ID: r.run.AgentID})
-		if err != nil {
-			return err
-		}
-		reason := fmt.Sprintf("its sandbox never became ready in %s: %s (%s)", runreply.Human(capd), su.cause.Describe(), su.detail)
-		if _, err := q.MarkAgentUnhealthy(ctx, store.MarkAgentUnhealthyParams{
-			OrgID: r.run.OrgID, ID: r.run.AgentID, Reason: reason,
-		}); errors.Is(err, pgx.ErrNoRows) {
-			return nil // already unhealthy: it was told, audited and noted
-		} else if err != nil {
-			return err
-		}
-		if err := audit.RecordErr(ctx, q, audit.Event{
-			Org: r.run.OrgID, Actor: audit.System(), Action: "agent.mark_unhealthy",
-			TargetKind: "agent", TargetID: r.run.AgentID.String(),
-			After: map[string]any{
-				"reason": reason, "cause": "sandbox_unavailable", "sandboxCause": string(su.cause),
-				"runId": r.run.ID.String(), "waitedSeconds": int64(su.waited.Seconds()),
-			},
-		}); err != nil {
-			return err
-		}
-		// The decision says "the agent's owners". Koinon has no per-agent owner (agents.created_by is
-		// only who created it): the people who can act are the ones who can resume an agent, the
-		// org's admins and owners.
-		message := fmt.Sprintf("%s was marked unhealthy: its sandbox never became ready in %s (%s). Fix the cause, then resume the agent on its page.",
-			a.DisplayName, runreply.Human(capd), su.cause.Describe())
-		if err := r.notifyUnhealthy(ctx, q, "agent.unhealthy:"+r.run.AgentID.String()+":sandbox-wait:"+r.run.ID.String(), map[string]string{
-			"run_id": r.run.ID.String(), "sandbox_cause": string(su.cause), "message": message,
-		}); err != nil {
-			return err
-		}
-		waiting, err := q.ListTasksWithWaitingRunOfAgent(ctx, store.ListTasksWithWaitingRunOfAgentParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
-		if err != nil {
-			return err
-		}
-		tasks := map[pgtype.UUID]bool{r.run.TaskID: true}
-		for _, t := range waiting {
-			tasks[t] = true
-		}
-		for t := range tasks {
-			if err := r.taskNote(ctx, q, t, kindAgentUnhealthy,
-				message+" Its waiting runs do not start until an admin resumes the agent."); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return r.dbErr(ctx, "fail the run", err)
-	}
-	r.p.cfg.Metrics.Finished.WithLabelValues(string(store.RunStateFailed)).Inc()
-	r.p.cfg.Metrics.SandboxWaitCap.WithLabelValues(string(su.cause)).Inc()
-	r.log.Error("the sandbox never became ready", "cause", su.cause, "detail", su.detail, "waited", su.waited)
-	return nil
 }

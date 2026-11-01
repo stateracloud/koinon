@@ -31,6 +31,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/internal/tracing/export"
 	"github.com/stateracloud/koinon/internal/tracing/semconv"
@@ -342,20 +343,10 @@ func (t *runTrace) openRow() (pgtype.UUID, bool) {
 	return t.turn.row.ID, true
 }
 
-// finish ends the last turn of this execution with the run's outcome (decision 3: koinon.outcome and
-// koinon.failure_class on the last turn). err is what execute returned and fk why the worker was
-// fenced, if it was.
-func (t *runTrace) finish(ctx context.Context, err error, fk fence) {
-	if t == nil {
-		return
-	}
-	t.mu.Lock()
-	tt, parkedOn := t.turn, t.parkedOn
-	t.turn = nil
-	t.mu.Unlock()
-	if tt == nil {
-		return
-	}
+// endFor is how a turn ends for the run's outcome (decision 3: koinon.outcome and koinon.failure_class
+// on the last turn). err is what execute returned, fk why the worker was fenced, if it was, and
+// parkedOn the park endTurn made.
+func endFor(err error, fk fence, parkedOn string) *turnEnd {
 	var f *failure
 	var c *canceled
 	end := &turnEnd{reason: turnReason(err)}
@@ -372,8 +363,38 @@ func (t *runTrace) finish(ctx context.Context, err error, fk fence) {
 	case errors.As(err, &c):
 		end.outcome, end.class = string(store.RunStateCanceled), string(c.class)
 	}
-	// A worker that lost the run or gave it up writes nothing: the new owner ends the row.
-	t.closeTurn(ctx, tt, end, fk != fenceLost && fk != fenceAbandon)
+	return end
+}
+
+// turnRow is the open turn row and why it ends with the run, for the run's owner to end it with the
+// ending verb (internal/runoutcome). A worker that lost the run or gave it up gets none: the new owner
+// ends the row.
+func (t *runTrace) turnRow(err error, fk fence) runoutcome.Turn {
+	if t == nil || fk == fenceLost || fk == fenceAbandon {
+		return runoutcome.Turn{}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.turn == nil {
+		return runoutcome.Turn{}
+	}
+	return runoutcome.Turn{ID: t.turn.row.ID, Reason: endFor(err, fk, t.parkedOn).reason}
+}
+
+// finish ends the spans of the last turn of this execution with the run's outcome. The turn's row
+// is the run owner's to end.
+func (t *runTrace) finish(ctx context.Context, err error, fk fence) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	tt, parkedOn := t.turn, t.parkedOn
+	t.turn = nil
+	t.mu.Unlock()
+	if tt == nil {
+		return
+	}
+	t.closeTurn(ctx, tt, endFor(err, fk, parkedOn), false)
 }
 
 type turnEnd struct {
@@ -381,7 +402,8 @@ type turnEnd struct {
 }
 
 // closeTurn ends a turn that is no longer reachable from the runTrace: its open tool spans, its
-// root span and, when writeRow, its row.
+// root span and, when writeRow, its row (a turn that continues into a new one; a run's last turn
+// is ended by the run's owner).
 func (t *runTrace) closeTurn(ctx context.Context, tt *turnTrace, end *turnEnd, writeRow bool) {
 	now := time.Now()
 	for id, tool := range tt.tools {
@@ -428,7 +450,7 @@ func (t *runTrace) closeTurn(ctx context.Context, tt *turnTrace, end *turnEnd, w
 	ectx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	_, err := t.q.EndRunTurn(ectx, store.EndRunTurnParams{OrgID: t.run.OrgID, ID: tt.row.ID, EndReason: pgtype.Text{String: end.reason, Valid: true}})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) { // no row: the park transaction ended it
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) { // no row: it is ended already
 		t.log.Warn("ending the turn row failed", "err", err)
 	}
 }

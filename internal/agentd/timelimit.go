@@ -112,7 +112,7 @@ func (r *runner) markWrapUp(ctx context.Context, c turnpolicy.Cause) (bool, erro
 	case turnpolicy.KindSpend:
 		payload["spentUSD"], payload["maxSpendUSD"] = c.Spent.String(), c.MaxSpend.String()
 	}
-	if err := r.record(ctx, kindWrapUpNotice, payload); err != nil {
+	if err := r.own.Record(ctx, kindWrapUpNotice, payload); err != nil {
 		return false, r.dbErr(ctx, "record the wrap-up notice", err)
 	}
 	r.p.cfg.Metrics.WrapUpNotices.WithLabelValues(string(c.Kind)).Inc()
