@@ -42,10 +42,9 @@ Instructions for coding agents working on Koinon.
   that changed something e2e-relevant, one running and the newest pending) and nightly, always,
   to catch drift no commit explains. Run it on
   demand for a risky PR: `hack/needs-e2e.sh` says whether your change touches what only a full
-  install observes (the rule lives only there); if yes, run `hack/e2e-remote.sh` (the maintainers'
-  home-lab Argo queue: submit, keep working, `--no-wait` and `--follow <run>` to come back later; it
-  needs the maintainers' credentials) or `hack/e2e-remote.sh --local`, paste the timings table in the
-  PR body, or add the `e2e` label. `SUITE_LABEL=smoke` (only with `--local` or `--ssh`) runs steps 1-6 only. The required check is `e2e result` (green when the e2e
+  install observes (the rule lives only there); if yes, run `hack/e2e-remote.sh` (your own Docker,
+  the same as `--local`), paste the timings table in the PR body, or add the `e2e` label. `SUITE_LABEL=smoke` (not with `--argo`) runs steps 1-6 only. A maintainer with a home lab can queue
+  the run there instead: see "Maintainer lab (optional)". The required check is `e2e result` (green when the e2e
   was skipped). Why: #281 (branch naming in githubtools) and #284 (a startup flag the chart's
   migrate Job lacked) passed every package test and failed only in a full install.
 - When main's kind e2e goes from green to red, `hack/e2e-bisect.sh` opens one `e2e-regression` issue
@@ -105,10 +104,19 @@ A session that runs agents in parallel gives each one a lane (ADR 0082): the par
 with `hack/claim.sh take N --lane L`, creates the lane's worktree with `hack/wt.sh new`, and hands
 the agent the issue, the worktree and `docs/agents/subagent-brief.md`. One issue per lane, at most
 four claims per human. The parent beats, ships (`hack/ship.sh`) and releases; agents never call
-`claim.sh`. On the home-lab queue each lane runs `hack/e2e-remote.sh --repo <its worktree>` with
-`KOINON_E2E_AGENT=<session>-<lane>`, submits with `--no-wait` and follows later, keeps at most one
-kind run waiting, and uses `--lane light` for unit tests. Its notifications carry the agent label as
-an ntfy tag (`?tags=<agent>`).
+`claim.sh`. Each lane tests its own worktree: `hack/e2e-remote.sh --repo` is an `--argo` option, so
+on the local Docker run the script from the lane's worktree.
+
+## Maintainer lab (optional)
+
+Only the maintainers have a home lab; nothing in the repository needs it and none of its endpoints
+are tracked. Their settings live in the untracked `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/lab.env`
+(template `hack/lab/lab.env.example`; `hack/e2e-argo.sh` header). With them,
+`hack/e2e-remote.sh --argo` queues the e2e on the lab's Argo: `--no-wait` and `--follow <run>` to
+come back later, `--lane light` for the Docker-only targets (unit tests, chart checks). Each lane
+runs `hack/e2e-remote.sh --argo --repo <its worktree>` with `KOINON_E2E_AGENT=<session>-<lane>` and
+keeps at most one kind run waiting. Its notifications carry the agent label as an ntfy tag
+(`?tags=<agent>`). Dev loop and registry: `docs/dev/maintainer-homelab.md`.
 
 ## Working alongside another human
 

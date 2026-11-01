@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Runs one light-lane target inside the home lab's light workflow (hack/lab/light.workflow.json), in
-# the checked-out commit: the make target, its output in $OUT/driver.log and a result line in
+# Runs one light-lane target inside a lab's light workflow (KOINON_E2E_LIGHT_MANIFEST, see
+# hack/e2e-argo.sh), in the checked-out commit: the make target, its output in $OUT/driver.log and a result line in
 # $OUT/result.txt. Only the targets below run; they need Docker (the pod's dind) at most, no kind.
 #
 #   hack/lab/light-run.sh <target>

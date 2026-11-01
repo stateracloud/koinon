@@ -2,48 +2,56 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The --argo mode of hack/e2e-remote.sh: run a make target (the kind e2e by default) of the committed
-# HEAD on an Argo Workflows queue, the maintainers' home lab by default (its ADR 036). Steps: a git
-# bundle of HEAD goes to an S3 bucket, the WorkflowTemplate is submitted through the Argo Server REST
-# API (no argo CLI needed) on the slot with the fewest unfinished runs, and the run is followed to the
-# end: stage lines while it runs, then the results archive (timings, logs, diagnostics) in --out and
-# the run's exit status. Ctrl-C stops the run.
+# HEAD on an Argo Workflows queue that you operate (the maintainers use their home lab, see
+# docs/dev/maintainer-homelab.md). Nothing about a particular queue is tracked here: the endpoints
+# come from the environment or from an untracked config file (hack/lab/config.sh; template
+# hack/lab/lab.env.example), and the script exits 2 when they are missing. Steps: a git bundle of
+# HEAD goes to an S3 bucket, the WorkflowTemplate is submitted through the Argo Server REST API (no
+# argo CLI needed) on the slot with the fewest unfinished runs, and the run is followed to the end:
+# stage lines while it runs, then the results archive (timings, logs, diagnostics) in --out and the
+# run's exit status. Ctrl-C stops the run.
 #
 # Lanes: kind (default) submits the queue's WorkflowTemplate (koinon-make; target test-e2e-kind);
-# light submits hack/lab/light.workflow.json as an inline Workflow for targets without a kind
-# cluster (default test-go; hack/lab/light-run.sh lists them) on its own light slots and caches. --repo names the checkout to test (default: the one
-# the current directory is in), so a worktree can be tested without changing directory.
+# light submits the manifest in KOINON_E2E_LIGHT_MANIFEST as an inline Workflow for targets without a
+# kind cluster (default test-go; hack/lab/light-run.sh lists them) on its own light slots and caches.
+# The manifest has the parameters target, ref, bundle, agent and slot (with an enum of the slot
+# names), fetches the bundle, checks out `ref` and runs `hack/lab/light-run.sh $target`; it holds no
+# test logic of its own. --repo names the checkout to test (default: the one the current directory
+# is in), so a worktree can be tested without changing directory.
 #
-#   hack/e2e-remote.sh [--argo] [--lane kind|light] [--repo DIR] [--target T] [--slot S] [--out DIR] [--no-wait] [--dry-run]
+#   hack/e2e-remote.sh --argo [--lane kind|light] [--repo DIR] [--target T] [--slot S] [--out DIR] [--no-wait] [--dry-run]
 #   hack/e2e-remote.sh --argo --follow <workflow name> [--out DIR]
 #
 # Credentials never appear in argv, logs or files: a credentials file (KOINON_E2E_ARGO_CREDS,
-# sourced) defines e2e_creds_open, e2e_creds_argo_token (prints a bearer token),
-# e2e_creds_s3 (prints ACCESS_KEY_ID:SECRET_KEY for the bundle bucket), optionally
-# e2e_creds_results (the same for a read-only key on the results bucket) and e2e_creds_close; the values stay in shell
-# variables and reach curl as a config on stdin (-K -). The default file, hack/e2e-argo-lab-creds.sh,
-# reads them from the maintainers' OpenBao and only works for them; use your own file and endpoints
-# for your own Argo, or --local.
+# sourced; template hack/lab/creds.example.sh) defines e2e_creds_open, e2e_creds_argo_token (prints a
+# bearer token), e2e_creds_s3 (prints ACCESS_KEY_ID:SECRET_KEY for the bundle bucket), optionally
+# e2e_creds_results (the same for a read-only key on the results bucket) and e2e_creds_close; the
+# values stay in shell variables and reach curl as a config on stdin (-K -).
 #
-# Environment (defaults: the maintainers' home lab):
-#   KOINON_E2E_ARGO_SERVER     Argo Server URL (https://argo.apps.lab.example.invalid)
+# Environment (or the lab config file, ${XDG_CONFIG_HOME:-~/.config}/koinon/lab.env; the environment wins):
+#   KOINON_E2E_ARGO_SERVER     Argo Server URL (required)
+#   KOINON_E2E_BUNDLE_URL      S3 bucket URL for the bundles (required)
+#   KOINON_E2E_RESULTS_URL     S3 bucket URL of the run results (required)
+#   KOINON_E2E_ARGO_CREDS      credentials file (required)
+#   KOINON_E2E_LIGHT_MANIFEST  Workflow manifest of the light lane (required for --lane light)
+#   KOINON_E2E_S3_REGION       SigV4 region (us-east-1)
 #   KOINON_E2E_ARGO_NAMESPACE  namespace of the template and runs (koinon-e2e)
 #   KOINON_E2E_ARGO_TEMPLATE   WorkflowTemplate (koinon-make); parameters target, ref, bundle, agent, slot
-#   KOINON_E2E_BUNDLE_URL      S3 bucket URL for the bundles (https://s3.apps.lab.example.invalid/e2e-bundles)
-#   KOINON_E2E_RESULTS_URL     S3 bucket URL of the run results (https://s3.apps.lab.example.invalid/e2e-artifacts)
-#   KOINON_E2E_S3_REGION       SigV4 region (garage)
-#   KOINON_E2E_ARGO_CREDS      credentials file (hack/e2e-argo-lab-creds.sh)
 #   KOINON_E2E_ARGO_POLL       seconds between status polls (30)
 #   KOINON_E2E_AGENT           who submits, a label on the run (KOINON_AGENT_SESSION, else $USER)
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-SERVER=${KOINON_E2E_ARGO_SERVER:-https://argo.apps.lab.example.invalid}
+# shellcheck source=hack/lab/config.sh
+. "$here/lab/config.sh"
+lab_config_load
+SERVER=${KOINON_E2E_ARGO_SERVER:-}
 NS=${KOINON_E2E_ARGO_NAMESPACE:-koinon-e2e}
 TEMPLATE=${KOINON_E2E_ARGO_TEMPLATE:-koinon-make}
-BUNDLE_URL=${KOINON_E2E_BUNDLE_URL:-https://s3.apps.lab.example.invalid/e2e-bundles}
-RESULTS_URL=${KOINON_E2E_RESULTS_URL:-https://s3.apps.lab.example.invalid/e2e-artifacts}
-REGION=${KOINON_E2E_S3_REGION:-garage}
-CREDS=${KOINON_E2E_ARGO_CREDS:-$here/e2e-argo-lab-creds.sh}
+BUNDLE_URL=${KOINON_E2E_BUNDLE_URL:-}
+RESULTS_URL=${KOINON_E2E_RESULTS_URL:-}
+REGION=${KOINON_E2E_S3_REGION:-us-east-1}
+CREDS=${KOINON_E2E_ARGO_CREDS:-}
 POLL=${KOINON_E2E_ARGO_POLL:-30}
 AGENT=${KOINON_E2E_AGENT:-${KOINON_AGENT_SESSION:-${USER:-agent}}}
 
@@ -68,7 +76,11 @@ kind) target=${target:-test-e2e-kind} ;;
 light) target=${target:-test-go} ;;
 *) echo "e2e-remote --argo: --lane is kind or light" >&2; exit 2 ;;
 esac
-MANIFEST=$here/lab/light.workflow.json
+MANIFEST=${KOINON_E2E_LIGHT_MANIFEST:-}
+lab_require "e2e-remote --argo" KOINON_E2E_ARGO_SERVER KOINON_E2E_BUNDLE_URL KOINON_E2E_RESULTS_URL KOINON_E2E_ARGO_CREDS
+[[ $lane != light ]] || lab_require "e2e-remote --argo --lane light" KOINON_E2E_LIGHT_MANIFEST
+[[ -r $CREDS ]] || { echo "e2e-remote --argo: credentials file $CREDS is not readable (KOINON_E2E_ARGO_CREDS)" >&2; exit 2; }
+[[ $lane != light || -r $MANIFEST ]] || { echo "e2e-remote --argo: manifest $MANIFEST is not readable (KOINON_E2E_LIGHT_MANIFEST)" >&2; exit 2; }
 if [[ -n ${SUITE_LABEL:-} ]]; then
   echo "e2e-remote --argo: SUITE_LABEL is not supported by the queue's template; use --local" >&2
   exit 2
@@ -79,7 +91,7 @@ label=$(printf %s "$AGENT" | tr -c 'A-Za-z0-9_.-' '-' | cut -c1-63 | sed 's/^[^A
 label=${label:-agent}
 
 token="" s3user="" opened=0 name="" finished=0
-# shellcheck source=hack/e2e-argo-lab-creds.sh disable=SC1091
+# shellcheck source=hack/lab/creds.example.sh disable=SC1091
 . "$CREDS"
 
 cleanup() {
