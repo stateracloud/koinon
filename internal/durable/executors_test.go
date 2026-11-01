@@ -4,6 +4,7 @@ package durable_test
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -19,18 +20,19 @@ var _ = Describe("Executors (ADR 0085, decision 11)", func() {
 	// newRuntime registers one workflow that blocks while stuck is set and otherwise reports where it ran.
 	type env struct {
 		dsn   string
-		stuck bool
+		stuck atomic.Bool
 		runs  chan string
 		in    chan struct{}
 	}
 	setup := func(ctx SpecContext) *env {
-		e := &env{dsn: newDatabase(ctx), stuck: true, runs: make(chan string, 8), in: make(chan struct{}, 4)}
+		e := &env{dsn: newDatabase(ctx), runs: make(chan string, 8), in: make(chan struct{}, 4)}
+		e.stuck.Store(true)
 		Expect(durable.Migrate(ctx, e.dsn, nil)).To(Succeed())
 		return e
 	}
 	work := func(e *env) func(dbos.Context, string) (string, error) {
 		return func(c dbos.Context, label string) (string, error) {
-			if e.stuck {
+			if e.stuck.Load() {
 				e.in <- struct{}{}
 				_, err := dbos.Sleep(c, time.Minute)
 				return "", err
@@ -74,15 +76,17 @@ var _ = Describe("Executors (ADR 0085, decision 11)", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(e.in).Should(Receive())
 		_ = dead.Shutdown(time.Second) // the pod is gone; its name is never used again
-		e.stuck = false
+		e.stuck.Store(false)
 
 		live := newRuntime(e, "koinon-api-live", durable.Config{
-			HeartbeatInterval: 200 * time.Millisecond, ExecutorStaleAfter: 2 * time.Second, RecoveryInterval: 300 * time.Millisecond,
+			HeartbeatInterval: 200 * time.Millisecond, ExecutorStaleAfter: 4 * time.Second, RecoveryInterval: 300 * time.Millisecond,
 		})
 		Expect(live.Launch(ctx)).To(Succeed())
 		DeferCleanup(func() { _ = live.Shutdown(5 * time.Second) })
 
-		// Not recovered while the dead executor's last beat is fresh; recovered once it is stale.
+		// Not recovered while the dead executor's last beat is fresh (the window is well inside the
+		// 4 s threshold); recovered once it is stale.
+		Consistently(e.runs, time.Second).ShouldNot(Receive())
 		Eventually(e.runs, 30*time.Second).Should(Receive(Equal("koinon-api-live")))
 		h, err := dbos.RetrieveWorkflow[string](live.Context(), "wf-dead")
 		Expect(err).NotTo(HaveOccurred())
@@ -116,5 +120,44 @@ var _ = Describe("Executors (ADR 0085, decision 11)", func() {
 			return n
 		}, 4*time.Second, 500*time.Millisecond).Should(BeZero())
 		Consistently(e.in, time.Second).ShouldNot(Receive(), "the workflow was not started a second time")
+	})
+
+	It("recovers the pending workflows left under DBOS's default executor ID, which has no heartbeat row", func(ctx SpecContext) {
+		e := setup(ctx)
+		// An earlier build ran with no executor ID, so DBOS used "local" and nothing heartbeated for it.
+		old := newRuntime(e, "local", durable.Config{HeartbeatInterval: -1, RecoveryInterval: -1})
+		Expect(old.Launch(ctx)).To(Succeed())
+		_, err := dbos.RunWorkflow(old.Context(), work(e), "x", dbos.WithWorkflowID("wf-local"))
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(e.in).Should(Receive())
+		_ = old.Shutdown(time.Second)
+		c := connect(ctx, e.dsn)
+		defer func() { _ = c.Close(ctx) }()
+		_, err = c.Exec(ctx, "DELETE FROM "+table+" WHERE executor_id = 'local'")
+		Expect(err).NotTo(HaveOccurred())
+		e.stuck.Store(false)
+
+		live := newRuntime(e, "koinon-api-live", durable.Config{
+			HeartbeatInterval: 200 * time.Millisecond, ExecutorStaleAfter: 2 * time.Second, RecoveryInterval: 300 * time.Millisecond,
+		})
+		Expect(live.Launch(ctx)).To(Succeed())
+		DeferCleanup(func() { _ = live.Shutdown(5 * time.Second) })
+
+		Eventually(e.runs, 30*time.Second).Should(Receive(Equal("koinon-api-live")))
+		h, err := dbos.RetrieveWorkflow[string](live.Context(), "wf-local")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(h.GetResult()).To(Equal("done x"))
+	})
+
+	It("creates the heartbeat table itself when Launch migrates (local and test runs)", func(ctx SpecContext) {
+		dsn := newDatabase(ctx) // not durable.Migrate'd: DBOS creates its own tables
+		rt := durable.New(durable.Config{DatabaseURL: dsn, Migrate: true, ExecutorID: "koinon-api-solo", ApplicationVersion: "1", CarryOverInterval: -1, RecoveryInterval: -1})
+		Expect(rt.Launch(ctx)).To(Succeed())
+		DeferCleanup(func() { _ = rt.Shutdown(5 * time.Second) })
+		c := connect(ctx, dsn)
+		defer func() { _ = c.Close(ctx) }()
+		var n int
+		Expect(c.QueryRow(ctx, "SELECT count(*) FROM "+table+" WHERE executor_id = 'koinon-api-solo'").Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1))
 	})
 })

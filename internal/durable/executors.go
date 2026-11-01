@@ -191,7 +191,18 @@ ORDER BY last_heartbeat FOR UPDATE`, executorsTable()), self, r.staleAfter().Sec
 	if err := rows.Err(); err != nil {
 		return 0, fmt.Errorf("durable: list stale executors: %w", err)
 	}
-	if len(forget) == 0 {
+	// Workflows of an executor that has no row at all: the ones earlier builds left pending under
+	// DBOS's default ID "local", or any ID that never beat. No heartbeat can ever mark them stale, so
+	// they are recovered by their own age (a pod that has not yet written its first beat only has
+	// young workflows). This runs only when the deployment uses per-pod IDs.
+	if r.cfg.ExecutorID != "" {
+		orphans, err := orphanExecutors(ctx, tx, self, version, r.staleAfter())
+		if err != nil {
+			return 0, err
+		}
+		recover = append(recover, orphans...)
+	}
+	if len(forget) == 0 && len(recover) == 0 {
 		return 0, nil
 	}
 	if len(recover) > 0 {
@@ -206,13 +217,33 @@ ORDER BY last_heartbeat FOR UPDATE`, executorsTable()), self, r.staleAfter().Sec
 			return 0, fmt.Errorf("durable: recover the workflows of executors %v: %w", recover, err)
 		}
 	}
-	if _, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s WHERE executor_id = ANY($1)`, executorsTable()), forget); err != nil {
-		return 0, fmt.Errorf("durable: forget stale executors: %w", err)
+	if len(forget) > 0 {
+		if _, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s WHERE executor_id = ANY($1)`, executorsTable()), forget); err != nil {
+			return 0, fmt.Errorf("durable: forget stale executors: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, fmt.Errorf("durable: commit recovery: %w", err)
 	}
 	return len(recover), nil
+}
+
+// orphanExecutors lists the executor IDs that own pending workflows of version, have no row in
+// ExecutorsTable, are not self, and whose workflows have not changed for staleAfter.
+func orphanExecutors(ctx context.Context, tx pgx.Tx, self, version string, staleAfter time.Duration) ([]string, error) {
+	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT DISTINCT w.executor_id FROM %s w
+WHERE w.status = 'PENDING' AND w.application_version = $1 AND w.executor_id IS NOT NULL AND w.executor_id <> $2
+  AND w.updated_at < (extract(epoch FROM now()) * 1000)::bigint - $3::bigint
+  AND NOT EXISTS (SELECT 1 FROM %s e WHERE e.executor_id = w.executor_id)`,
+		pgx.Identifier{Schema, "workflow_status"}.Sanitize(), executorsTable()), version, self, staleAfter.Milliseconds())
+	if err != nil {
+		return nil, fmt.Errorf("durable: list executors without a heartbeat row: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("durable: list executors without a heartbeat row: %w", err)
+	}
+	return ids, nil
 }
 
 // startExecutorLoops writes the first heartbeat and starts the heartbeat and recovery loops.
@@ -223,6 +254,13 @@ func (r *Runtime) startExecutorLoops(ctx context.Context) error {
 		return fmt.Errorf("durable: open the executor pool: %w", err)
 	}
 	id := r.ExecutorID()
+	if r.cfg.Migrate {
+		// Local and test runs let DBOS create its own tables; the heartbeat table is ours.
+		if _, err := pool.Exec(ctx, executorsDDL()); err != nil {
+			pool.Close()
+			return fmt.Errorf("durable: create the executor heartbeat table: %w", err)
+		}
+	}
 	if err := heartbeat(ctx, pool, id, r.version()); err != nil {
 		pool.Close()
 		return err
