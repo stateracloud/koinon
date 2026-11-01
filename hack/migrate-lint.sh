@@ -6,6 +6,13 @@
 #   - numbers are unique and contiguous from 00001
 #   - with a base ref argument: migrations present on the base are unchanged
 #     (forward-only, ADR 0027), except the one-time edits listed in allowed_edits
+#   - on a patch line (ADR 0085, decisions 5 and 6): migrations the branch adds must not contain
+#     RENAME, DROP COLUMN, DROP TABLE, DROP TYPE or a column type change, so the previous patch
+#     release's binaries keep working on the new schema (expand now, contract in the next minor).
+#
+# A patch line is a base ref named release/<anything> (for example origin/release/v0.1) or
+# MIGRATE_LINT_PATCH_LINE=1. A base of main (the next minor line) may contain them. Patch releases
+# are cut only from release/vX.Y branches, so the branch name is the marker.
 set -euo pipefail
 
 dir=internal/db/migrations
@@ -49,6 +56,28 @@ if [[ -n $base ]]; then
   if [[ -n $changed ]]; then
     echo "merged migrations must not change:"; echo "$changed"; fail=1
   fi
+fi
+
+# Statements that break the previous patch release's binaries. Matched case-insensitively on each
+# statement with comments removed and whitespace collapsed.
+contract_re='(^|[^a-z0-9_])(rename[[:space:]]|drop[[:space:]]+(column|table|type)[[:space:]]|alter[[:space:]]+column[[:space:]]+[^[:space:]]+[[:space:]]+(set[[:space:]]+data[[:space:]]+)?type[[:space:]])'
+patch_line() {
+  [[ ${MIGRATE_LINT_PATCH_LINE:-} == 1 ]] && return 0
+  [[ $base == release/* || $base == */release/* ]]
+}
+
+if [[ -n $base ]] && patch_line; then
+  added=$(git diff --name-only --diff-filter=A "$(git merge-base "$base" HEAD)" -- ":(glob)$dir/*.sql" || true)
+  for f in $added; do
+    # One statement per record: drop "--" comments, split on ";", collapse whitespace.
+    hits=$(sed -E 's/--.*$//' "$f" | awk -v RS=';' '{ gsub(/[[:space:]]+/, " "); print }' |
+      grep -iE "$contract_re" || true)
+    if [[ -n $hits ]]; then
+      echo "$f: breaks the previous patch release on a patch line (ADR 0085): expand now, contract in the next minor"
+      echo "$hits" | cut -c1-120 | sed 's/^/    /'
+      fail=1
+    fi
+  done
 fi
 
 exit $fail
