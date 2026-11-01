@@ -32,6 +32,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
@@ -42,6 +43,7 @@ import (
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/schemagate"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/pricing"
 )
@@ -103,15 +105,18 @@ func run() error {
 	// (or mounted) yet: wait for it.
 	// The pod is not ready while it waits, and the wait is logged at warn level every minute.
 	var ready atomic.Bool
+	// Also not ready while the schema is outside the goose range this build supports (ADR 0085).
+	gate := schemagate.New(pool, schemagate.Range{Min: migrations.MinSupported, Max: migrations.MaxSupported}, log)
+	safego.Go(ctx, log, "schema-gate", gate.Run)
 	if cfg.healthAddr != "" {
 		mux := http.NewServeMux()
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-		mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 			if !ready.Load() {
 				http.Error(w, "waiting for the key-encryption keys", http.StatusServiceUnavailable)
 				return
 			}
-			w.WriteHeader(http.StatusOK)
+			gate.ReadyHandler()(w, r)
 		})
 		health := &http.Server{Addr: cfg.healthAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		safego.Go(ctx, log, "health-listener", func(context.Context) {

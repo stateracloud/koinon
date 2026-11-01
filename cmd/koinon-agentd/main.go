@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,11 +28,14 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/schemagate"
 	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/pricing"
 )
@@ -43,6 +47,7 @@ type config struct {
 	openshellName    string
 	savedWorkKeyFile string
 	metricsAddr      string
+	healthAddr       string
 
 	// The internal OTLP listener of koinon-api, where run spans go (ADR 0074): its base URL and
 	// the file with the bearer token it requires. Validated at start; the exporter uses them.
@@ -69,6 +74,7 @@ func parseFlags(args []string) (config, error) {
 		"directory with the OpenShell client bundle (tls.crt, tls.key, ca.crt); empty connects without TLS")
 	fs.StringVar(&c.openshellName, "openshell-server-name", "", "name checked against the gateway's certificate")
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort, "listen address of /metrics (Prometheus); empty disables it")
+	fs.StringVar(&c.healthAddr, "health-addr", ":8082", "listen address of /healthz and /readyz (not ready while the database schema is outside the supported goose range, ADR 0085); empty disables it")
 	fs.StringVar(&c.otlpEndpoint, "otlp-endpoint", "",
 		"base URL of koinon-api's internal OTLP/HTTP listener (for example http://koinon-api.koinon.svc:4318), where run spans are exported; empty: not exported")
 	fs.StringVar(&c.otlpTokenFile, "otlp-token-file", "",
@@ -199,6 +205,9 @@ func run() error {
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, slog.Default()); err != nil {
 		return err
 	}
+	if err := serveHealth(ctx, cfg.healthAddr, db, slog.Default()); err != nil {
+		return err
+	}
 	if cfg.otlpEndpoint != "" {
 		// Run spans (ADR 0074). The service only reads settings and decides runs: agentd holds no
 		// key-encryption key and dials no destination; the router in koinon-api does.
@@ -242,4 +251,35 @@ func checkpointsFrom(cfg config) (*agentd.Checkpoints, error) {
 		},
 		Interval: cfg.checkpointInterval,
 	}, nil
+}
+
+// serveHealth serves /healthz and /readyz on addr. koinon-agentd is not Ready while the database
+// schema is outside the goose range this build supports (ADR 0085): a rollout of a release the
+// schema has outgrown then stalls on the new pod instead of replacing working ones.
+func serveHealth(ctx context.Context, addr string, db schemagate.Querier, log *slog.Logger) error {
+	if addr == "" {
+		return nil
+	}
+	gate := schemagate.New(db, schemagate.Range{Min: migrations.MinSupported, Max: migrations.MaxSupported}, log)
+	safego.Go(ctx, log, "schema-gate", gate.Run)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("GET /readyz", gate.ReadyHandler())
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("health listener: %w", err)
+	}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	safego.Go(ctx, log, "health-shutdown", func(context.Context) {
+		<-ctx.Done()
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(sctx)
+	})
+	safego.Go(ctx, log, "health-listener", func(context.Context) {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("health listener failed", "addr", addr, "err", err)
+		}
+	})
+	return nil
 }
