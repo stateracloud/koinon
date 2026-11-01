@@ -258,10 +258,12 @@ jobs:
           DEP_AGE_WAIVER: ${{ steps.waiver.outputs.by }}
         run: hack/dep-age-check.sh "origin/${{ github.base_ref }}"
 
-  web:
+  # The web checks run as parallel jobs (#218), each its own check; `web` below aggregates them and
+  # keeps the required check name stable.
+  web-lint:
     needs: changes
     if: needs.changes.outputs.web == 'true'
-    name: web
+    name: web-lint
     runs-on: blacksmith-2vcpu-ubuntu-2404
     defaults:
       run:
@@ -279,11 +281,86 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+
+  web-test:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    name: web-test
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
       - run: pnpm test
-      - run: pnpm build
-      # The Playwright test fakes the API in the browser; E1 covers the real path.
-      - run: pnpm exec playwright install --with-deps chromium
+
+  # Playwright builds the app once and serves the build with `vite preview` (KOINON_PW_PREVIEW, see
+  # web/playwright.config.ts), on 2 workers. The API is faked in the browser; E1 covers the real path.
+  # The browser download is cached by @playwright/test version; system libraries are installed on
+  # every run (cheap), the browser binary only on a cache miss.
+  web-e2e:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    name: web-e2e
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - id: pw
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >>"$GITHUB_OUTPUT"
+      - id: pwcache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
+      - if: steps.pwcache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps chromium
+      - if: steps.pwcache.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps chromium
+      - run: pnpm exec vite build
       - run: pnpm test:e2e
+        env:
+          KOINON_PW_PREVIEW: "1"
+
+  # The required check `web`: green when every web job above is green, or when the change touches no
+  # web code (then the parts are skipped and `changes` says so). A skipped part of a web change is a
+  # failure. hack/ci-web-gate-test.sh keeps this list whole.
+  web:
+    name: web
+    needs: [changes, web-lint, web-test, web-e2e]
+    if: ${{ !cancelled() }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          WEB: ${{ needs.changes.outputs.web }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
+          [[ $WEB == true ]] || { echo "no web changes: nothing to gate"; exit 0; }
+          for r in $RESULTS; do
+            [[ $r == success ]] || { echo "::error::a web job finished $r (results: $RESULTS)"; exit 1; }
+          done
 
   proto:
     name: proto
@@ -463,6 +540,7 @@ jobs:
       - run: hack/pr-wait-test.sh
       - run: hack/ci-fail-test.sh
       - run: hack/ci-go-gate-test.sh
+      - run: hack/ci-web-gate-test.sh
       - run: hack/go-test-test.sh
       - run: hack/wt-test.sh
       - run: hack/wt-install-test.sh
