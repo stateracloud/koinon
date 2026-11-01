@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package schemagate keeps a binary not Ready while the database schema is outside the goose
-// version range the binary supports (ADR 0085, item 8).
+// Package schemagate keeps a binary not Ready while the database schema is older than the binary
+// needs or declares (schema_compat.min_reader_version) that only a newer release can read it
+// (ADR 0085, item 8).
 //
 // The migration Job runs before the new pods start, so a rolling upgrade always finds the schema
 // at the new version; the gate matters when an app-only rollback leaves older pods on a newer
@@ -29,34 +30,49 @@ type Querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// Range is the inclusive range of supported goose versions.
-type Range struct{ Min, Max int64 }
+// Range is what a build requires: Min is the oldest goose version its code works against and
+// Latest the newest migration it embeds, the highest min_reader_version it can read.
+type Range struct{ Min, Latest int64 }
 
-// Version reads the highest applied goose version. A database that goose never touched is an
-// error: the migration Job has not run.
-func Version(ctx context.Context, q Querier) (int64, error) {
-	var v int64
-	if err := q.QueryRow(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied`).Scan(&v); err != nil {
-		return 0, fmt.Errorf("read the schema version: %w", err)
+// Schema is what the database says about itself: the highest applied goose version and the oldest
+// release that can still read it (table schema_compat, written by migrations).
+type Schema struct{ Version, MinReader int64 }
+
+// Read reads the schema. A database that goose never touched reads as version 0: the migration
+// Job has not run. A database from before schema_compat existed reads as MinReader 0.
+func Read(ctx context.Context, q Querier) (Schema, error) {
+	var s Schema
+	if err := q.QueryRow(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied`).Scan(&s.Version); err != nil {
+		return Schema{}, fmt.Errorf("read the schema version: %w", err)
 	}
-	return v, nil
+	var has bool
+	if err := q.QueryRow(ctx, `SELECT to_regclass('schema_compat') IS NOT NULL`).Scan(&has); err != nil {
+		return Schema{}, fmt.Errorf("read the schema compatibility: %w", err)
+	}
+	if !has {
+		return s, nil
+	}
+	if err := q.QueryRow(ctx, `SELECT COALESCE(MAX(min_reader_version), 0) FROM schema_compat`).Scan(&s.MinReader); err != nil {
+		return Schema{}, fmt.Errorf("read the schema compatibility: %w", err)
+	}
+	return s, nil
 }
 
-// Judge says whether schema version v is inside r; the error is the sentence the log line and the
+// Judge says whether this build can run against s; the error is the sentence the log line and the
 // probe carry.
-func Judge(v int64, r Range) error {
+func Judge(s Schema, r Range) error {
 	switch {
-	case v < r.Min:
-		return fmt.Errorf("the database schema is at version %d, older than the %d this build needs (supported %d to %d): the migration Job has not run or the database was restored from an older backup; run koinon-api migrate", v, r.Min, r.Min, r.Max)
-	case v > r.Max:
-		return fmt.Errorf("the database schema is at version %d, newer than the %d this build supports (supported %d to %d): this is an older release than the one that migrated it; upgrade the app, or restore a backup taken before the upgrade", v, r.Max, r.Min, r.Max)
+	case s.Version < r.Min:
+		return fmt.Errorf("the database schema is at version %d, older than the %d this build needs: the migration Job has not run or the database was restored from an older backup; run koinon-api migrate", s.Version, r.Min)
+	case s.MinReader > r.Latest:
+		return fmt.Errorf("the database schema is at version %d and needs a release that knows migration %d or newer, but this build knows up to %d: this is an older release than the one that migrated it; upgrade the app, or restore a backup taken before the upgrade", s.Version, s.MinReader, r.Latest)
 	}
 	return nil
 }
 
 // Gate holds the latest verdict.
 type Gate struct {
-	read     func(context.Context) (int64, error)
+	read     func(context.Context) (Schema, error)
 	rng      Range
 	log      *slog.Logger
 	interval time.Duration
@@ -68,11 +84,11 @@ type Gate struct {
 
 // New returns a gate over a database connection, not Ready until its first check passes.
 func New(q Querier, r Range, log *slog.Logger) *Gate {
-	return NewFunc(func(ctx context.Context) (int64, error) { return Version(ctx, q) }, r, log)
+	return NewFunc(func(ctx context.Context) (Schema, error) { return Read(ctx, q) }, r, log)
 }
 
 // NewFunc is New over any reader of the schema version.
-func NewFunc(read func(context.Context) (int64, error), r Range, log *slog.Logger) *Gate {
+func NewFunc(read func(context.Context) (Schema, error), r Range, log *slog.Logger) *Gate {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -81,9 +97,9 @@ func NewFunc(read func(context.Context) (int64, error), r Range, log *slog.Logge
 
 // Check reads the version once, records the verdict and logs it when it changes.
 func (g *Gate) Check(ctx context.Context) error {
-	v, err := g.read(ctx)
+	sc, err := g.read(ctx)
 	if err == nil {
-		err = Judge(v, g.rng)
+		err = Judge(sc, g.rng)
 	}
 	g.mu.Lock()
 	changed := !g.checked || (g.err == nil) != (err == nil) || (err != nil && g.err.Error() != err.Error())
@@ -91,9 +107,9 @@ func (g *Gate) Check(ctx context.Context) error {
 	g.mu.Unlock()
 	switch {
 	case err != nil && changed:
-		g.log.Error("not ready: schema version outside the supported range", "supported_min", g.rng.Min, "supported_max", g.rng.Max, "err", err)
+		g.log.Error("not ready: the schema is not supported by this build", "supported_min", g.rng.Min, "latest", g.rng.Latest, "err", err)
 	case err == nil && changed:
-		g.log.Info("schema version supported", "version", v, "supported_min", g.rng.Min, "supported_max", g.rng.Max)
+		g.log.Info("schema supported", "version", sc.Version, "min_reader", sc.MinReader, "supported_min", g.rng.Min, "latest", g.rng.Latest)
 	}
 	return err
 }

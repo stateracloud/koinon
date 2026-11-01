@@ -260,7 +260,7 @@ func serveHealth(ctx context.Context, addr string, db schemagate.Querier, log *s
 	if addr == "" {
 		return nil
 	}
-	gate := schemagate.New(db, schemagate.Range{Min: migrations.MinSupported, Max: migrations.MaxSupported}, log)
+	gate := schemagate.New(db, schemagate.Range{Min: migrations.MinSupported, Latest: migrations.MustLatest()}, log)
 	safego.Go(ctx, log, "schema-gate", gate.Run)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })

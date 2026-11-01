@@ -106,7 +106,7 @@ func run() error {
 	// The pod is not ready while it waits, and the wait is logged at warn level every minute.
 	var ready atomic.Bool
 	// Also not ready while the schema is outside the goose range this build supports (ADR 0085).
-	gate := schemagate.New(pool, schemagate.Range{Min: migrations.MinSupported, Max: migrations.MaxSupported}, log)
+	gate := schemagate.New(pool, schemagate.Range{Min: migrations.MinSupported, Latest: migrations.MustLatest()}, log)
 	safego.Go(ctx, log, "schema-gate", gate.Run)
 	if cfg.healthAddr != "" {
 		mux := http.NewServeMux()

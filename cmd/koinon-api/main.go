@@ -372,7 +372,7 @@ func run() error {
 
 	// Not Ready (/readyz) while the schema is outside the goose range this build supports
 	// (ADR 0085): after an app-only rollback the older pods would otherwise fail at their first query.
-	gate := schemagate.New(pool, schemagate.Range{Min: migrations.MinSupported, Max: migrations.MaxSupported}, slog.Default())
+	gate := schemagate.New(pool, schemagate.Range{Min: migrations.MinSupported, Latest: migrations.MustLatest()}, slog.Default())
 	safego.Go(ctx, slog.Default(), "schema-gate", gate.Run)
 
 	mode, err := auth.ParseIdentityMode(cfg.defaultOrgMode)

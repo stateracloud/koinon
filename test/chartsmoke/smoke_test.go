@@ -200,7 +200,7 @@ func describeMode(name, valuesFile string) {
 			ready["koinon-agentd"] = startDeployment(ctx, rn, r, "koinon-agentd")
 			accounted = append(accounted, "koinon-agentd")
 			// Its readiness probe is /readyz on the health port: the schema gate (ADR 0085, #408)
-			// reads goose_db_version of the migrated database and must find it in the supported range.
+			// reads goose_db_version and schema_compat of the migrated database and must find the schema supported.
 			// The drain on SIGTERM must fit in the pod's grace period (ADR 0085): the kubelet
 			// would otherwise kill agentd mid-drain and the leases would not be released.
 			ps := r.deployment("koinon-agentd").Spec.Template.Spec
