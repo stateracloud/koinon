@@ -34,6 +34,10 @@ type Options struct {
 	UI fs.FS
 	// Metrics counts RPCs by procedure and code; nil counts nothing.
 	Metrics *Metrics
+	// Ready serves /readyz, the readiness probe: it answers 200 or 503 with a reason. /healthz
+	// stays unconditional so a not-ready pod is kept out of rotation but not restarted. Nil serves
+	// no /readyz.
+	Ready http.HandlerFunc
 }
 
 // NewHandler returns the API's HTTP handler.
@@ -72,6 +76,9 @@ func NewHandler(opts Options) (http.Handler, error) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	if opts.Ready != nil {
+		mux.Handle("GET /readyz", opts.Ready)
+	}
 	if opts.UI != nil {
 		mux.Handle("/", spaHandler(opts.UI))
 	}

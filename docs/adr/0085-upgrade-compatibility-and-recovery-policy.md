@@ -175,6 +175,20 @@ section says what the recommended option would have bought.
 8. **Binaries gate on the schema version** (procoduck, 2026-11-01). Each binary declares the range of
    goose versions it supports and stays not Ready, with a clear log line, outside it. The migration
    Job's own check (refusing to migrate past what running pods support) can follow.
+   Implemented (#408): the schema declares who can read it. Migration 00046 adds the one-row table
+   `schema_compat(min_reader_version)`, and `internal/schemagate` re-reads it and `goose_db_version`
+   every 15 s. A binary is Ready iff the goose version is at least `migrations.MinSupported` (the
+   oldest schema its code works against) and `min_reader_version` is at most the newest migration
+   it embeds (`migrations.Latest()`). koinon-api and koinon-agentd (new `--health-addr`, default
+   `:8082`) and koinon-reconciler answer `/readyz` 503 with the reason otherwise, and log it once
+   per change; `/healthz` stays 200, so the pod waits and is not restarted. There is deliberately
+   no upper bound compiled into a binary: an old release cannot predict a later schema, so the
+   newer schema carries the verdict. An expand migration leaves `min_reader_version` alone and
+   every older release in the minor line stays Ready (decision 5: patch releases roll, rollback is
+   an image rollback); a breaking migration, allowed only in a new minor line (decision 6a), sets
+   it to its own version with `UPDATE schema_compat SET min_reader_version = <its version>`.
+   `TestCompatDeclarations` rejects any other write to the column; `TestSupportedRange` keeps
+   `MinSupported` satisfiable.
 
 ### Supervisor and OpenShell
 

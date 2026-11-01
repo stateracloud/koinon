@@ -2004,6 +2004,11 @@ type SavedWorkUploadNonce struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type SchemaCompat struct {
+	Singleton        bool
+	MinReaderVersion int64
+}
+
 type Session struct {
 	ID            pgtype.UUID
 	TokenHash     []byte
