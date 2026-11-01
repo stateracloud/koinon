@@ -1170,11 +1170,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
 		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, homeDirtiedSince(w.sb))
 	}
-	if sb.Labels[LabelSpecHash] != hash && !r.supervisorKnown() {
-		// The gateway's supervisor image was never read, so the hash lacks it and a mismatch
-		// proves nothing. Recreating now would recreate every sandbox once the image is known.
-		r.log.Debug("not comparing the sandbox spec hash: the OpenShell supervisor image is not known yet", w.logAttrs()...)
-	} else if sb.Labels[LabelSpecHash] != hash {
+	if sb.Labels[LabelSpecHash] != hash || r.supervisorChanged(sb) {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
 		// hand): OpenShell cannot change those in place, so the sandbox is recreated, which
 		// also replaces its home volume. Never while a run holds the agent, parked runs
@@ -1184,15 +1180,17 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		if act.HasHeld {
 			return r.record(ctx, w, sb, hash, "sandbox spec changed; recreating it after the active and parked runs finish")
 		}
+		if !r.takeRecreate() {
+			// The cap keeps an OpenShell upgrade from recreating the whole fleet in one pass. It is
+			// taken before the home gate, which requests checkpoints and wakes stopped sandboxes: a
+			// sandbox whose gate is still waiting keeps its slot, so at most the cap starts per pass.
+			return r.record(ctx, w, sb, hash, "sandbox spec changed; waiting for a free recreate slot of this pass")
+		}
 		if ok, note, err := r.homeGate(ctx, w, ws, sb, homeDirtiedSince(w.sb)); err != nil || !ok {
 			if err != nil {
 				return err
 			}
 			return r.record(ctx, w, sb, hash, note)
-		}
-		if !r.takeRecreate() {
-			// The cap keeps an OpenShell upgrade from recreating the whole fleet in one pass.
-			return r.record(ctx, w, sb, hash, "sandbox spec changed; waiting for a free recreate slot of this pass")
 		}
 		if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
 			return err

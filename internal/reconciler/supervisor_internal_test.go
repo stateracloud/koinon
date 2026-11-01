@@ -40,58 +40,59 @@ func testReconciler(src SupervisorSource) *Reconciler {
 	}
 }
 
-func TestSpecHashCoversTheSupervisorImage(t *testing.T) {
-	spec := execution.SandboxSpec{Image: "img", Labels: map[string]string{}}
-	none := specHash(spec, "")
-	if got := specHash(spec, "supervisor:1"); got == none {
-		t.Error("a supervisor image does not change the hash")
-	}
-	if specHash(spec, "supervisor:1") == specHash(spec, "supervisor:2") {
-		t.Error("a new supervisor image does not change the hash")
-	}
-	again := specHash(spec, "supervisor:1")
-	if got := specHash(spec, "supervisor:1"); got != again {
-		t.Error("the hash is not stable")
-	}
-}
-
-func TestSandboxSpecHashFollowsTheGatewaySupervisor(t *testing.T) {
+func TestSpecHashLeavesTheSupervisorImageOut(t *testing.T) {
 	src := &stubSupervisor{image: "supervisor:1"}
 	r := testReconciler(src)
 	r.refreshSupervisor(t.Context())
-	_, h1 := r.sandboxSpec(zeroUUID, zeroUUID, execution.AgentNames{Sandbox: "sb"}, Flavor{Image: "img"}, nil, nil, defaultRes)
+	names := execution.AgentNames{Sandbox: "sb"}
+	s1, h1 := r.sandboxSpec(zeroUUID, zeroUUID, names, Flavor{Image: "img"}, nil, nil, defaultRes)
 	src.image = "supervisor:2"
 	r.refreshSupervisor(t.Context())
-	_, h2 := r.sandboxSpec(zeroUUID, zeroUUID, execution.AgentNames{Sandbox: "sb"}, Flavor{Image: "img"}, nil, nil, defaultRes)
-	if h1 == h2 {
-		t.Error("a new supervisor image leaves the spec hash unchanged")
+	s2, h2 := r.sandboxSpec(zeroUUID, zeroUUID, names, Flavor{Image: "img"}, nil, nil, defaultRes)
+	if h1 != h2 {
+		t.Error("a new supervisor image changes the spec hash")
+	}
+	if s1.Labels[LabelSupervisorImage] != "supervisor:1" || s2.Labels[LabelSupervisorImage] != "supervisor:2" {
+		t.Errorf("supervisor labels = %q, %q", s1.Labels[LabelSupervisorImage], s2.Labels[LabelSupervisorImage])
 	}
 }
 
-func TestRefreshSupervisorKeepsTheLastImageOnError(t *testing.T) {
+func TestSupervisorChanged(t *testing.T) {
 	src := &stubSupervisor{err: errors.New("forbidden")}
 	r := testReconciler(src)
 	r.refreshSupervisor(t.Context())
-	if r.supervisorKnown() {
-		t.Fatal("spec-change recreates should wait while the supervisor image has never been read")
+	old := execution.Sandbox{Labels: map[string]string{LabelSupervisorImage: "supervisor:1"}}
+	if r.supervisorChanged(old) {
+		t.Fatal("an unknown image must not drive a recreate")
+	}
+	if _, known := r.supervisorImage(); known {
+		t.Fatal("known before any read")
 	}
 	src.image, src.err = "supervisor:1", nil
 	r.refreshSupervisor(t.Context())
-	if !r.supervisorKnown() {
-		t.Fatal("known after a read")
+	if r.supervisorChanged(old) {
+		t.Error("the same image is a change")
+	}
+	if r.supervisorChanged(execution.Sandbox{Labels: map[string]string{}}) {
+		t.Error("a sandbox without the label is recreated for a supervisor change")
+	}
+	src.image = "supervisor:2"
+	r.refreshSupervisor(t.Context())
+	if !r.supervisorChanged(old) {
+		t.Error("a new image is not a change")
 	}
 	src.image, src.err = "", errors.New("gone")
 	r.refreshSupervisor(t.Context())
-	if got := r.supervisorImage(); got != "supervisor:1" {
-		t.Errorf("image after a failed read = %q, want the last one read", got)
+	if img, _ := r.supervisorImage(); img != "supervisor:2" {
+		t.Errorf("image after a failed read = %q, want the last one read", img)
 	}
 }
 
 func TestNoSupervisorSourceIsAlwaysReady(t *testing.T) {
 	r := testReconciler(nil)
 	r.refreshSupervisor(t.Context())
-	if !r.supervisorKnown() || r.supervisorImage() != "" {
-		t.Errorf("known = %v, image = %q", r.supervisorKnown(), r.supervisorImage())
+	if img, known := r.supervisorImage(); !known || img != "" {
+		t.Errorf("known = %v, image = %q", known, img)
 	}
 }
 

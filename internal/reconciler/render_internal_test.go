@@ -22,8 +22,8 @@ func TestSpecHashCoversEveryResource(t *testing.T) {
 		Image: "img", CPURequest: "250m", CPULimit: "2", MemoryRequest: "1Gi", MemoryLimit: "2Gi",
 		Labels: map[string]string{},
 	}
-	want := specHash(base, "")
-	if specHash(base, "") != want {
+	want := specHash(base)
+	if specHash(base) != want {
 		t.Fatal("the hash is not stable")
 	}
 	for name, mutate := range map[string]func(*execution.SandboxSpec){
@@ -34,14 +34,14 @@ func TestSpecHashCoversEveryResource(t *testing.T) {
 	} {
 		s := base
 		mutate(&s)
-		if specHash(s, "") == want {
+		if specHash(s) == want {
 			t.Errorf("changing the %s does not change the hash", name)
 		}
 	}
 	// A request and a limit are different fields: swapping them is a change.
 	swapped := base
 	swapped.CPURequest, swapped.CPULimit = base.CPULimit, base.CPURequest
-	if specHash(swapped, "") == want {
+	if specHash(swapped) == want {
 		t.Error("swapping the CPU request and limit does not change the hash")
 	}
 }
