@@ -58,6 +58,12 @@ type fileConfig struct {
 		RuntimeClassName string `yaml:"runtimeClassName"`
 		// GatewayID is OpenShell's gateway_id, which names the workspace namespaces.
 		GatewayID string `yaml:"gatewayId"`
+		// GatewayConfig locates OpenShell's gateway ConfigMap, whose supervisor_image is part of the
+		// sandbox spec hash (ADR 0085 decision 9). Empty leaves it out.
+		GatewayConfig struct {
+			Namespace string `yaml:"namespace"`
+			ConfigMap string `yaml:"configMap"`
+		} `yaml:"gatewayConfig"`
 	} `yaml:"openshell"`
 	// SandboxObserver is the chart's sandboxObserver (ADR 0078).
 	SandboxObserver struct {
@@ -73,9 +79,11 @@ type fileConfig struct {
 		ArchiveAfter   string `yaml:"archiveAfter"`
 		SandboxJobs    int    `yaml:"sandboxJobs"`
 		KeepWarmPerOrg int    `yaml:"keepWarmPerOrg"`
-		ResyncInterval string `yaml:"resyncInterval"`
-		HomeRetention  string `yaml:"homeRetention"`
-		Checkpoints    bool   `yaml:"checkpoints"`
+		// MaxRecreatesPerPass caps the sandboxes recreated with a changed spec per pass.
+		MaxRecreatesPerPass int    `yaml:"maxRecreatesPerPass"`
+		ResyncInterval      string `yaml:"resyncInterval"`
+		HomeRetention       string `yaml:"homeRetention"`
+		Checkpoints         bool   `yaml:"checkpoints"`
 	} `yaml:"reconciler"`
 	// SandboxResources is the chart's sandbox.resources (ADR 0083). Values left out keep
 	// sandboxres.DefaultPolicy's.
@@ -199,10 +207,14 @@ type config struct {
 	parkWarm       time.Duration
 	sandboxJobs    int
 	keepWarmPerOrg int
-	resyncInterval time.Duration
-	homeRetention  string
-	checkpoints    bool
-	flavorImages   map[string]string
+	// maxRecreates is the cap on spec-change recreates per pass; openshellConfigNS and
+	// openshellConfigMap locate the gateway ConfigMap that names the supervisor image.
+	maxRecreates                          int
+	openshellConfigNS, openshellConfigMap string
+	resyncInterval                        time.Duration
+	homeRetention                         string
+	checkpoints                           bool
+	flavorImages                          map[string]string
 
 	// sandboxResources is the platform's sandbox sizing, from the config file's sandboxResources.
 	sandboxResources sandboxres.Policy
@@ -258,6 +270,9 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.DurationVar(&c.idleTimeout, "idle-timeout", 0, "stop a sandbox after this long without an active run (default 10m)")
 	fs.DurationVar(&c.parkWarm, "park-warm", 0, "keep a sandbox up this long after its run parked on a2a or input_required (default 15m)")
 	fs.IntVar(&c.keepWarmPerOrg, "keep-warm-per-org", 0, "keep-warm sandboxes an org may have (default 2; negative grants none)")
+	fs.IntVar(&c.maxRecreates, "max-recreates-per-pass", 0, "sandboxes one pass may recreate with a changed spec, such as a new supervisor image (default 4; negative is no cap)")
+	fs.StringVar(&c.openshellConfigNS, "openshell-config-namespace", "", "namespace of OpenShell's gateway ConfigMap, to read its supervisor image")
+	fs.StringVar(&c.openshellConfigMap, "openshell-config-map", "", "OpenShell's gateway ConfigMap (<fullname>-config); empty leaves the supervisor image out of the sandbox spec hash")
 	fs.IntVar(&c.sandboxJobs, "sandbox-jobs", 0, "sandbox start/stop jobs that run at once (default 8)")
 	fs.DurationVar(&c.resyncInterval, "resync-interval", 0, "time between passes without a wake-up (default 30s)")
 	fs.BoolVar(&c.checkpoints, "checkpoints", false, "stop, recreate and restore sandboxes around home checkpoints (koinon-agentd writes them; ADR 0032)")
@@ -320,6 +335,9 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.openshellTLSDir, fc.OpenShell.TLS)
 	orDefault(&c.runtimeClass, fc.OpenShell.RuntimeClassName)
 	orDefault(&c.openshellGateway, fc.OpenShell.GatewayID)
+	orDefault(&c.openshellConfigNS, fc.OpenShell.GatewayConfig.Namespace)
+	orDefault(&c.openshellConfigMap, fc.OpenShell.GatewayConfig.ConfigMap)
+	orDefault(&c.maxRecreates, fc.Reconciler.MaxRecreatesPerPass)
 	orDefault(&c.openshellGateway, execution.DefaultGatewayID)
 	// An explicit flag or variable wins over the file in both directions: flag > file > default (off).
 	if !c.sandboxObserverSet {

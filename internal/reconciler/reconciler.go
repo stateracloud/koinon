@@ -41,6 +41,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -174,6 +175,14 @@ type Config struct {
 	Logger *slog.Logger
 	// Metrics receives the pass metrics; nil keeps them unexported.
 	Metrics *Metrics
+	// Supervisor says which supervisor image the OpenShell gateway starts sandboxes with. It is part
+	// of the sandbox spec hash, so an OpenShell upgrade recreates each sandbox through the usual path
+	// (ADR 0085 decision 9). Nil leaves it out of the hash.
+	Supervisor SupervisorSource
+	// MaxRecreatesPerPass caps the sandboxes one pass deletes to recreate them with a changed spec
+	// (a new supervisor, image or resources); the others wait for a later pass. Zero is
+	// DefaultMaxRecreatesPerPass; negative is no cap.
+	MaxRecreatesPerPass int
 	// Now defaults to time.Now; tests move it forward to pass the idle timeout.
 	Now func() time.Time
 }
@@ -223,6 +232,14 @@ type Reconciler struct {
 	probes    []mcpProbe
 	mcp       *mcpservers.Service
 	m         *Metrics
+
+	// supMu guards the supervisor image read from the gateway (supervisor.go).
+	supMu    sync.Mutex
+	supImage string
+	supKnown bool
+	supErr   error
+	// recreates counts this pass's spec-change recreates against MaxRecreatesPerPass.
+	recreates atomic.Int32
 }
 
 // New returns a Reconciler.
@@ -244,6 +261,9 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.SandboxJobs <= 0 {
 		cfg.SandboxJobs = 8
+	}
+	if cfg.MaxRecreatesPerPass == 0 {
+		cfg.MaxRecreatesPerPass = DefaultMaxRecreatesPerPass
 	}
 	if cfg.KeepWarmPerOrg == 0 {
 		cfg.KeepWarmPerOrg = DefaultKeepWarmPerOrg
@@ -362,6 +382,8 @@ func (r *Reconciler) observeSandboxes(ctx context.Context) {
 }
 
 func (r *Reconciler) reconcileAll(ctx context.Context) error {
+	r.recreates.Store(0)
+	r.refreshSupervisor(ctx)
 	orgs, err := r.q.ListOrgsToReconcile(ctx)
 	if err != nil {
 		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
@@ -1079,6 +1101,9 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	}
 	names = w.names()
 
+	if err := r.supervisorReady(); err != nil {
+		return err
+	}
 	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor, providers, network, r.sandboxResources(w))
 	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm})
 	if err != nil {
@@ -1163,6 +1188,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 				return err
 			}
 			return r.record(ctx, w, sb, hash, note)
+		}
+		if !r.takeRecreate() {
+			// The cap keeps an OpenShell upgrade from recreating the whole fleet in one pass.
+			return r.record(ctx, w, sb, hash, "sandbox spec changed; waiting for a free recreate slot of this pass")
 		}
 		if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
 			return err

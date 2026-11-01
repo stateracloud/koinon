@@ -150,14 +150,17 @@ func (r *Reconciler) sandboxSpec(org, agent pgtype.UUID, names execution.AgentNa
 		MemoryRequest:    res.Memory.Request,
 		MemoryLimit:      res.Memory.Limit,
 	}
-	hash := specHash(spec)
+	hash := specHash(spec, r.supervisorImage())
 	spec.Labels[LabelSpecHash] = hash
 	return spec, hash
 }
 
 // specHash covers the fields OpenShell cannot change on an existing sandbox. Network rules are
-// left out: they are updated in place.
-func specHash(s execution.SandboxSpec) string {
+// left out: they are updated in place. supervisor is the OpenShell gateway's supervisor image
+// (ADR 0085 decision 9): OpenShell reads it when it creates or starts a sandbox and never touches a
+// running supervisor, so only a recreate moves a sandbox to a new one. Empty (not configured, or the
+// gateway does not set it) is left out of the hash, which keeps every earlier hash.
+func specHash(s execution.SandboxSpec, supervisor string) string {
 	b, err := json.Marshal(struct {
 		Image, RuntimeClassName    string
 		CPURequest, CPULimit       string
@@ -165,10 +168,11 @@ func specHash(s execution.SandboxSpec) string {
 		Command, Providers         []string
 		Filesystem                 execution.FilesystemPolicy
 		Labels                     map[string]string
+		SupervisorImage            string `json:",omitempty"`
 	}{
 		s.Image, s.RuntimeClassName,
 		s.CPURequest, s.CPULimit, s.MemoryRequest, s.MemoryLimit,
-		s.Command, s.Providers, s.Policy.Filesystem, maps.Clone(s.Labels),
+		s.Command, s.Providers, s.Policy.Filesystem, maps.Clone(s.Labels), supervisor,
 	})
 	if err != nil {
 		panic(err) // plain strings and slices always marshal
