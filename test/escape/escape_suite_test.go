@@ -28,7 +28,8 @@
 //	                            test/fixtures/rt1/manifests (no default; the gateway case is
 //	                            skipped without it)
 //	KOINON_ESCAPE_GITEA_URL     the Gitea base URL the read grant is rendered for (default
-//	                            https://example.com/gitea; the host must resolve in the sandbox)
+//	                            https://example.com/gitea; the host must resolve in the sandbox and accept
+//	                            a TLS connect on 443: kind.sh points it at escape-gitea-standin, #371)
 //	KOINON_ESCAPE_CLUSTER_DNS   the cluster DNS Service IP (default 10.96.0.10)
 //	KOINON_ESCAPE_EGRESS, KOINON_ESCAPE_METADATA, KOINON_ESCAPE_API, KOINON_ESCAPE_INTERNAL
 //	                            comma-separated host:port lists that replace the default

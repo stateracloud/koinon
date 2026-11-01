@@ -27,10 +27,12 @@ func main() {
 	scripts := flag.String("scripts", "", "directory of YAML scripts (default: the example scripts built into the binary)")
 	strict := flag.Bool("strict-messages", false, "refuse Messages requests the way Anthropic does (unknown fields, beta-only fields without their anthropic-beta, thinking types the model does not take) and chat-completions reasoning the way OpenRouter does")
 	standin := flag.Bool("standin", false, "serve no model: answer every request with an empty 418 and X-Koinon-Standin: 1 (a stand-in for agentgateway in the escape suite, ADR 0080)")
+	tlsCert := flag.String("tls-cert", "", "with -standin: serve TLS with this certificate file (and -tls-key), for the escape suite's Gitea stand-in")
+	tlsKey := flag.String("tls-key", "", "with -standin and -tls-cert: the certificate's private key file")
 	flag.Parse()
 
 	if *standin {
-		if err := serve(*addr, standinHandler(), "standin"); err != nil {
+		if err := serveWith(*addr, standinHandler(), "standin", *tlsCert, *tlsKey); err != nil {
 			slog.Error("koinon-fakemodel failed", "err", err)
 			os.Exit(1)
 		}
@@ -63,6 +65,11 @@ func run(addr, dir string, strict bool) error {
 
 // serve runs handler on addr until SIGINT or SIGTERM. mode names a non-default mode in the log.
 func serve(addr string, handler http.Handler, mode string) error {
+	return serveWith(addr, handler, mode, "", "")
+}
+
+// serveWith is serve over TLS when certFile is set.
+func serveWith(addr string, handler http.Handler, mode, certFile, keyFile string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -78,7 +85,13 @@ func serve(addr string, handler http.Handler, mode string) error {
 	if mode != "" {
 		slog.Info("starting koinon-fakemodel", "version", project.Version, "addr", addr, "mode", mode)
 	}
-	if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	var err error
+	if certFile != "" {
+		err = hs.ListenAndServeTLS(certFile, keyFile)
+	} else {
+		err = hs.ListenAndServe()
+	}
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
