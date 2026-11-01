@@ -51,6 +51,9 @@ expect() { # <description> <want rc> <want output>
 cr() { # <name> <status> <conclusion> <run id>
   printf '{"name":"%s","status":"%s","conclusion":"%s","detailsUrl":"https://github.com/o/r/actions/runs/%s/job/9"}' "$1" "$2" "$3" "$4"
 }
+cr_at() { # <name> <conclusion> <run id> <startedAt>
+  printf '{"name":"%s","status":"COMPLETED","conclusion":"%s","startedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/%s/job/9"}' "$1" "$2" "$4" "$3"
+}
 pr() {
   local mc=null
   [ -z "$3" ] || mc="{\"oid\":\"$3\"}"
@@ -112,6 +115,28 @@ expect "timeout" 2 "checks 0/1 pending: go
 TIMEOUT"
 
 # 10. --require: missing, skipped, failed, green
+# 10a. (#392) two runs of one required check on the head: only the newest counts
+q_skip=$(cr_at quickstart SKIPPED 21 2026-11-01T10:00:00Z)
+q_ok=$(cr_at quickstart SUCCESS 22 2026-11-01T10:05:00Z)
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$q_skip,$q_ok")"
+run 7 --checks --require quickstart --interval 0
+expect "later success supersedes an earlier skip" 0 "checks 2/2 green"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$q_ok,$q_skip")"
+run 7 --checks --require quickstart --interval 0
+expect "newest run wins whatever the rollup order" 0 "checks 2/2 green"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$q_ok,$(cr_at quickstart SKIPPED 23 2026-11-01T10:10:00Z)")"
+run 7 --checks --require quickstart --interval 0
+expect "a newer skip after a success is not green" 1 "REQUIRED quickstart skipped
+only skipped runs of quickstart on this head; run: gh workflow run e2e-kind.yml --ref <branch>"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$(cr_at quickstart CANCELLED 21 2026-11-01T10:00:00Z),$q_ok")"
+run 7 --checks --require quickstart --interval 0
+expect "later success supersedes an earlier cancel" 0 "checks 2/2 green"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$(cr_at quickstart CANCELLED 21 2026-11-01T10:00:00Z)")"
+run 7 --checks --require quickstart --interval 0
+expect "only a cancelled run: failed, with the dispatch hint" 1 "FAILED quickstart (run 21)
+REQUIRED quickstart failed
+only cancelled runs of quickstart on this head; run: gh workflow run e2e-kind.yml --ref <branch>"
+
 usage_line="usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK] [--timeout DURATION] [--interval SECONDS]"
 e2e_ok=$(cr "e2e result" COMPLETED SUCCESS 14)
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"
@@ -119,7 +144,8 @@ run 7 --checks --require "e2e result" --interval 0
 expect "required check missing" 1 "REQUIRED e2e result missing"
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$(cr "e2e result" COMPLETED SKIPPED 14)")"
 run 7 --checks --require "e2e result" --interval 0
-expect "required check skipped" 1 "REQUIRED e2e result skipped"
+expect "required check skipped" 1 "REQUIRED e2e result skipped
+only skipped runs of e2e result on this head; run: gh workflow run e2e-kind.yml --ref <branch>"
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$(cr "e2e result" COMPLETED FAILURE 14)")"
 run 7 --checks --require "e2e result" --interval 0
 expect "required check failed" 1 "FAILED e2e result (run 14)
