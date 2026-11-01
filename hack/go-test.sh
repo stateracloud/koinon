@@ -20,6 +20,7 @@ cd "$(dirname "$0")/.."
 
 PARALLEL_SUITES=(
 	./internal/agentd
+	./internal/runoutcome
 	./internal/api
 	./internal/durable
 	./internal/checkpoint

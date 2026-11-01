@@ -1,4 +1,4 @@
-# XXXX. One writer ends a run
+# 0089. One writer ends a run
 
 - Status: Accepted
 - Date: 2026-11-01
@@ -35,17 +35,20 @@ success commit; the task left working after a park; and three more).
    it concludes; it ends the spans first only so they are exported promptly.
 5. **Stale writers write nothing.** A verb whose epoch no longer owns the run matches no row, rolls
    its transaction back and returns `ErrFenced` after telling a cancel from a lost epoch (ADR 0082).
-6. **agentd's `conclude` maps how a run ended onto the verbs** and holds no write of its own. It still
-   reads the ending from the error `execute` returns (`failure`, `canceled`, `requeued` and the
-   fence and shutdown sentinels), which the turn driver builds from the turn policy's typed outcome
-   (ADR 0087). Switching `conclude` on the typed outcome directly, with the setup-phase failures as
-   typed values of their own, is deferred to Backlog issue #SENTINEL-ISSUE (exit condition: `conclude` switches on `turnpolicy.Outcome` and `turnDriver.outcome` is deleted); those errors are also what the run's trace reads.
-   A verb whose transaction fails ends the turn row on its own, best effort, unless another owner took
-   the run over, so a run canceled meanwhile does not keep a turn that looks running.
+6. **agentd's `conclude` maps how a run ended onto the verbs** and holds no write of its own. It
+   switches on the turn controller's typed outcome (`turnpolicy.Outcome`, ADR 0087) for a run whose
+   turns ended, and on the error `execute` returned for everything before the turn: the setup-phase
+   failures, a dropped connection, a requeue and the fence and shutdown sentinels. The trace reads the
+   same two inputs. A verb whose transaction fails ends the turn row on its own, best effort, unless
+   another owner took the run over, so a run canceled meanwhile does not keep a turn that looks
+   running. `EndTurn` is the exception: it does not know the turn's end reason (a cancel fence ends it
+   as "canceled", which the caller learns from the error), so the caller ends the row with `CloseTurn`
+   once it knows.
 7. **The module is tested against real Postgres**, one group of specs per verb: the order of the
-   timeline, the fence of a stale epoch, and the race between park and approval. No fake harness and no
-   agentd pool. The agentd specs stay as the regression net; Backlog issue #SMOKE-ISSUE replaces the ones the module
-   specs cover with a few smoke specs (exit condition: no agentd spec repeats a module spec).
+   timeline, the fence of a stale epoch, the race between park and approval and the source seq under
+   concurrent writers. No fake harness and no agentd pool. The agentd specs stay as the regression
+   net; replacing the ones the module specs cover with a few smoke specs is tracked in #491 (exit
+   condition: no agentd spec repeats a module spec).
 
 ## Consequences
 
