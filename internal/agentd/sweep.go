@@ -79,7 +79,7 @@ func (r *runner) sweep(ctx context.Context, workspace, sandbox string) (string, 
 // given up, its slot may be free, and the agent's next run may have started its harness. The
 // next run's sweep catches what is left.
 func (r *runner) sweepAfter(ctx context.Context, workspace, sandbox string) {
-	if r.isFenced() {
+	if r.own.IsFenced() {
 		return
 	}
 	_, ended, err := r.sweep(context.WithoutCancel(ctx), workspace, sandbox)

@@ -108,3 +108,4 @@ are in [0046](0046-adr-conventions.md).
 | [0086](0086-stored-org-default-model.md) | The org default model is stored, not derived | Accepted |
 | [0087](0087-turn-policy-is-a-pure-state-machine.md) | Turn policy is a pure state machine | Accepted |
 | [0088](0088-cli-stack.md) | The command-line stack: cobra, pflag and viper, with Charm on a terminal only | Accepted |
+| [0089](0089-run-outcome-writer.md) | One writer ends a run | Accepted |

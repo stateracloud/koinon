@@ -10,6 +10,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/agentd/turnpolicy"
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/runlimits"
 )
@@ -19,7 +20,7 @@ import (
 // reads, the database writes and the timer. It feeds the policy events with the time they happened
 // at and carries out the action that comes back. It turns a prompt error into facts (classify.go,
 // budgetstop.go, providerrefusal.go read the ledger and the gateway's record) and the policy's
-// outcome back into the errors that conclude and endTurn read.
+// outcome to execute as a turnResult.
 
 type promptResult struct {
 	stop acp.StopReason
@@ -52,7 +53,7 @@ type turnDriver struct {
 // turnWithRetry runs the turn and, as the policy says, the turns after it: the wrap-up notice, the
 // continuation of a refused turn and the retry of a failed model request. The wait ends when the
 // worker is fenced or stops.
-func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, session acp.SessionID, text string) error {
+func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, session acp.SessionID, text string) (*turnResult, error) {
 	d := &turnDriver{
 		r: r, ctx: ctx, fctx: fctx, conn: conn, proc: proc, stderr: stderr, session: session, text: text,
 		c: turnpolicy.New(r.turnConfig()),
@@ -85,7 +86,8 @@ func (r *runner) turnConfig() turnpolicy.Config {
 	}
 }
 
-func (d *turnDriver) run() error {
+// run returns the policy's outcome, or the error of a write the turns needed.
+func (d *turnDriver) run() (*turnResult, error) {
 	a := d.c.Begin(time.Now())
 	for {
 		if a.Ended != turnpolicy.EndedNone {
@@ -109,10 +111,10 @@ func (d *turnDriver) run() error {
 			err = d.record(a)
 			ev = turnpolicy.Event{Kind: turnpolicy.EvRecorded}
 		case turnpolicy.ActEnd:
-			return d.outcome(a.Outcome)
+			return d.result(a.Outcome), nil
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 		a = d.c.Step(ev, time.Now())
 	}
@@ -168,13 +170,13 @@ func (d *turnDriver) record(a turnpolicy.Action) error {
 	r := d.r
 	switch a.Record {
 	case turnpolicy.RecordRefusal:
-		if err := r.record(d.fctx, "run.refusal", map[string]any{"refusals": d.refs, "count": a.Count, "cwd": r.cwd}); err != nil {
+		if err := r.own.Record(d.fctx, "run.refusal", map[string]any{"refusals": d.refs, "count": a.Count, "cwd": r.cwd}); err != nil {
 			return r.dbErr(d.ctx, "record the refusal", err)
 		}
 	case turnpolicy.RecordRetry:
 		f := d.failure
 		r.log.Info("retrying the turn", "class", f.class, "attempt", a.Attempt, "delay", a.Delay)
-		if err := r.record(d.fctx, "run.retry", map[string]any{
+		if err := r.own.Record(d.fctx, "run.retry", map[string]any{
 			"failureClass": f.class, "attempt": a.Attempt, "delaySeconds": a.Delay.Seconds(), "reason": f.reason,
 		}); err != nil {
 			return r.dbErr(d.ctx, "record the retry", err)
@@ -230,8 +232,8 @@ func (d *turnDriver) await(a turnpolicy.Action) turnpolicy.Event {
 		select {
 		case res := <-d.done:
 			return d.promptDone(res)
-		case <-r.fenced:
-			return turnpolicy.Event{Kind: turnpolicy.EvFenced, FenceCanceled: fence(r.fenceKind.Load()) == fenceCanceled}
+		case <-r.own.Fenced():
+			return turnpolicy.Event{Kind: turnpolicy.EvFenced, FenceCanceled: r.own.FenceKind() == fenceCanceled}
 		case <-deadline:
 			return turnpolicy.Event{Kind: turnpolicy.EvTick}
 		case <-poll:
@@ -323,28 +325,44 @@ func (d *turnDriver) takeRefusals(out *turnpolicy.Result) {
 	}
 }
 
-// outcome maps the policy's outcome to the error that conclude and endTurn read.
-func (d *turnDriver) outcome(o turnpolicy.Outcome) error {
-	r := d.r
-	switch o.Kind {
-	case turnpolicy.OutEndTurn:
-		return errEndTurn
-	case turnpolicy.OutCapReached:
-		return &canceled{
-			reason:    fmt.Sprintf("wall-clock cap of %s reached", time.Duration(r.run.MaxWallClockSeconds)*time.Second),
-			timeLimit: true,
-		}
+// turnResult is how the turns of a run ended: the policy's typed outcome with the facts the driver
+// holds for it. conclude and the trace switch on Outcome directly. Only an outcome the policy does not
+// interpret (OutFailed, OutPassthrough) carries the driver's classified error.
+type turnResult struct {
+	out turnpolicy.Outcome
+	// err is the classified error of the last prompt (OutFailed, OutPassthrough).
+	err error
+	// failure is the last failed prompt's failure (OutRetriesExhausted).
+	failure *failure
+	// refs is what agentd refused in the last turn (OutRefusalsExceeded).
+	refs []refusal
+	// maxRetryAfter is the longest provider wait Koinon accepts (OutRetriesExhausted).
+	maxRetryAfter time.Duration
+	// capNote is the reason of a wall-clock cap (OutCapReached).
+	capNote string
+}
+
+// fails reports whether the outcome fails the run for a reason the driver holds, with the reason
+// and class. OutFailed and OutPassthrough are the classified error of the last prompt instead.
+func (t *turnResult) fails() (reason string, class store.RunFailureClass, ok bool) {
+	switch t.out.Kind {
 	case turnpolicy.OutHarnessCancelled:
-		return &failure{reason: "the harness cancelled the turn"}
+		return "the harness cancelled the turn", "", true
 	case turnpolicy.OutRetriesExhausted:
-		return exhausted(d.failure, o.Retries, r.p.cfg.MaxRetryAfter)
+		f := exhausted(t.failure, t.out.Retries, t.maxRetryAfter)
+		return f.reason, f.class, true
 	case turnpolicy.OutRefusalsExceeded:
-		ref := &refused{refusals: d.refs}
-		return &failure{reason: fmt.Sprintf("%s (the agent kept asking after %d refusals)", ref.Error(), o.Refused), class: classPolicy}
-	case turnpolicy.OutFenced:
-		return errFenced
-	case turnpolicy.OutShutdown:
-		return errShutdown
+		ref := &refused{refusals: t.refs}
+		return fmt.Sprintf("%s (the agent kept asking after %d refusals)", ref.Error(), t.out.Refused), classPolicy, true
 	}
-	return d.err // OutFailed, OutPassthrough
+	return "", "", false
+}
+
+// result carries the policy's outcome to execute.
+func (d *turnDriver) result(o turnpolicy.Outcome) *turnResult {
+	r := d.r
+	return &turnResult{
+		out: o, err: d.err, failure: d.failure, refs: d.refs, maxRetryAfter: r.p.cfg.MaxRetryAfter,
+		capNote: fmt.Sprintf("wall-clock cap of %s reached", time.Duration(r.run.MaxWallClockSeconds)*time.Second),
+	}
 }

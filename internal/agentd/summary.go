@@ -60,7 +60,7 @@ func truncateSummary(s string) string { return runreply.Truncate(s, summaryMaxBy
 
 // summarize asks the agent for its note and stores it on the task. It never fails the run.
 func (r *runner) summarize(ctx context.Context, conn *acp.Conn, session acp.SessionID) {
-	if r.isFenced() || ctx.Err() != nil {
+	if r.own.IsFenced() || ctx.Err() != nil {
 		return
 	}
 	bg := context.WithoutCancel(ctx)
@@ -101,7 +101,7 @@ func (r *runner) summarize(ctx context.Context, conn *acp.Conn, session acp.Sess
 	var res result
 	select {
 	case res = <-done:
-	case <-r.fenced:
+	case <-r.own.Fenced():
 		cancel()
 		return
 	}
@@ -139,7 +139,7 @@ func (r *runner) summarize(ctx context.Context, conn *acp.Conn, session acp.Sess
 
 // noteSummary records what became of the summary. A failed write is only logged.
 func (r *runner) noteSummary(kind string, payload map[string]any) {
-	if err := r.record(context.WithoutCancel(context.Background()), kind, payload); err != nil {
+	if err := r.own.Record(context.WithoutCancel(context.Background()), kind, payload); err != nil {
 		r.log.Warn("recording the summary outcome failed", "kind", kind, "err", err)
 	}
 }
