@@ -59,6 +59,12 @@ type TurnEnd struct {
 // outcomes, then either succeeds the run or parks it while approval requests or questions the agent
 // made are open or their outcomes unsent. The turn row ends with the run's row, as "end_turn" or
 // "park:<reason>".
+//
+// Unlike the other verbs, a failed EndTurn does not end the turn row itself (it uses Err, not failed):
+// the turn row's reason is not known here. The caller does not know how the turn will end until it
+// has read the error (a cancel fence ends it as "canceled", a lost run leaves it to the new owner), so
+// it ends the row with CloseTurn and the reason it then knows. Ending it here first, with the reason
+// of the caller's Turn, would win over that (EndRunTurn only ends an open row).
 func (o *Owner) EndTurn(ctx context.Context, d Delivered, turn Turn) (TurnEnd, error) {
 	var end TurnEnd
 	err := o.begin(ctx, func(q *store.Queries, src int64) error {

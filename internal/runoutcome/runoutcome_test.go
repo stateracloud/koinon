@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -58,6 +59,48 @@ var _ = Describe("Record", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(w.own.Record(ctx, "run.late", nil)).To(MatchError(runoutcome.ErrFenced))
 		Expect(w.own.FenceKind()).To(Equal(runoutcome.FenceCanceled))
+	})
+})
+
+var _ = Describe("the source seq under concurrent writers", func() {
+	It("only grows under the write mutex: Record and an ending verb never share or skip a seq", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		turn := w.openTurn(ctx)
+		turn.Reason = "end_turn"
+		const writers = 24
+		var wg sync.WaitGroup
+		for i := range writers {
+			wg.Go(func() {
+				defer GinkgoRecover()
+				// Records that run after the ending are fenced; the ones before it are written.
+				err := w.own.Record(ctx, "run.concurrent", map[string]int{"n": i})
+				if err != nil {
+					Expect(err).To(MatchError(runoutcome.ErrFenced))
+				}
+			})
+		}
+		wg.Go(func() {
+			defer GinkgoRecover()
+			Expect(w.own.Succeed(ctx, turn)).To(Succeed())
+		})
+		wg.Wait()
+
+		evs, err := q.ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{OrgID: w.org, RunID: w.run.ID, MaxEvents: 1000})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(evs).NotTo(BeEmpty())
+		var src []int64
+		for _, e := range evs {
+			Expect(e.SourceSeq.Valid).To(BeTrue())
+			src = append(src, e.SourceSeq.Int64)
+		}
+		// In the order they were written the seqs are 1, 2, 3, ...: unique and contiguous.
+		want := make([]int64, len(evs))
+		for i := range want {
+			want[i] = int64(i + 1)
+		}
+		Expect(src).To(Equal(want))
+		// The ending is the last event of the run.
+		Expect(evs[len(evs)-1].Kind).To(Equal("run.succeeded"))
 	})
 })
 

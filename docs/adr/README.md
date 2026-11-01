@@ -107,3 +107,4 @@ are in [0046](0046-adr-conventions.md).
 | [0085](0085-upgrade-compatibility-and-recovery-policy.md) | Upgrade, compatibility and recovery policy | Accepted (scope decided by procoduck, 2026-10-31; decisions of 2026-11-01; a v0.1.0 gate) |
 | [0086](0086-stored-org-default-model.md) | The org default model is stored, not derived | Accepted |
 | [0087](0087-turn-policy-is-a-pure-state-machine.md) | Turn policy is a pure state machine | Accepted |
+| [0089](0089-run-outcome-writer.md) | One writer ends a run | Accepted |
