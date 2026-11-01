@@ -93,7 +93,7 @@ if [[ $dirty == 1 ]]; then
 			size=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
 			[[ $size -le $limit ]] || { git reset -q; fail "blobs: $f is $((size / 1024 / 1024)) MiB, over the $limit_mib MiB limit (not committed)"; }
 		done < <(git diff --cached --name-only --diff-filter=AM -z)
-		tmp=$(mktemp)
+		tmp=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
 		trap 'rm -f "$tmp"' EXIT
 		if [[ -n $msg_file ]]; then cat "$msg_file" >"$tmp"; else printf '%s\n' "$subject" >"$tmp"; fi
 		if [[ -n ${KOINON_COMMIT_FOOTER:-} ]]; then printf '\n%s\n' "$KOINON_COMMIT_FOOTER" >>"$tmp"; fi
@@ -161,7 +161,7 @@ else
 	# 5. gitleaks over every commit CI will scan
 	command -v gitleaks >/dev/null || fail "gitleaks is not installed"
 	n=$(git rev-list --count origin/main..HEAD)
-	glog=$(mktemp)
+	glog=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
 	if ! gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" . >"$glog" 2>&1; then
 		tail -n 8 "$glog" >&2
 		rm -f "$glog"
