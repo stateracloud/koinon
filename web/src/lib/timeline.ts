@@ -8,7 +8,7 @@ import type { JsonObject } from '@bufbuild/protobuf'
 import { timestampMs, type Timestamp } from '@bufbuild/protobuf/wkt'
 import type { RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { ActorKind, type TaskEvent } from '@/gen/koinon/task/v1alpha1/task_pb'
-import { obj, str } from '@/lib/json'
+import { arr, obj, str } from '@/lib/json'
 import { stateLabel, taskStateFromName } from '@/lib/labels'
 
 export type TimelineItem =
@@ -286,8 +286,9 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
       // agentd found an MCP server the agent may use not serving tools before it started the harness
       // (#326). {attempt, servers: [{name, reason}], reason}: the first miss is retried, the second
       // fails the run.
-      const servers = Array.isArray(p.servers) ? (p.servers as Array<Record<string, unknown>>) : []
-      const names = servers.map((s) => str(s?.name)).filter((n): n is string => !!n)
+      const names = arr(p.servers)
+        .map((s) => str(obj(s)?.name))
+        .filter((n): n is string => !!n)
       const what = names.length > 0 ? `the MCP server${names.length > 1 ? 's' : ''} ${names.join(', ')}` : 'an MCP server'
       const tail = p.attempt === 2 ? ' again' : ' and will check once more before it starts'
       return { key, at, type: 'note', text: `Run ${shortId(runId)} found ${what} not serving tools${tail}`, runId }

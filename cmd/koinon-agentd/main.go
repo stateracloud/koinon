@@ -42,6 +42,7 @@ type config struct {
 	openshellTLSDir  string
 	openshellName    string
 	savedWorkKeyFile string
+	mcpCheckKeyFile  string
 	metricsAddr      string
 
 	// The internal OTLP listener of koinon-api, where run spans go (ADR 0074): its base URL and
@@ -74,6 +75,9 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.otlpTokenFile, "otlp-token-file", "",
 		"file with the bearer token that listener requires (the Secret koinon-otlp-token, key token, mounted read-only); required with --otlp-endpoint")
 	fs.StringVar(&c.savedWorkKeyFile, "saved-work-key-file", "", "file with the key that signs saved-work posts (the Secret koinon-api creates, mounted read-only)")
+	fs.StringVar(&c.mcpCheckKeyFile, "mcp-check-key-file", "",
+		"file with a gateway key that lists the tools of every MCP server (read-only mount); a run then asks the gateway at "+
+			"session start whether an allowed server's tools are missing (#326). Empty: the servers' health record is read instead")
 	fs.StringVar(&c.pool.SavedWorkURL, "saved-work-url", "",
 		"koinon-api's tools listener, where the uncommitted work of a stuck sandbox is posted to be sealed (ADR 0054); empty: not saved")
 	fs.StringVar(&c.pool.GatewayURL, "gateway-url", "",
@@ -183,6 +187,9 @@ func run() error {
 
 	if cfg.savedWorkKeyFile != "" {
 		cfg.pool.SavedWorkKey = func() ([]byte, error) { return os.ReadFile(cfg.savedWorkKeyFile) } //nolint:gosec // an operator-set path
+	}
+	if cfg.mcpCheckKeyFile != "" {
+		cfg.pool.MCPTools = agentd.GatewayMCPLister{URL: cfg.pool.GatewayURL, KeyFile: cfg.mcpCheckKeyFile}
 	}
 	if cfg.checkpoints {
 		cp, err := checkpointsFrom(cfg)
