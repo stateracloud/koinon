@@ -107,3 +107,4 @@ are in [0046](0046-adr-conventions.md).
 | [0085](0085-upgrade-compatibility-and-recovery-policy.md) | Upgrade, compatibility and recovery policy | Accepted (scope decided by Andre, 2026-10-31; decisions of 2026-11-01; a v0.1.0 gate) |
 | [0086](0086-stored-org-default-model.md) | The org default model is stored, not derived | Accepted |
 | [0087](0087-turn-policy-is-a-pure-state-machine.md) | Turn policy is a pure state machine | Accepted |
+| [0088](0088-cli-stack.md) | The command-line stack: cobra, pflag and viper, with Charm on a terminal only | Accepted |
