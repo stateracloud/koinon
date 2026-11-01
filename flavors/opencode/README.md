@@ -165,7 +165,9 @@ runs `failOpen`, so a server it cannot reach is silently left out of the tool li
 the harness, agentd therefore checks the control plane's health record of those servers (unhealthy,
 or failing probes below the threshold; a disabled or removed server only gets the note at session
 start). The reconciler's prober refreshes that record every 60 s, so a server that drops between two
-probes is not caught. A miss records the run event `run.mcp_server_missing`, waits `MCPRetryDelay`
+probes is not caught by the record alone. So agentd also asks the gateway what it lists to the agent
+right now, under the agent's own key (koinon-api holds it and lists the tools; agentd and the sandbox
+never see it; ADR 0057 amendment 2026-11-01, issue #488). A miss, from either, records the run event `run.mcp_server_missing`, waits `MCPRetryDelay`
 (75 s by default, a probe interval plus slack) and looks once more. If the servers are back the run
 records `run.mcp_server_recovered` and the first turn's root span carries `koinon.mcp.missing_servers`
 and `koinon.mcp.missing_attempts=1`. A second miss fails the run before any turn starts: it has no

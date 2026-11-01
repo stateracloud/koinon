@@ -586,6 +586,12 @@ type Querier interface {
 	// max_output, or the price could not be used (price_error).
 	ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesParams) ([]ListFlaggedPricesRow, error)
 	ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpServer, error)
+	// The servers an agent may use that the gateway should serve right now, with the tools it should
+	// list for each by tier, for the live check agentd runs before the harness starts (issue #488). An
+	// unhealthy server is left out: ListMissingMCPServersOfAgent has it already and the planner withdraws
+	// its tools. A server with no present, permitted tool (never probed, or all in the never tier) is
+	// returned with empty lists and not expected to list anything.
+	ListMCPServersToCheckLive(ctx context.Context, arg ListMCPServersToCheckLiveParams) ([]ListMCPServersToCheckLiveRow, error)
 	ListMCPTools(ctx context.Context, orgID pgtype.UUID) ([]McpTool, error)
 	ListMCPToolsOfServer(ctx context.Context, arg ListMCPToolsOfServerParams) ([]McpTool, error)
 	// The servers an agent may use that Koinon has found not serving tools right now, and has not
