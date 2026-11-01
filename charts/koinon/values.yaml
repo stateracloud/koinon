@@ -619,8 +619,8 @@ sandboxPolicy:
   namespaceSelector:
     matchLabels:
       openshell.ai/managed-by: openshell
-  # Runtime classes allowed for sandbox workload pods (the vm tier, ADR 0075). The schema accepts
-  # only Kata classes (^kata(-[a-z0-9-]+)?$) and, for the dev tier on kind, runc. kata-qemu-runtime-rs
+  # Runtime classes allowed for sandbox workload pods (the vm tier, ADR 0075). Any class not
+  # listed here is refused by the policy. kata-qemu-runtime-rs
   # is the Rust runtime Kata 3.x ships beside kata-qemu (#442). The RuntimeClass the reconciler
   # requests stays openshell.runtimeClassName and must be one of these.
   runtimeClasses: [kata, kata-qemu, kata-qemu-runtime-rs]
