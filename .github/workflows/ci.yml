@@ -169,7 +169,7 @@ jobs:
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       # The reconciler runs per-sandbox jobs concurrently (LT1); keep its state guarded.
       # A Ginkgo suite: ginkgo writes one testcase per spec to the report.
-      - run: go tool ginkgo -race --procs=1 --junit-report=go-race.xml --output-dir=reports/go ./internal/reconciler/
+      - run: mkdir -p reports/go && go tool ginkgo -race --procs=1 --junit-report=go-race.xml --output-dir=reports/go ./internal/reconciler/
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
