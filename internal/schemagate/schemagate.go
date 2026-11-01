@@ -20,7 +20,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// undefinedTable is the SQLSTATE of a query on a table that does not exist.
+const undefinedTable = "42P01"
 
 // DefaultInterval is how often the gate re-reads the schema version.
 const DefaultInterval = 15 * time.Second
@@ -43,6 +47,10 @@ type Schema struct{ Version, MinReader int64 }
 func Read(ctx context.Context, q Querier) (Schema, error) {
 	var s Schema
 	if err := q.QueryRow(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied`).Scan(&s.Version); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == undefinedTable {
+			return Schema{}, nil // goose never ran: no goose_db_version table yet
+		}
 		return Schema{}, fmt.Errorf("read the schema version: %w", err)
 	}
 	var has bool
