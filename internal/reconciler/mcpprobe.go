@@ -8,15 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/reconciler/gatewayplan"
 	"github.com/stateracloud/koinon/internal/safego"
 )
 
@@ -33,16 +32,6 @@ import (
 // and its tools are simply missing from the list; "no tools" is therefore the failure the prober
 // sees. The reason is only what the gateway returned: the credential never leaves the gateway, so the
 // prober does not ask the server itself.
-
-// mcpProbe is one server the prober lists.
-type mcpProbe struct {
-	org      pgtype.UUID
-	orgSlug  string
-	server   pgtype.UUID
-	name     string
-	target   string
-	material string
-}
 
 const (
 	mcpProbeTimeout    = 20 * time.Second
@@ -69,9 +58,7 @@ func (r *Reconciler) RunProber(ctx context.Context) {
 
 // ProbeAll probes every served server once.
 func (r *Reconciler) ProbeAll(ctx context.Context) {
-	r.mu.Lock()
-	probes := slices.Clone(r.probes)
-	r.mu.Unlock()
+	probes := r.plan.Probes()
 	sem := make(chan struct{}, mcpProbeParallel)
 	var wg sync.WaitGroup
 	for _, p := range probes {
@@ -98,11 +85,11 @@ func (b bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // listTools lists the server's tools through the gateway, with the gateway's prefix removed.
-func (r *Reconciler) listTools(ctx context.Context, p mcpProbe) ([]mcpservers.ListedTool, error) {
+func (r *Reconciler) listTools(ctx context.Context, p gatewayplan.Probe) ([]mcpservers.ListedTool, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "koinon-mcp-prober", Version: "0"}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint:             fmt.Sprintf("http://%s:%d/mcp", r.cfg.Gateway.Host, r.cfg.Gateway.Port),
-		HTTPClient:           &http.Client{Transport: bearerTransport{key: p.material, base: http.DefaultTransport}},
+		HTTPClient:           &http.Client{Transport: bearerTransport{key: p.Material, base: http.DefaultTransport}},
 		DisableStandaloneSSE: true,
 		MaxRetries:           -1,
 	}, nil)
@@ -111,7 +98,7 @@ func (r *Reconciler) listTools(ctx context.Context, p mcpProbe) ([]mcpservers.Li
 	}
 	defer func() { _ = session.Close() }()
 	var out []mcpservers.ListedTool
-	prefix := p.target + "_"
+	prefix := p.Target + "_"
 	var cursor string
 	for range mcpMaxToolPages {
 		res, err := session.ListTools(ctx, &mcp.ListToolsParams{Cursor: cursor})
@@ -141,10 +128,10 @@ func jsonOf(v any) (json.RawMessage, error) {
 	return b, err
 }
 
-func (r *Reconciler) probeOne(ctx context.Context, p mcpProbe) {
+func (r *Reconciler) probeOne(ctx context.Context, p gatewayplan.Probe) {
 	ctx, cancel := context.WithTimeout(ctx, mcpProbeTimeout)
 	defer cancel()
-	log := r.log.With("org", p.orgSlug, "server", p.name)
+	log := r.log.With("org", p.OrgSlug, "server", p.Name)
 	tools, err := r.listTools(ctx, p)
 	reason := ""
 	switch {
@@ -157,7 +144,7 @@ func (r *Reconciler) probeOne(ctx context.Context, p mcpProbe) {
 	if reason != "" {
 		// Only what the gateway returned: the server's credential never leaves the gateway, so the
 		// prober cannot ask the server itself why.
-		if _, changed, err := r.mcp.RecordProbe(ctx, p.org, p.server, false, reason, false); errors.Is(err, mcpservers.ErrNotFound) {
+		if _, changed, err := r.mcp.RecordProbe(ctx, p.Org, p.Server, false, reason, false); errors.Is(err, mcpservers.ErrNotFound) {
 			return
 		} else if err != nil {
 			log.Warn("recording an MCP probe failed", "err", err)
@@ -166,7 +153,7 @@ func (r *Reconciler) probeOne(ctx context.Context, p mcpProbe) {
 		}
 		return
 	}
-	res, err := r.mcp.SyncTools(ctx, p.org, p.server, tools)
+	res, err := r.mcp.SyncTools(ctx, p.Org, p.Server, tools)
 	if err != nil {
 		log.Warn("syncing MCP tools failed", "err", err)
 		return
@@ -174,7 +161,7 @@ func (r *Reconciler) probeOne(ctx context.Context, p mcpProbe) {
 	if len(res.New)+len(res.Changed) > 0 {
 		log.Info("MCP tools synced", "new", len(res.New), "changed", len(res.Changed), "absent", len(res.Absent))
 	}
-	if _, changed, err := r.mcp.RecordProbe(ctx, p.org, p.server, true, "", true); err != nil {
+	if _, changed, err := r.mcp.RecordProbe(ctx, p.Org, p.Server, true, "", true); err != nil {
 		log.Warn("recording an MCP probe failed", "err", err)
 	} else if changed {
 		log.Info("MCP server is healthy")
