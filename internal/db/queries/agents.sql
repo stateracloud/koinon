@@ -112,3 +112,11 @@ UPDATE agents
 SET thinking = sqlc.narg(thinking)
 WHERE org_id = @org_id AND id = @id AND status <> 'archived'
 RETURNING *;
+
+-- name: SetAgentKeepWarm :one
+-- Whether an org admin asks for the agent's sandbox to stay up (#315). The operator's per-org cap
+-- decides how many of the requests the reconciler grants. Not a new version.
+UPDATE agents
+SET keep_warm = @keep_warm
+WHERE org_id = @org_id AND id = @id AND status <> 'archived'
+RETURNING *;

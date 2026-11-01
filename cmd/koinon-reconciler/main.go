@@ -169,6 +169,7 @@ func run() error {
 			ParkWarm:          cfg.parkWarm,
 			ArchiveAfter:      cfg.archiveAfter,
 			SandboxJobs:       cfg.sandboxJobs,
+			KeepWarmPerOrg:    cfg.keepWarmPerOrg,
 			ResyncInterval:    cfg.resyncInterval,
 			HomeRetention:     reconciler.Retention(cfg.homeRetention),
 			Checkpoints:       cfg.checkpoints,
