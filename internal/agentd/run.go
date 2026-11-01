@@ -459,15 +459,22 @@ func (r *runner) execute(ctx context.Context) error {
 		}
 	}
 	if model == "" {
-		// The org's first served model: providers by name, then models by name (PV1).
+		// The org's stored default model (#256); it is never derived from what the org serves.
 		var err error
-		if model, err = agentmodel.OrgDefault(fctx, r.p.cfg.Prices, r.q, r.run.OrgID, time.Now()); err != nil {
-			return r.dbErr(ctx, "load the org's models", err)
+		if model, err = agentmodel.OrgDefault(fctx, r.q, r.run.OrgID); err != nil {
+			return r.dbErr(ctx, "load the org's default model", err)
 		}
 		source = agentmodel.SourceOrgDefault
-	}
-	if model == "" {
-		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model with a price"}
+		if model == "" {
+			return &failure{reason: agentmodel.NoDefaultMessage}
+		}
+		var unusable *agentmodel.UnusableError
+		switch err := agentmodel.Check(fctx, r.p.cfg.Prices, r.q, r.run.OrgID, model, time.Now()); {
+		case errors.As(err, &unusable):
+			return &failure{reason: "the org's default model is not usable: " + unusable.Error() + "; set another default model"}
+		case err != nil:
+			return r.dbErr(ctx, "check the org's default model", err)
+		}
 	}
 	r.model, r.modelSource = model, source
 	r.tr.identify(agent, version, task, model)

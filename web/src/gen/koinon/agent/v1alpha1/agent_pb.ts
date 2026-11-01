@@ -977,14 +977,16 @@ export enum ModelSource {
   VERSION = 2,
 
   /**
-   * The org default: the first model the org serves and has a price for.
+   * The default model: the org's stored default model (ADR 0086), or the platform's
+   * --default-model when the org has none.
    *
    * @generated from enum value: MODEL_SOURCE_ORG_DEFAULT = 3;
    */
   ORG_DEFAULT = 3,
 
   /**
-   * Nothing: the org serves no priced model, so a run would fail.
+   * Nothing: the agent, its version and the platform name no model and the org has no default
+   * model, so a run would fail until an admin sets one.
    *
    * @generated from enum value: MODEL_SOURCE_NONE = 4;
    */

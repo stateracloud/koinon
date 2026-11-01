@@ -5,7 +5,9 @@ package catalog
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/audit"
@@ -206,9 +208,12 @@ func (s *Service) DeleteProvider(ctx context.Context, org pgtype.UUID, actor aud
 		if _, err := q.DeleteProvider(ctx, store.DeleteProviderParams{OrgID: org, ID: pid}); err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		if err := audit.RecordErr(ctx, q, audit.Event{
 			Org: org, Actor: actor, Action: "provider.delete", TargetKind: "provider", TargetID: id, Before: providerSummary(cur),
-		})
+		}); err != nil {
+			return err
+		}
+		return clearDefaultIfGone(ctx, q, org, actor)
 	})
 	return mapErr(err)
 }
@@ -303,6 +308,9 @@ func (s *Service) CreateModel(ctx context.Context, org pgtype.UUID, actor audit.
 		if err != nil {
 			return err
 		}
+		if err := adoptDefaultModel(ctx, q, org, actor, row.Name); err != nil {
+			return err
+		}
 		return audit.RecordErr(ctx, q, audit.Event{
 			Org: org, Actor: actor, Action: "model.create", TargetKind: "model", TargetID: id.String(), After: modelSummary(row),
 		})
@@ -382,9 +390,12 @@ func (s *Service) DeleteModel(ctx context.Context, org pgtype.UUID, actor audit.
 		if _, err := q.DeleteModel(ctx, store.DeleteModelParams{OrgID: org, ID: mid}); err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		if err := audit.RecordErr(ctx, q, audit.Event{
 			Org: org, Actor: actor, Action: "model.delete", TargetKind: "model", TargetID: id, Before: modelSummary(cur),
-		})
+		}); err != nil {
+			return err
+		}
+		return clearDefaultIfGone(ctx, q, org, actor)
 	})
 	return mapErr(err)
 }
@@ -456,4 +467,34 @@ func refitModelFormats(ctx context.Context, q *store.Queries, org pgtype.UUID, a
 		}
 	}
 	return nil
+}
+
+// clearDefaultIfGone clears the org's default model when the model it names no longer exists, in
+// the transaction that deleted the model, and audits it (#256). It never picks another model: that
+// silent change is what the stored default prevents. The agents without a model setting then fail
+// with agentmodel.NoDefaultMessage until an admin sets a default.
+func clearDefaultIfGone(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor) error {
+	old, err := q.ClearOrgDefaultModelIfGone(ctx, org)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // the default stays, or there was none
+	} else if err != nil {
+		return err
+	}
+	return audit.RecordErr(ctx, q, audit.Event{
+		Org: org, Actor: actor, Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
+		Before: map[string]any{"model": old}, After: map[string]any{"model": "", "reason": "model deleted"},
+	})
+}
+
+// adoptDefaultModel makes the org's first model its default model (#256). An org that has a default
+// keeps it: a later provider or model never moves the agents that run on it. The change is audited.
+func adoptDefaultModel(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor, model string) error {
+	n, err := q.SetOrgDefaultModelIfUnset(ctx, store.SetOrgDefaultModelIfUnsetParams{OrgID: org, DefaultModel: model})
+	if err != nil || n == 0 {
+		return err
+	}
+	return audit.RecordErr(ctx, q, audit.Event{
+		Org: org, Actor: actor, Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
+		Before: map[string]any{"model": ""}, After: map[string]any{"model": model, "reason": "first model"},
+	})
 }

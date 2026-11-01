@@ -38,6 +38,9 @@ func serveModel(ctx context.Context, e *env, name string, priced bool) string {
 		e.org, "prov-"+strings.NewReplacer("/", "-").Replace(name)).Scan(&providerID)).To(Succeed())
 	_, err := pool.Exec(ctx, `INSERT INTO models (org_id, provider_id, name) VALUES ($1, $2, $3)`, e.org, providerID, name)
 	Expect(err).NotTo(HaveOccurred())
+	// The org's first model is its default, as catalog.CreateModel does (#256).
+	_, err = pool.Exec(ctx, `UPDATE orgs SET default_model = $2 WHERE id = $1 AND default_model IS NULL`, e.org, name)
+	Expect(err).NotTo(HaveOccurred())
 	if priced {
 		_, err = pool.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by)
 			VALUES ($1, $2, jsonb_build_object('provider', 'openai', 'match', jsonb_build_object('glob', $3::text),
