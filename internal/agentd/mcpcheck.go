@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -93,6 +94,28 @@ func (l GatewayMCPLister) ListTools(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
+// expectsGrantedTools mirrors reconciler.mcpGrants: whether the gateway should offer this agent at
+// least one tool of the server, that is a present tool with a usable name, in the auto or ask tier,
+// that the agent's tool allowlist (nil means all) lets through.
+func (r *runner) expectsGrantedTools(ctx context.Context, slug string, s store.McpServer, allowlist []string) (bool, error) {
+	tools, err := r.q.ListMCPToolsOfServer(ctx, store.ListMCPToolsOfServerParams{OrgID: r.run.OrgID, ServerID: s.ID})
+	if err != nil {
+		return false, err
+	}
+	for _, t := range tools {
+		if !t.Present || (allowlist != nil && !slices.Contains(allowlist, t.Name)) {
+			continue
+		}
+		if mcpservers.ToolNameProblem(slug, s.Name, t.Name) != "" {
+			continue
+		}
+		if t.Tier == store.McpTierAuto || t.Tier == store.McpTierAsk {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // gatewayMissingMCPServers is the direct check: the servers the agent may use, not disabled or
 // removed and probed at least once, that have no tool in what the gateway offers. A server the
 // reconciler has not yet applied to the gateway (never probed) is not a miss. The error is the
@@ -105,6 +128,7 @@ func (r *runner) gatewayMissingMCPServers(ctx context.Context, lister MCPToolLis
 		return nil, err
 	}
 	var allowed []store.McpServer
+	var allowedRows []store.AgentMcpServer
 	for _, a := range rows {
 		s, err := r.q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: r.run.OrgID, ID: a.ServerID})
 		if err != nil {
@@ -114,6 +138,7 @@ func (r *runner) gatewayMissingMCPServers(ctx context.Context, lister MCPToolLis
 			continue
 		}
 		allowed = append(allowed, s)
+		allowedRows = append(allowedRows, a)
 	}
 	if len(allowed) == 0 {
 		return nil, nil
@@ -127,11 +152,21 @@ func (r *runner) gatewayMissingMCPServers(ctx context.Context, lister MCPToolLis
 		return nil, err
 	}
 	var out []missingMCPServer
-	for _, s := range allowed {
-		prefix := mcpservers.TargetName(slug, s.Name) + "_"
+	for i, s := range allowed {
+		// The reconciler grants auto-tier tools on the plain target and ask-tier tools on the
+		// "-ask" target, and nothing else. A server with no such tool for this agent is not
+		// expected to be offered, so it is not a miss.
+		expected, err := r.expectsGrantedTools(ctx, slug, s, allowedRows[i].Tools)
+		if err != nil {
+			return nil, err
+		}
+		if !expected {
+			continue
+		}
+		prefixes := []string{mcpservers.TargetName(slug, s.Name) + "_", mcpservers.AskTargetName(slug, s.Name) + "_"}
 		served := false
 		for _, t := range tools {
-			if strings.HasPrefix(t, prefix) {
+			if slices.ContainsFunc(prefixes, func(p string) bool { return strings.HasPrefix(t, p) }) {
 				served = true
 				break
 			}

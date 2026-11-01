@@ -21,6 +21,15 @@ import (
 var _ = Describe("Checking the agent's MCP servers before the harness starts", func() {
 	const retry = 300 * time.Millisecond
 
+	// tool adds a present tool of the given tier to an MCP server of the org.
+	tool := func(ctx context.Context, e *env, server, name, tier string) {
+		GinkgoHelper()
+		_, err := db.Exec(ctx, `INSERT INTO mcp_tools (org_id, server_id, name, content_hash, tier)
+			SELECT org_id, id, $3, repeat('a', 64), $4::mcp_tier FROM mcp_servers WHERE org_id = $1 AND name = $2`,
+			e.org, server, name, tier)
+		Expect(err).NotTo(HaveOccurred())
+	}
+
 	// allow adds an MCP server in the given health to the org and lets the agent use it.
 	allow := func(ctx context.Context, e *env, name, health string, failures int, extra string) {
 		GinkgoHelper()
@@ -32,6 +41,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		_, err := db.Exec(ctx, `INSERT INTO agent_mcp_servers (org_id, agent_id, server_id) VALUES ($1, $2, $3::uuid)`,
 			e.org, e.agent.ID, id)
 		Expect(err).NotTo(HaveOccurred())
+		tool(ctx, e, name, "create_issue", "auto")
 	}
 	setHealth := func(ctx context.Context, e *env, name string) {
 		GinkgoHelper()
@@ -158,6 +168,42 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 			l := &stubLister{tools: []string{slug + "-tracker_create_issue"}}
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", withTools(l))
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Expect(missing(ctx, r)()).To(BeEmpty())
+		})
+
+		It("counts a server whose tools are all ask-tier as served by its ask target", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			allow(ctx, e, "tracker", "healthy", 0, "")
+			_, err := db.Exec(ctx, `UPDATE mcp_tools SET tier = 'ask' WHERE org_id = $1`, e.org)
+			Expect(err).NotTo(HaveOccurred())
+			slug, err := q.GetOrgSlug(ctx, e.org)
+			Expect(err).NotTo(HaveOccurred())
+			l := &stubLister{tools: []string{slug + "-tracker-ask_create_issue"}}
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withTools(l))
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Expect(missing(ctx, r)()).To(BeEmpty())
+		})
+
+		It("expects nothing from a server whose tools are all denied", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			allow(ctx, e, "tracker", "healthy", 0, "")
+			_, err := db.Exec(ctx, `UPDATE mcp_tools SET tier = 'never' WHERE org_id = $1`, e.org)
+			Expect(err).NotTo(HaveOccurred())
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withTools(&stubLister{}))
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Expect(missing(ctx, r)()).To(BeEmpty())
+		})
+
+		It("expects nothing from a server when the agent's tool allowlist leaves no granted tool", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			allow(ctx, e, "tracker", "healthy", 0, "")
+			_, err := db.Exec(ctx, `UPDATE agent_mcp_servers SET tools = ARRAY['other_tool'] WHERE org_id = $1`, e.org)
+			Expect(err).NotTo(HaveOccurred())
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withTools(&stubLister{}))
 			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 			Expect(missing(ctx, r)()).To(BeEmpty())
 		})
