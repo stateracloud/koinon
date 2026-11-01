@@ -164,6 +164,11 @@
       "properties": {
         "image": {"$ref": "#/definitions/koinonImage"},
         "replicas": {"type": "integer", "minimum": 0},
+        "podDisruptionBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"maxUnavailable": {"type": "integer", "minimum": 1}}
+        },
         "workers": {"type": "integer", "minimum": 1},
         "lease": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
         "drainDeadlineSeconds": {"type": "integer", "minimum": 1},
