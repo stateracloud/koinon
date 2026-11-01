@@ -33,6 +33,6 @@ export function OrgProvider({ memberships, children }: { memberships: readonly M
       },
     }
   }, [memberships, chosen])
-  if (!value) return <p className="p-6">You are not a member of any organization yet.</p>
+  if (!value) return <p className="p-6">You are not a member of any org yet.</p>
   return <OrgContext.Provider value={value}>{children}</OrgContext.Provider>
 }

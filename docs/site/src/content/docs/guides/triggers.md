@@ -1,6 +1,6 @@
 ---
 title: Triggers
-description: Start an agent's work on a schedule, or with a direct message in the inbox chat.
+description: Start an agent's work on a schedule, or with a direct message in the inbox.
 ---
 
 A trigger starts a task for an agent without a person creating it. A trigger has an ID, a type, a
@@ -69,10 +69,10 @@ asked**:
 - **The org's owners**, or **all members** (everyone with the member role or higher).
 - **A person.** Pick a member who can answer questions. The choice is checked when you propose the
   version, and again when the question is asked: if that person has left the org or become a viewer, the
-  question goes to the org's admins and the agent is told so.
+  question goes to the org admins (admins and owners) and the agent is told so.
 - **A chat channel** is for v0.2, when Slack and Teams connectors exist. The editor shows it disabled.
 
-A direct-message trigger takes no target: it asks the person in the chat. A template can name a role but
+A direct-message trigger takes no target: it asks the person in the thread. A template can name a role but
 never a person or a channel, because both belong to one org; pick the person on the agent's Edit triggers
 page after you create the agent.
 
@@ -82,8 +82,8 @@ button, so a test fire behaves like the real one.
 
 ## Direct message
 
-A direct-message trigger lets people chat with the agent in the inbox. An agent has at most one, and it
-has no filter. Without it the agent takes no direct messages, the chat says so and offers no text box.
+A direct-message trigger lets people message the agent in the inbox. An agent has at most one, and it
+has no filter. Without it the agent takes no direct messages, the inbox says so and offers no text box.
 
 The thread is the task. The first message starts a task whose title is the message's first line. The
 agent sees the trigger's instruction followed by your text, and the timeline shows only your text. Your

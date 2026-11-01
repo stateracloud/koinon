@@ -153,7 +153,7 @@ describe('buildTimeline', () => {
   })
 
   it('shows a session reset as a note', () => {
-    const message = "The agent's workspace was reset, so this run starts a new session."
+    const message = "The agent's home was reset, so this run starts a new session."
     const items = buildTimeline(
       [
         taskEvent(1, 100, 'run.session_reset', { message, previousSessionId: 'ses_1', sessionId: 'ses_2' }),
