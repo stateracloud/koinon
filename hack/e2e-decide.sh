@@ -61,7 +61,7 @@ pull_request)
   else
     rule "$base"
     if [[ $rc -ne 1 ]]; then
-      summary "Does not run. This PR is e2e-relevant per hack/needs-e2e.sh (or the rule could not be evaluated, exit $rc):"$'\n\n'"$text"$'\n\n'"Run \`hack/e2e-remote.sh\` (or \`--local\`), or add the \`e2e\` label to run it here."
+      summary "Does not run. This PR is e2e-relevant per hack/needs-e2e.sh (or the rule could not be evaluated, exit $rc):"$'\n\n'"$text"$'\n\n'"Run \`hack/e2e-remote.sh\` (your own Docker), or add the \`e2e\` label to run it here."
     else
       summary "Does not run: nothing in this pull request needs the kind e2e."
     fi
