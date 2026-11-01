@@ -6,6 +6,16 @@
 #   - numbers are unique and contiguous from 00001
 #   - with a base ref argument: migrations present on the base are unchanged
 #     (forward-only, ADR 0027), except the one-time edits listed in allowed_edits
+#   - on a patch line (ADR 0085, decisions 5 and 6): migrations the branch adds must not contain
+#     RENAME, DROP COLUMN, DROP TABLE, DROP TYPE or a column type change, so the previous patch
+#     release's binaries keep working on the new schema (expand now, contract in the next minor).
+#
+# A patch line is any of: the marker file hack/migrate-patch-line, read at the merge base, names a
+# shipped minor line (for example v0.1) instead of "none"; the base ref is named release/<anything>;
+# or MIGRATE_LINT_PATCH_LINE=1. Patch tags are cut from main (hack/release-gate.sh requires an
+# ancestor of origin/main), so the marker is what makes the rule bite on main: it is set to the
+# minor line when that line's .0 ships, and reset to "none" in the change that opens the next
+# minor line (ADR 0085, open question on detection). Before the first final release it is "none".
 set -euo pipefail
 
 dir=internal/db/migrations
@@ -27,7 +37,7 @@ allowed() {
 }
 
 expected=1
-for f in $(ls "$dir"/*.sql | sort); do
+for f in "$dir"/*.sql; do
   name=$(basename "$f")
   if [[ ! $name =~ ^([0-9]{5})_[a-z0-9_]+\.sql$ ]]; then
     echo "bad migration name: $name (want NNNNN_snake_case.sql)"; fail=1; continue
@@ -49,6 +59,70 @@ if [[ -n $base ]]; then
   if [[ -n $changed ]]; then
     echo "merged migrations must not change:"; echo "$changed"; fail=1
   fi
+fi
+
+# Statements that break the previous patch release's binaries. Matched case-insensitively on each
+# statement with comments removed and whitespace collapsed.
+contract_re='(^|[^a-z0-9_])(rename[[:space:]]|drop[[:space:]]+(column|table|type)[[:space:]]|alter[[:space:]]+(column[[:space:]]+)?[^[:space:]]+[[:space:]]+(set[[:space:]]+data[[:space:]]+)?type[[:space:]])'
+# ALTER TABLE ... DROP [COLUMN] [IF EXISTS] x: COLUMN is optional, so a DROP in an ALTER TABLE is a
+# column drop unless it drops a constraint, NOT NULL, a default, an identity or a generated expression.
+drop_col_re='(^|[^a-z0-9_])alter[[:space:]]+table[[:space:]].*[[:space:]]drop[[:space:]]'
+drop_other_re='[[:space:]]drop[[:space:]]+(constraint|not[[:space:]]+null|default|identity|expression)([^a-z0-9_]|$)'
+marker=hack/migrate-patch-line
+patch_line() {
+  [[ ${MIGRATE_LINT_PATCH_LINE:-} == 1 ]] && return 0
+  local m
+  m=$(git show "$(git merge-base "$base" HEAD):$marker" 2>/dev/null || cat "$marker" 2>/dev/null || true)
+  m=$(echo "$m" | tr -d '[:space:]')
+  [[ -n $m && $m != none ]] && return 0
+  [[ $base == release/* || $base == */release/* ]]
+}
+
+# Remove "--" line comments and "/* */" block comments (also multi-line) outside single-quoted
+# strings ('' is an escaped quote). Portable awk: no gawk-only features.
+strip_sql_comments() {
+  awk '
+    BEGIN { q = sprintf("%c", 39); inq = 0; inb = 0 }
+    {
+      out = ""; n = length($0); i = 1
+      while (i <= n) {
+        c = substr($0, i, 1); d = substr($0, i, 2)
+        if (inb) {
+          if (d == "*/") { inb = 0; i += 2 } else i++
+        } else if (inq) {
+          out = out c
+          if (c == q) inq = 0
+          i++
+        } else if (d == "--") {
+          break
+        } else if (d == "/*") {
+          inb = 1; out = out " "; i += 2
+        } else {
+          if (c == q) inq = 1
+          out = out c; i++
+        }
+      }
+      print out
+    }' "$1"
+}
+
+if [[ -n $base ]] && patch_line; then
+  added=$(git diff --name-only --diff-filter=A "$(git merge-base "$base" HEAD)" -- ":(glob)$dir/*.sql" || true)
+  for f in $added; do
+    # One statement per record: drop comments, split on ";", collapse whitespace.
+    stmts=$(strip_sql_comments "$f" | awk -v RS=';' '{ gsub(/[[:space:]]+/, " "); print }')
+    hits=$(echo "$stmts" | grep -iE "$contract_re" || true)
+    # A DROP in ALTER TABLE that is not one of the safe kinds. A statement may hold several
+    # comma-separated actions, so split on commas before looking for the safe kinds.
+    drops=$(echo "$stmts" | grep -iE "$drop_col_re" | sed -E 's/,/\n/g' |
+      grep -iE '(^|[[:space:]])drop[[:space:]]' | grep -ivE "$drop_other_re" || true)
+    [[ -n $drops ]] && hits=$(printf '%s\n%s' "$hits" "$drops" | sed '/^$/d')
+    if [[ -n $hits ]]; then
+      echo "$f: breaks the previous patch release on a patch line (ADR 0085): expand now, contract in the next minor"
+      echo "$hits" | cut -c1-120 | sed 's/^/    /'
+      fail=1
+    fi
+  done
 fi
 
 exit $fail
