@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -71,5 +72,24 @@ var _ = Describe("OTLP exporter settings", func() {
 		_, err = parseFlags(otlp(endpoint, tokenFile("hunter2")))
 		Expect(err).To(MatchError(ContainSubstring("at least")))
 		Expect(err.Error()).NotTo(ContainSubstring("hunter2"))
+	})
+})
+
+var _ = Describe("Drain deadline", func() {
+	base := []string{"--database-url", "postgres://x@db/koinon", "--openshell-address", "o:1", "--gateway-url", "http://g:8080"}
+
+	It("defaults to 5 minutes and takes a flag or the environment (ADR 0085)", func() {
+		c, err := parseFlags(base)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.pool.DrainDeadline).To(Equal(5 * time.Minute))
+
+		c, err = parseFlags(append([]string{"--drain-deadline", "90s"}, base...))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.pool.DrainDeadline).To(Equal(90 * time.Second))
+
+		GinkgoT().Setenv("KOINON_DRAIN_DEADLINE", "2m")
+		c, err = parseFlags(base)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.pool.DrainDeadline).To(Equal(2 * time.Minute))
 	})
 })
