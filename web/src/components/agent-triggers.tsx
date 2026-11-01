@@ -114,7 +114,7 @@ export function AgentTriggers({ agent, canEdit }: { agent: Agent; canEdit: boole
       {editing ? (
         <Editor agent={agent} initial={shown} members={members} onDone={() => setEditing(false)} />
       ) : shown.length === 0 ? (
-        <p className="text-muted-foreground">None. Nothing starts work on this agent except tickets.</p>
+        <p className="text-muted-foreground">None. Nothing starts work on this agent except tasks people create.</p>
       ) : (
         <ul className="grid gap-2">
           {shown.map((t) => (

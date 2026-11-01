@@ -162,15 +162,15 @@ export function sourceLabel(s: Server): string {
 
 export const tiers = [
   { value: Tier.ASK, label: 'Ask', help: 'A human approves each call.' },
-  { value: Tier.AUTO, label: 'Auto', help: 'The agent calls the tool directly.' },
-  { value: Tier.NEVER, label: 'Never', help: 'No agent may call the tool.' },
+  { value: Tier.AUTO, label: 'Allow', help: 'The agent calls the tool directly.' },
+  { value: Tier.NEVER, label: 'Deny', help: 'No agent may call the tool.' },
 ] as const
 
 export function tierLabel(t: Tier): string {
   return tiers.find((x) => x.value === t)?.label ?? 'Ask'
 }
 
-export const tierExplanation = 'Ask means a human approves each call; Auto means the agent calls the tool directly.'
+export const tierExplanation = 'Ask means a human approves each call; Allow means the agent calls the tool directly.'
 
 export function healthLabel(h: Health): string {
   switch (h) {
