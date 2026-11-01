@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-package main
+package koinonapi
 
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"k8s.io/client-go/dynamic"
@@ -16,17 +14,21 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/preflight"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
 type preflightConfig struct {
-	kubeconfig string
-	namespace  string
-	timeout    time.Duration
-	check      preflight.Config
-	tlsDir     string
+	kubeconfig       string
+	namespace        string
+	timeout          time.Duration
+	check            preflight.Config
+	tlsDir           string
+	supervisorImages string
 
 	seccompProbe     bool
 	probeImage       string
@@ -40,11 +42,10 @@ type preflightConfig struct {
 	netpolNamePrefix string
 }
 
-func parsePreflightFlags(args []string) (preflightConfig, error) {
-	var c preflightConfig
-	fs := flag.NewFlagSet("koinon-api preflight", flag.ContinueOnError)
+// flags registers the flags of "koinon-api preflight".
+func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config")
-	fs.StringVar(&c.namespace, "namespace", os.Getenv("POD_NAMESPACE"), "release namespace, where the seccomp probe pod runs")
+	fs.StringVar(&c.namespace, "namespace", "", "release namespace, where the seccomp probe pod runs")
 	fs.DurationVar(&c.timeout, "call-timeout", 15*time.Second, "timeout of each Kubernetes API and gateway call")
 	c.check.PostgresMode, c.check.GatewayMode = project.PostgresCNPG, project.GatewayStandalone
 	fs.Var(&c.check.PostgresMode, "postgres-mode", "postgres.mode: cnpg or external")
@@ -62,7 +63,7 @@ func parsePreflightFlags(args []string) (preflightConfig, error) {
 	fs.BoolVar(&c.check.ExpectSandboxPullSecrets, "expect-sandbox-pull-secrets", false, "the release pulls with credentials or through a mirror: warn when the OpenShell gateway has no sandbox pull secrets")
 	fs.StringVar(&c.check.OpenShellGatewayID, "openshell-gateway-id", "", "openshell.gatewayId: warn when it differs from the OpenShell gateway's gateway_id (the sandbox observer's namespaces)")
 	fs.BoolVar(&c.check.SandboxObserverDisabled, "sandbox-observer-disabled", false, "sandboxObserver.enabled is false: warn that pull failures will show an unknown cause")
-	supervisorImages := fs.String("supervisor-images", "", "comma-separated sandboxPolicy.supervisorImages: warn when the OpenShell gateway's supervisor image is not one of them")
+	fs.StringVar(&c.supervisorImages, "supervisor-images", "", "comma-separated sandboxPolicy.supervisorImages: warn when the OpenShell gateway's supervisor image is not one of them")
 	fs.BoolVar(&c.seccompProbe, "seccomp-probe", true, "run a pod with the sandbox RuntimeClass to check Kata guest seccomp")
 	fs.StringVar(&c.probeImage, "probe-image", "", "image of the seccomp probe pod (this binary's image)")
 	fs.StringVar(&c.probePullSecrets, "probe-image-pull-secrets", "", "comma-separated image pull Secrets of the probe pod")
@@ -72,59 +73,77 @@ func parsePreflightFlags(args []string) (preflightConfig, error) {
 	fs.BoolVar(&c.netpolProbe, "netpol-probe", true, "run two pods and a NetworkPolicy to check that NetworkPolicy is enforced")
 	fs.DurationVar(&c.netpolTimeout, "netpol-probe-timeout", 90*time.Second, "how long the NetworkPolicy probe may take, image pulls included")
 	fs.StringVar(&c.netpolNamePrefix, "netpol-probe-name-prefix", "koinon-preflight-netpol", "name prefix of the NetworkPolicy probe's objects")
-	if err := fs.Parse(args); err != nil {
-		return c, err
-	}
-	if fs.NArg() > 0 {
-		return c, fmt.Errorf("unexpected arguments %q", fs.Args())
-	}
+}
+
+// validate fills what the flags imply and checks the rules between them.
+func (c *preflightConfig) validate() error {
 	c.check.OpenShellPlaintext = c.tlsDir == ""
-	c.check.SupervisorImages = splitList(*supervisorImages)
+	c.check.SupervisorImages = splitList(c.supervisorImages)
 	if c.seccompProbe && (c.probeImage == "" || c.namespace == "") {
-		return c, errors.New("--seccomp-probe needs --probe-image and --namespace (or POD_NAMESPACE)")
+		return errors.New("--seccomp-probe needs --probe-image and --namespace (or POD_NAMESPACE)")
 	}
 	if c.netpolProbe && (c.probeImage == "" || c.namespace == "") {
-		return c, errors.New("--netpol-probe needs --probe-image and --namespace (or POD_NAMESPACE)")
+		return errors.New("--netpol-probe needs --probe-image and --namespace (or POD_NAMESPACE)")
 	}
-	return c, nil
+	return nil
 }
 
-// runNetPolClient is "preflight netpol-client", the NetworkPolicy probe's client pod.
-func runNetPolClient(ctx context.Context, args []string, out io.Writer) error {
-	var c preflight.NetPolClient
-	fs := flag.NewFlagSet("koinon-api preflight netpol-client", flag.ContinueOnError)
-	fs.StringVar(&c.Host, "target", "", "IP of the probe server pod")
-	fs.DurationVar(&c.Window, "window", 5*time.Second, "how long the denied port must keep answering to count as open")
-	if err := fs.Parse(args); err != nil {
-		return err
+func newPreflightCommand() *cobra.Command {
+	var c preflightConfig
+	cmd := &cobra.Command{
+		Use:   "preflight",
+		Short: "Check the cluster for Koinon's install prerequisites",
+		Long: "Checks the cluster for Koinon's install prerequisites and exits non-zero when one is missing (plan item H2); " +
+			"the chart runs it as a pre-install and pre-upgrade hook Job. It needs no database. " +
+			"Its subcommands are what the probe pods run.",
+		Args:    cobra.NoArgs,
+		PreRunE: func(*cobra.Command, []string) error { return c.validate() },
+		RunE:    func(cmd *cobra.Command, _ []string) error { return runPreflight(cmd.Context(), c, cmd.OutOrStdout()) },
 	}
-	if c.Host == "" || fs.NArg() > 0 {
-		return errors.New("netpol-client needs --target and no other arguments")
-	}
-	_, err := fmt.Fprintln(out, c.Run(ctx))
-	return err
-}
+	c.flags(cmd.Flags())
+	cli.EnvAlias(cmd, "namespace", "POD_NAMESPACE")
 
-// runPreflight is "koinon-api preflight": the install checks, or what the probe pods run:
-// "preflight probe" (seccomp), "preflight netpol-server" and "preflight netpol-client".
-func runPreflight(ctx context.Context, args []string, out io.Writer) error {
-	switch {
-	case len(args) == 1 && args[0] == "probe":
-		res, err := preflight.SelfProbe()
-		if err != nil {
+	cmd.AddCommand(&cobra.Command{
+		Use:   "probe",
+		Short: "Run inside the seccomp probe pod: report what the guest kernel allows",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			res, err := preflight.SelfProbe()
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), res)
 			return err
-		}
-		_, err = fmt.Fprintln(out, res)
-		return err
-	case len(args) == 1 && args[0] == "netpol-server":
-		return preflight.ServeNetPolProbe(ctx, "")
-	case len(args) > 0 && args[0] == "netpol-client":
-		return runNetPolClient(ctx, args[1:], out)
+		},
+	}, &cobra.Command{
+		Use:   "netpol-server",
+		Short: "Run inside the NetworkPolicy probe's server pod",
+		Args:  cobra.NoArgs,
+		RunE:  func(cmd *cobra.Command, _ []string) error { return preflight.ServeNetPolProbe(cmd.Context(), "") },
+	}, newNetPolClientCommand())
+	return cmd
+}
+
+// newNetPolClientCommand is "preflight netpol-client", the NetworkPolicy probe's client pod.
+func newNetPolClientCommand() *cobra.Command {
+	var c preflight.NetPolClient
+	cmd := &cobra.Command{
+		Use:   "netpol-client",
+		Short: "Run inside the NetworkPolicy probe's client pod",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), c.Run(cmd.Context()))
+			return err
+		},
 	}
-	cfg, err := parsePreflightFlags(args)
-	if err != nil {
-		return err
-	}
+	cmd.Flags().StringVar(&c.Host, "target", "", "IP of the probe server pod")
+	cmd.Flags().DurationVar(&c.Window, "window", 5*time.Second, "how long the denied port must keep answering to count as open")
+	mustRequire(cmd, "target")
+	return cmd
+}
+
+// runPreflight is "koinon-api preflight": the install checks.
+func runPreflight(ctx context.Context, cfg preflightConfig, out io.Writer) error {
 	rc, err := restConfig(cfg.kubeconfig)
 	if err != nil {
 		return err
