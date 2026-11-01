@@ -35,8 +35,22 @@ kubectl --context homelab -n koinon create secret docker-registry dev-registry \
   --docker-username=<pull user> --docker-password="<read the pull credential from the secret store>"
 ```
 
-Then `make dev` (see [loop.md](loop.md)). The Tiltfile allows the contexts of `hack/dev/local.homelab.example.yaml` (`homelab`, `homelab-koinon`)
-and `kind-koinon-*`.
+Then `make dev` (see [loop.md](loop.md)). The Tiltfile allows `kind-koinon-*` and the contexts listed in your git-ignored `hack/dev/local.yaml`
+(see "Maintainer config outside the repository" below).
+
+## Maintainer config outside the repository
+
+Nothing of the lab is tracked (issue #508): the repository works without it. The maintainers keep
+these in `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/`:
+
+| File | What |
+| --- | --- |
+| `lab.env` | `KOINON_E2E_ARGO_SERVER`, `_BUNDLE_URL`, `_RESULTS_URL`, `_S3_REGION`, `_ARGO_CREDS`, `_LIGHT_MANIFEST` for `hack/e2e-remote.sh --argo` (template `hack/lab/lab.env.example`; the environment overrides it) |
+| `lab/lab-creds.sh` | the credentials functions of `hack/e2e-argo.sh` (contract `hack/lab/creds.example.sh`) |
+| `lab/light.workflow.json` | the Argo Workflow of `--lane light` |
+| `lab/local.homelab.example.yaml`, `values-homelab.yaml`, `model-provider-homelab.yaml` | the Tilt remote profile of the lab |
+
+Without `lab.env`, `hack/e2e-remote.sh --argo` exits 2 and names what is missing.
 
 ## Dev database
 
@@ -62,17 +76,16 @@ tilt up --context homelab
 ### Home-lab values in the remote profile
 
 The home lab is the generic remote profile ([loop.md](loop.md#remote-cluster)) with these values,
-checked in as `hack/dev/local.homelab.example.yaml`. When the context is `homelab` or `homelab-koinon`
-and there is no `hack/dev/local.yaml`, the Tiltfile uses that file, so the command above is unchanged.
-To change something, copy it to `hack/dev/local.yaml` (git-ignored) and edit the copy.
+kept as `local.homelab.example.yaml` in the maintainer config directory (below), not in the repository.
+Copy it to `hack/dev/local.yaml` (git-ignored); the Tiltfile reads only that file.
 
 | Home-lab value | Where it lives now |
 | --- | --- |
 | Zot, `zot.apps.lab.example.invalid/koinon` | `registry` |
 | the `dev-registry` pull secret | `imagePullSecret` |
 | OpenShell at `openshell.openshell.svc:8080`, runtime class `kata`, mTLS Secret `openshell-client-tls` | `openshell.*` |
-| the Ollama provider | `modelProvider: hack/dev/model-provider-homelab.yaml` |
-| Ollama egress host and network policy | `values: [hack/dev/values-homelab.yaml]` |
+| the Ollama provider | `modelProvider:` (`model-provider-homelab.yaml`, same directory) |
+| Ollama egress host and network policy | `values:` (`values-homelab.yaml`, same directory) |
 | the `lab.example.invalid/openbao` namespace label | `namespaceLabels` (it is no longer on the kind namespace) |
 | sandbox policies off | `sandboxPolicy: false` |
 
