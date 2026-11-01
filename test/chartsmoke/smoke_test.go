@@ -191,7 +191,7 @@ func describeMode(name, valuesFile string) {
 			api := r.deployment("koinon-api")
 			Expect(api).NotTo(BeNil())
 			c := api.Spec.Template.Spec.Containers[0]
-			if !slices.Contains(c.Args, "-durable") {
+			if !slices.Contains(c.Args, "--durable") {
 				Skip("api.durable is off in this mode")
 			}
 			var ref *corev1.EnvVar
@@ -210,7 +210,7 @@ func describeMode(name, valuesFile string) {
 				}
 				_, pre, hook := hookOf(j)
 				Expect(hook && pre).To(BeTrue(), "the migrate Job runs before koinon-api exists")
-				Expect(j.Spec.Template.Spec.Containers[0].Args).To(ContainElement("-durable"), "the migrate Job creates the DBOS tables")
+				Expect(j.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--durable"), "the migrate Job creates the DBOS tables")
 			}
 		})
 
