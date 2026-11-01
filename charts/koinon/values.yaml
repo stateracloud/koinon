@@ -119,6 +119,12 @@ reconciler:
   # agent is activated. An org admin can mark an agent keep-warm; this caps the keep-warm sandboxes
   # per org (the oldest agents win). 0 is the default of 2; a negative value grants none (#315).
   keepWarmPerOrg: 2
+  # A changed sandbox spec (a new OpenShell supervisor image, flavor image or resources) recreates
+  # each sandbox through the usual path: held runs finish, the home gate passes, a checkpoint is taken
+  # first. This caps the recreates per reconcile pass, so an OpenShell upgrade does not recreate the
+  # whole fleet at once (ADR 0085 decision 9). 0 is the default of 4; a negative value is no cap. The
+  # supervisor image is read from the OpenShell gateway ConfigMap named by preflight.openshell.
+  maxRecreatesPerPass: 4
   # Time between full passes. Postgres NOTIFY wakes the reconciler earlier for new runs and
   # agent changes; the timer covers idle timeouts and drift.
   resyncInterval: 30s
