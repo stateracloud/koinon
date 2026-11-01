@@ -117,6 +117,34 @@ func carryOverID(original, version string) string {
 	return original + "~v" + version
 }
 
+// CarriedOverID is the ID of the fork that CarryOver makes of workflow id under this runtime's
+// version. A caller that enqueues under a fixed ID (so a retried request attaches to the same
+// workflow) uses AwaitResult instead of deriving it.
+func (r *Runtime) CarriedOverID(id string) string {
+	return carryOverID(id, r.version())
+}
+
+// AwaitResult waits for the result of h, the handle of workflow id. When the workflow was
+// cancelled by CarryOver, whether before the call (a client retry enqueues under the original ID
+// and DBOS hands back the cancelled workflow) or while it waited, the result is the fork's, so the
+// caller sees what the carried-over run produced instead of a cancellation error. Any other error,
+// and a cancellation with no fork, is returned as it is.
+func AwaitResult[R any](r *Runtime, h dbos.WorkflowHandle[R], id string, opts ...dbos.GetResultOption) (R, error) {
+	out, err := h.GetResult(opts...)
+	if err == nil || !(errors.Is(err, dbos.ErrWorkflowCancelled) || errors.Is(err, dbos.ErrAwaitedWorkflowCancelled)) {
+		return out, err
+	}
+	dctx := r.Context()
+	if dctx == nil {
+		return out, err
+	}
+	fork, ferr := dbos.RetrieveWorkflow[R](dctx, r.CarriedOverID(id))
+	if ferr != nil {
+		return out, err
+	}
+	return fork.GetResult(opts...)
+}
+
 // olderVersion reports whether a workflow of version wf is to be carried over by a runtime of
 // version cur. WorkflowVersion is an integer string, so a workflow is carried over only when its
 // version is lower. A version that is not an integer (the legacy release versions such as
