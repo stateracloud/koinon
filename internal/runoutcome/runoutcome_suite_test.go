@@ -4,6 +4,8 @@ package runoutcome_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 	"time"
 
@@ -152,10 +154,13 @@ func (w *world) taskKinds(ctx context.Context) []string {
 // pendingApproval is an ask-tier request of the run that nobody decided.
 func (w *world) pendingApproval(ctx context.Context) store.ApprovalRequest {
 	GinkgoHelper()
+	// The table checks args_sha256 against the SHA-256 of args_json.
+	const args = `{}`
+	sum := sha256.Sum256([]byte(args))
 	req, err := q.CreateApprovalRequest(ctx, store.CreateApprovalRequestParams{
 		OrgID: w.org, TaskID: w.task, RunID: w.run.ID, AgentID: w.agent,
 		Connector: "github", Tool: "comment_on_issue", Target: "github:acme/widgets",
-		ArgsJson: `{}`, ArgsSha256: pgtest.Uniq("sha"), Risk: []byte(`{}`),
+		ArgsJson: args, ArgsSha256: hex.EncodeToString(sum[:]), Risk: []byte(`{}`),
 		Decision: store.ApprovalDecisionAsk, Status: store.ApprovalStatusPending,
 		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
 	})
