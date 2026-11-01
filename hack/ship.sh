@@ -43,7 +43,7 @@ while [[ $# -gt 0 ]]; do
 	--review) need "$@"; review=$2; shift 2 ;;
 	--no-issue) no_issue=1; shift ;;
 	--dry-run) dry=1; shift ;;
-	-h | --help) sed -n 4,28p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h | --help) sed -n 4,27p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "ship: unknown argument $1 (see --help)" >&2; exit 2 ;;
 	esac
 done
