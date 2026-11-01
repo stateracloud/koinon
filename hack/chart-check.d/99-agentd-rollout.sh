@@ -4,10 +4,10 @@
 # Chart assertions: agentd rollout strategy and PodDisruptionBudget (ADR 0085, #405).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
-agentd_doc() { render --show-only templates/deployments.yaml "$@" | awk 'BEGIN{RS="\n---\n"} /component: agentd/'; }
-doc=$(agentd_doc)
-grep -q 'type: RollingUpdate' <<<"$doc" && grep -q 'maxSurge: 1' <<<"$doc" && grep -q 'maxUnavailable: 0' <<<"$doc" \
-  || fail "agentd Deployment uses RollingUpdate with maxSurge 1 and maxUnavailable 0"
+doc=$(render --show-only templates/deployments.yaml | awk 'BEGIN{RS="\n---\n"} /component: agentd/')
+for want in 'type: RollingUpdate' 'maxSurge: 1' 'maxUnavailable: 0'; do
+  grep -q "$want" <<<"$doc" || fail "agentd Deployment sets $want"
+done
 # The API and the reconciler keep Kubernetes' default strategy.
 for c in api reconciler; do
   render --show-only templates/deployments.yaml | awk -v c="component: $c" 'BEGIN{RS="\n---\n"} index($0, c) && /maxSurge/{bad=1} END{exit bad}' \
