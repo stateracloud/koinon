@@ -144,11 +144,26 @@ check "the directory lock made --local wait" has 'waiting for the e2e lock' "$tm
 check "--local ran after the owner went away" test "$rc" -eq 0
 check "the directory lock is released" test ! -d "$tmp/lock.d"
 
-# 7. --argo (the default without KOINON_E2E_REMOTE): `curl` is a fake Argo Server and S3, the
-# credentials file a fake. The bundle reaches S3, the least busy slot is picked from the template's
+# 7. --argo (explicit; the default is --local): `curl` is a fake Argo Server and S3, the
+# credentials file a fake. The lab settings are placeholders: nothing about a real lab is tracked. The bundle reaches S3, the least busy slot is picked from the template's
 # enum, the run is followed and its results unpacked, and no credential is ever in curl's argv.
 cp "$repo/hack/e2e-argo.sh" "$tmp/repo/hack/"
 cp -R "$repo/hack/lab" "$tmp/repo/hack/"
+export KOINON_LAB_CONFIG="$tmp/no-such-lab.env" # never the tester's own lab config
+cat >"$tmp/light.workflow.json" <<'JSON'
+{
+  "//": ["comment key of the manifest"],
+  "metadata": {"generateName": "koinon-light-"},
+  "spec": {
+    "entrypoint": "run",
+    "arguments": {"parameters": [
+      {"name": "target"}, {"name": "ref"}, {"name": "bundle"}, {"name": "agent"},
+      {"name": "slot", "value": "light-1", "enum": ["light-1", "light-2"]}
+    ]},
+    "templates": [{"name": "run", "podSpecPatch": "{\"claim\": \"e2e-cache-{{workflow.parameters.slot}}\"}"}]
+  }
+}
+JSON
 git -C "$tmp/repo" checkout -q --detach "$sha"
 argo_sha=$(git -C "$tmp/repo" rev-parse HEAD)
 cat >"$tmp/creds.sh" <<'SH'
@@ -199,6 +214,8 @@ chmod +x "$tmp/bin/curl"
 argo_env() { # <dir>: a fresh fake server state
   rm -rf "$1"; mkdir -p "$1"
   export ARGO_DIR=$1 FAKE_CFG=$1/cfg KOINON_E2E_ARGO_CREDS="$tmp/creds.sh" KOINON_E2E_ARGO_POLL=0
+  export KOINON_E2E_ARGO_SERVER=https://argo.example.invalid KOINON_E2E_BUNDLE_URL=https://s3.example.invalid/e2e-bundles
+  export KOINON_E2E_RESULTS_URL=https://s3.example.invalid/e2e-artifacts KOINON_E2E_LIGHT_MANIFEST="$tmp/light.workflow.json"
 }
 
 argo_env "$tmp/argo1"
@@ -206,8 +223,8 @@ argo_env "$tmp/argo1"
 rc=0
 (unset KOINON_E2E_REMOTE
   FAKE_LIST='{"items":[{"spec":{"arguments":{"parameters":[{"name":"slot","value":"a"}]}}}]}' \
-    KOINON_E2E_AGENT='agent koinon/1' hack/e2e-remote.sh --out "$tmp/out7" >"$tmp/log7" 2>&1) || rc=$?
-check "--argo is the default and passes" test "$rc" -eq 0
+    KOINON_E2E_AGENT='agent koinon/1' hack/e2e-remote.sh --argo --out "$tmp/out7" >"$tmp/log7" 2>&1) || rc=$?
+check "--argo passes" test "$rc" -eq 0
 check "the bundle holds the commit" sh -c "git clone -q --no-checkout '$tmp/argo1/last.bundle' '$tmp/argo1/clone' && git -C '$tmp/argo1/clone' cat-file -e $argo_sha"
 check "no temporary branch is left" test -z "$(git -C "$tmp/repo" for-each-ref 'refs/heads/e2e-bundle-*')"
 check "submits the commit" has "ref=$argo_sha" "$tmp/argo1/submitted"
@@ -237,7 +254,7 @@ check "... and says so" has 'after its target passed' "$tmp/log8b"
 argo_env "$tmp/argo3"
 : >"$FAKE_LOG"
 rc=0
-(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --no-wait --slot c >"$tmp/log9" 2>&1) || rc=$?
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --no-wait --slot c >"$tmp/log9" 2>&1) || rc=$?
 check "--no-wait returns after the submit" test "$rc" -eq 0 -a ! -e "$tmp/argo3/polls"
 check "--slot is passed through" has 'slot=c' "$tmp/argo3/submitted"
 check "--no-wait prints how to follow" has 'hack/e2e-remote.sh --argo --follow koinon-make-t1' "$tmp/log9"
@@ -245,7 +262,7 @@ check "--no-wait keeps the login (the token must outlive the submit)" sh -c "! g
 
 argo_env "$tmp/argo4"
 rc=0
-(unset KOINON_E2E_REMOTE; cd "$tmp" && "$tmp/repo/hack/e2e-remote.sh" --repo "$tmp/repo" --no-wait >"$tmp/log10" 2>&1) || rc=$?
+(unset KOINON_E2E_REMOTE; cd "$tmp" && "$tmp/repo/hack/e2e-remote.sh" --argo --repo "$tmp/repo" --no-wait >"$tmp/log10" 2>&1) || rc=$?
 check "--repo tests that checkout from outside it" sh -c "test $rc -eq 0 && grep -q 'ref=$argo_sha' '$tmp/argo4/submitted'"
 
 # 7b. --lane light: the manifest goes in as an inline Workflow with its parameters filled in, on the
@@ -254,7 +271,7 @@ argo_env "$tmp/argo5"
 rc=0
 (unset KOINON_E2E_REMOTE
   FAKE_LIST='{"items":[{"spec":{"arguments":{"parameters":[{"name":"slot","value":"light-1"}]}}}]}' \
-    hack/e2e-remote.sh --lane light --out "$tmp/out11" >"$tmp/log11" 2>&1) || rc=$?
+    hack/e2e-remote.sh --argo --lane light --out "$tmp/out11" >"$tmp/log11" 2>&1) || rc=$?
 check "--lane light passes" test "$rc" -eq 0
 check "--lane light creates an inline Workflow, not a template submit" test -f "$tmp/argo5/created" -a ! -e "$tmp/argo5/submitted"
 param() { jq -r --arg n "$1" '.workflow.spec.arguments.parameters[] | select(.name == $n) | .value' "$tmp/argo5/created"; }
@@ -262,8 +279,47 @@ check "--lane light defaults to test-go" test "$(param target)" = test-go
 check "--lane light submits the commit" test "$(param ref)" = "$argo_sha"
 check "--lane light picks the least busy light slot" test "$(param slot)" = light-2
 check "the manifest's comment key is not sent" test "$(jq 'has("//") or (.workflow | has("//"))' "$tmp/argo5/created")" = false
-check "the slot's Block volume is in podSpecPatch" sh -c "jq -r '.workflow.spec.templates[0].podSpecPatch' '$tmp/argo5/created' | grep -q 'e2e-cache-{{workflow.parameters.slot}}'"
+check "the manifest's podSpecPatch is sent as is" sh -c "jq -r '.workflow.spec.templates[0].podSpecPatch' '$tmp/argo5/created' | grep -q 'e2e-cache-{{workflow.parameters.slot}}'"
 check "light-run.sh refuses a target that is not a light one" sh -c "! OUT='$tmp/out12' '$repo/hack/lab/light-run.sh' test-e2e-kind 2>/dev/null"
+
+# 7c. The lab is opt-in (#508): the default mode is --local, the --argo options need --argo, and --argo
+# without lab settings exits 2 naming them instead of reaching for any lab.
+argo_env "$tmp/argo6"
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --dry-run >"$tmp/log13" 2>&1) || rc=$?
+check "no mode flag runs the local e2e" test "$rc" -eq 0
+check "... which is the git archive plus docker run, not a submit" has 'git archive' "$tmp/log13"
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --no-wait >"$tmp/log14" 2>&1) || rc=$?
+check "--no-wait without --argo exits 2" test "$rc" -eq 2
+check "... and says to add --argo" has 'add --argo' "$tmp/log14"
+rc=0
+(unset KOINON_E2E_REMOTE KOINON_E2E_ARGO_SERVER KOINON_E2E_BUNDLE_URL KOINON_E2E_RESULTS_URL KOINON_E2E_ARGO_CREDS
+  hack/e2e-remote.sh --argo --dry-run >"$tmp/log15" 2>&1) || rc=$?
+check "--argo without lab settings exits 2" test "$rc" -eq 2
+check "... naming the server variable" has 'KOINON_E2E_ARGO_SERVER' "$tmp/log15"
+check "... and the config file" has 'lab.env' "$tmp/log15"
+check "... and no curl was made" test ! -s "$tmp/argo6/cfg"
+rc=0
+(unset KOINON_E2E_REMOTE KOINON_E2E_LIGHT_MANIFEST; hack/e2e-remote.sh --argo --lane light --dry-run >"$tmp/log16" 2>&1) || rc=$?
+check "--lane light without a manifest exits 2" test "$rc" -eq 2
+check "... naming KOINON_E2E_LIGHT_MANIFEST" has 'KOINON_E2E_LIGHT_MANIFEST' "$tmp/log16"
+# The settings can come from the untracked config file; the environment wins over it.
+cat >"$tmp/lab.env" <<ENV
+KOINON_E2E_ARGO_SERVER=https://argo.example.invalid
+KOINON_E2E_BUNDLE_URL=https://from-file.example.invalid/e2e-bundles
+KOINON_E2E_RESULTS_URL=https://s3.example.invalid/e2e-artifacts
+KOINON_E2E_ARGO_CREDS=$tmp/creds.sh
+ENV
+rc=0
+(unset KOINON_E2E_REMOTE KOINON_E2E_ARGO_SERVER KOINON_E2E_BUNDLE_URL KOINON_E2E_RESULTS_URL KOINON_E2E_ARGO_CREDS
+  KOINON_LAB_CONFIG="$tmp/lab.env" hack/e2e-remote.sh --argo --dry-run >"$tmp/log17" 2>&1) || rc=$?
+check "the lab config file supplies the settings" test "$rc" -eq 0
+check "... including the bundle URL" has 'from-file.example.invalid' "$tmp/log17"
+rc=0
+(unset KOINON_E2E_REMOTE; KOINON_E2E_BUNDLE_URL=https://from-env.example.invalid/e2e-bundles KOINON_LAB_CONFIG="$tmp/lab.env" \
+  hack/e2e-remote.sh --argo --dry-run >"$tmp/log18" 2>&1) || rc=$?
+check "the environment wins over the file" has 'from-env.example.invalid' "$tmp/log18"
 
 # 6. The toolchain image pins what the workflow pins.
 wf="$repo/.github/workflows/e2e-kind.yml" df="$repo/hack/e2e-toolchain/Dockerfile"
