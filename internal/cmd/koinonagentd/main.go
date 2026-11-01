@@ -138,6 +138,18 @@ func NewRootCommand() *cobra.Command {
 
 // validate holds the rules between flags, which cobra's required-flag check does not know.
 func (c *config) validate() error {
+	// MarkFlagRequired only checks that a flag was set, and an empty environment variable counts as
+	// set, so an empty value is refused here. An empty database URL would make pgx fall back to the
+	// libpq defaults.
+	if c.databaseURL == "" {
+		return errors.New("--database-url is required")
+	}
+	if c.openshellAddr == "" {
+		return errors.New("--openshell-address is required")
+	}
+	if c.pool.GatewayURL == "" {
+		return errors.New("--gateway-url is required")
+	}
 	if c.pool.OwnerID == "" {
 		h, err := os.Hostname()
 		if err != nil {
