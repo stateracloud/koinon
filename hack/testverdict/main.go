@@ -89,7 +89,7 @@ func load(dir string) (map[string][]types.Report, error) {
 	}
 	out := map[string][]types.Report{}
 	for _, f := range files {
-		b, err := os.ReadFile(f)
+		b, err := os.ReadFile(f) // #nosec G304 -- the report directory the calling script names
 		if err != nil {
 			return nil, err
 		}
@@ -177,6 +177,7 @@ func requirement(msg string) (string, bool) {
 
 // summarize prints the verdicts and reports whether the run may count as green.
 func summarize(w io.Writer, name string, results []result) bool {
+	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, format, a...) } // stdout; nothing to do on error
 	count := map[verdict]int{}
 	var skippedDirs []string
 	missing := map[string]int{}
@@ -184,7 +185,7 @@ func summarize(w io.Writer, name string, results []result) bool {
 		count[r.verdict]++
 		switch r.verdict {
 		case fail, notRun:
-			fmt.Fprintf(w, "%-8s %s: %s\n", r.verdict, r.dir, r.why)
+			p("%-8s %s: %s\n", r.verdict, r.dir, r.why)
 		case skipped:
 			skippedDirs = append(skippedDirs, fmt.Sprintf("%s (%s)", r.dir, strings.Join(r.requires, ", ")))
 			for _, n := range r.requires {
@@ -198,11 +199,11 @@ func summarize(w io.Writer, name string, results []result) bool {
 			names = append(names, n)
 		}
 		slices.Sort(names)
-		fmt.Fprintf(w, "\n==== %s: %d suite(s) SKIPPED, NOT PASSED: missing %s ====\n", name, len(skippedDirs), strings.Join(names, ", "))
+		p("\n==== %s: %d suite(s) SKIPPED, NOT PASSED: missing %s ====\n", name, len(skippedDirs), strings.Join(names, ", "))
 		for _, d := range skippedDirs {
-			fmt.Fprintf(w, "  SKIPPED  %s\n", d)
+			p("  SKIPPED  %s\n", d)
 		}
-		fmt.Fprintf(w, "Provide the requirement to run them; %s=%s turns these skips into failures (CI sets it).\n\n", testenv.RequireVar, strings.Join(names, ","))
+		p("Provide the requirement to run them; %s=%s turns these skips into failures (CI sets it).\n\n", testenv.RequireVar, strings.Join(names, ","))
 	}
 	ok := count[fail] == 0 && count[notRun] == 0
 	state := "ok"
@@ -212,7 +213,7 @@ func summarize(w io.Writer, name string, results []result) bool {
 	case count[skipped] > 0:
 		state = "INCOMPLETE (skipped suites did not run)"
 	}
-	fmt.Fprintf(w, "%s verdict: %s: %d passed, %d failed, %d not run, %d skipped (of %d suites)\n",
+	p("%s verdict: %s: %d passed, %d failed, %d not run, %d skipped (of %d suites)\n",
 		name, state, count[pass], count[fail], count[notRun], count[skipped], len(results))
 	return ok
 }

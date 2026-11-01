@@ -11,7 +11,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/stateracloud/koinon/internal/testing/testenv"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -23,6 +22,8 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/yaml"
+
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // The sandbox observer's RBAC and the policy that fences it (ADR 0078), exactly as `helm template`

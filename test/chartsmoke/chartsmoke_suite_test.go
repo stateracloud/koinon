@@ -47,8 +47,9 @@ import (
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/stateracloud/koinon/internal/testing/testenv"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 func TestChartSmoke(t *testing.T) {
