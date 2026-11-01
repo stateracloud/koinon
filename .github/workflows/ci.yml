@@ -69,7 +69,6 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
 
-
   go-lint:
     needs: changes
     if: needs.changes.outputs.go == 'true'
@@ -94,7 +93,6 @@ jobs:
         with:
           version: v2.15.0
 
-
   go-vet:
     needs: changes
     if: needs.changes.outputs.go == 'true'
@@ -116,7 +114,6 @@ jobs:
           restore-keys: |
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       - run: go vet ./...
-
 
   go-test:
     needs: changes
@@ -142,7 +139,6 @@ jobs:
       # test/flavors needs the flavor images, which the flavors job builds and tests.
       - run: go test $(go list ./... | grep -v '/test/flavors$')
 
-
   go-race:
     needs: changes
     if: needs.changes.outputs.go == 'true'
@@ -166,14 +162,13 @@ jobs:
       # The reconciler runs per-sandbox jobs concurrently (LT1); keep its state guarded.
       - run: go test -race -count=1 ./internal/reconciler/
 
-
   # The required check `go`: green when every Go job above is green, or when the change touches no
   # Go (then the parts are skipped and `changes` says so). A skipped part of a Go change is a
   # failure, so a skipped job cannot pass the gate. hack/ci-go-gate-test.sh keeps this list whole.
   go:
     name: go
     needs: [changes, go-tidy, go-lint, go-vet, go-test, go-race]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - env:

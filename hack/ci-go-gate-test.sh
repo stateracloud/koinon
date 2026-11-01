@@ -5,7 +5,7 @@
 set -euo pipefail
 wf="$(cd "$(dirname "$0")/.." && pwd)/.github/workflows/ci.yml"
 
-jobs=$(sed -n 's/^  \(go-[a-z]*\):$/\1/p' "$wf" | sort)
+jobs=$(sed -n 's/^  \(go-[a-z0-9-]*\):$/\1/p' "$wf" | sort)
 needs=$(sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf" | sed -n 's/^    needs: \[\(.*\)\]$/\1/p' | tr ',' '\n' | tr -d ' ' | grep '^go-' | sort || true)
 
 [[ -n $jobs ]] || { echo "FAIL: no go-* jobs in ci.yml"; exit 1; }
@@ -14,5 +14,5 @@ if [[ $jobs != "$needs" ]]; then
   echo "jobs:"; echo "$jobs"; echo "needs:"; echo "$needs"
   exit 1
 fi
-grep -q '^    if: always()$' <(sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go gate must run if: always()"; exit 1; }
+grep -qF '    if: ${{ !cancelled() }}' <(sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go gate must run if: !cancelled() (runs when a part fails, not on a superseded run)"; exit 1; }
 echo "ok: go gate covers $(echo "$jobs" | tr '\n' ' ')"
