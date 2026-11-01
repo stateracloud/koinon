@@ -397,17 +397,25 @@ func (r *runner) execute(ctx context.Context) error {
 	fctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
-		select {
-		case <-r.fenced:
-			cancel()
-		case <-r.p.stopping:
-			// The pool is draining (ADR 0085 decision 2): a run still setting up has no turn to
-			// finish, so it is handed off at once. A turn that began finishes up to the deadline.
-			if r.turnState.CompareAndSwap(turnSetup, turnHandedOff) {
-				r.log.Info("the pool is stopping before the turn began; handing the run off")
+		stopping := r.p.stopping
+		for {
+			select {
+			case <-r.fenced:
 				cancel()
+				return
+			case <-stopping:
+				// The pool is draining (ADR 0085 decision 2): a run still setting up has no turn to
+				// finish, so it is handed off at once. A turn that began finishes up to the deadline,
+				// and keeps watching for a fence meanwhile.
+				stopping = nil
+				if r.turnState.CompareAndSwap(turnSetup, turnHandedOff) {
+					r.log.Info("the pool is stopping before the turn began; handing the run off")
+					cancel()
+					return
+				}
+			case <-fctx.Done():
+				return
 			}
-		case <-fctx.Done():
 		}
 	}()
 

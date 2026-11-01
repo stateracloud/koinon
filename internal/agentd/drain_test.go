@@ -4,6 +4,7 @@ package agentd_test
 
 import (
 	"context"
+	"net/http/httptest"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
 
 // Drain on SIGTERM (ADR 0085 decision 2, #403): a stopping pool claims nothing more, lets the turn
@@ -94,5 +96,43 @@ var _ = Describe("Draining on stop", func() {
 		stop() // fails the spec if the pool does not stop within 10 s: the deadline is a minute
 		Expect(time.Since(started)).To(BeNumerically("<", 5*time.Second))
 		Expect(getRun(ctx, r).LeaseExpiresAt.Time).To(BeTemporally("<", time.Now()), "the lease was released")
+	})
+
+	It("stops a retry back-off at once when the run is cancelled during the drain", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		srv, err := fakemodel.New(fakemodel.Script{
+			Model: "faulty", Faults: fakemodel.Faults{RateLimit: 5, RetryAfter: 30},
+			Turns: []fakemodel.Turn{{Text: "one two three four"}},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		ts := httptest.NewServer(srv)
+		DeferCleanup(ts.Close)
+		e.harness.modelFault = modelCaller(ts.URL)
+
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		stop := e.pool("agentd-a", func(c *agentd.Config) { c.DrainDeadline = time.Minute })
+		Eventually(func() int { return len(srv.Requests()) }).WithTimeout(15 * time.Second).Should(BeNumerically(">=", 1))
+		Eventually(func() bool {
+			for _, ev := range events(ctx, r) {
+				if ev.Kind == "run.retry" {
+					return true
+				}
+			}
+			return false
+		}).WithTimeout(10*time.Second).Should(BeTrue(), "the run is in its retry back-off")
+
+		done := make(chan struct{})
+		go func() {
+			defer GinkgoRecover()
+			defer close(done)
+			stop()
+		}()
+		time.Sleep(500 * time.Millisecond) // the pool is draining, the turn has begun
+		_, err = db.Exec(ctx, `UPDATE runs SET state = 'canceled', outcome_reason = 'cancelled in the drain',
+			finished_at = now(), ready_at = NULL, lease_expires_at = NULL, heartbeat_at = NULL
+			WHERE org_id = $1 AND id = $2`, e.org, r.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(done).WithTimeout(15*time.Second).Should(BeClosed(),
+			"the fence ends the back-off instead of sleeping out the 30 s Retry-After")
 	})
 })
