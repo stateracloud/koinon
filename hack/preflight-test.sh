@@ -8,7 +8,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-test.XXXXXX") || exit 1 # explicit template: macOS mktemp -d ignores TMPDIR (#466)
 trap '[[ -n ${KEEP_TMP:-} ]] || rm -rf "$tmp"' EXIT
 export FAKE_LOG="$tmp/calls.log" TMPDIR="$tmp/tmpdir" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 mkdir -p "$tmp/bin" "$tmp/tmpdir" "$tmp/limited"
@@ -56,13 +56,26 @@ for d in internal/foo charts/koinon web docs/adr internal/db/queries internal/db
 
 fresh() { # a fresh clone on a feature branch, echoes its path
 	local w
-	w=$(mktemp -d "$tmp/w.XXXXXX")
-	git clone -q "$tmp/origin.git" "$w" 2>/dev/null
+	# Fail hard (#485): a failed mktemp or clone must never leave $w empty, or the git -C calls below
+	# would run in the caller's own checkout and switch its branch.
+	w=$(mktemp -d "$tmp/w.XXXXXX") || exit 1
+	[[ -n $w && -d $w ]] || { echo "mktemp gave no directory" >&2; exit 1; }
+	git clone -q "$tmp/origin.git" "$w" 2>/dev/null || { echo "clone into $w failed" >&2; exit 1; }
+	[[ -d $w/.git ]] || { echo "$w is not a checkout" >&2; exit 1; }
 	git -C "$w" config user.name dev
 	git -C "$w" config user.email dev@example.invalid
 	git -C "$w" checkout -q -b feat/x
 	echo "$w"
 }
+# #485: when mktemp fails, fresh() must stop and leave the caller's checkout alone.
+guard=$(mktemp -d "$tmp/guard.XXXXXX")
+git -C "$guard" init -q -b keep
+git -C "$guard" -c user.name=d -c user.email=d@example.invalid commit -q --allow-empty -m g
+mkdir -p "$tmp/failbin"
+printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
+chmod +x "$tmp/failbin/mktemp"
+mktemp_fail_rc=0
+(cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(fresh)) >/dev/null 2>&1 || mktemp_fail_rc=$?
 reset_state() { : >"$FAKE_LOG"; unset FAKE_TIDY_CHANGE FAKE_GO_TEST_RC FAKE_LINT_RC FAKE_GITLEAKS_RC FAKE_GEN_CHANGE FAKE_NEEDS_RC FAKE_GOFUMPT_OUT FAKE_MIGRATE_LINT_RC FAKE_CHART_CHECK_RC FAKE_DEP_AGE_CHECK_RC FAKE_BUF_RC || true; rm -rf "$tmp/tmpdir"/*; }
 
 fail=0 pass=0
@@ -277,5 +290,7 @@ PATH="$tmp/limited" "$repo/hack/preflight.sh" --only proto >"$tmp/d5" 2>&1 || rc
 check "no buf: proto skipped, exit 0" eq "$rc" 0
 check "no buf: skip line" has '^proto skip' "$tmp/d5"
 
+check "mktemp failure: fresh() fails" test "$mktemp_fail_rc" -ne 0
+check "mktemp failure: caller's checkout branch unchanged" eq "$(git -C "$guard" branch --show-current)" keep
 echo "$pass passed, $fail failed"
 exit $((fail > 0))
