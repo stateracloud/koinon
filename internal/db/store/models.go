@@ -1384,6 +1384,7 @@ type Agent struct {
 	ResumedAt       pgtype.Timestamptz
 	Model           pgtype.Text
 	Thinking        pgtype.Text
+	KeepWarm        bool
 }
 
 type AgentBudget struct {

@@ -331,3 +331,25 @@ is no default: the install fails until `postgres.mode` is set.
 Agent Sandbox and OpenShell are no longer manual prerequisites: each Koinon release pins their
 versions in `release/versions.yaml`. They install as separate Helm releases, either with plain
 `helm install` in a documented order or with `koinon install`, which runs the same steps. Kata, the CNPG operator and the NetworkPolicy engine stay prerequisites.
+
+## Amendment (2026-11-01): a sandbox starts on demand, with an optional keep-warm
+
+Issue #315 (decision by Andre, 2026-10-31). Activating an agent no longer creates its sandbox: on
+the rc.9 home-lab run, activating 22 agents started 22 sandboxes and they stopped only after the
+idle timeout. The reconciler now creates (and starts) a sandbox only when something wants it: a run
+that is active, a claimable run (`has_demand`), a pre-wake signal (package wake), or a keep-warm
+request. Until then the agent's sandbox row records state `deleting`, phase `Idle` ("no sandbox yet,
+it starts with the first run"), as an archived agent's row records `Archived`. Bulk-creating agents
+from templates costs nothing until work arrives.
+
+- **Keep-warm** is `agents.keep_warm`, a per-agent setting like `thinking`, set by an org admin
+  (migration 00044, query `SetAgentKeepWarm`). A keep-warm agent's sandbox is created when the agent
+  is active, is never idle-stopped and is started when found stopped.
+- **The operator caps keep-warm per org**: `reconciler.keepWarmPerOrg` in the chart (reconciler
+  `--keep-warm-per-org`), default 2, negative for none. The flag is a request: each pass grants it to
+  the org's oldest active agents (`created_at`, `id`) up to the cap, so the same agents win from pass
+  to pass; the others start on demand. Keep-warm sandboxes count toward resources (#314).
+- **Cost.** The first run of an agent now waits for its sandbox to start (image pull, home volume);
+  that wait is the one `agentd` already has for a stopped or archived sandbox. Preparing the image
+  and the home volume at activation without starting the pod is not built: follow-up.
+- **Not built yet:** the API and UI for the setting (the data and the reconciler side are in).

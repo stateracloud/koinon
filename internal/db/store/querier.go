@@ -854,6 +854,9 @@ type Querier interface {
 	RevokeSessionReturningUser(ctx context.Context, arg RevokeSessionReturningUserParams) (pgtype.UUID, error)
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
+	// Whether an org admin asks for the agent's sandbox to stay up (#315). The operator's per-org cap
+	// decides how many of the requests the reconciler grants. Not a new version.
+	SetAgentKeepWarm(ctx context.Context, arg SetAgentKeepWarmParams) (Agent, error)
 	// An agent's model setting (NULL: use the version's model, then the org default). Not a new version.
 	SetAgentModel(ctx context.Context, arg SetAgentModelParams) (Agent, error)
 	// Replaces the agent's overrides. A NULL argument clears that override.
