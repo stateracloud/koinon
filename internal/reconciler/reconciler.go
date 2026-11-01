@@ -78,7 +78,9 @@ const (
 
 // Defaults.
 const (
-	DefaultIdleTimeout    = 10 * time.Minute
+	DefaultIdleTimeout = 10 * time.Minute
+	// DefaultKeepWarmPerOrg is the default cap of keep-warm sandboxes per org (#315).
+	DefaultKeepWarmPerOrg = 2
 	DefaultResyncInterval = 30 * time.Second
 	// DefaultMCPProbeInterval is how often each org MCP server is probed (plan item MC1).
 	DefaultMCPProbeInterval = 60 * time.Second
@@ -147,6 +149,9 @@ type Config struct {
 	ParkWarm time.Duration
 	// SandboxJobs bounds the per-sandbox jobs running at once. Default 8.
 	SandboxJobs int
+	// KeepWarmPerOrg caps the sandboxes an org's admins can keep warm (agents.keep_warm, #315).
+	// Default 2; a negative value grants none. Over the cap the oldest agents win.
+	KeepWarmPerOrg int
 	// ResyncInterval is the time between passes without a wake-up. Default 30 seconds.
 	ResyncInterval time.Duration
 	// Checkpoints turns on home checkpoints (checkpoint.go): a sandbox is stopped, recreated or
@@ -240,6 +245,9 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	if cfg.SandboxJobs <= 0 {
 		cfg.SandboxJobs = 8
 	}
+	if cfg.KeepWarmPerOrg == 0 {
+		cfg.KeepWarmPerOrg = DefaultKeepWarmPerOrg
+	}
 	if cfg.MCPProbeInterval == 0 {
 		cfg.MCPProbeInterval = DefaultMCPProbeInterval
 	}
@@ -303,6 +311,8 @@ type work struct {
 	cfg agentconfig.Config
 	// tools are the MCP tools the active version's grants allow.
 	tools []gateway.ToolGrant
+	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (#315).
+	keepWarm bool
 }
 
 // names are the agent's object names: the recorded ones, and the GitHub ones derived from the
@@ -371,6 +381,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 			return fmt.Errorf("reconciler: list agents of org %s: %w", org.Slug, err)
 		}
+		warm := 0
 		for _, a := range agents {
 			w, err := r.prepare(ctx, org, a, workspaces)
 			if errors.Is(err, errAbortPass) {
@@ -385,6 +396,11 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			}
 			if w == nil {
 				continue
+			}
+			if a.KeepWarm && a.Status == store.AgentStatusActive && warm < r.cfg.KeepWarmPerOrg {
+				// The list is oldest first, so the cap keeps the same agents from pass to pass.
+				w.keepWarm = true
+				warm++
 			}
 			items = append(items, w)
 			if w.key.ID != "" {
@@ -1071,10 +1087,14 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 
 	sb, err := r.backend.GetSandbox(ctx, ws, names.Sandbox)
 	if errors.Is(err, execution.ErrNotFound) {
-		if w.sb.ArchivedAt.Valid && !act.HasActive && !act.HasDemand && !r.woken(w.sb, tune) {
-			// Archived (archive.go): nothing wants the agent, so no sandbox is created. A run,
-			// a claimable park or a pre-wake signal creates one; the first run restores the home.
-			return r.recordState(ctx, w, store.SandboxStateDeleting, archivedPhase, archivedMessage)
+		if !act.HasActive && !act.HasDemand && !r.woken(w.sb, tune) && !w.keepWarm {
+			// Nothing wants the agent, so no sandbox is created: it starts on demand (#315). A
+			// run, a claimable park, a pre-wake signal or a keep-warm setting creates one. An
+			// archived agent (archive.go) restores its home on the first run.
+			if w.sb.ArchivedAt.Valid {
+				return r.recordState(ctx, w, store.SandboxStateDeleting, archivedPhase, archivedMessage)
+			}
+			return r.recordState(ctx, w, store.SandboxStateDeleting, idlePhase, idleMessage)
 		}
 		if !hasRead {
 			// No sandbox references a GitHub record now: drop one left by a removed grant.
@@ -1157,7 +1177,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		if _, err := r.backend.EnsurePolicy(ctx, ws, names.Sandbox, spec.Policy); err != nil {
 			return err
 		}
-		if !act.HasActive && !act.HasDemand && r.idle(w.sb, act, tune) {
+		if !act.HasActive && !act.HasDemand && !w.keepWarm && r.idle(w.sb, act, tune) {
 			// The home is backed up before the stop (practice B3).
 			if ok, err := r.stopGate(ctx, w, sb); err != nil {
 				return err
@@ -1170,7 +1190,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			r.log.Info("stopped idle sandbox", w.logAttrs()...)
 		}
 	case execution.PhaseStopped:
-		if act.HasActive || act.HasDemand || r.woken(w.sb, tune) {
+		if act.HasActive || act.HasDemand || w.keepWarm || r.woken(w.sb, tune) {
 			if sb, err = r.backend.StartSandbox(ctx, ws, names.Sandbox); err != nil {
 				return err
 			}

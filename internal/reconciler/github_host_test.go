@@ -126,6 +126,7 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 		Expect(err).NotTo(HaveOccurred())
 		agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: version.ID, ActivatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
+		keepWarm(ctx, org, agent.ID)
 		r, err := reconciler.New(pool, openshell.New(cc), &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
 			Prices:  prices.NewResolver(pricing.Embedded()),
 			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
@@ -172,6 +173,7 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 		Expect(err).NotTo(HaveOccurred())
 		agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: version.ID, ActivatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
+		keepWarm(ctx, org, agent.ID)
 
 		r, err := reconciler.New(pool, openshell.New(cc), &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
 			Prices:  prices.NewResolver(pricing.Embedded()),

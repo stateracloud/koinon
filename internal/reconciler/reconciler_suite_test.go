@@ -17,16 +17,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/pressly/goose/v3"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
-	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/prices"
@@ -34,9 +30,6 @@ import (
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/pricing"
 )
-
-// postgresImage is the minimum supported Postgres version (ADR 0047).
-const postgresImage = "postgres:18-alpine"
 
 var (
 	pool *pgxpool.Pool
@@ -53,26 +46,7 @@ func TestReconciler(t *testing.T) {
 }
 
 var _ = BeforeSuite(func(ctx SpecContext) {
-	ctr, err := postgres.Run(ctx, postgresImage,
-		postgres.WithDatabase("koinon"),
-		postgres.BasicWaitStrategies(),
-	)
-	Expect(err).NotTo(HaveOccurred())
-	DeferCleanup(func(ctx context.Context) error { return ctr.Terminate(ctx) })
-
-	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	Expect(err).NotTo(HaveOccurred())
-	pool, err = pgxpool.New(ctx, dsn)
-	Expect(err).NotTo(HaveOccurred())
-	DeferCleanup(pool.Close)
-
-	db := stdlib.OpenDBFromPool(pool)
-	DeferCleanup(db.Close)
-	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
-	Expect(err).NotTo(HaveOccurred())
-	_, err = provider.Up(ctx)
-	Expect(err).NotTo(HaveOccurred())
-
+	pool = pgtest.Start(ctx)
 	q = store.New(pool)
 }, NodeTimeout(3*time.Minute))
 
@@ -127,8 +101,35 @@ func newAgent(ctx context.Context, org, user pgtype.UUID) store.Agent {
 	return newAgentWithConfig(ctx, org, user, `{"instructions":"help"}`)
 }
 
-// newAgentWithConfig creates and activates an OpenCode agent whose version has config.
+// newAgentWithConfig creates and activates an OpenCode agent whose version has config. The agent is
+// keep-warm (the reconciler's default cap is two per org), so its sandbox exists after the first
+// pass as most specs expect; a spec about the on-demand start or the idle stop uses newOnDemandAgent.
 func newAgentWithConfig(ctx context.Context, org, user pgtype.UUID, config string) store.Agent {
+	agent := newOnDemandAgent(ctx, org, user, config)
+	keepWarm(ctx, org, agent.ID)
+	return agent
+}
+
+// keepWarm marks an activated agent keep-warm, so its sandbox exists after the first pass.
+func keepWarm(ctx context.Context, org, agent pgtype.UUID) {
+	GinkgoHelper()
+	_, err := q.SetAgentKeepWarm(ctx, store.SetAgentKeepWarmParams{OrgID: org, ID: agent, KeepWarm: true})
+	Expect(err).NotTo(HaveOccurred())
+}
+
+// coolDown ends an agent's keep-warm request once its sandbox exists, for the specs about the idle
+// stop: from then on the sandbox is stopped when idle and starts again on demand.
+func coolDown(ctx context.Context, org pgtype.UUID, agents ...pgtype.UUID) {
+	GinkgoHelper()
+	for _, a := range agents {
+		_, err := q.SetAgentKeepWarm(ctx, store.SetAgentKeepWarmParams{OrgID: org, ID: a, KeepWarm: false})
+		Expect(err).NotTo(HaveOccurred())
+	}
+}
+
+// newOnDemandAgent creates and activates an OpenCode agent that is not keep-warm: its sandbox
+// starts with the first run, not with the activation (#315).
+func newOnDemandAgent(ctx context.Context, org, user pgtype.UUID, config string) store.Agent {
 	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
 		OrgID: org, DisplayName: "Repo helper with a long display name that is no sandbox name",
 		Flavor: store.AgentFlavorOpencode, CreatedBy: user,
