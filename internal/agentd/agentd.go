@@ -108,6 +108,10 @@ type Config struct {
 	// whose model is not served in time fails with a reason that names the provider. Default
 	// DefaultModelServeTimeout.
 	ModelServeTimeout time.Duration
+	// MCPRetryDelay is how long a run waits, before it starts its harness, between finding an MCP
+	// server it may use not serving tools and looking again; a second miss fails the run (issue
+	// #326). Default DefaultMCPRetryDelay.
+	MCPRetryDelay time.Duration
 	// ReconcileNudge is how often a worker waiting for a sandbox NOTIFYs the reconciler.
 	// Default 5s.
 	ReconcileNudge time.Duration
@@ -210,6 +214,7 @@ func (c *Config) defaults() error {
 	}
 	setDefault(&c.ReconcileNudge, 5*time.Second)
 	setDefault(&c.ModelServeTimeout, DefaultModelServeTimeout)
+	setDefault(&c.MCPRetryDelay, DefaultMCPRetryDelay)
 	setDefault(&c.CancelGrace, 10*time.Second)
 	setDefault(&c.ReadyTimeout, time.Minute)
 	setDefault(&c.ReadySettle, time.Second)
