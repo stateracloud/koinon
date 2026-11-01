@@ -1,0 +1,302 @@
+# Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.
+# Keys appear only as hashes; key material lives in Kubernetes Secrets.
+config:
+  adminAddr: localhost:15000
+  statsAddr: '[::]:15020'
+  readinessAddr: '[::]:15021'
+  database:
+    url: sqlite:///data/agentgateway.db?mode=rwc
+  logging:
+    format: json
+  modelCatalog:
+    - inline:
+        providers:
+          acme.openrouter:
+            models:
+              open/model:
+                rates:
+                  input: "1"
+                  output: "2"
+          globex.openrouter:
+            models:
+              open/model:
+                rates:
+                  input: "1"
+                  output: "2"
+frontendPolicies:
+  accessLog:
+    add:
+      koinon.agent: default(apiKey.agent, "")
+      koinon.cache_read: llm.cachedInputTokens
+      koinon.cache_write: llm.cacheCreationInputTokens
+      koinon.config: '"5c6415ea9c7279e9"'
+      koinon.error: proxy.error.reason
+      koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
+      koinon.in: llm.inputTokens
+      koinon.key: default(apiKey.name, "")
+      koinon.max_tokens: llm.params.max_tokens
+      koinon.out: llm.outputTokens
+      koinon.reasoning: llm.reasoningTokens
+      koinon.req_bytes: int(request.headers["content-length"])
+      koinon.request: uuid()
+      koinon.response_id: coalesce(response.headers["x-generation-id"])
+      koinon.status: response.code
+      koinon.stream: llm.streaming
+      koinon.upstream: default(proxy.upstreamDuration, "") != ""
+gateways:
+  default:
+    port: 4000
+llm:
+  policies:
+    apiKey:
+      mode: strict
+      location:
+        header:
+          name: authorization
+          prefix: 'Bearer '
+      keys:
+        - keyHash: sha256:fc633ae2c114704d6ff5197afbc63722e0e385c8755c82989e64f104e1cae7ab
+          metadata:
+            name: key-a1
+            agent: acme/a1
+            org: acme
+          allowedModels:
+            - open/model
+          budgets:
+            - name: koinon-agent-limit-1793491200-1
+              limit:
+                unit: USD
+                amount: 5.0
+              window:
+                rolling: 24h
+              onBudgetExceeded: Block
+        - keyHash: sha256:90ba64dd41d50ea18cfd83586a598789e3b3d15bc25206bc87a3f19d44ec416b
+          metadata:
+            name: key-a2
+            agent: acme/a2
+            org: acme
+          allowedModels:
+            - open/model
+          budgets:
+            - name: koinon-agent-limit-1793491200-1
+              limit:
+                unit: USD
+                amount: 5.0
+              window:
+                rolling: 24h
+              onBudgetExceeded: Block
+        - keyHash: sha256:3f48d13e49bc4a5102eb5fe669901c04fb71eb24c9feaffb4c788104e2f8fa9e
+          metadata:
+            name: key-spent
+            agent: globex/spent
+            org: globex
+          allowedModels:
+            - open/model
+          budgets:
+            - name: koinon-agent-limit-1793491200-3
+              limit:
+                unit: USD
+                amount: 0.0
+              window:
+                rolling: 24h
+              onBudgetExceeded: Block
+        - keyHash: sha256:67faca6a7993219ebb099f8b663ec8a5492fa17423078106e0bd4a6e585df336
+          metadata:
+            name: probe-1
+            agent: acme/mcp-probe-wiki
+            org: acme
+          allowedModels: []
+        - keyHash: sha256:a19c14ea46eff9f375783a6dc7b3b8a150ecdc6ee46afc38b262453d33d60213
+          metadata:
+            name: probe-2
+            agent: acme/mcp-probe-sick
+            org: acme
+          allowedModels: []
+        - keyHash: sha256:3ba76138e47866520bd3b44ce25b86ad716586e74d1b4165934693e15f719a5d
+          metadata:
+            name: sys-acme-mcp-exec
+            agent: acme/mcp-exec
+            org: acme
+          allowedModels: []
+        - keyHash: sha256:099f0db15eb33862f6fec6e23eee74891c2a8cbd905fa0570ef30344eb10b350
+          metadata:
+            name: sys-acme-model-check
+            agent: acme/model-check
+            org: acme
+          allowedModels:
+            - open/model
+          budgets:
+            - name: koinon-agent-limit-1793491200-9
+              limit:
+                unit: USD
+                amount: 1.0
+              window:
+                rolling: 24h
+              onBudgetExceeded: Block
+        - keyHash: sha256:aa5fced283ccacdb20fd6e840bf27ced67b4f2b6a082fbb8b3712dd668fd83a9
+          metadata:
+            name: sys-globex-model-check
+            agent: globex/model-check
+            org: globex
+          allowedModels:
+            - open/model
+          budgets:
+            - name: koinon-agent-limit-1793491200-9
+              limit:
+                unit: USD
+                amount: 1.0
+              window:
+                rolling: 24h
+              onBudgetExceeded: Block
+        - keyHash: sha256:52dbaa91629aaf9a1aca4ce3e93e58d9ce4540b963bb4d5c3e7dae956b16a2e0
+          metadata:
+            name: koinon-reload-probe
+            agent: ""
+          budgets:
+            - name: koinon-reload-probe
+              limit:
+                unit: Tokens
+                amount: 0
+              window:
+                rolling: 24h
+              onBudgetExceeded: Block
+    authorization:
+      rules:
+        - apiKey.name != "koinon-reload-probe" && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_") && !has(llmRequest.mcp_servers)
+    transformations:
+      request:
+        replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
+        set:
+          x-koinon-org: default(apiKey.org, "")
+  models:
+    - id: acme/open/model
+      name: open/model
+      matches:
+        - headers:
+            - name: x-koinon-org
+              value:
+                exact: acme
+      provider:
+        custom:
+          providerOverride: acme.openrouter
+          formats:
+            - type: completions
+      params:
+        baseUrl: https://openrouter.ai/api/v1
+        apiKey:
+          file: /secrets/provider-keys/prov-f1
+      transformation:
+        stream_options: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'
+    - id: globex/open/model
+      name: open/model
+      matches:
+        - headers:
+            - name: x-koinon-org
+              value:
+                exact: globex
+      provider:
+        custom:
+          providerOverride: globex.openrouter
+          formats:
+            - type: completions
+      params:
+        baseUrl: https://openrouter.ai/api/v1
+      transformation:
+        stream_options: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'
+mcp:
+  failureMode: failOpen
+  prefixMode: always
+  policies:
+    apiKey:
+      mode: strict
+      location:
+        header:
+          name: authorization
+          prefix: 'Bearer '
+      keys:
+        - keyHash: sha256:fc633ae2c114704d6ff5197afbc63722e0e385c8755c82989e64f104e1cae7ab
+          metadata:
+            name: key-a1
+            agent: acme/a1
+            org: acme
+        - keyHash: sha256:90ba64dd41d50ea18cfd83586a598789e3b3d15bc25206bc87a3f19d44ec416b
+          metadata:
+            name: key-a2
+            agent: acme/a2
+            org: acme
+        - keyHash: sha256:3f48d13e49bc4a5102eb5fe669901c04fb71eb24c9feaffb4c788104e2f8fa9e
+          metadata:
+            name: key-spent
+            agent: globex/spent
+            org: globex
+        - keyHash: sha256:67faca6a7993219ebb099f8b663ec8a5492fa17423078106e0bd4a6e585df336
+          metadata:
+            name: probe-1
+            agent: acme/mcp-probe-wiki
+            org: acme
+        - keyHash: sha256:a19c14ea46eff9f375783a6dc7b3b8a150ecdc6ee46afc38b262453d33d60213
+          metadata:
+            name: probe-2
+            agent: acme/mcp-probe-sick
+            org: acme
+        - keyHash: sha256:3ba76138e47866520bd3b44ce25b86ad716586e74d1b4165934693e15f719a5d
+          metadata:
+            name: sys-acme-mcp-exec
+            agent: acme/mcp-exec
+            org: acme
+        - keyHash: sha256:099f0db15eb33862f6fec6e23eee74891c2a8cbd905fa0570ef30344eb10b350
+          metadata:
+            name: sys-acme-model-check
+            agent: acme/model-check
+            org: acme
+        - keyHash: sha256:aa5fced283ccacdb20fd6e840bf27ced67b4f2b6a082fbb8b3712dd668fd83a9
+          metadata:
+            name: sys-globex-model-check
+            agent: globex/model-check
+            org: globex
+    authorization:
+      rules:
+        - '!toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")'
+    mcpAuthorization:
+      rules:
+        - apiKey.agent == "acme/a1" && ((mcp.tool.target == "acme-wiki" && mcp.tool.name in ["search"]) || (mcp.tool.target == "acme-wiki-ask" && mcp.tool.name in ["edit", "get_approval_status"]))
+        - apiKey.agent == "acme/a2" && ((mcp.tool.target == "github" && mcp.tool.name in ["get_issue"]) || (mcp.tool.target == "acme-wiki" && mcp.tool.name in ["search"]))
+        - apiKey.agent == "acme/mcp-exec" && ((mcp.tool.target == "acme-wiki" && mcp.tool.name in ["edit"]) || (mcp.tool.target == "acme-sick" && mcp.tool.name in ["edit"]))
+        - apiKey.agent == "acme/mcp-probe-sick" && ((mcp.tool.target == "acme-sick"))
+        - apiKey.agent == "acme/mcp-probe-wiki" && ((mcp.tool.target == "acme-wiki"))
+        - mcp.prompt.name == "koinon-ready"
+    transformations:
+      request:
+        replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id", "user-agent"])
+        set:
+          x-koinon-agent: apiKey.agent
+        remove:
+          - authorization
+  targets:
+    - name: acme-sick
+      condition: apiKey.org == "acme"
+      mcp:
+        host: https://wiki.example.com/mcp
+    - name: acme-wiki
+      condition: apiKey.org == "acme"
+      mcp:
+        host: https://wiki.example.com/mcp
+      policies:
+        backendAuth:
+          credentials:
+            - key:
+                file: /secrets/provider-keys/mcp-wiki-f1
+              location:
+                header:
+                  name: authorization
+                  prefix: 'Bearer '
+    - name: acme-wiki-ask
+      condition: apiKey.org == "acme"
+      mcp:
+        host: http://koinon-api:8080/mcp/wiki
+    - name: github
+      mcp:
+        host: http://koinon-api:8081/github
+    - name: koinon
+      mcp:
+        host: http://koinon-api:8081/koinon
