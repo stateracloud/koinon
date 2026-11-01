@@ -16,6 +16,14 @@ metadata:
     argocd.argoproj.io/sync-wave: "2"
 spec:
   replicas: {{ $v.replicas }}
+  {{- if eq $component "agentd" }}
+  {{- /* ADR 0085: a rollout starts the new worker before the old one drains, and never lowers the ready count. */}}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  {{- end }}
   selector:
     matchLabels:
       {{- include "koinon.selectorLabels" (list $ $component) | nindent 6 }}
