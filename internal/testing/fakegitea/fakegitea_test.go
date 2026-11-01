@@ -20,6 +20,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 func TestFakeGitea(t *testing.T) {
@@ -400,9 +401,7 @@ var _ = Describe("fake Gitea", func() {
 
 	Describe("git smart HTTP", func() {
 		BeforeEach(func() {
-			if _, err := exec.LookPath("git"); err != nil {
-				Skip("git is not installed")
-			}
+			testenv.Require(testenv.Binary("git"))
 		})
 		cloneURL := func(token string) string {
 			return strings.Replace(f.Server.URL, "http://", "http://x-access-token:"+token+"@", 1) + "/acme/widgets.git"

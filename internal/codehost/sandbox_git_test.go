@@ -17,6 +17,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 const helperPath = "../../flavors/common/koinon-git-credential"
@@ -55,9 +56,7 @@ var _ = Describe("git in a sandbox on a connection's host", func() {
 	})
 
 	It("trusts the connection's CA for git, and sends the helper's placeholder only to its host", func() {
-		if _, err := exec.LookPath("git"); err != nil {
-			Skip("git is not installed")
-		}
+		testenv.Require(testenv.Binary("git"))
 		var mu sync.Mutex
 		var auths []string
 		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

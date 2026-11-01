@@ -20,6 +20,10 @@ func missing(name string) Requirement {
 }
 
 var _ = Describe("decide", func() {
+	// These specs name their fake requirements "docker"; a KOINON_TESTENV_UNAVAILABLE=docker run
+	// (the no-Docker gate) must not mark them missing.
+	BeforeEach(func() { GinkgoT().Setenv(UnavailableVar, "") })
+
 	It("does nothing when the requirement is met", func() {
 		met := Requirement{Name: "docker", check: func() error { return nil }}
 		skip, msg := decide(met, "docker")
