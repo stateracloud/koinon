@@ -112,6 +112,15 @@ func parseGatewayConfig(toml string) gatewayImages {
 	return g
 }
 
+// GatewayConfigKey is the key of OpenShell's gateway configuration in its ConfigMap.
+const GatewayConfigKey = gatewayConfigKey
+
+// SupervisorImage reads the gateway's supervisor_image out of the gateway.toml text; empty when the
+// file does not set it. The reconciler uses it for the sandbox spec hash (ADR 0085 decision 9).
+func SupervisorImage(toml string) string {
+	return parseGatewayConfig(toml).supervisorImage
+}
+
 // checkSandboxImages checks OpenShell's gateway configuration for what sandbox pods need to pull
 // the images Koinon names:
 //   - when Koinon pulls with credentials or through a mirror (ExpectSandboxPullSecrets), that the
@@ -142,7 +151,8 @@ func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 	if cause != "" {
 		return []Result{{
 			Check: checkGatewayConfig, Status: Warn,
-			Message: cause + ", so the gateway's sandbox pull secrets, supervisor image and gateway ID are not checked",
+			Message: cause + ", so the gateway's sandbox pull secrets, supervisor image and gateway ID are not checked, " +
+				"and the reconciler cannot see an OpenShell upgrade: sandboxes are not recreated for a new supervisor image",
 			Fix: "set preflight.openshell.namespace and .configMap to the OpenShell release's gateway ConfigMap " +
 				"(<fullname>-config), or check by hand that the OpenShell release has server.sandboxImagePullSecrets and " +
 				"a supervisor image that sandboxPolicy.supervisorImages lists, and a gateway_id that equals openshell.gatewayId" + seeGuide,

@@ -152,29 +152,37 @@ func run() error {
 	if err := catalog.ValidateAllowedHosts(splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)); err != nil {
 		return err
 	}
+	var supervisor reconciler.SupervisorSource
+	if cfg.openshellConfigMap != "" {
+		supervisor = reconciler.KubeSupervisorImage{Client: kube, Namespace: cfg.openshellConfigNS, ConfigMap: cfg.openshellConfigMap}
+	} else {
+		log.Warn("no OpenShell gateway ConfigMap is configured: a new supervisor image does not recreate existing sandboxes")
+	}
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
-			Gateway:           endpoint,
-			Prices:            priceResolver,
-			Keys:              keyring,
-			ProviderKeys:      reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
-			ProviderKeyDir:    cfg.providerKeysDir,
-			URLPolicy:         catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)},
-			ProviderKeySettle: cfg.keySettle,
-			Flavors:           cfg.flavors(),
-			RuntimeClassName:  cfg.runtimeClass,
-			SandboxResources:  &cfg.sandboxResources,
-			IdleTimeout:       cfg.idleTimeout,
-			ParkWarm:          cfg.parkWarm,
-			ArchiveAfter:      cfg.archiveAfter,
-			SandboxJobs:       cfg.sandboxJobs,
-			KeepWarmPerOrg:    cfg.keepWarmPerOrg,
-			ResyncInterval:    cfg.resyncInterval,
-			HomeRetention:     reconciler.Retention(cfg.homeRetention),
-			Checkpoints:       cfg.checkpoints,
-			ToolServers:       cfg.toolServers(),
-			MCPAskURL:         cfg.mcpAskURL,
+			Gateway:             endpoint,
+			Prices:              priceResolver,
+			Keys:                keyring,
+			ProviderKeys:        reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
+			ProviderKeyDir:      cfg.providerKeysDir,
+			URLPolicy:           catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)},
+			ProviderKeySettle:   cfg.keySettle,
+			Flavors:             cfg.flavors(),
+			RuntimeClassName:    cfg.runtimeClass,
+			SandboxResources:    &cfg.sandboxResources,
+			IdleTimeout:         cfg.idleTimeout,
+			ParkWarm:            cfg.parkWarm,
+			ArchiveAfter:        cfg.archiveAfter,
+			SandboxJobs:         cfg.sandboxJobs,
+			KeepWarmPerOrg:      cfg.keepWarmPerOrg,
+			Supervisor:          supervisor,
+			MaxRecreatesPerPass: cfg.maxRecreates,
+			ResyncInterval:      cfg.resyncInterval,
+			HomeRetention:       reconciler.Retention(cfg.homeRetention),
+			Checkpoints:         cfg.checkpoints,
+			ToolServers:         cfg.toolServers(),
+			MCPAskURL:           cfg.mcpAskURL,
 			// repo.read grants (plan item C2): tokens minted with the App key opened from the
 			// connection's stored secret fields.
 			GitHub: reconciler.GitHubApps{
