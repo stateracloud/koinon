@@ -147,7 +147,7 @@ check "go test on the changed package" has '^go test ./internal/foo ' "$FAKE_LOG
 check "every gate ran with KUBECONFIG=/dev/null" hasnt 'KUBECONFIG=\]' "$FAKE_LOG"
 check "gitleaks scans base..HEAD" has 'gitleaks git --redact --no-banner --log-opts=origin/main..HEAD' "$FAKE_LOG"
 check "chart gate did not run" hasnt 'chart-check' "$FAKE_LOG"
-check "logs are kept" test -f "$TMPDIR/koinon-preflight/go.log"
+check "logs are kept" compgen -G "$TMPDIR/koinon-preflight/*/go.log"
 # e2e needed is informational
 : >"$FAKE_LOG"
 FAKE_NEEDS_RC=0 pf "$tmp/r1b" --only e2e >/dev/null
@@ -174,7 +174,7 @@ echo "package foo // f" >>internal/foo/a.go; commit_all
 export FAKE_GO_TEST_RC=1
 rc=$(pf "$tmp/f1")
 check "go test failure: exit 1" eq "$rc" 1
-check "FAIL line names the gate and log" has "^go FAIL [0-9]*s log=$TMPDIR/koinon-preflight/go.log$" "$tmp/f1"
+check "FAIL line names the gate and log" has "^go FAIL [0-9]*s log=$TMPDIR/koinon-preflight/[0-9a-f]*/go.log$" "$tmp/f1"
 check "error excerpt shown" has '^  | --- FAIL: TestX' "$tmp/f1"
 check "excerpt at most 5 lines" test "$(grep -c '^  | ' "$tmp/f1")" -le 5
 check "later gates still run" has '^gitleaks ok' "$tmp/f1"
