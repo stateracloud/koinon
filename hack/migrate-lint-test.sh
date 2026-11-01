@@ -77,6 +77,12 @@ patch p-droptable 'DROP TABLE t;' "drops a table" 1
 patch p-droptype 'DROP TYPE s;' "drops a type" 1
 patch p-retype 'ALTER TABLE t ALTER COLUMN a TYPE bigint;' "changes a column type" 1
 patch p-retype2 'ALTER TABLE t\n  ALTER COLUMN a SET DATA TYPE text;' "changes a column type (SET DATA TYPE)" 1
+patch p-dropbare 'ALTER TABLE t DROP a;' "drops a column (COLUMN omitted)" 1
+patch p-dropif 'ALTER TABLE t DROP IF EXISTS a;' "drops a column (IF EXISTS, COLUMN omitted)" 1
+patch p-retypebare 'ALTER TABLE t ALTER a TYPE bigint;' "changes a column type (COLUMN omitted)" 1
+patch p-dropmulti 'ALTER TABLE t ADD COLUMN c int, DROP a;' "drops a column after another action" 1
+patch p-enum 'ALTER TYPE s ADD VALUE IF NOT EXISTS x;' "adds an enum value" 0
+patch p-dropsafe 'ALTER TABLE t DROP CONSTRAINT k;\nALTER TABLE t ALTER COLUMN a DROP DEFAULT;\nALTER TABLE t ALTER COLUMN a DROP NOT NULL;\nALTER TABLE t ALTER COLUMN a DROP IDENTITY;' "drops a constraint, default, NOT NULL, identity" 0
 patch p-default 'ALTER TABLE t ALTER COLUMN a SET DEFAULT 1;\nALTER TABLE t ALTER COLUMN a DROP NOT NULL;' "changes a default and drops NOT NULL" 0
 
 # The same migration is fine on the next minor line (base main), and the env var forces the rule.
@@ -86,5 +92,23 @@ echo 'ALTER TABLE t RENAME TO u;' >"$dir/00004_p.sql" && git add -A && git commi
 expect 0 "rename on main (next minor line)"
 git checkout -q next
 MIGRATE_LINT_PATCH_LINE=1 expect 1 "rename with MIGRATE_LINT_PATCH_LINE=1"
+
+# The marker file on main: "none" lets main contract; a shipped line makes the rule bite on main.
+git checkout -qb marker-none main
+mkdir -p hack && echo none >hack/migrate-patch-line && git add -A && git commit -qm "marker none"
+git branch marker-main
+git checkout -q marker-main
+echo v0.1 >hack/migrate-patch-line && git add -A && git commit -qm "marker v0.1"
+git branch -f main marker-main
+git checkout -qb after-ship main
+echo 'ALTER TABLE t RENAME TO u;' >"$dir/00004_p.sql" && git add -A && git commit -qm after
+expect 1 "rename on main once the marker names a shipped line"
+git checkout -qb ok-after-ship main
+echo 'ALTER TABLE t ADD COLUMN c int;' >"$dir/00004_p.sql" && git add -A && git commit -qm ok
+expect 0 "expand on main once the marker names a shipped line"
+git checkout -qb flip main
+echo none >hack/migrate-patch-line
+echo 'ALTER TABLE t RENAME TO u;' >"$dir/00004_p.sql" && git add -A && git commit -qam flip
+expect 1 "flipping the marker in the same change does not lift the rule"
 
 exit $fail
