@@ -19,7 +19,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/stateracloud/koinon/internal/testing/testenv"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	modelgw "github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 	"github.com/stateracloud/koinon/templates"
 )
 
