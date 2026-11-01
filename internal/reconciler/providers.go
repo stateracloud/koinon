@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/reconciler/gatewayplan"
 	"github.com/stateracloud/koinon/internal/thinking"
 )
 
@@ -127,13 +128,7 @@ func (k KubeProviderKeys) Prune(ctx context.Context, keep map[string]bool) error
 // servedProviders is what a pass renders for providers: the gateway providers and the key
 // files they need.
 type servedProviders struct {
-	providers []gateway.Provider
-	// ids and fileNames are parallel to providers: the provider's ID and its key file's data key
-	// ("" for a keyless provider).
-	ids       []string
-	orgIDs    []pgtype.UUID
-	pids      []pgtype.UUID
-	fileNames []string
+	providers []gatewayplan.Provider
 	files     map[string][]byte
 	// modelIDs maps each rendered model (gateway.ModelRef) to its ID, for gateway_served_models.
 	modelIDs map[string]pgtype.UUID
@@ -209,11 +204,9 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 			out.modelIDs[gateway.ModelRef(org.Slug, row.ModelName)] = row.ModelID
 		}
 		for _, id := range order {
-			out.providers = append(out.providers, *byID[id])
-			out.ids = append(out.ids, id)
-			out.orgIDs = append(out.orgIDs, org.ID)
-			out.pids = append(out.pids, pidOf[id])
-			out.fileNames = append(out.fileNames, fileOf[id])
+			out.providers = append(out.providers, gatewayplan.Provider{
+				ID: id, OrgID: org.ID, ProviderID: pidOf[id], File: fileOf[id], Gateway: *byID[id],
+			})
 		}
 	}
 	if len(out.files) > 0 && r.cfg.ProviderKeys == nil {
