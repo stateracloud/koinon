@@ -12,7 +12,7 @@ profile as described under "Home-lab values in the remote profile" below.
 Tilt pushes images to the home lab's Zot registry (ADR 0047). Zot is part of the home-lab platform
 (Argo CD), not installed by Koinon.
 
-- URL: `zot.apps.lab.example.invalid`, Koinon images under `koinon/`
+- URL: `<registry host from lab.env>`, Koinon images under `koinon/`
 - Zot v2.1.22 in namespace `zot`. It is also the cluster's pull-through cache: anonymous reads
   work only for mirrored upstreams (docker.io, ghcr.io, quay.io, registry.k8s.io), so `koinon/*`
   needs credentials for both push and pull.
@@ -24,14 +24,14 @@ The credentials come from the maintainer's secret store; these commands never pr
 ```sh
 # On your Mac: ko and Tilt push with this login
 <read the push credential from the secret store> |
-  docker login zot.apps.lab.example.invalid -u <push user> --password-stdin
+  docker login <registry host from lab.env> -u <push user> --password-stdin
 
 # In the cluster: the pull secret the dev manifests reference.
 # Prefer a read-only Zot account here over your push credentials.
-kubectl --context homelab create namespace koinon --dry-run=client -o yaml |
-  kubectl --context homelab apply -f -
-kubectl --context homelab -n koinon create secret docker-registry dev-registry \
-  --docker-server=zot.apps.lab.example.invalid \
+kubectl --context <your lab kube context> create namespace koinon --dry-run=client -o yaml |
+  kubectl --context <your lab kube context> apply -f -
+kubectl --context <your lab kube context> -n koinon create secret docker-registry dev-registry \
+  --docker-server=<registry host from lab.env> \
   --docker-username=<pull user> --docker-password="<read the pull credential from the secret store>"
 ```
 
@@ -46,7 +46,7 @@ these in `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/`:
 | File | What |
 | --- | --- |
 | `lab.env` | `KOINON_E2E_ARGO_SERVER`, `_BUNDLE_URL`, `_RESULTS_URL`, `_S3_REGION`, `_ARGO_CREDS`, `_LIGHT_MANIFEST` for `hack/e2e-remote.sh --argo` (template `hack/lab/lab.env.example`; the environment overrides it) |
-| `lab/lab-creds.sh` | the credentials functions of `hack/e2e-argo.sh` (contract `hack/lab/creds.example.sh`) |
+| `lab/creds.sh` | the credentials functions of `hack/e2e-argo.sh` (contract `hack/lab/creds.example.sh`) |
 | `lab/light.workflow.json` | the Argo Workflow of `--lane light` |
 | `lab/local.homelab.example.yaml`, `values-homelab.yaml`, `model-provider-homelab.yaml` | the Tilt remote profile of the lab |
 
@@ -70,7 +70,7 @@ using the platform's operator, and generates one password Secret per component r
 One-time setup: the Zot login and the `dev-registry` pull secret ([Dev registry](#dev-registry)). Then:
 
 ```sh
-tilt up --context homelab
+tilt up --context <your lab kube context>
 ```
 
 ### Home-lab values in the remote profile
@@ -81,20 +81,20 @@ Copy it to `hack/dev/local.yaml` (git-ignored); the Tiltfile reads only that fil
 
 | Home-lab value | Where it lives now |
 | --- | --- |
-| Zot, `zot.apps.lab.example.invalid/koinon` | `registry` |
+| Zot, `<registry host from lab.env>/koinon` | `registry` |
 | the `dev-registry` pull secret | `imagePullSecret` |
 | OpenShell at `openshell.openshell.svc:8080`, runtime class `kata`, mTLS Secret `openshell-client-tls` | `openshell.*` |
 | the Ollama provider | `modelProvider:` (`model-provider-homelab.yaml`, same directory) |
 | Ollama egress host and network policy | `values:` (`values-homelab.yaml`, same directory) |
-| the `lab.example.invalid/openbao` namespace label | `namespaceLabels` (it is no longer on the kind namespace) |
+| the `<lab secret-store label from lab.env>` namespace label | `namespaceLabels` (it is no longer on the kind namespace) |
 | sandbox policies off | `sandboxPolicy: false` |
 
 Tilt builds for `linux/amd64`. Change single values without editing files:
 
 ```sh
-tilt up --context homelab -- --helm-set openshell.address=openshell.other.svc:8080 --helm-set openshell.runtimeClassName=kata-qemu
-tilt up --context homelab -- --openshell-tls-secret=   # no mTLS (the default copies openshell-client-tls)
-tilt up --context homelab -- --openshell-namespace=openshell
+tilt up --context <your lab kube context> -- --helm-set openshell.address=openshell.other.svc:8080 --helm-set openshell.runtimeClassName=kata-qemu
+tilt up --context <your lab kube context> -- --openshell-tls-secret=   # no mTLS (the default copies openshell-client-tls)
+tilt up --context <your lab kube context> -- --openshell-namespace=openshell
 ```
 
 The home-lab gateway requires mTLS (docs/spikes/openshell.md), so the profile copies the Secret
@@ -140,7 +140,7 @@ REL2 run A installs the rc from the home-lab Zot ([Dev registry](#dev-registry))
 With `crane` and `jq` installed and `docker login` done for both registries:
 
 ```sh
-hack/mirror-release.sh 0.1.0-rc.1 zot.apps.lab.example.invalid/koinon
+hack/mirror-release.sh 0.1.0-rc.1 <registry host from lab.env>/koinon
 ```
 
 It copies the four images (the three Go images and `flavor-opencode`, every platform, plus any
@@ -153,6 +153,6 @@ referrers-API-only output is not copied. Install the mirrored chart with
 
 ## RT fixtures on the home lab
 
-`kubectl --context homelab apply -k test/fixtures/rt1/overlays/homelab` applies the story-test fixtures
+`kubectl --context <your lab kube context> apply -k test/fixtures/rt1/overlays/homelab` applies the story-test fixtures
 with the images from Zot pinned by digest; the Secrets come from OpenBao through ExternalSecrets.
 Everyone else uses `overlays/kind` or `overlays/remote` ([real-model-tests.md](real-model-tests.md)).
