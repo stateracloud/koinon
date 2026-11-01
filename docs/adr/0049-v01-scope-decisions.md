@@ -351,5 +351,7 @@ from templates costs nothing until work arrives.
   to pass; the others start on demand. Keep-warm sandboxes count toward resources (#314).
 - **Cost.** The first run of an agent now waits for its sandbox to start (image pull, home volume);
   that wait is the one `agentd` already has for a stopped or archived sandbox. Preparing the image
-  and the home volume at activation without starting the pod is not built: follow-up.
-- **Not built yet:** the API and UI for the setting (the data and the reconciler side are in).
+  and the home volume at activation without starting the pod is not built: tracked in #461. A per-org rate limit on
+  sandbox starts is tracked in #153.
+- **Not built yet:** the API and UI for the setting, with the org-admin authz check (the data and
+  the reconciler side are in): tracked in #460.
