@@ -186,8 +186,8 @@ func (s *Service) GetDefault(ctx context.Context, org pgtype.UUID) (string, erro
 // change and its audit event, with the old and new value, commit together; setting the value it
 // already has writes no event.
 func (s *Service) SetDefault(ctx context.Context, org pgtype.UUID, actor audit.Actor, model string, at time.Time) error {
-	if len(model) > 200 {
-		return &InvalidError{Msg: "the model name is longer than 200 characters"}
+	if len(model) > 256 {
+		return &InvalidError{Msg: "the model name is longer than 256 characters"}
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)

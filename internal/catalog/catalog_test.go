@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
@@ -351,6 +352,17 @@ var _ = Describe("Service", func() {
 			var n int
 			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'org.default_model.set'`, org).Scan(&n)).To(Succeed())
 			Expect(n).To(Equal(1))
+		})
+
+		It("adopts a first model whose name is the longest the catalog accepts", func(ctx SpecContext) {
+			p := create(ctx, "long", "")
+			name := strings.Repeat("m", 256)
+			_, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: name})
+			Expect(err).NotTo(HaveOccurred())
+			var d *string
+			Expect(pool.QueryRow(ctx, `SELECT default_model FROM orgs WHERE id = $1`, org).Scan(&d)).To(Succeed())
+			Expect(d).NotTo(BeNil())
+			Expect(*d).To(Equal(name))
 		})
 
 		It("keeps model names unique per org across providers", func(ctx SpecContext) {
