@@ -5,7 +5,9 @@
 # origin/main, gitleaks, push, pull request, board, ready, auto-merge, claim review. One line per step.
 #
 #   hack/ship.sh [--message-file F | -m SUBJECT] [--pr-title T --pr-body FILE] [--draft] [--ready]
-#                [--auto-merge] [--review N[,M]] [--dry-run]
+#                [--e2e] [--auto-merge] [--review N[,M]] [--dry-run]
+#
+# --e2e adds the `e2e` label before the push (an open PR) or at PR creation, so one run carries it.
 #
 # Run it inside a checkout or worktree on a feature branch. Environment:
 #   KOINON_SHIP_ALLOWED_EMAILS  comma list of user.email values that may commit (default: any)
@@ -18,7 +20,7 @@
 # The gitleaks gate is never skipped and nothing is ever force-pushed.
 set -euo pipefail
 
-msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 auto=0 review="" dry=0
+msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 review="" dry=0
 need() { [[ $# -ge 2 ]] || { echo "ship: $1 needs a value" >&2; exit 2; }; }
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -28,10 +30,11 @@ while [[ $# -gt 0 ]]; do
 	--pr-body) need "$@"; pr_body=$2; shift 2 ;;
 	--draft) draft=1; shift ;;
 	--ready) ready=1; shift ;;
+	--e2e) e2e=1; shift ;;
 	--auto-merge) auto=1; shift ;;
 	--review) need "$@"; review=$2; shift 2 ;;
 	--dry-run) dry=1; shift ;;
-	-h | --help) sed -n 4,19p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h | --help) sed -n 4,21p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "ship: unknown argument $1 (see --help)" >&2; exit 2 ;;
 	esac
 done
@@ -102,6 +105,7 @@ say "blobs ok"
 
 # 4. fetch and merge origin/main
 if [[ $dry == 1 ]]; then
+	[[ $e2e == 1 ]] && say "dry-run: would add the e2e label before the push"
 	say "dry-run: would git fetch origin, merge origin/main if behind, run gitleaks, push $branch"
 else
 	git fetch -q origin
@@ -135,7 +139,15 @@ else
 	rm -f "$glog"
 	say "gitleaks ok ($n commits)"
 
-	# 6. push
+	# 6. push. The e2e label goes on an open PR first, so the push already sees it; a new PR gets it
+	# at creation (step 7).
+	if [[ $e2e == 1 ]]; then
+		label_pr=$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)
+		if [[ -n $label_pr ]]; then
+			gh pr edit "$label_pr" --add-label e2e >/dev/null || fail "could not add the e2e label"
+			say "label e2e"
+		fi
+	fi
 	# git prints the server's "remote:" banner on stderr even with -q; keep it out of the step lines.
 	if ! pushlog=$(git push -q -u origin "$branch" 2>&1); then
 		printf '%s\n' "$pushlog" >&2
@@ -159,6 +171,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			else
 				args=(--head "$branch" --title "$pr_title" --body-file "$pr_body")
 				[[ $draft == 1 ]] && args+=(--draft)
+				[[ $e2e == 1 ]] && args+=(--label e2e)
 				pr_url=$(gh pr create "${args[@]}" | tail -n 1)
 			fi
 		fi
