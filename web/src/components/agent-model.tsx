@@ -51,7 +51,7 @@ export function AgentModel({ agent }: { agent: Agent }) {
           <AlertDescription>{m.problem}{m.source === ModelSource.AGENT && ' Runs fail until you pick another model.'}</AlertDescription>
         </Alert>
       )}
-      {m.source === ModelSource.NONE && !m.problem && <p className="text-muted-foreground">The org serves no model with a price, so runs fail. Add a provider, a model and a price first.</p>}
+      {m.source === ModelSource.NONE && !m.problem && <p className="text-muted-foreground">The org has no default model, so runs fail. Add a provider, a model and a price, or set the org's default model.</p>}
       <div className="grid gap-1.5">
         <Label htmlFor="agent-model-pick">Model for this agent</Label>
         <NativeSelect id="agent-model-pick" value={value} onChange={(e) => setPicked(e.target.value)} disabled={archived} aria-describedby="agent-model-help">

@@ -367,6 +367,8 @@ type Querier interface {
 	GetOrgBudget(ctx context.Context, orgID pgtype.UUID) (GetOrgBudgetRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
+	// The model agents without a model setting run on (#256); '' when the org has none.
+	GetOrgDefaultModel(ctx context.Context, orgID pgtype.UUID) (string, error)
 	// The part of an org's spend since @since that came from estimated usage.
 	GetOrgEstimatedSpendSince(ctx context.Context, arg GetOrgEstimatedSpendSinceParams) (string, error)
 	// What provisional entries of an org since @since hold back from every key's org-level limit.
@@ -893,6 +895,10 @@ type Querier interface {
 	SetMCPToolTier(ctx context.Context, arg SetMCPToolTierParams) (McpTool, error)
 	SetMCPToolTwoApprovers(ctx context.Context, arg SetMCPToolTwoApproversParams) (McpTool, error)
 	SetModelDisabled(ctx context.Context, arg SetModelDisabledParams) error
+	// Sets or clears ('') the org's default model. The old value comes back for the audit event.
+	SetOrgDefaultModel(ctx context.Context, arg SetOrgDefaultModelParams) (string, error)
+	// The org's first model becomes its default; a default that is set stays.
+	SetOrgDefaultModelIfUnset(ctx context.Context, arg SetOrgDefaultModelIfUnsetParams) (int64, error)
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
 	// Sets or clears (NULL) the org's monthly cap, keeping its platform ceiling.
 	SetOrgMonthlyCap(ctx context.Context, arg SetOrgMonthlyCapParams) (SetOrgMonthlyCapRow, error)

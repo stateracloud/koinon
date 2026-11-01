@@ -13,7 +13,7 @@ import (
 
 const getOrgBySlug = `-- name: GetOrgBySlug :one
 
-SELECT id, slug, display_name, kind, identity_mode, created_at, updated_at, deleted_at FROM orgs
+SELECT id, slug, display_name, kind, identity_mode, created_at, updated_at, deleted_at, default_model FROM orgs
 WHERE slug = $1 AND deleted_at IS NULL
 `
 
@@ -30,8 +30,22 @@ func (q *Queries) GetOrgBySlug(ctx context.Context, slug string) (Org, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.DefaultModel,
 	)
 	return i, err
+}
+
+const getOrgDefaultModel = `-- name: GetOrgDefaultModel :one
+SELECT coalesce(default_model, '')::text AS default_model FROM orgs
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+// The model agents without a model setting run on (#256); ” when the org has none.
+func (q *Queries) GetOrgDefaultModel(ctx context.Context, orgID pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getOrgDefaultModel, orgID)
+	var default_model string
+	err := row.Scan(&default_model)
+	return default_model, err
 }
 
 const getOrgSlug = `-- name: GetOrgSlug :one
@@ -73,4 +87,45 @@ func (q *Queries) ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const setOrgDefaultModel = `-- name: SetOrgDefaultModel :one
+UPDATE orgs o
+SET default_model = nullif($1::text, '')
+FROM (SELECT x.id, coalesce(x.default_model, '')::text AS old FROM orgs x WHERE x.id = $2 FOR UPDATE) cur
+WHERE o.id = cur.id
+RETURNING cur.old::text AS old_default_model
+`
+
+type SetOrgDefaultModelParams struct {
+	DefaultModel string
+	OrgID        pgtype.UUID
+}
+
+// Sets or clears (”) the org's default model. The old value comes back for the audit event.
+func (q *Queries) SetOrgDefaultModel(ctx context.Context, arg SetOrgDefaultModelParams) (string, error) {
+	row := q.db.QueryRow(ctx, setOrgDefaultModel, arg.DefaultModel, arg.OrgID)
+	var old_default_model string
+	err := row.Scan(&old_default_model)
+	return old_default_model, err
+}
+
+const setOrgDefaultModelIfUnset = `-- name: SetOrgDefaultModelIfUnset :execrows
+UPDATE orgs
+SET default_model = $1::text
+WHERE id = $2 AND default_model IS NULL AND deleted_at IS NULL
+`
+
+type SetOrgDefaultModelIfUnsetParams struct {
+	DefaultModel string
+	OrgID        pgtype.UUID
+}
+
+// The org's first model becomes its default; a default that is set stays.
+func (q *Queries) SetOrgDefaultModelIfUnset(ctx context.Context, arg SetOrgDefaultModelIfUnsetParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setOrgDefaultModelIfUnset, arg.DefaultModel, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

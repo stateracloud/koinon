@@ -332,6 +332,27 @@ var _ = Describe("Service", func() {
 			Expect(errors.As(err, &inv)).To(BeTrue())
 		})
 
+		It("makes the org's first model its default model and never moves it (#256)", func(ctx SpecContext) {
+			q := store.New(pool)
+			def := func() string {
+				GinkgoHelper()
+				d, err := q.GetOrgDefaultModel(ctx, org)
+				Expect(err).NotTo(HaveOccurred())
+				return d
+			}
+			Expect(def()).To(BeEmpty())
+			z, a := create(ctx, "z-first", ""), create(ctx, "a-second", "")
+			_, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: z.ID, Name: "zz"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(def()).To(Equal("zz"))
+			_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: a.ID, Name: "aa"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(def()).To(Equal("zz"), "a model that sorts first does not take the default")
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'org.default_model.set'`, org).Scan(&n)).To(Succeed())
+			Expect(n).To(Equal(1))
+		})
+
 		It("keeps model names unique per org across providers", func(ctx SpecContext) {
 			a, b := create(ctx, "a", ""), create(ctx, "b", "")
 			_, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: a.ID, Name: "m"})

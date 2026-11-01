@@ -280,8 +280,11 @@ instructions, and sometimes returned empty or cut-off replies. Use a larger mode
 
 ## The default model
 
-An agent whose template names no model (or `default`) uses the first model its org serves: providers
-by name, then models by name.
+An agent whose template names no model (or `default`) uses the org's default model. It is stored:
+the first model an org gets becomes its default, and an admin changes it with `PUT /admin/v1/default-model`
+(a model the org serves and has a price for; leaving `model` out clears it). Adding a provider, a model or a
+price never moves it, and each change is audited as `org.default_model.set`. An org with no default model
+fails runs of agents that name no model, with a message that says so.
 
 ## The admin API
 

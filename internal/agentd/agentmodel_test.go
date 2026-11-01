@@ -30,6 +30,9 @@ var _ = Describe("The agent's model setting", func() {
 			e.org, providerID, name, string(format)).Scan(&modelID)).To(Succeed())
 		_, err := db.Exec(ctx, `INSERT INTO gateway_served_models (org_id, model_id, provider_id) VALUES ($1, $2, $3)`, e.org, modelID, providerID)
 		Expect(err).NotTo(HaveOccurred())
+		// The org's first model is its default, as catalog.CreateModel does (#256).
+		_, err = db.Exec(ctx, `UPDATE orgs SET default_model = $2 WHERE id = $1 AND default_model IS NULL`, e.org, name)
+		Expect(err).NotTo(HaveOccurred())
 		if !priced {
 			return
 		}
