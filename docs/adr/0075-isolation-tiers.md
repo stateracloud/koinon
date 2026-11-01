@@ -342,3 +342,13 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
 - https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/
 - https://kubernetes.io/docs/concepts/containers/runtime-class/#scheduling
 - https://github.com/bottlerocket-os/bottlerocket/issues/4070
+
+## Amendment (2026-11-01): kata-qemu-runtime-rs in the vm tier (#442)
+
+Kata 3.x registers a third QEMU handler, `kata-qemu-runtime-rs` (the Rust runtime). The `vm` tier's
+`sandboxPolicy.runtimeClasses` now defaults to `[kata, kata-qemu, kata-qemu-runtime-rs]`, so a
+cluster that uses it needs no override. The values schema accepts only names matching
+`^kata(-[a-z0-9-]+)?$` and, for the `dev` tier on kind, `runc`; the list cannot be empty, so no
+other runtime (gVisor, a lookalike) is admitted by configuration. Enforcement stays `enforce`
+(ADR 0045). The reconciler still requests `openshell.runtimeClassName` (default `kata`), which must
+be one of the admitted classes; its default is unchanged.
