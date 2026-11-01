@@ -318,6 +318,10 @@ jobs:
         with:
           go-version-file: go.mod
       - run: hack/needs-e2e-test.sh
+      - name: flavor-tag-test (needs a UTF-8 locale with its own collation)
+        run: |
+          sudo locale-gen en_US.UTF-8
+          hack/flavor-tag-test.sh
       - run: hack/e2e-remote-test.sh
       - run: hack/pr-wait-test.sh
       - run: hack/ci-fail-test.sh
