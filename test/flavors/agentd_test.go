@@ -24,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -52,9 +53,7 @@ func describeAgentd(f flavor) bool {
 		)
 
 		BeforeAll(func(ctx SpecContext) {
-			if dockerErr != nil {
-				Skip("Docker is not available: " + dockerErr.Error())
-			}
+			testenv.Require(testenv.Docker)
 			ensureImage(f)
 
 			db = pgtest.Start(ctx)

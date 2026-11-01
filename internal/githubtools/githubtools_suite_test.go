@@ -14,10 +14,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 var (
@@ -30,29 +30,18 @@ func TestGitHubTools(t *testing.T) {
 	RunSpecs(t, "GitHub Tools Suite")
 }
 
-// needDB skips specs that need Postgres when Docker is not available, so the
-// pure validation specs still run.
-var dbErr error
-
 var _ = BeforeSuite(func(ctx SpecContext) {
-	p, err := testcontainers.NewDockerProvider()
-	if err == nil {
-		err = p.Health(ctx)
-		_ = p.Close()
-	}
-	if err != nil {
-		dbErr = err
+	// Without Docker the pure validation specs still run; the ones that need Postgres call needDB.
+	if testenv.Docker.Err() != nil {
 		return
 	}
 	pool = pgtest.Start(ctx)
 	q = store.New(pool)
 }, NodeTimeout(3*time.Minute))
 
-func needDB() {
-	if dbErr != nil {
-		Skip("Docker is not available: " + dbErr.Error())
-	}
-}
+// needDB skips a spec that needs Postgres when Docker is not available (or fails it under
+// KOINON_REQUIRE=docker).
+func needDB() { testenv.Require(testenv.Docker) }
 
 var seq atomic.Int64
 

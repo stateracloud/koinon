@@ -58,6 +58,13 @@ var _ = Describe("requirements", func() {
 		Expect(Var("probe", "KOINON_TESTENV_PROBE").Err()).To(Succeed())
 	})
 
+	It("Binary needs the executable on PATH", func() {
+		Expect(Binary("sh").Err()).To(Succeed())
+		err := Binary("koinon-no-such-binary").Err()
+		Expect(err).To(MatchError(ContainSubstring("not on PATH")))
+		Expect(Binary("helm").Name).To(Equal("helm"))
+	})
+
 	It("Envtest needs KUBEBUILDER_ASSETS to be a directory", func() {
 		GinkgoT().Setenv("KUBEBUILDER_ASSETS", "")
 		Expect(Envtest.Err()).To(HaveOccurred())

@@ -16,6 +16,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // The integration test runs against a real gateway only when KOINON_OPENSHELL_ENDPOINT is
@@ -34,10 +35,8 @@ var _ = Describe("OpenShell gateway", Label("integration"), Ordered, func() {
 	)
 
 	BeforeAll(func(ctx SpecContext) {
+		testenv.Require(testenv.Var("openshell", "KOINON_OPENSHELL_ENDPOINT"))
 		endpoint := os.Getenv("KOINON_OPENSHELL_ENDPOINT")
-		if endpoint == "" {
-			Skip("KOINON_OPENSHELL_ENDPOINT is not set")
-		}
 		dir := os.Getenv("KOINON_OPENSHELL_MTLS_DIR")
 		image := os.Getenv("KOINON_OPENSHELL_IMAGE")
 		Expect(dir).NotTo(BeEmpty(), "KOINON_OPENSHELL_MTLS_DIR")

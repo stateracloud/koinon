@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -68,6 +69,16 @@ func Var(name, variable string) Requirement {
 	return Requirement{Name: name, check: func() error {
 		if os.Getenv(variable) == "" {
 			return fmt.Errorf("%s is not set", variable)
+		}
+		return nil
+	}}
+}
+
+// Binary is a requirement met when the executable is on PATH; its name is the executable's.
+func Binary(bin string) Requirement {
+	return Requirement{Name: bin, check: func() error {
+		if _, err := exec.LookPath(bin); err != nil {
+			return fmt.Errorf("%s is not on PATH", bin)
 		}
 		return nil
 	}}

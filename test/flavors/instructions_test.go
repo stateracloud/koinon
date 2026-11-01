@@ -11,15 +11,14 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/acp"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // newFlavorSandbox starts a sandbox with f's image, the session directory and, unless
 // instructions is empty, the instruction file koinon-agentd writes.
 func newFlavorSandbox(ctx context.Context, f flavor, instructions string) *sandbox {
 	GinkgoHelper()
-	if dockerErr != nil {
-		Skip("Docker is not available: " + dockerErr.Error())
-	}
+	testenv.Require(testenv.Docker)
 	ensureImage(f)
 	sb := newSandbox(f.image(), "OPENAI_API_KEY="+fakeKey)
 	DeferCleanup(func() { sb.remove(context.Background()) })

@@ -19,6 +19,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -96,8 +97,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		// DNS never reaches the proxy (issue #244), and a refused connection reaches the client
 		// as a TCP failure, not a 502 (issue #270). The gateway spec skips without it; the
 		// provider record below only needs some host to bind the key to.
-		gwStandIn = os.Getenv("KOINON_ESCAPE_GATEWAY_HOST")
-		gwHost    = envOr("KOINON_ESCAPE_GATEWAY_HOST", "agentgateway.koinon-escape.invalid")
+		gwHost = envOr("KOINON_ESCAPE_GATEWAY_HOST", "agentgateway.koinon-escape.invalid")
 	)
 
 	// probe runs checks in the sandbox and returns each check's result by id.
@@ -195,9 +195,10 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	}, NodeTimeout(3*time.Minute))
 
 	It("lets the sandbox post to the gateway's model routes and nothing else on it (ADR 0069)", func(ctx SpecContext) {
-		if gwStandIn == "" {
-			Skip("KOINON_ESCAPE_GATEWAY_HOST is not set: name the stand-in (escape-gateway-standin.koinon-fixtures.svc.cluster.local), a non-loopback host the proxy resolves with a server on port 4000 that answers 418 and X-Koinon-Standin: 1")
-		}
+		// KOINON_ESCAPE_GATEWAY_HOST names the stand-in (escape-gateway-standin.koinon-fixtures.svc.cluster.local),
+		// a non-loopback host the proxy resolves with a server on port 4000 that answers 418 and
+		// X-Koinon-Standin: 1.
+		testenv.Require(testenv.Var("escape-gateway", "KOINON_ESCAPE_GATEWAY_HOST"))
 		// The stand-in answers every request 418 with the marker header, so an allowed request is
 		// recognisable by what the far end said, a denied one by the proxy's 403, and anything
 		// else (curl code 000 from a DNS or connect failure, a 502 from the proxy) means the
@@ -355,10 +356,8 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	It("cannot reach the platform Services' ClusterIPs", func(ctx SpecContext) {
 		// The Services are looked up with the cluster client (see admission_live_test.go);
 		// KOINON_ESCAPE_SERVICES is a comma-separated namespace/name:port list.
+		testenv.Require(testenv.Var("cluster", "KOINON_ESCAPE_NAMESPACE")) // and KOINON_ESCAPE_KUBECONFIG, to look up Service IPs
 		cs := kubeClient()
-		if cs == nil {
-			Skip("no cluster client: set KOINON_ESCAPE_NAMESPACE (and KOINON_ESCAPE_KUBECONFIG) to look up Service IPs")
-		}
 		var ts []target
 		for _, s := range strings.Split(envOr("KOINON_ESCAPE_SERVICES", "openshell/openshell:8080,agentgateway/agentgateway-mgmt:4001,agentgateway/agentgateway:8080"), ",") {
 			nsName, port, _ := strings.Cut(strings.TrimSpace(s), ":")
@@ -458,10 +457,9 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	// Kata is a manual release gate (ADR 0045): the home lab's dev profile may run sandboxes
 	// under another runtime class, and CI has no Kata at all.
 	It("runs in a Kata guest, not on the host kernel", func(ctx SpecContext) {
+		// KOINON_ESCAPE_HOST_KERNEL is the nodes' uname -r; set it to require a Kata guest.
+		testenv.Require(testenv.Var("kata", "KOINON_ESCAPE_HOST_KERNEL"))
 		host := os.Getenv("KOINON_ESCAPE_HOST_KERNEL")
-		if host == "" {
-			Skip("KOINON_ESCAPE_HOST_KERNEL (the nodes' uname -r) is not set: Kata is a manual release gate; set it to require a Kata guest")
-		}
 		res := probe(ctx, check{"id": "kernel", "op": "kernel"})
 		k := res["kernel"].(map[string]any)
 		Expect(k["release"]).NotTo(Equal(host), "the sandbox runs on the host kernel, so not under Kata")

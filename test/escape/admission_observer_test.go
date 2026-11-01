@@ -5,13 +5,13 @@ package escape_test
 import (
 	"bytes"
 	"context"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -90,9 +90,7 @@ var _ = Describe("Sandbox observer admission policy", Label("escape", "admission
 	}
 
 	BeforeAll(func(ctx SpecContext) {
-		if os.Getenv("KUBEBUILDER_ASSETS") == "" {
-			Skip("KUBEBUILDER_ASSETS is not set (setup-envtest use -p path)")
-		}
+		testenv.Require(testenv.Envtest)
 		objects := renderObserver(ctx)
 
 		env := &envtest.Environment{CRDs: []*apiextensionsv1.CustomResourceDefinition{sandboxCRD()}}

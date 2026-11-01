@@ -50,3 +50,23 @@ if [[ ${GO_TEST_TEST_RUN:-} == 1 ]]; then
 	[[ -n $f && $(grep -c '<testcase' "$f") -gt 1 ]] || { echo "FAIL: reconciler report has no per-spec testcases"; exit 1; }
 	echo "ok: serial Ginkgo suite report has per-spec testcases"
 fi
+
+# #507: a Ginkgo suite where no spec ran is not a pass. ./internal/runoutcome has Postgres specs
+# only, so without Docker every one of them skips through testenv.Require. A dead DOCKER_HOST does
+# not simulate that (testcontainers falls back to the default socket), KOINON_TESTENV_UNAVAILABLE does.
+d=$(mktemp -d)
+out=$(KOINON_TESTENV_UNAVAILABLE=docker REPORT_DIR=$d hack/go-test.sh ./internal/runoutcome 2>&1) || {
+	echo "$out" | tail -20
+	echo "FAIL: a suite that skips for a missing requirement must exit 0 (SKIPPED), not fail"; exit 1
+}
+grep -q 'SKIPPED, NOT PASSED' <<<"$out" || { echo "$out" | tail -20; echo "FAIL: a suite skipped for a missing requirement is not reported as SKIPPED, NOT PASSED"; exit 1; }
+d=$(mktemp -d)
+if KOINON_REQUIRE=docker KOINON_TESTENV_UNAVAILABLE=docker REPORT_DIR=$d hack/go-test.sh ./internal/runoutcome >/dev/null 2>&1; then
+	echo "FAIL: KOINON_REQUIRE=docker must fail a suite whose Docker is missing"; exit 1
+fi
+d=$(mktemp -d)
+if out=$(go run ./hack/testverdict -reports "$d" ./internal/runoutcome 2>&1); then
+	echo "FAIL: testverdict passed a suite that left no report"; exit 1
+fi
+grep -q 'NOT RUN' <<<"$out" || { echo "$out"; echo "FAIL: testverdict does not report a suite without a report as NOT RUN"; exit 1; }
+echo "ok: skipped suites are SKIPPED, KOINON_REQUIRE fails them, a missing report is NOT RUN"
