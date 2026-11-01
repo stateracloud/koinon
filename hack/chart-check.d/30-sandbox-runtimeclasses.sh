@@ -15,3 +15,11 @@ lacks "runc is not admitted by default" '"runc"' --show-only $pol
 lacks "gvisor is not admitted by default" '"gvisor"' --show-only $pol
 if render --set 'sandboxPolicy.runtimeClasses={}' >/dev/null 2>&1; then fail "an empty RuntimeClass list must not render"; fi
 render --set 'sandboxPolicy.runtimeClasses={microvm}' >/dev/null 2>&1 || fail "a non-kata class (microvm) must render"
+
+# The reconciler's class must be admitted by the policy: the chart refuses to render otherwise.
+render --set openshell.runtimeClassName=kata-qemu-runtime-rs >/dev/null 2>&1 || fail "runtimeClassName kata-qemu-runtime-rs must render with the default list"
+if gvisor_out=$(render --set openshell.runtimeClassName=gvisor 2>&1); then
+	fail "runtimeClassName gvisor outside sandboxPolicy.runtimeClasses must not render"
+else
+	grep -Fq 'openshell.runtimeClassName "gvisor" is not in sandboxPolicy.runtimeClasses' <<<"$gvisor_out" || fail "the runtimeClassName guard message must name both values"
+fi

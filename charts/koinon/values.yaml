@@ -620,9 +620,10 @@ sandboxPolicy:
     matchLabels:
       openshell.ai/managed-by: openshell
   # Runtime classes allowed for sandbox workload pods (the vm tier, ADR 0075). Any class not
-  # listed here is refused by the policy. kata-qemu-runtime-rs
-  # is the Rust runtime Kata 3.x ships beside kata-qemu (#442). The RuntimeClass the reconciler
-  # requests stays openshell.runtimeClassName and must be one of these.
+  # listed here is refused by the policy. kata-qemu-runtime-rs is the Rust runtime that Kata 4.x's
+  # kata-deploy (4.3.1) creates by default; it marks the Go-runtime kata-qemu deprecated (#442).
+  # openshell.runtimeClassName, the class the reconciler requests, must be one of these: the chart
+  # fails the render when it is not.
   runtimeClasses: [kata, kata-qemu, kata-qemu-runtime-rs]
   # Images allowed in OpenShell supervisor pods (label openshell.ai/boundary-role=supervisor),
   # for every container and init container (ADR 0045: a pinned supervisor image). Empty uses
