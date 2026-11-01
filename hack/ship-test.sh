@@ -393,5 +393,22 @@ rc=$(run "$tmp/o16" -m "fix: s")
 check "stray branch name: refused" eq "$rc" 1
 check "stray branch name: message" has 'is not <type>/<N>-<slug>' "$tmp/o16"
 check "stray branch name: nothing pushed" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/stray"
+
+# #485: unnumbered branches (exempt work) need --no-issue
+reset_state
+w=$(newwork); cd "$w"
+git checkout -q -b chore/light-lane-cpu
+echo c >c.txt
+rc=$(run "$tmp/o17" -m "chore: c")
+check "unnumbered branch without --no-issue: refused" eq "$rc" 1
+check "unnumbered branch refusal names --no-issue" has 'no-issue' "$tmp/o17"
+check "unnumbered branch refused: nothing pushed" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/chore/light-lane-cpu"
+rc=$(run "$tmp/o18" --no-issue -m "chore: c")
+check "unnumbered branch with --no-issue: exit 0" eq "$rc" 0
+check "unnumbered branch with --no-issue: pushed" branch_on_origin chore/light-lane-cpu
+git checkout -q -b stray
+echo t >t.txt
+rc=$(run "$tmp/o19" --no-issue -m "chore: t")
+check "--no-issue still refuses a stray name" eq "$rc" 1
 echo "$pass passed, $fail failed"
 exit $((fail > 0))
