@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -75,8 +76,12 @@ func Var(name, variable string) Requirement {
 }
 
 // Binary is a requirement met when the executable is on PATH; its name is the executable's.
-func Binary(bin string) Requirement {
-	return Requirement{Name: bin, check: func() error {
+func Binary(bin string) Requirement { return BinaryNamed(bin, bin) }
+
+// BinaryNamed is Binary with a requirement name of its own, for an executable whose path comes from
+// a setting (name "helm", bin the value of $HELM).
+func BinaryNamed(name, bin string) Requirement {
+	return Requirement{Name: name, check: func() error {
 		if _, err := exec.LookPath(bin); err != nil {
 			return fmt.Errorf("%s is not on PATH", bin)
 		}
@@ -96,6 +101,22 @@ func Require(reqs ...Requirement) {
 			ginkgo.Skip(msg)
 		default:
 			ginkgo.Fail(msg)
+		}
+	}
+}
+
+// RequireT is Require for a plain `testing` test: it skips t when a requirement is missing, or
+// fails it when KOINON_REQUIRE lists the requirement.
+func RequireT(t testing.TB, reqs ...Requirement) {
+	t.Helper()
+	for _, r := range reqs {
+		skip, msg := decide(r, os.Getenv(RequireVar))
+		switch {
+		case msg == "":
+		case skip:
+			t.Skip(msg)
+		default:
+			t.Fatal(msg)
 		}
 	}
 }

@@ -10,14 +10,19 @@
 //
 //	PASS     at least one spec passed and none failed
 //	FAIL     a spec or a suite node failed
+//	PARTIAL  specs passed, but others skipped for a missing requirement (printed "PASS (partly skipped: docker)")
 //	SKIPPED  no spec ran because a requirement is missing (testenv: "koinon:requires=<name>: ...")
 //	NOT RUN  no report, or no spec ran without a declared requirement
 //
-// FAIL and NOT RUN exit 1. SKIPPED exits 0 unless KOINON_REQUIRE lists the requirement, so
-// `make test` on a laptop without Docker stays usable, but it prints a banner and never calls the
-// run a pass.
+// -expect names the machine prerequisites this run is meant to have (testenv.Required syntax, default
+// "all"). A SKIPPED or PARTIAL suite is incomplete when a requirement it lacks is expected; the
+// others are opt-in targets (e2e, openshell, ...) whose skips are normal here and only listed.
 //
-// Usage: go run ./hack/testverdict -reports DIR [-name LABEL] PKGDIR...
+// Exit codes: 1 when any suite is FAIL or NOT RUN; else 3 when any suite is incomplete (an
+// expected requirement was missing, so the run did not prove everything); else 0. A requirement
+// listed in KOINON_REQUIRE turns a SKIPPED or PARTIAL suite into FAIL.
+//
+// Usage: go run ./hack/testverdict -reports DIR [-name LABEL] [-expect LIST] PKGDIR...
 package main
 
 import (
@@ -40,6 +45,7 @@ type verdict string
 
 const (
 	pass    verdict = "PASS"
+	partial verdict = "PARTIAL"
 	fail    verdict = "FAIL"
 	skipped verdict = "SKIPPED"
 	notRun  verdict = "NOT RUN"
@@ -51,14 +57,18 @@ type result struct {
 	passed   int
 	requires []string // missing requirements that skipped specs (SKIPPED, or part of a PASS)
 	why      string
+	// incomplete: SKIPPED or PARTIAL because of a requirement the run expected to have (-expect).
+	incomplete bool
+	expected   []string // the subset of requires that -expect names
 }
 
 func main() {
 	reports := flag.String("reports", "", "directory with the Ginkgo JSON reports (*.json)")
 	name := flag.String("name", "go-test", "label for the summary line")
+	expect := flag.String("expect", "all", "requirements this run is meant to have (comma list or \"all\"); skips for others are opt-in")
 	flag.Parse()
 	if *reports == "" || flag.NArg() == 0 {
-		fmt.Fprintln(os.Stderr, "usage: testverdict -reports DIR [-name LABEL] PKGDIR...")
+		fmt.Fprintln(os.Stderr, "usage: testverdict -reports DIR [-name LABEL] [-expect LIST] PKGDIR...")
 		os.Exit(2)
 	}
 	byPath, err := load(*reports)
@@ -74,11 +84,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, "testverdict:", err)
 			os.Exit(2)
 		}
-		results = append(results, judge(dir, byPath[abs], required))
+		results = append(results, judge(dir, byPath[abs], required, *expect))
 	}
-	if !summarize(os.Stdout, *name, results) {
-		os.Exit(1)
-	}
+	os.Exit(summarize(os.Stdout, *name, results))
 }
 
 // load reads every *.json in dir as a Ginkgo report and indexes the suites by their directory.
@@ -106,7 +114,7 @@ func load(dir string) (map[string][]types.Report, error) {
 }
 
 // judge gives one suite its verdict from its reports (none when it never reported).
-func judge(dir string, reports []types.Report, required string) result {
+func judge(dir string, reports []types.Report, required, expect string) result {
 	res := result{dir: dir}
 	if len(reports) == 0 {
 		res.verdict, res.why = notRun, "no report (the suite never reached RunSpecs, or its processes exited before reporting)"
@@ -143,19 +151,31 @@ func judge(dir string, reports []types.Report, required string) result {
 	switch {
 	case failed != "":
 		res.verdict, res.why = fail, failed
-	case res.passed > 0:
+	case res.passed > 0 && len(res.requires) == 0:
 		res.verdict = pass
+	case res.passed > 0:
+		res.verdict = partial
+		res.why = "PASS (partly skipped: " + strings.Join(res.requires, ", ") + ")"
 	case len(reqs) > 0 && undeclared == "":
 		res.verdict = skipped
-		for _, n := range res.requires {
-			if testenv.Required(required, n) {
-				res.verdict, res.why = fail, fmt.Sprintf("skipped for %s, which %s=%s requires", n, testenv.RequireVar, required)
-			}
-		}
 	case undeclared != "":
 		res.verdict, res.why = notRun, "0 specs ran; skipped without a declared requirement: "+undeclared
 	default:
 		res.verdict, res.why = notRun, "0 specs ran"
+	}
+	if res.verdict == skipped || res.verdict == partial {
+		for _, n := range res.requires {
+			if testenv.Required(required, n) {
+				res.verdict, res.why = fail, fmt.Sprintf("skipped for %s, which %s=%s requires", n, testenv.RequireVar, required)
+				return res
+			}
+		}
+		for _, n := range res.requires {
+			if testenv.Required(expect, n) {
+				res.incomplete = true
+				res.expected = append(res.expected, n)
+			}
+		}
 	}
 	return res
 }
@@ -175,45 +195,58 @@ func requirement(msg string) (string, bool) {
 	return name, name != ""
 }
 
-// summarize prints the verdicts and reports whether the run may count as green.
-func summarize(w io.Writer, name string, results []result) bool {
+// summarize prints the verdicts and returns the exit code: 1 when a suite is FAIL or NOT RUN, 3 when
+// a suite is incomplete (skipped for an expected requirement), otherwise 0.
+func summarize(w io.Writer, name string, results []result) int {
 	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, format, a...) } // stdout; nothing to do on error
 	count := map[verdict]int{}
-	var skippedDirs []string
-	missing := map[string]int{}
+	var incomplete, optIn []string
+	missing := map[string]bool{}
 	for _, r := range results {
 		count[r.verdict]++
 		switch r.verdict {
 		case fail, notRun:
 			p("%-8s %s: %s\n", r.verdict, r.dir, r.why)
-		case skipped:
-			skippedDirs = append(skippedDirs, fmt.Sprintf("%s (%s)", r.dir, strings.Join(r.requires, ", ")))
-			for _, n := range r.requires {
-				missing[n]++
+		case skipped, partial:
+			label := "SKIPPED"
+			if r.verdict == partial {
+				label = "PARTLY"
+			}
+			entry := fmt.Sprintf("%s (%s)", r.dir, strings.Join(r.requires, ", "))
+			if !r.incomplete {
+				optIn = append(optIn, entry)
+				continue
+			}
+			incomplete = append(incomplete, fmt.Sprintf("  %-8s %s\n", label, entry))
+			for _, n := range r.expected {
+				missing[n] = true
 			}
 		}
 	}
-	if len(skippedDirs) > 0 {
-		var names []string
-		for n := range missing {
-			names = append(names, n)
-		}
-		slices.Sort(names)
-		p("\n==== %s: %d suite(s) SKIPPED, NOT PASSED: missing %s ====\n", name, len(skippedDirs), strings.Join(names, ", "))
-		for _, d := range skippedDirs {
-			p("  SKIPPED  %s\n", d)
+	var names []string
+	for n := range missing {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	if len(optIn) > 0 {
+		p("opt-in suites not run here: %s\n", strings.Join(optIn, ", "))
+	}
+	if len(incomplete) > 0 {
+		p("\n==== %s: %d suite(s) SKIPPED, NOT PASSED: missing %s ====\n", name, len(incomplete), strings.Join(names, ", "))
+		for _, l := range incomplete {
+			p("%s", l)
 		}
 		p("Provide the requirement to run them; %s=%s turns these skips into failures (CI sets it).\n\n", testenv.RequireVar, strings.Join(names, ","))
 	}
-	ok := count[fail] == 0 && count[notRun] == 0
+	code := 0
 	state := "ok"
 	switch {
-	case !ok:
-		state = "FAILED"
-	case count[skipped] > 0:
-		state = "INCOMPLETE (skipped suites did not run)"
+	case count[fail] > 0 || count[notRun] > 0:
+		code, state = 1, "FAILED"
+	case len(incomplete) > 0:
+		code, state = 3, "INCOMPLETE (missing "+strings.Join(names, ",")+")"
 	}
-	p("%s verdict: %s: %d passed, %d failed, %d not run, %d skipped (of %d suites)\n",
-		name, state, count[pass], count[fail], count[notRun], count[skipped], len(results))
-	return ok
+	p("%s verdict: %s: %d passed, %d partly skipped, %d failed, %d not run, %d skipped (of %d suites)\n",
+		name, state, count[pass], count[partial], count[fail], count[notRun], count[skipped], len(results))
+	return code
 }

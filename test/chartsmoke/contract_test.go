@@ -5,7 +5,6 @@ package chartsmoke_test
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cmd/koinonagentd"
 	"github.com/stateracloud/koinon/internal/cmd/koinonapi"
 	"github.com/stateracloud/koinon/internal/cmd/koinonreconciler"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // commandTrees are the binaries whose command tree the contract test knows (ADR 0088). A binary
@@ -43,9 +43,7 @@ var commandTrees = map[string]func() *cobra.Command{
 // as rendered. A value that comes from a Secret or the downward API is replaced by a placeholder, so
 // a check that parses such a value (a duration, a mode) cannot be proved here.
 func TestChartContract(t *testing.T) {
-	if _, err := exec.LookPath(envOr("HELM", "helm")); err != nil {
-		t.Skip("helm is not installed (set HELM)")
-	}
+	testenv.RequireT(t, testenv.BinaryNamed("helm", envOr("HELM", "helm"))) // set HELM for a helm outside PATH
 	for _, values := range valuesFiles() {
 		t.Run(filepath.Base(values), func(t *testing.T) {
 			r := helmRender(t.Context(), values)

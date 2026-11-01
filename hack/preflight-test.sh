@@ -48,7 +48,7 @@ for s in migrate-lint adr-lint docs-check chart-check dep-age-check; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
 # The Go gate runs hack/go-test.sh (and its verdict, #507), not bare go test.
-printf '#!/usr/bin/env bash\necho "go-test.sh $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\n[[ ${FAKE_GO_TEST_RC:-0} -eq 0 ]] || echo "--- FAIL: TestX"\nexit "${FAKE_GO_TEST_RC:-0}"\n' >"$seed/hack/go-test.sh"
+printf '#!/usr/bin/env bash\necho "go-test.sh $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\ncase ${FAKE_GO_TEST_RC:-0} in 0) ;; 3) echo "go-test verdict: INCOMPLETE (missing docker): 1 passed, 0 partly skipped, 0 failed, 0 not run, 1 skipped (of 2 suites)" ;; *) echo "--- FAIL: TestX" ;; esac\nexit "${FAKE_GO_TEST_RC:-0}"\n' >"$seed/hack/go-test.sh"
 printf '#!/usr/bin/env bash\necho "needs-e2e.sh $*" >>"$FAKE_LOG"\nrc=${FAKE_NEEDS_RC:-1}\n[[ $rc -ne 0 ]] || echo "kind e2e needed"\nexit "$rc"\n' >"$seed/hack/needs-e2e.sh"
 chmod +x "$seed/hack/"*.sh
 printf 'module example.com/m\n\ngo 1.25\n' >"$seed/go.mod"
@@ -195,6 +195,15 @@ check "error excerpt shown" has '^  | --- FAIL: TestX' "$tmp/f1"
 check "excerpt at most 5 lines" test "$(grep -c '^  | ' "$tmp/f1")" -le 5
 check "later gates still run" has '^gitleaks ok' "$tmp/f1"
 check "summary names the failed gate" has '^preflight FAIL (go)' "$tmp/f1"
+unset FAKE_GO_TEST_RC
+# 4b. incomplete (go-test.sh exit 3, an expected requirement missing): exit 3, never "ok"
+export FAKE_GO_TEST_RC=3
+rc=$(pf "$tmp/f1b" --only go)
+check "go incomplete: exit 3" eq "$rc" 3
+check "INCOMPLETE line names the skipped requirement and log" has "^go INCOMPLETE [0-9]*s [(]skipped: docker[)] log=" "$tmp/f1b"
+check "summary says incomplete" has '^preflight incomplete' "$tmp/f1b"
+check "no preflight ok" hasnt '^preflight ok' "$tmp/f1b"
+check "no go ok" hasnt '^go ok' "$tmp/f1b"
 unset FAKE_GO_TEST_RC
 export FAKE_GITLEAKS_RC=1
 rc=$(pf "$tmp/f2" --only gitleaks)
