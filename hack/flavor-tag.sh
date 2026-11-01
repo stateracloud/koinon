@@ -8,6 +8,10 @@
 # different branches never overwrite each other's image. Used by the Makefile and test/flavors.
 set -euo pipefail
 
+# Byte-order collation everywhere: sort (and every other comparison in the hash path) must not
+# depend on the caller's locale, or a UTF-8 shell computes a different tag than CI (#335).
+export LC_ALL=C
+
 flavor=${1:?usage: flavor-tag.sh <flavor>}
 cd "$(dirname "$0")/.."
 [ -d "flavors/$flavor" ] || { echo "flavor-tag.sh: no such flavor: $flavor" >&2; exit 2; }
