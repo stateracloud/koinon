@@ -11,9 +11,9 @@ has without a grant: asking costs nothing and only waits for a person.
 `ask_user(to, question, draft, choices, default)`:
 
 - `to` is a member of the org (email or user ID); the person needs the member role or higher. Left out,
-  Koinon picks who is asked in this order: in a chat, the person in the chat; for a task a person
+  Koinon picks who is asked in this order: in a direct-message thread, its person; for a task a person
   created, its creator; otherwise the trigger's notify target ([Triggers](/guides/triggers/)), which is
-  the org's admins unless the trigger says otherwise. A person picked that way who can no longer answer
+  the org admins unless the trigger says otherwise. A person picked that way who can no longer answer
   (they left the org, or became a viewer) is replaced by the trigger's target or the admins, and the
   tool's answer tells the agent so. A person the agent named is never replaced: the agent gets an error.
 - `question` is the text; `draft` is an optional proposed answer; `choices` is an optional list.
@@ -26,7 +26,7 @@ in one step: no question is visible before the park, and no run parks without it
 
 ## Answering
 
-A question can be asked of several people, for example the org's admins. Each of them is a recipient
+A question can be asked of several people, for example the org admins. Each of them is a recipient
 and sees it in the inbox, labelled with who it was asked to and for how long it has waited on them.
 In the inbox ([Tasks and the inbox](/guides/tasks-and-inbox/)) a recipient picks a choice, uses or
 edits the draft, writes free text, or dismisses the question. Only recipients can answer; an admin who
@@ -36,14 +36,14 @@ answer, so the default applies for everyone. An answer resumes the run exactly o
 
 The age shown in the inbox counts from when the question started waiting on that person. A reminder does
 not reset it. A person counts as a recipient only while they can answer: if everyone a question was asked
-to leaves the org or becomes a viewer, Koinon asks the trigger's notify target instead (the org's admins and owners unless the trigger names
+to leaves the org or becomes a viewer, Koinon asks the trigger's notify target instead (the org admins and owners unless the trigger names
 someone else), their age starts then, and the audit log records the change as `question.retarget`.
 
 The answer reaches the agent as part of its next prompt: `the person answered: "..."`, or, when the
 question was dismissed or timed out, that the default was applied and what it is. The agent is always
 told.
 
-An answer within the org's park-warm time (15 minutes by default) finds the sandbox still running. A later one starts the stopped
+An answer within the org's warm window (15 minutes by default) finds the sandbox still running. A later one starts the stopped
 sandbox, or, after the archive window, a fresh sandbox with the home restored from its checkpoint, and
 the agent continues the same session. Questions of a run end with the run.
 

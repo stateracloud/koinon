@@ -157,7 +157,7 @@ for (const vp of viewports) {
       await expect(page.getByRole('heading', { name: 'Fix the README typo', level: 1 })).toBeVisible()
 
       // The unhealthy notice banner is on every page for admins; the unknown kind does not crash it.
-      const banner = page.getByRole('region', { name: 'Notices' })
+      const banner = page.getByRole('region', { name: 'Notifications' })
       await expect(banner.getByRole('alert').first()).toContainText('Repo helper was marked unhealthy')
       await expect(banner.getByRole('link', { name: 'Open the agent' })).toHaveAttribute('href', '/agents/a-1')
 

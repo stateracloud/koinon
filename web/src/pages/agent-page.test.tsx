@@ -180,10 +180,10 @@ describe('AgentPage activation', () => {
   })
 })
 
-describe('AgentPage standing approvals', () => {
+describe('AgentPage scoped approvals', () => {
   it('lists the agent\'s active scopes and lets an admin revoke one', async () => {
     const { revokes } = setup({ scopes: true })
-    const section = await screen.findByRole('region', { name: 'Standing approvals' })
+    const section = await screen.findByRole('region', { name: 'Scoped approvals' })
     const row = await within(section).findByTestId('approval-scope')
     expect(row).toHaveTextContent('create_pull_request on acme/widgets')
     expect(row).toHaveTextContent('For this agent, until')
@@ -195,7 +195,7 @@ describe('AgentPage standing approvals', () => {
 
   it('shows scopes to a member without a revoke button', async () => {
     setup({ scopes: true, role: OrgRole.MEMBER })
-    const section = await screen.findByRole('region', { name: 'Standing approvals' })
+    const section = await screen.findByRole('region', { name: 'Scoped approvals' })
     await within(section).findByTestId('approval-scope')
     expect(within(section).queryByRole('button', { name: /Revoke/ })).not.toBeInTheDocument()
   })
