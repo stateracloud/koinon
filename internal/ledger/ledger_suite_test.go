@@ -15,23 +15,17 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/pressly/goose/v3"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/pricing"
 )
-
-// postgresImage is the minimum supported Postgres version (ADR 0047).
-const postgresImage = "postgres:18-alpine"
 
 var (
 	db  *pgxpool.Pool
@@ -75,21 +69,8 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 		GinkgoWriter.Println("Docker is not available; Postgres specs are skipped:", err)
 		return
 	}
-	ctr, err := postgres.Run(ctx, postgresImage, postgres.WithDatabase("koinon"), postgres.BasicWaitStrategies())
-	Expect(err).NotTo(HaveOccurred())
-	DeferCleanup(func(ctx context.Context) error { return ctr.Terminate(ctx) })
-	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	Expect(err).NotTo(HaveOccurred())
-	db, err = pgxpool.New(ctx, dsn)
-	Expect(err).NotTo(HaveOccurred())
-	DeferCleanup(db.Close)
-
-	sqlDB := stdlib.OpenDBFromPool(db)
-	DeferCleanup(sqlDB.Close)
-	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.FS)
-	Expect(err).NotTo(HaveOccurred())
-	_, err = provider.Up(ctx)
-	Expect(err).NotTo(HaveOccurred())
+	// The ledger is the crash-safety surface of billing: it runs on production durability settings.
+	db = pgtest.Start(ctx, pgtest.Durable())
 	q = store.New(db)
 	ing = &ledger.Ingester{DB: db, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Prices: prices.NewResolver(priceList)}
 }, NodeTimeout(3*time.Minute))
