@@ -333,9 +333,14 @@ var _ = Describe("the quickstart", Ordered, func() {
 		agent = activated.GetAgent()
 		Expect(agent.GetStatus()).To(Equal(agentv1alpha1.AgentStatus_AGENT_STATUS_ACTIVE))
 
-		// The template names no model, so the run takes the org default. The quickstart steps need it
-		// to be the quickstart's model (repo-helper's script makes the tool call step 4 parks on); a
-		// second provider declared by the e2e must not take its place (kind/model-provider-anthropic.yaml).
+		// The template names no model, so the run takes the org default, and the quickstart steps need
+		// it to be the quickstart's model (repo-helper's script makes the tool call step 4 parks on).
+		// The org's first model sets the default on its own, but which model is first depends on the
+		// order the importer reads the declared Secrets (creation time, one-second resolution, then
+		// name), which this test must not rely on: it states the default, as an admin does. repo-helper
+		// is priced since 1b.
+		code, body := admin(ctx, http.MethodPut, "/default-model", `{"model":"repo-helper"}`)
+		Expect(code).To(Equal(http.StatusOK), string(body))
 		Eventually(func(g Gomega) {
 			code, body := admin(ctx, http.MethodGet, "/agents/"+agent.GetId()+"/model")
 			g.Expect(code).To(Equal(http.StatusOK), string(body))

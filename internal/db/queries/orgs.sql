@@ -29,6 +29,17 @@ FROM (SELECT x.id, coalesce(x.default_model, '')::text AS old FROM orgs x WHERE 
 WHERE o.id = cur.id
 RETURNING cur.old::text AS old_default_model;
 
+-- name: ListOrgsPendingDefaultModel :many
+-- Orgs whose default model migration 00045 left for BackfillDefaults.
+SELECT id FROM orgs
+WHERE default_model_pending AND deleted_at IS NULL
+ORDER BY id;
+
+-- name: ClaimOrgDefaultModelBackfill :execrows
+-- Takes an org's pending backfill; a concurrent replica waits on the row and then finds it taken.
+UPDATE orgs SET default_model_pending = false
+WHERE id = @org_id AND default_model_pending;
+
 -- name: SetOrgDefaultModelIfUnset :execrows
 -- The org's first model becomes its default; a default that is set stays.
 UPDATE orgs

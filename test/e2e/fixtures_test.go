@@ -42,14 +42,14 @@ func readProvider(t *testing.T, file string) (name string, models []string) {
 }
 
 // The quickstart steps run on the org default model: the repo-helper template names none. The org
-// default is stored (orgs.default_model, #256) and the org's first model sets it, so it is the first
-// model of the quickstart's provider, which run.sh applies before the e2e-only provider
-// (kind/model-provider-anthropic.yaml). The provider's name no longer matters (rc.8 hit it when it
-// did: "anthropic-fake" sorted first). This check runs offline with `go test ./...`; the e2e suite
-// itself is skipped there.
-func TestE2EQuickstartProviderDeclaresTheOrgDefaultModelFirst(t *testing.T) {
+// default is stored (orgs.default_model, #256). The org's first model sets it, which here would
+// depend on the importer's order over the two declared Secrets (creation time, then name), so step 3
+// of the e2e states it with PUT /admin/v1/default-model. That needs repo-helper to be a model of the
+// quickstart's provider, which this check pins offline with `go test ./...`; the e2e suite itself
+// is skipped there.
+func TestE2EQuickstartProviderDeclaresRepoHelperFirst(t *testing.T) {
 	quickstart, models := readProvider(t, "model-provider.yaml")
 	if len(models) == 0 || models[0] != "repo-helper" {
-		t.Fatalf("the quickstart provider %q must declare repo-helper first, it becomes the org default; got %v", quickstart, models)
+		t.Fatalf("the quickstart provider %q must declare repo-helper first, step 3 makes it the org default; got %v", quickstart, models)
 	}
 }

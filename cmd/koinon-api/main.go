@@ -56,6 +56,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/stateracloud/koinon/internal/adminapi"
+	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/api"
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/askuser"
@@ -448,6 +449,12 @@ func run() error {
 	}
 	if _, err := priceSvc.CompleteMigrated(ctx); err != nil {
 		return err
+	}
+	// Orgs that existed before the stored default model (migration 00045) get the model they ran on.
+	if n, err := agentmodel.BackfillDefaults(ctx, pool, prices.NewResolver(pricing.Embedded()), time.Now()); err != nil {
+		return err
+	} else if n > 0 {
+		slog.Info("backfilled org default models", "orgs", n)
 	}
 	// Every model no admin set the format of follows the format table (ADR 0069).
 	if _, err := catalog.New(pool, nil, slog.Default()).RederiveFormats(ctx); err != nil {
