@@ -175,6 +175,13 @@ section says what the recommended option would have bought.
 8. **Binaries gate on the schema version** (Andre, 2026-11-01). Each binary declares the range of
    goose versions it supports and stays not Ready, with a clear log line, outside it. The migration
    Job's own check (refusing to migrate past what running pods support) can follow.
+   Implemented (#408): `migrations.MinSupported` and `MaxSupported` declare the range, and
+   `internal/schemagate` re-reads `goose_db_version` every 15 s. koinon-api and koinon-agentd
+   (new `--health-addr`, default `:8082`) and koinon-reconciler answer `/readyz` 503 with the reason
+   outside the range, and log it once per change; `/healthz` stays 200, so the pod waits and is not
+   restarted. `TestSupportedRange` fails when a migration is added until the author has decided
+   whether the older release still works against it (raise `MaxSupported`) or the code now needs it
+   (raise `MinSupported`).
 
 ### Supervisor and OpenShell
 
