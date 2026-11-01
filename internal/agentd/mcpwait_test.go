@@ -4,8 +4,6 @@ package agentd_test
 
 import (
 	"context"
-	"errors"
-	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -118,132 +116,42 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		))
 	})
 
-	// The gateway lists the tools itself: the health record can say healthy (the last probe passed,
-	// or the drop fell between two probes) while the session's gateway has dropped the server.
-	Describe("when agentd lists the gateway's tools itself", func() {
-		withTools := func(l *stubLister) func(*agentd.Config) {
-			return func(c *agentd.Config) { c.MCPTools = l; c.MCPRetryDelay = retry }
+	It("gives a run that fails on the second miss no root span, only the attempt-2 event", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		allow(ctx, e, "tracker", "unhealthy", 3, "")
+		rcv := newReceiver()
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		e.pool("agentd-a", tracingOn(rcv, fakeDecider{traced: true, level: "none"}), func(c *agentd.Config) { c.MCPRetryDelay = retry })
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(missing(ctx, r)()).To(HaveLen(2))
+		Consistently(rcv.count).WithTimeout(time.Second).Should(BeZero())
+	})
+
+	It("puts the missing-server attributes on the first turn's root span only", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		allow(ctx, e, "tracker", "healthy", 1, "")
+		rcv := newReceiver()
+		t := e.task(ctx, markWait)
+		r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 6})
+		Expect(err).NotTo(HaveOccurred())
+		e.pool("agentd-a", tracingOn(rcv, fakeDecider{traced: true, level: "none"}), func(c *agentd.Config) {
+			c.MCPRetryDelay = time.Second
+			c.WrapUpNotice = 4 * time.Second
+		})
+		Eventually(missing(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
+		setHealth(ctx, e, "tracker")
+		Eventually(runState(ctx, r)).WithTimeout(20 * time.Second).Should(Equal(store.RunStateCanceled))
+		Eventually(rcv.count).WithTimeout(10 * time.Second).Should(BeNumerically(">=", 2))
+		roots := spanByName(rcv.snapshot(), "invoke_agent "+e.agent.DisplayName)
+		Expect(len(roots)).To(BeNumerically(">=", 2))
+		for _, s := range roots {
+			attrs := attrMap(s.Attributes)
+			if attrs[semconv.KoinonTurn] == "1" {
+				Expect(attrs).To(HaveKeyWithValue(semconv.KoinonMCPMissingServers, "tracker"))
+			} else {
+				Expect(attrs).NotTo(HaveKey(semconv.KoinonMCPMissingServers))
+				Expect(attrs).NotTo(HaveKey(semconv.KoinonMCPMissingAttempts))
+			}
 		}
-
-		It("finds a server recorded healthy whose tools the gateway leaves out, and fails on the second miss", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
-			allow(ctx, e, "tracker", "healthy", 0, "")
-			allow(ctx, e, "wiki", "healthy", 0, "")
-			slug, err := q.GetOrgSlug(ctx, e.org)
-			Expect(err).NotTo(HaveOccurred())
-			l := &stubLister{tools: []string{slug + "-wiki_search"}} // tracker's tools are missing
-			r := e.enqueue(ctx, e.task(ctx, "hello"))
-			e.pool("agentd-a", withTools(l))
-
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
-			Expect(getRun(ctx, r).OutcomeReason.String).To(And(ContainSubstring("tracker"), ContainSubstring("the gateway offers no tools")))
-			Expect(getRun(ctx, r).OutcomeReason.String).NotTo(ContainSubstring("wiki"))
-			evs := missing(ctx, r)()
-			Expect(evs).To(HaveLen(2))
-			Expect(payload(evs[0])["servers"]).To(ConsistOf(HaveKeyWithValue("name", "tracker")))
-			prompts, _, _, _ := e.harness.snapshot()
-			Expect(prompts).To(BeEmpty())
-		})
-
-		It("records the miss and starts the harness when the tools are back at the second look", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
-			allow(ctx, e, "tracker", "healthy", 0, "")
-			slug, err := q.GetOrgSlug(ctx, e.org)
-			Expect(err).NotTo(HaveOccurred())
-			l := &stubLister{}
-			r := e.enqueue(ctx, e.task(ctx, "hello"))
-			e.pool("agentd-a", func(c *agentd.Config) { c.MCPTools = l; c.MCPRetryDelay = time.Second })
-
-			Eventually(missing(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
-			l.set([]string{slug + "-tracker_create_issue"}, nil)
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-			Expect(eventOf(events(ctx, r), "run.mcp_server_recovered")).To(HaveLen(1))
-		})
-
-		It("does not trust a bad health record over the gateway's tools", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
-			allow(ctx, e, "tracker", "healthy", 2, "")
-			slug, err := q.GetOrgSlug(ctx, e.org)
-			Expect(err).NotTo(HaveOccurred())
-			l := &stubLister{tools: []string{slug + "-tracker_create_issue"}}
-			r := e.enqueue(ctx, e.task(ctx, "hello"))
-			e.pool("agentd-a", withTools(l))
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-			Expect(missing(ctx, r)()).To(BeEmpty())
-		})
-
-		It("counts a server whose tools are all ask-tier as served by its ask target", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
-			allow(ctx, e, "tracker", "healthy", 0, "")
-			_, err := db.Exec(ctx, `UPDATE mcp_tools SET tier = 'ask' WHERE org_id = $1`, e.org)
-			Expect(err).NotTo(HaveOccurred())
-			slug, err := q.GetOrgSlug(ctx, e.org)
-			Expect(err).NotTo(HaveOccurred())
-			l := &stubLister{tools: []string{slug + "-tracker-ask_create_issue"}}
-			r := e.enqueue(ctx, e.task(ctx, "hello"))
-			e.pool("agentd-a", withTools(l))
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-			Expect(missing(ctx, r)()).To(BeEmpty())
-		})
-
-		It("expects nothing from a server whose tools are all denied", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
-			allow(ctx, e, "tracker", "healthy", 0, "")
-			_, err := db.Exec(ctx, `UPDATE mcp_tools SET tier = 'never' WHERE org_id = $1`, e.org)
-			Expect(err).NotTo(HaveOccurred())
-			r := e.enqueue(ctx, e.task(ctx, "hello"))
-			e.pool("agentd-a", withTools(&stubLister{}))
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-			Expect(missing(ctx, r)()).To(BeEmpty())
-		})
-
-		It("expects nothing from a server when the agent's tool allowlist leaves no granted tool", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
-			allow(ctx, e, "tracker", "healthy", 0, "")
-			_, err := db.Exec(ctx, `UPDATE agent_mcp_servers SET tools = ARRAY['other_tool'] WHERE org_id = $1`, e.org)
-			Expect(err).NotTo(HaveOccurred())
-			r := e.enqueue(ctx, e.task(ctx, "hello"))
-			e.pool("agentd-a", withTools(&stubLister{}))
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-			Expect(missing(ctx, r)()).To(BeEmpty())
-		})
-
-		It("falls back to the health record when the listing fails", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
-			allow(ctx, e, "tracker", "unhealthy", 3, "")
-			l := &stubLister{err: errors.New("connect: refused")}
-			r := e.enqueue(ctx, e.task(ctx, "hello"))
-			e.pool("agentd-a", withTools(l))
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
-			Expect(getRun(ctx, r).OutcomeReason.String).To(And(ContainSubstring("tracker"), ContainSubstring("the gateway got no tools")))
-			Expect(l.calls()).To(BeNumerically(">=", 1))
-		})
 	})
 })
-
-// stubLister is the gateway's /mcp tool list, as a spec sets it.
-type stubLister struct {
-	mu    sync.Mutex
-	tools []string
-	err   error
-	n     int
-}
-
-func (l *stubLister) ListTools(context.Context) ([]string, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.n++
-	return l.tools, l.err
-}
-
-func (l *stubLister) set(tools []string, err error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.tools, l.err = tools, err
-}
-
-func (l *stubLister) calls() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.n
-}

@@ -33,7 +33,9 @@ type missingMCPServer struct {
 }
 
 // missingMCPServers lists the servers the agent may use that Koinon has found not serving tools (see
-// ListMissingMCPServersOfAgent).
+// ListMissingMCPServersOfAgent). It reads the control plane's health record, which the reconciler's
+// prober refreshes every 60 s, so a server that drops between two probes (agentgateway runs failOpen
+// and leaves it out silently) is not caught until the next probe marks it.
 func (r *runner) missingMCPServers(ctx context.Context) ([]missingMCPServer, error) {
 	rows, err := r.q.ListMissingMCPServersOfAgent(ctx, store.ListMissingMCPServersOfAgentParams{
 		OrgID: r.run.OrgID, AgentID: r.run.AgentID,
@@ -55,29 +57,6 @@ func (r *runner) missingMCPServers(ctx context.Context) ([]missingMCPServer, err
 	return out, nil
 }
 
-// checkMCPServers finds the allowed servers that are not serving tools. It asks the gateway itself
-// (mcpcheck.go) what tools it offers right now, because the health record is only as fresh as the
-// last probe (every 60 s) and a server dropped between two probes, or after a good one, would still
-// start a silent run. The health record (missingMCPServers) answers instead when the direct check is
-// not possible: Config.MCPTools is not set (no gateway key is mounted), or the listing failed. The
-// run records which, so a check that fell back is not mistaken for a direct one.
-func (r *runner) checkMCPServers(ctx context.Context) ([]missingMCPServer, error) {
-	lister := r.p.cfg.MCPTools
-	if lister == nil {
-		r.log.Debug("the gateway's tools are not listed at session start (no MCP check key); using the servers' health record")
-		return r.missingMCPServers(ctx)
-	}
-	missing, err := r.gatewayMissingMCPServers(ctx, lister)
-	if err == nil {
-		return missing, nil
-	}
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	r.log.Warn("listing the gateway's tools at session start failed; using the servers' health record", "err", err)
-	return r.missingMCPServers(ctx)
-}
-
 func mcpServerNames(ss []missingMCPServer) []string {
 	names := make([]string, len(ss))
 	for i, s := range ss {
@@ -94,7 +73,7 @@ func mcpServerNames(ss []missingMCPServer) []string {
 // miss the run fails with a reason that names each server. A server an admin disabled or removed is
 // not a miss: the note at session start (mcpnotice.go) already tells the agent.
 func (r *runner) waitMCPServers(ctx context.Context) error {
-	missing, err := r.checkMCPServers(ctx)
+	missing, err := r.missingMCPServers(ctx)
 	if err != nil || len(missing) == 0 {
 		return err
 	}
@@ -111,7 +90,7 @@ func (r *runner) waitMCPServers(ctx context.Context) error {
 	if !sleep(ctx, delay) {
 		return ctx.Err()
 	}
-	again, err := r.checkMCPServers(ctx)
+	again, err := r.missingMCPServers(ctx)
 	if err != nil {
 		return err
 	}

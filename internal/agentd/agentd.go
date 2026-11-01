@@ -110,13 +110,9 @@ type Config struct {
 	ModelServeTimeout time.Duration
 	// MCPRetryDelay is how long a run waits, before it starts its harness, between finding an MCP
 	// server it may use not serving tools and looking again; a second miss fails the run (issue
-	// #326). Default DefaultMCPRetryDelay.
+	// #326). A miss is what Koinon's health record of the server says (probed every 60 s), so a drop
+	// between two probes is not caught. Default DefaultMCPRetryDelay.
 	MCPRetryDelay time.Duration
-	// MCPTools lists the tools the gateway offers over /mcp, for the check above to run itself instead
-	// of trusting the prober's last result (mcpcheck.go). Nil: the check reads the servers' health
-	// record (it needs no gateway key, but is as stale as the last 60 s probe), and so does a run
-	// whose listing fails.
-	MCPTools MCPToolLister
 	// ReconcileNudge is how often a worker waiting for a sandbox NOTIFYs the reconciler.
 	// Default 5s.
 	ReconcileNudge time.Duration
