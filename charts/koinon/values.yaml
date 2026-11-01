@@ -145,6 +145,11 @@ agentd:
     tag: ""
     digest: ""
   replicas: 1
+  # PodDisruptionBudget, rendered only when replicas > 1 (ADR 0085). maxUnavailable rather than
+  # minAvailable: each evicted replica drains for up to drainDeadlineSeconds, so a node drain takes
+  # them one at a time at any replica count; minAvailable: 1 would let it evict all but one together.
+  podDisruptionBudget:
+    maxUnavailable: 1
   # Runs each replica drives at once (one exec stream each).
   workers: 8
   # Run lease; when a replica dies, another takes its runs over after this long.
