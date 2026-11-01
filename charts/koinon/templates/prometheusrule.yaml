@@ -1,0 +1,58 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+Alerting rules (metrics.prometheusRule.enabled), for prometheus-operator. Off by default; it needs
+the monitoring.coreos.com/v1 PrometheusRule CRD. The rules are the ones docs/site/.../guides/metrics.md
+documents, for installs that do not write their own.
+
+Durable workflows (ADR 0085, decision 11): koinon_durable_workflows_pending is read from the
+database, so every koinon-api replica reports the same value; the rule aggregates with max by
+(version), never sum. A workflow waits for a process of its own version. Older versions are carried
+over by the first koinon-api of the current one, so pending work of a version that no live executor
+runs (a rollback target, or a carry-over that keeps failing) is what the alert names.
+*/ -}}
+{{- $pr := .Values.metrics.prometheusRule }}
+{{- if $pr.enabled }}
+{{- if and (not $pr.skipCapabilityCheck) (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule")) }}
+{{- fail "metrics.prometheusRule.enabled is true but the cluster has no monitoring.coreos.com/v1 PrometheusRule CRD; install prometheus-operator (or kube-prometheus-stack), set metrics.prometheusRule.skipCapabilityCheck=true when the CRD arrives later or the renderer cannot report it, or leave metrics.prometheusRule.enabled=false and load the rules from the metrics guide" }}
+{{- end }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "koinon.componentName" (list . "rules") }}
+  labels:
+    {{- include "koinon.labels" (list . "api") | nindent 4 }}
+    {{- with $pr.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    {{- if .Values.api.durable.enabled }}
+    - name: koinon-durable
+      rules:
+        - alert: KoinonDurableWorkflowsStranded
+          expr: |
+            max by (version) (koinon_durable_workflows_pending) > 0
+            unless on (version)
+            max by (version) (koinon_durable_executors > 0)
+          for: {{ $pr.durableStrandedFor | quote }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Durable workflows wait for a workflow version that no koinon-api runs
+            description: >-
+              {{ "{{ $value }}" }} durable workflows are pending for workflow version {{ "{{ $labels.version }}" }}, and no koinon-api
+              replica of that version has a fresh heartbeat. Workflows of an older version are carried over
+              by the current one, so this is a rollback target that is gone or a carry-over that keeps failing:
+              read the koinon-api log ("carrying pending workflows of another version over failed").
+        - alert: KoinonDurableMetricsUnreadable
+          expr: max(koinon_durable_metrics_read_failing) == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: koinon-api cannot read the durable workflow counts, so the stranded-workflow alert is blind
+    {{- else }}
+    []
+    {{- end }}
+{{- end }}

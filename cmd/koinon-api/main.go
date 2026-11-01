@@ -473,6 +473,7 @@ func run() error {
 	// Notifications that follow a commit (pre-wakes) are DBOS steps with --durable, and inline
 	// best effort without it (ADR 0066, practice B2).
 	var notifier *durable.Notifier
+	var durableRT *durable.Runtime // for its metrics, registered once the registry exists
 	var sched *schedule.Scheduler
 	if !cfg.durable {
 		slog.Warn("schedule triggers do not fire: they run on the DBOS runtime (api.durable.enabled, --durable)")
@@ -489,6 +490,7 @@ func run() error {
 			// an upgrade must not orphan pending workflows (ADR 0085).
 			Logger: slog.Default(),
 		})
+		durableRT = rt
 		notifier = durable.NewNotifier(rt, slog.Default())
 		services.RegisterNotifications(notifier, pool)
 		if err := rt.Register(notifier.Registrar()); err != nil {
@@ -645,6 +647,10 @@ func run() error {
 	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithTriggers(svc).WithModelCheck(echo)
 
 	reg := metrics.NewRegistry()
+	if durableRT != nil {
+		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
+		reg.MustRegister(durableRT.Collector())
+	}
 	if err := metrics.Serve(bgCtx, cfg.metricsAddr, reg, slog.Default()); err != nil {
 		return err
 	}
