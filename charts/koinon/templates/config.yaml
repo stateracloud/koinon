@@ -47,6 +47,10 @@ data:
       tls: {{ if .Values.openshell.clientTLSSecret }}/etc/koinon/openshell-tls{{ else }}""{{ end }}
       runtimeClassName: {{ .Values.openshell.runtimeClassName }}
       gatewayId: {{ .Values.openshell.gatewayId | quote }}
+      # OpenShell's gateway ConfigMap: its supervisor_image is part of the sandbox spec hash (ADR 0085).
+      gatewayConfig:
+        namespace: {{ .Values.preflight.openshell.namespace | quote }}
+        configMap: {{ .Values.preflight.openshell.configMap | quote }}
     sandboxObserver:
       enabled: {{ .Values.sandboxObserver.enabled }}
       {{- if .Values.sandboxObserver.enabled }}
@@ -59,6 +63,7 @@ data:
       archiveAfter: {{ .Values.reconciler.archiveAfter }}
       sandboxJobs: {{ .Values.reconciler.sandboxJobs }}
       keepWarmPerOrg: {{ .Values.reconciler.keepWarmPerOrg }}
+      maxRecreatesPerPass: {{ .Values.reconciler.maxRecreatesPerPass }}
       resyncInterval: {{ .Values.reconciler.resyncInterval }}
       homeRetention: {{ .Values.reconciler.homeRetention }}
       checkpoints: {{ .Values.checkpoints.enabled }}

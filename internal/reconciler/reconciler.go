@@ -41,6 +41,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -174,6 +175,14 @@ type Config struct {
 	Logger *slog.Logger
 	// Metrics receives the pass metrics; nil keeps them unexported.
 	Metrics *Metrics
+	// Supervisor says which supervisor image the OpenShell gateway starts sandboxes with. It is part
+	// of the sandbox spec hash, so an OpenShell upgrade recreates each sandbox through the usual path
+	// (ADR 0085 decision 9). Nil leaves it out of the hash.
+	Supervisor SupervisorSource
+	// MaxRecreatesPerPass caps the sandboxes one pass deletes to recreate them with a changed spec
+	// (a new supervisor, image or resources); the others wait for a later pass. Zero is
+	// DefaultMaxRecreatesPerPass; negative is no cap.
+	MaxRecreatesPerPass int
 	// Now defaults to time.Now; tests move it forward to pass the idle timeout.
 	Now func() time.Time
 }
@@ -223,6 +232,14 @@ type Reconciler struct {
 	probes    []mcpProbe
 	mcp       *mcpservers.Service
 	m         *Metrics
+
+	// supMu guards the supervisor image read from the gateway (supervisor.go).
+	supMu    sync.Mutex
+	supImage string
+	supKnown bool
+	supErr   error
+	// recreates counts this pass's spec-change recreates against MaxRecreatesPerPass.
+	recreates atomic.Int32
 }
 
 // New returns a Reconciler.
@@ -244,6 +261,9 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.SandboxJobs <= 0 {
 		cfg.SandboxJobs = 8
+	}
+	if cfg.MaxRecreatesPerPass == 0 {
+		cfg.MaxRecreatesPerPass = DefaultMaxRecreatesPerPass
 	}
 	if cfg.KeepWarmPerOrg == 0 {
 		cfg.KeepWarmPerOrg = DefaultKeepWarmPerOrg
@@ -362,6 +382,8 @@ func (r *Reconciler) observeSandboxes(ctx context.Context) {
 }
 
 func (r *Reconciler) reconcileAll(ctx context.Context) error {
+	r.recreates.Store(0)
+	r.refreshSupervisor(ctx)
 	orgs, err := r.q.ListOrgsToReconcile(ctx)
 	if err != nil {
 		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
@@ -1148,7 +1170,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
 		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, homeDirtiedSince(w.sb))
 	}
-	if sb.Labels[LabelSpecHash] != hash {
+	if sb.Labels[LabelSpecHash] != hash || r.supervisorChanged(sb) {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
 		// hand): OpenShell cannot change those in place, so the sandbox is recreated, which
 		// also replaces its home volume. Never while a run holds the agent, parked runs
@@ -1157,6 +1179,12 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// agent_sandboxes.home_generation.)
 		if act.HasHeld {
 			return r.record(ctx, w, sb, hash, "sandbox spec changed; recreating it after the active and parked runs finish")
+		}
+		if !r.takeRecreate() {
+			// The cap keeps an OpenShell upgrade from recreating the whole fleet in one pass. It is
+			// taken before the home gate, which requests checkpoints and wakes stopped sandboxes: a
+			// sandbox whose gate is still waiting keeps its slot, so at most the cap starts per pass.
+			return r.record(ctx, w, sb, hash, "sandbox spec changed; waiting for a free recreate slot of this pass")
 		}
 		if ok, note, err := r.homeGate(ctx, w, ws, sb, homeDirtiedSince(w.sb)); err != nil || !ok {
 			if err != nil {

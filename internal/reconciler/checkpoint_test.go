@@ -151,6 +151,50 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
 	})
 
+	It("starts at most MaxRecreatesPerPass home checkpoints per pass after a supervisor change", func(ctx SpecContext) {
+		sup := &fakeSupervisor{image: "ghcr.io/nvidia/openshell/supervisor:0.1.5"}
+		cfg.Supervisor = sup
+		cfg.MaxRecreatesPerPass = 1
+		var err error
+		r, err = reconciler.New(pool, backend, &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, cfg)
+		Expect(err).NotTo(HaveOccurred())
+
+		// The BeforeEach sandbox was made without the label, so it counts as changed once the image is
+		// known and is recreated (clean home, no checkpoint). Let it converge first, then give it a
+		// dirty home too: otherwise it takes the pass's one slot below and is deleted without a
+		// checkpoint, and nothing tests the cap in front of the gate.
+		pass(ctx) // deletes
+		pass(ctx) // creates, with the label
+		Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+		Expect(row(ctx).State).To(Equal(store.SandboxStateReady))
+		dirtyHome(ctx, org, user, agent.ID)
+
+		// Agents created now get sandboxes that carry the supervisor label. Their homes are dirtied
+		// only once the sandboxes exist: home_dirtied_at belongs to the current sandbox, so a run
+		// before the sandbox leaves the home looking untouched and the gate lets it go unbacked.
+		orgs := []pgtype.UUID{org}
+		type owner struct{ org, user, agent pgtype.UUID }
+		var more []owner
+		for range 3 {
+			o, u := newOrg(ctx)
+			addProvider(ctx, o, u, "upstream", "", "fake")
+			a := newAgent(ctx, o, u)
+			more = append(more, owner{o, u, a.ID})
+			orgs = append(orgs, o)
+		}
+		pass(ctx)
+		pass(ctx)
+		for _, m := range more {
+			dirtyHome(ctx, m.org, m.user, m.agent)
+		}
+
+		sup.image = "ghcr.io/nvidia/openshell/supervisor:0.1.6"
+		pass(ctx)
+		var n int
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM home_checkpoints WHERE org_id = ANY($1) AND reason = 'recreate'`, orgs).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1), "the pass's one slot is taken before the gate asks for a checkpoint")
+	})
+
 	It("a sandbox recreated without a checkpoint gets a new generation", func(ctx SpecContext) {
 		cfg.Checkpoints = false
 		old := row(ctx).HomeGeneration.String
