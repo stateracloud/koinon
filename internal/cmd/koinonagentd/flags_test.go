@@ -34,6 +34,10 @@ func start(env map[string]string, args ...string) error {
 	for k, v := range env {
 		all[k] = v
 	}
+	if args == nil {
+		// nil would make cobra read os.Args, which carry the test runner's own flags.
+		args = []string{}
+	}
 	return cli.Check(NewRootCommand(), args, all)
 }
 
@@ -44,8 +48,10 @@ var _ = Describe("koinon-agentd's startup", func() {
 	})
 
 	It("takes the database URL from DATABASE_URL and the owner from POD_NAME", func() {
-		Expect(cli.Check(NewRootCommand(), nil, map[string]string{"DATABASE_URL": db, "POD_NAME": "koinon-agentd-0",
-			"KOINON_OPENSHELL_ADDRESS": "o:1", "KOINON_GATEWAY_URL": "http://g:8080"})).To(Succeed())
+		Expect(cli.Check(NewRootCommand(), []string{}, map[string]string{
+			"DATABASE_URL": db, "POD_NAME": "koinon-agentd-0",
+			"KOINON_OPENSHELL_ADDRESS": "o:1", "KOINON_GATEWAY_URL": "http://g:8080",
+		})).To(Succeed())
 	})
 
 	It("names each missing required setting", func() {
@@ -69,8 +75,10 @@ var _ = Describe("koinon-agentd's startup", func() {
 
 	It("requires the saved-work settings with checkpoints", func() {
 		Expect(start(map[string]string{"KOINON_CHECKPOINTS": "true"})).To(MatchError(ContainSubstring("required with --checkpoints")))
-		Expect(start(map[string]string{"KOINON_CHECKPOINTS": "true", "KOINON_SAVED_WORK_URL": "http://api:8083",
-			"KOINON_SAVED_WORK_KEY_FILE": "/keys/saved-work"})).To(Succeed())
+		Expect(start(map[string]string{
+			"KOINON_CHECKPOINTS": "true", "KOINON_SAVED_WORK_URL": "http://api:8083",
+			"KOINON_SAVED_WORK_KEY_FILE": "/keys/saved-work",
+		})).To(Succeed())
 	})
 
 	It("takes the drain deadline from a flag or the environment, and refuses one that does not parse (ADR 0085)", func() {
