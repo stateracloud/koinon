@@ -423,6 +423,42 @@ paths:
           description: Deleted.
         default:
           $ref: "#/components/responses/Error"
+  /default-model:
+    get:
+      tags: [models]
+      operationId: getDefaultModel
+      summary: The org's default model, which agents without a model setting run on.
+      responses:
+        "200":
+          description: The default model; `model` is absent when the org has none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DefaultModel"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [models]
+      operationId: setDefaultModel
+      summary: Set the org's default model, or clear it by leaving `model` out. Audited.
+      description: |
+        The model must be one the org serves and has a price for. The org's first model becomes its
+        default on its own; nothing else changes it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DefaultModel"
+      responses:
+        "200":
+          description: The default model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DefaultModel"
+        default:
+          $ref: "#/components/responses/Error"
   /tokens:
     get:
       tags: [tokens]
@@ -1557,6 +1593,10 @@ components:
           type: array
           items: {$ref: "#/components/schemas/AuditEvent"}
         nextPageToken: {type: string, description: "Absent on the last page."}
+    DefaultModel:
+      type: object
+      properties:
+        model: {type: string, description: "The model name. Absent: the org has no default model."}
     OrgBudget:
       type: object
       required: [spentThisMonthUsd, monthStart]

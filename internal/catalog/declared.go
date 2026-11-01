@@ -130,7 +130,7 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 				return err
 			}
 		}
-		if err := s.syncDeclaredModels(ctx, q, org, row, d); err != nil {
+		if err := s.syncDeclaredModels(ctx, q, org, actor, row, d); err != nil {
 			return err
 		}
 		if err := refreshShadows(ctx, q, org); err != nil {
@@ -155,7 +155,7 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 	return changed, nil
 }
 
-func (s *Service) syncDeclaredModels(ctx context.Context, q *store.Queries, org pgtype.UUID, prov store.Provider, d DeclaredProvider) error {
+func (s *Service) syncDeclaredModels(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor, prov store.Provider, d DeclaredProvider) error {
 	existing, err := q.ListModels(ctx, org)
 	if err != nil {
 		return err
@@ -198,6 +198,9 @@ func (s *Service) syncDeclaredModels(ctx context.Context, q *store.Queries, org 
 			if isUnique(err) {
 				return invalid("model %q is already declared by another Secret", m.Name)
 			}
+			return err
+		}
+		if err := adoptDefaultModel(ctx, q, org, actor, m.Name); err != nil {
 			return err
 		}
 	}

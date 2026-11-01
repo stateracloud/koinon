@@ -15,3 +15,22 @@ ORDER BY id;
 -- The slug of the org the caller is acting in, for names derived from it (gateway targets).
 SELECT slug FROM orgs
 WHERE id = @org_id AND deleted_at IS NULL;
+
+-- name: GetOrgDefaultModel :one
+-- The model agents without a model setting run on (#256); '' when the org has none.
+SELECT coalesce(default_model, '')::text AS default_model FROM orgs
+WHERE id = @org_id AND deleted_at IS NULL;
+
+-- name: SetOrgDefaultModel :one
+-- Sets or clears ('') the org's default model. The old value comes back for the audit event.
+UPDATE orgs o
+SET default_model = nullif(@default_model::text, '')
+FROM (SELECT x.id, coalesce(x.default_model, '')::text AS old FROM orgs x WHERE x.id = @org_id FOR UPDATE) cur
+WHERE o.id = cur.id
+RETURNING cur.old::text AS old_default_model;
+
+-- name: SetOrgDefaultModelIfUnset :execrows
+-- The org's first model becomes its default; a default that is set stays.
+UPDATE orgs
+SET default_model = @default_model::text
+WHERE id = @org_id AND default_model IS NULL AND deleted_at IS NULL;

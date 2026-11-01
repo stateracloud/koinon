@@ -303,6 +303,9 @@ func (s *Service) CreateModel(ctx context.Context, org pgtype.UUID, actor audit.
 		if err != nil {
 			return err
 		}
+		if err := adoptDefaultModel(ctx, q, org, actor, row.Name); err != nil {
+			return err
+		}
 		return audit.RecordErr(ctx, q, audit.Event{
 			Org: org, Actor: actor, Action: "model.create", TargetKind: "model", TargetID: id.String(), After: modelSummary(row),
 		})
@@ -456,4 +459,17 @@ func refitModelFormats(ctx context.Context, q *store.Queries, org pgtype.UUID, a
 		}
 	}
 	return nil
+}
+
+// adoptDefaultModel makes the org's first model its default model (#256). An org that has a default
+// keeps it: a later provider or model never moves the agents that run on it. The change is audited.
+func adoptDefaultModel(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor, model string) error {
+	n, err := q.SetOrgDefaultModelIfUnset(ctx, store.SetOrgDefaultModelIfUnsetParams{OrgID: org, DefaultModel: model})
+	if err != nil || n == 0 {
+		return err
+	}
+	return audit.RecordErr(ctx, q, audit.Event{
+		Org: org, Actor: actor, Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
+		Before: map[string]any{"model": ""}, After: map[string]any{"model": model, "reason": "first model"},
+	})
 }

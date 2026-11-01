@@ -4,12 +4,8 @@
 # fake model server (test/fakemodel/scripts/claude-e2e.yaml), so its model runs in the Messages format
 # through the harness's koinon-anthropic entry, the gateway and the ledger. Steps 6d and 8 set the
 # agent's model explicitly.
-# The provider's name must sort after the quickstart's ("fake"): the org default is the first served,
-# priced model by provider name, then model name (agentmodel.OrgDefault), and the quickstart steps run
-# on the org default, which must stay repo-helper. claude-haiku-5-5 is priced by the default price list
-# from the moment it is declared, so under a name sorting first ("anthropic-fake", rc.8) it became the
-# org default and step 4 ran on its script instead of repo-helper's. test/e2e/fixtures_test.go checks
-# this offline.
+# The org default model is stored and set by the org's first model (#256), which run.sh applies from
+# model-provider.yaml before this file, so this provider's name and models never take it.
 # claude-haiku-5-5 is a Claude 5.x ID the thinking table matches (internal/thinking), so step 6e
 # sends adaptive thinking with block_binding through the real gateway to the strict fake model
 # (script claude-haiku-5-5.yaml; the fake runs with -strict-messages, test/e2e/kind/fakes.yaml).
