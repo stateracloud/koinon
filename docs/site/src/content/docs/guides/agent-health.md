@@ -10,7 +10,7 @@ network file system). Koinon ends every process the agent started when a turn is
 still there 60 seconds later, the sandbox is **stuck**, and Koinon heals it:
 
 1. **It saves the uncommitted work.** Within 30 seconds Koinon reads the changes in the git repositories
-   in the agent's workspace (files you have not committed, new files included, at most 50 MB) and
+   in the agent's home (files you have not committed, new files included, at most 50 MB) and
    stores them encrypted, tied to the task, for 14 days.
 2. **It asks before it pushes.** The task shows an approval, **Push saved work to a branch**, with a
    diffstat. Approving it pushes a new branch `koinon/wip/<task>-<time>` to the repository. It never
@@ -25,7 +25,7 @@ The event is in the audit log with the process that would not end (its name, sta
 function it was waiting in).
 
 If an agent's sandbox gets stuck **three times in 24 hours**, Koinon stops recreating it and marks the
-agent **unhealthy**: new runs are refused with the reason, and owners and admins get a notice. Fix the
+agent **unhealthy**: new runs are refused with the reason, and org admins get a notification. Fix the
 cause (usually the storage), then choose **Resume agent** on the agent's page. Resuming recreates the
 sandbox and starts the count again.
 
@@ -105,7 +105,7 @@ A sandbox pod can also fail because of the supervisor pod OpenShell starts next 
 cannot be pulled). The observer reads that pod too, by name, when the workload pod says nothing; the detail then starts with
 "supervisor pod:".
 
-The agent is marked **unhealthy** with that reason, the org's owners and admins get a notice, every task
+The agent is marked **unhealthy** with that reason, the org admins get a notification, every task
 with a run waiting on the agent gets a note, and admins and owners see an item for the agent in the
 inbox until it is resumed. Fix the cause, then choose **Resume agent** on the agent's page; the waiting
 runs start a new wait. An archived agent cannot be resumed and shows no item.

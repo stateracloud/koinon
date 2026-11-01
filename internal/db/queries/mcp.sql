@@ -203,6 +203,20 @@ WHERE a.org_id = @org_id AND a.agent_id = @agent_id
   AND (s.health = 'unhealthy' OR s.disabled_reason IS NOT NULL OR s.removed_at IS NOT NULL)
 ORDER BY s.name;
 
+-- name: ListMissingMCPServersOfAgent :many
+-- The servers an agent may use that Koinon has found not serving tools right now, and has not
+-- withdrawn on purpose (a disabled or removed server is only mentioned in the note, see
+-- ListUnavailableMCPServersOfAgent): unhealthy, or failing probes that have not yet reached the
+-- threshold, which is what a server overloaded for a minute looks like (issue #326). agentd checks
+-- this before it starts the harness; a server never probed (unknown) is not a miss.
+SELECT s.name, s.health::text AS health, s.health_reason, s.consecutive_failures
+FROM agent_mcp_servers a
+JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
+WHERE a.org_id = @org_id AND a.agent_id = @agent_id
+  AND s.disabled_reason IS NULL AND s.removed_at IS NULL
+  AND (s.health = 'unhealthy' OR (s.health = 'healthy' AND s.consecutive_failures > 0))
+ORDER BY s.name;
+
 -- name: SetMCPToolTwoApprovers :one
 UPDATE mcp_tools
 SET requires_two_approvers = @required

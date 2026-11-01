@@ -120,10 +120,10 @@ export function InboxPage() {
         </section>
         <section aria-labelledby="chat-heading" className="grid content-start gap-4">
           <h2 id="chat-heading" className="text-sm font-semibold">
-            Chat with agents
+            Messages to agents
           </h2>
           {tasks.isPending ? (
-            <p role="status">Loading conversations…</p>
+            <p role="status">Loading threads…</p>
           ) : (
             <ChatPanel
               orgId={orgId}
