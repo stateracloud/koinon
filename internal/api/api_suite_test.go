@@ -26,7 +26,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/testcontainers/testcontainers-go"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/stateracloud/koinon/internal/api"
@@ -58,7 +57,6 @@ var (
 )
 
 func TestAPI(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "API Suite")
 }

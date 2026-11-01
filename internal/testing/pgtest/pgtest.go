@@ -27,6 +27,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // Image is the minimum supported Postgres version (ADR 0047). It is the one place the test image
@@ -83,8 +84,12 @@ func customizers(opts []Option) []testcontainers.ContainerCustomizer {
 }
 
 // Run starts an empty Postgres (nothing migrated) and returns its DSN. The container is removed
-// when the current spec node ends; call it from a BeforeSuite or BeforeAll.
+// when the current spec node ends; call it from a BeforeSuite or BeforeAll. Without Docker it
+// skips that node (fails it under KOINON_REQUIRE=docker, see testenv), so a suite needs no Docker
+// check of its own when Postgres is the first container its BeforeSuite starts.
 func Run(ctx context.Context, opts ...Option) string {
+	ginkgo.GinkgoHelper()
+	testenv.Require(testenv.Docker)
 	ctr, err := postgres.Run(ctx, Image, customizers(opts)...)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	ginkgo.DeferCleanup(func(ctx context.Context) error { return testcontainers.TerminateContainer(ctr) })

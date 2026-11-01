@@ -9,7 +9,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
@@ -17,7 +16,6 @@ import (
 var pool *pgxpool.Pool
 
 func TestKeysCLI(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Keys CLI Suite")
 }

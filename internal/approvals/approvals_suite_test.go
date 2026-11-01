@@ -22,7 +22,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/codehost"
@@ -44,7 +43,6 @@ var (
 )
 
 func TestApprovals(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Approvals Suite")
 }

@@ -20,21 +20,14 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/pressly/goose/v3"
-	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
-// docker is whether testcontainers can start containers; the Postgres specs skip without it.
-var docker bool
-
+// The Postgres specs skip without Docker: pgtest.Run requires it (testenv).
 func TestKoinonAPI(t *testing.T) {
-	t.Run("docker", func(t *testing.T) {
-		testcontainers.SkipIfProviderIsNotHealthy(t)
-		docker = true
-	})
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "koinon-api Suite")
 }
@@ -103,9 +96,6 @@ var _ = Describe("retryBootstrap", func() {
 			pool *pgxpool.Pool
 		)
 		BeforeAll(func(ctx SpecContext) {
-			if !docker {
-				Skip("no container provider")
-			}
 			dsn = pgtest.Run(ctx)
 			var err error
 			pool, err = pgxpool.New(ctx, dsn)
