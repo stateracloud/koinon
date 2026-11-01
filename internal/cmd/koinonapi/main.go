@@ -8,7 +8,7 @@
 //
 // "koinon-api migrate" applies the database migrations and exits; the Helm
 // chart runs it as a hook Job with the migration role. The command tree (commands.go) follows
-// ADR 0087; without a subcommand koinon-api serves.
+// ADR 0088; without a subcommand koinon-api serves.
 //
 // Besides the API on --addr, koinon-api serves the GitHub connector's MCP
 // tools (internal/githubtools, plan item C3) on --tools-addr, a separate

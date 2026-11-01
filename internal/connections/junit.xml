@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+  <testsuites tests="9" disabled="0" errors="0" failures="0" time="3.89971625">
+      <testsuite name="Connections Suite" package="/tmp/claude-502/kw/l456/internal/connections" tests="9" disabled="0" skipped="0" errors="0" failures="0" time="3.89971625" timestamp="2026-11-01T15:47:33">
+          <properties>
+              <property name="SuiteSucceeded" value="true"></property>
+              <property name="SuiteHasProgrammaticFocus" value="false"></property>
+              <property name="SpecialSuiteFailureReason" value=""></property>
+              <property name="SuiteLabels" value="[]"></property>
+              <property name="SuiteSemVerConstraints" value="[]"></property>
+              <property name="SuiteComponentSemVerConstraints" value="[]"></property>
+              <property name="RandomSeed" value="1793544452"></property>
+              <property name="RandomizeAllSpecs" value="false"></property>
+              <property name="LabelFilter" value=""></property>
+              <property name="SemVerFilter" value=""></property>
+              <property name="FocusStrings" value=""></property>
+              <property name="SkipStrings" value=""></property>
+              <property name="FocusFiles" value=""></property>
+              <property name="SkipFiles" value=""></property>
+              <property name="FailOnPending" value="false"></property>
+              <property name="FailOnEmpty" value="true"></property>
+              <property name="FailFast" value="false"></property>
+              <property name="FlakeAttempts" value="0"></property>
+              <property name="DryRun" value="false"></property>
+              <property name="ParallelTotal" value="1"></property>
+              <property name="OutputInterceptorMode" value=""></property>
+          </properties>
+          <testcase name="[BeforeSuite]" classname="Connections Suite" status="passed" time="2.945121292">
+              <system-err>&gt; Enter [BeforeSuite] TOP-LEVEL - /tmp/claude-502/kw/l456/internal/connections/connections_suite_test.go:25 @ 11/01/26 15:47:33.052&#xA;&lt; Exit [BeforeSuite] TOP-LEVEL - /tmp/claude-502/kw/l456/internal/connections/connections_suite_test.go:25 @ 11/01/26 15:47:35.997 (2.945s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] MigrateLegacy seals the old Secret&#39;s fields into the row, then deletes the Secret" classname="Connections Suite" status="passed" time="0.155216833">
+              <system-err>&gt; Enter [BeforeEach] MigrateLegacy - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:50 @ 11/01/26 15:47:35.997&#xA;&lt; Exit [BeforeEach] MigrateLegacy - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:50 @ 11/01/26 15:47:36.134 (137ms)&#xA;&gt; Enter [It] seals the old Secret&#39;s fields into the row, then deletes the Secret - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:71 @ 11/01/26 15:47:36.134&#xA;&lt; Exit [It] seals the old Secret&#39;s fields into the row, then deletes the Secret - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:71 @ 11/01/26 15:47:36.153 (18ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] MigrateLegacy keeps the old Secret when sealing fails, and tries again next start" classname="Connections Suite" status="passed" time="0.096637667">
+              <system-err>&gt; Enter [BeforeEach] MigrateLegacy - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:50 @ 11/01/26 15:47:36.153&#xA;&lt; Exit [BeforeEach] MigrateLegacy - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:50 @ 11/01/26 15:47:36.235 (82ms)&#xA;&gt; Enter [It] keeps the old Secret when sealing fails, and tries again next start - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:92 @ 11/01/26 15:47:36.235&#xA;&lt; Exit [It] keeps the old Secret when sealing fails, and tries again next start - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:92 @ 11/01/26 15:47:36.249 (15ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] MigrateLegacy moves the fields even when the old Secret cannot be deleted, keeps secret_name, and finishes at the next start" classname="Connections Suite" status="passed" time="0.091811916">
+              <system-err>&gt; Enter [BeforeEach] MigrateLegacy - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:50 @ 11/01/26 15:47:36.249&#xA;&lt; Exit [BeforeEach] MigrateLegacy - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:50 @ 11/01/26 15:47:36.332 (82ms)&#xA;&gt; Enter [It] moves the fields even when the old Secret cannot be deleted, keeps secret_name, and finishes at the next start - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:106 @ 11/01/26 15:47:36.332&#xA;&lt; Exit [It] moves the fields even when the old Secret cannot be deleted, keeps secret_name, and finishes at the next start - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:106 @ 11/01/26 15:47:36.341 (10ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] MigrateLegacy finishes a move whose Secret is already gone by clearing the name" classname="Connections Suite" status="passed" time="0.080512125">
+              <system-err>&gt; Enter [BeforeEach] MigrateLegacy - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:50 @ 11/01/26 15:47:36.341&#xA;&lt; Exit [BeforeEach] MigrateLegacy - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:50 @ 11/01/26 15:47:36.41 (69ms)&#xA;&gt; Enter [It] finishes a move whose Secret is already gone by clearing the name - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:133 @ 11/01/26 15:47:36.41&#xA;&lt; Exit [It] finishes a move whose Secret is already gone by clearing the name - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:133 @ 11/01/26 15:47:36.422 (11ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] MigrateLegacy skips a connection whose Secret is already gone and migrates the others" classname="Connections Suite" status="passed" time="0.085700875">
+              <system-err>&gt; Enter [BeforeEach] MigrateLegacy - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:50 @ 11/01/26 15:47:36.422&#xA;&lt; Exit [BeforeEach] MigrateLegacy - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:50 @ 11/01/26 15:47:36.497 (75ms)&#xA;&gt; Enter [It] skips a connection whose Secret is already gone and migrates the others - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:145 @ 11/01/26 15:47:36.497&#xA;&lt; Exit [It] skips a connection whose Secret is already gone and migrates the others - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:145 @ 11/01/26 15:47:36.507 (11ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] MigrateLegacy says so when connections wait for a Kubernetes Secret and there is no access to it" classname="Connections Suite" status="passed" time="0.078540792">
+              <system-err>&gt; Enter [BeforeEach] MigrateLegacy - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:50 @ 11/01/26 15:47:36.507&#xA;&lt; Exit [BeforeEach] MigrateLegacy - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:50 @ 11/01/26 15:47:36.582 (74ms)&#xA;&gt; Enter [It] says so when connections wait for a Kubernetes Secret and there is no access to it - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:153 @ 11/01/26 15:47:36.582&#xA;&lt; Exit [It] says so when connections wait for a Kubernetes Secret and there is no access to it - /tmp/claude-502/kw/l456/internal/connections/migrate_test.go:153 @ 11/01/26 15:47:36.586 (4ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[DeferCleanup (Suite)]" classname="Connections Suite" status="passed" time="0.000109959">
+              <system-err>&gt; Enter [DeferCleanup (Suite)] TOP-LEVEL - /tmp/claude-502/kw/l456/internal/testing/pgtest/pgtest.go:114 @ 11/01/26 15:47:36.586&#xA;&lt; Exit [DeferCleanup (Suite)] TOP-LEVEL - /tmp/claude-502/kw/l456/internal/testing/pgtest/pgtest.go:114 @ 11/01/26 15:47:36.586 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[DeferCleanup (Suite)]" classname="Connections Suite" status="passed" time="0.365711541">
+              <system-err>&gt; Enter [DeferCleanup (Suite)] TOP-LEVEL - /tmp/claude-502/kw/l456/internal/testing/pgtest/pgtest.go:90 @ 11/01/26 15:47:36.586&#xA;&lt; Exit [DeferCleanup (Suite)] TOP-LEVEL - /tmp/claude-502/kw/l456/internal/testing/pgtest/pgtest.go:90 @ 11/01/26 15:47:36.952 (366ms)&#xA;</system-err>
+          </testcase>
+      </testsuite>
+  </testsuites>

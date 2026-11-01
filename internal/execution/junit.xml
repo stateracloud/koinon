@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8"?>
+  <testsuites tests="59" disabled="0" errors="0" failures="0" time="0.019339583">
+      <testsuite name="Execution Suite" package="/tmp/claude-502/kw/l456/internal/execution" tests="59" disabled="0" skipped="0" errors="0" failures="0" time="0.019339583" timestamp="2026-11-01T15:47:35">
+          <properties>
+              <property name="SuiteSucceeded" value="true"></property>
+              <property name="SuiteHasProgrammaticFocus" value="false"></property>
+              <property name="SpecialSuiteFailureReason" value=""></property>
+              <property name="SuiteLabels" value="[]"></property>
+              <property name="SuiteSemVerConstraints" value="[]"></property>
+              <property name="SuiteComponentSemVerConstraints" value="[]"></property>
+              <property name="RandomSeed" value="1793544455"></property>
+              <property name="RandomizeAllSpecs" value="false"></property>
+              <property name="LabelFilter" value=""></property>
+              <property name="SemVerFilter" value=""></property>
+              <property name="FocusStrings" value=""></property>
+              <property name="SkipStrings" value=""></property>
+              <property name="FocusFiles" value=""></property>
+              <property name="SkipFiles" value=""></property>
+              <property name="FailOnPending" value="false"></property>
+              <property name="FailOnEmpty" value="true"></property>
+              <property name="FailFast" value="false"></property>
+              <property name="FlakeAttempts" value="0"></property>
+              <property name="DryRun" value="false"></property>
+              <property name="ParallelTotal" value="1"></property>
+              <property name="OutputInterceptorMode" value=""></property>
+          </properties>
+          <testcase name="[It] CheckEgressHost refuses patterns leading label" classname="Execution Suite" status="passed" time="0.000195083">
+              <system-err>&gt; Enter [It] leading label - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:19 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] leading label - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:19 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] CheckEgressHost refuses patterns bare star" classname="Execution Suite" status="passed" time="1.0875e-05">
+              <system-err>&gt; Enter [It] bare star - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:20 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] bare star - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:20 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] CheckEgressHost refuses patterns double star" classname="Execution Suite" status="passed" time="7.542e-06">
+              <system-err>&gt; Enter [It] double star - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:21 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] double star - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:21 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] CheckEgressHost refuses patterns inner star" classname="Execution Suite" status="passed" time="7.792e-06">
+              <system-err>&gt; Enter [It] inner star - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:22 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] inner star - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:22 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] CheckEgressHost refuses patterns partial label" classname="Execution Suite" status="passed" time="1.125e-05">
+              <system-err>&gt; Enter [It] partial label - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:23 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] partial label - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:23 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] CheckEgressHost refuses patterns question mark" classname="Execution Suite" status="passed" time="5.792e-06">
+              <system-err>&gt; Enter [It] question mark - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:24 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] question mark - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:24 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] CheckEgressHost refuses patterns class" classname="Execution Suite" status="passed" time="6.25e-06">
+              <system-err>&gt; Enter [It] class - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:25 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] class - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:25 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] CheckEgressHost refuses patterns braces" classname="Execution Suite" status="passed" time="5.25e-06">
+              <system-err>&gt; Enter [It] braces - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:26 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] braces - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:26 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] CheckEgressHost accepts exact names and addresses name" classname="Execution Suite" status="passed" time="1.4417e-05">
+              <system-err>&gt; Enter [It] name - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:30 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] name - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:30 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] CheckEgressHost accepts exact names and addresses service" classname="Execution Suite" status="passed" time="5.208e-06">
+              <system-err>&gt; Enter [It] service - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:31 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] service - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:31 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] CheckEgressHost accepts exact names and addresses ip" classname="Execution Suite" status="passed" time="5.5e-06">
+              <system-err>&gt; Enter [It] ip - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:32 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] ip - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:32 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] CheckEgressHost accepts exact names and addresses ipv6, as url.Hostname returns it" classname="Execution Suite" status="passed" time="5.208e-06">
+              <system-err>&gt; Enter [It] ipv6, as url.Hostname returns it - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:33 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] ipv6, as url.Hostname returns it - /tmp/claude-502/kw/l456/internal/execution/egress_test.go:33 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] UUIDString formats a UUID in canonical lower-case form" classname="Execution Suite" status="passed" time="6.6583e-05">
+              <system-err>&gt; Enter [It] formats a UUID in canonical lower-case form - /tmp/claude-502/kw/l456/internal/execution/names_test.go:14 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] formats a UUID in canonical lower-case form - /tmp/claude-502/kw/l456/internal/execution/names_test.go:14 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait an image pull reason" classname="Execution Suite" status="passed" time="1.2292e-05">
+              <system-err>&gt; Enter [It] an image pull reason - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:16 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] an image pull reason - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:16 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait a back-off reason" classname="Execution Suite" status="passed" time="7.875e-06">
+              <system-err>&gt; Enter [It] a back-off reason - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:17 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] a back-off reason - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:17 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait a pull error in the message" classname="Execution Suite" status="passed" time="6.959e-06">
+              <system-err>&gt; Enter [It] a pull error in the message - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:18 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] a pull error in the message - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:18 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait an admission webhook" classname="Execution Suite" status="passed" time="5.958e-06">
+              <system-err>&gt; Enter [It] an admission webhook - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:19 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] an admission webhook - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:19 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait a ValidatingAdmissionPolicy" classname="Execution Suite" status="passed" time="7.334e-06">
+              <system-err>&gt; Enter [It] a ValidatingAdmissionPolicy - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:20 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] a ValidatingAdmissionPolicy - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:20 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait a quota" classname="Execution Suite" status="passed" time="1.1083e-05">
+              <system-err>&gt; Enter [It] a quota - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:21 @ 11/01/26 15:47:35.607&#xA;&lt; Exit [It] a quota - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:21 @ 11/01/26 15:47:35.607 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait an unschedulable pod" classname="Execution Suite" status="passed" time="7.666e-06">
+              <system-err>&gt; Enter [It] an unschedulable pod - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:22 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] an unschedulable pod - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:22 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait no node has the memory" classname="Execution Suite" status="passed" time="6.292e-06">
+              <system-err>&gt; Enter [It] no node has the memory - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:23 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] no node has the memory - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:23 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait nothing" classname="Execution Suite" status="passed" time="5.25e-06">
+              <system-err>&gt; Enter [It] nothing - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:24 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] nothing - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:24 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait a reason that says nothing" classname="Execution Suite" status="passed" time="8.167e-06">
+              <system-err>&gt; Enter [It] a reason that says nothing - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:25 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] a reason that says nothing - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:25 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait a reason in other case" classname="Execution Suite" status="passed" time="5e-06">
+              <system-err>&gt; Enter [It] a reason in other case - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:26 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] a reason in other case - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:26 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait captured: no node has the CPU" classname="Execution Suite" status="passed" time="6.416e-06">
+              <system-err>&gt; Enter [It] captured: no node has the CPU - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:29 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] captured: no node has the CPU - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:29 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait captured: OpenShell alone while the image cannot be pulled (no observer)" classname="Execution Suite" status="passed" time="6.875e-06">
+              <system-err>&gt; Enter [It] captured: OpenShell alone while the image cannot be pulled (no observer) - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:37 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] captured: OpenShell alone while the image cannot be pulled (no observer) - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:37 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait captured: Agent Sandbox ready condition while the pod is pending (no observer)" classname="Execution Suite" status="passed" time="8.208e-06">
+              <system-err>&gt; Enter [It] captured: Agent Sandbox ready condition while the pod is pending (no observer) - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:39 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] captured: Agent Sandbox ready condition while the pod is pending (no observer) - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:39 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait captured: OpenShell while the sandbox is scheduling-gated" classname="Execution Suite" status="passed" time="6.041e-06">
+              <system-err>&gt; Enter [It] captured: OpenShell while the sandbox is scheduling-gated - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:41 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] captured: OpenShell while the sandbox is scheduling-gated - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:41 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait captured: kubelet waiting state of an unpullable image" classname="Execution Suite" status="passed" time="6.375e-06">
+              <system-err>&gt; Enter [It] captured: kubelet waiting state of an unpullable image - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:44 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] captured: kubelet waiting state of an unpullable image - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:44 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait captured: kubelet pull failure event" classname="Execution Suite" status="passed" time="6.375e-06">
+              <system-err>&gt; Enter [It] captured: kubelet pull failure event - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:47 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] captured: kubelet pull failure event - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:47 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait a crash loop" classname="Execution Suite" status="passed" time="8.75e-06">
+              <system-err>&gt; Enter [It] a crash loop - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:50 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] a crash loop - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:50 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait a crash loop in the message" classname="Execution Suite" status="passed" time="6.459e-06">
+              <system-err>&gt; Enter [It] a crash loop in the message - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:51 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] a crash loop in the message - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:51 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait a container that cannot be created" classname="Execution Suite" status="passed" time="5.042e-06">
+              <system-err>&gt; Enter [It] a container that cannot be created - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:52 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] a container that cannot be created - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:52 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait a container whose configuration is refused" classname="Execution Suite" status="passed" time="5.709e-06">
+              <system-err>&gt; Enter [It] a container whose configuration is refused - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:53 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] a container whose configuration is refused - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:53 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait a container the runtime cannot run" classname="Execution Suite" status="passed" time="1.0708e-05">
+              <system-err>&gt; Enter [It] a container the runtime cannot run - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:54 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] a container the runtime cannot run - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:54 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ClassifySandboxWait captured: the chart&#39;s ValidatingAdmissionPolicy refusing a pod" classname="Execution Suite" status="passed" time="1.0041e-05">
+              <system-err>&gt; Enter [It] captured: the chart&#39;s ValidatingAdmissionPolicy refusing a pod - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:55 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] captured: the chart&#39;s ValidatingAdmissionPolicy refusing a pod - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:55 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] TaskSandboxName is stable per task, differs per task and agent, and fits OpenShell&#39;s name limit" classname="Execution Suite" status="passed" time="6.8291e-05">
+              <system-err>&gt; Enter [It] is stable per task, differs per task and agent, and fits OpenShell&#39;s name limit - /tmp/claude-502/kw/l456/internal/execution/names_test.go:23 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] is stable per task, differs per task and agent, and fits OpenShell&#39;s name limit - /tmp/claude-502/kw/l456/internal/execution/names_test.go:23 @ 11/01/26 15:47:35.608 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] PodWaitDetail explains the captured missing image as an image pull" classname="Execution Suite" status="passed" time="0.014730291">
+              <system-err>&gt; Enter [It] explains the captured missing image as an image pull - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:23 @ 11/01/26 15:47:35.608&#xA;&lt; Exit [It] explains the captured missing image as an image pull - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:23 @ 11/01/26 15:47:35.622 (15ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] PodWaitDetail explains the captured supervisor pod whose image cannot be pulled" classname="Execution Suite" status="passed" time="0.003221042">
+              <system-err>&gt; Enter [It] explains the captured supervisor pod whose image cannot be pulled - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:44 @ 11/01/26 15:47:35.623&#xA;&lt; Exit [It] explains the captured supervisor pod whose image cannot be pulled - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:44 @ 11/01/26 15:47:35.626 (3ms)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] PodWaitDetail looks at init containers before containers and skips routine waits" classname="Execution Suite" status="passed" time="2.0209e-05">
+              <system-err>&gt; Enter [It] looks at init containers before containers and skips routine waits - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:58 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] looks at init containers before containers and skips routine waits - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:58 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] PodWaitDetail names a crash loop with its last exit" classname="Execution Suite" status="passed" time="4.8625e-05">
+              <system-err>&gt; Enter [It] names a crash loop with its last exit - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:68 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] names a crash loop with its last exit - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:68 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] PodWaitDetail says nothing for a pod that is only starting, and for nil" classname="Execution Suite" status="passed" time="6.75e-06">
+              <system-err>&gt; Enter [It] says nothing for a pod that is only starting, and for nil - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:76 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] says nothing for a pod that is only starting, and for nil - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:76 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] PodWaitDetail cuts a long message on a rune boundary" classname="Execution Suite" status="passed" time="1.2666e-05">
+              <system-err>&gt; Enter [It] cuts a long message on a rune boundary - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:82 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] cuts a long message on a rune boundary - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:82 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] SandboxCRDetail reads an admission refusal from the Ready condition" classname="Execution Suite" status="passed" time="5.725e-05">
+              <system-err>&gt; Enter [It] reads an admission refusal from the Ready condition - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:101 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] reads an admission refusal from the Ready condition - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:101 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] SandboxCRDetail reads the v1.0.8 container issue" classname="Execution Suite" status="passed" time="1.1e-05">
+              <system-err>&gt; Enter [It] reads the v1.0.8 container issue - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:110 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] reads the v1.0.8 container issue - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:110 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] SandboxCRDetail ignores the captured v1.0.7 message and a Ready condition that is True" classname="Execution Suite" status="passed" time="1.3834e-05">
+              <system-err>&gt; Enter [It] ignores the captured v1.0.7 message and a Ready condition that is True - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:118 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] ignores the captured v1.0.7 message and a Ready condition that is True - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:118 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] WorkspaceNamespace the default gateway" classname="Execution Suite" status="passed" time="1.8667e-05">
+              <system-err>&gt; Enter [It] the default gateway - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:141 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] the default gateway - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:141 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] WorkspaceNamespace another gateway" classname="Execution Suite" status="passed" time="7.208e-06">
+              <system-err>&gt; Enter [It] another gateway - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:142 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] another gateway - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:142 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] WorkspaceNamespace an empty gateway ID is OpenShell&#39;s default" classname="Execution Suite" status="passed" time="6.291e-06">
+              <system-err>&gt; Enter [It] an empty gateway ID is OpenShell&#39;s default - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:143 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] an empty gateway ID is OpenShell&#39;s default - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:143 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] SandboxWaitCause.Describe image_pull" classname="Execution Suite" status="passed" time="7.667e-06">
+              <system-err>&gt; Enter [It] image_pull - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:62 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] image_pull - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:62 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] SandboxWaitCause.Describe admission" classname="Execution Suite" status="passed" time="5.791e-06">
+              <system-err>&gt; Enter [It] admission - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:63 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] admission - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:63 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] SandboxWaitCause.Describe no_nodes" classname="Execution Suite" status="passed" time="8.834e-06">
+              <system-err>&gt; Enter [It] no_nodes - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:64 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] no_nodes - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:64 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] SandboxWaitCause.Describe crash_loop" classname="Execution Suite" status="passed" time="9.583e-06">
+              <system-err>&gt; Enter [It] crash_loop - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:65 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] crash_loop - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:65 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] SandboxWaitCause.Describe container_create" classname="Execution Suite" status="passed" time="7.875e-06">
+              <system-err>&gt; Enter [It] container_create - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:66 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] container_create - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:66 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] SandboxWaitCause.Describe unknown" classname="Execution Suite" status="passed" time="5.333e-06">
+              <system-err>&gt; Enter [It] unknown - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:67 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] unknown - /tmp/claude-502/kw/l456/internal/execution/waitcause_test.go:67 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ExplainWait an opaque OpenShell reason is replaced" classname="Execution Suite" status="passed" time="1.7416e-05">
+              <system-err>&gt; Enter [It] an opaque OpenShell reason is replaced - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:132 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] an opaque OpenShell reason is replaced - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:132 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ExplainWait Agent Sandbox&#39;s pending reason is replaced" classname="Execution Suite" status="passed" time="5.666e-06">
+              <system-err>&gt; Enter [It] Agent Sandbox&#39;s pending reason is replaced - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:133 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] Agent Sandbox&#39;s pending reason is replaced - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:133 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ExplainWait an informative reason is kept" classname="Execution Suite" status="passed" time="5.417e-06">
+              <system-err>&gt; Enter [It] an informative reason is kept - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:134 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] an informative reason is kept - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:134 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+          <testcase name="[It] ExplainWait an empty detail changes nothing" classname="Execution Suite" status="passed" time="4.75e-06">
+              <system-err>&gt; Enter [It] an empty detail changes nothing - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:135 @ 11/01/26 15:47:35.626&#xA;&lt; Exit [It] an empty detail changes nothing - /tmp/claude-502/kw/l456/internal/execution/podcause_test.go:135 @ 11/01/26 15:47:35.626 (0s)&#xA;</system-err>
+          </testcase>
+      </testsuite>
+  </testsuites>

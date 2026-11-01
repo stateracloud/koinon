@@ -2,7 +2,7 @@
 
 // Command koinon-api serves the Koinon API and web UI, and carries the operator commands
 // (migrate, preflight, ensure-secrets, keys, audit). Its command tree lives in
-// internal/cmd/koinonapi, where the chart's contract test can build it (ADR 0087).
+// internal/cmd/koinonapi, where the chart's contract test can build it (ADR 0088).
 package main
 
 import (

@@ -15,7 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cmd/koinonapi"
 )
 
-// commandTrees are the binaries whose command tree the contract test knows (ADR 0087). A binary
+// commandTrees are the binaries whose command tree the contract test knows (ADR 0088). A binary
 // that has moved to the shared CLI stack adds itself here; until then its containers are not
 // checked (the reconciler and agentd: #457, #458).
 var commandTrees = map[string]func() *cobra.Command{

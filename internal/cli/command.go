@@ -20,7 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/project"
 )
 
-// The command-line stack of every Koinon binary (ADR 0087): cobra commands, pflag flags and viper
+// The command-line stack of every Koinon binary (ADR 0088): cobra commands, pflag flags and viper
 // as the one owner of where a setting comes from. The precedence is, highest first:
 //
 //  1. the flag on the command line,
@@ -165,7 +165,7 @@ func DefaultSubcommand(root *cobra.Command, args []string) []string {
 }
 
 // Styled reports whether help and errors may use colour and layout: only on a terminal, and not
-// when NO_COLOR is set (ADR 0087). In pods and CI output stays plain text.
+// when NO_COLOR is set (ADR 0088). In pods and CI output stays plain text.
 func Styled(w io.Writer) bool {
 	if _, set := os.LookupEnv("NO_COLOR"); set {
 		return false
