@@ -24,6 +24,10 @@ func TestSupportedRange(t *testing.T) {
 	}
 }
 
+// eraseCompat matches a DELETE or TRUNCATE of schema_compat. Emptying the table erases the
+// declaration: the gate then reads min_reader_version as 0 and lets every older release through.
+var eraseCompat = regexp.MustCompile(`(?i)\b(DELETE\s+FROM|TRUNCATE(\s+TABLE)?(\s+ONLY)?)\s+(\w+\.)?"?schema_compat\b`)
+
 var minReader = regexp.MustCompile(`(?i)min_reader_version`)
 
 // TestCompatDeclarations records the compatibility decision a migration makes. Only a migration
@@ -49,12 +53,32 @@ func TestCompatDeclarations(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if eraseCompat.Match(body) {
+			t.Errorf("%s deletes or truncates schema_compat: the declaration may only be raised, with `UPDATE schema_compat SET min_reader_version = %d`", e.Name(), v)
+		}
 		if !minReader.Match(body) {
 			continue
 		}
 		m := updateOwn.FindSubmatch(body)
 		if m == nil || string(m[1]) != strconv.FormatInt(v, 10) {
 			t.Errorf("%s writes min_reader_version: it must be `UPDATE schema_compat SET min_reader_version = %d` (its own version)", e.Name(), v)
+		}
+	}
+}
+
+// TestCompatEraseIsCaught keeps the DELETE and TRUNCATE check honest.
+func TestCompatEraseIsCaught(t *testing.T) {
+	for _, sql := range []string{
+		"DELETE FROM schema_compat;", "delete  from public.schema_compat", "TRUNCATE schema_compat;",
+		"TRUNCATE TABLE schema_compat", "truncate only schema_compat",
+	} {
+		if !eraseCompat.MatchString(sql) {
+			t.Errorf("%q must be caught", sql)
+		}
+	}
+	for _, sql := range []string{"UPDATE schema_compat SET min_reader_version = 46", "DELETE FROM other WHERE x = 'schema_compat'"} {
+		if eraseCompat.MatchString(sql) {
+			t.Errorf("%q must not be caught", sql)
 		}
 	}
 }
