@@ -87,9 +87,11 @@ const (
 	ModelSource_MODEL_SOURCE_AGENT ModelSource = 1
 	// The model of the agent's active version (a template's spec.model).
 	ModelSource_MODEL_SOURCE_VERSION ModelSource = 2
-	// The org default: the first model the org serves and has a price for.
+	// The default model: the org's stored default model (ADR 0086), or the platform's
+	// --default-model when the org has none.
 	ModelSource_MODEL_SOURCE_ORG_DEFAULT ModelSource = 3
-	// Nothing: the org serves no priced model, so a run would fail.
+	// Nothing: the agent, its version and the platform name no model and the org has no default
+	// model, so a run would fail until an admin sets one.
 	ModelSource_MODEL_SOURCE_NONE ModelSource = 4
 )
 

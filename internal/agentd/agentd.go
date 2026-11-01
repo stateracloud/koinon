@@ -165,7 +165,7 @@ type Config struct {
 	// <GatewayURL>/mcp for tools. Required; it must not carry credentials.
 	GatewayURL string
 	// DefaultModel is the model of agents whose version names none, or "default", when set;
-	// otherwise the org's first served model is used (plan item PV1).
+	// otherwise the org's stored default model is used (#256).
 	DefaultModel string
 	// SessionCwd is the harness session's working directory in the sandbox. Default
 	// /sandbox/work.

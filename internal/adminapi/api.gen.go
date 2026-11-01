@@ -572,6 +572,12 @@ type AuditEventList struct {
 	NextPageToken *string `json:"nextPageToken,omitempty"`
 }
 
+// DefaultModel defines model for DefaultModel.
+type DefaultModel struct {
+	// Model The model name. Absent: the org has no default model.
+	Model *string `json:"model,omitempty"`
+}
+
 // DefaultPriceChanges defines model for DefaultPriceChanges.
 type DefaultPriceChanges struct {
 	Changes []PriceChange `json:"changes"`
@@ -1336,6 +1342,9 @@ type SetAgentThinkingJSONRequestBody = AgentThinkingUpdate
 // SetBudgetJSONRequestBody defines body for SetBudget for application/json ContentType.
 type SetBudgetJSONRequestBody = OrgBudgetUpdate
 
+// SetDefaultModelJSONRequestBody defines body for SetDefaultModel for application/json ContentType.
+type SetDefaultModelJSONRequestBody = DefaultModel
+
 // CreateMcpServerJSONRequestBody defines body for CreateMcpServer for application/json ContentType.
 type CreateMcpServerJSONRequestBody = McpServerCreate
 
@@ -1406,6 +1415,12 @@ type ServerInterface interface {
 	// SetBudget Set the org's monthly cap, or clear it by leaving `monthlyCapUsd` out.
 	// (PUT /budget)
 	SetBudget(w http.ResponseWriter, r *http.Request)
+	// GetDefaultModel The org's default model, which agents without a model setting run on.
+	// (GET /default-model)
+	GetDefaultModel(w http.ResponseWriter, r *http.Request)
+	// SetDefaultModel Set the org's default model, or clear it by leaving `model` out. Audited.
+	// (PUT /default-model)
+	SetDefaultModel(w http.ResponseWriter, r *http.Request)
 	// ListMcpServers List the org's remote MCP servers, entered and declared, with their health.
 	// (GET /mcp-servers)
 	ListMcpServers(w http.ResponseWriter, r *http.Request)
@@ -1857,6 +1872,34 @@ func (siw *ServerInterfaceWrapper) SetBudget(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetBudget(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDefaultModel operation middleware
+func (siw *ServerInterfaceWrapper) GetDefaultModel(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDefaultModel(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetDefaultModel operation middleware
+func (siw *ServerInterfaceWrapper) SetDefaultModel(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetDefaultModel(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2717,6 +2760,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/models/{modelId}", wrapper.DeleteModel)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/models/{modelId}", wrapper.GetModel)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/models/{modelId}", wrapper.UpdateModel)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/default-model", wrapper.GetDefaultModel)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/default-model", wrapper.SetDefaultModel)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tokens", wrapper.ListTokens)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tokens", wrapper.CreateToken)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/tokens/{tokenId}", wrapper.RevokeToken)
@@ -3164,6 +3209,83 @@ type SetBudgetdefaultJSONResponse struct {
 }
 
 func (response SetBudgetdefaultJSONResponse) VisitSetBudgetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDefaultModelRequestObject struct {
+}
+
+type GetDefaultModelResponseObject interface {
+	VisitGetDefaultModelResponse(w http.ResponseWriter) error
+}
+
+type GetDefaultModel200JSONResponse DefaultModel
+
+func (response GetDefaultModel200JSONResponse) VisitGetDefaultModelResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDefaultModeldefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetDefaultModeldefaultJSONResponse) VisitGetDefaultModelResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetDefaultModelRequestObject struct {
+	Body *SetDefaultModelJSONRequestBody
+}
+
+type SetDefaultModelResponseObject interface {
+	VisitSetDefaultModelResponse(w http.ResponseWriter) error
+}
+
+type SetDefaultModel200JSONResponse DefaultModel
+
+func (response SetDefaultModel200JSONResponse) VisitSetDefaultModelResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetDefaultModeldefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetDefaultModeldefaultJSONResponse) VisitSetDefaultModelResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -4355,6 +4477,12 @@ type StrictServerInterface interface {
 	// SetBudget Set the org's monthly cap, or clear it by leaving `monthlyCapUsd` out.
 	// (PUT /budget)
 	SetBudget(ctx context.Context, request SetBudgetRequestObject) (SetBudgetResponseObject, error)
+	// GetDefaultModel The org's default model, which agents without a model setting run on.
+	// (GET /default-model)
+	GetDefaultModel(ctx context.Context, request GetDefaultModelRequestObject) (GetDefaultModelResponseObject, error)
+	// SetDefaultModel Set the org's default model, or clear it by leaving `model` out. Audited.
+	// (PUT /default-model)
+	SetDefaultModel(ctx context.Context, request SetDefaultModelRequestObject) (SetDefaultModelResponseObject, error)
 	// ListMcpServers List the org's remote MCP servers, entered and declared, with their health.
 	// (GET /mcp-servers)
 	ListMcpServers(ctx context.Context, request ListMcpServersRequestObject) (ListMcpServersResponseObject, error)
@@ -4800,6 +4928,61 @@ func (sh *strictHandler) SetBudget(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetBudgetResponseObject); ok {
 		if err := validResponse.VisitSetBudgetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetDefaultModel operation middleware
+func (sh *strictHandler) GetDefaultModel(w http.ResponseWriter, r *http.Request) {
+	var request GetDefaultModelRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDefaultModel(ctx, request.(GetDefaultModelRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDefaultModel")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetDefaultModelResponseObject); ok {
+		if err := validResponse.VisitGetDefaultModelResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetDefaultModel operation middleware
+func (sh *strictHandler) SetDefaultModel(w http.ResponseWriter, r *http.Request) {
+	var request SetDefaultModelRequestObject
+
+	var body SetDefaultModelJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetDefaultModel(ctx, request.(SetDefaultModelRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetDefaultModel")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetDefaultModelResponseObject); ok {
+		if err := validResponse.VisitSetDefaultModelResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
