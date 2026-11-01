@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/stateracloud/koinon/internal/schemagate"
 )
 
@@ -108,7 +109,7 @@ func (r errRow) Scan(...any) error { return r.err }
 
 type errQuerier struct{ err error }
 
-func (q errQuerier) QueryRow(context.Context, string, ...any) pgx.Row { return errRow{q.err} }
+func (q errQuerier) QueryRow(context.Context, string, ...any) pgx.Row { return errRow(q) }
 
 func TestReadMissingGooseTableIsVersionZero(t *testing.T) {
 	s, err := schemagate.Read(t.Context(), errQuerier{fmt.Errorf("wrapped: %w", &pgconn.PgError{Code: "42P01", Message: "some other wording"})})
