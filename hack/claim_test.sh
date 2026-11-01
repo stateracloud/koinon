@@ -351,7 +351,8 @@ sess M
 # generated per-worktree holder: no session env, two worktrees do not share an id
 holder_a=$(env -u KOINON_AGENT_SESSION -u CLAUDE_CODE_SESSION_ID bash -c 'CLAIM_LIB_ONLY=1; source "$1"; my_holder' _ "$claim")
 # shellcheck disable=SC2016
-holder_b=$(cd "$(mktemp -d)" && git init -q . && env -u KOINON_AGENT_SESSION -u CLAUDE_CODE_SESSION_ID bash -c 'CLAIM_LIB_ONLY=1; source "$1"; my_holder' _ "$claim")
+holder_b_dir=$(mktemp -d)
+holder_b=$(cd "$holder_b_dir" && git init -q . && env -u KOINON_AGENT_SESSION -u CLAUDE_CODE_SESSION_ID bash -c 'CLAIM_LIB_ONLY=1; source "$1"; my_holder' _ "$claim")
 if [[ -n $holder_a && $holder_a != "$holder_b" ]]; then ok "holders differ per git dir"; else bad "holders differ per git dir ($holder_a / $holder_b)"; fi
 
 # sweeper: an expired claim with no PR is released after lease + grace + release window

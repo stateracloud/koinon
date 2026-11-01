@@ -6,7 +6,11 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-tmp=$(cd "$(mktemp -d)" && pwd -P)
+# mktemp on its own line so set -e sees its failure. Never put it inside a cd: with an empty result
+# `cd ""` stays in the caller's directory and the trap below would delete that directory (#476).
+tmp=$(mktemp -d)
+tmp=$(cd "$tmp" && pwd -P)
+[[ -n $tmp && -d $tmp && $tmp != "$PWD" && $tmp != "$repo" ]] || exit 1
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export PATH="$tmp/bin:$PATH" FAKE_PRS="$tmp/prs" KOINON_WT_ROOT="$tmp/kw"
