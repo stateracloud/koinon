@@ -128,8 +128,11 @@ func SupervisorImage(toml string) string {
 //     cannot give sandbox pods a pull secret itself (ADR 0061);
 //   - that the supervisor image the gateway starts is one sandboxPolicy.supervisorImages admits.
 //
-// It reads one ConfigMap and only warns: an environment variable on the gateway can override the
-// file, and a ConfigMap that cannot be read says nothing about the gateway.
+// It reads one ConfigMap. Its findings only warn: an environment variable on the gateway can override
+// the file. A ConfigMap that cannot be read fails when the chart configures a supervisor image
+// (sandboxPolicy.supervisorImages): the reconciler reads the same ConfigMap to put the supervisor image
+// in the sandbox spec hash (ADR 0085, #410), so it would not recreate sandboxes after an OpenShell
+// upgrade (#489). Without a supervisor image it warns, since it says nothing about the gateway.
 func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 	wantSecrets := c.Config.ExpectSandboxPullSecrets
 	wantSupervisor := len(c.Config.SupervisorImages) > 0
@@ -149,8 +152,12 @@ func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 		cause = fmt.Sprintf("ConfigMap %s/%s has no %s", ns, name, gatewayConfigKey)
 	}
 	if cause != "" {
+		status := Warn
+		if wantSupervisor {
+			status = Fail
+		}
 		return []Result{{
-			Check: checkGatewayConfig, Status: Warn,
+			Check: checkGatewayConfig, Status: status,
 			Message: cause + ", so the gateway's sandbox pull secrets, supervisor image and gateway ID are not checked, " +
 				"and the reconciler cannot see an OpenShell upgrade: sandboxes are not recreated for a new supervisor image",
 			Fix: "set preflight.openshell.namespace and .configMap to the OpenShell release's gateway ConfigMap " +
