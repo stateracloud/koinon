@@ -31,7 +31,7 @@ Instructions for coding agents working on Koinon.
   push, PR, board, optional auto-merge and `claim.sh review`). Wait on a PR with `hack/pr-wait.sh`
   (in the background); read why CI failed with `hack/ci-fail.sh <PR>`. Worktrees: `hack/wt.sh`.
 - Migrations: `hack/migrate-lint.sh origin/main` (merged migrations unchanged, numbers contiguous;
-  against a `release/*` base also the patch-line rule under Conventions);
+  also the patch-line rule under Conventions, from the `hack/migrate-patch-line` marker);
   after merging main, `hack/migrate-renumber.sh` renumbers your branch's migrations.
 - Testing layers. Every PR: unit and package tests, the smoke test and the scenarios (`make test`
   and CI). The kind e2e (`test/e2e`, ~15-25 min) is not per PR: it runs on a PR only when the PR
@@ -144,12 +144,13 @@ Two humans' agents change the same tree. Before you start, after `take`:
   `internal/project`; never hard-code them elsewhere in Go.
 - Migrations are forward-only goose files `internal/db/migrations/NNNNN_name.sql`. Never edit a
   merged migration. Tables owned by an org are keyed by `(org_id, id)` with composite foreign keys.
-- **Patch-line migrations (ADR 0085).** Within a minor line (v0.1.x) the old and the new binaries
-  share the schema, so a migration that lands on a `release/vX.Y` branch (a patch release) only
-  expands: no `RENAME`, `DROP COLUMN`, `DROP TABLE`, `DROP TYPE` and no column type change. Add the
-  new column or table, keep the old one working (see `00014` and `00036` for the pattern), and
-  contract in the next minor. `main` is the next minor line and may contract. `hack/migrate-lint.sh`
-  enforces this when its base ref is `release/*` (CI passes the pull request's base branch).
+- **Patch-line migrations (ADR 0085).** Within a shipped minor line (`hack/migrate-patch-line`
+  names it, e.g. `v0.1`) the old and the new binaries share the schema, so migrations only expand:
+  no `RENAME`, `DROP COLUMN`, `DROP TABLE`, `DROP TYPE` and no column type change. Add the new
+  column or table, keep the old one working (see `00014` and `00036` for the pattern), and contract
+  in the next minor. `main` may contract only while the marker is `none`, i.e. after the change that
+  opens the next minor. `hack/migrate-lint.sh` enforces this from the marker at the merge base, a
+  `release/*` base or `MIGRATE_LINT_PATCH_LINE=1`. When to flip the marker: `docs/dev/releasing.md`.
 - Every source file starts with `SPDX-License-Identifier: Apache-2.0`.
 - Tests: Ginkgo/Gomega and testcontainers-go in Go, Vitest in `web/`. CI never calls paid models:
   use the fake model server. Fake secrets in tests are obviously fake and low-entropy
