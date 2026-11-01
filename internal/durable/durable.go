@@ -20,6 +20,7 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Schema is the Postgres schema that holds the DBOS system tables.
@@ -47,6 +48,10 @@ func Migrate(ctx context.Context, dsn string, logger *slog.Logger) error {
 		return fmt.Errorf("connect to grant the DBOS schema: %w", err)
 	}
 	defer func() { _ = conn.Close(ctx) }()
+	// Koinon's own table of executor heartbeats lives beside DBOS's (ADR 0085, decision 11).
+	if _, err := conn.Exec(ctx, executorsDDL()); err != nil {
+		return fmt.Errorf("create the executor heartbeat table: %w", err)
+	}
 	var exists bool
 	if err := conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, AppRole).Scan(&exists); err != nil {
 		return fmt.Errorf("look up role %s: %w", AppRole, err)
@@ -94,8 +99,19 @@ type Config struct {
 	// DefaultCarryOverInterval and a negative value turns the periodic sweep off (the one at Launch
 	// still runs).
 	CarryOverInterval time.Duration
-	// ExecutorID names this process to DBOS; empty lets DBOS choose.
+	// ExecutorID names this process to DBOS and in the heartbeat table: koinon-api passes its pod
+	// name (ADR 0085). Empty lets DBOS choose (DBOS__VMID, else "local"), which is only right for
+	// a single process.
 	ExecutorID string
+	// HeartbeatInterval is the time between executor heartbeats; zero is DefaultHeartbeatInterval
+	// and a negative value stops the beat after the first one (tests).
+	HeartbeatInterval time.Duration
+	// ExecutorStaleAfter is how old a heartbeat must be for the executor to count as dead; zero is
+	// DefaultStaleAfter.
+	ExecutorStaleAfter time.Duration
+	// RecoveryInterval is the time between passes of the dead-executor recovery job; zero is
+	// DefaultRecoveryInterval and a negative value turns the periodic pass off.
+	RecoveryInterval time.Duration
 	// SchedulerPollingInterval is how often DBOS picks up created or changed schedules; zero is
 	// DBOS's default of 30 seconds.
 	SchedulerPollingInterval time.Duration
@@ -114,7 +130,8 @@ type Runtime struct {
 	mu      sync.Mutex
 	dctx    dbos.Context
 	stopped bool
-	cancel  context.CancelFunc // ends the carry-over loop
+	cancel  context.CancelFunc // ends the carry-over, heartbeat and recovery loops
+	pool    *pgxpool.Pool      // the heartbeat and recovery job's own connections
 	loop    sync.WaitGroup
 }
 
@@ -151,6 +168,10 @@ func (r *Runtime) Launch(ctx context.Context) error {
 	r.mu.Lock()
 	r.cancel = cancel
 	r.mu.Unlock()
+	if err := r.startExecutorLoops(loopCtx); err != nil {
+		_ = r.Shutdown(time.Second)
+		return err
+	}
 	r.sweep(loopCtx)
 	if iv := r.cfg.CarryOverInterval; iv >= 0 {
 		if iv == 0 {
@@ -221,13 +242,16 @@ func (r *Runtime) ApplySchedules(specs ...dbos.ScheduleSpec) error {
 func (r *Runtime) Shutdown(timeout time.Duration) error {
 	r.mu.Lock()
 	r.stopped = true
-	dctx, cancel := r.dctx, r.cancel
-	r.dctx, r.cancel = nil, nil
+	dctx, cancel, pool := r.dctx, r.cancel, r.pool
+	r.dctx, r.cancel, r.pool = nil, nil, nil
 	r.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	r.loop.Wait() // a sweep in flight reads Context, so the lock is not held here
+	if pool != nil {
+		pool.Close()
+	}
 	if dctx == nil {
 		return nil
 	}

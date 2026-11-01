@@ -220,11 +220,13 @@ file on 2026-10-26):
 - ~~DBOS's system tables: a separate schema or a separate database in the same cluster, and which
   Koinon processes run DBOS workers.~~ Answered by the 2026-10-26 (DB1) amendment: schema `dbos`,
   workers in `koinon-api` only.
-- DBOS executor identity and upgrades (prerequisite for TR2/TK4, before any workflow is registered):
+- ~~DBOS executor identity and upgrades (prerequisite for TR2/TK4, before any workflow is registered):
   DBOS recovers pending workflows for its own executor ID on Launch, and the API leaves the ID at
   the default `local`, so with `api.replicas` > 1 or a surge during a rolling update a new pod
   re-runs workflows another live pod is still running. Each replica needs a unique, stable executor
-  ID (for example the pod name) or the durable runtime must stay at one replica.
+  ID (for example the pod name) or the durable runtime must stay at one replica.~~
+  Answered by ADR 0085 (#413): the executor ID is the pod name (downward API), and a leader recovers
+  the workflows of executors whose heartbeat went stale.
 - ~~`ApplicationVersion` is the release version, so workflows left pending by the previous release
   (a long durable timer) are not recovered after an upgrade; decide how they are carried over.~~
   Answered by ADR 0085, decision 11 (#412): a fixed `durable.WorkflowVersion`, bumped only when a
