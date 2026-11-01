@@ -63,7 +63,14 @@ var _ = Describe("koinon-agentd's startup", func() {
 					args = append(args, "--"+f+"=x:1")
 				}
 			}
-			Expect(cli.Check(NewRootCommand(), args, nil)).To(MatchError(ContainSubstring(`"`+missing+`"`)), missing)
+			Expect(cli.Check(NewRootCommand(), args, nil)).To(MatchError(ContainSubstring("--"+missing)), missing)
+		}
+	})
+
+	It("refuses an empty required setting from any source", func() {
+		for env, flag := range map[string]string{"KOINON_DATABASE_URL": "database-url", "KOINON_OPENSHELL_ADDRESS": "openshell-address", "KOINON_GATEWAY_URL": "gateway-url"} {
+			Expect(start(map[string]string{env: ""})).To(MatchError(ContainSubstring("--"+flag+" is required")), env)
+			Expect(start(nil, "--"+flag+"=")).To(MatchError(ContainSubstring("--"+flag+" is required")), flag)
 		}
 	})
 

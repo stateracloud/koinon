@@ -80,6 +80,11 @@ func Check(root *cobra.Command, args []string, env map[string]string) (err error
 	}
 
 	neutralize(root)
+	// nil would make cobra read os.Args, which carry the test runner's own flags (a container with no
+	// args, like koinon-agentd's, renders as nil).
+	if args == nil {
+		args = []string{}
+	}
 	root.SetArgs(args)
 	root.SetOut(discard{})
 	root.SetErr(discard{})
