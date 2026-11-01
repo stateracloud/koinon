@@ -83,7 +83,7 @@ var _ = Describe("Sandbox image checks", func() {
 		Expect(r.Message).To(ContainSubstring("does not set supervisor_image"))
 	})
 
-	DescribeTable("warns once, without failing, when the gateway ConfigMap cannot be read",
+	DescribeTable("fails once when the gateway ConfigMap cannot be read and a supervisor image is configured (#489)",
 		func(ctx SpecContext, cm *corev1.ConfigMap, forbid string) {
 			c := withConfig(cm, func(c *preflight.Config) {
 				c.ExpectSandboxPullSecrets = true
@@ -92,9 +92,24 @@ var _ = Describe("Sandbox image checks", func() {
 			c.forbid = forbid
 			results := c.run(ctx)
 			r := find(results, "OpenShell gateway configuration")
-			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Status).To(Equal(preflight.Fail))
 			Expect(r.Fix).To(ContainSubstring("preflight.openshell"))
 			Expect(checks(results)).NotTo(ContainElements("Sandbox image pull secrets", "Sandbox supervisor image"))
+			Expect(preflight.Write(&discard{}, results)).NotTo(BeZero())
+		},
+		Entry("not found", nil, ""),
+		Entry("forbidden", openshellConfig(""), "configmaps"),
+		Entry("no gateway.toml", &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "openshell-config", Namespace: "openshell"}}, ""),
+	)
+
+	DescribeTable("warns once, without failing, when the gateway ConfigMap cannot be read and no supervisor image is configured",
+		func(ctx SpecContext, cm *corev1.ConfigMap, forbid string) {
+			c := withConfig(cm, func(c *preflight.Config) { c.ExpectSandboxPullSecrets = true })
+			c.forbid = forbid
+			results := c.run(ctx)
+			r := find(results, "OpenShell gateway configuration")
+			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Fix).To(ContainSubstring("preflight.openshell"))
 			Expect(preflight.Write(&discard{}, results)).To(BeZero())
 		},
 		Entry("not found", nil, ""),
