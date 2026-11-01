@@ -138,6 +138,14 @@ jobs:
       # Postgres tests use testcontainers; Docker is available on ubuntu runners.
       # test/flavors needs the flavor images, which the flavors job builds and tests.
       - run: hack/go-test.sh
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: go-test-reports
+          path: reports/go/*.xml
+          if-no-files-found: warn
+          retention-days: 30
 
   go-race:
     needs: changes
@@ -160,7 +168,15 @@ jobs:
           restore-keys: |
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       # The reconciler runs per-sandbox jobs concurrently (LT1); keep its state guarded.
-      - run: go test -race -count=1 ./internal/reconciler/
+      - run: go tool gotestsum --junitfile reports/go/go-race.xml --format pkgname -- -race -count=1 ./internal/reconciler/
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: go-race-reports
+          path: reports/go/*.xml
+          if-no-files-found: warn
+          retention-days: 30
 
   # The required check `go`: green when every Go job above is green, or when the change touches no
   # Go (then the parts are skipped and `changes` says so). A skipped part of a Go change is a
