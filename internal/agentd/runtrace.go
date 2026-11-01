@@ -30,6 +30,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/stateracloud/koinon/internal/acp"
+	"github.com/stateracloud/koinon/internal/agentd/turnpolicy"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/tracedest"
@@ -296,12 +297,31 @@ func (t *runTrace) noteTurnReason(reason string) {
 	}
 }
 
+// reason is how the last prompt ended, for an ending: the policy's outcome when it ended the turns,
+// else the error.
+func (e ending) reason() string {
+	if t := e.res; t != nil {
+		switch t.out.Kind {
+		case turnpolicy.OutCapReached:
+			return "canceled"
+		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded:
+			return "failed"
+		case turnpolicy.OutFenced:
+			return "fenced"
+		case turnpolicy.OutShutdown:
+			return "shutdown"
+		}
+		return turnReason(t.err) // OutFailed, OutPassthrough
+	}
+	return turnReason(e.err)
+}
+
 func turnReason(err error) string {
 	var f *failure
 	var c *canceled
 	var ref *refused
 	switch {
-	case err == nil, errors.Is(err, errEndTurn):
+	case err == nil:
 		return "end_turn"
 	case errors.As(err, &ref):
 		return "refused"
@@ -344,12 +364,33 @@ func (t *runTrace) openRow() (pgtype.UUID, bool) {
 }
 
 // endFor is how a turn ends for the run's outcome (decision 3: koinon.outcome and koinon.failure_class
-// on the last turn). err is what execute returned, fk why the worker was fenced, if it was, and
+// on the last turn). e is how execute ended, fk why the worker was fenced, if it was, and
 // parkedOn the park endTurn made.
-func endFor(err error, fk fence, parkedOn string) *turnEnd {
+func endFor(e ending, fk fence, parkedOn string) *turnEnd {
 	var f *failure
 	var c *canceled
-	end := &turnEnd{reason: turnReason(err)}
+	end := &turnEnd{reason: e.reason()}
+	err := e.err
+	if t := e.res; t != nil {
+		switch t.out.Kind {
+		case turnpolicy.OutCapReached:
+			end.outcome = string(store.RunStateCanceled)
+			return end
+		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded:
+			_, class, _ := t.fails()
+			end.outcome, end.class = string(store.RunStateFailed), string(cmp.Or(class, classFatal))
+			return end
+		case turnpolicy.OutFenced:
+			if fk == fenceCanceled {
+				// The control plane canceled the run (a person, the budget, a cap).
+				end.reason, end.outcome = "canceled", string(store.RunStateCanceled)
+			}
+			return end
+		case turnpolicy.OutShutdown:
+			return end
+		}
+		err = t.err // OutFailed, OutPassthrough
+	}
 	switch {
 	case err == nil && parkedOn != "":
 		end.reason, end.park = "park:"+parkedOn, parkedOn
@@ -369,7 +410,7 @@ func endFor(err error, fk fence, parkedOn string) *turnEnd {
 // turnRow is the open turn row and why it ends with the run, for the run's owner to end it with the
 // ending verb (internal/runoutcome). A worker that lost the run or gave it up gets none: the new owner
 // ends the row.
-func (t *runTrace) turnRow(err error, fk fence) runoutcome.Turn {
+func (t *runTrace) turnRow(e ending, fk fence) runoutcome.Turn {
 	if t == nil || fk == fenceLost || fk == fenceAbandon {
 		return runoutcome.Turn{}
 	}
@@ -378,12 +419,12 @@ func (t *runTrace) turnRow(err error, fk fence) runoutcome.Turn {
 	if t.turn == nil {
 		return runoutcome.Turn{}
 	}
-	return runoutcome.Turn{ID: t.turn.row.ID, Reason: endFor(err, fk, t.parkedOn).reason}
+	return runoutcome.Turn{ID: t.turn.row.ID, Reason: endFor(e, fk, t.parkedOn).reason}
 }
 
 // finish ends the spans of the last turn of this execution with the run's outcome. The turn's row
 // is the run owner's to end.
-func (t *runTrace) finish(ctx context.Context, err error, fk fence) {
+func (t *runTrace) finish(ctx context.Context, e ending, fk fence) {
 	if t == nil {
 		return
 	}
@@ -394,7 +435,7 @@ func (t *runTrace) finish(ctx context.Context, err error, fk fence) {
 	if tt == nil {
 		return
 	}
-	t.closeTurn(ctx, tt, endFor(err, fk, parkedOn), false)
+	t.closeTurn(ctx, tt, endFor(e, fk, parkedOn), false)
 }
 
 type turnEnd struct {

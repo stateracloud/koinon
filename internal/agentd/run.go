@@ -20,6 +20,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/agentd/turnpolicy"
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
@@ -39,9 +40,6 @@ var (
 	errDropped = errors.New("harness connection lost")
 	// errShutdown: the pool is stopping.
 	errShutdown = errors.New("shutting down")
-	// errEndTurn: the turn ended with end_turn; execute closes the harness and sweeps before
-	// it ends the run.
-	errEndTurn = errors.New("the turn ended")
 )
 
 // failure fails the run with a reason.
@@ -122,6 +120,9 @@ type runner struct {
 	// own writes the run's events and ends it (internal/runoutcome): the source seq, the write
 	// mutex and the fence state live there.
 	own *runoutcome.Owner
+	// res is how the turns ended, when execute got as far as the turn and the policy ended it with
+	// anything but end_turn. The run's ending is then res, not an error.
+	res *turnResult
 	// turnState is the run's phase for a draining pool (turnSetup, turnRunning, turnHandedOff).
 	turnState atomic.Int32
 
@@ -271,9 +272,10 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	// The turn's row ends with the run's ending, inside the transaction of the verb that ends it
 	// (internal/runoutcome), so whoever sees the run finished sees the turn ended. The trace's spans
 	// end first only so that they are exported promptly.
-	turn := r.tr.turnRow(err, r.own.FenceKind())
-	r.tr.finish(ctx, err, r.own.FenceKind())
-	r.conclude(ctx, err, turn)
+	end := ending{err: err, res: r.res}
+	turn := r.tr.turnRow(end, r.own.FenceKind())
+	r.tr.finish(ctx, end, r.own.FenceKind())
+	r.conclude(ctx, end, turn)
 }
 
 // heartbeat renews the lease until ctx ends. A heartbeat that matches no rows means the run
@@ -676,9 +678,14 @@ func (r *runner) execute(ctx context.Context) error {
 	if !r.turnState.CompareAndSwap(turnSetup, turnRunning) {
 		return errShutdown // the pool began to stop first
 	}
-	err = r.turnWithRetry(ctx, fctx, conn, proc, &stderr, session, text)
-	if !errors.Is(err, errEndTurn) {
+	res, err := r.turnWithRetry(ctx, fctx, conn, proc, &stderr, session, text)
+	if err != nil {
 		return err
+	}
+	if res.out.Kind != turnpolicy.OutEndTurn {
+		// The run ends with the policy's outcome, which conclude carries out.
+		r.res = res
+		return nil
 	}
 	// The agent's note for the task, before the harness is let go.
 	r.summarize(ctx, conn, session)
@@ -917,9 +924,36 @@ func assemblePrompt(mode promptMode, title, notice string, msgs []string, outcom
 	return strings.Join(parts, "\n\n")
 }
 
+// ending is how execute ended: res when the turn controller ended the turns with anything but
+// end_turn, otherwise err (nil: the run succeeded or parked). A setup-phase failure, a dropped
+// connection and the like are errors; the turn's outcome is never turned back into one.
+type ending struct {
+	err error
+	res *turnResult
+}
+
 // conclude maps how execute ended onto the verbs of the run's owner (internal/runoutcome). turn is
 // the run's open turn row, which the verbs end with the run.
-func (r *runner) conclude(ctx context.Context, err error, turn runoutcome.Turn) {
+func (r *runner) conclude(ctx context.Context, e ending, turn runoutcome.Turn) {
+	err := e.err
+	if t := e.res; t != nil {
+		switch t.out.Kind {
+		case turnpolicy.OutCapReached:
+			r.cancel(ctx, turn, t.capNote, "", nil, true)
+			return
+		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded:
+			reason, class, _ := t.fails()
+			r.fail(ctx, turn, reason, class)
+			return
+		case turnpolicy.OutFenced:
+			r.concludeFenced(ctx, turn)
+			return
+		case turnpolicy.OutShutdown:
+			r.concludeShutdown(ctx, turn)
+			return
+		}
+		err = t.err // OutFailed, OutPassthrough: the driver's classified error of the last prompt
+	}
 	var f *failure
 	var c *canceled
 	var rq *requeued
@@ -928,7 +962,6 @@ func (r *runner) conclude(ctx context.Context, err error, turn runoutcome.Turn) 
 	case errors.As(err, &rq):
 		if rerr := r.own.Requeue(ctx, turn, rq.reason); errors.Is(rerr, errFenced) {
 			r.log.Warn("the run could not be requeued: it was taken over, canceled or is no longer starting", "state", r.run.State, "reason", rq.reason)
-			r.own.FenceFromDB(ctx)
 		} else if rerr != nil {
 			r.log.Warn("requeueing the run failed; its lease expires and a worker takes it over", "reason", rq.reason, "err", rerr)
 		}
@@ -940,50 +973,69 @@ func (r *runner) conclude(ctx context.Context, err error, turn runoutcome.Turn) 
 			r.log.Warn("failing the run failed", "reason", f.reason, "err", ferr)
 		}
 	case errors.As(err, &f):
-		if ferr := r.own.Fail(ctx, turn, f.reason, cmp.Or(f.class, classFatal)); ferr != nil {
-			r.log.Warn("failing the run failed", "reason", f.reason, "err", ferr)
-		}
+		r.fail(ctx, turn, f.reason, f.class)
 	case errors.As(err, &c):
-		extra := c.extra
-		if c.timeLimit {
-			// The note of a run stopped at its time limit: what the agent last said (or its notes),
-			// the same payload the api's sweep writes. A failure to read it leaves the summary out.
-			note, nerr := runreply.TimeLimitNote(ctx, r.q, r.run)
-			if nerr != nil {
-				r.log.Warn("reading the agent's last reply for the time-limit note failed", "err", nerr)
-			}
-			for k, v := range c.extra {
-				note[k] = v
-			}
-			extra = note
-		}
-		if ferr := r.own.Cancel(ctx, turn, c.reason, c.class, extra); ferr != nil {
-			r.log.Warn("canceling the run failed", "reason", c.reason, "err", ferr)
-		} else if c.timeLimit {
-			r.p.cfg.Metrics.TimeLimitStops.Inc()
-		}
+		r.cancel(ctx, turn, c.reason, c.class, c.extra, c.timeLimit)
 	case errors.Is(err, errFenced):
-		switch r.own.FenceKind() {
-		case fenceCanceled:
-			r.log.Info("run canceled")
-			r.own.CloseTurn(ctx, turn)
-		case fenceAbandon:
-			r.log.Warn("giving the run up")
-			r.own.Release(ctx, turn)
-		default:
-			r.log.Info("run taken over or finished elsewhere")
-		}
+		r.concludeFenced(ctx, turn)
 	case errors.Is(err, errDropped):
 		r.own.Release(ctx, turn)
 	case errors.Is(err, errShutdown):
-		if r.p.cfg.KeepLeaseOnShutdown {
-			r.own.CloseTurn(ctx, turn)
-		} else {
-			r.own.Release(context.WithoutCancel(ctx), turn)
-		}
+		r.concludeShutdown(ctx, turn)
 	default:
 		r.log.Warn("driving the run failed", "err", err)
 		r.own.Release(ctx, turn)
+	}
+}
+
+// fail fails the run; an empty class is fatal.
+func (r *runner) fail(ctx context.Context, turn runoutcome.Turn, reason string, class store.RunFailureClass) {
+	if ferr := r.own.Fail(ctx, turn, reason, cmp.Or(class, classFatal)); ferr != nil {
+		r.log.Warn("failing the run failed", "reason", reason, "err", ferr)
+	}
+}
+
+// cancel cancels the run as its owner. A run stopped at its time limit carries the note of what the
+// agent last said (or its notes), the same payload the api's sweep writes.
+func (r *runner) cancel(ctx context.Context, turn runoutcome.Turn, reason string, class store.RunFailureClass, extra map[string]any, timeLimit bool) {
+	if timeLimit {
+		// A failure to read the note leaves the summary out.
+		note, nerr := runreply.TimeLimitNote(ctx, r.q, r.run)
+		if nerr != nil {
+			r.log.Warn("reading the agent's last reply for the time-limit note failed", "err", nerr)
+		}
+		for k, v := range extra {
+			note[k] = v
+		}
+		extra = note
+	}
+	if ferr := r.own.Cancel(ctx, turn, reason, class, extra); ferr != nil {
+		r.log.Warn("canceling the run failed", "reason", reason, "err", ferr)
+	} else if timeLimit {
+		r.p.cfg.Metrics.TimeLimitStops.Inc()
+	}
+}
+
+// concludeFenced ends a worker that may no longer write the run.
+func (r *runner) concludeFenced(ctx context.Context, turn runoutcome.Turn) {
+	switch r.own.FenceKind() {
+	case fenceCanceled:
+		r.log.Info("run canceled")
+		r.own.CloseTurn(ctx, turn)
+	case fenceAbandon:
+		r.log.Warn("giving the run up")
+		r.own.Release(ctx, turn)
+	default:
+		r.log.Info("run taken over or finished elsewhere")
+	}
+}
+
+// concludeShutdown ends a worker whose pool is stopping.
+func (r *runner) concludeShutdown(ctx context.Context, turn runoutcome.Turn) {
+	if r.p.cfg.KeepLeaseOnShutdown {
+		r.own.CloseTurn(ctx, turn)
+	} else {
+		r.own.Release(context.WithoutCancel(ctx), turn)
 	}
 }
 
