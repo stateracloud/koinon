@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-package main
+package koinonreconciler
 
 import (
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
@@ -56,6 +59,29 @@ bootstrapAdmin:
   enabled: true
 `
 
+// parseConfig runs koinon-reconciler's real startup (flags, KOINON_* environment, config file, defaults
+// and rules) and returns the settings serve would get. The process environment is cleared of every
+// variable the command reads, then set to env.
+func parseConfig(args []string, env map[string]string) (config, error) {
+	var got config
+	root := newRootCommand(func(_ context.Context, c config) error { got = c; return nil })
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(name, cli.EnvPrefix) || name == "DATABASE_URL" || name == "POD_NAMESPACE" {
+			old := os.Getenv(name)
+			Expect(os.Unsetenv(name)).To(Succeed())
+			DeferCleanup(func() { _ = os.Setenv(name, old) })
+		}
+	}
+	for k, v := range env {
+		GinkgoT().Setenv(k, v)
+	}
+	root.SetArgs(cli.DefaultSubcommand(root, args))
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	return got, root.Execute()
+}
+
 func TestReconcilerCommand(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "koinon-reconciler Suite")
@@ -68,7 +94,7 @@ var _ = Describe("parseConfig for the sandbox observer", func() {
 		env := map[string]string{
 			"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k",
 		}
-		return parseConfig(args, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+		return parseConfig(args, env)
 	}
 
 	It("is off and uses OpenShell's default gateway ID when the chart does not set them", func() {
@@ -106,7 +132,7 @@ var _ = Describe("parseConfig for the sandbox observer", func() {
 			"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k",
 			"KOINON_SANDBOX_OBSERVER": "false",
 		}
-		c, err := parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+		c, err := parseConfig(nil, env)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(c.sandboxObserver).To(BeFalse())
 	})
@@ -134,7 +160,7 @@ var _ = Describe("parseConfig", func() {
 			"KOINON_IDLE_TIMEOUT": "15m", // flags and env override the file
 			"KOINON_KEK_DIR":      "/secrets/kek",
 		}
-		c, err := parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+		c, err := parseConfig(nil, env)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(c.idleTimeout).To(Equal(15 * time.Minute))
 		Expect(c.resyncInterval).To(Equal(30 * time.Second))
@@ -188,7 +214,7 @@ openshell:
 		env := map[string]string{
 			"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k",
 		}
-		c, err := parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+		c, err := parseConfig(nil, env)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(c.gatewayMode).To(Equal(project.GatewayKubernetes))
 		Expect(c.gatewayName).To(Equal("koinon-gateway"))
@@ -200,7 +226,7 @@ openshell:
 		delete(env, "KOINON_CONFIG")
 		env["KOINON_GATEWAY_MODE"], env["KOINON_GATEWAY_URL"] = "kubernetes", "http://g:4000"
 		env["KOINON_OPENSHELL_ADDRESS"], env["KOINON_PROVIDER_KEYS_SECRET"], env["KOINON_PROVIDER_KEYS_DIR"] = "o:1", "s", "/d"
-		_, err = parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+		_, err = parseConfig(nil, env)
 		Expect(err).To(MatchError(ContainSubstring("--gateway-name is required in kubernetes mode")))
 	})
 
@@ -220,7 +246,7 @@ openshell:
 			return env
 		}
 		parse := func(env map[string]string, args ...string) config {
-			c, err := parseConfig(args, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+			c, err := parseConfig(args, env)
 			Expect(err).NotTo(HaveOccurred())
 			return c
 		}
@@ -230,7 +256,7 @@ openshell:
 	})
 
 	It("requires the database, namespace, OpenShell and gateway settings", func() {
-		_, err := parseConfig(nil, func(string) (string, bool) { return "", false })
+		_, err := parseConfig(nil, nil)
 		Expect(err).To(HaveOccurred())
 	})
 })
@@ -242,7 +268,7 @@ var _ = Describe("parseConfig for the sandbox resources", func() {
 		env := map[string]string{
 			"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k",
 		}
-		return parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+		return parseConfig(nil, env)
 	}
 
 	It("uses the built-in policy when the file has no sandboxResources", func() {
@@ -283,4 +309,84 @@ sandboxResources:
 		Entry("a minimum above the maximum", "sandboxResources:\n  bounds:\n    memory:\n      limit: {min: 16Gi}\n", "bounds.memoryLimit: min 16Gi is greater than max 8Gi"),
 		Entry("a default request above its limit", "sandboxResources:\n  default:\n    cpu: {request: 4}\n", "cpu.request 4 is greater than cpu.limit 2"),
 	)
+})
+
+var _ = Describe("koinon-reconciler's settings", func() {
+	write := func(file string) string {
+		path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
+		Expect(os.WriteFile(path, []byte(file), 0o600)).To(Succeed())
+		return path
+	}
+	base := func(path string) map[string]string {
+		return map[string]string{"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k"}
+	}
+
+	It("takes a setting from the flag, then the environment, then the file, then the default", func() {
+		env := base(write(chartConfig))
+		c, err := parseConfig(nil, env)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.idleTimeout).To(Equal(10*time.Minute), "the file")
+		Expect(c.healthAddr).To(Equal(":8082"), "the default")
+
+		env["KOINON_IDLE_TIMEOUT"] = "15m"
+		c, err = parseConfig(nil, env)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.idleTimeout).To(Equal(15*time.Minute), "the environment beats the file")
+
+		c, err = parseConfig([]string{"--idle-timeout=20m"}, env)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.idleTimeout).To(Equal(20*time.Minute), "the flag beats the environment")
+	})
+
+	It("takes the config file from --config as well as KOINON_CONFIG", func() {
+		env := base("")
+		delete(env, "KOINON_CONFIG")
+		c, err := parseConfig([]string{"--config", write(chartConfig)}, env)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.openshellAddress).To(Equal("openshell.openshell.svc:8080"))
+	})
+
+	It("leaves a flag's default where the file has an empty value, as the chart renders an unset one", func() {
+		env := base(write(strings.Replace(chartConfig, "  gatewayId: prod\n", "  gatewayId: \"\"\n", 1)))
+		c, err := parseConfig(nil, env)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.openshellGateway).To(Equal("openshell"))
+	})
+
+	It("names the unreadable config file and the key whose value does not parse", func() {
+		env := base(filepath.Join(GinkgoT().TempDir(), "missing.yaml"))
+		_, err := parseConfig(nil, env)
+		Expect(err).To(MatchError(ContainSubstring("read config")))
+
+		_, err = parseConfig(nil, base(write(strings.Replace(chartConfig, "idleTimeout: 10m", "idleTimeout: soon", 1))))
+		Expect(err).To(MatchError(ContainSubstring("config key reconciler.idleTimeout")))
+	})
+
+	DescribeTable("refuses to start without",
+		func(drop string) {
+			env := base(write(chartConfig))
+			delete(env, drop)
+			if drop == "KOINON_CONFIG" {
+				env["KOINON_KEK_DIR"] = "/k"
+			}
+			_, err := parseConfig(nil, env)
+			Expect(err).To(HaveOccurred())
+		},
+		Entry("the database URL", "DATABASE_URL"),
+		Entry("the namespace", "POD_NAMESPACE"),
+		Entry("the KEK directory (3151301a)", "KOINON_KEK_DIR"),
+		Entry("the config file, which holds the OpenShell and gateway settings", "KOINON_CONFIG"),
+	)
+
+	It("names every missing required setting", func() {
+		_, err := parseConfig(nil, nil)
+		Expect(err).To(MatchError(And(ContainSubstring("database-url"), ContainSubstring("kek-dir"), ContainSubstring("gateway-url"))))
+	})
+
+	It("refuses an unknown flag and an environment variable nothing reads", func() {
+		_, err := parseConfig([]string{"--no-such-flag"}, base(write(chartConfig)))
+		Expect(err).To(MatchError(ContainSubstring("unknown flag")))
+		err = cli.Check(NewRootCommand(), nil, map[string]string{"KOINON_NO_SUCH": "1"})
+		Expect(err).To(MatchError(ContainSubstring("KOINON_NO_SUCH")))
+	})
 })
