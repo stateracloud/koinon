@@ -471,6 +471,11 @@ func (r *runner) execute(ctx context.Context) error {
 	if err := r.waitModel(fctx, model); err != nil {
 		return r.execErr(ctx, "wait for the model", err)
 	}
+	// An allowed MCP server that is not serving tools is recorded, retried once and then fails the
+	// run (mcpwait.go, issue #326).
+	if err := r.waitMCPServers(fctx); err != nil {
+		return r.execErr(ctx, "check the agent's MCP servers", err)
+	}
 	sb, err := r.waitSandbox(fctx)
 	if err != nil {
 		return r.execErr(ctx, "sandbox", err)
