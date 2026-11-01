@@ -78,11 +78,39 @@ patch_line() {
   [[ $base == release/* || $base == */release/* ]]
 }
 
+# Remove "--" line comments and "/* */" block comments (also multi-line) outside single-quoted
+# strings ('' is an escaped quote). Portable awk: no gawk-only features.
+strip_sql_comments() {
+  awk '
+    BEGIN { q = sprintf("%c", 39); inq = 0; inb = 0 }
+    {
+      out = ""; n = length($0); i = 1
+      while (i <= n) {
+        c = substr($0, i, 1); d = substr($0, i, 2)
+        if (inb) {
+          if (d == "*/") { inb = 0; i += 2 } else i++
+        } else if (inq) {
+          out = out c
+          if (c == q) inq = 0
+          i++
+        } else if (d == "--") {
+          break
+        } else if (d == "/*") {
+          inb = 1; out = out " "; i += 2
+        } else {
+          if (c == q) inq = 1
+          out = out c; i++
+        }
+      }
+      print out
+    }' "$1"
+}
+
 if [[ -n $base ]] && patch_line; then
   added=$(git diff --name-only --diff-filter=A "$(git merge-base "$base" HEAD)" -- ":(glob)$dir/*.sql" || true)
   for f in $added; do
-    # One statement per record: drop "--" comments, split on ";", collapse whitespace.
-    stmts=$(sed -E 's/--.*$//' "$f" | awk -v RS=';' '{ gsub(/[[:space:]]+/, " "); print }')
+    # One statement per record: drop comments, split on ";", collapse whitespace.
+    stmts=$(strip_sql_comments "$f" | awk -v RS=';' '{ gsub(/[[:space:]]+/, " "); print }')
     hits=$(echo "$stmts" | grep -iE "$contract_re" || true)
     # A DROP in ALTER TABLE that is not one of the safe kinds. A statement may hold several
     # comma-separated actions, so split on commas before looking for the safe kinds.

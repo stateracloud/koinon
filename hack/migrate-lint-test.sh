@@ -70,6 +70,8 @@ patch() { # patch <branch> <migration body> <description> <exit code>
 }
 patch p-ok 'ALTER TABLE t ADD COLUMN c int;\nCREATE INDEX i ON t (c);' "adds a column and an index" 0
 patch p-comment '-- we do not DROP COLUMN or RENAME anything here\nALTER TABLE t ADD COLUMN c int;' "mentions a ban only in a comment" 0
+patch p-dashstr "INSERT INTO t VALUES ('a--b'); DROP TABLE x;" "a dash pair inside a string does not hide a later DROP" 1
+patch p-blockcomment '/* we never DROP TABLE\n   or RENAME here */\nALTER TABLE t ADD COLUMN c int; /* DROP COLUMN */' "mentions a ban only in a block comment" 0
 patch p-rename 'ALTER TABLE t RENAME TO u;' "renames a table" 1
 patch p-rename-col 'ALTER TABLE t\n  RENAME COLUMN a TO b;' "renames a column over two lines" 1
 patch p-dropcol 'alter table t drop column a;' "drops a column (lower case)" 1

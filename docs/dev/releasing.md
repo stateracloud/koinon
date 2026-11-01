@@ -54,6 +54,10 @@ with a new digest) and the chart tag is overwritten. Do not move a tag that was 
 Same steps with `vX.Y.Z` after the last rc was exercised (REL2). The final release also moves the
 `latest` image tag and is not marked as a prerelease.
 
+Checklist step for every `vX.Y.0`: after the final tag is published, open a pull request that sets
+`hack/migrate-patch-line` to `vX.Y` (for v0.1.0: `v0.1`). Until it merges, main can still contract
+the schema that the shipped release runs on (ADR 0085).
+
 ## Signing and SBOM attestations
 
 The workflow can sign with cosign keyless and attest the SBOMs, but its `sign` job runs only when
