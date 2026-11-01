@@ -4,7 +4,6 @@ package api_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
 	"io/fs"
@@ -27,9 +26,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/pressly/goose/v3"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/stateracloud/koinon/internal/api"
@@ -40,7 +37,6 @@ import (
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
-	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/mcpservers"
@@ -50,19 +46,15 @@ import (
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/services"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
 )
 
-// PostgresImage is the minimum supported Postgres version (ADR 0047).
-const PostgresImage = "postgres:18-alpine"
-
-const templateDB = "koinon_template"
-
 var (
-	adminDSN string // connects to the server's maintenance database
-	dbSeq    atomic.Int64
+	tmpl  *pgtest.Template
+	dbSeq atomic.Int64
 )
 
 func TestAPI(t *testing.T) {
@@ -74,46 +66,11 @@ func TestAPI(t *testing.T) {
 // BeforeSuite migrates a template database once; every spec gets a fresh
 // copy, so bootstrap state never leaks between specs.
 var _ = BeforeSuite(func(ctx SpecContext) {
-	ctr, err := postgres.Run(ctx, PostgresImage,
-		postgres.WithDatabase(templateDB),
-		postgres.BasicWaitStrategies(),
-	)
-	Expect(err).NotTo(HaveOccurred())
-	DeferCleanup(func(ctx context.Context) error { return ctr.Terminate(ctx) })
-
-	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	Expect(err).NotTo(HaveOccurred())
-	db, err := sql.Open("pgx", dsn)
-	Expect(err).NotTo(HaveOccurred())
-	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
-	Expect(err).NotTo(HaveOccurred())
-	_, err = provider.Up(ctx)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(db.Close()).To(Succeed())
-
-	adminDSN = withDatabase(dsn, "postgres")
+	tmpl = pgtest.StartTemplate(ctx)
 }, NodeTimeout(3*time.Minute))
 
-func withDatabase(dsn, name string) string {
-	u, err := url.Parse(dsn)
-	Expect(err).NotTo(HaveOccurred())
-	u.Path = "/" + name
-	return u.String()
-}
-
 // newPool returns a pool on a fresh copy of the migrated template.
-func newPool(ctx context.Context) *pgxpool.Pool {
-	name := fmt.Sprintf("koinon_%d", dbSeq.Add(1))
-	admin, err := sql.Open("pgx", adminDSN)
-	Expect(err).NotTo(HaveOccurred())
-	defer func() { _ = admin.Close() }()
-	_, err = admin.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE %s TEMPLATE %s", name, templateDB))
-	Expect(err).NotTo(HaveOccurred())
-	pool, err := pgxpool.New(ctx, withDatabase(adminDSN, name))
-	Expect(err).NotTo(HaveOccurred())
-	DeferCleanup(pool.Close)
-	return pool
-}
+func newPool(ctx context.Context) *pgxpool.Pool { return tmpl.NewDB(ctx) }
 
 // clock is a settable time source shared by the API and the test issuer.
 type clock struct {
