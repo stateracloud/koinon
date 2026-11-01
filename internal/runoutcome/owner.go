@@ -160,6 +160,17 @@ func (o *Owner) Err(ctx context.Context, what string, err error) error {
 	return fmt.Errorf("%s: %w", what, err)
 }
 
+// failed is Err for an ending verb whose transaction rolled back, turn row included. Unless another
+// owner took the run over or the worker gave it up, the turn row is ended on its own, best effort, so a
+// run canceled meanwhile does not keep a turn that looks like it is still running.
+func (o *Owner) failed(ctx context.Context, turn Turn, what string, err error) error {
+	err = o.Err(ctx, what, err)
+	if k := o.FenceKind(); k != FenceLost && k != FenceAbandon {
+		o.CloseTurn(ctx, turn)
+	}
+	return err
+}
+
 // Record appends a run event under the next source seq, retrying transient failures. The source seq
 // makes a retry after an ambiguous failure (the insert committed, the reply was lost) a no-op
 // instead of a duplicate. An event that cannot be recorded abandons the run rather than drop it: the
