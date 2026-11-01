@@ -49,7 +49,8 @@ func TestSpecHashCoversTheSupervisorImage(t *testing.T) {
 	if specHash(spec, "supervisor:1") == specHash(spec, "supervisor:2") {
 		t.Error("a new supervisor image does not change the hash")
 	}
-	if specHash(spec, "supervisor:1") != specHash(spec, "supervisor:1") {
+	again := specHash(spec, "supervisor:1")
+	if got := specHash(spec, "supervisor:1"); got != again {
 		t.Error("the hash is not stable")
 	}
 }
@@ -71,13 +72,13 @@ func TestRefreshSupervisorKeepsTheLastImageOnError(t *testing.T) {
 	src := &stubSupervisor{err: errors.New("forbidden")}
 	r := testReconciler(src)
 	r.refreshSupervisor(t.Context())
-	if err := r.supervisorReady(); err == nil {
-		t.Fatal("sandbox work should wait while the supervisor image has never been read")
+	if r.supervisorKnown() {
+		t.Fatal("spec-change recreates should wait while the supervisor image has never been read")
 	}
 	src.image, src.err = "supervisor:1", nil
 	r.refreshSupervisor(t.Context())
-	if err := r.supervisorReady(); err != nil {
-		t.Fatalf("ready after a read: %v", err)
+	if !r.supervisorKnown() {
+		t.Fatal("known after a read")
 	}
 	src.image, src.err = "", errors.New("gone")
 	r.refreshSupervisor(t.Context())
@@ -89,8 +90,8 @@ func TestRefreshSupervisorKeepsTheLastImageOnError(t *testing.T) {
 func TestNoSupervisorSourceIsAlwaysReady(t *testing.T) {
 	r := testReconciler(nil)
 	r.refreshSupervisor(t.Context())
-	if err := r.supervisorReady(); err != nil || r.supervisorImage() != "" {
-		t.Errorf("ready = %v, image = %q", err, r.supervisorImage())
+	if !r.supervisorKnown() || r.supervisorImage() != "" {
+		t.Errorf("known = %v, image = %q", r.supervisorKnown(), r.supervisorImage())
 	}
 }
 

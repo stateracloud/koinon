@@ -395,6 +395,15 @@ var _ = Describe("Reconciler", func() {
 			Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateReady))
 		})
 
+		It("still creates a sandbox when the gateway ConfigMap can never be read", func(ctx SpecContext) {
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			cfg.Supervisor = &fakeSupervisor{err: errors.New("forbidden")}
+			r = newReconciler()
+			Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+			pass(ctx, r)
+			Expect(osg.Sandbox(row.Workspace, names.Sandbox)).NotTo(BeNil())
+		})
+
 		It("records the sandbox's OpenShell ID as its home generation, new for a recreated sandbox", func(ctx SpecContext) {
 			coolDown(ctx, org, agent.ID)
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)

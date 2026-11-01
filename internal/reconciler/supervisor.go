@@ -51,7 +51,7 @@ func (k KubeSupervisorImage) SupervisorImage(ctx context.Context) (string, error
 
 // refreshSupervisor reads the gateway's supervisor image once per pass. A failed read keeps the
 // last image read: dropping it would change every sandbox's spec hash and recreate the fleet.
-// Before the first successful read the image is unknown, and sandbox work waits (supervisorReady).
+// Before the first successful read the image is unknown, and spec-change recreates wait (supervisorKnown).
 func (r *Reconciler) refreshSupervisor(ctx context.Context) {
 	if r.cfg.Supervisor == nil {
 		return
@@ -78,18 +78,17 @@ func (r *Reconciler) supervisorImage() string {
 	return r.supImage
 }
 
-// supervisorReady is an error while a source is configured and no read has succeeded yet: the spec
-// hash cannot be computed, and a hash without the image would recreate every sandbox once it is known.
-func (r *Reconciler) supervisorReady() error {
+// supervisorKnown says whether the spec hash can be trusted to include the supervisor image: true
+// without a source, and after the first successful read. Until then only the recreate decision
+// waits (a hash without the image would recreate every sandbox once it is known); creating,
+// starting, stopping and policy work go on, so an unreadable ConfigMap never blocks the fleet.
+func (r *Reconciler) supervisorKnown() bool {
 	if r.cfg.Supervisor == nil {
-		return nil
+		return true
 	}
 	r.supMu.Lock()
 	defer r.supMu.Unlock()
-	if r.supKnown {
-		return nil
-	}
-	return fmt.Errorf("the OpenShell supervisor image is not known yet: %w", r.supErr)
+	return r.supKnown
 }
 
 // takeRecreate spends one of the pass's recreates; false when the cap is used up (ADR 0085

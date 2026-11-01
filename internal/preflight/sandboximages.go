@@ -151,7 +151,8 @@ func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 	if cause != "" {
 		return []Result{{
 			Check: checkGatewayConfig, Status: Warn,
-			Message: cause + ", so the gateway's sandbox pull secrets, supervisor image and gateway ID are not checked",
+			Message: cause + ", so the gateway's sandbox pull secrets, supervisor image and gateway ID are not checked, " +
+				"and the reconciler cannot see an OpenShell upgrade: sandboxes are not recreated for a new supervisor image",
 			Fix: "set preflight.openshell.namespace and .configMap to the OpenShell release's gateway ConfigMap " +
 				"(<fullname>-config), or check by hand that the OpenShell release has server.sandboxImagePullSecrets and " +
 				"a supervisor image that sandboxPolicy.supervisorImages lists, and a gateway_id that equals openshell.gatewayId" + seeGuide,
