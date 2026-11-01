@@ -699,6 +699,8 @@ it carries no credentials.
   value: {{ .Values.agentd.workers | default 8 | quote }}
 - name: KOINON_LEASE
   value: {{ .Values.agentd.lease | default "30s" | quote }}
+- name: KOINON_DRAIN_DEADLINE
+  value: {{ printf "%ds" (int (.Values.agentd.drainDeadlineSeconds | default 300)) | quote }}
 {{- if .Values.checkpoints.enabled }}
 {{- /* Home checkpoints: agentd is the writer, the only holder of the S3 credentials, and holds no KEK: koinon-api hands it each repository password (ADR 0032, 0054). */}}
 - name: KOINON_CHECKPOINTS

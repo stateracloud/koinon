@@ -224,9 +224,11 @@ file on 2026-10-26):
   DBOS recovers pending workflows for its own executor ID on Launch, and the API leaves the ID at
   the default `local`, so with `api.replicas` > 1 or a surge during a rolling update a new pod
   re-runs workflows another live pod is still running. Each replica needs a unique, stable executor
-  ID (for example the pod name) or the durable runtime must stay at one replica. The other side:
-  `ApplicationVersion` is the release version, so workflows left pending by the previous release
-  (a long durable timer) are not recovered after an upgrade; decide how they are carried over.
+  ID (for example the pod name) or the durable runtime must stay at one replica.
+- ~~`ApplicationVersion` is the release version, so workflows left pending by the previous release
+  (a long durable timer) are not recovered after an upgrade; decide how they are carried over.~~
+  Answered by ADR 0085, decision 11 (#412): a fixed `durable.WorkflowVersion`, bumped only when a
+  workflow's steps change, and `durable.CarryOver` forks older pending workflows from step 0.
 - ~~Where per-org concurrency is enforced for runs: DBOS queues, `run_claimable`, or both.~~ Answered by
   the 2026-10-27 (DB2) amendment: `run_claimable`.
 - The burst window length, the pre-warm lead time and the jitter range.

@@ -391,6 +391,9 @@ func (e *env) poolOn(conns *pgxpool.Pool, name string, mutate ...func(*agentd.Co
 		ReadySettle:    10 * time.Millisecond,
 		// Specs that fail a run with an authentication error have no access-log record to wait for.
 		GatewayRecordWait: 300 * time.Millisecond,
+		// A short drain, so a spec that ends with a turn in progress does not wait out the default
+		// 5 minutes; the drain specs set their own.
+		DrainDeadline: 200 * time.Millisecond,
 	}
 	for _, m := range mutate {
 		m(&cfg)
