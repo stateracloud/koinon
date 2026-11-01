@@ -199,7 +199,10 @@ func (s *Service) SetDefault(ctx context.Context, org pgtype.UUID, actor audit.A
 		q := store.New(tx)
 		if model != "" {
 			var u *UnusableError
-			if err := Check(ctx, s.prices, q, org, model, at); errors.As(err, &u) {
+			if err := Check(ctx, s.prices, q, org, model, at); errors.As(err, &u) && u.Reason == "not_served" {
+				// Another org's model reads exactly like one that does not exist (org isolation).
+				return fmt.Errorf("%w: the org serves no model named %q", ErrNotFound, model)
+			} else if errors.As(err, &u) {
 				return &InvalidError{Msg: u.Error() + "; pick a model the org serves and has a price for"}
 			} else if err != nil {
 				return err

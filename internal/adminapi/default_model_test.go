@@ -60,9 +60,11 @@ var _ = Describe("the org's default model in the admin API (#256)", func() {
 	It("refuses a model the org does not serve and one it has no price for, and keeps the default", func(ctx SpecContext) {
 		serveModel(ctx, e, "vendor/a-model", true)
 		serveModel(ctx, e, "vendor/unpriced", false)
-		for _, bad := range []string{"vendor/ghost", "vendor/unpriced"} {
+		// A model the org does not serve is not found (another org's model looks the same); a
+		// served model without a price is a bad request.
+		for bad, want := range map[string]int{"vendor/ghost": http.StatusNotFound, "vendor/unpriced": http.StatusBadRequest} {
 			st, raw := e.call(ctx, e.token, http.MethodPut, "/default-model", map[string]any{"model": bad})
-			Expect(st).To(Equal(http.StatusBadRequest), string(raw))
+			Expect(st).To(Equal(want), bad+": "+string(raw))
 		}
 		st, raw := e.call(ctx, e.token, http.MethodGet, "/default-model", nil)
 		Expect(st).To(Equal(http.StatusOK), string(raw))

@@ -41,9 +41,10 @@ var _ = Describe("the org's default model in ProviderService", func() {
 		set, err := owner.providers.SetDefaultModel(ctx, &providerv1alpha1.SetDefaultModelRequest{OrgId: org, Model: "vendor/b-model"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(set.GetModel()).To(Equal("vendor/b-model"))
-		for _, bad := range []string{"vendor/ghost", "vendor/unpriced"} {
+		// Not served is not found (another org's model looks the same); served but unpriced is invalid.
+		for bad, want := range map[string]connect.Code{"vendor/ghost": connect.CodeNotFound, "vendor/unpriced": connect.CodeInvalidArgument} {
 			_, err = owner.providers.SetDefaultModel(ctx, &providerv1alpha1.SetDefaultModelRequest{OrgId: org, Model: bad})
-			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), bad)
+			Expect(codeOf(err)).To(Equal(want), bad)
 		}
 		set, err = owner.providers.SetDefaultModel(ctx, &providerv1alpha1.SetDefaultModelRequest{OrgId: org})
 		Expect(err).NotTo(HaveOccurred())
