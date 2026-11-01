@@ -23,6 +23,9 @@
 #   claim.sh review <N> [--lane L]    the PR is ready: Status In Review, lease extended
 #   claim.sh release <N> --note TEXT [--lane L]
 #                                     hand the issue back (keep the branch and draft PR)
+#   claim.sh wait-release <N> [--timeout SECONDS]
+#                                     block until no live claim on N remains (released, or its PR
+#                                     merged or closed); exit 0, or 1 on timeout (default 7200)
 #   claim.sh block <N> <M>            N waits for issue M: add "blocked by", release, Status Ready
 #   claim.sh show <N> | mine [--lane L] | limits [--lane L]
 #   claim.sh adr                      reserve the next free ADR number (claim/adr-NNNN) and print it
@@ -62,6 +65,7 @@
 #   KOINON_CLAIM_LEASE_SECONDS (7200), _HUMAN_LEASE_SECONDS (259200), _GRACE_SECONDS (900),
 #   _HUMAN_CAP (4), _SESSION_CAP (1: per session and lane),
 #   KOINON_CLAIM_LANE           the lane (same as --lane)
+#   KOINON_CLAIM_WAIT_INTERVAL  poll interval of wait-release in seconds (30)
 #   _STALE_RELEASE_SECONDS (7200: the sweeper releases this long after the lease ran out)
 set -euo pipefail
 
@@ -762,6 +766,34 @@ cmd_release() {
   do_release_claim "$C" "$note" 0 || { CLAIM_EXIT=3 die "#$n changed while releasing it: re-read with show"; }
 }
 
+# wait-release N: poll until the claim is released or its PR is closed. An API error dies (load_claim),
+# it is never read as "free". Exit 1 on timeout; exit 3 is not used (that is a lost claim).
+cmd_wait_release() {
+  local n=${1:-} timeout=7200 interval=${KOINON_CLAIM_WAIT_INTERVAL:-30} deadline rc pr
+  [[ $n =~ ^[0-9]+$ ]] || die "usage: wait-release <N> [--timeout SECONDS]"
+  shift
+  while (($#)); do
+    case $1 in
+      --timeout) timeout=${2:-}; shift 2 ;;
+      *) die "unknown option $1" ;;
+    esac
+  done
+  [[ $timeout =~ ^[0-9]+$ ]] || die "--timeout needs a number of seconds"
+  deadline=$(($(date +%s) + timeout))
+  while :; do
+    rc=0
+    load_claim "$n" || rc=$?
+    if ((rc == 1)); then echo "#$n: no claim"; return 0; fi
+    if [[ $(jq -r .state <<<"$C") != held ]]; then echo "#$n: claim released"; return 0; fi
+    pr=$(jq -r .pr <<<"$C")
+    if [[ -n $pr && $(gh api "repos/$REPO/pulls/$pr" --jq .state 2>/dev/null) == closed ]]; then
+      echo "#$n: PR #$pr merged or closed"; return 0
+    fi
+    if (($(date +%s) >= deadline)); then die "timed out after ${timeout}s: #$n is still claimed"; fi
+    sleep "$interval"
+  done
+}
+
 cmd_block() {
   local n=${1:-} m=${2:-} id
   [[ $n =~ ^[0-9]+$ && $m =~ ^[0-9]+$ ]] || die "usage: block <N> <M>"
@@ -1005,6 +1037,7 @@ main() {
     beat) cmd_beat "$@" ;;
     review) cmd_review "$@" ;;
     release) cmd_release "$@" ;;
+    wait-release) cmd_wait_release "$@" ;;
     block) cmd_block "$@" ;;
     show) cmd_show "${1:?usage: show <N>}" ;;
     mine) cmd_mine ;;

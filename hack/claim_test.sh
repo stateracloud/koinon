@@ -196,7 +196,7 @@ lanecmd() {
     split_globals "$@" || exit 1
     set -- "${REST[@]}"
     cmd=$1; shift
-    "cmd_$cmd" "$@"
+    "cmd_${cmd//-/_}" "$@"
   } 2>&1) || rc=$?
   echo "$out"
   echo "rc=$rc"
@@ -245,6 +245,15 @@ eq "release writes only that issue" "$(cut -d' ' -f1,2,3 "$LOG")" "write 12 rele
 : >"$LOG"
 eq "release from another lane is a lost claim" "$(rc_of "$(lanecmd "$FIX" release 12 --lane y --note finished)")" 3
 eq "a refused release writes nothing" "$(wc -l <"$LOG" | tr -d ' ')" 0
+# wait-release: released -> 0, still held until the timeout -> 1 (poll interval 0).
+held1='[{"issue":10,"sha":"s10","state":"held","holder":"alice/mac/s1","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"","note":""}]'
+rel1=$(jq -c '[.[] | .state = "released"]' <<<"$held1")
+export KOINON_CLAIM_WAIT_INTERVAL=0
+eq "wait-release returns 0 for a released claim" "$(rc_of "$(lanecmd "$rel1" wait-release 10 --timeout 5)")" 0
+eq "wait-release returns 0 when there is no claim" "$(rc_of "$(lanecmd "$rel1" wait-release 99 --timeout 5)")" 0
+eq "wait-release times out with exit 1 on a held claim" "$(rc_of "$(lanecmd "$held1" wait-release 10 --timeout 1)")" 1
+eq "wait-release needs a number" "$(rc_of "$(lanecmd "$held1" wait-release x)")" 1
+unset KOINON_CLAIM_WAIT_INTERVAL
 rm -f "$LOG"
 
 if [[ -z ${KOINON_CLAIM_TEST_REPO:-} ]]; then
