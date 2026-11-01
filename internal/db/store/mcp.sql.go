@@ -525,6 +525,63 @@ func (q *Queries) ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpS
 	return items, nil
 }
 
+const listMCPServersToCheckLive = `-- name: ListMCPServersToCheckLive :many
+SELECT s.name, o.slug AS org_slug,
+       COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.tier = 'auto'), '{}')::text[] AS auto_tools,
+       COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.tier = 'ask'), '{}')::text[] AS ask_tools
+FROM agent_mcp_servers a
+JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
+JOIN orgs o ON o.id = s.org_id
+LEFT JOIN mcp_tools t ON t.org_id = s.org_id AND t.server_id = s.id AND t.present
+  AND (a.tools IS NULL OR t.name = ANY(a.tools))
+WHERE a.org_id = $1 AND a.agent_id = $2
+  AND s.disabled_reason IS NULL AND s.removed_at IS NULL AND s.health <> 'unhealthy'
+GROUP BY s.id, s.name, o.slug
+ORDER BY s.name
+`
+
+type ListMCPServersToCheckLiveParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+type ListMCPServersToCheckLiveRow struct {
+	Name      string
+	OrgSlug   string
+	AutoTools []string
+	AskTools  []string
+}
+
+// The servers an agent may use that the gateway should serve right now, with the tools it should
+// list for each by tier, for the live check agentd runs before the harness starts (issue #488). An
+// unhealthy server is left out: ListMissingMCPServersOfAgent has it already and the planner withdraws
+// its tools. A server with no present, permitted tool (never probed, or all in the never tier) is
+// returned with empty lists and not expected to list anything.
+func (q *Queries) ListMCPServersToCheckLive(ctx context.Context, arg ListMCPServersToCheckLiveParams) ([]ListMCPServersToCheckLiveRow, error) {
+	rows, err := q.db.Query(ctx, listMCPServersToCheckLive, arg.OrgID, arg.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMCPServersToCheckLiveRow
+	for rows.Next() {
+		var i ListMCPServersToCheckLiveRow
+		if err := rows.Scan(
+			&i.Name,
+			&i.OrgSlug,
+			&i.AutoTools,
+			&i.AskTools,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMCPTools = `-- name: ListMCPTools :many
 SELECT org_id, server_id, name, description, input_schema, content_hash, read_only_hint, tier, review_reason, present, first_seen_at, last_seen_at, requires_two_approvers, tier_set_by, tier_set_at, description_original_length, description_capped, description_cleaned FROM mcp_tools
 WHERE org_id = $1

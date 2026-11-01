@@ -4,7 +4,11 @@ package agentd_test
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -154,4 +158,134 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 			}
 		}
 	})
+
+	Describe("the live check with the agent's own key (issue #488)", func() {
+		// It holds the tool names the gateway lists to the agent. It is koinon-api's answer; agentd
+		// never sees the agent's key, so nothing here carries one.
+		liveTools := &fakeMCPTools{}
+		BeforeEach(func() { liveTools.set(nil, nil) })
+
+		withLive := func(c *agentd.Config) { c.MCPTools = liveTools; c.MCPRetryDelay = time.Second }
+		slug := func(ctx context.Context, e *env) string {
+			GinkgoHelper()
+			var s string
+			Expect(db.QueryRow(ctx, `SELECT slug FROM orgs WHERE id = $1`, e.org).Scan(&s)).To(Succeed())
+			return s
+		}
+
+		It("starts the harness when the gateway lists the server's tools", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			allow(ctx, e, "tracker", "healthy", 0, "") // the health record is fine
+			liveTools.set([]string{slug(ctx, e) + "-tracker_create_issue"}, nil)
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withLive)
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Expect(missing(ctx, r)()).To(BeEmpty())
+			Expect(liveTools.calls()).To(BeNumerically(">=", 1))
+		})
+
+		It("catches a server that dropped between two probes: the record is healthy, the gateway lists nothing", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			allow(ctx, e, "tracker", "healthy", 0, "")
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withLive)
+
+			Eventually(missing(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
+			ev := missing(ctx, r)()[0]
+			Expect(payload(ev)).To(HaveKeyWithValue("attempt", BeNumerically("==", 1)))
+			Expect(payload(ev)["servers"]).To(ConsistOf(HaveKeyWithValue("name", "tracker")))
+			prompts, _, _, _ := e.harness.snapshot()
+			Expect(prompts).To(BeEmpty())
+
+			liveTools.set([]string{slug(ctx, e) + "-tracker_create_issue"}, nil)
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Expect(eventOf(events(ctx, r), "run.mcp_server_recovered")).To(HaveLen(1))
+		})
+
+		It("fails the run on a second miss when the agent's key lacks the grant, and says no key is in it", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			allow(ctx, e, "tracker", "healthy", 0, "")
+			// The gateway lists another server's tool for this agent, not the tracker's.
+			liveTools.set([]string{slug(ctx, e) + "-wiki_read"}, nil)
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withLive)
+
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+			Expect(getRun(ctx, r).OutcomeReason.String).To(And(ContainSubstring("tracker"), ContainSubstring("does not list")))
+			Expect(getRun(ctx, r).OutcomeReason.String).NotTo(ContainSubstring("kgw_"))
+			evs := missing(ctx, r)()
+			Expect(evs).To(HaveLen(2))
+			Expect(payload(evs[1])).To(HaveKeyWithValue("attempt", BeNumerically("==", 2)))
+		})
+
+		It("expects an ask-tier tool under the ask target", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			allow(ctx, e, "tracker", "healthy", 0, "")
+			_, err := db.Exec(ctx, `UPDATE mcp_tools SET tier = 'ask' WHERE org_id = $1`, e.org)
+			Expect(err).NotTo(HaveOccurred())
+			liveTools.set([]string{slug(ctx, e) + "-tracker-ask_create_issue"}, nil)
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withLive)
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Expect(missing(ctx, r)()).To(BeEmpty())
+		})
+
+		It("does not expect tools of a server with none to offer", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			allow(ctx, e, "tracker", "unknown", 0, "")
+			_, err := db.Exec(ctx, `UPDATE mcp_tools SET tier = 'never' WHERE org_id = $1`, e.org)
+			Expect(err).NotTo(HaveOccurred())
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withLive)
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Expect(missing(ctx, r)()).To(BeEmpty())
+		})
+
+		It("relies on the health record when the live check cannot be made", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			allow(ctx, e, "tracker", "healthy", 0, "")
+			liveTools.set(nil, errors.New("koinon-api answered 502"))
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withLive)
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Expect(missing(ctx, r)()).To(BeEmpty())
+		})
+
+		It("reports a server once when the health record and the live check both miss it", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			allow(ctx, e, "tracker", "healthy", 2, "")
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withLive)
+			Eventually(missing(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
+			Expect(payload(missing(ctx, r)()[0])["servers"]).To(HaveLen(1))
+		})
+	})
 })
+
+// fakeMCPTools is the live check's stand-in for koinon-api: the tool names the gateway lists to the
+// agent, or an error. The real one is mcpcheck.Remote.
+type fakeMCPTools struct {
+	mu    sync.Mutex
+	names []string
+	err   error
+	n     int
+}
+
+func (f *fakeMCPTools) set(names []string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.names, f.err = names, err
+}
+
+func (f *fakeMCPTools) calls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.n
+}
+
+func (f *fakeMCPTools) Tools(context.Context, pgtype.UUID, pgtype.UUID) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.n++
+	return append([]string(nil), f.names...), f.err
+}

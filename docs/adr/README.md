@@ -76,7 +76,7 @@ are in [0046](0046-adr-conventions.md).
 | [0054](0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is recreated | Accepted; amended 2026-10-24 (below): detection, saving the work, the loop guard |
 | [0055](0055-chat-as-its-own-object.md) | Chat is its own object | Accepted |
 | [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29 and 2026-10-31 (below) |
-| [0057](0057-mcp-servers.md) | MCP servers: remote and container, catalog, allowlists and discovery | Accepted; amended 2026-10-24, 2026-10-30 and 2026-10-31 by [0084](0084-leak-guard.md) (below) |
+| [0057](0057-mcp-servers.md) | MCP servers: remote and container, catalog, allowlists and discovery | Accepted; amended 2026-10-24, 2026-10-30, 2026-10-31 and 2026-11-01 by [0084](0084-leak-guard.md) (below) |
 | [0058](0058-gateway-modes.md) | Gateway modes: standalone, kubernetes and shared | Accepted; amended 2026-10-25 and 2026-10-26 (below) |
 | [0059](0059-v01-opencode-only.md) | v0.1 ships one harness: OpenCode v2 | Accepted |
 | [0060](0060-migrations-as-a-job.md) | Migrations run as a Job, not on start; an Argo CD Sync hook under Argo | Accepted |
