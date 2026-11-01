@@ -52,6 +52,8 @@ type runNowOutput struct {
 	Err, Msg string
 }
 
+const stepRunNow = "run-trigger-now"
+
 // RegisterRunNow registers the run-now workflow on rt.
 func RegisterRunNow(rt *durable.Runtime, work *durable.OrgWork) (*RunNowQueue, error) {
 	q := &RunNowQueue{work: work, ready: make(chan struct{})}
@@ -101,7 +103,7 @@ func (q *RunNowQueue) workflow(c dbos.Context, in runNowInput) (runNowOutput, er
 			return runNowOutput{}, err
 		}
 		return runNowOutput{Task: idString(task.ID)}, nil
-	}, dbos.WithStepName("run-trigger-now"), dbos.WithStepMaxRetries(3))
+	}, dbos.WithStepName(stepRunNow), dbos.WithStepMaxRetries(3))
 }
 
 // remoteError is an error that came back as data from the workflow and still matches its sentinel.
@@ -126,7 +128,7 @@ func (q *RunNowQueue) fire(ctx context.Context, in triggers.RunNow) (store.Task,
 	if err != nil {
 		return store.Task{}, err
 	}
-	out, err := h.GetResult(dbos.WithHandleTimeout(runNowWait))
+	out, err := durable.AwaitResult(q.work.Runtime(), h, id, runNowWait)
 	if err != nil {
 		if errors.Is(err, dbos.ErrTimeout) {
 			return store.Task{}, connect.NewError(connect.CodeUnavailable, "the organisation's queue is busy; run the trigger again in a moment")
