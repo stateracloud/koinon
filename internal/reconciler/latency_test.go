@@ -93,6 +93,7 @@ var _ = Describe("Reconciler latency defaults", func() {
 		GinkgoHelper()
 		agent := newAgent(ctx, org, user)
 		pass(ctx)
+		coolDown(ctx, org, agent.ID)
 		queueRun(ctx, org, user, agent.ID)
 		run := claimRun(ctx, org)
 		_, err := q.ParkRun(ctx, store.ParkRunParams{OrgID: org, ID: run.ID, Epoch: run.Epoch, ParkReason: reason})
@@ -146,6 +147,7 @@ var _ = Describe("Reconciler latency defaults", func() {
 		GinkgoHelper()
 		agent := newAgent(ctx, org, user)
 		pass(ctx)
+		coolDown(ctx, org, agent.ID)
 		queued := queueRun(ctx, org, user, agent.ID)
 		run := claimRun(ctx, org)
 		var row store.Question
@@ -211,6 +213,7 @@ var _ = Describe("Reconciler latency defaults", func() {
 	It("counts a pre-wake signal as activity, and starts a stopped sandbox for it", func(ctx SpecContext) {
 		agent := newAgent(ctx, org, user)
 		pass(ctx)
+		coolDown(ctx, org, agent.ID)
 		advance(9 * time.Minute)
 		pass(ctx)
 		Expect(phase(agent.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
@@ -248,6 +251,7 @@ var _ = Describe("Reconciler latency defaults", func() {
 	It("starts a stopped sandbox while the gateway is still reloading", func(ctx SpecContext) {
 		agent := newAgent(ctx, org, user)
 		pass(ctx)
+		coolDown(ctx, org, agent.ID)
 		advance(11 * time.Minute)
 		pass(ctx)
 		Expect(phase(agent.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED))
@@ -279,6 +283,7 @@ var _ = Describe("Reconciler latency defaults", func() {
 		Expect(err).NotTo(HaveOccurred())
 		agent := newAgent(ctx, org, user)
 		Expect(tr.ReconcileAll(ctx)).To(Succeed())
+		coolDown(ctx, org, agent.ID)
 		routes := func() []string {
 			var paths []string
 			for _, rule := range osg.Profile(orgWorkspace(ctx, org), "koinon-agentgateway-opencode").GetEndpoints()[0].GetRules() {
@@ -310,5 +315,104 @@ var _ = Describe("Reconciler latency defaults", func() {
 		Expect(grant.ID.Valid).To(BeTrue())
 		close(hold)
 		Eventually(done).WithTimeout(10 * time.Second).Should(Receive(BeNil()))
+	})
+
+	// A sandbox starts on demand (#315): activating agents creates nothing; the first run, a
+	// pre-wake signal or a keep-warm request does. The operator caps keep-warm sandboxes per org.
+	Describe("starting on demand", func() {
+		created := func() int { return osg.Calls("CreateSandbox") }
+		onDemand := func(ctx context.Context) store.Agent {
+			GinkgoHelper()
+			return newOnDemandAgent(ctx, org, user, `{"instructions":"help"}`)
+		}
+
+		It("creates no sandbox for agents that are only activated", func(ctx SpecContext) {
+			var agents []store.Agent
+			for range 5 {
+				agents = append(agents, onDemand(ctx))
+			}
+			pass(ctx)
+			pass(ctx)
+			Expect(created()).To(Equal(0))
+			for _, a := range agents {
+				var phase string
+				Expect(pool.QueryRow(ctx, `SELECT phase FROM agent_sandboxes WHERE agent_id = $1`, a.ID).Scan(&phase)).To(Succeed())
+				Expect(phase).To(Equal("Idle"))
+			}
+		})
+
+		It("creates the sandbox of the agent whose first run is queued, and no other", func(ctx SpecContext) {
+			busy, idle := onDemand(ctx), onDemand(ctx)
+			pass(ctx)
+			Expect(created()).To(Equal(0))
+			queueRun(ctx, org, user, busy.ID)
+			pass(ctx)
+			Expect(created()).To(Equal(1))
+			Expect(phase(busy.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM agent_sandboxes WHERE agent_id = $1 AND phase = 'Idle'`, idle.ID).Scan(&n)).To(Succeed())
+			Expect(n).To(Equal(1))
+		})
+
+		It("creates the sandbox for a pre-wake signal", func(ctx SpecContext) {
+			a := onDemand(ctx)
+			pass(ctx)
+			woke, err := wake.Agent(ctx, q, org, a.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woke).To(BeTrue())
+			pass(ctx)
+			Expect(created()).To(Equal(1))
+		})
+
+		It("creates a keep-warm agent's sandbox at once and keeps it up past the idle timeout", func(ctx SpecContext) {
+			a := onDemand(ctx)
+			keepWarm(ctx, org, a.ID)
+			pass(ctx)
+			Expect(phase(a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+			advance(time.Hour)
+			pass(ctx)
+			Expect(phase(a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY), "keep-warm is never idle-stopped")
+
+			By("turning it off lets the idle stop apply")
+			coolDown(ctx, org, a.ID)
+			pass(ctx)
+			Expect(phase(a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED))
+		})
+
+		It("grants keep-warm to the oldest agents up to the operator's cap per org", func(ctx SpecContext) {
+			var agents []store.Agent
+			for range 4 {
+				a := onDemand(ctx)
+				keepWarm(ctx, org, a.ID)
+				agents = append(agents, a)
+			}
+			capped, err := reconciler.New(pool, backend, mg, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace},
+				func() reconciler.Config { c := cfg; c.KeepWarmPerOrg = 3; return c }())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(capped.ReconcileAll(ctx)).To(Succeed())
+			Expect(created()).To(Equal(3))
+			Expect(phase(agents[0].ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+			var phaseOfLast string
+			Expect(pool.QueryRow(ctx, `SELECT phase FROM agent_sandboxes WHERE agent_id = $1`, agents[3].ID).Scan(&phaseOfLast)).To(Succeed())
+			Expect(phaseOfLast).To(Equal("Idle"), "over the cap: it starts on demand")
+
+			By("the cap is per org")
+			org2, user2 := newOrg(ctx)
+			addProvider(ctx, org2, user2, "upstream", "", "fake")
+			other := newAgent(ctx, org2, user2)
+			Expect(capped.ReconcileAll(ctx)).To(Succeed())
+			Expect(created()).To(Equal(4))
+			Expect(other.ID.Valid).To(BeTrue())
+		})
+
+		It("grants no keep-warm when the cap is negative", func(ctx SpecContext) {
+			a := onDemand(ctx)
+			keepWarm(ctx, org, a.ID)
+			none, err := reconciler.New(pool, backend, mg, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace},
+				func() reconciler.Config { c := cfg; c.KeepWarmPerOrg = -1; return c }())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(none.ReconcileAll(ctx)).To(Succeed())
+			Expect(created()).To(Equal(0))
+		})
 	})
 })
