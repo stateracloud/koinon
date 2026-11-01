@@ -11,7 +11,7 @@
 -- +goose Up
 
 ALTER TABLE orgs
-    ADD COLUMN default_model text CHECK (default_model IS NULL OR length(default_model) BETWEEN 1 AND 200);
+    ADD COLUMN default_model text CHECK (default_model IS NULL OR length(default_model) BETWEEN 1 AND 256);
 
 -- Orgs keep what they run on today, the model the derived rule picks now (the first model that
 -- passes agentmodel.Check, by provider and model name). That rule needs the price resolver, which
