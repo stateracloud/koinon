@@ -33,26 +33,44 @@ import (
 // receiver off, as --otlp-addr= does.
 
 const (
-	aliasAnnotation = "koinon.dev/env-alias"
-	extraEnvKey     = "koinon.dev/env"
-	defaultKey      = "koinon.dev/default-subcommand"
+	aliasAnnotation  = "koinon.dev/env-alias"
+	configAnnotation = "koinon.dev/config-key"
+	extraEnvKey      = "koinon.dev/env"
+	defaultKey       = "koinon.dev/default-subcommand"
 )
 
 // EnvAlias makes the flag of cmd also readable from the environment variables names, after its
 // KOINON_ one (for example DATABASE_URL, set by the dev manifests, and POD_NAMESPACE from the
 // downward API). It panics when the flag does not exist: that is a bug in the command definition.
 func EnvAlias(cmd *cobra.Command, flag string, names ...string) {
+	f := mustFlag(cmd, "EnvAlias", flag)
+	addAnnotation(f, aliasAnnotation, names...)
+}
+
+// ConfigKey names the key of the config file that sets the flag of cmd, with dots for nesting
+// ("gateway.mode"). Without it the key is the flag name. The file ranks below the environment
+// and above the flag's default; an empty value in the file leaves the default, since the chart
+// renders an unset value as empty. It panics when the flag does not exist.
+func ConfigKey(cmd *cobra.Command, flag, key string) {
+	addAnnotation(mustFlag(cmd, "ConfigKey", flag), configAnnotation, key)
+}
+
+func mustFlag(cmd *cobra.Command, who, flag string) *pflag.Flag {
 	f := cmd.Flags().Lookup(flag)
 	if f == nil {
 		f = cmd.PersistentFlags().Lookup(flag)
 	}
 	if f == nil {
-		panic(fmt.Sprintf("cli.EnvAlias: command %q has no flag --%s", cmd.Name(), flag))
+		panic(fmt.Sprintf("cli.%s: command %q has no flag --%s", who, cmd.Name(), flag))
 	}
+	return f
+}
+
+func addAnnotation(f *pflag.Flag, key string, values ...string) {
 	if f.Annotations == nil {
 		f.Annotations = map[string][]string{}
 	}
-	f.Annotations[aliasAnnotation] = append(f.Annotations[aliasAnnotation], names...)
+	f.Annotations[key] = append(f.Annotations[key], values...)
 }
 
 // EnvNames lists the environment variables that set f, in precedence order.
@@ -103,15 +121,23 @@ func Resolve(cmd *cobra.Command, v *viper.Viper) error {
 			err = bindErr
 			return
 		}
-		if !v.IsSet(f.Name) {
+		key := f.Name
+		if !v.IsSet(key) {
+			if ck := f.Annotations[configAnnotation]; len(ck) > 0 && v.IsSet(ck[0]) {
+				key = ck[0]
+			} else {
+				return
+			}
+		}
+		if !fromEnv(names) && v.GetString(key) == "" {
 			return
 		}
 		var val string
 		switch f.Value.Type() {
 		case "stringSlice", "stringArray":
-			val = strings.Join(v.GetStringSlice(f.Name), ",")
+			val = strings.Join(v.GetStringSlice(key), ",")
 		default:
-			val = v.GetString(f.Name)
+			val = v.GetString(key)
 		}
 		if setErr := cmd.Flags().Set(f.Name, val); setErr != nil {
 			err = fmt.Errorf("%s: %w", sourceOf(f, names), setErr)
@@ -120,12 +146,25 @@ func Resolve(cmd *cobra.Command, v *viper.Viper) error {
 	return err
 }
 
+// fromEnv reports whether one of the variables is set (an empty value counts).
+func fromEnv(names []string) bool {
+	for _, n := range names {
+		if _, ok := os.LookupEnv(n); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // sourceOf names where a flag's value came from, for an error message.
 func sourceOf(f *pflag.Flag, envNames []string) string {
 	for _, n := range envNames {
 		if _, ok := os.LookupEnv(n); ok {
 			return n
 		}
+	}
+	if ck := f.Annotations[configAnnotation]; len(ck) > 0 {
+		return "config key " + ck[0]
 	}
 	return "config key " + f.Name
 }
@@ -136,6 +175,35 @@ func sourceOf(f *pflag.Flag, envNames []string) string {
 func Bind(root *cobra.Command, v *viper.Viper) {
 	root.SilenceErrors, root.SilenceUsage = true, true
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error { return Resolve(cmd, v) }
+}
+
+// ConfigFile is Bind for a binary that reads a config file: it gives every command a persistent
+// --config flag (KOINON_CONFIG), reads that file into v before the flags are resolved, and then
+// resolves them as Bind does. A flag takes its value from the file at the key ConfigKey names, or
+// at its own name. Values that are not flags (sections the binary reads itself) stay in v.
+func ConfigFile(root *cobra.Command, v *viper.Viper) {
+	Bind(root, v)
+	root.PersistentFlags().String("config", "", "Koinon config file (the chart's config.yaml)")
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		f := cmd.Flags().Lookup("config")
+		path := f.Value.String()
+		if !f.Changed {
+			for _, n := range EnvNames(f) {
+				if e, ok := os.LookupEnv(n); ok {
+					path = e
+					break
+				}
+			}
+		}
+		if path != "" {
+			v.SetConfigFile(path)
+			v.SetConfigType("yaml")
+			if err := v.ReadInConfig(); err != nil {
+				return fmt.Errorf("read config %s: %w", path, err)
+			}
+		}
+		return Resolve(cmd, v)
+	}
 }
 
 // DefaultTo makes root run the subcommand name when args name none (see DefaultSubcommand). A

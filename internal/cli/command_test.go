@@ -103,3 +103,64 @@ var _ = Describe("the command stack", func() {
 		Expect(cli.Styled(os.Stdout)).To(BeFalse())
 	})
 })
+
+var _ = Describe("the config file", func() {
+	type got struct {
+		mode, name string
+		jobs       int
+		on         bool
+	}
+	var g got
+	root := func() *cobra.Command {
+		g = got{}
+		r := &cobra.Command{Use: "t"}
+		cli.ConfigFile(r, cli.NewViper())
+		run := &cobra.Command{Use: "run", RunE: func(*cobra.Command, []string) error { return nil }}
+		run.Flags().StringVar(&g.mode, "mode", "standalone", "")
+		run.Flags().StringVar(&g.name, "name", "", "")
+		run.Flags().IntVar(&g.jobs, "jobs", 0, "")
+		run.Flags().BoolVar(&g.on, "on", false, "")
+		cli.ConfigKey(run, "mode", "gateway.mode")
+		cli.ConfigKey(run, "jobs", "reconciler.jobs")
+		cli.ConfigKey(run, "on", "feature.enabled")
+		r.AddCommand(run)
+		return r
+	}
+	file := func(content string) string {
+		p := filepath.Join(GinkgoT().TempDir(), "config.yaml")
+		Expect(os.WriteFile(p, []byte(content), 0o600)).To(Succeed())
+		return p
+	}
+	const yamlFile = "gateway:\n  mode: kubernetes\nreconciler:\n  jobs: 4\nfeature:\n  enabled: true\nname: from-file\n"
+
+	It("sets flags from the file, at their config key or their own name, ranked below the environment and the flag", func() {
+		p := file(yamlFile)
+		Expect(cli.Check(root(), []string{"run", "--config", p}, nil)).To(Succeed())
+		Expect(g).To(Equal(got{mode: "kubernetes", name: "from-file", jobs: 4, on: true}))
+
+		Expect(cli.Check(root(), []string{"run"}, map[string]string{"KOINON_CONFIG": p, "KOINON_JOBS": "9", "KOINON_ON": "false"})).To(Succeed())
+		Expect(g).To(Equal(got{mode: "kubernetes", name: "from-file", jobs: 9, on: false}))
+
+		Expect(cli.Check(root(), []string{"run", "--jobs=2", "--mode=standalone"}, map[string]string{"KOINON_CONFIG": p, "KOINON_JOBS": "9"})).To(Succeed())
+		Expect(g).To(Equal(got{mode: "standalone", name: "from-file", jobs: 2, on: true}))
+	})
+
+	It("keeps the default where the file has an empty value, and where it has no key", func() {
+		Expect(cli.Check(root(), []string{"run", "--config", file("gateway:\n  mode: \"\"\n")}, nil)).To(Succeed())
+		Expect(g.mode).To(Equal("standalone"))
+		Expect(cli.Check(root(), []string{"run"}, nil)).To(Succeed())
+		Expect(g.mode).To(Equal("standalone"))
+	})
+
+	It("lets an empty variable override the file", func() {
+		Expect(cli.Check(root(), []string{"run"}, map[string]string{"KOINON_CONFIG": file(yamlFile), "KOINON_NAME": ""})).To(Succeed())
+		Expect(g.name).To(BeEmpty())
+	})
+
+	It("names the config key whose value does not parse, and an unreadable file", func() {
+		Expect(cli.Check(root(), []string{"run", "--config", file("reconciler:\n  jobs: many\n")}, nil)).
+			To(MatchError(ContainSubstring("config key reconciler.jobs")))
+		Expect(cli.Check(root(), []string{"run", "--config", filepath.Join(GinkgoT().TempDir(), "none.yaml")}, nil)).
+			To(MatchError(ContainSubstring("read config")))
+	})
+})
