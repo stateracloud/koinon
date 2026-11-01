@@ -581,6 +581,12 @@ type Querier interface {
 	ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpServer, error)
 	ListMCPTools(ctx context.Context, orgID pgtype.UUID) ([]McpTool, error)
 	ListMCPToolsOfServer(ctx context.Context, arg ListMCPToolsOfServerParams) ([]McpTool, error)
+	// The servers an agent may use that Koinon has found not serving tools right now, and has not
+	// withdrawn on purpose (a disabled or removed server is only mentioned in the note, see
+	// ListUnavailableMCPServersOfAgent): unhealthy, or failing probes that have not yet reached the
+	// threshold, which is what a server overloaded for a minute looks like (issue #326). agentd checks
+	// this before it starts the harness; a server never probed (unknown) is not a miss.
+	ListMissingMCPServersOfAgent(ctx context.Context, arg ListMissingMCPServersOfAgentParams) ([]ListMissingMCPServersOfAgentRow, error)
 	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
 	// Every model no admin set the format of, in every live org, with its provider's type (startup:
 	// catalog.RederiveFormats applies internal/modelformat to them).
