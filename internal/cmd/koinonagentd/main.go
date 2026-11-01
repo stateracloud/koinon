@@ -207,7 +207,7 @@ func run(ctx context.Context, cfg config) error {
 	defer func() { _ = backend.Close() }()
 
 	if cfg.savedWorkKeyFile != "" {
-		cfg.pool.SavedWorkKey = func() ([]byte, error) { return os.ReadFile(cfg.savedWorkKeyFile) } //nolint:gosec // an operator-set path
+		cfg.pool.SavedWorkKey = func() ([]byte, error) { return os.ReadFile(cfg.savedWorkKeyFile) }
 		if cfg.pool.SavedWorkURL != "" {
 			// The live check of an agent's MCP tools (issue #488) asks koinon-api, which holds the
 			// agent's gateway key; koinon-agentd never does.
@@ -274,7 +274,7 @@ func checkpointsFrom(cfg config) (*agentd.Checkpoints, error) {
 		Store: &checkpoint.Writer{Storage: s3, Scratch: cfg.checkpointScratch},
 		Repositories: checkpoint.Remote{
 			HTTP: &http.Client{Timeout: time.Minute}, BaseURL: cfg.pool.SavedWorkURL,
-			Key: func() ([]byte, error) { return os.ReadFile(cfg.savedWorkKeyFile) }, //nolint:gosec // an operator-set path
+			Key: func() ([]byte, error) { return os.ReadFile(cfg.savedWorkKeyFile) },
 		},
 		Interval: cfg.checkpointInterval,
 	}, nil
