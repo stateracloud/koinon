@@ -10,7 +10,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
@@ -22,7 +21,6 @@ var (
 )
 
 func TestMigrations(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Migrations Suite")
 }
