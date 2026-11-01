@@ -6,6 +6,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# First, and on its own line so set -e stops the script when mktemp fails (#476).
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
 fail=0
 # expect <0|1> <paths, space separated>
 expect() {
@@ -94,8 +98,6 @@ while IFS= read -r p; do
 done < <(grep -v '^ *#' test/e2e/run.sh | grep -oE 'hack/[A-Za-z0-9_.-]+\.sh' | sort -u)
 
 # Against git, in a scratch module shaped like the repository: the six binaries and the driver.
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
 g() { git -C "$tmp" -c user.name=t -c user.email=t@example.invalid "$@"; }
 git -C "$tmp" init -q -b main
 printf 'module example.invalid/m\n\ngo 1.21\n' >"$tmp/go.mod"

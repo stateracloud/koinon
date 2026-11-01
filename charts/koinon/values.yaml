@@ -192,7 +192,8 @@ preflight:
   # release's namespace (key gateway.toml). The preflight reads it to check that the gateway has
   # sandbox pull secrets (when global.imagePullSecrets, imageRegistry or registryMirrors is set) and
   # that sandboxPolicy admits its supervisor image. Read-only, by name; a ConfigMap it cannot read
-  # only warns.
+  # fails the preflight while sandboxPolicy pins a supervisor image (the reconciler reads the same
+  # ConfigMap for the sandbox spec hash, #489) and only warns otherwise.
   openshell:
     namespace: openshell
     configMap: openshell-config
