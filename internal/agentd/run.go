@@ -122,6 +122,8 @@ type runner struct {
 	fenceOnce sync.Once
 	fenced    chan struct{}
 	fenceKind atomic.Int32
+	// turnState is the run's phase for a draining pool (turnSetup, turnRunning, turnHandedOff).
+	turnState atomic.Int32
 
 	mu        sync.Mutex // serialises appends and srcSeq
 	srcSeq    int64
@@ -238,6 +240,14 @@ func (r *runner) markTool(id string) {
 	}
 }
 
+// Phases of a run's turn, for a draining pool: set up (a stop hands the run off), running (a stop
+// waits for the turn, up to the drain deadline), or handed off during the setup.
+const (
+	turnSetup int32 = iota
+	turnRunning
+	turnHandedOff
+)
+
 func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	r := &runner{
 		p: p, q: p.q, run: run, fenced: make(chan struct{}), cmdChanged: make(chan struct{}),
@@ -254,6 +264,11 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	var err error
 	if safego.Do(r.log, "run", func() { err = r.execute(ctx) }) {
 		err = &failure{reason: "internal error: the run panicked"}
+	}
+	if r.turnState.Load() == turnHandedOff && !errors.Is(err, errFenced) {
+		// The pool stopped before the turn began and cut the run's setup short: whatever error that
+		// caused, the run goes back to the queue.
+		err = errShutdown
 	}
 	stop()
 	hb.Wait()
@@ -385,6 +400,13 @@ func (r *runner) execute(ctx context.Context) error {
 		select {
 		case <-r.fenced:
 			cancel()
+		case <-r.p.stopping:
+			// The pool is draining (ADR 0085 decision 2): a run still setting up has no turn to
+			// finish, so it is handed off at once. A turn that began finishes up to the deadline.
+			if r.turnState.CompareAndSwap(turnSetup, turnHandedOff) {
+				r.log.Info("the pool is stopping before the turn began; handing the run off")
+				cancel()
+			}
 		case <-fctx.Done():
 		}
 	}()
@@ -670,6 +692,9 @@ func (r *runner) execute(ctx context.Context) error {
 	// the run's instructions in place.
 	if err := r.checkInstructions(fctx, workspace, sandbox, agent.Flavor, instructions); err != nil {
 		return r.execErr(ctx, "check the instructions", err)
+	}
+	if !r.turnState.CompareAndSwap(turnSetup, turnRunning) {
+		return errShutdown // the pool began to stop first
 	}
 	err = r.turnWithRetry(ctx, fctx, conn, proc, &stderr, session, text)
 	if !errors.Is(err, errEndTurn) {

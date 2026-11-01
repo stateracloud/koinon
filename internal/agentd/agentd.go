@@ -172,6 +172,11 @@ type Config struct {
 	SessionCwd string
 	// Permissions answers the harness's permission requests. Default DefaultPermissions.
 	Permissions *PermissionPolicy
+	// DrainDeadline is how long a stopping pool (its Run context ended: SIGTERM) lets the turns in
+	// progress finish before it hands their runs off (ADR 0085 decision 2). From the stop on, no
+	// worker claims a run, a run that has not begun its turn is handed off at once, and the
+	// heartbeats go on. Default 5m. The pod's terminationGracePeriodSeconds must be this plus 30s.
+	DrainDeadline time.Duration
 	// KeepLeaseOnShutdown leaves the leases of runs in progress to expire when the pool
 	// stops, as if the process had been killed. By default they are released so another
 	// replica resumes at once. Tests set it to emulate a killed pod.
@@ -203,6 +208,7 @@ func (c *Config) defaults() error {
 	}
 	setDefault(&c.Workers, 8)
 	setDefault(&c.Lease, 30*time.Second)
+	setDefault(&c.DrainDeadline, DefaultDrainDeadline)
 	setDefault(&c.Heartbeat, c.Lease/3)
 	setDefault(&c.Poll, time.Second)
 	setDefault(&c.SandboxTimeout, orgsettings.DefaultQueueWait)
@@ -281,7 +287,12 @@ type Pool struct {
 	http    *http.Client
 	// sink exports run spans; nil when tracing is off.
 	sink *traceSink
+	// stopping is closed when Run's context ends: the pool drains. Nil (never closed) before Run.
+	stopping <-chan struct{}
 }
+
+// DefaultDrainDeadline is Config.DrainDeadline's default.
+const DefaultDrainDeadline = 5 * time.Minute
 
 // New returns a pool. Run starts it.
 func New(db *pgxpool.Pool, backend Backend, cfg Config) (*Pool, error) {
@@ -302,14 +313,41 @@ func New(db *pgxpool.Pool, backend Backend, cfg Config) (*Pool, error) {
 	return p, nil
 }
 
-// Run drives runs until ctx ends, then waits for the workers to stop.
+// Run drives runs until ctx ends, then drains: it claims nothing more, lets the turns in
+// progress finish for up to Config.DrainDeadline (the heartbeats go on), hands the runs still
+// going off, and waits for the workers to stop (ADR 0085 decision 2).
 func (p *Pool) Run(ctx context.Context) error {
+	// runCtx drives the runs. It outlives ctx by the drain deadline.
+	runCtx, cancelRuns := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelRuns()
+	p.stopping = ctx.Done()
+	go func() {
+		select {
+		case <-runCtx.Done():
+			return
+		case <-ctx.Done():
+		}
+		if p.cfg.KeepLeaseOnShutdown { // a simulated kill: no drain
+			cancelRuns()
+			return
+		}
+		p.log.Info("stopping: no new runs are claimed; turns in progress get to finish", "drain_deadline", p.cfg.DrainDeadline.String())
+		t := time.NewTimer(p.cfg.DrainDeadline)
+		defer t.Stop()
+		select {
+		case <-runCtx.Done():
+		case <-t.C:
+			p.log.Warn("the drain deadline passed; handing the runs in progress off", "drain_deadline", p.cfg.DrainDeadline.String())
+			cancelRuns()
+		}
+	}()
+
 	var wg sync.WaitGroup
 	if p.cfg.Checkpoints != nil {
 		wg.Go(func() { p.checkpointLoop(ctx) })
 	}
 	for i := range p.cfg.Workers {
-		wg.Go(func() { p.work(ctx, p.cfg.OwnerID+"/"+strconv.Itoa(i)) })
+		wg.Go(func() { p.work(ctx, runCtx, p.cfg.OwnerID+"/"+strconv.Itoa(i)) })
 	}
 	wg.Wait()
 	if p.sink != nil {
@@ -321,14 +359,18 @@ func (p *Pool) Run(ctx context.Context) error {
 	return nil
 }
 
-func (p *Pool) work(ctx context.Context, owner string) {
+// work claims and drives runs. ctx ends when the pool stops (no more claims); runCtx ends when the
+// drain deadline passes (the runs in progress are handed off).
+func (p *Pool) work(ctx, runCtx context.Context, owner string) {
 	log := p.log.With("owner", owner)
 	for ctx.Err() == nil {
 		// One iteration at a time, so a panic in a run is logged and the worker goes on: the run's
 		// lease expires and another worker takes it over (bounded by MaxTakeovers).
 		panicked := safego.Do(log, "agentd-worker", func() {
-			run, ok, err := p.claim(ctx, owner)
-			if err != nil && ctx.Err() == nil {
+			// Claimed with runCtx, so a claim that commits is never abandoned half-way; a run claimed
+			// as the pool stops is handed off at once (execute).
+			run, ok, err := p.claim(runCtx, owner)
+			if err != nil && runCtx.Err() == nil {
 				log.Warn("claiming a run failed", "err", err)
 			}
 			if !ok {
@@ -336,7 +378,7 @@ func (p *Pool) work(ctx context.Context, owner string) {
 				sleep(ctx, p.cfg.Poll/2+rand.N(p.cfg.Poll)) //nolint:gosec // jitter, not security
 				return
 			}
-			p.drive(ctx, run, log)
+			p.drive(runCtx, run, log)
 		})
 		if panicked {
 			// Back off after a panic, so a bad row does not spin the worker and flood the log.
