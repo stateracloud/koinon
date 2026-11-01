@@ -283,15 +283,15 @@ func spanContext(traceID []byte) trace.SpanContext {
 	})
 }
 
-// noteTurnResult records how the prompt ended, from turn()'s error.
-func (t *runTrace) noteTurnResult(err error) {
+// noteTurnReason records how the prompt ended (turnReason's vocabulary).
+func (t *runTrace) noteTurnReason(reason string) {
 	if t == nil {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.turn != nil {
-		t.turn.reason = turnReason(err)
+		t.turn.reason = reason
 	}
 }
 
@@ -302,8 +302,6 @@ func turnReason(err error) string {
 	switch {
 	case err == nil, errors.Is(err, errEndTurn):
 		return "end_turn"
-	case errors.Is(err, errWrapUp):
-		return "wrap_up"
 	case errors.As(err, &ref):
 		return "refused"
 	case errors.As(err, &f):
