@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Stand-in for a Gitea server in the escape suite (issue #371): koinon-fakemodel -standin over TLS.
+# OpenShell 0.1.5 admits the connect to an allowed host at L4 and dials (and TLS-handshakes) it
+# before its L7 relay judges the request, so the Gitea read-grant specs need a real TLS listener
+# behind the host the grant is rendered for, inside the cluster instead of on the internet. It
+# answers every request that reaches it with an empty 418 and X-Koinon-Standin: 1; the specs expect
+# 403 from the sandbox proxy, so a 418 means the policy let a request through. Applied by
+# test/escape/kind.sh, which creates the Secret escape-gitea-standin-tls (tls.crt, tls.key, issued
+# by a throwaway CA that kind.sh also installs in the probe image the sandboxes run). Not part of
+# the rt1 kustomization: it needs that Secret. Service port 443 (what a https grant dials).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: escape-gitea-standin
+  labels: &labels
+    app.kubernetes.io/name: escape-gitea-standin
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: escape-gitea-standin
+  template:
+    metadata:
+      labels: *labels
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: standin
+          # Placeholder tag: kind.sh substitutes the image it built.
+          image: rt1-fakemodel:dev
+          args: ["-standin", "-addr=:8443", "-tls-cert=/tls/tls.crt", "-tls-key=/tls/tls.key"]
+          ports:
+            - {name: https, containerPort: 8443}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
+          volumeMounts:
+            - {name: tls, mountPath: /tls, readOnly: true}
+          readinessProbe:
+            tcpSocket: {port: https}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: https}
+            periodSeconds: 30
+      volumes:
+        - name: tls
+          secret: {secretName: escape-gitea-standin-tls}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: escape-gitea-standin
+  labels:
+    app.kubernetes.io/name: escape-gitea-standin
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  selector:
+    app.kubernetes.io/name: escape-gitea-standin
+  ports:
+    - {name: https, port: 443, targetPort: https}
+---
+# Only pods in OpenShell sandbox namespaces may connect (as for escape-gateway-standin).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandboxes-to-escape-gitea-standin
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: escape-gitea-standin
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {protocol: TCP, port: 8443}
+      from:
+        - namespaceSelector:
+            matchLabels:
+              openshell.ai/managed-by: openshell
