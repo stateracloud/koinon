@@ -426,8 +426,9 @@ var _ = Describe("MCP servers", func() {
 
 	It("grants tools by tier, adds the ask target, the executor key and a probe key per server", func() {
 		p := newPlanner(0)
-		d := p.Begin(mcpInput())
-		d.Allowances = allow
+		in := mcpInput()
+		in.Allowances = allow
+		d := p.Begin(in)
 		pl := settle(d, nil, nil, lk)
 
 		a1 := gateway.AgentRef{Org: "acme", Name: "a1"}
@@ -455,11 +456,29 @@ var _ = Describe("MCP servers", func() {
 		Expect(p.Probes()[0].Material).NotTo(BeEmpty())
 	})
 
+	It("keeps a file written in a pass that fails in Settle settling in the next pass, which writes nothing", func() {
+		p := newPlanner(time.Minute)
+		in := mcpInput()
+		in.Allowances = allow
+		lk.systemErr = errors.New("no key")
+		_, err := p.Begin(in).Settle(context.Background(), []string{"mcp-wiki-f1"}, nil, lk)
+		Expect(err).To(HaveOccurred())
+
+		// The next pass writes nothing (the file is unchanged), yet the file has not had KeySettle.
+		lk.systemErr = nil
+		pl := settle(p.Begin(in), nil, nil, lk)
+		for _, t := range pl.State.MCP {
+			Expect(t.Name).NotTo(Equal("acme-wiki"))
+		}
+		Expect(pl.Keep).To(HaveKey("mcp-wiki-f1"))
+	})
+
 	It("keeps the probe keys across passes, so a pass does not revoke them", func() {
 		p := newPlanner(0)
 		for range 2 {
-			d := p.Begin(mcpInput())
-			d.Allowances = allow
+			in := mcpInput()
+			in.Allowances = allow
+			d := p.Begin(in)
 			settle(d, nil, nil, lk).Applied(gatewayplan.ApplyResult{})
 		}
 		Expect(lk.issued).To(Equal(2))
@@ -469,15 +488,15 @@ var _ = Describe("MCP servers", func() {
 		p := newPlanner(time.Minute)
 		old := mcpInput()
 		old.Now = t0.Add(-time.Hour)
+		old.Allowances = allow
 		d := p.Begin(old)
-		d.Allowances = allow
 		settle(d, nil, nil, lk).Applied(gatewayplan.ApplyResult{})
 
 		in := mcpInput()
 		in.MCP[0].File = "mcp-wiki-f2"
 		in.MCPFiles = map[string][]byte{"mcp-wiki-f2": []byte("koinon_test_not-a-real-token")}
+		in.Allowances = allow
 		d = p.Begin(in)
-		d.Allowances = allow
 		pl := settle(d, []string{"mcp-wiki-f2"}, nil, lk)
 		var cred string
 		for _, t := range pl.State.MCP {
@@ -491,7 +510,6 @@ var _ = Describe("MCP servers", func() {
 		// With no previous file the server is not served at all.
 		fresh := newPlanner(time.Minute)
 		d = fresh.Begin(in)
-		d.Allowances = allow
 		pl = settle(d, []string{"mcp-wiki-f2"}, nil, lk)
 		for _, t := range pl.State.MCP {
 			Expect(t.Name).NotTo(Equal("acme-wiki"))
@@ -515,8 +533,8 @@ var _ = Describe("Rendered state", func() {
 		in.ProviderFiles = map[string][]byte{"prov-f1": []byte("koinon_test_not-a-real-token")}
 		in.ModelIDs = map[string]pgtype.UUID{gateway.ModelRef("acme", "open/model"): uuid(50), gateway.ModelRef("globex", "open/model"): uuid(51)}
 
+		in.Allowances = map[string]map[pgtype.UUID][]gatewayplan.Allowed{"acme": {uuid(1): {{Server: uuid(20)}}, uuid(2): {{Server: uuid(20), Tools: []string{"search"}}}}}
 		d := newPlanner(0).Begin(in)
-		d.Allowances = map[string]map[pgtype.UUID][]gatewayplan.Allowed{"acme": {uuid(1): {{Server: uuid(20)}}, uuid(2): {{Server: uuid(20), Tools: []string{"search"}}}}}
 		pl := settle(d, []string{"prov-f1"}, nil, lk)
 		got, _, err := standalone.Render(pl.State, standalone.Options{DatabaseURL: "sqlite:///data/agentgateway.db?mode=rwc"})
 		Expect(err).NotTo(HaveOccurred())

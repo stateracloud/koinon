@@ -451,10 +451,20 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	if g, ok := r.gw.(gateway.LedgerBudgets); ok {
 		ledgerEnforces = g.LedgerEnforcesBudgets()
 	}
+	// The MCP allowlists are read before any key file is written: a failure after the Put would leave
+	// the written files unrecorded as settling (the next pass would see them unchanged).
+	var allowances map[string]map[pgtype.UUID][]gatewayplan.Allowed
+	if len(mcpServed.servers) > 0 {
+		var err error
+		if allowances, err = r.mcpAllowancesOf(ctx, items); err != nil {
+			r.m.PassErrors.WithLabelValues(errKindMCP).Inc()
+			return errors.Join(append(errs, err)...)
+		}
+	}
 	draft := r.plan.Begin(gatewayplan.Input{
 		Now: now, Orgs: orgRefs, Agents: agents,
 		Providers: served.providers, ProviderFiles: served.files, ModelIDs: served.modelIDs,
-		MCP: mcpServed.servers, MCPFiles: mcpServed.files, LedgerEnforcesBudgets: ledgerEnforces,
+		MCP: mcpServed.servers, MCPFiles: mcpServed.files, LedgerEnforcesBudgets: ledgerEnforces, Allowances: allowances,
 	})
 	// An agent whose budget cannot be computed fails closed (its last pushed limit, or zero) and is
 	// reported; it never stops the pass for the other agents and orgs.
@@ -487,13 +497,6 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		if written, present, err = r.cfg.ProviderKeys.Put(ctx, draft.Files); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindProviderKeys).Inc()
 			return errors.Join(append(errs, fmt.Errorf("reconciler: deliver provider keys: %w", err))...)
-		}
-	}
-	if len(mcpServed.servers) > 0 {
-		var err error
-		if draft.Allowances, err = r.mcpAllowancesOf(ctx, items); err != nil {
-			r.m.PassErrors.WithLabelValues(errKindMCP).Inc()
-			return errors.Join(append(errs, err)...)
 		}
 	}
 	plan, err := draft.Settle(ctx, written, present, planLookups{r})
