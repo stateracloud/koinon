@@ -169,17 +169,24 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		Expect(row(ctx).State).To(Equal(store.SandboxStateReady))
 		dirtyHome(ctx, org, user, agent.ID)
 
-		// Agents created now get sandboxes that carry the supervisor label.
+		// Agents created now get sandboxes that carry the supervisor label. Their homes are dirtied
+		// only once the sandboxes exist: home_dirtied_at belongs to the current sandbox, so a run
+		// before the sandbox leaves the home looking untouched and the gate lets it go unbacked.
 		orgs := []pgtype.UUID{org}
+		type owner struct{ org, user, agent pgtype.UUID }
+		var more []owner
 		for range 3 {
 			o, u := newOrg(ctx)
 			addProvider(ctx, o, u, "upstream", "", "fake")
 			a := newAgent(ctx, o, u)
-			dirtyHome(ctx, o, u, a.ID)
+			more = append(more, owner{o, u, a.ID})
 			orgs = append(orgs, o)
 		}
 		pass(ctx)
 		pass(ctx)
+		for _, m := range more {
+			dirtyHome(ctx, m.org, m.user, m.agent)
+		}
 
 		sup.image = "ghcr.io/nvidia/openshell/supervisor:0.1.6"
 		pass(ctx)
