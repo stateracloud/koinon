@@ -115,6 +115,10 @@ reconciler:
   archiveAfter: 168h
   # Sandbox start/stop jobs that run at once, outside the gateway update (plan item LT1).
   sandboxJobs: 8
+  # A sandbox starts on demand (the first run, claimable work or a pre-wake signal), not when its
+  # agent is activated. An org admin can mark an agent keep-warm; this caps the keep-warm sandboxes
+  # per org (the oldest agents win). 0 is the default of 2; a negative value grants none (#315).
+  keepWarmPerOrg: 2
   # Time between full passes. Postgres NOTIFY wakes the reconciler earlier for new runs and
   # agent changes; the timer covers idle timeouts and drift.
   resyncInterval: 30s
