@@ -10,7 +10,7 @@
 // Plain Docker has no OpenShell placeholder substitution, so the container gets a fake key
 // directly. No real key or paid model is ever used.
 //
-// The suite skips when Docker is unavailable and fails when a flavor image is missing. Images are
+// The suite skips (testenv.Require) when Docker is unavailable and fails when a flavor image is missing. Images are
 // tagged per source tree (koinon/flavor-<name>:dev-<hash>, hack/flavor-tag.sh), so build them from
 // this tree with `make flavors` (or set KOINON_FLAVOR_BUILD=1 to build them here). Override an
 // image with KOINON_FLAVOR_IMAGE_<NAME>, for example KOINON_FLAVOR_IMAGE_OPENCODE, and print every
@@ -22,10 +22,7 @@
 package flavors_test
 
 import (
-	"context"
-	"os/exec"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -35,20 +32,3 @@ func TestFlavors(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "flavor contract")
 }
-
-var dockerErr error
-
-var _ = BeforeSuite(func() {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	if out, err := exec.CommandContext(ctx, "docker", "info", "--format", "{{.ServerVersion}}").CombinedOutput(); err != nil {
-		dockerErr = &dockerUnavailableError{out: string(out), err: err}
-	}
-})
-
-type dockerUnavailableError struct {
-	out string
-	err error
-}
-
-func (e *dockerUnavailableError) Error() string { return e.err.Error() + ": " + e.out }

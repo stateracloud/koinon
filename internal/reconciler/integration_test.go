@@ -19,6 +19,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -38,10 +39,8 @@ import (
 // is why the home lab runs it with KOINON_E2E_ORG_ID.
 var _ = Describe("against an OpenShell gateway", Label("integration"), func() {
 	It("activates, stops and archives an agent", func(ctx SpecContext) {
+		testenv.Require(testenv.Var("openshell", "KOINON_OPENSHELL_ENDPOINT"))
 		endpoint := os.Getenv("KOINON_OPENSHELL_ENDPOINT")
-		if endpoint == "" {
-			Skip("KOINON_OPENSHELL_ENDPOINT is not set")
-		}
 		dir, image := os.Getenv("KOINON_OPENSHELL_MTLS_DIR"), os.Getenv("KOINON_OPENSHELL_IMAGE")
 		Expect(dir).NotTo(BeEmpty(), "KOINON_OPENSHELL_MTLS_DIR")
 		Expect(image).NotTo(BeEmpty(), "KOINON_OPENSHELL_IMAGE")

@@ -47,7 +47,7 @@ import (
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/testcontainers/testcontainers-go"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -60,22 +60,8 @@ func TestChartSmoke(t *testing.T) {
 var images map[string]string
 
 var _ = BeforeSuite(func(ctx SpecContext) {
-	if envOr("KUBEBUILDER_ASSETS", "") == "" {
-		Skip("KUBEBUILDER_ASSETS is not set (setup-envtest use -p path; make test-chart-smoke)")
-	}
-	if !dockerAvailable(ctx) {
-		Skip("Docker is not available")
-	}
+	testenv.Require(testenv.Envtest, testenv.Docker)
 	images = buildImages(ctx, "../..")
 	DeferCleanup(func(ctx context.Context) { removeImages(ctx, images) })
 	Expect(images).To(HaveLen(len(koinonImages)))
 }, NodeTimeout(10*time.Minute))
-
-func dockerAvailable(ctx context.Context) bool {
-	p, err := testcontainers.NewDockerProvider()
-	if err != nil {
-		return false
-	}
-	defer func() { _ = p.Close() }()
-	return p.Health(ctx) == nil
-}

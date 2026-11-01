@@ -13,6 +13,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // tinyPDF is a one-page PDF whose text is "Hello Koinon" with a correct cross-reference table.
@@ -51,9 +53,7 @@ func describeTools(f flavor) bool {
 			if !f.dataTools {
 				Skip(f.name + " ships no data tools")
 			}
-			if dockerErr != nil {
-				Skip("Docker is not available: " + dockerErr.Error())
-			}
+			testenv.Require(testenv.Docker)
 			ensureImage(f)
 		})
 
@@ -165,9 +165,7 @@ func describeImageSize(f flavor) bool {
 			if len(f.sizeBudget) == 0 {
 				Skip(f.name + " has no size budget")
 			}
-			if dockerErr != nil {
-				Skip("Docker is not available: " + dockerErr.Error())
-			}
+			testenv.Require(testenv.Docker)
 			ensureImage(f)
 			arch := strings.TrimSpace(docker(ctx, "image", "inspect", "--format", "{{.Architecture}}", f.image()))
 			budget, ok := f.sizeBudget[arch]

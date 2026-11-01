@@ -8,6 +8,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,11 +33,9 @@ import (
 //	                            carry the chart's app.kubernetes.io/part-of=koinon label
 var _ = Describe("Sandbox admission policy on the cluster", Label("escape", "openshell"), func() {
 	It("denies Kata annotations and other runtimes for the controller, and admits a compliant pod", func(ctx SpecContext) {
+		testenv.Require(testenv.Var("cluster", "KOINON_ESCAPE_NAMESPACE"))
 		ns := os.Getenv("KOINON_ESCAPE_NAMESPACE")
 		cfg := kubeConfig()
-		if cfg == nil {
-			Skip("KOINON_ESCAPE_NAMESPACE is not set")
-		}
 		cs := kubernetes.NewForConfigOrDie(cfg)
 		policy := envOr("KOINON_ESCAPE_POLICY", "koinon-koinon-sandbox-pods")
 		if !policyBound(ctx, cs, policy, ns) {

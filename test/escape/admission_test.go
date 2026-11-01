@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
@@ -101,9 +101,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 	}
 
 	BeforeAll(func(ctx SpecContext) {
-		if os.Getenv("KUBEBUILDER_ASSETS") == "" {
-			Skip("KUBEBUILDER_ASSETS is not set (setup-envtest use -p path)")
-		}
+		testenv.Require(testenv.Envtest)
 		policies, bindings = renderSandboxPolicy(ctx)
 
 		env := &envtest.Environment{CRDs: []*apiextensionsv1.CustomResourceDefinition{sandboxCRD()}}

@@ -10,6 +10,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // The chart does not render agentgateway's config ConfigMap: a render without cluster access
@@ -21,10 +23,9 @@ var _ = Describe("the chart and the gateway config", func() {
 
 	render := func(args ...string) []map[string]any {
 		GinkgoHelper()
+		testenv.Require(testenv.Binary("helm"))
 		helm, err := exec.LookPath("helm")
-		if err != nil {
-			Skip("helm is not installed")
-		}
+		Expect(err).NotTo(HaveOccurred())
 		cmd := exec.Command(helm, append([]string{
 			"template", "koinon", chart, "--namespace", "koinon",
 			"--set", "gateway.mode=standalone", "--set", "openshell.insecure=true",
