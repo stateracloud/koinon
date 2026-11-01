@@ -455,7 +455,7 @@ var _ = Describe("koinon-api keys", func() {
 
 		It("does not ask without a prompter: a missing ID is the old error and nothing is confirmed", func(ctx SpecContext) {
 			tool.Prompt = nil
-			Expect(tool.Activate(ctx, "")).To(MatchError("KEK  is not in the key set"))
+			Expect(tool.Activate(ctx, "")).To(MatchError("a KEK ID is required"))
 			Expect(tool.Rewrap(ctx)).To(Succeed())
 			Expect(tool.Reencrypt(ctx)).To(Succeed())
 		})
