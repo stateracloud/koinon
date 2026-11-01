@@ -96,6 +96,11 @@ const (
 	KoinonTest = "koinon.test"
 	// KoinonParkReason is the attribute of the koinon.park event.
 	KoinonParkReason = "koinon.park.reason"
+	// KoinonMCPMissingServers is the root span's list (comma-separated names) of the MCP servers the
+	// agent may use that were not serving tools when the run started its harness, and
+	// KoinonMCPMissingAttempts how many checks found any (1: back after the retry, 2: the run failed).
+	KoinonMCPMissingServers  = "koinon.mcp.missing_servers"
+	KoinonMCPMissingAttempts = "koinon.mcp.missing_attempts"
 	// KoinonWaitSeconds is the attribute of the koinon.wait event.
 	KoinonWaitSeconds = "koinon.wait.seconds"
 

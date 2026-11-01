@@ -77,6 +77,21 @@ describe('buildTimeline', () => {
     ])
   })
 
+  it('shows a missing MCP server and its recovery as notes', () => {
+    const items = buildTimeline([], {
+      [run]: [
+        runEvent(1, 'run.mcp_server_missing', { attempt: 1, servers: [{ name: 'metrics', reason: 'x' }, { name: 'wiki', reason: 'y' }] }),
+        runEvent(2, 'run.mcp_server_recovered', { servers: ['metrics', 'wiki'] }),
+        runEvent(3, 'run.mcp_server_missing', { attempt: 2, servers: [{ name: 'metrics', reason: 'x' }] }),
+      ],
+    })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456 found the MCP servers metrics, wiki not serving tools and will check once more before it starts',
+      'Run r-123456 found its MCP servers serving tools again and started',
+      'Run r-123456 found the MCP server metrics not serving tools again',
+    ])
+  })
+
   it('shows an uncached run as a note', () => {
     const items = buildTimeline([], { [run]: [runEvent(1, 'run.uncached', { model: 'google/gemini-x', reason: 'no cache mode for the provider format' })] })
     expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([

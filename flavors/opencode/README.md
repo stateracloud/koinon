@@ -160,6 +160,14 @@ appears once the server is connected. agentd waits for it (bounded; a timeout fa
 then waits one more second: OpenCode registers the server's tools after a 100 ms debounce
 (`packages/core/src/tool/mcp.ts`), separately from the prompt path.
 
+The announcement says nothing about the tools of the MCP servers the agent may use: agentgateway
+runs `failOpen`, so a server it cannot reach is silently left out of the tool list. Before it starts
+the harness, agentd therefore checks Koinon's record of those servers (unhealthy, or failing probes
+below the threshold; a disabled or removed server only gets the note at session start). A miss
+records the run event `run.mcp_server_missing` and puts `koinon.mcp.missing_servers` on the root
+span, waits `MCPRetryDelay` (75 s by default, a probe interval plus slack) and looks once more; a
+second miss fails the run (issue #326).
+
 ## Model selection
 
 A new session reports a model OpenCode picked from its own catalog (for example

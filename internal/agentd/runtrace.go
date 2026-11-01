@@ -47,10 +47,14 @@ type runTrace struct {
 	// fenced closes when the worker may no longer write; database calls on the run's path end then.
 	fenced <-chan struct{}
 
-	mu       sync.Mutex
-	id       identity
-	turn     *turnTrace
-	parkedOn string // the park reason endTurn chose, until finish
+	mu sync.Mutex
+	id identity
+	// mcpMissing is set before the first turn: the names of the allowed MCP servers that were not
+	// serving tools when the harness started, and the check that found them (mcpwait.go).
+	mcpMissing []string
+	mcpAttempt int
+	turn       *turnTrace
+	parkedOn   string // the park reason endTurn chose, until finish
 }
 
 // identity is what the root span says about the agent and the task.
@@ -153,6 +157,17 @@ func (t *runTrace) identify(agent store.Agent, version store.AgentVersion, task 
 	t.mu.Unlock()
 }
 
+// noteMCPMissing records the allowed MCP servers found missing before the harness started; the next
+// root span carries them (attempt 1 or 2, see semconv.KoinonMCPMissingAttempts).
+func (t *runTrace) noteMCPMissing(names []string, attempt int) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.mcpMissing, t.mcpAttempt = names, attempt
+	t.mu.Unlock()
+}
+
 func uuidString(u pgtype.UUID) string {
 	if !u.Valid {
 		return ""
@@ -186,7 +201,7 @@ func (t *runTrace) beginTurn(ctx context.Context, prompt string) map[string]any 
 		return nil
 	}
 	t.mu.Lock()
-	prev, id := t.turn, t.id
+	prev, id, missing, attempt := t.turn, t.id, t.mcpMissing, t.mcpAttempt
 	t.turn, t.parkedOn = nil, ""
 	t.mu.Unlock()
 	if prev != nil {
@@ -216,6 +231,11 @@ func (t *runTrace) beginTurn(ctx context.Context, prompt string) map[string]any 
 		attribute.String(semconv.KoinonRequestedByKind, id.requestedKind),
 		attribute.String(semconv.KoinonRequestedByID, id.requestedID),
 	)
+	if len(missing) > 0 {
+		attrs = append(attrs,
+			attribute.String(semconv.KoinonMCPMissingServers, strings.Join(missing, ",")),
+			attribute.Int(semconv.KoinonMCPMissingAttempts, attempt))
+	}
 	opts := []trace.SpanStartOption{trace.WithSpanKind(trace.SpanKindInternal), trace.WithTimestamp(now), trace.WithAttributes(attrs...)}
 	var wait *time.Duration
 	if row.Seq > 1 {
