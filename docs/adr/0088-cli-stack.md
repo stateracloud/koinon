@@ -28,7 +28,9 @@ install failed), 3151301a (`KOINON_KEK_DIR` was missing from the reconciler) and
    `KOINON_` plus the flag name in upper case with `-` as `_`; a flag may declare aliases that are
    read after it (`DATABASE_URL`, `POD_NAMESPACE`). An empty variable counts as set, so
    `KOINON_OTLP_ADDR=` turns the receiver off as `--otlp-addr=` does. Config file keys are the flag
-   names. Every existing variable and file key keeps its name, so no chart value changes and no
+   names, or the nested key a flag declares with `cli.ConfigKey` (the reconciler's `--gateway-mode`
+   is `gateway.mode` in the chart's `config.yaml`, read through `cli.ConfigFile`); an empty value in
+   the file leaves the default, as the chart renders an unset value that way. Every existing variable and file key keeps its name, so no chart value changes and no
    upgrade breaks (ADR 0085). `internal/cli` implements this once (`Bind`, `Resolve`), replacing
    `BindEnv` and the reconciler's `fill`.
 3. **Each command declares its own flags and what it requires.** Required flags are marked required
@@ -72,8 +74,8 @@ install failed), 3151301a (`KOINON_KEK_DIR` was missing from the reconciler) and
   `make test`, not a fresh install.
 - Negative: a larger dependency set (cobra, viper, fang and their transitive modules, all past the
   ADR 0079 age check); the old argument order stops working.
-- Follow-ups: the reconciler (#457) and agentd (#458) move onto `internal/cli` and join
-  `commandTrees`; the interactive prompts (#459); operator subcommand output with lipgloss; moving
+- Follow-ups: agentd (#458) moves onto `internal/cli` and joins `commandTrees` (the reconciler did in
+  #457, and the contract test writes the ConfigMap it mounts to disk, so its file settings are checked); the interactive prompts (#459); operator subcommand output with lipgloss; moving
   the remaining startup-input assertions of `hack/chart-check.d` into the contract test.
 
 ## Links

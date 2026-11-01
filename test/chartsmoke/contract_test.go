@@ -4,8 +4,10 @@ package chartsmoke_test
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -14,14 +16,16 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/cmd/koinonagentd"
 	"github.com/stateracloud/koinon/internal/cmd/koinonapi"
+	"github.com/stateracloud/koinon/internal/cmd/koinonreconciler"
 )
 
 // commandTrees are the binaries whose command tree the contract test knows (ADR 0088). A binary
 // that has moved to the shared CLI stack adds itself here; until then its containers are not
-// checked (the reconciler: #457).
+// checked. koinon-api, koinon-agentd and koinon-reconciler are all on the stack (#497, #458, #457).
 var commandTrees = map[string]func() *cobra.Command{
-	"koinon-api":    koinonapi.NewRootCommand,
-	"koinon-agentd": koinonagentd.NewRootCommand,
+	"koinon-api":        koinonapi.NewRootCommand,
+	"koinon-agentd":     koinonagentd.NewRootCommand,
+	"koinon-reconciler": koinonreconciler.NewRootCommand,
 }
 
 // TestChartContract is the chart's side of the startup contract, without Docker or a cluster. It
@@ -34,8 +38,10 @@ var commandTrees = map[string]func() *cobra.Command{
 // (KOINON_KEK_DIR missing from a Deployment) are failures of this kind; the container-level smoke
 // test (smoke_test.go, make test-chart-smoke) still boots the same containers against Postgres.
 //
-// A value that comes from a Secret, a ConfigMap or the downward API is replaced by a placeholder,
-// so a check that parses such a value (a duration, a mode) cannot be proved here.
+// A ConfigMap mounted into the container is written to a temporary directory and the paths under its
+// mount point are rewritten to it, so the settings the reconciler reads from config.yaml are checked
+// as rendered. A value that comes from a Secret or the downward API is replaced by a placeholder, so
+// a check that parses such a value (a duration, a mode) cannot be proved here.
 func TestChartContract(t *testing.T) {
 	if _, err := exec.LookPath(envOr("HELM", "helm")); err != nil {
 		t.Skip("helm is not installed (set HELM)")
@@ -61,7 +67,14 @@ func TestChartContract(t *testing.T) {
 					for _, e := range c.Env {
 						env[e.Name] = envValue(e)
 					}
-					if err := cli.Check(newRoot(), c.Args, env); err != nil {
+					args := c.Args
+					if mounts := configMapFiles(t, r, c); len(mounts) > 0 {
+						args = mounts.rewriteAll(c.Args)
+						for k, v := range env {
+							env[k] = mounts.rewrite(v)
+						}
+					}
+					if err := cli.Check(newRoot(), args, env); err != nil {
 						t.Errorf("%s %v does not start: %v", imageName(c.Image), c.Args, err)
 					}
 				})
@@ -76,14 +89,65 @@ func TestChartContract(t *testing.T) {
 // podContainer is a rendered container and where it runs.
 type podContainer struct {
 	corev1.Container
-	where string
+	where   string
+	volumes []corev1.Volume
+}
+
+// fileMounts maps a container path (a ConfigMap volume's mount point) to where the test wrote it.
+type fileMounts map[string]string
+
+func (m fileMounts) rewrite(v string) string {
+	for from, to := range m {
+		if v == from || strings.HasPrefix(v, from+"/") {
+			return to + strings.TrimPrefix(v, from)
+		}
+	}
+	return v
+}
+
+func (m fileMounts) rewriteAll(vs []string) []string {
+	out := make([]string, len(vs))
+	for i, v := range vs {
+		out[i] = m.rewrite(v)
+	}
+	return out
+}
+
+// configMapFiles writes each ConfigMap volume the container mounts to a temporary directory.
+func configMapFiles(t *testing.T, r *rendered, c podContainer) fileMounts {
+	t.Helper()
+	out := fileMounts{}
+	for _, m := range c.VolumeMounts {
+		for _, v := range c.volumes {
+			if v.Name != m.Name || v.ConfigMap == nil {
+				continue
+			}
+			var cm *corev1.ConfigMap
+			for _, o := range r.Objects {
+				if o, ok := o.(*corev1.ConfigMap); ok && o.Name == v.ConfigMap.Name {
+					cm = o
+				}
+			}
+			if cm == nil {
+				t.Fatalf("volume %s: ConfigMap %s is not rendered", v.Name, v.ConfigMap.Name)
+			}
+			dir := t.TempDir()
+			for key, data := range cm.Data {
+				if err := os.WriteFile(filepath.Join(dir, key), []byte(data), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			out[m.MountPath] = dir
+		}
+	}
+	return out
 }
 
 func containersOf(r *rendered) []podContainer {
 	var out []podContainer
 	add := func(where string, spec corev1.PodSpec) {
 		for _, c := range append(append([]corev1.Container{}, spec.InitContainers...), spec.Containers...) {
-			out = append(out, podContainer{c, where})
+			out = append(out, podContainer{c, where, spec.Volumes})
 		}
 	}
 	for _, j := range r.Jobs {
