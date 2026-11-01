@@ -29,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/mcpcheck"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/otlpauth"
@@ -191,6 +192,11 @@ func run() error {
 
 	if cfg.savedWorkKeyFile != "" {
 		cfg.pool.SavedWorkKey = func() ([]byte, error) { return os.ReadFile(cfg.savedWorkKeyFile) } //nolint:gosec // an operator-set path
+		if cfg.pool.SavedWorkURL != "" {
+			// The live check of an agent's MCP tools (issue #488) asks koinon-api, which holds the
+			// agent's gateway key; koinon-agentd never does.
+			cfg.pool.MCPTools = mcpcheck.Remote{HTTP: &http.Client{Timeout: time.Minute}, BaseURL: cfg.pool.SavedWorkURL, Key: cfg.pool.SavedWorkKey}
+		}
 	}
 	if cfg.checkpoints {
 		cp, err := checkpointsFrom(cfg)

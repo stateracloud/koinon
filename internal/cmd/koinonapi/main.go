@@ -74,6 +74,7 @@ import (
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpask"
+	"github.com/stateracloud/koinon/internal/mcpcheck"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
@@ -690,6 +691,11 @@ func serve(ctx context.Context, cfg config) error {
 		}
 		mux := http.NewServeMux()
 		mux.Handle(savedwork.UploadPath, savedwork.NewReceiver(pool, keyring, keyFn, slog.Default()))
+		// The live check of an agent's MCP tools (issue #488): koinon-api reads the agent's gateway key
+		// and lists the tools as the agent; koinon-agentd gets names only, never the key.
+		if cfg.gatewayMCPURL != "" {
+			mux.Handle(mcpcheck.Path, mcpcheck.Server{Keys: mcpcheck.KubeAgentKeys{Client: kube, Namespace: cfg.secretsNamespace}, Gateway: cfg.gatewayMCPURL, Key: keyFn})
+		}
 		// The password of an agent's home repository (ADR 0032): koinon-agentd, the checkpoint
 		// writer, asks per checkpoint and holds no key-encryption key.
 		mux.Handle(checkpoint.RepositoryPath, checkpoint.Server{Passwords: checkpoint.Passwords{Q: store.New(pool), Keys: keyring}, Key: keyFn})
