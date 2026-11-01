@@ -57,6 +57,15 @@ var _ = Describe("judge", func() {
 		Expect(r.requires).To(Equal([]string{"docker"}))
 	})
 
+	It("ignores the skips Ginkgo propagates from a skipped BeforeAll (test/escape)", func() {
+		r := judge("pkg", report(true,
+			spec(types.NodeTypeBeforeAll, types.SpecStateSkipped, "koinon:requires=envtest: KUBEBUILDER_ASSETS is not set"),
+			spec(types.NodeTypeIt, types.SpecStateSkipped, "Spec skipped because Skip() was called in BeforeAll"),
+		), "")
+		Expect(r.verdict).To(Equal(skipped))
+		Expect(r.requires).To(Equal([]string{"envtest"}))
+	})
+
 	It("is FAIL when KOINON_REQUIRE lists the missing requirement", func() {
 		r := judge("pkg", report(true, spec(types.NodeTypeBeforeSuite, types.SpecStateSkipped, docker)), "envtest,docker")
 		Expect(r.verdict).To(Equal(fail))
