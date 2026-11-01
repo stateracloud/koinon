@@ -88,15 +88,24 @@ spec:
             httpGet: {path: /healthz, port: http}
             periodSeconds: 2
             failureThreshold: 150
+          # Not ready while the database schema is outside the goose range this build supports (ADR 0085);
+          # liveness stays /healthz so the pod waits instead of restarting.
           readinessProbe:
-            httpGet: {path: /healthz, port: http}
+            httpGet: {path: /readyz, port: http}
           livenessProbe:
             httpGet: {path: /healthz, port: http}
           {{- end }}
           {{- if eq $component "agentd" }}
           ports:
+            - name: health
+              containerPort: 8082
             - name: metrics
               containerPort: {{ $.Values.metrics.port }}
+          # Not ready while the database schema is outside the goose range this build supports (ADR 0085).
+          readinessProbe:
+            httpGet: {path: /readyz, port: health}
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
           {{- end }}
           env:
             # Prometheus /metrics, on its own port (values: metrics).

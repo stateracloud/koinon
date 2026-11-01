@@ -87,6 +87,7 @@ import (
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/schemagate"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/tokens"
@@ -374,6 +375,11 @@ func run() error {
 		return fmt.Errorf("connect to postgres: %w", err)
 	}
 	defer pool.Close()
+
+	// Not Ready (/readyz) while the schema is outside the goose range this build supports
+	// (ADR 0085): after an app-only rollback the older pods would otherwise fail at their first query.
+	gate := schemagate.New(pool, schemagate.Range{Min: migrations.MinSupported, Latest: migrations.MustLatest()}, slog.Default())
+	safego.Go(ctx, slog.Default(), "schema-gate", gate.Run)
 
 	mode, err := auth.ParseIdentityMode(cfg.defaultOrgMode)
 	if err != nil {
@@ -702,6 +708,7 @@ func run() error {
 		Services:       []func(*connect.Server){svc.Register},
 		UI:             web.Dist(),
 		Mounts:         []func(*http.ServeMux){adminSvc.Mount},
+		Ready:          gate.ReadyHandler(),
 	})
 	if err != nil {
 		return err
