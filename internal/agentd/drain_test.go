@@ -96,6 +96,7 @@ var _ = Describe("Draining on stop", func() {
 		stop() // fails the spec if the pool does not stop within 10 s: the deadline is a minute
 		Expect(time.Since(started)).To(BeNumerically("<", 5*time.Second))
 		Expect(getRun(ctx, r).LeaseExpiresAt.Time).To(BeTemporally("<", time.Now()), "the lease was released")
+		Expect(kinds(events(ctx, r))).NotTo(ContainElement("run.interrupted"), "a handed-off run is not reported as interrupted")
 	})
 
 	It("stops a retry back-off at once when the run is cancelled during the drain", func(ctx SpecContext) {
