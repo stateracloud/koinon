@@ -21,10 +21,10 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/pressly/goose/v3"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
 // docker is whether testcontainers can start containers; the Postgres specs skip without it.
@@ -106,11 +106,8 @@ var _ = Describe("retryBootstrap", func() {
 			if !docker {
 				Skip("no container provider")
 			}
-			ctr, err := postgres.Run(ctx, "postgres:18-alpine", postgres.WithDatabase("koinon"), postgres.BasicWaitStrategies())
-			Expect(err).NotTo(HaveOccurred())
-			DeferCleanup(func(ctx context.Context) error { return ctr.Terminate(ctx) })
-			dsn, err = ctr.ConnectionString(ctx, "sslmode=disable")
-			Expect(err).NotTo(HaveOccurred())
+			dsn = pgtest.Run(ctx)
+			var err error
 			pool, err = pgxpool.New(ctx, dsn)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(pool.Close)
