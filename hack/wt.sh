@@ -8,7 +8,10 @@
 # Usage:
 #   wt.sh new <name> [--from REF] [--branch BRANCH]
 #       fetch origin, add a worktree at <root>/<name> from REF (default origin/main). With --branch it
-#       creates that branch, otherwise HEAD is detached. Prints only the absolute path.
+#       creates that branch, otherwise HEAD is detached. Prints only the absolute path. It also
+#       installs web/node_modules (pnpm install --frozen-lockfile --offline from the shared store),
+#       because make generate needs it; when that fails it says how to fix it and still succeeds.
+#       KOINON_WT_NO_INSTALL=1 skips the install.
 #   wt.sh rm <name> [--branch] [--force]
 #       remove the worktree. Refuses when it is dirty or has commits on no remote branch (--force
 #       skips both). --branch also deletes its local branch, never one with an open PR.
@@ -38,6 +41,24 @@ check_name() {
 
 open_pr() { # <branch>: prints the open PR number, if any
   gh pr list --head "$1" --state open --json number 2>/dev/null | jq -r '.[0].number // empty' 2>/dev/null || true
+}
+
+install_web() { # <dir>: web dependencies for make generate; never fails the worktree creation
+	local dir=$1
+	[ -z "${KOINON_WT_NO_INSTALL:-}" ] || return 0
+	[ -f "$dir/web/pnpm-lock.yaml" ] || return 0
+	if ! command -v pnpm >/dev/null 2>&1; then
+		echo "wt: pnpm not installed; web/node_modules missing, so make generate will fail (install pnpm, then: cd $dir/web && pnpm install --frozen-lockfile)" >&2
+		return 0
+	fi
+	if (cd "$dir/web" && pnpm install --frozen-lockfile --offline) >&2; then
+		return 0
+	fi
+	echo "wt: offline pnpm install failed (store lacks a package); retrying online" >&2
+	if (cd "$dir/web" && pnpm install --frozen-lockfile) >&2; then
+		return 0
+	fi
+	echo "wt: web install failed; make generate will fail until: cd $dir/web && pnpm install --frozen-lockfile" >&2
 }
 
 cmd_new() {
@@ -72,6 +93,7 @@ cmd_new() {
   else
     git worktree add -q --detach "$dir" "$from" >&2
   fi
+  install_web "$dir"
   echo "$dir"
 }
 
