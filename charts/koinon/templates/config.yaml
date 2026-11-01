@@ -58,6 +58,7 @@ data:
       parkWarm: {{ .Values.reconciler.parkWarm }}
       archiveAfter: {{ .Values.reconciler.archiveAfter }}
       sandboxJobs: {{ .Values.reconciler.sandboxJobs }}
+      keepWarmPerOrg: {{ .Values.reconciler.keepWarmPerOrg }}
       resyncInterval: {{ .Values.reconciler.resyncInterval }}
       homeRetention: {{ .Values.reconciler.homeRetention }}
       checkpoints: {{ .Values.checkpoints.enabled }}

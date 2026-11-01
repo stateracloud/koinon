@@ -14,6 +14,7 @@ has "reconciler config carries the archive window (AR1)" 'archiveAfter: 168h' --
 has "reconciler config carries the archive window override" 'archiveAfter: 24h' --set reconciler.archiveAfter=24h --show-only templates/config.yaml
 has "reconciler config can turn the archive tier off" 'archiveAfter: -1h' --set reconciler.archiveAfter=-1h --show-only templates/config.yaml
 has "reconciler config carries the sandbox job bound" 'sandboxJobs: 8' --show-only templates/config.yaml
+has "reconciler config carries the keep-warm cap per org" 'keepWarmPerOrg: 2' --show-only templates/config.yaml
 # Flavor pre-pull (practice B6): off by default; needs a node selector; one init container per
 # flavor image through koinon.imageRef and the pull secrets; never in a sandbox namespace.
 prepull=(--set flavorPrepull.enabled=true --set-string 'flavorPrepull.nodeSelector.katacontainers\.io/kata-runtime=true')

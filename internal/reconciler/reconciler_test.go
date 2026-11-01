@@ -164,6 +164,7 @@ var _ = Describe("Reconciler", func() {
 				OrgID: org, ID: agent.ID, VersionID: version.ID, ActivatedBy: user,
 			})
 			Expect(err).NotTo(HaveOccurred())
+			keepWarm(ctx, org, agent.ID)
 			pass(ctx, newReconciler())
 
 			row := sandboxRow(ctx, agent.ID)
@@ -366,6 +367,7 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("records the sandbox's OpenShell ID as its home generation, new for a recreated sandbox", func(ctx SpecContext) {
+			coolDown(ctx, org, agent.ID)
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			id := osg.Sandbox(row.Workspace, names.Sandbox).GetMetadata().GetId()
 			Expect(id).NotTo(BeEmpty())
@@ -793,6 +795,7 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("stops after the idle timeout and starts again for a queued run", func(ctx SpecContext) {
+			coolDown(ctx, org, agent.ID)
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			phase := func() openshellv1.SandboxPhase {
 				return osg.Sandbox(row.Workspace, names.Sandbox).GetStatus().GetPhase()
@@ -1083,6 +1086,7 @@ var _ = Describe("Reconciler", func() {
 			b := newAgent(ctx, org, user)
 			r := newReconciler()
 			pass(ctx, r)
+			coolDown(ctx, org, a.ID, b.ID)
 			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
 
 			mg.fail = errors.New("gateway unreachable")
@@ -1103,6 +1107,7 @@ var _ = Describe("Reconciler", func() {
 			a := newAgent(ctx, org, user)
 			r := newReconciler()
 			pass(ctx, r)
+			coolDown(ctx, org, a.ID)
 			keyBefore := sandboxRow(ctx, a.ID).GatewayKeyID
 			Expect(osg.Calls("CreateSandbox")).To(Equal(1))
 
@@ -1128,6 +1133,7 @@ var _ = Describe("Reconciler", func() {
 			a := newAgent(ctx, org, user)
 			r := newReconciler()
 			pass(ctx, r)
+			coolDown(ctx, org, a.ID)
 			mg.fail = &gateway.ConfigRejectedError{Revision: "abc", Reason: "USD budget limits support at most 9 fractional digits"}
 			fresh := newAgent(ctx, org, user)
 			advance(11 * time.Minute)
@@ -1149,6 +1155,7 @@ var _ = Describe("Reconciler", func() {
 			a := newAgent(ctx, org, user)
 			r := newReconciler()
 			pass(ctx, r)
+			coolDown(ctx, org, a.ID)
 			served := map[string]bool{}
 			for _, k := range mg.last().Keys {
 				served[k.ID] = true
@@ -1180,6 +1187,7 @@ var _ = Describe("Reconciler", func() {
 		It("holds back every agent after a restart until one Apply has succeeded", func(ctx SpecContext) {
 			a := newAgent(ctx, org, user)
 			pass(ctx, newReconciler())
+			coolDown(ctx, org, a.ID)
 			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
 
 			restarted := newReconciler()
@@ -1223,6 +1231,7 @@ var _ = Describe("Reconciler", func() {
 		advance(time.Hour) // the first pass creates the sandbox; the next one stops it as idle
 		r := newReconciler()
 		pass(ctx, r)
+		coolDown(ctx, org, agent.ID)
 		pass(ctx, r)
 		names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 		ws := execution.WorkspaceName(org.Bytes)
