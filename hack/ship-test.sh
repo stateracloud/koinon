@@ -20,7 +20,16 @@ cat >"$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 echo "gh $*" >>"$FAKE_LOG"
 case "$1 $2" in
-"pr list") echo "${FAKE_PR_URL:-}" ;;
+"pr list")
+	if [[ " $* " == *" --state all "* ]]; then
+		# the branch's PR lookup: apply the caller's --jq to FAKE_PR_JSON (a JSON array)
+		q=""
+		while [[ $# -gt 0 ]]; do [[ $1 == --jq ]] && q=$2; shift; done
+		[[ -z ${FAKE_PR_JSON:-} ]] || jq -r "$q" <<<"$FAKE_PR_JSON"
+	else
+		echo "${FAKE_PR_URL:-}"
+	fi
+	;;
 "pr create") echo "https://example.invalid/o/r/pull/123" ;;
 "project item-add") exit "${FAKE_BOARD_RC:-0}" ;;
 esac
@@ -69,7 +78,7 @@ newwork() { # prints the path of a fresh clone on branch feat/x with an identity
 }
 # shellcheck disable=SC2329 # called through check
 branch_on_origin() { git --git-dir="$tmp/origin.git" rev-parse --verify -q "refs/heads/$1" >/dev/null; }
-reset_state() { : >"$FAKE_LOG"; unset FAKE_PR_URL FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_SHIP_ALLOWED_EMAILS KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_PR_URL FAKE_PR_JSON FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_SHIP_ALLOWED_EMAILS KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; }
 
 fail=0
 pass=0
@@ -118,7 +127,7 @@ check "gitleaks ran over origin/main..HEAD" has 'gitleaks git --redact --no-bann
 check "gitleaks line counts commits" has '^gitleaks ok (1 commits)$' "$tmp/o2"
 check "pushed line" has '^pushed feat/x$' "$tmp/o2"
 check "branch reached origin" branch_on_origin feat/x
-check "no PR without --pr-title" hasnt 'gh pr' "$FAKE_LOG"
+check "no PR without --pr-title" hasnt 'gh pr \(create\|edit\|merge\)' "$FAKE_LOG"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/x
 
 # 3. allowed identity passes
@@ -314,6 +323,50 @@ check "unknown flag: exit 2" eq "$rc" 2
 echo u >u.txt
 rc=$(run "$tmp/o14b")
 check "changes without a message: exit 2" eq "$rc" 2
+
+# 15. (#431) the branch's PR: merged or closed refuses before the push; auto-merge on warns; --hold
+reset_state
+w=$(newwork); cd "$w"
+echo m >m.txt
+export FAKE_PR_JSON='[{"number":427,"state":"MERGED","autoMergeRequest":null}]'
+rc=$(run "$tmp/o15" -m "fix: m")
+check "merged PR: exit 1" eq "$rc" 1
+check "merged PR is named" has 'PR #427 for feat/x is MERGED' "$tmp/o15"
+check "merged PR: says how to continue" has 'hack/wt.sh new <name> --from feat/x --branch <new-branch>' "$tmp/o15"
+check "merged PR: nothing pushed" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/feat/x"
+check "merged PR: gitleaks not reached" hasnt '^gitleaks' "$FAKE_LOG"
+export FAKE_PR_JSON='[{"number":428,"state":"CLOSED","autoMergeRequest":null}]'
+rc=$(run "$tmp/o15b")
+check "closed PR: exit 1" eq "$rc" 1
+check "closed PR is named" has 'is CLOSED' "$tmp/o15b"
+# an older merged PR plus a newer open one: the open one counts
+export FAKE_PR_JSON='[{"number":427,"state":"MERGED","autoMergeRequest":null},{"number":430,"state":"OPEN","autoMergeRequest":null}]'
+rc=$(run "$tmp/o15c")
+check "merged and open PR on the branch: pushes" eq "$rc" 0
+check "open PR without auto-merge: no warning" hasnt 'auto-merge on' "$tmp/o15c"
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/x
+reset_state
+w=$(newwork); cd "$w"
+echo n >n.txt
+export FAKE_PR_JSON='[{"number":431,"state":"OPEN","autoMergeRequest":{"mergeMethod":"MERGE"}}]'
+rc=$(run "$tmp/o15d" -m "fix: n")
+check "auto-merge on: still pushes" eq "$rc" 0
+check "auto-merge on: warning" has 'warning: PR #431 has auto-merge on' "$tmp/o15d"
+check "auto-merge on: not turned off" hasnt 'disable-auto' "$FAKE_LOG"
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/x
+reset_state
+w=$(newwork); cd "$w"
+echo o >o.txt
+export FAKE_PR_JSON='[{"number":431,"state":"OPEN","autoMergeRequest":{"mergeMethod":"MERGE"}}]'
+rc=$(run "$tmp/o15e" -m "fix: o" --hold)
+check "--hold: exit 0" eq "$rc" 0
+check "--hold: gh pr merge --disable-auto" has 'gh pr merge 431 --disable-auto' "$FAKE_LOG"
+check "--hold: says how to turn it back on" has 'gh pr merge 431 --auto --merge' "$tmp/o15e"
+check "--hold: no warning" hasnt 'warning' "$tmp/o15e"
+check "--hold: auto-merge off before the push" bash -c "awk '/disable-auto/{a=NR} END{exit !a}' $FAKE_LOG"
+check "--hold: pushed" branch_on_origin feat/x
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/x
+unset FAKE_PR_JSON
 
 echo "$pass passed, $fail failed"
 exit $((fail > 0))
