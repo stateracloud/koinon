@@ -5,8 +5,12 @@
 # origin/main, gitleaks, push, pull request, board, ready, auto-merge, claim review. One line per step.
 #
 #   hack/ship.sh [--message-file F | -m SUBJECT] [--pr-title T --pr-body FILE] [--draft] [--ready]
-#                [--e2e] [--auto-merge] [--review N[,M]] [--dry-run]
+#                [--e2e] [--auto-merge] [--hold] [--review N[,M]] [--dry-run]
 #
+# Before the push it looks up the branch's PR. A MERGED or CLOSED one is a refusal (exit 1): a push
+# cannot reach main through it; the message says how to continue on a new branch. Pushing to an open
+# PR that has auto-merge on prints a warning (it can merge at the old head before CI sees the new
+# commits); --hold turns auto-merge off before the push and prints the command that turns it back on.
 # --e2e adds the `e2e` label before the push (an open PR) or at PR creation, so one run carries it.
 #
 # Run it inside a checkout or worktree on a feature branch. Environment:
@@ -20,7 +24,7 @@
 # The gitleaks gate is never skipped and nothing is ever force-pushed.
 set -euo pipefail
 
-msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 review="" dry=0
+msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 review="" dry=0
 need() { [[ $# -ge 2 ]] || { echo "ship: $1 needs a value" >&2; exit 2; }; }
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -32,9 +36,10 @@ while [[ $# -gt 0 ]]; do
 	--ready) ready=1; shift ;;
 	--e2e) e2e=1; shift ;;
 	--auto-merge) auto=1; shift ;;
+	--hold) hold=1; shift ;;
 	--review) need "$@"; review=$2; shift 2 ;;
 	--dry-run) dry=1; shift ;;
-	-h | --help) sed -n 4,21p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h | --help) sed -n 4,26p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "ship: unknown argument $1 (see --help)" >&2; exit 2 ;;
 	esac
 done
@@ -126,6 +131,29 @@ else
 			exit 4
 		fi
 	fi
+
+	# 4b. the branch's PR: a merged or closed one cannot take this push (#431)
+	prinfo=$(gh pr list --head "$branch" --state all --json number,state,autoMergeRequest --jq \
+		'(map(select(.state == "OPEN"))[0] // (sort_by(.number) | last)) // empty | [.state, (.number | tostring), (.autoMergeRequest != null | tostring)] | @tsv' 2>/dev/null || true)
+	pr_state="" pr_num="" pr_auto=false
+	if [[ -n $prinfo ]]; then IFS=$'\t' read -r pr_state pr_num pr_auto <<<"$prinfo"; fi
+	case $pr_state in
+	MERGED | CLOSED)
+		echo "ship: PR #$pr_num for $branch is $pr_state; a push to $branch cannot reach main (nothing pushed)" >&2
+		echo "ship: continue on a new branch from the unmerged commits:" >&2
+		echo "ship:   hack/wt.sh new <name> --from $branch --branch <new-branch>" >&2
+		exit 1
+		;;
+	OPEN)
+		if [[ $pr_auto == true && $hold == 1 ]]; then
+			gh pr merge "$pr_num" --disable-auto >/dev/null || fail "could not turn auto-merge off on PR #$pr_num"
+			say "hold: auto-merge off on PR #$pr_num"
+			say "turn it back on after CI is green: gh pr merge $pr_num --auto --merge"
+		elif [[ $pr_auto == true ]]; then
+			echo "ship: warning: PR #$pr_num has auto-merge on; it can merge at the old head before CI sees the new commits (use --hold to turn it off for the push)" >&2
+		fi
+		;;
+	esac
 
 	# 5. gitleaks over every commit CI will scan
 	command -v gitleaks >/dev/null || fail "gitleaks is not installed"

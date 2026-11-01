@@ -137,6 +137,22 @@ expect "only a cancelled run: failed, with the dispatch hint" 1 "FAILED quicksta
 REQUIRED quickstart failed
 only cancelled runs of quickstart on this head; run: gh workflow run e2e-kind.yml --ref <branch>"
 
+# 10b. (#431) cancelled and in progress with the same startedAt: keep waiting for the live run
+t0=2026-11-01T10:00:00Z
+q_cancel=$(cr_at quickstart CANCELLED 41261362803 $t0)
+q_live=$(printf '{"name":"quickstart","status":"IN_PROGRESS","conclusion":"","startedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/41261363000/job/9"}' $t0)
+q_done=$(cr_at quickstart SUCCESS 41261363000 $t0)
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$q_cancel,$q_live")" "$(pr OPEN CLEAN "" "$lint_ok,$q_live,$q_cancel")" \
+  "$(pr OPEN CLEAN "" "$lint_ok,$q_cancel,$q_done")"
+run 7 --checks --require quickstart --interval 0
+expect "cancelled plus in-progress at the same startedAt: waits, then passes" 0 "checks 1/2 pending: quickstart
+checks 2/2 green"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$q_cancel,$q_live")" "$(pr OPEN CLEAN "" "$lint_ok,$q_cancel,$(cr_at quickstart FAILURE 41261363000 $t0)")"
+run 7 --checks --require quickstart --interval 0
+expect "cancelled plus live that then fails: the failure is reported" 1 "checks 1/2 pending: quickstart
+FAILED quickstart (run 41261363000)
+REQUIRED quickstart failed"
+
 usage_line="usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK] [--timeout DURATION] [--interval SECONDS]"
 e2e_ok=$(cr "e2e result" COMPLETED SUCCESS 14)
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"

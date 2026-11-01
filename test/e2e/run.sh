@@ -160,9 +160,21 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
   # minutes. Anything missing falls back to the build.
   flavor_tag=""
   if [[ -n ${FLAVOR_PULL_REPO:-} ]]; then
-    flavor_tag=$("$root/hack/flavor-tag.sh" opencode 2>/dev/null || true)
+    flavor_tag=$("$root/hack/flavor-tag.sh" opencode) || {
+      echo "flavor tag computation failed; building the flavor image instead" >&2
+      flavor_tag=""
+    }
   fi
-  if [[ -n $flavor_tag ]] && docker pull -q "$FLAVOR_PULL_REPO:$flavor_tag" >/dev/null 2>&1; then
+  pulled=0
+  if [[ -n $flavor_tag ]]; then
+    echo "pulling flavor image $FLAVOR_PULL_REPO:$flavor_tag"
+    if pull_err=$(docker pull -q "$FLAVOR_PULL_REPO:$flavor_tag" 2>&1 >/dev/null); then
+      pulled=1
+    else
+      echo "WARNING: pull of $FLAVOR_PULL_REPO:$flavor_tag failed, building the flavor image instead: ${pull_err:-no output}" >&2
+    fi
+  fi
+  if [[ $pulled == 1 ]]; then
     echo "flavor image $FLAVOR_PULL_REPO:$flavor_tag pulled"
     docker tag "$FLAVOR_PULL_REPO:$flavor_tag" kind.local/flavor-opencode:e2e
   else
