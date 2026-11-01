@@ -158,7 +158,9 @@ func (t *runTrace) identify(agent store.Agent, version store.AgentVersion, task 
 }
 
 // noteMCPMissing records the allowed MCP servers found missing before the harness started; the next
-// root span carries them (attempt 1 or 2, see semconv.KoinonMCPMissingAttempts).
+// root span carries them, once. Only the recovered case (attempt 1) reaches a root span: a run that
+// fails on the second miss (attempt 2) ends before its first turn, so it has no root span and the
+// run.mcp_server_missing event (attempt 2) is its record.
 func (t *runTrace) noteMCPMissing(names []string, attempt int) {
 	if t == nil {
 		return
@@ -202,6 +204,8 @@ func (t *runTrace) beginTurn(ctx context.Context, prompt string) map[string]any 
 	}
 	t.mu.Lock()
 	prev, id, missing, attempt := t.turn, t.id, t.mcpMissing, t.mcpAttempt
+	// The notice belongs to the first turn's root span only.
+	t.mcpMissing, t.mcpAttempt = nil, 0
 	t.turn, t.parkedOn = nil, ""
 	t.mu.Unlock()
 	if prev != nil {
