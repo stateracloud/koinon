@@ -69,6 +69,52 @@ var _ = Describe("CarryOver (ADR 0085, decision 11)", func() {
 		Consistently(runs, 2*time.Second).ShouldNot(Receive())
 	}, SpecTimeout(2*time.Minute))
 
+	It("hands a retried fixed-ID request the fork's result, not the cancellation", func(ctx SpecContext) {
+		dsn := newDatabase(ctx)
+		Expect(durable.Migrate(ctx, dsn, nil)).To(Succeed())
+
+		entered := make(chan struct{}, 4)
+		stuck := true
+		work := func(c dbos.Context, label string) (string, error) {
+			if stuck {
+				entered <- struct{}{}
+				_, err := dbos.Sleep(c, time.Minute)
+				return "", err
+			}
+			return "done " + label, nil
+		}
+		newRuntime := func(version string) *durable.Runtime {
+			rt := durable.New(durable.Config{DatabaseURL: dsn, ApplicationVersion: version, CarryOverInterval: -1})
+			Expect(rt.Register(func(c dbos.Context) error {
+				dbos.RegisterWorkflow(c, work, dbos.WithWorkflowName("test.work"))
+				return nil
+			})).To(Succeed())
+			return rt
+		}
+		old := newRuntime("old")
+		Expect(old.Launch(ctx)).To(Succeed())
+		_, err := dbos.RunWorkflow(old.Context(), work, "x", dbos.WithWorkflowID("dm:org:msg-1"))
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(entered).Should(Receive())
+		_ = old.Shutdown(time.Second)
+		stuck = false
+
+		next := newRuntime("new")
+		Expect(next.Launch(ctx)).To(Succeed())
+		DeferCleanup(func() { _ = next.Shutdown(5 * time.Second) })
+		Expect(next.CarriedOverID("dm:org:msg-1")).To(Equal("dm:org:msg-1~vnew"))
+
+		// The client retries under the original ID: DBOS returns the cancelled original.
+		h, err := dbos.RunWorkflow(next.Context(), work, "x", dbos.WithWorkflowID("dm:org:msg-1"))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = h.GetResult()
+		Expect(err).To(HaveOccurred())
+
+		out, err := durable.AwaitResult(next, h, "dm:org:msg-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out).To(Equal("done x"))
+	}, SpecTimeout(2*time.Minute))
+
 	It("leaves a pending workflow of a newer version alone and carries over a lower integer one", func(ctx SpecContext) {
 		dsn := newDatabase(ctx)
 		Expect(durable.Migrate(ctx, dsn, nil)).To(Succeed())
