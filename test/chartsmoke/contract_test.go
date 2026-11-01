@@ -4,6 +4,7 @@ package chartsmoke_test
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -34,6 +35,9 @@ var commandTrees = map[string]func() *cobra.Command{
 // A value that comes from a Secret, a ConfigMap or the downward API is replaced by a placeholder,
 // so a check that parses such a value (a duration, a mode) cannot be proved here.
 func TestChartContract(t *testing.T) {
+	if _, err := exec.LookPath(envOr("HELM", "helm")); err != nil {
+		t.Skip("helm is not installed (set HELM)")
+	}
 	for _, values := range valuesFiles() {
 		t.Run(filepath.Base(values), func(t *testing.T) {
 			r := helmRender(t.Context(), values)
