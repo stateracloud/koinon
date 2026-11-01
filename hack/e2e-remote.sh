@@ -4,7 +4,7 @@
 # Run the kind e2e (`make test-e2e-kind`, the go suite) of the committed HEAD somewhere other than
 # your shell's toolchain, three ways:
 #
-#   hack/e2e-remote.sh [--local] [--out DIR]                          the local Docker (default)
+#   hack/e2e-remote.sh [--local] [--out DIR] [--dry-run]              the local Docker (default)
 #   hack/e2e-remote.sh --ssh [--out DIR] [--dry-run]                  a Docker host over SSH ($KOINON_E2E_REMOTE)
 #   hack/e2e-remote.sh --argo [--out DIR] [--no-wait] [--dry-run]     an Argo Workflows queue you operate
 #
