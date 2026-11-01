@@ -139,6 +139,10 @@ type Input struct {
 	// LedgerEnforcesBudgets is set when the gateway cannot enforce a limit itself (Kubernetes mode:
 	// the ledger revokes the key at zero), so a limit that fails closed is zero.
 	LedgerEnforcesBudgets bool
+	// Allowances are the active agents' MCP allowlists, by org slug and agent ID. The caller loads them
+	// before Begin when the pass serves MCP servers, so nothing can fail between writing the key files
+	// and Settle recording their write time.
+	Allowances map[string]map[pgtype.UUID][]Allowed
 }
 
 // Lookups are the reads that depend on what the plan decided. A nil Lookups is not allowed where
@@ -276,9 +280,6 @@ type Draft struct {
 	Stops []int
 	// LimitFailures are the agents whose budget could not be computed.
 	LimitFailures []LimitFailure
-	// Allowances are the active agents' MCP allowlists, by org slug and agent ID; the caller sets them
-	// before Settle when the pass serves MCP servers.
-	Allowances map[string]map[pgtype.UUID][]Allowed
 }
 
 // Begin builds the state for one pass: every agent's key and tools, the providers, the tool servers
@@ -355,7 +356,7 @@ type Plan struct {
 // (an MCP key could not be had).
 func (d *Draft) Settle(ctx context.Context, written []string, present map[string]bool, lk Lookups) (*Plan, error) {
 	p, in := d.p, d.in
-	pl := &Plan{p: p, in: in, State: d.state, allowances: d.Allowances}
+	pl := &Plan{p: p, in: in, State: d.state, allowances: in.Allowances}
 	settling := p.keysSettling(written, in.Now)
 	recorded := d.recordedFiles(ctx, settling, present, lk)
 	pl.providers = slices.Clone(in.Providers)
