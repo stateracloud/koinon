@@ -5,8 +5,11 @@ Instructions for coding agents working on Koinon.
 ## Commands
 
 - Build: `make build` · Test: `make test` · Lint: `make lint` · Codegen: `make generate`
-- Go only: `go test $(go list ./... | grep -v '/test/flavors$')`, which is what `make test` runs
-  (Postgres tests need Docker; they skip without it). `test/flavors` needs the flavor images:
+- Go only: `hack/go-test.sh`, which is what `make test` runs: the agentd, api, durable and checkpoint
+  suites under Ginkgo `-p` (one Postgres container per process, see `internal/testing/pgtest`), the
+  rest under `go test` (Postgres tests need Docker; they skip without it). A new suite joins the
+  parallel list in that script once it shares no database, fixed port or fixed path between processes.
+  One package: `go test ./internal/x` (serial) or `go tool ginkgo -p ./internal/x`. `test/flavors` needs the flavor images:
   `make test-flavors`.
 - Web only: `cd web && pnpm lint && pnpm typecheck && pnpm test`
 - Docs site: `make docs` · `make docs-check`. The quickstart's `sh e1=<name>` blocks are what
