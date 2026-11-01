@@ -87,9 +87,13 @@ type Config struct {
 	// migration Job does that (ADR 0060). It exists for tests and local runs without a Job.
 	Migrate bool
 	// ApplicationVersion tags workflows, and only a process with the same version recovers them.
-	// Empty lets DBOS derive one from the binary, which orphans pending workflows on every build;
-	// koinon-api passes the release version.
+	// Empty means WorkflowVersion, which koinon-api uses (ADR 0085): never the release version, which
+	// would orphan the pending workflows at every upgrade. Tests set their own.
 	ApplicationVersion string
+	// CarryOverInterval is the time between sweeps for pending workflows of another version; zero is
+	// DefaultCarryOverInterval and a negative value turns the periodic sweep off (the one at Launch
+	// still runs).
+	CarryOverInterval time.Duration
 	// ExecutorID names this process to DBOS; empty lets DBOS choose.
 	ExecutorID string
 	// SchedulerPollingInterval is how often DBOS picks up created or changed schedules; zero is
@@ -110,6 +114,8 @@ type Runtime struct {
 	mu      sync.Mutex
 	dctx    dbos.Context
 	stopped bool
+	cancel  context.CancelFunc // ends the carry-over loop
+	loop    sync.WaitGroup
 }
 
 // New returns a Runtime. Add registrars with Register, then call Launch.
@@ -135,6 +141,31 @@ func (r *Runtime) Register(reg Registrar) error {
 // scheduler and recovery of workflows left pending by a previous process with the same version.
 // ctx bounds the lifetime of the DBOS context; Shutdown stops it sooner.
 func (r *Runtime) Launch(ctx context.Context) error {
+	if err := r.launch(ctx); err != nil {
+		return err
+	}
+	// Workflows left by a process of another version (an earlier WorkflowVersion, or the release
+	// version older koinon-api builds used) are carried over from step 0. A failed sweep is logged
+	// and retried; it does not stop the start.
+	loopCtx, cancel := context.WithCancel(ctx)
+	r.mu.Lock()
+	r.cancel = cancel
+	r.mu.Unlock()
+	r.sweep(loopCtx)
+	if iv := r.cfg.CarryOverInterval; iv >= 0 {
+		if iv == 0 {
+			iv = DefaultCarryOverInterval
+		}
+		r.loop.Add(1)
+		go func() {
+			defer r.loop.Done()
+			r.carryOverLoop(loopCtx, iv)
+		}()
+	}
+	return nil
+}
+
+func (r *Runtime) launch(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.dctx != nil || r.stopped {
@@ -145,7 +176,7 @@ func (r *Runtime) Launch(ctx context.Context) error {
 		DatabaseURL:        r.cfg.DatabaseURL,
 		DatabaseSchema:     Schema,
 		SkipMigrations:     !r.cfg.Migrate,
-		ApplicationVersion: r.cfg.ApplicationVersion,
+		ApplicationVersion: r.version(),
 		ExecutorID:         r.cfg.ExecutorID,
 
 		SchedulerPollingInterval: r.cfg.SchedulerPollingInterval,
@@ -189,12 +220,16 @@ func (r *Runtime) ApplySchedules(specs ...dbos.ScheduleSpec) error {
 // Workflows still pending are recovered by the next process. It is safe to call twice or before Launch.
 func (r *Runtime) Shutdown(timeout time.Duration) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.stopped = true
-	if r.dctx == nil {
+	dctx, cancel := r.dctx, r.cancel
+	r.dctx, r.cancel = nil, nil
+	r.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	r.loop.Wait() // a sweep in flight reads Context, so the lock is not held here
+	if dctx == nil {
 		return nil
 	}
-	dctx := r.dctx
-	r.dctx = nil
 	return dbos.Shutdown(dctx, timeout)
 }

@@ -52,6 +52,10 @@ type runNowOutput struct {
 	Err, Msg string
 }
 
+const stepRunNow = "run-trigger-now"
+
+var _ = durable.DeclareSteps(RunNowWorkflow, stepRunNow)
+
 // RegisterRunNow registers the run-now workflow on rt.
 func RegisterRunNow(rt *durable.Runtime, work *durable.OrgWork) (*RunNowQueue, error) {
 	q := &RunNowQueue{work: work, ready: make(chan struct{})}
@@ -101,7 +105,7 @@ func (q *RunNowQueue) workflow(c dbos.Context, in runNowInput) (runNowOutput, er
 			return runNowOutput{}, err
 		}
 		return runNowOutput{Task: idString(task.ID)}, nil
-	}, dbos.WithStepName("run-trigger-now"), dbos.WithStepMaxRetries(3))
+	}, dbos.WithStepName(stepRunNow), dbos.WithStepMaxRetries(3))
 }
 
 // remoteError is an error that came back as data from the workflow and still matches its sentinel.

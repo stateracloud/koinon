@@ -478,9 +478,10 @@ func run() error {
 		// The tables come from the migration Job (ADR 0060): DBOS only verifies them here, so a
 		// missing schema fails the start instead of the API running without its timers.
 		rt := durable.New(durable.Config{
-			DatabaseURL:        cfg.databaseURL,
-			ApplicationVersion: project.Version,
-			Logger:             slog.Default(),
+			DatabaseURL: cfg.databaseURL,
+			// The default ApplicationVersion is durable.WorkflowVersion, not the release version:
+			// an upgrade must not orphan pending workflows (ADR 0085).
+			Logger: slog.Default(),
 		})
 		notifier = durable.NewNotifier(rt, slog.Default())
 		services.RegisterNotifications(notifier, pool)
