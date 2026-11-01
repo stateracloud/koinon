@@ -184,6 +184,36 @@ func describeMode(name, valuesFile string) {
 			}
 		}, SpecTimeout(5*time.Minute))
 
+		// With the DBOS runtime on (ADR 0085), the executor ID is the pod name from the downward API,
+		// and the migrate Job (a pre-install hook, so it ran above) creates the tables the runtime
+		// needs before koinon-api starts.
+		It("gives a durable koinon-api its pod name as the executor ID", func() {
+			api := r.deployment("koinon-api")
+			Expect(api).NotTo(BeNil())
+			c := api.Spec.Template.Spec.Containers[0]
+			if !slices.Contains(c.Args, "-durable") {
+				Skip("api.durable is off in this mode")
+			}
+			var ref *corev1.EnvVar
+			for i := range c.Env {
+				if c.Env[i].Name == "KOINON_EXECUTOR_ID" {
+					ref = &c.Env[i]
+				}
+			}
+			Expect(ref).NotTo(BeNil(), "koinon-api has KOINON_EXECUTOR_ID")
+			Expect(ref.ValueFrom).NotTo(BeNil())
+			Expect(ref.ValueFrom.FieldRef).NotTo(BeNil())
+			Expect(ref.ValueFrom.FieldRef.FieldPath).To(Equal("metadata.name"))
+			for _, j := range r.Jobs {
+				if j.Name != "koinon-migrate" {
+					continue
+				}
+				_, pre, hook := hookOf(j)
+				Expect(hook && pre).To(BeTrue(), "the migrate Job runs before koinon-api exists")
+				Expect(j.Spec.Template.Spec.Containers[0].Args).To(ContainElement("-durable"), "the migrate Job creates the DBOS tables")
+			}
+		})
+
 		It("starts koinon-api and answers its probes", func(ctx SpecContext) {
 			ready["koinon-api"] = startDeployment(ctx, rn, r, "koinon-api")
 			accounted = append(accounted, "koinon-api")
