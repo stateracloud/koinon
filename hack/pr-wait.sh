@@ -11,7 +11,8 @@
 #   --require  (repeatable, with --checks) a check that must be green: once the others finish, a
 #              required check that is missing, skipped or not green exits 1 (`REQUIRED <name> missing|skipped|failed`).
 #              Only the newest check run of that name on the head counts: a later success supersedes an
-#              earlier skip or cancel. If the newest is skipped or cancelled, the next line suggests
+#              earlier skip or cancel, and a cancelled or skipped run never outranks one that is queued or
+#              in progress (even at the same startedAt): it keeps waiting for the live run. If the newest is skipped or cancelled, the next line suggests
 #              `gh workflow run e2e-kind.yml --ref <branch>`.
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
 #   --interval 20 seconds by default
@@ -72,9 +73,12 @@ case $pr in '' | *[!0-9]*) usage ;; esac
 [ ${#required[@]} -eq 0 ] || [ "$mode" = checks ] || usage
 
 # One normalised row per check: CheckRuns (status/conclusion) and commit statuses (state) alike.
-# A required check is judged on its newest run only (by start time; rollup order breaks ties).
+# A required check is judged on its newest run only (by start time; rollup order breaks ties). A
+# cancelled or skipped run never outranks a queued or in-progress one (#431): wait for the live run.
 # shellcheck disable=SC2016 # $req is a jq variable, bound by jqn
-norm='[(.statusCheckRollup // [])[] | {
+norm='def newest: sort_by(.ts) | . as $s | ($s | last) as $l
+  | if ($l.done and ($l.cancelled or $l.skipped)) and any($s[]; .done | not) then ([$s[] | select(.done | not)] | last) else $l end;
+[(.statusCheckRollup // [])[] | {
   name: (.name // .context // "?"),
   ts: (.startedAt // .completedAt // ""),
   cancelled: ((.conclusion // "") == "CANCELLED"),
@@ -82,7 +86,7 @@ norm='[(.statusCheckRollup // [])[] | {
   done: ((.status == "COMPLETED") or ((.state // "") | IN("SUCCESS", "FAILURE", "ERROR"))),
   skipped: ((.conclusion // "") == "SKIPPED"),
   bad: ((.conclusion // .state // "") | IN("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"))
-}] | group_by(.name) | map(if (.[0].name | IN($req[])) then [sort_by(.ts) | last] else . end) | add // []'
+}] | group_by(.name) | map(if (.[0].name | IN($req[])) then [newest] else . end) | add // []'
 
 reqjson=$(printf '%s\n' ${required[@]+"${required[@]}"} | jq -R . | jq -sc .)
 jqn() { jq --argjson req "$reqjson" "$@"; }
