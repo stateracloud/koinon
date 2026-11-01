@@ -20,6 +20,7 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Schema is the Postgres schema that holds the DBOS system tables.
@@ -47,6 +48,10 @@ func Migrate(ctx context.Context, dsn string, logger *slog.Logger) error {
 		return fmt.Errorf("connect to grant the DBOS schema: %w", err)
 	}
 	defer func() { _ = conn.Close(ctx) }()
+	// Koinon's own table of executor heartbeats lives beside DBOS's (ADR 0085, decision 11).
+	if _, err := conn.Exec(ctx, executorsDDL()); err != nil {
+		return fmt.Errorf("create the executor heartbeat table: %w", err)
+	}
 	var exists bool
 	if err := conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, AppRole).Scan(&exists); err != nil {
 		return fmt.Errorf("look up role %s: %w", AppRole, err)
@@ -87,11 +92,26 @@ type Config struct {
 	// migration Job does that (ADR 0060). It exists for tests and local runs without a Job.
 	Migrate bool
 	// ApplicationVersion tags workflows, and only a process with the same version recovers them.
-	// Empty lets DBOS derive one from the binary, which orphans pending workflows on every build;
-	// koinon-api passes the release version.
+	// Empty means WorkflowVersion, which koinon-api uses (ADR 0085): never the release version, which
+	// would orphan the pending workflows at every upgrade. Tests set their own.
 	ApplicationVersion string
-	// ExecutorID names this process to DBOS; empty lets DBOS choose.
+	// CarryOverInterval is the time between sweeps for pending workflows of another version; zero is
+	// DefaultCarryOverInterval and a negative value turns the periodic sweep off (the one at Launch
+	// still runs).
+	CarryOverInterval time.Duration
+	// ExecutorID names this process to DBOS and in the heartbeat table: koinon-api passes its pod
+	// name (ADR 0085). Empty lets DBOS choose (DBOS__VMID, else "local"), which is only right for
+	// a single process.
 	ExecutorID string
+	// HeartbeatInterval is the time between executor heartbeats; zero is DefaultHeartbeatInterval
+	// and a negative value stops the beat after the first one (tests).
+	HeartbeatInterval time.Duration
+	// ExecutorStaleAfter is how old a heartbeat must be for the executor to count as dead; zero is
+	// DefaultStaleAfter.
+	ExecutorStaleAfter time.Duration
+	// RecoveryInterval is the time between passes of the dead-executor recovery job; zero is
+	// DefaultRecoveryInterval and a negative value turns the periodic pass off.
+	RecoveryInterval time.Duration
 	// SchedulerPollingInterval is how often DBOS picks up created or changed schedules; zero is
 	// DBOS's default of 30 seconds.
 	SchedulerPollingInterval time.Duration
@@ -110,6 +130,9 @@ type Runtime struct {
 	mu      sync.Mutex
 	dctx    dbos.Context
 	stopped bool
+	cancel  context.CancelFunc // ends the carry-over, heartbeat and recovery loops
+	pool    *pgxpool.Pool      // the heartbeat and recovery job's own connections
+	loop    sync.WaitGroup
 }
 
 // New returns a Runtime. Add registrars with Register, then call Launch.
@@ -135,6 +158,35 @@ func (r *Runtime) Register(reg Registrar) error {
 // scheduler and recovery of workflows left pending by a previous process with the same version.
 // ctx bounds the lifetime of the DBOS context; Shutdown stops it sooner.
 func (r *Runtime) Launch(ctx context.Context) error {
+	if err := r.launch(ctx); err != nil {
+		return err
+	}
+	// Workflows left by a process of another version (an earlier WorkflowVersion, or the release
+	// version older koinon-api builds used) are carried over from step 0. A failed sweep is logged
+	// and retried; it does not stop the start.
+	loopCtx, cancel := context.WithCancel(ctx)
+	r.mu.Lock()
+	r.cancel = cancel
+	r.mu.Unlock()
+	if err := r.startExecutorLoops(loopCtx); err != nil {
+		_ = r.Shutdown(time.Second)
+		return err
+	}
+	r.sweep(loopCtx)
+	if iv := r.cfg.CarryOverInterval; iv >= 0 {
+		if iv == 0 {
+			iv = DefaultCarryOverInterval
+		}
+		r.loop.Add(1)
+		go func() {
+			defer r.loop.Done()
+			r.carryOverLoop(loopCtx, iv)
+		}()
+	}
+	return nil
+}
+
+func (r *Runtime) launch(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.dctx != nil || r.stopped {
@@ -145,7 +197,7 @@ func (r *Runtime) Launch(ctx context.Context) error {
 		DatabaseURL:        r.cfg.DatabaseURL,
 		DatabaseSchema:     Schema,
 		SkipMigrations:     !r.cfg.Migrate,
-		ApplicationVersion: r.cfg.ApplicationVersion,
+		ApplicationVersion: r.version(),
 		ExecutorID:         r.cfg.ExecutorID,
 
 		SchedulerPollingInterval: r.cfg.SchedulerPollingInterval,
@@ -189,12 +241,19 @@ func (r *Runtime) ApplySchedules(specs ...dbos.ScheduleSpec) error {
 // Workflows still pending are recovered by the next process. It is safe to call twice or before Launch.
 func (r *Runtime) Shutdown(timeout time.Duration) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.stopped = true
-	if r.dctx == nil {
+	dctx, cancel, pool := r.dctx, r.cancel, r.pool
+	r.dctx, r.cancel, r.pool = nil, nil, nil
+	r.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	r.loop.Wait() // a sweep in flight reads Context, so the lock is not held here
+	if pool != nil {
+		pool.Close()
+	}
+	if dctx == nil {
 		return nil
 	}
-	dctx := r.dctx
-	r.dctx = nil
 	return dbos.Shutdown(dctx, timeout)
 }

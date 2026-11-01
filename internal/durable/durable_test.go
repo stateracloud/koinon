@@ -196,3 +196,10 @@ var _ = Describe("Runtime", func() {
 		Expect(started.Load()).To(Equal(int32(2)), "the workflow body re-ran once, on recovery")
 	}, SpecTimeout(2*time.Minute))
 })
+
+// connect opens a plain connection to dsn, for specs that read the tables directly.
+func connect(ctx context.Context, dsn string) *pgx.Conn {
+	c, err := pgx.Connect(ctx, dsn)
+	Expect(err).NotTo(HaveOccurred())
+	return c
+}

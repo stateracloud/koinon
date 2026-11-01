@@ -18,6 +18,10 @@ var (
 	// LabelSpecHash on a sandbox holds the hash of the spec it was created from, so a changed
 	// spec (image, providers, filesystem policy) is detected and the sandbox recreated.
 	LabelSpecHash = project.Domain + "/spec-hash"
+	// LabelSupervisorImage on a sandbox holds a short digest of the OpenShell supervisor image the
+	// gateway named when the sandbox was created (ADR 0085 decision 9); the ref itself is not a valid
+	// label value. A sandbox without it is recreated once an image is known.
+	LabelSupervisorImage = project.Domain + "/supervisor-image"
 	// ManagedByValue is the value of LabelManagedBy.
 	ManagedByValue = "koinon-reconciler"
 )
