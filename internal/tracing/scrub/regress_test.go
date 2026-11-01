@@ -664,7 +664,7 @@ func TestContentLimitIsCappedAndHugeJSONStaysJSON(t *testing.T) {
 func TestNestedEscapedJSONIsBounded(t *testing.T) {
 	leaf := `{"headers":[{"name":"Authorization","value":"Basic dXNlcjpwYXNzd29yZA=="},{"name":"Cookie","value":"a=b"}],` +
 		`"env":[{"name":"DB_PASSWORD","value":"notreal-dbpw"}],"password":"notreal-pw","text":"Authorization: Bearer abcdefghijklmnop1234 token=notreal-t"}`
-	level1, _ := json.Marshal(strings.Repeat(leaf+"\n", 40))
+	level1, _ := json.Marshal(strings.Repeat(leaf+"\n", 4))
 	level2, _ := json.Marshal(map[string]string{"output": string(level1)})
 	build := func(size int) []byte {
 		var items []string
@@ -674,22 +674,30 @@ func TestNestedEscapedJSONIsBounded(t *testing.T) {
 		doc, _ := json.Marshal(map[string]any{"calls": items})
 		return doc
 	}
-	doc, quarter := build(4<<20), build(1<<20)
+	// doc is over the 4 MiB parse cap and so is scrubbed as cut text; parsed (under the cap) and
+	// parsedQuarter go through the JSON walk.
+	doc, parsed, parsedQuarter := build(4<<20), build(2<<20), build(1<<19)
 	s := scrub.New(scrub.Config{Level: scrub.LevelRedacted, Secrets: scrub.NewSecrets("notreal-dbpw")})
-	// The bound is relative to the machine (#366): the full document must cost under 6x a
-	// quarter-size one (linear is 4x, plus margin). The best of several runs of each keeps
-	// scheduler noise out; a superlinear blow-up grows by far more than 6x.
-	best := func(in []byte) time.Duration {
-		d := time.Duration(1<<63 - 1)
-		for range 5 {
-			start := time.Now()
-			s.Content(string(in), 0)
-			d = min(d, time.Since(start))
-		}
-		return d
+	// The bound is on work, not on time (#474): wall-clock ratios flake on shared CI runners, while
+	// the bytes the detectors read are the same on every machine. A parsed document is read
+	// linearly: the reads per input byte of a document four times larger stay within 1.1x those of
+	// the small one (a quadratic path grows by the size ratio), and no input byte is read more than
+	// once on average (the escaped readings are of cut strings). A document past the parse cap is
+	// cut to a prefix first, so its reads depend on the limit alone.
+	reads := func(in []byte) (n int) {
+		scrub.Counting(s, &n).Content(string(in), 0)
+		return n
 	}
-	if small, full := best(quarter), best(doc); full > 6*small {
-		t.Errorf("full %v for %d bytes against %v for %d: not linear", full, len(doc), small, len(quarter))
+	small, large, cutText := reads(parsedQuarter), reads(parsed), reads(doc)
+	t.Logf("detector reads: %d (%d B), %d (%d B), %d (%d B)", small, len(parsedQuarter), large, len(parsed), cutText, len(doc))
+	if float64(large)/float64(len(parsed)) > 1.1*float64(small)/float64(len(parsedQuarter)) {
+		t.Errorf("%d reads for %d bytes against %d for %d: not linear", large, len(parsed), small, len(parsedQuarter))
+	}
+	if large > len(parsed) || small > len(parsedQuarter) {
+		t.Errorf("reads %d and %d exceed the input sizes %d and %d", small, large, len(parsedQuarter), len(parsed))
+	}
+	if limit := scrub.DefaultMaxBytes + 4<<10; cutText > 8*limit {
+		t.Errorf("cut text read %d bytes for a limit of %d", cutText, limit)
 	}
 	out, cut := s.Content(string(doc), 0)
 	if !cut || !json.Valid([]byte(out)) || strings.Contains(out, "dXNlcjpw") || strings.Contains(out, "notreal-dbpw") {

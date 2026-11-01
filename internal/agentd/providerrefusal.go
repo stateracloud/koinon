@@ -99,7 +99,7 @@ func (r *runner) awaitRefusal(ctx context.Context, since time.Time) (providerRef
 		select {
 		case <-ctx.Done():
 			return providerRefusal{}, false
-		case <-r.fenced:
+		case <-r.own.Fenced():
 			return providerRefusal{}, false
 		case <-time.After(min(gatewayRecordPoll, time.Until(deadline))):
 		}

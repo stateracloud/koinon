@@ -20,11 +20,13 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/agentd/turnpolicy"
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/runreply"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/thinking"
@@ -33,14 +35,11 @@ import (
 // How a driven run ends, besides success (nil).
 var (
 	// errFenced: the worker may no longer write (another owner, a cancel, or it gave up).
-	errFenced = errors.New("no longer the run's owner")
+	errFenced = runoutcome.ErrFenced
 	// errDropped: the harness connection ended mid-run; the run is resumed by a takeover.
 	errDropped = errors.New("harness connection lost")
 	// errShutdown: the pool is stopping.
 	errShutdown = errors.New("shutting down")
-	// errEndTurn: the turn ended with end_turn; execute closes the harness and sweeps before
-	// it ends the run.
-	errEndTurn = errors.New("the turn ended")
 )
 
 // failure fails the run with a reason.
@@ -93,13 +92,13 @@ type canceled struct {
 
 func (c *canceled) Error() string { return c.reason }
 
-// fence says why a worker stopped being allowed to write.
-type fence int32
+// fence says why a worker stopped being allowed to write (internal/runoutcome).
+type fence = runoutcome.Fence
 
 const (
-	fenceLost     fence = iota + 1 // a newer epoch owns the run, or it finished
-	fenceCanceled                  // the control plane canceled the run
-	fenceAbandon                   // the worker cannot reach the database and gives up
+	fenceLost     = runoutcome.FenceLost     // a newer epoch owns the run, or it finished
+	fenceCanceled = runoutcome.FenceCanceled // the control plane canceled the run
+	fenceAbandon  = runoutcome.FenceAbandon  // the worker cannot reach the database and gives up
 )
 
 // resumeNote opens the prompt of a run resumed after the harness connection was lost.
@@ -118,14 +117,15 @@ type runner struct {
 	log *slog.Logger
 	run store.Run
 
-	fenceOnce sync.Once
-	fenced    chan struct{}
-	fenceKind atomic.Int32
+	// own writes the run's events and ends it (internal/runoutcome): the source seq, the write
+	// mutex and the fence state live there.
+	own *runoutcome.Owner
+	// res is how the turns ended, when execute got as far as the turn and the policy ended it with
+	// anything but end_turn. The run's ending is then res, not an error.
+	res *turnResult
 	// turnState is the run's phase for a draining pool (turnSetup, turnRunning, turnHandedOff).
 	turnState atomic.Int32
 
-	mu        sync.Mutex // serialises appends and srcSeq
-	srcSeq    int64
 	replaying atomic.Bool
 
 	toolsMu sync.Mutex
@@ -243,11 +243,15 @@ const (
 
 func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	r := &runner{
-		p: p, q: p.q, run: run, fenced: make(chan struct{}), cmdChanged: make(chan struct{}),
+		p: p, q: p.q, run: run, cmdChanged: make(chan struct{}),
 		log: log.With("org", run.OrgID.String(), "run", run.ID.String(), "epoch", run.Epoch),
 	}
+	r.own = runoutcome.New(runoutcome.Config{
+		DB: p.db, Queries: p.q, Run: run, Log: r.log, Now: p.cfg.Now,
+		Metrics: outcomeMetrics{p.cfg.Metrics}, Stop: r.stopped,
+	})
 	r.log.Info("driving run", "state", run.State, "takeovers", run.Takeovers)
-	r.tr = p.traceStart(ctx, run, r.fenced, r.log)
+	r.tr = p.traceStart(ctx, run, r.own.Fenced(), r.log)
 
 	hctx, stop := context.WithCancel(ctx)
 	var hb sync.WaitGroup
@@ -265,39 +269,13 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	}
 	stop()
 	hb.Wait()
-	// The turn's row ends before the run's state changes, so whoever sees the run finished sees the
-	// turn ended (a success ends it inside endTurn's transaction, a park likewise).
-	r.tr.finish(ctx, err, fence(r.fenceKind.Load()))
-	r.conclude(ctx, err)
-}
-
-func (r *runner) fence(k fence) {
-	r.fenceOnce.Do(func() {
-		r.fenceKind.Store(int32(k))
-		close(r.fenced)
-	})
-}
-
-func (r *runner) isFenced() bool {
-	select {
-	case <-r.fenced:
-		return true
-	default:
-		return false
-	}
-}
-
-// fenceFromDB fences after a write matched no rows, telling a cancel from a lost epoch.
-func (r *runner) fenceFromDB(ctx context.Context) {
-	cur, err := r.q.GetRun(ctx, store.GetRunParams{OrgID: r.run.OrgID, ID: r.run.ID})
-	switch {
-	case err != nil:
-		r.fence(fenceAbandon)
-	case cur.State == store.RunStateCanceled && cur.Epoch == r.run.Epoch:
-		r.fence(fenceCanceled)
-	default:
-		r.fence(fenceLost)
-	}
+	// The turn's row ends with the run's ending, inside the transaction of the verb that ends it
+	// (internal/runoutcome), so whoever sees the run finished sees the turn ended. The trace's spans
+	// end first only so that they are exported promptly.
+	end := ending{err: err, res: r.res}
+	turn := r.tr.turnRow(end, r.own.FenceKind())
+	r.tr.finish(ctx, end, r.own.FenceKind())
+	r.conclude(ctx, end, turn)
 }
 
 // heartbeat renews the lease until ctx ends. A heartbeat that matches no rows means the run
@@ -311,7 +289,7 @@ func (r *runner) heartbeat(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-r.fenced:
+		case <-r.own.Fenced():
 			return
 		case <-t.C:
 		}
@@ -322,13 +300,13 @@ func (r *runner) heartbeat(ctx context.Context) {
 		case err == nil:
 			last = time.Now()
 		case errors.Is(err, pgx.ErrNoRows):
-			r.fenceFromDB(ctx)
+			r.own.FenceFromDB(ctx)
 			return
 		case ctx.Err() != nil:
 			return
 		case time.Since(last) >= r.p.cfg.Lease:
 			r.log.Warn("lease lost: heartbeats failed", "err", err)
-			r.fence(fenceAbandon)
+			r.own.Fence(fenceAbandon)
 			return
 		default:
 			r.log.Warn("heartbeat failed", "err", err)
@@ -343,7 +321,7 @@ func (p *Pool) leaseSeconds() int32 {
 // stopped returns errFenced or errShutdown when either applies.
 func (r *runner) stopped(ctx context.Context) error {
 	switch {
-	case r.isFenced():
+	case r.own.IsFenced():
 		return errFenced
 	case r.turnState.Load() == turnHandedOff:
 		// The pool stopped while the run was still setting up and cut it short.
@@ -371,14 +349,7 @@ func (r *runner) modelGone(ctx context.Context, err error) error {
 
 // dbErr classifies a database error of the run's own writes and reads.
 func (r *runner) dbErr(ctx context.Context, what string, err error) error {
-	if stop := r.stopped(ctx); stop != nil {
-		return stop
-	}
-	if errors.Is(err, pgx.ErrNoRows) {
-		r.fenceFromDB(ctx)
-		return errFenced
-	}
-	return fmt.Errorf("%s: %w", what, err)
+	return r.own.Err(ctx, what, err)
 }
 
 // execute drives the run until its turn ends.
@@ -396,7 +367,7 @@ func (r *runner) execute(ctx context.Context) error {
 		stopping := r.p.stopping
 		for {
 			select {
-			case <-r.fenced:
+			case <-r.own.Fenced():
 				cancel()
 				return
 			case <-stopping:
@@ -552,13 +523,13 @@ func (r *runner) execute(ctx context.Context) error {
 	log := r.log.With("sandbox", sandbox)
 	if unknown {
 		// Visible on the task timeline: the run is costlier than the price list suggests.
-		if err := r.record(fctx, "run.uncached", map[string]any{"model": model, "reason": prices.UncachedReason(ptype, model)}); err != nil {
+		if err := r.own.Record(fctx, "run.uncached", map[string]any{"model": model, "reason": prices.UncachedReason(ptype, model)}); err != nil {
 			return r.dbErr(ctx, "record the uncached run", err)
 		}
 	}
 	if len(ended) > 0 {
 		log.Warn("ended processes left in the sandbox", "pids", ended, "main", main)
-		if err := r.record(fctx, "run.sandbox_swept", map[string]any{"pids": ended, "main": main}); err != nil {
+		if err := r.own.Record(fctx, "run.sandbox_swept", map[string]any{"pids": ended, "main": main}); err != nil {
 			return r.dbErr(ctx, "record the sweep", err)
 		}
 	}
@@ -678,7 +649,7 @@ func (r *runner) execute(ctx context.Context) error {
 			return r.dbErr(ctx, "mark the run running", err)
 		}
 	}
-	if err := r.record(fctx, "run.session", map[string]any{
+	if err := r.own.Record(fctx, "run.session", map[string]any{
 		"sessionId": session, "loaded": loaded, "reset": reset, "restart": restart, "takeovers": r.run.Takeovers,
 		"agent": init.AgentInfo, "model": model,
 		"instructions": map[string]any{"path": instructionsPath, "sha256": sha256Hex(instructions)},
@@ -695,7 +666,7 @@ func (r *runner) execute(ctx context.Context) error {
 	}); err != nil {
 		return r.dbErr(ctx, "record the prompt", err)
 	}
-	if err := r.record(fctx, "run.prompt", map[string]any{
+	if err := r.own.Record(fctx, "run.prompt", map[string]any{
 		"text": text, "throughSeq": through, "resumed": r.run.PromptThroughSeq.Valid,
 	}); err != nil {
 		return r.dbErr(ctx, "record the prompt", err)
@@ -708,9 +679,14 @@ func (r *runner) execute(ctx context.Context) error {
 	if !r.turnState.CompareAndSwap(turnSetup, turnRunning) {
 		return errShutdown // the pool began to stop first
 	}
-	err = r.turnWithRetry(ctx, fctx, conn, proc, &stderr, session, text)
-	if !errors.Is(err, errEndTurn) {
+	res, err := r.turnWithRetry(ctx, fctx, conn, proc, &stderr, session, text)
+	if err != nil {
 		return err
+	}
+	if res.out.Kind != turnpolicy.OutEndTurn {
+		// The run ends with the policy's outcome, which conclude carries out.
+		r.res = res
+		return nil
 	}
 	// The agent's note for the task, before the harness is let go.
 	r.summarize(ctx, conn, session)
@@ -830,7 +806,7 @@ func (r *runner) interrupted(ctx context.Context, reason string, exit *int, stde
 	if stderr != "" {
 		payload["stderrTail"] = stderr
 	}
-	if err := r.record(ctx, "run.interrupted", payload); err != nil {
+	if err := r.own.Record(ctx, "run.interrupted", payload); err != nil {
 		r.log.Warn("recording the interruption failed", "err", err)
 	}
 }
@@ -949,243 +925,119 @@ func assemblePrompt(mode promptMode, title, notice string, msgs []string, outcom
 	return strings.Join(parts, "\n\n")
 }
 
-// record appends a run event under the next source seq, retrying transient failures. The
-// source seq makes a retry after an ambiguous failure (the insert committed, the reply was
-// lost) a no-op instead of a duplicate.
-func (r *runner) record(ctx context.Context, kind string, payload any) error {
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	return r.recordRaw(ctx, kind, b)
+// ending is how execute ended: res when the turn controller ended the turns with anything but
+// end_turn, otherwise err (nil: the run succeeded or parked). A setup-phase failure, a dropped
+// connection and the like are errors; the turn's outcome is never turned back into one.
+type ending struct {
+	err error
+	res *turnResult
 }
 
-func (r *runner) recordRaw(ctx context.Context, kind string, payload []byte) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.isFenced() {
-		return errFenced
-	}
-	r.srcSeq++
-	src := r.srcSeq
-	backoff := 100 * time.Millisecond
-	for attempt := 0; ; attempt++ {
-		_, err := r.q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
-			OrgID: r.run.OrgID, RunID: r.run.ID, Epoch: r.run.Epoch,
-			Kind: kind, Payload: payload, SourceSeq: src,
-		})
-		if err == nil {
-			return nil
+// conclude maps how execute ended onto the verbs of the run's owner (internal/runoutcome). turn is
+// the run's open turn row, which the verbs end with the run.
+func (r *runner) conclude(ctx context.Context, e ending, turn runoutcome.Turn) {
+	err := e.err
+	if t := e.res; t != nil {
+		switch t.out.Kind {
+		case turnpolicy.OutCapReached:
+			r.cancel(ctx, turn, t.capNote, "", nil, true)
+			return
+		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded:
+			reason, class, _ := t.fails()
+			r.fail(ctx, turn, reason, class)
+			return
+		case turnpolicy.OutFenced:
+			r.concludeFenced(ctx, turn)
+			return
+		case turnpolicy.OutShutdown:
+			r.concludeShutdown(ctx, turn)
+			return
 		}
-		if errors.Is(err, pgx.ErrNoRows) {
-			if _, gerr := r.q.GetRunEventBySource(ctx, store.GetRunEventBySourceParams{
-				OrgID: r.run.OrgID, RunID: r.run.ID, Epoch: r.run.Epoch, SourceSeq: src,
-			}); gerr == nil {
-				return nil // an earlier attempt committed
-			}
-			r.fenceFromDB(ctx)
-			return errFenced
-		}
-		if attempt == 4 || !sleep(ctx, backoff) {
-			// The event cannot be recorded: stop rather than drop it. The lease expires and
-			// another worker resumes the session.
-			r.log.Warn("recording a run event failed", "kind", kind, "err", err)
-			r.fence(fenceAbandon)
-			return err
-		}
-		backoff *= 2
+		err = t.err // OutFailed, OutPassthrough: the driver's classified error of the last prompt
 	}
-}
-
-// finish ends the run as its owner, with a closing run event and a task event, in one
-// transaction. On success the task event is the agent's reply.
-func (r *runner) finish(ctx context.Context, outcome store.RunState, reason string, class store.RunFailureClass) error {
-	return r.finishWith(ctx, outcome, reason, class, nil)
-}
-
-// finishWith is finish with more fields in the closing events' payload; extra does not override
-// the reason and the failure class.
-func (r *runner) finishWith(ctx context.Context, outcome store.RunState, reason string, class store.RunFailureClass, extra map[string]any) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.srcSeq++
-	src := r.srcSeq
-	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
-		return r.finishIn(ctx, r.q.WithTx(tx), src, outcome, reason, class, extra)
-	})
-	if err != nil {
-		return r.dbErr(ctx, "finish the run", err)
-	}
-	r.p.cfg.Metrics.Finished.WithLabelValues(string(outcome)).Inc()
-	r.log.Info("run finished", "outcome", outcome, "reason", reason)
-	return nil
-}
-
-// finishIn ends the run in the caller's transaction.
-func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outcome store.RunState, reason string, class store.RunFailureClass, extra map[string]any) error {
-	body := map[string]any{}
-	for k, v := range extra {
-		body[k] = v
-	}
-	if _, ok := body["reason"]; !ok {
-		body["reason"] = reason
-	}
-	if class != "" {
-		body["failureClass"] = string(class)
-	}
-	payload, _ := json.Marshal(body)
-	if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
-		OrgID: r.run.OrgID, RunID: r.run.ID, Epoch: r.run.Epoch,
-		Kind: "run." + string(outcome), Payload: payload, SourceSeq: src,
-	}); err != nil {
-		return err
-	}
-	if _, err := q.FinishRun(ctx, store.FinishRunParams{
-		OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch, Outcome: outcome,
-		OutcomeReason: pgtype.Text{String: reason, Valid: reason != ""},
-		FailureClass:  store.NullRunFailureClass{RunFailureClass: class, Valid: class != ""},
-	}); err != nil {
-		return err
-	}
-	if outcome == store.RunStateSucceeded {
-		if err := r.postReply(ctx, q); err != nil {
-			return err
-		}
-	} else if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
-		OrgID: r.run.OrgID, TaskID: r.run.TaskID, RunID: r.run.ID,
-		Kind: "run." + string(outcome), ActorKind: store.TaskActorKindSystem, Payload: payload,
-	}); err != nil {
-		return err
-	}
-	// The task's end comes after the reply or the failure on its timeline.
-	return r.endTask(ctx, q, outcome, class)
-}
-
-// endTask moves the run's task to the run's outcome (ADR 0065): a run that succeeded completes it, a
-// run that failed fatally fails it, whether or not the run parked on the way. Other failures leave the
-// task open (a person can retry them with a message), and a task that is canceled, already ended or
-// has another run queued (a follow-up message) stays as it is.
-func (r *runner) endTask(ctx context.Context, q *store.Queries, outcome store.RunState, class store.RunFailureClass) error {
-	var to store.TaskState
-	switch {
-	case outcome == store.RunStateSucceeded:
-		to = store.TaskStateCompleted
-	case outcome == store.RunStateFailed && class == store.RunFailureClassFatal:
-		to = store.TaskStateFailed
-	default:
-		return nil
-	}
-	t, err := q.EndTaskFrom(ctx, store.EndTaskFromParams{
-		OrgID: r.run.OrgID, ID: r.run.TaskID, ToState: to,
-		FromStates: []string{string(store.TaskStateSubmitted), string(store.TaskStateWorking), string(store.TaskStateInputRequired)},
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	payload, _ := json.Marshal(map[string]any{"to": string(t.State), "reason": "run_" + string(outcome)})
-	_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
-		OrgID: r.run.OrgID, TaskID: r.run.TaskID, RunID: r.run.ID,
-		Kind: "status.changed", ActorKind: store.TaskActorKindSystem, Payload: payload,
-	})
-	return err
-}
-
-// postReply puts the agent's reply since the run's last park on the task, if it said
-// anything.
-func (r *runner) postReply(ctx context.Context, q *store.Queries) error {
-	reply, err := r.reply(ctx, q)
-	if err != nil || reply == "" {
-		return err
-	}
-	text, _ := json.Marshal(map[string]string{"text": reply})
-	_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
-		OrgID: r.run.OrgID, TaskID: r.run.TaskID, RunID: r.run.ID,
-		Kind: "message", ActorKind: store.TaskActorKindAgent, ActorAgentID: r.run.AgentID, Payload: text,
-	})
-	return err
-}
-
-// reply is the agent's last message of the run since its last park (interim narration before a tool call is left out).
-func (r *runner) reply(ctx context.Context, q *store.Queries) (string, error) {
-	return runreply.Reply(ctx, q, r.run.OrgID, r.run.ID)
-}
-
-// conclude acts on how execute ended.
-func (r *runner) conclude(ctx context.Context, err error) {
 	var f *failure
 	var c *canceled
 	var rq *requeued
 	switch {
 	case err == nil:
 	case errors.As(err, &rq):
-		if rerr := r.requeue(ctx, rq.reason); errors.Is(rerr, errFenced) {
+		if rerr := r.own.Requeue(ctx, turn, rq.reason); errors.Is(rerr, errFenced) {
 			r.log.Warn("the run could not be requeued: it was taken over, canceled or is no longer starting", "state", r.run.State, "reason", rq.reason)
-			r.fenceFromDB(ctx)
 		} else if rerr != nil {
 			r.log.Warn("requeueing the run failed; its lease expires and a worker takes it over", "reason", rq.reason, "err", rerr)
 		}
 	case errors.As(err, &f) && f.sandbox != nil:
-		if ferr := r.failSandboxUnavailable(ctx, f); ferr != nil {
+		su := f.sandbox
+		if ferr := r.own.SandboxUnavailable(ctx, turn, runoutcome.Unavailable{
+			Reason: f.reason, Cause: su.cause, Detail: su.detail, Waited: su.waited, Cap: su.cap, Class: classSandboxUnavailable,
+		}); ferr != nil {
 			r.log.Warn("failing the run failed", "reason", f.reason, "err", ferr)
 		}
 	case errors.As(err, &f):
-		if ferr := r.finish(ctx, store.RunStateFailed, f.reason, cmp.Or(f.class, classFatal)); ferr != nil {
-			r.log.Warn("failing the run failed", "reason", f.reason, "err", ferr)
-		}
+		r.fail(ctx, turn, f.reason, f.class)
 	case errors.As(err, &c):
-		extra := c.extra
-		if c.timeLimit {
-			// The note of a run stopped at its time limit: what the agent last said (or its notes),
-			// the same payload the api's sweep writes. A failure to read it leaves the summary out.
-			note, nerr := runreply.TimeLimitNote(ctx, r.q, r.run)
-			if nerr != nil {
-				r.log.Warn("reading the agent's last reply for the time-limit note failed", "err", nerr)
-			}
-			for k, v := range c.extra {
-				note[k] = v
-			}
-			extra = note
-		}
-		if ferr := r.finishWith(ctx, store.RunStateCanceled, c.reason, c.class, extra); ferr != nil {
-			r.log.Warn("canceling the run failed", "reason", c.reason, "err", ferr)
-		} else if c.timeLimit {
-			r.p.cfg.Metrics.TimeLimitStops.Inc()
-		}
+		r.cancel(ctx, turn, c.reason, c.class, c.extra, c.timeLimit)
 	case errors.Is(err, errFenced):
-		switch fence(r.fenceKind.Load()) {
-		case fenceCanceled:
-			r.log.Info("run canceled")
-		case fenceAbandon:
-			r.log.Warn("giving the run up")
-			r.release(ctx)
-		default:
-			r.log.Info("run taken over or finished elsewhere")
-		}
+		r.concludeFenced(ctx, turn)
 	case errors.Is(err, errDropped):
-		r.release(ctx)
+		r.own.Release(ctx, turn)
 	case errors.Is(err, errShutdown):
-		if !r.p.cfg.KeepLeaseOnShutdown {
-			r.release(context.WithoutCancel(ctx))
-		}
+		r.concludeShutdown(ctx, turn)
 	default:
 		r.log.Warn("driving the run failed", "err", err)
-		r.release(ctx)
+		r.own.Release(ctx, turn)
 	}
 }
 
-// release gives the lease up so a worker takes the run over at once.
-func (r *runner) release(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	_, err := r.q.ReleaseRunLease(ctx, store.ReleaseRunLeaseParams{OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		r.log.Warn("releasing the lease failed; it expires on its own", "err", err)
-		return
+// fail fails the run; an empty class is fatal.
+func (r *runner) fail(ctx context.Context, turn runoutcome.Turn, reason string, class store.RunFailureClass) {
+	if ferr := r.own.Fail(ctx, turn, reason, cmp.Or(class, classFatal)); ferr != nil {
+		r.log.Warn("failing the run failed", "reason", reason, "err", ferr)
 	}
-	r.log.Info("lease released for a takeover")
+}
+
+// cancel cancels the run as its owner. A run stopped at its time limit carries the note of what the
+// agent last said (or its notes), the same payload the api's sweep writes.
+func (r *runner) cancel(ctx context.Context, turn runoutcome.Turn, reason string, class store.RunFailureClass, extra map[string]any, timeLimit bool) {
+	if timeLimit {
+		// A failure to read the note leaves the summary out.
+		note, nerr := runreply.TimeLimitNote(ctx, r.q, r.run)
+		if nerr != nil {
+			r.log.Warn("reading the agent's last reply for the time-limit note failed", "err", nerr)
+		}
+		for k, v := range extra {
+			note[k] = v
+		}
+		extra = note
+	}
+	if ferr := r.own.Cancel(ctx, turn, reason, class, extra); ferr != nil {
+		r.log.Warn("canceling the run failed", "reason", reason, "err", ferr)
+	} else if timeLimit {
+		r.p.cfg.Metrics.TimeLimitStops.Inc()
+	}
+}
+
+// concludeFenced ends a worker that may no longer write the run.
+func (r *runner) concludeFenced(ctx context.Context, turn runoutcome.Turn) {
+	switch r.own.FenceKind() {
+	case fenceCanceled:
+		r.log.Info("run canceled")
+		r.own.CloseTurn(ctx, turn)
+	case fenceAbandon:
+		r.log.Warn("giving the run up")
+		r.own.Release(ctx, turn)
+	default:
+		r.log.Info("run taken over or finished elsewhere")
+	}
+}
+
+// concludeShutdown ends a worker whose pool is stopping.
+func (r *runner) concludeShutdown(ctx context.Context, turn runoutcome.Turn) {
+	if r.p.cfg.KeepLeaseOnShutdown {
+		r.own.CloseTurn(ctx, turn)
+	} else {
+		r.own.Release(context.WithoutCancel(ctx), turn)
+	}
 }
 
 // handler records the harness's session updates and answers its permission requests.
@@ -1208,7 +1060,7 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	if err != nil {
 		return err
 	}
-	if err := h.r.recordRaw(ctx, "acp."+updateKind(b), b); err != nil {
+	if err := h.r.own.RecordRaw(ctx, "acp."+updateKind(b), b); err != nil {
 		return err
 	}
 	h.r.tr.update(n, at)
@@ -1249,7 +1101,7 @@ func (h handler) RequestPermission(ctx context.Context, req acp.PermissionReques
 	case <-time.After(toolCallWait):
 	case <-ctx.Done():
 	}
-	if err := h.r.record(ctx, "acp.permission", map[string]any{"toolCall": req.ToolCall, "decision": d}); err != nil {
+	if err := h.r.own.Record(ctx, "acp.permission", map[string]any{"toolCall": req.ToolCall, "decision": d}); err != nil {
 		return acp.Decision{}, err
 	}
 	h.r.log.Info("permission answered", "kind", d.Kind, "tier", d.Tier, "verdict", d.Verdict, "outside", d.Outside)

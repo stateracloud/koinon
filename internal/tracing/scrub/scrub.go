@@ -118,6 +118,9 @@ type Scrubber struct {
 	// leafCap, when positive, is the longest string scrubbed whole (see capLeaf); Content sets it
 	// on a copy.
 	leafCap int
+	// work, when set, is told the length of every text a detector set reads. Only tests set it
+	// (export_test.go), to count work instead of timing it.
+	work func(int)
 }
 
 // New returns a Scrubber.
@@ -155,6 +158,9 @@ func (s *Scrubber) collect(in string, spans []span) []span {
 
 // detect appends the spans of every detector that applies at the level, on one reading of the text.
 func (s *Scrubber) detect(in string, spans []span) []span {
+	if s.work != nil {
+		s.work(len(in))
+	}
 	spans = s.secrets.find(in, spans)
 	spans = findAlways(in, spans)
 	if s.level == LevelRedacted {

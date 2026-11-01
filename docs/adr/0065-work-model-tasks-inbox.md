@@ -499,7 +499,7 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
 The TK1 interim ("runs do not end tasks") is over. A park already moved a task to `input-required` and
 its decision back to `working`, but nothing moved it on when the run ended, so a task whose run parked
 and then succeeded stayed `working`, while one that never parked stayed `submitted`. agentd now ends
-the task in the transaction that finishes the run (`runner.endTask`): a run that **succeeded**
+the task in the transaction that finishes the run (`Owner.endTask` in `internal/runoutcome`, ADR 0089; it was `runner.endTask` in agentd): a run that **succeeded**
 completes its task and a run that failed with class **fatal** fails it, whether or not the run
 parked. The other failure classes (`transient`, `throttled`, `context_overflow`, `budget`, `policy`,
 `sandbox_unavailable`) leave the task open, since a person can still retry them with a message. A
