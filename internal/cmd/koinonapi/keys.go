@@ -23,6 +23,19 @@ import (
 type keysOptions struct {
 	dbURL, kekSecret, kekDir, namespace, kubeconfig, id string
 	period                                              time.Duration
+	yes                                                 bool
+}
+
+// prompterFor decides whether a keys command may ask the person (cli.PrompterFor); tests replace it.
+var prompterFor = cli.PrompterFor
+
+// oneOrPrompt accepts a missing ID: on a terminal the command asks for it. PreRunE rejects a missing
+// ID when it cannot ask, with the error ExactArgs(1) gives.
+func oneOrPrompt(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	return cobra.ExactArgs(1)(cmd, args)
 }
 
 // newKeysCommand is "koinon-api keys", the key-encryption key (KEK) tool.
@@ -47,31 +60,40 @@ func newKeysCommand() *cobra.Command {
 		name, _, _ := strings.Cut(use, " ")
 		return &cobra.Command{
 			Use: use, Short: short, Args: args,
-			PreRunE: func(*cobra.Command, []string) error {
+			PreRunE: func(cmd *cobra.Command, args []string) error {
+				// A missing ID is for the person to pick, if there is one to ask (the flags and
+				// KOINON_NO_INPUT are resolved by now); otherwise it is the error ExactArgs gives.
+				if len(args) == 0 && strings.Contains(use, " ") && prompterFor(cmd) == nil {
+					return cobra.ExactArgs(1)(cmd, args)
+				}
 				if needsDB && o.dbURL == "" {
 					return errors.New("--database-url is required")
 				}
 				return nil
 			},
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return runKeys(cmd.Context(), o, name, args, cmd.OutOrStdout())
+				return runKeys(cmd.Context(), o, name, args, cmd.OutOrStdout(), prompterFor(cmd))
 			},
 		}
+	}
+	confirmed := func(c *cobra.Command) *cobra.Command {
+		c.Flags().BoolVar(&o.yes, "yes", false, "on a terminal, do not ask for confirmation")
+		return c
 	}
 	add := sub("add", "Generate a new KEK (not active yet)", cobra.NoArgs, false)
 	add.Flags().StringVar(&o.id, "id", "", "the new KEK's ID (default kek-YYYYMMDD-xxxx)")
 	keys.AddCommand(
 		sub("status", "List the KEKs, the active one and the values each wraps", cobra.NoArgs, true),
 		add,
-		sub("activate ID", "Make a KEK the one that wraps new data keys", cobra.ExactArgs(1), false),
-		sub("rewrap", "Wrap every stored data key under the active KEK (payloads are not decrypted)", cobra.NoArgs, true),
-		sub("retire ID", "Remove a KEK; refuses while any value uses it", cobra.ExactArgs(1), true),
-		sub("reencrypt", "Seal every value again under a new data key (the compromise path)", cobra.NoArgs, true),
+		confirmed(sub("activate [ID]", "Make a KEK the one that wraps new data keys (on a terminal, pick it from a list without ID)", oneOrPrompt, false)),
+		confirmed(sub("rewrap", "Wrap every stored data key under the active KEK (payloads are not decrypted)", cobra.NoArgs, true)),
+		confirmed(sub("retire [ID]", "Remove a KEK; refuses while any value uses it (on a terminal, pick it from a list without ID)", oneOrPrompt, true)),
+		confirmed(sub("reencrypt", "Seal every value again under a new data key (the compromise path)", cobra.NoArgs, true)),
 	)
 	return keys
 }
 
-func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out io.Writer) error {
+func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out io.Writer, prompt *cli.Prompter) error {
 	var store keyscli.Store
 	switch {
 	case o.kekSecret != "":
@@ -89,8 +111,9 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		return errors.New("set --kek-secret or --kek-dir")
 	}
 
-	tool := &keyscli.Tool{Store: store, Out: out, ActivePeriod: o.period}
-	if o.dbURL != "" && cmd != "add" && cmd != "activate" {
+	tool := &keyscli.Tool{Store: store, Out: out, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes}
+	// activate needs the database only to show, in its picker, the values each KEK wraps.
+	if o.dbURL != "" && cmd != "add" && (cmd != "activate" || (prompt != nil && len(rest) == 0)) {
 		pool, err := pgxpool.New(ctx, o.dbURL)
 		if err != nil {
 			return fmt.Errorf("connect to postgres: %w", err)
@@ -104,15 +127,22 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 	case "add":
 		return tool.Add(ctx, o.id)
 	case "activate":
-		return tool.Activate(ctx, rest[0])
+		return tool.Activate(ctx, firstOrEmpty(rest))
 	case "rewrap":
 		return tool.Rewrap(ctx)
 	case "retire":
-		return tool.Retire(ctx, rest[0])
+		return tool.Retire(ctx, firstOrEmpty(rest))
 	case "reencrypt":
 		return tool.Reencrypt(ctx)
 	}
 	return fmt.Errorf("unknown keys command %q", cmd)
+}
+
+func firstOrEmpty(a []string) string {
+	if len(a) == 0 {
+		return ""
+	}
+	return a[0]
 }
 
 func keysKubeClient(kubeconfig string) (kubernetes.Interface, error) {
