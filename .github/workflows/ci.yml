@@ -561,6 +561,7 @@ jobs:
       - run: hack/e2e-label-test.sh
       - run: hack/e2e-bisect-test.sh
       - run: hack/hooks/agent-spawn-check_test.sh
+      - run: hack/hooks/read-hooks_test.sh
 
   # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
