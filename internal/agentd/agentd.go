@@ -152,18 +152,30 @@ type Config struct {
 	// MaxTakeovers fails a run that has been taken over more often than this, instead of
 	// resuming it again. Default 5.
 	MaxTakeovers int
-	// ModelRetries is how often a turn is repeated after a transient or throttled model
-	// error (ADR 0030, failure classes) before the run fails. Default 3.
+	// ModelRetries, RetryBackoff and MaxRetryAfter are Koinon's policy for retrying a model request
+	// that failed with a transient or throttled error (ADR 0030 failure classes; ADR 0056
+	// amendment 2026-10-31, point 3). Exactly one layer applies it: for a flavor whose harness
+	// retries model requests itself (flavor.Descriptor.RetriesModelRequests, OpenCode) the
+	// harness gets the policy as launch switches and agentd does not repeat the turn; for any
+	// other flavor agentd repeats the turn. Either way one failed step costs at most
+	// ModelRetries+1 gateway requests and waits at most ModelRetries × MaxRetryAfter.
+	//
+	// ModelRetries is how many retries follow the first try before the run fails. Default 2
+	// (3 tries).
 	ModelRetries int
 	// MaxRefusedTurns is how often a run continues a turn the harness cancelled after agentd
 	// refused a permission request (refusal.go) before it fails. Default 5.
 	MaxRefusedTurns int
 	// RetryBackoff is the first wait before a transient retry; it doubles per retry up to a
-	// minute. Default 2s.
+	// minute (the harness adds jitter). Default 1s.
 	RetryBackoff time.Duration
 	// MaxRetryAfter is the longest Retry-After Koinon waits out; a provider asking for more
-	// fails the run as throttled. Default 5m.
+	// fails the run as throttled, so a long Retry-After cannot hold a run. Default 60s.
 	MaxRetryAfter time.Duration
+	// ownRetryLayer makes agentd repeat failed turns even for a flavor whose harness retries.
+	// Only this package's tests set it (export_test.go), to exercise agentd's own layer with the
+	// fake harness, which does not retry.
+	ownRetryLayer bool
 	// GatewayURL is agentgateway's base URL as sandboxes reach it, for example
 	// http://koinon-gateway.koinon.svc:8080. Flavors get <GatewayURL>/v1 for models and
 	// <GatewayURL>/mcp for tools. Required; it must not carry credentials.
@@ -230,10 +242,10 @@ func (c *Config) defaults() error {
 	setDefault(&c.ReadyTimeout, time.Minute)
 	setDefault(&c.ReadySettle, time.Second)
 	setDefault(&c.MaxTakeovers, 5)
-	setDefault(&c.ModelRetries, 3)
+	setDefault(&c.ModelRetries, DefaultModelRetries)
 	setDefault(&c.MaxRefusedTurns, 5)
-	setDefault(&c.RetryBackoff, 2*time.Second)
-	setDefault(&c.MaxRetryAfter, 5*time.Minute)
+	setDefault(&c.RetryBackoff, DefaultRetryBackoff)
+	setDefault(&c.MaxRetryAfter, DefaultMaxRetryAfter)
 	setDefault(&c.GatewayRecordWait, defaultGatewayRecordWait)
 	setDefault(&c.SummaryTimeout, defaultSummaryWait)
 	setDefault(&c.StuckAfter, defaultStuckAfter)
@@ -297,6 +309,14 @@ type Pool struct {
 
 // DefaultDrainDeadline is Config.DrainDeadline's default.
 const DefaultDrainDeadline = 5 * time.Minute
+
+// The defaults of Koinon's model-retry policy (ADR 0056 amendment 2026-10-31, point 3): up to 3
+// tries, waits of 1s then 2s, and a Retry-After of up to 60s honoured.
+const (
+	DefaultModelRetries  = 2
+	DefaultRetryBackoff  = time.Second
+	DefaultMaxRetryAfter = time.Minute
+)
 
 // New returns a pool. Run starts it.
 func New(db *pgxpool.Pool, backend Backend, cfg Config) (*Pool, error) {
