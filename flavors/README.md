@@ -14,6 +14,14 @@ endpoint, model, MCP URL) arrive as arguments to the entry script, the same for 
 /usr/local/bin/koinon-<flavor> --model-base-url URL --model NAME --mcp-url URL
 ```
 
+Exactly one layer retries a failed model request, with Koinon's policy (ADR 0056 amendment
+2026-10-31, point 3). A flavor whose harness retries model requests itself sets
+`RetriesModelRequests` in its descriptor: koinon-agentd then repeats no turn for it and adds
+`--model-tries N --model-retry-backoff-ms MS --model-max-retry-after-ms MS` (parsed by the shared
+library, with koinon-agentd's defaults 3, 1000 and 60000), and the entry script makes the harness
+follow them instead of its own schedule (OpenCode: [`opencode/README.md`](opencode/README.md#model-retries)).
+For any other flavor koinon-agentd repeats the turn with the same policy.
+
 Every image also ships what `common/` holds, through the `common` build context (`make
 flavor-<name>` passes it): `koinon-git-credential`, git's credential helper for
 `https://github.com`, configured in the read-only `/etc/koinon/git/config` and included from
