@@ -287,7 +287,19 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: hack/e2e-result.sh
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          # The base branch's copy, as for decide: a pull request must not change the verdict on
+          # itself. This PR's own copy only when the base has none (the commit that introduces it).
+          if [[ $EVENT == pull_request ]] && git fetch -q --depth=1 origin "$BASE" &&
+            git show "FETCH_HEAD:hack/e2e-result.sh" > "$RUNNER_TEMP/e2e-result.sh" 2>/dev/null; then
+            echo "using hack/e2e-result.sh from origin/$BASE"
+          else
+            cp hack/e2e-result.sh "$RUNNER_TEMP/e2e-result.sh"
+          fi
+          chmod +x "$RUNNER_TEMP/e2e-result.sh"
+          "$RUNNER_TEMP/e2e-result.sh"
 
   # A red run on main: find the merge that did it and open one issue (hack/e2e-bisect.sh).
   bisect:
