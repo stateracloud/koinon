@@ -7,11 +7,14 @@
 #   hack/e2e-remote.sh [--local] [--out DIR] [--dry-run]              the local Docker (default)
 #   hack/e2e-remote.sh --ssh [--out DIR] [--dry-run]                  a Docker host over SSH ($KOINON_E2E_REMOTE)
 #   hack/e2e-remote.sh --argo [--out DIR] [--no-wait] [--dry-run]     an Argo Workflows queue you operate
+#   hack/e2e-remote.sh --argo --gate <set> [--out DIR]                one gate set (hack/lab/gate-run.sh) on its koinon-gate template
 #
 # --argo (hack/e2e-argo.sh, see its header for options and settings): an Argo queue of your own, for
 # example a maintainer's home lab. Its endpoints and credentials are not in the repository: set them
 # in the environment or in the untracked lab config (hack/lab/lab.env.example); without them it
-# exits 2. Its options (--no-wait, --follow, --lane, ...) are --argo options and need --argo.
+# exits 2. Its options (--no-wait, --follow, --lane, --gate, ...) are --argo options and need --argo.
+# --gate exits 0 pass, the gate's status on failure, 2 usage, 75 no slot or the lab unreachable (run
+# the gate locally), 76 NOT RUN (the gate skipped what it expected to run, #507).
 # --ssh and --local run the pinned toolchain image of hack/e2e-toolchain (the Go from go.mod and the
 # kind, ko, helm and kubectl versions CI uses) against that host's Docker socket, so the result does
 # not depend on what is installed on the machine you type this on. Setting KOINON_E2E_REMOTE alone
@@ -72,7 +75,7 @@ while [[ $# -gt 0 ]]; do
   --local) mode=local ;;
   --ssh) mode=remote ;;
   --argo) mode=argo ;;
-  --no-wait | --target | --slot | --follow | --repo | --lane)
+  --no-wait | --target | --slot | --follow | --repo | --lane | --gate)
     [[ ${mode:-} == argo ]] || { echo "e2e-remote: $1 is an --argo option; add --argo" >&2; exit 2; }
     break ;;
   --out) out=${2:?--out needs a directory}; shift ;;
