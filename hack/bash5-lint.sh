@@ -10,7 +10,7 @@
 # bash 4+ syntax, and the guard itself uses only POSIX syntax. This lint runs under bash 5 only, like
 # every other script; it checks the exact text, so the message cannot drift between scripts.
 #
-# Hooks: hack/hooks/*-check.sh carry the fail-open variant instead (see hook_guard below).
+# Hooks: the three registered hack/hooks/*-check.sh carry the fail-open variant instead (see hook_guard below).
 # Any other bash shebang (#!/bin/bash, env -S bash, ...) is rejected.
 #
 # Scope: every *.sh file under the root whose first line is `#!/usr/bin/env bash`. Not in scope, by
@@ -45,7 +45,13 @@ while IFS= read -r f; do
 	[[ $shebang == '#!/usr/bin/env bash' ]] || continue
 	n=$((n + 1))
 	first=$(awk 'NR > 1 && NF && $0 !~ /^[[:space:]]*#/ { print; exit }' "$f")
-	if [[ $first == "$hook_guard" && $f == */hack/hooks/*-check.sh ]]; then
+	rel=${f#"$root"/}
+	# Exactly the registered PreToolUse hooks. Add a new hook here when .claude/settings.json registers it.
+	case $rel in
+	hack/hooks/agent-spawn-check.sh | hack/hooks/bash-read-check.sh | hack/hooks/read-result-check.sh) is_hook=1 ;;
+	*) is_hook=0 ;;
+	esac
+	if [[ $first == "$hook_guard" && $is_hook == 1 ]]; then
 		continue # hooks fail open: exit 2 would block the tool call (ADR 0090, point 6)
 	fi
 	if [[ $first != "$guard" ]]; then

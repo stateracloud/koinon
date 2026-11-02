@@ -67,8 +67,14 @@ check "a drifted guard fails" "$(run "$drift")" 1
 hookg=$(sed -n "s/^hook_guard='\(.*\)'\$/\1/p" "$lint" | sed "s/'\"'\"'/'/g")
 hk=$tmp/hk
 mkdir -p "$hk/hack/hooks"
-printf '#!/usr/bin/env bash\n%s\n' "$hookg" >"$hk/hack/hooks/x-check.sh"
-check "the hook variant passes in a hook" "$(run "$hk")" 0
+printf '#!/usr/bin/env bash\n%s\n' "$hookg" >"$hk/hack/hooks/bash-read-check.sh"
+check "the hook variant passes in a registered hook" "$(run "$hk")" 0
+for other in hack/hooks/sub/evil-check.sh test/hack/hooks/x-check.sh hack/hooks/notahook-check.sh; do
+	rm -rf "$tmp/hk2"
+	mkdir -p "$tmp/hk2/$(dirname "$other")"
+	printf '#!/usr/bin/env bash\n%s\n' "$hookg" >"$tmp/hk2/$other"
+	check "the hook variant is rejected in $other" "$(run "$tmp/hk2")" 1
+done
 printf '#!/usr/bin/env bash\n%s\n' "$hookg" >"$hk/hack/y.sh"
 check "the hook variant is rejected elsewhere" "$(run "$hk")" 1
 rm "$hk/hack/y.sh"
