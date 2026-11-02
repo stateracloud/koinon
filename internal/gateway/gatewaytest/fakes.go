@@ -20,6 +20,16 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 )
 
+// ProviderErrors maps the models the acme fake provider answers with an error status. The 429 with
+// the "-retry" name also sends x-should-retry: true, which the gateway must leave alone.
+var ProviderErrors = map[string]int{
+	"provider-400":       http.StatusBadRequest,
+	"provider-403":       http.StatusForbidden,
+	"provider-429":       http.StatusTooManyRequests,
+	"provider-429-retry": http.StatusTooManyRequests,
+	"provider-500":       http.StatusInternalServerError,
+}
+
 // fakeUpstream is an OpenAI-compatible chat completions server that reports
 // 10 input and 10 output tokens per request and counts requests in hits.
 func fakeUpstream(hits *atomic.Int64) *httptest.Server {
@@ -30,6 +40,16 @@ func fakeUpstream(hits *atomic.Int64) *httptest.Server {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		w.Header().Set("Content-Type", "application/json")
+		// A provider that answers with an error status, to tell its answers from the gateway's own
+		// refusals (the do-not-retry marker, #342).
+		if status, ok := ProviderErrors[req.Model]; ok {
+			if req.Model == "provider-429-retry" {
+				w.Header().Set(gateway.DoNotRetryHeader, "true")
+			}
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "provider says " + strconv.Itoa(status)}})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": "chatcmpl-test", "object": "chat.completion", "created": time.Now().Unix(), "model": req.Model,
 			"choices": []any{map[string]any{

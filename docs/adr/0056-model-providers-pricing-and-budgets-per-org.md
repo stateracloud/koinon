@@ -618,6 +618,13 @@ streamed. The code lands in #340 (ledger), #341 (agentd) and #342 (gateway), whi
    false for `x-should-retry: false` and true for `true`, before any status rule
    ([agentgateway v1.7.0](https://github.com/agentgateway/agentgateway/tree/v1.7.0),
    [opencode v2.2.0](https://github.com/anomalyco/opencode/tree/v2.2.0)).
+   Built in #342 (`gateway.DoNotRetryHeader`, `gateway.DoNotRetryCEL`; a response transformation in
+   both drivers) and tested against the real gateway in both modes. Finding: the key stage answers
+   before any response policy runs, so a 401 for a missing, unknown or revoked key cannot carry the
+   marker, nor, in standalone mode, the budget `429`, the LLM route's authorization `403` and the
+   MCP route's `401`. Every other refusal and a provider's `403` are marked; a provider's other
+   answers pass untouched. A consumer treats every `401` as final by status, and a `429` whose
+   `Retry-After` exceeds its cap as final. Interim, with its exit condition, in #590.
 6. **Aggregator 403s are refusals** (procoduck, 2026-11-01). A 403 from an aggregator such as OpenRouter
    is a policy refusal: it is marked do-not-retry and surfaced. Koinon sets no OpenRouter provider
    routing in v0.1 (`provider.order`, `allow_fallbacks`): the aggregator's defaults apply. Routing may

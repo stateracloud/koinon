@@ -29,7 +29,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"5c6415ea9c7279e9"'
+      koinon.config: '"a365ea2f053b1a93"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -148,7 +148,7 @@ llm:
               window:
                 rolling: 24h
               onBudgetExceeded: Block
-        - keyHash: sha256:52dbaa91629aaf9a1aca4ce3e93e58d9ce4540b963bb4d5c3e7dae956b16a2e0
+        - keyHash: sha256:1d7d29a7e53ca611578866383e04f7e6ae3d15bd0bb8689be1e2ff465312ea45
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -168,6 +168,9 @@ llm:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
         set:
           x-koinon-org: default(apiKey.org, "")
+      response:
+        set:
+          x-should-retry: '(response.code == 403 || (response.code >= 400 && response.code < 500 && default(proxy.upstreamDuration, "") == "")) ? "false" : response.headers["x-should-retry"]'
   models:
     - id: acme/open/model
       name: open/model
@@ -272,6 +275,9 @@ mcp:
           x-koinon-agent: apiKey.agent
         remove:
           - authorization
+      response:
+        set:
+          x-should-retry: '(response.code == 403 || (response.code >= 400 && response.code < 500 && default(proxy.upstreamDuration, "") == "")) ? "false" : response.headers["x-should-retry"]'
   targets:
     - name: acme-sick
       condition: apiKey.org == "acme"
