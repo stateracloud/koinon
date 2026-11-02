@@ -36,6 +36,7 @@
 # (hack/lab/gate-run.sh) reads the file to tell NOT RUN from a failure.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# shellcheck disable=SC2329 # invoked from the exit trap
 write_rc() { [[ -z ${KOINON_RC_FILE:-} ]] || echo "$1" >"$KOINON_RC_FILE"; }
 
 PARALLEL_SUITES=(
