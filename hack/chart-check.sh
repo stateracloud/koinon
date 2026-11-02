@@ -9,7 +9,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CHART=charts/koinon
-KUBECONFORM_VERSION=v0.8.0
+# shellcheck source=/dev/null
+. hack/versions.env # KUBECONFORM_VERSION
 KUBERNETES_VERSION=1.37.0
 # CRD schemas (CNPG Cluster) from the datree catalog, pinned to a commit.
 CRDS_CATALOG=501527ab9c40c827144c8f45945b25a023e344ce

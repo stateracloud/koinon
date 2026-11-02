@@ -10,6 +10,7 @@
 #   - any non-doc file: image references pinned by digest (`name:tag@sha256:...`): the registry's
 #     build time of the newest platform image
 #   - Dockerfile `ADD` URLs of GitHub release assets, raw.githubusercontent.com tags and npm tarballs
+#   - the `<TOOL>_VERSION` pins in hack/versions.env (the release's publish time)
 #   - the ADR 0077 platform pins in test/e2e/kind/up.sh, and any line that carries a marker
 #     `# dep-age: github=<owner/repo> [tag-prefix=<prefix>]` (use it where release/versions.yaml
 #     or another file records a pin; the first version-looking token on the line is checked)
@@ -340,6 +341,41 @@ while IFS=$'\t' read -r file line; do
 		once "url $url" && check_url "$url"
 	done
 done < <(added_lines '**/Dockerfile*' 'Dockerfile*' 'hack/*.sh' 'test/e2e/**/*.sh')
+
+# 4b. The tool versions of hack/versions.env (#544): the release each <TOOL>_VERSION names. The file
+# is also what the workflows, Dockerfile and CONTRIBUTING copies are checked against
+# (hack/versions-check.sh), so dating it dates the release assets they download.
+# tool_repo <TOOL>: the GitHub repository of the release; an unknown name warns (like pin_repo).
+tool_repo() {
+	case $1 in
+	KIND) echo "kubernetes-sigs/kind" ;;
+	KO) echo "ko-build/ko" ;;
+	HELM) echo "helm/helm" ;;
+	KUBECTL) echo "kubernetes/kubernetes" ;;
+	GITLEAKS) echo "gitleaks/gitleaks" ;;
+	SHELLCHECK) echo "koalaman/shellcheck" ;;
+	ACTIONLINT) echo "rhysd/actionlint" ;;
+	GORELEASER) echo "goreleaser/goreleaser" ;;
+	COSIGN) echo "sigstore/cosign" ;;
+	KUBECONFORM) echo "yannh/kubeconform" ;;
+	GOLANGCI_LINT) echo "golangci/golangci-lint" ;;
+	esac
+}
+while IFS=$'\t' read -r file line; do
+	if [[ $line =~ ^([A-Z][A-Z0-9_]*)_VERSION=([^[:space:]#]+) ]]; then
+		tool=${BASH_REMATCH[1]}
+		ver=${BASH_REMATCH[2]}
+		repo=$(tool_repo "$tool")
+		if [[ -n $repo ]]; then
+			prefix=v
+			[[ $ver == v* ]] && prefix=
+			once "pin $repo $prefix$ver" && check_github "$repo" "$prefix$ver"
+		else
+			# Fail closed: a tool whose release cannot be dated would skip the cooldown (ADR 0079).
+			report "$tool $ver (no entry in tool_repo of hack/dep-age-check.sh)" unknown "$file"
+		fi
+	fi
+done < <(added_lines 'hack/versions.env')
 
 # 5. ADR 0077 platform pins: the variables in test/e2e/kind/up.sh and marked lines anywhere.
 # pin_repo <VARIABLE>: "<owner/repo> <tag prefix>" for the pins in test/e2e/kind/up.sh.
