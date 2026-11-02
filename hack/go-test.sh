@@ -93,16 +93,17 @@ while IFS= read -r dir; do
 done <<<"$dirs"
 
 rc=0
+failed=()
 # Run all parts so one CI run reports every failing package.
 if ((${#parallel[@]})); then
 	# shellcheck disable=SC2086 # GINKGO_FLAGS is a word list
-	go tool ginkgo "${procs[@]}" --junit-report=junit.xml --json-report=report.json --keep-separate-reports --output-dir="$report_dir" --keep-going --randomize-all --fail-on-empty ${GINKGO_FLAGS:-} "${parallel[@]}" || rc=$?
+	go tool ginkgo "${procs[@]}" --junit-report=junit.xml --json-report=report.json --keep-separate-reports --output-dir="$report_dir" --keep-going --randomize-all --fail-on-empty ${GINKGO_FLAGS:-} "${parallel[@]}" || { prc=$?; rc=$prc; failed+=("ginkgo -p (exit $prc)"); }
 fi
 if ((${#ginkgo_rest[@]})); then
 	for dir in "${ginkgo_rest[@]}"; do rm -f "$dir/junit.xml" "$dir/report.json"; done
 	# Through gotestsum for its go test -json events: a plain test in a suite's package that skips
 	# through testenv.RequireT is seen only there (the chart contract test without helm).
-	go tool gotestsum --jsonfile "$report_dir/ginkgo-rest.gotest.jsonl" --format standard-quiet -- -count=1 "${ginkgo_rest[@]}" -args -ginkgo.junit-report=junit.xml -ginkgo.json-report=report.json -ginkgo.fail-on-empty || rc=$?
+	go tool gotestsum --jsonfile "$report_dir/ginkgo-rest.gotest.jsonl" --format standard-quiet -- -count=1 "${ginkgo_rest[@]}" -args -ginkgo.junit-report=junit.xml -ginkgo.json-report=report.json -ginkgo.fail-on-empty || { prc=$?; rc=$prc; failed+=("serial Ginkgo suites (exit $prc)"); }
 	for dir in "${ginkgo_rest[@]}"; do
 		name=${dir#./}
 		name=${name//\//_}
@@ -111,7 +112,7 @@ if ((${#ginkgo_rest[@]})); then
 	done
 fi
 if ((${#plain[@]})); then
-	go tool gotestsum --junitfile "$report_dir/go-test.xml" --jsonfile "$report_dir/plain.gotest.jsonl" --format pkgname -- "${plain[@]}" || rc=$?
+	go tool gotestsum --junitfile "$report_dir/go-test.xml" --jsonfile "$report_dir/plain.gotest.jsonl" --format pkgname -- "${plain[@]}" || { prc=$?; rc=$prc; failed+=("plain packages (exit $prc)"); }
 fi
 
 # The verdict over every Ginkgo suite of this run; it fails the run for a suite that did not run.
@@ -131,4 +132,9 @@ if ((${#suites[@]} + ${#events[@]})); then
 	fi
 fi
 
+# The verdict above counts Ginkgo specs only: a plain test that failed shows there as "0 failed".
+# Name the failing part, so "go-test verdict: ok" followed by a non-zero exit is not a mystery (#512).
+if ((${#failed[@]})); then
+	echo "go-test.sh: failing part(s): ${failed[*]}; the verdict line above counts Ginkgo specs only, see the '=== FAIL' lines of the go test output" >&2
+fi
 exit "$rc"
