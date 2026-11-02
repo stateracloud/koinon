@@ -44,6 +44,12 @@ test: ## Run all unit tests; the web tests run even when the Go run failed or wa
 test-go: ## Run Go tests like CI (Postgres tests need Docker); test/flavors needs images, see test-flavors
 	hack/go-test.sh
 
+.PHONY: test-go-suite
+test-go-suite: ## Run one parallel Go suite under ginkgo -p: make test-go-suite SUITE=./internal/agentd (one of hack/go-test.sh --list)
+	@if [ -z "$$SUITE" ] || ! hack/go-test.sh --list | grep -Fxq -- "$$SUITE"; then \
+		echo "test-go-suite: SUITE must be one of (hack/go-test.sh --list):" >&2; hack/go-test.sh --list | sed 's/^/  /' >&2; exit 2; fi
+	hack/go-test.sh "$$SUITE"
+
 .PHONY: test-web
 test-web: ## Run web tests
 	cd web && $(PNPM) test

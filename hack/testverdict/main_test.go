@@ -12,6 +12,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/types"
 	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 func TestTestverdict(t *testing.T) {
@@ -256,5 +258,26 @@ var _ = Describe("go test events (testenv.RequireT in a plain test)", func() {
 
 	It("rejects a file that is not a go test event stream", func() {
 		Expect(loadGoTest(write("not json"), map[string]*plainPkg{})).NotTo(Succeed())
+	})
+})
+
+var _ = Describe("loadGoTest", func() {
+	// Two gotestsum phases, as hack/go-test.sh writes them: the first fails, the second passes.
+	It("remembers a failing test of an earlier event file after a later file passed (#512)", func() {
+		dir := GinkgoT().TempDir()
+		first := filepath.Join(dir, "plain.gotest.jsonl")
+		second := filepath.Join(dir, "ginkgo-rest.gotest.jsonl")
+		pkg := project.ModulePath + "/internal/x"
+		Expect(os.WriteFile(first, []byte(`{"Action":"fail","Package":"`+pkg+`","Test":"TestBad"}
+{"Action":"fail","Package":"`+pkg+`"}
+`), 0o600)).To(Succeed())
+		Expect(os.WriteFile(second, []byte(`{"Action":"pass","Package":"`+project.ModulePath+`/internal/y","Test":"TestGood"}
+`), 0o600)).To(Succeed())
+		pkgs := map[string]*plainPkg{}
+		Expect(loadGoTest(first, pkgs)).To(Succeed())
+		Expect(loadGoTest(second, pkgs)).To(Succeed())
+		Expect(pkgs["internal/x"].failed).To(Equal([]string{"TestBad", "(package)"}))
+		Expect(pkgs["internal/y"].failed).To(BeEmpty())
+		Expect(pkgs["internal/y"].passed).To(Equal(1))
 	})
 })
