@@ -27,16 +27,26 @@
 //   - base64 (standard and URL-safe alphabets, padded or raw) and base32 (RFC 4648 alphabet);
 //   - hex in either case, as one run, in groups joined by up to two separators ("6b:6f",
 //     xxd's "6b6f 696e", "6b, 6f") or as \xHH and 0xHH bytes;
-//   - an encoded stream cut into chunks by separators or line breaks (chunks of any length):
-//     the separators are removed and the result decoded ("compact").
+//   - an encoded stream cut into chunks of any length by any separators ("projected"): for each
+//     alphabet (base64 standard, base64 URL-safe, base32, hex) the text is projected onto it,
+//     every byte outside the alphabet dropped (and the x of 0x for hex), and the projection
+//     decoded. There is no density gate, so a separator of any length between chunks of any
+//     length is read through; the price is that prose is projected too (its letters are
+//     base64 and base32 symbols), which resynchronisation turns into nothing, at a cost the
+//     work and time budgets bound (a 1 MiB argument is checked well inside 500 ms). A
+//     projection keeps only stretches of 16 or more decoded bytes that are 60% letters, digits
+//     or spaces, so chance ASCII in misaligned decodings does not become a variant.
 //
 // Each base64, base32 and hex run is decoded at each of its own alignments and also
 // resynchronised (every alignment decoded, the stretches that are text joined in order), so two
 // encoded parts at different alignments in one run ("<b1>Q<b2>") decode as one text. A run is
-// replaced by its decoding only when the decoding holds text: a stretch of at least 12
-// printable characters, which random bytes almost never have (a misaligned decoding of an
-// ordinary word stays as it was). A decoding whose NUL bytes say it is UTF-16 (either byte
-// order, as PowerShell's -EncodedCommand is UTF-16LE base64) is read as UTF-16. Data wrapped so
+// replaced by its decoding only when the decoding holds text: at least 16 bytes, a stretch of
+// 12 printable characters, 90% of it printable and half of it letters, digits or spaces, which
+// random bytes almost never are (a misaligned decoding of an ordinary word stays as it was).
+// Of several decodings of one run (alignments, byte orders) the one with the most characters
+// that fold to ASCII letters and digits wins. Every decoding is also read as UTF-16 (either byte order and
+// alignment; PowerShell's -EncodedCommand is UTF-16LE base64), and that reading is kept when
+// its characters sit in at most two 256-character blocks, as one script's text does. Data wrapped so
 // that no 12 printable characters stand together is the "own cipher" case the URL rule
 // backstops. Decoding nests up to Limits.MaxDepth (3) levels; text that still decodes further at
 // that depth fails closed (ReasonDecodeDepth).
@@ -94,9 +104,11 @@
 // MemoryStore caps the fingerprints per scope (oldest evicted), the scopes (least recently used
 // evicted) and the total across scopes: an Add past the total fails with ErrStoreFull rather
 // than evict another scope. Lookup reports a scope that lost fingerprints to eviction
-// (Hits.Evicted), and Check copies it to Decision.Evicted without changing Allow: whether an
-// evicted scope blocks, asks or passes is #349's choice. Past 4*MaxScopes evicted scopes the
-// store stops remembering which ones they were and reports every unknown scope as evicted.
+// or was refused by a full store (Hits.Evicted), and Check copies it to Decision.Evicted
+// without changing Allow: whether an evicted scope blocks, asks or passes is #349's choice. The
+// store remembers the last 4*MaxScopes scopes evicted whole; an older one is forgotten
+// (StoreStats.ForgottenEvictions counts them) and then reports Evicted false, so alert on
+// that counter rather than rely on the flag alone.
 //
 // # Known limits
 //
@@ -105,6 +117,9 @@
 //     unless they are in call order; text reordered inside one argument (words swapped);
 //   - reversed text, ciphers, compression and encodings other than the ones above (base85,
 //     uuencode, punycode, ...);
+//   - an encoded stream whose separators are themselves symbols of its alphabet ("/" between
+//     chunks of standard base64, "a" to "f" between hex digits): the projection keeps them, and
+//     only chunks of 16 or more decoded bytes still decode;
 //   - data carried in the host labels of a URL is checked for length and randomness but not
 //     charged to the per-host byte budget, and letters-only data is never judged random, so a
 //     run can carry about 20 KiB of letters-only text across 20 hosts within the URL rule.

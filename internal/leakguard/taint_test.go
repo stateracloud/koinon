@@ -87,6 +87,28 @@ var _ = Describe("TaintChecker", func() {
 		Entry(`\u escapes`, []string{uEscapes(excerpt)}, []int{0}),
 		Entry("HTML character references", []string{htmlRefs(excerpt)}, []int{0}),
 		Entry("base32", []string{base32.StdEncoding.EncodeToString([]byte(excerpt))}, []int{0}),
+		// fix round 2: each of these passed before
+		Entry("base64 in chunks of 3", []string{chunks(b64(excerpt), 3, " ")}, []int{0}),
+		Entry("base64 in chunks of 4", []string{chunks(b64(excerpt), 4, " ")}, []int{0}),
+		Entry("base64 in chunks of 8 with ' - '", []string{chunks(b64(excerpt), 8, " - ")}, []int{0}),
+		Entry("base64 in chunks of 8 with '!'", []string{chunks(b64(excerpt), 8, "!")}, []int{0}),
+		Entry("base32 in chunks of 4", []string{chunks(base32.StdEncoding.EncodeToString([]byte(excerpt)), 4, " ")}, []int{0}),
+		Entry("hex, one ' - ' per byte", []string{strings.Join(hexBytes(excerpt), " - ")}, []int{0}),
+		Entry("hex, one '---' per byte", []string{strings.Join(hexBytes(excerpt), "---")}, []int{0}),
+		Entry("hex, one '_-_' per byte", []string{strings.Join(hexBytes(excerpt), "_-_")}, []int{0}),
+		Entry("hex, one ',;:' per byte", []string{strings.Join(hexBytes(excerpt), ",;:")}, []int{0}),
+		Entry("hex, one ' / ' per byte", []string{strings.Join(hexBytes(excerpt), " / ")}, []int{0}),
+		Entry("hex, one '/' per byte", []string{strings.Join(hexBytes(excerpt), "/")}, []int{0}),
+		Entry("hex, one '+' per byte", []string{strings.Join(hexBytes(excerpt), "+")}, []int{0}),
+		Entry("hex, one '\\n  ' per byte", []string{strings.Join(hexBytes(excerpt), "\n  ")}, []int{0}),
+		Entry("hex nibbles with ' - '", []string{chunks(hexOf(excerpt), 1, " - ")}, []int{0}),
+		Entry("base64 of UTF-16LE fullwidth", []string{b64(utf16le(toFullwidth(excerpt)))}, []int{0}),
+		Entry("base64 of UTF-16LE cyrillic", []string{b64(utf16le(cyrillic))}, []int{0}),
+		Entry("base64 of UTF-16LE mathematical bold", []string{b64(utf16le(mathBold(excerpt)))}, []int{0}),
+		Entry(`\u surrogate pairs of mathematical bold`, []string{uEscapes(mathBold(excerpt))}, []int{0}),
+		Entry("hex after NUL padding (found by FuzzTaint)", []string{"000000000000 " + hexOf(excerpt) + " 0"}, []int{0}),
+		Entry("hex after long NUL padding", []string{strings.Repeat("00", 40) + hexOf(excerpt)}, []int{0}),
+		Entry("base64 after NUL padding", []string{"AAAAAAAAAAAAAAAA" + b64raw(excerpt)}, []int{0}),
 		Entry("split across arguments 1 and n-1 of 33", spread(33, 1, excerpt[:half], 32, excerpt[half:]), []int{1, 32}),
 	)
 
@@ -256,12 +278,23 @@ func utf16le(s string) string {
 	return string(b)
 }
 
+// uEscapes writes s as \uHHHH escapes, characters outside the BMP as surrogate pairs.
 func uEscapes(s string) string {
 	var b strings.Builder
-	for _, r := range s {
-		fmt.Fprintf(&b, `\u%04x`, r)
+	for _, u := range utf16.Encode([]rune(s)) {
+		fmt.Fprintf(&b, `\u%04x`, u)
 	}
 	return b.String()
+}
+
+// mathBold writes the lower-case letters of s as mathematical bold letters (U+1D41A on).
+func mathBold(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'a' <= r && r <= 'z' {
+			return 0x1d41a + r - 'a'
+		}
+		return r
+	}, s)
 }
 
 func htmlRefs(s string) string {

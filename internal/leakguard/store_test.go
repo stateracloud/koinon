@@ -206,15 +206,39 @@ var _ = Describe("Fingerprints and the store", func() {
 			b.Generation = "gen-b"
 			Expect(st.Add(ctx, a, fps(0, 100))).To(Succeed())
 			Expect(st.Add(ctx, b, fps(0, 60))).To(MatchError(leakguard.ErrStoreFull))
+			hb, _ := st.Lookup(ctx, b, fps(0, 1))
+			Expect(hb.Evicted).To(BeTrue()) // the refused add is taint b does not hold
 			Expect(st.Add(ctx, b, fps(0, 50))).To(Succeed())
 			Expect(st.Add(ctx, a, fps(0, 100))).To(Succeed()) // already held: no growth
 			Expect(st.Add(ctx, b, fps(50, 51))).To(MatchError(leakguard.ErrStoreFull))
+			hb, _ = st.Lookup(ctx, b, fps(0, 1))
+			Expect(hb.Evicted).To(BeTrue())
 			ha, _ := st.Lookup(ctx, a, fps(0, 1))
 			Expect(ha.Found).To(Equal([]bool{true}))
 			Expect(ha.Evicted).To(BeFalse())
 			Expect(st.Drop(ctx, a)).To(Succeed())
 			Expect(st.Add(ctx, b, fps(50, 100))).To(Succeed())
 			Expect(st.Stats().Fingerprints).To(Equal(100))
+		})
+
+		It("forgets the oldest evicted scopes past its memory, and counts them", func() {
+			st := leakguard.NewMemoryStore(leakguard.MemoryStoreOptions{MaxScopes: 1})
+			scopes := make([]leakguard.Scope, 7)
+			for i := range scopes {
+				scopes[i] = testScope
+				scopes[i].Generation = fmt.Sprintf("gen-%d", i)
+				Expect(st.Add(ctx, scopes[i], fps(0, 1))).To(Succeed())
+			}
+			// six scopes were evicted, four are remembered
+			Expect(st.Stats().ForgottenEvictions).To(Equal(uint64(2)))
+			h0, _ := st.Lookup(ctx, scopes[0], fps(0, 1))
+			h5, _ := st.Lookup(ctx, scopes[5], fps(0, 1))
+			fresh := testScope
+			fresh.Generation = "gen-new"
+			hn, _ := st.Lookup(ctx, fresh, fps(0, 1))
+			Expect(h0.Evicted).To(BeFalse())
+			Expect(h5.Evicted).To(BeTrue())
+			Expect(hn.Evicted).To(BeFalse())
 		})
 
 		It("refuses a scope without a generation", func() {
