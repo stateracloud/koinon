@@ -9,6 +9,10 @@
 # Environment: TAG (v1.2.3 or v1.2.3-rc.1), SHA (the tagged commit), GITHUB_REPOSITORY and GH_TOKEN
 # (needs checks:read, contents:read and pull-requests:read: the dco check runs on pull requests only,
 # so it is read from the head commit of the pull request that merged the tagged commit). Needs gh, git and awk, and a clone with origin/main.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 : "${TAG:?}" "${SHA:?}" "${GITHUB_REPOSITORY:?}" "${GH_TOKEN:?}"

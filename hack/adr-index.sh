@@ -8,6 +8,10 @@
 #
 # Usage: hack/adr-index.sh [--check] [adr-dir]    (default: write docs/adr/README.md)
 #   --check   exit 1 when the README is not what this script would write (CI: adr-lint)
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 check=0

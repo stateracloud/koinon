@@ -4,6 +4,10 @@
 # Offline test of hack/flavor-tag.sh: the tag must not depend on the caller's locale (#335). A
 # fixture repo has file names whose order differs between C and a UTF-8 collation; the script is run
 # under both and the tags must be equal.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 

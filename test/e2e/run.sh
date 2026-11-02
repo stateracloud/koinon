@@ -33,6 +33,10 @@
 # The quickstart opens the API on localhost:8080 (the doc's port-forward block), so that port must be
 # free. API_PORT=<n> changes the local end of the port-forward for the test only; the doc's block
 # stays 8080.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 CLUSTER=${CLUSTER:-koinon-e1}

@@ -18,6 +18,10 @@
 # Needs the Go toolchain (it asks `go list` for the binaries' dependencies).
 # Exit 0 and print the paths that matter when the e2e is needed; exit 1 and print "not needed"
 # otherwise. Exit 2 on a usage, git or `go list` error: callers must treat that as "needed".
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 # --- The rule (the only place to change it) -------------------------------------------------------

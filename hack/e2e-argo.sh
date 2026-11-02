@@ -81,6 +81,10 @@
 #   KOINON_E2E_ALLOW_FLAVORS   1: run although flavors/ changed (same as --allow-flavors)
 #   KOINON_E2E_BASE            the base the flavors check diffs against (origin/main)
 #   KOINON_E2E_AGENT           who submits, a label on the run (KOINON_AGENT_SESSION, else $USER)
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)

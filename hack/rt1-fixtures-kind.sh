@@ -6,6 +6,10 @@
 # namespace koinon-fixtures with fake Secrets. Needs docker, kind, ko and kubectl; no registry. The
 # three upstream images (Prometheus, SearXNG, mcp-searxng) are pulled by the node, anonymously.
 # See test/fixtures/rt1/README.md and docs/dev/real-model-tests.md. DRY_RUN=1 prints the commands only.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 CLUSTER=${CLUSTER:-koinon-dev}

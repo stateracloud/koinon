@@ -5,6 +5,10 @@
 # kube-network-policies, Agent Sandbox v1.0.7, RuntimeClass `runc`, OpenShell 0.1.5 and the
 # CloudNativePG operator. Taken from spike S1 (docs/spikes/kind.md), plus CNPG.
 # Every kubectl/helm call names --context kind-$CLUSTER; nothing else is touched.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 CLUSTER=${CLUSTER:-koinon-e1}
