@@ -45,6 +45,14 @@ type Faults struct {
 	RateLimit int `yaml:"rateLimit,omitempty"`
 	// RetryAfter is the Retry-After value, in seconds, sent with a 429. Zero means 1.
 	RetryAfter int `yaml:"retryAfter,omitempty"`
+	// Refuse answers the first N requests to this model (after any 503s and 429s) with HTTP
+	// RefuseStatus, a client error such as a bad key (401) or no access (403).
+	Refuse int `yaml:"refuse,omitempty"`
+	// RefuseStatus is the status sent for Refuse. Zero means 400.
+	RefuseStatus int `yaml:"refuseStatus,omitempty"`
+	// DoNotRetry adds the header x-should-retry: false to every scripted 503, 429 and refusal, the
+	// gateway's mark for a refusal no layer retries.
+	DoNotRetry bool `yaml:"doNotRetry,omitempty"`
 	// ContextLength answers every request with the context-length-exceeded error: HTTP 400,
 	// code context_length_exceeded (OpenAI-compatible) or "prompt is too long" (Anthropic).
 	ContextLength bool `yaml:"contextLength,omitempty"`

@@ -51,6 +51,7 @@ var _ = Describe("koinon-opencode model retries", func() {
 		stop, err := h.conn.Prompt(ctx, session, helloPrompt)
 		took := time.Since(start)
 		GinkgoWriter.Printf("prompt ended after %s: stop %q, err %v\n", took, stop, err)
+		Expect(err).To(HaveOccurred(), "the turn fails once the retries end")
 		// No try is left over to run after the turn ended.
 		n := len(primary(gw))
 		Consistently(func() int { return len(primary(gw)) }).WithTimeout(3 * time.Second).Should(Equal(n))
@@ -104,6 +105,28 @@ var _ = Describe("koinon-opencode model retries", func() {
 	It("ends the retries at once on a Retry-After beyond the cap", func(ctx SpecContext) {
 		rs, took := failing(ctx, fakemodel.Faults{RateLimit: 1000, RetryAfter: 120})
 		Expect(rs).To(HaveLen(1), "a 120s Retry-After is beyond the 60s Koinon waits")
+		Expect(took).To(BeNumerically("<", 30*time.Second), "the turn is not held for the Retry-After")
+	}, SpecTimeout(3*time.Minute))
+
+	// Koinon never retries a refusal (koinon.retry's own rule, before OpenCode's retryable table):
+	// a client error other than 408, 409 and 429, or anything the gateway marks x-should-retry: false.
+	DescribeTable("does not retry a refusal",
+		func(ctx SpecContext, faults fakemodel.Faults) {
+			rs, took := failing(ctx, faults)
+			Expect(rs).To(HaveLen(1))
+			Expect(took).To(BeNumerically("<", 30*time.Second))
+		},
+		Entry("400, a malformed request", fakemodel.Faults{Refuse: 1000, RefuseStatus: 400}, SpecTimeout(3*time.Minute)),
+		Entry("401, a bad key the gateway cannot mark", fakemodel.Faults{Refuse: 1000, RefuseStatus: 401}, SpecTimeout(3*time.Minute)),
+		Entry("403, no access", fakemodel.Faults{Refuse: 1000, RefuseStatus: 403}, SpecTimeout(3*time.Minute)),
+		Entry("a 429 the gateway marks x-should-retry: false", fakemodel.Faults{RateLimit: 1000, RetryAfter: 1, DoNotRetry: true}, SpecTimeout(3*time.Minute)),
+	)
+
+	It("ends at once on the standalone gateway's budget refusal, a 429 with a Retry-After of hours", func(ctx SpecContext) {
+		// #342 cannot mark this one in standalone mode: Koinon's Retry-After cap makes it final, and
+		// koinon-agentd then fails the turn as throttled (internal/agentd failure_class_test.go).
+		rs, took := failing(ctx, fakemodel.Faults{RateLimit: 1000, RetryAfter: 11812})
+		Expect(rs).To(HaveLen(1))
 		Expect(took).To(BeNumerically("<", 30*time.Second), "the turn is not held for the Retry-After")
 	}, SpecTimeout(3*time.Minute))
 

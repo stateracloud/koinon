@@ -188,7 +188,7 @@ var _ = Describe("Failure classes", func() {
 			Expect(failedClass(ctx, r)).To(Equal(store.RunFailureClassTransient))
 			Expect(srv.Requests()).To(HaveLen(1), "the fake harness's one request; agentd adds none")
 			Expect(retries(ctx, r)).To(BeEmpty())
-			Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("the harness gave up within the 3 tries Koinon allows"))
+			Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("the harness stopped retrying (Koinon allows it up to 3 tries)"))
 		})
 
 		It("does not wait out a 429 either, and still names a Retry-After beyond the cap", func(ctx SpecContext) {
@@ -203,6 +203,19 @@ var _ = Describe("Failure classes", func() {
 			Expect(srv.Requests()).To(HaveLen(1))
 			Expect(retries(ctx, r)).To(BeEmpty())
 			Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("asked to wait 2m0s, longer than the 1m0s Koinon waits"))
+		})
+
+		It("fails the standalone gateway's budget refusal, a 429 with a Retry-After of hours, as throttled", func(ctx SpecContext) {
+			// The gateway cannot mark it x-should-retry: false in standalone mode (#342).
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			model(e, fakemodel.Faults{RateLimit: 5, RetryAfter: 11812})
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", harness)
+			Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+			Expect(failedClass(ctx, r)).To(Equal(store.RunFailureClassThrottled))
+			Expect(srv.Requests()).To(HaveLen(1))
+			Expect(retries(ctx, r)).To(BeEmpty())
+			Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("asked to wait 3h16m52s, longer than the 1m0s Koinon waits"))
 		})
 
 		It("launches the harness with the pool's retry policy", func(ctx SpecContext) {

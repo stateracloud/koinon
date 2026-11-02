@@ -302,9 +302,13 @@ proposed decision and the error, which carries the provider's `Retry-After`
 (`packages/core/src/session/to-session-error.ts`). Koinon's plugin `koinon.retry`
 ([`plugins/koinon-retry/index.js`](plugins/koinon-retry/index.js), installed as
 `/usr/local/lib/koinon/opencode/plugins/koinon-retry`) replaces that decision from the switches,
-which reach it as the options of its entry in the read-only config's `plugins` list. It keeps
-OpenCode's "no" (a failure that is not retryable, the gateway's `x-should-retry: false`, a fourth
-timeout) and only shortens the schedule, never lengthens it. The directory is outside every config
+which reach it as the options of its entry in the read-only config's `plugins` list. Koinon never
+retries a refusal, as the plugin's own rule: a client error other than 408, 409 and 429 (a bad key,
+no access, a malformed request) and anything marked `x-should-retry: false` end after one request. It
+also keeps OpenCode's "no" (a failure that is not retryable, the gateway's `x-should-retry: false`,
+which OpenCode reads before the hook, a fourth timeout) and only shortens the schedule, never
+lengthens it. A refusal the gateway cannot mark, such as the standalone gateway's budget 429 with a
+`Retry-After` of hours, ends on the `Retry-After` cap, and koinon-agentd fails the turn as throttled. The directory is outside every config
 root, so nothing loads the plugin without its options. No fork of OpenCode: the hook is its
 public plugin API.
 
@@ -312,6 +316,14 @@ Worst case for one failed step, with the defaults: 3 gateway requests (the run's
 ledger count each one), and at most 1 s + 2 s of backoff (±20%), or up to 2 × 60 s when the provider
 asks for its `Retry-After`. `test/flavors/retry_test.go` asserts the count and the waits against the
 fake model.
+
+Known limit: if the plugin fails to load (a broken file in the image), OpenCode logs it and runs on
+without it (`packages/core/src/plugin/supervisor.ts`), back on its own 10 retries, and koinon-agentd
+repeats no turn either. Neither the entry script nor koinon-agentd can see this: OpenCode loads
+plugins after the entry script has handed over to it, and reports a load failure only in its log,
+not over ACP. The plugin is fixed in the image, so the flavor contract suite
+(`test/flavors/retry_test.go`) is what catches it: every image that suite passes loads the plugin
+and makes 3 tries, not 11. The request cap still bounds a run that hits it.
 
 What the plugin does not reach: OpenCode's one-shot requests (the session title) retry on their own
 path (`retryOneShot`, at most 4 tries and only when the provider clearly did not run the request: a
