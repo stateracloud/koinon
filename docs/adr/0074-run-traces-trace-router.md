@@ -727,7 +727,7 @@ event classes. The code lands in #344 (items), #345 (business and diagnostic eve
      (procoduck, 2026-11-01): run state changes, park and resume, approvals and `ask_user` answers, task
      status, and the final reply.
    - **Diagnostic events** are everything else. A failed write is logged and counted and never fences
-     the run. Classes: thoughts, tool-call items and progress, usage notes, and debug events.
+     the run (except a write that matches no row: the run is no longer the worker's). Classes: thoughts, tool-call items and progress, usage notes, and debug events.
 3. **Per-org retention of stored run content** (procoduck, 2026-11-01). Org admins set the retention
    from 1 to 365 days; the default is 30. A platform admin can set a lower platform maximum. Every
    change is audited (old and new value). A purge job removes content older than the org's retention
@@ -743,20 +743,20 @@ event classes. The code lands in #344 (items), #345 (business and diagnostic eve
    level (decision 6): items are always stored, with the always-on secret scrubber, and the trace level
    governs only what the router exports to trace destinations. Retention is the privacy control for
    stored content.
+7. **Tool calls and message chunks are business events** (#345, 2026-11-02). This overrides item 2
+   for tool calls: `acp.tool_call` and `acp.tool_call_update` are business events, not diagnostic
+   ones as "tool-call items" in item 2 says, and so are the agent's message chunks
+   (`acp.agent_message_chunk`). The rule that decides it: an event the run's outcome or the task's
+   reply reads is business. The reply (`internal/runreply`) is built from the message chunks and uses
+   the tool calls as the boundaries between the agent's messages; a dropped tool call would merge the
+   agent's interim narration ("I'll pull the data ...") into the reply the task posts. When #344 turns
+   chunks into items, the reply still needs those boundaries, so the items keep the class.
 
 ### Open questions
 
 - ~~The metric name for failed diagnostic writes.~~ `koinon_agentd_run_event_write_failures_total`,
-  labelled `class` (`diagnostic`, `business`) and `reason` (`timeout`, `conn`, `transient`, `other`)
-  (#345). It counts business writes too: those abandon the run, as before. The class of every kind
+  labelled `class` (`diagnostic`, `business`) and `reason` (`timeout`, `conn`, `transient`, `canceled`,
+  `other`) (#345). It counts business writes too: those abandon the run, as before. The class of every kind
   agentd writes is the table in `internal/runoutcome/eventclass.go`; an unlisted kind is business. A
-  diagnostic write is tried twice, a business one five times; a write that matches no row fences the
+  diagnostic write is tried twice, each try with a 2 s deadline, a business one five times; a write that matches no row fences the
   run whatever its class, since the run is no longer the worker's.
-- **This overrides decision 2 for tool calls** (#345, 2026-11-02): `acp.tool_call` and
-  `acp.tool_call_update` are business events, not diagnostic ones as "tool-call items" in decision 2
-  says, and so are the agent's message chunks (`acp.agent_message_chunk`). The rule that decides it:
-  an event the run's outcome or the task's reply reads is business. The reply (`internal/runreply`)
-  is built from the message chunks and uses the tool calls as the boundaries between the agent's
-  messages; a dropped tool call would merge the agent's interim narration ("I'll pull the data ...")
-  into the reply the task posts. When #344 turns chunks into items, the reply still needs those
-  boundaries, so the items keep the class.
