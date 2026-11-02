@@ -25,7 +25,9 @@
 #                                     lane L with --lane); one line per round. --every 30m (or 90,
 #                                     90s, 2h) loops: exit 3 stops it and names the lost claim; an
 #                                     error (exit 1) is retried next round. The loop ends (exit 0)
-#                                     after --for (default 12h) or when PID is gone; any release but
+#                                     after --for (default 12h, the backstop) or when PID is gone
+#                                     (in the background use --while-pid $PPID, the agent that
+#                                     started the shell; $$ dies with that one call); any release but
 #                                     the merge/close one counts as a lost claim.
 #   claim.sh adopt --from <session> [N...]
 #                                     re-key the claims of your dead session to this one, each in
@@ -811,13 +813,13 @@ beat_mine() {
 }
 
 cmd_beat() {
-  local pr="" ns=() a own=0 every="" for_s=43200 pid=""
+  local pr="" ns=() a own=0 every="" for_s=43200 for_given=0 pid=""
   while (($#)); do
     case $1 in
       --pr) pr=${2:-}; [[ $pr =~ ^[0-9]+$ ]] || die "--pr needs a pull request number"; shift 2 ;;
       --mine) own=1; shift ;;
       --every) every=$(parse_duration "${2:-}") || die "--every needs a duration: 90, 90s, 30m or 2h"; shift 2 ;;
-      --for) for_s=$(parse_duration "${2:-}") || die "--for needs a duration: 90, 90s, 30m or 2h"; shift 2 ;;
+      --for) for_given=1; for_s=$(parse_duration "${2:-}") || die "--for needs a duration: 90, 90s, 30m or 2h"; shift 2 ;;
       --while-pid) pid=${2:-}; [[ $pid =~ ^[0-9]+$ ]] || die "--while-pid needs a process id"; shift 2 ;;
       *) [[ $1 =~ ^[0-9]+$ ]] || die "usage: beat <N>... [--pr P] [--lane L] | beat --mine [--every D] [--for D] [--while-pid PID]"; ns+=("$1"); shift ;;
     esac
@@ -827,7 +829,7 @@ cmd_beat() {
     beat_mine "$every" "$for_s" "$pid"
     return
   fi
-  [[ -z $every && -z $pid ]] || die "--every and --while-pid need --mine"
+  [[ -z $every && -z $pid && $for_given == 0 ]] || die "--every, --for and --while-pid need --mine"
   ((${#ns[@]})) || die "usage: beat <N>... [--pr P] [--lane L] | beat --mine [--every DURATION]"
   for a in "${ns[@]}"; do beat_one "$a" "$pr"; done
 }
@@ -848,7 +850,7 @@ cmd_adopt() {
   [[ -n $from ]] || die "usage: adopt --from <session> [N...]"
   ((!HUMAN_MODE)) || die "adopt re-keys agent claims; --human claims are not adopted"
   from=${from%%#*}; from=${from//[^A-Za-z0-9._-]/-}
-  local human base mysess claims now cand n c old lane newh key cnt
+  local human base mysess claims now cand n c old lane newh key cnt iss
   human=$(human_login); base=$(my_base_holder); mysess=$(holder_session "$base")
   [[ $from != "$mysess" ]] || die "$from is this session: nothing to adopt"
   claims=$(list_claims); now=$(server_now)
@@ -873,7 +875,8 @@ cmd_adopt() {
   for n in "${ns[@]}"; do
     c=$(jq -c --argjson n "$n" '.[] | select(.issue == $n)' <<<"$cand")
     [[ -n $c ]] || CLAIM_EXIT=2 die "#$n is not a held claim of session $from"
-    if [[ $(jq -r .state <<<"$(issue_json "$n")") != open ]]; then CLAIM_EXIT=2 die "#$n is closed"; fi
+    iss=$(issue_json "$n") || die "cannot read issue #$n (API error); retry"
+    if [[ $(jq -r .state <<<"$iss") != open ]]; then CLAIM_EXIT=2 die "#$n is closed"; fi
     dead_holder_check "$n" "$c" "$now" || exit 2
     old=$(jq -r .holder <<<"$c"); lane=$(holder_lane "$old")
     newh="$base${lane:+#$lane}"; key=$(holder_key "$newh")

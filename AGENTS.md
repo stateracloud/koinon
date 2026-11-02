@@ -85,8 +85,9 @@ or adopts them.
 4. Within 30 minutes: push `<type>/<N>-<slug>` and open a draft PR with `Closes #N`. The `claim`
    check needs the claim first; after `take` the script re-runs the failed check.
 5. `hack/claim.sh beat <N>` every 30 minutes and before long steps. **Pushes alone are not
-   liveness: you must `beat`.** In the background, `beat --mine --every 30m --while-pid $$` renews
-   all your claims, lanes included, and ends with your shell (or after `--for`, default 12h).
+   liveness: you must `beat`.** In the background, `beat --mine --every 30m --while-pid $PPID`
+   renews all your claims, lanes included, and ends with the agent that started it (`$PPID`, not
+   `$$`, which dies with that one call); `--for` (default 12h) is the backstop.
 6. Exit code 3 from any claim command means the claim is lost (taken over or released): stop work
    on that issue and tell your human. Exit 1 is an error (for example the network): retry.
 7. Blocked by another issue: `hack/claim.sh block <N> <M>` (adds "blocked by", releases). New work
