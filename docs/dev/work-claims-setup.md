@@ -39,7 +39,8 @@ current milestone a due date, and put Ready issues in it.
 ## 5. Ruleset `main`
 
 - Require branches to be up to date before merging (`strict_required_status_checks_policy: true`).
-- Required checks: the existing ones plus **`claim`** (required from day one) and **`adr-lint`**.
+- Required checks: `hack/ci-required.txt` is the list (`hack/ci-required-test.sh --ruleset` diffs it
+  against the live ruleset); the existing ones plus **`claim`** (required from day one) and **`adr-lint`**.
   The first pull request after this needs `Closes #N` with a held claim, or an exemption (a
   `chore`/`ci`/`build(deps)` title without source changes, Dependabot, or the label `unclaimed-ok`
   added by a maintainer). Use the label for the pull request that introduces the checks.

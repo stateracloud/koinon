@@ -9,6 +9,6 @@ settled the OpenShell, Agent Sandbox, agentgateway and flavor decisions in the A
 - They were written against the maintainer's home lab (Zot registry, shared OpenShell) and are not
   maintained; several no longer match the current charts or APIs.
 - Nothing in the build or the tests depends on them, apart from `probe/`, the source of the
-  `spike-probe` image used by the escape suite (see `test/escape` and `make test-escape-kind`), and
-  `kind/`, which the manual `spike-kind` workflow runs.
+  `spike-probe` image used by the escape suite (see `test/escape` and `make test-escape-kind`).
+  (`kind/` was run by a `spike-kind` workflow, deleted in #561; the scripts stay as evidence.)
 - Do not start new work here. Reproducible checks belong in `test/`, `hack/` or the chart.

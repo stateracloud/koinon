@@ -50,13 +50,26 @@ Instructions for coding agents working on Koinon.
   GitHub for it, dispatch it by hand), run it on GitHub (`gh workflow run e2e-kind.yml --ref <branch>`,
   or the `e2e` label). `hack/e2e-remote.sh` on your own Docker (`--local`) is a dev and debug tool
   only: it produces neither `e2e-lab` nor `quickstart`, so it is not merge evidence.
-  `SUITE_LABEL=smoke` (not with `--argo`) runs steps 1-6 only. The required check is `e2e result`
-  (green when the e2e was skipped); `e2e-lab` is not required, contributors without a lab cannot produce it. Why: #281 (branch naming in githubtools) and #284 (a startup flag the chart's
+  `SUITE_LABEL=smoke` (not with `--argo`) runs steps 1-6 only. The required check is `e2e result`:
+  green when nothing needs the e2e, but for a PR that needs one (`hack/needs-e2e.sh`) it is red until
+  the head has a green `quickstart` (this run or a dispatched one) or `e2e-lab` success
+  (`hack/e2e-gate.sh`, #562); a later `e2e-lab` or a passing dispatch re-runs the `e2e result` job
+  itself (not when the PR run is still in progress: then "Re-run failed jobs"). `e2e-lab` is not a
+  required context of its own, contributors without a lab cannot produce it. Trust limit: `result`
+  runs from the PR's own `e2e-kind.yml`, so a PR can edit the YAML to drop the gate; the guard is the
+  ruleset's required review on `.github/**` (not CODEOWNERS), `e2e result` is not pinned to an app and
+  anyone with write access can post `e2e-lab`: a guardrail against mistakes, not a malicious member
+  (pinned integration_id / lab App: #568). Why: #281 (branch naming in githubtools) and #284 (a startup flag the chart's
   migrate Job lacked) passed every package test and failed only in a full install.
 - When main's kind e2e goes from green to red, `hack/e2e-bisect.sh` opens one `e2e-regression` issue
   naming the merge (or the suspects): fix forward within 2 hours, otherwise revert it. RC and
   release tags are cut only from a commit whose `quickstart` job concluded success
   (`hack/release-gate.sh` checks it; dispatch e2e-kind on the commit if the batched run skipped it).
+- Required status checks: `hack/ci-required.txt` is the list the `main` ruleset mirrors; `flavors` is
+  the only advisory job on pull requests (`flavor-publish` is advisory and push-only). `hack/ci-required-test.sh` (CI job `scripts`) fails when a `ci.yml` job is
+  neither required nor advisory; `hack/ci-required-test.sh --ruleset` diffs the list with the live
+  ruleset. A new job goes into the list in the same PR, and a required job must report on every
+  pull request and push (a job-level `if:` skip reports success and is fine; only a workflow-level `paths:` filter leaves a check absent).
 - `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
 - Before pushing: `gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" .`. CI scans
   every commit of a pull request, so a leak fixed in a later commit still fails.
@@ -200,10 +213,12 @@ Lessons that cost time more than once. They apply to humans and agents alike.
 - **OpenShell exec stdin is capped.** More than about 4 MiB of stdin that the command does not read
   makes `exec` exit 74. Code that restores or uploads data through exec must chunk it and have the
   command consume each chunk.
-- **Merging.** The only merge method is a merge commit: `gh pr merge --auto --merge`. Auto-merge
-  does not wait for `e2e-kind`, which is not a required check. So a pull request that changes startup
-  flags, chart Jobs or hooks, or anything the e2e expects does not get auto-merge until
-  `hack/pr-wait.sh <PR> --checks --require e2e` passes: a green `e2e-lab` status on the head (from
+- **Merging.** The only merge method is a merge commit: `gh pr merge --auto --merge`. `e2e result` is
+  required and fails a needs-e2e PR without a passing e2e on its head (#562), so a plain auto-merge
+  cannot skip it; still, a pull request that changes startup flags, chart Jobs or hooks, or anything
+  the e2e expects does not get auto-merge until
+  `hack/pr-wait.sh <PR> --checks --require e2e` passes (`--checks` also waits for every required
+  context of the ruleset to exist on the head, so a queued `ci` run is not "green"): a green `e2e-lab` status on the head (from
   `hack/e2e-remote.sh --argo`, which needs the branch pushed) or a green `quickstart` run on the head
   (it runs on its own for the paths in `.github/workflows/e2e-kind.yml`; otherwise dispatch it with
   `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and `hack/claim.sh review <N>`
