@@ -390,12 +390,14 @@ r=$( {
 if ((rc == 1)) && grep -q 'API error' <<<"$r"; then ok "adopt: an API error is exit 1, not closed"; else bad "issue_json failure: rc=$rc $r"; fi
 eq "adopt your own session" "$(rc_of "$(lanecmd "$ADOPT_DEAD" adopt --from s1)")" 1
 eq "adopt needs --from" "$(rc_of "$(lanecmd "$ADOPT_DEAD" adopt)")" 1
-# Caps: the human cap (4) counts the active claims, the session cap (1) counts per lane.
+# Caps: the human cap (8) counts the active claims, the session cap (1) counts per lane.
 cap_fix=$(jq -c ". + [$(dead 30 alice/mac/old#x 2026-10-30T15:00:00Z)]" <<<"$FIX")
 cap_fix=$(jq -c '[.[] | select(.issue != 14)]' <<<"$cap_fix")
+# Four more live claims, each in its own lane, bring the human to the cap of 8 (the pre-8 fixture had 4).
+cap_fix=$(jq -c '. + [range(40; 44) as $i | {"issue":$i,"sha":"s\($i)","state":"held","holder":"alice/mac/s1#f\($i)","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"","note":""}]' <<<"$cap_fix")
 r=$(lanecmd "$cap_fix" adopt --from old)
 eq "adopt respects the human cap" "$(rc_of "$r")" 2
-if grep -q 'cap of 4' <<<"$r"; then ok "adopt cap message"; else bad "cap message: $r"; fi
+if grep -q 'cap of 8' <<<"$r"; then ok "adopt cap message"; else bad "cap message: $r"; fi
 same_lane=$(jq -nc "[$(dead 30 alice/mac/old#x 2026-10-30T15:00:00Z), $(dead 35 alice/mac/old#x 2026-10-30T15:00:00Z)]")
 r=$(lanecmd "$same_lane" adopt --from old)
 eq "adopt respects the session cap per lane" "$(rc_of "$r")" 2
