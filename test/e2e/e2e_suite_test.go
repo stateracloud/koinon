@@ -19,11 +19,12 @@
 package e2e_test
 
 import (
-	"os"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 func TestE2E(t *testing.T) {
@@ -32,7 +33,5 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	if os.Getenv("KOINON_E2E_API_URL") == "" {
-		Skip("KOINON_E2E_API_URL is not set; run test/e2e/run.sh")
-	}
+	testenv.Require(testenv.Var("e2e", "KOINON_E2E_API_URL"))
 })

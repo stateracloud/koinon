@@ -17,13 +17,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -40,21 +40,9 @@ func TestLedger(t *testing.T) {
 	RunSpecs(t, "ledger")
 }
 
-func dockerAvailable(ctx context.Context) error {
-	p, err := testcontainers.NewDockerProvider()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = p.Close() }()
-	return p.Health(ctx)
-}
-
-// needDocker skips the spec without a container runtime. Decoding and limit specs run anyway.
-func needDocker() {
-	if db == nil {
-		Skip("Docker is not available")
-	}
-}
+// needDocker skips the spec without a container runtime (or fails it under KOINON_REQUIRE=docker).
+// Decoding and limit specs run anyway.
+func needDocker() { testenv.Require(testenv.Docker) }
 
 var _ = BeforeSuite(func(ctx SpecContext) {
 	// The specs assert exact money values, so they price against their own fixed list, never the
@@ -65,7 +53,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	Expect(err).NotTo(HaveOccurred())
 	priceList = pricing.Static(l, rs)
 
-	if err := dockerAvailable(ctx); err != nil {
+	if err := testenv.Docker.Err(); err != nil {
 		GinkgoWriter.Println("Docker is not available; Postgres specs are skipped:", err)
 		return
 	}

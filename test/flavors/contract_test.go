@@ -18,6 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // flavor is what the contract suite needs to know about one flavor: how to drive it, and what
@@ -225,9 +226,7 @@ func describeContract(f flavor) bool {
 		}
 
 		BeforeAll(func() {
-			if dockerErr != nil {
-				Skip("Docker is not available: " + dockerErr.Error())
-			}
+			testenv.Require(testenv.Docker)
 			ensureImage(f)
 			gw = newGateway(contractScript(f))
 			sb = newSandbox(f.image(), "OPENAI_API_KEY="+fakeKey, "GITHUB_TOKEN="+fakeGitHubPlaceholder)

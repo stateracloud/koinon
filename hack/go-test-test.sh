@@ -44,9 +44,45 @@ echo "ok: serial Ginkgo suites and go-race report per spec"
 # Behaviour check, opt-in because it runs the suites (needs Docker): a Ginkgo suite outside
 # PARALLEL_SUITES must leave a report with more than one testcase.
 if [[ ${GO_TEST_TEST_RUN:-} == 1 ]]; then
-	d=$(mktemp -d)
+	d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
 	REPORT_DIR=$d hack/go-test.sh >/dev/null 2>&1 || true
 	f=$(find "$d" -name 'junit_*reconciler*.xml' | head -1)
 	[[ -n $f && $(grep -c '<testcase' "$f") -gt 1 ]] || { echo "FAIL: reconciler report has no per-spec testcases"; exit 1; }
 	echo "ok: serial Ginkgo suite report has per-spec testcases"
 fi
+
+# #507: a Ginkgo suite where no spec ran is not a pass. ./internal/runoutcome has Postgres specs
+# only, so without Docker every one of them skips through testenv.Require. A dead DOCKER_HOST does
+# not simulate that (testcontainers falls back to the default socket), KOINON_TESTENV_UNAVAILABLE does.
+d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+rc=0
+out=$(KOINON_TESTENV_UNAVAILABLE=docker REPORT_DIR=$d hack/go-test.sh ./internal/runoutcome 2>&1) || rc=$?
+[[ $rc == 3 ]] || { echo "$out" | tail -20; echo "FAIL: a suite that skips for a missing expected requirement must exit 3 (incomplete), got $rc"; exit 1; }
+grep -q 'SKIPPED, NOT PASSED' <<<"$out" || { echo "$out" | tail -20; echo "FAIL: a suite skipped for a missing requirement is not reported as SKIPPED, NOT PASSED"; exit 1; }
+d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+if KOINON_REQUIRE=docker KOINON_TESTENV_UNAVAILABLE=docker REPORT_DIR=$d hack/go-test.sh ./internal/runoutcome >/dev/null 2>&1; then
+	echo "FAIL: KOINON_REQUIRE=docker must fail a suite whose Docker is missing"; exit 1
+fi
+d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+if out=$(go run ./hack/testverdict -reports "$d" ./internal/runoutcome 2>&1); then
+	echo "FAIL: testverdict passed a suite that left no report"; exit 1
+fi
+grep -q 'NOT RUN' <<<"$out" || { echo "$out"; echo "FAIL: testverdict does not report a suite without a report as NOT RUN"; exit 1; }
+echo "ok: skipped suites are SKIPPED, KOINON_REQUIRE fails them, a missing report is NOT RUN"
+
+# A package argument go list rejects must fail the run, not leave an empty run that exits 0.
+d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+if REPORT_DIR=$d hack/go-test.sh ./internal/no-such-package >/dev/null 2>&1; then
+	echo "FAIL: go-test.sh passed a package that go list rejects"; exit 1
+fi
+echo "ok: a failing go list fails the run"
+
+# A plain test that skips through testenv.RequireT is seen through go test's events: the chart
+# contract test (a plain test in the chartsmoke suite's package) without helm makes the run
+# incomplete, even though the suite's own specs skip for the opt-in envtest.
+d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+rc=0
+out=$(env -u KUBEBUILDER_ASSETS HELM=koinon-no-such-helm REPORT_DIR="$d" hack/go-test.sh ./test/chartsmoke 2>&1) || rc=$?
+[[ $rc == 3 ]] || { echo "$out" | tail -20; echo "FAIL: chart contract test without helm: exit $rc, want 3 (incomplete)"; exit 1; }
+grep -q 'INCOMPLETE (missing helm)' <<<"$out" || { echo "$out" | tail -20; echo "FAIL: the verdict does not name helm"; exit 1; }
+echo "ok: a plain test skipped for an expected requirement makes the run incomplete"

@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -38,14 +37,7 @@ var _ = Describe("Postgres", Ordered, func() {
 	)
 
 	BeforeAll(func(ctx SpecContext) {
-		provider, err := testcontainers.ProviderDocker.GetProvider()
-		if err == nil {
-			err = provider.Health(ctx)
-		}
-		if err != nil {
-			Skip("Docker is not available: " + err.Error())
-		}
-		pool = pgtest.Start(ctx)
+		pool = pgtest.Start(ctx) // skips without Docker (testenv)
 		q = store.New(pool)
 		org, user, slug = pgtest.NewOrg(ctx, pool)
 

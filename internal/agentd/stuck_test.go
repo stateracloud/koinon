@@ -24,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 const (
@@ -392,9 +393,7 @@ var _ = Describe("procinfo.sh", func() {
 
 var _ = Describe("savework.sh", func() {
 	It("lists the uncommitted work against the newest commit GitHub has, leaving the repository alone", func() {
-		if _, err := exec.LookPath("git"); err != nil {
-			Skip("git is not installed")
-		}
+		testenv.Require(testenv.Binary("git"))
 		work := GinkgoT().TempDir()
 		repo := filepath.Join(work, "widgets")
 		git := func(args ...string) string {
@@ -465,9 +464,7 @@ var _ = Describe("savework.sh", func() {
 		// A canary appends to a file when git runs it and otherwise behaves like cat.
 		var work, repo, canary string
 		BeforeEach(func() {
-			if _, err := exec.LookPath("git"); err != nil {
-				Skip("git is not installed")
-			}
+			testenv.Require(testenv.Binary("git"))
 			work = GinkgoT().TempDir()
 			repo = filepath.Join(work, "widgets")
 			canary = filepath.Join(GinkgoT().TempDir(), "ran")
@@ -628,9 +625,7 @@ var _ = Describe("savework.sh", func() {
 	})
 
 	It("reads nothing from a repository whose origin is not GitHub, and says so", func() {
-		if _, err := exec.LookPath("git"); err != nil {
-			Skip("git is not installed")
-		}
+		testenv.Require(testenv.Binary("git"))
 		work := GinkgoT().TempDir()
 		for _, args := range [][]string{{"init", "-q", "."}, {"remote", "add", "origin", "https://gitlab.example.test/a/b.git"}} {
 			c := exec.Command("git", append([]string{"-C", work}, args...)...)
@@ -645,9 +640,7 @@ var _ = Describe("savework.sh", func() {
 	})
 
 	It("reads the repositories of the connection's host, and only those", func() {
-		if _, err := exec.LookPath("git"); err != nil {
-			Skip("git is not installed")
-		}
+		testenv.Require(testenv.Binary("git"))
 		work := GinkgoT().TempDir()
 		for _, origin := range []string{"https://ghes.example.test:8443/acme/widgets.git", "git@ghes.example.test:acme/gadgets", "https://github.com/acme/other.git"} {
 			dir := filepath.Join(work, filepath.Base(strings.TrimSuffix(origin, ".git")))

@@ -9,6 +9,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // koinon-agentd's sweep script (internal/agentd/sweep.sh) on three PID 1s: the OpenShell
@@ -18,9 +20,7 @@ var _ = Describe("koinon-agentd's sandbox sweep", func() {
 	var script string
 
 	BeforeEach(func() {
-		if dockerErr != nil {
-			Skip("Docker is not available: " + dockerErr.Error())
-		}
+		testenv.Require(testenv.Docker)
 		ensureImage(opencode)
 		b, err := os.ReadFile("../../internal/agentd/sweep.sh")
 		Expect(err).NotTo(HaveOccurred())

@@ -35,7 +35,10 @@ build-web: ## Build the web UI
 	cd web && $(PNPM) build
 
 .PHONY: test
-test: test-go test-web ## Run all unit tests
+test: ## Run all unit tests; the web tests run even when the Go run failed or was incomplete (exit 3)
+	@rc=0; hack/go-test.sh || rc=$$?; \
+	$(MAKE) --no-print-directory test-web || rc=1; \
+	exit $$rc
 
 .PHONY: test-go
 test-go: ## Run Go tests like CI (Postgres tests need Docker); test/flavors needs images, see test-flavors
@@ -119,7 +122,7 @@ flavors: $(addprefix flavor-,$(FLAVORS)) ## Build all flavor images
 
 .PHONY: test-flavors
 test-flavors: flavors ## Build the flavor images and run the flavor contract suite
-	$(GO) test -count=1 ./test/flavors/...
+	KOINON_REQUIRE=$${KOINON_REQUIRE:-docker} $(GO) test -count=1 ./test/flavors/...
 
 # Docs site (plan item DOC1): Starlight in docs/site. The quickstart's `sh e1=<name>` blocks are
 # what test/e2e/run.sh runs; docs-check keeps the doc, the e2e script and the code in step.
@@ -148,12 +151,16 @@ SETUP_ENVTEST       ?= $(GO) run sigs.k8s.io/controller-runtime/tools/setup-envt
 .PHONY: test-admission
 test-admission: ## Run the escape suite's admission policy cases against envtest (needs helm)
 	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
-		KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -v ./test/escape/ -ginkgo.label-filter=admission
+		KOINON_REQUIRE=$${KOINON_REQUIRE:-envtest} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -v ./test/escape/ -ginkgo.label-filter=admission
 
 .PHONY: test-chart-smoke
 test-chart-smoke: ## Start the chart's rendered Jobs and Deployments as containers (needs Docker, helm, Go)
 	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
-		KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -timeout 20m -v ./test/chartsmoke/ -ginkgo.timeout=15m
+		mkdir -p reports/chartsmoke && rm -f reports/chartsmoke/*.json && \
+		{ rc=0; \
+		KOINON_REQUIRE=$${KOINON_REQUIRE:-docker,envtest} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -timeout 20m -v ./test/chartsmoke/ -ginkgo.timeout=15m -ginkgo.json-report=$(CURDIR)/reports/chartsmoke/report.json || rc=1; \
+		$(GO) run ./hack/testverdict -reports reports/chartsmoke -name chart-smoke -expect docker,envtest ./test/chartsmoke || rc=1; \
+		exit $$rc; }
 
 .PHONY: test-escape
 test-escape: ## Run the escape suite's OpenShell cases against a gateway you point it at (KOINON_OPENSHELL_*)

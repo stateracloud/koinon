@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/audit"
@@ -98,10 +97,7 @@ var _ = Describe("the org default model", Ordered, func() {
 	}
 
 	BeforeAll(func(ctx SpecContext) {
-		if p, err := testcontainers.NewDockerProvider(); err != nil || p.Health(ctx) != nil {
-			Skip("Docker is not available")
-		}
-		pool = pgtest.Start(ctx)
+		pool = pgtest.Start(ctx) // skips without Docker (testenv)
 		l, rs, err := pricing.ParseList([]byte(orgDefaultList))
 		Expect(err).NotTo(HaveOccurred())
 		rv = prices.NewResolver(pricing.Static(l, rs))
