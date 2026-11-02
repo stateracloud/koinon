@@ -114,7 +114,8 @@ fi
 norm='def ok: .done and (.bad | not) and (.skipped | not);
 def newest: sort_by(.ts) | . as $s | ($s | last) as $l
   | ([$s[] | select(ok)] | last) as $g
-  | if $g != null and ($l.done and ($l.bad and ($l.cancelled | not)) and $l.ts > $g.ts) then $l elif $g != null then $g elif ($l.done and ($l.cancelled or $l.skipped)) and any($s[]; .done | not) then ([$s[] | select(.done | not)] | last) else $l end;
+  | ([$s[] | select(.done and .bad and (.cancelled | not))] | last) as $f
+  | if $g != null and $f != null and $f.ts > $g.ts then $f elif $g != null then $g elif ($l.done and ($l.cancelled or $l.skipped)) and any($s[]; .done | not) then ([$s[] | select(.done | not)] | last) else $l end;
 [(.statusCheckRollup // [])[] | {
   name: (.name // .context // "?"),
   ts: (.startedAt // .completedAt // ""),
@@ -191,12 +192,16 @@ while :; do
       # (An explicit `--require quickstart` stays required as it is: no alias relief.)
       # `e2e` is satisfied by a green e2e-lab status or a green quickstart run on the head; then the other
       # runs of those two names (skipped, cancelled, red) no longer matter.
-      if jq -e 'any((.statusCheckRollup // [])[]; ((.name // .context // "") == "e2e-lab" and (.state // "") == "SUCCESS")
-          or ((.name // "") == "quickstart" and (.status // "") == "COMPLETED" and (.conclusion // "") == "SUCCESS"))' <<<"$json" >/dev/null; then
+      reqjson='["quickstart"]'
+      if jq -e 'any((.statusCheckRollup // [])[]; (.name // .context // "") == "e2e-lab" and (.state // "") == "SUCCESS")' <<<"$json" >/dev/null; then
         json=$(jq '.statusCheckRollup |= map(select(((.name // .context // "") | IN("quickstart", "e2e-lab") | not)
           or (.state // "") == "SUCCESS" or (.conclusion // "") == "SUCCESS"))' <<<"$json")
         req_now=()
         for r in ${required[@]+"${required[@]}"}; do [ "$r" = quickstart ] || req_now+=("$r"); done
+        no_live=1
+      elif jqn -e "$norm | any(.[]; .name == \"quickstart\" and ok)" <<<"$json" >/dev/null; then
+        # quickstart's newest verdict on the head is green (a newer failure would not be): a red e2e-lab is moot.
+        json=$(jq '.statusCheckRollup |= map(select((.name // .context // "") != "e2e-lab" or (.state // "") == "SUCCESS"))' <<<"$json")
         no_live=1
       fi
     fi

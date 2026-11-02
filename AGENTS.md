@@ -120,7 +120,8 @@ are tracked. Their settings live in the untracked `${XDG_CONFIG_HOME:-$HOME/.con
 (template `hack/lab/lab.env.example`; `hack/e2e-argo.sh` header). With them,
 `hack/e2e-remote.sh --argo` queues the e2e (and `--gate <set>` the Docker-only gates) on the lab's
 Argo. Exit codes, the `e2e-lab` status, lane rules and `KOINON_E2E_AGENT`: `docs/dev/maintainer-homelab.md`
-and the `hack/e2e-argo.sh` header. Dev loop and registry: `docs/dev/maintainer-homelab.md`.
+and the `hack/e2e-argo.sh` header. Each lane runs `hack/e2e-remote.sh --argo --repo <its worktree>` with
+`KOINON_E2E_AGENT=<session>-<lane>` and keeps at most one kind run waiting. Dev loop and registry: `docs/dev/maintainer-homelab.md`.
 
 ## Working alongside another human
 
