@@ -69,7 +69,19 @@ func (c TaintChecker) Check(ctx context.Context, scope Scope, fp *Fingerprinter,
 	if len(all) == 0 {
 		return allow(ReasonPass), nil
 	}
-	hits, err := c.Store.Lookup(ctx, scope, all)
+	if err := m.clock(); err != nil {
+		return budgetDecision(err), nil
+	}
+	lctx, cancel := context.WithDeadline(ctx, m.deadline)
+	res, err := c.Store.Lookup(lctx, scope, all)
+	cancel()
+	if err == nil {
+		err = m.clock()
+		if err != nil {
+			return budgetDecision(err), nil
+		}
+	}
+	hits := res.Found
 	if err != nil || len(hits) != len(all) {
 		if err == nil {
 			err = errors.New("leakguard: the store answered for the wrong number of fingerprints")
@@ -85,11 +97,31 @@ func (c TaintChecker) Check(ctx context.Context, scope Scope, fp *Fingerprinter,
 		}
 	}
 	if best == nil {
-		return allow(ReasonPass), nil
+		d := allow(ReasonPass)
+		d.Evicted = res.Evicted
+		return d, nil
 	}
 	d := block(ReasonTaint, "the call would send %d characters of private text; it needs approval", best.Length)
 	d.Match = best
+	d.Evicted = res.Evicted
 	return d, nil
+}
+
+// maxPairs bounds the ordered argument pairs of one call, as a multiple of MaxPairArgs squared.
+const maxPairs = 4
+
+// pairsFit reports whether every ordered pair of the arguments idx fits the pair budget: at most
+// maxPairs*MaxPairArgs^2 pairs and an eighth of MaxWorkBytes of joined text before decoding.
+func pairsFit(args []string, idx []int, lim Limits) bool {
+	n := len(idx)
+	if n*(n-1) > maxPairs*lim.MaxPairArgs*lim.MaxPairArgs {
+		return false
+	}
+	bytes := 0
+	for _, i := range idx {
+		bytes += (n - 1) * (min(len(args[i]), lim.PairJoinBytes) * 2)
+	}
+	return bytes <= lim.MaxWorkBytes/8
 }
 
 func budgetDecision(err error) Decision {
@@ -136,17 +168,14 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 			ai, aj := args[idx[i]], args[idx[j]]
 			raws = append(raws, rawText{tail(ai, lim.PairJoinBytes) + head(aj, lim.PairJoinBytes), []int{idx[i], idx[j]}})
 		}
-		if n <= lim.MaxPairArgs {
-			for i := range n {
-				for j := range n {
-					if i != j && j != i+1 { // the joined text already holds every in-order boundary
-						pair(i, j)
-					}
+		if n > lim.MaxPairArgs && !pairsFit(args, idx, lim) {
+			return nil, &budgetError{ReasonBudgetArgs, fmt.Sprintf("the call has %d non-empty arguments, too many to check every pair of them for split text; the tool call could not be checked", n)}
+		}
+		for i := range n {
+			for j := range n {
+				if i != j && j != i+1 { // the joined text already holds every in-order boundary
+					pair(i, j)
 				}
-			}
-		} else {
-			for i := 0; i+1 < n; i++ {
-				pair(i+1, i)
 			}
 		}
 	}

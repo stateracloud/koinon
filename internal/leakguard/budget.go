@@ -55,6 +55,10 @@ type Decision struct {
 	Reason Reason
 	Detail string
 	Match  *Match
+	// Evicted reports that the taint store has forgotten some of the scope's private text to
+	// stay within its size limits, so a pass may miss it. It does not change Allow; what to do
+	// about it is the caller's choice (#349).
+	Evicted bool
 }
 
 func allow(r Reason) Decision { return Decision{Allow: true, Reason: r} }
@@ -72,7 +76,7 @@ type Limits struct {
 	MaxWorkBytes  int           // bytes decoded and normalised per call (default 32 MiB)
 	MaxDuration   time.Duration // wall clock per call (default 500 ms)
 	PairJoinBytes int           // bytes of each side joined for split reassembly (default 512)
-	MaxPairArgs   int           // above this many arguments only adjacent pairs join (default 32)
+	MaxPairArgs   int           // above this many arguments, pairs must fit the pair budget (default 32)
 }
 
 // DefaultLimits returns the default budgets.

@@ -89,10 +89,30 @@ func appendCanonRune(out []rune, r rune, depth int) []rune {
 	if f := unicode.ToLower(unicode.ToUpper(r)); f != r {
 		return appendCanonRune(out, f, depth+1)
 	}
+	if d, ok := digitValue(r); ok {
+		return append(out, '0'+d)
+	}
 	if unicode.IsLetter(r) || unicode.IsDigit(r) {
 		return append(out, r)
 	}
 	return out
+}
+
+// digitValue returns the value of a decimal digit of any script (Unicode Nd), which the
+// matching form writes as the ASCII digit. Every Nd range starts at a zero and runs in tens.
+func digitValue(r rune) (rune, bool) {
+	for _, rg := range unicode.Nd.R16 {
+		if lo, hi := rune(rg.Lo), rune(rg.Hi); lo <= r && r <= hi && rg.Stride == 1 {
+			return (r - lo) % 10, true
+		}
+	}
+	for _, rg := range unicode.Nd.R32 {
+		// Nd code points are below U+20000, so they fit a rune
+		if lo, hi := rune(rg.Lo), rune(rg.Hi); lo <= r && r <= hi && rg.Stride == 1 { //nolint:gosec // see above
+			return (r - lo) % 10, true
+		}
+	}
+	return 0, false
 }
 
 // confusables folds look-alike letters of other scripts, and Latin letters without a

@@ -22,11 +22,24 @@ type Scope struct {
 type Store interface {
 	// Add records fingerprints for scope.
 	Add(ctx context.Context, scope Scope, fps []Fingerprint) error
-	// Lookup reports, for each fingerprint, whether scope holds it.
-	Lookup(ctx context.Context, scope Scope, fps []Fingerprint) ([]bool, error)
+	// Lookup reports, for each fingerprint, whether scope holds it, and whether the store has
+	// evicted fingerprints of scope (so a miss may be text it once held).
+	Lookup(ctx context.Context, scope Scope, fps []Fingerprint) (Hits, error)
 	// Drop forgets scope, for example when its home generation ends.
 	Drop(ctx context.Context, scope Scope) error
 }
+
+// Hits is the answer of a Lookup: Found[i] reports whether the scope holds fingerprint i.
+// Evicted reports that the store has forgotten some of the scope's fingerprints (or the whole
+// scope) to stay within its size limits, so a miss is not proof the text is not private.
+type Hits struct {
+	Found   []bool
+	Evicted bool
+}
+
+// ErrStoreFull is the error of an Add that would take a MemoryStore past MaxTotalFingerprints.
+// The caller fails closed on it: text it could not record is not known to be private.
+var ErrStoreFull = errors.New("leakguard: the taint store is full")
 
 // MemoryStoreOptions size a MemoryStore. The zero value of a field means its default.
 type MemoryStoreOptions struct {
@@ -35,6 +48,9 @@ type MemoryStoreOptions struct {
 	MaxFingerprints int
 	// MaxScopes held at once (default 4096). Beyond it the least recently used scope is evicted.
 	MaxScopes int
+	// MaxTotalFingerprints across all scopes (default 1<<23, roughly 1 GiB of memory). An Add
+	// past it fails with ErrStoreFull instead of evicting another scope's taint.
+	MaxTotalFingerprints int
 }
 
 // StoreStats counts what a MemoryStore holds and what it evicted. An eviction forgets taint, so
@@ -53,11 +69,20 @@ type MemoryStore struct {
 	mu        sync.Mutex
 	maxFP     int
 	maxScopes int
+	maxTotal  int
+	total     int
 	clock     uint64
 	scopes    map[Scope]*scopeSet
 	evictedFP uint64
 	evictedSc uint64
+	// gone remembers scopes evicted whole, so a later Lookup reports them as evicted; past
+	// maxGone entries it is cleared and goneLost makes every unknown scope count as evicted.
+	gone     map[Scope]struct{}
+	goneLost bool
 }
+
+// maxGone bounds the memory of evicted scopes, as a multiple of MaxScopes.
+const maxGone = 4
 
 type scopeSet struct {
 	seq     map[Fingerprint]uint64 // fingerprint -> sequence number of its latest add
@@ -65,6 +90,7 @@ type scopeSet struct {
 	head    int
 	next    uint64
 	lastUse uint64
+	evicted bool // some of this scope's fingerprints were evicted
 }
 
 type ringEntry struct {
@@ -80,7 +106,13 @@ func NewMemoryStore(o MemoryStoreOptions) *MemoryStore {
 	if o.MaxScopes <= 0 {
 		o.MaxScopes = 4096
 	}
-	return &MemoryStore{maxFP: o.MaxFingerprints, maxScopes: o.MaxScopes, scopes: map[Scope]*scopeSet{}}
+	if o.MaxTotalFingerprints <= 0 {
+		o.MaxTotalFingerprints = 1 << 23
+	}
+	return &MemoryStore{
+		maxFP: o.MaxFingerprints, maxScopes: o.MaxScopes, maxTotal: o.MaxTotalFingerprints,
+		scopes: map[Scope]*scopeSet{}, gone: map[Scope]struct{}{},
+	}
 }
 
 var errNoScope = errors.New("leakguard: the scope has no generation")
@@ -95,7 +127,24 @@ func (m *MemoryStore) Add(ctx context.Context, scope Scope, fps []Fingerprint) e
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// the scope's size after this add, at most maxFP; fail closed if the total would pass maxTotal
+	cur := 0
+	if s, ok := m.scopes[scope]; ok {
+		cur = len(s.seq)
+		grow := 0
+		for _, fp := range fps {
+			if _, held := s.seq[fp]; !held {
+				grow++
+			}
+		}
+		if m.total+min(cur+grow, m.maxFP)-cur > m.maxTotal {
+			return ErrStoreFull
+		}
+	} else if m.total+min(len(fps), m.maxFP) > m.maxTotal {
+		return ErrStoreFull
+	}
 	s := m.scope(scope, true)
+	before := len(s.seq)
 	for _, fp := range fps {
 		s.next++
 		s.seq[fp] = s.next
@@ -107,8 +156,10 @@ func (m *MemoryStore) Add(ctx context.Context, scope Scope, fps []Fingerprint) e
 		if s.seq[e.fp] == e.seq {
 			delete(s.seq, e.fp)
 			m.evictedFP++
+			s.evicted = true
 		}
 	}
+	m.total += len(s.seq) - before
 	// drop stale entries and compact when the ring has grown to twice what it holds
 	if len(s.ring)-s.head > 2*len(s.seq)+1024 || s.head > len(s.ring)/2 {
 		live := make([]ringEntry, 0, len(s.seq))
@@ -123,22 +174,25 @@ func (m *MemoryStore) Add(ctx context.Context, scope Scope, fps []Fingerprint) e
 }
 
 // Lookup implements Store.
-func (m *MemoryStore) Lookup(ctx context.Context, scope Scope, fps []Fingerprint) ([]bool, error) {
+func (m *MemoryStore) Lookup(ctx context.Context, scope Scope, fps []Fingerprint) (Hits, error) {
 	if scope.Generation == "" {
-		return nil, errNoScope
+		return Hits{}, errNoScope
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return Hits{}, err
 	}
-	out := make([]bool, len(fps))
+	out := Hits{Found: make([]bool, len(fps))}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.scope(scope, false)
 	if s == nil {
+		_, gone := m.gone[scope]
+		out.Evicted = gone || m.goneLost
 		return out, nil
 	}
+	out.Evicted = s.evicted
 	for i, fp := range fps {
-		_, out[i] = s.seq[fp]
+		_, out.Found[i] = s.seq[fp]
 	}
 	return out, nil
 }
@@ -147,7 +201,11 @@ func (m *MemoryStore) Lookup(ctx context.Context, scope Scope, fps []Fingerprint
 func (m *MemoryStore) Drop(_ context.Context, scope Scope) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.scopes, scope)
+	if s, ok := m.scopes[scope]; ok {
+		m.total -= len(s.seq)
+		delete(m.scopes, scope)
+	}
+	delete(m.gone, scope)
 	return nil
 }
 
@@ -182,11 +240,20 @@ func (m *MemoryStore) scope(sc Scope, create bool) *scopeSet {
 				oldest, oldestUse, first = k, s.lastUse, false
 			}
 		}
-		m.evictedFP += uint64(len(m.scopes[oldest].seq))
+		n := len(m.scopes[oldest].seq)
+		m.evictedFP += uint64(n)
+		m.total -= n
 		delete(m.scopes, oldest)
 		m.evictedSc++
+		if len(m.gone) >= maxGone*m.maxScopes {
+			clear(m.gone)
+			m.goneLost = true
+		}
+		m.gone[oldest] = struct{}{}
 	}
-	s := &scopeSet{seq: map[Fingerprint]uint64{}, lastUse: m.clock}
+	_, wasGone := m.gone[sc]
+	delete(m.gone, sc)
+	s := &scopeSet{seq: map[Fingerprint]uint64{}, lastUse: m.clock, evicted: wasGone || m.goneLost}
 	m.scopes[sc] = s
 	return s
 }
