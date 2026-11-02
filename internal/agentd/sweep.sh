@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# shellcheck shell=sh
 #
 # sweep ends every process in the sandbox that runs as this script's user, apart from PID 1,
 # the sandbox's main process and this script with its ancestors (the exec that runs it).
@@ -58,6 +59,7 @@ else
   for d in /proc/[0-9]*; do
     { read -r line <"$d/stat"; } 2>/dev/null || continue
     # Fields after "pid (comm) ": state, ppid, ..., start time the 20th.
+    # shellcheck disable=SC2086 # splitting the stat fields is the point
     set -- ${line##*") "}
     [ $# -ge 20 ] && [ "$2" = 1 ] || continue
     shift 19
@@ -116,6 +118,7 @@ while :; do
     sv=
     for pid in $found; do
       { read -r line <"/proc/$pid/stat"; } 2>/dev/null || continue
+      # shellcheck disable=SC2086 # splitting the stat fields is the point
       set -- ${line##*") "}
       [ $# -ge 20 ] || continue
       shift 19
@@ -130,6 +133,7 @@ while :; do
   done
   # TERM first, so a harness can save its state; KILL in later rounds.
   if [ "$round" -eq 1 ]; then sig=TERM; else sig=KILL; fi
+  # shellcheck disable=SC2086 # found is a list of pids
   kill -s "$sig" $found 2>/dev/null
   i=0
   while alive && [ "$i" -lt 30 ]; do

@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# shellcheck shell=sh
 #
 # savework reads the uncommitted work of the git repositories in a workspace so that
 # koinon-agentd can keep it when the sandbox has to be recreated (savework.go, ADR 0054).
@@ -129,6 +130,7 @@ while IFS= read -r r; do
     case $path in
       '"'* | ' '* | *' ') echo "S $slug: $path: the path has characters Koinon does not save" >>"$tmp/skipped"; continue ;;
     esac
+    # shellcheck disable=SC2086 # meta is a space-separated field list
     set -- $meta
     omode=${1#:}
     nmode=$2
