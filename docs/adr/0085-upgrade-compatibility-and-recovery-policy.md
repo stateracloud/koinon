@@ -292,8 +292,19 @@ Implementation-level unknowns, to settle in the sub-issues:
   of its own version whose heartbeat is older than 90 s (`durable.Runtime.RecoverDeadExecutors`),
   forgets stale executors of older versions (the carry-over forks their workflows) and leaves those
   of newer versions to a process of that version. Still to do: the pending-by-version metric.
-- The exact shape of the key-wrapping interface (wrap, unwrap, key identity and reachability
-  probe) and how an adapter's credentials reach koinon-api without entering a sandbox.
+- Resolved (#415, decision 12): the key-wrapping interface is `secretstore.Wrapper` (`Backend`,
+  `KeyID`, `Wrap`, `Unwrap`, `Probe`). It wraps the KEKs, not each DEK: the KEK Secret holds every
+  KEK as its wrapper stored it (a `Local` KEK as the base64 of its bytes, unchanged; a KMS-wrapped one
+  as JSON naming the backend and key), and the processes unwrap the key set when they load or reload
+  it (every minute). So `Seal` and `Open` stay local and synchronous, a short KMS outage does not stop
+  reads, and koinon-api and the reconciler need decrypt rights alone; only wrapping a new KEK
+  (`keys add`, koinon-api's first start) needs encrypt. `secretstore.Wrappers` picks each stored KEK's
+  adapter (`Local` is always readable), so an install moves to a KMS by `keys add` (wrapped by the
+  KMS), `activate`, `rewrap`, `retire`. A wrapped KEK is bound to its ID. Adapters authenticate with
+  the pod's identity (OpenBao Kubernetes auth, the AWS default chain with IRSA; procoduck, 2026-11-02),
+  so no credential is in Helm values, env or a sandbox. The fingerprint is `secretstore.Fingerprint`
+  (HMAC-SHA256 keyed by the KEK, 16 bytes), the same however the KEK is wrapped; `keys status` and
+  `keys export` print it. agentd holds no keyring (it asks koinon-api for repository passwords).
 - Resolved (detection of the decision 6 rule): the lint reads a marker file, `hack/migrate-patch-line`
   (`none` or the shipped minor line, for example `v0.1`), at the merge base. Patch tags are cut from
   `main` (the release gate requires an ancestor of `origin/main`), so the marker, not a branch name,

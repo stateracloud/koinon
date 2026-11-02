@@ -89,12 +89,15 @@ func newKeysCommand() *cobra.Command {
 		confirmed(sub("rewrap", "Wrap every stored data key under the active KEK (payloads are not decrypted)", cobra.NoArgs, true)),
 		confirmed(sub("retire [ID]", "Remove a KEK; refuses while any value uses it (on a terminal, pick it from a list without ID)", oneOrPrompt, true)),
 		confirmed(sub("reencrypt", "Seal every value again under a new data key (the compromise path)", cobra.NoArgs, true)),
+		sub("export", "Print the key set as a Secret manifest, the KEK backup (redirect it into a file; restore with kubectl apply)", cobra.NoArgs, false),
 	)
 	return keys
 }
 
 func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out io.Writer, prompt *cli.Prompter) error {
 	var store keyscli.Store
+	// The KEKs are local (Secret-held) until a KMS adapter is configured (#416, #417): the zero
+	// secretstore.Wrappers in the stores.
 	switch {
 	case o.kekSecret != "":
 		if o.namespace == "" {
@@ -111,9 +114,9 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		return errors.New("set --kek-secret or --kek-dir")
 	}
 
-	tool := &keyscli.Tool{Store: store, Out: out, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes}
+	tool := &keyscli.Tool{Store: store, Out: out, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, SecretName: o.kekSecret}
 	// activate needs the database only to show, in its picker, the values each KEK wraps.
-	if o.dbURL != "" && cmd != "add" && (cmd != "activate" || (prompt != nil && len(rest) == 0)) {
+	if o.dbURL != "" && cmd != "add" && cmd != "export" && (cmd != "activate" || (prompt != nil && len(rest) == 0)) {
 		pool, err := pgxpool.New(ctx, o.dbURL)
 		if err != nil {
 			return fmt.Errorf("connect to postgres: %w", err)
@@ -134,6 +137,8 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		return tool.Retire(ctx, firstOrEmpty(rest))
 	case "reencrypt":
 		return tool.Reencrypt(ctx)
+	case "export":
+		return tool.Export(ctx)
 	}
 	return fmt.Errorf("unknown keys command %q", cmd)
 }

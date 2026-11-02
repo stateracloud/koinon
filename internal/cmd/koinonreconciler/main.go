@@ -122,9 +122,14 @@ func serve(ctx context.Context, cfg config) error {
 		})
 		defer func() { _ = health.Close() }()
 	}
-	var keyring *secretstore.Keyring
+	// The KEKs are local (Secret-held) until a KMS adapter is configured (ADR 0085 decision 12;
+	// #416, #417): the zero secretstore.Wrappers.
+	var (
+		keyring  *secretstore.Keyring
+		wrappers secretstore.Wrappers
+	)
 	for lastWarn := (time.Time{}); keyring == nil; {
-		if keyring, err = secretstore.LoadDir(cfg.kekDir); err != nil {
+		if keyring, err = secretstore.LoadDir(ctx, cfg.kekDir, wrappers); err != nil {
 			if time.Since(lastWarn) >= time.Minute {
 				log.Warn("waiting for the key-encryption keys (koinon-api creates them on its first start, or restore the KEK Secret)", "err", err)
 				lastWarn = time.Now()
@@ -137,7 +142,7 @@ func serve(ctx context.Context, cfg config) error {
 		}
 	}
 	ready.Store(true)
-	safego.GoOrStop(ctx, log, "keyring-watch-dir", stop, func(ctx context.Context) { keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log) })
+	safego.GoOrStop(ctx, log, "keyring-watch-dir", stop, func(ctx context.Context) { keyring.WatchDir(ctx, cfg.kekDir, wrappers, time.Minute, log) })
 
 	observer, err := newSandboxObserver(cfg, kube, log)
 	if err != nil {
