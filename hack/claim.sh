@@ -20,6 +20,21 @@
 #   claim.sh beat <N>... [--pr P] [--lane L]
 #                                     extend the lease (every 30 min and before long steps; PR
 #                                     pushes alone are not liveness). Human claims: daily.
+#   claim.sh beat --mine [--every DURATION] [--for DURATION] [--while-pid PID]
+#                                     renew every claim this session holds, lanes included (only
+#                                     lane L with --lane); one line per round. --every 30m (or 90,
+#                                     90s, 2h) loops: exit 3 stops it and names the lost claim; an
+#                                     error (exit 1) is retried next round. The loop ends (exit 0)
+#                                     after --for (default 12h, the backstop) or when PID is gone
+#                                     (in the background use --while-pid $PPID, the agent that
+#                                     started the shell; $$ dies with that one call); any release but
+#                                     the merge/close one counts as a lost claim.
+#   claim.sh adopt --from <session> [N...]
+#                                     re-key the claims of your dead session to this one, each in
+#                                     its own lane (all of them without N). The holder must be dead
+#                                     by the take --takeover rule; the caps still apply (exit 2). A
+#                                     session that died after `review` (PR ready) cannot be adopted:
+#                                     take --takeover once the PR is not ready, or ask the human.
 #   claim.sh review <N> [--lane L]    the PR is ready: Status In Review, lease extended
 #   claim.sh release <N> --note TEXT [--lane L]
 #                                     hand the issue back (keep the branch and draft PR)
@@ -576,10 +591,28 @@ warn_area_overlap() { # N CLAIMS_JSON NOW
   done
 }
 
+# dead_holder_check N CLAIM_JSON NOW: the one dead-holder rule of `take --takeover` and `adopt`.
+# 0: the holder is dead and the claim may be taken over (LIVE is set); 2: refused, reason printed
+# (the holder is alive or in grace, its liveness is unknown, or a pull request is ready for review).
+dead_holder_check() {
+  local n=$1 existing=$2 now=$3
+  if ! claim_liveness "$existing"; then
+    echo "claim: #$n: cannot judge liveness of $(jq -r .holder <<<"$existing") (unparsable lease or API error); not taking it" >&2; return 2
+  fi
+  case $(claim_status held "$LIVE" "$now") in
+    active | grace)
+      echo "claim: #$n is held by $(jq -r .holder <<<"$existing"), alive until $(epoch_to_iso "$LIVE") (takeover after +${GRACE}s grace). Pick another issue." >&2; return 2 ;;
+  esac
+  if [[ $PR_STATE == ready ]]; then
+    echo "claim: #$n has an open pull request #$PR_NUM that is ready for review; ask $(jq -r .human <<<"$existing") to release it" >&2; return 2
+  fi
+  return 0
+}
+
 # take_one N TAKEOVER HOLDER HUMAN CLAIMS NOW: 0 taken, 2 refused or lost the race (reason printed).
 take_one() {
   local n=$1 takeover=$2 holder=$3 human=$4 claims=$5 now=$6
-  local issue existing="" parent="" status rc=0 lease_until pr prev_human=""
+  local issue existing="" parent="" rc=0 lease_until pr prev_human=""
   issue=$(issue_json "$n") || { echo "claim: cannot read issue #$n" >&2; return 1; }
   if [[ $(jq -r .state <<<"$issue") != open ]]; then echo "claim: #$n is closed" >&2; return 2; fi
   if [[ $(jq -r .pull <<<"$issue") != false ]]; then echo "claim: #$n is a pull request" >&2; return 2; fi
@@ -592,20 +625,9 @@ take_one() {
         echo "#$n is already yours; extending the lease"
         beat_one "$n" ""; return
       fi
-      if ! claim_liveness "$existing"; then
-        echo "claim: #$n: cannot judge liveness of $(jq -r .holder <<<"$existing") (unparsable lease or API error); not taking it" >&2; return 2
-      fi
-      status=$(claim_status held "$LIVE" "$now")
-      case $status in
-        active | grace)
-          echo "claim: #$n is held by $(jq -r .holder <<<"$existing"), alive until $(epoch_to_iso "$LIVE") (takeover after +${GRACE}s grace). Pick another issue." >&2; return 2 ;;
-        takeover)
-          if [[ $PR_STATE == ready ]]; then
-            echo "claim: #$n has an open pull request #$PR_NUM that is ready for review; ask $(jq -r .human <<<"$existing") to release it" >&2; return 2
-          fi
-          if ((!takeover)); then echo "claim: #$n's holder is dead (since $(epoch_to_iso "$LIVE")); use: take $n --takeover" >&2; return 2; fi
-          prev_human=$(jq -r .human <<<"$existing") ;;
-      esac
+      dead_holder_check "$n" "$existing" "$now" || return 2
+      if ((!takeover)); then echo "claim: #$n's holder is dead (since $(epoch_to_iso "$LIVE")); use: take $n --takeover" >&2; return 2; fi
+      prev_human=$(jq -r .human <<<"$existing")
     fi
   elif ((takeover)); then
     echo "#$n has no claim; taking it normally"
@@ -702,16 +724,184 @@ beat_one() { # N PR_OVERRIDE
   upsert_comment "$n" "$(claim_comment held "$HOLDER" "$HUMAN" "$lease_until" "$pr" "$note")"
 }
 
+# parse_duration D -> seconds: 90, 90s, 30m or 2h (more than zero).
+parse_duration() {
+  [[ $1 =~ ^([0-9]+)([smh]?)$ ]] || return 1
+  local v=$((10#${BASH_REMATCH[1]}))
+  ((v > 0)) || return 1
+  case ${BASH_REMATCH[2]} in m) echo $((v * 60)) ;; h) echo $((v * 3600)) ;; *) echo "$v" ;; esac
+}
+
+# mine_claims CLAIMS_JSON LOGIN SESSION -> "<issue><TAB><holder>" for every held claim of that
+# session, lanes included (only this invocation's lane when one is set, like `mine`).
+mine_claims() {
+  jq -r --arg l "$2" --arg s "$3" --arg lane "$LANE" '
+    .[] | select(.state == "held" and (.holder | split("/") | first) == $l
+                 and (.holder | split("/") | last | split("#") | first) == $s
+                 and ($lane == "" or ((.holder | split("/") | last | split("#") | .[1:] | first // "") == $lane)))
+    | "\(.issue)\t\(.holder)"' <<<"$1"
+}
+
+join_or_none() { if (($#)); then local IFS=' '; echo "$*"; else echo none; fi; }
+
+# beat_identity: sets BEAT_LOGIN and BEAT_SESS once per run (three tries; a gh blip must not end a
+# long loop later, and a start that cannot resolve them is an error, exit 1).
+beat_identity() {
+  local i
+  for i in 1 2 3; do
+    if BEAT_LOGIN=$(human_login) && BEAT_SESS=$(holder_session "$(my_base_holder)") && [[ -n $BEAT_LOGIN && -n $BEAT_SESS ]]; then return 0; fi
+    ((i == 3)) || sleep 2
+  done
+  die "cannot resolve your login and session after 3 tries"
+}
+
+# beat_round: renew every claim of this session once. Sets BEAT_OK, BEAT_LOST (exit 3: the claim is
+# not ours any more) and BEAT_ERR (exit 1 or anything else: retry next round; no gh failure of a round
+# ends the loop) and BEAT_DROP (released because its pull request merged or closed). TRACKED holds
+# the issues renewed or failed in earlier rounds, so a claim that left our hands is noticed instead
+# of silently forgotten. A release does not change the holder, so only the note tells the releases
+# apart: the merge/close release is expected; any other (the sweeper, `release --force`, a manual
+# `release`) counts as lost. This process makes no releases of its own.
+TRACKED=()
+beat_round() {
+  local claims lines n holder rc t e state note
+  BEAT_OK=(); BEAT_LOST=(); BEAT_ERR=(); BEAT_DROP=()
+  if ! claims=$(list_claims); then BEAT_ERR+=("(listing the claims)"); return 0; fi
+  if ! lines=$(mine_claims "$claims" "$BEAT_LOGIN" "$BEAT_SESS"); then BEAT_ERR+=("(reading the claims)"); return 0; fi
+  local mine=()
+  while IFS=$'\t' read -r n holder; do
+    [[ -n $n ]] || continue
+    mine+=("$n")
+    rc=0
+    # A subshell: beat_one dies with exit 3 (lost) or 1 (error), and each claim beats under its own lane.
+    (LANE=$(holder_lane "$holder"); beat_one "$n" "" >/dev/null) || rc=$?
+    case $rc in
+      0) BEAT_OK+=("#$n") ;;
+      3) BEAT_LOST+=("#$n") ;;
+      *) BEAT_ERR+=("#$n") ;;
+    esac
+  done <<<"$lines"
+  for t in ${TRACKED[@]+"${TRACKED[@]}"}; do
+    [[ " ${mine[*]-} " != *" $t "* ]] || continue
+    e=$(jq -r --argjson n "$t" '.[] | select(.issue == $n) | [.state, (.note // "")] | @tsv' <<<"$claims")
+    state=${e%%$'\t'*}; note=${e#*$'\t'}
+    if [[ $state == released && $note =~ ^pull\ request\ \#[0-9]+\ closed$ ]]; then BEAT_DROP+=("#$t"); else BEAT_LOST+=("#$t"); fi
+  done
+  TRACKED=(${mine[@]+"${mine[@]}"})
+}
+
+# beat_mine EVERY FOR WHILE_PID. EVERY "" = one round. Exit 3 when a claim is lost (the loop stops and
+# names it); exit 1 on errors in a single round; in a loop an error only repeats next round. A loop
+# ends with exit 0 after FOR seconds, or when WHILE_PID is gone (so a background loop cannot outlive
+# its session).
+beat_clock() { date +%s; }
+beat_mine() {
+  local every=$1 for_s=$2 pid=$3 deadline
+  TRACKED=()
+  beat_identity
+  deadline=$(($(beat_clock) + for_s))
+  while :; do
+    if [[ -n $pid ]] && ! kill -0 "$pid" 2>/dev/null; then echo "beat --mine: process $pid is gone"; return 0; fi
+    beat_round
+    echo "beat $(date -u +%Y-%m-%dT%H:%M:%SZ): renewed $(join_or_none ${BEAT_OK[@]+"${BEAT_OK[@]}"}); lost $(join_or_none ${BEAT_LOST[@]+"${BEAT_LOST[@]}"}); errors $(join_or_none ${BEAT_ERR[@]+"${BEAT_ERR[@]}"})$( ((${#BEAT_DROP[@]})) && echo "; released $(join_or_none "${BEAT_DROP[@]}")" || true)"
+    if ((${#BEAT_LOST[@]})); then
+      CLAIM_EXIT=3 die "lost ${BEAT_LOST[*]}: stop work on it and tell your human"
+    fi
+    if [[ -z $every ]]; then
+      if ((${#BEAT_ERR[@]})); then exit 1; fi
+      return 0
+    fi
+    sleep "$every"
+    if (($(beat_clock) >= deadline)); then echo "beat --mine: --for elapsed"; return 0; fi
+  done
+}
+
 cmd_beat() {
-  local pr="" ns=() a
+  local pr="" ns=() a own=0 every="" for_s=43200 for_given=0 pid=""
   while (($#)); do
     case $1 in
       --pr) pr=${2:-}; [[ $pr =~ ^[0-9]+$ ]] || die "--pr needs a pull request number"; shift 2 ;;
-      *) [[ $1 =~ ^[0-9]+$ ]] || die "usage: beat <N>... [--pr P] [--lane L]"; ns+=("$1"); shift ;;
+      --mine) own=1; shift ;;
+      --every) every=$(parse_duration "${2:-}") || die "--every needs a duration: 90, 90s, 30m or 2h"; shift 2 ;;
+      --for) for_given=1; for_s=$(parse_duration "${2:-}") || die "--for needs a duration: 90, 90s, 30m or 2h"; shift 2 ;;
+      --while-pid) pid=${2:-}; [[ $pid =~ ^[0-9]+$ ]] || die "--while-pid needs a process id"; shift 2 ;;
+      *) [[ $1 =~ ^[0-9]+$ ]] || die "usage: beat <N>... [--pr P] [--lane L] | beat --mine [--every D] [--for D] [--while-pid PID]"; ns+=("$1"); shift ;;
     esac
   done
-  ((${#ns[@]})) || die "usage: beat <N>... [--pr P] [--lane L]"
+  if ((own)); then
+    ((${#ns[@]} == 0)) && [[ -z $pr ]] || die "beat --mine renews every claim you hold: no issue numbers and no --pr"
+    beat_mine "$every" "$for_s" "$pid"
+    return
+  fi
+  [[ -z $every && -z $pid && $for_given == 0 ]] || die "--every, --for and --while-pid need --mine"
+  ((${#ns[@]})) || die "usage: beat <N>... [--pr P] [--lane L] | beat --mine [--every DURATION]"
   for a in "${ns[@]}"; do beat_one "$a" "$pr"; done
+}
+
+# cmd_adopt --from SESSION [N...]: re-key the claims of a dead session of this human to the current
+# session. Each claim keeps its lane. The dead-holder rule is take --takeover's (dead_holder_check);
+# the human and session caps count the claims as taken. The checks are all-or-nothing: no write
+# happens unless every claim passes. The writes are not: if one fails (the holder woke up, another
+# session adopted it first) the claims written before it stay adopted (each was echoed), the rest not.
+cmd_adopt() {
+  local from="" ns=() a
+  while (($#)); do
+    case $1 in
+      --from) from=${2:-}; shift 2 ;;
+      *) [[ $1 =~ ^[0-9]+$ ]] || die "usage: adopt --from <session> [N...]"; ns+=("$1"); shift ;;
+    esac
+  done
+  [[ -n $from ]] || die "usage: adopt --from <session> [N...]"
+  ((!HUMAN_MODE)) || die "adopt re-keys agent claims; --human claims are not adopted"
+  from=${from%%#*}; from=${from//[^A-Za-z0-9._-]/-}
+  local human base mysess claims now cand n c old lane newh key cnt iss
+  human=$(human_login); base=$(my_base_holder); mysess=$(holder_session "$base")
+  [[ $from != "$mysess" ]] || die "$from is this session: nothing to adopt"
+  claims=$(list_claims); now=$(server_now)
+  cand=$(jq -c --arg l "$human" --arg s "$from" '
+    [.[] | select(.state == "held" and (.holder | split("/") | first) == $l and .human == $l
+                  and (.holder | split("/") | last | split("#") | first) == $s)]' <<<"$claims")
+  if ((${#ns[@]} == 0)); then
+    while read -r n; do ns+=("$n"); done < <(jq -r '.[].issue' <<<"$cand")
+    ((${#ns[@]})) || CLAIM_EXIT=2 die "session $from holds no claims of $human"
+  else
+    local uniq=()
+    while read -r n; do uniq+=("$n"); done < <(printf '%s\n' "${ns[@]}" | awk '!seen[$0]++')
+    ns=("${uniq[@]}")
+  fi
+  local counts hcount
+  counts=$(active_counts "$claims" "$now" "$human" "$mysess")
+  hcount=${counts% *}
+  if ((hcount + ${#ns[@]} > HUMAN_CAP)); then
+    CLAIM_EXIT=2 die "$human holds $hcount claims; adopting ${#ns[@]} more would pass the cap of $HUMAN_CAP."
+  fi
+  local plan_n=() plan_c=() plan_h=() planned_keys=()
+  for n in "${ns[@]}"; do
+    c=$(jq -c --argjson n "$n" '.[] | select(.issue == $n)' <<<"$cand")
+    [[ -n $c ]] || CLAIM_EXIT=2 die "#$n is not a held claim of session $from"
+    iss=$(issue_json "$n") || die "cannot read issue #$n (API error); retry"
+    if [[ $(jq -r .state <<<"$iss") != open ]]; then CLAIM_EXIT=2 die "#$n is closed"; fi
+    dead_holder_check "$n" "$c" "$now" || exit 2
+    old=$(jq -r .holder <<<"$c"); lane=$(holder_lane "$old")
+    newh="$base${lane:+#$lane}"; key=$(holder_key "$newh")
+    cnt=$(active_counts "$claims" "$now" "$human" "$key"); cnt=${cnt#* }
+    for a in ${planned_keys[@]+"${planned_keys[@]}"}; do if [[ $a == "$key" ]]; then cnt=$((cnt + 1)); fi; done
+    if ((cnt >= SESSION_CAP)); then
+      CLAIM_EXIT=2 die "adopting #$n would give this session $((cnt + 1)) claims in $(lane_label "$newh") (cap $SESSION_CAP)"
+    fi
+    planned_keys+=("$key"); plan_n+=("$n"); plan_c+=("$c"); plan_h+=("$newh")
+  done
+  local i lease_until pr
+  for i in "${!plan_n[@]}"; do
+    n=${plan_n[$i]}; c=${plan_c[$i]}
+    lease_until=$(epoch_to_iso $((now + $(lease_for_holder "${plan_h[$i]}"))))
+    pr=$(jq -r .pr <<<"$c"); [[ -n $pr ]] || pr=$(find_pr "$n")
+    if ! write_claim "$n" held "${plan_h[$i]}" "$human" "$lease_until" "$pr" "adopted from $(jq -r .holder <<<"$c")" "$(jq -r .sha <<<"$c")"; then
+      CLAIM_EXIT=2 die "#$n changed while adopting it (the holder woke up or another session adopted it first); re-read with show"
+    fi
+    echo "adopted #$n as ${plan_h[$i]} until $lease_until"
+    mirror_held "$n" "$human" "${plan_h[$i]}" "$lease_until" "$pr" "adopted from $(jq -r .holder <<<"$c")" "In Progress"
+  done
 }
 
 cmd_review() {
@@ -1039,6 +1229,7 @@ main() {
     next) cmd_next "$@" ;;
     take) cmd_take "$@" ;;
     beat) cmd_beat "$@" ;;
+    adopt) cmd_adopt "$@" ;;
     review) cmd_review "$@" ;;
     release) cmd_release "$@" ;;
     wait-release) cmd_wait_release "$@" ;;
