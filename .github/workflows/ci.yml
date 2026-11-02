@@ -529,6 +529,41 @@ jobs:
       - run: hack/claim_test.sh
       - run: hack/migrate-renumber-test.sh
 
+  # shellcheck over every tracked shell script (the set hack/preflight.sh's shell gate uses, minus the
+  # generated golden file) and actionlint over the workflows (actionlint also runs shellcheck on the
+  # `run:` blocks). Its own job, not a step of `scripts`: it needs no Go toolchain and is cheap, and it
+  # keeps the lint result separate from the script tests. Both tools are release binaries checked
+  # against a pinned SHA-256, versions at least 3 days old when pinned (ADR 0079; shellcheck 0.11.0 is
+  # from 2025-08-04, actionlint 1.7.12 from 2026-03-30). Bump them together with hack/preflight.sh's use.
+  lint-shell:
+    name: lint-shell
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    env:
+      SHELLCHECK_VERSION: 0.11.0
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+      ACTIONLINT_VERSION: 1.7.12
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: install shellcheck and actionlint
+        run: |
+          bin="$RUNNER_TEMP/lintbin"
+          mkdir -p "$bin"
+          cd "$RUNNER_TEMP"
+          sc="shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl -fsSLo "$sc" "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/$sc"
+          echo "${SHELLCHECK_SHA256}  $sc" | sha256sum -c -
+          tar xJf "$sc" --strip-components=1 -C "$bin" "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          al="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLo "$al" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$al"
+          echo "${ACTIONLINT_SHA256}  $al" | sha256sum -c -
+          tar xzf "$al" -C "$bin" actionlint
+          echo "$bin" >>"$GITHUB_PATH"
+      - name: shellcheck
+        run: git ls-files -z '*.sh' ':!:*.golden.sh' | xargs -0 shellcheck
+      - name: actionlint
+        run: actionlint
+
   # Tests of the e2e tooling scripts: the decision rule (needs the Go toolchain for `go list`) and
   # the remote runner (needs flock, so Linux).
   scripts:

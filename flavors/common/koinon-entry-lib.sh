@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# shellcheck shell=bash
 #
 # koinon-entry-lib.sh is sourced by every flavor's entry script (koinon-opencode in v0.1,
 # ADR 0059) from /usr/local/lib/koinon/. It holds what the flavors share: argument parsing, URL
