@@ -18,11 +18,17 @@ forward: nothing runs a `Down`. Inside a minor line they only add (new columns a
 no drop, no type change), so the previous patch release keeps working on the new schema. A new
 minor line may remove and rename things, so its schema can break the previous minor.
 
-The names below assume the release is called `koinon` in the namespace `koinon`, as in the
-[Quickstart](/quickstart/). If your release has another name, the Deployments are
-`<release>-api`, `<release>-reconciler` and `<release>-agentd` (the chart leaves out the repeated
-name when the release name contains `koinon`). Replace `<version>` with the chart version you move
-to, without the leading `v` (for example `0.1.3`).
+Commands use the namespace `koinon`. Two names depend on your release:
+
+- `<release>` is the Helm release name (`koinon` in the [Quickstart](/quickstart/)).
+- `<name>` is the chart's full name, which prefixes every object. It is `<release>-koinon`, except
+  that when the release name already contains `koinon` it is just `<release>`. So release `koinon`
+  gives `koinon-api`, `koinon-migrate` and `koinon-kek`, and release `prod` gives `prod-koinon-api`,
+  `prod-koinon-migrate` and `prod-koinon-kek`. (`fullnameOverride` replaces it.)
+
+The Deployments are `<name>-api`, `<name>-reconciler` and `<name>-agentd`. The Secret with the
+encryption keys is `<name>-kek`, or the Secret you set in `secrets.kek.existingSecret`. Replace
+`<version>` with the chart version you move to, without the leading `v` (for example `0.1.3`).
 
 ## Before you start
 
@@ -31,27 +37,39 @@ to, without the leading `v` (for example `0.1.3`).
 2. Your values file must still render with the new chart:
 
    ```sh
-   helm template koinon oci://ghcr.io/stateracloud/charts/koinon --version <version> \
+   helm template <release> oci://ghcr.io/stateracloud/charts/koinon --version <version> \
      --namespace koinon -f values.yaml > /dev/null
    ```
 
-   If you installed from a clone, use `helm template koinon charts/koinon` after you check out the tag.
+   If you installed from a clone, use `helm template <release> charts/koinon` after you check out the tag.
 3. Back up the encryption keys (the [Quickstart](/quickstart/#back-up-the-encryption-keys) explains
    why they matter):
 
    ```sh
-   kubectl -n koinon get secret koinon-kek -o yaml > koinon-kek-backup.yaml
+   kubectl -n koinon get secret <name>-kek -o yaml > koinon-kek-backup.yaml
    ```
 
-4. For a minor upgrade, back up the database too, because it is the only way back. Use your database
-   mode's tool: a CloudNativePG backup, your provider's snapshot, or `pg_dump --format=custom` on the
-   database (include the `dbos` schema). Keep it with the key backup from the step above, and note
-   the chart version you ran (`helm -n koinon list`). Without both, a minor upgrade cannot be undone.
+4. For a minor upgrade, back up the database too, because it is the only way back. Keep the dump with
+   the key backup from the step above, and note the chart version you ran (`helm -n koinon list`).
+   Without both, a minor upgrade cannot be undone.
+
+   - **cnpg mode** (the default). The rendered CloudNativePG Cluster `<name>-pg` has no backup
+     configured, so dump the database from its primary pod. The database is `postgres.cnpg.database`
+     (default `koinon`); the dump covers every schema in it, including `dbos`:
+
+     ```sh
+     PRIMARY=$(kubectl -n koinon get pod -l cnpg.io/cluster=<name>-pg,cnpg.io/instanceRole=primary -o name)
+     kubectl -n koinon exec "$PRIMARY" -c postgres -- pg_dump --format=custom --dbname=koinon > koinon-pre-upgrade.dump
+     ```
+
+   - **external mode** (your own Postgres, for example RDS). Take your provider's snapshot, or run
+     `pg_dump --format=custom` as the migration role against the same database.
+
 5. Note the state you start from, to compare afterwards:
 
    ```sh
    helm -n koinon list
-   kubectl -n koinon get deploy koinon-api koinon-reconciler koinon-agentd
+   kubectl -n koinon get deploy <name>-api <name>-reconciler <name>-agentd
    kubectl -n koinon get pods
    ```
 
@@ -60,11 +78,11 @@ to, without the leading `v` (for example `0.1.3`).
 A patch release shares the schema with the one before it. Upgrade in place:
 
 ```sh
-helm upgrade koinon oci://ghcr.io/stateracloud/charts/koinon --version <version> \
+helm upgrade <release> oci://ghcr.io/stateracloud/charts/koinon --version <version> \
   --namespace koinon -f values.yaml --wait --timeout 10m
 ```
 
-Helm runs the preflight, the secrets Job and the migration Job (`koinon-migrate`) first. Then the
+Helm runs the preflight, the secrets Job and the migration Job (`<name>-migrate`) first. Then the
 Deployments roll. During the roll the old pods run against the new schema, which is why a patch
 migration only adds.
 
@@ -91,12 +109,13 @@ So stop first.
 1. **Stop.** Scale agentd down first, so it drains, then the reconciler and the API:
 
    ```sh
-   kubectl -n koinon scale deployment koinon-agentd --replicas=0
-   kubectl -n koinon wait --for=delete pod -l app.kubernetes.io/instance=koinon,app.kubernetes.io/component=agentd --timeout=10m
-   kubectl -n koinon scale deployment koinon-reconciler koinon-api --replicas=0
-   kubectl -n koinon wait --for=delete pod -l app.kubernetes.io/instance=koinon,app.kubernetes.io/component=reconciler --timeout=5m
-   kubectl -n koinon wait --for=delete pod -l app.kubernetes.io/instance=koinon,app.kubernetes.io/component=api --timeout=5m
+   kubectl -n koinon scale deployment <name>-agentd --replicas=0
+   kubectl -n koinon wait --for=delete pod -l app.kubernetes.io/instance=<release>,app.kubernetes.io/component=agentd --timeout=10m
+   kubectl -n koinon scale deployment <name>-reconciler <name>-api --replicas=0
+   kubectl -n koinon wait --for=delete pod -l 'app.kubernetes.io/instance=<release>,app.kubernetes.io/component in (api,reconciler)' --timeout=5m
    ```
+
+   If `wait` prints "no matching resources found", the pods were already gone.
 
    agentd drains for up to `agentd.drainDeadlineSeconds` (default 300) before its pods go. The
    database (CloudNativePG or yours), the gateway and OpenShell stay up.
@@ -114,17 +133,17 @@ So stop first.
    ```
 
    ```sh
-   helm upgrade koinon oci://ghcr.io/stateracloud/charts/koinon --version <version> \
+   helm upgrade <release> oci://ghcr.io/stateracloud/charts/koinon --version <version> \
      --namespace koinon -f values.yaml -f stop.yaml --wait --timeout 15m
    ```
 
-   Helm runs the preflight, then the migration Job `koinon-migrate` (which runs `koinon-api migrate`),
+   Helm runs the preflight, then the migration Job `<name>-migrate` (which runs `koinon-api migrate`),
    then applies the new chart with no pods. The Job is deleted when it succeeds, so a successful
    `helm upgrade` is your proof. If the upgrade fails, the Job is kept:
 
    ```sh
-   kubectl -n koinon logs job/koinon-migrate
-   kubectl -n koinon describe job koinon-migrate
+   kubectl -n koinon logs job/<name>-migrate
+   kubectl -n koinon describe job <name>-migrate
    ```
 
    The Job retries `migrations.backoffLimit` times (default 4) and stops after
@@ -135,7 +154,7 @@ So stop first.
 3. **Start.** Upgrade again without `stop.yaml`, so the replicas return to your values:
 
    ```sh
-   helm upgrade koinon oci://ghcr.io/stateracloud/charts/koinon --version <version> \
+   helm upgrade <release> oci://ghcr.io/stateracloud/charts/koinon --version <version> \
      --namespace koinon -f values.yaml --wait --timeout 10m
    ```
 
@@ -151,15 +170,18 @@ replica counts and sync again.
 v0.1.0 is the first release with the compatibility promise, and its schema is the first baseline.
 An install made from a release candidate upgrades to v0.1.0 with the stop, migrate, start above and
 cannot go back to a release candidate: the rcs have no promise, and migration 00020 (rc.3) renamed
-tables in place. Take the database backup first. There is no retrofit for installs that are older than
-rc.3.
+tables in place. Take the database backup first. An install older than rc.3 is not supported
+by any upgrade path: Koinon ships no compatibility views for the tables that migration 00020 renamed,
+so re-install instead of upgrading.
 
 ## Check afterwards
 
 ```sh
 kubectl -n koinon get pods
-kubectl -n koinon rollout status deployment/koinon-api deployment/koinon-reconciler deployment/koinon-agentd
-kubectl -n koinon logs deployment/koinon-api --tail=50
+kubectl -n koinon rollout status deployment/<name>-api
+kubectl -n koinon rollout status deployment/<name>-reconciler
+kubectl -n koinon rollout status deployment/<name>-agentd
+kubectl -n koinon logs deployment/<name>-api --tail=50
 ```
 
 - All three Deployments are Ready at the replica counts in your values. Each binary reports ready only
@@ -182,8 +204,8 @@ kubectl -n koinon logs deployment/koinon-api --tail=50
 an image rollback. Use the previous revision or an explicit version:
 
 ```sh
-helm -n koinon history koinon
-helm -n koinon rollback koinon <revision> --wait --timeout 10m
+helm -n koinon history <release>
+helm -n koinon rollback <release> <revision> --wait --timeout 10m
 ```
 
 or `helm upgrade` with `--version <previous>` and the same values. The migration does not run on a
@@ -197,14 +219,27 @@ previous release's pods would fail on their first query, and the schema-version 
 Not Ready. The only way back is a restore:
 
 1. Scale all three components to zero, as in step 1 above (or use `stop.yaml`).
-2. Restore the database from the backup you took before the upgrade, with its `dbos` schema, into the
-   same database (or point `postgres` at the restored one).
-3. Make sure `koinon-kek` is the one from your key backup. Without the same key, the stored provider
-   keys and every home checkpoint password cannot be read.
+2. Restore the database from the backup you took before the upgrade.
+   - **cnpg mode.** Restore in place. The dump holds the old schema, so first drop the schemas the
+     migration changed or added (`public` and `dbos`), then load the dump through the primary pod:
+
+     ```sh
+     PRIMARY=$(kubectl -n koinon get pod -l cnpg.io/cluster=<name>-pg,cnpg.io/instanceRole=primary -o name)
+     kubectl -n koinon exec "$PRIMARY" -c postgres -- psql --dbname=koinon \
+       -c 'DROP SCHEMA IF EXISTS dbos CASCADE' -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public'
+     kubectl -n koinon exec -i "$PRIMARY" -c postgres -- pg_restore --dbname=koinon --exit-on-error < koinon-pre-upgrade.dump
+     ```
+
+     Pointing `postgres` at a database you restored somewhere else means switching the install to
+     `postgres.mode: external` (a cnpg install cannot be pointed elsewhere), which is a change to how
+     the chart connects, not a rollback step. Prefer the in-place restore.
+   - **external mode.** Restore your provider's snapshot, or `pg_restore` the dump into the database.
+3. Make sure the Secret `<name>-kek` (or `secrets.kek.existingSecret`) is the one from your key backup.
+   Without the same key, the stored provider keys and every home checkpoint password cannot be read.
 4. Install the previous chart version with the values you used then:
 
    ```sh
-   helm upgrade koinon oci://ghcr.io/stateracloud/charts/koinon --version <previous-version> \
+   helm upgrade <release> oci://ghcr.io/stateracloud/charts/koinon --version <previous-version> \
      --namespace koinon -f values.yaml --wait --timeout 10m
    ```
 
