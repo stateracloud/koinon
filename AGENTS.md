@@ -46,9 +46,10 @@ Instructions for coding agents working on Koinon.
   touches what only a full install observes (the rule lives only there). If yes, with a lab run
   `hack/e2e-remote.sh --argo`: a green run posts the commit status `e2e-lab` on your pushed head and
   that is enough to merge. Without a lab, or when it exits 75 (the lab cannot run it now), 78 (no lab
-  configured) or 79 (the change touches `flavors/`, which the lab cannot build), run it on GitHub
-  (`gh workflow run e2e-kind.yml --ref <branch>`, or the `e2e` label) or on your own Docker
-  (`hack/e2e-remote.sh`, the same as `--local`; paste the timings table in the PR body).
+  configured) or 79 (the change touches `flavors/`, which the lab cannot build; nothing triggers
+  GitHub for it, dispatch it by hand), run it on GitHub (`gh workflow run e2e-kind.yml --ref <branch>`,
+  or the `e2e` label). `hack/e2e-remote.sh` on your own Docker (`--local`) is a dev and debug tool
+  only: it produces neither `e2e-lab` nor `quickstart`, so it is not merge evidence.
   `SUITE_LABEL=smoke` (not with `--argo`) runs steps 1-6 only. The required check is `e2e result`
   (green when the e2e was skipped); `e2e-lab` is not required, contributors without a lab cannot produce it. Why: #281 (branch naming in githubtools) and #284 (a startup flag the chart's
   migrate Job lacked) passed every package test and failed only in a full install.
@@ -117,12 +118,9 @@ on the local Docker run the script from the lane's worktree.
 Only the maintainers have a home lab; nothing in the repository needs it and none of its endpoints
 are tracked. Their settings live in the untracked `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/lab.env`
 (template `hack/lab/lab.env.example`; `hack/e2e-argo.sh` header). With them,
-`hack/e2e-remote.sh --argo` queues the e2e on the lab's Argo: `--no-wait` and `--follow <run>` to
-come back later, `--gate <set>` for the Docker-only gates (`go-test`, `agentd-ginkgo`, the sets the lab's koinon-gate template accepts today; the other sets of `hack/lab/gate-run.sh` run only locally through it), which exits 75 when no slot is free or the lab is unreachable (run the gate locally then) and 76 when the gate skipped what it expected to run.
-Exit codes of `--argo`: 0 passed, 1 the e2e failed, 2 usage, 75 the lab cannot run it now, 76 not run, 78 no lab configured, 79 refused (flavors). It posts `e2e-lab` itself (`--no-status` to opt out); push the branch first, or post later with `hack/e2e-status.sh`. Each lane
-runs `hack/e2e-remote.sh --argo --repo <its worktree>` with `KOINON_E2E_AGENT=<session>-<lane>` and
-keeps at most one kind run waiting. Its notifications carry the agent label as an ntfy tag
-(`?tags=<agent>`). Dev loop and registry: `docs/dev/maintainer-homelab.md`.
+`hack/e2e-remote.sh --argo` queues the e2e (and `--gate <set>` the Docker-only gates) on the lab's
+Argo. Exit codes, the `e2e-lab` status, lane rules and `KOINON_E2E_AGENT`: `docs/dev/maintainer-homelab.md`
+and the `hack/e2e-argo.sh` header. Dev loop and registry: `docs/dev/maintainer-homelab.md`.
 
 ## Working alongside another human
 

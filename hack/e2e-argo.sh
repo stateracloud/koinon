@@ -48,6 +48,9 @@
 # Commit status (#547): a followed kind e2e run posts `e2e-lab` on the commit it ran (the ref it
 # submitted): success on exit 0, failure when the target failed, nothing on a fallback (75), when no lab
 # is configured, with --no-wait (a later --follow posts it), or with --no-status / KOINON_E2E_NO_STATUS=1.
+# A run that ends Failed with no result.txt (a hang, an OOM, a pod that died first) is a lab fault, exit
+# 75: it goes to GitHub and leaves no lab result. --no-status is not remembered by the run: a later
+# `--follow` of a --no-wait run posts unless it gets --no-status again.
 # The description names the run, the target_url is the run's page on the Argo Server of lab.env. A commit
 # that is not on GitHub yet cannot take a status: the script says so and prints the command to post it
 # after the push (hack/e2e-status.sh). `hack/pr-wait.sh <PR> --checks --require e2e` accepts it.
@@ -291,6 +294,8 @@ stage_lines() {
 fetch_results() {
   local dir=$1 status node key tgz reader="" ok=1
   mkdir -p "$dir"
+  # A reused --out may hold an earlier run's verdict: never let it stand in for this run's.
+  rm -rf "$dir/result.txt" "$dir/out"
   status=$(api GET "/api/v1/workflows/$NS/$name")
   node=$(jq -r '[.status.nodes[]? | select(.type == "Pod")][0].id // empty' <<<"$status")
   [[ -n $node ]] || { echo "e2e-remote --argo: the run has no pod; no results" >&2; return 0; }
@@ -308,7 +313,14 @@ fetch_results() {
     tar -xzf "$tgz" -C "$dir" 2>/dev/null || tar -xf "$tgz" -C "$dir" 2>/dev/null ||
       echo "e2e-remote --argo: could not unpack the results archive" >&2
     # The archive holds the out directory itself; flatten it.
-    if [[ -d $dir/out && ! -e $dir/result.txt ]]; then mv "$dir"/out/* "$dir"/ 2>/dev/null || true; rmdir "$dir/out" 2>/dev/null || true; fi
+    if [[ -d $dir/out ]]; then mv "$dir"/out/* "$dir"/ 2>/dev/null || true; rmdir "$dir/out" 2>/dev/null || true; fi
+    # Trust only a verdict that names this run's commit (a result.txt without a ref= field is taken as is).
+    local res_ref
+    res_ref=$(sed -n 's/.* ref=\([0-9a-f]\{7,\}\).*/\1/p' "$dir/result.txt" 2>/dev/null | tail -1 || true)
+    if [[ -n $res_ref && -n ${status_sha:-} && $status_sha != "$res_ref"* ]]; then
+      echo "e2e-remote --argo: result.txt names ref $res_ref, not ${status_sha:0:12}; ignoring it" >&2
+      rm -f "$dir/result.txt"
+    fi
   else
     echo "e2e-remote --argo: no results archive (the run may have ended before it wrote one)" >&2
   fi

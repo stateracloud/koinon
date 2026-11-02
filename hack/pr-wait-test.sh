@@ -287,6 +287,21 @@ printf '\n' >"$FAKE_DIR/runs"
 run 7 --checks --require e2e --require go --interval 0
 expect "--require e2e together with another required check" 0 "checks 3/3 green"
 
+# success then a newer FAILURE stays red; success then a newer skip is green (#392 intent for failures)
+seq_set "$(prh "$lint_ok,$q_ok,$(cr_at quickstart FAILURE 24 2026-11-01T10:20:00Z)")"
+printf '\n' >"$FAKE_DIR/runs"
+run 7 --checks --require quickstart --interval 0
+expect "a newer failure after a success stays failed" 1 "FAILED quickstart (run 24)
+REQUIRED quickstart failed"
+seq_set "$(prh "$lint_ok,$q_ok,$(cr_at quickstart SKIPPED 25 2026-11-01T10:20:00Z)")"
+run 7 --checks --require quickstart --interval 0
+expect "a newer skip after a success is green" 0 "checks 2/2 green"
+# an explicit --require quickstart stays required next to --require e2e
+seq_set "$(prh "$lint_ok,$(st e2e-lab SUCCESS),$q_skip_new")"
+run 7 --checks --require e2e --require quickstart --interval 0
+expect "--require e2e --require quickstart: e2e-lab green does not excuse a skipped quickstart" 1 "REQUIRED quickstart skipped
+only skipped runs of quickstart on this head; run: gh workflow run e2e-kind.yml --ref <branch>"
+
 usage_line="usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK|e2e] [--timeout DURATION] [--interval SECONDS]"
 e2e_ok=$(cr "e2e result" COMPLETED SUCCESS 14)
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"

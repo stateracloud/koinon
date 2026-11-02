@@ -226,7 +226,7 @@ DELETE:*/workflows/koinon-e2e/koinon-make-t1) [[ -z ${FAKE_DELETE_FAIL:-} ]] || 
 */e2e-artifacts/koinon-make-t1/koinon-make-t1/results.tgz | */artifact-files/*)
   echo "$url" >>"$ARGO_DIR/results-from"
   d=$(mktemp -d "${TMPDIR:-/tmp}/fake-results.XXXXXX"); mkdir -p "$d/out"; echo "| Phase | s |" >"$d/out/quickstart-timings.md"
-  [[ -n ${FAKE_NO_RESULT:-} ]] || echo "${FAKE_RESULT_LINE:-target=test-e2e-kind ref=x rc=${FAKE_RESULT_RC:-0} seconds=1}" >"$d/out/result.txt"
+  [[ -n ${FAKE_NO_RESULT:-} ]] || echo "${FAKE_RESULT_LINE:-target=test-e2e-kind ref=$(git -C "$ARGO_REPO" rev-parse HEAD) rc=${FAKE_RESULT_RC:-0} seconds=1}" >"$d/out/result.txt"
   tar -czf "$o" -C "$d" out; rm -rf "$d" ;;
 *) echo "fake curl: unexpected $method $url" >&2; exit 22 ;;
 esac
@@ -312,6 +312,21 @@ argo_env "$tmp/argo2j"; : >"$FAKE_GH_LOG"
 rc=0
 (unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --no-wait >"$tmp/log8j" 2>&1 && hack/e2e-remote.sh --argo --follow koinon-make-t1 --out "$tmp/out8j" >>"$tmp/log8j" 2>&1) || rc=$?
 check "--no-wait posts nothing; the later --follow posts e2e-lab=success on the submitted ref" sh -c "test $rc -eq 0 && test \$(grep -c 'context=e2e-lab' '$FAKE_GH_LOG') -eq 1 && grep -q 'statuses/$argo_sha -f state=success' '$FAKE_GH_LOG'"
+
+# A reused --out with an old rc=0 verdict must not turn a new failed run into success (stale result.txt).
+argo_env "$tmp/argo2k"; : >"$FAKE_GH_LOG"
+mkdir -p "$tmp/out8k"; echo "target=test-e2e-kind ref=$argo_sha rc=0 seconds=1" >"$tmp/out8k/result.txt"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_NO_RESULT=1 hack/e2e-remote.sh --argo --out "$tmp/out8k" >"$tmp/log8k" 2>&1) || rc=$?
+check "a stale result.txt in a reused --out is not trusted: no verdict, 75, no status" test "$rc" -eq 75 -a ! -s "$FAKE_GH_LOG"
+argo_env "$tmp/argo2l"; : >"$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_RESULT_RC=7 hack/e2e-remote.sh --argo --out "$tmp/out8k" >"$tmp/log8l" 2>&1) || rc=$?
+check "a reused --out: the new failed run's verdict replaces the old one" test "$rc" -eq 7 -a "$(grep -c 'state=failure' "$FAKE_GH_LOG")" -eq 1 -a "$(grep -c 'state=success' "$FAKE_GH_LOG")" -eq 0
+argo_env "$tmp/argo2m"; : >"$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_RESULT_LINE="target=test-e2e-kind ref=deadbeefdead rc=0 seconds=1" hack/e2e-remote.sh --argo --out "$tmp/out8m" >"$tmp/log8m" 2>&1) || rc=$?
+check "a result.txt naming another commit is ignored (75, no status)" test "$rc" -eq 75 -a ! -s "$FAKE_GH_LOG"
 
 argo_env "$tmp/argo3"
 : >"$FAKE_LOG"

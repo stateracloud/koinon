@@ -27,8 +27,8 @@
 #              `--require quickstart` and prints `REQUIRED e2e missing|skipped|failed` with how to produce one.
 #              Every required check is also read from the head commit's check runs (`gh api
 #              commits/<sha>/check-runs`), not only from the PR rollup, which lists just one run per name: a
-#              dispatched run that passed counts next to a skipped pull_request run. Any success on the head
-#              wins over skipped or cancelled runs of the same check.
+#              dispatched run that passed counts next to a skipped pull_request run. A success on the head
+#              wins over a newer skipped or cancelled run of the same check, but a newer failure stays failed.
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
 #   --interval 20 seconds by default
 #
@@ -56,7 +56,7 @@ duration() { # 90m | 30s | 2h | 45 -> seconds
 }
 
 pr="" mode=merged timeout=5400 interval=20
-required=() alias_e2e=0
+required=() alias_e2e=0 explicit_qs=0
 while [ $# -gt 0 ]; do
   case $1 in
   --merged) mode=merged ;;
@@ -67,6 +67,7 @@ while [ $# -gt 0 ]; do
       alias_e2e=1
       required+=(quickstart)
     else
+      [ "$2" != quickstart ] || explicit_qs=1
       required+=("$2")
     fi
     shift
@@ -90,6 +91,19 @@ while [ $# -gt 0 ]; do
   shift
 done
 case $pr in '' | *[!0-9]*) usage ;; esac
+# An explicit quickstart is a plain required check: no `e2e` wording, no duplicate.
+if [ "$explicit_qs" = 1 ]; then
+  alias_show=0
+  dedup=()
+  seen_qs=0
+  for r in ${required[@]+"${required[@]}"}; do
+    if [ "$r" = quickstart ]; then [ "$seen_qs" = 0 ] || continue; seen_qs=1; fi
+    dedup+=("$r")
+  done
+  required=("${dedup[@]}")
+else
+  alias_show=$alias_e2e
+fi
 [ ${#required[@]} -eq 0 ] || [ "$mode" = checks ] || usage
 
 # One normalised row per check: CheckRuns (status/conclusion) and commit statuses (state) alike.
@@ -99,7 +113,8 @@ case $pr in '' | *[!0-9]*) usage ;; esac
 # shellcheck disable=SC2016 # $req is a jq variable, bound by jqn
 norm='def ok: .done and (.bad | not) and (.skipped | not);
 def newest: sort_by(.ts) | . as $s | ($s | last) as $l
-  | if any($s[]; ok) then ([$s[] | select(ok)] | last) elif ($l.done and ($l.cancelled or $l.skipped)) and any($s[]; .done | not) then ([$s[] | select(.done | not)] | last) else $l end;
+  | ([$s[] | select(ok)] | last) as $g
+  | if $g != null and ($l.done and ($l.bad and ($l.cancelled | not)) and $l.ts > $g.ts) then $l elif $g != null then $g elif ($l.done and ($l.cancelled or $l.skipped)) and any($s[]; .done | not) then ([$s[] | select(.done | not)] | last) else $l end;
 [(.statusCheckRollup // [])[] | {
   name: (.name // .context // "?"),
   ts: (.startedAt // .completedAt // ""),
@@ -133,7 +148,7 @@ live_e2e() {
 }
 
 # shown <check>: the name to print; `--require e2e` is judged on quickstart (and e2e-lab).
-shown() { if [ "$alias_e2e" = 1 ] && [ "$1" = quickstart ]; then echo e2e; else echo "$1"; fi; }
+shown() { if [ "$alias_show" = 1 ] && [ "$1" = quickstart ]; then echo e2e; else echo "$1"; fi; }
 
 no_live=0 last=""
 emit() { # print only when the line differs from the previous one
@@ -172,7 +187,8 @@ while :; do
       json=$(jq --argjson x "$extra" --argjson names "$(printf '%s\n' "${req_now[@]}" | jq -R . | jq -sc .)" \
         '.statusCheckRollup = ((.statusCheckRollup // []) + [$x[]? | select(.name | IN($names[]))])' <<<"$json")
     fi
-    if [ "$alias_e2e" = 1 ]; then
+    if [ "$alias_e2e" = 1 ] && [ "$explicit_qs" = 0 ]; then
+      # (An explicit `--require quickstart` stays required as it is: no alias relief.)
       # `e2e` is satisfied by a green e2e-lab status or a green quickstart run on the head; then the other
       # runs of those two names (skipped, cancelled, red) no longer matter.
       if jq -e 'any((.statusCheckRollup // [])[]; ((.name // .context // "") == "e2e-lab" and (.state // "") == "SUCCESS")
@@ -230,7 +246,7 @@ while :; do
           for w in "${whys[@]}"; do
             name=${w%%$'\t'*} why=${w#*$'\t'}
             echo "REQUIRED $(shown "$name") $why"
-            if [ "$alias_e2e" = 1 ] && [ "$name" = quickstart ]; then
+            if [ "$alias_show" = 1 ] && [ "$name" = quickstart ]; then
               echo "no green e2e on this head ($why quickstart, no e2e-lab success); run: hack/e2e-remote.sh --argo (posts e2e-lab), or gh workflow run e2e-kind.yml --ref $branch"
             elif [ "$why" = skipped ]; then
               echo "only skipped runs of $name on this head; run: gh workflow run e2e-kind.yml --ref $branch"
