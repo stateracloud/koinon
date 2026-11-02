@@ -29,10 +29,11 @@ on:
     - cron: "*/30 * * * *"
   workflow_dispatch:
   pull_request_target:
-    # Not ready_for_review and not auto_merge_enabled: the claim does not depend on the draft state or
-    # on auto-merge (auto_merge_enabled starts updater.yml). labeled/unlabeled stay: unclaimed-ok
+    # Not auto_merge_enabled: the claim does not depend on auto-merge (it starts updater.yml).
+    # ready_for_review stays: a draft whose claim was swept or taken over must re-check when marked
+    # ready. labeled/unlabeled stay: unclaimed-ok
     # decides the check and `types:` cannot filter by label name.
-    types: [opened, reopened, synchronize, edited, labeled, unlabeled, closed]
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review, closed]
 
 permissions:
   contents: read

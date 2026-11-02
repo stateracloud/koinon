@@ -7,7 +7,7 @@
 #
 # Triggers, each for a reason the others cannot cover:
 #   push to main            main moved: pull requests fall behind
-#   workflow_run (ci)       a pull request's checks finished: the next one may go. Not for a ci run
+#   workflow_run (ci, e2e-kind)  a pull request's checks finished: the next one may go. Not for a ci run
 #                           of a push to main (the push trigger already ran) and not for a cancelled
 #                           run (a new run of the same pull request follows)
 #   auto_merge_enabled      a pull request joined the queue
@@ -25,7 +25,7 @@ on:
   push:
     branches: [main]
   workflow_run:
-    workflows: [ci]
+    workflows: [ci, e2e-kind]
     types: [completed]
 
 permissions:
