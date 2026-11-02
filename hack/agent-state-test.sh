@@ -11,6 +11,7 @@ script="$repo/hack/agent-state.sh"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-state-test.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT
 export KOINON_STATE_DIR="$tmp/state"
+export KOINON_STATE_TODAY=2026-11-10
 mkdir "$KOINON_STATE_DIR"
 lanes="$KOINON_STATE_DIR/lanes.md"
 pending="$KOINON_STATE_DIR/pending.md"
@@ -53,7 +54,7 @@ run pending "done" "Rivet: order"
 expect "pending done twice" 0 "already done"
 cmp -s "$pending" "$tmp/pending.after1" && ok "second done leaves the file identical" || bad "second done changed the file"
 run pending "done" "no such text anywhere"
-expect "pending done without a match" 1 "no pending item"
+expect "pending done without a match" 1 "no pending item matches"
 run pending add
 expect "pending add without text" 2
 for s in "Pending 2026-11-02 ~08:30 CET" "- Waiting on procoduck: move #510 to Ready" "- 2026-11-02 ~10:00 other thing"; do
@@ -95,13 +96,92 @@ grep -vF -e agent-state -e '| ' -e '|---' -e 'lane add' -e 'lane set' -e 'lane d
 grep -v '^$' "$tmp/lanes.orig" | cmp -s - "$tmp/lanes.now" && ok "original lanes content unchanged and in order" || bad "original lanes content changed"
 
 # show
-run show
+KOINON_STATE_TODAY=2026-11-04 run show
 expect "show" 0 "#517 local feat/517-x PR #600 - ready for review" "#518"
-[[ $out == *"Open pending:"* && $out == *"- Waiting on procoduck"* && $out != *"Rivet: order"* ]] && ok "show lists open pending only" || bad "show pending wrong: $out"
+[[ $out == *"Open pending"* && $out == *"- Waiting on procoduck"* && $out != *"Rivet: order"* ]] && ok "show lists open pending only" || bad "show pending wrong: $out"
 rm -rf "$KOINON_STATE_DIR"
 mkdir "$KOINON_STATE_DIR"
 run show
 expect "show on an empty dir" 0 "Open lanes:"
+
+
+# one match only; --all, --line, --before
+printf -- '- 2026-10-01 ~09:00 alpha old\n- 2026-10-02 ~09:00 alpha older\n- 2026-11-09 ~09:00 alpha new\n- undated alpha\n' >"$pending"
+run pending "done" alpha
+expect "done with several matches refuses" 1 "4 open items" 
+[[ $out == *"1: - 2026-10-01"* && $out == *"3: - 2026-11-09"* ]] && ok "refusal lists them numbered" || bad "refusal list: $out"
+hasnt "refusal changes nothing" "$pending" "[done"
+run pending "done" --line 2
+expect "done --line" 0 "marked done: 1"
+has "--line marks that line" "$pending" "alpha older [done"
+hasnt "--line marks only that line" "$pending" "alpha old [done"
+run pending "done" --line 2
+expect "done --line twice" 0 "already done"
+run pending "done" --line 99
+expect "done --line out of range" 1 "no pending item"
+run show
+expect "show hides items older than 3 days" 0 "3: - 2026-11-09" "alpha old"
+[[ $out == *"(1 older open items: show --all)"* && $out == *"4: - undated alpha"* ]] && ok "show counts the older ones, keeps undated" || bad "show older note: $out"
+run show --all
+expect "show --all" 0 "1: - 2026-10-01 ~09:00 alpha old"
+run pending "done" --before 2026-11-01
+expect "done --before" 0 "marked done: 1"
+has "--before marks the old item" "$pending" "alpha old [done"
+hasnt "--before spares newer and undated" "$pending" "alpha new [done"
+hasnt "--before spares undated" "$pending" "undated alpha [done"
+run pending "done" --all alpha
+expect "done --all" 0 "marked done: 2"
+run pending "done" --before 2026-11-01
+expect "done --before twice" 0 "already done"
+
+# mode kept, symlink written through
+printf -- '- 2026-11-09 ~09:00 mode\n' >"$pending"
+chmod 640 "$pending"
+run pending add "mode check"
+expect "add on a 640 file" 0
+[[ $(stat -c %a "$pending" 2>/dev/null || stat -f %Lp "$pending") == 640 ]] && ok "existing mode kept" || bad "mode changed"
+rm -f "$lanes" "$pending"
+run pending add "fresh file"
+[[ $(stat -c %a "$pending" 2>/dev/null || stat -f %Lp "$pending") == 600 ]] && ok "new file is 600" || bad "new file mode"
+mkdir "$tmp/real"
+printf -- '- 2026-11-09 ~09:00 linked\n' >"$tmp/real/pending.md"
+rm -f "$pending"
+ln -s "$tmp/real/pending.md" "$pending"
+run pending add "through link"
+expect "add through a symlink" 0
+[[ -L $pending ]] && ok "symlink kept" || bad "symlink replaced"
+has "target was written" "$tmp/real/pending.md" "through link"
+rm -f "$pending"
+
+# one write per lane command: the row and its log line appear together (a single rename)
+run lane add 7 l b '#1'
+n=$(grep -c -e '| #7 |' -e 'lane add #7' "$lanes")
+[[ $n -eq 2 ]] && ok "lane add wrote table and log together" || bad "lane add wrote $n of 2"
+run lane "done" 7
+rm -f "$lanes"
+
+# default dir honours XDG_CONFIG_HOME
+xdg_out=$(env -u KOINON_STATE_DIR XDG_CONFIG_HOME="$tmp/xdg" "$script" pending add "xdg" 2>&1)
+[[ -f $tmp/xdg/koinon/state/pending.md ]] && ok "XDG_CONFIG_HOME default dir" || bad "XDG default: $xdg_out"
+
+# stale locks
+mkdir "$KOINON_STATE_DIR/.lock"
+bash -c 'echo $$' >"$KOINON_STATE_DIR/.lock/pid"   # a pid whose process has exited
+KOINON_STATE_LOCK_TIMEOUT=2 run pending add "after a killed writer"
+expect "lock of a dead pid is reclaimed" 0
+has "write went through" "$pending" "after a killed writer"
+mkdir "$KOINON_STATE_DIR/.lock"
+echo $$ >"$KOINON_STATE_DIR/.lock/pid"
+KOINON_STATE_LOCK_TIMEOUT=1 run pending add "blocked by a live pid"
+expect "lock of a live pid is kept" 1 "could not take"
+rm -rf "$KOINON_STATE_DIR/.lock"
+mkdir "$KOINON_STATE_DIR/.lock"
+KOINON_STATE_LOCK_TIMEOUT=1 run pending add "blocked fresh pidless"
+expect "fresh pidless lock is kept" 1 "could not take"
+touch -t 200001010000 "$KOINON_STATE_DIR/.lock"
+KOINON_STATE_LOCK_TIMEOUT=2 run pending add "after an old pidless lock"
+expect "old pidless lock is reclaimed" 0
+rm -f "$lanes" "$pending"
 
 # concurrent writers: no line lost
 rm -f "$lanes" "$pending"
