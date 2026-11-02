@@ -46,6 +46,37 @@ var _ = Describe("Faults", func() {
 		Expect(resp.Body.Close()).To(Succeed())
 	})
 
+	It("refuses the first N requests with the scripted client error, then succeeds", func(ctx SpecContext) {
+		_, ts := start(faulty(fakemodel.Faults{Refuse: 1, RefuseStatus: http.StatusUnauthorized}))
+		resp := openAI(ctx, ts.URL, false)
+		Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized))
+		Expect(resp.Header.Get("x-should-retry")).To(BeEmpty())
+		Expect(resp.Body.Close()).To(Succeed())
+		resp = openAI(ctx, ts.URL, false)
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		Expect(resp.Body.Close()).To(Succeed())
+	})
+
+	It("refuses with 400 when no status is scripted", func(ctx SpecContext) {
+		_, ts := start(faulty(fakemodel.Faults{Refuse: 1}))
+		resp := openAI(ctx, ts.URL, false)
+		Expect(resp.StatusCode).To(Equal(http.StatusBadRequest))
+		Expect(resp.Body.Close()).To(Succeed())
+	})
+
+	It("marks scripted faults with x-should-retry: false", func(ctx SpecContext) {
+		_, ts := start(faulty(fakemodel.Faults{RateLimit: 1, RetryAfter: 7, Refuse: 1, DoNotRetry: true}))
+		resp := openAI(ctx, ts.URL, false)
+		Expect(resp.StatusCode).To(Equal(http.StatusTooManyRequests))
+		Expect(resp.Header.Get("Retry-After")).To(Equal("7"))
+		Expect(resp.Header.Get("x-should-retry")).To(Equal("false"))
+		Expect(resp.Body.Close()).To(Succeed())
+		resp = openAI(ctx, ts.URL, false)
+		Expect(resp.StatusCode).To(Equal(http.StatusBadRequest))
+		Expect(resp.Header.Get("x-should-retry")).To(Equal("false"))
+		Expect(resp.Body.Close()).To(Succeed())
+	})
+
 	It("answers 503 on the Anthropic API with an overloaded_error body", func(ctx SpecContext) {
 		_, ts := start(faulty(fakemodel.Faults{Unavailable: 1}))
 		resp := post(ctx, ts.URL+"/v1/messages", map[string]any{"model": "faulty", "max_tokens": 1, "messages": []any{anUser("hi")}})
