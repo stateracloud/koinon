@@ -3,6 +3,8 @@
 #
 # Prints name=true|false lines (for $GITHUB_OUTPUT) saying which CI jobs a change can affect.
 # With no base ref (a push to main) every job runs. Usage: hack/ci-changes.sh [base-ref]
+# `--stdin` in place of the base ref reads the changed paths from stdin (hack/ci-changes-test.sh);
+# `--flavors-dirs` prints the directories the flavors suite builds from.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -11,6 +13,25 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# flavors_dirs: the repository-relative directory of every package of this module that the flavors
+# suite builds, tests included (`go list -deps -test`, as the flavors job runs it on linux).
+# CI_CHANGES_FLAVORS_DIRS (a list of directories) replaces the `go list` call; the test sets it once.
+flavors_dirs() {
+	local root out
+	if [[ -v CI_CHANGES_FLAVORS_DIRS ]]; then
+		printf '%s\n' "$CI_CHANGES_FLAVORS_DIRS"
+		return 0
+	fi
+	root=$(pwd)
+	out=$(GOOS=linux go list -deps -test -f '{{if not .Standard}}{{.Dir}}{{end}}' ./test/flavors/...) || return 1
+	awk -v r="$root/" 'index($0, r) == 1 { print substr($0, length(r) + 1) }' <<<"$out" | sort -u
+}
+
+if [[ ${1:-} == --flavors-dirs ]]; then
+	flavors_dirs
+	exit
+fi
+
 jobs=(go web generate chart chartsmoke docs escape flavors)
 base=${1:-}
 if [[ -z $base ]]; then
@@ -18,7 +39,11 @@ if [[ -z $base ]]; then
 	exit 0
 fi
 
-files=$(git diff --name-only "$(git merge-base "$base" HEAD)" HEAD)
+if [[ $base == --stdin ]]; then
+	files=$(cat) # the changed paths, one per line (hack/ci-changes-test.sh)
+else
+	files=$(git diff --name-only "$(git merge-base "$base" HEAD)" HEAD)
+fi
 
 # Changes to CI itself, the Makefile or the Go module run everything.
 everything='^(\.github/workflows/ci\.yml|hack/ci-changes\.sh|Makefile|go\.mod|go\.sum)$'
@@ -30,13 +55,21 @@ match() { grep -Eq -- "$1" <<<"$files"; }
 pattern() {
 	case $1 in
 	web) echo '^(web/|api/proto/)' ;;
-	generate) echo '^(api/proto/|internal/db/(queries|migrations)/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/)' ;;
-	chart) echo '^(charts/|hack/chart-check\.sh|hack/chartlint/)' ;;
+	# Every input and output of `make generate` (hack/ci-changes-test.sh derives them from the
+	# Makefile and the generator configs and fails when one is missing here): the protos and
+	# the vendored OpenShell protos, the OpenAPI spec and its config, the sqlc inputs, the
+	# buf and sqlc configs, protoc-gen-es (web/package.json, its lockfile) and the outputs.
+	generate) echo '^(api/proto/|third_party/openshell/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations)/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|web/package\.json$|web/pnpm-lock\.yaml$)' ;;
+	# chart-check.sh sources hack/versions.env and every hack/chart-check.d/*.sh.
+	chart) echo '^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/versions\.env$)' ;;
 	# The binaries the chart starts, their flags and everything they import (the Go packages
 	# outside internal/ and cmd/) count too.
 	chartsmoke) echo '^(charts/|cmd/|internal/|pricing/|connectors/|templates/|api/|web/|test/chartsmoke/|go\.(mod|sum))' ;;
-	docs) echo '^(docs/|test/e2e/|charts/|web/e2e-real/|hack/docs-|README\.md)' ;;
+	# hack/docs-check.sh also reads internal/preflight/preflight.go and hack/versions.env, and
+	# runs the tests of internal/declarative.
+	docs) echo '^(docs/|test/e2e/|charts/|web/e2e-real/|hack/docs-|README\.md|internal/preflight/preflight\.go$|internal/declarative/|hack/versions\.env$)' ;;
 	escape) echo '^(charts/|test/escape/)' ;;
+	# The suite's Go imports are added by flavors_graph below.
 	flavors) echo '^(flavors/|internal/(agentd|flavor|acp)/|test/flavors/|hack/flavor-tag\.sh|templates/)' ;;
 	esac
 }
@@ -55,10 +88,30 @@ else
 	done <<<"$files"
 fi
 
+# flavors_graph: a changed file lies in (or below, for embedded files) the directory of a package
+# the flavors suite builds. Derived, so a new import of the suite is covered without editing a
+# list. If `go list` fails (no toolchain) the job runs: fail closed.
+flavors_graph() {
+	local dirs d f
+	dirs=$(flavors_dirs) || return 0
+	while IFS= read -r f; do
+		d=${f%/*}
+		[[ $d != "$f" ]] || continue # a file in the repository root
+		while [[ -n $d ]]; do
+			grep -qxF -- "$d" <<<"$dirs" && return 0
+			[[ $d == */* ]] || break
+			d=${d%/*}
+		done
+	done <<<"$files"
+	return 1
+}
+
 for j in "${jobs[@]}"; do
 	if [[ $j == go ]]; then
 		echo "go=$go"
 	elif match "$everything" || match "$(pattern "$j")"; then
+		echo "$j=true"
+	elif [[ $j == flavors ]] && flavors_graph; then
 		echo "$j=true"
 	else
 		echo "$j=false"
