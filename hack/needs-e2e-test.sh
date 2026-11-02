@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # First, and on its own line so set -e stops the script when mktemp fails (#476).
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/needs-e2e-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 fail=0

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 tool=$(cd "$(dirname "$0")" && pwd)/migrate-renumber.sh
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/migrate-renumber-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 cd "$work"
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com

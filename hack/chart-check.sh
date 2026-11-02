@@ -17,7 +17,7 @@ CRDS_CATALOG=501527ab9c40c827144c8f45945b25a023e344ce
 HELM=${HELM:-helm}
 KUBECONFORM=(go run "github.com/yannh/kubeconform/cmd/kubeconform@${KUBECONFORM_VERSION}")
 
-out=$(mktemp -d)
+out=$(mktemp -d "${TMPDIR:-/tmp}/chart-check.XXXXXX")
 trap 'rm -rf "$out"' EXIT
 
 value_files=("$CHART/values.yaml" "$CHART"/ci/*-values.yaml)

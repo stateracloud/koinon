@@ -55,7 +55,7 @@ eq "status grace" "$(claim_status held 1000 1500)" grace
 eq "status takeover" "$(claim_status held 1000 1901)" takeover
 eq "status released" "$(claim_status released 1000 0)" released
 
-tmp=$(mktemp)
+tmp=$(mktemp "${TMPDIR:-/tmp}/claim_test.XXXXXX")
 trap 'rm -f "$tmp"' EXIT
 printf '# Sensitive paths.\n/.github/ @a @b\n/AGENTS.md @a\n/internal/auth/ @a\n' >"$tmp.co"
 eq "sensitive paths" "$(sensitive_paths "$tmp.co" | paste -sd, -)" ".github/**,AGENTS.md,internal/auth/**"
@@ -77,7 +77,7 @@ if is_dependabot "not-dependabot"; then bad "lookalike is not dependabot"; else 
 if printf 'docs/a.md\n.github/CODEOWNERS\n' | pr_touches_code; then bad "docs are not code"; else ok "docs are not code"; fi
 if printf 'docs/a.md\ninternal/x/y.go\n' | pr_touches_code; then ok "go is code"; else bad "go is code"; fi
 if printf 'charts/koinon/values.yaml\n' | pr_touches_code; then ok "chart is code"; else bad "chart is code"; fi
-co=$(mktemp)
+co=$(mktemp "${TMPDIR:-/tmp}/claim_test.XXXXXX")
 printf '# c\n* @ProcoDuck @ovirandunu\n/docs/ @x\n' >"$co"
 eq "humans list" "$(humans_list "$co" | paste -sd, -)" "procoduck,ovirandunu"
 rm -f "$co"
@@ -166,7 +166,7 @@ eq "held_by_key names issue and PR" "$(held_by_key "$FIX" "$LNOW" s1)" "#10 (PR 
 eq "held_by_key without a PR" "$(held_by_key "$FIX" "$LNOW" 's1#y')" "#11"
 
 # Stubs: nothing below talks to GitHub.
-LOG=$(mktemp)
+LOG=$(mktemp "${TMPDIR:-/tmp}/claim_test.XXXXXX")
 stub_github() {
   server_now() { echo "$LNOW"; }
   human_login() { echo alice; }
@@ -351,7 +351,7 @@ sess M
 # generated per-worktree holder: no session env, two worktrees do not share an id
 holder_a=$(env -u KOINON_AGENT_SESSION -u CLAUDE_CODE_SESSION_ID bash -c 'CLAIM_LIB_ONLY=1; source "$1"; my_holder' _ "$claim")
 # shellcheck disable=SC2016
-holder_b_dir=$(mktemp -d)
+holder_b_dir=$(mktemp -d "${TMPDIR:-/tmp}/claim_test.XXXXXX")
 holder_b=$(cd "$holder_b_dir" && git init -q . && env -u KOINON_AGENT_SESSION -u CLAUDE_CODE_SESSION_ID bash -c 'CLAIM_LIB_ONLY=1; source "$1"; my_holder' _ "$claim")
 if [[ -n $holder_a && $holder_a != "$holder_b" ]]; then ok "holders differ per git dir"; else bad "holders differ per git dir ($holder_a / $holder_b)"; fi
 
