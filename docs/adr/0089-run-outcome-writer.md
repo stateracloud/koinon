@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-01
-- Relates to: [0065](0065-work-model-tasks-inbox.md), [0074](0074-run-traces-trace-router.md), [0082](0082-work-claims-and-ready-queue.md), [0087](0087-turn-policy-is-a-pure-state-machine.md)
+- Relates to: [0030](0030-run-state-machine.md), [0065](0065-work-model-tasks-inbox.md), [0074](0074-run-traces-trace-router.md), [0087](0087-turn-policy-is-a-pure-state-machine.md)
 - Issue: #453
 
 ## Context
@@ -34,7 +34,7 @@ success commit; the task left working after a park; and three more).
    turn ended. The trace keeps its spans and attributes. agentd no longer has to end the trace before
    it concludes; it ends the spans first only so they are exported promptly.
 5. **Stale writers write nothing.** A verb whose epoch no longer owns the run matches no row, rolls
-   its transaction back and returns `ErrFenced` after telling a cancel from a lost epoch (ADR 0082).
+   its transaction back and returns `ErrFenced` after telling a cancel from a lost epoch (ADR 0030).
 6. **agentd's `conclude` maps how a run ended onto the verbs** and holds no write of its own. It
    switches on the turn controller's typed outcome (`turnpolicy.Outcome`, ADR 0087) for a run whose
    turns ended, and on the error `execute` returned for everything before the turn: the setup-phase
@@ -73,7 +73,8 @@ success commit; the task left working after a park; and three more).
   (queued, starting, running or parked) is canceled; a finished one returns `pgx.ErrNoRows` and gets no
   event. The `Owner` keeps its rule that it always holds an epoch: there is no unfenced `Owner`. The two
   are ordered by the run's row: whichever commits first is the run's outcome, and the other writes
-  nothing (the owner's verb is fenced as `FenceCanceled`, ADR 0050, ADR 0082). One spec per order.
+  nothing (the owner's verb is fenced as `FenceCanceled`, ADR 0050, ADR 0030). One spec per order, for a single cancel and for the sweep, each against
+  the owner's success and its own cancel (#522).
 - **The time-limit note is built once, in the module.** `Owner.CancelAtTimeLimit` (agentd at the cap)
   and `CancelOverTimeLimit` (the sweep) both write `runreply.TimeLimitNote`; the reads the control
   plane makes inside its transaction run in a savepoint, so a failed read only leaves the summary out.
