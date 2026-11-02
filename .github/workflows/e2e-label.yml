@@ -16,11 +16,6 @@ on:
 permissions:
   contents: read
 
-# A second label event on the same PR replaces the first.
-concurrency:
-  group: e2e-label-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   dispatch:
     # Drafts get the e2e when they are marked ready (e2e-kind reads the label then). A fork's token
@@ -28,6 +23,13 @@ jobs:
     if: >-
       github.event.label.name == 'e2e' && !github.event.pull_request.draft
       && github.event.pull_request.head.repo.full_name == github.repository
+    # On the job, not the workflow: every label is its own `labeled` event, and a workflow-level
+    # group would let another label (added with `e2e`, or during the wait) cancel the dispatcher.
+    # A skipped job never joins the group. No cancelling: a second `e2e` event queues behind the
+    # first and then finds the run that one dispatched.
+    concurrency:
+      group: e2e-label-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
