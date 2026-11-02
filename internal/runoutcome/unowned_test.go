@@ -80,10 +80,19 @@ var _ = Describe("CancelUnowned", func() {
 
 	// The control plane and the run's owner end the run at the same moment: whichever commits first
 	// is the run's only outcome, and the other writes nothing. A transaction holding the run's row
-	// keeps both in flight; they queue on the row in the order given, and the first one wins.
+	// keeps both in flight; they queue on the row in the order given, and the first one wins. The
+	// control plane is a single cancel (a person, a budget stop) or the time-limit sweep's bulk
+	// cancel; the owner succeeds or cancels at its own budget stop (agentd). Each only matches a run
+	// that is still live: the owner by its epoch and state (ADR 0030), the control plane by the live
+	// states in its query's filter, so a regression in that filter fails the owner-first entries.
 	DescribeTable("resolves a race with an owner ending the run to a single outcome",
-		func(ctx SpecContext, ownerFirst bool) {
+		func(ctx SpecContext, cp controlPlane, ov ownerVerb, ownerFirst bool) {
 			w := newWorld(ctx, true)
+			if cp == bySweep {
+				// Put the run past its wall-clock cap, as the sweep sees it.
+				_, err := pool.Exec(ctx, `UPDATE runs SET started_at = now() - interval '2 hours' WHERE org_id = $1 AND id = $2`, w.org, w.run.ID)
+				Expect(err).NotTo(HaveOccurred())
+			}
 			turn := w.openTurn(ctx)
 			hold, err := pool.Begin(ctx)
 			Expect(err).NotTo(HaveOccurred())
@@ -93,14 +102,27 @@ var _ = Describe("CancelUnowned", func() {
 
 			var wg sync.WaitGroup
 			var ownErr, cancelErr error
+			var swept []store.Run
 			owner := func() {
 				defer GinkgoRecover()
 				defer wg.Done()
+				if ov == ownerCancels {
+					ownErr = w.own.Cancel(ctx, turn, ownerReason, store.RunFailureClassBudget, map[string]any{"limit": "agent_daily"})
+					return
+				}
 				ownErr = w.own.Succeed(ctx, turn)
 			}
 			cancel := func() {
 				defer GinkgoRecover()
 				defer wg.Done()
+				if cp == bySweep {
+					cancelErr = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+						var err error
+						swept, err = runoutcome.CancelOverTimeLimit(ctx, tx, w.org)
+						return err
+					})
+					return
+				}
 				_, cancelErr = w.cancelUnowned(ctx, runoutcome.Cancellation{
 					Reason: runoutcome.ReasonSpendLimit, Message: "budget spent",
 					Class: store.RunFailureClassBudget, Actor: runoutcome.System,
@@ -126,27 +148,78 @@ var _ = Describe("CancelUnowned", func() {
 				}
 			}
 			Expect(closing).To(Equal(1), "one closing run event")
+			canceledOnTask := 0
+			for _, k := range w.taskKinds(ctx) {
+				if k == runoutcome.KindRunCanceled {
+					canceledOnTask++
+				}
+			}
+
 			if ownerFirst {
-				Expect(run.State).To(Equal(store.RunStateSucceeded))
 				Expect(ownErr).NotTo(HaveOccurred())
-				Expect(cancelErr).To(MatchError(pgx.ErrNoRows), "the cancel matched no live run")
-				Expect(w.taskKinds(ctx)).NotTo(ContainElement(runoutcome.KindRunCanceled))
-				Expect(w.taskState(ctx)).To(Equal(store.TaskStateCompleted))
+				if cp == bySweep {
+					Expect(cancelErr).NotTo(HaveOccurred())
+					Expect(swept).To(BeEmpty(), "the sweep matched no live run")
+				} else {
+					Expect(cancelErr).To(MatchError(pgx.ErrNoRows), "the cancel matched no live run")
+				}
+				if ov == ownerSucceeds {
+					Expect(run.State).To(Equal(store.RunStateSucceeded))
+					Expect(canceledOnTask).To(BeZero())
+					Expect(w.taskState(ctx)).To(Equal(store.TaskStateCompleted))
+					return
+				}
+				Expect(run.State).To(Equal(store.RunStateCanceled))
+				Expect(run.OutcomeReason.String).To(Equal(ownerReason), "the owner's cancel is the outcome")
+				Expect(run.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
+				Expect(canceledOnTask).To(Equal(1), "only the owner's cancel is on the task")
 				return
 			}
+
 			Expect(run.State).To(Equal(store.RunStateCanceled))
-			Expect(run.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
+			Expect(run.OutcomeReason.String).NotTo(Equal(ownerReason), "the control plane's cancel is the outcome")
 			Expect(cancelErr).NotTo(HaveOccurred())
+			if cp == bySweep {
+				Expect(swept).To(HaveLen(1))
+				Expect(payloadOf(w.taskEvents(ctx)[0].Payload)).To(HaveKeyWithValue("reason", "wall_clock_cap"))
+			} else {
+				Expect(run.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
+			}
 			Expect(ownErr).To(MatchError(runoutcome.ErrFenced))
 			Expect(w.own.FenceKind()).To(Equal(runoutcome.FenceCanceled))
-			Expect(w.taskKinds(ctx)).To(ContainElement(runoutcome.KindRunCanceled))
+			Expect(canceledOnTask).To(Equal(1), "only the control plane's cancel is on the task")
 			Expect(w.taskState(ctx)).NotTo(Equal(store.TaskStateCompleted))
 			Expect(w.turnRow(ctx).EndedAt.Valid).To(BeTrue(), "the fenced owner still ends its turn row")
 		},
-		Entry("the owner commits first: the cancel finds no live run", true),
-		Entry("the cancel commits first: the owner's ending is fenced", false),
+		Entry("a cancel, the owner succeeds first: the cancel finds no live run", byCancel, ownerSucceeds, true),
+		Entry("a cancel first: the owner's success is fenced", byCancel, ownerSucceeds, false),
+		Entry("a cancel, the owner cancels first (agentd's budget stop): the cancel finds no live run", byCancel, ownerCancels, true),
+		Entry("a cancel first: the owner's own cancel is fenced", byCancel, ownerCancels, false),
+		Entry("the sweep, the owner succeeds first: the sweep cancels nothing", bySweep, ownerSucceeds, true),
+		Entry("the sweep first: the owner's success is fenced", bySweep, ownerSucceeds, false),
+		Entry("the sweep, the owner cancels first (agentd's budget stop): the sweep cancels nothing", bySweep, ownerCancels, true),
+		Entry("the sweep first: the owner's own cancel is fenced", bySweep, ownerCancels, false),
 	)
 })
+
+// controlPlane is who ends the run in a race with its owner.
+type controlPlane int
+
+const (
+	byCancel controlPlane = iota // CancelUnowned: a person or a budget stop
+	bySweep                      // CancelOverTimeLimit: the time-limit sweep's bulk cancel
+)
+
+// ownerVerb is how the run's owner ends it in a race.
+type ownerVerb int
+
+const (
+	ownerSucceeds ownerVerb = iota
+	ownerCancels            // Owner.Cancel, as agentd at a spent budget
+)
+
+// ownerReason is the outcome reason of the owner's own cancel in a race.
+const ownerReason = "the agent's budget is spent (owner)"
 
 // waitingOnLocks is how many sessions of this suite's database wait on a lock.
 func waitingOnLocks(ctx context.Context) int {
