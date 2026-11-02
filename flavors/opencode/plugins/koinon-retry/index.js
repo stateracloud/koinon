@@ -27,6 +27,22 @@ function whole(options, key, min) {
   return n
 }
 
+// A 4xx other than 408 (timeout), 409 (conflict) and 429 (rate limit) is the request's own fault
+// (a bad key, no access, a malformed request) and fails the same way again. The gateway's
+// x-should-retry: false marks a refusal of any status (internal/gateway DoNotRetry); OpenCode 2.2.0
+// reads it before this hook and its session error carries no headers today, so the header check
+// only takes effect if a later OpenCode passes them on. A budget refusal the gateway cannot mark (a
+// 429 with a Retry-After of hours) ends on maxRetryAfterMs.
+const RETRYABLE_4XX = new Set([408, 409, 429])
+
+function refused(error) {
+  const status = error?.status
+  if (typeof status === "number" && status >= 400 && status < 500 && !RETRYABLE_4XX.has(status)) return true
+  const headers = error?.response?.headers ?? error?.headers
+  const mark = headers?.["x-should-retry"] ?? headers?.["X-Should-Retry"]
+  return typeof mark === "string" && mark.toLowerCase() === "false"
+}
+
 export default {
   id: "koinon.retry",
   setup: async (ctx) => {
@@ -34,6 +50,12 @@ export default {
     const backoffMs = whole(ctx.options, "backoffMs", 0)
     const maxRetryAfterMs = whole(ctx.options, "maxRetryAfterMs", 0)
     await ctx.session.hook("retry", (event) => {
+      // Koinon never retries a refusal, whatever OpenCode would do: this guard keeps the rule here
+      // rather than in OpenCode's retryable table.
+      if (refused(event.error)) {
+        event.decision = { retry: false }
+        return
+      }
       // OpenCode found the failure not worth a retry (not retryable, x-should-retry: false from the
       // gateway, a fourth timeout): that stands.
       if (!event.decision.retry) return

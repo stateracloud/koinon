@@ -241,7 +241,8 @@ const retryNote = "[Koinon] A request to the model failed with a temporary error
 	"retried. Continue the task from where you stopped. Do not repeat actions that already succeeded."
 
 // exhausted words a retryable failure that ended the run. harnessTries is set when the harness was
-// the retrying layer (then agentd made no retries of its own): it is the tries Koinon allowed it.
+// the retrying layer (then agentd made no retries of its own): it is the tries Koinon allowed it,
+// not the tries it made, which agentd does not see (a refusal ends after one).
 func exhausted(f *failure, retries, harnessTries int, maxWait time.Duration) *failure {
 	out := *f
 	switch {
@@ -249,7 +250,7 @@ func exhausted(f *failure, retries, harnessTries int, maxWait time.Duration) *fa
 		out.reason = fmt.Sprintf("%s; the provider asked to wait %s, longer than the %s Koinon waits",
 			f.reason, f.retryAfter.Round(time.Second), maxWait)
 	case harnessTries > 0:
-		out.reason = fmt.Sprintf("%s; the harness gave up within the %d tries Koinon allows", f.reason, harnessTries)
+		out.reason = fmt.Sprintf("%s; the harness stopped retrying (Koinon allows it up to %d tries)", f.reason, harnessTries)
 	default:
 		out.reason = fmt.Sprintf("%s; gave up after %d retries", f.reason, retries)
 	}
