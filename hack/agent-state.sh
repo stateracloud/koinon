@@ -6,25 +6,29 @@
 # two sessions cannot lose each other's lines. Existing content is never deleted.
 #
 #   agent-state.sh pending add "<text>"        append "- 2026-11-02 ~22:45 <text>" to pending.md
-#   agent-state.sh pending done <match>        mark every open item containing <match> done, in place, by
+#   agent-state.sh pending done <match>        mark the ONE open item containing <match> done, in place, by
 #                                              appending " [done 2026-11-03 ~09:00]" (the leading date stays,
-#                                              so hack/notes-expiry.sh still retires it);
-#                                              a second run changes nothing
+#                                              so hack/notes-expiry.sh still retires it); several matches:
+#                                              refuses, lists them numbered, exit 1; a second run changes nothing
+#   agent-state.sh pending done --all <match>  mark every open item containing <match>
+#   agent-state.sh pending done --line <n>     mark the item on file line <n> (the number show prints)
+#   agent-state.sh pending done --before <date>  mark every open item dated before YYYY-MM-DD (bulk retire)
 #   agent-state.sh lane add <N> <lane> <branch> <pr> [note]
 #   agent-state.sh lane set <N> <field>=<value>...   fields: lane, branch, pr, note
 #   agent-state.sh lane done <N>               drop the row from the table (the log keeps it)
-#   agent-state.sh show                        open lanes and open pending items, compact
+#   agent-state.sh show [--all]                open lanes and open pending items of the last 3 days, numbered
+#                                              by file line; --all adds the older ones
 #
 # lanes.md keeps a small current-lanes table between two marker comments at the top; everything
 # else (the log: "- <date> ~<time> <text>" lines and any headed blocks) stays below it. Each lane
 # command also appends a log line.
 #
-# State dir: $KOINON_STATE_DIR (default ~/.config/koinon/state). Lock wait: $KOINON_STATE_LOCK_TIMEOUT
+# State dir: $KOINON_STATE_DIR (default ${XDG_CONFIG_HOME:-~/.config}/koinon/state). Lock wait: $KOINON_STATE_LOCK_TIMEOUT
 # seconds (default 10). Exit: 0 ok, 1 error (no such lane, no match, lock timeout), 2 usage.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 set -euo pipefail
 
-state_dir=${KOINON_STATE_DIR:-$HOME/.config/koinon/state}
+state_dir=${KOINON_STATE_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/koinon/state}
 lanes="$state_dir/lanes.md"
 pending="$state_dir/pending.md"
 begin_marker='<!-- agent-state:lanes begin -->'
@@ -33,28 +37,71 @@ lock_dir="$state_dir/.lock"
 lock_held=0
 
 die() { echo "agent-state: $*" >&2; exit 1; }
-usage() { sed -n '4,19p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '4,25p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 stamp() { date '+%Y-%m-%d ~%H:%M'; }
 
-unlock() { if ((lock_held)); then rmdir "$lock_dir" 2>/dev/null || true; lock_held=0; fi; }
+unlock() {
+	if ((lock_held)); then
+		rm -f "$lock_dir/pid"
+		rmdir "$lock_dir" 2>/dev/null || true
+		lock_held=0
+	fi
+}
+file_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
+file_mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
+# reclaim_stale: remove the lock when its holder is dead, or when it is older than 60 s and holds no pid.
+reclaim_stale() {
+	local pid='' moved mtime
+	[[ -d $lock_dir ]] || return 1
+	[[ -r $lock_dir/pid ]] && pid=$(<"$lock_dir/pid")
+	if [[ $pid =~ ^[0-9]+$ ]]; then
+		kill -0 "$pid" 2>/dev/null && return 1
+	else
+		mtime=$(file_mtime "$lock_dir") || return 1
+		(($(date +%s) - mtime > 60)) || return 1
+	fi
+	# Take it by rename so that only one reclaimer wins; put it back if it was not the lock we judged.
+	moved="$lock_dir.stale.$$"
+	mv "$lock_dir" "$moved" 2>/dev/null || return 1
+	if [[ $(cat "$moved/pid" 2>/dev/null || true) != "$pid" ]]; then
+		mv "$moved" "$lock_dir" 2>/dev/null || rm -rf "$moved"
+		return 1
+	fi
+	rm -rf "$moved"
+	return 0
+}
 lock() {
 	mkdir -p "$state_dir"
 	local tries=0 max=$((${KOINON_STATE_LOCK_TIMEOUT:-10} * 20))
 	until mkdir "$lock_dir" 2>/dev/null; do
+		reclaim_stale && continue
 		tries=$((tries + 1))
-		((tries <= max)) || die "could not take $lock_dir within ${KOINON_STATE_LOCK_TIMEOUT:-10}s (remove it if no agent-state.sh is running)"
+		((tries <= max)) || die "could not take $lock_dir within ${KOINON_STATE_LOCK_TIMEOUT:-10}s (held by pid $(cat "$lock_dir/pid" 2>/dev/null || echo unknown))"
 		sleep 0.05
 	done
 	lock_held=1
+	echo $$ >"$lock_dir/pid"
 	trap unlock EXIT
 	trap 'exit 130' INT TERM
 }
 
-# atomic_write <file>: stdin becomes the file, via a temp file in the same dir.
+# atomic_write <file>: stdin becomes the file, via a temp file in the same dir. A symlink is written
+# through to its target; an existing file keeps its mode (new files are 600, from mktemp).
 atomic_write() {
-	local tmp
-	tmp=$(mktemp "$state_dir/.tmp.XXXXXX")
-	if cat >"$tmp"; then mv "$tmp" "$1"; else rm -f "$tmp"; die "write of $1 failed"; fi
+	local target=$1 tmp l
+	while [[ -L $target ]]; do
+		l=$(readlink "$target")
+		[[ $l == /* ]] || l=$(dirname "$target")/$l
+		target=$l
+	done
+	tmp=$(mktemp "$(dirname "$target")/.tmp.XXXXXX")
+	if cat >"$tmp"; then
+		[[ -e $target ]] && chmod "$(file_mode "$target")" "$tmp"
+		mv "$tmp" "$target"
+	else
+		rm -f "$tmp"
+		die "write of $1 failed"
+	fi
 }
 
 # append_line <file> <line>: the file plus one line, atomically; a missing final newline is added.
@@ -106,6 +153,7 @@ parse_row() {
 }
 format_row() { printf '| %s | %s | %s | %s | %s |' "$r_n" "$r_lane" "$r_branch" "$r_pr" "$r_note"; }
 
+# write_lanes <log line>: the table, the body and the log line, in one rename.
 write_lanes() {
 	{
 		printf '%s\n' "$begin_marker"
@@ -116,7 +164,10 @@ write_lanes() {
 		if ((${#body[@]})); then
 			printf '\n'
 			printf '%s\n' "${body[@]}"
+		else
+			printf '\n'
 		fi
+		printf '%s\n' "$1"
 	} | atomic_write "$lanes"
 }
 
@@ -147,8 +198,7 @@ lane_add() {
 	find_row "$n" && die "lane #$n is already open (use: lane set $n <field>=<value>)"
 	r_n="#$n" r_lane=$(clean "$2") r_branch=$(clean "$3") r_pr=$(clean "$4") r_note=$(clean "${5:-}")
 	rows+=("$(format_row)")
-	write_lanes
-	append_line "$lanes" "- $(stamp) lane add #$n $r_lane $r_branch $r_pr${r_note:+: $r_note}"
+	write_lanes "- $(stamp) lane add #$n $r_lane $r_branch $r_pr${r_note:+: $r_note}"
 }
 
 lane_set() {
@@ -175,8 +225,7 @@ lane_set() {
 		changes+="${changes:+ }$key=$val"
 	done
 	rows[row_idx]=$(format_row)
-	write_lanes
-	append_line "$lanes" "- $(stamp) lane set #$n $changes"
+	write_lanes "- $(stamp) lane set #$n $changes"
 }
 
 lane_done() {
@@ -188,8 +237,7 @@ lane_done() {
 	find_row "$n" || die "lane #$n is not open"
 	unset 'rows[row_idx]'
 	rows=("${rows[@]}")
-	write_lanes
-	append_line "$lanes" "- $(stamp) lane done #$n"
+	write_lanes "- $(stamp) lane done #$n"
 }
 
 # --- pending.md ------------------------------------------------------------------------------
@@ -202,34 +250,65 @@ pending_add() {
 	append_line "$pending" "- $(stamp) $(clean "$1")"
 }
 
+# today: the pinned test date (KOINON_STATE_TODAY) or the real one; days_ago <n> as YYYY-MM-DD.
+today() { printf '%s' "${KOINON_STATE_TODAY:-$(date +%F)}"; }
+days_ago() {
+	local t
+	t=$(today)
+	date -d "$t -$1 days" +%F 2>/dev/null || date -j -v-"$1"d -f %F "$t" +%F
+}
+# item_date <line>: the leading YYYY-MM-DD of a "- 2026-11-02 ..." line, empty when undated.
+item_date() { [[ $1 =~ ^-[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})([[:space:]]|$) ]] && printf '%s' "${BASH_REMATCH[1]}"; return 0; }
+
 pending_done() {
+	local mode=one arg
+	case ${1:-} in
+	--all) mode=all; shift ;;
+	--line) mode=line; shift ;;
+	--before) mode=before; shift ;;
+	esac
 	(($# == 1)) && [[ -n $1 ]] || usage
+	arg=$1
+	case $mode in
+	line) [[ $arg =~ ^[0-9]+$ ]] || usage ;;
+	before) [[ $arg =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || usage ;;
+	esac
 	lock
-	[[ -f $pending ]] || die "no match for '$1' (no pending.md)"
-	local lines=() out=() line open=0 already=0 now
+	[[ -f $pending ]] || die "no pending.md"
+	local lines=() line i d now hit=() hit_done=0
 	mapfile -t lines <"$pending"
 	now=$(stamp)
-	for line in "${lines[@]}"; do
-		if [[ $line == '- '* && $line == *"$1"* ]]; then
-			if is_done "$line"; then
-				already=$((already + 1))
-			else
-				open=$((open + 1))
-				line="$line [done $now]"
-			fi
-		fi
-		out+=("$line")
+	for i in "${!lines[@]}"; do
+		line=${lines[$i]}
+		[[ $line == '- '* ]] || continue
+		case $mode in
+		one | all) [[ $line == *"$arg"* ]] || continue ;;
+		line) ((i + 1 == arg)) || continue ;;
+		before)
+			d=$(item_date "$line")
+			[[ -n $d && $d < $arg ]] || continue
+			;;
+		esac
+		if is_done "$line"; then hit_done=$((hit_done + 1)); else hit+=("$i"); fi
 	done
-	if ((open + already == 0)); then die "no pending item contains '$1'"; fi
-	if ((open == 0)); then echo "already done: $already item(s) match '$1'"; return 0; fi
-	printf '%s\n' "${out[@]}" | atomic_write "$pending"
-	echo "marked done: $open item(s)"
+	if ((${#hit[@]} + hit_done == 0)); then die "no pending item matches ($mode '$arg')"; fi
+	if ((${#hit[@]} == 0)); then echo "already done: $hit_done item(s)"; return 0; fi
+	if [[ $mode == one ]] && ((${#hit[@]} > 1)); then
+		echo "agent-state: ${#hit[@]} open items contain '$arg'; use --line <n> or --all:" >&2
+		for i in "${hit[@]}"; do printf '  %s: %s\n' "$((i + 1))" "${lines[$i]}" >&2; done
+		exit 1
+	fi
+	for i in "${hit[@]}"; do lines[i]="${lines[$i]} [done $now]"; done
+	printf '%s\n' "${lines[@]}" | atomic_write "$pending"
+	echo "marked done: ${#hit[@]} item(s)"
 }
 
 # --- show ------------------------------------------------------------------------------------
 
 show() {
-	local i n_open=0 line
+	local all=0 i n_open=0 older=0 line d cutoff n=0
+	[[ ${1:-} == --all ]] && all=1
+	cutoff=$(days_ago 3)
 	read_lanes
 	echo "Open lanes:"
 	for i in "${!rows[@]}"; do
@@ -238,17 +317,21 @@ show() {
 		n_open=$((n_open + 1))
 	done
 	((n_open)) || echo "  none"
-	echo "Open pending:"
+	echo "Open pending (line: item):"
 	n_open=0
 	if [[ -f $pending ]]; then
 		while IFS= read -r line || [[ -n $line ]]; do
-			if [[ $line == '- '* ]] && ! is_done "$line"; then
-				printf '  %s\n' "$line"
-				n_open=$((n_open + 1))
-			fi
+			n=$((n + 1))
+			[[ $line == '- '* ]] || continue
+			! is_done "$line" || continue
+			d=$(item_date "$line")
+			if ((!all)) && [[ -n $d && $d < $cutoff ]]; then older=$((older + 1)); continue; fi
+			printf '  %s: %s\n' "$n" "$line"
+			n_open=$((n_open + 1))
 		done <"$pending"
 	fi
 	((n_open)) || echo "  none"
+	((older == 0)) || echo "($older older open items: show --all)"
 	return 0
 }
 
@@ -274,6 +357,6 @@ lane)
 	*) usage ;;
 	esac
 	;;
-show) show ;;
+show) show "$@" ;;
 *) usage ;;
 esac
