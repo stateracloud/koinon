@@ -125,12 +125,21 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# lab_down <message>: the lab cannot be reached. The gate lane exits 75 (the caller runs the gate
+# locally); the other lanes exit 1.
+lab_down() {
+  [[ -z ${bundle:-} ]] || rm -f "$bundle"
+  echo "e2e-remote --argo: $1" >&2
+  if [[ $lane == gate ]]; then echo "e2e-remote --argo: the lab is unreachable; run the gate locally" >&2; exit 75; fi
+  exit 1
+}
+
 open_creds() {
   [[ $opened == 1 ]] && return 0
-  e2e_creds_open
+  e2e_creds_open || lab_down "cannot open the credentials from $CREDS"
   opened=1
-  token=$(e2e_creds_argo_token)
-  [[ -n $token ]] || { echo "e2e-remote --argo: no Argo token from $CREDS" >&2; exit 1; }
+  token=$(e2e_creds_argo_token) || token=""
+  [[ -n $token ]] || lab_down "no Argo token from $CREDS"
 }
 
 # api <method> <path> [json body]: one Argo Server call; prints the response body. The token reaches
@@ -145,7 +154,8 @@ api() {
 # s3_put <file> <object>: upload with SigV4; the key reaches curl on stdin.
 s3_put() {
   local code
-  [[ -n $s3user ]] || s3user=$(e2e_creds_s3)
+  [[ -n $s3user ]] || s3user=$(e2e_creds_s3) || s3user=""
+  [[ -n $s3user ]] || { echo "e2e-remote --argo: no bundle credentials from $CREDS" >&2; return 1; }
   code=$(printf 'user = "%s"\n' "$s3user" | curl -K - -sS -o /dev/null -w '%{http_code}' \
     --aws-sigv4 "aws:amz:$REGION:s3" -H 'x-amz-content-sha256: UNSIGNED-PAYLOAD' -T "$1" "$BUNDLE_URL/$2")
   [[ $code == 200 ]] || { echo "e2e-remote --argo: bundle upload returned HTTP $code" >&2; return 1; }
@@ -354,18 +364,18 @@ git update-ref "$tmpref" "$sha"
 git bundle create -q "$bundle" "$tmpref" || { git update-ref -d "$tmpref"; rm -f "$bundle"; exit 1; }
 git update-ref -d "$tmpref"
 
+# Anything that goes wrong reaching the lab leaves the gate lane's caller to run the gate locally
+# (75). The gate slot is picked before the upload, so a busy lab costs no bundle.
 open_creds
+if [[ $lane == gate ]]; then
+  [[ -n $slot ]] || slot=$(pick_slot) || { rm -f "$bundle"; echo "e2e-remote --argo: the lab is unreachable; run the gate locally" >&2; exit 75; }
+  [[ -n $slot ]] || { rm -f "$bundle"; echo "e2e-remote --argo: every gate slot is busy; run the gate locally" >&2; exit 75; }
+fi
 echo "== uploading the bundle of ${sha:0:12} ($(wc -c <"$bundle" | tr -d ' ') bytes)"
-s3_put "$bundle" "$object" || { rm -f "$bundle"; exit 1; }
+s3_put "$bundle" "$object" || { rm -f "$bundle"; [[ $lane == gate ]] && exit 75; exit 1; }
 rm -f "$bundle"
 
-if [[ $lane == gate ]]; then
-  # Anything that goes wrong reaching the lab leaves the caller to run the gate locally (75).
-  [[ -n $slot ]] || slot=$(pick_slot) || { echo "e2e-remote --argo: the lab is unreachable; run the gate locally" >&2; exit 75; }
-  [[ -n $slot ]] || { echo "e2e-remote --argo: every gate slot is busy; run the gate locally" >&2; exit 75; }
-else
-  [[ -n $slot ]] || slot=$(pick_slot)
-fi
+[[ $lane == gate ]] || { [[ -n $slot ]] || slot=$(pick_slot); }
 if [[ $lane == gate ]]; then
   body=$(jq -nc --arg t "$GATE_TEMPLATE" --arg g "$target" --arg ref "$sha" --arg b "$object" \
     --arg a "$label" --arg s "$slot" '{resourceKind: "WorkflowTemplate", resourceName: $t,

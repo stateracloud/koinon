@@ -168,7 +168,7 @@ git -C "$tmp/repo" checkout -q --detach "$sha"
 argo_sha=$(git -C "$tmp/repo" rev-parse HEAD)
 cat >"$tmp/creds.sh" <<'SH'
 e2e_creds_open() { echo "creds open" >>"$FAKE_LOG"; }
-e2e_creds_argo_token() { echo koinon_test_not-a-real-token; }
+e2e_creds_argo_token() { [[ -z ${FAKE_NO_TOKEN:-} ]] || return 1; echo koinon_test_not-a-real-token; }
 e2e_creds_s3() { echo koinon_test_id:koinon_test_not-a-real-secret; }
 e2e_creds_results() { echo koinon_test_reader:koinon_test_not-a-real-reader; }
 e2e_creds_close() { echo "creds closed" >>"$FAKE_LOG"; }
@@ -191,7 +191,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 case $method:$url in
-PUT:*/e2e-bundles/*) cp "$upload" "$ARGO_DIR/last.bundle"; [[ -z $w ]] || printf 200 ;;
+PUT:*/e2e-bundles/*) cp "$upload" "$ARGO_DIR/last.bundle"; [[ -z $w ]] || printf '%s' "${FAKE_PUT_CODE:-200}" ;;
 */workflow-templates/*/koinon-gate) echo '{"spec":{"arguments":{"parameters":[{"name":"slot","enum":["gate-1","gate-2","gate-3","gate-4"]}]}}}' ;;
 */workflow-templates/*) echo '{"spec":{"arguments":{"parameters":[{"name":"slot","enum":["a","b","c"]}]}}}' ;;
 *'/workflows/koinon-e2e?'*) if [[ -n ${FAKE_LIST:-} ]]; then echo "$FAKE_LIST"; else echo '{}'; fi ;;
@@ -362,6 +362,13 @@ rc=0
   FAKE_LIST='{"items":[{"spec":{"arguments":{"parameters":[{"name":"slot","value":"gate-1"},{"name":"slot","value":"gate-2"},{"name":"slot","value":"gate-3"},{"name":"slot","value":"gate-4"}]}}}]}' \
     hack/e2e-remote.sh --argo --gate go-test >"$tmp/gate6/log" 2>&1) || rc=$?
 check "--gate with every slot busy exits 75 without submitting" test "$rc" -eq 75 -a ! -e "$tmp/gate6/submitted"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_PUT_CODE=503 hack/e2e-remote.sh --argo --gate go-test >"$tmp/gate6/log4" 2>&1) || rc=$?
+check "--gate with a failing bundle upload exits 75 without submitting" test "$rc" -eq 75 -a ! -e "$tmp/gate6/submitted"
+rc=0
+rm -f "$tmp/gate6/last.bundle"
+(unset KOINON_E2E_REMOTE; FAKE_NO_TOKEN=1 hack/e2e-remote.sh --argo --gate go-test >"$tmp/gate6/log5" 2>&1) || rc=$?
+check "--gate without an Argo token exits 75 without uploading" test "$rc" -eq 75 -a ! -e "$tmp/gate6/last.bundle"
 rc=0
 (unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --gate 'x;rm' --dry-run >"$tmp/gate6/log2" 2>&1) || rc=$?
 check "--gate refuses a gate set that is not a plain name" test "$rc" -eq 2
