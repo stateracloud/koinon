@@ -4,7 +4,7 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 fail=0
-eq() { [[ $2 == "$3" ]] && echo "ok: $1" || { echo "FAIL: $1: got '$2', want '$3'"; fail=1; }; }
+eq() { if [[ $2 == "$3" ]]; then echo "ok: $1"; else echo "FAIL: $1: got '$2', want '$3'"; fail=1; fi; }
 
 fixture='# Maintainers
 

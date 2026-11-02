@@ -334,6 +334,7 @@ expand_vars() {
 
 # 4. Release assets, raw tags and npm tarballs fetched by Dockerfiles and scripts.
 while IFS=$'\t' read -r file line; do
+	# shellcheck disable=SC2013 # the matched urls contain no whitespace
 	for url in $(grep -Eo 'https://(github\.com/[^/ ]+/[^/ ]+/releases/download/[^ ]+|raw\.githubusercontent\.com/[^ ]+|registry\.npmjs\.org/[^ ]+\.tgz)' <<<"$line" | sed 's/[\\"]*$//'); do
 		url=$(expand_vars "$file" "$url")
 		once "url $url" && check_url "$url"
