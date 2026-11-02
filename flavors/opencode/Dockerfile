@@ -172,6 +172,9 @@ RUN set -eux; \
 COPY --from=common --chmod=0755 koinon-entry-lib.sh /usr/local/lib/koinon/koinon-entry-lib.sh
 COPY --chmod=0755 koinon-opencode /usr/local/bin/koinon-opencode
 COPY --chmod=0644 etc/koinon/opencode/opencode.jsonc /etc/koinon/opencode/opencode.jsonc
+# Koinon's retry policy for OpenCode's model requests, loaded by the config's plugin list
+# (README.md, "Model retries"); outside every config root, so nothing else loads it.
+COPY --chmod=0644 plugins/koinon-retry/index.js /usr/local/lib/koinon/opencode/plugins/koinon-retry/index.js
 # git's GitHub credential helper, shared by every flavor (flavors/common, build context
 # "common"): it prints the OpenShell placeholder and stores nothing.
 COPY --from=common --chmod=0755 koinon-git-credential /usr/local/bin/koinon-git-credential

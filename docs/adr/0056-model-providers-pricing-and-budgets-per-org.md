@@ -641,7 +641,10 @@ streamed. The code lands in #340 (ledger), #341 (agentd) and #342 (gateway), whi
   plugin `session.retry` hook (`packages/core/src/session/runner/retry.ts` lets a hook change the
   decision and delay), which nothing here has exercised. Until a lever is chosen, the single-layer rule
   is met by the gateway marking refusals and agentd skipping its own retry; #341 decides whether the
-  flavor uses a plugin hook.
+  flavor uses a plugin hook. Decided in #341: it does. Koinon's plugin `koinon.retry`, listed in the
+  flavor's read-only config, replaces each `session.retry` decision with the policy above, which
+  agentd passes as launch switches (`flavors/opencode/README.md`, "Model retries"); the flavor
+  contract suite asserts the tries and waits.
 
 ## Open questions
 

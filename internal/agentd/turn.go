@@ -70,6 +70,13 @@ func (r *runner) turnConfig() turnpolicy.Config {
 		r.log.Warn("reading the run's limits for the wrap-up notice failed", "err", err)
 		limits.MaxModelRequests, limits.MaxSpend = 0, 0
 	}
+	// One layer retries a failed model request (ADR 0056 amendment 2026-10-31, point 3). When the
+	// harness does, with the policy agentd gave it (launchCommand), a retryable failure that reaches
+	// agentd has already used every try, so the turn is not repeated.
+	retries := cfg.ModelRetries
+	if r.harnessRetries() {
+		retries = 0
+	}
 	return turnpolicy.Config{
 		CapEnd:          r.capEnd(),
 		WallClock:       time.Duration(r.run.MaxWallClockSeconds) * time.Second,
@@ -80,10 +87,15 @@ func (r *runner) turnConfig() turnpolicy.Config {
 		NoticeRecorded:  r.run.WrapUpNoticeAt.Valid,
 		CancelGrace:     cfg.CancelGrace,
 		MaxRefusedTurns: cfg.MaxRefusedTurns,
-		ModelRetries:    cfg.ModelRetries,
+		ModelRetries:    retries,
 		RetryBackoff:    cfg.RetryBackoff,
 		MaxRetryAfter:   cfg.MaxRetryAfter,
 	}
+}
+
+// harnessRetries reports whether the run's harness is the layer that retries model requests.
+func (r *runner) harnessRetries() bool {
+	return harnessRetries(r.flavor) && !r.p.cfg.ownRetryLayer
 }
 
 // run returns the policy's outcome, or the error of a write the turns needed.
@@ -338,6 +350,9 @@ type turnResult struct {
 	refs []refusal
 	// maxRetryAfter is the longest provider wait Koinon accepts (OutRetriesExhausted).
 	maxRetryAfter time.Duration
+	// harnessTries is how many tries the harness was allowed when it is the retrying layer, else 0
+	// (OutRetriesExhausted).
+	harnessTries int
 	// capNote is the reason of a wall-clock cap (OutCapReached).
 	capNote string
 }
@@ -349,7 +364,7 @@ func (t *turnResult) fails() (reason string, class store.RunFailureClass, ok boo
 	case turnpolicy.OutHarnessCancelled:
 		return "the harness cancelled the turn", "", true
 	case turnpolicy.OutRetriesExhausted:
-		f := exhausted(t.failure, t.out.Retries, t.maxRetryAfter)
+		f := exhausted(t.failure, t.out.Retries, t.harnessTries, t.maxRetryAfter)
 		return f.reason, f.class, true
 	case turnpolicy.OutRefusalsExceeded:
 		ref := &refused{refusals: t.refs}
@@ -361,8 +376,12 @@ func (t *turnResult) fails() (reason string, class store.RunFailureClass, ok boo
 // result carries the policy's outcome to execute.
 func (d *turnDriver) result(o turnpolicy.Outcome) *turnResult {
 	r := d.r
+	tries := 0
+	if r.harnessRetries() {
+		tries = retryPolicyOf(r.p.cfg).Tries
+	}
 	return &turnResult{
-		out: o, err: d.err, failure: d.failure, refs: d.refs, maxRetryAfter: r.p.cfg.MaxRetryAfter,
+		out: o, err: d.err, failure: d.failure, refs: d.refs, maxRetryAfter: r.p.cfg.MaxRetryAfter, harnessTries: tries,
 		capNote: fmt.Sprintf("wall-clock cap of %s reached", time.Duration(r.run.MaxWallClockSeconds)*time.Second),
 	}
 }
