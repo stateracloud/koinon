@@ -12,7 +12,7 @@
 # PR that has auto-merge on prints a warning (it can merge at the old head before CI sees the new
 # commits); --hold turns auto-merge off before the push and prints the command that turns it back on.
 # --e2e adds the `e2e` label before the push (an open PR) or at PR creation. Creation labels in a
-# second call (`opened`, then `labeled`); e2e-kind runs the e2e once for both (#468).
+# second call; e2e-kind's `opened` run reads the labels live and runs the e2e (#468).
 #
 # Run it inside a checkout or worktree on a feature branch named <type>/<N>-<slug> (the claim and the
 # PR hang off N); any other name is refused before anything is pushed (#485). Work that needs no issue

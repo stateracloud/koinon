@@ -11,13 +11,8 @@
 #                      when the full rule (needs-e2e.sh) would have wanted it. The labels are the
 #                      event's plus the PR's current ones: `gh pr create --label` opens the PR and
 #                      then labels it (two events, #468), and the run of `opened` should already see
-#                      the label. Adding the `e2e` label (ACTION=labeled) to a head that another run
-#                      of this workflow already ran the e2e on (or is running it) runs nothing and
-#                      prints `covered=<that run's id>`: the result job (hack/e2e-result.sh) is green
-#                      only when that run's quickstart concluded success. The workflow queues the
-#                      labelled run behind the other instead of cancelling it. So adding the label
-#                      again after a red e2e does not retry it: re-run the red run's failed jobs, or
-#                      `gh workflow run e2e-kind.yml --ref <branch>`.
+#                      the label. Label events do not start the workflow; adding `e2e` later
+#                      dispatches it (hack/e2e-label.sh).
 #   push               (main) needed when the full rule matches anything since the last green e2e
 #                      run on main (push or schedule), or when there is no such run.
 #   schedule           (nightly) always: drift no commit explains (upstream images, the runner
@@ -25,8 +20,8 @@
 #   workflow_dispatch  always needed.
 #
 # Environment: EVENT, BASE (pull request base branch), LABELS (JSON array of the PR's label names),
-# ACTION (the pull_request action), PR (its number), HEAD_SHA, RUN_ID (this run), NEEDS_E2E (path
-# of the rule script, default hack/needs-e2e.sh), GH (the gh command), GH_REPO.
+# PR (its number), NEEDS_E2E (path of the rule script, default hack/needs-e2e.sh), GH (the gh
+# command), GH_REPO.
 # Any failure of the rule script other than "not needed" reads as needed.
 set -euo pipefail
 
@@ -35,33 +30,14 @@ NEEDS=${NEEDS_E2E:-hack/needs-e2e.sh}
 GH=${GH:-gh}
 LABELS=${LABELS:-[]}
 
-emit() { # <needed> [covered]
+emit() {
   echo "needed=$1"
   [[ -z ${GITHUB_OUTPUT:-} ]] || echo "needed=$1" >>"$GITHUB_OUTPUT"
-  if [[ -n ${2:-} ]]; then
-    echo "covered=$2"
-    [[ -z ${GITHUB_OUTPUT:-} ]] || echo "covered=$2" >>"$GITHUB_OUTPUT"
-  fi
 }
 # live_labels: the PR's labels now, as a JSON array; [] when they cannot be read.
 live_labels() {
   [[ -n ${PR:-} && -n ${GH_REPO:-} ]] || { echo '[]'; return; }
   "$GH" api "repos/$GH_REPO/issues/$PR/labels" --jq '[.[].name]' 2>/dev/null || echo '[]'
-}
-# ran_on_head: the id of another run of this workflow on HEAD_SHA, not cancelled, whose quickstart
-# job ran (or runs); empty for none.
-ran_on_head() {
-  [[ -n ${HEAD_SHA:-} && -n ${GH_REPO:-} ]] || return 0
-  local id n
-  for id in $("$GH" api "repos/$GH_REPO/actions/workflows/e2e-kind.yml/runs?head_sha=$HEAD_SHA&event=pull_request&per_page=30" \
-    --jq ".workflow_runs[] | select(.id != ${RUN_ID:-0} and .conclusion != \"cancelled\") | .id" 2>/dev/null); do
-    n=$("$GH" api "repos/$GH_REPO/actions/runs/$id/jobs" \
-      --jq '[.jobs[] | select((.name | startswith("quickstart")) and .conclusion != "skipped" and .conclusion != "cancelled")] | length' 2>/dev/null || echo 0)
-    if [[ $n -gt 0 ]]; then
-      echo "$id"
-      return 0
-    fi
-  done
 }
 summary() {
   [[ -z ${GITHUB_STEP_SUMMARY:-} ]] || printf '## Kind e2e\n\n%s\n' "$*" >>"$GITHUB_STEP_SUMMARY"
@@ -84,11 +60,6 @@ pull_request)
     exit 0
   fi
   forced=$rc
-  if [[ ${ACTION:-} == labeled ]] && covered=$(ran_on_head) && [[ -n $covered ]]; then
-    summary "Does not run again: run $covered already ran the e2e on this commit; this result mirrors it."
-    emit false "$covered"
-    exit 0
-  fi
   labelled=1
   if jq -e 'index("e2e")' <<<"$LABELS" >/dev/null 2>&1 || jq -e 'index("e2e")' <<<"$(live_labels)" >/dev/null 2>&1; then
     labelled=0

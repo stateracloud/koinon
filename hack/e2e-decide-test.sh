@@ -13,14 +13,11 @@ cat >"$tmp/needs" <<'SH'
 if [[ $1 == --forced-only ]]; then echo "forced stub"; exit "${STUB_FORCED:-1}"; fi
 echo "full stub $*"; exit "${STUB_FULL:-1}"
 SH
-# Stub gh: STUB_LABELS answers the PR's current labels, STUB_RUNS the other runs on the head (ids, one
-# per line), STUB_RAN how many quickstart jobs of such a run ran; anything else STUB_COVERED.
+# Stub gh: STUB_LABELS answers the PR's current labels; anything else STUB_COVERED.
 cat >"$tmp/gh" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
 */issues/*/labels*) echo "${STUB_LABELS:-[]}" ;;
-*/actions/workflows/e2e-kind.yml/runs*) [[ -z ${STUB_RUNS:-} ]] || printf '%s\n' $STUB_RUNS ;;
-*/actions/runs/*/jobs*) echo "${STUB_RAN:-0}" ;;
 *) echo "${STUB_COVERED:-}" ;;
 esac
 SH
@@ -49,18 +46,9 @@ want true "PR: a rule failure fails closed" EVENT=pull_request STUB_FORCED=2
 want false "PR: nothing relevant says so" EVENT=pull_request
 summary_has "nothing in this pull request"
 # #468: `gh pr create --label e2e` fires `opened` without the label, then `labeled`.
-PRV=(PR=524 GH_REPO=o/r HEAD_SHA=abc RUN_ID=2)
+PRV=(PR=524 GH_REPO=o/r)
 want true "opened: the label added after the event counts" EVENT=pull_request ACTION=opened "${PRV[@]}" 'STUB_LABELS=["e2e"]'
 want false "opened: no label now either" EVENT=pull_request ACTION=opened "${PRV[@]}" 'STUB_LABELS=["bug"]'
-want false "labeled e2e after a run that ran the e2e on the head: covered" EVENT=pull_request ACTION=labeled "${PRV[@]}" \
-  'LABELS=["e2e"]' STUB_RUNS=1 STUB_RAN=1
-summary_has "already ran the e2e"
-covered=$(env EVENT=pull_request ACTION=labeled "${PRV[@]}" 'LABELS=["e2e"]' STUB_RUNS="7 9" STUB_RAN=1 hack/e2e-decide.sh | sed -n 's/^covered=//p')
-[[ $covered == 7 ]] || { echo "FAIL: covered=<the covering run's id> is printed (got '$covered')" >&2; fail=1; }
-want true "labeled e2e after a run that skipped the e2e: runs" EVENT=pull_request ACTION=labeled "${PRV[@]}" \
-  'LABELS=["e2e"]' STUB_RUNS=1 STUB_RAN=0
-want true "labeled e2e with no other run on the head: runs" EVENT=pull_request ACTION=labeled "${PRV[@]}" 'LABELS=["e2e"]'
-want true "synchronize is never covered" EVENT=pull_request ACTION=synchronize "${PRV[@]}" 'LABELS=["e2e"]' STUB_RUNS=1 STUB_RAN=1
 want true "dispatch always runs" EVENT=workflow_dispatch
 want true "push with no green run to compare with runs" EVENT=push
 want true "push with e2e-relevant changes since the last green run" EVENT=push STUB_COVERED=abc123 STUB_FULL=0
