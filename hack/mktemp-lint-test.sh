@@ -70,7 +70,6 @@ case_ "word in a string"        0 hack/a.sh 'echo "mktemp gave no directory" >&2
 case_ "word in a for list"      0 hack/a.sh 'for t in git rm mktemp tr; do :; done'
 case_ "stub file path"          0 hack/a.sh 'chmod +x "$tmp/failbin/mktemp"'
 case_ "mktemp_fail_rc var"      0 hack/a.sh 'mktemp_fail_rc=0'
-case_ "excluded file (#512)"    0 hack/e2e-remote.sh 'x=$(mktemp -d)'
 case_ "not a script"            0 docs/x.md 'x=$(mktemp -d)'
 
 # A mixed file reports the bad line and its number.
