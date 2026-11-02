@@ -148,6 +148,8 @@ type runner struct {
 	// (internal/agentmodel).
 	model       string
 	modelSource agentmodel.Source
+	// flavor is the agent's harness flavor, set with the launch command.
+	flavor store.AgentFlavor
 
 	// vcfg and home are the run's version config and the sandbox's home generation, for
 	// handling a stuck sandbox (stuck.go).
@@ -459,12 +461,16 @@ func (r *runner) execute(ctx context.Context) error {
 	// renders that and never guesses from the model ID (ADR 0069 amendment 2026-10-29).
 	thinkMode := thinking.Of(ptype, model, format).Effective(agentmodel.ChooseThinking(agent.Thinking.String, vc.Thinking))
 	r.log.Info("the run's thinking", "model", model, "mode", string(thinkMode))
-	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker, Thinking: thinkMode, SessionID: sessionID})
+	cmd, err := launchCommand(agent.Flavor, endpoints{
+		ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker,
+		Thinking: thinkMode, SessionID: sessionID, Retry: retryPolicyOf(r.p.cfg),
+	})
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}
 	cmd = append(cmd, harnessArgs(agent.Flavor, vc)...)
 	r.vcfg = vc
+	r.flavor = agent.Flavor
 	// The gateway may not serve the model yet: a new provider's key file is still reaching the
 	// gateway pod (issue #174). The reconciler starts the sandbox meanwhile, because this run is
 	// demand for it, so the two waits overlap.
