@@ -5,6 +5,10 @@
 # may be behind its base, but must not edit, delete or rename a merged one, except an edit that
 # leaves a file listed in the lint's allowed_edits at exactly its allowed content. On a patch line
 # (base ref release/*, ADR 0085) a new migration must also not rename, drop or retype.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 lint=$(cd "$(dirname "$0")" && pwd)/migrate-lint.sh

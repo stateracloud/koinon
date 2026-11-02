@@ -590,6 +590,8 @@ jobs:
       - run: hack/notes-expiry-test.sh
       - run: hack/mktemp-lint-test.sh
       - run: hack/mktemp-lint.sh
+      - run: hack/bash5-lint-test.sh
+      - run: hack/bash5-lint.sh
       - run: hack/ship-test.sh
       - run: hack/preflight-test.sh
       - run: hack/preflight-stop-test.sh

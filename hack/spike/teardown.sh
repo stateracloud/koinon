@@ -6,6 +6,10 @@
 #
 # Not removed here (procoduck's platform, listed at the end): the openshell-spike KV mount, the
 # OpenBao policies and role, the RuntimeClass label and the Kata guest-seccomp change.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 run=0

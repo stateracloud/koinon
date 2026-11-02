@@ -16,6 +16,10 @@
 # ancestor of origin/main), so the marker is what makes the rule bite on main: it is set to the
 # minor line when that line's .0 ships, and reset to "none" in the change that opens the next
 # minor line (ADR 0085, open question on detection). Before the first final release it is "none".
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 dir=internal/db/migrations

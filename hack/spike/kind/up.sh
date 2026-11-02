@@ -4,6 +4,10 @@
 # Spike S1: single-node kind cluster with Agent Sandbox v1.0.7 and OpenShell 0.1.5
 # (Kubernetes driver, default RuntimeClass `runc`). Prints wall-clock per step.
 # Touches only the context kind-koinon-s1.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 CLUSTER=${CLUSTER:-koinon-s1}
