@@ -4,6 +4,9 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -164,7 +167,8 @@ var _ = Describe("summarize", func() {
 			{dir: "c", verdict: skipped, requires: []string{"e2e"}},
 		}
 		Expect(summarize(&out, "go-test", results)).To(Equal(0))
-		Expect(out.String()).To(ContainSubstring("opt-in suites not run here: b (openshell), c (e2e)"))
+		Expect(out.String()).To(ContainSubstring("opt-in suites not run here: c (e2e)"))
+		Expect(out.String()).To(ContainSubstring("partly run here (the specs that need them skipped): b (openshell)"))
 		Expect(out.String()).NotTo(ContainSubstring("NOT PASSED"))
 		Expect(out.String()).To(ContainSubstring("go-test verdict: ok:"))
 	})
@@ -197,5 +201,60 @@ var _ = Describe("summarize", func() {
 		})
 		Expect(code).To(Equal(1))
 		Expect(out.String()).To(ContainSubstring("FAILED"))
+	})
+})
+
+var _ = Describe("summarize, opt-in", func() {
+	It("says partly run for a suite that ran but skipped specs for an opt-in requirement", func() {
+		var out bytes.Buffer
+		r := judge("a", report(true,
+			spec(types.NodeTypeIt, types.SpecStatePassed, ""),
+			spec(types.NodeTypeIt, types.SpecStateSkipped, "koinon:requires=openshell: not set"),
+		), "", "docker,git,helm")
+		Expect(summarize(&out, "go-test", []result{r})).To(Equal(0))
+		Expect(out.String()).To(ContainSubstring("opt-in suites partly run here (the specs that need them skipped): a (openshell)"))
+		Expect(out.String()).NotTo(ContainSubstring("not run here"))
+	})
+})
+
+var _ = Describe("go test events (testenv.RequireT in a plain test)", func() {
+	write := func(lines ...string) string {
+		f := filepath.Join(GinkgoT().TempDir(), "e.gotest.jsonl")
+		Expect(os.WriteFile(f, []byte(strings.Join(lines, "\n")+"\n"), 0o600)).To(Succeed())
+		return f
+	}
+	const pkg = "github.com/stateracloud/koinon/test/chartsmoke"
+
+	It("counts a plain test skipped for helm into its suite, which is then incomplete", func() {
+		pkgs := map[string]*plainPkg{}
+		Expect(loadGoTest(write(
+			`{"Action":"run","Package":"`+pkg+`","Test":"TestChartContract"}`,
+			`{"Action":"output","Package":"`+pkg+`","Test":"TestChartContract","Output":"    contract_test.go:46: koinon:requires=helm: helm is not on PATH\n"}`,
+			`{"Action":"skip","Package":"`+pkg+`","Test":"TestChartContract"}`,
+			`{"Action":"pass","Package":"`+pkg+`","Test":"TestChartsmoke"}`,
+			`{"Action":"pass","Package":"`+pkg+`"}`,
+		), pkgs)).To(Succeed())
+		Expect(pkgs["test/chartsmoke"].requires()).To(Equal([]string{"helm"}))
+
+		// The suite itself skipped for the opt-in envtest; the plain test's helm makes it incomplete.
+		r := judgeWith("./test/chartsmoke", report(true,
+			spec(types.NodeTypeBeforeSuite, types.SpecStateSkipped, "koinon:requires=envtest: KUBEBUILDER_ASSETS is not set"),
+		), pkgs["test/chartsmoke"].requires(), "", "docker,git,helm")
+		Expect(r.verdict).To(Equal(skipped))
+		Expect(r.incomplete).To(BeTrue())
+		Expect(r.expected).To(Equal([]string{"helm"}))
+	})
+
+	It("ignores a skip that names no requirement", func() {
+		pkgs := map[string]*plainPkg{}
+		Expect(loadGoTest(write(
+			`{"Action":"output","Package":"`+pkg+`","Test":"TestX","Output":"    x_test.go:1: short mode\n"}`,
+			`{"Action":"skip","Package":"`+pkg+`","Test":"TestX"}`,
+		), pkgs)).To(Succeed())
+		Expect(pkgs["test/chartsmoke"].requires()).To(BeEmpty())
+	})
+
+	It("rejects a file that is not a go test event stream", func() {
+		Expect(loadGoTest(write("not json"), map[string]*plainPkg{})).NotTo(Succeed())
 	})
 })

@@ -35,7 +35,10 @@ build-web: ## Build the web UI
 	cd web && $(PNPM) build
 
 .PHONY: test
-test: test-go test-web ## Run all unit tests
+test: ## Run all unit tests; the web tests run even when the Go run failed or was incomplete (exit 3)
+	@rc=0; hack/go-test.sh || rc=$$?; \
+	$(MAKE) --no-print-directory test-web || rc=1; \
+	exit $$rc
 
 .PHONY: test-go
 test-go: ## Run Go tests like CI (Postgres tests need Docker); test/flavors needs images, see test-flavors

@@ -69,3 +69,20 @@ if out=$(go run ./hack/testverdict -reports "$d" ./internal/runoutcome 2>&1); th
 fi
 grep -q 'NOT RUN' <<<"$out" || { echo "$out"; echo "FAIL: testverdict does not report a suite without a report as NOT RUN"; exit 1; }
 echo "ok: skipped suites are SKIPPED, KOINON_REQUIRE fails them, a missing report is NOT RUN"
+
+# A package argument go list rejects must fail the run, not leave an empty run that exits 0.
+d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+if REPORT_DIR=$d hack/go-test.sh ./internal/no-such-package >/dev/null 2>&1; then
+	echo "FAIL: go-test.sh passed a package that go list rejects"; exit 1
+fi
+echo "ok: a failing go list fails the run"
+
+# A plain test that skips through testenv.RequireT is seen through go test's events: the chart
+# contract test (a plain test in the chartsmoke suite's package) without helm makes the run
+# incomplete, even though the suite's own specs skip for the opt-in envtest.
+d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+rc=0
+out=$(env -u KUBEBUILDER_ASSETS HELM=koinon-no-such-helm REPORT_DIR="$d" hack/go-test.sh ./test/chartsmoke 2>&1) || rc=$?
+[[ $rc == 3 ]] || { echo "$out" | tail -20; echo "FAIL: chart contract test without helm: exit $rc, want 3 (incomplete)"; exit 1; }
+grep -q 'INCOMPLETE (missing helm)' <<<"$out" || { echo "$out" | tail -20; echo "FAIL: the verdict does not name helm"; exit 1; }
+echo "ok: a plain test skipped for an expected requirement makes the run incomplete"
