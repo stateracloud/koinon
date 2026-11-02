@@ -12,7 +12,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"08a20d3ca69ca57a"'
+      koinon.config: '"afaebe87d578efc4"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -44,7 +44,7 @@ llm:
             agent: acme/triage
             org: acme
           allowedModels: []
-        - keyHash: sha256:dc6591289dd08064de79191b2bc6d86a3a0591260dd11c5e969edd79d7792048
+        - keyHash: sha256:0f00a6dd1c2226793524aa8b88a2996198127fd4629ccc4b797dd93f7719e0e3
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -56,6 +56,9 @@ llm:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
         set:
           x-koinon-org: default(apiKey.org, "")
+      response:
+        set:
+          x-should-retry: '(response.code == 403 || (response.code >= 400 && response.code < 500 && default(proxy.upstreamDuration, "") == "")) ? "false" : response.headers["x-should-retry"]'
   models: []
 mcp:
   failureMode: failOpen
@@ -84,6 +87,9 @@ mcp:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id", "user-agent"])
         set:
           x-koinon-agent: apiKey.agent
+      response:
+        set:
+          x-should-retry: '(response.code == 403 || (response.code >= 400 && response.code < 500 && default(proxy.upstreamDuration, "") == "")) ? "false" : response.headers["x-should-retry"]'
   targets:
     - name: github
       mcp:

@@ -316,10 +316,17 @@ func (b *builder) gatewayObjects() {
 				"mode":              "Strict",
 				"configMapSelector": map[string]any{"matchLabels": map[string]any{LabelKeys: name}},
 			},
-			"transformation": map[string]any{"request": map[string]any{"set": []any{
-				// set overwrites whatever the client sent.
-				map[string]any{"name": gateway.OrgHeader, "value": `default(apiKey.org, "")`},
-			}}},
+			"transformation": map[string]any{
+				"request": map[string]any{"set": []any{
+					// set overwrites whatever the client sent.
+					map[string]any{"name": gateway.OrgHeader, "value": `default(apiKey.org, "")`},
+				}},
+				// The gateway's own refusals (401, 403, 404, 429) and a provider's 403 are final: no
+				// layer retries them (gateway.DoNotRetryCEL, ADR 0056 amendment 2026-11-01, #342).
+				"response": map[string]any{"set": []any{
+					map[string]any{"name": gateway.DoNotRetryHeader, "value": gateway.DoNotRetryCEL},
+				}},
+			},
 		},
 	}, nil, nil)
 

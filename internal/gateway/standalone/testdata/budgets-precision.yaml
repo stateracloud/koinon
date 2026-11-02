@@ -14,7 +14,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"4bd2e48bbe97757d"'
+      koinon.config: '"b6355c8986a75656"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -82,7 +82,7 @@ llm:
               window:
                 rolling: 24h
               onBudgetExceeded: Block
-        - keyHash: sha256:a40e2460ca4ee0d65d886dd02ff49dc500e1e40cf73e058c300ba51442b94300
+        - keyHash: sha256:796496a46a6399efb260bdd57f24318483c798f8e18186989130a2722089840e
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -102,4 +102,7 @@ llm:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
         set:
           x-koinon-org: default(apiKey.org, "")
+      response:
+        set:
+          x-should-retry: '(response.code == 403 || (response.code >= 400 && response.code < 500 && default(proxy.upstreamDuration, "") == "")) ? "false" : response.headers["x-should-retry"]'
   models: []
