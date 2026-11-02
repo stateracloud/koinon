@@ -216,6 +216,16 @@ expect "cancelled decide and red e2e result with no live run: fails" 1 "FAILED d
 FAILED e2e result (run 41261362803)
 REQUIRED e2e result failed"
 
+# All green, but the `e2e` label dispatched an e2e-kind run on the head that has not created its
+# checks yet: not final until it has.
+er1=$(crw "e2e result" SUCCESS 41261362803 2026-11-01T10:00:30Z)
+er2=$(crw "e2e result" SUCCESS 41265167595 2026-11-01T10:40:00Z)
+seq_set "$(prh "$lint_ok,$er1")" "$(prh "$lint_ok,$er1,$er2")"
+printf '41265167595\n\n' >"$FAKE_DIR/runs"
+run 7 --checks --require "e2e result" --interval 0
+expect "all green while a dispatched e2e-kind run is queued: waits" 0 "waiting for e2e-kind run 41265167595 on abc1234
+checks 2/2 green"
+
 usage_line="usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK] [--timeout DURATION] [--interval SECONDS]"
 e2e_ok=$(cr "e2e result" COMPLETED SUCCESS 14)
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"

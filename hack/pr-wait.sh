@@ -17,7 +17,8 @@
 #              progress (whose jobs may not exist yet, #468) is waited for too: `waiting for e2e-kind run <id>`;
 #              so are failed or cancelled checks of an earlier e2e-kind run on the head (its `decide`
 #              cancelled, its `e2e result` red). Checks of e2e-kind count by their newest run, like
-#              required ones.
+#              required ones. All green is not final while an e2e-kind run on the head is queued or
+#              in progress either (the `e2e` label dispatches one, whose `e2e result` comes last).
 #              Otherwise, if the newest is skipped or cancelled, the next line suggests
 #              `gh workflow run e2e-kind.yml --ref <branch>`.
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
@@ -163,17 +164,18 @@ while :; do
     if [ -n "$live" ]; then
       emit "waiting for e2e-kind run $live on ${head:0:7}"
     elif [ "$total" -gt 0 ] && [ -z "$pending" ]; then
-      if [ "$mode" = checks ] && [ ${#required[@]} -gt 0 ]; then
+      # Every check has finished, but an e2e-kind run on the head that has not created its jobs yet
+      # (queued; or dispatched by the `e2e` label, #468) brings newer ones: wait for it.
+      [ -z "$head" ] || live=$(live_e2e "$head")
+      if [ -n "$live" ]; then
+        emit "waiting for e2e-kind run $live on ${head:0:7}"
+      elif [ "$mode" = checks ] && [ ${#required[@]} -gt 0 ]; then
         whys=()
         for name in "${required[@]}"; do
           why=$(jqn -r --arg n "$name" "$norm | [.[] | select(.name == \$n)] | if length == 0 then \"missing\" elif any(.[]; .skipped) then \"skipped\" else \"\" end" <<<"$json")
           [ -z "$why" ] || whys+=("$name"$'\t'"$why")
         done
-        # A required check that is missing or skipped may still come from a live e2e-kind run.
-        [ ${#whys[@]} -eq 0 ] || [ -z "$head" ] || live=$(live_e2e "$head")
-        if [ -n "$live" ]; then
-          emit "waiting for e2e-kind run $live on ${head:0:7}"
-        elif [ ${#whys[@]} -gt 0 ]; then
+        if [ ${#whys[@]} -gt 0 ]; then
           for w in "${whys[@]}"; do
             name=${w%%$'\t'*} why=${w#*$'\t'}
             echo "REQUIRED $name $why"
