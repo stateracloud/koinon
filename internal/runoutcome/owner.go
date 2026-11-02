@@ -15,7 +15,7 @@
 //  3. the task ends after the reply (ADR 0065);
 //  4. the source seq is only incremented under the Owner's mutex.
 //
-// A write by a stale epoch matches no row and writes nothing (ADR 0082): the verb fences the Owner
+// A write by a stale epoch matches no row and writes nothing (ADR 0030): the verb fences the Owner
 // and returns ErrFenced.
 package runoutcome
 
