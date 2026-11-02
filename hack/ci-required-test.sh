@@ -6,8 +6,10 @@
 # `name:` field, else the job key), must be
 #   - listed as required,
 #   - listed as `advisory` (an explicit, short list), or
-#   - a part of a required job: named in the `needs` of a required job, transitively (the parts of the
-#     `go` and `web` gates, and `changes`).
+#   - a part of an aggregator: named in the `needs` of a job listed as `aggregator` (the `go` and `web`
+#     gates and their parts). An aggregator reads `needs.*.result`, so a failed or skipped part fails
+#     it. Needing a job from any other required job is no exemption: `if:` without a status function
+#     implies success(), so a failing needed job would make that required job skip, which is green.
 # Every required name (not `external`) must have a job. So a new job cannot be silently advisory, and
 # a required name cannot outlive its job. Matrix jobs are not supported (a matrix fans one job out
 # into several check names) and fail the test.
@@ -15,7 +17,8 @@
 # Usage:
 #   hack/ci-required-test.sh              the checks above, plus the script's own negative cases
 #   hack/ci-required-test.sh --ruleset    diff the list against the live `main` ruleset (gh api); prints
-#                                         SKIPPED and exits 0 when gh is missing or not authenticated
+#                                         SKIPPED and exits 0 when gh is missing, not logged in
+#                                         (auth) or cannot reach GitHub (network)
 # Environment: CI_YML and CI_REQUIRED override the two files (used by the negative cases).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -55,13 +58,14 @@ jobs_of() {
 # check YML LIST: print problems, return 1 when there are any.
 check() {
   local yml=$1 list=$2 problems=0 line key name needs matrix n
-  local -A required=() advisory=() jobname=() jobneeds=() isjob=()
+  local -A required=() advisory=() aggregator=() jobname=() jobneeds=() isjob=()
   while IFS= read -r line; do
     line=${line%%#*}
     line=$(sed -e 's/[[:space:]]*$//' -e 's/^[[:space:]]*//' <<<"$line")
     [[ -n $line ]] || continue
     case $line in
       advisory\ *) advisory[${line#advisory }]=1 ;;
+      aggregator\ *) aggregator[${line#aggregator }]=1; required[${line#aggregator }]=1 ;;
       external\ *) : ;; # produced by another workflow
       *) required[$line]=1 ;;
     esac
@@ -79,19 +83,20 @@ check() {
   done < <(jobs_of "$yml")
   [[ ${#jobname[@]} -gt 0 ]] || { echo "FAIL: no jobs found in $yml"; return 1; }
 
-  # Parts: jobs a required job depends on, transitively.
+  # Parts: the jobs an aggregator needs. The aggregator must check every result.
   local -A part=()
-  local -a queue=()
   for key in "${!jobname[@]}"; do
-    if [[ -n ${required[${jobname[$key]}]:-} ]]; then queue+=("$key"); fi
-  done
-  while [[ ${#queue[@]} -gt 0 ]]; do
-    key=${queue[0]}; queue=("${queue[@]:1}")
+    [[ -n ${aggregator[${jobname[$key]}]:-} ]] || continue
+    if ! awk -v k="  $key:" '$0 == k { on = 1; next } on && /^  [A-Za-z0-9_-]+:[ ]*$/ { on = 0 } on' "$yml" | grep -qF 'needs.*.result'; then
+      echo "FAIL: aggregator '${jobname[$key]}' does not read needs.*.result, so it does not gate its parts"
+      problems=1
+    fi
     for n in ${jobneeds[$key]}; do
-      if [[ -z ${part[$n]:-} && -n ${jobname[$n]:-} ]]; then
-        part[$n]=1; queue+=("$n")
-      fi
+      if [[ -n ${jobname[$n]:-} ]]; then part[$n]=1; fi
     done
+  done
+  for name in "${!aggregator[@]}"; do
+    if [[ -z ${isjob[$name]:-} ]]; then echo "FAIL: aggregator '$name' has no job"; problems=1; fi
   done
 
   for key in "${!jobname[@]}"; do
@@ -125,21 +130,22 @@ contexts() {
     line=${line%%#*}
     line=$(sed -e 's/[[:space:]]*$//' -e 's/^[[:space:]]*//' <<<"$line")
     [[ -n $line && $line != advisory\ * ]] || continue
-    echo "${line#external }"
+    line=${line#external }
+    echo "${line#aggregator }"
   done <"$1" | sort -u
 }
 
 ruleset() {
-  command -v gh >/dev/null 2>&1 || { echo "SKIPPED: gh is not installed; the list was not compared with the ruleset"; return 0; }
-  gh auth status >/dev/null 2>&1 || { echo "SKIPPED: gh is not authenticated; the list was not compared with the ruleset"; return 0; }
+  command -v gh >/dev/null 2>&1 || { echo "SKIPPED (auth): gh is not installed; the list was not compared with the ruleset"; return 0; }
+  gh auth status >/dev/null 2>&1 || { echo "SKIPPED (auth): gh is not logged in; the list was not compared with the ruleset"; return 0; }
   local repo ids id live want rule found=0
   repo=${CI_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)} ||
-    { echo "SKIPPED: gh could not name the repository (offline?)"; return 0; }
+    { echo "SKIPPED (network): gh could not name the repository, offline or not a GitHub checkout"; return 0; }
   ids=$(gh api "repos/$repo/rulesets" --jq '.[] | select(.target == "branch") | .id' 2>/dev/null) ||
-    { echo "SKIPPED: gh api repos/$repo/rulesets failed (offline or no access)"; return 0; }
+    { echo "SKIPPED (network): gh api repos/$repo/rulesets failed, offline or no access"; return 0; }
   for id in $ids; do
     rule=$(gh api "repos/$repo/rulesets/$id" 2>/dev/null) ||
-      { echo "SKIPPED: gh api repos/$repo/rulesets/$id failed"; return 0; }
+      { echo "SKIPPED (network): gh api repos/$repo/rulesets/$id failed"; return 0; }
     [[ $(jq -r .name <<<"$rule") == main ]] || continue
     found=1
     live=$(jq -r '[.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | .[]' <<<"$rule" | sort -u)
@@ -162,7 +168,7 @@ if [[ ${1:-} == --ruleset ]]; then
 fi
 
 check "$yml" "$list"
-echo "ok: every job of $(basename "$yml") is required, advisory or a part of a required job; every required name has a job"
+echo "ok: every job of $(basename "$yml") is required, advisory or a part of an aggregator; every required name has a job"
 
 # Negative cases, on small fixtures: the check has to fail where it should.
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/ci-required-test.XXXXXX")
@@ -182,6 +188,14 @@ jobs:
     name: the gate
     needs: [changes, part]
     runs-on: x
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: echo "$RESULTS"
+  docs:
+    name: docs
+    needs: [changes]
+    runs-on: x
   plain:
     runs-on: x
   adv:
@@ -189,7 +203,8 @@ jobs:
     runs-on: x
 EOF
 cat >"$tmp/ok.txt" <<'EOF'
-the gate
+aggregator the gate
+docs
 plain # comment
 external elsewhere
 advisory advisory one
@@ -201,10 +216,20 @@ expect_fail() { # description, list content, expected text
   if out=$(check "$tmp/ci.yml" "$tmp/bad.txt" 2>&1); then echo "FAIL: $1: the check passed"; exit 1; fi
   grep -qF "$3" <<<"$out" || { echo "FAIL: $1: expected '$3' in:"; echo "$out"; exit 1; }
 }
-expect_fail "job neither required nor advisory" $'the gate\nadvisory advisory one' "'plain' (plain) is neither"
-expect_fail "required name without a job" $'the gate\nplain\nghost\nadvisory advisory one' "required check 'ghost' has no job"
-expect_fail "advisory name without a job" $'the gate\nplain\nadvisory advisory one\nadvisory ghost' "advisory job 'ghost' does not exist"
-expect_fail "advisory job not listed" $'the gate\nplain' "'advisory one' (adv) is neither"
+expect_fail "job neither required nor advisory" $'aggregator the gate\ndocs\nadvisory advisory one' "'plain' (plain) is neither"
+expect_fail "required name without a job" $'aggregator the gate\ndocs\nplain\nghost\nadvisory advisory one' "required check 'ghost' has no job"
+expect_fail "advisory name without a job" $'aggregator the gate\ndocs\nplain\nadvisory advisory one\nadvisory ghost' "advisory job 'ghost' does not exist"
+expect_fail "advisory job not listed" $'aggregator the gate\ndocs\nplain' "'advisory one' (adv) is neither"
+# The reviewer's repro: a required job needs a hidden job that nothing aggregates; if hidden fails,
+# docs is skipped, which is green.
+sed -e 's/^    needs: \[changes\]$/    needs: [changes, hidden]/' -e 's/^  plain:$/  hidden:\n    runs-on: x\n    steps:\n      - run: "false"\n  plain:/' "$tmp/ci.yml" >"$tmp/hidden.yml"
+cp "$tmp/ok.txt" "$tmp/hidden.txt"
+if out=$(check "$tmp/hidden.yml" "$tmp/hidden.txt" 2>&1); then echo "FAIL: a hidden need of a required job passed"; exit 1; fi
+grep -qF "job 'hidden' (hidden) is neither" <<<"$out" || { echo "FAIL: hidden need: wrong message: $out"; exit 1; }
+# An aggregator that does not read the results is not one.
+sed -e '/needs.\*.result/d' -e 's/RESULTS:.*//' "$tmp/ci.yml" >"$tmp/noagg.yml"
+if out=$(check "$tmp/noagg.yml" "$tmp/ok.txt" 2>&1); then echo "FAIL: an aggregator without needs.*.result passed"; exit 1; fi
+grep -qF "does not read needs" <<<"$out" || { echo "FAIL: noagg: wrong message: $out"; exit 1; }
 printf 'jobs:\n  m:\n    name: m\n    strategy:\n      matrix:\n        a: [1]\n' >"$tmp/m.yml"
 printf 'm\n' >"$tmp/m.txt"
 if check "$tmp/m.yml" "$tmp/m.txt" >/dev/null 2>&1; then echo "FAIL: a matrix job passed"; exit 1; fi
