@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Health, McpServerService, Tier, type Server, type Tool } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import { useMcpActions, type McpActions } from '@/hooks/use-mcp-actions'
+import { closeOnly } from '@/lib/editing'
 import { useOrg } from '@/lib/org-context'
 import { availabilityMinutes, formatTime } from '@/lib/providers'
 import { healthLabel, serverDeletable, serverEditable, sourceLabel, suggestsAuto, summarizeTools, summaryText, tierExplanation, tiers, toolsOf, transportLabel } from '@/lib/mcp-servers'
@@ -57,7 +58,7 @@ function ServersContent() {
         A server is a remote MCP server your agents can call through the gateway, such as a docs or issue-tracker server. Koinon keeps its credential encrypted and hands it only to the gateway; sandboxes never see it. Servers can also be declared with a Kubernetes Secret, which are read-only here (their tools&apos; tiers can still be set). The tools of a new server start in the Ask tier. A new or changed credential takes about {availabilityMinutes} minutes to reach the gateway.
       </p>
       <p className="text-muted-foreground text-sm">{tierExplanation} A server that stops answering is Unhealthy and its tools are withdrawn from agents until it recovers.</p>
-      {editing?.kind === 'new' && <ServerForm actions={actions} onDone={() => setEditing(undefined)} onSaved={saved} />}
+      {editing?.kind === 'new' && <ServerForm actions={actions} onDone={closeOnly(setEditing, { kind: 'new' })} onSaved={saved} />}
       {refused && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{refused}</AlertDescription>
@@ -86,7 +87,7 @@ function ServersContent() {
                 tools={toolsOf(allTools, s.id)}
                 editing={editing?.kind === 'server' && editing.id === s.id}
                 edit={() => setEditing({ kind: 'server', id: s.id })}
-                done={() => setEditing(undefined)}
+                done={closeOnly(setEditing, { kind: 'server', id: s.id })}
                 actions={actions}
                 onSaved={saved}
                 onNotice={(m) => {
