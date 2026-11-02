@@ -46,6 +46,7 @@ var _ = Describe("prompt caching of the default price list", func() {
 			marker := mode.Marker()
 			cmd, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{
 				ModelBaseURL: "http://gw.test/v1", Model: name, MCPURL: "http://gw.test/mcp", Format: format, CacheMarker: marker,
+				Retry: agentd.DefaultRetryPolicy(),
 			})
 			Expect(err).NotTo(HaveOccurred(), r.Entry.ID)
 			switch mode {
@@ -107,11 +108,14 @@ var _ = Describe("prompt caching of the default price list", func() {
 	It("launches a direct Anthropic model on the anthropic entry", func() {
 		cmd, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{
 			ModelBaseURL: "http://gw.test/v1", Model: "claude-haiku-5-5", MCPURL: "http://gw.test/mcp", Format: modelformat.Anthropic,
+			Retry: agentd.DefaultRetryPolicy(),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cmd).To(Equal([]string{
 			"/usr/local/bin/koinon-opencode", "--model-base-url", "http://gw.test/v1", "--model", "claude-haiku-5-5",
-			"--mcp-url", "http://gw.test/mcp", "--model-format", "anthropic",
+			"--mcp-url", "http://gw.test/mcp",
+			"--model-tries", "3", "--model-retry-backoff-ms", "1000", "--model-max-retry-after-ms", "60000",
+			"--model-format", "anthropic",
 		}))
 		Expect(agentd.ModelOption(store.AgentFlavorOpencode, modelformat.Anthropic, "claude-haiku-5-5")).To(Equal("koinon-anthropic/claude-haiku-5-5"))
 	})
@@ -120,6 +124,7 @@ var _ = Describe("prompt caching of the default price list", func() {
 		for _, mode := range thinking.Modes() {
 			cmd, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{
 				ModelBaseURL: "http://gw.test/v1", Model: "claude-haiku-5-5", MCPURL: "http://gw.test/mcp", Format: modelformat.Anthropic, Thinking: mode,
+				Retry: agentd.DefaultRetryPolicy(),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cmd[len(cmd)-2:]).To(Equal([]string{"--thinking", string(mode)}))
@@ -145,12 +150,12 @@ var _ = Describe("prompt caching of the default price list", func() {
 	})
 
 	It("refuses a format the flavor has no entry for", func() {
-		_, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{Format: "gemini"})
+		_, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{Format: "gemini", Retry: agentd.DefaultRetryPolicy()})
 		Expect(err).To(MatchError(ContainSubstring("no provider entry")))
 	})
 
 	It("passes the run ID as --session-id, and nothing without one", func() {
-		e := agentd.Endpoints{ModelBaseURL: "http://gw.test/v1", Model: "m", MCPURL: "http://gw.test/mcp", SessionID: "run-1"}
+		e := agentd.Endpoints{ModelBaseURL: "http://gw.test/v1", Model: "m", MCPURL: "http://gw.test/mcp", SessionID: "run-1", Retry: agentd.DefaultRetryPolicy()}
 		cmd, err := agentd.LaunchCommand(store.AgentFlavorOpencode, e)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cmd[len(cmd)-2:]).To(Equal([]string{"--session-id", "run-1"}))
@@ -161,7 +166,7 @@ var _ = Describe("prompt caching of the default price list", func() {
 	})
 
 	It("refuses a marker the flavor has no switch for", func() {
-		_, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{CacheMarker: "gemini"})
+		_, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{CacheMarker: "gemini", Retry: agentd.DefaultRetryPolicy()})
 		Expect(err).To(MatchError(ContainSubstring("cannot send")))
 	})
 })

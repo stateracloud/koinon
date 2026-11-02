@@ -111,7 +111,8 @@ var _ = Describe("Draining on stop", func() {
 		e.harness.modelFault = modelCaller(ts.URL)
 
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
-		stop := e.pool("agentd-a", func(c *agentd.Config) { c.DrainDeadline = time.Minute })
+		// agentd's own retry layer, the one for a flavor whose harness does not retry.
+		stop := e.pool("agentd-a", agentd.OwnRetryLayer, func(c *agentd.Config) { c.DrainDeadline = time.Minute })
 		Eventually(func() int { return len(srv.Requests()) }).WithTimeout(15 * time.Second).Should(BeNumerically(">=", 1))
 		Eventually(func() bool {
 			for _, ev := range events(ctx, r) {

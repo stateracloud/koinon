@@ -25,7 +25,9 @@
 // too long" (Anthropic); overloadedMidStream ends a stream with an overloaded error event after
 // about half the events; lockstep holds each request until the test calls [Server.Release]
 // ([Server.Waiting] counts the held ones; lockstep works only in-process, because the
-// binary has no release endpoint). Unknown models get HTTP 404 with the API's native error body.
+// binary has no release endpoint); refuse answers the first N requests with refuseStatus (a client
+// error, 400 by default), and doNotRetry marks every scripted fault with x-should-retry: false.
+// Unknown models get HTTP 404 with the API's native error body.
 //
 // Scripts load from YAML files ([LoadDir], [ParseScript]) or are registered from Go
 // ([Server.Register]). The server is an [http.Handler], so tests run it in-process with
