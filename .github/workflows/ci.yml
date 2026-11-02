@@ -2,7 +2,10 @@
 name: ci
 
 on:
+  # ready_for_review is not a default type: it runs the full suite on the same head when a draft is
+  # marked ready (#593).
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
@@ -15,13 +18,29 @@ concurrency:
 
 jobs:
   # Which parts of the tree a pull request touches, so the slow jobs run only when they can be
-  # affected (Actions minutes are capped). Pushes to main run everything. A job skipped by its
-  # `if:` reports success, so required checks still pass when it does not apply.
+  # affected (Actions minutes are capped). Pushes to main run everything, except when the merge
+  # commit is a pull request head that already passed. A job skipped by its `if:` reports success,
+  # so required checks still pass when it does not apply.
+  #
+  # hack/ci-skip-heavy.sh also switches every heavy output below to false (the go, web, generate,
+  # chart, chartsmoke, docs, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (#593; `go` and `web` then FAIL on
+  # purpose, "not tested", so a draft never leaves a green `go` behind; marking it ready runs
+  # everything on the same head), and a push to main whose merge tree equals a pull request head whose required checks
+  # passed (#595). The fast jobs (proto, migrations, adr-lint, claim-tests, lint-shell, scripts) and
+  # flavor-publish always run. Read the script's header before changing this.
   changes:
     name: changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
+    # Read rights only: the draft state of the pull request and the check runs of its head.
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
     outputs:
+      skip: ${{ steps.skip.outputs.skip }}
+      reason: ${{ steps.skip.outputs.reason }}
+      flavors_publish: ${{ steps.paths.outputs.flavors_publish }}
       go: ${{ steps.paths.outputs.go }}
       web: ${{ steps.paths.outputs.web }}
       generate: ${{ steps.paths.outputs.generate }}
@@ -46,10 +65,26 @@ jobs:
           key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+      - id: skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+        run: |
+          hack/ci-skip-heavy.sh decide >"$RUNNER_TEMP/skip.txt"
+          tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/skip.txt"
       - id: paths
         env:
           BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
-        run: hack/ci-changes.sh "$BASE" >>"$GITHUB_OUTPUT"
+          SKIP: ${{ steps.skip.outputs.skip }}
+        run: |
+          hack/ci-changes.sh "$BASE" >"$RUNNER_TEMP/changes.txt"
+          # No pipe: a failing step must fail the job, not leave outputs empty (empty reads as "nothing to gate").
+          hack/ci-skip-heavy.sh apply <"$RUNNER_TEMP/changes.txt" >"$RUNNER_TEMP/outputs.txt"
+          tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/outputs.txt"
 
   # The Go checks run as parallel jobs (#217). They share one module and build cache, keyed on the
   # Go version and go.sum. Only go-test saves it, because it compiles the most; the others restore
@@ -206,16 +241,28 @@ jobs:
   go:
     name: go
     needs: [changes, go-tidy, go-lint, go-vet, go-test, go-race]
-    if: ${{ !cancelled() }}
+    # Not on a push to main whose heavy jobs were switched off (#595): the check then reports skipped
+    # and hack/release-gate.sh reads the merged pull request's head instead.
+    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - env:
           CHANGES: ${{ needs.changes.result }}
           GO: ${{ needs.changes.outputs.go }}
+          SKIP: ${{ needs.changes.outputs.skip }}
+          REASON: ${{ needs.changes.outputs.reason }}
+          EVENT: ${{ github.event_name }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
-          [[ $GO == true ]] || { echo "no Go changes: nothing to gate"; exit 0; }
+          # A draft was not tested: red on purpose (neutral and skipped both count as passing). The newest
+          # `go` check run on a head must never be a vacuous success while the ready run is still
+          # going (#593). Drafts cannot merge; marking ready runs everything on the same head.
+          if [[ $SKIP == true && $EVENT == pull_request ]]; then
+            echo "::error::draft pull request: not tested ($REASON); mark it ready for review to run the Go checks"
+            exit 1
+          fi
+          [[ $GO == true ]] || { echo "no Go changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
           for r in $RESULTS; do
             [[ $r == success ]] || { echo "::error::a Go job finished $r (results: $RESULTS)"; exit 1; }
           done
@@ -356,16 +403,28 @@ jobs:
   web:
     name: web
     needs: [changes, web-lint, web-test, web-e2e]
-    if: ${{ !cancelled() }}
+    # Not on a push to main whose heavy jobs were switched off (#595): the check then reports skipped
+    # and hack/release-gate.sh reads the merged pull request's head instead.
+    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - env:
           CHANGES: ${{ needs.changes.result }}
           WEB: ${{ needs.changes.outputs.web }}
+          SKIP: ${{ needs.changes.outputs.skip }}
+          REASON: ${{ needs.changes.outputs.reason }}
+          EVENT: ${{ github.event_name }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
-          [[ $WEB == true ]] || { echo "no web changes: nothing to gate"; exit 0; }
+          # A draft was not tested: red on purpose (neutral and skipped both count as passing). The newest
+          # `web` check run on a head must never be a vacuous success while the ready run is still
+          # going (#593). Drafts cannot merge; marking ready runs everything on the same head.
+          if [[ $SKIP == true && $EVENT == pull_request ]]; then
+            echo "::error::draft pull request: not tested ($REASON); mark it ready for review to run the web checks"
+            exit 1
+          fi
+          [[ $WEB == true ]] || { echo "no web changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
           for r in $RESULTS; do
             [[ $r == success ]] || { echo "::error::a web job finished $r (results: $RESULTS)"; exit 1; }
           done
@@ -615,6 +674,7 @@ jobs:
       - run: hack/release-gate-test.sh
       - run: hack/dep-age-check-test.sh
       - run: hack/ci-changes-test.sh
+      - run: hack/ci-skip-heavy-test.sh
 
   # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
@@ -656,7 +716,10 @@ jobs:
   flavor-publish:
     name: flavor-publish
     needs: [changes, flavors]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.flavors == 'true'
+    # Always runs on main when the flavors changed, also when the flavors job was switched off because
+    # the merge tree is a tested pull request head (#595): publishing is not a test. A failed or
+    # cancelled flavors job still stops it. flavors_publish is the value before the switch.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.flavors_publish == 'true' && (needs.flavors.result == 'success' || needs.flavors.result == 'skipped') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     permissions:
