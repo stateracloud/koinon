@@ -65,6 +65,11 @@ Instructions for coding agents working on Koinon.
   naming the merge (or the suspects): fix forward within 2 hours, otherwise revert it. RC and
   release tags are cut only from a commit whose `quickstart` job concluded success
   (`hack/release-gate.sh` checks it; dispatch e2e-kind on the commit if the batched run skipped it).
+- Required status checks: `hack/ci-required.txt` is the list the `main` ruleset mirrors; `flavors` is
+  the only advisory job on pull requests (`flavor-publish` is advisory and push-only). `hack/ci-required-test.sh` (CI job `scripts`) fails when a `ci.yml` job is
+  neither required nor advisory; `hack/ci-required-test.sh --ruleset` diffs the list with the live
+  ruleset. A new job goes into the list in the same PR, and a required job must report on every
+  pull request and push (a job-level `if:` skip reports success and is fine; only a workflow-level `paths:` filter leaves a check absent).
 - `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
 - Before pushing: `gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" .`. CI scans
   every commit of a pull request, so a leak fixed in a later commit still fails.
