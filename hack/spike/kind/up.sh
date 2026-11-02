@@ -29,7 +29,7 @@ MS_VERSION=v0.9.0
 
 here="$(cd "$(dirname "$0")" && pwd)"
 K=(kubectl --context "$CTX")
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/up.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 t0=$(date +%s)

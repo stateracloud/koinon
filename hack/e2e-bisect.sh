@@ -170,7 +170,7 @@ status="" final_title="$title"
 if ((${#candidates[@]} == 0)); then
   status="No merge since the last green run changed anything the e2e depends on: suspect a flake or the environment (runner, an upstream image or a download). Re-run the e2e on main."
 else
-  wd=$(mktemp -d)
+  wd=$(mktemp -d "${TMPDIR:-/tmp}/e2e-bisect.XXXXXX")
   for c in "${candidates[@]}"; do
     if [[ $dry == 1 ]]; then
       echo "would dispatch: gh workflow run e2e-kind.yml -f commit=$c -f bisect_id=$RUN_ID"

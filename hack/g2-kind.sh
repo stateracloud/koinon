@@ -20,7 +20,7 @@ KEEP=${KEEP:-0}
 GATEWAY_CRDS_VERSION=v1.4.0
 GATEWAY_CRDS_SHA256=6a4029e661446d64add866a00ecdc40c14219b68777ab614c5cdaac0adb481f1
 AGENTGATEWAY_VERSION=v1.7.0
-OUT=${OUT:-$(mktemp -d)}
+OUT=${OUT:-$(mktemp -d "${TMPDIR:-/tmp}/g2-kind.XXXXXX")}
 mkdir -p "$OUT"
 export KUBECONFIG="$OUT/kubeconfig"
 root="$(cd "$(dirname "$0")/.." && pwd)"

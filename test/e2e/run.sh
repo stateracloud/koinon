@@ -55,7 +55,7 @@ done
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 here="$root/test/e2e"
-OUT=${OUT:-$(mktemp -d)}
+OUT=${OUT:-$(mktemp -d "${TMPDIR:-/tmp}/run.XXXXXX")}
 mkdir -p "$OUT"
 K=(kubectl --context "$CTX")
 cd "$root"

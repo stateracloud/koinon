@@ -4,7 +4,7 @@
 # Tests hack/e2e-label.sh (the e2e-label workflow's dispatcher) with a stub gh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/e2e-label-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 # Stub gh. The runs listing applies the script's own --jq filter to $FAKE/runs.N.json for the Nth

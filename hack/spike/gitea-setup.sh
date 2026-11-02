@@ -19,7 +19,7 @@ ADMIN=$(security find-generic-password -s gitea-kionon -w)
 
 # api METHOD PATH [JSON] prints the HTTP status; the body goes to $body. Statuses are
 # captured in $st first: bash 3.2 (macOS) mangles escaped quotes inside "$(...)".
-body=$(mktemp)
+body=$(mktemp "${TMPDIR:-/tmp}/gitea-setup.XXXXXX")
 trap 'rm -f "$body"' EXIT
 api() {
   local data=()

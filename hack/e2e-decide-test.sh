@@ -4,7 +4,7 @@
 # Tests hack/e2e-decide.sh with a stub rule script and a stub gh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/e2e-decide-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 # Stub rule: STUB_FORCED / STUB_FULL are the exit codes for --forced-only and the full rule.
