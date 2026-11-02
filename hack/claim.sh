@@ -39,7 +39,7 @@
 #   ^[a-z0-9][a-z0-9-]{0,15}$. With a lane the holder is `<login>/<host>/<session>#<L>`; without
 #   one it is `<login>/<host>/<session>`, which is its own lane. A claim is yours only under the
 #   lane that took it: a lane never beats, reviews or releases another lane's claim. The human cap
-#   (default 4) still counts every claim of the human, lanes or not. Subagents still never call
+#   (default 8) still counts every claim of the human, lanes or not. Subagents still never call
 #   claim.sh: the parent takes one lane per subagent and does all the bookkeeping. --human claims
 #   have no lane.
 #
@@ -63,7 +63,7 @@
 #                               worktree's git dir. Claude subagents share the parent's id: only the
 #                               parent takes claims. Other agents must export KOINON_AGENT_SESSION.
 #   KOINON_CLAIM_LEASE_SECONDS (7200), _HUMAN_LEASE_SECONDS (259200), _GRACE_SECONDS (900),
-#   _HUMAN_CAP (4), _SESSION_CAP (1: per session and lane),
+#   _HUMAN_CAP (8), _SESSION_CAP (1: per session and lane),
 #   KOINON_CLAIM_LANE           the lane (same as --lane)
 #   KOINON_CLAIM_WAIT_INTERVAL  poll interval of wait-release in seconds (30)
 #   _STALE_RELEASE_SECONDS (7200: the sweeper releases this long after the lease ran out)
@@ -77,7 +77,7 @@ LEASE=${KOINON_CLAIM_LEASE_SECONDS:-7200}
 HUMAN_LEASE=${KOINON_CLAIM_HUMAN_LEASE_SECONDS:-259200}
 HUMAN_MODE=0
 GRACE=${KOINON_CLAIM_GRACE_SECONDS:-900}
-HUMAN_CAP=${KOINON_CLAIM_HUMAN_CAP:-4}
+HUMAN_CAP=${KOINON_CLAIM_HUMAN_CAP:-8}
 SESSION_CAP=${KOINON_CLAIM_SESSION_CAP:-1}
 RELEASE_AFTER=${KOINON_CLAIM_STALE_RELEASE_SECONDS:-7200}
 MARKER='<!-- koinon-claim -->'

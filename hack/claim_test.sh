@@ -196,7 +196,7 @@ lanecmd() {
   out=$( {
     FIX=$fx; export KOINON_AGENT_SESSION=s1; unset CLAUDE_CODE_SESSION_ID KOINON_CLAIM_LANE
     stub_github
-    LANE=; HUMAN_CAP=4; SESSION_CAP=1
+    LANE=; HUMAN_CAP=8; SESSION_CAP=1
     split_globals "$@" || exit 1
     set -- "${REST[@]}"
     cmd=$1; shift
@@ -225,11 +225,11 @@ if grep -q '#10 (PR #100)' <<<"$r" && grep -q 'no lane' <<<"$r"; then ok "no-lan
 two_lanes=$(jq -c '[.[] | select(.issue == 10 or .issue == 11 or .issue == 12 or .issue == 15)]' <<<"$FIX")
 r=$(lanecmd "$two_lanes" take 22 --lane w)
 eq "a third lane succeeds under the human cap" "$(rc_of "$r")" 0
-four=$(jq -c '. + [{"issue":17,"sha":"s17","state":"held","holder":"alice/mac/s1#v","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"","note":""}]' <<<"$(jq -c '[.[] | select(.issue == 10 or .issue == 11 or .issue == 12)]' <<<"$FIX")")
-r=$(lanecmd "$four" take 23 --lane w)
-eq "the human cap refuses the 5th claim" "$(rc_of "$r")" 2
-if grep -q 'cap of 4' <<<"$r"; then ok "human cap message"; else bad "human cap message: $r"; fi
-r=$(lanecmd "$four" take 23 --lane w --human)
+eight=$(jq -c '[range(30; 38) as $i | {"issue":$i,"sha":"s\($i)","state":"held","holder":"alice/mac/s1#l\($i)","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"","note":""}]' <<<null)
+r=$(lanecmd "$eight" take 23 --lane w)
+eq "the human cap refuses the 9th claim" "$(rc_of "$r")" 2
+if grep -q 'cap of 8' <<<"$r"; then ok "human cap message"; else bad "human cap message: $r"; fi
+r=$(lanecmd "$eight" take 23 --lane w --human)
 eq "a human claim is not stopped by the session cap but by the human cap" "$(rc_of "$r")" 2
 eq "a bad lane is an error" "$(rc_of "$(lanecmd "$mine_only" take 24 --lane NO)")" 1
 
