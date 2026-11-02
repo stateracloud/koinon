@@ -4,6 +4,10 @@
 # Offline tests for hack/wt.sh `new`: the web dependency install (#391). A fake pnpm on PATH records
 # how it was called; nothing touches the network or a cluster.
 # shellcheck disable=SC2015,SC2329 # "A && ok || bad" is the test idiom; cleanup runs from a trap
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)

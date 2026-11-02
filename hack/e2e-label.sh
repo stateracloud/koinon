@@ -21,6 +21,10 @@
 # between looks, default 15), WAIT_MAX (seconds to wait for a run to decide, default 900; then it
 # dispatches anyway: a second e2e beats none), LIST_POLL and LIST_MAX (seconds between looks for the
 # dispatched run, default 5, and how long, default 60).
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 GH=${GH:-gh}

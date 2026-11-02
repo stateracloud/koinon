@@ -12,6 +12,10 @@
 # and snippets in docs.
 #
 # Usage: hack/mktemp-lint.sh [root]    (default: the repository root)
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 root=${1:-$(cd "$(dirname "$0")/.." && pwd)}

@@ -12,6 +12,10 @@
 # Also checks the file's own format. Go itself is not here (go.mod is its source).
 #
 # Usage: hack/versions-check.sh. VERSIONS_CHECK_ROOT=<dir> checks another tree (the test's fixtures).
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 root=${VERSIONS_CHECK_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}

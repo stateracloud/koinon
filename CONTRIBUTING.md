@@ -35,6 +35,7 @@ uses; newer patch releases usually work, but if something differs from CI, match
 | Tilt | current | `make dev` |
 | gitleaks | 8.30.1 | secret scan before you push |
 | jq | any | e2e and kind scripts |
+| bash | 5 or newer (macOS ships 3.2: `brew install bash`, ADR 0090) | every script in `hack/` and `test/`; they exit 2 on an older bash |
 
 Code generators (protoc-gen-go, protoc-gen-connect-go, sqlc, goose, oapi-codegen) are pinned as Go
 tools in `go.mod` and run through `go tool`. `setup-envtest` for the admission tests is fetched by

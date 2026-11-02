@@ -17,6 +17,10 @@
 #   5. The versions on the Prerequisites page equal the ones test/e2e/kind/up.sh, the preflight,
 #      the chart and the e2e workflow use.
 #   6. Every repository file the docs link to exists.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
