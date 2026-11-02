@@ -1,6 +1,6 @@
 # 0025. Deterministic, free CI with a continuous sandbox escape suite
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-02 (below)
 - Date: 2026-10-21
 - Decision: [design.md#25](../design.md)
 - Verification: escape suite design depends on the OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))
@@ -74,6 +74,46 @@ Checked 2026-10-21:
 - testcontainers-go v0.44.0, `modules/postgres` with Snapshot/Restore; set a wait strategy.
   https://golang.testcontainers.org/modules/postgres/
 - ACP methods and optional `session/load`: https://agentclientprotocol.com/protocol/session-setup
+
+## Amendment (2026-11-02, #512 and #547): the optional lab lane and where the kind e2e runs
+
+CI stays free and public (above). This amendment records the lab lane a maintainer may add and the
+routing of the kind e2e. It does not change what CI requires.
+
+**What #512 built.** `hack/e2e-remote.sh --argo --gate <set>` runs one gate set of `hack/lab/gate-run.sh`
+(go-test, agentd-ginkgo, ...) on an Argo Workflows queue the operator runs, in the WorkflowTemplate
+`koinon-gate` (the `koinon-gate` lane, replacing the light lane):
+
+- A gate pod is a main container of 3 CPU / 6 Gi and a Docker-in-Docker sidecar of 1 CPU / 2 Gi. One
+  lab node fits 4 gate runs, or 3 kind e2e runs and 1 gate run. A slot (`gate-1`..`gate-4`) is a mutex.
+- A run that is still Pending after 120 s is given up: every slot busy, the slot mutex, the namespace
+  limit (`namespace-limit`), a ResourceQuota (`quota`) or an unschedulable pod (`unschedulable`). It is
+  deleted, never stopped (a stopped run turns Failed and the lab pushes a false "Failed"), and the
+  script exits 75: the caller runs the gate locally.
+- Measured on the lab: go-test warm about 700 s, agentd-ginkgo about 175 s.
+
+**Decision (Andre, 2026-11-02, #547): a green lab run is enough to merge a needs-e2e pull request.**
+The kind e2e of a pull request is tested like this, in this order:
+
+1. With a lab: `hack/e2e-remote.sh --argo` runs it on the lab. A followed run posts the commit status
+   `e2e-lab` (success or failure) on the tested commit; `hack/pr-wait.sh <PR> --checks --require e2e`
+   accepts a green `e2e-lab` on the head, or any green `quickstart` check run on the head.
+2. GitHub's `e2e-kind` runs on a pull request only when there is no green lab run: no lab (exit 78), the
+   lab cannot run it now (exit 75: unreachable, no slot, Pending fallback, no verdict), the change touches
+   `flavors/` (exit 79: the lab cannot build a flavor image, `nvcr.io` is fenced there; refused up front
+   unless `--allow-flavors` because the image is already in the lab's registry), or the pull request
+   changes the e2e's own files (already forced) or carries the `e2e` label.
+3. Main stays batched on GitHub, plus the nightly run, always.
+
+Requiring `quickstart` alone would pay for GitHub on every needs-e2e PR and make the lab pointless, so
+`e2e-lab` is accepted instead. It is **not** a required check of the ruleset: contributors without a
+lab cannot produce it. The merge rule is the agents' (`AGENTS.md`), checked with `hack/pr-wait.sh`;
+the required check stays `e2e result`. `e2e-lab` is a plain commit status, trusted as far as the
+maintainer's lab credentials are; it asserts only that a lab run passed on that exact commit.
+
+Exit codes of `hack/e2e-remote.sh --argo` separate the cases a caller acts on differently: 0 passed,
+1 the e2e failed, 2 usage, 75 the lab cannot run it now (fall back), 76 not run, 78 no lab configured,
+79 refused for flavors.
 
 ## Links
 

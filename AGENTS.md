@@ -42,12 +42,15 @@ Instructions for coding agents working on Koinon.
   and CI). The kind e2e (`test/e2e`, ~15-25 min) is not per PR: it runs on a PR only when the PR
   changes the e2e's own files or carries the `e2e` label, and otherwise batched on main (each push
   that changed something e2e-relevant, one running and the newest pending) and nightly, always,
-  to catch drift no commit explains. Run it on
-  demand for a risky PR: `hack/needs-e2e.sh` says whether your change touches what only a full
-  install observes (the rule lives only there); if yes, run `hack/e2e-remote.sh` (your own Docker,
-  the same as `--local`), paste the timings table in the PR body, or add the `e2e` label. `SUITE_LABEL=smoke` (not with `--argo`) runs steps 1-6 only. A maintainer with a home lab can queue
-  the run there instead: see "Maintainer lab (optional)". The required check is `e2e result` (green when the e2e
-  was skipped). Why: #281 (branch naming in githubtools) and #284 (a startup flag the chart's
+  to catch drift no commit explains. For a risky PR, `hack/needs-e2e.sh` says whether your change
+  touches what only a full install observes (the rule lives only there). If yes, with a lab run
+  `hack/e2e-remote.sh --argo`: a green run posts the commit status `e2e-lab` on your pushed head and
+  that is enough to merge. Without a lab, or when it exits 75 (the lab cannot run it now), 78 (no lab
+  configured) or 79 (the change touches `flavors/`, which the lab cannot build), run it on GitHub
+  (`gh workflow run e2e-kind.yml --ref <branch>`, or the `e2e` label) or on your own Docker
+  (`hack/e2e-remote.sh`, the same as `--local`; paste the timings table in the PR body).
+  `SUITE_LABEL=smoke` (not with `--argo`) runs steps 1-6 only. The required check is `e2e result`
+  (green when the e2e was skipped); `e2e-lab` is not required, contributors without a lab cannot produce it. Why: #281 (branch naming in githubtools) and #284 (a startup flag the chart's
   migrate Job lacked) passed every package test and failed only in a full install.
 - When main's kind e2e goes from green to red, `hack/e2e-bisect.sh` opens one `e2e-regression` issue
   naming the merge (or the suspects): fix forward within 2 hours, otherwise revert it. RC and
@@ -115,7 +118,8 @@ Only the maintainers have a home lab; nothing in the repository needs it and non
 are tracked. Their settings live in the untracked `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/lab.env`
 (template `hack/lab/lab.env.example`; `hack/e2e-argo.sh` header). With them,
 `hack/e2e-remote.sh --argo` queues the e2e on the lab's Argo: `--no-wait` and `--follow <run>` to
-come back later, `--gate <set>` for the Docker-only gates (`go-test`, `agentd-ginkgo`, the sets the lab's koinon-gate template accepts today; the other sets of `hack/lab/gate-run.sh` run only locally through it), which exits 75 when no slot is free or the lab is unreachable (run the gate locally then) and 76 when the gate skipped what it expected to run. Each lane
+come back later, `--gate <set>` for the Docker-only gates (`go-test`, `agentd-ginkgo`, the sets the lab's koinon-gate template accepts today; the other sets of `hack/lab/gate-run.sh` run only locally through it), which exits 75 when no slot is free or the lab is unreachable (run the gate locally then) and 76 when the gate skipped what it expected to run.
+Exit codes of `--argo`: 0 passed, 1 the e2e failed, 2 usage, 75 the lab cannot run it now, 76 not run, 78 no lab configured, 79 refused (flavors). It posts `e2e-lab` itself (`--no-status` to opt out); push the branch first, or post later with `hack/e2e-status.sh`. Each lane
 runs `hack/e2e-remote.sh --argo --repo <its worktree>` with `KOINON_E2E_AGENT=<session>-<lane>` and
 keeps at most one kind run waiting. Its notifications carry the agent label as an ntfy tag
 (`?tags=<agent>`). Dev loop and registry: `docs/dev/maintainer-homelab.md`.
@@ -196,10 +200,12 @@ Lessons that cost time more than once. They apply to humans and agents alike.
   command consume each chunk.
 - **Merging.** The only merge method is a merge commit: `gh pr merge --auto --merge`. Auto-merge
   does not wait for `e2e-kind`, which is not a required check. So a pull request that changes startup
-  flags, chart Jobs or hooks, or anything the e2e expects does not get auto-merge until `e2e-kind` is
-  green on the PR: it runs on its own for the paths in `.github/workflows/e2e-kind.yml`, otherwise
-  dispatch it (`gh workflow run e2e-kind.yml --ref <branch>`) or run `make test-e2e-kind`, then enable
-  auto-merge and `hack/claim.sh review <N>` (step 8 above).
+  flags, chart Jobs or hooks, or anything the e2e expects does not get auto-merge until
+  `hack/pr-wait.sh <PR> --checks --require e2e` passes: a green `e2e-lab` status on the head (from
+  `hack/e2e-remote.sh --argo`, which needs the branch pushed) or a green `quickstart` run on the head
+  (it runs on its own for the paths in `.github/workflows/e2e-kind.yml`; otherwise dispatch it with
+  `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and `hack/claim.sh review <N>`
+  (step 8 above).
 - **Root causes, not workarounds.** When you hit the same workaround twice, find out why and fix the
   cause. An interim fix is allowed only with an issue that names the exit condition (when it can be
   removed), linked from the code or doc that carries it.

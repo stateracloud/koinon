@@ -50,7 +50,43 @@ these in `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/`:
 | `lab/light.workflow.json` | the Argo Workflow of `--lane light` (superseded by the lab's `koinon-gate` WorkflowTemplate, `--gate <set>`; no file needed) |
 | `lab/local.homelab.example.yaml`, `values-homelab.yaml`, `model-provider-homelab.yaml` | the Tilt remote profile of the lab |
 
-Without `lab.env`, `hack/e2e-remote.sh --argo` exits 2 and names what is missing.
+Without `lab.env`, `hack/e2e-remote.sh --argo` exits 78 (no lab configured) and names what is missing.
+
+## Where a pull request's kind e2e runs (#547)
+
+A needs-e2e pull request (`hack/needs-e2e.sh`) is tested lab first. A green lab run is enough to merge,
+recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendment) has the decision.
+
+1. Push the branch, then `hack/e2e-remote.sh --argo` (about 15-25 min; `--no-wait` and `--follow <run>`
+   to come back later). A followed run posts the commit status `e2e-lab` on the commit it tested: `success`
+   on exit 0, `failure` when the e2e failed, nothing on a fallback. The description names the run and the
+   target URL is the run's page on the Argo Server from `lab.env`. A branch that is not pushed cannot take
+   a status: the script says so; push, then `hack/e2e-status.sh <sha> success|failure <description> [url]`.
+   `--no-status` (or `KOINON_E2E_NO_STATUS=1`) is for local experiments.
+2. `hack/pr-wait.sh <PR> --checks --require e2e` is the merge gate: it passes on a green `e2e-lab` on the
+   head, or on any green `quickstart` check run on the head (also a dispatched one next to a skipped
+   pull_request run). Then auto-merge as usual.
+3. GitHub's `e2e-kind` is the fallback, `gh workflow run e2e-kind.yml --ref <branch>`, when:
+
+| Exit of `--argo` | Meaning | What to do |
+| --- | --- | --- |
+| 0 | the e2e passed, `e2e-lab` is success | merge gate 2 |
+| 1 | the e2e failed, `e2e-lab` is failure | fix it |
+| 75 | the lab cannot run it now: unreachable, a failed upload or submit, no verdict | GitHub e2e-kind |
+| 78 | no lab configured | GitHub e2e-kind (or `--local`) |
+| 79 | the change touches `flavors/`: the lab cannot build a flavor image (`nvcr.io` is fenced) | GitHub e2e-kind; `--allow-flavors` if the image is already in Zot |
+| 2 | usage, or the lab rejected the request | fix the call |
+
+   The `koinon-gate` lane (`--gate <set>`, not the e2e) has the same 75 / 76 contract: 75 is "run the gate
+   locally", including the 120 s Pending fallback (reasons `quota`, `unschedulable`, `namespace-limit`,
+   `slot`; the run is deleted, never stopped).
+4. A pull request that changes the e2e's own files (`needs-e2e.sh --forced-only`) gets `e2e-kind` on GitHub
+   by itself, so the lab run is optional there; the `e2e` label dispatches it too.
+5. Main stays batched on GitHub (each push that changed something e2e-relevant, one running and the newest
+   pending) and nightly, always.
+
+`e2e-lab` is not a required check of the ruleset, because contributors without a lab cannot produce it;
+the required check stays `e2e result`.
 
 ## Dev database
 
