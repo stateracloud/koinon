@@ -22,7 +22,8 @@
 # Gate (--gate <set>, #512) submits the queue's WorkflowTemplate koinon-gate for one gate set of
 # hack/lab/gate-run.sh (go-test, agentd-ginkgo, ...), which replaces the light lane. Parameters
 # gate-set, ref (the 40-hex commit), bundle, agent and slot (gate-1..gate-4, the one with no unfinished
-# run: label lane=gate); labels lab.example.invalid/agent=<agent>, lane=gate, target=<set>. Every
+# run: label lab.example.invalid/lane=gate). The template sets the lane, target and agent labels
+# itself (agent from the agent parameter); the submit passes none. Every
 # slot busy, or the run still Pending after 120 s (KOINON_E2E_GATE_PENDING: the slot mutex, the
 # namespace limit or a ResourceQuota), stops and deletes the run and exits 75 so the caller runs the
 # gate locally. The log is followed as it is written, then $OUT (result.txt, driver.log, reports) is
@@ -64,6 +65,7 @@ NS=${KOINON_E2E_ARGO_NAMESPACE:-koinon-e2e}
 TEMPLATE=${KOINON_E2E_ARGO_TEMPLATE:-koinon-make}
 GATE_TEMPLATE=${KOINON_E2E_GATE_TEMPLATE:-koinon-gate}
 GATE_PENDING=${KOINON_E2E_GATE_PENDING:-120}
+LOG_GRACE=${KOINON_E2E_LOG_GRACE:-30}
 BUNDLE_URL=${KOINON_E2E_BUNDLE_URL:-}
 RESULTS_URL=${KOINON_E2E_RESULTS_URL:-}
 REGION=${KOINON_E2E_S3_REGION:-us-east-1}
@@ -113,7 +115,7 @@ token="" s3user="" opened=0 name="" finished=0 log_pid=""
 . "$CREDS"
 
 cleanup() {
-  [[ -z $log_pid ]] || kill "$log_pid" 2>/dev/null || true
+  stop_log
   if [[ -n $name && $finished == 0 && $wait == 1 ]]; then
     echo "e2e-remote --argo: stopping $name" >&2
     api PUT "/api/v1/workflows/$NS/$name/stop" '{}' >/dev/null 2>&1 || true
@@ -211,7 +213,7 @@ pick_slot() {
   if [[ $lane == gate ]]; then
     # A gate slot is free only with no unfinished run at all: Running, or Pending on the slot mutex,
     # the namespace limit or a ResourceQuota. Prints nothing when every slot is taken.
-    api GET "/api/v1/workflows/$NS?listOptions.labelSelector=lane=gate,workflows.argoproj.io/completed!=true&fields=items.spec.arguments.parameters" |
+    api GET "/api/v1/workflows/$NS?listOptions.labelSelector=lab.example.invalid/lane=gate,workflows.argoproj.io/completed!=true&fields=items.spec.arguments.parameters" |
       jq -r --arg all "$all" '
         ($all | split(" ")) as $slots
         | [.items[]? | .spec.arguments.parameters[]? | select(.name == "slot") | .value] as $busy
@@ -292,6 +294,25 @@ follow_log() {
   log_pid=$!
 }
 
+# stop_log: end the log stream this script started: the subshell and its curl and jq children.
+stop_log() {
+  [[ -n $log_pid ]] || return 0
+  pkill -P "$log_pid" 2>/dev/null || true
+  kill "$log_pid" 2>/dev/null || true
+  log_pid=""
+}
+
+# wait_log: let the stream deliver its last lines (it ends with the run), but at most
+# KOINON_E2E_LOG_GRACE seconds; then stop_log.
+wait_log() {
+  local i=0
+  while [[ -n $log_pid ]] && kill -0 "$log_pid" 2>/dev/null; do
+    if [[ $i -ge $LOG_GRACE ]]; then break; fi
+    i=$((i + 1)); sleep 1
+  done
+  if [[ -n $log_pid ]] && kill -0 "$log_pid" 2>/dev/null; then stop_log; else wait "$log_pid" 2>/dev/null || true; log_pid=""; fi
+}
+
 # give_up: stop and delete the run that never started; exit 75, the caller runs the gate locally.
 give_up() {
   echo "e2e-remote --argo: $name is still Pending after ${GATE_PENDING}s (slot mutex, namespace limit or quota); giving up, run the gate locally" >&2
@@ -302,16 +323,21 @@ give_up() {
 }
 
 follow_run() {
-  local phase="" last="" msg seen="" line rc pending_since=$SECONDS
+  local phase="" last="" pods="" msg seen="" line rc pending_since=$SECONDS
   echo "== following $name ($SERVER/workflows/$NS/$name)"
   while :; do
     # A failed poll (a network blip) keeps the last phase; the next poll tries again.
-    read -r phase msg < <(api GET "/api/v1/workflows/$NS/$name?fields=status.phase,status.message" 2>/dev/null |
-      jq -r '"\(.status.phase // "Pending") \(.status.message // "")"' 2>/dev/null) || { phase=${last:-Pending}; msg=""; }
+    # pods: "pending" when the workflow has pod nodes and every one is still Pending (a quota
+    # rejection keeps the workflow Running with its pod Pending), "none" without pod nodes.
+    read -r phase pods msg < <(api GET "/api/v1/workflows/$NS/$name?fields=status.phase,status.message,status.nodes" 2>/dev/null |
+      jq -r '[.status.nodes[]? | select(.type == "Pod")] as $p
+        | "\(.status.phase // "Pending") \(if ($p | length) == 0 then "none" elif ($p | all(.phase == "Pending")) then "pending" else "started" end) \(.status.message // "")"' 2>/dev/null) || { phase=${last:-Pending}; pods=none; msg=""; }
     if [[ $phase != "$last" ]]; then echo "== $(date -u +%H:%M:%SZ) $phase${msg:+: $msg}"; last=$phase; fi
     if [[ $lane == gate ]]; then
-      if [[ $phase == Pending && $((SECONDS - pending_since)) -ge $GATE_PENDING ]]; then give_up; fi
-      [[ $phase == Pending ]] || follow_log
+      local stuck=0
+      if [[ $phase == Pending || ( $phase == Running && $pods == pending ) ]]; then stuck=1; fi
+      if [[ $stuck == 1 && $((SECONDS - pending_since)) -ge $GATE_PENDING ]]; then give_up; fi
+      [[ $stuck == 1 ]] || follow_log
     elif [[ $phase == Running ]]; then
       while IFS= read -r line; do
         case $seen in *"|$line|"*) ;; *) echo "$line"; seen+="|$line|" ;; esac
@@ -321,10 +347,7 @@ follow_run() {
     sleep "$POLL"
   done
   finished=1
-  if [[ -n $log_pid ]]; then
-    wait "$log_pid" 2>/dev/null || true # the stream ends with the run: its last lines
-    log_pid=""
-  fi
+  wait_log # the stream ends with the run: its last lines
   : "${out:=$(git rev-parse --show-toplevel)/.e2e-out/$name}"
   fetch_results "$out"
   echo
@@ -376,7 +399,8 @@ if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
 fi
 if [[ $dry == 1 ]]; then
   echo "+ git bundle of ${sha:0:12} -> $BUNDLE_URL/$object"
-  echo "+ submit ($lane lane) $NS/$(case $lane in light) echo inline ;; gate) echo "$GATE_TEMPLATE" ;; *) echo "$TEMPLATE" ;; esac) target=$target ref=$sha bundle=$object agent=$label slot=${slot:-<least busy>}"
+  case $lane in light) tpl=inline ;; gate) tpl=$GATE_TEMPLATE ;; *) tpl=$TEMPLATE ;; esac
+  echo "+ submit ($lane lane) $NS/$tpl target=$target ref=$sha bundle=$object agent=$label slot=${slot:-<least busy>}"
   [[ $wait == 0 ]] || echo "+ follow the run, results to ${out:-.e2e-out/<run>}"
   exit 0
 fi
@@ -409,8 +433,7 @@ rm -f "$bundle"
 if [[ $lane == gate ]]; then
   body=$(jq -nc --arg t "$GATE_TEMPLATE" --arg g "$target" --arg ref "$sha" --arg b "$object" \
     --arg a "$label" --arg s "$slot" '{resourceKind: "WorkflowTemplate", resourceName: $t,
-      submitOptions: {parameters: ["gate-set=\($g)", "ref=\($ref)", "bundle=\($b)", "agent=\($a)", "slot=\($s)"],
-                      labels: "lab.example.invalid/agent=\($a),lane=gate,target=\($g)"}}')
+      submitOptions: {parameters: ["gate-set=\($g)", "ref=\($ref)", "bundle=\($b)", "agent=\($a)", "slot=\($s)"]}}')
   name=$(gate_submit "$body") || exit $?
 elif [[ $lane == light ]]; then
   # The manifest with its parameters filled in; "//" holds its comments and is not a Workflow field.

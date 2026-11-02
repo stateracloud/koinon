@@ -192,16 +192,18 @@ while [[ $# -gt 0 ]]; do
 done
 case $method:$url in
 PUT:*/e2e-bundles/*) cp "$upload" "$ARGO_DIR/last.bundle"; [[ -z $w ]] || printf '%s' "${FAKE_PUT_CODE:-200}" ;;
-*/workflow-templates/*/koinon-gate) echo '{"spec":{"arguments":{"parameters":[{"name":"slot","enum":["gate-1","gate-2","gate-3","gate-4"]}]}}}' ;;
+*/workflow-templates/*/koinon-gate) echo '{"spec":{"arguments":{"parameters":[{"name":"gate-set","enum":["go-test","agentd-ginkgo"]},{"name":"slot","enum":["gate-1","gate-2","gate-3","gate-4"]}]}}}' ;;
 */workflow-templates/*) echo '{"spec":{"arguments":{"parameters":[{"name":"slot","enum":["a","b","c"]}]}}}' ;;
 *'/workflows/koinon-e2e?'*) if [[ -n ${FAKE_LIST:-} ]]; then echo "$FAKE_LIST"; else echo '{}'; fi ;;
-POST:*/submit) printf '%s' "$body" >"$ARGO_DIR/submitted"; echo '{"metadata":{"name":"koinon-make-t1"}}' ;;
+POST:*/submit) printf '%s' "$body" >"$ARGO_DIR/submitted"
+  if [[ -n $o ]]; then echo '{"metadata":{"name":"koinon-make-t1"}}' >"$o"; printf '%s' "${FAKE_SUBMIT_CODE:-200}"; else echo '{"metadata":{"name":"koinon-make-t1"}}'; fi ;;
 POST:*/api/v1/workflows/koinon-e2e) printf '%s' "$body" >"$ARGO_DIR/created"; echo '{"metadata":{"name":"koinon-make-t1"}}' ;;
 PUT:*/stop) echo stopped >>"$ARGO_DIR/stopped"; echo '{}' ;;
 DELETE:*/workflows/koinon-e2e/koinon-make-t1) echo deleted >>"$ARGO_DIR/deleted"; echo '{}' ;;
 *'/koinon-make-t1?fields='*)
   n=$(cat "$ARGO_DIR/polls" 2>/dev/null || echo 0); echo $((n + 1)) >"$ARGO_DIR/polls"
-  if [[ -n ${FAKE_PENDING:-} ]]; then echo '{"status":{"phase":"Pending","message":"Waiting for e2e-gate-1 lock"}}'
+  if [[ -n ${FAKE_PENDING_POD:-} ]]; then echo '{"status":{"phase":"Running","nodes":{"p":{"type":"Pod","phase":"Pending","message":"exceeded quota"}}}}'
+  elif [[ -n ${FAKE_PENDING:-} ]]; then echo '{"status":{"phase":"Pending","message":"Waiting for e2e-gate-1 lock"}}'
   elif [[ $n -lt 1 ]]; then echo '{"status":{"phase":"Running"}}'; else echo "{\"status\":{\"phase\":\"${FAKE_PHASE:-Succeeded}\"}}"; fi ;;
 */koinon-make-t1/log?*) echo '{"result":{"content":"== 12:00:00Z prerequisites (kind/up.sh)"}}' ;;
 */workflows/koinon-e2e/koinon-make-t1) echo '{"status":{"nodes":{"koinon-make-t1":{"id":"koinon-make-t1","type":"Pod","outputs":{"artifacts":[{"name":"results","s3":{"key":"koinon-make-t1/koinon-make-t1/results.tgz"}}]}}}}}' ;;
@@ -339,8 +341,8 @@ check "--gate pass exits 0" test "$rc" -eq 0
 check "--gate submits the koinon-gate template" has '"resourceName":"koinon-gate"' "$tmp/gate1/submitted"
 check "--gate passes gate-set, ref, bundle, agent" sh -c "grep -q 'gate-set=go-test' '$tmp/gate1/submitted' && grep -q 'ref=$argo_sha' '$tmp/gate1/submitted' && grep -q 'bundle=koinon-' '$tmp/gate1/submitted' && grep -q 'agent=2d024d34-local' '$tmp/gate1/submitted'"
 check "--gate picks a slot with no unfinished run" has 'slot=gate-2' "$tmp/gate1/submitted"
-check "--gate sets the lab labels" has 'lab.example.invalid/agent=2d024d34-local,lane=gate,target=go-test' "$tmp/gate1/submitted"
-check "--gate selects busy slots by the lane=gate label" has 'labelSelector=lane=gate' "$FAKE_LOG"
+check "--gate passes no labels (the template sets lane, target and agent)" test "$(jq -r '.submitOptions.labels // ""' "$tmp/gate1/submitted")" = ""
+check "--gate selects busy slots by the lane=gate label" has 'labelSelector=lab.example.invalid/lane=gate' "$FAKE_LOG"
 check "--gate follows the log" has 'logOptions.follow=true' "$FAKE_LOG"
 check "--gate fetches \$OUT" test -f "$tmp/gate1/out/result.txt"
 gate "$tmp/gate2" "target=go-test ref=x rc=1 seconds=1 verdict=fail" FAKE_PHASE=Failed
@@ -356,6 +358,12 @@ gate "$tmp/gate4" "" FAKE_PENDING=1 KOINON_E2E_GATE_PENDING=1
 check "--gate Pending past the limit exits 75" test "$rc" -eq 75
 check "... stopping the run" test -s "$tmp/gate4/stopped"
 check "... and deleting it" test -s "$tmp/gate4/deleted"
+argo_env "$tmp/gate4b"; : >"$FAKE_LOG"
+gate "$tmp/gate4b" "" FAKE_PENDING_POD=1 KOINON_E2E_GATE_PENDING=1
+check "--gate Running with every pod Pending past the limit exits 75" test "$rc" -eq 75
+check "... stopping the run" test -s "$tmp/gate4b/stopped"
+check "... and deleting it" test -s "$tmp/gate4b/deleted"
+check "... without following the log" sh -c "! grep -q 'logOptions.follow' '$FAKE_LOG'"
 argo_env "$tmp/gate6"
 rc=0
 (unset KOINON_E2E_REMOTE
@@ -372,6 +380,18 @@ check "--gate without an Argo token exits 75 without uploading" test "$rc" -eq 7
 rc=0
 (unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --gate 'x;rm' --dry-run >"$tmp/gate6/log2" 2>&1) || rc=$?
 check "--gate refuses a gate set that is not a plain name" test "$rc" -eq 2
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --gate chart-check >"$tmp/gate6/log6" 2>&1) || rc=$?
+check "--gate refuses a set the lab template does not accept (exit 2)" test "$rc" -eq 2
+check "... naming what it accepts" has 'go-test agentd-ginkgo' "$tmp/gate6/log6"
+check "... with no upload and no submit" test ! -e "$tmp/gate6/last.bundle" -a ! -e "$tmp/gate6/submitted"
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --gate go-test --dry-run >"$tmp/gate6/log7" 2>&1) || rc=$?
+check "--gate dry-run exits 0 under /bin/bash" test "$rc" -eq 0
+check "... naming the koinon-gate template" has 'koinon-e2e/koinon-gate' "$tmp/gate6/log7"
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --dry-run >"$tmp/gate6/log8" 2>&1) || rc=$?
+check "the kind dry-run names the koinon-make template" has 'koinon-e2e/koinon-make' "$tmp/gate6/log8"
 rc=0
 (unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --gate go-test --dry-run >"$tmp/gate6/log3" 2>&1) || rc=$?
 check "--gate without --argo exits 2" test "$rc" -eq 2
