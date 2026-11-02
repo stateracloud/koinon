@@ -195,6 +195,27 @@ FAILED quickstart (run 41261362803)
 REQUIRED quickstart failed
 only cancelled runs of quickstart on this head; run: gh workflow run e2e-kind.yml --ref <branch>"
 
+# A cancelled `decide` (not required) and a red `e2e result` of the first e2e-kind run, while the
+# second run on the head is still live: wait for it; its green checks supersede the first run's.
+crw() { # <name> <conclusion> <run id> <startedAt>: a check of the e2e-kind workflow
+  printf '{"name":"%s","workflowName":"e2e-kind","status":"COMPLETED","conclusion":"%s","startedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/%s/job/9"}' "$1" "$2" "$4" "$3"
+}
+d1=$(crw decide CANCELLED 41261362803 2026-11-01T10:00:00Z)
+r1=$(crw "e2e result" FAILURE 41261362803 2026-11-01T10:00:30Z)
+d2=$(crw decide SUCCESS 41261363000 2026-11-01T10:01:00Z)
+r2=$(crw "e2e result" SUCCESS 41261363000 2026-11-01T10:30:00Z)
+seq_set "$(prh "$lint_ok,$d1,$r1")" "$(prh "$lint_ok,$d1,$r1,$d2")" "$(prh "$lint_ok,$d1,$r1,$d2,$r2")"
+printf '41261363000\n41261363000\n\n' >"$FAKE_DIR/runs"
+run 7 --checks --require "e2e result" --interval 0
+expect "cancelled decide and red e2e result of an earlier run, another run live: waits, then passes" 0 "waiting for e2e-kind run 41261363000 on abc1234
+checks 3/3 green"
+seq_set "$(prh "$lint_ok,$d1,$r1")"
+printf '\n' >"$FAKE_DIR/runs"
+run 7 --checks --require "e2e result" --interval 0
+expect "cancelled decide and red e2e result with no live run: fails" 1 "FAILED decide (run 41261362803)
+FAILED e2e result (run 41261362803)
+REQUIRED e2e result failed"
+
 usage_line="usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK] [--timeout DURATION] [--interval SECONDS]"
 e2e_ok=$(cr "e2e result" COMPLETED SUCCESS 14)
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"

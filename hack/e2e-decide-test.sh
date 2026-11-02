@@ -55,8 +55,8 @@ want false "opened: no label now either" EVENT=pull_request ACTION=opened "${PRV
 want false "labeled e2e after a run that ran the e2e on the head: covered" EVENT=pull_request ACTION=labeled "${PRV[@]}" \
   'LABELS=["e2e"]' STUB_RUNS=1 STUB_RAN=1
 summary_has "already ran the e2e"
-covered=$(env EVENT=pull_request ACTION=labeled "${PRV[@]}" 'LABELS=["e2e"]' STUB_RUNS=1 STUB_RAN=1 hack/e2e-decide.sh | sed -n 's/^covered=//p')
-[[ $covered == true ]] || { echo "FAIL: covered=true is printed (got '$covered')" >&2; fail=1; }
+covered=$(env EVENT=pull_request ACTION=labeled "${PRV[@]}" 'LABELS=["e2e"]' STUB_RUNS="7 9" STUB_RAN=1 hack/e2e-decide.sh | sed -n 's/^covered=//p')
+[[ $covered == 7 ]] || { echo "FAIL: covered=<the covering run's id> is printed (got '$covered')" >&2; fail=1; }
 want true "labeled e2e after a run that skipped the e2e: runs" EVENT=pull_request ACTION=labeled "${PRV[@]}" \
   'LABELS=["e2e"]' STUB_RUNS=1 STUB_RAN=0
 want true "labeled e2e with no other run on the head: runs" EVENT=pull_request ACTION=labeled "${PRV[@]}" 'LABELS=["e2e"]'

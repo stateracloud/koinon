@@ -13,8 +13,11 @@
 #                      then labels it (two events, #468), and the run of `opened` should already see
 #                      the label. Adding the `e2e` label (ACTION=labeled) to a head that another run
 #                      of this workflow already ran the e2e on (or is running it) runs nothing and
-#                      prints `covered=true`: the result job mirrors that run. The workflow queues the
-#                      labelled run behind the other instead of cancelling it.
+#                      prints `covered=<that run's id>`: the result job (hack/e2e-result.sh) is green
+#                      only when that run's quickstart concluded success. The workflow queues the
+#                      labelled run behind the other instead of cancelling it. So adding the label
+#                      again after a red e2e does not retry it: re-run the red run's failed jobs, or
+#                      `gh workflow run e2e-kind.yml --ref <branch>`.
 #   push               (main) needed when the full rule matches anything since the last green e2e
 #                      run on main (push or schedule), or when there is no such run.
 #   schedule           (nightly) always: drift no commit explains (upstream images, the runner
@@ -83,7 +86,7 @@ pull_request)
   forced=$rc
   if [[ ${ACTION:-} == labeled ]] && covered=$(ran_on_head) && [[ -n $covered ]]; then
     summary "Does not run again: run $covered already ran the e2e on this commit; this result mirrors it."
-    emit false true
+    emit false "$covered"
     exit 0
   fi
   labelled=1
