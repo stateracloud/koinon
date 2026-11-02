@@ -538,13 +538,10 @@ jobs:
   lint-shell:
     name: lint-shell
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    env:
-      SHELLCHECK_VERSION: 0.11.0
-      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
-      ACTIONLINT_VERSION: 1.7.12
-      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: tool versions (hack/versions.env)
+        run: grep -E '^[A-Z]' hack/versions.env >> "$GITHUB_ENV"
       - name: install shellcheck and actionlint
         run: |
           bin="$RUNNER_TEMP/lintbin"
@@ -552,11 +549,11 @@ jobs:
           cd "$RUNNER_TEMP"
           sc="shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
           curl -fsSLo "$sc" "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/$sc"
-          echo "${SHELLCHECK_SHA256}  $sc" | sha256sum -c -
+          echo "${SHELLCHECK_SHA256_AMD64}$sc" | sha256sum -c -
           tar xJf "$sc" --strip-components=1 -C "$bin" "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
           al="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           curl -fsSLo "$al" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$al"
-          echo "${ACTIONLINT_SHA256}  $al" | sha256sum -c -
+          echo "${ACTIONLINT_SHA256_AMD64}$al" | sha256sum -c -
           tar xzf "$al" -C "$bin" actionlint
           echo "$bin" >>"$GITHUB_PATH"
       - name: shellcheck
@@ -580,6 +577,8 @@ jobs:
           sudo locale-gen en_US.UTF-8
           hack/flavor-tag-test.sh
       - run: hack/e2e-remote-test.sh
+      - run: hack/versions-check-test.sh
+      - run: hack/versions-check.sh
       - run: hack/pr-wait-test.sh
       - run: hack/ci-fail-test.sh
       - run: hack/ci-go-gate-test.sh

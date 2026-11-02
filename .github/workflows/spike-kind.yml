@@ -24,12 +24,13 @@ jobs:
         # Explicit bash adds -o pipefail, so `| tee` keeps the script's exit code.
         shell: bash
     env:
-      KIND_VERSION: v0.33.0
-      KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
       OPENSHELL_VERSION: v0.1.5
       OPENSHELL_CLI_SHA256: ca1ad6e6fbb4a6cd407e95763391b8ecff02912e7d9c467e7ca22696fe80af69
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Tool versions (hack/versions.env)
+        run: grep -E '^[A-Z]' hack/versions.env >> "$GITHUB_ENV"
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
@@ -48,7 +49,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/bin"
           curl -fsSL -o "$RUNNER_TEMP/bin/kind" \
             "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
-          echo "${KIND_SHA256}  $RUNNER_TEMP/bin/kind" | sha256sum -c -
+          echo "${KIND_SHA256_AMD64}$RUNNER_TEMP/bin/kind" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/bin/kind"
           curl -fsSL -o "$RUNNER_TEMP/openshell.tgz" \
             "https://github.com/NVIDIA/OpenShell/releases/download/${OPENSHELL_VERSION}/openshell-x86_64-unknown-linux-musl.tar.gz"

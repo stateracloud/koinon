@@ -486,15 +486,9 @@ check "gate-run refuses a gate set that is not in the enum (exit 2)" test "$rc" 
 gate_run 'go-test; id'
 check "... or an injected one" test "$rc" -eq 2 -a ! -s "$FAKE_MAKE_LOG"
 
-# 6. The toolchain image pins what the workflow pins.
-wf="$repo/.github/workflows/e2e-kind.yml" df="$repo/hack/e2e-toolchain/Dockerfile"
-pin() { sed -n "s/^ *$1: *//p" "$wf" | head -1; }
-check "kind version matches the workflow" has "ARG KIND_VERSION=$(pin KIND_VERSION)\$" "$df"
-check "kind sha256 matches the workflow" has "ARG KIND_SHA256_amd64=$(pin KIND_SHA256)\$" "$df"
-check "ko version matches the workflow" has "ARG KO_VERSION=$(pin KO_VERSION)\$" "$df"
-check "ko sha256 matches the workflow" has "ARG KO_SHA256_amd64=$(pin KO_SHA256)\$" "$df"
-helm=$(sed -n '/setup-helm/,/version:/s/^ *version: *//p' "$wf" | head -1)
-check "helm version matches the workflow" has "ARG HELM_VERSION=$helm\$" "$df"
+# 6. The toolchain image pins what hack/versions.env pins (kind, ko, helm, kubectl and their checksums).
+df="$repo/hack/e2e-toolchain/Dockerfile"
+check "toolchain image and workflows match hack/versions.env" "$repo/hack/versions-check.sh"
 check "Go matches go.mod" test "$(sed -n 's/^ARG GO_VERSION=//p' "$df")" = "$(awk '/^go /{print $2; exit}' "$repo/go.mod")"
 # The web variant (#358) pins what the web suite uses: a mismatch makes the run download a browser.
 wdf="$repo/hack/e2e-toolchain/web.Dockerfile" pkg="$repo/web/package.json"
