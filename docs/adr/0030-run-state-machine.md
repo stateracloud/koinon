@@ -169,9 +169,14 @@ from the class:
 
 Status (FC1): `runs.failure_class` (migration 00021) and `Run.failure_class` on the API carry the
 class. agentd classifies an answered `session/prompt` error from the HTTP status, `Retry-After` and
-error text the harness reports (`internal/agentd/classify.go`), and repeats the turn in the same
-session for `transient` (backoff from `RetryBackoff`) and `throttled` (the provider's `Retry-After`,
-at most `MaxRetryAfter`), up to `ModelRetries` times, recording a `run.retry` event each time. Token
+error text the harness reports (`internal/agentd/classify.go`). Exactly one layer retries a failed
+model request (ADR 0056 amendment 2026-10-31, point 3; #341). For a flavor whose harness retries model
+requests itself (`RetriesModelRequests` in `internal/flavor`, OpenCode today) that layer is the
+harness, on Koinon's policy, which agentd passes as launch switches; agentd then repeats no turn, and
+a `transient` or `throttled` failure that reaches it ends the run. For every other flavor agentd
+repeats the turn in the same session for `transient` (backoff from `RetryBackoff`) and `throttled`
+(the provider's `Retry-After`, at most `MaxRetryAfter`), up to `ModelRetries` times, recording a
+`run.retry` event each time. Token
 and spend limits cancel the run with class `budget`. `context_overflow` fails the run with a clear
 message; shrinking the largest input and `ask_user` wait for the inbox work (ADR 0065). Every other
 failure is `fatal`.
