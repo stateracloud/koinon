@@ -26,7 +26,7 @@
 # slot busy, or the run still Pending after 120 s (KOINON_E2E_GATE_PENDING: the slot mutex, the
 # namespace limit or a ResourceQuota), stops and deletes the run and exits 75 so the caller runs the
 # gate locally. The log is followed as it is written, then $OUT (result.txt, driver.log, reports) is
-# fetched. Exit status: 0 pass, the gate's own status when it failed, 2 usage or configuration, 75 no
+# fetched. A set the template does not accept, or a 4xx answer to the submit, exits 2. Exit status: 0 pass, the gate's own status when it failed, 2 usage or configuration, 75 no
 # slot or the lab unreachable, 76 NOT RUN (result.txt verdict=notrun: hack/go-test.sh exited 3, the
 # run proved less than it should, #507).
 #
@@ -178,6 +178,30 @@ slots() {
   s=$(api GET "/api/v1/workflow-templates/$NS/$TEMPLATE" |
     jq -r '[.spec.arguments.parameters[]? | select(.name == "slot") | .enum[]?] | join(" ")')
   echo "${s:-a b}"
+}
+
+# gate_sets prints the gate sets the template accepts (the enum of its gate-set parameter; empty when
+# it lists none). Returns non-zero when the template cannot be read.
+gate_sets() {
+  api GET "/api/v1/workflow-templates/$NS/$GATE_TEMPLATE" |
+    jq -r '[.spec.arguments.parameters[]? | select(.name == "gate-set") | .enum[]?] | join(" ")'
+}
+
+# gate_submit <json body>: submit the gate run; prints the workflow name. A 4xx answer is a rejected
+# request (exit 2, the arguments are wrong); a network failure or a 5xx answer is the lab being
+# unavailable (exit 75).
+gate_submit() {
+  local out code resp
+  out=$(mktemp "${TMPDIR:-/tmp}/koinon-e2e-submit.XXXXXX")
+  code=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -K - -sS -o "$out" -w '%{http_code}' \
+    -X POST -H 'Accept: application/json' -H 'Content-Type: application/json' --data-binary "$1" \
+    "$SERVER/api/v1/workflows/$NS/submit") || code=000
+  resp=$(cat "$out"); rm -f "$out"
+  case $code in
+  2??) jq -r '.metadata.name // empty' <<<"$resp" ;;
+  4??) echo "e2e-remote --argo: the lab rejected the gate run (HTTP $code): $resp" >&2; exit 2 ;;
+  *) echo "e2e-remote --argo: the submit failed (HTTP $code); run the gate locally" >&2; exit 75 ;;
+  esac
 }
 
 # pick_slot prints the slot with the fewest unfinished runs (the first one on a tie).
@@ -368,6 +392,12 @@ git update-ref -d "$tmpref"
 # (75). The gate slot is picked before the upload, so a busy lab costs no bundle.
 open_creds
 if [[ $lane == gate ]]; then
+  accepted=$(gate_sets) || { rm -f "$bundle"; echo "e2e-remote --argo: the lab is unreachable; run the gate locally" >&2; exit 75; }
+  if [[ -n $accepted && " $accepted " != *" $target "* ]]; then
+    rm -f "$bundle"
+    echo "e2e-remote --argo: the lab's $GATE_TEMPLATE does not accept gate set '$target'; it accepts: $accepted (run the others with hack/lab/gate-run.sh)" >&2
+    exit 2
+  fi
   [[ -n $slot ]] || slot=$(pick_slot) || { rm -f "$bundle"; echo "e2e-remote --argo: the lab is unreachable; run the gate locally" >&2; exit 75; }
   [[ -n $slot ]] || { rm -f "$bundle"; echo "e2e-remote --argo: every gate slot is busy; run the gate locally" >&2; exit 75; }
 fi
@@ -381,8 +411,7 @@ if [[ $lane == gate ]]; then
     --arg a "$label" --arg s "$slot" '{resourceKind: "WorkflowTemplate", resourceName: $t,
       submitOptions: {parameters: ["gate-set=\($g)", "ref=\($ref)", "bundle=\($b)", "agent=\($a)", "slot=\($s)"],
                       labels: "lab.example.invalid/agent=\($a),lane=gate,target=\($g)"}}')
-  name=$(api POST "/api/v1/workflows/$NS/submit" "$body" | jq -r '.metadata.name // empty') ||
-    { echo "e2e-remote --argo: the submit failed; run the gate locally" >&2; exit 75; }
+  name=$(gate_submit "$body") || exit $?
 elif [[ $lane == light ]]; then
   # The manifest with its parameters filled in; "//" holds its comments and is not a Workflow field.
   body=$(jq -c --arg target "$target" --arg ref "$sha" --arg b "$object" --arg a "$label" --arg s "$slot" '
