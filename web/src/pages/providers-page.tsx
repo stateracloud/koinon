@@ -3,7 +3,7 @@
 import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
 import { ModelForm } from '@/components/model-form'
 import { OrgDefaultModel } from '@/components/org-default-model'
@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ProviderService, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import { useProviderActions } from '@/hooks/use-catalog-actions'
+import { closeOnly } from '@/lib/editing'
 import { useOrg } from '@/lib/org-context'
 import { availabilityMinutes, savedNotice, savedRecently, modelsOf, providerDeletable, providerEditable, providerTypeLabel, scopedModelName, formatLabelOf } from '@/lib/providers'
 
@@ -41,7 +42,6 @@ function ProvidersContent() {
   const [notice, setNotice] = useState<string>()
   const [refused, setRefused] = useState<string>()
   const [warnings, setWarnings] = useState<string[]>([])
-  const done = () => setEditing(undefined)
   const saved = (warns: string[] = []) => {
     setRefused(undefined)
     setWarnings(warns)
@@ -64,7 +64,7 @@ function ProvidersContent() {
         A provider is the model API your agents call, such as OpenRouter or Ollama. Koinon keeps its key encrypted and hands it only to the gateway; sandboxes never see it. Providers can also be declared with a Kubernetes Secret, which are read-only here. A new or changed API key reaches the gateway through Kubernetes, which takes about three minutes; an agent run that starts sooner can fail.
       </p>
       <OrgDefaultModel orgId={orgId} />
-      {editing?.kind === 'new-provider' && <ProviderForm onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={done} onSaved={() => saved()} />}
+      {editing?.kind === 'new-provider' && <ProviderForm onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={closeOnly(setEditing, { kind: 'new-provider' })} onSaved={() => saved()} />}
       {refused && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{refused}</AlertDescription>
@@ -139,13 +139,12 @@ function ProviderCard({
   models: Model[]
   orgSlug: string
   editing: Editing | undefined
-  setEditing: (e: Editing | undefined) => void
+  setEditing: Dispatch<SetStateAction<Editing | undefined>>
   actions: Actions
   onSaved: (warnings?: string[]) => void
   onNotice: (m: string) => void
   onRefused: (m: string) => void
 }) {
-  const done = () => setEditing(undefined)
   const now = useNow()
   const editable = providerEditable(p)
   const disabled = p.disabledReason !== '' || p.removed
@@ -192,7 +191,7 @@ function ProviderCard({
         </p>
       )}
       {editing?.kind === 'provider' && editing.id === p.id ? (
-        <ProviderForm provider={p} onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={done} onSaved={() => onSaved()} />
+        <ProviderForm provider={p} onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={closeOnly(setEditing, { kind: 'provider', id: p.id })} onSaved={() => onSaved()} />
       ) : (
         (editable || providerDeletable(p)) && (
           <div className="flex flex-wrap gap-2">
@@ -235,7 +234,7 @@ function ProviderCard({
           )}
         </div>
         {editing?.kind === 'new-model' && editing.providerId === p.id && (
-          <ModelForm provider={p} orgSlug={orgSlug} onCreate={actions.createModel} onUpdate={actions.updateModel} onDone={done} onSaved={onSaved} />
+          <ModelForm provider={p} orgSlug={orgSlug} onCreate={actions.createModel} onUpdate={actions.updateModel} onDone={closeOnly(setEditing, { kind: 'new-model', providerId: p.id })} onSaved={onSaved} />
         )}
         {models.length === 0 ? (
           <p className="text-muted-foreground text-sm">No models yet. Agents can only use models you add.</p>
@@ -249,7 +248,7 @@ function ProviderCard({
                   orgSlug={orgSlug}
                   editing={editing?.kind === 'model' && editing.id === m.id}
                   edit={() => setEditing({ kind: 'model', id: m.id })}
-                  done={done}
+                  done={closeOnly(setEditing, { kind: 'model', id: m.id })}
                   now={now}
                   actions={actions}
                   onSaved={onSaved}
