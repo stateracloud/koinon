@@ -23,9 +23,9 @@ jobs:
   # so required checks still pass when it does not apply.
   #
   # hack/ci-skip-heavy.sh also switches every heavy output below to false (the go, web, generate,
-  # chart, chartsmoke, docs, escape and flavors jobs) in two cases, so `go` and `web` gate nothing and
-  # the others are skipped: a draft pull request (#593; marking it ready runs everything on the same
-  # head), and a push to main whose merge tree equals a pull request head whose required checks
+  # chart, chartsmoke, docs, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (#593; `go` and `web` then FAIL on
+  # purpose, "not tested", so a draft never leaves a green `go` behind; marking it ready runs
+  # everything on the same head), and a push to main whose merge tree equals a pull request head whose required checks
   # passed (#595). The fast jobs (proto, migrations, adr-lint, claim-tests, lint-shell, scripts) and
   # flavor-publish always run. Read the script's header before changing this.
   changes:
@@ -241,7 +241,9 @@ jobs:
   go:
     name: go
     needs: [changes, go-tidy, go-lint, go-vet, go-test, go-race]
-    if: ${{ !cancelled() }}
+    # Not on a push to main whose heavy jobs were switched off (#595): the check then reports skipped
+    # and hack/release-gate.sh reads the merged pull request's head instead.
+    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - env:
@@ -249,9 +251,17 @@ jobs:
           GO: ${{ needs.changes.outputs.go }}
           SKIP: ${{ needs.changes.outputs.skip }}
           REASON: ${{ needs.changes.outputs.reason }}
+          EVENT: ${{ github.event_name }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
+          # A draft was not tested: red on purpose (neutral and skipped both count as passing). The newest
+          # `go` check run on a head must never be a vacuous success while the ready run is still
+          # going (#593). Drafts cannot merge; marking ready runs everything on the same head.
+          if [[ $SKIP == true && $EVENT == pull_request ]]; then
+            echo "::error::draft pull request: not tested ($REASON); mark it ready for review to run the Go checks"
+            exit 1
+          fi
           [[ $GO == true ]] || { echo "no Go changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
           for r in $RESULTS; do
             [[ $r == success ]] || { echo "::error::a Go job finished $r (results: $RESULTS)"; exit 1; }
@@ -393,7 +403,9 @@ jobs:
   web:
     name: web
     needs: [changes, web-lint, web-test, web-e2e]
-    if: ${{ !cancelled() }}
+    # Not on a push to main whose heavy jobs were switched off (#595): the check then reports skipped
+    # and hack/release-gate.sh reads the merged pull request's head instead.
+    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - env:
@@ -401,9 +413,17 @@ jobs:
           WEB: ${{ needs.changes.outputs.web }}
           SKIP: ${{ needs.changes.outputs.skip }}
           REASON: ${{ needs.changes.outputs.reason }}
+          EVENT: ${{ github.event_name }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
+          # A draft was not tested: red on purpose (neutral and skipped both count as passing). The newest
+          # `web` check run on a head must never be a vacuous success while the ready run is still
+          # going (#593). Drafts cannot merge; marking ready runs everything on the same head.
+          if [[ $SKIP == true && $EVENT == pull_request ]]; then
+            echo "::error::draft pull request: not tested ($REASON); mark it ready for review to run the web checks"
+            exit 1
+          fi
           [[ $WEB == true ]] || { echo "no web changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
           for r in $RESULTS; do
             [[ $r == success ]] || { echo "::error::a web job finished $r (results: $RESULTS)"; exit 1; }

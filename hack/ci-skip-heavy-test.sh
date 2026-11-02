@@ -110,6 +110,17 @@ g checkout -q main; echo d >"$repo/d"; g add d; g commit -qm "main moved"
 g merge -q --no-ff feat2 -m "Merge feat2" # main moved after feat2 branched: tree differs from the head
 merge_diff=$(g rev-parse HEAD)
 plain=$(g rev-parse HEAD~1) # a one-parent commit
+# a merge whose tree equals the head's but whose head does not contain the first parent
+base=$(g rev-parse HEAD)
+g checkout -qb feat4 "$base"; echo e >"$repo/e"; g add e; g commit -qm feat4
+g checkout -q main; echo e >"$repo/e"; g add e; g commit -qm "main adds the same e"
+g merge -q --no-ff feat4 -m "Merge feat4"
+merge_noanc=$(g rev-parse HEAD)
+# a merge that brings a file the flavors suite builds from
+g checkout -qb feat3; mkdir -p "$repo/flavors"; echo f >"$repo/flavors/x"; g add flavors; g commit -qm feat3
+g checkout -q main; g merge -q --no-ff feat3 -m "Merge feat3"
+merge_flav=$(g rev-parse HEAD)
+export CI_CHANGES_FLAVORS_DIRS=test/flavors # the directories the flavors suite builds (no go list in the scratch repo)
 
 all_green=(go:success proto:success "generated code:skipped" dco:failure)
 checks "${all_green[@]}"
@@ -136,6 +147,37 @@ expect "a newer green run replaces an older red one" true "equals the tree" $(pu
 checks go:success proto:success:1 proto:cancelled:2 "generated code:success"
 # shellcheck disable=SC2046
 expect "a newer red run replaces an older green one" false "proto" $(push "$merge_same")
+checks "${all_green[@]}"
+# shellcheck disable=SC2046
+expect "a head that does not contain the first parent runs everything" false "not an ancestor" $(push "$merge_noanc")
+# flavors is advisory: failed on the head with nothing under its paths changed, the skip stands
+checks "${all_green[@]}" flavors:failure
+# shellcheck disable=SC2046
+expect "flavors red but not affected: skip" true "equals the tree" $(push "$merge_same")
+# shellcheck disable=SC2046
+expect "flavors red and its files changed runs everything" false "flavors did not pass" $(push "$merge_flav")
+checks "${all_green[@]}" flavors:cancelled
+# shellcheck disable=SC2046
+expect "flavors cancelled and its files changed runs everything" false "flavors did not pass" $(push "$merge_flav")
+checks "${all_green[@]}"
+# shellcheck disable=SC2046
+expect "flavors never ran and its files changed runs everything" false "no completed run" $(push "$merge_flav")
+checks "${all_green[@]}" flavors:success
+# shellcheck disable=SC2046
+expect "flavors green and its files changed: skip" true "equals the tree" $(push "$merge_flav")
+# a draft run leaves a failed go and web (by design); the ready run is still going, or was cancelled
+checks proto:success "generated code:success" go:success:1 go:failure:2 flavors:success
+# shellcheck disable=SC2046
+expect "the newest go is a draft run's failure: run everything" false "'go'" $(push "$merge_same")
+checks proto:success "generated code:success" go:failure:1 go:running:2 flavors:success
+# shellcheck disable=SC2046
+expect "ready run still going after a draft failure: run everything" false "not completed" $(push "$merge_same")
+checks proto:success "generated code:success" go:failure:1 go:cancelled:2 flavors:success
+# shellcheck disable=SC2046
+expect "ready run cancelled: run everything" false "'go'" $(push "$merge_same")
+checks proto:success "generated code:success" go:success:1 go:failure:2 go:success:3 flavors:success
+# shellcheck disable=SC2046
+expect "ready, draft, push, ready again: the newest green go counts" true "equals the tree" $(push "$merge_same")
 checks "${all_green[@]}"
 # shellcheck disable=SC2046
 expect "a different tree runs everything" false "differs" $(push "$merge_diff")
