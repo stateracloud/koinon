@@ -89,6 +89,7 @@ import (
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/schemagate"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/tokens"
 	"github.com/stateracloud/koinon/internal/tracedest"
@@ -149,6 +150,8 @@ type config struct {
 	// start when kekCreate is set and it is missing, and never overwrites it.
 	kekSecret string
 	kekCreate bool
+	// kekWrapping is how the KEKs are wrapped (wrapping.New); zero is the local Secret-held KEK.
+	kekWrapping wrapping.Config
 
 	// egressAllowedHosts and its deprecated alias providerAllowedHosts are joined: internal hosts that
 	// providers and MCP servers may name.
@@ -477,12 +480,14 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	// The secret store (ADR 0056): provider keys and connection secrets are envelopes in
-	// Postgres, wrapped by the KEKs of a mounted Secret. The KEKs are local (Secret-held) until a
-	// KMS adapter is configured (ADR 0085 decision 12; #416, #417): the zero secretstore.Wrappers.
-	var (
-		keyring  *secretstore.Keyring
-		wrappers secretstore.Wrappers
-	)
+	// Postgres, wrapped by the KEKs of a mounted Secret, which are wrapped in turn as
+	// cfg.kekWrapping says (ADR 0085 decision 12). koinon-api is decrypt-only: with a KMS, new KEKs
+	// come from the key-admin Job.
+	var keyring *secretstore.Keyring
+	wrappers, err := wrapping.New(ctx, cfg.kekWrapping, wrapping.Service)
+	if err != nil {
+		return err
+	}
 	switch {
 	case cfg.kekSecret != "" && kube != nil:
 		// The chart renders no key material (a render would make new keys every time, and a new

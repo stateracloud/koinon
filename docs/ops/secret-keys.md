@@ -242,11 +242,47 @@ public addresses needs its own rules; the policy matches addresses, not names, s
 `egress.allowedInternalHosts` in agreement; and a CNI that does not enforce egress policy ignores
 it (the default provider URL check still applies).
 
+## Wrapping the KEKs with a KMS (optional)
+
+A KMS is an option, not a mandate. The default keeps the KEKs in the Kubernetes Secret, as described
+above; it is fully supported and nothing here asks you to move. An install can opt in to have a KMS
+(OpenBao/Vault transit, #416, or AWS KMS, #417) wrap each KEK, so the Secret holds only ciphertext
+that is useless without the KMS. The adapters are not released yet; this release only has the
+groundwork, so there is no setting to turn on.
+
+What changes once you opt in (ADR 0085 decision 12):
+
+- The KMS wraps the KEKs, not every value. Pods unwrap the key set when they load it (on start and
+  every minute), so values are read and written locally and a short KMS outage does not stop reads.
+- Every pod signs in to the KMS with its own pod identity (Kubernetes auth for OpenBao, IRSA for
+  AWS). No KMS credential is in Helm values or env.
+- koinon-api, the reconciler and agentd may only decrypt. A separate key-admin Job, with its own
+  service account and the only encrypt right, wraps new KEKs: it runs on first install and on demand
+  when you add or rotate a KEK. `koinon-api keys add` (and koinon-api's first start without a key)
+  then fail with "new KEKs are wrapped by the key-admin Job" instead of calling the KMS. `keys
+  activate`, `rewrap`, `retire`, `status` and `export` still work from koinon-api.
+- Moving to the KMS uses the rotation steps above: the key-admin Job adds a KMS-wrapped KEK, then
+  `keys activate`, `keys rewrap` and `keys retire` on the local ones. `keys status` shows WRAPPED BY
+  for each KEK. The fingerprint does not change with the wrapping, so earlier backups still match.
+
+A local install has none of this: no key-admin Job, and koinon-api creates and adds KEKs exactly as
+before.
+
+### Rolling back below the release that added key wrapping
+
+Koinon releases before key wrapping read only local KEKs. While the Secret holds any KMS-wrapped KEK,
+such a release cannot read the key set: koinon-api does not start and the reconciler keeps waiting
+for keys. Before you roll back that far, switch the wrapping back to local while the KMS stays
+configured for reading, add a local KEK, `keys activate` it, `keys rewrap`, and
+`keys retire` every KMS-wrapped KEK, so `keys status` shows `local` for every KEK left. A local
+install's Secret is unchanged by key wrapping and needs nothing.
+
 ## Limits and notes
 
 - AES-GCM with random nonces is safe for 2^32 invocations per key. A KEK is invoked once per write and
   once per rewrap, so a KEK would need billions of values. The yearly period is for hygiene, not for
   this limit.
-- Koinon does not use a KMS. The envelope has a `kek_id` so a KMS adapter can follow.
+- A KMS is optional (see above); without one, the KEKs are protected only by the Secret's access
+  rules and by etcd encryption at rest, if the cluster has it on.
 - `koinon-api keys` changes the Secret with the `update` permission the chart grants `koinon-api` on
   that one Secret.

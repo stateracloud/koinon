@@ -16,7 +16,7 @@ import (
 )
 
 // FakeKMS is a secretstore.Wrapper that stands in for a remote KMS in tests: AES-GCM under a fixed,
-// obviously fake key, with switches for an outage and for a decrypt-only identity. It passes
+// obviously fake key, with switches for an outage, a hang and a decrypt-only identity. It passes
 // WrapperContract, which a real adapter's tests run too.
 type FakeKMS struct {
 	// Name is the KeyID (default "koinon-test").
@@ -25,6 +25,8 @@ type FakeKMS struct {
 	Down atomic.Bool
 	// DecryptOnly makes Wrap fail as a decrypt-only identity would.
 	DecryptOnly atomic.Bool
+	// Hang makes every call block until its context ends, as a KMS that never answers.
+	Hang atomic.Bool
 
 	once  sync.Once
 	aead  cipher.AEAD
@@ -47,7 +49,7 @@ func (f *FakeKMS) gcm() cipher.AEAD {
 	return f.aead
 }
 
-// Wraps counts the successful Wrap calls.
+// Wraps counts the Wrap calls (Encrypt requests), successful or not.
 func (f *FakeKMS) Wraps() int64 { return f.wraps.Load() }
 
 // Backend implements secretstore.Wrapper.
@@ -61,7 +63,11 @@ func (f *FakeKMS) KeyID() string {
 	return f.Name
 }
 
-func (f *FakeKMS) reach() error {
+func (f *FakeKMS) reach(ctx context.Context) error {
+	if f.Hang.Load() {
+		<-ctx.Done()
+		return fmt.Errorf("%w: fake KMS did not answer: %w", secretstore.ErrUnreachable, ctx.Err())
+	}
 	if f.Down.Load() {
 		return fmt.Errorf("%w: fake KMS is down", secretstore.ErrUnreachable)
 	}
@@ -69,8 +75,9 @@ func (f *FakeKMS) reach() error {
 }
 
 // Wrap implements secretstore.Wrapper.
-func (f *FakeKMS) Wrap(_ context.Context, kek, aad []byte) ([]byte, error) {
-	if err := f.reach(); err != nil {
+func (f *FakeKMS) Wrap(ctx context.Context, kek, aad []byte) ([]byte, error) {
+	f.wraps.Add(1)
+	if err := f.reach(ctx); err != nil {
 		return nil, err
 	}
 	if f.DecryptOnly.Load() {
@@ -81,13 +88,12 @@ func (f *FakeKMS) Wrap(_ context.Context, kek, aad []byte) ([]byte, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
-	f.wraps.Add(1)
 	return a.Seal(nonce, nonce, kek, aad), nil
 }
 
 // Unwrap implements secretstore.Wrapper.
-func (f *FakeKMS) Unwrap(_ context.Context, wrapped, aad []byte) ([]byte, error) {
-	if err := f.reach(); err != nil {
+func (f *FakeKMS) Unwrap(ctx context.Context, wrapped, aad []byte) ([]byte, error) {
+	if err := f.reach(ctx); err != nil {
 		return nil, err
 	}
 	a := f.gcm()
@@ -102,4 +108,4 @@ func (f *FakeKMS) Unwrap(_ context.Context, wrapped, aad []byte) ([]byte, error)
 }
 
 // Probe implements secretstore.Wrapper.
-func (f *FakeKMS) Probe(context.Context) error { return f.reach() }
+func (f *FakeKMS) Probe(ctx context.Context) error { return f.reach(ctx) }

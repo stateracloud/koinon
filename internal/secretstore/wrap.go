@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // BackendLocal is the [Local] adapter's backend name.
@@ -26,6 +27,11 @@ var ErrUnreachable = errors.New("secretstore: the key-wrapping key is unreachabl
 
 // Wrapper is one key-wrapping key: an adapter over the place that holds it. Implementations are
 // safe for concurrent use and never log key material.
+//
+// Every call must end by its context's deadline, and an adapter must also apply its own per-call
+// timeout to each request (the watch loops pass a context that lives as long as the process;
+// [Wrappers] bounds each call by [CallTimeout] as well). A call that gave up wraps [ErrUnreachable].
+// Adapters sign in with the pod's identity, never with a credential in values, env or a sandbox.
 type Wrapper interface {
 	// Backend names the adapter: a short fixed word ("local", "openbao", "awskms"). It is the value
 	// of the metric label "backend" (ADR 0023: a fixed set) and is stored with every wrapped KEK.
@@ -40,6 +46,7 @@ type Wrapper interface {
 	Unwrap(ctx context.Context, wrapped, aad []byte) ([]byte, error)
 	// Probe reports, without changing anything, whether the wrapping key is reachable and usable by
 	// this process (nil), or why not (wrapping [ErrUnreachable]). It needs no right beyond decrypt.
+	// Nothing calls it on a timer yet: the unreachable-key metric that will is 415b.
 	Probe(ctx context.Context) error
 }
 
@@ -143,14 +150,53 @@ func kekAAD(id string) []byte { return Binding{}.aad("kek", id) }
 // Wrappers are the key-wrapping keys a process can use: one wraps new KEKs, the others (and
 // [Local], always) only unwrap, so a key set can hold KEKs of an earlier backend while its values
 // are rewrapped. The zero value is [Local] alone: today's behaviour.
+//
+// Only the key-admin Job wraps a new KEK with a KMS (procoduck, 2026-11-02): the services (koinon-api,
+// the reconciler, agentd) are decrypt-only. [NewWrappers] builds a service's wrappers, whose Wrap
+// refuses a KMS primary with [ErrKeyAdminWraps] before it calls the KMS; [NewKeyAdminWrappers]
+// builds the Job's. With the [Local] primary both wrap, as before key wrapping. Processes build
+// them from their configuration in one place (package secretstore/wrapping), not here.
 type Wrappers struct {
-	primary Wrapper
-	more    []Wrapper
+	primary  Wrapper
+	more     []Wrapper
+	keyAdmin bool
+	timeout  time.Duration
 }
 
-// NewWrappers returns the wrappers with primary wrapping new KEKs. Each backend and key ID pair
-// appears once.
+// ErrKeyAdminWraps means a service tried to wrap a new KEK with a KMS: only the key-admin Job holds
+// encrypt rights.
+var ErrKeyAdminWraps = errors.New("secretstore: new KEKs are wrapped by the key-admin Job; this process may only unwrap")
+
+// CallTimeout bounds each adapter call that Wrappers makes, whatever the caller's context: the
+// watch loops pass a context that lives as long as the process.
+const CallTimeout = 10 * time.Second
+
+// NewWrappers returns a service's wrappers: primary is the wrapping key of the key set (new KEKs
+// are wrapped with it only when it is [Local]). Each backend and key ID pair appears once.
 func NewWrappers(primary Wrapper, more ...Wrapper) (Wrappers, error) {
+	return newWrappers(false, primary, more)
+}
+
+// NewKeyAdminWrappers returns the key-admin Job's wrappers: they wrap new KEKs with primary.
+func NewKeyAdminWrappers(primary Wrapper, more ...Wrapper) (Wrappers, error) {
+	return newWrappers(true, primary, more)
+}
+
+// WithCallTimeout returns ws with another per-call bound than [CallTimeout] (tests).
+func (ws Wrappers) WithCallTimeout(d time.Duration) Wrappers {
+	ws.timeout = d
+	return ws
+}
+
+func (ws Wrappers) call(ctx context.Context) (context.Context, context.CancelFunc) {
+	d := ws.timeout
+	if d <= 0 {
+		d = CallTimeout
+	}
+	return context.WithTimeout(ctx, d)
+}
+
+func newWrappers(keyAdmin bool, primary Wrapper, more []Wrapper) (Wrappers, error) {
 	if primary == nil {
 		return Wrappers{}, errors.New("secretstore: no key-wrapping key to wrap new keys with")
 	}
@@ -165,7 +211,7 @@ func NewWrappers(primary Wrapper, more ...Wrapper) (Wrappers, error) {
 		}
 		seen[k] = true
 	}
-	return Wrappers{primary: primary, more: more}, nil
+	return Wrappers{primary: primary, more: more, keyAdmin: keyAdmin}, nil
 }
 
 // Primary is the wrapper new KEKs are wrapped with.
@@ -189,12 +235,18 @@ func (ws Wrappers) For(s StoredKEK) (Wrapper, error) {
 	return nil, fmt.Errorf("secretstore: no adapter is configured for the key-wrapping key %s", s.String())
 }
 
-// Wrap wraps a new KEK under the primary wrapper.
+// Wrap wraps a new KEK under the primary wrapper. A service's wrappers with a KMS primary refuse
+// with [ErrKeyAdminWraps] and never call the KMS.
 func (ws Wrappers) Wrap(ctx context.Context, id string, kek []byte) (StoredKEK, error) {
 	if len(kek) != KeySize {
 		return StoredKEK{}, fmt.Errorf("secretstore: a key is %d bytes, not %d", len(kek), KeySize)
 	}
 	w := ws.Primary()
+	if w.Backend() != BackendLocal && !ws.keyAdmin {
+		return StoredKEK{}, fmt.Errorf("wrap key %q with %s: %w", id, w.Backend(), ErrKeyAdminWraps)
+	}
+	ctx, cancel := ws.call(ctx)
+	defer cancel()
 	wrapped, err := w.Wrap(ctx, kek, kekAAD(id))
 	if err != nil {
 		return StoredKEK{}, fmt.Errorf("secretstore: wrap key %q with %s: %w", id, w.Backend(), err)
@@ -208,8 +260,13 @@ func (ws Wrappers) Unwrap(ctx context.Context, id string, s StoredKEK) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := ws.call(ctx)
+	defer cancel()
 	kek, err := w.Unwrap(ctx, s.Wrapped, kekAAD(id))
 	if err != nil {
+		if ctx.Err() != nil && !errors.Is(err, ErrUnreachable) {
+			err = fmt.Errorf("%w: %w", ErrUnreachable, err)
+		}
 		return nil, fmt.Errorf("secretstore: unwrap key %q with %s: %w", id, s.String(), err)
 	}
 	if len(kek) != KeySize {
@@ -246,12 +303,21 @@ func (ws Wrappers) Probe(ctx context.Context, s StoredKEK) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
-	return w.Probe(ctx)
+	ctx, cancel := ws.call(ctx)
+	defer cancel()
+	if err := w.Probe(ctx); err != nil {
+		if !errors.Is(err, ErrUnreachable) {
+			err = fmt.Errorf("%w: %w", ErrUnreachable, err)
+		}
+		return err
+	}
+	return nil
 }
 
 // Fingerprint identifies a KEK without revealing it: the first 16 bytes of HMAC-SHA256 keyed by
-// the KEK over a fixed label, in hex. It is the same however the KEK is wrapped, so a backup (the
-// key export) can be matched with the fingerprints the database records.
+// the KEK over a fixed label, in hex. It is the same however the KEK is wrapped. Today "keys
+// status" and "keys export" print it, so a backup can be matched with the live key set; recording
+// it in the database is 415b.
 func Fingerprint(kek []byte) string {
 	m := hmac.New(sha256.New, kek)
 	_, _ = m.Write([]byte("koinon/secretstore/kek-fingerprint/v1"))
