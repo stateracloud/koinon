@@ -8,17 +8,21 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 # Stub gh. The runs on the head: the Nth listing answers $FAKE/runs.N (the last one repeats); each
-# line is `<id> <status> <conclusion>`. A run's quickstart verdict: the next line of $FAKE/q.<id>
-# per call (the last one repeats), as the real jq prints it.
+# line is `<id> <status> <conclusion>`. Or, when $FAKE/runs.json exists, the script's own --jq
+# filter runs on that API response. A run's quickstart verdict: the next line of $FAKE/q.<id> per
+# call (the last one repeats), as the real jq prints it; its decide verdict: $FAKE/d.<id>
+# (default success).
 cat >"$tmp/gh" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
 */actions/workflows/e2e-kind.yml/runs*)
+  if [[ -e $FAKE/runs.json ]]; then jq -r "$4" "$FAKE/runs.json"; exit; fi
   n=$(($(cat "$FAKE/rn" 2>/dev/null || echo 0) + 1)); echo "$n" >"$FAKE/rn"
   while [[ $n -gt 1 && ! -e $FAKE/runs.$n ]]; do n=$((n - 1)); done
   cat "$FAKE/runs.$n" 2>/dev/null || true ;;
 */actions/runs/*/jobs*)
   id=$2; id=${id#*actions/runs/}; id=${id%%/*}
+  if [[ $4 == *'startswith("decide")'* ]]; then cat "$FAKE/d.$id" 2>/dev/null || echo success; exit; fi
   c=$(($(cat "$FAKE/c.$id" 2>/dev/null || echo 0) + 1)); echo "$c" >"$FAKE/c.$id"
   total=$(wc -l <"$FAKE/q.$id"); [[ $c -le $total ]] || c=$total
   sed -n "${c}p" "$FAKE/q.$id" ;;
@@ -75,13 +79,13 @@ fresh
 printf '41 in_progress -\n' >"$FAKE/runs.1"
 printf '41 in_progress -\n' >"$FAKE/runs.2"
 printf '41 completed failure\n' >"$FAKE/runs.3"
-echo failure >"$FAKE/q.41"
+printf 'pending\npending\nfailure\n' >"$FAKE/q.41"
 want 1 "mirror: waits for the live e2e, then mirrors its failure" "waiting for e2e-kind run 41" DECIDE=skipped QUICKSTART=skipped MIRROR=true
 [[ $(cat "$FAKE/rn") -eq 3 ]] || { echo "FAIL: mirror listed the runs $(cat "$FAKE/rn") times, want 3" >&2; fail=1; }
 fresh
 printf '41 in_progress -\n' >"$FAKE/runs.1"
 printf '41 completed success\n' >"$FAKE/runs.2"
-echo success >"$FAKE/q.41"
+printf 'pending\nsuccess\n' >"$FAKE/q.41"
 want 0 "mirror: waits for the live e2e, then mirrors its success" "newest run that ran the e2e on this commit: 41 (success)" \
   DECIDE=skipped QUICKSTART=skipped MIRROR=true
 fresh
@@ -99,13 +103,52 @@ want 0 "mirror: a later green e2e (re-run or dispatch) counts" "44 (success)" DE
 fresh
 printf '41 completed success\n' >"$FAKE/runs.1"
 echo skipped >"$FAKE/q.41"
-want 0 "mirror: no run ran the e2e, the last one was green" "newest finished run: success" DECIDE=skipped QUICKSTART=skipped MIRROR=true
+want 0 "mirror: no run ran the e2e, the last one was green" "newest finished run that decided: success" DECIDE=skipped QUICKSTART=skipped MIRROR=true
 fresh
 printf '41 completed failure\n' >"$FAKE/runs.1"
 echo none >"$FAKE/q.41"
 want 1 "mirror: no run ran the e2e, the last one failed" "concluded failure" DECIDE=skipped QUICKSTART=skipped MIRROR=true
 fresh
-want 0 "mirror: no other run on the head" "newest finished run: none" DECIDE=skipped QUICKSTART=skipped MIRROR=true
+want 0 "mirror: no other run on the head" "newest finished run that decided: none" DECIDE=skipped QUICKSTART=skipped MIRROR=true
+
+# Round 2: two label runs on one head never wait on each other.
+fresh
+printf '51 in_progress -\n52 queued -\n' >"$FAKE/runs.1"
+echo skipped >"$FAKE/q.51"
+echo skipped >"$FAKE/d.51"
+echo none >"$FAKE/q.52"
+want 0 "mirror: an in-progress mirror-only run and a queued run are not waited for" "newest finished run that decided: none" \
+  DECIDE=skipped QUICKSTART=skipped MIRROR=true
+[[ $(cat "$FAKE/rn") -eq 1 ]] || { echo "FAIL: waited on another label run (listed $(cat "$FAKE/rn") times)" >&2; fail=1; }
+fresh
+printf '41 completed success\n51 completed failure\n' >"$FAKE/runs.1"
+echo skipped >"$FAKE/q.41"
+echo skipped >"$FAKE/q.51"
+echo skipped >"$FAKE/d.51"
+want 0 "mirror: a red mirror-only run is not passed on" "newest finished run that decided: success" \
+  DECIDE=skipped QUICKSTART=skipped MIRROR=true
+fresh
+cat >"$FAKE/runs.json" <<'JSON'
+{"workflow_runs":[
+ {"id":41,"event":"pull_request","display_title":"e2e-kind","status":"completed","conclusion":"failure","created_at":"2026-11-01T10:00:00Z"},
+ {"id":60,"event":"workflow_dispatch","display_title":"e2e-kind (0123abc) bisect 7","status":"completed","conclusion":"success","created_at":"2026-11-01T11:00:00Z"},
+ {"id":99,"event":"pull_request","display_title":"e2e-kind","status":"in_progress","conclusion":null,"created_at":"2026-11-01T12:00:00Z"}
+]}
+JSON
+echo failure >"$FAKE/q.41"
+echo success >"$FAKE/q.60"
+want 1 "mirror: a dispatch that tested another commit is not a mirror source" "run 41: failure" \
+  DECIDE=skipped QUICKSTART=skipped MIRROR=true
+fresh
+cat >"$FAKE/runs.json" <<'JSON'
+{"workflow_runs":[
+ {"id":41,"event":"pull_request","display_title":"e2e-kind","status":"completed","conclusion":"failure","created_at":"2026-11-01T10:00:00Z"},
+ {"id":61,"event":"workflow_dispatch","display_title":"e2e-kind","status":"completed","conclusion":"success","created_at":"2026-11-01T11:00:00Z"}
+]}
+JSON
+echo failure >"$FAKE/q.41"
+echo success >"$FAKE/q.61"
+want 0 "mirror: a dispatch of the head itself is" "61 (success)" DECIDE=skipped QUICKSTART=skipped MIRROR=true
 
 [[ $fail -eq 0 ]] && echo "e2e-result tests passed"
 exit "$fail"
