@@ -149,8 +149,10 @@ g_go() {
 	local pkgs files out
 	pkgs=$(go_pkgs)
 	if command -v golangci-lint >/dev/null; then
+		# `|| return 1`: golangci-lint exits 3 on findings, which run_gate would read as INCOMPLETE;
+		# only go-test.sh may report 3.
 		# shellcheck disable=SC2086 # pkgs is a word list
-		golangci-lint run $pkgs
+		golangci-lint run $pkgs || return 1
 	else
 		files=$(existing '\.go$')
 		if [[ -n $files ]]; then
@@ -159,7 +161,7 @@ g_go() {
 			if [[ -n $out ]]; then echo "gofumpt would change:"; echo "$out"; return 1; fi
 		fi
 		# shellcheck disable=SC2086
-		go vet $pkgs
+		go vet $pkgs || return 1
 	fi
 	# hack/go-test.sh, not bare go test: its verdict reports a suite that skipped for a missing
 	# requirement (no Docker in a sandbox) as SKIPPED and one that did not run as a failure (#507).

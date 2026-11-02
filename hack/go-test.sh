@@ -27,7 +27,8 @@
 # Per-spec reports (#221): JUnit XML goes to REPORT_DIR (default reports/go, git-ignored), one file
 # per Ginkgo suite (`ginkgo --junit-report` for the parallel ones, `go test -args
 # -ginkgo.junit-report` for the rest, one testcase per spec) and go-test.xml from `gotestsum --junitfile` for the packages with only plain tests, so a local run and CI produce the same files. CI uploads the directory as an artifact.
-# The Ginkgo JSON reports the verdict reads sit next to them (*_report.json).
+# The Ginkgo JSON reports the verdict reads sit next to them (*_report.json), with the go test
+# events of the go test parts (*.gotest.jsonl), where a plain test's testenv.RequireT skip shows.
 # The reports only record; nothing reruns a failed spec.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -51,7 +52,7 @@ procs=(-p)
 report_dir=${REPORT_DIR:-reports/go}
 mkdir -p "$report_dir"
 # Stale files from an earlier run would read as this run's results.
-find "$report_dir" -maxdepth 1 \( -name '*.xml' -o -name '*.json' \) -delete
+find "$report_dir" -maxdepth 1 \( -name '*.xml' -o -name '*.json' -o -name '*.jsonl' \) -delete
 
 pkgs=("$@")
 ((${#pkgs[@]})) || pkgs=(./...)
@@ -64,7 +65,12 @@ pkgs=("$@")
 parallel=()
 ginkgo_rest=()
 plain=()
+# Listed first, not in a process substitution: a failing `go list` (a bad package argument) would
+# otherwise leave an empty run that exits 0.
+dirs=$(go list -f '{{.Dir}}' "${pkgs[@]}") || { echo "go-test.sh: go list ${pkgs[*]} failed" >&2; exit 1; }
 while IFS= read -r dir; do
+	[[ -n $dir ]] || continue
+	dir=${dir/#"$PWD"/.}
 	[[ $# == 0 && $dir == ./test/flavors ]] && continue # needs the flavor images, see make test-flavors
 	is_parallel=0
 	for s in "${PARALLEL_SUITES[@]}"; do
@@ -77,7 +83,7 @@ while IFS= read -r dir; do
 	else
 		plain+=("$dir")
 	fi
-done < <(go list -f '{{.Dir}}' "${pkgs[@]}" | sed "s|^$PWD|.|")
+done <<<"$dirs"
 
 rc=0
 # Run all parts so one CI run reports every failing package.
@@ -87,7 +93,9 @@ if ((${#parallel[@]})); then
 fi
 if ((${#ginkgo_rest[@]})); then
 	for dir in "${ginkgo_rest[@]}"; do rm -f "$dir/junit.xml" "$dir/report.json"; done
-	go test -count=1 "${ginkgo_rest[@]}" -args -ginkgo.junit-report=junit.xml -ginkgo.json-report=report.json -ginkgo.fail-on-empty || rc=$?
+	# Through gotestsum for its go test -json events: a plain test in a suite's package that skips
+	# through testenv.RequireT is seen only there (the chart contract test without helm).
+	go tool gotestsum --jsonfile "$report_dir/ginkgo-rest.gotest.jsonl" --format standard-quiet -- -count=1 "${ginkgo_rest[@]}" -args -ginkgo.junit-report=junit.xml -ginkgo.json-report=report.json -ginkgo.fail-on-empty || rc=$?
 	for dir in "${ginkgo_rest[@]}"; do
 		name=${dir#./}
 		name=${name//\//_}
@@ -96,16 +104,18 @@ if ((${#ginkgo_rest[@]})); then
 	done
 fi
 if ((${#plain[@]})); then
-	go tool gotestsum --junitfile "$report_dir/go-test.xml" --format pkgname -- "${plain[@]}" || rc=$?
+	go tool gotestsum --junitfile "$report_dir/go-test.xml" --jsonfile "$report_dir/plain.gotest.jsonl" --format pkgname -- "${plain[@]}" || rc=$?
 fi
 
 # The verdict over every Ginkgo suite of this run; it fails the run for a suite that did not run.
 suites=(${parallel[@]+"${parallel[@]}"} ${ginkgo_rest[@]+"${ginkgo_rest[@]}"}) # bash 3.2: empty arrays under set -u
-if ((${#suites[@]})); then
+events=()
+for f in "$report_dir"/*.gotest.jsonl; do [[ -f $f ]] && events+=(-gotest-json "$f"); done
+if ((${#suites[@]} + ${#events[@]})); then
 	# Built, not `go run`: go run reports any non-zero exit of the program as 1, hiding the 3.
 	go build -o "$report_dir/testverdict.bin" ./hack/testverdict || exit 1
 	vrc=0
-	"$report_dir/testverdict.bin" -reports "$report_dir" -name go-test -expect "${KOINON_EXPECT:-docker,git,helm}" "${suites[@]}" || vrc=$?
+	"$report_dir/testverdict.bin" -reports "$report_dir" -name go-test -expect "${KOINON_EXPECT:-docker,git,helm}" ${events[@]+"${events[@]}"} ${suites[@]+"${suites[@]}"} || vrc=$?
 	rm -f "$report_dir/testverdict.bin"
 	if [[ $vrc == 3 && $rc == 0 ]]; then
 		rc=3

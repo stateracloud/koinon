@@ -205,6 +205,13 @@ check "summary says incomplete" has '^preflight incomplete' "$tmp/f1b"
 check "no preflight ok" hasnt '^preflight ok' "$tmp/f1b"
 check "no go ok" hasnt '^go ok' "$tmp/f1b"
 unset FAKE_GO_TEST_RC
+# 4c. golangci-lint's own exit 3 (its findings code) is a failure, not INCOMPLETE
+export FAKE_LINT_RC=3
+rc=$(pf "$tmp/f1c" --only go)
+check "lint exit 3: exit 1" eq "$rc" 1
+check "lint exit 3 is a FAIL" has '^go FAIL ' "$tmp/f1c"
+check "lint exit 3 is not INCOMPLETE" hasnt '[Ii][Nn][Cc][Oo][Mm][Pp][Ll][Ee][Tt][Ee]' "$tmp/f1c"
+unset FAKE_LINT_RC
 export FAKE_GITLEAKS_RC=1
 rc=$(pf "$tmp/f2" --only gitleaks)
 check "gitleaks failure: exit 1" eq "$rc" 1
