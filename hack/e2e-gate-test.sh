@@ -40,8 +40,8 @@ fail=0
 reset() { rm -f "$tmp"/*.json "$tmp"/calls; }
 # runs <id> <event> <displayTitle>...: the runs the head has (one per triple).
 runs() { local j="[" sep=""; while (($#)); do j+="$sep{\"databaseId\":$1,\"event\":\"$2\",\"displayTitle\":\"$3\"}"; sep=","; shift 3; done; echo "$j]" >"$tmp/runs.json"; }
-# job <run id> <quickstart conclusion> <web-step conclusion>
-job() { echo "{\"jobs\":[{\"id\":7,\"name\":\"quickstart\",\"conclusion\":\"$2\",\"steps\":[{\"name\":\"Node and pnpm (web suite)\",\"conclusion\":\"$3\"}]},{\"id\":8,\"name\":\"e2e result\",\"conclusion\":\"failure\",\"steps\":[]}]}" >"$tmp/jobs-$1.json"; }
+# job <run id> <quickstart conclusion> <go-suite marker step conclusion>
+job() { echo "{\"jobs\":[{\"id\":7,\"name\":\"quickstart\",\"conclusion\":\"$2\",\"steps\":[{\"name\":\"Go suite (marker for the e2e gate)\",\"conclusion\":\"$3\"}]},{\"id\":8,\"name\":\"e2e result\",\"conclusion\":\"failure\",\"steps\":[]}]}" >"$tmp/jobs-$1.json"; }
 # gate <want rc> <description> [VAR=value...]
 gate() {
   local want=$1 desc=$2 rc=0 out
@@ -65,23 +65,23 @@ has "gh workflow run e2e-kind.yml --ref feat/x"
 has "Re-run failed jobs"
 
 runs 101 workflow_dispatch e2e-kind
-job 101 success skipped
+job 101 success success
 gate 0 "required, a dispatched go-suite run's quickstart job passed (the run may still be in progress)" "${G[@]}"
-job 101 failure skipped
+job 101 failure success
 gate 1 "required, the dispatched quickstart failed" "${G[@]}"
 job 101 skipped skipped
 gate 1 "required, a run whose quickstart was skipped is not evidence" "${G[@]}"
-job 101 success success
-gate 1 "required, the web suite (Playwright only) is not evidence" "${G[@]}"
-runs 101 workflow_dispatch "e2e-kind (0123456789abcdef0123456789abcdef01234567) bisect 9"
 job 101 success skipped
+gate 1 "required, a suite without the go marker (web, or a future one) is not evidence" "${G[@]}"
+runs 101 workflow_dispatch "e2e-kind (0123456789abcdef0123456789abcdef01234567) bisect 9"
+job 101 success success
 gate 1 "required, a bisect dispatch of another commit is not evidence" "${G[@]}"
 runs 101 push e2e-kind
 gate 1 "required, a push run is not evidence on a PR head" "${G[@]}"
 runs 101 pull_request e2e-kind
 gate 0 "required, another pull_request run with a green quickstart (label) is evidence" "${G[@]}"
 runs 100 workflow_dispatch e2e-kind
-job 100 success skipped
+job 100 success success
 gate 1 "required, this run itself is not looked up as another run" "${G[@]}"
 
 reset
@@ -96,13 +96,21 @@ echo '[{"context":"e2e-lab","state":"success"}]' >"$tmp/lab.json"
 gate 1 "required and quickstart failed, a lab success does not hide it" DECIDE=success QUICKSTART=failure REQUIRED=true
 gate 1 "required, no head sha is read as no evidence" "${G[@]}" SHA=
 
+# The YAML and the gate agree on the marker step: its exact name, and the `if` that makes the default
+# (no inputs, as on pull_request) count as the go suite.
+wf=.github/workflows/e2e-kind.yml
+grep -qxF '      - name: Go suite (marker for the e2e gate)' "$wf" || { echo "FAIL: $wf lacks the marker step name" >&2; fail=1; }
+grep -qF '"Go suite (marker for the e2e gate)"' hack/e2e-gate.sh || { echo "FAIL: e2e-gate.sh does not read the marker step name" >&2; fail=1; }
+grep -A1 -xF '      - name: Go suite (marker for the e2e gate)' "$wf" | grep -qxF "        if: (inputs.suite || 'go') == 'go'" || { echo "FAIL: the marker step's if is not the go-suite default" >&2; fail=1; }
+echo ok: marker step pinned
+
 # hack/e2e-rerun-result.sh
 reset
 rc=0
 hack/e2e-rerun-result.sh "$SHA" >/dev/null || rc=$?
 if [[ $rc -eq 0 ]] && ! grep -q '^run rerun' "$tmp/calls"; then echo "ok: rerun: nothing failed, nothing re-run"; else echo "FAIL: rerun without a failed run" >&2; fail=1; fi
 echo '[{"databaseId":55,"status":"completed","conclusion":"failure"}]' >"$tmp/failed.json"
-job 55 failure skipped
+job 55 failure success
 hack/e2e-rerun-result.sh "$SHA" >/dev/null
 if grep -q '^run rerun 55 --job 8$' "$tmp/calls" && ! grep -q -- '--failed' "$tmp/calls"; then echo "ok: rerun: only the e2e result job is re-run"; else echo "FAIL: rerun did not re-run job 8 of run 55 alone" >&2; fail=1; fi
 echo '[{"databaseId":55,"status":"in_progress","conclusion":null}]' >"$tmp/failed.json"
