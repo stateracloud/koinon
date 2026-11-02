@@ -330,6 +330,8 @@ eq "--while-pid stops with 0 when the process is gone" "$(rc_of "$r")" 0
 eq "--while-pid stops before any round" "$(grep -c '^beat [0-9]' <<<"$r")" 0
 r=$(lanecmd "$mine_only" beat --mine --every 30m --while-pid $$ --for 1m)
 eq "--while-pid with a live process runs" "$(grep -c '^beat [0-9]' <<<"$r")" 1
+eq "--for needs --mine" "$(rc_of "$(lanecmd "$mine_only" beat 10 --for 1m)")" 1
+eq "\$PPID of a bash -c is the parent's pid" "$(bash -c 'echo $PPID')" "$$"
 eq "--while-pid needs --mine" "$(rc_of "$(lanecmd "$mine_only" beat 10 --while-pid $$)")" 1
 unset STUB_SLEEP ON_SLEEP
 
@@ -373,6 +375,15 @@ r=$( {
   cmd_adopt --from old 30
 } 2>&1 ) || rc=$?
 if ((rc == 2)) && grep -q 'is closed' <<<"$r"; then ok "adopt refuses a closed issue"; else bad "closed issue: rc=$rc $r"; fi
+rc=0
+r=$( {
+  FIX=$ADOPT_DEAD; export KOINON_AGENT_SESSION=s1; unset CLAUDE_CODE_SESSION_ID KOINON_CLAIM_LANE
+  stub_github
+  issue_json() { return 1; }
+  LANE=; HUMAN_CAP=4; SESSION_CAP=1
+  cmd_adopt --from old 30
+} 2>&1 ) || rc=$?
+if ((rc == 1)) && grep -q 'API error' <<<"$r"; then ok "adopt: an API error is exit 1, not closed"; else bad "issue_json failure: rc=$rc $r"; fi
 eq "adopt your own session" "$(rc_of "$(lanecmd "$ADOPT_DEAD" adopt --from s1)")" 1
 eq "adopt needs --from" "$(rc_of "$(lanecmd "$ADOPT_DEAD" adopt)")" 1
 # Caps: the human cap (4) counts the active claims, the session cap (1) counts per lane.
