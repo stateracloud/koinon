@@ -98,7 +98,7 @@ expect "go chartsmoke flavors" internal/modelformat/format.go
 expect "go chartsmoke flavors" internal/prices/prices.go
 expect "go chartsmoke flavors" internal/testing/fakemodel/server.go
 expect "go chartsmoke flavors" internal/thinking/thinking.go
-expect "go chartsmoke flavors" internal/db/store/models.go
+expect "go chartsmoke flavors generate" internal/db/store/models.go # sqlc.yaml out: a hand edit of generated code must run the check
 expect "go chartsmoke flavors" pricing/prices.json # pricing/ is embedded by internal/prices; its own package dir
 expect "go chartsmoke flavors" internal/agentd/agentd.go # the original filter
 expect "go chartsmoke flavors" templates/agent.yaml
@@ -144,37 +144,64 @@ probe() {
 	if [[ -d $1 ]]; then echo "${1%/}/zzz-probe.file"; else echo "$1"; fi
 }
 
+# need_min <what> <minimum> <found>: a derivation that parses too little is a failure, not a pass.
+need_min() {
+	total=$((total + 1))
+	if [[ $3 -lt $2 ]]; then
+		echo "FAIL: derived only $3 $1 (want at least $2); the derivation is stale or the parser is not portable"
+		fails=$((fails + 1))
+	fi
+}
+
 # generate: the Makefile's recipe names the buf templates, the sqlc config and the oapi-codegen
 # config and spec; the templates and configs name the inputs, the outputs and the local plugin.
+# Portable sed only (-E; BSD sed has no \|).
 gen_inputs=(buf.yaml buf.gen.yaml sqlc.yaml)
 recipe=$(sed -n '/^generate:/,/^[^[:space:]]/p' Makefile | grep -E '^[[:space:]]' || true)
-[[ -n $recipe ]] || { echo "FAIL: no generate recipe found in Makefile"; fails=$((fails + 1)); }
+need_min "lines in the Makefile generate recipe" 4 "$(grep -c . <<<"$recipe" || true)"
 for tok in $recipe; do
 	[[ -f $tok ]] && gen_inputs+=("$tok")
 done
+# buf.yaml: modules: - path: <module dir> (the protos buf generate reads).
+mods=0
+while IFS= read -r v; do
+	[[ -n $v ]] && { gen_inputs+=("$v"); mods=$((mods + 1)); }
+done < <(sed -n -E 's/^[[:space:]-]*path:[[:space:]]*//p' buf.yaml)
+need_min "buf.yaml modules" 1 $mods
+templates=0 tmplin=0
 for tmpl in buf.gen*.yaml; do
+	templates=$((templates + 1))
 	gen_inputs+=("$tmpl")
 	# directory: <input dir>, out: <output dir>, local: [..] or path (a node_modules plugin).
 	while IFS= read -r v; do
 		[[ -n $v ]] || continue
+		tmplin=$((tmplin + 1))
 		if [[ $v == web/node_modules/* ]]; then
 			gen_inputs+=(web/package.json web/pnpm-lock.yaml)
 		else
 			gen_inputs+=("$v")
 		fi
-	done < <(sed -n -e 's/^[[:space:]-]*directory:[[:space:]]*//p' -e 's/^[[:space:]-]*out:[[:space:]]*//p' -e 's/^[[:space:]-]*local:[[:space:]]*\(web\/[^ "]*\).*/\1/p' "$tmpl")
+	done < <(sed -n -E -e 's/^[[:space:]-]*directory:[[:space:]]*//p' -e 's/^[[:space:]-]*out:[[:space:]]*//p' -e 's/^[[:space:]-]*local:[[:space:]]*(web\/[^ "]*).*/\1/p' "$tmpl")
 done
+need_min "buf.gen*.yaml templates" 3 $templates
+need_min "inputs, outputs and plugins read from the buf templates" 6 $tmplin
+sqlcin=0
 while IFS= read -r v; do # sqlc.yaml: schema, queries, out
-	[[ -n $v ]] && gen_inputs+=("$v")
-done < <(sed -n -e 's/^[[:space:]-]*\(schema\|queries\|out\):[[:space:]]*//p' sqlc.yaml)
+	[[ -n $v ]] && { gen_inputs+=("$v"); sqlcin=$((sqlcin + 1)); }
+done < <(sed -n -E 's/^[[:space:]-]*(schema|queries|out):[[:space:]]*//p' sqlc.yaml)
+need_min "sqlc.yaml paths (schema, queries, out)" 3 $sqlcin
+oapi=0
 while IFS= read -r cfg; do # oapi-codegen -config <file> <spec>: the config, its output, the spec
 	gen_inputs+=("$cfg")
-	out=$(sed -n 's/^output:[[:space:]]*//p' "$cfg")
-	[[ -n $out ]] && gen_inputs+=("$out")
+	oapi=$((oapi + 1))
+	out=$(sed -n -E 's/^output:[[:space:]]*//p' "$cfg")
+	[[ -n $out ]] && { gen_inputs+=("$out"); oapi=$((oapi + 1)); }
 done < <(grep -oE -- '-config [^ ]+' <<<"$recipe" | awk '{print $2}')
 # The spec is the recipe's last argument of the oapi-codegen line.
 spec=$(grep 'oapi-codegen' <<<"$recipe" | awk '{print $NF}')
-[[ -f $spec ]] && gen_inputs+=("$spec")
+[[ -f $spec ]] && { gen_inputs+=("$spec"); oapi=$((oapi + 1)); }
+need_min "oapi-codegen config, output and spec" 3 $oapi
+need_min "generator inputs in all" 15 ${#gen_inputs[@]}
 for p in "${gen_inputs[@]}"; do
 	[[ -e $p ]] || { echo "FAIL: derived generator input $p does not exist (the derivation is stale)"; fails=$((fails + 1)); continue; }
 	turns_on generate "$(probe "$p")"
@@ -182,9 +209,15 @@ done
 
 # chart: hack/chart-check.sh sources `. <file>` and every hack/chart-check.d/*.sh, and runs ./hack/chartlint.
 chart_inputs=(hack/chart-check.sh)
-while IFS= read -r f; do chart_inputs+=("$f"); done < <(sed -n 's/^\.[[:space:]]\{1,\}\(hack\/[^[:space:]]*\).*/\1/p' hack/chart-check.sh)
-for f in hack/chart-check.d/*.sh; do chart_inputs+=("$f"); done
-while IFS= read -r f; do chart_inputs+=("${f#./}"); done < <(grep -oE '\./hack/[a-z0-9_/-]+' hack/chart-check.sh | sort -u)
+sourced=0
+while IFS= read -r f; do chart_inputs+=("$f"); sourced=$((sourced + 1)); done < <(sed -n -E 's/^\.[[:space:]]+(hack\/[^[:space:]]*).*/\1/p' hack/chart-check.sh)
+need_min "files sourced by chart-check.sh" 1 $sourced
+parts=0
+for f in hack/chart-check.d/*.sh; do chart_inputs+=("$f"); parts=$((parts + 1)); done
+need_min "hack/chart-check.d assertion files" 5 $parts
+runs=0
+while IFS= read -r f; do chart_inputs+=("${f#./}"); runs=$((runs + 1)); done < <(grep -oE '\./hack/[a-z0-9_/-]+' hack/chart-check.sh | sort -u)
+need_min "./hack tools run by chart-check.sh" 1 $runs
 chart_inputs+=(charts/koinon/Chart.yaml)
 for p in "${chart_inputs[@]}"; do
 	[[ -e $p ]] || { echo "FAIL: derived chart input $p does not exist"; fails=$((fails + 1)); continue; }
@@ -200,16 +233,36 @@ while IFS= read -r tok; do
 	[[ -n $tok && -e $tok ]] && docs_inputs+=("$tok")
 done < <(grep -v '^[[:space:]]*#' hack/docs-check.sh | grep -oE '(\./)?(internal|hack|test|web|charts|docs|cmd|pkg)/[A-Za-z0-9_./*-]+' | sort -u)
 docs_inputs+=(README.md)
-[[ ${#docs_inputs[@]} -gt 3 ]] || { echo "FAIL: found only ${#docs_inputs[@]} docs-check inputs (the derivation is stale)"; fails=$((fails + 1)); }
+need_min "docs-check inputs" 8 ${#docs_inputs[@]}
 for p in "${docs_inputs[@]}"; do
 	turns_on docs "$(probe "$p")"
 done
 
-# flavors: every package directory the suite builds from (go list), and a file below it (embedded).
+# flavors, independent of the script: a real `go list` of the suite (import paths, not .Dir, so
+# no path stripping is shared with ci-changes.sh). The packages the audit named, and the suite
+# itself, must be in it; then each package directory (and a file below it) must turn flavors on.
+mod=$(go list -m)
+real_dirs=$(GOOS=linux go list -deps -test -f '{{.ImportPath}}' ./test/flavors/... | awk '{print $1}' | grep -F "$mod/" | grep -v '\.test$' | sed -e "s#^$mod/##" -e 's#_test$##' | sort -u) # test/flavors_test is the external test package of test/flavors
+for pkg in test/flavors internal/execution internal/modelformat internal/prices internal/testing/fakemodel internal/thinking pricing internal/db/store; do
+	total=$((total + 1))
+	if ! grep -qxF "$pkg" <<<"$real_dirs"; then
+		echo "FAIL: go list of test/flavors does not contain $pkg (the audit's F5 package)"
+		fails=$((fails + 1))
+	fi
+done
+need_min "packages in the flavors build graph" 30 "$(grep -c . <<<"$real_dirs" || true)"
+flav_rows=0
 while IFS= read -r d; do
 	[[ -n $d ]] || continue
 	turns_on flavors "$d/zzz-probe.file"
-done <<<"$flavors_dirs"
+	flav_rows=$((flav_rows + 1))
+done <<<"$real_dirs"
+# Fail closed: a dirs list without test/flavors (a path strip that found nothing) turns flavors on.
+total=$((total + 1))
+if ! printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$'internal/execution\ninternal/prices' bash $script --stdin | grep -qx 'flavors=true'; then
+	echo "FAIL: a dirs list without test/flavors must fail closed (flavors=true)"
+	fails=$((fails + 1))
+fi
 
 if [[ $fails -ne 0 ]]; then
 	echo "ci-changes-test: $fails of $total checks failed"

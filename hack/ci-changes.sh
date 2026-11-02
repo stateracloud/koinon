@@ -17,14 +17,18 @@ cd "$(dirname "$0")/.."
 # suite builds, tests included (`go list -deps -test`, as the flavors job runs it on linux).
 # CI_CHANGES_FLAVORS_DIRS (a list of directories) replaces the `go list` call; the test sets it once.
 flavors_dirs() {
-	local root out
+	local root out dirs
 	if [[ -v CI_CHANGES_FLAVORS_DIRS ]]; then
-		printf '%s\n' "$CI_CHANGES_FLAVORS_DIRS"
-		return 0
+		dirs=$CI_CHANGES_FLAVORS_DIRS
+	else
+		root=$(pwd -P) # go reports .Dir under the logical or the physical path, so strip both
+		out=$(GOOS=linux go list -deps -test -f '{{if not .Standard}}{{.Dir}}{{end}}' ./test/flavors/...) || return 1
+		dirs=$(awk -v r="$root/" -v l="$PWD/" 'index($0, r) == 1 { print substr($0, length(r) + 1) } index($0, l) == 1 { print substr($0, length(l) + 1) }' <<<"$out" | sort -u)
 	fi
-	root=$(pwd)
-	out=$(GOOS=linux go list -deps -test -f '{{if not .Standard}}{{.Dir}}{{end}}' ./test/flavors/...) || return 1
-	awk -v r="$root/" 'index($0, r) == 1 { print substr($0, length(r) + 1) }' <<<"$out" | sort -u
+	# The suite's own directory must be in the list; if not, the strip failed (a path outside
+	# the checkout, a symlink): fail closed instead of reporting "no dependency changed".
+	grep -qxF test/flavors <<<"$dirs" || return 1
+	printf '%s\n' "$dirs"
 }
 
 if [[ ${1:-} == --flavors-dirs ]]; then
@@ -59,14 +63,17 @@ pattern() {
 	# Makefile and the generator configs and fails when one is missing here): the protos and
 	# the vendored OpenShell protos, the OpenAPI spec and its config, the sqlc inputs, the
 	# buf and sqlc configs, protoc-gen-es (web/package.json, its lockfile) and the outputs.
-	generate) echo '^(api/proto/|third_party/openshell/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations)/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|web/package\.json$|web/pnpm-lock\.yaml$)' ;;
+	generate) echo '^(api/proto/|third_party/openshell/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|web/package\.json$|web/pnpm-lock\.yaml$)' ;;
 	# chart-check.sh sources hack/versions.env and every hack/chart-check.d/*.sh.
 	chart) echo '^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/versions\.env$)' ;;
 	# The binaries the chart starts, their flags and everything they import (the Go packages
+	# (This list is hand-written and partial: the Jobs also read hack/versions.env and other
+	# files the chart smoke test names; a push to main runs the job anyway.)
 	# outside internal/ and cmd/) count too.
 	chartsmoke) echo '^(charts/|cmd/|internal/|pricing/|connectors/|templates/|api/|web/|test/chartsmoke/|go\.(mod|sum))' ;;
 	# hack/docs-check.sh also reads internal/preflight/preflight.go and hack/versions.env, and
-	# runs the tests of internal/declarative.
+	# runs the tests of internal/declarative. Its repository-link check reads any file of the repo,
+	# so its inputs cannot be listed: this pattern is partial, and a push to main runs docs anyway.
 	docs) echo '^(docs/|test/e2e/|charts/|web/e2e-real/|hack/docs-|README\.md|internal/preflight/preflight\.go$|internal/declarative/|hack/versions\.env$)' ;;
 	escape) echo '^(charts/|test/escape/)' ;;
 	# The suite's Go imports are added by flavors_graph below.
