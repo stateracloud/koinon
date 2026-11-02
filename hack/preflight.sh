@@ -15,7 +15,7 @@
 #   --stop        stop this worktree's running preflight (pid file in its log directory) and exit;
 #                 never touches another worktree's run. Do not pkill/pgrep by script name instead.
 #
-# Gates: go tidy deps generate proto migrate adr docs chart web shell actionlint mktemp e2e gitleaks.
+# Gates: go tidy deps generate proto migrate adr docs chart web shell actionlint mktemp versions e2e gitleaks.
 # One line per gate: `go ok 12s`, `go FAIL 3s log=<path>` followed by at most 5 lines of the
 # error, or `go INCOMPLETE 3s (skipped: docker) log=<path>` when hack/go-test.sh exited 3 (an
 # expected requirement was missing, so some suites or specs skipped; #507). Full logs are under
@@ -26,7 +26,7 @@
 # failed, 2 on a usage error.
 set -uo pipefail
 
-ALL="go tidy deps generate proto migrate adr docs chart web shell actionlint mktemp e2e gitleaks"
+ALL="go tidy deps generate proto migrate adr docs chart web shell actionlint mktemp versions e2e gitleaks"
 GOFUMPT_VERSION=v0.12.0 # newest release at least 3 days old when pinned (ADR 0079)
 base=origin/main only="" list=0 verbose=0 stop=0
 while [[ $# -gt 0 ]]; do
@@ -107,6 +107,7 @@ reason() {
 	shell) n=$(count '\.sh$'); [[ $n -gt 0 ]] && echo "$n shell scripts changed" ;;
 	actionlint) match '^\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)$' && echo "workflows or the actionlint config changed" ;;
 	mktemp) match '\.sh$|^Makefile$|^\.github/workflows/[^/]*\.yml$' && echo "shell scripts, the Makefile or workflows changed" ;;
+	versions) match '^(hack/versions|hack/e2e-toolchain/|CONTRIBUTING\.md$|\.github/workflows/[^/]*\.yml$|hack/chart-check\.sh$|hack/[^/]*\.sh$|test/e2e/.*\.sh$)' && echo "the versions file or a copy of one changed" ;;
 	e2e) echo "informational, always" ;;
 	gitleaks) echo "always" ;;
 	esac
@@ -225,6 +226,10 @@ g_actionlint() { actionlint; } # the whole tree, as CI does: a workflow's lint c
 g_mktemp() { # independent of shellcheck, so it runs where shellcheck is missing (#535)
 	hack/mktemp-lint-test.sh
 	hack/mktemp-lint.sh
+}
+g_versions() { # hack/versions.env against its literal copies (#544)
+	hack/versions-check-test.sh
+	hack/versions-check.sh
 }
 g_gitleaks() { gitleaks git --redact --no-banner --log-opts="$base..HEAD" .; }
 

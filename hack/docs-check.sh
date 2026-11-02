@@ -137,8 +137,8 @@ need "$pre" "kubeVersion floor in Chart.yaml" "$(sed -n 's/^kubeVersion: *">=\([
 need "$pre" "agent sandbox version in the preflight" "$(sed -n 's#.*agent-sandbox/releases/download/\(v[0-9.]*\)/.*#\1#p' internal/preflight/preflight.go | head -1)"
 need "$pre" "OpenShell version in the preflight" "$(sed -n 's/.*SupportedOpenShellVersions = \[\]string{"\([^"]*\)"}.*/\1/p' internal/preflight/preflight.go)"
 need "$pre" "Postgres image tag in values.yaml" "$(sed -n 's#.*postgresql:\([0-9][0-9.]*\)-.*#\1#p' charts/koinon/values.yaml | head -1)"
-need "$pre" "kind version in the e2e workflow" "$(sed -n 's/.*KIND_VERSION: *\(v[0-9.]*\).*/\1/p' .github/workflows/e2e-kind.yml | head -1)"
-need "$pre" "Helm version in the e2e workflow" "$(sed -n 's/.*version: *\(v[0-9.]*\).*/\1/p' .github/workflows/e2e-kind.yml | head -1 | sed 's/^v//')"
+need "$pre" "kind version in hack/versions.env" "$(pin hack/versions.env KIND_VERSION)"
+need "$pre" "Helm version in hack/versions.env" "$(pin hack/versions.env HELM_VERSION | sed 's/^v//')"
 need "$docs/guides/gateway-modes.md" "agentgateway tag in values.yaml" "$(sed -n 's/^ *tag: \(v1\.[0-9.]*\)$/\1/p' charts/koinon/values.yaml | head -1)"
 [[ $failures -eq 0 ]] && ok "prerequisite versions match the repository"
 

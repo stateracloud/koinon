@@ -45,7 +45,7 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/internal/foo" "$seed/charts/koinon" "$seed/web" "$seed/docs/adr" "$seed/internal/db/queries" "$seed/internal/db/migrations"
-for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check mktemp-lint mktemp-lint-test; do
+for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check mktemp-lint mktemp-lint-test versions-check versions-check-test; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
 # The Go gate runs hack/go-test.sh (and its verdict, #507), not bare go test.
@@ -140,6 +140,9 @@ commit_all
 pf "$tmp/l3" --list >/dev/null
 check "workflow change selects mktemp" has '^mktemp:' "$tmp/l3"
 check "workflow change selects actionlint" has '^actionlint:' "$tmp/l3"
+check "workflow change selects versions" has '^versions:' "$tmp/l3"
+check "go change does not select versions" hasnt '^versions:' "$tmp/l1"
+
 check "workflow change does not select shell" hasnt '^shell:' "$tmp/l3"
 
 # uncommitted and untracked changes count
@@ -284,6 +287,8 @@ check "shellcheck on the changed script" has '^shellcheck hack/new.sh' "$FAKE_LO
 check "actionlint ran for the workflow change" has '^actionlint' "$FAKE_LOG"
 check "mktemp-lint ran" has '^mktemp-lint.sh' "$FAKE_LOG"
 check "mktemp-lint-test ran" has '^mktemp-lint-test.sh' "$FAKE_LOG"
+check "versions-check ran" has '^versions-check.sh' "$FAKE_LOG"
+check "versions-check-test ran" has '^versions-check-test.sh' "$FAKE_LOG"
 check "no Go change: no go test" hasnt '^go-test.sh' "$FAKE_LOG"
 export FAKE_MKTEMP_LINT_RC=1
 rc=$(pf "$tmp/c3")
