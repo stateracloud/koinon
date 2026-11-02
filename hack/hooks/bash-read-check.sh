@@ -11,7 +11,7 @@
 # Allowed: output into a pipe, a redirect or a command substitution (`cat x | grep`, `cat > f <<EOF`,
 # `v=$(cat f)`), heredoc bodies, anything inside quotes (a commit message, `gh --body "..."`), and
 # /dev/*, /proc/*, *.log and task *.output files. The patterns are heuristic: the cases are in
-# bash-read-check_test.sh.
+# read-hooks_test.sh.
 # On a violation it prints a PreToolUse "deny" decision with a one-line reason; otherwise nothing.
 # Needs only bash (3.2 compatible), awk and jq.
 set -uo pipefail
@@ -19,23 +19,32 @@ set -uo pipefail
 in=$(cat)
 cmd=$(jq -r '.tool_input.command // ""' <<<"$in")
 [ -n "$cmd" ] || exit 0
+# Generated scripts and pasted data, not reads: allow without parsing (awk cost grows with size).
+[ ${#cmd} -gt 65536 ] && exit 0
 
 # Tokenize like a shell (quotes become Q, heredoc bodies and comments vanish), then judge each simple
 # command. Prints the first violation, or nothing.
 why=$(printf '%s\n' "$cmd" | awk -v sq="'" '
 function push(k, v) { n++; tk[n] = k; tv[n] = v }
+# add(x): extend the current word; a word past 1024 characters is no file name, so stop growing it
+# (string concatenation is quadratic in some awks).
+function add(x) { if (length(word) < 1024) word = word x; inword = 1 }
 function flush() { if (inword) { push("W", word); word = ""; inword = 0 } }
-{ s = s $0 "\n" }
+# The command as one character array C[1..L], built per line: linear, where substr() per character
+# over one long string is quadratic in BSD awk (macOS).
+{ m = split($0, t, ""); for (j = 1; j <= m; j++) C[++L] = t[j]; C[++L] = "\n" }
+function at(k) { return (k >= 1 && k <= L) ? C[k] : "" }
 END {
-  L = length(s); i = 1; nh = 0
+  i = 1; nh = 0
   while (i <= L) {
-    c = substr(s, i, 1); c2 = substr(s, i, 2)
+    c = C[i]; c2 = c at(i + 1)
     if (c == "\n") {
       flush(); push("OP", ";"); i++
       for (h = 1; h <= nh; h++) {          # skip each pending heredoc body
         while (i <= L) {
-          e = index(substr(s, i), "\n"); if (e == 0) e = L - i + 2
-          line = substr(s, i, e - 1); i += e
+          line = ""
+          while (i <= L && C[i] != "\n") { if (length(line) < 1024) line = line C[i]; i++ }
+          i++
           sub(/^[ \t]+/, "", line)
           if (line == hd[h]) break
         }
@@ -44,43 +53,42 @@ END {
     }
     if (c == " " || c == "\t") { flush(); i++; continue }
     if (c == "\\") {
-      if (substr(s, i + 1, 1) == "\n") { i += 2; continue }
-      word = word substr(s, i + 1, 1); inword = 1; i += 2; continue
+      if (at(i + 1) == "\n") { i += 2; continue }
+      add(at(i + 1)); i += 2; continue
     }
     if (c == sq) {
-      e = index(substr(s, i + 1), sq); i = (e ? i + e + 1 : L + 1)
-      word = word "Q"; inword = 1; continue
+      i++; while (i <= L && C[i] != sq) i++
+      i++; add("Q"); continue
     }
     if (c == "\"") {
-      j = i + 1
-      while (j <= L && substr(s, j, 1) != "\"") { if (substr(s, j, 1) == "\\") j++; j++ }
-      i = j + 1; word = word "Q"; inword = 1; continue
+      i++; while (i <= L && C[i] != "\"") { if (C[i] == "\\") i++; i++ }
+      i++; add("Q"); continue
     }
     if (c == "#" && !inword) {
-      while (i <= L && substr(s, i, 1) != "\n") i++
+      while (i <= L && C[i] != "\n") i++
       continue
     }
-    if (c == ";") { flush(); push("OP", ";"); i++; if (substr(s, i, 1) == ";") i++; continue }
+    if (c == ";") { flush(); push("OP", ";"); i++; if (at(i) == ";") i++; continue }
     if (c2 == "&&") { flush(); push("OP", "&&"); i += 2; continue }
-    if (c2 == "&>") { flush(); push("OP", ">"); i += 2; if (substr(s, i, 1) == ">") i++; continue }
+    if (c2 == "&>") { flush(); push("OP", ">"); i += 2; if (at(i) == ">") i++; continue }
     if (c == "&") { flush(); push("OP", ";"); i++; continue }
     if (c2 == "||") { flush(); push("OP", "||"); i += 2; continue }
     if (c2 == "|&") { flush(); push("OP", "|"); i += 2; continue }
     if (c == "|") { flush(); push("OP", "|"); i++; continue }
-    if (substr(s, i, 3) == "$((") { word = word "$(("; inword = 1; i += 3; continue }
+    if (c2 at(i + 2) == "$((") { add("$(("); i += 3; continue }
     if (c2 == "$(" || c2 == "<(" || c2 == ">(") { flush(); push("OP", "$("); i += 2; continue }
     if (c == "`") { flush(); push("OP", "`"); i++; continue }
     if (c == "(") { flush(); push("OP", "("); i++; continue }
     if (c == ")") { flush(); push("OP", ")"); i++; continue }
-    if (substr(s, i, 3) == "<<<") { flush(); push("OP", "R<"); i += 3; continue }
+    if (c2 at(i + 2) == "<<<") { flush(); push("OP", "R<"); i += 3; continue }
     if (c2 == "<<") {
-      flush(); i += 2; if (substr(s, i, 1) == "-") i++
-      while (substr(s, i, 1) == " " || substr(s, i, 1) == "\t") i++
+      flush(); i += 2; if (at(i) == "-") i++
+      while (at(i) == " " || at(i) == "\t") i++
       d = ""
       while (i <= L) {
-        ch = substr(s, i, 1)
-        if (ch ~ /[ \t\n;|&<>()]/) break
-        if (ch != sq && ch != "\"" && ch != "\\") d = d ch
+        x = C[i]
+        if (x ~ /[ \t\n;|&<>()]/) break
+        if (x != sq && x != "\"" && x != "\\" && length(d) < 1024) d = d x
         i++
       }
       hd[++nh] = d; push("OP", "HD"); continue
@@ -90,16 +98,16 @@ END {
       fd = ""
       if (inword && word ~ /^[0-9]+$/) { fd = word; word = ""; inword = 0 } else flush()
       op = (fd == "" || fd == "1") ? ">" : "R>"
-      i++; if (substr(s, i, 1) == ">") i++
-      if (substr(s, i, 1) == "&") {          # a dup (2>&1, >&2): no target word follows
-        i++; t = ""
-        while (substr(s, i, 1) ~ /[0-9-]/) { t = t substr(s, i, 1); i++ }
+      i++; if (at(i) == ">") i++
+      if (at(i) == "&") {                    # a dup (2>&1, >&2): no target word follows
+        i++
+        while (at(i) ~ /[0-9-]/) i++
         if (op == "R>") continue
         push("OP", ">D"); continue
       }
       push("OP", op); continue
     }
-    word = word c; inword = 1; i++
+    add(c); i++
   }
   flush(); push("OP", ";")
 
