@@ -142,6 +142,7 @@ check "workflow change selects mktemp" has '^mktemp:' "$tmp/l3"
 check "workflow change selects actionlint" has '^actionlint:' "$tmp/l3"
 check "workflow change selects versions" has '^versions:' "$tmp/l3"
 check "go change does not select versions" hasnt '^versions:' "$tmp/l1"
+
 check "workflow change does not select shell" hasnt '^shell:' "$tmp/l3"
 
 # uncommitted and untracked changes count
