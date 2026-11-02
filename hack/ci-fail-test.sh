@@ -6,7 +6,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/ci-fail-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export PATH="$tmp/bin:$PATH" FAKE_CALLS="$tmp/calls"

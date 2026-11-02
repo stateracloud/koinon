@@ -8,7 +8,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/pr-wait-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export FAKE_DIR="$tmp/seq" PATH="$tmp/bin:$PATH"

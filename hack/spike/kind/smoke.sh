@@ -16,7 +16,7 @@ NAME=${NAME:-s1}
 OPENSHELL=${OPENSHELL:-openshell}
 K=(kubectl --context "$CTX")
 
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/smoke.XXXXXX")
 export XDG_CONFIG_HOME="$work/config"
 pf_pid=
 cleanup() { [[ -n "$pf_pid" ]] && kill "$pf_pid" 2>/dev/null; rm -rf "$work"; }

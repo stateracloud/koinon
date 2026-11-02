@@ -41,7 +41,7 @@ for ns in $("${K[@]}" get ns -l openshell.ai/managed-by=openshell -o name) \
 done
 
 # Agent Sandbox controller and CRDs, from the same pinned manifest the install used.
-manifest=$(mktemp)
+manifest=$(mktemp "${TMPDIR:-/tmp}/teardown.XXXXXX")
 trap 'rm -f "$manifest"' EXIT
 curl -fsSL -o "$manifest" \
   https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.7/sandbox-with-extensions.yaml

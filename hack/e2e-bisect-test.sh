@@ -4,7 +4,7 @@
 # Tests hack/e2e-bisect.sh --dry-run on a fixture history.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/e2e-bisect-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 cd "$tmp"
 git init -q -b main .

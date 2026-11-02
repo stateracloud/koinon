@@ -44,7 +44,7 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/internal/foo" "$seed/charts/koinon" "$seed/web" "$seed/docs/adr" "$seed/internal/db/queries" "$seed/internal/db/migrations"
-for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check; do
+for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check mktemp-lint mktemp-lint-test; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
 # The Go gate runs hack/go-test.sh (and its verdict, #507), not bare go test.
@@ -79,7 +79,7 @@ printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
 chmod +x "$tmp/failbin/mktemp"
 mktemp_fail_rc=0
 (cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(fresh)) >/dev/null 2>&1 || mktemp_fail_rc=$?
-reset_state() { : >"$FAKE_LOG"; unset FAKE_TIDY_CHANGE FAKE_GO_TEST_RC FAKE_LINT_RC FAKE_GITLEAKS_RC FAKE_GEN_CHANGE FAKE_NEEDS_RC FAKE_GOFUMPT_OUT FAKE_MIGRATE_LINT_RC FAKE_CHART_CHECK_RC FAKE_DEP_AGE_CHECK_RC FAKE_BUF_RC || true; rm -rf "$tmp/tmpdir"/*; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_TIDY_CHANGE FAKE_GO_TEST_RC FAKE_LINT_RC FAKE_GITLEAKS_RC FAKE_GEN_CHANGE FAKE_NEEDS_RC FAKE_GOFUMPT_OUT FAKE_MIGRATE_LINT_RC FAKE_CHART_CHECK_RC FAKE_DEP_AGE_CHECK_RC FAKE_BUF_RC FAKE_MKTEMP_LINT_RC || true; rm -rf "$tmp/tmpdir"/*; }
 
 fail=0 pass=0
 check() { # <description> <command...>
@@ -126,9 +126,19 @@ echo "syntax = 'proto3';" >api.proto
 printf '#!/bin/sh\n' >hack/new.sh
 commit_all
 pf "$tmp/l2" --list >/dev/null
-for g in chart web generate migrate adr docs shell; do check "$g selected by its path" has "^$g:" "$tmp/l2"; done
+for g in chart web generate migrate adr docs shell mktemp; do check "$g selected by its path" has "^$g:" "$tmp/l2"; done
 check "no Go files: go not selected" hasnt '^go:' "$tmp/l2"
 check "no Go files: tidy not selected" hasnt '^tidy:' "$tmp/l2"
+
+# a workflow-only change selects the mktemp gate but not the shell gate
+reset_state
+w=$(fresh); cd "$w"
+mkdir -p .github/workflows
+echo "on: push" >.github/workflows/x.yml
+commit_all
+pf "$tmp/l3" --list >/dev/null
+check "workflow change selects mktemp" has '^mktemp:' "$tmp/l3"
+check "workflow change does not select shell" hasnt '^shell:' "$tmp/l3"
 
 # uncommitted and untracked changes count
 reset_state
@@ -267,7 +277,14 @@ check "docs-check ran" has '^docs-check.sh' "$FAKE_LOG"
 check "chart-check ran" has '^chart-check.sh' "$FAKE_LOG"
 check "pnpm ran for web" has '^pnpm ' "$FAKE_LOG"
 check "shellcheck on the changed script" has '^shellcheck hack/new.sh' "$FAKE_LOG"
+check "mktemp-lint ran" has '^mktemp-lint.sh' "$FAKE_LOG"
+check "mktemp-lint-test ran" has '^mktemp-lint-test.sh' "$FAKE_LOG"
 check "no Go change: no go test" hasnt '^go-test.sh' "$FAKE_LOG"
+export FAKE_MKTEMP_LINT_RC=1
+rc=$(pf "$tmp/c3")
+check "a failing mktemp lint fails preflight" eq "$rc" 1
+check "mktemp FAIL line" has '^mktemp FAIL' "$tmp/c3"
+unset FAKE_MKTEMP_LINT_RC
 export FAKE_CHART_CHECK_RC=1
 rc=$(pf "$tmp/c2")
 check "a failing checker fails preflight" eq "$rc" 1
