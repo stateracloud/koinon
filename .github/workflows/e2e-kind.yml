@@ -8,7 +8,9 @@
 # When it runs (the `decide` job, hack/e2e-decide.sh):
 #   - pull requests: only if they change the e2e's own files (hack/needs-e2e.sh --forced-only) or
 #     carry the `e2e` label. A PR that is e2e-relevant by the full rule gets a hint in the summary
-#     to run hack/e2e-remote.sh or add the label.
+#     to run hack/e2e-remote.sh or add the label. Adding the label again after a red e2e on the
+#     same commit mirrors that result: retry with "Re-run failed jobs" on the red run, or
+#     `gh workflow run e2e-kind.yml --ref <branch>`.
 #   - pushes to main: batched (one running, the newest pending) when anything e2e-relevant changed
 #     since the last green run. Nightly: always, once a day, to catch drift nothing in the tree
 #     explains (upstream images, the runner image, downloads). A red run after a green one opens
@@ -47,12 +49,13 @@ permissions:
 
 # Pull requests: a new push cancels the old run. Adding the `e2e` label does not: `gh pr create
 # --label e2e` fires `opened` and then `labeled` on one head (#468), so the labelled run queues behind
-# the other and runs nothing when that one ran the e2e (hack/e2e-decide.sh, `covered`). Main: one
-# running, one pending, the newest pending replaces the older (batching). Everything else (dispatch,
-# nightly) runs alone.
+# the other and runs nothing when that one ran the e2e (hack/e2e-decide.sh, `covered`). Other label
+# runs do not cancel either: one waits for the e2e on its head and mirrors it (hack/e2e-result.sh),
+# the next pending one replaces any older pending one. Main: one running, one pending, the newest
+# pending replaces the older (batching). Everything else (dispatch, nightly) runs alone.
 concurrency:
   group: ${{ github.event_name == 'push' && 'e2e-main' || github.event_name == 'pull_request' && format('e2e-kind-pr-{0}-{1}', github.ref, (github.event.action == 'unlabeled' || (github.event.action == 'labeled' && github.event.label.name != 'e2e')) && 'label' || 'run') || format('e2e-kind-{0}-{1}', github.event_name, github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' && !(github.event.action == 'labeled' && github.event.label.name == 'e2e') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && github.event.action != 'unlabeled' }}
 
 jobs:
   # Cheap: a checkout, a git diff, one `go list`.
@@ -261,38 +264,30 @@ jobs:
     needs: [decide, quickstart]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    # A run started by a label waits for the e2e still running on its head (quickstart: 75 minutes).
+    timeout-minutes: 95
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Fail unless decide and quickstart succeeded or were skipped
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: hack/e2e-result.sh
+          sparse-checkout-cone-mode: false
+      - name: Fail unless the e2e passed or was not needed
         env:
           DECIDE: ${{ needs.decide.result }}
           QUICKSTART: ${{ needs.quickstart.result }}
-          # Another label, or removing `e2e`, starts this workflow again but skips the e2e: a skip
-          # must not replace an earlier failure as this check's latest result, so mirror the last
-          # real run on the commit.
-          UNRELATED_LABEL: ${{ github.event_name == 'pull_request' && (github.event.action == 'unlabeled' || (github.event.action == 'labeled' && github.event.label.name != 'e2e')) }}
-          # The `e2e` label on a head another run already ran the e2e on: mirror that run too (#468).
-          COVERED: ${{ needs.decide.outputs.covered == 'true' }}
+          # Another label, or removing `e2e`, starts this workflow again but skips the e2e: mirror
+          # the e2e on the commit instead of reporting the skip (hack/e2e-result.sh).
+          MIRROR: ${{ github.event_name == 'pull_request' && (github.event.action == 'unlabeled' || (github.event.action == 'labeled' && github.event.label.name != 'e2e')) }}
+          # The `e2e` label on a head another run already ran the e2e on: that run's id (#468).
+          COVERED: ${{ needs.decide.outputs.covered }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           RUN_ID: ${{ github.run_id }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: |
-          echo "decide: $DECIDE, quickstart: $QUICKSTART"
-          if [[ $UNRELATED_LABEL == true || $COVERED == true ]]; then
-            prev=$(gh run list --workflow e2e-kind.yml --event pull_request --commit "$HEAD_SHA" --limit 20 \
-              --json databaseId,conclusion,createdAt \
-              --jq "[.[] | select(.databaseId != $RUN_ID and .conclusion != \"\")] | sort_by(.createdAt) | last | .conclusion // \"none\"")
-            echo "previous completed run for this commit: $prev"
-            case $prev in failure | cancelled | timed_out) echo "::error::the e2e failed on this commit ($prev)"; exit 1 ;; esac
-            exit 0
-          fi
-          for r in "$DECIDE" "$QUICKSTART"; do
-            case $r in success | skipped) ;; *) echo "::error::the e2e did not pass ($r)"; exit 1 ;; esac
-          done
+        run: hack/e2e-result.sh
 
   # A red run on main: find the merge that did it and open one issue (hack/e2e-bisect.sh).
   bisect:

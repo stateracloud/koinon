@@ -14,7 +14,10 @@
 #              earlier skip or cancel, and a cancelled or skipped run never outranks one that is queued or
 #              in progress (even at the same startedAt): it keeps waiting for the live run. A required check
 #              that is missing, skipped or cancelled while an e2e-kind run on the head is still queued or in
-#              progress (whose jobs may not exist yet, #468) is waited for too: `waiting for e2e-kind run <id>`.
+#              progress (whose jobs may not exist yet, #468) is waited for too: `waiting for e2e-kind run <id>`;
+#              so are failed or cancelled checks of an earlier e2e-kind run on the head (its `decide`
+#              cancelled, its `e2e result` red). Checks of e2e-kind count by their newest run, like
+#              required ones.
 #              Otherwise, if the newest is skipped or cancelled, the next line suggests
 #              `gh workflow run e2e-kind.yml --ref <branch>`.
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
@@ -78,6 +81,7 @@ case $pr in '' | *[!0-9]*) usage ;; esac
 # One normalised row per check: CheckRuns (status/conclusion) and commit statuses (state) alike.
 # A required check is judged on its newest run only (by start time; rollup order breaks ties). A
 # cancelled or skipped run never outranks a queued or in-progress one (#431): wait for the live run.
+# The checks of the e2e-kind workflow count the same way: several runs on one head are normal there.
 # shellcheck disable=SC2016 # $req is a jq variable, bound by jqn
 norm='def newest: sort_by(.ts) | . as $s | ($s | last) as $l
   | if ($l.done and ($l.cancelled or $l.skipped)) and any($s[]; .done | not) then ([$s[] | select(.done | not)] | last) else $l end;
@@ -86,10 +90,11 @@ norm='def newest: sort_by(.ts) | . as $s | ($s | last) as $l
   ts: (.startedAt // .completedAt // ""),
   cancelled: ((.conclusion // "") == "CANCELLED"),
   url: (.detailsUrl // .targetUrl // ""),
+  wf: (.workflowName // ""),
   done: ((.status == "COMPLETED") or ((.state // "") | IN("SUCCESS", "FAILURE", "ERROR"))),
   skipped: ((.conclusion // "") == "SKIPPED"),
   bad: ((.conclusion // .state // "") | IN("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"))
-}] | group_by(.name) | map(if (.[0].name | IN($req[])) then [newest] else . end) | add // []'
+}] | group_by(.name) | map(if (.[0].name | IN($req[])) or all(.[]; .wf == "e2e-kind") then [newest] else . end) | add // []'
 
 reqjson=$(printf '%s\n' ${required[@]+"${required[@]}"} | jq -R . | jq -sc .)
 jqn() { jq --argjson req "$reqjson" "$@"; }
@@ -129,10 +134,11 @@ while :; do
     head=$(jq -r '.headRefOid // ""' <<<"$json")
     live=""
     failed=$(jqn -r "$norm | .[] | select(.bad) | [.name, .cancelled, ((.url | capture(\"/runs/(?<r>[0-9]+)\")? | .r) // \"\")] | @tsv" <<<"$json")
-    # The only failures are cancelled runs of required checks: an e2e-kind run on the head that has
-    # not created its jobs yet may still bring them (#468), so wait for it instead of failing.
+    # The only failures are cancelled runs of required checks, or checks of an earlier e2e-kind run:
+    # an e2e-kind run on the head that is still queued or running brings newer ones (#468), so wait
+    # for it instead of failing.
     if [ -n "$failed" ] && [ -n "$head" ] &&
-      jqn -e "$norm | [.[] | select(.bad)] | all(.cancelled and (.name | IN(\$req[])))" <<<"$json" >/dev/null; then
+      jqn -e "$norm | [.[] | select(.bad)] | all((.cancelled and (.name | IN(\$req[]))) or .wf == \"e2e-kind\")" <<<"$json" >/dev/null; then
       live=$(live_e2e "$head")
     fi
     if [ -z "$live" ] && [ -n "$failed" ]; then
