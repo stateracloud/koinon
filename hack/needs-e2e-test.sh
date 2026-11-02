@@ -34,6 +34,10 @@ forced 0 .github/workflows/e2e-kind.yml
 forced 0 hack/docs-e1.sh
 forced 0 docs/site/src/content/docs/quickstart.md
 forced 0 flavors/opencode/prompt.md
+forced 0 hack/versions.env
+forced 0 hack/versions-env.sh
+forced 0 hack/e2e-toolchain/web.Dockerfile
+forced 0 hack/e2e-toolchain/Dockerfile
 forced 1 internal/api/server.go
 forced 1 charts/koinon/values.yaml
 forced 1 go.mod
@@ -109,6 +113,16 @@ while IFS= read -r p; do
   [[ -f $p ]] || continue
   expect 0 "$p"
 done < <(grep -v '^ *#' test/e2e/run.sh | grep -oE 'hack/[A-Za-z0-9_.-]+\.sh' | sort -u)
+
+# #565: every file the jobs that run the e2e (the `quickstart` job of e2e-kind.yml, not decide, result
+# or bisect, which are about whether to run) read, and every file under hack/e2e-toolchain/, is an
+# input: a kind, ko or helm bump must run the e2e.
+while IFS= read -r p; do
+  [[ -f $p ]] || continue
+  expect 0 "$p"
+done < <(awk '/^  quickstart:/ {on=1; next} /^  [a-z][a-z-]*:/ {on=0} on' .github/workflows/e2e-kind.yml |
+  grep -v '^ *#' | grep -oE 'hack/[A-Za-z0-9_.-]+\.(sh|env)' | sort -u)
+for p in hack/versions.env hack/e2e-toolchain/*; do expect 0 "$p"; done
 
 # Against git, in a scratch module shaped like the repository: the six binaries and the driver.
 g() { git -C "$tmp" -c user.name=t -c user.email=t@example.invalid "$@"; }
