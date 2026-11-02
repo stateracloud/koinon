@@ -16,6 +16,10 @@
 # DRY_RUN=1 prints the commands and pushes nothing. You must be logged in to the registry (docker login
 # or a DOCKER_CONFIG that has it). Prints a ready-to-paste kustomize images: block with digests at the end
 # (names use REGISTRY; see test/fixtures/rt1/overlays/remote for the matching overlay).
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 registry="${1:?usage: $0 REGISTRY [TAG]}"

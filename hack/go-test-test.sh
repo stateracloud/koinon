@@ -3,6 +3,10 @@
 # hack/go-test.sh runs its PARALLEL_SUITES with Ginkgo -p (#222). Fails when a listed suite is not
 # a Ginkgo suite, when one starts Postgres outside a BeforeSuite (the container would then be shared
 # or missing in the other processes), or when one binds a fixed local port.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"

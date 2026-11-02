@@ -4,6 +4,10 @@
 # Render-only checks for charts/koinon (plan item H1): helm lint and helm template for every
 # value set in charts/koinon/ci/ (each postgres.mode x gateway.mode), assertions on the rendered
 # output for chosen values, then kubeconform on the output. Never talks to a cluster.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

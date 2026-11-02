@@ -34,6 +34,10 @@
 # KOINON_RC_FILE: when set, the final exit status is also written to that file. `make` turns every
 # failing recipe into exit 2, so the 3 (incomplete) would not survive `make test-go`; the lab gate
 # (hack/lab/gate-run.sh) reads the file to tell NOT RUN from a failure.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck disable=SC2329 # invoked from the exit trap
@@ -116,7 +120,7 @@ if ((${#plain[@]})); then
 fi
 
 # The verdict over every Ginkgo suite of this run; it fails the run for a suite that did not run.
-suites=(${parallel[@]+"${parallel[@]}"} ${ginkgo_rest[@]+"${ginkgo_rest[@]}"}) # bash 3.2: empty arrays under set -u
+suites=("${parallel[@]}" "${ginkgo_rest[@]}")
 events=()
 for f in "$report_dir"/*.gotest.jsonl; do [[ -f $f ]] && events+=(-gotest-json "$f"); done
 if ((${#suites[@]} + ${#events[@]})); then
