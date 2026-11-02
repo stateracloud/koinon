@@ -11,6 +11,10 @@
 #   A number of 9 digits or more is a run id, a shorter one a PR number. --job keeps the jobs whose
 #   name contains NAME.
 # Exit: 0 nothing failed, 1 something failed, 64 usage.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 export GH_PAGER=cat PAGER=cat
 

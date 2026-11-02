@@ -7,6 +7,10 @@
 #   1. static: no `cd "$(mktemp` (or pushd) under hack/.
 #   2. dynamic: every test script that calls mktemp, run from a canary directory (a bare `.git`
 #      file) with a failing mktemp first on PATH and TMPDIR read-only, exits non-zero and leaves the canary.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -uo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd -P)

@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # The required check `go` aggregates the parallel go-* jobs of ci.yml (#217). Fails when a go-*
 # job is missing from the gate's needs, or the gate names a job that does not exist.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 wf="$(cd "$(dirname "$0")/.." && pwd)/.github/workflows/ci.yml"
 
