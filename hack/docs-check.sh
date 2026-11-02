@@ -57,7 +57,12 @@ for n in $names; do
   bash -n "$tmp/$n.sh" || fail "e1 block $n is not valid shell"
 done
 # The golden file starts with a four-line header; the rest is the script.
-if hack/docs-e1.sh script | diff -u <(tail -n +5 "$golden") - >"$tmp/golden.diff"; then
+# Plain files, not process substitution or `diff -`: sandboxes (macOS Seatbelt) deny opening
+# /dev/fd/N and /dev/stdin, so a pipe into diff fails there as if the files differed.
+tail -n +5 "$golden" >"$tmp/golden.expected"
+if ! hack/docs-e1.sh script >"$tmp/golden.actual"; then
+  fail "hack/docs-e1.sh script failed"
+elif diff -u "$tmp/golden.expected" "$tmp/golden.actual" >"$tmp/golden.diff"; then
   ok "the e1 blocks equal $golden"
 else
   cat "$tmp/golden.diff" >&2
@@ -74,7 +79,14 @@ for n in $names; do
 done
 [[ $failures -eq 0 ]] && ok "test/e2e/run.sh runs every e1 block: $(tr '\n' ' ' <<<"$used")"
 
-# 3. Chart values blocks.
+# 3. Chart values blocks. The block list goes through a file (see the golden check above).
+for d in "$docs"/*.md "$docs"/guides/*.md; do
+  awk -v dir="$tmp" -v base="$(basename "$d" .md)" '
+    /^```yaml chart-values/ { n++; out = sprintf("%s/%s-%d.yaml", dir, base, n); printf "" > out; inblock = 1; next }
+    /^```/ { if (inblock) { close(out); printf "%s%c", out, 0; inblock = 0 } ; next }
+    inblock { print > out }
+  ' "$d"
+done >"$tmp/blocks.list"
 i=0
 while IFS= read -r -d '' f; do
   i=$((i + 1))
@@ -91,15 +103,7 @@ while IFS= read -r -d '' f; do
     cat "$tmp/lint.out" "$tmp/tpl.out" >&2
     fail "chart-values block $(basename "$f") is not valid chart values"
   fi
-done < <(
-  for d in "$docs"/*.md "$docs"/guides/*.md; do
-    awk -v dir="$tmp" -v base="$(basename "$d" .md)" '
-      /^```yaml chart-values/ { n++; out = sprintf("%s/%s-%d.yaml", dir, base, n); printf "" > out; inblock = 1; next }
-      /^```/ { if (inblock) { close(out); printf "%s%c", out, 0; inblock = 0 } ; next }
-      inblock { print > out }
-    ' "$d"
-  done
-)
+done <"$tmp/blocks.list"
 [[ $i -gt 0 ]] || fail "no chart-values blocks found"
 ok "$i chart-values blocks checked with helm lint and template"
 

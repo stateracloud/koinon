@@ -207,24 +207,11 @@ jobs:
             [[ $r == success ]] || { echo "::error::a Go job finished $r (results: $RESULTS)"; exit 1; }
           done
 
-  # Known vulnerabilities in the Go dependencies, by reachability (ADR 0079): a reachable finding
-  # is what lets a fix take the security fast path instead of waiting out the cooldown.
-  govulncheck:
-    needs: changes
-    if: needs.changes.outputs.go == 'true'
-    name: govulncheck
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
-
   # Dependency cooldown (ADR 0079): versions this pull request adds must be at least 3 days old.
   # Public endpoints only. The waiver is the label `dependency-age-waiver`, honoured only when
   # the maintainer put it on; the job reads the label when it runs, so re-run the job after
-  # labelling. Timestamps guard against accidents, they are not proof.
+  # labelling. Timestamps guard against accidents, they are not proof. Required check: on a push to
+  # main the job is skipped, which reports success; rulesets only check pull request heads.
   dep-age:
     name: dependency age
     if: github.event_name == 'pull_request'
@@ -435,7 +422,8 @@ jobs:
       - run: make chart-check
 
   # Rendered startup smoke test (#284): the chart's Jobs and Deployments run as containers, with
-  # the rendered args, env and mounts, against Postgres and envtest. See test/chartsmoke.
+  # the rendered args, env and mounts, against Postgres and envtest. See test/chartsmoke. Required:
+  # a run skipped because no chart file changed reports success.
   chart-smoke:
     needs: changes
     if: needs.changes.outputs.chartsmoke == 'true'
@@ -460,8 +448,8 @@ jobs:
       - run: make test-chart-smoke
 
   # Docs site (plan item DOC1): builds the Starlight site and checks the quickstart against
-  # test/e2e, the chart and the web spec. No deploy while the repository is private. Not a
-  # required check.
+  # test/e2e, the chart and the web spec. No deploy while the repository is private. Required: a
+  # run skipped because no docs file changed reports success.
   docs:
     needs: changes
     if: needs.changes.outputs.docs == 'true'
@@ -583,6 +571,7 @@ jobs:
       - run: hack/ci-fail-test.sh
       - run: hack/ci-go-gate-test.sh
       - run: hack/ci-web-gate-test.sh
+      - run: hack/ci-required-test.sh
       - run: hack/go-test-test.sh
       - run: hack/wt-test.sh
       - run: hack/tmp-safety-test.sh
@@ -605,7 +594,7 @@ jobs:
   # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
   # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
-  # a fake key; it never reaches a real or paid model. Not a required check.
+  # a fake key; it never reaches a real or paid model. The only advisory job on pull requests (hack/ci-required.txt); flavor-publish below is push-only.
   flavors:
     needs: changes
     if: needs.changes.outputs.flavors == 'true'
