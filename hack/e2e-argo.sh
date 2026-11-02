@@ -57,7 +57,7 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-# shellcheck source=hack/lab/config.sh
+# shellcheck source=hack/lab/config.sh disable=SC1091
 . "$here/lab/config.sh"
 lab_config_load
 SERVER=${KOINON_E2E_ARGO_SERVER:-}
