@@ -107,7 +107,7 @@ reason() {
 	shell) n=$(count '\.sh$'); [[ $n -gt 0 ]] && echo "$n shell scripts changed" ;;
 	actionlint) match '^\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)$' && echo "workflows or the actionlint config changed" ;;
 	mktemp) match '\.sh$|^Makefile$|^\.github/workflows/[^/]*\.yml$' && echo "shell scripts, the Makefile or workflows changed" ;;
-	versions) match '^(hack/versions|hack/e2e-toolchain/|CONTRIBUTING\.md$|\.github/workflows/[^/]*\.yml$|hack/chart-check\.sh$)' && echo "the versions file or a copy of one changed" ;;
+	versions) match '^(hack/versions|hack/e2e-toolchain/|CONTRIBUTING\.md$|\.github/workflows/[^/]*\.yml$|hack/chart-check\.sh$|hack/[^/]*\.sh$|test/e2e/.*\.sh$)' && echo "the versions file or a copy of one changed" ;;
 	e2e) echo "informational, always" ;;
 	gitleaks) echo "always" ;;
 	esac

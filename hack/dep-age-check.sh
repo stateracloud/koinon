@@ -371,7 +371,8 @@ while IFS=$'\t' read -r file line; do
 			[[ $ver == v* ]] && prefix=
 			once "pin $repo $prefix$ver" && check_github "$repo" "$prefix$ver"
 		else
-			echo "WARN    $file: $tool has no entry in tool_repo (hack/dep-age-check.sh); its age is not checked"
+			# Fail closed: a tool whose release cannot be dated would skip the cooldown (ADR 0079).
+			report "$tool $ver (no entry in tool_repo of hack/dep-age-check.sh)" unknown "$file"
 		fi
 	fi
 done < <(added_lines 'hack/versions.env')

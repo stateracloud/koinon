@@ -120,7 +120,7 @@ jobs:
           ref: ${{ inputs.commit }} # empty: the event's own ref
 
       - name: Tool versions (hack/versions.env)
-        run: grep -E '^[A-Z]' hack/versions.env >> "$GITHUB_ENV"
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
 
       # cache: false, and an explicit cache with a fallback prefix: a new go.sum still starts from
       # the last build cache (main saves one on every run), which is most of the ko and driver builds.

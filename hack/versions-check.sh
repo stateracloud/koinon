@@ -28,7 +28,8 @@ val() { sed -n "s/^$1=//p" "$env_file" | head -1; }
 # 1. The file's own format: NAME=value lines, comments and blank lines only.
 while IFS= read -r line; do
 	[[ -z $line || $line == \#* ]] && continue
-	[[ $line =~ ^[A-Z][A-Z0-9_]*=[A-Za-z0-9._+-]+$ ]] || fail "$env_file: not NAME=value (no quotes or spaces): $line"
+	# The same name rule as hack/versions-env.sh, the filter every workflow loads the file through.
+	[[ $line =~ ^[A-Z][A-Z0-9_]*_(VERSION|SHA256_(AMD64|ARM64))=[A-Za-z0-9._+-]+$ ]] || fail "$env_file: not <TOOL>_VERSION or <TOOL>_SHA256_AMD64/ARM64 = value (no quotes or spaces): $line"
 	if [[ $line =~ ^[A-Z0-9_]*_SHA256_[A-Z0-9]+=(.*)$ ]]; then
 		[[ ${BASH_REMATCH[1]} =~ ^[0-9a-f]{64}$ ]] || fail "$env_file: not a sha256: $line"
 	fi
@@ -77,12 +78,19 @@ for n in $names; do
 	[[ -z $hits ]] || fail "$n is set outside $env_file (read the file instead): $(head -1 <<<"$hits")"
 done
 
+# 4b. `sha256sum -c` input needs two spaces between hash and file ("HASH  FILE"); GNU sha256sum rejects
+# one space or none as a malformed line, and only the CI run would show it.
+bad=$(grep -nE 'sha256sum -c' .github/workflows/*.yml hack/*.sh test/e2e/*.sh test/e2e/*/*.sh 2>/dev/null |
+	grep -E 'SHA256' | grep -vE '\$\{[A-Za-z0-9_]*SHA256[A-Za-z0-9_]*\}  [^ ]' | grep -v '^hack/versions-check' || true)
+[[ -z $bad ]] || fail "sha256sum -c line without two spaces after the hash variable: $(head -1 <<<"$bad")"
+
 # 5. CONTRIBUTING.md's tool table.
 doc=CONTRIBUTING.md
 row_has() { # <row label> <NAME>
 	local want
 	want=$(val "$2")
-	grep -E "^\\| $1 " "$doc" | grep -qF -- "$want" || fail "$doc: the '$1' row does not contain $want ($2 in $env_file)"
+	# the whole version token: v4.3.10 is not v4.3.1
+	grep -E "^\\| $1 " "$doc" | grep -qE -- "(^|[^A-Za-z0-9._+-])${want//./\\.}([^A-Za-z0-9._+-]|\$)" || fail "$doc: the '$1' row does not contain $want ($2 in $env_file)"
 }
 row_has Helm HELM_VERSION
 row_has kind KIND_VERSION

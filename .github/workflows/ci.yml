@@ -541,7 +541,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: tool versions (hack/versions.env)
-        run: grep -E '^[A-Z]' hack/versions.env >> "$GITHUB_ENV"
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
       - name: install shellcheck and actionlint
         run: |
           bin="$RUNNER_TEMP/lintbin"
@@ -549,11 +549,11 @@ jobs:
           cd "$RUNNER_TEMP"
           sc="shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
           curl -fsSLo "$sc" "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/$sc"
-          echo "${SHELLCHECK_SHA256_AMD64}$sc" | sha256sum -c -
+          echo "${SHELLCHECK_SHA256_AMD64}  $sc" | sha256sum -c -
           tar xJf "$sc" --strip-components=1 -C "$bin" "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
           al="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           curl -fsSLo "$al" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$al"
-          echo "${ACTIONLINT_SHA256_AMD64}$al" | sha256sum -c -
+          echo "${ACTIONLINT_SHA256_AMD64}  $al" | sha256sum -c -
           tar xzf "$al" -C "$bin" actionlint
           echo "$bin" >>"$GITHUB_PATH"
       - name: shellcheck

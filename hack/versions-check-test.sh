@@ -4,6 +4,7 @@
 # Tests of hack/versions-check.sh on a copy of the real tree's inputs: the clean copy passes, and
 # each kind of drift (Dockerfile ARG, checksum, setup-helm input, golangci-lint input, a second
 # literal in a workflow or a script, the CONTRIBUTING table, a malformed file) fails.
+# shellcheck disable=SC2016 # the fixtures edit literal workflow text
 set -uo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -80,11 +81,51 @@ expect_fail "CONTRIBUTING table drift" "$w" "'Helm' row"
 
 w=$(fresh)
 printf 'BAD_VERSION="1.0"\n' >>"$w/hack/versions.env"
-expect_fail "a quoted value" "$w" "not NAME=value"
+expect_fail "a quoted value" "$w" "not <TOOL>_VERSION"
 
 w=$(fresh)
 printf 'X_SHA256_AMD64=abc\n' >>"$w/hack/versions.env"
 expect_fail "a short checksum" "$w" "not a sha256"
+
+w=$(fresh)
+printf 'BASH_ENV=evil.sh\n' >>"$w/hack/versions.env"
+expect_fail "a name the workflow loader would pass to \$GITHUB_ENV as BASH_ENV" "$w" "not <TOOL>_VERSION"
+
+w=$(fresh)
+subst "$w/.github/workflows/ci.yml" 'echo "${SHELLCHECK_SHA256_AMD64}  $sc"' 'echo "${SHELLCHECK_SHA256_AMD64} $sc"'
+expect_fail "sha256sum -c line with one space" "$w" "two spaces"
+
+w=$(fresh)
+subst "$w/.github/workflows/g2-kind.yml" 'echo "${KIND_SHA256_AMD64}  $RUNNER_TEMP' 'echo "${KIND_SHA256_AMD64}$RUNNER_TEMP'
+expect_fail "sha256sum -c line with no space" "$w" "two spaces"
+
+w=$(fresh)
+subst "$w/CONTRIBUTING.md" "| Helm | v4.3.1 |" "| Helm | v4.3.10 |"
+expect_fail "CONTRIBUTING row with a longer version" "$w" "'Helm' row"
+
+# the loader prints no line outside the name rule, even from a hostile file
+w=$(fresh)
+mkdir -p "$w/hack"
+cp "$repo/hack/versions-env.sh" "$w/hack/"
+printf 'BASH_ENV=evil.sh\nPATH=/x\nFOO_VERSION=1.0\n' >>"$w/hack/versions.env"
+out=$("$w/hack/versions-env.sh")
+check "versions-env.sh keeps FOO_VERSION" 0 "$(grep -c '^FOO_VERSION=1.0$' <<<"$out" | sed 's/^1$/0/')"
+check "versions-env.sh drops BASH_ENV and PATH" 0 "$(grep -cE '^(BASH_ENV|PATH)=' <<<"$out" || true)"
+
+# dep-age-check fails (no network needed) for a *_VERSION with no tool_repo entry
+w=$(mktemp -d "$tmp/dep.XXXXXX") || exit 1
+mkdir -p "$w/hack"
+cp "$repo/hack/dep-age-check.sh" "$w/hack/"
+(
+	cd "$w" || exit 1
+	git init -q -b main . && git config user.name t && git config user.email t@example.invalid
+	echo base >README.txt && git add -A && git commit -q -m base
+	printf 'NEWTOOL_VERSION=1.0.0\n' >hack/versions.env && git add -A && git commit -q -m add
+)
+rc=0
+(cd "$w" && hack/dep-age-check.sh HEAD~1 >"$w/out" 2>&1) || rc=$?
+check "dep-age-check: an unknown tool fails" 1 "$rc"
+grep -q 'NEWTOOL' "$w/out" || { echo "FAIL dep-age output lacks NEWTOOL"; cat "$w/out"; fail=1; }
 
 [[ $fail -eq 0 ]] && echo "versions-check tests passed"
 exit "$fail"
