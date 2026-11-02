@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-29
 - Amends: [0041](0041-koinon-spend-ledger-and-budget-stops.md) (the run level of the net key limit is built), [0050](0050-spend-ledger-ingestion-and-net-limits.md) (decision 5, the token cap, is replaced), [0049](0049-v01-scope-decisions.md) (the per-run caps)
-- Relates to: [0066](0066-triggers-and-scheduling.md) (the wrap-up notice of issue #183), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0068](0068-prompt-caching-always-on.md), [0023](0023-observability.md)
+- Relates to: [0066](0066-triggers-and-scheduling.md) (the wrap-up notice of issue #183), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0068](0068-prompt-caching-always-on.md), [0023](0023-observability-and-audit.md)
 - Issue: #243 (decision by Andre, 2026-10-29); the per-task spend cap of #183 comes after v0.1.0
 
 ## Context

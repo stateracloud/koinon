@@ -112,7 +112,10 @@ test('owner adds a provider and a model; the pages pass axe in each state', asyn
   await expect(page.getByRole('link', { name: 'Prices page' }).first()).toBeVisible()
   await expectAccessible(page)
   await page.getByRole('button', { name: 'Add model', exact: true }).click()
-  await expect(page.getByText('default/llama3.1')).toBeVisible()
+  // The open form previews the served name in a <code> too, until onDone closes it; the saved model
+  // is the row in the provider's list, so target that, not any text match (#520).
+  await expect(page.getByRole('list', { name: 'Models of ollama-lab' }).getByText('default/llama3.1')).toBeVisible()
+  await expect(page.getByRole('form', { name: 'Add model to ollama-lab' })).toHaveCount(0)
   expect(seen.modelCreate).toMatchObject({ providerId: 'p-new', name: 'llama3.1' })
 
   await page.getByRole('button', { name: 'Delete provider openrouter' }).click()
