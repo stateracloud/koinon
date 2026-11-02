@@ -73,9 +73,14 @@ recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendm
 | 0 | the e2e passed, `e2e-lab` is success | merge gate 2 |
 | 1 | the e2e failed, `e2e-lab` is failure | fix it |
 | 75 | the lab cannot run it now: unreachable, a failed upload or submit, no verdict | GitHub e2e-kind |
-| 78 | no lab configured | GitHub e2e-kind (or `--local`) |
-| 79 | the change touches `flavors/`: the lab cannot build a flavor image (`nvcr.io` is fenced) | GitHub e2e-kind; `--allow-flavors` if the image is already in Zot |
+| 78 | no lab configured | GitHub e2e-kind |
+| 79 | the change touches `flavors/`: the lab cannot build a flavor image (`nvcr.io` is fenced) | GitHub e2e-kind, dispatched by hand (nothing triggers it for a flavors/ PR); `--allow-flavors` if the image is already in Zot |
 | 2 | usage, or the lab rejected the request | fix the call |
+
+   `hack/e2e-remote.sh --local` (your own Docker) is a dev and debug tool, not merge evidence: it yields
+   neither `e2e-lab` nor `quickstart`. A run that fails with no result.txt (a hang, an OOM) exits 75, so it
+   goes to GitHub and leaves no lab result. `--no-status` is not remembered by the run: a later `--follow`
+   posts unless it gets `--no-status` too.
 
    The `koinon-gate` lane (`--gate <set>`, not the e2e) has the same 75 / 76 contract: 75 is "run the gate
    locally", including the 120 s Pending fallback (reasons `quota`, `unschedulable`, `namespace-limit`,
