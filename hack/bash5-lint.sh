@@ -10,6 +10,9 @@
 # bash 4+ syntax, and the guard itself uses only POSIX syntax. This lint runs under bash 5 only, like
 # every other script; it checks the exact text, so the message cannot drift between scripts.
 #
+# Hooks: hack/hooks/*-check.sh carry the fail-open variant instead (see hook_guard below).
+# Any other bash shebang (#!/bin/bash, env -S bash, ...) is rejected.
+#
 # Scope: every *.sh file under the root whose first line is `#!/usr/bin/env bash`. Not in scope, by
 # design (see ADR 0090): files without a bash shebang (libraries that are only sourced, such as
 # hack/lab/config.sh, hack/chart-check.d/*.sh and test/e2e/quickstart.golden.sh, which a guarded script
@@ -25,19 +28,39 @@ set -euo pipefail
 
 guard='[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon'"'"'s scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }'
 
+# PreToolUse hooks (hack/hooks/*-check.sh) skip with a message instead: exit 2 would block the tool call.
+hook_guard='[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo '"'"'{"systemMessage":"Koinon hooks skipped: they need bash 5 or newer; on macOS: brew install bash"}'"'"'; exit 0; }'
+
 root=${1:-$(cd "$(dirname "$0")/.." && pwd)}
 
 fail=0
 n=0
 while IFS= read -r f; do
-	[[ $(head -n 1 "$f") == '#!/usr/bin/env bash' ]] || continue
+	shebang=$(head -n 1 "$f")
+	if [[ $shebang == '#!'*bash* && $shebang != '#!/usr/bin/env bash' ]]; then
+		echo "bash5-lint: ${f#"$root"/}: bash shebang '$shebang' (use #!/usr/bin/env bash)" >&2
+		fail=1
+		continue
+	fi
+	[[ $shebang == '#!/usr/bin/env bash' ]] || continue
 	n=$((n + 1))
 	first=$(awk 'NR > 1 && NF && $0 !~ /^[[:space:]]*#/ { print; exit }' "$f")
+	if [[ $first == "$hook_guard" && $f == */hack/hooks/*-check.sh ]]; then
+		continue # hooks fail open: exit 2 would block the tool call (ADR 0090, point 6)
+	fi
 	if [[ $first != "$guard" ]]; then
 		echo "bash5-lint: ${f#"$root"/}: the first command is not the bash 5 guard" >&2
 		fail=1
 	fi
-done < <(find "$root" \( -name .git -o -name node_modules \) -prune -o -name '*.sh' ! -name '*.golden.sh' -type f -print | sort)
+done < <(
+	{
+		if [[ -e $root/.git ]]; then
+			git -C "$root" ls-files --cached --others --exclude-standard -z -- '*.sh' | xargs -0 -I{} printf '%s/%s\n' "$root" {}
+		else
+			find "$root" \( -name .git -o -name node_modules \) -prune -o -name '*.sh' -type f -print
+		fi
+	} | grep -v '\.golden\.sh$' | sort
+)
 
 if ((fail)); then
 	echo "bash5-lint: put this line before the first command of each script listed (ADR 0090):" >&2

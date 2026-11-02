@@ -11,7 +11,7 @@ macOS ships bash 3.2 as `/bin/bash`. For about 80 scripts we kept 3.2 compatibil
 `declare -A`, `mapfile` or `${v,,}`, empty arrays guarded under `set -u`, a variable in place of a
 quote inside `"$(...)"`. The rule cost more than it paid. Two Mac-only bugs on 2026-11-02 came from it,
 and the workarounds (`${arr[@]+"${arr[@]}"}`, a `tr` for lower-casing) make the code harder to read
-and easy to get wrong again. CI, the cloud sessions and the e2e toolchain image already run bash 5.
+and easy to get wrong again. CI runs on Ubuntu 24.04 (bash 5.2) and the e2e toolchain image on Debian bookworm (bash 5.2).
 
 The dev-toolchain research (`docs/research/2026-11-dev-toolchain.md`) picked "stay, with a versions
 file, a drift check and a bash 3.2 CI job" and named a Nix flake as the only option that removes the
@@ -40,21 +40,25 @@ it. That closes the gap at the source for the price of one prerequisite.
    (`$(dirname "$0")/lib/...`) written in portable syntax, and that is longer and more fragile than the
    guard it would hide. There is no common library the scripts already source. One line, copied
    verbatim, checked by a lint, costs less.
-4. **Which files carry it.** Every tracked `*.sh` whose first line is `#!/usr/bin/env bash`: entry
+4. **Which files carry it.** Every tracked `*.sh` whose first line is `#!/usr/bin/env bash` (the lint lists files with `git ls-files` and rejects any other bash shebang, such as `#!/bin/bash`): entry
    points, tests and `hack/hooks/*.sh` alike. A test script is run directly by hand and by CI, so it
    gets the same early, plain failure. Not carried, on purpose:
    - files without a bash shebang: libraries that are only sourced by a guarded script
-     (`hack/lab/config.sh`, `hack/chart-check.d/*.sh`, `flavors/common/koinon-entry-lib.sh`) and the
+     (`hack/lab/config.sh`, `hack/chart-check.d/*.sh`) and the
      generated `test/e2e/quickstart.golden.sh`;
    - scripts that run inside container images or the sandbox: the flavors' `koinon-*` entry scripts
-     and the spike images' (`#!/bin/sh`) and `internal/agentd/*.sh` (no shebang). Those images are not
+     and the spike images' (`#!/bin/sh`), the library they source
+     (`flavors/common/koinon-entry-lib.sh`) and `internal/agentd/*.sh` (no shebang). Those images are not
      bash 5 by contract and these scripts use POSIX sh. A script that needs bash in an image must install bash 5 there first.
 5. **`hack/bash5-lint.sh` fails on a script missing the guard** (or carrying a different text), with a
    test (`hack/bash5-lint-test.sh`, which also proves the guard under `/bin/bash` 3.2 where it exists).
    It runs in preflight (the `bash5` gate, chosen by a `*.sh` change) and in the CI `scripts` job.
-6. **Hooks.** The Claude Code hooks in `hack/hooks/` are run by the harness with the user's PATH. On an
-   old bash the guard exits 2, which a PreToolUse hook reads as "block with this message", so a
-   misconfigured Mac fails loudly with the install hint instead of misbehaving.
+6. **Hooks fail open.** `hack/hooks/*-check.sh` are PreToolUse hooks run by the harness with the user's
+   PATH, and exit 2 there blocks the tool call, so on an old bash the exit-2 guard would block every
+   Bash, Read and Agent call. These three files use a variant instead: it prints
+   `{"systemMessage":"Koinon hooks skipped: they need bash 5 or newer; on macOS: brew install bash"}`
+   and exits 0, so the call goes on and the user sees the hint. `hack/bash5-lint.sh` accepts the variant
+   only in `hack/hooks/*-check.sh`; the hooks' `*_test.sh` files keep the exit-2 guard.
 7. **Scripts may use bash 5 syntax freely.** Existing 3.2 workarounds are removed where they hurt
    readability; no mass rewrite.
 
