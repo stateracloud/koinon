@@ -18,6 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/questions"
+	"github.com/stateracloud/koinon/internal/runpark"
 )
 
 // prArgs proposes text, a byte-exact edge case (no trailing newline, CRLF, tab, non-ASCII,
@@ -521,7 +522,7 @@ var _ = Describe("Service", func() {
 			if err != nil {
 				return err
 			}
-			return approvals.ResolveRun(ctx, store.New(tx), f.org, f.run.ID)
+			return runpark.Resolve(ctx, store.New(tx), f.org, f.run.ID)
 		})).To(Succeed())
 		run := f.getRun(ctx)
 		Expect(run.State).To(Equal(store.RunStateParked))

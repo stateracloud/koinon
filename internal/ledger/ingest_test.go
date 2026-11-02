@@ -18,7 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
-	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 )
 
 var _ = Describe("Ingester", func() {
@@ -214,11 +214,11 @@ var _ = Describe("Ingester", func() {
 		Expect(err).NotTo(HaveOccurred())
 		var payload map[string]any
 		for _, ev := range events {
-			if ev.Kind == scheduler.KindRunCanceled {
+			if ev.Kind == runoutcome.KindRunCanceled {
 				Expect(json.Unmarshal(ev.Payload, &payload)).To(Succeed())
 			}
 		}
-		Expect(payload).To(HaveKeyWithValue("reason", string(scheduler.ReasonSpendLimit)))
+		Expect(payload).To(HaveKeyWithValue("reason", string(runoutcome.ReasonSpendLimit)))
 		Expect(payload).To(HaveKeyWithValue("spend_limit_usd", "0.05"))
 		Expect(payload).To(HaveKeyWithValue("limit", "agent_daily"))
 		Expect(payload).To(HaveKeyWithValue("failureClass", "budget"))

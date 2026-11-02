@@ -15,7 +15,7 @@
 //	         (CancelOfFinishedRuns) closes it, and the inbox hides it meanwhile
 //
 // Every resolution is one transaction under the run's row lock: the question, the audit event, the
-// task event and the run's park (ResolveRun) change together, so an answer resumes the run exactly
+// task event and the run's park (runpark.Resolve) change together, so an answer resumes the run exactly
 // once. The agent gets the outcome as the next prompt of the resumed run (internal/agentd), which
 // says when the default was applied. Notifications go out after the commit (Notify).
 package questions
@@ -37,9 +37,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
-	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/runpark"
 )
 
 // Task event kinds.
@@ -467,7 +467,7 @@ func resolve(ctx context.Context, q *store.Queries, org, id pgtype.UUID, by pgty
 		return cur, err
 	}
 	// Resumes the run, once, when nothing else it waits for is open.
-	return row, approvals.ResolveRun(ctx, q, org, row.RunID)
+	return row, runpark.Resolve(ctx, q, org, row.RunID)
 }
 
 // Respond records a person's answer and resumes the run. Only a recipient of the question may

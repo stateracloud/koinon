@@ -243,6 +243,18 @@ func (o *Owner) Cancel(ctx context.Context, turn Turn, reason string, class stor
 	return o.end(ctx, turn, store.RunStateCanceled, reason, class, extra)
 }
 
+// CancelAtTimeLimit cancels the run as its owner at its wall-clock cap. The closing events carry
+// the note of runreply.TimeLimitNote, the same the control plane's sweep writes when it gets there
+// first (CancelOverTimeLimit); reason is the run's outcome reason. A failure to read the agent's
+// last reply leaves the summary out of the note.
+func (o *Owner) CancelAtTimeLimit(ctx context.Context, turn Turn, reason string) error {
+	note, err := runreply.TimeLimitNote(ctx, o.q, o.run)
+	if err != nil {
+		o.cfg.Log.Warn("reading the agent's last reply for the time-limit note failed", "err", err)
+	}
+	return o.Cancel(ctx, turn, reason, "", note)
+}
+
 func (o *Owner) end(ctx context.Context, turn Turn, outcome store.RunState, reason string, class store.RunFailureClass, extra map[string]any) error {
 	err := o.begin(ctx, func(q *store.Queries, src int64) error {
 		if err := o.endRow(ctx, q, turn, turn.Reason); err != nil {

@@ -9,7 +9,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/money"
-	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 )
 
 // A spent budget stops a run in two ways that race (ADR 0050): the ledger cancels the run and
@@ -46,9 +46,9 @@ func (r *runner) budgetStop(ctx context.Context, err error) error {
 	r.log.Info("the gateway refused the model request and a limit is reached; stopping the run on the budget", "limit", l.Name, "refusal", f.reason)
 	msg := l.StopMessage()
 	extra := l.StopDetail()
-	extra["reason"] = string(scheduler.ReasonSpendLimit)
+	extra["reason"] = string(runoutcome.ReasonSpendLimit)
 	if l.Name == budget.RunSpend {
-		extra["reason"] = string(scheduler.ReasonRunSpendCap)
+		extra["reason"] = string(runoutcome.ReasonRunSpendCap)
 	}
 	extra["message"] = msg
 	return &canceled{reason: msg, class: classBudget, extra: extra}
