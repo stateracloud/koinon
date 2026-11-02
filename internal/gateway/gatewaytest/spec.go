@@ -134,6 +134,16 @@ func llmSpec(env Env) {
 		}
 		chat := func(ctx context.Context, key string) (int, string) { return chatModel(ctx, key, testModel) }
 
+		// expectMarker asserts the do-not-retry marker on a refusal; for a kind listed in Env.Unmarked it
+		// asserts the header is absent, so an agentgateway upgrade that starts marking it fails here and
+		// the entry goes (#590).
+		expectMarker := func(unmarked bool, h http.Header, what string) {
+			if unmarked {
+				Expect(h.Values(gateway.DoNotRetryHeader)).To(BeEmpty(), "%s is now marked: remove it from Env.Unmarked and close #590: %v", what, h)
+				return
+			}
+			Expect(gateway.DoNotRetry(h)).To(BeTrue(), "%s must be marked: %v", what, h)
+		}
 		mcpSessionAs := func(ctx context.Context, key, spoof string) (*mcp.ClientSession, error) {
 			client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0.0.1"}, nil)
 			return client.Connect(ctx, &mcp.StreamableClientTransport{
@@ -468,13 +478,11 @@ func llmSpec(env Env) {
 		// does not (ADR 0056 amendment 2026-11-01, #342).
 		Describe("do-not-retry marker on refusals (#342)", func() {
 			It("marks a missing and an unknown key (401)", func(ctx SpecContext) {
-				if slices.Contains(env.Unmarked, RefusalLLMKey) {
-					Skip("this gateway answers the LLM route's key check before any response policy runs (Env.Unmarked)")
-				}
+				unmarked := slices.Contains(env.Unmarked, RefusalLLMKey)
 				for _, key := range []string{"kgw_not-a-real-key", ""} {
 					code, h, body := chatFull(ctx, key, testModel)
 					Expect(code).To(Equal(http.StatusUnauthorized), body)
-					Expect(gateway.DoNotRetry(h)).To(BeTrue(), "401 for key %q: %v", key, h)
+					expectMarker(unmarked, h, "401 for key "+key)
 				}
 			})
 
@@ -492,9 +500,7 @@ func llmSpec(env Env) {
 			})
 
 			It("marks a request that carries a gateway key in a header but Authorization (403)", func(ctx SpecContext) {
-				if slices.Contains(env.Unmarked, RefusalLLMAuthorization) {
-					Skip("this gateway answers the LLM route's authorization rule before any response policy runs (Env.Unmarked)")
-				}
+				unmarked := slices.Contains(env.Unmarked, RefusalLLMAuthorization)
 				req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/chat/completions",
 					bytes.NewBufferString(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}]}`, testModel)))
 				Expect(err).NotTo(HaveOccurred())
@@ -509,9 +515,7 @@ func llmSpec(env Env) {
 			})
 
 			It("marks an MCP request without a valid key", func(ctx SpecContext) {
-				if slices.Contains(env.Unmarked, RefusalMCPKey) {
-					Skip("this gateway answers the MCP route's key check before any response policy runs (Env.Unmarked)")
-				}
+				unmarked := slices.Contains(env.Unmarked, RefusalMCPKey)
 				req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/mcp",
 					strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
 				Expect(err).NotTo(HaveOccurred())
@@ -561,12 +565,10 @@ func llmSpec(env Env) {
 						break
 					}
 				}
-				if !slices.Contains(env.Unmarked, RefusalBudget) {
-					Expect(gateway.DoNotRetry(lastHeader)).To(BeTrue(), "the budget refusal is final: %v", lastHeader)
-				}
 				// $0.001 per request against $0.0015: two pass (the second overshoots
 				// by less than one response, ADR 0041), the third is blocked.
 				Expect(codes).To(Equal([]int{200, 200, 429}))
+				expectMarker(slices.Contains(env.Unmarked, RefusalBudget), lastHeader, "the budget 429")
 				Expect(last).To(ContainSubstring("budget_exceeded"))
 
 				code, _ := chat(ctx, keyB.Material)

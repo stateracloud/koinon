@@ -24,6 +24,8 @@ import (
 //     budget_exceeded, the LLM route's authorization 403 and the MCP route's 401. A consumer treats
 //     every 401 as final by its status, and a 429 that has a Retry-After beyond its cap as final
 //     (the standalone budget 429 sends the seconds until the window ends).
+//     Interim: tracked in #590; exit condition there (an agentgateway release that runs response
+//     policies on key-stage refusals, which makes gatewaytest Env.Unmarked fail loudly).
 //  4. A response without the marker is not a refusal. A provider's own 429, 5xx and network
 //     failure stay retryable; a gateway failure that is not a refusal (5xx) carries no marker.
 //
