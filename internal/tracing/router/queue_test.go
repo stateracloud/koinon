@@ -107,15 +107,21 @@ var _ = Describe("Destination queues", func() {
 
 		e.post(named(tr.tool(false), "s0"))
 		Eventually(func() int { return len(g.times(ep)) }).Should(Equal(1), "s0 is in flight")
+		m := e.r.Metrics()
+		depth := func() float64 { return testutil.ToFloat64(m.QueueDepth.WithLabelValues("org", "generic")) }
+		dropped := func() float64 { return testutil.ToFloat64(m.Dropped.WithLabelValues("org", "generic", "queue_full")) }
+		// A post returns once its spans are in the intake, and the intake workers attribute spans
+		// concurrently, so two posts in a row can reach the queue in either order (#567). Each span is
+		// queued (or has pushed the oldest out) before the next is posted, so arrival order is s1..s5.
 		for i := 1; i <= 5; i++ {
 			e.post(named(tr.tool(false), "s"+strconv.Itoa(i)))
+			Eventually(func() float64 { return depth() + dropped() }).Should(Equal(float64(i)), "s%d reached the queue", i)
 		}
-		m := e.r.Metrics()
-		Eventually(func() float64 { return testutil.ToFloat64(m.Dropped.WithLabelValues("org", "generic", "queue_full")) }).Should(Equal(2.0))
-		Expect(testutil.ToFloat64(m.QueueDepth.WithLabelValues("org", "generic"))).To(Equal(3.0))
+		Expect(dropped()).To(Equal(2.0))
+		Expect(depth()).To(Equal(3.0))
 		close(hold)
 		Eventually(sentNames).Should(Equal([]string{"s0", "s3", "s4", "s5"}), "s1 and s2, the oldest, were dropped")
-		Eventually(func() float64 { return testutil.ToFloat64(m.QueueDepth.WithLabelValues("org", "generic")) }).Should(BeZero())
+		Eventually(depth).Should(BeZero())
 		Eventually(func() float64 { return testutil.ToFloat64(m.Exported.WithLabelValues("org", "generic")) }).Should(Equal(4.0))
 
 		e.clock.SetNow(t0.Add(11 * time.Second))
