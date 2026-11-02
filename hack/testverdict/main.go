@@ -115,6 +115,12 @@ func main() {
 	sort.Strings(dirs)
 	for _, d := range dirs {
 		p := plain[d]
+		if len(p.failed) > 0 {
+			// Whatever the package's Ginkgo report says: a failed plain test fails the run, and the
+			// verdict must not read "0 failed" beside go test's own FAIL (#512).
+			results = append(results, result{dir: "./" + d, verdict: fail, passed: p.passed, why: "plain test failed: " + strings.Join(p.failed, ", ")})
+			continue
+		}
 		if suites[d] || len(p.skips) == 0 {
 			continue
 		}
@@ -136,6 +142,7 @@ func (l *stringList) Set(v string) error { *l = append(*l, v); return nil }
 type plainPkg struct {
 	passed int             // top-level tests that passed
 	skips  map[string]bool // requirements a test skipped for (testenv.RequireT)
+	failed []string        // plain tests that failed (and the package itself, when it failed as a whole)
 }
 
 func (p *plainPkg) requires() []string {
@@ -165,7 +172,7 @@ func loadGoTest(file string, pkgs map[string]*plainPkg) error {
 		} else if err != nil {
 			return fmt.Errorf("%s: not a go test -json stream: %w", file, err)
 		}
-		if e.Test == "" {
+		if e.Test == "" && e.Action != "fail" {
 			continue
 		}
 		dir := pkgDir(e.Package)
@@ -173,6 +180,10 @@ func loadGoTest(file string, pkgs map[string]*plainPkg) error {
 		if p == nil {
 			p = &plainPkg{skips: map[string]bool{}}
 			pkgs[dir] = p
+		}
+		if e.Test == "" { // the package's own result: build error, panic, timeout
+			p.failed = append(p.failed, "(package)")
+			continue
 		}
 		key := [2]string{e.Package, e.Test}
 		switch e.Action {
@@ -185,6 +196,10 @@ func loadGoTest(file string, pkgs map[string]*plainPkg) error {
 		case "skip":
 			if n, ok := pending[key]; ok {
 				p.skips[n] = true
+			}
+		case "fail":
+			if !strings.Contains(e.Test, "/") {
+				p.failed = append(p.failed, e.Test)
 			}
 		case "pass":
 			if !strings.Contains(e.Test, "/") {
