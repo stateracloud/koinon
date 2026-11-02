@@ -9,7 +9,7 @@
 #
 # The file is plain shell that assigns KOINON_* variables (see hack/lab/lab.env.example). A variable
 # that is already set in the environment wins over the file, so a one-off override needs no edit.
-# Scripts that need a setting call lab_require, which exits 2 with a message naming the variable
+# Scripts that need a setting call lab_require, which exits 78 (no lab configured) with a message naming the variable
 # and the file when it is empty.
 #
 # Used by hack/e2e-argo.sh; a lab gate script should source this file too instead of growing its own.
@@ -39,7 +39,7 @@ lab_config_load() {
   eval "$pre"
 }
 
-# lab_require <script name> <VAR>...: exit 2 naming every variable that is empty.
+# lab_require <script name> <VAR>...: exit 78 (no lab configured; 2 stays usage) naming every variable that is empty.
 lab_require() {
   local who=$1 v missing=""
   shift
@@ -53,5 +53,5 @@ lab_require() {
     echo "  Set them in the environment or in $(lab_config_file) (template: hack/lab/lab.env.example)."
     echo "  Without a lab, run the e2e on your own Docker: hack/e2e-remote.sh --local"
   } >&2
-  exit 2
+  exit 78
 }
