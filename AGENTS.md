@@ -53,9 +53,13 @@ Instructions for coding agents working on Koinon.
   `SUITE_LABEL=smoke` (not with `--argo`) runs steps 1-6 only. The required check is `e2e result`:
   green when nothing needs the e2e, but for a PR that needs one (`hack/needs-e2e.sh`) it is red until
   the head has a green `quickstart` (this run or a dispatched one) or `e2e-lab` success
-  (`hack/e2e-gate.sh`, #562); a later `e2e-lab` or a passing dispatch re-runs the failed `e2e result`
-  itself, else "Re-run failed jobs". `e2e-lab` is not a required context of its own, contributors
-  without a lab cannot produce it. Why: #281 (branch naming in githubtools) and #284 (a startup flag the chart's
+  (`hack/e2e-gate.sh`, #562); a later `e2e-lab` or a passing dispatch re-runs the `e2e result` job
+  itself (not when the PR run is still in progress: then "Re-run failed jobs"). `e2e-lab` is not a
+  required context of its own, contributors without a lab cannot produce it. Trust limit: `result`
+  runs from the PR's own `e2e-kind.yml`, so a PR can edit the YAML to drop the gate; the guard is the
+  ruleset's required review on `.github/**` (not CODEOWNERS), `e2e result` is not pinned to an app and
+  anyone with write access can post `e2e-lab`: a guardrail against mistakes, not a malicious member
+  (pinned integration_id / lab App: #568). Why: #281 (branch naming in githubtools) and #284 (a startup flag the chart's
   migrate Job lacked) passed every package test and failed only in a full install.
 - When main's kind e2e goes from green to red, `hack/e2e-bisect.sh` opens one `e2e-regression` issue
   naming the merge (or the suspects): fix forward within 2 hours, otherwise revert it. RC and

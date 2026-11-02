@@ -114,14 +114,14 @@ while IFS= read -r p; do
   expect 0 "$p"
 done < <(grep -v '^ *#' test/e2e/run.sh | grep -oE 'hack/[A-Za-z0-9_.-]+\.sh' | sort -u)
 
-# #565: every file the install steps of e2e-kind.yml read (hack/ scripts and env files; not the
-# decision and bisect scripts, which are about whether to run) and every file under hack/e2e-toolchain/
-# is an input: a kind, ko or helm bump must run the e2e.
+# #565: every file the jobs that run the e2e (the `quickstart` job of e2e-kind.yml, not decide, result
+# or bisect, which are about whether to run) read, and every file under hack/e2e-toolchain/, is an
+# input: a kind, ko or helm bump must run the e2e.
 while IFS= read -r p; do
   [[ -f $p ]] || continue
-  case $p in hack/e2e-decide.sh | hack/needs-e2e.sh | hack/e2e-bisect.sh) continue ;; esac
   expect 0 "$p"
-done < <(grep -v '^ *#' .github/workflows/e2e-kind.yml | grep -oE 'hack/[A-Za-z0-9_.-]+\.(sh|env)' | sort -u)
+done < <(awk '/^  quickstart:/ {on=1; next} /^  [a-z][a-z-]*:/ {on=0} on' .github/workflows/e2e-kind.yml |
+  grep -v '^ *#' | grep -oE 'hack/[A-Za-z0-9_.-]+\.(sh|env)' | sort -u)
 for p in hack/versions.env hack/e2e-toolchain/*; do expect 0 "$p"; done
 
 # Against git, in a scratch module shaped like the repository: the six binaries and the driver.
