@@ -511,7 +511,7 @@ func llmSpec(env Env) {
 				Expect(err).NotTo(HaveOccurred())
 				_ = resp.Body.Close()
 				Expect(resp.StatusCode).To(Equal(http.StatusForbidden))
-				Expect(gateway.DoNotRetry(resp.Header)).To(BeTrue(), "%v", resp.Header)
+				expectMarker(unmarked, resp.Header, "403 for a key in a header")
 			})
 
 			It("marks an MCP request without a valid key", func(ctx SpecContext) {
@@ -526,7 +526,7 @@ func llmSpec(env Env) {
 				Expect(err).NotTo(HaveOccurred())
 				_ = resp.Body.Close()
 				Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized))
-				Expect(gateway.DoNotRetry(resp.Header)).To(BeTrue(), "%v", resp.Header)
+				expectMarker(unmarked, resp.Header, "MCP 401")
 			})
 
 			It("marks a provider's 403 (an aggregator's policy refusal) and no other provider answer", func(ctx SpecContext) {
