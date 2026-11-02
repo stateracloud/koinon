@@ -45,11 +45,14 @@ on:
 permissions:
   contents: read
 
-# Pull requests: a new push cancels the old run. Main: one running, one pending, the newest pending
-# replaces the older (batching). Everything else (dispatch, nightly) runs alone.
+# Pull requests: a new push cancels the old run. Adding the `e2e` label does not: `gh pr create
+# --label e2e` fires `opened` and then `labeled` on one head (#468), so the labelled run queues behind
+# the other and runs nothing when that one ran the e2e (hack/e2e-decide.sh, `covered`). Main: one
+# running, one pending, the newest pending replaces the older (batching). Everything else (dispatch,
+# nightly) runs alone.
 concurrency:
   group: ${{ github.event_name == 'push' && 'e2e-main' || github.event_name == 'pull_request' && format('e2e-kind-pr-{0}-{1}', github.ref, (github.event.action == 'unlabeled' || (github.event.action == 'labeled' && github.event.label.name != 'e2e')) && 'label' || 'run') || format('e2e-kind-{0}-{1}', github.event_name, github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !(github.event.action == 'labeled' && github.event.label.name == 'e2e') }}
 
 jobs:
   # Cheap: a checkout, a git diff, one `go list`.
@@ -64,9 +67,11 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      actions: read # the last green run on main
+      actions: read # the last green run on main; the other runs on a PR's head
+      pull-requests: read # the PR's current labels
     outputs:
       needed: ${{ steps.decide.outputs.needed }}
+      covered: ${{ steps.decide.outputs.covered }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -84,6 +89,10 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.base_ref }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          ACTION: ${{ github.event.action }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ID: ${{ github.run_id }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
@@ -265,13 +274,15 @@ jobs:
           # must not replace an earlier failure as this check's latest result, so mirror the last
           # real run on the commit.
           UNRELATED_LABEL: ${{ github.event_name == 'pull_request' && (github.event.action == 'unlabeled' || (github.event.action == 'labeled' && github.event.label.name != 'e2e')) }}
+          # The `e2e` label on a head another run already ran the e2e on: mirror that run too (#468).
+          COVERED: ${{ needs.decide.outputs.covered == 'true' }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           RUN_ID: ${{ github.run_id }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           echo "decide: $DECIDE, quickstart: $QUICKSTART"
-          if [[ $UNRELATED_LABEL == true ]]; then
+          if [[ $UNRELATED_LABEL == true || $COVERED == true ]]; then
             prev=$(gh run list --workflow e2e-kind.yml --event pull_request --commit "$HEAD_SHA" --limit 20 \
               --json databaseId,conclusion,createdAt \
               --jq "[.[] | select(.databaseId != $RUN_ID and .conclusion != \"\")] | sort_by(.createdAt) | last | .conclusion // \"none\"")
