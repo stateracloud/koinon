@@ -31,6 +31,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
+	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/savedwork"
@@ -104,6 +105,26 @@ type Tool struct {
 	Out          io.Writer
 	ActivePeriod time.Duration
 	Now          func() time.Time
+	// Prompt asks the person for what is missing and confirms what is hard to undo. Nil means do
+	// not ask: the commands then behave as they do in a script.
+	Prompt *cli.Prompter
+	// Yes skips the confirmations (--yes). It does not pick a KEK for the person.
+	Yes bool
+}
+
+// confirm asks unless there is nobody to ask or --yes was given.
+func (t *Tool) confirm(ctx context.Context, title, description string) error {
+	if t.Prompt == nil || t.Yes {
+		return nil
+	}
+	ok, err := t.Prompt.Confirm(ctx, title, description)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return cli.ErrCancelled
+	}
+	return nil
 }
 
 func (t *Tool) now() time.Time {
@@ -258,13 +279,23 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 
 // Activate makes id the wrapping KEK. New values use it once the pods have the changed Secret
 // (kubelet propagates it within about a minute).
+//
+// With an empty id and a Prompt, the person picks one of the inactive KEKs.
 func (t *Tool) Activate(ctx context.Context, id string) error {
 	ks, err := t.Store.Load(ctx)
 	if err != nil {
 		return err
 	}
+	if id == "" {
+		if id, err = t.pickInactive(ctx, ks); err != nil {
+			return err
+		}
+	}
 	if _, ok := ks.Keys[id]; !ok {
 		return fmt.Errorf("KEK %s is not in the key set", id)
+	}
+	if err := t.confirm(ctx, fmt.Sprintf("Activate %s?", id), "New values use it within about a minute."); err != nil {
+		return err
 	}
 	ks.Active, ks.ActivatedAt = id, t.now()
 	if err := t.Store.Save(ctx, ks); err != nil {
@@ -274,12 +305,66 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 	return nil
 }
 
+// pickInactive lists the KEKs that are not active, with their age and (when there is a database)
+// the values each wraps, and returns the one the person picks.
+func (t *Tool) pickInactive(ctx context.Context, ks KeySet) (string, error) {
+	if t.Prompt == nil {
+		return "", errors.New("a KEK ID is required")
+	}
+	var usage map[string]int
+	if t.Pool != nil {
+		var err error
+		if usage, err = t.Usage(ctx); err != nil {
+			return "", err
+		}
+	}
+	var choices []cli.Choice
+	for _, id := range slices.Sorted(maps.Keys(ks.Keys)) {
+		if id != ks.Active {
+			choices = append(choices, cli.Choice{Label: t.describeKEK(id, usage), Value: id})
+		}
+	}
+	if len(choices) == 0 {
+		return "", errors.New("there is no inactive KEK to activate; create one with: koinon-api keys add")
+	}
+	return t.Prompt.Select(ctx, "Which KEK should wrap new values?", choices)
+}
+
+// describeKEK is the picker's line for id: the ID, its age when the ID carries a date, and the
+// values it wraps when usage is known.
+func (t *Tool) describeKEK(id string, usage map[string]int) string {
+	label := id
+	if added, ok := ageFromID(id); ok {
+		label += fmt.Sprintf("  added %d days ago", int(t.now().Sub(added).Hours()/24))
+	}
+	if usage != nil {
+		label += fmt.Sprintf("  wraps %d value(s)", usage[id])
+	}
+	return label
+}
+
 func (t *Tool) ring(ks KeySet) (*secretstore.Keyring, error) {
 	return secretstore.NewKeyring(ks.Keys, ks.Active)
 }
 
 // Rewrap wraps every stored data key under the active KEK. It never decrypts a payload.
 func (t *Tool) Rewrap(ctx context.Context) error {
+	if t.Prompt != nil && !t.Yes {
+		ks, usage, err := t.keysAndUsage(ctx)
+		if err != nil {
+			return err
+		}
+		n := 0
+		for id, c := range usage {
+			if id != ks.Active {
+				n += c
+			}
+		}
+		if err := t.confirm(ctx, fmt.Sprintf("Rewrap %d value(s) under %s?", n, ks.Active),
+			"Data keys are wrapped again; payloads are not decrypted."); err != nil {
+			return err
+		}
+	}
 	return t.each(ctx, "rewrapped", func(ring *secretstore.Keyring, b secretstore.Binding, env secretstore.Envelope, active string) (*secretstore.Envelope, error) {
 		if env.KEKID == active {
 			return nil, nil
@@ -293,6 +378,31 @@ func (t *Tool) Rewrap(ctx context.Context) error {
 // decrypts each payload in memory. After it, rotate the credentials themselves at their
 // providers: re-encrypting does not undo a leak.
 func (t *Tool) Reencrypt(ctx context.Context) error {
+	if t.Prompt != nil && !t.Yes {
+		ks, usage, err := t.keysAndUsage(ctx)
+		if err != nil {
+			return err
+		}
+		n := 0
+		for _, c := range usage {
+			n += c
+		}
+		got, err := t.Prompt.Input(ctx,
+			fmt.Sprintf("Re-encrypt %d value(s) under new data keys? Type the active KEK ID (%s) to continue", n, ks.Active),
+			"This decrypts every payload in memory. It does not undo a leak: rotate the credentials at their providers afterwards.",
+			func(s string) error {
+				if strings.TrimSpace(s) != ks.Active {
+					return fmt.Errorf("type %s to continue", ks.Active)
+				}
+				return nil
+			})
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(got) != ks.Active {
+			return cli.ErrCancelled
+		}
+	}
 	return t.each(ctx, "re-encrypted", func(ring *secretstore.Keyring, b secretstore.Binding, env secretstore.Envelope, _ string) (*secretstore.Envelope, error) {
 		plain, err := ring.Open(b, env)
 		if err != nil {
@@ -302,6 +412,15 @@ func (t *Tool) Reencrypt(ctx context.Context) error {
 		out, err := ring.Seal(b, plain)
 		return &out, err
 	})
+}
+
+func (t *Tool) keysAndUsage(ctx context.Context) (KeySet, map[string]int, error) {
+	ks, err := t.Store.Load(ctx)
+	if err != nil {
+		return KeySet{}, nil, err
+	}
+	usage, err := t.Usage(ctx)
+	return ks, usage, err
 }
 
 type rowFn func(ring *secretstore.Keyring, b secretstore.Binding, env secretstore.Envelope, active string) (*secretstore.Envelope, error)
@@ -406,12 +525,38 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 }
 
 // Retire removes a KEK from the key set. It refuses while the KEK is active or any value
-// uses it.
+// uses it. With an empty id and a Prompt, the person picks one of the KEKs that can be retired.
 func (t *Tool) Retire(ctx context.Context, id string) error {
 	ks, err := t.Store.Load(ctx)
 	if err != nil {
 		return err
 	}
+	usage, err := t.Usage(ctx)
+	if err != nil {
+		return err
+	}
+	if id == "" {
+		if id, err = t.pickRetirable(ctx, ks, usage); err != nil {
+			return err
+		}
+	}
+	if err := t.retireBlock(ks, usage, id); err != nil {
+		return err
+	}
+	if err := t.confirm(ctx, fmt.Sprintf("Retire %s?", id),
+		"The KEK is removed from the key set. Keep a copy in your backup escrow for as long as database backups that used it exist."); err != nil {
+		return err
+	}
+	delete(ks.Keys, id)
+	if err := t.Store.Save(ctx, ks); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(t.Out, "Retired KEK %s. Keep a copy in your backup escrow for as long as database backups that used it exist.\n", id)
+	return nil
+}
+
+// retireBlock is why id cannot be retired now, or nil.
+func (t *Tool) retireBlock(ks KeySet, usage map[string]int, id string) error {
 	if _, ok := ks.Keys[id]; !ok {
 		return fmt.Errorf("KEK %s is not in the key set", id)
 	}
@@ -424,17 +569,39 @@ func (t *Tool) Retire(ctx context.Context, id string) error {
 		return fmt.Errorf("the active KEK %s was activated %s ago; wait until it has been active for %s so every pod wraps with it, rewrap, then retire",
 			ks.Active, t.now().Sub(ks.ActivatedAt).Round(time.Second), MinActiveBeforeRetire)
 	}
-	usage, err := t.Usage(ctx)
-	if err != nil {
-		return err
-	}
 	if n := usage[id]; n > 0 {
 		return fmt.Errorf("%d value(s) still use KEK %s; run \"keys rewrap\" first (or \"keys reencrypt\")", n, id)
 	}
-	delete(ks.Keys, id)
-	if err := t.Store.Save(ctx, ks); err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(t.Out, "Retired KEK %s. Keep a copy in your backup escrow for as long as database backups that used it exist.\n", id)
 	return nil
+}
+
+// pickRetirable lists every KEK; the ones retireBlock refuses are shown with the reason.
+func (t *Tool) pickRetirable(ctx context.Context, ks KeySet, usage map[string]int) (string, error) {
+	if t.Prompt == nil {
+		return "", errors.New("a KEK ID is required")
+	}
+	var choices []cli.Choice
+	for _, id := range slices.Sorted(maps.Keys(ks.Keys)) {
+		c := cli.Choice{Label: t.describeKEK(id, usage), Value: id}
+		if err := t.retireBlock(ks, usage, id); err != nil {
+			c.Disabled = err.Error()
+		}
+		choices = append(choices, c)
+	}
+	if allDisabled(choices) {
+		for _, c := range choices {
+			_, _ = fmt.Fprintf(t.Out, "  %s (not available: %s)\n", c.Label, c.Disabled)
+		}
+		return "", errors.New("no KEK can be retired now (reasons above)")
+	}
+	return t.Prompt.Select(ctx, "Which KEK should be retired?", choices)
+}
+
+func allDisabled(cs []cli.Choice) bool {
+	for _, c := range cs {
+		if c.Disabled == "" {
+			return false
+		}
+	}
+	return true
 }
