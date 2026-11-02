@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Offline tests for hack/preflight.sh (#391): per-worktree log directories, the pid file and --stop
-# stopping only its own worktree's run. Each fixture repo carries a stub hack/adr-lint.sh.
+# stopping only its own worktree's run. Each fixture repo carries stub hack/adr-lint.sh and hack/adr-lint-test.sh.
 # shellcheck disable=SC2015,SC2329 # "A && ok || bad" is the test idiom; cleanup runs from a trap
 set -euo pipefail
 
@@ -28,7 +28,8 @@ mkrepo() { # <name> <adr-lint body>
 	local d=$tmp/$1
 	mkdir -p "$d/hack" "$d/docs/adr"
 	printf '#!/usr/bin/env bash\n%s\n' "$2" >"$d/hack/adr-lint.sh"
-	chmod +x "$d/hack/adr-lint.sh"
+	printf '#!/usr/bin/env bash\nexit 0\n' >"$d/hack/adr-lint-test.sh" # the adr gate runs it first
+	chmod +x "$d/hack/adr-lint.sh" "$d/hack/adr-lint-test.sh"
 	echo x >"$d/docs/adr/0001-x.md"
 	git -C "$d" init -q
 	git -C "$d" add -A

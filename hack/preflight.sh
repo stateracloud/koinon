@@ -100,7 +100,7 @@ reason() {
 	proto) match '\.proto$' && echo "proto files changed" ;;
 	generate) match '\.proto$|^internal/db/queries/.*\.sql$|^sqlc\.yaml$' && echo "proto or sqlc queries changed" ;;
 	migrate) match '^internal/db/migrations/' && echo "migrations changed" ;;
-	adr) match '^docs/adr/' && echo "docs/adr changed" ;;
+	adr) match '^(docs/adr/|hack/adr-)' && echo "docs/adr or the ADR scripts changed" ;;
 	docs) match '^(docs/|test/e2e/|charts/|web/e2e-real/|hack/docs-|README\.md)' && echo "docs or what docs-check checks changed" ;;
 	chart) match '^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/)' && echo "charts changed" ;;
 	web) match '^web/' && echo "web/ changed" ;;
@@ -208,7 +208,7 @@ g_generate() {
 }
 
 g_migrate() { hack/migrate-lint.sh "$base"; }
-g_adr() { hack/adr-lint.sh; }
+g_adr() { hack/adr-lint-test.sh >/dev/null && hack/adr-lint.sh; }
 g_docs() { hack/docs-check.sh; }
 g_chart() { hack/chart-check.sh; }
 g_web() { (cd web && pnpm lint && pnpm typecheck && pnpm test); }
