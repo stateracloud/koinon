@@ -13,7 +13,7 @@ is marked **[unverified]**, with the page or test that would settle it.
 
 ## Short answer
 
-- **Probably not available today; unverified.** The facts:
+- **Not available today: refused by the API on 2026-11-02 (Team plan, private repo).** The facts:
   - The org is on the Team plan with 2 seats (`gh api orgs/stateracloud`: plan `team`).
   - The repository is private (`"private": true` from the repos API).
   - No queue is configured (GraphQL `repository.mergeQueue(branch: "main")` is null), which does
@@ -22,9 +22,11 @@ is marked **[unverified]**, with the page or test that would settle it.
     available", and `claims.yml` says the same in its header. ADR 0082 decision 8 already says
     "Use the native merge queue once the repository is public".
 
-  GitHub's pages on the queue, its plans and its pricing do not state which plans include it
-  **[unverified]**. The cheapest proof is for Andre to open Settings, Rules, new branch ruleset,
-  and see whether "Require merge queue" is offered.
+  - Creating a disabled ruleset with a `merge_queue` rule fails with HTTP 422 "Invalid rule
+    'merge_queue': ". The same payload with a `deletion` rule is accepted (section 1).
+
+  GitHub's error text is empty, and its pages on the queue, its plans and its pricing do not state
+  which plans include it. So the plan is the most likely cause, but GitHub does not name it.
 - **Even where it is available, a queue saves little once #598 (#593 + #595) lands.**
   - Without #598, a size-1 queue roughly breaks even.
   - With #598, it costs more than today unless groups batch about four PRs or the heavy jobs move
@@ -43,7 +45,21 @@ is marked **[unverified]**, with the page or test that would settle it.
 | Repository is private, org-owned, merge commits only, auto-merge on | repos API (`private: true`, `allow_merge_commit: true`, squash/rebase off, `allow_auto_merge: true`) |
 | Plan is Team, 2 seats | `gh api orgs/stateracloud` (read 2026-11-02) |
 | No queue configured on `main` | GraphQL `repository.mergeQueue(branch: "main")` is null |
-| Merge queue not available on Team for a private repository | ADR 0082 Context; `claims.yml` header. **[unverified]**: neither [managing-a-merge-queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue), the [plans page](https://docs.github.com/en/get-started/learning-about-github/githubs-plans) nor [pricing](https://github.com/pricing) states plan availability. Proof: does the ruleset editor offer "Require merge queue"? |
+| Merge queue refused for this private repository on Team | The rulesets API, 2026-11-02 (below); ADR 0082 Context; `claims.yml` header. Neither [managing-a-merge-queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue), the [plans page](https://docs.github.com/en/get-started/learning-about-github/githubs-plans) nor [pricing](https://github.com/pricing) states plan availability. |
+
+The API test was run on 2026-11-02 by a second session with the gh CLI:
+
+- `POST repos/stateracloud/koinon/rulesets` with `enforcement: "disabled"` and a `merge_queue`
+  rule (all seven parameters, grouping strategy `ALLGREEN`, merge method `MERGE`). It was aimed at
+  `~DEFAULT_BRANCH`, and in a second try at a branch that does not exist. Both answered HTTP 422
+  "Validation Failed", with errors `["Invalid rule 'merge_queue': "]`.
+- Control: the same payload with a `deletion` rule in place of `merge_queue` was accepted (ruleset
+  26401043) and deleted at once.
+- Afterwards the ruleset list was unchanged: `claims`, `main` and the three release-tag rulesets.
+
+So the API refuses `merge_queue` for this repository while it accepts the other rules. That
+matches ADR 0082. The error names no reason; the Team plan on a private repository is the likely
+one.
 
 Paths to a queue:
 
@@ -249,9 +265,11 @@ Steps 1 and 2 need no rollback.
    - Keep the strict rule and the updater. Land #598.
    - Narrow the updater to ready PRs whose own required checks are green, so a red PR is not
      re-run against new main for nothing. That targets the 1,393 ready-PR sync minutes directly.
+     Overlap: #596 (PR #600) trims the `claims` workflow's updater in parallel, so this change
+     belongs in that PR or follows it, never as a separate edit of the same job.
    - Do step 1 of the migration whenever convenient (inert until a queue exists), so the switch is
      a ruleset edit when the repository goes public, as ADR 0082 decision 8 already plans.
-2. **At go-public (or on Enterprise Cloud):**
+2. **Adopting the queue waits for the repository going public, or a plan change. Then:**
    - Adopt the native queue with group size 1 and build concurrency 2 for latency.
    - Consider "the queue is the full gate" only as its own decision, since it changes PR feedback.
 3. **The cheaper option and what it costs later:** turn the strict rule off with no queue. That
