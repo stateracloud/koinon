@@ -458,6 +458,19 @@ type mcpPolicies struct {
 
 type transformations struct {
 	Request headerTransform `yaml:"request"`
+	// Response marks the gateway's own refusals do-not-retry (doNotRetry).
+	Response responseTransform `yaml:"response"`
+}
+
+// responseTransform sets response headers from CEL expressions.
+type responseTransform struct {
+	Set map[string]string `yaml:"set"`
+}
+
+// doNotRetry is the response transformation of every section: the do-not-retry marker on a refusal
+// (gateway.DoNotRetryCEL, ADR 0056 amendment 2026-11-01, #342).
+func doNotRetry() responseTransform {
+	return responseTransform{Set: map[string]string{gateway.DoNotRetryHeader: gateway.DoNotRetryCEL}}
 }
 
 type headerTransform struct {
@@ -587,7 +600,7 @@ func build(s gateway.State, o Options) document {
 			Transformations: transformations{Request: headerTransform{
 				Replace: gateway.AllowHeadersExpr(gateway.ForwardedHeaders),
 				Set:     map[string]string{gateway.OrgHeader: `default(apiKey.org, "")`},
-			}},
+			}, Response: doNotRetry()},
 		},
 		Models: []llmModel{},
 	}
@@ -678,7 +691,7 @@ func build(s gateway.State, o Options) document {
 					Replace: gateway.AllowHeadersExpr(gateway.MCPForwardedHeaders),
 					Set:     map[string]string{strings.ToLower(gateway.AgentHeader): "apiKey.agent"},
 					Remove:  credentialHeaders(s.MCP),
-				}},
+				}, Response: doNotRetry()},
 			},
 		}
 		for _, t := range sortedTargets(s) {

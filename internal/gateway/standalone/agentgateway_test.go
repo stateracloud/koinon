@@ -135,6 +135,8 @@ var _ = func() bool {
 		},
 		GatewayBudgets:  true,
 		HeaderAllowlist: true,
+		// agentgateway v1.7.0 answers these in the key stage, before any response policy runs (#342).
+		Unmarked: []string{gatewaytest.RefusalLLMKey, gatewaytest.RefusalLLMAuthorization, gatewaytest.RefusalMCPKey, gatewaytest.RefusalBudget},
 	})
 	return true
 }()

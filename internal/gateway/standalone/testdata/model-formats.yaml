@@ -35,7 +35,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"734cb4f6352b9b04"'
+      koinon.config: '"4991b4d9fecb18a0"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -70,7 +70,7 @@ llm:
             - claude-haiku-4-5
             - claude-haiku-5-5
             - open/model
-        - keyHash: sha256:25ebfdae023c6a140b08a34d4cfaf4ed782062e7810a750e335d3fd4b106a2ac
+        - keyHash: sha256:699c49d56a15fa739f5e1dabc78ff685dfb628e884635a53e6da1d1ed71bd72e
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -82,6 +82,9 @@ llm:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
         set:
           x-koinon-org: default(apiKey.org, "")
+      response:
+        set:
+          x-should-retry: '(response.code == 403 || (response.code >= 400 && response.code < 500 && default(proxy.upstreamDuration, "") == "")) ? "false" : response.headers["x-should-retry"]'
   models:
     - id: acme/claude-haiku-4-5
       name: claude-haiku-4-5
