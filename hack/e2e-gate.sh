@@ -8,14 +8,21 @@
 # Evidence, any one of (all on the PR's head commit):
 #   1. this run's `quickstart` job succeeded;
 #   2. another e2e-kind run on the head (a `gh workflow run e2e-kind.yml --ref <branch>` dispatch,
-#      the `e2e` label's dispatch) has a `quickstart` job that succeeded;
+#      the `e2e` label's dispatch) has a go-suite `quickstart` job that succeeded (not a bisect
+#      dispatch of another commit, not the web suite);
 #   3. the commit status `e2e-lab` is success (posted by hack/e2e-remote.sh --argo after a green lab
 #      run, hack/e2e-status.sh). Its newest status counts.
 #
 # A status event does not start a workflow, so a later `e2e-lab` (or a dispatched run) does not
 # re-evaluate this job by itself: hack/e2e-status.sh and the dispatched run's own `e2e result` job
-# re-run the failed `e2e result` of the pull request run (hack/e2e-rerun-result.sh); by hand it is
-# "Re-run failed jobs" on the pull request's e2e-kind run.
+# re-run the `e2e result` job of the pull request run (hack/e2e-rerun-result.sh; not while that run
+# is still in progress); by hand it is "Re-run failed jobs" on the pull request's e2e-kind run.
+#
+# Trust limit: `result` runs from the pull request's own e2e-kind.yml, so a PR can edit the YAML to
+# drop this gate. The guard is the ruleset's required review on `.github/**` (not CODEOWNERS:
+# require_code_owner_review is false). `e2e result` is not pinned to an app and `e2e-lab` can be
+# posted by anyone with write access: a guardrail against mistakes, not against a malicious member.
+# The follow-up is a pinned integration_id / the lab's own GitHub App (#568).
 #
 # Environment: DECIDE and QUICKSTART (the `needs.<job>.result` values), REQUIRED (true|false), SHA
 # (the pull request head), BRANCH (its head branch, for the hint), GH (the gh command), GH_REPO,
@@ -46,13 +53,17 @@ pass() {
 [[ $QUICKSTART != success ]] || pass "this run's quickstart job succeeded"
 
 if [[ -n $SHA && -n $GH_REPO ]]; then
-  # A green quickstart job of another e2e-kind run on the head.
-  runs=$("$GH" run list --workflow e2e-kind.yml --commit "$SHA" --status success --limit 20 \
-    --json databaseId --jq '.[].databaseId' 2>/dev/null || true)
+  # A green go-suite quickstart job of another e2e-kind run on the head: a pull_request run, or a
+  # plain dispatch (display title "e2e-kind", as hack/e2e-label.sh; a bisect dispatch with a commit
+  # input tests another commit). The job's own conclusion is judged, not the run's: the dispatched run
+  # that re-runs this one is still in progress. A quickstart job that skipped the "web suite" step ran
+  # the go suite; the web suite only runs Playwright.
+  runs=$("$GH" run list --workflow e2e-kind.yml --commit "$SHA" --limit 30 --json databaseId,event,displayTitle \
+    --jq '.[] | select(.event == "pull_request" or (.event == "workflow_dispatch" and .displayTitle == "e2e-kind")) | .databaseId' 2>/dev/null || true)
   for id in $runs; do
     [[ $id != "${GITHUB_RUN_ID:-}" ]] || continue
     if [[ -n $("$GH" api "repos/$GH_REPO/actions/runs/$id/jobs?per_page=100" \
-      --jq '.jobs[] | select(.name == "quickstart" and .conclusion == "success") | .id' 2>/dev/null || true) ]]; then
+      --jq '.jobs[] | select(.name == "quickstart" and .conclusion == "success" and any(.steps[]?; .name == "Node and pnpm (web suite)" and .conclusion == "skipped")) | .id' 2>/dev/null || true) ]]; then
       pass "quickstart succeeded in e2e-kind run $id on ${SHA:0:12}"
     fi
   done

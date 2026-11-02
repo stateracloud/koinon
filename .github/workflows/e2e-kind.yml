@@ -22,7 +22,10 @@
 # The `e2e result` job is the one to require: it passes when the e2e was skipped because nothing needed
 # it, and for a pull request that needs one (hack/needs-e2e.sh) it fails until the head has a passing
 # e2e: a quickstart job here or in a dispatched run on the head, or the lab's `e2e-lab` commit status
-# (hack/e2e-gate.sh, #562).
+# (hack/e2e-gate.sh, #562). Trust limit: `result` runs from this very file, so a PR can edit it to drop the
+# gate; the guard is the ruleset's required review on `.github/**` (not CODEOWNERS), `e2e result` is not
+# pinned to an app and anyone with write access can post `e2e-lab`: a guardrail against mistakes, not a
+# malicious member (pinned integration_id / lab App: #568).
 name: e2e-kind
 run-name: e2e-kind${{ inputs.commit && format(' ({0}) bisect {1}', inputs.commit, inputs.bisect_id) || '' }}
 
@@ -156,7 +159,9 @@ jobs:
         with:
           package_json_file: web/package.json
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      # (This step's name is read by hack/e2e-gate.sh: skipped means the go suite ran.)
+      - name: Node and pnpm (web suite)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: inputs.suite == 'web'
         with:
           node-version: 24
@@ -255,7 +260,8 @@ jobs:
   # needs an e2e (decide's `required`) and its head has no passing one: neither a quickstart job in this
   # or another e2e-kind run nor the lab's `e2e-lab` status (hack/e2e-gate.sh, #562). A status event
   # starts no workflow, so a later e2e-lab or a dispatched run re-runs this job through
-  # hack/e2e-rerun-result.sh; by hand: "Re-run failed jobs" on the pull request's e2e-kind run.
+  # hack/e2e-rerun-result.sh (only that job, and only once the PR run has finished); by hand: "Re-run
+  # failed jobs" on the pull request's e2e-kind run.
   result:
     name: e2e result
     needs: [decide, quickstart]
