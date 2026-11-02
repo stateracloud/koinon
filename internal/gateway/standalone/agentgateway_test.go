@@ -31,22 +31,11 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/testing/containerhost"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // AgentgatewayImage is the agentgateway release Koinon targets (ADR 0048).
 const AgentgatewayImage = "cr.agentgateway.dev/agentgateway:v1.7.0"
-
-// skipWithoutDocker skips the spec when no container runtime is reachable.
-func skipWithoutDocker(ctx context.Context) {
-	p, err := testcontainers.NewDockerProvider()
-	if err == nil {
-		defer func() { _ = p.Close() }()
-		err = p.Health(ctx)
-	}
-	if err != nil {
-		Skip("Docker is not available: " + err.Error())
-	}
-}
 
 var options = standalone.Options{DatabaseURL: "sqlite:///tmp/agentgateway.db?mode=rwc"}
 
@@ -62,7 +51,7 @@ type running struct {
 // startStandalone starts agentgateway in a container on an empty config; files land in the directory
 // mounted at /secrets/upstream.
 func startStandalone(ctx context.Context, hostPorts []int, files map[string]string) (*running, error) {
-	skipWithoutDocker(ctx)
+	testenv.Require(testenv.Docker)
 	cfgDir, err := os.MkdirTemp("", "koinon-agw-cfg-")
 	if err != nil {
 		return nil, err
@@ -307,7 +296,7 @@ func portOf(s *httptest.Server) int {
 
 var _ = Describe("golden files", func() {
 	It("are accepted by agentgateway --validate-only", func(ctx SpecContext) {
-		skipWithoutDocker(ctx)
+		testenv.Require(testenv.Docker)
 		dir, err := filepath.Abs("testdata")
 		Expect(err).NotTo(HaveOccurred())
 		// The full fixture names a provider key file; validation opens it.
@@ -343,7 +332,7 @@ var _ = Describe("golden files", func() {
 // forwards the client's anthropic-version instead of replacing it, so the pin must still win.
 var _ = Describe("agentgateway v1.7.0 anthropic-version header (ADR 0069)", func() {
 	It("a requestHeaders.set pin overrides the client's value; without one the client's is forwarded", func(ctx SpecContext) {
-		skipWithoutDocker(ctx)
+		testenv.Require(testenv.Docker)
 		var mu sync.Mutex
 		seen := map[string]string{}
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

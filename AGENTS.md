@@ -9,6 +9,8 @@ Instructions for coding agents working on Koinon.
   suites under Ginkgo `-p` (one Postgres container per process, see `internal/testing/pgtest`), the
   rest under `go test` (Postgres tests need Docker; they skip without it). A new suite joins the
   parallel list in that script once it shares no database, fixed port or fixed path between processes.
+  `hack/testverdict` reports a skipped suite as SKIPPED (not PASS) and fails one that did not run (NOT RUN);
+  `hack/go-test.sh` exits 3 when an expected requirement (docker, git, helm) was missing.
   One package: `go test ./internal/x` (serial) or `go tool ginkgo -p ./internal/x`. `test/flavors` needs the flavor images:
   `make test-flavors`.
 - Web only: `cd web && pnpm lint && pnpm typecheck && pnpm test`
@@ -166,7 +168,7 @@ Two humans' agents change the same tree. Before you start, after `take`:
 - Tests: Ginkgo/Gomega and testcontainers-go in Go, Vitest in `web/`. CI never calls paid models:
   use the fake model server. Fake secrets in tests are obviously fake and low-entropy
   (`koinon_test_not-a-real-token`) from the first commit: gitleaks scans every commit of a pull
-  request, so a fixture that looks real and is fixed later still fails.
+  request, so a fixture that looks real and is fixed later still fails. Declare what a test needs from the machine with `testenv.Require` (in BeforeSuite or a spec, never before RunSpecs); CI sets `KOINON_REQUIRE` to turn those skips into failures; `KOINON_TESTENV_UNAVAILABLE=docker` simulates a machine without Docker.
 - Dependencies are at least 3 days old before they enter the tree, security fixes excepted with
   checks (ADR 0079; `hack/dep-age-check.sh origin/main`).
 - Chart renders are deterministic: no Helm `lookup` and no random values in templates. Generated

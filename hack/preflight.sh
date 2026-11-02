@@ -16,11 +16,14 @@
 #                 never touches another worktree's run. Do not pkill/pgrep by script name instead.
 #
 # Gates: go tidy deps generate proto migrate adr docs chart web shell e2e gitleaks.
-# One line per gate: `go ok 12s`, or `go FAIL 3s log=<path>` followed by at most 5 lines of the
-# error. Full logs are under ${TMPDIR:-/tmp}/koinon-preflight/<hash of the repo root>/, one directory
-# per worktree, so parallel lanes never mix logs. The e2e gate only reports the verdict
+# One line per gate: `go ok 12s`, `go FAIL 3s log=<path>` followed by at most 5 lines of the
+# error, or `go INCOMPLETE 3s (skipped: docker) log=<path>` when hack/go-test.sh exited 3 (an
+# expected requirement was missing, so some suites or specs skipped; #507). Full logs are under
+# ${TMPDIR:-/tmp}/koinon-preflight/<hash of the repo root>/, one directory per worktree, so
+# parallel lanes never mix logs. The e2e gate only reports the verdict
 # of hack/needs-e2e.sh and never fails. Gates never touch a cluster (KUBECONFIG=/dev/null).
-# Exit 0 when every gate that ran passed, 1 when one failed, 2 on a usage error.
+# Exit 0 when every gate that ran passed, 1 when one failed, 3 when a gate was incomplete and none
+# failed, 2 on a usage error.
 set -uo pipefail
 
 ALL="go tidy deps generate proto migrate adr docs chart web shell e2e gitleaks"
@@ -33,7 +36,7 @@ while [[ $# -gt 0 ]]; do
 	--list) list=1; shift ;;
 	-v) verbose=1; shift ;;
 	--stop) stop=1; shift ;;
-	-h | --help) sed -n 4,22p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h | --help) sed -n 4,26p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "preflight: unknown argument $1 (see --help)" >&2; exit 2 ;;
 	esac
 done
@@ -146,8 +149,10 @@ g_go() {
 	local pkgs files out
 	pkgs=$(go_pkgs)
 	if command -v golangci-lint >/dev/null; then
+		# `|| return 1`: golangci-lint exits 3 on findings, which run_gate would read as INCOMPLETE;
+		# only go-test.sh may report 3.
 		# shellcheck disable=SC2086 # pkgs is a word list
-		golangci-lint run $pkgs
+		golangci-lint run $pkgs || return 1
 	else
 		files=$(existing '\.go$')
 		if [[ -n $files ]]; then
@@ -156,10 +161,16 @@ g_go() {
 			if [[ -n $out ]]; then echo "gofumpt would change:"; echo "$out"; return 1; fi
 		fi
 		# shellcheck disable=SC2086
-		go vet $pkgs
+		go vet $pkgs || return 1
 	fi
+	# hack/go-test.sh, not bare go test: its verdict reports a suite that skipped for a missing
+	# requirement (no Docker in a sandbox) as SKIPPED and one that did not run as a failure (#507).
+	local reports rc=0
+	reports=$(mktemp -d "${TMPDIR:-/tmp}/preflight-go.XXXXXX") || return 1
 	# shellcheck disable=SC2086
-	go test $pkgs
+	REPORT_DIR=$reports hack/go-test.sh $pkgs || rc=$?
+	rm -rf "$reports"
+	return "$rc"
 }
 
 g_tidy() {
@@ -218,7 +229,7 @@ if [[ -n $oldpid ]] && kill -0 "$oldpid" 2>/dev/null; then
 fi
 echo $$ >"$pidfile"
 trap 'rm -f "$pidfile"' EXIT
-failed="" ran=0
+failed="" incomplete="" ran=0
 
 run_gate() { # <gate>
 	local g=$1 log=$logdir/$1.log start rc
@@ -244,6 +255,12 @@ run_gate() { # <gate>
 	if [[ $rc -eq 0 ]]; then
 		echo "$g ok $((SECONDS - start))s"
 		[[ $verbose == 1 ]] && sed 's/^/  | /' "$log"
+	elif [[ $g == go && $rc -eq 3 ]]; then
+		local names
+		names=$(sed -n 's/.*INCOMPLETE (missing \([^)]*\)).*/\1/p' "$log" | tail -1)
+		echo "$g INCOMPLETE $((SECONDS - start))s (skipped: ${names:-see log}) log=$log"
+		if [[ $verbose == 1 ]]; then sed 's/^/  | /' "$log"; else tail -n 5 "$log" | sed 's/^/  | /'; fi
+		incomplete="$incomplete${incomplete:+,}$g"
 	else
 		echo "$g FAIL $((SECONDS - start))s log=$log"
 		if [[ $verbose == 1 ]]; then sed 's/^/  | /' "$log"; else tail -n 5 "$log" | sed 's/^/  | /'; fi
@@ -258,5 +275,9 @@ done
 if [[ -n $failed ]]; then
 	echo "preflight FAIL ($failed)"
 	exit 1
+fi
+if [[ -n $incomplete ]]; then
+	echo "preflight incomplete ($incomplete: requirements missing, see above)"
+	exit 3
 fi
 echo "preflight ok ($ran gates)"

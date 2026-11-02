@@ -47,8 +47,6 @@ for t in "$repo"/hack/*-test.sh "$repo"/hack/claim_test.sh; do
 	name=$(basename "$t")
 	[[ $name == "$self" ]] && continue
 	grep -q mktemp "$t" || continue
-	# go-test-test.sh calls mktemp only in its opt-in behaviour check (GO_TEST_TEST_RUN=1, needs Docker).
-	[[ $name == go-test-test.sh ]] && continue
 	canary="$base/canary-$name"
 	mkdir "$canary"
 	: >"$canary/.git"

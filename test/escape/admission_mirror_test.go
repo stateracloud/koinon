@@ -3,7 +3,6 @@
 package escape_test
 
 import (
-	"os"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -15,6 +14,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // With a registry mirror (global.registryMirrors / global.imageRegistry), the chart rewrites the
@@ -40,9 +41,7 @@ var _ = Describe("Sandbox admission policy with a registry mirror", Label("escap
 	}
 
 	BeforeAll(func(ctx SpecContext) {
-		if os.Getenv("KUBEBUILDER_ASSETS") == "" {
-			Skip("KUBEBUILDER_ASSETS is not set (setup-envtest use -p path)")
-		}
+		testenv.Require(testenv.Envtest)
 		policies, bindings := renderSandboxPolicy(ctx, "--set", "global.registryMirrors.ghcr\\.io=art.example.com/ghcr-remote")
 
 		env := &envtest.Environment{CRDs: []*apiextensionsv1.CustomResourceDefinition{sandboxCRD()}}

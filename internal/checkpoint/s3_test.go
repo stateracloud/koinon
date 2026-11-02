@@ -18,6 +18,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/testing/containerhost"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // seaweedImage is the S3 server of the spike (ADR 0032): plain HTTP, path-style, no checksum
@@ -36,14 +37,7 @@ var _ = Describe("Writer on S3", Ordered, func() {
 	)
 
 	BeforeAll(func(sctx SpecContext) {
-		p, err := testcontainers.NewDockerProvider()
-		if err == nil {
-			err = p.Health(sctx)
-			_ = p.Close()
-		}
-		if err != nil {
-			Skip("Docker is not available: " + err.Error())
-		}
+		testenv.Require(testenv.Docker)
 		ctr, err := testcontainers.GenericContainer(sctx, testcontainers.GenericContainerRequest{
 			ContainerRequest: testcontainers.ContainerRequest{
 				Image:        seaweedImage,

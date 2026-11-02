@@ -5,7 +5,6 @@ package escape_test
 import (
 	"bytes"
 	"context"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -23,6 +22,8 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/yaml"
+
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // The sandbox observer's RBAC and the policy that fences it (ADR 0078), exactly as `helm template`
@@ -90,9 +91,7 @@ var _ = Describe("Sandbox observer admission policy", Label("escape", "admission
 	}
 
 	BeforeAll(func(ctx SpecContext) {
-		if os.Getenv("KUBEBUILDER_ASSETS") == "" {
-			Skip("KUBEBUILDER_ASSETS is not set (setup-envtest use -p path)")
-		}
+		testenv.Require(testenv.Envtest)
 		objects := renderObserver(ctx)
 
 		env := &envtest.Environment{CRDs: []*apiextensionsv1.CustomResourceDefinition{sandboxCRD()}}

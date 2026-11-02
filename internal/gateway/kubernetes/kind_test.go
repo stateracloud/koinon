@@ -29,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/gatewaytest"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // The kind suite needs a cluster with the Gateway API CRDs and agentgateway v1.7.0 (hack/g2-kind.sh
@@ -56,12 +57,13 @@ var (
 
 // needCluster returns the kind cluster or skips the spec.
 func needCluster() *cluster {
+	testenv.Require(
+		testenv.Var("g2-kind", envKubeconfig),
+		testenv.Var("g2-kind", envHost),
+	) // hack/g2-kind.sh sets both
 	clusterOnce.Do(func() {
 		path := os.Getenv(envKubeconfig)
 		host := os.Getenv(envHost)
-		if path == "" || host == "" {
-			return
-		}
 		rc, err := clientcmd.BuildConfigFromFlags("", path)
 		Expect(err).NotTo(HaveOccurred())
 		// The driver applies a dozen objects per pass; client-go's default 5 requests per second
@@ -73,9 +75,6 @@ func needCluster() *cluster {
 		Expect(err).NotTo(HaveOccurred())
 		theCluster = &cluster{cfgPath: path, kube: kube, dyn: dyn, host: host}
 	})
-	if theCluster == nil {
-		Skip(envKubeconfig + " and " + envHost + " are not set: run hack/g2-kind.sh")
-	}
 	return theCluster
 }
 
