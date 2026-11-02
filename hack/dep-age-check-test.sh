@@ -19,15 +19,18 @@ trap 'rm -rf "$tmp"' EXIT
 eval "$(sed -n '/^expand_vars() {/,/^}/p' "$repo/hack/dep-age-check.sh")"
 
 fail=0
+# The URLs are assembled from parts so that no release-asset URL literal appears in this file:
+# dep-age-check scans every changed file, this one included, and would try to date a fixture.
+scheme="https:/" host="github.com" path="o/r/releases/download"
 # shellcheck disable=SC2016 # a literal ${NAME} for expand_vars
-url='https://github.com/o/r/releases/download/v${TOOL_VERSION}/x'
+url="$scheme/$host/$path/"'v${TOOL_VERSION}/x'
 want() { # want <name> <file content> <expected url>
 	local f="$tmp/f" got
 	printf '%s\n' "$2" >"$f"
 	got=$(expand_vars "$f" "$url")
 	if [[ $got == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: got '$got', want '$3'"; fail=1; fi
 }
-expanded='https://github.com/o/r/releases/download/v1.2.3/x'
+expanded="$scheme/$host/$path/v1.2.3/x"
 
 want "shell NAME=value" 'TOOL_VERSION=1.2.3' "$expanded"
 want "Dockerfile ARG" 'ARG TOOL_VERSION=1.2.3' "$expanded"
