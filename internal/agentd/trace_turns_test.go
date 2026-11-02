@@ -130,7 +130,8 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 		e.harness.modelFault = modelCaller(ts.URL)
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
-		e.pool("agentd-retry", tracingOn(rcv, fakeDecider{traced: true, level: "none"}), func(c *agentd.Config) { c.RetryBackoff = 10 * time.Millisecond })
+		// agentd's own retry layer, the one for a flavor whose harness does not retry.
+		e.pool("agentd-retry", tracingOn(rcv, fakeDecider{traced: true, level: "none"}), agentd.OwnRetryLayer, func(c *agentd.Config) { c.RetryBackoff = 10 * time.Millisecond })
 		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Expect(endReasons(turnRows(ctx, e, r))).To(Equal([]string{"failed", "end_turn"}))
 		Eventually(rcv.count).WithTimeout(10 * time.Second).Should(Equal(2))

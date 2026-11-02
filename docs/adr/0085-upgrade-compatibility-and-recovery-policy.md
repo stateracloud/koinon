@@ -292,8 +292,46 @@ Implementation-level unknowns, to settle in the sub-issues:
   of its own version whose heartbeat is older than 90 s (`durable.Runtime.RecoverDeadExecutors`),
   forgets stale executors of older versions (the carry-over forks their workflows) and leaves those
   of newer versions to a process of that version. Still to do: the pending-by-version metric.
-- The exact shape of the key-wrapping interface (wrap, unwrap, key identity and reachability
-  probe) and how an adapter's credentials reach koinon-api without entering a sandbox.
+- Resolved (#415, decision 12; first slice 415a). A KMS is an option, not a mandate (Andre,
+  2026-11-02): the local keyring, with the KEKs in a Kubernetes Secret, stays the default and is
+  fully supported, with no migration warning and nothing deprecated. A KMS (OpenBao or AWS) is opt-in
+  through configuration. What is decided:
+  - Interface: `secretstore.Wrapper` (`Backend`, `KeyID`, `Wrap`, `Unwrap`, `Probe`), with `Local` as
+    the default adapter. Every adapter call ends by its context's deadline and the adapter applies
+    its own per-call timeout; `secretstore.Wrappers` also bounds each call (10 s), because the
+    reload loops pass a context that lives as long as the process. One constructor
+    (`secretstore/wrapping.New`) builds a process's wrappers from its configuration.
+  - The KMS wraps the KEKs, not each DEK (Andre accepted, 2026-11-02). The KEK Secret holds each KEK
+    as its wrapper stored it (a local KEK as the base64 of its bytes, unchanged; a KMS-wrapped one as
+    JSON naming the backend and key). Processes unwrap the key set when they load or reload it, so
+    `Seal` and `Open` stay local and synchronous and a short KMS outage does not stop reads. A
+    wrapped KEK is bound to its ID. `Wrappers` reads each stored KEK with its own adapter (`Local` is
+    always readable), so an install that opts in moves by add (wrapped by the KMS), `activate`,
+    `rewrap`, `retire`.
+  - Identity: adapters sign in with the pod's identity (OpenBao Kubernetes auth, the AWS default
+    chain with IRSA; Andre, 2026-11-02), so no credential is in Helm values, env or a sandbox.
+  - Only once a KMS primary is configured: koinon-api (with its `keys` commands) and the reconciler
+    are decrypt-only (agentd holds no keyring), and a separate key-admin Job with its own service account is the only
+    identity with encrypt rights. It wraps new KEKs: on first install and on demand for `keys add`
+    and rotation (Andre, 2026-11-02). The services refuse to wrap with a KMS
+    (`secretstore.ErrKeyAdminWraps`, "new KEKs are wrapped by the key-admin Job") before they call
+    it. A local install has no key-admin Job: koinon-api creates and adds KEKs exactly as before.
+    415a has the refusal; the Job and its chart wiring come with the first adapter (#416).
+  - Fingerprint: decision 12 said the wrapping keys' fingerprints; the code fingerprints the KEKs
+    (`secretstore.Fingerprint`, HMAC-SHA256 keyed by the KEK, 16 bytes). A KEK's fingerprint is the
+    same however it is wrapped: a KEK's fingerprint does not depend on its wrapping, so an export
+    matches the KEKs it holds whichever backend wraps them; a wrapping key's identity is already in the stored form (backend and key). `keys status`
+    and `keys export` print it.
+  - Still owed (415b): the fingerprints recorded in the database (on load and on activate) and the
+    unreachable-key metric (`Wrappers.Probe` in the reload loops, plus a line in `keys status`).
+    agentd holds no keyring (it asks koinon-api for repository passwords), so it needs no adapter.
+  - N-1 and rollback: once a KMS-wrapped KEK is in the Secret, a binary from before 415a cannot parse
+    the key set (it wants base64): koinon-api will not start and the reconciler keeps waiting for
+    keys. Before rolling back past 415a, an install that opted in sets the wrapping back to local (the
+    KMS still configured for reading), adds and activates a local KEK, rewraps and
+    retires every KMS-wrapped KEK, so the Secret holds local KEKs only. 415a itself cannot configure
+    a KMS, so no install reaches that state before an adapter ships; a local install's Secret is
+    byte-for-byte what N-1 reads.
 - Resolved (detection of the decision 6 rule): the lint reads a marker file, `hack/migrate-patch-line`
   (`none` or the shipped minor line, for example `v0.1`), at the merge base. Patch tags are cut from
   `main` (the release gate requires an ancestor of `origin/main`), so the marker, not a branch name,
