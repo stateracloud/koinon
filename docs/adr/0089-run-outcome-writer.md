@@ -58,3 +58,25 @@ success commit; the task left working after a park; and three more).
   the ledger and the scheduler can use the same verbs for their cancels.
 - agentd's metrics and the pool's shutdown reason reach the module through two small hooks
   (`Metrics`, `Stop`), not an import of agentd.
+
+## Amendment 2026-11-02 (#454): the control plane's cancels
+
+- **Every cancel by someone other than the run's owner is in the module too**, as package functions
+  beside the `Owner`: `CancelUnowned` (a person, an expired approval, the ledger's budget stop of an
+  agent's or org's runs), `CancelAtLimit` (the run's own request or spend limit, which carries what the
+  agent last said), `CancelOverTimeLimit` (the wall-clock sweep), `CancelQueuedForTask` and
+  `CancelForAgent`. With the `Owner`'s verbs they are the only writers of `CancelRun`, `FinishRun`, the
+  closing run event and the cancel's task event. The cancel reasons, `Actor` and `KindRunCanceled`
+  moved here from `internal/scheduler`, which keeps the limit check and the sweep's loop and calls the
+  module for the write.
+- **They hold no handle and no epoch; the run's state fences them.** Only a run that is still live
+  (queued, starting, running or parked) is canceled; a finished one returns `pgx.ErrNoRows` and gets no
+  event. The `Owner` keeps its rule that it always holds an epoch: there is no unfenced `Owner`. The two
+  are ordered by the run's row: whichever commits first is the run's outcome, and the other writes
+  nothing (the owner's verb is fenced as `FenceCanceled`, ADR 0050, ADR 0082). One spec per order.
+- **The time-limit note is built once, in the module.** `Owner.CancelAtTimeLimit` (agentd at the cap)
+  and `CancelOverTimeLimit` (the sweep) both write `runreply.TimeLimitNote`; the reads the control
+  plane makes inside its transaction run in a savepoint, so a failed read only leaves the summary out.
+- **The park's resolution moved to `internal/runpark`** (`Resolve`, formerly `approvals.ResolveRun`):
+  the module imports the question service, which resumed parks through the approval service, which
+  cancels expired runs through the module. `runpark` depends on the store alone and breaks that cycle.

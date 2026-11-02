@@ -40,7 +40,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/questions"
-	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/services"
 )
 
@@ -419,7 +419,7 @@ func (s *Server) cancelTask(ctx context.Context, req *mcp.CallToolRequest, in Ca
 		}); err != nil {
 			return err
 		}
-		_, err = scheduler.CancelQueuedForTask(ctx, q, t, "task canceled by the agent", scheduler.System)
+		_, err = runoutcome.CancelQueuedForTask(ctx, q, t, "task canceled by the agent", runoutcome.System)
 		return err
 	})
 	if err != nil {

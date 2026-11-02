@@ -29,40 +29,12 @@ import (
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/runlimits"
-	"github.com/stateracloud/koinon/internal/runreply"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 )
 
-// Event kinds written by the scheduler, on both the run and the task.
-const (
-	KindRunQueued   = "run.queued"
-	KindRunCanceled = "run.canceled"
-)
-
-// CancelReason is the machine-readable cause of a cancel, in the event
-// payload's "reason".
-type CancelReason string
-
-// Cancel reasons.
-const (
-	ReasonUser CancelReason = "user"
-	// ReasonTaskDone: the task reached an end state. The value is what earlier events stored.
-	ReasonTaskDone      CancelReason = "ticket_done"
-	ReasonAgentArchived CancelReason = "agent_archived"
-	ReasonWallClockCap  CancelReason = "wall_clock_cap"
-	// ReasonTokenCap: the token cap of runs before ADR 0081. It cancels nothing now; old events
-	// carry it.
-	ReasonTokenCap CancelReason = "token_cap"
-	// ReasonRequestCap: the run made as many model requests as its limit allows (ADR 0081).
-	ReasonRequestCap CancelReason = "request_cap"
-	// ReasonRunSpendCap: the run spent its spend limit (ADR 0081). The agent's, org's and platform's
-	// budgets cancel with ReasonSpendLimit.
-	ReasonRunSpendCap CancelReason = "run_spend_cap"
-	// ReasonSpendLimit: the agent reached its spend limit (plan item L1).
-	ReasonSpendLimit CancelReason = "spend_limit"
-	// ReasonApprovalExpired: the run was parked on an approval nobody decided in time
-	// (ADR 0049: 7 days).
-	ReasonApprovalExpired CancelReason = "approval_expired"
-)
+// KindRunQueued is the run and task event of a queued run. The cancels write
+// runoutcome.KindRunCanceled.
+const KindRunQueued = "run.queued"
 
 // ErrAgentNotActive means the task's agent cannot take runs.
 var ErrAgentNotActive = errors.New("agent is not active")
@@ -70,15 +42,6 @@ var ErrAgentNotActive = errors.New("agent is not active")
 // ErrAgentUnhealthy means the agent's sandbox keeps getting stuck and an admin has not resumed it
 // (ADR 0054). The error wraps the reason.
 var ErrAgentUnhealthy = errors.New("agent is unhealthy")
-
-// Actor is who caused a scheduler action, for the task event.
-type Actor struct {
-	// UserID is set for a user; otherwise the actor is the system.
-	UserID pgtype.UUID
-}
-
-// System is the actor for automatic actions (caps, sweeps).
-var System = Actor{}
 
 // Enqueue queues a run of the task's agent for the task, with the caps of
 // the agent's active version. It queues nothing, and returns false, when the
@@ -158,84 +121,6 @@ func EnqueueOrigin(ctx context.Context, q *store.Queries, task store.Task, origi
 		return store.Run{}, false, fmt.Errorf("append task event: %w", err)
 	}
 	return run, true, nil
-}
-
-// Cancel cancels a run that has not finished. pgx.ErrNoRows: it has finished
-// or does not exist in the org.
-func Cancel(ctx context.Context, q *store.Queries, org, runID pgtype.UUID, reason CancelReason, message string, actor Actor) (store.Run, error) {
-	run, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: org, ID: runID, OutcomeReason: message})
-	if err != nil {
-		return store.Run{}, err
-	}
-	return RecordCancel(ctx, q, run, reason, message, actor, nil)
-}
-
-// CancelQueuedForTask cancels the task's queued runs, when it reaches an end
-// state. msg is the outcome the runs record.
-func CancelQueuedForTask(ctx context.Context, q *store.Queries, task store.Task, msg string, actor Actor) ([]store.Run, error) {
-	runs, err := q.CancelQueuedRunsForTask(ctx, store.CancelQueuedRunsForTaskParams{
-		OrgID: task.OrgID, TaskID: task.ID, OutcomeReason: msg,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return recordAll(ctx, q, runs, ReasonTaskDone, msg, actor)
-}
-
-// CancelForAgent cancels every unfinished run of an agent, when it is
-// archived.
-func CancelForAgent(ctx context.Context, q *store.Queries, org, agentID pgtype.UUID, actor Actor) ([]store.Run, error) {
-	const msg = "agent archived"
-	runs, err := q.CancelOpenRunsForAgent(ctx, store.CancelOpenRunsForAgentParams{
-		OrgID: org, AgentID: agentID, OutcomeReason: msg,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return recordAll(ctx, q, runs, ReasonAgentArchived, msg, actor)
-}
-
-func recordAll(ctx context.Context, q *store.Queries, runs []store.Run, reason CancelReason, msg string, actor Actor) ([]store.Run, error) {
-	out := make([]store.Run, 0, len(runs))
-	for _, r := range runs {
-		r, err := RecordCancel(ctx, q, r, reason, msg, actor, nil)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, nil
-}
-
-// RecordCancel writes the run and task events for a run that was just
-// canceled. extra is merged into the payload.
-func RecordCancel(ctx context.Context, q *store.Queries, run store.Run, reason CancelReason, message string, actor Actor, extra map[string]any) (store.Run, error) {
-	p := map[string]any{"reason": string(reason), "message": message}
-	for k, v := range extra {
-		p[k] = v
-	}
-	if run.FailureClass.Valid {
-		p["failureClass"] = string(run.FailureClass.RunFailureClass)
-	}
-	payload := mustJSON(p)
-	ev, err := q.AppendRunControlEvent(ctx, store.AppendRunControlEventParams{
-		OrgID: run.OrgID, RunID: run.ID, Kind: KindRunCanceled, Payload: payload,
-	})
-	if err != nil {
-		return store.Run{}, fmt.Errorf("append run event: %w", err)
-	}
-	run.LastEventSeq = ev.Seq
-	te := store.AppendTaskEventParams{
-		OrgID: run.OrgID, TaskID: run.TaskID, Kind: KindRunCanceled,
-		ActorKind: store.TaskActorKindSystem, RunID: run.ID, Payload: payload,
-	}
-	if actor.UserID.Valid {
-		te.ActorKind, te.ActorUserID = store.TaskActorKindUser, actor.UserID
-	}
-	if _, err := q.AppendTaskEvent(ctx, te); err != nil {
-		return store.Run{}, fmt.Errorf("append task event: %w", err)
-	}
-	return run, nil
 }
 
 // DB is what the scheduler needs from a pool to open transactions.
@@ -318,9 +203,9 @@ func checkRunLimits(ctx context.Context, tx pgx.Tx, run store.Run) (store.Run, e
 	if err != nil {
 		return run, err
 	}
-	reason, msg, extra := CancelReason(""), "", map[string]any(nil)
+	reason, msg, extra := runoutcome.CancelReason(""), "", map[string]any(nil)
 	if r, hit := limits.CheckRequests(usage); hit {
-		reason, msg, extra = ReasonRequestCap, r.Message(), r.Detail()
+		reason, msg, extra = runoutcome.ReasonRequestCap, r.Message(), r.Detail()
 	}
 	if reason == "" {
 		for _, scope := range spendScopes {
@@ -329,7 +214,7 @@ func checkRunLimits(ctx context.Context, tx pgx.Tx, run store.Run) (store.Run, e
 				return run, err
 			}
 			if ok && l.Reached() {
-				reason, msg, extra = ReasonRunSpendCap, l.StopMessage(), l.StopDetail()
+				reason, msg, extra = runoutcome.ReasonRunSpendCap, l.StopMessage(), l.StopDetail()
 				break
 			}
 		}
@@ -337,26 +222,16 @@ func checkRunLimits(ctx context.Context, tx pgx.Tx, run store.Run) (store.Run, e
 	if reason == "" {
 		return run, nil
 	}
-	canceled, err := q.CancelRun(ctx, store.CancelRunParams{
-		OrgID: run.OrgID, ID: run.ID, OutcomeReason: msg,
-		FailureClass: store.NullRunFailureClass{RunFailureClass: store.RunFailureClassBudget, Valid: true},
+	extra["model_requests"], extra["spent_usd"] = usage.Requests, usage.Spend.String()
+	// What the agent last said travels with the cancel, as at the time limit (ADR 0066 amendment
+	// 2026-10-28).
+	canceled, err := runoutcome.CancelAtLimit(ctx, tx, run.OrgID, run.ID, runoutcome.Cancellation{
+		Reason: reason, Message: msg, Class: store.RunFailureClassBudget, Actor: runoutcome.System, Extra: extra,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return run, nil // finished meanwhile
-	} else if err != nil {
-		return run, err
 	}
-	extra["model_requests"], extra["spent_usd"] = usage.Requests, usage.Spend.String()
-	// What the agent last said travels with the cancel, as at the time limit (ADR 0066 amendment
-	// 2026-10-28): a failure to read it leaves the summary out, the cancel must not wait on it.
-	summary, source, serr := summaryIn(ctx, tx, canceled)
-	if serr != nil {
-		slog.Warn("reading the agent's last reply for the limit note failed", "run", run.ID.String(), "err", serr)
-	}
-	if summary != "" {
-		extra["summary"], extra["summarySource"] = summary, source
-	}
-	return RecordCancel(ctx, q, canceled, reason, msg, System, extra)
+	return canceled, err
 }
 
 // SweepWallClock cancels every owned run past its wall-clock cap, org by org,
@@ -370,65 +245,15 @@ func SweepWallClock(ctx context.Context, db DB) (int, error) {
 	n := 0
 	for _, org := range orgs {
 		err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
-			q := store.New(tx)
-			runs, err := q.CancelRunsOverWallClock(ctx, store.CancelRunsOverWallClockParams{
-				OrgID: org, OutcomeReason: "wall-clock cap exceeded",
-			})
-			if err != nil {
-				return err
-			}
-			for _, r := range runs {
-				// The same note agentd writes when it stops the run at its time limit: the agent's
-				// text since its last park, or the task's notes. A failure to read it leaves the
-				// summary out; the cancel must not wait on it. The read runs in a savepoint: a failed
-				// statement aborts a Postgres transaction, and the cancel would then fail with it.
-				note, nerr := timeLimitNote(ctx, tx, r)
-				if nerr != nil {
-					slog.Warn("reading the agent's last reply for the time-limit note failed", "run", r.ID.String(), "err", nerr)
-				}
-				msg, _ := note["message"].(string)
-				if _, err := RecordCancel(ctx, q, r, ReasonWallClockCap, msg, System, note); err != nil {
-					return err
-				}
-			}
+			runs, err := runoutcome.CancelOverTimeLimit(ctx, tx, org)
 			n += len(runs)
-			return nil
+			return err
 		})
 		if err != nil {
 			return n, fmt.Errorf("sweep org %s: %w", org.String(), err)
 		}
 	}
 	return n, nil
-}
-
-// summaryIn reads runreply.Summary inside a savepoint of tx, so that a failed read is rolled back
-// and leaves tx usable.
-func summaryIn(ctx context.Context, tx pgx.Tx, r store.Run) (summary, source string, err error) {
-	sp, err := tx.Begin(ctx)
-	if err != nil {
-		return "", "", err
-	}
-	summary, source, err = runreply.Summary(ctx, store.New(sp), r)
-	if err != nil {
-		_ = sp.Rollback(ctx)
-		return "", "", err
-	}
-	return summary, source, sp.Commit(ctx)
-}
-
-// timeLimitNote reads runreply.TimeLimitNote inside a savepoint of tx, so that a failed read is
-// rolled back and leaves tx usable. On an error the note is still returned, without a summary.
-func timeLimitNote(ctx context.Context, tx pgx.Tx, r store.Run) (map[string]any, error) {
-	sp, err := tx.Begin(ctx)
-	if err != nil {
-		return runreply.TimeLimitNoteBase(r), err
-	}
-	note, err := runreply.TimeLimitNote(ctx, store.New(sp), r)
-	if err != nil {
-		_ = sp.Rollback(ctx)
-		return note, err
-	}
-	return note, sp.Commit(ctx)
 }
 
 // Sweeper runs SweepWallClock every interval until ctx ends.

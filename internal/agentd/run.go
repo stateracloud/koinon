@@ -27,7 +27,6 @@ import (
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runoutcome"
-	"github.com/stateracloud/koinon/internal/runreply"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/thinking"
 )
@@ -85,9 +84,6 @@ type canceled struct {
 	class store.RunFailureClass
 	// extra is merged into the payload of the run's closing events.
 	extra map[string]any
-	// timeLimit: the run was stopped at its wall-clock cap; the closing events carry the note of
-	// runreply.TimeLimitNote.
-	timeLimit bool
 }
 
 func (c *canceled) Error() string { return c.reason }
@@ -940,7 +936,7 @@ func (r *runner) conclude(ctx context.Context, e ending, turn runoutcome.Turn) {
 	if t := e.res; t != nil {
 		switch t.out.Kind {
 		case turnpolicy.OutCapReached:
-			r.cancel(ctx, turn, t.capNote, "", nil, true)
+			r.cancelAtTimeLimit(ctx, turn, t.capNote)
 			return
 		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded:
 			reason, class, _ := t.fails()
@@ -976,7 +972,7 @@ func (r *runner) conclude(ctx context.Context, e ending, turn runoutcome.Turn) {
 	case errors.As(err, &f):
 		r.fail(ctx, turn, f.reason, f.class)
 	case errors.As(err, &c):
-		r.cancel(ctx, turn, c.reason, c.class, c.extra, c.timeLimit)
+		r.cancel(ctx, turn, c.reason, c.class, c.extra)
 	case errors.Is(err, errFenced):
 		r.concludeFenced(ctx, turn)
 	case errors.Is(err, errDropped):
@@ -996,25 +992,20 @@ func (r *runner) fail(ctx context.Context, turn runoutcome.Turn, reason string, 
 	}
 }
 
-// cancel cancels the run as its owner. A run stopped at its time limit carries the note of what the
-// agent last said (or its notes), the same payload the api's sweep writes.
-func (r *runner) cancel(ctx context.Context, turn runoutcome.Turn, reason string, class store.RunFailureClass, extra map[string]any, timeLimit bool) {
-	if timeLimit {
-		// A failure to read the note leaves the summary out.
-		note, nerr := runreply.TimeLimitNote(ctx, r.q, r.run)
-		if nerr != nil {
-			r.log.Warn("reading the agent's last reply for the time-limit note failed", "err", nerr)
-		}
-		for k, v := range extra {
-			note[k] = v
-		}
-		extra = note
-	}
+// cancel cancels the run as its owner.
+func (r *runner) cancel(ctx context.Context, turn runoutcome.Turn, reason string, class store.RunFailureClass, extra map[string]any) {
 	if ferr := r.own.Cancel(ctx, turn, reason, class, extra); ferr != nil {
 		r.log.Warn("canceling the run failed", "reason", reason, "err", ferr)
-	} else if timeLimit {
-		r.p.cfg.Metrics.TimeLimitStops.Inc()
 	}
+}
+
+// cancelAtTimeLimit cancels the run as its owner at its wall-clock cap, with the time-limit note.
+func (r *runner) cancelAtTimeLimit(ctx context.Context, turn runoutcome.Turn, reason string) {
+	if ferr := r.own.CancelAtTimeLimit(ctx, turn, reason); ferr != nil {
+		r.log.Warn("canceling the run failed", "reason", reason, "err", ferr)
+		return
+	}
+	r.p.cfg.Metrics.TimeLimitStops.Inc()
 }
 
 // concludeFenced ends a worker that may no longer write the run.

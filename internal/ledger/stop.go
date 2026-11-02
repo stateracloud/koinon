@@ -13,6 +13,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
@@ -21,8 +22,8 @@ import (
 // platform ceiling. Queued and parked runs are canceled too: they would start, or resume, on a key
 // that has nothing left. It returns how many runs it canceled. db is a transaction or a pool.
 //
-// Cancel, not park, is the transition (ADR 0050): it is the control plane's, needs no epoch, and
-// an owner's later report (a model request refused with 401 or 429 once the key is out of budget)
+// Cancel, not park, is the transition (ADR 0050): it is the control plane's
+// ([runoutcome.CancelUnowned]), needs no epoch, and an owner's later report (a model request refused with 401 or 429 once the key is out of budget)
 // then matches no row, so the run keeps the budget reason.
 //
 // The run's own limit goes through [scheduler.CheckRunLimits], the cancel of every other writer of
@@ -32,7 +33,6 @@ func Stop(ctx context.Context, db scheduler.DB, org, agent pgtype.UUID, l budget
 	q := store.New(db)
 	var runs []store.Run
 	var err error
-	reason := scheduler.ReasonSpendLimit
 	switch l.Name {
 	case budget.RunSpend:
 		r, err := scheduler.CheckRunLimits(ctx, db, org, l.Run)
@@ -53,19 +53,16 @@ func Stop(ctx context.Context, db scheduler.DB, org, agent pgtype.UUID, l budget
 	if err != nil {
 		return 0, fmt.Errorf("list open runs: %w", err)
 	}
-	msg, extra := l.StopMessage(), l.StopDetail()
+	c := runoutcome.Cancellation{
+		Reason: runoutcome.ReasonSpendLimit, Message: l.StopMessage(), Class: store.RunFailureClassBudget,
+		Actor: runoutcome.System, Extra: l.StopDetail(),
+	}
 	n := 0
 	for _, r := range runs {
-		c, err := q.CancelRun(ctx, store.CancelRunParams{
-			OrgID: org, ID: r.ID, OutcomeReason: msg,
-			FailureClass: store.NullRunFailureClass{RunFailureClass: store.RunFailureClassBudget, Valid: true},
-		})
+		_, err := runoutcome.CancelUnowned(ctx, q, org, r.ID, c)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue // finished meanwhile
 		} else if err != nil {
-			return n, err
-		}
-		if _, err := scheduler.RecordCancel(ctx, q, c, reason, msg, scheduler.System, extra); err != nil {
 			return n, err
 		}
 		n++
