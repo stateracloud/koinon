@@ -174,6 +174,7 @@ func sourceOf(f *pflag.Flag, envNames []string) string {
 // command that declares its own PersistentPreRunE must call Resolve itself.
 func Bind(root *cobra.Command, v *viper.Viper) {
 	root.SilenceErrors, root.SilenceUsage = true, true
+	addNoInputFlag(root)
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error { return Resolve(cmd, v) }
 }
 
