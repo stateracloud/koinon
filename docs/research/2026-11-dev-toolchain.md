@@ -4,7 +4,15 @@ Research date: 2026-11-02, for #536. The issue started as a Nix flake trial; pro
 "which option is best", so six options are scored on the same criteria. Probes ran on procoduck's Mac
 (macOS 27.2, arm64) inside the Claude Code sandbox, with nothing installed system-wide: mise and pkgx
 as single binaries in `$TMPDIR`, Nix through the multi-user install that was already there (2.21.1,
-April 2024). The trial `flake.nix` and `flake.lock` are in the repository root; nothing calls them.
+April 2024). The trial `flake.nix` and `flake.lock` were removed again (see Decision); they are in the git history of the trial branch only.
+
+## Decision
+
+2026-11-02, procoduck: no Nix. He has uninstalled it from his Mac and will not reinstall it. The winner,
+"stay, with one versions file, a drift check and a bash 3.2 CI job" (option 6), is filed as #544.
+The Nix flake was the runner-up and is the only option that removes the bash 3.2 gap at the source.
+Revisit it if the #544 bash 3.2 CI job proves too slow or misses BSD/GNU differences. The trial
+`flake.nix` and `flake.lock` are removed; this note is the record.
 
 ## Short answer
 
@@ -49,7 +57,7 @@ the Mac (checked) and bash 5 in CI.
 | GNU coreutils / sed / grep / awk | BSD Mac / GNU CI | 9.12 / 4.10 / 3.12 / 5.4.1 | available (g-prefixed) | 9.12.0 / yes | uutils only |
 
 Nothing in nixpkgs lags today; kubectl is one patch ahead (allowed by CONTRIBUTING). Homebrew matches
-by timing, not by pin: it serves only its current version. The `exactPins` overlay in `flake.nix`
+by timing, not by pin: it serves only its current version. The trial flake's `exactPins` overlay
 shows the fallback for helm and kind anyway: `fetchurl` of the upstream release with the Dockerfile's
 linux sha256s and the darwin sha256s from the releases' own `.sha256sum` files (the linux ones match
 the Dockerfile byte for byte). It is not applied.
@@ -113,7 +121,7 @@ stay in go.mod.
   eval cache lives in `~/.cache/nix`. `/nix/store` reads are already allowed.
 - Cloud session: setup script runs the Determinate installer with `--init none` (no systemd in the
   container; single-user store), then `nix develop -c true` to warm the store. Expect a few tens of
-  seconds for the install and the closure download; to be measured.
+  seconds for the install and the closure download (not measured, trial stopped).
 - CI: `DeterminateSystems/nix-installer-action` then `nix develop -c <step>`. Everything in this
   shell is on cache.nixos.org (a CDN), so the first cache option is no cache at all; measure before
   adding one. Magic Nix Cache stores paths in the GitHub Actions cache, which Blacksmith replaces
@@ -154,17 +162,10 @@ differ (replacing the hand cross-check in `hack/e2e-remote-test.sh`). Add a job 
 bash bugs; only a macOS runner also catches BSD `sed`/`date`. A `hack/doctor.sh` can warn when a
 local tool differs from the versions file.
 
-## Measurements still to take (outside the sandbox, after the Nix upgrade)
+## Nix measurements
 
-```sh
-cd /tmp/claude-502/kw/l536
-export NIX_CONFIG='experimental-features = nix-command flakes'
-nix --version && nix store info
-nix flake metadata . && git diff --exit-code flake.lock   # narHash confirmed when unchanged
-nix build .#devShells.aarch64-darwin.default --dry-run    # prints "will fetch N MiB (M MiB unpacked)"
-/usr/bin/time -p nix develop -c bash --version            # cold
-/usr/bin/time -p nix develop -c bash --version            # warm
-```
+Not measured, trial stopped (see Decision): no `nix develop` cold or warm timing, no closure download
+size, and no `nix flake metadata` confirmation of the hand-computed `narHash`.
 
 ## What an ADR would decide
 
