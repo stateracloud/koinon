@@ -256,14 +256,14 @@ What changes once you opt in (ADR 0085 decision 12):
   every minute), so values are read and written locally and a short KMS outage does not stop reads.
 - Every pod signs in to the KMS with its own pod identity (Kubernetes auth for OpenBao, IRSA for
   AWS). No KMS credential is in Helm values or env.
-- koinon-api, the reconciler and agentd may only decrypt. A separate key-admin Job, with its own
+- koinon-api and the reconciler may only decrypt (agentd holds no keyring). A separate key-admin Job, with its own
   service account and the only encrypt right, wraps new KEKs: it runs on first install and on demand
   when you add or rotate a KEK. `koinon-api keys add` (and koinon-api's first start without a key)
   then fail with "new KEKs are wrapped by the key-admin Job" instead of calling the KMS. `keys
   activate`, `rewrap`, `retire`, `status` and `export` still work from koinon-api.
 - Moving to the KMS uses the rotation steps above: the key-admin Job adds a KMS-wrapped KEK, then
   `keys activate`, `keys rewrap` and `keys retire` on the local ones. `keys status` shows WRAPPED BY
-  for each KEK. The fingerprint does not change with the wrapping, so earlier backups still match.
+  for each KEK. A KEK's fingerprint does not depend on its wrapping.
 
 A local install has none of this: no key-admin Job, and koinon-api creates and adds KEKs exactly as
 before.

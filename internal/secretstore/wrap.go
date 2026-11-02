@@ -152,7 +152,7 @@ func kekAAD(id string) []byte { return Binding{}.aad("kek", id) }
 // are rewrapped. The zero value is [Local] alone: today's behaviour.
 //
 // Only the key-admin Job wraps a new KEK with a KMS (Andre, 2026-11-02): the services (koinon-api,
-// the reconciler, agentd) are decrypt-only. [NewWrappers] builds a service's wrappers, whose Wrap
+// the reconciler) are decrypt-only; agentd holds no keyring. [NewWrappers] builds a service's wrappers, whose Wrap
 // refuses a KMS primary with [ErrKeyAdminWraps] before it calls the KMS; [NewKeyAdminWrappers]
 // builds the Job's. With the [Local] primary both wrap, as before key wrapping. Processes build
 // them from their configuration in one place (package secretstore/wrapping), not here.
@@ -249,6 +249,9 @@ func (ws Wrappers) Wrap(ctx context.Context, id string, kek []byte) (StoredKEK, 
 	defer cancel()
 	wrapped, err := w.Wrap(ctx, kek, kekAAD(id))
 	if err != nil {
+		if ctx.Err() != nil && !errors.Is(err, ErrUnreachable) {
+			err = fmt.Errorf("%w: %w", ErrUnreachable, err)
+		}
 		return StoredKEK{}, fmt.Errorf("secretstore: wrap key %q with %s: %w", id, w.Backend(), err)
 	}
 	return StoredKEK{Backend: w.Backend(), KeyID: w.KeyID(), Wrapped: wrapped}, nil

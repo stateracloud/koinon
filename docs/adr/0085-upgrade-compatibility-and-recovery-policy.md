@@ -310,8 +310,8 @@ Implementation-level unknowns, to settle in the sub-issues:
     `rewrap`, `retire`.
   - Identity: adapters sign in with the pod's identity (OpenBao Kubernetes auth, the AWS default
     chain with IRSA; Andre, 2026-11-02), so no credential is in Helm values, env or a sandbox.
-  - Only once a KMS primary is configured: koinon-api (with its `keys` commands), the reconciler and
-    agentd are decrypt-only, and a separate key-admin Job with its own service account is the only
+  - Only once a KMS primary is configured: koinon-api (with its `keys` commands) and the reconciler
+    are decrypt-only (agentd holds no keyring), and a separate key-admin Job with its own service account is the only
     identity with encrypt rights. It wraps new KEKs: on first install and on demand for `keys add`
     and rotation (Andre, 2026-11-02). The services refuse to wrap with a KMS
     (`secretstore.ErrKeyAdminWraps`, "new KEKs are wrapped by the key-admin Job") before they call
@@ -319,8 +319,8 @@ Implementation-level unknowns, to settle in the sub-issues:
     415a has the refusal; the Job and its chart wiring come with the first adapter (#416).
   - Fingerprint: decision 12 said the wrapping keys' fingerprints; the code fingerprints the KEKs
     (`secretstore.Fingerprint`, HMAC-SHA256 keyed by the KEK, 16 bytes). A KEK's fingerprint is the
-    same however it is wrapped, so a backup taken before or after a move to a KMS matches the live
-    key set; a wrapping key's identity is already in the stored form (backend and key). `keys status`
+    same however it is wrapped: a KEK's fingerprint does not depend on its wrapping, so an export
+    matches the KEKs it holds whichever backend wraps them; a wrapping key's identity is already in the stored form (backend and key). `keys status`
     and `keys export` print it.
   - Still owed (415b): the fingerprints recorded in the database (on load and on activate) and the
     unreachable-key metric (`Wrappers.Probe` in the reload loops, plus a line in `keys status`).
