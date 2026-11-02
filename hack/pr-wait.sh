@@ -29,6 +29,10 @@
 #              commits/<sha>/check-runs`), not only from the PR rollup, which lists just one run per name: a
 #              dispatched run that passed counts next to a skipped pull_request run. A success on the head
 #              wins over a newer skipped or cancelled run of the same check, but a newer failure stays failed.
+#              With --checks, "all green" also needs every required status check context of the base
+#              branch's rules (gh api repos/{owner}/{repo}/rules/branches/<base>) to exist on the head:
+#              a workflow run that is still queued has no jobs yet, so its required checks are missing
+#              from the rollup (`waiting for required checks not on the head yet: ci,...`, #562).
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
 #   --interval 20 seconds by default
 #
@@ -155,6 +159,20 @@ live_e2e() {
 # shown <check>: the name to print; `--require e2e` is judged on quickstart (and e2e-lab).
 shown() { if [ "$alias_show" = 1 ] && [ "$1" = quickstart ]; then echo e2e; else echo "$1"; fi; }
 
+# load_contexts <base branch>: the required status check contexts of the base branch's rules (the
+# ruleset), one per line, into $ctxs. Read until it succeeds once; a failed read leaves it empty.
+# A workflow run that is queued has no jobs yet, so its required checks are absent from the head's
+# rollup: "everything in the rollup is green" is not "every required check is green".
+ctx_ok=0 ctxs=""
+load_contexts() {
+  [ "$ctx_ok" = 0 ] || return 0
+  local out
+  if out=$(gh api "repos/{owner}/{repo}/rules/branches/$1" \
+    --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique | .[]' 2>/dev/null); then
+    ctxs=$out ctx_ok=1
+  fi
+}
+
 no_live=0 last=""
 emit() { # print only when the line differs from the previous one
   if [ "$1" != "$last" ]; then
@@ -165,7 +183,7 @@ emit() { # print only when the line differs from the previous one
 
 start=$SECONDS
 while :; do
-  if json=$(gh pr view "$pr" --json state,mergeStateStatus,mergeCommit,statusCheckRollup,headRefName,headRefOid 2>/dev/null) && [ -n "$json" ]; then
+  if json=$(gh pr view "$pr" --json state,mergeStateStatus,mergeCommit,statusCheckRollup,headRefName,headRefOid,baseRefName 2>/dev/null) && [ -n "$json" ]; then
     state=$(jq -r '.state // ""' <<<"$json")
     mstate=$(jq -r '.mergeStateStatus // ""' <<<"$json")
     case $state in
@@ -234,6 +252,16 @@ while :; do
       echo "needs-update"
       exit 4
     fi
+    # Required contexts of the ruleset that have no check on the head yet (a queued workflow run).
+    missing_ctx=""
+    if [ "$mode" = checks ]; then
+      load_contexts "$(jq -r '.baseRefName // "main"' <<<"$json")"
+      while IFS= read -r c; do
+        [ -n "$c" ] || continue
+        jq -e --arg c "$c" 'any((.statusCheckRollup // [])[]; (.name // .context // "") == $c)' <<<"$json" >/dev/null ||
+          missing_ctx+="${missing_ctx:+,}$c"
+      done <<<"$ctxs"
+    fi
     total=$(jqn "$norm | length" <<<"$json")
     pending=$(jqn -r "$norm | [.[] | select(.done | not) | .name] | sort | join(\",\")" <<<"$json")
     ndone=$(jqn "$norm | [.[] | select(.done)] | length" <<<"$json")
@@ -245,6 +273,9 @@ while :; do
       [ -z "$head" ] || live=$(live_e2e "$head")
       if [ -n "$live" ]; then
         emit "waiting for e2e-kind run $live on ${head:0:7}"
+      elif [ -n "$missing_ctx" ]; then
+        emit "checks $ndone/$total done; waiting for required checks not on the head yet: $missing_ctx"
+        live=$missing_ctx
       elif [ "$mode" = checks ] && [ ${#req_now[@]} -gt 0 ]; then
         whys=()
         for name in "${req_now[@]}"; do
