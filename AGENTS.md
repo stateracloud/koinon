@@ -78,7 +78,7 @@ or adopts them.
    Ready, `agent-ok`, current-milestone, unblocked, unclaimed issues, by Priority then age. Only
    humans move issues to Ready; never start an issue that is not listed unless your human names it.
 2. Overlap check, see "Working alongside another human" below.
-3. `hack/claim.sh take <N>`: one claim per session, four per human, 2 h lease. A pull request that
+3. `hack/claim.sh take <N>`: one claim per session, eight per human, 2 h lease. A pull request that
    closes several issues takes them together, `take N M` (all or nothing). Exit 2: pick another
    issue. It assigns your human and sets In Progress. A person's own claim is `take <N> --human`
    (3 days, `beat <N> --human` daily).
@@ -112,7 +112,7 @@ or adopts them.
 A session that runs agents in parallel gives each one a lane (ADR 0082): the parent takes the claim
 with `hack/claim.sh take N --lane L`, creates the lane's worktree with `hack/wt.sh new`, and hands
 the agent the issue, the worktree and `docs/agents/subagent-brief.md`. One issue per lane, at most
-four claims per human. Pick the model from the brief's "Which model" section. The parent beats, ships (`hack/ship.sh`) and releases; agents never call
+eight claims per human. Pick the model from the brief's "Which model" section. The parent beats, ships (`hack/ship.sh`) and releases; agents never call
 `claim.sh`. Each lane tests its own worktree: `hack/e2e-remote.sh --repo` is an `--argo` option, so
 on the local Docker run the script from the lane's worktree.
 
