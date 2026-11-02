@@ -65,9 +65,11 @@ var eventClasses = map[string]EventClass{
 
 	// The rest of the harness's session updates. #344 turns the chunks into stored items; the
 	// classes stay with the kinds.
-	"acp.agent_thought_chunk":       ClassDiagnostic,
-	"acp.user_message_chunk":        ClassDiagnostic,
-	"acp.plan":                      ClassDiagnostic,
+	"acp.agent_thought_chunk": ClassDiagnostic,
+	"acp.user_message_chunk":  ClassDiagnostic,
+	"acp.plan":                ClassDiagnostic,
+	// Not recorded today: agentd keeps it as harness state and returns before the write (run.go);
+	// listed so the class is settled if it ever is.
 	"acp.available_commands_update": ClassDiagnostic,
 	"acp.current_mode_update":       ClassDiagnostic,
 	"acp.usage_update":              ClassDiagnostic,
@@ -117,22 +119,29 @@ const (
 	// FailureTransient: the database refused for a while (serialization, deadlock, resources,
 	// an administrator's restart).
 	FailureTransient WriteFailure = "transient"
+	// FailureCanceled: the write's context was canceled (the run or the worker is stopping).
+	FailureCanceled WriteFailure = "canceled"
 	// FailureOther: anything else.
 	FailureOther WriteFailure = "other"
 )
 
 // WriteFailures is the reason label's whole set.
-var WriteFailures = []WriteFailure{FailureTimeout, FailureConn, FailureTransient, FailureOther}
+var WriteFailures = []WriteFailure{FailureTimeout, FailureConn, FailureTransient, FailureCanceled, FailureOther}
 
 // failureOf classifies a write's error into the fixed set.
 func failureOf(err error) WriteFailure {
 	var pgErr *pgconn.PgError
 	var netErr net.Error
 	switch {
+	// Before the timeout check: pgconn.Timeout reports a canceled context as a timeout too.
+	case errors.Is(err, context.Canceled):
+		return FailureCanceled
 	case errors.Is(err, context.DeadlineExceeded) || pgconn.Timeout(err):
 		return FailureTimeout
 	case errors.As(err, &pgErr):
 		switch {
+		case pgErr.Code == "57014": // query_canceled: statement_timeout or a cancel request
+			return FailureTimeout
 		case len(pgErr.Code) >= 2 && (pgErr.Code[:2] == "40" || pgErr.Code[:2] == "53"),
 			len(pgErr.Code) >= 3 && pgErr.Code[:3] == "57P":
 			return FailureTransient

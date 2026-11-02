@@ -5,9 +5,11 @@ package runoutcome_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -19,23 +21,49 @@ import (
 )
 
 // flaky is the pool, except that AppendRunEventOnce fails with err for its next `fails` calls
-// (every call while fails is negative). attempts counts the calls it failed.
+// (every call while fails is negative). attempts counts the calls it failed, calls all of them. With committed, a
+// failing call inserts the event first and then reports err (the reply of a committed insert
+// lost); with hang, it waits for its context to end and reports the context's error.
 type flaky struct {
 	store.DBTX
-	err      error
-	fails    atomic.Int64
-	attempts atomic.Int64
+	err       error
+	committed bool
+	hang      bool
+	fails     atomic.Int64
+	attempts  atomic.Int64
+	calls     atomic.Int64 // every AppendRunEventOnce, failed or not
 }
 
 type failedRow struct{ err error }
 
 func (r failedRow) Scan(...any) error { return r.err }
 
+// committedRow scans the real row and then reports err.
+type committedRow struct {
+	pgx.Row
+	err error
+}
+
+func (r committedRow) Scan(dest ...any) error {
+	if err := r.Row.Scan(dest...); err != nil {
+		return err
+	}
+	return r.err
+}
+
 func (f *flaky) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	if strings.Contains(sql, "-- name: AppendRunEventOnce ") {
+		f.calls.Add(1)
 		if n := f.fails.Load(); n != 0 {
 			f.fails.Add(-1)
 			f.attempts.Add(1)
+			switch {
+			case f.committed:
+				return committedRow{f.DBTX.QueryRow(ctx, sql, args...), f.err}
+			case f.hang:
+				<-ctx.Done()
+				return failedRow{ctx.Err()}
+			}
 			return failedRow{f.err}
 		}
 	}
@@ -101,6 +129,34 @@ var _ = Describe("Run event classes", func() {
 		Expect(w.metrics.writeFailed).To(BeEmpty())
 	})
 
+	It("takes a unique violation for the event stored already, and counts nothing", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		f := &flaky{err: &pgconn.PgError{Code: "23505"}, committed: true}
+		f.fails.Store(1)
+		w.flakyOwner(f)
+
+		Expect(w.own.Record(ctx, businessKind, map[string]any{})).To(Succeed())
+		Expect(f.calls.Load()).To(Equal(int64(1)), "no retry: the event is there")
+		Expect(w.runKinds(ctx)).To(Equal([]string{businessKind}))
+		Expect(w.own.IsFenced()).To(BeFalse())
+		Expect(w.metrics.writeFailed).To(BeEmpty())
+	})
+
+	It("gives each try of a diagnostic write its own deadline, so a hung connection holds the run up briefly", func(ctx SpecContext) {
+		DeferCleanup(runoutcome.SetDiagnosticTryTimeout(50 * time.Millisecond))
+		w := newWorld(ctx, true)
+		f := &flaky{hang: true}
+		f.fails.Store(-1)
+		w.flakyOwner(f)
+
+		start := time.Now()
+		Expect(w.own.Record(ctx, diagnosticKind, map[string]any{})).To(Succeed())
+		Expect(time.Since(start)).To(BeNumerically("<", 2*time.Second), "two tries of 50 ms and a 100 ms pause")
+		Expect(f.attempts.Load()).To(Equal(int64(2)))
+		Expect(w.own.IsFenced()).To(BeFalse())
+		Expect(w.metrics.writeFailed).To(Equal([]string{"diagnostic/timeout"}))
+	})
+
 	DescribeTable("fences either class when the run is no longer the worker's",
 		func(ctx SpecContext, kind string) {
 			w := newWorld(ctx, true)
@@ -132,6 +188,9 @@ var _ = Describe("Run event classes", func() {
 		Entry("a connection failure reported by the server", &pgconn.PgError{Code: "08006"}, "conn"),
 		Entry("a refused connection", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}, "conn"),
 		Entry("a deadline", context.DeadlineExceeded, "timeout"),
+		Entry("a statement timeout", &pgconn.PgError{Code: "57014"}, "timeout"),
+		Entry("a canceled context", context.Canceled, "canceled"),
+		Entry("a canceled context, wrapped as pgx reports it", fmt.Errorf("timeout: %w", context.Canceled), "canceled"),
 		Entry("a constraint violation", &pgconn.PgError{Code: "23505"}, "other"),
 		Entry("anything else", errors.New("the database said no"), "other"),
 	)

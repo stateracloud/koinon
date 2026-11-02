@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -205,19 +206,11 @@ func (o *Owner) RecordRaw(ctx context.Context, kind string, payload []byte) erro
 	}
 	backoff := 100 * time.Millisecond
 	for attempt := 1; ; attempt++ {
-		_, err := o.q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
-			OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
-			Kind: kind, Payload: payload, SourceSeq: src,
-		})
+		err := o.tryAppend(ctx, class, kind, payload, src)
 		if err == nil {
 			return nil
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
-			if _, gerr := o.q.GetRunEventBySource(ctx, store.GetRunEventBySourceParams{
-				OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch, SourceSeq: src,
-			}); gerr == nil {
-				return nil // an earlier attempt committed
-			}
 			o.FenceFromDB(ctx)
 			return ErrFenced
 		}
@@ -238,12 +231,45 @@ func (o *Owner) RecordRaw(ctx context.Context, kind string, payload []byte) erro
 	}
 }
 
-// The tries of Record before it gives up: a business event keeps trying for about 1.5 s, a
-// diagnostic one tries twice, 100 ms apart, so it never holds the run up for long.
+// tryAppend is one try of RecordRaw; the caller holds o.mu. It returns nil when the event is
+// stored, by this try or by an earlier one whose reply was lost: the insert matched no row
+// (pgx.ErrNoRows) or hit a unique violation, and the event is there under its source seq. A
+// diagnostic try has its own short deadline, so a hung connection holds o.mu, and with it the
+// run's other writes, for at most diagnosticTryTimeout; a business try runs under ctx alone.
+func (o *Owner) tryAppend(ctx context.Context, class EventClass, kind string, payload []byte, src int64) error {
+	if class == ClassDiagnostic {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, diagnosticTryTimeout)
+		defer cancel()
+	}
+	_, err := o.q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
+		OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
+		Kind: kind, Payload: payload, SourceSeq: src,
+	})
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.Is(err, pgx.ErrNoRows) || errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if _, gerr := o.q.GetRunEventBySource(ctx, store.GetRunEventBySourceParams{
+			OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch, SourceSeq: src,
+		}); gerr == nil {
+			return nil // an earlier attempt committed
+		}
+	}
+	return err
+}
+
+// The tries of Record before it gives up. A business event keeps trying for about 1.5 s plus the
+// time its tries take under the caller's context. A diagnostic one tries twice, 100 ms apart, each
+// try with its own diagnosticTryTimeout, so it holds the run up for about 4 s at the most.
 const (
 	businessTries   = 5
 	diagnosticTries = 2
 )
+
+// diagnosticTryTimeout is the deadline of one try of a diagnostic event's write; a variable for tests.
+var diagnosticTryTimeout = 2 * time.Second
 
 // sleep waits for d or until ctx ends, and reports whether ctx is still live.
 func sleep(ctx context.Context, d time.Duration) bool {

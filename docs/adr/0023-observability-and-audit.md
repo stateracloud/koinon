@@ -170,7 +170,7 @@ the parts that belong to this ADR:
 
 - **Business and diagnostic events.** A run's events are business events (state the run depends on;
   a failed write may fence the run) or diagnostic events (a failed write is logged and counted,
-  never fences). Business: run state changes, park and resume, approvals and `ask_user` answers, task
+  never fences, except a write that matches no row: the run is no longer the worker's). Business: run state changes, park and resume, approvals and `ask_user` answers, task
   status, the final reply. Diagnostic: thoughts, tool-call items and progress, usage notes, debug
   events (Andre, 2026-11-01). The count is a metric under the label rule of the metrics amendment: a
   fixed label set, no org, agent, user, ticket or run IDs.
@@ -184,7 +184,8 @@ the parts that belong to this ADR:
   are never deleted by run-content retention; audit retention is its own policy (#155).
 
 The metric is `koinon_agentd_run_event_write_failures_total{class, reason}` (#345); the event classes
-and the tries are in the [0074 amendment](0074-run-traces-trace-router.md).
+and the tries are in the [0074 amendment](0074-run-traces-trace-router.md), whose item 7 makes tool
+calls and the agent's message chunks business events.
 
 ## Open questions
 
