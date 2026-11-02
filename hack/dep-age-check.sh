@@ -29,6 +29,10 @@
 # Environment:
 #   MIN_AGE_DAYS        minimum age in days (default 3)
 #   DEP_AGE_WAIVER      set to the waiver's author (the PR label's actor) to report instead of fail
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

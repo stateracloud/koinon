@@ -4,6 +4,10 @@
 # Offline tests of hack/hooks/read-result-check.sh and hack/hooks/bash-read-check.sh (issue #534).
 # Needs only bash, awk and jq.
 # shellcheck disable=SC2016 # the commands under test are literal strings; nothing should expand
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)

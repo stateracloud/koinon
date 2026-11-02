@@ -24,6 +24,10 @@
 #
 # --dry-run calls no GitHub API: it prints what it would do and takes outcomes from --results
 # (default pass). Environment: GH (the gh command), GH_REPO, GITHUB_RUN_ID, GITHUB_RUN_URL.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 MAX_CANDIDATES=${MAX_CANDIDATES:-5}

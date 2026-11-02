@@ -60,6 +60,10 @@
 # run.sh port-forwards there. That works on Linux Docker and OrbStack; Docker Desktop needs its
 # host networking enabled. The Docker socket mounted into it is /var/run/docker.sock as the daemon
 # sees it (the same on Linux, OrbStack and Docker Desktop), whatever DOCKER_HOST says here.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 SELF=$(cd "$(dirname "$0")" && pwd)/$(basename "$0") # absolute: we cd later

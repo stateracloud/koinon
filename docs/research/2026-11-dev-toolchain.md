@@ -175,3 +175,12 @@ decides: whether the flake is required or optional (optional keeps bash-3.2-safe
 the nixpkgs channel and the age rule for `flake.lock`, whether CI jobs run in `nix develop`, the
 cache, and the sandbox socket rule for agents. Docker and OrbStack stay outside either way: Nix on
 macOS cannot provide a Docker engine, and the e2e image stays the Dockerfile.
+
+## Addendum, 2026-11-02: bash 5 required (ADR 0090, #553)
+
+Andre changed the bash decision after this note: every script now requires bash 5 (Homebrew on macOS,
+`#!/usr/bin/env bash` unchanged), with a guard line in each script and a lint. This is the cheaper way
+to close the gap the note gave to Nix: option 5's "if PATH puts brew first" became a rule, enforced by
+the guard. No bash 3.2 CI job is built, and the Nix flake loses its only unique benefit for bash. What
+remains of the "gap" is BSD-versus-GNU tools (sed, grep, date, mktemp), which Homebrew bash does not
+change and which the guard does not cover.

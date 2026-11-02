@@ -11,6 +11,10 @@
 # under the same name. Merged migrations are never renamed or edited (forward-only, ADR 0027). Files
 # are renamed with `git mv`, in the order of their current numbers; the new names are printed, and any
 # file that still mentions an old name is listed so you can fix the reference.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 generate=1
