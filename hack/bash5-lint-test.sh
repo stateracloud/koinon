@@ -63,6 +63,34 @@ mkdir -p "$drift"
 printf '#!/usr/bin/env bash\n[ "${BASH_VERSINFO:-0}" -ge 4 ] || exit 2\n' >"$drift/d.sh"
 check "a drifted guard fails" "$(run "$drift")" 1
 
+# The fail-open hook variant: accepted in hack/hooks/*-check.sh, rejected elsewhere.
+hookg=$(sed -n "s/^hook_guard='\(.*\)'\$/\1/p" "$lint" | sed "s/'\"'\"'/'/g")
+hk=$tmp/hk
+mkdir -p "$hk/hack/hooks"
+printf '#!/usr/bin/env bash\n%s\n' "$hookg" >"$hk/hack/hooks/x-check.sh"
+check "the hook variant passes in a hook" "$(run "$hk")" 0
+printf '#!/usr/bin/env bash\n%s\n' "$hookg" >"$hk/hack/y.sh"
+check "the hook variant is rejected elsewhere" "$(run "$hk")" 1
+rm "$hk/hack/y.sh"
+printf '#!/usr/bin/env bash\n%s\n' "$hookg" >"$hk/hack/hooks/z_test.sh"
+check "the hook variant is rejected in a hook test" "$(run "$hk")" 1
+
+# Any other bash shebang fails.
+for sb in '#!/bin/bash' '#!/usr/bin/env -S bash -e' '#!/usr/local/bin/bash'; do
+	sbd=$tmp/sb
+	rm -rf "$sbd"
+	mkdir -p "$sbd"
+	printf '%s\n%s\n' "$sb" "$guard" >"$sbd/s.sh"
+	check "shebang $sb fails" "$(run "$sbd")" 1
+done
+
+# In a git checkout the files come from git ls-files.
+gd=$tmp/gitroot
+mkdir -p "$gd"
+git -C "$gd" init -q
+printf '#!/bin/bash\n' >"$gd/g.sh"
+check "git root: a bad shebang fails" "$(run "$gd")" 1
+
 # The guard itself, under the system bash 3.2 when this machine has it (macOS), else skipped.
 printf '#!/usr/bin/env bash\n%s\ndeclare -A m=([a]=1)\necho ran\n' "$guard" >"$tmp/g.sh"
 if [[ -x /bin/bash ]] && [[ $(/bin/bash -c 'echo ${BASH_VERSINFO[0]}') -lt 5 ]]; then
