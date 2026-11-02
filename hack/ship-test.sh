@@ -3,6 +3,10 @@
 #
 # Offline tests of hack/ship.sh: temp git repositories with a bare "origin", and `gh`, `gitleaks` and
 # the hack/ helpers (needs-e2e.sh, claim.sh) as stubs. Nothing talks to GitHub.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)

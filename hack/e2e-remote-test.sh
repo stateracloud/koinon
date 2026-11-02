@@ -6,6 +6,10 @@
 # push, the lock, the checkout, the run, the copy-back and the exit status are all exercised. The
 # lock test needs flock (Linux): on macOS run this in the toolchain image:
 #   docker run --rm -v "$PWD:/r" -w /r koinon-e2e-toolchain:<tag> hack/e2e-remote-test.sh
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)

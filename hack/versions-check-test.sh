@@ -5,6 +5,10 @@
 # each kind of drift (Dockerfile ARG, checksum, setup-helm input, golangci-lint input, a second
 # literal in a workflow or a script, the CONTRIBUTING table, a malformed file) fails.
 # shellcheck disable=SC2016 # the fixtures edit literal workflow text
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -uo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)

@@ -13,6 +13,10 @@
 #   4. the cluster is deleted unless KEEP=1.
 #
 #   CLUSTER=koinon-g2  KEEP=0  OUT=<dir for the kubeconfig and the log>  FOCUS=<Ginkgo focus regexp>
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 CLUSTER=${CLUSTER:-koinon-g2}

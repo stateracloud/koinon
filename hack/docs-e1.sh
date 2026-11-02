@@ -10,6 +10,10 @@
 #   docs-e1.sh script         every block, each under a "# e1=<name>" line (the golden form)
 #   docs-e1.sh run <name>     run one block with bash -euo pipefail in $E1_WORKDIR (default: .);
 #                             a one-command block replaces the shell (bash -c), so it can be killed
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 DOC=${E1_DOC:-$(cd "$(dirname "$0")/.." && pwd)/docs/site/src/content/docs/quickstart.md}

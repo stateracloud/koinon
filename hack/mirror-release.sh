@@ -11,6 +11,10 @@
 #
 # The images land at <registry>/<name>:<version> and the chart at <registry>/charts/koinon:<version>,
 # so install with --set image.registry=<registry>. SOURCE overrides the source registry (tests).
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 if (($# != 2)); then

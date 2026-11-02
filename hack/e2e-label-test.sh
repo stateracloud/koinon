@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Tests hack/e2e-label.sh (the e2e-label workflow's dispatcher) with a stub gh.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 cd "$(dirname "$0")/.."
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/e2e-label-test.XXXXXX")
