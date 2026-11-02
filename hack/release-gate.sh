@@ -78,25 +78,39 @@ is_pr_only() { local p; for p in "${pr_only[@]}"; do [[ $p == "$1" ]] && return 
 
 pr_heads=
 pr_heads_read=0
+# from_pr_heads <name>: the conclusion of the check on the head of the pull request that merged SHA.
+from_pr_heads() {
+	local h merged got=
+	if ((pr_heads_read == 0)); then
+		pr_heads=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
+			--jq '.[] | select(.merged_at != null) | [.head.sha, .merged_at] | @tsv') ||
+			fail "cannot list the pull requests of $SHA"
+		pr_heads_read=1
+	fi
+	while IFS=$'\t' read -r h merged; do
+		[[ -n $h ]] || continue
+		got=$(conclusion_of "$h" "$1" "$merged")
+		[[ -n $got ]] && break
+	done <<<"$pr_heads"
+	echo "$got"
+}
+
 failed=0
 for name in "${required[@]}"; do
 	if is_pr_only "$name"; then
-		if ((pr_heads_read == 0)); then
-			pr_heads=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
-				--jq '.[] | select(.merged_at != null) | [.head.sha, .merged_at] | @tsv') ||
-				fail "cannot list the pull requests of $SHA"
-			pr_heads_read=1
-		fi
-		got=
-		while IFS=$'\t' read -r h merged; do
-			[[ -n $h ]] || continue
-			got=$(conclusion_of "$h" "$name" "$merged")
-			[[ -n $got ]] && break
-		done <<<"$pr_heads"
+		got=$(from_pr_heads "$name")
 		where="on the merged pull request's head"
 	else
 		got=$(conclusion_of "$SHA" "$name")
 		where="on $SHA"
+		# A push to main skips the heavy jobs when the merge tree equals a pull request head whose
+		# required checks passed (hack/ci-skip-heavy.sh, #595); they report `skipped` here. Then the
+		# merged pull request's head is the evidence, and it must have passed (or skipped) them.
+		if [[ $got == skipped ]]; then
+			got=$(from_pr_heads "$name")
+			[[ $got == skipped ]] && got=success
+			where="on the merged pull request's head (skipped on $SHA: the merge tree is that head's tree)"
+		fi
 	fi
 	if [[ $got == success ]]; then
 		echo "ok: $name"
