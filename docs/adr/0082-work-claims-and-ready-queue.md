@@ -49,8 +49,8 @@ claim ref could be deleted by hand.
    P3. Label `agent-ok`. `claim.sh next` lists only issues that are Ready, `agent-ok`, in the
    current milestone, have no open native "blocked by" (`issues/{n}/dependencies/blocked_by`) and
    no claim, sorted by Priority then age. Only humans move items to Ready.
-5. **WIP caps.** One claim per session; four per human (held, unexpired claim refs whose `human`
-   matches). Several issues can be taken as one unit (`take N M`) for one pull request that closes
+5. **WIP caps.** One claim per session; eight per human (held, unexpired claim refs whose `human`
+   matches; it was four until the 2026-11-02 amendment). Several issues can be taken as one unit (`take N M`) for one pull request that closes
    them all; it is all or nothing. There are **no exclusive lanes**: a Component is not a lock. procoduck puts the
    label `start-here` on Ready issues suited to the contributor (`next --label start-here`); everyone
    else sees the whole queue. `take` warns when another active claim
@@ -124,8 +124,9 @@ each in its own worktree, could therefore work only one issue at a time. The cap
   (or with no lane) exit 3, like any claim that is not yours. Takeover, leases, the sweeper and the PR
   `claim` check are unchanged; they read the login and the lease, and the lane is only part of the
   holder's identity. `--human` claims have no lane.
-- The **human cap stays four** and counts every claim of the human, lanes or not. So one session holds
-  up to four claims, one per lane. When `take` is refused by the session cap the message lists the
+- The **human cap counts** every claim of the human, lanes or not (four when this amendment was
+  written; eight since the 2026-11-02 amendment below). So one session holds up to that many claims,
+  one per lane. When `take` is refused by the session cap the message lists the
   claims the session already holds in that lane (with their pull requests) and suggests `--lane` or
   `release`.
 - **Subagents still never call `claim.sh`** and never set a session id or a lane. The parent takes
@@ -190,3 +191,10 @@ each in its own worktree, could therefore work only one issue at a time. The cap
 - [Git refs REST API](https://docs.github.com/en/rest/git/refs)
 - [Building a C compiler with parallel Claudes](https://www.anthropic.com/engineering/building-c-compiler)
 - [ADR 0079](0079-dependency-cooldown.md), [setup checklist](../dev/work-claims-setup.md)
+
+## Amendment: human cap raised to eight (2026-11-02, procoduck)
+
+The human cap of decision 5 is now **8** (it was 4). One human runs several local lanes plus a cloud
+lane at once, and four claims was the bottleneck. The default of `KOINON_CLAIM_HUMAN_CAP` in
+`hack/claim.sh` changes from 4 to 8; the variable still overrides it. The session cap (one claim per
+session and lane) is unchanged, as is everything else in decision 5 and the lanes amendment.
