@@ -147,7 +147,17 @@ check "the directory lock is released" test ! -d "$tmp/lock.d"
 # 7. --argo (explicit; the default is --local): `curl` is a fake Argo Server and S3, the
 # credentials file a fake. The lab settings are placeholders: nothing about a real lab is tracked. The bundle reaches S3, the least busy slot is picked from the template's
 # enum, the run is followed and its results unpacked, and no credential is ever in curl's argv.
-cp "$repo/hack/e2e-argo.sh" "$tmp/repo/hack/"
+cp "$repo/hack/e2e-argo.sh" "$repo/hack/e2e-status.sh" "$repo/hack/needs-e2e.sh" "$tmp/repo/hack/"
+# gh: records `gh api` calls (the e2e-lab commit status); FAKE_GH_FAIL=1 makes the post fail.
+cat >"$tmp/bin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "gh $*" >>"$FAKE_GH_LOG"
+[[ -z ${FAKE_GH_FAIL:-} ]] || exit 1
+exit 0
+SH
+chmod +x "$tmp/bin/gh"
+export FAKE_GH_LOG="$tmp/gh.log"
+: >"$FAKE_GH_LOG"
 cp -R "$repo/hack/lab" "$tmp/repo/hack/"
 export KOINON_LAB_CONFIG="$tmp/no-such-lab.env" # never the tester's own lab config
 cat >"$tmp/light.workflow.json" <<'JSON'
@@ -192,6 +202,7 @@ while [[ $# -gt 0 ]]; do
 done
 case $method:$url in
 PUT:*/e2e-bundles/*) cp "$upload" "$ARGO_DIR/last.bundle"; [[ -z $w ]] || printf '%s' "${FAKE_PUT_CODE:-200}" ;;
+*fields=spec.arguments.parameters*) echo "{\"spec\":{\"arguments\":{\"parameters\":[{\"name\":\"target\",\"value\":\"test-e2e-kind\"},{\"name\":\"ref\",\"value\":\"$(git -C "$ARGO_REPO" rev-parse HEAD)\"}]}}}" ;;
 */workflow-templates/*/koinon-gate) echo '{"spec":{"arguments":{"parameters":[{"name":"gate-set","enum":["go-test","agentd-ginkgo"]},{"name":"slot","enum":["gate-1","gate-2","gate-3","gate-4"]}]}}}' ;;
 */workflow-templates/*) echo '{"spec":{"arguments":{"parameters":[{"name":"slot","enum":["a","b","c"]}]}}}' ;;
 *'/workflows/koinon-e2e?'*) if [[ -n ${FAKE_LIST:-} ]]; then echo "$FAKE_LIST"; else echo '{}'; fi ;;
@@ -215,7 +226,7 @@ DELETE:*/workflows/koinon-e2e/koinon-make-t1) [[ -z ${FAKE_DELETE_FAIL:-} ]] || 
 */e2e-artifacts/koinon-make-t1/koinon-make-t1/results.tgz | */artifact-files/*)
   echo "$url" >>"$ARGO_DIR/results-from"
   d=$(mktemp -d "${TMPDIR:-/tmp}/fake-results.XXXXXX"); mkdir -p "$d/out"; echo "| Phase | s |" >"$d/out/quickstart-timings.md"
-  echo "${FAKE_RESULT_LINE:-target=test-e2e-kind ref=x rc=${FAKE_RESULT_RC:-0} seconds=1}" >"$d/out/result.txt"
+  [[ -n ${FAKE_NO_RESULT:-} ]] || echo "${FAKE_RESULT_LINE:-target=test-e2e-kind ref=$(git -C "$ARGO_REPO" rev-parse HEAD) rc=${FAKE_RESULT_RC:-0} seconds=1}" >"$d/out/result.txt"
   tar -czf "$o" -C "$d" out; rm -rf "$d" ;;
 *) echo "fake curl: unexpected $method $url" >&2; exit 22 ;;
 esac
@@ -223,7 +234,7 @@ SH
 chmod +x "$tmp/bin/curl"
 argo_env() { # <dir>: a fresh fake server state
   rm -rf "$1"; mkdir -p "$1"
-  export ARGO_DIR=$1 FAKE_CFG=$1/cfg KOINON_E2E_ARGO_CREDS="$tmp/creds.sh" KOINON_E2E_ARGO_POLL=0
+  export ARGO_REPO=$tmp/repo ARGO_DIR=$1 FAKE_CFG=$1/cfg KOINON_E2E_ARGO_CREDS="$tmp/creds.sh" KOINON_E2E_ARGO_POLL=0
   export KOINON_E2E_ARGO_SERVER=https://argo.example.invalid KOINON_E2E_BUNDLE_URL=https://s3.example.invalid/e2e-bundles
   export KOINON_E2E_RESULTS_URL=https://s3.example.invalid/e2e-artifacts KOINON_E2E_LIGHT_MANIFEST="$tmp/light.workflow.json"
 }
@@ -248,11 +259,16 @@ check "the results key reached curl only on stdin" has 'koinon_test_not-a-real-r
 check "the credentials are closed after the run" has 'creds closed' "$FAKE_LOG"
 check "the token reached curl only on stdin" has 'koinon_test_not-a-real-token' "$tmp/argo1/cfg"
 check "no credential in curl's argv" sh -c "! grep -q 'koinon_test_not-a-real' '$FAKE_LOG'"
+check "a green run posts e2e-lab=success on the tested commit" sh -c "grep -q 'api -X POST repos/{owner}/{repo}/statuses/$argo_sha -f state=success -f context=e2e-lab' '$FAKE_GH_LOG'"
+check "... with the run name in the description" has 'description=koinon-make-t1: e2e passed in 1s' "$FAKE_GH_LOG"
+check "... and the Argo Server's run page as target_url" has 'target_url=https://argo.example.invalid/workflows/koinon-e2e/koinon-make-t1' "$FAKE_GH_LOG"
 
 argo_env "$tmp/argo2"
+: >"$FAKE_GH_LOG"
 rc=0
 (unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_RESULT_RC=7 hack/e2e-remote.sh --argo --out "$tmp/out8" >"$tmp/log8" 2>&1) || rc=$?
 check "--argo passes the e2e's exit status through" test "$rc" -eq 7
+check "a failed run posts e2e-lab=failure" has 'statuses/.* -f state=failure -f context=e2e-lab' "$FAKE_GH_LOG"
 check "results unpacked on failure" test -f "$tmp/out8/quickstart-timings.md"
 
 argo_env "$tmp/argo2b"
@@ -260,6 +276,57 @@ rc=0
 (unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_RESULT_RC=0 hack/e2e-remote.sh --argo --out "$tmp/out8b" >"$tmp/log8b" 2>&1) || rc=$?
 check "a run Failed after its target passed (result.txt rc=0) counts as passed" test "$rc" -eq 0
 check "... and says so" has 'after its target passed' "$tmp/log8b"
+
+# 7a. Exit codes (#547): make's 2 is a failed e2e (1), not "no lab"; no verdict is a lab fault (75).
+argo_env "$tmp/argo2c"; : >"$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_RESULT_RC=2 hack/e2e-remote.sh --argo --out "$tmp/out8c" >"$tmp/log8c" 2>&1) || rc=$?
+check "a failed target that exits 2 (make) is exit 1, not the usage/no-lab code" test "$rc" -eq 1
+check "... and still posts e2e-lab=failure" has 'state=failure -f context=e2e-lab' "$FAKE_GH_LOG"
+argo_env "$tmp/argo2d"; : >"$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_NO_RESULT=1 hack/e2e-remote.sh --argo --out "$tmp/out8d" >"$tmp/log8d" 2>&1) || rc=$?
+check "a run that ended with no verdict exits 75 (fall back)" test "$rc" -eq 75
+check "... and posts no status" test ! -s "$FAKE_GH_LOG"
+argo_env "$tmp/argo2e"; : >"$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --no-status --out "$tmp/out8e" >"$tmp/log8e" 2>&1) || rc=$?
+check "--no-status: the run passes and posts nothing" test "$rc" -eq 0 -a ! -s "$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; KOINON_E2E_NO_STATUS=1 hack/e2e-remote.sh --argo --out "$tmp/out8f" >"$tmp/log8f" 2>&1) || rc=$?
+check "KOINON_E2E_NO_STATUS=1: the same" test "$rc" -eq 0 -a ! -s "$FAKE_GH_LOG"
+argo_env "$tmp/argo2g"; : >"$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_GH_FAIL=1 hack/e2e-remote.sh --argo --out "$tmp/out8g" >"$tmp/log8g" 2>&1) || rc=$?
+check "a status that cannot be posted (commit not pushed) leaves the exit status alone" test "$rc" -eq 0
+check "... and says how to post it later" has 'hack/e2e-status.sh '"$argo_sha"' success' "$tmp/log8g"
+argo_env "$tmp/argo2h"; : >"$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_PUT_CODE=503 hack/e2e-remote.sh --argo --out "$tmp/out8h" >"$tmp/log8h" 2>&1) || rc=$?
+check "the kind lane with the lab unreachable (upload fails) exits 75 and posts nothing" test "$rc" -eq 75 -a ! -s "$FAKE_GH_LOG"
+argo_env "$tmp/argo2i"; : >"$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_NO_TOKEN=1 hack/e2e-remote.sh --argo --out "$tmp/out8i" >"$tmp/log8i" 2>&1) || rc=$?
+check "the kind lane without an Argo token exits 75 and posts nothing" test "$rc" -eq 75 -a ! -s "$FAKE_GH_LOG"
+argo_env "$tmp/argo2j"; : >"$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --no-wait >"$tmp/log8j" 2>&1 && hack/e2e-remote.sh --argo --follow koinon-make-t1 --out "$tmp/out8j" >>"$tmp/log8j" 2>&1) || rc=$?
+check "--no-wait posts nothing; the later --follow posts e2e-lab=success on the submitted ref" sh -c "test $rc -eq 0 && test \$(grep -c 'context=e2e-lab' '$FAKE_GH_LOG') -eq 1 && grep -q 'statuses/$argo_sha -f state=success' '$FAKE_GH_LOG'"
+
+# A reused --out with an old rc=0 verdict must not turn a new failed run into success (stale result.txt).
+argo_env "$tmp/argo2k"; : >"$FAKE_GH_LOG"
+mkdir -p "$tmp/out8k"; echo "target=test-e2e-kind ref=$argo_sha rc=0 seconds=1" >"$tmp/out8k/result.txt"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_NO_RESULT=1 hack/e2e-remote.sh --argo --out "$tmp/out8k" >"$tmp/log8k" 2>&1) || rc=$?
+check "a stale result.txt in a reused --out is not trusted: no verdict, 75, no status" test "$rc" -eq 75 -a ! -s "$FAKE_GH_LOG"
+argo_env "$tmp/argo2l"; : >"$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_RESULT_RC=7 hack/e2e-remote.sh --argo --out "$tmp/out8k" >"$tmp/log8l" 2>&1) || rc=$?
+check "a reused --out: the new failed run's verdict replaces the old one" test "$rc" -eq 7 -a "$(grep -c 'state=failure' "$FAKE_GH_LOG")" -eq 1 -a "$(grep -c 'state=success' "$FAKE_GH_LOG")" -eq 0
+argo_env "$tmp/argo2m"; : >"$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_RESULT_LINE="target=test-e2e-kind ref=deadbeefdead rc=0 seconds=1" hack/e2e-remote.sh --argo --out "$tmp/out8m" >"$tmp/log8m" 2>&1) || rc=$?
+check "a result.txt naming another commit is ignored (75, no status)" test "$rc" -eq 75 -a ! -s "$FAKE_GH_LOG"
 
 argo_env "$tmp/argo3"
 : >"$FAKE_LOG"
@@ -306,13 +373,13 @@ check "... and says to add --argo" has 'add --argo' "$tmp/log14"
 rc=0
 (unset KOINON_E2E_REMOTE KOINON_E2E_ARGO_SERVER KOINON_E2E_BUNDLE_URL KOINON_E2E_RESULTS_URL KOINON_E2E_ARGO_CREDS
   hack/e2e-remote.sh --argo --dry-run >"$tmp/log15" 2>&1) || rc=$?
-check "--argo without lab settings exits 2" test "$rc" -eq 2
+check "--argo without lab settings exits 78 (no lab), not 2 and not 1" test "$rc" -eq 78
 check "... naming the server variable" has 'KOINON_E2E_ARGO_SERVER' "$tmp/log15"
 check "... and the config file" has 'lab.env' "$tmp/log15"
 check "... and no curl was made" test ! -s "$tmp/argo6/cfg"
 rc=0
 (unset KOINON_E2E_REMOTE KOINON_E2E_LIGHT_MANIFEST; hack/e2e-remote.sh --argo --lane light --dry-run >"$tmp/log16" 2>&1) || rc=$?
-check "--lane light without a manifest exits 2" test "$rc" -eq 2
+check "--lane light without a manifest exits 78" test "$rc" -eq 78
 check "... naming KOINON_E2E_LIGHT_MANIFEST" has 'KOINON_E2E_LIGHT_MANIFEST' "$tmp/log16"
 # The settings can come from the untracked config file; the environment wins over it.
 cat >"$tmp/lab.env" <<ENV
@@ -445,6 +512,54 @@ check "the kind dry-run names the koinon-make template" has 'koinon-e2e/koinon-m
 rc=0
 (unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --gate go-test --dry-run >"$tmp/gate6/log3" 2>&1) || rc=$?
 check "--gate without --argo exits 2" test "$rc" -eq 2
+
+# 7f. flavors (#547): the lab cannot build a flavor image, so a change under flavors/ is refused up front
+# (79) before any upload; --allow-flavors / KOINON_E2E_ALLOW_FLAVORS=1 override; the gate lane is not affected.
+git clone -q "$tmp/repo" "$tmp/frepo"
+git -C "$tmp/frepo" checkout -q -b feat
+mkdir -p "$tmp/frepo/flavors/opencode"
+echo x >"$tmp/frepo/flavors/opencode/Dockerfile"
+git -C "$tmp/frepo" add -A
+git -C "$tmp/frepo" -c user.name=t -c user.email=t@example.invalid commit -q -m "feat: flavor"
+argo_env "$tmp/flav1"; : >"$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --repo "$tmp/frepo" >"$tmp/flav1/log" 2>&1) || rc=$?
+check "a change under flavors/ is refused with exit 79" test "$rc" -eq 79
+check "... saying why, naming the file and the GitHub e2e" sh -c "grep -q 'cannot build a flavor image' '$tmp/flav1/log' && grep -q 'flavors/opencode/Dockerfile' '$tmp/flav1/log' && grep -q 'gh workflow run e2e-kind.yml' '$tmp/flav1/log'"
+check "... before any upload, submit or status" test ! -e "$tmp/flav1/last.bundle" -a ! -e "$tmp/flav1/submitted" -a ! -s "$FAKE_GH_LOG"
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --repo "$tmp/frepo" --dry-run >"$tmp/flav1/log2" 2>&1) || rc=$?
+check "... also with --dry-run" test "$rc" -eq 79
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --repo "$tmp/frepo" --allow-flavors --no-wait >"$tmp/flav1/log3" 2>&1) || rc=$?
+check "--allow-flavors lets it through" test "$rc" -eq 0 -a -e "$tmp/flav1/submitted"
+rc=0
+(unset KOINON_E2E_REMOTE; KOINON_E2E_ALLOW_FLAVORS=1 hack/e2e-remote.sh --argo --repo "$tmp/frepo" --no-wait >"$tmp/flav1/log4" 2>&1) || rc=$?
+check "KOINON_E2E_ALLOW_FLAVORS=1 lets it through" test "$rc" -eq 0
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --repo "$tmp/frepo" --gate go-test --dry-run >"$tmp/flav1/log5" 2>&1) || rc=$?
+check "the gate lane is not refused for flavors" test "$rc" -eq 0
+git -C "$tmp/frepo" checkout -q main
+echo y >"$tmp/frepo/notes.txt"
+git -C "$tmp/frepo" add -A
+git -C "$tmp/frepo" -c user.name=t -c user.email=t@example.invalid commit -q -m "chore: notes"
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --repo "$tmp/frepo" --dry-run >"$tmp/flav1/log6" 2>&1) || rc=$?
+check "a change without flavors/ goes through" test "$rc" -eq 0
+
+# 7g. hack/e2e-status.sh on its own.
+: >"$FAKE_GH_LOG"
+rc=0; "$repo/hack/e2e-status.sh" "$argo_sha" success "a run" "https://argo.example.invalid/w/x" >/dev/null 2>&1 || rc=$?
+check "e2e-status posts a status" test "$rc" -eq 0 && check "... through gh api statuses with the context" has "statuses/$argo_sha -f state=success -f context=e2e-lab -f description=a run -f target_url=https://argo.example.invalid/w/x" "$FAKE_GH_LOG"
+rc=0; "$repo/hack/e2e-status.sh" "$argo_sha" maybe x >/dev/null 2>&1 || rc=$?
+check "e2e-status refuses a state that is not success or failure (64)" test "$rc" -eq 64
+rc=0; "$repo/hack/e2e-status.sh" abc123 success x >/dev/null 2>&1 || rc=$?
+check "e2e-status refuses a short sha (64)" test "$rc" -eq 64
+: >"$FAKE_GH_LOG"
+rc=0; KOINON_E2E_NO_STATUS=1 "$repo/hack/e2e-status.sh" "$argo_sha" success x >/dev/null 2>&1 || rc=$?
+check "e2e-status with KOINON_E2E_NO_STATUS posts nothing" test "$rc" -eq 0 -a ! -s "$FAKE_GH_LOG"
+rc=0; FAKE_GH_FAIL=1 "$repo/hack/e2e-status.sh" "$argo_sha" failure x >/dev/null 2>&1 || rc=$?
+check "e2e-status exits 1 when the post fails" test "$rc" -eq 1
 
 # 7e. hack/lab/gate-run.sh: the gate-set enum, the command each set runs, and the verdict mapping
 # (a go gate's 3 is notrun, read from KOINON_RC_FILE because make turns it into 2).

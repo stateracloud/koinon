@@ -12,9 +12,15 @@
 # --argo (hack/e2e-argo.sh, see its header for options and settings): an Argo queue of your own, for
 # example a maintainer's home lab. Its endpoints and credentials are not in the repository: set them
 # in the environment or in the untracked lab config (hack/lab/lab.env.example); without them it
-# exits 2. Its options (--no-wait, --follow, --lane, --gate, ...) are --argo options and need --argo.
-# --gate exits 0 pass, the gate's status on failure, 2 usage, 75 no slot or the lab unreachable (run
-# the gate locally), 76 NOT RUN (the gate skipped what it expected to run, #507).
+# exits 78. Its options (--no-wait, --follow, --lane, --gate, --no-status, --allow-flavors, ...) are
+# --argo options and need --argo.
+# --argo exit status: 0 pass, 1 the run failed (the target's own status unless it collides with a code
+# below), 2 usage, 75 the lab cannot run it now (unreachable, no slot, Pending too long, no verdict):
+# fall back to GitHub's e2e-kind (the gate: run it locally), 76 NOT RUN (the gate skipped what it
+# expected to run, #507), 78 no lab configured, 79 refused: the change touches flavors/ and the lab
+# cannot build flavors (--allow-flavors if the image is in Zot). A followed kind e2e posts the commit
+# status `e2e-lab` on the tested commit (success/failure, not on a fallback; --no-status or
+# KOINON_E2E_NO_STATUS=1 opts out; hack/e2e-status.sh). Details: the header of hack/e2e-argo.sh.
 # --ssh and --local run the pinned toolchain image of hack/e2e-toolchain (the Go from go.mod and the
 # kind, ko, helm and kubectl versions CI uses) against that host's Docker socket, so the result does
 # not depend on what is installed on the machine you type this on. Setting KOINON_E2E_REMOTE alone
@@ -75,7 +81,7 @@ while [[ $# -gt 0 ]]; do
   --local) mode=local ;;
   --ssh) mode=remote ;;
   --argo) mode=argo ;;
-  --no-wait | --target | --slot | --follow | --repo | --lane | --gate)
+  --no-wait | --target | --slot | --follow | --repo | --lane | --gate | --no-status | --allow-flavors)
     [[ ${mode:-} == argo ]] || { echo "e2e-remote: $1 is an --argo option; add --argo" >&2; exit 2; }
     break ;;
   --out) out=${2:?--out needs a directory}; shift ;;
