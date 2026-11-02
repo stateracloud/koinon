@@ -28,11 +28,31 @@
 # namespace limit or a ResourceQuota), deletes the run and exits 75 so the caller runs the gate
 # locally. A Pending run is deleted, never stopped: a stopped run turns Failed and the lab's ntfy
 # sensor pushes a false "Failed". Only a Running run is stopped (Ctrl-C). The log is followed as it is written, then $OUT (result.txt, driver.log, reports) is
-# fetched. A set the template does not accept, or a 4xx answer to the submit, exits 2. Exit status: 0 pass, the gate's own status when it failed, 2 usage or configuration, 75 no
-# slot or the lab unreachable, 76 NOT RUN (result.txt verdict=notrun: hack/go-test.sh exited 3, the
-# run proved less than it should, #507).
+# fetched. A set the template does not accept, or a 4xx answer to the submit, exits 2.
 #
-#   hack/e2e-remote.sh --argo [--lane kind|light] [--repo DIR] [--target T] [--slot S] [--out DIR] [--no-wait] [--dry-run]
+# Exit status (every lane; a caller tells "the e2e failed" from "no lab" by it, #547):
+#   0   the run passed
+#   1   the run failed: the target's own status, or 1 when that status would collide with a code
+#       below (make reports a failed target as 2). The gate lane passes the gate's own status through
+#   2   usage, or the lab rejected the request (4xx)
+#   75  the lab cannot run it now (unreachable, a failed upload or submit, every slot busy, a gate run
+#       still Pending after 120 s, or the run ended with no verdict): nothing was decided, fall back
+#       (the gate: run it locally; the e2e: GitHub's e2e-kind, `gh workflow run e2e-kind.yml --ref <branch>`)
+#   76  NOT RUN (gate: result.txt verdict=notrun, hack/go-test.sh exited 3, the run proved less than
+#       it should, #507)
+#   78  no lab configured (a setting or the credentials/manifest file is missing): there is no lab to
+#       use; run the e2e on your own Docker (--local) or on GitHub
+#   79  refused up front: the change touches flavors/ and the lab cannot build a flavor image (nvcr.io
+#       is not reachable from it). GitHub's e2e-kind runs it; --allow-flavors when the image is in Zot
+#
+# Commit status (#547): a followed kind e2e run posts `e2e-lab` on the commit it ran (the ref it
+# submitted): success on exit 0, failure when the target failed, nothing on a fallback (75), when no lab
+# is configured, with --no-wait (a later --follow posts it), or with --no-status / KOINON_E2E_NO_STATUS=1.
+# The description names the run, the target_url is the run's page on the Argo Server of lab.env. A commit
+# that is not on GitHub yet cannot take a status: the script says so and prints the command to post it
+# after the push (hack/e2e-status.sh). `hack/pr-wait.sh <PR> --checks --require e2e` accepts it.
+#
+#   hack/e2e-remote.sh --argo [--lane kind|light] [--repo DIR] [--target T] [--slot S] [--out DIR] [--no-wait] [--no-status] [--allow-flavors] [--dry-run]
 #   hack/e2e-remote.sh --argo --gate <set> [--repo DIR] [--out DIR] [--no-wait] [--dry-run]
 #   hack/e2e-remote.sh --argo --follow <workflow name> [--out DIR]
 #
@@ -54,6 +74,9 @@
 #   KOINON_E2E_GATE_TEMPLATE   WorkflowTemplate of --gate (koinon-gate); parameters gate-set, ref, bundle, agent, slot
 #   KOINON_E2E_GATE_PENDING    seconds a gate run may stay Pending before it is given up (120)
 #   KOINON_E2E_ARGO_POLL       seconds between status polls (30)
+#   KOINON_E2E_NO_STATUS       1: do not post the e2e-lab commit status (same as --no-status)
+#   KOINON_E2E_ALLOW_FLAVORS   1: run although flavors/ changed (same as --allow-flavors)
+#   KOINON_E2E_BASE            the base the flavors check diffs against (origin/main)
 #   KOINON_E2E_AGENT           who submits, a label on the run (KOINON_AGENT_SESSION, else $USER)
 set -euo pipefail
 
@@ -74,7 +97,8 @@ CREDS=${KOINON_E2E_ARGO_CREDS:-}
 POLL=${KOINON_E2E_ARGO_POLL:-30}
 AGENT=${KOINON_E2E_AGENT:-${KOINON_AGENT_SESSION:-${USER:-agent}}}
 
-lane=kind target="" slot="" out=${KOINON_E2E_OUT:-} wait=1 dry=0 follow="" repo=""
+lane=kind target="" slot="" out=${KOINON_E2E_OUT:-} wait=1 dry=0 follow="" repo="" allow_flavors=0
+[[ ${KOINON_E2E_ALLOW_FLAVORS:-} != 1 ]] || allow_flavors=1
 while [[ $# -gt 0 ]]; do
   case $1 in
   --argo) ;;
@@ -85,6 +109,8 @@ while [[ $# -gt 0 ]]; do
   --slot) slot=${2:?--slot needs a slot name}; shift ;;
   --out) out=${2:?--out needs a directory}; shift ;;
   --no-wait) wait=0 ;;
+  --no-status) export KOINON_E2E_NO_STATUS=1 ;;
+  --allow-flavors) allow_flavors=1 ;;
   --follow) follow=${2:?--follow needs a workflow name}; shift ;;
   --dry-run) dry=1 ;;
   *) echo "e2e-remote --argo: unknown argument $1" >&2; exit 2 ;;
@@ -100,8 +126,8 @@ esac
 MANIFEST=${KOINON_E2E_LIGHT_MANIFEST:-}
 lab_require "e2e-remote --argo" KOINON_E2E_ARGO_SERVER KOINON_E2E_BUNDLE_URL KOINON_E2E_RESULTS_URL KOINON_E2E_ARGO_CREDS
 [[ $lane != light ]] || lab_require "e2e-remote --argo --lane light" KOINON_E2E_LIGHT_MANIFEST
-[[ -r $CREDS ]] || { echo "e2e-remote --argo: credentials file $CREDS is not readable (KOINON_E2E_ARGO_CREDS)" >&2; exit 2; }
-[[ $lane != light || -r $MANIFEST ]] || { echo "e2e-remote --argo: manifest $MANIFEST is not readable (KOINON_E2E_LIGHT_MANIFEST)" >&2; exit 2; }
+[[ -r $CREDS ]] || { echo "e2e-remote --argo: credentials file $CREDS is not readable (KOINON_E2E_ARGO_CREDS)" >&2; exit 78; }
+[[ $lane != light || -r $MANIFEST ]] || { echo "e2e-remote --argo: manifest $MANIFEST is not readable (KOINON_E2E_LIGHT_MANIFEST)" >&2; exit 78; }
 if [[ -n ${SUITE_LABEL:-} ]]; then
   echo "e2e-remote --argo: SUITE_LABEL is not supported by the queue's template; use --local" >&2
   exit 2
@@ -111,7 +137,7 @@ fi
 label=$(printf %s "$AGENT" | tr -c 'A-Za-z0-9_.-' '-' | cut -c1-63 | sed 's/^[^A-Za-z0-9]*//; s/[^A-Za-z0-9]*$//')
 label=${label:-agent}
 
-token="" s3user="" opened=0 name="" finished=0 log_pid="" cur_phase=""
+status_sha="" token="" s3user="" opened=0 name="" finished=0 log_pid="" cur_phase=""
 # shellcheck source=hack/lab/creds.example.sh disable=SC1091
 . "$CREDS"
 
@@ -134,13 +160,30 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# lab_down <message>: the lab cannot be reached. The gate lane exits 75 (the caller runs the gate
-# locally); the other lanes exit 1.
+# lab_down <message>: the lab cannot be reached: exit 75, so the caller falls back (the gate runs
+# locally, the e2e on GitHub) and can tell it from a failed run (1).
 lab_down() {
   [[ -z ${bundle:-} ]] || rm -f "$bundle"
   echo "e2e-remote --argo: $1" >&2
-  if [[ $lane == gate ]]; then echo "e2e-remote --argo: the lab is unreachable; run the gate locally" >&2; exit 75; fi
-  exit 1
+  if [[ $lane == gate ]]; then echo "e2e-remote --argo: the lab is unreachable; run the gate locally" >&2
+  else echo "e2e-remote --argo: the lab is unreachable; use GitHub's e2e-kind (gh workflow run e2e-kind.yml) or --local" >&2; fi
+  exit 75
+}
+
+# fail_rc <status>: a failed run's status, kept unless it collides with a reserved code above (make
+# reports a failed target as 2); then 1.
+fail_rc() {
+  case $1 in 0 | 2 | 75 | 76 | 77 | 78 | 79) echo 1 ;; *) echo "$1" ;; esac
+}
+
+# post_status <success|failure> <description>: the e2e-lab commit status on the commit the run tested.
+# A failed post is a warning; the run's own result stands.
+post_status() {
+  local top
+  [[ -n ${status_sha:-} ]] || return 0
+  top=$(git -C "${repo:-.}" rev-parse --show-toplevel 2>/dev/null || pwd)
+  (cd "$top" && "$here/e2e-status.sh" "$status_sha" "$1" "$2" "$SERVER/workflows/$NS/$name") ||
+    echo "e2e-remote --argo: the e2e-lab status was not posted; the run's result stands" >&2
 }
 
 open_creds() {
@@ -282,10 +325,10 @@ gate_exit() {
   case $verdict in
   pass) return 0 ;;
   notrun) echo "e2e-remote --argo: NOT RUN: the gate skipped what it expected to run (result.txt: $(tr -d '\n' <"$f"))" >&2; return 76 ;;
-  fail) [[ -n $grc && $grc != 0 ]] && return "$grc"; return 1 ;;
+  fail) [[ -n $grc && $grc != 0 ]] && return "$(fail_rc "$grc")"; return 1 ;;
   esac
   [[ $phase == Succeeded ]] && return 0
-  [[ -n $grc && $grc != 0 ]] && return "$grc"
+  [[ -n $grc && $grc != 0 ]] && return "$(fail_rc "$grc")"
   return 1
 }
 
@@ -376,6 +419,7 @@ follow_run() {
     echo "gate ($target) $phase, exit status $rc"
     return "$rc"
   fi
+  local verdict=yes
   if [[ $phase != Succeeded ]]; then
     rc=$(sed -n 's/.* rc=\([0-9]*\) .*/\1/p' "$out/result.txt" 2>/dev/null || true)
     if [[ $rc == 0 ]]; then
@@ -384,7 +428,19 @@ follow_run() {
       # the target's own verdict.
       echo "note: the run ended $phase after its target passed (result.txt: rc=0); counting it as passed" >&2
     else
-      [[ -n $rc ]] || rc=1
+      if [[ -z $rc ]]; then verdict=no; rc=1; else rc=$(fail_rc "$rc"); fi
+    fi
+  fi
+  if [[ $verdict == no ]]; then
+    # The run ended without the target's verdict (the pod died first): nothing was decided.
+    echo "e2e ($target) $phase with no result.txt: a lab fault, not a verdict; falling back (exit 75)" >&2
+    return 75
+  fi
+  if [[ $lane == kind && $target == test-e2e-kind ]]; then
+    if [[ $rc == 0 ]]; then
+      post_status success "$name: e2e passed in $(sed -n 's/.* seconds=\([0-9]*\).*/\1/p' "$out/result.txt" 2>/dev/null | tail -1)s"
+    else
+      post_status failure "$name: e2e failed (exit $rc)"
     fi
   fi
   echo "e2e ($target) $phase, exit status $rc"
@@ -401,6 +457,7 @@ if [[ -n $follow ]]; then
   # A gate run is recognised by its gate-set parameter.
   [[ $(jq -r '[.spec.arguments.parameters[]? | select(.name == "gate-set")] | length' <<<"$params" 2>/dev/null || echo 0) == 0 ]] || lane=gate
   target=${target:-run}
+  status_sha=$(jq -r '[.spec.arguments.parameters[]? | select(.name == "ref") | .value][0] // empty' <<<"$params" 2>/dev/null || true)
   follow_run
   exit
 fi
@@ -408,6 +465,26 @@ fi
 root=$(git -C "${repo:-.}" rev-parse --show-toplevel)
 cd "$root"
 sha=$(git rev-parse HEAD)
+
+# The kind e2e builds the flavor image; the lab cannot (nvcr.io is fenced), so a change under flavors/
+# goes to GitHub's e2e-kind (#547). The rule is hack/needs-e2e.sh --flavors. A check that cannot be
+# evaluated (no origin/main) lets the run go on: the lab then fails after minutes, not never.
+if [[ $lane == kind && $target == test-e2e-kind && $allow_flavors == 0 ]]; then
+  frc=0
+  fchanged=$("$here/needs-e2e.sh" --flavors "${KOINON_E2E_BASE:-origin/main}" 2>/dev/null) || frc=$?
+  case $frc in
+  0)
+    {
+      echo "e2e-remote --argo: refused: this change touches flavors/, and the lab cannot build a flavor image (nvcr.io is not reachable from it)."
+      echo "$fchanged"
+      echo "  Run the e2e on GitHub: gh workflow run e2e-kind.yml --ref <branch>   (or your own Docker: hack/e2e-remote.sh --local)."
+      echo "  If the flavor image for this change is already in the lab's registry, add --allow-flavors."
+    } >&2
+    exit 79 ;;
+  1) ;;
+  *) echo "warning: could not check for flavor changes against ${KOINON_E2E_BASE:-origin/main}; going on" >&2 ;;
+  esac
+fi
 id="$(date -u +%Y%m%d-%H%M%S)-${sha:0:8}-$$"
 object="koinon-${sha:0:12}-$id.bundle"
 if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
@@ -442,10 +519,10 @@ if [[ $lane == gate ]]; then
   [[ -n $slot ]] || { rm -f "$bundle"; echo "e2e-remote --argo: every gate slot is busy; run the gate locally" >&2; exit 75; }
 fi
 echo "== uploading the bundle of ${sha:0:12} ($(wc -c <"$bundle" | tr -d ' ') bytes)"
-s3_put "$bundle" "$object" || { rm -f "$bundle"; [[ $lane == gate ]] && exit 75; exit 1; }
+s3_put "$bundle" "$object" || { rm -f "$bundle"; echo "e2e-remote --argo: the lab is unreachable; falling back" >&2; exit 75; }
 rm -f "$bundle"
 
-[[ $lane == gate ]] || { [[ -n $slot ]] || slot=$(pick_slot); }
+[[ $lane == gate ]] || { [[ -n $slot ]] || slot=$(pick_slot) || lab_down "cannot list the lab's runs to pick a slot"; }
 if [[ $lane == gate ]]; then
   body=$(jq -nc --arg t "$GATE_TEMPLATE" --arg g "$target" --arg ref "$sha" --arg b "$object" \
     --arg a "$label" --arg s "$slot" '{resourceKind: "WorkflowTemplate", resourceName: $t,
@@ -458,15 +535,16 @@ elif [[ $lane == light ]]; then
     | .metadata.labels["koinon.dev/session"] = $a
     | .spec.arguments.parameters |= map(.value = ({target: $target, ref: $ref, bundle: $b, agent: $a, slot: $s}[.name]))
     | {workflow: .}' "$MANIFEST")
-  name=$(api POST "/api/v1/workflows/$NS" "$body" | jq -r '.metadata.name // empty')
+  name=$(api POST "/api/v1/workflows/$NS" "$body" | jq -r '.metadata.name // empty') || name=""
 else
   body=$(jq -nc --arg t "$TEMPLATE" --arg target "$target" --arg ref "$sha" --arg b "$object" \
     --arg a "$label" --arg s "$slot" '{resourceKind: "WorkflowTemplate", resourceName: $t,
       submitOptions: {parameters: ["target=\($target)", "ref=\($ref)", "bundle=\($b)", "agent=\($a)", "slot=\($s)"],
                       labels: "koinon.dev/session=\($a)"}}')
-  name=$(api POST "/api/v1/workflows/$NS/submit" "$body" | jq -r '.metadata.name // empty')
+  name=$(api POST "/api/v1/workflows/$NS/submit" "$body" | jq -r '.metadata.name // empty') || name=""
 fi
-[[ -n $name ]] || { echo "e2e-remote --argo: the submit returned no workflow name" >&2; exit 1; }
+[[ -n $name ]] || lab_down "the submit failed or returned no workflow name"
+status_sha=$sha
 echo "== submitted $name: $target at ${sha:0:12}, slot $slot"
 
 if [[ $wait == 0 ]]; then
