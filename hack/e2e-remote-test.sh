@@ -402,7 +402,15 @@ for ph in Pending Running; do
   tpid=$!
   sleep 3
   kill -TERM "$tpid" 2>/dev/null || true
-  wait "$tpid" || true
+  # A watchdog kills it if it ignores TERM. Exit 143 proves e2e-argo.sh itself got the signal and
+  # handled it (the subshell exec'd it, so $tpid is the script, not a wrapper).
+  (sleep 10; kill -KILL "$tpid" 2>/dev/null) &
+  wd=$!
+  trc=0
+  wait "$tpid" || trc=$?
+  kill "$wd" 2>/dev/null || true
+  wait "$wd" 2>/dev/null || true
+  check "Ctrl-C on a $ph run: the script exits 143 on its own and is gone" sh -c "test $trc -eq 143 && ! kill -0 $tpid 2>/dev/null"
 done
 check "Ctrl-C on a Pending run deletes it without stopping" sh -c "test ! -e '$tmp/termPending/stopped' && test -s '$tmp/termPending/deleted'"
 check "Ctrl-C on a Running run stops it without deleting" sh -c "test -s '$tmp/termRunning/stopped' && test ! -e '$tmp/termRunning/deleted'"
