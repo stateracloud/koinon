@@ -164,48 +164,50 @@ rm -f "$lanes"
 xdg_out=$(env -u KOINON_STATE_DIR XDG_CONFIG_HOME="$tmp/xdg" "$script" pending add "xdg" 2>&1)
 [[ -f $tmp/xdg/koinon/state/pending.md ]] && ok "XDG_CONFIG_HOME default dir" || bad "XDG default: $xdg_out"
 
-# stale locks
-mkdir "$KOINON_STATE_DIR/.lock"
-bash -c 'echo $$' >"$KOINON_STATE_DIR/.lock/pid"   # a pid whose process has exited
-KOINON_STATE_LOCK_TIMEOUT=2 run pending add "after a killed writer"
-expect "lock of a dead pid is reclaimed" 0
-has "write went through" "$pending" "after a killed writer"
-mkdir "$KOINON_STATE_DIR/.lock"
-echo $$ >"$KOINON_STATE_DIR/.lock/pid"
-KOINON_STATE_LOCK_TIMEOUT=1 run pending add "blocked by a live pid"
-expect "lock of a live pid is kept" 1 "could not take"
-rm -rf "$KOINON_STATE_DIR/.lock"
-mkdir "$KOINON_STATE_DIR/.lock"
-KOINON_STATE_LOCK_TIMEOUT=1 run pending add "blocked fresh pidless"
-expect "fresh pidless lock is kept" 1 "could not take"
-touch -t 200001010000 "$KOINON_STATE_DIR/.lock"
-KOINON_STATE_LOCK_TIMEOUT=2 run pending add "after an old pidless lock"
-expect "old pidless lock is reclaimed" 0
-rm -f "$lanes" "$pending"
 
-# concurrent writers: no line lost
-rm -f "$lanes" "$pending"
-pids=()
-for w in 1 2 3 4; do
-	(for i in 1 2 3 4 5 6 7 8 9 10; do "$script" pending add "writer $w line $i" >/dev/null 2>&1; done) &
+# locking, once per locker (flock where it exists; perl's flock, which is what macOS uses)
+locktests() { # locktests <locker>
+	local locker=$1 pids=() w i n hp fifo
+	export KOINON_STATE_LOCKER=$locker
+	rm -f "$lanes" "$pending"
+	for w in 1 2 3 4; do
+		(for i in 1 2 3 4 5 6 7 8 9 10; do "$script" pending add "writer $w line $i" >/dev/null 2>&1; done) &
+		pids+=($!)
+	done
+	(for i in 1 2 3 4 5 6 7 8 9 10; do
+		"$script" lane add $((100 + i)) l b "#$i" >/dev/null 2>&1
+	done) &
 	pids+=($!)
-done
-(for i in 1 2 3 4 5 6 7 8 9 10; do
-	"$script" lane add $((100 + i)) l b "#$i" >/dev/null 2>&1
-done) &
-pids+=($!)
-wait "${pids[@]}"
-n=$(grep -c 'writer . line' "$pending")
-[[ $n -eq 40 ]] && ok "40 concurrent pending adds, none lost" || bad "concurrent pending adds: $n of 40"
-n=$(grep -c '^| #1' "$lanes")
-[[ $n -eq 10 ]] && ok "10 lane adds beside them, none lost" || bad "concurrent lane adds: $n of 10"
-[[ ! -e $KOINON_STATE_DIR/.lock ]] && ok "lock released" || bad "lock dir left behind"
-[[ -z $(find "$KOINON_STATE_DIR" -name '.tmp.*') ]] && ok "no temp files left" || bad "temp files left"
+	wait "${pids[@]}"
+	n=$(grep -c 'writer . line' "$pending")
+	[[ $n -eq 40 ]] && ok "$locker: 40 concurrent pending adds, none lost" || bad "$locker: concurrent pending adds: $n of 40"
+	n=$(grep -c '^| #1' "$lanes")
+	[[ $n -eq 10 ]] && ok "$locker: 10 lane adds beside them, none lost" || bad "$locker: concurrent lane adds: $n of 10"
+	[[ -z $(find "$KOINON_STATE_DIR" -name '.tmp.*') ]] && ok "$locker: no temp files left" || bad "$locker: temp files left"
 
-# a held lock times out
-mkdir "$KOINON_STATE_DIR/.lock"
-KOINON_STATE_LOCK_TIMEOUT=1 run pending add "blocked"
-expect "held lock times out" 1 "could not take"
-rmdir "$KOINON_STATE_DIR/.lock"
+	# a holder that is running: the next writer times out
+	fifo="$tmp/hold.fifo"
+	rm -f "$fifo" "$fifo.pid"
+	mkfifo "$fifo"
+	KOINON_STATE_TEST_HOLD=$fifo "$script" pending add "holder" >/dev/null 2>&1 &
+	hp=$!
+	for _ in $(seq 1 100); do [[ -s $fifo.pid ]] && break; sleep 0.05; done
+	[[ -s $fifo.pid ]] || bad "$locker: holder never took the lock"
+	KOINON_STATE_LOCK_TIMEOUT=1 run pending add "blocked"
+	expect "$locker: a held lock times out" 1 "could not take"
+	# the holder dies by SIGKILL: the next writer is not blocked
+	kill -9 "$(<"$fifo.pid")" 2>/dev/null
+	wait "$hp" 2>/dev/null
+	KOINON_STATE_LOCK_TIMEOUT=5 run pending add "after a killed writer"
+	expect "$locker: a writer killed with -9 does not block the next" 0
+	has "$locker: the next write went through" "$pending" "after a killed writer"
+	rm -f "$fifo" "$fifo.pid"
+	unset KOINON_STATE_LOCKER
+}
+locktests perl
+if command -v flock >/dev/null 2>&1; then locktests flock; else echo "note: no flock(1) here (macOS); the flock path is not tested"; fi
+rm -f "$lanes" "$pending"
+run pending add "auto locker"
+expect "default locker" 0
 
 exit $fail

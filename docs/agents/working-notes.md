@@ -24,7 +24,7 @@ The main agent's `lanes.md` and `pending.md` (in `${XDG_CONFIG_HOME:-~/.config}/
 items in bulk), `lane add <N> <lane> <branch> <pr> [note]`, `lane set <N> field=value`,
 `lane done <N>` and `show` (open lanes and open items; read it at session start). Writes are atomic
 and locked, so two sessions cannot lose a line; `lanes.md` keeps a current-lanes table at the top and
-the log below it. On first use, main seeds the table with `lane add` for the lanes it already has.
+the log below it. Undated old items always show in `show`; retire them with `pending done --line N`. On first use, main seeds the table with `lane add` for the lanes it already has.
 Tests: `hack/agent-state-test.sh`.
 
 Append-only bullet logs (`- YYYY-MM-DD ~HH:MM ...`). A bullet older than 14 days is moved out
