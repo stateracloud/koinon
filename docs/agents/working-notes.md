@@ -18,6 +18,15 @@ as expired.
 
 ## Pending and lane logs
 
+The main agent's `lanes.md` and `pending.md` (in `${XDG_CONFIG_HOME:-~/.config}/koinon/state`) are written only through
+`hack/agent-state.sh`, never by hand: `pending add "<text>"`, `pending done <match>` (marks the one matching line
+`[done <date>]` in place; several matches need `--line <n>` or `--all`; `--before <date>` retires old
+items in bulk), `lane add <N> <lane> <branch> <pr> [note]`, `lane set <N> field=value`,
+`lane done <N>` and `show` (open lanes and open items; read it at session start). Writes are atomic
+and locked, so two sessions cannot lose a line; `lanes.md` keeps a current-lanes table at the top and
+the log below it. Undated old items always show in `show`; retire them with `pending done --line N`. On first use, main seeds the table with `lane add` for the lanes it already has.
+Tests: `hack/agent-state-test.sh`.
+
 Append-only bullet logs (`- YYYY-MM-DD ~HH:MM ...`). A bullet older than 14 days is moved out
 (into a memory file, an ADR, a doc or an issue) or deleted. Nothing is kept in a log for later.
 
