@@ -27,6 +27,11 @@ if [ "$1 $2" = "run list" ]; then
   sed -n "${m}p" "$FAKE_DIR/runs" | grep . || tail -n 1 "$FAKE_DIR/runs"
   exit 0
 fi
+if [ "$1" = api ] && [[ $2 == */rules/branches/* ]]; then # the ruleset's required contexts, one per line
+  [ -f "$FAKE_DIR/rules" ] || exit 9
+  cat "$FAKE_DIR/rules"
+  exit 0
+fi
 if [ "$1" = api ]; then # gh api .../check-runs --jq ...: $FAKE_DIR/rows holds the --jq output (one row per line)
   [ -f "$FAKE_DIR/rows" ] || exit 9
   cat "$FAKE_DIR/rows"
@@ -341,6 +346,27 @@ run 7 --checks --require "e2e result" --require go --interval 0
 expect "required checks green" 0 "checks 3/3 green"
 run 7 --require go --interval 0
 expect "--require needs --checks" 64 "$usage_line"
+
+# 7b. #562: the ruleset's required contexts must exist on the head. A queued workflow run has no
+# jobs yet, so a rollup of finished checks is not "all green" while a required context is absent.
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")" "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
+printf 'lint\ngo\nweb\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "--checks waits for a required context that has not appeared" 0 "checks 2/2 done; waiting for required checks not on the head yet: web
+checks 3/3 green"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"
+printf 'lint\ngo\nweb\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0 --timeout 0
+expect "--checks never reports green while a required context is absent" 2 "checks 2/2 done; waiting for required checks not on the head yet: web
+TIMEOUT"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
+printf 'lint\ngo\nweb\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "--checks green when every required context exists" 0 "checks 3/3 green"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"
+run 7 --interval 0 --timeout 0
+expect "without --checks the ruleset is not consulted" 2 "checks 2/2 green
+TIMEOUT"
 
 # 8. a transient gh failure is retried
 rm -rf "$FAKE_DIR"
