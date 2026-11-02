@@ -335,7 +335,7 @@ follow_run() {
     read -r phase pods msg < <(api GET "/api/v1/workflows/$NS/$name?fields=status.phase,status.message,status.nodes" 2>/dev/null |
       jq -r '[.status.nodes[]? | select(.type == "Pod" and .phase == "Pending") | .message // ""] as $p
         | (($p + [.status.message // ""]) | map(ascii_downcase)) as $m
-        | "\(.status.phase // "Pending") \(if ($m | any(test("exceeded quota|is forbidden"))) then "quota" elif ($m | any(test("unschedulable|insufficient|nodes are available"))) then "unschedulable" elif ($m | any(test("postponed|throttled|parallelism"))) then "namespace-limit" else "none" end) \(.status.message // "")"' 2>/dev/null) || { phase=${last:-Pending}; pods=none; msg=""; }
+        | "\(.status.phase // "Pending") \(if ((.status.message // "") | test("waiting for .*lock"; "i")) then "none" elif ($m | any(test("exceeded quota|is forbidden"))) then "quota" elif ($m | any(test("unschedulable|insufficient|nodes are available"))) then "unschedulable" elif ($m | any(test("postponed|throttled|parallelism"))) then "namespace-limit" else "none" end) \(.status.message // "")"' 2>/dev/null) || { phase=${last:-Pending}; pods=none; msg=""; }
     if [[ $phase != "$last" ]]; then echo "== $(date -u +%H:%M:%SZ) $phase${msg:+: $msg}"; last=$phase; fi
     if [[ $lane == gate ]]; then
       local stuck=0
