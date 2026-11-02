@@ -91,7 +91,22 @@ recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendm
    pending) and nightly, always.
 
 `e2e-lab` is not a required check of the ruleset, because contributors without a lab cannot produce it;
-the required check stays `e2e result`.
+the required check stays `e2e result`, and it enforces the rule on GitHub (#562): when `hack/needs-e2e.sh`
+(or the e2e's own files, or the `e2e` label) says the PR needs the e2e, `e2e result` fails unless the head
+has a successful `quickstart` job (this run, or an e2e-kind run dispatched on the head) or the commit
+status `e2e-lab` = success (`hack/e2e-gate.sh`; the failure message names `hack/e2e-remote.sh --argo` and
+`gh workflow run e2e-kind.yml --ref <branch>`). A status event starts no workflow, so
+`hack/e2e-status.sh` re-runs the PR run's `e2e result` job (only that job, not a failed quickstart) after posting `success`
+(`hack/e2e-rerun-result.sh`), as does a passing dispatched run; if that did not happen, use "Re-run failed
+jobs" on the PR's e2e-kind run. Anyone with write access can still post `e2e-lab` by hand: the lab's own
+GitHub App that makes the status verifiable is a separate, later issue (#568).
+
+The re-run only happens once the PR run has finished: an `e2e-lab` posted while it is still in progress gets
+no re-run, use "Re-run failed jobs" afterwards. Trust limit: `result` runs from the PR's own `e2e-kind.yml`, so
+a PR can edit the YAML to drop the gate. The guard is the ruleset's required review on `.github/**` (not
+CODEOWNERS: `require_code_owner_review` is false); `e2e result` is not pinned to an app and `e2e-lab` can be
+posted by anyone with write access. This is a guardrail against mistakes, not against a malicious member;
+the follow-up is a pinned `integration_id` / the lab's own App (#568).
 
 ### Lanes and notifications
 
