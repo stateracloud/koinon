@@ -56,7 +56,7 @@ claim ref could be deleted by hand.
    else sees the whole queue. `take` warns when another active claim
    shares the issue's `area:` label. The Phase field is retired: milestones are the release gate, and
    `next` uses the milestone only.
-6. **Liveness and the sweeper** (`claims.yml`, every 15 minutes). Liveness is the later of the
+6. **Liveness and the sweeper** (`claims.yml`, every 30 minutes). Liveness is the later of the
    lease and the last push or comment on the linked pull request plus one lease. Past liveness +
    grace the sweeper comments, mentioning the human, and labels `claim:stale`. Two hours after the
    lease ran out it releases the claim, sets Status Ready and
@@ -73,7 +73,7 @@ claim ref could be deleted by hand.
    is the bot): a human opens or adopts them. The check runs from `pull_request_target`, using the
    base branch's workflow and script and never checking out the pull request. After `take`, the
    script re-runs the failed check.
-8. **Merge ordering.** Strict required status checks plus a serialising updater (`claims.yml`): on
+8. **Merge ordering.** Strict required status checks plus a serialising updater (`updater.yml`): on
    a push to main, a finished `ci` run, auto-merge being enabled or the 15-minute
    schedule, the oldest auto-merge pull request that is behind main gets
    `PUT pulls/{n}/update-branch` (with `expected_head_sha`), unless another auto-merge pull request is already up to date and

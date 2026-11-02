@@ -45,7 +45,7 @@
 #   claim.sh show <N> | mine [--lane L] | limits [--lane L]
 #   claim.sh adr                      reserve the next free ADR number (claim/adr-NNNN) and print it
 #   claim.sh sensitive-paths          the ruleset patterns for CODEOWNERS' sensitive section
-#   claim.sh sweep | check-pr <PR> | release-pr <PR> | update-oldest     (used by claims.yml)
+#   claim.sh sweep | check-pr <PR> | release-pr <PR> | update-oldest     (used by claims.yml, updater.yml)
 #
 # Lanes (ADR 0082, amendment):
 #   The session cap is one claim per (session, lane). A session that runs several agents at once,
@@ -1163,7 +1163,7 @@ query($o: String!, $n: String!) {
         labels(first: 50) { nodes { name } }
         commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
           __typename
-          ... on CheckRun { name status startedAt }
+          ... on CheckRun { name status conclusion startedAt }
           ... on StatusContext { context state }
         } } } } } }
       }
@@ -1172,6 +1172,20 @@ query($o: String!, $n: String!) {
 }' --jq '[.data.repository.pullRequests.nodes[] | {number, createdAt, isDraft, headRefOid, mergeStateStatus,
     autoMergeRequest, labels: .labels.nodes,
     statusCheckRollup: (.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])}]'
+}
+
+# update_target: stdin is open_prs output; prints the number of the pull request to bring up to date, or
+# nothing. The oldest auto-merge pull request that is behind main, not a draft, and green on its own
+# head: at least one check, every check completed and none failed. Updating any other one only
+# starts CI runs that are thrown away (#596): a draft is not asking to merge, a red or running head
+# changes anyway, and a conflicting one (DIRTY) is labelled needs-update instead.
+update_target() {
+  jq -r '[.[] | select(.autoMergeRequest != null and .mergeStateStatus == "BEHIND" and (.isDraft | not)
+    and ((.statusCheckRollup // []) | length > 0)
+    and all((.statusCheckRollup // [])[];
+      if .__typename == "StatusContext" then .state == "SUCCESS"
+      else .status == "COMPLETED" and (.conclusion | IN("SUCCESS", "SKIPPED", "NEUTRAL")) end))]
+    | sort_by(.createdAt) | first.number // empty'
 }
 
 cmd_update_oldest() {
@@ -1202,8 +1216,8 @@ cmd_update_oldest() {
   for n in $(jq -r '.[] | select(.mergeStateStatus != "DIRTY" and ([.labels[]? | select(.name == "needs-update")] | length > 0)) | .number' <<<"$prs"); do
     drop_label "$n" needs-update
   done
-  target=$(jq -r '[.[] | select(.autoMergeRequest != null and .mergeStateStatus == "BEHIND")] | sort_by(.createdAt) | first.number // empty' <<<"$prs")
-  if [[ -z $target ]]; then echo "no auto-merge pull request is behind main"; return 0; fi
+  target=$(update_target <<<"$prs")
+  if [[ -z $target ]]; then echo "no ready, green auto-merge pull request is behind main"; return 0; fi
   head=$(jq -r --argjson n "$target" '.[] | select(.number == $n) | .headRefOid' <<<"$prs")
   gh_try -X PUT "repos/$REPO/pulls/$target/update-branch" -f "expected_head_sha=$head"
   if ((TRY_RC == 0)); then echo "updated #$target with main"
