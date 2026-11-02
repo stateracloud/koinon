@@ -23,6 +23,10 @@
 # PR (its number), NEEDS_E2E (path of the rule script, default hack/needs-e2e.sh), GH (the gh
 # command), GH_REPO.
 # Any failure of the rule script other than "not needed" reads as needed.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 EVENT=${EVENT:?EVENT}

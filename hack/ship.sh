@@ -26,6 +26,10 @@
 #        PR #N <url> | board ok | ready | auto-merge on | review ok #N
 # Exit: 0 ok, 1 a gate failed (named on stderr), 2 usage, 3 claim lost, 4 merge conflict.
 # The gitleaks gate is never skipped and nothing is ever force-pushed.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 review="" dry=0 no_issue=0

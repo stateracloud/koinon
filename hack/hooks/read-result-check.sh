@@ -6,7 +6,11 @@
 # whole: half of all Read characters in the research window. This hook refuses a Read whose
 # file_path contains /tool-results/ and that sets no limit. Exact match, no heuristics.
 # On a violation it prints a PreToolUse "deny" decision with a one-line reason; otherwise nothing.
-# Needs only bash (3.2 compatible) and jq.
+# Needs only bash and jq.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -uo pipefail
 
 in=$(cat)

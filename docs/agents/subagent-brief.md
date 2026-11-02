@@ -27,7 +27,7 @@ carries only the task, the worktree and the scope. The shell tool is `Bash`.
   paths. The shell's directory resets between calls.
 - Never call `hack/claim.sh`: the parent owns claims (one lane per subagent, ADR 0082).
 - No cluster: `KUBECONFIG=/dev/null` for every test. CI never calls paid models; neither do you.
-- macOS shells run bash 3.2: no `declare -A`, `mapfile` or `${v,,}`. Use `/bin/ls`, not `ls`.
+- Scripts need bash 5 (ADR 0090; the PATH has Homebrew's on a Mac): run them and their tests with `bash` or directly, not `/bin/bash` (3.2, only to prove a guard fires). Use `/bin/ls`, not `ls`.
 - Call hack scripts by absolute path (`<worktree>/hack/x.sh`), never `cd X && hack/x.sh`.
 - No standalone `sleep`, and no `until … sleep` loop in the foreground. To wait on a pull request use
   `hack/pr-wait.sh`. For anything else: `run_in_background`, then keep working or end the turn; wait

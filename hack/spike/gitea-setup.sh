@@ -6,6 +6,10 @@
 # access to that repo only. The bot's token goes straight into OpenBao at
 # secret/koinon-spike/gitea-bot and is never printed. Safe to re-run: a re-run
 # replaces the bot's token.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 GITEA=https://git.apps.lab.example.invalid/api/v1

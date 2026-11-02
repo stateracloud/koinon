@@ -13,8 +13,11 @@
 #
 # Output, one line per item, tab-separated: <path or line number> <date> <first 80 characters>.
 # The date column is `no-expiry` for a file without a field. Exit 0: nothing listed; 1: something
-# listed; 2: usage error. Pure bash arithmetic on dates, so it behaves the same with BSD and GNU date
-# and on bash 3.2.
+# listed; 2: usage error. Pure bash arithmetic on dates, so it behaves the same with BSD and GNU date.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -uo pipefail
 
 usage() {

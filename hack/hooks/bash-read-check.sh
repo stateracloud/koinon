@@ -13,7 +13,11 @@
 # /dev/*, /proc/*, *.log and task *.output files. The patterns are heuristic: the cases are in
 # read-hooks_test.sh.
 # On a violation it prints a PreToolUse "deny" decision with a one-line reason; otherwise nothing.
-# Needs only bash (3.2 compatible), awk and jq.
+# Needs only bash, awk and jq.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -uo pipefail
 
 in=$(cat)

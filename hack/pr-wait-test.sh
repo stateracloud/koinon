@@ -5,6 +5,10 @@
 # state of a scripted sequence (the last one repeats) and records every call. `gh run list` answers
 # with the next line of $FAKE_DIR/runs (the live e2e-kind runs on the head; the last line repeats,
 # none when the file is absent).
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
