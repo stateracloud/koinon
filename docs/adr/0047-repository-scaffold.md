@@ -104,6 +104,7 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
   hand (about 22 minutes of the plan's included minutes per run); once it is public it runs on every
   pull request to main and nightly. `g2-kind.yml` keeps Blacksmith: it creates no OpenShell
   sandbox. `spike-kind.yml` is a draft that has never run; its removal is tracked in issue #234.
+  _Note (2026-11-02):_ `spike-kind.yml` was removed in #561.
 - _Amended (2026-10-29, later):_ while the repository is private, `e2e-kind.yml` also runs its go
   suite on ready (non-draft) pull requests to main that touch `internal/ledger`, `internal/gateway`,
   `flavors`, `test/e2e`, `test/fakemodel` or the workflow itself. Dispatching it only per release
