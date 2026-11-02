@@ -25,8 +25,9 @@
 # run: label lab.example.invalid/lane=gate). The template sets the lane, target and agent labels
 # itself (agent from the agent parameter); the submit passes none. Every
 # slot busy, or the run still Pending after 120 s (KOINON_E2E_GATE_PENDING: the slot mutex, the
-# namespace limit or a ResourceQuota), stops and deletes the run and exits 75 so the caller runs the
-# gate locally. The log is followed as it is written, then $OUT (result.txt, driver.log, reports) is
+# namespace limit or a ResourceQuota), deletes the run and exits 75 so the caller runs the gate
+# locally. A Pending run is deleted, never stopped: a stopped run turns Failed and the lab's ntfy
+# sensor pushes a false "Failed". Only a Running run is stopped (Ctrl-C). The log is followed as it is written, then $OUT (result.txt, driver.log, reports) is
 # fetched. A set the template does not accept, or a 4xx answer to the submit, exits 2. Exit status: 0 pass, the gate's own status when it failed, 2 usage or configuration, 75 no
 # slot or the lab unreachable, 76 NOT RUN (result.txt verdict=notrun: hack/go-test.sh exited 3, the
 # run proved less than it should, #507).
@@ -110,15 +111,21 @@ fi
 label=$(printf %s "$AGENT" | tr -c 'A-Za-z0-9_.-' '-' | cut -c1-63 | sed 's/^[^A-Za-z0-9]*//; s/[^A-Za-z0-9]*$//')
 label=${label:-agent}
 
-token="" s3user="" opened=0 name="" finished=0 log_pid=""
+token="" s3user="" opened=0 name="" finished=0 log_pid="" cur_phase=""
 # shellcheck source=hack/lab/creds.example.sh disable=SC1091
 . "$CREDS"
 
 cleanup() {
   stop_log
   if [[ -n $name && $finished == 0 && $wait == 1 ]]; then
-    echo "e2e-remote --argo: stopping $name" >&2
-    api PUT "/api/v1/workflows/$NS/$name/stop" '{}' >/dev/null 2>&1 || true
+    if [[ $cur_phase == Running ]]; then
+      echo "e2e-remote --argo: stopping $name" >&2
+      api PUT "/api/v1/workflows/$NS/$name/stop" '{}' >/dev/null 2>&1 || true
+    else
+      # Pending or not yet seen: a stop would turn it Failed (a false push); delete it.
+      echo "e2e-remote --argo: deleting $name (not started)" >&2
+      api DELETE "/api/v1/workflows/$NS/$name" >/dev/null 2>&1 || true
+    fi
   fi
   # A --no-wait run keeps the login: closing it would revoke the token the run was submitted with.
   if [[ $opened == 1 && $wait == 1 ]]; then e2e_creds_close || true; fi
@@ -313,11 +320,13 @@ wait_log() {
   if [[ -n $log_pid ]] && kill -0 "$log_pid" 2>/dev/null; then stop_log; else wait "$log_pid" 2>/dev/null || true; log_pid=""; fi
 }
 
-# give_up: stop and delete the run that never started; exit 75, the caller runs the gate locally.
+# give_up: delete the run that never started; exit 75, the caller runs the gate locally. No stop first:
+# a stopped run turns Failed and the lab's ntfy sensor pushes a false "Failed" for a run that never ran.
 give_up() {
   echo "e2e-remote --argo: $name is still Pending after ${GATE_PENDING}s (reason: ${1:-slot}); giving up, run the gate locally" >&2
-  api PUT "/api/v1/workflows/$NS/$name/stop" '{}' >/dev/null 2>&1 || true
-  api DELETE "/api/v1/workflows/$NS/$name" >/dev/null 2>&1 || true
+  if ! api DELETE "/api/v1/workflows/$NS/$name" >/dev/null 2>&1; then
+    echo "e2e-remote --argo: WARNING could not delete $name in namespace $NS; it is still queued and may start later, delete it by hand" >&2
+  fi
   finished=1
   exit 75
 }
@@ -336,6 +345,7 @@ follow_run() {
       jq -r '[.status.nodes[]? | select(.type == "Pod" and .phase == "Pending") | .message // ""] as $p
         | (($p + [.status.message // ""]) | map(ascii_downcase)) as $m
         | "\(.status.phase // "Pending") \(if ((.status.message // "") | test("waiting for .*lock"; "i")) then "none" elif ($m | any(test("exceeded quota|is forbidden"))) then "quota" elif ($m | any(test("unschedulable|insufficient|nodes are available"))) then "unschedulable" elif ($m | any(test("postponed|throttled|parallelism"))) then "namespace-limit" else "none" end) \(.status.message // "")"' 2>/dev/null) || { phase=${last:-Pending}; pods=none; msg=""; }
+    cur_phase=$phase
     if [[ $phase != "$last" ]]; then echo "== $(date -u +%H:%M:%SZ) $phase${msg:+: $msg}"; last=$phase; fi
     if [[ $lane == gate ]]; then
       local stuck=0

@@ -199,7 +199,7 @@ POST:*/submit) printf '%s' "$body" >"$ARGO_DIR/submitted"
   if [[ -n $o ]]; then echo '{"metadata":{"name":"koinon-make-t1"}}' >"$o"; printf '%s' "${FAKE_SUBMIT_CODE:-200}"; else echo '{"metadata":{"name":"koinon-make-t1"}}'; fi ;;
 POST:*/api/v1/workflows/koinon-e2e) printf '%s' "$body" >"$ARGO_DIR/created"; echo '{"metadata":{"name":"koinon-make-t1"}}' ;;
 PUT:*/stop) echo stopped >>"$ARGO_DIR/stopped"; echo '{}' ;;
-DELETE:*/workflows/koinon-e2e/koinon-make-t1) echo deleted >>"$ARGO_DIR/deleted"; echo '{}' ;;
+DELETE:*/workflows/koinon-e2e/koinon-make-t1) [[ -z ${FAKE_DELETE_FAIL:-} ]] || exit 22; echo deleted >>"$ARGO_DIR/deleted"; echo '{}' ;;
 *'/koinon-make-t1?fields='*)
   n=$(cat "$ARGO_DIR/polls" 2>/dev/null || echo 0); echo $((n + 1)) >"$ARGO_DIR/polls"
   if [[ -n ${FAKE_PENDING_UNSCHED:-} ]]; then echo '{"status":{"phase":"Running","nodes":{"p":{"type":"Pod","phase":"Pending","message":"Unschedulable: 0/3 nodes are available: 3 Insufficient cpu."}}}}'
@@ -207,6 +207,7 @@ DELETE:*/workflows/koinon-e2e/koinon-make-t1) echo deleted >>"$ARGO_DIR/deleted"
   elif [[ -n ${FAKE_PENDING_LOCK:-} ]]; then echo '{"status":{"phase":"Pending","message":"Waiting for koinon-e2e/Mutex/e2e-gate-1 lock. Lock status: 0/1"}}'
   elif [[ -n ${FAKE_PENDING_PULL:-} ]]; then if [[ $n -lt 4 ]]; then echo '{"status":{"phase":"Running","nodes":{"p":{"type":"Pod","phase":"Pending","message":"ContainerCreating"}}}}'; else echo '{"status":{"phase":"Succeeded"}}'; fi
   elif [[ -n ${FAKE_PENDING_POD:-} ]]; then echo '{"status":{"phase":"Running","nodes":{"p":{"type":"Pod","phase":"Pending","message":"exceeded quota"}}}}'
+  elif [[ -n ${FAKE_RUNNING:-} ]]; then echo '{"status":{"phase":"Running"}}'
   elif [[ -n ${FAKE_PENDING:-} ]]; then echo '{"status":{"phase":"Pending","message":"Waiting for e2e-gate-1 lock"}}'
   elif [[ $n -lt 1 ]]; then echo '{"status":{"phase":"Running"}}'; else echo "{\"status\":{\"phase\":\"${FAKE_PHASE:-Succeeded}\"}}"; fi ;;
 */koinon-make-t1/log?*) echo '{"result":{"content":"== 12:00:00Z prerequisites (kind/up.sh)"}}' ;;
@@ -360,12 +361,12 @@ gate "$tmp/gate3b" "target=go-test ref=x rc=3 seconds=1 verdict=notrun" FAKE_PHA
 check "--gate verdict=notrun exits 76 even when the pod succeeded" test "$rc" -eq 76
 gate "$tmp/gate4" "" FAKE_PENDING=1 KOINON_E2E_GATE_PENDING=1
 check "--gate Pending past the limit exits 75" test "$rc" -eq 75
-check "... stopping the run" test -s "$tmp/gate4/stopped"
+check "... without stopping the run" test ! -e "$tmp/gate4/stopped"
 check "... and deleting it" test -s "$tmp/gate4/deleted"
 argo_env "$tmp/gate4b"; : >"$FAKE_LOG"
 gate "$tmp/gate4b" "" FAKE_PENDING_POD=1 KOINON_E2E_GATE_PENDING=1
 check "--gate Running with every pod Pending past the limit exits 75" test "$rc" -eq 75
-check "... stopping the run" test -s "$tmp/gate4b/stopped"
+check "... without stopping the run" test ! -e "$tmp/gate4b/stopped"
 check "... and deleting it" test -s "$tmp/gate4b/deleted"
 check "... without following the log" sh -c "! grep -q 'logOptions.follow' '$FAKE_LOG'"
 check "... naming the reason (quota) and the workflow" sh -c "grep -q 'koinon-make-t1 is still Pending.*reason: quota' '$tmp/gate4b/log'"
@@ -373,21 +374,46 @@ argo_env "$tmp/gate4c"; : >"$FAKE_LOG"
 gate "$tmp/gate4c" "" FAKE_PENDING_UNSCHED=1 KOINON_E2E_GATE_PENDING=1
 check "--gate with an Unschedulable pod past the limit exits 75" test "$rc" -eq 75
 check "... naming the reason (unschedulable) and the workflow" sh -c "grep -q 'koinon-make-t1 is still Pending.*reason: unschedulable' '$tmp/gate4c/log'"
-check "... stopping and deleting the run" sh -c "test -s '$tmp/gate4c/stopped' && test -s '$tmp/gate4c/deleted'"
+check "... deleting the run without stopping it" sh -c "test ! -e '$tmp/gate4c/stopped' && test -s '$tmp/gate4c/deleted'"
 argo_env "$tmp/gate4e"; : >"$FAKE_LOG"
 gate "$tmp/gate4e" "" FAKE_PENDING_LIMIT=1 KOINON_E2E_GATE_PENDING=1
 check "--gate postponed by the namespace limit exits 75" test "$rc" -eq 75
 check "... naming the reason (namespace-limit) and the workflow" sh -c "grep -q 'koinon-make-t1 is still Pending.*reason: namespace-limit' '$tmp/gate4e/log'"
-check "... stopping and deleting the run" sh -c "test -s '$tmp/gate4e/stopped' && test -s '$tmp/gate4e/deleted'"
+check "... deleting the run without stopping it" sh -c "test ! -e '$tmp/gate4e/stopped' && test -s '$tmp/gate4e/deleted'"
 argo_env "$tmp/gate4f"; : >"$FAKE_LOG"
 gate "$tmp/gate4f" "" FAKE_PENDING_LOCK=1 KOINON_E2E_GATE_PENDING=1
 check "--gate waiting on the slot mutex exits 75" test "$rc" -eq 75
 check "... naming the reason (slot), not quota or namespace-limit" sh -c "grep -q 'koinon-make-t1 is still Pending.*reason: slot' '$tmp/gate4f/log'"
-check "... stopping and deleting the run" sh -c "test -s '$tmp/gate4f/stopped' && test -s '$tmp/gate4f/deleted'"
+check "... deleting the run without stopping it" sh -c "test ! -e '$tmp/gate4f/stopped' && test -s '$tmp/gate4f/deleted'"
 argo_env "$tmp/gate4d"; : >"$FAKE_LOG"
 gate "$tmp/gate4d" "" FAKE_PENDING_PULL=1 KOINON_E2E_GATE_PENDING=1 KOINON_E2E_POLL=1
 check "--gate with a pod in ContainerCreating does not give up" test "$rc" -ne 75
 check "... and does not stop the run" test ! -e "$tmp/gate4d/stopped"
+argo_env "$tmp/gate4g"; : >"$FAKE_LOG"
+gate "$tmp/gate4g" "" FAKE_PENDING=1 FAKE_DELETE_FAIL=1 KOINON_E2E_GATE_PENDING=1
+check "--gate give-up with a failed delete still exits 75" test "$rc" -eq 75
+check "... and warns naming the run and the namespace" sh -c "grep -q 'WARNING could not delete koinon-make-t1 in namespace koinon-e2e' '$tmp/gate4g/log'"
+# Ctrl-C (SIGTERM here: a background job ignores SIGINT): a Pending run is deleted, a Running one stopped.
+for ph in Pending Running; do
+  d=$tmp/term$ph
+  argo_env "$d"
+  if [[ $ph == Pending ]]; then v=FAKE_PENDING; else v=FAKE_RUNNING; fi
+  (unset KOINON_E2E_REMOTE; exec env "$v=1" KOINON_E2E_ARGO_POLL=1 KOINON_E2E_GATE_PENDING=600 KOINON_E2E_LOG_GRACE=0 hack/e2e-remote.sh --argo --gate go-test --out "$d/out" >"$d/log" 2>&1) &
+  tpid=$!
+  sleep 3
+  kill -TERM "$tpid" 2>/dev/null || true
+  # A watchdog kills it if it ignores TERM. Exit 143 proves e2e-argo.sh itself got the signal and
+  # handled it (the subshell exec'd it, so $tpid is the script, not a wrapper).
+  (sleep 10; kill -KILL "$tpid" 2>/dev/null) &
+  wd=$!
+  trc=0
+  wait "$tpid" || trc=$?
+  kill "$wd" 2>/dev/null || true
+  wait "$wd" 2>/dev/null || true
+  check "Ctrl-C on a $ph run: the script exits 143 on its own and is gone" sh -c "test $trc -eq 143 && ! kill -0 $tpid 2>/dev/null"
+done
+check "Ctrl-C on a Pending run deletes it without stopping" sh -c "test ! -e '$tmp/termPending/stopped' && test -s '$tmp/termPending/deleted'"
+check "Ctrl-C on a Running run stops it without deleting" sh -c "test -s '$tmp/termRunning/stopped' && test ! -e '$tmp/termRunning/deleted'"
 argo_env "$tmp/gate6"
 rc=0
 (unset KOINON_E2E_REMOTE

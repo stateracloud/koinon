@@ -295,7 +295,7 @@ client_remote() {
   local args remote_cmd
   args=$(printf ' %q' --stage --sha "$sha" --run-id "$id")
   # shellcheck disable=SC2016 # expands on the remote
-  remote_cmd="f=\$(mktemp) && cat >\"\$f\" && KOINON_E2E_REMOTE_WORK=$(printf %q "$WORK") bash \"\$f\"$args; rc=\$?; rm -f \"\$f\"; exit \$rc"
+  remote_cmd="f=\$(mktemp \"\${TMPDIR:-/tmp}/koinon-e2e-stage.XXXXXX\") && cat >\"\$f\" && KOINON_E2E_REMOTE_WORK=$(printf %q "$WORK") bash \"\$f\"$args; rc=\$?; rm -f \"\$f\"; exit \$rc"
   if [[ $dry == 1 ]]; then
     printf '+ ssh -o BatchMode=yes -o ServerAliveInterval=30 %q %q < %q\n' "$REMOTE" "$remote_cmd" "$SELF"
   else
