@@ -4,6 +4,13 @@ How a subagent works in this repository. A parent session points its subagents h
 docs/agents/subagent-brief.md") instead of retyping the same rules in every prompt; the prompt then
 carries only the task, the worktree and the scope. The shell tool is `Bash`.
 
+## Which model
+Parents pick the model by the work; it applies to cloud lanes and `SendMessage` briefs too (paste or link this section there, the spawn hook does not see them).
+- haiku: mechanical, checkable work: test and log runs, no product code. It never fixes code: on a failure it stops and reports the evidence.
+- sonnet: implementation of settled designs, tests from a spec, conflict merges, doc and CI fixes.
+- opus: design, research against source, security, hard bugs, review.
+- Verify every success claim a subagent makes before you repeat it.
+
 ## Find before you read
 - Code questions go to CodeGraph first: the `codegraph_explore` MCP tool, or `codegraph explore
   "<symbol names or a question>"` in a shell. One call returns the relevant symbols' source, their
