@@ -7,8 +7,12 @@
 #
 # When it runs (the `decide` job, hack/e2e-decide.sh):
 #   - pull requests: only if they change the e2e's own files (hack/needs-e2e.sh --forced-only) or
-#     carry the `e2e` label. A PR that is e2e-relevant by the full rule gets a hint in the summary
-#     to run hack/e2e-remote.sh or add the label.
+#     carry the `e2e` label (read live, so `gh pr create --label e2e` counts on `opened`). A PR that
+#     is e2e-relevant by the full rule gets a hint in the summary to run hack/e2e-remote.sh or add
+#     the label. Label events do not start this workflow (#468): adding `e2e` later dispatches it
+#     once on the head (e2e-label.yml, hack/e2e-label.sh), unless a run there is live or passed the
+#     e2e. To retry a red e2e: "Re-run failed jobs", remove and add the label, or
+#     `gh workflow run e2e-kind.yml --ref <branch>`.
 #   - pushes to main: batched (one running, the newest pending) when anything e2e-relevant changed
 #     since the last green run. Nightly: always, once a day, to catch drift nothing in the tree
 #     explains (upstream images, the runner image, downloads). A red run after a green one opens
@@ -21,7 +25,7 @@ run-name: e2e-kind${{ inputs.commit && format(' ({0}) bisect {1}', inputs.commit
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
   schedule:
@@ -48,23 +52,20 @@ permissions:
 # Pull requests: a new push cancels the old run. Main: one running, one pending, the newest pending
 # replaces the older (batching). Everything else (dispatch, nightly) runs alone.
 concurrency:
-  group: ${{ github.event_name == 'push' && 'e2e-main' || github.event_name == 'pull_request' && format('e2e-kind-pr-{0}-{1}', github.ref, (github.event.action == 'unlabeled' || (github.event.action == 'labeled' && github.event.label.name != 'e2e')) && 'label' || 'run') || format('e2e-kind-{0}-{1}', github.event_name, github.run_id) }}
+  group: ${{ github.event_name == 'push' && 'e2e-main' || github.event_name == 'pull_request' && format('e2e-kind-pr-{0}', github.ref) || format('e2e-kind-{0}-{1}', github.event_name, github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Cheap: a checkout, a git diff, one `go list`.
   decide:
-    # Not for drafts, and only adding the `e2e` label starts a run: removing it, or any other
-    # label, only re-runs the result job, which mirrors the earlier result (so a red run cannot
-    # turn green by unlabelling).
-    if: >-
-      github.event_name != 'pull_request' || (!github.event.pull_request.draft
-      && !(github.event.action == 'unlabeled' || (github.event.action == 'labeled' && github.event.label.name != 'e2e')))
+    # Not for drafts.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
       actions: read # the last green run on main
+      pull-requests: read # the PR's current labels
     outputs:
       needed: ${{ steps.decide.outputs.needed }}
     steps:
@@ -84,6 +85,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.base_ref }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          PR: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
@@ -255,30 +257,13 @@ jobs:
     timeout-minutes: 2
     permissions:
       contents: read
-      actions: read
     steps:
       - name: Fail unless decide and quickstart succeeded or were skipped
         env:
           DECIDE: ${{ needs.decide.result }}
           QUICKSTART: ${{ needs.quickstart.result }}
-          # Another label, or removing `e2e`, starts this workflow again but skips the e2e: a skip
-          # must not replace an earlier failure as this check's latest result, so mirror the last
-          # real run on the commit.
-          UNRELATED_LABEL: ${{ github.event_name == 'pull_request' && (github.event.action == 'unlabeled' || (github.event.action == 'labeled' && github.event.label.name != 'e2e')) }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          RUN_ID: ${{ github.run_id }}
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
         run: |
           echo "decide: $DECIDE, quickstart: $QUICKSTART"
-          if [[ $UNRELATED_LABEL == true ]]; then
-            prev=$(gh run list --workflow e2e-kind.yml --event pull_request --commit "$HEAD_SHA" --limit 20 \
-              --json databaseId,conclusion,createdAt \
-              --jq "[.[] | select(.databaseId != $RUN_ID and .conclusion != \"\")] | sort_by(.createdAt) | last | .conclusion // \"none\"")
-            echo "previous completed run for this commit: $prev"
-            case $prev in failure | cancelled | timed_out) echo "::error::the e2e failed on this commit ($prev)"; exit 1 ;; esac
-            exit 0
-          fi
           for r in "$DECIDE" "$QUICKSTART"; do
             case $r in success | skipped) ;; *) echo "::error::the e2e did not pass ($r)"; exit 1 ;; esac
           done
