@@ -60,6 +60,9 @@ type StoreStats struct {
 	Fingerprints        int
 	EvictedFingerprints uint64
 	EvictedScopes       uint64
+	// ForgottenEvictions counts evicted scopes the store no longer remembers (see
+	// MemoryStore): a Lookup of one of them reports Evicted false.
+	ForgottenEvictions uint64
 }
 
 // MemoryStore is an in-memory Store with eviction by size: per scope, the oldest added
@@ -75,10 +78,12 @@ type MemoryStore struct {
 	scopes    map[Scope]*scopeSet
 	evictedFP uint64
 	evictedSc uint64
-	// gone remembers scopes evicted whole, so a later Lookup reports them as evicted; past
-	// maxGone entries it is cleared and goneLost makes every unknown scope count as evicted.
-	gone     map[Scope]struct{}
-	goneLost bool
+	// gone remembers the scopes evicted whole or refused by a full store, oldest first in
+	// goneOrder, so a later Lookup reports them as evicted; past maxGone*MaxScopes entries the
+	// oldest is forgotten (counted in forgotten).
+	gone      map[Scope]struct{}
+	goneOrder []Scope
+	forgotten uint64
 }
 
 // maxGone bounds the memory of evicted scopes, as a multiple of MaxScopes.
@@ -138,9 +143,11 @@ func (m *MemoryStore) Add(ctx context.Context, scope Scope, fps []Fingerprint) e
 			}
 		}
 		if m.total+min(cur+grow, m.maxFP)-cur > m.maxTotal {
+			s.evicted = true // what it could not record is taint the scope lost
 			return ErrStoreFull
 		}
 	} else if m.total+min(len(fps), m.maxFP) > m.maxTotal {
+		m.markGone(scope)
 		return ErrStoreFull
 	}
 	s := m.scope(scope, true)
@@ -187,7 +194,7 @@ func (m *MemoryStore) Lookup(ctx context.Context, scope Scope, fps []Fingerprint
 	s := m.scope(scope, false)
 	if s == nil {
 		_, gone := m.gone[scope]
-		out.Evicted = gone || m.goneLost
+		out.Evicted = gone
 		return out, nil
 	}
 	out.Evicted = s.evicted
@@ -213,11 +220,37 @@ func (m *MemoryStore) Drop(_ context.Context, scope Scope) error {
 func (m *MemoryStore) Stats() StoreStats {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	st := StoreStats{Scopes: len(m.scopes), EvictedFingerprints: m.evictedFP, EvictedScopes: m.evictedSc}
+	st := StoreStats{Scopes: len(m.scopes), EvictedFingerprints: m.evictedFP, EvictedScopes: m.evictedSc, ForgottenEvictions: m.forgotten}
 	for _, s := range m.scopes {
 		st.Fingerprints += len(s.seq)
 	}
 	return st
+}
+
+// markGone remembers that sc lost taint while it held no set. The caller holds m.mu.
+func (m *MemoryStore) markGone(sc Scope) {
+	if _, ok := m.gone[sc]; ok {
+		return
+	}
+	for len(m.gone) >= maxGone*m.maxScopes && len(m.goneOrder) > 0 {
+		old := m.goneOrder[0]
+		m.goneOrder = m.goneOrder[1:]
+		if _, ok := m.gone[old]; ok {
+			delete(m.gone, old)
+			m.forgotten++
+		}
+	}
+	m.gone[sc] = struct{}{}
+	m.goneOrder = append(m.goneOrder, sc)
+	if len(m.goneOrder) > 2*maxGone*m.maxScopes { // drop entries already taken out of gone
+		live := make([]Scope, 0, len(m.gone))
+		for _, g := range m.goneOrder {
+			if _, ok := m.gone[g]; ok {
+				live = append(live, g)
+			}
+		}
+		m.goneOrder = live
+	}
 }
 
 // scope returns the set of sc, creating it (and evicting the least recently used scope) when
@@ -245,15 +278,11 @@ func (m *MemoryStore) scope(sc Scope, create bool) *scopeSet {
 		m.total -= n
 		delete(m.scopes, oldest)
 		m.evictedSc++
-		if len(m.gone) >= maxGone*m.maxScopes {
-			clear(m.gone)
-			m.goneLost = true
-		}
-		m.gone[oldest] = struct{}{}
+		m.markGone(oldest)
 	}
 	_, wasGone := m.gone[sc]
 	delete(m.gone, sc)
-	s := &scopeSet{seq: map[Fingerprint]uint64{}, lastUse: m.clock, evicted: wasGone || m.goneLost}
+	s := &scopeSet{seq: map[Fingerprint]uint64{}, lastUse: m.clock, evicted: wasGone}
 	m.scopes[sc] = s
 	return s
 }
