@@ -14,24 +14,28 @@
 # A dispatch run's checks, `e2e result` among them, land on the head commit (run 41265167595 on
 # #462's head, 2026-11-01). Its `e2e result` appears only once quickstart ends; until then the head
 # keeps its earlier result (green when that run skipped the e2e). hack/pr-wait.sh waits while an
-# e2e-kind run on the head is live.
+# e2e-kind run on the head is live, so after the dispatch this waits until the new run is listed
+# (it takes a few seconds) and fails loudly if it never is.
 #
 # Environment: HEAD_SHA, BRANCH (the PR's head branch), GH (the gh command), GH_REPO, POLL (seconds
 # between looks, default 15), WAIT_MAX (seconds to wait for a run to decide, default 900; then it
-# dispatches anyway: a second e2e beats none).
+# dispatches anyway: a second e2e beats none), LIST_POLL and LIST_MAX (seconds between looks for the
+# dispatched run, default 5, and how long, default 60).
 set -euo pipefail
 
 GH=${GH:-gh}
 POLL=${POLL:-15}
 WAIT_MAX=${WAIT_MAX:-900}
+LIST_POLL=${LIST_POLL:-5}
+LIST_MAX=${LIST_MAX:-60}
 : "${HEAD_SHA:?HEAD_SHA}" "${BRANCH:?BRANCH}" "${GH_REPO:?GH_REPO}"
 
 # runs: the e2e-kind runs that test the head (pull_request, and dispatch without a `commit` input:
-# a bisect dispatch tests another commit), one per line: <id> <status>.
+# a bisect dispatch tests another commit), one per line: <id> <status> <event>.
 runs() {
   "$GH" api "repos/$GH_REPO/actions/workflows/e2e-kind.yml/runs?head_sha=$HEAD_SHA&per_page=50" --jq '
     .workflow_runs[] | select(.event == "pull_request" or (.event == "workflow_dispatch" and .display_title == "e2e-kind"))
-    | "\(.id) \(.status)"'
+    | "\(.id) \(.status) \(.event)"'
 }
 # quickstart_of <run id>: none (no quickstart job yet: decide has not finished), pending, skipped,
 # success, or the first other conclusion. A job that needs another is created when that one ends.
@@ -49,7 +53,7 @@ waited=0
 while :; do
   list=$(runs) || { echo "::error::could not list the e2e-kind runs on ${HEAD_SHA:0:12}"; exit 1; }
   undecided=""
-  while read -r id status; do
+  while read -r id status _; do
     [[ -n $id ]] || continue
     q=$(quickstart_of "$id") || q=none
     case $q in
@@ -75,4 +79,21 @@ if [[ $now != "$HEAD_SHA" ]]; then
   exit 0
 fi
 echo "dispatching e2e-kind on $BRANCH (${HEAD_SHA:0:12})"
+before=$(awk '$3 == "workflow_dispatch" {print $1}' <<<"$list")
 "$GH" workflow run e2e-kind.yml --ref "$BRANCH"
+
+# Until the new run is listed, hack/pr-wait.sh sees nothing live on the head.
+looked=0
+while :; do
+  new=$(runs | awk -v before=" $(tr '\n' ' ' <<<"$before") " '$3 == "workflow_dispatch" && index(before, " " $1 " ") == 0 {print $1; exit}') || new=""
+  if [[ -n $new ]]; then
+    echo "dispatched run $new on ${HEAD_SHA:0:12}"
+    exit 0
+  fi
+  if [[ $looked -ge $LIST_MAX ]]; then
+    echo "::error::no e2e-kind dispatch run on ${HEAD_SHA:0:12} appeared within ${LIST_MAX}s of the dispatch"
+    exit 1
+  fi
+  sleep "$LIST_POLL"
+  looked=$((looked + (LIST_POLL > 0 ? LIST_POLL : 1)))
+done
