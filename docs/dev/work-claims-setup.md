@@ -1,6 +1,6 @@
 # Work claims: settings to apply by hand
 
-[ADR 0082](../adr/0082-work-claims-and-ready-queue.md) adds `hack/claim.sh`, `.github/workflows/claims.yml`
+[ADR 0082](../adr/0082-work-claims-and-ready-queue.md) adds `hack/claim.sh`, `.github/workflows/claims.yml`, `.github/workflows/updater.yml`
 and `hack/adr-lint.sh`. Nothing below is applied by the pull request; an organization owner does it
 in this order. Until step 7 the workflows skip their App-dependent jobs with a notice.
 

@@ -45,6 +45,7 @@ import (
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/schemagate"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -122,9 +123,15 @@ func serve(ctx context.Context, cfg config) error {
 		})
 		defer func() { _ = health.Close() }()
 	}
+	// The KEKs are unwrapped as cfg.kekWrapping says (ADR 0085 decision 12): the default local KEK,
+	// or an opted-in KMS. The reconciler only unwraps.
 	var keyring *secretstore.Keyring
+	wrappers, err := wrapping.New(ctx, cfg.kekWrapping, wrapping.Service)
+	if err != nil {
+		return err
+	}
 	for lastWarn := (time.Time{}); keyring == nil; {
-		if keyring, err = secretstore.LoadDir(cfg.kekDir); err != nil {
+		if keyring, err = secretstore.LoadDir(ctx, cfg.kekDir, wrappers); err != nil {
 			if time.Since(lastWarn) >= time.Minute {
 				log.Warn("waiting for the key-encryption keys (koinon-api creates them on its first start, or restore the KEK Secret)", "err", err)
 				lastWarn = time.Now()
@@ -137,7 +144,7 @@ func serve(ctx context.Context, cfg config) error {
 		}
 	}
 	ready.Store(true)
-	safego.GoOrStop(ctx, log, "keyring-watch-dir", stop, func(ctx context.Context) { keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log) })
+	safego.GoOrStop(ctx, log, "keyring-watch-dir", stop, func(ctx context.Context) { keyring.WatchDir(ctx, cfg.kekDir, wrappers, time.Minute, log) })
 
 	observer, err := newSandboxObserver(cfg, kube, log)
 	if err != nil {

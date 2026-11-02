@@ -142,6 +142,10 @@ or adopts them.
     that branch: the `claim` check wants the claim's human to be the PR author.
 11. A PR that conflicts with main while auto-merge is on gets the label `needs-update`: merge
     `origin/main` yourself (the updater bot never pushes code to your branch).
+    The updater bot merges `main` into a branch only when the PR has auto-merge on, is not a draft,
+    is green on its current head (every required check of `hack/ci-required.txt` passed, newest run
+    per name; advisory and third-party checks do not count) and is behind `main`; a draft, a red or
+    a running PR is left alone, so sync a draft or red branch yourself when you need it.
 12. Releases: either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay
     procoduck's. Tags are immutable by ruleset: fix a bad tag with the next rc (`docs/dev/releasing.md`).
 
