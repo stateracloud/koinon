@@ -377,9 +377,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: load tool versions
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
       - uses: bufbuild/buf-action@85aebf73123b5c15fd5528aaecbf9129cddf7fa7 # v1.6.0
         with:
           setup_only: true
+          version: ${{ env.BUF_VERSION }}
+          checksum: ${{ env.BUF_SHA256_AMD64 }}
       - run: buf lint
       - name: buf breaking
         if: github.event_name == 'pull_request'
@@ -409,9 +413,13 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
+      - name: load tool versions
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
       - uses: bufbuild/buf-action@85aebf73123b5c15fd5528aaecbf9129cddf7fa7 # v1.6.0
         with:
           setup_only: true
+          version: ${{ env.BUF_VERSION }}
+          checksum: ${{ env.BUF_SHA256_AMD64 }}
       - run: make web-deps generate
       - name: no diff after make generate
         run: |
@@ -603,6 +611,7 @@ jobs:
       - run: hack/hooks/agent-spawn-check_test.sh
       - run: hack/hooks/read-hooks_test.sh
       - run: hack/agent-state-test.sh
+      - run: hack/dep-age-check-test.sh
       - run: hack/ci-changes-test.sh
 
   # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this

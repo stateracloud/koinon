@@ -323,14 +323,15 @@ while IFS=$'\t' read -r file line; do
 done < <(added_lines . ':!*.md' ':!*.lock' ':!*pnpm-lock.yaml' ':!go.sum' ':!docs/' ':!**/testdata/**' ':!.github/dependabot.yml' ':!*.json')
 
 # expand_vars <file> <url>: replaces ${NAME} and $NAME in a URL with the default the same file gives
-# NAME (`ARG NAME=…`, `ENV NAME=…`, `NAME=…` or `: "${NAME:=…}"`), so a version kept in a variable is
-# dated. A name the file does not define is left as it is, and dating it then fails (fail closed).
+# NAME (`ARG NAME=…`, `ENV NAME=…`, `NAME=…`, a YAML `NAME: …` or `: "${NAME:=…}"`), so a version kept in a variable is
+# dated. A name the file does not define, or defines with two different values, is left as it is, and dating it then fails (fail closed).
 expand_vars() {
 	local file=$1 url=$2 name val
 	while [[ $url =~ \$\{?([A-Za-z_][A-Za-z0-9_]*)\}? ]]; do
 		name=${BASH_REMATCH[1]}
-		val=$(sed -nE "s/^[[:space:]]*(ARG|ENV)?[[:space:]]*${name}=[\"']?([^\"' ]+)[\"']?.*/\\2/p; s/.*\\\$\\{${name}:=([^}]+)\\}.*/\\1/p" "$file" 2>/dev/null | head -1)
-		[[ -n $val ]] || break
+		val=$(sed -nE "s/^[[:space:]]*(ARG|ENV)?[[:space:]]*${name}=[\"']?([^\"' ]+)[\"']?.*/\\2/p; s/^[[:space:]]*(-[[:space:]]*)?${name}:[[:space:]]+[\"']?([^\"' #]+)[\"']?.*/\\2/p; s/.*\\\$\\{${name}:=([^}]+)\\}.*/\\1/p" "$file" 2>/dev/null | sort -u)
+		# Not defined, or defined with different values in one file (ambiguous): leave it, so dating fails.
+		[[ -n $val && $val != *$'\n'* ]] || break
 		url=${url//"\${$name}"/$val}
 		url=${url//"\$$name"/$val}
 	done
@@ -344,7 +345,7 @@ while IFS=$'\t' read -r file line; do
 		url=$(expand_vars "$file" "$url")
 		once "url $url" && check_url "$url"
 	done
-done < <(added_lines '**/Dockerfile*' 'Dockerfile*' 'hack/*.sh' 'test/e2e/**/*.sh')
+done < <(added_lines '**/Dockerfile*' 'Dockerfile*' 'hack/*.sh' 'test/e2e/**/*.sh' '.github/workflows/*.yml' '.github/workflows/*.yaml')
 
 # 4b. The tool versions of hack/versions.env (#544): the release each <TOOL>_VERSION names. The file
 # is also what the workflows, Dockerfile and CONTRIBUTING copies are checked against
@@ -363,6 +364,9 @@ tool_repo() {
 	COSIGN) echo "sigstore/cosign" ;;
 	KUBECONFORM) echo "yannh/kubeconform" ;;
 	GOLANGCI_LINT) echo "golangci/golangci-lint" ;;
+	BUF) echo "bufbuild/buf" ;;
+	GOVULNCHECK) echo "golang/vuln" ;;
+	GOFUMPT) echo "mvdan/gofumpt" ;;
 	esac
 }
 while IFS=$'\t' read -r file line; do
