@@ -49,12 +49,18 @@ type counts struct {
 	finished []store.RunState
 	requeued int
 	capped   []string
+	// writeFailed is each run event Record gave up on, as "class/reason".
+	writeFailed []string
 }
 
 func (c *counts) Finished(s store.RunState) { c.finished = append(c.finished, s) }
 func (c *counts) Requeued()                 { c.requeued++ }
 func (c *counts) SandboxWaitCap(cause execution.SandboxWaitCause) {
 	c.capped = append(c.capped, string(cause))
+}
+
+func (c *counts) EventWriteFailed(class runoutcome.EventClass, reason runoutcome.WriteFailure) {
+	c.writeFailed = append(c.writeFailed, class.String()+"/"+string(reason))
 }
 
 // newWorld claims a run; running moves it to running, otherwise it stays starting.

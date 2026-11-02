@@ -65,6 +65,9 @@ type Metrics interface {
 	Requeued()
 	// SandboxWaitCap counts a run failed because its sandbox never became ready.
 	SandboxWaitCap(cause execution.SandboxWaitCause)
+	// EventWriteFailed counts a run event Record could not write after its tries, by the event's
+	// class and why. A diagnostic one was dropped; a business one abandoned the run.
+	EventWriteFailed(class EventClass, reason WriteFailure)
 }
 
 // Config is what an Owner needs.
@@ -173,8 +176,11 @@ func (o *Owner) failed(ctx context.Context, turn Turn, what string, err error) e
 
 // Record appends a run event under the next source seq, retrying transient failures. The source seq
 // makes a retry after an ambiguous failure (the insert committed, the reply was lost) a no-op
-// instead of a duplicate. An event that cannot be recorded abandons the run rather than drop it: the
-// lease expires and another worker resumes the session.
+// instead of a duplicate. What a write that keeps failing does depends on the kind's class
+// (ClassOf): a business event abandons the run rather than drop it (the lease expires and another
+// worker resumes the session); a diagnostic event is dropped, logged and counted after at most two
+// tries, and Record returns nil. Either class fences when the write matches no row: the run is no
+// longer this worker's.
 func (o *Owner) Record(ctx context.Context, kind string, payload any) error {
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -192,8 +198,13 @@ func (o *Owner) RecordRaw(ctx context.Context, kind string, payload []byte) erro
 	}
 	o.srcSeq++
 	src := o.srcSeq
+	class := ClassOf(kind)
+	tries := businessTries
+	if class == ClassDiagnostic {
+		tries = diagnosticTries
+	}
 	backoff := 100 * time.Millisecond
-	for attempt := 0; ; attempt++ {
+	for attempt := 1; ; attempt++ {
 		_, err := o.q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
 			OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
 			Kind: kind, Payload: payload, SourceSeq: src,
@@ -210,14 +221,29 @@ func (o *Owner) RecordRaw(ctx context.Context, kind string, payload []byte) erro
 			o.FenceFromDB(ctx)
 			return ErrFenced
 		}
-		if attempt == 4 || !sleep(ctx, backoff) {
-			o.cfg.Log.Warn("recording a run event failed", "kind", kind, "err", err)
+		if attempt == tries || !sleep(ctx, backoff) {
+			reason := failureOf(err)
+			if o.cfg.Metrics != nil {
+				o.cfg.Metrics.EventWriteFailed(class, reason)
+			}
+			if class == ClassDiagnostic {
+				o.cfg.Log.Warn("dropped a diagnostic run event that could not be recorded", "kind", kind, "reason", reason, "err", err)
+				return nil
+			}
+			o.cfg.Log.Warn("recording a run event failed", "kind", kind, "reason", reason, "err", err)
 			o.Fence(FenceAbandon)
 			return err
 		}
 		backoff *= 2
 	}
 }
+
+// The tries of Record before it gives up: a business event keeps trying for about 1.5 s, a
+// diagnostic one tries twice, 100 ms apart, so it never holds the run up for long.
+const (
+	businessTries   = 5
+	diagnosticTries = 2
+)
 
 // sleep waits for d or until ctx ends, and reports whether ctx is still live.
 func sleep(ctx context.Context, d time.Duration) bool {
