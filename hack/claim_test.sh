@@ -175,7 +175,19 @@ stub_github() {
   load_claim() { C=$(jq -c --argjson n "$1" '.[] | select(.issue == $n)' <<<"$FIX"); [[ -n $C ]] || return 1; }
   find_pr() { :; }
   pr_is_open() { return 1; }
-  write_claim() { echo "write $1 $2 $3" >>"$LOG"; return 0; }
+  write_claim() {
+    if [[ -n ${WRITE_RC:-} ]]; then echo "claim: boom" >&2; exit "$WRITE_RC"; fi
+    echo "write $1 $2 $3" >>"$LOG"; return 0
+  }
+  # The beat --every loop: after the 1st sleep the failure clears, after the 2nd the claims change to
+  # $ON_SLEEP; more than 5 sleeps means the loop did not stop.
+  sleep() {
+    if [[ -z ${STUB_SLEEP:-} ]]; then command sleep "$@"; return; fi
+    SLEEPS=$((${SLEEPS:-0} + 1))
+    if ((SLEEPS == 1)); then WRITE_RC=; fi
+    if ((SLEEPS == 2)) && [[ -n ${ON_SLEEP:-} ]]; then FIX=$ON_SLEEP; fi
+    if ((SLEEPS > 5)); then echo "sleep stub: the loop did not stop"; exit 99; fi
+  }
   warn_area_overlap() { :; }
   mirror_held() { :; }
   unassign() { :; }
@@ -254,6 +266,82 @@ eq "wait-release returns 0 when there is no claim" "$(rc_of "$(lanecmd "$rel1" w
 eq "wait-release times out with exit 1 on a held claim" "$(rc_of "$(lanecmd "$held1" wait-release 10 --timeout 1)")" 1
 eq "wait-release needs a number" "$(rc_of "$(lanecmd "$held1" wait-release x)")" 1
 unset KOINON_CLAIM_WAIT_INTERVAL
+
+# beat --mine: every claim of this session (lanes included), never another holder's.
+: >"$LOG"
+r=$(lanecmd "$FIX" beat --mine)
+eq "beat --mine succeeds" "$(rc_of "$r")" 0
+eq "beat --mine renews all held claims of the session, lanes included" "$(awk '{print $2}' "$LOG" | sort -n | paste -sd, -)" "10,11,12,14"
+eq "beat --mine keeps each lane" "$(sed 's#alice/[^/]*/#alice/HOST/#' "$LOG" | awk '{print $2":"$4}' | sort -n | paste -sd, -)" "10:alice/HOST/s1,11:alice/HOST/s1#y,12:alice/HOST/s1#x,14:alice/HOST/s1#z"
+eq "beat --mine prints one line per round" "$(grep -c '^beat ' <<<"$r")" 1
+if grep -q 'renewed #10 #11 #12 #14' <<<"$r"; then ok "beat --mine names what it renewed"; else bad "beat --mine line: $r"; fi
+: >"$LOG"
+r=$(lanecmd "$FIX" beat --mine --lane x)
+eq "beat --mine --lane x renews only that lane" "$(awk '{print $2}' "$LOG" | paste -sd, -)" "12"
+eq "beat --mine wants no issue numbers" "$(rc_of "$(lanecmd "$FIX" beat --mine 10)")" 1
+eq "beat --every needs --mine" "$(rc_of "$(lanecmd "$FIX" beat --every 5m)")" 1
+eq "beat --every rejects junk" "$(rc_of "$(lanecmd "$FIX" beat --mine --every soon)")" 1
+eq "duration: seconds" "$(parse_duration 90)" 90
+eq "duration: minutes" "$(parse_duration 30m)" 1800
+eq "duration: hours" "$(parse_duration 2h)" 7200
+eq "duration: zero is refused" "$(parse_duration 0 && echo y || echo n)" n
+eq "beat --mine with nothing held" "$(rc_of "$(lanecmd '[]' beat --mine)")" 0
+# --every: a claim that leaves our hands (exit 3) stops the loop and is named.
+STUB_SLEEP=1
+other10=$(jq -c '[.[] | select(.issue == 10) | .holder = "alice/mac/other"]' <<<"$FIX")
+ON_SLEEP=$other10
+r=$(lanecmd "$mine_only" beat --mine --every 30m)
+eq "beat --every stops with 3 when a claim is lost" "$(rc_of "$r")" 3
+eq "beat --every ran a round after each sleep until the loss" "$(grep -c '^beat ' <<<"$r")" 3
+if grep -q 'lost #10: stop work' <<<"$r"; then ok "beat --every names the lost claim"; else bad "lost claim not named: $r"; fi
+# Exit 1 (an error) does not stop the loop: the next round retries and succeeds.
+r=$(WRITE_RC=1 lanecmd "$mine_only" beat --mine --every 30m)
+eq "beat --every keeps looping after an error, then stops on the loss" "$(rc_of "$r")" 3
+if grep -q 'errors #10' <<<"$r" && grep -q 'renewed #10; lost none; errors none' <<<"$r"; then ok "beat --every retries a failed claim next round"; else bad "error retry: $r"; fi
+r=$(WRITE_RC=1 lanecmd "$mine_only" beat --mine)
+eq "beat --mine once: an error is exit 1" "$(rc_of "$r")" 1
+unset STUB_SLEEP ON_SLEEP
+
+# adopt: a dead session's claims move to this session, each in its own lane.
+dead() { # ISSUE HOLDER LEASE
+  printf '{"issue":%s,"sha":"s%s","state":"held","holder":"%s","human":"alice","lease_until":"%s","pr":"","note":""}' "$1" "$1" "$2" "$3"
+}
+ADOPT_DEAD=$(jq -nc "[$(dead 30 alice/mac/old#x 2026-10-30T15:00:00Z), $(dead 31 alice/mac/old 2026-10-30T15:00:00Z)]")
+host_fix() { sed 's#alice/[^/]*/#alice/HOST/#'; }
+: >"$LOG"
+r=$(lanecmd "$ADOPT_DEAD" adopt --from old)
+eq "adopt all claims of a dead session" "$(rc_of "$r")" 0
+eq "adopt keeps each claim's lane" "$(host_fix <"$LOG" | sort | paste -sd, -)" "write 30 held alice/HOST/s1#x,write 31 held alice/HOST/s1"
+: >"$LOG"
+r=$(lanecmd "$ADOPT_DEAD" adopt --from old 30)
+eq "adopt one claim" "$(host_fix <"$LOG")" "write 30 held alice/HOST/s1#x"
+r=$(lanecmd "$ADOPT_DEAD" adopt --from old 99)
+eq "adopt refuses an issue the session does not hold" "$(rc_of "$r")" 2
+live_old=$(jq -c ". + [$(dead 32 alice/mac/old#y 2026-10-30T17:00:00Z)]" <<<"$ADOPT_DEAD")
+: >"$LOG"
+r=$(lanecmd "$live_old" adopt --from old 32)
+eq "adopt refuses a live holder" "$(rc_of "$r")" 2
+if grep -q 'alive until' <<<"$r"; then ok "adopt names the takeover rule"; else bad "live holder text: $r"; fi
+r=$(lanecmd "$live_old" adopt --from old)
+eq "adopt without N refuses when one claim is alive" "$(rc_of "$r")" 2
+eq "a refused adopt writes nothing" "$(wc -l <"$LOG" | tr -d ' ')" 0
+grace_old=$(jq -nc "[$(dead 33 alice/mac/old 2026-10-30T15:50:00Z)]")
+eq "adopt refuses a holder still in grace" "$(rc_of "$(lanecmd "$grace_old" adopt --from old)")" 2
+ready_old=$(jq -nc "[$(dead 34 alice/mac/old 2026-10-30T15:00:00Z | jq -c '.pr = "340"')]")
+# shellcheck disable=SC2329
+if (stub_github; claim_liveness() { LIVE=$(iso_to_epoch 2026-10-30T15:00:00Z); PR_STATE=ready; PR_NUM=340; return 0; }
+  dead_holder_check 34 "$(jq -c '.[0]' <<<"$ready_old")" "$LNOW" 2>/dev/null); then bad "ready PR must block adopt"; else ok "a ready PR blocks adopt like take --takeover"; fi
+eq "adopt your own session" "$(rc_of "$(lanecmd "$ADOPT_DEAD" adopt --from s1)")" 1
+eq "adopt needs --from" "$(rc_of "$(lanecmd "$ADOPT_DEAD" adopt)")" 1
+# Caps: the human cap (4) counts the active claims, the session cap (1) counts per lane.
+cap_fix=$(jq -c ". + [$(dead 30 alice/mac/old#x 2026-10-30T15:00:00Z)]" <<<"$FIX")
+cap_fix=$(jq -c '[.[] | select(.issue != 14)]' <<<"$cap_fix")
+r=$(lanecmd "$cap_fix" adopt --from old)
+eq "adopt respects the human cap" "$(rc_of "$r")" 2
+if grep -q 'cap of 4' <<<"$r"; then ok "adopt cap message"; else bad "cap message: $r"; fi
+same_lane=$(jq -nc "[$(dead 30 alice/mac/old#x 2026-10-30T15:00:00Z), $(dead 35 alice/mac/old#x 2026-10-30T15:00:00Z)]")
+r=$(lanecmd "$same_lane" adopt --from old)
+eq "adopt respects the session cap per lane" "$(rc_of "$r")" 2
 rm -f "$LOG"
 
 if [[ -z ${KOINON_CLAIM_TEST_REPO:-} ]]; then
