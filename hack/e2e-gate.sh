@@ -56,14 +56,14 @@ if [[ -n $SHA && -n $GH_REPO ]]; then
   # A green go-suite quickstart job of another e2e-kind run on the head: a pull_request run, or a
   # plain dispatch (display title "e2e-kind", as hack/e2e-label.sh; a bisect dispatch with a commit
   # input tests another commit). The job's own conclusion is judged, not the run's: the dispatched run
-  # that re-runs this one is still in progress. A quickstart job that skipped the "web suite" step ran
-  # the go suite; the web suite only runs Playwright.
+  # that re-runs this one is still in progress. Only a quickstart job whose "Go suite" marker step
+  # succeeded counts (the web suite, or any future suite, only runs something else).
   runs=$("$GH" run list --workflow e2e-kind.yml --commit "$SHA" --limit 30 --json databaseId,event,displayTitle \
     --jq '.[] | select(.event == "pull_request" or (.event == "workflow_dispatch" and .displayTitle == "e2e-kind")) | .databaseId' 2>/dev/null || true)
   for id in $runs; do
     [[ $id != "${GITHUB_RUN_ID:-}" ]] || continue
     if [[ -n $("$GH" api "repos/$GH_REPO/actions/runs/$id/jobs?per_page=100" \
-      --jq '.jobs[] | select(.name == "quickstart" and .conclusion == "success" and any(.steps[]?; .name == "Node and pnpm (web suite)" and .conclusion == "skipped")) | .id' 2>/dev/null || true) ]]; then
+      --jq '.jobs[] | select(.name == "quickstart" and .conclusion == "success" and any(.steps[]?; .name == "Go suite (marker for the e2e gate)" and .conclusion == "success")) | .id' 2>/dev/null || true) ]]; then
       pass "quickstart succeeded in e2e-kind run $id on ${SHA:0:12}"
     fi
   done

@@ -159,7 +159,6 @@ jobs:
         with:
           package_json_file: web/package.json
 
-      # (This step's name is read by hack/e2e-gate.sh: skipped means the go suite ran.)
       - name: Node and pnpm (web suite)
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: inputs.suite == 'web'
@@ -202,6 +201,12 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
           GHCR_USER: ${{ github.actor }}
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin || true
+
+      # A positive marker, read by hack/e2e-gate.sh (hack/e2e-gate-test.sh pins its name and `if`): only
+      # the go suite (the default, also on pull_request, which has no inputs) counts as the e2e's evidence.
+      - name: Go suite (marker for the e2e gate)
+        if: (inputs.suite || 'go') == 'go'
+        run: echo "suite=go"
 
       - name: Quickstart e2e (kind, images, helm install, driver or browser)
         env:
