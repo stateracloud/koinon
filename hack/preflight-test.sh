@@ -34,6 +34,7 @@ stub golangci-lint 'exit "${FAKE_LINT_RC:-0}"'
 stub make '[[ -z ${FAKE_GEN_CHANGE:-} ]] || echo gen >>generated.txt'
 stub pnpm 'exit 0'
 stub shellcheck 'exit 0'
+stub actionlint '[[ ${FAKE_ACTIONLINT_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ACTIONLINT_RC:-0}"'
 stub buf 'exit "${FAKE_BUF_RC:-0}"'
 stub gitleaks '[[ ${FAKE_GITLEAKS_RC:-0} -eq 0 ]] || echo "Finding: fake"; exit "${FAKE_GITLEAKS_RC:-0}"'
 export PATH="$tmp/bin:$PATH"
@@ -130,7 +131,7 @@ for g in chart web generate migrate adr docs shell mktemp; do check "$g selected
 check "no Go files: go not selected" hasnt '^go:' "$tmp/l2"
 check "no Go files: tidy not selected" hasnt '^tidy:' "$tmp/l2"
 
-# a workflow-only change selects the mktemp gate but not the shell gate
+# a workflow-only change selects the mktemp and actionlint gates but not the shell gate
 reset_state
 w=$(fresh); cd "$w"
 mkdir -p .github/workflows
@@ -138,6 +139,7 @@ echo "on: push" >.github/workflows/x.yml
 commit_all
 pf "$tmp/l3" --list >/dev/null
 check "workflow change selects mktemp" has '^mktemp:' "$tmp/l3"
+check "workflow change selects actionlint" has '^actionlint:' "$tmp/l3"
 check "workflow change does not select shell" hasnt '^shell:' "$tmp/l3"
 
 # uncommitted and untracked changes count
@@ -267,6 +269,8 @@ echo "# adr" >docs/adr/0002-x.md
 echo "a: b" >charts/koinon/values.yaml
 echo "x" >web/app.ts
 printf '#!/bin/sh\n' >hack/new.sh
+mkdir -p .github/workflows
+echo "on: push" >.github/workflows/y.yml
 commit_all
 rc=$(pf "$tmp/c1")
 check "multi-area change passes: exit 0" eq "$rc" 0
@@ -277,6 +281,7 @@ check "docs-check ran" has '^docs-check.sh' "$FAKE_LOG"
 check "chart-check ran" has '^chart-check.sh' "$FAKE_LOG"
 check "pnpm ran for web" has '^pnpm ' "$FAKE_LOG"
 check "shellcheck on the changed script" has '^shellcheck hack/new.sh' "$FAKE_LOG"
+check "actionlint ran for the workflow change" has '^actionlint' "$FAKE_LOG"
 check "mktemp-lint ran" has '^mktemp-lint.sh' "$FAKE_LOG"
 check "mktemp-lint-test ran" has '^mktemp-lint-test.sh' "$FAKE_LOG"
 check "no Go change: no go test" hasnt '^go-test.sh' "$FAKE_LOG"
@@ -285,6 +290,11 @@ rc=$(pf "$tmp/c3")
 check "a failing mktemp lint fails preflight" eq "$rc" 1
 check "mktemp FAIL line" has '^mktemp FAIL' "$tmp/c3"
 unset FAKE_MKTEMP_LINT_RC
+export FAKE_ACTIONLINT_RC=1
+rc=$(pf "$tmp/c4")
+check "a failing actionlint fails preflight" eq "$rc" 1
+check "actionlint FAIL line" has '^actionlint FAIL' "$tmp/c4"
+unset FAKE_ACTIONLINT_RC
 export FAKE_CHART_CHECK_RC=1
 rc=$(pf "$tmp/c2")
 check "a failing checker fails preflight" eq "$rc" 1

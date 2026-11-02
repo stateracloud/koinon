@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# shellcheck shell=sh
 #
 # procinfo reads the processes koinon-agentd's sweep could not end (stuck.go). Its arguments are
 # PID:STARTTIME pairs as sweep.sh prints them; for each that is still the same process and not a
@@ -15,6 +16,7 @@ for a in "$@"; do
   want=${a#*:}
   line=
   { read -r line <"$proc/$pid/stat"; } 2>/dev/null || continue
+  # shellcheck disable=SC2086 # splitting the stat fields is the point
   set -- ${line##*") "}
   [ $# -ge 20 ] || continue
   state=$1
