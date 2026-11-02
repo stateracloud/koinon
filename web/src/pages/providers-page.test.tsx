@@ -40,7 +40,7 @@ const shadowed = create(ProviderSchema, { id: 'p-shadow', name: 'dup', type: 'op
 const model = create(ModelSchema, { id: 'm-1', providerId: 'p-ui', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui', format: 'openai' })
 const secretModel = create(ModelSchema, { id: 'm-2', providerId: 'p-sec', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret' })
 
-function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string; warnings?: string[]; overridden?: boolean; slowTypeInfo?: Promise<void>; withAnthropic?: boolean } = {}) {
+function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string; warnings?: string[]; overridden?: boolean; slowTypeInfo?: Promise<void>; withAnthropic?: boolean; holdModelsRefetchAfterCreate?: Promise<void> } = {}) {
   const calls = { providerCreates: [] as CreateProviderRequest[], providerUpdates: [] as UpdateProviderRequest[], providerDeletes: [] as DeleteProviderRequest[], modelCreates: [] as CreateModelRequest[], modelUpdates: [] as UpdateModelRequest[], formatAsks: [] as ModelFormatsRequest[], listed: 0 }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
@@ -50,7 +50,11 @@ function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string;
         calls.listed++
         return { providers: [uiProvider, secretProvider, removedProvider, shadowed, fresh, ...(opts.withAnthropic ? [claude] : [])] }
       },
-      listModels: () => ({ models: [opts.overridden ? create(ModelSchema, { ...model, format: 'anthropic', formatOverridden: true }) : model, secretModel] }),
+      listModels: async () => {
+        // Hold the refetch that follows a provider create, so the form's completion arrives late.
+        if (opts.holdModelsRefetchAfterCreate && calls.providerCreates.length > 0) await opts.holdModelsRefetchAfterCreate
+        return { models: [opts.overridden ? create(ModelSchema, { ...model, format: 'anthropic', formatOverridden: true }) : model, secretModel] }
+      },
       modelFormats: (req) => {
         calls.formatAsks.push(req)
         return { defaultFormat: req.name.startsWith('claude') ? 'anthropic' : 'openai' }
@@ -129,6 +133,26 @@ describe('Providers page', () => {
     expect(calls.providerCreates[0]).toMatchObject({ orgId: 'org-1', name: 'second', type: 'openrouter', url: 'https://openrouter.ai/api/v1', apiKey: 'sk-or-secret-value' })
     await waitFor(() => expect(screen.queryByRole('form', { name: 'Add provider' })).not.toBeInTheDocument())
     expect(document.body.textContent).not.toContain('sk-or-secret-value')
+  })
+
+  it('keeps a model form the person opened while a provider save is still refetching (#520)', async () => {
+    let release = () => {}
+    const hold = new Promise<void>((r) => (release = r))
+    const calls = setup({ holdModelsRefetchAfterCreate: hold })
+    await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+    const form = screen.getByRole('form', { name: 'Add provider' })
+    await userEvent.type(within(form).getByLabelText('Name'), 'second')
+    await userEvent.type(within(form).getByLabelText('API key'), 'koinon_test_not-a-real-token')
+    await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
+    await waitFor(() => expect(calls.providerCreates).toHaveLength(1))
+
+    // The create has returned but its refetch is pending, so the provider form is still open.
+    await userEvent.click(screen.getByRole('button', { name: 'Add model to openrouter' }))
+    expect(screen.getByRole('form', { name: 'Add model to openrouter' })).toBeInTheDocument()
+
+    release()
+    await waitFor(() => expect(screen.queryByRole('form', { name: 'Add provider' })).not.toBeInTheDocument())
+    expect(screen.getByRole('form', { name: 'Add model to openrouter' })).toBeInTheDocument()
   })
 
   it('shows the server\'s URL refusal plainly and keeps the form open without the key', async () => {
