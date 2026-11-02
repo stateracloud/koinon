@@ -1,6 +1,6 @@
 # 0026. Home lab for real isolation testing; Apache-2.0 with DCO
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-02 (below)
 - Date: 2026-10-21
 - Decision: [design.md#26](../design.md)
 
@@ -56,6 +56,14 @@ Checked 2026-10-21:
 - Agent Sandbox Kata examples cover AKS and GKE only; Talos is untested upstream.
   https://github.com/kubernetes-sigs/agent-sandbox
 - DCO app configuration: https://github.com/dcoapp/app
+
+## Amendment (2026-11-02, #547): a maintainer's agent may submit lab runs
+
+The lab is still not a CI runner and is still not connected to public CI: no GitHub workflow, and no
+pull request's code, reaches it by itself. A maintainer's own agent submits a run of the maintainer's
+own checkout (`hack/e2e-remote.sh --argo`) and posts the result as the commit status `e2e-lab`.
+`e2e-lab` is not a check of the repository ruleset: contributors without a lab use GitHub's `e2e-kind`.
+The merge rule and the exit codes are in ADR [0025](0025-testing-strategy.md) (amendment).
 
 ## Links
 
