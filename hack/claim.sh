@@ -20,15 +20,19 @@
 #   claim.sh beat <N>... [--pr P] [--lane L]
 #                                     extend the lease (every 30 min and before long steps; PR
 #                                     pushes alone are not liveness). Human claims: daily.
-#   claim.sh beat --mine [--every DURATION]
+#   claim.sh beat --mine [--every DURATION] [--for DURATION] [--while-pid PID]
 #                                     renew every claim this session holds, lanes included (only
 #                                     lane L with --lane); one line per round. --every 30m (or 90,
 #                                     90s, 2h) loops: exit 3 stops it and names the lost claim; an
-#                                     error (exit 1) is retried next round.
+#                                     error (exit 1) is retried next round. The loop ends (exit 0)
+#                                     after --for (default 12h) or when PID is gone; any release but
+#                                     the merge/close one counts as a lost claim.
 #   claim.sh adopt --from <session> [N...]
 #                                     re-key the claims of your dead session to this one, each in
 #                                     its own lane (all of them without N). The holder must be dead
-#                                     by the take --takeover rule; the caps still apply (exit 2).
+#                                     by the take --takeover rule; the caps still apply (exit 2). A
+#                                     session that died after `review` (PR ready) cannot be adopted:
+#                                     take --takeover once the PR is not ready, or ask the human.
 #   claim.sh review <N> [--lane L]    the PR is ready: Status In Review, lease extended
 #   claim.sh release <N> --note TEXT [--lane L]
 #                                     hand the issue back (keep the branch and draft PR)
@@ -734,17 +738,30 @@ mine_claims() {
 
 join_or_none() { if (($#)); then local IFS=' '; echo "$*"; else echo none; fi; }
 
+# beat_identity: sets BEAT_LOGIN and BEAT_SESS once per run (three tries; a gh blip must not end a
+# long loop later, and a start that cannot resolve them is an error, exit 1).
+beat_identity() {
+  local i
+  for i in 1 2 3; do
+    if BEAT_LOGIN=$(human_login) && BEAT_SESS=$(holder_session "$(my_base_holder)") && [[ -n $BEAT_LOGIN && -n $BEAT_SESS ]]; then return 0; fi
+    ((i == 3)) || sleep 2
+  done
+  die "cannot resolve your login and session after 3 tries"
+}
+
 # beat_round: renew every claim of this session once. Sets BEAT_OK, BEAT_LOST (exit 3: the claim is
-# not ours any more) and BEAT_ERR (exit 1 or anything else: retry later) and BEAT_DROP (released by us
-# since the last round). TRACKED holds the issues renewed or failed in earlier rounds, so a claim
-# that left our hands is noticed instead of silently forgotten.
+# not ours any more) and BEAT_ERR (exit 1 or anything else: retry next round; no gh failure of a round
+# ends the loop) and BEAT_DROP (released because its pull request merged or closed). TRACKED holds
+# the issues renewed or failed in earlier rounds, so a claim that left our hands is noticed instead
+# of silently forgotten. A release does not change the holder, so only the note tells the releases
+# apart: the merge/close release is expected; any other (the sweeper, `release --force`, a manual
+# `release`) counts as lost. This process makes no releases of its own.
 TRACKED=()
 beat_round() {
-  local claims login sess lines n holder rc t e
+  local claims lines n holder rc t e state note
   BEAT_OK=(); BEAT_LOST=(); BEAT_ERR=(); BEAT_DROP=()
-  login=$(human_login); sess=$(holder_session "$(my_base_holder)")
   if ! claims=$(list_claims); then BEAT_ERR+=("(listing the claims)"); return 0; fi
-  lines=$(mine_claims "$claims" "$login" "$sess")
+  if ! lines=$(mine_claims "$claims" "$BEAT_LOGIN" "$BEAT_SESS"); then BEAT_ERR+=("(reading the claims)"); return 0; fi
   local mine=()
   while IFS=$'\t' read -r n holder; do
     [[ -n $n ]] || continue
@@ -758,22 +775,29 @@ beat_round() {
       *) BEAT_ERR+=("#$n") ;;
     esac
   done <<<"$lines"
-  for t in "${TRACKED[@]}"; do
-    [[ " ${mine[*]} " != *" $t "* ]] || continue
-    e=$(jq -r --argjson n "$t" '.[] | select(.issue == $n) | [.state, (.holder | split("/") | last | split("#") | first)] | @tsv' <<<"$claims")
-    if [[ $e == "released"$'\t'"$sess" ]]; then BEAT_DROP+=("#$t"); else BEAT_LOST+=("#$t"); fi
+  for t in ${TRACKED[@]+"${TRACKED[@]}"}; do
+    [[ " ${mine[*]-} " != *" $t "* ]] || continue
+    e=$(jq -r --argjson n "$t" '.[] | select(.issue == $n) | [.state, (.note // "")] | @tsv' <<<"$claims")
+    state=${e%%$'\t'*}; note=${e#*$'\t'}
+    if [[ $state == released && $note =~ ^pull\ request\ \#[0-9]+\ closed$ ]]; then BEAT_DROP+=("#$t"); else BEAT_LOST+=("#$t"); fi
   done
-  TRACKED=("${mine[@]}")
+  TRACKED=(${mine[@]+"${mine[@]}"})
 }
 
-# beat_mine EVERY_SECONDS ("" = one round). Exit 3 when a claim is lost (the loop stops and names it);
-# exit 1 on errors in a single round; with a loop an error only repeats next round.
+# beat_mine EVERY FOR WHILE_PID. EVERY "" = one round. Exit 3 when a claim is lost (the loop stops and
+# names it); exit 1 on errors in a single round; in a loop an error only repeats next round. A loop
+# ends with exit 0 after FOR seconds, or when WHILE_PID is gone (so a background loop cannot outlive
+# its session).
+beat_clock() { date +%s; }
 beat_mine() {
-  local every=$1
+  local every=$1 for_s=$2 pid=$3 deadline
   TRACKED=()
+  beat_identity
+  deadline=$(($(beat_clock) + for_s))
   while :; do
+    if [[ -n $pid ]] && ! kill -0 "$pid" 2>/dev/null; then echo "beat --mine: process $pid is gone"; return 0; fi
     beat_round
-    echo "beat $(date -u +%Y-%m-%dT%H:%M:%SZ): renewed $(join_or_none "${BEAT_OK[@]}"); lost $(join_or_none "${BEAT_LOST[@]}"); errors $(join_or_none "${BEAT_ERR[@]}")$( ((${#BEAT_DROP[@]})) && echo "; released $(join_or_none "${BEAT_DROP[@]}")" || true)"
+    echo "beat $(date -u +%Y-%m-%dT%H:%M:%SZ): renewed $(join_or_none ${BEAT_OK[@]+"${BEAT_OK[@]}"}); lost $(join_or_none ${BEAT_LOST[@]+"${BEAT_LOST[@]}"}); errors $(join_or_none ${BEAT_ERR[@]+"${BEAT_ERR[@]}"})$( ((${#BEAT_DROP[@]})) && echo "; released $(join_or_none "${BEAT_DROP[@]}")" || true)"
     if ((${#BEAT_LOST[@]})); then
       CLAIM_EXIT=3 die "lost ${BEAT_LOST[*]}: stop work on it and tell your human"
     fi
@@ -782,32 +806,37 @@ beat_mine() {
       return 0
     fi
     sleep "$every"
+    if (($(beat_clock) >= deadline)); then echo "beat --mine: --for elapsed"; return 0; fi
   done
 }
 
 cmd_beat() {
-  local pr="" ns=() a own=0 every=""
+  local pr="" ns=() a own=0 every="" for_s=43200 pid=""
   while (($#)); do
     case $1 in
       --pr) pr=${2:-}; [[ $pr =~ ^[0-9]+$ ]] || die "--pr needs a pull request number"; shift 2 ;;
       --mine) own=1; shift ;;
       --every) every=$(parse_duration "${2:-}") || die "--every needs a duration: 90, 90s, 30m or 2h"; shift 2 ;;
-      *) [[ $1 =~ ^[0-9]+$ ]] || die "usage: beat <N>... [--pr P] [--lane L] | beat --mine [--every DURATION]"; ns+=("$1"); shift ;;
+      --for) for_s=$(parse_duration "${2:-}") || die "--for needs a duration: 90, 90s, 30m or 2h"; shift 2 ;;
+      --while-pid) pid=${2:-}; [[ $pid =~ ^[0-9]+$ ]] || die "--while-pid needs a process id"; shift 2 ;;
+      *) [[ $1 =~ ^[0-9]+$ ]] || die "usage: beat <N>... [--pr P] [--lane L] | beat --mine [--every D] [--for D] [--while-pid PID]"; ns+=("$1"); shift ;;
     esac
   done
   if ((own)); then
     ((${#ns[@]} == 0)) && [[ -z $pr ]] || die "beat --mine renews every claim you hold: no issue numbers and no --pr"
-    beat_mine "$every"
+    beat_mine "$every" "$for_s" "$pid"
     return
   fi
-  [[ -z $every ]] || die "--every needs --mine"
+  [[ -z $every && -z $pid ]] || die "--every and --while-pid need --mine"
   ((${#ns[@]})) || die "usage: beat <N>... [--pr P] [--lane L] | beat --mine [--every DURATION]"
   for a in "${ns[@]}"; do beat_one "$a" "$pr"; done
 }
 
 # cmd_adopt --from SESSION [N...]: re-key the claims of a dead session of this human to the current
 # session. Each claim keeps its lane. The dead-holder rule is take --takeover's (dead_holder_check);
-# the human and session caps count the claims as taken. Nothing is written unless every claim passes.
+# the human and session caps count the claims as taken. The checks are all-or-nothing: no write
+# happens unless every claim passes. The writes are not: if one fails (the holder woke up, another
+# session adopted it first) the claims written before it stay adopted (each was echoed), the rest not.
 cmd_adopt() {
   local from="" ns=() a
   while (($#)); do
@@ -829,6 +858,10 @@ cmd_adopt() {
   if ((${#ns[@]} == 0)); then
     while read -r n; do ns+=("$n"); done < <(jq -r '.[].issue' <<<"$cand")
     ((${#ns[@]})) || CLAIM_EXIT=2 die "session $from holds no claims of $human"
+  else
+    local uniq=()
+    while read -r n; do uniq+=("$n"); done < <(printf '%s\n' "${ns[@]}" | awk '!seen[$0]++')
+    ns=("${uniq[@]}")
   fi
   local counts hcount
   counts=$(active_counts "$claims" "$now" "$human" "$mysess")
@@ -840,6 +873,7 @@ cmd_adopt() {
   for n in "${ns[@]}"; do
     c=$(jq -c --argjson n "$n" '.[] | select(.issue == $n)' <<<"$cand")
     [[ -n $c ]] || CLAIM_EXIT=2 die "#$n is not a held claim of session $from"
+    if [[ $(jq -r .state <<<"$(issue_json "$n")") != open ]]; then CLAIM_EXIT=2 die "#$n is closed"; fi
     dead_holder_check "$n" "$c" "$now" || exit 2
     old=$(jq -r .holder <<<"$c"); lane=$(holder_lane "$old")
     newh="$base${lane:+#$lane}"; key=$(holder_key "$newh")
