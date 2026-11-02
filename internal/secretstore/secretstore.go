@@ -34,7 +34,7 @@
 //
 // The KMS is called when a key set is loaded or reloaded, never once per value: [Keyring.Seal]
 // and [Keyring.Open] stay local and synchronous, and a short KMS outage does not stop reads. The
-// services (koinon-api, the reconciler, agentd) only unwrap; wrapping a new KEK with a KMS is the
+// services (koinon-api, the reconciler; agentd holds no keyring) only unwrap; wrapping a new KEK with a KMS is the
 // key-admin Job's alone ([ErrKeyAdminWraps]; the Job comes with the KMS adapters). [Wrappers] picks
 // the adapter of each stored KEK, so a key set can move from one backend to another by add,
 // activate, rewrap and retire.

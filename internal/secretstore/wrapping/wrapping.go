@@ -16,7 +16,7 @@ import (
 type Role int
 
 const (
-	// Service is koinon-api (and its "keys" commands), the reconciler and agentd: decrypt-only. A
+	// Service is koinon-api (and its "keys" commands), and the reconciler: decrypt-only (agentd holds no keyring). A
 	// service wraps a new KEK only while the primary is the local Secret-held KEK.
 	Service Role = iota
 	// KeyAdmin is the key-admin Job (procoduck, 2026-11-02; it comes with the KMS adapters): the only

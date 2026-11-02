@@ -197,6 +197,13 @@ var _ = Describe("Key wrapping", func() {
 		Expect(time.Since(start)).To(BeNumerically("<", 2*time.Second))
 	})
 
+	It("reports a Wrap that ran out of time as unreachable", func(ctx SpecContext) {
+		admin, _ := secretstore.NewKeyAdminWrappers(bareHang{&secretstoretest.FakeKMS{}})
+		_, err := admin.WithCallTimeout(100*time.Millisecond).Wrap(context.Background(), "k1", key())
+		Expect(err).To(MatchError(secretstore.ErrUnreachable))
+		Expect(err).To(MatchError(context.DeadlineExceeded))
+	})
+
 	It("fingerprints a KEK stably without revealing it", func() {
 		k := bytes.Repeat([]byte("k"), secretstore.KeySize)
 		fp := secretstore.Fingerprint(k)
@@ -206,3 +213,12 @@ var _ = Describe("Key wrapping", func() {
 		Expect(strings.Contains(fp, fmt.Sprintf("%x", k[:4]))).To(BeFalse())
 	})
 })
+
+// bareHang is an adapter whose Wrap blocks until its context ends and returns only ctx.Err(), not
+// ErrUnreachable: Wrappers must still report it as unreachable.
+type bareHang struct{ *secretstoretest.FakeKMS }
+
+func (bareHang) Wrap(ctx context.Context, _, _ []byte) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
