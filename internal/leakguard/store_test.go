@@ -98,7 +98,7 @@ var _ = Describe("Fingerprints and the store", func() {
 			Expect(st.Add(ctx, testScope, fps(0, 150))).To(Succeed())
 			hits, err := st.Lookup(ctx, testScope, []leakguard.Fingerprint{0, 49, 50, 149})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(hits).To(Equal([]bool{false, false, true, true}))
+			Expect(hits.Found).To(Equal([]bool{false, false, true, true}))
 			Expect(st.Stats()).To(Equal(leakguard.StoreStats{Scopes: 1, Fingerprints: 100, EvictedFingerprints: 50}))
 		})
 
@@ -109,7 +109,7 @@ var _ = Describe("Fingerprints and the store", func() {
 			Expect(st.Add(ctx, testScope, []leakguard.Fingerprint{7})).To(Succeed())
 			hits, err := st.Lookup(ctx, testScope, []leakguard.Fingerprint{0, 1, 2, 7})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(hits).To(Equal([]bool{true, false, true, true}))
+			Expect(hits.Found).To(Equal([]bool{true, false, true, true}))
 		})
 
 		It("stays bounded under repeated adds", func() {
@@ -126,17 +126,17 @@ var _ = Describe("Fingerprints and the store", func() {
 			next := testScope
 			next.Generation = "gen-2"
 			hits, _ := st.Lookup(ctx, next, fps(0, 5))
-			Expect(hits).To(Equal([]bool{false, false, false, false, false}))
+			Expect(hits.Found).To(Equal([]bool{false, false, false, false, false}))
 			otherAgent := testScope
 			otherAgent.Agent = "agent-other"
 			hits, _ = st.Lookup(ctx, otherAgent, fps(0, 1))
-			Expect(hits).To(Equal([]bool{false}))
+			Expect(hits.Found).To(Equal([]bool{false}))
 			// a later run of the same generation still sees it
 			hits, _ = st.Lookup(ctx, testScope, fps(0, 1))
-			Expect(hits).To(Equal([]bool{true}))
+			Expect(hits.Found).To(Equal([]bool{true}))
 			Expect(st.Drop(ctx, testScope)).To(Succeed())
 			hits, _ = st.Lookup(ctx, testScope, fps(0, 1))
-			Expect(hits).To(Equal([]bool{false}))
+			Expect(hits.Found).To(Equal([]bool{false}))
 		})
 
 		It("evicts the least recently used scope", func() {
@@ -149,8 +149,8 @@ var _ = Describe("Fingerprints and the store", func() {
 			Expect(st.Add(ctx, c, fps(0, 2))).To(Succeed())
 			hb, _ := st.Lookup(ctx, b, fps(0, 1))
 			ha, _ := st.Lookup(ctx, a, fps(0, 1))
-			Expect(hb).To(Equal([]bool{false}))
-			Expect(ha).To(Equal([]bool{true}))
+			Expect(hb.Found).To(Equal([]bool{false}))
+			Expect(ha.Found).To(Equal([]bool{true}))
 			Expect(st.Stats().EvictedScopes).To(Equal(uint64(1)))
 		})
 
@@ -177,6 +177,44 @@ var _ = Describe("Fingerprints and the store", func() {
 				})
 			}
 			wg.Wait()
+		})
+
+		It("reports eviction on Lookup, per scope", func() {
+			st := leakguard.NewMemoryStore(leakguard.MemoryStoreOptions{MaxFingerprints: 10, MaxScopes: 2})
+			a, b, c := testScope, testScope, testScope
+			b.Generation, c.Generation = "gen-b", "gen-c"
+			Expect(st.Add(ctx, a, fps(0, 5))).To(Succeed())
+			Expect(st.Add(ctx, b, fps(0, 20))).To(Succeed())
+			ha, _ := st.Lookup(ctx, a, fps(0, 1))
+			hb, _ := st.Lookup(ctx, b, fps(0, 1))
+			Expect(ha.Evicted).To(BeFalse())
+			Expect(hb.Evicted).To(BeTrue())
+			// b is now the least recent: c evicts it whole, and b stays reported as evicted
+			_, _ = st.Lookup(ctx, a, fps(0, 1))
+			Expect(st.Add(ctx, c, fps(0, 1))).To(Succeed())
+			hb, _ = st.Lookup(ctx, b, fps(0, 1))
+			Expect(hb.Found).To(Equal([]bool{false}))
+			Expect(hb.Evicted).To(BeTrue())
+			Expect(st.Add(ctx, b, fps(0, 1))).To(Succeed())
+			hb, _ = st.Lookup(ctx, b, fps(0, 1))
+			Expect(hb.Evicted).To(BeTrue())
+		})
+
+		It("fails an Add past the total cap instead of evicting another scope", func() {
+			st := leakguard.NewMemoryStore(leakguard.MemoryStoreOptions{MaxFingerprints: 100, MaxTotalFingerprints: 150})
+			a, b := testScope, testScope
+			b.Generation = "gen-b"
+			Expect(st.Add(ctx, a, fps(0, 100))).To(Succeed())
+			Expect(st.Add(ctx, b, fps(0, 60))).To(MatchError(leakguard.ErrStoreFull))
+			Expect(st.Add(ctx, b, fps(0, 50))).To(Succeed())
+			Expect(st.Add(ctx, a, fps(0, 100))).To(Succeed()) // already held: no growth
+			Expect(st.Add(ctx, b, fps(50, 51))).To(MatchError(leakguard.ErrStoreFull))
+			ha, _ := st.Lookup(ctx, a, fps(0, 1))
+			Expect(ha.Found).To(Equal([]bool{true}))
+			Expect(ha.Evicted).To(BeFalse())
+			Expect(st.Drop(ctx, a)).To(Succeed())
+			Expect(st.Add(ctx, b, fps(50, 100))).To(Succeed())
+			Expect(st.Stats().Fingerprints).To(Equal(100))
 		})
 
 		It("refuses a scope without a generation", func() {
