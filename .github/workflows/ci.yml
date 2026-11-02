@@ -210,23 +210,21 @@ jobs:
   # Dependency cooldown (ADR 0079): versions this pull request adds must be at least 3 days old.
   # Public endpoints only. The waiver is the label `dependency-age-waiver`, honoured only when
   # the maintainer put it on; the job reads the label when it runs, so re-run the job after
-  # labelling. Timestamps guard against accidents, they are not proof. Required check: the job runs
-  # on every event and every step is skipped unless it is a pull request, so a push to main reports
-  # success (the `e2e result` pattern) instead of the check being absent.
+  # labelling. Timestamps guard against accidents, they are not proof. Required check: on a push to
+  # main the job is skipped, which reports success; rulesets only check pull request heads.
   dep-age:
     name: dependency age
+    if: github.event_name == 'pull_request'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: read
       pull-requests: read
       issues: read
     steps:
-      - if: github.event_name == 'pull_request'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - id: waiver
-        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -250,7 +248,6 @@ jobs:
             fi
           fi
       - name: versions are at least 3 days old
-        if: github.event_name == 'pull_request'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           DEP_AGE_WAIVER: ${{ steps.waiver.outputs.by }}
@@ -597,7 +594,7 @@ jobs:
   # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
   # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
-  # a fake key; it never reaches a real or paid model. The only advisory job (hack/ci-required.txt).
+  # a fake key; it never reaches a real or paid model. The only advisory job on pull requests (hack/ci-required.txt); flavor-publish below is push-only.
   flavors:
     needs: changes
     if: needs.changes.outputs.flavors == 'true'

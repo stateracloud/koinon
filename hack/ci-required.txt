@@ -7,9 +7,9 @@
 # against the live ruleset.
 #
 # A required job must report a conclusion on every pull request and every push to main. A job-level
-# `if:` that skips it counts as passing, which is intended for "this change does not touch my files".
-# A job that never starts (a workflow-level `paths:` filter, or a pull-request-only job) leaves the
-# check absent and blocks the merge: give it step-level conditions instead (see `dependency age`).
+# `if:` that skips it counts as passing, which is intended for "this change does not touch my files"
+# (and for pull-request-only jobs such as `dependency age`: rulesets only check pull request heads).
+# Only a workflow-level `paths:` filter leaves a check absent and blocks the merge.
 #
 # Required checks that other workflows produce:
 #   dco              .github/workflows/dco.yml
@@ -18,9 +18,10 @@
 #   e2e result       .github/workflows/e2e-kind.yml
 # They are listed under `external` and are not compared with ci.yml.
 
-# ci.yml jobs
-go
-web
+# ci.yml jobs. `aggregator` is a required job that reads needs.*.result of its parts (go, web); only
+# the jobs an aggregator needs are exempt from being listed.
+aggregator go
+aggregator web
 proto
 generated code
 chart
