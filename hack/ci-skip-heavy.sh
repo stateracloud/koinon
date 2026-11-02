@@ -22,6 +22,9 @@
 #                   - REF is refs/heads/main and SHA is a merge commit with two parents;
 #                   - the merge commit's tree equals the tree of its second parent (the pull request
 #                     head), i.e. the merge brought nothing the head had not been tested with;
+#                   - the first parent is an ancestor of that head (the head was up to date);
+#                   - flavors (advisory) succeeded on the head, or nothing the flavors suite builds
+#                     from changed between the first parent and the merge (hack/ci-changes.sh);
 #                   - every required check that ci.yml produces (hack/ci-required.txt, not the
 #                     `external` ones, which other workflows produce) has a newest check run, made by
 #                     GitHub Actions on that head, that is completed with conclusion success, skipped
@@ -78,7 +81,7 @@ decide_pull_request() {
 
 # decide_push: skip when the merge commit is the tested pull request head, tree for tree.
 decide_push() {
-	local parents head tree_m tree_h required name runs checks latest conclusion
+	local parents head changed flavors_line tree_m tree_h required name runs checks latest conclusion
 	if [[ ${REF:-} != refs/heads/main || -z ${SHA:-} || -z ${REPO:-} ]]; then
 		emit false "not a push to main: running everything"
 		return
@@ -99,6 +102,12 @@ decide_push() {
 	fi
 	if [[ $tree_m != "$tree_h" ]]; then
 		emit false "the merge tree differs from the pull request head $head (merged out of date, or an admin merge): running everything"
+		return
+	fi
+	# The head must contain the first parent: a merge of an out-of-date branch, or of a branch whose
+	# tree only happens to match, was not tested on top of what main had.
+	if ! git merge-base --is-ancestor "${p[1]}" "$head" 2>/dev/null; then
+		emit false "the first parent ${p[1]} is not an ancestor of the pull request head $head: running everything"
 		return
 	fi
 	if ! required=$(required_names) || [[ -z $required ]]; then
@@ -128,6 +137,16 @@ decide_push() {
 			;;
 		esac
 	done <<<"$required"
+	# flavors is advisory, so it is not in the required list, but flavor-publish ships what it tested:
+	# an image is published untested unless flavors passed on the head or nothing it builds from changed.
+	conclusion=$(awk -F'\t' '$1 == "flavors" && $3 == "completed" { print $4 }' <<<"$latest")
+	if [[ $conclusion != success ]]; then
+		changed=$(git diff --name-only "${p[1]}" "$SHA" 2>/dev/null) || changed=
+		if [[ -z $changed ]] || ! flavors_line=$("$root/hack/ci-changes.sh" --stdin <<<"$changed" 2>/dev/null | grep -x 'flavors=.*') || [[ $flavors_line != flavors=false ]]; then
+			emit false "flavors did not pass on $head (${conclusion:-no completed run}) and files it builds from may have changed: running everything"
+			return
+		fi
+	fi
 	emit true "the merge tree equals the tree of $head, whose required checks passed"
 }
 
