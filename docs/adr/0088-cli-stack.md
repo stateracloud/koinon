@@ -22,7 +22,7 @@ install failed), 3151301a (`KOINON_KEK_DIR` was missing from the reconciler) and
 
 1. **Stack.** cobra (commands), pflag (flags) and viper (sources) in every Koinon binary, and Charm
    for presentation: fang for styled help, usage, errors and version, lipgloss for the operator
-   subcommands' output. Interactive prompts (bubbletea, huh) are a separate decision.
+   subcommands' output. Interactive prompts (huh) are covered by "Interactive prompts" below.
 2. **viper owns the sources.** A setting comes from, highest first: the flag, the environment, the
    config file (for the binaries that read one), the default. The environment variable of a flag is
    `KOINON_` plus the flag name in upper case with `-` as `_`; a flag may declare aliases that are
@@ -56,6 +56,20 @@ install failed), 3151301a (`KOINON_KEK_DIR` was missing from the reconciler) and
    changes that follow from pflag: long flags take two dashes (`-durable` is `--durable`), and flags
    follow the subcommand (`koinon-api migrate --wait 5m`, no longer `koinon-api -wait 5m migrate`).
    The chart passes the new spelling; nothing else in the tree used the old one.
+
+## Interactive prompts
+
+(Decided 2026-11-02, #459.) An operator subcommand may ask a person on a terminal for what the flags
+and arguments left out, with huh (`internal/cli`: `Interactive`, `Prompter`).
+
+- **A prompt is a convenience over the flag form, never a replacement.** The gate is `cli.Interactive`:
+  stdin and stdout are terminals and `--no-input` is off. Otherwise a command behaves exactly as before
+  (same errors, no confirmations, no `--yes` needed), so a pod, a script or CI never waits on input.
+- **`--no-input`** is a persistent flag on every binary's root (`cli.Bind`), also `KOINON_NO_INPUT`. The
+  chart does not set it: a container has no terminal anyway.
+- **Accessible mode.** `TERM=dumb` uses huh's line prompts. Colour follows `cli.Styled` and `NO_COLOR`.
+- **Scope.** Only commands a person runs by hand ask: `koinon-api keys activate|retire|rewrap|reencrypt`.
+  `--yes` skips their confirmations. Hook Jobs, servers and reconcilers never prompt.
 
 ## Alternatives considered
 
