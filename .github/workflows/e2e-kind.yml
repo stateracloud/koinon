@@ -114,15 +114,13 @@ jobs:
       run:
         # Explicit bash adds -o pipefail, so `| tee` keeps the script's exit code.
         shell: bash
-    env:
-      KIND_VERSION: v0.33.0
-      KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
-      KO_VERSION: 0.19.1
-      KO_SHA256: 635ac6ea3fd376c935fee597fbb29ab2c2449f49ef1655085fe3aa9c25fed7a5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.commit }} # empty: the event's own ref
+
+      - name: Tool versions (hack/versions.env)
+        run: grep -E '^[A-Z]' hack/versions.env >> "$GITHUB_ENV"
 
       # cache: false, and an explicit cache with a fallback prefix: a new go.sum still starts from
       # the last build cache (main saves one on every run), which is most of the ko and driver builds.
@@ -181,11 +179,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/bin"
           curl -fsSL -o "$RUNNER_TEMP/bin/kind" \
             "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
-          echo "${KIND_SHA256}  $RUNNER_TEMP/bin/kind" | sha256sum -c -
+          echo "${KIND_SHA256_AMD64}  $RUNNER_TEMP/bin/kind" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/bin/kind"
           curl -fsSL -o "$RUNNER_TEMP/ko.tgz" \
             "https://github.com/ko-build/ko/releases/download/v${KO_VERSION}/ko_${KO_VERSION}_Linux_x86_64.tar.gz"
-          echo "${KO_SHA256}  $RUNNER_TEMP/ko.tgz" | sha256sum -c -
+          echo "${KO_SHA256_AMD64}  $RUNNER_TEMP/ko.tgz" | sha256sum -c -
           tar xzf "$RUNNER_TEMP/ko.tgz" -C "$RUNNER_TEMP/bin" ko
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
