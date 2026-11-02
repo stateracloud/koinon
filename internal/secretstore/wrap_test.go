@@ -124,7 +124,7 @@ var _ = Describe("Key wrapping", func() {
 		slog.New(slog.NewTextHandler(&logged, nil)).Info("loaded", "kek", s)
 		for _, out := range []string{fmt.Sprint(s), fmt.Sprintf("%v %+v %#v", s, s, s), logged.String()} {
 			Expect(out).NotTo(ContainSubstring(string(secretstore.EncodeKey(k))))
-			Expect(out).NotTo(ContainSubstring(fmt.Sprint(k)))
+			Expect(out).NotTo(ContainSubstring(fmt.Sprintf("%x", k)))
 		}
 		Expect(fmt.Sprintf("%#v", s)).To(Equal("secretstore.StoredKEK{local}"))
 	})

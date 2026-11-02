@@ -5,8 +5,8 @@ package secretstoretest
 import (
 	"bytes"
 
-	. "github.com/onsi/ginkgo/v2" //nolint:revive // a Ginkgo helper
-	. "github.com/onsi/gomega"    //nolint:revive // a Ginkgo helper
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
@@ -18,38 +18,39 @@ import (
 func WrapperContract(newWrapper func() secretstore.Wrapper) {
 	kek := bytes.Repeat([]byte("k"), secretstore.KeySize)
 	aad := []byte("koinon-test-aad")
+	expect := gomega.Expect
 
-	It("names a fixed backend and its key", func() {
+	ginkgo.It("names a fixed backend and its key", func() {
 		w := newWrapper()
-		Expect(w.Backend()).To(MatchRegexp(`^[a-z][a-z0-9]{0,15}$`))
-		Expect(w.Backend()).NotTo(Equal(secretstore.BackendLocal))
-		Expect(w.KeyID()).NotTo(BeEmpty())
+		expect(w.Backend()).To(gomega.MatchRegexp(`^[a-z][a-z0-9]{0,15}$`))
+		expect(w.Backend()).NotTo(gomega.Equal(secretstore.BackendLocal))
+		expect(w.KeyID()).NotTo(gomega.BeEmpty())
 	})
 
-	It("round-trips a KEK and does not store it in the clear", func(ctx SpecContext) {
+	ginkgo.It("round-trips a KEK and does not store it in the clear", func(ctx ginkgo.SpecContext) {
 		w := newWrapper()
 		wrapped, err := w.Wrap(ctx, kek, aad)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(bytes.Contains(wrapped, kek)).To(BeFalse())
+		expect(err).NotTo(gomega.HaveOccurred())
+		expect(bytes.Contains(wrapped, kek)).To(gomega.BeFalse())
 		got, err := w.Unwrap(ctx, wrapped, aad)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(got).To(Equal(kek))
+		expect(err).NotTo(gomega.HaveOccurred())
+		expect(got).To(gomega.Equal(kek))
 	})
 
-	It("refuses other associated data and modified ciphertext", func(ctx SpecContext) {
+	ginkgo.It("refuses other associated data and modified ciphertext", func(ctx ginkgo.SpecContext) {
 		w := newWrapper()
 		wrapped, err := w.Wrap(ctx, kek, aad)
-		Expect(err).NotTo(HaveOccurred())
+		expect(err).NotTo(gomega.HaveOccurred())
 		_, err = w.Unwrap(ctx, wrapped, []byte("koinon-test-other"))
-		Expect(err).To(MatchError(secretstore.ErrOpen))
+		expect(err).To(gomega.MatchError(secretstore.ErrOpen))
 		bad := bytes.Clone(wrapped)
 		bad[len(bad)-1] ^= 1
 		_, err = w.Unwrap(ctx, bad, aad)
-		Expect(err).To(HaveOccurred())
-		Expect(err).NotTo(MatchError(secretstore.ErrUnreachable))
+		expect(err).To(gomega.HaveOccurred())
+		expect(err).NotTo(gomega.MatchError(secretstore.ErrUnreachable))
 	})
 
-	It("is reachable", func(ctx SpecContext) {
-		Expect(newWrapper().Probe(ctx)).To(Succeed())
+	ginkgo.It("is reachable", func(ctx ginkgo.SpecContext) {
+		expect(newWrapper().Probe(ctx)).To(gomega.Succeed())
 	})
 }
