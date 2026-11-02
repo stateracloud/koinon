@@ -477,15 +477,19 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	// The secret store (ADR 0056): provider keys and connection secrets are envelopes in
-	// Postgres, wrapped by the KEKs of a mounted Secret.
-	var keyring *secretstore.Keyring
+	// Postgres, wrapped by the KEKs of a mounted Secret. The KEKs are local (Secret-held) until a
+	// KMS adapter is configured (ADR 0085 decision 12; #416, #417): the zero secretstore.Wrappers.
+	var (
+		keyring  *secretstore.Keyring
+		wrappers secretstore.Wrappers
+	)
 	switch {
 	case cfg.kekSecret != "" && kube != nil:
 		// The chart renders no key material (a render would make new keys every time, and a new
 		// KEK loses every stored secret): koinon-api creates the Secret once, and only reads it after.
-		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret}
+		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret, Wrappers: wrappers}
 		if cfg.kekCreate {
-			created, err := keyscli.EnsureKubeSecret(ctx, kube, cfg.secretsNamespace, cfg.kekSecret, time.Now(),
+			created, err := kekStore.Ensure(ctx, time.Now(),
 				func(ctx context.Context) (bool, error) { return keyscli.AnyEnvelope(ctx, pool) })
 			if err != nil {
 				return err
@@ -499,11 +503,11 @@ func serve(ctx context.Context, cfg config) error {
 		}
 		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch", stop, func(ctx context.Context) { watchKeyring(ctx, keyring, kekStore, time.Minute) })
 	case cfg.kekDir != "":
-		if keyring, err = secretstore.LoadDir(cfg.kekDir); err != nil {
+		if keyring, err = secretstore.LoadDir(ctx, cfg.kekDir, wrappers); err != nil {
 			return err
 		}
 		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch-dir", stop, func(ctx context.Context) {
-			keyring.WatchDir(ctx, cfg.kekDir, time.Minute, slog.Default())
+			keyring.WatchDir(ctx, cfg.kekDir, wrappers, time.Minute, slog.Default())
 		})
 	default:
 		slog.Warn("no --kek-secret or --kek-dir: provider keys and connections cannot be stored")

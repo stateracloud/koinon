@@ -49,8 +49,12 @@ Do this once the install is up (the Secret exists after `koinon-api` has started
 `keys add`:
 
 ```sh
-kubectl -n koinon get secret koinon-kek -o yaml > koinon-kek-backup.yaml
+kubectl -n koinon exec deploy/koinon-api -- koinon-api keys export > koinon-kek-backup.yaml
 ```
+
+`keys export` prints the key set as a Secret manifest without a namespace, with a comment line per
+KEK that gives its fingerprint (also in `keys status`), so you can tell which backup holds which key.
+Restore it with `kubectl -n <namespace> apply -f koinon-kek-backup.yaml`.
 
 Keep the file with your other secrets, apart from the database backups. **A database backup needs the
 KEKs that wrapped it.** Keep every KEK, including retired ones, for as long as a database backup that
