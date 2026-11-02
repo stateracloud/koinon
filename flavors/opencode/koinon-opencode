@@ -9,7 +9,13 @@
 #                   [--model-format openai|anthropic] [--cache-anthropic | --cache-alibaba]
 #                   [--thinking none|default|adaptive-summarized|disabled|effort-none]
 #                   [--session-id ID] [--no-web-tools]
+#                   [--model-tries N] [--model-retry-backoff-ms MS] [--model-max-retry-after-ms MS]
 #                   [-- OPENCODE_ACP_ARGS...]
+#
+# --model-tries, --model-retry-backoff-ms and --model-max-retry-after-ms are Koinon's retry policy
+# for a failed model request, which koinon-agentd always passes (ADR 0056 amendment 2026-10-31,
+# point 3): OpenCode is the one layer that retries, and Koinon's plugin
+# /usr/local/lib/koinon/opencode/plugins/koinon-retry makes it follow the policy, not its own.
 #
 # --plugin-installs is set by koinon-agentd when the agent's template turns
 # harness.pluginInstalls on; only then are the agent's own plugins loaded (see README.md).
@@ -89,6 +95,9 @@ esac
 if [ -n "$cache_format" ] && [ "$model_format" != openai ]; then
   koinon_die "--cache-$cache_format applies to the openai model format only"
 fi
+# Koinon's retry plugin can shorten OpenCode 2.2.0's schedule of 10 retries but not lengthen it
+# (packages/core/src/model-retry.ts asks the session.retry hook only while that schedule runs).
+[ "$model_tries" -le 11 ] || koinon_die "--model-tries must be at most 11 for OpenCode: '$model_tries'"
 
 # Drop anything the caller's environment might carry that would change where OpenCode reads its
 # configuration, its database or its server credentials, or where it sends telemetry
@@ -209,6 +218,11 @@ fi
 export KOINON_MODEL_KEY="${OPENAI_API_KEY:-}"
 unset OPENAI_API_KEY
 koinon_export_endpoints
+# Koinon's retry policy, the options of the koinon.retry plugin in opencode.jsonc (see README.md,
+# "Model retries"): OpenCode's own schedule never decides.
+export KOINON_MODEL_TRIES="$model_tries"
+export KOINON_MODEL_RETRY_BACKOFF_MS="$model_retry_backoff_ms"
+export KOINON_MODEL_MAX_RETRY_AFTER_MS="$model_max_retry_after_ms"
 
 # opencode acp talks to its own server (opencode serve --stdio --port 0 on 127.0.0.1) over HTTP;
 # that traffic must not go to the sandbox proxy.
