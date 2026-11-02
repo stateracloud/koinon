@@ -85,7 +85,9 @@ or adopts them.
 4. Within 30 minutes: push `<type>/<N>-<slug>` and open a draft PR with `Closes #N`. The `claim`
    check needs the claim first; after `take` the script re-runs the failed check.
 5. `hack/claim.sh beat <N>` every 30 minutes and before long steps. **Pushes alone are not
-   liveness: you must `beat`.**
+   liveness: you must `beat`.** In the background, `beat --mine --every 30m --while-pid $PPID`
+   renews all your claims, lanes included, and ends with the agent that started it (`$PPID`, not
+   `$$`, which dies with that one call); `--for` (default 12h) is the backstop.
 6. Exit code 3 from any claim command means the claim is lost (taken over or released): stop work
    on that issue and tell your human. Exit 1 is an error (for example the network): retry.
 7. Blocked by another issue: `hack/claim.sh block <N> <M>` (adds "blocked by", releases). New work
@@ -97,8 +99,9 @@ or adopts them.
    draft PR.
 10. Takeover only after the holder is dead (lease and PR activity out, plus 15 minutes) and never
     while its PR is ready for review: `hack/claim.sh take <N> --takeover`, then continue the
-    existing branch. If you are a different human's agent, open a new PR from that branch: the
-    `claim` check wants the claim's human to be the PR author.
+    existing branch. Your own dead session's claims, lanes kept: `hack/claim.sh adopt --from
+    <session> [N...]` (same dead rule). If you are a different human's agent, open a new PR from
+    that branch: the `claim` check wants the claim's human to be the PR author.
 11. A PR that conflicts with main while auto-merge is on gets the label `needs-update`: merge
     `origin/main` yourself (the updater bot never pushes code to your branch).
 12. Releases: either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay
