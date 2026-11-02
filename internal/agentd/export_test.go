@@ -15,6 +15,19 @@ type Endpoints = endpoints
 
 var LaunchCommand = launchCommand
 
+// RetryPolicy is the model-retry policy a retrying harness is launched with.
+type RetryPolicy = retryPolicy
+
+// DefaultRetryPolicy is the policy of a Config with the defaults.
+func DefaultRetryPolicy() RetryPolicy {
+	return retryPolicyOf(Config{ModelRetries: DefaultModelRetries, RetryBackoff: DefaultRetryBackoff, MaxRetryAfter: DefaultMaxRetryAfter})
+}
+
+// OwnRetryLayer makes the pool repeat failed turns itself even for a flavor whose harness retries
+// model requests, so specs can exercise agentd's own retry layer with the fake harness, which
+// does not retry.
+func OwnRetryLayer(c *Config) { c.ownRetryLayer = true }
+
 // ModelOption exposes the model value agentd selects for the session.
 var ModelOption = modelOption
 

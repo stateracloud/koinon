@@ -32,6 +32,8 @@ type Request struct {
 	Body []byte
 	// Header is a copy of the request headers, for asserting what a gateway sent upstream.
 	Header http.Header
+	// At is when the request arrived, for asserting a client's retry backoff.
+	At time.Time
 }
 
 // Server serves scripted model responses. The zero value is not usable; call [New].
@@ -303,7 +305,7 @@ func (s *Server) readBody(w http.ResponseWriter, r *http.Request, v any) ([]byte
 func (s *Server) plan(path, query string, header http.Header, model string, body []byte, conv conversation) (reply, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.requests = append(s.requests, Request{Path: path, Query: query, Model: model, Body: body, Header: header.Clone()})
+	s.requests = append(s.requests, Request{Path: path, Query: query, Model: model, Body: body, Header: header.Clone(), At: time.Now()})
 	e, ok := s.scripts[model]
 	if !ok {
 		return reply{}, &apiError{kind: errNotFound, message: fmt.Sprintf("The model `%s` does not exist or you do not have access to it.", model)}
