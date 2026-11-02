@@ -202,7 +202,10 @@ PUT:*/stop) echo stopped >>"$ARGO_DIR/stopped"; echo '{}' ;;
 DELETE:*/workflows/koinon-e2e/koinon-make-t1) echo deleted >>"$ARGO_DIR/deleted"; echo '{}' ;;
 *'/koinon-make-t1?fields='*)
   n=$(cat "$ARGO_DIR/polls" 2>/dev/null || echo 0); echo $((n + 1)) >"$ARGO_DIR/polls"
-  if [[ -n ${FAKE_PENDING_POD:-} ]]; then echo '{"status":{"phase":"Running","nodes":{"p":{"type":"Pod","phase":"Pending","message":"exceeded quota"}}}}'
+  if [[ -n ${FAKE_PENDING_UNSCHED:-} ]]; then echo '{"status":{"phase":"Running","nodes":{"p":{"type":"Pod","phase":"Pending","message":"Unschedulable: 0/3 nodes are available: 3 Insufficient cpu."}}}}'
+  elif [[ -n ${FAKE_PENDING_LIMIT:-} ]]; then echo '{"status":{"phase":"Pending","message":"Workflow processing has been postponed because too many workflows are already running"}}'
+  elif [[ -n ${FAKE_PENDING_PULL:-} ]]; then if [[ $n -lt 4 ]]; then echo '{"status":{"phase":"Running","nodes":{"p":{"type":"Pod","phase":"Pending","message":"ContainerCreating"}}}}'; else echo '{"status":{"phase":"Succeeded"}}'; fi
+  elif [[ -n ${FAKE_PENDING_POD:-} ]]; then echo '{"status":{"phase":"Running","nodes":{"p":{"type":"Pod","phase":"Pending","message":"exceeded quota"}}}}'
   elif [[ -n ${FAKE_PENDING:-} ]]; then echo '{"status":{"phase":"Pending","message":"Waiting for e2e-gate-1 lock"}}'
   elif [[ $n -lt 1 ]]; then echo '{"status":{"phase":"Running"}}'; else echo "{\"status\":{\"phase\":\"${FAKE_PHASE:-Succeeded}\"}}"; fi ;;
 */koinon-make-t1/log?*) echo '{"result":{"content":"== 12:00:00Z prerequisites (kind/up.sh)"}}' ;;
@@ -364,6 +367,21 @@ check "--gate Running with every pod Pending past the limit exits 75" test "$rc"
 check "... stopping the run" test -s "$tmp/gate4b/stopped"
 check "... and deleting it" test -s "$tmp/gate4b/deleted"
 check "... without following the log" sh -c "! grep -q 'logOptions.follow' '$FAKE_LOG'"
+check "... naming the reason (quota) and the workflow" sh -c "grep -q 'koinon-make-t1 is still Pending.*reason: quota' '$tmp/gate4b/log'"
+argo_env "$tmp/gate4c"; : >"$FAKE_LOG"
+gate "$tmp/gate4c" "" FAKE_PENDING_UNSCHED=1 KOINON_E2E_GATE_PENDING=1
+check "--gate with an Unschedulable pod past the limit exits 75" test "$rc" -eq 75
+check "... naming the reason (unschedulable) and the workflow" sh -c "grep -q 'koinon-make-t1 is still Pending.*reason: unschedulable' '$tmp/gate4c/log'"
+check "... stopping and deleting the run" sh -c "test -s '$tmp/gate4c/stopped' && test -s '$tmp/gate4c/deleted'"
+argo_env "$tmp/gate4e"; : >"$FAKE_LOG"
+gate "$tmp/gate4e" "" FAKE_PENDING_LIMIT=1 KOINON_E2E_GATE_PENDING=1
+check "--gate postponed by the namespace limit exits 75" test "$rc" -eq 75
+check "... naming the reason (namespace-limit) and the workflow" sh -c "grep -q 'koinon-make-t1 is still Pending.*reason: namespace-limit' '$tmp/gate4e/log'"
+check "... stopping and deleting the run" sh -c "test -s '$tmp/gate4e/stopped' && test -s '$tmp/gate4e/deleted'"
+argo_env "$tmp/gate4d"; : >"$FAKE_LOG"
+gate "$tmp/gate4d" "" FAKE_PENDING_PULL=1 KOINON_E2E_GATE_PENDING=1 KOINON_E2E_POLL=1
+check "--gate with a pod in ContainerCreating does not give up" test "$rc" -ne 75
+check "... and does not stop the run" test ! -e "$tmp/gate4d/stopped"
 argo_env "$tmp/gate6"
 rc=0
 (unset KOINON_E2E_REMOTE

@@ -315,7 +315,7 @@ wait_log() {
 
 # give_up: stop and delete the run that never started; exit 75, the caller runs the gate locally.
 give_up() {
-  echo "e2e-remote --argo: $name is still Pending after ${GATE_PENDING}s (slot mutex, namespace limit or quota); giving up, run the gate locally" >&2
+  echo "e2e-remote --argo: $name is still Pending after ${GATE_PENDING}s (reason: ${1:-slot}); giving up, run the gate locally" >&2
   api PUT "/api/v1/workflows/$NS/$name/stop" '{}' >/dev/null 2>&1 || true
   api DELETE "/api/v1/workflows/$NS/$name" >/dev/null 2>&1 || true
   finished=1
@@ -327,16 +327,22 @@ follow_run() {
   echo "== following $name ($SERVER/workflows/$NS/$name)"
   while :; do
     # A failed poll (a network blip) keeps the last phase; the next poll tries again.
-    # pods: "pending" when the workflow has pod nodes and every one is still Pending (a quota
-    # rejection keeps the workflow Running with its pod Pending), "none" without pod nodes.
+    # pods is why a pod waits for capacity: "quota" (the ResourceQuota refused the pod: the node
+    # stays Pending with "exceeded quota", no pod exists), "unschedulable" (the pod exists, PodScheduled
+    # False: Argo copies "Unschedulable: 0/N nodes are available: Insufficient cpu" into the node), "none"
+    # otherwise. A pod that is scheduled and still starting (ContainerCreating, an image pull) has
+    # neither message and is not waiting for capacity.
     read -r phase pods msg < <(api GET "/api/v1/workflows/$NS/$name?fields=status.phase,status.message,status.nodes" 2>/dev/null |
-      jq -r '[.status.nodes[]? | select(.type == "Pod")] as $p
-        | "\(.status.phase // "Pending") \(if ($p | length) == 0 then "none" elif ($p | all(.phase == "Pending")) then "pending" else "started" end) \(.status.message // "")"' 2>/dev/null) || { phase=${last:-Pending}; pods=none; msg=""; }
+      jq -r '[.status.nodes[]? | select(.type == "Pod" and .phase == "Pending") | .message // ""] as $p
+        | (($p + [.status.message // ""]) | map(ascii_downcase)) as $m
+        | "\(.status.phase // "Pending") \(if ($m | any(test("exceeded quota|is forbidden"))) then "quota" elif ($m | any(test("unschedulable|insufficient|nodes are available"))) then "unschedulable" elif ($m | any(test("postponed|throttled|parallelism"))) then "namespace-limit" else "none" end) \(.status.message // "")"' 2>/dev/null) || { phase=${last:-Pending}; pods=none; msg=""; }
     if [[ $phase != "$last" ]]; then echo "== $(date -u +%H:%M:%SZ) $phase${msg:+: $msg}"; last=$phase; fi
     if [[ $lane == gate ]]; then
       local stuck=0
-      if [[ $phase == Pending || ( $phase == Running && $pods == pending ) ]]; then stuck=1; fi
-      if [[ $stuck == 1 && $((SECONDS - pending_since)) -ge $GATE_PENDING ]]; then give_up; fi
+      local why=slot
+      if [[ $pods != none ]]; then stuck=1; why=$pods; elif [[ $phase == Pending ]]; then stuck=1; fi
+      if [[ $stuck == 0 ]]; then pending_since=$SECONDS; fi
+      if [[ $stuck == 1 && $((SECONDS - pending_since)) -ge $GATE_PENDING ]]; then give_up "$why"; fi
       [[ $stuck == 1 ]] || follow_log
     elif [[ $phase == Running ]]; then
       while IFS= read -r line; do
