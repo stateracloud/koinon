@@ -296,6 +296,19 @@ REQUIRED quickstart failed"
 seq_set "$(prh "$lint_ok,$q_ok,$(cr_at quickstart SKIPPED 25 2026-11-01T10:20:00Z)")"
 run 7 --checks --require quickstart --interval 0
 expect "a newer skip after a success is green" 0 "checks 2/2 green"
+# success, failure, then a newer skip: the failure is not hidden by the skip
+seq_set "$(prh "$lint_ok,$q_ok,$(cr_at quickstart FAILURE 24 2026-11-01T10:20:00Z),$(cr_at quickstart SKIPPED 26 2026-11-01T10:30:00Z)")"
+run 7 --checks --require quickstart --interval 0
+expect "success, failure, then a newer skip stays failed" 1 "FAILED quickstart (run 24)
+REQUIRED quickstart failed"
+# --require e2e judges quickstart with the same rule
+seq_set "$(prh "$lint_ok,$q_ok,$(cr_at quickstart FAILURE 24 2026-11-01T10:20:00Z)")"
+run 7 --checks --require e2e --interval 0
+expect "--require e2e: a quickstart success followed by a newer failure is red" 1 "FAILED quickstart (run 24)
+REQUIRED e2e failed"
+seq_set "$(prh "$lint_ok,$q_ok,$(cr_at quickstart SKIPPED 25 2026-11-01T10:20:00Z)")"
+run 7 --checks --require e2e --interval 0
+expect "--require e2e: a quickstart success followed by a newer skip is green" 0 "checks 2/2 green"
 # an explicit --require quickstart stays required next to --require e2e
 seq_set "$(prh "$lint_ok,$(st e2e-lab SUCCESS),$q_skip_new")"
 run 7 --checks --require e2e --require quickstart --interval 0

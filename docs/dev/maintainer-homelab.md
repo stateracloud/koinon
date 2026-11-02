@@ -93,6 +93,12 @@ recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendm
 `e2e-lab` is not a required check of the ruleset, because contributors without a lab cannot produce it;
 the required check stays `e2e result`.
 
+### Lanes and notifications
+
+Each lane of a parallel session runs `hack/e2e-remote.sh --argo --repo <its worktree>` with
+`KOINON_E2E_AGENT=<session>-<lane>` and keeps at most one kind run waiting. The lab's notifications
+(ntfy) carry the agent label as a tag (`?tags=<agent>`).
+
 ## Dev database
 
 The chart renders the single-instance CloudNativePG `Cluster` `koinon-pg` (`postgres.mode: cnpg`),
