@@ -115,7 +115,7 @@ Only the maintainers have a home lab; nothing in the repository needs it and non
 are tracked. Their settings live in the untracked `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/lab.env`
 (template `hack/lab/lab.env.example`; `hack/e2e-argo.sh` header). With them,
 `hack/e2e-remote.sh --argo` queues the e2e on the lab's Argo: `--no-wait` and `--follow <run>` to
-come back later, `--gate <set>` for the Docker-only gates (`go-test`, `agentd-ginkgo`, `test-admission`, `test-chart-smoke`, `chart-check`, `docs-check`; `hack/lab/gate-run.sh`), which exits 75 when no slot is free or the lab is unreachable (run the gate locally then) and 76 when the gate skipped what it expected to run. Each lane
+come back later, `--gate <set>` for the Docker-only gates (`go-test`, `agentd-ginkgo`, the sets the lab's koinon-gate template accepts today; the other sets of `hack/lab/gate-run.sh` run only locally through it), which exits 75 when no slot is free or the lab is unreachable (run the gate locally then) and 76 when the gate skipped what it expected to run. Each lane
 runs `hack/e2e-remote.sh --argo --repo <its worktree>` with `KOINON_E2E_AGENT=<session>-<lane>` and
 keeps at most one kind run waiting. Its notifications carry the agent label as an ntfy tag
 (`?tags=<agent>`). Dev loop and registry: `docs/dev/maintainer-homelab.md`.
