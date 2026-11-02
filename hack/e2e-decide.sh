@@ -19,6 +19,10 @@
 #                      image, downloads) is what it is for.
 #   workflow_dispatch  always needed.
 #
+# `required=true` (pull requests only) is what `e2e result` enforces (hack/e2e-gate.sh, #562): the
+# change needs an e2e (the full rule, the e2e's own files or the label), so the job fails unless the
+# head has a green quickstart or the lab's `e2e-lab` status. Every other event: `required=false`.
+#
 # Environment: EVENT, BASE (pull request base branch), LABELS (JSON array of the PR's label names),
 # PR (its number), NEEDS_E2E (path of the rule script, default hack/needs-e2e.sh), GH (the gh
 # command), GH_REPO.
@@ -34,9 +38,13 @@ NEEDS=${NEEDS_E2E:-hack/needs-e2e.sh}
 GH=${GH:-gh}
 LABELS=${LABELS:-[]}
 
+# emit <needed> [required]: needed = run the quickstart in this workflow run; required = the pull
+# request must have a passing e2e on its head before `e2e result` goes green (hack/e2e-gate.sh).
 emit() {
+  local req=${2:-false}
   echo "needed=$1"
-  [[ -z ${GITHUB_OUTPUT:-} ]] || echo "needed=$1" >>"$GITHUB_OUTPUT"
+  echo "required=$req"
+  [[ -z ${GITHUB_OUTPUT:-} ]] || printf 'needed=%s\nrequired=%s\n' "$1" "$req" >>"$GITHUB_OUTPUT"
 }
 # live_labels: the PR's labels now, as a JSON array; [] when they cannot be read.
 live_labels() {
@@ -60,7 +68,7 @@ pull_request)
   rule --forced-only "$base"
   if [[ $rc -ge 2 ]]; then
     echo "::warning::needs-e2e.sh exited $rc; running the e2e to be safe"
-    emit true
+    emit true true
     exit 0
   fi
   forced=$rc
@@ -70,18 +78,21 @@ pull_request)
   fi
   if [[ $forced -eq 0 ]]; then
     summary "Runs: this pull request changes the e2e's own files."$'\n\n'"$text"
-    emit true
+    emit true true
   elif [[ $labelled -eq 0 ]]; then
     summary "Runs: the pull request has the \`e2e\` label."
-    emit true
+    emit true true
   else
     rule "$base"
     if [[ $rc -ne 1 ]]; then
-      summary "Does not run. This PR is e2e-relevant per hack/needs-e2e.sh (or the rule could not be evaluated, exit $rc):"$'\n\n'"$text"$'\n\n'"Run \`hack/e2e-remote.sh\` (your own Docker), or add the \`e2e\` label to run it here."
+      # Not run here, but required: `e2e result` stays red until the head has a green quickstart or
+      # the lab's e2e-lab status (hack/e2e-gate.sh).
+      summary "Does not run here, and \`e2e result\` fails until the head has a passing e2e. This PR is e2e-relevant per hack/needs-e2e.sh (or the rule could not be evaluated, exit $rc):"$'\n\n'"$text"$'\n\n'"Run \`hack/e2e-remote.sh --argo\` (the lab posts \`e2e-lab\`), or \`gh workflow run e2e-kind.yml --ref <branch>\`, or add the \`e2e\` label to run it here."
+      emit false true
     else
       summary "Does not run: nothing in this pull request needs the kind e2e."
+      emit false false
     fi
-    emit false
   fi
   ;;
 workflow_dispatch)

@@ -7,7 +7,9 @@
 #
 #   hack/e2e-status.sh <sha> <success|failure> <description> [target url]
 #
-# `hack/pr-wait.sh <PR> --checks --require e2e` accepts a green `e2e-lab` on the PR head. The status is
+# On GitHub the required check `e2e result` (hack/e2e-gate.sh) accepts a green `e2e-lab` on the PR head
+# for a pull request that needs the e2e; a success here re-runs its failed `e2e result`
+# (hack/e2e-rerun-result.sh). `hack/pr-wait.sh <PR> --checks --require e2e` accepts a green `e2e-lab` on the PR head. The status is
 # not a required check of the ruleset (contributors without a lab cannot produce it).
 #
 # Posts with `gh api repos/{owner}/{repo}/statuses/<sha>` from the repository of the current directory.
@@ -38,6 +40,8 @@ args=(-X POST "repos/{owner}/{repo}/statuses/$sha" -f state="$state" -f context=
 
 if gh api "${args[@]}" --silent 2>/dev/null; then
   echo "e2e-status: posted e2e-lab=$state on ${sha:0:12}"
+  # A status starts no workflow: have the pull request's red `e2e result` look again (best effort).
+  [[ $state != success ]] || "$(dirname "$0")/e2e-rerun-result.sh" "$sha" || true
   exit 0
 fi
 {
