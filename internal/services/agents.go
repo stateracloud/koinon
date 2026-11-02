@@ -22,7 +22,7 @@ import (
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/runlimits"
-	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -512,7 +512,7 @@ func (s *Server) ArchiveAgent(ctx context.Context, req *agentv1alpha1.ArchiveAge
 		if err != nil {
 			return err
 		}
-		canceled, err := scheduler.CancelForAgent(ctx, q, c.org, a.ID, scheduler.Actor{UserID: c.actor()})
+		canceled, err := runoutcome.CancelForAgent(ctx, q, c.org, a.ID, runoutcome.Actor{UserID: c.actor()})
 		if err != nil {
 			return err
 		}

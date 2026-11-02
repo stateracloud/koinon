@@ -14,7 +14,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
-	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 )
 
 // watchBatch is how many events WatchRun reads per query.
@@ -67,7 +67,9 @@ func (s *Server) CancelRun(ctx context.Context, req *runv1alpha1.CancelRunReques
 		if _, err := q.GetRun(ctx, store.GetRunParams{OrgID: c.org, ID: id}); err != nil {
 			return err
 		}
-		out, err = scheduler.Cancel(ctx, q, c.org, id, scheduler.ReasonUser, reason, scheduler.Actor{UserID: c.actor()})
+		out, err = runoutcome.CancelUnowned(ctx, q, c.org, id, runoutcome.Cancellation{
+			Reason: runoutcome.ReasonUser, Message: reason, Actor: runoutcome.Actor{UserID: c.actor()},
+		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return connect.NewError(connect.CodeFailedPrecondition, "run has already finished")
 		}
