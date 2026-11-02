@@ -72,6 +72,29 @@ Checklist step for every `vX.Y.0`: after the final tag is published, open a pull
 `hack/migrate-patch-line` to `vX.Y` (for v0.1.0: `v0.1`). Until it merges, main can still contract
 the schema that the shipped release runs on (ADR 0085).
 
+## Release notes: "Upgrading from vX.Y"
+
+The generated notes list commits only. Before you publish the draft (step 4), add an "Upgrading from
+vX.Y" section by hand, where X.Y is the previous minor line (for `v0.2.0`, "Upgrading from v0.1").
+Operators follow [Upgrading Koinon](../site/src/content/docs/guides/upgrading.md) (ADR 0085); the notes
+say what is specific to this release. Template:
+
+```markdown
+## Upgrading from vX.Y
+
+- **Procedure:** stop, migrate, start (the minor upgrade of the Upgrading Koinon guide).
+  For a patch release write "rolling upgrade, no schema change that breaks the previous patch" instead.
+- **Rollback:** none short of restoring the pre-upgrade database and key backup. For a patch
+  release: roll the images back.
+- **Schema:** the migrations that contract (rename, drop, retype) and what they remove.
+- **Values:** values added, renamed or removed, and what to change in `values.yaml`.
+- **OpenShell:** the pinned version, and whether it changed (a change recreates every sandbox over time).
+- **Other manual steps:** anything an operator must do before or after.
+```
+
+For `v0.1.0`, write that a release candidate install upgrades with a stop and cannot roll back to an
+rc, and that v0.1.0 is the compatibility baseline.
+
 ## Signing and SBOM attestations
 
 The workflow can sign with cosign keyless and attest the SBOMs, but its `sign` job runs only when
