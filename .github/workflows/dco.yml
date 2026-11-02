@@ -40,6 +40,6 @@ jobs:
             fi
           done
           if [ "$fail" -ne 0 ]; then
-            echo "Fix with: git rebase --signoff $BASE"
+            echo "Fix with: git commit --amend -s for an unpushed last commit; a pushed commit needs a force-push or a history rewrite: ask your human. Merge commits are exempt."
           fi
           exit $fail
