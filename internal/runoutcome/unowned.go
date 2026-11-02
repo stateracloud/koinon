@@ -19,7 +19,7 @@ import (
 // an expired approval, a task that ended or an agent that was archived ends a run nobody here owns.
 // They hold no epoch and are fenced by the run's state instead: only a run that is still live
 // (queued, starting, running or parked) is canceled, and its owner's later writes then match no row
-// (ADR 0050, ADR 0082). Whichever of the two commits first is the run's outcome.
+// (ADR 0050, ADR 0030). Whichever of the two commits first is the run's outcome.
 
 // KindRunCanceled is the run and task event of a canceled run.
 const KindRunCanceled = "run.canceled"

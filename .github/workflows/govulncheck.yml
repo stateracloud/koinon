@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Nightly govulncheck on main (ADR 0079). The ci.yml job only runs when a pull request changes Go
-# code, but a new advisory needs no code change to apply. A reachable finding fails the run, which
+# Nightly govulncheck on main (ADR 0079). It is the only govulncheck run: a new advisory needs no
+# code change to apply, so a per-pull-request job (removed in #561) added nothing. A reachable finding fails the run, which
 # notifies the maintainer and is what starts the security fast path.
 name: govulncheck
 
