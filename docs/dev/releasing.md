@@ -28,11 +28,24 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    ```
 
 3. Watch the `release` workflow. The `gate` job runs first and fails the release if the tag is not
-   `vX.Y.Z` or `vX.Y.Z-rc.N`, the commit is not an ancestor of `origin/main`, or any required check
-   of the `main` ruleset (dco, go, web, proto, migrations, generated code, gitleaks, chart, escape
-   (admission)) has not concluded `success` on it. It reruns no tests. The `dco` workflow runs on
-   pull requests only, so the gate reads that check from the head commit of the pull request that
-   merged the tag's commit.
+   `vX.Y.Z` or `vX.Y.Z-rc.N`, the commit is not an ancestor of `origin/main`, or any required status
+   check that applies to `main` has not concluded `success`. The gate reads that list at run time from
+   `rules/branches/<default>` (every active repository and organization rule for the branch, branch
+   patterns resolved by GitHub), so adding or removing a required check needs no edit to
+   `hack/release-gate.sh`; if it cannot read the rules, or finds no required checks, it fails closed.
+   Each context must have succeeded on the tagged commit itself, except four that a push to main does
+   not report as a result: `dco` and `dependency age` (pull requests only; on main the latter is a
+   skipped run; it is required from #561 on), `claim` (`pull_request_target`; skipped on main) and
+   `e2e result` (a composite that also passes when the e2e was skipped; its real subject, the kind
+   e2e, the gate asks for through the `quickstart` rule below). Those are listed in the script
+   (`pr_only`) and read from the head commit of the pull request that merged the tag's commit: the
+   newest run that started before the merge (the `closed` event reruns some of them as skipped). A
+   commit that was not merged through a pull request therefore fails the gate. They are listed
+   rather than inferred from "no run on the commit", so a new push-triggered required check that is
+   missing or red on the commit cannot be excused by a pull request run. When a workflow gains or
+   loses a `push` trigger, move its context in or out of `pr_only`.
+   The gate also requires the `quickstart` job of the kind e2e to have succeeded on the commit. It
+   reruns no tests. `hack/release-gate-test.sh` tests it against a stubbed `gh`.
 
    Patch releases (vX.Y.Z, Z > 0) are tagged on `main` like every other release. Once a minor
    line has shipped its `.0`, set `hack/migrate-patch-line` to that line (for example `v0.1`); from
