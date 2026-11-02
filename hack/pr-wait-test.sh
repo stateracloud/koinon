@@ -23,6 +23,11 @@ if [ "$1 $2" = "run list" ]; then
   sed -n "${m}p" "$FAKE_DIR/runs" | grep . || tail -n 1 "$FAKE_DIR/runs"
   exit 0
 fi
+if [ "$1" = api ]; then # gh api .../check-runs --jq ...: $FAKE_DIR/rows holds the --jq output (one row per line)
+  [ -f "$FAKE_DIR/rows" ] || exit 9
+  cat "$FAKE_DIR/rows"
+  exit 0
+fi
 [ "$1 $2" = "pr view" ] || exit 9
 n=$(($(cat "$FAKE_DIR/n" 2>/dev/null || echo 0) + 1))
 echo "$n" >"$FAKE_DIR/n"
@@ -135,8 +140,7 @@ run 7 --checks --require quickstart --interval 0
 expect "newest run wins whatever the rollup order" 0 "checks 2/2 green"
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$q_ok,$(cr_at quickstart SKIPPED 23 2026-11-01T10:10:00Z)")"
 run 7 --checks --require quickstart --interval 0
-expect "a newer skip after a success is not green" 1 "REQUIRED quickstart skipped
-only skipped runs of quickstart on this head; run: gh workflow run e2e-kind.yml --ref <branch>"
+expect "a success on the head wins over a newer skip (#547: any run that passed counts)" 0 "checks 2/2 green"
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$(cr_at quickstart CANCELLED 21 2026-11-01T10:00:00Z),$q_ok")"
 run 7 --checks --require quickstart --interval 0
 expect "later success supersedes an earlier cancel" 0 "checks 2/2 green"
@@ -226,7 +230,92 @@ run 7 --checks --require "e2e result" --interval 0
 expect "all green while a dispatched e2e-kind run is queued: waits" 0 "waiting for e2e-kind run 41265167595 on abc1234
 checks 2/2 green"
 
-usage_line="usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK] [--timeout DURATION] [--interval SECONDS]"
+# 11. (#547) --require looks at every check run of the head (gh api), not only the PR rollup, and
+# `--require e2e` passes on a green e2e-lab status or a green quickstart run.
+row() { # <name> <status> <conclusion> <run id> <startedAt>: one row of head_runs' output
+  printf '{"name":"%s","status":"%s","conclusion":"%s","startedAt":"%s","completedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/%s/job/9","workflowName":""}\n' "$1" "$2" "$3" "$5" "$5" "$4"
+}
+st() { # <context> <state>: a commit status in the rollup
+  printf '{"context":"%s","state":"%s","targetUrl":"https://argo.example.invalid/workflows/x/y"}' "$1" "$2"
+}
+q_skip_new=$(cr_at quickstart SKIPPED 51 2026-11-01T11:00:00Z)
+seq_set "$(prh "$lint_ok,$q_skip_new")"
+row quickstart COMPLETED SUCCESS 50 2026-11-01T10:00:00Z >"$FAKE_DIR/rows"
+printf '\n' >"$FAKE_DIR/runs"
+run 7 --checks --require quickstart --interval 0
+expect "a dispatched success on the head counts next to the rollup's skipped run" 0 "checks 2/2 green"
+seq_set "$(prh "$lint_ok,$q_skip_new")"
+run 7 --checks --require quickstart --interval 0
+expect "... but without the success in the check runs it is still skipped" 1 "REQUIRED quickstart skipped
+only skipped runs of quickstart on this head; run: gh workflow run e2e-kind.yml --ref <branch>"
+grep -q -- '^api repos/{owner}/{repo}/commits/abc1234def/check-runs' "$FAKE_DIR/calls" || { echo "FAIL: reads the head's check runs" >&2; fail=1; }
+
+seq_set "$(prh "$lint_ok,$(st e2e-lab SUCCESS)")"
+printf '\n' >"$FAKE_DIR/runs"
+run 7 --checks --require e2e --interval 0
+expect "--require e2e: e2e-lab success passes" 0 "checks 2/2 green"
+seq_set "$(prh "$lint_ok,$q_skip_new,$(st e2e-lab SUCCESS)")"
+printf '41265167595\n' >"$FAKE_DIR/runs"
+run 7 --checks --require e2e --interval 0
+expect "--require e2e: e2e-lab success beats a skipped quickstart and a live e2e-kind run" 0 "checks 2/2 green"
+seq_set "$(prh "$lint_ok,$q_skip_new")"
+row quickstart COMPLETED SUCCESS 50 2026-11-01T10:00:00Z >"$FAKE_DIR/rows"
+printf '\n' >"$FAKE_DIR/runs"
+run 7 --checks --require e2e --interval 0
+expect "--require e2e: a dispatched quickstart success passes" 0 "checks 2/2 green"
+seq_set "$(prh "$lint_ok,$(st e2e-lab FAILURE),$(cr_at quickstart SUCCESS 52 2026-11-01T10:00:00Z)")"
+printf '\n' >"$FAKE_DIR/runs"
+run 7 --checks --require e2e --interval 0
+expect "--require e2e: quickstart success passes although e2e-lab is red" 0 "checks 2/2 green"
+seq_set "$(prh "$lint_ok,$(st e2e-lab FAILURE)")"
+run 7 --checks --require e2e --interval 0
+expect "--require e2e: a red e2e-lab alone fails" 1 "FAILED e2e-lab"
+seq_set "$(prh "$lint_ok,$(st e2e-lab PENDING)")"
+run 7 --checks --require e2e --timeout 1s --interval 1
+expect "--require e2e: a pending e2e-lab is waited for" 2 "checks 1/2 pending: e2e-lab
+TIMEOUT"
+seq_set "$(prh "$lint_ok,$q_skip_new")"
+run 7 --checks --require e2e --interval 0
+expect "--require e2e: only a skipped quickstart says how to get a green e2e" 1 "REQUIRED e2e skipped
+no green e2e on this head (skipped quickstart, no e2e-lab success); run: hack/e2e-remote.sh --argo (posts e2e-lab), or gh workflow run e2e-kind.yml --ref <branch>"
+seq_set "$(prh "$lint_ok")"
+run 7 --checks --require e2e --interval 0
+expect "--require e2e: nothing at all is missing" 1 "REQUIRED e2e missing
+no green e2e on this head (missing quickstart, no e2e-lab success); run: hack/e2e-remote.sh --argo (posts e2e-lab), or gh workflow run e2e-kind.yml --ref <branch>"
+seq_set "$(prh "$lint_ok,$(st e2e-lab SUCCESS),$go_ok")"
+printf '\n' >"$FAKE_DIR/runs"
+run 7 --checks --require e2e --require go --interval 0
+expect "--require e2e together with another required check" 0 "checks 3/3 green"
+
+# success then a newer FAILURE stays red; success then a newer skip is green (#392 intent for failures)
+seq_set "$(prh "$lint_ok,$q_ok,$(cr_at quickstart FAILURE 24 2026-11-01T10:20:00Z)")"
+printf '\n' >"$FAKE_DIR/runs"
+run 7 --checks --require quickstart --interval 0
+expect "a newer failure after a success stays failed" 1 "FAILED quickstart (run 24)
+REQUIRED quickstart failed"
+seq_set "$(prh "$lint_ok,$q_ok,$(cr_at quickstart SKIPPED 25 2026-11-01T10:20:00Z)")"
+run 7 --checks --require quickstart --interval 0
+expect "a newer skip after a success is green" 0 "checks 2/2 green"
+# success, failure, then a newer skip: the failure is not hidden by the skip
+seq_set "$(prh "$lint_ok,$q_ok,$(cr_at quickstart FAILURE 24 2026-11-01T10:20:00Z),$(cr_at quickstart SKIPPED 26 2026-11-01T10:30:00Z)")"
+run 7 --checks --require quickstart --interval 0
+expect "success, failure, then a newer skip stays failed" 1 "FAILED quickstart (run 24)
+REQUIRED quickstart failed"
+# --require e2e judges quickstart with the same rule
+seq_set "$(prh "$lint_ok,$q_ok,$(cr_at quickstart FAILURE 24 2026-11-01T10:20:00Z)")"
+run 7 --checks --require e2e --interval 0
+expect "--require e2e: a quickstart success followed by a newer failure is red" 1 "FAILED quickstart (run 24)
+REQUIRED e2e failed"
+seq_set "$(prh "$lint_ok,$q_ok,$(cr_at quickstart SKIPPED 25 2026-11-01T10:20:00Z)")"
+run 7 --checks --require e2e --interval 0
+expect "--require e2e: a quickstart success followed by a newer skip is green" 0 "checks 2/2 green"
+# an explicit --require quickstart stays required next to --require e2e
+seq_set "$(prh "$lint_ok,$(st e2e-lab SUCCESS),$q_skip_new")"
+run 7 --checks --require e2e --require quickstart --interval 0
+expect "--require e2e --require quickstart: e2e-lab green does not excuse a skipped quickstart" 1 "REQUIRED quickstart skipped
+only skipped runs of quickstart on this head; run: gh workflow run e2e-kind.yml --ref <branch>"
+
+usage_line="usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK|e2e] [--timeout DURATION] [--interval SECONDS]"
 e2e_ok=$(cr "e2e result" COMPLETED SUCCESS 14)
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"
 run 7 --checks --require "e2e result" --interval 0
@@ -264,8 +353,8 @@ expect "transient gh failure" 0 "MERGED 1234567"
 
 # 9. usage
 run
-expect "no PR is a usage error" 64 "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK] [--timeout DURATION] [--interval SECONDS]"
+expect "no PR is a usage error" 64 "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK|e2e] [--timeout DURATION] [--interval SECONDS]"
 run 7 --timeout soon
-expect "bad timeout is a usage error" 64 "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK] [--timeout DURATION] [--interval SECONDS]"
+expect "bad timeout is a usage error" 64 "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK|e2e] [--timeout DURATION] [--interval SECONDS]"
 
 exit "$fail"

@@ -257,7 +257,7 @@ run_gate() { # <gate>
 		hack/needs-e2e.sh "$base" >"$log" 2>&1
 		rc=$?
 		case $rc in
-		0) echo "e2e info needed (hack/e2e-remote.sh --local on your Docker; --argo for a maintainer lab queue; or the e2e label)" ;;
+		0) echo "e2e info needed (hack/e2e-remote.sh --argo on a lab posts e2e-lab; --local on your Docker; or the e2e label)" ;;
 		1) echo "e2e info not needed" ;;
 		*) echo "e2e info unknown, treat as needed (see $log)" ;;
 		esac
