@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The main agent's state files (lanes.md and pending.md), written through one script instead of by
-# hand: every write is atomic (temp file in the same dir, then mv) and serialised by a lock dir, so
+# hand: every write is atomic (temp file in the same dir, then mv) and serialised by a kernel lock on a lock file, so
 # two sessions cannot lose each other's lines. Existing content is never deleted.
 #
 #   agent-state.sh pending add "<text>"        append "- 2026-11-02 ~22:45 <text>" to pending.md
@@ -33,56 +33,45 @@ lanes="$state_dir/lanes.md"
 pending="$state_dir/pending.md"
 begin_marker='<!-- agent-state:lanes begin -->'
 end_marker='<!-- agent-state:lanes end -->'
-lock_dir="$state_dir/.lock"
-lock_held=0
 
 die() { echo "agent-state: $*" >&2; exit 1; }
 usage() { sed -n '4,25p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 stamp() { date '+%Y-%m-%d ~%H:%M'; }
 
-unlock() {
-	if ((lock_held)); then
-		rm -f "$lock_dir/pid"
-		rmdir "$lock_dir" 2>/dev/null || true
-		lock_held=0
-	fi
-}
-file_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 file_mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
-# reclaim_stale: remove the lock when its holder is dead, or when it is older than 60 s and holds no pid.
-reclaim_stale() {
-	local pid='' moved mtime
-	[[ -d $lock_dir ]] || return 1
-	[[ -r $lock_dir/pid ]] && pid=$(<"$lock_dir/pid")
-	if [[ $pid =~ ^[0-9]+$ ]]; then
-		kill -0 "$pid" 2>/dev/null && return 1
-	else
-		mtime=$(file_mtime "$lock_dir") || return 1
-		(($(date +%s) - mtime > 60)) || return 1
-	fi
-	# Take it by rename so that only one reclaimer wins; put it back if it was not the lock we judged.
-	moved="$lock_dir.stale.$$"
-	mv "$lock_dir" "$moved" 2>/dev/null || return 1
-	if [[ $(cat "$moved/pid" 2>/dev/null || true) != "$pid" ]]; then
-		mv "$moved" "$lock_dir" 2>/dev/null || rm -rf "$moved"
-		return 1
-	fi
-	rm -rf "$moved"
-	return 0
-}
+
+# lock: serialise writers with a kernel lock on a lock FILE (flock where it exists, perl's flock
+# otherwise; macOS has no flock(1)). The script re-runs itself under the lock with
+# KOINON_STATE_LOCKED=1, so the whole read-modify-rename is covered, and the kernel releases the
+# lock when the holder dies, however it dies. KOINON_STATE_LOCKER=flock|perl forces one path (tests).
+orig_args=("$@")
+# shellcheck disable=SC2016  # perl code, no shell expansion wanted
+perl_locker='use Fcntl qw(:flock F_SETFD); use Time::HiRes qw(time);
+my ($f, $t, @cmd) = @ARGV;
+open(my $fh, ">>", $f) or do { print STDERR "agent-state: cannot open $f: $!\n"; exit 1 };
+my $end = time + $t;
+until (flock($fh, LOCK_EX | LOCK_NB)) { exit 75 if time >= $end; select(undef, undef, undef, 0.05); }
+fcntl($fh, F_SETFD, 0);
+$ENV{KOINON_STATE_LOCKED} = 1;
+exec @cmd or do { print STDERR "agent-state: exec failed: $!\n"; exit 1 };'
 lock() {
+	if [[ ${KOINON_STATE_LOCKED:-} == 1 ]]; then
+		if [[ -n ${KOINON_STATE_TEST_HOLD:-} ]]; then # tests: hold the lock until killed
+			echo "$BASHPID" >"$KOINON_STATE_TEST_HOLD.pid"
+			read -r -t 60 <>"$KOINON_STATE_TEST_HOLD" || true
+		fi
+		return 0
+	fi
 	mkdir -p "$state_dir"
-	local tries=0 max=$((${KOINON_STATE_LOCK_TIMEOUT:-10} * 20))
-	until mkdir "$lock_dir" 2>/dev/null; do
-		reclaim_stale && continue
-		tries=$((tries + 1))
-		((tries <= max)) || die "could not take $lock_dir within ${KOINON_STATE_LOCK_TIMEOUT:-10}s (held by pid $(cat "$lock_dir/pid" 2>/dev/null || echo unknown))"
-		sleep 0.05
-	done
-	lock_held=1
-	echo $$ >"$lock_dir/pid"
-	trap unlock EXIT
-	trap 'exit 130' INT TERM
+	local t=${KOINON_STATE_LOCK_TIMEOUT:-10} lf="$state_dir/.lock" locker=${KOINON_STATE_LOCKER:-} rc=0
+	if [[ -z $locker ]]; then if command -v flock >/dev/null 2>&1; then locker=flock; else locker=perl; fi; fi
+	case $locker in
+	flock) flock -w "$t" -E 75 "$lf" env KOINON_STATE_LOCKED=1 "$BASH" "$0" "${orig_args[@]}" || rc=$? ;;
+	perl) perl -e "$perl_locker" "$lf" "$t" env KOINON_STATE_LOCKED=1 "$BASH" "$0" "${orig_args[@]}" || rc=$? ;;
+	*) die "KOINON_STATE_LOCKER must be flock or perl" ;;
+	esac
+	((rc != 75)) || die "could not take $lf within ${t}s (another agent-state.sh holds it)"
+	exit "$rc"
 }
 
 # atomic_write <file>: stdin becomes the file, via a temp file in the same dir. A symlink is written
