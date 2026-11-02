@@ -159,6 +159,34 @@ run_on "$sha" go success
 check "quickstart missing on the commit fails" "$(gate_rc)" 1
 
 new_case
+# #595: main skipped the heavy job because the merge tree is the PR head; the head is the evidence.
+echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
+run_on "$sha" quickstart success
+run_on "$sha" go skipped
+run_on "$pr_head" go success
+check "a check skipped on main is read from the PR head (green)" "$(gate_rc)" 0
+
+new_case
+echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
+run_on "$sha" quickstart success
+run_on "$sha" go skipped
+run_on "$pr_head" go failure
+check "a check skipped on main and red on the PR head fails" "$(gate_rc)" 1
+
+new_case
+echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
+run_on "$sha" quickstart success
+run_on "$sha" go skipped
+check "a check skipped on main and absent on the PR head fails" "$(gate_rc)" 1
+
+new_case
+echo '[]' >"$FX/pulls.json"
+echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
+run_on "$sha" quickstart success
+run_on "$sha" go skipped
+check "a check skipped on main with no merged PR fails" "$(gate_rc)" 1
+
+new_case
 rm "$FX/rules.json"
 check "unreadable rules fail closed" "$(gate_rc)" 1
 check "...with a clear message" "$(grep -c 'cannot read the rules that apply' "$tmp/err")" 1
