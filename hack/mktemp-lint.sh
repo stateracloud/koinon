@@ -16,11 +16,8 @@ set -euo pipefail
 
 root=${1:-$(cd "$(dirname "$0")/.." && pwd)}
 
-# Files still carrying bare calls because #512 is changing them. Empty this list after #512 merges (#535).
-excluded=(
-	hack/e2e-remote.sh      # #535: bare mktemp in the remote command; fix after #512 merges
-	hack/e2e-remote-test.sh # #535: bare mktemp -d; fix after #512 merges
-)
+# Files still carrying bare calls: none (#535, #546).
+excluded=()
 
 is_excluded() {
 	local e

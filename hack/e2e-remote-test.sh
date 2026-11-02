@@ -360,12 +360,12 @@ gate "$tmp/gate3b" "target=go-test ref=x rc=3 seconds=1 verdict=notrun" FAKE_PHA
 check "--gate verdict=notrun exits 76 even when the pod succeeded" test "$rc" -eq 76
 gate "$tmp/gate4" "" FAKE_PENDING=1 KOINON_E2E_GATE_PENDING=1
 check "--gate Pending past the limit exits 75" test "$rc" -eq 75
-check "... stopping the run" test -s "$tmp/gate4/stopped"
+check "... without stopping the run" test ! -e "$tmp/gate4/stopped"
 check "... and deleting it" test -s "$tmp/gate4/deleted"
 argo_env "$tmp/gate4b"; : >"$FAKE_LOG"
 gate "$tmp/gate4b" "" FAKE_PENDING_POD=1 KOINON_E2E_GATE_PENDING=1
 check "--gate Running with every pod Pending past the limit exits 75" test "$rc" -eq 75
-check "... stopping the run" test -s "$tmp/gate4b/stopped"
+check "... without stopping the run" test ! -e "$tmp/gate4b/stopped"
 check "... and deleting it" test -s "$tmp/gate4b/deleted"
 check "... without following the log" sh -c "! grep -q 'logOptions.follow' '$FAKE_LOG'"
 check "... naming the reason (quota) and the workflow" sh -c "grep -q 'koinon-make-t1 is still Pending.*reason: quota' '$tmp/gate4b/log'"
@@ -373,17 +373,17 @@ argo_env "$tmp/gate4c"; : >"$FAKE_LOG"
 gate "$tmp/gate4c" "" FAKE_PENDING_UNSCHED=1 KOINON_E2E_GATE_PENDING=1
 check "--gate with an Unschedulable pod past the limit exits 75" test "$rc" -eq 75
 check "... naming the reason (unschedulable) and the workflow" sh -c "grep -q 'koinon-make-t1 is still Pending.*reason: unschedulable' '$tmp/gate4c/log'"
-check "... stopping and deleting the run" sh -c "test -s '$tmp/gate4c/stopped' && test -s '$tmp/gate4c/deleted'"
+check "... deleting the run without stopping it" sh -c "test ! -e '$tmp/gate4c/stopped' && test -s '$tmp/gate4c/deleted'"
 argo_env "$tmp/gate4e"; : >"$FAKE_LOG"
 gate "$tmp/gate4e" "" FAKE_PENDING_LIMIT=1 KOINON_E2E_GATE_PENDING=1
 check "--gate postponed by the namespace limit exits 75" test "$rc" -eq 75
 check "... naming the reason (namespace-limit) and the workflow" sh -c "grep -q 'koinon-make-t1 is still Pending.*reason: namespace-limit' '$tmp/gate4e/log'"
-check "... stopping and deleting the run" sh -c "test -s '$tmp/gate4e/stopped' && test -s '$tmp/gate4e/deleted'"
+check "... deleting the run without stopping it" sh -c "test ! -e '$tmp/gate4e/stopped' && test -s '$tmp/gate4e/deleted'"
 argo_env "$tmp/gate4f"; : >"$FAKE_LOG"
 gate "$tmp/gate4f" "" FAKE_PENDING_LOCK=1 KOINON_E2E_GATE_PENDING=1
 check "--gate waiting on the slot mutex exits 75" test "$rc" -eq 75
 check "... naming the reason (slot), not quota or namespace-limit" sh -c "grep -q 'koinon-make-t1 is still Pending.*reason: slot' '$tmp/gate4f/log'"
-check "... stopping and deleting the run" sh -c "test -s '$tmp/gate4f/stopped' && test -s '$tmp/gate4f/deleted'"
+check "... deleting the run without stopping it" sh -c "test ! -e '$tmp/gate4f/stopped' && test -s '$tmp/gate4f/deleted'"
 argo_env "$tmp/gate4d"; : >"$FAKE_LOG"
 gate "$tmp/gate4d" "" FAKE_PENDING_PULL=1 KOINON_E2E_GATE_PENDING=1 KOINON_E2E_POLL=1
 check "--gate with a pod in ContainerCreating does not give up" test "$rc" -ne 75
