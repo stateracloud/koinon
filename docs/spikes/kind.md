@@ -5,8 +5,8 @@ and OpenShell 0.1.5 with a `runc` RuntimeClass, so that E1 (quickstart e2e) and 
 suite on `runc`) can run on GitHub's free `ubuntu-latest` runners?
 
 Run locally on 2026-10-22. **Nothing in this document was run on a GitHub runner**; the
-workflow `.github/workflows/spike-kind.yml` is a draft with `workflow_dispatch` only and has not
-been triggered.
+workflow `spike-kind.yml` was a draft with `workflow_dispatch` only, never triggered, and was
+deleted in #561.
 
 ## What was used
 
@@ -151,7 +151,8 @@ the home lab) applies only to E2; E1 does not depend on NetworkPolicy.
 
 ## Follow-ups
 
-- Run `.github/workflows/spike-kind.yml` once by hand (procoduck) and add the runner's numbers here.
+- (Dropped: the `spike-kind` workflow was deleted in #561 without ever running; `make test-e2e-kind`
+  and the `e2e-kind` workflow are the CI path now.)
 - E2 must wait for NetworkPolicy enforcement before probing, and set
   `landlock.compatibility: hard_requirement` so a missing LSM fails the test instead of passing it.
 - `smoke.sh` checks are written for macOS's bash 3.2, where `[[ … ]]` failures do not trip
