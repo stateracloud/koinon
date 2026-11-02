@@ -30,8 +30,13 @@
 # The Ginkgo JSON reports the verdict reads sit next to them (*_report.json), with the go test
 # events of the go test parts (*.gotest.jsonl), where a plain test's testenv.RequireT skip shows.
 # The reports only record; nothing reruns a failed spec.
+#
+# KOINON_RC_FILE: when set, the final exit status is also written to that file. `make` turns every
+# failing recipe into exit 2, so the 3 (incomplete) would not survive `make test-go`; the lab gate
+# (hack/lab/gate-run.sh) reads the file to tell NOT RUN from a failure.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+write_rc() { [[ -z ${KOINON_RC_FILE:-} ]] || echo "$1" >"$KOINON_RC_FILE"; }
 
 PARALLEL_SUITES=(
 	./internal/agentd
@@ -45,6 +50,7 @@ if [[ ${1:-} == "--list" ]]; then
 	printf '%s\n' "${PARALLEL_SUITES[@]}"
 	exit 0
 fi
+trap 'write_rc $?' EXIT # after --list: a listing is not a run
 
 procs=(-p)
 [[ -z ${PROCS:-} ]] || procs=("--procs=$PROCS")

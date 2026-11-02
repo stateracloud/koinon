@@ -19,7 +19,19 @@
 # test logic of its own. --repo names the checkout to test (default: the one the current directory
 # is in), so a worktree can be tested without changing directory.
 #
+# Gate (--gate <set>, #512) submits the queue's WorkflowTemplate koinon-gate for one gate set of
+# hack/lab/gate-run.sh (go-test, agentd-ginkgo, ...), which replaces the light lane. Parameters
+# gate-set, ref (the 40-hex commit), bundle, agent and slot (gate-1..gate-4, the one with no unfinished
+# run: label lane=gate); labels lab.example.invalid/agent=<agent>, lane=gate, target=<set>. Every
+# slot busy, or the run still Pending after 120 s (KOINON_E2E_GATE_PENDING: the slot mutex, the
+# namespace limit or a ResourceQuota), stops and deletes the run and exits 75 so the caller runs the
+# gate locally. The log is followed as it is written, then $OUT (result.txt, driver.log, reports) is
+# fetched. Exit status: 0 pass, the gate's own status when it failed, 2 usage or configuration, 75 no
+# slot or the lab unreachable, 76 NOT RUN (result.txt verdict=notrun: hack/go-test.sh exited 3, the
+# run proved less than it should, #507).
+#
 #   hack/e2e-remote.sh --argo [--lane kind|light] [--repo DIR] [--target T] [--slot S] [--out DIR] [--no-wait] [--dry-run]
+#   hack/e2e-remote.sh --argo --gate <set> [--repo DIR] [--out DIR] [--no-wait] [--dry-run]
 #   hack/e2e-remote.sh --argo --follow <workflow name> [--out DIR]
 #
 # Credentials never appear in argv, logs or files: a credentials file (KOINON_E2E_ARGO_CREDS,
@@ -37,6 +49,8 @@
 #   KOINON_E2E_S3_REGION       SigV4 region (us-east-1)
 #   KOINON_E2E_ARGO_NAMESPACE  namespace of the template and runs (koinon-e2e)
 #   KOINON_E2E_ARGO_TEMPLATE   WorkflowTemplate (koinon-make); parameters target, ref, bundle, agent, slot
+#   KOINON_E2E_GATE_TEMPLATE   WorkflowTemplate of --gate (koinon-gate); parameters gate-set, ref, bundle, agent, slot
+#   KOINON_E2E_GATE_PENDING    seconds a gate run may stay Pending before it is given up (120)
 #   KOINON_E2E_ARGO_POLL       seconds between status polls (30)
 #   KOINON_E2E_AGENT           who submits, a label on the run (KOINON_AGENT_SESSION, else $USER)
 set -euo pipefail
@@ -48,6 +62,8 @@ lab_config_load
 SERVER=${KOINON_E2E_ARGO_SERVER:-}
 NS=${KOINON_E2E_ARGO_NAMESPACE:-koinon-e2e}
 TEMPLATE=${KOINON_E2E_ARGO_TEMPLATE:-koinon-make}
+GATE_TEMPLATE=${KOINON_E2E_GATE_TEMPLATE:-koinon-gate}
+GATE_PENDING=${KOINON_E2E_GATE_PENDING:-120}
 BUNDLE_URL=${KOINON_E2E_BUNDLE_URL:-}
 RESULTS_URL=${KOINON_E2E_RESULTS_URL:-}
 REGION=${KOINON_E2E_S3_REGION:-us-east-1}
@@ -60,6 +76,7 @@ while [[ $# -gt 0 ]]; do
   case $1 in
   --argo) ;;
   --lane) lane=${2:?--lane needs kind or light}; shift ;;
+  --gate) lane=gate; target=${2:?--gate needs a gate set}; shift ;;
   --repo) repo=${2:?--repo needs a directory}; shift ;;
   --target) target=${2:?--target needs a make target}; shift ;;
   --slot) slot=${2:?--slot needs a slot name}; shift ;;
@@ -74,7 +91,8 @@ done
 case $lane in
 kind) target=${target:-test-e2e-kind} ;;
 light) target=${target:-test-go} ;;
-*) echo "e2e-remote --argo: --lane is kind or light" >&2; exit 2 ;;
+gate) [[ $target =~ ^[a-z0-9-]+$ ]] || { echo "e2e-remote --argo: --gate needs a gate set name (go-test, agentd-ginkgo, ...)" >&2; exit 2; } ;;
+*) echo "e2e-remote --argo: --lane is kind or light (or --gate <set>)" >&2; exit 2 ;;
 esac
 MANIFEST=${KOINON_E2E_LIGHT_MANIFEST:-}
 lab_require "e2e-remote --argo" KOINON_E2E_ARGO_SERVER KOINON_E2E_BUNDLE_URL KOINON_E2E_RESULTS_URL KOINON_E2E_ARGO_CREDS
@@ -90,11 +108,12 @@ fi
 label=$(printf %s "$AGENT" | tr -c 'A-Za-z0-9_.-' '-' | cut -c1-63 | sed 's/^[^A-Za-z0-9]*//; s/[^A-Za-z0-9]*$//')
 label=${label:-agent}
 
-token="" s3user="" opened=0 name="" finished=0
+token="" s3user="" opened=0 name="" finished=0 log_pid=""
 # shellcheck source=hack/lab/creds.example.sh disable=SC1091
 . "$CREDS"
 
 cleanup() {
+  [[ -z $log_pid ]] || kill "$log_pid" 2>/dev/null || true
   if [[ -n $name && $finished == 0 && $wait == 1 ]]; then
     echo "e2e-remote --argo: stopping $name" >&2
     api PUT "/api/v1/workflows/$NS/$name/stop" '{}' >/dev/null 2>&1 || true
@@ -136,6 +155,12 @@ s3_put() {
 # slot parameter; "a b" if the template has none.
 slots() {
   local s
+  if [[ $lane == gate ]]; then
+    s=$(api GET "/api/v1/workflow-templates/$NS/$GATE_TEMPLATE" |
+      jq -r '[.spec.arguments.parameters[]? | select(.name == "slot") | .enum[]?] | join(" ")')
+    echo "${s:-gate-1 gate-2 gate-3 gate-4}"
+    return
+  fi
   if [[ $lane == light ]]; then
     jq -r '[.spec.arguments.parameters[] | select(.name == "slot") | .enum[]] | join(" ")' "$MANIFEST"
     return
@@ -149,6 +174,16 @@ slots() {
 pick_slot() {
   local all
   all=$(slots)
+  if [[ $lane == gate ]]; then
+    # A gate slot is free only with no unfinished run at all: Running, or Pending on the slot mutex,
+    # the namespace limit or a ResourceQuota. Prints nothing when every slot is taken.
+    api GET "/api/v1/workflows/$NS?listOptions.labelSelector=lane=gate,workflows.argoproj.io/completed!=true&fields=items.spec.arguments.parameters" |
+      jq -r --arg all "$all" '
+        ($all | split(" ")) as $slots
+        | [.items[]? | .spec.arguments.parameters[]? | select(.name == "slot") | .value] as $busy
+        | [$slots[] | select(. as $s | ([$busy[] | select(. == $s)] | length) == 0)] | .[0] // empty'
+    return
+  fi
   api GET "/api/v1/workflows/$NS?listOptions.labelSelector=workflows.argoproj.io/completed!=true&fields=items.spec.arguments.parameters" |
     jq -r --arg all "$all" '
       ($all | split(" ")) as $slots
@@ -194,16 +229,56 @@ fetch_results() {
   rm -f "$tgz"
 }
 
+# gate_exit <phase> <result.txt>: the lab-gate exit status from the gate's verdict line
+# (hack/lab/gate-run.sh): pass 0, fail its rc (1 when it has none), notrun 76. Without a verdict
+# (a commit whose template fell back to light-run.sh, or a pod that died first) the phase decides.
+gate_exit() {
+  local phase=$1 f=$2 verdict="" grc=""
+  verdict=$(sed -n 's/.* verdict=\([a-z]*\).*/\1/p' "$f" 2>/dev/null | tail -1 || true)
+  grc=$(sed -n 's/.* rc=\([0-9]*\) .*/\1/p' "$f" 2>/dev/null | tail -1 || true)
+  case $verdict in
+  pass) return 0 ;;
+  notrun) echo "e2e-remote --argo: NOT RUN: the gate skipped what it expected to run (result.txt: $(tr -d '\n' <"$f"))" >&2; return 76 ;;
+  fail) [[ -n $grc && $grc != 0 ]] && return "$grc"; return 1 ;;
+  esac
+  [[ $phase == Succeeded ]] && return 0
+  [[ -n $grc && $grc != 0 ]] && return "$grc"
+  return 1
+}
+
 # follow_run: poll until the run ends; print phase changes and stage lines; fetch the results.
+# follow_log: stream the main container's log as it is written (gate lane), in the background.
+follow_log() {
+  [[ -z $log_pid ]] || return 0
+  {
+    printf 'header = "Authorization: Bearer %s"\n' "$token" |
+      curl -K - -sSN "$SERVER/api/v1/workflows/$NS/$name/log?logOptions.container=main&logOptions.follow=true" 2>/dev/null |
+      jq -r --unbuffered '.result.content? // empty' 2>/dev/null || true
+  } &
+  log_pid=$!
+}
+
+# give_up: stop and delete the run that never started; exit 75, the caller runs the gate locally.
+give_up() {
+  echo "e2e-remote --argo: $name is still Pending after ${GATE_PENDING}s (slot mutex, namespace limit or quota); giving up, run the gate locally" >&2
+  api PUT "/api/v1/workflows/$NS/$name/stop" '{}' >/dev/null 2>&1 || true
+  api DELETE "/api/v1/workflows/$NS/$name" >/dev/null 2>&1 || true
+  finished=1
+  exit 75
+}
+
 follow_run() {
-  local phase="" last="" msg seen="" line rc
+  local phase="" last="" msg seen="" line rc pending_since=$SECONDS
   echo "== following $name ($SERVER/workflows/$NS/$name)"
   while :; do
     # A failed poll (a network blip) keeps the last phase; the next poll tries again.
     read -r phase msg < <(api GET "/api/v1/workflows/$NS/$name?fields=status.phase,status.message" 2>/dev/null |
       jq -r '"\(.status.phase // "Pending") \(.status.message // "")"' 2>/dev/null) || { phase=${last:-Pending}; msg=""; }
     if [[ $phase != "$last" ]]; then echo "== $(date -u +%H:%M:%SZ) $phase${msg:+: $msg}"; last=$phase; fi
-    if [[ $phase == Running ]]; then
+    if [[ $lane == gate ]]; then
+      if [[ $phase == Pending && $((SECONDS - pending_since)) -ge $GATE_PENDING ]]; then give_up; fi
+      [[ $phase == Pending ]] || follow_log
+    elif [[ $phase == Running ]]; then
       while IFS= read -r line; do
         case $seen in *"|$line|"*) ;; *) echo "$line"; seen+="|$line|" ;; esac
       done < <(stage_lines $((POLL + 30)))
@@ -212,6 +287,10 @@ follow_run() {
     sleep "$POLL"
   done
   finished=1
+  if [[ -n $log_pid ]]; then
+    wait "$log_pid" 2>/dev/null || true # the stream ends with the run: its last lines
+    log_pid=""
+  fi
   : "${out:=$(git rev-parse --show-toplevel)/.e2e-out/$name}"
   fetch_results "$out"
   echo
@@ -219,6 +298,11 @@ follow_run() {
   [[ -f $out/quickstart-timings.md ]] && cat "$out/quickstart-timings.md"
   [[ -d $out/diagnostics ]] && echo "diagnostics in $out/diagnostics"
   rc=0
+  if [[ $lane == gate ]]; then
+    gate_exit "$phase" "$out/result.txt" || rc=$?
+    echo "gate ($target) $phase, exit status $rc"
+    return "$rc"
+  fi
   if [[ $phase != Succeeded ]]; then
     rc=$(sed -n 's/.* rc=\([0-9]*\) .*/\1/p' "$out/result.txt" 2>/dev/null || true)
     if [[ $rc == 0 ]]; then
@@ -239,8 +323,10 @@ if [[ -n $follow ]]; then
   [[ $dry == 0 ]] || { echo "+ follow $name"; exit 0; }
   open_creds
   # The run's own target, for the last line (the default is the kind lane's).
-  target=$(api GET "/api/v1/workflows/$NS/$name?fields=spec.arguments.parameters" 2>/dev/null |
-    jq -r '[.spec.arguments.parameters[]? | select(.name == "target") | .value][0] // empty' 2>/dev/null || true)
+  params=$(api GET "/api/v1/workflows/$NS/$name?fields=spec.arguments.parameters" 2>/dev/null || true)
+  target=$(jq -r '[.spec.arguments.parameters[]? | select(.name == "target" or .name == "gate-set") | .value][0] // empty' <<<"$params" 2>/dev/null || true)
+  # A gate run is recognised by its gate-set parameter.
+  [[ $(jq -r '[.spec.arguments.parameters[]? | select(.name == "gate-set")] | length' <<<"$params" 2>/dev/null || echo 0) == 0 ]] || lane=gate
   target=${target:-run}
   follow_run
   exit
@@ -256,7 +342,7 @@ if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
 fi
 if [[ $dry == 1 ]]; then
   echo "+ git bundle of ${sha:0:12} -> $BUNDLE_URL/$object"
-  echo "+ submit ($lane lane) $NS/$([[ $lane == light ]] && echo inline || echo "$TEMPLATE") target=$target ref=$sha bundle=$object agent=$label slot=${slot:-<least busy>}"
+  echo "+ submit ($lane lane) $NS/$(case $lane in light) echo inline ;; gate) echo "$GATE_TEMPLATE" ;; *) echo "$TEMPLATE" ;; esac) target=$target ref=$sha bundle=$object agent=$label slot=${slot:-<least busy>}"
   [[ $wait == 0 ]] || echo "+ follow the run, results to ${out:-.e2e-out/<run>}"
   exit 0
 fi
@@ -273,8 +359,21 @@ echo "== uploading the bundle of ${sha:0:12} ($(wc -c <"$bundle" | tr -d ' ') by
 s3_put "$bundle" "$object" || { rm -f "$bundle"; exit 1; }
 rm -f "$bundle"
 
-[[ -n $slot ]] || slot=$(pick_slot)
-if [[ $lane == light ]]; then
+if [[ $lane == gate ]]; then
+  # Anything that goes wrong reaching the lab leaves the caller to run the gate locally (75).
+  [[ -n $slot ]] || slot=$(pick_slot) || { echo "e2e-remote --argo: the lab is unreachable; run the gate locally" >&2; exit 75; }
+  [[ -n $slot ]] || { echo "e2e-remote --argo: every gate slot is busy; run the gate locally" >&2; exit 75; }
+else
+  [[ -n $slot ]] || slot=$(pick_slot)
+fi
+if [[ $lane == gate ]]; then
+  body=$(jq -nc --arg t "$GATE_TEMPLATE" --arg g "$target" --arg ref "$sha" --arg b "$object" \
+    --arg a "$label" --arg s "$slot" '{resourceKind: "WorkflowTemplate", resourceName: $t,
+      submitOptions: {parameters: ["gate-set=\($g)", "ref=\($ref)", "bundle=\($b)", "agent=\($a)", "slot=\($s)"],
+                      labels: "lab.example.invalid/agent=\($a),lane=gate,target=\($g)"}}')
+  name=$(api POST "/api/v1/workflows/$NS/submit" "$body" | jq -r '.metadata.name // empty') ||
+    { echo "e2e-remote --argo: the submit failed; run the gate locally" >&2; exit 75; }
+elif [[ $lane == light ]]; then
   # The manifest with its parameters filled in; "//" holds its comments and is not a Workflow field.
   body=$(jq -c --arg target "$target" --arg ref "$sha" --arg b "$object" --arg a "$label" --arg s "$slot" '
     del(."//")
