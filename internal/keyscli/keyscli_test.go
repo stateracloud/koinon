@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/keyscli"
@@ -347,5 +349,115 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(created).To(BeFalse())
 		got, _ := fresh.CoreV1().Secrets(ns).Get(ctx, "mine", metav1.GetOptions{})
 		Expect(got.Data).To(HaveLen(1))
+	})
+	Describe("on a terminal", func() {
+		var asked *bytes.Buffer
+		ask := func(input string) {
+			asked = &bytes.Buffer{}
+			tool.Prompt = &cli.Prompter{In: strings.NewReader(input), Out: asked, Accessible: true}
+		}
+		active := func(ctx SpecContext) string {
+			GinkgoHelper()
+			set, err := ks.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			return set.Active
+		}
+
+		It("activate without an ID picks an inactive KEK, with its age and values, and confirms", func(ctx SpecContext) {
+			Expect(tool.Add(ctx, "kek-20261001-bbbb")).To(Succeed())
+			ask("1\nn\n")
+			Expect(tool.Activate(ctx, "")).To(MatchError(cli.ErrCancelled))
+			Expect(asked.String()).To(And(ContainSubstring("kek-20261001-bbbb  added 22 days ago  wraps 0 value(s)"),
+				ContainSubstring("Activate kek-20261001-bbbb?")))
+			Expect(asked.String()).NotTo(ContainSubstring("kek-20260101-aaaa"), "the active KEK is not offered")
+			Expect(active(ctx)).To(Equal("kek-20260101-aaaa"), "declining changes nothing")
+
+			ask("1\ny\n")
+			Expect(tool.Activate(ctx, "")).To(Succeed())
+			Expect(active(ctx)).To(Equal("kek-20261001-bbbb"))
+		})
+
+		It("activate with an ID confirms too, and --yes skips the confirmation", func(ctx SpecContext) {
+			Expect(tool.Add(ctx, "kek-20261001-bbbb")).To(Succeed())
+			ask("n\n")
+			Expect(tool.Activate(ctx, "kek-20261001-bbbb")).To(MatchError(cli.ErrCancelled))
+			ask("")
+			tool.Yes = true
+			Expect(tool.Activate(ctx, "kek-20261001-bbbb")).To(Succeed())
+			Expect(asked.String()).To(BeEmpty())
+		})
+
+		It("activate has nothing to pick when only the active KEK exists", func(ctx SpecContext) {
+			ask("1\n")
+			Expect(tool.Activate(ctx, "")).To(MatchError(ContainSubstring("no inactive KEK")))
+		})
+
+		It("retire without an ID lists KEKs in use as unavailable and confirms with the escrow warning", func(ctx SpecContext) {
+			seed(ctx, 2)
+			Expect(tool.Add(ctx, "kek-20261001-bbbb")).To(Succeed())
+			Expect(tool.Add(ctx, "kek-20261002-cccc")).To(Succeed())
+			Expect(tool.Activate(ctx, "kek-20261001-bbbb")).To(Succeed())
+			now = now.Add(6 * time.Minute)
+
+			ask("1\nn\n")
+			Expect(tool.Retire(ctx, "")).To(MatchError(cli.ErrCancelled))
+			Expect(asked.String()).To(And(
+				ContainSubstring("kek-20260101-aaaa  added"), ContainSubstring("2 value(s) still use KEK kek-20260101-aaaa"),
+				ContainSubstring("kek-20261001-bbbb  added"), ContainSubstring("is the active KEK"),
+				ContainSubstring("1. kek-20261002-cccc"), ContainSubstring("backup escrow")))
+			set, _ := ks.Load(ctx)
+			Expect(set.Keys).To(HaveLen(3))
+
+			ask("1\ny\n")
+			Expect(tool.Retire(ctx, "")).To(Succeed())
+			set, _ = ks.Load(ctx)
+			Expect(set.Keys).NotTo(HaveKey("kek-20261002-cccc"))
+		})
+
+		It("retire says so when no KEK can be retired", func(ctx SpecContext) {
+			seed(ctx, 1)
+			ask("1\n")
+			Expect(tool.Retire(ctx, "")).To(MatchError(ContainSubstring("no KEK can be retired")))
+		})
+
+		It("rewrap confirms with the count of values it will change", func(ctx SpecContext) {
+			seed(ctx, 3)
+			Expect(tool.Add(ctx, "kek-20261001-bbbb")).To(Succeed())
+			Expect(tool.Activate(ctx, "kek-20261001-bbbb")).To(Succeed())
+			ask("n\n")
+			Expect(tool.Rewrap(ctx)).To(MatchError(cli.ErrCancelled))
+			Expect(asked.String()).To(ContainSubstring("Rewrap 3 value(s) under kek-20261001-bbbb?"))
+			Expect(usage(ctx)).To(Equal(map[string]int{"kek-20260101-aaaa": 3}))
+			ask("y\n")
+			Expect(tool.Rewrap(ctx)).To(Succeed())
+			Expect(usage(ctx)).To(Equal(map[string]int{"kek-20261001-bbbb": 3}))
+		})
+
+		It("reencrypt wants the active KEK ID typed", func(ctx SpecContext) {
+			ids := seed(ctx, 1)
+			var before []byte
+			Expect(pool.QueryRow(ctx, `SELECT api_key FROM providers WHERE id = $1`, ids[0]).Scan(&before)).To(Succeed())
+			changed := func() bool {
+				var after []byte
+				Expect(pool.QueryRow(ctx, `SELECT api_key FROM providers WHERE id = $1`, ids[0]).Scan(&after)).To(Succeed())
+				return !bytes.Equal(before, after)
+			}
+
+			ask("")
+			Expect(tool.Reencrypt(ctx)).To(MatchError(cli.ErrCancelled))
+			Expect(changed()).To(BeFalse())
+
+			ask("yes\nkek-20260101-aaaa\n")
+			Expect(tool.Reencrypt(ctx)).To(Succeed())
+			Expect(asked.String()).To(And(ContainSubstring("Re-encrypt 1 value(s)"), ContainSubstring("type kek-20260101-aaaa to continue")))
+			Expect(changed()).To(BeTrue())
+		})
+
+		It("does not ask without a prompter: a missing ID is the old error and nothing is confirmed", func(ctx SpecContext) {
+			tool.Prompt = nil
+			Expect(tool.Activate(ctx, "")).To(MatchError("a KEK ID is required"))
+			Expect(tool.Rewrap(ctx)).To(Succeed())
+			Expect(tool.Reencrypt(ctx)).To(Succeed())
+		})
 	})
 })
