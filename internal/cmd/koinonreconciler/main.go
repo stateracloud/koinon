@@ -45,6 +45,7 @@ import (
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/schemagate"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -122,12 +123,13 @@ func serve(ctx context.Context, cfg config) error {
 		})
 		defer func() { _ = health.Close() }()
 	}
-	// The KEKs are local (Secret-held) until a KMS adapter is configured (ADR 0085 decision 12;
-	// #416, #417): the zero secretstore.Wrappers.
-	var (
-		keyring  *secretstore.Keyring
-		wrappers secretstore.Wrappers
-	)
+	// The KEKs are unwrapped as cfg.kekWrapping says (ADR 0085 decision 12): the default local KEK,
+	// or an opted-in KMS. The reconciler only unwraps.
+	var keyring *secretstore.Keyring
+	wrappers, err := wrapping.New(ctx, cfg.kekWrapping, wrapping.Service)
+	if err != nil {
+		return err
+	}
 	for lastWarn := (time.Time{}); keyring == nil; {
 		if keyring, err = secretstore.LoadDir(ctx, cfg.kekDir, wrappers); err != nil {
 			if time.Since(lastWarn) >= time.Minute {

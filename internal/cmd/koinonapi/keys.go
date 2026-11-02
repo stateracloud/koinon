@@ -18,12 +18,15 @@ import (
 
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/keyscli"
+	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 )
 
 type keysOptions struct {
 	dbURL, kekSecret, kekDir, namespace, kubeconfig, id string
 	period                                              time.Duration
 	yes                                                 bool
+	// wrapping is how the KEKs are wrapped; zero is the default local Secret-held KEK.
+	wrapping wrapping.Config
 }
 
 // prompterFor decides whether a keys command may ask the person (cli.PrompterFor); tests replace it.
@@ -96,8 +99,12 @@ func newKeysCommand() *cobra.Command {
 
 func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out io.Writer, prompt *cli.Prompter) error {
 	var store keyscli.Store
-	// The KEKs are local (Secret-held) until a KMS adapter is configured (#416, #417): the zero
-	// secretstore.Wrappers in the stores.
+	// These commands run in the koinon-api pod, so they are a service: with the default local KEK
+	// they add keys as before; with an opted-in KMS, only the key-admin Job adds them.
+	wrappers, err := wrapping.New(ctx, o.wrapping, wrapping.Service)
+	if err != nil {
+		return err
+	}
 	switch {
 	case o.kekSecret != "":
 		if o.namespace == "" {
@@ -107,9 +114,9 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		if err != nil {
 			return err
 		}
-		store = keyscli.KubeStore{Client: client, Namespace: o.namespace, Name: o.kekSecret}
+		store = keyscli.KubeStore{Client: client, Namespace: o.namespace, Name: o.kekSecret, Wrappers: wrappers}
 	case o.kekDir != "":
-		store = keyscli.DirStore{Dir: o.kekDir}
+		store = keyscli.DirStore{Dir: o.kekDir, Wrappers: wrappers}
 	default:
 		return errors.New("set --kek-secret or --kek-dir")
 	}

@@ -4,6 +4,8 @@ package secretstoretest
 
 import (
 	"bytes"
+	"context"
+	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -13,12 +15,31 @@ import (
 
 // WrapperContract declares the specs every secretstore.Wrapper that really wraps (a KMS adapter)
 // passes: call it inside a Describe of the adapter's suite, with a function that returns a wrapper
-// over a reachable test key (an OpenBao dev container, LocalStack KMS). The test KEK is obviously
-// fake.
-func WrapperContract(newWrapper func() secretstore.Wrapper) {
+// over a reachable test key (an OpenBao dev container, LocalStack KMS). newHanging returns the
+// adapter pointed at a backend that accepts connections and never answers (a listener that never
+// replies); nil skips that spec. The test KEK is obviously fake.
+func WrapperContract(newWrapper, newHanging func() secretstore.Wrapper) {
 	kek := bytes.Repeat([]byte("k"), secretstore.KeySize)
 	aad := []byte("koinon-test-aad")
 	expect := gomega.Expect
+
+	ginkgo.It("gives up by the context's deadline when the backend never answers", func(ctx ginkgo.SpecContext) {
+		if newHanging == nil {
+			ginkgo.Skip("no hanging backend for this adapter")
+		}
+		w := newHanging()
+		for name, call := range map[string]func(context.Context) error{
+			"unwrap": func(c context.Context) error { _, err := w.Unwrap(c, []byte("koinon-test"), aad); return err },
+			"probe":  w.Probe,
+		} {
+			c, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+			start := time.Now()
+			err := call(c)
+			cancel()
+			expect(err).To(gomega.MatchError(secretstore.ErrUnreachable), name)
+			expect(time.Since(start)).To(gomega.BeNumerically("<", 2*time.Second), name)
+		}
+	})
 
 	ginkgo.It("names a fixed backend and its key", func() {
 		w := newWrapper()

@@ -33,11 +33,15 @@
 //     no credential in Helm values, env or a sandbox.
 //
 // The KMS is called when a key set is loaded or reloaded, never once per value: [Keyring.Seal]
-// and [Keyring.Open] stay local and synchronous, a short KMS outage does not stop reads, and the
-// processes that only load keys need decrypt rights alone. Only wrapping a new KEK ("keys add",
-// and koinon-api creating the first one) needs encrypt rights. [Wrapper.Probe] is what the
-// unreachable-key metric and "keys status" call. [Wrappers] picks the adapter of each stored KEK,
-// so a key set can move from one backend to another by add, activate, rewrap and retire.
+// and [Keyring.Open] stay local and synchronous, and a short KMS outage does not stop reads. The
+// services (koinon-api, the reconciler, agentd) only unwrap; wrapping a new KEK with a KMS is the
+// key-admin Job's alone ([ErrKeyAdminWraps]; the Job comes with the KMS adapters). [Wrappers] picks
+// the adapter of each stored KEK, so a key set can move from one backend to another by add,
+// activate, rewrap and retire.
+//
+// What exists today: the interface, [Local], the stored form and [Fingerprint] (printed by
+// "keys status" and "keys export"). Not yet: the fingerprints recorded in the database and the
+// unreachable-key metric that calls [Wrapper.Probe] (415b), and the KMS adapters (#416, #417).
 //
 // # Additional authenticated data
 //

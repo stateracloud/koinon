@@ -4,22 +4,28 @@ package secretstore_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
+	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 )
 
 var _ = Describe("Key wrapping", func() {
 	Describe("the fake KMS", func() {
-		secretstoretest.WrapperContract(func() secretstore.Wrapper { return &secretstoretest.FakeKMS{} })
+		secretstoretest.WrapperContract(
+			func() secretstore.Wrapper { return &secretstoretest.FakeKMS{} },
+			func() secretstore.Wrapper { f := &secretstoretest.FakeKMS{}; f.Hang.Store(true); return f },
+		)
 	})
 
 	It("stores a local KEK exactly as before, so old Secrets and backups read unchanged", func(ctx SpecContext) {
@@ -42,7 +48,7 @@ var _ = Describe("Key wrapping", func() {
 
 	It("loads a key set that mixes local and KMS-wrapped KEKs", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
-		ws, err := secretstore.NewWrappers(kms)
+		ws, err := secretstore.NewKeyAdminWrappers(kms)
 		Expect(err).NotTo(HaveOccurred())
 		oldKey, newKey := key(), key()
 		s, err := ws.Wrap(ctx, "k2", newKey)
@@ -75,7 +81,7 @@ var _ = Describe("Key wrapping", func() {
 	})
 
 	It("binds a wrapped KEK to its ID", func(ctx SpecContext) {
-		ws, _ := secretstore.NewWrappers(&secretstoretest.FakeKMS{})
+		ws, _ := secretstore.NewKeyAdminWrappers(&secretstoretest.FakeKMS{})
 		s, err := ws.Wrap(ctx, "k1", key())
 		Expect(err).NotTo(HaveOccurred())
 		_, err = ws.Unwrap(ctx, "k2", s)
@@ -84,7 +90,7 @@ var _ = Describe("Key wrapping", func() {
 
 	It("tells an unreachable KMS from a wrong key, and a failed reload keeps the old keys", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
-		ws, _ := secretstore.NewWrappers(kms)
+		ws, _ := secretstore.NewKeyAdminWrappers(kms)
 		s, err := ws.Wrap(ctx, "k1", key())
 		Expect(err).NotTo(HaveOccurred())
 		v, _ := s.Encode()
@@ -105,7 +111,7 @@ var _ = Describe("Key wrapping", func() {
 
 	It("opens a key set with a decrypt-only identity; only a new KEK needs encrypt", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
-		ws, _ := secretstore.NewWrappers(kms)
+		ws, _ := secretstore.NewKeyAdminWrappers(kms)
 		s, err := ws.Wrap(ctx, "k1", key())
 		Expect(err).NotTo(HaveOccurred())
 		kms.DecryptOnly.Store(true)
@@ -149,6 +155,46 @@ var _ = Describe("Key wrapping", func() {
 		Expect(err).To(MatchError(ContainSubstring("configured twice")))
 		_, err = secretstore.NewWrappers(nil)
 		Expect(err).To(HaveOccurred())
+	})
+
+	It("lets a service wrap with the default local KEK, as before key wrapping", func(ctx SpecContext) {
+		ws, err := wrapping.New(ctx, wrapping.Config{}, wrapping.Service)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Primary().Backend()).To(Equal(secretstore.BackendLocal))
+		s, err := ws.Wrap(ctx, "k1", key())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(s.Backend).To(Equal(secretstore.BackendLocal))
+	})
+
+	It("never lets a service wrap with an opted-in KMS, and never calls it to try", func(ctx SpecContext) {
+		kms := &secretstoretest.FakeKMS{}
+		kms.DecryptOnly.Store(true)
+		admin, _ := secretstore.NewKeyAdminWrappers(&secretstoretest.FakeKMS{})
+		s, err := admin.Wrap(ctx, "k1", key())
+		Expect(err).NotTo(HaveOccurred())
+
+		service, err := secretstore.NewWrappers(kms)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = service.Wrap(ctx, "k2", key())
+		Expect(err).To(MatchError(secretstore.ErrKeyAdminWraps))
+		Expect(err.Error()).To(ContainSubstring("new KEKs are wrapped by the key-admin Job"))
+		Expect(kms.Wraps()).To(BeZero())
+		_, err = service.Unwrap(ctx, "k1", s)
+		Expect(err).NotTo(HaveOccurred(), "a decrypt-only service still unwraps")
+	})
+
+	It("bounds each adapter call, whatever the caller's context", func(ctx SpecContext) {
+		kms := &secretstoretest.FakeKMS{}
+		admin, _ := secretstore.NewKeyAdminWrappers(kms)
+		s, err := admin.Wrap(ctx, "k1", key())
+		Expect(err).NotTo(HaveOccurred())
+		kms.Hang.Store(true)
+		ws := admin.WithCallTimeout(100 * time.Millisecond)
+		start := time.Now()
+		_, err = ws.Unwrap(context.Background(), "k1", s) // a watch loop's long-lived context
+		Expect(err).To(MatchError(secretstore.ErrUnreachable))
+		Expect(ws.Probe(context.Background(), s)).To(MatchError(secretstore.ErrUnreachable))
+		Expect(time.Since(start)).To(BeNumerically("<", 2*time.Second))
 	})
 
 	It("fingerprints a KEK stably without revealing it", func() {
