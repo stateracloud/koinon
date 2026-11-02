@@ -53,8 +53,9 @@ import (
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/mcpask"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/runoutcome"
+	"github.com/stateracloud/koinon/internal/runpark"
 	"github.com/stateracloud/koinon/internal/savedwork"
-	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
@@ -363,52 +364,12 @@ func (s *Service) Deny(ctx context.Context, org, id, approver pgtype.UUID, note 
 		if row.System {
 			return nil
 		}
-		return ResolveRun(ctx, q, org, row.RunID)
+		return runpark.Resolve(ctx, q, org, row.RunID)
 	})
 	if err == nil {
 		s.log.Info("approval denied", attrs(row)...)
 	}
 	return row, err
-}
-
-// ResolveRun makes a run parked on approvals or questions (reasons approval and input_required)
-// claimable once none of its approval requests is open and no question of it waits for a person,
-// and moves its task back from Waiting on you. It locks the run row first; call it in the
-// transaction that resolved a request.
-func ResolveRun(ctx context.Context, q *store.Queries, org, runID pgtype.UUID) error {
-	run, err := q.LockRun(ctx, store.LockRunParams{OrgID: org, ID: runID})
-	if err != nil {
-		return err
-	}
-	reason := run.ParkReason.RunParkReason
-	if run.State != store.RunStateParked || run.ReadyAt.Valid ||
-		(reason != store.RunParkReasonApproval && reason != store.RunParkReasonInputRequired) {
-		// Still running: agentd sees the outcome when it ends the turn.
-		return nil
-	}
-	reqs, err := q.ListUndeliveredApprovalRequestsForRun(ctx, store.ListUndeliveredApprovalRequestsForRunParams{OrgID: org, RunID: runID})
-	if err != nil {
-		return err
-	}
-	for _, r := range reqs {
-		if r.Status.Open() {
-			return nil
-		}
-	}
-	if n, err := q.CountOpenQuestionsForRun(ctx, store.CountOpenQuestionsForRunParams{OrgID: org, RunID: runID}); err != nil || n > 0 {
-		return err
-	}
-	if _, err := q.ResolveRunPark(ctx, store.ResolveRunParkParams{OrgID: org, ID: runID}); err != nil {
-		return err
-	}
-	_, err = q.SetTaskStateFrom(ctx, store.SetTaskStateFromParams{
-		OrgID: org, ID: run.TaskID, ToState: store.TaskStateWorking,
-		FromStates: []string{string(store.TaskStateInputRequired)},
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	return err
 }
 
 // permanentError is an execution failure that a retry would not fix.
@@ -487,7 +448,7 @@ func (s *Service) Execute(ctx context.Context, org, id pgtype.UUID) (store.Appro
 			}
 			return nil
 		}
-		return ResolveRun(ctx, q, org, out.RunID)
+		return runpark.Resolve(ctx, q, org, out.RunID)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Another executor took over after our lease ran out; its outcome counts.
@@ -649,9 +610,11 @@ func (s *Service) cancelExpiredRun(ctx context.Context, q *store.Queries, org, r
 		// The run is parked on an open question too (ADR 0065 TK3: only parks with reason
 		// approval are canceled here). The approval is expired, so the run resumes with
 		// "approval expired" once its questions are resolved.
-		return false, ResolveRun(ctx, q, org, runID)
+		return false, runpark.Resolve(ctx, q, org, runID)
 	}
-	if _, err := scheduler.Cancel(ctx, q, org, runID, scheduler.ReasonApprovalExpired, expiredMessage, scheduler.System); err != nil {
+	if _, err := runoutcome.CancelUnowned(ctx, q, org, runID, runoutcome.Cancellation{
+		Reason: runoutcome.ReasonApprovalExpired, Message: expiredMessage, Actor: runoutcome.System,
+	}); err != nil {
 		return false, err
 	}
 	if _, err := s.cancelPending(ctx, q, org, runID, expiredMessage); err != nil {

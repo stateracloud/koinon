@@ -22,6 +22,7 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/questions"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/wake"
 )
@@ -312,7 +313,7 @@ func (s *Server) setState(ctx context.Context, c caller, id pgtype.UUID, cancelM
 			}
 		}
 		if isEnded(to) {
-			if runs, err = scheduler.CancelQueuedForTask(ctx, q, t, cancelMsg, scheduler.Actor{UserID: c.actor()}); err != nil {
+			if runs, err = runoutcome.CancelQueuedForTask(ctx, q, t, cancelMsg, runoutcome.Actor{UserID: c.actor()}); err != nil {
 				return err
 			}
 		}
