@@ -751,8 +751,12 @@ event classes. The code lands in #344 (items), #345 (business and diagnostic eve
   (#345). It counts business writes too: those abandon the run, as before. The class of every kind
   agentd writes is the table in `internal/runoutcome/eventclass.go`; an unlisted kind is business. A
   diagnostic write is tried twice, a business one five times; a write that matches no row fences the
-  run whatever its class, since the run is no longer the worker's. One deviation from the classes in
-  decision 2: `acp.tool_call` and `acp.tool_call_update` are business, because the task's reply
-  (`internal/runreply`) uses them as the boundaries of the agent's messages, and dropping one would
-  merge interim narration into the reply. When #344 turns chunks into items, the reply still needs
-  those boundaries.
+  run whatever its class, since the run is no longer the worker's.
+- **This overrides decision 2 for tool calls** (#345, 2026-11-02): `acp.tool_call` and
+  `acp.tool_call_update` are business events, not diagnostic ones as "tool-call items" in decision 2
+  says, and so are the agent's message chunks (`acp.agent_message_chunk`). The rule that decides it:
+  an event the run's outcome or the task's reply reads is business. The reply (`internal/runreply`)
+  is built from the message chunks and uses the tool calls as the boundaries between the agent's
+  messages; a dropped tool call would merge the agent's interim narration ("I'll pull the data ...")
+  into the reply the task posts. When #344 turns chunks into items, the reply still needs those
+  boundaries, so the items keep the class.
