@@ -39,7 +39,7 @@ chmod +x "$tmp/gh"
 export GH="$tmp/gh" GH_REPO=o/r HEAD_SHA=abc1234def BRANCH=fix/1-x POLL=0 WAIT_MAX=5 LIST_POLL=0 LIST_MAX=3
 
 fail=0
-fresh() { FAKE=$(mktemp -d "$tmp/w.XXXX"); export FAKE; }
+fresh() { FAKE=$(mktemp -d "$tmp/w.XXXXXX"); export FAKE; }
 # run_json <N> <runs...>: each run is id:event:title:status.
 run_json() {
   local n=$1 r id ev title st out=""
