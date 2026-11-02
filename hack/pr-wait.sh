@@ -12,7 +12,10 @@
 #              required check that is missing, skipped or not green exits 1 (`REQUIRED <name> missing|skipped|failed`).
 #              Only the newest check run of that name on the head counts: a later success supersedes an
 #              earlier skip or cancel, and a cancelled or skipped run never outranks one that is queued or
-#              in progress (even at the same startedAt): it keeps waiting for the live run. If the newest is skipped or cancelled, the next line suggests
+#              in progress (even at the same startedAt): it keeps waiting for the live run. A required check
+#              that is missing, skipped or cancelled while an e2e-kind run on the head is still queued or in
+#              progress (whose jobs may not exist yet, #468) is waited for too: `waiting for e2e-kind run <id>`.
+#              Otherwise, if the newest is skipped or cancelled, the next line suggests
 #              `gh workflow run e2e-kind.yml --ref <branch>`.
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
 #   --interval 20 seconds by default
@@ -91,6 +94,13 @@ norm='def newest: sort_by(.ts) | . as $s | ($s | last) as $l
 reqjson=$(printf '%s\n' ${required[@]+"${required[@]}"} | jq -R . | jq -sc .)
 jqn() { jq --argjson req "$reqjson" "$@"; }
 
+# live_e2e <sha>: the e2e-kind runs on the commit that have not completed (queued, waiting, pending,
+# in progress), comma-separated. A run's jobs, and so its checks, appear only once it starts.
+live_e2e() {
+  gh run list --commit "$1" --workflow e2e-kind.yml --limit 20 --json databaseId,status \
+    --jq '[.[] | select(.status != "completed") | .databaseId | tostring] | join(",")' 2>/dev/null || true
+}
+
 last=""
 emit() { # print only when the line differs from the previous one
   if [ "$1" != "$last" ]; then
@@ -101,7 +111,7 @@ emit() { # print only when the line differs from the previous one
 
 start=$SECONDS
 while :; do
-  if json=$(gh pr view "$pr" --json state,mergeStateStatus,mergeCommit,statusCheckRollup,headRefName 2>/dev/null) && [ -n "$json" ]; then
+  if json=$(gh pr view "$pr" --json state,mergeStateStatus,mergeCommit,statusCheckRollup,headRefName,headRefOid 2>/dev/null) && [ -n "$json" ]; then
     state=$(jq -r '.state // ""' <<<"$json")
     mstate=$(jq -r '.mergeStateStatus // ""' <<<"$json")
     case $state in
@@ -116,8 +126,16 @@ while :; do
       ;;
     esac
     branch=$(jq -r '.headRefName // "<branch>"' <<<"$json")
+    head=$(jq -r '.headRefOid // ""' <<<"$json")
+    live=""
     failed=$(jqn -r "$norm | .[] | select(.bad) | [.name, .cancelled, ((.url | capture(\"/runs/(?<r>[0-9]+)\")? | .r) // \"\")] | @tsv" <<<"$json")
-    if [ -n "$failed" ]; then
+    # The only failures are cancelled runs of required checks: an e2e-kind run on the head that has
+    # not created its jobs yet may still bring them (#468), so wait for it instead of failing.
+    if [ -n "$failed" ] && [ -n "$head" ] &&
+      jqn -e "$norm | [.[] | select(.bad)] | all(.cancelled and (.name | IN(\$req[])))" <<<"$json" >/dev/null; then
+      live=$(live_e2e "$head")
+    fi
+    if [ -z "$live" ] && [ -n "$failed" ]; then
       while IFS=$'\t' read -r name cancelled run; do
         if [ -n "$run" ]; then echo "FAILED $name (run $run)"; else echo "FAILED $name"; fi
         for r in ${required[@]+"${required[@]}"}; do
@@ -136,26 +154,35 @@ while :; do
     total=$(jqn "$norm | length" <<<"$json")
     pending=$(jqn -r "$norm | [.[] | select(.done | not) | .name] | sort | join(\",\")" <<<"$json")
     ndone=$(jqn "$norm | [.[] | select(.done)] | length" <<<"$json")
-    if [ "$total" -gt 0 ] && [ -z "$pending" ]; then
+    if [ -n "$live" ]; then
+      emit "waiting for e2e-kind run $live on ${head:0:7}"
+    elif [ "$total" -gt 0 ] && [ -z "$pending" ]; then
       if [ "$mode" = checks ] && [ ${#required[@]} -gt 0 ]; then
-        reqfail=0
+        whys=()
         for name in "${required[@]}"; do
           why=$(jqn -r --arg n "$name" "$norm | [.[] | select(.name == \$n)] | if length == 0 then \"missing\" elif any(.[]; .skipped) then \"skipped\" else \"\" end" <<<"$json")
-          if [ -n "$why" ]; then
+          [ -z "$why" ] || whys+=("$name"$'\t'"$why")
+        done
+        # A required check that is missing or skipped may still come from a live e2e-kind run.
+        [ ${#whys[@]} -eq 0 ] || [ -z "$head" ] || live=$(live_e2e "$head")
+        if [ -n "$live" ]; then
+          emit "waiting for e2e-kind run $live on ${head:0:7}"
+        elif [ ${#whys[@]} -gt 0 ]; then
+          for w in "${whys[@]}"; do
+            name=${w%%$'\t'*} why=${w#*$'\t'}
             echo "REQUIRED $name $why"
             if [ "$why" = skipped ]; then
               echo "only skipped runs of $name on this head; run: gh workflow run e2e-kind.yml --ref $branch"
             fi
-            reqfail=1
-          fi
-        done
-        [ "$reqfail" -eq 0 ] || exit 1
+          done
+          exit 1
+        fi
       fi
-      if [ "$mode" = checks ]; then
+      if [ -z "$live" ] && [ "$mode" = checks ]; then
         echo "checks $total/$total green"
         exit 0
       fi
-      emit "checks $total/$total green"
+      [ -n "$live" ] || emit "checks $total/$total green"
     elif [ -n "$pending" ]; then
       emit "checks $ndone/$total pending: $pending"
     else

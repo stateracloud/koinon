@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Tests hack/pr-wait.sh offline: `gh` is a stub on PATH that answers `gh pr view` with the next JSON
-# state of a scripted sequence (the last one repeats) and records every call.
+# state of a scripted sequence (the last one repeats) and records every call. `gh run list` answers
+# with the next line of $FAKE_DIR/runs (the live e2e-kind runs on the head; the last line repeats,
+# none when the file is absent).
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -14,6 +16,13 @@ export FAKE_DIR="$tmp/seq" PATH="$tmp/bin:$PATH"
 cat >"$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 echo "$*" >>"$FAKE_DIR/calls"
+if [ "$1 $2" = "run list" ]; then
+  [ -f "$FAKE_DIR/runs" ] || exit 0
+  m=$(($(cat "$FAKE_DIR/rn" 2>/dev/null || echo 0) + 1))
+  echo "$m" >"$FAKE_DIR/rn"
+  sed -n "${m}p" "$FAKE_DIR/runs" | grep . || tail -n 1 "$FAKE_DIR/runs"
+  exit 0
+fi
 [ "$1 $2" = "pr view" ] || exit 9
 n=$(($(cat "$FAKE_DIR/n" 2>/dev/null || echo 0) + 1))
 echo "$n" >"$FAKE_DIR/n"
@@ -152,6 +161,39 @@ run 7 --checks --require quickstart --interval 0
 expect "cancelled plus live that then fails: the failure is reported" 1 "checks 1/2 pending: quickstart
 FAILED quickstart (run 41261363000)
 REQUIRED quickstart failed"
+
+# 10c. (#468) the only quickstart on the head is cancelled while a second e2e-kind run has not created
+# its jobs yet: wait for that run, then judge its result; with no live run, fail as before.
+prh() { # <rollup>: an open PR whose head is abc1234…
+  printf '{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"headRefOid":"abc1234def","statusCheckRollup":[%s]}' "$1"
+}
+q_first=$(cr_at quickstart CANCELLED 41261362803 2026-11-01T10:00:00Z)
+q_second=$(cr_at quickstart SUCCESS 41261363000 2026-11-01T10:01:00Z)
+seq_set "$(prh "$lint_ok,$q_first")" "$(prh "$lint_ok,$q_first")" "$(prh "$lint_ok,$q_first,$q_second")"
+printf '41261363000\n41261363000\n\n' >"$FAKE_DIR/runs"
+run 7 --checks --require quickstart --interval 0
+expect "cancelled while another e2e-kind run is queued: waits, then passes" 0 "waiting for e2e-kind run 41261363000 on abc1234
+checks 2/2 green"
+grep -q -- '^run list --commit abc1234def --workflow e2e-kind.yml' "$FAKE_DIR/calls" ||
+  { echo "FAIL: lists the e2e-kind runs of the head commit" >&2; fail=1; }
+seq_set "$(prh "$lint_ok")" "$(prh "$lint_ok,$q_second")"
+printf '41261363000\n\n' >"$FAKE_DIR/runs"
+run 7 --checks --require quickstart --interval 0
+expect "required check missing while an e2e-kind run is queued: waits" 0 "waiting for e2e-kind run 41261363000 on abc1234
+checks 2/2 green"
+seq_set "$(prh "$lint_ok,$q_first")"
+printf '\n' >"$FAKE_DIR/runs"
+run 7 --checks --require quickstart --interval 0
+expect "cancelled with no live e2e-kind run: failed, with the dispatch hint" 1 "FAILED quickstart (run 41261362803)
+REQUIRED quickstart failed
+only cancelled runs of quickstart on this head; run: gh workflow run e2e-kind.yml --ref <branch>"
+seq_set "$(prh "$lint_ok,$(cr go COMPLETED FAILURE 11),$q_first")"
+printf '41261363000\n' >"$FAKE_DIR/runs"
+run 7 --checks --require quickstart --interval 0
+expect "another check failed: no waiting for the live run" 1 "FAILED go (run 11)
+FAILED quickstart (run 41261362803)
+REQUIRED quickstart failed
+only cancelled runs of quickstart on this head; run: gh workflow run e2e-kind.yml --ref <branch>"
 
 usage_line="usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK] [--timeout DURATION] [--interval SECONDS]"
 e2e_ok=$(cr "e2e result" COMPLETED SUCCESS 14)
