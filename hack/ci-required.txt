@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The required status checks of the `main` ruleset, by the check's display name (the `name:` of the
+# job in .github/workflows/*.yml). This file is the source of truth: the ruleset mirrors it, and
+# hack/ci-required-test.sh (CI job `scripts`) fails when a ci.yml job is neither listed here nor
+# advisory, or when a name here has no job. `hack/ci-required-test.sh --ruleset` diffs this list
+# against the live ruleset.
+#
+# A required job must report a conclusion on every pull request and every push to main. A job-level
+# `if:` that skips it counts as passing, which is intended for "this change does not touch my files".
+# A job that never starts (a workflow-level `paths:` filter, or a pull-request-only job) leaves the
+# check absent and blocks the merge: give it step-level conditions instead (see `dependency age`).
+#
+# Required checks that other workflows produce:
+#   dco              .github/workflows/dco.yml
+#   gitleaks         .github/workflows/secrets.yml
+#   claim            .github/workflows/claims.yml
+#   e2e result       .github/workflows/e2e-kind.yml
+# They are listed under `external` and are not compared with ci.yml.
+
+# ci.yml jobs
+go
+web
+proto
+generated code
+chart
+chart smoke
+docs
+escape (admission)
+migrations
+adr-lint
+claim-tests
+lint-shell
+scripts
+dependency age
+
+# produced by other workflows
+external dco
+external gitleaks
+external claim
+external e2e result
+
+# Advisory on purpose: reported, never blocks. Keep this list as short as it is. A job that only
+# runs after a push to main cannot gate a pull request.
+advisory flavors
+advisory flavor-publish
