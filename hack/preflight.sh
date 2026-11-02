@@ -218,6 +218,8 @@ g_shell() {
 	[[ -n $files ]] || { echo "no existing shell files"; return 0; }
 	# shellcheck disable=SC2086
 	shellcheck $files
+	hack/mktemp-lint-test.sh
+	hack/mktemp-lint.sh
 }
 g_gitleaks() { gitleaks git --redact --no-banner --log-opts="$base..HEAD" .; }
 

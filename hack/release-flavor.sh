@@ -24,7 +24,7 @@ cd "$(dirname "$0")/.."
 tags=(--tag "$repo:$version")
 [[ $version == *-rc.* ]] || tags+=(--tag "$repo:latest") # latest moves for final releases only, like GoReleaser's
 
-meta=$(mktemp)
+meta=$(mktemp "${TMPDIR:-/tmp}/release-flavor.XXXXXX")
 trap 'rm -f "$meta"' EXIT
 docker buildx build --push --platform linux/amd64,linux/arm64 \
 	--build-context common=flavors/common "${tags[@]}" \

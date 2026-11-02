@@ -8,7 +8,7 @@ set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 # mktemp on its own line so set -e sees its failure. Never put it inside a cd: with an empty result
 # `cd ""` stays in the caller's directory and the trap below would delete that directory (#476).
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/wt-test.XXXXXX")
 tmp=$(cd "$tmp" && pwd -P)
 [[ -n $tmp && -d $tmp && $tmp != "$PWD" && $tmp != "$repo" ]] || exit 1
 trap 'rm -rf "$tmp"' EXIT

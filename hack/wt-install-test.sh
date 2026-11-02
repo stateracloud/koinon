@@ -13,7 +13,7 @@ ok() { echo "ok: $1"; }
 bad() { echo "FAIL: $1"; fail=1; }
 eq() { if [[ $2 == "$3" ]]; then ok "$1"; else bad "$1 (got '$2', want '$3')"; fi; }
 
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/wt-install-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 export KUBECONFIG=/dev/null GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
 

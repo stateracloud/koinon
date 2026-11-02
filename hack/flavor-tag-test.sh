@@ -7,7 +7,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/flavor-tag-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/hack" "$tmp/flavors/demo" "$tmp/flavors/common"
 cp "$here/flavor-tag.sh" "$tmp/hack/flavor-tag.sh"

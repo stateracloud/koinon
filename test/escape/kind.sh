@@ -42,7 +42,7 @@ K=(kubectl --context "$CTX")
 "${K[@]}" -n openshell get secret openshell-client-tls >/dev/null ||
   { echo "the OpenShell gateway is not installed in $CTX (make dev-kind-up installs it)" >&2; exit 1; }
 
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/kind.XXXXXX")
 pf=
 diagnostics() {
   local rc=$?

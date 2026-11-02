@@ -42,7 +42,7 @@ if [[ ${1:-} == --update ]]; then
   exit 0
 fi
 
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/docs-check.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 # 1. The e1 blocks.
