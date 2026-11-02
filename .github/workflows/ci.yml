@@ -553,6 +553,7 @@ jobs:
       - run: hack/wt-test.sh
       - run: hack/tmp-safety-test.sh
       - run: hack/wt-install-test.sh
+      - run: hack/notes-expiry-test.sh
       - run: hack/ship-test.sh
       - run: hack/preflight-test.sh
       - run: hack/preflight-stop-test.sh
