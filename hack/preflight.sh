@@ -31,7 +31,8 @@
 set -uo pipefail
 
 ALL="go tidy deps generate proto migrate adr docs chart web shell actionlint mktemp bash5 versions e2e gitleaks"
-GOFUMPT_VERSION=v0.12.0 # newest release at least 3 days old when pinned (ADR 0079)
+# shellcheck source=/dev/null
+. "$(dirname "$0")/versions.env" # GOFUMPT_VERSION, dated by hack/dep-age-check.sh (ADR 0079)
 base=origin/main only="" list=0 verbose=0 stop=0
 while [[ $# -gt 0 ]]; do
 	case $1 in
