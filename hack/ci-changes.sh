@@ -67,9 +67,9 @@ pattern() {
 	# chart-check.sh sources hack/versions.env and every hack/chart-check.d/*.sh.
 	chart) echo '^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/versions\.env$)' ;;
 	# The binaries the chart starts, their flags and everything they import (the Go packages
-	# (This list is hand-written and partial: the Jobs also read hack/versions.env and other
-	# files the chart smoke test names; a push to main runs the job anyway.)
-	# outside internal/ and cmd/) count too.
+	# outside internal/ and cmd/) count too. This list is hand-written and partial: the Jobs
+	# also read hack/versions.env and other files the chart smoke test names; a push to main
+	# runs the job anyway.
 	chartsmoke) echo '^(charts/|cmd/|internal/|pricing/|connectors/|templates/|api/|web/|test/chartsmoke/|go\.(mod|sum))' ;;
 	# hack/docs-check.sh also reads internal/preflight/preflight.go and hack/versions.env, and
 	# runs the tests of internal/declarative. Its repository-link check reads any file of the repo,

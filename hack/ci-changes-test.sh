@@ -251,11 +251,9 @@ for pkg in test/flavors internal/execution internal/modelformat internal/prices 
 	fi
 done
 need_min "packages in the flavors build graph" 30 "$(grep -c . <<<"$real_dirs" || true)"
-flav_rows=0
 while IFS= read -r d; do
 	[[ -n $d ]] || continue
 	turns_on flavors "$d/zzz-probe.file"
-	flav_rows=$((flav_rows + 1))
 done <<<"$real_dirs"
 # Fail closed: a dirs list without test/flavors (a path strip that found nothing) turns flavors on.
 total=$((total + 1))
