@@ -189,7 +189,7 @@ locktests() { # locktests <locker>
 	fifo="$tmp/hold.fifo"
 	rm -f "$fifo" "$fifo.pid"
 	mkfifo "$fifo"
-	KOINON_STATE_TEST_HOLD=$fifo "$script" pending add "holder" >/dev/null 2>&1 &
+	KOINON_STATE_TESTONLY_HOLD=$fifo "$script" pending add "holder" >/dev/null 2>&1 &
 	hp=$!
 	for _ in $(seq 1 100); do [[ -s $fifo.pid ]] && break; sleep 0.05; done
 	[[ -s $fifo.pid ]] || bad "$locker: holder never took the lock"
@@ -201,6 +201,16 @@ locktests() { # locktests <locker>
 	KOINON_STATE_LOCK_TIMEOUT=5 run pending add "after a killed writer"
 	expect "$locker: a writer killed with -9 does not block the next" 0
 	has "$locker: the next write went through" "$pending" "after a killed writer"
+	rm -f "$fifo" "$fifo.pid"
+	# an inherited KOINON_STATE_LOCKED=1 must not skip the lock: with a holder running, we still time out
+	mkfifo "$fifo"
+	KOINON_STATE_TESTONLY_HOLD=$fifo "$script" pending add "holder2" >/dev/null 2>&1 &
+	hp=$!
+	for _ in $(seq 1 100); do [[ -s $fifo.pid ]] && break; sleep 0.05; done
+	KOINON_STATE_LOCKED=1 KOINON_STATE_LOCK_TIMEOUT=1 run pending add "inherited"
+	expect "$locker: an inherited KOINON_STATE_LOCKED=1 still takes the lock" 1 "could not take"
+	kill -9 "$(<"$fifo.pid")" 2>/dev/null
+	wait "$hp" 2>/dev/null
 	rm -f "$fifo" "$fifo.pid"
 	unset KOINON_STATE_LOCKER
 }

@@ -25,6 +25,8 @@
 #
 # State dir: $KOINON_STATE_DIR (default ${XDG_CONFIG_HOME:-~/.config}/koinon/state). Lock wait: $KOINON_STATE_LOCK_TIMEOUT
 # seconds (default 10). Exit: 0 ok, 1 error (no such lane, no match, lock timeout), 2 usage.
+# Internal, not for callers: --locked-token, KOINON_STATE_LOCKED, KOINON_STATE_LOCKER (force flock or perl),
+# KOINON_STATE_TESTONLY_HOLD (a test hook: hold the lock until killed).
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 set -euo pipefail
 
@@ -44,6 +46,13 @@ file_mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 # otherwise; macOS has no flock(1)). The script re-runs itself under the lock with
 # KOINON_STATE_LOCKED=1, so the whole read-modify-rename is covered, and the kernel releases the
 # lock when the holder dies, however it dies. KOINON_STATE_LOCKER=flock|perl forces one path (tests).
+# The child gets the token twice, as --locked-token <t> on argv and as KOINON_STATE_LOCKED=<t> in
+# the environment; it skips the lock only when both match, so a stale inherited variable cannot.
+locked_token=''
+if [[ ${1:-} == --locked-token ]]; then
+	[[ -n ${2:-} && ${KOINON_STATE_LOCKED:-} == "$2" ]] && locked_token=$2
+	shift 2
+fi
 orig_args=("$@")
 # shellcheck disable=SC2016  # perl code, no shell expansion wanted
 perl_locker='use Fcntl qw(:flock F_SETFD); use Time::HiRes qw(time);
@@ -52,22 +61,21 @@ open(my $fh, ">>", $f) or do { print STDERR "agent-state: cannot open $f: $!\n";
 my $end = time + $t;
 until (flock($fh, LOCK_EX | LOCK_NB)) { exit 75 if time >= $end; select(undef, undef, undef, 0.05); }
 fcntl($fh, F_SETFD, 0);
-$ENV{KOINON_STATE_LOCKED} = 1;
 exec @cmd or do { print STDERR "agent-state: exec failed: $!\n"; exit 1 };'
 lock() {
-	if [[ ${KOINON_STATE_LOCKED:-} == 1 ]]; then
-		if [[ -n ${KOINON_STATE_TEST_HOLD:-} ]]; then # tests: hold the lock until killed
-			echo "$BASHPID" >"$KOINON_STATE_TEST_HOLD.pid"
-			read -r -t 60 <>"$KOINON_STATE_TEST_HOLD" || true
+	if [[ -n $locked_token ]]; then
+		if [[ -n ${KOINON_STATE_TESTONLY_HOLD:-} ]]; then # tests: hold the lock until killed
+			echo "$BASHPID" >"$KOINON_STATE_TESTONLY_HOLD.pid"
+			read -r -t 60 <>"$KOINON_STATE_TESTONLY_HOLD" || true
 		fi
 		return 0
 	fi
 	mkdir -p "$state_dir"
-	local t=${KOINON_STATE_LOCK_TIMEOUT:-10} lf="$state_dir/.lock" locker=${KOINON_STATE_LOCKER:-} rc=0
+	local token="$$-$RANDOM$RANDOM-$SECONDS" t=${KOINON_STATE_LOCK_TIMEOUT:-10} lf="$state_dir/.lock" locker=${KOINON_STATE_LOCKER:-} rc=0
 	if [[ -z $locker ]]; then if command -v flock >/dev/null 2>&1; then locker=flock; else locker=perl; fi; fi
 	case $locker in
-	flock) flock -w "$t" -E 75 "$lf" env KOINON_STATE_LOCKED=1 "$BASH" "$0" "${orig_args[@]}" || rc=$? ;;
-	perl) perl -e "$perl_locker" "$lf" "$t" env KOINON_STATE_LOCKED=1 "$BASH" "$0" "${orig_args[@]}" || rc=$? ;;
+	flock) flock -w "$t" -E 75 "$lf" env "KOINON_STATE_LOCKED=$token" "$BASH" "$0" --locked-token "$token" "${orig_args[@]}" || rc=$? ;;
+	perl) perl -e "$perl_locker" "$lf" "$t" env "KOINON_STATE_LOCKED=$token" "$BASH" "$0" --locked-token "$token" "${orig_args[@]}" || rc=$? ;;
 	*) die "KOINON_STATE_LOCKER must be flock or perl" ;;
 	esac
 	((rc != 75)) || die "could not take $lf within ${t}s (another agent-state.sh holds it)"
