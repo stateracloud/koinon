@@ -67,15 +67,27 @@ if [[ -n $SHA && -n $GH_REPO ]]; then
       pass "quickstart succeeded in e2e-kind run $id on ${SHA:0:12}"
     fi
   done
-  # The lab's status (the newest e2e-lab status is first).
-  lab=$("$GH" api "repos/$GH_REPO/commits/$SHA/statuses?per_page=100" \
-    --jq '[.[] | select(.context == "e2e-lab")][0].state // ""' 2>/dev/null || true)
+  # The lab's status (the newest e2e-lab status is first). An API error (a 403 when the job lacks
+  # `statuses: read`, #588) or a body that is not JSON is reported as such, not as "no e2e-lab";
+  # the gate still fails closed.
+  lab="" laberr=""
+  errf=$(mktemp "${TMPDIR:-/tmp}/e2e-gate.XXXXXX")
+  rc=0
+  resp=$("$GH" api "repos/$GH_REPO/commits/$SHA/statuses?per_page=100" 2>"$errf") || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    laberr="$(tr '\n' ' ' <"$errf")"
+    laberr=${laberr:-exit $rc}
+  elif ! lab=$(jq -r '[.[] | select(.context == "e2e-lab")][0].state // ""' <<<"$resp" 2>/dev/null); then
+    lab="" laberr="invalid JSON in the response"
+  fi
+  rm -f "$errf"
+  [[ -z $laberr ]] || echo "::error::could not read e2e-lab: $laberr (check the job's statuses: read permission)"
   [[ $lab != success ]] || pass "the commit status e2e-lab is success on ${SHA:0:12}"
 else
-  lab=""
+  lab="" laberr=""
 fi
 
-msg="This change needs the kind e2e (hack/needs-e2e.sh, or the e2e label) and the head ${SHA:0:12} has no passing one: no successful quickstart job in this or another e2e-kind run${lab:+, e2e-lab is $lab}."
+msg="This change needs the kind e2e (hack/needs-e2e.sh, or the e2e label) and the head ${SHA:0:12} has no passing one: no successful quickstart job in this or another e2e-kind run${lab:+, e2e-lab is $lab}${laberr:+, and e2e-lab could not be read ($laberr; the job needs statuses: read)}."
 how="Produce one: run \`hack/e2e-remote.sh --argo\` (the lab posts the status e2e-lab), or run \`gh workflow run e2e-kind.yml --ref $BRANCH\` on GitHub. Then re-run this job: \"Re-run failed jobs\" on this e2e-kind run (hack/e2e-status.sh and a dispatched run's result job do it for you)."
 echo "::error::$msg"
 echo "$how"
