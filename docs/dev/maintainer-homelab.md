@@ -47,7 +47,7 @@ these in `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/`:
 | --- | --- |
 | `lab.env` | `KOINON_E2E_ARGO_SERVER`, `_BUNDLE_URL`, `_RESULTS_URL`, `_S3_REGION`, `_ARGO_CREDS`, `_LIGHT_MANIFEST` for `hack/e2e-remote.sh --argo` (template `hack/lab/lab.env.example`; the environment overrides it) |
 | `lab/creds.sh` | the credentials functions of `hack/e2e-argo.sh` (contract `hack/lab/creds.example.sh`) |
-| `lab/light.workflow.json` | the Argo Workflow of `--lane light` |
+| `lab/light.workflow.json` | the Argo Workflow of `--lane light` (superseded by the lab's `koinon-gate` WorkflowTemplate, `--gate <set>`; no file needed) |
 | `lab/local.homelab.example.yaml`, `values-homelab.yaml`, `model-provider-homelab.yaml` | the Tilt remote profile of the lab |
 
 Without `lab.env`, `hack/e2e-remote.sh --argo` exits 2 and names what is missing.

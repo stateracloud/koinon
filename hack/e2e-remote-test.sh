@@ -9,7 +9,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/e2e-remote-test.XXXXXX")
 trap 'kill $(jobs -p) 2>/dev/null || true; [[ -n ${KEEP_TMP:-} ]] || rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/home"
 export REMOTE_HOME="$tmp/home" FAKE_LOG="$tmp/docker.log" PATH="$tmp/bin:$PATH"
@@ -192,20 +192,23 @@ while [[ $# -gt 0 ]]; do
 done
 case $method:$url in
 PUT:*/e2e-bundles/*) cp "$upload" "$ARGO_DIR/last.bundle"; [[ -z $w ]] || printf 200 ;;
+*/workflow-templates/*/koinon-gate) echo '{"spec":{"arguments":{"parameters":[{"name":"slot","enum":["gate-1","gate-2","gate-3","gate-4"]}]}}}' ;;
 */workflow-templates/*) echo '{"spec":{"arguments":{"parameters":[{"name":"slot","enum":["a","b","c"]}]}}}' ;;
 *'/workflows/koinon-e2e?'*) if [[ -n ${FAKE_LIST:-} ]]; then echo "$FAKE_LIST"; else echo '{}'; fi ;;
 POST:*/submit) printf '%s' "$body" >"$ARGO_DIR/submitted"; echo '{"metadata":{"name":"koinon-make-t1"}}' ;;
 POST:*/api/v1/workflows/koinon-e2e) printf '%s' "$body" >"$ARGO_DIR/created"; echo '{"metadata":{"name":"koinon-make-t1"}}' ;;
 PUT:*/stop) echo stopped >>"$ARGO_DIR/stopped"; echo '{}' ;;
+DELETE:*/workflows/koinon-e2e/koinon-make-t1) echo deleted >>"$ARGO_DIR/deleted"; echo '{}' ;;
 *'/koinon-make-t1?fields='*)
   n=$(cat "$ARGO_DIR/polls" 2>/dev/null || echo 0); echo $((n + 1)) >"$ARGO_DIR/polls"
-  if [[ $n -lt 1 ]]; then echo '{"status":{"phase":"Running"}}'; else echo "{\"status\":{\"phase\":\"${FAKE_PHASE:-Succeeded}\"}}"; fi ;;
+  if [[ -n ${FAKE_PENDING:-} ]]; then echo '{"status":{"phase":"Pending","message":"Waiting for e2e-gate-1 lock"}}'
+  elif [[ $n -lt 1 ]]; then echo '{"status":{"phase":"Running"}}'; else echo "{\"status\":{\"phase\":\"${FAKE_PHASE:-Succeeded}\"}}"; fi ;;
 */koinon-make-t1/log?*) echo '{"result":{"content":"== 12:00:00Z prerequisites (kind/up.sh)"}}' ;;
 */workflows/koinon-e2e/koinon-make-t1) echo '{"status":{"nodes":{"koinon-make-t1":{"id":"koinon-make-t1","type":"Pod","outputs":{"artifacts":[{"name":"results","s3":{"key":"koinon-make-t1/koinon-make-t1/results.tgz"}}]}}}}}' ;;
 */e2e-artifacts/koinon-make-t1/koinon-make-t1/results.tgz | */artifact-files/*)
   echo "$url" >>"$ARGO_DIR/results-from"
-  d=$(mktemp -d); mkdir -p "$d/out"; echo "| Phase | s |" >"$d/out/quickstart-timings.md"
-  echo "target=test-e2e-kind ref=x rc=${FAKE_RESULT_RC:-0} seconds=1" >"$d/out/result.txt"
+  d=$(mktemp -d "${TMPDIR:-/tmp}/fake-results.XXXXXX"); mkdir -p "$d/out"; echo "| Phase | s |" >"$d/out/quickstart-timings.md"
+  echo "${FAKE_RESULT_LINE:-target=test-e2e-kind ref=x rc=${FAKE_RESULT_RC:-0} seconds=1}" >"$d/out/result.txt"
   tar -czf "$o" -C "$d" out; rm -rf "$d" ;;
 *) echo "fake curl: unexpected $method $url" >&2; exit 22 ;;
 esac
@@ -320,6 +323,91 @@ rc=0
 (unset KOINON_E2E_REMOTE; KOINON_E2E_BUNDLE_URL=https://from-env.example.invalid/e2e-bundles KOINON_LAB_CONFIG="$tmp/lab.env" \
   hack/e2e-remote.sh --argo --dry-run >"$tmp/log18" 2>&1) || rc=$?
 check "the environment wins over the file" has 'from-env.example.invalid' "$tmp/log18"
+
+# 7d. --gate <set> (#512): the koinon-gate template with gate-set, ref, bundle, agent and slot, the
+# labels, the exit contract (0 pass, the gate's rc, 75 no slot, 76 NOT RUN) and the pending give-up.
+gate() { # <dir> <result line> [env...]: one gate run; sets rc
+  local d=$1 line=$2
+  shift 2
+  argo_env "$d"
+  rc=0
+  (unset KOINON_E2E_REMOTE; env FAKE_RESULT_LINE="$line" "$@" hack/e2e-remote.sh --argo --gate go-test --out "$d/out" >"$d/log" 2>&1) || rc=$?
+}
+gate "$tmp/gate1" "target=go-test ref=x rc=0 seconds=1 verdict=pass" FAKE_PHASE=Succeeded \
+  FAKE_LIST='{"items":[{"spec":{"arguments":{"parameters":[{"name":"slot","value":"gate-1"}]}}}]}' KOINON_E2E_AGENT='2d024d34-local'
+check "--gate pass exits 0" test "$rc" -eq 0
+check "--gate submits the koinon-gate template" has '"resourceName":"koinon-gate"' "$tmp/gate1/submitted"
+check "--gate passes gate-set, ref, bundle, agent" sh -c "grep -q 'gate-set=go-test' '$tmp/gate1/submitted' && grep -q 'ref=$argo_sha' '$tmp/gate1/submitted' && grep -q 'bundle=koinon-' '$tmp/gate1/submitted' && grep -q 'agent=2d024d34-local' '$tmp/gate1/submitted'"
+check "--gate picks a slot with no unfinished run" has 'slot=gate-2' "$tmp/gate1/submitted"
+check "--gate sets the lab labels" has 'lab.example.invalid/agent=2d024d34-local,lane=gate,target=go-test' "$tmp/gate1/submitted"
+check "--gate selects busy slots by the lane=gate label" has 'labelSelector=lane=gate' "$FAKE_LOG"
+check "--gate follows the log" has 'logOptions.follow=true' "$FAKE_LOG"
+check "--gate fetches \$OUT" test -f "$tmp/gate1/out/result.txt"
+gate "$tmp/gate2" "target=go-test ref=x rc=1 seconds=1 verdict=fail" FAKE_PHASE=Failed
+check "--gate fail passes the gate's rc through" test "$rc" -eq 1
+gate "$tmp/gate2b" "target=go-test ref=x rc=7 seconds=1 verdict=fail" FAKE_PHASE=Failed
+check "--gate fail exits with the gate's own status" test "$rc" -eq 7
+gate "$tmp/gate3" "target=go-test ref=x rc=3 seconds=1 verdict=notrun" FAKE_PHASE=Failed
+check "--gate verdict=notrun exits 76" test "$rc" -eq 76
+check "... and says NOT RUN" has 'NOT RUN' "$tmp/gate3/log"
+gate "$tmp/gate3b" "target=go-test ref=x rc=3 seconds=1 verdict=notrun" FAKE_PHASE=Succeeded
+check "--gate verdict=notrun exits 76 even when the pod succeeded" test "$rc" -eq 76
+gate "$tmp/gate4" "" FAKE_PENDING=1 KOINON_E2E_GATE_PENDING=1
+check "--gate Pending past the limit exits 75" test "$rc" -eq 75
+check "... stopping the run" test -s "$tmp/gate4/stopped"
+check "... and deleting it" test -s "$tmp/gate4/deleted"
+argo_env "$tmp/gate6"
+rc=0
+(unset KOINON_E2E_REMOTE
+  FAKE_LIST='{"items":[{"spec":{"arguments":{"parameters":[{"name":"slot","value":"gate-1"},{"name":"slot","value":"gate-2"},{"name":"slot","value":"gate-3"},{"name":"slot","value":"gate-4"}]}}}]}' \
+    hack/e2e-remote.sh --argo --gate go-test >"$tmp/gate6/log" 2>&1) || rc=$?
+check "--gate with every slot busy exits 75 without submitting" test "$rc" -eq 75 -a ! -e "$tmp/gate6/submitted"
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --gate 'x;rm' --dry-run >"$tmp/gate6/log2" 2>&1) || rc=$?
+check "--gate refuses a gate set that is not a plain name" test "$rc" -eq 2
+rc=0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --gate go-test --dry-run >"$tmp/gate6/log3" 2>&1) || rc=$?
+check "--gate without --argo exits 2" test "$rc" -eq 2
+
+# 7e. hack/lab/gate-run.sh: the gate-set enum, the command each set runs, and the verdict mapping
+# (a go gate's 3 is notrun, read from KOINON_RC_FILE because make turns it into 2).
+cat >"$tmp/bin/make" <<'SH'
+#!/usr/bin/env bash
+echo "make $* PROCS=${PROCS:-} RC_FILE=${KOINON_RC_FILE:+set}" >>"$FAKE_MAKE_LOG"
+[[ -z ${FAKE_GO_RC:-} || -z ${KOINON_RC_FILE:-} ]] || echo "$FAKE_GO_RC" >"$KOINON_RC_FILE"
+exit "${FAKE_MAKE_RC:-0}"
+SH
+chmod +x "$tmp/bin/make"
+export FAKE_MAKE_LOG="$tmp/make.log"
+gate_run() { # <gate set> [env...]: rc and $tmp/gr/result.txt
+  local gs=$1
+  shift
+  rm -rf "$tmp/gr"
+  : >"$FAKE_MAKE_LOG"
+  rc=0
+  (cd "$tmp/repo" && env OUT="$tmp/gr" "$@" "$repo/hack/lab/gate-run.sh" "$gs" >"$tmp/gr.log" 2>&1) || rc=$?
+}
+gate_run go-test
+check "gate-run go-test passes" test "$rc" -eq 0
+check "... running make test-go with PROCS set explicitly" has 'make test-go PROCS=4' "$FAKE_MAKE_LOG"
+check "... and the result line has verdict=pass" has 'rc=0 .*verdict=pass' "$tmp/gr/result.txt"
+check "... with the commit and seconds" sh -c "grep -q 'ref=$argo_sha' '$tmp/gr/result.txt' && grep -q 'seconds=' '$tmp/gr/result.txt'"
+check "... and driver.log" test -f "$tmp/gr/driver.log"
+gate_run agentd-ginkgo
+check "gate-run agentd-ginkgo runs the agentd suite" has 'make test-go-suite SUITE=./internal/agentd' "$FAKE_MAKE_LOG"
+gate_run go-test FAKE_MAKE_RC=2 FAKE_GO_RC=3
+check "gate-run: go-test.sh's 3 (through make's 2) is notrun" has 'rc=3 .*verdict=notrun' "$tmp/gr/result.txt"
+check "... and exits 3" test "$rc" -eq 3
+gate_run go-test FAKE_MAKE_RC=2 FAKE_GO_RC=1
+check "gate-run: go-test.sh's 1 is fail" has 'rc=1 .*verdict=fail' "$tmp/gr/result.txt"
+gate_run go-test FAKE_MAKE_RC=2
+check "gate-run: a make failure without a status file is fail" has 'rc=2 .*verdict=fail' "$tmp/gr/result.txt"
+gate_run chart-check FAKE_MAKE_RC=3
+check "gate-run: a non-Go gate's 3 is a plain failure, not notrun" has 'rc=3 .*verdict=fail' "$tmp/gr/result.txt"
+gate_run test-e2e-kind
+check "gate-run refuses a gate set that is not in the enum (exit 2)" test "$rc" -eq 2 -a ! -s "$FAKE_MAKE_LOG"
+gate_run 'go-test; id'
+check "... or an injected one" test "$rc" -eq 2 -a ! -s "$FAKE_MAKE_LOG"
 
 # 6. The toolchain image pins what the workflow pins.
 wf="$repo/.github/workflows/e2e-kind.yml" df="$repo/hack/e2e-toolchain/Dockerfile"

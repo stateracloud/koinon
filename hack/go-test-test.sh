@@ -86,3 +86,17 @@ out=$(env -u KUBEBUILDER_ASSETS HELM=koinon-no-such-helm REPORT_DIR="$d" hack/go
 [[ $rc == 3 ]] || { echo "$out" | tail -20; echo "FAIL: chart contract test without helm: exit $rc, want 3 (incomplete)"; exit 1; }
 grep -q 'INCOMPLETE (missing helm)' <<<"$out" || { echo "$out" | tail -20; echo "FAIL: the verdict does not name helm"; exit 1; }
 echo "ok: a plain test skipped for an expected requirement makes the run incomplete"
+
+# make test-go-suite SUITE=<name> (#512): one of --list, nothing free-form. The refusals do not start
+# any test, so they run anywhere.
+for bad in "" ./internal/nope "./internal/agentd ./internal/api" "../etc"; do
+	rc=0
+	SUITE="$bad" make -s test-go-suite SUITE="$bad" >/dev/null 2>&1 || rc=$?
+	# make reports a failed recipe as 2, which is also the usage code here.
+	[[ $rc == 2 ]] || { echo "FAIL: make test-go-suite SUITE='$bad' must exit 2, got $rc"; exit 1; }
+done
+echo "ok: test-go-suite refuses a suite that hack/go-test.sh --list does not name"
+rc_file=$(mktemp "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+KOINON_RC_FILE=$rc_file REPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX") hack/go-test.sh ./no/such/pkg >/dev/null 2>&1 || true
+[[ $(cat "$rc_file") == 1 ]] || { echo "FAIL: KOINON_RC_FILE must hold go-test.sh's exit status (1 for a bad package)"; exit 1; }
+echo "ok: KOINON_RC_FILE carries the exit status past make"
