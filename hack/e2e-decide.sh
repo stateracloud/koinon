@@ -8,7 +8,11 @@
 #
 #   pull_request       needed when the PR touches the e2e's own files (needs-e2e.sh --forced-only)
 #                      or carries the `e2e` label. Otherwise not needed, and the summary says so
-#                      when the full rule (needs-e2e.sh) would have wanted it.
+#                      when the full rule (needs-e2e.sh) would have wanted it. The labels are the
+#                      event's plus the PR's current ones: `gh pr create --label` opens the PR and
+#                      then labels it (two events, #468), and the run of `opened` should already see
+#                      the label. Label events do not start the workflow; adding `e2e` later
+#                      dispatches it (hack/e2e-label.sh).
 #   push               (main) needed when the full rule matches anything since the last green e2e
 #                      run on main (push or schedule), or when there is no such run.
 #   schedule           (nightly) always: drift no commit explains (upstream images, the runner
@@ -16,7 +20,8 @@
 #   workflow_dispatch  always needed.
 #
 # Environment: EVENT, BASE (pull request base branch), LABELS (JSON array of the PR's label names),
-# NEEDS_E2E (path of the rule script, default hack/needs-e2e.sh), GH (the gh command), GH_REPO.
+# PR (its number), NEEDS_E2E (path of the rule script, default hack/needs-e2e.sh), GH (the gh
+# command), GH_REPO.
 # Any failure of the rule script other than "not needed" reads as needed.
 set -euo pipefail
 
@@ -28,6 +33,11 @@ LABELS=${LABELS:-[]}
 emit() {
   echo "needed=$1"
   [[ -z ${GITHUB_OUTPUT:-} ]] || echo "needed=$1" >>"$GITHUB_OUTPUT"
+}
+# live_labels: the PR's labels now, as a JSON array; [] when they cannot be read.
+live_labels() {
+  [[ -n ${PR:-} && -n ${GH_REPO:-} ]] || { echo '[]'; return; }
+  "$GH" api "repos/$GH_REPO/issues/$PR/labels" --jq '[.[].name]' 2>/dev/null || echo '[]'
 }
 summary() {
   [[ -z ${GITHUB_STEP_SUMMARY:-} ]] || printf '## Kind e2e\n\n%s\n' "$*" >>"$GITHUB_STEP_SUMMARY"
@@ -51,7 +61,9 @@ pull_request)
   fi
   forced=$rc
   labelled=1
-  if jq -e 'index("e2e")' <<<"$LABELS" >/dev/null 2>&1; then labelled=0; fi
+  if jq -e 'index("e2e")' <<<"$LABELS" >/dev/null 2>&1 || jq -e 'index("e2e")' <<<"$(live_labels)" >/dev/null 2>&1; then
+    labelled=0
+  fi
   if [[ $forced -eq 0 ]]; then
     summary "Runs: this pull request changes the e2e's own files."$'\n\n'"$text"
     emit true

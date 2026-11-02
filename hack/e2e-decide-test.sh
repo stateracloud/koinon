@@ -13,9 +13,13 @@ cat >"$tmp/needs" <<'SH'
 if [[ $1 == --forced-only ]]; then echo "forced stub"; exit "${STUB_FORCED:-1}"; fi
 echo "full stub $*"; exit "${STUB_FULL:-1}"
 SH
+# Stub gh: STUB_LABELS answers the PR's current labels; anything else STUB_COVERED.
 cat >"$tmp/gh" <<'SH'
 #!/usr/bin/env bash
-echo "${STUB_COVERED:-}"
+case "$*" in
+*/issues/*/labels*) echo "${STUB_LABELS:-[]}" ;;
+*) echo "${STUB_COVERED:-}" ;;
+esac
 SH
 chmod +x "$tmp/needs" "$tmp/gh"
 export NEEDS_E2E="$tmp/needs" GH="$tmp/gh" BASE=main
@@ -41,6 +45,10 @@ summary_has "e2e\` label"
 want true "PR: a rule failure fails closed" EVENT=pull_request STUB_FORCED=2
 want false "PR: nothing relevant says so" EVENT=pull_request
 summary_has "nothing in this pull request"
+# #468: `gh pr create --label e2e` fires `opened` without the label, then `labeled`.
+PRV=(PR=524 GH_REPO=o/r)
+want true "opened: the label added after the event counts" EVENT=pull_request ACTION=opened "${PRV[@]}" 'STUB_LABELS=["e2e"]'
+want false "opened: no label now either" EVENT=pull_request ACTION=opened "${PRV[@]}" 'STUB_LABELS=["bug"]'
 want true "dispatch always runs" EVENT=workflow_dispatch
 want true "push with no green run to compare with runs" EVENT=push
 want true "push with e2e-relevant changes since the last green run" EVENT=push STUB_COVERED=abc123 STUB_FULL=0
