@@ -39,31 +39,34 @@ while IFS= read -r f; do
 	# that follows one of those words. Words like "rm mktemp tr" or a path ending in /mktemp do not match.
 	hits=$(awk -v file="$rel" '
 		# 1 when the call whose text follows "mktemp" has no usable template
-		function bad(rest,   n, i, t, tok, tmpl, badopt) {
-			if (match(rest, /[);|&`]|[[:space:]]#/)) rest = substr(rest, 1, RSTART - 1)
+		function bad(rest,   n, i, t, tok, tmpl, c, q, len) {
+			# cut at the end of the call, but not inside double quotes
+			q = 0
+			len = length(rest)
+			for (i = 1; i <= len; i++) {
+				c = substr(rest, i, 1)
+				if (c == "\"") q = !q
+				else if (!q && (c == ")" || c == ";" || c == "|" || c == "&" || c == "`")) break
+				else if (!q && (c == " " || c == "\t") && substr(rest, i + 1, 1) == "#") break
+			}
+			rest = substr(rest, 1, i - 1)
 			n = split(rest, tok, /[[:space:]]+/)
 			tmpl = ""
-			badopt = 0
 			for (i = 1; i <= n; i++) {
 				t = tok[i]
-				if (t ~ /^-[a-zA-Z]*[tp][a-zA-Z]*$/ || t ~ /^--tmpdir/) badopt = 1 # -t, -p, --tmpdir
-				else if (tmpl == "" && t ~ /XXXXXX/) tmpl = t
+				# -t fails or ignores TMPDIR on macOS, --tmpdir is GNU-only and -p is needless with a template
+				if (t ~ /^-[a-zA-Z]*[tp][a-zA-Z]*$/ || t ~ /^--tmpdir/) return 1
+				if (tmpl == "" && t ~ /XXXXXX/) tmpl = t
 			}
 			if (tmpl == "") return 1
 			sub(/^["\047]+/, "", tmpl)
+			sub(/["\047]+$/, "", tmpl)
+			if (tmpl !~ /XXXXXX$/) return 1 # BSD mktemp only replaces trailing X
 			if (tmpl ~ /^\//) return 1 # a hard-coded absolute path, not under ${TMPDIR...}
-			if (badopt && tmpl !~ /^\$/) return 1 # -t/-p/--tmpdir do not honour TMPDIR on every platform
 			return 0
 		}
-		buf == "" && /^[[:space:]]*#/ { next }
-		{
-			if (buf == "") { start = NR; first = $0 }
-			if ($0 ~ /\\$/) { buf = buf substr($0, 1, length($0) - 1) " "; next }
-			line = buf $0
-			buf = ""
-			# A command position: start of line, after $( or a backtick, after ; | & ( or =, or after a space
-			# that follows one of those words. Words like "rm mktemp tr" or a path ending in /mktemp do not match.
-			while (match(line, /(^|[;|&(=`"[:space:]])mktemp([[:space:]]|\)|`|;|$)/)) {
+		function scan(line,   rs, rl, lead, before, rest, cmd) {
+			while (match(line, /(^|[;|&(=`"[:space:]])mktemp([[:space:]]|\)|`|;|\||&|$)/)) {
 				rs = RSTART
 				rl = RLENGTH # bad() calls match(), which resets RSTART and RLENGTH
 				lead = (RSTART == 1 && substr(line, 1, 1) == "m") ? "" : substr(line, RSTART, 1)
@@ -73,14 +76,24 @@ while IFS= read -r f; do
 				if (lead == "" || lead ~ /[(`;|&=]/) cmd = 1
 				else if (lead ~ /[[:space:]]/) {
 					sub(/[[:space:]]+$/, "", before)
-					if (before == "" || before ~ /(;|\||&|\(|`|then|do|else|command)$/) cmd = 1
+					if (before == "" || before ~ /(;|\||&|\(|`|then|do|else|command|env|xargs)$/) cmd = 1
 				}
 				if (before == "" && substr(rest, 1, 1) == ")") cmd = 0 # a case label: mktemp) ...
 				if (lead == "(" && before ~ /\\\$$/) cmd = 0 # an escaped \$( in a string
 				if (cmd && bad(rest)) printf "%s:%d: %s\n", file, start, first
 				line = substr(line, rs + rl)
 			}
-		}' "$f")
+		}
+		buf == "" && /^[[:space:]]*#/ { next }
+		{
+			sub("\015$", "")
+			if (buf == "") { start = NR; first = $0 }
+			if ($0 ~ /\\$/) { buf = buf substr($0, 1, length($0) - 1) " "; next }
+			scan(buf $0)
+			buf = ""
+		}
+		END { if (buf != "") scan(buf) }
+' "$f")
 	if [[ -n $hits ]]; then
 		echo "$hits" >&2
 		fail=1
