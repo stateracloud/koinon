@@ -65,6 +65,9 @@ FORCED=(
   '^flavors/.*\.md$'        # agent prompts and instructions may be Markdown
   '^hack/docs-e1\.sh$'      # run.sh runs the quickstart blocks through it
   '^hack/flavor-tag\.sh$'    # run.sh names the pulled flavor image with it
+  '^hack/versions\.env$'    # the kind, ko and helm versions e2e-kind.yml installs (#565)
+  '^hack/versions-env\.sh$' # the filter that loads them into the workflow's environment
+  '^hack/e2e-toolchain/'    # the web toolchain image run.sh uses (Chromium for the browser suite)
   '^docs/site/src/content/docs/quickstart\.md$'
 )
 IGNORED=(
