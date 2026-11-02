@@ -16,23 +16,10 @@ set -euo pipefail
 
 root=${1:-$(cd "$(dirname "$0")/.." && pwd)}
 
-# Files still carrying bare calls because #512 is changing them. Empty this list after #512 merges (#535).
-excluded=(
-	hack/e2e-remote.sh      # #535: bare mktemp in the remote command; fix after #512 merges
-	hack/e2e-remote-test.sh # #535: bare mktemp -d; fix after #512 merges
-)
-
-is_excluded() {
-	local e
-	for e in ${excluded[@]+"${excluded[@]}"}; do [[ $1 == "$e" ]] && return 0; done
-	return 1
-}
-
 fail=0
 n=0
 while IFS= read -r f; do
 	rel=${f#"$root"/}
-	is_excluded "$rel" && continue
 	[[ $rel == hack/mktemp-lint-test.sh ]] && continue # its fixtures are bare calls on purpose
 	n=$((n + 1))
 	# A command position: start of line, after $( or a backtick, after ; | & ( or =, or after a space

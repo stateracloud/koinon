@@ -123,7 +123,7 @@ that has no `credsStore` and symlinks to the real `cli-plugins` and `contexts`:
 
 ```sh
 real="${DOCKER_CONFIG:-$HOME/.docker}"
-tmp="$(mktemp -d)"
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/docker-config.XXXXXX")"
 echo '{"auths":{}}' > "$tmp/config.json"
 ln -s "$real/cli-plugins" "$tmp/cli-plugins"
 ln -s "$real/contexts" "$tmp/contexts"   # only if it exists
