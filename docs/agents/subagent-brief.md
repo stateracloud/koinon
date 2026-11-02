@@ -58,3 +58,4 @@ carries only the task, the worktree and the scope. The shell tool is `Bash`.
 ## For parents
 - Every spawn prompt names this brief, a model, the worktree and the scope.
 - Spawns are checked by `hack/hooks/agent-spawn-check.sh` (a PreToolUse hook in `.claude/settings.json`): a model and this brief are required (#397).
+- Reads are checked too (#534): `hack/hooks/read-result-check.sh` refuses a Read of `tool-results/` without `limit`; `hack/hooks/bash-read-check.sh` refuses a Bash call that prints several files, loops over files or cats a whole source file.
