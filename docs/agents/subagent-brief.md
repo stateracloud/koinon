@@ -10,7 +10,10 @@ carries only the task, the worktree and the scope. The shell tool is `Bash`.
   callers and what depends on them. Do not start with `grep -rn` or `cat` on whole files.
 - When you must read a file, read the part you need: `sed -n 'A,Bp'` (at most about 120 lines) or the
   Read tool with an offset and limit. Never `cat` a large file or a log whole; filter it first.
-- `git diff --stat` before `git diff`; diff one path at a time.
+- One file and one range per call: no `cat a b c`, no several `sed -n` in one command, no loop
+  that prints files. Bundled reads were 20% of all subagent output (docs/research/2026-11-token-tiers.md).
+- Output too large and saved to a file: grep that file or Read it with offset and limit, never whole.
+- `git diff --stat` before `git diff`; then one path at a time, `| head -150` when it is long.
 - Edit with the Edit tool (exact string replacement), not with Python or sed heredocs. Before an
   Edit, read the lines with the Read tool or `codegraph_explore` (`sed`/`cat` output does not
   count). New files: the Write tool, not a heredoc.
