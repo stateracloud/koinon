@@ -81,6 +81,7 @@ and the log line says the reason could not be read.
 | `koinon_agentd_wrap_up_notices_total` | counter | `limit`: `time`, `requests`, `spend` | Runs whose agent was told a run limit is near (about 80% of it), by the limit that was nearest. |
 | `koinon_agentd_time_limit_stops_total` | counter | none | Runs this replica stopped at their time limit. The api's wall-clock sweep is the backstop and is not counted. |
 | `koinon_agentd_model_wait_duration_seconds` | histogram | none | Time a run waited, before starting its harness, for the gateway to serve its model (a new provider's key still reaching the gateway). Observed only for runs that waited and were then served or timed out, not for a wait ended by a cancel, a lost lease or a shutdown. |
+| `koinon_agentd_run_event_write_failures_total` | counter | `class`: `diagnostic`, `business`; `reason`: `timeout`, `conn`, `transient`, `other` | Run events that could not be written after their tries. A diagnostic event (thoughts, progress, notes) is dropped and the run goes on; a business event (state changes, approvals, the reply) abandons the run, and another worker resumes it. The classes are listed in `internal/runoutcome/eventclass.go`. |
 
 ## koinon-api
 

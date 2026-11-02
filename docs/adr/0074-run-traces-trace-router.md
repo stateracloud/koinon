@@ -735,15 +735,24 @@ event classes. The code lands in #344 (items), #345 (business and diagnostic eve
 4. **What retention does not touch.** Run traces (this ADR's router and its destinations) and the
    spend ledger are unaffected; the ledger stays append-only ([0041](0041-koinon-spend-ledger-and-budget-stops.md)).
    Audit records are not covered by run-content retention either: audit retention is its own policy
-   (#345), and run-content retention never deletes audit records (procoduck, 2026-11-01).
-6. **A purge removes content only** (procoduck, 2026-11-01). Message, thought and tool payloads are
+   (#155), and run-content retention never deletes audit records (procoduck, 2026-11-01).
+5. **A purge removes content only** (procoduck, 2026-11-01). Message, thought and tool payloads are
    deleted; event rows keep type, time, state and cost, so the timeline, the costs and the audit links
    keep working. The UI shows "content expired after N days" for a run past retention.
-5. **Content level** (procoduck, 2026-11-01). Stored run content is independent of the trace content
+6. **Content level** (procoduck, 2026-11-01). Stored run content is independent of the trace content
    level (decision 6): items are always stored, with the always-on secret scrubber, and the trace level
    governs only what the router exports to trace destinations. Retention is the privacy control for
    stored content.
 
 ### Open questions
 
-- The metric name for failed diagnostic writes (see the 0023 amendment); #345 names it against the code.
+- ~~The metric name for failed diagnostic writes.~~ `koinon_agentd_run_event_write_failures_total`,
+  labelled `class` (`diagnostic`, `business`) and `reason` (`timeout`, `conn`, `transient`, `other`)
+  (#345). It counts business writes too: those abandon the run, as before. The class of every kind
+  agentd writes is the table in `internal/runoutcome/eventclass.go`; an unlisted kind is business. A
+  diagnostic write is tried twice, a business one five times; a write that matches no row fences the
+  run whatever its class, since the run is no longer the worker's. One deviation from the classes in
+  decision 2: `acp.tool_call` and `acp.tool_call_update` are business, because the task's reply
+  (`internal/runreply`) uses them as the boundaries of the agent's messages, and dropping one would
+  merge interim narration into the reply. When #344 turns chunks into items, the reply still needs
+  those boundaries.
