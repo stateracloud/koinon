@@ -108,4 +108,11 @@ else
 fi
 if [ -z "$("$here/bash-read-check.sh" <<<'{"tool_input":{}}')" ]; then ok "no command: allow"; else bad "no command"; fi
 
+# A command over 64 KiB (a generated script, pasted data) is allowed without parsing, and fast: the
+# tokenizer's cost grows with size, and quadratically in some awks.
+big=$(jq -nc --arg c "$(printf 'cat a.go b.go\n%.0s' $(seq 6000))" '{tool_input:{command:$c}}')
+start=$SECONDS
+got=$(decide bash-read-check.sh "$big")
+if [ "$got" = allow ] && [ $((SECONDS - start)) -le 2 ]; then ok "a >64 KiB command allows fast"; else bad "a >64 KiB command: got $got in $((SECONDS - start))s"; fi
+
 exit "$fail"
