@@ -124,8 +124,8 @@ var _ = Describe("Evasions of the third review", func() {
 	Describe("an argument at the size cap", func() {
 		prose := strings.Repeat("Kubernetes 1.34 deprecates several beta APIs; see the release notes at https://kubernetes.io/docs/. ", 1<<20/100)
 
-		It("has a clock budget of at least a second", func() {
-			Expect(leakguard.DefaultLimits().MaxDuration).To(BeNumerically(">=", time.Second))
+		It("has a clock backstop of 5 seconds", func() {
+			Expect(leakguard.DefaultLimits().MaxDuration).To(Equal(5 * time.Second))
 		})
 
 		DescribeTable("passes",
@@ -296,11 +296,15 @@ var _ = Describe("Fourth review", func() {
 
 		DescribeTable("within the work cap",
 			func(args []string, workCap int) {
-				checker := leakguard.TaintChecker{Store: taintedStore(fp, privateLine)}
+				// The default work budget decides and the clock is a backstop (5 s): a benign
+				// shape is allowed on one core, and uses under half of the budget.
+				lim := leakguard.DefaultLimits()
+				checker := leakguard.TaintChecker{Store: taintedStore(fp, privateLine), Limits: lim}
 				d, work, err := checker.CheckWork(context.Background(), testScope, fp, args)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
 				Expect(work).To(BeNumerically("<=", int64(workCap)))
+				Expect(work).To(BeNumerically("<=", int64(lim.MaxWorkBytes/2)))
 			},
 			Entry("two halves of base64 of base64", halves(b64(b64(prose[:9<<16]))), 12000000),
 			Entry("two halves of base64 of dashed UTF-16", halves(b64(utf16le(between(prose[:3<<16], "-")))), 7400000),
@@ -320,10 +324,10 @@ var _ = Describe("Fourth review", func() {
 			Entry("128 arguments of 8 KiB, each base64 of UTF-8 of Russian", sliced(128, func(i int) string { return b64(string([]rune(russianProse)[i*50 : i*50+3000])) }), 15900000),
 		)
 
-		// The one spec against the wall clock: the real MaxDuration, on one core, and serial, so
-		// that no other spec of a parallel run shares the core. The shape is the slowest one that
-		// failed on a loaded lab node (3 CPUs, other packages in parallel) before the work caps.
-		It("passes within the real clock of a second on one core", Serial, func() {
+		// The one spec against the wall clock: the 5 s backstop, on one core, and serial, so that
+		// no other spec of a parallel run shares the core. The shape is the slowest one that
+		// failed on a loaded lab node (3 CPUs, other packages in parallel).
+		It("is allowed within the 5 s backstop and the default work budget on one core", Serial, func() {
 			args := sliced(128, func(i int) string { return b64(string([]rune(russianProse)[i*50 : i*50+3000])) })
 			d, err := leakguard.TaintChecker{Store: taintedStore(fp, privateLine)}.Check(context.Background(), testScope, fp, args)
 			Expect(err).NotTo(HaveOccurred())
@@ -595,4 +599,27 @@ var _ = Describe("Invalid bytes interleaved in an encoded stream", func() {
 			Expect(d.Reason).NotTo(Equal(leakguard.ReasonTaint))
 		}
 	})
+})
+
+// The work budget decides, on every machine: with no clock to speak of (an hour), a call that
+// blows up decoding still ends on a budget of work, pairs or depth, never of time.
+var _ = Describe("Blow-ups end on the work budget", func() {
+	var fp *leakguard.Fingerprinter
+	BeforeEach(func() { fp = newFingerprinter(testKey) })
+	prose := strings.Repeat("Kubernetes 1.34 deprecates several beta APIs; see the release notes at https://kubernetes.io/docs/. ", 1<<20/100)
+
+	DescribeTable("fails closed on",
+		func(args []string, lim leakguard.Limits, want leakguard.Reason) {
+			lim.MaxDuration = time.Hour
+			checker := leakguard.TaintChecker{Store: taintedStore(fp, "payroll export job runs nightly"), Limits: lim}
+			d, err := checker.Check(context.Background(), testScope, fp, args)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.Allow).To(BeFalse())
+			Expect(d.Reason).To(Equal(want))
+		},
+		Entry("nesting beyond the depth", []string{percentAll(percentAll(percentAll(percentAll(percentAll("payroll export job runs nightly")))))}, leakguard.Limits{}, leakguard.ReasonDecodeDepth),
+		Entry("a megabyte of base64 of base64 on a small work budget", []string{b64(b64(prose[:9<<16]))}, leakguard.Limits{MaxWorkBytes: 1 << 20}, leakguard.ReasonBudgetWork),
+		Entry("many long arguments, whose pairs do not fit the pair budget", sliced(100, func(i int) string { return b64(randomBytes(i, 6000)) }), leakguard.Limits{MaxWorkBytes: 4 << 20}, leakguard.ReasonBudgetArgs),
+		Entry("prose projected into every alphabet on a small work budget", []string{prose[:1<<19]}, leakguard.Limits{MaxWorkBytes: 1 << 20}, leakguard.ReasonBudgetWork),
+	)
 })

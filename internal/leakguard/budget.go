@@ -75,7 +75,7 @@ type Limits struct {
 	MaxDepth      int           // decode nesting (default 3)
 	MaxVariants   int           // decoded variants per text (default 64)
 	MaxWorkBytes  int           // bytes decoded and normalised per call (default 32 MiB)
-	MaxDuration   time.Duration // wall clock per call (default 1 s)
+	MaxDuration   time.Duration // wall clock backstop per call (default 5 s; the work budget decides)
 	PairJoinBytes int           // bytes of each side joined for split reassembly (default 512)
 	MaxPairArgs   int           // above this many arguments, pairs must fit the pair budget (default 32)
 }
@@ -88,7 +88,7 @@ func DefaultLimits() Limits {
 		MaxDepth:      3,
 		MaxVariants:   64,
 		MaxWorkBytes:  32 << 20,
-		MaxDuration:   time.Second,
+		MaxDuration:   5 * time.Second,
 		PairJoinBytes: 512,
 		MaxPairArgs:   32,
 	}
