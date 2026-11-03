@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"html"
 	"slices"
+	"sort"
 	"strings"
+	"sync"
 	"unicode/utf16"
 	"unicode/utf8"
 )
@@ -51,6 +53,31 @@ var decoders = []decoder{
 	{name: "projected", fn: decodeProjected},
 }
 
+// parallelText is the length from which the decoders of a text run side by side: they are
+// independent, and a megabyte takes each of them a good part of a second.
+const parallelText = 128 << 10
+
+// runDecoders runs every decoder on s and returns their children, in the order of decoders.
+func runDecoders(s string) [][]string {
+	kids := make([][]string, len(decoders))
+	if len(s) < parallelText {
+		for i, d := range decoders {
+			kids[i] = d.fn(s)
+		}
+		return kids
+	}
+	var wg sync.WaitGroup
+	for i, d := range decoders {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			kids[i] = d.fn(s)
+		}()
+	}
+	wg.Wait()
+	return kids
+}
+
 func decodeAll(s string, lim Limits, m *meter) ([]Variant, error) {
 	type item struct {
 		v     Variant
@@ -62,11 +89,14 @@ func decodeAll(s string, lim Limits, m *meter) ([]Variant, error) {
 	for len(queue) > 0 {
 		it := queue[0]
 		queue = queue[1:]
-		for _, d := range decoders {
-			if err := m.add(len(it.v.Text)); err != nil {
-				return nil, err
-			}
-			for _, child := range d.fn(it.v.Text) {
+		// Each decoder makes a pass over the text, most of them a cheap scan that finds nothing to
+		// decode: the text is charged twice for the six, and the clock is the bound that counts.
+		if err := m.add(2 * len(it.v.Text)); err != nil {
+			return nil, err
+		}
+		kids := runDecoders(it.v.Text)
+		for di, d := range decoders {
+			for _, child := range kids[di] {
 				if _, dup := seen[child]; dup {
 					continue
 				}
@@ -228,6 +258,10 @@ func newProjection(name, alphabet string) *projection {
 // catching is at least the threshold (24 canonical characters) long.
 const minSegmentBytes = 16
 
+// minWideUnits is the fewest characters of a UTF-16 reading: a leak is at least the threshold (24
+// canonical characters) long, and a shorter random reading looks like text by chance too often.
+const minWideUnits = 24
+
 // minShortBytes is the shortest stretch resync considers as part of a chain (see resync).
 const minShortBytes = 5
 
@@ -235,6 +269,7 @@ const minShortBytes = 5
 // that is its own projection (the run decoders cover it) or whose projection is too short.
 func decodeProjected(s string) []string {
 	var out []string
+	var rs [][]string
 	buf := make([]byte, 0, len(s))
 	for _, p := range projections {
 		buf = buf[:0]
@@ -252,7 +287,7 @@ func decodeProjected(s string) []string {
 		if len(buf) < minRun || len(buf) == len(s) {
 			continue
 		}
-		var cands []string
+		var cands readings
 		switch p.name {
 		case "base64", "base64url":
 			for i, c := range buf {
@@ -274,11 +309,23 @@ func decodeProjected(s string) []string {
 		default:
 			cands = hexCandidates(string(buf))
 		}
-		if t, ok := best(cands); ok {
-			out = append(out, t)
+		rs = append(rs, cands.all())
+	}
+	// the k-th reading of each projection makes the k-th child
+	for k := 0; ; k++ {
+		more := false
+		for _, r := range rs {
+			if k < len(r) {
+				more = true
+				if !slices.Contains(out, r[k]) {
+					out = append(out, r[k])
+				}
+			}
+		}
+		if !more {
+			return out
 		}
 	}
-	return out
 }
 
 // wordy reports whether at least 60% of the bytes of b are letters, digits or spaces, as text is
@@ -515,8 +562,12 @@ func resync(stream []byte, c *blockCodec) []byte {
 // replaced by its best decoding: the run at each of the 4 alignments, or resynchronised.
 func decodeBase64(s string) []string {
 	runs := findRuns(s, isBase64Char, minRun)
-	return replaceRuns(s, runs, func(run string) (string, bool) {
-		buf := []byte(run)
+	rs := make([][]string, len(runs))
+	for i, r := range runs {
+		if allHex(s[r[0]:r[1]]) { // a hash or an id: its base64 reading is bytes that look like ideographs
+			continue
+		}
+		buf := []byte(s[r[0]:r[1]])
 		for i, c := range buf {
 			switch c {
 			case '-':
@@ -525,14 +576,15 @@ func decodeBase64(s string) []string {
 				buf[i] = '/'
 			}
 		}
-		return best(b64Candidates(buf))
-	})
+		rs[i] = b64Candidates(buf).all()
+	}
+	return replaceSpans(s, runs, rs)
 }
 
 // b64Candidates are the text readings of buf, a stream of the standard base64 alphabet: at each
 // of its 4 alignments, and resynchronised.
-func b64Candidates(buf []byte) []string {
-	var cands []string
+func b64Candidates(buf []byte) readings {
+	var cands readings
 	dec := make([]byte, base64.RawStdEncoding.DecodedLen(len(buf)))
 	for off := range min(4, len(buf)+1) {
 		r := buf[off:]
@@ -543,45 +595,39 @@ func b64Candidates(buf []byte) []string {
 			continue
 		}
 		if n, err := base64.RawStdEncoding.Decode(dec, r); err == nil {
-			if t, ok := asText(dec[:n]); ok {
-				cands = append(cands, t)
-			}
+			cands.add(asText(dec[:n]))
 		}
 	}
-	if t, ok := resyncText(resync(buf, &b64StdCodec)); ok {
-		cands = append(cands, t)
-	}
+	cands.add(resyncText(resync(buf, &b64StdCodec)))
 	return cands
 }
 
 // decodeBase32 returns the text with each base32 run replaced by its best decoding.
 func decodeBase32(s string) []string {
 	runs := findRuns(s, isBase32Char, minRun)
-	return replaceRuns(s, runs, func(run string) (string, bool) {
-		up := []byte(run)
+	rs := make([][]string, len(runs))
+	for i, r := range runs {
+		up := []byte(s[r[0]:r[1]])
 		for i, c := range up {
 			if 'a' <= c && c <= 'z' {
 				up[i] = c - 'a' + 'A'
 			}
 		}
-		return best(b32Candidates(up))
-	})
+		rs[i] = b32Candidates(up).all()
+	}
+	return replaceSpans(s, runs, rs)
 }
 
 // b32Candidates are the text readings of up, a stream of the upper-case base32 alphabet.
-func b32Candidates(up []byte) []string {
-	var cands []string
+func b32Candidates(up []byte) readings {
+	var cands readings
 	if r := up[:len(up)/8*8]; len(r) >= minRun {
 		dec := make([]byte, b32Raw.DecodedLen(len(r)))
 		if n, err := b32Raw.Decode(dec, r); err == nil {
-			if t, ok := asText(dec[:n]); ok {
-				cands = append(cands, t)
-			}
+			cands.add(asText(dec[:n]))
 		}
 	}
-	if t, ok := resyncText(resync(up, &b32Codec)); ok {
-		cands = append(cands, t)
-	}
+	cands.add(resyncText(resync(up, &b32Codec)))
 	return cands
 }
 
@@ -593,33 +639,19 @@ func decodeHex(s string) []string {
 	if len(seqs) == 0 {
 		return nil
 	}
-	var b strings.Builder
-	last := 0
-	changed := false
-	for _, q := range seqs {
-		t, ok := best(hexCandidates(q.digits))
-		if !ok {
-			continue
-		}
-		if !changed {
-			b.Grow(len(s))
-			changed = true
-		}
-		b.WriteString(s[last:q.start])
-		b.WriteString(t)
-		last = q.end
+	spans := make([][2]int, len(seqs))
+	rs := make([][]string, len(seqs))
+	for i, q := range seqs {
+		spans[i] = [2]int{q.start, q.end}
+		rs[i] = hexCandidates(q.digits).all()
 	}
-	if !changed {
-		return nil
-	}
-	b.WriteString(s[last:])
-	return []string{b.String()}
+	return replaceSpans(s, spans, rs)
 }
 
 // hexCandidates are the text readings of digits, a string of hex digits, at both alignments and
 // resynchronised.
-func hexCandidates(digits string) []string {
-	var cands []string
+func hexCandidates(digits string) readings {
+	var cands readings
 	for off := range min(2, len(digits)+1) {
 		d := digits[off:]
 		d = d[:len(d)/2*2]
@@ -630,13 +662,9 @@ func hexCandidates(digits string) []string {
 		for i := range dec {
 			dec[i] = unhex(d[2*i])<<4 | unhex(d[2*i+1])
 		}
-		if t, ok := asText(dec); ok {
-			cands = append(cands, t)
-		}
+		cands.add(asText(dec))
 	}
-	if t, ok := resyncText(resync([]byte(digits), &hexCodec)); ok {
-		cands = append(cands, t)
-	}
+	cands.add(resyncText(resync([]byte(digits), &hexCodec)))
 	return cands
 }
 
@@ -707,81 +735,90 @@ func isHexSep(c byte) bool {
 	return false
 }
 
-// replaceRuns replaces each run that dec turns into text, and returns the result when any did.
-func replaceRuns(s string, runs [][2]int, dec func(string) (string, bool)) []string {
-	var b strings.Builder
-	last := 0
-	changed := false
-	for _, r := range runs {
-		t, ok := dec(s[r[0]:r[1]])
-		if !ok {
-			continue
-		}
-		if !changed {
-			b.Grow(len(s))
-			changed = true
-		}
-		b.WriteString(s[last:r[0]])
-		b.WriteString(t)
-		last = r[1]
+// replaceSpans returns the text with each span replaced by one of its readings: the first child
+// by the first reading of each span, the second by the second (or the first, for a span with
+// one), and so on. A span without readings stays. It returns nothing when no span has any.
+func replaceSpans(s string, spans [][2]int, rs [][]string) []string {
+	k := 0
+	for _, r := range rs {
+		k = max(k, len(r))
 	}
-	if !changed {
-		return nil
-	}
-	b.WriteString(s[last:])
-	return []string{b.String()}
-}
-
-// best returns the candidate with the highest score: a character that folds to an ASCII letter
-// or digit in the matching form (see Normalise) scores 2, another printable character 1, and an
-// unprintable one -8. The decoding at the right alignment and in the right byte order wins: a
-// misread one is either unprintable or text of no script in particular.
-func best(cands []string) (string, bool) {
-	bi, bn := -1, 0
-	t := runeClasses()
-	for i, c := range cands {
-		n := 0
-		// A filler (an invalid byte, a control, a format or combining character) scores nothing
-		// when it is one of two kinds, as an attacker's is; a reading with more kinds of it is a
-		// misreading, and each costs.
-		var kinds [3]rune
-		nKinds := 0
-		for i, r := range c {
-			cl := classOf(t, r)
-			if r == utf8.RuneError {
-				if _, size := utf8.DecodeRuneInString(c[i:]); size == 1 {
-					r, cl = -rune(c[i])-1, clsInvis
-				}
-			}
-			if r != 0 && cl&clsInvis != 0 {
-				if !slices.Contains(kinds[:nKinds], r) && nKinds < len(kinds) {
-					kinds[nKinds] = r
-					nKinds++
-				}
-				if slices.Contains(kinds[:min(nKinds, 2)], r) {
-					continue
-				}
-				n -= 8
+	var out []string
+	for j := range k {
+		var b strings.Builder
+		b.Grow(len(s))
+		last := 0
+		for i, sp := range spans {
+			if len(rs[i]) == 0 {
 				continue
 			}
-			switch {
-			case r == utf8.RuneError:
-				n -= 8
-			case r < utf8.RuneSelf && cl&clsFold != 0:
-				n += 3 // an ASCII letter or digit: a tie goes to the reading with the real letters
-			case cl&clsFold != 0:
-				n += 2
-			case cl&clsPrint == 0 && r != '\n' && r != '\r' && r != '\t':
-				n -= 8
-			case r >= 1<<16:
-				// a well-formed surrogate pair (emoji) is evidence of the alignment and byte
-				// order of a UTF-16 reading: a misread one holds almost none
-				n += 6
-			default:
-				n++
-			}
+			b.WriteString(s[last:sp[0]])
+			b.WriteString(rs[i][min(j, len(rs[i])-1)])
+			last = sp[1]
 		}
-		if bi < 0 || n > bn {
+		b.WriteString(s[last:])
+		if c := b.String(); !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// A readings holds the texts one encoded stream may be: the readings as 8-bit text (at each
+// alignment, and resynchronised) and as UTF-16 (either byte order, either alignment). One
+// stream has no single right reading that can be told from the wrong ones by a score: a reading
+// misaligned by a byte scores like the real one on some scripts, and an attacker can shape the
+// text so that it does. Every reading that passes the loose gates is checked.
+type readings struct {
+	plain []string
+	wide  []string
+}
+
+// maxWide is how many UTF-16 readings of one stream are kept.
+const maxWide = 4
+
+func (r *readings) add(o readings) {
+	r.plain = append(r.plain, o.plain...)
+	r.wide = append(r.wide, o.wide...)
+}
+
+// all returns the readings to check: the best-scoring 8-bit reading, if any, then the UTF-16
+// readings, the highest scoring maxWide of them when there are more.
+func (r readings) all() []string {
+	var out []string
+	if t, ok := best(r.plain); ok {
+		out = append(out, t)
+	}
+	wide := r.wide
+	if len(wide) > maxWide {
+		sc := make([]int, len(wide))
+		for i, w := range wide {
+			sc[i] = score(w)
+		}
+		idx := make([]int, len(wide))
+		for i := range idx {
+			idx[i] = i
+		}
+		sort.SliceStable(idx, func(a, b int) bool { return sc[idx[a]] > sc[idx[b]] })
+		top := make([]string, 0, maxWide)
+		for _, i := range idx[:maxWide] {
+			top = append(top, wide[i])
+		}
+		wide = top
+	}
+	for _, w := range wide {
+		if !slices.Contains(out, w) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// best returns the candidate with the highest score (see score).
+func best(cands []string) (string, bool) {
+	bi, bn := -1, 0
+	for i, c := range cands {
+		if n := score(c); bi < 0 || n > bn {
 			bi, bn = i, n
 		}
 	}
@@ -789,6 +826,53 @@ func best(cands []string) (string, bool) {
 		return "", false
 	}
 	return cands[bi], true
+}
+
+// score rates a reading: a character that folds to an ASCII letter or digit in the matching
+// form (see Normalise) scores 2 (3 when it is ASCII itself), another printable character 1, a
+// filler (control, format or combining character) 0, and an unprintable one -8.
+func score(c string) int {
+	t := runeClasses()
+	n := 0
+	// A filler (an invalid byte, a control, a format or combining character) scores nothing when
+	// it is one of two kinds, as an attacker's is; a reading with more kinds of it is a
+	// misreading, and each costs.
+	var kinds [3]rune
+	nKinds := 0
+	for i, r := range c {
+		cl := classOf(t, r)
+		if r == utf8.RuneError {
+			if _, size := utf8.DecodeRuneInString(c[i:]); size == 1 {
+				r, cl = -rune(c[i])-1, clsInvis
+			}
+		}
+		if r != 0 && cl&clsInvis != 0 {
+			if !slices.Contains(kinds[:nKinds], r) && nKinds < len(kinds) {
+				kinds[nKinds] = r
+				nKinds++
+			}
+			if slices.Contains(kinds[:min(nKinds, 2)], r) {
+				continue
+			}
+			n -= 8
+			continue
+		}
+		switch {
+		case r == utf8.RuneError:
+			n -= 8
+		case r < utf8.RuneSelf && cl&clsFold != 0:
+			n += 3
+		case cl&clsFold != 0:
+			n += 2
+		case cl&clsPrint == 0 && r != '\n' && r != '\r' && r != '\t':
+			n -= 8
+		case r >= 1<<16:
+			n += 6
+		default:
+			n++
+		}
+	}
+	return n
 }
 
 func foldsToASCII(rs []rune) bool {
@@ -815,127 +899,161 @@ func findRuns(s string, in func(byte) bool, minLen int) [][2]int {
 	return runs
 }
 
-// asText returns b as text when it is text (see textual). Its UTF-16 readings (either byte
-// order, either alignment) are always candidates too, as PowerShell's -EncodedCommand is
-// UTF-16LE base64; a reading counts only when its code units sit in at most two 256-character
-// blocks for three quarters of the text, as one script's text does and random bytes do not.
-func asText(b []byte) (string, bool) { return asTextWith(b, textual) }
+// asText returns the readings of b that are text: b itself when it is text (see textual), and
+// its UTF-16 readings (either byte order, either alignment), which are always candidates too, as
+// PowerShell's -EncodedCommand is UTF-16LE base64. A UTF-16 reading counts when it passes the
+// gate of utf16Gate and is text itself.
+func asText(b []byte) readings { return asTextWith(b, textual) }
 
 // resyncText is asText for the output of resync, whose segments were already judged to be text
 // (see wordy): it needs only a printable run, so NUL padding an attacker puts before the text
 // (which a straight decoding fails on) does not hide it.
-func resyncText(b []byte) (string, bool) {
+func resyncText(b []byte) readings {
 	return asTextWith(b, func(b []byte) bool { return longestPrintable(b) >= textualRun })
 }
 
-func asTextWith(b []byte, isText func([]byte) bool) (string, bool) {
+func asTextWith(b []byte, isText func([]byte) bool) readings {
+	var r readings
 	if len(b) < minSegmentBytes {
-		return "", false
+		return r
 	}
-	var cands []string
 	if isText(b) {
-		cands = append(cands, string(b))
+		r.plain = append(r.plain, string(b))
 	}
 	if len(b) >= 2*textualRun {
 		for _, le := range []bool{true, false} {
 			for off := range 2 {
 				if u, ok := fromUTF16(b[off:], le); ok && textual([]byte(u)) {
-					cands = append(cands, u)
+					r.wide = append(r.wide, u)
 				}
 			}
 		}
 	}
-	return best(cands)
+	return r
 }
 
-// utf16Gate reports whether the code units lo to hi of b look like one script's text (see
-// fromUTF16).
-func utf16Gate(b []byte, le bool, lo, hi int) bool {
-	unit := func(i int) uint16 {
-		if le {
-			return uint16(b[2*i]) | uint16(b[2*i+1])<<8
-		}
-		return uint16(b[2*i])<<8 | uint16(b[2*i+1])
-	}
-	// One script's text sits in at most two 256-character blocks (its own and ASCII). What an
-	// attacker puts between the letters is left out of the count: spaces, punctuation and
-	// invisible marks (U+3000, U+2014, U+200B) and pairs that are no letter or digit (emoji).
-	// What is left must be a quarter of the characters, with controls under 5% (binary is full
-	// of NULs), and sit in two blocks for three quarters of it. Chinese, whose ideographs span
-	// about eighty blocks, has a second way in: at least 24 ideographs, 70% of the characters,
-	// and 70% of them different (random bytes put 40% of their units there; a repeating
-	// pattern repeats).
-	var pages [256]int
-	var cjk [(0x9fff-0x3400)/64 + 1]uint64
-	counted, chars, ctrl, ideographs, distinct := 0, 0, 0, 0, 0
-	cls := runeClasses()
-	for i := lo; i < hi; i++ {
-		u := unit(i)
-		chars++
-		if cls[u]&clsInvis != 0 && cls[u]&clsMark == 0 && u != '\n' && u != '\r' && u != '\t' {
-			ctrl++
-		}
-		if 0xd800 <= u && u < 0xdc00 && i+1 < hi { // a surrogate pair is one character
-			r := utf16.DecodeRune(rune(u), rune(unit(i+1)))
-			i++
-			if c := classOf(cls, r); c&clsWord == 0 || c&clsSpace != 0 {
-				continue
-			}
-		} else if cls[u]&(clsSpace|clsPunctOnly|clsMark) != 0 {
-			continue
-		}
-		if 0x3400 <= u && u <= 0x9fff {
-			w, bit := (u-0x3400)/64, uint64(1)<<((u-0x3400)%64)
-			if cjk[w]&bit == 0 {
-				cjk[w] |= bit
-				distinct++
-			}
-			ideographs++
-		}
-		pages[u>>8]++
-		counted++
-	}
-	first, second := 0, 0
-	for _, c := range pages {
-		if c > first {
-			first, second = c, first
-		} else if c > second {
-			second = c
-		}
-	}
-	if 4*counted < chars || 20*ctrl > chars {
+// utf16Gate reports whether the code units of b look like one script's text, loosely: a reading
+// that passes is checked, one that fails is dropped, and several may pass (see readings). One
+// script's text sits in two 256-character blocks at most (its own and ASCII), and Chinese,
+// Japanese and Korean in a few more, which are one block each here (ideographs span about eighty
+// of 256, Hangul forty-four). What an attacker puts between the letters is left out of the
+// count: spaces, punctuation and invisible marks (U+3000, U+2014, U+200B) and pairs that are no
+// letter or digit (emoji). What is left must be a quarter of the characters, with the unprintable
+// ones (controls, unassigned and private-use characters: a third of random units) under 5%, and sit in two blocks (three when one is ideographs, as Japanese
+// is kana, ideographs and ASCII) for three quarters of it. Random bytes put 42% of their units
+// among the ideographs and the rest across 190 blocks.
+func utf16Gate(b []byte, le bool) bool {
+	n := len(b) / 2
+	if n < minWideUnits {
 		return false
 	}
-	chinese := ideographs >= 24 && 10*ideographs >= 7*counted && 10*distinct >= 7*ideographs
-	return 4*(first+second) >= 3*counted || chinese
+	const han = 256 // bucket of U+4E00 to U+9FFF
+	var pages [257]int32
+	p1, p2 := 0, 1
+	var c1, c2 int32
+	var seen [8]uint16 // the first distinct ideographs: eight are enough (see below)
+	distinct := 0
+	merged := false
+	counted, chars, bad, hanUnits, hanWide := 0, 0, 0, 0, 0
+	cls := runeClasses()
+	for i := 0; i < n; i++ {
+		var u uint16
+		if le {
+			u = uint16(b[2*i]) | uint16(b[2*i+1])<<8
+		} else {
+			u = uint16(b[2*i])<<8 | uint16(b[2*i+1])
+		}
+		chars++
+		c := cls[u]
+		if 0xd800 <= u && u < 0xdc00 && i+1 < n { // a surrogate pair is one character
+			var lo uint16
+			if le {
+				lo = uint16(b[2*i+2]) | uint16(b[2*i+3])<<8
+			} else {
+				lo = uint16(b[2*i+2])<<8 | uint16(b[2*i+3])
+			}
+			i++
+			if c := classOf(cls, utf16.DecodeRune(rune(u), rune(lo))); c&clsWord == 0 || c&clsSpace != 0 {
+				continue
+			}
+		} else if c&(clsSpace|clsPunctOnly|clsMark) != 0 {
+			continue
+		} else if c&clsPrint == 0 {
+			bad++           // a control, a lone surrogate, an unassigned or private-use character
+			if 20*bad > n { // more than 5% of all the units: the reading fails whatever follows
+				return false
+			}
+		}
+		switch {
+		default:
+			p := int(u >> 8)
+			v := pages[p] + 1
+			pages[p] = v
+			switch { // the two fullest blocks so far
+			case p == p1:
+				c1 = v
+			case v > c1:
+				p2, c2, p1, c1 = p1, c1, p, v
+			case p == p2:
+				c2 = v
+			case v > c2:
+				p2, c2 = p, v
+			}
+			if 0x4e00 <= u && u <= 0x9fff {
+				hanUnits++
+				if u&0x80 != 0 {
+					hanWide++
+				}
+				if distinct < len(seen) && !slices.Contains(seen[:distinct], u) {
+					seen[distinct] = u
+					distinct++
+				}
+			}
+		}
+		counted++
+	}
+	// Ideographs are one block, unless they are ASCII read in pairs: a pair of printable ASCII
+	// bytes lands in 0x2020 to 0x7e7e, and never has a byte of 0x80 or more, as half of the
+	// ideographs do.
+	// (and not a pattern repeating: a run of one byte value in base64 reads as a few ideographs)
+	if hanUnits > 0 && 4*hanWide >= hanUnits && distinct >= 8 {
+		for p := 0x4e; p <= 0x9f; p++ {
+			pages[p] = 0
+		}
+		pages[han] = int32(hanUnits)
+		merged = true
+	}
+	if 4*counted < chars || 20*bad > chars {
+		return false
+	}
+	first, second := c1, c2
+	if merged {
+		first, second = 0, 0
+		for _, c := range pages {
+			if c > first {
+				first, second = c, first
+			} else if c > second {
+				second = c
+			}
+		}
+	}
+	// Japanese is kana, ideographs and ASCII: three blocks
+	top := max(first+second, pages[han]+pages[0x30]+pages[0])
+	return 4*int(top) >= 3*counted
 }
 
 func fromUTF16(b []byte, le bool) (string, bool) {
-	n := len(b) / 2
-	// a long reading is first tried on four short samples: text, which is most of what textual
-	// accepts, passes at least one; random bytes (most readings of a megabyte) fail all four
-	if n > 1024 {
-		sampled := false
-		for q := range 4 {
-			lo := n * q / 4
-			sampled = sampled || utf16Gate(b, le, lo, min(lo+256, n))
-		}
-		if !sampled {
-			return "", false
-		}
-	}
-	if !utf16Gate(b, le, 0, n) {
+	if !utf16Gate(b, le) {
 		return "", false
 	}
-	unit := func(i int) uint16 {
-		if le {
-			return uint16(b[2*i]) | uint16(b[2*i+1])<<8
-		}
-		return uint16(b[2*i])<<8 | uint16(b[2*i+1])
-	}
+	n := len(b) / 2
 	u := make([]uint16, n)
 	for i := range u {
-		u[i] = unit(i)
+		if le {
+			u[i] = uint16(b[2*i]) | uint16(b[2*i+1])<<8
+		} else {
+			u[i] = uint16(b[2*i])<<8 | uint16(b[2*i+1])
+		}
 	}
 	if len(u) > 0 && u[0] == 0xfeff {
 		u = u[1:]

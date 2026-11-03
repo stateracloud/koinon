@@ -4,3 +4,5 @@
 86035255835499a48a18d27cb8ffa3e0bda61817:web/e2e/settings.spec.ts:generic-api-key:59
 # A rendered CEL rule (apiKey.agent == "acme/repo-helper" && ...) in a golden file; not a secret.
 19412ff555611f318221c8bee776b3d61b1db549:internal/gateway/standalone/testdata/mcp-servers.yaml:generic-api-key:83
+# A JWT-shaped test fixture of the leakguard evasion tests (fake claims, no signature); the next commit builds it at run time.
+330431dd5aafc604f6b1404c80b55cdbb1b09b5e:internal/leakguard/evasion_test.go:jwt:323

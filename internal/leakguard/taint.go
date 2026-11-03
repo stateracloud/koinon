@@ -6,7 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 )
 
@@ -213,31 +216,100 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 			}
 		}
 	}
+	res, err := decodeRaws(raws, lim, fp, m)
+	if err != nil {
+		return nil, err
+	}
 	seen := map[string]struct{}{}
 	var out []candidate
-	for _, r := range raws {
+	for _, rs := range res {
+		for _, c := range rs {
+			if _, dup := seen[c.key]; dup {
+				continue
+			}
+			seen[c.key] = struct{}{}
+			out = append(out, c.candidate)
+		}
+	}
+	return out, nil
+}
+
+type keyedCandidate struct {
+	candidate
+	key string
+}
+
+// decodeRaws decodes, normalises and fingerprints each text. The texts are independent and a
+// call may carry thousands of them (the pairs of its arguments), so several workers take them in
+// turn; the results stay in the order of raws.
+func decodeRaws(raws []rawText, lim Limits, fp *Fingerprinter, m *meter) ([][]keyedCandidate, error) {
+	one := func(r rawText) ([]keyedCandidate, error) {
 		vs, err := decodeAll(r.text, lim, m)
 		if err != nil {
 			return nil, err
 		}
+		var out []keyedCandidate
 		for _, v := range vs {
 			if err := m.add(len(v.Text)); err != nil {
 				return nil, err
 			}
 			c := Normalise(v.Text)
-			key := c.String()
 			if len(c.Runes) < fp.k {
 				continue
 			}
-			if _, dup := seen[key]; dup {
-				continue
+			out = append(out, keyedCandidate{candidate{args: r.args, v: v, canon: c, fps: fp.kgrams(c.Runes, nil)}, c.String()})
+		}
+		return out, nil
+	}
+	res := make([][]keyedCandidate, len(raws))
+	workers := min(runtime.GOMAXPROCS(0), maxWorkers, len(raws)/minPerWorker)
+	if workers <= 1 {
+		for i, r := range raws {
+			var err error
+			if res[i], err = one(r); err != nil {
+				return nil, err
 			}
-			seen[key] = struct{}{}
-			out = append(out, candidate{args: r.args, v: v, canon: c, fps: fp.kgrams(c.Runes, nil)})
+		}
+		return res, nil
+	}
+	var (
+		next   atomic.Int64
+		failed atomic.Bool
+		wg     sync.WaitGroup
+		errs   = make([]error, len(raws))
+	)
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for !failed.Load() {
+				i := int(next.Add(1) - 1)
+				if i >= len(raws) {
+					return
+				}
+				var err error
+				if res[i], err = one(raws[i]); err != nil {
+					errs[i] = err
+					failed.Store(true)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs { // the first in call order, as a serial run reports it
+		if err != nil {
+			return nil, err
 		}
 	}
-	return out, nil
+	return res, nil
 }
+
+// maxWorkers and minPerWorker bound the workers of decodeRaws: a call of a few texts is decoded
+// in turn, not worth the goroutines.
+const (
+	maxWorkers   = 8
+	minPerWorker = 8
+)
 
 // head returns at most n bytes from the start of s, cut at a character boundary.
 func head(s string, n int) string {

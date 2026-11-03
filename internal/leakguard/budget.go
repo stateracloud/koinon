@@ -5,6 +5,7 @@ package leakguard
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 )
 
@@ -134,29 +135,29 @@ func (e *budgetError) decision() Decision {
 	return Decision{Reason: e.reason, Detail: e.detail}
 }
 
-// meter counts the work of one check against the work and time budgets.
+// meter counts the work of one check against the work and time budgets. It is safe for the
+// workers that decode a call's texts side by side.
 type meter struct {
 	ctx      context.Context
-	used     int
-	max      int
+	used     atomic.Int64
+	max      int64
 	deadline time.Time
-	next     int // used value at which the clock is read next
+	next     atomic.Int64 // used value at which the clock is read next
 }
 
 const meterClockEvery = 64 << 10
 
 func newMeter(ctx context.Context, l Limits) *meter {
-	return &meter{ctx: ctx, max: l.MaxWorkBytes, deadline: time.Now().Add(l.MaxDuration)}
+	return &meter{ctx: ctx, max: int64(l.MaxWorkBytes), deadline: time.Now().Add(l.MaxDuration)}
 }
 
 // add charges n bytes of work and fails when a budget is spent or the context is done.
 func (m *meter) add(n int) error {
-	m.used += n
-	if m.used > m.max {
+	used := m.used.Add(int64(n))
+	if used > m.max {
 		return &budgetError{ReasonBudgetWork, fmt.Sprintf("the check needed more than %d bytes of decoding work; the tool call could not be checked", m.max)}
 	}
-	if m.used >= m.next {
-		m.next = m.used + meterClockEvery
+	if next := m.next.Load(); used >= next && m.next.CompareAndSwap(next, used+meterClockEvery) {
 		return m.clock()
 	}
 	return nil
