@@ -39,7 +39,7 @@
 //     length is read through; the price is that prose is projected too (its letters are
 //     base64 and base32 symbols), which resynchronisation turns into nothing, at a cost the
 //     work and time budgets bound. Measured on one core (GOMAXPROCS=1) on a laptop, a benign
-//     call of up to 1 MiB takes 0.004 to 0.41 s of the 1 s a call has: 0.41 s for 128 arguments
+//     call of up to 1 MiB takes 0.004 to 0.41 s: 0.41 s for 128 arguments
 //     of 8 KiB of base64 of UTF-8 Russian, 0.40 s for two halves of base64 of base64, 0.35 s of
 //     base64 of random bytes, 0.32 s for 128 arguments of 8 KiB of UTF-16 prose, 0.30 s of 3 KiB
 //     of UTF-16 Russian, 0.28 s of UTF-16 Chinese, 0.25 s of 100 arguments of random bytes, and
@@ -47,7 +47,7 @@
 //     of 3 CPUs shared with other test packages, is 2.1 times a laptop's (128 arguments of base64
 //     of UTF-8 Russian took 1.03 s there before the changes of the eighth round, 0.5 s here;
 //     0.29 s here after the ninth, 0.41 s after the tenth, which reads text with invalid bytes
-//     of many kinds in it, see below), so the slowest shapes take about 0.85 s there. The texts
+//     of many kinds in it, see below), so the slowest shapes take about 0.85 s there, and a lab node under parallel load took 1.0 to 1.1 s for the same shapes (2.8 s for the one-core smoke spec): the time a node takes is no property of the call. The texts
 //     of a call are decoded by up to 8 workers and the decoders of a text over 128 KiB run side
 //     by side, as a speed-up only: a pod with a small CPU limit gets no benefit.
 //
@@ -57,9 +57,9 @@
 //     MaxWorkBytes. Each benign shape has a cap of 1.1 times its measured work, rounded up to
 //     100 KB (0.5 to 17 MB): the caps keep the cost of a shape from growing unnoticed, and they
 //     are chosen by shape because the time a byte of work takes differs (19 to 35 ms a MB here,
-//     and 2.1 times that on the lab node, taking the slowest shape to 0.85 s of the second).
+//     and 2.1 times that on the lab node, taking the slowest shape to 0.85 s on the lab node unloaded).
 //     One spec, serial and on one core, runs the slowest shape that failed on the lab node
-//     against the real clock. A
+//     against the 5 s backstop. A
 //     projection keeps stretches of 16 or more decoded bytes that are 60% letters, digits or
 //     spaces (ASCII punctuation and NULs do not count against them), so chance ASCII in
 //     misaligned decodings does not become a variant; shorter stretches (5 or more bytes, base64
@@ -171,10 +171,21 @@
 //
 // # Budgets
 //
-// Every check is bounded: argument count, total input bytes, decode depth, variants per text,
-// a work counter over every byte decoded and normalised, and a wall-clock cap, which is also
+// Every check is bounded: argument count, total input bytes, decode depth, variants per text, a
+// work counter over every byte decoded and normalised, and a wall-clock backstop, which is also
 // checked before and after the store lookup and bounds the lookup's context. A check that
 // exceeds a budget fails closed: it returns a blocking Decision whose Reason names the budget.
+//
+// The work budget decides; the clock does not. MaxWorkBytes (32 MiB) is the same on every machine:
+// a call that blows up decoding (deep nesting, a variant explosion, pairs of many arguments)
+// reaches it, or the pair budget (MaxWorkBytes/16), with the same verdict on a laptop, a lab
+// node under load and a pod with a small CPU limit. The benign shapes measured (up to 1 MiB of
+// arguments in the slowest encodings) are charged 0.5 to 15 MB, under half of the budget, and
+// the specs assert both that and a cap per shape. MaxDuration (5 s) is a safety net for a stuck
+// or starved machine, not a policy: a benign call must never depend on it (the specs run the
+// whole suite with the clock set to an hour and nothing changes), and 5 s is far above the
+// worst time measured for the worst shape (2.8 s, one core under parallel load on the lab node).
+// A cancelled context still ends a check at once, with ReasonBudgetTime.
 //
 // # Store limits
 //
