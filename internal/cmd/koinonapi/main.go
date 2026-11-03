@@ -32,6 +32,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -47,6 +48,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for goose
 	"github.com/pressly/goose/v3"
 	"github.com/spf13/pflag"
+	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,12 +72,15 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/declarative"
 	"github.com/stateracloud/koinon/internal/durable"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gen/agentgateway/extmcp"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpask"
 	"github.com/stateracloud/koinon/internal/mcpcheck"
+	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
@@ -141,6 +146,8 @@ type config struct {
 	metricsAddr                                                          string
 	toolsAddr                                                            string
 	savedWorkAddr                                                        string
+	guardAddr                                                            string
+	guardByteCap                                                         int
 	savedWorkSecret                                                      string
 	secretsNamespace                                                     string
 	kubeconfig                                                           string
@@ -237,6 +244,10 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 		"listen address of the saved-work upload endpoint, for koinon-agentd only; empty disables it")
 	fs.StringVar(&c.savedWorkSecret, "saved-work-secret", "koinon-saved-work",
 		"Secret with the key that signs saved-work uploads; created on first use, never overwritten")
+	fs.StringVar(&c.guardAddr, "guard-addr", ":8083",
+		"listen address of the MCP leak guard (agentgateway's mcpGuardrails, ADR 0091); reachable only from agentgateway. Empty disables it, and the gateway then refuses every org MCP call")
+	fs.IntVar(&c.guardByteCap, "leak-guard-byte-cap", mcpguard.DefaultByteCap,
+		"payload bytes a run that holds both legs may send through external-low tools (ADR 0091 decision 5)")
 	fs.StringVar(&c.toolsAddr, "tools-addr", ":8081",
 		"listen address of the GitHub tools MCP server, for agentgateway only; empty disables it")
 	fs.StringVar(&c.secretsNamespace, "secrets-namespace", "",
@@ -546,7 +557,21 @@ func serve(ctx context.Context, cfg config) error {
 	if err := catalog.ValidateAllowedHosts(urlPolicy.AllowedHosts); err != nil {
 		return err
 	}
-	approvalOpts := approvals.Options{Keys: opener, Hosts: hosts, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default()}
+	// The MCP leak guard (ADR 0091) and the ask-tier proxy refer to each other: the guard records its
+	// approvals through the proxy, and the proxy asks the guard for the risk on its one card.
+	guardMetrics := mcpguard.NewMetrics(nil)
+	var guard *mcpguard.Guard
+	askSrv := mcpask.New(pool, mcpask.Options{
+		Assess: func(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, tool string, args json.RawMessage) (map[string]any, error) {
+			return guard.Assess(ctx, org, agent, srv, tool, args)
+		},
+	})
+	guard = mcpguard.New(pool, mcpguard.Options{
+		Logger: slog.Default(), Metrics: guardMetrics, ByteCap: cfg.guardByteCap,
+		Approve:    askSrv.RequestApproval,
+		OwnTargets: append(providers.Default().IDs(), gateway.KoinonTarget),
+	})
+	approvalOpts := approvals.Options{Keys: opener, Hosts: hosts, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default(), OnMCPResult: guard.RecordApproved}
 	if kube != nil {
 		// Approved calls to remote MCP servers go through the gateway with the org's executor key,
 		// which the reconciler keeps in a Secret; koinon-api never holds a server credential.
@@ -605,6 +630,7 @@ func serve(ctx context.Context, cfg config) error {
 
 	reg := metrics.NewRegistry()
 	reg.MustRegister(kekMetrics.ActiveReachable)
+	reg.MustRegister(guardMetrics.Collectors()...)
 	if durableRT != nil {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
 		reg.MustRegister(durableRT.Collector())
@@ -680,7 +706,7 @@ func serve(ctx context.Context, cfg config) error {
 		mux := http.NewServeMux()
 		mux.Handle("/mcp", tools.Handler())
 		// The ask-tier tools of org MCP servers (plan item MC1), for agentgateway only like /mcp.
-		mux.Handle(mcpask.Path, mcpask.New(pool, mcpask.Options{}).Handler())
+		mux.Handle(mcpask.Path, askSrv.Handler())
 		// ask_user (plan item TK3), the "koinon" target of the gateway.
 		mux.Handle(askuser.Path, askuser.New(pool, askuser.Options{Metrics: apiMetrics}).Handler())
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -726,8 +752,29 @@ func serve(ctx context.Context, cfg config) error {
 			}
 		})
 	}
+	var guardSrv *grpc.Server
+	if cfg.guardAddr != "" {
+		lis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.guardAddr)
+		if err != nil {
+			return fmt.Errorf("--guard-addr: %w", err)
+		}
+		guardSrv = grpc.NewServer()
+		extmcp.RegisterExtMcpServer(guardSrv, mcpguard.NewServer(guard))
+		safego.GoOrStop(ctx, slog.Default(), "mcp-guard", stop, func(context.Context) {
+			slog.Info("serving the MCP leak guard", "addr", cfg.guardAddr)
+			if err := guardSrv.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+				toolsErr <- fmt.Errorf("mcp leak guard: %w", err)
+				stop()
+			}
+		})
+	} else {
+		slog.Warn("the MCP leak guard is off (--guard-addr empty): the gateway refuses every org MCP call")
+	}
 	safego.Go(ctx, slog.Default(), "shutdown", func(context.Context) {
 		<-ctx.Done()
+		if guardSrv != nil {
+			guardSrv.GracefulStop()
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		for _, s := range servers {
