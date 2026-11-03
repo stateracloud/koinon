@@ -117,3 +117,16 @@ func TestRejectedRequestChargesInputOnly(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestFailedCallChargesInputOnlyAndReservesNothing(t *testing.T) {
+	p := estimate.Params{Tokenizer: pricing.TokenizerBytes, Ratio: 3, MaxOutput: 128000}
+	r := estimate.Estimate(p, estimate.Input{RequestBytes: 3000, Failed: true, Aborted: true, MaxTokens: 4000})
+	if r.InputTokens != 1000 || r.OutputTokens != 0 || r.ReserveOutputTokens != 0 || !r.Estimated || r.Method != "bytes" {
+		t.Fatalf("%+v", r)
+	}
+	// An aborted response that did not fail with a 5xx keeps its reserve (a cut stream after output).
+	r = estimate.Estimate(p, estimate.Input{RequestBytes: 3000, Aborted: true, MaxTokens: 4000})
+	if r.ReserveOutputTokens != 4000 {
+		t.Fatalf("%+v", r)
+	}
+}
