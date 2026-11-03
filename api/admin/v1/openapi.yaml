@@ -31,6 +31,7 @@ tags:
   - name: agents
   - name: models
   - name: mcp
+  - name: leak-guard
   - name: tokens
   - name: prices
   - name: budgets
@@ -220,6 +221,31 @@ paths:
       responses:
         "204":
           description: Deleted.
+        default:
+          $ref: "#/components/responses/Error"
+  /mcp-servers/{serverId}/data-class:
+    parameters:
+      - $ref: "#/components/parameters/serverId"
+    put:
+      tags: [mcp]
+      operationId: setMcpServerDataClass
+      summary: "Set what a server exposes, its kind and the legs of the leak guard it carries. Audited."
+      description: |
+        Works for declared servers too: the declaring Secret does not carry it. A server nobody
+        classified is kind `other` with all three legs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/McpServerDataClass"
+      responses:
+        "200":
+          description: The server.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpServer"
         default:
           $ref: "#/components/responses/Error"
   /mcp-servers/{serverId}/tools:
@@ -457,6 +483,80 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DefaultModel"
+        default:
+          $ref: "#/components/responses/Error"
+  /leak-guard:
+    get:
+      tags: [leak-guard]
+      operationId: getLeakGuard
+      summary: The org's leak-guard settings, with defaults filled in, and its fetch-trusted host list.
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeakGuard"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [leak-guard]
+      operationId: setLeakGuard
+      summary: Set the match threshold, or return it to the default by leaving `matchThreshold` out. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeakGuardSettings"
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeakGuard"
+        default:
+          $ref: "#/components/responses/Error"
+  /leak-guard/trusted-hosts:
+    post:
+      tags: [leak-guard]
+      operationId: addFetchTrustedHost
+      summary: Put a host on the fetch-trusted list, which the automatic URL rule exempts. Audited.
+      description: |
+        The list starts empty. A host is a bare DNS name; adding one already on the list changes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FetchTrustedHost"
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeakGuard"
+        default:
+          $ref: "#/components/responses/Error"
+  /leak-guard/trusted-hosts/{host}:
+    delete:
+      tags: [leak-guard]
+      operationId: removeFetchTrustedHost
+      summary: Take a host off the fetch-trusted list. Audited.
+      parameters:
+        - name: host
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeakGuard"
         default:
           $ref: "#/components/responses/Error"
   /tokens:
@@ -1126,7 +1226,7 @@ components:
           description: Replaces the workspace ID; an empty string removes it. Only for type `anthropic`.
     McpServer:
       type: object
-      required: [id, name, url, transport, hasCredential, source, health, createdAt, updatedAt]
+      required: [id, name, url, transport, hasCredential, source, health, kind, dataClass, createdAt, updatedAt]
       properties:
         id: {type: string, format: uuid}
         name: {type: string, example: tracker}
@@ -1152,6 +1252,54 @@ components:
         toolsSyncedAt: {type: string, format: date-time}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+        kind: {$ref: "#/components/schemas/McpServerKind"}
+        dataClass: {$ref: "#/components/schemas/McpDataClass"}
+    McpServerKind:
+      type: string
+      enum: [fetch, search, other]
+      description: What the server is for. `other` is the default.
+    McpDataClass:
+      type: array
+      uniqueItems: true
+      description: |
+        The legs of the leak guard (ADR 0084) the server carries: `untrusted_input` (returns text an
+        outsider controls), `private_data` (returns data the org does not want to leave) and `outbound`
+        (a call sends its arguments outside the org). A server may carry several; empty carries none.
+        A server nobody classified carries all three.
+      items:
+        type: string
+        enum: [untrusted_input, private_data, outbound]
+    McpServerDataClass:
+      type: object
+      required: [kind, dataClass]
+      properties:
+        kind: {$ref: "#/components/schemas/McpServerKind"}
+        dataClass: {$ref: "#/components/schemas/McpDataClass"}
+    LeakGuard:
+      type: object
+      required: [matchThreshold, defaultMatchThreshold, minMatchThreshold, maxMatchThreshold, trustedHosts]
+      properties:
+        matchThreshold:
+          type: integer
+          description: The shortest tainted text, in characters after normalisation, that blocks a call. Default 24.
+        defaultMatchThreshold: {type: integer}
+        minMatchThreshold: {type: integer}
+        maxMatchThreshold: {type: integer}
+        trustedHosts:
+          type: array
+          description: The fetch-trusted host list, sorted. Empty for a new org.
+          items: {type: string}
+    LeakGuardSettings:
+      type: object
+      properties:
+        matchThreshold:
+          type: integer
+          description: Characters. Leave out for the default (24).
+    FetchTrustedHost:
+      type: object
+      required: [host]
+      properties:
+        host: {type: string, example: docs.example.com}
     McpServerList:
       type: object
       required: [servers]
@@ -1178,6 +1326,8 @@ components:
         credentialValue:
           type: string
           description: The secret. Omit for a server that needs none.
+        kind: {$ref: "#/components/schemas/McpServerKind"}
+        dataClass: {$ref: "#/components/schemas/McpDataClass"}
     McpServerUpdate:
       type: object
       properties:

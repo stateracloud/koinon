@@ -35,6 +35,9 @@ const (
 	// McpServerServiceUpdateServerProcedure is the procedure name of the McpServerService's
 	// UpdateServer RPC.
 	McpServerServiceUpdateServerProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/UpdateServer"
+	// McpServerServiceSetServerClassProcedure is the procedure name of the McpServerService's
+	// SetServerClass RPC.
+	McpServerServiceSetServerClassProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/SetServerClass"
 	// McpServerServiceDeleteServerProcedure is the procedure name of the McpServerService's
 	// DeleteServer RPC.
 	McpServerServiceDeleteServerProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/DeleteServer"
@@ -78,6 +81,13 @@ var (
 			StreamType: connect.StreamTypeUnary,
 			Schema:     v1alpha1.File_koinon_mcpserver_v1alpha1_mcpserver_proto.Services().ByName("McpServerService").Methods().ByName("UpdateServer"),
 			Procedure:  McpServerServiceUpdateServerProcedure,
+		}
+	})
+	mcpServerServiceSetServerClassSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_mcpserver_v1alpha1_mcpserver_proto.Services().ByName("McpServerService").Methods().ByName("SetServerClass"),
+			Procedure:  McpServerServiceSetServerClassProcedure,
 		}
 	})
 	mcpServerServiceDeleteServerSpec = sync.OnceValue(func() connect.Spec {
@@ -140,6 +150,10 @@ type McpServerServiceClient interface {
 	// INVALID_ARGUMENT (planned for v0.2).
 	CreateServer(context.Context, *v1alpha1.CreateServerRequest) (*v1alpha1.CreateServerResponse, error)
 	UpdateServer(context.Context, *v1alpha1.UpdateServerRequest) (*v1alpha1.UpdateServerResponse, error)
+	// SetServerClass sets what a server exposes: its kind and the legs of the leak guard (ADR 0084) it
+	// carries. It works for declared servers too, which the declaring Secret does not describe. Audited
+	// as mcp_server.data_class.set.
+	SetServerClass(context.Context, *v1alpha1.SetServerClassRequest) (*v1alpha1.SetServerClassResponse, error)
 	// DeleteServer deletes a server entered here, with its tools and the agents' allowances of it. A
 	// declared server can be deleted only after its Secret was deleted (removed).
 	DeleteServer(context.Context, *v1alpha1.DeleteServerRequest) (*v1alpha1.DeleteServerResponse, error)
@@ -172,6 +186,10 @@ type McpServerServiceHandler interface {
 	// INVALID_ARGUMENT (planned for v0.2).
 	CreateServer(context.Context, *v1alpha1.CreateServerRequest) (*v1alpha1.CreateServerResponse, error)
 	UpdateServer(context.Context, *v1alpha1.UpdateServerRequest) (*v1alpha1.UpdateServerResponse, error)
+	// SetServerClass sets what a server exposes: its kind and the legs of the leak guard (ADR 0084) it
+	// carries. It works for declared servers too, which the declaring Secret does not describe. Audited
+	// as mcp_server.data_class.set.
+	SetServerClass(context.Context, *v1alpha1.SetServerClassRequest) (*v1alpha1.SetServerClassResponse, error)
 	// DeleteServer deletes a server entered here, with its tools and the agents' allowances of it. A
 	// declared server can be deleted only after its Secret was deleted (removed).
 	DeleteServer(context.Context, *v1alpha1.DeleteServerRequest) (*v1alpha1.DeleteServerResponse, error)
@@ -198,6 +216,7 @@ func RegisterMcpServerServiceHandler(server *connect.Server, svc McpServerServic
 		connect.Method{Spec: mcpServerServiceListServersSpec(), Handler: adapter.listServers},
 		connect.Method{Spec: mcpServerServiceCreateServerSpec(), Handler: adapter.createServer},
 		connect.Method{Spec: mcpServerServiceUpdateServerSpec(), Handler: adapter.updateServer},
+		connect.Method{Spec: mcpServerServiceSetServerClassSpec(), Handler: adapter.setServerClass},
 		connect.Method{Spec: mcpServerServiceDeleteServerSpec(), Handler: adapter.deleteServer},
 		connect.Method{Spec: mcpServerServiceListToolsSpec(), Handler: adapter.listTools},
 		connect.Method{Spec: mcpServerServiceSetToolTierSpec(), Handler: adapter.setToolTier},
@@ -221,6 +240,10 @@ func (UnimplementedMcpServerServiceHandler) CreateServer(context.Context, *v1alp
 
 func (UnimplementedMcpServerServiceHandler) UpdateServer(context.Context, *v1alpha1.UpdateServerRequest) (*v1alpha1.UpdateServerResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.mcpserver.v1alpha1.McpServerService.UpdateServer is not implemented")
+}
+
+func (UnimplementedMcpServerServiceHandler) SetServerClass(context.Context, *v1alpha1.SetServerClassRequest) (*v1alpha1.SetServerClassResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.mcpserver.v1alpha1.McpServerService.SetServerClass is not implemented")
 }
 
 func (UnimplementedMcpServerServiceHandler) DeleteServer(context.Context, *v1alpha1.DeleteServerRequest) (*v1alpha1.DeleteServerResponse, error) {
@@ -274,6 +297,14 @@ func (c *mcpServerServiceClient) CreateServer(ctx context.Context, req *v1alpha1
 func (c *mcpServerServiceClient) UpdateServer(ctx context.Context, req *v1alpha1.UpdateServerRequest) (*v1alpha1.UpdateServerResponse, error) {
 	var res v1alpha1.UpdateServerResponse
 	if err := c.client.CallUnary(ctx, mcpServerServiceUpdateServerSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *mcpServerServiceClient) SetServerClass(ctx context.Context, req *v1alpha1.SetServerClassRequest) (*v1alpha1.SetServerClassResponse, error) {
+	var res v1alpha1.SetServerClassResponse
+	if err := c.client.CallUnary(ctx, mcpServerServiceSetServerClassSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -367,6 +398,18 @@ func (h mcpServerServiceHandler) updateServer(ctx context.Context, _ connect.Spe
 		return err
 	}
 	res, err := h.svc.UpdateServer(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h mcpServerServiceHandler) setServerClass(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetServerClassRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetServerClass(ctx, &req)
 	if err != nil {
 		return err
 	}

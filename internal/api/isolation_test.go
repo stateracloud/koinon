@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -37,6 +38,8 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1/budgetv1alpha1connect"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
+	leakguardv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1/leakguardv1alpha1connect"
 	mcpserverv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	_ "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1" // registers its descriptor
@@ -56,6 +59,7 @@ import (
 	tracev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1/tracev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 )
 
@@ -550,6 +554,37 @@ var isolationCases = map[string]isolationCase{
 			})
 		},
 	},
+	mcpserverv1alpha1connect.McpServerServiceSetServerClassProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.mcps.SetServerClass(ctx, &mcpserverv1alpha1.SetServerClassRequest{
+				OrgId: org, ServerId: f.mcpServer, Class: &mcpserverv1alpha1.ServerClass{Kind: "fetch"},
+			})
+		},
+	},
+	leakguardv1alpha1connect.LeakGuardServiceGetLeakGuardProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.leakguard.GetLeakGuard(ctx, &leakguardv1alpha1.GetLeakGuardRequest{OrgId: org})
+		},
+	},
+	leakguardv1alpha1connect.LeakGuardServiceSetMatchThresholdProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.leakguard.SetMatchThreshold(ctx, &leakguardv1alpha1.SetMatchThresholdRequest{OrgId: org, MatchThreshold: 99})
+		},
+	},
+	leakguardv1alpha1connect.LeakGuardServiceAddTrustedHostProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.leakguard.AddTrustedHost(ctx, &leakguardv1alpha1.AddTrustedHostRequest{OrgId: org, Host: fmt.Sprintf("intruder-%d.example.com", dbSeq.Add(1))})
+		},
+	},
+	leakguardv1alpha1connect.LeakGuardServiceRemoveTrustedHostProcedure: {
+		// The host is the org-owned input: another org's entry is never found here.
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.leakguard.RemoveTrustedHost(ctx, &leakguardv1alpha1.RemoveTrustedHostRequest{OrgId: org, Host: f.trustedHost})
+		},
+	},
 	mcpserverv1alpha1connect.McpServerServiceDeleteServerProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.mcps.DeleteServer(ctx, &mcpserverv1alpha1.DeleteServerRequest{OrgId: org, ServerId: f.mcpServer})
@@ -705,7 +740,7 @@ var _ = Describe("org isolation", func() {
 		})
 		a := e.newIsolationFixture(ctx, gh.PEM)
 		b := e.newIsolationFixture(ctx, gh.PEM)
-		foreign := []string{a.org, a.agent.GetId(), a.draft.GetId(), a.ticket.GetId(), a.run.GetId(), a.connection, a.approval.ID.String(), a.provider, a.model}
+		foreign := []string{a.org, a.agent.GetId(), a.draft.GetId(), a.ticket.GetId(), a.run.GetId(), a.connection, a.approval.ID.String(), a.provider, a.model, a.trustedHost}
 		before := snapshot(ctx, e, a)
 
 		// The strongest caller in B: its owner, and a B admin.
@@ -779,6 +814,13 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	Expect(orgID.Scan(f.org)).To(Succeed())
 	_, err = mcpservers.New(e.pool, nil, nil).SyncTools(ctx, orgID, sid, []mcpservers.ListedTool{{Name: f.mcpTool, Description: "Search"}})
 	Expect(err).NotTo(HaveOccurred())
+	// The leak-guard settings: a trusted host and a threshold of the org's own.
+	f.trustedHost = fmt.Sprintf("trusted-%d.example.com", dbSeq.Add(1))
+	lg := orgsettings.NewService(e.pool)
+	_, err = lg.AddTrustedHost(ctx, orgID, audit.System(), f.trustedHost)
+	Expect(err).NotTo(HaveOccurred())
+	thirty := 30
+	Expect(lg.SetMatchThreshold(ctx, orgID, audit.System(), &thirty)).To(Succeed())
 	// A trace destination, inserted directly: the isolation cases only name it.
 	Expect(e.pool.QueryRow(ctx,
 		`INSERT INTO trace_destinations (org_id, name, backend, endpoint_url) VALUES ($1, 'isolated', 'generic', 'https://otlp.example.com/v1/traces') RETURNING id`,
@@ -816,6 +858,9 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM trace_destinations WHERE org_id = $1 AND name = 'isolated'`, org),
 		count(ctx, e, `SELECT count(*) FROM org_trace_settings WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND requires_two_approvers`, org),
+		count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND kind = 'other' AND exposes_private_data`, org),
+		count(ctx, e, `SELECT count(*) FROM org_fetch_trusted_hosts WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM org_settings WHERE org_id = $1 AND leak_match_threshold = 30`, org),
 	}
 }
 

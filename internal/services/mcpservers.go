@@ -53,6 +53,7 @@ func (s *Server) mcpServerProto(org, slug string, m mcpservers.Server) *mcpserve
 		HealthCheckedAt: optTime(m.HealthCheckedAt), HealthSince: optTime(m.HealthSince), ToolsSyncedAt: optTime(m.ToolsSyncedAt),
 		CreatedAt: timestamppb.New(m.CreatedAt), UpdatedAt: timestamppb.New(m.UpdatedAt),
 		GatewayTarget: mcpservers.TargetName(slug, m.Name),
+		Kind:          m.Kind, DataClass: m.DataClass,
 	}
 }
 
@@ -116,10 +117,14 @@ func (s *Server) CreateServer(ctx context.Context, req *mcpserverv1alpha1.Create
 	if err != nil {
 		return nil, err
 	}
-	m, err := s.mcp.Create(requestCtx(ctx), c.org, c.auditActor(), c.actor(), mcpservers.Input{
+	in := mcpservers.Input{
 		Name: req.GetName(), URL: req.GetUrl(), Transport: req.GetTransport(), CredentialHeader: req.GetCredentialHeader(),
 		CredentialPrefix: req.GetCredentialPrefix(), CredentialValue: req.GetCredentialValue(),
-	})
+	}
+	if cl := req.GetClass(); cl != nil {
+		in.Class = &mcpservers.Declaration{Kind: cl.GetKind(), Legs: cl.GetDataClass()}
+	}
+	m, err := s.mcp.Create(requestCtx(ctx), c.org, c.auditActor(), c.actor(), in)
 	if err != nil {
 		return nil, s.mcpError(err)
 	}
@@ -149,6 +154,24 @@ func (s *Server) UpdateServer(ctx context.Context, req *mcpserverv1alpha1.Update
 		return nil, err
 	}
 	return &mcpserverv1alpha1.UpdateServerResponse{Server: s.mcpServerProto(req.GetOrgId(), slug, m)}, nil
+}
+
+// SetServerClass implements McpServerService. Admins and owners.
+func (s *Server) SetServerClass(ctx context.Context, req *mcpserverv1alpha1.SetServerClassRequest) (*mcpserverv1alpha1.SetServerClassResponse, error) {
+	c, err := s.mcpCaller(ctx, req.GetOrgId())
+	if err != nil {
+		return nil, err
+	}
+	m, err := s.mcp.SetDataClass(requestCtx(ctx), c.org, c.auditActor(), req.GetServerId(),
+		mcpservers.Declaration{Kind: req.GetClass().GetKind(), Legs: req.GetClass().GetDataClass()})
+	if err != nil {
+		return nil, s.mcpError(err)
+	}
+	slug, err := s.orgSlug(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	return &mcpserverv1alpha1.SetServerClassResponse{Server: s.mcpServerProto(req.GetOrgId(), slug, m)}, nil
 }
 
 // DeleteServer implements McpServerService. Admins and owners.

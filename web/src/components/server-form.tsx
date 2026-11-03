@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import type { Server } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import type { McpActions } from '@/hooks/use-mcp-actions'
-import { buildCreateRequest, buildUpdateRequest, formErrors, initialForm, initialMode, maxServerNameLength, serverErrorField, transports, type CredentialMode } from '@/lib/mcp-servers'
+import { buildCreateRequest, buildUpdateRequest, dataLegs, formErrors, initialForm, initialMode, maxServerNameLength, serverErrorField, serverKinds, toggleLeg, transports, type CredentialMode } from '@/lib/mcp-servers'
 
 export type ServerFormProps = {
   /** Set to edit that server; unset to add one. */
@@ -193,6 +193,28 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
           <input type="checkbox" checked={f.removeCredential} onChange={(e) => set({ removeCredential: e.target.checked, value: e.target.checked ? '' : f.value })} />
           Remove credential
         </label>
+      )}
+      {!editing && (
+        <fieldset className="grid gap-2 rounded-md border p-3">
+          <legend className="px-1 text-sm font-medium">What this server exposes</legend>
+          <div className="grid gap-1.5">
+            <Label htmlFor="server-kind">Kind</Label>
+            <NativeSelect id="server-kind" value={f.kind} onChange={(e) => set({ kind: e.target.value })}>
+              {serverKinds.map((k) => (
+                <option key={k.value} value={k.value}>
+                  {k.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          {dataLegs.map((l) => (
+            <label key={l.value} className="flex items-center gap-2 text-sm" title={l.help}>
+              <input type="checkbox" checked={f.legs.includes(l.value)} onChange={(e) => set({ legs: toggleLeg(f.legs, l.value, e.target.checked) })} />
+              {l.label}
+            </label>
+          ))}
+          <p className="text-muted-foreground text-xs">The leak guard (ADR 0084) uses this. A server nobody classified counts as every leg, so leave a leg on unless you know the server does not have it.</p>
+        </fieldset>
       )}
       {!editing && <p className="text-muted-foreground text-xs">The tools of a new server start in the Ask tier: a human approves each call until you set another tier.</p>}
       {unplaced && (

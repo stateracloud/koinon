@@ -11,9 +11,47 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addOrgFetchTrustedHost = `-- name: AddOrgFetchTrustedHost :execrows
+INSERT INTO org_fetch_trusted_hosts (org_id, host)
+VALUES ($1, $2)
+ON CONFLICT (org_id, host) DO NOTHING
+`
+
+type AddOrgFetchTrustedHostParams struct {
+	OrgID pgtype.UUID
+	Host  string
+}
+
+// Adding a host that is on the list changes nothing (0 rows).
+func (q *Queries) AddOrgFetchTrustedHost(ctx context.Context, arg AddOrgFetchTrustedHostParams) (int64, error) {
+	result, err := q.db.Exec(ctx, addOrgFetchTrustedHost, arg.OrgID, arg.Host)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteOrgFetchTrustedHost = `-- name: DeleteOrgFetchTrustedHost :execrows
+DELETE FROM org_fetch_trusted_hosts
+WHERE org_id = $1 AND host = $2
+`
+
+type DeleteOrgFetchTrustedHostParams struct {
+	OrgID pgtype.UUID
+	Host  string
+}
+
+func (q *Queries) DeleteOrgFetchTrustedHost(ctx context.Context, arg DeleteOrgFetchTrustedHostParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOrgFetchTrustedHost, arg.OrgID, arg.Host)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getOrgSettings = `-- name: GetOrgSettings :one
 
-SELECT org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds FROM org_settings
+SELECT org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold FROM org_settings
 WHERE org_id = $1
 `
 
@@ -34,8 +72,59 @@ func (q *Queries) GetOrgSettings(ctx context.Context, orgID pgtype.UUID) (OrgSet
 		&i.TriggerConcurrency,
 		&i.TriggerRatePerMinute,
 		&i.SandboxWaitCapSeconds,
+		&i.LeakMatchThreshold,
 	)
 	return i, err
+}
+
+const listOrgFetchTrustedHosts = `-- name: ListOrgFetchTrustedHosts :many
+SELECT org_id, id, host, created_at FROM org_fetch_trusted_hosts
+WHERE org_id = $1
+ORDER BY host
+`
+
+// The org's fetch-trusted host list (ADR 0084 decision 5). Empty for a new org.
+func (q *Queries) ListOrgFetchTrustedHosts(ctx context.Context, orgID pgtype.UUID) ([]OrgFetchTrustedHost, error) {
+	rows, err := q.db.Query(ctx, listOrgFetchTrustedHosts, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrgFetchTrustedHost
+	for rows.Next() {
+		var i OrgFetchTrustedHost
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.Host,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setOrgLeakMatchThreshold = `-- name: SetOrgLeakMatchThreshold :exec
+INSERT INTO org_settings (org_id, leak_match_threshold)
+VALUES ($1, $2)
+ON CONFLICT (org_id) DO UPDATE SET leak_match_threshold = EXCLUDED.leak_match_threshold
+`
+
+type SetOrgLeakMatchThresholdParams struct {
+	OrgID              pgtype.UUID
+	LeakMatchThreshold pgtype.Int4
+}
+
+// The leak guard's match threshold in characters (ADR 0084 decision 3); NULL is the platform
+// default. It touches only this column, so the latency and limit overrides stay.
+func (q *Queries) SetOrgLeakMatchThreshold(ctx context.Context, arg SetOrgLeakMatchThresholdParams) error {
+	_, err := q.db.Exec(ctx, setOrgLeakMatchThreshold, arg.OrgID, arg.LeakMatchThreshold)
+	return err
 }
 
 const upsertOrgSettings = `-- name: UpsertOrgSettings :one
@@ -53,7 +142,7 @@ SET idle_timeout_seconds = EXCLUDED.idle_timeout_seconds,
     trigger_concurrency = EXCLUDED.trigger_concurrency,
     trigger_rate_per_minute = EXCLUDED.trigger_rate_per_minute,
     sandbox_wait_cap_seconds = EXCLUDED.sandbox_wait_cap_seconds
-RETURNING org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds
+RETURNING org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold
 `
 
 type UpsertOrgSettingsParams struct {
@@ -90,6 +179,7 @@ func (q *Queries) UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsPa
 		&i.TriggerConcurrency,
 		&i.TriggerRatePerMinute,
 		&i.SandboxWaitCapSeconds,
+		&i.LeakMatchThreshold,
 	)
 	return i, err
 }

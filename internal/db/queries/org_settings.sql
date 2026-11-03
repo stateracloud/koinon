@@ -22,3 +22,26 @@ SET idle_timeout_seconds = EXCLUDED.idle_timeout_seconds,
     trigger_rate_per_minute = EXCLUDED.trigger_rate_per_minute,
     sandbox_wait_cap_seconds = EXCLUDED.sandbox_wait_cap_seconds
 RETURNING *;
+
+-- name: SetOrgLeakMatchThreshold :exec
+-- The leak guard's match threshold in characters (ADR 0084 decision 3); NULL is the platform
+-- default. It touches only this column, so the latency and limit overrides stay.
+INSERT INTO org_settings (org_id, leak_match_threshold)
+VALUES (@org_id, sqlc.narg(leak_match_threshold))
+ON CONFLICT (org_id) DO UPDATE SET leak_match_threshold = EXCLUDED.leak_match_threshold;
+
+-- name: ListOrgFetchTrustedHosts :many
+-- The org's fetch-trusted host list (ADR 0084 decision 5). Empty for a new org.
+SELECT * FROM org_fetch_trusted_hosts
+WHERE org_id = @org_id
+ORDER BY host;
+
+-- name: AddOrgFetchTrustedHost :execrows
+-- Adding a host that is on the list changes nothing (0 rows).
+INSERT INTO org_fetch_trusted_hosts (org_id, host)
+VALUES (@org_id, @host)
+ON CONFLICT (org_id, host) DO NOTHING;
+
+-- name: DeleteOrgFetchTrustedHost :execrows
+DELETE FROM org_fetch_trusted_hosts
+WHERE org_id = @org_id AND host = @host;

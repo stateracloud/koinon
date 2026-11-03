@@ -195,6 +195,28 @@ call. Now:
   must be longer than the 5 s backstop plus the store lookup, so the guard answers before agentgateway
   gives up.
 
+### Amendment 2026-11-03: the data class and the org settings (#350)
+
+The data model #349 builds on, as shipped in migration `00048`:
+
+- **Kind and legs.** `mcp_servers.kind` is `fetch`, `search` or `other` (enum `mcp_server_kind`). The
+  three legs are three booleans (`exposes_untrusted_input`, `exposes_private_data`,
+  `exposes_outbound`), not an array: the set is closed, a boolean is checkable and indexable, and the
+  API and UI still show them as the list `untrusted_input`, `private_data`, `outbound`.
+- **Unclassified default.** A server nobody classified, and every server that existed before the
+  migration, is kind `other` with all three legs. This is the cautious reading, so the guard treats it
+  as the worst case and nothing changes until an admin declares less. An admin may declare no leg at
+  all.
+- **Declared servers.** The class is not a Secret key. It is set through the admin API or the console
+  (`mcp_server.data_class.set`, audited with before and after) and survives the Secret being applied
+  again.
+- **Threshold.** `org_settings.leak_match_threshold` is NULL for the default 24 and otherwise 12 to 256
+  (the bounds of `internal/leakguard`, enforced by a CHECK). The API treats 0 or absent as "back to
+  the default".
+- **Fetch-trusted hosts.** `org_fetch_trusted_hosts(org_id, id, host)`, empty for a new org. A host is
+  one lower-case DNS name, matched exactly: no wildcard, suffix, URL, port or IP address. At most 256
+  per org. Add and remove are audited as `org.fetch_trusted_host.add` and `.remove`.
+
 ## Upstream verification
 
 agentgateway v1.6.0 ExtMcp (`ext_mcp.proto`, request and response checks) was exercised in the

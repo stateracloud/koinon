@@ -526,6 +526,49 @@ func (ns NullMcpHealth) Value() (driver.Value, error) {
 	return string(ns.McpHealth), nil
 }
 
+type McpServerKind string
+
+const (
+	McpServerKindFetch  McpServerKind = "fetch"
+	McpServerKindSearch McpServerKind = "search"
+	McpServerKindOther  McpServerKind = "other"
+)
+
+func (e *McpServerKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = McpServerKind(s)
+	case string:
+		*e = McpServerKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for McpServerKind: %T", src)
+	}
+	return nil
+}
+
+type NullMcpServerKind struct {
+	McpServerKind McpServerKind
+	Valid         bool // Valid is true if McpServerKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMcpServerKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.McpServerKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.McpServerKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMcpServerKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.McpServerKind), nil
+}
+
 type McpTier string
 
 const (
@@ -1633,28 +1676,32 @@ type LocalCredential struct {
 }
 
 type McpServer struct {
-	OrgID               pgtype.UUID
-	ID                  pgtype.UUID
-	Name                string
-	Url                 string
-	Transport           McpTransport
-	CredentialHeader    pgtype.Text
-	CredentialPrefix    string
-	Credential          []byte
-	Source              ConfigSource
-	ManagedBySecret     pgtype.Text
-	DeclaredVersion     pgtype.Text
-	RemovedAt           pgtype.Timestamptz
-	DisabledReason      pgtype.Text
-	Health              McpHealth
-	HealthReason        pgtype.Text
-	HealthCheckedAt     pgtype.Timestamptz
-	HealthSince         pgtype.Timestamptz
-	ConsecutiveFailures int32
-	ToolsSyncedAt       pgtype.Timestamptz
-	CreatedBy           pgtype.UUID
-	CreatedAt           pgtype.Timestamptz
-	UpdatedAt           pgtype.Timestamptz
+	OrgID                 pgtype.UUID
+	ID                    pgtype.UUID
+	Name                  string
+	Url                   string
+	Transport             McpTransport
+	CredentialHeader      pgtype.Text
+	CredentialPrefix      string
+	Credential            []byte
+	Source                ConfigSource
+	ManagedBySecret       pgtype.Text
+	DeclaredVersion       pgtype.Text
+	RemovedAt             pgtype.Timestamptz
+	DisabledReason        pgtype.Text
+	Health                McpHealth
+	HealthReason          pgtype.Text
+	HealthCheckedAt       pgtype.Timestamptz
+	HealthSince           pgtype.Timestamptz
+	ConsecutiveFailures   int32
+	ToolsSyncedAt         pgtype.Timestamptz
+	CreatedBy             pgtype.UUID
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+	Kind                  McpServerKind
+	ExposesUntrustedInput bool
+	ExposesPrivateData    bool
+	ExposesOutbound       bool
 }
 
 type McpTool struct {
@@ -1741,6 +1788,13 @@ type OrgBudget struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+type OrgFetchTrustedHost struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	Host      string
+	CreatedAt pgtype.Timestamptz
+}
+
 type OrgGroupMapping struct {
 	OrgID      pgtype.UUID
 	ID         pgtype.UUID
@@ -1773,6 +1827,7 @@ type OrgSetting struct {
 	TriggerConcurrency    pgtype.Int4
 	TriggerRatePerMinute  pgtype.Int4
 	SandboxWaitCapSeconds pgtype.Int4
+	LeakMatchThreshold    pgtype.Int4
 }
 
 type OrgTraceSetting struct {

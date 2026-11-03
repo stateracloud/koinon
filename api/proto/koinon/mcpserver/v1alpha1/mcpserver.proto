@@ -23,6 +23,10 @@ service McpServerService {
   // INVALID_ARGUMENT (planned for v0.2).
   rpc CreateServer(CreateServerRequest) returns (CreateServerResponse);
   rpc UpdateServer(UpdateServerRequest) returns (UpdateServerResponse);
+  // SetServerClass sets what a server exposes: its kind and the legs of the leak guard (ADR 0084) it
+  // carries. It works for declared servers too, which the declaring Secret does not describe. Audited
+  // as mcp_server.data_class.set.
+  rpc SetServerClass(SetServerClassRequest) returns (SetServerClassResponse);
   // DeleteServer deletes a server entered here, with its tools and the agents' allowances of it. A
   // declared server can be deleted only after its Secret was deleted (removed).
   rpc DeleteServer(DeleteServerRequest) returns (DeleteServerResponse);
@@ -92,6 +96,22 @@ message Server {
   // gateway_target is the name of the server's target in the gateway, "<org slug>-<name>", which is
   // also the prefix of its tools in an agent's tool list.
   string gateway_target = 19;
+  // kind is "fetch", "search" or "other"; data_class lists the legs the server carries, in the order
+  // untrusted_input, private_data, outbound (see ServerClass). A server nobody classified is kind
+  // "other" with all three legs.
+  string kind = 20;
+  repeated string data_class = 21;
+}
+
+// ServerClass is what a server declares it exposes (ADR 0084 decision 8).
+message ServerClass {
+  // kind is "fetch" (reads web pages or other untrusted documents), "search" (sends a query to a
+  // search provider) or "other".
+  string kind = 1;
+  // data_class are the legs the server carries, any of "untrusted_input" (returns text an outsider
+  // controls), "private_data" (returns data the org does not want to leave) and "outbound" (a call
+  // sends its arguments outside the org). A server may carry several; none is allowed.
+  repeated string data_class = 2;
 }
 
 message Tool {
@@ -154,6 +174,9 @@ message CreateServerRequest {
   // credential_prefix precedes the secret in the header value, for example "Bearer ".
   string credential_prefix = 6;
   string credential_value = 7 [debug_redact = true];
+  // class is what the server exposes; leaving it out is the unclassified default (kind "other", all
+  // three legs).
+  ServerClass class = 8;
 }
 
 message CreateServerResponse {
@@ -175,6 +198,16 @@ message UpdateServerRequest {
 }
 
 message UpdateServerResponse {
+  Server server = 1;
+}
+
+message SetServerClassRequest {
+  string org_id = 1;
+  string server_id = 2;
+  ServerClass class = 3;
+}
+
+message SetServerClassResponse {
   Server server = 1;
 }
 

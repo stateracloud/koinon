@@ -17,6 +17,8 @@ type Querier interface {
 	// (a concurrent duplicate activation re-evaluates the WHERE clause and gets no row).
 	ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error)
 	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
+	// Adding a host that is on the list changes nothing (0 rows).
+	AddOrgFetchTrustedHost(ctx context.Context, arg AddOrgFetchTrustedHostParams) (int64, error)
 	// The question's recipients, when it is created (waiting_since stays NULL until it is opened).
 	AddQuestionRecipients(ctx context.Context, arg AddQuestionRecipientsParams) error
 	// Adds reported token usage to an unfinished run. Tokens are reported, not enforced (ADR 0081):
@@ -172,6 +174,7 @@ type Querier interface {
 	//
 	// Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
+	// A NULL kind or leg is the column default (kind other, all three legs: not yet classified).
 	CreateMCPServer(ctx context.Context, arg CreateMCPServerParams) (McpServer, error)
 	CreateModel(ctx context.Context, arg CreateModelParams) (Model, error)
 	CreateOIDCLoginFlow(ctx context.Context, arg CreateOIDCLoginFlowParams) error
@@ -230,6 +233,7 @@ type Querier interface {
 	DeleteModel(ctx context.Context, arg DeleteModelParams) (int64, error)
 	// A nonce only matters while its token could still be good (5 minutes); older ones go.
 	DeleteOldUploadNonces(ctx context.Context, orgID pgtype.UUID) (int64, error)
+	DeleteOrgFetchTrustedHost(ctx context.Context, arg DeleteOrgFetchTrustedHostParams) (int64, error)
 	DeletePlatformTraceDestination(ctx context.Context) (int64, error)
 	DeleteProvider(ctx context.Context, arg DeleteProviderParams) (int64, error)
 	DeleteSpendSettlement(ctx context.Context, arg DeleteSpendSettlementParams) error
@@ -623,6 +627,8 @@ type Querier interface {
 	ListOrgBudgetRecipients(ctx context.Context, orgID pgtype.UUID) ([]pgtype.UUID, error)
 	// Every live org with its cap, platform ceiling and spend since @since. Platform admins only.
 	ListOrgBudgetSummaries(ctx context.Context, since pgtype.Timestamptz) ([]ListOrgBudgetSummariesRow, error)
+	// The org's fetch-trusted host list (ADR 0084 decision 5). Empty for a new org.
+	ListOrgFetchTrustedHosts(ctx context.Context, orgID pgtype.UUID) ([]OrgFetchTrustedHost, error)
 	// Every live org, for control-plane sweeps and workers that then work org by
 	// org (koinon-agentd claims runs org by org, so each claim stays org-scoped).
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
@@ -915,6 +921,9 @@ type Querier interface {
 	SetDerivedModelFormat(ctx context.Context, arg SetDerivedModelFormatParams) (int64, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
+	// What the server exposes (ADR 0084 decision 8). Allowed for every source: a declared server's
+	// Secret does not carry it, and UpdateDeclaredMCPServer leaves it alone.
+	SetMCPServerDataClass(ctx context.Context, arg SetMCPServerDataClassParams) (McpServer, error)
 	SetMCPToolTier(ctx context.Context, arg SetMCPToolTierParams) (McpTool, error)
 	SetMCPToolTwoApprovers(ctx context.Context, arg SetMCPToolTwoApproversParams) (McpTool, error)
 	SetModelDisabled(ctx context.Context, arg SetModelDisabledParams) error
@@ -923,6 +932,9 @@ type Querier interface {
 	// The org's first model becomes its default; a default that is set stays.
 	SetOrgDefaultModelIfUnset(ctx context.Context, arg SetOrgDefaultModelIfUnsetParams) (int64, error)
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
+	// The leak guard's match threshold in characters (ADR 0084 decision 3); NULL is the platform
+	// default. It touches only this column, so the latency and limit overrides stay.
+	SetOrgLeakMatchThreshold(ctx context.Context, arg SetOrgLeakMatchThresholdParams) error
 	// Sets or clears (NULL) the org's monthly cap, keeping its platform ceiling.
 	SetOrgMonthlyCap(ctx context.Context, arg SetOrgMonthlyCapParams) (SetOrgMonthlyCapRow, error)
 	// Sets or clears (NULL) the platform ceiling of an org, keeping its monthly cap.

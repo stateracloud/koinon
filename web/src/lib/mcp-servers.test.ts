@@ -16,10 +16,12 @@ import {
   summarizeTools,
   summaryText,
   tierLabel,
+  toggleLeg,
+  legsText,
   type ServerFormState,
 } from '@/lib/mcp-servers'
 
-const base: ServerFormState = { name: 'docs', url: ' https://mcp.example.com/mcp ', transport: 'streamable-http', mode: 'none', header: '', value: '', removeCredential: false }
+const base: ServerFormState = { name: 'docs', url: ' https://mcp.example.com/mcp ', transport: 'streamable-http', mode: 'none', header: '', value: '', removeCredential: false, kind: 'other', legs: ['untrusted_input', 'private_data', 'outbound'] }
 const not = 'not-a-real-token'
 
 describe('serverNameError', () => {
@@ -33,7 +35,7 @@ describe('serverNameError', () => {
 
 describe('buildCreateRequest', () => {
   it('sends no credential fields without a credential', () => {
-    expect(buildCreateRequest(base)).toEqual({ name: 'docs', url: 'https://mcp.example.com/mcp', transport: 'streamable-http', credentialHeader: '', credentialPrefix: '', credentialValue: '' })
+    expect(buildCreateRequest(base)).toEqual({ name: 'docs', url: 'https://mcp.example.com/mcp', transport: 'streamable-http', credentialHeader: '', credentialPrefix: '', credentialValue: '', class: { kind: 'other', dataClass: ['untrusted_input', 'private_data', 'outbound'] } })
   })
   it('builds a bearer token as Authorization with the Bearer prefix', () => {
     expect(buildCreateRequest({ ...base, mode: 'bearer', value: not })).toMatchObject({ credentialHeader: 'Authorization', credentialPrefix: 'Bearer ', credentialValue: not })
@@ -114,5 +116,19 @@ describe('summarizeTools', () => {
     const s = summarizeTools(tools)
     expect(s).toEqual({ total: 3, review: 1, suggested: 1, gone: 1 })
     expect(summaryText(s)).toBe('3 tools, 1 to review, 1 suggested read-only')
+  })
+})
+
+describe('the data class helpers', () => {
+  it('keeps the canonical leg order when a leg is toggled', () => {
+    expect(toggleLeg(['outbound'], 'untrusted_input', true)).toEqual(['untrusted_input', 'outbound'])
+    expect(toggleLeg(['untrusted_input', 'private_data', 'outbound'], 'private_data', false)).toEqual(['untrusted_input', 'outbound'])
+    expect(toggleLeg([], 'private_data', false)).toEqual([])
+  })
+  it('says none for a server with no leg', () => {
+    expect(legsText([])).toBe('none')
+  })
+  it('sends the class chosen in the form with the create request', () => {
+    expect(buildCreateRequest({ ...base, kind: 'fetch', legs: ['outbound'] }).class).toEqual({ kind: 'fetch', dataClass: ['outbound'] })
   })
 })

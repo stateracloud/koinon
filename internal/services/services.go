@@ -46,6 +46,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/audit/v1alpha1/auditv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1/budgetv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1/leakguardv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
@@ -57,6 +58,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1/tracev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelcheck"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/tokens"
@@ -157,6 +159,8 @@ type Server struct {
 	modelCheck  *modelcheck.Service
 	runNow      *RunNowQueue
 	traces      *tracedest.Service
+	// leakGuard changes the org's leak-guard threshold and fetch-trusted host list (#350).
+	leakGuard *orgsettings.Service
 }
 
 // New returns a Server backed by pool.
@@ -186,7 +190,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, log: opts.Logger,
 		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
-		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces,
+		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces, leakGuard: orgsettings.NewService(pool),
 	}
 	if s.dm != nil {
 		s.dm.bind(s)
@@ -212,6 +216,7 @@ func (s *Server) Register(server *connect.Server) {
 	approvalv1alpha1connect.RegisterApprovalServiceHandler(server, s)
 	providerv1alpha1connect.RegisterProviderServiceHandler(server, s)
 	mcpserverv1alpha1connect.RegisterMcpServerServiceHandler(server, s)
+	leakguardv1alpha1connect.RegisterLeakGuardServiceHandler(server, s)
 	auditv1alpha1connect.RegisterAuditServiceHandler(server, s)
 	tracev1alpha1connect.RegisterTraceDestinationServiceHandler(server, traceAPI{s})
 }
@@ -228,6 +233,7 @@ var (
 	_ budgetv1alpha1connect.PriceServiceHandler          = (*Server)(nil)
 	_ providerv1alpha1connect.ProviderServiceHandler     = (*Server)(nil)
 	_ mcpserverv1alpha1connect.McpServerServiceHandler   = (*Server)(nil)
+	_ leakguardv1alpha1connect.LeakGuardServiceHandler   = (*Server)(nil)
 	_ auditv1alpha1connect.AuditServiceHandler           = (*Server)(nil)
 )
 

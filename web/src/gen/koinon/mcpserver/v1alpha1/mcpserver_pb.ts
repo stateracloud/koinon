@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/mcpserver/v1alpha1/mcpserver.proto.
  */
 export const file_koinon_mcpserver_v1alpha1_mcpserver: GenFile = /*@__PURE__*/
-  fileDesc("Cilrb2lub24vbWNwc2VydmVyL3YxYWxwaGExL21jcHNlcnZlci5wcm90bxIZa29pbm9uLm1jcHNlcnZlci52MWFscGhhMSLFBAoGU2VydmVyEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSCwoDdXJsGAMgASgJEhEKCXRyYW5zcG9ydBgEIAEoCRIWCg5oYXNfY3JlZGVudGlhbBgFIAEoCBIZChFjcmVkZW50aWFsX2hlYWRlchgGIAEoCRIZChFjcmVkZW50aWFsX3ByZWZpeBgHIAEoCRIOCgZzb3VyY2UYCCABKAkSGQoRbWFuYWdlZF9ieV9zZWNyZXQYCSABKAkSFwoPZGlzYWJsZWRfcmVhc29uGAogASgJEg8KB3JlbW92ZWQYCyABKAgSMQoGaGVhbHRoGAwgASgOMiEua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5IZWFsdGgSFQoNaGVhbHRoX3JlYXNvbhgNIAEoCRI1ChFoZWFsdGhfY2hlY2tlZF9hdBgOIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMAoMaGVhbHRoX3NpbmNlGA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIzCg90b29sc19zeW5jZWRfYXQYECABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCmNyZWF0ZWRfYXQYESABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYEiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhYKDmdhdGV3YXlfdGFyZ2V0GBMgASgJIv8DCgRUb29sEhEKCXNlcnZlcl9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEhYKDnJlYWRfb25seV9oaW50GAQgASgIEi0KBHRpZXIYBSABKA4yHy5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLlRpZXISFQoNcmV2aWV3X3JlYXNvbhgGIAEoCRIPCgdwcmVzZW50GAcgASgIEjEKDWZpcnN0X3NlZW5fYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDGxhc3Rfc2Vlbl9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEwoLdGllcl9zZXRfYnkYCiABKAkSLwoLdGllcl9zZXRfYXQYCyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEh4KFnJlcXVpcmVzX3R3b19hcHByb3ZlcnMYDCABKAgSFAoMY29udGVudF9oYXNoGA0gASgJEhMKC3VuYXZhaWxhYmxlGA4gASgJEiMKG2Rlc2NyaXB0aW9uX29yaWdpbmFsX2xlbmd0aBgPIAEoAxIaChJkZXNjcmlwdGlvbl9jYXBwZWQYECABKAgSGwoTZGVzY3JpcHRpb25fY2xlYW5lZBgRIAEoCCItCglBbGxvd2FuY2USEQoJc2VydmVyX2lkGAEgASgJEg0KBXRvb2xzGAIgAygJIiQKEkxpc3RTZXJ2ZXJzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkiSQoTTGlzdFNlcnZlcnNSZXNwb25zZRIyCgdzZXJ2ZXJzGAEgAygLMiEua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5TZXJ2ZXIiqAEKE0NyZWF0ZVNlcnZlclJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSCwoDdXJsGAMgASgJEhEKCXRyYW5zcG9ydBgEIAEoCRIZChFjcmVkZW50aWFsX2hlYWRlchgFIAEoCRIZChFjcmVkZW50aWFsX3ByZWZpeBgGIAEoCRIdChBjcmVkZW50aWFsX3ZhbHVlGAcgASgJQgOAAQEiSQoUQ3JlYXRlU2VydmVyUmVzcG9uc2USMQoGc2VydmVyGAEgASgLMiEua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5TZXJ2ZXIiuAIKE1VwZGF0ZVNlcnZlclJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIQCgN1cmwYAyABKAlIAIgBARIWCgl0cmFuc3BvcnQYBCABKAlIAYgBARIeChFjcmVkZW50aWFsX2hlYWRlchgFIAEoCUgCiAEBEh4KEWNyZWRlbnRpYWxfcHJlZml4GAYgASgJSAOIAQESIgoQY3JlZGVudGlhbF92YWx1ZRgHIAEoCUIDgAEBSASIAQESGQoRcmVtb3ZlX2NyZWRlbnRpYWwYCCABKAhCBgoEX3VybEIMCgpfdHJhbnNwb3J0QhQKEl9jcmVkZW50aWFsX2hlYWRlckIUChJfY3JlZGVudGlhbF9wcmVmaXhCEwoRX2NyZWRlbnRpYWxfdmFsdWUiSQoUVXBkYXRlU2VydmVyUmVzcG9uc2USMQoGc2VydmVyGAEgASgLMiEua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5TZXJ2ZXIiOAoTRGVsZXRlU2VydmVyUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEQoJc2VydmVyX2lkGAIgASgJIhYKFERlbGV0ZVNlcnZlclJlc3BvbnNlIjUKEExpc3RUb29sc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCSJDChFMaXN0VG9vbHNSZXNwb25zZRIuCgV0b29scxgBIAMoCzIfLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuVG9vbCJ0ChJTZXRUb29sVGllclJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIMCgR0b29sGAMgASgJEi0KBHRpZXIYBCABKA4yHy5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLlRpZXIiRAoTU2V0VG9vbFRpZXJSZXNwb25zZRItCgR0b29sGAEgASgLMh8ua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5Ub29sIk8KHEFja25vd2xlZGdlVG9vbFJldmlld1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIMCgR0b29sGAMgASgJIk4KHUFja25vd2xlZGdlVG9vbFJldmlld1Jlc3BvbnNlEi0KBHRvb2wYASABKAsyHy5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLlRvb2wiOgoWR2V0QWdlbnRTZXJ2ZXJzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiUAoXR2V0QWdlbnRTZXJ2ZXJzUmVzcG9uc2USNQoHc2VydmVycxgBIAMoCzIkLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuQWxsb3dhbmNlInEKFlNldEFnZW50U2VydmVyc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEjUKB3NlcnZlcnMYAyADKAsyJC5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkFsbG93YW5jZSJQChdTZXRBZ2VudFNlcnZlcnNSZXNwb25zZRI1CgdzZXJ2ZXJzGAEgAygLMiQua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5BbGxvd2FuY2UiXwoaU2V0VG9vbFR3b0FwcHJvdmVyc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIMCgR0b29sGAMgASgJEhAKCHJlcXVpcmVkGAQgASgIIkwKG1NldFRvb2xUd29BcHByb3ZlcnNSZXNwb25zZRItCgR0b29sGAEgASgLMh8ua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5Ub29sKkkKBFRpZXISFAoQVElFUl9VTlNQRUNJRklFRBAAEgwKCFRJRVJfQVNLEAESDQoJVElFUl9BVVRPEAISDgoKVElFUl9ORVZFUhADKl4KBkhlYWx0aBIWChJIRUFMVEhfVU5TUEVDSUZJRUQQABISCg5IRUFMVEhfVU5LTk9XThABEhIKDkhFQUxUSF9IRUFMVEhZEAISFAoQSEVBTFRIX1VOSEVBTFRIWRADMsAJChBNY3BTZXJ2ZXJTZXJ2aWNlEnEKC0xpc3RTZXJ2ZXJzEi0ua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5MaXN0U2VydmVyc1JlcXVlc3QaLi5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkxpc3RTZXJ2ZXJzUmVzcG9uc2UiA5ACARJvCgxDcmVhdGVTZXJ2ZXISLi5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkNyZWF0ZVNlcnZlclJlcXVlc3QaLy5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkNyZWF0ZVNlcnZlclJlc3BvbnNlEm8KDFVwZGF0ZVNlcnZlchIuLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuVXBkYXRlU2VydmVyUmVxdWVzdBovLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuVXBkYXRlU2VydmVyUmVzcG9uc2USbwoMRGVsZXRlU2VydmVyEi4ua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5EZWxldGVTZXJ2ZXJSZXF1ZXN0Gi8ua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5EZWxldGVTZXJ2ZXJSZXNwb25zZRJrCglMaXN0VG9vbHMSKy5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkxpc3RUb29sc1JlcXVlc3QaLC5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkxpc3RUb29sc1Jlc3BvbnNlIgOQAgESbAoLU2V0VG9vbFRpZXISLS5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLlNldFRvb2xUaWVyUmVxdWVzdBouLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuU2V0VG9vbFRpZXJSZXNwb25zZRKEAQoTU2V0VG9vbFR3b0FwcHJvdmVycxI1LmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuU2V0VG9vbFR3b0FwcHJvdmVyc1JlcXVlc3QaNi5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLlNldFRvb2xUd29BcHByb3ZlcnNSZXNwb25zZRKKAQoVQWNrbm93bGVkZ2VUb29sUmV2aWV3Ejcua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5BY2tub3dsZWRnZVRvb2xSZXZpZXdSZXF1ZXN0Gjgua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5BY2tub3dsZWRnZVRvb2xSZXZpZXdSZXNwb25zZRJ9Cg9HZXRBZ2VudFNlcnZlcnMSMS5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkdldEFnZW50U2VydmVyc1JlcXVlc3QaMi5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkdldEFnZW50U2VydmVyc1Jlc3BvbnNlIgOQAgESeAoPU2V0QWdlbnRTZXJ2ZXJzEjEua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5TZXRBZ2VudFNlcnZlcnNSZXF1ZXN0GjIua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5TZXRBZ2VudFNlcnZlcnNSZXNwb25zZUJZWldnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9tY3BzZXJ2ZXIvdjFhbHBoYTE7bWNwc2VydmVydjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_timestamp]);
+  fileDesc("Cilrb2lub24vbWNwc2VydmVyL3YxYWxwaGExL21jcHNlcnZlci5wcm90bxIZa29pbm9uLm1jcHNlcnZlci52MWFscGhhMSLnBAoGU2VydmVyEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSCwoDdXJsGAMgASgJEhEKCXRyYW5zcG9ydBgEIAEoCRIWCg5oYXNfY3JlZGVudGlhbBgFIAEoCBIZChFjcmVkZW50aWFsX2hlYWRlchgGIAEoCRIZChFjcmVkZW50aWFsX3ByZWZpeBgHIAEoCRIOCgZzb3VyY2UYCCABKAkSGQoRbWFuYWdlZF9ieV9zZWNyZXQYCSABKAkSFwoPZGlzYWJsZWRfcmVhc29uGAogASgJEg8KB3JlbW92ZWQYCyABKAgSMQoGaGVhbHRoGAwgASgOMiEua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5IZWFsdGgSFQoNaGVhbHRoX3JlYXNvbhgNIAEoCRI1ChFoZWFsdGhfY2hlY2tlZF9hdBgOIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMAoMaGVhbHRoX3NpbmNlGA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIzCg90b29sc19zeW5jZWRfYXQYECABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCmNyZWF0ZWRfYXQYESABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYEiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhYKDmdhdGV3YXlfdGFyZ2V0GBMgASgJEgwKBGtpbmQYFCABKAkSEgoKZGF0YV9jbGFzcxgVIAMoCSIvCgtTZXJ2ZXJDbGFzcxIMCgRraW5kGAEgASgJEhIKCmRhdGFfY2xhc3MYAiADKAki/wMKBFRvb2wSEQoJc2VydmVyX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkSFgoOcmVhZF9vbmx5X2hpbnQYBCABKAgSLQoEdGllchgFIAEoDjIfLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuVGllchIVCg1yZXZpZXdfcmVhc29uGAYgASgJEg8KB3ByZXNlbnQYByABKAgSMQoNZmlyc3Rfc2Vlbl9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMAoMbGFzdF9zZWVuX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBITCgt0aWVyX3NldF9ieRgKIAEoCRIvCgt0aWVyX3NldF9hdBgLIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASHgoWcmVxdWlyZXNfdHdvX2FwcHJvdmVycxgMIAEoCBIUCgxjb250ZW50X2hhc2gYDSABKAkSEwoLdW5hdmFpbGFibGUYDiABKAkSIwobZGVzY3JpcHRpb25fb3JpZ2luYWxfbGVuZ3RoGA8gASgDEhoKEmRlc2NyaXB0aW9uX2NhcHBlZBgQIAEoCBIbChNkZXNjcmlwdGlvbl9jbGVhbmVkGBEgASgIIi0KCUFsbG93YW5jZRIRCglzZXJ2ZXJfaWQYASABKAkSDQoFdG9vbHMYAiADKAkiJAoSTGlzdFNlcnZlcnNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJJChNMaXN0U2VydmVyc1Jlc3BvbnNlEjIKB3NlcnZlcnMYASADKAsyIS5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLlNlcnZlciLfAQoTQ3JlYXRlU2VydmVyUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDAoEbmFtZRgCIAEoCRILCgN1cmwYAyABKAkSEQoJdHJhbnNwb3J0GAQgASgJEhkKEWNyZWRlbnRpYWxfaGVhZGVyGAUgASgJEhkKEWNyZWRlbnRpYWxfcHJlZml4GAYgASgJEh0KEGNyZWRlbnRpYWxfdmFsdWUYByABKAlCA4ABARI1CgVjbGFzcxgIIAEoCzImLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuU2VydmVyQ2xhc3MiSQoUQ3JlYXRlU2VydmVyUmVzcG9uc2USMQoGc2VydmVyGAEgASgLMiEua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5TZXJ2ZXIiuAIKE1VwZGF0ZVNlcnZlclJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIQCgN1cmwYAyABKAlIAIgBARIWCgl0cmFuc3BvcnQYBCABKAlIAYgBARIeChFjcmVkZW50aWFsX2hlYWRlchgFIAEoCUgCiAEBEh4KEWNyZWRlbnRpYWxfcHJlZml4GAYgASgJSAOIAQESIgoQY3JlZGVudGlhbF92YWx1ZRgHIAEoCUIDgAEBSASIAQESGQoRcmVtb3ZlX2NyZWRlbnRpYWwYCCABKAhCBgoEX3VybEIMCgpfdHJhbnNwb3J0QhQKEl9jcmVkZW50aWFsX2hlYWRlckIUChJfY3JlZGVudGlhbF9wcmVmaXhCEwoRX2NyZWRlbnRpYWxfdmFsdWUiSQoUVXBkYXRlU2VydmVyUmVzcG9uc2USMQoGc2VydmVyGAEgASgLMiEua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5TZXJ2ZXIicQoVU2V0U2VydmVyQ2xhc3NSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIRCglzZXJ2ZXJfaWQYAiABKAkSNQoFY2xhc3MYAyABKAsyJi5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLlNlcnZlckNsYXNzIksKFlNldFNlcnZlckNsYXNzUmVzcG9uc2USMQoGc2VydmVyGAEgASgLMiEua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5TZXJ2ZXIiOAoTRGVsZXRlU2VydmVyUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEQoJc2VydmVyX2lkGAIgASgJIhYKFERlbGV0ZVNlcnZlclJlc3BvbnNlIjUKEExpc3RUb29sc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCSJDChFMaXN0VG9vbHNSZXNwb25zZRIuCgV0b29scxgBIAMoCzIfLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuVG9vbCJ0ChJTZXRUb29sVGllclJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIMCgR0b29sGAMgASgJEi0KBHRpZXIYBCABKA4yHy5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLlRpZXIiRAoTU2V0VG9vbFRpZXJSZXNwb25zZRItCgR0b29sGAEgASgLMh8ua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5Ub29sIk8KHEFja25vd2xlZGdlVG9vbFJldmlld1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIMCgR0b29sGAMgASgJIk4KHUFja25vd2xlZGdlVG9vbFJldmlld1Jlc3BvbnNlEi0KBHRvb2wYASABKAsyHy5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLlRvb2wiOgoWR2V0QWdlbnRTZXJ2ZXJzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiUAoXR2V0QWdlbnRTZXJ2ZXJzUmVzcG9uc2USNQoHc2VydmVycxgBIAMoCzIkLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuQWxsb3dhbmNlInEKFlNldEFnZW50U2VydmVyc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEjUKB3NlcnZlcnMYAyADKAsyJC5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkFsbG93YW5jZSJQChdTZXRBZ2VudFNlcnZlcnNSZXNwb25zZRI1CgdzZXJ2ZXJzGAEgAygLMiQua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5BbGxvd2FuY2UiXwoaU2V0VG9vbFR3b0FwcHJvdmVyc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIMCgR0b29sGAMgASgJEhAKCHJlcXVpcmVkGAQgASgIIkwKG1NldFRvb2xUd29BcHByb3ZlcnNSZXNwb25zZRItCgR0b29sGAEgASgLMh8ua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5Ub29sKkkKBFRpZXISFAoQVElFUl9VTlNQRUNJRklFRBAAEgwKCFRJRVJfQVNLEAESDQoJVElFUl9BVVRPEAISDgoKVElFUl9ORVZFUhADKl4KBkhlYWx0aBIWChJIRUFMVEhfVU5TUEVDSUZJRUQQABISCg5IRUFMVEhfVU5LTk9XThABEhIKDkhFQUxUSF9IRUFMVEhZEAISFAoQSEVBTFRIX1VOSEVBTFRIWRADMrcKChBNY3BTZXJ2ZXJTZXJ2aWNlEnEKC0xpc3RTZXJ2ZXJzEi0ua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5MaXN0U2VydmVyc1JlcXVlc3QaLi5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkxpc3RTZXJ2ZXJzUmVzcG9uc2UiA5ACARJvCgxDcmVhdGVTZXJ2ZXISLi5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkNyZWF0ZVNlcnZlclJlcXVlc3QaLy5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkNyZWF0ZVNlcnZlclJlc3BvbnNlEm8KDFVwZGF0ZVNlcnZlchIuLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuVXBkYXRlU2VydmVyUmVxdWVzdBovLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuVXBkYXRlU2VydmVyUmVzcG9uc2USdQoOU2V0U2VydmVyQ2xhc3MSMC5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLlNldFNlcnZlckNsYXNzUmVxdWVzdBoxLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuU2V0U2VydmVyQ2xhc3NSZXNwb25zZRJvCgxEZWxldGVTZXJ2ZXISLi5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkRlbGV0ZVNlcnZlclJlcXVlc3QaLy5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkRlbGV0ZVNlcnZlclJlc3BvbnNlEmsKCUxpc3RUb29scxIrLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuTGlzdFRvb2xzUmVxdWVzdBosLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuTGlzdFRvb2xzUmVzcG9uc2UiA5ACARJsCgtTZXRUb29sVGllchItLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuU2V0VG9vbFRpZXJSZXF1ZXN0Gi4ua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5TZXRUb29sVGllclJlc3BvbnNlEoQBChNTZXRUb29sVHdvQXBwcm92ZXJzEjUua29pbm9uLm1jcHNlcnZlci52MWFscGhhMS5TZXRUb29sVHdvQXBwcm92ZXJzUmVxdWVzdBo2LmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuU2V0VG9vbFR3b0FwcHJvdmVyc1Jlc3BvbnNlEooBChVBY2tub3dsZWRnZVRvb2xSZXZpZXcSNy5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkFja25vd2xlZGdlVG9vbFJldmlld1JlcXVlc3QaOC5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLkFja25vd2xlZGdlVG9vbFJldmlld1Jlc3BvbnNlEn0KD0dldEFnZW50U2VydmVycxIxLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuR2V0QWdlbnRTZXJ2ZXJzUmVxdWVzdBoyLmtvaW5vbi5tY3BzZXJ2ZXIudjFhbHBoYTEuR2V0QWdlbnRTZXJ2ZXJzUmVzcG9uc2UiA5ACARJ4Cg9TZXRBZ2VudFNlcnZlcnMSMS5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLlNldEFnZW50U2VydmVyc1JlcXVlc3QaMi5rb2lub24ubWNwc2VydmVyLnYxYWxwaGExLlNldEFnZW50U2VydmVyc1Jlc3BvbnNlQllaV2dpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL21jcHNlcnZlci92MWFscGhhMTttY3BzZXJ2ZXJ2MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * Server is a remote MCP server of the org. It never holds the credential.
@@ -128,6 +128,20 @@ export type Server = Message<"koinon.mcpserver.v1alpha1.Server"> & {
    * @generated from field: string gateway_target = 19;
    */
   gatewayTarget: string;
+
+  /**
+   * kind is "fetch", "search" or "other"; data_class lists the legs the server carries, in the order
+   * untrusted_input, private_data, outbound (see ServerClass). A server nobody classified is kind
+   * "other" with all three legs.
+   *
+   * @generated from field: string kind = 20;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: repeated string data_class = 21;
+   */
+  dataClass: string[];
 };
 
 /**
@@ -136,6 +150,37 @@ export type Server = Message<"koinon.mcpserver.v1alpha1.Server"> & {
  */
 export const ServerSchema: GenMessage<Server> = /*@__PURE__*/
   messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 0);
+
+/**
+ * ServerClass is what a server declares it exposes (ADR 0084 decision 8).
+ *
+ * @generated from message koinon.mcpserver.v1alpha1.ServerClass
+ */
+export type ServerClass = Message<"koinon.mcpserver.v1alpha1.ServerClass"> & {
+  /**
+   * kind is "fetch" (reads web pages or other untrusted documents), "search" (sends a query to a
+   * search provider) or "other".
+   *
+   * @generated from field: string kind = 1;
+   */
+  kind: string;
+
+  /**
+   * data_class are the legs the server carries, any of "untrusted_input" (returns text an outsider
+   * controls), "private_data" (returns data the org does not want to leave) and "outbound" (a call
+   * sends its arguments outside the org). A server may carry several; none is allowed.
+   *
+   * @generated from field: repeated string data_class = 2;
+   */
+  dataClass: string[];
+};
+
+/**
+ * Describes the message koinon.mcpserver.v1alpha1.ServerClass.
+ * Use `create(ServerClassSchema)` to create a new message.
+ */
+export const ServerClassSchema: GenMessage<ServerClass> = /*@__PURE__*/
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 1);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.Tool
@@ -252,7 +297,7 @@ export type Tool = Message<"koinon.mcpserver.v1alpha1.Tool"> & {
  * Use `create(ToolSchema)` to create a new message.
  */
 export const ToolSchema: GenMessage<Tool> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 1);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 2);
 
 /**
  * Allowance is a server an agent may use, optionally narrowed to some of its tools.
@@ -279,7 +324,7 @@ export type Allowance = Message<"koinon.mcpserver.v1alpha1.Allowance"> & {
  * Use `create(AllowanceSchema)` to create a new message.
  */
 export const AllowanceSchema: GenMessage<Allowance> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 2);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 3);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.ListServersRequest
@@ -296,7 +341,7 @@ export type ListServersRequest = Message<"koinon.mcpserver.v1alpha1.ListServersR
  * Use `create(ListServersRequestSchema)` to create a new message.
  */
 export const ListServersRequestSchema: GenMessage<ListServersRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 3);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 4);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.ListServersResponse
@@ -313,7 +358,7 @@ export type ListServersResponse = Message<"koinon.mcpserver.v1alpha1.ListServers
  * Use `create(ListServersResponseSchema)` to create a new message.
  */
 export const ListServersResponseSchema: GenMessage<ListServersResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 4);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 5);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.CreateServerRequest
@@ -359,6 +404,14 @@ export type CreateServerRequest = Message<"koinon.mcpserver.v1alpha1.CreateServe
    * @generated from field: string credential_value = 7;
    */
   credentialValue: string;
+
+  /**
+   * class is what the server exposes; leaving it out is the unclassified default (kind "other", all
+   * three legs).
+   *
+   * @generated from field: koinon.mcpserver.v1alpha1.ServerClass class = 8;
+   */
+  class?: ServerClass | undefined;
 };
 
 /**
@@ -366,7 +419,7 @@ export type CreateServerRequest = Message<"koinon.mcpserver.v1alpha1.CreateServe
  * Use `create(CreateServerRequestSchema)` to create a new message.
  */
 export const CreateServerRequestSchema: GenMessage<CreateServerRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 5);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 6);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.CreateServerResponse
@@ -383,7 +436,7 @@ export type CreateServerResponse = Message<"koinon.mcpserver.v1alpha1.CreateServ
  * Use `create(CreateServerResponseSchema)` to create a new message.
  */
 export const CreateServerResponseSchema: GenMessage<CreateServerResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 6);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 7);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.UpdateServerRequest
@@ -440,7 +493,7 @@ export type UpdateServerRequest = Message<"koinon.mcpserver.v1alpha1.UpdateServe
  * Use `create(UpdateServerRequestSchema)` to create a new message.
  */
 export const UpdateServerRequestSchema: GenMessage<UpdateServerRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 7);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 8);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.UpdateServerResponse
@@ -457,7 +510,51 @@ export type UpdateServerResponse = Message<"koinon.mcpserver.v1alpha1.UpdateServ
  * Use `create(UpdateServerResponseSchema)` to create a new message.
  */
 export const UpdateServerResponseSchema: GenMessage<UpdateServerResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 8);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 9);
+
+/**
+ * @generated from message koinon.mcpserver.v1alpha1.SetServerClassRequest
+ */
+export type SetServerClassRequest = Message<"koinon.mcpserver.v1alpha1.SetServerClassRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string server_id = 2;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: koinon.mcpserver.v1alpha1.ServerClass class = 3;
+   */
+  class?: ServerClass | undefined;
+};
+
+/**
+ * Describes the message koinon.mcpserver.v1alpha1.SetServerClassRequest.
+ * Use `create(SetServerClassRequestSchema)` to create a new message.
+ */
+export const SetServerClassRequestSchema: GenMessage<SetServerClassRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 10);
+
+/**
+ * @generated from message koinon.mcpserver.v1alpha1.SetServerClassResponse
+ */
+export type SetServerClassResponse = Message<"koinon.mcpserver.v1alpha1.SetServerClassResponse"> & {
+  /**
+   * @generated from field: koinon.mcpserver.v1alpha1.Server server = 1;
+   */
+  server?: Server | undefined;
+};
+
+/**
+ * Describes the message koinon.mcpserver.v1alpha1.SetServerClassResponse.
+ * Use `create(SetServerClassResponseSchema)` to create a new message.
+ */
+export const SetServerClassResponseSchema: GenMessage<SetServerClassResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 11);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.DeleteServerRequest
@@ -479,7 +576,7 @@ export type DeleteServerRequest = Message<"koinon.mcpserver.v1alpha1.DeleteServe
  * Use `create(DeleteServerRequestSchema)` to create a new message.
  */
 export const DeleteServerRequestSchema: GenMessage<DeleteServerRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 9);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 12);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.DeleteServerResponse
@@ -492,7 +589,7 @@ export type DeleteServerResponse = Message<"koinon.mcpserver.v1alpha1.DeleteServ
  * Use `create(DeleteServerResponseSchema)` to create a new message.
  */
 export const DeleteServerResponseSchema: GenMessage<DeleteServerResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 10);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 13);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.ListToolsRequest
@@ -514,7 +611,7 @@ export type ListToolsRequest = Message<"koinon.mcpserver.v1alpha1.ListToolsReque
  * Use `create(ListToolsRequestSchema)` to create a new message.
  */
 export const ListToolsRequestSchema: GenMessage<ListToolsRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 11);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 14);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.ListToolsResponse
@@ -531,7 +628,7 @@ export type ListToolsResponse = Message<"koinon.mcpserver.v1alpha1.ListToolsResp
  * Use `create(ListToolsResponseSchema)` to create a new message.
  */
 export const ListToolsResponseSchema: GenMessage<ListToolsResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 12);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 15);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.SetToolTierRequest
@@ -563,7 +660,7 @@ export type SetToolTierRequest = Message<"koinon.mcpserver.v1alpha1.SetToolTierR
  * Use `create(SetToolTierRequestSchema)` to create a new message.
  */
 export const SetToolTierRequestSchema: GenMessage<SetToolTierRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 13);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 16);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.SetToolTierResponse
@@ -580,7 +677,7 @@ export type SetToolTierResponse = Message<"koinon.mcpserver.v1alpha1.SetToolTier
  * Use `create(SetToolTierResponseSchema)` to create a new message.
  */
 export const SetToolTierResponseSchema: GenMessage<SetToolTierResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 14);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 17);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.AcknowledgeToolReviewRequest
@@ -607,7 +704,7 @@ export type AcknowledgeToolReviewRequest = Message<"koinon.mcpserver.v1alpha1.Ac
  * Use `create(AcknowledgeToolReviewRequestSchema)` to create a new message.
  */
 export const AcknowledgeToolReviewRequestSchema: GenMessage<AcknowledgeToolReviewRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 15);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 18);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.AcknowledgeToolReviewResponse
@@ -624,7 +721,7 @@ export type AcknowledgeToolReviewResponse = Message<"koinon.mcpserver.v1alpha1.A
  * Use `create(AcknowledgeToolReviewResponseSchema)` to create a new message.
  */
 export const AcknowledgeToolReviewResponseSchema: GenMessage<AcknowledgeToolReviewResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 16);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 19);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.GetAgentServersRequest
@@ -646,7 +743,7 @@ export type GetAgentServersRequest = Message<"koinon.mcpserver.v1alpha1.GetAgent
  * Use `create(GetAgentServersRequestSchema)` to create a new message.
  */
 export const GetAgentServersRequestSchema: GenMessage<GetAgentServersRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 17);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 20);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.GetAgentServersResponse
@@ -663,7 +760,7 @@ export type GetAgentServersResponse = Message<"koinon.mcpserver.v1alpha1.GetAgen
  * Use `create(GetAgentServersResponseSchema)` to create a new message.
  */
 export const GetAgentServersResponseSchema: GenMessage<GetAgentServersResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 18);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 21);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.SetAgentServersRequest
@@ -690,7 +787,7 @@ export type SetAgentServersRequest = Message<"koinon.mcpserver.v1alpha1.SetAgent
  * Use `create(SetAgentServersRequestSchema)` to create a new message.
  */
 export const SetAgentServersRequestSchema: GenMessage<SetAgentServersRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 19);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 22);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.SetAgentServersResponse
@@ -707,7 +804,7 @@ export type SetAgentServersResponse = Message<"koinon.mcpserver.v1alpha1.SetAgen
  * Use `create(SetAgentServersResponseSchema)` to create a new message.
  */
 export const SetAgentServersResponseSchema: GenMessage<SetAgentServersResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 20);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 23);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.SetToolTwoApproversRequest
@@ -739,7 +836,7 @@ export type SetToolTwoApproversRequest = Message<"koinon.mcpserver.v1alpha1.SetT
  * Use `create(SetToolTwoApproversRequestSchema)` to create a new message.
  */
 export const SetToolTwoApproversRequestSchema: GenMessage<SetToolTwoApproversRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 21);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 24);
 
 /**
  * @generated from message koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse
@@ -756,7 +853,7 @@ export type SetToolTwoApproversResponse = Message<"koinon.mcpserver.v1alpha1.Set
  * Use `create(SetToolTwoApproversResponseSchema)` to create a new message.
  */
 export const SetToolTwoApproversResponseSchema: GenMessage<SetToolTwoApproversResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 22);
+  messageDesc(file_koinon_mcpserver_v1alpha1_mcpserver, 25);
 
 /**
  * @generated from enum koinon.mcpserver.v1alpha1.Tier
@@ -866,6 +963,18 @@ export const McpServerService: GenService<{
     methodKind: "unary";
     input: typeof UpdateServerRequestSchema;
     output: typeof UpdateServerResponseSchema;
+  },
+  /**
+   * SetServerClass sets what a server exposes: its kind and the legs of the leak guard (ADR 0084) it
+   * carries. It works for declared servers too, which the declaring Secret does not describe. Audited
+   * as mcp_server.data_class.set.
+   *
+   * @generated from rpc koinon.mcpserver.v1alpha1.McpServerService.SetServerClass
+   */
+  setServerClass: {
+    methodKind: "unary";
+    input: typeof SetServerClassRequestSchema;
+    output: typeof SetServerClassResponseSchema;
   },
   /**
    * DeleteServer deletes a server entered here, with its tools and the agents' allowances of it. A
