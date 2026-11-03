@@ -430,6 +430,26 @@ check "--gate verdict=notrun exits 76" test "$rc" -eq 76
 check "... and says NOT RUN" has 'NOT RUN' "$tmp/gate3/log"
 gate "$tmp/gate3b" "target=go-test ref=x rc=3 seconds=1 verdict=notrun" FAKE_PHASE=Succeeded
 check "--gate verdict=notrun exits 76 even when the pod succeeded" test "$rc" -eq 76
+# go-test-lab (#610): a followed go-test gate posts the commit status ci.yml's go-test job reads.
+: >"$FAKE_GH_LOG"
+gate "$tmp/gate3c" "target=go-test ref=x rc=0 seconds=1 verdict=pass" FAKE_PHASE=Succeeded
+check "--gate go-test pass posts go-test-lab=success on the tested commit" sh -c "grep -q 'statuses/$argo_sha -f state=success -f context=go-test-lab' '$FAKE_GH_LOG'"
+check "... and not e2e-lab" sh -c "! grep -q 'context=e2e-lab' '$FAKE_GH_LOG'"
+check "... and does not re-run e2e result (that is e2e-lab's)" sh -c "! grep -q 'run list' '$FAKE_GH_LOG'"
+: >"$FAKE_GH_LOG"
+gate "$tmp/gate3d" "target=go-test ref=x rc=1 seconds=1 verdict=fail" FAKE_PHASE=Failed
+check "--gate go-test fail posts go-test-lab=failure" sh -c "grep -q 'statuses/$argo_sha -f state=failure -f context=go-test-lab' '$FAKE_GH_LOG'"
+: >"$FAKE_GH_LOG"
+gate "$tmp/gate3e" "target=go-test ref=x rc=3 seconds=1 verdict=notrun" FAKE_PHASE=Failed
+check "--gate go-test NOT RUN (76) posts nothing (after the run)" sh -c "test $rc -eq 76 && ! grep -q 'statuses' '$FAKE_GH_LOG'"
+gate "$tmp/gate3f" "" FAKE_PENDING=1 KOINON_E2E_GATE_PENDING=1
+check "--gate go-test fallback (75) posts nothing" sh -c "test $rc -eq 75 && ! grep -q 'statuses' '$FAKE_GH_LOG'"
+gate "$tmp/gate3g" "target=go-test ref=x rc=0 seconds=1 verdict=pass" FAKE_PHASE=Succeeded KOINON_E2E_NO_STATUS=1
+check "--gate go-test pass with KOINON_E2E_NO_STATUS posts nothing" sh -c "test $rc -eq 0 && ! grep -q 'statuses' '$FAKE_GH_LOG'"
+: >"$FAKE_GH_LOG"
+gate "$tmp/gate3h" "target=go-test ref=x rc=0 seconds=1 verdict=pass" FAKE_PHASE=Succeeded FAKE_GH_FAIL=1
+check "--gate go-test pass with a failing post still exits 0" test "$rc" -eq 0
+check "... and warns that go-test-lab was not posted" has 'the go-test-lab status was not posted' "$tmp/gate3h/log"
 gate "$tmp/gate4" "" FAKE_PENDING=1 KOINON_E2E_GATE_PENDING=1
 check "--gate Pending past the limit exits 75" test "$rc" -eq 75
 check "... without stopping the run" test ! -e "$tmp/gate4/stopped"

@@ -108,6 +108,35 @@ CODEOWNERS: `require_code_owner_review` is false); `e2e result` is not pinned to
 posted by anyone with write access. This is a guardrail against mistakes, not against a malicious member;
 the follow-up is a pinned `integration_id` / the lab's own App (#568).
 
+### go-test on the lab gate first (#610)
+
+CI's `go-test` job is the longest Blacksmith job. With a lab, run it there first and let CI skip it:
+
+1. Pull request as a draft (a draft skips the heavy jobs, #593). Then
+   `hack/ship.sh --ready --lab-go-test ...`: after the push it runs `hack/e2e-remote.sh --argo --gate go-test`
+   on a free gate slot (`gate-1`..`gate-4` with no unfinished `lane=gate` run, never always `gate-1`),
+   which posts the commit status `go-test-lab` on the pushed head (`success`, or `failure` when the gate
+   failed; nothing on 75 / 76 / 78 / 79 or with `--no-status`), and only then marks the pull request ready.
+2. The ready run's `changes` job reads that status (`hack/ci-skip-heavy.sh lab`, `hack/go-test-lab.sh`):
+   for the exact head SHA of the pull request and state `success` it sets `go_test_lab=true`, `go-test` is
+   skipped, and the required `go` check accepts that one skip (any other skipped part, or a skipped
+   `go-test` without the status, is still a failure). The required check name stays `go`; the merge rule
+   and the ruleset's required contexts do not change.
+3. Without the status (no lab: exit 78; lab cannot run it now or no free slot: 75; NOT RUN: 76; flavors
+   change: 79), `go-test` runs on Blacksmith as before. `hack/ship.sh` prints the reason and goes on.
+   A gate that really failed (any other non-zero) stops the ship before ready.
+4. A push to a ready pull request runs CI on the new head at once, before any status can exist, and `go-test`
+   runs on Blacksmith: nothing waits for a status (a waiting Blacksmith job is billed). To keep the lab for
+   a fix, turn the pull request into a draft (`gh pr ready --undo`), push, and ship with
+   `--ready --lab-go-test` again. A status posted after the ready run started changes nothing.
+5. A push to main and the release gate do not trust a skip blindly: `hack/ci-skip-heavy.sh decide` and
+   `hack/release-gate.sh` accept a skipped `go-test` only with a green `go-test-lab` on the pull request
+   head, or when the change touches no Go (`hack/go-test-lab.sh touches-go`).
+
+Trust limit, as for `e2e-lab` (#568): anyone with write access can post `go-test-lab`, and the `changes` job
+runs from the pull request's own `ci.yml`; the guard is the required review on `.github/**`. A guardrail
+against mistakes, not against a malicious member. `changes` and the release `gate` job need `statuses: read`.
+
 ### Lanes and notifications
 
 Each lane of a parallel session runs `hack/e2e-remote.sh --argo --repo <its worktree>` with
