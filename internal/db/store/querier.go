@@ -27,6 +27,11 @@ type Querier interface {
 	// The people a question is retargeted to start waiting now (a new recipient's age starts when the
 	// item starts waiting on them). Returns the rows that were new.
 	AddWaitingQuestionRecipients(ctx context.Context, arg AddWaitingQuestionRecipientsParams) ([]pgtype.UUID, error)
+	// AppendRunEventOnce for the run's own epoch after the control plane canceled it: the worker
+	// stores the item (a message or a thought) the agent was in the middle of, so a stopped run keeps
+	// what was said (#344). Nothing else is recorded this way. No row: another epoch, the run is not
+	// canceled, or the event exists.
+	AppendCanceledRunEventOnce(ctx context.Context, arg AppendCanceledRunEventOnceParams) (RunEvent, error)
 	// Appends an event from the control plane (API, scheduler) without an epoch,
 	// for example a cancel notice. Stamped with the run's current epoch.
 	AppendRunControlEvent(ctx context.Context, arg AppendRunControlEventParams) (RunEvent, error)

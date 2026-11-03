@@ -1020,6 +1020,7 @@ func (r *runner) concludeFenced(ctx context.Context, turn runoutcome.Turn) {
 	switch r.own.FenceKind() {
 	case fenceCanceled:
 		r.log.Info("run canceled")
+		r.own.FlushItems(ctx, true) // what the agent was saying when it was canceled
 		r.own.CloseTurn(ctx, turn)
 	case fenceAbandon:
 		r.log.Warn("giving the run up")

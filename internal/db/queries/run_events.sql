@@ -62,6 +62,27 @@ SELECT run.org_id, run.id, run.last_event_seq, run.epoch, @kind, @payload, @sour
 FROM run
 RETURNING *;
 
+-- name: AppendCanceledRunEventOnce :one
+-- AppendRunEventOnce for the run's own epoch after the control plane canceled it: the worker
+-- stores the item (a message or a thought) the agent was in the middle of, so a stopped run keeps
+-- what was said (#344). Nothing else is recorded this way. No row: another epoch, the run is not
+-- canceled, or the event exists.
+WITH run AS (
+    UPDATE runs
+    SET last_event_seq = last_event_seq + 1
+    WHERE runs.org_id = @org_id AND runs.id = @run_id AND runs.epoch = @epoch
+      AND runs.state = 'canceled'
+      AND NOT EXISTS (
+          SELECT 1 FROM run_events e
+          WHERE e.org_id = @org_id AND e.run_id = @run_id AND e.epoch = @epoch
+            AND e.source_seq = @source_seq::bigint)
+    RETURNING runs.org_id, runs.id, runs.epoch, runs.last_event_seq
+)
+INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload, source_seq)
+SELECT run.org_id, run.id, run.last_event_seq, run.epoch, @kind, @payload, @source_seq::bigint
+FROM run
+RETURNING *;
+
 -- name: GetRunEventBySource :one
 SELECT * FROM run_events
 WHERE org_id = @org_id AND run_id = @run_id AND epoch = @epoch AND source_seq = @source_seq::bigint;
