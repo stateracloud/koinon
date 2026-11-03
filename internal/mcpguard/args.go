@@ -185,8 +185,9 @@ func (w walker) address(name string) error {
 }
 
 // urlPayload is the part of a fetched URL that is payload, as sent. To a host the org trusts it is
-// everything after the host (path, query and fragment). To any other host it is everything after
-// the scheme: host labels carry data as well as a path does (ADR 0091 decision 8, whatever the
+// everything after the scheme except the host name: the userinfo, the port, the path, the query and
+// the fragment all reach the host and can carry data. To any other host it is everything after the
+// scheme: host labels carry data as well as a path does (ADR 0091 decision 8, whatever the
 // encoding). A URL that does not parse is payload whole.
 func (w walker) urlPayload(raw string) string {
 	s := strings.TrimSpace(raw)
@@ -194,18 +195,33 @@ func (w walker) urlPayload(raw string) string {
 	if err != nil || u.Host == "" {
 		return s
 	}
-	host, ok := sinkclass.FetchHost(s)
-	if !ok || w.hosts == nil || !w.hosts.TrustsHost(host) {
-		if i := strings.Index(s, "://"); i >= 0 {
-			return s[i+len("://"):]
-		}
-		return s
-	}
-	i := strings.Index(s, u.Host)
+	i := strings.Index(s, "://")
 	if i < 0 {
 		return s
 	}
-	return s[i+len(u.Host):]
+	rest := s[i+len("://"):]
+	host, ok := sinkclass.FetchHost(s)
+	if !ok || w.hosts == nil || !w.hosts.TrustsHost(host) {
+		return rest
+	}
+	end := strings.IndexAny(rest, "/?#")
+	if end < 0 {
+		end = len(rest)
+	}
+	authority, tail := rest[:end], rest[end:]
+	userinfo, hostport := "", authority
+	if at := strings.LastIndex(authority, "@"); at >= 0 {
+		userinfo, hostport = authority[:at+1], authority[at+1:]
+	}
+	port := ""
+	if strings.HasPrefix(hostport, "[") {
+		if j := strings.Index(hostport, "]"); j >= 0 {
+			port = hostport[j+1:]
+		}
+	} else if j := strings.LastIndex(hostport, ":"); j >= 0 {
+		port = hostport[j:]
+	}
+	return userinfo + port + tail
 }
 
 func (w walker) value(path string, depth int, odd bool) error {
