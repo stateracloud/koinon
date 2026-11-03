@@ -86,6 +86,16 @@ func (s *Service) executeMCP(ctx context.Context, row store.ApprovalRequest) (ma
 	})
 	switch {
 	case err == nil:
+		if s.onMCP != nil {
+			raw, err := json.Marshal(res)
+			if err == nil {
+				err = s.onMCP(ctx, row, srv, raw)
+			}
+			if err != nil {
+				s.log.Error("approvals: the leak guard could not record an MCP result", append(attrs(row), "err", err)...)
+				return nil, permanent("the call ran, but the leak guard could not record its result, so the result is withheld")
+			}
+		}
 		return res, nil
 	case errors.Is(err, mcpservers.ErrNotSent):
 		return nil, err // retried by the sweeper
