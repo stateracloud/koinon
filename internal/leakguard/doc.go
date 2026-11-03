@@ -39,16 +39,17 @@
 //     length is read through; the price is that prose is projected too (its letters are
 //     base64 and base32 symbols), which resynchronisation turns into nothing, at a cost the
 //     work and time budgets bound. Measured on one core (GOMAXPROCS=1) on a laptop, a benign
-//     call of up to 1 MiB takes 0.003 to 0.37 s of the 1 s a call has: 0.37 s for two halves of
-//     base64 of base64, 0.35 s of base64 of random bytes, 0.29 s for 128 arguments of 3 KiB of
-//     base64 of UTF-16 Russian, of 8 KiB of UTF-16 prose or of UTF-8 Russian, 0.27 s of UTF-16
-//     Chinese, 0.23 s of 100 arguments of random bytes, and a few ms for 100 short arguments.
-//     The one measurement on a loaded node, a lab Linux node of 3 CPUs shared with other test
-//     packages, is 2.1 times a laptop's (128 arguments of base64 of UTF-8 Russian took 1.03 s
-//     there before the changes of the eighth round, 0.5 s here; 0.29 s here after), so the
-//     slowest shapes take about 0.8 s there. The texts of a call are decoded by up to 8 workers
-//     and the decoders of a text over 128 KiB run side by side, as a speed-up only: a pod with a
-//     small CPU limit gets no benefit.
+//     call of up to 1 MiB takes 0.004 to 0.41 s of the 1 s a call has: 0.41 s for 128 arguments
+//     of 8 KiB of base64 of UTF-8 Russian, 0.40 s for two halves of base64 of base64, 0.35 s of
+//     base64 of random bytes, 0.32 s for 128 arguments of 8 KiB of UTF-16 prose, 0.30 s of 3 KiB
+//     of UTF-16 Russian, 0.28 s of UTF-16 Chinese, 0.25 s of 100 arguments of random bytes, and
+//     a few ms for 100 short arguments. The one measurement on a loaded node, a lab Linux node
+//     of 3 CPUs shared with other test packages, is 2.1 times a laptop's (128 arguments of base64
+//     of UTF-8 Russian took 1.03 s there before the changes of the eighth round, 0.5 s here;
+//     0.29 s here after the ninth, 0.41 s after the tenth, which reads text with invalid bytes
+//     of many kinds in it, see below), so the slowest shapes take about 0.85 s there. The texts
+//     of a call are decoded by up to 8 workers and the decoders of a text over 128 KiB run side
+//     by side, as a speed-up only: a pod with a small CPU limit gets no benefit.
 //
 //     The specs do not assert these times, which depend on the machine. They assert the work
 //     the call is charged (the bytes decoded, normalised and fingerprinted, and a fixed charge
@@ -56,7 +57,7 @@
 //     MaxWorkBytes. Each benign shape has a cap of 1.1 times its measured work, rounded up to
 //     100 KB (0.5 to 17 MB): the caps keep the cost of a shape from growing unnoticed, and they
 //     are chosen by shape because the time a byte of work takes differs (19 to 35 ms a MB here,
-//     and 2.1 times that on the lab node, taking the slowest shape to 0.8 s of the second).
+//     and 2.1 times that on the lab node, taking the slowest shape to 0.85 s of the second).
 //     One spec, serial and on one core, runs the slowest shape that failed on the lab node
 //     against the real clock. A
 //     projection keeps stretches of 16 or more decoded bytes that are 60% letters, digits or
@@ -86,7 +87,23 @@
 // and three quarters of them in two 256-character blocks, as one script's text is. Chinese
 // ideographs span about eighty blocks and count as one (if half of them have a byte of 0x80 or
 // more, as ASCII read in pairs does not, and at least eight differ); Japanese is kana,
-// ideographs and ASCII. A run of hex digits is not read as base64 at all. Each reading makes a
+// ideographs and ASCII. A run of hex digits is not read as base64 at all.
+// Invalid UTF-8 bytes in a reading are noise the sender controls, as fillers are, and Normalise
+// drops them. Up to two kinds of them (and of control characters) are skipped anywhere in a
+// reading, as before; of more kinds, when no alignment of the stream is text otherwise, they are
+// stripped up to 35% of the bytes, and the rest must still be text: 60% of the bytes printable,
+// two thirds of the characters letters, digits or spaces, at least 24 of them and 8 different
+// ones with none over 35%, and the letters beyond ASCII on two pages for nine in ten (the other
+// alignments of a stream of text read as letters of every script and an invalid byte in five).
+// Random bytes are 44% printable and 45% invalid, and are given up after 256 bytes. A reading
+// with one invalid byte in eight or more is dropped when another reading with less holds at
+// least four fifths as many letters (the same alignments, of a script of two-byte letters).
+// The short windows of a call of more than 32 arguments (see below) do not strip: there are
+// thousands of them, and a window of the wrong alignment reads as text with an invalid byte in
+// five as often as a real one does. So a stream cut across two arguments of such a call, with
+// invalid bytes of three or more kinds in it, is the one noisy case not read; it is also not
+// read when another alignment of the same stream is clean text, which an attacker must craft.
+// Each reading makes a
 // child of the text, the k-th reading of each run the k-th child (see the known limits). Data wrapped so
 // that no 12 printable characters stand together is the "own cipher" case the URL rule
 // backstops, and the URL rule runs only on fetch and search calls: for any other tool a text
