@@ -36,6 +36,15 @@ func withKey(key string) *awskms.Wrapper {
 	return w
 }
 
+// unverified is the probe's answer from LocalStack, which ignores DryRun: unreachable, since the
+// decrypt right is unverified (the dry run against AWS's behaviour is in hardening_test.go).
+func unverified(err error) {
+	GinkgoHelper()
+	Expect(err).To(MatchError(secretstore.ErrUnreachable))
+	Expect(err).To(MatchError(awskms.ErrDryRunUnverified))
+	Expect(err.Error()).To(ContainSubstring("the decrypt right is unverified"))
+}
+
 // hanging is a listener that accepts connections and never answers.
 func hanging() string {
 	GinkgoHelper()
@@ -58,9 +67,15 @@ var _ = Describe("the AWS KMS wrapper", func() {
 	kek := bytes.Repeat([]byte("k"), secretstore.KeySize) // obviously fake
 	aad := []byte("koinon-test-aad")
 
+	// The contract runs against the AWS stand-in of hardening_test.go, whose dry run answers as AWS
+	// documents it: LocalStack ignores DryRun, so its probe is never healthy (below). LocalStack
+	// still round-trips real ciphertexts in the specs that follow.
 	Describe("the wrapper contract", func() {
 		secretstoretest.WrapperContract(
-			func() secretstore.Wrapper { return withKey(testKey) },
+			func() secretstore.Wrapper {
+				_, url := newFakeKMS()
+				return onFake(url, fixed(creds("admin"), nil))
+			},
 			func() secretstore.Wrapper {
 				w, err := awskms.NewWithCredentials(awskms.Config{Region: region, KeyID: testKey, Endpoint: hanging()}, static(nil))
 				Expect(err).NotTo(HaveOccurred())
@@ -81,7 +96,12 @@ var _ = Describe("the AWS KMS wrapper", func() {
 		got, err := withKey("alias/koinon-test").Unwrap(ctx, wrapped, aad)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(Equal(kek))
-		Expect(withKey("alias/koinon-test").Probe(ctx)).To(Succeed())
+	})
+
+	It("calls LocalStack unreachable on probe, since it ignores DryRun and the decrypt right is unverified", func(ctx SpecContext) {
+		for _, key := range []string{testKey, "alias/koinon-test"} {
+			unverified(withKey(key).Probe(ctx))
+		}
 	})
 
 	It("refuses a ciphertext of another key as not opening, since every decrypt names the key", func(ctx SpecContext) {
@@ -111,7 +131,7 @@ var _ = Describe("the AWS KMS wrapper", func() {
 		Expect(err).To(MatchError(secretstore.ErrUnreachable))
 		Expect(err).NotTo(MatchError(secretstore.ErrOpen))
 		kms(ctx, "EnableKey", map[string]any{"KeyId": disabled})
-		Expect(withKey(disabled).Probe(ctx)).To(Succeed())
+		unverified(withKey(disabled).Probe(ctx)) // enabled again: past the key's state, at the dry run
 
 		deleted := createKey(ctx)["KeyId"].(string)
 		kms(ctx, "ScheduleKeyDeletion", map[string]any{"KeyId": deleted, "PendingWindowInDays": 7})
@@ -165,7 +185,7 @@ var _ = Describe("the AWS KMS wrapper", func() {
 			Identity: awskms.Identity{RoleARN: "arn:aws:iam::000000000000:role/koinon-api", WebIdentityTokenFile: p},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(w.Probe(ctx)).To(Succeed())
+		unverified(w.Probe(ctx)) // signed in: STS answered, and KMS got as far as the dry run
 		wrapped, err := w.Wrap(ctx, kek, aad)
 		Expect(err).NotTo(HaveOccurred())
 		got, err := w.Unwrap(ctx, wrapped, aad)

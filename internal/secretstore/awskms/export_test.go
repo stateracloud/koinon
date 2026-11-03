@@ -55,3 +55,6 @@ func Sign(req *http.Request, body []byte, accessKey, secretKey, token, region, s
 
 // SigningKey is the SigV4 key derivation.
 var SigningKey = signingKey
+
+// ErrDryRunUnverified is the probe's reason for an endpoint that does not do the dry run.
+var ErrDryRunUnverified = errDryRunUnverified

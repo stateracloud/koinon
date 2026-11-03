@@ -104,8 +104,7 @@ type Wrapper struct {
 	pending *refreshCall
 
 	// log is where the adapter logs (nil: slog.Default()).
-	log          *slog.Logger
-	fallbackOnce sync.Once
+	log *slog.Logger
 }
 
 // refreshCall is one credential refresh; done closes once creds and err are set.
@@ -316,12 +315,10 @@ var probeCiphertext = []byte("koinon-probe")
 // junk ciphertext would not do: KMS may refuse the ciphertext before it checks the right, so a role
 // without kms:Decrypt would probe healthy.
 //
-// An endpoint that does not know the dry run (an emulator, an older KMS-compatible service) either
-// rejects the parameters (probeRejectsDryRun) or ignores them and answers as to a plain Decrypt of
-// the junk: InvalidCiphertextException. AWS KMS never answers that to a dry run that ignores the
-// ciphertext. Only then the probe falls back to the plain Decrypt and its weaker answer
-// (InvalidCiphertextException is healthy: the credentials were accepted; it says nothing reliable
-// about the right or the key's state), and logs that once.
+// An endpoint that does not know the dry run (an emulator such as LocalStack, a KMS-compatible
+// service) ignores the parameters and answers as to a plain Decrypt of the junk
+// (InvalidCiphertextException), or rejects them. Neither proves the decrypt right, so the probe
+// calls that endpoint unreachable and says why (errDryRunUnverified); there is no weaker fallback.
 func (w *Wrapper) Probe(ctx context.Context) error {
 	ctx, cancel := remotekms.Bound(ctx, w.cfg.Timeout)
 	defer cancel()
@@ -337,47 +334,32 @@ func (w *Wrapper) Probe(ctx context.Context) error {
 		return nil
 	case err == nil:
 		return remotekms.Unreachable(what, errors.New("KMS decrypted a dry run"))
-	case errors.As(err, &ae) && ae.status == http.StatusBadRequest && ae.typ == "InvalidCiphertextException":
-		// The endpoint ignored the dry run: this is the plain Decrypt's answer already.
-		w.logFallback("the endpoint ignored DryRun", ae)
-		return nil
-	case errors.As(err, &ae) && probeRejectsDryRun(ae):
-		w.logFallback("the endpoint rejected DryRun", ae)
-		return w.plainProbe(ctx, what)
+	case errors.As(err, &ae) && dryRunUnsupported(ae):
+		return remotekms.Unreachable(what, fmt.Errorf("%w: %w", errDryRunUnverified, ae))
 	default:
 		return remotekms.Unreachable(what, err)
 	}
 }
 
-// probeRejectsDryRun is an endpoint's refusal of the dry-run parameters themselves: a 400
-// validation or serialization error that names them. An authorization refusal never is.
-func probeRejectsDryRun(ae *apiError) bool {
-	return ae.status == http.StatusBadRequest &&
-		(ae.typ == "ValidationException" || ae.typ == "SerializationException") &&
-		strings.Contains(ae.msg, "DryRun")
-}
+// errDryRunUnverified is the probe's reason for an endpoint that does not do the dry run.
+var errDryRunUnverified = errors.New("awskms: the endpoint ignored or rejected DryRun; the decrypt right is unverified")
 
-// plainProbe decrypts probeCiphertext, which KMS refuses as InvalidCiphertextException once it
-// accepted the credentials. It does not prove the kms:Decrypt right.
-func (w *Wrapper) plainProbe(ctx context.Context, what string) error {
-	err := w.decrypt(ctx, probeCiphertext, nil)
-	var ae *apiError
-	switch {
-	case errors.As(err, &ae) && ae.status == http.StatusBadRequest && ae.typ == "InvalidCiphertextException":
-		return nil
-	case err == nil:
-		return remotekms.Unreachable(what, errors.New("KMS decrypted the probe, which is no ciphertext"))
-	default:
-		return remotekms.Unreachable(what, err)
+// dryRunUnsupported is an endpoint's answer to a dry run it does not do: it ignored DryRun and
+// refused the junk ciphertext (AWS KMS never reads it with IGNORE_CIPHERTEXT), or it rejected the
+// parameters with a 400 validation or serialization error that names them. An authorization
+// refusal never is.
+func dryRunUnsupported(ae *apiError) bool {
+	if ae.status != http.StatusBadRequest {
+		return false
 	}
-}
-
-// logFallback logs, once per adapter, that the probe cannot check the decrypt right.
-func (w *Wrapper) logFallback(why string, ae *apiError) {
-	w.fallbackOnce.Do(func() {
-		w.logger().Warn("awskms: "+why+"; the key probe falls back to a plain Decrypt, which proves only that the endpoint accepted the credentials, not the kms:Decrypt right",
-			"key", w.cfg.KeyID, "answer", ae.Error())
-	})
+	switch ae.typ {
+	case "InvalidCiphertextException":
+		return true
+	case "ValidationException", "SerializationException":
+		return strings.Contains(ae.msg, "DryRun")
+	default:
+		return false
+	}
 }
 
 func (w *Wrapper) logger() *slog.Logger {
@@ -502,27 +484,26 @@ func parseError(status int, raw []byte, c credentials) *apiError {
 // must still be valid when KMS checks it.
 const expirySkew = time.Minute
 
+// refreshRetry is how long after a failed refresh the next one starts while the current credentials
+// are still usable: during an STS or Pod Identity Agent outage the calls go on with them, and at
+// most one refresh per refreshRetry tries the endpoint.
+const refreshRetry = 10 * time.Second
+
 // credentials returns credentials that have not expired, refreshing them when there are none.
 // After 4/5 of their lifetime it starts a refresh in the background and keeps using the current
-// ones until they expire (less expirySkew): a failed refresh is logged, not a failed call. Callers
-// that need credentials while a refresh is in flight share it, and each stops waiting when its own
-// ctx ends. The refresh is not bound to the first caller's ctx (its end would fail every other
-// waiter), only to the configured timeout.
+// ones until they expire (less expirySkew): a failed refresh is logged, not a failed call, and the
+// next one waits refreshRetry. Callers that need credentials while a refresh is in flight share it,
+// and each stops waiting when its own ctx ends. The refresh is not bound to the first caller's ctx
+// (its end would fail every other waiter), only to the configured timeout.
 func (w *Wrapper) credentials(ctx context.Context) (credentials, error) {
 	w.mu.Lock()
 	now := w.now()
-	if c := w.creds; c.valid() {
-		if w.refresh.IsZero() || now.Before(w.refresh) {
-			w.mu.Unlock()
-			return c, nil
+	if c := w.creds; c.valid() && w.usable(now) {
+		if !w.refresh.IsZero() && !now.Before(w.refresh) && w.pending == nil {
+			w.startRefresh(ctx)
 		}
-		if w.expires.IsZero() || now.Before(w.expires.Add(-expirySkew)) {
-			if w.pending == nil {
-				w.startRefresh(ctx)
-			}
-			w.mu.Unlock()
-			return c, nil
-		}
+		w.mu.Unlock()
+		return c, nil
 	}
 	call := w.pending
 	if call == nil {
@@ -535,6 +516,11 @@ func (w *Wrapper) credentials(ctx context.Context) (credentials, error) {
 	case <-ctx.Done():
 		return credentials{}, fmt.Errorf("waiting for credentials: %w", ctx.Err())
 	}
+}
+
+// usable reports whether the current credentials may still sign a request at now; w.mu is held.
+func (w *Wrapper) usable(now time.Time) bool {
+	return w.expires.IsZero() || now.Before(w.expires.Add(-expirySkew))
 }
 
 // startRefresh starts a refresh; w.mu is held.
@@ -561,10 +547,11 @@ func (w *Wrapper) runRefresh(ctx context.Context, call *refreshCall) {
 			now := w.now()
 			w.refresh = now.Add(c.Expires.Sub(now) * 4 / 5)
 		}
-	case w.creds.valid() && (w.expires.IsZero() || w.now().Before(w.expires.Add(-expirySkew))):
-		// The current credentials stay in use until they expire; the next call tries again.
+	case w.creds.valid() && w.usable(w.now()):
+		// The current credentials stay in use until they expire; the next refresh waits refreshRetry.
+		w.refresh = w.now().Add(refreshRetry)
 		w.logger().Warn("awskms: credential refresh failed; the current credentials stay in use until they expire",
-			"expires", w.expires, "error", err)
+			"expires", w.expires, "retry_in", refreshRetry, "error", err)
 	}
 	close(call.done)
 }

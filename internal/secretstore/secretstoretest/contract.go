@@ -15,7 +15,8 @@ import (
 
 // WrapperContract declares the specs every secretstore.Wrapper that really wraps (a KMS adapter)
 // passes: call it inside a Describe of the adapter's suite, with a function that returns a wrapper
-// over a reachable test key (an OpenBao dev container, LocalStack KMS). newHanging returns the
+// over a reachable test key (an OpenBao dev container, an AWS KMS stand-in that does the dry run,
+// which LocalStack does not). newHanging returns the
 // adapter pointed at a backend that accepts connections and never answers (a listener that never
 // replies); nil skips that spec. The test KEK is obviously fake.
 func WrapperContract(newWrapper, newHanging func() secretstore.Wrapper) {

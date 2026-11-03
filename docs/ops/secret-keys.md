@@ -429,11 +429,12 @@ Notes:
   `DryRunOperationException`, its answer to a dry run that would have been allowed. Any other answer
   (`AccessDeniedException` or another KMS error), an identity that cannot sign in and a network error
   read as unreachable (`koinon_kek_active_reachable` 0), never as a wrong key.
-- An endpoint that does not support the dry run (an emulator such as LocalStack, which ignores it)
-  makes the check fall back to a plain Decrypt of a junk ciphertext, and Koinon logs "the key probe
-  falls back to a plain Decrypt" once. That check only shows that the endpoint accepted the
-  credentials: KMS may refuse the junk before it checks the right. AWS KMS itself supports the dry
-  run.
+- An endpoint that does not support the dry run (an emulator such as LocalStack, which ignores it,
+  or a KMS-compatible service that rejects the parameters) reads as unreachable too, with the reason
+  "the endpoint ignored or rejected DryRun; the decrypt right is unverified". There is no weaker
+  fallback: a plain Decrypt of a junk ciphertext cannot prove the right, since KMS may refuse the
+  junk before it checks it. Wrapping and unwrapping still work against such an endpoint; only the
+  health check stays at 0. AWS KMS itself supports the dry run.
 - Disabling the key or scheduling its deletion stops every pod from loading the key set on its next
   start. Before you retire the key, move the KEKs to a new key (the steps above: add with the new
   `keyId`, activate, rewrap, retire), and keep the old key enabled until `keys status` lists no KEK
