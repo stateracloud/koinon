@@ -589,6 +589,10 @@ streamed. The code lands in #340 (ledger), #341 (agentd) and #342 (gateway), whi
    request bytes (decision 6.2 of the 2026-10-24 amendment) and nothing for output. They are no longer
    charged at `max_tokens`. Providers do not bill output they never generated, and a retried 5xx must
    not burn the run's budget on one bad minute. The entry keeps `estimated` and `usage_missing`.
+   Built in #340: a 5xx without usage is recorded `failed_by_upstream`, final at once (no settlement),
+   with no `max_tokens` reserve held back from the key, even from a provider that could settle it. A
+   stream cut with a 2xx keeps the reserve and the settlement: nothing in the gateway's log says whether
+   the provider generated output before the cut, and the provider's own figure decides.
 2. **A cut-short response is never charged at `max_tokens`** (Andre, 2026-11-01). A response cut
    short (an aborted stream, a closed connection) is charged its input plus the output actually
    streamed, estimated when the provider did not report usage. This replaces the sentence of issue
