@@ -396,11 +396,12 @@ var _ = Describe("koinon-api keys", func() {
 		BeforeEach(func(ctx SpecContext) {
 			kms = &secretstoretest.FakeKMS{}
 			var err error
-			admin, err = secretstore.NewKeyAdminWrappers(kms)
+			// Both read the bound-only marker and the install ID from the database, as koinon-api and
+			// the key-admin Job do.
+			admin, err = secretstore.NewKeyAdminWrappers(installid.BoundOnlySource(pool), kms)
 			Expect(err).NotTo(HaveOccurred())
-			service, err = secretstore.NewWrappers(kms)
+			service, err = secretstore.NewWrappers(installid.BoundOnlySource(pool), kms)
 			Expect(err).NotTo(HaveOccurred())
-			// Both read the install ID from the database, as koinon-api and the key-admin Job do.
 			admin = admin.WithInstallID(installid.Source(pool))
 			service = service.WithInstallID(installid.Source(pool))
 			use(admin)
@@ -476,7 +477,9 @@ var _ = Describe("koinon-api keys", func() {
 			marked := pgtest.Start(ctx)
 			_, err := installid.SetBoundOnly(ctx, marked, secretstore.BoundOnlyRewrap)
 			Expect(err).NotTo(HaveOccurred())
-			use(service.WithBoundOnly(installid.BoundOnlySource(marked)))
+			markedService, err := secretstore.NewWrappers(installid.BoundOnlySource(marked), kms)
+			Expect(err).NotTo(HaveOccurred())
+			use(markedService.WithInstallID(installid.Source(pool)))
 			tool.Pool = marked
 			DeferCleanup(func() { tool.Pool = pool })
 
@@ -604,7 +607,7 @@ var _ = Describe("koinon-api keys", func() {
 			Expect(out.String()).NotTo(ContainSubstring("WARNING"), "a local-only install is never warned")
 
 			kms := &secretstoretest.FakeKMS{}
-			admin, err := secretstore.NewKeyAdminWrappers(kms)
+			admin, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, kms)
 			Expect(err).NotTo(HaveOccurred())
 			admin = admin.WithInstallID(installid.Source(pool))
 			ks.Wrappers = admin

@@ -91,7 +91,7 @@ var _ = Describe("the KEK monitor", func() {
 
 	It("counts the KMS KEKs wrapped before the install binding on every load, and warns while there are any (#615)", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
-		ws, err := secretstore.NewWrappers(kms)
+		ws, err := secretstore.NewWrappers(secretstoretest.BoundOnlyUnset, kms)
 		Expect(err).NotTo(HaveOccurred())
 		mon := &kekhealth.Monitor{Wrappers: ws, Metrics: m, Log: log}
 		kmsKEK := func(install string) secretstore.StoredKEK {
@@ -129,7 +129,7 @@ var _ = Describe("the KEK monitor", func() {
 
 	It("follows the wrapping key of the active KEK and keeps one series", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
-		ws, err := secretstore.NewWrappers(kms)
+		ws, err := secretstore.NewWrappers(secretstoretest.BoundOnlyUnset, kms)
 		Expect(err).NotTo(HaveOccurred())
 		mon := &kekhealth.Monitor{Wrappers: ws, Metrics: m, Log: log}
 		wrapped := secretstore.StoredKEK{Backend: secretstoretest.FakeKMSBackend, KeyID: kms.KeyID(), Wrapped: []byte("x")}
@@ -166,7 +166,7 @@ var _ = Describe("the KEK monitor", func() {
 
 	It("is told by the directory load and reload, also when the reload cannot unwrap", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
-		admin, err := secretstore.NewKeyAdminWrappers(kms)
+		admin, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, kms)
 		Expect(err).NotTo(HaveOccurred())
 		install := secretstore.StaticInstallID(secretstoretest.InstallA)
 		w, err := admin.WithInstallID(install).Wrap(ctx, "kek-1", key(3))
@@ -177,7 +177,7 @@ var _ = Describe("the KEK monitor", func() {
 		Expect(os.WriteFile(filepath.Join(dir, "kek-1"), enc, 0o600)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(dir, "active"), []byte("kek-1"), 0o600)).To(Succeed())
 
-		service, err := secretstore.NewWrappers(kms)
+		service, err := secretstore.NewWrappers(secretstoretest.BoundOnlyUnset, kms)
 		Expect(err).NotTo(HaveOccurred())
 		service = service.WithInstallID(install)
 		mon := &kekhealth.Monitor{Wrappers: service, Metrics: m, Recorder: &kekhealth.Recorder{Q: db}, Log: log}
@@ -215,7 +215,7 @@ var _ = Describe("the KEK monitor", func() {
 
 	It("warns about an unreachable key once, not on every retry", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
-		ws, err := secretstore.NewWrappers(kms)
+		ws, err := secretstore.NewWrappers(secretstoretest.BoundOnlyUnset, kms)
 		Expect(err).NotTo(HaveOccurred())
 		mon := &kekhealth.Monitor{Wrappers: ws, Metrics: m, Log: log}
 		wrapped := secretstore.StoredKEK{Backend: secretstoretest.FakeKMSBackend, KeyID: kms.KeyID(), Wrapped: []byte("x")}

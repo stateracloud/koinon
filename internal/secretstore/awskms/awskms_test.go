@@ -160,7 +160,7 @@ var _ = Describe("the AWS KMS wrapper", func() {
 	})
 
 	It("binds a KEK to its ID and the install through secretstore.Wrappers", func(ctx SpecContext) {
-		ws, err := secretstore.NewKeyAdminWrappers(withKey(testKey))
+		ws, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, withKey(testKey))
 		Expect(err).NotTo(HaveOccurred())
 		ws = ws.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 		stored, err := ws.Wrap(ctx, "koinon-test-1", kek)
@@ -173,7 +173,7 @@ var _ = Describe("the AWS KMS wrapper", func() {
 		_, err = ws.Unwrap(ctx, "koinon-test-2", stored)
 		Expect(err).To(MatchError(secretstore.ErrOpen))
 
-		svc, err := secretstore.NewWrappers(withKey(testKey))
+		svc, err := secretstore.NewWrappers(secretstoretest.BoundOnlyUnset, withKey(testKey))
 		Expect(err).NotTo(HaveOccurred())
 		svc = svc.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 		got, err = svc.Unwrap(ctx, "koinon-test-1", stored)

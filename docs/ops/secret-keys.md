@@ -377,7 +377,9 @@ an unbound KMS KEK (at start and on every reload, about once a minute), and keep
 set. A process that started before the marker was set refuses unbound KEKs from its next load on; a
 failed reload keeps the key set it already has, which after the rewrap holds the bound forms. If the
 marker cannot be read (the database is down), an unbound KEK is refused (fail closed); bound and local
-KEKs do not need it.
+KEKs do not need it. Every process that opens KEKs reads the marker; there is no mode that skips it. The
+`keys` commands run without `--database-url` (or `DATABASE_URL`) refuse an unbound KMS KEK for the
+same reason.
 
 **Rotate as well if an old backup may have leaked.** The marker stops an old KEK Secret backup only
 where this database is: an install whose database lacks the marker (a clone taken before it was set, a

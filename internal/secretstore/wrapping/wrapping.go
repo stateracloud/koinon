@@ -79,8 +79,12 @@ func (c *Config) Flags(fs *pflag.FlagSet) {
 }
 
 // New returns the wrappers for cfg in role. KEKs stored before a switch to a KMS still unwrap
-// (secretstore.Wrappers always opens a local one) until the key-admin Job rewraps them.
-func New(_ context.Context, cfg Config, role Role) (secretstore.Wrappers, error) {
+// (secretstore.Wrappers always opens a local one) until the key-admin Job rewraps them. boundOnly
+// reads the install's bound-only marker (#615) and is required: see [secretstore.NewWrappers].
+func New(_ context.Context, cfg Config, role Role, boundOnly secretstore.BoundOnlySource) (secretstore.Wrappers, error) {
+	if boundOnly == nil {
+		return secretstore.Wrappers{}, secretstore.ErrNoBoundOnlySource
+	}
 	var primary secretstore.Wrapper
 	switch cfg.Backend {
 	case "", BackendLocal:
@@ -117,9 +121,9 @@ func New(_ context.Context, cfg Config, role Role) (secretstore.Wrappers, error)
 		return secretstore.Wrappers{}, fmt.Errorf("unknown KEK backend %q (local, openbao or awskms)", cfg.Backend)
 	}
 	if role == KeyAdmin {
-		return secretstore.NewKeyAdminWrappers(primary)
+		return secretstore.NewKeyAdminWrappers(boundOnly, primary)
 	}
-	return secretstore.NewWrappers(primary)
+	return secretstore.NewWrappers(boundOnly, primary)
 }
 
 // openBaoSettings names the OpenBao settings of c that differ from the flags' defaults.

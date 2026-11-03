@@ -180,14 +180,34 @@ var _ = Describe("Key wrapping", func() {
 	})
 
 	It("refuses a wrapping key configured twice", func() {
-		_, err := secretstore.NewWrappers(&secretstoretest.FakeKMS{}, &secretstoretest.FakeKMS{})
+		_, err := secretstore.NewWrappers(secretstoretest.BoundOnlyUnset, &secretstoretest.FakeKMS{}, &secretstoretest.FakeKMS{})
 		Expect(err).To(MatchError(ContainSubstring("configured twice")))
-		_, err = secretstore.NewWrappers(nil)
+		_, err = secretstore.NewWrappers(secretstoretest.BoundOnlyUnset, nil)
 		Expect(err).To(HaveOccurred())
 	})
 
+	It("refuses to build wrappers without a source for the bound-only marker (#615): there is no mode that accepts format 1 unasked", func() {
+		for _, w := range []secretstore.Wrapper{secretstore.Local{}, &secretstoretest.FakeKMS{}} {
+			_, err := secretstore.NewWrappers(nil, w)
+			Expect(err).To(MatchError(secretstore.ErrNoBoundOnlySource), w.Backend())
+			_, err = secretstore.NewKeyAdminWrappers(nil, w)
+			Expect(err).To(MatchError(secretstore.ErrNoBoundOnlySource), w.Backend())
+		}
+	})
+
+	It("refuses a KMS KEK stored unbound when the process has no database to read the marker from (fail closed)", func(ctx SpecContext) {
+		kms := &secretstoretest.FakeKMS{}
+		noDB := errors.New("koinon_test no database")
+		ws, err := secretstore.NewWrappers(secretstore.UnreadableBoundOnly(noDB), kms)
+		Expect(err).NotTo(HaveOccurred())
+		wrapped, err := kms.Wrap(ctx, key(), secretstoretest.LegacyKEKAAD("k1"))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = ws.Unwrap(ctx, "k1", secretstore.StoredKEK{Backend: kms.Backend(), KeyID: kms.KeyID(), Wrapped: wrapped})
+		Expect(err).To(MatchError(noDB))
+	})
+
 	It("lets a service wrap with the default local KEK, as before key wrapping", func(ctx SpecContext) {
-		ws, err := wrapping.New(ctx, wrapping.Config{}, wrapping.Service)
+		ws, err := wrapping.New(ctx, wrapping.Config{}, wrapping.Service, secretstoretest.BoundOnlyUnset)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ws.Primary().Backend()).To(Equal(secretstore.BackendLocal))
 		s, err := ws.Wrap(ctx, "k1", key())
@@ -202,7 +222,7 @@ var _ = Describe("Key wrapping", func() {
 		s, err := admin.Wrap(ctx, "k1", key())
 		Expect(err).NotTo(HaveOccurred())
 
-		service, err := secretstore.NewWrappers(kms)
+		service, err := secretstore.NewWrappers(secretstoretest.BoundOnlyUnset, kms)
 		Expect(err).NotTo(HaveOccurred())
 		service = service.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 		_, err = service.Wrap(ctx, "k2", key())
@@ -265,7 +285,7 @@ func decodeBefore615(v []byte) error {
 
 // keyAdmin is the key-admin Job's wrappers over w, with an install ID.
 func keyAdmin(w secretstore.Wrapper, more ...secretstore.Wrapper) (secretstore.Wrappers, error) {
-	ws, err := secretstore.NewKeyAdminWrappers(w, more...)
+	ws, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, w, more...)
 	return ws.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA)), err
 }
 

@@ -79,10 +79,10 @@ var _ = Describe("the key-admin Job", func() {
 		kube = fake.NewClientset()
 		kms = &secretstoretest.FakeKMS{}
 		var err error
-		admin, err = secretstore.NewKeyAdminWrappers(kms)
-		Expect(err).NotTo(HaveOccurred())
 		marker = &memMarker{}
-		admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA)).WithBoundOnly(marker.source())
+		admin, err = secretstore.NewKeyAdminWrappers(marker.source(), kms)
+		Expect(err).NotTo(HaveOccurred())
+		admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 		out = &bytes.Buffer{}
 	})
 
@@ -186,7 +186,7 @@ var _ = Describe("the key-admin Job", func() {
 	})
 
 	It("never wraps a KEK without the install ID", func(ctx SpecContext) {
-		unbound, err := secretstore.NewKeyAdminWrappers(kms)
+		unbound, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, kms)
 		Expect(err).NotTo(HaveOccurred())
 		a := job(true, "", none)
 		a.Store.Wrappers = unbound
@@ -216,9 +216,9 @@ var _ = Describe("the key-admin Job", func() {
 			old = &secretstoretest.FakeKMS{Name: "koinon-test-old"}
 			var err error
 			// The Job reads KEKs of an older wrapping key too, as configured for the move.
-			admin, err = secretstore.NewKeyAdminWrappers(kms, old)
+			admin, err = secretstore.NewKeyAdminWrappers(marker.source(), kms, old)
 			Expect(err).NotTo(HaveOccurred())
-			admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA)).WithBoundOnly(marker.source())
+			admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 			local = bytes.Repeat([]byte("l"), secretstore.KeySize) // obviously fake
 			legacies = map[string][]byte{
 				"kek-20261001-prim": bytes.Repeat([]byte("p"), secretstore.KeySize),
@@ -271,7 +271,7 @@ var _ = Describe("the key-admin Job", func() {
 			Expect(marker.b.Set).To(BeFalse())
 
 			By("the bound KEK no longer opens next to another install's database")
-			other, err := secretstore.NewWrappers(kms, old)
+			other, err := secretstore.NewWrappers(secretstoretest.BoundOnlyUnset, kms, old)
 			Expect(err).NotTo(HaveOccurred())
 			other = other.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallB))
 			_, err = keyscli.KubeStore{Client: kube, Namespace: ns, Name: secret, Wrappers: other}.Load(ctx)
@@ -309,9 +309,9 @@ var _ = Describe("the key-admin Job", func() {
 			Expect(kube.CoreV1().Secrets(ns).Delete(ctx, secret, metav1.DeleteOptions{})).To(Succeed())
 			_, err = kube.CoreV1().Secrets(ns).Create(ctx, backup, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			service, err := secretstore.NewWrappers(kms, old)
+			service, err := secretstore.NewWrappers(marker.source(), kms, old)
 			Expect(err).NotTo(HaveOccurred())
-			service = service.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA)).WithBoundOnly(marker.source())
+			service = service.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 			_, err = keyscli.KubeStore{Client: kube, Namespace: ns, Name: secret, Wrappers: service}.Load(ctx)
 			Expect(err).To(And(MatchError(secretstore.ErrBoundOnly), MatchError(secretstore.ErrOpen)))
 			Expect(a.Run(ctx)).To(MatchError(secretstore.ErrBoundOnly), "the Job cannot bind it again either: rotate")
