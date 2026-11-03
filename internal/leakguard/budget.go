@@ -76,8 +76,7 @@ type Limits struct {
 	MaxVariants   int           // decoded variants per text (default 64)
 	MaxWorkBytes  int           // bytes decoded and normalised per call (default 32 MiB)
 	MaxDuration   time.Duration // wall clock backstop per call (default 5 s; the work budget decides)
-	PairJoinBytes int           // bytes of each side joined for split reassembly (default 512)
-	MaxPairArgs   int           // above this many arguments, pairs must fit the pair budget (default 32)
+	JoinEndBytes  int           // bytes of each end of a long argument in the call-order join (default 512)
 }
 
 // DefaultLimits returns the default budgets.
@@ -89,8 +88,7 @@ func DefaultLimits() Limits {
 		MaxVariants:   64,
 		MaxWorkBytes:  32 << 20,
 		MaxDuration:   5 * time.Second,
-		PairJoinBytes: 512,
-		MaxPairArgs:   32,
+		JoinEndBytes:  512,
 	}
 }
 
@@ -114,11 +112,8 @@ func (l Limits) withDefaults() Limits {
 	if l.MaxDuration <= 0 {
 		l.MaxDuration = d.MaxDuration
 	}
-	if l.PairJoinBytes <= 0 {
-		l.PairJoinBytes = d.PairJoinBytes
-	}
-	if l.MaxPairArgs <= 0 {
-		l.MaxPairArgs = d.MaxPairArgs
+	if l.JoinEndBytes <= 0 {
+		l.JoinEndBytes = d.JoinEndBytes
 	}
 	return l
 }
