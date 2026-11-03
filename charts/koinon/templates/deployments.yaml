@@ -141,6 +141,11 @@ spec:
             {{- if eq $component "reconciler" }}
             {{- include "koinon.kekVolumeMount" $ | nindent 12 }}
             {{- end }}
+            {{- if has $component (list "api" "reconciler") }}
+            {{- with include "koinon.kmsVolumeMount" $ | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- end }}
             {{- if eq $component "agentd" }}
             {{- include "koinon.otlpTokenVolumeMount" $ | nindent 12 }}
             {{- include "koinon.savedWorkVolumeMount" $ | nindent 12 }}
@@ -165,6 +170,11 @@ spec:
         {{- include "koinon.dbVolume" $ | nindent 8 }}
         {{- if eq $component "reconciler" }}
         {{- include "koinon.kekVolume" $ | nindent 8 }}
+        {{- end }}
+        {{- if has $component (list "api" "reconciler") }}
+        {{- with include "koinon.kmsVolume" $ | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- end }}
         {{- if eq $component "agentd" }}
         {{- include "koinon.otlpTokenVolume" $ | nindent 8 }}

@@ -14,6 +14,7 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
 // notifyTargetsVersion finds the migration by name, so no test hard-codes its number.
@@ -40,15 +41,8 @@ var _ = Describe("the notify targets migration", func() {
 	)
 
 	BeforeEach(func(ctx SpecContext) {
-		admin, err := sql.Open("pgx", dsn)
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(admin.Close)
-		_, err = admin.ExecContext(ctx, `CREATE DATABASE notify_before`)
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func(ctx context.Context) {
-			_, _ = admin.ExecContext(ctx, `DROP DATABASE IF EXISTS notify_before WITH (FORCE)`)
-		})
-		old, err = sql.Open("pgx", strings.Replace(dsn, "/koinon?", "/notify_before?", 1))
+		var err error
+		old, err = sql.Open("pgx", pgtest.Run(ctx))
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(old.Close)
 		provider, err = goose.NewProvider(goose.DialectPostgres, old, migrations.FS)

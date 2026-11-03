@@ -201,6 +201,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.otlpTokenSecret, "gateway-access-log-otlp-token-secret", "",
 		"Secret (key token) with the bearer token the OTLP receiver requires, for kubernetes mode: the agentgateway controller reads it and hands it to the proxy")
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort, "listen address of /metrics (Prometheus); empty disables it")
+	c.kekWrapping.Flags(fs)
 	fs.StringVar(&c.healthAddr, "health-addr", ":8082", "listen address of /healthz and /readyz (not ready until the key-encryption keys are loaded and the schema version is supported); empty disables it")
 	fs.StringVar(&c.egressHosts, "egress-allowed-hosts", "", "comma-separated hosts (optionally host:port) providers and MCP servers may name although they are internal")
 	fs.StringVar(&c.allowedHosts, "provider-allowed-hosts", "", "deprecated alias of --egress-allowed-hosts, kept for one release")

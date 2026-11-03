@@ -232,6 +232,7 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort,
 		"listen address of /metrics (Prometheus); empty disables it")
+	c.kekWrapping.Flags(fs)
 	fs.StringVar(&c.savedWorkAddr, "saved-work-addr", "",
 		"listen address of the saved-work upload endpoint, for koinon-agentd only; empty disables it")
 	fs.StringVar(&c.savedWorkSecret, "saved-work-secret", "koinon-saved-work",
