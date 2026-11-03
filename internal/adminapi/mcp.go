@@ -31,6 +31,7 @@ func toMcpServer(m mcpservers.Server) McpServer {
 		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt, Id: openapi_types.UUID(pgUUID(m.ID).Bytes), Name: m.Name, Url: m.URL,
 		Transport: McpServerTransport(m.Transport), HasCredential: m.HasCredential, Source: Source(m.Source),
 		Health: McpServerHealth(m.Health), HealthCheckedAt: m.HealthCheckedAt, HealthSince: m.HealthSince, ToolsSyncedAt: m.ToolsSyncedAt,
+		Kind: McpServerKind(m.Kind), DataClass: append([]string{}, m.DataClass...),
 	}
 	str := func(s string) *string {
 		if s == "" {
@@ -103,6 +104,16 @@ func (s *Server) CreateMcpServer(ctx context.Context, req CreateMcpServerRequest
 	}
 	if req.Body.Transport != nil {
 		in.Transport = string(*req.Body.Transport)
+	}
+	if req.Body.Kind != nil || req.Body.DataClass != nil {
+		d := mcpservers.DefaultDeclaration()
+		if req.Body.Kind != nil {
+			d.Kind = string(*req.Body.Kind)
+		}
+		if req.Body.DataClass != nil {
+			d.Legs = *req.Body.DataClass
+		}
+		in.Class = &d
 	}
 	got, err := s.mcp.Create(ctx, p.Org, actor, pgtype.UUID{}, in)
 	if err != nil {
@@ -284,4 +295,19 @@ func (s *Server) SetAgentMcpServers(ctx context.Context, req SetAgentMcpServersR
 		return SetAgentMcpServersdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
 	return SetAgentMcpServers200JSONResponse(toAgentMcp(list)), nil
+}
+
+// SetMcpServerDataClass implements StrictServerInterface.
+func (s *Server) SetMcpServerDataClass(ctx context.Context, req SetMcpServerDataClassRequestObject) (SetMcpServerDataClassResponseObject, error) {
+	if s.mcp == nil {
+		st, e := s.noMCP()
+		return SetMcpServerDataClassdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	p, actor := s.actor(ctx)
+	got, err := s.mcp.SetDataClass(ctx, p.Org, actor, uid(req.ServerId), mcpservers.Declaration{Kind: string(req.Body.Kind), Legs: req.Body.DataClass})
+	if err != nil {
+		st, e := s.problem(err)
+		return SetMcpServerDataClassdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	return SetMcpServerDataClass200JSONResponse(toMcpServer(got)), nil
 }

@@ -160,6 +160,11 @@ type Server struct {
 	// gateway_target is the name of the server's target in the gateway, "<org slug>-<name>", which is
 	// also the prefix of its tools in an agent's tool list.
 	GatewayTarget string `protobuf:"bytes,19,opt,name=gateway_target,json=gatewayTarget,proto3" json:"gateway_target,omitempty"`
+	// kind is "fetch", "search" or "other"; data_class lists the legs the server carries, in the order
+	// untrusted_input, private_data, outbound (see ServerClass). A server nobody classified is kind
+	// "other" with all three legs.
+	Kind          string   `protobuf:"bytes,20,opt,name=kind,proto3" json:"kind,omitempty"`
+	DataClass     []string `protobuf:"bytes,21,rep,name=data_class,json=dataClass,proto3" json:"data_class,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -327,6 +332,78 @@ func (x *Server) GetGatewayTarget() string {
 	return ""
 }
 
+func (x *Server) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *Server) GetDataClass() []string {
+	if x != nil {
+		return x.DataClass
+	}
+	return nil
+}
+
+// ServerClass is what a server declares it exposes (ADR 0084 decision 8).
+type ServerClass struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// kind is "fetch" (reads web pages or other untrusted documents), "search" (sends a query to a
+	// search provider) or "other".
+	Kind string `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	// data_class are the legs the server carries, any of "untrusted_input" (returns text an outsider
+	// controls), "private_data" (returns data the org does not want to leave) and "outbound" (a call
+	// sends its arguments outside the org). A server may carry several; none is allowed.
+	DataClass     []string `protobuf:"bytes,2,rep,name=data_class,json=dataClass,proto3" json:"data_class,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServerClass) Reset() {
+	*x = ServerClass{}
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServerClass) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServerClass) ProtoMessage() {}
+
+func (x *ServerClass) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServerClass.ProtoReflect.Descriptor instead.
+func (*ServerClass) Descriptor() ([]byte, []int) {
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ServerClass) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *ServerClass) GetDataClass() []string {
+	if x != nil {
+		return x.DataClass
+	}
+	return nil
+}
+
 type Tool struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	ServerId    string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -365,7 +442,7 @@ type Tool struct {
 
 func (x *Tool) Reset() {
 	*x = Tool{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[1]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -377,7 +454,7 @@ func (x *Tool) String() string {
 func (*Tool) ProtoMessage() {}
 
 func (x *Tool) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[1]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -390,7 +467,7 @@ func (x *Tool) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Tool.ProtoReflect.Descriptor instead.
 func (*Tool) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{1}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Tool) GetServerId() string {
@@ -525,7 +602,7 @@ type Allowance struct {
 
 func (x *Allowance) Reset() {
 	*x = Allowance{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[2]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -537,7 +614,7 @@ func (x *Allowance) String() string {
 func (*Allowance) ProtoMessage() {}
 
 func (x *Allowance) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[2]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -550,7 +627,7 @@ func (x *Allowance) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Allowance.ProtoReflect.Descriptor instead.
 func (*Allowance) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{2}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Allowance) GetServerId() string {
@@ -576,7 +653,7 @@ type ListServersRequest struct {
 
 func (x *ListServersRequest) Reset() {
 	*x = ListServersRequest{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[3]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -588,7 +665,7 @@ func (x *ListServersRequest) String() string {
 func (*ListServersRequest) ProtoMessage() {}
 
 func (x *ListServersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[3]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -601,7 +678,7 @@ func (x *ListServersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListServersRequest.ProtoReflect.Descriptor instead.
 func (*ListServersRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{3}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListServersRequest) GetOrgId() string {
@@ -620,7 +697,7 @@ type ListServersResponse struct {
 
 func (x *ListServersResponse) Reset() {
 	*x = ListServersResponse{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[4]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -632,7 +709,7 @@ func (x *ListServersResponse) String() string {
 func (*ListServersResponse) ProtoMessage() {}
 
 func (x *ListServersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[4]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -645,7 +722,7 @@ func (x *ListServersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListServersResponse.ProtoReflect.Descriptor instead.
 func (*ListServersResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{4}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ListServersResponse) GetServers() []*Server {
@@ -667,13 +744,16 @@ type CreateServerRequest struct {
 	// credential_prefix precedes the secret in the header value, for example "Bearer ".
 	CredentialPrefix string `protobuf:"bytes,6,opt,name=credential_prefix,json=credentialPrefix,proto3" json:"credential_prefix,omitempty"`
 	CredentialValue  string `protobuf:"bytes,7,opt,name=credential_value,json=credentialValue,proto3" json:"credential_value,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// class is what the server exposes; leaving it out is the unclassified default (kind "other", all
+	// three legs).
+	Class         *ServerClass `protobuf:"bytes,8,opt,name=class,proto3" json:"class,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateServerRequest) Reset() {
 	*x = CreateServerRequest{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[5]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -685,7 +765,7 @@ func (x *CreateServerRequest) String() string {
 func (*CreateServerRequest) ProtoMessage() {}
 
 func (x *CreateServerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[5]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -698,7 +778,7 @@ func (x *CreateServerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateServerRequest.ProtoReflect.Descriptor instead.
 func (*CreateServerRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{5}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CreateServerRequest) GetOrgId() string {
@@ -750,6 +830,13 @@ func (x *CreateServerRequest) GetCredentialValue() string {
 	return ""
 }
 
+func (x *CreateServerRequest) GetClass() *ServerClass {
+	if x != nil {
+		return x.Class
+	}
+	return nil
+}
+
 type CreateServerResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Server        *Server                `protobuf:"bytes,1,opt,name=server,proto3" json:"server,omitempty"`
@@ -759,7 +846,7 @@ type CreateServerResponse struct {
 
 func (x *CreateServerResponse) Reset() {
 	*x = CreateServerResponse{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[6]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -771,7 +858,7 @@ func (x *CreateServerResponse) String() string {
 func (*CreateServerResponse) ProtoMessage() {}
 
 func (x *CreateServerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[6]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -784,7 +871,7 @@ func (x *CreateServerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateServerResponse.ProtoReflect.Descriptor instead.
 func (*CreateServerResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{6}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CreateServerResponse) GetServer() *Server {
@@ -813,7 +900,7 @@ type UpdateServerRequest struct {
 
 func (x *UpdateServerRequest) Reset() {
 	*x = UpdateServerRequest{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[7]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -825,7 +912,7 @@ func (x *UpdateServerRequest) String() string {
 func (*UpdateServerRequest) ProtoMessage() {}
 
 func (x *UpdateServerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[7]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -838,7 +925,7 @@ func (x *UpdateServerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateServerRequest.ProtoReflect.Descriptor instead.
 func (*UpdateServerRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{7}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *UpdateServerRequest) GetOrgId() string {
@@ -906,7 +993,7 @@ type UpdateServerResponse struct {
 
 func (x *UpdateServerResponse) Reset() {
 	*x = UpdateServerResponse{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[8]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -918,7 +1005,7 @@ func (x *UpdateServerResponse) String() string {
 func (*UpdateServerResponse) ProtoMessage() {}
 
 func (x *UpdateServerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[8]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -931,10 +1018,114 @@ func (x *UpdateServerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateServerResponse.ProtoReflect.Descriptor instead.
 func (*UpdateServerResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{8}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *UpdateServerResponse) GetServer() *Server {
+	if x != nil {
+		return x.Server
+	}
+	return nil
+}
+
+type SetServerClassRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	ServerId      string                 `protobuf:"bytes,2,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	Class         *ServerClass           `protobuf:"bytes,3,opt,name=class,proto3" json:"class,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetServerClassRequest) Reset() {
+	*x = SetServerClassRequest{}
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetServerClassRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetServerClassRequest) ProtoMessage() {}
+
+func (x *SetServerClassRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetServerClassRequest.ProtoReflect.Descriptor instead.
+func (*SetServerClassRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SetServerClassRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *SetServerClassRequest) GetServerId() string {
+	if x != nil {
+		return x.ServerId
+	}
+	return ""
+}
+
+func (x *SetServerClassRequest) GetClass() *ServerClass {
+	if x != nil {
+		return x.Class
+	}
+	return nil
+}
+
+type SetServerClassResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Server        *Server                `protobuf:"bytes,1,opt,name=server,proto3" json:"server,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetServerClassResponse) Reset() {
+	*x = SetServerClassResponse{}
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetServerClassResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetServerClassResponse) ProtoMessage() {}
+
+func (x *SetServerClassResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetServerClassResponse.ProtoReflect.Descriptor instead.
+func (*SetServerClassResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SetServerClassResponse) GetServer() *Server {
 	if x != nil {
 		return x.Server
 	}
@@ -951,7 +1142,7 @@ type DeleteServerRequest struct {
 
 func (x *DeleteServerRequest) Reset() {
 	*x = DeleteServerRequest{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[9]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -963,7 +1154,7 @@ func (x *DeleteServerRequest) String() string {
 func (*DeleteServerRequest) ProtoMessage() {}
 
 func (x *DeleteServerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[9]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -976,7 +1167,7 @@ func (x *DeleteServerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteServerRequest.ProtoReflect.Descriptor instead.
 func (*DeleteServerRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{9}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DeleteServerRequest) GetOrgId() string {
@@ -1001,7 +1192,7 @@ type DeleteServerResponse struct {
 
 func (x *DeleteServerResponse) Reset() {
 	*x = DeleteServerResponse{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[10]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1013,7 +1204,7 @@ func (x *DeleteServerResponse) String() string {
 func (*DeleteServerResponse) ProtoMessage() {}
 
 func (x *DeleteServerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[10]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1026,7 +1217,7 @@ func (x *DeleteServerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteServerResponse.ProtoReflect.Descriptor instead.
 func (*DeleteServerResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{10}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{13}
 }
 
 type ListToolsRequest struct {
@@ -1039,7 +1230,7 @@ type ListToolsRequest struct {
 
 func (x *ListToolsRequest) Reset() {
 	*x = ListToolsRequest{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[11]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1051,7 +1242,7 @@ func (x *ListToolsRequest) String() string {
 func (*ListToolsRequest) ProtoMessage() {}
 
 func (x *ListToolsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[11]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1064,7 +1255,7 @@ func (x *ListToolsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListToolsRequest.ProtoReflect.Descriptor instead.
 func (*ListToolsRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{11}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ListToolsRequest) GetOrgId() string {
@@ -1090,7 +1281,7 @@ type ListToolsResponse struct {
 
 func (x *ListToolsResponse) Reset() {
 	*x = ListToolsResponse{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[12]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1102,7 +1293,7 @@ func (x *ListToolsResponse) String() string {
 func (*ListToolsResponse) ProtoMessage() {}
 
 func (x *ListToolsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[12]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1115,7 +1306,7 @@ func (x *ListToolsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListToolsResponse.ProtoReflect.Descriptor instead.
 func (*ListToolsResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{12}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ListToolsResponse) GetTools() []*Tool {
@@ -1137,7 +1328,7 @@ type SetToolTierRequest struct {
 
 func (x *SetToolTierRequest) Reset() {
 	*x = SetToolTierRequest{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[13]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1149,7 +1340,7 @@ func (x *SetToolTierRequest) String() string {
 func (*SetToolTierRequest) ProtoMessage() {}
 
 func (x *SetToolTierRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[13]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1162,7 +1353,7 @@ func (x *SetToolTierRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetToolTierRequest.ProtoReflect.Descriptor instead.
 func (*SetToolTierRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{13}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SetToolTierRequest) GetOrgId() string {
@@ -1202,7 +1393,7 @@ type SetToolTierResponse struct {
 
 func (x *SetToolTierResponse) Reset() {
 	*x = SetToolTierResponse{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[14]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1214,7 +1405,7 @@ func (x *SetToolTierResponse) String() string {
 func (*SetToolTierResponse) ProtoMessage() {}
 
 func (x *SetToolTierResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[14]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1227,7 +1418,7 @@ func (x *SetToolTierResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetToolTierResponse.ProtoReflect.Descriptor instead.
 func (*SetToolTierResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{14}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SetToolTierResponse) GetTool() *Tool {
@@ -1248,7 +1439,7 @@ type AcknowledgeToolReviewRequest struct {
 
 func (x *AcknowledgeToolReviewRequest) Reset() {
 	*x = AcknowledgeToolReviewRequest{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[15]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1260,7 +1451,7 @@ func (x *AcknowledgeToolReviewRequest) String() string {
 func (*AcknowledgeToolReviewRequest) ProtoMessage() {}
 
 func (x *AcknowledgeToolReviewRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[15]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1273,7 +1464,7 @@ func (x *AcknowledgeToolReviewRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcknowledgeToolReviewRequest.ProtoReflect.Descriptor instead.
 func (*AcknowledgeToolReviewRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{15}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *AcknowledgeToolReviewRequest) GetOrgId() string {
@@ -1306,7 +1497,7 @@ type AcknowledgeToolReviewResponse struct {
 
 func (x *AcknowledgeToolReviewResponse) Reset() {
 	*x = AcknowledgeToolReviewResponse{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[16]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1318,7 +1509,7 @@ func (x *AcknowledgeToolReviewResponse) String() string {
 func (*AcknowledgeToolReviewResponse) ProtoMessage() {}
 
 func (x *AcknowledgeToolReviewResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[16]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1331,7 +1522,7 @@ func (x *AcknowledgeToolReviewResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcknowledgeToolReviewResponse.ProtoReflect.Descriptor instead.
 func (*AcknowledgeToolReviewResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{16}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *AcknowledgeToolReviewResponse) GetTool() *Tool {
@@ -1351,7 +1542,7 @@ type GetAgentServersRequest struct {
 
 func (x *GetAgentServersRequest) Reset() {
 	*x = GetAgentServersRequest{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[17]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1363,7 +1554,7 @@ func (x *GetAgentServersRequest) String() string {
 func (*GetAgentServersRequest) ProtoMessage() {}
 
 func (x *GetAgentServersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[17]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1376,7 +1567,7 @@ func (x *GetAgentServersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentServersRequest.ProtoReflect.Descriptor instead.
 func (*GetAgentServersRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{17}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *GetAgentServersRequest) GetOrgId() string {
@@ -1402,7 +1593,7 @@ type GetAgentServersResponse struct {
 
 func (x *GetAgentServersResponse) Reset() {
 	*x = GetAgentServersResponse{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[18]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1414,7 +1605,7 @@ func (x *GetAgentServersResponse) String() string {
 func (*GetAgentServersResponse) ProtoMessage() {}
 
 func (x *GetAgentServersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[18]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1427,7 +1618,7 @@ func (x *GetAgentServersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentServersResponse.ProtoReflect.Descriptor instead.
 func (*GetAgentServersResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{18}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *GetAgentServersResponse) GetServers() []*Allowance {
@@ -1448,7 +1639,7 @@ type SetAgentServersRequest struct {
 
 func (x *SetAgentServersRequest) Reset() {
 	*x = SetAgentServersRequest{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[19]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1460,7 +1651,7 @@ func (x *SetAgentServersRequest) String() string {
 func (*SetAgentServersRequest) ProtoMessage() {}
 
 func (x *SetAgentServersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[19]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1473,7 +1664,7 @@ func (x *SetAgentServersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentServersRequest.ProtoReflect.Descriptor instead.
 func (*SetAgentServersRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{19}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *SetAgentServersRequest) GetOrgId() string {
@@ -1506,7 +1697,7 @@ type SetAgentServersResponse struct {
 
 func (x *SetAgentServersResponse) Reset() {
 	*x = SetAgentServersResponse{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[20]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1518,7 +1709,7 @@ func (x *SetAgentServersResponse) String() string {
 func (*SetAgentServersResponse) ProtoMessage() {}
 
 func (x *SetAgentServersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[20]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1531,7 +1722,7 @@ func (x *SetAgentServersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentServersResponse.ProtoReflect.Descriptor instead.
 func (*SetAgentServersResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{20}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *SetAgentServersResponse) GetServers() []*Allowance {
@@ -1553,7 +1744,7 @@ type SetToolTwoApproversRequest struct {
 
 func (x *SetToolTwoApproversRequest) Reset() {
 	*x = SetToolTwoApproversRequest{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[21]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1565,7 +1756,7 @@ func (x *SetToolTwoApproversRequest) String() string {
 func (*SetToolTwoApproversRequest) ProtoMessage() {}
 
 func (x *SetToolTwoApproversRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[21]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1578,7 +1769,7 @@ func (x *SetToolTwoApproversRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetToolTwoApproversRequest.ProtoReflect.Descriptor instead.
 func (*SetToolTwoApproversRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{21}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *SetToolTwoApproversRequest) GetOrgId() string {
@@ -1618,7 +1809,7 @@ type SetToolTwoApproversResponse struct {
 
 func (x *SetToolTwoApproversResponse) Reset() {
 	*x = SetToolTwoApproversResponse{}
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[22]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1630,7 +1821,7 @@ func (x *SetToolTwoApproversResponse) String() string {
 func (*SetToolTwoApproversResponse) ProtoMessage() {}
 
 func (x *SetToolTwoApproversResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[22]
+	mi := &file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1643,7 +1834,7 @@ func (x *SetToolTwoApproversResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetToolTwoApproversResponse.ProtoReflect.Descriptor instead.
 func (*SetToolTwoApproversResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{22}
+	return file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *SetToolTwoApproversResponse) GetTool() *Tool {
@@ -1657,7 +1848,7 @@ var File_koinon_mcpserver_v1alpha1_mcpserver_proto protoreflect.FileDescriptor
 
 const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\n" +
-	")koinon/mcpserver/v1alpha1/mcpserver.proto\x12\x19koinon.mcpserver.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xac\x06\n" +
+	")koinon/mcpserver/v1alpha1/mcpserver.proto\x12\x19koinon.mcpserver.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xdf\x06\n" +
 	"\x06Server\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
@@ -1680,7 +1871,14 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"created_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
 	"updated_at\x18\x12 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12%\n" +
-	"\x0egateway_target\x18\x13 \x01(\tR\rgatewayTarget\"\xe8\x05\n" +
+	"\x0egateway_target\x18\x13 \x01(\tR\rgatewayTarget\x12\x12\n" +
+	"\x04kind\x18\x14 \x01(\tR\x04kind\x12\x1d\n" +
+	"\n" +
+	"data_class\x18\x15 \x03(\tR\tdataClass\"@\n" +
+	"\vServerClass\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x1d\n" +
+	"\n" +
+	"data_class\x18\x02 \x03(\tR\tdataClass\"\xe8\x05\n" +
 	"\x04Tool\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -1707,7 +1905,7 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x12ListServersRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"R\n" +
 	"\x13ListServersResponse\x12;\n" +
-	"\aservers\x18\x01 \x03(\v2!.koinon.mcpserver.v1alpha1.ServerR\aservers\"\xfa\x01\n" +
+	"\aservers\x18\x01 \x03(\v2!.koinon.mcpserver.v1alpha1.ServerR\aservers\"\xb8\x02\n" +
 	"\x13CreateServerRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
@@ -1715,7 +1913,8 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\ttransport\x18\x04 \x01(\tR\ttransport\x12+\n" +
 	"\x11credential_header\x18\x05 \x01(\tR\x10credentialHeader\x12+\n" +
 	"\x11credential_prefix\x18\x06 \x01(\tR\x10credentialPrefix\x12.\n" +
-	"\x10credential_value\x18\a \x01(\tB\x03\x80\x01\x01R\x0fcredentialValue\"Q\n" +
+	"\x10credential_value\x18\a \x01(\tB\x03\x80\x01\x01R\x0fcredentialValue\x12<\n" +
+	"\x05class\x18\b \x01(\v2&.koinon.mcpserver.v1alpha1.ServerClassR\x05class\"Q\n" +
 	"\x14CreateServerResponse\x129\n" +
 	"\x06server\x18\x01 \x01(\v2!.koinon.mcpserver.v1alpha1.ServerR\x06server\"\xa0\x03\n" +
 	"\x13UpdateServerRequest\x12\x15\n" +
@@ -1734,6 +1933,12 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x12_credential_prefixB\x13\n" +
 	"\x11_credential_value\"Q\n" +
 	"\x14UpdateServerResponse\x129\n" +
+	"\x06server\x18\x01 \x01(\v2!.koinon.mcpserver.v1alpha1.ServerR\x06server\"\x89\x01\n" +
+	"\x15SetServerClassRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1b\n" +
+	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12<\n" +
+	"\x05class\x18\x03 \x01(\v2&.koinon.mcpserver.v1alpha1.ServerClassR\x05class\"S\n" +
+	"\x16SetServerClassResponse\x129\n" +
 	"\x06server\x18\x01 \x01(\v2!.koinon.mcpserver.v1alpha1.ServerR\x06server\"I\n" +
 	"\x13DeleteServerRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1b\n" +
@@ -1785,11 +1990,13 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x12HEALTH_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eHEALTH_UNKNOWN\x10\x01\x12\x12\n" +
 	"\x0eHEALTH_HEALTHY\x10\x02\x12\x14\n" +
-	"\x10HEALTH_UNHEALTHY\x10\x032\xc0\t\n" +
+	"\x10HEALTH_UNHEALTHY\x10\x032\xb7\n" +
+	"\n" +
 	"\x10McpServerService\x12q\n" +
 	"\vListServers\x12-.koinon.mcpserver.v1alpha1.ListServersRequest\x1a..koinon.mcpserver.v1alpha1.ListServersResponse\"\x03\x90\x02\x01\x12o\n" +
 	"\fCreateServer\x12..koinon.mcpserver.v1alpha1.CreateServerRequest\x1a/.koinon.mcpserver.v1alpha1.CreateServerResponse\x12o\n" +
-	"\fUpdateServer\x12..koinon.mcpserver.v1alpha1.UpdateServerRequest\x1a/.koinon.mcpserver.v1alpha1.UpdateServerResponse\x12o\n" +
+	"\fUpdateServer\x12..koinon.mcpserver.v1alpha1.UpdateServerRequest\x1a/.koinon.mcpserver.v1alpha1.UpdateServerResponse\x12u\n" +
+	"\x0eSetServerClass\x120.koinon.mcpserver.v1alpha1.SetServerClassRequest\x1a1.koinon.mcpserver.v1alpha1.SetServerClassResponse\x12o\n" +
 	"\fDeleteServer\x12..koinon.mcpserver.v1alpha1.DeleteServerRequest\x1a/.koinon.mcpserver.v1alpha1.DeleteServerResponse\x12k\n" +
 	"\tListTools\x12+.koinon.mcpserver.v1alpha1.ListToolsRequest\x1a,.koinon.mcpserver.v1alpha1.ListToolsResponse\"\x03\x90\x02\x01\x12l\n" +
 	"\vSetToolTier\x12-.koinon.mcpserver.v1alpha1.SetToolTierRequest\x1a..koinon.mcpserver.v1alpha1.SetToolTierResponse\x12\x84\x01\n" +
@@ -1811,82 +2018,90 @@ func file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_mcpserver_v1alpha1_mcpserver_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_koinon_mcpserver_v1alpha1_mcpserver_proto_goTypes = []any{
 	(Tier)(0),                             // 0: koinon.mcpserver.v1alpha1.Tier
 	(Health)(0),                           // 1: koinon.mcpserver.v1alpha1.Health
 	(*Server)(nil),                        // 2: koinon.mcpserver.v1alpha1.Server
-	(*Tool)(nil),                          // 3: koinon.mcpserver.v1alpha1.Tool
-	(*Allowance)(nil),                     // 4: koinon.mcpserver.v1alpha1.Allowance
-	(*ListServersRequest)(nil),            // 5: koinon.mcpserver.v1alpha1.ListServersRequest
-	(*ListServersResponse)(nil),           // 6: koinon.mcpserver.v1alpha1.ListServersResponse
-	(*CreateServerRequest)(nil),           // 7: koinon.mcpserver.v1alpha1.CreateServerRequest
-	(*CreateServerResponse)(nil),          // 8: koinon.mcpserver.v1alpha1.CreateServerResponse
-	(*UpdateServerRequest)(nil),           // 9: koinon.mcpserver.v1alpha1.UpdateServerRequest
-	(*UpdateServerResponse)(nil),          // 10: koinon.mcpserver.v1alpha1.UpdateServerResponse
-	(*DeleteServerRequest)(nil),           // 11: koinon.mcpserver.v1alpha1.DeleteServerRequest
-	(*DeleteServerResponse)(nil),          // 12: koinon.mcpserver.v1alpha1.DeleteServerResponse
-	(*ListToolsRequest)(nil),              // 13: koinon.mcpserver.v1alpha1.ListToolsRequest
-	(*ListToolsResponse)(nil),             // 14: koinon.mcpserver.v1alpha1.ListToolsResponse
-	(*SetToolTierRequest)(nil),            // 15: koinon.mcpserver.v1alpha1.SetToolTierRequest
-	(*SetToolTierResponse)(nil),           // 16: koinon.mcpserver.v1alpha1.SetToolTierResponse
-	(*AcknowledgeToolReviewRequest)(nil),  // 17: koinon.mcpserver.v1alpha1.AcknowledgeToolReviewRequest
-	(*AcknowledgeToolReviewResponse)(nil), // 18: koinon.mcpserver.v1alpha1.AcknowledgeToolReviewResponse
-	(*GetAgentServersRequest)(nil),        // 19: koinon.mcpserver.v1alpha1.GetAgentServersRequest
-	(*GetAgentServersResponse)(nil),       // 20: koinon.mcpserver.v1alpha1.GetAgentServersResponse
-	(*SetAgentServersRequest)(nil),        // 21: koinon.mcpserver.v1alpha1.SetAgentServersRequest
-	(*SetAgentServersResponse)(nil),       // 22: koinon.mcpserver.v1alpha1.SetAgentServersResponse
-	(*SetToolTwoApproversRequest)(nil),    // 23: koinon.mcpserver.v1alpha1.SetToolTwoApproversRequest
-	(*SetToolTwoApproversResponse)(nil),   // 24: koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse
-	(*timestamppb.Timestamp)(nil),         // 25: google.protobuf.Timestamp
+	(*ServerClass)(nil),                   // 3: koinon.mcpserver.v1alpha1.ServerClass
+	(*Tool)(nil),                          // 4: koinon.mcpserver.v1alpha1.Tool
+	(*Allowance)(nil),                     // 5: koinon.mcpserver.v1alpha1.Allowance
+	(*ListServersRequest)(nil),            // 6: koinon.mcpserver.v1alpha1.ListServersRequest
+	(*ListServersResponse)(nil),           // 7: koinon.mcpserver.v1alpha1.ListServersResponse
+	(*CreateServerRequest)(nil),           // 8: koinon.mcpserver.v1alpha1.CreateServerRequest
+	(*CreateServerResponse)(nil),          // 9: koinon.mcpserver.v1alpha1.CreateServerResponse
+	(*UpdateServerRequest)(nil),           // 10: koinon.mcpserver.v1alpha1.UpdateServerRequest
+	(*UpdateServerResponse)(nil),          // 11: koinon.mcpserver.v1alpha1.UpdateServerResponse
+	(*SetServerClassRequest)(nil),         // 12: koinon.mcpserver.v1alpha1.SetServerClassRequest
+	(*SetServerClassResponse)(nil),        // 13: koinon.mcpserver.v1alpha1.SetServerClassResponse
+	(*DeleteServerRequest)(nil),           // 14: koinon.mcpserver.v1alpha1.DeleteServerRequest
+	(*DeleteServerResponse)(nil),          // 15: koinon.mcpserver.v1alpha1.DeleteServerResponse
+	(*ListToolsRequest)(nil),              // 16: koinon.mcpserver.v1alpha1.ListToolsRequest
+	(*ListToolsResponse)(nil),             // 17: koinon.mcpserver.v1alpha1.ListToolsResponse
+	(*SetToolTierRequest)(nil),            // 18: koinon.mcpserver.v1alpha1.SetToolTierRequest
+	(*SetToolTierResponse)(nil),           // 19: koinon.mcpserver.v1alpha1.SetToolTierResponse
+	(*AcknowledgeToolReviewRequest)(nil),  // 20: koinon.mcpserver.v1alpha1.AcknowledgeToolReviewRequest
+	(*AcknowledgeToolReviewResponse)(nil), // 21: koinon.mcpserver.v1alpha1.AcknowledgeToolReviewResponse
+	(*GetAgentServersRequest)(nil),        // 22: koinon.mcpserver.v1alpha1.GetAgentServersRequest
+	(*GetAgentServersResponse)(nil),       // 23: koinon.mcpserver.v1alpha1.GetAgentServersResponse
+	(*SetAgentServersRequest)(nil),        // 24: koinon.mcpserver.v1alpha1.SetAgentServersRequest
+	(*SetAgentServersResponse)(nil),       // 25: koinon.mcpserver.v1alpha1.SetAgentServersResponse
+	(*SetToolTwoApproversRequest)(nil),    // 26: koinon.mcpserver.v1alpha1.SetToolTwoApproversRequest
+	(*SetToolTwoApproversResponse)(nil),   // 27: koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse
+	(*timestamppb.Timestamp)(nil),         // 28: google.protobuf.Timestamp
 }
 var file_koinon_mcpserver_v1alpha1_mcpserver_proto_depIdxs = []int32{
 	1,  // 0: koinon.mcpserver.v1alpha1.Server.health:type_name -> koinon.mcpserver.v1alpha1.Health
-	25, // 1: koinon.mcpserver.v1alpha1.Server.health_checked_at:type_name -> google.protobuf.Timestamp
-	25, // 2: koinon.mcpserver.v1alpha1.Server.health_since:type_name -> google.protobuf.Timestamp
-	25, // 3: koinon.mcpserver.v1alpha1.Server.tools_synced_at:type_name -> google.protobuf.Timestamp
-	25, // 4: koinon.mcpserver.v1alpha1.Server.created_at:type_name -> google.protobuf.Timestamp
-	25, // 5: koinon.mcpserver.v1alpha1.Server.updated_at:type_name -> google.protobuf.Timestamp
+	28, // 1: koinon.mcpserver.v1alpha1.Server.health_checked_at:type_name -> google.protobuf.Timestamp
+	28, // 2: koinon.mcpserver.v1alpha1.Server.health_since:type_name -> google.protobuf.Timestamp
+	28, // 3: koinon.mcpserver.v1alpha1.Server.tools_synced_at:type_name -> google.protobuf.Timestamp
+	28, // 4: koinon.mcpserver.v1alpha1.Server.created_at:type_name -> google.protobuf.Timestamp
+	28, // 5: koinon.mcpserver.v1alpha1.Server.updated_at:type_name -> google.protobuf.Timestamp
 	0,  // 6: koinon.mcpserver.v1alpha1.Tool.tier:type_name -> koinon.mcpserver.v1alpha1.Tier
-	25, // 7: koinon.mcpserver.v1alpha1.Tool.first_seen_at:type_name -> google.protobuf.Timestamp
-	25, // 8: koinon.mcpserver.v1alpha1.Tool.last_seen_at:type_name -> google.protobuf.Timestamp
-	25, // 9: koinon.mcpserver.v1alpha1.Tool.tier_set_at:type_name -> google.protobuf.Timestamp
+	28, // 7: koinon.mcpserver.v1alpha1.Tool.first_seen_at:type_name -> google.protobuf.Timestamp
+	28, // 8: koinon.mcpserver.v1alpha1.Tool.last_seen_at:type_name -> google.protobuf.Timestamp
+	28, // 9: koinon.mcpserver.v1alpha1.Tool.tier_set_at:type_name -> google.protobuf.Timestamp
 	2,  // 10: koinon.mcpserver.v1alpha1.ListServersResponse.servers:type_name -> koinon.mcpserver.v1alpha1.Server
-	2,  // 11: koinon.mcpserver.v1alpha1.CreateServerResponse.server:type_name -> koinon.mcpserver.v1alpha1.Server
-	2,  // 12: koinon.mcpserver.v1alpha1.UpdateServerResponse.server:type_name -> koinon.mcpserver.v1alpha1.Server
-	3,  // 13: koinon.mcpserver.v1alpha1.ListToolsResponse.tools:type_name -> koinon.mcpserver.v1alpha1.Tool
-	0,  // 14: koinon.mcpserver.v1alpha1.SetToolTierRequest.tier:type_name -> koinon.mcpserver.v1alpha1.Tier
-	3,  // 15: koinon.mcpserver.v1alpha1.SetToolTierResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
-	3,  // 16: koinon.mcpserver.v1alpha1.AcknowledgeToolReviewResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
-	4,  // 17: koinon.mcpserver.v1alpha1.GetAgentServersResponse.servers:type_name -> koinon.mcpserver.v1alpha1.Allowance
-	4,  // 18: koinon.mcpserver.v1alpha1.SetAgentServersRequest.servers:type_name -> koinon.mcpserver.v1alpha1.Allowance
-	4,  // 19: koinon.mcpserver.v1alpha1.SetAgentServersResponse.servers:type_name -> koinon.mcpserver.v1alpha1.Allowance
-	3,  // 20: koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
-	5,  // 21: koinon.mcpserver.v1alpha1.McpServerService.ListServers:input_type -> koinon.mcpserver.v1alpha1.ListServersRequest
-	7,  // 22: koinon.mcpserver.v1alpha1.McpServerService.CreateServer:input_type -> koinon.mcpserver.v1alpha1.CreateServerRequest
-	9,  // 23: koinon.mcpserver.v1alpha1.McpServerService.UpdateServer:input_type -> koinon.mcpserver.v1alpha1.UpdateServerRequest
-	11, // 24: koinon.mcpserver.v1alpha1.McpServerService.DeleteServer:input_type -> koinon.mcpserver.v1alpha1.DeleteServerRequest
-	13, // 25: koinon.mcpserver.v1alpha1.McpServerService.ListTools:input_type -> koinon.mcpserver.v1alpha1.ListToolsRequest
-	15, // 26: koinon.mcpserver.v1alpha1.McpServerService.SetToolTier:input_type -> koinon.mcpserver.v1alpha1.SetToolTierRequest
-	23, // 27: koinon.mcpserver.v1alpha1.McpServerService.SetToolTwoApprovers:input_type -> koinon.mcpserver.v1alpha1.SetToolTwoApproversRequest
-	17, // 28: koinon.mcpserver.v1alpha1.McpServerService.AcknowledgeToolReview:input_type -> koinon.mcpserver.v1alpha1.AcknowledgeToolReviewRequest
-	19, // 29: koinon.mcpserver.v1alpha1.McpServerService.GetAgentServers:input_type -> koinon.mcpserver.v1alpha1.GetAgentServersRequest
-	21, // 30: koinon.mcpserver.v1alpha1.McpServerService.SetAgentServers:input_type -> koinon.mcpserver.v1alpha1.SetAgentServersRequest
-	6,  // 31: koinon.mcpserver.v1alpha1.McpServerService.ListServers:output_type -> koinon.mcpserver.v1alpha1.ListServersResponse
-	8,  // 32: koinon.mcpserver.v1alpha1.McpServerService.CreateServer:output_type -> koinon.mcpserver.v1alpha1.CreateServerResponse
-	10, // 33: koinon.mcpserver.v1alpha1.McpServerService.UpdateServer:output_type -> koinon.mcpserver.v1alpha1.UpdateServerResponse
-	12, // 34: koinon.mcpserver.v1alpha1.McpServerService.DeleteServer:output_type -> koinon.mcpserver.v1alpha1.DeleteServerResponse
-	14, // 35: koinon.mcpserver.v1alpha1.McpServerService.ListTools:output_type -> koinon.mcpserver.v1alpha1.ListToolsResponse
-	16, // 36: koinon.mcpserver.v1alpha1.McpServerService.SetToolTier:output_type -> koinon.mcpserver.v1alpha1.SetToolTierResponse
-	24, // 37: koinon.mcpserver.v1alpha1.McpServerService.SetToolTwoApprovers:output_type -> koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse
-	18, // 38: koinon.mcpserver.v1alpha1.McpServerService.AcknowledgeToolReview:output_type -> koinon.mcpserver.v1alpha1.AcknowledgeToolReviewResponse
-	20, // 39: koinon.mcpserver.v1alpha1.McpServerService.GetAgentServers:output_type -> koinon.mcpserver.v1alpha1.GetAgentServersResponse
-	22, // 40: koinon.mcpserver.v1alpha1.McpServerService.SetAgentServers:output_type -> koinon.mcpserver.v1alpha1.SetAgentServersResponse
-	31, // [31:41] is the sub-list for method output_type
-	21, // [21:31] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	3,  // 11: koinon.mcpserver.v1alpha1.CreateServerRequest.class:type_name -> koinon.mcpserver.v1alpha1.ServerClass
+	2,  // 12: koinon.mcpserver.v1alpha1.CreateServerResponse.server:type_name -> koinon.mcpserver.v1alpha1.Server
+	2,  // 13: koinon.mcpserver.v1alpha1.UpdateServerResponse.server:type_name -> koinon.mcpserver.v1alpha1.Server
+	3,  // 14: koinon.mcpserver.v1alpha1.SetServerClassRequest.class:type_name -> koinon.mcpserver.v1alpha1.ServerClass
+	2,  // 15: koinon.mcpserver.v1alpha1.SetServerClassResponse.server:type_name -> koinon.mcpserver.v1alpha1.Server
+	4,  // 16: koinon.mcpserver.v1alpha1.ListToolsResponse.tools:type_name -> koinon.mcpserver.v1alpha1.Tool
+	0,  // 17: koinon.mcpserver.v1alpha1.SetToolTierRequest.tier:type_name -> koinon.mcpserver.v1alpha1.Tier
+	4,  // 18: koinon.mcpserver.v1alpha1.SetToolTierResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
+	4,  // 19: koinon.mcpserver.v1alpha1.AcknowledgeToolReviewResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
+	5,  // 20: koinon.mcpserver.v1alpha1.GetAgentServersResponse.servers:type_name -> koinon.mcpserver.v1alpha1.Allowance
+	5,  // 21: koinon.mcpserver.v1alpha1.SetAgentServersRequest.servers:type_name -> koinon.mcpserver.v1alpha1.Allowance
+	5,  // 22: koinon.mcpserver.v1alpha1.SetAgentServersResponse.servers:type_name -> koinon.mcpserver.v1alpha1.Allowance
+	4,  // 23: koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
+	6,  // 24: koinon.mcpserver.v1alpha1.McpServerService.ListServers:input_type -> koinon.mcpserver.v1alpha1.ListServersRequest
+	8,  // 25: koinon.mcpserver.v1alpha1.McpServerService.CreateServer:input_type -> koinon.mcpserver.v1alpha1.CreateServerRequest
+	10, // 26: koinon.mcpserver.v1alpha1.McpServerService.UpdateServer:input_type -> koinon.mcpserver.v1alpha1.UpdateServerRequest
+	12, // 27: koinon.mcpserver.v1alpha1.McpServerService.SetServerClass:input_type -> koinon.mcpserver.v1alpha1.SetServerClassRequest
+	14, // 28: koinon.mcpserver.v1alpha1.McpServerService.DeleteServer:input_type -> koinon.mcpserver.v1alpha1.DeleteServerRequest
+	16, // 29: koinon.mcpserver.v1alpha1.McpServerService.ListTools:input_type -> koinon.mcpserver.v1alpha1.ListToolsRequest
+	18, // 30: koinon.mcpserver.v1alpha1.McpServerService.SetToolTier:input_type -> koinon.mcpserver.v1alpha1.SetToolTierRequest
+	26, // 31: koinon.mcpserver.v1alpha1.McpServerService.SetToolTwoApprovers:input_type -> koinon.mcpserver.v1alpha1.SetToolTwoApproversRequest
+	20, // 32: koinon.mcpserver.v1alpha1.McpServerService.AcknowledgeToolReview:input_type -> koinon.mcpserver.v1alpha1.AcknowledgeToolReviewRequest
+	22, // 33: koinon.mcpserver.v1alpha1.McpServerService.GetAgentServers:input_type -> koinon.mcpserver.v1alpha1.GetAgentServersRequest
+	24, // 34: koinon.mcpserver.v1alpha1.McpServerService.SetAgentServers:input_type -> koinon.mcpserver.v1alpha1.SetAgentServersRequest
+	7,  // 35: koinon.mcpserver.v1alpha1.McpServerService.ListServers:output_type -> koinon.mcpserver.v1alpha1.ListServersResponse
+	9,  // 36: koinon.mcpserver.v1alpha1.McpServerService.CreateServer:output_type -> koinon.mcpserver.v1alpha1.CreateServerResponse
+	11, // 37: koinon.mcpserver.v1alpha1.McpServerService.UpdateServer:output_type -> koinon.mcpserver.v1alpha1.UpdateServerResponse
+	13, // 38: koinon.mcpserver.v1alpha1.McpServerService.SetServerClass:output_type -> koinon.mcpserver.v1alpha1.SetServerClassResponse
+	15, // 39: koinon.mcpserver.v1alpha1.McpServerService.DeleteServer:output_type -> koinon.mcpserver.v1alpha1.DeleteServerResponse
+	17, // 40: koinon.mcpserver.v1alpha1.McpServerService.ListTools:output_type -> koinon.mcpserver.v1alpha1.ListToolsResponse
+	19, // 41: koinon.mcpserver.v1alpha1.McpServerService.SetToolTier:output_type -> koinon.mcpserver.v1alpha1.SetToolTierResponse
+	27, // 42: koinon.mcpserver.v1alpha1.McpServerService.SetToolTwoApprovers:output_type -> koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse
+	21, // 43: koinon.mcpserver.v1alpha1.McpServerService.AcknowledgeToolReview:output_type -> koinon.mcpserver.v1alpha1.AcknowledgeToolReviewResponse
+	23, // 44: koinon.mcpserver.v1alpha1.McpServerService.GetAgentServers:output_type -> koinon.mcpserver.v1alpha1.GetAgentServersResponse
+	25, // 45: koinon.mcpserver.v1alpha1.McpServerService.SetAgentServers:output_type -> koinon.mcpserver.v1alpha1.SetAgentServersResponse
+	35, // [35:46] is the sub-list for method output_type
+	24, // [24:35] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_koinon_mcpserver_v1alpha1_mcpserver_proto_init() }
@@ -1894,14 +2109,14 @@ func file_koinon_mcpserver_v1alpha1_mcpserver_proto_init() {
 	if File_koinon_mcpserver_v1alpha1_mcpserver_proto != nil {
 		return
 	}
-	file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[7].OneofWrappers = []any{}
+	file_koinon_mcpserver_v1alpha1_mcpserver_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc), len(file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   23,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

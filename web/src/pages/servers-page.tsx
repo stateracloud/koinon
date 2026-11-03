@@ -5,6 +5,8 @@ import { useQuery } from '@connectrpc/connect-query'
 import { useState } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
 import { RequireAdmin } from '@/components/require-admin'
+import { LeakGuardSettings } from '@/components/leak-guard-settings'
+import { ServerClass } from '@/components/server-class'
 import { ServerForm } from '@/components/server-form'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -103,6 +105,7 @@ function ServersContent() {
           ))}
         </ul>
       )}
+      <LeakGuardSettings orgId={orgId} />
     </>
   )
 }
@@ -179,6 +182,7 @@ function ServerCard({
           This server is declared by the Secret {s.managedBySecret}. Change or delete that Secret to change it here. You can still set its tools&apos; tiers.
         </p>
       )}
+      {!s.removed && <ServerClass key={`${s.kind}/${s.dataClass.join()}`} server={s} actions={actions} />}
       {editing ? (
         <ServerForm server={s} actions={actions} onDone={done} onSaved={onSaved} />
       ) : (

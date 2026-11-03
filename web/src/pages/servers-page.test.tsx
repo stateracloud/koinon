@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentSchema, AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { LeakGuardService } from '@/gen/koinon/leakguard/v1alpha1/leakguard_pb'
 import {
   Health,
   McpServerService,
@@ -19,6 +20,7 @@ import {
   type CreateServerRequest,
   type DeleteServerRequest,
   type SetAgentServersRequest,
+  type SetServerClassRequest,
   type SetToolTierRequest,
   type SetToolTwoApproversRequest,
   type UpdateServerRequest,
@@ -38,6 +40,8 @@ const docs = create(ServerSchema, {
   health: Health.HEALTHY,
   healthCheckedAt: checked,
   gatewayTarget: 'default-docs',
+  kind: 'other',
+  dataClass: ['untrusted_input', 'private_data', 'outbound'],
 })
 const issues = create(ServerSchema, {
   id: 's-issues',
@@ -84,6 +88,7 @@ function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failD
     updates: [] as UpdateServerRequest[],
     deletes: [] as DeleteServerRequest[],
     allowSets: [] as SetAgentServersRequest[],
+    classes: [] as SetServerClassRequest[],
     listed: 0,
   }
   const current = new Map(tools.map((t) => [`${t.serverId}/${t.name}`, t]))
@@ -91,7 +96,14 @@ function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failD
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
     service(ConnectionService, { listConnections: () => ({ connections: [] }) })
     service(AgentService, { getAgent: () => ({ agent: create(AgentSchema, { id: 'a-1', orgId: 'org-1', displayName: 'Helper', status: AgentStatus.ACTIVE, latestVersion: 1, activeVersion: 1 }) }) })
+    service(LeakGuardService, {
+      getLeakGuard: () => ({ leakGuard: { matchThreshold: 24, defaultMatchThreshold: 24, minMatchThreshold: 12, maxMatchThreshold: 256, trustedHosts: [] } }),
+    })
     service(McpServerService, {
+      setServerClass: (req) => {
+        calls.classes.push(req)
+        return { server: create(ServerSchema, { ...docs, kind: req.class?.kind ?? 'other', dataClass: req.class?.dataClass ?? [] }) }
+      },
       listServers: () => {
         calls.listed++
         return { servers: [docs, issues, managed, gone] }
@@ -378,5 +390,39 @@ describe('Agent MCP allowlist', () => {
     setup({ path: '/agents/a-1', role: OrgRole.MEMBER })
     await screen.findByRole('heading', { name: 'Helper' })
     expect(screen.queryByText('MCP servers')).not.toBeInTheDocument()
+  })
+  it('shows the data class of each server and changes it', async () => {
+    const calls = setup()
+    const list = await screen.findByRole('list', { name: 'Servers' })
+    const d = within(within(list).getByRole('region', { name: 'docs' }))
+    expect(d.getByText(/Data class: Other; legs: returns untrusted input, reads private data, can send data out/)).toBeInTheDocument()
+    await userEvent.click(d.getByRole('button', { name: 'Change data class of docs' }))
+    await userEvent.selectOptions(d.getByLabelText('Kind'), 'fetch')
+    await userEvent.click(d.getByLabelText('Reads private data'))
+    await userEvent.click(d.getByRole('button', { name: 'Save class' }))
+    await waitFor(() => expect(calls.classes).toHaveLength(1))
+    expect(calls.classes[0]).toMatchObject({ serverId: 's-docs', class: { kind: 'fetch', dataClass: ['untrusted_input', 'outbound'] } })
+  })
+
+  it('lets a class be set on a server declared by a Secret', async () => {
+    setup()
+    const list = await screen.findByRole('list', { name: 'Servers' })
+    const w = within(within(list).getByRole('region', { name: 'wiki' }))
+    expect(w.getByRole('button', { name: 'Change data class of wiki' })).toBeInTheDocument()
+  })
+
+  it('creates a server with the class chosen in the form, unclassified by default', async () => {
+    const calls = setup()
+    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
+    const form = within(screen.getByRole('form', { name: 'Add server' }))
+    expect(form.getByLabelText('Kind')).toHaveValue('other')
+    for (const l of ['Returns untrusted input', 'Reads private data', 'Can send data out']) expect(form.getByLabelText(l)).toBeChecked()
+    await userEvent.type(form.getByLabelText('Name'), 'fetcher')
+    await userEvent.type(form.getByLabelText('URL'), 'https://f.example.com/mcp')
+    await userEvent.selectOptions(form.getByLabelText('Kind'), 'fetch')
+    await userEvent.click(form.getByLabelText('Reads private data'))
+    await userEvent.click(form.getByRole('button', { name: 'Add server' }))
+    await waitFor(() => expect(calls.creates).toHaveLength(1))
+    expect(calls.creates[0].class).toMatchObject({ kind: 'fetch', dataClass: ['untrusted_input', 'outbound'] })
   })
 })

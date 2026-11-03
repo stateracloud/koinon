@@ -8,9 +8,24 @@
 
 -- name: CreateMCPServer :one
 INSERT INTO mcp_servers (org_id, id, name, url, transport, credential_header, credential_prefix, credential,
-                         source, managed_by_secret, declared_version, disabled_reason, created_by)
+                         source, managed_by_secret, declared_version, disabled_reason, created_by,
+                         kind, exposes_untrusted_input, exposes_private_data, exposes_outbound)
+-- A NULL kind or leg is the column default (kind other, all three legs: not yet classified).
 VALUES (@org_id, @id, @name, @url, @transport, sqlc.narg(credential_header), @credential_prefix, sqlc.narg(credential),
-        @source, sqlc.narg(managed_by_secret), sqlc.narg(declared_version), sqlc.narg(disabled_reason), sqlc.narg(created_by))
+        @source, sqlc.narg(managed_by_secret), sqlc.narg(declared_version), sqlc.narg(disabled_reason), sqlc.narg(created_by),
+        COALESCE(sqlc.narg(kind)::mcp_server_kind, 'other'),
+        COALESCE(sqlc.narg(exposes_untrusted_input)::boolean, true),
+        COALESCE(sqlc.narg(exposes_private_data)::boolean, true),
+        COALESCE(sqlc.narg(exposes_outbound)::boolean, true))
+RETURNING *;
+
+-- name: SetMCPServerDataClass :one
+-- What the server exposes (ADR 0084 decision 8). Allowed for every source: a declared server's
+-- Secret does not carry it, and UpdateDeclaredMCPServer leaves it alone.
+UPDATE mcp_servers
+SET kind = @kind, exposes_untrusted_input = @exposes_untrusted_input,
+    exposes_private_data = @exposes_private_data, exposes_outbound = @exposes_outbound
+WHERE org_id = @org_id AND id = @id
 RETURNING *;
 
 -- name: GetMCPServer :one

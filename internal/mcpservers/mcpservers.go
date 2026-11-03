@@ -189,7 +189,11 @@ type Server struct {
 	ManagedBySecret  string `json:"managedBySecret,omitempty"`
 	DisabledReason   string `json:"disabledReason,omitempty"`
 	// Removed is set when the declaring Secret was deleted.
-	Removed         bool       `json:"removed,omitempty"`
+	Removed bool `json:"removed,omitempty"`
+	// Kind and DataClass are what the server declares it exposes (ADR 0084 decision 8): its kind and
+	// the legs it carries, in the order of Legs. A server nobody classified is DefaultDeclaration.
+	Kind            string     `json:"kind"`
+	DataClass       []string   `json:"dataClass"`
 	Health          string     `json:"health"`
 	HealthReason    string     `json:"healthReason,omitempty"`
 	HealthCheckedAt *time.Time `json:"healthCheckedAt,omitempty"`
@@ -303,6 +307,7 @@ func toServer(r store.McpServer) Server {
 		Removed: r.RemovedAt.Valid, Health: string(r.Health), HealthReason: r.HealthReason.String,
 		HealthCheckedAt: timePtr(r.HealthCheckedAt), HealthSince: timePtr(r.HealthSince), ToolsSyncedAt: timePtr(r.ToolsSyncedAt),
 		CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
+		Kind: declarationOf(r).Kind, DataClass: declarationOf(r).Legs,
 	}
 }
 
@@ -320,6 +325,7 @@ func serverSummary(r store.McpServer) map[string]any {
 	return map[string]any{
 		"name": r.Name, "url": r.Url, "transport": string(r.Transport), "hasCredential": len(r.Credential) > 0,
 		"credentialHeader": r.CredentialHeader.String, "source": string(r.Source),
+		"kind": declarationOf(r).Kind, "dataClass": declarationOf(r).Legs,
 	}
 }
 
@@ -425,6 +431,8 @@ type Input struct {
 	CredentialHeader string
 	CredentialPrefix string
 	CredentialValue  string
+	// Class is what the server exposes. Nil is DefaultDeclaration: not yet classified.
+	Class *Declaration
 }
 
 // Patch changes a server; nil fields stay.
@@ -487,6 +495,13 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if err := ValidateRemote(in.URL, in.Transport, in.CredentialHeader, in.CredentialPrefix); err != nil {
 		return Server{}, err
 	}
+	if in.Class != nil {
+		d, err := in.Class.Normalize()
+		if err != nil {
+			return Server{}, err
+		}
+		in.Class = &d
+	}
 	if err := s.policy.Check(ctx, in.URL); err != nil {
 		return Server{}, err
 	}
@@ -504,11 +519,13 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	header := pgtype.Text{String: in.CredentialHeader, Valid: len(cred) > 0}
 	var row store.McpServer
 	err = s.tx(ctx, func(q *store.Queries) error {
-		row, err = q.CreateMCPServer(ctx, store.CreateMCPServerParams{
+		p := store.CreateMCPServerParams{
 			OrgID: org, ID: id, Name: in.Name, Url: in.URL, Transport: store.McpTransport(in.Transport),
 			CredentialHeader: header, CredentialPrefix: prefixIf(in.CredentialPrefix, len(cred) > 0), Credential: cred,
 			Source: store.ConfigSourceUi, CreatedBy: creator,
-		})
+		}
+		createClass(&p, in.Class)
+		row, err = q.CreateMCPServer(ctx, p)
 		if err != nil {
 			return err
 		}

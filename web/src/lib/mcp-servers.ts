@@ -26,6 +26,61 @@ export function transportLabel(t: string): string {
   return transports.find((x) => x.value === t)?.label ?? t
 }
 
+/** The kinds a server can declare (ADR 0084): what the leak guard treats as its role. */
+export const serverKinds = [
+  {
+    value: 'fetch',
+    label: 'Fetch',
+    help: 'Reads web pages or other documents an outsider can write.',
+  },
+  {
+    value: 'search',
+    label: 'Search',
+    help: 'Sends a query out and returns results.',
+  },
+  { value: 'other', label: 'Other', help: 'Anything else.' },
+] as const
+
+/** The legs a server can carry, in the canonical order the API answers them. */
+export const dataLegs = [
+  {
+    value: 'untrusted_input',
+    label: 'Returns untrusted input',
+    help: 'Its results can contain text an outsider wrote.',
+  },
+  {
+    value: 'private_data',
+    label: 'Reads private data',
+    help: 'It can read data that belongs to the org or its users.',
+  },
+  {
+    value: 'outbound',
+    label: 'Can send data out',
+    help: 'It can send what it is given to a third party.',
+  },
+] as const
+
+export function kindLabel(k: string): string {
+  return serverKinds.find((x) => x.value === k)?.label ?? k
+}
+
+export function legsText(legs: readonly string[]): string {
+  if (legs.length === 0) return 'none'
+  return dataLegs
+    .filter((l) => legs.includes(l.value))
+    .map((l) => l.label.toLowerCase())
+    .join(', ')
+}
+
+/** The class of a server nobody classified: kind other, every leg (the cautious default). */
+export const defaultKind = 'other'
+export const defaultLegs: readonly string[] = dataLegs.map((l) => l.value)
+
+/** toggleLeg adds or drops a leg, keeping the canonical order. */
+export function toggleLeg(legs: readonly string[], leg: string, on: boolean): string[] {
+  return dataLegs.map((l) => l.value).filter((v) => (v === leg ? on : legs.includes(v)))
+}
+
 export type CredentialMode = 'none' | 'bearer' | 'custom'
 
 export const bearerHeader = 'Authorization'
@@ -42,6 +97,9 @@ export type ServerFormState = {
   value: string
   /** Edit only: drop the stored credential. */
   removeCredential: boolean
+  /** Create only: what the server exposes. An edit leaves the class to its own control. */
+  kind: string
+  legs: string[]
 }
 
 /** initialMode is the credential mode a stored credential's header and prefix correspond to. */
@@ -59,6 +117,8 @@ export function initialForm(s?: Server): ServerFormState {
     header: s?.hasCredential && initialMode(s) === 'custom' ? s.credentialHeader : '',
     value: '',
     removeCredential: false,
+    kind: s?.kind || defaultKind,
+    legs: s ? [...s.dataClass] : [...defaultLegs],
   }
 }
 
@@ -89,6 +149,7 @@ export type CreateServerInput = {
   credentialHeader: string
   credentialPrefix: string
   credentialValue: string
+  class: { kind: string; dataClass: string[] }
 }
 
 function credentialParts(f: ServerFormState): { header: string; prefix: string } {
@@ -106,6 +167,7 @@ export function buildCreateRequest(f: ServerFormState): CreateServerInput {
     credentialHeader: withSecret ? c.header : '',
     credentialPrefix: withSecret ? c.prefix : '',
     credentialValue: withSecret ? f.value : '',
+    class: { kind: f.kind, dataClass: [...f.legs] },
   }
 }
 

@@ -1,0 +1,73 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.leakguard.v1alpha1;
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1;leakguardv1alpha1";
+
+// LeakGuardService manages an org's leak-guard settings (ADR 0084): the match threshold and the
+// fetch-trusted host list the automatic URL rule exempts. It is the connect-rpc face of the same
+// service layer the admin API uses. Admins and owners only. Every change is audited.
+service LeakGuardService {
+  rpc GetLeakGuard(GetLeakGuardRequest) returns (GetLeakGuardResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // SetMatchThreshold sets the match threshold, or returns it to the default (24) when
+  // match_threshold is 0. Audited as org.leak_guard.threshold.set.
+  rpc SetMatchThreshold(SetMatchThresholdRequest) returns (SetMatchThresholdResponse);
+  // AddTrustedHost puts a host on the fetch-trusted list. A host already on it changes nothing.
+  // Audited as org.fetch_trusted_host.add.
+  rpc AddTrustedHost(AddTrustedHostRequest) returns (AddTrustedHostResponse);
+  // RemoveTrustedHost takes a host off the list; NOT_FOUND when it was not on it. Audited as
+  // org.fetch_trusted_host.remove.
+  rpc RemoveTrustedHost(RemoveTrustedHostRequest) returns (RemoveTrustedHostResponse);
+}
+
+// LeakGuard is the org's effective configuration.
+message LeakGuard {
+  // match_threshold is the shortest tainted text, in characters after normalisation, that blocks a call.
+  int32 match_threshold = 1;
+  int32 default_match_threshold = 2;
+  int32 min_match_threshold = 3;
+  int32 max_match_threshold = 4;
+  // trusted_hosts is the fetch-trusted host list, sorted; empty for a new org.
+  repeated string trusted_hosts = 5;
+}
+
+message GetLeakGuardRequest {
+  string org_id = 1;
+}
+
+message GetLeakGuardResponse {
+  LeakGuard leak_guard = 1;
+}
+
+message SetMatchThresholdRequest {
+  string org_id = 1;
+  // match_threshold in characters; 0 returns it to the default.
+  int32 match_threshold = 2;
+}
+
+message SetMatchThresholdResponse {
+  LeakGuard leak_guard = 1;
+}
+
+message AddTrustedHostRequest {
+  string org_id = 1;
+  // host is a bare DNS name such as docs.example.com.
+  string host = 2;
+}
+
+message AddTrustedHostResponse {
+  LeakGuard leak_guard = 1;
+}
+
+message RemoveTrustedHostRequest {
+  string org_id = 1;
+  string host = 2;
+}
+
+message RemoveTrustedHostResponse {
+  LeakGuard leak_guard = 1;
+}

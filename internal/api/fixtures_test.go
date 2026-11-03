@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1/leakguardv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	providerv1alpha1connect "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
@@ -56,6 +57,7 @@ type client struct {
 	providers providerv1alpha1connect.ProviderServiceClient
 	mcps      mcpserverv1alpha1connect.McpServerServiceClient
 	questions questionv1alpha1connect.QuestionServiceClient
+	leakguard leakguardv1alpha1connect.LeakGuardServiceClient
 }
 
 func newClient(b *browser) *client {
@@ -73,6 +75,7 @@ func newClient(b *browser) *client {
 		providers: providerv1alpha1connect.NewProviderServiceClient(cc),
 		mcps:      mcpserverv1alpha1connect.NewMcpServerServiceClient(cc),
 		questions: questionv1alpha1connect.NewQuestionServiceClient(cc),
+		leakguard: leakguardv1alpha1connect.NewLeakGuardServiceClient(cc),
 	}
 }
 
@@ -270,6 +273,8 @@ type orgFixture struct {
 	mcpServer, mcpTool string
 	// traceDest is a trace destination of the org.
 	traceDest string
+	// trustedHost is on the org's fetch-trusted list; the org's match threshold is 30.
+	trustedHost string
 }
 
 func (e *env) newOrgFixture(ctx context.Context) orgFixture {

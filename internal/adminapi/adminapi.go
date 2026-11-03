@@ -43,6 +43,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/tokens"
 	"github.com/stateracloud/koinon/internal/triggers"
@@ -65,10 +66,12 @@ type Server struct {
 	// agentModels sets and describes agents' models; triggers fires a schedule trigger now;
 	// modelCheck runs the provider echo check.
 	agentModels *agentmodel.Service
-	triggers    TriggerRunner
-	modelCheck  *modelcheck.Service
-	log         *slog.Logger
-	limiter     *limiter
+	// leakGuard changes the org's leak-guard threshold and fetch-trusted host list (#350).
+	leakGuard  *orgsettings.Service
+	triggers   TriggerRunner
+	modelCheck *modelcheck.Service
+	log        *slog.Logger
+	limiter    *limiter
 }
 
 var _ StrictServerInterface = (*Server)(nil)
@@ -78,7 +81,7 @@ func New(pool *pgxpool.Pool, c *catalog.Service, t *tokens.Service, log *slog.Lo
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{pool: pool, catalog: c, tokens: t, prices: prices.New(pool, log, src), budgets: budget.New(pool), agentModels: agentmodel.New(pool, prices.NewResolver(src)), log: log, limiter: newLimiter()}
+	return &Server{pool: pool, catalog: c, tokens: t, prices: prices.New(pool, log, src), budgets: budget.New(pool), agentModels: agentmodel.New(pool, prices.NewResolver(src)), leakGuard: orgsettings.NewService(pool), log: log, limiter: newLimiter()}
 }
 
 type principalKey struct{}
