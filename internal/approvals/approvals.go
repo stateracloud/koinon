@@ -129,6 +129,11 @@ type Options struct {
 	Now func() time.Time
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
+	// OnMCPResult records the result of an approved MCP call in the requesting agent's leak-guard
+	// session (internal/mcpguard: its legs and fingerprints), since the executor's own call is not
+	// the agent's. If it fails the result is withheld and the request fails: a result the guard did
+	// not see could leave the org later unchecked. Nil records nothing.
+	OnMCPResult func(ctx context.Context, row store.ApprovalRequest, srv store.McpServer, result json.RawMessage) error
 }
 
 // Service decides and executes approval requests.
@@ -144,6 +149,7 @@ type Service struct {
 	maxExec   int
 	now       func() time.Time
 	log       *slog.Logger
+	onMCP     func(ctx context.Context, row store.ApprovalRequest, srv store.McpServer, result json.RawMessage) error
 }
 
 // New returns a Service.
@@ -166,7 +172,7 @@ func New(pool *pgxpool.Pool, opts Options) *Service {
 	return &Service{
 		now:  opts.Now,
 		pool: pool, q: store.New(pool), keys: opts.Keys, gwURL: opts.GatewayMCPURL, execKey: opts.ExecKeys, savedKeys: opts.SavedWorkKeys, hosts: opts.Hosts,
-		lease: opts.ExecutionLease, maxExec: opts.MaxExecutions, log: opts.Logger,
+		lease: opts.ExecutionLease, maxExec: opts.MaxExecutions, log: opts.Logger, onMCP: opts.OnMCPResult,
 	}
 }
 
