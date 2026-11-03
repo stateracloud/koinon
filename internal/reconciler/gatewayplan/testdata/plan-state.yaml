@@ -29,7 +29,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"a365ea2f053b1a93"'
+      koinon.config: '"4aed63f177170555"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -148,7 +148,7 @@ llm:
               window:
                 rolling: 24h
               onBudgetExceeded: Block
-        - keyHash: sha256:1d7d29a7e53ca611578866383e04f7e6ae3d15bd0bb8689be1e2ff465312ea45
+        - keyHash: sha256:bfe3d286f718c7966e47bc648cde670d5c159bc7baae9b07f5c222a8f1ab54d5
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -268,6 +268,13 @@ mcp:
         - apiKey.agent == "acme/mcp-probe-sick" && ((mcp.tool.target == "acme-sick"))
         - apiKey.agent == "acme/mcp-probe-wiki" && ((mcp.tool.target == "acme-wiki"))
         - mcp.prompt.name == "koinon-ready"
+    mcpGuardrails:
+      processors:
+        - kind: expression
+          methods:
+            tools/call: full
+          condition: mcp.tool.target in ["acme-sick", "acme-wiki", "acme-wiki-ask"]
+          reject: 'refused: the MCP leak guard is not configured on this installation'
     transformations:
       request:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id", "user-agent"])
