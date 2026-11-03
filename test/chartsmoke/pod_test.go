@@ -74,7 +74,8 @@ func (r *runner) start(ctx context.Context, owner string, ps corev1.PodSpec, c c
 	if sa == "" {
 		sa = "default"
 	}
-	if _, err := r.cl.Admin.CoreV1().ServiceAccounts(namespace).Get(ctx, sa, metaGet); err != nil {
+	saObj, err := r.cl.Admin.CoreV1().ServiceAccounts(namespace).Get(ctx, sa, metaGet)
+	if err != nil {
 		panic(fmt.Sprintf("%s: ServiceAccount %q does not exist when the pod starts: %v", owner, sa, err))
 	}
 	vars, envList := r.env(ctx, owner, ps, c)
@@ -83,6 +84,20 @@ func (r *runner) start(ctx context.Context, owner string, ps corev1.PodSpec, c c
 		args = append(args, expand(a, vars))
 	}
 	mounts, tmpfs := r.volumes(ctx, owner, ps, c)
+	if role := irsaRole(saObj); role != "" {
+		// What the EKS Pod Identity Webhook adds to a pod whose ServiceAccount names an IAM role
+		// (IRSA), whatever automountServiceAccountToken says: the role, and a token of the
+		// ServiceAccount the pod exchanges for credentials with STS. EKS projects it with the
+		// audience sts.amazonaws.com; LocalStack does not check the token, so the suite's
+		// ordinary token stands in.
+		envList["AWS_ROLE_ARN"] = role
+		envList["AWS_WEB_IDENTITY_TOKEN_FILE"] = irsaTokenDir + "/token"
+		var fsGroup int
+		if ps.SecurityContext != nil && ps.SecurityContext.FSGroup != nil {
+			fsGroup = int(*ps.SecurityContext.FSGroup)
+		}
+		mounts = append(mounts, r.fileVolume(ctx, map[string]volumeFile{"token": {[]byte(r.cl.Token(ctx, sa)), 0o644}}, fsGroup, irsaTokenDir, true))
+	}
 	user, groups := runAs(ps, c)
 
 	opts := []testcontainers.ContainerCustomizer{

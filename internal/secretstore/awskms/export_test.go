@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package awskms
+
+import (
+	"context"
+	"net/http"
+	"time"
+)
+
+// Credentials are temporary credentials as a test hands them to NewWithCredentials.
+type Credentials = credentials
+
+// NewWithCredentials is New with credentials from fetch instead of the pod's identity (tests:
+// LocalStack accepts any), and plain http on any host (a container's host is not always the
+// loopback).
+func NewWithCredentials(cfg Config, fetch func(ctx context.Context) (Credentials, error)) (*Wrapper, error) {
+	w, err := newWrapper(cfg, true)
+	if err != nil {
+		return nil, err
+	}
+	w.fetch = fetch
+	return w, nil
+}
+
+// NewAnyHTTP is New with plain http on any host, for the endpoints and the credentials URI.
+func NewAnyHTTP(cfg Config) (*Wrapper, error) {
+	w, err := newWrapper(cfg, true)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case cfg.Identity.RoleARN != "":
+		w.fetch = w.webIdentity
+	default:
+		if err := validCredentialsURI(cfg.Identity.CredentialsURI, true); err != nil {
+			return nil, err
+		}
+		w.fetch = w.podIdentity
+	}
+	return w, nil
+}
+
+// SetClock makes w read the time from now (credential expiry).
+func (w *Wrapper) SetClock(now func() time.Time) { w.now = now }
+
+// Sign is the SigV4 signer.
+func Sign(req *http.Request, body []byte, accessKey, secretKey, token, region, service string, now time.Time) {
+	sign(req, body, credentials{AccessKeyID: accessKey, SecretAccessKey: secretKey, SessionToken: token}, region, service, now)
+}
+
+// SigningKey is the SigV4 key derivation.
+var SigningKey = signingKey
