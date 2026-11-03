@@ -18,6 +18,31 @@
 // every value is sealed again under a new DEK ([Keyring.Seal] on the opened
 // value) and the credentials themselves are rotated at their providers.
 //
+// # Key wrapping (ADR 0085 decision 12)
+//
+// The keys form a hierarchy: a value is sealed by its own DEK, a DEK is wrapped by a KEK
+// ([Keyring]), and a KEK is stored wrapped by a key-wrapping key that a [Wrapper] holds. Only the
+// last step differs between deployments:
+//
+//   - [Local] (kind, development, and every install before a KMS is configured): there is no
+//     wrapping key. The KEK Secret holds the KEK itself, and its backup is the key export
+//     ("koinon-api keys export").
+//   - A KMS adapter (OpenBao/Vault transit #416, AWS KMS #417; GCP and Azure later): the wrapping
+//     key never leaves the KMS. The KEK Secret holds the KMS's ciphertext of each KEK, and each
+//     process signs in with its pod identity (Kubernetes auth; the AWS default chain with IRSA):
+//     no credential in Helm values, env or a sandbox.
+//
+// The KMS is called when a key set is loaded or reloaded, never once per value: [Keyring.Seal]
+// and [Keyring.Open] stay local and synchronous, and a short KMS outage does not stop reads. The
+// services (koinon-api, the reconciler; agentd holds no keyring) only unwrap; wrapping a new KEK with a KMS is the
+// key-admin Job's alone ([ErrKeyAdminWraps]; the Job comes with the KMS adapters). [Wrappers] picks
+// the adapter of each stored KEK, so a key set can move from one backend to another by add,
+// activate, rewrap and retire.
+//
+// What exists today: the interface, [Local], the stored form and [Fingerprint] (printed by
+// "keys status" and "keys export"). Not yet: the fingerprints recorded in the database and the
+// unreachable-key metric that calls [Wrapper.Probe] (415b), and the KMS adapters (#416, #417).
+//
 // # Additional authenticated data
 //
 // Both the payload and the wrapped DEK are authenticated with a [Binding]:

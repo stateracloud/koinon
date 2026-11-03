@@ -32,6 +32,8 @@ type Request struct {
 	Body []byte
 	// Header is a copy of the request headers, for asserting what a gateway sent upstream.
 	Header http.Header
+	// At is when the request arrived, for asserting a client's retry backoff.
+	At time.Time
 }
 
 // Server serves scripted model responses. The zero value is not usable; call [New].
@@ -51,6 +53,7 @@ type entry struct {
 	script  Script
 	served  int // requests seen, for Faults.Unavailable
 	limited int // 429s sent, for Faults.RateLimit
+	refused int // refusals sent, for Faults.Refuse
 	// gate holds one token per released response in lockstep mode.
 	gate    chan struct{}
 	waiting int // requests held by the gate
@@ -260,11 +263,18 @@ type apiError struct {
 	message string
 	// retryAfter is the Retry-After header in seconds, when positive.
 	retryAfter int
+	// code, when set, is the HTTP status instead of the kind's.
+	code int
+	// doNotRetry sends x-should-retry: false.
+	doNotRetry bool
 }
 
 func (e *apiError) Error() string { return e.message }
 
 func (e *apiError) status() int {
+	if e.code != 0 {
+		return e.code
+	}
 	switch e.kind {
 	case errNotFound:
 		return http.StatusNotFound
@@ -299,23 +309,32 @@ func (s *Server) readBody(w http.ResponseWriter, r *http.Request, v any) ([]byte
 	return body, nil
 }
 
-// plan records the request, applies Faults.Unavailable and selects the turn.
+// plan records the request, applies the scripted faults and selects the turn.
 func (s *Server) plan(path, query string, header http.Header, model string, body []byte, conv conversation) (reply, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.requests = append(s.requests, Request{Path: path, Query: query, Model: model, Body: body, Header: header.Clone()})
+	s.requests = append(s.requests, Request{Path: path, Query: query, Model: model, Body: body, Header: header.Clone(), At: time.Now()})
 	e, ok := s.scripts[model]
 	if !ok {
 		return reply{}, &apiError{kind: errNotFound, message: fmt.Sprintf("The model `%s` does not exist or you do not have access to it.", model)}
 	}
 	e.served++
-	if e.served <= e.script.Faults.Unavailable {
-		return reply{}, &apiError{kind: errUnavailable, message: fmt.Sprintf("fakemodel: scripted outage %d of %d", e.served, e.script.Faults.Unavailable)}
+	f := e.script.Faults
+	if e.served <= f.Unavailable {
+		return reply{}, &apiError{kind: errUnavailable, doNotRetry: f.DoNotRetry, message: fmt.Sprintf("fakemodel: scripted outage %d of %d", e.served, f.Unavailable)}
 	}
-	if e.limited < e.script.Faults.RateLimit {
+	if e.limited < f.RateLimit {
 		e.limited++
-		ra := max(1, e.script.Faults.RetryAfter)
-		return reply{}, &apiError{kind: errRateLimit, retryAfter: ra, message: fmt.Sprintf("fakemodel: scripted rate limit %d of %d", e.limited, e.script.Faults.RateLimit)}
+		ra := max(1, f.RetryAfter)
+		return reply{}, &apiError{kind: errRateLimit, retryAfter: ra, doNotRetry: f.DoNotRetry, message: fmt.Sprintf("fakemodel: scripted rate limit %d of %d", e.limited, f.RateLimit)}
+	}
+	if e.refused < f.Refuse {
+		e.refused++
+		code := f.RefuseStatus
+		if code == 0 {
+			code = http.StatusBadRequest
+		}
+		return reply{}, &apiError{kind: errBadRequest, code: code, doNotRetry: f.DoNotRetry, message: fmt.Sprintf("fakemodel: scripted refusal %d of %d (HTTP %d)", e.refused, f.Refuse, code)}
 	}
 	if e.script.Faults.ContextLength {
 		return reply{}, &apiError{kind: errContextLength, message: fmt.Sprintf(
@@ -422,9 +441,13 @@ func midStreamError(events []sseEvent, errEvent sseEvent) []sseEvent {
 	return append(slices.Clone(events[:n]), errEvent)
 }
 
+// setRetryAfter sets the retry headers of an error response: Retry-After and x-should-retry.
 func setRetryAfter(w http.ResponseWriter, e *apiError) {
 	if e.retryAfter > 0 {
 		w.Header().Set("Retry-After", fmt.Sprint(e.retryAfter))
+	}
+	if e.doNotRetry {
+		w.Header().Set("x-should-retry", "false")
 	}
 }
 

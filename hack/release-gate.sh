@@ -7,7 +7,7 @@
 # swapped for a "local checks recorded" gate without touching the release job.
 #
 # Environment: TAG (v1.2.3 or v1.2.3-rc.1), SHA (the tagged commit), GITHUB_REPOSITORY and GH_TOKEN
-# (needs checks:read, contents:read and pull-requests:read; the ruleset is read with the implicit
+# (needs checks:read, contents:read, statuses:read and pull-requests:read; the ruleset is read with the implicit
 # metadata permission). The required checks are read from the `main` ruleset; the pull-request-only
 # ones (pr_only below) are read from the head commit of the pull request that merged the tagged
 # commit. Needs gh, git and awk, and a clone with origin/main.
@@ -17,6 +17,7 @@
 
 set -euo pipefail
 
+here=$(cd "$(dirname "$0")" && pwd)
 : "${TAG:?}" "${SHA:?}" "${GITHUB_REPOSITORY:?}" "${GH_TOKEN:?}"
 
 # The required status checks come from GitHub at run time (required_contexts below), so a check
@@ -24,10 +25,7 @@ set -euo pipefail
 #
 # Required contexts that are not reported by a push to main, read instead from the head commit of
 # the pull request that merged the tagged commit (the newest run that started before the merge):
-#   dco, dependency age  their workflows or jobs run on pull_request only (ci.yml gives
-#                        `dependency age` `if: github.event_name == 'pull_request'`, so on main it is
-#                        a skipped run). `dependency age` becomes required with #561; the gate
-#                        expects it.
+#   dco                  its workflow runs on pull_request only.
 #   claim                runs on pull_request_target (hack/claim.sh check-pr, about the PR and its
 #                        claim); on a push to main it is skipped.
 #   e2e result           succeeds on main pushes too, but it is a composite that passes when the
@@ -37,7 +35,11 @@ set -euo pipefail
 # check that is missing or red on the commit fails the gate instead of being excused by a PR run.
 # A context not listed here must succeed on the tagged commit itself. When a workflow gains or
 # loses a push trigger, move its context between the two cases.
-pr_only=(dco "dependency age" claim "e2e result")
+pr_only=(dco claim "e2e result")
+# Contexts that must succeed on the tagged commit AND on the merged pull request's head: `quick
+# checks` runs on main too, but its dependency age steps run on pull requests only (#594; they were
+# the PR-only job `dependency age`), so main's green says nothing about them.
+both=("quick checks")
 
 fail() { echo "release gate: $*" >&2; exit 1; }
 
@@ -74,29 +76,48 @@ contexts=$(required_contexts) ||
 	fail "no required status checks apply to the default branch; refusing to release without the required list"
 mapfile -t required <<<"$contexts"
 
+is_both() { local p; for p in "${both[@]}"; do [[ $p == "$1" ]] && return 0; done; return 1; }
 is_pr_only() { local p; for p in "${pr_only[@]}"; do [[ $p == "$1" ]] && return 0; done; return 1; }
 
 pr_heads=
 pr_heads_read=0
+# from_pr_heads <name>: the conclusion of the check on the head of the pull request that merged SHA.
+from_pr_heads() {
+	local h merged got=
+	if ((pr_heads_read == 0)); then
+		pr_heads=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
+			--jq '.[] | select(.merged_at != null) | [.head.sha, .merged_at] | @tsv') ||
+			fail "cannot list the pull requests of $SHA"
+		pr_heads_read=1
+	fi
+	while IFS=$'\t' read -r h merged; do
+		[[ -n $h ]] || continue
+		got=$(conclusion_of "$h" "$1" "$merged")
+		[[ -n $got ]] && break
+	done <<<"$pr_heads"
+	echo "$got"
+}
+
 failed=0
 for name in "${required[@]}"; do
 	if is_pr_only "$name"; then
-		if ((pr_heads_read == 0)); then
-			pr_heads=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
-				--jq '.[] | select(.merged_at != null) | [.head.sha, .merged_at] | @tsv') ||
-				fail "cannot list the pull requests of $SHA"
-			pr_heads_read=1
-		fi
-		got=
-		while IFS=$'\t' read -r h merged; do
-			[[ -n $h ]] || continue
-			got=$(conclusion_of "$h" "$name" "$merged")
-			[[ -n $got ]] && break
-		done <<<"$pr_heads"
+		got=$(from_pr_heads "$name")
 		where="on the merged pull request's head"
 	else
 		got=$(conclusion_of "$SHA" "$name")
 		where="on $SHA"
+		# A push to main skips the heavy jobs when the merge tree equals a pull request head whose
+		# required checks passed (hack/ci-skip-heavy.sh, #595); they report `skipped` here. Then the
+		# merged pull request's head is the evidence, and it must have passed (or skipped) them.
+		if [[ $got == skipped ]]; then
+			got=$(from_pr_heads "$name")
+			[[ $got == skipped ]] && got=success
+			where="on the merged pull request's head (skipped on $SHA: the merge tree is that head's tree)"
+		fi
+	fi
+	if [[ $got == success ]] && is_both "$name"; then
+		got=$(from_pr_heads "$name")
+		where="on the merged pull request's head (it also passed on $SHA)"
 	fi
 	if [[ $got == success ]]; then
 		echo "ok: $name"
@@ -105,6 +126,46 @@ for name in "${required[@]}"; do
 		failed=1
 	fi
 done
+# go-test (#610): the job is skipped when the pull request head had a green lab gate (the commit status
+# go-test-lab), and `go` accepts that. A go-test that was skipped is therefore checked once more: on the
+# merged pull request's head it must have succeeded, or have been skipped with a green go-test-lab status
+# on that head, or the change must touch nothing the go-* jobs run for. A go-test with no run at all is
+# the business of `go` above. Needs statuses:read.
+got=$(conclusion_of "$SHA" go-test)
+if [[ $got == skipped ]]; then
+	from_pr_heads go-test >/dev/null # called directly (not in $(...)) so that pr_heads is filled here
+	got=
+	lab=
+	while IFS=$'\t' read -r h merged; do
+		[[ -n $h ]] || continue
+		got=$(conclusion_of "$h" go-test "$merged")
+		if [[ -n $got ]]; then
+			[[ $got != skipped ]] || lab=$("$here/go-test-lab.sh" state "$h" 2>/dev/null || true)
+			break
+		fi
+	done <<<"$pr_heads"
+	tg=0
+	case $got in
+	success) echo "ok: go-test (on the merged pull request's head)" ;;
+	skipped)
+		if [[ $lab == success ]]; then
+			echo "ok: go-test (passed on the lab: go-test-lab on the merged pull request's head)"
+		else
+			"$here/go-test-lab.sh" touches-go "$SHA^1" "$SHA" || tg=$?
+			if [[ $tg == 1 ]]; then
+				echo "ok: go-test (skipped: the change touches no Go)"
+			else
+				echo "FAIL: go-test: skipped on the merged pull request's head with no green go-test-lab status (${lab:-none}) and the change may touch Go" >&2
+				failed=1
+			fi
+		fi
+		;;
+	*)
+		echo "FAIL: go-test: ${got:-no check run found} on the merged pull request's head (skipped on $SHA)" >&2
+		failed=1
+		;;
+	esac
+fi
 # The kind e2e is not a required check (it is batched on main, and `e2e result` passes when it is
 # skipped), so a release asks for the `quickstart` job itself to have concluded success on this very
 # commit. If main's batched run skipped or never reached it, dispatch e2e-kind on the commit first.

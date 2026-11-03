@@ -8,12 +8,26 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 )
 
 // Endpoints and LaunchCommand expose the flavor launch commands to the external test package.
 type Endpoints = endpoints
 
 var LaunchCommand = launchCommand
+
+// RetryPolicy is the model-retry policy a retrying harness is launched with.
+type RetryPolicy = retryPolicy
+
+// DefaultRetryPolicy is the policy of a Config with the defaults.
+func DefaultRetryPolicy() RetryPolicy {
+	return retryPolicyOf(Config{ModelRetries: DefaultModelRetries, RetryBackoff: DefaultRetryBackoff, MaxRetryAfter: DefaultMaxRetryAfter})
+}
+
+// OwnRetryLayer makes the pool repeat failed turns itself even for a flavor whose harness retries
+// model requests, so specs can exercise agentd's own retry layer with the fake harness, which
+// does not retry.
+func OwnRetryLayer(c *Config) { c.ownRetryLayer = true }
 
 // ModelOption exposes the model value agentd selects for the session.
 var ModelOption = modelOption
@@ -92,3 +106,6 @@ type Repository = repository
 type Refusal = refusal
 
 func RefusalNote(refs []Refusal, cwd string) string { return refusalNote(refs, cwd) }
+
+// OutcomeMetrics is what the run owner counts with (internal/runoutcome).
+func OutcomeMetrics(m *Metrics) runoutcome.Metrics { return outcomeMetrics{m} }

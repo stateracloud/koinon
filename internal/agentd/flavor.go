@@ -4,7 +4,9 @@ package agentd
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -33,6 +35,39 @@ type endpoints struct {
 	Thinking thinking.Mode
 	// SessionID is the run ID to send to OpenRouter as session_id (sticky routing), or "".
 	SessionID string
+	// Retry is Koinon's model-retry policy, handed to a flavor whose harness retries model
+	// requests itself (flavor.Descriptor.RetriesModelRequests); other flavors ignore it.
+	Retry retryPolicy
+}
+
+// retryPolicy is Koinon's policy for retrying a failed model request (Config.ModelRetries,
+// RetryBackoff, MaxRetryAfter), as the layer that applies it takes it.
+type retryPolicy struct {
+	// Tries counts the first request: retries plus one.
+	Tries         int
+	Backoff       time.Duration
+	MaxRetryAfter time.Duration
+}
+
+// retryPolicyOf is the policy in cfg.
+func retryPolicyOf(cfg Config) retryPolicy {
+	return retryPolicy{Tries: cfg.ModelRetries + 1, Backoff: cfg.RetryBackoff, MaxRetryAfter: cfg.MaxRetryAfter}
+}
+
+// args are the entry-script switches that carry the policy (flavors/common/koinon-entry-lib.sh).
+func (p retryPolicy) args() []string {
+	return []string{
+		"--model-tries", strconv.Itoa(p.Tries),
+		"--model-retry-backoff-ms", strconv.FormatInt(p.Backoff.Milliseconds(), 10),
+		"--model-max-retry-after-ms", strconv.FormatInt(p.MaxRetryAfter.Milliseconds(), 10),
+	}
+}
+
+// harnessRetries reports whether the flavor's harness retries model requests itself, so that
+// agentd must not repeat the turn as well (one retrying layer, ADR 0056 amendment 2026-10-31).
+func harnessRetries(f store.AgentFlavor) bool {
+	d, _ := flavor.Lookup(f)
+	return d.RetriesModelRequests
 }
 
 // launchCommand is the flavor's ACP launch command. Binaries are absolute paths: OpenShell
@@ -47,6 +82,13 @@ func launchCommand(f store.AgentFlavor, e endpoints) ([]string, error) {
 		"--model-base-url", e.ModelBaseURL,
 		"--model", e.Model,
 		"--mcp-url", e.MCPURL,
+	}
+	// The harness is the retrying layer: it gets Koinon's policy, never runs on its own defaults.
+	if d.RetriesModelRequests {
+		if e.Retry.Tries < 1 || e.Retry.Backoff < 0 || e.Retry.MaxRetryAfter < 0 {
+			return nil, fmt.Errorf("flavor %q retries model requests and needs Koinon's retry policy, got %+v", f, e.Retry)
+		}
+		cmd = append(cmd, e.Retry.args()...)
 	}
 	if e.Format != "" && len(d.ModelEntries) > 0 {
 		if _, ok := d.ModelEntries[e.Format]; !ok {

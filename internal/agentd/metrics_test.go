@@ -12,9 +12,47 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 )
 
 var _ = Describe("metrics", func() {
+	It("exports every class and reason of failed run event writes from the start, and counts one", func() {
+		reg := prometheus.NewRegistry()
+		m := agentd.NewMetrics(reg)
+		const name = "koinon_agentd_run_event_write_failures_total"
+		series := func() map[string]float64 {
+			fams, err := reg.Gather()
+			Expect(err).NotTo(HaveOccurred())
+			out := map[string]float64{}
+			for _, f := range fams {
+				if f.GetName() != name {
+					continue
+				}
+				for _, mt := range f.GetMetric() {
+					l := map[string]string{}
+					for _, p := range mt.GetLabel() {
+						l[p.GetName()] = p.GetValue()
+					}
+					Expect(l).To(HaveLen(2), "class and reason only (ADR 0023)")
+					out[l["class"]+"/"+l["reason"]] = mt.GetCounter().GetValue()
+				}
+			}
+			return out
+		}
+		want := map[string]float64{}
+		for _, c := range []runoutcome.EventClass{runoutcome.ClassBusiness, runoutcome.ClassDiagnostic} {
+			for _, r := range runoutcome.WriteFailures {
+				want[c.String()+"/"+string(r)] = 0
+			}
+		}
+		Expect(want).To(HaveLen(10))
+		Expect(series()).To(Equal(want))
+
+		agentd.OutcomeMetrics(m).EventWriteFailed(runoutcome.ClassDiagnostic, runoutcome.FailureCanceled)
+		want["diagnostic/canceled"] = 1
+		Expect(series()).To(Equal(want))
+	})
+
 	withMetrics := func(m *agentd.Metrics) func(*agentd.Config) {
 		return func(c *agentd.Config) { c.Metrics = m }
 	}

@@ -36,6 +36,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
@@ -45,6 +46,7 @@ import (
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/schemagate"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -122,9 +124,19 @@ func serve(ctx context.Context, cfg config) error {
 		})
 		defer func() { _ = health.Close() }()
 	}
+	// The KEKs are unwrapped as cfg.kekWrapping says (ADR 0085 decision 12): the default local KEK,
+	// or an opted-in KMS. The reconciler only unwraps.
 	var keyring *secretstore.Keyring
+	wrappers, err := wrapping.New(ctx, cfg.kekWrapping, wrapping.Service)
+	if err != nil {
+		return err
+	}
+	// The monitor sets koinon_kek_active_reachable from the watch loop; the reconciler records nothing.
+	// The keyring loads before the metrics registry exists, so the gauge is registered below.
+	kekMetrics := kekhealth.NewMetrics(nil)
+	kekMonitor := &kekhealth.Monitor{Wrappers: wrappers, Metrics: kekMetrics, Log: log}
 	for lastWarn := (time.Time{}); keyring == nil; {
-		if keyring, err = secretstore.LoadDir(cfg.kekDir); err != nil {
+		if keyring, err = secretstore.LoadDir(ctx, cfg.kekDir, wrappers, kekMonitor.Observer()); err != nil {
 			if time.Since(lastWarn) >= time.Minute {
 				log.Warn("waiting for the key-encryption keys (koinon-api creates them on its first start, or restore the KEK Secret)", "err", err)
 				lastWarn = time.Now()
@@ -137,7 +149,9 @@ func serve(ctx context.Context, cfg config) error {
 		}
 	}
 	ready.Store(true)
-	safego.GoOrStop(ctx, log, "keyring-watch-dir", stop, func(ctx context.Context) { keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log) })
+	safego.GoOrStop(ctx, log, "keyring-watch-dir", stop, func(ctx context.Context) {
+		keyring.WatchDir(ctx, cfg.kekDir, wrappers, time.Minute, log, kekMonitor.Observer())
+	})
 
 	observer, err := newSandboxObserver(cfg, kube, log)
 	if err != nil {
@@ -145,6 +159,7 @@ func serve(ctx context.Context, cfg config) error {
 	}
 
 	reg := metrics.NewRegistry()
+	reg.MustRegister(kekMetrics.ActiveReachable)
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, log); err != nil {
 		return err
 	}

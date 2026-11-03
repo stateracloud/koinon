@@ -8,7 +8,7 @@
 #
 # A required job must report a conclusion on every pull request and every push to main. A job-level
 # `if:` that skips it counts as passing, which is intended for "this change does not touch my files"
-# (and for pull-request-only jobs such as `dependency age`: rulesets only check pull request heads).
+# (and for pull-request-only steps such as the dependency age ones inside `quick checks`: rulesets only check pull request heads).
 # Only a workflow-level `paths:` filter leaves a check absent and blocks the merge.
 #
 # Required checks that other workflows produce:
@@ -22,18 +22,14 @@
 # the jobs an aggregator needs are exempt from being listed.
 aggregator go
 aggregator web
-proto
+quick checks
 generated code
 chart
 chart smoke
 docs
 escape (admission)
-migrations
-adr-lint
-claim-tests
 lint-shell
 scripts
-dependency age
 
 # produced by other workflows
 external dco

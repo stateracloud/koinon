@@ -19,6 +19,9 @@ type flightCall struct {
 	done chan struct{}
 	val  any
 	err  error
+	// waiters is how many callers joined this call instead of starting their own; it is written
+	// under flight.mu. Nothing in the router reads it: it lets a test wait until a caller has joined.
+	waiters int
 }
 
 func (f *flight) do(key string, fn func() (any, error)) (val any, err error) {
@@ -27,6 +30,7 @@ func (f *flight) do(key string, fn func() (any, error)) (val any, err error) {
 		f.calls = map[string]*flightCall{}
 	}
 	if c, ok := f.calls[key]; ok {
+		c.waiters++
 		f.mu.Unlock()
 		<-c.done
 		return c.val, c.err
