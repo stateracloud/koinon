@@ -61,6 +61,31 @@ Instructions for coding agents working on Koinon.
   anyone with write access can post `e2e-lab`: a guardrail against mistakes, not a malicious member
   (pinned integration_id / lab App: #568). Why: #281 (branch naming in githubtools) and #284 (a startup flag the chart's
   migrate Job lacked) passed every package test and failed only in a full install.
+- What `ci` runs when (Actions minutes cost money; `hack/ci-skip-heavy.sh` decides, its header and
+  `hack/ci-skip-heavy-test.sh` are the rule). The heavy jobs are the ones the `changes` job gates:
+  `go` (go-tidy, go-lint, go-vet, go-test, go-race), `web` (web-lint, web-test, web-e2e),
+  `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. The fast jobs
+  (`changes`, `proto`, `migrations`, `adr-lint`, `claim-tests`, `lint-shell`, `scripts`,
+  `dependency age`) and the other workflows (`dco`, `gitleaks`, `claim`, `e2e result`) always run.
+  A skipped heavy job reports success, so every required check still reports.
+  - Draft pull request (#593): only the fast jobs run, and `go` and `web` are RED on purpose
+    ("draft: not tested, mark ready for review"): a green draft `go` would otherwise stay the newest
+    run on the head while the ready run is still going. A draft cannot merge, so get WIP feedback
+    from `hack/preflight.sh`, not CI. Marking it ready fires
+    `ready_for_review`, which runs everything on the same head, and so does every push to a ready PR.
+    The draft state is read live (a re-run of an old draft run does not skip). Mark the PR ready
+    (`hack/ship.sh --ready`, `gh pr ready`) before you wait on it with `hack/pr-wait.sh`: a draft's
+    green is not merge evidence.
+  - Push to main (#595): everything runs, except when the push is a merge commit whose tree equals the
+    tree of its second parent (the PR head) and every required check `ci.yml` produces is green (or
+    skipped) on that head, newest run per check, made by GitHub Actions. Then the heavy jobs are
+    skipped: the merge brought nothing the head was not tested with. The head must also contain the
+    first parent, and `flavors` (advisory, but `flavor-publish` ships what it tested) must have passed
+    on the head unless nothing it builds from changed. On such a push `go` and `web` report skipped. Any doubt (a merge of an
+    out-of-date branch, an admin or direct push, a squash, a missing or red check, an API error) runs
+    everything. `flavor-publish` and the kind e2e (batched on main, nightly) are unaffected. So what
+    no single commit explains is caught by the nightly and batched e2e, not by `ci` on main.
+    `hack/release-gate.sh` reads a check that main skipped from the merged PR's head.
 - When main's kind e2e goes from green to red, `hack/e2e-bisect.sh` opens one `e2e-regression` issue
   naming the merge (or the suspects): fix forward within 2 hours, otherwise revert it. RC and
   release tags are cut only from a commit whose `quickstart` job concluded success
@@ -117,6 +142,10 @@ or adopts them.
     that branch: the `claim` check wants the claim's human to be the PR author.
 11. A PR that conflicts with main while auto-merge is on gets the label `needs-update`: merge
     `origin/main` yourself (the updater bot never pushes code to your branch).
+    The updater bot merges `main` into a branch only when the PR has auto-merge on, is not a draft,
+    is green on its current head (every required check of `hack/ci-required.txt` passed, newest run
+    per name; advisory and third-party checks do not count) and is behind `main`; a draft, a red or
+    a running PR is left alone, so sync a draft or red branch yourself when you need it.
 12. Releases: either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay
     procoduck's. Tags are immutable by ruleset: fix a bad tag with the next rc (`docs/dev/releasing.md`).
 

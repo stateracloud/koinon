@@ -14,6 +14,7 @@ import (
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/sandboxres"
+	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 )
 
 // The sections of the chart's config.yaml (charts/koinon/templates/config.yaml) that are not
@@ -110,14 +111,16 @@ type config struct {
 	providerKeysSecret string
 	providerKeysDir    string
 	kekDir             string
-	keySettle          time.Duration
-	allowedHosts       string
-	egressHosts        string
-	healthAddr         string
-	metricsAddr        string
-	accessLogOTLP      string
-	otlpTokenFile      string
-	otlpTokenSecret    string
+	// kekWrapping is how the KEKs are wrapped (wrapping.New); zero is the default local KEK.
+	kekWrapping     wrapping.Config
+	keySettle       time.Duration
+	allowedHosts    string
+	egressHosts     string
+	healthAddr      string
+	metricsAddr     string
+	accessLogOTLP   string
+	otlpTokenFile   string
+	otlpTokenSecret string
 
 	idleTimeout    time.Duration
 	archiveAfter   time.Duration

@@ -45,7 +45,7 @@
 #   claim.sh show <N> | mine [--lane L] | limits [--lane L]
 #   claim.sh adr                      reserve the next free ADR number (claim/adr-NNNN) and print it
 #   claim.sh sensitive-paths          the ruleset patterns for CODEOWNERS' sensitive section
-#   claim.sh sweep | check-pr <PR> | release-pr <PR> | update-oldest     (used by claims.yml)
+#   claim.sh sweep | check-pr <PR> | release-pr <PR> | update-oldest     (used by claims.yml, updater.yml)
 #
 # Lanes (ADR 0082, amendment):
 #   The session cap is one claim per (session, lane). A session that runs several agents at once,
@@ -1163,8 +1163,8 @@ query($o: String!, $n: String!) {
         labels(first: 50) { nodes { name } }
         commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
           __typename
-          ... on CheckRun { name status startedAt }
-          ... on StatusContext { context state }
+          ... on CheckRun { name status conclusion startedAt }
+          ... on StatusContext { context state createdAt }
         } } } } } }
       }
     }
@@ -1174,9 +1174,45 @@ query($o: String!, $n: String!) {
     statusCheckRollup: (.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])}]'
 }
 
+# required_contexts [FILE]: the required check names of hack/ci-required.txt as a JSON array (the
+# repository's source of truth; `advisory` lines are not required). The updater runs on a checkout
+# of the default branch, so the file is there.
+required_contexts() {
+  local f=${1:-${KOINON_CLAIM_REQUIRED:-$(cd "$(dirname "$0")/.." && pwd)/hack/ci-required.txt}}
+  [[ -r $f ]] || die "cannot read $f"
+  sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' -e '/^advisory /d' -e 's/^aggregator //' -e 's/^external //' "$f" | jq -R . | jq -s .
+}
+
+# JQ_LATEST: jq definitions shared by the updater's picks. A rollup keeps every run of a check name
+# on the head (a draft run, a cancelled run, a rerun), so only the newest run per name counts, and
+# only the required names: an advisory check, a third-party check or the updater's own run says
+# nothing about whether the pull request can merge. A queued run without a start time is the newest.
+# shellcheck disable=SC2016
+JQ_LATEST='
+def nm: .name // .context;
+def ts: if (.__typename == "CheckRun") and (.startedAt == null) and (.status != "COMPLETED") then "9999" else (.startedAt // .createdAt // "") end;
+def latest($req): [.statusCheckRollup[]? | select(nm | IN($req[]))] | group_by(nm) | map(max_by(ts));
+def green: if .__typename == "StatusContext" then .state == "SUCCESS"
+  else .status == "COMPLETED" and (.conclusion | IN("SUCCESS", "SKIPPED", "NEUTRAL")) end;
+'
+
+# update_target REQUIRED_JSON: stdin is open_prs output; prints the number of the pull request to
+# bring up to date, or nothing. The oldest auto-merge pull request that is behind main, not a draft,
+# and green on its own head: every required check has reported and its newest run succeeded.
+# Updating any other one only starts CI runs that are thrown away (#596): a draft is not asking to
+# merge, a red or running head changes anyway, and a conflicting one (DIRTY) is labelled needs-update.
+update_target() {
+  jq -r --argjson req "${1:?required contexts}" "$JQ_LATEST"'
+    [.[] | select(.autoMergeRequest != null and .mergeStateStatus == "BEHIND" and (.isDraft | not)
+      and ($req | length > 0)
+      and (latest($req) as $l | all($req[]; . as $r | any($l[]; nm == $r)) and all($l[]; green)))]
+    | sort_by(.createdAt) | first.number // empty'
+}
+
 cmd_update_oldest() {
-  local prs inflight target head tries=0 now
+  local prs inflight target head tries=0 now req
   now=$(server_now)
+  req=$(required_contexts)
   while :; do
     prs=$(open_prs)
     if ((tries < 3)) && jq -e '[.[] | select(.autoMergeRequest != null and .mergeStateStatus == "UNKNOWN")] | length > 0' <<<"$prs" >/dev/null; then
@@ -1184,10 +1220,11 @@ cmd_update_oldest() {
     fi
     break
   done
-  # In flight: an up-to-date auto-merge PR whose checks are still running, started within the last hour
+  # In flight: an up-to-date auto-merge PR whose required checks are still running, started within the last hour
   # (a stuck check does not block the others for ever).
-  inflight=$(jq -r --argjson now "$now" '[.[] | select(.autoMergeRequest != null and .mergeStateStatus != "BEHIND"
-    and ([.statusCheckRollup[]? | select(((.status // "COMPLETED") != "COMPLETED" or .state == "PENDING")
+  inflight=$(jq -r --argjson now "$now" --argjson req "$req" "$JQ_LATEST"'
+    [.[] | select(.autoMergeRequest != null and .mergeStateStatus != "BEHIND"
+    and ([latest($req)[] | select(((.status // "COMPLETED") != "COMPLETED" or .state == "PENDING")
          and (((.startedAt // "1970-01-01T00:00:00Z") | fromdateiso8601) > ($now - 3600)))] | length > 0)) | .number] | first // empty' <<<"$prs")
   if [[ -n $inflight ]]; then echo "::notice::#$inflight is up to date and its checks are running; not updating another branch"; return 0; fi
   # A conflicting auto-merge pull request is labelled for its author and skipped; the bot never
@@ -1202,8 +1239,8 @@ cmd_update_oldest() {
   for n in $(jq -r '.[] | select(.mergeStateStatus != "DIRTY" and ([.labels[]? | select(.name == "needs-update")] | length > 0)) | .number' <<<"$prs"); do
     drop_label "$n" needs-update
   done
-  target=$(jq -r '[.[] | select(.autoMergeRequest != null and .mergeStateStatus == "BEHIND")] | sort_by(.createdAt) | first.number // empty' <<<"$prs")
-  if [[ -z $target ]]; then echo "no auto-merge pull request is behind main"; return 0; fi
+  target=$(update_target "$req" <<<"$prs")
+  if [[ -z $target ]]; then echo "no ready, green auto-merge pull request is behind main"; return 0; fi
   head=$(jq -r --argjson n "$target" '.[] | select(.number == $n) | .headRefOid' <<<"$prs")
   gh_try -X PUT "repos/$REPO/pulls/$target/update-branch" -f "expected_head_sha=$head"
   if ((TRY_RC == 0)); then echo "updated #$target with main"

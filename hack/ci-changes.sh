@@ -50,7 +50,7 @@ else
 fi
 
 # Changes to CI itself, the Makefile or the Go module run everything.
-everything='^(\.github/workflows/ci\.yml|hack/ci-changes\.sh|Makefile|go\.mod|go\.sum)$'
+everything='^(\.github/workflows/ci\.yml|hack/ci-changes\.sh|hack/ci-skip-heavy\.sh|Makefile|go\.mod|go\.sum)$'
 
 # match <extended regexp>: some changed file matches.
 match() { grep -Eq -- "$1" <<<"$files"; }

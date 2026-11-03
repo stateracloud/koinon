@@ -19,5 +19,8 @@ if [[ $jobs != "$needs" ]]; then
   exit 1
 fi
 # shellcheck disable=SC2016 # literal GitHub expression, not a shell expansion
-grep -qF '    if: ${{ !cancelled() }}' <(sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go gate must run if: !cancelled() (runs when a part fails, not on a superseded run)"; exit 1; }
+grep -qF '    if: ${{ !cancelled() && !(github.event_name == '"'push'"' && needs.changes.outputs.skip == '"'true'"') }}' <(sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go gate must run if: !cancelled() (runs when a part fails, not on a superseded run)"; exit 1; }
+# A draft is not tested: the gate must fail on it (#593), or a vacuous green would be the newest run.
+# shellcheck disable=SC2016 # literal text of the workflow
+sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf" | grep -qF 'SKIP == true && $EVENT == pull_request' || { echo "FAIL: go gate must fail on a draft (skip=true on a pull_request)"; exit 1; }
 echo "ok: go gate covers $(echo "$jobs" | tr '\n' ' ')"

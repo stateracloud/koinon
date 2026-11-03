@@ -89,6 +89,7 @@ import (
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/schemagate"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/tokens"
 	"github.com/stateracloud/koinon/internal/tracedest"
@@ -149,6 +150,8 @@ type config struct {
 	// start when kekCreate is set and it is missing, and never overwrites it.
 	kekSecret string
 	kekCreate bool
+	// kekWrapping is how the KEKs are wrapped (wrapping.New); zero is the local Secret-held KEK.
+	kekWrapping wrapping.Config
 
 	// egressAllowedHosts and its deprecated alias providerAllowedHosts are joined: internal hosts that
 	// providers and MCP servers may name.
@@ -477,15 +480,21 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	// The secret store (ADR 0056): provider keys and connection secrets are envelopes in
-	// Postgres, wrapped by the KEKs of a mounted Secret.
+	// Postgres, wrapped by the KEKs of a mounted Secret, which are wrapped in turn as
+	// cfg.kekWrapping says (ADR 0085 decision 12). koinon-api is decrypt-only: with a KMS, new KEKs
+	// come from the key-admin Job.
 	var keyring *secretstore.Keyring
+	wrappers, err := wrapping.New(ctx, cfg.kekWrapping, wrapping.Service)
+	if err != nil {
+		return err
+	}
 	switch {
 	case cfg.kekSecret != "" && kube != nil:
 		// The chart renders no key material (a render would make new keys every time, and a new
 		// KEK loses every stored secret): koinon-api creates the Secret once, and only reads it after.
-		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret}
+		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret, Wrappers: wrappers}
 		if cfg.kekCreate {
-			created, err := keyscli.EnsureKubeSecret(ctx, kube, cfg.secretsNamespace, cfg.kekSecret, time.Now(),
+			created, err := kekStore.Ensure(ctx, time.Now(),
 				func(ctx context.Context) (bool, error) { return keyscli.AnyEnvelope(ctx, pool) })
 			if err != nil {
 				return err
@@ -499,11 +508,11 @@ func serve(ctx context.Context, cfg config) error {
 		}
 		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch", stop, func(ctx context.Context) { watchKeyring(ctx, keyring, kekStore, time.Minute) })
 	case cfg.kekDir != "":
-		if keyring, err = secretstore.LoadDir(cfg.kekDir); err != nil {
+		if keyring, err = secretstore.LoadDir(ctx, cfg.kekDir, wrappers); err != nil {
 			return err
 		}
 		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch-dir", stop, func(ctx context.Context) {
-			keyring.WatchDir(ctx, cfg.kekDir, time.Minute, slog.Default())
+			keyring.WatchDir(ctx, cfg.kekDir, wrappers, time.Minute, slog.Default())
 		})
 	default:
 		slog.Warn("no --kek-secret or --kek-dir: provider keys and connections cannot be stored")

@@ -165,25 +165,26 @@ var _ = Describe("Keyring", func() {
 })
 
 var _ = Describe("KEK directory", func() {
-	It("reads a mounted Secret and reloads it", func() {
+	It("reads a mounted Secret and reloads it", func(ctx SpecContext) {
 		dir := GinkgoT().TempDir()
 		write := func(name string, v []byte) {
 			Expect(os.WriteFile(filepath.Join(dir, name), v, 0o600)).To(Succeed())
 		}
+		var local secretstore.Wrappers
 		write("k1", secretstore.EncodeKey(key()))
 		write("active", []byte("k1\n"))
-		ring, err := secretstore.LoadDir(dir)
+		ring, err := secretstore.LoadDir(ctx, dir, local)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ring.Active()).To(Equal("k1"))
 
 		write("k2", secretstore.EncodeKey(key()))
 		write("active", []byte("k2"))
-		Expect(ring.Reload(dir)).To(Succeed())
+		Expect(ring.Reload(ctx, dir, local)).To(Succeed())
 		Expect(ring.Active()).To(Equal("k2"))
 		Expect(ring.IDs()).To(ConsistOf("k1", "k2"))
 
 		write("active", []byte("missing"))
-		Expect(ring.Reload(dir)).NotTo(Succeed())
+		Expect(ring.Reload(ctx, dir, local)).NotTo(Succeed())
 		Expect(ring.Active()).To(Equal("k2")) // a failed reload keeps the old keys
 	})
 
