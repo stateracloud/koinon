@@ -336,6 +336,22 @@ move from local KEKs, set `secrets.kek.kms.keyAdmin.addKey` to a new ID (for exa
 inactive. Back up the KEK Secret, then `koinon-api keys activate <id>` and `keys rewrap` as in the
 rotation steps. With `secrets.kek.existingSecret` the Job adds to your Secret and never creates it.
 
+#### When the key-admin Job fails for good
+
+The Job retries a few times, then stays failed (its log says why: OpenBao unreachable, a role or
+policy missing, the transit key missing). A failed Job does not run again on a plain upgrade with the
+same inputs, because its name is the hash of those inputs. Fix the cause, then:
+
+```sh
+kubectl -n koinon logs job/<the koinon-key-admin-… Job>      # why it failed
+kubectl -n koinon delete job <the koinon-key-admin-… Job>
+helm upgrade koinon <chart> -n koinon -f values.yaml          # renders the Job again; it runs once more
+```
+
+`helm install --wait` (and `helm upgrade --wait`) times out while the Job keeps failing on install,
+since koinon-api waits for the KEK Secret. A plain `helm upgrade` does not wait for the Job at all;
+only `--wait-for-jobs` does, so check the Job yourself after an upgrade that adds a KEK.
+
 ### Rolling back below the release that added key wrapping
 
 Koinon releases before key wrapping read only local KEKs. While the Secret holds any KMS-wrapped KEK,
