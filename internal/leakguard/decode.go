@@ -583,7 +583,10 @@ func decodeBase64(s string) []string {
 
 // b64Candidates are the text readings of buf, a stream of the standard base64 alphabet: at each
 // of its 4 alignments, and resynchronised.
-func b64Candidates(buf []byte) readings {
+func b64Candidates(buf []byte) readings { return b64Readings(buf, true) }
+
+// b64Readings is b64Candidates, with the resynchronised reading only when sync.
+func b64Readings(buf []byte, sync bool) readings {
 	var cands readings
 	dec := make([]byte, base64.RawStdEncoding.DecodedLen(len(buf)))
 	for off := range min(4, len(buf)+1) {
@@ -598,7 +601,9 @@ func b64Candidates(buf []byte) readings {
 			cands.add(asText(dec[:n]))
 		}
 	}
-	cands.add(resyncText(resync(buf, &b64StdCodec)))
+	if sync {
+		cands.add(resyncText(resync(buf, &b64StdCodec)))
+	}
 	return cands
 }
 
@@ -619,7 +624,10 @@ func decodeBase32(s string) []string {
 }
 
 // b32Candidates are the text readings of up, a stream of the upper-case base32 alphabet.
-func b32Candidates(up []byte) readings {
+func b32Candidates(up []byte) readings { return b32Readings(up, true) }
+
+// b32Readings is b32Candidates, with the resynchronised reading only when sync.
+func b32Readings(up []byte, sync bool) readings {
 	var cands readings
 	if r := up[:len(up)/8*8]; len(r) >= minRun {
 		dec := make([]byte, b32Raw.DecodedLen(len(r)))
@@ -627,7 +635,9 @@ func b32Candidates(up []byte) readings {
 			cands.add(asText(dec[:n]))
 		}
 	}
-	cands.add(resyncText(resync(up, &b32Codec)))
+	if sync {
+		cands.add(resyncText(resync(up, &b32Codec)))
+	}
 	return cands
 }
 
@@ -650,7 +660,10 @@ func decodeHex(s string) []string {
 
 // hexCandidates are the text readings of digits, a string of hex digits, at both alignments and
 // resynchronised.
-func hexCandidates(digits string) readings {
+func hexCandidates(digits string) readings { return hexReadings(digits, true) }
+
+// hexReadings is hexCandidates, with the resynchronised reading only when sync.
+func hexReadings(digits string, sync bool) readings {
 	var cands readings
 	for off := range min(2, len(digits)+1) {
 		d := digits[off:]
@@ -664,7 +677,9 @@ func hexCandidates(digits string) readings {
 		}
 		cands.add(asText(dec))
 	}
-	cands.add(resyncText(resync([]byte(digits), &hexCodec)))
+	if sync {
+		cands.add(resyncText(resync([]byte(digits), &hexCodec)))
+	}
 	return cands
 }
 
@@ -777,36 +792,25 @@ type readings struct {
 // maxWide is how many UTF-16 readings of one stream are kept.
 const maxWide = 4
 
+// maxPlain is how many 8-bit readings of one stream are kept: a stream has 4 alignments and a
+// resynchronised reading, and text in UTF-8 of a script of two-byte letters reads as text at two of them.
+const maxPlain = 4
+
 func (r *readings) add(o readings) {
 	r.plain = append(r.plain, o.plain...)
 	r.wide = append(r.wide, o.wide...)
 }
 
-// all returns the readings to check: the best-scoring 8-bit reading, if any, then the UTF-16
-// readings, the highest scoring maxWide of them when there are more.
+// all returns the readings to check: the 8-bit readings that are text, then the UTF-16 readings,
+// the highest scoring maxPlain and maxWide of them when there are more.
 func (r readings) all() []string {
 	var out []string
-	if t, ok := best(r.plain); ok {
-		out = append(out, t)
+	for _, p := range top(r.plain, maxPlain) {
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
 	}
-	wide := r.wide
-	if len(wide) > maxWide {
-		sc := make([]int, len(wide))
-		for i, w := range wide {
-			sc[i] = score(w)
-		}
-		idx := make([]int, len(wide))
-		for i := range idx {
-			idx[i] = i
-		}
-		sort.SliceStable(idx, func(a, b int) bool { return sc[idx[a]] > sc[idx[b]] })
-		top := make([]string, 0, maxWide)
-		for _, i := range idx[:maxWide] {
-			top = append(top, wide[i])
-		}
-		wide = top
-	}
-	for _, w := range wide {
+	for _, w := range top(r.wide, maxWide) {
 		if !slices.Contains(out, w) {
 			out = append(out, w)
 		}
@@ -814,18 +818,24 @@ func (r readings) all() []string {
 	return out
 }
 
-// best returns the candidate with the highest score (see score).
-func best(cands []string) (string, bool) {
-	bi, bn := -1, 0
+// top returns cands, or the n highest scoring of them (in their order) when there are more.
+func top(cands []string, n int) []string {
+	if len(cands) <= n {
+		return cands
+	}
+	sc := make([]int, len(cands))
+	idx := make([]int, len(cands))
 	for i, c := range cands {
-		if n := score(c); bi < 0 || n > bn {
-			bi, bn = i, n
-		}
+		sc[i], idx[i] = score(c), i
 	}
-	if bi < 0 {
-		return "", false
+	sort.SliceStable(idx, func(a, b int) bool { return sc[idx[a]] > sc[idx[b]] })
+	idx = idx[:n]
+	sort.Ints(idx)
+	out := make([]string, 0, n)
+	for _, i := range idx {
+		out = append(out, cands[i])
 	}
-	return cands[bi], true
+	return out
 }
 
 // score rates a reading: a character that folds to an ASCII letter or digit in the matching
@@ -843,7 +853,8 @@ func score(c string) int {
 		cl := classOf(t, r)
 		if r == utf8.RuneError {
 			if _, size := utf8.DecodeRuneInString(c[i:]); size == 1 {
-				r, cl = -rune(c[i])-1, clsInvis
+				n -= 8 // an invalid byte is no filler: it costs
+				continue
 			}
 		}
 		if r != 0 && cl&clsInvis != 0 {

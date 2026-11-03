@@ -34,12 +34,14 @@
 //     length is read through; the price is that prose is projected too (its letters are
 //     base64 and base32 symbols), which resynchronisation turns into nothing, at a cost the
 //     work and time budgets bound (measured on one core, GOMAXPROCS=1, on a laptop, a benign
-//     call of up to 1 MiB takes 0.05 to 0.45 s of the 1 s a call has: one argument or two halves
+//     call of up to 1 MiB takes 0.01 to 0.5 s of the 1 s a call has: one argument or two halves
 //     of plain text, base64 of base64, of UTF-16 or of random bytes, or 65 to 128 short or 8 KiB
-//     arguments, the slowest being 128 arguments of 8 KiB of base64 of UTF-16, 0.43 s. The
-//     texts of a call are decoded by up to 8 workers and the decoders of a text over 128 KiB run
-//     side by side, as a speed-up only: a pod with a small CPU limit gets no benefit, and the
-//     clock specs of evasion_test.go run on one core with a 0.6 s clock). A
+//     arguments. The slowest are 128 arguments of base64 of UTF-8 Russian, 0.5 s, and of UTF-16
+//     Chinese of 8 KiB, 0.4 s; a slower machine has a thinner margin (a reviewer measured 0.49 to
+//     0.55 s of the shapes before the windows below). The texts of a call are decoded by up to 8
+//     workers and the decoders of a text over 128 KiB run side by side, as a speed-up only: a pod
+//     with a small CPU limit gets no benefit, and the clock specs of evasion_test.go run on one
+//     core with a 0.6 s clock). A
 //     projection keeps stretches of 16 or more decoded bytes that are 60% letters, digits or
 //     spaces (ASCII punctuation and NULs do not count against them), so chance ASCII in
 //     misaligned decodings does not become a variant; shorter stretches (5 or more bytes, base64
@@ -56,9 +58,10 @@
 // The projection of a stream is also decoded whole at each alignment, so chunked base64 of
 // non-ASCII text decodes; an NUL among the printable characters does not end their run.
 // A stream has no single right reading: a reading misaligned by a byte, or of the wrong byte
-// order, can score like the real one, so none is chosen by score. The 8-bit readings (the
-// alignments, the resynchronised one) give the one with the most characters that fold to ASCII
-// letters and digits, as at most one of them is text; every UTF-16 reading (either byte order and
+// order, can score like the real one, so none is chosen by score. Every 8-bit reading that is
+// text (the alignments, the resynchronised one; UTF-8 text of a script of two-byte letters reads
+// as text at two of them) is kept, four at most, the invalid bytes of one costing it in the
+// score that picks among more; every UTF-16 reading (either byte order and
 // alignment; PowerShell's -EncodedCommand is UTF-16LE base64) that passes a loose gate is kept as
 // a reading of its own, four at most, and each is checked against the store. The gate wants the
 // characters of a reading to be a quarter of its units (spaces, punctuation, marks and emoji
@@ -87,16 +90,19 @@
 //
 // Up to MaxPairArgs (32) arguments each pair is the joined text of the two ends, decoded again,
 // so an encoded stream cut anywhere, mid-block or mid-byte, is reassembled. Above that, decoding
-// every pair again costs a call of 128 arguments seconds on one core, so the pairs are built
-// from the decoded forms the arguments already have: the argument as it is, and its deepest
-// decoding. A split is still caught there when the cut is plain text, when each half decodes on
-// its own (each half base64 or percent-encoded, whatever the other half is), and when the
-// stream is cut where its encoding is aligned (base64 at a multiple of 4 characters, hex between
-// bytes, UTF-16 base64 at a multiple of 4). It is not caught there when the stream is cut
-// inside a unit of its encoding, so that neither half decodes to the unit's text (base64 cut
-// mid-block, hex cut mid-byte) and the decoded halves then each hold fewer than 24
-// canonical characters of the leak; the joined text of all arguments in call order still
-// catches that cut for adjacent arguments.
+// every pair again costs a call of 128 arguments seconds on one core, so a pair is checked two
+// ways that cost little. First, from the decoded forms the arguments already have (the argument
+// as it is, and its deepest decoding, 40 bytes of each end, only the k-grams across the cut):
+// this catches a cut in plain text, and halves that each decode on their own (each half base64
+// or percent-encoded, whatever the other half is). Second, from a window: where the ends
+// facing each other are runs of base64 characters (either alphabet, hex and base32 among them) of
+// 4 or more, 48 characters of each are joined and decoded as a stream (the alignments, hex,
+// base32 and base64), so a stream cut anywhere, mid-block or mid-byte, between any two
+// arguments is reassembled. A window shows 36 bytes of each end, 18 characters of UTF-16, so
+// a UTF-16 leak of 24 characters cut leaving 5 or fewer on one side is not seen whole. A window costs about 15 us on one core,
+// so a call in which more than 8000 pairs of ends are runs of base64 (about 90 arguments that
+// all begin and end in base64) has no windows: its stream cut inside an encoding unit is
+// caught only for adjacent arguments, by the joined text of all arguments in call order.
 //
 // # Fingerprints (winnowing)
 //
@@ -164,7 +170,10 @@
 //     separator: base64 pieces under about 6 bytes, base32 pieces under about 10 and pieces of
 //     non-ASCII text are too short to decode, and the resynchronisation does not chain them;
 //   - a stream cut inside a unit of its encoding between two arguments that are not adjacent, in
-//     a call of more than 32 arguments (see Split reassembly);
+//     a call of more than 90 arguments that all begin and end in base64 (see Split reassembly);
+//     and, in a call of more than 32 arguments, a UTF-16 stream cut so that one side holds fewer
+//     than 6 characters of a leak whose other side is 18 or more (the window shows 18 characters
+//     of each end);
 //   - when one text holds several runs that each have several UTF-16 readings (at most 4 each),
 //     only the k-th reading of each run is combined into the k-th child, so a leak that needs
 //     the second reading of one run and the third of another is not read;

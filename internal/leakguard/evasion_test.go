@@ -315,6 +315,8 @@ var _ = Describe("Fourth review", func() {
 			Entry("100 arguments of 10 KiB, each base64 of random bytes", sliced(100, func(i int) string { return b64(randomBytes(i, 7500)) })),
 			Entry("65 arguments of 200 bytes, each base64 of UTF-16 of prose", sliced(65, func(i int) string { return b64(utf16le(prose[i*70 : i*70+70])) })),
 			Entry("128 arguments of 40 bytes, each base64 of random bytes", sliced(128, func(i int) string { return b64(randomBytes(i, 30)) })),
+			Entry("128 arguments of 3 KiB, each base64 of UTF-16 of Russian", sliced(128, func(i int) string { return b64(utf16le(string([]rune(russianProse)[i*50 : i*50+1500]))) })),
+			Entry("128 arguments of 8 KiB, each base64 of UTF-16 of Chinese", sliced(128, func(i int) string { return b64(utf16le(string([]rune(chineseProse)[i*20 : i*20+2000]))) })),
 		)
 	})
 
@@ -460,5 +462,83 @@ var _ = Describe("Pairs of many arguments", func() {
 		d, err := checker.Check(context.Background(), testScope, fp, spread(32, 3, enc[:27], 30, enc[27:]))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
+	})
+})
+
+// Sixth review: a base64 stream of UTF-8 text in a script of two-byte letters reads as text at two
+// alignments; each reading that is text is checked, not the one that scores best.
+var _ = Describe("Readings of UTF-8 base64", func() {
+	var fp *leakguard.Fingerprinter
+	BeforeEach(func() { fp = newFingerprinter(testKey) })
+	russian := "Платёжная ведомость формируется каждую ночь на узле финансовой пакетной обработки номер семь"
+	hindi := "वेतन निर्यात कार्य हर रात वित्त बैच नोड पर चलता है और रिपोर्ट फ़ाइल बनाता है"
+
+	DescribeTable("catches",
+		func(private, arg string) {
+			checker := leakguard.TaintChecker{Store: taintedStore(fp, private)}
+			d, err := checker.Check(context.Background(), testScope, fp, []string{arg})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
+		},
+		Entry("russian, std", russian, b64(russian)),
+		Entry("russian, url", russian, b64url(russian)),
+		Entry("hindi, std", hindi, b64(hindi)),
+		Entry("hindi, url", hindi, b64url(hindi)),
+		Entry("russian, shifted by one", russian, b64("x"+russian)),
+		Entry("russian, shifted by two", russian, b64("xy"+russian)),
+		Entry("hindi, shifted by one", hindi, b64("x"+hindi)),
+	)
+})
+
+// Sixth review, second finding: a stream cut anywhere between two arguments that are not
+// adjacent, in a call of more than 32 arguments, padded with arguments that hold base64 letters.
+var _ = Describe("Streams cut inside an encoding unit in a call of many arguments", func() {
+	var fp *leakguard.Fingerprinter
+	excerpt := "payroll export job runs nightly on the finance" // 40 canonical characters
+	BeforeEach(func() { fp = newFingerprinter(testKey) })
+
+	padded := func(n, i int, a string, j int, b string) []string {
+		out := make([]string, n)
+		for k := range out {
+			out[k] = []string{"filler " + fmt.Sprint(k), "true", "42", "--verbose", "report"}[k%5]
+		}
+		out[i], out[j] = a, b
+		return out
+	}
+
+	DescribeTable("catches",
+		func(first, second string) {
+			checker := leakguard.TaintChecker{Store: taintedStore(fp, excerpt)}
+			d, err := checker.Check(context.Background(), testScope, fp, padded(40, 1, first, 38, second))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
+			Expect(d.Match.Args).To(ConsistOf(1, 38))
+		},
+		Entry("base64 cut at 27", b64raw(excerpt)[:27], b64raw(excerpt)[27:]),
+		Entry("base64 cut at 30", b64raw(excerpt)[:30], b64raw(excerpt)[30:]),
+		Entry("base64 cut at 33", b64raw(excerpt)[:33], b64raw(excerpt)[33:]),
+		Entry("url base64 cut at 31", b64url(excerpt)[:31], b64url(excerpt)[31:]),
+		Entry("hex cut at 41", hexOf(excerpt)[:41], hexOf(excerpt)[41:]),
+		Entry("hex cut at 40", hexOf(excerpt)[:40], hexOf(excerpt)[40:]),
+		Entry("base64 of UTF-16 cut at 66", b64raw(utf16le(excerpt))[:66], b64raw(utf16le(excerpt))[66:]),
+	)
+})
+
+var (
+	russianProse = strings.Repeat("Платёжная ведомость формируется каждую ночь на узле финансовой пакетной обработки. ", 400)
+	chineseProse = strings.Repeat("服务器上的数据库密码存放在内部保险库中，每天晚上由财务批处理节点轮换。", 400)
+)
+
+// Plain base64 of UTF-8 Russian has two readings that are text, so it costs the most to decode:
+// the default clock, not the 0.6 s of the table, with a margin of half.
+var _ = Describe("128 arguments of base64 of UTF-8 Russian", func() {
+	It("passes within the default clock on one core", func() {
+		procs := runtime.GOMAXPROCS(1)
+		defer runtime.GOMAXPROCS(procs)
+		fp := newFingerprinter(testKey)
+		args := sliced(128, func(i int) string { return b64(string([]rune(russianProse)[i*50 : i*50+3000])) })
+		d, err := leakguard.TaintChecker{Store: taintedStore(fp, privateLine)}.Check(context.Background(), testScope, fp, args)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
 	})
 })
