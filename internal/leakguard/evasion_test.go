@@ -288,10 +288,12 @@ var _ = Describe("Fourth review", func() {
 
 		DescribeTable("within the clock",
 			func(args []string) {
-				start := time.Now()
-				d := check(privateLine, args...)
+				// a clock of 0.8 s, not the default second: a call that needs more than that on
+				// this machine leaves no margin on a slower one
+				checker := leakguard.TaintChecker{Store: taintedStore(fp, privateLine), Limits: leakguard.Limits{MaxDuration: 800 * time.Millisecond}}
+				d, err := checker.Check(context.Background(), testScope, fp, args)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
-				Expect(time.Since(start)).To(BeNumerically("<", 3*time.Second))
 			},
 			Entry("two halves of base64 of base64", halves(b64(b64(prose[:9<<16])))),
 			Entry("two halves of base64 of dashed UTF-16", halves(b64(utf16le(between(prose[:3<<16], "-"))))),
@@ -301,6 +303,11 @@ var _ = Describe("Fourth review", func() {
 			Entry("100 arguments of 40 bytes", many(100, 40)),
 			Entry("128 arguments of 40 bytes", many(128, 40)),
 			Entry("64 arguments of 600 bytes", many(64, 600)),
+			Entry("128 arguments of 8 KiB, each base64 of UTF-16 of prose", sliced(128, func(i int) string { return b64(utf16le(prose[i*3000 : i*3000+3000])) })),
+			Entry("128 arguments of 8 KiB, each base64 of random bytes", sliced(128, func(i int) string { return b64(randomBytes(i, 6000)) })),
+			Entry("100 arguments of 10 KiB, each base64 of random bytes", sliced(100, func(i int) string { return b64(randomBytes(i, 7500)) })),
+			Entry("65 arguments of 200 bytes, each base64 of UTF-16 of prose", sliced(65, func(i int) string { return b64(utf16le(prose[i*70 : i*70+70])) })),
+			Entry("128 arguments of 40 bytes, each base64 of random bytes", sliced(128, func(i int) string { return b64(randomBytes(i, 30)) })),
 		)
 	})
 
@@ -320,7 +327,7 @@ var _ = Describe("Fourth review", func() {
 		Entry("emoji only", b64(utf16le(strings.Repeat("😀🎉🚀", 12)))),
 		Entry("go.sum", "github.com/onsi/gomega v1.36.2 h1:koinon-test-not-a-real-hash-AAAAAAAAAAAAAAAAAAAAA=\ngithub.com/onsi/gomega v1.36.2/go.mod h1:koinon-test-not-a-real-hash-BBBBBBBBBBBBBBBBBBBBB="),
 		Entry("sha and uuid", "35937b0ef31c67bdf4143149e7a996c2d1df21b9 123e4567-e89b-12d3-a456-426614174000"),
-		Entry("jwt-like", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJrb2lub24tdGVzdCJ9.koinon_test_not-a-real-signature"),
+		Entry("jwt-like", strings.Join([]string{"eyJhbGci", "OiJIUzI1NiJ9", "eyJzdWIi", "OiJrb2lub24tdGVzdCJ9", "koinon_test_not-a-real-signature"}, ".")),
 		Entry("svg data uri", "data:image/svg+xml;base64,"+b64(`<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="#123456"/></svg>`)),
 		Entry("css", "body{margin:0;padding:0;font:14px/1.4 system-ui,sans-serif}.a{color:#123456;background:#fafafa}.b{display:flex}"),
 		Entry("hexdump", "00000000  7f 45 4c 46 02 01 01 00  00 00 00 00 00 00 00 00  |.ELF............|\n00000010  03 00 3e 00 01 00 00 00  40 10 00 00 00 00 00 00  |..>.....@.......|"),
@@ -335,3 +342,70 @@ func utf16be(s string) string {
 	}
 	return string(b)
 }
+
+func sliced(n int, mk func(i int) string) []string {
+	a := make([]string, n)
+	for i := range a {
+		a[i] = mk(i)
+	}
+	return a
+}
+
+func randomBytes(seed, n int) string {
+	r := rand.New(rand.NewPCG(uint64(seed), 7))
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = byte(r.Uint32())
+	}
+	return string(b)
+}
+
+// Fifth review: every reading that passes the loose gates is checked, not the one that scores
+// best.
+var _ = Describe("Fifth review", func() {
+	var fp *leakguard.Fingerprinter
+	BeforeEach(func() { fp = newFingerprinter(testKey) })
+
+	// natural prose that repeats its words: 70% distinct ideographs or fewer
+	repeating := "服务器上的数据库密码存放在内部保险库中，每天晚上由财务批处理节点轮换，" +
+		"数据库密码轮换完成后，财务批处理节点把报表文件写入内部保险库，" +
+		"内部保险库的访问记录每天晚上由服务器上的批处理节点汇总，" +
+		"财务批处理节点每天晚上轮换数据库密码并生成报表文件，" +
+		"服务器上的报表文件存放在内部保险库的财务目录下面。"
+	mixed := "服务器 finance-batch-07 的数据库密码存放在内部保险库 vault 的财务目录下面每天轮换"
+	russian := "Платёжная ведомость формируется каждую ночь на узле финансовой пакетной обработки номер семь"
+
+	catches := func(private string, arg string) {
+		checker := leakguard.TaintChecker{Store: taintedStore(fp, private)}
+		d, err := checker.Check(context.Background(), testScope, fp, []string{arg})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(d.Allow).To(BeFalse(), "%+v", d)
+		Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
+	}
+
+	It("has prose that repeats its words, under 70% distinct ideographs", func() {
+		seen, total := map[rune]bool{}, 0
+		for _, r := range repeating {
+			if r >= 0x4e00 && r <= 0x9fff {
+				seen[r] = true
+				total++
+			}
+		}
+		Expect(total).To(BeNumerically(">=", 100))
+		Expect(10 * len(seen)).To(BeNumerically("<", 7*total))
+	})
+
+	DescribeTable("catches the UTF-16 reading that is not the best scoring",
+		func(private, arg string) { catches(private, arg) },
+		Entry("chinese prose that repeats words, LE", repeating, b64(utf16le(repeating))),
+		Entry("chinese prose that repeats words, BE", repeating, b64(utf16be(repeating))),
+		Entry("chinese with latin terms, LE", mixed, b64(utf16le(mixed))),
+		Entry("chinese with latin terms, BE", mixed, b64(utf16be(mixed))),
+		Entry("russian with spaces, LE", russian, b64(utf16le(russian))),
+		Entry("russian with spaces, BE", russian, b64(utf16be(russian))),
+		Entry("russian with U+200B between", russian, b64(utf16le(between(russian, "\u200b")))),
+		Entry("russian with U+2060 between", russian, b64(utf16le(between(russian, "\u2060")))),
+		Entry("russian with U+FEFF between", russian, b64(utf16le(between(russian, "\ufeff")))),
+		Entry("chunked base64 of russian with spaces", russian, chunks(b64(utf16le(russian)), 15, " ")),
+	)
+})

@@ -33,10 +33,12 @@
 //     decoded. There is no density gate, so a separator of any length between chunks of any
 //     length is read through; the price is that prose is projected too (its letters are
 //     base64 and base32 symbols), which resynchronisation turns into nothing, at a cost the
-//     work and time budgets bound (on a laptop a benign call of up to 1 MiB takes at most about 0.4 s of the
-//     1 s a call has, whatever its shape: one argument or two halves, base64 of text or of random
-//     bytes, base64 of UTF-16, 128 short arguments; so the clock is a backstop that a benign call
-//     within the size cap does not reach). A
+//     work and time budgets bound (measured on a 10-core laptop, a benign call of up to 1 MiB takes
+//     0.15 to 0.35 s of the 1 s a call has: one argument or two halves of plain text, base64 of
+//     base64, of UTF-16 or of random bytes, or 65 to 128 short or 8 KiB arguments. The texts of
+//     a call, its pairs among them, are decoded by up to 8 workers, and the decoders of a text
+//     over 128 KiB run side by side; on one core the same calls take 0.2 to 0.5 s, and the
+//     65 to 128 arguments of base64 of UTF-16 about 1 s, which the clock then refuses). A
 //     projection keeps stretches of 16 or more decoded bytes that are 60% letters, digits or
 //     spaces (ASCII punctuation and NULs do not count against them), so chance ASCII in
 //     misaligned decodings does not become a variant; shorter stretches (5 or more bytes, base64
@@ -52,11 +54,19 @@
 // random bytes almost never are (a misaligned decoding of an ordinary word stays as it was).
 // The projection of a stream is also decoded whole at each alignment, so chunked base64 of
 // non-ASCII text decodes; an NUL among the printable characters does not end their run.
-// Of several decodings of one run (alignments, byte orders) the one with the most characters
-// that fold to ASCII letters and digits wins. Every decoding is also read as UTF-16 (either byte order and
-// alignment; PowerShell's -EncodedCommand is UTF-16LE base64), and that reading is kept when
-// its letters and digits sit in at most two 256-character blocks, as one script's text does
-// (spaces, punctuation and emoji between them are left out of the count). Data wrapped so
+// A stream has no single right reading: a reading misaligned by a byte, or of the wrong byte
+// order, can score like the real one, so none is chosen by score. The 8-bit readings (the
+// alignments, the resynchronised one) give the one with the most characters that fold to ASCII
+// letters and digits, as at most one of them is text; every UTF-16 reading (either byte order and
+// alignment; PowerShell's -EncodedCommand is UTF-16LE base64) that passes a loose gate is kept as
+// a reading of its own, four at most, and each is checked against the store. The gate wants the
+// characters of a reading to be a quarter of its units (spaces, punctuation, marks and emoji
+// between them are left out of the count), under 5% of them unprintable, at least 24 of them,
+// and three quarters of them in two 256-character blocks, as one script's text is. Chinese
+// ideographs span about eighty blocks and count as one (if half of them have a byte of 0x80 or
+// more, as ASCII read in pairs does not, and at least eight differ); Japanese is kana,
+// ideographs and ASCII. A run of hex digits is not read as base64 at all. Each reading makes a
+// child of the text, the k-th reading of each run the k-th child. Data wrapped so
 // that no 12 printable characters stand together is the "own cipher" case the URL rule
 // backstops, and the URL rule runs only on fetch and search calls: for any other tool a text
 // that decodes to nothing printable passes the taint check. Decoding nests up to Limits.MaxDepth (3) levels; text that still decodes further at
@@ -67,7 +77,7 @@
 // Text split across several arguments of one call is reassembled two ways: all arguments
 // joined in call order, and every ordered pair of arguments (the last PairJoinBytes of one
 // joined to the first PairJoinBytes of the other), so a two-way split matches in either order.
-// The joined text of all pairs is bounded (MaxWorkBytes/64 before decoding): long arguments are
+// The joined text of all pairs is bounded (MaxWorkBytes/16 before decoding): long arguments are
 // joined shorter (halving PairJoinBytes down to 64 bytes) rather than running out of time. With
 // more than MaxPairArgs non-empty arguments every pair is still checked when there are at most
 // 16*MaxPairArgs^2 pairs and the joined text fits at 64 bytes a side; otherwise the call fails

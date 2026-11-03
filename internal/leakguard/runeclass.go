@@ -58,6 +58,9 @@ var runeClasses = sync.OnceValue(func() *[1 << 16]uint8 {
 				c |= clsFold
 			}
 		}
+		if u == 0xfffd || u >= 0xfff0 {
+			c &^= clsPrint
+		}
 		t[u] = c
 	}
 	return &t
