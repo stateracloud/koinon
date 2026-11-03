@@ -49,7 +49,9 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 			Cmd:          []string{"server", "-dev", "-dev-listen-address=0.0.0.0:8200"},
 			Env:          map[string]string{"BAO_DEV_ROOT_TOKEN_ID": rootToken},
 			ExposedPorts: []string{"8200/tcp"},
-			WaitingFor:   wait.ForHTTP("/v1/sys/health").WithPort("8200/tcp").WithStartupTimeout(2 * time.Minute),
+			// The dev listener is IPv4 only, and the health check below dials the IPv4 host:
+			// wait.ForHTTP would dial "localhost", which is ::1 first on some machines (OrbStack).
+			WaitingFor: wait.ForLog("Development mode should NOT be used").WithStartupTimeout(2 * time.Minute),
 		},
 		Started: true,
 	})
@@ -60,6 +62,14 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	port, err := ctr.MappedPort(ctx, "8200/tcp")
 	Expect(err).NotTo(HaveOccurred())
 	bao = fmt.Sprintf("http://%s:%s", host, port.Port())
+	Eventually(func(g Gomega) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, bao+"/v1/sys/health", nil)
+		g.Expect(err).NotTo(HaveOccurred())
+		resp, err := http.DefaultClient.Do(req)
+		g.Expect(err).NotTo(HaveOccurred())
+		_ = resp.Body.Close()
+		g.Expect(resp.StatusCode).To(Equal(http.StatusOK))
+	}).WithTimeout(time.Minute).Should(Succeed())
 
 	// The transit engine, the key, and a decrypt-only token as koinon-api's policy would give it.
 	root(ctx, "/v1/sys/mounts/transit", map[string]any{"type": "transit"})

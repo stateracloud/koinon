@@ -9,6 +9,7 @@ package wrapping
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/spf13/pflag"
 
@@ -71,6 +72,11 @@ func New(_ context.Context, cfg Config, role Role) (secretstore.Wrappers, error)
 	var primary secretstore.Wrapper
 	switch cfg.Backend {
 	case "", BackendLocal:
+		if s := openBaoSettings(cfg.OpenBao); len(s) > 0 {
+			// Likely a half-done switch to OpenBao (the backend flag forgotten): say so, since the
+			// process would otherwise wrap new KEKs locally without a word.
+			slog.Warn("OpenBao settings are ignored: the KEK backend is local (set --kek-backend=openbao to use them)", "settings", s)
+		}
 		primary = secretstore.Local{}
 	case BackendOpenBao:
 		w, err := openbao.New(cfg.OpenBao)
@@ -85,4 +91,24 @@ func New(_ context.Context, cfg Config, role Role) (secretstore.Wrappers, error)
 		return secretstore.NewKeyAdminWrappers(primary)
 	}
 	return secretstore.NewWrappers(primary)
+}
+
+// openBaoSettings names the OpenBao settings of c that differ from the flags' defaults.
+func openBaoSettings(c openbao.Config) []string {
+	var set []string
+	add := func(name string, on bool) {
+		if on {
+			set = append(set, name)
+		}
+	}
+	add("openbao-address", c.Address != "")
+	add("openbao-ca-file", c.CACertFile != "")
+	add("openbao-namespace", c.Namespace != "")
+	add("openbao-transit-mount", c.TransitMount != "" && c.TransitMount != "transit")
+	add("openbao-key", c.Key != "")
+	add("openbao-auth-mount", c.AuthMount != "" && c.AuthMount != "kubernetes")
+	add("openbao-role", c.Role != "")
+	add("openbao-token-file", c.TokenFile != "" && c.TokenFile != openbao.DefaultTokenFile)
+	add("openbao-timeout", c.Timeout != 0)
+	return set
 }
