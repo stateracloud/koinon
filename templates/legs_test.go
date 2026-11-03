@@ -11,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/sinkclass"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -32,15 +33,45 @@ var webDeclaration = mcpservers.Declaration{Kind: mcpservers.KindFetch, Legs: []
 // toolCall matches a tool the instructions tell the agent to call, written in backticks.
 var toolCall = regexp.MustCompile("`([a-z]+(?:_[a-z]+)+)`")
 
-// knownTools are the tools the shipped templates name, with what they are under ADR 0091: the
-// platform's own questions, the forge tools (ask-tier or internal) and the external-low web tools.
-// A tool that is not here comes from an admin-allowed server nobody classified, which defaults to
-// external-high (ADR 0091 decision 4). Instructions name only auto-tier tools to call; a tool that
-// asks first is listed here so it does not count.
-var knownTools = map[string]bool{
-	"ask_user": true, "create_pull_request": true, "github_create_pull_request": true,
-	"gitea_create_pull_request": true, "comment_on_issue": true,
-	"web_url_read": true, "searxng_web_search": true,
+func boolPtr(b bool) *bool { return &b }
+
+// knownTools are the tools the shipped templates name, each with the declaration a server record
+// would carry for it (ADR 0091 decision 2): the platform's own questions (none), the forge tools
+// (code-host derived: the class follows the repository, and the org's own repositories are internal,
+// ask-tier) and the external-low web tools whose results an outsider controls. A tool that is not
+// here comes from an admin-allowed server nobody classified: sinkclass.Default() on a server with
+// mcpservers.DefaultDeclaration(), external-high with both data legs (ADR 0091 decision 4).
+var knownTools = map[string]sinkclass.Declaration{
+	"ask_user":                   {Class: sinkclass.None, Derivation: sinkclass.Fixed},
+	"create_pull_request":        {Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}},
+	"github_create_pull_request": {Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}},
+	"gitea_create_pull_request":  {Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}},
+	"comment_on_issue":           {Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}},
+	"web_url_read":               {Class: sinkclass.ExternalLow, Derivation: sinkclass.Fetch, AddressArgs: []string{"url"}, ResultUntrustedInput: boolPtr(true), ResultPrivateData: boolPtr(false)},
+	"searxng_web_search":         {Class: sinkclass.ExternalLow, Derivation: sinkclass.Fixed, ResultUntrustedInput: boolPtr(true), ResultPrivateData: boolPtr(false)},
+}
+
+// toolLegs returns the declaration of a named tool and the legs its results carry. An unlisted tool
+// is the default of both.
+func toolLegs(name string) (sinkclass.Declaration, []string) {
+	if d, ok := knownTools[name]; ok {
+		var legs []string
+		if d.ResultUntrustedInput != nil && *d.ResultUntrustedInput {
+			legs = append(legs, mcpservers.LegUntrustedInput)
+		}
+		if d.ResultPrivateData != nil && *d.ResultPrivateData {
+			legs = append(legs, mcpservers.LegPrivateData)
+		}
+		return d, legs
+	}
+	return sinkclass.Default(), mcpservers.DefaultDeclaration().Legs
+}
+
+// autoExternalHigh reports whether a call of d would run without approval to a party outside the
+// org: a fixed external-high tool. A code-host tool is derived per call and is internal for the
+// org's own repositories.
+func autoExternalHigh(d sinkclass.Declaration) bool {
+	return d.Class == sinkclass.ExternalHigh && d.Derivation == sinkclass.Fixed
 }
 
 type templateLegs struct {
@@ -74,7 +105,14 @@ func legsOf(t *templates.Template) templateLegs {
 		l.privateData = l.privateData || slices.Contains(d.Legs, mcpservers.LegPrivateData)
 	}
 	for _, m := range toolCall.FindAllStringSubmatch(t.Spec.Instructions, -1) {
-		if !knownTools[m[1]] {
+		d, legs := toolLegs(m[1])
+		if slices.Contains(legs, mcpservers.LegUntrustedInput) {
+			l.untrustedInput = true
+		}
+		if slices.Contains(legs, mcpservers.LegPrivateData) {
+			l.privateData = true
+		}
+		if autoExternalHigh(d) {
 			l.autoOutbound = true
 		}
 	}
@@ -108,6 +146,14 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 	It("reports a template that holds all three legs (negative fixture)", func() {
 		t, err := templates.Parse(readFile("testdata/legs/all-three.yaml"))
 		Expect(err).NotTo(HaveOccurred())
+		Expect(legsOf(t)).To(Equal(templateLegs{untrustedInput: true, privateData: true, autoOutbound: true}))
+		Expect(legsOf(t).all()).To(BeTrue())
+	})
+
+	It("reports a template that names an unlisted tool and no web phrasing (negative fixture)", func() {
+		t, err := templates.Parse(readFile("testdata/legs/unlisted-tool.yaml"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(webTools.MatchString(t.Spec.Instructions + t.Metadata.Description)).To(BeFalse())
 		Expect(legsOf(t)).To(Equal(templateLegs{untrustedInput: true, privateData: true, autoOutbound: true}))
 		Expect(legsOf(t).all()).To(BeTrue())
 	})
