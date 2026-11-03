@@ -284,9 +284,22 @@ func describeMode(name, valuesFile string) {
 			Expect(cl.Secret(ctx, kekSecretName(r))).NotTo(BeNil(), "the key-encryption Secret exists")
 		}, SpecTimeout(3*time.Minute))
 
+		// The MCP leak guard (ADR 0091): agentgateway fails every org MCP call closed when it cannot
+		// reach the guard, so the guard koinon-api serves must be where the chart's reconciler config
+		// points, and answer there.
+		It("serves the MCP leak guard where the reconciler's config points", func(ctx SpecContext) {
+			Expect(ready["koinon-api"]).NotTo(BeEmpty(), "koinon-api is running")
+			checkLeakGuard(ctx, r, ready["koinon-api"][0])
+		}, SpecTimeout(time.Minute))
+
 		It("starts koinon-reconciler and answers its probes", func(ctx SpecContext) {
 			ready["koinon-reconciler"] = startDeployment(ctx, rn, r, "koinon-reconciler")
 			accounted = append(accounted, "koinon-reconciler")
+			// The reconciler read mcpGuard.url from the chart's config: without it it warns and renders
+			// a gateway that refuses every org MCP call.
+			for _, w := range ready["koinon-reconciler"] {
+				Expect(w.Logs(ctx)).NotTo(ContainSubstring("no --mcp-guard-url"), "the reconciler gets the leak guard's URL")
+			}
 		}, SpecTimeout(3*time.Minute))
 
 		It("starts koinon-agentd and answers its probes", func(ctx SpecContext) {

@@ -186,7 +186,66 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	Expect(called).NotTo(BeNil(), "the server saw the tool call")
 	Expect(called.Agent).To(Equal("default/" + agentID))
 	Expect(called.Authorized).To(BeTrue())
+
+	leakGuardExfilE2E(ctx, admin, session, fake, srv.ID, res.Content[0].(*mcp.TextContent).Text)
 	return srv.ID
+}
+
+// leakGuardExfilE2E is the exfiltration case of the MCP leak guard (ADR 0084, ADR 0091) on a full
+// install: the tracker is unclassified, so its tools are external-high and its results carry both
+// legs. read_item's result above is a static stand-in for private data (the fake server answers the
+// same text to every call); once the session holds it, the agent's attempt to send it out through an
+// auto-tier tool of the same server must be stopped at the gateway by the guard, and never reach the
+// server. The call is made outside a task, so the guard refuses it (an approval needs a run); inside
+// a task the same call is an approval of the exact call (internal/mcpguard and the gateway specs).
+func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, string, ...string) (int, []byte), session *mcp.ClientSession, fake, serverID, private string) {
+	GinkgoHelper()
+	By("with both legs, an external-high call carrying what the session read is stopped by the leak guard")
+	code, body := admin(ctx, http.MethodPut, "/mcp-servers/"+serverID+"/tools/write_item/tier", `{"tier":"auto"}`)
+	Expect(code).To(Equal(http.StatusOK), string(body))
+	DeferCleanup(func(ctx context.Context) {
+		// Step 6c calls write_item through the approval proxy, where only ask-tier tools are.
+		code, body := admin(ctx, http.MethodPut, "/mcp-servers/"+serverID+"/tools/write_item/tier", `{"tier":"ask"}`)
+		Expect(code).To(Equal(http.StatusOK), string(body))
+		Eventually(func(g Gomega) {
+			res, err := session.ListTools(ctx, nil)
+			g.Expect(err).NotTo(HaveOccurred())
+			var names []string
+			for _, tl := range res.Tools {
+				names = append(names, tl.Name)
+			}
+			g.Expect(names).NotTo(ContainElement(HaveSuffix("default-tracker_write_item")))
+			g.Expect(names).To(ContainElement(HaveSuffix(scenarios.PullRequest.TrackerAskTool)))
+		}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+	})
+	var write string
+	Eventually(func(g Gomega) {
+		res, err := session.ListTools(ctx, nil)
+		g.Expect(err).NotTo(HaveOccurred())
+		for _, tl := range res.Tools {
+			if strings.HasSuffix(tl.Name, "default-tracker_write_item") {
+				write = tl.Name
+			}
+		}
+		g.Expect(write).NotTo(BeEmpty(), "write_item is served on the server's own target once it is auto")
+	}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: write, Arguments: map[string]any{"title": "notes", "body": "fyi: " + private}})
+	var text string
+	if err == nil {
+		Expect(res.IsError).To(BeTrue(), "the guard stops the call")
+		for _, c := range res.Content {
+			if tc, ok := c.(*mcp.TextContent); ok {
+				text += tc.Text
+			}
+		}
+	} else {
+		text = err.Error()
+	}
+	Expect(text).To(ContainSubstring("leak guard"), "the agent reads why it was stopped")
+	for _, r := range fakeMCPRequests(ctx, fake) {
+		Expect(r.Tool).NotTo(Equal("write_item"), "nothing the guard stopped reached the server")
+	}
 }
 
 // agentGatewayKey reads the agent's gateway key from its Secret, with a kubectl bound to the e2e

@@ -268,6 +268,15 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			Expect(approvals(ctx)).To(Equal(1))
 		})
 
+		It("refuses, in words, an external-high call outside a task, where no approval can be made", func(ctx SpecContext) {
+			_, err := pool.Exec(ctx, `UPDATE runs SET state = 'succeeded', finished_at = now(), lease_expires_at = NULL WHERE org_id = $1`, org)
+			Expect(err).NotTo(HaveOccurred())
+			r := call(ctx, "tracker", "post_message", map[string]any{"channel": "general", "text": "hello"})
+			Expect(passed(r)).To(BeFalse())
+			Expect(reason(r)).To(ContainSubstring("only possible while the agent works on a task"))
+			Expect(approvals(ctx)).To(BeZero())
+		})
+
 		It("refuses an external-low call past the byte cap, in words the agent can read", func(ctx SpecContext) {
 			note := strings.Repeat("n", 40)
 			r := call(ctx, "tracker", "fetch_page", map[string]any{"url": "https://docs.example.com/a", "note": note})

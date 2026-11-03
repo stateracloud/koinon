@@ -254,6 +254,13 @@ func (g *Guard) check(ctx context.Context, call Call) (Outcome, string, error) {
 	if !tool.Valid {
 		return refuse(v.Reason, "refused by the leak guard: this call needs a decision, and the server never published this tool"), string(a.class), nil
 	}
+	// An approval belongs to a run (ADR 0042): a call that needs one outside a task is refused, in
+	// words, rather than failed as an error of the approval store.
+	if _, err := g.q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: c.org.ID, AgentID: c.agent.ID}); errors.Is(err, pgx.ErrNoRows) {
+		return refuse(ReasonNoRun, "refused by the leak guard: this call needs a person's approval, which is only possible while the agent works on a task"), string(a.class), nil
+	} else if err != nil {
+		return Outcome{}, string(a.class), err
+	}
 	out, err := g.decider.DecidePending(ctx, Pending{
 		Org: c.org, Agent: c.agent, Server: c.server, Tool: tool.McpTool, Arguments: call.Arguments,
 		Verdict: v, Destination: a.args.Address, PayloadBytes: a.args.PayloadBytes(), Risk: a.risk(),
