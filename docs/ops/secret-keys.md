@@ -247,9 +247,8 @@ it (the default provider URL check still applies).
 A KMS is an option, not a mandate. The default keeps the KEKs in the Kubernetes Secret, as described
 above; it is fully supported and nothing here asks you to move. An install can opt in to have a KMS
 (OpenBao/Vault transit, #416, or AWS KMS, #417) wrap each KEK, so the Secret holds only ciphertext
-that is useless without the KMS. The OpenBao adapter is in the binaries (`--kek-backend=openbao`),
-but its chart settings and the key-admin Job are not released yet (#416), so there is no chart
-setting to turn on; AWS KMS follows (#417).
+that is useless without the KMS. OpenBao is set with `secrets.kek.kms` (below); AWS KMS follows
+(#417).
 
 What changes once you opt in (ADR 0085 decision 12):
 
@@ -282,6 +281,60 @@ What changes once you opt in (ADR 0085 decision 12):
 
 A local install has none of this: no key-admin Job, and koinon-api creates and adds KEKs exactly as
 before.
+
+### Setting up OpenBao (or Vault) transit
+
+On the OpenBao side (the release in namespace `koinon`, chart defaults for the names):
+
+```sh
+bao secrets enable transit
+bao write -f transit/keys/koinon-kek
+# koinon-api and the reconciler: decrypt only.
+bao policy write koinon-decrypt - <<'HCL'
+path "transit/decrypt/koinon-kek" { capabilities = ["update"] }
+HCL
+# The key-admin Job: encrypt and decrypt. Grant update, never create: with create, encrypt makes a
+# missing key on the spot, so a typo in the key name would wrap the KEK under a new key.
+bao policy write koinon-key-admin - <<'HCL'
+path "transit/encrypt/koinon-kek" { capabilities = ["update"] }
+path "transit/decrypt/koinon-kek" { capabilities = ["update"] }
+HCL
+bao auth enable kubernetes
+bao write auth/kubernetes/config kubernetes_host=https://<api server>:443 \
+  kubernetes_ca_cert=@ca.crt token_reviewer_jwt=@reviewer.jwt
+for r in api:koinon-decrypt reconciler:koinon-decrypt key-admin:koinon-key-admin; do
+  bao write auth/kubernetes/role/koinon-${r%%:*} bound_service_account_names=koinon-${r%%:*} \
+    bound_service_account_namespaces=koinon token_policies=${r#*:} token_ttl=1h
+done
+```
+
+Each role binds one service account: `koinon-api`, `koinon-reconciler` and `koinon-key-admin`
+(`<release fullname>-<component>`). OpenBao checks the pods' tokens with the TokenReview API; an
+OpenBao outside the cluster needs a reviewer token (`reviewer.jwt` above) of a service account bound
+to the `system:auth-delegator` ClusterRole. An OpenBao in the cluster can leave
+`token_reviewer_jwt` out and use its own.
+
+In the chart values:
+
+```yaml
+secrets:
+  kek:
+    kms:
+      backend: openbao
+      openbao:
+        address: https://openbao.openbao.svc:8200   # the active node; redirects are refused
+        caConfigMap: openbao-ca                     # a ConfigMap with ca.crt, when the CA is private
+        key: koinon-kek
+        # transitMount, authMount, namespace, timeout and roles.{api,reconciler,keyAdmin}
+        # default to the names above.
+```
+
+On install the key-admin Job (`koinon-key-admin-<hash>`) creates the KEK Secret with one KEK wrapped
+by OpenBao, and koinon-api restarts until the Secret is there. To add a KEK, for a rotation or the
+move from local KEKs, set `secrets.kek.kms.keyAdmin.addKey` to a new ID (for example
+`kek-20271103-a1b2`) and upgrade: the Job runs once for every change of its inputs and adds that KEK,
+inactive. Back up the KEK Secret, then `koinon-api keys activate <id>` and `keys rewrap` as in the
+rotation steps. With `secrets.kek.existingSecret` the Job adds to your Secret and never creates it.
 
 ### Rolling back below the release that added key wrapping
 

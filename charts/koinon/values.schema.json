@@ -384,7 +384,45 @@
           "additionalProperties": false,
           "properties": {
             "existingSecret": {"type": "string"},
-            "activePeriod": {"type": "string", "pattern": "^[0-9]+(h|m|s)$"}
+            "activePeriod": {"type": "string", "pattern": "^[0-9]+(h|m|s)$"},
+            "kms": {
+              "description": "Wrapping the KEKs with a KMS (ADR 0085 decision 12); local by default.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "backend": {"enum": ["local", "openbao"]},
+                "openbao": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "address": {"type": "string", "pattern": "^(|https?://[^\\s/]+/?)$"},
+                    "caConfigMap": {"type": "string"},
+                    "namespace": {"type": "string"},
+                    "transitMount": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"},
+                    "key": {"type": "string", "pattern": "^(|[A-Za-z0-9_.-]{1,128})$"},
+                    "authMount": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"},
+                    "roles": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "api": {"type": "string", "minLength": 1},
+                        "reconciler": {"type": "string", "minLength": 1},
+                        "keyAdmin": {"type": "string", "minLength": 1}
+                      }
+                    },
+                    "timeout": {"type": "string", "pattern": "^(|[0-9]+(ms|s|m))$"}
+                  }
+                },
+                "keyAdmin": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "addKey": {"type": "string", "pattern": "^(|[a-z0-9]([a-z0-9._-]{0,60}[a-z0-9])?)$"},
+                    "resources": {"type": "object"}
+                  }
+                }
+              }
+            }
           }
         }
       }
