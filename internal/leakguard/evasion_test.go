@@ -7,8 +7,10 @@ import (
 	"encoding/base32"
 	"encoding/base64"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -220,6 +222,116 @@ func derLike(n int) string {
 	b := []byte{0x30, 0x82, byte(n >> 8), byte(n)}
 	for i := range n {
 		b = append(b, byte(i*167+31))
+	}
+	return string(b)
+}
+
+// Fourth review: benign calls pass inside the clock, and the text tests read the fillers an
+// attacker puts between the characters.
+var _ = Describe("Fourth review", func() {
+	var fp *leakguard.Fingerprinter
+	excerpt := "payroll export job runs nightly on the finance" // 40 canonical characters
+	chinese := "工资导出任务每天晚上在财务批处理节点上运行并生成报表文件"
+	japanese := "給与エクスポートジョブは毎晩財務バッチノードで実行されレポートファイルを生成します"
+
+	BeforeEach(func() { fp = newFingerprinter(testKey) })
+
+	check := func(private string, args ...string) leakguard.Decision {
+		checker := leakguard.TaintChecker{Store: taintedStore(fp, private)}
+		d, err := checker.Check(context.Background(), testScope, fp, args)
+		Expect(err).NotTo(HaveOccurred())
+		return d
+	}
+
+	DescribeTable("catches",
+		func(private string, args ...string) {
+			d := check(private, args...)
+			Expect(d.Allow).To(BeFalse(), "%+v", d)
+			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
+		},
+		Entry("UTF-16LE with a pair of emoji between", excerpt, b64(utf16le(between(excerpt, "😀😀")))),
+		Entry("UTF-16LE with U+200B between", excerpt, b64(utf16le(between(excerpt, "\u200b")))),
+		Entry("UTF-16LE chinese", chinese, b64(utf16le(chinese))),
+		Entry("UTF-16BE chinese", chinese, b64(utf16be(chinese))),
+		Entry("UTF-16LE chinese with an emoji between", chinese, b64(utf16le(between(chinese, "😀")))),
+		Entry("UTF-16LE chinese with U+3000 between", chinese, b64(utf16le(between(chinese, "　")))),
+		Entry("UTF-16LE japanese", japanese, b64(utf16le(japanese))),
+		Entry("base64 with U+200B between", excerpt, b64(between(excerpt, "\u200b"))),
+		Entry("base64 with U+00AD between", excerpt, b64(between(excerpt, "\u00ad"))),
+		Entry("base64 with \\x01 between", excerpt, b64(between(excerpt, "\x01"))),
+		Entry("base64 with \\x7f between", excerpt, b64(between(excerpt, "\x7f"))),
+		Entry("base64 with \\xff between", excerpt, b64(strings.Join(strings.Split(excerpt, ""), "\xff"))),
+		Entry("base64 with two combining marks between", excerpt, b64(between(excerpt, "́̂"))),
+		Entry("chunked base64 with U+200B between", excerpt, chunks(b64(between(excerpt, "\u200b")), 15, " ")),
+	)
+
+	// A benign call is decided on its content, not on a budget: the shapes whose cost the first
+	// version of the joined text and the pairs doubled or refused.
+	Describe("a benign call passes", func() {
+		prose := strings.Repeat("Kubernetes 1.34 deprecates several beta APIs; see the release notes at https://kubernetes.io/docs/. ", 1<<20/100)
+		rnd := func() string {
+			b := make([]byte, 3<<18)
+			r := rand.New(rand.NewPCG(1, 2))
+			for i := range b {
+				b[i] = byte(r.Uint32())
+			}
+			return string(b)
+		}
+		halves := func(s string) []string { return []string{s[:len(s)/2], s[len(s)/2:]} }
+		many := func(n, l int) []string {
+			a := make([]string, n)
+			for i := range a {
+				a[i] = strings.Repeat("kubernetes release notes ", l/24+1)[:l]
+			}
+			return a
+		}
+
+		DescribeTable("within the clock",
+			func(args []string) {
+				start := time.Now()
+				d := check(privateLine, args...)
+				Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
+				Expect(time.Since(start)).To(BeNumerically("<", 3*time.Second))
+			},
+			Entry("two halves of base64 of base64", halves(b64(b64(prose[:9<<16])))),
+			Entry("two halves of base64 of dashed UTF-16", halves(b64(utf16le(between(prose[:3<<16], "-"))))),
+			Entry("two halves of base64 of random bytes", halves(b64(rnd()))),
+			Entry("two halves of base64 of UTF-16", halves(b64(utf16le(prose[:3<<17])))),
+			Entry("65 arguments of 80 bytes", many(65, 80)),
+			Entry("100 arguments of 40 bytes", many(100, 40)),
+			Entry("128 arguments of 40 bytes", many(128, 40)),
+			Entry("64 arguments of 600 bytes", many(64, 600)),
+		)
+	})
+
+	// Real text in the scripts the guard reads, encoded in the ways it decodes, holds no secret.
+	DescribeTable("leaves benign text alone",
+		func(s string) {
+			Expect(check(privateLine, s)).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
+		},
+		Entry("russian", b64(utf16le("Платёжная ведомость формируется каждую ночь на узле финансовой пакетной обработки"))),
+		Entry("chinese utf-16", b64(utf16le(chinese))),
+		Entry("chinese utf-16 with emoji", b64(utf16le(between(chinese, "😀")))),
+		Entry("chinese utf-8", b64(chinese)),
+		Entry("japanese", b64(utf16be(japanese))),
+		Entry("arabic", b64(utf16le("يتم تشغيل مهمة تصدير الرواتب كل ليلة على عقدة المعالجة المالية"))),
+		Entry("hindi", b64(utf16le("वेतन निर्यात कार्य हर रात वित्त बैच नोड पर चलता है और रिपोर्ट फ़ाइल बनाता है"))),
+		Entry("greek", b64(utf16le("Η εργασία εξαγωγής μισθοδοσίας εκτελείται κάθε βράδυ στον κόμβο οικονομικής επεξεργασίας"))),
+		Entry("emoji only", b64(utf16le(strings.Repeat("😀🎉🚀", 12)))),
+		Entry("go.sum", "github.com/onsi/gomega v1.36.2 h1:koinon-test-not-a-real-hash-AAAAAAAAAAAAAAAAAAAAA=\ngithub.com/onsi/gomega v1.36.2/go.mod h1:koinon-test-not-a-real-hash-BBBBBBBBBBBBBBBBBBBBB="),
+		Entry("sha and uuid", "35937b0ef31c67bdf4143149e7a996c2d1df21b9 123e4567-e89b-12d3-a456-426614174000"),
+		Entry("jwt-like", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJrb2lub24tdGVzdCJ9.koinon_test_not-a-real-signature"),
+		Entry("svg data uri", "data:image/svg+xml;base64,"+b64(`<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="#123456"/></svg>`)),
+		Entry("css", "body{margin:0;padding:0;font:14px/1.4 system-ui,sans-serif}.a{color:#123456;background:#fafafa}.b{display:flex}"),
+		Entry("hexdump", "00000000  7f 45 4c 46 02 01 01 00  00 00 00 00 00 00 00 00  |.ELF............|\n00000010  03 00 3e 00 01 00 00 00  40 10 00 00 00 00 00 00  |..>.....@.......|"),
+		Entry("png", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="),
+	)
+})
+
+func utf16be(s string) string {
+	var b []byte
+	for _, u := range utf16.Encode([]rune(s)) {
+		b = append(b, byte(u>>8), byte(u))
 	}
 	return string(b)
 }

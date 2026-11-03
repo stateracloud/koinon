@@ -116,9 +116,11 @@ const maxPairs = 16
 const minPairJoin = 64
 
 // pairBudgetDiv sets the joined text of all pairs of one call, before decoding, to
-// MaxWorkBytes/pairBudgetDiv (512 KiB by default): decoding and fingerprinting cost about 0.35 ms
-// per KiB, so that is about 180 ms of the second a call has.
-const pairBudgetDiv = 64
+// MaxWorkBytes/pairBudgetDiv (2 MiB by default). Plain text of that size is decoded and
+// fingerprinted in about 0.1 s on a laptop (about 0.05 ms per KiB, measured on the call
+// shapes of evasion_test.go); base64 of it costs three times that. A call of 128
+// arguments of 40 bytes, 128*127 pairs of 80 bytes, is 1.3 MiB.
+const pairBudgetDiv = 16
 
 // pairJoin returns how many bytes of each side of an argument pair to join for the arguments idx,
 // or false when the pairs cannot be checked: more than maxPairs*MaxPairArgs^2 pairs, or joined
@@ -182,7 +184,15 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 		var b strings.Builder
 		idx := make([]int, 0, len(raws))
 		for _, r := range raws {
-			b.WriteString(r.text)
+			// An argument is decoded whole on its own; in the joined text a long one is cut to
+			// its two ends, which hold the boundaries to its neighbours. Joined whole, a call of
+			// two halves of 1 MiB would cost twice a call of one.
+			if w := lim.PairJoinBytes; len(r.text) > 2*w {
+				b.WriteString(head(r.text, w))
+				b.WriteString(tail(r.text, w))
+			} else {
+				b.WriteString(r.text)
+			}
 			idx = append(idx, r.args[0])
 		}
 		raws = append(raws, rawText{b.String(), idx})
