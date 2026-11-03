@@ -189,6 +189,27 @@ func (q *Queries) EvictLeakGuardFingerprints(ctx context.Context, arg EvictLeakG
 	return result.RowsAffected(), nil
 }
 
+const getLeakGuardFeed = `-- name: GetLeakGuardFeed :one
+SELECT feed_read, feed_done FROM leak_guard_runs WHERE org_id = $1 AND run_id = $2
+`
+
+type GetLeakGuardFeedParams struct {
+	OrgID pgtype.UUID
+	RunID pgtype.UUID
+}
+
+type GetLeakGuardFeedRow struct {
+	FeedRead int64
+	FeedDone int64
+}
+
+func (q *Queries) GetLeakGuardFeed(ctx context.Context, arg GetLeakGuardFeedParams) (GetLeakGuardFeedRow, error) {
+	row := q.db.QueryRow(ctx, getLeakGuardFeed, arg.OrgID, arg.RunID)
+	var i GetLeakGuardFeedRow
+	err := row.Scan(&i.FeedRead, &i.FeedDone)
+	return i, err
+}
+
 const getLeakGuardSession = `-- name: GetLeakGuardSession :one
 SELECT org_id, agent_id, generation, fp_key, untrusted_input, private_data, evicted, created_at, updated_at FROM leak_guard_sessions
 WHERE org_id = $1 AND agent_id = $2 AND generation = $3
@@ -221,7 +242,7 @@ const lockLeakGuardRun = `-- name: LockLeakGuardRun :one
 INSERT INTO leak_guard_runs (org_id, run_id)
 VALUES ($1, $2)
 ON CONFLICT (org_id, run_id) DO UPDATE SET org_id = leak_guard_runs.org_id
-RETURNING org_id, run_id, capped_bytes, url_state, updated_at
+RETURNING org_id, run_id, capped_bytes, url_state, feed_epoch, feed_read, feed_done, updated_at
 `
 
 type LockLeakGuardRunParams struct {
@@ -239,6 +260,9 @@ func (q *Queries) LockLeakGuardRun(ctx context.Context, arg LockLeakGuardRunPara
 		&i.RunID,
 		&i.CappedBytes,
 		&i.UrlState,
+		&i.FeedEpoch,
+		&i.FeedRead,
+		&i.FeedDone,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -300,6 +324,46 @@ func (q *Queries) MarkLeakGuardEvicted(ctx context.Context, arg MarkLeakGuardEvi
 	return err
 }
 
+const markLeakGuardFeedDone = `-- name: MarkLeakGuardFeedDone :execrows
+UPDATE leak_guard_runs SET feed_done = feed_done + 1, updated_at = now()
+WHERE org_id = $1 AND run_id = $2 AND feed_epoch = $3
+`
+
+type MarkLeakGuardFeedDoneParams struct {
+	OrgID pgtype.UUID
+	RunID pgtype.UUID
+	Epoch int64
+}
+
+// The worker of epoch recorded (or had nothing to record of) the next finished tool call it read.
+func (q *Queries) MarkLeakGuardFeedDone(ctx context.Context, arg MarkLeakGuardFeedDoneParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markLeakGuardFeedDone, arg.OrgID, arg.RunID, arg.Epoch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markLeakGuardFeedRead = `-- name: MarkLeakGuardFeedRead :execrows
+UPDATE leak_guard_runs SET feed_read = feed_read + 1, updated_at = now()
+WHERE org_id = $1 AND run_id = $2 AND feed_epoch = $3
+`
+
+type MarkLeakGuardFeedReadParams struct {
+	OrgID pgtype.UUID
+	RunID pgtype.UUID
+	Epoch int64
+}
+
+// The worker of epoch read a finished tool call from the harness; it has not recorded it yet.
+func (q *Queries) MarkLeakGuardFeedRead(ctx context.Context, arg MarkLeakGuardFeedReadParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markLeakGuardFeedRead, arg.OrgID, arg.RunID, arg.Epoch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const saveLeakGuardRun = `-- name: SaveLeakGuardRun :exec
 UPDATE leak_guard_runs
 SET capped_bytes = $1, url_state = $2, updated_at = now()
@@ -320,5 +384,26 @@ func (q *Queries) SaveLeakGuardRun(ctx context.Context, arg SaveLeakGuardRunPara
 		arg.OrgID,
 		arg.RunID,
 	)
+	return err
+}
+
+const startLeakGuardFeed = `-- name: StartLeakGuardFeed :exec
+INSERT INTO leak_guard_runs (org_id, run_id, feed_epoch)
+VALUES ($1, $2, $3)
+ON CONFLICT (org_id, run_id) DO UPDATE
+SET feed_epoch = $3, feed_read = 0, feed_done = 0, updated_at = now()
+WHERE leak_guard_runs.feed_epoch <= $3
+`
+
+type StartLeakGuardFeedParams struct {
+	OrgID pgtype.UUID
+	RunID pgtype.UUID
+	Epoch int64
+}
+
+// A worker starts the run's harness under its epoch: the counts start at zero, and what an earlier
+// worker read and never recorded is gone with it (the harness's replay reports it again).
+func (q *Queries) StartLeakGuardFeed(ctx context.Context, arg StartLeakGuardFeedParams) error {
+	_, err := q.db.Exec(ctx, startLeakGuardFeed, arg.OrgID, arg.RunID, arg.Epoch)
 	return err
 }

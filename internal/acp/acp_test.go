@@ -4,9 +4,11 @@ package acp_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -314,3 +316,68 @@ func (r *slowRecorder) count() int {
 	defer r.mu.Unlock()
 	return r.n
 }
+
+// observer records the order in which updates are read off the stream and handed to the handler.
+type observer struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (o *observer) add(e string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.events = append(o.events, e)
+}
+
+func (o *observer) UpdateRead(line []byte) {
+	var m struct {
+		Params struct {
+			Update struct {
+				Content struct{ Text string } `json:"content"`
+			} `json:"update"`
+		} `json:"params"`
+	}
+	Expect(json.Unmarshal(line, &m)).To(Succeed())
+	o.add("read " + m.Params.Update.Content.Text)
+}
+
+func (o *observer) SessionUpdate(_ context.Context, n acp.SessionNotification) error {
+	o.add("handled " + acp.Flatten(n).Text)
+	return nil
+}
+
+func (o *observer) RequestPermission(context.Context, acp.PermissionRequest) (acp.Decision, error) {
+	return acp.Decision{}, nil
+}
+
+func (o *observer) got() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return slices.Clone(o.events)
+}
+
+var _ = Describe("a ReadObserver handler", func() {
+	It("sees each update as it is read, before the handler gets it, and nothing else", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		obs := &observer{}
+		conn := acp.NewConn(obs, io.Discard, fromAgentR)
+		go func() {
+			defer GinkgoRecover()
+			for i := range 2 {
+				_, err := fmt.Fprintf(fromAgentW, `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"u%d"}}}}`+"\n", i)
+				Expect(err).NotTo(HaveOccurred())
+			}
+			_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","id":7,"result":{}}`+"\n")
+			_ = fromAgentW.Close()
+		}()
+		Eventually(conn.Done()).Should(BeClosed())
+		Expect(conn.WaitUpdates(ctx)).To(BeTrue())
+		ev := obs.got()
+		Expect(ev).To(HaveLen(4), "the response is not an update")
+		for _, u := range []string{"u0", "u1"} {
+			read, handled := slices.Index(ev, "read "+u), slices.Index(ev, "handled "+u)
+			Expect(read).To(BeNumerically(">=", 0), u)
+			Expect(handled).To(BeNumerically(">", read), u)
+		}
+	})
+})

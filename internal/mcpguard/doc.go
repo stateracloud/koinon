@@ -38,6 +38,11 @@
 // taint store; the text itself is never stored. agentd computes fingerprints in the sandbox's
 // supervisor side and sends those only (State.AddFingerprints).
 //
+// The guard decides an external call only on legs that hold every tool result the harness finished
+// before it (ADR 0091 decision 4, amendment 2026-11-03): agentd counts a finished call when it reads
+// it and again when it has reported it (Feed.Read, Feed.Done), and the guard waits for the second
+// count to catch up, for at most Options.FeedWait; past it the session is taken as holding both legs.
+//
 // # Failing closed
 //
 // Every error inside the guard is a refusal, and a result the guard could not record is

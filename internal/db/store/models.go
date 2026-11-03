@@ -1821,6 +1821,9 @@ type LeakGuardRun struct {
 	RunID       pgtype.UUID
 	CappedBytes int32
 	UrlState    []byte
+	FeedEpoch   int64
+	FeedRead    int64
+	FeedDone    int64
 	UpdatedAt   pgtype.Timestamptz
 }
 

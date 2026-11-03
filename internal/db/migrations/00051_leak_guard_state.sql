@@ -55,6 +55,13 @@ CREATE TABLE leak_guard_runs (
     -- leakguard.RunState as JSON: per untrusted host the bytes charged and the SHA-256 of each
     -- distinct path and query, and the search bytes.
     url_state     jsonb       NOT NULL DEFAULT '{}',
+    -- agentd's feed (ADR 0091 decision 4, amendment 2026-11-03): feed_read counts the finished tool
+    -- calls the run's current worker (feed_epoch, runs.epoch) has read from the harness, feed_done
+    -- those it has recorded. The guard waits for feed_done to reach what feed_read was when a call
+    -- arrived before it reads the legs. A worker of another epoch counts nothing here.
+    feed_epoch    bigint      NOT NULL DEFAULT 0 CHECK (feed_epoch >= 0),
+    feed_read     bigint      NOT NULL DEFAULT 0 CHECK (feed_read >= 0),
+    feed_done     bigint      NOT NULL DEFAULT 0 CHECK (feed_done >= 0),
     updated_at    timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (org_id, run_id),
     FOREIGN KEY (org_id, run_id) REFERENCES runs (org_id, id) ON DELETE CASCADE

@@ -3,13 +3,21 @@
 package agentd_test
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"slices"
+	"strings"
+	"sync"
+	"time"
 
 	sdk "github.com/coder/acp-go-sdk"
+	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 )
 
@@ -82,6 +90,30 @@ var _ = Describe("The leak guard's feed (ADR 0091 decision 4)", func() {
 		Expect(legs).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}))
 	})
 
+	It("counts, for the guard's wait, every update that finishes a tool call, and the same ones on both sides", func() {
+		line := func(update string) []byte {
+			return []byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":` + update + `}}`)
+		}
+		for _, c := range []struct {
+			update string
+			counts bool
+		}{
+			{`{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed"}`, true},
+			{`{"sessionUpdate":"tool_call","toolCallId":"t2","kind":"execute","status":"failed"}`, true},
+			{`{"sessionUpdate":"tool_call_update","toolCallId":"t3","kind":"switch_mode","status":"completed"}`, true},
+			{`{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"in_progress"}`, false},
+			{`{"sessionUpdate":"tool_call","toolCallId":"t4","kind":"read"}`, false},
+			{`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"completed"}}`, false},
+		} {
+			read, handled := agentd.FeedCounts(line(c.update))
+			Expect(read).To(Equal(c.counts), c.update)
+			Expect(handled).To(Equal(c.counts), c.update)
+			// The handler sees the update after the SDK decoded it: the count must not change.
+			_, handled = agentd.FeedCounts(line(string(update(c.update))))
+			Expect(handled).To(Equal(c.counts), "after the SDK's round trip: "+c.update)
+		}
+	})
+
 	It("counts delete, move and think as private data, and reports nothing for a mode switch or other updates", func() {
 		for _, kind := range []string{"delete", "move", "think"} {
 			legs, _, ok := finished(update(`{"sessionUpdate":"tool_call","toolCallId":"k-` + kind + `","title":"x","kind":"` + kind + `","status":"completed"}`))
@@ -92,5 +124,97 @@ var _ = Describe("The leak guard's feed (ADR 0091 decision 4)", func() {
 		Expect(ok).To(BeFalse())
 		_, _, ok = finished(update(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}`))
 		Expect(ok).To(BeFalse())
+	})
+})
+
+// recordingFeed is a TaintFeed that records what agentd tells the leak guard, in order.
+type recordingFeed struct {
+	mu     sync.Mutex
+	events []string
+	epochs []int64
+}
+
+func (f *recordingFeed) add(e string, epoch int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, e)
+	f.epochs = append(f.epochs, epoch)
+}
+
+func (f *recordingFeed) Report(_ context.Context, _, _ pgtype.UUID, legs mcpguard.Legs, _ []string) error {
+	f.add(fmt.Sprintf("report private=%t untrusted=%t", legs.PrivateData, legs.UntrustedInput), -1)
+	return nil
+}
+
+func (f *recordingFeed) Start(_ context.Context, _, _ pgtype.UUID, epoch int64) error {
+	f.add("start", epoch)
+	return nil
+}
+
+func (f *recordingFeed) Read(_ context.Context, _, _ pgtype.UUID, epoch int64) error {
+	f.add("read", epoch)
+	return nil
+}
+
+func (f *recordingFeed) Done(_ context.Context, _, _ pgtype.UUID, epoch int64) error {
+	f.add("done", epoch)
+	return nil
+}
+
+func (f *recordingFeed) snapshot() ([]string, []int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.events), slices.Clone(f.epochs)
+}
+
+var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2026-11-03)", func() {
+	It("counts each finished tool call when it is read and again once it is reported, under the run's epoch", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e.harness.set(func(h *harness) {
+			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
+				defer GinkgoRecover()
+				// A shell read of repository text, then a fetch, then a call still running.
+				Expect(say(sdk.StartToolCall("c1", "bash", sdk.WithStartKind(sdk.ToolKindExecute)))).To(Succeed())
+				Expect(say(sdk.UpdateToolCall("c1", sdk.WithUpdateStatus(sdk.ToolCallStatusCompleted),
+					sdk.WithUpdateRawOutput(map[string]any{"output": "koinon-test private repository line"})))).To(Succeed())
+				Expect(say(sdk.StartToolCall("c2", "webfetch", sdk.WithStartKind(sdk.ToolKindFetch), sdk.WithStartStatus(sdk.ToolCallStatusCompleted)))).To(Succeed())
+				Expect(say(sdk.StartToolCall("c3", "bash", sdk.WithStartKind(sdk.ToolKindExecute)))).To(Succeed())
+				return true
+			}
+		})
+		feed := &recordingFeed{}
+		r := e.enqueue(ctx, e.task(ctx, "feed"))
+		e.pool("agentd-feed", func(c *agentd.Config) { c.Taint = feed })
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		events, epochs := feed.snapshot()
+		Expect(events).To(HaveLen(7))
+		Expect(events[0]).To(Equal("start"), "the counts start before the harness runs")
+		claimed := getRun(ctx, r)
+		for i, ev := range events {
+			if ev == "start" || ev == "read" || ev == "done" {
+				Expect(epochs[i]).To(Equal(claimed.Epoch), ev)
+			}
+		}
+		// Each finished call: read before it is reported, reported before it is done.
+		reads, reports, dones := []int{}, []int{}, []int{}
+		for i, ev := range events {
+			switch {
+			case ev == "read":
+				reads = append(reads, i)
+			case strings.HasPrefix(ev, "report"):
+				reports = append(reports, i)
+			case ev == "done":
+				dones = append(dones, i)
+			}
+		}
+		Expect(reads).To(HaveLen(2))
+		Expect(reports).To(HaveLen(2))
+		Expect(dones).To(HaveLen(2))
+		for k := range 2 {
+			Expect(reads[k]).To(BeNumerically("<", reports[k]))
+			Expect(reports[k]).To(BeNumerically("<", dones[k]))
+		}
+		Expect(events[reports[0]]).To(Equal("report private=true untrusted=false"))
+		Expect(events[reports[1]]).To(Equal("report private=false untrusted=true"))
 	})
 })

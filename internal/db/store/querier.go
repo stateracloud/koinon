@@ -382,6 +382,7 @@ type Querier interface {
 	// error without a status). Only the statuses in @statuses count. No row when the provider
 	// refused nothing in the window.
 	GetLastUpstreamRefusal(ctx context.Context, arg GetLastUpstreamRefusalParams) (GetLastUpstreamRefusalRow, error)
+	GetLeakGuardFeed(ctx context.Context, arg GetLeakGuardFeedParams) (GetLeakGuardFeedRow, error)
 	GetLeakGuardSession(ctx context.Context, arg GetLeakGuardSessionParams) (LeakGuardSession, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
@@ -812,6 +813,10 @@ type Querier interface {
 	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
 	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
 	MarkLeakGuardEvicted(ctx context.Context, arg MarkLeakGuardEvictedParams) error
+	// The worker of epoch recorded (or had nothing to record of) the next finished tool call it read.
+	MarkLeakGuardFeedDone(ctx context.Context, arg MarkLeakGuardFeedDoneParams) (int64, error)
+	// The worker of epoch read a finished tool call from the harness; it has not recorded it yet.
+	MarkLeakGuardFeedRead(ctx context.Context, arg MarkLeakGuardFeedReadParams) (int64, error)
 	// The declaring Secret was deleted: keep the row, stop serving it.
 	MarkMCPServerRemoved(ctx context.Context, arg MarkMCPServerRemovedParams) error
 	// Tools the server did not list this time.
@@ -1041,6 +1046,9 @@ type Querier interface {
 	// The system checks of an org since @since: requests and cost. They count against the org's
 	// monthly cap and the platform ceiling.
 	SpendSystemSince(ctx context.Context, arg SpendSystemSinceParams) (SpendSystemSinceRow, error)
+	// A worker starts the run's harness under its epoch: the counts start at zero, and what an earlier
+	// worker read and never recorded is gone with it (the harness's replay reports it again).
+	StartLeakGuardFeed(ctx context.Context, arg StartLeakGuardFeedParams) error
 	// The questions became visible: their recipients start waiting now.
 	StartQuestionRecipientsWaiting(ctx context.Context, arg StartQuestionRecipientsWaitingParams) error
 	// Totals per run, for the runs in @run_ids that have spend.
