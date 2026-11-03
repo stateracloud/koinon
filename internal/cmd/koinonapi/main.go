@@ -71,6 +71,7 @@ import (
 	"github.com/stateracloud/koinon/internal/declarative"
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/ledger"
@@ -490,6 +491,8 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	// KMS-wrapped KEKs are bound to the install ID the database holds (#615).
+	wrappers = wrappers.WithInstallID(installid.Source(pool))
 	// On every load and reload: probe the active KEK's wrapping key (koinon_kek_active_reachable,
 	// registered below with the other metrics) and record the KEK fingerprints (#591).
 	kekMetrics := kekhealth.NewMetrics(nil)

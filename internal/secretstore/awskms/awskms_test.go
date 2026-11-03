@@ -84,6 +84,10 @@ var _ = Describe("the AWS KMS wrapper", func() {
 		)
 	})
 
+	Describe("the install binding contract (#615)", func() {
+		secretstoretest.InstallBindingContract(func() secretstore.Wrapper { return withKey(testKey) })
+	})
+
 	It("names its backend and the key as configured", func() {
 		w := withKey(testKey)
 		Expect(w.Backend()).To(Equal("awskms"))
@@ -155,9 +159,10 @@ var _ = Describe("the AWS KMS wrapper", func() {
 		Expect(err.Error()).To(ContainSubstring("InvalidKeyUsageException"))
 	})
 
-	It("binds a KEK to its ID through secretstore.Wrappers", func(ctx SpecContext) {
+	It("binds a KEK to its ID and the install through secretstore.Wrappers", func(ctx SpecContext) {
 		ws, err := secretstore.NewKeyAdminWrappers(withKey(testKey))
 		Expect(err).NotTo(HaveOccurred())
+		ws = ws.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 		stored, err := ws.Wrap(ctx, "koinon-test-1", kek)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(stored.Backend).To(Equal("awskms"))
@@ -170,11 +175,18 @@ var _ = Describe("the AWS KMS wrapper", func() {
 
 		svc, err := secretstore.NewWrappers(withKey(testKey))
 		Expect(err).NotTo(HaveOccurred())
+		svc = svc.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 		got, err = svc.Unwrap(ctx, "koinon-test-1", stored)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(Equal(kek))
 		_, err = svc.Wrap(ctx, "koinon-test-3", kek)
 		Expect(err).To(MatchError(secretstore.ErrKeyAdminWraps))
+
+		By("a decrypt-only service of another install gets a KEK that does not open, from a KMS that answered")
+		other := svc.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallB))
+		_, err = other.Unwrap(ctx, "koinon-test-1", stored)
+		Expect(err).To(MatchError(secretstore.ErrOpen))
+		Expect(err).NotTo(MatchError(secretstore.ErrUnreachable))
 	})
 
 	It("signs in with IRSA through STS AssumeRoleWithWebIdentity", func(ctx SpecContext) {

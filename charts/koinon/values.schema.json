@@ -439,6 +439,7 @@
                   "additionalProperties": false,
                   "properties": {
                     "addKey": {"type": "string", "pattern": "^(|[a-z0-9]([a-z0-9._-]{0,60}[a-z0-9])?)$", "not": {"const": "active"}, "description": "A KEK ID to add; \"active\" is the keyring's pointer, not an ID."},
+                    "rewrapUnbound": {"type": "boolean", "description": "Bind the KEKs wrapped before #615 to the install ID; a binary older than #615 cannot read them then."},
                     "resources": {"type": "object"}
                   }
                 }

@@ -36,6 +36,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/memlimit"
@@ -131,6 +132,8 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	// KMS-wrapped KEKs are bound to the install ID the database holds (#615).
+	wrappers = wrappers.WithInstallID(installid.Source(pool))
 	// The monitor sets koinon_kek_active_reachable from the watch loop; the reconciler records nothing.
 	// The keyring loads before the metrics registry exists, so the gauge is registered below.
 	kekMetrics := kekhealth.NewMetrics(nil)

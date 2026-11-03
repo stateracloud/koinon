@@ -38,6 +38,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/project"
@@ -240,7 +241,7 @@ func (t *Tool) Status(ctx context.Context) error {
 			state = "MISSING"
 		}
 		if k := ks.Keys[id]; k != nil {
-			wrapped, fp = storedName(ks, id), secretstore.Fingerprint(k)
+			wrapped, fp = storedName(ks, id)+bindingNote(ks, id), secretstore.Fingerprint(k)
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", id, state, usage[id], wrapped, fp)
 	}
@@ -268,7 +269,55 @@ func (t *Tool) Status(ctx context.Context) error {
 		}
 	}
 	t.reachability(ctx, ks)
+	if err := t.installBinding(ctx, ks); err != nil {
+		return err
+	}
 	return t.fingerprintCheck(ctx, ks)
+}
+
+// bindingNote says whether a KMS-wrapped KEK is bound to the install (#615): ", bound" or
+// ", unbound" (wrapped before #615). A local KEK cannot be bound and gets nothing.
+func bindingNote(ks KeySet, id string) string {
+	s, ok := ks.Stored[id]
+	switch {
+	case !ok || s.Backend == secretstore.BackendLocal:
+		return ""
+	case s.Bound():
+		return ", bound"
+	default:
+		return ", unbound"
+	}
+}
+
+// installBinding prints the install ID the KMS-wrapped KEKs are bound to, and names the KEKs that
+// are not bound yet. A key set of local KEKs only says nothing: they cannot be bound.
+func (t *Tool) installBinding(ctx context.Context, ks KeySet) error {
+	var unbound []string
+	kms := false
+	for _, id := range slices.Sorted(maps.Keys(ks.Stored)) {
+		s := ks.Stored[id]
+		if s.Backend == secretstore.BackendLocal {
+			continue
+		}
+		kms = true
+		if !s.Bound() {
+			unbound = append(unbound, id)
+		}
+	}
+	if !kms {
+		return nil
+	}
+	if t.Pool != nil {
+		install, err := installid.Read(ctx, t.Pool)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(t.Out, "The install ID is %s: KEKs wrapped by a KMS since #615 are bound to it and open only next to this database.\n", install)
+	}
+	for _, id := range unbound {
+		_, _ = fmt.Fprintf(t.Out, "KEK %s is not bound to the install (wrapped before #615): it would also open next to another install's database. Bind it with the key-admin Job (secrets.kek.kms.keyAdmin.rewrapUnbound), or rotate it out.\n", id)
+	}
+	return nil
 }
 
 // reachability prints whether the active KEK's wrapping key answers a probe, and warns about a

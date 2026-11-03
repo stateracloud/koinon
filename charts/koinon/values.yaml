@@ -395,6 +395,12 @@ secrets:
         # rewrap, keys retire the old ones. The Job runs again whenever this or the KMS settings
         # change; with nothing to do it changes nothing.
         addKey: ""
+        # Every KEK the Job wraps is bound to the install ID in the database (#615): a KEK Secret
+        # copied to another install, or a database restored into the wrong one, does not open. true
+        # also binds the KEKs of the primary wrapping key wrapped before that (the KEKs themselves
+        # are unchanged). A binary older than #615 cannot read a bound KEK, so leave it false until
+        # you will not roll back below it (docs/ops/secret-keys.md).
+        rewrapUnbound: false
         resources:
           requests:
             cpu: 10m

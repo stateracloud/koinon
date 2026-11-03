@@ -129,7 +129,8 @@ var _ = Describe("the KEK monitor", func() {
 		kms := &secretstoretest.FakeKMS{}
 		admin, err := secretstore.NewKeyAdminWrappers(kms)
 		Expect(err).NotTo(HaveOccurred())
-		w, err := admin.Wrap(ctx, "kek-1", key(3))
+		install := secretstore.StaticInstallID(secretstoretest.InstallA)
+		w, err := admin.WithInstallID(install).Wrap(ctx, "kek-1", key(3))
 		Expect(err).NotTo(HaveOccurred())
 		enc, err := w.Encode()
 		Expect(err).NotTo(HaveOccurred())
@@ -139,6 +140,7 @@ var _ = Describe("the KEK monitor", func() {
 
 		service, err := secretstore.NewWrappers(kms)
 		Expect(err).NotTo(HaveOccurred())
+		service = service.WithInstallID(install)
 		mon := &kekhealth.Monitor{Wrappers: service, Metrics: m, Recorder: &kekhealth.Recorder{Q: db}, Log: log}
 		ring, err := secretstore.LoadDir(ctx, dir, service, mon.Observer())
 		Expect(err).NotTo(HaveOccurred())
