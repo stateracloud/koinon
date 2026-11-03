@@ -39,6 +39,17 @@ n1=$(job_name) n2=$(job_name) n3=$(job_name --set secrets.kek.kms.keyAdmin.addKe
 [[ $n1 != "$n3" ]] || fail "key-admin Job name changes with addKey"
 n4=$(job_name --set image.tag=9.9.9)
 [[ $n1 != "$n4" ]] || fail "key-admin Job name changes with the image"
+# A long release name cuts the prefix, never the hash: otherwise a changed template would keep the
+# name and the upgrade would fail on the Job's immutable spec.
+long=(--set fullnameOverride=koinon-a-release-name-long-enough-to-fill-sixty-three-chars)
+l1=$(job_name "${long[@]}") l2=$(job_name "${long[@]}" --set secrets.kek.kms.keyAdmin.addKey=kek-20261103-aaaa)
+[[ ${#l1} -le 63 && $l1 =~ -[0-9a-f]{10}$ ]] || fail "key-admin Job name keeps its hash within 63 characters, got '$l1'"
+[[ $l1 != "$l2" ]] || fail "key-admin Job name changes with addKey under a long fullname ($l1)"
+
+# The Job accepts no connections, as the migrate Job.
+np=$(render --show-only templates/networkpolicy.yaml "${kms[@]}")
+grep -A20 '^  name: koinon-key-admin$' <<<"$np" | grep -q 'policyTypes: \[Ingress\]' || fail "key-admin NetworkPolicy denies ingress"
+lacks "no key-admin NetworkPolicy with the local KEK" 'name: koinon-key-admin$' --show-only templates/networkpolicy.yaml
 
 # The services decrypt only: each signs in as its own role, and koinon-api no longer creates the
 # KEK Secret (only the Job can wrap its first KEK).
@@ -73,7 +84,9 @@ done
 if render --set secrets.kek.kms.keyAdmin.addKey=kek-20261103-aaaa >/dev/null 2>&1; then
 	fail "keyAdmin.addKey without a KMS must not render"
 fi
-if render "${kms[@]}" --set secrets.kek.kms.keyAdmin.addKey=Not_An_ID >/dev/null 2>&1; then
-	fail "keyAdmin.addKey must be a KEK ID"
-fi
+for bad_id in Not_An_ID active; do
+	if render "${kms[@]}" --set secrets.kek.kms.keyAdmin.addKey=$bad_id >/dev/null 2>&1; then
+		fail "keyAdmin.addKey must be a KEK ID, not $bad_id"
+	fi
+done
 has "plain http on the loopback renders" 'KOINON_OPENBAO_ADDRESS' "${kms[@]}" --set secrets.kek.kms.openbao.address=http://127.0.0.1:8200

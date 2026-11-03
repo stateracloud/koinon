@@ -1,0 +1,15 @@
+# rc.9-shaped benign web search queries. One per line.
+kubernetes 1.34 release notes deprecated apis
+argo cd 3.1 upgrade guide breaking changes
+cert-manager v1.19.0 changelog
+postgresql 17.2 end of life date
+cilium 1.16.1 vs 1.16.0 bug fixes
+helm chart values.schema.json examples
+opencode 2.2.0 acp support
+best practices for prometheus node-exporter textfile collector
+grafana loki 3.3 retention configuration
+CVE-2026-12345 affected versions
+how to rotate postgres passwords with external secrets operator
+what is the lethal trifecta in AI agents
+mcp-server-fetch redirect handling
+terraform aws provider 6.0 release date
