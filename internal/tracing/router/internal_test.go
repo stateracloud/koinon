@@ -643,13 +643,14 @@ func TestHangingDatabaseDoesNotStopTheReceiver(t *testing.T) {
 	t.Cleanup(release) // before r.Close, which waits for the workers
 	srv := httptest.NewServer(r.Handler())
 	defer srv.Close()
+	client := &http.Client{Timeout: hangBound} // a receiver that hangs fails the post, not the package
 	post := func() (time.Duration, int) {
 		sp := span(pOrg, [16]byte{1}, false, 0)
 		raw, _ := proto.Marshal(&coltracepb.ExportTraceServiceRequest{ResourceSpans: []*tracepb.ResourceSpans{{ScopeSpans: []*tracepb.ScopeSpans{{Spans: []*tracepb.Span{sp}}}}}})
 		start := time.Now()
 		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL, bytes.NewReader(raw))
 		req.Header.Set("Content-Type", "application/x-protobuf")
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -666,6 +667,11 @@ func TestHangingDatabaseDoesNotStopTheReceiver(t *testing.T) {
 	if n := st.attrs.Load(); n != 1 {
 		t.Errorf("the database was asked %d times while it hung; the workers share one read", n)
 	}
+	// The second worker joins the read in flight before it fails, so the count below sees the shared
+	// read rather than a worker that had not got there yet.
+	trace := [16]byte{1}
+	fkey := "attr/" + pOrg.String() + "/" + pRun.String() + "/" + string(trace[:]) // as Router.attribute keys it
+	eventually(t, "the second worker joined the read", func() bool { return r.fl.waiting(fkey) >= 1 })
 	// The read fails; the spans still in the intake are dropped on the remembered failure.
 	release()
 	discarded := func(reason string) float64 { return testutilValue(r.metrics.Discarded.WithLabelValues(reason)) }

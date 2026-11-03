@@ -285,7 +285,9 @@ var _ = Describe("Destination queues", func() {
 		e.post(named(tr.tool(false), "s0"))
 		Eventually(func() int { return len(g.times(ep)) }).Should(Equal(1))
 		e.post(named(tr.tool(false), "s1")) // queued behind the stuck one
-		time.Sleep(20 * time.Millisecond)
+		Eventually(func() float64 {
+			return testutil.ToFloat64(e.r.Metrics().QueueDepth.WithLabelValues("org", "generic"))
+		}).Should(Equal(1.0), "s1 is queued before the destination is deleted")
 		e.routes.set(uid(orgA)) // the admin deletes the destination
 		e.clock.Advance(time.Second)
 		e.post(named(tr.tool(false), "s2"))
