@@ -293,31 +293,41 @@ var _ = Describe("Fourth review", func() {
 		BeforeEach(func() { procs = runtime.GOMAXPROCS(1) })
 		AfterEach(func() { runtime.GOMAXPROCS(procs) })
 
-		DescribeTable("within the clock on one core",
-			func(args []string) {
-				// a clock of 0.6 s, not the default second: a call that needs more than that on
-				// this machine leaves no margin on a slower one
-				checker := leakguard.TaintChecker{Store: taintedStore(fp, privateLine), Limits: leakguard.Limits{MaxDuration: 600 * time.Millisecond}}
-				d, err := checker.Check(context.Background(), testScope, fp, args)
+		DescribeTable("within the work cap",
+			func(args []string, workCap int) {
+				checker := leakguard.TaintChecker{Store: taintedStore(fp, privateLine)}
+				d, work, err := checker.CheckWork(context.Background(), testScope, fp, args)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
+				Expect(work).To(BeNumerically("<=", int64(workCap)))
 			},
-			Entry("two halves of base64 of base64", halves(b64(b64(prose[:9<<16])))),
-			Entry("two halves of base64 of dashed UTF-16", halves(b64(utf16le(between(prose[:3<<16], "-"))))),
-			Entry("two halves of base64 of random bytes", halves(b64(rnd()))),
-			Entry("two halves of base64 of UTF-16", halves(b64(utf16le(prose[:3<<17])))),
-			Entry("65 arguments of 80 bytes", many(65, 80)),
-			Entry("100 arguments of 40 bytes", many(100, 40)),
-			Entry("128 arguments of 40 bytes", many(128, 40)),
-			Entry("64 arguments of 600 bytes", many(64, 600)),
-			Entry("128 arguments of 8 KiB, each base64 of UTF-16 of prose", sliced(128, func(i int) string { return b64(utf16le(prose[i*3000 : i*3000+3000])) })),
-			Entry("128 arguments of 8 KiB, each base64 of random bytes", sliced(128, func(i int) string { return b64(randomBytes(i, 6000)) })),
-			Entry("100 arguments of 10 KiB, each base64 of random bytes", sliced(100, func(i int) string { return b64(randomBytes(i, 7500)) })),
-			Entry("65 arguments of 200 bytes, each base64 of UTF-16 of prose", sliced(65, func(i int) string { return b64(utf16le(prose[i*70 : i*70+70])) })),
-			Entry("128 arguments of 40 bytes, each base64 of random bytes", sliced(128, func(i int) string { return b64(randomBytes(i, 30)) })),
-			Entry("128 arguments of 3 KiB, each base64 of UTF-16 of Russian", sliced(128, func(i int) string { return b64(utf16le(string([]rune(russianProse)[i*50 : i*50+1500]))) })),
-			Entry("128 arguments of 8 KiB, each base64 of UTF-16 of Chinese", sliced(128, func(i int) string { return b64(utf16le(string([]rune(chineseProse)[i*20 : i*20+2000]))) })),
+			Entry("two halves of base64 of base64", halves(b64(b64(prose[:9<<16]))), 12000000),
+			Entry("two halves of base64 of dashed UTF-16", halves(b64(utf16le(between(prose[:3<<16], "-")))), 7400000),
+			Entry("two halves of base64 of random bytes", halves(b64(rnd())), 5500000),
+			Entry("two halves of base64 of UTF-16", halves(b64(utf16le(prose[:3<<17]))), 7400000),
+			Entry("65 arguments of 80 bytes", many(65, 80), 1700000),
+			Entry("100 arguments of 40 bytes", many(100, 40), 900000),
+			Entry("128 arguments of 40 bytes", many(128, 40), 1500000),
+			Entry("64 arguments of 600 bytes", many(64, 600), 700000),
+			Entry("128 arguments of 8 KiB, each base64 of UTF-16 of prose", sliced(128, func(i int) string { return b64(utf16le(prose[i*3000 : i*3000+3000])) }), 13800000),
+			Entry("128 arguments of 8 KiB, each base64 of random bytes", sliced(128, func(i int) string { return b64(randomBytes(i, 6000)) }), 5600000),
+			Entry("100 arguments of 10 KiB, each base64 of random bytes", sliced(100, func(i int) string { return b64(randomBytes(i, 7500)) }), 4900000),
+			Entry("65 arguments of 200 bytes, each base64 of UTF-16 of prose", sliced(65, func(i int) string { return b64(utf16le(prose[i*70 : i*70+70])) }), 1700000),
+			Entry("128 arguments of 40 bytes, each base64 of random bytes", sliced(128, func(i int) string { return b64(randomBytes(i, 30)) }), 1500000),
+			Entry("128 arguments of 3 KiB, each base64 of UTF-16 of Russian", sliced(128, func(i int) string { return b64(utf16le(string([]rune(russianProse)[i*50 : i*50+1500]))) }), 16700000),
+			Entry("128 arguments of 8 KiB, each base64 of UTF-16 of Chinese", sliced(128, func(i int) string { return b64(utf16le(string([]rune(chineseProse)[i*20 : i*20+2000]))) }), 14300000),
+			Entry("128 arguments of 8 KiB, each base64 of UTF-8 of Russian", sliced(128, func(i int) string { return b64(string([]rune(russianProse)[i*50 : i*50+3000])) }), 13400000),
 		)
+
+		// The one spec against the wall clock: the real MaxDuration, on one core, and serial, so
+		// that no other spec of a parallel run shares the core. The shape is the slowest one that
+		// failed on a loaded lab node (3 CPUs, other packages in parallel) before the work caps.
+		It("passes within the real clock of a second on one core", Serial, func() {
+			args := sliced(128, func(i int) string { return b64(string([]rune(russianProse)[i*50 : i*50+3000])) })
+			d, err := leakguard.TaintChecker{Store: taintedStore(fp, privateLine)}.Check(context.Background(), testScope, fp, args)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
+		})
 	})
 
 	// Real text in the scripts the guard reads, encoded in the ways it decodes, holds no secret.
@@ -528,17 +538,3 @@ var (
 	russianProse = strings.Repeat("Платёжная ведомость формируется каждую ночь на узле финансовой пакетной обработки. ", 400)
 	chineseProse = strings.Repeat("服务器上的数据库密码存放在内部保险库中，每天晚上由财务批处理节点轮换。", 400)
 )
-
-// Plain base64 of UTF-8 Russian has two readings that are text, so it costs the most to decode:
-// the default clock, not the 0.6 s of the table, with a margin of half.
-var _ = Describe("128 arguments of base64 of UTF-8 Russian", func() {
-	It("passes within the default clock on one core", func() {
-		procs := runtime.GOMAXPROCS(1)
-		defer runtime.GOMAXPROCS(procs)
-		fp := newFingerprinter(testKey)
-		args := sliced(128, func(i int) string { return b64(string([]rune(russianProse)[i*50 : i*50+3000])) })
-		d, err := leakguard.TaintChecker{Store: taintedStore(fp, privateLine)}.Check(context.Background(), testScope, fp, args)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
-	})
-})

@@ -22,26 +22,43 @@
 //
 // Before matching, the guard undoes the encodings of ADR 0084 decision 2 and their common
 // spellings:
+//
 //   - URL percent-encoding ("+" needs no decoding: it and a space are both separators);
+//
 //   - backslash escapes (\xHH, \uHHHH, \UHHHHHHHH) and HTML character references;
+//
 //   - base64 (standard and URL-safe alphabets, padded or raw) and base32 (RFC 4648 alphabet);
+//
 //   - hex in either case, as one run, in groups joined by up to two separators ("6b:6f",
 //     xxd's "6b6f 696e", "6b, 6f") or as \xHH and 0xHH bytes;
+//
 //   - an encoded stream cut into chunks of any length by any separators ("projected"): for each
 //     alphabet (base64 standard, base64 URL-safe, base32, hex) the text is projected onto it,
 //     every byte outside the alphabet dropped (and the x of 0x for hex), and the projection
 //     decoded. There is no density gate, so a separator of any length between chunks of any
 //     length is read through; the price is that prose is projected too (its letters are
 //     base64 and base32 symbols), which resynchronisation turns into nothing, at a cost the
-//     work and time budgets bound (measured on one core, GOMAXPROCS=1, on a laptop, a benign
-//     call of up to 1 MiB takes 0.01 to 0.5 s of the 1 s a call has: one argument or two halves
-//     of plain text, base64 of base64, of UTF-16 or of random bytes, or 65 to 128 short or 8 KiB
-//     arguments. The slowest are 128 arguments of base64 of UTF-8 Russian, 0.5 s, and of UTF-16
-//     Chinese of 8 KiB, 0.4 s; a slower machine has a thinner margin (a reviewer measured 0.49 to
-//     0.55 s of the shapes before the windows below). The texts of a call are decoded by up to 8
-//     workers and the decoders of a text over 128 KiB run side by side, as a speed-up only: a pod
-//     with a small CPU limit gets no benefit, and the clock specs of evasion_test.go run on one
-//     core with a 0.6 s clock). A
+//     work and time budgets bound. Measured on one core (GOMAXPROCS=1) on a laptop, a benign
+//     call of up to 1 MiB takes 0.003 to 0.37 s of the 1 s a call has: 0.37 s for two halves of
+//     base64 of base64, 0.35 s of base64 of random bytes, 0.29 s for 128 arguments of 3 KiB of
+//     base64 of UTF-16 Russian, of 8 KiB of UTF-16 prose or of UTF-8 Russian, 0.27 s of UTF-16
+//     Chinese, 0.23 s of 100 arguments of random bytes, and a few ms for 100 short arguments.
+//     The one measurement on a loaded node, a lab Linux node of 3 CPUs shared with other test
+//     packages, is 2.1 times a laptop's (128 arguments of base64 of UTF-8 Russian took 1.03 s
+//     there before the changes of the eighth round, 0.5 s here; 0.29 s here after), so the
+//     slowest shapes take about 0.8 s there. The texts of a call are decoded by up to 8 workers
+//     and the decoders of a text over 128 KiB run side by side, as a speed-up only: a pod with a
+//     small CPU limit gets no benefit.
+//
+//     The specs do not assert these times, which depend on the machine. They assert the work
+//     the call is charged (the bytes decoded, normalised and fingerprinted, and a fixed charge
+//     for a window): the same on every machine, and read from the meter that also enforces
+//     MaxWorkBytes. Each benign shape has a cap of 1.1 times its measured work, rounded up to
+//     100 KB (0.5 to 17 MB): the caps keep the cost of a shape from growing unnoticed, and they
+//     are chosen by shape because the time a byte of work takes differs (19 to 35 ms a MB here,
+//     and 2.1 times that on the lab node, taking the slowest shape to 0.8 s of the second).
+//     One spec, serial and on one core, runs the slowest shape that failed on the lab node
+//     against the real clock. A
 //     projection keeps stretches of 16 or more decoded bytes that are 60% letters, digits or
 //     spaces (ASCII punctuation and NULs do not count against them), so chance ASCII in
 //     misaligned decodings does not become a variant; shorter stretches (5 or more bytes, base64

@@ -42,6 +42,12 @@ type TaintChecker struct {
 // that scope's store holds. A budget that runs out blocks with its reason (fail closed). A store
 // failure blocks with ReasonStoreError and returns the error too.
 func (c TaintChecker) Check(ctx context.Context, scope Scope, fp *Fingerprinter, args []string) (Decision, error) {
+	return c.check(ctx, scope, fp, args, nil)
+}
+
+// check is Check, and also stores in work, when it is not nil, the bytes of work the call was
+// charged (the figure the work caps of the specs read, see export_test.go).
+func (c TaintChecker) check(ctx context.Context, scope Scope, fp *Fingerprinter, args []string, work *int64) (Decision, error) {
 	lim := c.Limits.withDefaults()
 	if fp == nil || c.Store == nil {
 		err := errors.New("leakguard: taint check without a store or fingerprinter")
@@ -58,6 +64,9 @@ func (c TaintChecker) Check(ctx context.Context, scope Scope, fp *Fingerprinter,
 		return block(ReasonBudgetInput, "the arguments are %d bytes; at most %d can be checked", total, lim.MaxInputBytes), nil
 	}
 	m := newMeter(ctx, lim)
+	if work != nil {
+		defer func() { *work = m.used.Load() }()
+	}
 	if err := m.clock(); err != nil {
 		return budgetDecision(err), nil
 	}
@@ -65,7 +74,11 @@ func (c TaintChecker) Check(ctx context.Context, scope Scope, fp *Fingerprinter,
 	if err != nil {
 		return budgetDecision(err), nil
 	}
-	var all []Fingerprint
+	nfp := 0
+	for i := range cands {
+		nfp += len(cands[i].fps)
+	}
+	all := make([]Fingerprint, 0, nfp)
 	for i := range cands {
 		cands[i].first = len(all)
 		all = append(all, cands[i].fps...)
@@ -168,6 +181,8 @@ type candidate struct {
 	canon Canonical
 	fps   []Fingerprint
 	first int
+	ta    string // a pair of ends has no text of its own: its two ends
+	hb    string
 	lo    int // the first k-gram of the text that fps holds (a pair holds those across its cut)
 }
 
@@ -235,9 +250,25 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 			}
 			res = append(res, more...)
 		} else {
-			forms := make([][]string, n)
+			// The ends of the forms of each argument, normalised once: a pair then needs only
+			// the k-grams across its cut, from the last k-1 characters of one end and the first
+			// k-1 of the other.
+			type end struct {
+				text  string
+				runes []rune
+			}
+			tails, heads := make([][]end, n), make([][]end, n)
 			for i := range n {
-				forms[i] = pairForms(res[i].vars)
+				for _, f := range pairForms(res[i].vars) {
+					var c Canonical
+					te := tail(f, formReach)
+					normaliseInto(&c, te)
+					tails[i] = append(tails[i], end{te, c.Runes})
+					c = Canonical{}
+					he := head(f, formReach)
+					normaliseInto(&c, he)
+					heads[i] = append(heads[i], end{he, c.Runes})
+				}
 			}
 			var more decoded
 			// A pair is only fingerprinted: one buffer serves the canonical forms, and the
@@ -281,20 +312,48 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 					}
 					more = decoded{cands: make([]keyedCandidate, 0, 2048)}
 				}
-				more.cands = append(more.cands, keyedCandidate{candidate{args: argSlab[len(argSlab)-2:], v: Variant{Text: text, Chain: chain}, fps: fpSlab[from:len(fpSlab):len(fpSlab)], lo: lo}, text})
+				more.cands = append(more.cands, keyedCandidate{candidate{args: argSlab[len(argSlab)-2:], v: Variant{Text: text, Chain: chain}, fps: fpSlab[from:len(fpSlab):len(fpSlab)], lo: lo}, ""})
+				return nil
+			}
+			emitPair := func(i, j int, ta, hb string, tr, hr []rune) error {
+				if err := m.add(len(ta) + len(hb)); err != nil {
+					return err
+				}
+				nb := len(tr)
+				lo, hi := max(0, nb-fp.k+1), min(nb-1, nb+len(hr)-fp.k)
+				if hi < lo {
+					return nil
+				}
+				scratch.Runes = append(append(scratch.Runes[:0], tr[lo:]...), hr[:min(len(hr), hi+fp.k-nb)]...)
+				if need := hi - lo + 1; cap(fpSlab)-len(fpSlab) < need {
+					fpSlab = make([]Fingerprint, 0, max(need, 1<<14))
+				}
+				from := len(fpSlab)
+				fpSlab = fp.kgrams(scratch.Runes, fpSlab)
+				if cap(argSlab)-len(argSlab) < 2 {
+					argSlab = make([]int, 0, 1<<10)
+				}
+				argSlab = append(argSlab, idx[i], idx[j])
+				if len(more.cands) == cap(more.cands) {
+					if len(more.cands) > 0 {
+						res = append(res, more)
+					}
+					more = decoded{cands: make([]keyedCandidate, 0, 2048)}
+				}
+				more.cands = append(more.cands, keyedCandidate{candidate{args: argSlab[len(argSlab)-2:], v: Variant{Chain: "pair"}, ta: ta, hb: hb, fps: fpSlab[from:len(fpSlab):len(fpSlab)], lo: lo}, ""})
 				return nil
 			}
 			// The cut of an encoded stream falls anywhere, so where the ends facing each
 			// other are both runs of base64 (or base32, hex) characters, a window around
 			// the boundary is decoded as the stream it would be joined.
-			tails, heads := make([]string, n), make([]string, n)
+			wtails, wheads := make([]string, n), make([]string, n)
 			nt, nh := 0, 0
 			for i := range n {
-				tails[i], heads[i] = tailRun(args[idx[i]]), headRun(args[idx[i]])
-				if len(tails[i]) >= minWindowRun {
+				wtails[i], wheads[i] = tailRun(args[idx[i]]), headRun(args[idx[i]])
+				if len(wtails[i]) >= minWindowRun {
 					nt++
 				}
-				if len(heads[i]) >= minWindowRun {
+				if len(wheads[i]) >= minWindowRun {
 					nh++
 				}
 			}
@@ -307,9 +366,9 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 					if i == j || j == i+1 {
 						continue
 					}
-					if windows && len(tails[i]) >= minWindowRun && len(heads[j]) >= minWindowRun {
-						w := tails[i] + heads[j]
-						if err := m.add(len(w)); err != nil {
+					if windows && len(wtails[i]) >= minWindowRun && len(wheads[j]) >= minWindowRun {
+						w := wtails[i] + wheads[j]
+						if err := m.add(len(w) + windowCost); err != nil {
 							return nil, err
 						}
 						for _, text := range windowReadings(w) {
@@ -318,10 +377,9 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 							}
 						}
 					}
-					for _, fi := range forms[i] {
-						for _, fj := range forms[j] {
-							ti := tail(fi, formReach)
-							if err := emit(i, j, ti+head(fj, formReach), len(ti), "pair"); err != nil {
+					for _, ti := range tails[i] {
+						for _, hj := range heads[j] {
+							if err := emitPair(i, j, ti.text, hj.text, ti.runes, hj.runes); err != nil {
 								return nil, err
 							}
 						}
@@ -332,13 +390,19 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 		}
 	}
 	seen := map[string]struct{}{}
-	var out []candidate
+	total := 0
+	for _, rs := range res {
+		total += len(rs.cands)
+	}
+	out := make([]candidate, 0, total)
 	for _, rs := range res {
 		for _, c := range rs.cands {
-			if _, dup := seen[c.key]; dup {
-				continue
+			if c.key != "" { // a pair or window has no key: it is not worth telling duplicates of
+				if _, dup := seen[c.key]; dup {
+					continue
+				}
+				seen[c.key] = struct{}{}
 			}
-			seen[c.key] = struct{}{}
 			out = append(out, c.candidate)
 		}
 	}
@@ -352,6 +416,10 @@ const formReach = 40
 
 // maxWindowPairs bounds the boundaries of a call whose windows are decoded.
 const maxWindowPairs = 8000
+
+// windowCost is the bytes of work a window is charged beyond its text: its decoders cost about
+// as much as that many bytes of the arguments (15 us against 30 us a KiB measured).
+const windowCost = 256
 
 // windowRun is the most characters of each side of a boundary that are decoded as one stream,
 // and minWindowRun the least of each side for a window to be decoded: a leak of 24 characters
@@ -440,6 +508,8 @@ type decoded struct {
 // call may carry thousands of them (the pairs of its arguments), so several workers take them in
 // turn, as a speed-up only (a pod with one core decodes them in turn too); the results stay in
 // the order of raws.
+var canonPool = sync.Pool{New: func() any { return new(Canonical) }}
+
 func decodeRaws(raws []rawText, lim Limits, fp *Fingerprinter, m *meter) ([]decoded, error) {
 	one := func(r rawText) (decoded, error) {
 		vs, err := decodeAll(r.text, lim, m)
@@ -447,16 +517,21 @@ func decodeRaws(raws []rawText, lim Limits, fp *Fingerprinter, m *meter) ([]deco
 			return decoded{}, err
 		}
 		out := decoded{vars: vs}
+		// one buffer for the variants of every text; a match recomputes its own canonical form
+		cp := canonPool.Get().(*Canonical)
+		defer canonPool.Put(cp)
+		c := cp
 		for _, v := range vs {
 			if err := m.add(len(v.Text)); err != nil {
 				return decoded{}, err
 			}
-			c := Normalise(v.Text)
+			c.Runes, c.Off = c.Runes[:0], c.Off[:0]
+			normaliseInto(c, v.Text)
 			if len(c.Runes) < fp.k {
 				continue
 			}
 			fps := fp.kgrams(c.Runes, make([]Fingerprint, 0, len(c.Runes)-fp.k+1))
-			out.cands = append(out.cands, keyedCandidate{candidate{args: r.args, v: v, canon: c, fps: fps}, c.String()})
+			out.cands = append(out.cands, keyedCandidate{candidate{args: r.args, v: v, fps: fps}, c.String()})
 		}
 		return out, nil
 	}
@@ -537,9 +612,6 @@ func tail(s string, n int) string {
 // run: winnowing keeps at least one fingerprint in every window of the source.
 func (c *candidate) match(hits []bool, fp *Fingerprinter) *Match {
 	k, w := fp.k, fp.p.Window
-	if c.canon.Off == nil { // a pair or window candidate keeps its text only, not its canonical form
-		c.canon = Normalise(c.v.Text)
-	}
 	bestStart, bestEnd := -1, -1
 	start, end := -1, -1
 	for i, h := range hits {
@@ -558,6 +630,12 @@ func (c *candidate) match(hits []bool, fp *Fingerprinter) *Match {
 	}
 	if bestStart < 0 {
 		return nil
+	}
+	if c.canon.Off == nil { // a candidate keeps its text only, not its canonical form
+		if c.v.Text == "" {
+			c.v.Text = c.ta + c.hb
+		}
+		c.canon = Normalise(c.v.Text)
 	}
 	from := c.canon.Off[bestStart]
 	last := c.canon.Off[bestEnd-1]

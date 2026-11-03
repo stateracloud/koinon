@@ -78,6 +78,25 @@ func runDecoders(s string) [][]string {
 	return kids
 }
 
+// minCovered is the length from which a decoding that is part of another variant is dropped.
+const minCovered = 64
+
+// coveredBy reports whether child is a part of one of the variants: it holds no k-gram they do
+// not, and decoding it again finds what decoding them finds. The projection of a stream, which
+// keeps the edges of a decoding off (a base64 run and its projection are one text but for a
+// few bytes at the ends), is such a part of the base64 reading, and decoding it costs as much.
+func coveredBy(vs []Variant, child string) bool {
+	if len(child) < minCovered {
+		return false
+	}
+	for _, v := range vs {
+		if len(v.Text) > len(child) && strings.Contains(v.Text, child) {
+			return true
+		}
+	}
+	return false
+}
+
 func decodeAll(s string, lim Limits, m *meter) ([]Variant, error) {
 	type item struct {
 		v     Variant
@@ -98,6 +117,9 @@ func decodeAll(s string, lim Limits, m *meter) ([]Variant, error) {
 		for di, d := range decoders {
 			for _, child := range kids[di] {
 				if _, dup := seen[child]; dup {
+					continue
+				}
+				if coveredBy(out, child) {
 					continue
 				}
 				if it.depth >= lim.MaxDepth {
@@ -805,7 +827,7 @@ func (r *readings) add(o readings) {
 // the highest scoring maxPlain and maxWide of them when there are more.
 func (r readings) all() []string {
 	var out []string
-	for _, p := range top(r.plain, maxPlain) {
+	for _, p := range top(sound(r.plain), maxPlain) {
 		if !slices.Contains(out, p) {
 			out = append(out, p)
 		}
@@ -814,6 +836,38 @@ func (r readings) all() []string {
 		if !slices.Contains(out, w) {
 			out = append(out, w)
 		}
+	}
+	return out
+}
+
+// maxInvalidShare is the share of bytes (1 in 8) that may be no UTF-8 in an 8-bit reading that is
+// kept beside a cleaner one.
+const maxInvalidShare = 8
+
+// sound drops from cands the readings in which 1 byte in maxInvalidShare or more is no UTF-8,
+// when another reading has fewer: a stream read one byte off holds text of a script of two-byte
+// letters as invalid bytes between ASCII punctuation, and costs a whole pass of decoders for
+// nothing. When every reading is that broken they are all kept.
+func sound(cands []string) []string {
+	if len(cands) < 2 {
+		return cands
+	}
+	var out []string
+	for _, c := range cands {
+		bad := 0
+		for i := 0; i < len(c); {
+			r, size := utf8.DecodeRuneInString(c[i:])
+			if r == utf8.RuneError && size == 1 {
+				bad++
+			}
+			i += size
+		}
+		if bad*maxInvalidShare < len(c) {
+			out = append(out, c)
+		}
+	}
+	if len(out) == 0 {
+		return cands
 	}
 	return out
 }
