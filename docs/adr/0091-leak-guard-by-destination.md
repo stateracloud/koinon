@@ -1,0 +1,323 @@
+# 0091. Leak guard by destination: sink classes, session legs and a byte cap
+
+- Status: Accepted (decisions by Andre, 2026-11-03)
+- Date: 2026-11-03
+- Amends: [0084](0084-leak-guard.md) (the main protection moves from the text check to where a call sends data; decisions 2, 3, 5, 7, 8 and 12 change)
+- Relates to: [0042](0042-ask-tier-park-and-execute.md) (approvals), [0051](0051-session-home-generations.md) (home generations), [0057](0057-mcp-servers.md) (tool tiers), [0062](0062-code-host-connectors.md) (code-host repository list), [0080](0080-tool-set-matches-egress-and-escape-hosts.md) (no web egress from the sandbox)
+- Issue: #625, part of #265; changes #348, #349, #350, #351, #352 and #609
+
+## Context
+
+ADR 0084 made a text check the main protection against leaks. The guard looks for private text in
+the arguments of each MCP tool call, after undoing the encodings an attacker might use. Since then
+every round of work on it found a new gap or a new false alarm:
+
+| Round | What happened |
+|---|---|
+| #348, review rounds 1 to 10 (PR #582) | Each review found a new spelling the decoders missed: punctuation between letters, UTF-16 with emoji, chunked base64 of non-ASCII text, 13 to 14 byte pieces, a NUL every 11 bytes, invalid-byte polyglots. Each got a new decoder heuristic. |
+| #348, cost | Readings times alignments times argument pairs blew past the 1 s clock. That led to the work budget, the 5 s backstop (ADR 0084 amendment), `budget_args` and pair windows switched off above 8000 pairs, which is a bypass in its own right. |
+| #609 | A list of accepted gaps (tiny separately-encoded pieces, padding that turns off the windows). The issue itself says the approach probably needs to change. |
+| #350 (PR #621) | Legs are declared per server, but the risk depends on where one call sends its data. |
+| #352 (PR #623) | Pair reassembly glued owner `northwind` and repo `platform-handbook`, the address of a write into the org's own repo, into 25 characters that matched a private title: 91 of 272 benign Gitea writes blocked. The pending fix, "glued text needs both halves", was one more heuristic. |
+
+**Root cause.** The guard decides by what the outgoing bytes look like, without knowing where they
+go. `TaintChecker.Check(ctx, scope, fp, args []string)` gets a flat list of strings: no tool, no
+destination, no split between the address of a call and its payload. The attacker picks the
+encoding, so the question "does this argument contain private text?" has no complete answer, and it
+is the wrong question when the call writes into the org's own system. Every fix against evasion
+widens the check (more cost, more false alarms); every fix against a false alarm narrows it (more
+evasion).
+
+The published work agrees. Detection-based defences "remain fundamentally heuristic" (the
+design-patterns paper); twelve published prompt-injection defences fell to adaptive attacks, most
+at over 90% success ("The Attacker Moves Second"). The guarantees in Meta's Rule of Two, CaMeL and
+FIDES come from structure: which session holds which legs, and which sinks it may reach. Comparable
+products (Codex cloud, Claude Code's sandbox, the Copilot coding agent firewall, Gemini) limit the
+destination, not the content. The GitHub MCP exploit (Invariant Labs) is the #352 shape with an
+attacker in it: one server is private data, untrusted input and outbound at once, and only a class
+that depends on the destination of the call (a public repo versus a private one) tells them apart.
+
+A limit on how many bytes leave for untrusted hosts holds whatever the encoding, because it bounds
+bits, not spellings. A text match holds only for the spellings it decodes. So the byte limit and the
+destination are the guarantee, and the text match is an alarm.
+
+Koinon's own benign numbers are weaker than ADR 0084 suggests: G1's "0 of 218, 0 of 272" predates the
+pair joins, and the #352 replay corpus is hand-built, not real recordings. The benign rate on real
+traffic is unmeasured.
+
+## Decision
+
+Everything below is deterministic and does not depend on how the data is encoded. ADR 0084
+decisions 1 (the guard in koinon-api behind ExtMcp), 4 (scope of a home generation), 9 (templates),
+10 (fail closed), 11 and the work-budget amendment stand.
+
+### 1. Sink classes
+
+Every tool call has one sink class:
+
+| Class | Meaning | Examples |
+|---|---|---|
+| `none` | Reads only; sends nothing that leaves. | read a file, list issues, get a page of the org's own docs |
+| `internal` | Writes only into a system the org owns and does not publish. | an issue or comment in one of the org's own private repos |
+| `external-low` | A small payload in an address or query to an outside party. | fetch a URL, a web search query |
+| `external-high` | Free text to a party outside the org. | an issue or PR on a public repo or a foreign owner, an email, a chat post, an arbitrary POST |
+
+**Unknown or unclassified tools count as `external-high`.** That is the cautious reading, the same
+choice as #350's all-three-legs default for an unclassified server.
+
+### 2. Where the class is declared
+
+The class is declared **per tool**, not per server. Each tool's declaration says:
+
+- its sink class, either **fixed** (one of the four) or **derived** from its address arguments
+  (decision 3);
+- which arguments are **address arguments** (where the call goes: `owner`, `repo`, `url`) and,
+  by elimination, which are **payload arguments** (what it carries: a title, a body, a query);
+- what its results carry for the session legs (decision 4): untrusted input, private data or
+  neither. A tool without its own declaration takes its server's legs (#350).
+
+Declarations live on the MCP server records of #350 (per tool, next to the server's kind and legs)
+and in the code-host connector's data for its own write tools (ADR 0062, `connector.yaml`). They are
+set through the admin API and the console and audited with before and after, like the data class.
+A tool's declaration goes back to the default (`external-high`, server legs) when the server's URL
+changes (the #350 rule) or when the tool's content hash changes (the ADR 0057 rule that moves a
+changed tool back to the ask tier): the declaration described the old tool.
+
+### 3. How one call's class is derived
+
+A derived class is decided per call from the address arguments only:
+
+- **Code host.** The tool names its owner and repo arguments. The call is `internal` when that
+  `owner/repo` is in the org's repository list for the connection (the connector knows its scope,
+  ADR 0062) and the repository is not public. A public repository, a repository outside the list or
+  an owner outside the org makes the call `external-high`. So an issue in
+  `northwind/platform-handbook` is internal and never counts as a leak; a PR on a public repo is
+  external-high, which is what the Invariant case needs.
+- **Fetch.** The tool names its URL argument. The host is the address. A host on the org's
+  fetch-trusted list (#350's contract: an exact lower-case name, or a `*.example.com` wildcard that
+  covers subdomains at any depth but not `example.com` itself) makes the call `internal`. Any other
+  host makes it `external-low`. The path, query and fragment of the URL are **payload** and count
+  toward the byte cap.
+- **Search.** A search query always leaves for the provider (ADR 0084 decision 6), so a search tool
+  is `external-low` and its query is payload.
+
+An address argument the guard cannot parse (a URL without a host, an owner without a repo) makes
+the call `external-high`.
+
+### 4. Session legs
+
+Per home generation (ADR 0051, the scope ADR 0084 decision 4 already uses), the guard records two
+legs:
+
+- **untrusted input**: set when the session receives a result of a tool or server declared
+  untrusted (a web page, a search result, a public issue);
+- **private data**: set when the session receives a result of a tool or server declared private,
+  or when agentd reports a repository read or shell output (the fingerprint feed of ADR 0084
+  decision 2).
+
+A leg is set by a response, after the call that brought it. The legs **only grow**: nothing within
+a generation clears them, not the end of a run, not a new run, not an admin action. Only a new home
+generation starts with both legs clear. The third leg, outbound, is no longer a session flag: it is
+the sink class of the call being decided.
+
+### 5. The decision table
+
+| Session state | `none`, `internal` | `external-low` | `external-high` |
+|---|---|---|---|
+| Not both legs | pass | today's limits | pass |
+| Both legs | pass | byte cap | ADR 0042 approval |
+
+- **`none` and `internal` always pass.** They carry nothing out. The ADR 0057 tool tiers still
+  govern writes, and integrity of what is written is not this guard's job.
+- **Before both legs**, today's limits apply: ADR 0084 decision 5's URL shape rule and its per-host
+  and per-run budgets (20 hosts, 1 KB per host, 8 KB of search) for `external-low`; the ordinary
+  tiers for `external-high`.
+- **Both legs and `external-high`**: the call becomes an ADR 0042 approval for that exact call. The
+  card shows what would leave: the destination (the address arguments) and the full payload. An
+  ask-tier tool that hits this branch gets one approval, not two, and its card carries the leak
+  reason.
+- **Both legs and `external-low`**: a **byte cap per run** on what goes to untrusted hosts. It counts
+  the payload bytes as sent (the URL's path, query and fragment, the search query), with no decoding,
+  so it holds whatever the encoding. It counts from the first call after the run holds both legs,
+  since no byte sent before that can carry private data under injected instructions. The **starting
+  value is about 2 KB**, set from real traffic measurements (open questions). A call that would go
+  over the cap is a **plain refusal** with a reason the agent can read, not an approval. The URL
+  shape rule keeps applying inside the cap.
+- **Shipped templates never reach the approval branch.** No shipped template combines a leg-setting
+  read of untrusted input, private data and an auto-tier `external-high` tool; the #351 templates
+  test reads the sink classes and fails if one does. So normal use adds no click ("no agent
+  nannies", 2026-10-31).
+
+### 6. Text matching: a frozen secondary alarm
+
+The taint store, the keyed winnowing, the normaliser and the single-layer decoders of #348 stay.
+Their role changes:
+
+- They run **only on payload arguments of `external-low` and `external-high` calls**, never on
+  address arguments and never on `none` or `internal` calls.
+- The decoder set is **frozen**: no new evasion heuristics. The package documentation says plainly
+  that it catches verbatim and simply-encoded copies, not an adaptive attacker.
+- Joins happen **only in call order**: the payload arguments of one call, joined in their order in
+  the call. The any-pair joins and the pair windows go.
+- A match becomes an ADR 0042 approval showing the matched text (ADR 0084 decision 7 stays), on an
+  `external-low` call that would otherwise pass, and on an `external-high` call before both legs.
+  On an `external-high` call that is already an approval, the match is marked on the card.
+- **failClosed stays**, with the work budget and the 5 s backstop. A check that cannot finish
+  refuses the call.
+
+### 7. What the guard's input is
+
+The guard no longer decides on `[]string`. Its input per call is the tool, its sink class (fixed or
+derived), the address arguments, the payload arguments and the session legs. It maintains the legs
+from responses and from agentd's feed.
+
+### 8. Guarantees and non-guarantees
+
+**Guaranteed:**
+
+- No shipped template holds both legs with an auto-tier `external-high` tool (a static test, #351).
+- Once a session holds both legs, no free-text body reaches a party outside the org without a person
+  approving that exact call, with the payload on the card.
+- Through `external-low` sinks, such a run sends at most the byte cap to untrusted hosts, whatever
+  the encoding.
+- Verbatim and simply-encoded copies of private text in the payload of an external call are shown to
+  a person.
+- Writes into the org's own private repos are never blocked as leaks, so the #352 class of false
+  alarm is gone by construction.
+
+**Not guaranteed:**
+
+- **Leaks under the byte cap.** Up to the cap per run leaves through `external-low` sinks, and a run
+  after a run in the same generation gets its own cap. A secret of 40 bytes fits, so the cap must
+  stay small, and keys belong in the secret store, not in the context.
+- **A misclassified internal sink.** A repo or host declared internal that is in fact world-readable
+  leaks freely. The classification has to be right; its default is external.
+- **Integrity attacks.** Injected content written into the org's own repo is an internal write and
+  passes. That is the ADR 0057 tiers and review, a separate concern.
+- **Side channels**: which host is called, timing, the number of calls.
+- **Paraphrase** under the cap, and any rewording the frozen decoders do not undo.
+- The model provider as a channel (trusted by design), and anything outside MCP and agentd's view,
+  which is narrow because the sandbox has no web egress (ADR 0080).
+
+### 9. The v0.2+ path
+
+Per-value labels in the CaMeL or FIDES style (a planner that takes control flow from the trusted
+query, values that carry their confidentiality and integrity labels, policy checked at each sink)
+need Koinon to own the agent loop, so they belong in koinon-harness (#249), not in OpenCode. They
+use the same vocabulary: the four sink classes, the two legs and the address-versus-payload split.
+Nothing in this ADR is a stopgap that work would throw away; it moves the labels from the whole
+session to single values.
+
+```mermaid
+flowchart TD
+  C[tools/call] --> K{sink class<br/>from declaration<br/>and address args}
+  K -->|none / internal| P[pass]
+  K -->|external-low| L{both legs?}
+  K -->|external-high| H{both legs?}
+  L -->|no| T[URL rule and today's budgets]
+  L -->|yes| B{within byte cap?}
+  B -->|no| R[plain refusal]
+  B -->|yes| M
+  T --> M{text match on payload?}
+  H -->|yes| A[ADR 0042 approval: destination and payload]
+  H -->|no| M2{text match on payload?}
+  M -->|yes| A2[ADR 0042 approval: matched text]
+  M -->|no| P
+  M2 -->|yes| A2
+  M2 -->|no| P
+```
+
+## Alternatives considered
+
+- **Keep the text check as the main protection** (ADR 0084 as written). Rejected: the attacker
+  picks the encoding, so each round finds a new gap, and the check cannot tell an in-org write from a
+  leak. The patch rounds in Context are the evidence.
+- **Fix the #352 false alarm with "glued text needs both halves".** Rejected: one more heuristic of
+  the same kind. The false alarm goes away because in-org writes are internal and address arguments
+  are never matched.
+- **Chase #609's small encoded pieces.** Rejected: the byte cap bounds that class whatever the
+  encoding.
+- **Keep the legs per server only.** Rejected: it cannot tell a private repo from a public one on the
+  same server, so both the #352 false alarm and the GitHub public-repo leak stay possible.
+- **Refuse, instead of asking, for `external-high` in a session with both legs.** Not chosen: shipped
+  templates never get there, and an admin-built agent that needs it should be able to have a person
+  approve the exact call.
+- **Rebuild the loop the CaMeL way now.** Strongest, but it needs Koinon's own harness (#249); it is
+  the v0.2+ path.
+- **Force the ask tier on every outbound tool of a three-leg agent** (the first #265 proposal).
+  Still rejected: approval fatigue. Here a person sees only the rare call that would send free text
+  out of a session that holds both legs.
+
+## Consequences
+
+- Positive: the guarantee no longer depends on the encoding, and the decoders stop growing.
+- Positive: in-org writes never trip the guard, so the 91-of-272 false alarm class of #352 disappears.
+- Positive: the text check gets cheaper (no any-pair joins, no windows, external payloads only).
+- Negative: correctness now rests on the sink-class declarations. A wrong `internal` is a hole, so
+  the default is `external-high` and a declaration resets when the tool or URL changes.
+- Negative: admins must classify tools and name their address arguments before an agent holding both
+  legs can use them without approvals; an unclassified write tool asks.
+- Negative: the code-host scope needs each repository's visibility, which the connector has to read
+  and keep current _(inferred)_.
+- Negative: a long research run that has read private data loses most of its fetch and search room
+  once it also reads the web.
+- Metrics (ADR 0023): decisions counted with fixed labels (decision, reason, sink class), never org,
+  agent, run or ticket IDs.
+
+**Effect on the issues:**
+
+| Issue | Change |
+|---|---|
+| #348 (merged core) | Freeze the decoders. Drop the any-pair joins and the pair windows; join payload arguments in call order. `doc.go` calls it a secondary signal. |
+| #609 | Superseded by the byte cap; close as by design. |
+| #349 (wiring) | The guard's input becomes tool, sink class, address args, payload args and session legs. It maintains the legs from responses and agentd's feed. Text matching on external payloads only. Byte-cap and URL-rule refusals are plain refusals; a text match or a both-legs `external-high` call is an approval. failClosed and a timeout over 5 s stay. |
+| #350 / PR #621 (schema) | Keep kind, legs, the URL reset, the fetch-trusted hosts and the threshold. Add a sink class per tool (default `external-high`), the address-argument declaration, and the org's own code-host scope. Can follow in #349. |
+| #351 (templates) | Keep. The test reads sink classes and fails on untrusted input, private data and an auto-tier `external-high` tool together. |
+| #352 / PR #623 (tests) | Build the replay from real, scrubbed recordings, not the generated corpus, and assert per sink class. Keep the planted leaks and the RT1 canaries. The `northwind/platform-handbook` case becomes the "internal write passes" regression. |
+| "Glued text needs both halves" | Dropped. |
+
+## Open questions
+
+These need numbers from real traffic: the scrubbed recordings of #352. The implementer of #352
+measures; Andre decides each number.
+
+- **The byte cap.** The starting value (about 2 KB) against the `external-low` payload bytes real
+  runs send after they hold both legs.
+- **How often real runs hold both legs**, and so how often an admin-built agent would see the
+  approval branch.
+- **The text-match threshold** (24 by default, 12 to 256) now that it runs on external payloads
+  only: whether 24 is still right, measured as false alarms on real external calls.
+- **The cap's scope.** Per run, as decided, or per home generation like the legs, if recordings
+  show agents spreading work across runs of one generation.
+- **Repository visibility.** How fresh the connector's view of a repository being public must be,
+  and what a call does when the visibility is unknown (this ADR: `external-high`). Decided in #350
+  with Andre.
+
+## Upstream verification
+
+No upstream behaviour changes. The guard still runs behind agentgateway v1.6.0 ExtMcp
+`mcpGuardrails`, failClosed (ADR 0084).
+
+## References
+
+- Simon Willison, "The lethal trifecta for AI agents", 2025-06-16. https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/
+- Meta, "Agents Rule of Two: A Practical Approach to AI Agent Security", 2025-10-31. https://ai.meta.com/blog/practical-ai-agent-security/
+- Debenedetti et al., "Defeating Prompt Injections by Design" (CaMeL), arXiv 2503.18813. https://arxiv.org/abs/2503.18813
+- Costa et al., "Securing AI Agents with Information-Flow Control" (FIDES), arXiv 2505.23643. https://arxiv.org/abs/2505.23643
+- Beurer-Kellner et al., "Design Patterns for Securing LLM Agents against Prompt Injections", arXiv 2506.08837. https://arxiv.org/html/2506.08837v3
+- Nasr, Carlini, Tramèr et al., "The Attacker Moves Second", arXiv 2510.09023. https://arxiv.org/abs/2510.09023
+- MSRC, "How Microsoft defends against indirect prompt injection attacks", 2025-07. https://www.microsoft.com/msrc/blog/2025/07/how-microsoft-defends-against-indirect-prompt-injection-attacks
+- Google, "Mitigating prompt injection attacks with a layered defense strategy", 2025-06-13. https://blog.google/security/mitigating-prompt-injection-attacks/
+- Invariant Labs, "GitHub MCP exploited: accessing private repositories via MCP", 2025-05-26. https://invariantlabs.ai/blog/mcp-github-vulnerability
+- OpenAI, Codex cloud internet access. https://learn.chatgpt.com/docs/cloud/internet-access
+- Anthropic, "Beyond permission prompts: making Claude Code more secure and autonomous", 2025-10-20. https://www.anthropic.com/engineering/claude-code-sandboxing
+- GitHub, "Customize the agent firewall" (Copilot coding agent). https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/customize-the-agent-firewall
+- Microsoft Purview, document fingerprinting. https://learn.microsoft.com/en-us/purview/document-fingerprinting
+- Schleimer, Wilkerson, Aiken, "Winnowing: local algorithms for document fingerprinting", SIGMOD 2003.
+
+## Links
+
+- Andre's decisions, 2026-11-03: [#265 comment](https://github.com/stateracloud/koinon/issues/265#issuecomment-6608053150)
+- The design review behind them is kept by the maintainers (not in the repository).
+- Issues #265, #348, #349, #350, #351, #352, #609, #249; PRs #582, #621, #623
+- ADRs [0084](0084-leak-guard.md), [0042](0042-ask-tier-park-and-execute.md), [0051](0051-session-home-generations.md), [0057](0057-mcp-servers.md), [0062](0062-code-host-connectors.md), [0080](0080-tool-set-matches-egress-and-escape-hosts.md), [0023](0023-observability-and-audit.md)
