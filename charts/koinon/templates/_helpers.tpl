@@ -744,6 +744,13 @@ sandbox policies. The reconciler's RoleBinding to it in each workspace namespace
 {{- fail (printf "secrets.kek.kms.awskms.%s must be https: the KEKs and signed requests travel to it (plain http only on a loopback address)" $what) }}
 {{- end }}
 {{- end }}
+{{- /* IRSA for every identity, or for none (EKS Pod Identity): a partial set leaves a pod without its role. */ -}}
+{{- $roles := $a.roleArns | default dict }}
+{{- $set := 0 }}
+{{- range $r := list "api" "reconciler" "keyAdmin" }}{{ if index $roles $r }}{{ $set = add1 $set }}{{ end }}{{ end }}
+{{- if and (gt $set 0) (lt $set 3) }}
+{{- fail "secrets.kek.kms.awskms.roleArns: set api, reconciler and keyAdmin together (IRSA), or none of them (EKS Pod Identity)" }}
+{{- end }}
 {{- end }}
 {{- if and .Values.secrets.kek.kms.keyAdmin.addKey (not (include "koinon.kms" .)) }}
 {{- fail "secrets.kek.kms.keyAdmin.addKey needs a KMS (secrets.kek.kms.backend): a local install adds KEKs with koinon-api keys add" }}
