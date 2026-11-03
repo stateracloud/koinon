@@ -45,7 +45,7 @@ type CodeHostRepo struct {
 func codeHostScopeOf(rows []store.OrgCodeHostRepo) []sinkclass.Repo {
 	out := make([]sinkclass.Repo, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, sinkclass.Repo{Owner: r.Owner, Name: r.Repo, Visibility: sinkclass.Visibility(r.Visibility), CheckedAt: r.CheckedAt.Time})
+		out = append(out, sinkclass.Repo{Connection: r.ConnectionID.String(), Owner: r.Owner, Name: r.Repo, Visibility: sinkclass.Visibility(r.Visibility), CheckedAt: r.CheckedAt.Time})
 	}
 	return out
 }
@@ -67,10 +67,17 @@ func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, act
 	if len(repos) > MaxCodeHostRepos {
 		return &InvalidError{Msg: fmt.Sprintf("a connection reports at most %d repositories", MaxCodeHostRepos)}
 	}
+	if checkedAt.After(time.Now().Add(sinkclass.MaxClockSkew)) {
+		return &InvalidError{Msg: "the visibility reading is dated in the future"}
+	}
 	var owners, names, vis []string
 	seen := map[string]bool{}
 	counts := map[string]int{}
 	for _, r := range repos {
+		// Validate before lower-casing: U+212A (Kelvin sign) lower-cases to an ASCII k.
+		if !sinkclass.ValidRepoPart(strings.TrimSpace(r.Owner)) || !sinkclass.ValidRepoPart(strings.TrimSpace(r.Name)) {
+			return &InvalidError{Msg: fmt.Sprintf("repository %q/%q is not an owner and a name", r.Owner, r.Name)}
+		}
 		o, n := strings.ToLower(strings.TrimSpace(r.Owner)), strings.ToLower(strings.TrimSpace(r.Name))
 		v := sinkclass.Visibility(r.Visibility)
 		switch v {
@@ -78,7 +85,7 @@ func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, act
 		default:
 			return &InvalidError{Msg: fmt.Sprintf("repository visibility must be private, internal, public or unknown, not %q", r.Visibility)}
 		}
-		if o == "" || n == "" || strings.ContainsAny(o+n, "/\\ \t\r\n") || len(o) > 255 || len(n) > 255 {
+		if len(o) > 255 || len(n) > 255 {
 			return &InvalidError{Msg: fmt.Sprintf("repository %q/%q is not an owner and a name", r.Owner, r.Name)}
 		}
 		if seen[o+"/"+n] {
@@ -128,7 +135,7 @@ func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, act
 // served: an org can have thousands.
 type ScopeSummary struct {
 	Repositories, Private, Internal, Public, Unknown int
-	// Stale counts the repositories whose reading is older than MaxAge: the derivation treats them as unknown.
+	// Stale counts the repositories whose reading is older than MaxAge or dated in the future: the derivation treats them as unknown.
 	Stale int
 	// OldestCheckedAt is the oldest reading, nil for an empty scope.
 	OldestCheckedAt *time.Time

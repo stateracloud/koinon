@@ -564,7 +564,7 @@ var isolationCases = map[string]isolationCase{
 	mcpserverv1alpha1connect.McpServerServiceSetToolSinkProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.mcps.SetToolSink(ctx, &mcpserverv1alpha1.SetToolSinkRequest{
-				OrgId: org, ServerId: f.mcpServer, Tool: f.mcpTool,
+				OrgId: org, ServerId: f.mcpServer, Tool: f.mcpTool, ContentHash: "koinon_test_hash",
 				Sink: &mcpserverv1alpha1.ToolSink{SinkClass: "none", Derivation: "fixed"},
 			})
 		},

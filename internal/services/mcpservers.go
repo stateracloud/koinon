@@ -54,7 +54,7 @@ func (s *Server) mcpServerProto(org, slug string, m mcpservers.Server) *mcpserve
 		HealthCheckedAt: optTime(m.HealthCheckedAt), HealthSince: optTime(m.HealthSince), ToolsSyncedAt: optTime(m.ToolsSyncedAt),
 		CreatedAt: timestamppb.New(m.CreatedAt), UpdatedAt: timestamppb.New(m.UpdatedAt),
 		GatewayTarget: mcpservers.TargetName(slug, m.Name),
-		Kind:          m.Kind, DataClass: m.DataClass,
+		Kind:          m.Kind, DataClass: m.DataClass, CodeHostConnectionId: m.CodeHostConnectionID,
 	}
 }
 
@@ -127,7 +127,7 @@ func (s *Server) CreateServer(ctx context.Context, req *mcpserverv1alpha1.Create
 		CredentialPrefix: req.GetCredentialPrefix(), CredentialValue: req.GetCredentialValue(),
 	}
 	if cl := req.GetClass(); cl != nil {
-		in.Class = &mcpservers.Declaration{Kind: cl.GetKind(), Legs: cl.GetDataClass()}
+		in.Class = &mcpservers.Declaration{Kind: cl.GetKind(), Legs: cl.GetDataClass(), CodeHostConnection: cl.GetCodeHostConnectionId()}
 	}
 	m, err := s.mcp.Create(requestCtx(ctx), c.org, c.auditActor(), c.actor(), in)
 	if err != nil {
@@ -168,7 +168,7 @@ func (s *Server) SetServerClass(ctx context.Context, req *mcpserverv1alpha1.SetS
 		return nil, err
 	}
 	m, err := s.mcp.SetDataClass(requestCtx(ctx), c.org, c.auditActor(), req.GetServerId(),
-		mcpservers.Declaration{Kind: req.GetClass().GetKind(), Legs: req.GetClass().GetDataClass()})
+		mcpservers.Declaration{Kind: req.GetClass().GetKind(), Legs: req.GetClass().GetDataClass(), CodeHostConnection: req.GetClass().GetCodeHostConnectionId()})
 	if err != nil {
 		return nil, s.mcpError(err)
 	}
@@ -235,7 +235,7 @@ func (s *Server) SetToolSink(ctx context.Context, req *mcpserverv1alpha1.SetTool
 	if sk == nil {
 		sk = &mcpserverv1alpha1.ToolSink{} // an empty derivation, which Normalize refuses
 	}
-	t, err := s.mcp.SetToolDeclaration(requestCtx(ctx), c.org, c.auditActor(), req.GetServerId(), req.GetTool(), sinkclass.Declaration{
+	t, err := s.mcp.SetToolDeclaration(requestCtx(ctx), c.org, c.auditActor(), req.GetServerId(), req.GetTool(), req.GetContentHash(), sinkclass.Declaration{
 		Class: sinkclass.Class(sk.GetSinkClass()), Derivation: sinkclass.Derivation(sk.GetDerivation()), AddressArgs: sk.GetAddressArgs(),
 		ResultUntrustedInput: sk.ResultUntrustedInput, ResultPrivateData: sk.ResultPrivateData,
 	})

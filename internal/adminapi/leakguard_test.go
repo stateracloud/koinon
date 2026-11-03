@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 )
 
@@ -114,11 +117,31 @@ var _ = Describe("the leak guard in the admin API (#350)", func() {
 			Expect(string(raw)).To(ContainSubstring(`"sink":{"addressArgs":[],"derivation":"fixed","sinkClass":"external-high"}`))
 		})
 
+		// sinkBody is the request body for a declaration against the content hash the caller read.
+		sinkBody := func(ctx SpecContext, id, tool string, sink map[string]any) map[string]any {
+			GinkgoHelper()
+			_, raw := e.call(ctx, e.token, http.MethodGet, "/mcp-servers/"+id+"/tools", nil)
+			var list struct {
+				Tools []struct {
+					Name        string `json:"name"`
+					ContentHash string `json:"contentHash"`
+				} `json:"tools"`
+			}
+			Expect(json.Unmarshal(raw, &list)).To(Succeed(), string(raw))
+			hash := "no-such-tool"
+			for _, t := range list.Tools {
+				if t.Name == tool {
+					hash = t.ContentHash
+				}
+			}
+			return map[string]any{"contentHash": hash, "sink": sink}
+		}
+
 		It("is declared with an audited PUT and read back", func(ctx SpecContext) {
 			id := setup(ctx)
-			code, raw := e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/tools/create_issue/sink", map[string]any{
+			code, raw := e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/tools/create_issue/sink", sinkBody(ctx, id, "create_issue", map[string]any{
 				"sinkClass": "external-high", "derivation": "code_host", "addressArgs": []string{"owner", "repo"}, "resultUntrustedInput": true,
-			})
+			}))
 			Expect(code).To(Equal(http.StatusOK), string(raw))
 			sink := decode[struct{ Sink map[string]any }](raw).Sink
 			Expect(sink).To(HaveKeyWithValue("derivation", "code_host"))
@@ -139,25 +162,67 @@ var _ = Describe("the leak guard in the admin API (#350)", func() {
 			Expect(auditCount(ctx, "mcp_tool.declaration.reset")).To(Equal(1))
 		})
 
+		It("answers 409 and changes nothing when the tool changed since the caller read it", func(ctx SpecContext) {
+			id := setup(ctx)
+			body := sinkBody(ctx, id, "create_issue", map[string]any{"sinkClass": "none", "derivation": "fixed", "addressArgs": []string{}})
+			_, err := e.mcp.SyncTools(ctx, e.org, pgOf(id), []mcpservers.ListedTool{
+				{Name: "create_issue", Description: "Create an issue and mail the world", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			code, raw := e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/tools/create_issue/sink", body)
+			Expect(code).To(Equal(http.StatusConflict), string(raw))
+			Expect(auditCount(ctx, "mcp_tool.declaration.set")).To(BeZero())
+			_, raw = e.call(ctx, e.token, http.MethodGet, "/mcp-servers/"+id+"/tools", nil)
+			Expect(string(raw)).To(ContainSubstring(`"sinkClass":"external-high"`))
+
+			By("the hash of the new text goes through")
+			code, raw = e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/tools/create_issue/sink", sinkBody(ctx, id, "create_issue", map[string]any{"sinkClass": "none", "derivation": "fixed", "addressArgs": []string{}}))
+			Expect(code).To(Equal(http.StatusOK), string(raw))
+		})
+
 		It("refuses an invalid declaration with 400, an unknown tool with 404 and another org's server with 404", func(ctx SpecContext) {
 			id := setup(ctx)
-			for _, body := range []map[string]any{
+			for _, sink := range []map[string]any{
 				{"sinkClass": "everywhere", "derivation": "fixed", "addressArgs": []string{}},
 				{"sinkClass": "none", "derivation": "oracle", "addressArgs": []string{}},
 				{"sinkClass": "external-high", "derivation": "code_host", "addressArgs": []string{"repo"}},
 				{"sinkClass": "none", "derivation": "fixed", "addressArgs": []string{"a b"}},
 			} {
-				code, raw := e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/tools/create_issue/sink", body)
+				code, raw := e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/tools/create_issue/sink", sinkBody(ctx, id, "create_issue", sink))
 				Expect(code).To(Equal(http.StatusBadRequest), string(raw))
 			}
 			Expect(auditCount(ctx, "mcp_tool.declaration.set")).To(BeZero())
-			code, _ := e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/tools/no_such/sink", map[string]any{"sinkClass": "none", "derivation": "fixed", "addressArgs": []string{}})
+			none := map[string]any{"sinkClass": "none", "derivation": "fixed", "addressArgs": []string{}}
+			code, _ := e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/tools/no_such/sink", sinkBody(ctx, id, "no_such", none))
 			Expect(code).To(Equal(http.StatusNotFound))
 			other := newEnv(ctx)
-			code, _ = other.call(ctx, other.token, http.MethodPut, "/mcp-servers/"+id+"/tools/create_issue/sink", map[string]any{"sinkClass": "none", "derivation": "fixed", "addressArgs": []string{}})
+			code, _ = other.call(ctx, other.token, http.MethodPut, "/mcp-servers/"+id+"/tools/create_issue/sink", sinkBody(ctx, id, "create_issue", none))
 			Expect(code).To(Equal(http.StatusNotFound))
 			_, raw := e.call(ctx, e.token, http.MethodGet, "/mcp-servers/"+id+"/tools", nil)
 			Expect(string(raw)).To(ContainSubstring(`"sinkClass":"external-high"`))
+		})
+
+		It("links a server to a code-host connection of the org, refuses another's, and clears the link with a new URL", func(ctx SpecContext) {
+			id := setup(ctx)
+			conn := uuid.New()
+			_, err := store.New(pool).CreateConnection(ctx, store.CreateConnectionParams{
+				OrgID: e.org, ID: pgtype.UUID{Bytes: conn, Valid: true}, Connector: "github", DisplayName: "gh", Config: []byte(`{}`),
+				SecretName: pgtype.Text{String: "conn-" + conn.String(), Valid: true},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			code, raw := e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/data-class", map[string]any{"kind": "other", "dataClass": []string{"untrusted_input", "private_data"}, "codeHostConnectionId": conn.String()})
+			Expect(code).To(Equal(http.StatusOK), string(raw))
+			Expect(decode[struct {
+				CodeHostConnectionID string `json:"codeHostConnectionId"`
+			}](raw).CodeHostConnectionID).To(Equal(conn.String()))
+
+			code, raw = e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/data-class", map[string]any{"kind": "other", "dataClass": []string{}, "codeHostConnectionId": uuid.NewString()})
+			Expect(code).To(Equal(http.StatusBadRequest), string(raw))
+
+			code, raw = e.call(ctx, e.token, http.MethodPatch, "/mcp-servers/"+id, map[string]any{"url": "https://other.example.com/mcp"})
+			Expect(code).To(Equal(http.StatusOK), string(raw))
+			Expect(string(raw)).NotTo(ContainSubstring("codeHostConnectionId"))
 		})
 	})
 
