@@ -290,7 +290,8 @@ func (x *SetMatchThresholdResponse) GetLeakGuard() *LeakGuard {
 type AddTrustedHostRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	OrgId string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	// host is a bare DNS name such as docs.example.com.
+	// host is a bare DNS name such as docs.example.com (exactly that host), or *. and a DNS name such as
+	// *.example.com (any subdomain at any depth, not example.com itself). A wildcard over a public suffix is refused.
 	Host          string `protobuf:"bytes,2,opt,name=host,proto3" json:"host,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -110,7 +110,12 @@ var _ = Describe("the leak guard in the admin API (#350)", func() {
 			Expect(decode[leakGuardJSON](raw).MatchThreshold).To(Equal(24))
 			Expect(auditCount(ctx, "org.leak_guard.threshold.set")).To(Equal(2))
 
-			for _, bad := range []int{0, 11, 257, -5} {
+			code, raw = e.call(ctx, e.token, http.MethodPut, "/leak-guard", map[string]any{"matchThreshold": 40})
+			Expect(code).To(Equal(http.StatusOK), string(raw))
+			code, raw = e.call(ctx, e.token, http.MethodPut, "/leak-guard", map[string]any{"matchThreshold": 0})
+			Expect(code).To(Equal(http.StatusOK), string(raw))
+			Expect(decode[leakGuardJSON](raw).MatchThreshold).To(Equal(24), "0 returns the default, as on the UI API")
+			for _, bad := range []int{11, 257, -5} {
 				code, raw = e.call(ctx, e.token, http.MethodPut, "/leak-guard", map[string]any{"matchThreshold": bad})
 				Expect(code).To(Equal(http.StatusBadRequest), string(raw))
 			}
@@ -134,8 +139,17 @@ var _ = Describe("the leak guard in the admin API (#350)", func() {
 			Expect(code).To(Equal(http.StatusNotFound))
 		})
 
+		It("adds and removes a wildcard entry", func(ctx SpecContext) {
+			code, raw := e.call(ctx, e.token, http.MethodPost, "/leak-guard/trusted-hosts", map[string]any{"host": "*.Example.com"})
+			Expect(code).To(Equal(http.StatusOK), string(raw))
+			Expect(decode[leakGuardJSON](raw).TrustedHosts).To(Equal([]string{"*.example.com"}))
+			code, raw = e.call(ctx, e.token, http.MethodDelete, "/leak-guard/trusted-hosts/*.example.com", nil)
+			Expect(code).To(Equal(http.StatusOK), string(raw))
+			Expect(decode[leakGuardJSON](raw).TrustedHosts).To(BeEmpty())
+		})
+
 		It("refuses a host that is not a bare DNS name", func(ctx SpecContext) {
-			for _, bad := range []string{"https://docs.example.com/a", "*.example.com", "10.0.0.1", "docs.example.com:443", ""} {
+			for _, bad := range []string{"https://docs.example.com/a", "*", "a.*.example.com", "*.com", "*.co.uk", "localhost", "127.1", "10.0.0.1", "docs.example.com:443", ""} {
 				code, raw := e.call(ctx, e.token, http.MethodPost, "/leak-guard/trusted-hosts", map[string]any{"host": bad})
 				Expect(code).To(Equal(http.StatusBadRequest), bad+": "+string(raw))
 			}

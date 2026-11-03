@@ -45,3 +45,11 @@ ON CONFLICT (org_id, host) DO NOTHING;
 -- name: DeleteOrgFetchTrustedHost :execrows
 DELETE FROM org_fetch_trusted_hosts
 WHERE org_id = @org_id AND host = @host;
+
+-- name: EnsureOrgSettings :exec
+-- Makes sure the org has an org_settings row, so LockOrgSettings has a row to lock.
+INSERT INTO org_settings (org_id) VALUES (@org_id) ON CONFLICT (org_id) DO NOTHING;
+
+-- name: LockOrgSettings :one
+-- Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
+SELECT org_id FROM org_settings WHERE org_id = @org_id FOR UPDATE;

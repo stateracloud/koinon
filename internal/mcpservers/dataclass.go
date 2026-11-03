@@ -139,3 +139,21 @@ func (s *Service) SetDataClass(ctx context.Context, org pgtype.UUID, actor audit
 	}
 	return toServer(out), nil
 }
+
+// recordClassReset audits the reset a URL change made to the data class (the UpdateMCPServer and
+// UpdateDeclaredMCPServer queries do the reset itself). It records nothing when the class was already
+// the default. The event is mcp_server.data_class.reset with reason url_changed.
+func recordClassReset(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor, cur, out store.McpServer) error {
+	if cur.Url == out.Url {
+		return nil
+	}
+	before, after := declarationOf(cur), declarationOf(out)
+	if before.Kind == after.Kind && slices.Equal(before.Legs, after.Legs) {
+		return nil
+	}
+	return audit.RecordErr(ctx, q, audit.Event{
+		Org: org, Actor: actor, Action: "mcp_server.data_class.reset", TargetKind: "mcp_server", TargetID: out.ID.String(),
+		Before: map[string]any{"name": cur.Name, "kind": before.Kind, "dataClass": before.Legs},
+		After:  map[string]any{"name": out.Name, "kind": after.Kind, "dataClass": after.Legs, "reason": "url_changed"},
+	})
+}

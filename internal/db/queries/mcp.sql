@@ -50,6 +50,12 @@ SET url = @url, transport = @transport,
     credential_header = CASE WHEN @set_credential_meta::boolean THEN sqlc.narg(credential_header) ELSE credential_header END,
     credential_prefix = CASE WHEN @set_credential_meta::boolean THEN @credential_prefix ELSE credential_prefix END,
     credential = CASE WHEN @set_credential::boolean THEN sqlc.narg(credential) ELSE credential END,
+    -- A new URL is a different server: its data class goes back to the cautious default (kind other,
+    -- every leg), so a class declared for the old endpoint cannot narrow the guard for the new one (ADR 0084).
+    kind = CASE WHEN url IS DISTINCT FROM @url THEN 'other'::mcp_server_kind ELSE kind END,
+    exposes_untrusted_input = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_untrusted_input END,
+    exposes_private_data = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_private_data END,
+    exposes_outbound = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_outbound END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
 WHERE org_id = @org_id AND id = @id
 RETURNING *;
@@ -59,6 +65,12 @@ UPDATE mcp_servers
 SET url = @url, transport = @transport, credential_header = sqlc.narg(credential_header),
     credential_prefix = @credential_prefix, credential = sqlc.narg(credential),
     declared_version = @declared_version, removed_at = NULL, disabled_reason = NULL,
+    -- A new URL is a different server: its data class goes back to the cautious default (kind other,
+    -- every leg), so a class declared for the old endpoint cannot narrow the guard for the new one (ADR 0084).
+    kind = CASE WHEN url IS DISTINCT FROM @url THEN 'other'::mcp_server_kind ELSE kind END,
+    exposes_untrusted_input = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_untrusted_input END,
+    exposes_private_data = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_private_data END,
+    exposes_outbound = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_outbound END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
 WHERE org_id = @org_id AND id = @id AND source = 'secret'
 RETURNING *;

@@ -37,7 +37,12 @@ func (s *Server) GetLeakGuard(ctx context.Context, _ GetLeakGuardRequestObject) 
 // SetLeakGuard implements StrictServerInterface.
 func (s *Server) SetLeakGuard(ctx context.Context, req SetLeakGuardRequestObject) (SetLeakGuardResponseObject, error) {
 	p, actor := s.actor(ctx)
-	err := s.leakGuard.SetMatchThreshold(ctx, p.Org, actor, req.Body.MatchThreshold)
+	// 0 means the default, as on the UI API (ADR 0084).
+	n := req.Body.MatchThreshold
+	if n != nil && *n == 0 {
+		n = nil
+	}
+	err := s.leakGuard.SetMatchThreshold(ctx, p.Org, actor, n)
 	if err == nil {
 		var v LeakGuard
 		if v, err = s.leakGuardView(ctx, p.Org); err == nil {

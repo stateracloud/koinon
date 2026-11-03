@@ -104,6 +104,14 @@ describe('LeakGuardSettings', () => {
     await waitFor(() => expect(screen.queryByText('docs.example.com')).not.toBeInTheDocument())
   })
 
+  it('shows a wildcard entry as any subdomain of its domain', async () => {
+    setup({ hosts: ['*.example.com', 'docs.example.org'] })
+    const list = await screen.findByRole('list', { name: 'Fetch-trusted hosts' })
+    expect(within(list).getByText('Any subdomain of example.com')).toBeInTheDocument()
+    expect(within(list).getAllByText(/Any subdomain of/)).toHaveLength(1)
+    expect(within(list).getByRole('button', { name: 'Remove *.example.com' })).toBeInTheDocument()
+  })
+
   it('shows the reason when a host is refused', async () => {
     setup({ failAdd: 'host must be a DNS name' })
     await userEvent.type(await screen.findByLabelText('Host'), 'https://x.example.com')

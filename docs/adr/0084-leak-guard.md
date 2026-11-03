@@ -168,9 +168,6 @@ The decisions on #265 leave these open; each is settled in the implementation is
   restart and works with several replicas, its size limit and eviction (#348, #349).
 - **Fingerprint keying:** whether fingerprints are keyed per home generation, so that a hash of a
   short window cannot be reversed by guessing (#348).
-- **Data class identifiers and defaults:** the stored names of the three legs and the kinds, whether
-  a server may carry several legs (a fetch server is untrusted input and outbound), and the class
-  existing servers migrate to (#350).
 - **Guard timeout:** the ExtMcp processor timeout the reconciler renders (#349).
 - **An emergency bypass:** whether an org or platform admin can switch the guard off for an org while
   koinon-api is degraded; none is decided, so none is built.
@@ -209,13 +206,37 @@ The data model #349 builds on, as shipped in migration `00048`:
   all.
 - **Declared servers.** The class is not a Secret key. It is set through the admin API or the console
   (`mcp_server.data_class.set`, audited with before and after) and survives the Secret being applied
-  again.
+  again with the same URL.
+- **A new URL resets the class.** When an update or a Secret re-apply changes a server's URL, its
+  class goes back to the default (kind `other`, all three legs): the class described the old
+  endpoint, and a server re-pointed from a docs server to a GitHub server must not keep a narrowing
+  that no longer holds. The same transaction audits it as `mcp_server.data_class.reset` (before and
+  after, reason `url_changed`) when the class was not already the default. A change of transport or
+  credential alone keeps the class.
 - **Threshold.** `org_settings.leak_match_threshold` is NULL for the default 24 and otherwise 12 to 256
   (the bounds of `internal/leakguard`, enforced by a CHECK). The API treats 0 or absent as "back to
   the default".
-- **Fetch-trusted hosts.** `org_fetch_trusted_hosts(org_id, id, host)`, empty for a new org. A host is
-  one lower-case DNS name, matched exactly: no wildcard, suffix, URL, port or IP address. At most 256
-  per org. Add and remove are audited as `org.fetch_trusted_host.add` and `.remove`.
+- **Fetch-trusted hosts.** `org_fetch_trusted_hosts(org_id, id, host)`, empty for a new org, at most
+  256 per org (the cap is checked under a lock on the org's settings row, so parallel adds cannot pass
+  it). Add and remove are audited as `org.fetch_trusted_host.add` and `.remove`. Andre's contract
+  (2026-11-03), which #349 relies on (`LeakGuard.TrustsHost`):
+  - An entry is one lower-case DNS name, matched **exactly**: `docs.example.com` trusts that host, not
+    its subdomains and not its parent.
+  - An admin may also add a **wildcard** entry `*.example.com` on purpose. It trusts any subdomain at
+    any depth (`a.example.com`, `a.b.example.com`) but **not `example.com` itself**, which needs its
+    own entry. Matching is on whole labels, so `evilexample.com` and `example.com.evil.net` match
+    nothing.
+  - Only a leading `*.` is allowed: `*` alone, a `*` anywhere else, and a wildcard over a public
+    suffix (`*.com`, `*.co.uk`, `*.blogspot.com`, by the `golang.org/x/net/publicsuffix` list) are
+    refused.
+  - The name after the optional `*.` follows the same rules in both forms. It has at least two labels
+    (`localhost` and `intranet` are refused). Its last label is not a number a resolver reads as an
+    IPv4 address (all digits, or `0x` and hex digits: `127.1`, `2130706433`, `0x7f.1`). It is not a
+    URL, port, path or IP address. A Unicode name is accepted and stored in punycode (via
+    `golang.org/x/net/idna`; a name that does not convert is refused). The database CHECK encodes the
+    same shape rules; the public-suffix test is the application's.
+  - `golang.org/x/net` was already in `go.mod` at the same version (an indirect requirement); using
+    its `publicsuffix` and `idna` packages moves the line to the direct block and adds no new module.
 
 ## Upstream verification
 

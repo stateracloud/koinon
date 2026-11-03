@@ -524,7 +524,7 @@ paths:
       operationId: addFetchTrustedHost
       summary: Put a host on the fetch-trusted list, which the automatic URL rule exempts. Audited.
       description: |
-        The list starts empty. A host is a bare DNS name; adding one already on the list changes nothing.
+        The list starts empty. An entry is a bare DNS name, which trusts exactly that host, or `*.` and a DNS name (`*.example.com`), which trusts every subdomain at any depth but not `example.com` itself. A wildcard over a public suffix (`*.com`, `*.co.uk`) is refused. Adding an entry already on the list changes nothing.
       requestBody:
         required: true
         content:
