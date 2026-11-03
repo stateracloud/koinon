@@ -191,6 +191,9 @@ var _ = Describe("Router", func() {
 			e.post(tr.root(false), tr.tool(false))
 			Eventually(func() int { return len(be.spans()) }).Should(Equal(1), "the tool span goes at once")
 			Expect(be.named("invoke_agent Support Bot")).To(BeNil(), "the root waits for the ledger")
+			// The root is held asynchronously, by another intake worker than the tool span's: a sweep
+			// before it is held finds nothing, and no later sweep would release it (#396, #612).
+			Eventually(func() int { return e.r.HeldRoots() }).Should(Equal(1))
 
 			settle(e) // the first poll finds two rows
 			Consistently(func() int { return len(be.spans()) }, 50*time.Millisecond).Should(Equal(1))
@@ -429,10 +432,10 @@ var _ = Describe("Router", func() {
 			}
 			req := &coltracepb.ExportTraceServiceRequest{ResourceSpans: []*tracepb.ResourceSpans{{ScopeSpans: []*tracepb.ScopeSpans{{Spans: spans}}}}}
 			body, _ := proto.Marshal(req)
-			start := time.Now()
+			// Nothing drains the intake, so a handler that waited for room would never answer: the
+			// answer itself is the proof (httpDo gives up after hangBound) (#612).
 			resp := httpDo(http.MethodPost, srv.URL, "application/x-protobuf", bytes.NewReader(body))
 			defer func() { _ = resp.Body.Close() }()
-			Expect(time.Since(start)).To(BeNumerically("<", time.Second))
 			var out coltracepb.ExportTraceServiceResponse
 			buf := new(bytes.Buffer)
 			_, _ = buf.ReadFrom(resp.Body)
