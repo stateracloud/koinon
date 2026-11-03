@@ -33,12 +33,13 @@
 //     decoded. There is no density gate, so a separator of any length between chunks of any
 //     length is read through; the price is that prose is projected too (its letters are
 //     base64 and base32 symbols), which resynchronisation turns into nothing, at a cost the
-//     work and time budgets bound (measured on a 10-core laptop, a benign call of up to 1 MiB takes
-//     0.15 to 0.35 s of the 1 s a call has: one argument or two halves of plain text, base64 of
-//     base64, of UTF-16 or of random bytes, or 65 to 128 short or 8 KiB arguments. The texts of
-//     a call, its pairs among them, are decoded by up to 8 workers, and the decoders of a text
-//     over 128 KiB run side by side; on one core the same calls take 0.2 to 0.5 s, and the
-//     65 to 128 arguments of base64 of UTF-16 about 1 s, which the clock then refuses). A
+//     work and time budgets bound (measured on one core, GOMAXPROCS=1, on a laptop, a benign
+//     call of up to 1 MiB takes 0.05 to 0.45 s of the 1 s a call has: one argument or two halves
+//     of plain text, base64 of base64, of UTF-16 or of random bytes, or 65 to 128 short or 8 KiB
+//     arguments, the slowest being 128 arguments of 8 KiB of base64 of UTF-16, 0.43 s. The
+//     texts of a call are decoded by up to 8 workers and the decoders of a text over 128 KiB run
+//     side by side, as a speed-up only: a pod with a small CPU limit gets no benefit, and the
+//     clock specs of evasion_test.go run on one core with a 0.6 s clock). A
 //     projection keeps stretches of 16 or more decoded bytes that are 60% letters, digits or
 //     spaces (ASCII punctuation and NULs do not count against them), so chance ASCII in
 //     misaligned decodings does not become a variant; shorter stretches (5 or more bytes, base64
@@ -66,7 +67,7 @@
 // ideographs span about eighty blocks and count as one (if half of them have a byte of 0x80 or
 // more, as ASCII read in pairs does not, and at least eight differ); Japanese is kana,
 // ideographs and ASCII. A run of hex digits is not read as base64 at all. Each reading makes a
-// child of the text, the k-th reading of each run the k-th child. Data wrapped so
+// child of the text, the k-th reading of each run the k-th child (see the known limits). Data wrapped so
 // that no 12 printable characters stand together is the "own cipher" case the URL rule
 // backstops, and the URL rule runs only on fetch and search calls: for any other tool a text
 // that decodes to nothing printable passes the taint check. Decoding nests up to Limits.MaxDepth (3) levels; text that still decodes further at
@@ -83,6 +84,19 @@
 // 16*MaxPairArgs^2 pairs and the joined text fits at 64 bytes a side; otherwise the call fails
 // closed (ReasonBudgetArgs). Splits across calls are not reassembled; the per-host
 // and per-run URL budgets bound them.
+//
+// Up to MaxPairArgs (32) arguments each pair is the joined text of the two ends, decoded again,
+// so an encoded stream cut anywhere, mid-block or mid-byte, is reassembled. Above that, decoding
+// every pair again costs a call of 128 arguments seconds on one core, so the pairs are built
+// from the decoded forms the arguments already have: the argument as it is, and its deepest
+// decoding. A split is still caught there when the cut is plain text, when each half decodes on
+// its own (each half base64 or percent-encoded, whatever the other half is), and when the
+// stream is cut where its encoding is aligned (base64 at a multiple of 4 characters, hex between
+// bytes, UTF-16 base64 at a multiple of 4). It is not caught there when the stream is cut
+// inside a unit of its encoding, so that neither half decodes to the unit's text (base64 cut
+// mid-block, hex cut mid-byte) and the decoded halves then each hold fewer than 24
+// canonical characters of the leak; the joined text of all arguments in call order still
+// catches that cut for adjacent arguments.
 //
 // # Fingerprints (winnowing)
 //
@@ -149,6 +163,11 @@
 //   - a secret split into small pieces that are each encoded on their own and joined by a
 //     separator: base64 pieces under about 6 bytes, base32 pieces under about 10 and pieces of
 //     non-ASCII text are too short to decode, and the resynchronisation does not chain them;
+//   - a stream cut inside a unit of its encoding between two arguments that are not adjacent, in
+//     a call of more than 32 arguments (see Split reassembly);
+//   - when one text holds several runs that each have several UTF-16 readings (at most 4 each),
+//     only the k-th reading of each run is combined into the k-th child, so a leak that needs
+//     the second reading of one run and the third of another is not read;
 //   - the same chain of short pieces when the text they carry is not ASCII: resync keeps text
 //     blocks of ASCII only (textBlock), so short chains of Cyrillic, Chinese or other scripts are
 //     not recovered, while the same text in one stretch is.
