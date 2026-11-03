@@ -57,7 +57,9 @@ var _ = Describe("Settings that change while spans wait", func() {
 		e.post(named(tr.tool(false), "s0"))
 		Eventually(func() int { return len(g.times(ep)) }).Should(Equal(1))
 		e.post(tr.tool(true)) // queued at full, with content
-		time.Sleep(20 * time.Millisecond)
+		Eventually(func() float64 {
+			return testutil.ToFloat64(e.r.Metrics().QueueDepth.WithLabelValues("org", "generic"))
+		}).Should(Equal(1.0), "the span is queued before the level changes")
 
 		e.routes.set(uid(orgA), be.route("d1", false, "none")) // the owner lowers the level
 		close(hold)
@@ -122,8 +124,8 @@ var _ = Describe("Settings that change while spans wait", func() {
 		// The post is asynchronous: first the batch is tried and lost, then the idle queue goes.
 		Eventually(func() float64 {
 			return testutil.ToFloat64(e.r.Metrics().Dropped.WithLabelValues("org", "generic", "export_failed"))
-		}, 3*time.Second).Should(Equal(1.0))
-		Eventually(e.r.QueueCount, 3*time.Second).Should(BeZero(), "the worker idled out")
+		}).Should(Equal(1.0))
+		Eventually(e.r.QueueCount).Should(BeZero(), "the worker idled out")
 		_, fail, _ := e.health.counts()
 		Expect(fail).To(BeNumerically("<=", 2), "the error, and the drop; not one write per interval")
 		time.Sleep(100 * time.Millisecond)
@@ -145,9 +147,12 @@ var _ = Describe("Settings that change while spans wait", func() {
 		secrets.versioned = true
 		g = newGate()
 		be = newBackend()
+		// The router's clock decides when the set is checked again (ConfigCheck, 1 ms) and when the
+		// grace ends: the spec moves it past each, rather than sleeping and hoping the machine kept up
+		// (#612).
 		e = newEnv(func(c *router.Config) {
 			c.Sender = g
-			c.SecretsGrace = 30 * time.Millisecond
+			c.SecretsGrace = 30 * time.Second
 		}, secrets)
 		e.routes.set(uid(orgA), be.route("d1", false, "full"))
 		tr = newTurn(e, orgA, runA, 1)
@@ -162,13 +167,13 @@ var _ = Describe("Settings that change while spans wait", func() {
 		Expect(av(be.named("a"), semconv.GenAIToolCallResult)).To(ContainSubstring("koinon_test_not-a-real-token-added-later"), "not yet a known secret")
 
 		secrets.set(uid(orgA), fakeOrgSecret, "koinon_test_not-a-real-token-added-later")
-		time.Sleep(10 * time.Millisecond)
+		e.clock.Advance(time.Second) // past ConfigCheck: the fingerprint is read again
 		leak("b", "koinon_test_not-a-real-token-added-later")
 		Eventually(func() int { return len(be.spans()) }).Should(Equal(2))
 		Expect(av(be.named("b"), semconv.GenAIToolCallResult)).To(Equal("found [redacted:secret]"))
 
 		secrets.setErr(errors.New("database down"))
-		time.Sleep(100 * time.Millisecond) // past the grace
+		e.clock.Advance(time.Minute) // past the grace
 		leak("c", "anything")
 		Eventually(func() int { return len(be.spans()) }).Should(Equal(3))
 		Expect(has(be.named("c"), semconv.GenAIToolCallResult)).To(BeFalse(), "no content for an org whose secrets are unknown")
@@ -210,7 +215,7 @@ var _ = Describe("Settings that change while spans wait", func() {
 			}
 			return out
 		}
-		Eventually(func() int { return len(roots()) }, 3*time.Second).Should(Equal(2))
+		Eventually(func() int { return len(roots()) }).Should(Equal(2))
 		Expect(has(roots()[orgB], semconv.KoinonSpansDropped)).To(BeFalse(), "org B lost nothing")
 		Expect(has(roots()[orgA], semconv.KoinonSpansDropped)).To(BeTrue(), "org A is told what it lost")
 	})
@@ -310,7 +315,7 @@ var _ = Describe("Hostile or repeated input", func() {
 		}()
 		defer func() { GinkgoWriter.Println("blocking request outcome:", outcome.Load()) }()
 		// Probe only once the receiver says the blocking request holds the slot, not on a timer.
-		Eventually(e.r.RequestsInProgress, 10*time.Second).Should(Equal(1), "the blocking request reached the handler (outcome: %v)", outcome.Load())
+		Eventually(e.r.RequestsInProgress).Should(Equal(1), "the blocking request reached the handler (outcome: %v)", outcome.Load())
 		resp := httpDo(http.MethodPost, e.srv.URL, "application/x-protobuf", bytes.NewReader(nil))
 		_ = resp.Body.Close()
 		Expect(resp.StatusCode).To(Equal(http.StatusServiceUnavailable))

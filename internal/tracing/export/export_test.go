@@ -26,6 +26,10 @@ const (
 	fakePublic = "koinon_test_not-a-real-public"
 )
 
+// hangBound tells a hang from a slow machine. The client's own timeout is not what these specs test,
+// and the 2 s it had was missed on the lab's loaded gate (#612).
+const hangBound = time.Minute
+
 var _ = Describe("Client", func() {
 	var (
 		b      *backend
@@ -38,7 +42,7 @@ var _ = Describe("Client", func() {
 		host, _, err := net.SplitHostPort(b.Listener.Addr().String())
 		Expect(err).NotTo(HaveOccurred())
 		policy := catalog.URLPolicy{Namespace: "koinon", AllowedHosts: []string{host}}
-		client, err = export.NewClient(policy.DialContext(&net.Dialer{Timeout: time.Second}), 2*time.Second)
+		client, err = export.NewClient(policy.DialContext(&net.Dialer{Timeout: hangBound}), hangBound)
 		Expect(err).NotTo(HaveOccurred())
 	})
 	generic := func() export.Destination {

@@ -51,16 +51,22 @@ type pStore struct {
 	gate  chan struct{}
 	enter atomic.Int32
 	calls []ModelCall
-	// hang makes Attribute wait for its context, as a database that does not answer.
-	hang  bool
-	attrs atomic.Int32
+	// hang makes Attribute wait for its context or for release, as a database that does not answer
+	// until it fails.
+	hang    bool
+	release chan struct{}
+	attrs   atomic.Int32
 }
 
 func (s *pStore) Attribute(ctx context.Context, _, _ pgtype.UUID, _ [16]byte) (Turn, error) {
 	s.attrs.Add(1)
 	if s.hang {
-		<-ctx.Done()
-		return Turn{}, ctx.Err()
+		select {
+		case <-ctx.Done():
+			return Turn{}, ctx.Err()
+		case <-s.release:
+			return Turn{}, errors.New("database down")
+		}
 	}
 	return Turn{Seq: 1, StartedAt: time.Unix(0, 0)}, nil
 }
@@ -206,9 +212,14 @@ func newRouter(t *testing.T, cfg Config) *Router {
 	return r
 }
 
+// hangBound tells a hang from a slow machine: a test waits on state, never on a time, and this
+// deadline only ends a wait that would otherwise never end. The lab's loaded 3-CPU gate has taken
+// more than 2 s for a step that takes milliseconds alone (#533, #612).
+const hangBound = time.Minute
+
 func eventually(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(hangBound)
 	for !ok() {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out: %s", what)
@@ -331,7 +342,10 @@ func TestSecretsAreNotServedStaleAfterAKnownChange(t *testing.T) {
 	}
 }
 
-// Two roots of one trace arriving together make the model calls once.
+// Two roots of one trace arriving together make the model calls once. The spec waits on the router's
+// state, not on time (#612): the second root arrives while the first is inside its ledger read (or
+// held), the gate opens only once the second has been dropped as a duplicate, and the sends are
+// counted when they have happened.
 func TestDuplicateRootsArrivingTogetherEmitOnce(t *testing.T) {
 	for name, cfg := range map[string]Config{
 		"over the byte bound": {MaxHeldBytes: 1},
@@ -350,6 +364,7 @@ func TestDuplicateRootsArrivingTogetherEmitOnce(t *testing.T) {
 				other := [16]byte{9}
 				r.hold(context.Background(), &heldRoot{span: span(pOrg, other, true, 0), org: pOrg, run: pRun, trace: other, since: time.Now()})
 			}
+			duplicates := func() float64 { return testutilValue(r.metrics.Discarded.WithLabelValues(discardDuplicate)) }
 			trace := [16]byte{1}
 			var wg sync.WaitGroup
 			for range 2 {
@@ -359,29 +374,44 @@ func TestDuplicateRootsArrivingTogetherEmitOnce(t *testing.T) {
 					r.hold(context.Background(), &heldRoot{span: span(pOrg, trace, true, 0), org: pOrg, run: pRun, trace: trace, since: time.Now()})
 				}()
 			}
-			time.Sleep(50 * time.Millisecond)
+			// One root claimed the trace: it is held, or released and blocked in its ledger read. The
+			// other was dropped while it was so.
+			eventually(t, "the second root was dropped as a duplicate", func() bool { return duplicates() == 1 })
+			if name == "held" {
+				wg.Wait()
+				if n := r.HeldRoots(); n != 1 {
+					t.Fatalf("held roots = %d, want the one", n)
+				}
+			} else {
+				eventually(t, "the first root is in its ledger read", func() bool { return st.enter.Load() == 1 })
+			}
 			close(st.gate)
 			wg.Wait()
 			if name == "held" {
 				r.Sweep(context.Background(), time.Now())
 				r.Sweep(context.Background(), time.Now().Add(time.Minute))
 			}
-			time.Sleep(300 * time.Millisecond)
-			snd.mu.Lock()
-			n := snd.spans["http://d1"]
-			snd.mu.Unlock()
-			if n < 2 || n > 2+boolToInt(name == "over the count") {
-				t.Errorf("spans sent = %d; want one chat span and one root (plus the filler's root)", n)
+			sent := func() int {
+				snd.mu.Lock()
+				defer snd.mu.Unlock()
+				return snd.spans["http://d1"]
+			}
+			// The filler of "over the count" stays held (no sweep runs), so in every case the trace's
+			// chat span and its root are all that is sent.
+			eventually(t, "the chat span and the root are sent", func() bool { return sent() >= 2 })
+			if n := sent(); n != 2 {
+				t.Errorf("spans sent = %d; want one chat span and one root", n)
+			}
+			if d := duplicates(); d != 1 {
+				t.Errorf("duplicates = %v, want 1: the second root never reaches the ledger", d)
+			}
+			if name != "held" {
+				if n := st.enter.Load(); n != 1 {
+					t.Errorf("ledger reads = %d, want 1", n)
+				}
 			}
 		})
 	}
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 // A batch being retried is still in memory: it stays in the byte budget, and a batch is bounded by bytes.
@@ -421,7 +451,7 @@ func TestFailingDestinationDoesNotStarveAnother(t *testing.T) {
 				bad = append(bad, span(pOrg, [16]byte{byte(i + 1)}, false, 8<<10))
 			}
 			r.dispatch(context.Background(), pOrg, bad...)
-			time.Sleep(20 * time.Millisecond)
+			eventually(t, "the failing destination has tried and is backing off", func() bool { return snd.calls.Load() >= 1 })
 			// The healthy org is the larger: 100 spans over time, exported as they come.
 			for chunk := range 10 {
 				var good []*tracepb.Span
@@ -602,9 +632,15 @@ func TestEstimateChargesTheObjectsAroundTheBytes(t *testing.T) {
 }
 
 // A database that does not answer must not stop the receiver, and is asked once, not once per span.
+// The database hangs until the spec releases it, far longer than any post may take, so a receiver that
+// waited for it could not answer; the reads are counted, not timed (#612).
 func TestHangingDatabaseDoesNotStopTheReceiver(t *testing.T) {
-	st := &pStore{hang: true}
-	r := newRouter(t, Config{Store: st, ConfigTimeout: 100 * time.Millisecond, Workers: 2, IngestQueue: 8, NegativeTTL: time.Hour})
+	st := &pStore{hang: true, release: make(chan struct{})}
+	// The failure is remembered for ConfigCheck: an hour, so a slow machine cannot outlast it.
+	r := newRouter(t, Config{Store: st, ConfigTimeout: 2 * hangBound, ConfigCheck: time.Hour, Workers: 2, IngestQueue: 8, NegativeTTL: time.Hour})
+	var once sync.Once
+	release := func() { once.Do(func() { close(st.release) }) }
+	t.Cleanup(release) // before r.Close, which waits for the workers
 	srv := httptest.NewServer(r.Handler())
 	defer srv.Close()
 	post := func() (time.Duration, int) {
@@ -620,14 +656,24 @@ func TestHangingDatabaseDoesNotStopTheReceiver(t *testing.T) {
 		_ = resp.Body.Close()
 		return time.Since(start), resp.StatusCode
 	}
-	for range 50 {
-		if d, code := post(); d > 50*time.Millisecond || code != 200 {
+	const posts = 50
+	for range posts {
+		if d, code := post(); d > hangBound || code != 200 {
 			t.Fatalf("the receiver took %v and answered %d while the database hung", d, code)
 		}
 	}
-	time.Sleep(300 * time.Millisecond)
-	if n := st.attrs.Load(); n > 3 {
-		t.Errorf("the database was asked %d times about one trace; the workers share one read and a failure is remembered", n)
+	eventually(t, "a worker asked the database", func() bool { return st.attrs.Load() >= 1 })
+	if n := st.attrs.Load(); n != 1 {
+		t.Errorf("the database was asked %d times while it hung; the workers share one read", n)
+	}
+	// The read fails; the spans still in the intake are dropped on the remembered failure.
+	release()
+	discarded := func(reason string) float64 { return testutilValue(r.metrics.Discarded.WithLabelValues(reason)) }
+	eventually(t, "every span was refused at the intake or dropped", func() bool {
+		return discarded(discardLookup)+discarded(discardIngestFull) == posts
+	})
+	if n := st.attrs.Load(); n != 1 {
+		t.Errorf("the database was asked %d times about one trace; a failure is remembered", n)
 	}
 }
 
@@ -710,13 +756,13 @@ func TestDropCountsSurviveALostBatch(t *testing.T) {
 	trace := [16]byte{2}
 	r.dispatch(context.Background(), pOrg, span(pOrg, trace, true, 0))
 	eventually(t, "the batch with the root was tried and lost", func() bool { return snd.calls.Load() >= 2 })
-	time.Sleep(50 * time.Millisecond)
-	q.dmu.Lock()
-	got := q.droppedByOrg[pOrg]
-	q.dmu.Unlock()
-	if got < 7 {
-		t.Errorf("the count to report fell to %d when the batch with its root was lost", got)
-	}
+	// The batch's bytes are released before its roots' counts are put back (send's defers), so the
+	// spec waits for the count itself: a router that lost it never gets there.
+	eventually(t, "the count to report survives the lost batch", func() bool {
+		q.dmu.Lock()
+		defer q.dmu.Unlock()
+		return q.droppedByOrg[pOrg] >= 7
+	})
 }
 
 func TestPollIntervalIsNeverShorterThanTheTurnGrace(t *testing.T) {
@@ -741,13 +787,28 @@ func (h *cHealth) Failure(context.Context, pgtype.UUID, tracedest.Route, string,
 type flakyRoutes struct {
 	pRoutes
 	broken atomic.Bool
+	// failed counts the reads refused while broken.
+	failed atomic.Int32
 }
 
 func (f *flakyRoutes) ConfigVersion(ctx context.Context, org pgtype.UUID) (string, error) {
 	if f.broken.Load() {
+		f.failed.Add(1)
 		return "", errors.New("database down")
 	}
 	return f.pRoutes.ConfigVersion(ctx, org)
+}
+
+// timerSleep is the router's own sleep, for a test's Sleep that adds a step before it.
+func timerSleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // The database being down is not the destination's failure.
@@ -755,13 +816,28 @@ func TestSettingsReadFailureIsNotTheDestinationsFailure(t *testing.T) {
 	rs := &flakyRoutes{pRoutes: pRoutes{routes: map[pgtype.UUID][]tracedest.Route{pOrg: {route("d1", "http://d1")}}}}
 	snd := &pSender{spans: map[string]int{}}
 	h := &cHealth{}
+	// The worker's first sleep is the linger before it makes the copy: it waits until the settings
+	// are broken, then lingers (longer than ConfigCheck, so the copy reads them again) (#612).
+	broken := make(chan struct{})
+	var lingered atomic.Bool
 	r := newRouter(t, Config{
-		Routes: rs, Sender: snd, Health: h, Linger: 60 * time.Millisecond, ConfigCheck: time.Millisecond,
+		Routes: rs, Sender: snd, Health: h, Linger: 10 * time.Millisecond, ConfigCheck: time.Millisecond,
 		BackoffBase: 5 * time.Millisecond, MaxAttempts: 2, BreakerThreshold: 1, BreakerBase: time.Hour,
+		Sleep: func(ctx context.Context, d time.Duration) error {
+			if lingered.CompareAndSwap(false, true) {
+				select {
+				case <-broken:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			return timerSleep(ctx, d)
+		},
 	})
 	r.dispatch(context.Background(), pOrg, span(pOrg, [16]byte{1}, false, 0))
 	rs.broken.Store(true) // during the linger, before the worker makes the copy
-	time.Sleep(300 * time.Millisecond)
+	close(broken)
+	eventually(t, "the worker tried several times to read the settings", func() bool { return rs.failed.Load() >= 3 })
 	if snd.calls.Load() != 0 {
 		t.Fatal("nothing can be sent while the settings cannot be read")
 	}
