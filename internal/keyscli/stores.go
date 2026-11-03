@@ -34,18 +34,19 @@ type KubeStore struct {
 	Wrappers secretstore.Wrappers
 }
 
-// Load implements Store.
+// Load implements Store. When the KEKs cannot be unwrapped it returns the error with the stored
+// KEKs and the active ID (no keys), so the caller can probe the wrapping key.
 func (k KubeStore) Load(ctx context.Context) (KeySet, error) {
 	s, err := k.Client.CoreV1().Secrets(k.Namespace).Get(ctx, k.Name, metav1.GetOptions{})
 	if err != nil {
 		return KeySet{}, fmt.Errorf("read the KEK Secret %s/%s: %w", k.Namespace, k.Name, err)
 	}
 	ks, err := openKeySet(ctx, k.Wrappers, s.Data)
-	if err != nil {
-		return KeySet{}, fmt.Errorf("KEK Secret %s/%s: %w", k.Namespace, k.Name, err)
-	}
 	if v := s.Annotations[ActivatedAnnotation]; v != "" {
 		ks.ActivatedAt, _ = time.Parse(time.RFC3339, v)
+	}
+	if err != nil {
+		return ks, fmt.Errorf("KEK Secret %s/%s: %w", k.Namespace, k.Name, err)
 	}
 	return ks, nil
 }
@@ -58,7 +59,8 @@ func openKeySet(ctx context.Context, ws secretstore.Wrappers, data map[string][]
 	}
 	keys, err := ws.UnwrapAll(ctx, stored)
 	if err != nil {
-		return KeySet{}, err
+		// Stored and Active come back with the error, so a caller can still probe the wrapping key.
+		return KeySet{Stored: stored, Active: active}, err
 	}
 	return KeySet{Keys: keys, Stored: stored, Active: active}, nil
 }
@@ -124,7 +126,7 @@ func (d DirStore) Load(ctx context.Context) (KeySet, error) {
 	}
 	keys, err := d.Wrappers.UnwrapAll(ctx, stored)
 	if err != nil {
-		return KeySet{}, fmt.Errorf("%s: %w", d.Dir, err)
+		return KeySet{Stored: stored, Active: active}, fmt.Errorf("%s: %w", d.Dir, err)
 	}
 	return KeySet{Keys: keys, Stored: stored, Active: active}, nil
 }
