@@ -39,9 +39,10 @@ turns:
       inputTokens: 1500
       cachedInputTokens: 1350
       outputTokens: 20
-  # The leak guard inside a task (ADR 0091): the agent reads from the unclassified tracker (both
-  # legs), then calls its write tool, which is auto-tier; the guard turns that call into an approval
-  # of the exact call and the run parks. The resumed run matches "approved and executed by Koinon".
+  # The leak guard inside a task (ADR 0091): the agent reads from the tracker (read_item is declared
+  # internal; its result, an MCP tool's, sets both legs), then calls its write tool, which is
+  # auto-tier and undeclared (external-high); the guard turns that call into an approval of the exact
+  # call and the run parks. The resumed run matches "approved and executed by Koinon".
   - when:
       systemContains: "# Repo helper"
       userContains: "tracker exfil"

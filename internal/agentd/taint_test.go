@@ -127,11 +127,15 @@ var _ = Describe("The leak guard's feed (ADR 0091 decision 4)", func() {
 	})
 })
 
-// recordingFeed is a TaintFeed that records what agentd tells the leak guard, in order.
+// recordingFeed is a TaintFeed that records what agentd tells the leak guard, in order. With hold
+// set, the first Report waits until hold is closed: a slow database.
 type recordingFeed struct {
 	mu     sync.Mutex
 	events []string
 	epochs []int64
+	counts [][2]int64
+	hold   chan struct{}
+	held   bool
 }
 
 func (f *recordingFeed) add(e string, epoch int64) {
@@ -141,7 +145,21 @@ func (f *recordingFeed) add(e string, epoch int64) {
 	f.epochs = append(f.epochs, epoch)
 }
 
-func (f *recordingFeed) Report(_ context.Context, _, _ pgtype.UUID, legs mcpguard.Legs, _ []string) error {
+func (f *recordingFeed) Report(ctx context.Context, _, _ pgtype.UUID, legs mcpguard.Legs, _ []string) error {
+	f.mu.Lock()
+	hold := f.hold
+	if f.held {
+		hold = nil
+	}
+	f.held = true
+	f.mu.Unlock()
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	f.add(fmt.Sprintf("report private=%t untrusted=%t", legs.PrivateData, legs.UntrustedInput), -1)
 	return nil
 }
@@ -151,13 +169,11 @@ func (f *recordingFeed) Start(_ context.Context, _, _ pgtype.UUID, epoch int64) 
 	return nil
 }
 
-func (f *recordingFeed) Read(_ context.Context, _, _ pgtype.UUID, epoch int64) error {
-	f.add("read", epoch)
-	return nil
-}
-
-func (f *recordingFeed) Done(_ context.Context, _, _ pgtype.UUID, epoch int64) error {
-	f.add("done", epoch)
+func (f *recordingFeed) Counts(_ context.Context, _, _ pgtype.UUID, epoch, read, done int64) error {
+	f.add(fmt.Sprintf("counts %d/%d", read, done), epoch)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.counts = append(f.counts, [2]int64{read, done})
 	return nil
 }
 
@@ -165,6 +181,16 @@ func (f *recordingFeed) snapshot() ([]string, []int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.events), slices.Clone(f.epochs)
+}
+
+// latest is the last counts written, or none.
+func (f *recordingFeed) latest() [2]int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.counts) == 0 {
+		return [2]int64{}
+	}
+	return f.counts[len(f.counts)-1]
 }
 
 var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2026-11-03)", func() {
@@ -186,35 +212,54 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 		r := e.enqueue(ctx, e.task(ctx, "feed"))
 		e.pool("agentd-feed", func(c *agentd.Config) { c.Taint = feed })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(feed.latest).Should(Equal([2]int64{2, 2}))
 		events, epochs := feed.snapshot()
-		Expect(events).To(HaveLen(7))
 		Expect(events[0]).To(Equal("start"), "the counts start before the harness runs")
 		claimed := getRun(ctx, r)
+		reports := 0
+		var last [2]int64
 		for i, ev := range events {
-			if ev == "start" || ev == "read" || ev == "done" {
-				Expect(epochs[i]).To(Equal(claimed.Epoch), ev)
+			if strings.HasPrefix(ev, "report") {
+				reports++
+				continue
 			}
-		}
-		// Each finished call: read before it is reported, reported before it is done.
-		reads, reports, dones := []int{}, []int{}, []int{}
-		for i, ev := range events {
-			switch {
-			case ev == "read":
-				reads = append(reads, i)
-			case strings.HasPrefix(ev, "report"):
-				reports = append(reports, i)
-			case ev == "done":
-				dones = append(dones, i)
+			Expect(epochs[i]).To(Equal(claimed.Epoch), ev)
+			var c [2]int64
+			if _, err := fmt.Sscanf(ev, "counts %d/%d", &c[0], &c[1]); err != nil {
+				continue
 			}
+			// The counts only grow, done never passes read, and done counts only reported calls.
+			Expect(c[0]).To(BeNumerically(">=", last[0]), ev)
+			Expect(c[1]).To(BeNumerically(">=", last[1]), ev)
+			Expect(c[1]).To(BeNumerically("<=", c[0]), ev)
+			Expect(c[1]).To(BeNumerically("<=", reports), ev)
+			last = c
 		}
-		Expect(reads).To(HaveLen(2))
-		Expect(reports).To(HaveLen(2))
-		Expect(dones).To(HaveLen(2))
-		for k := range 2 {
-			Expect(reads[k]).To(BeNumerically("<", reports[k]))
-			Expect(reports[k]).To(BeNumerically("<", dones[k]))
-		}
-		Expect(events[reports[0]]).To(Equal("report private=true untrusted=false"))
-		Expect(events[reports[1]]).To(Equal("report private=false untrusted=true"))
+		Expect(reports).To(Equal(2))
+		Expect(events).To(ContainElements("report private=true untrusted=false", "report private=false untrusted=true"))
+	})
+
+	It("counts a result read while an earlier report is slow, before that report finishes", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e.harness.set(func(h *harness) {
+			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
+				defer GinkgoRecover()
+				// Two shell reads finish back to back; the first one's report is slow.
+				Expect(say(sdk.StartToolCall("c1", "bash", sdk.WithStartKind(sdk.ToolKindExecute), sdk.WithStartStatus(sdk.ToolCallStatusCompleted)))).To(Succeed())
+				Expect(say(sdk.StartToolCall("c2", "bash", sdk.WithStartKind(sdk.ToolKindExecute), sdk.WithStartStatus(sdk.ToolCallStatusCompleted)))).To(Succeed())
+				return true
+			}
+		})
+		feed := &recordingFeed{hold: make(chan struct{})}
+		r := e.enqueue(ctx, e.task(ctx, "feed"))
+		e.pool("agentd-feed-slow", func(c *agentd.Config) { c.Taint = feed })
+		// Both results are counted as read while the first report still waits: the guard sees the
+		// session two results behind, and waits.
+		Eventually(feed.latest).WithTimeout(10 * time.Second).Should(Equal([2]int64{2, 0}))
+		events, _ := feed.snapshot()
+		Expect(events).NotTo(ContainElement(HavePrefix("report")))
+		close(feed.hold)
+		Eventually(feed.latest).WithTimeout(10 * time.Second).Should(Equal([2]int64{2, 2}))
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 	})
 })

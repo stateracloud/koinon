@@ -109,6 +109,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 			Name         string `json:"name"`
 			Tier         string `json:"tier"`
 			ReadOnlyHint bool   `json:"readOnlyHint"`
+			ContentHash  string `json:"contentHash"`
 		} `json:"tools"`
 	}
 	Expect(json.Unmarshal(body, &tools)).To(Succeed())
@@ -136,8 +137,24 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	Expect(anonymous).To(BeNumerically(">=", 1), "the OAuth check reached the server anonymously")
 	Expect(recs).To(ContainElement(HaveField("Agent", "default/mcp-probe-tracker")))
 
-	By("an admin confirms read_item as auto and allows the agent")
+	By("an admin confirms read_item as auto, declares it an in-org read, and allows the agent")
 	code, body = admin(ctx, http.MethodPut, "/mcp-servers/"+srv.ID+"/tools/read_item/tier", `{"tier":"auto"}`)
+	Expect(code).To(Equal(http.StatusOK), string(body))
+	// The tracker is the org's own (in the cluster), so a lookup in it sends nothing out of the org:
+	// internal (ADR 0091 decision 5). Undeclared, read_item would be external-high, and this agent's
+	// home generation already holds both legs from step 4's task (create_pull_request is an MCP tool,
+	// ACP kind other: both legs, decision 4), so the call below, made outside a task, would be refused
+	// with mcpguard.NoRunApprovalText, as an external-high call with both legs must be.
+	// write_item stays undeclared: external-high, the leak guard's case below and in step 6b.
+	var readHash string
+	for _, tl := range tools.Tools {
+		if tl.Name == "read_item" {
+			readHash = tl.ContentHash
+		}
+	}
+	Expect(readHash).NotTo(BeEmpty())
+	code, body = admin(ctx, http.MethodPut, "/mcp-servers/"+srv.ID+"/tools/read_item/sink",
+		fmt.Sprintf(`{"contentHash":%q,"sink":{"sinkClass":"internal","derivation":"fixed","addressArgs":[]}}`, readHash))
 	Expect(code).To(Equal(http.StatusOK), string(body))
 	code, body = admin(ctx, http.MethodPut, "/agents/"+agentID+"/mcp-servers", fmt.Sprintf(`{"servers":[{"serverId":%q}]}`, srv.ID))
 	Expect(code).To(Equal(http.StatusOK), string(body))
@@ -176,7 +193,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	}
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: read, Arguments: map[string]any{"title": "from the e2e"}})
 	Expect(err).NotTo(HaveOccurred())
-	Expect(res.IsError).To(BeFalse())
+	Expect(res.IsError).To(BeFalse(), "the call failed; its content says why: %s", toolText(res))
 	Expect(res.Content[0].(*mcp.TextContent).Text).To(ContainSubstring("read_item ok: from the e2e"))
 	var called *fakeMCPRecord
 	for _, r := range fakeMCPRequests(ctx, fake) {
@@ -192,9 +209,21 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	return srv.ID
 }
 
+// toolText is the text content of a tool result, for a failure message.
+func toolText(res *mcp.CallToolResult) string {
+	var b strings.Builder
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			b.WriteString(tc.Text)
+		}
+	}
+	return b.String()
+}
+
 // leakGuardExfilE2E is the exfiltration case of the MCP leak guard (ADR 0084, ADR 0091) on a full
-// install: the tracker is unclassified, so its tools are external-high and its results carry both
-// legs. read_item's result above is a static stand-in for private data (the fake server answers the
+// install: write_item is undeclared, so it is external-high, and the agent's home generation holds
+// both legs (step 4's task left them; read_item's result, an MCP tool's, would set them too, ADR 0091
+// decision 4). read_item's result above is a static stand-in for private data (the fake server answers the
 // same text to every call); once the session holds it, the agent's attempt to send it out through an
 // auto-tier tool of the same server must be stopped at the gateway by the guard, and never reach the
 // server. The call is made outside a task, so the guard refuses it (an approval needs a run); inside

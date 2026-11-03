@@ -74,24 +74,30 @@ UPDATE leak_guard_runs
 SET capped_bytes = @capped_bytes, url_state = @url_state, updated_at = now()
 WHERE org_id = @org_id AND run_id = @run_id;
 
--- name: StartLeakGuardFeed :exec
+-- name: StartLeakGuardFeed :execrows
 -- A worker starts the run's harness under its epoch: the counts start at zero, and what an earlier
--- worker read and never recorded is gone with it (the harness's replay reports it again).
+-- worker read and never recorded is gone with it (the harness's replay reports it again). No row:
+-- a newer epoch already owns the feed.
 INSERT INTO leak_guard_runs (org_id, run_id, feed_epoch)
 VALUES (@org_id, @run_id, @epoch)
 ON CONFLICT (org_id, run_id) DO UPDATE
 SET feed_epoch = @epoch, feed_read = 0, feed_done = 0, updated_at = now()
 WHERE leak_guard_runs.feed_epoch <= @epoch;
 
--- name: MarkLeakGuardFeedRead :execrows
--- The worker of epoch read a finished tool call from the harness; it has not recorded it yet.
-UPDATE leak_guard_runs SET feed_read = feed_read + 1, updated_at = now()
-WHERE org_id = @org_id AND run_id = @run_id AND feed_epoch = @epoch;
-
--- name: MarkLeakGuardFeedDone :execrows
--- The worker of epoch recorded (or had nothing to record of) the next finished tool call it read.
-UPDATE leak_guard_runs SET feed_done = feed_done + 1, updated_at = now()
+-- name: SetLeakGuardFeedCounts :execrows
+-- The worker of epoch has read feed_read finished tool calls from the harness and recorded the first
+-- feed_done of them. The counts are absolute and only grow, so a retried or late write never counts
+-- twice or goes back. No row: a newer epoch owns the feed (this worker is fenced).
+UPDATE leak_guard_runs
+SET feed_read = GREATEST(feed_read, @read::bigint), feed_done = GREATEST(feed_done, @done::bigint), updated_at = now()
 WHERE org_id = @org_id AND run_id = @run_id AND feed_epoch = @epoch;
 
 -- name: GetLeakGuardFeed :one
 SELECT feed_read, feed_done FROM leak_guard_runs WHERE org_id = @org_id AND run_id = @run_id;
+
+-- name: GetLiveRunForAgent :one
+-- The agent's running run, during its end-of-turn summary too: its harness runs until the run ends,
+-- so the guard waits for its feed then as well (GetRunningRunForAgent leaves the summary out: no
+-- approval belongs to it).
+SELECT * FROM runs
+WHERE org_id = @org_id AND agent_id = @agent_id AND state = 'running';
