@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -439,5 +440,103 @@ var _ = Describe("a worker that is shutting down", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(own.Fail(ctx, runoutcome.Turn{}, "late", store.RunFailureClassFatal)).To(MatchError(errShutdown))
 		Expect(own.IsFenced()).To(BeFalse())
+	})
+})
+
+var _ = Describe("RecordUpdate: items, not chunks (#344)", func() {
+	chunk := func(kind, text string) []byte {
+		return []byte(`{"sessionUpdate":"` + kind + `","content":{"type":"text","text":"` + text + `"}}`)
+	}
+	texts := func(ctx context.Context, w *world) (kinds, text []string, partial []bool) {
+		GinkgoHelper()
+		evs, err := q.ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{OrgID: w.org, RunID: w.run.ID, MaxEvents: 1000})
+		Expect(err).NotTo(HaveOccurred())
+		for _, e := range evs {
+			var u struct {
+				Content struct {
+					Text string `json:"text"`
+				} `json:"content"`
+				Partial bool `json:"partial"`
+			}
+			Expect(json.Unmarshal(e.Payload, &u)).To(Succeed())
+			kinds, text, partial = append(kinds, e.Kind), append(text, u.Content.Text), append(partial, u.Partial)
+		}
+		return
+	}
+
+	It("stores one event per message, however many chunks it came in, and sends every chunk live", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		var live []string
+		own := runoutcome.New(runoutcome.Config{DB: pool, Queries: q, Run: w.run, Live: func(kind string, p []byte) { live = append(live, kind) }})
+		for range 500 {
+			Expect(own.RecordUpdate(ctx, "acp.agent_message_chunk", chunk("agent_message_chunk", "ab"))).To(Succeed())
+		}
+		Expect(w.runKinds(ctx)).To(BeEmpty(), "an item in progress is not stored")
+		Expect(own.RecordUpdate(ctx, "acp.tool_call", []byte(`{"sessionUpdate":"tool_call","toolCallId":"t1"}`))).To(Succeed())
+		Expect(own.RecordUpdate(ctx, "acp.agent_message_chunk", chunk("agent_message_chunk", "done"))).To(Succeed())
+		own.FlushItems(ctx, false)
+
+		kinds, text, partial := texts(ctx, w)
+		Expect(kinds).To(Equal([]string{"acp.agent_message_chunk", "acp.tool_call", "acp.agent_message_chunk"}))
+		Expect(text[0]).To(Equal(strings.Repeat("ab", 500)))
+		Expect(text[2]).To(Equal("done"))
+		Expect(partial).To(Equal([]bool{false, false, false}))
+		Expect(live).To(HaveLen(501))
+	})
+
+	It("keeps a thought and a message apart", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		for _, c := range []struct{ kind, text string }{
+			{"agent_thought_chunk", "hm"}, {"agent_thought_chunk", "m"}, {"agent_message_chunk", "ok"},
+		} {
+			Expect(w.own.RecordUpdate(ctx, "acp."+c.kind, chunk(c.kind, c.text))).To(Succeed())
+		}
+		w.own.FlushItems(ctx, false)
+		kinds, text, _ := texts(ctx, w)
+		Expect(kinds).To(Equal([]string{"acp.agent_thought_chunk", "acp.agent_message_chunk"}))
+		Expect(text).To(Equal([]string{"hmm", "ok"}))
+	})
+
+	It("stores a message cut off mid-way with a partial marker", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		Expect(w.own.RecordUpdate(ctx, "acp.agent_message_chunk", chunk("agent_message_chunk", "half a "))).To(Succeed())
+		Expect(w.own.RecordUpdate(ctx, "acp.agent_message_chunk", chunk("agent_message_chunk", "sentence"))).To(Succeed())
+		w.own.FlushItems(ctx, true)
+		w.own.FlushItems(ctx, true) // nothing left: stores nothing more
+		kinds, text, partial := texts(ctx, w)
+		Expect(kinds).To(Equal([]string{"acp.agent_message_chunk"}))
+		Expect(text).To(Equal([]string{"half a sentence"}))
+		Expect(partial).To(Equal([]bool{true}))
+	})
+
+	It("stores the item in progress, cut off, before a verb ends the run, so the reply has it", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		turn := w.openTurn(ctx)
+		turn.Reason = "canceled"
+		Expect(w.own.RecordUpdate(ctx, "acp.agent_message_chunk", chunk("agent_message_chunk", "so far"))).To(Succeed())
+		Expect(w.own.Succeed(ctx, turn)).To(Succeed())
+		kinds, text, partial := texts(ctx, w)
+		Expect(kinds).To(Equal([]string{"acp.agent_message_chunk", "run.succeeded"}))
+		Expect(text[0]).To(Equal("so far"))
+		Expect(partial[0]).To(BeTrue())
+	})
+
+	It("stores a very long message in pieces that join to the whole", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		piece := strings.Repeat("x", 1000)
+		for range 150 {
+			Expect(w.own.RecordUpdate(ctx, "acp.agent_message_chunk", chunk("agent_message_chunk", piece))).To(Succeed())
+		}
+		w.own.FlushItems(ctx, false)
+		kinds, text, _ := texts(ctx, w)
+		Expect(kinds).To(HaveLen(3), "150 KB in items of at most 64 KiB")
+		Expect(strings.Join(text, "")).To(Equal(strings.Repeat(piece, 150)))
+	})
+
+	It("stores a chunk that is not plain text as it is", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		img := []byte(`{"sessionUpdate":"agent_message_chunk","content":{"type":"image","data":"AAAA","mimeType":"image/png"}}`)
+		Expect(w.own.RecordUpdate(ctx, "acp.agent_message_chunk", img)).To(Succeed())
+		Expect(w.runKinds(ctx)).To(Equal([]string{"acp.agent_message_chunk"}))
 	})
 })

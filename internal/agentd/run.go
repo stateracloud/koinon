@@ -808,6 +808,7 @@ func (r *runner) interrupted(ctx context.Context, reason string, exit *int, stde
 	if stderr != "" {
 		payload["stderrTail"] = stderr
 	}
+	r.own.FlushItems(ctx, true) // a message the harness was in the middle of is cut off
 	if err := r.own.Record(ctx, "run.interrupted", payload); err != nil {
 		r.log.Warn("recording the interruption failed", "err", err)
 	}
@@ -1031,6 +1032,7 @@ func (r *runner) concludeFenced(ctx context.Context, turn runoutcome.Turn) {
 // concludeShutdown ends a worker whose pool is stopping.
 func (r *runner) concludeShutdown(ctx context.Context, turn runoutcome.Turn) {
 	if r.p.cfg.KeepLeaseOnShutdown {
+		r.own.FlushItems(ctx, true)
 		r.own.CloseTurn(ctx, turn)
 	} else {
 		r.own.Release(context.WithoutCancel(ctx), turn)
@@ -1057,7 +1059,7 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	if err != nil {
 		return err
 	}
-	if err := h.r.own.RecordRaw(ctx, "acp."+updateKind(b), b); err != nil {
+	if err := h.r.own.RecordUpdate(ctx, "acp."+updateKind(b), b); err != nil {
 		return err
 	}
 	h.r.tr.update(n, at)
