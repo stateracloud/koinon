@@ -3,7 +3,6 @@
 package migrations_test
 
 import (
-	"context"
 	"database/sql"
 	"io/fs"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
 // chainMigrationVersion finds the audit hash chain migration by name, so no test hard-codes its number.
@@ -117,18 +117,7 @@ var _ = Describe("the audit hash chain migration", func() {
 
 	It("chains the rows that exist when it runs, per org in id order", func(ctx SpecContext) {
 		version := chainMigrationVersion()
-		admin, err := sql.Open("pgx", dsn)
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(admin.Close)
-		_, err = admin.ExecContext(ctx, `CREATE DATABASE backfill`)
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func(ctx context.Context) {
-			_, _ = admin.ExecContext(ctx, `DROP DATABASE IF EXISTS backfill WITH (FORCE)`)
-		})
-
-		cut := strings.Replace(dsn, "/koinon?", "/backfill?", 1)
-		Expect(cut).NotTo(Equal(dsn))
-		old, err := sql.Open("pgx", cut)
+		old, err := sql.Open("pgx", pgtest.Run(ctx))
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(old.Close)
 		provider, err := goose.NewProvider(goose.DialectPostgres, old, migrations.FS)
