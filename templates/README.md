@@ -7,10 +7,9 @@ Agent templates: building blocks for the agent builder; the result is always a d
   `web-researcher` (web research over several runs, no grant, no private data) and
   `lcm-upgrader` (weekly upgrade proposals, one pull request after a yes).
 - `researcher` and `web-researcher` are split so that no template holds all three legs of ADR 0084
-  (untrusted input, private data, an auto-tier outbound tool). `legs_test.go` fails if a template
-  combines them, except those listed in its `knownAllThree` (today `lcm-upgrader`, which reads
-  release notes through fetch tools next to its repository grant); `testdata/legs/` has the
-  negative fixture.
+  (untrusted input, private data, an auto-tier `external-high` tool; fetch and search are
+  `external-low`, ADR 0091). `legs_test.go` fails if a template combines them, with no exceptions;
+  `testdata/legs/` has the negative fixture.
 - `<id>.yaml`: one template per file, named after `metadata.id`, `apiVersion:
   templates.koinon.dev/v1alpha1`, `kind: Template`.
 - `schema/template.schema.json`: the JSON Schema (2020-12) every template must pass.
