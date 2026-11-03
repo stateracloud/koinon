@@ -26,8 +26,8 @@ jobs:
   # chart, chartsmoke, docs, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (#593; `go` and `web` then FAIL on
   # purpose, "not tested", so a draft never leaves a green `go` behind; marking it ready runs
   # everything on the same head), and a push to main whose merge tree equals a pull request head whose required checks
-  # passed (#595). The fast jobs (proto, migrations, adr-lint, claim-tests, lint-shell, scripts) and
-  # flavor-publish always run. Read the script's header before changing this.
+  # passed (#595). `changes`, `quick checks` (#594) and flavor-publish always run; `scripts` and
+  # `lint-shell` run except on that push to main (#594). Read the script's header before changing this.
   changes:
     name: changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
@@ -267,15 +267,24 @@ jobs:
             [[ $r == success ]] || { echo "::error::a Go job finished $r (results: $RESULTS)"; exit 1; }
           done
 
-  # Dependency cooldown (ADR 0079): versions this pull request adds must be at least 3 days old.
-  # Public endpoints only. The waiver is the label `dependency-age-waiver`, honoured only when
-  # the maintainer put it on; the job reads the label when it runs, so re-run the job after
-  # labelling. Timestamps guard against accidents, they are not proof. Required check: on a push to
-  # main the job is skipped, which reports success; rulesets only check pull request heads.
-  dep-age:
-    name: dependency age
-    if: github.event_name == 'pull_request'
+  # The short checks in one job (#594). Every job is billed at least one whole minute and each of
+  # these did about 10 s of work, so five jobs (proto, migrations, adr-lint, claim-tests, dependency
+  # age) cost five minutes for under one minute of work. The steps run one after another and each
+  # runs even when an earlier one failed (!cancelled()), so one run still shows every failure, as
+  # five jobs did. Needs nothing, so it starts at once; always runs, also on drafts and on a push to
+  # main with skip=true (a few seconds of work).
+  #
+  # Required check `quick checks` replaces `proto`, `migrations`, `adr-lint`, `claim-tests` and
+  # `dependency age` (hack/ci-required.txt). The dependency age steps run on pull requests only
+  # (rulesets only check pull request heads). Dependency cooldown (ADR 0079): versions this pull
+  # request adds must be at least 3 days old. Public endpoints only. The waiver is the label
+  # `dependency-age-waiver`, honoured only when the maintainer put it on; the step reads the label
+  # when it runs, so re-run the job after labelling. Timestamps guard against accidents, they are
+  # not proof.
+  quick-checks:
+    name: quick checks
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: read
@@ -284,7 +293,48 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: load tool versions
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
+      - uses: bufbuild/buf-action@85aebf73123b5c15fd5528aaecbf9129cddf7fa7 # v1.6.0
+        with:
+          setup_only: true
+          version: ${{ env.BUF_VERSION }}
+          checksum: ${{ env.BUF_SHA256_AMD64 }}
+      - name: proto (buf lint)
+        run: buf lint
+      - name: proto (buf breaking)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: |
+          base="origin/${{ github.base_ref }}"
+          if git cat-file -e "$base:buf.yaml" 2>/dev/null; then
+            buf breaking --against ".git#ref=$base"
+          else
+            echo "no buf.yaml on $base yet; nothing to compare"
+          fi
+      - name: migrations (tests)
+        if: ${{ !cancelled() }}
+        run: hack/migrate-lint-test.sh
+      - name: migrations (lint)
+        if: ${{ !cancelled() }}
+        run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+      # ADR numbers unique and contiguous, README index in sync (hack/adr-lint.sh, ADR 0082).
+      - name: adr-lint (tests)
+        if: ${{ !cancelled() }}
+        run: hack/adr-lint-test.sh
+      - name: adr-lint
+        if: ${{ !cancelled() }}
+        run: hack/adr-lint.sh
+      # Offline unit tests of hack/claim.sh. The live tests need a scratch repository and never run
+      # here: CI must not mutate GitHub.
+      - name: claim-tests
+        if: ${{ !cancelled() }}
+        run: hack/claim_test.sh
+      - name: claim-tests (migrate-renumber)
+        if: ${{ !cancelled() }}
+        run: hack/migrate-renumber-test.sh
       - id: waiver
+        name: dependency age (waiver)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -307,7 +357,8 @@ jobs:
               echo "::error::label $label was added by '${actor:-unknown}', not by a maintainer listed in MAINTAINERS.md ($(tr '\n' ' ' <<<"$approvers")); it does not waive anything"
             fi
           fi
-      - name: versions are at least 3 days old
+      - name: dependency age (versions are at least 3 days old)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           DEP_AGE_WAIVER: ${{ steps.waiver.outputs.by }}
@@ -429,31 +480,6 @@ jobs:
             [[ $r == success ]] || { echo "::error::a web job finished $r (results: $RESULTS)"; exit 1; }
           done
 
-  proto:
-    name: proto
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: load tool versions
-        run: hack/versions-env.sh >> "$GITHUB_ENV"
-      - uses: bufbuild/buf-action@85aebf73123b5c15fd5528aaecbf9129cddf7fa7 # v1.6.0
-        with:
-          setup_only: true
-          version: ${{ env.BUF_VERSION }}
-          checksum: ${{ env.BUF_SHA256_AMD64 }}
-      - run: buf lint
-      - name: buf breaking
-        if: github.event_name == 'pull_request'
-        run: |
-          base="origin/${{ github.base_ref }}"
-          if git cat-file -e "$base:buf.yaml" 2>/dev/null; then
-            buf breaking --against ".git#ref=$base"
-          else
-            echo "no buf.yaml on $base yet; nothing to compare"
-          fi
-
   generate:
     needs: changes
     if: needs.changes.outputs.generate == 'true'
@@ -568,43 +594,19 @@ jobs:
           version: v4.3.1
       - run: make test-admission
 
-  migrations:
-    name: migrations
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - run: hack/migrate-lint-test.sh
-      - run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
-
-  # ADR numbers unique and contiguous, README index in sync (hack/adr-lint.sh, ADR 0082).
-  adr-lint:
-    name: adr-lint
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: hack/adr-lint-test.sh
-      - run: hack/adr-lint.sh
-
-  # Offline unit tests of hack/claim.sh. The live tests need a scratch repository and never run
-  # here: CI must not mutate GitHub.
-  claim-tests:
-    name: claim-tests
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: hack/claim_test.sh
-      - run: hack/migrate-renumber-test.sh
-
   # shellcheck over every tracked shell script (the set hack/preflight.sh's shell gate uses, minus the
   # generated golden file) and actionlint over the workflows (actionlint also runs shellcheck on the
   # `run:` blocks). Its own job, not a step of `scripts`: it needs no Go toolchain and is cheap, and it
   # keeps the lint result separate from the script tests. Both tools are release binaries checked
   # against a pinned SHA-256, versions at least 3 days old when pinned (ADR 0079; shellcheck 0.11.0 is
   # from 2025-08-04, actionlint 1.7.12 from 2026-03-30). Bump them together with hack/preflight.sh's use.
+  # Skipped like `go` on a push to main whose heavy jobs are off (#594): the pull request head passed it.
   lint-shell:
     name: lint-shell
+    needs: changes
+    # !cancelled() and no outputs-based gate on the way in: when `changes` itself fails, this still
+    # runs (empty output is not 'true'), so a red `changes` cannot turn this check into a skip.
+    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -631,8 +633,11 @@ jobs:
 
   # Tests of the e2e tooling scripts: the decision rule (needs the Go toolchain for `go list`) and
   # the remote runner (needs flock, so Linux).
+  # Skipped like `go` on a push to main whose heavy jobs are off (#594); see lint-shell.
   scripts:
     name: scripts
+    needs: changes
+    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
