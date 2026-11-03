@@ -370,6 +370,13 @@ type Querier interface {
 	//
 	// Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
 	GetHomeRepository(ctx context.Context, arg GetHomeRepositoryParams) (HomeRepository, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The install ID (#615): created once by a migration, never changed. KMS-wrapped KEKs are bound
+	// to it.
+	GetInstallID(ctx context.Context) (pgtype.UUID, error)
+	// SPDX-License-Identifier: Apache-2.0
+	GetKEKBoundOnly(ctx context.Context) (GetKEKBoundOnlyRow, error)
 	// The last request of a run that its provider answered with an error status at or after @since: the
 	// gateway's own record of why a model request failed (agentd reads it when a harness reports an
 	// error without a status). Only the statuses in @statuses count. No row when the provider
@@ -380,6 +387,9 @@ type Querier interface {
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	GetMCPServer(ctx context.Context, arg GetMCPServerParams) (McpServer, error)
 	GetMCPTool(ctx context.Context, arg GetMCPToolParams) (McpTool, error)
+	// Locks the tool row until the transaction ends: a sync that republishes the tool waits, so what an
+	// admin declared is what was read (ADR 0091, the ADR 0057 rule).
+	GetMCPToolForUpdate(ctx context.Context, arg GetMCPToolForUpdateParams) (McpTool, error)
 	GetModel(ctx context.Context, arg GetModelParams) (Model, error)
 	// The enabled model an agent asks for by its plain name, with its provider's type, id and URL and its
 	// wire format, for finding its price and its cache mode.
@@ -957,6 +967,8 @@ type Querier interface {
 	// Changes the format of a model that is still not overridden, so a save that raced the startup
 	// re-derivation wins.
 	SetDerivedModelFormat(ctx context.Context, arg SetDerivedModelFormatParams) (int64, error)
+	// Sets the marker unless it is set: the first setting stays (the row is never updated).
+	SetKEKBoundOnly(ctx context.Context, setBy string) error
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
 	// What the server exposes (ADR 0084 decision 8). Allowed for every source: a declared server's

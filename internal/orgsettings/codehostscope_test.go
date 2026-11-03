@@ -63,7 +63,7 @@ var _ = Describe("the org's code-host scope (ADR 0091, #350)", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(l.CodeHostRepos).To(BeEmpty())
 		Expect(l.CodeHostRepos).NotTo(BeNil())
-		Expect(l.Scope().Internal("northwind", "platform-handbook", now)).To(BeFalse())
+		Expect(l.Scope().Internal(conn, "northwind", "platform-handbook", now)).To(BeFalse())
 		Expect(l.ScopeSummary(now).Repositories).To(BeZero())
 		Expect(l.ScopeSummary(now).OldestCheckedAt).To(BeNil())
 	})
@@ -77,9 +77,9 @@ var _ = Describe("the org's code-host scope (ADR 0091, #350)", func() {
 		l, err := svc.LeakGuard(ctx, org)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(l.CodeHostRepos).To(HaveLen(3))
-		Expect(l.Scope().Internal("northwind", "platform-handbook", now)).To(BeTrue())
-		Expect(l.Scope().Internal("northwind", "website", now)).To(BeFalse())
-		Expect(l.Scope().Internal("northwind", "old", now)).To(BeFalse(), "unknown visibility is not internal")
+		Expect(l.Scope().Internal(conn, "northwind", "platform-handbook", now)).To(BeTrue())
+		Expect(l.Scope().Internal(conn, "northwind", "website", now)).To(BeFalse())
+		Expect(l.Scope().Internal(conn, "northwind", "old", now)).To(BeFalse(), "unknown visibility is not internal")
 
 		By("a second report is the whole list: a repository it leaves out leaves the scope, a changed one is updated")
 		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{
@@ -88,7 +88,7 @@ var _ = Describe("the org's code-host scope (ADR 0091, #350)", func() {
 		l, err = svc.LeakGuard(ctx, org)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(l.CodeHostRepos).To(HaveLen(1))
-		Expect(l.Scope().Internal("northwind", "platform-handbook", now)).To(BeFalse(), "it turned public")
+		Expect(l.Scope().Internal(conn, "northwind", "platform-handbook", now)).To(BeFalse(), "it turned public")
 
 		By("an empty report empties the connection's part of the scope")
 		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, nil, now)).To(Succeed())
@@ -109,7 +109,7 @@ var _ = Describe("the org's code-host scope (ADR 0091, #350)", func() {
 	It("treats a reading older than the window as unknown", func(ctx SpecContext) {
 		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}}, now.Add(-2*time.Hour))).To(Succeed())
 		l, _ := svc.LeakGuard(ctx, org)
-		Expect(l.Scope().Internal("a", "b", now)).To(BeFalse())
+		Expect(l.Scope().Internal(conn, "a", "b", now)).To(BeFalse())
 		s := l.ScopeSummary(now)
 		Expect(s.Private).To(Equal(1))
 		Expect(s.Stale).To(Equal(1))
@@ -117,7 +117,7 @@ var _ = Describe("the org's code-host scope (ADR 0091, #350)", func() {
 
 		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}}, now)).To(Succeed())
 		l, _ = svc.LeakGuard(ctx, org)
-		Expect(l.Scope().Internal("a", "b", now)).To(BeTrue())
+		Expect(l.Scope().Internal(conn, "a", "b", now)).To(BeTrue())
 		Expect(l.ScopeSummary(now).Stale).To(BeZero())
 	})
 
@@ -163,8 +163,46 @@ var _ = Describe("the org's code-host scope (ADR 0091, #350)", func() {
 		Entry("an empty visibility", []orgsettings.CodeHostRepo{{Owner: "a", Name: "b"}}),
 		Entry("an empty owner", []orgsettings.CodeHostRepo{{Name: "b", Visibility: "private"}}),
 		Entry("a slash in the name", []orgsettings.CodeHostRepo{{Owner: "a", Name: "b/c", Visibility: "private"}}),
+		Entry("a non-ASCII name that lower-cases to an ASCII one (U+212A)", []orgsettings.CodeHostRepo{{Owner: "\u212Aorg", Name: "b", Visibility: "private"}}),
 		Entry("the same repository twice, in another case", []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}, {Owner: "A", Name: "B", Visibility: "private"}}),
 	)
+
+	It("trusts an internationalised host through the real list, in either spelling", func(ctx SpecContext) {
+		stored, err := svc.AddTrustedHost(ctx, org, actor, "*.m\u00fcnchen.example.com")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(stored).To(Equal("*.xn--mnchen-3ya.example.com"))
+		_, err = svc.AddTrustedHost(ctx, org, actor, "b\u00fccher.example.org")
+		Expect(err).NotTo(HaveOccurred())
+		l, _ := svc.LeakGuard(ctx, org)
+		fetch := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.Fetch, AddressArgs: []string{"url"}}
+		get := func(u string) sinkclass.Class {
+			return sinkclass.Classify(fetch, map[string]string{"url": u}, conn, l.Scope(), l, now)
+		}
+		Expect(get("https://shop.m\u00fcnchen.example.com/")).To(Equal(sinkclass.Internal))
+		Expect(get("https://shop.xn--mnchen-3ya.example.com/")).To(Equal(sinkclass.Internal))
+		Expect(get("https://m\u00fcnchen.example.com/")).To(Equal(sinkclass.ExternalLow), "the wildcard does not cover its apex")
+		Expect(get("https://B\u00dcCHER.example.org/")).To(Equal(sinkclass.Internal))
+		Expect(get("https://xn--bcher-kva.example.org/")).To(Equal(sinkclass.Internal))
+		Expect(get("https://b\u00fccher.example.net/")).To(Equal(sinkclass.ExternalLow))
+	})
+
+	It("refuses a reading dated in the future, and keeps the old one", func(ctx SpecContext) {
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}}, now)).To(Succeed())
+		err := svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{{Owner: "a", Name: "c", Visibility: "private"}}, time.Now().Add(24*time.Hour))
+		var inv *orgsettings.InvalidError
+		Expect(errors.As(err, &inv)).To(BeTrue(), "%v", err)
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, nil, time.Now().Add(sinkclass.MaxClockSkew/2))).To(Succeed(), "a small skew is tolerated")
+	})
+
+	It("looks a repository up in the linked connection only", func(ctx SpecContext) {
+		second := newConn(ctx, org)
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{{Owner: "northwind", Name: "platform-handbook", Visibility: "private"}}, now)).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, second, []orgsettings.CodeHostRepo{{Owner: "northwind", Name: "platform-handbook", Visibility: "public"}}, now)).To(Succeed())
+		l, _ := svc.LeakGuard(ctx, org)
+		Expect(l.Scope().Internal(conn, "northwind", "platform-handbook", now)).To(BeTrue())
+		Expect(l.Scope().Internal(second, "northwind", "platform-handbook", now)).To(BeFalse())
+		Expect(l.Scope().Internal("", "northwind", "platform-handbook", now)).To(BeFalse())
+	})
 
 	It("does not find another org's connection, or one that does not exist", func(ctx SpecContext) {
 		other, _, _ := pgtest.NewOrg(ctx, pool)
@@ -197,7 +235,7 @@ var _ = Describe("the org's code-host scope (ADR 0091, #350)", func() {
 
 		code := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}}
 		classify := func(owner, repo string) sinkclass.Class {
-			return sinkclass.Classify(code, map[string]string{"owner": owner, "repo": repo}, l.Scope(), l, now)
+			return sinkclass.Classify(code, map[string]string{"owner": owner, "repo": repo}, conn, l.Scope(), l, now)
 		}
 		Expect(classify("northwind", "platform-handbook")).To(Equal(sinkclass.Internal))
 		Expect(classify("northwind", "website")).To(Equal(sinkclass.ExternalHigh))
@@ -205,10 +243,15 @@ var _ = Describe("the org's code-host scope (ADR 0091, #350)", func() {
 
 		fetch := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.Fetch, AddressArgs: []string{"url"}}
 		get := func(u string) sinkclass.Class {
-			return sinkclass.Classify(fetch, map[string]string{"url": u}, l.Scope(), l, now)
+			return sinkclass.Classify(fetch, map[string]string{"url": u}, conn, l.Scope(), l, now)
 		}
 		Expect(get("https://a.b.docs.example.com/x?q=1")).To(Equal(sinkclass.Internal), "a wildcard covers any depth")
 		Expect(get("https://docs.example.com/")).To(Equal(sinkclass.ExternalLow), "but not the apex")
 		Expect(get("https://evil.example.org/")).To(Equal(sinkclass.ExternalLow))
+		Expect(get("https://x.docs.example.com\\@evil.example.org/")).To(Equal(sinkclass.ExternalHigh), "a backslash in the authority does not parse (a browser would read it as a slash)")
+		Expect(get("https://evil.example.org\\.docs.example.com/")).To(Equal(sinkclass.ExternalHigh))
+		Expect(get("https://evil.example.org%2f.docs.example.com/")).To(Equal(sinkclass.ExternalHigh), "a percent-encoded separator in the host does not parse")
+		Expect(get("https://docs.example.com%2eevil.example.org/")).To(Equal(sinkclass.ExternalHigh))
+		Expect(get("https://A.DOCS.Example.COM./")).To(Equal(sinkclass.Internal), "case and a trailing dot name the same host")
 	})
 })

@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AgentSchema, AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { ConnectionSchema, ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { LeakGuardService } from '@/gen/koinon/leakguard/v1alpha1/leakguard_pb'
 import {
   Health,
@@ -70,7 +70,7 @@ const managed = create(ServerSchema, {
 const gone = create(ServerSchema, { id: 's-gone', name: 'old', url: 'https://old.example.com/mcp', source: 'secret', managedBySecret: 'old-secret', removed: true, disabledReason: 'its Kubernetes Secret was deleted' })
 
 const tools = [
-  create(ToolSchema, { serverId: 's-docs', name: 'search', description: 'Search the docs', tier: Tier.ASK, readOnlyHint: true, present: true }),
+  create(ToolSchema, { serverId: 's-docs', name: 'search', contentHash: 'hash-search', description: 'Search the docs', tier: Tier.ASK, readOnlyHint: true, present: true }),
   create(ToolSchema, { serverId: 's-docs', name: 'publish', description: 'Publish a page', tier: Tier.NEVER, present: true }),
   create(ToolSchema, { serverId: 's-docs', name: 'edit', description: 'Edit a page', tier: Tier.ASK, present: true, reviewReason: 'the description changed' }),
   create(ToolSchema, { serverId: 's-docs', name: 'legacy', tier: Tier.AUTO, present: false }),
@@ -80,7 +80,7 @@ const tools = [
   create(ToolSchema, { serverId: 's-sec', name: 'read', description: 'Read a page', tier: Tier.ASK, present: true }),
 ]
 
-function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failDelete?: string; allowed?: { serverId: string; tools: string[] }[] } = {}) {
+function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failDelete?: string; failSink?: string; allowed?: { serverId: string; tools: string[] }[] } = {}) {
   const calls = {
     tiers: [] as SetToolTierRequest[],
     twos: [] as SetToolTwoApproversRequest[],
@@ -96,7 +96,7 @@ function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failD
   const current = new Map(tools.map((t) => [`${t.serverId}/${t.name}`, t]))
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
-    service(ConnectionService, { listConnections: () => ({ connections: [] }) })
+    service(ConnectionService, { listConnections: () => ({ connections: [create(ConnectionSchema, { id: 'c-gh', connector: 'github', displayName: 'Company GitHub' })] }) })
     service(AgentService, { getAgent: () => ({ agent: create(AgentSchema, { id: 'a-1', orgId: 'org-1', displayName: 'Helper', status: AgentStatus.ACTIVE, latestVersion: 1, activeVersion: 1 }) }) })
     service(LeakGuardService, {
       getLeakGuard: () => ({ leakGuard: { matchThreshold: 24, defaultMatchThreshold: 24, minMatchThreshold: 12, maxMatchThreshold: 256, trustedHosts: [] } }),
@@ -104,6 +104,7 @@ function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failD
     service(McpServerService, {
       setToolSink: (req) => {
         calls.sinks.push(req)
+        if (opts.failSink) throw new ConnectError(opts.failSink, Code.Aborted)
         return { tool: create(ToolSchema, { ...current.get(`${req.serverId}/${req.tool}`)!, sink: req.sink }) }
       },
       setServerClass: (req) => {
@@ -449,7 +450,31 @@ describe('Agent MCP allowlist', () => {
     await userEvent.selectOptions(form.getByLabelText('Results carry private data'), 'yes')
     await userEvent.click(form.getByRole('button', { name: 'Save sink class' }))
     await waitFor(() => expect(calls.sinks).toHaveLength(1))
-    expect(calls.sinks[0]).toMatchObject({ serverId: 's-docs', tool: 'search', sink: { sinkClass: 'external-high', derivation: 'code_host', addressArgs: ['owner', 'repo'], resultPrivateData: true } })
+    expect(calls.sinks[0]).toMatchObject({ serverId: 's-docs', tool: 'search', contentHash: 'hash-search', sink: { sinkClass: 'external-high', derivation: 'code_host', addressArgs: ['owner', 'repo'], resultPrivateData: true } })
     expect(calls.sinks[0].sink?.resultUntrustedInput).toBeUndefined()
+  })
+
+  it('links a server to a code-host connection', async () => {
+    const calls = setup()
+    const list = await screen.findByRole('list', { name: 'Servers' })
+    const d = within(within(list).getByRole('region', { name: 'docs' }))
+    expect(d.getByText(/No code-host connection: its code-host tools count as external, free text/)).toBeInTheDocument()
+    await userEvent.click(d.getByRole('button', { name: 'Change data class of docs' }))
+    await userEvent.selectOptions(await d.findByLabelText('Code-host connection'), 'c-gh')
+    await userEvent.click(d.getByRole('button', { name: 'Save class' }))
+    await waitFor(() => expect(calls.classes).toHaveLength(1))
+    expect(calls.classes[0].class?.codeHostConnectionId).toBe('c-gh')
+  })
+
+  it('says the tool changed when the declaration is refused as aborted', async () => {
+    const calls = setup({ failSink: 'the tool changed since it was read; read it again and review the new description' })
+    const list = await screen.findByRole('list', { name: 'Servers' })
+    const d = within(within(list).getByRole('region', { name: 'docs' }))
+    await userEvent.click(d.getAllByRole('button', { name: 'Change sink class of search' })[0])
+    const form = within(d.getByRole('form', { name: 'Sink class of search' }))
+    await userEvent.selectOptions(form.getByLabelText('Sink class'), 'none')
+    await userEvent.click(form.getByRole('button', { name: 'Save sink class' }))
+    expect(await form.findByRole('alert')).toHaveTextContent(/the tool changed since it was read.*review it and declare again/)
+    expect(calls.sinks).toHaveLength(1)
   })
 })

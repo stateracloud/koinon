@@ -162,15 +162,23 @@ const (
 // connector's refresh.
 const DefaultMaxAge = time.Hour
 
-// Repo is one repository of the org's code-host scope.
+// MaxClockSkew is how far a reading may be dated after the reader's clock and still count as fresh.
+// A reading further ahead is treated as stale on read and refused on write.
+const MaxClockSkew = time.Minute
+
+// Repo is one repository of the org's code-host scope: a repository of one connection. Connection
+// is the connection's ID. The same owner and name on another connection is another repository (it
+// may be on another host).
 type Repo struct {
+	Connection  string
 	Owner, Name string
 	Visibility  Visibility
 	CheckedAt   time.Time
 }
 
-// Scope is the org's code-host scope: the repositories of its code-host connections with their
-// visibility (ADR 0091 decision 3).
+// Scope is the org's code-host scope: the repositories of each code-host connection with their
+// visibility (ADR 0091 decision 3). A lookup names the connection; the repositories of the other
+// connections are not consulted.
 type Scope struct {
 	repos  map[string][]Repo
 	maxAge time.Duration
@@ -184,20 +192,26 @@ func NewScope(repos []Repo, maxAge time.Duration) Scope {
 	}
 	s := Scope{repos: map[string][]Repo{}, maxAge: maxAge}
 	for _, r := range repos {
-		k := key(r.Owner, r.Name)
+		k := key(r.Connection, r.Owner, r.Name)
 		s.repos[k] = append(s.repos[k], r)
 	}
 	return s
 }
 
-func key(owner, repo string) string { return strings.ToLower(owner) + "/" + strings.ToLower(repo) }
+func key(connection, owner, repo string) string {
+	return connection + "/" + strings.ToLower(owner) + "/" + strings.ToLower(repo)
+}
 
-// Internal reports whether owner/repo is a repository the org owns and does not publish: it is in
-// the scope, every reading of it (one per connection that lists it) is private or internal, and none
-// is older than the scope's maxAge. Unknown visibility, a public repository, a stale reading and a
-// repository the scope does not list are all not internal.
-func (s Scope) Internal(owner, repo string, now time.Time) bool {
-	rs := s.repos[key(owner, repo)]
+// Internal reports whether owner/repo is a repository the org owns and does not publish: the
+// connection lists it, and its reading is private or internal and no older than the scope's maxAge.
+// Unknown visibility, a public repository, a stale reading, a reading dated in the future (a writer
+// error: it would stay fresh forever), no connection, a repository only another connection lists
+// and a repository the scope does not list are all not internal.
+func (s Scope) Internal(connection, owner, repo string, now time.Time) bool {
+	if connection == "" {
+		return false
+	}
+	rs := s.repos[key(connection, owner, repo)]
 	if len(rs) == 0 {
 		return false
 	}
@@ -205,7 +219,7 @@ func (s Scope) Internal(owner, repo string, now time.Time) bool {
 		if r.Visibility != VisPrivate && r.Visibility != VisInternal {
 			return false
 		}
-		if now.Sub(r.CheckedAt) > s.maxAge {
+		if age := now.Sub(r.CheckedAt); age > s.maxAge || age < -MaxClockSkew {
 			return false
 		}
 	}
@@ -217,8 +231,11 @@ type HostTrust interface{ TrustsHost(host string) bool }
 
 // Classify returns the sink class of one call. address holds the values of the call's address
 // arguments by name; the payload arguments are not an input, they never decide the class. A derived
-// tool whose address arguments are missing or do not parse is ExternalHigh.
-func Classify(d Declaration, address map[string]string, scope Scope, hosts HostTrust, now time.Time) Class {
+// tool whose address arguments are missing or do not parse is ExternalHigh. connection is the ID of
+// the code-host connection the tool's server is linked to (mcp_servers.code_host_connection_id), "" for
+// none: a code-host tool of an unlinked server is ExternalHigh, and the repository is looked up in
+// that connection's list only.
+func Classify(d Declaration, address map[string]string, connection string, scope Scope, hosts HostTrust, now time.Time) Class {
 	switch d.Derivation {
 	case Fixed:
 		if d.Class.Valid() {
@@ -233,7 +250,7 @@ func Classify(d Declaration, address map[string]string, scope Scope, hosts HostT
 		if !repoPart(owner) || !repoPart(repo) {
 			return ExternalHigh
 		}
-		if scope.Internal(owner, repo, now) {
+		if scope.Internal(connection, owner, repo, now) {
 			return Internal
 		}
 		return ExternalHigh
@@ -253,9 +270,23 @@ func Classify(d Declaration, address map[string]string, scope Scope, hosts HostT
 	return ExternalHigh
 }
 
-// repoPart accepts one path segment of a repository address: no separator, no space.
+// ValidRepoPart reports whether s is an owner or repository name the derivation accepts, and the
+// scope's writer stores.
+func ValidRepoPart(s string) bool { return repoPart(s) }
+
+// repoPart accepts one path segment of a repository address: ASCII only (a code host's names are,
+// and a non-ASCII letter such as U+212A lower-cases to an ASCII one, so it would match a different
+// repository), no separator, no space, no control character.
 func repoPart(s string) bool {
-	return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, "/\\ \t\r\n")
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c <= ' ' || c >= 0x7f || c == '/' || c == '\\' {
+			return false
+		}
+	}
+	return true
 }
 
 // FetchHost returns the host of an http or https URL, or false for anything else: a URL without a

@@ -5,13 +5,15 @@ The key-admin Job (ADR 0085 decision 12, #416): only with a KMS (secrets.kek.kms
 koinon-api and the reconciler may only decrypt. It creates the KEK Secret with one active KEK
 wrapped by the KMS when the Secret does not exist (not with secrets.kek.existingSecret, which is the
 operator's), and adds the KEK secrets.kek.kms.keyAdmin.addKey names when the key set does not hold
-it. It never activates, rewraps or retires: koinon-api keys does.
+it. Every KEK it wraps is bound to the install ID in the database (#615); with
+secrets.kek.kms.keyAdmin.rewrapUnbound it also binds the KEKs wrapped before that. It never
+activates, retires or rewraps values: koinon-api keys does.
 
 It is an ordinary release resource, not a hook: on a new install it must run while the database
 and koinon-api come up (a post-install hook would deadlock `helm install --wait`, since koinon-api
 cannot become ready before the KEK Secret exists, and in cnpg mode a pre-install hook has no
-database yet). It waits for the database, which it reads only to refuse re-creating a deleted Secret
-over stored values; until it is done, koinon-api restarts. The Job's name carries a hash of its pod
+database yet). It waits for the database and its first migration: it reads the install ID there,
+and refuses to re-create a deleted Secret over stored values; until it is done, koinon-api restarts. The Job's name carries a hash of its pod
 template, so any change of its inputs (addKey, the KMS settings, the image) makes a new Job that runs
 once, and an unchanged upgrade or Argo CD sync leaves the finished one alone. A Job's spec cannot be
 changed in place, and this way it never has to be. Each run is idempotent.

@@ -163,10 +163,14 @@ type Server struct {
 	// kind is "fetch", "search" or "other"; data_class lists the session legs the server's results can
 	// set, in the order untrusted_input, private_data (see ServerClass). A server nobody classified is
 	// kind "other" with both legs.
-	Kind          string   `protobuf:"bytes,20,opt,name=kind,proto3" json:"kind,omitempty"`
-	DataClass     []string `protobuf:"bytes,21,rep,name=data_class,json=dataClass,proto3" json:"data_class,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Kind      string   `protobuf:"bytes,20,opt,name=kind,proto3" json:"kind,omitempty"`
+	DataClass []string `protobuf:"bytes,21,rep,name=data_class,json=dataClass,proto3" json:"data_class,omitempty"`
+	// code_host_connection_id is the org's code-host connection the server acts through, empty for none.
+	// The code-host sink class of its tools is looked up in that connection's repository list only; a
+	// server without one is external-high. A changed URL clears it.
+	CodeHostConnectionId string `protobuf:"bytes,22,opt,name=code_host_connection_id,json=codeHostConnectionId,proto3" json:"code_host_connection_id,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *Server) Reset() {
@@ -346,6 +350,13 @@ func (x *Server) GetDataClass() []string {
 	return nil
 }
 
+func (x *Server) GetCodeHostConnectionId() string {
+	if x != nil {
+		return x.CodeHostConnectionId
+	}
+	return ""
+}
+
 // ServerClass is what a server declares it exposes (ADR 0084 decision 8).
 type ServerClass struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -356,9 +367,12 @@ type ServerClass struct {
 	// (returns text an outsider controls) and "private_data" (returns data the org does not want to
 	// leave). A server may carry both; none is allowed. Where a call goes is not a server leg: it is the
 	// sink class of each tool (ToolSink).
-	DataClass     []string `protobuf:"bytes,2,rep,name=data_class,json=dataClass,proto3" json:"data_class,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	DataClass []string `protobuf:"bytes,2,rep,name=data_class,json=dataClass,proto3" json:"data_class,omitempty"`
+	// code_host_connection_id links the server to one of the org's code-host connections (see Server).
+	// Empty means none.
+	CodeHostConnectionId string `protobuf:"bytes,3,opt,name=code_host_connection_id,json=codeHostConnectionId,proto3" json:"code_host_connection_id,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *ServerClass) Reset() {
@@ -403,6 +417,13 @@ func (x *ServerClass) GetDataClass() []string {
 		return x.DataClass
 	}
 	return nil
+}
+
+func (x *ServerClass) GetCodeHostConnectionId() string {
+	if x != nil {
+		return x.CodeHostConnectionId
+	}
+	return ""
 }
 
 type Tool struct {
@@ -1482,11 +1503,13 @@ func (x *SetToolTierRequest) GetTier() Tier {
 }
 
 type SetToolSinkRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	ServerId      string                 `protobuf:"bytes,2,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
-	Tool          string                 `protobuf:"bytes,3,opt,name=tool,proto3" json:"tool,omitempty"`
-	Sink          *ToolSink              `protobuf:"bytes,4,opt,name=sink,proto3" json:"sink,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	OrgId    string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	ServerId string                 `protobuf:"bytes,2,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	Tool     string                 `protobuf:"bytes,3,opt,name=tool,proto3" json:"tool,omitempty"`
+	Sink     *ToolSink              `protobuf:"bytes,4,opt,name=sink,proto3" json:"sink,omitempty"`
+	// content_hash is the Tool.content_hash the admin reviewed. Required.
+	ContentHash   string `protobuf:"bytes,5,opt,name=content_hash,json=contentHash,proto3" json:"content_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1547,6 +1570,13 @@ func (x *SetToolSinkRequest) GetSink() *ToolSink {
 		return x.Sink
 	}
 	return nil
+}
+
+func (x *SetToolSinkRequest) GetContentHash() string {
+	if x != nil {
+		return x.ContentHash
+	}
+	return ""
 }
 
 type SetToolSinkResponse struct {
@@ -2057,7 +2087,7 @@ var File_koinon_mcpserver_v1alpha1_mcpserver_proto protoreflect.FileDescriptor
 
 const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\n" +
-	")koinon/mcpserver/v1alpha1/mcpserver.proto\x12\x19koinon.mcpserver.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xdf\x06\n" +
+	")koinon/mcpserver/v1alpha1/mcpserver.proto\x12\x19koinon.mcpserver.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x96\a\n" +
 	"\x06Server\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
@@ -2083,11 +2113,13 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x0egateway_target\x18\x13 \x01(\tR\rgatewayTarget\x12\x12\n" +
 	"\x04kind\x18\x14 \x01(\tR\x04kind\x12\x1d\n" +
 	"\n" +
-	"data_class\x18\x15 \x03(\tR\tdataClass\"@\n" +
+	"data_class\x18\x15 \x03(\tR\tdataClass\x125\n" +
+	"\x17code_host_connection_id\x18\x16 \x01(\tR\x14codeHostConnectionId\"w\n" +
 	"\vServerClass\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x1d\n" +
 	"\n" +
-	"data_class\x18\x02 \x03(\tR\tdataClass\"\xa1\x06\n" +
+	"data_class\x18\x02 \x03(\tR\tdataClass\x125\n" +
+	"\x17code_host_connection_id\x18\x03 \x01(\tR\x14codeHostConnectionId\"\xa1\x06\n" +
 	"\x04Tool\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -2174,12 +2206,13 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x12\n" +
 	"\x04tool\x18\x03 \x01(\tR\x04tool\x123\n" +
-	"\x04tier\x18\x04 \x01(\x0e2\x1f.koinon.mcpserver.v1alpha1.TierR\x04tier\"\x95\x01\n" +
+	"\x04tier\x18\x04 \x01(\x0e2\x1f.koinon.mcpserver.v1alpha1.TierR\x04tier\"\xb8\x01\n" +
 	"\x12SetToolSinkRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x12\n" +
 	"\x04tool\x18\x03 \x01(\tR\x04tool\x127\n" +
-	"\x04sink\x18\x04 \x01(\v2#.koinon.mcpserver.v1alpha1.ToolSinkR\x04sink\"J\n" +
+	"\x04sink\x18\x04 \x01(\v2#.koinon.mcpserver.v1alpha1.ToolSinkR\x04sink\x12!\n" +
+	"\fcontent_hash\x18\x05 \x01(\tR\vcontentHash\"J\n" +
 	"\x13SetToolSinkResponse\x123\n" +
 	"\x04tool\x18\x01 \x01(\v2\x1f.koinon.mcpserver.v1alpha1.ToolR\x04tool\"J\n" +
 	"\x13SetToolTierResponse\x123\n" +
@@ -2226,9 +2259,9 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x0eSetServerClass\x120.koinon.mcpserver.v1alpha1.SetServerClassRequest\x1a1.koinon.mcpserver.v1alpha1.SetServerClassResponse\x12o\n" +
 	"\fDeleteServer\x12..koinon.mcpserver.v1alpha1.DeleteServerRequest\x1a/.koinon.mcpserver.v1alpha1.DeleteServerResponse\x12k\n" +
 	"\tListTools\x12+.koinon.mcpserver.v1alpha1.ListToolsRequest\x1a,.koinon.mcpserver.v1alpha1.ListToolsResponse\"\x03\x90\x02\x01\x12l\n" +
-	"\vSetToolTier\x12-.koinon.mcpserver.v1alpha1.SetToolTierRequest\x1a..koinon.mcpserver.v1alpha1.SetToolTierResponse\x12l\n" +
-	"\vSetToolSink\x12-.koinon.mcpserver.v1alpha1.SetToolSinkRequest\x1a..koinon.mcpserver.v1alpha1.SetToolSinkResponse\x12\x84\x01\n" +
-	"\x13SetToolTwoApprovers\x125.koinon.mcpserver.v1alpha1.SetToolTwoApproversRequest\x1a6.koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse\x12\x8a\x01\n" +
+	"\vSetToolTier\x12-.koinon.mcpserver.v1alpha1.SetToolTierRequest\x1a..koinon.mcpserver.v1alpha1.SetToolTierResponse\x12\x84\x01\n" +
+	"\x13SetToolTwoApprovers\x125.koinon.mcpserver.v1alpha1.SetToolTwoApproversRequest\x1a6.koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse\x12l\n" +
+	"\vSetToolSink\x12-.koinon.mcpserver.v1alpha1.SetToolSinkRequest\x1a..koinon.mcpserver.v1alpha1.SetToolSinkResponse\x12\x8a\x01\n" +
 	"\x15AcknowledgeToolReview\x127.koinon.mcpserver.v1alpha1.AcknowledgeToolReviewRequest\x1a8.koinon.mcpserver.v1alpha1.AcknowledgeToolReviewResponse\x12}\n" +
 	"\x0fGetAgentServers\x121.koinon.mcpserver.v1alpha1.GetAgentServersRequest\x1a2.koinon.mcpserver.v1alpha1.GetAgentServersResponse\"\x03\x90\x02\x01\x12x\n" +
 	"\x0fSetAgentServers\x121.koinon.mcpserver.v1alpha1.SetAgentServersRequest\x1a2.koinon.mcpserver.v1alpha1.SetAgentServersResponseBYZWgithub.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1;mcpserverv1alpha1b\x06proto3"
@@ -2316,8 +2349,8 @@ var file_koinon_mcpserver_v1alpha1_mcpserver_proto_depIdxs = []int32{
 	15, // 31: koinon.mcpserver.v1alpha1.McpServerService.DeleteServer:input_type -> koinon.mcpserver.v1alpha1.DeleteServerRequest
 	17, // 32: koinon.mcpserver.v1alpha1.McpServerService.ListTools:input_type -> koinon.mcpserver.v1alpha1.ListToolsRequest
 	19, // 33: koinon.mcpserver.v1alpha1.McpServerService.SetToolTier:input_type -> koinon.mcpserver.v1alpha1.SetToolTierRequest
-	20, // 34: koinon.mcpserver.v1alpha1.McpServerService.SetToolSink:input_type -> koinon.mcpserver.v1alpha1.SetToolSinkRequest
-	29, // 35: koinon.mcpserver.v1alpha1.McpServerService.SetToolTwoApprovers:input_type -> koinon.mcpserver.v1alpha1.SetToolTwoApproversRequest
+	29, // 34: koinon.mcpserver.v1alpha1.McpServerService.SetToolTwoApprovers:input_type -> koinon.mcpserver.v1alpha1.SetToolTwoApproversRequest
+	20, // 35: koinon.mcpserver.v1alpha1.McpServerService.SetToolSink:input_type -> koinon.mcpserver.v1alpha1.SetToolSinkRequest
 	23, // 36: koinon.mcpserver.v1alpha1.McpServerService.AcknowledgeToolReview:input_type -> koinon.mcpserver.v1alpha1.AcknowledgeToolReviewRequest
 	25, // 37: koinon.mcpserver.v1alpha1.McpServerService.GetAgentServers:input_type -> koinon.mcpserver.v1alpha1.GetAgentServersRequest
 	27, // 38: koinon.mcpserver.v1alpha1.McpServerService.SetAgentServers:input_type -> koinon.mcpserver.v1alpha1.SetAgentServersRequest
@@ -2328,8 +2361,8 @@ var file_koinon_mcpserver_v1alpha1_mcpserver_proto_depIdxs = []int32{
 	16, // 43: koinon.mcpserver.v1alpha1.McpServerService.DeleteServer:output_type -> koinon.mcpserver.v1alpha1.DeleteServerResponse
 	18, // 44: koinon.mcpserver.v1alpha1.McpServerService.ListTools:output_type -> koinon.mcpserver.v1alpha1.ListToolsResponse
 	22, // 45: koinon.mcpserver.v1alpha1.McpServerService.SetToolTier:output_type -> koinon.mcpserver.v1alpha1.SetToolTierResponse
-	21, // 46: koinon.mcpserver.v1alpha1.McpServerService.SetToolSink:output_type -> koinon.mcpserver.v1alpha1.SetToolSinkResponse
-	30, // 47: koinon.mcpserver.v1alpha1.McpServerService.SetToolTwoApprovers:output_type -> koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse
+	30, // 46: koinon.mcpserver.v1alpha1.McpServerService.SetToolTwoApprovers:output_type -> koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse
+	21, // 47: koinon.mcpserver.v1alpha1.McpServerService.SetToolSink:output_type -> koinon.mcpserver.v1alpha1.SetToolSinkResponse
 	24, // 48: koinon.mcpserver.v1alpha1.McpServerService.AcknowledgeToolReview:output_type -> koinon.mcpserver.v1alpha1.AcknowledgeToolReviewResponse
 	26, // 49: koinon.mcpserver.v1alpha1.McpServerService.GetAgentServers:output_type -> koinon.mcpserver.v1alpha1.GetAgentServersResponse
 	28, // 50: koinon.mcpserver.v1alpha1.McpServerService.SetAgentServers:output_type -> koinon.mcpserver.v1alpha1.SetAgentServersResponse

@@ -9,13 +9,14 @@
 -- name: CreateMCPServer :one
 INSERT INTO mcp_servers (org_id, id, name, url, transport, credential_header, credential_prefix, credential,
                          source, managed_by_secret, declared_version, disabled_reason, created_by,
-                         kind, exposes_untrusted_input, exposes_private_data)
+                         kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id)
 -- A NULL kind or leg is the column default (kind other, both legs: not yet classified).
 VALUES (@org_id, @id, @name, @url, @transport, sqlc.narg(credential_header), @credential_prefix, sqlc.narg(credential),
         @source, sqlc.narg(managed_by_secret), sqlc.narg(declared_version), sqlc.narg(disabled_reason), sqlc.narg(created_by),
         COALESCE(sqlc.narg(kind)::mcp_server_kind, 'other'),
         COALESCE(sqlc.narg(exposes_untrusted_input)::boolean, true),
-        COALESCE(sqlc.narg(exposes_private_data)::boolean, true))
+        COALESCE(sqlc.narg(exposes_private_data)::boolean, true),
+        sqlc.narg(code_host_connection_id))
 RETURNING *;
 
 -- name: SetMCPServerDataClass :one
@@ -23,7 +24,8 @@ RETURNING *;
 -- Secret does not carry it, and UpdateDeclaredMCPServer leaves it alone.
 UPDATE mcp_servers
 SET kind = @kind, exposes_untrusted_input = @exposes_untrusted_input,
-    exposes_private_data = @exposes_private_data
+    exposes_private_data = @exposes_private_data,
+    code_host_connection_id = sqlc.narg(code_host_connection_id)
 WHERE org_id = @org_id AND id = @id
 RETURNING *;
 
@@ -54,6 +56,9 @@ SET url = @url, transport = @transport,
     kind = CASE WHEN url IS DISTINCT FROM @url THEN 'other'::mcp_server_kind ELSE kind END,
     exposes_untrusted_input = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_untrusted_input END,
     exposes_private_data = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_private_data END,
+    -- The connection link described the old endpoint too: it is cleared, and a code-host tool of the server is
+    -- external-high until an admin links it again (ADR 0091 decision 3).
+    code_host_connection_id = CASE WHEN url IS DISTINCT FROM @url THEN NULL ELSE code_host_connection_id END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
 WHERE org_id = @org_id AND id = @id
 RETURNING *;
@@ -68,6 +73,9 @@ SET url = @url, transport = @transport, credential_header = sqlc.narg(credential
     kind = CASE WHEN url IS DISTINCT FROM @url THEN 'other'::mcp_server_kind ELSE kind END,
     exposes_untrusted_input = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_untrusted_input END,
     exposes_private_data = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_private_data END,
+    -- The connection link described the old endpoint too: it is cleared, and a code-host tool of the server is
+    -- external-high until an admin links it again (ADR 0091 decision 3).
+    code_host_connection_id = CASE WHEN url IS DISTINCT FROM @url THEN NULL ELSE code_host_connection_id END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
 WHERE org_id = @org_id AND id = @id AND source = 'secret'
 RETURNING *;
@@ -137,6 +145,13 @@ ORDER BY name;
 -- name: GetMCPTool :one
 SELECT * FROM mcp_tools
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name;
+
+-- name: GetMCPToolForUpdate :one
+-- Locks the tool row until the transaction ends: a sync that republishes the tool waits, so what an
+-- admin declared is what was read (ADR 0091, the ADR 0057 rule).
+SELECT * FROM mcp_tools
+WHERE org_id = @org_id AND server_id = @server_id AND name = @name
+FOR UPDATE;
 
 -- name: InsertMCPTool :one
 INSERT INTO mcp_tools (org_id, server_id, name, description, input_schema, content_hash, read_only_hint,

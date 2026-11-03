@@ -17,7 +17,9 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/keyscli"
+	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 )
 
@@ -50,7 +52,7 @@ func newKeysCommand() *cobra.Command {
 		Long:  "Run it in a koinon-api pod: kubectl exec deploy/koinon-api -- koinon-api keys status",
 	}
 	pf := keys.PersistentFlags()
-	pf.StringVar(&o.dbURL, "database-url", "", "Postgres connection string (status, rewrap, retire and reencrypt)")
+	pf.StringVar(&o.dbURL, "database-url", "", "Postgres connection string (status, rewrap, retire and reencrypt; every command for the install ID that KMS-wrapped KEKs are bound to)")
 	pf.StringVar(&o.kekSecret, "kek-secret", "", "name of the KEK Secret; the key set is read and changed through the Kubernetes API")
 	pf.StringVar(&o.kekDir, "kek-dir", "", "mounted KEK directory, read-only; used when --kek-secret is not set")
 	pf.StringVar(&o.namespace, "namespace", "", "namespace of the KEK Secret")
@@ -102,9 +104,25 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 	var store keyscli.Store
 	// These commands run in the koinon-api pod, so they are a service: with the default local KEK
 	// they add keys as before; with an opted-in KMS, only the key-admin Job adds them.
-	wrappers, err := wrapping.New(ctx, o.wrapping, wrapping.Service)
+	// KMS-wrapped KEKs are bound to the install ID in the database (#615), and the bound-only marker
+	// is there too: every command that opens them, export too, reads both there, and only when such
+	// a KEK is opened. Without a database a KMS KEK stored unbound does not open (fail closed).
+	var pool *pgxpool.Pool
+	boundOnly := secretstore.UnreadableBoundOnly(errors.New("no --database-url to read the bound-only marker from"))
+	if o.dbURL != "" {
+		var err error
+		if pool, err = pgxpool.New(ctx, o.dbURL); err != nil {
+			return fmt.Errorf("connect to postgres: %w", err)
+		}
+		defer pool.Close()
+		boundOnly = installid.BoundOnlySource(pool)
+	}
+	wrappers, err := wrapping.New(ctx, o.wrapping, wrapping.Service, boundOnly)
 	if err != nil {
 		return err
+	}
+	if pool != nil {
+		wrappers = wrappers.WithInstallID(installid.Source(pool))
 	}
 	switch {
 	case o.kekSecret != "":
@@ -124,12 +142,7 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 
 	tool := &keyscli.Tool{Store: store, Out: out, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, SecretName: o.kekSecret, Wrappers: wrappers}
 	// activate uses the database to record the activation and to show, in its picker, the values each KEK wraps.
-	if o.dbURL != "" && cmd != "add" && cmd != "export" {
-		pool, err := pgxpool.New(ctx, o.dbURL)
-		if err != nil {
-			return fmt.Errorf("connect to postgres: %w", err)
-		}
-		defer pool.Close()
+	if pool != nil && cmd != "add" && cmd != "export" {
 		tool.Pool = pool
 	}
 	switch cmd {

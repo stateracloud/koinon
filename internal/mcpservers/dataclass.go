@@ -44,6 +44,10 @@ type Declaration struct {
 	Kind string
 	// Legs are the legs the server carries, any subset of Legs; empty means none.
 	Legs []string
+	// CodeHostConnection is the ID of the org's code-host connection the server acts through, "" for
+	// none. A code-host tool of a server without one is external-high (ADR 0091 decision 3). A change
+	// of the server URL clears it.
+	CodeHostConnection string
 }
 
 // DefaultDeclaration is what a server that nobody classified declares: kind other and both
@@ -64,6 +68,13 @@ func (d Declaration) Normalize() (Declaration, error) {
 		}
 	}
 	out := Declaration{Kind: d.Kind, Legs: []string{}}
+	if d.CodeHostConnection != "" {
+		var id pgtype.UUID
+		if err := id.Scan(d.CodeHostConnection); err != nil || !id.Valid {
+			return Declaration{}, invalid("codeHostConnectionId %q is not a connection ID", d.CodeHostConnection)
+		}
+		out.CodeHostConnection = id.String()
+	}
 	for _, l := range Legs {
 		if slices.Contains(d.Legs, l) {
 			out.Legs = append(out.Legs, l)
@@ -85,7 +96,19 @@ func declarationOf(r store.McpServer) Declaration {
 			d.Legs = append(d.Legs, l.leg)
 		}
 	}
+	if r.CodeHostConnectionID.Valid {
+		d.CodeHostConnection = r.CodeHostConnectionID.String()
+	}
 	return d
+}
+
+// connectionParam is the nullable UUID of a declaration's connection. Normalize checked its shape.
+func connectionParam(d Declaration) pgtype.UUID {
+	var id pgtype.UUID
+	if d.CodeHostConnection != "" {
+		_ = id.Scan(d.CodeHostConnection)
+	}
+	return id
 }
 
 // createClass fills the class columns of a new server: the declaration, or the column defaults.
@@ -96,6 +119,7 @@ func createClass(p *store.CreateMCPServerParams, d *Declaration) {
 	p.Kind = store.NullMcpServerKind{McpServerKind: store.McpServerKind(d.Kind), Valid: true}
 	p.ExposesUntrustedInput = pgtype.Bool{Bool: slices.Contains(d.Legs, LegUntrustedInput), Valid: true}
 	p.ExposesPrivateData = pgtype.Bool{Bool: slices.Contains(d.Legs, LegPrivateData), Valid: true}
+	p.CodeHostConnectionID = connectionParam(*d)
 }
 
 // SetDataClass sets what a server exposes. It works for every source: a declared server's Secret
@@ -119,6 +143,7 @@ func (s *Service) SetDataClass(ctx context.Context, org pgtype.UUID, actor audit
 			OrgID: org, ID: sid, Kind: store.McpServerKind(d.Kind),
 			ExposesUntrustedInput: slices.Contains(d.Legs, LegUntrustedInput),
 			ExposesPrivateData:    slices.Contains(d.Legs, LegPrivateData),
+			CodeHostConnectionID:  connectionParam(d),
 		})
 		if err != nil {
 			return err
@@ -126,8 +151,8 @@ func (s *Service) SetDataClass(ctx context.Context, org pgtype.UUID, actor audit
 		before, after := declarationOf(cur), declarationOf(out)
 		return audit.RecordErr(ctx, q, audit.Event{
 			Org: org, Actor: actor, Action: "mcp_server.data_class.set", TargetKind: "mcp_server", TargetID: id,
-			Before: map[string]any{"name": cur.Name, "kind": before.Kind, "dataClass": before.Legs},
-			After:  map[string]any{"name": out.Name, "kind": after.Kind, "dataClass": after.Legs},
+			Before: map[string]any{"name": cur.Name, "kind": before.Kind, "dataClass": before.Legs, "codeHostConnectionId": before.CodeHostConnection},
+			After:  map[string]any{"name": out.Name, "kind": after.Kind, "dataClass": after.Legs, "codeHostConnectionId": after.CodeHostConnection},
 		})
 	})
 	if err != nil {
@@ -144,12 +169,12 @@ func recordClassReset(ctx context.Context, q *store.Queries, org pgtype.UUID, ac
 		return nil
 	}
 	before, after := declarationOf(cur), declarationOf(out)
-	if before.Kind == after.Kind && slices.Equal(before.Legs, after.Legs) {
+	if before.Kind == after.Kind && slices.Equal(before.Legs, after.Legs) && before.CodeHostConnection == after.CodeHostConnection {
 		return nil
 	}
 	return audit.RecordErr(ctx, q, audit.Event{
 		Org: org, Actor: actor, Action: "mcp_server.data_class.reset", TargetKind: "mcp_server", TargetID: out.ID.String(),
-		Before: map[string]any{"name": cur.Name, "kind": before.Kind, "dataClass": before.Legs},
-		After:  map[string]any{"name": out.Name, "kind": after.Kind, "dataClass": after.Legs, "reason": "url_changed"},
+		Before: map[string]any{"name": cur.Name, "kind": before.Kind, "dataClass": before.Legs, "codeHostConnectionId": before.CodeHostConnection},
+		After:  map[string]any{"name": out.Name, "kind": after.Kind, "dataClass": after.Legs, "codeHostConnectionId": after.CodeHostConnection, "reason": "url_changed"},
 	})
 }
