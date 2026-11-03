@@ -37,6 +37,15 @@ const (
 	fakeEmail      = "mara@example.test"
 )
 
+// The specs wait on state, never on a time. These deadlines only tell a hang from a slow machine: the
+// lab's loaded 3-CPU gate has taken seconds for steps that take milliseconds alone (#533, #612).
+const (
+	// hangBound ends a wait that would otherwise never end.
+	hangBound = time.Minute
+	// exportTimeout bounds one export to a fake backend. No spec here tests the timeout itself.
+	exportTimeout = 30 * time.Second
+)
+
 func uid(s string) pgtype.UUID {
 	var id pgtype.UUID
 	Expect(id.Scan(s)).To(Succeed())
@@ -334,12 +343,14 @@ func (h *fakeHealth) counts() (ok, fail int, dropped int64) {
 }
 
 // clock is the router's time: real time plus whatever a test has advanced, so waits and rate limits
-// keep running while a test moves the ledger deadline by whole seconds.
+// keep running while a test moves the ledger deadline by whole seconds. A frozen clock moves only
+// when the test advances it, for a spec about an interval rather than a wait.
 type clock struct {
-	mu    sync.Mutex
-	base  time.Time
-	start time.Time
-	skew  time.Duration
+	mu     sync.Mutex
+	base   time.Time
+	start  time.Time
+	skew   time.Duration
+	frozen bool
 }
 
 func newClock(base time.Time) *clock { return &clock{base: base, start: time.Now()} }
@@ -347,7 +358,17 @@ func newClock(base time.Time) *clock { return &clock{base: base, start: time.Now
 func (c *clock) Now() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.frozen {
+		return c.base.Add(c.skew)
+	}
 	return c.base.Add(c.skew).Add(time.Since(c.start))
+}
+
+// Freeze stops the clock where it is; Advance still moves it.
+func (c *clock) Freeze() {
+	c.mu.Lock()
+	c.base, c.skew, c.frozen = c.base.Add(c.skew).Add(time.Since(c.start)), 0, true
+	c.mu.Unlock()
 }
 
 func (c *clock) Advance(d time.Duration) {
@@ -378,7 +399,7 @@ var t0 = time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 
 func newEnv(mod func(*router.Config), secrets *fakeSecrets) *env {
 	e := &env{store: newStore(), routes: &fakeRoutes{}, secrets: secrets, health: &fakeHealth{}, clock: newClock(t0.Add(time.Hour))}
-	client, err := export.NewClient((&net.Dialer{Timeout: time.Second}).DialContext, 2*time.Second)
+	client, err := export.NewClient((&net.Dialer{Timeout: exportTimeout}).DialContext, exportTimeout)
 	Expect(err).NotTo(HaveOccurred())
 	cfg := router.Config{
 		Store: e.store, Routes: e.routes, Secrets: secretSource(e.secrets), Health: e.health, Sender: client,
@@ -517,7 +538,7 @@ func httpDo(method, url, contentType string, body io.Reader) *http.Response {
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := (&http.Client{Timeout: hangBound}).Do(req)
 	Expect(err).NotTo(HaveOccurred())
 	return resp
 }
@@ -535,4 +556,16 @@ func newBlockingBody() (*io.PipeReader, *io.PipeWriter) { return io.Pipe() }
 
 func strVal(s string) *commonpb.AnyValue {
 	return &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: s}}
+}
+
+// timerSleep is the router's own sleep, for a test's Sleep that records or adds a step.
+func timerSleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
