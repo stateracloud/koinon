@@ -23,6 +23,10 @@ service McpServerService {
   // INVALID_ARGUMENT (planned for v0.2).
   rpc CreateServer(CreateServerRequest) returns (CreateServerResponse);
   rpc UpdateServer(UpdateServerRequest) returns (UpdateServerResponse);
+  // SetServerClass sets what a server exposes: its kind and the legs of the leak guard (ADR 0084) it
+  // carries. It works for declared servers too, which the declaring Secret does not describe. Audited
+  // as mcp_server.data_class.set.
+  rpc SetServerClass(SetServerClassRequest) returns (SetServerClassResponse);
   // DeleteServer deletes a server entered here, with its tools and the agents' allowances of it. A
   // declared server can be deleted only after its Secret was deleted (removed).
   rpc DeleteServer(DeleteServerRequest) returns (DeleteServerResponse);
@@ -36,6 +40,12 @@ service McpServerService {
   // SetToolTwoApprovers turns on or off the requirement that a call to the tool in the ask tier needs
   // two approvers: distinct admins or owners, neither the ticket's creator. Off by default.
   rpc SetToolTwoApprovers(SetToolTwoApproversRequest) returns (SetToolTwoApproversResponse);
+  // SetToolSink declares a tool's sink class, address arguments and result legs (ADR 0091). The
+  // request names the content hash of the tool the admin reviewed; if the server republished the tool
+  // since, the call fails with ABORTED (HTTP 409) and nothing changes. Audited as
+  // mcp_tool.declaration.set. A changed server URL or tool content hash puts the declaration back to
+  // the default, audited as mcp_tool.declaration.reset.
+  rpc SetToolSink(SetToolSinkRequest) returns (SetToolSinkResponse);
   // AcknowledgeToolReview clears a tool's review flag without changing its tier.
   rpc AcknowledgeToolReview(AcknowledgeToolReviewRequest) returns (AcknowledgeToolReviewResponse);
 
@@ -92,6 +102,30 @@ message Server {
   // gateway_target is the name of the server's target in the gateway, "<org slug>-<name>", which is
   // also the prefix of its tools in an agent's tool list.
   string gateway_target = 19;
+  // kind is "fetch", "search" or "other"; data_class lists the session legs the server's results can
+  // set, in the order untrusted_input, private_data (see ServerClass). A server nobody classified is
+  // kind "other" with both legs.
+  string kind = 20;
+  repeated string data_class = 21;
+  // code_host_connection_id is the org's code-host connection the server acts through, empty for none.
+  // The code-host sink class of its tools is looked up in that connection's repository list only; a
+  // server without one is external-high. A changed URL clears it.
+  string code_host_connection_id = 22;
+}
+
+// ServerClass is what a server declares it exposes (ADR 0084 decision 8).
+message ServerClass {
+  // kind is "fetch" (reads web pages or other untrusted documents), "search" (sends a query to a
+  // search provider) or "other".
+  string kind = 1;
+  // data_class are the session legs the server's results can set (ADR 0091), any of "untrusted_input"
+  // (returns text an outsider controls) and "private_data" (returns data the org does not want to
+  // leave). A server may carry both; none is allowed. Where a call goes is not a server leg: it is the
+  // sink class of each tool (ToolSink).
+  repeated string data_class = 2;
+  // code_host_connection_id links the server to one of the org's code-host connections (see Server).
+  // Empty means none.
+  string code_host_connection_id = 3;
 }
 
 message Tool {
@@ -125,6 +159,27 @@ message Tool {
   int64 description_original_length = 15;
   bool description_capped = 16;
   bool description_cleaned = 17;
+  // sink is the tool's declaration for the leak guard (ADR 0091). A tool nobody declared is
+  // external-high with the server's legs.
+  ToolSink sink = 18;
+}
+
+// ToolSink is what a tool declares about its calls (ADR 0091 decision 2).
+message ToolSink {
+  // sink_class is "none", "internal", "external-low" or "external-high": the fixed class of the tool.
+  // For a derived tool it is the class of a call whose address arguments do not parse, always
+  // "external-high".
+  string sink_class = 1;
+  // derivation is "fixed" (use sink_class), "code_host" (internal only for a non-public repository of
+  // the org's code-host scope; address_args are the owner and repo arguments, in that order) or "fetch"
+  // (internal for a fetch-trusted host, otherwise external-low; address_args is the url argument).
+  string derivation = 2;
+  // address_args name the arguments that say where a call goes. Every other argument is payload.
+  repeated string address_args = 3;
+  // result_untrusted_input and result_private_data say what the tool's results carry for the session
+  // legs. Unset is the server's own leg.
+  optional bool result_untrusted_input = 4;
+  optional bool result_private_data = 5;
 }
 
 // Allowance is a server an agent may use, optionally narrowed to some of its tools.
@@ -154,6 +209,9 @@ message CreateServerRequest {
   // credential_prefix precedes the secret in the header value, for example "Bearer ".
   string credential_prefix = 6;
   string credential_value = 7 [debug_redact = true];
+  // class is what the server exposes; leaving it out is the unclassified default (kind "other", both
+  // legs).
+  ServerClass class = 8;
 }
 
 message CreateServerResponse {
@@ -178,6 +236,16 @@ message UpdateServerResponse {
   Server server = 1;
 }
 
+message SetServerClassRequest {
+  string org_id = 1;
+  string server_id = 2;
+  ServerClass class = 3;
+}
+
+message SetServerClassResponse {
+  Server server = 1;
+}
+
 message DeleteServerRequest {
   string org_id = 1;
   string server_id = 2;
@@ -199,6 +267,19 @@ message SetToolTierRequest {
   string server_id = 2;
   string tool = 3;
   Tier tier = 4;
+}
+
+message SetToolSinkRequest {
+  string org_id = 1;
+  string server_id = 2;
+  string tool = 3;
+  ToolSink sink = 4;
+  // content_hash is the Tool.content_hash the admin reviewed. Required.
+  string content_hash = 5;
+}
+
+message SetToolSinkResponse {
+  Tool tool = 1;
 }
 
 message SetToolTierResponse {

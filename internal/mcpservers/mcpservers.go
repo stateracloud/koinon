@@ -49,6 +49,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpsanitize"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/sinkclass"
 )
 
 // Errors are the catalog's, so every caller maps them the same way. Messages are safe to show.
@@ -58,6 +59,11 @@ var (
 	ErrConflict = catalog.ErrConflict
 	ErrNoKeys   = catalog.ErrNoKeys
 )
+
+// ErrToolChanged is returned when a tool's declaration is set against a content hash that is no longer
+// the tool's: the server republished it since the admin read it. Callers map it to a conflict (Aborted,
+// HTTP 409). Message safe to show.
+var ErrToolChanged = errors.New("the tool changed since it was read; read it again and review the new description")
 
 // InvalidError is a validation failure.
 type InvalidError = catalog.InvalidError
@@ -189,14 +195,21 @@ type Server struct {
 	ManagedBySecret  string `json:"managedBySecret,omitempty"`
 	DisabledReason   string `json:"disabledReason,omitempty"`
 	// Removed is set when the declaring Secret was deleted.
-	Removed         bool       `json:"removed,omitempty"`
-	Health          string     `json:"health"`
-	HealthReason    string     `json:"healthReason,omitempty"`
-	HealthCheckedAt *time.Time `json:"healthCheckedAt,omitempty"`
-	HealthSince     *time.Time `json:"healthSince,omitempty"`
-	ToolsSyncedAt   *time.Time `json:"toolsSyncedAt,omitempty"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
+	Removed bool `json:"removed,omitempty"`
+	// Kind and DataClass are what the server declares it exposes (ADR 0084 decision 8): its kind and
+	// the legs it carries, in the order of Legs. A server nobody classified is DefaultDeclaration.
+	Kind      string   `json:"kind"`
+	DataClass []string `json:"dataClass"`
+	// CodeHostConnectionID is the code-host connection the server acts through, "" for none. The
+	// code-host derivation of its tools looks a repository up in that connection's list only (ADR 0091).
+	CodeHostConnectionID string     `json:"codeHostConnectionId"`
+	Health               string     `json:"health"`
+	HealthReason         string     `json:"healthReason,omitempty"`
+	HealthCheckedAt      *time.Time `json:"healthCheckedAt,omitempty"`
+	HealthSince          *time.Time `json:"healthSince,omitempty"`
+	ToolsSyncedAt        *time.Time `json:"toolsSyncedAt,omitempty"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	UpdatedAt            time.Time  `json:"updatedAt"`
 }
 
 // Tool is a tool of a server.
@@ -225,6 +238,9 @@ type Tool struct {
 	LastSeenAt  time.Time  `json:"lastSeenAt"`
 	TierSetBy   string     `json:"tierSetBy,omitempty"`
 	TierSetAt   *time.Time `json:"tierSetAt,omitempty"`
+	// Sink is the tool's declaration for the leak guard (ADR 0091): its sink class, its address
+	// arguments and what its results carry. A tool nobody declared has sinkclass.Default.
+	Sink sinkclass.Declaration `json:"sink"`
 }
 
 // Service is the MCP server service layer.
@@ -284,6 +300,10 @@ func mapErr(err error) error {
 	case isUnique(err):
 		return ErrConflict
 	}
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && pg.Code == "23503" && strings.Contains(pg.ConstraintName, "code_host_connection_id") {
+		return invalid("codeHostConnectionId is not a connection of this org")
+	}
 	return err
 }
 
@@ -303,6 +323,7 @@ func toServer(r store.McpServer) Server {
 		Removed: r.RemovedAt.Valid, Health: string(r.Health), HealthReason: r.HealthReason.String,
 		HealthCheckedAt: timePtr(r.HealthCheckedAt), HealthSince: timePtr(r.HealthSince), ToolsSyncedAt: timePtr(r.ToolsSyncedAt),
 		CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
+		Kind: declarationOf(r).Kind, DataClass: declarationOf(r).Legs, CodeHostConnectionID: declarationOf(r).CodeHostConnection,
 	}
 }
 
@@ -313,6 +334,7 @@ func toTool(t store.McpTool) Tool {
 		RequiresTwoApprovers: t.RequiresTwoApprovers, ContentHash: t.ContentHash,
 		DescriptionOriginalLength: int(t.DescriptionOriginalLength), DescriptionCapped: t.DescriptionCapped, DescriptionCleaned: t.DescriptionCleaned,
 		FirstSeenAt: t.FirstSeenAt.Time, LastSeenAt: t.LastSeenAt.Time, TierSetBy: t.TierSetBy.String, TierSetAt: timePtr(t.TierSetAt),
+		Sink: sinkOf(t),
 	}
 }
 
@@ -320,6 +342,7 @@ func serverSummary(r store.McpServer) map[string]any {
 	return map[string]any{
 		"name": r.Name, "url": r.Url, "transport": string(r.Transport), "hasCredential": len(r.Credential) > 0,
 		"credentialHeader": r.CredentialHeader.String, "source": string(r.Source),
+		"kind": declarationOf(r).Kind, "dataClass": declarationOf(r).Legs,
 	}
 }
 
@@ -425,6 +448,8 @@ type Input struct {
 	CredentialHeader string
 	CredentialPrefix string
 	CredentialValue  string
+	// Class is what the server exposes. Nil is DefaultDeclaration: not yet classified.
+	Class *Declaration
 }
 
 // Patch changes a server; nil fields stay.
@@ -487,6 +512,13 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if err := ValidateRemote(in.URL, in.Transport, in.CredentialHeader, in.CredentialPrefix); err != nil {
 		return Server{}, err
 	}
+	if in.Class != nil {
+		d, err := in.Class.Normalize()
+		if err != nil {
+			return Server{}, err
+		}
+		in.Class = &d
+	}
 	if err := s.policy.Check(ctx, in.URL); err != nil {
 		return Server{}, err
 	}
@@ -504,11 +536,13 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	header := pgtype.Text{String: in.CredentialHeader, Valid: len(cred) > 0}
 	var row store.McpServer
 	err = s.tx(ctx, func(q *store.Queries) error {
-		row, err = q.CreateMCPServer(ctx, store.CreateMCPServerParams{
+		p := store.CreateMCPServerParams{
 			OrgID: org, ID: id, Name: in.Name, Url: in.URL, Transport: store.McpTransport(in.Transport),
 			CredentialHeader: header, CredentialPrefix: prefixIf(in.CredentialPrefix, len(cred) > 0), Credential: cred,
 			Source: store.ConfigSourceUi, CreatedBy: creator,
-		})
+		}
+		createClass(&p, in.Class)
+		row, err = q.CreateMCPServer(ctx, p)
 		if err != nil {
 			return err
 		}
@@ -606,10 +640,13 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		}
 		after := serverSummary(out)
 		after["credentialChanged"] = patch.Credential != nil || patch.RemoveCredential
-		return audit.RecordErr(ctx, q, audit.Event{
+		if err := audit.RecordErr(ctx, q, audit.Event{
 			Org: org, Actor: actor, Action: "mcp_server.update", TargetKind: "mcp_server", TargetID: id,
 			Before: serverSummary(cur), After: after,
-		})
+		}); err != nil {
+			return err
+		}
+		return resetOnURLChange(ctx, q, org, actor, cur, out)
 	})
 	if err != nil {
 		return Server{}, mapErr(err)
@@ -876,11 +913,16 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 					reason = ReviewChangedDemoted
 					res.Demoted = append(res.Demoted, lt.Name)
 				}
-				if _, err := q.UpdateMCPToolContent(ctx, store.UpdateMCPToolContentParams{
+				out, err := q.UpdateMCPToolContent(ctx, store.UpdateMCPToolContentParams{
 					OrgID: org, ServerID: serverID, Name: lt.Name, Description: desc, InputSchema: schema, ContentHash: hash,
 					ReadOnlyHint: lt.ReadOnlyHint, ReviewReason: pgtype.Text{String: reason, Valid: true},
 					DescriptionOriginalLength: int64(rep.OriginalLen), DescriptionCapped: rep.Capped, DescriptionCleaned: rep.Cleaned,
-				}); err != nil {
+				})
+				if err != nil {
+					return err
+				}
+				// The query put the declaration back to the default; the audit says what it was.
+				if err := recordToolDeclarationReset(ctx, q, org, audit.System(), srv.Name, cur, out, ReasonContentChanged); err != nil {
 					return err
 				}
 				res.Changed = append(res.Changed, lt.Name)

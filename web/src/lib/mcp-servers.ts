@@ -26,6 +26,171 @@ export function transportLabel(t: string): string {
   return transports.find((x) => x.value === t)?.label ?? t
 }
 
+/** The kinds a server can declare (ADR 0084): what the leak guard treats as its role. */
+export const serverKinds = [
+  {
+    value: 'fetch',
+    label: 'Fetch',
+    help: 'Reads web pages or other documents an outsider can write.',
+  },
+  {
+    value: 'search',
+    label: 'Search',
+    help: 'Sends a query out and returns results.',
+  },
+  { value: 'other', label: 'Other', help: 'Anything else.' },
+] as const
+
+/**
+ * The session legs a server's results can set, in the canonical order the API answers them. Where a
+ * call goes is not a server leg: it is the sink class of each tool (ADR 0091), see sinkClasses.
+ */
+export const dataLegs = [
+  {
+    value: 'untrusted_input',
+    label: 'Returns untrusted input',
+    help: 'Its results can contain text an outsider wrote.',
+  },
+  {
+    value: 'private_data',
+    label: 'Reads private data',
+    help: 'It can read data that belongs to the org or its users.',
+  },
+] as const
+
+export function kindLabel(k: string): string {
+  return serverKinds.find((x) => x.value === k)?.label ?? k
+}
+
+export function legsText(legs: readonly string[]): string {
+  if (legs.length === 0) return 'none'
+  return dataLegs
+    .filter((l) => legs.includes(l.value))
+    .map((l) => l.label.toLowerCase())
+    .join(', ')
+}
+
+/** The class of a server nobody classified: kind other, both legs (the cautious default). */
+export const defaultKind = 'other'
+export const defaultLegs: readonly string[] = dataLegs.map((l) => l.value)
+
+/** toggleLeg adds or drops a leg, keeping the canonical order. */
+export function toggleLeg(legs: readonly string[], leg: string, on: boolean): string[] {
+  return dataLegs.map((l) => l.value).filter((v) => (v === leg ? on : legs.includes(v)))
+}
+
+/** The sink classes of a tool call (ADR 0091 decision 1), from the least to the most exposed. */
+export const sinkClasses = [
+  { value: 'none', label: 'None', help: 'Reads only; nothing leaves.' },
+  { value: 'internal', label: 'Internal', help: 'Writes only into a system the org owns and does not publish.' },
+  { value: 'external-low', label: 'External, small', help: 'A small payload in an address or query to an outside party: a fetch, a search.' },
+  { value: 'external-high', label: 'External, free text', help: 'Free text to a party outside the org: a public issue, an email, a chat post. The default.' },
+] as const
+
+/** How a tool's class is decided (ADR 0091 decision 3). */
+export const sinkDerivations = [
+  { value: 'fixed', label: 'Fixed class', args: 0, hint: '' },
+  {
+    value: 'code_host',
+    label: 'From the repository',
+    args: 2,
+    hint: 'The owner and the repository arguments, in that order, for example owner, repo. Internal only for a repository in the org’s code-host scope that is not public.',
+  },
+  {
+    value: 'fetch',
+    label: 'From the URL',
+    args: 1,
+    hint: 'The URL argument, for example url. Internal for a fetch-trusted host, otherwise a small external payload.',
+  },
+] as const
+
+export const defaultSinkClass = 'external-high'
+
+export function sinkClassLabel(c: string): string {
+  return sinkClasses.find((x) => x.value === c)?.label ?? c
+}
+
+type SinkLike = {
+  sinkClass: string
+  derivation: string
+  addressArgs: readonly string[]
+  resultUntrustedInput?: boolean
+  resultPrivateData?: boolean
+}
+
+/** isDefaultSink reports a tool nobody declared: external-high, fixed, nothing else. */
+export function isDefaultSink(s?: SinkLike): boolean {
+  return !s || (s.sinkClass === defaultSinkClass && s.derivation === 'fixed' && s.addressArgs.length === 0 && s.resultUntrustedInput === undefined && s.resultPrivateData === undefined)
+}
+
+/** sinkText says in one line where a tool's calls go. */
+export function sinkText(s?: SinkLike): string {
+  if (isDefaultSink(s)) return `${sinkClassLabel(defaultSinkClass)} (not declared)`
+  const x = s as SinkLike
+  const addr = x.addressArgs.length > 0 ? `; address: ${x.addressArgs.join(', ')}` : ''
+  if (x.derivation === 'code_host') return `from the repository${addr}`
+  if (x.derivation === 'fetch') return `from the URL${addr}`
+  return `${sinkClassLabel(x.sinkClass)}${addr}`
+}
+
+/** The three answers for what a tool's results carry: the server's own leg, or yes, or no. */
+export type ResultLeg = 'server' | 'yes' | 'no'
+
+export type SinkFormState = {
+  sinkClass: string
+  derivation: string
+  /** The address arguments as typed, comma separated. */
+  addressArgs: string
+  resultUntrustedInput: ResultLeg
+  resultPrivateData: ResultLeg
+}
+
+const toResultLeg = (v?: boolean): ResultLeg => (v === undefined ? 'server' : v ? 'yes' : 'no')
+const fromResultLeg = (v: ResultLeg): boolean | undefined => (v === 'server' ? undefined : v === 'yes')
+
+export function sinkFormOf(s?: SinkLike): SinkFormState {
+  return {
+    sinkClass: s?.sinkClass || defaultSinkClass,
+    derivation: s?.derivation || 'fixed',
+    addressArgs: (s?.addressArgs ?? []).join(', '),
+    resultUntrustedInput: toResultLeg(s?.resultUntrustedInput),
+    resultPrivateData: toResultLeg(s?.resultPrivateData),
+  }
+}
+
+export function parseArgs(text: string): string[] {
+  return text
+    .split(',')
+    .map((a) => a.trim())
+    .filter((a) => a !== '')
+}
+
+const argName = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/
+
+/** validateSink returns what is wrong with the form, or undefined. The API checks the same again. */
+export function validateSink(f: SinkFormState): string | undefined {
+  const args = parseArgs(f.addressArgs)
+  const d = sinkDerivations.find((x) => x.value === f.derivation)
+  if (!d) return 'Choose how the class is decided.'
+  if (d.args > 0 && args.length !== d.args) return `${d.label} names ${d.args === 1 ? 'one argument' : 'two arguments'}.`
+  if (args.length > 8) return 'Name at most 8 address arguments.'
+  const bad = args.find((a) => !argName.test(a))
+  if (bad) return `"${bad}" is not an argument name.`
+  if (new Set(args).size !== args.length) return 'An argument is listed twice.'
+  return undefined
+}
+
+/** buildSink turns the form into the request. A derived tool's class is external-high, its fallback. */
+export function buildSink(f: SinkFormState) {
+  return {
+    sinkClass: f.derivation === 'fixed' ? f.sinkClass : defaultSinkClass,
+    derivation: f.derivation,
+    addressArgs: parseArgs(f.addressArgs),
+    resultUntrustedInput: fromResultLeg(f.resultUntrustedInput),
+    resultPrivateData: fromResultLeg(f.resultPrivateData),
+  }
+}
+
 export type CredentialMode = 'none' | 'bearer' | 'custom'
 
 export const bearerHeader = 'Authorization'
@@ -42,6 +207,9 @@ export type ServerFormState = {
   value: string
   /** Edit only: drop the stored credential. */
   removeCredential: boolean
+  /** Create only: what the server exposes. An edit leaves the class to its own control. */
+  kind: string
+  legs: string[]
 }
 
 /** initialMode is the credential mode a stored credential's header and prefix correspond to. */
@@ -59,6 +227,8 @@ export function initialForm(s?: Server): ServerFormState {
     header: s?.hasCredential && initialMode(s) === 'custom' ? s.credentialHeader : '',
     value: '',
     removeCredential: false,
+    kind: s?.kind || defaultKind,
+    legs: s ? [...s.dataClass] : [...defaultLegs],
   }
 }
 
@@ -89,6 +259,7 @@ export type CreateServerInput = {
   credentialHeader: string
   credentialPrefix: string
   credentialValue: string
+  class: { kind: string; dataClass: string[] }
 }
 
 function credentialParts(f: ServerFormState): { header: string; prefix: string } {
@@ -106,6 +277,7 @@ export function buildCreateRequest(f: ServerFormState): CreateServerInput {
     credentialHeader: withSecret ? c.header : '',
     credentialPrefix: withSecret ? c.prefix : '',
     credentialValue: withSecret ? f.value : '',
+    class: { kind: f.kind, dataClass: [...f.legs] },
   }
 }
 

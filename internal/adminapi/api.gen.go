@@ -198,6 +198,27 @@ func (e McpServerCreateTransport) Valid() bool {
 	}
 }
 
+// Defines values for McpServerKind.
+const (
+	Fetch  McpServerKind = "fetch"
+	Other  McpServerKind = "other"
+	Search McpServerKind = "search"
+)
+
+// Valid indicates whether the value is a known member of the McpServerKind enum.
+func (e McpServerKind) Valid() bool {
+	switch e {
+	case Fetch:
+		return true
+	case Other:
+		return true
+	case Search:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for McpServerUpdateTransport.
 const (
 	McpServerUpdateTransportSse            McpServerUpdateTransport = "sse"
@@ -572,6 +593,24 @@ type AuditEventList struct {
 	NextPageToken *string `json:"nextPageToken,omitempty"`
 }
 
+// CodeHostScope The org's code-host scope (ADR 0091): the repositories of its code-host connections with the
+// visibility the connector last read. The code-host derivation calls a write internal only for a
+// listed repository that is not public and whose reading is fresh.
+type CodeHostScope struct {
+	Internal        int        `json:"internal"`
+	OldestCheckedAt *time.Time `json:"oldestCheckedAt,omitempty"`
+	Private         int        `json:"private"`
+	Public          int        `json:"public"`
+	Repositories    int        `json:"repositories"`
+
+	// Stale Repositories whose reading is older than the freshness window. They count as unknown.
+	Stale *int `json:"stale,omitempty"`
+
+	// Unknown Repositories whose visibility the connector could not read. They count as external-high.
+	Unknown                 int `json:"unknown"`
+	VisibilityMaxAgeSeconds int `json:"visibilityMaxAgeSeconds"`
+}
+
 // DefaultModel defines model for DefaultModel.
 type DefaultModel struct {
 	// Model The model name. Absent: the org has no default model.
@@ -634,6 +673,11 @@ type Error struct {
 // ErrorCode defines model for ErrorCode.
 type ErrorCode string
 
+// FetchTrustedHost defines model for FetchTrustedHost.
+type FetchTrustedHost struct {
+	Host string `json:"host"`
+}
+
 // FlaggedPrice defines model for FlaggedPrice.
 type FlaggedPrice struct {
 	// CostUsd What Koinon computed (counts for limits and reports).
@@ -650,12 +694,49 @@ type FlaggedPriceList struct {
 	Flagged []FlaggedPrice `json:"flagged"`
 }
 
+// LeakGuard defines model for LeakGuard.
+type LeakGuard struct {
+	// CodeHostScope The org's code-host scope (ADR 0091): the repositories of its code-host connections with the
+	// visibility the connector last read. The code-host derivation calls a write internal only for a
+	// listed repository that is not public and whose reading is fresh.
+	CodeHostScope         CodeHostScope `json:"codeHostScope"`
+	DefaultMatchThreshold int           `json:"defaultMatchThreshold"`
+
+	// MatchThreshold The shortest tainted text, in characters after normalisation, that blocks a call. Default 24.
+	MatchThreshold    int `json:"matchThreshold"`
+	MaxMatchThreshold int `json:"maxMatchThreshold"`
+	MinMatchThreshold int `json:"minMatchThreshold"`
+
+	// TrustedHosts The fetch-trusted host list, sorted. Empty for a new org.
+	TrustedHosts []string `json:"trustedHosts"`
+}
+
+// LeakGuardSettings defines model for LeakGuardSettings.
+type LeakGuardSettings struct {
+	// MatchThreshold Characters. Leave out for the default (24).
+	MatchThreshold *int `json:"matchThreshold,omitempty"`
+}
+
+// McpDataClass The session legs (ADR 0091) the server's results can set: `untrusted_input` (returns text an
+// outsider controls) and `private_data` (returns data the org does not want to leave). A server
+// may carry both; empty carries none. A server nobody classified carries both. Where a call
+// goes is not a server leg: it is the sink class of each tool.
+type McpDataClass = []string
+
 // McpServer defines model for McpServer.
 type McpServer struct {
-	CreatedAt        time.Time `json:"createdAt"`
-	CredentialHeader *string   `json:"credentialHeader,omitempty"`
-	CredentialPrefix *string   `json:"credentialPrefix,omitempty"`
-	DisabledReason   *string   `json:"disabledReason,omitempty"`
+	// CodeHostConnectionId The org's code-host connection the server acts through. Absent for none, which makes a code-host tool of the server external-high.
+	CodeHostConnectionId *openapi_types.UUID `json:"codeHostConnectionId,omitempty"`
+	CreatedAt            time.Time           `json:"createdAt"`
+	CredentialHeader     *string             `json:"credentialHeader,omitempty"`
+	CredentialPrefix     *string             `json:"credentialPrefix,omitempty"`
+
+	// DataClass The session legs (ADR 0091) the server's results can set: `untrusted_input` (returns text an
+	// outsider controls) and `private_data` (returns data the org does not want to leave). A server
+	// may carry both; empty carries none. A server nobody classified carries both. Where a call
+	// goes is not a server leg: it is the sink class of each tool.
+	DataClass      McpDataClass `json:"dataClass"`
+	DisabledReason *string      `json:"disabledReason,omitempty"`
 
 	// HasCredential Whether a credential is stored. The credential itself is never returned.
 	HasCredential   bool            `json:"hasCredential"`
@@ -663,11 +744,14 @@ type McpServer struct {
 	HealthCheckedAt *time.Time      `json:"healthCheckedAt,omitempty"`
 
 	// HealthReason Why the server is unhealthy.
-	HealthReason    *string            `json:"healthReason,omitempty"`
-	HealthSince     *time.Time         `json:"healthSince,omitempty"`
-	Id              openapi_types.UUID `json:"id"`
-	ManagedBySecret *string            `json:"managedBySecret,omitempty"`
-	Name            string             `json:"name"`
+	HealthReason *string            `json:"healthReason,omitempty"`
+	HealthSince  *time.Time         `json:"healthSince,omitempty"`
+	Id           openapi_types.UUID `json:"id"`
+
+	// Kind What the server is for. `other` is the default.
+	Kind            McpServerKind `json:"kind"`
+	ManagedBySecret *string       `json:"managedBySecret,omitempty"`
+	Name            string        `json:"name"`
 
 	// Removed The declaring Secret was deleted; the server is disabled.
 	Removed *bool `json:"removed,omitempty"`
@@ -697,6 +781,15 @@ type McpServerCreate struct {
 	// CredentialValue The secret. Omit for a server that needs none.
 	CredentialValue *string `json:"credentialValue,omitempty"`
 
+	// DataClass The session legs (ADR 0091) the server's results can set: `untrusted_input` (returns text an
+	// outsider controls) and `private_data` (returns data the org does not want to leave). A server
+	// may carry both; empty carries none. A server nobody classified carries both. Where a call
+	// goes is not a server leg: it is the sink class of each tool.
+	DataClass *McpDataClass `json:"dataClass,omitempty"`
+
+	// Kind What the server is for. `other` is the default.
+	Kind *McpServerKind `json:"kind,omitempty"`
+
 	// Name A DNS label of at most 24 characters. The gateway target is `<org slug>-<name>`.
 	Name      string                    `json:"name"`
 	Transport *McpServerCreateTransport `json:"transport,omitempty"`
@@ -705,6 +798,26 @@ type McpServerCreate struct {
 
 // McpServerCreateTransport defines model for McpServerCreate.Transport.
 type McpServerCreateTransport string
+
+// McpServerDataClass defines model for McpServerDataClass.
+type McpServerDataClass struct {
+	// CodeHostConnectionId Link the server to one of the org's code-host connections (ADR 0091 decision 3). A code-host
+	// tool looks the repository up in that connection's list only. Leave out to unlink. A changed
+	// server URL clears the link.
+	CodeHostConnectionId *openapi_types.UUID `json:"codeHostConnectionId,omitempty"`
+
+	// DataClass The session legs (ADR 0091) the server's results can set: `untrusted_input` (returns text an
+	// outsider controls) and `private_data` (returns data the org does not want to leave). A server
+	// may carry both; empty carries none. A server nobody classified carries both. Where a call
+	// goes is not a server leg: it is the sink class of each tool.
+	DataClass McpDataClass `json:"dataClass"`
+
+	// Kind What the server is for. `other` is the default.
+	Kind McpServerKind `json:"kind"`
+}
+
+// McpServerKind What the server is for. `other` is the default.
+type McpServerKind string
 
 // McpServerList defines model for McpServerList.
 type McpServerList struct {
@@ -756,6 +869,7 @@ type McpTool struct {
 	// ReviewReason Set while the tool's description or input schema changed since an admin last reviewed it.
 	ReviewReason *string            `json:"reviewReason,omitempty"`
 	ServerId     openapi_types.UUID `json:"serverId"`
+	Sink         McpToolSink        `json:"sink"`
 	Tier         McpToolTier        `json:"tier"`
 	TierSetAt    *time.Time         `json:"tierSetAt,omitempty"`
 	TierSetBy    *string            `json:"tierSetBy,omitempty"`
@@ -770,6 +884,32 @@ type McpToolTier string
 // McpToolList defines model for McpToolList.
 type McpToolList struct {
 	Tools []McpTool `json:"tools"`
+}
+
+// McpToolSink defines model for McpToolSink.
+type McpToolSink struct {
+	// AddressArgs The arguments that say where a call goes, in the order the derivation reads them: code_host [owner, repo], fetch [url]. Every other argument is payload.
+	AddressArgs []string `json:"addressArgs"`
+
+	// Derivation `fixed` (use sinkClass), `code_host` (owner and repo arguments) or `fetch` (the url argument).
+	Derivation string `json:"derivation"`
+
+	// ResultPrivateData The tool's results carry data the org does not want to leave. Leave out for the server's own leg.
+	ResultPrivateData *bool `json:"resultPrivateData,omitempty"`
+
+	// ResultUntrustedInput The tool's results carry text an outsider controls. Leave out for the server's own leg.
+	ResultUntrustedInput *bool `json:"resultUntrustedInput,omitempty"`
+
+	// SinkClass `none`, `internal`, `external-low` or `external-high`. The fixed class of a tool; for a
+	// derived tool, the class of a call whose address arguments do not parse (`external-high`).
+	SinkClass string `json:"sinkClass"`
+}
+
+// McpToolSinkUpdate defines model for McpToolSinkUpdate.
+type McpToolSinkUpdate struct {
+	// ContentHash The `contentHash` of the tool as the caller read it.
+	ContentHash string      `json:"contentHash"`
+	Sink        McpToolSink `json:"sink"`
 }
 
 // McpToolTierUpdate defines model for McpToolTierUpdate.
@@ -1345,11 +1485,23 @@ type SetBudgetJSONRequestBody = OrgBudgetUpdate
 // SetDefaultModelJSONRequestBody defines body for SetDefaultModel for application/json ContentType.
 type SetDefaultModelJSONRequestBody = DefaultModel
 
+// SetLeakGuardJSONRequestBody defines body for SetLeakGuard for application/json ContentType.
+type SetLeakGuardJSONRequestBody = LeakGuardSettings
+
+// AddFetchTrustedHostJSONRequestBody defines body for AddFetchTrustedHost for application/json ContentType.
+type AddFetchTrustedHostJSONRequestBody = FetchTrustedHost
+
 // CreateMcpServerJSONRequestBody defines body for CreateMcpServer for application/json ContentType.
 type CreateMcpServerJSONRequestBody = McpServerCreate
 
 // UpdateMcpServerJSONRequestBody defines body for UpdateMcpServer for application/json ContentType.
 type UpdateMcpServerJSONRequestBody = McpServerUpdate
+
+// SetMcpServerDataClassJSONRequestBody defines body for SetMcpServerDataClass for application/json ContentType.
+type SetMcpServerDataClassJSONRequestBody = McpServerDataClass
+
+// SetMcpToolSinkJSONRequestBody defines body for SetMcpToolSink for application/json ContentType.
+type SetMcpToolSinkJSONRequestBody = McpToolSinkUpdate
 
 // SetMcpToolTierJSONRequestBody defines body for SetMcpToolTier for application/json ContentType.
 type SetMcpToolTierJSONRequestBody = McpToolTierUpdate
@@ -1421,6 +1573,18 @@ type ServerInterface interface {
 	// SetDefaultModel Set the org's default model, or clear it by leaving `model` out. Audited.
 	// (PUT /default-model)
 	SetDefaultModel(w http.ResponseWriter, r *http.Request)
+	// GetLeakGuard The org's leak-guard settings, with defaults filled in, and its fetch-trusted host list.
+	// (GET /leak-guard)
+	GetLeakGuard(w http.ResponseWriter, r *http.Request)
+	// SetLeakGuard Set the match threshold, or return it to the default by leaving `matchThreshold` out. Audited.
+	// (PUT /leak-guard)
+	SetLeakGuard(w http.ResponseWriter, r *http.Request)
+	// AddFetchTrustedHost Put a host on the fetch-trusted list, which the automatic URL rule exempts. Audited.
+	// (POST /leak-guard/trusted-hosts)
+	AddFetchTrustedHost(w http.ResponseWriter, r *http.Request)
+	// RemoveFetchTrustedHost Take a host off the fetch-trusted list. Audited.
+	// (DELETE /leak-guard/trusted-hosts/{host})
+	RemoveFetchTrustedHost(w http.ResponseWriter, r *http.Request, host string)
 	// ListMcpServers List the org's remote MCP servers, entered and declared, with their health.
 	// (GET /mcp-servers)
 	ListMcpServers(w http.ResponseWriter, r *http.Request)
@@ -1437,12 +1601,18 @@ type ServerInterface interface {
 	// UpdateMcpServer Change a server's URL, transport or credential. Declared servers answer 409.
 	// (PATCH /mcp-servers/{serverId})
 	UpdateMcpServer(w http.ResponseWriter, r *http.Request, serverId ServerId)
+	// SetMcpServerDataClass Set what a server exposes, its kind and the legs of the leak guard it carries. Audited.
+	// (PUT /mcp-servers/{serverId}/data-class)
+	SetMcpServerDataClass(w http.ResponseWriter, r *http.Request, serverId ServerId)
 	// ListMcpTools The server's tools with their tiers and review flags.
 	// (GET /mcp-servers/{serverId}/tools)
 	ListMcpTools(w http.ResponseWriter, r *http.Request, serverId ServerId)
 	// AcknowledgeMcpToolReview Mark a changed tool as reviewed without changing its tier.
 	// (POST /mcp-servers/{serverId}/tools/{toolName}/review)
 	AcknowledgeMcpToolReview(w http.ResponseWriter, r *http.Request, serverId ServerId, toolName ToolName)
+	// SetMcpToolSink Declare a tool's sink class, its address arguments and what its results carry. Audited.
+	// (PUT /mcp-servers/{serverId}/tools/{toolName}/sink)
+	SetMcpToolSink(w http.ResponseWriter, r *http.Request, serverId ServerId, toolName ToolName)
 	// SetMcpToolTier Move a tool to a tier: `ask` (a human approves each call), `auto` (the agent calls it) or
 	// `never`. Works on declared servers too. Clears the tool's review flag.
 	// (PUT /mcp-servers/{serverId}/tools/{toolName}/tier)
@@ -1909,6 +2079,74 @@ func (siw *ServerInterfaceWrapper) SetDefaultModel(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetLeakGuard operation middleware
+func (siw *ServerInterfaceWrapper) GetLeakGuard(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLeakGuard(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetLeakGuard operation middleware
+func (siw *ServerInterfaceWrapper) SetLeakGuard(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetLeakGuard(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddFetchTrustedHost operation middleware
+func (siw *ServerInterfaceWrapper) AddFetchTrustedHost(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddFetchTrustedHost(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveFetchTrustedHost operation middleware
+func (siw *ServerInterfaceWrapper) RemoveFetchTrustedHost(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "host" -------------
+	var host string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "host", r.PathValue("host"), &host, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "host", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveFetchTrustedHost(w, r, host)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListMcpServers operation middleware
 func (siw *ServerInterfaceWrapper) ListMcpServers(w http.ResponseWriter, r *http.Request) {
 
@@ -2015,6 +2253,32 @@ func (siw *ServerInterfaceWrapper) UpdateMcpServer(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// SetMcpServerDataClass operation middleware
+func (siw *ServerInterfaceWrapper) SetMcpServerDataClass(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId ServerId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", r.PathValue("serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetMcpServerDataClass(w, r, serverId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListMcpTools operation middleware
 func (siw *ServerInterfaceWrapper) ListMcpTools(w http.ResponseWriter, r *http.Request) {
 
@@ -2067,6 +2331,41 @@ func (siw *ServerInterfaceWrapper) AcknowledgeMcpToolReview(w http.ResponseWrite
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AcknowledgeMcpToolReview(w, r, serverId, toolName)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetMcpToolSink operation middleware
+func (siw *ServerInterfaceWrapper) SetMcpToolSink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId ServerId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", r.PathValue("serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "toolName" -------------
+	var toolName ToolName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "toolName", r.PathValue("toolName"), &toolName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "toolName", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetMcpToolSink(w, r, serverId, toolName)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2749,8 +3048,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/mcp-servers/{serverId}", wrapper.DeleteMcpServer)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/mcp-servers/{serverId}", wrapper.GetMcpServer)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/mcp-servers/{serverId}", wrapper.UpdateMcpServer)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/mcp-servers/{serverId}/data-class", wrapper.SetMcpServerDataClass)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/mcp-servers/{serverId}/tools", wrapper.ListMcpTools)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/mcp-servers/{serverId}/tools/{toolName}/tier", wrapper.SetMcpToolTier)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/mcp-servers/{serverId}/tools/{toolName}/sink", wrapper.SetMcpToolSink)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/mcp-servers/{serverId}/tools/{toolName}/two-approvers", wrapper.SetMcpToolTwoApprovers)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/mcp-servers/{serverId}/tools/{toolName}/review", wrapper.AcknowledgeMcpToolReview)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/agents/{agentId}/mcp-servers", wrapper.GetAgentMcpServers)
@@ -2762,6 +3063,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/models/{modelId}", wrapper.UpdateModel)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/default-model", wrapper.GetDefaultModel)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/default-model", wrapper.SetDefaultModel)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/leak-guard", wrapper.GetLeakGuard)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/leak-guard", wrapper.SetLeakGuard)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/leak-guard/trusted-hosts", wrapper.AddFetchTrustedHost)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/leak-guard/trusted-hosts/{host}", wrapper.RemoveFetchTrustedHost)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tokens", wrapper.ListTokens)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tokens", wrapper.CreateToken)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/tokens/{tokenId}", wrapper.RevokeToken)
@@ -3297,6 +3602,161 @@ func (response SetDefaultModeldefaultJSONResponse) VisitSetDefaultModelResponse(
 	return err
 }
 
+type GetLeakGuardRequestObject struct {
+}
+
+type GetLeakGuardResponseObject interface {
+	VisitGetLeakGuardResponse(w http.ResponseWriter) error
+}
+
+type GetLeakGuard200JSONResponse LeakGuard
+
+func (response GetLeakGuard200JSONResponse) VisitGetLeakGuardResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLeakGuarddefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetLeakGuarddefaultJSONResponse) VisitGetLeakGuardResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLeakGuardRequestObject struct {
+	Body *SetLeakGuardJSONRequestBody
+}
+
+type SetLeakGuardResponseObject interface {
+	VisitSetLeakGuardResponse(w http.ResponseWriter) error
+}
+
+type SetLeakGuard200JSONResponse LeakGuard
+
+func (response SetLeakGuard200JSONResponse) VisitSetLeakGuardResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLeakGuarddefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetLeakGuarddefaultJSONResponse) VisitSetLeakGuardResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddFetchTrustedHostRequestObject struct {
+	Body *AddFetchTrustedHostJSONRequestBody
+}
+
+type AddFetchTrustedHostResponseObject interface {
+	VisitAddFetchTrustedHostResponse(w http.ResponseWriter) error
+}
+
+type AddFetchTrustedHost200JSONResponse LeakGuard
+
+func (response AddFetchTrustedHost200JSONResponse) VisitAddFetchTrustedHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddFetchTrustedHostdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response AddFetchTrustedHostdefaultJSONResponse) VisitAddFetchTrustedHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveFetchTrustedHostRequestObject struct {
+	Host string `json:"host"`
+}
+
+type RemoveFetchTrustedHostResponseObject interface {
+	VisitRemoveFetchTrustedHostResponse(w http.ResponseWriter) error
+}
+
+type RemoveFetchTrustedHost200JSONResponse LeakGuard
+
+func (response RemoveFetchTrustedHost200JSONResponse) VisitRemoveFetchTrustedHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveFetchTrustedHostdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RemoveFetchTrustedHostdefaultJSONResponse) VisitRemoveFetchTrustedHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListMcpServersRequestObject struct {
 }
 
@@ -3486,6 +3946,46 @@ func (response UpdateMcpServerdefaultJSONResponse) VisitUpdateMcpServerResponse(
 	return err
 }
 
+type SetMcpServerDataClassRequestObject struct {
+	ServerId ServerId `json:"serverId"`
+	Body     *SetMcpServerDataClassJSONRequestBody
+}
+
+type SetMcpServerDataClassResponseObject interface {
+	VisitSetMcpServerDataClassResponse(w http.ResponseWriter) error
+}
+
+type SetMcpServerDataClass200JSONResponse McpServer
+
+func (response SetMcpServerDataClass200JSONResponse) VisitSetMcpServerDataClassResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMcpServerDataClassdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetMcpServerDataClassdefaultJSONResponse) VisitSetMcpServerDataClassResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListMcpToolsRequestObject struct {
 	ServerId ServerId `json:"serverId"`
 }
@@ -3554,6 +4054,47 @@ type AcknowledgeMcpToolReviewdefaultJSONResponse struct {
 }
 
 func (response AcknowledgeMcpToolReviewdefaultJSONResponse) VisitAcknowledgeMcpToolReviewResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMcpToolSinkRequestObject struct {
+	ServerId ServerId `json:"serverId"`
+	ToolName ToolName `json:"toolName"`
+	Body     *SetMcpToolSinkJSONRequestBody
+}
+
+type SetMcpToolSinkResponseObject interface {
+	VisitSetMcpToolSinkResponse(w http.ResponseWriter) error
+}
+
+type SetMcpToolSink200JSONResponse McpTool
+
+func (response SetMcpToolSink200JSONResponse) VisitSetMcpToolSinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMcpToolSinkdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetMcpToolSinkdefaultJSONResponse) VisitSetMcpToolSinkResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -4483,6 +5024,18 @@ type StrictServerInterface interface {
 	// SetDefaultModel Set the org's default model, or clear it by leaving `model` out. Audited.
 	// (PUT /default-model)
 	SetDefaultModel(ctx context.Context, request SetDefaultModelRequestObject) (SetDefaultModelResponseObject, error)
+	// GetLeakGuard The org's leak-guard settings, with defaults filled in, and its fetch-trusted host list.
+	// (GET /leak-guard)
+	GetLeakGuard(ctx context.Context, request GetLeakGuardRequestObject) (GetLeakGuardResponseObject, error)
+	// SetLeakGuard Set the match threshold, or return it to the default by leaving `matchThreshold` out. Audited.
+	// (PUT /leak-guard)
+	SetLeakGuard(ctx context.Context, request SetLeakGuardRequestObject) (SetLeakGuardResponseObject, error)
+	// AddFetchTrustedHost Put a host on the fetch-trusted list, which the automatic URL rule exempts. Audited.
+	// (POST /leak-guard/trusted-hosts)
+	AddFetchTrustedHost(ctx context.Context, request AddFetchTrustedHostRequestObject) (AddFetchTrustedHostResponseObject, error)
+	// RemoveFetchTrustedHost Take a host off the fetch-trusted list. Audited.
+	// (DELETE /leak-guard/trusted-hosts/{host})
+	RemoveFetchTrustedHost(ctx context.Context, request RemoveFetchTrustedHostRequestObject) (RemoveFetchTrustedHostResponseObject, error)
 	// ListMcpServers List the org's remote MCP servers, entered and declared, with their health.
 	// (GET /mcp-servers)
 	ListMcpServers(ctx context.Context, request ListMcpServersRequestObject) (ListMcpServersResponseObject, error)
@@ -4499,12 +5052,18 @@ type StrictServerInterface interface {
 	// UpdateMcpServer Change a server's URL, transport or credential. Declared servers answer 409.
 	// (PATCH /mcp-servers/{serverId})
 	UpdateMcpServer(ctx context.Context, request UpdateMcpServerRequestObject) (UpdateMcpServerResponseObject, error)
+	// SetMcpServerDataClass Set what a server exposes, its kind and the legs of the leak guard it carries. Audited.
+	// (PUT /mcp-servers/{serverId}/data-class)
+	SetMcpServerDataClass(ctx context.Context, request SetMcpServerDataClassRequestObject) (SetMcpServerDataClassResponseObject, error)
 	// ListMcpTools The server's tools with their tiers and review flags.
 	// (GET /mcp-servers/{serverId}/tools)
 	ListMcpTools(ctx context.Context, request ListMcpToolsRequestObject) (ListMcpToolsResponseObject, error)
 	// AcknowledgeMcpToolReview Mark a changed tool as reviewed without changing its tier.
 	// (POST /mcp-servers/{serverId}/tools/{toolName}/review)
 	AcknowledgeMcpToolReview(ctx context.Context, request AcknowledgeMcpToolReviewRequestObject) (AcknowledgeMcpToolReviewResponseObject, error)
+	// SetMcpToolSink Declare a tool's sink class, its address arguments and what its results carry. Audited.
+	// (PUT /mcp-servers/{serverId}/tools/{toolName}/sink)
+	SetMcpToolSink(ctx context.Context, request SetMcpToolSinkRequestObject) (SetMcpToolSinkResponseObject, error)
 	// SetMcpToolTier Move a tool to a tier: `ask` (a human approves each call), `auto` (the agent calls it) or
 	// `never`. Works on declared servers too. Clears the tool's review flag.
 	// (PUT /mcp-servers/{serverId}/tools/{toolName}/tier)
@@ -4990,6 +5549,118 @@ func (sh *strictHandler) SetDefaultModel(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// GetLeakGuard operation middleware
+func (sh *strictHandler) GetLeakGuard(w http.ResponseWriter, r *http.Request) {
+	var request GetLeakGuardRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetLeakGuard(ctx, request.(GetLeakGuardRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetLeakGuard")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetLeakGuardResponseObject); ok {
+		if err := validResponse.VisitGetLeakGuardResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetLeakGuard operation middleware
+func (sh *strictHandler) SetLeakGuard(w http.ResponseWriter, r *http.Request) {
+	var request SetLeakGuardRequestObject
+
+	var body SetLeakGuardJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetLeakGuard(ctx, request.(SetLeakGuardRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetLeakGuard")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetLeakGuardResponseObject); ok {
+		if err := validResponse.VisitSetLeakGuardResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddFetchTrustedHost operation middleware
+func (sh *strictHandler) AddFetchTrustedHost(w http.ResponseWriter, r *http.Request) {
+	var request AddFetchTrustedHostRequestObject
+
+	var body AddFetchTrustedHostJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddFetchTrustedHost(ctx, request.(AddFetchTrustedHostRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddFetchTrustedHost")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddFetchTrustedHostResponseObject); ok {
+		if err := validResponse.VisitAddFetchTrustedHostResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveFetchTrustedHost operation middleware
+func (sh *strictHandler) RemoveFetchTrustedHost(w http.ResponseWriter, r *http.Request, host string) {
+	var request RemoveFetchTrustedHostRequestObject
+
+	request.Host = host
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveFetchTrustedHost(ctx, request.(RemoveFetchTrustedHostRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveFetchTrustedHost")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveFetchTrustedHostResponseObject); ok {
+		if err := validResponse.VisitRemoveFetchTrustedHostResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListMcpServers operation middleware
 func (sh *strictHandler) ListMcpServers(w http.ResponseWriter, r *http.Request) {
 	var request ListMcpServersRequestObject
@@ -5130,6 +5801,39 @@ func (sh *strictHandler) UpdateMcpServer(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// SetMcpServerDataClass operation middleware
+func (sh *strictHandler) SetMcpServerDataClass(w http.ResponseWriter, r *http.Request, serverId ServerId) {
+	var request SetMcpServerDataClassRequestObject
+
+	request.ServerId = serverId
+
+	var body SetMcpServerDataClassJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetMcpServerDataClass(ctx, request.(SetMcpServerDataClassRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetMcpServerDataClass")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetMcpServerDataClassResponseObject); ok {
+		if err := validResponse.VisitSetMcpServerDataClassResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListMcpTools operation middleware
 func (sh *strictHandler) ListMcpTools(w http.ResponseWriter, r *http.Request, serverId ServerId) {
 	var request ListMcpToolsRequestObject
@@ -5176,6 +5880,40 @@ func (sh *strictHandler) AcknowledgeMcpToolReview(w http.ResponseWriter, r *http
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(AcknowledgeMcpToolReviewResponseObject); ok {
 		if err := validResponse.VisitAcknowledgeMcpToolReviewResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetMcpToolSink operation middleware
+func (sh *strictHandler) SetMcpToolSink(w http.ResponseWriter, r *http.Request, serverId ServerId, toolName ToolName) {
+	var request SetMcpToolSinkRequestObject
+
+	request.ServerId = serverId
+	request.ToolName = toolName
+
+	var body SetMcpToolSinkJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetMcpToolSink(ctx, request.(SetMcpToolSinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetMcpToolSink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetMcpToolSinkResponseObject); ok {
+		if err := validResponse.VisitSetMcpToolSinkResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

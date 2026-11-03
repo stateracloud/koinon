@@ -5,6 +5,9 @@ import { useQuery } from '@connectrpc/connect-query'
 import { useState } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
 import { RequireAdmin } from '@/components/require-admin'
+import { LeakGuardSettings } from '@/components/leak-guard-settings'
+import { ServerClass } from '@/components/server-class'
+import { ToolSink } from '@/components/tool-sink'
 import { ServerForm } from '@/components/server-form'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -103,6 +106,7 @@ function ServersContent() {
           ))}
         </ul>
       )}
+      <LeakGuardSettings orgId={orgId} />
     </>
   )
 }
@@ -179,6 +183,7 @@ function ServerCard({
           This server is declared by the Secret {s.managedBySecret}. Change or delete that Secret to change it here. You can still set its tools&apos; tiers.
         </p>
       )}
+      {!s.removed && <ServerClass key={`${s.kind}/${s.dataClass.join()}`} server={s} actions={actions} />}
       {editing ? (
         <ServerForm server={s} actions={actions} onDone={done} onSaved={onSaved} />
       ) : (
@@ -285,6 +290,7 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
           {!askTier && ' This only applies in the Ask tier.'}
         </p>
       </div>
+      {!server.removed && <ToolSink key={`${t.sink?.sinkClass}/${t.sink?.derivation}/${t.sink?.addressArgs.join()}`} server={server} tool={t} actions={actions} />}
       {suggestsAuto(t) && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span>Suggested read-only: the server marks this tool as read-only. That is its own claim, so the tier stays as it is until you choose.</span>
