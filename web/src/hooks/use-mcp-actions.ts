@@ -5,7 +5,7 @@ import { createConnectQueryKey, useTransport } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { McpServerService, type Tier } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
-import type { CreateServerInput, UpdateServerInput } from '@/lib/mcp-servers'
+import type { buildSink, CreateServerInput, UpdateServerInput } from '@/lib/mcp-servers'
 
 // Plain client calls rather than useMutation, like useProviderActions: TanStack Query would keep the
 // request, with its credential, in its mutation cache.
@@ -28,6 +28,7 @@ export function useMcpActions(orgId: string) {
       setServerClass: (serverId: string, kind: string, dataClass: string[]) => done(client.setServerClass({ orgId, serverId, class: { kind, dataClass } })),
       deleteServer: (serverId: string) => done(client.deleteServer({ orgId, serverId })),
       setToolTier: (serverId: string, tool: string, tier: Tier) => done(client.setToolTier({ orgId, serverId, tool, tier })),
+      setToolSink: (serverId: string, tool: string, sink: ReturnType<typeof buildSink>) => done(client.setToolSink({ orgId, serverId, tool, sink })),
       setToolTwoApprovers: (serverId: string, tool: string, required: boolean) => done(client.setToolTwoApprovers({ orgId, serverId, tool, required })),
       acknowledgeReview: (serverId: string, tool: string) => done(client.acknowledgeToolReview({ orgId, serverId, tool })),
       setAgentServers: (agentId: string, servers: { serverId: string; tools: string[] }[]) => done(client.setAgentServers({ orgId, agentId, servers })),

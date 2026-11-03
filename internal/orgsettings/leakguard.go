@@ -20,6 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/leakguard"
+	"github.com/stateracloud/koinon/internal/sinkclass"
 )
 
 // The org's leak-guard settings (ADR 0084 decisions 3 and 5, #350): the match threshold and the
@@ -45,6 +46,10 @@ type LeakGuard struct {
 	MatchThreshold int
 	// TrustedHosts are the hosts the URL rule exempts, sorted. Empty for a new org.
 	TrustedHosts []string
+	// CodeHostRepos is the org's code-host scope with each repository's visibility (ADR 0091
+	// decision 3). Empty for an org whose connectors have not reported one: then no code-host write
+	// is internal.
+	CodeHostRepos []sinkclass.Repo
 }
 
 // TrustsHost reports whether the URL rule exempts host. host is a URL's host name; case and a
@@ -170,7 +175,7 @@ func ValidateMatchThreshold(n int) error {
 
 // LeakGuardOf returns the org's leak-guard configuration read through q.
 func LeakGuardOf(ctx context.Context, q *store.Queries, org pgtype.UUID) (LeakGuard, error) {
-	out := LeakGuard{MatchThreshold: DefaultMatchThreshold, TrustedHosts: []string{}}
+	out := LeakGuard{MatchThreshold: DefaultMatchThreshold, TrustedHosts: []string{}, CodeHostRepos: []sinkclass.Repo{}}
 	row, err := q.GetOrgSettings(ctx, org)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
@@ -186,6 +191,11 @@ func LeakGuardOf(ctx context.Context, q *store.Queries, org pgtype.UUID) (LeakGu
 	for _, h := range hosts {
 		out.TrustedHosts = append(out.TrustedHosts, h.Host)
 	}
+	repos, err := q.ListOrgCodeHostRepos(ctx, org)
+	if err != nil {
+		return LeakGuard{}, err
+	}
+	out.CodeHostRepos = codeHostScopeOf(repos)
 	return out, nil
 }
 

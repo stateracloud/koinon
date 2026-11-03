@@ -3,10 +3,13 @@
 package adminapi_test
 
 import (
+	"encoding/json"
 	"net/http"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/mcpservers"
 )
 
 type leakGuardJSON struct {
@@ -15,6 +18,13 @@ type leakGuardJSON struct {
 	MinMatchThreshold     int      `json:"minMatchThreshold"`
 	MaxMatchThreshold     int      `json:"maxMatchThreshold"`
 	TrustedHosts          []string `json:"trustedHosts"`
+	CodeHostScope         struct {
+		Repositories            int `json:"repositories"`
+		Private                 int `json:"private"`
+		Public                  int `json:"public"`
+		Unknown                 int `json:"unknown"`
+		VisibilityMaxAgeSeconds int `json:"visibilityMaxAgeSeconds"`
+	} `json:"codeHostScope"`
 }
 
 var _ = Describe("the leak guard in the admin API (#350)", func() {
@@ -33,15 +43,15 @@ var _ = Describe("the leak guard in the admin API (#350)", func() {
 			code, raw := e.call(ctx, e.token, http.MethodPost, "/mcp-servers", map[string]any{"name": "plain", "url": "https://mcp.example.com/mcp"})
 			Expect(code).To(Equal(http.StatusCreated), string(raw))
 			Expect(decode[map[string]any](raw)).To(HaveKeyWithValue("kind", "other"))
-			Expect(decode[map[string]any](raw)).To(HaveKeyWithValue("dataClass", ConsistOf("untrusted_input", "private_data", "outbound")))
+			Expect(decode[map[string]any](raw)).To(HaveKeyWithValue("dataClass", ConsistOf("untrusted_input", "private_data")))
 
 			code, raw = e.call(ctx, e.token, http.MethodPost, "/mcp-servers", map[string]any{
-				"name": "fetcher", "url": "https://mcp.example.com/mcp", "kind": "fetch", "dataClass": []string{"outbound", "untrusted_input"},
+				"name": "fetcher", "url": "https://mcp.example.com/mcp", "kind": "fetch", "dataClass": []string{"untrusted_input"},
 			})
 			Expect(code).To(Equal(http.StatusCreated), string(raw))
 			s := decode[map[string]any](raw)
 			Expect(s).To(HaveKeyWithValue("kind", "fetch"))
-			Expect(s).To(HaveKeyWithValue("dataClass", []any{"untrusted_input", "outbound"}))
+			Expect(s).To(HaveKeyWithValue("dataClass", []any{"untrusted_input"}))
 			id := s["id"].(string)
 
 			code, raw = e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/data-class", map[string]any{"kind": "search", "dataClass": []string{}})
@@ -85,8 +95,74 @@ var _ = Describe("the leak guard in the admin API (#350)", func() {
 		})
 	})
 
+	Describe("the sink class of a tool (ADR 0091)", func() {
+		setup := func(ctx SpecContext) (id string) {
+			GinkgoHelper()
+			_, raw := e.call(ctx, e.token, http.MethodPost, "/mcp-servers", map[string]any{"name": "forge", "url": "https://mcp.example.com/mcp"})
+			id = decode[mcpServerJSON](raw).ID
+			_, err := e.mcp.SyncTools(ctx, e.org, pgOf(id), []mcpservers.ListedTool{
+				{Name: "create_issue", Description: "Create an issue", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			return id
+		}
+
+		It("is undeclared at first: external-high, fixed, no address arguments", func(ctx SpecContext) {
+			id := setup(ctx)
+			code, raw := e.call(ctx, e.token, http.MethodGet, "/mcp-servers/"+id+"/tools", nil)
+			Expect(code).To(Equal(http.StatusOK), string(raw))
+			Expect(string(raw)).To(ContainSubstring(`"sink":{"addressArgs":[],"derivation":"fixed","sinkClass":"external-high"}`))
+		})
+
+		It("is declared with an audited PUT and read back", func(ctx SpecContext) {
+			id := setup(ctx)
+			code, raw := e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/tools/create_issue/sink", map[string]any{
+				"sinkClass": "external-high", "derivation": "code_host", "addressArgs": []string{"owner", "repo"}, "resultUntrustedInput": true,
+			})
+			Expect(code).To(Equal(http.StatusOK), string(raw))
+			sink := decode[struct{ Sink map[string]any }](raw).Sink
+			Expect(sink).To(HaveKeyWithValue("derivation", "code_host"))
+			Expect(sink).To(HaveKeyWithValue("addressArgs", []any{"owner", "repo"}))
+			Expect(sink).To(HaveKeyWithValue("resultUntrustedInput", true))
+			Expect(sink).NotTo(HaveKey("resultPrivateData"))
+
+			code, raw = e.call(ctx, e.token, http.MethodGet, "/mcp-servers/"+id+"/tools", nil)
+			Expect(code).To(Equal(http.StatusOK), string(raw))
+			Expect(string(raw)).To(ContainSubstring(`"derivation":"code_host"`))
+			Expect(auditCount(ctx, "mcp_tool.declaration.set")).To(Equal(1))
+
+			By("a changed server URL puts it back, audited")
+			code, raw = e.call(ctx, e.token, http.MethodPatch, "/mcp-servers/"+id, map[string]any{"url": "https://other.example.com/mcp"})
+			Expect(code).To(Equal(http.StatusOK), string(raw))
+			_, raw = e.call(ctx, e.token, http.MethodGet, "/mcp-servers/"+id+"/tools", nil)
+			Expect(string(raw)).To(ContainSubstring(`"sink":{"addressArgs":[],"derivation":"fixed","sinkClass":"external-high"}`))
+			Expect(auditCount(ctx, "mcp_tool.declaration.reset")).To(Equal(1))
+		})
+
+		It("refuses an invalid declaration with 400, an unknown tool with 404 and another org's server with 404", func(ctx SpecContext) {
+			id := setup(ctx)
+			for _, body := range []map[string]any{
+				{"sinkClass": "everywhere", "derivation": "fixed", "addressArgs": []string{}},
+				{"sinkClass": "none", "derivation": "oracle", "addressArgs": []string{}},
+				{"sinkClass": "external-high", "derivation": "code_host", "addressArgs": []string{"repo"}},
+				{"sinkClass": "none", "derivation": "fixed", "addressArgs": []string{"a b"}},
+			} {
+				code, raw := e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/tools/create_issue/sink", body)
+				Expect(code).To(Equal(http.StatusBadRequest), string(raw))
+			}
+			Expect(auditCount(ctx, "mcp_tool.declaration.set")).To(BeZero())
+			code, _ := e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/tools/no_such/sink", map[string]any{"sinkClass": "none", "derivation": "fixed", "addressArgs": []string{}})
+			Expect(code).To(Equal(http.StatusNotFound))
+			other := newEnv(ctx)
+			code, _ = other.call(ctx, other.token, http.MethodPut, "/mcp-servers/"+id+"/tools/create_issue/sink", map[string]any{"sinkClass": "none", "derivation": "fixed", "addressArgs": []string{}})
+			Expect(code).To(Equal(http.StatusNotFound))
+			_, raw := e.call(ctx, e.token, http.MethodGet, "/mcp-servers/"+id+"/tools", nil)
+			Expect(string(raw)).To(ContainSubstring(`"sinkClass":"external-high"`))
+		})
+	})
+
 	Describe("the settings and the fetch-trusted host list", func() {
-		It("starts at 24 characters with an empty list", func(ctx SpecContext) {
+		It("starts at 24 characters with an empty list and an empty code-host scope", func(ctx SpecContext) {
 			code, raw := e.call(ctx, e.token, http.MethodGet, "/leak-guard", nil)
 			Expect(code).To(Equal(http.StatusOK), string(raw))
 			l := decode[leakGuardJSON](raw)
@@ -95,6 +171,8 @@ var _ = Describe("the leak guard in the admin API (#350)", func() {
 			Expect(l.MinMatchThreshold).To(Equal(12))
 			Expect(l.MaxMatchThreshold).To(Equal(256))
 			Expect(string(raw)).To(ContainSubstring(`"trustedHosts":[]`))
+			Expect(l.CodeHostScope.Repositories).To(BeZero())
+			Expect(l.CodeHostScope.VisibilityMaxAgeSeconds).To(Equal(3600))
 		})
 
 		It("sets the threshold and returns it to the default, auditing each change", func(ctx SpecContext) {

@@ -4,6 +4,8 @@ syntax = "proto3";
 
 package koinon.leakguard.v1alpha1;
 
+import "google/protobuf/timestamp.proto";
+
 option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1;leakguardv1alpha1";
 
 // LeakGuardService manages an org's leak-guard settings (ADR 0084): the match threshold and the
@@ -33,6 +35,24 @@ message LeakGuard {
   int32 max_match_threshold = 4;
   // trusted_hosts is the fetch-trusted host list, sorted; empty for a new org.
   repeated string trusted_hosts = 5;
+  // code_host_scope summarises the org's code-host scope (ADR 0091 decision 3).
+  CodeHostScope code_host_scope = 6;
+}
+
+// CodeHostScope counts the repositories of the org's code-host connections by the visibility the
+// connector last read. The code-host derivation calls a write internal only for a listed repository
+// that is not public and whose reading is fresh; unknown and stale ones count as external-high.
+message CodeHostScope {
+  int32 repositories = 1;
+  int32 private = 2;
+  int32 internal = 3;
+  int32 public = 4;
+  int32 unknown = 5;
+  // stale counts the readings older than visibility_max_age_seconds.
+  int32 stale = 6;
+  // oldest_checked_at is the oldest reading; unset for an empty scope.
+  google.protobuf.Timestamp oldest_checked_at = 7;
+  int32 visibility_max_age_seconds = 8;
 }
 
 message GetLeakGuardRequest {

@@ -17,11 +17,17 @@ import {
   summaryText,
   tierLabel,
   toggleLeg,
+  buildSink,
+  isDefaultSink,
+  parseArgs,
+  sinkFormOf,
+  sinkText,
+  validateSink,
   legsText,
   type ServerFormState,
 } from '@/lib/mcp-servers'
 
-const base: ServerFormState = { name: 'docs', url: ' https://mcp.example.com/mcp ', transport: 'streamable-http', mode: 'none', header: '', value: '', removeCredential: false, kind: 'other', legs: ['untrusted_input', 'private_data', 'outbound'] }
+const base: ServerFormState = { name: 'docs', url: ' https://mcp.example.com/mcp ', transport: 'streamable-http', mode: 'none', header: '', value: '', removeCredential: false, kind: 'other', legs: ['untrusted_input', 'private_data'] }
 const not = 'not-a-real-token'
 
 describe('serverNameError', () => {
@@ -35,7 +41,7 @@ describe('serverNameError', () => {
 
 describe('buildCreateRequest', () => {
   it('sends no credential fields without a credential', () => {
-    expect(buildCreateRequest(base)).toEqual({ name: 'docs', url: 'https://mcp.example.com/mcp', transport: 'streamable-http', credentialHeader: '', credentialPrefix: '', credentialValue: '', class: { kind: 'other', dataClass: ['untrusted_input', 'private_data', 'outbound'] } })
+    expect(buildCreateRequest(base)).toEqual({ name: 'docs', url: 'https://mcp.example.com/mcp', transport: 'streamable-http', credentialHeader: '', credentialPrefix: '', credentialValue: '', class: { kind: 'other', dataClass: ['untrusted_input', 'private_data'] } })
   })
   it('builds a bearer token as Authorization with the Bearer prefix', () => {
     expect(buildCreateRequest({ ...base, mode: 'bearer', value: not })).toMatchObject({ credentialHeader: 'Authorization', credentialPrefix: 'Bearer ', credentialValue: not })
@@ -121,14 +127,49 @@ describe('summarizeTools', () => {
 
 describe('the data class helpers', () => {
   it('keeps the canonical leg order when a leg is toggled', () => {
-    expect(toggleLeg(['outbound'], 'untrusted_input', true)).toEqual(['untrusted_input', 'outbound'])
-    expect(toggleLeg(['untrusted_input', 'private_data', 'outbound'], 'private_data', false)).toEqual(['untrusted_input', 'outbound'])
+    expect(toggleLeg([], 'untrusted_input', true)).toEqual(['untrusted_input'])
+    expect(toggleLeg(['untrusted_input', 'private_data'], 'private_data', false)).toEqual(['untrusted_input'])
     expect(toggleLeg([], 'private_data', false)).toEqual([])
   })
   it('says none for a server with no leg', () => {
     expect(legsText([])).toBe('none')
   })
   it('sends the class chosen in the form with the create request', () => {
-    expect(buildCreateRequest({ ...base, kind: 'fetch', legs: ['outbound'] }).class).toEqual({ kind: 'fetch', dataClass: ['outbound'] })
+    expect(buildCreateRequest({ ...base, kind: 'fetch', legs: ['private_data'] }).class).toEqual({ kind: 'fetch', dataClass: ['private_data'] })
+  })
+})
+
+describe('the sink class of a tool (ADR 0091)', () => {
+  const declared = { sinkClass: 'internal', derivation: 'fixed', addressArgs: [] as string[] }
+  it('treats a tool nobody declared as external-high', () => {
+    expect(isDefaultSink(undefined)).toBe(true)
+    expect(isDefaultSink({ sinkClass: 'external-high', derivation: 'fixed', addressArgs: [] })).toBe(true)
+    expect(isDefaultSink(declared)).toBe(false)
+    expect(isDefaultSink({ sinkClass: 'external-high', derivation: 'fixed', addressArgs: [], resultPrivateData: false })).toBe(false)
+    expect(sinkText(undefined)).toMatch(/not declared/)
+  })
+  it('says how a derived class is decided', () => {
+    expect(sinkText({ sinkClass: 'external-high', derivation: 'code_host', addressArgs: ['owner', 'repo'] })).toBe('from the repository; address: owner, repo')
+    expect(sinkText({ sinkClass: 'external-high', derivation: 'fetch', addressArgs: ['url'] })).toBe('from the URL; address: url')
+  })
+  it('round-trips the form and keeps the three answers for a result leg', () => {
+    const f = sinkFormOf({ ...declared, resultUntrustedInput: false, resultPrivateData: true })
+    expect([f.resultUntrustedInput, f.resultPrivateData]).toEqual(['no', 'yes'])
+    expect(sinkFormOf(undefined)).toMatchObject({ sinkClass: 'external-high', derivation: 'fixed', resultUntrustedInput: 'server' })
+    expect(buildSink(f)).toEqual({ sinkClass: 'internal', derivation: 'fixed', addressArgs: [], resultUntrustedInput: false, resultPrivateData: true })
+  })
+  it('sends external-high as the fallback class of a derived tool', () => {
+    expect(buildSink({ ...sinkFormOf(declared), derivation: 'fetch', addressArgs: ' url ' })).toMatchObject({ sinkClass: 'external-high', derivation: 'fetch', addressArgs: ['url'] })
+  })
+  it('checks the address arguments as the API does', () => {
+    const f = sinkFormOf(declared)
+    expect(parseArgs(' a, ,b ,')).toEqual(['a', 'b'])
+    expect(validateSink(f)).toBeUndefined()
+    expect(validateSink({ ...f, derivation: 'code_host', addressArgs: 'owner' })).toMatch(/two arguments/)
+    expect(validateSink({ ...f, derivation: 'fetch', addressArgs: '' })).toMatch(/one argument/)
+    expect(validateSink({ ...f, addressArgs: 'bad name' })).toMatch(/not an argument name/)
+    expect(validateSink({ ...f, addressArgs: 'a, a' })).toMatch(/twice/)
+    expect(validateSink({ ...f, addressArgs: 'a,b,c,d,e,f,g,h,i' })).toMatch(/at most 8/)
+    expect(validateSink({ ...f, derivation: 'nope' })).toMatch(/Choose/)
   })
 })

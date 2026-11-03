@@ -4,6 +4,7 @@ package services
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -24,7 +25,8 @@ func (s *Server) leakGuardProto(ctx context.Context, org pgtype.UUID) (*leakguar
 	return &leakguardv1alpha1.LeakGuard{
 		MatchThreshold: int32(l.MatchThreshold), DefaultMatchThreshold: orgsettings.DefaultMatchThreshold, //nolint:gosec // bounded by the table's CHECK
 		MinMatchThreshold: leakguard.MinThreshold, MaxMatchThreshold: leakguard.MaxThreshold,
-		TrustedHosts: l.TrustedHosts,
+		TrustedHosts:  l.TrustedHosts,
+		CodeHostScope: codeHostScopeProto(l.ScopeSummary(time.Now())),
 	}, nil
 }
 
@@ -91,4 +93,12 @@ func (s *Server) RemoveTrustedHost(ctx context.Context, req *leakguardv1alpha1.R
 		return nil, err
 	}
 	return &leakguardv1alpha1.RemoveTrustedHostResponse{LeakGuard: l}, nil
+}
+
+func codeHostScopeProto(c orgsettings.ScopeSummary) *leakguardv1alpha1.CodeHostScope {
+	return &leakguardv1alpha1.CodeHostScope{
+		Repositories: int32(c.Repositories), Private: int32(c.Private), Internal: int32(c.Internal), Public: int32(c.Public), //nolint:gosec // a count of rows
+		Unknown: int32(c.Unknown), Stale: int32(c.Stale), OldestCheckedAt: optTime(c.OldestCheckedAt), //nolint:gosec // a count of rows
+		VisibilityMaxAgeSeconds: int32(c.MaxAge.Seconds()),
+	}
 }

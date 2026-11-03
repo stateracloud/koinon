@@ -49,6 +49,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpsanitize"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/sinkclass"
 )
 
 // Errors are the catalog's, so every caller maps them the same way. Messages are safe to show.
@@ -229,6 +230,9 @@ type Tool struct {
 	LastSeenAt  time.Time  `json:"lastSeenAt"`
 	TierSetBy   string     `json:"tierSetBy,omitempty"`
 	TierSetAt   *time.Time `json:"tierSetAt,omitempty"`
+	// Sink is the tool's declaration for the leak guard (ADR 0091): its sink class, its address
+	// arguments and what its results carry. A tool nobody declared has sinkclass.Default.
+	Sink sinkclass.Declaration `json:"sink"`
 }
 
 // Service is the MCP server service layer.
@@ -318,6 +322,7 @@ func toTool(t store.McpTool) Tool {
 		RequiresTwoApprovers: t.RequiresTwoApprovers, ContentHash: t.ContentHash,
 		DescriptionOriginalLength: int(t.DescriptionOriginalLength), DescriptionCapped: t.DescriptionCapped, DescriptionCleaned: t.DescriptionCleaned,
 		FirstSeenAt: t.FirstSeenAt.Time, LastSeenAt: t.LastSeenAt.Time, TierSetBy: t.TierSetBy.String, TierSetAt: timePtr(t.TierSetAt),
+		Sink: sinkOf(t),
 	}
 }
 
@@ -629,7 +634,7 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		}); err != nil {
 			return err
 		}
-		return recordClassReset(ctx, q, org, actor, cur, out)
+		return resetOnURLChange(ctx, q, org, actor, cur, out)
 	})
 	if err != nil {
 		return Server{}, mapErr(err)
@@ -896,11 +901,16 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 					reason = ReviewChangedDemoted
 					res.Demoted = append(res.Demoted, lt.Name)
 				}
-				if _, err := q.UpdateMCPToolContent(ctx, store.UpdateMCPToolContentParams{
+				out, err := q.UpdateMCPToolContent(ctx, store.UpdateMCPToolContentParams{
 					OrgID: org, ServerID: serverID, Name: lt.Name, Description: desc, InputSchema: schema, ContentHash: hash,
 					ReadOnlyHint: lt.ReadOnlyHint, ReviewReason: pgtype.Text{String: reason, Valid: true},
 					DescriptionOriginalLength: int64(rep.OriginalLen), DescriptionCapped: rep.Capped, DescriptionCleaned: rep.Cleaned,
-				}); err != nil {
+				})
+				if err != nil {
+					return err
+				}
+				// The query put the declaration back to the default; the audit says what it was.
+				if err := recordToolDeclarationReset(ctx, q, org, audit.System(), srv.Name, cur, out, ReasonContentChanged); err != nil {
 					return err
 				}
 				res.Changed = append(res.Changed, lt.Name)

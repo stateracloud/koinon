@@ -232,7 +232,7 @@ paths:
       summary: "Set what a server exposes, its kind and the legs of the leak guard it carries. Audited."
       description: |
         Works for declared servers too: the declaring Secret does not carry it. A server nobody
-        classified is kind `other` with all three legs.
+        classified is kind `other` with both legs.
       requestBody:
         required: true
         content:
@@ -280,6 +280,37 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/McpToolTierUpdate"
+      responses:
+        "200":
+          description: The tool.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpTool"
+        default:
+          $ref: "#/components/responses/Error"
+  /mcp-servers/{serverId}/tools/{toolName}/sink:
+    parameters:
+      - $ref: "#/components/parameters/serverId"
+      - $ref: "#/components/parameters/toolName"
+    put:
+      tags: [mcp]
+      operationId: setMcpToolSink
+      summary: "Declare a tool's sink class, its address arguments and what its results carry. Audited."
+      description: |
+        ADR 0091. The class is `fixed` (one of `none`, `internal`, `external-low`, `external-high`) or
+        derived per call from the address arguments: `code_host` takes the owner and repo arguments, in
+        that order, and is internal only for a non-public repository in the org's code-host scope;
+        `fetch` takes the url argument and is internal for a fetch-trusted host, otherwise
+        external-low. The other arguments are payload. A tool nobody declared is `external-high` with
+        the server's legs, which is also what a changed server URL or tool content hash puts it back to.
+        Works on declared servers too.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/McpToolSink"
       responses:
         "200":
           description: The tool.
@@ -1262,13 +1293,13 @@ components:
       type: array
       uniqueItems: true
       description: |
-        The legs of the leak guard (ADR 0084) the server carries: `untrusted_input` (returns text an
-        outsider controls), `private_data` (returns data the org does not want to leave) and `outbound`
-        (a call sends its arguments outside the org). A server may carry several; empty carries none.
-        A server nobody classified carries all three.
+        The session legs (ADR 0091) the server's results can set: `untrusted_input` (returns text an
+        outsider controls) and `private_data` (returns data the org does not want to leave). A server
+        may carry both; empty carries none. A server nobody classified carries both. Where a call
+        goes is not a server leg: it is the sink class of each tool.
       items:
         type: string
-        enum: [untrusted_input, private_data, outbound]
+        enum: [untrusted_input, private_data]
     McpServerDataClass:
       type: object
       required: [kind, dataClass]
@@ -1277,7 +1308,7 @@ components:
         dataClass: {$ref: "#/components/schemas/McpDataClass"}
     LeakGuard:
       type: object
-      required: [matchThreshold, defaultMatchThreshold, minMatchThreshold, maxMatchThreshold, trustedHosts]
+      required: [matchThreshold, defaultMatchThreshold, minMatchThreshold, maxMatchThreshold, trustedHosts, codeHostScope]
       properties:
         matchThreshold:
           type: integer
@@ -1289,6 +1320,50 @@ components:
           type: array
           description: The fetch-trusted host list, sorted. Empty for a new org.
           items: {type: string}
+        codeHostScope: {$ref: "#/components/schemas/CodeHostScope"}
+    CodeHostScope:
+      type: object
+      description: |
+        The org's code-host scope (ADR 0091): the repositories of its code-host connections with the
+        visibility the connector last read. The code-host derivation calls a write internal only for a
+        listed repository that is not public and whose reading is fresh.
+      required: [repositories, private, internal, public, unknown, visibilityMaxAgeSeconds]
+      properties:
+        repositories: {type: integer}
+        private: {type: integer}
+        internal: {type: integer}
+        public: {type: integer}
+        unknown: {type: integer, description: Repositories whose visibility the connector could not read. They count as external-high.}
+        stale:
+          type: integer
+          description: Repositories whose reading is older than the freshness window. They count as unknown.
+        oldestCheckedAt: {type: string, format: date-time}
+        visibilityMaxAgeSeconds: {type: integer}
+    McpToolSink:
+      type: object
+      required: [sinkClass, derivation, addressArgs]
+      properties:
+        # Not an OpenAPI enum: the generator would name the constants Internal and Fetch, which collide
+        # with the error codes and the server kinds. The service validates the values.
+        sinkClass:
+          type: string
+          description: |
+            `none`, `internal`, `external-low` or `external-high`. The fixed class of a tool; for a
+            derived tool, the class of a call whose address arguments do not parse (`external-high`).
+        derivation:
+          type: string
+          description: "`fixed` (use sinkClass), `code_host` (owner and repo arguments) or `fetch` (the url argument)."
+
+        addressArgs:
+          type: array
+          items: {type: string}
+          description: "The arguments that say where a call goes, in the order the derivation reads them: code_host [owner, repo], fetch [url]. Every other argument is payload."
+        resultUntrustedInput:
+          type: boolean
+          description: The tool's results carry text an outsider controls. Leave out for the server's own leg.
+        resultPrivateData:
+          type: boolean
+          description: The tool's results carry data the org does not want to leave. Leave out for the server's own leg.
     LeakGuardSettings:
       type: object
       properties:
@@ -1341,7 +1416,7 @@ components:
         removeCredential: {type: boolean}
     McpTool:
       type: object
-      required: [serverId, name, description, readOnlyHint, tier, contentHash, descriptionOriginalLength, descriptionCapped, descriptionCleaned, present, firstSeenAt, lastSeenAt]
+      required: [serverId, name, description, readOnlyHint, tier, contentHash, descriptionOriginalLength, descriptionCapped, descriptionCleaned, present, firstSeenAt, lastSeenAt, sink]
       properties:
         serverId: {type: string, format: uuid}
         name: {type: string}
@@ -1378,6 +1453,7 @@ components:
         lastSeenAt: {type: string, format: date-time}
         tierSetBy: {type: string}
         tierSetAt: {type: string, format: date-time}
+        sink: {$ref: "#/components/schemas/McpToolSink"}
     McpToolList:
       type: object
       required: [tools]

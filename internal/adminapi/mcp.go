@@ -10,6 +10,7 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/sinkclass"
 )
 
 // WithMCP sets the service behind the remote MCP server endpoints (plan item MC1). Without it they
@@ -52,6 +53,10 @@ func toMcpTool(t mcpservers.Tool) McpTool {
 	out := McpTool{
 		ServerId: openapi_types.UUID(pgUUID(t.ServerID).Bytes), Name: t.Name, Description: t.Description, ReadOnlyHint: t.ReadOnlyHint,
 		Tier: McpToolTier(t.Tier), Present: t.Present, ContentHash: t.ContentHash, DescriptionOriginalLength: t.DescriptionOriginalLength, DescriptionCapped: t.DescriptionCapped, DescriptionCleaned: t.DescriptionCleaned, RequiresTwoApprovers: &t.RequiresTwoApprovers, FirstSeenAt: t.FirstSeenAt, LastSeenAt: t.LastSeenAt, TierSetAt: t.TierSetAt,
+		Sink: McpToolSink{
+			SinkClass: string(t.Sink.Class), Derivation: string(t.Sink.Derivation), AddressArgs: append([]string{}, t.Sink.AddressArgs...),
+			ResultUntrustedInput: t.Sink.ResultUntrustedInput, ResultPrivateData: t.Sink.ResultPrivateData,
+		},
 	}
 	if t.ReviewReason != "" {
 		out.ReviewReason = &t.ReviewReason
@@ -208,6 +213,25 @@ func (s *Server) SetMcpToolTier(ctx context.Context, req SetMcpToolTierRequestOb
 		return SetMcpToolTierdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
 	return SetMcpToolTier200JSONResponse(toMcpTool(got)), nil
+}
+
+// SetMcpToolSink implements StrictServerInterface.
+func (s *Server) SetMcpToolSink(ctx context.Context, req SetMcpToolSinkRequestObject) (SetMcpToolSinkResponseObject, error) {
+	if s.mcp == nil {
+		st, e := s.noMCP()
+		return SetMcpToolSinkdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	p, actor := s.actor(ctx)
+	b := req.Body
+	got, err := s.mcp.SetToolDeclaration(ctx, p.Org, actor, uid(req.ServerId), req.ToolName, sinkclass.Declaration{
+		Class: sinkclass.Class(b.SinkClass), Derivation: sinkclass.Derivation(b.Derivation), AddressArgs: b.AddressArgs,
+		ResultUntrustedInput: b.ResultUntrustedInput, ResultPrivateData: b.ResultPrivateData,
+	})
+	if err != nil {
+		st, e := s.problem(err)
+		return SetMcpToolSinkdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	return SetMcpToolSink200JSONResponse(toMcpTool(got)), nil
 }
 
 // SetMcpToolTwoApprovers implements StrictServerInterface.

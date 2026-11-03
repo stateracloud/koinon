@@ -137,6 +137,20 @@ export function LeakGuardSettings({ orgId }: { orgId: string }) {
           </Button>
         </form>
       </div>
+      <div className="grid gap-2">
+        <h3 className="font-semibold">Code-host scope</h3>
+        <p className="text-muted-foreground text-xs">
+          A write to a repository counts as internal only when the repository is in a code-host connection of this org and the connector read it as not public within the last {Math.round((g.codeHostScope?.visibilityMaxAgeSeconds ?? 3600) / 60)}{' '}
+          minutes. A public, unknown, stale or unlisted repository counts as external, free text.
+        </p>
+        {!g.codeHostScope || g.codeHostScope.repositories === 0 ? (
+          <p className="text-muted-foreground">No repositories listed: every code-host write counts as external, free text.</p>
+        ) : (
+          <p aria-label="Code-host scope">
+            {g.codeHostScope.repositories} repositories: {g.codeHostScope.private} private, {g.codeHostScope.internal} internal, {g.codeHostScope.public} public, {g.codeHostScope.unknown} unknown; {g.codeHostScope.stale} stale.
+          </p>
+        )}
+      </div>
       {error && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>Could not save: {ConnectError.from(error).rawMessage}</AlertDescription>

@@ -19,10 +19,10 @@ import (
 
 var _ = Describe("Declaration", func() {
 	It("puts the legs in canonical order and drops duplicates", func() {
-		d, err := mcpservers.Declaration{Kind: "fetch", Legs: []string{"outbound", "untrusted_input", "outbound"}}.Normalize()
+		d, err := mcpservers.Declaration{Kind: "fetch", Legs: []string{"private_data", "untrusted_input", "private_data"}}.Normalize()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(d.Kind).To(Equal("fetch"))
-		Expect(d.Legs).To(Equal([]string{"untrusted_input", "outbound"}))
+		Expect(d.Legs).To(Equal([]string{"untrusted_input", "private_data"}))
 	})
 
 	It("allows a server that carries no leg", func() {
@@ -41,13 +41,14 @@ var _ = Describe("Declaration", func() {
 		Entry("an unknown kind", mcpservers.Declaration{Kind: "browser"}),
 		Entry("an empty kind", mcpservers.Declaration{}),
 		Entry("an unknown leg", mcpservers.Declaration{Kind: "other", Legs: []string{"secrets"}}),
+		Entry("outbound, which ADR 0091 moved to the sink class of each tool", mcpservers.Declaration{Kind: "other", Legs: []string{"outbound"}}),
 		Entry("a leg in another spelling", mcpservers.Declaration{Kind: "other", Legs: []string{"private-data"}}),
 	)
 
-	It("is the cautious default: kind other, all three legs", func() {
+	It("is the cautious default: kind other, both legs", func() {
 		d := mcpservers.DefaultDeclaration()
 		Expect(d.Kind).To(Equal(mcpservers.KindOther))
-		Expect(d.Legs).To(ConsistOf(mcpservers.LegUntrustedInput, mcpservers.LegPrivateData, mcpservers.LegOutbound))
+		Expect(d.Legs).To(ConsistOf(mcpservers.LegUntrustedInput, mcpservers.LegPrivateData))
 	})
 })
 
@@ -82,17 +83,17 @@ var _ = Describe("the data class of a server (ADR 0084, #350)", func() {
 		return s
 	}
 
-	It("is unclassified (kind other, all three legs) when the creator says nothing", func(ctx SpecContext) {
+	It("is unclassified (kind other, both legs) when the creator says nothing", func(ctx SpecContext) {
 		s := create(ctx, "wiki", nil)
 		Expect(s.Kind).To(Equal("other"))
-		Expect(s.DataClass).To(Equal([]string{"untrusted_input", "private_data", "outbound"}))
+		Expect(s.DataClass).To(Equal([]string{"untrusted_input", "private_data"}))
 		Expect(s.Carries(mcpservers.LegPrivateData)).To(BeTrue())
 	})
 
 	It("stores what the creator declares, including no leg at all", func(ctx SpecContext) {
-		f := create(ctx, "fetcher", &mcpservers.Declaration{Kind: "fetch", Legs: []string{"outbound", "untrusted_input"}})
+		f := create(ctx, "fetcher", &mcpservers.Declaration{Kind: "fetch", Legs: []string{"untrusted_input"}})
 		Expect(f.Kind).To(Equal("fetch"))
-		Expect(f.DataClass).To(Equal([]string{"untrusted_input", "outbound"}))
+		Expect(f.DataClass).To(Equal([]string{"untrusted_input"}))
 		Expect(f.Carries(mcpservers.LegPrivateData)).To(BeFalse())
 
 		none := create(ctx, "clock", &mcpservers.Declaration{Kind: "other"})
@@ -101,7 +102,7 @@ var _ = Describe("the data class of a server (ADR 0084, #350)", func() {
 		got, err := svc.Get(ctx, org, f.ID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.Kind).To(Equal("fetch"))
-		Expect(got.DataClass).To(Equal([]string{"untrusted_input", "outbound"}))
+		Expect(got.DataClass).To(Equal([]string{"untrusted_input"}))
 	})
 
 	It("refuses an invalid declaration at create", func(ctx SpecContext) {
@@ -116,10 +117,10 @@ var _ = Describe("the data class of a server (ADR 0084, #350)", func() {
 
 	It("changes the class, audits before and after, and leaves the rest of the server alone", func(ctx SpecContext) {
 		s := create(ctx, "wiki", nil)
-		got, err := svc.SetDataClass(ctx, org, actor, s.ID, mcpservers.Declaration{Kind: "search", Legs: []string{"outbound", "untrusted_input"}})
+		got, err := svc.SetDataClass(ctx, org, actor, s.ID, mcpservers.Declaration{Kind: "search", Legs: []string{"untrusted_input"}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.Kind).To(Equal("search"))
-		Expect(got.DataClass).To(Equal([]string{"untrusted_input", "outbound"}))
+		Expect(got.DataClass).To(Equal([]string{"untrusted_input"}))
 		Expect(got.URL).To(Equal(s.URL))
 		Expect(got.Health).To(Equal(s.Health))
 
@@ -128,9 +129,9 @@ var _ = Describe("the data class of a server (ADR 0084, #350)", func() {
 		Expect(ev[0].TargetID).To(Equal(s.ID))
 		var sum struct{ Before, After map[string]any }
 		Expect(json.Unmarshal(ev[0].Summary, &sum)).To(Succeed())
-		Expect(sum.Before).To(HaveKeyWithValue("dataClass", ConsistOf("untrusted_input", "private_data", "outbound")))
+		Expect(sum.Before).To(HaveKeyWithValue("dataClass", ConsistOf("untrusted_input", "private_data")))
 		Expect(sum.After).To(HaveKeyWithValue("kind", "search"))
-		Expect(sum.After).To(HaveKeyWithValue("dataClass", ConsistOf("untrusted_input", "outbound")))
+		Expect(sum.After).To(HaveKeyWithValue("dataClass", ConsistOf("untrusted_input")))
 	})
 
 	It("is org-scoped: another org's server is not found and stays as it was", func(ctx SpecContext) {
@@ -141,7 +142,7 @@ var _ = Describe("the data class of a server (ADR 0084, #350)", func() {
 		got, err := svc.Get(ctx, org, s.ID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.Kind).To(Equal("other"))
-		Expect(got.DataClass).To(HaveLen(3))
+		Expect(got.DataClass).To(HaveLen(2))
 	})
 
 	It("does not change a server for an invalid declaration", func(ctx SpecContext) {
@@ -162,7 +163,7 @@ var _ = Describe("the data class of a server (ADR 0084, #350)", func() {
 		list, _ := svc.List(ctx, org)
 		Expect(list).To(HaveLen(1))
 		Expect(list[0].Source).To(Equal("secret"))
-		Expect(list[0].DataClass).To(HaveLen(3), "a declared server starts unclassified")
+		Expect(list[0].DataClass).To(HaveLen(2), "a declared server starts unclassified")
 
 		_, err = svc.SetDataClass(ctx, org, actor, list[0].ID, mcpservers.Declaration{Kind: "fetch", Legs: []string{"untrusted_input"}})
 		Expect(err).NotTo(HaveOccurred())
@@ -196,7 +197,7 @@ var _ = Describe("the data class of a server (ADR 0084, #350)", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.URL).To(Equal("https://decl2.example.com/mcp"))
 		Expect(got.Kind).To(Equal("other"))
-		Expect(got.DataClass).To(Equal([]string{"untrusted_input", "private_data", "outbound"}))
+		Expect(got.DataClass).To(Equal([]string{"untrusted_input", "private_data"}))
 		expectReset(events(ctx, "mcp_server.data_class.reset"), "fetch", []any{"untrusted_input"})
 	})
 
@@ -215,10 +216,10 @@ var _ = Describe("the data class of a server (ADR 0084, #350)", func() {
 		got, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &other})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.Kind).To(Equal("other"))
-		Expect(got.DataClass).To(Equal([]string{"untrusted_input", "private_data", "outbound"}))
+		Expect(got.DataClass).To(Equal([]string{"untrusted_input", "private_data"}))
 		again, err := svc.Get(ctx, org, s.ID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(again.DataClass).To(HaveLen(3))
+		Expect(again.DataClass).To(HaveLen(2))
 		expectReset(events(ctx, "mcp_server.data_class.reset"), "fetch", []any{"untrusted_input"})
 
 		By("a second change of URL, from the default, has nothing to reset and audits nothing more")
@@ -248,6 +249,6 @@ func expectReset(ev []store.AuditEvent, wasKind string, wasLegs []any) {
 	Expect(sum.Before).To(HaveKeyWithValue("kind", wasKind))
 	Expect(sum.Before).To(HaveKeyWithValue("dataClass", wasLegs))
 	Expect(sum.After).To(HaveKeyWithValue("kind", "other"))
-	Expect(sum.After).To(HaveKeyWithValue("dataClass", ConsistOf("untrusted_input", "private_data", "outbound")))
+	Expect(sum.After).To(HaveKeyWithValue("dataClass", ConsistOf("untrusted_input", "private_data")))
 	Expect(sum.After).To(HaveKeyWithValue("reason", "url_changed"))
 }

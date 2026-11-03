@@ -21,6 +21,7 @@ import {
   type DeleteServerRequest,
   type SetAgentServersRequest,
   type SetServerClassRequest,
+  type SetToolSinkRequest,
   type SetToolTierRequest,
   type SetToolTwoApproversRequest,
   type UpdateServerRequest,
@@ -41,7 +42,7 @@ const docs = create(ServerSchema, {
   healthCheckedAt: checked,
   gatewayTarget: 'default-docs',
   kind: 'other',
-  dataClass: ['untrusted_input', 'private_data', 'outbound'],
+  dataClass: ['untrusted_input', 'private_data'],
 })
 const issues = create(ServerSchema, {
   id: 's-issues',
@@ -89,6 +90,7 @@ function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failD
     deletes: [] as DeleteServerRequest[],
     allowSets: [] as SetAgentServersRequest[],
     classes: [] as SetServerClassRequest[],
+    sinks: [] as SetToolSinkRequest[],
     listed: 0,
   }
   const current = new Map(tools.map((t) => [`${t.serverId}/${t.name}`, t]))
@@ -100,6 +102,10 @@ function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failD
       getLeakGuard: () => ({ leakGuard: { matchThreshold: 24, defaultMatchThreshold: 24, minMatchThreshold: 12, maxMatchThreshold: 256, trustedHosts: [] } }),
     })
     service(McpServerService, {
+      setToolSink: (req) => {
+        calls.sinks.push(req)
+        return { tool: create(ToolSchema, { ...current.get(`${req.serverId}/${req.tool}`)!, sink: req.sink }) }
+      },
       setServerClass: (req) => {
         calls.classes.push(req)
         return { server: create(ServerSchema, { ...docs, kind: req.class?.kind ?? 'other', dataClass: req.class?.dataClass ?? [] }) }
@@ -395,13 +401,13 @@ describe('Agent MCP allowlist', () => {
     const calls = setup()
     const list = await screen.findByRole('list', { name: 'Servers' })
     const d = within(within(list).getByRole('region', { name: 'docs' }))
-    expect(d.getByText(/Data class: Other; legs: returns untrusted input, reads private data, can send data out/)).toBeInTheDocument()
+    expect(d.getByText(/Data class: Other; legs: returns untrusted input, reads private data/)).toBeInTheDocument()
     await userEvent.click(d.getByRole('button', { name: 'Change data class of docs' }))
     await userEvent.selectOptions(d.getByLabelText('Kind'), 'fetch')
     await userEvent.click(d.getByLabelText('Reads private data'))
     await userEvent.click(d.getByRole('button', { name: 'Save class' }))
     await waitFor(() => expect(calls.classes).toHaveLength(1))
-    expect(calls.classes[0]).toMatchObject({ serverId: 's-docs', class: { kind: 'fetch', dataClass: ['untrusted_input', 'outbound'] } })
+    expect(calls.classes[0]).toMatchObject({ serverId: 's-docs', class: { kind: 'fetch', dataClass: ['untrusted_input'] } })
   })
 
   it('lets a class be set on a server declared by a Secret', async () => {
@@ -416,13 +422,34 @@ describe('Agent MCP allowlist', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
     const form = within(screen.getByRole('form', { name: 'Add server' }))
     expect(form.getByLabelText('Kind')).toHaveValue('other')
-    for (const l of ['Returns untrusted input', 'Reads private data', 'Can send data out']) expect(form.getByLabelText(l)).toBeChecked()
+    for (const l of ['Returns untrusted input', 'Reads private data']) expect(form.getByLabelText(l)).toBeChecked()
     await userEvent.type(form.getByLabelText('Name'), 'fetcher')
     await userEvent.type(form.getByLabelText('URL'), 'https://f.example.com/mcp')
     await userEvent.selectOptions(form.getByLabelText('Kind'), 'fetch')
     await userEvent.click(form.getByLabelText('Reads private data'))
     await userEvent.click(form.getByRole('button', { name: 'Add server' }))
     await waitFor(() => expect(calls.creates).toHaveLength(1))
-    expect(calls.creates[0].class).toMatchObject({ kind: 'fetch', dataClass: ['untrusted_input', 'outbound'] })
+    expect(calls.creates[0].class).toMatchObject({ kind: 'fetch', dataClass: ['untrusted_input'] })
+  })
+
+  it('shows where the calls of a tool go and declares a derived class from the address arguments', async () => {
+    const calls = setup()
+    const list = await screen.findByRole('list', { name: 'Servers' })
+    const d = within(within(list).getByRole('region', { name: 'docs' }))
+    expect(d.getAllByText(/Where calls go: External, free text \(not declared\)/).length).toBeGreaterThan(0)
+    await userEvent.click(d.getAllByRole('button', { name: 'Change sink class of search' })[0])
+    const form = within(d.getByRole('form', { name: 'Sink class of search' }))
+    await userEvent.selectOptions(form.getByLabelText('How the class is decided'), 'code_host')
+    expect(form.queryByLabelText('Sink class')).not.toBeInTheDocument()
+    await userEvent.type(form.getByLabelText('Address arguments'), 'owner')
+    await userEvent.click(form.getByRole('button', { name: 'Save sink class' }))
+    expect(await form.findByRole('alert')).toHaveTextContent(/two arguments/)
+    expect(calls.sinks).toHaveLength(0)
+    await userEvent.type(form.getByLabelText('Address arguments'), ', repo')
+    await userEvent.selectOptions(form.getByLabelText('Results carry private data'), 'yes')
+    await userEvent.click(form.getByRole('button', { name: 'Save sink class' }))
+    await waitFor(() => expect(calls.sinks).toHaveLength(1))
+    expect(calls.sinks[0]).toMatchObject({ serverId: 's-docs', tool: 'search', sink: { sinkClass: 'external-high', derivation: 'code_host', addressArgs: ['owner', 'repo'], resultPrivateData: true } })
+    expect(calls.sinks[0].sink?.resultUntrustedInput).toBeUndefined()
   })
 })

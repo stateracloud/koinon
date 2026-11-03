@@ -355,6 +355,50 @@ func (ns NullCheckpointStatus) Value() (driver.Value, error) {
 	return string(ns.CheckpointStatus), nil
 }
 
+type CodeHostRepoVisibility string
+
+const (
+	CodeHostRepoVisibilityPrivate  CodeHostRepoVisibility = "private"
+	CodeHostRepoVisibilityInternal CodeHostRepoVisibility = "internal"
+	CodeHostRepoVisibilityPublic   CodeHostRepoVisibility = "public"
+	CodeHostRepoVisibilityUnknown  CodeHostRepoVisibility = "unknown"
+)
+
+func (e *CodeHostRepoVisibility) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CodeHostRepoVisibility(s)
+	case string:
+		*e = CodeHostRepoVisibility(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CodeHostRepoVisibility: %T", src)
+	}
+	return nil
+}
+
+type NullCodeHostRepoVisibility struct {
+	CodeHostRepoVisibility CodeHostRepoVisibility
+	Valid                  bool // Valid is true if CodeHostRepoVisibility is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCodeHostRepoVisibility) Scan(value interface{}) error {
+	if value == nil {
+		ns.CodeHostRepoVisibility, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CodeHostRepoVisibility.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCodeHostRepoVisibility) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CodeHostRepoVisibility), nil
+}
+
 type ConfigSource string
 
 const (
@@ -567,6 +611,93 @@ func (ns NullMcpServerKind) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.McpServerKind), nil
+}
+
+type McpSinkClass string
+
+const (
+	McpSinkClassNone         McpSinkClass = "none"
+	McpSinkClassInternal     McpSinkClass = "internal"
+	McpSinkClassExternalLow  McpSinkClass = "external-low"
+	McpSinkClassExternalHigh McpSinkClass = "external-high"
+)
+
+func (e *McpSinkClass) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = McpSinkClass(s)
+	case string:
+		*e = McpSinkClass(s)
+	default:
+		return fmt.Errorf("unsupported scan type for McpSinkClass: %T", src)
+	}
+	return nil
+}
+
+type NullMcpSinkClass struct {
+	McpSinkClass McpSinkClass
+	Valid        bool // Valid is true if McpSinkClass is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMcpSinkClass) Scan(value interface{}) error {
+	if value == nil {
+		ns.McpSinkClass, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.McpSinkClass.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMcpSinkClass) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.McpSinkClass), nil
+}
+
+type McpSinkDerivation string
+
+const (
+	McpSinkDerivationFixed    McpSinkDerivation = "fixed"
+	McpSinkDerivationCodeHost McpSinkDerivation = "code_host"
+	McpSinkDerivationFetch    McpSinkDerivation = "fetch"
+)
+
+func (e *McpSinkDerivation) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = McpSinkDerivation(s)
+	case string:
+		*e = McpSinkDerivation(s)
+	default:
+		return fmt.Errorf("unsupported scan type for McpSinkDerivation: %T", src)
+	}
+	return nil
+}
+
+type NullMcpSinkDerivation struct {
+	McpSinkDerivation McpSinkDerivation
+	Valid             bool // Valid is true if McpSinkDerivation is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMcpSinkDerivation) Scan(value interface{}) error {
+	if value == nil {
+		ns.McpSinkDerivation, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.McpSinkDerivation.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMcpSinkDerivation) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.McpSinkDerivation), nil
 }
 
 type McpTier string
@@ -1701,7 +1832,6 @@ type McpServer struct {
 	Kind                  McpServerKind
 	ExposesUntrustedInput bool
 	ExposesPrivateData    bool
-	ExposesOutbound       bool
 }
 
 type McpTool struct {
@@ -1723,6 +1853,11 @@ type McpTool struct {
 	DescriptionOriginalLength int64
 	DescriptionCapped         bool
 	DescriptionCleaned        bool
+	SinkClass                 McpSinkClass
+	SinkDerivation            McpSinkDerivation
+	AddressArgs               []string
+	ResultUntrustedInput      pgtype.Bool
+	ResultPrivateData         pgtype.Bool
 }
 
 type Model struct {
@@ -1786,6 +1921,15 @@ type OrgBudget struct {
 	PlatformCeiling pgtype.Numeric
 	UpdatedBy       string
 	UpdatedAt       pgtype.Timestamptz
+}
+
+type OrgCodeHostRepo struct {
+	OrgID        pgtype.UUID
+	ConnectionID pgtype.UUID
+	Owner        string
+	Repo         string
+	Visibility   CodeHostRepoVisibility
+	CheckedAt    pgtype.Timestamptz
 }
 
 type OrgFetchTrustedHost struct {

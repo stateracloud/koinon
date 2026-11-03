@@ -174,7 +174,7 @@ type Querier interface {
 	//
 	// Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
-	// A NULL kind or leg is the column default (kind other, all three legs: not yet classified).
+	// A NULL kind or leg is the column default (kind other, both legs: not yet classified).
 	CreateMCPServer(ctx context.Context, arg CreateMCPServerParams) (McpServer, error)
 	CreateModel(ctx context.Context, arg CreateModelParams) (Model, error)
 	CreateOIDCLoginFlow(ctx context.Context, arg CreateOIDCLoginFlowParams) error
@@ -222,6 +222,7 @@ type Querier interface {
 	DeferSpendSettlement(ctx context.Context, arg DeferSpendSettlementParams) error
 	DeleteAgentMCPServers(ctx context.Context, arg DeleteAgentMCPServersParams) error
 	DeleteAgentRunLimits(ctx context.Context, arg DeleteAgentRunLimitsParams) (int64, error)
+	DeleteCodeHostConnectionRepos(ctx context.Context, arg DeleteCodeHostConnectionReposParams) (int64, error)
 	DeleteConnection(ctx context.Context, arg DeleteConnectionParams) (int64, error)
 	// Sweeps records older than the cutoff; sources keep redelivering for a bounded time only.
 	DeleteDedupeRecordsBefore(ctx context.Context, arg DeleteDedupeRecordsBeforeParams) (int64, error)
@@ -629,6 +630,12 @@ type Querier interface {
 	ListOrgBudgetRecipients(ctx context.Context, orgID pgtype.UUID) ([]pgtype.UUID, error)
 	// Every live org with its cap, platform ceiling and spend since @since. Platform admins only.
 	ListOrgBudgetSummaries(ctx context.Context, since pgtype.Timestamptz) ([]ListOrgBudgetSummariesRow, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The org's code-host scope: the repositories of its code-host connections with the visibility the
+	// connector last read (ADR 0091 decision 3). Every query takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	ListOrgCodeHostRepos(ctx context.Context, orgID pgtype.UUID) ([]OrgCodeHostRepo, error)
 	// The org's fetch-trusted host list (ADR 0084 decision 5). Empty for a new org.
 	ListOrgFetchTrustedHosts(ctx context.Context, orgID pgtype.UUID) ([]OrgFetchTrustedHost, error)
 	// Every live org, for control-plane sweeps and workers that then work org by
@@ -871,6 +878,9 @@ type Querier interface {
 	// claim was spent waiting for the sandbox, so it is credited to parked_seconds and does not count
 	// against the wall-clock cap.
 	RequeueRun(ctx context.Context, arg RequeueRunParams) (Run, error)
+	// The server's URL changed: every tool of it goes back to the default declaration. Returns the tools
+	// whose declaration was not the default already, with what they had, so the caller can audit each.
+	ResetMCPToolDeclarations(ctx context.Context, arg ResetMCPToolDeclarationsParams) ([]ResetMCPToolDeclarationsRow, error)
 	// open -> answered | dismissed | expired. No row: the question is not open (already resolved).
 	ResolveQuestion(ctx context.Context, arg ResolveQuestionParams) (Question, error)
 	// Makes a parked run claimable again (approval decided, input given). It
@@ -928,6 +938,8 @@ type Querier interface {
 	// What the server exposes (ADR 0084 decision 8). Allowed for every source: a declared server's
 	// Secret does not carry it, and UpdateDeclaredMCPServer leaves it alone.
 	SetMCPServerDataClass(ctx context.Context, arg SetMCPServerDataClassParams) (McpServer, error)
+	// What a tool's calls send and where (ADR 0091 decision 2). Allowed for every source.
+	SetMCPToolDeclaration(ctx context.Context, arg SetMCPToolDeclarationParams) (McpTool, error)
 	SetMCPToolTier(ctx context.Context, arg SetMCPToolTierParams) (McpTool, error)
 	SetMCPToolTwoApprovers(ctx context.Context, arg SetMCPToolTwoApproversParams) (McpTool, error)
 	SetModelDisabled(ctx context.Context, arg SetModelDisabledParams) error
@@ -1033,6 +1045,8 @@ type Querier interface {
 	// config_version. @set_test says the change was tested and the test columns are recorded; otherwise the
 	// previous test result stays. The router's health columns stay.
 	UpdateTraceDestination(ctx context.Context, arg UpdateTraceDestinationParams) (TraceDestination, error)
+	// One connection's repositories, from parallel arrays (owner, repo and visibility at the same index).
+	UpsertCodeHostRepos(ctx context.Context, arg UpsertCodeHostReposParams) (int64, error)
 	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) error
 	// Grants the roles of every mapping that matches one of the user's groups,
 	// in orgs whose identity mode uses the IdP.

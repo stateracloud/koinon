@@ -4,6 +4,7 @@ package adminapi
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -19,7 +20,7 @@ func (s *Server) leakGuardView(ctx context.Context, org pgtype.UUID) (LeakGuard,
 	return LeakGuard{
 		MatchThreshold: l.MatchThreshold, DefaultMatchThreshold: orgsettings.DefaultMatchThreshold,
 		MinMatchThreshold: leakguard.MinThreshold, MaxMatchThreshold: leakguard.MaxThreshold,
-		TrustedHosts: l.TrustedHosts,
+		TrustedHosts: l.TrustedHosts, CodeHostScope: scopeView(l.ScopeSummary(time.Now())),
 	}, nil
 }
 
@@ -79,4 +80,12 @@ func (s *Server) RemoveFetchTrustedHost(ctx context.Context, req RemoveFetchTrus
 	}
 	st, e := s.problem(err)
 	return RemoveFetchTrustedHostdefaultJSONResponse{Body: e, StatusCode: st}, nil
+}
+
+func scopeView(c orgsettings.ScopeSummary) CodeHostScope {
+	stale := c.Stale
+	return CodeHostScope{
+		Repositories: c.Repositories, Private: c.Private, Internal: c.Internal, Public: c.Public, Unknown: c.Unknown,
+		Stale: &stale, OldestCheckedAt: c.OldestCheckedAt, VisibilityMaxAgeSeconds: int(c.MaxAge.Seconds()),
+	}
 }
