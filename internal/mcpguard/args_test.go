@@ -4,6 +4,7 @@ package mcpguard_test
 
 import (
 	"encoding/json"
+	"strconv"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -79,4 +80,22 @@ var _ = Describe("splitting a call's arguments (ADR 0091 decision 7)", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(a.Payload).To(Equal([]string{"docs.example.com/x"}), "no trust list trusts nothing")
 	})
+
+	DescribeTable("counts everything but the host name of a fetch to a host the org trusts",
+		func(raw, payload string) {
+			a, err := split(`{"url":`+strconv.Quote(raw)+`}`, fetch, trusts{"trusted.example.com"})
+			Expect(err).NotTo(HaveOccurred())
+			if payload == "" {
+				Expect(a.Payload).To(BeEmpty())
+				return
+			}
+			Expect(a.Payload).To(Equal([]string{payload}))
+		},
+		Entry("userinfo", "https://koinon_test_not-a-real-token@trusted.example.com/x", "koinon_test_not-a-real-token@/x"),
+		Entry("user and password", "https://user:koinon_test_pw@trusted.example.com/x", "user:koinon_test_pw@/x"),
+		Entry("a port", "https://trusted.example.com:8443/x", ":8443/x"),
+		Entry("userinfo and a port, no path", "https://u@trusted.example.com:8443", "u@:8443"),
+		Entry("query and fragment", "https://trusted.example.com/x?q=1#frag", "/x?q=1#frag"),
+		Entry("the host alone", "https://trusted.example.com", ""),
+	)
 })
