@@ -53,6 +53,24 @@ var _ = Describe("Signature Version 4", func() {
 			"acc3ed3afb60bb290fc8d2dd0098b9911fcaa05412b367055dee359757a9c736"),
 	)
 
+	// post-sts-header-before from AWS's signing test suite as awslabs/aws-c-auth carries it:
+	// tests/aws-signing-test-suite/v4/post-sts-header-before/ (context.json, request.txt,
+	// header-signature.txt, header-signed-request.txt) at commit
+	// bdb7cef99d8bd1ad3c189b1400140a7787e47105. The token is the suite's documented example
+	// session token; the body is empty and unsigned (sign_body false), whose hash is the empty one.
+	It("signs the session token as the test suite's post-sts-header-before does", func() {
+		const exampleToken = "AQoDYXdzEPT//////////wEXAMPLEtc764bNrC9SAPBSM22wDOk4x4HIZ8j4FZTwdQWLWsKWHGBuFqwAeMicRXmxfpSPfIeoIYRqTflfKD8YUuwthAx7mSEI/qkPpKPi/kMcGdQrmGdeehM4IC1NtBmUpp2wUE8phUZampKsburEDy0KPkyQDYwT7WZ0wq5VSXDvp75YU9HFvlRd8Tx6q6fE8YQcHNVXAkiY9q6d+xo0rKwT38xVqr7ZD0u0iPPkUL64lIZbqBAz+scqKmlzm8FDrypNC9Yjc8fPOLn9FX9KSYvKTr4rvx3iSIlTJabIQwj2ICCR/oLxBA=="
+		req, err := http.NewRequest("POST", "https://example.amazonaws.com/", http.NoBody)
+		Expect(err).NotTo(HaveOccurred())
+		awskms.Sign(req, nil, exampleAccessKey, exampleSecret, exampleToken, "us-east-1", "service", at)
+		Expect(req.Header.Get("X-Amz-Date")).To(Equal("20150830T123600Z"))
+		Expect(req.Header.Get("X-Amz-Security-Token")).To(Equal(exampleToken))
+		Expect(req.Header.Get("Authorization")).To(Equal(
+			"AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, " +
+				"SignedHeaders=host;x-amz-date;x-amz-security-token, " +
+				"Signature=85d96828115b5dc0cfc3bd16ad9e210dd772bbebba041836c64533a82be05ead"))
+	})
+
 	It("derives the signing key as AWS's documented example does", func() {
 		// "Examples of how to derive a signing key for Signature Version 4" (IAM user guide).
 		k := awskms.SigningKey(exampleSecret, "20120215", "us-east-1", "iam")

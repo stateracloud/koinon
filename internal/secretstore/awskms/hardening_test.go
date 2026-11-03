@@ -251,50 +251,48 @@ var _ = Describe("rights", func() {
 			Expect(err.Error()).To(ContainSubstring("AccessDeniedException"), who)
 		}
 		for _, b := range f.bodies {
-			if b["CiphertextBlob"] != nil && b["DryRun"] == nil {
-				Expect(b["CiphertextBlob"]).NotTo(Equal("a29pbm9uLXByb2Jl"), "an access denial never makes the probe fall back")
+			if b["DryRun"] == nil {
+				Expect(b["CiphertextBlob"]).NotTo(Equal("a29pbm9uLXByb2Jl"), "the probe never sends a plain Decrypt")
 			}
 		}
 	})
 
+	// An endpoint without the dry run cannot prove the decrypt right: the probe calls it unreachable
+	// and says why, with no weaker fallback, so a role without kms:Decrypt is never healthy there.
 	Describe("an endpoint without the dry run", func() {
-		var logged *lockedBuffer
-		logTo := func(w *awskms.Wrapper) *awskms.Wrapper {
-			logged = &lockedBuffer{}
-			w.SetLogger(slog.New(slog.NewTextHandler(logged, nil)))
-			return w
-		}
-
-		It("falls back to a plain Decrypt when it ignores the dry run, and says so once", func(ctx SpecContext) {
+		It("is unreachable, the right unverified, when it ignores DryRun", func(ctx SpecContext) {
 			f, url := newFakeKMS()
 			f.dryRun = "ignore"
-			w := logTo(onFake(url, fixed(creds("decrypt"), nil)))
-			Expect(w.Probe(ctx)).To(Succeed())
-			Expect(w.Probe(ctx)).To(Succeed())
-			Expect(logged.String()).To(ContainSubstring("ignored DryRun"))
-			Expect(strings.Count(logged.String(), "falls back")).To(Equal(1))
-			// The weaker answer: it proves the credentials, not the right.
-			Expect(logTo(onFake(url, fixed(creds("nobody"), nil))).Probe(ctx)).To(Succeed())
+			for _, who := range []string{"decrypt", "nobody"} {
+				err := onFake(url, fixed(creds(who), nil)).Probe(ctx)
+				Expect(err).To(MatchError(secretstore.ErrUnreachable), who)
+				Expect(err).To(MatchError(awskms.ErrDryRunUnverified), who)
+				Expect(err.Error()).To(ContainSubstring("the endpoint ignored or rejected DryRun; the decrypt right is unverified"), who)
+				Expect(err.Error()).To(ContainSubstring("InvalidCiphertextException"), who)
+			}
+			Expect(f.bodies).To(HaveLen(2), "one dry run per probe, never a plain Decrypt after it")
+			for _, b := range f.bodies {
+				Expect(b).To(HaveKeyWithValue("DryRun", true))
+			}
 		})
 
-		It("retries without the dry run when it rejects the parameters, and says so", func(ctx SpecContext) {
+		It("is unreachable, the right unverified, when it rejects DryRun", func(ctx SpecContext) {
 			f, url := newFakeKMS()
 			f.dryRun = "reject"
-			w := logTo(onFake(url, fixed(creds("decrypt"), nil)))
-			Expect(w.Probe(ctx)).To(Succeed())
-			Expect(f.bodies).To(HaveLen(2))
-			Expect(f.bodies[0]).To(HaveKeyWithValue("DryRun", true))
-			Expect(f.bodies[1]).NotTo(HaveKey("DryRun"))
-			Expect(f.bodies[1]).NotTo(HaveKey("DryRunModifiers"))
-			Expect(logged.String()).To(ContainSubstring("rejected DryRun"))
+			err := onFake(url, fixed(creds("decrypt"), nil)).Probe(ctx)
+			Expect(err).To(MatchError(secretstore.ErrUnreachable))
+			Expect(err).To(MatchError(awskms.ErrDryRunUnverified))
+			Expect(err.Error()).To(ContainSubstring("ValidationException"))
+			Expect(f.bodies).To(HaveLen(1), "no retry without DryRun")
 		})
 
-		It("never falls back on an access denial", func(ctx SpecContext) {
+		It("reports an access denial as such, not as an unverified right", func(ctx SpecContext) {
 			f, url := newFakeKMS()
-			w := logTo(onFake(url, fixed(creds("nobody"), nil)))
-			Expect(w.Probe(ctx)).To(MatchError(secretstore.ErrUnreachable))
+			err := onFake(url, fixed(creds("nobody"), nil)).Probe(ctx)
+			Expect(err).To(MatchError(secretstore.ErrUnreachable))
+			Expect(err).NotTo(MatchError(awskms.ErrDryRunUnverified))
+			Expect(err.Error()).To(ContainSubstring("AccessDeniedException"))
 			Expect(f.bodies).To(HaveLen(1))
-			Expect(logged.String()).To(BeEmpty())
 		})
 	})
 
@@ -328,9 +326,9 @@ var _ = Describe("what an answer means", func() {
 	kmsErr := func(typ string) string { return `{"__type":"` + typ + `","message":"koinon test"}` }
 
 	// Only KMS's own refusal of the ciphertext is ErrOpen, which callers may treat as final; a
-	// proxy's 400 page or another KMS error is not. A healthy probe is the dry run's
-	// DryRunOperationException, or InvalidCiphertextException from an endpoint that ignored the dry
-	// run (the probe is no ciphertext at all, so KMS calling it another key's means something else).
+	// proxy's 400 page or another KMS error is not. A healthy probe is exactly the dry run's
+	// DryRunOperationException; InvalidCiphertextException to the dry run is an endpoint that
+	// ignored it, which leaves the decrypt right unverified.
 	DescribeTable("an answer to decrypt", func(status int, header map[string]string, body string, open, healthy bool) {
 		ctx := context.Background()
 		w := onFake(answering(status, header, body), fixed(creds("admin"), nil))
@@ -348,8 +346,8 @@ var _ = Describe("what an answer means", func() {
 		}
 	},
 		Entry("the dry run's yes", 400, kmsJSON, kmsErr("DryRunOperationException"), false, true),
-		Entry("a modified ciphertext (an endpoint that ignores the dry run)", 400, kmsJSON, kmsErr("InvalidCiphertextException"), true, true),
-		Entry("a namespaced error type", 400, kmsJSON, kmsErr("com.amazonaws.kms#InvalidCiphertextException"), true, true),
+		Entry("a modified ciphertext (an endpoint that ignores the dry run)", 400, kmsJSON, kmsErr("InvalidCiphertextException"), true, false),
+		Entry("a namespaced error type", 400, kmsJSON, kmsErr("com.amazonaws.kms#InvalidCiphertextException"), true, false),
 		Entry("another key's ciphertext", 400, kmsJSON, kmsErr("IncorrectKeyException"), true, false),
 		Entry("a proxy's HTML page", 400, nil, `<html><body>400 Bad Request</body></html>`, false, false),
 		Entry("an empty body", 400, nil, ``, false, false),
@@ -660,6 +658,45 @@ var _ = Describe("pod identity", func() {
 			Expect(err).To(MatchError(secretstore.ErrUnreachable))
 			Expect(err.Error()).To(ContainSubstring("InvalidTokenException"))
 			Expect(err.Error()).NotTo(ContainSubstring("not-a-real-jwt"))
+		})
+
+		It("tries a failed refresh again at most once per 10 s while the credentials are usable", func(ctx SpecContext) {
+			_, kmsURL := newFakeKMS()
+			clk := newClock()
+			var want atomic.Value
+			var seen atomic.Int64
+			want.Store("koinon_test_not-a-real-jwt-1")
+			w, err := awskms.NewAnyHTTP(awskms.Config{
+				Region: "us-east-1", KeyID: fakeKey, Endpoint: kmsURL,
+				Identity: awskms.Identity{CredentialsURI: fakeAgent(clk, &want, &seen), CredentialsTokenFile: tokenFile("koinon_test_not-a-real-jwt-1")},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			w.SetClock(read(clk))
+			logged := &lockedBuffer{}
+			w.SetLogger(slog.New(slog.NewTextHandler(logged, nil)))
+			Expect(w.Probe(ctx)).To(Succeed())
+			Expect(seen.Load()).To(BeEquivalentTo(1))
+
+			// The agent is down for this pod from here on.
+			want.Store("koinon_test_not-a-real-jwt-other")
+			failed := func() int { return strings.Count(logged.String(), "credential refresh failed") }
+			advance(clk, 5*time.Hour) // past 4/5 of six hours
+			Expect(w.Probe(ctx)).To(Succeed())
+			Eventually(failed).Should(Equal(1))
+			for range 20 {
+				Expect(w.Probe(ctx)).To(Succeed())
+			}
+			advance(clk, 9*time.Second)
+			Expect(w.Probe(ctx)).To(Succeed())
+			Consistently(seen.Load, 200*time.Millisecond).Should(BeEquivalentTo(2), "no new attempt within 10 s of the failed one")
+			Expect(failed()).To(Equal(1))
+
+			advance(clk, time.Second)
+			Expect(w.Probe(ctx)).To(Succeed())
+			Eventually(failed).Should(Equal(2))
+			Expect(seen.Load()).To(BeEquivalentTo(3))
+			Expect(w.Probe(ctx)).To(Succeed())
+			Consistently(seen.Load, 200*time.Millisecond).Should(BeEquivalentTo(3))
 		})
 	})
 })
