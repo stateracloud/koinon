@@ -145,21 +145,38 @@ var _ = Describe("Destination queues", func() {
 	})
 
 	It("retries with backoff, pauses a failing destination with a growing breaker, and recovers", func() {
+		// The waits the queue asks for after the first attempt, recorded rather than timed: on a loaded
+		// machine a 2 ms wait can take longer than the breaker's pause, so only the pauses' lower
+		// bounds are measured on the clock (a wait never ends early) (#612).
+		var ep string
+		var mu sync.Mutex
+		var afterFirst []time.Duration
 		setup(func(c *router.Config) {
 			c.BreakerThreshold, c.BreakerBase, c.BreakerMax = 2, 40*time.Millisecond, time.Second
 			c.BackoffBase, c.BackoffMax = time.Millisecond, 2*time.Millisecond
 			c.HealthInterval = 20 * time.Millisecond
+			c.Sleep = func(ctx context.Context, d time.Duration) error {
+				if len(g.times(ep)) == 1 {
+					mu.Lock()
+					afterFirst = append(afterFirst, d)
+					mu.Unlock()
+				}
+				return timerSleep(ctx, d)
+			}
 		})
-		ep := be.URL + "/v1/traces"
+		ep = be.URL + "/v1/traces"
 		g.mu.Lock()
 		g.failing[ep] = &export.Error{Kind: export.KindServer, Status: 503, Message: "the backend answered HTTP 503 (the backend failed)"}
 		g.mu.Unlock()
 		e.post(named(tr.tool(false), "s0"))
 
-		Eventually(func() int { return len(g.times(ep)) }, 3*time.Second).Should(Equal(6), "MaxAttempts")
+		Eventually(func() int { return len(g.times(ep)) }).Should(Equal(6), "MaxAttempts")
 		ts := g.times(ep)
 		gap := func(i int) time.Duration { return ts[i+1].Sub(ts[i]) }
-		Expect(gap(0)).To(BeNumerically("<", 30*time.Millisecond), "below the threshold only the backoff applies")
+		mu.Lock()
+		Expect(afterFirst).NotTo(BeEmpty())
+		Expect(afterFirst).To(HaveEach(BeNumerically("<=", 2*time.Millisecond)), "below the threshold only the backoff (and the linger) applies")
+		mu.Unlock()
 		Expect(gap(1)).To(BeNumerically(">=", 35*time.Millisecond), "the breaker opened")
 		Expect(gap(2)).To(BeNumerically(">=", 70*time.Millisecond), "and the pause grows")
 		Expect(gap(3)).To(BeNumerically(">=", 140*time.Millisecond))
@@ -174,7 +191,7 @@ var _ = Describe("Destination queues", func() {
 		delete(g.failing, ep)
 		g.mu.Unlock()
 		e.post(named(tr.tool(false), "s1"))
-		Eventually(sentNames, 3*time.Second).Should(Equal([]string{"s1"}))
+		Eventually(sentNames).Should(Equal([]string{"s1"}))
 		Eventually(func() int { ok, _, _ := e.health.counts(); return ok }).Should(BeNumerically(">=", 1))
 	})
 
@@ -224,30 +241,38 @@ var _ = Describe("Destination queues", func() {
 			}
 		}()
 
-		start := time.Now()
 		e.post(named(tr.tool(false), "a0"))
 		Eventually(func() int { return len(g.times(epA)) }).Should(Equal(1), "org A's export is stuck")
 		for i := range 20 {
 			e.post(named(tr.tool(false), "a"+strconv.Itoa(i+1)))
 		}
 		e.post(named(tb.tool(false), "b0"))
-		Eventually(func() int { return len(beB.spans()) }, 500*time.Millisecond).Should(Equal(1), "org B's destination is unaffected")
-		Expect(time.Since(start)).To(BeNumerically("<", time.Second), "and the sender never waited")
+		// A's export is still held: B's span arriving, and every post above answering, is the proof that
+		// neither B's queue nor the sender waited for A. No wall-clock bound (#612).
+		Eventually(func() int { return len(beB.spans()) }).Should(Equal(1), "org B's destination is unaffected")
 		Expect(be.spans()).To(BeEmpty())
 		close(hold)
 		Eventually(func() int { return len(be.spans()) }).Should(Equal(21))
 	})
 
 	It("writes a destination's health at most every interval", func() {
+		// The router's clock is frozen and moved by whole intervals, so the number of intervals the
+		// traffic spans is fixed however slowly the machine runs (#612).
 		setup(func(c *router.Config) { c.HealthInterval = 300 * time.Millisecond })
-		for i := range 30 {
-			e.post(named(tr.tool(false), "s"+strconv.Itoa(i)))
-			time.Sleep(20 * time.Millisecond)
+		e.clock.Freeze()
+		const rounds = 3
+		for round := range rounds {
+			if round > 0 {
+				e.clock.Advance(300 * time.Millisecond)
+			}
+			for i := range 10 {
+				e.post(named(tr.tool(false), "s"+strconv.Itoa(round*10+i)))
+			}
+			Eventually(func() int { return len(be.spans()) }).Should(Equal((round + 1) * 10))
 		}
-		Eventually(func() int { return len(be.spans()) }).Should(Equal(30))
 		ok, _, _ := e.health.counts()
 		Expect(ok).To(BeNumerically(">=", 1))
-		Expect(ok).To(BeNumerically("<=", 4), "about 600 ms of traffic, one write per 300 ms")
+		Expect(ok).To(BeNumerically("<=", rounds), "one write per interval at most, over three intervals")
 	})
 
 	It("stops sending to a destination that was removed, even a request in flight", func() {
