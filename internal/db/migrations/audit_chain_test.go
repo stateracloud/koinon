@@ -54,7 +54,7 @@ var _ = Describe("the audit hash chain migration", func() {
 
 	It("cannot be steered by a temp table, for a role that only inserts events", func(ctx SpecContext) {
 		_, org := newUser(ctx)
-		_, err := db.ExecContext(ctx, `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='chain_probe') THEN CREATE ROLE chain_probe NOLOGIN; END IF; END $$`)
+		err := pgtest.EnsureRole(ctx, db, "chain_probe")
 		Expect(err).NotTo(HaveOccurred())
 		_, err = db.ExecContext(ctx, `GRANT SELECT, INSERT ON audit_events TO chain_probe`)
 		Expect(err).NotTo(HaveOccurred())
@@ -90,7 +90,7 @@ var _ = Describe("the audit hash chain migration", func() {
 		_, org := newUser(ctx)
 		_, err := db.ExecContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, action, target_kind) VALUES ($1, 'system', 'test.head', 'test')`, org)
 		Expect(err).NotTo(HaveOccurred())
-		_, err = db.ExecContext(ctx, `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='koinon_app_probe') THEN CREATE ROLE koinon_app_probe NOLOGIN; END IF; END $$`)
+		err = pgtest.EnsureRole(ctx, db, "koinon_app_probe")
 		Expect(err).NotTo(HaveOccurred())
 		// The chart's CNPG bootstrap grants DML by default privileges; the migration revokes the
 		// writes from koinon_app, and this runs the same statement for the probe role.
