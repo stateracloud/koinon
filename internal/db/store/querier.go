@@ -347,6 +347,11 @@ type Querier interface {
 	//
 	// Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
 	GetHomeRepository(ctx context.Context, arg GetHomeRepositoryParams) (HomeRepository, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The install ID (#615): created once by a migration, never changed. KMS-wrapped KEKs are bound
+	// to it.
+	GetInstallID(ctx context.Context) (pgtype.UUID, error)
 	// The last request of a run that its provider answered with an error status at or after @since: the
 	// gateway's own record of why a model request failed (agentd reads it when a harness reports an
 	// error without a status). Only the statuses in @statuses count. No row when the provider

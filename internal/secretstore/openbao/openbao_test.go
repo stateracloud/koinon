@@ -73,6 +73,10 @@ var _ = Describe("the OpenBao transit wrapper", func() {
 		)
 	})
 
+	Describe("the install binding contract (#615)", func() {
+		secretstoretest.InstallBindingContract(func() secretstore.Wrapper { return withToken(adminToken) })
+	})
+
 	It("names the transit mount and key", func() {
 		w := withToken(adminToken)
 		Expect(w.Backend()).To(Equal("openbao"))
@@ -145,9 +149,10 @@ var _ = Describe("the OpenBao transit wrapper", func() {
 		Expect(logins.Load()).To(BeEquivalentTo(2))
 	})
 
-	It("binds a KEK to its ID through secretstore.Wrappers", func(ctx SpecContext) {
+	It("binds a KEK to its ID and the install through secretstore.Wrappers", func(ctx SpecContext) {
 		ws, err := secretstore.NewKeyAdminWrappers(withToken(adminToken))
 		Expect(err).NotTo(HaveOccurred())
+		ws = ws.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 		stored, err := ws.Wrap(ctx, "koinon-test-1", kek)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(stored.Backend).To(Equal("openbao"))
@@ -159,11 +164,18 @@ var _ = Describe("the OpenBao transit wrapper", func() {
 
 		svc, err := secretstore.NewWrappers(withToken(decryptToken))
 		Expect(err).NotTo(HaveOccurred())
+		svc = svc.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 		got, err = svc.Unwrap(ctx, "koinon-test-1", stored)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(Equal(kek))
 		_, err = svc.Wrap(ctx, "koinon-test-3", kek)
 		Expect(err).To(MatchError(secretstore.ErrKeyAdminWraps))
+
+		By("a decrypt-only service of another install gets a KEK that does not open, from a KMS that answered")
+		other := svc.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallB))
+		_, err = other.Unwrap(ctx, "koinon-test-1", stored)
+		Expect(err).To(MatchError(secretstore.ErrOpen))
+		Expect(err).NotTo(MatchError(secretstore.ErrUnreachable))
 	})
 })
 

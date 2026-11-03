@@ -918,22 +918,24 @@ spec:
         {{- with .ka.addKey }}
         - {{ printf "--add-key=%s" . | quote }}
         {{- end }}
+        {{- if .ka.rewrapUnbound }}
+        - --rewrap-unbound
+        {{- end }}
       env:
         - name: POD_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        {{- if .create }}
+        # Always: every KEK it wraps is bound to the install ID in the database (#615).
         {{- include "koinon.dbEnv" (list $ "api") | nindent 8 }}
-        {{- end }}
         {{- include "koinon.kmsEnv" (dict "root" $ "role" "keyAdmin") | trim | nindent 8 }}
       securityContext:
         {{- include "koinon.containerSecurityContext" $ | nindent 8 }}
       terminationMessagePolicy: FallbackToLogsOnError
       resources:
         {{- toYaml .ka.resources | nindent 8 }}
-      {{- $mounts := list (ternary (include "koinon.dbVolumeMount" $) "" .create) (include "koinon.kmsVolumeMount" $) | join "\n" | trim }}
-      {{- $volumes := list (ternary (include "koinon.dbVolume" $) "" .create) (include "koinon.kmsVolume" $) | join "\n" | trim }}
+      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) | join "\n" | trim }}
+      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) | join "\n" | trim }}
       {{- with $mounts }}
       volumeMounts:
         {{- . | nindent 8 }}

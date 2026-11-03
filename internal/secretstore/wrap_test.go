@@ -5,6 +5,8 @@ package secretstore_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -26,6 +28,13 @@ var _ = Describe("Key wrapping", func() {
 			func() secretstore.Wrapper { return &secretstoretest.FakeKMS{} },
 			func() secretstore.Wrapper { f := &secretstoretest.FakeKMS{}; f.Hang.Store(true); return f },
 		)
+		Describe("the install binding (#615)", func() {
+			secretstoretest.InstallBindingContract(func() secretstore.Wrapper { return &secretstoretest.FakeKMS{} })
+		})
+	})
+
+	Describe("the local KEK and the install binding (#615)", func() {
+		secretstoretest.LocalBindingContract()
 	})
 
 	It("stores a local KEK exactly as before, so old Secrets and backups read unchanged", func(ctx SpecContext) {
@@ -48,7 +57,7 @@ var _ = Describe("Key wrapping", func() {
 
 	It("loads a key set that mixes local and KMS-wrapped KEKs", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
-		ws, err := secretstore.NewKeyAdminWrappers(kms)
+		ws, err := keyAdmin(kms)
 		Expect(err).NotTo(HaveOccurred())
 		oldKey, newKey := key(), key()
 		s, err := ws.Wrap(ctx, "k2", newKey)
@@ -81,7 +90,7 @@ var _ = Describe("Key wrapping", func() {
 	})
 
 	It("binds a wrapped KEK to its ID", func(ctx SpecContext) {
-		ws, _ := secretstore.NewKeyAdminWrappers(&secretstoretest.FakeKMS{})
+		ws, _ := keyAdmin(&secretstoretest.FakeKMS{})
 		s, err := ws.Wrap(ctx, "k1", key())
 		Expect(err).NotTo(HaveOccurred())
 		_, err = ws.Unwrap(ctx, "k2", s)
@@ -90,7 +99,7 @@ var _ = Describe("Key wrapping", func() {
 
 	It("tells an unreachable KMS from a wrong key, and a failed reload keeps the old keys", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
-		ws, _ := secretstore.NewKeyAdminWrappers(kms)
+		ws, _ := keyAdmin(kms)
 		s, err := ws.Wrap(ctx, "k1", key())
 		Expect(err).NotTo(HaveOccurred())
 		v, _ := s.Encode()
@@ -111,7 +120,7 @@ var _ = Describe("Key wrapping", func() {
 
 	It("opens a key set with a decrypt-only identity; only a new KEK needs encrypt", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
-		ws, _ := secretstore.NewKeyAdminWrappers(kms)
+		ws, _ := keyAdmin(kms)
 		s, err := ws.Wrap(ctx, "k1", key())
 		Expect(err).NotTo(HaveOccurred())
 		kms.DecryptOnly.Store(true)
@@ -138,6 +147,9 @@ var _ = Describe("Key wrapping", func() {
 	It("rejects stored forms it cannot read without quoting them", func() {
 		for _, v := range []string{
 			`{"fmt":2,"backend":"fakekms","key":"x","wrapped":"aGVsbG8="}`,
+			`{"fmt":2,"backend":"fakekms","key":"x","wrapped":"aGVsbG8=","install":"NOT-A-UUID-hunter2"}`,
+			`{"fmt":1,"backend":"fakekms","key":"x","wrapped":"aGVsbG8=","install":"` + secretstoretest.InstallA + `"}`,
+			`{"fmt":3,"backend":"fakekms","key":"x","wrapped":"aGVsbG8=","install":"` + secretstoretest.InstallA + `"}`,
 			`{"fmt":1,"backend":"local","wrapped":"aGVsbG8="}`,
 			`{"fmt":1,"backend":"Bad Name","wrapped":"aGVsbG8="}`,
 			`{"fmt":1,"backend":"fakekms","key":"x"}`,
@@ -148,6 +160,23 @@ var _ = Describe("Key wrapping", func() {
 			Expect(err.Error()).NotTo(ContainSubstring("hunter2"))
 			Expect(err.Error()).NotTo(ContainSubstring("aGVsbG8"))
 		}
+	})
+
+	It("writes a bound KEK in a form a binary from before #615 refuses, and an unbound one it reads", func(ctx SpecContext) {
+		kms := &secretstoretest.FakeKMS{}
+		ws, err := keyAdmin(kms)
+		Expect(err).NotTo(HaveOccurred())
+		s, err := ws.Wrap(ctx, "k1", key())
+		Expect(err).NotTo(HaveOccurred())
+		v, err := s.Encode()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(decodeBefore615(v)).To(MatchError(ContainSubstring("unsupported format 2")), "an old binary fails closed")
+
+		legacy, err := kms.Wrap(ctx, key(), secretstoretest.LegacyKEKAAD("k1"))
+		Expect(err).NotTo(HaveOccurred())
+		v, err = secretstore.StoredKEK{Backend: kms.Backend(), KeyID: kms.KeyID(), Wrapped: legacy}.Encode()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(decodeBefore615(v)).To(Succeed(), "an unbound KEK keeps the form older binaries read")
 	})
 
 	It("refuses a wrapping key configured twice", func() {
@@ -169,12 +198,13 @@ var _ = Describe("Key wrapping", func() {
 	It("never lets a service wrap with an opted-in KMS, and never calls it to try", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
 		kms.DecryptOnly.Store(true)
-		admin, _ := secretstore.NewKeyAdminWrappers(&secretstoretest.FakeKMS{})
+		admin, _ := keyAdmin(&secretstoretest.FakeKMS{})
 		s, err := admin.Wrap(ctx, "k1", key())
 		Expect(err).NotTo(HaveOccurred())
 
 		service, err := secretstore.NewWrappers(kms)
 		Expect(err).NotTo(HaveOccurred())
+		service = service.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 		_, err = service.Wrap(ctx, "k2", key())
 		Expect(err).To(MatchError(secretstore.ErrKeyAdminWraps))
 		Expect(err.Error()).To(ContainSubstring("new KEKs are wrapped by the key-admin Job"))
@@ -185,7 +215,7 @@ var _ = Describe("Key wrapping", func() {
 
 	It("bounds each adapter call, whatever the caller's context", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
-		admin, _ := secretstore.NewKeyAdminWrappers(kms)
+		admin, _ := keyAdmin(kms)
 		s, err := admin.Wrap(ctx, "k1", key())
 		Expect(err).NotTo(HaveOccurred())
 		kms.Hang.Store(true)
@@ -198,7 +228,7 @@ var _ = Describe("Key wrapping", func() {
 	})
 
 	It("reports a Wrap that ran out of time as unreachable", func(ctx SpecContext) {
-		admin, _ := secretstore.NewKeyAdminWrappers(bareHang{&secretstoretest.FakeKMS{}})
+		admin, _ := keyAdmin(bareHang{&secretstoretest.FakeKMS{}})
 		_, err := admin.WithCallTimeout(100*time.Millisecond).Wrap(context.Background(), "k1", key())
 		Expect(err).To(MatchError(secretstore.ErrUnreachable))
 		Expect(err).To(MatchError(context.DeadlineExceeded))
@@ -213,6 +243,31 @@ var _ = Describe("Key wrapping", func() {
 		Expect(strings.Contains(fp, fmt.Sprintf("%x", k[:4]))).To(BeFalse())
 	})
 })
+
+// decodeBefore615 is the check that the releases from #416 to #615 make on a wrapped KEK's Secret
+// value (secretstore.decodeStored as it was), kept here to show what such a binary does with the
+// forms this one writes.
+func decodeBefore615(v []byte) error {
+	var j struct {
+		Format  int    `json:"fmt"`
+		Backend string `json:"backend"`
+		KeyID   string `json:"key"`
+		Wrapped []byte `json:"wrapped"`
+	}
+	if err := json.Unmarshal(v, &j); err != nil {
+		return errors.New("a wrapped key that is not valid JSON")
+	}
+	if j.Format != 1 || j.Backend == secretstore.BackendLocal || len(j.Wrapped) == 0 {
+		return fmt.Errorf("a wrapped key of unsupported format %d, backend %q", j.Format, j.Backend)
+	}
+	return nil
+}
+
+// keyAdmin is the key-admin Job's wrappers over w, with an install ID.
+func keyAdmin(w secretstore.Wrapper, more ...secretstore.Wrapper) (secretstore.Wrappers, error) {
+	ws, err := secretstore.NewKeyAdminWrappers(w, more...)
+	return ws.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA)), err
+}
 
 // bareHang is an adapter whose Wrap blocks until its context ends and returns only ctx.Err(), not
 // ErrUnreachable: Wrappers must still report it as unreachable.

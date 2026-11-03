@@ -15,6 +15,7 @@ numbers and the procedure are in [the research](../research/kek-rotation.md).
 | Wrapped DEKs and ciphertext | `providers.api_key`, `connections.secret_envelope`, `mcp_servers.credential`, `saved_work.envelope` (uncommitted work saved from a stuck sandbox, sealed by koinon-api, gone after 14 days) in Postgres | Anyone with the database, but they need the KEK to open them. |
 | Saved-work upload key | Secret `<release>-saved-work`, key `key` (random, created by `koinon-api` on first use, never overwritten) | `koinon-api` reads it through the Kubernetes API; `koinon-agentd` mounts it read-only. It signs agentd's posts of a stuck sandbox's work; it is not a KEK and opens nothing. |
 | Opened provider keys | Secret `koinon-gateway-providers` | Only the gateway pod mounts it. |
+| Install ID | Table `install_identity` in Postgres (one UUID, written by the first migration, never changed) | Anyone with the database; it is not secret. A KEK wrapped by a KMS is bound to it (see "The install binding" below). |
 
 **The chart does not generate the keys.** A Helm render that made key material would make new keys
 every time it ran (`helm template`, Argo CD and Flux do not have the live Secret to look at), and a new
@@ -280,6 +281,54 @@ What changes once you opt in (ADR 0085 decision 12):
 
 A local install has none of this: no key-admin Job, and koinon-api creates and adds KEKs exactly as
 before.
+
+### The install binding (#615)
+
+Every KEK the key-admin Job wraps is bound to the install: the KMS call carries the install ID as
+part of its authenticated data, so the wrapped KEK opens only next to the database it was made for.
+A KEK Secret copied to another install (or a staging copy of production pointed at the same KMS
+key), or a database restored into the wrong install, then fails to load with "cannot open envelope …
+it was wrapped for install A and this is install B", the same error as a wrong key, never as a KMS
+outage.
+
+**Where the install ID comes from.** The first migration of a release with #615 writes a random
+UUID into the table `install_identity` of the database; it can be read but never changed, deleted
+or added to. `keys status` prints it ("The install ID is …"). It is not secret. The database is the
+one place that is born with the data and travels with it, so the ID stays the same through:
+
+| Event | Install ID |
+| --- | --- |
+| Upgrade (any number of releases) | Unchanged: the row is written once. |
+| Restore of a database backup (`pg_dump`, CNPG backup, a snapshot) | The backup's, which is the install that wrote the values. |
+| Restore of the KEK Secret from its backup | Unchanged: the ID is not in the Secret (each KEK records it only as a label). |
+| `helm uninstall` and reinstall that keeps the database (external Postgres, a retained PVC) | Unchanged. |
+| A move to another namespace or cluster with the same database | Unchanged. |
+| A new, empty database | New: it is a new install, and a KEK Secret left over from the old one does not open. Delete that Secret (or restore the old database). |
+
+**Restore order does not matter.** Restore the database and the KEK Secret in either order; until
+both are back, the pods do not start (fail closed) and start on their own once both match. A running
+pod reads the install ID once, so restart koinon-api and the reconciler after a database restore,
+as after any restore under running pods. If they
+do not match, `keys status` and the pod log name both install IDs: restore the KEK Secret backup that
+belongs to this database, or the database that belongs to this Secret.
+
+Rejected sources, and why: a chart value is lost on a reinstall that forgets it and is not born with
+the data; a generated Secret would be backed up and restored with the KEK Secret, which defeats the
+binding; the namespace or cluster UID changes on a move or a reinstall that keeps the data.
+
+**KEKs wrapped before #615 keep working.** They are stored in the old form (`"fmt":1`) and open as
+before; `keys status` shows them as `…, unbound` in WRAPPED BY and lists them. Bind them either by
+rotating (add, activate, rewrap, retire, as above), or by setting
+`secrets.kek.kms.keyAdmin.rewrapUnbound: true` and upgrading: the key-admin Job wraps each unbound KEK
+of the primary wrapping key again, bound (the KEK itself is unchanged, so no value needs a rewrap).
+The run is idempotent; a KEK wrapped by another KMS key stays unbound and the Job says so. Back up
+the KEK Secret afterwards. A local KEK is never bound (it is not wrapped).
+
+**Rolling back below #615.** A bound KEK is stored as `"fmt":2`, which a release before #615
+refuses ("unsupported format 2"): its pods fail closed and never misread it. Every new KMS-wrapped
+KEK is bound, so before rolling back below #615 use the steps in "Rolling back below the release that
+added key wrapping" below (back to local KEKs), or roll back to a key set that held only unbound
+KEKs. Leave `rewrapUnbound` off until you will not roll back that far.
 
 ### Setting up OpenBao (or Vault) transit
 
