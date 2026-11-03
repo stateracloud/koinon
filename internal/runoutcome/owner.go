@@ -89,6 +89,11 @@ type Config struct {
 	// the update's JSON). Chunks are never stored, only the items they make up (items.go); this is
 	// how a live subscriber sees them. It runs on the harness's notification path, so it must not
 	// block. Nil means none.
+	//
+	// Interim gap (#344 is split): nothing wires Live yet, so a watcher sees agent text when an
+	// item completes, not chunk by chunk. The live path (batch chunks about every 100 ms into the
+	// koinon_run NOTIFY payload under its 8 KB cap, forwarded by runwatch and WatchRun) is the
+	// follow-up issue 344b; remove this note when it lands.
 	Live func(kind string, payload []byte)
 }
 
