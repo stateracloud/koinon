@@ -214,6 +214,9 @@ func ageFromID(id string) (time.Time, bool) {
 func (t *Tool) Status(ctx context.Context) error {
 	ks, err := t.Store.Load(ctx)
 	if err != nil {
+		if errors.Is(err, secretstore.ErrUnreachable) && ks.Stored != nil {
+			t.reachability(ctx, ks)
+		}
 		return err
 	}
 	usage, err := t.Usage(ctx)

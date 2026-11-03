@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -98,6 +99,34 @@ type Monitor struct {
 	Metrics  *Metrics // nil: no gauge
 	Recorder *Recorder
 	Log      *slog.Logger
+
+	mu     sync.Mutex
+	warned map[string]time.Time // throttle key -> last warning
+	last   string               // backend of the series now set
+}
+
+// warnEvery bounds a repeated warning (the reconciler retries a failed load every 5 seconds).
+const warnEvery = 10 * time.Minute
+
+// throttle reports whether the warning for key is due, and marks it. A zero every means once per
+// process.
+func (m *Monitor) throttle(key string, every time.Duration) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.warned == nil {
+		m.warned = map[string]time.Time{}
+	}
+	if t, ok := m.warned[key]; ok && (every == 0 || time.Since(t) < every) {
+		return false
+	}
+	m.warned[key] = time.Now()
+	return true
+}
+
+func (m *Monitor) clearThrottle(key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.warned, key)
 }
 
 // Observer returns the observer to pass to the keyring's load and watch.
@@ -114,9 +143,14 @@ func (m *Monitor) Observe(ctx context.Context, l secretstore.Loaded) {
 	if !ok {
 		return
 	}
-	reachable := m.probe(ctx, active, l.Err, log)
+	reachable := m.probe(ctx, active, log)
 	if m.Metrics != nil {
-		m.Metrics.ActiveReachable.Reset() // the backend can change with the active KEK
+		m.mu.Lock()
+		if m.last != "" && m.last != active.Backend { // the backend changed with the active KEK
+			m.Metrics.ActiveReachable.DeleteLabelValues(m.last)
+		}
+		m.last = active.Backend
+		m.mu.Unlock()
 		v := 0.0
 		if reachable {
 			v = 1
@@ -125,7 +159,9 @@ func (m *Monitor) Observe(ctx context.Context, l secretstore.Loaded) {
 	}
 	if active.Backend == secretstore.BackendLocal && m.Wrappers.Primary().Backend() != secretstore.BackendLocal {
 		// Only an install that opted in to a KMS is told; a local-only install never is.
-		log.Warn("the active key-encryption key is a local one but a KMS is configured: run keys add and keys activate with the key-admin Job", "kek", l.Active)
+		if m.throttle("local-active", warnEvery) {
+			log.Warn("the active key-encryption key is a local one but a KMS is configured: run keys add and keys activate with the key-admin Job", "kek", l.Active)
+		}
 	}
 	if m.Recorder == nil || l.Err != nil {
 		return
@@ -137,21 +173,25 @@ func (m *Monitor) Observe(ctx context.Context, l secretstore.Loaded) {
 		log.Warn("recording the key-encryption key fingerprints failed", "err", err)
 	}
 	for _, mm := range mismatches {
+		if !m.throttle("mismatch/"+mm.KEKID+"/"+mm.Loaded, 0) {
+			continue
+		}
 		log.Warn("a key-encryption key differs from the one the database recorded for its ID: a restored or wrong KEK Secret opens nothing",
 			"kek", mm.KEKID, "recorded", mm.Recorded, "loaded", mm.Loaded)
 	}
 }
 
-// probe reports whether the wrapping key of active answers. A load that already failed as
-// unreachable counts as unreachable without a second call.
-func (m *Monitor) probe(ctx context.Context, active secretstore.StoredKEK, loadErr error, log *slog.Logger) bool {
-	if errors.Is(loadErr, secretstore.ErrUnreachable) {
-		log.Warn("the key-wrapping key of the active key-encryption key is unreachable", "wrapped_by", active.String(), "err", loadErr)
-		return false
-	}
+// probe reports whether the wrapping key of active answers. It always probes the active KEK's own
+// wrapper (bounded by [secretstore.CallTimeout]): a failed load can be a retained KEK on another
+// backend, which must not make the active one look unreachable.
+func (m *Monitor) probe(ctx context.Context, active secretstore.StoredKEK, log *slog.Logger) bool {
+	key := "unreachable/" + active.String()
 	if err := m.Wrappers.Probe(ctx, active); err != nil {
-		log.Warn("the key-wrapping key of the active key-encryption key is unreachable", "wrapped_by", active.String(), "err", err)
+		if m.throttle(key, warnEvery) {
+			log.Warn("the key-wrapping key of the active key-encryption key is unreachable", "wrapped_by", active.String(), "err", err)
+		}
 		return false
 	}
+	m.clearThrottle(key)
 	return true
 }
