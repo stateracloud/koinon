@@ -94,6 +94,13 @@ var errNoIdentity = errors.New("no pod identity: annotate the ServiceAccount wit
 
 // validCredentialsURI is the AWS SDKs' rule for a container credentials endpoint: https, or plain
 // http only to the loopback or to the ECS and EKS agents' link-local addresses.
+//
+// https to any host is accepted, as the SDKs accept it: the URI comes from the pod's env, which the
+// EKS Pod Identity webhook sets (to http://169.254.170.23 in practice), and whoever controls that
+// env also controls the token file and every other input; https at least keeps the token off the
+// wire in the clear. The adapter does not narrow it further, so a pod set up for the SDKs works
+// unchanged. The answer is still bounded (maxResponse), never followed on a redirect, and the
+// agent client never uses a proxy.
 func validCredentialsURI(raw string, anyHTTP bool) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {

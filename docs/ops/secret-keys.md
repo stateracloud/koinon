@@ -423,11 +423,17 @@ Notes:
 - Calls go to `https://kms.<region>.amazonaws.com` and `https://sts.<region>.amazonaws.com` (with
   IRSA) unless you set the endpoints. Koinon honours `HTTPS_PROXY` and `NO_PROXY` for them; the EKS
   Pod Identity agent (a link-local address) is always called directly. Redirects are never followed.
-- Koinon checks the key on every reload by asking KMS to decrypt a fixed non-ciphertext: KMS
-  refusing it as invalid ciphertext is the healthy answer, so the check needs no right beyond
-  `kms:Decrypt` and never decrypts anything. A disabled, deleted or missing key, a missing right, an
-  expired identity or a network error reads as unreachable (`koinon_kek_active_reachable` 0), never
-  as a wrong key.
+- Koinon checks the key on every reload with a dry-run Decrypt (`DryRun` with the modifier
+  `IGNORE_CIPHERTEXT`): KMS checks the identity and the `kms:Decrypt` right on the key, encryption
+  context condition included, without decrypting anything. Healthy is exactly KMS's
+  `DryRunOperationException`, its answer to a dry run that would have been allowed. Any other answer
+  (`AccessDeniedException` or another KMS error), an identity that cannot sign in and a network error
+  read as unreachable (`koinon_kek_active_reachable` 0), never as a wrong key.
+- An endpoint that does not support the dry run (an emulator such as LocalStack, which ignores it)
+  makes the check fall back to a plain Decrypt of a junk ciphertext, and Koinon logs "the key probe
+  falls back to a plain Decrypt" once. That check only shows that the endpoint accepted the
+  credentials: KMS may refuse the junk before it checks the right. AWS KMS itself supports the dry
+  run.
 - Disabling the key or scheduling its deletion stops every pod from loading the key set on its next
   start. Before you retire the key, move the KEKs to a new key (the steps above: add with the new
   `keyId`, activate, rewrap, retire), and keep the old key enabled until `keys status` lists no KEK

@@ -4,6 +4,7 @@ package awskms
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -43,6 +44,9 @@ func NewAnyHTTP(cfg Config) (*Wrapper, error) {
 
 // SetClock makes w read the time from now (credential expiry).
 func (w *Wrapper) SetClock(now func() time.Time) { w.now = now }
+
+// SetLogger sets where the adapter logs.
+func (w *Wrapper) SetLogger(l *slog.Logger) { w.log = l }
 
 // Sign is the SigV4 signer.
 func Sign(req *http.Request, body []byte, accessKey, secretKey, token, region, service string, now time.Time) {

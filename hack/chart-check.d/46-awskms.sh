@@ -66,3 +66,14 @@ for bad in "secrets.kek.kms.awskms.region=" "secrets.kek.kms.awskms.keyId=" \
 	if render "${awskms[@]}" --set "$bad" >/dev/null 2>&1; then fail "must not render with $bad"; fi
 done
 has "an alias renders" 'value: "alias/koinon-kek"' "${awskms[@]}" --set secrets.kek.kms.awskms.keyId=alias/koinon-kek
+
+# roleArns: all three (IRSA) or none (EKS Pod Identity); a partial set would leave a pod without a role.
+for awskms_partial in api reconciler keyAdmin; do
+	if render "${awskms[@]}" --set "secrets.kek.kms.awskms.roleArns.$awskms_partial=arn:aws:iam::111122223333:role/koinon-x" >/dev/null 2>&1; then
+		fail "must not render with only roleArns.$awskms_partial"
+	fi
+done
+if render "${awskms[@]}" "${awskms_irsa[@]}" --set secrets.kek.kms.awskms.roleArns.reconciler= >/dev/null 2>&1; then
+	fail "must not render with roleArns.reconciler missing"
+fi
+render "${awskms[@]}" "${awskms_irsa[@]}" >/dev/null 2>&1 || fail "all three roleArns render"

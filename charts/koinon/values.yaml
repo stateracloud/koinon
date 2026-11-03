@@ -352,8 +352,8 @@ secrets:
         # A ConfigMap in the release namespace with ca.crt, for a TLS-inspecting egress proxy;
         # empty is the image's system roots.
         caConfigMap: ""
-        # Pod identity only, never an access key: each identity is an IAM role. With IRSA, set each
-        # role's ARN here; the chart puts it on the ServiceAccount (<fullname>-api,
+        # Pod identity only, never an access key: each identity is an IAM role. With IRSA, set all three
+        # roles' ARNs here; the chart puts each on its ServiceAccount (<fullname>-api,
         # <fullname>-reconciler, <fullname>-key-admin) as eks.amazonaws.com/role-arn. With EKS Pod
         # Identity leave them empty and associate each role with its ServiceAccount in EKS.
         # Policies: koinon-api and the reconciler kms:Decrypt on the key; the key-admin Job
