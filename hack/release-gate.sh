@@ -24,10 +24,9 @@ set -euo pipefail
 #
 # Required contexts that are not reported by a push to main, read instead from the head commit of
 # the pull request that merged the tagged commit (the newest run that started before the merge):
-#   dco, dependency age  their workflows or jobs run on pull_request only (ci.yml gives
-#                        `dependency age` `if: github.event_name == 'pull_request'`, so on main it is
-#                        a skipped run). `dependency age` becomes required with #561; the gate
-#                        expects it.
+#   dco                  its workflow runs on pull_request only. (`dependency age` was a job of
+#                        its own that was skipped on main; since #594 its steps are part of
+#                        `quick checks`, which runs on every push, so it is no longer listed.)
 #   claim                runs on pull_request_target (hack/claim.sh check-pr, about the PR and its
 #                        claim); on a push to main it is skipped.
 #   e2e result           succeeds on main pushes too, but it is a composite that passes when the
@@ -37,7 +36,7 @@ set -euo pipefail
 # check that is missing or red on the commit fails the gate instead of being excused by a PR run.
 # A context not listed here must succeed on the tagged commit itself. When a workflow gains or
 # loses a push trigger, move its context between the two cases.
-pr_only=(dco "dependency age" claim "e2e result")
+pr_only=(dco claim "e2e result")
 
 fail() { echo "release gate: $*" >&2; exit 1; }
 

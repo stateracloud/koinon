@@ -209,5 +209,27 @@ check_apply "flavors_publish keeps a false flavors" $'go=false\nflavors=false\nf
 # an unknown name passes through untouched
 check_apply "unknown outputs pass through" $'extra=true\nflavors_publish=true' true $'extra=true'
 
+# --- ci.yml wiring (#594) --------------------------------------------------------------------------
+# `scripts` and `lint-shell` are skipped on a push to main whose heavy jobs are switched off (#595);
+# `quick-checks` never waits for `changes` and never skips. A job-level `if:` is the only switch.
+ci_yml=$(cd "$(dirname "$script")/.." && pwd)/.github/workflows/ci.yml
+job_block() { awk -v j="$1" '$0 == "  " j ":" { on = 1; next } on && /^  [a-z0-9-]+:/ { exit } on' "$ci_yml"; }
+for j in scripts lint-shell; do
+	b=$(job_block "$j")
+	if grep -q 'needs: changes' <<<"$b" && grep -q "github.event_name == 'push' && needs.changes.outputs.skip == 'true'" <<<"$b" && grep -q '!cancelled()' <<<"$b"; then
+		echo "ok: ci.yml skips $j on a push to main with skip=true"
+	else
+		echo "FAIL: ci.yml job $j lacks needs: changes plus the push/skip/!cancelled() condition"
+		fails=1
+	fi
+done
+b=$(job_block quick-checks)
+if [[ -n $b ]] && ! grep -qE 'needs:|outputs\.skip' <<<"$b"; then
+	echo "ok: ci.yml quick-checks always runs, without waiting for changes"
+else
+	echo "FAIL: ci.yml quick-checks is missing, has needs: or depends on the skip decision"
+	fails=1
+fi
+
 ((fails == 0)) || exit 1
 echo "all ci-skip-heavy tests passed"

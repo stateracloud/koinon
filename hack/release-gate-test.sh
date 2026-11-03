@@ -139,10 +139,9 @@ set_ruleset go dco claim "e2e result"
 check "a claim run that failed before the merge fails" "$(gate_rc)" 1
 
 new_case
-run_on "$pr_head" "dependency age" success
-run_on "$sha" "dependency age" skipped
-set_ruleset go dco "dependency age" "e2e result"
-check "dependency age is read from the PR head, not the skipped main run" "$(gate_rc)" 0
+run_on "$sha" "quick checks" success
+set_ruleset go dco "quick checks" "e2e result"
+check "quick checks is read from the commit itself (it runs on main too)" "$(gate_rc)" 0
 
 new_case
 echo '[]' >"$FX/pulls.json"
