@@ -296,7 +296,8 @@ var _ = Describe("Org MCP servers", func() {
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
 		st := mg.last()
 		exec := gateway.AgentRef{Org: slug, Name: gateway.MCPExecAgentName}
-		Expect(st.Tools[exec]).To(Equal([]gateway.ToolGrant{{Target: slug + "-wiki", Tools: []string{"write"}}}), "only the ask-tier tools")
+		Expect(st.Tools[exec]).To(Equal([]gateway.ToolGrant{{Target: slug + "-wiki", Tools: []string{"read", "write"}}}),
+			"the tools a person can approve a call of: ask tier, and auto tier for the leak guard's cards (ADR 0091); never the never tier")
 		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, mcpservers.ExecSecretName(org), metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(sec.Data[mcpservers.ExecKeyDataKey]).NotTo(BeEmpty())
