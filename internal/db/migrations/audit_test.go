@@ -7,6 +7,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
 var _ = Describe("00012_providers_audit_tokens", func() {
@@ -26,7 +28,7 @@ var _ = Describe("00012_providers_audit_tokens", func() {
 
 	It("revokes UPDATE, DELETE and TRUNCATE on audit_events from koinon_app, when that role exists", func(ctx SpecContext) {
 		// The chart's CNPG bootstrap creates koinon_app with default privileges; here we create it first.
-		_, err := db.ExecContext(ctx, `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='koinon_app_probe') THEN CREATE ROLE koinon_app_probe NOLOGIN; END IF; END $$`)
+		err := pgtest.EnsureRole(ctx, db, "koinon_app_probe")
 		Expect(err).NotTo(HaveOccurred())
 		// The migration only revokes from koinon_app; assert the statement it runs is valid for a role
 		// that holds the default privileges.
