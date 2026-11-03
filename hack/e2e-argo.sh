@@ -54,6 +54,10 @@
 # The description names the run, the target_url is the run's page on the Argo Server of lab.env. A commit
 # that is not on GitHub yet cannot take a status: the script says so and prints the command to post it
 # after the push (hack/e2e-status.sh). `hack/pr-wait.sh <PR> --checks --require e2e` accepts it.
+# The followed gate run of the set go-test posts `go-test-lab` the same way (success on exit 0, failure when the
+# gate failed, nothing on 75/76 or with --no-status, #610): ci.yml's go-test job is skipped for a pull request
+# head that has a green one (hack/go-test-lab.sh, docs/dev/maintainer-homelab.md). A gate run picks a free
+# slot, gate-1..gate-4 with no unfinished gate run (pick_slot), never a fixed one.
 #
 #   hack/e2e-remote.sh --argo [--lane kind|light] [--repo DIR] [--target T] [--slot S] [--out DIR] [--no-wait] [--no-status] [--allow-flavors] [--dry-run]
 #   hack/e2e-remote.sh --argo --gate <set> [--repo DIR] [--out DIR] [--no-wait] [--dry-run]
@@ -183,14 +187,15 @@ fail_rc() {
   case $1 in 0 | 2 | 75 | 76 | 77 | 78 | 79) echo 1 ;; *) echo "$1" ;; esac
 }
 
-# post_status <success|failure> <description>: the e2e-lab commit status on the commit the run tested.
-# A failed post is a warning; the run's own result stands.
+# post_status <success|failure> <description> [context]: a commit status (e2e-lab by default, go-test-lab
+# for the go-test gate, #610) on the commit the run tested. A failed post is a warning; the run's own
+# result stands.
 post_status() {
-  local top
+  local top ctx=${3:-e2e-lab}
   [[ -n ${status_sha:-} ]] || return 0
   top=$(git -C "${repo:-.}" rev-parse --show-toplevel 2>/dev/null || pwd)
-  (cd "$top" && "$here/e2e-status.sh" "$status_sha" "$1" "$2" "$SERVER/workflows/$NS/$name") ||
-    echo "e2e-remote --argo: the e2e-lab status was not posted; the run's result stands" >&2
+  (cd "$top" && KOINON_STATUS_CONTEXT=$ctx "$here/e2e-status.sh" "$status_sha" "$1" "$2" "$SERVER/workflows/$NS/$name") ||
+    echo "e2e-remote --argo: the $ctx status was not posted; the run's result stands" >&2
 }
 
 open_creds() {
@@ -432,6 +437,16 @@ follow_run() {
   rc=0
   if [[ $lane == gate ]]; then
     gate_exit "$phase" "$out/result.txt" || rc=$?
+    # The go-test gate leaves the commit status go-test-lab (#610): ci.yml's go-test job is satisfied
+    # by a green one on the pull request head. Only a verdict posts: pass (0) or the gate's own
+    # failure; NOT RUN (76) and the fallbacks (75) leave nothing, so CI runs go-test itself.
+    if [[ $target == go-test ]]; then
+      case $rc in
+      0) post_status success "$name: go-test passed on the lab" go-test-lab ;;
+      75 | 76 | 78 | 79) ;;
+      *) post_status failure "$name: go-test failed on the lab (exit $rc)" go-test-lab ;;
+      esac
+    fi
     echo "gate ($target) $phase, exit status $rc"
     return "$rc"
   fi

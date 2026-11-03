@@ -32,14 +32,18 @@ jobs:
     name: changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
-    # Read rights only: the draft state of the pull request and the check runs of its head.
+    # Read rights only: the draft state of the pull request, the check runs of its head and, for
+    # go-test-lab (#610), its commit statuses.
     permissions:
       contents: read
       pull-requests: read
       checks: read
+      statuses: read
     outputs:
       skip: ${{ steps.skip.outputs.skip }}
       reason: ${{ steps.skip.outputs.reason }}
+      go_test_lab: ${{ steps.lab.outputs.go_test_lab }}
+      go_test_lab_reason: ${{ steps.lab.outputs.go_test_lab_reason }}
       flavors_publish: ${{ steps.paths.outputs.flavors_publish }}
       go: ${{ steps.paths.outputs.go }}
       web: ${{ steps.paths.outputs.web }}
@@ -85,6 +89,22 @@ jobs:
           # No pipe: a failing step must fail the job, not leave outputs empty (empty reads as "nothing to gate").
           hack/ci-skip-heavy.sh apply <"$RUNNER_TEMP/changes.txt" >"$RUNNER_TEMP/outputs.txt"
           tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/outputs.txt"
+      # go-test on the lab gate first (#610): a ready pull request whose head has the commit status
+      # go-test-lab = success (posted by `hack/e2e-remote.sh --argo --gate go-test` through hack/ship.sh
+      # --lab-go-test, before the pull request is marked ready) does not run go-test on Blacksmith; the
+      # `go` gate accepts that skip. No status, a draft, a push or an API error: go-test runs as before.
+      # Trust limit as for e2e-lab (#568): anyone with write access can post the status, and this job
+      # runs from the pull request's own ci.yml; the guard is the required review on .github/**.
+      - id: lab
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SKIP: ${{ steps.skip.outputs.skip }}
+        run: |
+          hack/ci-skip-heavy.sh lab >"$RUNNER_TEMP/lab.txt"
+          tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/lab.txt"
 
   # The Go checks run as parallel jobs (#217). They share one module and build cache, keyed on the
   # Go version and go.sum. Only go-test saves it, because it compiles the most; the others restore
@@ -163,9 +183,10 @@ jobs:
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       - run: go vet ./...
 
+  # Skipped (and accepted by `go`) when the pull request head has a green go-test-lab status (#610).
   go-test:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.go_test_lab != 'true'
     name: go-test
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
@@ -253,6 +274,9 @@ jobs:
           REASON: ${{ needs.changes.outputs.reason }}
           EVENT: ${{ github.event_name }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          GO_TEST: ${{ needs.go-test.result }}
+          LAB: ${{ needs.changes.outputs.go_test_lab }}
+          LAB_REASON: ${{ needs.changes.outputs.go_test_lab_reason }}
         run: |
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
           # A draft was not tested: red on purpose (neutral and skipped both count as passing). The newest
@@ -263,6 +287,12 @@ jobs:
             exit 1
           fi
           [[ $GO == true ]] || { echo "no Go changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
+          # go-test skipped because the lab proved it (#610): that one skip counts as success. Any other
+          # skipped part stays a failure, and so does a go-test skip with no green lab status.
+          if [[ $GO_TEST == skipped && $LAB == true ]]; then
+            echo "go-test passed on the lab: $LAB_REASON"
+            RESULTS=${RESULTS/skipped/success}
+          fi
           for r in $RESULTS; do
             [[ $r == success ]] || { echo "::error::a Go job finished $r (results: $RESULTS)"; exit 1; }
           done

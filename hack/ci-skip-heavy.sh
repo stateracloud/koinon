@@ -10,6 +10,8 @@
 # for `decide` to say skip. `quick-checks` and `changes` always run.
 #
 #   hack/ci-skip-heavy.sh decide   prints skip=true|false and reason=<text> (lines for $GITHUB_OUTPUT)
+#   hack/ci-skip-heavy.sh lab      prints go_test_lab=true|false and go_test_lab_reason=<text>: whether the
+#                                  job go-test is satisfied by the lab (#610), see below
 #   hack/ci-skip-heavy.sh apply    reads the name=value lines of hack/ci-changes.sh on stdin and
 #                                  prints them back: the heavy names become false when SKIP=true.
 #                                  Always adds flavors_publish=<the flavors value before the switch>,
@@ -32,8 +34,18 @@
 #                     `external` ones, which other workflows produce) has a newest check run, made by
 #                     GitHub Actions on that head, that is completed with conclusion success, skipped
 #                     or neutral (skipped is how a job that does not apply reports).
-#                 Only read rights are used (contents, checks). Any doubt (an API error, a missing
+#                   - a go-test check run that was skipped on the head is only accepted when the head has
+#                     a green go-test-lab status, or the change touches nothing the go-* jobs run for
+#                     (hack/go-test-lab.sh): the `go` gate already demands this, this is the second look;
+#                 Only read rights are used (contents, checks, statuses). Any doubt (an API error, a missing
 #                 check, a shallow clone, an unknown event) is skip=false.
+# lab (#610): go_test_lab=true only for a pull_request event, not a draft (SKIP != true), whose head
+#   (HEAD_SHA: github.event.pull_request.head.sha, not the merge ref github.sha) has the commit status
+#   `go-test-lab` = success (hack/go-test-lab.sh; posted by hack/e2e-remote.sh --argo --gate go-test
+#   after a green lab run). ci.yml then skips the go-test job and the `go` gate accepts that skip.
+#   Anything else, an API error included, is false: go-test runs on Blacksmith as before. There is no
+#   waiting for a status that arrives later; hack/ship.sh posts it before marking the pull request ready.
+#   decide for a push also refuses to count a skipped go-test as green (see decide_push).
 # Environment CI_REQUIRED overrides the required list (tests). Needs bash 5, git, gh, jq.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -84,7 +96,7 @@ decide_pull_request() {
 
 # decide_push: skip when the merge commit is the tested pull request head, tree for tree.
 decide_push() {
-	local parents head changed flavors_line tree_m tree_h required name runs checks latest conclusion
+	local parents head changed state tg flavors_line tree_m tree_h required name runs checks latest conclusion
 	if [[ ${REF:-} != refs/heads/main || -z ${SHA:-} || -z ${REPO:-} ]]; then
 		emit false "not a push to main: running everything"
 		return
@@ -140,6 +152,20 @@ decide_push() {
 			;;
 		esac
 	done <<<"$required"
+	# A go-test that was skipped (not "success") is a lab-satisfied one (#610) or one for a change with no
+	# Go in it. The `go` gate says so too; a skip that is neither must not pass on this path.
+	conclusion=$(awk -F'\t' '$1 == "go-test" && $3 == "completed" { print $4 }' <<<"$latest")
+	if [[ $conclusion == skipped ]]; then
+		state=$("$root/hack/go-test-lab.sh" state "$head" 2>/dev/null) || state=
+		if [[ $state != success ]]; then
+			tg=0
+			"$root/hack/go-test-lab.sh" touches-go "${p[1]}" "$SHA" || tg=$?
+			if [[ $tg != 1 ]]; then
+				emit false "go-test was skipped on $head with no green go-test-lab status (${state:-none}) and the change may touch Go: running everything"
+				return
+			fi
+		fi
+	fi
 	# flavors is advisory, so it is not in the required list, but flavor-publish ships what it tested:
 	# an image is published untested unless flavors passed on the head or nothing it builds from changed.
 	conclusion=$(awk -F'\t' '$1 == "flavors" && $3 == "completed" { print $4 }' <<<"$latest")
@@ -151,6 +177,24 @@ decide_push() {
 		fi
 	fi
 	emit true "the merge tree equals the tree of $head, whose required checks passed"
+}
+
+# lab: is go-test satisfied by a green go-test-lab status on the pull request head (#610)?
+lab() {
+	local state
+	if [[ ${EVENT_NAME:-} != pull_request ]]; then
+		echo "go_test_lab=false"; echo "go_test_lab_reason=not a pull request: go-test runs"
+	elif [[ ${SKIP:-} == true ]]; then
+		echo "go_test_lab=false"; echo "go_test_lab_reason=the heavy jobs are off: nothing to satisfy"
+	elif [[ -z ${HEAD_SHA:-} ]]; then
+		echo "go_test_lab=false"; echo "go_test_lab_reason=no head commit given: go-test runs"
+	elif ! state=$("$root/hack/go-test-lab.sh" state "$HEAD_SHA" 2>/dev/null); then
+		echo "go_test_lab=false"; echo "go_test_lab_reason=cannot read the statuses of ${HEAD_SHA:0:12}: go-test runs"
+	elif [[ $state == success ]]; then
+		echo "go_test_lab=true"; echo "go_test_lab_reason=go-test-lab is success on ${HEAD_SHA:0:12}: go-test passed on the lab"
+	else
+		echo "go_test_lab=false"; echo "go_test_lab_reason=no green go-test-lab on ${HEAD_SHA:0:12} (${state:-none}): go-test runs"
+	fi
 }
 
 decide() {
@@ -182,8 +226,9 @@ apply() {
 case ${1:-} in
 decide) decide ;;
 apply) apply ;;
+lab) lab ;;
 *)
-	echo "usage: hack/ci-skip-heavy.sh decide|apply" >&2
+	echo "usage: hack/ci-skip-heavy.sh decide|apply|lab" >&2
 	exit 2
 	;;
 esac
