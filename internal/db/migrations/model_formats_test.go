@@ -3,7 +3,6 @@
 package migrations_test
 
 import (
-	"context"
 	"database/sql"
 	"io/fs"
 	"regexp"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
 var _ = Describe("the model formats migration (ADR 0069)", func() {
@@ -27,15 +27,7 @@ var _ = Describe("the model formats migration (ADR 0069)", func() {
 		version, err := strconv.ParseInt(strings.SplitN(names[0], "_", 2)[0], 10, 64)
 		Expect(err).NotTo(HaveOccurred())
 
-		admin, err := sql.Open("pgx", dsn)
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(admin.Close)
-		_, err = admin.ExecContext(ctx, `CREATE DATABASE formats_before`)
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func(ctx context.Context) {
-			_, _ = admin.ExecContext(ctx, `DROP DATABASE IF EXISTS formats_before WITH (FORCE)`)
-		})
-		old, err := sql.Open("pgx", strings.Replace(dsn, "/koinon?", "/formats_before?", 1))
+		old, err := sql.Open("pgx", pgtest.Run(ctx))
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(old.Close)
 		provider, err := goose.NewProvider(goose.DialectPostgres, old, migrations.FS)

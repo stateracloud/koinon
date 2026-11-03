@@ -14,11 +14,10 @@ import (
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
-var (
-	db *sql.DB
-	// dsn reaches the suite database; tests that migrate step by step create databases beside it.
-	dsn string
-)
+// db is the suite database, migrated from nothing here (not copied from pgtest's template: this
+// suite is where the migrations themselves run). Tests that migrate step by step take an empty
+// database of their own with pgtest.Run.
+var db *sql.DB
 
 func TestMigrations(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -27,7 +26,7 @@ func TestMigrations(t *testing.T) {
 
 var _ = BeforeSuite(func(ctx SpecContext) {
 	var err error
-	dsn = pgtest.Run(ctx)
+	dsn := pgtest.Run(ctx)
 	db, err = sql.Open("pgx", dsn)
 	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(db.Close)
