@@ -134,6 +134,7 @@ type recordingFeed struct {
 	events []string
 	epochs []int64
 	counts [][2]int64
+	texts  []string
 	hold   chan struct{}
 	held   bool
 }
@@ -145,7 +146,7 @@ func (f *recordingFeed) add(e string, epoch int64) {
 	f.epochs = append(f.epochs, epoch)
 }
 
-func (f *recordingFeed) Report(ctx context.Context, _, _ pgtype.UUID, legs mcpguard.Legs, _ []string) error {
+func (f *recordingFeed) Report(ctx context.Context, _, _ pgtype.UUID, legs mcpguard.Legs, texts []string) error {
 	f.mu.Lock()
 	hold := f.hold
 	if f.held {
@@ -161,6 +162,9 @@ func (f *recordingFeed) Report(ctx context.Context, _, _ pgtype.UUID, legs mcpgu
 		}
 	}
 	f.add(fmt.Sprintf("report private=%t untrusted=%t", legs.PrivateData, legs.UntrustedInput), -1)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.texts = append(f.texts, texts...)
 	return nil
 }
 
@@ -181,6 +185,14 @@ func (f *recordingFeed) snapshot() ([]string, []int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.events), slices.Clone(f.epochs)
+}
+
+// fencedFeed is a feed a newer worker of the run already started.
+type fencedFeed struct{ recordingFeed }
+
+func (f *fencedFeed) Start(_ context.Context, _, _ pgtype.UUID, epoch int64) error {
+	f.add("start", epoch)
+	return mcpguard.ErrFeedFenced
 }
 
 // latest is the last counts written, or none.
@@ -261,5 +273,44 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 		close(feed.hold)
 		Eventually(feed.latest).WithTimeout(10 * time.Second).Should(Equal([2]int64{2, 2}))
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+	})
+
+	It("feeds a tool that finishes during the end-of-turn summary before it counts it as done", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e.harness.set(func(h *harness) {
+			// The summary prompt blocks permission requests, not tools: a fetch can finish then.
+			h.summaryUpdates = []sdk.SessionUpdate{
+				sdk.StartToolCall("s1", "webfetch", sdk.WithStartKind(sdk.ToolKindFetch)),
+				sdk.UpdateToolCall("s1", sdk.WithUpdateStatus(sdk.ToolCallStatusCompleted),
+					sdk.WithUpdateRawOutput(map[string]any{"output": "koinon-test page fetched during the summary"})),
+			}
+		})
+		feed := &recordingFeed{}
+		r := e.enqueue(ctx, e.task(ctx, "feed"))
+		e.pool("agentd-feed-summary", func(c *agentd.Config) { c.Taint = feed })
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(feed.latest).Should(Equal([2]int64{1, 1}))
+		events, _ := feed.snapshot()
+		report := slices.Index(events, "report private=false untrusted=true")
+		Expect(report).To(BeNumerically(">=", 0), "the summary's fetch set the untrusted leg: %v", events)
+		for i, ev := range events {
+			if ev == "counts 1/1" {
+				Expect(i).To(BeNumerically(">", report), "done advanced only after the report")
+			}
+		}
+		feed.mu.Lock()
+		defer feed.mu.Unlock()
+		Expect(feed.texts).To(ContainElement("koinon-test page fetched during the summary"), "its text reached the fingerprints")
+	})
+
+	It("leaves the run to the newer worker when its feed is already fenced, as a takeover, not an interruption", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		feed := &fencedFeed{}
+		r := e.enqueue(ctx, e.task(ctx, "feed"))
+		e.pool("agentd-feed-fenced", func(c *agentd.Config) { c.Taint = feed })
+		Eventually(func() []string { ev, _ := feed.snapshot(); return ev }).WithTimeout(10 * time.Second).Should(ContainElement("start"))
+		Consistently(func() []string { return kinds(events(ctx, r)) }).WithTimeout(time.Second).
+			ShouldNot(ContainElement("run.interrupted"), "the newer worker drives the run; this one records nothing")
+		Expect(runState(ctx, r)()).NotTo(Equal(store.RunStateSucceeded))
 	})
 })
