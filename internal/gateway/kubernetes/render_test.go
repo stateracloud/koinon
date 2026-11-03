@@ -102,6 +102,7 @@ func opts() gwk8s.Options {
 	return gwk8s.Options{
 		Namespace: "koinon", ProviderKeysSecret: "koinon-gateway-providers",
 		AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318", TokenSecret: "koinon-otlp-token", TokenSecretKey: "token"},
+		GuardURL:      "http://koinon-api-guard.koinon.svc:8083",
 	}
 }
 
@@ -433,3 +434,73 @@ func nested(obj map[string]any, path ...string) ([]any, bool, error) {
 	s, ok := cur.([]any)
 	return s, ok, nil
 }
+
+// The MCP leak guard (ADR 0091): every org server sits behind the one MCP Backend, whose guardrails
+// send each tools/call to koinon-api and fail closed; without a guard address they refuse instead.
+var _ = Describe("Render the MCP leak guard", func() {
+	guardrails := func(o gwk8s.Options) map[string]any {
+		GinkgoHelper()
+		r, err := gwk8s.Render(fullState(), o)
+		Expect(err).NotTo(HaveOccurred())
+		var found []map[string]any
+		for _, obj := range r.Objects {
+			if obj.U.GetKind() != gwk8s.KindBackend {
+				continue
+			}
+			if _, mcp := obj.U.Object["spec"].(map[string]any)["mcp"]; !mcp {
+				continue
+			}
+			spec := obj.U.Object["spec"].(map[string]any)
+			targets := spec["mcp"].(map[string]any)["targets"].([]any)
+			var orgs []string
+			for _, t := range targets {
+				if c, ok := t.(map[string]any)["condition"].(string); ok && c != "false" {
+					orgs = append(orgs, c)
+				}
+			}
+			Expect(orgs).NotTo(BeEmpty(), "the org servers are on this Backend")
+			g, ok := spec["policies"].(map[string]any)["mcp"].(map[string]any)["guardrails"].(map[string]any)
+			Expect(ok).To(BeTrue(), "the MCP Backend carries guardrails")
+			found = append(found, g)
+		}
+		Expect(found).To(HaveLen(1))
+		return found[0]
+	}
+
+	It("sends every tools/call to the guard in both phases and fails closed", func() {
+		ps := guardrails(opts())["processors"].([]any)
+		Expect(ps).To(HaveLen(1))
+		p := ps[0].(map[string]any)
+		Expect(p["methods"]).To(Equal(map[string]any{gateway.GuardMethod: "Full"}))
+		remote := p["remote"].(map[string]any)
+		Expect(remote["url"]).To(Equal("http://koinon-api-guard.koinon.svc:8083"))
+		Expect(remote["failureMode"]).To(Equal("FailClosed"))
+		Expect(remote["metadata"]).To(HaveKeyWithValue("agent", "apiKey.agent"))
+		Expect(remote["metadata"]).To(HaveKeyWithValue("tool", "mcp.tool.name"))
+		// An empty allow list would forward the agent's gateway key to the guard.
+		Expect(remote["allowedRequestHeaders"]).To(Equal([]any{"mcp-protocol-version"}))
+		Expect(remote["disallowedRequestHeaders"]).To(ContainElements("authorization", "x-api-key"))
+	})
+
+	It("refuses every call to an org's server when no guard is configured", func() {
+		o := opts()
+		o.GuardURL = ""
+		ps := guardrails(o)["processors"].([]any)
+		Expect(ps).To(HaveLen(1))
+		p := ps[0].(map[string]any)
+		Expect(p["methods"]).To(Equal(map[string]any{gateway.GuardMethod: "Full"}))
+		Expect(p["expression"]).To(Equal(map[string]any{
+			"condition": `mcp.tool.target in ["acme-wiki", "globex-search"]`,
+			"reject":    gateway.GuardUnconfiguredReason,
+		}))
+	})
+
+	It("refuses a guard address the CRD would not accept", func() {
+		for _, raw := range []string{"http://koinon-api-guard", "http://koinon-api-guard:8083/check", "grpc://koinon-api-guard:8083"} {
+			o := opts()
+			o.GuardURL = raw
+			_, err := gwk8s.Render(fullState(), o)
+			Expect(err).To(HaveOccurred(), raw)
+		}
+	})
+})
