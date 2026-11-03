@@ -162,7 +162,7 @@ func serve(ctx context.Context, cfg config) error {
 	}
 
 	reg := metrics.NewRegistry()
-	reg.MustRegister(kekMetrics.ActiveReachable)
+	reg.MustRegister(kekMetrics.Collectors()...)
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, log); err != nil {
 		return err
 	}

@@ -29,18 +29,32 @@ type Metrics struct {
 	// ActiveReachable is 1 while the wrapping key of the active KEK answers a probe, else 0. Only the
 	// active KEK's backend has a series.
 	ActiveReachable *prometheus.GaugeVec
+	// Unbound is the number of KEKs in the loaded key set that a KMS wrapped before #615, so they
+	// are not bound to the install ID. Local KEKs are not counted (they are not wrapped). No labels.
+	Unbound prometheus.Gauge
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered).
 func NewMetrics(reg prometheus.Registerer) *Metrics {
-	m := &Metrics{ActiveReachable: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "koinon_kek_active_reachable",
-		Help: "1 while the key-wrapping key of the active KEK is reachable by this process, else 0; local is always 1. By backend.",
-	}, []string{"backend"})}
+	m := &Metrics{
+		ActiveReachable: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "koinon_kek_active_reachable",
+			Help: "1 while the key-wrapping key of the active KEK is reachable by this process, else 0; local is always 1. By backend.",
+		}, []string{"backend"}),
+		Unbound: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "koinon_kek_unbound",
+			Help: "KEKs in the loaded key set wrapped by a KMS but not bound to the install ID (wrapped before #615); local KEKs are not counted.",
+		}),
+	}
 	if reg != nil {
-		reg.MustRegister(m.ActiveReachable)
+		reg.MustRegister(m.Collectors()...)
 	}
 	return m
+}
+
+// Collectors are all the KEK metrics, for a registry made after NewMetrics.
+func (m *Metrics) Collectors() []prometheus.Collector {
+	return []prometheus.Collector{m.ActiveReachable, m.Unbound}
 }
 
 // Mismatch is a KEK whose fingerprint differs from the one recorded for its ID.
@@ -139,6 +153,7 @@ func (m *Monitor) Observe(ctx context.Context, l secretstore.Loaded) {
 	if log == nil {
 		log = slog.Default()
 	}
+	m.observeUnbound(l, log)
 	active, ok := l.Stored[l.Active]
 	if !ok {
 		return
@@ -178,6 +193,34 @@ func (m *Monitor) Observe(ctx context.Context, l secretstore.Loaded) {
 		}
 		log.Warn("a key-encryption key differs from the one the database recorded for its ID: a restored or wrong KEK Secret opens nothing",
 			"kek", mm.KEKID, "recorded", mm.Recorded, "loaded", mm.Loaded)
+	}
+}
+
+// UnboundKEKs counts the KEKs of the key set that a KMS wrapped without the install binding (#615).
+func UnboundKEKs(stored map[string]secretstore.StoredKEK) int {
+	n := 0
+	for _, s := range stored {
+		if s.Backend != secretstore.BackendLocal && !s.Bound() {
+			n++
+		}
+	}
+	return n
+}
+
+// observeUnbound sets koinon_kek_unbound on every load and warns while it is above 0.
+func (m *Monitor) observeUnbound(l secretstore.Loaded, log *slog.Logger) {
+	n := UnboundKEKs(l.Stored)
+	if m.Metrics != nil && m.Metrics.Unbound != nil {
+		m.Metrics.Unbound.Set(float64(n))
+	}
+	if n == 0 {
+		m.clearThrottle("unbound")
+		return
+	}
+	if m.throttle("unbound", warnEvery) {
+		log.Warn("key-encryption keys wrapped by a KMS are not bound to the install ID (wrapped before #615): "+
+			"bind them with the key-admin Job (secrets.kek.kms.keyAdmin.rewrapUnbound, --rewrap-unbound) or rotate them out",
+			"unbound", n)
 	}
 }
 

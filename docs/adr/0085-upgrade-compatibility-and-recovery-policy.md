@@ -359,7 +359,12 @@ Implementation-level unknowns, to settle in the sub-issues:
     byte-for-byte what N-1 reads.
   - Amended (#615, 2026-11-03): the install ID is bound into the KEK AAD. The install ID is a
     random UUID the first migration writes into `install_identity` (one row; triggers refuse
-    update, delete and truncate). The database is the source because it is born with the data and
+    update, delete and truncate as a guard against mistakes; the table owner, `pg_restore
+    --disable-triggers` and `session_replication_role = replica` bypass them, which can only close
+    bound KEKs, never open one). A database clone is the same install, so a staging copy that must
+    not open production KEKs needs its own KMS key; a data-only restore onto a migrated database
+    stops on the singleton key. `koinon_kek_unbound` (no labels) counts the KMS KEKs not bound yet,
+    set on every load, with a warning while above 0. The database is the source because it is born with the data and
     travels with it: an upgrade, a database restore, a KEK Secret restore, a reinstall that keeps
     the database and a namespace or cluster move all keep it, restore order does not matter, and an
     empty database is a new install whose left-over KEK Secret does not open. A chart value (lost on
