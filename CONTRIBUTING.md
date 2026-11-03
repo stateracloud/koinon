@@ -104,7 +104,7 @@ binaries, Helm dependencies and the pinned OpenShell and Agent Sandbox versions,
 included. [ADR 0079](docs/adr/0079-dependency-cooldown.md) has the reasoning and the exact rules.
 
 - Dependabot (`cooldown`) and pnpm (`web/pnpm-workspace.yaml`, strict) enforce it for the bot and for
-  `pnpm add`. The `dependency age` CI check (`hack/dep-age-check.sh`) checks the rest on every pull
+  `pnpm add`. The dependency age steps of the `quick checks` CI job (`hack/dep-age-check.sh`) check the rest on every pull
   request. You can run it locally: `hack/dep-age-check.sh origin/main`. Publication dates are a guard
   against accidents, not proof of safety.
 - Security fixes may skip the wait, with checks: a reviewed advisory names the fix (take the lowest
@@ -114,4 +114,4 @@ included. [ADR 0079](docs/adr/0079-dependency-cooldown.md) has the reasoning and
   one exact version (`pkg@1.2.3`) with a comment naming the advisory and the date.
 - Anything else younger than 3 days needs a waiver from the maintainer, recorded in the pull
   request (who decided, why, what was verified), and the `dependency-age-waiver` label. Re-run the
-  `dependency age` job after labelling.
+  `quick checks` job after labelling.

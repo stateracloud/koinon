@@ -5,6 +5,9 @@
 # the decision to the output of hack/ci-changes.sh. The heavy jobs are the ones `changes` gates: go-*
 # (through `go`), web-* (through `web`), generated code, chart, chart smoke, docs, escape (admission)
 # and flavors. A job switched off by its `if:` reports success, so every required check still reports.
+# On a push to main with skip=true, `scripts` and `lint-shell` are skipped too (#594, their own `if:`
+# in ci.yml, not an output of this script): the pull request head already passed them, as it must
+# for `decide` to say skip. `quick-checks` and `changes` always run.
 #
 #   hack/ci-skip-heavy.sh decide   prints skip=true|false and reason=<text> (lines for $GITHUB_OUTPUT)
 #   hack/ci-skip-heavy.sh apply    reads the name=value lines of hack/ci-changes.sh on stdin and
