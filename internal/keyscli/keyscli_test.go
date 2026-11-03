@@ -487,17 +487,27 @@ var _ = Describe("koinon-api keys", func() {
 			Expect(tool.Status(ctx)).To(Succeed())
 			Expect(out.String()).To(MatchRegexp(`Bound only: set at \d{4}-\d\d-\d\dT[0-9:]+Z, when the key-admin Job \(--rewrap-unbound\) bound the last unbound KEK`))
 
-			By("an unbound KEK, from an old backup, no longer opens")
-			legacy, err := kms.Wrap(ctx, newKey(), secretstoretest.LegacyKEKAAD("kek-20261001-old1"))
-			Expect(err).NotTo(HaveOccurred())
-			v, err := secretstore.StoredKEK{Backend: kms.Backend(), KeyID: kms.KeyID(), Wrapped: legacy}.Encode()
-			Expect(err).NotTo(HaveOccurred())
+			By("unbound KEKs, from an old backup, no longer open, and status names every one of them")
 			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			sec.Data["kek-20261001-old1"] = v
+			for _, id := range []string{"kek-20261001-old1", "kek-20261001-old2"} {
+				legacy, err := kms.Wrap(ctx, newKey(), secretstoretest.LegacyKEKAAD(id))
+				Expect(err).NotTo(HaveOccurred())
+				v, err := secretstore.StoredKEK{Backend: kms.Backend(), KeyID: kms.KeyID(), Wrapped: legacy}.Encode()
+				Expect(err).NotTo(HaveOccurred())
+				sec.Data[id] = v
+			}
 			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
 			Expect(err).NotTo(HaveOccurred())
+			out.Reset()
 			Expect(tool.Status(ctx)).To(MatchError(secretstore.ErrBoundOnly))
+			Expect(out.String()).To(And(
+				ContainSubstring("Bound only: set at"),
+				ContainSubstring("REFUSED: KEK kek-20261001-old1 is stored unbound"),
+				ContainSubstring("REFUSED: KEK kek-20261001-old2 is stored unbound"),
+				ContainSubstring("rerun the key-admin Job"),
+				Not(ContainSubstring("REFUSED: KEK kek-20261023-bbbb")),
+			))
 		})
 
 		It("koinon-api never wraps a new KEK with the KMS: keys add and the first start point at the key-admin Job", func(ctx SpecContext) {

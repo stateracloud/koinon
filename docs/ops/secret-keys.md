@@ -379,7 +379,18 @@ failed reload keeps the key set it already has, which after the rewrap holds the
 marker cannot be read (the database is down), an unbound KEK is refused (fail closed); bound and local
 KEKs do not need it. Every process that opens KEKs reads the marker; there is no mode that skips it. The
 `keys` commands run without `--database-url` (or `DATABASE_URL`) refuse an unbound KMS KEK for the
-same reason.
+same reason. A read of the marker is bounded like a KMS call (10 seconds): a hung database fails that
+load and logs the timeout, instead of blocking every load after it.
+
+**When a KEK is refused as unbound.** The pods log the refusal (and the `koinon_kek_unbound` gauge
+stays above 0), and `keys status` lists every refused KEK ("REFUSED: KEK … is stored unbound").
+Binding cannot help here: `rewrapUnbound` has to open a KEK to bind it. Instead:
+
+- Restore a KEK Secret backup taken after the KEKs were bound.
+- On an install whose database holds no encrypted values yet, delete the KEK Secret and rerun the
+  key-admin Job, which creates a new, bound one: no values are lost. This is the usual case when
+  GitOps or a backup restore (Velero, for example) puts an old KEK Secret in place on a new install,
+  whose key-admin Job set the marker before it found the Secret already there.
 
 **Rotate as well if an old backup may have leaked.** The marker stops an old KEK Secret backup only
 where this database is: an install whose database lacks the marker (a clone taken before it was set, a

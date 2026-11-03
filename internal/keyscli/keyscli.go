@@ -215,8 +215,13 @@ func ageFromID(id string) (time.Time, bool) {
 func (t *Tool) Status(ctx context.Context) error {
 	ks, err := t.Store.Load(ctx)
 	if err != nil {
+		// Say what can be said without the keys: whether the wrapping key answers, and which KEKs
+		// the bound-only policy refused (all of them, not only the first error).
 		if errors.Is(err, secretstore.ErrUnreachable) && ks.Stored != nil {
 			t.reachability(ctx, ks)
+		}
+		if errors.Is(err, secretstore.ErrBoundOnly) && ks.Stored != nil {
+			t.boundOnlyRefused(ctx, ks)
 		}
 		return err
 	}
@@ -286,6 +291,20 @@ func bindingNote(ks KeySet, id string) string {
 		return ", bound"
 	default:
 		return ", unbound"
+	}
+}
+
+// boundOnlyRefused prints the bound-only marker and every KEK of ks it makes this install refuse:
+// the KMS KEKs stored unbound (#615).
+func (t *Tool) boundOnlyRefused(ctx context.Context, ks KeySet) {
+	if t.Pool != nil {
+		if b, err := installid.ReadBoundOnly(ctx, t.Pool); err == nil && b.Set {
+			_, _ = fmt.Fprintf(t.Out, "Bound only: %s.\n", b)
+		}
+	}
+	for _, id := range secretstore.UnboundKEKs(ks.Stored) {
+		_, _ = fmt.Fprintf(t.Out, "REFUSED: KEK %s is stored unbound (wrapped before #615) and this install accepts bound KEKs only. "+
+			"Restore a KEK Secret taken after the KEKs were bound, or, while the database holds no encrypted values, delete the KEK Secret and rerun the key-admin Job.\n", id)
 	}
 }
 

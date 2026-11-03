@@ -127,6 +127,23 @@ var _ = Describe("the KEK monitor", func() {
 		Expect(logs.String()).To(ContainSubstring("unbound=1"))
 	})
 
+	It("does not advise a rewrap when the bound-only policy refused the unbound KEKs (#615)", func(ctx SpecContext) {
+		kms := &secretstoretest.FakeKMS{}
+		ws, err := secretstore.NewWrappers(secretstore.StaticBoundOnly(secretstoretest.BoundOnlySet), kms)
+		Expect(err).NotTo(HaveOccurred())
+		mon := &kekhealth.Monitor{Wrappers: ws, Metrics: m, Log: log}
+		stored := map[string]secretstore.StoredKEK{
+			"kek-1": {Backend: secretstoretest.FakeKMSBackend, KeyID: kms.KeyID(), Wrapped: []byte("x")},
+		}
+		_, loadErr := ws.UnwrapAll(ctx, stored)
+		Expect(loadErr).To(MatchError(secretstore.ErrBoundOnly))
+		mon.Observe(ctx, secretstore.Loaded{Stored: stored, Active: "kek-1", Err: loadErr})
+		Expect(testutil.ToFloat64(m.Unbound)).To(Equal(1.0))
+		Expect(logs.String()).To(And(ContainSubstring("refused by the bound-only policy"),
+			ContainSubstring("restore a KEK Secret taken after the KEKs were bound"),
+			ContainSubstring("rerun the key-admin Job"), Not(ContainSubstring("bind them with the key-admin Job"))))
+	})
+
 	It("follows the wrapping key of the active KEK and keeps one series", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
 		ws, err := secretstore.NewWrappers(secretstoretest.BoundOnlyUnset, kms)
