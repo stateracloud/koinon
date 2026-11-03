@@ -194,7 +194,7 @@ call. Now:
 
 ### Amendment 2026-11-03: the data class and the org settings (#350)
 
-The data model #349 builds on, as shipped in migration `00048`:
+The data model #349 builds on, as shipped in migration `00050`:
 
 - **Kind and legs.** `mcp_servers.kind` is `fetch`, `search` or `other` (enum `mcp_server_kind`). The
   server legs are two booleans (`exposes_untrusted_input`, `exposes_private_data`), not an array: the
