@@ -33,6 +33,14 @@ RETURNING *;
 SELECT * FROM mcp_servers
 WHERE org_id = @org_id AND id = @id;
 
+-- name: ListMCPServersLinkedToConnectionForUpdate :many
+-- The servers whose code-host connection is the one being deleted, locked so the delete can audit the
+-- unlink the foreign key (ON DELETE SET NULL) is about to do.
+SELECT * FROM mcp_servers
+WHERE org_id = @org_id AND code_host_connection_id = @connection_id
+ORDER BY name, id
+FOR UPDATE;
+
 -- name: ListMCPServers :many
 SELECT * FROM mcp_servers
 WHERE org_id = @org_id
