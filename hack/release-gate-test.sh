@@ -21,6 +21,7 @@ mkdir -p "$tmp/bin"
 cat >"$tmp/bin/git" <<'EOF'
 #!/usr/bin/env bash
 [[ $1 == merge-base && -n ${GIT_NOT_ANCESTOR:-} ]] && exit 1
+[[ $1 == diff ]] && { printf '%s\n' "${GIT_DIFF:-}"; exit 0; }
 exit 0
 EOF
 
@@ -43,6 +44,7 @@ repos/o/r) f=repo.json ;;
 repos/o/r/rules/branches/main) f=rules.json ;;
 repos/o/r/commits/*/check-runs) c=${path#repos/o/r/commits/}; f=checks-${c%%/*}.json ;;
 repos/o/r/commits/*/pulls) f=pulls.json ;;
+repos/o/r/commits/*/statuses) c=${path#repos/o/r/commits/}; f=statuses-${c%%/*}.json ;;
 *) echo "gh stub: unexpected $path" >&2; exit 1 ;;
 esac
 [[ -f $FX/$f ]] || { echo "gh stub: HTTP 404 $path" >&2; exit 1; }
@@ -196,6 +198,45 @@ echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 run_on "$sha" quickstart success
 run_on "$sha" go skipped
 check "a check skipped on main with no merged PR fails" "$(gate_rc)" 1
+
+# go-test (#610): skipped on main (the merge tree is the PR head), the head decides.
+go_test_case() { # a fresh case in which main skipped go-test, the head's go-test is $1 ("" = no run)
+	new_case
+	echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
+	run_on "$sha" quickstart success
+	run_on "$sha" go skipped
+	run_on "$sha" go-test skipped
+	run_on "$pr_head" go success
+	[[ -z $1 ]] || run_on "$pr_head" go-test "$1"
+}
+echo '[{"state":"success","context":"go-test-lab"}]' >"$tmp/lab-ok.json"
+echo '[{"state":"failure","context":"go-test-lab"},{"state":"success","context":"go-test-lab"}]' >"$tmp/lab-red.json"
+export GIT_DIFF=internal/x/x.go
+go_test_case success
+check "go-test green on the PR head passes" "$(gate_rc)" 0
+go_test_case skipped
+cp "$tmp/lab-ok.json" "$FX/statuses-$pr_head.json"
+check "go-test skipped by the lab (green go-test-lab on the PR head) passes" "$(gate_rc)" 0
+check "...and says it passed on the lab" "$(grep -c 'ok: go-test (passed on the lab' "$tmp/out")" 1
+go_test_case skipped
+check "go-test skipped with no go-test-lab status and Go in the change fails" "$(gate_rc)" 1
+check "...and names go-test" "$(grep -c 'FAIL: go-test: skipped on the merged pull request' "$tmp/err")" 1
+go_test_case skipped
+cp "$tmp/lab-red.json" "$FX/statuses-$pr_head.json"
+check "go-test skipped with a red newest go-test-lab status fails" "$(gate_rc)" 1
+go_test_case skipped
+cp "$tmp/lab-ok.json" "$FX/statuses-$sha.json" # a status on the merge commit is not the PR head's
+check "a go-test-lab on another commit does not count" "$(gate_rc)" 1
+go_test_case skipped
+GIT_DIFF=docs/guide.md
+check "go-test skipped with no Go in the change passes" "$(gate_rc)" 0
+GIT_DIFF=
+check "go-test skipped and the change cannot be read fails" "$(gate_rc)" 1
+export GIT_DIFF=internal/x/x.go
+go_test_case failure
+check "go-test red on the PR head fails" "$(gate_rc)" 1
+go_test_case ""
+check "go-test skipped on main and absent on the PR head fails" "$(gate_rc)" 1
 
 new_case
 rm "$FX/rules.json"

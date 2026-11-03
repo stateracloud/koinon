@@ -115,6 +115,21 @@ Exit codes of `hack/e2e-remote.sh --argo` separate the cases a caller acts on di
 1 the e2e failed, 2 usage, 75 the lab cannot run it now (fall back), 76 not run, 78 no lab configured,
 79 refused for flavors.
 
+## Amendment (2026-11-03, #610): CI's go-test on the lab gate first
+
+The same lab lane serves CI's longest Blacksmith job. A followed `hack/e2e-remote.sh --argo --gate go-test`
+posts the commit status `go-test-lab` (named like `e2e-lab`) on the tested commit; `hack/ship.sh --ready
+--lab-go-test` runs it on the pushed draft head before marking the pull request ready. In `ci.yml` the
+`changes` job reads the status for the pull request's exact head SHA (`hack/ci-skip-heavy.sh lab`);
+`success` skips `go-test`, and the required check `go` accepts that one skip, nothing else. No status,
+a draft, a push or an API error: `go-test` runs on Blacksmith, so a contributor without a lab is unaffected.
+CI does not wait for a status that arrives later (a waiting Blacksmith job is billed), so a push to a ready
+pull request runs `go-test` on Blacksmith. `hack/ci-skip-heavy.sh decide` (push to main) and
+`hack/release-gate.sh` treat a skipped `go-test` as green only with a green `go-test-lab` on the pull
+request head or a change with no Go in it. The required check name (`go`), the ruleset and the merge rule do
+not change. Trust limit as for `e2e-lab` (#568): a status anyone with write access can post, behind the
+required review on `.github/**`. Details: `docs/dev/maintainer-homelab.md`.
+
 ## Links
 
 - [design.md](../design.md), decision 25
