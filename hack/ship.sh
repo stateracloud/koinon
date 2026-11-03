@@ -18,8 +18,9 @@
 # request is marked ready: `hack/e2e-remote.sh --argo --gate go-test` posts the commit status go-test-lab
 # on the pushed head, and the ready run of ci.yml then skips its Blacksmith go-test (a draft skips the
 # heavy jobs, so nothing is lost by running the lab first). Exit 75 (lab cannot run it now, no free slot),
-# 76 (NOT RUN), 78 (no lab configured) or 79 (refused) print the reason and go on: go-test runs on
-# Blacksmith, as it does for anyone without a lab. A push to a pull request that is already ready runs CI
+# 76 (NOT RUN), 78 (no lab configured) or 2 (the lab rejected the call) print the reason and go on: go-test runs on
+# Blacksmith, as it does for anyone without a lab. Only a failed gate (a posted failure status) stops.
+# A new pull request is created as a draft; one that is already ready skips the lab run (see below). A push to a pull request that is already ready runs CI
 # on the new head at once, before any lab status can exist, and ci.yml does not wait for one (a waiting
 # Blacksmith job is billed): that go-test runs on Blacksmith. To keep it on the lab, turn the pull
 # request back into a draft first (`gh pr ready --undo`), push, and ship with --ready --lab-go-test.
@@ -229,7 +230,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 				gh pr edit "$pr_url" --title "$pr_title" --body-file "$pr_body" >/dev/null
 			else
 				args=(--head "$branch" --title "$pr_title" --body-file "$pr_body")
-				[[ $draft == 1 ]] && args+=(--draft)
+				[[ $draft == 1 || $lab == 1 ]] && args+=(--draft)
 				[[ $e2e == 1 ]] && args+=(--label e2e)
 				pr_url=$(gh pr create "${args[@]}" | tail -n 1)
 			fi
@@ -242,7 +243,10 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			echo "ship: warning: could not add $pr_url to the board" >&2
 			say "board warn"
 		fi
-		if [[ $lab == 1 ]]; then
+		if [[ $lab == 1 ]] && [[ $(gh pr view "$pr_url" --json isDraft --jq .isDraft 2>/dev/null || echo true) == false ]]; then
+			echo "ship: lab go-test: PR already ready: go-test runs on Blacksmith (CI started on the push); gh pr ready --undo to use the lab" >&2
+			say "lab go-test skipped (PR already ready)"
+		elif [[ $lab == 1 ]]; then
 			# The status must exist on the pushed head before the ready run reads it (#610).
 			lab_rc=0
 			hack/e2e-remote.sh --argo --gate go-test || lab_rc=$?
@@ -258,7 +262,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			75) echo "ship: lab go-test: the lab cannot run it now (unreachable, no free gate slot, or no verdict); go-test runs on Blacksmith" >&2; say "lab go-test skipped (exit 75)" ;;
 			76) echo "ship: lab go-test: NOT RUN (the gate skipped what it expected to run); go-test runs on Blacksmith" >&2; say "lab go-test skipped (exit 76)" ;;
 			78) echo "ship: lab go-test: no lab configured; go-test runs on Blacksmith" >&2; say "lab go-test skipped (exit 78)" ;;
-			79) echo "ship: lab go-test: refused, the change touches flavors/ and the lab cannot build flavors; go-test runs on Blacksmith" >&2; say "lab go-test skipped (exit 79)" ;;
+			2) echo "ship: lab go-test: the lab rejected the request (exit 2: usage or a 4xx answer); go-test runs on Blacksmith" >&2; say "lab go-test skipped (exit 2)" ;;
 			*) fail "lab go-test failed (exit $lab_rc); fix it and run again (the pull request was not marked ready)" ;;
 			esac
 		fi
