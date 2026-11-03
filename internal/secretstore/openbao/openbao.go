@@ -87,6 +87,15 @@ type Wrapper struct {
 	mu      sync.Mutex
 	token   string
 	expires time.Time // zero: no known expiry
+	// pending is the sign-in in flight, shared by every caller that needs a token meanwhile.
+	pending *signInCall
+}
+
+// signInCall is one sign-in; done closes once token and err are set.
+type signInCall struct {
+	done  chan struct{}
+	token string
+	err   error
 }
 
 var _ secretstore.Wrapper = (*Wrapper)(nil)
@@ -118,9 +127,13 @@ func newWrapper(cfg Config, anyHTTP bool) (*Wrapper, error) {
 		return nil, fmt.Errorf("openbao: invalid transit key name %q", cfg.Key)
 	}
 	for _, m := range []string{cfg.TransitMount, cfg.AuthMount} {
-		if !mountPattern.MatchString(m) || slices.ContainsFunc(strings.Split(m, "/"), dots) {
+		if !validPath(m) {
 			return nil, fmt.Errorf("openbao: invalid mount path %q", m)
 		}
+	}
+	// A namespace is a path too ("team/koinon"; OpenBao accepts a trailing slash).
+	if ns := strings.TrimSuffix(cfg.Namespace, "/"); cfg.Namespace != "" && !validPath(ns) {
+		return nil, fmt.Errorf("openbao: invalid namespace %q", cfg.Namespace)
 	}
 	base, err := url.Parse(strings.TrimRight(cfg.Address, "/"))
 	if err != nil || base.Host == "" || (base.Scheme != "https" && base.Scheme != "http") {
@@ -144,7 +157,20 @@ func newWrapper(cfg Config, anyHTTP bool) (*Wrapper, error) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.TLSClientConfig = tlsCfg
 	tr.Proxy = nil // the KMS is reached directly, never through an egress proxy
-	return &Wrapper{cfg: cfg, base: base, http: &http.Client{Transport: tr}}, nil
+	return &Wrapper{cfg: cfg, base: base, http: &http.Client{
+		Transport: tr,
+		// Never follow a redirect: it would re-send the token (and on sign-in the service account
+		// token) to wherever it points, plain http included, which gets around the loopback-only
+		// http rule. An HA standby or a load balancer that redirects means a wrong address.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}}, nil
+}
+
+// errRedirect is a 3xx answer, which the adapter never follows.
+var errRedirect = errors.New("redirect refused: set the active node's address")
+
+func validPath(p string) bool {
+	return mountPattern.MatchString(p) && !slices.ContainsFunc(strings.Split(p, "/"), dots)
 }
 
 // dots is a path segment that a server would resolve ("." or "..").
@@ -208,6 +234,8 @@ const probeCiphertext = "vault:v1:AA=="
 
 // Probe implements secretstore.Wrapper: it decrypts probeCiphertext, which OpenBao refuses as an
 // invalid ciphertext only once the pod is signed in, may decrypt with the key, and the key exists.
+// Healthy is exactly that refusal (OpenBao's own JSON error, see openRefusals); any other answer,
+// a proxy's 400 page included, is not.
 func (w *Wrapper) Probe(ctx context.Context) error {
 	ctx, cancel := remotekms.Bound(ctx, w.cfg.Timeout)
 	defer cancel()
@@ -228,10 +256,11 @@ func (w *Wrapper) transit(ctx context.Context, op string, body map[string]string
 		if err != nil {
 			return remotekms.Unreachable(what, err)
 		}
-		status, data, msg, err := w.do(ctx, path, token, body)
+		status, r, err := w.post(ctx, path, token, body)
 		if err != nil {
 			return remotekms.Unreachable(what, err)
 		}
+		data, msg, errs := r.Data, r.message(), r.Errors
 		switch {
 		case status == http.StatusOK:
 			if out == nil {
@@ -244,11 +273,13 @@ func (w *Wrapper) transit(ctx context.Context, op string, body map[string]string
 		case status == http.StatusForbidden && attempt == 0:
 			w.forget(token)
 			continue
-		case status == http.StatusBadRequest && strings.Contains(msg, "key not found"):
-			return remotekms.Unreachable(what, errors.New("the transit key does not exist"))
-		case status == http.StatusBadRequest && op == "decrypt":
+		case status >= 300 && status < 400:
+			return remotekms.Unreachable(what, fmt.Errorf("HTTP %d: %w", status, errRedirect))
+		case status == http.StatusBadRequest && op == "decrypt" && openRefusal(errs):
 			return secretstore.ErrOpen
-		case status == http.StatusForbidden, status == http.StatusNotFound,
+		case status == http.StatusBadRequest && slices.Contains(errs, "encryption key not found"):
+			return remotekms.Unreachable(what, errors.New("the transit key does not exist"))
+		case status == http.StatusBadRequest, status == http.StatusForbidden, status == http.StatusNotFound,
 			status == http.StatusTooManyRequests, status >= 500:
 			return remotekms.Unreachable(what, fmt.Errorf("HTTP %d: %s", status, msg))
 		default:
@@ -257,22 +288,66 @@ func (w *Wrapper) transit(ctx context.Context, op string, body map[string]string
 	}
 }
 
-// signIn returns a token that has not expired, signing in when there is none.
+// openRefusals are OpenBao's answers (2.4.1, its "errors" array) to a decrypt of a ciphertext that
+// is not one of this key's: malformed, or failing authentication (another key, or altered bytes).
+// Only these are secretstore.ErrOpen, which callers may treat as final. A key version OpenBao does
+// not have (too new: the key was restored from an older backup; too old: min_decryption_version
+// was raised) is a setting an operator can undo, so it is unreachable, as is anything else, such
+// as a proxy's own 400 page.
+var openRefusals = []string{
+	"invalid ciphertext length",
+	"invalid ciphertext: no prefix",
+	"invalid ciphertext: wrong number of fields",
+	"invalid ciphertext: could not decode base64",
+	"invalid ciphertext: version number could not be decoded",
+	"cipher: message authentication failed",
+}
+
+func openRefusal(errs []string) bool {
+	return len(errs) == 1 && slices.Contains(openRefusals, errs[0])
+}
+
+// signIn returns a token that has not expired, signing in when there is none. Callers that need a
+// token while a sign-in is in flight share it, and each stops waiting when its own ctx ends. The
+// sign-in is not bound to the first caller's ctx (its end would fail every other waiter), only to
+// the configured timeout.
 func (w *Wrapper) signIn(ctx context.Context) (string, error) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	if w.token != "" && (w.expires.IsZero() || time.Now().Before(w.expires)) {
-		return w.token, nil
+		token := w.token
+		w.mu.Unlock()
+		return token, nil
 	}
+	call := w.pending
+	if call == nil {
+		call = &signInCall{done: make(chan struct{})}
+		w.pending = call
+		go w.runSignIn(context.WithoutCancel(ctx), call)
+	}
+	w.mu.Unlock()
+	select {
+	case <-call.done:
+		return call.token, call.err
+	case <-ctx.Done():
+		return "", fmt.Errorf("waiting for the sign-in: %w", ctx.Err())
+	}
+}
+
+func (w *Wrapper) runSignIn(ctx context.Context, call *signInCall) {
+	ctx, cancel := remotekms.Bound(ctx, w.cfg.Timeout)
+	defer cancel()
 	token, ttl, err := w.login(ctx)
-	if err != nil {
-		return "", err
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.pending = nil
+	call.token, call.err = token, err
+	if err == nil {
+		w.token, w.expires = token, time.Time{}
+		if ttl > 0 {
+			w.expires = time.Now().Add(ttl * 4 / 5) // sign in again before it expires
+		}
 	}
-	w.token, w.expires = token, time.Time{}
-	if ttl > 0 {
-		w.expires = time.Now().Add(ttl * 4 / 5) // sign in again before it expires
-	}
-	return token, nil
+	close(call.done)
 }
 
 // forget drops token if it is still the current one, so the next call signs in again.
@@ -297,6 +372,9 @@ func (w *Wrapper) kubernetesLogin(ctx context.Context) (string, time.Duration, e
 		return "", 0, err
 	}
 	msg, auth := r.message(), r.Auth
+	if status >= 300 && status < 400 {
+		return "", 0, fmt.Errorf("sign-in: HTTP %d: %w", status, errRedirect)
+	}
 	if status != http.StatusOK || auth == nil || auth.ClientToken == "" {
 		return "", 0, fmt.Errorf("sign-in as role %q refused: HTTP %d: %s", w.cfg.Role, status, msg)
 	}
@@ -312,14 +390,6 @@ type response struct {
 type authInfo struct {
 	ClientToken   string `json:"client_token"`
 	LeaseDuration int64  `json:"lease_duration"`
-}
-
-func (w *Wrapper) do(ctx context.Context, path, token string, body map[string]string) (int, json.RawMessage, string, error) {
-	status, r, err := w.post(ctx, path, token, body)
-	if err != nil {
-		return 0, nil, "", err
-	}
-	return status, r.Data, r.message(), nil
 }
 
 // message is OpenBao's error text, shortened. It never holds a token or a payload.

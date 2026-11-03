@@ -5,6 +5,7 @@ package wrapping_test
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -67,5 +68,28 @@ var _ = Describe("New", func() {
 		Expect(err).To(MatchError(ContainSubstring("unknown KEK backend")))
 		_, err = wrapping.New(ctx, parse("--kek-backend=openbao", "--openbao-address=https://bao.example"), wrapping.KeyAdmin)
 		Expect(err).To(HaveOccurred())
+		_, err = wrapping.New(ctx, parse("--kek-backend=openbao", "--openbao-address=https://bao.example",
+			"--openbao-key=koinon-kek", "--openbao-role=koinon-api", "--openbao-namespace=team/../root"), wrapping.Service)
+		Expect(err).To(MatchError(ContainSubstring("invalid namespace")))
+	})
+
+	It("warns when a local process is given OpenBao settings, and only then", func(ctx SpecContext) {
+		var logs bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+		DeferCleanup(func() { slog.SetDefault(prev) })
+
+		_, err := wrapping.New(ctx, parse(), wrapping.Service)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = wrapping.New(ctx, wrapping.Config{}, wrapping.Service)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(logs.String()).To(BeEmpty(), "the flags' defaults are no settings")
+
+		ws, err := wrapping.New(ctx, parse("--openbao-address=https://bao.example:8200", "--openbao-key=koinon-kek"), wrapping.Service)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Primary().Backend()).To(Equal(secretstore.BackendLocal))
+		Expect(logs.String()).To(ContainSubstring("OpenBao settings are ignored"))
+		Expect(logs.String()).To(ContainSubstring("openbao-address"))
+		Expect(logs.String()).To(ContainSubstring("openbao-key"))
 	})
 })

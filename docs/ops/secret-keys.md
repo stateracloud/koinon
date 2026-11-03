@@ -257,6 +257,9 @@ What changes once you opt in (ADR 0085 decision 12):
   every minute), so values are read and written locally and a short KMS outage does not stop reads.
 - Every pod signs in to the KMS with its own pod identity (Kubernetes auth for OpenBao, IRSA for
   AWS). No KMS credential is in Helm values or env.
+- Point the OpenBao address at the active node (or a load balancer that forwards to it). Koinon
+  never follows a redirect, since that would send its token to wherever the redirect points; a
+  standby that redirects is reported as "redirect refused: set the active node's address".
 - koinon-api and the reconciler may only decrypt (agentd holds no keyring). A separate key-admin Job, with its own
   service account and the only encrypt right, wraps new KEKs: it runs on first install and on demand
   when you add or rotate a KEK. `koinon-api keys add` (and koinon-api's first start without a key)

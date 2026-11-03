@@ -275,6 +275,8 @@ var _ = Describe("configuration", func() {
 		Entry("no address", openbao.Config{Key: "k", Role: "r"}),
 		Entry("another scheme", openbao.Config{Address: "ftp://bao.example", Key: "k", Role: "r"}),
 		Entry("plain http off the loopback", openbao.Config{Address: "http://bao.example:8200", Key: "k", Role: "r"}),
+		Entry("a namespace with ..", openbao.Config{Address: "https://bao.example", Key: "k", Role: "r", Namespace: "team/../root"}),
+		Entry("a namespace with a space", openbao.Config{Address: "https://bao.example", Key: "k", Role: "r", Namespace: "team koinon"}),
 		Entry("a missing CA bundle", openbao.Config{Address: "https://bao.example", Key: "k", Role: "r", CACertFile: "/nonexistent/ca.pem"}),
 	)
 
@@ -285,6 +287,7 @@ var _ = Describe("configuration", func() {
 		Entry("https", openbao.Config{Address: "https://bao.example:8200/", Key: "koinon-kek", Role: "r"}),
 		Entry("http on 127.0.0.1", openbao.Config{Address: "http://127.0.0.1:8200", Key: "k", Role: "r"}),
 		Entry("http on localhost", openbao.Config{Address: "http://localhost:8200", Key: "k", Role: "r"}),
+		Entry("a nested namespace", openbao.Config{Address: "https://bao.example", Key: "k", Role: "r", Namespace: "team/koinon/"}),
 		Entry("a nested mount", openbao.Config{Address: "https://bao.example", Key: "k", Role: "r", TransitMount: "koinon/transit"}),
 	)
 })
