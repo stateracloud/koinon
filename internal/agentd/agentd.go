@@ -199,6 +199,9 @@ type Config struct {
 	KeepLeaseOnShutdown bool
 	// Checkpoints turns on home checkpoints (checkpoint.go); nil leaves them off.
 	Checkpoints *Checkpoints
+	// Taint is the MCP leak guard's feed of the sandbox's own tool results (taint.go,
+	// mcpguard.Feed). koinon-agentd always sets it; nil, in tests only, reports nothing.
+	Taint TaintFeed
 	// Tracing turns on run spans (ADR 0074); nil leaves them off.
 	Tracing *Tracing
 	// Logger defaults to slog.Default().

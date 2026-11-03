@@ -6,6 +6,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/sinkclass"
@@ -35,4 +37,13 @@ func (p orgPolicy) threshold() int { return p.settings.MatchThreshold }
 // call's address arguments only (ADR 0091 decision 3).
 func (p orgPolicy) classify(_ store.McpServer, d sinkclass.Declaration, address map[string]string, now time.Time) sinkclass.Class {
 	return sinkclass.Classify(d, address, p.settings.Scope(), p.settings, now)
+}
+
+// thresholdOf is an org's match threshold (0: the default), for agentd's feed.
+func thresholdOf(ctx context.Context, q *store.Queries, org pgtype.UUID) (int, error) {
+	lg, err := orgsettings.LeakGuardOf(ctx, q, org)
+	if err != nil {
+		return 0, err
+	}
+	return orgPolicy{settings: lg}.threshold(), nil
 }
