@@ -16,6 +16,7 @@ numbers and the procedure are in [the research](../research/kek-rotation.md).
 | Saved-work upload key | Secret `<release>-saved-work`, key `key` (random, created by `koinon-api` on first use, never overwritten) | `koinon-api` reads it through the Kubernetes API; `koinon-agentd` mounts it read-only. It signs agentd's posts of a stuck sandbox's work; it is not a KEK and opens nothing. |
 | Opened provider keys | Secret `koinon-gateway-providers` | Only the gateway pod mounts it. |
 | Install ID | Table `install_identity` in Postgres (one UUID, written by the first migration, never changed) | Anyone with the database; it is not secret. A KEK wrapped by a KMS is bound to it (see "The install binding" below). |
+| Bound-only marker | Table `kek_bound_only` in Postgres (one row once set, never changed or removed by Koinon) | Anyone with the database; it is not secret. Once set, every Koinon process refuses a KMS-wrapped KEK stored unbound (see "The bound-only marker" below). |
 
 **The chart does not generate the keys.** A Helm render that made key material would make new keys
 every time it ran (`helm template`, Argo CD and Flux do not have the live Secret to look at), and a new
@@ -351,11 +352,47 @@ of the primary wrapping key again, bound (the KEK itself is unchanged, so no val
 The run is idempotent; a KEK wrapped by another KMS key stays unbound and the Job says so. Back up
 the KEK Secret afterwards. A local KEK is never bound (it is not wrapped).
 
+**The bound-only marker.** Binding wraps the same KEKs again: an old backup of the KEK Secret still
+holds them unbound, and an unbound KEK opens next to any database that can reach the KMS key. So once
+every KEK is bound, the install records it: a row in the table `kek_bound_only`. From then on every
+Koinon process (koinon-api, the reconciler, the key-admin Job, `keys` commands) refuses a KMS-wrapped
+KEK stored unbound, with an error that names the KEK, when the marker was set and by what ("…the
+bound-only marker of this install was set at 2026-11-03T12:00:00Z, when the key-admin Job
+(--rewrap-unbound) bound the last unbound KEK"). It is set
+
+- on a new install, by the key-admin Job (or koinon-api, for local KEKs) when it creates the first KEK,
+  before the KEK Secret exists: a new install never holds an unbound KMS KEK;
+- by the key-admin Job with `rewrapUnbound: true`, once a run leaves no KMS-wrapped KEK unbound. A run
+  that leaves one unbound (another KMS key) does not set it and names the KEKs: rotate them out and run
+  the Job again.
+
+`keys status` prints it ("Bound only: set at …" or "Bound only: not set"). Koinon only ever sets it;
+nothing in Koinon clears it, and triggers refuse UPDATE, DELETE and TRUNCATE on the table. Those guard
+against mistakes, not against a determined database owner: the table's owner can drop the table or
+disable the triggers, and `pg_restore --disable-triggers` and `session_replication_role = replica`
+skip them.
+
+A process reads the marker each time it loads the key set while the marker is unset and the set holds
+an unbound KMS KEK (at start and on every reload, about once a minute), and keeps it once it reads it
+set. A process that started before the marker was set refuses unbound KEKs from its next load on; a
+failed reload keeps the key set it already has, which after the rewrap holds the bound forms. If the
+marker cannot be read (the database is down), an unbound KEK is refused (fail closed); bound and local
+KEKs do not need it.
+
+**Rotate as well if an old backup may have leaked.** The marker stops an old KEK Secret backup only
+where this database is: an install whose database lacks the marker (a clone taken before it was set, a
+rollback below #615, another install on the same KMS key) still opens that backup's unbound KEKs. If
+a KEK Secret backup from before the rewrap may be in the wrong hands, rotate the KEKs as well (add,
+activate, rewrap, retire, as above): only rotation makes an old backup useless everywhere.
+
 **Rolling back below #615.** A bound KEK is stored as `"fmt":2`, which a release before #615
 refuses ("unsupported format 2"): its pods fail closed and never misread it. Every new KMS-wrapped
 KEK is bound, so before rolling back below #615 use the steps in "Rolling back below the release that
 added key wrapping" below (back to local KEKs), or roll back to a key set that held only unbound
-KEKs. Leave `rewrapUnbound` off until you will not roll back that far.
+KEKs. Leave `rewrapUnbound` off until you will not roll back that far: once it binds the last KEK the
+marker is set, the Job says so, and a rollback below #615 no longer works with this key set (those
+releases cannot read bound KEKs, and the unbound backups no longer open on this database once you
+come forward again).
 
 ### Setting up OpenBao (or Vault) transit
 

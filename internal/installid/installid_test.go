@@ -75,6 +75,65 @@ var _ = Describe("the install ID", func() {
 		Expect(src(ctx)).To(Equal(id), "kept: the database is not asked again")
 	})
 
+	Describe("the bound-only marker (#615)", func() {
+		It("is not set after the migrations, is set once, and keeps its first setting", func(ctx SpecContext) {
+			pool := pgtest.Start(ctx)
+			b, err := installid.ReadBoundOnly(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b.Set).To(BeFalse())
+
+			set, err := installid.SetBoundOnly(ctx, pool, secretstore.BoundOnlyFirstInstall)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(set.Set).To(BeTrue())
+			Expect(set.How).To(Equal(secretstore.BoundOnlyFirstInstall))
+			Expect(set.At).NotTo(BeZero())
+
+			By("setting it again changes nothing: the app has no way to change or clear it")
+			again, err := installid.Marker{DB: pool}.SetBoundOnly(ctx, secretstore.BoundOnlyRewrap)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again).To(Equal(set))
+		})
+
+		It("cannot be cleared or changed in the database", func(ctx SpecContext) {
+			pool := pgtest.Start(ctx)
+			set, err := installid.SetBoundOnly(ctx, pool, secretstore.BoundOnlyRewrap)
+			Expect(err).NotTo(HaveOccurred())
+			for _, stmt := range []string{
+				`DELETE FROM kek_bound_only`,
+				`TRUNCATE kek_bound_only`,
+				`UPDATE kek_bound_only SET set_by = 'first-install'`,
+				`UPDATE kek_bound_only SET set_at = now() - interval '1 day'`,
+				`INSERT INTO kek_bound_only (singleton, set_by) VALUES (false, 'rewrap-unbound')`,
+				`INSERT INTO kek_bound_only (set_by) VALUES ('cleared')`,
+			} {
+				_, err := pool.Exec(ctx, stmt)
+				Expect(err).To(HaveOccurred(), stmt)
+			}
+			Expect(installid.ReadBoundOnly(ctx, pool)).To(Equal(set))
+		})
+
+		It("is read by a source on every call until it is set, then kept", func(ctx SpecContext) {
+			dsn := pgtest.Run(ctx)
+			pool := open(ctx, dsn)
+			src := installid.BoundOnlySource(pool)
+			_, err := src(ctx)
+			Expect(err).To(MatchError(installid.ErrNotMigrated), "fail closed before the migration")
+
+			pgtest.Migrate(ctx, dsn)
+			b, err := src(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b.Set).To(BeFalse())
+
+			By("a process that read it unset sees it set on its next load")
+			set, err := installid.SetBoundOnly(ctx, pool, secretstore.BoundOnlyRewrap)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(src(ctx)).To(Equal(set))
+
+			pool.Close()
+			Expect(src(ctx)).To(Equal(set), "kept: it is never cleared")
+		})
+	})
+
 	It("is waited for while the database is not migrated, as the key-admin Job does on a new install", func(ctx SpecContext) {
 		dsn := pgtest.Run(ctx)
 		pool := open(ctx, dsn)

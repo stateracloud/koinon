@@ -466,7 +466,35 @@ var _ = Describe("koinon-api keys", func() {
 			Expect(out.String()).To(And(
 				ContainSubstring("fakekms:koinon-test, unbound"),
 				ContainSubstring("KEK kek-20261001-old1 is not bound to the install"),
+				ContainSubstring("Bound only: not set."),
 			))
+		})
+
+		It("shows the bound-only marker, and once it is set refuses a KEK stored unbound (#615)", func(ctx SpecContext) {
+			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			// Its own database: the suite's pool must stay without the marker for the other specs.
+			marked := pgtest.Start(ctx)
+			_, err := installid.SetBoundOnly(ctx, marked, secretstore.BoundOnlyRewrap)
+			Expect(err).NotTo(HaveOccurred())
+			use(service.WithBoundOnly(installid.BoundOnlySource(marked)))
+			tool.Pool = marked
+			DeferCleanup(func() { tool.Pool = pool })
+
+			out.Reset()
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).To(MatchRegexp(`Bound only: set at \d{4}-\d\d-\d\dT[0-9:]+Z, when the key-admin Job \(--rewrap-unbound\) bound the last unbound KEK`))
+
+			By("an unbound KEK, from an old backup, no longer opens")
+			legacy, err := kms.Wrap(ctx, newKey(), secretstoretest.LegacyKEKAAD("kek-20261001-old1"))
+			Expect(err).NotTo(HaveOccurred())
+			v, err := secretstore.StoredKEK{Backend: kms.Backend(), KeyID: kms.KeyID(), Wrapped: legacy}.Encode()
+			Expect(err).NotTo(HaveOccurred())
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			sec.Data["kek-20261001-old1"] = v
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tool.Status(ctx)).To(MatchError(secretstore.ErrBoundOnly))
 		})
 
 		It("koinon-api never wraps a new KEK with the KMS: keys add and the first start point at the key-admin Job", func(ctx SpecContext) {

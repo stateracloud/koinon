@@ -304,6 +304,17 @@ func (t *Tool) installBinding(ctx context.Context, ks KeySet) error {
 			unbound = append(unbound, id)
 		}
 	}
+	if t.Pool != nil {
+		b, err := installid.ReadBoundOnly(ctx, t.Pool)
+		if err != nil {
+			return err
+		}
+		if b.Set {
+			_, _ = fmt.Fprintf(t.Out, "Bound only: %s. KEKs stored unbound (wrapped before #615) never open here.\n", b)
+		} else {
+			_, _ = fmt.Fprintln(t.Out, "Bound only: not set. KEKs stored unbound (wrapped before #615) still open; the key-admin Job sets it once every KEK is bound (secrets.kek.kms.keyAdmin.rewrapUnbound).")
+		}
+	}
 	if !kms {
 		return nil
 	}

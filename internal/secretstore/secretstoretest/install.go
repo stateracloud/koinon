@@ -4,8 +4,12 @@ package secretstoretest
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"sync/atomic"
+	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -18,6 +22,9 @@ const (
 	InstallA = "00000000-0000-4000-8000-00000000000a"
 	InstallB = "00000000-0000-4000-8000-00000000000b"
 )
+
+// BoundOnlySet is a set bound-only marker for tests (#615).
+var BoundOnlySet = secretstore.BoundOnly{Set: true, At: time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC), How: secretstore.BoundOnlyRewrap}
 
 // LegacyKEKAAD is the associated data of a KEK in stored format 1 (#416), written out here apart
 // from secretstore, so that a change to it there fails the contract: KEKs wrapped with it are in
@@ -130,6 +137,62 @@ func InstallBindingContract(newWrapper func() secretstore.Wrapper) {
 		expect(err).To(gomega.MatchError(secretstore.ErrOpen), "still bound to its KEK ID")
 	})
 
+	ginkgo.Describe("the bound-only marker", func() {
+		var legacy secretstore.StoredKEK
+		ginkgo.BeforeEach(func(ctx ginkgo.SpecContext) {
+			v, err := w.Wrap(ctx, kek, LegacyKEKAAD(id))
+			expect(err).NotTo(gomega.HaveOccurred())
+			legacy = stored(secretstore.StoredKEK{Backend: w.Backend(), KeyID: w.KeyID(), Wrapped: v})
+		})
+		withMarker := func(src secretstore.BoundOnlySource) secretstore.Wrappers {
+			return wrappers(w, InstallA).WithBoundOnly(src)
+		}
+
+		ginkgo.It("still opens a KEK stored unbound (format 1) while it is not set", func(ctx ginkgo.SpecContext) {
+			got, err := withMarker(secretstore.StaticBoundOnly(secretstore.BoundOnly{})).Unwrap(ctx, id, legacy)
+			expect(err).NotTo(gomega.HaveOccurred())
+			expect(got).To(gomega.Equal(kek))
+		})
+
+		ginkgo.It("refuses a KEK stored unbound once it is set, as not opening, and says why", func(ctx ginkgo.SpecContext) {
+			_, err := withMarker(secretstore.StaticBoundOnly(BoundOnlySet)).Unwrap(ctx, id, legacy)
+			expect(err).To(gomega.And(gomega.MatchError(secretstore.ErrBoundOnly), gomega.MatchError(secretstore.ErrOpen)))
+			expect(err).NotTo(gomega.MatchError(secretstore.ErrUnreachable))
+			expect(err.Error()).To(gomega.And(gomega.ContainSubstring("2026-11-03T12:00:00Z"), gomega.ContainSubstring("--rewrap-unbound"),
+				gomega.ContainSubstring(id)))
+
+			ginkgo.By("a bound KEK still opens")
+			s, err := wrappers(w, InstallA).Wrap(ctx, id, kek)
+			expect(err).NotTo(gomega.HaveOccurred())
+			got, err := withMarker(secretstore.StaticBoundOnly(BoundOnlySet)).Unwrap(ctx, id, stored(s))
+			expect(err).NotTo(gomega.HaveOccurred())
+			expect(got).To(gomega.Equal(kek))
+		})
+
+		ginkgo.It("is read on every unwrap of an unbound KEK, so a process that opened it before the marker was set refuses it after", func(ctx ginkgo.SpecContext) {
+			var set atomic.Bool
+			src := func(context.Context) (secretstore.BoundOnly, error) {
+				if set.Load() {
+					return BoundOnlySet, nil
+				}
+				return secretstore.BoundOnly{}, nil
+			}
+			ws := withMarker(src)
+			_, err := ws.Unwrap(ctx, id, legacy)
+			expect(err).NotTo(gomega.HaveOccurred())
+			set.Store(true)
+			_, err = ws.Unwrap(ctx, id, legacy)
+			expect(err).To(gomega.MatchError(secretstore.ErrBoundOnly))
+		})
+
+		ginkgo.It("refuses a KEK stored unbound when the marker cannot be read (fail closed)", func(ctx ginkgo.SpecContext) {
+			down := errors.New("koinon_test database down")
+			_, err := withMarker(func(context.Context) (secretstore.BoundOnly, error) { return secretstore.BoundOnly{}, down }).Unwrap(ctx, id, legacy)
+			expect(err).To(gomega.MatchError(down))
+			expect(err).NotTo(gomega.MatchError(secretstore.ErrUnreachable))
+		})
+	})
+
 	ginkgo.It("wraps nothing without the install ID, and says so when a bound KEK is opened without it", func(ctx ginkgo.SpecContext) {
 		_, err := wrappers(w, "").Wrap(ctx, id, kek)
 		expect(err).To(gomega.MatchError(secretstore.ErrNoInstallID))
@@ -157,7 +220,8 @@ func LocalBindingContract() {
 		expect(err).NotTo(gomega.HaveOccurred())
 		expect(v).To(gomega.Equal(secretstore.EncodeKey(kek)))
 		for _, install := range []string{"", InstallA, InstallB} {
-			ws := local
+			// The bound-only marker is about KMS KEKs: a local one opens with it set.
+			ws := local.WithBoundOnly(secretstore.StaticBoundOnly(BoundOnlySet))
 			if install != "" {
 				ws = ws.WithInstallID(secretstore.StaticInstallID(install))
 			}

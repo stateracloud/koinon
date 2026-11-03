@@ -352,6 +352,8 @@ type Querier interface {
 	// The install ID (#615): created once by a migration, never changed. KMS-wrapped KEKs are bound
 	// to it.
 	GetInstallID(ctx context.Context) (pgtype.UUID, error)
+	// SPDX-License-Identifier: Apache-2.0
+	GetKEKBoundOnly(ctx context.Context) (GetKEKBoundOnlyRow, error)
 	// The last request of a run that its provider answered with an error status at or after @since: the
 	// gateway's own record of why a model request failed (agentd reads it when a harness reports an
 	// error without a status). Only the statuses in @statuses count. No row when the provider
@@ -918,6 +920,8 @@ type Querier interface {
 	// Changes the format of a model that is still not overridden, so a save that raced the startup
 	// re-derivation wins.
 	SetDerivedModelFormat(ctx context.Context, arg SetDerivedModelFormatParams) (int64, error)
+	// Sets the marker unless it is set: the first setting stays (the row is never updated).
+	SetKEKBoundOnly(ctx context.Context, setBy string) error
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
 	SetMCPToolTier(ctx context.Context, arg SetMCPToolTierParams) (McpTool, error)

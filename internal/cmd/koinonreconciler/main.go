@@ -133,7 +133,7 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	// KMS-wrapped KEKs are bound to the install ID the database holds (#615).
-	wrappers = wrappers.WithInstallID(installid.Source(pool))
+	wrappers = wrappers.WithInstallID(installid.Source(pool)).WithBoundOnly(installid.BoundOnlySource(pool))
 	// The monitor sets koinon_kek_active_reachable from the watch loop; the reconciler records nothing.
 	// The keyring loads before the metrics registry exists, so the gauge is registered below.
 	kekMetrics := kekhealth.NewMetrics(nil)

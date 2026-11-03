@@ -198,7 +198,8 @@ func describeMode(name, valuesFile string) {
 		// KEK Secret and added the KEK keyAdmin.addKey names, each wrapped by the KMS: the Secret
 		// holds no key in the clear, and koinon-api, which may only decrypt, starts from it below.
 		// Each KEK is bound (format 2) to the install ID the migration wrote into the database
-		// (#615), which the Job reads with the database settings the chart gives it.
+		// (#615), which the Job reads with the database settings the chart gives it, and the Job
+		// set the bound-only marker of the new install.
 		It("wraps every KEK with the KMS, bound to the install", func(ctx SpecContext) {
 			k := kmsOf(r)
 			if k == nil {
@@ -209,6 +210,11 @@ func describeMode(name, valuesFile string) {
 			DeferCleanup(conn.Close)
 			var install string
 			Expect(conn.QueryRow(ctx, "SELECT install_id::text FROM install_identity").Scan(&install)).To(Succeed())
+			// A new install is bound only from its first KEK on: the Job set the marker before it
+			// created the KEK Secret, so no process ever accepts an unbound KMS KEK here.
+			var setBy string
+			Expect(conn.QueryRow(ctx, "SELECT set_by FROM kek_bound_only").Scan(&setBy)).To(Succeed(), "the key-admin Job set the bound-only marker")
+			Expect(setBy).To(Equal("first-install"))
 			s := cl.Secret(ctx, kekSecretName(r))
 			Expect(s).NotTo(BeNil(), "the key-admin Job created the KEK Secret")
 			Expect(s.Data).To(HaveKey("active"))
