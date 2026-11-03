@@ -247,8 +247,7 @@ it (the default provider URL check still applies).
 A KMS is an option, not a mandate. The default keeps the KEKs in the Kubernetes Secret, as described
 above; it is fully supported and nothing here asks you to move. An install can opt in to have a KMS
 (OpenBao/Vault transit, #416, or AWS KMS, #417) wrap each KEK, so the Secret holds only ciphertext
-that is useless without the KMS. OpenBao is set with `secrets.kek.kms` (below); AWS KMS follows
-(#417).
+that is useless without the KMS. Both are set with `secrets.kek.kms` (below).
 
 What changes once you opt in (ADR 0085 decision 12):
 
@@ -351,6 +350,98 @@ helm upgrade koinon <chart> -n koinon -f values.yaml          # renders the Job 
 `helm install --wait` (and `helm upgrade --wait`) times out while the Job keeps failing on install,
 since koinon-api waits for the KEK Secret. A plain `helm upgrade` does not wait for the Job at all;
 only `--wait-for-jobs` does, so check the Job yourself after an upgrade that adds a KEK.
+
+### Setting up AWS KMS
+
+Koinon wraps with one symmetric encryption key (`SYMMETRIC_DEFAULT`, usage `ENCRYPT_DECRYPT`) that
+you create; it never creates, enables or schedules keys. Every request names that key and carries
+the encryption context `koinon=kek-wrap/v1`. The pods sign in with their pod identity only: IRSA (an
+IAM role on the ServiceAccount) or EKS Pod Identity. Koinon never reads an access key, the shared
+config files or the node's instance metadata; static `AWS_ACCESS_KEY_ID` and friends in the env are
+ignored with a warning, so the pod cannot fall back to the node's role or to a key someone left in
+the env.
+
+One IAM role per identity (the release in namespace `koinon`, chart default names):
+
+| Role (example name)          | ServiceAccount        | Actions on the key           |
+|------------------------------|-----------------------|------------------------------|
+| `koinon-api-decrypt`         | `koinon-api`          | `kms:Decrypt`                |
+| `koinon-reconciler-decrypt`  | `koinon-reconciler`   | `kms:Decrypt`                |
+| `koinon-key-admin-encrypt`   | `koinon-key-admin`    | `kms:Encrypt`, `kms:Decrypt` |
+
+The identity policy of the decrypt roles (the key-admin role adds `kms:Encrypt`):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["kms:Decrypt"],
+    "Resource": "arn:aws:kms:eu-central-1:111122223333:key/<key id>",
+    "Condition": {"StringEquals": {"kms:EncryptionContext:koinon": "kek-wrap/v1"}}
+  }]
+}
+```
+
+The condition is optional; it keeps the roles from decrypting anything that was not wrapped by
+Koinon. The key policy must let IAM policies grant access (the default key policy's account
+statement does), or name the three roles itself. Grant nothing else: no `kms:CreateKey`,
+`kms:GenerateDataKey` or `kms:ReEncrypt*`.
+
+With IRSA, each role trusts the cluster's OIDC provider for its one ServiceAccount
+(`system:serviceaccount:koinon:koinon-api`, and so on, audience `sts.amazonaws.com`), and the chart
+annotates the ServiceAccounts from `roleArns`. With EKS Pod Identity, leave `roleArns` empty and
+create one association per ServiceAccount (`aws eks create-pod-identity-association --namespace
+koinon --service-account koinon-api --role-arn ...`); the roles then trust `pods.eks.amazonaws.com`.
+agentd gets no role: it holds no keyring.
+
+In the chart values:
+
+```yaml
+secrets:
+  kek:
+    kms:
+      backend: awskms
+      awskms:
+        region: eu-central-1
+        keyId: arn:aws:kms:eu-central-1:111122223333:key/<key id>   # the key ARN (recommended)
+        roleArns:                                                 # IRSA; empty with EKS Pod Identity
+          api: arn:aws:iam::111122223333:role/koinon-api-decrypt
+          reconciler: arn:aws:iam::111122223333:role/koinon-reconciler-decrypt
+          keyAdmin: arn:aws:iam::111122223333:role/koinon-key-admin-encrypt
+        # endpoint, stsEndpoint: https://... of VPC endpoints with their own DNS names
+        # caConfigMap: a ConfigMap with ca.crt, for a TLS-inspecting egress proxy
+        # timeout: bound on one KMS call (default 5s)
+```
+
+Notes:
+
+- Name the key by its key ARN. Every wrapped KEK records the key as written in `keyId` and is read
+  with that key, so keep the spelling unchanged. An alias works, but if the alias is later pointed at
+  another key, the KEKs wrapped before refuse to unwrap with the wrong-key error ("cannot open
+  envelope"): aliases are for keys that never move.
+- Calls go to `https://kms.<region>.amazonaws.com` and `https://sts.<region>.amazonaws.com` (with
+  IRSA) unless you set the endpoints. Koinon honours `HTTPS_PROXY` and `NO_PROXY` for them; the EKS
+  Pod Identity agent (a link-local address) is always called directly. Redirects are never followed.
+- Koinon checks the key on every reload with a dry-run Decrypt (`DryRun` with the modifier
+  `IGNORE_CIPHERTEXT`): KMS checks the identity and the `kms:Decrypt` right on the key, encryption
+  context condition included, without decrypting anything. Healthy is exactly KMS's
+  `DryRunOperationException`, its answer to a dry run that would have been allowed. Any other answer
+  (`AccessDeniedException` or another KMS error), an identity that cannot sign in and a network error
+  read as unreachable (`koinon_kek_active_reachable` 0), never as a wrong key.
+- An endpoint that does not support the dry run (an emulator such as LocalStack, which ignores it,
+  or a KMS-compatible service that rejects the parameters) reads as unreachable too, with the reason
+  "the endpoint ignored or rejected DryRun; the decrypt right is unverified". There is no weaker
+  fallback: a plain Decrypt of a junk ciphertext cannot prove the right, since KMS may refuse the
+  junk before it checks it. Wrapping and unwrapping still work against such an endpoint; only the
+  health check stays at 0. AWS KMS itself supports the dry run.
+- Disabling the key or scheduling its deletion stops every pod from loading the key set on its next
+  start. Before you retire the key, move the KEKs to a new key (the steps above: add with the new
+  `keyId`, activate, rewrap, retire), and keep the old key enabled until `keys status` lists no KEK
+  wrapped by it.
+- The key-admin Job, its install and its retries work as with OpenBao. When it fails for good (a
+  role, trust policy or key policy missing, the key missing or disabled), follow "When the key-admin
+  Job fails for good" above.
 
 ### Rolling back below the release that added key wrapping
 
