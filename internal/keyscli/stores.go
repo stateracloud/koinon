@@ -197,6 +197,10 @@ func (k KubeStore) EnsureWith(ctx context.Context, now time.Time, hasValues func
 		Data: data,
 	}, metav1.CreateOptions{FieldManager: "koinon-api"})
 	if apierrors.IsAlreadyExists(err) {
+		// Someone else created it meanwhile: it is used as found. If that is an old Secret with KEKs
+		// stored unbound (GitOps or a backup restore on a new install), the marker set above makes the
+		// next load refuse them with secretstore.ErrBoundOnly, whose message says to delete the Secret
+		// and rerun the key-admin Job (#615).
 		return false, nil
 	}
 	if err != nil {

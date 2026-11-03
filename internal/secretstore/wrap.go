@@ -310,13 +310,23 @@ func (ws Wrappers) acceptUnbound(ctx context.Context, id string) error {
 		// Only the zero value has no source, and it opens local KEKs only; refuse rather than guess.
 		return fmt.Errorf("secretstore: KEK %q is stored unbound (format 1) and these wrappers read no bound-only marker", id)
 	}
-	b, err := ws.boundOnly(ctx)
+	// The source reads the database: bound it like an adapter call, so a hung database fails this
+	// load (fail closed) instead of blocking it and every load after it.
+	cctx, cancel := ws.call(ctx)
+	defer cancel()
+	b, err := ws.boundOnly(cctx)
 	if err != nil {
+		if cctx.Err() != nil && ctx.Err() == nil {
+			slog.Warn("reading the bound-only marker timed out; the KEK stored unbound is refused (fail closed)",
+				"kek", id, "timeout", ws.callTimeout())
+		}
 		return fmt.Errorf("secretstore: KEK %q is stored unbound (format 1) and whether this install still accepts that is not known: %w", id, err)
 	}
 	if b.Set {
 		return fmt.Errorf("%w: %w: KEK %q is stored unbound (format 1, wrapped before #615), and the bound-only marker of this install was %s. "+
-			"The KEK Secret is an old backup or belongs to another install: restore one taken after the KEKs were bound (docs/ops/secret-keys.md)",
+			"The KEK Secret is an old backup or belongs to another install: restore one taken after the KEKs were bound. "+
+			"If the database holds no encrypted values yet (a new install, where GitOps or a backup restore put an old Secret in place), "+
+			"delete the KEK Secret and rerun the key-admin Job instead: no values are lost (docs/ops/secret-keys.md)",
 			ErrBoundOnly, ErrOpen, id, b)
 	}
 	return nil
@@ -379,12 +389,15 @@ func (ws Wrappers) WithCallTimeout(d time.Duration) Wrappers {
 	return ws
 }
 
-func (ws Wrappers) call(ctx context.Context) (context.Context, context.CancelFunc) {
-	d := ws.timeout
-	if d <= 0 {
-		d = CallTimeout
+func (ws Wrappers) callTimeout() time.Duration {
+	if ws.timeout <= 0 {
+		return CallTimeout
 	}
-	return context.WithTimeout(ctx, d)
+	return ws.timeout
+}
+
+func (ws Wrappers) call(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, ws.callTimeout())
 }
 
 func newWrappers(keyAdmin bool, boundOnly BoundOnlySource, primary Wrapper, more []Wrapper) (Wrappers, error) {

@@ -168,7 +168,7 @@ func InstallBindingContract(newWrapper func() secretstore.Wrapper) {
 			expect(err).To(gomega.And(gomega.MatchError(secretstore.ErrBoundOnly), gomega.MatchError(secretstore.ErrOpen)))
 			expect(err).NotTo(gomega.MatchError(secretstore.ErrUnreachable))
 			expect(err.Error()).To(gomega.And(gomega.ContainSubstring("2026-11-03T12:00:00Z"), gomega.ContainSubstring("--rewrap-unbound"),
-				gomega.ContainSubstring(id)))
+				gomega.ContainSubstring(id), gomega.ContainSubstring("delete the KEK Secret and rerun the key-admin Job")))
 
 			ginkgo.By("a bound KEK still opens")
 			s, err := wrappers(w, InstallA).Wrap(ctx, id, kek)
@@ -192,6 +192,22 @@ func InstallBindingContract(newWrapper func() secretstore.Wrapper) {
 			set.Store(true)
 			_, err = ws.Unwrap(ctx, id, legacy)
 			expect(err).To(gomega.MatchError(secretstore.ErrBoundOnly))
+		})
+
+		ginkgo.It("bounds the marker read, so a hung database fails the unwrap instead of blocking it", func(ctx ginkgo.SpecContext) {
+			hang := func(ctx context.Context) (secretstore.BoundOnly, error) {
+				<-ctx.Done()
+				return secretstore.BoundOnly{}, ctx.Err()
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := withMarker(hang).WithCallTimeout(50*time.Millisecond).Unwrap(ctx, id, legacy)
+				done <- err
+			}()
+			var err error
+			gomega.Eventually(done).WithContext(ctx).WithTimeout(5*time.Second).Should(gomega.Receive(&err), "the read must end at the call timeout, not hang")
+			expect(err).To(gomega.MatchError(context.DeadlineExceeded))
+			expect(err).NotTo(gomega.MatchError(secretstore.ErrUnreachable))
 		})
 
 		ginkgo.It("refuses a KEK stored unbound when the marker cannot be read (fail closed)", func(ctx ginkgo.SpecContext) {

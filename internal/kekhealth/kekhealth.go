@@ -211,11 +211,20 @@ func (m *Monitor) observeUnbound(l secretstore.Loaded, log *slog.Logger) {
 		m.clearThrottle("unbound")
 		return
 	}
-	if m.throttle("unbound", warnEvery) {
-		log.Warn("key-encryption keys wrapped by a KMS are not bound to the install ID (wrapped before #615): "+
-			"bind them with the key-admin Job (secrets.kek.kms.keyAdmin.rewrapUnbound, --rewrap-unbound) or rotate them out",
-			"unbound", n)
+	if !m.throttle("unbound", warnEvery) {
+		return
 	}
+	if errors.Is(l.Err, secretstore.ErrBoundOnly) {
+		// Rewrapping cannot help: the install accepts bound KEKs only, so the unbound ones are from a
+		// Secret restored from before the binding.
+		log.Warn("key-encryption keys stored unbound were refused by the bound-only policy of this install (#615): "+
+			"restore a KEK Secret taken after the KEKs were bound, or, while the database holds no encrypted values, delete it and rerun the key-admin Job (docs/ops/secret-keys.md)",
+			"unbound", n, "err", l.Err)
+		return
+	}
+	log.Warn("key-encryption keys wrapped by a KMS are not bound to the install ID (wrapped before #615): "+
+		"bind them with the key-admin Job (secrets.kek.kms.keyAdmin.rewrapUnbound, --rewrap-unbound) or rotate them out",
+		"unbound", n)
 }
 
 // probe reports whether the wrapping key of active answers. It always probes the active KEK's own
