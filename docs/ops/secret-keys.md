@@ -269,7 +269,9 @@ What changes once you opt in (ADR 0085 decision 12):
   from the recorded one for its ID, which means a restored or wrong KEK Secret. Rows of retired KEKs
   stay: IDs are never reused, and the history is what a later `keys forget` needs.
 - `keys status` also says whether the active KEK's wrapping key answers, and warns when the active KEK
-  is a local one on an install that has a KMS configured. koinon-api and the reconciler export
+  is a local one on an install that has a KMS configured. `keys activate` refuses a local KEK while a
+  KMS is the configured primary (procoduck, 2026-11-03); to roll back, set the configured wrapping to
+  local first, then activate. koinon-api and the reconciler export
   `koinon_kek_active_reachable{backend}` (1 or 0), probed on every reload. A local install always
   reads 1 and logs nothing. If the KMS is down when a pod starts, the pod does not start (it cannot
   unwrap the KEKs: fail closed), so the gauge never shows 0 then; alert on the pod not being ready.
