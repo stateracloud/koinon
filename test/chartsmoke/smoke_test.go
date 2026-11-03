@@ -4,6 +4,7 @@ package chartsmoke_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -98,6 +99,10 @@ func describeMode(name, valuesFile string) {
 			_, err = cl.Admin.CoreV1().ServiceAccounts(namespace).Create(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "default"}}, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			AddReportEntry("operator Secrets", fmt.Sprint(provisionOperatorSecrets(ctx, cl, r)))
+			// The KMS the KEKs are wrapped by, set up as the operator would before the install.
+			if k := kmsOf(r); k != nil {
+				startOpenBao(ctx, cl, nw.Name, k)
+			}
 		}, NodeTimeout(5*time.Minute))
 
 		AfterEach(func(ctx SpecContext) {
@@ -183,6 +188,40 @@ func describeMode(name, valuesFile string) {
 				}
 			}
 		}, SpecTimeout(5*time.Minute))
+
+		// With a KMS (ADR 0085 decision 12) the key-admin Job, a plain Job of the release, created the
+		// KEK Secret and added the KEK keyAdmin.addKey names, each wrapped by the KMS: the Secret
+		// holds no key in the clear, and koinon-api, which may only decrypt, starts from it below.
+		It("wraps every KEK with the KMS", func(ctx SpecContext) {
+			k := kmsOf(r)
+			if k == nil {
+				Skip("the KEKs are local in this mode")
+			}
+			s := cl.Secret(ctx, kekSecretName(r))
+			Expect(s).NotTo(BeNil(), "the key-admin Job created the KEK Secret")
+			Expect(s.Data).To(HaveKey("active"))
+			var ids []string
+			for id, v := range s.Data {
+				if id == "active" {
+					continue
+				}
+				ids = append(ids, id)
+				var stored struct{ Backend, Key string }
+				Expect(json.Unmarshal(v, &stored)).To(Succeed(), "KEK %s is stored wrapped (JSON), not as the key", id)
+				Expect(stored.Backend).To(Equal("openbao"), "KEK %s", id)
+				Expect(stored.Key).To(Equal(k.transitMount+"/"+k.key), "KEK %s", id)
+			}
+			for _, j := range r.Jobs {
+				for _, c := range j.Spec.Template.Spec.Containers {
+					for _, a := range c.Args {
+						if id, ok := strings.CutPrefix(a, "--add-key="); ok {
+							Expect(ids).To(ContainElement(id), "the key-admin Job added %s", id)
+						}
+					}
+				}
+			}
+			Expect(ids).To(ContainElement(string(s.Data["active"])))
+		})
 
 		// With the DBOS runtime on (ADR 0085), the executor ID is the pod name from the downward API,
 		// and the migrate Job (a pre-install hook, so it ran above) creates the tables the runtime
