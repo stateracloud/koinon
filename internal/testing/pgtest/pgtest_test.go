@@ -5,6 +5,7 @@ package pgtest_test
 import (
 	"context"
 	"database/sql"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -245,7 +246,12 @@ var _ = Describe("pgtest", Ordered, func() {
 var _ = Describe("EnsureRole", func() {
 	open := func(ctx context.Context, dsn, app string) *sql.DB {
 		GinkgoHelper()
-		db, err := sql.Open("pgx", dsn+"&application_name="+app)
+		u, err := url.Parse(dsn)
+		Expect(err).NotTo(HaveOccurred())
+		q := u.Query()
+		q.Set("application_name", app)
+		u.RawQuery = q.Encode()
+		db, err := sql.Open("pgx", u.String())
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(db.Close)
 		return db
@@ -293,7 +299,7 @@ var _ = Describe("EnsureRole", func() {
 		Eventually(func(g Gomega) int {
 			var n int
 			g.Expect(observer.QueryRowContext(ctx,
-				`SELECT count(*) FROM pg_stat_activity WHERE application_name = 'ensure_waiter' AND wait_event_type = 'Lock'`).Scan(&n)).To(Succeed())
+				`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND application_name = 'ensure_waiter' AND wait_event_type = 'Lock'`).Scan(&n)).To(Succeed())
 			return n
 		}).WithContext(ctx).Should(Equal(1))
 		Expect(done).NotTo(Receive(), "B must still be waiting")
