@@ -8,6 +8,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 )
 
 // Endpoints and LaunchCommand expose the flavor launch commands to the external test package.
@@ -105,3 +106,6 @@ type Repository = repository
 type Refusal = refusal
 
 func RefusalNote(refs []Refusal, cwd string) string { return refusalNote(refs, cwd) }
+
+// OutcomeMetrics is what the run owner counts with (internal/runoutcome).
+func OutcomeMetrics(m *Metrics) runoutcome.Metrics { return outcomeMetrics{m} }

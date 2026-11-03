@@ -8,6 +8,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/runlimits"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 )
 
 // outcomes are the label values of koinon_agentd_runs_finished_total: the run states agentd moves
@@ -36,6 +37,10 @@ type Metrics struct {
 	// export_failed); TraceSpansExported those the listener accepted (ADR 0074).
 	TraceSpansDropped  *prometheus.CounterVec
 	TraceSpansExported prometheus.Counter
+	// RunEventWriteFailures counts run events that could not be written after their tries, by class
+	// (diagnostic: dropped, the run went on; business: the run was abandoned) and reason (ADR 0074,
+	// amendment of 2026-10-31).
+	RunEventWriteFailures *prometheus.CounterVec
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered).
@@ -68,6 +73,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		TraceSpansExported: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_agentd_trace_spans_exported_total", Help: "Run spans the OTLP listener accepted.",
 		}),
+		RunEventWriteFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_agentd_run_event_write_failures_total", Help: "Run events that could not be written after their tries, by class (diagnostic: dropped and the run went on; business: the run was abandoned) and reason (timeout, conn, transient, other).",
+		}, []string{"class", "reason"}),
 		SandboxWait: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name: "koinon_agentd_sandbox_wait_duration_seconds", Help: "Time a run waited for its agent's sandbox to be ready, whatever the result.",
 			Buckets: []float64{0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300},
@@ -89,9 +97,15 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, r := range []string{dropQueueFull, dropExportFailed, dropRejected, dropShutdown} {
 		m.TraceSpansDropped.WithLabelValues(r)
 	}
+	for _, c := range []runoutcome.EventClass{runoutcome.ClassBusiness, runoutcome.ClassDiagnostic} {
+		for _, r := range runoutcome.WriteFailures {
+			m.RunEventWriteFailures.WithLabelValues(c.String(), string(r))
+		}
+	}
 	if reg != nil {
 		reg.MustRegister(m.Claimed, m.Finished, m.Takeovers, m.SandboxWait, m.ModelWait, m.Requeued,
-			m.SandboxWaitCap, m.WrapUpNotices, m.TimeLimitStops, m.TraceSpansDropped, m.TraceSpansExported)
+			m.SandboxWaitCap, m.WrapUpNotices, m.TimeLimitStops, m.TraceSpansDropped, m.TraceSpansExported,
+			m.RunEventWriteFailures)
 	}
 	return m
 }
@@ -107,4 +121,8 @@ func (o outcomeMetrics) Requeued() { o.m.Requeued.Inc() }
 
 func (o outcomeMetrics) SandboxWaitCap(cause execution.SandboxWaitCause) {
 	o.m.SandboxWaitCap.WithLabelValues(string(cause)).Inc()
+}
+
+func (o outcomeMetrics) EventWriteFailed(class runoutcome.EventClass, reason runoutcome.WriteFailure) {
+	o.m.RunEventWriteFailures.WithLabelValues(class.String(), string(reason)).Inc()
 }
