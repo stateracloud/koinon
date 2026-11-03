@@ -13,7 +13,11 @@
 -- starts empty is a new install and gets a new ID, and a KEK Secret left over from the old one then
 -- does not unwrap, which is right: it protects nothing in this database. It is not secret.
 --
--- One row, created here and never changed: UPDATE, DELETE and TRUNCATE are refused for every role.
+-- One row, created here and never changed. The triggers below refuse UPDATE, DELETE and TRUNCATE:
+-- they guard against mistakes, not against a determined database owner. The table's owner can DROP
+-- the table or DISABLE TRIGGER, and `pg_restore --disable-triggers` and
+-- `session_replication_role = replica` skip them. Changing the row only makes the bound KEKs stop
+-- opening (fail closed); it opens nothing.
 
 -- +goose Up
 

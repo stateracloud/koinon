@@ -607,7 +607,7 @@ func serve(ctx context.Context, cfg config) error {
 	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithTriggers(svc).WithModelCheck(echo)
 
 	reg := metrics.NewRegistry()
-	reg.MustRegister(kekMetrics.ActiveReachable)
+	reg.MustRegister(kekMetrics.Collectors()...)
 	if durableRT != nil {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
 		reg.MustRegister(durableRT.Collector())

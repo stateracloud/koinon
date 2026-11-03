@@ -286,14 +286,17 @@ before.
 
 Every KEK the key-admin Job wraps is bound to the install: the KMS call carries the install ID as
 part of its authenticated data, so the wrapped KEK opens only next to the database it was made for.
-A KEK Secret copied to another install (or a staging copy of production pointed at the same KMS
-key), or a database restored into the wrong install, then fails to load with "cannot open envelope …
+A KEK Secret copied to another install (one with its own database, even on the same KMS key), or a
+database restored into the wrong install, then fails to load with "cannot open envelope …
 it was wrapped for install A and this is install B", the same error as a wrong key, never as a KMS
 outage.
 
 **Where the install ID comes from.** The first migration of a release with #615 writes a random
-UUID into the table `install_identity` of the database; it can be read but never changed, deleted
-or added to. `keys status` prints it ("The install ID is …"). It is not secret. The database is the
+UUID into the table `install_identity` of the database. Triggers refuse UPDATE, DELETE and TRUNCATE
+of it; they guard against mistakes, not against the database owner: the table's owner can DROP the
+table or `ALTER TABLE … DISABLE TRIGGER`, and `pg_restore --disable-triggers` and
+`session_replication_role = replica` skip the triggers. A changed ID only makes the bound KEKs stop
+opening (fail closed); it opens nothing. `keys status` prints it ("The install ID is …"). It is not secret. The database is the
 one place that is born with the data and travels with it, so the ID stays the same through:
 
 | Event | Install ID |
@@ -304,6 +307,26 @@ one place that is born with the data and travels with it, so the ID stays the sa
 | `helm uninstall` and reinstall that keeps the database (external Postgres, a retained PVC) | Unchanged. |
 | A move to another namespace or cluster with the same database | Unchanged. |
 | A new, empty database | New: it is a new install, and a KEK Secret left over from the old one does not open. Delete that Secret (or restore the old database). |
+
+**A clone is the same install.** A copy of the database (a restored backup, a CNPG clone, a
+snapshot) keeps the install ID, so the production KEKs open next to it: a staging environment made
+from a copy of production is, to the binding, production. For a staging copy that must **not** open
+the production KEKs:
+
+- give it its own KMS key (its own transit key, or its own AWS KMS key) and never grant its
+  service accounts decrypt on the production key; this is what keeps it out, the install ID does not;
+- never copy the production KEK Secret into it; it starts with no KEK Secret and its key-admin Job
+  creates a new one only while the database holds no encrypted values, so remove the copied values
+  first (or start from an empty database, which is also a new install ID) and enter the staging
+  credentials again.
+
+**A data-only restore onto a migrated database fails.** `pg_restore --data-only` (or a `COPY` of
+the tables) onto a database that already ran the migrations stops on `install_identity`: the target
+already holds its own row and the table has one row only (`duplicate key value violates unique
+constraint "install_identity_pkey"`). Restore schema and data into an empty database instead (a
+plain `pg_restore`, or drop and recreate the target first), so the backup's install ID, the one its
+KEKs are bound to, is the one that comes back. Do not delete the target's row to make room: its
+triggers refuse that, and an ID that is not the backup's leaves the bound KEKs closed.
 
 **Restore order does not matter.** Restore the database and the KEK Secret in either order; until
 both are back, the pods do not start (fail closed) and start on their own once both match. A running
@@ -317,7 +340,11 @@ the data; a generated Secret would be backed up and restored with the KEK Secret
 binding; the namespace or cluster UID changes on a move or a reinstall that keeps the data.
 
 **KEKs wrapped before #615 keep working.** They are stored in the old form (`"fmt":1`) and open as
-before; `keys status` shows them as `…, unbound` in WRAPPED BY and lists them. Bind them either by
+before; `keys status` shows them as `…, unbound` in WRAPPED BY and lists them. koinon-api and the
+reconciler export `koinon_kek_unbound` (no labels), the number of KMS-wrapped KEKs in the loaded
+key set that are not bound, set on every load (at start and about once a minute); local KEKs are
+not counted. While it is above 0 each process logs a warning with the count and the remedy (at most
+every 10 minutes). Alert on `koinon_kek_unbound > 0` if you want every KEK bound. Bind them either by
 rotating (add, activate, rewrap, retire, as above), or by setting
 `secrets.kek.kms.keyAdmin.rewrapUnbound: true` and upgrading: the key-admin Job wraps each unbound KEK
 of the primary wrapping key again, bound (the KEK itself is unchanged, so no value needs a rewrap).
