@@ -68,10 +68,12 @@ subjects:
     name: {{ $sa }}
     namespace: {{ .Release.Namespace }}
 ---
+# The hash names the pod template: a changed template is a new Job, never an update of an immutable
+# one. The prefix is cut to 52 so the hash always survives the 63-character limit.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ printf "%s-%s" $sa ($pod | sha256sum | trunc 10) | trunc 63 | trimSuffix "-" }}
+  name: {{ printf "%s-%s" ($sa | trunc 52 | trimSuffix "-") ($pod | sha256sum | trunc 10) }}
   labels:
     {{- include "koinon.labels" (list . "key-admin") | nindent 4 }}
   annotations:

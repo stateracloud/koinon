@@ -124,7 +124,10 @@ func startOpenBao(ctx context.Context, cl *cluster, nwName string, k *kmsSetting
 		testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
 			hc.ExtraHosts = append(hc.ExtraHosts, apiServerName+":host-gateway")
 		}),
-		testcontainers.WithWaitStrategy(wait.ForHTTP("/v1/sys/health").WithPort("8200/tcp").WithStartupTimeout(2*time.Minute)),
+		// The dev listener is IPv4 only: wait.ForHTTP would dial "localhost", which is ::1 first on some
+		// machines (OrbStack). Wait for the log line, then poll the health on the IPv4 host below. The
+		// deadline is explicit: WithWaitStrategy's default of 60 s would override the startup timeout.
+		testcontainers.WithWaitStrategyAndDeadline(2*time.Minute, wait.ForLog("Development mode should NOT be used").WithStartupTimeout(2*time.Minute)),
 	)
 	if ctr != nil {
 		DeferCleanup(func(context.Context) { _ = testcontainers.TerminateContainer(ctr) })
@@ -135,6 +138,14 @@ func startOpenBao(ctx context.Context, cl *cluster, nwName string, k *kmsSetting
 	mapped, err := ctr.MappedPort(ctx, "8200/tcp")
 	Expect(err).NotTo(HaveOccurred())
 	bao := openBaoAPI{base: fmt.Sprintf("http://%s:%s", h, mapped.Port())}
+	Eventually(func(g Gomega) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, bao.base+"/v1/sys/health", nil)
+		g.Expect(err).NotTo(HaveOccurred())
+		resp, err := http.DefaultClient.Do(req)
+		g.Expect(err).NotTo(HaveOccurred())
+		_ = resp.Body.Close()
+		g.Expect(resp.StatusCode).To(Equal(http.StatusOK))
+	}).WithTimeout(time.Minute).Should(Succeed())
 
 	bao.post(ctx, "/v1/sys/mounts/"+k.transitMount, map[string]any{"type": "transit"})
 	bao.post(ctx, "/v1/"+k.transitMount+"/keys/"+k.key, map[string]any{})
