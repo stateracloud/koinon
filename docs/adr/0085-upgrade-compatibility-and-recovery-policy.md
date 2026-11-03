@@ -314,7 +314,11 @@ Implementation-level unknowns, to settle in the sub-issues:
     `update` on `transit/encrypt/<key>` and `transit/decrypt/<key>`, never `create`: with `create`,
     encrypt makes a missing key on the spot, so a mistyped key name would wrap under a new key.
   - Identity: adapters sign in with the pod's identity (OpenBao Kubernetes auth, the AWS default
-    chain with IRSA; procoduck, 2026-11-02), so no credential is in Helm values, env or a sandbox.
+    chain with IRSA; procoduck, 2026-11-02), so no credential is in Helm values, env or a sandbox. The
+    AWS adapter (#417, `secretstore/awskms`) narrows the default chain to pod identity: IRSA's web
+    identity token or EKS Pod Identity, read again on each refresh. It never reads static keys
+    (`AWS_ACCESS_KEY_ID` and friends are ignored with a warning), the shared config files or the
+    instance metadata, so a node's role cannot stand in for the pod's.
   - Only once a KMS primary is configured: koinon-api (with its `keys` commands) and the reconciler
     are decrypt-only (agentd holds no keyring), and a separate key-admin Job with its own service account is the only
     identity with encrypt rights. It wraps new KEKs: on first install and on demand for `keys add`
@@ -441,7 +445,7 @@ Titles only here; each is opened after this ADR is accepted.
 12. durable: `koinon_durable_workflows_pending{version}` metric and alert (#331)
 13. security: key-wrapping interface, the local Secret adapter and its key export, fingerprints in the database and an unreachable-key metric (#332)
 14. security: Vault/OpenBao transit adapter
-15. security: AWS KMS adapter
+15. security: AWS KMS adapter (#417)
 16. keys: `keys forget` for a lost key (credentials marked lost, new kopia repositories, audited)
 17. keys: new kopia repository per agent after a compromise, with S3 credential rotation (#332)
 18. docs: secret-keys runbook covers home repositories, trace credentials, KMS, loss and compromise (#332)

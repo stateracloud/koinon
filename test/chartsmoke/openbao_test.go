@@ -40,15 +40,19 @@ const openBaoImage = "docker.io/openbao/openbao:2.4.1"
 // openBaoRootToken is the dev server's root token: obviously fake, and only the test container's.
 const openBaoRootToken = "koinon_test_not-a-real-token"
 
-// kmsSettings is what the rendered pods expect of OpenBao, read from their env (KOINON_OPENBAO_*):
-// the server the chart points at, its transit key and Kubernetes auth mount, and the role each
-// ServiceAccount signs in as.
+// kmsSettings is what the rendered pods expect of the KMS, read from their env: the backend
+// (KOINON_KEK_BACKEND) and its settings (KOINON_OPENBAO_* or KOINON_AWSKMS_*).
 type kmsSettings struct {
+	backend string
+	// OpenBao: the server the chart points at, its transit key and Kubernetes auth mount, and the
+	// role each ServiceAccount signs in as.
 	address, transitMount, key, authMount string
 	// roles maps an OpenBao role to the ServiceAccount it binds; admin roles may encrypt.
 	roles map[string]string
 	admin map[string]bool
-	// caConfigMap is the ConfigMap the pods mount the OpenBao CA from ("" when none).
+	// AWS KMS: the region, the key and the endpoints the pods call.
+	region, keyID, endpoint, stsEndpoint string
+	// caConfigMap is the ConfigMap the pods mount the KMS's CA from ("" when none).
 	caConfigMap string
 }
 
@@ -61,33 +65,64 @@ func kmsOf(r *rendered) *kmsSettings {
 			for _, e := range c.Env {
 				env[e.Name] = e.Value
 			}
-			if env["KOINON_KEK_BACKEND"] == "" || env["KOINON_KEK_BACKEND"] == "local" {
+			backend := env["KOINON_KEK_BACKEND"]
+			if backend == "" || backend == "local" {
 				continue
 			}
-			Expect(env["KOINON_KEK_BACKEND"]).To(Equal("openbao"), "the smoke test runs OpenBao only")
 			if k == nil {
-				k = &kmsSettings{roles: map[string]string{}, admin: map[string]bool{}}
+				k = &kmsSettings{backend: backend, roles: map[string]string{}, admin: map[string]bool{}}
 			}
-			k.address, k.transitMount, k.key, k.authMount = env["KOINON_OPENBAO_ADDRESS"], env["KOINON_OPENBAO_TRANSIT_MOUNT"], env["KOINON_OPENBAO_KEY"], env["KOINON_OPENBAO_AUTH_MOUNT"]
+			Expect(backend).To(Equal(k.backend), "%s uses another KMS than the other pods", c.Name)
 			sa := ps.ServiceAccountName
 			if sa == "" {
 				sa = "default"
 			}
-			role := env["KOINON_OPENBAO_ROLE"]
-			Expect(role).NotTo(BeEmpty(), "%s signs in to OpenBao with a role", c.Name)
-			if prev, ok := k.roles[role]; ok {
-				Expect(prev).To(Equal(sa), "OpenBao role %s is used by two ServiceAccounts", role)
+			caVolume := ""
+			switch backend {
+			case "openbao":
+				caVolume = "openbao-ca"
+				k.address, k.transitMount, k.key, k.authMount = env["KOINON_OPENBAO_ADDRESS"], env["KOINON_OPENBAO_TRANSIT_MOUNT"], env["KOINON_OPENBAO_KEY"], env["KOINON_OPENBAO_AUTH_MOUNT"]
+				role := env["KOINON_OPENBAO_ROLE"]
+				Expect(role).NotTo(BeEmpty(), "%s signs in to OpenBao with a role", c.Name)
+				if prev, ok := k.roles[role]; ok {
+					Expect(prev).To(Equal(sa), "OpenBao role %s is used by two ServiceAccounts", role)
+				}
+				k.roles[role] = sa
+				k.admin[role] = k.admin[role] || slices.Contains(c.Args, "key-admin")
+			case "awskms":
+				caVolume = "awskms-ca"
+				k.region, k.keyID, k.endpoint, k.stsEndpoint = env["KOINON_AWSKMS_REGION"], env["KOINON_AWSKMS_KEY_ID"], env["KOINON_AWSKMS_ENDPOINT"], env["KOINON_AWSKMS_STS_ENDPOINT"]
+			default:
+				Fail(fmt.Sprintf("%s: the smoke test runs no KMS for backend %q", c.Name, backend))
 			}
-			k.roles[role] = sa
-			k.admin[role] = k.admin[role] || slices.Contains(c.Args, "key-admin")
 			for _, v := range ps.Volumes {
-				if v.Name == "openbao-ca" && v.ConfigMap != nil {
+				if v.Name == caVolume && v.ConfigMap != nil {
 					k.caConfigMap = v.ConfigMap.Name
 				}
 			}
 		}
 	}
 	return k
+}
+
+// start runs the KMS the render points at, set up as the operator would before the install. Call
+// it once the namespace exists.
+func (k *kmsSettings) start(ctx context.Context, cl *cluster, nwName string) {
+	GinkgoHelper()
+	switch k.backend {
+	case "openbao":
+		startOpenBao(ctx, cl, nwName, k)
+	case "awskms":
+		startLocalStack(ctx, cl, nwName, k)
+	}
+}
+
+// keyName is how a KEK wrapped by this KMS names the key (secretstore.Wrapper.KeyID).
+func (k *kmsSettings) keyName() string {
+	if k.backend == "openbao" {
+		return k.transitMount + "/" + k.key
+	}
+	return k.keyID
 }
 
 // startOpenBao runs the OpenBao the render points at, as an operator would set it up for Koinon:
@@ -103,7 +138,7 @@ func startOpenBao(ctx context.Context, cl *cluster, nwName string, k *kmsSetting
 	host, port := u.Hostname(), u.Port()
 	Expect(port).NotTo(BeEmpty(), "name the port in secrets.kek.kms.openbao.address")
 
-	caPEM, certPEM, keyPEM := openBaoCerts(host)
+	caPEM, certPEM, keyPEM := serverCerts(host)
 	listener := fmt.Sprintf(`listener "tcp" {
   address       = "0.0.0.0:%s"
   tls_cert_file = "/openbao/tls/tls.crt"
@@ -214,13 +249,13 @@ func (b openBaoAPI) post(ctx context.Context, path string, body any) {
 	Expect(resp.StatusCode).To(BeNumerically("<", 300), "OpenBao %s: %s", path, out)
 }
 
-// openBaoCerts is a throwaway CA and a serving certificate for host.
-func openBaoCerts(host string) (caPEM, certPEM, keyPEM []byte) {
+// serverCerts is a throwaway CA and a serving certificate for host.
+func serverCerts(host string) (caPEM, certPEM, keyPEM []byte) {
 	now := time.Now().Add(-time.Minute)
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	must(err)
 	caTmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "koinon-chartsmoke-openbao-ca"},
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "koinon-chartsmoke-kms-ca"},
 		NotBefore: now, NotAfter: now.Add(24 * time.Hour),
 		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
 	}

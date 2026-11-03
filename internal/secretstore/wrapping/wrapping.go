@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/secretstore/awskms"
 	"github.com/stateracloud/koinon/internal/secretstore/openbao"
 )
 
@@ -35,6 +36,8 @@ const (
 	BackendLocal = secretstore.BackendLocal
 	// BackendOpenBao is an OpenBao (or Vault) transit key (#416).
 	BackendOpenBao = openbao.Backend
+	// BackendAWSKMS is an AWS KMS symmetric key (#417).
+	BackendAWSKMS = awskms.Backend
 )
 
 // Config is the key-wrapping configuration of a process. A KMS is an option, not a mandate: the
@@ -44,17 +47,20 @@ const (
 // credential) and its construction to New. The key-admin Job and the decrypt-only services apply
 // only once a KMS primary is configured.
 type Config struct {
-	// Backend is the primary: "" or BackendLocal, or BackendOpenBao.
+	// Backend is the primary: "" or BackendLocal, BackendOpenBao or BackendAWSKMS.
 	Backend string
 	// OpenBao is the transit key when Backend is BackendOpenBao.
 	OpenBao openbao.Config
+	// AWSKMS is the KMS key when Backend is BackendAWSKMS. Its Identity is not a flag: New reads it
+	// from the pod's environment (IRSA or EKS Pod Identity) when it is unset.
+	AWSKMS awskms.Config
 }
 
 // Flags registers the configuration's flags on fs. The chart sets them on every process that holds
 // the keyring (koinon-api, the reconciler) and on the key-admin Job, from one values block.
 func (c *Config) Flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.Backend, "kek-backend", BackendLocal,
-		"what wraps the KEKs: local (the Secret-held KEK) or openbao (an OpenBao or Vault transit key)")
+		"what wraps the KEKs: local (the Secret-held KEK), openbao (an OpenBao or Vault transit key) or awskms (an AWS KMS key)")
 	fs.StringVar(&c.OpenBao.Address, "openbao-address", "", "OpenBao server, https://host:port (kek-backend=openbao)")
 	fs.StringVar(&c.OpenBao.CACertFile, "openbao-ca-file", "", "PEM bundle that verifies OpenBao's certificate; empty is the system roots")
 	fs.StringVar(&c.OpenBao.Namespace, "openbao-namespace", "", "OpenBao namespace, if any")
@@ -64,6 +70,12 @@ func (c *Config) Flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.OpenBao.Role, "openbao-role", "", "Kubernetes auth role this pod signs in as")
 	fs.StringVar(&c.OpenBao.TokenFile, "openbao-token-file", openbao.DefaultTokenFile, "the pod's service account token")
 	fs.DurationVar(&c.OpenBao.Timeout, "openbao-timeout", 0, "bound on one OpenBao call; 0 is the default (5s)")
+	fs.StringVar(&c.AWSKMS.Region, "awskms-region", "", "AWS region of the KMS key (kek-backend=awskms)")
+	fs.StringVar(&c.AWSKMS.KeyID, "awskms-key-id", "", "the KMS key that wraps the KEKs: key ARN (recommended), key ID, alias/<name> or alias ARN")
+	fs.StringVar(&c.AWSKMS.Endpoint, "awskms-endpoint", "", "KMS endpoint, https://host[:port] (a VPC endpoint); empty is the region's")
+	fs.StringVar(&c.AWSKMS.STSEndpoint, "awskms-sts-endpoint", "", "STS endpoint for IRSA, https://host[:port]; empty is the region's")
+	fs.StringVar(&c.AWSKMS.CACertFile, "awskms-ca-file", "", "PEM bundle that verifies the KMS and STS endpoints; empty is the system roots")
+	fs.DurationVar(&c.AWSKMS.Timeout, "awskms-timeout", 0, "bound on one AWS KMS call; 0 is the default (5s)")
 }
 
 // New returns the wrappers for cfg in role. KEKs stored before a switch to a KMS still unwrap
@@ -72,10 +84,13 @@ func New(_ context.Context, cfg Config, role Role) (secretstore.Wrappers, error)
 	var primary secretstore.Wrapper
 	switch cfg.Backend {
 	case "", BackendLocal:
+		// Likely a half-done switch to a KMS (the backend flag forgotten): say so, since the process
+		// would otherwise wrap new KEKs locally without a word.
 		if s := openBaoSettings(cfg.OpenBao); len(s) > 0 {
-			// Likely a half-done switch to OpenBao (the backend flag forgotten): say so, since the
-			// process would otherwise wrap new KEKs locally without a word.
 			slog.Warn("OpenBao settings are ignored: the KEK backend is local (set --kek-backend=openbao to use them)", "settings", s)
+		}
+		if s := awsKMSSettings(cfg.AWSKMS); len(s) > 0 {
+			slog.Warn("AWS KMS settings are ignored: the KEK backend is local (set --kek-backend=awskms to use them)", "settings", s)
 		}
 		primary = secretstore.Local{}
 	case BackendOpenBao:
@@ -84,8 +99,22 @@ func New(_ context.Context, cfg Config, role Role) (secretstore.Wrappers, error)
 			return secretstore.Wrappers{}, err
 		}
 		primary = w
+	case BackendAWSKMS:
+		c := cfg.AWSKMS
+		if c.Identity == (awskms.Identity{}) {
+			var ignored []string
+			c.Identity, ignored = awskms.IdentityFromEnv()
+			if len(ignored) > 0 {
+				slog.Warn("static AWS keys are ignored: the awskms backend signs in with the pod's identity (IRSA or EKS Pod Identity) only", "variables", ignored)
+			}
+		}
+		w, err := awskms.New(c)
+		if err != nil {
+			return secretstore.Wrappers{}, err
+		}
+		primary = w
 	default:
-		return secretstore.Wrappers{}, fmt.Errorf("unknown KEK backend %q (local or openbao)", cfg.Backend)
+		return secretstore.Wrappers{}, fmt.Errorf("unknown KEK backend %q (local, openbao or awskms)", cfg.Backend)
 	}
 	if role == KeyAdmin {
 		return secretstore.NewKeyAdminWrappers(primary)
@@ -110,5 +139,22 @@ func openBaoSettings(c openbao.Config) []string {
 	add("openbao-role", c.Role != "")
 	add("openbao-token-file", c.TokenFile != "" && c.TokenFile != openbao.DefaultTokenFile)
 	add("openbao-timeout", c.Timeout != 0)
+	return set
+}
+
+// awsKMSSettings names the AWS KMS settings of c that differ from the flags' defaults.
+func awsKMSSettings(c awskms.Config) []string {
+	var set []string
+	add := func(name string, on bool) {
+		if on {
+			set = append(set, name)
+		}
+	}
+	add("awskms-region", c.Region != "")
+	add("awskms-key-id", c.KeyID != "")
+	add("awskms-endpoint", c.Endpoint != "")
+	add("awskms-sts-endpoint", c.STSEndpoint != "")
+	add("awskms-ca-file", c.CACertFile != "")
+	add("awskms-timeout", c.Timeout != 0)
 	return set
 }

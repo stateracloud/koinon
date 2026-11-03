@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+# The KEKs wrapped by an AWS KMS key (ADR 0085 decision 12, #417): the key-admin Job creates the KEK
+# Secret and adds a second KEK; koinon-api and the reconciler only decrypt. Each signs in with IRSA
+# (its ServiceAccount's role). The chart smoke test runs LocalStack (KMS and STS) with TLS at this
+# endpoint and adds what the EKS Pod Identity Webhook would to the pods.
+openshell:
+  address: openshell.openshell.svc:8080
+  insecure: true
+postgres:
+  mode: external
+  external:
+    secretName: koinon-db
+bootstrapAdmin:
+  enabled: false
+preflight:
+  enabled: false
+secrets:
+  kek:
+    kms:
+      backend: awskms
+      awskms:
+        region: us-east-1
+        keyId: alias/koinon-kek
+        endpoint: https://localstack:4566
+        stsEndpoint: https://localstack:4566
+        caConfigMap: localstack-ca
+        roleArns:
+          api: arn:aws:iam::000000000000:role/koinon-api-decrypt
+          reconciler: arn:aws:iam::000000000000:role/koinon-reconciler-decrypt
+          keyAdmin: arn:aws:iam::000000000000:role/koinon-key-admin-encrypt
+      keyAdmin:
+        addKey: smoke-added-kek

@@ -590,7 +590,7 @@ egress.allowedInternalHosts; both are joined. */}}
 {{- end }}
 
 {{/*
-The KMS that wraps the KEKs (values secrets.kek.kms, ADR 0085 decision 12): "openbao", or empty for
+The KMS that wraps the KEKs (values secrets.kek.kms, ADR 0085 decision 12): "openbao" or "awskms", or empty for
 the local Secret-held KEKs. With a KMS, koinon-api never creates the KEK Secret (KOINON_KEK_CREATE
 false): the key-admin Job does (key-admin.yaml), since only it may encrypt.
 */}}
@@ -601,8 +601,9 @@ false): the key-admin Job does (key-admin.yaml), since only it may encrypt.
 
 {{/*
 The KMS settings of one identity (dict root, role: api, reconciler or keyAdmin), as the KOINON_ forms
-of the --kek-backend and --openbao-* flags (internal/secretstore/wrapping). Each identity signs in
-with its own service account token as its own role; nothing here is a credential.
+of the --kek-backend, --openbao-* and --awskms-* flags (internal/secretstore/wrapping). Each identity
+signs in with its own service account token as its own role (OpenBao) or IAM role (AWS); nothing
+here is a credential.
 */}}
 {{- define "koinon.kmsEnv" -}}
 {{- $kms := .root.Values.secrets.kek.kms }}
@@ -632,26 +633,74 @@ with its own service account token as its own role; nothing here is a credential
 - name: KOINON_OPENBAO_CA_FILE
   value: /etc/koinon/openbao-ca/ca.crt
 {{- end }}
+{{- else if eq (include "koinon.kms" .root) "awskms" }}
+{{- $a := $kms.awskms }}
+{{- /* No credential and no AWS_* variable: IRSA's webhook or the EKS Pod Identity Agent gives the
+pod its identity (AWS_ROLE_ARN and a token file), and the adapter never reads static keys. */}}
+- name: KOINON_KEK_BACKEND
+  value: awskms
+- name: KOINON_AWSKMS_REGION
+  value: {{ $a.region | quote }}
+- name: KOINON_AWSKMS_KEY_ID
+  value: {{ $a.keyId | quote }}
+{{- with $a.endpoint }}
+- name: KOINON_AWSKMS_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
+{{- with $a.stsEndpoint }}
+- name: KOINON_AWSKMS_STS_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
+{{- with $a.timeout }}
+- name: KOINON_AWSKMS_TIMEOUT
+  value: {{ . | quote }}
+{{- end }}
+{{- if $a.caConfigMap }}
+- name: KOINON_AWSKMS_CA_FILE
+  value: /etc/koinon/awskms-ca/ca.crt
+{{- end }}
 {{- end }}
 {{- end }}
 
-{{/* The CA of the OpenBao server, when values name one (a ConfigMap: a CA is not secret). */}}
+{{/* The ConfigMap with the KMS's CA when values name one (a CA is not secret), and its volume name. */}}
+{{- define "koinon.kmsCA" -}}
+{{- $b := include "koinon.kms" . }}
+{{- if and (eq $b "openbao") .Values.secrets.kek.kms.openbao.caConfigMap }}openbao-ca={{ .Values.secrets.kek.kms.openbao.caConfigMap }}
+{{- else if and (eq $b "awskms") .Values.secrets.kek.kms.awskms.caConfigMap }}awskms-ca={{ .Values.secrets.kek.kms.awskms.caConfigMap }}
+{{- end }}
+{{- end }}
+
 {{- define "koinon.kmsVolumeMount" -}}
-{{- if and (eq (include "koinon.kms" .) "openbao") .Values.secrets.kek.kms.openbao.caConfigMap }}
-- name: openbao-ca
-  mountPath: /etc/koinon/openbao-ca
+{{- with include "koinon.kmsCA" . }}
+{{- $v := splitList "=" . }}
+- name: {{ index $v 0 }}
+  mountPath: /etc/koinon/{{ index $v 0 }}
   readOnly: true
 {{- end }}
 {{- end }}
 
 {{- define "koinon.kmsVolume" -}}
-{{- if and (eq (include "koinon.kms" .) "openbao") .Values.secrets.kek.kms.openbao.caConfigMap }}
-- name: openbao-ca
+{{- with include "koinon.kmsCA" . }}
+{{- $v := splitList "=" . }}
+- name: {{ index $v 0 }}
   configMap:
-    name: {{ .Values.secrets.kek.kms.openbao.caConfigMap }}
+    name: {{ index $v 1 }}
     items:
       - key: ca.crt
         path: ca.crt
+{{- end }}
+{{- end }}
+
+{{/*
+The annotations of an identity's ServiceAccount (dict root, role: api, reconciler or keyAdmin): with
+the awskms backend and an IRSA role for it, eks.amazonaws.com/role-arn, which makes EKS's webhook give
+the pod that role's web identity. Empty otherwise.
+*/}}
+{{- define "koinon.kmsServiceAccountAnnotations" -}}
+{{- if eq (include "koinon.kms" .root) "awskms" }}
+{{- with index .root.Values.secrets.kek.kms.awskms.roleArns .role }}
+eks.amazonaws.com/role-arn: {{ . | quote }}
+{{- end }}
 {{- end }}
 {{- end }}
 
@@ -674,6 +723,26 @@ sandbox policies. The reconciler's RoleBinding to it in each workspace namespace
 {{- end }}
 {{- if and (hasPrefix "http://" $o.address) (not (regexMatch "^http://(127\\.[0-9.]+|localhost|\\[::1\\])(:[0-9]+)?/?$" $o.address)) }}
 {{- fail "secrets.kek.kms.openbao.address must be https: the KEKs travel to OpenBao (plain http only on a loopback address)" }}
+{{- end }}
+{{- end }}
+{{- if eq (include "koinon.kms" .) "awskms" }}
+{{- $a := .Values.secrets.kek.kms.awskms }}
+{{- if not $a.region }}
+{{- fail "secrets.kek.kms.awskms.region is required when secrets.kek.kms.backend is awskms" }}
+{{- end }}
+{{- if not $a.keyId }}
+{{- fail "secrets.kek.kms.awskms.keyId is required when secrets.kek.kms.backend is awskms: the KMS key that wraps the KEKs" }}
+{{- end }}
+{{- if hasPrefix "alias/aws/" $a.keyId }}
+{{- fail "secrets.kek.kms.awskms.keyId names an AWS managed key, whose key policy cannot limit who decrypts: use a customer managed key" }}
+{{- end }}
+{{- if and (hasPrefix "arn:" $a.keyId) (not (contains (printf ":kms:%s:" $a.region) $a.keyId)) }}
+{{- fail "secrets.kek.kms.awskms.keyId is a key ARN in another region than secrets.kek.kms.awskms.region" }}
+{{- end }}
+{{- range $what, $e := dict "endpoint" $a.endpoint "stsEndpoint" $a.stsEndpoint }}
+{{- if and (hasPrefix "http://" $e) (not (regexMatch "^http://(127\\.[0-9.]+|localhost|\\[::1\\])(:[0-9]+)?/?$" $e)) }}
+{{- fail (printf "secrets.kek.kms.awskms.%s must be https: the KEKs and signed requests travel to it (plain http only on a loopback address)" $what) }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if and .Values.secrets.kek.kms.keyAdmin.addKey (not (include "koinon.kms" .)) }}

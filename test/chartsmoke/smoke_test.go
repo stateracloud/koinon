@@ -101,7 +101,7 @@ func describeMode(name, valuesFile string) {
 			AddReportEntry("operator Secrets", fmt.Sprint(provisionOperatorSecrets(ctx, cl, r)))
 			// The KMS the KEKs are wrapped by, set up as the operator would before the install.
 			if k := kmsOf(r); k != nil {
-				startOpenBao(ctx, cl, nw.Name, k)
+				k.start(ctx, cl, nw.Name)
 			}
 		}, NodeTimeout(5*time.Minute))
 
@@ -208,8 +208,8 @@ func describeMode(name, valuesFile string) {
 				ids = append(ids, id)
 				var stored struct{ Backend, Key string }
 				Expect(json.Unmarshal(v, &stored)).To(Succeed(), "KEK %s is stored wrapped (JSON), not as the key", id)
-				Expect(stored.Backend).To(Equal("openbao"), "KEK %s", id)
-				Expect(stored.Key).To(Equal(k.transitMount+"/"+k.key), "KEK %s", id)
+				Expect(stored.Backend).To(Equal(k.backend), "KEK %s", id)
+				Expect(stored.Key).To(Equal(k.keyName()), "KEK %s", id)
 			}
 			for _, j := range r.Jobs {
 				for _, c := range j.Spec.Template.Spec.Containers {

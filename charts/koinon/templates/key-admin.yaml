@@ -17,7 +17,7 @@ once, and an unchanged upgrade or Argo CD sync leaves the finished one alone. A 
 changed in place, and this way it never has to be. Each run is idempotent.
 
 The service account keeps one name (<fullname>-key-admin), the subject OpenBao's Kubernetes auth
-role binds.
+role binds, and the one an AWS IAM role trusts (IRSA's annotation or an EKS Pod Identity association).
 */ -}}
 {{- if include "koinon.kms" . }}
 {{- $sa := include "koinon.componentName" (list . "key-admin") }}
@@ -31,6 +31,11 @@ metadata:
   name: {{ $sa }}
   labels:
     {{- include "koinon.labels" (list . "key-admin") | nindent 4 }}
+  {{- with include "koinon.kmsServiceAccountAnnotations" (dict "root" . "role" "keyAdmin") | trim }}
+  # IRSA: the IAM role that may encrypt with the KMS key (secrets.kek.kms.awskms.roleArns.keyAdmin).
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
 automountServiceAccountToken: false
 ---
 apiVersion: rbac.authorization.k8s.io/v1
