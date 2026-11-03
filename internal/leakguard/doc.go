@@ -33,22 +33,31 @@
 //     decoded. There is no density gate, so a separator of any length between chunks of any
 //     length is read through; the price is that prose is projected too (its letters are
 //     base64 and base32 symbols), which resynchronisation turns into nothing, at a cost the
-//     work and time budgets bound (a 1 MiB argument is checked well inside 500 ms). A
-//     projection keeps only stretches of 16 or more decoded bytes that are 60% letters, digits
-//     or spaces, so chance ASCII in misaligned decodings does not become a variant.
+//     work and time budgets bound (a 1 MiB argument takes at most about 0.4 s of the 1 s a call has, so
+//     the clock is a backstop that a benign argument within the size cap does not reach). A
+//     projection keeps stretches of 16 or more decoded bytes that are 60% letters, digits or
+//     spaces (ASCII punctuation and NULs do not count against them), so chance ASCII in
+//     misaligned decodings does not become a variant; shorter stretches (5 or more bytes, base64
+//     and base32) are kept only in a chain that touches its neighbours and is together that long
+//     and wordy, as the pieces of a text encoded piece by piece and joined are.
 //
 // Each base64, base32 and hex run is decoded at each of its own alignments and also
 // resynchronised (every alignment decoded, the stretches that are text joined in order), so two
 // encoded parts at different alignments in one run ("<b1>Q<b2>") decode as one text. A run is
 // replaced by its decoding only when the decoding holds text: at least 16 bytes, a stretch of
-// 12 printable characters, 90% of it printable and half of it letters, digits or spaces, which
+// 12 printable characters, 90% of it printable and half of it, punctuation and symbols aside,
+// letters, digits or spaces (an attacker can put a "-" or an emoji between the letters), which
 // random bytes almost never are (a misaligned decoding of an ordinary word stays as it was).
+// The projection of a stream is also decoded whole at each alignment, so chunked base64 of
+// non-ASCII text decodes; an NUL among the printable characters does not end their run.
 // Of several decodings of one run (alignments, byte orders) the one with the most characters
 // that fold to ASCII letters and digits wins. Every decoding is also read as UTF-16 (either byte order and
 // alignment; PowerShell's -EncodedCommand is UTF-16LE base64), and that reading is kept when
-// its characters sit in at most two 256-character blocks, as one script's text does. Data wrapped so
+// its letters and digits sit in at most two 256-character blocks, as one script's text does
+// (spaces, punctuation and emoji between them are left out of the count). Data wrapped so
 // that no 12 printable characters stand together is the "own cipher" case the URL rule
-// backstops. Decoding nests up to Limits.MaxDepth (3) levels; text that still decodes further at
+// backstops, and the URL rule runs only on fetch and search calls: for any other tool a text
+// that decodes to nothing printable passes the taint check. Decoding nests up to Limits.MaxDepth (3) levels; text that still decodes further at
 // that depth fails closed (ReasonDecodeDepth).
 //
 // # Split reassembly
@@ -56,9 +65,11 @@
 // Text split across several arguments of one call is reassembled two ways: all arguments
 // joined in call order, and every ordered pair of arguments (the last PairJoinBytes of one
 // joined to the first PairJoinBytes of the other), so a two-way split matches in either order.
-// With more than MaxPairArgs non-empty arguments every pair is still joined when the pairs fit
-// a budget (at most 4*MaxPairArgs^2 pairs and MaxWorkBytes/8 of joined text); otherwise the
-// call fails closed (ReasonBudgetArgs). Splits across calls are not reassembled; the per-host
+// The joined text of all pairs is bounded (MaxWorkBytes/64 before decoding): long arguments are
+// joined shorter (halving PairJoinBytes down to 64 bytes) rather than running out of time. With
+// more than MaxPairArgs non-empty arguments every pair is still checked when there are at most
+// 16*MaxPairArgs^2 pairs and the joined text fits at 64 bytes a side; otherwise the call fails
+// closed (ReasonBudgetArgs). Splits across calls are not reassembled; the per-host
 // and per-run URL budgets bound them.
 //
 // # Fingerprints (winnowing)

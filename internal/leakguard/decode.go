@@ -11,6 +11,7 @@ import (
 	"html"
 	"slices"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -205,20 +206,19 @@ func backslashEscape(s string, i int) (rune, int) {
 // are. Prose around it is mostly inside the base64 and base32 alphabets and stays: resync, which
 // keeps only stretches that decode to text, discards what it turns into.
 type projection struct {
-	name  string
-	keep  [256]bool
-	codec *blockCodec
+	name string
+	keep [256]bool
 }
 
 var projections = []*projection{
-	newProjection("base64", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", &b64StdCodec),
-	newProjection("base64url", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", &b64URLCodec),
-	newProjection("base32", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz234567", &b32Codec),
-	newProjection("hex", "0123456789abcdefABCDEF", &hexCodec),
+	newProjection("base64", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"),
+	newProjection("base64url", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"),
+	newProjection("base32", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz234567"),
+	newProjection("hex", "0123456789abcdefABCDEF"),
 }
 
-func newProjection(name, alphabet string, c *blockCodec) *projection {
-	p := &projection{name: name, codec: c}
+func newProjection(name, alphabet string) *projection {
+	p := &projection{name: name}
 	for i := range len(alphabet) {
 		p.keep[alphabet[i]] = true
 	}
@@ -229,6 +229,9 @@ func newProjection(name, alphabet string, c *blockCodec) *projection {
 // the blocks of prose or binary that decode to ASCII by chance are dropped. A leak worth
 // catching is at least the threshold (24 canonical characters) long.
 const minSegmentBytes = 16
+
+// minShortBytes is the shortest stretch resync considers as part of a chain (see resync).
+const minShortBytes = 5
 
 // decodeProjected decodes the projections of s (see projection). It returns nothing for a text
 // that is its own projection (the run decoders cover it) or whose projection is too short.
@@ -251,27 +254,57 @@ func decodeProjected(s string) []string {
 		if len(buf) < minRun || len(buf) == len(s) {
 			continue
 		}
-		if t, ok := resyncText(resync(buf, p.codec)); ok {
+		var cands []string
+		switch p.name {
+		case "base64", "base64url":
+			for i, c := range buf {
+				switch c {
+				case '-':
+					buf[i] = '+'
+				case '_':
+					buf[i] = '/'
+				}
+			}
+			cands = b64Candidates(buf)
+		case "base32":
+			for i, c := range buf {
+				if 'a' <= c && c <= 'z' {
+					buf[i] = c - 'a' + 'A'
+				}
+			}
+			cands = b32Candidates(buf)
+		default:
+			cands = hexCandidates(string(buf))
+		}
+		if t, ok := best(cands); ok {
 			out = append(out, t)
 		}
 	}
 	return out
 }
 
-// wordy reports whether at least 60% of the bytes of b, NULs aside (UTF-16), are letters,
-// digits or spaces, as text is and the chance ASCII of a misaligned decoding is not.
+// wordy reports whether at least 60% of the bytes of b are letters, digits or spaces, as text is
+// and the chance ASCII of a misaligned decoding is not. NULs (UTF-16) and ASCII punctuation are
+// neutral: an attacker can put one punctuation character between the letters ("t-h-e- -s-e"),
+// which halves their share, so punctuation is left out of the count and a floor of
+// minSegmentBytes/2 letters, digits and spaces stands in for the length it no longer adds.
 func wordy(b []byte) bool {
 	n, w := 0, 0
 	for _, c := range b {
-		if c == 0 {
-			continue
-		}
-		n++
-		if isAlnumByte(c) || c == ' ' {
+		switch {
+		case c == 0 || isASCIIPunct(c):
+		case isAlnumByte(c) || c == ' ':
+			n++
 			w++
+		default:
+			n++
 		}
 	}
-	return n > 0 && 5*w >= 3*n
+	return w >= minSegmentBytes/2 && 5*w >= 3*n
+}
+
+func isASCIIPunct(c byte) bool {
+	return 0x21 <= c && c <= 0x7e && !isAlnumByte(c)
 }
 
 // A blockCodec decodes one fixed-size block of an encoding; resync uses it to decode a stream
@@ -298,7 +331,6 @@ func newCodec(alphabet string, chars, bytes int, bits uint, fold bool) blockCode
 
 var (
 	b64StdCodec = newCodec("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", 4, 3, 6, false)
-	b64URLCodec = newCodec("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", 4, 3, 6, false)
 	b32Codec    = newCodec("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", 8, 5, 5, true)
 	b32Raw      = base32.StdEncoding.WithPadding(base32.NoPadding)
 	hexCodec    = newCodec("0123456789abcdef", 2, 1, 4, true)
@@ -354,28 +386,39 @@ var asciiOK = func() (t [256]bool) {
 	return t
 }()
 
-// resync decodes stream at every alignment, keeps the stretches of at least minSegmentBytes
-// that decode to wordy ASCII text (or UTF-16 of it), and joins them in stream order, so two
-// encoded parts at different alignments in one run ("<b1>Q<b2>") decode as one text.
+// resync decodes stream at every alignment, keeps the stretches that decode to wordy ASCII text
+// (or UTF-16 of it), and joins them in stream order, so two encoded parts at different
+// alignments in one run ("<b1>Q<b2>") decode as one text. A stretch is kept when it is at least
+// minSegmentBytes long. Shorter ones (down to minShortBytes, base64 and base32 only) are kept
+// when they chain: they touch (within one block) the stretches beside them, as the pieces of
+// text encoded one by one and joined do, and the chain is together long and wordy enough.
 func resync(stream []byte, c *blockCodec) []byte {
 	minBlocks := (minSegmentBytes + c.bytes - 1) / c.bytes
+	shortBlocks := minBlocks // 1 block: no short stretches
+	if c.chars > 2 {
+		shortBlocks = (minShortBytes + c.bytes - 1) / c.bytes
+	}
 	type seg struct {
 		start, end int
 		data       []byte
+		long       bool
 	}
-	var segs []seg
+	var segs, shorts []seg
 	buf := make([]byte, c.bytes)
 	for off := range c.chars {
 		start, n := -1, 0
 		flush := func(end int) {
-			if n >= minBlocks {
+			if n >= shortBlocks {
 				data := make([]byte, 0, n*c.bytes)
 				for p := start; p < end; p += c.chars {
 					c.block(buf, stream[p:p+c.chars])
 					data = append(data, buf...)
 				}
-				if wordy(data) {
-					segs = append(segs, seg{start, end, data})
+				switch {
+				case n < minBlocks:
+					shorts = append(shorts, seg{start, end, data, false})
+				case wordy(data):
+					segs = append(segs, seg{start, end, data, true})
 				}
 			}
 			start, n = -1, 0
@@ -393,19 +436,12 @@ func resync(stream []byte, c *blockCodec) []byte {
 		}
 		flush(p)
 	}
-	slices.SortStableFunc(segs, func(a, b seg) int {
+	byStart := func(a, b seg) int {
 		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(b.end, a.end))
-	})
-	var out []byte
-	end := 0
-	partial := func(src []byte) {
-		if len(src) == 0 || len(src) >= c.chars {
-			return
-		}
-		if n := c.block(buf, src); n > 0 && asciiText(buf[:n]) {
-			out = append(out, buf[:n]...)
-		}
 	}
+	slices.SortStableFunc(segs, byStart)
+	var parts []seg // the stretches in stream order, each cut to start where the one before ends
+	end := 0
 	for _, s := range segs {
 		if s.end <= end {
 			continue
@@ -414,15 +450,65 @@ func resync(stream []byte, c *blockCodec) []byte {
 			drop := (end - s.start + c.chars - 1) / c.chars
 			s.data = s.data[drop*c.bytes:]
 			s.start += drop * c.chars
-		} else if end > 0 {
-			// the short last block of the previous part, cut off by the next part's alignment
-			partial(stream[end:s.start])
 		}
-		out = append(out, s.data...)
+		parts = append(parts, s)
 		end = s.end
 	}
-	if end > 0 {
-		partial(stream[end:])
+	if len(shorts) > 0 {
+		// a short stretch joins only where it overlaps none of the others
+		slices.SortStableFunc(shorts, byStart)
+		var all []seg
+		pi, last := 0, 0
+		for _, s := range shorts {
+			if s.start < last {
+				continue
+			}
+			for pi < len(parts) && parts[pi].end <= s.start {
+				all = append(all, parts[pi])
+				pi++
+			}
+			if pi < len(parts) && parts[pi].start < s.end {
+				continue
+			}
+			all = append(all, s)
+			last = s.end
+		}
+		parts = append(all, parts[pi:]...)
+		slices.SortStableFunc(parts, byStart)
+	}
+	var out []byte
+	partial := func(src []byte) []byte {
+		if len(src) == 0 || len(src) >= c.chars {
+			return nil
+		}
+		if n := c.block(buf, src); n > 0 && asciiText(buf[:n]) {
+			return buf[:n]
+		}
+		return nil
+	}
+	// chains: parts at most one block apart (the short last block of one part is cut off by the
+	// next part's alignment and sits in that gap)
+	for i := 0; i < len(parts); {
+		j := i + 1
+		for j < len(parts) && parts[j].start-parts[j-1].end < c.chars {
+			j++
+		}
+		var chain []byte
+		long := false
+		for k := i; k < j; k++ {
+			if k > i {
+				chain = append(chain, partial(stream[parts[k-1].end:parts[k].start])...)
+			}
+			chain = append(chain, parts[k].data...)
+			long = long || parts[k].long
+		}
+		if long || len(chain) >= minSegmentBytes && wordy(chain) {
+			out = append(out, chain...)
+			if j == len(parts) {
+				out = append(out, partial(stream[parts[j-1].end:])...)
+			}
+		}
+		i = j
 	}
 	return out
 }
@@ -441,27 +527,33 @@ func decodeBase64(s string) []string {
 				buf[i] = '/'
 			}
 		}
-		var cands []string
-		dec := make([]byte, base64.RawStdEncoding.DecodedLen(len(buf)))
-		for off := range 4 {
-			r := buf[off:]
-			if len(r)%4 == 1 {
-				r = r[:len(r)-1]
-			}
-			if len(r) < minRun {
-				continue
-			}
-			if n, err := base64.RawStdEncoding.Decode(dec, r); err == nil {
-				if t, ok := asText(dec[:n]); ok {
-					cands = append(cands, t)
-				}
-			}
-		}
-		if t, ok := resyncText(resync(buf, &b64StdCodec)); ok {
-			cands = append(cands, t)
-		}
-		return best(cands)
+		return best(b64Candidates(buf))
 	})
+}
+
+// b64Candidates are the text readings of buf, a stream of the standard base64 alphabet: at each
+// of its 4 alignments, and resynchronised.
+func b64Candidates(buf []byte) []string {
+	var cands []string
+	dec := make([]byte, base64.RawStdEncoding.DecodedLen(len(buf)))
+	for off := range min(4, len(buf)+1) {
+		r := buf[off:]
+		if len(r)%4 == 1 {
+			r = r[:len(r)-1]
+		}
+		if len(r) < minRun {
+			continue
+		}
+		if n, err := base64.RawStdEncoding.Decode(dec, r); err == nil {
+			if t, ok := asText(dec[:n]); ok {
+				cands = append(cands, t)
+			}
+		}
+	}
+	if t, ok := resyncText(resync(buf, &b64StdCodec)); ok {
+		cands = append(cands, t)
+	}
+	return cands
 }
 
 // decodeBase32 returns the text with each base32 run replaced by its best decoding.
@@ -474,20 +566,25 @@ func decodeBase32(s string) []string {
 				up[i] = c - 'a' + 'A'
 			}
 		}
-		var cands []string
-		if r := up[:len(up)/8*8]; len(r) >= minRun {
-			dec := make([]byte, b32Raw.DecodedLen(len(r)))
-			if n, err := b32Raw.Decode(dec, r); err == nil {
-				if t, ok := asText(dec[:n]); ok {
-					cands = append(cands, t)
-				}
+		return best(b32Candidates(up))
+	})
+}
+
+// b32Candidates are the text readings of up, a stream of the upper-case base32 alphabet.
+func b32Candidates(up []byte) []string {
+	var cands []string
+	if r := up[:len(up)/8*8]; len(r) >= minRun {
+		dec := make([]byte, b32Raw.DecodedLen(len(r)))
+		if n, err := b32Raw.Decode(dec, r); err == nil {
+			if t, ok := asText(dec[:n]); ok {
+				cands = append(cands, t)
 			}
 		}
-		if t, ok := resyncText(resync(up, &b32Codec)); ok {
-			cands = append(cands, t)
-		}
-		return best(cands)
-	})
+	}
+	if t, ok := resyncText(resync(up, &b32Codec)); ok {
+		cands = append(cands, t)
+	}
+	return cands
 }
 
 // decodeHex returns the text with each hex sequence replaced by its best decoding. A sequence is
@@ -502,25 +599,7 @@ func decodeHex(s string) []string {
 	last := 0
 	changed := false
 	for _, q := range seqs {
-		var cands []string
-		for off := range 2 {
-			d := q.digits[off:]
-			d = d[:len(d)/2*2]
-			if len(d) < minRun {
-				continue
-			}
-			dec := make([]byte, len(d)/2)
-			for i := range dec {
-				dec[i] = unhex(d[2*i])<<4 | unhex(d[2*i+1])
-			}
-			if t, ok := asText(dec); ok {
-				cands = append(cands, t)
-			}
-		}
-		if t, ok := resyncText(resync([]byte(q.digits), &hexCodec)); ok {
-			cands = append(cands, t)
-		}
-		t, ok := best(cands)
+		t, ok := best(hexCandidates(q.digits))
 		if !ok {
 			continue
 		}
@@ -537,6 +616,30 @@ func decodeHex(s string) []string {
 	}
 	b.WriteString(s[last:])
 	return []string{b.String()}
+}
+
+// hexCandidates are the text readings of digits, a string of hex digits, at both alignments and
+// resynchronised.
+func hexCandidates(digits string) []string {
+	var cands []string
+	for off := range min(2, len(digits)+1) {
+		d := digits[off:]
+		d = d[:len(d)/2*2]
+		if len(d) < minRun {
+			continue
+		}
+		dec := make([]byte, len(d)/2)
+		for i := range dec {
+			dec[i] = unhex(d[2*i])<<4 | unhex(d[2*i+1])
+		}
+		if t, ok := asText(dec); ok {
+			cands = append(cands, t)
+		}
+	}
+	if t, ok := resyncText(resync([]byte(digits), &hexCodec)); ok {
+		cands = append(cands, t)
+	}
+	return cands
 }
 
 type hexSeq struct {
@@ -642,7 +745,7 @@ func best(cands []string) (string, bool) {
 		n := 0
 		for _, r := range c {
 			switch {
-			case r == utf8.RuneError || r != '\n' && r != '\r' && r != '\t' && !unicode.IsPrint(r):
+			case r == utf8.RuneError || r != '\n' && r != '\r' && r != '\t' && !unicode.IsPrint(r) && !unicode.IsSpace(r):
 				n -= 8
 			case r < utf8.RuneSelf && unicode.IsLetter(r) || unicode.IsDigit(r) && r < utf8.RuneSelf:
 				n += 2
@@ -719,6 +822,16 @@ func asTextWith(b []byte, isText func([]byte) bool) (string, bool) {
 	return best(cands)
 }
 
+// bmpNeutral marks the code units of the Basic Multilingual Plane that are spaces or punctuation.
+var bmpNeutral = sync.OnceValue(func() *[1 << 16]bool {
+	var t [1 << 16]bool
+	for u := range t {
+		r := rune(u)
+		t[u] = unicode.IsSpace(r) || unicode.IsPunct(r)
+	}
+	return &t
+})
+
 func fromUTF16(b []byte, le bool) (string, bool) {
 	unit := func(i int) uint16 {
 		if le {
@@ -727,10 +840,28 @@ func fromUTF16(b []byte, le bool) (string, bool) {
 		return uint16(b[2*i])<<8 | uint16(b[2*i+1])
 	}
 	n := len(b) / 2
-	// one script's text sits in at most two 256-character blocks (its own and ASCII)
+	// one script's text sits in at most two 256-character blocks (its own and ASCII). What an
+	// attacker puts between the letters is left out of the count: spaces and punctuation (U+3000,
+	// U+2014) and pairs that are no letter or digit (emoji), which sit in blocks of their own.
+	// What is left (letters, digits, marks, other symbols, controls) must be a quarter of the
+	// characters and sit in two blocks for three quarters of it.
 	var pages [256]int
-	for i := range n {
-		pages[unit(i)>>8]++
+	counted, chars := 0, 0
+	neutral := bmpNeutral()
+	for i := 0; i < n; i++ {
+		u := unit(i)
+		chars++
+		if 0xd800 <= u && u < 0xdc00 && i+1 < n { // a surrogate pair is one character
+			r := utf16.DecodeRune(rune(u), rune(unit(i+1)))
+			i++
+			if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+				continue
+			}
+		} else if neutral[u] {
+			continue
+		}
+		pages[u>>8]++
+		counted++
 	}
 	first, second := 0, 0
 	for _, c := range pages {
@@ -740,7 +871,7 @@ func fromUTF16(b []byte, le bool) (string, bool) {
 			second = c
 		}
 	}
-	if 4*(first+second) < 3*n {
+	if 4*counted < chars || 4*(first+second) < 3*counted {
 		return "", false
 	}
 	u := make([]uint16, n)
@@ -757,33 +888,70 @@ func fromUTF16(b []byte, le bool) (string, bool) {
 // of it printable, and at least half of it letters, digits and spaces. Random bytes, which by
 // chance hold such a run once every 150 KB or so, fail the shares; a decoding with a garbage
 // prefix or a part at another alignment fails them too, and resync recovers its text.
+//
+// Punctuation and symbols are neutral in the letters share (an attacker can put one between
+// every two letters, "t-h-e- -s-e-c-r-e-t", or an emoji), and any Unicode space is a space
+// (U+3000 between Cyrillic letters); the letters, digits and spaces must still be at least
+// textualRun/2 characters and half of the rest.
 func textual(b []byte) bool {
-	run, longest, printable, wordish, total := 0, 0, 0, 0, 0
+	run, longest, printable, wordish, neutral, total := 0, 0, 0, 0, 0, 0
 	for i := 0; i < len(b); {
+		if c := b[i]; c < utf8.RuneSelf { // ASCII, without the unicode tables
+			i++
+			total++
+			switch {
+			case isAlnumByte(c) || c == ' ' || c == '\n' || c == '\r' || c == '\t':
+				printable++
+				wordish++
+			case 0x21 <= c && c <= 0x7e:
+				printable++
+				neutral++
+			default:
+				run = 0
+				if 10*(total-printable) > len(b) { // over 10% unprintable already
+					return false
+				}
+				continue
+			}
+			run++
+			longest = max(longest, run)
+			continue
+		}
 		r, size := utf8.DecodeRune(b[i:])
 		i += size
 		total++
-		if r != utf8.RuneError && (r == '\n' || r == '\r' || r == '\t' || unicode.IsPrint(r)) {
+		if r != utf8.RuneError && (unicode.IsPrint(r) || unicode.IsSpace(r)) {
 			printable++
-			if r == ' ' || unicode.IsLetter(r) || unicode.IsDigit(r) {
+			switch {
+			case unicode.IsSpace(r) || unicode.IsLetter(r) || unicode.IsDigit(r):
 				wordish++
+			case unicode.IsPunct(r) || unicode.IsSymbol(r):
+				neutral++
 			}
 			run++
 			longest = max(longest, run)
 			continue
 		}
 		run = 0
+		if 10*(total-printable) > len(b) {
+			return false
+		}
 	}
-	return longest >= textualRun && 10*printable >= 9*total && 2*wordish >= total
+	return longest >= textualRun && 10*printable >= 9*total && wordish >= textualRun/2 && 2*wordish >= total-neutral
 }
 
+// longestPrintable is the longest stretch of printable ASCII in b. NULs neither extend nor end
+// it: UTF-16 of ASCII has one between every two characters, and an attacker may put one every
+// few bytes.
 func longestPrintable(b []byte) int {
 	run, longest := 0, 0
 	for _, c := range b {
-		if c >= 0x20 && c < 0x7f || c == '\n' || c == '\r' || c == '\t' {
+		switch {
+		case c == 0:
+		case c >= 0x20 && c < 0x7f || c == '\n' || c == '\r' || c == '\t':
 			run++
 			longest = max(longest, run)
-		} else {
+		default:
 			run = 0
 		}
 	}
