@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # A valid template that holds all three legs (ADR 0084): a read grant on a repository (private
-# data), a web read tool (untrusted input) and that tool is an auto-tier outbound fetch. The
+# data), a web read tool (untrusted input) and an auto-tier tool of an unclassified server, which
+# defaults to external-high (ADR 0091 decision 4). The
 # templates test must report it; it is not shipped.
 apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
@@ -27,4 +28,5 @@ spec:
       maxSpendUSD: "5.00"
     spendUSD: "10.00"
   instructions: |
-    Read the repository, then call `web_url_read` on the pages it links to.
+    Read the repository, then call `web_url_read` on the pages it links to,
+    then send what you found with `post_webhook`.

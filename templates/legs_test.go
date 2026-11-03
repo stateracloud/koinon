@@ -25,17 +25,35 @@ import (
 var webTools = regexp.MustCompile(`(?i)web_url_read|searxng_web_search|web search|search and fetch|search or fetch|fetch tool|search tool`)
 
 // webDeclaration is what such a tool declares: a fetch server whose results an outsider controls.
-// Fetches and search queries are external-low sinks, tools in the auto tier (ADR 0091 decision 1),
-// so the same tools are the outbound leg.
+// Fetches and search queries are external-low sinks (ADR 0091 decisions 1, 4 and 5): they get a byte
+// cap and never an approval, so they are not the outbound leg.
 var webDeclaration = mcpservers.Declaration{Kind: mcpservers.KindFetch, Legs: []string{mcpservers.LegUntrustedInput}}
+
+// toolCall matches a tool the instructions tell the agent to call, written in backticks.
+var toolCall = regexp.MustCompile("`([a-z]+(?:_[a-z]+)+)`")
+
+// knownTools are the tools the shipped templates name, with what they are under ADR 0091: the
+// platform's own questions, the forge tools (ask-tier or internal) and the external-low web tools.
+// A tool that is not here comes from an admin-allowed server nobody classified, which defaults to
+// external-high (ADR 0091 decision 4). Instructions name only auto-tier tools to call; a tool that
+// asks first is listed here so it does not count.
+var knownTools = map[string]bool{
+	"ask_user": true, "create_pull_request": true, "github_create_pull_request": true,
+	"gitea_create_pull_request": true, "comment_on_issue": true,
+	"web_url_read": true, "searxng_web_search": true,
+}
 
 type templateLegs struct {
 	untrustedInput bool
 	privateData    bool
-	autoOutbound   bool
+	// autoOutbound is an auto-tier external-high tool (ADR 0091 line 146).
+	autoOutbound bool
 }
 
 func (l templateLegs) all() bool { return l.untrustedInput && l.privateData && l.autoOutbound }
+
+// bothInputLegs is untrusted input and private data: the pair that makes the byte cap apply.
+func (l templateLegs) bothInputLegs() bool { return l.untrustedInput && l.privateData }
 
 // legsOf reads the legs a template gives an agent made from it.
 func legsOf(t *templates.Template) templateLegs {
@@ -54,17 +72,13 @@ func legsOf(t *templates.Template) templateLegs {
 		d := webDeclaration
 		l.untrustedInput = slices.Contains(d.Legs, mcpservers.LegUntrustedInput)
 		l.privateData = l.privateData || slices.Contains(d.Legs, mcpservers.LegPrivateData)
-		l.autoOutbound = d.Kind == mcpservers.KindFetch || d.Kind == mcpservers.KindSearch
+	}
+	for _, m := range toolCall.FindAllStringSubmatch(t.Spec.Instructions, -1) {
+		if !knownTools[m[1]] {
+			l.autoOutbound = true
+		}
 	}
 	return l
-}
-
-// knownAllThree lists the shipped templates that still hold all three legs, each with the reason.
-// The test below fails for a template that is not here, and for an entry that no longer holds all
-// three, so the list can only shrink. Do not add to it: split the template instead.
-var knownAllThree = map[string]string{
-	"lcm-upgrader": "reads the Gitea repository and release notes through the allowed fetch tools; " +
-		"the pull request it opens is an ask-tier call, but the fetch is not",
 }
 
 var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
@@ -77,7 +91,7 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 
 		w, ok := templates.Get("web-researcher")
 		Expect(ok).To(BeTrue())
-		Expect(legsOf(w)).To(Equal(templateLegs{untrustedInput: true, autoOutbound: true}), "web-researcher has no private data")
+		Expect(legsOf(w)).To(Equal(templateLegs{untrustedInput: true}), "web-researcher has no private data")
 		Expect(w.Spec.Grants).To(BeEmpty(), "web-researcher holds no grant")
 		Expect(w.Spec.Instructions).To(ContainSubstring("web_url_read"))
 		Expect(w.Spec.Instructions).NotTo(ContainSubstring("MCP"), "an MCP server of private data is not named")
@@ -87,10 +101,6 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 		all, err := templates.All()
 		Expect(err).NotTo(HaveOccurred())
 		for _, t := range all {
-			if reason, known := knownAllThree[t.Metadata.ID]; known {
-				Expect(legsOf(t).all()).To(BeTrue(), t.Metadata.ID+" is listed in knownAllThree ("+reason+") but no longer holds all three: remove it from the list")
-				continue
-			}
 			Expect(legsOf(t).all()).To(BeFalse(), t.Metadata.ID+" holds untrusted input, private data and an auto-tier outbound tool: split it")
 		}
 	})
@@ -111,7 +121,7 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 		changed, err := templates.Parse([]byte(raw))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(changed.Metadata.ID).To(Equal(r.Metadata.ID))
-		Expect(legsOf(changed).all()).To(BeTrue())
+		Expect(legsOf(changed).bothInputLegs()).To(BeTrue())
 	})
 
 	It("reports web-researcher again when it gets a repository grant back", func() {
@@ -119,6 +129,6 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 			"  grants:\n    - connector: gitea\n      scopes: [repo.read]\n      preset: read-only\n      targets: {min: 1, max: 1}\n", 1)
 		changed, err := templates.Parse([]byte(raw))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(legsOf(changed).all()).To(BeTrue())
+		Expect(legsOf(changed).bothInputLegs()).To(BeTrue())
 	})
 })
