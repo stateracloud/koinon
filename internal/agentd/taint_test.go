@@ -303,6 +303,36 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 		Expect(feed.texts).To(ContainElement("koinon-test page fetched during the summary"), "its text reached the fingerprints")
 	})
 
+	It("records, through the real feed, a result that carries its text twice, and the run carries on", func(ctx SpecContext) {
+		// Lab e2e step 6b on 1657dd6: opencode sends a finished tool's text as its content and
+		// again as its raw output, the two winnowed to the same fingerprints, the fingerprints'
+		// upsert refused the statement (SQLSTATE 21000), and every worker gave the run up until it
+		// failed.
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		out := "koinon-test private repository file\nwith a second line that the harness reports twice\n"
+		e.harness.set(func(h *harness) {
+			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
+				defer GinkgoRecover()
+				Expect(say(sdk.StartToolCall("c1", "bash", sdk.WithStartKind(sdk.ToolKindExecute)))).To(Succeed())
+				Expect(say(sdk.UpdateToolCall("c1", sdk.WithUpdateStatus(sdk.ToolCallStatusCompleted),
+					sdk.WithUpdateContent([]sdk.ToolCallContent{sdk.ToolContent(sdk.TextBlock(out))}),
+					sdk.WithUpdateRawOutput(map[string]any{"output": out})))).To(Succeed())
+				return true
+			}
+		})
+		r := e.enqueue(ctx, e.task(ctx, "feed"))
+		e.pool("agentd-feed-real", func(c *agentd.Config) { c.Taint = mcpguard.NewFeed(db, nil) })
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Expect(getRun(ctx, r).Epoch).To(Equal(int64(1)), "one worker ran it: no takeover")
+		var private bool
+		var fps int
+		Expect(db.QueryRow(ctx, `SELECT s.private_data, (SELECT count(*) FROM leak_guard_fingerprints f
+			WHERE f.org_id = s.org_id AND f.agent_id = s.agent_id AND f.generation = s.generation)
+			FROM leak_guard_sessions s WHERE s.org_id = $1 AND s.agent_id = $2`, e.org, e.agent.ID).Scan(&private, &fps)).To(Succeed())
+		Expect(private).To(BeTrue())
+		Expect(fps).To(BeNumerically(">", 0))
+	})
+
 	It("leaves the run to the newer worker when its feed is already fenced, as a takeover, not an interruption", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		feed := &fencedFeed{}

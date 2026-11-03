@@ -31,10 +31,13 @@ SET evicted = true, updated_at = now()
 WHERE org_id = @org_id AND agent_id = @agent_id AND generation = @generation;
 
 -- name: AddLeakGuardFingerprints :execrows
--- Adding a fingerprint again makes it new, so the eviction keeps what the session saw last.
+-- Adding a fingerprint again makes it new, so the eviction keeps what the session saw last. The
+-- DISTINCT is needed: the texts of one result winnow to the same fingerprints more than once (a
+-- tool's content and raw output), and ON CONFLICT DO UPDATE refuses to touch a row twice in one
+-- statement (SQLSTATE 21000).
 INSERT INTO leak_guard_fingerprints (org_id, agent_id, generation, fp, added_at)
-SELECT @org_id, @agent_id, @generation, f, now()
-FROM unnest(@fps::bigint[]) AS f
+SELECT @org_id, @agent_id, @generation, u.f, now()
+FROM (SELECT DISTINCT unnest(@fps::bigint[]) AS f) AS u
 ON CONFLICT (org_id, agent_id, generation, fp) DO UPDATE SET added_at = EXCLUDED.added_at;
 
 -- name: CountLeakGuardFingerprints :one

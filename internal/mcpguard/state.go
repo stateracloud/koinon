@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -171,8 +172,12 @@ func (s *State) AddFingerprints(ctx context.Context, sess Session, legs Legs, fp
 	})
 }
 
-// add inserts fingerprints in chunks and evicts the oldest past the bound.
+// add inserts fingerprints in chunks and evicts the oldest past the bound. The texts of one result
+// winnow to the same fingerprints more than once (a tool's content and its raw output, an edit's two
+// sides), so each is inserted once (AddLeakGuardFingerprints dedupes too: one statement may not
+// upsert a row twice).
 func (s *State) add(ctx context.Context, q *store.Queries, sess Session, fps []int64) error {
+	fps = slices.Compact(slices.Sorted(slices.Values(fps)))
 	const chunk = 8192
 	for len(fps) > 0 {
 		n := min(len(fps), chunk)
