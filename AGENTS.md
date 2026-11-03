@@ -20,7 +20,7 @@ Instructions for coding agents working on Koinon.
   env var it requires, a mount, a Secret key, an RBAC rule) is covered by `make test-chart-smoke`;
   extend it when you add a component or a startup input (#284). Details: `docs/dev/ci.md#chart-and-admission-tests`.
 - Sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`): `make test-admission`; its
-  OpenShell cases run on kind (`make test-escape-kind`).
+  OpenShell cases run on kind: `make dev-kind-up`, then `make test-escape-kind`.
 - Local cluster: kind is the dev loop (`make dev-kind-up`, `make dev`, `make test-e2e-kind`). Nothing
   needs the maintainers' home lab, registry or secret store; see CONTRIBUTING.md and `docs/dev/loop.md`.
   Real-model runs on your own cluster and budget: `docs/dev/real-model-tests.md`.
@@ -33,17 +33,20 @@ Instructions for coding agents working on Koinon.
   also the patch-line rule under Conventions, from the `hack/migrate-patch-line` marker);
   after merging main, `hack/migrate-renumber.sh` renumbers your branch's migrations.
 - CI and e2e (details: `docs/dev/ci.md`). Mark the PR ready (`hack/ship.sh --ready`, `gh pr ready`)
-  before you wait on it with `hack/pr-wait.sh`: a draft runs almost nothing and its green is not
-  merge evidence; get WIP feedback from `hack/preflight.sh`.
+  before you wait on it with `hack/pr-wait.sh`: a draft runs almost nothing (`go` and `web` show red
+  on purpose) and its green is not merge evidence; get WIP feedback from `hack/preflight.sh`.
+  To skip `go-test` on the lab gate: `hack/ship.sh --ready --lab-go-test` (#610).
   [Testing layers](docs/dev/ci.md#testing-layers) · [what `ci` runs when](docs/dev/ci.md#what-ci-runs-when)
 - Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. A needs-e2e PR needs a green
   `e2e-lab` status or `quickstart` run on its head (`e2e result` is red without one); with a lab run
-  `hack/e2e-remote.sh --argo`, else `gh workflow run e2e-kind.yml --ref <branch>`; exit 75/78/79 and
-  `--local` are in [the gate](docs/dev/ci.md#the-e2e-result-gate). `--local` is not merge evidence.
-- When main's kind e2e goes red, fix forward within 2 hours or revert it; RC tags are cut only from a
-  commit whose `quickstart` job succeeded ([details](docs/dev/ci.md#mains-e2e-regressions-and-release-tags)).
-- A new `ci.yml` job goes into `hack/ci-required.txt` in the same PR
-  ([required checks](docs/dev/ci.md#required-status-checks)).
+  `hack/e2e-remote.sh --argo`, else `gh workflow run e2e-kind.yml --ref <branch>` (or the `e2e`
+  label). Exit 75/78/79 and `--local` (not merge evidence): [testing layers](docs/dev/ci.md#testing-layers).
+- When main's kind e2e goes red, fix forward within 2 hours or revert the merge (`hack/e2e-bisect.sh`
+  opens an `e2e-regression` issue). RC and release tags are cut only from a commit whose `quickstart`
+  job succeeded (`hack/release-gate.sh` checks it).
+- A new `ci.yml` job goes into `hack/ci-required.txt` (or is listed advisory) in the same PR; a
+  required job must report on every PR and push (no workflow-level `paths:`).
+  ([required checks](docs/dev/ci.md#required-status-checks))
 - `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
 - Before pushing: `gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" .`. CI scans
   every commit of a pull request, so a leak fixed in a later commit still fails.
@@ -55,20 +58,20 @@ branch (ADR 0082), so two agents cannot hold one issue. Use `hack/claim.sh` (gh 
 refresh -s project` once, for the board).
 
 Session identity: the claim holder is `<login>/<host>/<session>`. Claude Code sessions use
-`CLAUDE_CODE_SESSION_ID` automatically; any other agent must `export KOINON_AGENT_SESSION=<unique id>`
-before it calls the script (otherwise one holder is generated per worktree). **Claude subagents share
-their parent's id: only the parent takes claims; a subagent never takes its own or sets its own id.**
-Copilot coding agent pull requests cannot pass the `claim` check (the author is the bot): a human opens
-or adopts them.
+`CLAUDE_CODE_SESSION_ID`; any other agent must `export KOINON_AGENT_SESSION=<unique id>` before it
+calls the script (otherwise one holder is generated per worktree). **Claude subagents share their
+parent's id: only the parent takes claims; a subagent never takes its own or sets its own id.**
+Copilot coding agent pull requests cannot pass the `claim` check (the author is the bot): a human
+opens or adopts them.
 
 1. `hack/claim.sh next` (or `next --label start-here` for the issues Andre marked for the contributor):
    Ready, `agent-ok`, current-milestone, unblocked, unclaimed issues, by Priority then age. Only
    humans move issues to Ready; never start an issue that is not listed unless your human names it.
-2. Overlap check, see "Working alongside another human" below.
-3. `hack/claim.sh take <N>`: one claim per session, eight per human, 2 h lease. A pull request that
-   closes several issues takes them together, `take N M` (all or nothing). Exit 2: pick another
-   issue. It assigns your human and sets In Progress. A person's own claim is `take <N> --human`
-   (3 days, `beat <N> --human` daily).
+2. Overlap check, see "Working alongside another human".
+3. `hack/claim.sh take <N>`: one claim per session, eight per human, 2 h lease. A PR that closes
+   several issues takes them together, `take N M` (all or nothing). Exit 2: pick another issue. It
+   assigns your human and sets In Progress. A person's own claim is `take <N> --human` (3 days,
+   `beat <N> --human` daily).
 4. Within 30 minutes: push `<type>/<N>-<slug>` and open a draft PR with `Closes #N`. The `claim`
    check needs the claim first; after `take` the script re-runs the failed check.
 5. `hack/claim.sh beat <N>` every 30 minutes and before long steps. **Pushes alone are not
@@ -79,22 +82,22 @@ or adopts them.
    on that issue and tell your human. Exit 1 is an error (for example the network): retry.
 7. Blocked by another issue: `hack/claim.sh block <N> <M>` (adds "blocked by", releases). New work
    you discover becomes a Backlog issue; do not start it.
-8. Finish: mark the PR ready, enable auto-merge (unless it needs `e2e-kind` first, see "Merging" under
-   Working rules), then `hack/claim.sh review <N>`. The claim is
-   released when the PR merges or closes. Never delete a claim branch: claims are only released.
+8. Finish: mark the PR ready, enable auto-merge (unless it needs `e2e-kind` first, see "Merging"),
+   then `hack/claim.sh review <N>`. The claim is released when the PR merges or closes. Never
+   delete a claim branch: claims are only released.
 9. Hand off: `hack/claim.sh release <N> --note "<state, branch, next step>"`; keep the branch and
    draft PR.
 10. Takeover only after the holder is dead (lease and PR activity out, plus 15 minutes) and never
     while its PR is ready for review: `hack/claim.sh take <N> --takeover`, then continue the
     existing branch. Your own dead session's claims, lanes kept: `hack/claim.sh adopt --from
-    <session> [N...]` (same dead rule). If you are a different human's agent, open a new PR from
-    that branch: the `claim` check wants the claim's human to be the PR author.
+    <session> [N...]` (same dead rule). A different human's agent opens a new PR from that branch:
+    the `claim` check wants the claim's human to be the PR author.
 11. A PR that conflicts with main while auto-merge is on gets the label `needs-update`: merge
-    `origin/main` yourself (the updater bot never pushes code to your branch).
-    The updater bot merges `main` into a branch only when the PR has auto-merge on, is not a draft,
-    is green on its current head (every required check of `hack/ci-required.txt` passed, newest run
-    per name; advisory and third-party checks do not count) and is behind `main`; a draft, a red or
-    a running PR is left alone, so sync a draft or red branch yourself when you need it.
+    `origin/main` yourself (the updater bot never pushes code to your branch). The bot merges
+    `main` into a branch only when the PR has auto-merge on, is not a draft, is green on its
+    current head (every required check of `hack/ci-required.txt` passed, newest run per name;
+    advisory and third-party checks do not count) and is behind `main`; a draft, a red or a running
+    PR is left alone, so sync those yourself when you need it.
 12. Releases: either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay
     Andre's. Tags are immutable by ruleset: fix a bad tag with the next rc (`docs/dev/releasing.md`).
 
@@ -103,9 +106,10 @@ or adopts them.
 A session that runs agents in parallel gives each one a lane (ADR 0082): the parent takes the claim
 with `hack/claim.sh take N --lane L`, creates the lane's worktree with `hack/wt.sh new`, and hands
 the agent the issue, the worktree and `docs/agents/subagent-brief.md`. One issue per lane, at most
-eight claims per human. Pick the model from the brief's "Which model" section. The parent beats, ships (`hack/ship.sh`) and releases; agents never call
-`claim.sh`. Each lane tests its own worktree: `hack/e2e-remote.sh --repo` is an `--argo` option, so
-on the local Docker run the script from the lane's worktree.
+eight claims per human. Pick the model from the brief's "Which model" section. The parent beats,
+ships (`hack/ship.sh`) and releases; agents never call `claim.sh`. Each lane tests its own
+worktree: `hack/e2e-remote.sh --repo` is an `--argo` option, so on the local Docker run the script
+from the lane's worktree.
 
 ## Maintainer lab (optional)
 
@@ -132,14 +136,13 @@ Two humans' agents change the same tree. Before you start, after `take`:
   `hack/adr-index.sh`, never edit the index table. **Migration numbers:** pick them late; after
   merging main run `hack/migrate-renumber.sh` if `hack/migrate-lint.sh` complains.
 - **Chart assertions** go in the owning file of `hack/chart-check.d/`; a new feature adds a new file.
-- **No unrelated dependency bumps** in a feature PR. **Proto:** never reuse or renumber a field
-  number, only add; `make breaking` must pass. **Golden files:** regenerate, do not hand-edit.
+- **No unrelated dependency bumps** in a feature PR. **Proto:** only add fields, never reuse or
+  renumber; `make breaking` must pass. **Golden files:** regenerate, do not hand-edit.
 - **Stop and ask your human** when: the change touches a sensitive path the other human owns
-  (`.github/CODEOWNERS` lists them; either human approves the other's PR there), you would change a
-  public API or the data model another open PR also changes, you need to rebase or force-push, a
-  test only you changed starts failing elsewhere, or the issue turns out bigger than its claim.
-- **Keep branches under a day.** Split the issue and release the rest instead of holding a claim
-  for days.
+  (`.github/CODEOWNERS`; either human approves the other's PR there), you would change a public API
+  or data model another open PR also changes, you need to rebase or force-push, a test only you
+  changed starts failing elsewhere, or the issue is bigger than its claim.
+- **Keep branches under a day.** Split the issue and release the rest instead of holding a claim.
 
 ## Conventions
 
