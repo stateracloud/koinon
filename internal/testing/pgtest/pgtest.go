@@ -18,10 +18,14 @@
 // server (a per-process random part), the template is built under an advisory lock and only read
 // afterwards, so processes share no database and no row. They do share the server's cluster-wide
 // objects: a suite on the default server changes no server setting and creates a role only under a
-// name no other suite uses, idempotently and without dropping it (the migrations suite's probe
-// roles). Above all it never creates a role the migrations or the code look for (koinon_app), since
-// that would change what another process's template or grants see. The durable suite, which does,
-// runs on Durable, a container no other process reaches.
+// name no other suite uses, through EnsureRole (race-free between processes) and without dropping it
+// (the migrations suite's probe roles). Above all it never creates a role the migrations or the code
+// look for (koinon_app) on the shared server, since that would change what another process's template
+// or grants see. The durable suite, which does, runs on Durable, a container no other process reaches.
+//
+// Roles are cluster-wide, so the one server-side input of the template besides the migration files is
+// whether koinon_app exists when it is built (00012 and 00019 revoke from it only then). The template
+// key records that: see AppRole and TemplateKey.
 // A suite that is run in parallel must start Postgres in BeforeSuite (not in an init or a package
 // variable) and may not rely on state outside the process other than its databases.
 package pgtest
@@ -36,6 +40,8 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"regexp"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 
@@ -234,13 +240,47 @@ func (s *server) exec(ctx context.Context, stmt string, args ...any) error {
 
 // templateFormat is part of the template key: bump it when how the template is built changes
 // without a migration changing, so a long-lived shared server does not hand out the old one.
-const templateFormat = "pgtest-template-v1"
+const templateFormat = "pgtest-template-v2"
 
-// MigrationsHash is the hex SHA-256 of every file of fsys (path and content, in lexical order),
-// the key of the template database: a changed, added or removed migration gives a new template.
+// AppRole is the NOLOGIN role the chart's CNPG bootstrap creates and the code grants to (ADR 0003).
+// Migrations 00012 and 00019 revoke from it only when it exists, so a template built on a server
+// that has it differs from one built without. Shared servers never get it from pgtest.
+const AppRole = "koinon_app"
+
+const gooseModule = "github.com/pressly/goose/v3"
+
+// gooseVersion is the version of the goose module linked into this binary: the migrations are run
+// by it, so a different goose can build a different schema from the same files.
+func gooseVersion() (string, error) {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "", fmt.Errorf("pgtest: no build info, cannot tell the goose version")
+	}
+	for _, dep := range info.Deps {
+		if dep.Path == gooseModule {
+			if dep.Replace != nil {
+				return dep.Replace.Path + "@" + dep.Replace.Version + dep.Replace.Sum, nil
+			}
+			return dep.Version, nil
+		}
+	}
+	return "", fmt.Errorf("pgtest: %s is not in the build info", gooseModule)
+}
+
+// MigrationsHash is the hex SHA-256 of the goose version and every file of fsys (path and content,
+// in lexical order), the key of the template database: a changed, added or removed migration, or a
+// different goose, gives a new template.
 func MigrationsHash(fsys fs.FS) (string, error) {
+	v, err := gooseVersion()
+	if err != nil {
+		return "", err
+	}
+	return migrationsHashFor(fsys, v)
+}
+
+func migrationsHashFor(fsys fs.FS, goose string) (string, error) {
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "%s\x00", templateFormat)
+	_, _ = fmt.Fprintf(h, "%s\x00%s\x00", templateFormat, goose)
 	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -269,6 +309,28 @@ func TemplateName() string {
 	return "koinon_tmpl_" + hash[:16]
 }
 
+// TemplateKey is the name of the template database that fits the server at adminDSN: TemplateName,
+// plus "_app" when the server has the role AppRole, because the migrations then run differently. A
+// server on which the role appears or goes away gets a second template instead of a stale one. The
+// check is not atomic with the build; nothing in pgtest creates the role on a shared server.
+func TemplateKey(ctx context.Context, adminDSN string) (string, error) {
+	ginkgo.GinkgoHelper()
+	name := TemplateName()
+	conn, err := pgx.Connect(ctx, adminDSN)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+	var has bool
+	if err := conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, AppRole).Scan(&has); err != nil {
+		return "", err
+	}
+	if has {
+		name += "_app"
+	}
+	return name, nil
+}
+
 // templateBuilds counts the templates this process migrated (the tests check it).
 var templateBuilds atomic.Int64
 
@@ -278,7 +340,8 @@ func (s *server) template(ctx context.Context) string {
 	mu.Lock()
 	defer mu.Unlock()
 	if s.tmpl == "" {
-		name := TemplateName()
+		name, err := TemplateKey(ctx, s.dsn)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(ensureTemplate(ctx, s.dsn, name)).To(gomega.Succeed())
 		s.tmpl = name
 	}
@@ -349,6 +412,29 @@ func migrate(ctx context.Context, dsn string) error {
 		return err
 	}
 	_, err = provider.Up(ctx)
+	return err
+}
+
+// Execer is what EnsureRole needs of *sql.DB, *sql.Conn and *sql.Tx.
+type Execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+var roleName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
+// EnsureRole creates the NOLOGIN role name unless it exists, for any number of processes and
+// goroutines at once. Roles are cluster-wide, so concurrent creators share one name space. Checking
+// pg_roles first and then creating is a race: two sessions both see no role and the second CREATE
+// ROLE fails on pg_authid_rolname_index (unique_violation, or duplicate_object when it lost by a
+// commit). So it creates first and treats both errors as "someone else did". A creator that finds
+// the name taken by an uncommitted CREATE ROLE waits on that transaction and then gets the error.
+// Use it for roles no other suite uses; never for AppRole on a shared server.
+func EnsureRole(ctx context.Context, db Execer, name string) error {
+	if !roleName.MatchString(name) {
+		return fmt.Errorf("pgtest: role name %q is not a plain lower-case identifier", name)
+	}
+	_, err := db.ExecContext(ctx, `DO $$ BEGIN CREATE ROLE `+name+` NOLOGIN; `+
+		`EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$`)
 	return err
 }
 
