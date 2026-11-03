@@ -71,6 +71,7 @@ import (
 	"github.com/stateracloud/koinon/internal/declarative"
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/ledger"
@@ -486,10 +487,14 @@ func serve(ctx context.Context, cfg config) error {
 	// cfg.kekWrapping says (ADR 0085 decision 12). koinon-api is decrypt-only: with a KMS, new KEKs
 	// come from the key-admin Job.
 	var keyring *secretstore.Keyring
-	wrappers, err := wrapping.New(ctx, cfg.kekWrapping, wrapping.Service)
+	// Once the install is bound-only (#615), KEKs stored unbound are refused; the marker is read on
+	// every load until it is set.
+	wrappers, err := wrapping.New(ctx, cfg.kekWrapping, wrapping.Service, installid.BoundOnlySource(pool))
 	if err != nil {
 		return err
 	}
+	// KMS-wrapped KEKs are bound to the install ID the database holds (#615).
+	wrappers = wrappers.WithInstallID(installid.Source(pool))
 	// On every load and reload: probe the active KEK's wrapping key (koinon_kek_active_reachable,
 	// registered below with the other metrics) and record the KEK fingerprints (#591).
 	kekMetrics := kekhealth.NewMetrics(nil)
@@ -500,8 +505,13 @@ func serve(ctx context.Context, cfg config) error {
 		// KEK loses every stored secret): koinon-api creates the Secret once, and only reads it after.
 		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret, Wrappers: wrappers}
 		if cfg.kekCreate {
-			created, err := kekStore.Ensure(ctx, time.Now(),
-				func(ctx context.Context) (bool, error) { return keyscli.AnyEnvelope(ctx, pool) })
+			// The first KEK of an install makes it bound-only (#615): no KEK stored unbound belongs here.
+			created, err := kekStore.EnsureWith(ctx, time.Now(),
+				func(ctx context.Context) (bool, error) { return keyscli.AnyEnvelope(ctx, pool) },
+				func(ctx context.Context) error {
+					_, err := installid.SetBoundOnly(ctx, pool, secretstore.BoundOnlyFirstInstall)
+					return err
+				})
 			if err != nil {
 				return err
 			}
@@ -604,7 +614,7 @@ func serve(ctx context.Context, cfg config) error {
 	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithTriggers(svc).WithModelCheck(echo)
 
 	reg := metrics.NewRegistry()
-	reg.MustRegister(kekMetrics.ActiveReachable)
+	reg.MustRegister(kekMetrics.Collectors()...)
 	if durableRT != nil {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
 		reg.MustRegister(durableRT.Collector())

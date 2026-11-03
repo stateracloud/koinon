@@ -1787,6 +1787,18 @@ type HomeRepository struct {
 	CreatedAt        pgtype.Timestamptz
 }
 
+type InstallIdentity struct {
+	Singleton bool
+	InstallID pgtype.UUID
+	CreatedAt pgtype.Timestamptz
+}
+
+type KekBoundOnly struct {
+	Singleton bool
+	SetAt     pgtype.Timestamptz
+	SetBy     string
+}
+
 type KekFingerprint struct {
 	KekID       string
 	Fingerprint string

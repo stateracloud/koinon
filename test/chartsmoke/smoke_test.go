@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/testcontainers/testcontainers-go"
@@ -69,6 +70,8 @@ func describeMode(name, valuesFile string) {
 			ready = map[string][]*workload{}
 			// accounted collects the Deployments the specs ran or deliberately skipped.
 			accounted []string
+			// dbURL reaches the Postgres container from the test process.
+			dbURL string
 		)
 
 		BeforeAll(func(ctx SpecContext) {
@@ -83,6 +86,8 @@ func describeMode(name, valuesFile string) {
 			if pg != nil {
 				DeferCleanup(func(ctx context.Context) { _ = testcontainers.TerminateContainer(pg) })
 			}
+			Expect(err).NotTo(HaveOccurred())
+			dbURL, err = pg.ConnectionString(ctx, "sslmode=disable")
 			Expect(err).NotTo(HaveOccurred())
 
 			cl = startCluster()
@@ -192,11 +197,24 @@ func describeMode(name, valuesFile string) {
 		// With a KMS (ADR 0085 decision 12) the key-admin Job, a plain Job of the release, created the
 		// KEK Secret and added the KEK keyAdmin.addKey names, each wrapped by the KMS: the Secret
 		// holds no key in the clear, and koinon-api, which may only decrypt, starts from it below.
-		It("wraps every KEK with the KMS", func(ctx SpecContext) {
+		// Each KEK is bound (format 2) to the install ID the migration wrote into the database
+		// (#615), which the Job reads with the database settings the chart gives it, and the Job
+		// set the bound-only marker of the new install.
+		It("wraps every KEK with the KMS, bound to the install", func(ctx SpecContext) {
 			k := kmsOf(r)
 			if k == nil {
 				Skip("the KEKs are local in this mode")
 			}
+			conn, err := pgx.Connect(ctx, dbURL)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(conn.Close)
+			var install string
+			Expect(conn.QueryRow(ctx, "SELECT install_id::text FROM install_identity").Scan(&install)).To(Succeed())
+			// A new install is bound only from its first KEK on: the Job set the marker before it
+			// created the KEK Secret, so no process ever accepts an unbound KMS KEK here.
+			var setBy string
+			Expect(conn.QueryRow(ctx, "SELECT set_by FROM kek_bound_only").Scan(&setBy)).To(Succeed(), "the key-admin Job set the bound-only marker")
+			Expect(setBy).To(Equal("first-install"))
 			s := cl.Secret(ctx, kekSecretName(r))
 			Expect(s).NotTo(BeNil(), "the key-admin Job created the KEK Secret")
 			Expect(s.Data).To(HaveKey("active"))
@@ -206,10 +224,16 @@ func describeMode(name, valuesFile string) {
 					continue
 				}
 				ids = append(ids, id)
-				var stored struct{ Backend, Key string }
+				var stored struct {
+					Fmt          int
+					Backend, Key string
+					Install      string
+				}
 				Expect(json.Unmarshal(v, &stored)).To(Succeed(), "KEK %s is stored wrapped (JSON), not as the key", id)
 				Expect(stored.Backend).To(Equal(k.backend), "KEK %s", id)
 				Expect(stored.Key).To(Equal(k.keyName()), "KEK %s", id)
+				Expect(stored.Fmt).To(Equal(2), "KEK %s is bound to the install", id)
+				Expect(stored.Install).To(Equal(install), "KEK %s is bound to this database's install ID", id)
 			}
 			for _, j := range r.Jobs {
 				for _, c := range j.Spec.Template.Spec.Containers {
