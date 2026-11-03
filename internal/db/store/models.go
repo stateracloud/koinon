@@ -1619,6 +1619,12 @@ type InstallIdentity struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type KekBoundOnly struct {
+	Singleton bool
+	SetAt     pgtype.Timestamptz
+	SetBy     string
+}
+
 type KekFingerprint struct {
 	KekID       string
 	Fingerprint string

@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -19,22 +21,50 @@ import (
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 )
 
+// memMarker is the bound-only marker in memory: set once, never cleared, as installid.Marker.
+type memMarker struct {
+	mu   sync.Mutex
+	b    secretstore.BoundOnly
+	fail error
+}
+
+func (m *memMarker) BoundOnly(context.Context) (secretstore.BoundOnly, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.b, nil
+}
+
+func (m *memMarker) SetBoundOnly(_ context.Context, how string) (secretstore.BoundOnly, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.fail != nil {
+		return secretstore.BoundOnly{}, m.fail
+	}
+	if !m.b.Set {
+		m.b = secretstore.BoundOnly{Set: true, At: time.Date(2026, 11, 3, 13, 0, 0, 0, time.UTC), How: how}
+	}
+	return m.b, nil
+}
+
+func (m *memMarker) source() secretstore.BoundOnlySource { return m.BoundOnly }
+
 var _ = Describe("the key-admin Job", func() {
 	const (
 		ns     = "koinon-test"
 		secret = "koinon-kek"
 	)
 	var (
-		kube  *fake.Clientset
-		kms   *secretstoretest.FakeKMS
-		admin secretstore.Wrappers
-		out   *bytes.Buffer
-		clock = func() time.Time { return time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC) }
+		kube   *fake.Clientset
+		kms    *secretstoretest.FakeKMS
+		admin  secretstore.Wrappers
+		out    *bytes.Buffer
+		marker *memMarker
+		clock  = func() time.Time { return time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC) }
 	)
 	job := func(create bool, add string, hasValues func(context.Context) (bool, error)) keyscli.KeyAdmin {
 		return keyscli.KeyAdmin{
 			Store:  keyscli.KubeStore{Client: kube, Namespace: ns, Name: secret, Wrappers: admin},
-			Create: create, AddID: add, HasValues: hasValues, Out: out, Now: clock,
+			Create: create, AddID: add, HasValues: hasValues, Out: out, Now: clock, Marker: marker,
 		}
 	}
 	load := func(ctx context.Context) keyscli.KeySet {
@@ -51,7 +81,8 @@ var _ = Describe("the key-admin Job", func() {
 		var err error
 		admin, err = secretstore.NewKeyAdminWrappers(kms)
 		Expect(err).NotTo(HaveOccurred())
-		admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
+		marker = &memMarker{}
+		admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA)).WithBoundOnly(marker.source())
 		out = &bytes.Buffer{}
 	})
 
@@ -62,6 +93,9 @@ var _ = Describe("the key-admin Job", func() {
 		Expect(ks.Keys).To(HaveLen(1))
 		Expect(ks.Stored[ks.Active].Backend).To(Equal(secretstoretest.FakeKMSBackend))
 		Expect(ks.Stored[ks.Active].InstallID).To(Equal(secretstoretest.InstallA), "bound to the install (#615)")
+		Expect(marker.b.Set).To(BeTrue(), "a fresh install is bound-only from its first KEK")
+		Expect(marker.b.How).To(Equal(secretstore.BoundOnlyFirstInstall))
+		Expect(out.String()).To(ContainSubstring("The bound-only marker of this install is set at 2026-11-03T13:00:00Z, when the first KEK of this install was created"))
 		wraps := kms.Wraps()
 
 		out.Reset()
@@ -78,6 +112,28 @@ var _ = Describe("the key-admin Job", func() {
 		list, err := kube.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(list.Items).To(BeEmpty())
+		Expect(kms.Wraps()).To(BeZero())
+		Expect(marker.b.Set).To(BeFalse(), "not a first install")
+	})
+
+	It("creates no KEK when the marker cannot be set, and sets it on the next run", func(ctx SpecContext) {
+		marker.fail = errors.New("koinon_test database down")
+		Expect(job(true, "", none).Run(ctx)).To(MatchError(marker.fail))
+		list, err := kube.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list.Items).To(BeEmpty())
+		Expect(kms.Wraps()).To(BeZero())
+
+		marker.fail = nil
+		Expect(job(true, "", none).Run(ctx)).To(Succeed())
+		Expect(marker.b.Set).To(BeTrue())
+		Expect(load(ctx).Keys).To(HaveLen(1))
+	})
+
+	It("needs the marker to create or bind KEKs", func(ctx SpecContext) {
+		a := job(true, "", none)
+		a.Marker = nil
+		Expect(a.Run(ctx)).To(MatchError(ContainSubstring("bound-only marker")))
 		Expect(kms.Wraps()).To(BeZero())
 	})
 
@@ -100,6 +156,7 @@ var _ = Describe("the key-admin Job", func() {
 		Expect(ks.Keys["kek-20260101-aaaa"]).To(Equal(local))
 		Expect(ks.Stored["kek-20261103-bbbb"].Backend).To(Equal(secretstoretest.FakeKMSBackend))
 		Expect(ks.Stored["kek-20260101-aaaa"].Backend).To(Equal(secretstore.BackendLocal))
+		Expect(marker.b.Set).To(BeFalse(), "an existing install is not a first install")
 
 		out.Reset()
 		wraps := kms.Wraps()
@@ -161,7 +218,7 @@ var _ = Describe("the key-admin Job", func() {
 			// The Job reads KEKs of an older wrapping key too, as configured for the move.
 			admin, err = secretstore.NewKeyAdminWrappers(kms, old)
 			Expect(err).NotTo(HaveOccurred())
-			admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
+			admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA)).WithBoundOnly(marker.source())
 			local = bytes.Repeat([]byte("l"), secretstore.KeySize) // obviously fake
 			legacies = map[string][]byte{
 				"kek-20261001-prim": bytes.Repeat([]byte("p"), secretstore.KeySize),
@@ -187,7 +244,10 @@ var _ = Describe("the key-admin Job", func() {
 			Expect(out.String()).To(And(
 				ContainSubstring("Bound kek-20261001-prim to the install ID"),
 				ContainSubstring("KEK kek-20261001-olde is wrapped by fakekms:koinon-test-old, not by fakekms:koinon-test, and stays unbound"),
+				ContainSubstring("a rollback below #615 no longer works"),
+				ContainSubstring("kek-20261001-olde stay unbound, so the bound-only marker is not set"),
 			))
+			Expect(marker.b.Set).To(BeFalse(), "an unbound KEK remains")
 			Expect(kms.Wraps() - before).To(BeEquivalentTo(1))
 			Expect(old.Wraps()).To(BeEquivalentTo(1), "only the fixture wrapped with the older key")
 
@@ -208,12 +268,53 @@ var _ = Describe("the key-admin Job", func() {
 			Expect(out.String()).To(ContainSubstring("No unbound KEK of fakekms:koinon-test to bind"))
 			Expect(kms.Wraps()).To(Equal(wraps))
 
+			Expect(marker.b.Set).To(BeFalse())
+
 			By("the bound KEK no longer opens next to another install's database")
 			other, err := secretstore.NewWrappers(kms, old)
 			Expect(err).NotTo(HaveOccurred())
 			other = other.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallB))
 			_, err = keyscli.KubeStore{Client: kube, Namespace: ns, Name: secret, Wrappers: other}.Load(ctx)
 			Expect(err).To(MatchError(secretstore.ErrOpen))
+		})
+
+		It("sets the bound-only marker when it binds the last unbound KEK, and then an old backup does not open", func(ctx SpecContext) {
+			backup, err := kube.CoreV1().Secrets(ns).Get(ctx, secret, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			backup = backup.DeepCopy()
+			// The KEK of the old wrapping key is rotated out (keys retire), as the Job told the operator.
+			s := backup.DeepCopy()
+			delete(s.Data, "kek-20261001-olde")
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, s, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			a := job(false, "", none)
+			a.RewrapUnbound = true
+			Expect(a.Run(ctx)).To(Succeed())
+			Expect(marker.b.Set).To(BeTrue())
+			Expect(marker.b.How).To(Equal(secretstore.BoundOnlyRewrap))
+			Expect(out.String()).To(And(ContainSubstring("Every KEK is bound. The bound-only marker of this install is set"),
+				ContainSubstring("a rollback below #615 no longer works"), ContainSubstring("rotate the KEKs as well")))
+			Expect(load(ctx).Keys["kek-20261001-prim"]).To(Equal(legacies["kek-20261001-prim"]))
+
+			By("a rerun keeps it and wraps nothing")
+			out.Reset()
+			wraps := kms.Wraps()
+			Expect(a.Run(ctx)).To(Succeed())
+			Expect(kms.Wraps()).To(Equal(wraps))
+			Expect(out.String()).To(ContainSubstring("The bound-only marker of this install is set"))
+
+			By("the KEK Secret backup from before, which holds the same KEKs unbound, no longer opens")
+			backup.ResourceVersion = ""
+			Expect(kube.CoreV1().Secrets(ns).Delete(ctx, secret, metav1.DeleteOptions{})).To(Succeed())
+			_, err = kube.CoreV1().Secrets(ns).Create(ctx, backup, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			service, err := secretstore.NewWrappers(kms, old)
+			Expect(err).NotTo(HaveOccurred())
+			service = service.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA)).WithBoundOnly(marker.source())
+			_, err = keyscli.KubeStore{Client: kube, Namespace: ns, Name: secret, Wrappers: service}.Load(ctx)
+			Expect(err).To(And(MatchError(secretstore.ErrBoundOnly), MatchError(secretstore.ErrOpen)))
+			Expect(a.Run(ctx)).To(MatchError(secretstore.ErrBoundOnly), "the Job cannot bind it again either: rotate")
 		})
 
 		It("leaves the KEKs as they are without rewrapUnbound, and changes nothing while a KEK does not open", func(ctx SpecContext) {

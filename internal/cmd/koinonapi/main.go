@@ -492,7 +492,9 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	// KMS-wrapped KEKs are bound to the install ID the database holds (#615).
-	wrappers = wrappers.WithInstallID(installid.Source(pool))
+	// Once the install is bound-only, KEKs stored unbound are refused; the marker is read on every
+	// load until it is set.
+	wrappers = wrappers.WithInstallID(installid.Source(pool)).WithBoundOnly(installid.BoundOnlySource(pool))
 	// On every load and reload: probe the active KEK's wrapping key (koinon_kek_active_reachable,
 	// registered below with the other metrics) and record the KEK fingerprints (#591).
 	kekMetrics := kekhealth.NewMetrics(nil)
@@ -503,8 +505,13 @@ func serve(ctx context.Context, cfg config) error {
 		// KEK loses every stored secret): koinon-api creates the Secret once, and only reads it after.
 		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret, Wrappers: wrappers}
 		if cfg.kekCreate {
-			created, err := kekStore.Ensure(ctx, time.Now(),
-				func(ctx context.Context) (bool, error) { return keyscli.AnyEnvelope(ctx, pool) })
+			// The first KEK of an install makes it bound-only (#615): no KEK stored unbound belongs here.
+			created, err := kekStore.EnsureWith(ctx, time.Now(),
+				func(ctx context.Context) (bool, error) { return keyscli.AnyEnvelope(ctx, pool) },
+				func(ctx context.Context) error {
+					_, err := installid.SetBoundOnly(ctx, pool, secretstore.BoundOnlyFirstInstall)
+					return err
+				})
 			if err != nil {
 				return err
 			}

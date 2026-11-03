@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -215,6 +216,66 @@ func StaticInstallID(id string) InstallIDSource {
 // process does not know the install ID: it has no source, or the source failed.
 var ErrNoInstallID = errors.New("secretstore: the install ID is not known")
 
+// BoundOnly is the install's "bound only" marker (#615): once it is set, a KEK a KMS wrapped before
+// the install binding (stored format 1) is refused, so an old KEK Secret backup, which holds the
+// same KEKs unbound, no longer opens next to this install's database or any other. It is set once,
+// by the key-admin Job when it creates the first KEK of an install or when --rewrap-unbound leaves
+// no unbound KEK, and never cleared (table kek_bound_only, internal/installid).
+type BoundOnly struct {
+	Set bool
+	At  time.Time
+	// How says what set it: [BoundOnlyFirstInstall] or [BoundOnlyRewrap].
+	How string
+}
+
+// The ways the marker gets set.
+const (
+	BoundOnlyFirstInstall = "first-install"
+	BoundOnlyRewrap       = "rewrap-unbound"
+)
+
+// String says whether the marker is set, and when and how.
+func (b BoundOnly) String() string {
+	if !b.Set {
+		return "not set"
+	}
+	how := b.How
+	switch b.How {
+	case BoundOnlyFirstInstall:
+		how = "the first KEK of this install was created"
+	case BoundOnlyRewrap:
+		how = "the key-admin Job (--rewrap-unbound) bound the last unbound KEK"
+	}
+	return fmt.Sprintf("set at %s, when %s", b.At.UTC().Format(time.RFC3339), how)
+}
+
+// BoundOnlySource reads the marker. Koinon reads it from the database on every load of the key set
+// that holds an unbound KMS KEK, until it is set; a set marker may be kept, since it is never
+// cleared.
+type BoundOnlySource func(context.Context) (BoundOnly, error)
+
+// StaticBoundOnly is a source that always returns b (tests).
+func StaticBoundOnly(b BoundOnly) BoundOnlySource {
+	return func(context.Context) (BoundOnly, error) { return b, nil }
+}
+
+// UnboundKEKs returns the IDs, sorted, of the KEKs a KMS wrapped without the install binding
+// (format 1). Local KEKs are not wrapped, so never unbound.
+func UnboundKEKs(stored map[string]StoredKEK) []string {
+	var ids []string
+	for id, s := range stored {
+		if s.Backend != BackendLocal && !s.Bound() {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// ErrBoundOnly means a KEK stored unbound (format 1) was refused because the install accepts bound
+// KEKs only. It is also [ErrOpen]: the KEK does not open here, whatever the KMS says.
+var ErrBoundOnly = errors.New("secretstore: this install accepts only KEKs bound to the install ID")
+
 // Wrappers are the key-wrapping keys a process can use: one wraps new KEKs, the others (and
 // [Local], always) only unwrap, so a key set can hold KEKs of an earlier backend while its values
 // are rewrapped. The zero value is [Local] alone: today's behaviour.
@@ -228,11 +289,39 @@ var ErrNoInstallID = errors.New("secretstore: the install ID is not known")
 // A KMS-wrapped KEK is bound to the install ([Wrappers.WithInstallID], #615): every new wrap with a
 // KMS needs the install ID, and so does every unwrap of a KEK stored in format 2.
 type Wrappers struct {
-	primary  Wrapper
-	more     []Wrapper
-	keyAdmin bool
-	timeout  time.Duration
-	install  InstallIDSource
+	primary   Wrapper
+	more      []Wrapper
+	keyAdmin  bool
+	timeout   time.Duration
+	install   InstallIDSource
+	boundOnly BoundOnlySource
+}
+
+// WithBoundOnly returns ws reading the "bound only" marker from src before it unwraps a KMS KEK
+// stored unbound (format 1): with the marker set, such a KEK is [ErrBoundOnly]; when the marker
+// cannot be read, it is refused too (fail closed). Without a source, ws reads format 1 KEKs as
+// before #615 (tests, and tools that have no database); every Koinon process that loads the key set
+// sets one.
+func (ws Wrappers) WithBoundOnly(src BoundOnlySource) Wrappers {
+	ws.boundOnly = src
+	return ws
+}
+
+// acceptUnbound reports whether ws may open the KMS KEK id stored unbound (format 1).
+func (ws Wrappers) acceptUnbound(ctx context.Context, id string) error {
+	if ws.boundOnly == nil {
+		return nil
+	}
+	b, err := ws.boundOnly(ctx)
+	if err != nil {
+		return fmt.Errorf("secretstore: KEK %q is stored unbound (format 1) and whether this install still accepts that is not known: %w", id, err)
+	}
+	if b.Set {
+		return fmt.Errorf("%w: %w: KEK %q is stored unbound (format 1, wrapped before #615), and the bound-only marker of this install was %s. "+
+			"The KEK Secret is an old backup or belongs to another install: restore one taken after the KEKs were bound (docs/ops/secret-keys.md)",
+			ErrBoundOnly, ErrOpen, id, b)
+	}
+	return nil
 }
 
 // WithInstallID returns ws reading the install ID from src: new KMS wraps bind it, and the KEKs
@@ -367,7 +456,13 @@ func (ws Wrappers) Wrap(ctx context.Context, id string, kek []byte) (StoredKEK, 
 // KEK, which ignores it), the KEK ID and this process's install ID for format 2. It returns that
 // install ID too ("" for format 1).
 func (ws Wrappers) aadFor(ctx context.Context, id string, s StoredKEK) ([]byte, string, error) {
-	if !s.Bound() || s.Backend == BackendLocal {
+	if s.Backend == BackendLocal {
+		return kekAAD(id), "", nil
+	}
+	if !s.Bound() {
+		if err := ws.acceptUnbound(ctx, id); err != nil {
+			return nil, "", err
+		}
 		return kekAAD(id), "", nil
 	}
 	install, err := ws.installID(ctx)

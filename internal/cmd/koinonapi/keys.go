@@ -115,7 +115,7 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 			return fmt.Errorf("connect to postgres: %w", err)
 		}
 		defer pool.Close()
-		wrappers = wrappers.WithInstallID(installid.Source(pool))
+		wrappers = wrappers.WithInstallID(installid.Source(pool)).WithBoundOnly(installid.BoundOnlySource(pool))
 	}
 	switch {
 	case o.kekSecret != "":

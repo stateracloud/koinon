@@ -382,6 +382,19 @@ Implementation-level unknowns, to settle in the sub-issues:
     ("unsupported format 2") and fails closed, so rolling back below #615 needs the 415a steps
     above. Local KEKs are not wrapped and stay unbound. `keys status` prints the install ID and
     marks each KMS KEK bound or unbound.
+  - Amended (#615, 2026-11-03, procoduck): a strict switch after binding. Re-binding keeps the KEK
+    material, so an old `"fmt":1` backup of the KEK Secret would open forever. A "bound only" marker,
+    one row in its own table `kek_bound_only` (expand-only migration, triggers refuse UPDATE, DELETE
+    and TRUNCATE; they guard against mistakes, not against the table owner), is set at first install
+    (before the first KEK Secret is created) and by the key-admin Job's `rewrapUnbound` once no KMS
+    KEK is unbound, never while one is. Once set, every process refuses a KMS `"fmt":1` KEK
+    (`ErrBoundOnly`, an `ErrOpen`), naming when and how the marker was set; an unreadable marker
+    refuses too. Koinon only sets it. A process reads it on every key-set load while it is unset
+    (start and the reload about once a minute) and caches it once set, so one that loaded before the
+    switch refuses from its next load. Setting it ends rollback below #615 for that key set, and the
+    Job says so. The marker protects only databases that hold it; rotating the KEKs is what kills an
+    old backup everywhere, so the docs tell operators to rotate as well if one may have leaked.
+    `keys status` prints the marker; `koinon_kek_unbound` stays.
 - Resolved (detection of the decision 6 rule): the lint reads a marker file, `hack/migrate-patch-line`
   (`none` or the shipped minor line, for example `v0.1`), at the merge base. Patch tags are cut from
   `main` (the release gate requires an ancestor of `origin/main`), so the marker, not a branch name,

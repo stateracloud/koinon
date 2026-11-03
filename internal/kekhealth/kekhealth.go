@@ -198,13 +198,7 @@ func (m *Monitor) Observe(ctx context.Context, l secretstore.Loaded) {
 
 // UnboundKEKs counts the KEKs of the key set that a KMS wrapped without the install binding (#615).
 func UnboundKEKs(stored map[string]secretstore.StoredKEK) int {
-	n := 0
-	for _, s := range stored {
-		if s.Backend != secretstore.BackendLocal && !s.Bound() {
-			n++
-		}
-	}
-	return n
+	return len(secretstore.UnboundKEKs(stored))
 }
 
 // observeUnbound sets koinon_kek_unbound on every load and warns while it is above 0.

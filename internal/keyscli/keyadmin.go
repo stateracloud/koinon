@@ -36,9 +36,25 @@ type KeyAdmin struct {
 	// HasValues tells whether the database holds encrypted values: a missing Secret is then
 	// restored from backup, never created (KubeStore.Ensure).
 	HasValues func(context.Context) (bool, error)
-	Out       io.Writer
-	Now       func() time.Time
+	// Marker is the install's bound-only marker (#615). Creating the first KEK sets it (before the
+	// Secret exists), and so does RewrapUnbound once no unbound KEK remains. Required with Create
+	// or RewrapUnbound.
+	Marker BoundOnlyMarker
+	Out    io.Writer
+	Now    func() time.Time
 }
+
+// BoundOnlyMarker reads and sets the install's bound-only marker (installid.Marker). It has no way
+// to clear it.
+type BoundOnlyMarker interface {
+	BoundOnly(ctx context.Context) (secretstore.BoundOnly, error)
+	SetBoundOnly(ctx context.Context, how string) (secretstore.BoundOnly, error)
+}
+
+// rollbackNote is said whenever the marker is set or about to be.
+const rollbackNote = "a rollback below #615 no longer works (those releases cannot read bound KEKs). " +
+	"If an old KEK Secret backup may have leaked, rotate the KEKs as well (keys add, activate, rewrap, retire): " +
+	"only rotation makes an old backup useless everywhere"
 
 // ErrLocalKeyAdmin means the key-admin Job ran without a KMS: a local install adds KEKs from
 // koinon-api and has no Job.
@@ -55,8 +71,20 @@ func (a KeyAdmin) Run(ctx context.Context) error {
 		return ErrLocalKeyAdmin
 	}
 	wrappedBy := primary.Backend() + ":" + primary.KeyID()
+	if (a.Create || a.RewrapUnbound) && a.Marker == nil {
+		return errors.New("keyscli: the key-admin Job needs the bound-only marker (the database) to create or bind KEKs")
+	}
 	if a.Create {
-		created, err := a.Store.Ensure(ctx, now(), a.HasValues)
+		// The first KEK of an install is bound, so the install is bound-only from the start: the
+		// marker is set before the Secret exists, and a failure leaves no Secret, so a rerun sets it.
+		created, err := a.Store.EnsureWith(ctx, now(), a.HasValues, func(ctx context.Context) error {
+			b, err := a.Marker.SetBoundOnly(ctx, secretstore.BoundOnlyFirstInstall)
+			if err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintf(a.Out, "The bound-only marker of this install is %s: KEKs stored unbound never open here.\n", b)
+			return nil
+		})
 		if err != nil {
 			return err
 		}
@@ -106,6 +134,13 @@ func (a KeyAdmin) add(ctx context.Context, now func() time.Time, primary secrets
 // of another wrapping key is left as it is: the Job may not encrypt with that key, and moving a KEK
 // to another wrapping key is rotation's job (keys add, activate, rewrap, retire).
 func (a KeyAdmin) rewrapUnbound(ctx context.Context, primary secretstore.Wrapper) error {
+	b, err := a.Marker.BoundOnly(ctx)
+	if err != nil {
+		return fmt.Errorf("bind the KEKs to the install: %w", err)
+	}
+	if !b.Set {
+		_, _ = fmt.Fprintf(a.Out, "Binding the KEKs to the install. Once no KEK is unbound, the bound-only marker is set and KEKs stored unbound never open again: %s.\n", rollbackNote)
+	}
 	ks, err := a.Store.Load(ctx)
 	if err != nil {
 		return fmt.Errorf("bind the KEKs to the install: %w", err)
@@ -130,11 +165,37 @@ func (a KeyAdmin) rewrapUnbound(ctx context.Context, primary secretstore.Wrapper
 	}
 	if len(ids) == 0 {
 		_, _ = fmt.Fprintf(a.Out, "No unbound KEK of %s to bind.\n", wrappedBy)
+	} else {
+		if err := a.Store.Save(ctx, ks); err != nil {
+			return fmt.Errorf("bind the KEKs to the install: %w", err)
+		}
+		_, _ = fmt.Fprintf(a.Out, "Bound %s to the install ID (wrapped again by %s; the KEKs are unchanged). Back up the KEK Secret now (koinon-api keys export).\n", strings.Join(ids, ", "), wrappedBy)
+	}
+	return a.markBoundOnly(ctx, b)
+}
+
+// markBoundOnly sets the bound-only marker when the KEK Secret, as stored now, holds no unbound
+// KEK. It reads the stored forms again rather than trusting what it just saved.
+func (a KeyAdmin) markBoundOnly(ctx context.Context, b secretstore.BoundOnly) error {
+	if b.Set {
+		_, _ = fmt.Fprintf(a.Out, "The bound-only marker of this install is %s.\n", b)
 		return nil
 	}
-	if err := a.Store.Save(ctx, ks); err != nil {
-		return fmt.Errorf("bind the KEKs to the install: %w", err)
+	ks, err := a.Store.Load(ctx)
+	for _, k := range ks.Keys {
+		clear(k)
 	}
-	_, _ = fmt.Fprintf(a.Out, "Bound %s to the install ID (wrapped again by %s; the KEKs are unchanged). Back up the KEK Secret now (koinon-api keys export).\n", strings.Join(ids, ", "), wrappedBy)
+	if err != nil {
+		return fmt.Errorf("check that every KEK is bound: %w", err)
+	}
+	if left := secretstore.UnboundKEKs(ks.Stored); len(left) > 0 {
+		_, _ = fmt.Fprintf(a.Out, "%s stay unbound, so the bound-only marker is not set: rotate them out, then run the Job again.\n", strings.Join(left, ", "))
+		return nil
+	}
+	b, err = a.Marker.SetBoundOnly(ctx, secretstore.BoundOnlyRewrap)
+	if err != nil {
+		return fmt.Errorf("set the bound-only marker: %w", err)
+	}
+	_, _ = fmt.Fprintf(a.Out, "Every KEK is bound. The bound-only marker of this install is %s: every Koinon process now refuses KEKs stored unbound, so an old KEK Secret backup no longer opens. Note: %s.\n", b, rollbackNote)
 	return nil
 }

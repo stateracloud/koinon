@@ -82,7 +82,7 @@ func runKeyAdmin(ctx context.Context, o keyAdminOptions, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	wrappers = wrappers.WithInstallID(secretstore.StaticInstallID(install))
+	wrappers = wrappers.WithInstallID(secretstore.StaticInstallID(install)).WithBoundOnly(installid.BoundOnlySource(pool))
 	rc, err := restConfig(o.kubeconfig)
 	if err != nil {
 		return err
@@ -96,6 +96,7 @@ func runKeyAdmin(ctx context.Context, o keyAdminOptions, out io.Writer) error {
 		Create:        o.create,
 		AddID:         o.addID,
 		RewrapUnbound: o.rewrapUnbound,
+		Marker:        installid.Marker{DB: pool},
 		HasValues:     func(ctx context.Context) (bool, error) { return anyEnvelopeYet(ctx, pool) },
 		Out:           out,
 	}
