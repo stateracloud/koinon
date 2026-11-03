@@ -214,6 +214,12 @@ type Reconciler struct {
 	supErr   error
 	// recreates counts this pass's spec-change recreates against MaxRecreatesPerPass.
 	recreates atomic.Int32
+
+	// probeMu guards probeDue: the MCP servers a pass newly applied, waiting for the prober (issue
+	// #226). probeWake wakes the prober to take them.
+	probeMu   sync.Mutex
+	probeDue  []gatewayplan.Probe
+	probeWake chan struct{}
 }
 
 // New returns a Reconciler.
@@ -563,6 +569,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	}
 	r.m.GatewayConfigRejected.Set(b2f(rejectedReason != ""))
 	outcome := plan.Applied(res)
+	r.probeSoon(outcome.Probe)
 	if !res.Failed {
 		if err := r.recordServed(ctx, outcome.Served); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
