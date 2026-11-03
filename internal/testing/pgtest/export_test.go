@@ -2,7 +2,10 @@
 
 package pgtest
 
-import "context"
+import (
+	"context"
+	"io/fs"
+)
 
 // TemplateBuilds is how many template databases this process migrated.
 func TemplateBuilds() int64 { return templateBuilds.Load() }
@@ -17,3 +20,9 @@ func (t *Template) ServerDSN() string { return t.s.dsn }
 
 // ProcID is the part of database names unique to this process.
 func ProcID() string { return procID() }
+
+// HashWithGoose is MigrationsHash for a given goose version.
+func HashWithGoose(fsys fs.FS, goose string) (string, error) { return migrationsHashFor(fsys, goose) }
+
+// GooseVersion is the goose version MigrationsHash uses.
+func GooseVersion() (string, error) { return gooseVersion() }

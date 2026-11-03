@@ -4,6 +4,7 @@ package pgtest_test
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"sync"
 	"testing"
@@ -71,6 +72,23 @@ var _ = Describe("MigrationsHash", func() {
 		added := base()
 		added["00003_c.sql"] = &fstest.MapFile{Data: []byte("SELECT 1;")}
 		Expect(hash(added)).NotTo(Equal(h), "added")
+	})
+
+	It("changes when the goose version changes", func() {
+		a, err := pgtest.HashWithGoose(base(), "v3.1.0")
+		Expect(err).NotTo(HaveOccurred())
+		b, err := pgtest.HashWithGoose(base(), "v3.2.0")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(a).NotTo(Equal(b))
+	})
+
+	It("is keyed on the goose version linked into the binary", func() {
+		v, err := pgtest.GooseVersion()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(v).To(MatchRegexp(`^v\d+\.\d+\.\d+`))
+		want, err := pgtest.HashWithGoose(base(), v)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(hash(base())).To(Equal(want))
 	})
 
 	It("names the template of the current migrations", func() {
@@ -166,6 +184,27 @@ var _ = Describe("pgtest", Ordered, func() {
 		Expect(c).To(BeZero())
 	})
 
+	It("keys the template on the server's koinon_app role, which 00012 and 00019 branch on", func(ctx SpecContext) {
+		// Durable is a container of this process's own, so creating koinon_app there touches no other suite.
+		dsn := pgtest.Run(ctx, pgtest.Durable())
+		admin, err := sql.Open("pgx", dsn)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(admin.Close)
+		Expect(pgtest.EnsureRole(ctx, admin, pgtest.AppRole)).To(Succeed())
+		DeferCleanup(func(ctx context.Context) {
+			_, _ = admin.ExecContext(ctx, "DROP ROLE IF EXISTS "+pgtest.AppRole)
+		})
+		with, err := pgtest.TemplateKey(ctx, dsn)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(with).To(Equal(pgtest.TemplateName() + "_app"))
+
+		_, err = admin.ExecContext(ctx, "DROP ROLE "+pgtest.AppRole)
+		Expect(err).NotTo(HaveOccurred())
+		without, err := pgtest.TemplateKey(ctx, dsn)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(without).To(Equal(pgtest.TemplateName()))
+	})
+
 	It("builds a template once when several processes ask for it at the same time", func(ctx SpecContext) {
 		name := "koinon_tmpl_race_" + pgtest.ProcID()
 		admin := tmpl.ServerDSN()
@@ -201,6 +240,93 @@ var _ = Describe("pgtest", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func(ctx context.Context) { _, _ = conn.Exec(ctx, "DROP DATABASE IF EXISTS "+name+"_copy") })
 	}, SpecTimeout(3*time.Minute))
+})
+
+var _ = Describe("EnsureRole", func() {
+	open := func(ctx context.Context, dsn, app string) *sql.DB {
+		GinkgoHelper()
+		db, err := sql.Open("pgx", dsn+"&application_name="+app)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(db.Close)
+		return db
+	}
+	dropRole := func(dsn, role string) {
+		DeferCleanup(func(ctx context.Context) {
+			db, err := sql.Open("pgx", dsn)
+			if err != nil {
+				return
+			}
+			defer func() { _ = db.Close() }()
+			_, _ = db.ExecContext(ctx, "DROP ROLE IF EXISTS "+role)
+		})
+	}
+
+	It("is idempotent, and rejects a name that is not a plain identifier", func(ctx SpecContext) {
+		dsn := pgtest.Run(ctx)
+		db := open(ctx, dsn, "ensure_idem")
+		role := "pgtest_role_idem_" + pgtest.ProcID()
+		dropRole(dsn, role)
+		Expect(pgtest.EnsureRole(ctx, db, role)).To(Succeed())
+		Expect(pgtest.EnsureRole(ctx, db, role)).To(Succeed())
+		Expect(pgtest.EnsureRole(ctx, db, `x"; DROP ROLE y; --`)).NotTo(Succeed())
+	}, SpecTimeout(2*time.Minute))
+
+	It("survives a creator that is still in flight on the same name (the race of #619)", func(ctx SpecContext) {
+		dsn := pgtest.Run(ctx)
+		role := "pgtest_role_race_" + pgtest.ProcID()
+		dropRole(dsn, role)
+
+		// A holds an uncommitted CREATE ROLE: B checks, sees no role, and has to wait on A's commit.
+		holder := open(ctx, dsn, "ensure_holder")
+		tx, err := holder.BeginTx(ctx, nil)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = tx.Rollback() })
+		_, err = tx.ExecContext(ctx, "CREATE ROLE "+role+" NOLOGIN")
+		Expect(err).NotTo(HaveOccurred())
+
+		waiter := open(ctx, dsn, "ensure_waiter")
+		done := make(chan error, 1)
+		go func() { done <- pgtest.EnsureRole(ctx, waiter, role) }()
+
+		By("waiting until the server shows B blocked on A's transaction")
+		observer := open(ctx, dsn, "ensure_observer")
+		Eventually(func(g Gomega) int {
+			var n int
+			g.Expect(observer.QueryRowContext(ctx,
+				`SELECT count(*) FROM pg_stat_activity WHERE application_name = 'ensure_waiter' AND wait_event_type = 'Lock'`).Scan(&n)).To(Succeed())
+			return n
+		}).WithContext(ctx).Should(Equal(1))
+		Expect(done).NotTo(Receive(), "B must still be waiting")
+
+		Expect(tx.Commit()).To(Succeed())
+		Eventually(done).WithContext(ctx).Should(Receive(BeNil()), "B treats A's role as its own instead of failing on pg_authid_rolname_index")
+
+		var n int
+		Expect(observer.QueryRowContext(ctx, `SELECT count(*) FROM pg_roles WHERE rolname = $1`, role).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1))
+	}, SpecTimeout(2*time.Minute))
+
+	It("lets many concurrent creators of fresh names all succeed with one role each", func(ctx SpecContext) {
+		dsn := pgtest.Run(ctx)
+		db := open(ctx, dsn, "ensure_many")
+		db.SetMaxOpenConns(16)
+		for round := range 5 {
+			role := "pgtest_role_many_" + pgtest.ProcID() + "_" + string(rune('a'+round))
+			dropRole(dsn, role)
+			var wg sync.WaitGroup
+			errs := make([]error, 16)
+			for i := range errs {
+				wg.Go(func() { errs[i] = pgtest.EnsureRole(ctx, db, role) })
+			}
+			wg.Wait()
+			for _, err := range errs {
+				Expect(err).NotTo(HaveOccurred())
+			}
+			var n int
+			Expect(db.QueryRowContext(ctx, `SELECT count(*) FROM pg_roles WHERE rolname = $1`, role).Scan(&n)).To(Succeed())
+			Expect(n).To(Equal(1))
+		}
+	}, SpecTimeout(2*time.Minute))
 })
 
 var dropped string
