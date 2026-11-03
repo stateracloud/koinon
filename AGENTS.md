@@ -35,7 +35,7 @@ Instructions for coding agents working on Koinon.
 - CI and e2e (details: `docs/dev/ci.md`). Mark the PR ready (`hack/ship.sh --ready`, `gh pr ready`)
   before you wait on it with `hack/pr-wait.sh`: a draft runs almost nothing (`go` and `web` show red
   on purpose) and its green is not merge evidence; get WIP feedback from `hack/preflight.sh`.
-  To skip `go-test` on the lab gate: `hack/ship.sh --ready --lab-go-test` (#610).
+  To run `go-test` on the lab gate instead of CI: `hack/ship.sh --ready --lab-go-test` (#610).
   [Testing layers](docs/dev/ci.md#testing-layers) · [what `ci` runs when](docs/dev/ci.md#what-ci-runs-when)
 - Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. A needs-e2e PR needs a green
   `e2e-lab` status or `quickstart` run on its head (`e2e result` is red without one); with a lab run
@@ -97,7 +97,7 @@ opens or adopts them.
     `main` into a branch only when the PR has auto-merge on, is not a draft, is green on its
     current head (every required check of `hack/ci-required.txt` passed, newest run per name;
     advisory and third-party checks do not count) and is behind `main`; a draft, a red or a running
-    PR is left alone, so sync those yourself when you need it.
+    PR is left alone, so sync a draft or red branch yourself when you need it.
 12. Releases: either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay
     procoduck's. Tags are immutable by ruleset: fix a bad tag with the next rc (`docs/dev/releasing.md`).
 
@@ -141,8 +141,8 @@ Two humans' agents change the same tree. Before you start, after `take`:
 - **Stop and ask your human** when: the change touches a sensitive path the other human owns
   (`.github/CODEOWNERS`; either human approves the other's PR there), you would change a public API
   or data model another open PR also changes, you need to rebase or force-push, a test only you
-  changed starts failing elsewhere, or the issue is bigger than its claim.
-- **Keep branches under a day.** Split the issue and release the rest instead of holding a claim.
+  changed starts failing elsewhere, or the issue turns out bigger than its claim.
+- **Keep branches under a day.** Split the issue and release the rest instead of holding a claim for days.
 
 ## Conventions
 
