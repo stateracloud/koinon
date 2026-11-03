@@ -12,7 +12,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"2383903cada50774"'
+      koinon.config: '"3e00d56b4e908ced"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -50,7 +50,7 @@ llm:
             agent: globex/analyst
             org: globex
           allowedModels: []
-        - keyHash: sha256:b664f4de07929b04ae70743a9333a8f3885c5437eb9f79edd16a5bb8615a2f8f
+        - keyHash: sha256:dabacd505d3745187317c742d02e27d30904b174964c9410151348046e2df051
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -62,6 +62,9 @@ llm:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
         set:
           x-koinon-org: default(apiKey.org, "")
+      response:
+        set:
+          x-should-retry: '(response.code == 403 || (response.code >= 400 && response.code < 500 && default(proxy.upstreamDuration, "") == "")) ? "false" : response.headers["x-should-retry"]'
   models: []
 mcp:
   failureMode: failOpen
@@ -100,6 +103,9 @@ mcp:
         remove:
           - authorization
           - x-api-key
+      response:
+        set:
+          x-should-retry: '(response.code == 403 || (response.code >= 400 && response.code < 500 && default(proxy.upstreamDuration, "") == "")) ? "false" : response.headers["x-should-retry"]'
   targets:
     - name: acme-legacy
       condition: apiKey.org == "acme"

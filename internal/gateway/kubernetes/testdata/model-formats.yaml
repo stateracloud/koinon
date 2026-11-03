@@ -1,4 +1,4 @@
-# Revision 29b5efe9edbdee94
+# Revision 3fc5f51f4d7d20ca
 apiVersion: v1
 data:
   catalog.json: '{"providers":{"acme.anthropic":{"models":{"claude-haiku-4-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}},"claude-haiku-5-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}}}},"acme.openrouter":{"models":{"open/model":{"rates":{"input":"1","output":"2"}}}}}}'
@@ -25,7 +25,7 @@ metadata:
 ---
 apiVersion: v1
 data:
-  koinon-reload-probe: '{"keyHash":"sha256:6206d66e1380f6bea3c5d5e6c8036174a18e62906672723f340720e328f923ca","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
+  koinon-reload-probe: '{"keyHash":"sha256:7082d98e0017cce7727a11536389ea749966f3d810bf414f2ef46684b60eb578","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
 kind: ConfigMap
 metadata:
   labels:
@@ -265,6 +265,10 @@ spec:
         set:
           - name: x-koinon-org
             value: default(apiKey.org, "")
+      response:
+        set:
+          - name: x-should-retry
+            value: '(response.code == 403 || (response.code >= 400 && response.code < 500 && default(proxy.upstreamDuration, "") == "")) ? "false" : response.headers["x-should-retry"]'
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy

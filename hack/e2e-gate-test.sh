@@ -27,7 +27,9 @@ case "$*" in
 "api repos/o/r/actions/runs/"*"/jobs"*)
   id=${2#repos/o/r/actions/runs/}; id=${id%%/*}
   ans "$T/jobs-$id.json" ;;
-"api repos/o/r/commits/"*"/statuses"*) ans "$T/lab.json" ;;
+"api repos/o/r/commits/"*"/statuses"*)
+  [[ ! -f $T/lab.err ]] || { cat "$T/lab.err" >&2; exit 1; }
+  ans "$T/lab.json" ;;
 "run rerun"*) [[ -z ${T_RERUN_FAILS:-} ]] ;;
 *) exit 9 ;;
 esac
@@ -96,9 +98,24 @@ echo '[{"context":"e2e-lab","state":"success"}]' >"$tmp/lab.json"
 gate 1 "required and quickstart failed, a lab success does not hide it" DECIDE=success QUICKSTART=failure REQUIRED=true
 gate 1 "required, no head sha is read as no evidence" "${G[@]}" SHA=
 
+rm -f "$tmp/lab.json"
+echo "gh: Resource not accessible by integration (HTTP 403)" >"$tmp/lab.err"
+gate 1 "required, an API error reading e2e-lab fails closed" "${G[@]}"
+has "could not read e2e-lab: gh: Resource not accessible by integration (HTTP 403)"
+has "statuses: read"
+rm -f "$tmp/lab.err"
+echo 'not json' >"$tmp/lab.json"
+gate 1 "required, an invalid e2e-lab response fails closed" "${G[@]}"
+has "could not read e2e-lab: invalid JSON"
+echo '[{"context":"e2e-lab","state":"success"}]' >"$tmp/lab.json"
+
+wf=.github/workflows/e2e-kind.yml
+# The result job can read commit statuses (without it e2e-lab is a 403, #588).
+awk '/^  result:/{f=1;next} f&&/^  [a-z-]+:/{f=0} f' "$wf" | grep -qxF '      statuses: read # hack/e2e-gate.sh reads the e2e-lab commit status; without it the API answers 403 (#588)' || { echo "FAIL: the result job lacks statuses: read" >&2; fail=1; }
+echo ok: result job statuses pinned
+
 # The YAML and the gate agree on the marker step: its exact name, and the `if` that makes the default
 # (no inputs, as on pull_request) count as the go suite.
-wf=.github/workflows/e2e-kind.yml
 grep -qxF '      - name: Go suite (marker for the e2e gate)' "$wf" || { echo "FAIL: $wf lacks the marker step name" >&2; fail=1; }
 grep -qF '"Go suite (marker for the e2e gate)"' hack/e2e-gate.sh || { echo "FAIL: e2e-gate.sh does not read the marker step name" >&2; fail=1; }
 grep -A1 -xF '      - name: Go suite (marker for the e2e gate)' "$wf" | grep -qxF "        if: (inputs.suite || 'go') == 'go'" || { echo "FAIL: the marker step's if is not the go-suite default" >&2; fail=1; }

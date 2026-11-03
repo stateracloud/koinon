@@ -86,6 +86,13 @@ type Descriptor struct {
 	// OpenRouter as session_id so a run stays on one upstream and its cache stays warm. "" when
 	// the flavor cannot.
 	SessionArg string
+	// RetriesModelRequests is set when the flavor's harness retries a failed model request itself.
+	// Exactly one layer retries (ADR 0056 amendment 2026-10-31, point 3), so koinon-agentd then
+	// skips its own turn retry for the flavor, and gives the harness Koinon's retry policy instead:
+	// the entry script takes --model-tries, --model-retry-backoff-ms and --model-max-retry-after-ms
+	// (flavors/common/koinon-entry-lib.sh) and makes the harness follow them, not its own defaults.
+	// A flavor whose harness retries but cannot be given the policy has no place here.
+	RetriesModelRequests bool
 }
 
 var table = []Descriptor{
@@ -114,6 +121,11 @@ var table = []Descriptor{
 		CacheArgs:     map[string]string{"anthropic": "--cache-anthropic", "alibaba": "--cache-alibaba"},
 		NoWebToolsArg: "--no-web-tools",
 		SessionArg:    "--session-id",
+		// OpenCode 2.2.0 retries a failed model request up to 10 times on its own schedule
+		// (packages/core/src/model-retry.ts). No config key sets it; Koinon's retry plugin, loaded
+		// from the read-only config, overrides each decision through the session.retry hook
+		// (flavors/opencode/README.md, "Model retries").
+		RetriesModelRequests: true,
 	},
 }
 
