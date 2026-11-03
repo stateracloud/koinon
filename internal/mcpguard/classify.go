@@ -30,6 +30,9 @@ func loadPolicy(ctx context.Context, q *store.Queries, org store.Org) (orgPolicy
 	return orgPolicy{settings: lg}, nil
 }
 
+// hosts is the org's fetch-trusted hosts: a fetched URL to one of them carries data only after its host.
+func (p orgPolicy) hosts() sinkclass.HostTrust { return p.settings }
+
 // threshold is the org's match threshold (0: the default).
 func (p orgPolicy) threshold() int { return p.settings.MatchThreshold }
 

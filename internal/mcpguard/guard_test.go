@@ -83,6 +83,16 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Expect(err).NotTo(HaveOccurred())
 		return res
 	}
+	// rawCall sends the arguments exactly as written, repeated keys and all.
+	rawCall := func(ctx SpecContext, server, tool, args string) *extmcp.McpRequestResult {
+		GinkgoHelper()
+		res, err := srv.CheckRequest(ctx, &extmcp.McpRequest{
+			ServiceNames: []string{mcpservers.TargetName(slug, server)}, Method: "tools/call",
+			MetadataContext: meta(me(), tool), McpRequest: []byte(`{"name":"` + tool + `","arguments":` + args + `}`),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		return res
+	}
 	result := func(ctx SpecContext, server, tool, text string) *extmcp.McpResponseResult {
 		GinkgoHelper()
 		body, err := json.Marshal(map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}})
@@ -163,9 +173,12 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		svc = mcpservers.New(pool, ring, nil).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"})
 		// tracker: both legs (the default declaration), an external-high tool, an external-low
 		// fetch tool and a code-host write.
-		tracker = newServer(ctx, "tracker", nil, "post_message", "read_issue", "fetch_page", "commit_file")
+		tracker = newServer(ctx, "tracker", nil, "post_message", "read_issue", "fetch_page", "commit_file", "announce", "ping")
 		declare(ctx, tracker, "fetch_page", sinkclass.Declaration{Derivation: sinkclass.Fetch, AddressArgs: []string{"url"}})
 		declare(ctx, tracker, "commit_file", sinkclass.Declaration{Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}})
+		// announce and ping name a channel, but their class is fixed: the channel is data.
+		declare(ctx, tracker, "announce", sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.Fixed, AddressArgs: []string{"channel"}})
+		declare(ctx, tracker, "ping", sinkclass.Declaration{Class: sinkclass.ExternalLow, Derivation: sinkclass.Fixed, AddressArgs: []string{"channel"}})
 		// wiki: private data only.
 		wiki = newServer(ctx, "wiki", []string{mcpservers.LegPrivateData}, "read_page")
 		// web: untrusted input only.
@@ -211,6 +224,14 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		var risk []byte
 		Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE org_id = $1`, org).Scan(&risk)).To(Succeed())
 		Expect(string(risk)).To(ContainSubstring(`"taint"`))
+	})
+
+	It("matches private text in a fixed tool's address argument too", func(ctx SpecContext) {
+		Expect(result(ctx, "wiki", "read_page", secretPage).GetPass()).NotTo(BeNil())
+		Expect(passed(call(ctx, "tracker", "announce", map[string]any{"channel": "general", "text": "hi"}))).To(BeTrue())
+		r := call(ctx, "tracker", "announce", map[string]any{"channel": secretPage[40:300], "text": "hi"})
+		Expect(reason(r)).To(HavePrefix("approval requested: id="))
+		Expect(approvals(ctx)).To(Equal(1))
 	})
 
 	It("takes agentd's feed: a sandbox read sets the private leg and its text is caught, from fingerprints only", func(ctx SpecContext) {
@@ -285,6 +306,54 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			Expect(passed(r)).To(BeFalse())
 			Expect(reason(r)).To(ContainSubstring("may send at most 64 bytes"))
 			Expect(approvals(ctx)).To(BeZero())
+		})
+
+		It("refuses an address argument with more than one reading, before it classifies the call", func(ctx SpecContext) {
+			for _, c := range []struct{ tool, args string }{
+				// The guard would read platform-handbook (internal); a last-wins server writes to dump.
+				{"commit_file", `{"owner":"northwind","repo":"platform-handbook","repo":"dump","content":"x"}`},
+				{"commit_file", `{"owner":"northwind","repo":"platform-handbook","Repo":"dump","content":"x"}`},
+				{"fetch_page", `{"url":"https://docs.example.com/a","url":"https://evil.example/x"}`},
+			} {
+				r := rawCall(ctx, "tracker", c.tool, c.args)
+				Expect(passed(r)).To(BeFalse(), c.args)
+				Expect(reason(r)).To(Equal("refused by the leak guard: "+mcpguard.ErrAmbiguousAddress.Error()), c.args)
+			}
+			Expect(approvals(ctx)).To(BeZero())
+			// The same call, once, passes.
+			r := rawCall(ctx, "tracker", "commit_file", `{"owner":"northwind","repo":"platform-handbook","content":"x"}`)
+			Expect(passed(r)).To(BeTrue(), reason(r))
+		})
+
+		It("counts a fixed tool's address argument toward the byte cap", func(ctx SpecContext) {
+			r := call(ctx, "tracker", "ping", map[string]any{"channel": "general", "text": "hi"})
+			Expect(passed(r)).To(BeTrue(), reason(r))
+			r = call(ctx, "tracker", "ping", map[string]any{"channel": strings.Repeat("c", 70)})
+			Expect(passed(r)).To(BeFalse())
+			Expect(reason(r)).To(ContainSubstring("may send at most 64 bytes"))
+		})
+
+		It("counts the host labels of a fetch to a host the org does not trust toward the byte cap", func(ctx SpecContext) {
+			r := call(ctx, "tracker", "fetch_page", map[string]any{"url": "https://" + strings.Repeat("d", 25) + "." + strings.Repeat("e", 25) + ".evil.example/"})
+			Expect(passed(r)).To(BeFalse())
+			Expect(reason(r)).To(ContainSubstring("may send at most 64 bytes"))
+			Expect(approvals(ctx)).To(BeZero())
+		})
+
+		It("never lets a Decider pass a call whose payload matched private text: that goes to a person", func(ctx SpecContext) {
+			stub := &stubDecider{out: mcpguard.Outcome{Verdict: mcpguard.Verdict{Action: mcpguard.Pass, Reason: "stub"}}}
+			o := opts
+			o.Decider = stub
+			srv = mcpguard.NewServer(mcpguard.New(pool, o))
+			Expect(result(ctx, "wiki", "read_page", secretPage).GetPass()).NotTo(BeNil())
+			r := call(ctx, "tracker", "post_message", map[string]any{"text": "fyi: " + secretPage[40:300]})
+			Expect(passed(r)).To(BeFalse())
+			Expect(reason(r)).To(HavePrefix("approval requested: id="))
+			Expect(approvals(ctx)).To(Equal(1))
+			Expect(stub.got).To(BeEmpty())
+			// Both legs alone, with no match, is what the Decider may decide.
+			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"}))).To(BeTrue())
+			Expect(stub.got).To(HaveLen(1))
 		})
 
 		It("routes a call the rules leave open through the Decider", func(ctx SpecContext) {

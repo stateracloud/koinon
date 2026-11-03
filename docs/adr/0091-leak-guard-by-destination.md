@@ -97,7 +97,8 @@ A derived class is decided per call from the address arguments only:
   fetch-trusted list (#350's contract: an exact lower-case name, or a `*.example.com` wildcard that
   covers subdomains at any depth but not `example.com` itself) makes the call `internal`. Any other
   host makes it `external-low`. The path, query and fragment of the URL are **payload** and count
-  toward the byte cap.
+  toward the byte cap; to a host that is not trusted, so are the host's labels (they carry data as
+  well as a path does).
 - **Search.** A search query always leaves for the provider (ADR 0084 decision 6), so a search tool
   is `external-low` and its query is payload.
 
@@ -154,7 +155,8 @@ The taint store, the keyed winnowing, the normaliser and the single-layer decode
 Their role changes:
 
 - They run **only on payload arguments of `external-low` and `external-high` calls**, never on
-  address arguments and never on `none` or `internal` calls.
+  the address arguments of a derived class and never on `none` or `internal` calls. A fixed tool's
+  address arguments decide nothing, so they are payload.
 - The decoder set is **frozen**: no new evasion heuristics. The package documentation says plainly
   that it catches verbatim and simply-encoded copies, not an adaptive attacker.
 - Joins happen **only in call order**: the payload arguments of one call, joined in their order in
@@ -170,6 +172,11 @@ Their role changes:
 The guard no longer decides on `[]string`. Its input per call is the tool, its sink class (fixed or
 derived), the address arguments, the payload arguments and the session legs. It maintains the legs
 from responses and from agentd's feed.
+
+The address must have one reading, the one the server acts on. A call that gives an address
+argument more than once (a repeated key in the raw JSON, which a decoder would collapse to one of
+them), as a dotted literal key, in another case (decoders that match names case-insensitively) or
+inside a list is refused, whatever its class would be.
 
 ### 8. Guarantees and non-guarantees
 

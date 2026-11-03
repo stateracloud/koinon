@@ -552,7 +552,59 @@ var _ = Describe("the quickstart", Ordered, func() {
 	It("6b. adds a remote MCP server: the gateway injects its credential, and an agent's call reaches it", func(ctx SpecContext) {
 		t.begin()
 		mcpServerID = mcpServerE2E(ctx, admin, org, agent.GetId())
-		t.end("6b. Remote MCP server (add, health, tiers, allowlist, call through the gateway)")
+
+		By("inside a task, the same kind of call is held for an approval of the exact call, and runs only once approved")
+		fake := strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMCP_URL"), "/")
+		p := scenarios.PullRequest
+		guarded := func() []fakeMCPRecord {
+			var out []fakeMCPRecord
+			for _, r := range fakeMCPRequests(ctx, fake) {
+				if r.Tool == "write_item" && r.Args == p.TrackerGuardArgs {
+					out = append(out, r)
+				}
+			}
+			return out
+		}
+		res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+			OrgId: org, AgentId: agent.GetId(), Title: "Tracker exfil",
+			Message: p.TrackerGuardPrompt + ": read an item from the tracker, then write it back.",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		var seq int64
+		var evKinds []string
+		gw := watchRun(context.WithoutCancel(ctx), c, org, res.GetRun().GetId(), 0)
+		parked := gw.until(ctx, c, org, res.GetRun().GetId(), 8*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
+			return r.GetState() == runv1alpha1.RunState_RUN_STATE_PARKED
+		})
+		Expect(parked.GetParkReason()).To(Equal(runv1alpha1.ParkReason_PARK_REASON_APPROVAL))
+		list, err := c.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: res.GetTask().GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list.GetApprovals()).To(HaveLen(1), "the guard's card is the run's only approval")
+		got, err := c.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: list.GetApprovals()[0].GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		ap := got.GetApproval()
+		Expect(ap.GetConnector()).To(Equal("mcp"))
+		Expect(ap.GetTool()).To(Equal("write_item"))
+		Expect(ap.GetTarget()).To(Equal(p.TrackerAskTarget))
+		Expect(ap.GetArgsJson()).To(Equal(p.TrackerGuardArgs))
+		Expect(guarded()).To(BeEmpty(), "the guard held the call: nothing reached the server before the approval")
+
+		_, err = c.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: org, ApprovalId: ap.GetId(), ArgsSha256: ap.GetArgsSha256()})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func(g Gomega) {
+			a, err := c.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: ap.GetId()})
+			g.Expect(err).NotTo(HaveOccurred())
+			ap = a.GetApproval()
+			g.Expect(ap.GetStatus()).To(Equal(approvalv1alpha1.Status_STATUS_EXECUTED), ap.GetError())
+		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+		Expect(ap.GetExecutions()).To(BeEquivalentTo(1))
+		calls := guarded()
+		Expect(calls).To(HaveLen(1), "the server saw the approved call exactly once")
+		Expect(calls[0].Agent).To(Equal("default/mcp-exec"), "Koinon's executor made it, not the agent")
+		gw.until(ctx, c, org, res.GetRun().GetId(), 5*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
+			return r.GetState() == runv1alpha1.RunState_RUN_STATE_SUCCEEDED
+		})
+		t.end("6b. Remote MCP server (add, health, tiers, allowlist, call through the gateway, leak guard)")
 	})
 
 	It("6c. an agent's call to an ask-tier MCP tool parks, is approved, and runs once through the gateway with the exact arguments", func(ctx SpecContext) {
@@ -585,7 +637,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(ap.GetMcp().GetContentHash()).NotTo(BeEmpty())
 		Expect(ap.GetMcp().GetContentHash()).To(Equal(ap.GetMcp().GetCurrentContentHash()))
 		for _, r := range fakeMCPRequests(ctx, fake) {
-			Expect(r.Tool).NotTo(Equal("write_item"), "nothing reached the server before the approval")
+			// Step 6b's in-task leak-guard case wrote once, with its own arguments.
+			Expect(r.Tool == "write_item" && r.Args == scenarios.PullRequest.TrackerAskArgs).To(BeFalse(), "nothing reached the server before the approval")
 		}
 
 		_, err = c.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: org, ApprovalId: ap.GetId(), ArgsSha256: ap.GetArgsSha256()})
@@ -600,7 +653,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 		var calls []fakeMCPRecord
 		for _, r := range fakeMCPRequests(ctx, fake) {
-			if r.Tool == "write_item" {
+			if r.Tool == "write_item" && r.Args != scenarios.PullRequest.TrackerGuardArgs {
 				calls = append(calls, r)
 			}
 		}

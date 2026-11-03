@@ -76,6 +76,7 @@ type Guard struct {
 	cap     int
 	limits  leakguard.Limits
 	decider Decider
+	person  Decider
 	own     []string
 	url     leakguard.URLPolicy
 }
@@ -96,7 +97,7 @@ func New(pool *pgxpool.Pool, o Options) *Guard {
 	}
 	return &Guard{
 		pool: pool, q: store.New(pool), state: NewState(pool, o.MaxFingerprints, o.Metrics), log: o.Logger, metrics: o.Metrics,
-		now: o.Now, cap: o.ByteCap, limits: o.Limits, decider: o.Decider, own: slices.Clone(o.OwnTargets),
+		now: o.Now, cap: o.ByteCap, limits: o.Limits, decider: o.Decider, person: PersonDecider{Approve: o.Approve}, own: slices.Clone(o.OwnTargets),
 		url: leakguard.DefaultURLPolicy(),
 	}
 }
@@ -257,11 +258,17 @@ func (g *Guard) check(ctx context.Context, call Call) (Outcome, string, error) {
 	// An approval belongs to a run (ADR 0042): a call that needs one outside a task is refused, in
 	// words, rather than failed as an error of the approval store.
 	if _, err := g.q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: c.org.ID, AgentID: c.agent.ID}); errors.Is(err, pgx.ErrNoRows) {
-		return refuse(ReasonNoRun, "refused by the leak guard: this call needs a person's approval, which is only possible while the agent works on a task"), string(a.class), nil
+		return refuse(ReasonNoRun, NoRunApprovalText), string(a.class), nil
 	} else if err != nil {
 		return Outcome{}, string(a.class), err
 	}
-	out, err := g.decider.DecidePending(ctx, Pending{
+	// Only a call whose one reason is both legs may reach the Decider seam (ADR 0092: the judge
+	// sees facts, not text). A text match carries private text out: a person decides it, always.
+	decider := g.decider
+	if !onlyBothLegs(v) {
+		decider = g.person
+	}
+	out, err := decider.DecidePending(ctx, Pending{
 		Org: c.org, Agent: c.agent, Server: c.server, Tool: tool.McpTool, Arguments: call.Arguments,
 		Verdict: v, Destination: a.args.Address, PayloadBytes: a.args.PayloadBytes(), Risk: a.risk(),
 	})
@@ -334,17 +341,21 @@ func (a assessment) risk() map[string]any {
 // (the gateway's check); without, nothing is written (mcpask's card).
 func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration, raw json.RawMessage, charge bool) (assessment, error) {
 	var a assessment
-	args, err := SplitArgs(raw, decl)
-	if err != nil {
-		o := refuse(ReasonCheck, "refused by the leak guard: "+err.Error())
-		a.refused = &o
-		return a, nil
-	}
-	a.args = args
 	pol, err := loadPolicy(ctx, g.q, c.org)
 	if err != nil {
 		return a, err
 	}
+	args, err := SplitArgs(raw, decl, pol.hosts())
+	if err != nil {
+		reason := ReasonCheck
+		if errors.Is(err, ErrAmbiguousAddress) {
+			reason = ReasonAmbiguous
+		}
+		o := refuse(reason, "refused by the leak guard: "+err.Error())
+		a.refused = &o
+		return a, nil
+	}
+	a.args = args
 	a.class = pol.classify(c.server, decl, args.Address, g.now())
 	if a.class == sinkclass.None || a.class == sinkclass.Internal {
 		a.verdict = Decide(Facts{Class: a.class})
@@ -449,4 +460,10 @@ func (g *Guard) urlRule(st *leakguard.RunState, srv store.McpServer, decl sinkcl
 		}
 	}
 	return leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}, checked
+}
+
+// onlyBothLegs reports whether v is open for the one reason the Decider seam may take: both legs,
+// with no text match.
+func onlyBothLegs(v Verdict) bool {
+	return v.Reason == ReasonBothLegs && v.Match == nil && len(v.Reasons) == 1 && v.Reasons[0] == ReasonBothLegs
 }

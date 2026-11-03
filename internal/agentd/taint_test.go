@@ -60,9 +60,35 @@ var _ = Describe("The leak guard's feed (ADR 0091 decision 4)", func() {
 		Expect(legs).To(Equal(mcpguard.Legs{UntrustedInput: true}))
 	})
 
-	It("leaves MCP tools to the guard and ignores other updates", func() {
-		_, _, ok := finished(update(`{"sessionUpdate":"tool_call","toolCallId":"t5","title":"mcp__acme-wiki_read_page","kind":"other","status":"completed",
-			"content":[{"type":"content","content":{"type":"text","text":"x"}}]}`))
+	It("counts a tool of kind other (MCP tools among them) as both legs, cautiously", func() {
+		legs, texts, ok := finished(update(`{"sessionUpdate":"tool_call","toolCallId":"t5","title":"mcp__acme-wiki_read_page","kind":"other","status":"completed",
+			"content":[{"type":"content","content":{"type":"text","text":"a wiki page"}}]}`))
+		Expect(ok).To(BeTrue())
+		Expect(legs).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}))
+		Expect(texts).To(ConsistOf("a wiki page"))
+	})
+
+	It("counts a tool call without a kind, or of a kind it does not know, as both legs", func() {
+		for i, wire := range []string{
+			`{"sessionUpdate":"tool_call","toolCallId":"t6","title":"mystery","status":"completed","content":[{"type":"content","content":{"type":"text","text":"out"}}]}`,
+			`{"sessionUpdate":"tool_call","toolCallId":"t7","title":"newer","kind":"teleport","status":"completed"}`,
+		} {
+			legs, _, ok := finished([]byte(wire))
+			Expect(ok).To(BeTrue(), "case %d", i)
+			Expect(legs).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}), "case %d", i)
+		}
+		legs, _, ok := finished(update(`{"sessionUpdate":"tool_call","toolCallId":"t8","title":"mystery","status":"completed"}`))
+		Expect(ok).To(BeTrue(), "a missing kind after the SDK's round trip")
+		Expect(legs).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}))
+	})
+
+	It("counts delete, move and think as private data, and reports nothing for a mode switch or other updates", func() {
+		for _, kind := range []string{"delete", "move", "think"} {
+			legs, _, ok := finished(update(`{"sessionUpdate":"tool_call","toolCallId":"k-` + kind + `","title":"x","kind":"` + kind + `","status":"completed"}`))
+			Expect(ok).To(BeTrue(), kind)
+			Expect(legs).To(Equal(mcpguard.Legs{PrivateData: true}), kind)
+		}
+		_, _, ok := finished(update(`{"sessionUpdate":"tool_call","toolCallId":"t9","title":"plan mode","kind":"switch_mode","status":"completed"}`))
 		Expect(ok).To(BeFalse())
 		_, _, ok = finished(update(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}`))
 		Expect(ok).To(BeFalse())
