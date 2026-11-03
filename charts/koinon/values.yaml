@@ -330,6 +330,52 @@ secrets:
     existingSecret: ""
     # "koinon-api keys status" warns when the active key is older than this.
     activePeriod: 8760h
+    # Wrapping the KEKs with a KMS (optional; ADR 0085 decision 12, docs/ops/secret-keys.md). The
+    # default, local, keeps the KEKs in the Secret as they are; it is fully supported. With a KMS the
+    # Secret holds only KEKs encrypted by the KMS key, which never leaves the KMS. Every pod signs in
+    # with its own service account; no KMS credential is in these values. koinon-api and the
+    # reconciler may then only decrypt, and the key-admin Job, with its own service account, is the
+    # only identity that encrypts: it creates the first KEK and adds the one keyAdmin.addKey names.
+    kms:
+      # local or openbao (an OpenBao or Vault transit key).
+      backend: local
+      openbao:
+        # https://host:port of the server. Required with backend openbao.
+        address: ""
+        # A ConfigMap in the release namespace with ca.crt, the CA that signed the server's
+        # certificate (a CA is not secret). Empty: the image's system roots.
+        caConfigMap: ""
+        # The OpenBao namespace (X-Vault-Namespace), if any.
+        namespace: ""
+        # Mount path of the transit engine, and the transit key (create it first; aes256-gcm96).
+        transitMount: transit
+        key: ""
+        # Mount path of the Kubernetes auth method, and its roles, one per identity. Bind each role
+        # to its service account (<fullname>-api, <fullname>-reconciler, <fullname>-key-admin) in
+        # the release namespace. Policies: koinon-api and the reconciler get update on
+        # <transitMount>/decrypt/<key>; the key-admin Job update on <transitMount>/encrypt/<key> and
+        # <transitMount>/decrypt/<key>. Never grant create: transit encrypt would then make a
+        # missing key, so a mistyped key name would wrap the KEKs under a new key.
+        authMount: kubernetes
+        roles:
+          api: koinon-api
+          reconciler: koinon-reconciler
+          keyAdmin: koinon-key-admin
+        # Bound on one call to OpenBao, as a Go duration; empty is 5s.
+        timeout: ""
+      keyAdmin:
+        # The ID of a KEK for the key-admin Job to add, wrapped by the KMS, if the key set does not
+        # hold it yet (kek-YYYYMMDD-xxxx: lower-case letters, digits and dashes). Set a new ID to
+        # rotate or to move from local KEKs, upgrade, then in koinon-api: keys activate <ID>, keys
+        # rewrap, keys retire the old ones. The Job runs again whenever this or the KMS settings
+        # change; with nothing to do it changes nothing.
+        addKey: ""
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 64Mi
   # Only for installs that predate the secret store and still have a Kubernetes Secret per GitHub
   # connection: lets koinon-api delete those Secrets after it moved their fields into Postgres. Turn
   # it off again afterwards.

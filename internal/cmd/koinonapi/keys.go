@@ -56,6 +56,7 @@ func newKeysCommand() *cobra.Command {
 	pf.StringVar(&o.namespace, "namespace", "", "namespace of the KEK Secret")
 	pf.StringVar(&o.kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config")
 	pf.DurationVar(&o.period, "kek-active-period", keyscli.DefaultActivePeriod, "status warns when the active KEK is older than this")
+	o.wrapping.Flags(pf)
 	cli.EnvAlias(keys, "database-url", "DATABASE_URL")
 	cli.EnvAlias(keys, "namespace", "POD_NAMESPACE")
 

@@ -584,7 +584,74 @@ egress.allowedInternalHosts; both are joined. */}}
 - name: KOINON_KEK_SECRET
   value: {{ include "koinon.kekSecretName" .root | quote }}
 - name: KOINON_KEK_CREATE
-  value: {{ if .root.Values.secrets.kek.existingSecret }}"false"{{ else }}"true"{{ end }}
+  value: {{ if or .root.Values.secrets.kek.existingSecret (include "koinon.kms" .root) }}"false"{{ else }}"true"{{ end }}
+{{- end }}
+{{- include "koinon.kmsEnv" (dict "root" .root "role" .component) }}
+{{- end }}
+
+{{/*
+The KMS that wraps the KEKs (values secrets.kek.kms, ADR 0085 decision 12): "openbao", or empty for
+the local Secret-held KEKs. With a KMS, koinon-api never creates the KEK Secret (KOINON_KEK_CREATE
+false): the key-admin Job does (key-admin.yaml), since only it may encrypt.
+*/}}
+{{- define "koinon.kms" -}}
+{{- $b := .Values.secrets.kek.kms.backend | default "local" }}
+{{- if ne $b "local" }}{{ $b }}{{ end }}
+{{- end }}
+
+{{/*
+The KMS settings of one identity (dict root, role: api, reconciler or keyAdmin), as the KOINON_ forms
+of the --kek-backend and --openbao-* flags (internal/secretstore/wrapping). Each identity signs in
+with its own service account token as its own role; nothing here is a credential.
+*/}}
+{{- define "koinon.kmsEnv" -}}
+{{- $kms := .root.Values.secrets.kek.kms }}
+{{- if eq (include "koinon.kms" .root) "openbao" }}
+{{- $o := $kms.openbao }}
+- name: KOINON_KEK_BACKEND
+  value: openbao
+- name: KOINON_OPENBAO_ADDRESS
+  value: {{ $o.address | quote }}
+- name: KOINON_OPENBAO_TRANSIT_MOUNT
+  value: {{ $o.transitMount | default "transit" | quote }}
+- name: KOINON_OPENBAO_KEY
+  value: {{ $o.key | quote }}
+- name: KOINON_OPENBAO_AUTH_MOUNT
+  value: {{ $o.authMount | default "kubernetes" | quote }}
+- name: KOINON_OPENBAO_ROLE
+  value: {{ index $o.roles .role | quote }}
+{{- with $o.namespace }}
+- name: KOINON_OPENBAO_NAMESPACE
+  value: {{ . | quote }}
+{{- end }}
+{{- with $o.timeout }}
+- name: KOINON_OPENBAO_TIMEOUT
+  value: {{ . | quote }}
+{{- end }}
+{{- if $o.caConfigMap }}
+- name: KOINON_OPENBAO_CA_FILE
+  value: /etc/koinon/openbao-ca/ca.crt
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/* The CA of the OpenBao server, when values name one (a ConfigMap: a CA is not secret). */}}
+{{- define "koinon.kmsVolumeMount" -}}
+{{- if and (eq (include "koinon.kms" .) "openbao") .Values.secrets.kek.kms.openbao.caConfigMap }}
+- name: openbao-ca
+  mountPath: /etc/koinon/openbao-ca
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "koinon.kmsVolume" -}}
+{{- if and (eq (include "koinon.kms" .) "openbao") .Values.secrets.kek.kms.openbao.caConfigMap }}
+- name: openbao-ca
+  configMap:
+    name: {{ .Values.secrets.kek.kms.openbao.caConfigMap }}
+    items:
+      - key: ca.crt
+        path: ca.crt
 {{- end }}
 {{- end }}
 
@@ -597,6 +664,21 @@ sandbox policies. The reconciler's RoleBinding to it in each workspace namespace
 {{- end }}
 
 {{- define "koinon.validate" -}}
+{{- if eq (include "koinon.kms" .) "openbao" }}
+{{- $o := .Values.secrets.kek.kms.openbao }}
+{{- if not $o.address }}
+{{- fail "secrets.kek.kms.openbao.address is required when secrets.kek.kms.backend is openbao" }}
+{{- end }}
+{{- if not $o.key }}
+{{- fail "secrets.kek.kms.openbao.key is required when secrets.kek.kms.backend is openbao: the transit key that wraps the KEKs" }}
+{{- end }}
+{{- if and (hasPrefix "http://" $o.address) (not (regexMatch "^http://(127\\.[0-9.]+|localhost|\\[::1\\])(:[0-9]+)?/?$" $o.address)) }}
+{{- fail "secrets.kek.kms.openbao.address must be https: the KEKs travel to OpenBao (plain http only on a loopback address)" }}
+{{- end }}
+{{- end }}
+{{- if and .Values.secrets.kek.kms.keyAdmin.addKey (not (include "koinon.kms" .)) }}
+{{- fail "secrets.kek.kms.keyAdmin.addKey needs a KMS (secrets.kek.kms.backend): a local install adds KEKs with koinon-api keys add" }}
+{{- end }}
 {{- if .Values.sandboxObserver.enabled }}
 {{- if not .Values.sandboxPolicy.enabled }}
 {{- fail "sandboxObserver.enabled needs sandboxPolicy.enabled: the policy's RoleBinding rule is what limits the reconciler's right to bind the observer role to sandbox namespaces. Enable sandboxPolicy, or set sandboxObserver.enabled=false (a sandbox that cannot pull its image then stays an unknown wait cause)" }}
@@ -725,4 +807,63 @@ it carries no credentials.
       key: {{ $key }}
 {{- end }}
 {{- end }}
+{{- end }}
+
+{{/*
+The key-admin Job's pod template (key-admin.yaml), as a string: the Job is named by its hash.
+dict root, sa (service account), kek (Secret name), create (bool), ka (values secrets.kek.kms.keyAdmin).
+*/}}
+{{- define "koinon.keyAdminPod" -}}
+{{- $ := .root -}}
+metadata:
+  labels:
+    {{- include "koinon.labels" (list $ "key-admin") | nindent 4 }}
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ .sa }}
+  # The token signs in to the KMS (Kubernetes auth) and reaches the Kubernetes API.
+  automountServiceAccountToken: true
+  enableServiceLinks: false
+  {{- with include "koinon.imagePullSecrets" $ | trim }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  securityContext:
+    {{- include "koinon.podSecurityContext" $ | nindent 4 }}
+  containers:
+    - name: key-admin
+      image: {{ include "koinon.image" (list $ $.Values.api.image) }}
+      imagePullPolicy: {{ $.Values.image.pullPolicy }}
+      args:
+        - key-admin
+        - {{ printf "--kek-secret=%s" .kek | quote }}
+        {{- if .create }}
+        - --kek-create
+        {{- end }}
+        {{- with .ka.addKey }}
+        - {{ printf "--add-key=%s" . | quote }}
+        {{- end }}
+      env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        {{- if .create }}
+        {{- include "koinon.dbEnv" (list $ "api") | nindent 8 }}
+        {{- end }}
+        {{- include "koinon.kmsEnv" (dict "root" $ "role" "keyAdmin") | trim | nindent 8 }}
+      securityContext:
+        {{- include "koinon.containerSecurityContext" $ | nindent 8 }}
+      terminationMessagePolicy: FallbackToLogsOnError
+      resources:
+        {{- toYaml .ka.resources | nindent 8 }}
+      {{- $mounts := list (ternary (include "koinon.dbVolumeMount" $) "" .create) (include "koinon.kmsVolumeMount" $) | join "\n" | trim }}
+      {{- $volumes := list (ternary (include "koinon.dbVolume" $) "" .create) (include "koinon.kmsVolume" $) | join "\n" | trim }}
+      {{- with $mounts }}
+      volumeMounts:
+        {{- . | nindent 8 }}
+      {{- end }}
+  {{- with $volumes }}
+  volumes:
+    {{- . | nindent 4 }}
+  {{- end }}
 {{- end }}
