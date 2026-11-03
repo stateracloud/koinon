@@ -4,9 +4,18 @@
 # parallel mode (-p, one OS process per core), every other package with plain `go test` (#222).
 #
 # A suite may be listed only when each parallel process is isolated: pgtest.Start and
-# pgtest.StartTemplate run in every process's BeforeSuite, so each process gets its own Postgres
-# container, and the suite binds no fixed port and writes no fixed path. Add a suite here after
-# checking that; do not serialise a suite to hide shared state, fix the state.
+# pgtest.StartTemplate run in every process's BeforeSuite, so each process gets databases of its
+# own, and the suite binds no fixed port and writes no fixed path. Add a suite here after checking
+# that; do not serialise a suite to hide shared state, fix the state.
+#
+# One Postgres per run (#224): this script starts one server (hack/pgserver) and passes its DSN in
+# KOINON_PGTEST_DSN, and every test process of the run, parallel or not, creates its databases there
+# as copies of one template migrated once per run (internal/testing/pgtest). The databases are
+# still per process (names unique on the server), so the isolation above holds for rows and
+# schemas; what processes now share is the server's cluster-wide state, roles and settings, which a
+# suite on the default server must leave alone (pgtest's package comment). Durable suites keep a
+# container per process. Without Docker no server starts and the suites skip as before (testenv);
+# with KOINON_PGTEST_DSN already set, that server is used.
 #
 # Exit codes alone do not show that a suite ran (#507): a suite that skips as a whole exits 0, and
 # under -p a suite whose processes exit before reporting prints "Test Suite Passed" with no report.
@@ -40,7 +49,7 @@
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# shellcheck disable=SC2329 # invoked from the exit trap
+# shellcheck disable=SC2317,SC2329 # invoked from the exit trap (SC2317 before shellcheck 0.10)
 write_rc() { [[ -z ${KOINON_RC_FILE:-} ]] || echo "$1" >"$KOINON_RC_FILE"; }
 
 PARALLEL_SUITES=(
@@ -55,7 +64,19 @@ if [[ ${1:-} == "--list" ]]; then
 	printf '%s\n' "${PARALLEL_SUITES[@]}"
 	exit 0
 fi
-trap 'write_rc $?' EXIT # after --list: a listing is not a run
+pg_pid=
+pg_dir=
+# shellcheck disable=SC2317,SC2329 # invoked from the exit trap (SC2317 before shellcheck 0.10)
+on_exit() {
+	local status=$1
+	if [[ -n $pg_pid ]]; then
+		kill "$pg_pid" 2>/dev/null || true
+		wait "$pg_pid" 2>/dev/null || true
+	fi
+	[[ -z $pg_dir ]] || rm -rf "$pg_dir"
+	write_rc "$status"
+}
+trap 'on_exit $?' EXIT # after --list: a listing is not a run
 
 procs=(-p)
 [[ -z ${PROCS:-} ]] || procs=("--procs=$PROCS")
@@ -95,6 +116,24 @@ while IFS= read -r dir; do
 		plain+=("$dir")
 	fi
 done <<<"$dirs"
+
+# The run's shared Postgres (see the header). The DSN goes through a private temporary directory,
+# not the report directory, which CI uploads.
+if [[ -z ${KOINON_PGTEST_DSN:-} ]] && ((${#parallel[@]} + ${#ginkgo_rest[@]})); then
+	pg_dir=$(mktemp -d "${TMPDIR:-/tmp}/go-test-pg.XXXXXX")
+	go build -o "$pg_dir/pgserver" ./hack/pgserver || exit 1
+	"$pg_dir/pgserver" -dsn-file "$pg_dir/dsn" &
+	pg_pid=$!
+	while [[ ! -s $pg_dir/dsn ]] && kill -0 "$pg_pid" 2>/dev/null; do sleep 0.2; done
+	if [[ -s $pg_dir/dsn ]]; then
+		KOINON_PGTEST_DSN=$(<"$pg_dir/dsn")
+		export KOINON_PGTEST_DSN
+	else
+		wait "$pg_pid" || true
+		pg_pid=
+		echo "go-test.sh: no shared Postgres for this run (above); each test process starts its own or skips" >&2
+	fi
+fi
 
 rc=0
 failed=()

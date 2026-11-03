@@ -3,7 +3,6 @@
 package migrations_test
 
 import (
-	"context"
 	"database/sql"
 	"io/fs"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
 // tasksMigrationVersion finds the tasks migration by name, so no test hard-codes its number.
@@ -30,15 +30,7 @@ func tasksMigrationVersion() int64 {
 var _ = Describe("the tasks migration", func() {
 	It("moves tickets with their timelines, runs, approvals, spend and saved work to tasks", func(ctx SpecContext) {
 		version := tasksMigrationVersion()
-		admin, err := sql.Open("pgx", dsn)
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(admin.Close)
-		_, err = admin.ExecContext(ctx, `CREATE DATABASE tickets_before`)
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func(ctx context.Context) {
-			_, _ = admin.ExecContext(ctx, `DROP DATABASE IF EXISTS tickets_before WITH (FORCE)`)
-		})
-		old, err := sql.Open("pgx", strings.Replace(dsn, "/koinon?", "/tickets_before?", 1))
+		old, err := sql.Open("pgx", pgtest.Run(ctx))
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(old.Close)
 		provider, err := goose.NewProvider(goose.DialectPostgres, old, migrations.FS)
