@@ -34,7 +34,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"8cf4303fc02f83f1"'
+      koinon.config: '"2b1a0d5d8f62fd2d"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -104,7 +104,7 @@ llm:
             org: globex
           allowedModels:
             - deepseek/deepseek-v4.1-flash
-        - keyHash: sha256:8ae9d7f36c43471f47b779e138df4e7d1116e0a9bf983791a786e9a3b2c20e9d
+        - keyHash: sha256:9be9236385e8c822e1562ddd9e90bfadc409dcf37115964897b71489aaf7a44f
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -217,6 +217,23 @@ mcp:
       rules:
         - apiKey.agent == "acme/repo-helper" && ((mcp.tool.target == "github" && mcp.tool.name in ["create_pull_request", "get_approval_status"]) || (mcp.tool.target == "docs" && mcp.tool.name in ["search"]))
         - mcp.prompt.name == "koinon-ready"
+    mcpGuardrails:
+      processors:
+        - kind: remote
+          methods:
+            tools/call: full
+          host: koinon-api-guard.koinon.svc:8083
+          failureMode: failClosed
+          metadata:
+            agent: apiKey.agent
+            tool: mcp.tool.name
+          requestHeaders:
+            allowed:
+              - mcp-protocol-version
+            disallowed:
+              - authorization
+              - x-api-key
+              - cookie
     transformations:
       request:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id", "user-agent"])

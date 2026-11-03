@@ -44,6 +44,10 @@ type Options struct {
 	// retry a config it rejected, for example one naming a key file that kubelet had not
 	// mounted yet). It is not part of the revision.
 	Redelivery int
+	// GuardURL is the MCP leak guard in koinon-api, "http(s)://host:port": mcpGuardrails' remote
+	// processor on the MCP section, failureMode failClosed (ADR 0091). Empty refuses every call to
+	// an org's MCP server at the gateway.
+	GuardURL string
 }
 
 // OTLPExport is an OTLP/HTTP (protobuf) logs endpoint.
@@ -127,6 +131,9 @@ func admitRule() string {
 // Render returns agentgateway's config file for s and its revision. It is a
 // pure function: equal inputs give byte-identical output.
 func Render(s gateway.State, o Options) ([]byte, gateway.Revision, error) {
+	if err := gateway.ValidateGuardURL(o.GuardURL); err != nil {
+		return nil, "", fmt.Errorf("standalone: Options.GuardURL: %w", err)
+	}
 	if err := s.Validate(); err != nil {
 		return nil, "", err
 	}
@@ -453,7 +460,57 @@ type mcpPolicies struct {
 	// (gateway.NoKeyInHeadersExpr). It runs after apiKey and before Transformations.
 	Authorization    authorization    `yaml:"authorization"`
 	MCPAuthorization mcpAuthorization `yaml:"mcpAuthorization"`
-	Transformations  transformations  `yaml:"transformations"`
+	// MCPGuardrails is the MCP leak guard (ADR 0091; gateway.GuardMetadata).
+	MCPGuardrails   mcpGuardrails   `yaml:"mcpGuardrails"`
+	Transformations transformations `yaml:"transformations"`
+}
+
+// mcpGuardrails is agentgateway v1.7.0's McpGuardrails (crates/agentgateway/src/mcp/guardrails).
+type mcpGuardrails struct {
+	Processors []guardProcessor `yaml:"processors"`
+}
+
+// guardProcessor is one processor: kind remote (host, failureMode, metadata, requestHeaders) or
+// kind expression (condition, reject).
+type guardProcessor struct {
+	Kind           string            `yaml:"kind"`
+	Methods        map[string]string `yaml:"methods"`
+	Host           string            `yaml:"host,omitempty"`
+	Policies       *guardPolicies    `yaml:"policies,omitempty"`
+	FailureMode    string            `yaml:"failureMode,omitempty"`
+	Metadata       map[string]string `yaml:"metadata,omitempty"`
+	RequestHeaders *headerFilter     `yaml:"requestHeaders,omitempty"`
+	Condition      string            `yaml:"condition,omitempty"`
+	Reject         string            `yaml:"reject,omitempty"`
+}
+
+type guardPolicies struct {
+	BackendTLS map[string]any `yaml:"backendTLS"`
+}
+
+type headerFilter struct {
+	Allowed    []string `yaml:"allowed"`
+	Disallowed []string `yaml:"disallowed"`
+}
+
+// guardrails renders the guard's processor; without a guard, calls to org servers are refused.
+func guardrails(s gateway.State, guardURL string) mcpGuardrails {
+	methods := map[string]string{gateway.GuardMethod: "full"}
+	if guardURL == "" {
+		return mcpGuardrails{Processors: []guardProcessor{{
+			Kind: "expression", Methods: methods,
+			Condition: gateway.GuardUnconfiguredCondition(s), Reject: gateway.GuardUnconfiguredReason,
+		}}}
+	}
+	p := guardProcessor{
+		Kind: "remote", Methods: methods, Host: gateway.GuardHostPort(guardURL), FailureMode: "failClosed",
+		Metadata:       gateway.GuardMetadata(),
+		RequestHeaders: &headerFilter{Allowed: gateway.GuardAllowedHeaders, Disallowed: gateway.GuardDisallowedHeaders},
+	}
+	if strings.HasPrefix(guardURL, "https://") {
+		p.Policies = &guardPolicies{BackendTLS: map[string]any{}}
+	}
+	return mcpGuardrails{Processors: []guardProcessor{p}}
 }
 
 type transformations struct {
@@ -685,6 +742,7 @@ func build(s gateway.State, o Options) document {
 				APIKey:           keyPolicy(keys, gateway.State{}, nil),
 				Authorization:    authorization{Rules: []string{gateway.NoKeyInHeadersExpr()}},
 				MCPAuthorization: mcpAuthorization{Rules: toolRules(s.Tools)},
+				MCPGuardrails:    guardrails(s, o.GuardURL),
 				// Targets learn which agent calls from this header (gateway.AgentHeader);
 				// set overwrites whatever the client sent.
 				Transformations: transformations{Request: headerTransform{

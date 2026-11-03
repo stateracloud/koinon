@@ -12,7 +12,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"afaebe87d578efc4"'
+      koinon.config: '"5fb1c660c2cc40f4"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -44,7 +44,7 @@ llm:
             agent: acme/triage
             org: acme
           allowedModels: []
-        - keyHash: sha256:0f00a6dd1c2226793524aa8b88a2996198127fd4629ccc4b797dd93f7719e0e3
+        - keyHash: sha256:a0f57207a63c1f9d798918c85253d239e03e4fc60492257e68538d141efdaa75
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -82,6 +82,13 @@ mcp:
     mcpAuthorization:
       rules:
         - mcp.prompt.name == "koinon-ready"
+    mcpGuardrails:
+      processors:
+        - kind: expression
+          methods:
+            tools/call: full
+          condition: "false"
+          reject: 'refused: the MCP leak guard is not configured on this installation'
     transformations:
       request:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id", "user-agent"])
