@@ -323,6 +323,15 @@ Implementation-level unknowns, to settle in the sub-issues:
     it. A local install has no key-admin Job: koinon-api creates and adds KEKs exactly as before.
     415a has the refusal; the Job, its service account and its chart wiring are part of #416, with
     the first adapter (OpenBao transit, `secretstore/openbao`).
+  - The key-admin Job (#416) is `koinon-api key-admin`, rendered only with `secrets.kek.kms`. It is
+    an ordinary release resource, not a hook: a post-install hook would deadlock `helm install
+    --wait` (koinon-api is not ready before the KEK Secret exists) and in cnpg mode a pre-install
+    hook has no database. Its name carries a hash of its pod template, so any change of its inputs
+    (`keyAdmin.addKey`, the KMS settings, the image) runs it once more and an unchanged upgrade or
+    Argo CD sync leaves the finished Job alone; no immutable Job spec is ever changed. It creates
+    the KEK Secret when missing (never with `existingSecret`, and never while the database holds
+    values) and adds the KEK `addKey` names; it never activates, rewraps or retires. With a KMS,
+    koinon-api runs with `--kek-create=false` and restarts until the Job has made the Secret.
   - Fingerprint: decision 12 said the wrapping keys' fingerprints; the code fingerprints the KEKs
     (`secretstore.Fingerprint`, HMAC-SHA256 keyed by the KEK, 16 bytes). A KEK's fingerprint is the
     same however it is wrapped: a KEK's fingerprint does not depend on its wrapping, so an export

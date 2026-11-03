@@ -1,0 +1,85 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+The key-admin Job (ADR 0085 decision 12, #416): only with a KMS (secrets.kek.kms.backend). It runs
+"koinon-api key-admin" with its own service account, the only identity the KMS lets encrypt;
+koinon-api and the reconciler may only decrypt. It creates the KEK Secret with one active KEK
+wrapped by the KMS when the Secret does not exist (not with secrets.kek.existingSecret, which is the
+operator's), and adds the KEK secrets.kek.kms.keyAdmin.addKey names when the key set does not hold
+it. It never activates, rewraps or retires: koinon-api keys does.
+
+It is an ordinary release resource, not a hook: on a new install it must run while the database
+and koinon-api come up (a post-install hook would deadlock `helm install --wait`, since koinon-api
+cannot become ready before the KEK Secret exists, and in cnpg mode a pre-install hook has no
+database yet). It waits for the database, which it reads only to refuse re-creating a deleted Secret
+over stored values; until it is done, koinon-api restarts. The Job's name carries a hash of its pod
+template, so any change of its inputs (addKey, the KMS settings, the image) makes a new Job that runs
+once, and an unchanged upgrade or Argo CD sync leaves the finished one alone. A Job's spec cannot be
+changed in place, and this way it never has to be. Each run is idempotent.
+
+The service account keeps one name (<fullname>-key-admin), the subject OpenBao's Kubernetes auth
+role binds.
+*/ -}}
+{{- if include "koinon.kms" . }}
+{{- $sa := include "koinon.componentName" (list . "key-admin") }}
+{{- $kek := include "koinon.kekSecretName" . }}
+{{- $create := not .Values.secrets.kek.existingSecret }}
+{{- $ka := .Values.secrets.kek.kms.keyAdmin }}
+{{- $pod := include "koinon.keyAdminPod" (dict "root" . "sa" $sa "kek" $kek "create" $create "ka" $ka) }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  labels:
+    {{- include "koinon.labels" (list . "key-admin") | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $sa }}
+  labels:
+    {{- include "koinon.labels" (list . "key-admin") | nindent 4 }}
+rules:
+  # The KEK Secret, by name: read it, and add a KEK to it. It deletes nothing.
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ $kek }}]
+    verbs: [get, update]
+  {{- if $create }}
+  # create cannot be limited by resourceNames: this namespaced Role can create any Secret here. The
+  # Job creates only the KEK Secret, and only when it does not exist.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $sa }}
+  labels:
+    {{- include "koinon.labels" (list . "key-admin") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $sa }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-%s" $sa ($pod | sha256sum | trunc 10) | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "koinon.labels" (list . "key-admin") | nindent 4 }}
+  annotations:
+    # After the CNPG Cluster and the ServiceAccounts (wave 0), with the migration (wave 1).
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  template:
+    {{- $pod | nindent 4 }}
+{{- end }}
