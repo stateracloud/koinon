@@ -222,23 +222,34 @@ The data model #349 builds on, as shipped in migration `00048`:
   tool stores external-high as its fallback, for an address that does not parse. `result_untrusted_input`
   and `result_private_data` are nullable overrides of the server's legs for what the tool's results
   carry (NULL means the server's). It is set by `SetToolSink` (`PUT /mcp-servers/{id}/tools/{tool}/sink`),
-  audited as `mcp_tool.declaration.set` with before and after. The argument names are checked for
-  shape only, not against the tool's input schema.
+  audited as `mcp_tool.declaration.set` with before and after. The request carries the `content_hash`
+  of the tool the admin reviewed; the tool is read under `FOR UPDATE`, and a different hash is
+  `ABORTED` (HTTP 409) and changes nothing, so a declaration is never stored against text the admin did
+  not see. The argument names are checked for shape only, not against the tool's input schema.
 - **A new URL or a new tool hash resets the declaration (ADR 0057).** When a server's URL changes (an
   update or a Secret re-apply), every declared tool of it goes back to external-high, fixed, no
   address arguments and the server's legs, in the same transaction as the class reset, audited per
   tool as `mcp_tool.declaration.reset` (reason `url_changed`). When a sync finds a tool whose content
   hash changed, that tool's declaration resets the same way (reason `content_changed`, actor system),
   for the same reason as its tier: the declaration described text that is gone.
-- **Code-host scope and repository visibility.** `org_code_host_repos(org_id, connection_id, owner,
-  repo, visibility, checked_at)` holds the repositories a code-host connection can reach and the
-  visibility its connector last read (`private`, `internal`, `public`, `unknown`); owner and repo are
-  lower case. A write derives as **internal only if the repository is listed and every reading of it
-  is private or internal and fresh**. A public, unknown, unlisted or stale repository, a foreign
-  owner or an unparsable value derives external-high. Decision of #350 on the ADR's open question:
-  a reading is **fresh for 1 hour** (`DefaultVisibilityMaxAge`) and a stale one counts as unknown;
-  with several connections the worst reading wins. `ReplaceCodeHostRepos` is the writer a connector
-  uses, and the leak-guard view reports the counts by visibility and how many are stale.
+- **Code-host scope, per connection (ADR 0091 decision 3).** `org_code_host_repos(org_id,
+  connection_id, owner, repo, visibility, checked_at)` holds the repositories each code-host
+  connection can reach and the visibility its connector last read (`private`, `internal`, `public`,
+  `unknown`); owner and repo are lower case. A server is linked to the connection it acts through by
+  `mcp_servers.code_host_connection_id` (set with the data class; cleared by a URL change, audited as
+  part of `mcp_server.data_class.reset`; a deleted connection unlinks it). We key by connection ID,
+  not by code-host base URL, because the scope table already belongs to a connection, a connection
+  is the credential and identity the server acts with, and the data model stores no base URL to key
+  by. The link is per server: the server is the endpoint the connection belongs to. `Classify` takes
+  that connection ID and looks the repository up in its list only, so `northwind/platform-handbook`
+  private on a Gitea connection does not make a GitHub MCP write to a same-named public repository
+  internal. A write derives as **internal only if the linked connection lists the repository, not
+  public, with a fresh reading**. A server with no link, a public, unknown, unlisted or stale
+  repository, a foreign owner, a non-ASCII or unparsable name derives external-high. Names are ASCII
+  only (U+212A lower-cases to `k`). Decision of #350 on the ADR's open question: a reading is **fresh
+  for 1 hour** (`DefaultVisibilityMaxAge`) and a stale one counts as unknown; a reading dated more
+  than a minute in the future counts as stale on read and is refused by `ReplaceCodeHostRepos`, the
+  writer a connector uses. The leak-guard view reports the counts by visibility and how many are stale.
 - **Threshold.** `org_settings.leak_match_threshold` is NULL for the default 24 and otherwise 12 to 256
   (the bounds of `internal/leakguard`, enforced by a CHECK). The API treats 0 or absent as "back to
   the default".

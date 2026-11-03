@@ -39,11 +39,13 @@ service McpServerService {
   rpc SetToolTier(SetToolTierRequest) returns (SetToolTierResponse);
   // SetToolTwoApprovers turns on or off the requirement that a call to the tool in the ask tier needs
   // two approvers: distinct admins or owners, neither the ticket's creator. Off by default.
-  // SetToolSink declares a tool's sink class, address arguments and result legs (ADR 0091). Audited as
-  // mcp_tool.declaration.set. A changed server URL or tool content hash puts it back to the default,
-  // audited as mcp_tool.declaration.reset.
-  rpc SetToolSink(SetToolSinkRequest) returns (SetToolSinkResponse);
   rpc SetToolTwoApprovers(SetToolTwoApproversRequest) returns (SetToolTwoApproversResponse);
+  // SetToolSink declares a tool's sink class, address arguments and result legs (ADR 0091). The
+  // request names the content hash of the tool the admin reviewed; if the server republished the tool
+  // since, the call fails with ABORTED (HTTP 409) and nothing changes. Audited as
+  // mcp_tool.declaration.set. A changed server URL or tool content hash puts the declaration back to
+  // the default, audited as mcp_tool.declaration.reset.
+  rpc SetToolSink(SetToolSinkRequest) returns (SetToolSinkResponse);
   // AcknowledgeToolReview clears a tool's review flag without changing its tier.
   rpc AcknowledgeToolReview(AcknowledgeToolReviewRequest) returns (AcknowledgeToolReviewResponse);
 
@@ -105,6 +107,10 @@ message Server {
   // kind "other" with both legs.
   string kind = 20;
   repeated string data_class = 21;
+  // code_host_connection_id is the org's code-host connection the server acts through, empty for none.
+  // The code-host sink class of its tools is looked up in that connection's repository list only; a
+  // server without one is external-high. A changed URL clears it.
+  string code_host_connection_id = 22;
 }
 
 // ServerClass is what a server declares it exposes (ADR 0084 decision 8).
@@ -117,6 +123,9 @@ message ServerClass {
   // leave). A server may carry both; none is allowed. Where a call goes is not a server leg: it is the
   // sink class of each tool (ToolSink).
   repeated string data_class = 2;
+  // code_host_connection_id links the server to one of the org's code-host connections (see Server).
+  // Empty means none.
+  string code_host_connection_id = 3;
 }
 
 message Tool {
@@ -265,6 +274,8 @@ message SetToolSinkRequest {
   string server_id = 2;
   string tool = 3;
   ToolSink sink = 4;
+  // content_hash is the Tool.content_hash the admin reviewed. Required.
+  string content_hash = 5;
 }
 
 message SetToolSinkResponse {

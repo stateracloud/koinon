@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	connect "connectrpc.com/connect/v2"
+	guuid "github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -96,9 +97,10 @@ var _ = Describe("the leak guard settings in the UI API", func() {
 		Expect(tools.GetTools()[0].GetSink().GetSinkClass()).To(Equal("external-high"))
 		Expect(tools.GetTools()[0].GetSink().GetDerivation()).To(Equal("fixed"))
 
+		hash := tools.GetTools()[0].GetContentHash()
 		yes := true
 		set, err := owner.mcps.SetToolSink(ctx, &mcpserverv1alpha1.SetToolSinkRequest{
-			OrgId: org, ServerId: sid, Tool: "create_issue",
+			OrgId: org, ServerId: sid, Tool: "create_issue", ContentHash: hash,
 			Sink: &mcpserverv1alpha1.ToolSink{SinkClass: "external-high", Derivation: "code_host", AddressArgs: []string{"owner", "repo"}, ResultUntrustedInput: &yes},
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -114,14 +116,18 @@ var _ = Describe("the leak guard settings in the UI API", func() {
 			{SinkClass: "none", Derivation: "oracle"},
 			{SinkClass: "external-high", Derivation: "fetch"},
 		} {
-			_, err = owner.mcps.SetToolSink(ctx, &mcpserverv1alpha1.SetToolSinkRequest{OrgId: org, ServerId: sid, Tool: "create_issue", Sink: bad})
+			_, err = owner.mcps.SetToolSink(ctx, &mcpserverv1alpha1.SetToolSinkRequest{OrgId: org, ServerId: sid, Tool: "create_issue", ContentHash: hash, Sink: bad})
 			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "%v", bad)
 		}
 		_, err = owner.mcps.SetToolSink(ctx, &mcpserverv1alpha1.SetToolSinkRequest{
-			OrgId: org, ServerId: sid, Tool: "no_such",
+			OrgId: org, ServerId: sid, Tool: "no_such", ContentHash: hash,
 			Sink: &mcpserverv1alpha1.ToolSink{SinkClass: "none", Derivation: "fixed"},
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
+
+		By("a call without the reviewed hash is refused")
+		_, err = owner.mcps.SetToolSink(ctx, &mcpserverv1alpha1.SetToolSinkRequest{OrgId: org, ServerId: sid, Tool: "create_issue", Sink: &mcpserverv1alpha1.ToolSink{SinkClass: "none", Derivation: "fixed"}})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
 
 		_, err = owner.mcps.UpdateServer(ctx, &mcpserverv1alpha1.UpdateServerRequest{OrgId: org, ServerId: sid, Url: new("https://other.example.com/mcp")})
 		Expect(err).NotTo(HaveOccurred())
@@ -130,6 +136,64 @@ var _ = Describe("the leak guard settings in the UI API", func() {
 		Expect(tools.GetTools()[0].GetSink().GetDerivation()).To(Equal("fixed"))
 		Expect(tools.GetTools()[0].GetSink().GetAddressArgs()).To(BeEmpty())
 		Expect(audited(ctx, "mcp_tool.declaration.reset")).To(Equal(1))
+	})
+
+	It("answers Aborted and keeps the tool as it was when the server republished it after the review", func(ctx SpecContext) {
+		srv, err := owner.mcps.CreateServer(ctx, &mcpserverv1alpha1.CreateServerRequest{OrgId: org, Name: "forge", Url: "https://mcp.example.com/mcp"})
+		Expect(err).NotTo(HaveOccurred())
+		sid := srv.GetServer().GetId()
+		var pgid, orgID pgtype.UUID
+		Expect(pgid.Scan(sid)).To(Succeed())
+		Expect(orgID.Scan(org)).To(Succeed())
+		sync := func(description string) {
+			GinkgoHelper()
+			_, err := mcpservers.New(e.pool, nil, nil).SyncTools(ctx, orgID, pgid, []mcpservers.ListedTool{
+				{Name: "create_issue", Description: description, InputSchema: json.RawMessage(`{"type":"object"}`)},
+			})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		sync("Create an issue")
+		tools, err := owner.mcps.ListTools(ctx, &mcpserverv1alpha1.ListToolsRequest{OrgId: org, ServerId: sid})
+		Expect(err).NotTo(HaveOccurred())
+		reviewed := tools.GetTools()[0].GetContentHash()
+		none := &mcpserverv1alpha1.ToolSink{SinkClass: "none", Derivation: "fixed"}
+
+		_, err = owner.mcps.SetToolSink(ctx, &mcpserverv1alpha1.SetToolSinkRequest{OrgId: org, ServerId: sid, Tool: "create_issue", Sink: none})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "a call without the reviewed hash")
+
+		sync("Create an issue and email everyone")
+		_, err = owner.mcps.SetToolSink(ctx, &mcpserverv1alpha1.SetToolSinkRequest{OrgId: org, ServerId: sid, Tool: "create_issue", ContentHash: reviewed, Sink: none})
+		Expect(codeOf(err)).To(Equal(connect.CodeAborted))
+		Expect(audited(ctx, "mcp_tool.declaration.set")).To(BeZero())
+		tools, err = owner.mcps.ListTools(ctx, &mcpserverv1alpha1.ListToolsRequest{OrgId: org, ServerId: sid})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tools.GetTools()[0].GetSink().GetSinkClass()).To(Equal("external-high"))
+		Expect(tools.GetTools()[0].GetContentHash()).NotTo(Equal(reviewed))
+	})
+
+	It("links a server to one of the org's connections and refuses another", func(ctx SpecContext) {
+		srv, err := owner.mcps.CreateServer(ctx, &mcpserverv1alpha1.CreateServerRequest{OrgId: org, Name: "forge", Url: "https://mcp.example.com/mcp"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(srv.GetServer().GetCodeHostConnectionId()).To(BeEmpty())
+		var orgID pgtype.UUID
+		Expect(orgID.Scan(org)).To(Succeed())
+		conn := pgtype.UUID{Bytes: guuid.New(), Valid: true}
+		_, err = store.New(e.pool).CreateConnection(ctx, store.CreateConnectionParams{
+			OrgID: orgID, ID: conn, Connector: "github", DisplayName: "gh", Config: []byte(`{}`),
+			SecretName: pgtype.Text{String: "conn-" + conn.String(), Valid: true},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		set, err := owner.mcps.SetServerClass(ctx, &mcpserverv1alpha1.SetServerClassRequest{
+			OrgId: org, ServerId: srv.GetServer().GetId(), Class: &mcpserverv1alpha1.ServerClass{Kind: "other", DataClass: []string{"untrusted_input"}, CodeHostConnectionId: conn.String()},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(set.GetServer().GetCodeHostConnectionId()).To(Equal(conn.String()))
+
+		_, err = owner.mcps.SetServerClass(ctx, &mcpserverv1alpha1.SetServerClassRequest{
+			OrgId: org, ServerId: srv.GetServer().GetId(), Class: &mcpserverv1alpha1.ServerClass{Kind: "other", CodeHostConnectionId: guuid.NewString()},
+		})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
 	})
 
 	It("starts at 24 characters and an empty host list, and manages both", func(ctx SpecContext) {
@@ -183,7 +247,7 @@ var _ = Describe("the leak guard settings in the UI API", func() {
 		_, err = member.leakguard.RemoveTrustedHost(ctx, &leakguardv1alpha1.RemoveTrustedHostRequest{OrgId: org, Host: "docs.example.com"})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
 		_, err = member.mcps.SetToolSink(ctx, &mcpserverv1alpha1.SetToolSinkRequest{
-			OrgId: org, ServerId: srv.GetServer().GetId(), Tool: "x",
+			OrgId: org, ServerId: srv.GetServer().GetId(), Tool: "x", ContentHash: "h",
 			Sink: &mcpserverv1alpha1.ToolSink{SinkClass: "none", Derivation: "fixed"},
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))

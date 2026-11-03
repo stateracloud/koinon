@@ -63,7 +63,11 @@ func sinkSummary(server, tool string, d sinkclass.Declaration) map[string]any {
 
 // SetToolDeclaration sets a tool's declaration. It works for every source of server. Audited as
 // mcp_tool.declaration.set with the declaration before and after.
-func (s *Service) SetToolDeclaration(ctx context.Context, org pgtype.UUID, actor audit.Actor, serverID, tool string, d sinkclass.Declaration) (Tool, error) {
+//
+// expectedHash is the content hash of the tool the admin reviewed (Tool.ContentHash). The tool is read
+// under a row lock, and a different hash is ErrToolChanged: the declaration described text that is
+// gone, which is the case the content-hash reset exists for. An empty hash is invalid.
+func (s *Service) SetToolDeclaration(ctx context.Context, org pgtype.UUID, actor audit.Actor, serverID, tool, expectedHash string, d sinkclass.Declaration) (Tool, error) {
 	sid, err := parseID(serverID)
 	if err != nil {
 		return Tool{}, err
@@ -72,15 +76,21 @@ func (s *Service) SetToolDeclaration(ctx context.Context, org pgtype.UUID, actor
 	if err != nil {
 		return Tool{}, mapSinkErr(err)
 	}
+	if expectedHash == "" {
+		return Tool{}, invalid("contentHash is required: the hash of the tool you reviewed")
+	}
 	var out store.McpTool
 	err = s.tx(ctx, func(q *store.Queries) error {
 		srv, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: sid})
 		if err != nil {
 			return err
 		}
-		cur, err := q.GetMCPTool(ctx, store.GetMCPToolParams{OrgID: org, ServerID: sid, Name: tool})
+		cur, err := q.GetMCPToolForUpdate(ctx, store.GetMCPToolForUpdateParams{OrgID: org, ServerID: sid, Name: tool})
 		if err != nil {
 			return err
+		}
+		if cur.ContentHash != expectedHash {
+			return ErrToolChanged
 		}
 		out, err = q.SetMCPToolDeclaration(ctx, store.SetMCPToolDeclarationParams{
 			OrgID: org, ServerID: sid, Name: tool, SinkClass: store.McpSinkClass(d.Class), SinkDerivation: store.McpSinkDerivation(d.Derivation),

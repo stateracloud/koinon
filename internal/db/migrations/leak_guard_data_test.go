@@ -128,6 +128,32 @@ var _ = Describe("the leak guard data migration (ADR 0084, #350)", func() {
 			return err
 		}
 		Expect(add("northwind", "platform-handbook", "private")).To(Succeed())
+
+		By("a server is linked to no connection until an admin links it, and only to one of its org's")
+		var link sql.NullString
+		Expect(old.QueryRowContext(ctx, `SELECT code_host_connection_id::text FROM mcp_servers WHERE org_id = $1 AND name = 'tracker'`, org).Scan(&link)).To(Succeed())
+		Expect(link.Valid).To(BeFalse())
+		_, err = old.ExecContext(ctx, `UPDATE mcp_servers SET code_host_connection_id = $2 WHERE org_id = $1`, org, conn)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = old.ExecContext(ctx, `UPDATE mcp_servers SET code_host_connection_id = uuidv7() WHERE org_id = $1`, org)
+		Expect(err).To(HaveOccurred(), "a connection that is not the org's")
+		var other string
+		Expect(old.QueryRowContext(ctx, `INSERT INTO orgs (slug, display_name, kind, deleted_at) VALUES ('other-org', 'Other', 'personal', now()) RETURNING id`).Scan(&other)).To(Succeed())
+		var theirs string
+		Expect(old.QueryRowContext(ctx, `INSERT INTO connections (org_id, connector, display_name, secret_name) VALUES ($1, 'github', 'GitHub', 'conn-leak-guard-other') RETURNING id`, other).Scan(&theirs)).To(Succeed())
+		_, err = old.ExecContext(ctx, `UPDATE mcp_servers SET code_host_connection_id = $2 WHERE org_id = $1`, org, theirs)
+		Expect(err).To(HaveOccurred(), "another org's connection")
+		_, err = old.ExecContext(ctx, `DELETE FROM org_code_host_repos WHERE connection_id = $1`, conn)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = old.ExecContext(ctx, `DELETE FROM connections WHERE id = $1`, conn)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(old.QueryRowContext(ctx, `SELECT code_host_connection_id::text, org_id::text FROM mcp_servers WHERE name = 'tracker'`).Scan(&link, &other)).To(Succeed())
+		Expect(link.Valid).To(BeFalse(), "deleting the connection unlinks the server")
+		Expect(other).To(Equal(org), "and keeps its org")
+		Expect(add("northwind", "platform-handbook", "private")).NotTo(Succeed(), "the connection is gone")
+		conn = ""
+		Expect(old.QueryRowContext(ctx, `INSERT INTO connections (org_id, connector, display_name, secret_name) VALUES ($1, 'github', 'GitHub', 'conn-leak-guard-test2') RETURNING id`, org).Scan(&conn)).To(Succeed())
+		Expect(add("northwind", "platform-handbook", "private")).To(Succeed())
 		Expect(add("northwind", "platform-handbook", "public")).NotTo(Succeed(), "one reading per repository and connection")
 		Expect(add("Northwind", "Other", "private")).NotTo(Succeed())
 		Expect(add("northwind", "", "private")).NotTo(Succeed())

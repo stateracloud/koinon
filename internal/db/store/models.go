@@ -1832,6 +1832,7 @@ type McpServer struct {
 	Kind                  McpServerKind
 	ExposesUntrustedInput bool
 	ExposesPrivateData    bool
+	CodeHostConnectionID  pgtype.UUID
 }
 
 type McpTool struct {

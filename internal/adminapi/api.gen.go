@@ -725,9 +725,11 @@ type McpDataClass = []string
 
 // McpServer defines model for McpServer.
 type McpServer struct {
-	CreatedAt        time.Time `json:"createdAt"`
-	CredentialHeader *string   `json:"credentialHeader,omitempty"`
-	CredentialPrefix *string   `json:"credentialPrefix,omitempty"`
+	// CodeHostConnectionId The org's code-host connection the server acts through. Absent for none, which makes a code-host tool of the server external-high.
+	CodeHostConnectionId *openapi_types.UUID `json:"codeHostConnectionId,omitempty"`
+	CreatedAt            time.Time           `json:"createdAt"`
+	CredentialHeader     *string             `json:"credentialHeader,omitempty"`
+	CredentialPrefix     *string             `json:"credentialPrefix,omitempty"`
 
 	// DataClass The session legs (ADR 0091) the server's results can set: `untrusted_input` (returns text an
 	// outsider controls) and `private_data` (returns data the org does not want to leave). A server
@@ -799,6 +801,11 @@ type McpServerCreateTransport string
 
 // McpServerDataClass defines model for McpServerDataClass.
 type McpServerDataClass struct {
+	// CodeHostConnectionId Link the server to one of the org's code-host connections (ADR 0091 decision 3). A code-host
+	// tool looks the repository up in that connection's list only. Leave out to unlink. A changed
+	// server URL clears the link.
+	CodeHostConnectionId *openapi_types.UUID `json:"codeHostConnectionId,omitempty"`
+
 	// DataClass The session legs (ADR 0091) the server's results can set: `untrusted_input` (returns text an
 	// outsider controls) and `private_data` (returns data the org does not want to leave). A server
 	// may carry both; empty carries none. A server nobody classified carries both. Where a call
@@ -896,6 +903,13 @@ type McpToolSink struct {
 	// SinkClass `none`, `internal`, `external-low` or `external-high`. The fixed class of a tool; for a
 	// derived tool, the class of a call whose address arguments do not parse (`external-high`).
 	SinkClass string `json:"sinkClass"`
+}
+
+// McpToolSinkUpdate defines model for McpToolSinkUpdate.
+type McpToolSinkUpdate struct {
+	// ContentHash The `contentHash` of the tool as the caller read it.
+	ContentHash string      `json:"contentHash"`
+	Sink        McpToolSink `json:"sink"`
 }
 
 // McpToolTierUpdate defines model for McpToolTierUpdate.
@@ -1487,7 +1501,7 @@ type UpdateMcpServerJSONRequestBody = McpServerUpdate
 type SetMcpServerDataClassJSONRequestBody = McpServerDataClass
 
 // SetMcpToolSinkJSONRequestBody defines body for SetMcpToolSink for application/json ContentType.
-type SetMcpToolSinkJSONRequestBody = McpToolSink
+type SetMcpToolSinkJSONRequestBody = McpToolSinkUpdate
 
 // SetMcpToolTierJSONRequestBody defines body for SetMcpToolTier for application/json ContentType.
 type SetMcpToolTierJSONRequestBody = McpToolTierUpdate

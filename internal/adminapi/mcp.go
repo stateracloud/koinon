@@ -34,6 +34,10 @@ func toMcpServer(m mcpservers.Server) McpServer {
 		Health: McpServerHealth(m.Health), HealthCheckedAt: m.HealthCheckedAt, HealthSince: m.HealthSince, ToolsSyncedAt: m.ToolsSyncedAt,
 		Kind: McpServerKind(m.Kind), DataClass: append([]string{}, m.DataClass...),
 	}
+	if m.CodeHostConnectionID != "" {
+		id := openapi_types.UUID(pgUUID(m.CodeHostConnectionID).Bytes)
+		out.CodeHostConnectionId = &id
+	}
 	str := func(s string) *string {
 		if s == "" {
 			return nil
@@ -223,9 +227,9 @@ func (s *Server) SetMcpToolSink(ctx context.Context, req SetMcpToolSinkRequestOb
 	}
 	p, actor := s.actor(ctx)
 	b := req.Body
-	got, err := s.mcp.SetToolDeclaration(ctx, p.Org, actor, uid(req.ServerId), req.ToolName, sinkclass.Declaration{
-		Class: sinkclass.Class(b.SinkClass), Derivation: sinkclass.Derivation(b.Derivation), AddressArgs: b.AddressArgs,
-		ResultUntrustedInput: b.ResultUntrustedInput, ResultPrivateData: b.ResultPrivateData,
+	got, err := s.mcp.SetToolDeclaration(ctx, p.Org, actor, uid(req.ServerId), req.ToolName, b.ContentHash, sinkclass.Declaration{
+		Class: sinkclass.Class(b.Sink.SinkClass), Derivation: sinkclass.Derivation(b.Sink.Derivation), AddressArgs: b.Sink.AddressArgs,
+		ResultUntrustedInput: b.Sink.ResultUntrustedInput, ResultPrivateData: b.Sink.ResultPrivateData,
 	})
 	if err != nil {
 		st, e := s.problem(err)
@@ -328,7 +332,11 @@ func (s *Server) SetMcpServerDataClass(ctx context.Context, req SetMcpServerData
 		return SetMcpServerDataClassdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
 	p, actor := s.actor(ctx)
-	got, err := s.mcp.SetDataClass(ctx, p.Org, actor, uid(req.ServerId), mcpservers.Declaration{Kind: string(req.Body.Kind), Legs: req.Body.DataClass})
+	d := mcpservers.Declaration{Kind: string(req.Body.Kind), Legs: req.Body.DataClass}
+	if req.Body.CodeHostConnectionId != nil {
+		d.CodeHostConnection = uid(*req.Body.CodeHostConnectionId)
+	}
+	got, err := s.mcp.SetDataClass(ctx, p.Org, actor, uid(req.ServerId), d)
 	if err != nil {
 		st, e := s.problem(err)
 		return SetMcpServerDataClassdefaultJSONResponse{Body: e, StatusCode: st}, nil

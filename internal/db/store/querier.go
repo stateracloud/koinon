@@ -363,6 +363,9 @@ type Querier interface {
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	GetMCPServer(ctx context.Context, arg GetMCPServerParams) (McpServer, error)
 	GetMCPTool(ctx context.Context, arg GetMCPToolParams) (McpTool, error)
+	// Locks the tool row until the transaction ends: a sync that republishes the tool waits, so what an
+	// admin declared is what was read (ADR 0091, the ADR 0057 rule).
+	GetMCPToolForUpdate(ctx context.Context, arg GetMCPToolForUpdateParams) (McpTool, error)
 	GetModel(ctx context.Context, arg GetModelParams) (Model, error)
 	// The enabled model an agent asks for by its plain name, with its provider's type, id and URL and its
 	// wire format, for finding its price and its cache mode.

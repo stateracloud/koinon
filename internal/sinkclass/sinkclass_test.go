@@ -80,12 +80,13 @@ var _ = Describe("Declaration", func() {
 })
 
 var _ = Describe("Classify", func() {
+	const gh, gitea = "conn-github", "conn-gitea"
 	scope := sinkclass.NewScope([]sinkclass.Repo{
-		{Owner: "northwind", Name: "platform-handbook", Visibility: sinkclass.VisPrivate, CheckedAt: now.Add(-time.Minute)},
-		{Owner: "northwind", Name: "intranet", Visibility: sinkclass.VisInternal, CheckedAt: now.Add(-time.Minute)},
-		{Owner: "northwind", Name: "website", Visibility: sinkclass.VisPublic, CheckedAt: now.Add(-time.Minute)},
-		{Owner: "northwind", Name: "mystery", Visibility: sinkclass.VisUnknown, CheckedAt: now.Add(-time.Minute)},
-		{Owner: "northwind", Name: "old-reading", Visibility: sinkclass.VisPrivate, CheckedAt: now.Add(-2 * time.Hour)},
+		{Connection: gh, Owner: "northwind", Name: "platform-handbook", Visibility: sinkclass.VisPrivate, CheckedAt: now.Add(-time.Minute)},
+		{Connection: gh, Owner: "northwind", Name: "intranet", Visibility: sinkclass.VisInternal, CheckedAt: now.Add(-time.Minute)},
+		{Connection: gh, Owner: "northwind", Name: "website", Visibility: sinkclass.VisPublic, CheckedAt: now.Add(-time.Minute)},
+		{Connection: gh, Owner: "northwind", Name: "mystery", Visibility: sinkclass.VisUnknown, CheckedAt: now.Add(-time.Minute)},
+		{Connection: gh, Owner: "northwind", Name: "old-reading", Visibility: sinkclass.VisPrivate, CheckedAt: now.Add(-2 * time.Hour)},
 	}, 0)
 	code := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}}
 	fetch := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.Fetch, AddressArgs: []string{"url"}}
@@ -97,21 +98,21 @@ var _ = Describe("Classify", func() {
 	Describe("a fixed tool", func() {
 		It("has its declared class whatever the arguments", func() {
 			for _, c := range sinkclass.Classes {
-				Expect(sinkclass.Classify(sinkclass.Declaration{Class: c, Derivation: sinkclass.Fixed}, nil, scope, trusted, now)).To(Equal(c))
+				Expect(sinkclass.Classify(sinkclass.Declaration{Class: c, Derivation: sinkclass.Fixed}, nil, gh, scope, trusted, now)).To(Equal(c))
 			}
 		})
 		It("is external-high when the stored class is not one of the four", func() {
-			Expect(sinkclass.Classify(sinkclass.Declaration{Class: "", Derivation: sinkclass.Fixed}, nil, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+			Expect(sinkclass.Classify(sinkclass.Declaration{Class: "", Derivation: sinkclass.Fixed}, nil, gh, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
 		})
 		It("is external-high for the default declaration", func() {
-			Expect(sinkclass.Classify(sinkclass.Default(), nil, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+			Expect(sinkclass.Classify(sinkclass.Default(), nil, gh, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
 		})
 	})
 
 	Describe("a code-host tool", func() {
 		DescribeTable("by repository",
 			func(owner, name string, want sinkclass.Class) {
-				Expect(sinkclass.Classify(code, repo(owner, name), scope, trusted, now)).To(Equal(want))
+				Expect(sinkclass.Classify(code, repo(owner, name), gh, scope, trusted, now)).To(Equal(want))
 			},
 			Entry("a private repository in the scope is internal: the in-org write that must not count as a leak", "northwind", "platform-handbook", sinkclass.Internal),
 			Entry("an internal-visibility repository is not public", "northwind", "intranet", sinkclass.Internal),
@@ -130,38 +131,66 @@ var _ = Describe("Classify", func() {
 		)
 
 		It("is external-high when an address argument is missing from the call", func() {
-			Expect(sinkclass.Classify(code, map[string]string{"owner": "northwind"}, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
-			Expect(sinkclass.Classify(code, nil, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+			Expect(sinkclass.Classify(code, map[string]string{"owner": "northwind"}, gh, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+			Expect(sinkclass.Classify(code, nil, gh, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
 		})
 
 		It("reads the arguments the declaration names, not the ones called owner and repo", func() {
 			d := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"org", "project"}}
-			Expect(sinkclass.Classify(d, map[string]string{"org": "northwind", "project": "platform-handbook"}, scope, trusted, now)).To(Equal(sinkclass.Internal))
-			Expect(sinkclass.Classify(d, repo("northwind", "platform-handbook"), scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+			Expect(sinkclass.Classify(d, map[string]string{"org": "northwind", "project": "platform-handbook"}, gh, scope, trusted, now)).To(Equal(sinkclass.Internal))
+			Expect(sinkclass.Classify(d, repo("northwind", "platform-handbook"), gh, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
 		})
 
 		It("is never internal for an empty scope", func() {
-			Expect(sinkclass.Classify(code, repo("northwind", "platform-handbook"), sinkclass.NewScope(nil, 0), trusted, now)).To(Equal(sinkclass.ExternalHigh))
+			Expect(sinkclass.Classify(code, repo("northwind", "platform-handbook"), gh, sinkclass.NewScope(nil, 0), trusted, now)).To(Equal(sinkclass.ExternalHigh))
 		})
 
 		It("is not changed by the payload", func() {
 			args := repo("northwind", "platform-handbook")
 			args["body"] = "https://attacker.example/?q=secret"
-			Expect(sinkclass.Classify(code, args, scope, trusted, now)).To(Equal(sinkclass.Internal))
+			Expect(sinkclass.Classify(code, args, gh, scope, trusted, now)).To(Equal(sinkclass.Internal))
 		})
 
-		It("is external-high when two connections list the repository and one of them says public", func() {
+		It("looks the repository up in the linked connection only", func() {
 			s := sinkclass.NewScope([]sinkclass.Repo{
-				{Owner: "northwind", Name: "both", Visibility: sinkclass.VisPrivate, CheckedAt: now},
-				{Owner: "northwind", Name: "both", Visibility: sinkclass.VisPublic, CheckedAt: now},
+				{Connection: gitea, Owner: "northwind", Name: "platform-handbook", Visibility: sinkclass.VisPrivate, CheckedAt: now},
+				{Connection: gh, Owner: "northwind", Name: "platform-handbook", Visibility: sinkclass.VisPublic, CheckedAt: now},
 			}, 0)
-			Expect(sinkclass.Classify(code, repo("northwind", "both"), s, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+			Expect(sinkclass.Classify(code, repo("northwind", "platform-handbook"), gitea, s, trusted, now)).To(Equal(sinkclass.Internal), "the connection that lists it private")
+			Expect(sinkclass.Classify(code, repo("northwind", "platform-handbook"), gh, s, trusted, now)).To(Equal(sinkclass.ExternalHigh), "the same name on a public repository of another host")
+		})
+
+		It("is external-high for a repository only another connection lists as private", func() {
+			s := sinkclass.NewScope([]sinkclass.Repo{{Connection: gitea, Owner: "northwind", Name: "platform-handbook", Visibility: sinkclass.VisPrivate, CheckedAt: now}}, 0)
+			Expect(sinkclass.Classify(code, repo("northwind", "platform-handbook"), gh, s, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+			Expect(sinkclass.Classify(code, repo("northwind", "platform-handbook"), gitea, s, trusted, now)).To(Equal(sinkclass.Internal))
+		})
+
+		It("is external-high when the server is linked to no connection", func() {
+			Expect(sinkclass.Classify(code, repo("northwind", "platform-handbook"), "", scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+		})
+
+		It("is external-high for a reading dated in the future, beyond the clock skew", func() {
+			s := sinkclass.NewScope([]sinkclass.Repo{
+				{Connection: gh, Owner: "n", Name: "future", Visibility: sinkclass.VisPrivate, CheckedAt: now.Add(24 * time.Hour)},
+				{Connection: gh, Owner: "n", Name: "skewed", Visibility: sinkclass.VisPrivate, CheckedAt: now.Add(sinkclass.MaxClockSkew / 2)},
+			}, 0)
+			Expect(sinkclass.Classify(code, repo("n", "future"), gh, s, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+			Expect(sinkclass.Classify(code, repo("n", "skewed"), gh, s, trusted, now)).To(Equal(sinkclass.Internal), "a small skew is tolerated")
+		})
+
+		It("is external-high for a non-ASCII name, also one that lower-cases to an ASCII letter", func() {
+			s := sinkclass.NewScope([]sinkclass.Repo{{Connection: gh, Owner: "kfoo", Name: "r", Visibility: sinkclass.VisPrivate, CheckedAt: now}}, 0)
+			Expect(sinkclass.Classify(code, repo("kfoo", "r"), gh, s, trusted, now)).To(Equal(sinkclass.Internal))
+			Expect(sinkclass.Classify(code, repo("\u212Afoo", "r"), gh, s, trusted, now)).To(Equal(sinkclass.ExternalHigh), "U+212A")
+			Expect(sinkclass.Classify(code, repo("kfoo", "r\u00e9"), gh, s, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+			Expect(sinkclass.Classify(code, repo("kfoo", "r\x00"), gh, s, trusted, now)).To(Equal(sinkclass.ExternalHigh))
 		})
 
 		It("honours the freshness window it was built with", func() {
-			s := sinkclass.NewScope([]sinkclass.Repo{{Owner: "n", Name: "r", Visibility: sinkclass.VisPrivate, CheckedAt: now.Add(-10 * time.Minute)}}, 5*time.Minute)
-			Expect(sinkclass.Classify(code, repo("n", "r"), s, trusted, now)).To(Equal(sinkclass.ExternalHigh))
-			Expect(sinkclass.Classify(code, repo("n", "r"), s, trusted, now.Add(-8*time.Minute))).To(Equal(sinkclass.Internal))
+			s := sinkclass.NewScope([]sinkclass.Repo{{Connection: gh, Owner: "n", Name: "r", Visibility: sinkclass.VisPrivate, CheckedAt: now.Add(-10 * time.Minute)}}, 5*time.Minute)
+			Expect(sinkclass.Classify(code, repo("n", "r"), gh, s, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+			Expect(sinkclass.Classify(code, repo("n", "r"), gh, s, trusted, now.Add(-8*time.Minute))).To(Equal(sinkclass.Internal))
 		})
 	})
 
@@ -169,7 +198,7 @@ var _ = Describe("Classify", func() {
 		call := func(u string) map[string]string { return map[string]string{"url": u} }
 		DescribeTable("by host",
 			func(u string, want sinkclass.Class) {
-				Expect(sinkclass.Classify(fetch, call(u), scope, trusted, now)).To(Equal(want))
+				Expect(sinkclass.Classify(fetch, call(u), gh, scope, trusted, now)).To(Equal(want))
 			},
 			Entry("a trusted host is internal", "https://docs.example.com/guide", sinkclass.Internal),
 			Entry("the path, query and fragment are payload, not address", "https://docs.example.com/a?q=secret#frag", sinkclass.Internal),
@@ -192,22 +221,22 @@ var _ = Describe("Classify", func() {
 		)
 
 		It("is external-high when the url argument is missing", func() {
-			Expect(sinkclass.Classify(fetch, map[string]string{"q": "x"}, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+			Expect(sinkclass.Classify(fetch, map[string]string{"q": "x"}, gh, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
 		})
 
 		It("is external-low for every host when the org trusts none", func() {
-			Expect(sinkclass.Classify(fetch, call("https://docs.example.com/"), scope, nil, now)).To(Equal(sinkclass.ExternalLow))
+			Expect(sinkclass.Classify(fetch, call("https://docs.example.com/"), gh, scope, nil, now)).To(Equal(sinkclass.ExternalLow))
 		})
 	})
 
 	It("is external-high for a derived declaration with the wrong number of arguments", func() {
 		bad := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner"}}
-		Expect(sinkclass.Classify(bad, repo("northwind", "platform-handbook"), scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+		Expect(sinkclass.Classify(bad, repo("northwind", "platform-handbook"), gh, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
 		bad = sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.Fetch}
-		Expect(sinkclass.Classify(bad, map[string]string{"url": "https://docs.example.com/"}, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+		Expect(sinkclass.Classify(bad, map[string]string{"url": "https://docs.example.com/"}, gh, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
 	})
 
 	It("is external-high for a derivation it does not know", func() {
-		Expect(sinkclass.Classify(sinkclass.Declaration{Class: sinkclass.None, Derivation: "oracle"}, nil, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
+		Expect(sinkclass.Classify(sinkclass.Declaration{Class: sinkclass.None, Derivation: "oracle"}, nil, gh, scope, trusted, now)).To(Equal(sinkclass.ExternalHigh))
 	})
 })

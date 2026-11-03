@@ -15,6 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/modelformat"
 )
@@ -57,6 +58,8 @@ func (s *Server) catalogError(err error) error {
 		return connect.NewError(connect.CodeInvalidArgument, inv.Msg)
 	case errors.Is(err, catalog.ErrNotFound):
 		return connect.NewError(connect.CodeNotFound, "not found")
+	case errors.Is(err, mcpservers.ErrToolChanged):
+		return connect.NewError(connect.CodeAborted, err.Error())
 	case errors.Is(err, catalog.ErrReadOnly):
 		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
 	case errors.Is(err, catalog.ErrConflict):
