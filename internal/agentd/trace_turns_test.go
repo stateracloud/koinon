@@ -178,7 +178,7 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, markWait))
 		e.pool("agentd-cancel", tracingOn(rcv, fakeDecider{traced: true, level: "none"}))
-		Eventually(func() []string { return chunks(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(Equal([]string{"working"}))
+		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(10 * time.Second).Should(Equal(1))
 		_, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: e.org, ID: r.ID, OutcomeReason: "user canceled"})
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(func() []string { return endReasons(turnRows(ctx, e, r)) }).WithTimeout(10 * time.Second).Should(Equal([]string{"canceled"}))

@@ -85,6 +85,11 @@ type Config struct {
 	// down). It is asked before a database error is read as a fence, and its error is returned as it
 	// is. Nil means there is none.
 	Stop func(ctx context.Context) error
+	// Live receives every text chunk of a message or thought as it arrives (kind "acp.<update>",
+	// the update's JSON). Chunks are never stored, only the items they make up (items.go); this is
+	// how a live subscriber sees them. It runs on the harness's notification path, so it must not
+	// block. Nil means none.
+	Live func(kind string, payload []byte)
 }
 
 // Owner is the writer of one run under one epoch. It is safe for concurrent use.
@@ -93,8 +98,9 @@ type Owner struct {
 	run store.Run
 	q   *store.Queries
 
-	mu     sync.Mutex // serialises appends and srcSeq
+	mu     sync.Mutex // serialises appends, srcSeq and pend
 	srcSeq int64
+	pend   pending // the chunks of the item in progress (items.go)
 
 	fenceOnce sync.Once
 	fenced    chan struct{}
@@ -197,6 +203,15 @@ func (o *Owner) RecordRaw(ctx context.Context, kind string, payload []byte) erro
 	if o.IsFenced() {
 		return ErrFenced
 	}
+	// The item in progress comes first on the timeline (items.go).
+	if err := o.flushLocked(ctx, false); err != nil {
+		return err
+	}
+	return o.recordLocked(ctx, kind, payload)
+}
+
+// recordLocked is RecordRaw with o.mu held and the Owner not fenced.
+func (o *Owner) recordLocked(ctx context.Context, kind string, payload []byte) error {
 	o.srcSeq++
 	src := o.srcSeq
 	class := ClassOf(kind)
