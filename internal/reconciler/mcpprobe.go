@@ -46,10 +46,17 @@ const (
 func (r *Reconciler) RunProber(ctx context.Context) {
 	t := time.NewTicker(r.cfg.MCPProbeInterval)
 	defer t.Stop()
+	wake := r.probeWakeChan()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-wake:
+			// A pass applied servers that were not served before (or with another URL or credential):
+			// list them now, so a new server turns healthy in seconds instead of at the next tick.
+			if due := r.takeProbeDue(); len(due) > 0 {
+				safego.Do(r.log, "mcp-probe", func() { r.probeEach(ctx, due) })
+			}
 		case <-t.C:
 			safego.Do(r.log, "mcp-probe", func() { r.ProbeAll(ctx) })
 		}
@@ -58,7 +65,42 @@ func (r *Reconciler) RunProber(ctx context.Context) {
 
 // ProbeAll probes every served server once.
 func (r *Reconciler) ProbeAll(ctx context.Context) {
-	probes := r.plan.Probes()
+	r.probeEach(ctx, r.plan.Probes())
+}
+
+// probeSoon queues probes for the prober to run now.
+func (r *Reconciler) probeSoon(probes []gatewayplan.Probe) {
+	if len(probes) == 0 {
+		return
+	}
+	r.probeMu.Lock()
+	r.probeDue = append(r.probeDue, probes...)
+	r.probeMu.Unlock()
+	select {
+	case r.probeWakeChan() <- struct{}{}:
+	default: // a wake is already pending
+	}
+}
+
+func (r *Reconciler) takeProbeDue() []gatewayplan.Probe {
+	r.probeMu.Lock()
+	defer r.probeMu.Unlock()
+	due := r.probeDue
+	r.probeDue = nil
+	return due
+}
+
+func (r *Reconciler) probeWakeChan() chan struct{} {
+	r.probeMu.Lock()
+	defer r.probeMu.Unlock()
+	if r.probeWake == nil {
+		r.probeWake = make(chan struct{}, 1)
+	}
+	return r.probeWake
+}
+
+// probeEach probes the given servers, a few at a time.
+func (r *Reconciler) probeEach(ctx context.Context, probes []gatewayplan.Probe) {
 	sem := make(chan struct{}, mcpProbeParallel)
 	var wg sync.WaitGroup
 	for _, p := range probes {
