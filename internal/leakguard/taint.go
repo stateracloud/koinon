@@ -108,20 +108,43 @@ func (c TaintChecker) Check(ctx context.Context, scope Scope, fp *Fingerprinter,
 }
 
 // maxPairs bounds the ordered argument pairs of one call, as a multiple of MaxPairArgs squared.
-const maxPairs = 4
+const maxPairs = 16
 
-// pairsFit reports whether every ordered pair of the arguments idx fits the pair budget: at most
-// maxPairs*MaxPairArgs^2 pairs and an eighth of MaxWorkBytes of joined text before decoding.
-func pairsFit(args []string, idx []int, lim Limits) bool {
+// minPairJoin is the least bytes of each side joined for split reassembly: a leak is at least the
+// threshold (24 canonical characters), so a boundary needs that much around it, and hex is two
+// bytes to a character.
+const minPairJoin = 64
+
+// pairBudgetDiv sets the joined text of all pairs of one call, before decoding, to
+// MaxWorkBytes/pairBudgetDiv (512 KiB by default): decoding and fingerprinting cost about 0.35 ms
+// per KiB, so that is about 180 ms of the second a call has.
+const pairBudgetDiv = 64
+
+// pairJoin returns how many bytes of each side of an argument pair to join for the arguments idx,
+// or false when the pairs cannot be checked: more than maxPairs*MaxPairArgs^2 pairs, or joined
+// text over the budget even at minPairJoin. The join starts at PairJoinBytes and halves until the
+// pairs fit the budget, so a call with long arguments is checked with less reach per boundary
+// instead of running out of time. Up to MaxPairArgs arguments are always checked, at minPairJoin
+// if need be; more are checked only within the budget, and a call too big for it fails closed.
+func pairJoin(args []string, idx []int, lim Limits) (int, bool) {
 	n := len(idx)
-	if n*(n-1) > maxPairs*lim.MaxPairArgs*lim.MaxPairArgs {
-		return false
+	many := n > lim.MaxPairArgs
+	if many && n*(n-1) > maxPairs*lim.MaxPairArgs*lim.MaxPairArgs {
+		return 0, false
 	}
-	bytes := 0
-	for _, i := range idx {
-		bytes += (n - 1) * (min(len(args[i]), lim.PairJoinBytes) * 2)
+	floor := min(minPairJoin, lim.PairJoinBytes)
+	for join := lim.PairJoinBytes; ; join = max(join/2, floor) {
+		bytes := 0
+		for _, i := range idx {
+			bytes += (n - 1) * (min(len(args[i]), join) * 2)
+		}
+		if bytes <= lim.MaxWorkBytes/pairBudgetDiv {
+			return join, true
+		}
+		if join <= floor {
+			return floor, !many
+		}
 	}
-	return bytes <= lim.MaxWorkBytes/8
 }
 
 func budgetDecision(err error) Decision {
@@ -164,11 +187,12 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 		}
 		raws = append(raws, rawText{b.String(), idx})
 		n := len(idx)
+		join, fits := pairJoin(args, idx, lim)
 		pair := func(i, j int) {
 			ai, aj := args[idx[i]], args[idx[j]]
-			raws = append(raws, rawText{tail(ai, lim.PairJoinBytes) + head(aj, lim.PairJoinBytes), []int{idx[i], idx[j]}})
+			raws = append(raws, rawText{tail(ai, join) + head(aj, join), []int{idx[i], idx[j]}})
 		}
-		if n > lim.MaxPairArgs && !pairsFit(args, idx, lim) {
+		if !fits {
 			return nil, &budgetError{ReasonBudgetArgs, fmt.Sprintf("the call has %d non-empty arguments, too many to check every pair of them for split text; the tool call could not be checked", n)}
 		}
 		for i := range n {
