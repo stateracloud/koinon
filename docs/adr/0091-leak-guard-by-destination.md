@@ -138,11 +138,16 @@ How the wait works, and what it leaves open (#349 review, 2026-11-03):
   A slow report holds the handler, not the reader: the next result in the pipe is still counted,
   so the guard sees that the session is behind and waits. **Residual:** the guard can only wait
   for what agentd has read and written. The harness must write a tool's update to its stream before
-  it makes its next gateway call, and agentd's write of the read count races that call by a few
-  milliseconds. A harness that sends the call first, or a call that wins that race, is decided on
-  the legs before the result.
-- **The wait covers the end-of-turn summary.** The harness still runs then, so the guard waits for
-  the run's feed whether or not it is summarizing.
+  it makes its next gateway call, and the read count reaches the database only after the writer's
+  goroutine runs and its write lands: a few milliseconds when the database answers, up to the
+  writer's retry backoff (0.2 s, then 0.4 s, each try bounded by 10 s) when a write fails. The call
+  races that write. A harness that sends the call first, or a call that wins that race, is decided
+  on the legs before the result.
+- **The wait covers the end-of-turn summary.** The harness still runs then, and a tool can finish
+  during the summary (it blocks permission requests, not tools), so the guard waits for the run's
+  feed whether or not it is summarizing, and agentd feeds such a result before it counts it as done.
+- **A worker whose feed is already fenced** (a newer epoch started it) stops as taken over,
+  records nothing, and leaves the run to that worker; the counts writer does the same.
 - **A stall is a reason of its own.** A call decided as if both legs were held because the feed
   stalled carries the reason `feed_stalled`, and goes to a person, never to an automatic Decider:
   the legs were assumed, not read. Only a call whose one reason is `both_legs`, with no text match

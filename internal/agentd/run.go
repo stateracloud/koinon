@@ -24,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runoutcome"
@@ -596,6 +597,13 @@ func (r *runner) execute(ctx context.Context) error {
 	defer sweepOnce()
 	defer closeHarness()
 	if err := r.feedStart(fctx); err != nil {
+		if errors.Is(err, mcpguard.ErrFeedFenced) {
+			// A newer epoch already started the run's feed: another worker owns the run, as when the
+			// feed's writer finds it fenced (taint.go). Nothing is recorded; that worker drives it.
+			r.log.Warn("the leak guard's feed belongs to a newer worker of the run; this worker stops")
+			r.own.Fence(fenceLost)
+			return errDropped
+		}
 		// The leak guard could not be told this worker's epoch: resume later rather than run unwatched.
 		r.interrupted(ctx, "start the leak guard's feed: "+err.Error(), nil, "")
 		return errDropped
@@ -1050,17 +1058,24 @@ func (r *runner) concludeShutdown(ctx context.Context, turn runoutcome.Turn) {
 // handler records the harness's session updates and answers its permission requests.
 type handler struct{ r *runner }
 
-func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) (err error) {
+func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
 	at := time.Now() // for the trace, before the event write
-	if c := h.r.feedCounts.Load(); c != nil && (n.Update.ToolCall != nil || n.Update.ToolCallUpdate != nil) {
-		// The leak guard waits for this count (taint.go): it is added once the update is handled,
-		// on every path below that does not fail.
-		if b, merr := json.Marshal(n.Update); merr == nil && finishesTool(b) {
-			defer func() {
-				if err == nil {
-					c.add(0, 1)
-				}
-			}()
+	var b []byte
+	if n.Update.ToolCall != nil || n.Update.ToolCallUpdate != nil {
+		var err error
+		if b, err = json.Marshal(n.Update); err != nil {
+			return err
+		}
+		// The leak guard's feed (taint.go) comes before every path below that returns early: a tool
+		// can finish during the end-of-turn summary too, and its result must set its legs. It reads
+		// the replay of a resumed session as well: a worker that gave the run up may have failed to
+		// report a result.
+		if err := h.r.feedTaint(ctx, b); err != nil {
+			return err
+		}
+		// The leak guard waits for this count: it is added only once the update has been fed.
+		if c := h.r.feedCounts.Load(); c != nil && finishesTool(b) {
+			c.add(0, 1)
 		}
 	}
 	if h.r.summaryUpdate(n) {
@@ -1071,14 +1086,11 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) (
 		h.r.setCommands(acp.Flatten(n).Commands)
 		return nil
 	}
-	b, err := json.Marshal(n.Update)
-	if err != nil {
-		return err
-	}
-	// The leak guard's feed (taint.go) reads the replay of a resumed session too: a worker that gave
-	// the run up may have failed to report a result.
-	if err := h.r.feedTaint(ctx, b); err != nil {
-		return err
+	if b == nil {
+		var err error
+		if b, err = json.Marshal(n.Update); err != nil {
+			return err
+		}
 	}
 	if h.r.replaying.Load() {
 		return nil
