@@ -438,7 +438,7 @@
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
-                    "addKey": {"type": "string", "pattern": "^(|[a-z0-9]([a-z0-9._-]{0,60}[a-z0-9])?)$"},
+                    "addKey": {"type": "string", "pattern": "^(|[a-z0-9]([a-z0-9._-]{0,60}[a-z0-9])?)$", "not": {"const": "active"}, "description": "A KEK ID to add; \"active\" is the keyring's pointer, not an ID."},
                     "resources": {"type": "object"}
                   }
                 }

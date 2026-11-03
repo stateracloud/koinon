@@ -1,17 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # The KEKs wrapped by OpenBao transit (ADR 0085 decision 12): the key-admin Job creates the KEK
 # Secret and adds a second KEK; koinon-api and the reconciler only decrypt. The chart smoke test
-# runs an OpenBao with TLS and Kubernetes auth at this address.
+# runs an OpenBao with TLS and Kubernetes auth at this address (and makes the database external,
+# as for every values file).
 openshell:
   address: openshell.openshell.svc:8080
   insecure: true
-postgres:
-  mode: external
-  external:
-    secretName: koinon-db
 bootstrapAdmin:
-  enabled: false
-preflight:
   enabled: false
 secrets:
   kek:
