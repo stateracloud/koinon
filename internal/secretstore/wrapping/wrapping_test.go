@@ -73,6 +73,46 @@ var _ = Describe("New", func() {
 		Expect(err).To(MatchError(ContainSubstring("invalid namespace")))
 	})
 
+	It("builds the AWS KMS primary from the flags and the pod's IRSA identity, and a service may not wrap", func(ctx SpecContext) {
+		GinkgoT().Setenv("AWS_ROLE_ARN", "arn:aws:iam::111122223333:role/koinon-api")
+		GinkgoT().Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", "/var/run/secrets/eks.amazonaws.com/serviceaccount/token")
+		key := "arn:aws:kms:eu-central-1:111122223333:key/0b1d2e3f-4a5b-4c6d-8e9f-a0b1c2d3e4f5"
+		ws, err := wrapping.New(ctx, parse("--kek-backend=awskms", "--awskms-region=eu-central-1", "--awskms-key-id="+key), wrapping.Service)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Primary().Backend()).To(Equal(wrapping.BackendAWSKMS))
+		Expect(ws.Primary().KeyID()).To(Equal(key))
+		_, err = ws.Wrap(ctx, "koinon-test", kek)
+		Expect(err).To(MatchError(secretstore.ErrKeyAdminWraps))
+	})
+
+	It("refuses AWS KMS without a pod identity, even with static keys in the environment", func(ctx SpecContext) {
+		for _, k := range []string{"AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE"} {
+			GinkgoT().Setenv(k, "")
+		}
+		GinkgoT().Setenv("AWS_ACCESS_KEY_ID", "koinon_test_not-a-real-key-id")
+		GinkgoT().Setenv("AWS_SECRET_ACCESS_KEY", "koinon_test_not-a-real-secret")
+		var logs bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+		DeferCleanup(func() { slog.SetDefault(prev) })
+		_, err := wrapping.New(ctx, parse("--kek-backend=awskms", "--awskms-region=eu-central-1", "--awskms-key-id=alias/koinon-kek"), wrapping.KeyAdmin)
+		Expect(err).To(MatchError(ContainSubstring("no pod identity")))
+		Expect(logs.String()).To(ContainSubstring("static AWS keys are ignored"))
+		Expect(logs.String()).NotTo(ContainSubstring("not-a-real"))
+	})
+
+	It("warns when a local process is given AWS KMS settings", func(ctx SpecContext) {
+		var logs bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+		DeferCleanup(func() { slog.SetDefault(prev) })
+		ws, err := wrapping.New(ctx, parse("--awskms-region=eu-central-1", "--awskms-key-id=alias/koinon-kek"), wrapping.Service)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Primary().Backend()).To(Equal(secretstore.BackendLocal))
+		Expect(logs.String()).To(ContainSubstring("AWS KMS settings are ignored"))
+		Expect(logs.String()).To(ContainSubstring("awskms-key-id"))
+	})
+
 	It("warns when a local process is given OpenBao settings, and only then", func(ctx SpecContext) {
 		var logs bytes.Buffer
 		prev := slog.Default()

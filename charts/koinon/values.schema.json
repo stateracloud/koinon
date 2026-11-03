@@ -390,7 +390,28 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "backend": {"enum": ["local", "openbao"]},
+                "backend": {"enum": ["local", "openbao", "awskms"]},
+                "awskms": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "region": {"type": "string", "pattern": "^(|[a-z]{2}(-[a-z]+)+-[0-9]{1,2})$"},
+                    "keyId": {"type": "string", "pattern": "^(|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|mrk-[0-9a-f]{32}|alias/[A-Za-z0-9/_-]{1,250}|arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:(key|alias)/[A-Za-z0-9/_-]+)$"},
+                    "endpoint": {"type": "string", "pattern": "^(|https?://[^\\s/]+/?)$"},
+                    "stsEndpoint": {"type": "string", "pattern": "^(|https?://[^\\s/]+/?)$"},
+                    "caConfigMap": {"type": "string"},
+                    "roleArns": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "api": {"type": "string", "pattern": "^(|arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@/_-]+)$"},
+                        "reconciler": {"type": "string", "pattern": "^(|arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@/_-]+)$"},
+                        "keyAdmin": {"type": "string", "pattern": "^(|arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@/_-]+)$"}
+                      }
+                    },
+                    "timeout": {"type": "string", "pattern": "^(|[0-9]+(ms|s|m))$"}
+                  }
+                },
                 "openbao": {
                   "type": "object",
                   "additionalProperties": false,
