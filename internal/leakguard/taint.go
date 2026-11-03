@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -183,9 +184,14 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 			raws = append(raws, rawText{a, []int{i}})
 		}
 	}
-	if len(raws) > 1 {
+	n := len(raws)
+	idx := make([]int, 0, n)
+	for _, r := range raws {
+		idx = append(idx, r.args[0])
+	}
+	var join int
+	if n > 1 {
 		var b strings.Builder
-		idx := make([]int, 0, len(raws))
 		for _, r := range raws {
 			// An argument is decoded whole on its own; in the joined text a long one is cut to
 			// its two ends, which hold the boundaries to its neighbours. Joined whole, a call of
@@ -196,34 +202,70 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 			} else {
 				b.WriteString(r.text)
 			}
-			idx = append(idx, r.args[0])
 		}
 		raws = append(raws, rawText{b.String(), idx})
-		n := len(idx)
-		join, fits := pairJoin(args, idx, lim)
-		pair := func(i, j int) {
-			ai, aj := args[idx[i]], args[idx[j]]
-			raws = append(raws, rawText{tail(ai, join) + head(aj, join), []int{idx[i], idx[j]}})
-		}
-		if !fits {
+		var fits bool
+		if join, fits = pairJoin(args, idx, lim); !fits {
 			return nil, &budgetError{ReasonBudgetArgs, fmt.Sprintf("the call has %d non-empty arguments, too many to check every pair of them for split text; the tool call could not be checked", n)}
-		}
-		for i := range n {
-			for j := range n {
-				if i != j && j != i+1 { // the joined text already holds every in-order boundary
-					pair(i, j)
-				}
-			}
 		}
 	}
 	res, err := decodeRaws(raws, lim, fp, m)
 	if err != nil {
 		return nil, err
 	}
+	if n > 1 {
+		// The pairs: tail(ai)+head(aj), i != j, the in-order boundaries being in the joined text.
+		// Up to MaxPairArgs arguments, the joined strings are decoded again, so a stream cut
+		// anywhere decodes whole. Above that, decoding every pair costs a call of 128 arguments
+		// seconds on one core, and the pairs are built from the decoded forms of the arguments
+		// instead (see pairForms).
+		if n <= lim.MaxPairArgs {
+			var pairs []rawText
+			for i := range n {
+				for j := range n {
+					if i != j && j != i+1 {
+						pairs = append(pairs, rawText{tail(args[idx[i]], join) + head(args[idx[j]], join), []int{idx[i], idx[j]}})
+					}
+				}
+			}
+			more, err := decodeRaws(pairs, lim, fp, m)
+			if err != nil {
+				return nil, err
+			}
+			res = append(res, more...)
+		} else {
+			forms := make([][]string, n)
+			for i := range n {
+				forms[i] = pairForms(res[i].vars)
+			}
+			var more decoded
+			for i := range n {
+				for j := range n {
+					if i == j || j == i+1 {
+						continue
+					}
+					for _, fi := range forms[i] {
+						for _, fj := range forms[j] {
+							text := tail(fi, join) + head(fj, join)
+							if err := m.add(len(text)); err != nil {
+								return nil, err
+							}
+							c := Normalise(text)
+							if len(c.Runes) < fp.k {
+								continue
+							}
+							more.cands = append(more.cands, keyedCandidate{candidate{args: []int{idx[i], idx[j]}, v: Variant{Text: text, Chain: "pair"}, canon: c, fps: fp.kgrams(c.Runes, make([]Fingerprint, 0, len(c.Runes)-fp.k+1))}, c.String()})
+						}
+					}
+				}
+			}
+			res = append(res, more)
+		}
+	}
 	seen := map[string]struct{}{}
 	var out []candidate
 	for _, rs := range res {
-		for _, c := range rs {
+		for _, c := range rs.cands {
 			if _, dup := seen[c.key]; dup {
 				continue
 			}
@@ -234,34 +276,65 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 	return out, nil
 }
 
+// pairForms returns the texts of an argument that its pairs are built from: the argument itself
+// (a plain half of a split, whatever its other part decodes to) and the one of its decodings
+// that went deepest.
+func pairForms(vs []Variant) []string {
+	depth := func(v Variant) int {
+		if v.Chain == "" {
+			return 0
+		}
+		return strings.Count(v.Chain, ">") + 1
+	}
+	deepest := 0
+	for _, v := range vs {
+		deepest = max(deepest, depth(v))
+	}
+	out := []string{vs[0].Text}
+	for _, v := range vs {
+		if deepest > 0 && depth(v) == deepest && len(out) < 2 && !slices.Contains(out, v.Text) {
+			out = append(out, v.Text)
+		}
+	}
+	return out
+}
+
 type keyedCandidate struct {
 	candidate
 	key string
 }
 
+// decoded is what one text decodes to: the variants, and those of them long enough to match.
+type decoded struct {
+	vars  []Variant
+	cands []keyedCandidate
+}
+
 // decodeRaws decodes, normalises and fingerprints each text. The texts are independent and a
 // call may carry thousands of them (the pairs of its arguments), so several workers take them in
-// turn; the results stay in the order of raws.
-func decodeRaws(raws []rawText, lim Limits, fp *Fingerprinter, m *meter) ([][]keyedCandidate, error) {
-	one := func(r rawText) ([]keyedCandidate, error) {
+// turn, as a speed-up only (a pod with one core decodes them in turn too); the results stay in
+// the order of raws.
+func decodeRaws(raws []rawText, lim Limits, fp *Fingerprinter, m *meter) ([]decoded, error) {
+	one := func(r rawText) (decoded, error) {
 		vs, err := decodeAll(r.text, lim, m)
 		if err != nil {
-			return nil, err
+			return decoded{}, err
 		}
-		var out []keyedCandidate
+		out := decoded{vars: vs}
 		for _, v := range vs {
 			if err := m.add(len(v.Text)); err != nil {
-				return nil, err
+				return decoded{}, err
 			}
 			c := Normalise(v.Text)
 			if len(c.Runes) < fp.k {
 				continue
 			}
-			out = append(out, keyedCandidate{candidate{args: r.args, v: v, canon: c, fps: fp.kgrams(c.Runes, nil)}, c.String()})
+			fps := fp.kgrams(c.Runes, make([]Fingerprint, 0, len(c.Runes)-fp.k+1))
+			out.cands = append(out.cands, keyedCandidate{candidate{args: r.args, v: v, canon: c, fps: fps}, c.String()})
 		}
 		return out, nil
 	}
-	res := make([][]keyedCandidate, len(raws))
+	res := make([]decoded, len(raws))
 	workers := min(runtime.GOMAXPROCS(0), maxWorkers, len(raws)/minPerWorker)
 	if workers <= 1 {
 		for i, r := range raws {

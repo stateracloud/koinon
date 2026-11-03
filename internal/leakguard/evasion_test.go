@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math/rand/v2"
+	"runtime"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -286,11 +287,17 @@ var _ = Describe("Fourth review", func() {
 			return a
 		}
 
-		DescribeTable("within the clock",
+		// One core: a pod has a small CPU limit, so the workers of the guard are a speed-up
+		// only and a benign call has to fit the clock without them.
+		var procs int
+		BeforeEach(func() { procs = runtime.GOMAXPROCS(1) })
+		AfterEach(func() { runtime.GOMAXPROCS(procs) })
+
+		DescribeTable("within the clock on one core",
 			func(args []string) {
-				// a clock of 0.8 s, not the default second: a call that needs more than that on
+				// a clock of 0.6 s, not the default second: a call that needs more than that on
 				// this machine leaves no margin on a slower one
-				checker := leakguard.TaintChecker{Store: taintedStore(fp, privateLine), Limits: leakguard.Limits{MaxDuration: 800 * time.Millisecond}}
+				checker := leakguard.TaintChecker{Store: taintedStore(fp, privateLine), Limits: leakguard.Limits{MaxDuration: 600 * time.Millisecond}}
 				d, err := checker.Check(context.Background(), testScope, fp, args)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
@@ -408,4 +415,50 @@ var _ = Describe("Fifth review", func() {
 		Entry("russian with U+FEFF between", russian, b64(utf16le(between(russian, "\ufeff")))),
 		Entry("chunked base64 of russian with spaces", russian, chunks(b64(utf16le(russian)), 15, " ")),
 	)
+})
+
+// Sixth review: above MaxPairArgs arguments the pairs are built from the decoded forms of the
+// arguments, not by decoding every joined pair again. What they still catch, with 40 arguments
+// and the halves of the leak 3 and 37 apart (so not adjacent):
+var _ = Describe("Pairs of many arguments", func() {
+	var fp *leakguard.Fingerprinter
+	excerpt := "payroll export job runs nightly on the finance" // 40 canonical characters
+	cyrillic := strings.NewReplacer("a", "а", "e", "е", "o", "о", "p", "р", "c", "с", "x", "х").Replace(excerpt)
+	BeforeEach(func() { fp = newFingerprinter(testKey) })
+
+	DescribeTable("catches",
+		func(private string, first, second string) {
+			checker := leakguard.TaintChecker{Store: taintedStore(fp, private)}
+			args := spread(40, 3, first, 37, second)
+			d, err := checker.Check(context.Background(), testScope, fp, args)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.Allow).To(BeFalse(), "%+v", d)
+			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
+			Expect(d.Match.Args).To(ConsistOf(3, 37))
+		},
+		Entry("plain halves", excerpt, excerpt[:20], excerpt[20:]),
+		Entry("halves, each base64", excerpt, b64(excerpt[:21]), b64(excerpt[21:])),
+		Entry("base64 cut at a multiple of 4", excerpt, b64(excerpt)[:32], b64(excerpt)[32:]),
+		Entry("base64 of UTF-16 cut at a multiple of 4", excerpt, b64(utf16le(excerpt))[:64], b64(utf16le(excerpt))[64:]),
+		Entry("one half percent-encoded", excerpt, excerpt[:20], percentAll(excerpt[20:])),
+		Entry("hex cut between bytes", excerpt, hexOf(excerpt)[:36], hexOf(excerpt)[36:]),
+		Entry("base64 of cyrillic, halves", cyrillic, b64(cyrillic[:len(cyrillic)/2]), b64(cyrillic[len(cyrillic)/2:])),
+		Entry("halves in the other order", excerpt, excerpt[20:], excerpt[:20]),
+	)
+
+	It("catches a base64 stream cut inside a block between adjacent arguments of 40", func() {
+		checker := leakguard.TaintChecker{Store: taintedStore(fp, excerpt)}
+		enc := b64(excerpt)
+		d, err := checker.Check(context.Background(), testScope, fp, spread(40, 20, enc[:27], 21, enc[27:]))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
+	})
+
+	It("still catches a base64 stream cut inside a block with up to 32 arguments", func() {
+		checker := leakguard.TaintChecker{Store: taintedStore(fp, excerpt)}
+		enc := b64(excerpt)
+		d, err := checker.Check(context.Background(), testScope, fp, spread(32, 3, enc[:27], 30, enc[27:]))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
+	})
 })
