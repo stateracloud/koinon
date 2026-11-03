@@ -41,11 +41,6 @@ const Deadline = 5*time.Second + LookupBudget
 // configuration field; third_party/agentgateway/README.md records where to check it.
 const GatewayProcessorTimeout = 10 * time.Second
 
-// ApproveFunc records an ADR 0042 approval request for exactly this call of an auto-tier tool
-// (mcpask.Server.RequestApproval) with the guard's risk on the card, and returns the text the agent
-// reads ("approval requested: id=...").
-type ApproveFunc func(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, tool store.McpTool, args json.RawMessage, risk map[string]any) (string, error)
-
 // Options configures a Guard.
 type Options struct {
 	Logger  *slog.Logger
@@ -57,7 +52,11 @@ type Options struct {
 	Limits leakguard.Limits
 	// MaxFingerprints bounds one session's taint store (DefaultMaxFingerprints when <= 0).
 	MaxFingerprints int
-	// Approve records approvals. Without it a call that needs one is refused.
+	// Decider decides the calls the rules leave open (NeedsDecision). Nil is a PersonDecider with
+	// Approve: an ADR 0042 approval of the exact call.
+	Decider Decider
+	// Approve records approvals for the default PersonDecider. Without it, and without a Decider,
+	// a call that needs a decision is refused.
 	Approve ApproveFunc
 	// OwnTargets are the gateway targets of Koinon's own tool servers (the code-host tools and
 	// gateway.KoinonTarget). Every write they offer is already an ADR 0042 approval of the exact
@@ -76,7 +75,7 @@ type Guard struct {
 	now     func() time.Time
 	cap     int
 	limits  leakguard.Limits
-	approve ApproveFunc
+	decider Decider
 	own     []string
 	url     leakguard.URLPolicy
 }
@@ -92,9 +91,12 @@ func New(pool *pgxpool.Pool, o Options) *Guard {
 	if o.ByteCap <= 0 {
 		o.ByteCap = DefaultByteCap
 	}
+	if o.Decider == nil {
+		o.Decider = PersonDecider{Approve: o.Approve}
+	}
 	return &Guard{
 		pool: pool, q: store.New(pool), state: NewState(pool, o.MaxFingerprints, o.Metrics), log: o.Logger, metrics: o.Metrics,
-		now: o.Now, cap: o.ByteCap, limits: o.Limits, approve: o.Approve, own: slices.Clone(o.OwnTargets),
+		now: o.Now, cap: o.ByteCap, limits: o.Limits, decider: o.Decider, own: slices.Clone(o.OwnTargets),
 		url: leakguard.DefaultURLPolicy(),
 	}
 }
@@ -242,20 +244,28 @@ func (g *Guard) check(ctx context.Context, call Call) (Outcome, string, error) {
 	case Refuse:
 		return Outcome{Verdict: v, Text: v.Detail}, string(a.class), nil
 	}
-	// Approve
+	// NeedsDecision
 	if c.ask {
-		// The ask-tier proxy records the one approval this call gets, with the leak reason on
-		// its card (mcpask asks Assess); two cards for one call would be noise (ADR 0091 decision 5).
+		// The call's tool is ask-tier: mcpask records the one approval it gets, with the guard's
+		// reasons on its card (mcpask asks Assess); two cards for one call would be noise (ADR 0091
+		// decision 5). A person decides it either way.
 		return Outcome{Verdict: Verdict{Action: Pass, Reason: ReasonAskTarget, Reasons: v.Reasons}}, string(a.class), nil
 	}
-	if g.approve == nil || !tool.Valid {
-		return refuse(v.Reason, "refused by the leak guard: this call needs a person's approval, and approvals are not available for it"), string(a.class), nil
+	if !tool.Valid {
+		return refuse(v.Reason, "refused by the leak guard: this call needs a decision, and the server never published this tool"), string(a.class), nil
 	}
-	text, err := g.approve(ctx, c.org, c.agent, c.server, tool.McpTool, call.Arguments, a.risk())
+	out, err := g.decider.DecidePending(ctx, Pending{
+		Org: c.org, Agent: c.agent, Server: c.server, Tool: tool.McpTool, Arguments: call.Arguments,
+		Verdict: v, Destination: a.args.Address, PayloadBytes: a.args.PayloadBytes(), Risk: a.risk(),
+	})
 	if err != nil {
 		return Outcome{}, string(a.class), err
 	}
-	return Outcome{Verdict: v, Text: text}, string(a.class), nil
+	if out.Verdict.Action == NeedsDecision || out.Verdict.Action == "" {
+		// A Decider must decide; anything else fails closed.
+		return Outcome{}, string(a.class), fmt.Errorf("mcpguard: the decider left the call undecided (%q)", out.Verdict.Action)
+	}
+	return out, string(a.class), nil
 }
 
 // knownTool is a tool row, or none for a name the server never published.

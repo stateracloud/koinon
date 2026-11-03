@@ -16,6 +16,11 @@
 // both-legs one. A tool on an ask-tier target already gets a card from mcpask, which asks Assess
 // for the guard's reasons, so the guard lets that call on.
 //
+// The table never escalates by itself: what it cannot pass or refuse is NeedsDecision, with its
+// reasons, destination and payload size (Pending), and goes to Options.Decider. The only Decider
+// is PersonDecider, which turns every NeedsDecision into that ADR 0042 approval; the seam is where
+// another step between the rules and a person would go, and it can change no rule's outcome.
+//
 // # Legs and taint (ADR 0091 decision 4)
 //
 // A session is one home generation of one agent. Its legs grow from the results of tools whose
