@@ -6,7 +6,7 @@ Instructions for coding agents working on Koinon.
 
 - Build: `make build` · Test: `make test` · Lint: `make lint` · Codegen: `make generate`
 - Go only: `hack/go-test.sh`, which is what `make test` runs: the agentd, api, durable and checkpoint
-  suites under Ginkgo `-p` (one Postgres container per process, see `internal/testing/pgtest`), the
+  suites under Ginkgo `-p` (one shared Postgres server per run, a template-copied database per process, see `internal/testing/pgtest`), the
   rest under `go test` (Postgres tests need Docker; they skip without it). A new suite joins the
   parallel list in that script once it shares no database, fixed port or fixed path between processes.
   `hack/testverdict` reports a skipped suite as SKIPPED (not PASS) and fails one that did not run (NOT RUN);
