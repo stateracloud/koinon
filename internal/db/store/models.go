@@ -1613,6 +1613,15 @@ type HomeRepository struct {
 	CreatedAt        pgtype.Timestamptz
 }
 
+type KekFingerprint struct {
+	KekID       string
+	Fingerprint string
+	Backend     string
+	KeyID       string
+	FirstSeen   pgtype.Timestamptz
+	ActivatedAt pgtype.Timestamptz
+}
+
 type LocalCredential struct {
 	UserID             pgtype.UUID
 	Username           string

@@ -121,9 +121,9 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		return errors.New("set --kek-secret or --kek-dir")
 	}
 
-	tool := &keyscli.Tool{Store: store, Out: out, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, SecretName: o.kekSecret}
-	// activate needs the database only to show, in its picker, the values each KEK wraps.
-	if o.dbURL != "" && cmd != "add" && cmd != "export" && (cmd != "activate" || (prompt != nil && len(rest) == 0)) {
+	tool := &keyscli.Tool{Store: store, Out: out, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, SecretName: o.kekSecret, Wrappers: wrappers}
+	// activate uses the database to record the activation and to show, in its picker, the values each KEK wraps.
+	if o.dbURL != "" && cmd != "add" && cmd != "export" {
 		pool, err := pgxpool.New(ctx, o.dbURL)
 		if err != nil {
 			return fmt.Errorf("connect to postgres: %w", err)

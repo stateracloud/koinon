@@ -71,6 +71,7 @@ import (
 	"github.com/stateracloud/koinon/internal/declarative"
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpask"
@@ -488,6 +489,10 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	// On every load and reload: probe the active KEK's wrapping key (koinon_kek_active_reachable,
+	// registered below with the other metrics) and record the KEK fingerprints (#591).
+	kekMetrics := kekhealth.NewMetrics(nil)
+	kekMonitor := &kekhealth.Monitor{Wrappers: wrappers, Metrics: kekMetrics, Recorder: &kekhealth.Recorder{Q: store.New(pool)}, Log: slog.Default()}
 	switch {
 	case cfg.kekSecret != "" && kube != nil:
 		// The chart renders no key material (a render would make new keys every time, and a new
@@ -503,16 +508,16 @@ func serve(ctx context.Context, cfg config) error {
 				slog.Warn("created the key-encryption key Secret; back it up now (docs/ops/secret-keys.md)", "secret", cfg.kekSecret)
 			}
 		}
-		if keyring, err = loadKeyring(ctx, kekStore); err != nil {
+		if keyring, err = loadKeyring(ctx, kekStore, kekMonitor.Observer()); err != nil {
 			return err
 		}
-		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch", stop, func(ctx context.Context) { watchKeyring(ctx, keyring, kekStore, time.Minute) })
+		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch", stop, func(ctx context.Context) { watchKeyring(ctx, keyring, kekStore, time.Minute, kekMonitor.Observer()) })
 	case cfg.kekDir != "":
-		if keyring, err = secretstore.LoadDir(ctx, cfg.kekDir, wrappers); err != nil {
+		if keyring, err = secretstore.LoadDir(ctx, cfg.kekDir, wrappers, kekMonitor.Observer()); err != nil {
 			return err
 		}
 		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch-dir", stop, func(ctx context.Context) {
-			keyring.WatchDir(ctx, cfg.kekDir, wrappers, time.Minute, slog.Default())
+			keyring.WatchDir(ctx, cfg.kekDir, wrappers, time.Minute, slog.Default(), kekMonitor.Observer())
 		})
 	default:
 		slog.Warn("no --kek-secret or --kek-dir: provider keys and connections cannot be stored")
@@ -598,6 +603,7 @@ func serve(ctx context.Context, cfg config) error {
 	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithTriggers(svc).WithModelCheck(echo)
 
 	reg := metrics.NewRegistry()
+	reg.MustRegister(kekMetrics.ActiveReachable)
 	if durableRT != nil {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
 		reg.MustRegister(durableRT.Collector())
