@@ -1,0 +1,7 @@
+# Synthetic private notes for the leakguard corpus test. Every value is fake.
+Internal runbook: the payroll export job runs nightly on the finance-batch-07 node and writes to bucket koinon-canary-not-a-secret-1.
+Q3 forecast draft: Northwind Traders renewal is projected at 418 thousand with a churn risk flagged by the account team.
+The staging database password rotation is owned by the platform team; the current placeholder is koinon_test_not-a-real-token.
+Customer escalation 2231: Contoso reported duplicate invoices after the October migration of the billing ledger.
+Incident review: the canary deployment of the rate limiter at 14:05 dropped requests for tenant blue-heron-staging.
+Roadmap note: the unannounced Halcyon pricing tier launches with a forty percent discount for design partners.
