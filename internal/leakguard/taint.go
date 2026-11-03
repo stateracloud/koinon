@@ -168,6 +168,7 @@ type candidate struct {
 	canon Canonical
 	fps   []Fingerprint
 	first int
+	lo    int // the first k-gram of the text that fps holds (a pair holds those across its cut)
 }
 
 type rawText struct {
@@ -239,22 +240,90 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 				forms[i] = pairForms(res[i].vars)
 			}
 			var more decoded
+			// A pair is only fingerprinted: one buffer serves the canonical forms, and the
+			// fingerprints and argument numbers of all pairs share a few large slabs.
+			var scratch Canonical
+			var fpSlab []Fingerprint
+			var argSlab []int
+			// emit adds the text of a pair of ends, joined at byte cut, if its canonical form
+			// holds a k-gram across the cut; only the k-grams across it are fingerprinted, the
+			// ones inside an end being those of the argument itself.
+			emit := func(i, j int, text string, cut int, chain string) error {
+				if err := m.add(len(text)); err != nil {
+					return err
+				}
+				scratch.Runes, scratch.Off = scratch.Runes[:0], scratch.Off[:0]
+				lo, hi := 0, 0
+				if cut < 0 { // the cut is not known: every k-gram
+					normaliseInto(&scratch, text)
+					hi = len(scratch.Runes) - fp.k
+				} else {
+					normaliseInto(&scratch, text[:cut])
+					nb := len(scratch.Runes)
+					normaliseInto(&scratch, text[cut:]) // offsets of the second part are relative to it
+					lo, hi = max(0, nb-fp.k+1), min(nb-1, len(scratch.Runes)-fp.k)
+				}
+				if hi < lo {
+					return nil
+				}
+				if need := hi - lo + 1; cap(fpSlab)-len(fpSlab) < need {
+					fpSlab = make([]Fingerprint, 0, max(need, 1<<14))
+				}
+				from := len(fpSlab)
+				fpSlab = fp.kgrams(scratch.Runes[lo:hi+fp.k], fpSlab)
+				if cap(argSlab)-len(argSlab) < 2 {
+					argSlab = make([]int, 0, 1<<10)
+				}
+				argSlab = append(argSlab, idx[i], idx[j])
+				if len(more.cands) == cap(more.cands) { // chunks: a slice grown by doubling copies them all
+					if len(more.cands) > 0 {
+						res = append(res, more)
+					}
+					more = decoded{cands: make([]keyedCandidate, 0, 2048)}
+				}
+				more.cands = append(more.cands, keyedCandidate{candidate{args: argSlab[len(argSlab)-2:], v: Variant{Text: text, Chain: chain}, fps: fpSlab[from:len(fpSlab):len(fpSlab)], lo: lo}, text})
+				return nil
+			}
+			// The cut of an encoded stream falls anywhere, so where the ends facing each
+			// other are both runs of base64 (or base32, hex) characters, a window around
+			// the boundary is decoded as the stream it would be joined.
+			tails, heads := make([]string, n), make([]string, n)
+			nt, nh := 0, 0
+			for i := range n {
+				tails[i], heads[i] = tailRun(args[idx[i]]), headRun(args[idx[i]])
+				if len(tails[i]) >= minWindowRun {
+					nt++
+				}
+				if len(heads[i]) >= minWindowRun {
+					nh++
+				}
+			}
+			// A window costs about 15 us on one core; more pairs than maxWindowPairs would take
+			// the call past its clock, so such a call (about 90 arguments that all begin and end in
+			// base64 text) has no windows and relies on the decoded forms alone (a known limit).
+			windows := nt*nh <= maxWindowPairs
 			for i := range n {
 				for j := range n {
 					if i == j || j == i+1 {
 						continue
 					}
-					for _, fi := range forms[i] {
-						for _, fj := range forms[j] {
-							text := tail(fi, join) + head(fj, join)
-							if err := m.add(len(text)); err != nil {
+					if windows && len(tails[i]) >= minWindowRun && len(heads[j]) >= minWindowRun {
+						w := tails[i] + heads[j]
+						if err := m.add(len(w)); err != nil {
+							return nil, err
+						}
+						for _, text := range windowReadings(w) {
+							if err := emit(i, j, text, -1, "window"); err != nil {
 								return nil, err
 							}
-							c := Normalise(text)
-							if len(c.Runes) < fp.k {
-								continue
+						}
+					}
+					for _, fi := range forms[i] {
+						for _, fj := range forms[j] {
+							ti := tail(fi, formReach)
+							if err := emit(i, j, ti+head(fj, formReach), len(ti), "pair"); err != nil {
+								return nil, err
 							}
-							more.cands = append(more.cands, keyedCandidate{candidate{args: []int{idx[i], idx[j]}, v: Variant{Text: text, Chain: "pair"}, canon: c, fps: fp.kgrams(c.Runes, make([]Fingerprint, 0, len(c.Runes)-fp.k+1))}, c.String()})
 						}
 					}
 				}
@@ -274,6 +343,63 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 		}
 	}
 	return out, nil
+}
+
+// formReach is the bytes of each side of a boundary taken from the decoded forms of the arguments
+// of a call of many: a half of a leak is under 24 canonical characters or it is caught alone, so
+// a side needs about that many, and 40 bytes leaves room for the punctuation and spaces between.
+const formReach = 40
+
+// maxWindowPairs bounds the boundaries of a call whose windows are decoded.
+const maxWindowPairs = 8000
+
+// windowRun is the most characters of each side of a boundary that are decoded as one stream,
+// and minWindowRun the least of each side for a window to be decoded: a leak of 24 characters
+// cut in two leaves one side more than a few characters.
+const (
+	windowRun    = 48
+	minWindowRun = 4
+)
+
+// tailRun and headRun are the last and first windowRun bytes of s that are base64 characters
+// (either alphabet), up to the first byte that is not.
+func tailRun(s string) string {
+	i := len(s)
+	for i > 0 && len(s)-i < windowRun && isBase64Char(s[i-1]) {
+		i--
+	}
+	return s[i:]
+}
+
+func headRun(s string) string {
+	i := 0
+	for i < len(s) && i < windowRun && isBase64Char(s[i]) {
+		i++
+	}
+	return s[:i]
+}
+
+// windowReadings (a window holds no junk between the symbols of a stream, so no resynchronised reading) are the texts a window of base64 characters decodes to as hex, base32 or
+// base64, whichever alphabets it fits.
+func windowReadings(w string) []string {
+	if allHex(w) {
+		return hexReadings(w, false).all()
+	}
+	var out []string
+	up := []byte(strings.ToUpper(w))
+	if slices.IndexFunc(up, func(c byte) bool { return !isBase32Char(c) }) < 0 {
+		out = append(out, b32Readings(up, false).all()...)
+	}
+	buf := []byte(w)
+	for i, c := range buf {
+		switch c {
+		case '-':
+			buf[i] = '+'
+		case '_':
+			buf[i] = '/'
+		}
+	}
+	return append(out, b64Readings(buf, false).all()...)
 }
 
 // pairForms returns the texts of an argument that its pairs are built from: the argument itself
@@ -411,12 +537,16 @@ func tail(s string, n int) string {
 // run: winnowing keeps at least one fingerprint in every window of the source.
 func (c *candidate) match(hits []bool, fp *Fingerprinter) *Match {
 	k, w := fp.k, fp.p.Window
+	if c.canon.Off == nil { // a pair or window candidate keeps its text only, not its canonical form
+		c.canon = Normalise(c.v.Text)
+	}
 	bestStart, bestEnd := -1, -1
 	start, end := -1, -1
 	for i, h := range hits {
 		if !h {
 			continue
 		}
+		i += c.lo
 		if start >= 0 && i <= end-k+w {
 			end = i + k
 		} else {
