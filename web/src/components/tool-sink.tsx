@@ -60,8 +60,9 @@ export function ToolSink({ server, tool: t, actions }: { server: Server; tool: T
     return (
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span>Where calls go: {sinkText(t.sink)}.</span>
-        <Button variant="outline" size="sm" aria-label={`Change sink class of ${t.name}`} onClick={open}>
-          {isDefaultSink(t.sink) ? 'Declare' : 'Change'}
+        <Button variant="outline" size="sm" onClick={open}>
+          {/* The name starts with the visible text (WCAG 2.5.3, label in name); the tool's name is for screen readers. */}
+          {isDefaultSink(t.sink) ? 'Declare' : 'Change'} sink class{' '}<span className="sr-only">of {t.name}</span>
         </Button>
       </div>
     )
