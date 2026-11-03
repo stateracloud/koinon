@@ -56,8 +56,9 @@ export function ServerClass({ server: s, actions }: { server: Server; actions: P
           Data class: {kindLabel(s.kind)}; legs: {legsText(s.dataClass)}.{' '}
           {s.codeHostConnectionId ? `Code-host connection: ${linked?.displayName ?? s.codeHostConnectionId}.` : 'No code-host connection: its code-host tools count as external, free text.'}
         </span>
-        <Button variant="outline" size="sm" aria-label={`Change data class of ${s.name}`} onClick={open}>
-          Change class
+        <Button variant="outline" size="sm" onClick={open}>
+          {/* The name starts with the visible text (WCAG 2.5.3, label in name); the server's name is for screen readers. */}
+          Change data class{' '}<span className="sr-only">of {s.name}</span>
         </Button>
       </div>
     )
