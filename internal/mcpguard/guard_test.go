@@ -213,6 +213,29 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Expect(string(risk)).To(ContainSubstring(`"taint"`))
 	})
 
+	It("takes agentd's feed: a sandbox read sets the private leg and its text is caught, from fingerprints only", func(ctx SpecContext) {
+		feed := mcpguard.NewFeed(pool, nil)
+		Expect(feed.Report(ctx, org, agent.ID, mcpguard.Legs{PrivateData: true}, []string{secretPage})).To(Succeed())
+		var private bool
+		Expect(pool.QueryRow(ctx, `SELECT private_data FROM leak_guard_sessions WHERE org_id = $1 AND agent_id = $2`, org, agent.ID).Scan(&private)).To(Succeed())
+		Expect(private).To(BeTrue())
+		var fps int
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM leak_guard_fingerprints WHERE org_id = $1`, org).Scan(&fps)).To(Succeed())
+		Expect(fps).To(BeNumerically(">", 0))
+
+		Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"}))).To(BeTrue())
+		r := call(ctx, "tracker", "post_message", map[string]any{"text": "fyi: " + secretPage[40:300]})
+		Expect(reason(r)).To(HavePrefix("approval requested"))
+		var risk []byte
+		Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE org_id = $1`, org).Scan(&risk)).To(Succeed())
+		Expect(string(risk)).To(ContainSubstring(`"taint"`))
+	})
+
+	It("refuses agentd's feed for an agent with no home generation", func(ctx SpecContext) {
+		other := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+		Expect(mcpguard.NewFeed(pool, nil).Report(ctx, org, other, mcpguard.Legs{PrivateData: true}, nil)).To(MatchError(mcpguard.ErrNoGeneration))
+	})
+
 	When("the session holds both legs", func() {
 		BeforeEach(func(ctx SpecContext) {
 			Expect(result(ctx, "tracker", "read_issue", "an issue someone outside filed").GetPass()).NotTo(BeNil())
