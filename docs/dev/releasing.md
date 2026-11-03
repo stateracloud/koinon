@@ -33,11 +33,13 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    `rules/branches/<default>` (every active repository and organization rule for the branch, branch
    patterns resolved by GitHub), so adding or removing a required check needs no edit to
    `hack/release-gate.sh`; if it cannot read the rules, or finds no required checks, it fails closed.
-   Each context must have succeeded on the tagged commit itself, except four that a push to main does
-   not report as a result: `dco` and `dependency age` (pull requests only; on main the latter is a
-   skipped run; it is required from #561 on), `claim` (`pull_request_target`; skipped on main) and
-   `e2e result` (a composite that also passes when the e2e was skipped; its real subject, the kind
-   e2e, the gate asks for through the `quickstart` rule below). Those are listed in the script
+   Each context must have succeeded on the tagged commit itself, except three that a push to main does
+   not report as a result: `dco` (pull requests only), `claim` (`pull_request_target`; skipped on main) and
+   `e2e result` (a composite that also passes when the e2e was skipped on main; on a pull request it
+   fails when the change needs the e2e and the head has none, #562; its real subject, the kind
+   e2e, the gate asks for through the `quickstart` rule below). `quick checks` (proto, migrations, adr-lint, claim-tests and the dependency age
+   steps, which run on pull requests only) must succeed on the tagged commit and also on the merged
+   pull request's head (`both` in the script). The three above are listed in the script
    (`pr_only`) and read from the head commit of the pull request that merged the tag's commit: the
    newest run that started before the merge (the `closed` event reruns some of them as skipped). A
    commit that was not merged through a pull request therefore fails the gate. They are listed
@@ -70,6 +72,29 @@ Same steps with `vX.Y.Z` after the last rc was exercised (REL2). The final relea
 Checklist step for every `vX.Y.0`: after the final tag is published, open a pull request that sets
 `hack/migrate-patch-line` to `vX.Y` (for v0.1.0: `v0.1`). Until it merges, main can still contract
 the schema that the shipped release runs on (ADR 0085).
+
+## Release notes: "Upgrading from vX.Y"
+
+The generated notes list commits only. Before you publish the draft (step 4), add an "Upgrading from
+vX.Y" section by hand, where X.Y is the previous minor line (for `v0.2.0`, "Upgrading from v0.1").
+Operators follow [Upgrading Koinon](../site/src/content/docs/guides/upgrading.md) (ADR 0085); the notes
+say what is specific to this release. Template:
+
+```markdown
+## Upgrading from vX.Y
+
+- **Procedure:** stop, migrate, start (the minor upgrade of the Upgrading Koinon guide).
+  For a patch release write "rolling upgrade, no schema change that breaks the previous patch" instead.
+- **Rollback:** none short of restoring the pre-upgrade database and key backup. For a patch
+  release: roll the images back.
+- **Schema:** the migrations that contract (rename, drop, retype) and what they remove.
+- **Values:** values added, renamed or removed, and what to change in `values.yaml`.
+- **OpenShell:** the pinned version, and whether it changed (a change recreates every sandbox over time).
+- **Other manual steps:** anything an operator must do before or after.
+```
+
+For `v0.1.0`, write that a release candidate install upgrades with a stop and cannot roll back to an
+rc, and that v0.1.0 is the compatibility baseline.
 
 ## Signing and SBOM attestations
 

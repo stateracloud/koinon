@@ -7,24 +7,29 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	"sigs.k8s.io/yaml"
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/tracedest"
 )
@@ -67,6 +72,8 @@ var _ = Describe("koinon-api keys", func() {
 		// Every spec starts with no values, so counts are exact. (The audit log refuses TRUNCATE,
 		// so pgtest runs it with triggers off.)
 		pgtest.TruncateOrgs(ctx, pool)
+		_, err0 := pool.Exec(ctx, `DELETE FROM kek_fingerprints`)
+		Expect(err0).NotTo(HaveOccurred())
 		now = time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 		kube = fake.NewClientset()
 		first := "kek-20260101-aaaa"
@@ -293,7 +300,7 @@ var _ = Describe("koinon-api keys", func() {
 		seed(ctx, 1)
 		fresh := fake.NewClientset() // the Secret was deleted
 		used := func(ctx context.Context) (bool, error) { return keyscli.AnyEnvelope(ctx, pool) }
-		created, err := keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now, used)
+		created, err := keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek"}.Ensure(ctx, now, used)
 		Expect(err).To(MatchError(keyscli.ErrKEKMissing))
 		Expect(err.Error()).To(ContainSubstring("restore the Secret from your backup"))
 		Expect(created).To(BeFalse())
@@ -304,12 +311,12 @@ var _ = Describe("koinon-api keys", func() {
 		pgtest.TruncateOrgs(ctx, pool)
 		org, user, _ = pgtest.NewOrg(ctx, pool)
 		seedMCP(ctx)
-		_, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now, used)
+		_, err = keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek"}.Ensure(ctx, now, used)
 		Expect(err).To(MatchError(keyscli.ErrKEKMissing))
 
 		By("with no encrypted value yet, a fresh install creates it")
 		pgtest.TruncateOrgs(ctx, pool)
-		created, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now, used)
+		created, err = keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek"}.Ensure(ctx, now, used)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(created).To(BeTrue())
 	})
@@ -326,7 +333,7 @@ var _ = Describe("koinon-api keys", func() {
 
 	It("creates the KEK Secret once and never overwrites it", func(ctx SpecContext) {
 		fresh := fake.NewClientset()
-		created, err := keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now, nil)
+		created, err := keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek"}.Ensure(ctx, now, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(created).To(BeTrue())
 		store := keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek"}
@@ -335,7 +342,7 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(first.Keys).To(HaveLen(1))
 		Expect(first.Active).To(MatchRegexp(`^kek-20261023-[0-9a-f]{4}$`))
 
-		created, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now.Add(24*time.Hour), nil)
+		created, err = keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek"}.Ensure(ctx, now.Add(24*time.Hour), nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(created).To(BeFalse())
 		again, _ := store.Load(ctx)
@@ -344,12 +351,221 @@ var _ = Describe("koinon-api keys", func() {
 		By("a Secret someone else made is left alone, whatever it holds")
 		_, err = fresh.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "mine", Namespace: ns}, Data: map[string][]byte{"x": []byte("y")}}, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
-		created, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "mine", now, nil)
+		created, err = keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "mine"}.Ensure(ctx, now, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(created).To(BeFalse())
 		got, _ := fresh.CoreV1().Secrets(ns).Get(ctx, "mine", metav1.GetOptions{})
 		Expect(got.Data).To(HaveLen(1))
 	})
+
+	It("exports the key set as a Secret manifest that restores the same keys", func(ctx SpecContext) {
+		ids := seed(ctx, 1)
+		Expect(tool.Export(ctx)).To(Succeed())
+		Expect(out.String()).To(And(ContainSubstring("kind: Secret"), ContainSubstring("name: koinon-kek"), ContainSubstring("wrapped by local")))
+		Expect(out.String()).NotTo(ContainSubstring("namespace:"), "a restore goes into any namespace")
+
+		var sec corev1.Secret
+		Expect(yaml.Unmarshal(out.Bytes(), &sec)).To(Succeed())
+		restored := fake.NewClientset()
+		sec.Namespace = "restored"
+		_, err := restored.CoreV1().Secrets("restored").Create(ctx, &sec, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		back := keyscli.KubeStore{Client: restored, Namespace: "restored", Name: "koinon-kek"}
+		r, err := back.Load(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		orig, _ := ks.Load(ctx)
+		Expect(r.Keys).To(Equal(orig.Keys))
+		Expect(r.Active).To(Equal(orig.Active))
+		ring2, err := secretstore.NewKeyring(r.Keys, r.Active)
+		Expect(err).NotTo(HaveOccurred())
+		openAll(ctx, ring2, ids)
+	})
+
+	Describe("with KEKs wrapped by an opted-in KMS", func() {
+		var (
+			kms            *secretstoretest.FakeKMS
+			admin, service secretstore.Wrappers
+		)
+		// use makes the tool run as the key-admin Job (admin) or in the koinon-api pod (service).
+		use := func(ws secretstore.Wrappers) {
+			ks.Wrappers = ws
+			tool.Store = ks
+			tool.Wrappers = ws
+		}
+		BeforeEach(func(ctx SpecContext) {
+			kms = &secretstoretest.FakeKMS{}
+			var err error
+			admin, err = secretstore.NewKeyAdminWrappers(kms)
+			Expect(err).NotTo(HaveOccurred())
+			service, err = secretstore.NewWrappers(kms)
+			Expect(err).NotTo(HaveOccurred())
+			use(admin)
+		})
+
+		It("adds wrapped KEKs, keeps the local one readable, and moves the values over", func(ctx SpecContext) {
+			ids := seed(ctx, 2)
+			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			raw, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(raw.Data["kek-20261023-bbbb"])).To(HavePrefix(`{"fmt":1,"backend":"fakekms","key":"koinon-test"`))
+			Expect(raw.Data["kek-20260101-aaaa"]).NotTo(HavePrefix("{"), "the local KEK is not rewrapped")
+
+			By("koinon-api, decrypt-only, can activate and rewrap: no KEK is wrapped again")
+			use(service)
+			kms.DecryptOnly.Store(true)
+			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Rewrap(ctx)).To(Succeed())
+			Expect(usage(ctx)).To(Equal(map[string]int{"kek-20261023-bbbb": 2}))
+			openAll(ctx, ring(ctx), ids)
+
+			out.Reset()
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).To(And(ContainSubstring("WRAPPED BY"), ContainSubstring("fakekms:koinon-test"), ContainSubstring("local")))
+		})
+
+		It("koinon-api never wraps a new KEK with the KMS: keys add and the first start point at the key-admin Job", func(ctx SpecContext) {
+			use(service)
+			kms.DecryptOnly.Store(true)
+			Expect(tool.Add(ctx, "kek-20261023-cccc")).To(MatchError(secretstore.ErrKeyAdminWraps))
+			Expect(tool.Add(ctx, "kek-20261023-cccc")).To(MatchError(ContainSubstring("new KEKs are wrapped by the key-admin Job")))
+
+			fresh := fake.NewClientset()
+			store := keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek", Wrappers: service}
+			created, err := store.Ensure(ctx, now, nil)
+			Expect(err).To(MatchError(secretstore.ErrKeyAdminWraps))
+			Expect(created).To(BeFalse())
+			list, _ := fresh.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
+			Expect(list.Items).To(BeEmpty())
+			Expect(kms.Wraps()).To(BeZero(), "Encrypt was never called")
+			set, _ := ks.Load(ctx)
+			Expect(set.Keys).To(HaveLen(1), "the key set is unchanged")
+		})
+
+		It("the key-admin Job creates the first KEK wrapped", func(ctx SpecContext) {
+			fresh := fake.NewClientset()
+			store := keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek", Wrappers: admin}
+			created, err := store.Ensure(ctx, now, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(created).To(BeTrue())
+			store.Wrappers = service
+			set, err := store.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(set.Stored[set.Active].Backend).To(Equal(secretstoretest.FakeKMSBackend))
+
+			By("an unreachable KMS stops the load, it does not create keys")
+			kms.Down.Store(true)
+			_, err = store.Load(ctx)
+			Expect(err).To(MatchError(secretstore.ErrUnreachable))
+		})
+
+		It("exports a wrapped KEK still wrapped", func(ctx SpecContext) {
+			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			use(service)
+			set, _ := ks.Load(ctx)
+			out.Reset()
+			Expect(tool.Export(ctx)).To(Succeed())
+			Expect(out.String()).To(ContainSubstring("kek-20261023-bbbb fingerprint " + secretstore.Fingerprint(set.Keys["kek-20261023-bbbb"]) + ", wrapped by fakekms:koinon-test"))
+			var sec corev1.Secret
+			Expect(yaml.Unmarshal(out.Bytes(), &sec)).To(Succeed())
+			Expect(string(sec.Data["kek-20261023-bbbb"])).To(HavePrefix("{"))
+		})
+	})
+
+	Describe("KEK fingerprints (#591)", func() {
+		type row struct {
+			fp, backend string
+			activated   bool
+		}
+		recorded := func(ctx SpecContext, id string) (row, bool) {
+			GinkgoHelper()
+			var r row
+			err := pool.QueryRow(ctx, `SELECT fingerprint, backend, activated_at IS NOT NULL FROM kek_fingerprints WHERE kek_id = $1`, id).Scan(&r.fp, &r.backend, &r.activated)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return r, false
+			}
+			Expect(err).NotTo(HaveOccurred())
+			return r, true
+		}
+
+		It("records the fingerprint and activation time when a KEK is activated, and status is quiet", func(ctx SpecContext) {
+			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			_, ok := recorded(ctx, "kek-20261023-bbbb")
+			Expect(ok).To(BeFalse(), "add records nothing")
+			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(Succeed())
+			set, err := ks.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			r, ok := recorded(ctx, "kek-20261023-bbbb")
+			Expect(ok).To(BeTrue())
+			Expect(r).To(Equal(row{fp: secretstore.Fingerprint(set.Keys["kek-20261023-bbbb"]), backend: "local", activated: true}))
+			Expect(out.String()).NotTo(ContainSubstring("WARNING"))
+
+			out.Reset()
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).NotTo(ContainSubstring("WARNING"))
+			Expect(out.String()).To(ContainSubstring("(local) is reachable"))
+		})
+
+		It("status warns when a loaded KEK differs from the one the database recorded", func(ctx SpecContext) {
+			old := "kek-20260101-aaaa"
+			set, _ := ks.Load(ctx)
+			fp := secretstore.Fingerprint(set.Keys[old])
+			_, err0 := kekhealth.Recorder{Q: store.New(pool)}.Record(ctx, secretstore.NewLoaded(set.Stored, set.Active, set.Keys, nil))
+			Expect(err0).NotTo(HaveOccurred())
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).NotTo(ContainSubstring("WARNING"))
+
+			By("a wrong backup is restored under the same ID")
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			sec.Data[old] = secretstore.EncodeKey(newKey())
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			out.Reset()
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).To(And(ContainSubstring("WARNING: KEK "+old), ContainSubstring("the database recorded "+fp)))
+		})
+
+		It("says a KMS key is unreachable, and warns about a local active KEK only when a KMS is configured", func(ctx SpecContext) {
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).NotTo(ContainSubstring("WARNING"), "a local-only install is never warned")
+
+			kms := &secretstoretest.FakeKMS{}
+			admin, err := secretstore.NewKeyAdminWrappers(kms)
+			Expect(err).NotTo(HaveOccurred())
+			ks.Wrappers = admin
+			tool.Store, tool.Wrappers = ks, admin
+			out.Reset()
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).To(ContainSubstring("WARNING: the active KEK kek-20260101-aaaa is a local key but a KMS (fakekms)"))
+
+			By("activating a local KEK is refused while the KMS is the primary")
+			Expect(tool.Activate(ctx, "kek-20260101-aaaa")).To(MatchError(ContainSubstring("the KMS fakekms is configured")))
+
+			By("and allowed once the configured primary is local again (the rollback)")
+			localOnly := secretstore.Wrappers{}
+			ks.Wrappers = localOnly
+			tool.Store, tool.Wrappers = ks, localOnly
+			Expect(tool.Activate(ctx, "kek-20260101-aaaa")).To(Succeed())
+			ks.Wrappers = admin
+			tool.Store, tool.Wrappers = ks, admin
+
+			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(Succeed())
+			r, ok := recorded(ctx, "kek-20261023-bbbb")
+			Expect(ok).To(BeTrue())
+			Expect(r.backend).To(Equal("fakekms"))
+			out.Reset()
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).To(ContainSubstring("(fakekms:koinon-test) is reachable"))
+			Expect(out.String()).NotTo(ContainSubstring("WARNING"))
+
+			kms.Down.Store(true)
+			out.Reset()
+			Expect(tool.Status(ctx)).To(MatchError(secretstore.ErrUnreachable), "the load cannot unwrap the KEKs")
+			Expect(out.String()).To(ContainSubstring("is unreachable"), "status says so before it fails")
+		})
+	})
+
 	Describe("on a terminal", func() {
 		var asked *bytes.Buffer
 		ask := func(input string) {

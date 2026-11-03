@@ -64,7 +64,8 @@ var _ = Describe("A refused permission request", func() {
 			return nil
 		}
 		r := e.enqueue(ctx, e.task(ctx, "write the notes"))
-		e.pool("agentd-a", func(c *agentd.Config) { c.MaxRefusedTurns = 1; c.RetryBackoff = 10 * time.Millisecond })
+		// agentd's own retry layer, the one for a flavor whose harness does not retry.
+		e.pool("agentd-a", agentd.OwnRetryLayer, func(c *agentd.Config) { c.MaxRefusedTurns = 1; c.RetryBackoff = 10 * time.Millisecond })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Expect(eventOf(events(ctx, r), "run.refusal")).To(HaveLen(2))
 	})

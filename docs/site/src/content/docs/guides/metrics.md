@@ -81,6 +81,7 @@ and the log line says the reason could not be read.
 | `koinon_agentd_wrap_up_notices_total` | counter | `limit`: `time`, `requests`, `spend` | Runs whose agent was told a run limit is near (about 80% of it), by the limit that was nearest. |
 | `koinon_agentd_time_limit_stops_total` | counter | none | Runs this replica stopped at their time limit. The api's wall-clock sweep is the backstop and is not counted. |
 | `koinon_agentd_model_wait_duration_seconds` | histogram | none | Time a run waited, before starting its harness, for the gateway to serve its model (a new provider's key still reaching the gateway). Observed only for runs that waited and were then served or timed out, not for a wait ended by a cancel, a lost lease or a shutdown. |
+| `koinon_agentd_run_event_write_failures_total` | counter | `class`: `diagnostic`, `business`; `reason`: `timeout`, `conn`, `transient`, `canceled`, `other` | Run events that could not be written after their tries. A diagnostic event (thoughts, progress, notes) is dropped and the run goes on; a business event (state changes, approvals, the reply) abandons the run, and another worker resumes it. The classes are listed in `internal/runoutcome/eventclass.go`. |
 
 ## koinon-api
 
@@ -93,6 +94,15 @@ and the log line says the reason could not be read.
 | `koinon_api_rpc_requests_total` | counter | `procedure` (the RPC's full name), `code` (`ok` or the Connect code) | Connect RPCs finished. Requests the auth interceptor refuses are counted (`unauthenticated`). |
 
 The admin API under `/admin/v1` is plain HTTP, not Connect, and is not counted yet.
+
+### Key-encryption keys
+
+koinon-api and koinon-reconciler both export this gauge. They probe the active KEK's wrapping key each
+time they read the KEK Secret (at start and about once a minute).
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `koinon_kek_active_reachable` | gauge | `backend`: the adapter name of the active KEK (`local`, or the KMS adapter) | 1 while the key that wraps the active KEK answers this process, else 0. With the default local KEK it is always 1. A 0 means stored secrets cannot be opened after the next restart. If the KMS is down when a pod starts, the pod does not start (fail closed) and never reports 0. |
 
 ### Durable workflows
 

@@ -10,6 +10,7 @@
 //	rewrap      wrap every stored data key under the active KEK; payloads are not decrypted
 //	retire      remove a KEK, only when no value uses it
 //	reencrypt   seal every value again under a new data key: the compromise path
+//	export      print the key set as a Secret manifest: the KEK backup and its restore
 package keyscli
 
 import (
@@ -28,12 +29,18 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/tracedest"
@@ -86,7 +93,11 @@ func (c Column) rowKey() string {
 
 // KeySet is the KEK Secret's content.
 type KeySet struct {
-	Keys   map[string][]byte
+	// Keys are the unwrapped KEKs.
+	Keys map[string][]byte
+	// Stored is each loaded KEK as the Secret holds it (secretstore.StoredKEK). Save keeps it for
+	// the KEKs it has and wraps the others (new ones) with the store's primary wrapper.
+	Stored map[string]secretstore.StoredKEK
 	Active string
 	// ActivatedAt is when Active became active, if known.
 	ActivatedAt time.Time
@@ -110,6 +121,11 @@ type Tool struct {
 	Prompt *cli.Prompter
 	// Yes skips the confirmations (--yes). It does not pick a KEK for the person.
 	Yes bool
+	// SecretName names the Secret in Export's manifest (default ExportName).
+	SecretName string
+	// Wrappers are the key-wrapping keys, for the reachability line of status; the zero value is the
+	// local KEK alone.
+	Wrappers secretstore.Wrappers
 }
 
 // confirm asks unless there is nobody to ask or --yes was given.
@@ -198,6 +214,9 @@ func ageFromID(id string) (time.Time, bool) {
 func (t *Tool) Status(ctx context.Context) error {
 	ks, err := t.Store.Load(ctx)
 	if err != nil {
+		if errors.Is(err, secretstore.ErrUnreachable) && ks.Stored != nil {
+			t.reachability(ctx, ks)
+		}
 		return err
 	}
 	usage, err := t.Usage(ctx)
@@ -211,16 +230,19 @@ func (t *Tool) Status(ctx context.Context) error {
 		}
 	}
 	w := tabwriter.NewWriter(t.Out, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "KEK\tSTATE\tVALUES")
+	_, _ = fmt.Fprintln(w, "KEK\tSTATE\tVALUES\tWRAPPED BY\tFINGERPRINT")
 	for _, id := range ids {
-		state := "retained"
+		state, wrapped, fp := "retained", "-", "-"
 		switch {
 		case id == ks.Active:
 			state = "active"
 		case ks.Keys[id] == nil:
 			state = "MISSING"
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\n", id, state, usage[id])
+		if k := ks.Keys[id]; k != nil {
+			wrapped, fp = storedName(ks, id), secretstore.Fingerprint(k)
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", id, state, usage[id], wrapped, fp)
 	}
 	_ = w.Flush()
 	period := t.ActivePeriod
@@ -245,7 +267,114 @@ func (t *Tool) Status(ctx context.Context) error {
 			_, _ = fmt.Fprintf(t.Out, "WARNING: %d value(s) are wrapped by KEK %s, which is not in the key set. They cannot be opened until the key is restored from your backup.\n", usage[id], id)
 		}
 	}
+	t.reachability(ctx, ks)
+	return t.fingerprintCheck(ctx, ks)
+}
+
+// reachability prints whether the active KEK's wrapping key answers a probe, and warns about a
+// local active KEK on an install that opted in to a KMS (never on a local-only one).
+func (t *Tool) reachability(ctx context.Context, ks KeySet) {
+	active, ok := ks.Stored[ks.Active]
+	if !ok {
+		active = secretstore.StoredKEK{Backend: secretstore.BackendLocal}
+	}
+	if err := t.Wrappers.Probe(ctx, active); err != nil {
+		_, _ = fmt.Fprintf(t.Out, "WARNING: the key-wrapping key of the active KEK %s (%s) is unreachable: %v. Values wrapped by it cannot be opened until it answers.\n", ks.Active, active, err)
+	} else {
+		_, _ = fmt.Fprintf(t.Out, "The key-wrapping key of the active KEK %s (%s) is reachable.\n", ks.Active, active)
+	}
+	if active.Backend == secretstore.BackendLocal && t.Wrappers.Primary().Backend() != secretstore.BackendLocal {
+		_, _ = fmt.Fprintf(t.Out, "WARNING: the active KEK %s is a local key but a KMS (%s) is configured. Ask the key-admin Job to add a KEK, then activate it.\n", ks.Active, t.Wrappers.Primary().Backend())
+	}
+}
+
+// fingerprintCheck compares the loaded KEKs with the fingerprints the database recorded for their
+// IDs, and warns about a difference: a restored or wrong KEK Secret. Without a database it says so.
+func (t *Tool) fingerprintCheck(ctx context.Context, ks KeySet) error {
+	if t.Pool == nil {
+		return nil
+	}
+	rec := kekhealth.Recorder{Q: store.New(t.Pool)}
+	recorded, err := rec.Recorded(ctx)
+	if err != nil {
+		return err
+	}
+	for _, id := range slices.Sorted(maps.Keys(ks.Keys)) {
+		r, ok := recorded[id]
+		if !ok {
+			continue
+		}
+		if fp := secretstore.Fingerprint(ks.Keys[id]); fp != r.Fingerprint {
+			_, _ = fmt.Fprintf(t.Out, "WARNING: KEK %s has fingerprint %s, but the database recorded %s for it. This is not the key the database was written with: a restored or wrong KEK Secret opens nothing. Restore the right one from your backup.\n", id, fp, r.Fingerprint)
+		}
+	}
 	return nil
+}
+
+// storedName names what wraps KEK id: "local" or backend:key.
+func storedName(ks KeySet, id string) string {
+	if s, ok := ks.Stored[id]; ok {
+		return s.String()
+	}
+	return secretstore.BackendLocal
+}
+
+// ExportName is the Secret name Export writes when the Tool has none.
+const ExportName = "koinon-kek"
+
+// Export writes the key set as a Kubernetes Secret manifest: the backup of the KEKs, and what a
+// restore applies (kubectl apply -n <namespace> -f). It writes each KEK as the Secret holds it, so
+// a KMS-wrapped KEK stays wrapped and a local KEK is the key itself: keep the file with your other
+// secrets, apart from the database backups. The manifest has no namespace, so it restores into a
+// fresh one (ADR 0085 decision 15), and a comment line per KEK gives its fingerprint.
+func (t *Tool) Export(ctx context.Context) error {
+	ks, err := t.Store.Load(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		for _, k := range ks.Keys {
+			clear(k)
+		}
+	}()
+	data := map[string][]byte{secretstore.ActiveFile: []byte(ks.Active)}
+	for id := range ks.Keys {
+		s, ok := ks.Stored[id]
+		if !ok {
+			return fmt.Errorf("KEK %s has no stored form to export", id)
+		}
+		if data[id], err = s.Encode(); err != nil {
+			return fmt.Errorf("KEK %s: %w", id, err)
+		}
+	}
+	name := t.SecretName
+	if name == "" {
+		name = ExportName
+	}
+	sec := corev1.Secret{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: map[string]string{project.Domain + "/managed-by": "koinon-api"},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: data,
+	}
+	if !ks.ActivatedAt.IsZero() {
+		sec.Annotations = map[string]string{ActivatedAnnotation: ks.ActivatedAt.UTC().Format(time.RFC3339)}
+	}
+	out, err := yaml.Marshal(sec)
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	_, _ = fmt.Fprintf(&b, "# Koinon KEK export, %s. Restore: kubectl apply -n <namespace> -f <this file>\n", t.now().UTC().Format(time.RFC3339))
+	for _, id := range slices.Sorted(maps.Keys(ks.Keys)) {
+		_, _ = fmt.Fprintf(&b, "# %s fingerprint %s, wrapped by %s\n", id, secretstore.Fingerprint(ks.Keys[id]), storedName(ks, id))
+	}
+	_, _ = b.Write(out)
+	_, err = io.WriteString(t.Out, b.String())
+	return err
 }
 
 // Add generates a KEK, stores it in the key set (inactive) and prints its ID.
@@ -294,6 +423,11 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 	if _, ok := ks.Keys[id]; !ok {
 		return fmt.Errorf("KEK %s is not in the key set", id)
 	}
+	// An install that opted in to a KMS never activates a local KEK (procoduck, 2026-11-03). To roll back,
+	// set the configured primary to local first (docs/ops/secret-keys.md), then activate.
+	if p := t.Wrappers.Primary(); p.Backend() != secretstore.BackendLocal && ks.Stored[id].Backend == secretstore.BackendLocal {
+		return fmt.Errorf("KEK %s is a local key and the KMS %s is configured; activate a KEK wrapped by the KMS (ask the key-admin Job to add one), or switch the configured wrapping to local first to roll back", id, p.Backend())
+	}
 	if err := t.confirm(ctx, fmt.Sprintf("Activate %s?", id), "New values use it within about a minute."); err != nil {
 		return err
 	}
@@ -301,8 +435,37 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 	if err := t.Store.Save(ctx, ks); err != nil {
 		return err
 	}
+	t.recordActivation(ctx, ks)
 	_, _ = fmt.Fprintf(t.Out, "KEK %s is active. Wait for the pods to pick it up (about a minute), then run: koinon-api keys rewrap\n", id)
 	return nil
+}
+
+// recordActivation records the fingerprints of the key set and the activation time in the database,
+// when there is one. The activation itself has happened, so a failure is printed, not returned.
+func (t *Tool) recordActivation(ctx context.Context, ks KeySet) {
+	if t.Pool == nil {
+		return
+	}
+	l := secretstore.NewLoaded(ks.Stored, ks.Active, ks.Keys, nil)
+	l.ActivatedAt = ks.ActivatedAt
+	// A KEK added in this process has no stored form yet; Save wrapped it, so describe it as the store's primary does.
+	stored := make(map[string]secretstore.StoredKEK, len(ks.Keys))
+	for kid := range ks.Keys {
+		if s, ok := ks.Stored[kid]; ok {
+			stored[kid] = s
+		} else {
+			p := t.Wrappers.Primary()
+			stored[kid] = secretstore.StoredKEK{Backend: p.Backend(), KeyID: p.KeyID()}
+		}
+	}
+	l.Stored = stored
+	mismatches, err := kekhealth.Recorder{Q: store.New(t.Pool)}.Record(ctx, l)
+	if err != nil {
+		_, _ = fmt.Fprintf(t.Out, "WARNING: the KEK fingerprints were not recorded in the database: %v\n", err)
+	}
+	for _, m := range mismatches {
+		_, _ = fmt.Fprintf(t.Out, "WARNING: KEK %s has fingerprint %s, but the database recorded %s for it.\n", m.KEKID, m.Loaded, m.Recorded)
+	}
 }
 
 // pickInactive lists the KEKs that are not active, with their age and (when there is a database)

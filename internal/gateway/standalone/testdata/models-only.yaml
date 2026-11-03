@@ -21,7 +21,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"d0603287c0218c6f"'
+      koinon.config: '"2c297859a23f6076"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -54,7 +54,7 @@ llm:
             org: acme
           allowedModels:
             - qwen3.5:4b
-        - keyHash: sha256:03a7a1e838c36625bf4e3182acc4960fcd6fa1ab8784d63d08a9489ab22b8e51
+        - keyHash: sha256:72215be6930c113ec39ffb487f6216c79273efc530a6b77418013239ecd4ff43
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -66,6 +66,9 @@ llm:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
         set:
           x-koinon-org: default(apiKey.org, "")
+      response:
+        set:
+          x-should-retry: '(response.code == 403 || (response.code >= 400 && response.code < 500 && default(proxy.upstreamDuration, "") == "")) ? "false" : response.headers["x-should-retry"]'
   models:
     - id: acme/qwen3.5:4b
       name: qwen3.5:4b

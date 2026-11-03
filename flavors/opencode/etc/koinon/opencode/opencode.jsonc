@@ -71,7 +71,21 @@
   // "report" tells the agent to file issues with the GitHub CLI), the provider plugins (the koinon
   // provider is defined below; opencode.provider.opencode cannot be removed), web search, and
   // logins for well-known integrations.
+  //
+  // Koinon's retry plugin comes first (ADR 0056 amendment 2026-10-31, point 3): OpenCode is the one
+  // layer that retries a failed model request, with Koinon's policy, not its own 10 retries. The
+  // options are koinon-opencode's --model-tries, --model-retry-backoff-ms and
+  // --model-max-retry-after-ms (README.md, "Model retries"). The directory is outside every config
+  // root, so nothing loads it without these options.
   "plugins": [
+    {
+      "package": "/usr/local/lib/koinon/opencode/plugins/koinon-retry",
+      "options": {
+        "tries": "{env:KOINON_MODEL_TRIES}",
+        "backoffMs": "{env:KOINON_MODEL_RETRY_BACKOFF_MS}",
+        "maxRetryAfterMs": "{env:KOINON_MODEL_MAX_RETRY_AFTER_MS}"
+      }
+    },
     "-opencode.config.compatibility",
     "-opencode.skill",
     "-opencode.provider.*",

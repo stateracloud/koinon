@@ -2,7 +2,10 @@
 name: ci
 
 on:
+  # ready_for_review is not a default type: it runs the full suite on the same head when a draft is
+  # marked ready (#593).
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
@@ -15,13 +18,33 @@ concurrency:
 
 jobs:
   # Which parts of the tree a pull request touches, so the slow jobs run only when they can be
-  # affected (Actions minutes are capped). Pushes to main run everything. A job skipped by its
-  # `if:` reports success, so required checks still pass when it does not apply.
+  # affected (Actions minutes are capped). Pushes to main run everything, except when the merge
+  # commit is a pull request head that already passed. A job skipped by its `if:` reports success,
+  # so required checks still pass when it does not apply.
+  #
+  # hack/ci-skip-heavy.sh also switches every heavy output below to false (the go, web, generate,
+  # chart, chartsmoke, docs, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (#593; `go` and `web` then FAIL on
+  # purpose, "not tested", so a draft never leaves a green `go` behind; marking it ready runs
+  # everything on the same head), and a push to main whose merge tree equals a pull request head whose required checks
+  # passed (#595). `changes`, `quick checks` (#594) and flavor-publish always run; `scripts` and
+  # `lint-shell` run except on that push to main (#594). Read the script's header before changing this.
   changes:
     name: changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
+    # Read rights only: the draft state of the pull request, the check runs of its head and, for
+    # go-test-lab (#610), its commit statuses.
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      statuses: read
     outputs:
+      skip: ${{ steps.skip.outputs.skip }}
+      reason: ${{ steps.skip.outputs.reason }}
+      go_test_lab: ${{ steps.lab.outputs.go_test_lab }}
+      go_test_lab_reason: ${{ steps.lab.outputs.go_test_lab_reason }}
+      flavors_publish: ${{ steps.paths.outputs.flavors_publish }}
       go: ${{ steps.paths.outputs.go }}
       web: ${{ steps.paths.outputs.web }}
       generate: ${{ steps.paths.outputs.generate }}
@@ -46,10 +69,42 @@ jobs:
           key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+      - id: skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+        run: |
+          hack/ci-skip-heavy.sh decide >"$RUNNER_TEMP/skip.txt"
+          tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/skip.txt"
       - id: paths
         env:
           BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
-        run: hack/ci-changes.sh "$BASE" >>"$GITHUB_OUTPUT"
+          SKIP: ${{ steps.skip.outputs.skip }}
+        run: |
+          hack/ci-changes.sh "$BASE" >"$RUNNER_TEMP/changes.txt"
+          # No pipe: a failing step must fail the job, not leave outputs empty (empty reads as "nothing to gate").
+          hack/ci-skip-heavy.sh apply <"$RUNNER_TEMP/changes.txt" >"$RUNNER_TEMP/outputs.txt"
+          tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/outputs.txt"
+      # go-test on the lab gate first (#610): a ready pull request whose head has the commit status
+      # go-test-lab = success (posted by `hack/e2e-remote.sh --argo --gate go-test` through hack/ship.sh
+      # --lab-go-test, before the pull request is marked ready) does not run go-test on Blacksmith; the
+      # `go` gate accepts that skip. No status, a draft, a push or an API error: go-test runs as before.
+      # Trust limit as for e2e-lab (#568): anyone with write access can post the status, and this job
+      # runs from the pull request's own ci.yml; the guard is the required review on .github/**.
+      - id: lab
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SKIP: ${{ steps.skip.outputs.skip }}
+        run: |
+          hack/ci-skip-heavy.sh lab >"$RUNNER_TEMP/lab.txt"
+          tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/lab.txt"
 
   # The Go checks run as parallel jobs (#217). They share one module and build cache, keyed on the
   # Go version and go.sum. Only go-test saves it, because it compiles the most; the others restore
@@ -128,9 +183,10 @@ jobs:
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       - run: go vet ./...
 
+  # Skipped (and accepted by `go`) when the pull request head has a green go-test-lab status (#610).
   go-test:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.go_test_lab != 'true'
     name: go-test
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
@@ -206,29 +262,59 @@ jobs:
   go:
     name: go
     needs: [changes, go-tidy, go-lint, go-vet, go-test, go-race]
-    if: ${{ !cancelled() }}
+    # Not on a push to main whose heavy jobs were switched off (#595): the check then reports skipped
+    # and hack/release-gate.sh reads the merged pull request's head instead.
+    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - env:
           CHANGES: ${{ needs.changes.result }}
           GO: ${{ needs.changes.outputs.go }}
+          SKIP: ${{ needs.changes.outputs.skip }}
+          REASON: ${{ needs.changes.outputs.reason }}
+          EVENT: ${{ github.event_name }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          GO_TEST: ${{ needs.go-test.result }}
+          LAB: ${{ needs.changes.outputs.go_test_lab }}
+          LAB_REASON: ${{ needs.changes.outputs.go_test_lab_reason }}
         run: |
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
-          [[ $GO == true ]] || { echo "no Go changes: nothing to gate"; exit 0; }
+          # A draft was not tested: red on purpose (neutral and skipped both count as passing). The newest
+          # `go` check run on a head must never be a vacuous success while the ready run is still
+          # going (#593). Drafts cannot merge; marking ready runs everything on the same head.
+          if [[ $SKIP == true && $EVENT == pull_request ]]; then
+            echo "::error::draft pull request: not tested ($REASON); mark it ready for review to run the Go checks"
+            exit 1
+          fi
+          [[ $GO == true ]] || { echo "no Go changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
+          # go-test skipped because the lab proved it (#610): that one skip counts as success. Any other
+          # skipped part stays a failure, and so does a go-test skip with no green lab status.
+          if [[ $GO_TEST == skipped && $LAB == true ]]; then
+            echo "go-test passed on the lab: $LAB_REASON"
+            RESULTS=${RESULTS/skipped/success}
+          fi
           for r in $RESULTS; do
             [[ $r == success ]] || { echo "::error::a Go job finished $r (results: $RESULTS)"; exit 1; }
           done
 
-  # Dependency cooldown (ADR 0079): versions this pull request adds must be at least 3 days old.
-  # Public endpoints only. The waiver is the label `dependency-age-waiver`, honoured only when
-  # the maintainer put it on; the job reads the label when it runs, so re-run the job after
-  # labelling. Timestamps guard against accidents, they are not proof. Required check: on a push to
-  # main the job is skipped, which reports success; rulesets only check pull request heads.
-  dep-age:
-    name: dependency age
-    if: github.event_name == 'pull_request'
+  # The short checks in one job (#594). Every job is billed at least one whole minute and each of
+  # these did about 10 s of work, so five jobs (proto, migrations, adr-lint, claim-tests, dependency
+  # age) cost five minutes for under one minute of work. The steps run one after another and each
+  # runs even when an earlier one failed (!cancelled()), so one run still shows every failure, as
+  # five jobs did. Needs nothing, so it starts at once; always runs, also on drafts and on a push to
+  # main with skip=true (a few seconds of work).
+  #
+  # Required check `quick checks` replaces `proto`, `migrations`, `adr-lint`, `claim-tests` and
+  # `dependency age` (hack/ci-required.txt). The dependency age steps run on pull requests only
+  # (rulesets only check pull request heads). Dependency cooldown (ADR 0079): versions this pull
+  # request adds must be at least 3 days old. Public endpoints only. The waiver is the label
+  # `dependency-age-waiver`, honoured only when the maintainer put it on; the step reads the label
+  # when it runs, so re-run the job after labelling. Timestamps guard against accidents, they are
+  # not proof.
+  quick-checks:
+    name: quick checks
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: read
@@ -237,7 +323,48 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: load tool versions
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
+      - uses: bufbuild/buf-action@85aebf73123b5c15fd5528aaecbf9129cddf7fa7 # v1.6.0
+        with:
+          setup_only: true
+          version: ${{ env.BUF_VERSION }}
+          checksum: ${{ env.BUF_SHA256_AMD64 }}
+      - name: proto (buf lint)
+        run: buf lint
+      - name: proto (buf breaking)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: |
+          base="origin/${{ github.base_ref }}"
+          if git cat-file -e "$base:buf.yaml" 2>/dev/null; then
+            buf breaking --against ".git#ref=$base"
+          else
+            echo "no buf.yaml on $base yet; nothing to compare"
+          fi
+      - name: migrations (tests)
+        if: ${{ !cancelled() }}
+        run: hack/migrate-lint-test.sh
+      - name: migrations (lint)
+        if: ${{ !cancelled() }}
+        run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+      # ADR numbers unique and contiguous, README index in sync (hack/adr-lint.sh, ADR 0082).
+      - name: adr-lint (tests)
+        if: ${{ !cancelled() }}
+        run: hack/adr-lint-test.sh
+      - name: adr-lint
+        if: ${{ !cancelled() }}
+        run: hack/adr-lint.sh
+      # Offline unit tests of hack/claim.sh. The live tests need a scratch repository and never run
+      # here: CI must not mutate GitHub.
+      - name: claim-tests
+        if: ${{ !cancelled() }}
+        run: hack/claim_test.sh
+      - name: claim-tests (migrate-renumber)
+        if: ${{ !cancelled() }}
+        run: hack/migrate-renumber-test.sh
       - id: waiver
+        name: dependency age (waiver)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -260,7 +387,8 @@ jobs:
               echo "::error::label $label was added by '${actor:-unknown}', not by a maintainer listed in MAINTAINERS.md ($(tr '\n' ' ' <<<"$approvers")); it does not waive anything"
             fi
           fi
-      - name: versions are at least 3 days old
+      - name: dependency age (versions are at least 3 days old)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           DEP_AGE_WAIVER: ${{ steps.waiver.outputs.by }}
@@ -356,44 +484,31 @@ jobs:
   web:
     name: web
     needs: [changes, web-lint, web-test, web-e2e]
-    if: ${{ !cancelled() }}
+    # Not on a push to main whose heavy jobs were switched off (#595): the check then reports skipped
+    # and hack/release-gate.sh reads the merged pull request's head instead.
+    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - env:
           CHANGES: ${{ needs.changes.result }}
           WEB: ${{ needs.changes.outputs.web }}
+          SKIP: ${{ needs.changes.outputs.skip }}
+          REASON: ${{ needs.changes.outputs.reason }}
+          EVENT: ${{ github.event_name }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
-          [[ $WEB == true ]] || { echo "no web changes: nothing to gate"; exit 0; }
+          # A draft was not tested: red on purpose (neutral and skipped both count as passing). The newest
+          # `web` check run on a head must never be a vacuous success while the ready run is still
+          # going (#593). Drafts cannot merge; marking ready runs everything on the same head.
+          if [[ $SKIP == true && $EVENT == pull_request ]]; then
+            echo "::error::draft pull request: not tested ($REASON); mark it ready for review to run the web checks"
+            exit 1
+          fi
+          [[ $WEB == true ]] || { echo "no web changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
           for r in $RESULTS; do
             [[ $r == success ]] || { echo "::error::a web job finished $r (results: $RESULTS)"; exit 1; }
           done
-
-  proto:
-    name: proto
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: load tool versions
-        run: hack/versions-env.sh >> "$GITHUB_ENV"
-      - uses: bufbuild/buf-action@85aebf73123b5c15fd5528aaecbf9129cddf7fa7 # v1.6.0
-        with:
-          setup_only: true
-          version: ${{ env.BUF_VERSION }}
-          checksum: ${{ env.BUF_SHA256_AMD64 }}
-      - run: buf lint
-      - name: buf breaking
-        if: github.event_name == 'pull_request'
-        run: |
-          base="origin/${{ github.base_ref }}"
-          if git cat-file -e "$base:buf.yaml" 2>/dev/null; then
-            buf breaking --against ".git#ref=$base"
-          else
-            echo "no buf.yaml on $base yet; nothing to compare"
-          fi
 
   generate:
     needs: changes
@@ -509,43 +624,19 @@ jobs:
           version: v4.3.1
       - run: make test-admission
 
-  migrations:
-    name: migrations
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - run: hack/migrate-lint-test.sh
-      - run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
-
-  # ADR numbers unique and contiguous, README index in sync (hack/adr-lint.sh, ADR 0082).
-  adr-lint:
-    name: adr-lint
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: hack/adr-lint-test.sh
-      - run: hack/adr-lint.sh
-
-  # Offline unit tests of hack/claim.sh. The live tests need a scratch repository and never run
-  # here: CI must not mutate GitHub.
-  claim-tests:
-    name: claim-tests
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: hack/claim_test.sh
-      - run: hack/migrate-renumber-test.sh
-
   # shellcheck over every tracked shell script (the set hack/preflight.sh's shell gate uses, minus the
   # generated golden file) and actionlint over the workflows (actionlint also runs shellcheck on the
   # `run:` blocks). Its own job, not a step of `scripts`: it needs no Go toolchain and is cheap, and it
   # keeps the lint result separate from the script tests. Both tools are release binaries checked
   # against a pinned SHA-256, versions at least 3 days old when pinned (ADR 0079; shellcheck 0.11.0 is
   # from 2025-08-04, actionlint 1.7.12 from 2026-03-30). Bump them together with hack/preflight.sh's use.
+  # Skipped like `go` on a push to main whose heavy jobs are off (#594): the pull request head passed it.
   lint-shell:
     name: lint-shell
+    needs: changes
+    # !cancelled() and no outputs-based gate on the way in: when `changes` itself fails, this still
+    # runs (empty output is not 'true'), so a red `changes` cannot turn this check into a skip.
+    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -572,8 +663,11 @@ jobs:
 
   # Tests of the e2e tooling scripts: the decision rule (needs the Go toolchain for `go list`) and
   # the remote runner (needs flock, so Linux).
+  # Skipped like `go` on a push to main whose heavy jobs are off (#594); see lint-shell.
   scripts:
     name: scripts
+    needs: changes
+    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -606,6 +700,7 @@ jobs:
       - run: hack/preflight-test.sh
       - run: hack/preflight-stop-test.sh
       - run: hack/e2e-decide-test.sh
+      - run: hack/e2e-gate-test.sh
       - run: hack/e2e-label-test.sh
       - run: hack/e2e-bisect-test.sh
       - run: hack/hooks/agent-spawn-check_test.sh
@@ -614,6 +709,7 @@ jobs:
       - run: hack/release-gate-test.sh
       - run: hack/dep-age-check-test.sh
       - run: hack/ci-changes-test.sh
+      - run: hack/ci-skip-heavy-test.sh
 
   # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
@@ -655,7 +751,10 @@ jobs:
   flavor-publish:
     name: flavor-publish
     needs: [changes, flavors]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.flavors == 'true'
+    # Always runs on main when the flavors changed, also when the flavors job was switched off because
+    # the merge tree is a tested pull request head (#595): publishing is not a test. A failed or
+    # cancelled flavors job still stops it. flavors_publish is the value before the switch.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.flavors_publish == 'true' && (needs.flavors.result == 'success' || needs.flavors.result == 'skipped') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     permissions:

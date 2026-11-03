@@ -34,7 +34,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"b86f41b3bb280565"'
+      koinon.config: '"8cf4303fc02f83f1"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -104,7 +104,7 @@ llm:
             org: globex
           allowedModels:
             - deepseek/deepseek-v4.1-flash
-        - keyHash: sha256:28f3bbecb7ba71eeae880d833c62c6414ef852426bcb0f031085f3b000973767
+        - keyHash: sha256:8ae9d7f36c43471f47b779e138df4e7d1116e0a9bf983791a786e9a3b2c20e9d
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -124,6 +124,9 @@ llm:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
         set:
           x-koinon-org: default(apiKey.org, "")
+      response:
+        set:
+          x-should-retry: '(response.code == 403 || (response.code >= 400 && response.code < 500 && default(proxy.upstreamDuration, "") == "")) ? "false" : response.headers["x-should-retry"]'
   models:
     - id: acme/deepseek/deepseek-v4.1-flash
       name: deepseek/deepseek-v4.1-flash
@@ -219,6 +222,9 @@ mcp:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id", "user-agent"])
         set:
           x-koinon-agent: apiKey.agent
+      response:
+        set:
+          x-should-retry: '(response.code == 403 || (response.code >= 400 && response.code < 500 && default(proxy.upstreamDuration, "") == "")) ? "false" : response.headers["x-should-retry"]'
   targets:
     - name: docs
       mcp:

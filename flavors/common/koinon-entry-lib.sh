@@ -45,8 +45,17 @@ koinon_extra_arg() { return 1; }
 # checks them, and sets koinon_shift to the number of arguments consumed (a trailing
 # -- included). The caller then runs `shift "$koinon_shift"`, which leaves the arguments for the
 # harness.
+#
+# A flavor whose harness retries model requests (internal/flavor RetriesModelRequests) also takes
+# Koinon's retry policy, which koinon-agentd always passes (ADR 0056 amendment 2026-10-31, point 3):
+# --model-tries (the first request included), --model-retry-backoff-ms (the first wait; it doubles
+# per retry, up to a minute) and --model-max-retry-after-ms (the longest Retry-After waited out; a
+# longer one ends the retries), into model_tries, model_retry_backoff_ms and
+# model_max_retry_after_ms. Without them the script uses the same defaults as koinon-agentd (3,
+# 1000, 60000; test/flavors checks they agree), so the harness never runs on its own.
 koinon_parse_args() {
   base_url='' model='' mcp_url='' session_id='' model_format=openai thinking='' koinon_shift=0
+  model_tries=3 model_retry_backoff_ms=1000 model_max_retry_after_ms=60000
   while [ $# -gt 0 ]; do
     case $1 in
       --model-base-url) [ $# -ge 2 ] || koinon_die "$1 needs a value"; base_url=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
@@ -55,6 +64,9 @@ koinon_parse_args() {
       --model-format) [ $# -ge 2 ] || koinon_die "$1 needs a value"; model_format=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
       --thinking) [ $# -ge 2 ] || koinon_die "$1 needs a value"; thinking=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
       --session-id) [ $# -ge 2 ] || koinon_die "$1 needs a value"; session_id=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
+      --model-tries) [ $# -ge 2 ] || koinon_die "$1 needs a value"; model_tries=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
+      --model-retry-backoff-ms) [ $# -ge 2 ] || koinon_die "$1 needs a value"; model_retry_backoff_ms=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
+      --model-max-retry-after-ms) [ $# -ge 2 ] || koinon_die "$1 needs a value"; model_max_retry_after_ms=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
       --) koinon_shift=$((koinon_shift + 1)); break ;;
       *)
         if koinon_extra_arg "$1"; then
@@ -84,6 +96,17 @@ koinon_parse_args() {
     check --session-id "$session_id"
     [ ${#session_id} -le 256 ] || koinon_die "--session-id is longer than 256 characters"
   fi
+  koinon_check_count --model-tries "$model_tries" 1
+  koinon_check_count --model-retry-backoff-ms "$model_retry_backoff_ms" 0
+  koinon_check_count --model-max-retry-after-ms "$model_max_retry_after_ms" 0
+}
+
+# koinon_check_count NAME VALUE MIN: a decimal integer of at most 9 digits, at least MIN.
+koinon_check_count() {
+  case $2 in
+    '' | *[!0-9]* | ??????????*) koinon_die "$1 must be a whole number: '$2'" ;;
+  esac
+  [ "$2" -ge "$3" ] || koinon_die "$1 must be at least $3: '$2'"
 }
 
 # koinon_export_base_env: what every flavor sets for itself because OpenShell does not pass the

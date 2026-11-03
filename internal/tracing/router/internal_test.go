@@ -492,6 +492,19 @@ func TestUnreadableDestinationKeepsItsQueue(t *testing.T) {
 	}
 }
 
+// waiting is how many callers have joined the call running for key (0 when none runs).
+func (f *flight) waiting(key string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if c, ok := f.calls[key]; ok {
+		return c.waiters
+	}
+	return 0
+}
+
+// The leader panics while a second caller waits on its call: both get an error, neither hangs. The
+// spec waits on the flight's own state, not on time (#533): the leader panics only once the second
+// caller has joined, and the deadline only tells a hang from a slow machine.
 func TestFlightReleasesWaitersWhenTheLeaderPanics(t *testing.T) {
 	var f flight
 	started := make(chan struct{})
@@ -507,19 +520,27 @@ func TestFlightReleasesWaitersWhenTheLeaderPanics(t *testing.T) {
 	}()
 	<-started
 	go func() {
-		_, err := f.do("k", func() (any, error) { return nil, nil })
+		_, err := f.do("k", func() (any, error) { return nil, errors.New("the second caller ran its own read instead of joining") })
 		errs <- err
 	}()
-	time.Sleep(20 * time.Millisecond)
+	// One deadline for the whole spec, far beyond any slow machine: the lab once took more than 2 s.
+	deadline := time.After(time.Minute)
+	for f.waiting("k") != 1 {
+		select {
+		case <-deadline:
+			t.Fatal("the second caller never joined the leader's call")
+		case <-time.After(time.Millisecond):
+		}
+	}
 	close(release)
 	for range 2 {
 		select {
 		case err := <-errs:
-			if err == nil {
-				t.Error("a panicking read must give its callers an error")
+			if err == nil || !strings.Contains(err.Error(), "a read panicked") {
+				t.Errorf("err = %v; a panicking read must give each of its callers the panic's error", err)
 			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("a waiter was never released")
+		case <-deadline:
+			t.Fatal("a caller was never released")
 		}
 	}
 }
