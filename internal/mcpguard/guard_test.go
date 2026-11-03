@@ -98,7 +98,16 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 	reason := func(r *extmcp.McpRequestResult) string { return r.GetError().GetReason() }
 	declare := func(ctx SpecContext, server mcpservers.Server, tool string, d sinkclass.Declaration) {
 		GinkgoHelper()
-		_, err := svc.SetToolDeclaration(ctx, org, audit.System(), server.ID, tool, d)
+		tools, err := svc.Tools(ctx, org, server.ID)
+		Expect(err).NotTo(HaveOccurred())
+		hash := ""
+		for _, t := range tools {
+			if t.Name == tool {
+				hash = t.ContentHash
+			}
+		}
+		Expect(hash).NotTo(BeEmpty(), tool)
+		_, err = svc.SetToolDeclaration(ctx, org, audit.System(), server.ID, tool, hash, d)
 		Expect(err).NotTo(HaveOccurred())
 	}
 	newServer := func(ctx SpecContext, name string, legs []string, tools ...string) mcpservers.Server {
@@ -172,6 +181,11 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Expect(orgsettings.NewService(pool).ReplaceCodeHostRepos(ctx, org, audit.System(), conn.String(), []orgsettings.CodeHostRepo{
 			{Owner: "northwind", Name: "platform-handbook", Visibility: "private"},
 		}, time.Now())).To(Succeed())
+		// tracker acts through that connection: its code-host tool is looked up in its list.
+		linked := mcpservers.DefaultDeclaration()
+		linked.CodeHostConnection = conn.String()
+		tracker, err = svc.SetDataClass(ctx, org, audit.System(), tracker.ID, linked)
+		Expect(err).NotTo(HaveOccurred())
 
 		opts = mcpguard.Options{
 			ByteCap: 64, Approve: mcpask.New(pool, mcpask.Options{}).RequestApproval,
@@ -214,6 +228,13 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			r := call(ctx, "tracker", "commit_file", map[string]any{"owner": "someone-else", "repo": "dump", "content": "x"})
 			Expect(reason(r)).To(HavePrefix("approval requested"))
 			r = call(ctx, "tracker", "commit_file", map[string]any{"owner": "northwind/x", "repo": "platform-handbook", "content": "y"})
+			Expect(reason(r)).To(HavePrefix("approval requested"))
+		})
+
+		It("treats the scope's own repository as external-high on a server linked to no code-host connection", func(ctx SpecContext) {
+			_, err := svc.SetDataClass(ctx, org, audit.System(), tracker.ID, mcpservers.DefaultDeclaration())
+			Expect(err).NotTo(HaveOccurred())
+			r := call(ctx, "tracker", "commit_file", map[string]any{"owner": "northwind", "repo": "platform-handbook", "content": "x"})
 			Expect(reason(r)).To(HavePrefix("approval requested"))
 		})
 

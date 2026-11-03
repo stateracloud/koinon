@@ -16,13 +16,15 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/keyscli"
+	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 )
 
 type keyAdminOptions struct {
 	dbURL, kekSecret, namespace, kubeconfig, addID string
-	create                                         bool
+	create, rewrapUnbound                          bool
 	wait                                           time.Duration
 	wrapping                                       wrapping.Config
 }
@@ -36,37 +38,51 @@ func newKeyAdminCommand() *cobra.Command {
 		Short: "Wrap new KEKs with the KMS (the key-admin Job)",
 		Long: "Runs as the chart's key-admin Job, with its own service account, the only one the KMS lets " +
 			"encrypt. It creates the KEK Secret with one active KEK wrapped by the KMS when the Secret does not " +
-			"exist (--kek-create), and adds the KEK --add-key names when the key set does not hold it. It is " +
-			"idempotent and never activates, rewraps or retires: koinon-api keys does. Needs --kek-backend " +
-			"other than local.",
+			"exist (--kek-create), and adds the KEK --add-key names when the key set does not hold it. Every KEK " +
+			"it wraps is bound to the install ID in the database (#615); with --rewrap-unbound it also wraps " +
+			"again, bound, each KEK of the primary wrapping key that was wrapped before that. It is idempotent " +
+			"and never activates, retires or rewraps values: koinon-api keys does. Needs --kek-backend other " +
+			"than local and --database-url.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runKeyAdmin(cmd.Context(), o, cmd.OutOrStdout())
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&o.dbURL, "database-url", "", "Postgres connection string; required with --kek-create (a missing Secret is never re-created while values exist)")
+	f.StringVar(&o.dbURL, "database-url", "", "Postgres connection string: the install ID every new KEK is bound to, and (with --kek-create) whether values exist, since a missing Secret is never re-created then")
 	f.StringVar(&o.kekSecret, "kek-secret", "", "name of the KEK Secret")
 	f.StringVar(&o.namespace, "namespace", "", "namespace of the KEK Secret")
 	f.StringVar(&o.kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config")
 	f.BoolVar(&o.create, "kek-create", false, "create the KEK Secret with one active KMS-wrapped KEK when it does not exist")
 	f.StringVar(&o.addID, "add-key", "", "ID of a KEK to add, wrapped by the KMS, unless the key set holds it already")
-	f.DurationVar(&o.wait, "wait", 5*time.Minute, "how long to wait for the database to come up")
+	f.BoolVar(&o.rewrapUnbound, "rewrap-unbound", false, "wrap again, bound to the install ID, every KEK of the primary wrapping key that is not bound yet (wrapped before #615); a binary older than #615 cannot read the result")
+	f.DurationVar(&o.wait, "wait", 5*time.Minute, "how long to wait for the database to come up and be migrated")
 	o.wrapping.Flags(f)
 	cli.EnvAlias(cmd, "database-url", "DATABASE_URL")
 	cli.EnvAlias(cmd, "namespace", "POD_NAMESPACE")
-	mustRequire(cmd, "kek-secret", "namespace")
+	// The database is required for the install ID every new KEK is bound to (#615).
+	mustRequire(cmd, "kek-secret", "namespace", "database-url")
 	return cmd
 }
 
 func runKeyAdmin(ctx context.Context, o keyAdminOptions, out io.Writer) error {
-	if o.create && o.dbURL == "" {
-		return errors.New("--database-url is required with --kek-create")
-	}
-	wrappers, err := wrapping.New(ctx, o.wrapping, wrapping.KeyAdmin)
+	pool, err := waitForPool(ctx, o.dbURL, o.wait)
 	if err != nil {
 		return err
 	}
+	defer pool.Close()
+	// On a new install the first migration, which creates the install ID, may still be running.
+	waitCtx, cancel := context.WithTimeout(ctx, o.wait)
+	install, err := installid.Wait(waitCtx, pool, 2*time.Second)
+	cancel()
+	if err != nil {
+		return err
+	}
+	wrappers, err := wrapping.New(ctx, o.wrapping, wrapping.KeyAdmin, installid.BoundOnlySource(pool))
+	if err != nil {
+		return err
+	}
+	wrappers = wrappers.WithInstallID(secretstore.StaticInstallID(install))
 	rc, err := restConfig(o.kubeconfig)
 	if err != nil {
 		return err
@@ -76,19 +92,15 @@ func runKeyAdmin(ctx context.Context, o keyAdminOptions, out io.Writer) error {
 		return err
 	}
 	job := keyscli.KeyAdmin{
-		Store:  keyscli.KubeStore{Client: client, Namespace: o.namespace, Name: o.kekSecret, Wrappers: wrappers},
-		Create: o.create,
-		AddID:  o.addID,
-		Out:    out,
+		Store:         keyscli.KubeStore{Client: client, Namespace: o.namespace, Name: o.kekSecret, Wrappers: wrappers},
+		Create:        o.create,
+		AddID:         o.addID,
+		RewrapUnbound: o.rewrapUnbound,
+		Marker:        installid.Marker{DB: pool},
+		HasValues:     func(ctx context.Context) (bool, error) { return anyEnvelopeYet(ctx, pool) },
+		Out:           out,
 	}
-	if o.create {
-		pool, err := waitForPool(ctx, o.dbURL, o.wait)
-		if err != nil {
-			return err
-		}
-		defer pool.Close()
-		job.HasValues = func(ctx context.Context) (bool, error) { return anyEnvelopeYet(ctx, pool) }
-	}
+	_, _ = fmt.Fprintf(out, "Install ID %s: every KEK this Job wraps is bound to it.\n", install)
 	return job.Run(ctx)
 }
 

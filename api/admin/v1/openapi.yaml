@@ -304,13 +304,14 @@ paths:
         `fetch` takes the url argument and is internal for a fetch-trusted host, otherwise
         external-low. The other arguments are payload. A tool nobody declared is `external-high` with
         the server's legs, which is also what a changed server URL or tool content hash puts it back to.
-        Works on declared servers too.
+        Works on declared servers too. `contentHash` is the hash of the tool the caller reviewed: if the
+        server republished the tool since, the call fails with 409 and nothing changes.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/McpToolSink"
+              $ref: "#/components/schemas/McpToolSinkUpdate"
       responses:
         "200":
           description: The tool.
@@ -1285,6 +1286,10 @@ components:
         updatedAt: {type: string, format: date-time}
         kind: {$ref: "#/components/schemas/McpServerKind"}
         dataClass: {$ref: "#/components/schemas/McpDataClass"}
+        codeHostConnectionId:
+          type: string
+          format: uuid
+          description: The org's code-host connection the server acts through. Absent for none, which makes a code-host tool of the server external-high.
     McpServerKind:
       type: string
       enum: [fetch, search, other]
@@ -1306,6 +1311,13 @@ components:
       properties:
         kind: {$ref: "#/components/schemas/McpServerKind"}
         dataClass: {$ref: "#/components/schemas/McpDataClass"}
+        codeHostConnectionId:
+          type: string
+          format: uuid
+          description: |
+            Link the server to one of the org's code-host connections (ADR 0091 decision 3). A code-host
+            tool looks the repository up in that connection's list only. Leave out to unlink. A changed
+            server URL clears the link.
     LeakGuard:
       type: object
       required: [matchThreshold, defaultMatchThreshold, minMatchThreshold, maxMatchThreshold, trustedHosts, codeHostScope]
@@ -1339,6 +1351,14 @@ components:
           description: Repositories whose reading is older than the freshness window. They count as unknown.
         oldestCheckedAt: {type: string, format: date-time}
         visibilityMaxAgeSeconds: {type: integer}
+    McpToolSinkUpdate:
+      type: object
+      required: [contentHash, sink]
+      properties:
+        contentHash:
+          type: string
+          description: The `contentHash` of the tool as the caller read it.
+        sink: {$ref: "#/components/schemas/McpToolSink"}
     McpToolSink:
       type: object
       required: [sinkClass, derivation, addressArgs]

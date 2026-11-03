@@ -25,10 +25,10 @@ export function useMcpActions(orgId: string) {
     return {
       createServer: (i: CreateServerInput) => done(client.createServer({ orgId, ...i })),
       updateServer: (serverId: string, i: UpdateServerInput) => done(client.updateServer({ orgId, serverId, ...i })),
-      setServerClass: (serverId: string, kind: string, dataClass: string[]) => done(client.setServerClass({ orgId, serverId, class: { kind, dataClass } })),
+      setServerClass: (serverId: string, kind: string, dataClass: string[], codeHostConnectionId = '') => done(client.setServerClass({ orgId, serverId, class: { kind, dataClass, codeHostConnectionId } })),
       deleteServer: (serverId: string) => done(client.deleteServer({ orgId, serverId })),
       setToolTier: (serverId: string, tool: string, tier: Tier) => done(client.setToolTier({ orgId, serverId, tool, tier })),
-      setToolSink: (serverId: string, tool: string, sink: ReturnType<typeof buildSink>) => done(client.setToolSink({ orgId, serverId, tool, sink })),
+      setToolSink: (serverId: string, tool: string, contentHash: string, sink: ReturnType<typeof buildSink>) => done(client.setToolSink({ orgId, serverId, tool, contentHash, sink })),
       setToolTwoApprovers: (serverId: string, tool: string, required: boolean) => done(client.setToolTwoApprovers({ orgId, serverId, tool, required })),
       acknowledgeReview: (serverId: string, tool: string) => done(client.acknowledgeToolReview({ orgId, serverId, tool })),
       setAgentServers: (agentId: string, servers: { serverId: string; tools: string[] }[]) => done(client.setAgentServers({ orgId, agentId, servers })),

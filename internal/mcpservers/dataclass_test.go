@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -199,6 +200,90 @@ var _ = Describe("the data class of a server (ADR 0084, #350)", func() {
 		Expect(got.Kind).To(Equal("other"))
 		Expect(got.DataClass).To(Equal([]string{"untrusted_input", "private_data"}))
 		expectReset(events(ctx, "mcp_server.data_class.reset"), "fetch", []any{"untrusted_input"})
+	})
+
+	Describe("the code-host connection link (ADR 0091 decision 3)", func() {
+		newConn := func(ctx SpecContext, org pgtype.UUID) string {
+			GinkgoHelper()
+			id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+			_, err := store.New(pool).CreateConnection(ctx, store.CreateConnectionParams{
+				OrgID: org, ID: id, Connector: "github", DisplayName: "gh", Config: []byte(`{}`),
+				SecretName: pgtype.Text{String: "conn-" + id.String(), Valid: true},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			return id.String()
+		}
+
+		It("is none for a server nobody linked, and set, read back and audited with the class", func(ctx SpecContext) {
+			s := create(ctx, "forge", nil)
+			Expect(s.CodeHostConnectionID).To(BeEmpty())
+			conn := newConn(ctx, org)
+			got, err := svc.SetDataClass(ctx, org, actor, s.ID, mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CodeHostConnectionID).To(Equal(conn))
+			again, err := svc.Get(ctx, org, s.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.CodeHostConnectionID).To(Equal(conn))
+			ev := events(ctx, "mcp_server.data_class.set")
+			Expect(ev).To(HaveLen(1))
+			Expect(string(ev[0].Summary)).To(ContainSubstring(conn))
+
+			By("a class without a connection unlinks it")
+			got, err = svc.SetDataClass(ctx, org, actor, s.ID, mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CodeHostConnectionID).To(BeEmpty())
+		})
+
+		It("can be given at create", func(ctx SpecContext) {
+			conn := newConn(ctx, org)
+			s := create(ctx, "forge", &mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn})
+			Expect(s.CodeHostConnectionID).To(Equal(conn))
+		})
+
+		It("refuses a connection of another org, one that does not exist and one that is not an ID", func(ctx SpecContext) {
+			s := create(ctx, "forge", nil)
+			other, _, _ := pgtest.NewOrg(ctx, pool)
+			for _, c := range []string{newConn(ctx, other), uuid.NewString(), "not-an-id"} {
+				_, err := svc.SetDataClass(ctx, org, actor, s.ID, mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: c})
+				var inv *mcpservers.InvalidError
+				Expect(errors.As(err, &inv)).To(BeTrue(), "%q: %v", c, err)
+			}
+			_, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "x", URL: "https://x.example.com/mcp", Class: &mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: uuid.NewString()}})
+			var inv *mcpservers.InvalidError
+			Expect(errors.As(err, &inv)).To(BeTrue(), "%v", err)
+			got, _ := svc.Get(ctx, org, s.ID)
+			Expect(got.CodeHostConnectionID).To(BeEmpty())
+		})
+
+		It("is cleared, and audited as a class reset, when the URL changes", func(ctx SpecContext) {
+			conn := newConn(ctx, org)
+			s := create(ctx, "forge", &mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn})
+			same := s.URL
+			got, err := svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &same})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CodeHostConnectionID).To(Equal(conn), "the same URL keeps it")
+
+			other := "https://attacker.example.com/mcp"
+			got, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &other})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CodeHostConnectionID).To(BeEmpty())
+			ev := events(ctx, "mcp_server.data_class.reset")
+			Expect(ev).To(HaveLen(1), "the class was already the default, only the link changed")
+			Expect(string(ev[0].Summary)).To(ContainSubstring(conn))
+		})
+
+		It("is unlinked when the connection is deleted", func(ctx SpecContext) {
+			conn := newConn(ctx, org)
+			s := create(ctx, "forge", &mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn})
+			var cid pgtype.UUID
+			Expect(cid.Scan(conn)).To(Succeed())
+			_, err := pool.Exec(ctx, `DELETE FROM connections WHERE org_id = $1 AND id = $2`, org, cid)
+			Expect(err).NotTo(HaveOccurred())
+			got, err := svc.Get(ctx, org, s.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CodeHostConnectionID).To(BeEmpty())
+			Expect(got.Name).To(Equal("forge"), "the server is kept, and its org_id is not nulled")
+		})
 	})
 
 	It("keeps a UI server's class when the URL is unchanged and resets it, audited, when the URL changes", func(ctx SpecContext) {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { Code, ConnectError } from '@connectrpc/connect'
 import { useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -43,10 +43,12 @@ export function ToolSink({ server, tool: t, actions }: { server: Server; tool: T
     setPending(true)
     setError(undefined)
     try {
-      await actions.setToolSink(server.id, t.name, buildSink(form))
+      await actions.setToolSink(server.id, t.name, t.contentHash, buildSink(form))
       setEditing(false)
     } catch (e) {
-      setError(ConnectError.from(e).rawMessage)
+      const err = ConnectError.from(e)
+      // Aborted: the server republished the tool after this page read it. The list has been refreshed by now.
+      setError(err.code === Code.Aborted ? `${err.rawMessage} The tool is listed again below with its new text; review it and declare again.` : err.rawMessage)
     } finally {
       setPending(false)
     }

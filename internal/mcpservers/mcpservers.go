@@ -60,6 +60,11 @@ var (
 	ErrNoKeys   = catalog.ErrNoKeys
 )
 
+// ErrToolChanged is returned when a tool's declaration is set against a content hash that is no longer
+// the tool's: the server republished it since the admin read it. Callers map it to a conflict (Aborted,
+// HTTP 409). Message safe to show.
+var ErrToolChanged = errors.New("the tool changed since it was read; read it again and review the new description")
+
 // InvalidError is a validation failure.
 type InvalidError = catalog.InvalidError
 
@@ -193,15 +198,18 @@ type Server struct {
 	Removed bool `json:"removed,omitempty"`
 	// Kind and DataClass are what the server declares it exposes (ADR 0084 decision 8): its kind and
 	// the legs it carries, in the order of Legs. A server nobody classified is DefaultDeclaration.
-	Kind            string     `json:"kind"`
-	DataClass       []string   `json:"dataClass"`
-	Health          string     `json:"health"`
-	HealthReason    string     `json:"healthReason,omitempty"`
-	HealthCheckedAt *time.Time `json:"healthCheckedAt,omitempty"`
-	HealthSince     *time.Time `json:"healthSince,omitempty"`
-	ToolsSyncedAt   *time.Time `json:"toolsSyncedAt,omitempty"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
+	Kind      string   `json:"kind"`
+	DataClass []string `json:"dataClass"`
+	// CodeHostConnectionID is the code-host connection the server acts through, "" for none. The
+	// code-host derivation of its tools looks a repository up in that connection's list only (ADR 0091).
+	CodeHostConnectionID string     `json:"codeHostConnectionId"`
+	Health               string     `json:"health"`
+	HealthReason         string     `json:"healthReason,omitempty"`
+	HealthCheckedAt      *time.Time `json:"healthCheckedAt,omitempty"`
+	HealthSince          *time.Time `json:"healthSince,omitempty"`
+	ToolsSyncedAt        *time.Time `json:"toolsSyncedAt,omitempty"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	UpdatedAt            time.Time  `json:"updatedAt"`
 }
 
 // Tool is a tool of a server.
@@ -292,6 +300,10 @@ func mapErr(err error) error {
 	case isUnique(err):
 		return ErrConflict
 	}
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && pg.Code == "23503" && strings.Contains(pg.ConstraintName, "code_host_connection_id") {
+		return invalid("codeHostConnectionId is not a connection of this org")
+	}
 	return err
 }
 
@@ -311,7 +323,7 @@ func toServer(r store.McpServer) Server {
 		Removed: r.RemovedAt.Valid, Health: string(r.Health), HealthReason: r.HealthReason.String,
 		HealthCheckedAt: timePtr(r.HealthCheckedAt), HealthSince: timePtr(r.HealthSince), ToolsSyncedAt: timePtr(r.ToolsSyncedAt),
 		CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
-		Kind: declarationOf(r).Kind, DataClass: declarationOf(r).Legs,
+		Kind: declarationOf(r).Kind, DataClass: declarationOf(r).Legs, CodeHostConnectionID: declarationOf(r).CodeHostConnection,
 	}
 }
 

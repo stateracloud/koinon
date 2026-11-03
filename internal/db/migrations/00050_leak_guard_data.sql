@@ -10,8 +10,9 @@
 -- 3. An org's fetch-trusted host list: the hosts the automatic URL rule exempts. It starts empty.
 -- 4. A sink class per tool, which arguments are address arguments, and what the tool's results carry
 --    (ADR 0091 decisions 1 to 3). The default is external-high with the server's legs.
--- 5. The org's code-host scope: the repositories of its code-host connections with their visibility,
---    which the code-host derivation reads (ADR 0091 decision 3).
+-- 5. The org's code-host scope, per connection, and the link from a server to its connection: the
+--    repositories of each code-host connection with their visibility, which the code-host derivation
+--    reads for the linked connection only (ADR 0091 decision 3).
 
 -- +goose Up
 
@@ -26,7 +27,15 @@ CREATE TYPE mcp_server_kind AS ENUM ('fetch', 'search', 'other');
 ALTER TABLE mcp_servers
     ADD COLUMN kind                   mcp_server_kind NOT NULL DEFAULT 'other',
     ADD COLUMN exposes_untrusted_input boolean        NOT NULL DEFAULT true,
-    ADD COLUMN exposes_private_data    boolean        NOT NULL DEFAULT true;
+    ADD COLUMN exposes_private_data    boolean        NOT NULL DEFAULT true,
+    -- The code-host connection this server acts through (a GitHub MCP server and the org's GitHub
+    -- connection). The code-host derivation looks a repository up in this connection's list only: the
+    -- same owner/repo on another host is another repository (ADR 0091 decision 3). NULL means no link,
+    -- and a code-host tool of an unlinked server is external-high. The link is per server, not per
+    -- tool: the server is the endpoint the connection's credentials and repository list belong to. A
+    -- deleted connection unlinks the server; a changed server URL clears the link (the query does it).
+    ADD COLUMN code_host_connection_id uuid,
+    ADD FOREIGN KEY (org_id, code_host_connection_id) REFERENCES connections (org_id, id) ON DELETE SET NULL (code_host_connection_id);
 
 -- The bounds are those of leakguard.Params (MinThreshold, MaxThreshold).
 ALTER TABLE org_settings

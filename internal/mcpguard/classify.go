@@ -14,7 +14,7 @@ import (
 )
 
 // The one place the guard reads #350's surface: the org's leak-guard settings, the code-host scope
-// and sinkclass.Classify. Everything else in the package sees a class and a threshold only, so a
+// (per code-host connection) and sinkclass.Classify. Everything else in the package sees a class and a threshold only, so a
 // change to how the scope is keyed (org-wide or per connection) is an edit here.
 
 // orgPolicy is what the guard needs of an org's settings for one call.
@@ -34,9 +34,11 @@ func loadPolicy(ctx context.Context, q *store.Queries, org store.Org) (orgPolicy
 func (p orgPolicy) threshold() int { return p.settings.MatchThreshold }
 
 // classify returns the sink class of one call to a tool of srv under declaration d, from the
-// call's address arguments only (ADR 0091 decision 3).
-func (p orgPolicy) classify(_ store.McpServer, d sinkclass.Declaration, address map[string]string, now time.Time) sinkclass.Class {
-	return sinkclass.Classify(d, address, p.settings.Scope(), p.settings, now)
+// call's address arguments only (ADR 0091 decision 3). A code-host tool's repository is looked up
+// in the list of the code-host connection srv is linked to; an unlinked server ("") makes it
+// external-high.
+func (p orgPolicy) classify(srv store.McpServer, d sinkclass.Declaration, address map[string]string, now time.Time) sinkclass.Class {
+	return sinkclass.Classify(d, address, srv.CodeHostConnectionID.String(), p.settings.Scope(), p.settings, now)
 }
 
 // thresholdOf is an org's match threshold (0: the default), for agentd's feed.

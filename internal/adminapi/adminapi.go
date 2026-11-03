@@ -249,6 +249,8 @@ func (s *Server) problem(err error) (int, Error) {
 		return set(http.StatusNotFound, NotFound, "not found")
 	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, tokens.ErrNotFound):
 		return set(http.StatusNotFound, NotFound, "not found")
+	case errors.Is(err, mcpservers.ErrToolChanged):
+		return set(http.StatusConflict, Conflict, err.Error())
 	case errors.Is(err, catalog.ErrReadOnly):
 		return set(http.StatusConflict, Conflict, err.Error())
 	case errors.Is(err, catalog.ErrConflict):
