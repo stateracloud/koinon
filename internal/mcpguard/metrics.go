@@ -13,7 +13,7 @@ import (
 // Every label of the guard's metrics has a fixed set of values (ADR 0023): decision, reason, sink
 // class and phase. No org, agent, run, tool or server name.
 var (
-	actions = []Action{Pass, Refuse, Approve}
+	actions = []Action{Pass, Refuse, Approve, NeedsDecision}
 	reasons = []string{
 		ReasonInternal, ReasonClean, ReasonBothLegs, ReasonTaint, ReasonByteCap, ReasonURLRule, ReasonCheck,
 		ReasonError, ReasonIdentity, ReasonNoRun, ReasonExempt, ReasonAskTarget,
@@ -100,4 +100,9 @@ func (m *Metrics) legs(l Legs) {
 	if l.PrivateData {
 		m.Legs.WithLabelValues("private_data").Inc()
 	}
+}
+
+// Collectors are the metrics to register.
+func (m *Metrics) Collectors() []prometheus.Collector {
+	return []prometheus.Collector{m.Decisions, m.Duration, m.Evictions, m.Legs}
 }

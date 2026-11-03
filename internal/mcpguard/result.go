@@ -81,13 +81,22 @@ func (g *Guard) record(ctx context.Context, c caller, decl sinkclass.Declaration
 }
 
 // RecordApproved records the result of a call a person approved and Koinon's executor ran for the
-// agent (approvals.executeMCP): the executor's own call is exempt at the gateway, so its result
-// reaches the agent's session here.
-func (g *Guard) RecordApproved(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, tool string, result json.RawMessage) error {
+// agent (approvals.Options.OnMCPResult): the executor's own call is exempt at the gateway, so its
+// result reaches the agent's session here.
+func (g *Guard) RecordApproved(ctx context.Context, row store.ApprovalRequest, srv store.McpServer, result json.RawMessage) error {
 	ctx, cancel := context.WithTimeout(ctx, Deadline)
 	defer cancel()
+	slug, err := g.q.GetOrgSlug(ctx, row.OrgID)
+	if err != nil {
+		return err
+	}
+	org := store.Org{ID: row.OrgID, Slug: slug}
+	agent, err := g.q.GetAgent(ctx, store.GetAgentParams{OrgID: row.OrgID, ID: row.AgentID})
+	if err != nil {
+		return err
+	}
 	c := caller{org: org, agent: agent, server: srv}
-	_, decl, err := g.tool(ctx, c, tool)
+	_, decl, err := g.tool(ctx, c, row.Tool)
 	if err != nil {
 		return err
 	}
@@ -95,8 +104,20 @@ func (g *Guard) RecordApproved(ctx context.Context, org store.Org, agent store.A
 }
 
 // Assess decides an ask-tier call without charging anything, for mcpask's single card: the
-// returned risk is nil when the guard has nothing to add. An error fails the call closed.
+// returned risk is nil when the guard has nothing to add. Its error refuses the call, and its text
+// is safe for the agent to read.
 func (g *Guard) Assess(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, tool string, args json.RawMessage) (map[string]any, error) {
+	risk, err := g.assessAsk(ctx, org, agent, srv, tool, args)
+	if err != nil {
+		if _, ok := RefusalText(err); !ok {
+			g.log.Error("mcp guard: assessing an ask-tier call failed", "org", org.Slug, "tool", tool, "err", err)
+			return nil, refusedError{text: errText}
+		}
+	}
+	return risk, err
+}
+
+func (g *Guard) assessAsk(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, tool string, args json.RawMessage) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(ctx, Deadline)
 	defer cancel()
 	c := caller{org: org, agent: agent, server: srv}
@@ -112,7 +133,7 @@ func (g *Guard) Assess(ctx context.Context, org store.Org, agent store.Agent, sr
 		return nil, refusedError{text: a.refused.Text}
 	}
 	switch a.verdict.Action {
-	case Approve:
+	case NeedsDecision:
 		return a.risk(), nil
 	case Refuse:
 		return nil, refusedError{text: a.verdict.Detail}

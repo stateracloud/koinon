@@ -18,7 +18,11 @@ const (
 	// Refuse fails the call with a reason the agent can read (the byte cap, the URL rule, a check
 	// that could not finish).
 	Refuse Action = "refuse"
-	// Approve parks the call for an ADR 0042 approval of that exact call.
+	// NeedsDecision is the rules' third outcome: the call may carry private data out of the org, and
+	// the rules alone do not let it go. A Decider takes it from here (today: a person, ADR 0042).
+	NeedsDecision Action = "needs_decision"
+	// Approve is the Decider's escalation: the call is parked for an ADR 0042 approval of that
+	// exact call.
 	Approve Action = "approve"
 )
 
@@ -68,8 +72,9 @@ type Verdict struct {
 	Match  *leakguard.Match
 }
 
-// Decide is the decision table of ADR 0091 decision 5, with the text match of decision 6 on top.
-// It is pure: the caller gathers the facts and charges the budgets.
+// Decide is the decision table of ADR 0091 decision 5, with the text match of decision 6 on top:
+// the rules. Their outcome is Pass, Refuse or NeedsDecision; a NeedsDecision goes to the guard's
+// Decider. It is pure: the caller gathers the facts and charges the budgets.
 func Decide(f Facts) Verdict {
 	switch f.Class {
 	case sinkclass.None, sinkclass.Internal:
@@ -100,18 +105,18 @@ func Decide(f Facts) Verdict {
 				f.Cap, f.CapUsed, f.PayloadBytes)}
 		}
 		if matched {
-			return Verdict{Action: Approve, Reason: ReasonTaint, Reasons: []string{ReasonTaint}, Match: f.Taint.Match}
+			return Verdict{Action: NeedsDecision, Reason: ReasonTaint, Reasons: []string{ReasonTaint}, Match: f.Taint.Match}
 		}
 		return Verdict{Action: Pass, Reason: ReasonClean}
 	}
 	// external-high
 	switch {
 	case f.BothLegs && matched:
-		return Verdict{Action: Approve, Reason: ReasonBothLegs, Reasons: []string{ReasonBothLegs, ReasonTaint}, Match: f.Taint.Match}
+		return Verdict{Action: NeedsDecision, Reason: ReasonBothLegs, Reasons: []string{ReasonBothLegs, ReasonTaint}, Match: f.Taint.Match}
 	case f.BothLegs:
-		return Verdict{Action: Approve, Reason: ReasonBothLegs, Reasons: []string{ReasonBothLegs}}
+		return Verdict{Action: NeedsDecision, Reason: ReasonBothLegs, Reasons: []string{ReasonBothLegs}}
 	case matched:
-		return Verdict{Action: Approve, Reason: ReasonTaint, Reasons: []string{ReasonTaint}, Match: f.Taint.Match}
+		return Verdict{Action: NeedsDecision, Reason: ReasonTaint, Reasons: []string{ReasonTaint}, Match: f.Taint.Match}
 	}
 	return Verdict{Action: Pass, Reason: ReasonClean}
 }
