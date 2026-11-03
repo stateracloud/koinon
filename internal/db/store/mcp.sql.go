@@ -615,6 +615,67 @@ func (q *Queries) ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpS
 	return items, nil
 }
 
+const listMCPServersLinkedToConnectionForUpdate = `-- name: ListMCPServersLinkedToConnectionForUpdate :many
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id FROM mcp_servers
+WHERE org_id = $1 AND code_host_connection_id = $2
+ORDER BY name, id
+FOR UPDATE
+`
+
+type ListMCPServersLinkedToConnectionForUpdateParams struct {
+	OrgID        pgtype.UUID
+	ConnectionID pgtype.UUID
+}
+
+// The servers whose code-host connection is the one being deleted, locked so the delete can audit the
+// unlink the foreign key (ON DELETE SET NULL) is about to do.
+func (q *Queries) ListMCPServersLinkedToConnectionForUpdate(ctx context.Context, arg ListMCPServersLinkedToConnectionForUpdateParams) ([]McpServer, error) {
+	rows, err := q.db.Query(ctx, listMCPServersLinkedToConnectionForUpdate, arg.OrgID, arg.ConnectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []McpServer
+	for rows.Next() {
+		var i McpServer
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.Name,
+			&i.Url,
+			&i.Transport,
+			&i.CredentialHeader,
+			&i.CredentialPrefix,
+			&i.Credential,
+			&i.Source,
+			&i.ManagedBySecret,
+			&i.DeclaredVersion,
+			&i.RemovedAt,
+			&i.DisabledReason,
+			&i.Health,
+			&i.HealthReason,
+			&i.HealthCheckedAt,
+			&i.HealthSince,
+			&i.ConsecutiveFailures,
+			&i.ToolsSyncedAt,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Kind,
+			&i.ExposesUntrustedInput,
+			&i.ExposesPrivateData,
+			&i.CodeHostConnectionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMCPServersToCheckLive = `-- name: ListMCPServersToCheckLive :many
 SELECT s.name, o.slug AS org_slug,
        COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.tier = 'auto'), '{}')::text[] AS auto_tools,

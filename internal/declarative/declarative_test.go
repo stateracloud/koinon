@@ -30,7 +30,9 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/declarative"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
+	"github.com/stateracloud/koinon/internal/sinkclass"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
@@ -411,6 +413,34 @@ var _ = Describe("Importer", func() {
 			Expect(again).To(HaveLen(1))
 			Expect(again[0].ID).To(Equal(rows[0].ID))
 			Expect(again[0].RemovedAt.Valid).To(BeFalse())
+		})
+
+		It("stops a removed connection from making a repository internal, at once (ADR 0091, #350)", func(ctx SpecContext) {
+			put(ctx, "gh", declarative.TypeConnection, slug, conn())
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, err := store.New(pool).ListConnections(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rows).To(HaveLen(1))
+			cid := rows[0].ID.String()
+			_, err = pool.Exec(ctx, `INSERT INTO mcp_servers (org_id, name, url, code_host_connection_id) VALUES ($1, 'tracker', 'https://mcp.example.com/mcp', $2)`, org, cid)
+			Expect(err).NotTo(HaveOccurred())
+			var linked string
+			Expect(pool.QueryRow(ctx, `SELECT code_host_connection_id::text FROM mcp_servers WHERE org_id = $1 AND name = 'tracker'`, org).Scan(&linked)).To(Succeed())
+
+			osvc := orgsettings.NewService(pool)
+			now := time.Now()
+			Expect(osvc.ReplaceCodeHostRepos(ctx, org, audit.User(user), cid, []orgsettings.CodeHostRepo{{Owner: "northwind", Name: "handbook", Visibility: "private"}}, now)).To(Succeed())
+			code := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}}
+			classify := func() sinkclass.Class {
+				l, err := osvc.LeakGuard(ctx, org)
+				Expect(err).NotTo(HaveOccurred())
+				return sinkclass.Classify(code, map[string]string{"owner": "northwind", "repo": "handbook"}, linked, l.Scope(), l, time.Now())
+			}
+			Expect(classify()).To(Equal(sinkclass.Internal), "a fresh private repository of the linked connection")
+
+			Expect(kube.CoreV1().Secrets(ns).Delete(ctx, "gh", metav1.DeleteOptions{})).To(Succeed())
+			Expect(imp.Sync(ctx)).To(Succeed())
+			Expect(classify()).To(Equal(sinkclass.ExternalHigh), "the reading is fresh but the connection is removed")
 		})
 
 		It("can be read back with the keys", func(ctx SpecContext) {

@@ -625,6 +625,9 @@ type Querier interface {
 	// first loaded it. No key material.
 	ListKEKFingerprints(ctx context.Context) ([]KekFingerprint, error)
 	ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpServer, error)
+	// The servers whose code-host connection is the one being deleted, locked so the delete can audit the
+	// unlink the foreign key (ON DELETE SET NULL) is about to do.
+	ListMCPServersLinkedToConnectionForUpdate(ctx context.Context, arg ListMCPServersLinkedToConnectionForUpdateParams) ([]McpServer, error)
 	// The servers an agent may use that the gateway should serve right now, with the tools it should
 	// list for each by tier, for the live check agentd runs before the harness starts (issue #488). An
 	// unhealthy server is left out: ListMissingMCPServersOfAgent has it already and the planner withdraws
@@ -662,6 +665,8 @@ type Querier interface {
 	// The org's code-host scope: the repositories of its code-host connections with the visibility the
 	// connector last read (ADR 0091 decision 3). Every query takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
+	// A connection marked removed (its declaring Secret is gone) contributes nothing: its readings may
+	// still be fresh, but the credential behind them is gone, so a repository is not internal through it.
 	ListOrgCodeHostRepos(ctx context.Context, orgID pgtype.UUID) ([]OrgCodeHostRepo, error)
 	// The org's fetch-trusted host list (ADR 0084 decision 5). Empty for a new org.
 	ListOrgFetchTrustedHosts(ctx context.Context, orgID pgtype.UUID) ([]OrgFetchTrustedHost, error)

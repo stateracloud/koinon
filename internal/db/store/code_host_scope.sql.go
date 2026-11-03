@@ -31,9 +31,10 @@ func (q *Queries) DeleteCodeHostConnectionRepos(ctx context.Context, arg DeleteC
 
 const listOrgCodeHostRepos = `-- name: ListOrgCodeHostRepos :many
 
-SELECT org_id, connection_id, owner, repo, visibility, checked_at FROM org_code_host_repos
-WHERE org_id = $1
-ORDER BY owner, repo, connection_id
+SELECT r.org_id, r.connection_id, r.owner, r.repo, r.visibility, r.checked_at FROM org_code_host_repos r
+JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
+WHERE r.org_id = $1 AND c.removed_at IS NULL
+ORDER BY r.owner, r.repo, r.connection_id
 `
 
 // SPDX-License-Identifier: Apache-2.0
@@ -41,6 +42,8 @@ ORDER BY owner, repo, connection_id
 // The org's code-host scope: the repositories of its code-host connections with the visibility the
 // connector last read (ADR 0091 decision 3). Every query takes @org_id and filters on it
 // (TestQueriesAreOrgScoped).
+// A connection marked removed (its declaring Secret is gone) contributes nothing: its readings may
+// still be fresh, but the credential behind them is gone, so a repository is not internal through it.
 func (q *Queries) ListOrgCodeHostRepos(ctx context.Context, orgID pgtype.UUID) ([]OrgCodeHostRepo, error) {
 	rows, err := q.db.Query(ctx, listOrgCodeHostRepos, orgID)
 	if err != nil {
