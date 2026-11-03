@@ -247,3 +247,12 @@ referrers-API-only output is not copied. Install the mirrored chart with
 `kubectl --context <your lab kube context> apply -k test/fixtures/rt1/overlays/homelab` applies the story-test fixtures
 with the images from Zot pinned by digest; the Secrets come from OpenBao through ExternalSecrets.
 Everyone else uses `overlays/kind` or `overlays/remote` ([real-model-tests.md](real-model-tests.md)).
+
+## Agents and lanes
+
+Only the maintainers have a home lab; nothing in the repository needs it and none of its endpoints
+are tracked. Their settings live in the untracked `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/lab.env`
+(template `hack/lab/lab.env.example`; `hack/e2e-argo.sh` header). With them,
+`hack/e2e-remote.sh --argo` queues the e2e (and `--gate <set>` the Docker-only gates) on the lab's
+Argo. Each lane runs `hack/e2e-remote.sh --argo --repo <its worktree>` with
+`KOINON_E2E_AGENT=<session>-<lane>` and keeps at most one kind run waiting.
