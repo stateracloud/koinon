@@ -96,8 +96,8 @@ app, `strict_required_status_checks_policy: true`):
 
 | Check | Workflow, today's triggers | On `merge_group` |
 |---|---|---|
-| `go`, `web`, `proto`, `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)`, `migrations`, `adr-lint`, `claim-tests`, `lint-shell`, `scripts` | `ci.yml`: `pull_request`, `push` to main | Add `merge_group:`. `changes` passes `BASE=''` for any event except `pull_request`, so the group runs **every** job. To keep path filtering, pass the group's base (`github.event.merge_group.base_sha`) to `hack/ci-changes.sh`. `proto`'s breaking check and `migrate-lint`'s base are also `pull_request`-only; both would read `merge_group.base_sha`. The concurrency group `ci-${{ github.ref }}` is unique per queue ref, so groups do not cancel each other. |
-| `dependency age` | `ci.yml`, job `if: pull_request` | A skipped job reports success, so it passes as is. The PR run already checked it. |
+| `go`, `web`, `quick checks`, `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)`, `lint-shell`, `scripts` | `ci.yml`: `pull_request`, `push` to main | Add `merge_group:`. `changes` passes `BASE=''` for any event except `pull_request`, so the group runs **every** job. To keep path filtering, pass the group's base (`github.event.merge_group.base_sha`) to `hack/ci-changes.sh`. the proto breaking check (in `quick checks`) and `migrate-lint`'s base are also `pull_request`-only; both would read `merge_group.base_sha`. The concurrency group `ci-${{ github.ref }}` is unique per queue ref, so groups do not cancel each other. |
+| dependency age (steps of `quick checks`, `if: pull_request`) | `ci.yml` | A skipped step does not fail the job, so it passes as is. The PR run already checked it. |
 | `dco` | `dco.yml`: `pull_request` only | Add `merge_group:` and check `merge_group.base_sha..head_sha`. The commits are the PRs' own. The group's merge commits are exempt (`--no-merges`), so it passes when the PR passed. |
 | `gitleaks` | `secrets.yml`: `pull_request`, `push` | Add `merge_group:` and scan `base_sha..head_sha`. Redundant with the PR scan, but cheap, and it has to report. |
 | `claim` | `claims.yml`: `pull_request_target` only | `pull_request_target` is a pull request event, not a group one, so it does not run for the group **[unverified]**: the events page lists `merge_group` separately and says nothing either way. Two options: (a) a `merge_group` job that takes `<N>` from the queue ref and runs the base's `hack/claim.sh check-pr <N>`; (b) one that reports success, since the claim was checked on the PR before it could be queued. (a) keeps the check meaningful for a claim lost while queued. A group of several PRs needs every PR number, and whether the ref names all of them is **[unverified]**. |
@@ -228,7 +228,7 @@ For the day the plan allows it:
 1. **Triggers first; no ruleset change yet** (one PR):
    - add `merge_group:` to `ci.yml`, `dco.yml` and `secrets.yml`, and a `merge_group` job named
      `claim` (option (a)) and one named `e2e result` (map to PR heads);
-   - make `changes`, `proto` and `migrations` read `merge_group.base_sha`;
+   - make `changes` and the proto and migrations steps of `quick checks` read `merge_group.base_sha`;
    - teach `hack/ci-required-test.sh` the trigger rule.
 
    Harmless while no queue exists: the event never fires.
