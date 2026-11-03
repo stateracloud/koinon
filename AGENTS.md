@@ -70,6 +70,14 @@ Instructions for coding agents working on Koinon.
   `e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
   are skipped only on a push to main whose heavy jobs are skipped.
   A skipped heavy job reports success, so every required check still reports.
+  - go-test on the lab gate first (#610): `hack/ship.sh --ready --lab-go-test` runs
+    `hack/e2e-remote.sh --argo --gate go-test` on the pushed draft head (a free gate slot) and the lab posts
+    the commit status `go-test-lab`; `changes` reads it for the exact PR head SHA and the ready run skips
+    `go-test`, which `go` accepts (the required name stays `go`; no change to the ruleset). Exit 75/78/76/2
+    or no status: `go-test` runs on Blacksmith, as it does without a lab. Nothing waits for a late status,
+    so a push to a ready PR runs `go-test` on Blacksmith (go back to draft first to keep the lab). Push to
+    main (`ci-skip-heavy.sh decide`) and `hack/release-gate.sh` count a skipped `go-test` only with that
+    status or a change with no Go. Trust limit as `e2e-lab` (#568). `docs/dev/maintainer-homelab.md`.
   - Draft pull request (#593): only `changes`, `quick checks`, `lint-shell` and `scripts` run, and `go` and `web` are RED on purpose
     ("draft: not tested, mark ready for review"): a green draft `go` would otherwise stay the newest
     run on the head while the ready run is still going. A draft cannot merge, so get WIP feedback

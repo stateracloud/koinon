@@ -7,7 +7,7 @@
 # swapped for a "local checks recorded" gate without touching the release job.
 #
 # Environment: TAG (v1.2.3 or v1.2.3-rc.1), SHA (the tagged commit), GITHUB_REPOSITORY and GH_TOKEN
-# (needs checks:read, contents:read and pull-requests:read; the ruleset is read with the implicit
+# (needs checks:read, contents:read, statuses:read and pull-requests:read; the ruleset is read with the implicit
 # metadata permission). The required checks are read from the `main` ruleset; the pull-request-only
 # ones (pr_only below) are read from the head commit of the pull request that merged the tagged
 # commit. Needs gh, git and awk, and a clone with origin/main.
@@ -17,6 +17,7 @@
 
 set -euo pipefail
 
+here=$(cd "$(dirname "$0")" && pwd)
 : "${TAG:?}" "${SHA:?}" "${GITHUB_REPOSITORY:?}" "${GH_TOKEN:?}"
 
 # The required status checks come from GitHub at run time (required_contexts below), so a check
@@ -125,6 +126,46 @@ for name in "${required[@]}"; do
 		failed=1
 	fi
 done
+# go-test (#610): the job is skipped when the pull request head had a green lab gate (the commit status
+# go-test-lab), and `go` accepts that. A go-test that was skipped is therefore checked once more: on the
+# merged pull request's head it must have succeeded, or have been skipped with a green go-test-lab status
+# on that head, or the change must touch nothing the go-* jobs run for. A go-test with no run at all is
+# the business of `go` above. Needs statuses:read.
+got=$(conclusion_of "$SHA" go-test)
+if [[ $got == skipped ]]; then
+	from_pr_heads go-test >/dev/null # called directly (not in $(...)) so that pr_heads is filled here
+	got=
+	lab=
+	while IFS=$'\t' read -r h merged; do
+		[[ -n $h ]] || continue
+		got=$(conclusion_of "$h" go-test "$merged")
+		if [[ -n $got ]]; then
+			[[ $got != skipped ]] || lab=$("$here/go-test-lab.sh" state "$h" 2>/dev/null || true)
+			break
+		fi
+	done <<<"$pr_heads"
+	tg=0
+	case $got in
+	success) echo "ok: go-test (on the merged pull request's head)" ;;
+	skipped)
+		if [[ $lab == success ]]; then
+			echo "ok: go-test (passed on the lab: go-test-lab on the merged pull request's head)"
+		else
+			"$here/go-test-lab.sh" touches-go "$SHA^1" "$SHA" || tg=$?
+			if [[ $tg == 1 ]]; then
+				echo "ok: go-test (skipped: the change touches no Go)"
+			else
+				echo "FAIL: go-test: skipped on the merged pull request's head with no green go-test-lab status (${lab:-none}) and the change may touch Go" >&2
+				failed=1
+			fi
+		fi
+		;;
+	*)
+		echo "FAIL: go-test: ${got:-no check run found} on the merged pull request's head (skipped on $SHA)" >&2
+		failed=1
+		;;
+	esac
+fi
 # The kind e2e is not a required check (it is batched on main, and `e2e result` passes when it is
 # skipped), so a release asks for the `quickstart` job itself to have concluded success on this very
 # commit. If main's batched run skipped or never reached it, dispatch e2e-kind on the commit first.
