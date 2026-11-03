@@ -609,8 +609,8 @@ func b64Candidates(buf []byte) readings { return b64Readings(buf, true) }
 
 // b64Readings is b64Candidates, with the resynchronised reading only when sync.
 func b64Readings(buf []byte, sync bool) readings {
-	var cands readings
 	dec := make([]byte, base64.RawStdEncoding.DecodedLen(len(buf)))
+	var cands, noisy readings
 	for off := range min(4, len(buf)+1) {
 		r := buf[off:]
 		if len(r)%4 == 1 {
@@ -620,13 +620,10 @@ func b64Readings(buf []byte, sync bool) readings {
 			continue
 		}
 		if n, err := base64.RawStdEncoding.Decode(dec, r); err == nil {
-			cands.add(asText(dec[:n]))
+			cands.add(asTextOrNoisy(dec[:n], sync, &noisy))
 		}
 	}
-	if sync {
-		cands.add(resyncText(resync(buf, &b64StdCodec)))
-	}
-	return cands
+	return finish(cands, noisy, sync, func() readings { return resyncText(resync(buf, &b64StdCodec)) })
 }
 
 // decodeBase32 returns the text with each base32 run replaced by its best decoding.
@@ -650,17 +647,14 @@ func b32Candidates(up []byte) readings { return b32Readings(up, true) }
 
 // b32Readings is b32Candidates, with the resynchronised reading only when sync.
 func b32Readings(up []byte, sync bool) readings {
-	var cands readings
+	var cands, noisy readings
 	if r := up[:len(up)/8*8]; len(r) >= minRun {
 		dec := make([]byte, b32Raw.DecodedLen(len(r)))
 		if n, err := b32Raw.Decode(dec, r); err == nil {
-			cands.add(asText(dec[:n]))
+			cands.add(asTextOrNoisy(dec[:n], sync, &noisy))
 		}
 	}
-	if sync {
-		cands.add(resyncText(resync(up, &b32Codec)))
-	}
-	return cands
+	return finish(cands, noisy, sync, func() readings { return resyncText(resync(up, &b32Codec)) })
 }
 
 // decodeHex returns the text with each hex sequence replaced by its best decoding. A sequence is
@@ -686,7 +680,7 @@ func hexCandidates(digits string) readings { return hexReadings(digits, true) }
 
 // hexReadings is hexCandidates, with the resynchronised reading only when sync.
 func hexReadings(digits string, sync bool) readings {
-	var cands readings
+	var cands, noisy readings
 	for off := range min(2, len(digits)+1) {
 		d := digits[off:]
 		d = d[:len(d)/2*2]
@@ -697,10 +691,30 @@ func hexReadings(digits string, sync bool) readings {
 		for i := range dec {
 			dec[i] = unhex(d[2*i])<<4 | unhex(d[2*i+1])
 		}
-		cands.add(asText(dec))
+		cands.add(asTextOrNoisy(dec, sync, &noisy))
+	}
+	return finish(cands, noisy, sync, func() readings { return resyncText(resync([]byte(digits), &hexCodec)) })
+}
+
+// asTextOrNoisy is asTextStrict of one alignment of a stream; when it is no text and sync, its
+// reading with invalid bytes stripped (see asTextLax) goes to noisy, which finish uses when no
+// alignment is text.
+func asTextOrNoisy(b []byte, sync bool, noisy *readings) readings {
+	r := asTextStrict(b)
+	if sync && r.empty() {
+		noisy.add(asTextLax(b))
+	}
+	return r
+}
+
+// finish adds to the readings of the alignments of a stream those of its resynchronised form
+// (when sync), and the noisy readings when no alignment was text: it may be text with noise.
+func finish(cands, noisy readings, sync bool, resynced func() readings) readings {
+	if sync && cands.empty() {
+		cands = noisy
 	}
 	if sync {
-		cands.add(resyncText(resync([]byte(digits), &hexCodec)))
+		cands.add(resynced())
 	}
 	return cands
 }
@@ -844,30 +858,41 @@ func (r readings) all() []string {
 // kept beside a cleaner one.
 const maxInvalidShare = 8
 
-// sound drops from cands the readings in which 1 byte in maxInvalidShare or more is no UTF-8,
-// when another reading has fewer: a stream read one byte off holds text of a script of two-byte
-// letters as invalid bytes between ASCII punctuation, and costs a whole pass of decoders for
-// nothing. When every reading is that broken they are all kept.
+// sound drops from cands the readings that are mostly noise: 1 byte in maxInvalidShare or more is
+// no UTF-8, and another reading with less than that holds at least four fifths as many letters.
+// A stream read at another bit alignment holds text of a script of two-byte letters as other
+// letters with an invalid byte in five, and costs a whole pass of decoders (and the next level
+// of decoding) for nothing. A noisy reading is kept when no reading is quiet: an invalid byte is
+// noise the sender may put anywhere (Normalise drops it), so its share alone says nothing about
+// the text.
 func sound(cands []string) []string {
 	if len(cands) < 2 {
 		return cands
 	}
-	var out []string
-	for _, c := range cands {
-		bad := 0
+	t := runeClasses()
+	letters := make([]int, len(cands))
+	bad := make([]int, len(cands))
+	clean := 0 // the letters of the reading with little noise that has the most
+	for k, c := range cands {
 		for i := 0; i < len(c); {
 			r, size := utf8.DecodeRuneInString(c[i:])
-			if r == utf8.RuneError && size == 1 {
-				bad++
+			switch {
+			case r == utf8.RuneError && size == 1:
+				bad[k]++
+			case classOf(t, r)&clsWord != 0:
+				letters[k]++
 			}
 			i += size
 		}
-		if bad*maxInvalidShare < len(c) {
-			out = append(out, c)
+		if bad[k]*maxInvalidShare < len(c) {
+			clean = max(clean, letters[k])
 		}
 	}
-	if len(out) == 0 {
-		return cands
+	var out []string
+	for k, c := range cands {
+		if bad[k]*maxInvalidShare < len(c) || 4*letters[k] > 5*clean {
+			out = append(out, c)
+		}
 	}
 	return out
 }
@@ -964,20 +989,30 @@ func findRuns(s string, in func(byte) bool, minLen int) [][2]int {
 	return runs
 }
 
-// asText returns the readings of b that are text: b itself when it is text (see textual), and
+// asTextStrict returns the readings of b that are text: b itself when it is text (see textual), and
 // its UTF-16 readings (either byte order, either alignment), which are always candidates too, as
 // PowerShell's -EncodedCommand is UTF-16LE base64. A UTF-16 reading counts when it passes the
 // gate of utf16Gate and is text itself.
-func asText(b []byte) readings { return asTextWith(b, textual) }
+func asTextStrict(b []byte) readings { return asTextWith(b, textual, true) }
+
+// asTextLax is asTextStrict for a stream no alignment of which is text, and without the UTF-16
+// readings, which were tried: b is text when invalid bytes of any number of kinds are stripped
+// (see textualLax). The short windows of a call of many arguments do not get it: there are
+// thousands of them, and at that length a window of another alignment reads as text with an
+// invalid byte in five as often as a real one does.
+func asTextLax(b []byte) readings { return asTextWith(b, textualLax, false) }
+
+// empty reports whether no reading was found.
+func (r readings) empty() bool { return len(r.plain) == 0 && len(r.wide) == 0 }
 
 // resyncText is asText for the output of resync, whose segments were already judged to be text
 // (see wordy): it needs only a printable run, so NUL padding an attacker puts before the text
 // (which a straight decoding fails on) does not hide it.
 func resyncText(b []byte) readings {
-	return asTextWith(b, func(b []byte) bool { return longestPrintable(b) >= textualRun })
+	return asTextWith(b, func(b []byte) bool { return longestPrintable(b) >= textualRun }, true)
 }
 
-func asTextWith(b []byte, isText func([]byte) bool) readings {
+func asTextWith(b []byte, isText func([]byte) bool, wide bool) readings {
 	var r readings
 	if len(b) < minSegmentBytes {
 		return r
@@ -985,7 +1020,7 @@ func asTextWith(b []byte, isText func([]byte) bool) readings {
 	if isText(b) {
 		r.plain = append(r.plain, string(b))
 	}
-	if len(b) >= 2*textualRun {
+	if wide && len(b) >= 2*textualRun {
 		for _, le := range []bool{true, false} {
 			for off := range 2 {
 				if u, ok := fromUTF16(b[off:], le); ok && textual([]byte(u)) {
@@ -1135,17 +1170,31 @@ func fromUTF16(b []byte, le bool) (string, bool) {
 // every two letters, "t-h-e- -s-e-c-r-e-t", or an emoji), and any Unicode space is a space
 // (U+3000 between Cyrillic letters); the letters, digits and spaces must still be at least
 // textualRun/2 characters and half of the rest.
-func textual(b []byte) bool {
+func textual(b []byte) bool { return textualWith(b, false) }
+
+// textualLax is textual with the invalid bytes of any number of kinds stripped (see stripSound).
+func textualLax(b []byte) bool { return textualWith(b, true) }
+
+func textualWith(b []byte, strip bool) bool {
 	t := runeClasses()
 	run, longest, printable, wordish, punct, total := 0, 0, 0, 0, 0, 0
-	var inv [4]rune    // the invisible characters seen (see below)
-	nInv, nRaw := 0, 0 // how many there are, and how many of them are controls or invalid bytes
+	var inv [4]rune              // the invisible characters seen (see below)
+	nInv, nRaw := 0, 0           // how many there are, and how many of them are controls
+	nBad := 0                    // the invalid bytes, stripped
+	printBytes := 0              // the bytes of the printable characters
+	var pages [pageBuckets]int32 // the letters beyond ASCII, by page
+	nonASCII := 0
+	var letterSet [64]int32 // how often each letter was seen, hashed to 64 buckets
 	for i := 0; i < len(b); {
-		r, size := rune(b[i]), 1
+		if strip && i >= earlyLook && 100*printBytes < earlyPrintablePercent*i {
+			return false // an early look (see earlyLook)
+		}
+		r, size, bad := rune(b[i]), 1, false
 		if r >= utf8.RuneSelf {
 			r, size = utf8.DecodeRune(b[i:])
 			if r == utf8.RuneError && size == 1 {
 				r = -rune(b[i]) - 1 // an invalid byte
+				bad = true
 			}
 		}
 		i += size
@@ -1168,15 +1217,33 @@ func textual(b []byte) bool {
 				seen = true
 			}
 			if seen {
+				printBytes += size
+				continue
+			}
+			if bad && strip {
+				// Past the two kinds of filler, an invalid byte is still noise the sender
+				// controls (Normalise drops it): it is stripped, up to a share of the block.
+				nBad++
+				if 100*nBad > maxStrippedPercent*len(b) {
+					return false
+				}
 				continue
 			}
 		}
 		total++
 		if cl&clsPrint != 0 {
 			printable++
+			printBytes += size
 			switch {
 			case cl&clsWord != 0:
 				wordish++
+				if strip {
+					letterSet[int(r)*0x9e3779b1>>26&63]++
+					if r >= utf8.RuneSelf {
+						pages[pageOf(r)]++
+						nonASCII++
+					}
+				}
 			case cl&clsPunct != 0:
 				punct++
 			}
@@ -1189,8 +1256,95 @@ func textual(b []byte) bool {
 			return false
 		}
 	}
-	return longest >= textualRun && 10*printable >= 9*total && wordish >= textualRun/2 && 2*wordish >= total-punct
+	return (nBad == 0 || stripSound(nBad, len(b), printBytes, wordish, total) && oneScript(&pages, nonASCII) && variety(&letterSet, wordish)) && longest >= textualRun && 10*printable >= 9*total && wordish >= textualRun/2 && 2*wordish >= total-punct
 }
+
+// maxStrippedPercent is the share of a block that may be invalid UTF-8 bytes, which textual
+// strips. Random bytes are about 45% invalid and also hold a control in one byte in eight, which
+// is not stripped, so they fail the printable share by far; the cap keeps the strip from
+// making a block that is mostly noise look like the text left over.
+const maxStrippedPercent = 35
+
+// stripSound reports whether a block that had invalid bytes stripped still reads as text: they
+// were at most maxStrippedPercent of it, printable characters at least minPrintablePercent, and
+// letters, digits and spaces two thirds of the characters left (a block of punctuation and a few
+// letters that the strip left behind is no text).
+func stripSound(nBad, n, printBytes, wordish, total int) bool {
+	return 100*nBad <= maxStrippedPercent*n && 100*printBytes >= minPrintablePercent*n && wordish >= minStripLetters && 3*wordish >= 2*total
+}
+
+// earlyLook is how many bytes textual reads before it gives up on a block that is under
+// earlyPrintablePercent printable (a stripped byte is not): random bytes, which are about 44%
+// printable, are then read in a few hundred bytes instead of all of them, and text with noise
+// (65% printable at the most noise textual accepts) is not lost to it. Noise in front of the
+// text does reach it, and resync recovers the text after it, as it does for any garbage in front
+// of text.
+const (
+	earlyLook             = 256
+	earlyPrintablePercent = 55
+)
+
+// pageBuckets is the number of pages (blocks of 256 code points) of the Basic Multilingual Plane.
+const pageBuckets = 256
+
+// pageOf is the page of r; the ideographs, which spread over eighty pages, are one.
+func pageOf(r rune) int {
+	switch {
+	case r >= 0x4e00 && r <= 0x9fff:
+		return 0x4e
+	case r >= 1<<16:
+		return 0
+	}
+	return int(r >> 8)
+}
+
+// oneScript reports whether the letters beyond ASCII of a block with stripped bytes sit on two
+// pages for nine in ten: one script's text does (Cyrillic is one page, with ASCII beside it), and
+// the other alignments of a stream of such text, which read as letters of every script and an
+// invalid byte in five, do not.
+func oneScript(pages *[pageBuckets]int32, n int) bool {
+	var a, b int32
+	for _, c := range pages {
+		switch {
+		case c > a:
+			a, b = c, a
+		case c > b:
+			b = c
+		}
+	}
+	return 10*int(a+b) >= 9*n
+}
+
+// minVariety is how many different letters (of 64 hash buckets) a block needs to be read with
+// invalid bytes stripped, and maxLetterShare the most one letter may be of its letters: the zeros
+// of a hex string decode to "\xd3M4\xd3M4", which is "M4M4" once stripped, and no text. Text
+// puts no letter over a fifth, and a secret with noise between its characters is no less varied.
+const (
+	minVariety     = 8
+	maxLetterShare = 35 // percent
+)
+
+func variety(set *[64]int32, letters int) bool {
+	distinct, most := 0, int32(0)
+	for _, c := range set {
+		if c > 0 {
+			distinct++
+		}
+		most = max(most, c)
+	}
+	return distinct >= minVariety && 100*int(most) <= maxLetterShare*letters
+}
+
+// minStripLetters is how many letters, digits and spaces a block needs to be read with invalid
+// bytes stripped: the default match threshold is 24 canonical characters, so a block with fewer
+// holds no leak, and short windows of random bytes (which hold a stretch of text by chance) do
+// not pass.
+const minStripLetters = 24
+
+// minPrintablePercent is the share of a block, invalid bytes included, that must be printable
+// characters: it keeps a block of mostly punctuation or garbage with a few letters in it (the
+// stripped bytes no longer count against the 90% above) from reading as text.
+const minPrintablePercent = 60
 
 // longestPrintable is the longest stretch of printable ASCII in b. NULs neither extend nor end
 // it: UTF-16 of ASCII has one between every two characters, and an attacker may put one every

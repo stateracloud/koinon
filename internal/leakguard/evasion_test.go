@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base32"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"math/rand/v2"
 	"runtime"
@@ -316,7 +317,7 @@ var _ = Describe("Fourth review", func() {
 			Entry("128 arguments of 40 bytes, each base64 of random bytes", sliced(128, func(i int) string { return b64(randomBytes(i, 30)) }), 1500000),
 			Entry("128 arguments of 3 KiB, each base64 of UTF-16 of Russian", sliced(128, func(i int) string { return b64(utf16le(string([]rune(russianProse)[i*50 : i*50+1500]))) }), 16700000),
 			Entry("128 arguments of 8 KiB, each base64 of UTF-16 of Chinese", sliced(128, func(i int) string { return b64(utf16le(string([]rune(chineseProse)[i*20 : i*20+2000]))) }), 14300000),
-			Entry("128 arguments of 8 KiB, each base64 of UTF-8 of Russian", sliced(128, func(i int) string { return b64(string([]rune(russianProse)[i*50 : i*50+3000])) }), 13400000),
+			Entry("128 arguments of 8 KiB, each base64 of UTF-8 of Russian", sliced(128, func(i int) string { return b64(string([]rune(russianProse)[i*50 : i*50+3000])) }), 15900000),
 		)
 
 		// The one spec against the wall clock: the real MaxDuration, on one core, and serial, so
@@ -538,3 +539,60 @@ var (
 	russianProse = strings.Repeat("Платёжная ведомость формируется каждую ночь на узле финансовой пакетной обработки. ", 400)
 	chineseProse = strings.Repeat("服务器上的数据库密码存放在内部保险库中，每天晚上由财务批处理节点轮换。", 400)
 )
+
+// Invalid UTF-8 bytes inside a stream are noise the sender controls, as fillers are: the text
+// around them is still the secret.
+var _ = Describe("Invalid bytes interleaved in an encoded stream", func() {
+	var fp *leakguard.Fingerprinter
+	BeforeEach(func() { fp = newFingerprinter(testKey) })
+	prose := "Payroll export job runs nightly on the finance batch node number seven and writes the report file"
+	russian := "Платёжная ведомость формируется каждую ночь на узле финансовой пакетной обработки номер семь"
+
+	// noisy puts num invalid bytes (kinds of them, cycling) in every den characters, spread evenly.
+	noisy := func(s string, num, den int, kinds string) string {
+		var b strings.Builder
+		n := 0
+		for i, r := range []rune(s) {
+			b.WriteRune(r)
+			for ; n < (i+1)*num/den; n++ {
+				b.WriteByte(kinds[n%len(kinds)])
+			}
+		}
+		return b.String()
+	}
+	type share struct{ num, den int }
+	// the shares of the bytes that are invalid: prose is one byte a character, Russian two
+	five, twelve, thirty := share{1, 19}, share{3, 22}, share{3, 7}
+	rFive, rTwelve, rThirty := share{1, 10}, share{1, 4}, share{4, 5}
+	one, many := "\xff", "\xff\xfe\x80\xc0\xf5\xa0"
+
+	DescribeTable("catches",
+		func(private, arg string) {
+			checker := leakguard.TaintChecker{Store: taintedStore(fp, private)}
+			d, err := checker.Check(context.Background(), testScope, fp, []string{arg})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
+		},
+		Entry("prose, 5%, one kind", prose, b64(noisy(prose, five.num, five.den, one))),
+		Entry("prose, 5%, many kinds", prose, b64(noisy(prose, five.num, five.den, many))),
+		Entry("prose, about 12%, one kind", prose, b64(noisy(prose, twelve.num, twelve.den, one))),
+		Entry("prose, about 12%, many kinds", prose, b64(noisy(prose, twelve.num, twelve.den, many))),
+		Entry("prose, about 30%, one kind", prose, b64(noisy(prose, thirty.num, thirty.den, one))),
+		Entry("prose, about 30%, many kinds", prose, b64(noisy(prose, thirty.num, thirty.den, many))),
+		Entry("prose, 30%, many kinds, url alphabet", prose, b64url(noisy(prose, thirty.num, thirty.den, many))),
+		Entry("prose, 12%, hex", prose, hex.EncodeToString([]byte(noisy(prose, twelve.num, twelve.den, many)))),
+		Entry("prose, 12%, base32", prose, base32.StdEncoding.EncodeToString([]byte(noisy(prose, twelve.num, twelve.den, many)))),
+		Entry("russian, 5%, many kinds", russian, b64(noisy(russian, rFive.num, rFive.den, many))),
+		Entry("russian, 12%, many kinds", russian, b64(noisy(russian, rTwelve.num, rTwelve.den, many))),
+		Entry("russian, 30%, many kinds", russian, b64(noisy(russian, rThirty.num, rThirty.den, many))),
+	)
+
+	It("passes base64 of random bytes", func() {
+		checker := leakguard.TaintChecker{Store: taintedStore(fp, prose)}
+		for seed := range 40 {
+			d, err := checker.Check(context.Background(), testScope, fp, []string{b64(randomBytes(seed, 600)), b64(randomBytes(seed+99, 40))})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.Reason).NotTo(Equal(leakguard.ReasonTaint))
+		}
+	})
+})
