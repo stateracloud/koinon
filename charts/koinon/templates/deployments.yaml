@@ -70,7 +70,7 @@ spec:
             httpGet: {path: /healthz, port: health}
           {{- end }}
           {{- if eq $component "api" }}
-          args: ["serve", "--addr", ":{{ $v.port }}", "--otlp-addr", ":{{ $v.otlpPort }}", "--tools-addr", ":{{ $v.toolsPort }}", "--saved-work-addr", ":{{ $v.savedWorkPort }}", "--saved-work-secret", "{{ include "koinon.savedWorkSecretName" $ }}"{{ if $v.durable.enabled }}, "--durable"{{ end }}]
+          args: ["serve", "--addr", ":{{ $v.port }}", "--otlp-addr", ":{{ $v.otlpPort }}", "--tools-addr", ":{{ $v.toolsPort }}", "--saved-work-addr", ":{{ $v.savedWorkPort }}", "--saved-work-secret", "{{ include "koinon.savedWorkSecretName" $ }}", "--guard-addr", ":{{ $v.guardPort }}", "--leak-guard-byte-cap", "{{ int $v.leakGuardByteCap }}"{{ if $v.durable.enabled }}, "--durable"{{ end }}]
           ports:
             - name: http
               containerPort: {{ $v.port }}
@@ -80,6 +80,8 @@ spec:
               containerPort: {{ $v.toolsPort }}
             - name: savedwork
               containerPort: {{ $v.savedWorkPort }}
+            - name: guard
+              containerPort: {{ $v.guardPort }}
             - name: metrics
               containerPort: {{ $.Values.metrics.port }}
           # Until the first migration has run, koinon-api retries its bootstrap without serving;
@@ -241,6 +243,23 @@ spec:
     - name: tools
       port: {{ .Values.api.toolsPort }}
       targetPort: tools
+---
+# The MCP leak guard (ADR 0091), for agentgateway only (see networkpolicy.yaml): the reconciler renders
+# its address into every org MCP route's mcpGuardrails (failClosed).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "koinon.componentName" (list . "api-guard") }}
+  labels:
+    {{- include "koinon.labels" (list . "api") | nindent 4 }}
+spec:
+  selector:
+    {{- include "koinon.selectorLabels" (list . "api") | nindent 4 }}
+  ports:
+    - name: guard
+      port: {{ .Values.api.guardPort }}
+      targetPort: guard
+      appProtocol: kubernetes.io/h2c
 ---
 # Saved work from a stuck sandbox, for koinon-agentd only (ADR 0054; see networkpolicy.yaml). Its own
 # Service and port keep it apart from the tools, which trust agentgateway's agent header.
