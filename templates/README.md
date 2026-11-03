@@ -3,8 +3,14 @@
 Agent templates: building blocks for the agent builder; the result is always a draft (ADR 0020).
 
 - Templates: `repo-helper` and `repo-helper-gitea` (small pull requests), `finops-analyst` (daily cost
-  report from MCP cost servers, no grant), `researcher` (read-only research over several runs) and
+  report from MCP cost servers, no grant), `researcher` (private-only research over repositories, several runs, no web reads),
+  `web-researcher` (web research over several runs, no grant, no private data) and
   `lcm-upgrader` (weekly upgrade proposals, one pull request after a yes).
+- `researcher` and `web-researcher` are split so that no template holds all three legs of ADR 0084
+  (untrusted input, private data, an auto-tier outbound tool). `legs_test.go` fails if a template
+  combines them, except those listed in its `knownAllThree` (today `lcm-upgrader`, which reads
+  release notes through fetch tools next to its repository grant); `testdata/legs/` has the
+  negative fixture.
 - `<id>.yaml`: one template per file, named after `metadata.id`, `apiVersion:
   templates.koinon.dev/v1alpha1`, `kind: Template`.
 - `schema/template.schema.json`: the JSON Schema (2020-12) every template must pass.
