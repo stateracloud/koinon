@@ -16,6 +16,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -118,9 +119,14 @@ func provisionOperatorSecrets(ctx context.Context, cl *cluster, r *rendered) []s
 		needs[name][key] = value
 	}
 	kekCreate := true
+	// With a KMS the key-admin Job creates the KEK Secret (--kek-create), not koinon-api.
+	jobCreatesKEK := false
 	for _, ps := range r.podSpecs() {
 		all := append(append([]corev1.Container{}, ps.InitContainers...), ps.Containers...)
 		for _, c := range all {
+			if slices.Contains(c.Args, "key-admin") && slices.Contains(c.Args, "--kek-create") {
+				jobCreatesKEK = true
+			}
 			for _, e := range c.Env {
 				if e.Name == "KOINON_KEK_CREATE" && e.Value == "false" {
 					kekCreate = false
@@ -155,7 +161,7 @@ func provisionOperatorSecrets(ctx context.Context, cl *cluster, r *rendered) []s
 		}
 	}
 	// An operator-managed KEK Secret (secrets.kek.existingSecret): koinon-api does not create it.
-	if !kekCreate {
+	if !kekCreate && !jobCreatesKEK {
 		for _, ps := range r.podSpecs() {
 			for _, v := range ps.Volumes {
 				if v.Name == "kek" && v.Secret != nil && !have[v.Secret.SecretName] {

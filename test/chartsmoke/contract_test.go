@@ -127,7 +127,15 @@ func configMapFiles(t *testing.T, r *rendered, c podContainer) fileMounts {
 				}
 			}
 			if cm == nil {
-				t.Fatalf("volume %s: ConfigMap %s is not rendered", v.Name, v.ConfigMap.Name)
+				// The operator's own ConfigMap (the OpenBao CA): its keys are the volume's items,
+				// with placeholder content, since only the startup is checked here.
+				if len(v.ConfigMap.Items) == 0 {
+					t.Fatalf("volume %s: ConfigMap %s is not rendered, and the volume names no items an operator's ConfigMap would hold", v.Name, v.ConfigMap.Name)
+				}
+				cm = &corev1.ConfigMap{Data: map[string]string{}}
+				for _, it := range v.ConfigMap.Items {
+					cm.Data[it.Path] = "placeholder-" + it.Key
+				}
 			}
 			dir := t.TempDir()
 			for key, data := range cm.Data {
