@@ -10,6 +10,7 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/sinkclass"
 )
 
 // WithMCP sets the service behind the remote MCP server endpoints (plan item MC1). Without it they
@@ -31,6 +32,11 @@ func toMcpServer(m mcpservers.Server) McpServer {
 		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt, Id: openapi_types.UUID(pgUUID(m.ID).Bytes), Name: m.Name, Url: m.URL,
 		Transport: McpServerTransport(m.Transport), HasCredential: m.HasCredential, Source: Source(m.Source),
 		Health: McpServerHealth(m.Health), HealthCheckedAt: m.HealthCheckedAt, HealthSince: m.HealthSince, ToolsSyncedAt: m.ToolsSyncedAt,
+		Kind: McpServerKind(m.Kind), DataClass: append([]string{}, m.DataClass...),
+	}
+	if m.CodeHostConnectionID != "" {
+		id := openapi_types.UUID(pgUUID(m.CodeHostConnectionID).Bytes)
+		out.CodeHostConnectionId = &id
 	}
 	str := func(s string) *string {
 		if s == "" {
@@ -51,6 +57,10 @@ func toMcpTool(t mcpservers.Tool) McpTool {
 	out := McpTool{
 		ServerId: openapi_types.UUID(pgUUID(t.ServerID).Bytes), Name: t.Name, Description: t.Description, ReadOnlyHint: t.ReadOnlyHint,
 		Tier: McpToolTier(t.Tier), Present: t.Present, ContentHash: t.ContentHash, DescriptionOriginalLength: t.DescriptionOriginalLength, DescriptionCapped: t.DescriptionCapped, DescriptionCleaned: t.DescriptionCleaned, RequiresTwoApprovers: &t.RequiresTwoApprovers, FirstSeenAt: t.FirstSeenAt, LastSeenAt: t.LastSeenAt, TierSetAt: t.TierSetAt,
+		Sink: McpToolSink{
+			SinkClass: string(t.Sink.Class), Derivation: string(t.Sink.Derivation), AddressArgs: append([]string{}, t.Sink.AddressArgs...),
+			ResultUntrustedInput: t.Sink.ResultUntrustedInput, ResultPrivateData: t.Sink.ResultPrivateData,
+		},
 	}
 	if t.ReviewReason != "" {
 		out.ReviewReason = &t.ReviewReason
@@ -103,6 +113,16 @@ func (s *Server) CreateMcpServer(ctx context.Context, req CreateMcpServerRequest
 	}
 	if req.Body.Transport != nil {
 		in.Transport = string(*req.Body.Transport)
+	}
+	if req.Body.Kind != nil || req.Body.DataClass != nil {
+		d := mcpservers.DefaultDeclaration()
+		if req.Body.Kind != nil {
+			d.Kind = string(*req.Body.Kind)
+		}
+		if req.Body.DataClass != nil {
+			d.Legs = *req.Body.DataClass
+		}
+		in.Class = &d
 	}
 	got, err := s.mcp.Create(ctx, p.Org, actor, pgtype.UUID{}, in)
 	if err != nil {
@@ -199,6 +219,25 @@ func (s *Server) SetMcpToolTier(ctx context.Context, req SetMcpToolTierRequestOb
 	return SetMcpToolTier200JSONResponse(toMcpTool(got)), nil
 }
 
+// SetMcpToolSink implements StrictServerInterface.
+func (s *Server) SetMcpToolSink(ctx context.Context, req SetMcpToolSinkRequestObject) (SetMcpToolSinkResponseObject, error) {
+	if s.mcp == nil {
+		st, e := s.noMCP()
+		return SetMcpToolSinkdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	p, actor := s.actor(ctx)
+	b := req.Body
+	got, err := s.mcp.SetToolDeclaration(ctx, p.Org, actor, uid(req.ServerId), req.ToolName, b.ContentHash, sinkclass.Declaration{
+		Class: sinkclass.Class(b.Sink.SinkClass), Derivation: sinkclass.Derivation(b.Sink.Derivation), AddressArgs: b.Sink.AddressArgs,
+		ResultUntrustedInput: b.Sink.ResultUntrustedInput, ResultPrivateData: b.Sink.ResultPrivateData,
+	})
+	if err != nil {
+		st, e := s.problem(err)
+		return SetMcpToolSinkdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	return SetMcpToolSink200JSONResponse(toMcpTool(got)), nil
+}
+
 // SetMcpToolTwoApprovers implements StrictServerInterface.
 func (s *Server) SetMcpToolTwoApprovers(ctx context.Context, req SetMcpToolTwoApproversRequestObject) (SetMcpToolTwoApproversResponseObject, error) {
 	if s.mcp == nil {
@@ -284,4 +323,23 @@ func (s *Server) SetAgentMcpServers(ctx context.Context, req SetAgentMcpServersR
 		return SetAgentMcpServersdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
 	return SetAgentMcpServers200JSONResponse(toAgentMcp(list)), nil
+}
+
+// SetMcpServerDataClass implements StrictServerInterface.
+func (s *Server) SetMcpServerDataClass(ctx context.Context, req SetMcpServerDataClassRequestObject) (SetMcpServerDataClassResponseObject, error) {
+	if s.mcp == nil {
+		st, e := s.noMCP()
+		return SetMcpServerDataClassdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	p, actor := s.actor(ctx)
+	d := mcpservers.Declaration{Kind: string(req.Body.Kind), Legs: req.Body.DataClass}
+	if req.Body.CodeHostConnectionId != nil {
+		d.CodeHostConnection = uid(*req.Body.CodeHostConnectionId)
+	}
+	got, err := s.mcp.SetDataClass(ctx, p.Org, actor, uid(req.ServerId), d)
+	if err != nil {
+		st, e := s.problem(err)
+		return SetMcpServerDataClassdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	return SetMcpServerDataClass200JSONResponse(toMcpServer(got)), nil
 }

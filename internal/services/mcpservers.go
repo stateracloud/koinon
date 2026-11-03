@@ -12,6 +12,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	mcpserverv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/sinkclass"
 )
 
 // The McpServerService is the UI's face of the MCP server service layer (ADR 0057): the same
@@ -53,6 +54,7 @@ func (s *Server) mcpServerProto(org, slug string, m mcpservers.Server) *mcpserve
 		HealthCheckedAt: optTime(m.HealthCheckedAt), HealthSince: optTime(m.HealthSince), ToolsSyncedAt: optTime(m.ToolsSyncedAt),
 		CreatedAt: timestamppb.New(m.CreatedAt), UpdatedAt: timestamppb.New(m.UpdatedAt),
 		GatewayTarget: mcpservers.TargetName(slug, m.Name),
+		Kind:          m.Kind, DataClass: m.DataClass, CodeHostConnectionId: m.CodeHostConnectionID,
 	}
 }
 
@@ -63,6 +65,10 @@ func mcpToolProto(t mcpservers.Tool) *mcpserverv1alpha1.Tool {
 		LastSeenAt: timestamppb.New(t.LastSeenAt), TierSetBy: t.TierSetBy, TierSetAt: optTime(t.TierSetAt),
 		RequiresTwoApprovers: t.RequiresTwoApprovers, ContentHash: t.ContentHash, Unavailable: t.Unavailable,
 		DescriptionOriginalLength: int64(t.DescriptionOriginalLength), DescriptionCapped: t.DescriptionCapped, DescriptionCleaned: t.DescriptionCleaned,
+		Sink: &mcpserverv1alpha1.ToolSink{
+			SinkClass: string(t.Sink.Class), Derivation: string(t.Sink.Derivation), AddressArgs: append([]string{}, t.Sink.AddressArgs...),
+			ResultUntrustedInput: t.Sink.ResultUntrustedInput, ResultPrivateData: t.Sink.ResultPrivateData,
+		},
 	}
 }
 
@@ -116,10 +122,14 @@ func (s *Server) CreateServer(ctx context.Context, req *mcpserverv1alpha1.Create
 	if err != nil {
 		return nil, err
 	}
-	m, err := s.mcp.Create(requestCtx(ctx), c.org, c.auditActor(), c.actor(), mcpservers.Input{
+	in := mcpservers.Input{
 		Name: req.GetName(), URL: req.GetUrl(), Transport: req.GetTransport(), CredentialHeader: req.GetCredentialHeader(),
 		CredentialPrefix: req.GetCredentialPrefix(), CredentialValue: req.GetCredentialValue(),
-	})
+	}
+	if cl := req.GetClass(); cl != nil {
+		in.Class = &mcpservers.Declaration{Kind: cl.GetKind(), Legs: cl.GetDataClass(), CodeHostConnection: cl.GetCodeHostConnectionId()}
+	}
+	m, err := s.mcp.Create(requestCtx(ctx), c.org, c.auditActor(), c.actor(), in)
 	if err != nil {
 		return nil, s.mcpError(err)
 	}
@@ -149,6 +159,24 @@ func (s *Server) UpdateServer(ctx context.Context, req *mcpserverv1alpha1.Update
 		return nil, err
 	}
 	return &mcpserverv1alpha1.UpdateServerResponse{Server: s.mcpServerProto(req.GetOrgId(), slug, m)}, nil
+}
+
+// SetServerClass implements McpServerService. Admins and owners.
+func (s *Server) SetServerClass(ctx context.Context, req *mcpserverv1alpha1.SetServerClassRequest) (*mcpserverv1alpha1.SetServerClassResponse, error) {
+	c, err := s.mcpCaller(ctx, req.GetOrgId())
+	if err != nil {
+		return nil, err
+	}
+	m, err := s.mcp.SetDataClass(requestCtx(ctx), c.org, c.auditActor(), req.GetServerId(),
+		mcpservers.Declaration{Kind: req.GetClass().GetKind(), Legs: req.GetClass().GetDataClass(), CodeHostConnection: req.GetClass().GetCodeHostConnectionId()})
+	if err != nil {
+		return nil, s.mcpError(err)
+	}
+	slug, err := s.orgSlug(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	return &mcpserverv1alpha1.SetServerClassResponse{Server: s.mcpServerProto(req.GetOrgId(), slug, m)}, nil
 }
 
 // DeleteServer implements McpServerService. Admins and owners.
@@ -195,6 +223,26 @@ func (s *Server) SetToolTier(ctx context.Context, req *mcpserverv1alpha1.SetTool
 		return nil, s.mcpError(err)
 	}
 	return &mcpserverv1alpha1.SetToolTierResponse{Tool: mcpToolProto(t)}, nil
+}
+
+// SetToolSink implements McpServerService. Admins and owners.
+func (s *Server) SetToolSink(ctx context.Context, req *mcpserverv1alpha1.SetToolSinkRequest) (*mcpserverv1alpha1.SetToolSinkResponse, error) {
+	c, err := s.mcpCaller(ctx, req.GetOrgId())
+	if err != nil {
+		return nil, err
+	}
+	sk := req.GetSink()
+	if sk == nil {
+		sk = &mcpserverv1alpha1.ToolSink{} // an empty derivation, which Normalize refuses
+	}
+	t, err := s.mcp.SetToolDeclaration(requestCtx(ctx), c.org, c.auditActor(), req.GetServerId(), req.GetTool(), req.GetContentHash(), sinkclass.Declaration{
+		Class: sinkclass.Class(sk.GetSinkClass()), Derivation: sinkclass.Derivation(sk.GetDerivation()), AddressArgs: sk.GetAddressArgs(),
+		ResultUntrustedInput: sk.ResultUntrustedInput, ResultPrivateData: sk.ResultPrivateData,
+	})
+	if err != nil {
+		return nil, s.mcpError(err)
+	}
+	return &mcpserverv1alpha1.SetToolSinkResponse{Tool: mcpToolProto(t)}, nil
 }
 
 // SetToolTwoApprovers implements McpServerService. Admins and owners.

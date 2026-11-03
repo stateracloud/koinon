@@ -394,8 +394,23 @@ func (s *Server) DeleteConnection(ctx context.Context, req *connectionv1alpha1.D
 			}
 			return e
 		}
+		// The foreign key unlinks the MCP servers of this connection (ON DELETE SET NULL); audit each
+		// one, in this transaction, so the loss of the code-host link is never silent.
+		linked, err := q.ListMCPServersLinkedToConnectionForUpdate(rctx, store.ListMCPServersLinkedToConnectionForUpdateParams{OrgID: c.org, ConnectionID: id})
+		if err != nil {
+			return err
+		}
 		if _, err := q.DeleteConnection(rctx, store.DeleteConnectionParams{OrgID: c.org, ID: id}); err != nil {
 			return err
+		}
+		for _, srv := range linked {
+			if err := audit.RecordErr(rctx, q, audit.Event{
+				Org: c.org, Actor: c.auditActor(), Action: "mcp_server.data_class.reset", TargetKind: "mcp_server", TargetID: srv.ID.String(),
+				Before: map[string]any{"name": srv.Name, "codeHostConnectionId": id.String()},
+				After:  map[string]any{"name": srv.Name, "codeHostConnectionId": nil, "reason": "connection_deleted"},
+			}); err != nil {
+				return err
+			}
 		}
 		return audit.RecordErr(rctx, q, audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "connection.delete", TargetKind: "connection", TargetID: id.String(),

@@ -17,6 +17,8 @@ type Querier interface {
 	// (a concurrent duplicate activation re-evaluates the WHERE clause and gets no row).
 	ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error)
 	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
+	// Adding a host that is on the list changes nothing (0 rows).
+	AddOrgFetchTrustedHost(ctx context.Context, arg AddOrgFetchTrustedHostParams) (int64, error)
 	// The question's recipients, when it is created (waiting_since stays NULL until it is opened).
 	AddQuestionRecipients(ctx context.Context, arg AddQuestionRecipientsParams) error
 	// Adds reported token usage to an unfinished run. Tokens are reported, not enforced (ADR 0081):
@@ -172,6 +174,7 @@ type Querier interface {
 	//
 	// Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
+	// A NULL kind or leg is the column default (kind other, both legs: not yet classified).
 	CreateMCPServer(ctx context.Context, arg CreateMCPServerParams) (McpServer, error)
 	CreateModel(ctx context.Context, arg CreateModelParams) (Model, error)
 	CreateOIDCLoginFlow(ctx context.Context, arg CreateOIDCLoginFlowParams) error
@@ -219,6 +222,7 @@ type Querier interface {
 	DeferSpendSettlement(ctx context.Context, arg DeferSpendSettlementParams) error
 	DeleteAgentMCPServers(ctx context.Context, arg DeleteAgentMCPServersParams) error
 	DeleteAgentRunLimits(ctx context.Context, arg DeleteAgentRunLimitsParams) (int64, error)
+	DeleteCodeHostConnectionRepos(ctx context.Context, arg DeleteCodeHostConnectionReposParams) (int64, error)
 	DeleteConnection(ctx context.Context, arg DeleteConnectionParams) (int64, error)
 	// Sweeps records older than the cutoff; sources keep redelivering for a bounded time only.
 	DeleteDedupeRecordsBefore(ctx context.Context, arg DeleteDedupeRecordsBeforeParams) (int64, error)
@@ -230,6 +234,7 @@ type Querier interface {
 	DeleteModel(ctx context.Context, arg DeleteModelParams) (int64, error)
 	// A nonce only matters while its token could still be good (5 minutes); older ones go.
 	DeleteOldUploadNonces(ctx context.Context, orgID pgtype.UUID) (int64, error)
+	DeleteOrgFetchTrustedHost(ctx context.Context, arg DeleteOrgFetchTrustedHostParams) (int64, error)
 	DeletePlatformTraceDestination(ctx context.Context) (int64, error)
 	DeleteProvider(ctx context.Context, arg DeleteProviderParams) (int64, error)
 	DeleteSpendSettlement(ctx context.Context, arg DeleteSpendSettlementParams) error
@@ -245,6 +250,8 @@ type Querier interface {
 	// no run of it is queued (a follow-up message already asked for another turn). No row: the task is
 	// elsewhere (canceled, ended by a person) or has more work queued.
 	EndTaskFrom(ctx context.Context, arg EndTaskFromParams) (Task, error)
+	// Makes sure the org has an org_settings row, so LockOrgSettings has a row to lock.
+	EnsureOrgSettings(ctx context.Context, orgID pgtype.UUID) error
 	// pending -> expired once expires_at has passed (ADR 0049: 7 days).
 	ExpirePendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	// Saved work is kept for 14 days; the sealed files go with it.
@@ -363,6 +370,9 @@ type Querier interface {
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	GetMCPServer(ctx context.Context, arg GetMCPServerParams) (McpServer, error)
 	GetMCPTool(ctx context.Context, arg GetMCPToolParams) (McpTool, error)
+	// Locks the tool row until the transaction ends: a sync that republishes the tool waits, so what an
+	// admin declared is what was read (ADR 0091, the ADR 0057 rule).
+	GetMCPToolForUpdate(ctx context.Context, arg GetMCPToolForUpdateParams) (McpTool, error)
 	GetModel(ctx context.Context, arg GetModelParams) (Model, error)
 	// The enabled model an agent asks for by its plain name, with its provider's type, id and URL and its
 	// wire format, for finding its price and its cache mode.
@@ -598,6 +608,9 @@ type Querier interface {
 	// first loaded it. No key material.
 	ListKEKFingerprints(ctx context.Context) ([]KekFingerprint, error)
 	ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpServer, error)
+	// The servers whose code-host connection is the one being deleted, locked so the delete can audit the
+	// unlink the foreign key (ON DELETE SET NULL) is about to do.
+	ListMCPServersLinkedToConnectionForUpdate(ctx context.Context, arg ListMCPServersLinkedToConnectionForUpdateParams) ([]McpServer, error)
 	// The servers an agent may use that the gateway should serve right now, with the tools it should
 	// list for each by tier, for the live check agentd runs before the harness starts (issue #488). An
 	// unhealthy server is left out: ListMissingMCPServersOfAgent has it already and the planner withdraws
@@ -630,6 +643,16 @@ type Querier interface {
 	ListOrgBudgetRecipients(ctx context.Context, orgID pgtype.UUID) ([]pgtype.UUID, error)
 	// Every live org with its cap, platform ceiling and spend since @since. Platform admins only.
 	ListOrgBudgetSummaries(ctx context.Context, since pgtype.Timestamptz) ([]ListOrgBudgetSummariesRow, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The org's code-host scope: the repositories of its code-host connections with the visibility the
+	// connector last read (ADR 0091 decision 3). Every query takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	// A connection marked removed (its declaring Secret is gone) contributes nothing: its readings may
+	// still be fresh, but the credential behind them is gone, so a repository is not internal through it.
+	ListOrgCodeHostRepos(ctx context.Context, orgID pgtype.UUID) ([]OrgCodeHostRepo, error)
+	// The org's fetch-trusted host list (ADR 0084 decision 5). Empty for a new org.
+	ListOrgFetchTrustedHosts(ctx context.Context, orgID pgtype.UUID) ([]OrgFetchTrustedHost, error)
 	// Every live org, for control-plane sweeps and workers that then work org by
 	// org (koinon-agentd claims runs org by org, so each claim stays org-scoped).
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
@@ -748,6 +771,8 @@ type Querier interface {
 	// principal and sync IdP groups at login), always keyed by user_id.
 	// Serialises bootstrap across API replicas for the rest of the transaction.
 	LockBootstrap(ctx context.Context) error
+	// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
+	LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error)
 	LockPlatformTraceDestination(ctx context.Context) (PlatformTraceDestination, error)
 	// Reads the ceiling and holds the row until the transaction ends, so an org's level and a lowering
 	// of the ceiling cannot pass each other.
@@ -868,6 +893,9 @@ type Querier interface {
 	// claim was spent waiting for the sandbox, so it is credited to parked_seconds and does not count
 	// against the wall-clock cap.
 	RequeueRun(ctx context.Context, arg RequeueRunParams) (Run, error)
+	// The server's URL changed: every tool of it goes back to the default declaration. Returns the tools
+	// whose declaration was not the default already, with what they had, so the caller can audit each.
+	ResetMCPToolDeclarations(ctx context.Context, arg ResetMCPToolDeclarationsParams) ([]ResetMCPToolDeclarationsRow, error)
 	// open -> answered | dismissed | expired. No row: the question is not open (already resolved).
 	ResolveQuestion(ctx context.Context, arg ResolveQuestionParams) (Question, error)
 	// Makes a parked run claimable again (approval decided, input given). It
@@ -924,6 +952,11 @@ type Querier interface {
 	SetKEKBoundOnly(ctx context.Context, setBy string) error
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
+	// What the server exposes (ADR 0084 decision 8). Allowed for every source: a declared server's
+	// Secret does not carry it, and UpdateDeclaredMCPServer leaves it alone.
+	SetMCPServerDataClass(ctx context.Context, arg SetMCPServerDataClassParams) (McpServer, error)
+	// What a tool's calls send and where (ADR 0091 decision 2). Allowed for every source.
+	SetMCPToolDeclaration(ctx context.Context, arg SetMCPToolDeclarationParams) (McpTool, error)
 	SetMCPToolTier(ctx context.Context, arg SetMCPToolTierParams) (McpTool, error)
 	SetMCPToolTwoApprovers(ctx context.Context, arg SetMCPToolTwoApproversParams) (McpTool, error)
 	SetModelDisabled(ctx context.Context, arg SetModelDisabledParams) error
@@ -932,6 +965,9 @@ type Querier interface {
 	// The org's first model becomes its default; a default that is set stays.
 	SetOrgDefaultModelIfUnset(ctx context.Context, arg SetOrgDefaultModelIfUnsetParams) (int64, error)
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
+	// The leak guard's match threshold in characters (ADR 0084 decision 3); NULL is the platform
+	// default. It touches only this column, so the latency and limit overrides stay.
+	SetOrgLeakMatchThreshold(ctx context.Context, arg SetOrgLeakMatchThresholdParams) error
 	// Sets or clears (NULL) the org's monthly cap, keeping its platform ceiling.
 	SetOrgMonthlyCap(ctx context.Context, arg SetOrgMonthlyCapParams) (SetOrgMonthlyCapRow, error)
 	// Sets or clears (NULL) the platform ceiling of an org, keeping its monthly cap.
@@ -1026,6 +1062,8 @@ type Querier interface {
 	// config_version. @set_test says the change was tested and the test columns are recorded; otherwise the
 	// previous test result stays. The router's health columns stay.
 	UpdateTraceDestination(ctx context.Context, arg UpdateTraceDestinationParams) (TraceDestination, error)
+	// One connection's repositories, from parallel arrays (owner, repo and visibility at the same index).
+	UpsertCodeHostRepos(ctx context.Context, arg UpsertCodeHostReposParams) (int64, error)
 	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) error
 	// Grants the roles of every mapping that matches one of the user's groups,
 	// in orgs whose identity mode uses the IdP.

@@ -112,10 +112,16 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 			return err
 		}
 		changed = true
-		return audit.RecordErr(ctx, q, audit.Event{
+		if err := audit.RecordErr(ctx, q, audit.Event{
 			Org: org, Actor: actor, Action: "mcp_server.declare", TargetKind: "mcp_server", TargetID: id.String(),
 			Before: before, After: serverSummary(row),
-		})
+		}); err != nil {
+			return err
+		}
+		if cur != nil {
+			return resetOnURLChange(ctx, q, org, actor, *cur, row)
+		}
+		return nil
 	})
 	if err != nil {
 		return false, mapErr(err)

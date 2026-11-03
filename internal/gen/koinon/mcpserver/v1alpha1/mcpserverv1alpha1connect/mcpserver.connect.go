@@ -35,6 +35,9 @@ const (
 	// McpServerServiceUpdateServerProcedure is the procedure name of the McpServerService's
 	// UpdateServer RPC.
 	McpServerServiceUpdateServerProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/UpdateServer"
+	// McpServerServiceSetServerClassProcedure is the procedure name of the McpServerService's
+	// SetServerClass RPC.
+	McpServerServiceSetServerClassProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/SetServerClass"
 	// McpServerServiceDeleteServerProcedure is the procedure name of the McpServerService's
 	// DeleteServer RPC.
 	McpServerServiceDeleteServerProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/DeleteServer"
@@ -46,6 +49,9 @@ const (
 	// McpServerServiceSetToolTwoApproversProcedure is the procedure name of the McpServerService's
 	// SetToolTwoApprovers RPC.
 	McpServerServiceSetToolTwoApproversProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/SetToolTwoApprovers"
+	// McpServerServiceSetToolSinkProcedure is the procedure name of the McpServerService's SetToolSink
+	// RPC.
+	McpServerServiceSetToolSinkProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/SetToolSink"
 	// McpServerServiceAcknowledgeToolReviewProcedure is the procedure name of the McpServerService's
 	// AcknowledgeToolReview RPC.
 	McpServerServiceAcknowledgeToolReviewProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/AcknowledgeToolReview"
@@ -80,6 +86,13 @@ var (
 			Procedure:  McpServerServiceUpdateServerProcedure,
 		}
 	})
+	mcpServerServiceSetServerClassSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_mcpserver_v1alpha1_mcpserver_proto.Services().ByName("McpServerService").Methods().ByName("SetServerClass"),
+			Procedure:  McpServerServiceSetServerClassProcedure,
+		}
+	})
 	mcpServerServiceDeleteServerSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType: connect.StreamTypeUnary,
@@ -107,6 +120,13 @@ var (
 			StreamType: connect.StreamTypeUnary,
 			Schema:     v1alpha1.File_koinon_mcpserver_v1alpha1_mcpserver_proto.Services().ByName("McpServerService").Methods().ByName("SetToolTwoApprovers"),
 			Procedure:  McpServerServiceSetToolTwoApproversProcedure,
+		}
+	})
+	mcpServerServiceSetToolSinkSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_mcpserver_v1alpha1_mcpserver_proto.Services().ByName("McpServerService").Methods().ByName("SetToolSink"),
+			Procedure:  McpServerServiceSetToolSinkProcedure,
 		}
 	})
 	mcpServerServiceAcknowledgeToolReviewSpec = sync.OnceValue(func() connect.Spec {
@@ -140,6 +160,10 @@ type McpServerServiceClient interface {
 	// INVALID_ARGUMENT (planned for v0.2).
 	CreateServer(context.Context, *v1alpha1.CreateServerRequest) (*v1alpha1.CreateServerResponse, error)
 	UpdateServer(context.Context, *v1alpha1.UpdateServerRequest) (*v1alpha1.UpdateServerResponse, error)
+	// SetServerClass sets what a server exposes: its kind and the legs of the leak guard (ADR 0084) it
+	// carries. It works for declared servers too, which the declaring Secret does not describe. Audited
+	// as mcp_server.data_class.set.
+	SetServerClass(context.Context, *v1alpha1.SetServerClassRequest) (*v1alpha1.SetServerClassResponse, error)
 	// DeleteServer deletes a server entered here, with its tools and the agents' allowances of it. A
 	// declared server can be deleted only after its Secret was deleted (removed).
 	DeleteServer(context.Context, *v1alpha1.DeleteServerRequest) (*v1alpha1.DeleteServerResponse, error)
@@ -150,6 +174,12 @@ type McpServerServiceClient interface {
 	// SetToolTwoApprovers turns on or off the requirement that a call to the tool in the ask tier needs
 	// two approvers: distinct admins or owners, neither the ticket's creator. Off by default.
 	SetToolTwoApprovers(context.Context, *v1alpha1.SetToolTwoApproversRequest) (*v1alpha1.SetToolTwoApproversResponse, error)
+	// SetToolSink declares a tool's sink class, address arguments and result legs (ADR 0091). The
+	// request names the content hash of the tool the admin reviewed; if the server republished the tool
+	// since, the call fails with ABORTED (HTTP 409) and nothing changes. Audited as
+	// mcp_tool.declaration.set. A changed server URL or tool content hash puts the declaration back to
+	// the default, audited as mcp_tool.declaration.reset.
+	SetToolSink(context.Context, *v1alpha1.SetToolSinkRequest) (*v1alpha1.SetToolSinkResponse, error)
 	// AcknowledgeToolReview clears a tool's review flag without changing its tier.
 	AcknowledgeToolReview(context.Context, *v1alpha1.AcknowledgeToolReviewRequest) (*v1alpha1.AcknowledgeToolReviewResponse, error)
 	// GetAgentServers returns the servers an agent may use.
@@ -172,6 +202,10 @@ type McpServerServiceHandler interface {
 	// INVALID_ARGUMENT (planned for v0.2).
 	CreateServer(context.Context, *v1alpha1.CreateServerRequest) (*v1alpha1.CreateServerResponse, error)
 	UpdateServer(context.Context, *v1alpha1.UpdateServerRequest) (*v1alpha1.UpdateServerResponse, error)
+	// SetServerClass sets what a server exposes: its kind and the legs of the leak guard (ADR 0084) it
+	// carries. It works for declared servers too, which the declaring Secret does not describe. Audited
+	// as mcp_server.data_class.set.
+	SetServerClass(context.Context, *v1alpha1.SetServerClassRequest) (*v1alpha1.SetServerClassResponse, error)
 	// DeleteServer deletes a server entered here, with its tools and the agents' allowances of it. A
 	// declared server can be deleted only after its Secret was deleted (removed).
 	DeleteServer(context.Context, *v1alpha1.DeleteServerRequest) (*v1alpha1.DeleteServerResponse, error)
@@ -182,6 +216,12 @@ type McpServerServiceHandler interface {
 	// SetToolTwoApprovers turns on or off the requirement that a call to the tool in the ask tier needs
 	// two approvers: distinct admins or owners, neither the ticket's creator. Off by default.
 	SetToolTwoApprovers(context.Context, *v1alpha1.SetToolTwoApproversRequest) (*v1alpha1.SetToolTwoApproversResponse, error)
+	// SetToolSink declares a tool's sink class, address arguments and result legs (ADR 0091). The
+	// request names the content hash of the tool the admin reviewed; if the server republished the tool
+	// since, the call fails with ABORTED (HTTP 409) and nothing changes. Audited as
+	// mcp_tool.declaration.set. A changed server URL or tool content hash puts the declaration back to
+	// the default, audited as mcp_tool.declaration.reset.
+	SetToolSink(context.Context, *v1alpha1.SetToolSinkRequest) (*v1alpha1.SetToolSinkResponse, error)
 	// AcknowledgeToolReview clears a tool's review flag without changing its tier.
 	AcknowledgeToolReview(context.Context, *v1alpha1.AcknowledgeToolReviewRequest) (*v1alpha1.AcknowledgeToolReviewResponse, error)
 	// GetAgentServers returns the servers an agent may use.
@@ -198,10 +238,12 @@ func RegisterMcpServerServiceHandler(server *connect.Server, svc McpServerServic
 		connect.Method{Spec: mcpServerServiceListServersSpec(), Handler: adapter.listServers},
 		connect.Method{Spec: mcpServerServiceCreateServerSpec(), Handler: adapter.createServer},
 		connect.Method{Spec: mcpServerServiceUpdateServerSpec(), Handler: adapter.updateServer},
+		connect.Method{Spec: mcpServerServiceSetServerClassSpec(), Handler: adapter.setServerClass},
 		connect.Method{Spec: mcpServerServiceDeleteServerSpec(), Handler: adapter.deleteServer},
 		connect.Method{Spec: mcpServerServiceListToolsSpec(), Handler: adapter.listTools},
 		connect.Method{Spec: mcpServerServiceSetToolTierSpec(), Handler: adapter.setToolTier},
 		connect.Method{Spec: mcpServerServiceSetToolTwoApproversSpec(), Handler: adapter.setToolTwoApprovers},
+		connect.Method{Spec: mcpServerServiceSetToolSinkSpec(), Handler: adapter.setToolSink},
 		connect.Method{Spec: mcpServerServiceAcknowledgeToolReviewSpec(), Handler: adapter.acknowledgeToolReview},
 		connect.Method{Spec: mcpServerServiceGetAgentServersSpec(), Handler: adapter.getAgentServers},
 		connect.Method{Spec: mcpServerServiceSetAgentServersSpec(), Handler: adapter.setAgentServers},
@@ -223,6 +265,10 @@ func (UnimplementedMcpServerServiceHandler) UpdateServer(context.Context, *v1alp
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.mcpserver.v1alpha1.McpServerService.UpdateServer is not implemented")
 }
 
+func (UnimplementedMcpServerServiceHandler) SetServerClass(context.Context, *v1alpha1.SetServerClassRequest) (*v1alpha1.SetServerClassResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.mcpserver.v1alpha1.McpServerService.SetServerClass is not implemented")
+}
+
 func (UnimplementedMcpServerServiceHandler) DeleteServer(context.Context, *v1alpha1.DeleteServerRequest) (*v1alpha1.DeleteServerResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.mcpserver.v1alpha1.McpServerService.DeleteServer is not implemented")
 }
@@ -237,6 +283,10 @@ func (UnimplementedMcpServerServiceHandler) SetToolTier(context.Context, *v1alph
 
 func (UnimplementedMcpServerServiceHandler) SetToolTwoApprovers(context.Context, *v1alpha1.SetToolTwoApproversRequest) (*v1alpha1.SetToolTwoApproversResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.mcpserver.v1alpha1.McpServerService.SetToolTwoApprovers is not implemented")
+}
+
+func (UnimplementedMcpServerServiceHandler) SetToolSink(context.Context, *v1alpha1.SetToolSinkRequest) (*v1alpha1.SetToolSinkResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.mcpserver.v1alpha1.McpServerService.SetToolSink is not implemented")
 }
 
 func (UnimplementedMcpServerServiceHandler) AcknowledgeToolReview(context.Context, *v1alpha1.AcknowledgeToolReviewRequest) (*v1alpha1.AcknowledgeToolReviewResponse, error) {
@@ -279,6 +329,14 @@ func (c *mcpServerServiceClient) UpdateServer(ctx context.Context, req *v1alpha1
 	return &res, nil
 }
 
+func (c *mcpServerServiceClient) SetServerClass(ctx context.Context, req *v1alpha1.SetServerClassRequest) (*v1alpha1.SetServerClassResponse, error) {
+	var res v1alpha1.SetServerClassResponse
+	if err := c.client.CallUnary(ctx, mcpServerServiceSetServerClassSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
 func (c *mcpServerServiceClient) DeleteServer(ctx context.Context, req *v1alpha1.DeleteServerRequest) (*v1alpha1.DeleteServerResponse, error) {
 	var res v1alpha1.DeleteServerResponse
 	if err := c.client.CallUnary(ctx, mcpServerServiceDeleteServerSpec(), req, &res); err != nil {
@@ -306,6 +364,14 @@ func (c *mcpServerServiceClient) SetToolTier(ctx context.Context, req *v1alpha1.
 func (c *mcpServerServiceClient) SetToolTwoApprovers(ctx context.Context, req *v1alpha1.SetToolTwoApproversRequest) (*v1alpha1.SetToolTwoApproversResponse, error) {
 	var res v1alpha1.SetToolTwoApproversResponse
 	if err := c.client.CallUnary(ctx, mcpServerServiceSetToolTwoApproversSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *mcpServerServiceClient) SetToolSink(ctx context.Context, req *v1alpha1.SetToolSinkRequest) (*v1alpha1.SetToolSinkResponse, error) {
+	var res v1alpha1.SetToolSinkResponse
+	if err := c.client.CallUnary(ctx, mcpServerServiceSetToolSinkSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -373,6 +439,18 @@ func (h mcpServerServiceHandler) updateServer(ctx context.Context, _ connect.Spe
 	return stream.Send(res)
 }
 
+func (h mcpServerServiceHandler) setServerClass(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetServerClassRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetServerClass(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
 func (h mcpServerServiceHandler) deleteServer(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
 	var req v1alpha1.DeleteServerRequest
 	if err := stream.Receive(&req); err != nil {
@@ -415,6 +493,18 @@ func (h mcpServerServiceHandler) setToolTwoApprovers(ctx context.Context, _ conn
 		return err
 	}
 	res, err := h.svc.SetToolTwoApprovers(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h mcpServerServiceHandler) setToolSink(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetToolSinkRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetToolSink(ctx, &req)
 	if err != nil {
 		return err
 	}
