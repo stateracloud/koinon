@@ -128,9 +128,7 @@ var _ = Describe("Settings that change while spans wait", func() {
 		Eventually(e.r.QueueCount).Should(BeZero(), "the worker idled out")
 		_, fail, _ := e.health.counts()
 		Expect(fail).To(BeNumerically("<=", 2), "the error, and the drop; not one write per interval")
-		time.Sleep(100 * time.Millisecond)
-		_, fail2, _ := e.health.counts()
-		Expect(fail2).To(Equal(fail))
+		Consistently(func() int { _, f, _ := e.health.counts(); return f }, 100*time.Millisecond).Should(Equal(fail))
 	})
 
 	It("keeps a transfer target's name out at level none", func() {
