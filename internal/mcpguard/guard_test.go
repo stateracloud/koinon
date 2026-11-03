@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gen/agentgateway/extmcp"
+	"github.com/stateracloud/koinon/internal/leakguard"
 	"github.com/stateracloud/koinon/internal/mcpask"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/mcpservers"
@@ -285,6 +286,55 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		var risk []byte
 		Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE org_id = $1`, org).Scan(&risk)).To(Succeed())
 		Expect(string(risk)).To(ContainSubstring(`"taint"`))
+	})
+
+	Describe("one result that carries the same text more than once", func() {
+		// Winnow dedupes within one text, not across the texts of one result: agentd reports a
+		// tool's content and its raw output (the same text, from opencode), and an edit's old and
+		// new text, which share most lines. One statement may not upsert a row twice (SQLSTATE
+		// 21000): before the fix every such report failed, and agentd gave the run up, takeover
+		// after takeover, until it failed (lab e2e step 6b on 1657dd6).
+		fpCount := func(ctx SpecContext) int {
+			GinkgoHelper()
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM leak_guard_fingerprints WHERE org_id = $1 AND agent_id = $2`,
+				org, agent.ID).Scan(&n)).To(Succeed())
+			return n
+		}
+
+		It("stores each fingerprint once when one add carries it more than once", func(ctx SpecContext) {
+			st := mcpguard.NewState(pool, 0, nil)
+			sess := mcpguard.Session{Org: org, Agent: agent.ID, Generation: "gen-" + slug}
+			Expect(st.AddFingerprints(ctx, sess, mcpguard.Legs{PrivateData: true}, []leakguard.Fingerprint{5, 6, 5, 5, 7, 6})).To(Succeed())
+			Expect(fpCount(ctx)).To(Equal(3))
+		})
+
+		It("takes agentd's report of a tool's content and raw output, and of an edit's two sides", func(ctx SpecContext) {
+			feed := mcpguard.NewFeed(pool, nil)
+			Expect(feed.Report(ctx, org, agent.ID, mcpguard.Legs{PrivateData: true}, []string{secretPage, secretPage})).To(Succeed())
+			both := fpCount(ctx)
+			Expect(both).To(BeNumerically(">", 0))
+			Expect(feed.Report(ctx, org, agent.ID, mcpguard.Legs{PrivateData: true}, []string{secretPage})).To(Succeed())
+			Expect(fpCount(ctx)).To(Equal(both), "the same fingerprints, each held once")
+			edited := strings.Replace(secretPage, "eleven percent", "twelve percent", 1)
+			Expect(feed.Report(ctx, org, agent.ID, mcpguard.Legs{PrivateData: true}, []string{secretPage, edited})).To(Succeed())
+
+			r := call(ctx, "tracker", "post_message", map[string]any{"text": "fyi: " + secretPage[40:300]})
+			Expect(reason(r)).To(HavePrefix("approval requested"), "its text is still caught")
+		})
+
+		It("lets an MCP result with the same text in two content items through, and records it", func(ctx SpecContext) {
+			item := map[string]any{"type": "text", "text": secretPage}
+			body, err := json.Marshal(map[string]any{"content": []any{item, item}})
+			Expect(err).NotTo(HaveOccurred())
+			res, err := srv.CheckResponse(ctx, &extmcp.McpResponse{
+				ServiceNames: []string{mcpservers.TargetName(slug, "wiki")}, Method: "tools/call",
+				MetadataContext: meta(me(), "read_page"), McpResponse: body,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetPass()).NotTo(BeNil(), res.GetError().GetReason())
+			Expect(fpCount(ctx)).To(BeNumerically(">", 0))
+		})
 	})
 
 	Describe("waiting for agentd's feed (ADR 0091 decision 4, amendment 2026-11-03)", func() {

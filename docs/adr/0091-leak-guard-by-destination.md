@@ -157,6 +157,13 @@ How the wait works, and what it leaves open (#349 review, 2026-11-03):
   reports are not waited for: the new worker loads the session, and the harness replays its history
   as updates, each counted and reported again, before it answers the load; the guard sees the new
   harness's calls only after that. Reports are idempotent (legs only grow, fingerprints are a set).
+- **One report may repeat its own fingerprints.** A tool's update carries its text as content and
+  again as raw output, and an edit's two sides share most lines, so the texts of one report winnow
+  to the same fingerprints more than once. The store holds each once and its write takes the
+  repeats in one statement; a store that refuses them fails every report of such a tool, and the
+  run is given up worker after worker. A feed write that fails gives the run up whatever the
+  error, as a business event does (ADR 0074): telling a deterministic error from a transient one is
+  left to a classification shared with the run's event writes.
 - **A call outside a task adds no leg.** With no running run there is no feed to wait for and no
   leg is assumed: the call is decided on the legs the generation holds. Those are what earlier tasks
   left, and they only grow, so an `external-high` call outside a task from a generation that holds

@@ -16,7 +16,10 @@ type Querier interface {
 	// (a trigger-only proposal, ADR 0066). No row: archived, or the agent already runs this version
 	// (a concurrent duplicate activation re-evaluates the WHERE clause and gets no row).
 	ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error)
-	// Adding a fingerprint again makes it new, so the eviction keeps what the session saw last.
+	// Adding a fingerprint again makes it new, so the eviction keeps what the session saw last. The
+	// DISTINCT is needed: the texts of one result winnow to the same fingerprints more than once (a
+	// tool's content and raw output), and ON CONFLICT DO UPDATE refuses to touch a row twice in one
+	// statement (SQLSTATE 21000).
 	AddLeakGuardFingerprints(ctx context.Context, arg AddLeakGuardFingerprintsParams) (int64, error)
 	// The legs only grow: a leg already set stays set whatever @untrusted_input and @private_data say.
 	AddLeakGuardLegs(ctx context.Context, arg AddLeakGuardLegsParams) (LeakGuardSession, error)

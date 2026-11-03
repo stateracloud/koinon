@@ -13,8 +13,8 @@ import (
 
 const addLeakGuardFingerprints = `-- name: AddLeakGuardFingerprints :execrows
 INSERT INTO leak_guard_fingerprints (org_id, agent_id, generation, fp, added_at)
-SELECT $1, $2, $3, f, now()
-FROM unnest($4::bigint[]) AS f
+SELECT $1, $2, $3, u.f, now()
+FROM (SELECT DISTINCT unnest($4::bigint[]) AS f) AS u
 ON CONFLICT (org_id, agent_id, generation, fp) DO UPDATE SET added_at = EXCLUDED.added_at
 `
 
@@ -25,7 +25,10 @@ type AddLeakGuardFingerprintsParams struct {
 	Fps        []int64
 }
 
-// Adding a fingerprint again makes it new, so the eviction keeps what the session saw last.
+// Adding a fingerprint again makes it new, so the eviction keeps what the session saw last. The
+// DISTINCT is needed: the texts of one result winnow to the same fingerprints more than once (a
+// tool's content and raw output), and ON CONFLICT DO UPDATE refuses to touch a row twice in one
+// statement (SQLSTATE 21000).
 func (q *Queries) AddLeakGuardFingerprints(ctx context.Context, arg AddLeakGuardFingerprintsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, addLeakGuardFingerprints,
 		arg.OrgID,
