@@ -37,6 +37,8 @@ import (
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/savedwork"
@@ -121,6 +123,9 @@ type Tool struct {
 	Yes bool
 	// SecretName names the Secret in Export's manifest (default ExportName).
 	SecretName string
+	// Wrappers are the key-wrapping keys, for the reachability line of status; the zero value is the
+	// local KEK alone.
+	Wrappers secretstore.Wrappers
 }
 
 // confirm asks unless there is nobody to ask or --yes was given.
@@ -209,6 +214,9 @@ func ageFromID(id string) (time.Time, bool) {
 func (t *Tool) Status(ctx context.Context) error {
 	ks, err := t.Store.Load(ctx)
 	if err != nil {
+		if errors.Is(err, secretstore.ErrUnreachable) && ks.Stored != nil {
+			t.reachability(ctx, ks)
+		}
 		return err
 	}
 	usage, err := t.Usage(ctx)
@@ -257,6 +265,47 @@ func (t *Tool) Status(ctx context.Context) error {
 	for _, id := range ids {
 		if ks.Keys[id] == nil {
 			_, _ = fmt.Fprintf(t.Out, "WARNING: %d value(s) are wrapped by KEK %s, which is not in the key set. They cannot be opened until the key is restored from your backup.\n", usage[id], id)
+		}
+	}
+	t.reachability(ctx, ks)
+	return t.fingerprintCheck(ctx, ks)
+}
+
+// reachability prints whether the active KEK's wrapping key answers a probe, and warns about a
+// local active KEK on an install that opted in to a KMS (never on a local-only one).
+func (t *Tool) reachability(ctx context.Context, ks KeySet) {
+	active, ok := ks.Stored[ks.Active]
+	if !ok {
+		active = secretstore.StoredKEK{Backend: secretstore.BackendLocal}
+	}
+	if err := t.Wrappers.Probe(ctx, active); err != nil {
+		_, _ = fmt.Fprintf(t.Out, "WARNING: the key-wrapping key of the active KEK %s (%s) is unreachable: %v. Values wrapped by it cannot be opened until it answers.\n", ks.Active, active, err)
+	} else {
+		_, _ = fmt.Fprintf(t.Out, "The key-wrapping key of the active KEK %s (%s) is reachable.\n", ks.Active, active)
+	}
+	if active.Backend == secretstore.BackendLocal && t.Wrappers.Primary().Backend() != secretstore.BackendLocal {
+		_, _ = fmt.Fprintf(t.Out, "WARNING: the active KEK %s is a local key but a KMS (%s) is configured. Ask the key-admin Job to add a KEK, then activate it.\n", ks.Active, t.Wrappers.Primary().Backend())
+	}
+}
+
+// fingerprintCheck compares the loaded KEKs with the fingerprints the database recorded for their
+// IDs, and warns about a difference: a restored or wrong KEK Secret. Without a database it says so.
+func (t *Tool) fingerprintCheck(ctx context.Context, ks KeySet) error {
+	if t.Pool == nil {
+		return nil
+	}
+	rec := kekhealth.Recorder{Q: store.New(t.Pool)}
+	recorded, err := rec.Recorded(ctx)
+	if err != nil {
+		return err
+	}
+	for _, id := range slices.Sorted(maps.Keys(ks.Keys)) {
+		r, ok := recorded[id]
+		if !ok {
+			continue
+		}
+		if fp := secretstore.Fingerprint(ks.Keys[id]); fp != r.Fingerprint {
+			_, _ = fmt.Fprintf(t.Out, "WARNING: KEK %s has fingerprint %s, but the database recorded %s for it. This is not the key the database was written with: a restored or wrong KEK Secret opens nothing. Restore the right one from your backup.\n", id, fp, r.Fingerprint)
 		}
 	}
 	return nil
@@ -374,6 +423,11 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 	if _, ok := ks.Keys[id]; !ok {
 		return fmt.Errorf("KEK %s is not in the key set", id)
 	}
+	// An install that opted in to a KMS never activates a local KEK (procoduck, 2026-11-03). To roll back,
+	// set the configured primary to local first (docs/ops/secret-keys.md), then activate.
+	if p := t.Wrappers.Primary(); p.Backend() != secretstore.BackendLocal && ks.Stored[id].Backend == secretstore.BackendLocal {
+		return fmt.Errorf("KEK %s is a local key and the KMS %s is configured; activate a KEK wrapped by the KMS (ask the key-admin Job to add one), or switch the configured wrapping to local first to roll back", id, p.Backend())
+	}
 	if err := t.confirm(ctx, fmt.Sprintf("Activate %s?", id), "New values use it within about a minute."); err != nil {
 		return err
 	}
@@ -381,8 +435,37 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 	if err := t.Store.Save(ctx, ks); err != nil {
 		return err
 	}
+	t.recordActivation(ctx, ks)
 	_, _ = fmt.Fprintf(t.Out, "KEK %s is active. Wait for the pods to pick it up (about a minute), then run: koinon-api keys rewrap\n", id)
 	return nil
+}
+
+// recordActivation records the fingerprints of the key set and the activation time in the database,
+// when there is one. The activation itself has happened, so a failure is printed, not returned.
+func (t *Tool) recordActivation(ctx context.Context, ks KeySet) {
+	if t.Pool == nil {
+		return
+	}
+	l := secretstore.NewLoaded(ks.Stored, ks.Active, ks.Keys, nil)
+	l.ActivatedAt = ks.ActivatedAt
+	// A KEK added in this process has no stored form yet; Save wrapped it, so describe it as the store's primary does.
+	stored := make(map[string]secretstore.StoredKEK, len(ks.Keys))
+	for kid := range ks.Keys {
+		if s, ok := ks.Stored[kid]; ok {
+			stored[kid] = s
+		} else {
+			p := t.Wrappers.Primary()
+			stored[kid] = secretstore.StoredKEK{Backend: p.Backend(), KeyID: p.KeyID()}
+		}
+	}
+	l.Stored = stored
+	mismatches, err := kekhealth.Recorder{Q: store.New(t.Pool)}.Record(ctx, l)
+	if err != nil {
+		_, _ = fmt.Fprintf(t.Out, "WARNING: the KEK fingerprints were not recorded in the database: %v\n", err)
+	}
+	for _, m := range mismatches {
+		_, _ = fmt.Fprintf(t.Out, "WARNING: KEK %s has fingerprint %s, but the database recorded %s for it.\n", m.KEKID, m.Loaded, m.Recorded)
+	}
 }
 
 // pickInactive lists the KEKs that are not active, with their age and (when there is a database)

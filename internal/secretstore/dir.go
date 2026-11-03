@@ -96,12 +96,13 @@ func ReadDir(dir string) (keys map[string]StoredKEK, active string, err error) {
 }
 
 // openDir reads and unwraps a KEK directory.
-func openDir(ctx context.Context, dir string, ws Wrappers) (map[string][]byte, string, error) {
+func openDir(ctx context.Context, dir string, ws Wrappers, obs []Observer) (map[string][]byte, string, error) {
 	stored, active, err := ReadDir(dir)
 	if err != nil {
 		return nil, "", err
 	}
 	keys, err := ws.UnwrapAll(ctx, stored)
+	notify(ctx, obs, NewLoaded(stored, active, keys, err))
 	if err != nil {
 		return nil, "", fmt.Errorf("secretstore: %s: %w", dir, err)
 	}
@@ -109,9 +110,9 @@ func openDir(ctx context.Context, dir string, ws Wrappers) (map[string][]byte, s
 }
 
 // LoadDir returns a keyring of the KEK directory, its KEKs unwrapped by ws (the zero Wrappers
-// read [Local] KEKs only).
-func LoadDir(ctx context.Context, dir string, ws Wrappers) (*Keyring, error) {
-	keys, active, err := openDir(ctx, dir, ws)
+// read [Local] KEKs only). Each observer is told what the load found.
+func LoadDir(ctx context.Context, dir string, ws Wrappers, obs ...Observer) (*Keyring, error) {
+	keys, active, err := openDir(ctx, dir, ws, obs)
 	if err != nil {
 		return nil, err
 	}
@@ -129,8 +130,8 @@ func clearKeys(keys map[string][]byte) {
 // Reload re-reads the directory into k. A failed reload keeps the old keys.
 // Callers run it on a timer so a mounted Secret's changes (kubelet propagates
 // them within about a minute) apply without a restart.
-func (k *Keyring) Reload(ctx context.Context, dir string, ws Wrappers) error {
-	keys, active, err := openDir(ctx, dir, ws)
+func (k *Keyring) Reload(ctx context.Context, dir string, ws Wrappers, obs ...Observer) error {
+	keys, active, err := openDir(ctx, dir, ws, obs)
 	if err != nil {
 		return err
 	}
@@ -139,8 +140,9 @@ func (k *Keyring) Reload(ctx context.Context, dir string, ws Wrappers) error {
 }
 
 // WatchDir reloads the directory every interval until ctx ends, so a changed Secret applies
-// without a restart. A failed reload is logged and the old keys stay.
-func (k *Keyring) WatchDir(ctx context.Context, dir string, ws Wrappers, interval time.Duration, log *slog.Logger) {
+// without a restart. A failed reload is logged and the old keys stay. Each observer is told what
+// every reload found, including a reload whose KEKs could not be unwrapped.
+func (k *Keyring) WatchDir(ctx context.Context, dir string, ws Wrappers, interval time.Duration, log *slog.Logger, obs ...Observer) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	prev := k.Active()
@@ -149,7 +151,7 @@ func (k *Keyring) WatchDir(ctx context.Context, dir string, ws Wrappers, interva
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := k.Reload(ctx, dir, ws); err != nil {
+			if err := k.Reload(ctx, dir, ws, obs...); err != nil {
 				log.Warn("reloading the key-encryption keys failed; keeping the previous ones", "err", err)
 				continue
 			}

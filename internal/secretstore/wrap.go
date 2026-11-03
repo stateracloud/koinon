@@ -46,7 +46,8 @@ type Wrapper interface {
 	Unwrap(ctx context.Context, wrapped, aad []byte) ([]byte, error)
 	// Probe reports, without changing anything, whether the wrapping key is reachable and usable by
 	// this process (nil), or why not (wrapping [ErrUnreachable]). It needs no right beyond decrypt.
-	// Nothing calls it on a timer yet: the unreachable-key metric that will is 415b.
+	// The watch loops of koinon-api and the reconciler call it on every reload of the key set
+	// (internal/kekhealth, koinon_kek_active_reachable).
 	Probe(ctx context.Context) error
 }
 
@@ -319,8 +320,8 @@ func (ws Wrappers) Probe(ctx context.Context, s StoredKEK) error {
 
 // Fingerprint identifies a KEK without revealing it: the first 16 bytes of HMAC-SHA256 keyed by
 // the KEK over a fixed label, in hex. It is the same however the KEK is wrapped. Today "keys
-// status" and "keys export" print it, so a backup can be matched with the live key set; recording
-// it in the database is 415b.
+// status" and "keys export" print it, so a backup can be matched with the live key set, and
+// koinon-api records it in the database (kek_fingerprints) so a wrong KEK Secret is noticed.
 func Fingerprint(kek []byte) string {
 	m := hmac.New(sha256.New, kek)
 	_, _ = m.Write([]byte("koinon/secretstore/kek-fingerprint/v1"))
