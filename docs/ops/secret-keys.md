@@ -247,8 +247,9 @@ it (the default provider URL check still applies).
 A KMS is an option, not a mandate. The default keeps the KEKs in the Kubernetes Secret, as described
 above; it is fully supported and nothing here asks you to move. An install can opt in to have a KMS
 (OpenBao/Vault transit, #416, or AWS KMS, #417) wrap each KEK, so the Secret holds only ciphertext
-that is useless without the KMS. The adapters are not released yet; this release only has the
-groundwork, so there is no setting to turn on.
+that is useless without the KMS. The OpenBao adapter is in the binaries (`--kek-backend=openbao`),
+but its chart settings and the key-admin Job are not released yet (#416), so there is no chart
+setting to turn on; AWS KMS follows (#417).
 
 What changes once you opt in (ADR 0085 decision 12):
 

@@ -308,6 +308,11 @@ Implementation-level unknowns, to settle in the sub-issues:
     wrapped KEK is bound to its ID. `Wrappers` reads each stored KEK with its own adapter (`Local` is
     always readable), so an install that opts in moves by add (wrapped by the KMS), `activate`,
     `rewrap`, `retire`.
+  - Remote adapters share `secretstore/remotekms` (#416): the per-call bound, the error rules, and
+    a frame (version, SHA-256 of the AAD, KEK) that the KMS encrypts, so the binding of a KEK to its
+    ID does not depend on the KMS honouring associated data. OpenBao's key-admin policy grants
+    `update` on `transit/encrypt/<key>` and `transit/decrypt/<key>`, never `create`: with `create`,
+    encrypt makes a missing key on the spot, so a mistyped key name would wrap under a new key.
   - Identity: adapters sign in with the pod's identity (OpenBao Kubernetes auth, the AWS default
     chain with IRSA; Andre, 2026-11-02), so no credential is in Helm values, env or a sandbox.
   - Only once a KMS primary is configured: koinon-api (with its `keys` commands) and the reconciler
@@ -316,7 +321,8 @@ Implementation-level unknowns, to settle in the sub-issues:
     and rotation (Andre, 2026-11-02). The services refuse to wrap with a KMS
     (`secretstore.ErrKeyAdminWraps`, "new KEKs are wrapped by the key-admin Job") before they call
     it. A local install has no key-admin Job: koinon-api creates and adds KEKs exactly as before.
-    415a has the refusal; the Job and its chart wiring come with the first adapter (#416).
+    415a has the refusal; the Job, its service account and its chart wiring are part of #416, with
+    the first adapter (OpenBao transit, `secretstore/openbao`).
   - Fingerprint: decision 12 said the wrapping keys' fingerprints; the code fingerprints the KEKs
     (`secretstore.Fingerprint`, HMAC-SHA256 keyed by the KEK, 16 bytes). A KEK's fingerprint is the
     same however it is wrapped: a KEK's fingerprint does not depend on its wrapping, so an export
@@ -328,7 +334,7 @@ Implementation-level unknowns, to settle in the sub-issues:
     when a KMS is configured; `keys activate` refuses a local KEK while a KMS is the configured primary (Andre, 2026-11-03; rollback: set the primary to local first). koinon-api and the reconciler probe the active KEK's wrapper on every
     reload and export `koinon_kek_active_reachable{backend}`; the reconciler records nothing. Rows of
     retired KEKs are kept: IDs are never reused and `keys forget` needs the history. Binding an
-    install ID into the KEK AAD is deferred to #416. If the KMS is down at start the pod exits (fail
+    install ID into the KEK AAD is #615 (split off #416, Andre 2026-11-03). If the KMS is down at start the pod exits (fail
     closed) and the gauge never shows 0.
     agentd holds no keyring (it asks koinon-api for repository passwords), so it needs no adapter.
   - N-1 and rollback: once a KMS-wrapped KEK is in the Secret, a binary from before 415a cannot parse
