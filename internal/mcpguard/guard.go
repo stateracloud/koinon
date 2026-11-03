@@ -224,63 +224,105 @@ func (g *Guard) Check(ctx context.Context, call Call) Outcome {
 	start := g.now()
 	ctx, cancel := context.WithTimeout(ctx, Deadline)
 	defer cancel()
-	out, class, err := g.check(ctx, call)
+	var f decisionFacts
+	out, err := g.check(ctx, call, &f)
 	if err != nil {
 		g.log.Error("mcp guard: check failed", "target", call.Target, "tool", call.Tool, "err", err)
 		out = refuse(ReasonError, errText)
 	}
+	class := string(f.class)
 	g.metrics.decided(out.Verdict, class, g.now().Sub(start))
+	g.logDecision(call, out, f)
 	return out
 }
 
-func (g *Guard) check(ctx context.Context, call Call) (Outcome, string, error) {
+// decisionFacts is what the guard knew when it decided a call, for its log line: never the
+// arguments or the payload.
+type decisionFacts struct {
+	class sinkclass.Class
+	// legs is set once the session's legs were read.
+	legs *Legs
+	// run is "found" or "none" once the guard looked for the agent's running run, else empty.
+	run         string
+	feedStalled bool
+}
+
+// logDecision logs every refusal and every call sent to a person (an ask target or an approval),
+// at info: the reason codes, the class, the legs, whether a run was found and whether the feed
+// stalled. No argument value and no payload is logged.
+func (g *Guard) logDecision(call Call, out Outcome, f decisionFacts) {
+	v := out.Verdict
+	if v.Action == Pass && v.Reason != ReasonAskTarget {
+		return
+	}
+	attrs := []any{
+		"target", call.Target, "tool", call.Tool, "action", string(v.Action), "reason", v.Reason,
+		"reasons", v.Reasons, "class", string(f.class), "run", f.run, "feed_stalled", f.feedStalled,
+	}
+	if f.legs != nil {
+		attrs = append(attrs, "untrusted_input", f.legs.UntrustedInput, "private_data", f.legs.PrivateData)
+	}
+	g.log.Info("mcp guard: decided", attrs...)
+}
+
+func (g *Guard) check(ctx context.Context, call Call, f *decisionFacts) (Outcome, error) {
 	c, refused, err := g.identify(ctx, call.Agent, call.Target)
 	if err != nil {
-		return Outcome{}, "", err
+		return Outcome{}, err
 	}
 	if refused != nil {
-		return *refused, "", nil
+		return *refused, nil
 	}
 	if c.exempt || c.own {
-		return Outcome{Verdict: Verdict{Action: Pass, Reason: ReasonExempt}}, "", nil
+		return Outcome{Verdict: Verdict{Action: Pass, Reason: ReasonExempt}}, nil
 	}
 	tool, decl, err := g.tool(ctx, c, call.Tool)
 	if err != nil {
-		return Outcome{}, "", err
+		return Outcome{}, err
 	}
 	a, err := g.assess(ctx, c, decl, call.Arguments, true)
+	f.class, f.run, f.feedStalled = a.class, a.run, a.feedStalled
+	if a.legsRead {
+		l := a.legs
+		f.legs = &l
+	}
 	if err != nil {
-		return Outcome{}, string(a.class), err
+		return Outcome{}, err
 	}
 	if a.refused != nil {
-		return *a.refused, string(a.class), nil
+		return *a.refused, nil
 	}
 	v := a.verdict
 	switch v.Action {
 	case Pass:
-		return Outcome{Verdict: v}, string(a.class), nil
+		return Outcome{Verdict: v}, nil
 	case Refuse:
-		return Outcome{Verdict: v, Text: v.Detail}, string(a.class), nil
+		return Outcome{Verdict: v, Text: v.Detail}, nil
 	}
 	// NeedsDecision
 	if c.ask {
 		// The call's tool is ask-tier: mcpask records the one approval it gets, with the guard's
 		// reasons on its card (mcpask asks Assess); two cards for one call would be noise (ADR 0091
 		// decision 5). A person decides it either way.
-		return Outcome{Verdict: Verdict{Action: Pass, Reason: ReasonAskTarget, Reasons: v.Reasons}}, string(a.class), nil
+		return Outcome{Verdict: Verdict{Action: Pass, Reason: ReasonAskTarget, Reasons: v.Reasons}}, nil
 	}
 	if !tool.Valid {
-		return refuse(v.Reason, "refused by the leak guard: this call needs a decision, and the server never published this tool"), string(a.class), nil
+		return refuse(v.Reason, "refused by the leak guard: this call needs a decision, and the server never published this tool"), nil
 	}
 	// An approval belongs to a run (ADR 0042): a call that needs one outside a task is refused, in
 	// words, rather than failed as an error of the approval store.
 	if _, err := g.q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: c.org.ID, AgentID: c.agent.ID}); errors.Is(err, pgx.ErrNoRows) {
-		return refuse(ReasonNoRun, NoRunApprovalText), string(a.class), nil
+		f.run = "none"
+		o := refuse(ReasonNoRun, NoRunApprovalText)
+		o.Verdict.Reasons = append(slices.Clone(v.Reasons), ReasonNoRun)
+		return o, nil
 	} else if err != nil {
-		return Outcome{}, string(a.class), err
+		return Outcome{}, err
 	}
+	f.run = "found"
 	// Only a call whose one reason is both legs may reach the Decider seam (ADR 0092: the judge
-	// sees facts, not text). A text match carries private text out: a person decides it, always.
+	// sees facts, not text). A text match carries private text out, and a stalled feed means the
+	// legs were not read: a person decides those, always.
 	decider := g.decider
 	if !onlyBothLegs(v) {
 		decider = g.person
@@ -290,13 +332,13 @@ func (g *Guard) check(ctx context.Context, call Call) (Outcome, string, error) {
 		Verdict: v, Destination: a.args.Address, PayloadBytes: a.args.PayloadBytes(), Risk: a.risk(),
 	})
 	if err != nil {
-		return Outcome{}, string(a.class), err
+		return Outcome{}, err
 	}
 	if out.Verdict.Action == NeedsDecision || out.Verdict.Action == "" {
 		// A Decider must decide; anything else fails closed.
-		return Outcome{}, string(a.class), fmt.Errorf("mcpguard: the decider left the call undecided (%q)", out.Verdict.Action)
+		return Outcome{}, fmt.Errorf("mcpguard: the decider left the call undecided (%q)", out.Verdict.Action)
 	}
-	return out, string(a.class), nil
+	return out, nil
 }
 
 // knownTool is a tool row, or none for a name the server never published.
@@ -340,6 +382,10 @@ type assessment struct {
 	legs    Legs
 	verdict Verdict
 	refused *Outcome
+	// legsRead: legs holds the session's legs (the call was external).
+	legsRead bool
+	// run is "found" or "none" once the agent's running run was looked up.
+	run string
 	// feedStalled: agentd's feed did not catch up in time, so the legs were taken as both.
 	feedStalled bool
 }
@@ -394,16 +440,20 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 	}
 	// The legs must include every tool result the harness finished before this call: agentd may not
 	// have recorded the last one yet (its updates and the call travel different ways).
-	stalled, err := g.awaitFeed(ctx, c)
+	stalled, live, err := g.awaitFeed(ctx, c)
 	if err != nil {
 		return a, err
+	}
+	a.run = "none"
+	if live {
+		a.run = "found"
 	}
 	sess := Session{Org: c.org.ID, Agent: c.agent.ID, Generation: gen}
 	row, err := g.state.Ensure(ctx, sess)
 	if err != nil {
 		return a, err
 	}
-	a.legs = Legs{UntrustedInput: row.UntrustedInput, PrivateData: row.PrivateData}
+	a.legs, a.legsRead = Legs{UntrustedInput: row.UntrustedInput, PrivateData: row.PrivateData}, true
 	if stalled {
 		g.log.Warn("mcp guard: agentd's feed did not catch up; the call is decided as if the session held both legs",
 			"org", c.org.Slug, "agent", c.agent.ID.String(), "wait", g.feedWait)
@@ -424,7 +474,7 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 	}
 	f := Facts{Class: a.class, BothLegs: a.legs.Both(), Taint: taint, Cap: g.cap, PayloadBytes: args.PayloadBytes()}
 	if a.class != sinkclass.ExternalLow || !charge {
-		a.verdict = Decide(f)
+		a.verdict = a.stallMarked(Decide(f))
 		return a, nil
 	}
 	// external-low: the URL rule and the byte cap, charged to the run under its lock.
@@ -456,7 +506,7 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 			f.OverCap = capped+f.PayloadBytes > g.cap
 			capped += f.PayloadBytes
 		}
-		a.verdict = Decide(f)
+		a.verdict = a.stallMarked(Decide(f))
 		if a.verdict.Action == Refuse {
 			return nil // nothing is charged for a call that does not leave
 		}
@@ -469,30 +519,41 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 	return a, err
 }
 
-// awaitFeed waits until agentd has recorded every finished tool call of the agent's running run it
+// stallMarked adds ReasonFeedStalled to a verdict that is open while the feed stalled: the legs
+// were assumed, not read, so the call goes to a person and never to a Decider (onlyBothLegs).
+func (a assessment) stallMarked(v Verdict) Verdict {
+	if a.feedStalled && v.Action == NeedsDecision {
+		v.Reasons = append(slices.Clone(v.Reasons), ReasonFeedStalled)
+	}
+	return v
+}
+
+// awaitFeed waits until agentd has recorded every finished tool call of the agent's live run it
 // had read from the harness when the call arrived (leak_guard_runs.feed_done reaching that
-// feed_read). It reports true when the feed did not catch up within feedWait: the caller then takes
-// the session as holding both legs. Without a running run, or a feed for it, there is nothing to
-// wait for.
-func (g *Guard) awaitFeed(ctx context.Context, c caller) (bool, error) {
-	run, err := g.q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: c.org.ID, AgentID: c.agent.ID})
+// feed_read). The live run includes its end-of-turn summary: the harness still runs then. It
+// reports stalled when the feed did not catch up within feedWait (the caller then takes the session
+// as holding both legs), and live when the agent has a running run. Without a running run, or a feed
+// for it, there is nothing to wait for: no harness of the agent is running, and the legs it left
+// are recorded on the generation.
+func (g *Guard) awaitFeed(ctx context.Context, c caller) (stalled, live bool, err error) {
+	run, err := g.q.GetLiveRunForAgent(ctx, store.GetLiveRunForAgentParams{OrgID: c.org.ID, AgentID: c.agent.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return false, false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	key := store.GetLeakGuardFeedParams{OrgID: c.org.ID, RunID: run.ID}
 	feed, err := g.q.GetLeakGuardFeed(ctx, key)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return false, true, nil
 	}
 	if err != nil {
-		return false, err
+		return false, true, err
 	}
 	target := feed.FeedRead
 	if feed.FeedDone >= target {
-		return false, nil
+		return false, true, nil
 	}
 	deadline := time.NewTimer(g.feedWait)
 	defer deadline.Stop()
@@ -504,17 +565,17 @@ func (g *Guard) awaitFeed(ctx context.Context, c caller) (bool, error) {
 		}
 		select {
 		case <-ctx.Done():
-			return false, ctx.Err()
+			return false, true, ctx.Err()
 		case <-deadline.C:
-			return true, nil
+			return true, true, nil
 		case <-tick.C:
 		}
 		feed, err = g.q.GetLeakGuardFeed(ctx, key)
 		if err != nil {
-			return false, err
+			return false, true, err
 		}
 		if feed.FeedDone >= target {
-			return false, nil
+			return false, true, nil
 		}
 	}
 }

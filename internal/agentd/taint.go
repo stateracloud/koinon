@@ -5,6 +5,7 @@ package agentd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
@@ -27,9 +28,14 @@ import (
 // call (ADR 0091 decision 4, amendment 2026-11-03: procoduck, option A). The harness's session updates
 // reach agentd over ACP while its MCP calls reach the guard through the gateway, so a call can
 // overtake the update that finished a shell read. agentd therefore counts each finished tool call
-// twice: when its reader reads the update off the harness's stream (FeedRead, before the SDK queues
-// it) and once the handler has reported it (FeedDone). The guard waits for the second count to
-// reach the first before it reads the legs, and takes both legs when it does not within a bound.
+// twice: when its reader reads the update off the harness's stream (read, before the SDK queues it)
+// and once the handler has reported it (done). The guard waits for done to reach read before it
+// reads the legs, and takes both legs when it does not within a bound.
+//
+// The counts live in memory (feedCounts) and one writer per harness copies them to the database,
+// in order and as absolute values. The reader only adds to the count and never waits for the
+// database: while a slow report holds the handler, the next result in the pipe is still read and
+// counted, so the guard sees that the session is behind.
 
 // TaintFeed records one tool result of an agent's sandbox, and the counts the guard waits on
 // (mcpguard.Feed).
@@ -37,9 +43,10 @@ type TaintFeed interface {
 	Report(ctx context.Context, org, agent pgtype.UUID, legs mcpguard.Legs, texts []string) error
 	// Start starts the run's counts for this worker's epoch, before the harness runs.
 	Start(ctx context.Context, org, run pgtype.UUID, epoch int64) error
-	// Read counts a finished tool call read from the harness; Done counts it as reported.
-	Read(ctx context.Context, org, run pgtype.UUID, epoch int64) error
-	Done(ctx context.Context, org, run pgtype.UUID, epoch int64) error
+	// Counts records the worker's counts: finished tool calls read from the harness, and the first
+	// done of them reported. They are absolute and only grow; mcpguard.ErrFeedFenced when a newer
+	// epoch owns the feed.
+	Counts(ctx context.Context, org, run pgtype.UUID, epoch, read, done int64) error
 }
 
 // finishesTool reports whether a session update (its "update" object) finishes a tool call: the
@@ -66,55 +73,112 @@ func lineFinishesTool(line []byte) bool {
 	return json.Unmarshal(line, &m) == nil && finishesTool(m.Params.Update)
 }
 
-// feedTimeout bounds one count written from the reader, which has no context of its own.
+// feedTimeout bounds one write of the counts.
 const feedTimeout = 10 * time.Second
 
-// feedCount writes one count with feedTaint's retries. A count that cannot be written abandons the
-// run: the guard must not wait on counts that are wrong (it would pass a call too early).
-func (r *runner) feedCount(ctx context.Context, what string, count func(context.Context, pgtype.UUID, pgtype.UUID, int64) error) error {
-	var err error
-	wait := 200 * time.Millisecond
-	for try := 1; try <= taintTries; try++ {
-		if err = count(ctx, r.run.OrgID, r.run.ID, r.run.Epoch); err == nil {
-			return nil
-		}
-		if try == taintTries {
-			break
-		}
-		t := time.NewTimer(wait)
-		select {
-		case <-t.C:
-		case <-ctx.Done():
-			t.Stop()
-			try = taintTries
-		}
-		wait *= 2
+// feedCounts are one harness's counts for the leak guard, and their writer.
+type feedCounts struct {
+	r    *runner
+	feed TaintFeed
+	wake chan struct{}
+
+	mu         sync.Mutex
+	read, done int64
+}
+
+// add counts finished tool calls read (by the reader) or done (by the handler) and wakes the
+// writer. It never waits for the database.
+func (c *feedCounts) add(read, done int64) {
+	c.mu.Lock()
+	c.read += read
+	c.done += done
+	c.mu.Unlock()
+	select {
+	case c.wake <- struct{}{}:
+	default:
 	}
-	r.log.Error("the leak guard's feed could not count a tool result; giving the run up", "count", what, "err", err)
-	r.own.Fence(runoutcome.FenceAbandon)
-	return err
+}
+
+func (c *feedCounts) snapshot() (int64, int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.read, c.done
+}
+
+// write copies the counts to the database until ctx ends, the latest values each time: a write
+// that lags covers every count added meanwhile. A write that fails taintTries times abandons the
+// run (the guard must not wait on counts that are wrong, or it would pass a call too early); a
+// newer epoch owning the feed ends the writer, as the worker is fenced.
+func (c *feedCounts) write(ctx context.Context) {
+	var wrote [2]int64
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.wake:
+		}
+		read, done := c.snapshot()
+		if wrote == [2]int64{read, done} {
+			continue
+		}
+		var err error
+		wait := 200 * time.Millisecond
+		for try := 1; try <= taintTries; try++ {
+			wctx, cancel := context.WithTimeout(ctx, feedTimeout)
+			err = c.feed.Counts(wctx, c.r.run.OrgID, c.r.run.ID, c.r.run.Epoch, read, done)
+			cancel()
+			if err == nil || errors.Is(err, mcpguard.ErrFeedFenced) || ctx.Err() != nil || try == taintTries {
+				break
+			}
+			t := time.NewTimer(wait)
+			select {
+			case <-t.C:
+			case <-ctx.Done():
+				t.Stop()
+			}
+			wait *= 2
+		}
+		switch {
+		case err == nil:
+			wrote = [2]int64{read, done}
+		case ctx.Err() != nil:
+			return
+		case errors.Is(err, mcpguard.ErrFeedFenced):
+			c.r.log.Warn("the leak guard's feed belongs to a newer worker of the run; this worker stops counting")
+			c.r.own.Fence(runoutcome.FenceLost)
+			return
+		default:
+			c.r.log.Error("the leak guard's feed could not count tool results; giving the run up", "err", err)
+			c.r.own.Fence(runoutcome.FenceAbandon)
+			return
+		}
+	}
 }
 
 // UpdateRead is acp.ReadObserver: the reader read a session update off the harness's stream. A
 // finished tool call is counted before the SDK queues it, so the count is ahead of anything the
 // harness could send through the gateway after it.
 func (h handler) UpdateRead(line []byte) {
-	feed := h.r.p.cfg.Taint
-	if feed == nil || !lineFinishesTool(line) {
+	c := h.r.feedCounts.Load()
+	if c == nil || !lineFinishesTool(line) {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), feedTimeout)
-	defer cancel()
-	_ = h.r.feedCount(ctx, "read", feed.Read) // a failure has fenced the run
+	c.add(1, 0)
 }
 
-// feedStart starts the run's counts before the harness runs.
+// feedStart starts the run's counts before the harness runs, and their writer until ctx ends.
 func (r *runner) feedStart(ctx context.Context) error {
 	feed := r.p.cfg.Taint
 	if feed == nil {
 		return nil
 	}
-	return feed.Start(ctx, r.run.OrgID, r.run.ID, r.run.Epoch)
+	if err := feed.Start(ctx, r.run.OrgID, r.run.ID, r.run.Epoch); err != nil {
+		return err
+	}
+	c := &feedCounts{r: r, feed: feed, wake: make(chan struct{}, 1)}
+	r.feedCounts.Store(c)
+	go c.write(ctx)
+	return nil
 }
 
 // taintLegs are the legs a finished tool call of each known kind sets; a known kind with no legs

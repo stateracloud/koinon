@@ -3,9 +3,12 @@
 package mcpguard_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,6 +41,38 @@ const secretPage = "Quarterly retention plan for the Northwind accounts: the ren
 type stubDecider struct {
 	got []mcpguard.Pending
 	out mcpguard.Outcome
+}
+
+// logBuffer is a slog JSON sink the guard's specs read back.
+type logBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *logBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+// decisions returns the guard's "decided" log lines.
+func (b *logBuffer) decisions() []map[string]any {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(b.buf.String()), "\n") {
+		var m map[string]any
+		if json.Unmarshal([]byte(line), &m) == nil && m["msg"] == "mcp guard: decided" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func (b *logBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func (s *stubDecider) DecidePending(_ context.Context, p mcpguard.Pending) (mcpguard.Outcome, error) {
@@ -270,7 +305,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		It("decides a call that overtook the shell read's update on that read's result", func(ctx SpecContext) {
 			// agentd has read the finished shell read off the harness's stream, not recorded it yet;
 			// the harness's next call, carrying the read's text, reaches the guard first.
-			Expect(feed.Read(ctx, org, run.ID, run.Epoch)).To(Succeed())
+			Expect(feed.Counts(ctx, org, run.ID, run.Epoch, 1, 0)).To(Succeed())
 			polled := make(chan struct{})
 			var once bool
 			mcpguard.SetFeedPolled(guard, func() {
@@ -290,7 +325,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 				}
 				err := feed.Report(context.WithoutCancel(ctx), org, agent.ID, mcpguard.Legs{PrivateData: true}, []string{secretPage})
 				if err == nil {
-					err = feed.Done(context.WithoutCancel(ctx), org, run.ID, run.Epoch)
+					err = feed.Counts(context.WithoutCancel(ctx), org, run.ID, run.Epoch, 1, 1)
 				}
 				recorded <- err
 			}()
@@ -311,7 +346,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			srv = mcpguard.NewServer(mcpguard.New(pool, o))
 			// A clean call passes while the feed is level.
 			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"}))).To(BeTrue())
-			Expect(feed.Read(ctx, org, run.ID, run.Epoch)).To(Succeed()) // and never Done: agentd stalled
+			Expect(feed.Counts(ctx, org, run.ID, run.Epoch, 1, 0)).To(Succeed()) // and never done: agentd stalled
 			r := call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"})
 			Expect(passed(r)).To(BeFalse())
 			Expect(reason(r)).To(HavePrefix("approval requested: id="))
@@ -328,13 +363,115 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			Expect(polls).To(BeZero())
 		})
 
+		It("never lets a Decider decide a call whose legs were taken as both because the feed stalled", func(ctx SpecContext) {
+			stub := &stubDecider{out: mcpguard.Outcome{Verdict: mcpguard.Verdict{Action: mcpguard.Pass, Reason: "stub"}}}
+			o := opts
+			o.Decider, o.FeedWait = stub, 200*time.Millisecond
+			srv = mcpguard.NewServer(mcpguard.New(pool, o))
+			Expect(feed.Counts(ctx, org, run.ID, run.Epoch, 1, 0)).To(Succeed())
+			r := call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"})
+			Expect(passed(r)).To(BeFalse())
+			Expect(reason(r)).To(HavePrefix("approval requested: id="))
+			Expect(stub.got).To(BeEmpty(), "a stalled feed goes to a person")
+			var risk []byte
+			Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE org_id = $1`, org).Scan(&risk)).To(Succeed())
+			Expect(string(risk)).To(ContainSubstring(`"feed_stalled"]`), "the reason is on the card")
+			// Level again, both legs alone (the untrusted read and a reported private one) reach it.
+			Expect(feed.Report(ctx, org, agent.ID, mcpguard.Legs{PrivateData: true}, nil)).To(Succeed())
+			Expect(feed.Counts(ctx, org, run.ID, run.Epoch, 1, 1)).To(Succeed())
+			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"}))).To(BeTrue())
+			Expect(stub.got).To(HaveLen(1))
+		})
+
+		It("waits for the feed during the run's end-of-turn summary too", func(ctx SpecContext) {
+			_, err := pool.Exec(ctx, `UPDATE runs SET summarizing = true WHERE org_id = $1 AND id = $2`, org, run.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(feed.Counts(ctx, org, run.ID, run.Epoch, 1, 0)).To(Succeed())
+			o := opts
+			o.FeedWait = 200 * time.Millisecond
+			polls := 0
+			g := mcpguard.New(pool, o)
+			mcpguard.SetFeedPolled(g, func() { polls++ })
+			srv = mcpguard.NewServer(g)
+			r := call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"})
+			Expect(passed(r)).To(BeFalse(), "taken as both legs, and no approval belongs to a summary")
+			Expect(polls).To(BeNumerically(">", 0))
+		})
+
 		It("counts nothing from a worker of an earlier epoch", func(ctx SpecContext) {
 			Expect(feed.Start(ctx, org, run.ID, run.Epoch+1)).To(Succeed())
-			Expect(feed.Read(ctx, org, run.ID, run.Epoch)).To(Succeed())
-			Expect(feed.Done(ctx, org, run.ID, run.Epoch)).To(Succeed())
+			Expect(feed.Counts(ctx, org, run.ID, run.Epoch, 2, 1)).To(MatchError(mcpguard.ErrFeedFenced))
+			Expect(feed.Start(ctx, org, run.ID, run.Epoch)).To(MatchError(mcpguard.ErrFeedFenced))
 			var read, done int64
 			Expect(pool.QueryRow(ctx, `SELECT feed_read, feed_done FROM leak_guard_runs WHERE org_id = $1 AND run_id = $2`, org, run.ID).Scan(&read, &done)).To(Succeed())
 			Expect([]int64{read, done}).To(Equal([]int64{0, 0}))
+		})
+	})
+
+	Describe("outside a task, in the order of quickstart step 6b", func() {
+		var logs *logBuffer
+		BeforeEach(func(ctx SpecContext) {
+			logs = &logBuffer{}
+			o := opts
+			o.Logger = slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
+			srv = mcpguard.NewServer(mcpguard.New(pool, o))
+		})
+		finish := func(ctx SpecContext) {
+			GinkgoHelper()
+			_, err := pool.Exec(ctx, `UPDATE runs SET state = 'succeeded', finished_at = now(), lease_expires_at = NULL WHERE org_id = $1`, org)
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		It("adds no leg for the missing run: a call to an unclassified server's auto tool passes", func(ctx SpecContext) {
+			finish(ctx)
+			r := call(ctx, "tracker", "read_issue", map[string]any{"title": "from the e2e"})
+			Expect(passed(r)).To(BeTrue(), reason(r))
+			var u, p bool
+			Expect(pool.QueryRow(ctx, `SELECT untrusted_input, private_data FROM leak_guard_sessions WHERE org_id = $1 AND agent_id = $2`, org, agent.ID).Scan(&u, &p)).To(Succeed())
+			Expect([]bool{u, p}).To(Equal([]bool{false, false}))
+		})
+
+		It("refuses it once an earlier task left both legs on the generation, and logs why", func(ctx SpecContext) {
+			// Step 4's task: the harness's create_pull_request is an MCP tool, ACP kind other, which
+			// agentd reports as both legs (ADR 0091 decision 4). The legs stay with the generation.
+			Expect(mcpguard.NewFeed(pool, nil).Report(ctx, org, agent.ID, mcpguard.Legs{UntrustedInput: true, PrivateData: true}, nil)).To(Succeed())
+			finish(ctx)
+			r := call(ctx, "tracker", "read_issue", map[string]any{"title": "from the e2e"})
+			Expect(passed(r)).To(BeFalse())
+			Expect(reason(r)).To(Equal(mcpguard.NoRunApprovalText))
+			Expect(approvals(ctx)).To(BeZero())
+			lines := logs.decisions()
+			Expect(lines).To(HaveLen(1))
+			Expect(lines[0]).To(SatisfyAll(
+				HaveKeyWithValue("level", "INFO"), HaveKeyWithValue("action", "refuse"), HaveKeyWithValue("reason", mcpguard.ReasonNoRun),
+				HaveKeyWithValue("reasons", ConsistOf(mcpguard.ReasonBothLegs, mcpguard.ReasonNoRun)),
+				HaveKeyWithValue("class", "external-high"), HaveKeyWithValue("run", "none"), HaveKeyWithValue("feed_stalled", false),
+				HaveKeyWithValue("untrusted_input", true), HaveKeyWithValue("private_data", true),
+			))
+			Expect(logs.String()).NotTo(ContainSubstring("from the e2e"), "no argument value is logged")
+
+			By("declared internal, the same read passes on its class, whatever the legs")
+			declare(ctx, tracker, "read_issue", sinkclass.Declaration{Class: sinkclass.Internal, Derivation: sinkclass.Fixed})
+			r = call(ctx, "tracker", "read_issue", map[string]any{"title": "from the e2e"})
+			Expect(passed(r)).To(BeTrue(), reason(r))
+			Expect(logs.decisions()).To(HaveLen(1), "a pass is not logged")
+		})
+
+		It("logs a call sent to an ask target and an approval", func(ctx SpecContext) {
+			Expect(mcpguard.NewFeed(pool, nil).Report(ctx, org, agent.ID, mcpguard.Legs{UntrustedInput: true, PrivateData: true}, nil)).To(Succeed())
+			r := call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"})
+			Expect(reason(r)).To(HavePrefix("approval requested: id="))
+			params, err := json.Marshal(map[string]any{"name": "post_message", "arguments": map[string]any{"text": "hi"}})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = srv.CheckRequest(ctx, &extmcp.McpRequest{
+				ServiceNames: []string{mcpservers.TargetName(slug, "tracker") + mcpservers.AskSuffix}, Method: "tools/call",
+				MetadataContext: meta(me(), "post_message"), McpRequest: params,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			lines := logs.decisions()
+			Expect(lines).To(HaveLen(2))
+			Expect(lines[0]).To(SatisfyAll(HaveKeyWithValue("reason", mcpguard.ReasonBothLegs), HaveKeyWithValue("run", "found")))
+			Expect(lines[1]).To(SatisfyAll(HaveKeyWithValue("action", "pass"), HaveKeyWithValue("reason", mcpguard.ReasonAskTarget)))
 		})
 	})
 

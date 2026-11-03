@@ -45,6 +45,9 @@ const (
 	ReasonNoRun     = "no_run"            // an external call outside a running run: refusal
 	ReasonExempt    = "exempt"            // a call of Koinon's own executor or probe
 	ReasonAskTarget = "ask_target"        // approval-gated tool: mcpask records the one card
+	// ReasonFeedStalled marks a call decided while agentd's feed lagged: its legs were taken as both,
+	// so a person decides it, never a Decider (ADR 0091 decision 4, ADR 0092).
+	ReasonFeedStalled = "feed_stalled"
 )
 
 // Facts are what the decision table reads about one call (ADR 0091 decision 5).

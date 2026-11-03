@@ -238,6 +238,63 @@ func (q *Queries) GetLeakGuardSession(ctx context.Context, arg GetLeakGuardSessi
 	return i, err
 }
 
+const getLiveRunForAgent = `-- name: GetLiveRunForAgent :one
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd, traced, last_turn_seq FROM runs
+WHERE org_id = $1 AND agent_id = $2 AND state = 'running'
+`
+
+type GetLiveRunForAgentParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// The agent's running run, during its end-of-turn summary too: its harness runs until the run ends,
+// so the guard waits for its feed then as well (GetRunningRunForAgent leaves the summary out: no
+// approval belongs to it).
+func (q *Queries) GetLiveRunForAgent(ctx context.Context, arg GetLiveRunForAgentParams) (Run, error) {
+	row := q.db.QueryRow(ctx, getLiveRunForAgent, arg.OrgID, arg.AgentID)
+	var i Run
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.AgentID,
+		&i.AgentVersionID,
+		&i.TaskID,
+		&i.State,
+		&i.Epoch,
+		&i.OwnerID,
+		&i.LeaseExpiresAt,
+		&i.HeartbeatAt,
+		&i.ReadyAt,
+		&i.ParkReason,
+		&i.ParkedAt,
+		&i.ParkExpiresAt,
+		&i.OutcomeReason,
+		&i.MaxWallClockSeconds,
+		&i.MaxTokens,
+		&i.LastEventSeq,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParkedSeconds,
+		&i.TokensUsed,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
+		&i.Summarizing,
+		&i.FailureClass,
+		&i.Origin,
+		&i.ClaimedAt,
+		&i.SandboxWaitStartedAt,
+		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
+		&i.Traced,
+		&i.LastTurnSeq,
+	)
+	return i, err
+}
+
 const lockLeakGuardRun = `-- name: LockLeakGuardRun :one
 INSERT INTO leak_guard_runs (org_id, run_id)
 VALUES ($1, $2)
@@ -324,46 +381,6 @@ func (q *Queries) MarkLeakGuardEvicted(ctx context.Context, arg MarkLeakGuardEvi
 	return err
 }
 
-const markLeakGuardFeedDone = `-- name: MarkLeakGuardFeedDone :execrows
-UPDATE leak_guard_runs SET feed_done = feed_done + 1, updated_at = now()
-WHERE org_id = $1 AND run_id = $2 AND feed_epoch = $3
-`
-
-type MarkLeakGuardFeedDoneParams struct {
-	OrgID pgtype.UUID
-	RunID pgtype.UUID
-	Epoch int64
-}
-
-// The worker of epoch recorded (or had nothing to record of) the next finished tool call it read.
-func (q *Queries) MarkLeakGuardFeedDone(ctx context.Context, arg MarkLeakGuardFeedDoneParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markLeakGuardFeedDone, arg.OrgID, arg.RunID, arg.Epoch)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const markLeakGuardFeedRead = `-- name: MarkLeakGuardFeedRead :execrows
-UPDATE leak_guard_runs SET feed_read = feed_read + 1, updated_at = now()
-WHERE org_id = $1 AND run_id = $2 AND feed_epoch = $3
-`
-
-type MarkLeakGuardFeedReadParams struct {
-	OrgID pgtype.UUID
-	RunID pgtype.UUID
-	Epoch int64
-}
-
-// The worker of epoch read a finished tool call from the harness; it has not recorded it yet.
-func (q *Queries) MarkLeakGuardFeedRead(ctx context.Context, arg MarkLeakGuardFeedReadParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markLeakGuardFeedRead, arg.OrgID, arg.RunID, arg.Epoch)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const saveLeakGuardRun = `-- name: SaveLeakGuardRun :exec
 UPDATE leak_guard_runs
 SET capped_bytes = $1, url_state = $2, updated_at = now()
@@ -387,7 +404,38 @@ func (q *Queries) SaveLeakGuardRun(ctx context.Context, arg SaveLeakGuardRunPara
 	return err
 }
 
-const startLeakGuardFeed = `-- name: StartLeakGuardFeed :exec
+const setLeakGuardFeedCounts = `-- name: SetLeakGuardFeedCounts :execrows
+UPDATE leak_guard_runs
+SET feed_read = GREATEST(feed_read, $1::bigint), feed_done = GREATEST(feed_done, $2::bigint), updated_at = now()
+WHERE org_id = $3 AND run_id = $4 AND feed_epoch = $5
+`
+
+type SetLeakGuardFeedCountsParams struct {
+	Read  int64
+	Done  int64
+	OrgID pgtype.UUID
+	RunID pgtype.UUID
+	Epoch int64
+}
+
+// The worker of epoch has read feed_read finished tool calls from the harness and recorded the first
+// feed_done of them. The counts are absolute and only grow, so a retried or late write never counts
+// twice or goes back. No row: a newer epoch owns the feed (this worker is fenced).
+func (q *Queries) SetLeakGuardFeedCounts(ctx context.Context, arg SetLeakGuardFeedCountsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setLeakGuardFeedCounts,
+		arg.Read,
+		arg.Done,
+		arg.OrgID,
+		arg.RunID,
+		arg.Epoch,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const startLeakGuardFeed = `-- name: StartLeakGuardFeed :execrows
 INSERT INTO leak_guard_runs (org_id, run_id, feed_epoch)
 VALUES ($1, $2, $3)
 ON CONFLICT (org_id, run_id) DO UPDATE
@@ -402,8 +450,12 @@ type StartLeakGuardFeedParams struct {
 }
 
 // A worker starts the run's harness under its epoch: the counts start at zero, and what an earlier
-// worker read and never recorded is gone with it (the harness's replay reports it again).
-func (q *Queries) StartLeakGuardFeed(ctx context.Context, arg StartLeakGuardFeedParams) error {
-	_, err := q.db.Exec(ctx, startLeakGuardFeed, arg.OrgID, arg.RunID, arg.Epoch)
-	return err
+// worker read and never recorded is gone with it (the harness's replay reports it again). No row:
+// a newer epoch already owns the feed.
+func (q *Queries) StartLeakGuardFeed(ctx context.Context, arg StartLeakGuardFeedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, startLeakGuardFeed, arg.OrgID, arg.RunID, arg.Epoch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

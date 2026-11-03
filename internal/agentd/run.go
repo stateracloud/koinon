@@ -129,6 +129,8 @@ type runner struct {
 
 	// taint follows tool calls for the leak guard's feed (taint.go).
 	taint taintCalls
+	// feedCounts are the current harness's counts for the leak guard (taint.go); nil without a feed.
+	feedCounts atomic.Pointer[feedCounts]
 
 	// delivered are the approval requests whose outcomes this turn's prompt carries; they are
 	// marked delivered when the turn ends.
@@ -1050,13 +1052,13 @@ type handler struct{ r *runner }
 
 func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) (err error) {
 	at := time.Now() // for the trace, before the event write
-	if feed := h.r.p.cfg.Taint; feed != nil && (n.Update.ToolCall != nil || n.Update.ToolCallUpdate != nil) {
-		// The leak guard waits for this count (taint.go): it is written once the update is handled,
+	if c := h.r.feedCounts.Load(); c != nil && (n.Update.ToolCall != nil || n.Update.ToolCallUpdate != nil) {
+		// The leak guard waits for this count (taint.go): it is added once the update is handled,
 		// on every path below that does not fail.
 		if b, merr := json.Marshal(n.Update); merr == nil && finishesTool(b) {
 			defer func() {
 				if err == nil {
-					err = h.r.feedCount(ctx, "done", feed.Done)
+					c.add(0, 1)
 				}
 			}()
 		}

@@ -131,6 +131,36 @@ session held both legs: a card or a refusal, never a pass. `none` and `internal`
 A tool kind agentd does not know (ACP `other`, which covers MCP tools, a missing kind, or a newer
 kind) sets both legs.
 
+How the wait works, and what it leaves open (#349 review, 2026-11-03):
+
+- **The reader never waits for the database.** agentd counts in memory as it reads, and one writer
+  per harness copies both counts to the database, in order and as absolute values that only grow.
+  A slow report holds the handler, not the reader: the next result in the pipe is still counted,
+  so the guard sees that the session is behind and waits. **Residual:** the guard can only wait
+  for what agentd has read and written. The harness must write a tool's update to its stream before
+  it makes its next gateway call, and agentd's write of the read count races that call by a few
+  milliseconds. A harness that sends the call first, or a call that wins that race, is decided on
+  the legs before the result.
+- **The wait covers the end-of-turn summary.** The harness still runs then, so the guard waits for
+  the run's feed whether or not it is summarizing.
+- **A stall is a reason of its own.** A call decided as if both legs were held because the feed
+  stalled carries the reason `feed_stalled`, and goes to a person, never to an automatic Decider:
+  the legs were assumed, not read. Only a call whose one reason is `both_legs`, with no text match
+  and no stall, may reach the Decider seam; ADR 0092's judge must keep that rule.
+- **A takeover does not wait for the old worker.** The new worker starts the counts at zero under
+  its epoch, and the old worker's later writes count nothing (they are fenced). Its in-flight
+  reports are not waited for: the new worker loads the session, and the harness replays its history
+  as updates, each counted and reported again, before it answers the load; the guard sees the new
+  harness's calls only after that. Reports are idempotent (legs only grow, fingerprints are a set).
+- **A call outside a task adds no leg.** With no running run there is no feed to wait for and no
+  leg is assumed: the call is decided on the legs the generation holds. Those are what earlier tasks
+  left, and they only grow, so an `external-high` call outside a task from a generation that holds
+  both legs needs an approval, and is refused because no approval exists outside a run (ADR 0042).
+  A tool that only reads from a system the org owns is declared `internal` to be called that way.
+
+Every refusal and every call sent to a person is logged at info, with the reason codes, the class,
+the legs, whether a run was found and whether the feed stalled; never an argument value or payload.
+
 ### 5. The decision table
 
 | Session state | `none`, `internal` | `external-low` | `external-high` |

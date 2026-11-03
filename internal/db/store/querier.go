@@ -384,6 +384,10 @@ type Querier interface {
 	GetLastUpstreamRefusal(ctx context.Context, arg GetLastUpstreamRefusalParams) (GetLastUpstreamRefusalRow, error)
 	GetLeakGuardFeed(ctx context.Context, arg GetLeakGuardFeedParams) (GetLeakGuardFeedRow, error)
 	GetLeakGuardSession(ctx context.Context, arg GetLeakGuardSessionParams) (LeakGuardSession, error)
+	// The agent's running run, during its end-of-turn summary too: its harness runs until the run ends,
+	// so the guard waits for its feed then as well (GetRunningRunForAgent leaves the summary out: no
+	// approval belongs to it).
+	GetLiveRunForAgent(ctx context.Context, arg GetLiveRunForAgentParams) (Run, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	GetMCPServer(ctx context.Context, arg GetMCPServerParams) (McpServer, error)
@@ -813,10 +817,6 @@ type Querier interface {
 	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
 	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
 	MarkLeakGuardEvicted(ctx context.Context, arg MarkLeakGuardEvictedParams) error
-	// The worker of epoch recorded (or had nothing to record of) the next finished tool call it read.
-	MarkLeakGuardFeedDone(ctx context.Context, arg MarkLeakGuardFeedDoneParams) (int64, error)
-	// The worker of epoch read a finished tool call from the harness; it has not recorded it yet.
-	MarkLeakGuardFeedRead(ctx context.Context, arg MarkLeakGuardFeedReadParams) (int64, error)
 	// The declaring Secret was deleted: keep the row, stop serving it.
 	MarkMCPServerRemoved(ctx context.Context, arg MarkMCPServerRemovedParams) error
 	// Tools the server did not list this time.
@@ -979,6 +979,10 @@ type Querier interface {
 	SetDerivedModelFormat(ctx context.Context, arg SetDerivedModelFormatParams) (int64, error)
 	// Sets the marker unless it is set: the first setting stays (the row is never updated).
 	SetKEKBoundOnly(ctx context.Context, setBy string) error
+	// The worker of epoch has read feed_read finished tool calls from the harness and recorded the first
+	// feed_done of them. The counts are absolute and only grow, so a retried or late write never counts
+	// twice or goes back. No row: a newer epoch owns the feed (this worker is fenced).
+	SetLeakGuardFeedCounts(ctx context.Context, arg SetLeakGuardFeedCountsParams) (int64, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
 	// What the server exposes (ADR 0084 decision 8). Allowed for every source: a declared server's
@@ -1047,8 +1051,9 @@ type Querier interface {
 	// monthly cap and the platform ceiling.
 	SpendSystemSince(ctx context.Context, arg SpendSystemSinceParams) (SpendSystemSinceRow, error)
 	// A worker starts the run's harness under its epoch: the counts start at zero, and what an earlier
-	// worker read and never recorded is gone with it (the harness's replay reports it again).
-	StartLeakGuardFeed(ctx context.Context, arg StartLeakGuardFeedParams) error
+	// worker read and never recorded is gone with it (the harness's replay reports it again). No row:
+	// a newer epoch already owns the feed.
+	StartLeakGuardFeed(ctx context.Context, arg StartLeakGuardFeedParams) (int64, error)
 	// The questions became visible: their recipients start waiting now.
 	StartQuestionRecipientsWaiting(ctx context.Context, arg StartQuestionRecipientsWaitingParams) error
 	// Totals per run, for the runs in @run_ids that have spend.
