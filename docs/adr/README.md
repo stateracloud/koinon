@@ -110,4 +110,5 @@ are in [0046](0046-adr-conventions.md).
 | [0088](0088-cli-stack.md) | The command-line stack: cobra, pflag and viper, with Charm on a terminal only | Accepted |
 | [0089](0089-run-outcome-writer.md) | One writer ends a run | Accepted |
 | [0090](0090-scripts-require-bash-5.md) | Every repository script requires bash 5 | Accepted |
-| [0091](0091-leak-guard-by-destination.md) | Leak guard by destination: sink classes, session legs and a byte cap | Accepted (decisions by procoduck, 2026-11-03) |
+| [0091](0091-leak-guard-by-destination.md) | Leak guard by destination: sink classes, session legs and a byte cap | Accepted (decisions by procoduck, 2026-11-03); amended by [0092](0092-leak-guard-judge-model.md) (2026-11-03: the both-legs `external-high` approval becomes rules, a judge model, then a person) |
+| [0092](0092-leak-guard-judge-model.md) | Leak guard judge: rules, then a cheap judge model, then a person | Accepted (decisions by procoduck, 2026-11-03) |
