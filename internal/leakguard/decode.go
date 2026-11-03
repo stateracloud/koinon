@@ -11,8 +11,6 @@ import (
 	"html"
 	"slices"
 	"strings"
-	"sync"
-	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 )
@@ -284,8 +282,8 @@ func decodeProjected(s string) []string {
 }
 
 // wordy reports whether at least 60% of the bytes of b are letters, digits or spaces, as text is
-// and the chance ASCII of a misaligned decoding is not. NULs (UTF-16) and ASCII punctuation are
-// neutral: an attacker can put one punctuation character between the letters ("t-h-e- -s-e"),
+// and the chance ASCII of a misaligned decoding is not. Control bytes (the NULs of UTF-16, a \x01
+// filler) and ASCII punctuation are neutral: an attacker can put one punctuation character between the letters ("t-h-e- -s-e"),
 // which halves their share, so punctuation is left out of the count and a floor of
 // minSegmentBytes/2 letters, digits and spaces stands in for the length it no longer adds.
 func wordy(b []byte) bool {
@@ -740,17 +738,45 @@ func replaceRuns(s string, runs [][2]int, dec func(string) (string, bool)) []str
 // misread one is either unprintable or text of no script in particular.
 func best(cands []string) (string, bool) {
 	bi, bn := -1, 0
-	var buf [16]rune
+	t := runeClasses()
 	for i, c := range cands {
 		n := 0
-		for _, r := range c {
-			switch {
-			case r == utf8.RuneError || r != '\n' && r != '\r' && r != '\t' && !unicode.IsPrint(r) && !unicode.IsSpace(r):
+		// A filler (an invalid byte, a control, a format or combining character) scores nothing
+		// when it is one of two kinds, as an attacker's is; a reading with more kinds of it is a
+		// misreading, and each costs.
+		var kinds [3]rune
+		nKinds := 0
+		for i, r := range c {
+			cl := classOf(t, r)
+			if r == utf8.RuneError {
+				if _, size := utf8.DecodeRuneInString(c[i:]); size == 1 {
+					r, cl = -rune(c[i])-1, clsInvis
+				}
+			}
+			if r != 0 && cl&clsInvis != 0 {
+				if !slices.Contains(kinds[:nKinds], r) && nKinds < len(kinds) {
+					kinds[nKinds] = r
+					nKinds++
+				}
+				if slices.Contains(kinds[:min(nKinds, 2)], r) {
+					continue
+				}
 				n -= 8
-			case r < utf8.RuneSelf && unicode.IsLetter(r) || unicode.IsDigit(r) && r < utf8.RuneSelf:
+				continue
+			}
+			switch {
+			case r == utf8.RuneError:
+				n -= 8
+			case r < utf8.RuneSelf && cl&clsFold != 0:
+				n += 3 // an ASCII letter or digit: a tie goes to the reading with the real letters
+			case cl&clsFold != 0:
 				n += 2
-			case r >= utf8.RuneSelf && foldsToASCII(appendCanonRune(buf[:0], r, 0)):
-				n += 2
+			case cl&clsPrint == 0 && r != '\n' && r != '\r' && r != '\t':
+				n -= 8
+			case r >= 1<<16:
+				// a well-formed surrogate pair (emoji) is evidence of the alignment and byte
+				// order of a UTF-16 reading: a misread one holds almost none
+				n += 6
 			default:
 				n++
 			}
@@ -822,43 +848,49 @@ func asTextWith(b []byte, isText func([]byte) bool) (string, bool) {
 	return best(cands)
 }
 
-// bmpNeutral marks the code units of the Basic Multilingual Plane that are spaces or punctuation.
-var bmpNeutral = sync.OnceValue(func() *[1 << 16]bool {
-	var t [1 << 16]bool
-	for u := range t {
-		r := rune(u)
-		t[u] = unicode.IsSpace(r) || unicode.IsPunct(r)
-	}
-	return &t
-})
-
-func fromUTF16(b []byte, le bool) (string, bool) {
+// utf16Gate reports whether the code units lo to hi of b look like one script's text (see
+// fromUTF16).
+func utf16Gate(b []byte, le bool, lo, hi int) bool {
 	unit := func(i int) uint16 {
 		if le {
 			return uint16(b[2*i]) | uint16(b[2*i+1])<<8
 		}
 		return uint16(b[2*i])<<8 | uint16(b[2*i+1])
 	}
-	n := len(b) / 2
-	// one script's text sits in at most two 256-character blocks (its own and ASCII). What an
-	// attacker puts between the letters is left out of the count: spaces and punctuation (U+3000,
-	// U+2014) and pairs that are no letter or digit (emoji), which sit in blocks of their own.
-	// What is left (letters, digits, marks, other symbols, controls) must be a quarter of the
-	// characters and sit in two blocks for three quarters of it.
+	// One script's text sits in at most two 256-character blocks (its own and ASCII). What an
+	// attacker puts between the letters is left out of the count: spaces, punctuation and
+	// invisible marks (U+3000, U+2014, U+200B) and pairs that are no letter or digit (emoji).
+	// What is left must be a quarter of the characters, with controls under 5% (binary is full
+	// of NULs), and sit in two blocks for three quarters of it. Chinese, whose ideographs span
+	// about eighty blocks, has a second way in: at least 24 ideographs, 70% of the characters,
+	// and 70% of them different (random bytes put 40% of their units there; a repeating
+	// pattern repeats).
 	var pages [256]int
-	counted, chars := 0, 0
-	neutral := bmpNeutral()
-	for i := 0; i < n; i++ {
+	var cjk [(0x9fff-0x3400)/64 + 1]uint64
+	counted, chars, ctrl, ideographs, distinct := 0, 0, 0, 0, 0
+	cls := runeClasses()
+	for i := lo; i < hi; i++ {
 		u := unit(i)
 		chars++
-		if 0xd800 <= u && u < 0xdc00 && i+1 < n { // a surrogate pair is one character
+		if cls[u]&clsInvis != 0 && cls[u]&clsMark == 0 && u != '\n' && u != '\r' && u != '\t' {
+			ctrl++
+		}
+		if 0xd800 <= u && u < 0xdc00 && i+1 < hi { // a surrogate pair is one character
 			r := utf16.DecodeRune(rune(u), rune(unit(i+1)))
 			i++
-			if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			if c := classOf(cls, r); c&clsWord == 0 || c&clsSpace != 0 {
 				continue
 			}
-		} else if neutral[u] {
+		} else if cls[u]&(clsSpace|clsPunctOnly|clsMark) != 0 {
 			continue
+		}
+		if 0x3400 <= u && u <= 0x9fff {
+			w, bit := (u-0x3400)/64, uint64(1)<<((u-0x3400)%64)
+			if cjk[w]&bit == 0 {
+				cjk[w] |= bit
+				distinct++
+			}
+			ideographs++
 		}
 		pages[u>>8]++
 		counted++
@@ -871,8 +903,35 @@ func fromUTF16(b []byte, le bool) (string, bool) {
 			second = c
 		}
 	}
-	if 4*counted < chars || 4*(first+second) < 3*counted {
+	if 4*counted < chars || 20*ctrl > chars {
+		return false
+	}
+	chinese := ideographs >= 24 && 10*ideographs >= 7*counted && 10*distinct >= 7*ideographs
+	return 4*(first+second) >= 3*counted || chinese
+}
+
+func fromUTF16(b []byte, le bool) (string, bool) {
+	n := len(b) / 2
+	// a long reading is first tried on four short samples: text, which is most of what textual
+	// accepts, passes at least one; random bytes (most readings of a megabyte) fail all four
+	if n > 1024 {
+		sampled := false
+		for q := range 4 {
+			lo := n * q / 4
+			sampled = sampled || utf16Gate(b, le, lo, min(lo+256, n))
+		}
+		if !sampled {
+			return "", false
+		}
+	}
+	if !utf16Gate(b, le, 0, n) {
 		return "", false
+	}
+	unit := func(i int) uint16 {
+		if le {
+			return uint16(b[2*i]) | uint16(b[2*i+1])<<8
+		}
+		return uint16(b[2*i])<<8 | uint16(b[2*i+1])
 	}
 	u := make([]uint16, n)
 	for i := range u {
@@ -894,50 +953,60 @@ func fromUTF16(b []byte, le bool) (string, bool) {
 // (U+3000 between Cyrillic letters); the letters, digits and spaces must still be at least
 // textualRun/2 characters and half of the rest.
 func textual(b []byte) bool {
-	run, longest, printable, wordish, neutral, total := 0, 0, 0, 0, 0, 0
+	t := runeClasses()
+	run, longest, printable, wordish, punct, total := 0, 0, 0, 0, 0, 0
+	var inv [4]rune    // the invisible characters seen (see below)
+	nInv, nRaw := 0, 0 // how many there are, and how many of them are controls or invalid bytes
 	for i := 0; i < len(b); {
-		if c := b[i]; c < utf8.RuneSelf { // ASCII, without the unicode tables
-			i++
-			total++
-			switch {
-			case isAlnumByte(c) || c == ' ' || c == '\n' || c == '\r' || c == '\t':
-				printable++
-				wordish++
-			case 0x21 <= c && c <= 0x7e:
-				printable++
-				neutral++
-			default:
-				run = 0
-				if 10*(total-printable) > len(b) { // over 10% unprintable already
-					return false
+		r, size := rune(b[i]), 1
+		if r >= utf8.RuneSelf {
+			r, size = utf8.DecodeRune(b[i:])
+			if r == utf8.RuneError && size == 1 {
+				r = -rune(b[i]) - 1 // an invalid byte
+			}
+		}
+		i += size
+		cl := classOf(t, r)
+		if cl&clsInvis != 0 {
+			// an attacker's filler (U+200B, U+00AD, a combining mark, \x01, \xff after every
+			// character) is skipped, but only four kinds of it, and two of control or invalid
+			// bytes: random bytes hold dozens of both
+			seen := false
+			for _, v := range inv[:nInv] {
+				seen = seen || v == r
+			}
+			raw := cl&clsMark == 0
+			if !seen && nInv < len(inv) && (!raw || nRaw < 2) {
+				inv[nInv] = r
+				nInv++
+				if raw {
+					nRaw++
 				}
+				seen = true
+			}
+			if seen {
 				continue
 			}
-			run++
-			longest = max(longest, run)
-			continue
 		}
-		r, size := utf8.DecodeRune(b[i:])
-		i += size
 		total++
-		if r != utf8.RuneError && (unicode.IsPrint(r) || unicode.IsSpace(r)) {
+		if cl&clsPrint != 0 {
 			printable++
 			switch {
-			case unicode.IsSpace(r) || unicode.IsLetter(r) || unicode.IsDigit(r):
+			case cl&clsWord != 0:
 				wordish++
-			case unicode.IsPunct(r) || unicode.IsSymbol(r):
-				neutral++
+			case cl&clsPunct != 0:
+				punct++
 			}
 			run++
 			longest = max(longest, run)
 			continue
 		}
 		run = 0
-		if 10*(total-printable) > len(b) {
+		if 10*(total-printable) > len(b) { // over 10% unprintable already
 			return false
 		}
 	}
-	return longest >= textualRun && 10*printable >= 9*total && wordish >= textualRun/2 && 2*wordish >= total-neutral
+	return longest >= textualRun && 10*printable >= 9*total && wordish >= textualRun/2 && 2*wordish >= total-punct
 }
 
 // longestPrintable is the longest stretch of printable ASCII in b. NULs neither extend nor end

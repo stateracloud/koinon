@@ -33,8 +33,10 @@
 //     decoded. There is no density gate, so a separator of any length between chunks of any
 //     length is read through; the price is that prose is projected too (its letters are
 //     base64 and base32 symbols), which resynchronisation turns into nothing, at a cost the
-//     work and time budgets bound (a 1 MiB argument takes at most about 0.4 s of the 1 s a call has, so
-//     the clock is a backstop that a benign argument within the size cap does not reach). A
+//     work and time budgets bound (on a laptop a benign call of up to 1 MiB takes at most about 0.4 s of the
+//     1 s a call has, whatever its shape: one argument or two halves, base64 of text or of random
+//     bytes, base64 of UTF-16, 128 short arguments; so the clock is a backstop that a benign call
+//     within the size cap does not reach). A
 //     projection keeps stretches of 16 or more decoded bytes that are 60% letters, digits or
 //     spaces (ASCII punctuation and NULs do not count against them), so chance ASCII in
 //     misaligned decodings does not become a variant; shorter stretches (5 or more bytes, base64
@@ -133,7 +135,13 @@
 //     only chunks of 16 or more decoded bytes still decode;
 //   - data carried in the host labels of a URL is checked for length and randomness but not
 //     charged to the per-host byte budget, and letters-only data is never judged random, so a
-//     run can carry about 20 KiB of letters-only text across 20 hosts within the URL rule.
+//     run can carry about 20 KiB of letters-only text across 20 hosts within the URL rule;
+//   - a secret split into small pieces that are each encoded on their own and joined by a
+//     separator: base64 pieces under about 6 bytes, base32 pieces under about 10 and pieces of
+//     non-ASCII text are too short to decode, and the resynchronisation does not chain them;
+//   - the same chain of short pieces when the text they carry is not ASCII: resync keeps text
+//     blocks of ASCII only (textBlock), so short chains of Cyrillic, Chinese or other scripts are
+//     not recovered, while the same text in one stretch is.
 //
 // # Notes for the wiring (#349)
 //
