@@ -36,6 +36,7 @@ case "$1 $2" in
 		echo "${FAKE_PR_URL:-}"
 	fi
 	;;
+"pr view") echo "${FAKE_PR_DRAFT:-true}" ;;
 "pr create") echo "https://example.invalid/o/r/pull/123" ;;
 "project item-add") exit "${FAKE_BOARD_RC:-0}" ;;
 esac
@@ -109,7 +110,7 @@ printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
 chmod +x "$tmp/failbin/mktemp"
 mktemp_fail_rc=0
 (cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(newwork)) >/dev/null 2>&1 || mktemp_fail_rc=$?
-reset_state() { : >"$FAKE_LOG"; unset FAKE_PR_URL FAKE_PR_JSON FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_SHIP_ALLOWED_EMAILS KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; echo 0 >"$FAKE_LAB_RC"; echo success >"$FAKE_LAB_STATE"; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_PR_URL FAKE_PR_JSON FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_SHIP_ALLOWED_EMAILS KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; echo 0 >"$FAKE_LAB_RC"; echo success >"$FAKE_LAB_STATE"; }
 
 fail=0
 pass=0
@@ -444,11 +445,12 @@ rc=$(run "$tmp/o20c" -m "feat: l" --pr-title t --pr-body "$tmp/body.md" --ready 
 check "lab go-test green: exit 0" eq "$rc" 0
 check "the gate is go-test on the lab queue" has 'e2e-remote --argo --gate go-test' "$FAKE_LOG"
 check "the status is read on the pushed head" has "go-test-lab state $(git rev-parse HEAD)" "$FAKE_LOG"
+check "a new PR is created as a draft when the lab runs first" has 'gh pr create .*--draft' "$FAKE_LOG"
 check "lab go-test ok line" has '^lab go-test ok' "$tmp/o20c"
 check "the lab ran before the pull request was marked ready" bash -c "awk '/e2e-remote/ { l = NR } /^gh pr ready/ { r = NR } END { exit !(l && r && l < r) }' $FAKE_LOG"
 check "ready happened" has '^ready$' "$tmp/o20c"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
-for c in 75 76 78 79; do
+for c in 75 76 78 2; do
 	reset_state
 	echo "$c" >"$FAKE_LAB_RC"
 	w=$(newwork); cd "$w"
@@ -461,6 +463,25 @@ for c in 75 76 78 79; do
 	check "lab exit $c: no status read" hasnt 'go-test-lab state' "$FAKE_LOG"
 	git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 done
+# an already ready PR: the push started CI, the lab run would come too late
+reset_state
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PR_DRAFT=false
+w=$(newwork); cd "$w"
+echo lr >lr.txt
+rc=$(run "$tmp/o21r" -m "feat: l" --pr-title t --pr-body "$tmp/body.md" --ready --lab-go-test)
+check "already ready PR: exit 0" eq "$rc" 0
+check "already ready PR: the lab does not run" hasnt 'e2e-remote' "$FAKE_LOG"
+check "already ready PR: says why and how" has 'PR already ready.*gh pr ready --undo' "$tmp/o21r"
+check "already ready PR: skipped line" has '^lab go-test skipped (PR already ready)' "$tmp/o21r"
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
+reset_state
+echo 7 >"$FAKE_LAB_RC"
+w=$(newwork); cd "$w"
+echo l7 >l7.txt
+rc=$(run "$tmp/o21f" -m "feat: l" --pr-title t --pr-body "$tmp/body.md" --ready --lab-go-test)
+check "a gate's own failure status (rc 7) stops the ship" eq "$rc" 1
+check "...without marking ready" hasnt '^ready$' "$tmp/o21f"
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 reset_state
 echo 1 >"$FAKE_LAB_RC"
 w=$(newwork); cd "$w"

@@ -122,8 +122,8 @@ CI's `go-test` job is the longest Blacksmith job. With a lab, run it there first
    skipped, and the required `go` check accepts that one skip (any other skipped part, or a skipped
    `go-test` without the status, is still a failure). The required check name stays `go`; the merge rule
    and the ruleset's required contexts do not change.
-3. Without the status (no lab: exit 78; lab cannot run it now or no free slot: 75; NOT RUN: 76; flavors
-   change: 79), `go-test` runs on Blacksmith as before. `hack/ship.sh` prints the reason and goes on.
+3. Without the status (no lab: exit 78; lab cannot run it now or no free slot: 75; NOT RUN: 76;
+   the lab rejected the call: 2; the flavors refusal 79 is the kind lane's only), `go-test` runs on Blacksmith as before. `hack/ship.sh` prints the reason and goes on.
    A gate that really failed (any other non-zero) stops the ship before ready.
 4. A push to a ready pull request runs CI on the new head at once, before any status can exist, and `go-test`
    runs on Blacksmith: nothing waits for a status (a waiting Blacksmith job is billed). To keep the lab for
