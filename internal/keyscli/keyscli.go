@@ -423,6 +423,11 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 	if _, ok := ks.Keys[id]; !ok {
 		return fmt.Errorf("KEK %s is not in the key set", id)
 	}
+	// An install that opted in to a KMS never activates a local KEK (Andre, 2026-11-03). To roll back,
+	// set the configured primary to local first (docs/ops/secret-keys.md), then activate.
+	if p := t.Wrappers.Primary(); p.Backend() != secretstore.BackendLocal && ks.Stored[id].Backend == secretstore.BackendLocal {
+		return fmt.Errorf("KEK %s is a local key and the KMS %s is configured; activate a KEK wrapped by the KMS (ask the key-admin Job to add one), or switch the configured wrapping to local first to roll back", id, p.Backend())
+	}
 	if err := t.confirm(ctx, fmt.Sprintf("Activate %s?", id), "New values use it within about a minute."); err != nil {
 		return err
 	}

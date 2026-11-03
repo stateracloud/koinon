@@ -538,6 +538,17 @@ var _ = Describe("koinon-api keys", func() {
 			Expect(tool.Status(ctx)).To(Succeed())
 			Expect(out.String()).To(ContainSubstring("WARNING: the active KEK kek-20260101-aaaa is a local key but a KMS (fakekms)"))
 
+			By("activating a local KEK is refused while the KMS is the primary")
+			Expect(tool.Activate(ctx, "kek-20260101-aaaa")).To(MatchError(ContainSubstring("the KMS fakekms is configured")))
+
+			By("and allowed once the configured primary is local again (the rollback)")
+			localOnly := secretstore.Wrappers{}
+			ks.Wrappers = localOnly
+			tool.Store, tool.Wrappers = ks, localOnly
+			Expect(tool.Activate(ctx, "kek-20260101-aaaa")).To(Succeed())
+			ks.Wrappers = admin
+			tool.Store, tool.Wrappers = ks, admin
+
 			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
 			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(Succeed())
 			r, ok := recorded(ctx, "kek-20261023-bbbb")

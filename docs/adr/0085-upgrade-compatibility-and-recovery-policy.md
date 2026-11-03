@@ -325,7 +325,7 @@ Implementation-level unknowns, to settle in the sub-issues:
   - Built (415b, #591): koinon-api records each KEK's fingerprint in `kek_fingerprints` on load, on
     reload and on `keys activate`; `keys status` warns when a loaded KEK differs from the recorded
     one, says whether the active KEK's wrapping key answers, and warns about a local active KEK only
-    when a KMS is configured. koinon-api and the reconciler probe the active KEK's wrapper on every
+    when a KMS is configured; `keys activate` refuses a local KEK while a KMS is the configured primary (Andre, 2026-11-03; rollback: set the primary to local first). koinon-api and the reconciler probe the active KEK's wrapper on every
     reload and export `koinon_kek_active_reachable{backend}`; the reconciler records nothing. Rows of
     retired KEKs are kept: IDs are never reused and `keys forget` needs the history. Binding an
     install ID into the KEK AAD is deferred to #416. If the KMS is down at start the pod exits (fail
