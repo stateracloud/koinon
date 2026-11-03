@@ -623,10 +623,13 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		}
 		after := serverSummary(out)
 		after["credentialChanged"] = patch.Credential != nil || patch.RemoveCredential
-		return audit.RecordErr(ctx, q, audit.Event{
+		if err := audit.RecordErr(ctx, q, audit.Event{
 			Org: org, Actor: actor, Action: "mcp_server.update", TargetKind: "mcp_server", TargetID: id,
 			Before: serverSummary(cur), After: after,
-		})
+		}); err != nil {
+			return err
+		}
+		return recordClassReset(ctx, q, org, actor, cur, out)
 	})
 	if err != nil {
 		return Server{}, mapErr(err)

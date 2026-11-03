@@ -5,6 +5,9 @@ package orgsettings_test
 import (
 	"encoding/json"
 	"errors"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -31,7 +34,18 @@ var _ = Describe("NormalizeHost", func() {
 		},
 		Entry("plain", "docs.example.com", "docs.example.com"),
 		Entry("case and a trailing dot", " Docs.Example.COM. ", "docs.example.com"),
-		Entry("single label", "intranet", "intranet"),
+		Entry("a single label", "intranet", ""),
+		Entry("localhost", "localhost", ""),
+		Entry("a decimal IPv4 as one number", "2130706433", ""),
+		Entry("a shorthand IPv4", "127.1", ""),
+		Entry("a dotted IPv4 under a name", "example.0", ""),
+		Entry("an all-numeric last label", "docs.example.123", ""),
+		Entry("a hex last label", "docs.0x7f", ""),
+		Entry("a bare 0x last label", "docs.0x", ""),
+		Entry("a hex-looking label that is a name", "docs.0xample.com", "docs.0xample.com"),
+		Entry("a numeric first label", "1.example.com", "1.example.com"),
+		Entry("a Unicode name, stored as punycode", "Bücher.Example.com", "xn--bcher-kva.example.com"),
+		Entry("a Unicode name whose label is too long", "ü"+strings.Repeat("a", 70)+".example.com", ""),
 		Entry("a URL", "https://docs.example.com/a", ""),
 		Entry("a port", "docs.example.com:8443", ""),
 		Entry("a path", "docs.example.com/a", ""),
@@ -47,7 +61,65 @@ var _ = Describe("NormalizeHost", func() {
 	)
 })
 
+var _ = Describe("NormalizeTrustedEntry", func() {
+	DescribeTable("accepts a host or *. and a host, and nothing else",
+		func(raw, want string) {
+			got, err := orgsettings.NormalizeTrustedEntry(raw)
+			if want == "" {
+				var inv *orgsettings.InvalidError
+				Expect(errors.As(err, &inv)).To(BeTrue(), "%q should be refused", raw)
+				return
+			}
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal(want))
+		},
+		Entry("an exact host", "Docs.Example.com", "docs.example.com"),
+		Entry("a wildcard", "*.Example.com", "*.example.com"),
+		Entry("a wildcard with spaces", " *.example.com ", "*.example.com"),
+		Entry("a wildcard over a multi-label domain", "*.docs.example.co.uk", "*.docs.example.co.uk"),
+		Entry("a wildcard over a Unicode name", "*.Bücher.example", "*.xn--bcher-kva.example"),
+		Entry("a lone star", "*", ""),
+		Entry("a star dot with nothing after it", "*.", ""),
+		Entry("a star in the middle", "docs.*.example.com", ""),
+		Entry("a star inside a label", "*docs.example.com", ""),
+		Entry("a second star", "*.*.example.com", ""),
+		Entry("a star after the host", "example.com.*", ""),
+		Entry("a wildcard over a TLD", "*.com", ""),
+		Entry("a wildcard over a country second-level suffix", "*.co.uk", ""),
+		Entry("a wildcard over a private suffix", "*.blogspot.com", ""),
+		Entry("a wildcard over a single label", "*.intranet", ""),
+		Entry("a wildcard over an IPv4-like name", "*.127.1", ""),
+		Entry("a wildcard over an IP address", "*.10.0.0.1", ""),
+		Entry("a wildcard with a port", "*.example.com:443", ""),
+		Entry("a wildcard URL", "https://*.example.com", ""),
+		Entry("a wildcard with a path", "*.example.com/a", ""),
+	)
+})
+
 var _ = Describe("LeakGuard.TrustsHost", func() {
+	It("matches *.example.com on any subdomain at any depth, but not the apex or a lookalike", func() {
+		l := orgsettings.LeakGuard{TrustedHosts: []string{"*.example.com"}}
+		Expect(l.TrustsHost("a.example.com")).To(BeTrue())
+		Expect(l.TrustsHost("A.B.Example.com.")).To(BeTrue())
+		Expect(l.TrustsHost("x.y.z.example.com")).To(BeTrue())
+		Expect(l.TrustsHost("example.com")).To(BeFalse(), "the apex needs its own entry")
+		Expect(l.TrustsHost("evilexample.com")).To(BeFalse())
+		Expect(l.TrustsHost("a.evilexample.com")).To(BeFalse())
+		Expect(l.TrustsHost("example.com.evil.net")).To(BeFalse())
+		Expect(l.TrustsHost("a.example.com.evil.net")).To(BeFalse())
+		Expect(l.TrustsHost("a.example.org")).To(BeFalse())
+		Expect(l.TrustsHost(".example.com")).To(BeFalse())
+		Expect(l.TrustsHost("")).To(BeFalse())
+	})
+
+	It("trusts the apex when it is listed as well, and keeps exact entries exact", func() {
+		l := orgsettings.LeakGuard{TrustedHosts: []string{"*.example.com", "example.com", "docs.example.org"}}
+		Expect(l.TrustsHost("example.com")).To(BeTrue())
+		Expect(l.TrustsHost("a.example.com")).To(BeTrue())
+		Expect(l.TrustsHost("docs.example.org")).To(BeTrue())
+		Expect(l.TrustsHost("a.docs.example.org")).To(BeFalse(), "an exact entry does not cover subdomains")
+	})
+
 	It("matches the host exactly, not by suffix or substring", func() {
 		l := orgsettings.LeakGuard{TrustedHosts: []string{"docs.example.com"}}
 		Expect(l.TrustsHost("docs.example.com")).To(BeTrue())
@@ -193,7 +265,7 @@ var _ = Describe("the leak-guard settings", func() {
 		})
 
 		It("refuses something that is not a host name", func(ctx SpecContext) {
-			for _, bad := range []string{"https://docs.example.com/x", "*.example.com", "10.1.2.3", ""} {
+			for _, bad := range []string{"https://docs.example.com/x", "*", "*.com", "localhost", "10.1.2.3", ""} {
 				_, err := svc.AddTrustedHost(ctx, org, actor, bad)
 				var inv *orgsettings.InvalidError
 				Expect(errors.As(err, &inv)).To(BeTrue(), "%q", bad)
@@ -214,6 +286,60 @@ var _ = Describe("the leak-guard settings", func() {
 			By("a host already on the full list is still accepted")
 			_, err = svc.AddTrustedHost(ctx, org, actor, "h0.example.com")
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("stores and removes a wildcard entry, and refuses a wildcard over a public suffix", func(ctx SpecContext) {
+			got, err := svc.AddTrustedHost(ctx, org, actor, "*.Example.com")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal("*.example.com"))
+			_, err = svc.AddTrustedHost(ctx, org, actor, "*.co.uk")
+			var inv *orgsettings.InvalidError
+			Expect(errors.As(err, &inv)).To(BeTrue())
+			l, err := svc.LeakGuard(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(l.TrustedHosts).To(Equal([]string{"*.example.com"}))
+			Expect(l.TrustsHost("a.b.example.com")).To(BeTrue())
+			Expect(l.TrustsHost("example.com")).To(BeFalse())
+			Expect(svc.RemoveTrustedHost(ctx, org, actor, "*.example.com")).To(Succeed())
+			l, err = svc.LeakGuard(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(l.TrustedHosts).To(BeEmpty())
+		})
+
+		It("never holds more than the cap when adds run in parallel", func(ctx SpecContext) {
+			const room, parallel = 3, 16
+			for i := range orgsettings.MaxTrustedHosts - room {
+				_, err := q.AddOrgFetchTrustedHost(ctx, store.AddOrgFetchTrustedHostParams{OrgID: org, Host: "seed" + itoa(i) + ".example.com"})
+				Expect(err).NotTo(HaveOccurred())
+			}
+			var wg sync.WaitGroup
+			var ok, refused atomic.Int32
+			start := make(chan struct{})
+			for i := range parallel {
+				wg.Add(1)
+				go func() {
+					defer GinkgoRecover()
+					defer wg.Done()
+					<-start
+					_, err := svc.AddTrustedHost(ctx, org, actor, "par"+itoa(i)+".example.com")
+					var inv *orgsettings.InvalidError
+					switch {
+					case err == nil:
+						ok.Add(1)
+					case errors.As(err, &inv):
+						refused.Add(1)
+					default:
+						Expect(err).NotTo(HaveOccurred())
+					}
+				}()
+			}
+			close(start)
+			wg.Wait()
+			l, err := svc.LeakGuard(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(l.TrustedHosts).To(HaveLen(orgsettings.MaxTrustedHosts))
+			Expect(ok.Load()).To(BeEquivalentTo(room))
+			Expect(refused.Load()).To(BeEquivalentTo(parallel - room))
 		})
 
 		It("is scoped to the org", func(ctx SpecContext) {

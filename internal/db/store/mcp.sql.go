@@ -1192,6 +1192,12 @@ UPDATE mcp_servers
 SET url = $1, transport = $2, credential_header = $3,
     credential_prefix = $4, credential = $5,
     declared_version = $6, removed_at = NULL, disabled_reason = NULL,
+    -- A new URL is a different server: its data class goes back to the cautious default (kind other,
+    -- every leg), so a class declared for the old endpoint cannot narrow the guard for the new one (ADR 0084).
+    kind = CASE WHEN url IS DISTINCT FROM $1 THEN 'other'::mcp_server_kind ELSE kind END,
+    exposes_untrusted_input = CASE WHEN url IS DISTINCT FROM $1 THEN true ELSE exposes_untrusted_input END,
+    exposes_private_data = CASE WHEN url IS DISTINCT FROM $1 THEN true ELSE exposes_private_data END,
+    exposes_outbound = CASE WHEN url IS DISTINCT FROM $1 THEN true ELSE exposes_outbound END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
 WHERE org_id = $7 AND id = $8 AND source = 'secret'
 RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, exposes_outbound
@@ -1257,6 +1263,12 @@ SET url = $1, transport = $2,
     credential_header = CASE WHEN $3::boolean THEN $4 ELSE credential_header END,
     credential_prefix = CASE WHEN $3::boolean THEN $5 ELSE credential_prefix END,
     credential = CASE WHEN $6::boolean THEN $7 ELSE credential END,
+    -- A new URL is a different server: its data class goes back to the cautious default (kind other,
+    -- every leg), so a class declared for the old endpoint cannot narrow the guard for the new one (ADR 0084).
+    kind = CASE WHEN url IS DISTINCT FROM $1 THEN 'other'::mcp_server_kind ELSE kind END,
+    exposes_untrusted_input = CASE WHEN url IS DISTINCT FROM $1 THEN true ELSE exposes_untrusted_input END,
+    exposes_private_data = CASE WHEN url IS DISTINCT FROM $1 THEN true ELSE exposes_private_data END,
+    exposes_outbound = CASE WHEN url IS DISTINCT FROM $1 THEN true ELSE exposes_outbound END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
 WHERE org_id = $8 AND id = $9
 RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, exposes_outbound

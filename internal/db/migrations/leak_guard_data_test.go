@@ -71,12 +71,16 @@ var _ = Describe("the leak guard data migration (ADR 0084, #350)", func() {
 		Expect(err).To(HaveOccurred())
 		_, err = old.ExecContext(ctx, `UPDATE org_settings SET leak_match_threshold = 12 WHERE org_id = $1`, org)
 		Expect(err).NotTo(HaveOccurred())
-		for _, bad := range []string{"Docs.Example.com", "https://docs.example.com", "docs.example.com:443", "*.example.com", "", "-a.com", "a..com"} {
+		for _, bad := range []string{"Docs.Example.com", "https://docs.example.com", "docs.example.com:443", "*", "a.*.com", "*docs.example.com", "*.*.example.com", "*.com1", "*.localhost", "localhost", "127.1", "example.0x7f", "docs.example.123", "", "-a.com", "a..com"} {
 			_, err = old.ExecContext(ctx, `INSERT INTO org_fetch_trusted_hosts (org_id, host) VALUES ($1, $2)`, org, bad)
 			Expect(err).To(HaveOccurred(), "host %q", bad)
 		}
 		_, err = old.ExecContext(ctx, `INSERT INTO org_fetch_trusted_hosts (org_id, host) VALUES ($1, 'docs.example.com')`, org)
 		Expect(err).NotTo(HaveOccurred())
+		for _, good := range []string{"*.example.com", "xn--bcher-kva.example", "1.example.com"} {
+			_, err = old.ExecContext(ctx, `INSERT INTO org_fetch_trusted_hosts (org_id, host) VALUES ($1, $2)`, org, good)
+			Expect(err).NotTo(HaveOccurred(), "host %q", good)
+		}
 		_, err = old.ExecContext(ctx, `INSERT INTO org_fetch_trusted_hosts (org_id, host) VALUES ($1, 'docs.example.com')`, org)
 		Expect(err).To(HaveOccurred())
 	})

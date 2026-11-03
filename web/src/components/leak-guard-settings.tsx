@@ -5,6 +5,7 @@ import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connec
 import { useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -13,7 +14,7 @@ import { LeakGuardService } from '@/gen/koinon/leakguard/v1alpha1/leakguard_pb'
 /**
  * LeakGuardSettings is where an org admin sets the leak guard's match threshold and the hosts a fetch
  * server may reach without the guard's say (ADR 0084, #350). The list starts empty and a host is an
- * exact DNS name: example.com does not trust docs.example.com. Every change is audited.
+ * exact DNS name, or *.example.com for any subdomain of it (never example.com itself). Every change is audited.
  */
 export function LeakGuardSettings({ orgId }: { orgId: string }) {
   const queryClient = useQueryClient()
@@ -108,7 +109,8 @@ export function LeakGuardSettings({ orgId }: { orgId: string }) {
       <div className="grid gap-2">
         <h3 className="font-semibold">Fetch-trusted hosts</h3>
         <p className="text-muted-foreground text-xs">
-          Hosts a fetch server may reach without the guard stopping the call. Each is an exact DNS name, such as docs.example.com: it does not cover subdomains, and it is not a URL, a port or an IP address. The list starts empty.
+          Hosts a fetch server may reach without the guard stopping the call. An entry such as docs.example.com trusts exactly that host. An entry such as *.example.com trusts any subdomain at any depth, but not example.com itself, which needs its
+          own entry. A wildcard over a public suffix such as *.com or *.co.uk is refused, and an entry is never a URL, a port or an IP address. The list starts empty.
         </p>
         {g.trustedHosts.length === 0 ? (
           <p className="text-muted-foreground">No trusted hosts.</p>
@@ -117,6 +119,7 @@ export function LeakGuardSettings({ orgId }: { orgId: string }) {
             {g.trustedHosts.map((h) => (
               <li key={h} className="flex items-center gap-2">
                 <code className="break-all">{h}</code>
+                {h.startsWith('*.') && <Badge variant="secondary">Any subdomain of {h.slice(2)}</Badge>}
                 <Button variant="outline" size="sm" className="ml-auto" aria-label={`Remove ${h}`} disabled={removeHost.isPending} onClick={() => removeHost.mutate({ orgId, host: h })}>
                   Remove
                 </Button>
@@ -127,7 +130,7 @@ export function LeakGuardSettings({ orgId }: { orgId: string }) {
         <form onSubmit={add} className="flex flex-wrap items-end gap-2" aria-label="Add a trusted host">
           <div className="grid gap-1.5">
             <Label htmlFor="leak-host">Host</Label>
-            <Input id="leak-host" value={host} onChange={(e) => setHost(e.target.value)} placeholder="docs.example.com" autoComplete="off" spellCheck={false} />
+            <Input id="leak-host" value={host} onChange={(e) => setHost(e.target.value)} placeholder="docs.example.com or *.example.com" autoComplete="off" spellCheck={false} />
           </div>
           <Button type="submit" size="sm" disabled={host.trim() === '' || addHost.isPending}>
             Add host

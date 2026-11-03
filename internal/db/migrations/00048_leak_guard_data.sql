@@ -32,11 +32,17 @@ ALTER TABLE org_settings
 CREATE TABLE org_fetch_trusted_hosts (
     org_id     uuid        NOT NULL REFERENCES orgs (id),
     id         uuid        NOT NULL DEFAULT uuidv7(),
-    -- A lower-case DNS host name: no scheme, port, path or wildcard. The URL rule matches a URL's
-    -- host against it exactly.
+    -- A lower-case DNS host name (punycode for an international one) or "*." and one: no scheme,
+    -- port or path. The rules of orgsettings.NormalizeTrustedEntry: at least two labels after the
+    -- optional "*.", and a last label that is not a number a resolver reads as an IPv4 address
+    -- (digits, or 0x and hex digits). A wildcard over a public suffix is refused by the application,
+    -- which has the suffix list. The URL rule matches an exact entry exactly and a wildcard entry
+    -- against any subdomain, not the apex.
     host       text        NOT NULL CHECK (
         length(host) <= 253
-        AND host ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$'),
+        AND host ~ '^(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$'
+        AND regexp_replace(host, '^\*\.', '') ~ '\.'
+        AND regexp_replace(host, '^.*\.', '') !~ '^([0-9]+|0x[0-9a-f]*)$'),
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (org_id, id),
     UNIQUE (org_id, host)

@@ -49,6 +49,16 @@ func (q *Queries) DeleteOrgFetchTrustedHost(ctx context.Context, arg DeleteOrgFe
 	return result.RowsAffected(), nil
 }
 
+const ensureOrgSettings = `-- name: EnsureOrgSettings :exec
+INSERT INTO org_settings (org_id) VALUES ($1) ON CONFLICT (org_id) DO NOTHING
+`
+
+// Makes sure the org has an org_settings row, so LockOrgSettings has a row to lock.
+func (q *Queries) EnsureOrgSettings(ctx context.Context, orgID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, ensureOrgSettings, orgID)
+	return err
+}
+
 const getOrgSettings = `-- name: GetOrgSettings :one
 
 SELECT org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold FROM org_settings
@@ -107,6 +117,18 @@ func (q *Queries) ListOrgFetchTrustedHosts(ctx context.Context, orgID pgtype.UUI
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockOrgSettings = `-- name: LockOrgSettings :one
+SELECT org_id FROM org_settings WHERE org_id = $1 FOR UPDATE
+`
+
+// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
+func (q *Queries) LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockOrgSettings, orgID)
+	var org_id pgtype.UUID
+	err := row.Scan(&org_id)
+	return org_id, err
 }
 
 const setOrgLeakMatchThreshold = `-- name: SetOrgLeakMatchThreshold :exec

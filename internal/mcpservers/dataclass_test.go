@@ -155,7 +155,7 @@ var _ = Describe("the data class of a server (ADR 0084, #350)", func() {
 		Expect(events(ctx, "mcp_server.data_class.set")).To(BeEmpty())
 	})
 
-	It("is settable on a declared server and survives the Secret being applied again", func(ctx SpecContext) {
+	It("is settable on a declared server and survives the Secret being applied again with the same URL", func(ctx SpecContext) {
 		decl := mcpservers.Declared{SecretName: "s1", Version: "uid/1", Name: "wiki", URL: "https://decl.example.com/mcp"}
 		_, err := svc.ApplyDeclared(ctx, org, decl)
 		Expect(err).NotTo(HaveOccurred())
@@ -168,15 +168,64 @@ var _ = Describe("the data class of a server (ADR 0084, #350)", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		decl.Version = "uid/2"
-		decl.URL = "https://decl2.example.com/mcp"
+		decl.Transport = "sse"
 		changed, err := svc.ApplyDeclared(ctx, org, decl)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(changed).To(BeTrue())
 		got, err := svc.Get(ctx, org, list[0].ID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(got.URL).To(Equal("https://decl2.example.com/mcp"))
+		Expect(got.Transport).To(Equal("sse"))
 		Expect(got.Kind).To(Equal("fetch"))
 		Expect(got.DataClass).To(Equal([]string{"untrusted_input"}))
+		Expect(events(ctx, "mcp_server.data_class.reset")).To(BeEmpty())
+	})
+
+	It("resets a declared server's class to the default, and audits it, when the Secret names a new URL", func(ctx SpecContext) {
+		decl := mcpservers.Declared{SecretName: "s1", Version: "uid/1", Name: "wiki", URL: "https://decl.example.com/mcp"}
+		_, err := svc.ApplyDeclared(ctx, org, decl)
+		Expect(err).NotTo(HaveOccurred())
+		list, _ := svc.List(ctx, org)
+		_, err = svc.SetDataClass(ctx, org, actor, list[0].ID, mcpservers.Declaration{Kind: "fetch", Legs: []string{"untrusted_input"}})
+		Expect(err).NotTo(HaveOccurred())
+
+		decl.Version = "uid/2"
+		decl.URL = "https://decl2.example.com/mcp"
+		_, err = svc.ApplyDeclared(ctx, org, decl)
+		Expect(err).NotTo(HaveOccurred())
+		got, err := svc.Get(ctx, org, list[0].ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.URL).To(Equal("https://decl2.example.com/mcp"))
+		Expect(got.Kind).To(Equal("other"))
+		Expect(got.DataClass).To(Equal([]string{"untrusted_input", "private_data", "outbound"}))
+		expectReset(events(ctx, "mcp_server.data_class.reset"), "fetch", []any{"untrusted_input"})
+	})
+
+	It("keeps a UI server's class when the URL is unchanged and resets it, audited, when the URL changes", func(ctx SpecContext) {
+		s := create(ctx, "docs", &mcpservers.Declaration{Kind: "fetch", Legs: []string{"untrusted_input"}})
+
+		same := s.URL
+		tr := "sse"
+		got, err := svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &same, Transport: &tr})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.Kind).To(Equal("fetch"))
+		Expect(got.DataClass).To(Equal([]string{"untrusted_input"}))
+		Expect(events(ctx, "mcp_server.data_class.reset")).To(BeEmpty())
+
+		other := "https://github-mcp.example.com/mcp"
+		got, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &other})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.Kind).To(Equal("other"))
+		Expect(got.DataClass).To(Equal([]string{"untrusted_input", "private_data", "outbound"}))
+		again, err := svc.Get(ctx, org, s.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(again.DataClass).To(HaveLen(3))
+		expectReset(events(ctx, "mcp_server.data_class.reset"), "fetch", []any{"untrusted_input"})
+
+		By("a second change of URL, from the default, has nothing to reset and audits nothing more")
+		third := "https://third.example.com/mcp"
+		_, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &third})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(events(ctx, "mcp_server.data_class.reset")).To(HaveLen(1))
 	})
 
 	It("is part of the create, update and declare audit summaries", func(ctx SpecContext) {
@@ -190,3 +239,15 @@ var _ = Describe("the data class of a server (ADR 0084, #350)", func() {
 		Expect(string(events(ctx, "mcp_server.update")[0].Summary)).To(ContainSubstring(`"kind": "fetch"`))
 	})
 })
+
+func expectReset(ev []store.AuditEvent, wasKind string, wasLegs []any) {
+	GinkgoHelper()
+	Expect(ev).To(HaveLen(1))
+	var sum struct{ Before, After map[string]any }
+	Expect(json.Unmarshal(ev[0].Summary, &sum)).To(Succeed())
+	Expect(sum.Before).To(HaveKeyWithValue("kind", wasKind))
+	Expect(sum.Before).To(HaveKeyWithValue("dataClass", wasLegs))
+	Expect(sum.After).To(HaveKeyWithValue("kind", "other"))
+	Expect(sum.After).To(HaveKeyWithValue("dataClass", ConsistOf("untrusted_input", "private_data", "outbound")))
+	Expect(sum.After).To(HaveKeyWithValue("reason", "url_changed"))
+}

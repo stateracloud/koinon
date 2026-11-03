@@ -249,6 +249,8 @@ type Querier interface {
 	// no run of it is queued (a follow-up message already asked for another turn). No row: the task is
 	// elsewhere (canceled, ended by a person) or has more work queued.
 	EndTaskFrom(ctx context.Context, arg EndTaskFromParams) (Task, error)
+	// Makes sure the org has an org_settings row, so LockOrgSettings has a row to lock.
+	EnsureOrgSettings(ctx context.Context, orgID pgtype.UUID) error
 	// pending -> expired once expires_at has passed (ADR 0049: 7 days).
 	ExpirePendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	// Saved work is kept for 14 days; the sealed files go with it.
@@ -747,6 +749,8 @@ type Querier interface {
 	// principal and sync IdP groups at login), always keyed by user_id.
 	// Serialises bootstrap across API replicas for the rest of the transaction.
 	LockBootstrap(ctx context.Context) error
+	// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
+	LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error)
 	LockPlatformTraceDestination(ctx context.Context) (PlatformTraceDestination, error)
 	// Reads the ceiling and holds the row until the transaction ends, so an org's level and a lowering
 	// of the ceiling cannot pass each other.

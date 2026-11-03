@@ -143,7 +143,8 @@ export type AddTrustedHostRequest = Message<"koinon.leakguard.v1alpha1.AddTruste
   orgId: string;
 
   /**
-   * host is a bare DNS name such as docs.example.com.
+   * host is a bare DNS name such as docs.example.com (exactly that host), or *. and a DNS name such as
+   * *.example.com (any subdomain at any depth, not example.com itself). A wildcard over a public suffix is refused.
    *
    * @generated from field: string host = 2;
    */
