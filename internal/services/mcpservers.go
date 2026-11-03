@@ -12,6 +12,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	mcpserverv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/sinkclass"
 )
 
 // The McpServerService is the UI's face of the MCP server service layer (ADR 0057): the same
@@ -64,6 +65,10 @@ func mcpToolProto(t mcpservers.Tool) *mcpserverv1alpha1.Tool {
 		LastSeenAt: timestamppb.New(t.LastSeenAt), TierSetBy: t.TierSetBy, TierSetAt: optTime(t.TierSetAt),
 		RequiresTwoApprovers: t.RequiresTwoApprovers, ContentHash: t.ContentHash, Unavailable: t.Unavailable,
 		DescriptionOriginalLength: int64(t.DescriptionOriginalLength), DescriptionCapped: t.DescriptionCapped, DescriptionCleaned: t.DescriptionCleaned,
+		Sink: &mcpserverv1alpha1.ToolSink{
+			SinkClass: string(t.Sink.Class), Derivation: string(t.Sink.Derivation), AddressArgs: append([]string{}, t.Sink.AddressArgs...),
+			ResultUntrustedInput: t.Sink.ResultUntrustedInput, ResultPrivateData: t.Sink.ResultPrivateData,
+		},
 	}
 }
 
@@ -218,6 +223,26 @@ func (s *Server) SetToolTier(ctx context.Context, req *mcpserverv1alpha1.SetTool
 		return nil, s.mcpError(err)
 	}
 	return &mcpserverv1alpha1.SetToolTierResponse{Tool: mcpToolProto(t)}, nil
+}
+
+// SetToolSink implements McpServerService. Admins and owners.
+func (s *Server) SetToolSink(ctx context.Context, req *mcpserverv1alpha1.SetToolSinkRequest) (*mcpserverv1alpha1.SetToolSinkResponse, error) {
+	c, err := s.mcpCaller(ctx, req.GetOrgId())
+	if err != nil {
+		return nil, err
+	}
+	sk := req.GetSink()
+	if sk == nil {
+		sk = &mcpserverv1alpha1.ToolSink{} // an empty derivation, which Normalize refuses
+	}
+	t, err := s.mcp.SetToolDeclaration(requestCtx(ctx), c.org, c.auditActor(), req.GetServerId(), req.GetTool(), sinkclass.Declaration{
+		Class: sinkclass.Class(sk.GetSinkClass()), Derivation: sinkclass.Derivation(sk.GetDerivation()), AddressArgs: sk.GetAddressArgs(),
+		ResultUntrustedInput: sk.ResultUntrustedInput, ResultPrivateData: sk.ResultPrivateData,
+	})
+	if err != nil {
+		return nil, s.mcpError(err)
+	}
+	return &mcpserverv1alpha1.SetToolSinkResponse{Tool: mcpToolProto(t)}, nil
 }
 
 // SetToolTwoApprovers implements McpServerService. Admins and owners.

@@ -197,22 +197,48 @@ call. Now:
 The data model #349 builds on, as shipped in migration `00048`:
 
 - **Kind and legs.** `mcp_servers.kind` is `fetch`, `search` or `other` (enum `mcp_server_kind`). The
-  three legs are three booleans (`exposes_untrusted_input`, `exposes_private_data`,
-  `exposes_outbound`), not an array: the set is closed, a boolean is checkable and indexable, and the
-  API and UI still show them as the list `untrusted_input`, `private_data`, `outbound`.
+  server legs are two booleans (`exposes_untrusted_input`, `exposes_private_data`), not an array: the
+  set is closed, a boolean is checkable and indexable, and the API and UI show them as the list
+  `untrusted_input`, `private_data`. There is **no outbound leg**: ADR 0091 replaces it with a sink
+  class per tool (below), so `exposes_outbound` is not in the schema and the API refuses `outbound`.
 - **Unclassified default.** A server nobody classified, and every server that existed before the
-  migration, is kind `other` with all three legs. This is the cautious reading, so the guard treats it
+  migration, is kind `other` with both legs. This is the cautious reading, so the guard treats it
   as the worst case and nothing changes until an admin declares less. An admin may declare no leg at
   all.
 - **Declared servers.** The class is not a Secret key. It is set through the admin API or the console
   (`mcp_server.data_class.set`, audited with before and after) and survives the Secret being applied
   again with the same URL.
 - **A new URL resets the class.** When an update or a Secret re-apply changes a server's URL, its
-  class goes back to the default (kind `other`, all three legs): the class described the old
+  class goes back to the default (kind `other`, both legs): the class described the old
   endpoint, and a server re-pointed from a docs server to a GitHub server must not keep a narrowing
   that no longer holds. The same transaction audits it as `mcp_server.data_class.reset` (before and
   after, reason `url_changed`) when the class was not already the default. A change of transport or
   credential alone keeps the class.
+- **Sink class per tool (ADR 0091).** `mcp_tools.sink_class` is `none`, `internal`, `external-low` or
+  `external-high` (enum `mcp_sink_class`), default **external-high**, so a tool nobody declared is the
+  worst case. `sink_derivation` is `fixed` (the class column is the class), `code_host` or `fetch`
+  (the class is decided per call from the arguments named in `address_args`, an ordered `text[]`:
+  `[owner, repo]` for a code host, `[url]` for a fetch; every other argument is payload). A derived
+  tool stores external-high as its fallback, for an address that does not parse. `result_untrusted_input`
+  and `result_private_data` are nullable overrides of the server's legs for what the tool's results
+  carry (NULL means the server's). It is set by `SetToolSink` (`PUT /mcp-servers/{id}/tools/{tool}/sink`),
+  audited as `mcp_tool.declaration.set` with before and after. The argument names are checked for
+  shape only, not against the tool's input schema.
+- **A new URL or a new tool hash resets the declaration (ADR 0057).** When a server's URL changes (an
+  update or a Secret re-apply), every declared tool of it goes back to external-high, fixed, no
+  address arguments and the server's legs, in the same transaction as the class reset, audited per
+  tool as `mcp_tool.declaration.reset` (reason `url_changed`). When a sync finds a tool whose content
+  hash changed, that tool's declaration resets the same way (reason `content_changed`, actor system),
+  for the same reason as its tier: the declaration described text that is gone.
+- **Code-host scope and repository visibility.** `org_code_host_repos(org_id, connection_id, owner,
+  repo, visibility, checked_at)` holds the repositories a code-host connection can reach and the
+  visibility its connector last read (`private`, `internal`, `public`, `unknown`); owner and repo are
+  lower case. A write derives as **internal only if the repository is listed and every reading of it
+  is private or internal and fresh**. A public, unknown, unlisted or stale repository, a foreign
+  owner or an unparsable value derives external-high. Decision of #350 on the ADR's open question:
+  a reading is **fresh for 1 hour** (`DefaultVisibilityMaxAge`) and a stale one counts as unknown;
+  with several connections the worst reading wins. `ReplaceCodeHostRepos` is the writer a connector
+  uses, and the leak-guard view reports the counts by visibility and how many are stale.
 - **Threshold.** `org_settings.leak_match_threshold` is NULL for the default 24 and otherwise 12 to 256
   (the bounds of `internal/leakguard`, enforced by a CHECK). The API treats 0 or absent as "back to
   the default".

@@ -9,14 +9,13 @@
 -- name: CreateMCPServer :one
 INSERT INTO mcp_servers (org_id, id, name, url, transport, credential_header, credential_prefix, credential,
                          source, managed_by_secret, declared_version, disabled_reason, created_by,
-                         kind, exposes_untrusted_input, exposes_private_data, exposes_outbound)
--- A NULL kind or leg is the column default (kind other, all three legs: not yet classified).
+                         kind, exposes_untrusted_input, exposes_private_data)
+-- A NULL kind or leg is the column default (kind other, both legs: not yet classified).
 VALUES (@org_id, @id, @name, @url, @transport, sqlc.narg(credential_header), @credential_prefix, sqlc.narg(credential),
         @source, sqlc.narg(managed_by_secret), sqlc.narg(declared_version), sqlc.narg(disabled_reason), sqlc.narg(created_by),
         COALESCE(sqlc.narg(kind)::mcp_server_kind, 'other'),
         COALESCE(sqlc.narg(exposes_untrusted_input)::boolean, true),
-        COALESCE(sqlc.narg(exposes_private_data)::boolean, true),
-        COALESCE(sqlc.narg(exposes_outbound)::boolean, true))
+        COALESCE(sqlc.narg(exposes_private_data)::boolean, true))
 RETURNING *;
 
 -- name: SetMCPServerDataClass :one
@@ -24,7 +23,7 @@ RETURNING *;
 -- Secret does not carry it, and UpdateDeclaredMCPServer leaves it alone.
 UPDATE mcp_servers
 SET kind = @kind, exposes_untrusted_input = @exposes_untrusted_input,
-    exposes_private_data = @exposes_private_data, exposes_outbound = @exposes_outbound
+    exposes_private_data = @exposes_private_data
 WHERE org_id = @org_id AND id = @id
 RETURNING *;
 
@@ -51,11 +50,10 @@ SET url = @url, transport = @transport,
     credential_prefix = CASE WHEN @set_credential_meta::boolean THEN @credential_prefix ELSE credential_prefix END,
     credential = CASE WHEN @set_credential::boolean THEN sqlc.narg(credential) ELSE credential END,
     -- A new URL is a different server: its data class goes back to the cautious default (kind other,
-    -- every leg), so a class declared for the old endpoint cannot narrow the guard for the new one (ADR 0084).
+    -- both legs), so a class declared for the old endpoint cannot narrow the guard for the new one (ADR 0084).
     kind = CASE WHEN url IS DISTINCT FROM @url THEN 'other'::mcp_server_kind ELSE kind END,
     exposes_untrusted_input = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_untrusted_input END,
     exposes_private_data = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_private_data END,
-    exposes_outbound = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_outbound END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
 WHERE org_id = @org_id AND id = @id
 RETURNING *;
@@ -66,11 +64,10 @@ SET url = @url, transport = @transport, credential_header = sqlc.narg(credential
     credential_prefix = @credential_prefix, credential = sqlc.narg(credential),
     declared_version = @declared_version, removed_at = NULL, disabled_reason = NULL,
     -- A new URL is a different server: its data class goes back to the cautious default (kind other,
-    -- every leg), so a class declared for the old endpoint cannot narrow the guard for the new one (ADR 0084).
+    -- both legs), so a class declared for the old endpoint cannot narrow the guard for the new one (ADR 0084).
     kind = CASE WHEN url IS DISTINCT FROM @url THEN 'other'::mcp_server_kind ELSE kind END,
     exposes_untrusted_input = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_untrusted_input END,
     exposes_private_data = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_private_data END,
-    exposes_outbound = CASE WHEN url IS DISTINCT FROM @url THEN true ELSE exposes_outbound END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
 WHERE org_id = @org_id AND id = @id AND source = 'secret'
 RETURNING *;
@@ -157,6 +154,10 @@ SET description = @description, input_schema = @input_schema, content_hash = @co
     description_original_length = @description_original_length, description_capped = @description_capped,
     description_cleaned = @description_cleaned,
     review_reason = @review_reason,
+    -- The declaration described the old tool: it goes back to the default, external-high with the
+    -- server's legs (ADR 0091 decision 2, the ADR 0057 rule). The caller audits the reset.
+    sink_class = 'external-high', sink_derivation = 'fixed', address_args = '{}',
+    result_untrusted_input = NULL, result_private_data = NULL,
     tier = CASE WHEN tier = 'auto' THEN 'ask'::mcp_tier ELSE tier END,
     tier_set_by = CASE WHEN tier = 'auto' THEN 'koinon (the tool changed)' ELSE tier_set_by END,
     tier_set_at = CASE WHEN tier = 'auto' THEN now() ELSE tier_set_at END
@@ -183,6 +184,31 @@ UPDATE mcp_tools
 SET tier = @tier, review_reason = NULL, tier_set_by = @set_by, tier_set_at = now()
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name
 RETURNING *;
+
+-- name: SetMCPToolDeclaration :one
+-- What a tool's calls send and where (ADR 0091 decision 2). Allowed for every source.
+UPDATE mcp_tools
+SET sink_class = @sink_class, sink_derivation = @sink_derivation, address_args = @address_args::text[],
+    result_untrusted_input = sqlc.narg(result_untrusted_input), result_private_data = sqlc.narg(result_private_data)
+WHERE org_id = @org_id AND server_id = @server_id AND name = @name
+RETURNING *;
+
+-- name: ResetMCPToolDeclarations :many
+-- The server's URL changed: every tool of it goes back to the default declaration. Returns the tools
+-- whose declaration was not the default already, with what they had, so the caller can audit each.
+UPDATE mcp_tools t
+SET sink_class = 'external-high', sink_derivation = 'fixed', address_args = '{}',
+    result_untrusted_input = NULL, result_private_data = NULL
+FROM (SELECT name, sink_class, sink_derivation, address_args, result_untrusted_input, result_private_data
+      FROM mcp_tools
+      WHERE org_id = @org_id AND server_id = @server_id
+        AND NOT (sink_class = 'external-high' AND sink_derivation = 'fixed' AND cardinality(address_args) = 0
+                 AND result_untrusted_input IS NULL AND result_private_data IS NULL)
+      FOR UPDATE) o
+WHERE t.org_id = @org_id AND t.server_id = @server_id AND t.name = o.name
+RETURNING o.name, o.sink_class AS old_sink_class, o.sink_derivation AS old_sink_derivation,
+          o.address_args AS old_address_args, o.result_untrusted_input AS old_result_untrusted_input,
+          o.result_private_data AS old_result_private_data;
 
 -- name: AcknowledgeMCPToolReview :one
 UPDATE mcp_tools

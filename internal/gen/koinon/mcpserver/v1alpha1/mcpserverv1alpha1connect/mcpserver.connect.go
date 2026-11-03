@@ -46,6 +46,9 @@ const (
 	// McpServerServiceSetToolTierProcedure is the procedure name of the McpServerService's SetToolTier
 	// RPC.
 	McpServerServiceSetToolTierProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/SetToolTier"
+	// McpServerServiceSetToolSinkProcedure is the procedure name of the McpServerService's SetToolSink
+	// RPC.
+	McpServerServiceSetToolSinkProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/SetToolSink"
 	// McpServerServiceSetToolTwoApproversProcedure is the procedure name of the McpServerService's
 	// SetToolTwoApprovers RPC.
 	McpServerServiceSetToolTwoApproversProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/SetToolTwoApprovers"
@@ -112,6 +115,13 @@ var (
 			Procedure:  McpServerServiceSetToolTierProcedure,
 		}
 	})
+	mcpServerServiceSetToolSinkSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_mcpserver_v1alpha1_mcpserver_proto.Services().ByName("McpServerService").Methods().ByName("SetToolSink"),
+			Procedure:  McpServerServiceSetToolSinkProcedure,
+		}
+	})
 	mcpServerServiceSetToolTwoApproversSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType: connect.StreamTypeUnary,
@@ -163,6 +173,10 @@ type McpServerServiceClient interface {
 	SetToolTier(context.Context, *v1alpha1.SetToolTierRequest) (*v1alpha1.SetToolTierResponse, error)
 	// SetToolTwoApprovers turns on or off the requirement that a call to the tool in the ask tier needs
 	// two approvers: distinct admins or owners, neither the ticket's creator. Off by default.
+	// SetToolSink declares a tool's sink class, address arguments and result legs (ADR 0091). Audited as
+	// mcp_tool.declaration.set. A changed server URL or tool content hash puts it back to the default,
+	// audited as mcp_tool.declaration.reset.
+	SetToolSink(context.Context, *v1alpha1.SetToolSinkRequest) (*v1alpha1.SetToolSinkResponse, error)
 	SetToolTwoApprovers(context.Context, *v1alpha1.SetToolTwoApproversRequest) (*v1alpha1.SetToolTwoApproversResponse, error)
 	// AcknowledgeToolReview clears a tool's review flag without changing its tier.
 	AcknowledgeToolReview(context.Context, *v1alpha1.AcknowledgeToolReviewRequest) (*v1alpha1.AcknowledgeToolReviewResponse, error)
@@ -199,6 +213,10 @@ type McpServerServiceHandler interface {
 	SetToolTier(context.Context, *v1alpha1.SetToolTierRequest) (*v1alpha1.SetToolTierResponse, error)
 	// SetToolTwoApprovers turns on or off the requirement that a call to the tool in the ask tier needs
 	// two approvers: distinct admins or owners, neither the ticket's creator. Off by default.
+	// SetToolSink declares a tool's sink class, address arguments and result legs (ADR 0091). Audited as
+	// mcp_tool.declaration.set. A changed server URL or tool content hash puts it back to the default,
+	// audited as mcp_tool.declaration.reset.
+	SetToolSink(context.Context, *v1alpha1.SetToolSinkRequest) (*v1alpha1.SetToolSinkResponse, error)
 	SetToolTwoApprovers(context.Context, *v1alpha1.SetToolTwoApproversRequest) (*v1alpha1.SetToolTwoApproversResponse, error)
 	// AcknowledgeToolReview clears a tool's review flag without changing its tier.
 	AcknowledgeToolReview(context.Context, *v1alpha1.AcknowledgeToolReviewRequest) (*v1alpha1.AcknowledgeToolReviewResponse, error)
@@ -220,6 +238,7 @@ func RegisterMcpServerServiceHandler(server *connect.Server, svc McpServerServic
 		connect.Method{Spec: mcpServerServiceDeleteServerSpec(), Handler: adapter.deleteServer},
 		connect.Method{Spec: mcpServerServiceListToolsSpec(), Handler: adapter.listTools},
 		connect.Method{Spec: mcpServerServiceSetToolTierSpec(), Handler: adapter.setToolTier},
+		connect.Method{Spec: mcpServerServiceSetToolSinkSpec(), Handler: adapter.setToolSink},
 		connect.Method{Spec: mcpServerServiceSetToolTwoApproversSpec(), Handler: adapter.setToolTwoApprovers},
 		connect.Method{Spec: mcpServerServiceAcknowledgeToolReviewSpec(), Handler: adapter.acknowledgeToolReview},
 		connect.Method{Spec: mcpServerServiceGetAgentServersSpec(), Handler: adapter.getAgentServers},
@@ -256,6 +275,10 @@ func (UnimplementedMcpServerServiceHandler) ListTools(context.Context, *v1alpha1
 
 func (UnimplementedMcpServerServiceHandler) SetToolTier(context.Context, *v1alpha1.SetToolTierRequest) (*v1alpha1.SetToolTierResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.mcpserver.v1alpha1.McpServerService.SetToolTier is not implemented")
+}
+
+func (UnimplementedMcpServerServiceHandler) SetToolSink(context.Context, *v1alpha1.SetToolSinkRequest) (*v1alpha1.SetToolSinkResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.mcpserver.v1alpha1.McpServerService.SetToolSink is not implemented")
 }
 
 func (UnimplementedMcpServerServiceHandler) SetToolTwoApprovers(context.Context, *v1alpha1.SetToolTwoApproversRequest) (*v1alpha1.SetToolTwoApproversResponse, error) {
@@ -329,6 +352,14 @@ func (c *mcpServerServiceClient) ListTools(ctx context.Context, req *v1alpha1.Li
 func (c *mcpServerServiceClient) SetToolTier(ctx context.Context, req *v1alpha1.SetToolTierRequest) (*v1alpha1.SetToolTierResponse, error) {
 	var res v1alpha1.SetToolTierResponse
 	if err := c.client.CallUnary(ctx, mcpServerServiceSetToolTierSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *mcpServerServiceClient) SetToolSink(ctx context.Context, req *v1alpha1.SetToolSinkRequest) (*v1alpha1.SetToolSinkResponse, error) {
+	var res v1alpha1.SetToolSinkResponse
+	if err := c.client.CallUnary(ctx, mcpServerServiceSetToolSinkSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -446,6 +477,18 @@ func (h mcpServerServiceHandler) setToolTier(ctx context.Context, _ connect.Spec
 		return err
 	}
 	res, err := h.svc.SetToolTier(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h mcpServerServiceHandler) setToolSink(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetToolSinkRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetToolSink(ctx, &req)
 	if err != nil {
 		return err
 	}

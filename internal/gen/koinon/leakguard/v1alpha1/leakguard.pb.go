@@ -11,6 +11,7 @@ package leakguardv1alpha1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -32,7 +33,9 @@ type LeakGuard struct {
 	MinMatchThreshold     int32 `protobuf:"varint,3,opt,name=min_match_threshold,json=minMatchThreshold,proto3" json:"min_match_threshold,omitempty"`
 	MaxMatchThreshold     int32 `protobuf:"varint,4,opt,name=max_match_threshold,json=maxMatchThreshold,proto3" json:"max_match_threshold,omitempty"`
 	// trusted_hosts is the fetch-trusted host list, sorted; empty for a new org.
-	TrustedHosts  []string `protobuf:"bytes,5,rep,name=trusted_hosts,json=trustedHosts,proto3" json:"trusted_hosts,omitempty"`
+	TrustedHosts []string `protobuf:"bytes,5,rep,name=trusted_hosts,json=trustedHosts,proto3" json:"trusted_hosts,omitempty"`
+	// code_host_scope summarises the org's code-host scope (ADR 0091 decision 3).
+	CodeHostScope *CodeHostScope `protobuf:"bytes,6,opt,name=code_host_scope,json=codeHostScope,proto3" json:"code_host_scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -102,6 +105,118 @@ func (x *LeakGuard) GetTrustedHosts() []string {
 	return nil
 }
 
+func (x *LeakGuard) GetCodeHostScope() *CodeHostScope {
+	if x != nil {
+		return x.CodeHostScope
+	}
+	return nil
+}
+
+// CodeHostScope counts the repositories of the org's code-host connections by the visibility the
+// connector last read. The code-host derivation calls a write internal only for a listed repository
+// that is not public and whose reading is fresh; unknown and stale ones count as external-high.
+type CodeHostScope struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Repositories int32                  `protobuf:"varint,1,opt,name=repositories,proto3" json:"repositories,omitempty"`
+	Private      int32                  `protobuf:"varint,2,opt,name=private,proto3" json:"private,omitempty"`
+	Internal     int32                  `protobuf:"varint,3,opt,name=internal,proto3" json:"internal,omitempty"`
+	Public       int32                  `protobuf:"varint,4,opt,name=public,proto3" json:"public,omitempty"`
+	Unknown      int32                  `protobuf:"varint,5,opt,name=unknown,proto3" json:"unknown,omitempty"`
+	// stale counts the readings older than visibility_max_age_seconds.
+	Stale int32 `protobuf:"varint,6,opt,name=stale,proto3" json:"stale,omitempty"`
+	// oldest_checked_at is the oldest reading; unset for an empty scope.
+	OldestCheckedAt         *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=oldest_checked_at,json=oldestCheckedAt,proto3" json:"oldest_checked_at,omitempty"`
+	VisibilityMaxAgeSeconds int32                  `protobuf:"varint,8,opt,name=visibility_max_age_seconds,json=visibilityMaxAgeSeconds,proto3" json:"visibility_max_age_seconds,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *CodeHostScope) Reset() {
+	*x = CodeHostScope{}
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CodeHostScope) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CodeHostScope) ProtoMessage() {}
+
+func (x *CodeHostScope) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CodeHostScope.ProtoReflect.Descriptor instead.
+func (*CodeHostScope) Descriptor() ([]byte, []int) {
+	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *CodeHostScope) GetRepositories() int32 {
+	if x != nil {
+		return x.Repositories
+	}
+	return 0
+}
+
+func (x *CodeHostScope) GetPrivate() int32 {
+	if x != nil {
+		return x.Private
+	}
+	return 0
+}
+
+func (x *CodeHostScope) GetInternal() int32 {
+	if x != nil {
+		return x.Internal
+	}
+	return 0
+}
+
+func (x *CodeHostScope) GetPublic() int32 {
+	if x != nil {
+		return x.Public
+	}
+	return 0
+}
+
+func (x *CodeHostScope) GetUnknown() int32 {
+	if x != nil {
+		return x.Unknown
+	}
+	return 0
+}
+
+func (x *CodeHostScope) GetStale() int32 {
+	if x != nil {
+		return x.Stale
+	}
+	return 0
+}
+
+func (x *CodeHostScope) GetOldestCheckedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.OldestCheckedAt
+	}
+	return nil
+}
+
+func (x *CodeHostScope) GetVisibilityMaxAgeSeconds() int32 {
+	if x != nil {
+		return x.VisibilityMaxAgeSeconds
+	}
+	return 0
+}
+
 type GetLeakGuardRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
@@ -111,7 +226,7 @@ type GetLeakGuardRequest struct {
 
 func (x *GetLeakGuardRequest) Reset() {
 	*x = GetLeakGuardRequest{}
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[1]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -123,7 +238,7 @@ func (x *GetLeakGuardRequest) String() string {
 func (*GetLeakGuardRequest) ProtoMessage() {}
 
 func (x *GetLeakGuardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[1]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -136,7 +251,7 @@ func (x *GetLeakGuardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLeakGuardRequest.ProtoReflect.Descriptor instead.
 func (*GetLeakGuardRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{1}
+	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GetLeakGuardRequest) GetOrgId() string {
@@ -155,7 +270,7 @@ type GetLeakGuardResponse struct {
 
 func (x *GetLeakGuardResponse) Reset() {
 	*x = GetLeakGuardResponse{}
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[2]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -167,7 +282,7 @@ func (x *GetLeakGuardResponse) String() string {
 func (*GetLeakGuardResponse) ProtoMessage() {}
 
 func (x *GetLeakGuardResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[2]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -180,7 +295,7 @@ func (x *GetLeakGuardResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLeakGuardResponse.ProtoReflect.Descriptor instead.
 func (*GetLeakGuardResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{2}
+	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GetLeakGuardResponse) GetLeakGuard() *LeakGuard {
@@ -201,7 +316,7 @@ type SetMatchThresholdRequest struct {
 
 func (x *SetMatchThresholdRequest) Reset() {
 	*x = SetMatchThresholdRequest{}
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[3]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -213,7 +328,7 @@ func (x *SetMatchThresholdRequest) String() string {
 func (*SetMatchThresholdRequest) ProtoMessage() {}
 
 func (x *SetMatchThresholdRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[3]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -226,7 +341,7 @@ func (x *SetMatchThresholdRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetMatchThresholdRequest.ProtoReflect.Descriptor instead.
 func (*SetMatchThresholdRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{3}
+	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SetMatchThresholdRequest) GetOrgId() string {
@@ -252,7 +367,7 @@ type SetMatchThresholdResponse struct {
 
 func (x *SetMatchThresholdResponse) Reset() {
 	*x = SetMatchThresholdResponse{}
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[4]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -264,7 +379,7 @@ func (x *SetMatchThresholdResponse) String() string {
 func (*SetMatchThresholdResponse) ProtoMessage() {}
 
 func (x *SetMatchThresholdResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[4]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -277,7 +392,7 @@ func (x *SetMatchThresholdResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetMatchThresholdResponse.ProtoReflect.Descriptor instead.
 func (*SetMatchThresholdResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{4}
+	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SetMatchThresholdResponse) GetLeakGuard() *LeakGuard {
@@ -299,7 +414,7 @@ type AddTrustedHostRequest struct {
 
 func (x *AddTrustedHostRequest) Reset() {
 	*x = AddTrustedHostRequest{}
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[5]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -311,7 +426,7 @@ func (x *AddTrustedHostRequest) String() string {
 func (*AddTrustedHostRequest) ProtoMessage() {}
 
 func (x *AddTrustedHostRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[5]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -324,7 +439,7 @@ func (x *AddTrustedHostRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddTrustedHostRequest.ProtoReflect.Descriptor instead.
 func (*AddTrustedHostRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{5}
+	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AddTrustedHostRequest) GetOrgId() string {
@@ -350,7 +465,7 @@ type AddTrustedHostResponse struct {
 
 func (x *AddTrustedHostResponse) Reset() {
 	*x = AddTrustedHostResponse{}
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[6]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -362,7 +477,7 @@ func (x *AddTrustedHostResponse) String() string {
 func (*AddTrustedHostResponse) ProtoMessage() {}
 
 func (x *AddTrustedHostResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[6]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -375,7 +490,7 @@ func (x *AddTrustedHostResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddTrustedHostResponse.ProtoReflect.Descriptor instead.
 func (*AddTrustedHostResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{6}
+	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AddTrustedHostResponse) GetLeakGuard() *LeakGuard {
@@ -395,7 +510,7 @@ type RemoveTrustedHostRequest struct {
 
 func (x *RemoveTrustedHostRequest) Reset() {
 	*x = RemoveTrustedHostRequest{}
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[7]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -407,7 +522,7 @@ func (x *RemoveTrustedHostRequest) String() string {
 func (*RemoveTrustedHostRequest) ProtoMessage() {}
 
 func (x *RemoveTrustedHostRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[7]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -420,7 +535,7 @@ func (x *RemoveTrustedHostRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveTrustedHostRequest.ProtoReflect.Descriptor instead.
 func (*RemoveTrustedHostRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{7}
+	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RemoveTrustedHostRequest) GetOrgId() string {
@@ -446,7 +561,7 @@ type RemoveTrustedHostResponse struct {
 
 func (x *RemoveTrustedHostResponse) Reset() {
 	*x = RemoveTrustedHostResponse{}
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[8]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -458,7 +573,7 @@ func (x *RemoveTrustedHostResponse) String() string {
 func (*RemoveTrustedHostResponse) ProtoMessage() {}
 
 func (x *RemoveTrustedHostResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[8]
+	mi := &file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -471,7 +586,7 @@ func (x *RemoveTrustedHostResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveTrustedHostResponse.ProtoReflect.Descriptor instead.
 func (*RemoveTrustedHostResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{8}
+	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *RemoveTrustedHostResponse) GetLeakGuard() *LeakGuard {
@@ -485,13 +600,23 @@ var File_koinon_leakguard_v1alpha1_leakguard_proto protoreflect.FileDescriptor
 
 const file_koinon_leakguard_v1alpha1_leakguard_proto_rawDesc = "" +
 	"\n" +
-	")koinon/leakguard/v1alpha1/leakguard.proto\x12\x19koinon.leakguard.v1alpha1\"\xf1\x01\n" +
+	")koinon/leakguard/v1alpha1/leakguard.proto\x12\x19koinon.leakguard.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc3\x02\n" +
 	"\tLeakGuard\x12'\n" +
 	"\x0fmatch_threshold\x18\x01 \x01(\x05R\x0ematchThreshold\x126\n" +
 	"\x17default_match_threshold\x18\x02 \x01(\x05R\x15defaultMatchThreshold\x12.\n" +
 	"\x13min_match_threshold\x18\x03 \x01(\x05R\x11minMatchThreshold\x12.\n" +
 	"\x13max_match_threshold\x18\x04 \x01(\x05R\x11maxMatchThreshold\x12#\n" +
-	"\rtrusted_hosts\x18\x05 \x03(\tR\ftrustedHosts\",\n" +
+	"\rtrusted_hosts\x18\x05 \x03(\tR\ftrustedHosts\x12P\n" +
+	"\x0fcode_host_scope\x18\x06 \x01(\v2(.koinon.leakguard.v1alpha1.CodeHostScopeR\rcodeHostScope\"\xb6\x02\n" +
+	"\rCodeHostScope\x12\"\n" +
+	"\frepositories\x18\x01 \x01(\x05R\frepositories\x12\x18\n" +
+	"\aprivate\x18\x02 \x01(\x05R\aprivate\x12\x1a\n" +
+	"\binternal\x18\x03 \x01(\x05R\binternal\x12\x16\n" +
+	"\x06public\x18\x04 \x01(\x05R\x06public\x12\x18\n" +
+	"\aunknown\x18\x05 \x01(\x05R\aunknown\x12\x14\n" +
+	"\x05stale\x18\x06 \x01(\x05R\x05stale\x12F\n" +
+	"\x11oldest_checked_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x0foldestCheckedAt\x12;\n" +
+	"\x1avisibility_max_age_seconds\x18\b \x01(\x05R\x17visibilityMaxAgeSeconds\",\n" +
 	"\x13GetLeakGuardRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"[\n" +
 	"\x14GetLeakGuardResponse\x12C\n" +
@@ -533,36 +658,40 @@ func file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescGZIP() []byte {
 	return file_koinon_leakguard_v1alpha1_leakguard_proto_rawDescData
 }
 
-var file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_koinon_leakguard_v1alpha1_leakguard_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_koinon_leakguard_v1alpha1_leakguard_proto_goTypes = []any{
 	(*LeakGuard)(nil),                 // 0: koinon.leakguard.v1alpha1.LeakGuard
-	(*GetLeakGuardRequest)(nil),       // 1: koinon.leakguard.v1alpha1.GetLeakGuardRequest
-	(*GetLeakGuardResponse)(nil),      // 2: koinon.leakguard.v1alpha1.GetLeakGuardResponse
-	(*SetMatchThresholdRequest)(nil),  // 3: koinon.leakguard.v1alpha1.SetMatchThresholdRequest
-	(*SetMatchThresholdResponse)(nil), // 4: koinon.leakguard.v1alpha1.SetMatchThresholdResponse
-	(*AddTrustedHostRequest)(nil),     // 5: koinon.leakguard.v1alpha1.AddTrustedHostRequest
-	(*AddTrustedHostResponse)(nil),    // 6: koinon.leakguard.v1alpha1.AddTrustedHostResponse
-	(*RemoveTrustedHostRequest)(nil),  // 7: koinon.leakguard.v1alpha1.RemoveTrustedHostRequest
-	(*RemoveTrustedHostResponse)(nil), // 8: koinon.leakguard.v1alpha1.RemoveTrustedHostResponse
+	(*CodeHostScope)(nil),             // 1: koinon.leakguard.v1alpha1.CodeHostScope
+	(*GetLeakGuardRequest)(nil),       // 2: koinon.leakguard.v1alpha1.GetLeakGuardRequest
+	(*GetLeakGuardResponse)(nil),      // 3: koinon.leakguard.v1alpha1.GetLeakGuardResponse
+	(*SetMatchThresholdRequest)(nil),  // 4: koinon.leakguard.v1alpha1.SetMatchThresholdRequest
+	(*SetMatchThresholdResponse)(nil), // 5: koinon.leakguard.v1alpha1.SetMatchThresholdResponse
+	(*AddTrustedHostRequest)(nil),     // 6: koinon.leakguard.v1alpha1.AddTrustedHostRequest
+	(*AddTrustedHostResponse)(nil),    // 7: koinon.leakguard.v1alpha1.AddTrustedHostResponse
+	(*RemoveTrustedHostRequest)(nil),  // 8: koinon.leakguard.v1alpha1.RemoveTrustedHostRequest
+	(*RemoveTrustedHostResponse)(nil), // 9: koinon.leakguard.v1alpha1.RemoveTrustedHostResponse
+	(*timestamppb.Timestamp)(nil),     // 10: google.protobuf.Timestamp
 }
 var file_koinon_leakguard_v1alpha1_leakguard_proto_depIdxs = []int32{
-	0, // 0: koinon.leakguard.v1alpha1.GetLeakGuardResponse.leak_guard:type_name -> koinon.leakguard.v1alpha1.LeakGuard
-	0, // 1: koinon.leakguard.v1alpha1.SetMatchThresholdResponse.leak_guard:type_name -> koinon.leakguard.v1alpha1.LeakGuard
-	0, // 2: koinon.leakguard.v1alpha1.AddTrustedHostResponse.leak_guard:type_name -> koinon.leakguard.v1alpha1.LeakGuard
-	0, // 3: koinon.leakguard.v1alpha1.RemoveTrustedHostResponse.leak_guard:type_name -> koinon.leakguard.v1alpha1.LeakGuard
-	1, // 4: koinon.leakguard.v1alpha1.LeakGuardService.GetLeakGuard:input_type -> koinon.leakguard.v1alpha1.GetLeakGuardRequest
-	3, // 5: koinon.leakguard.v1alpha1.LeakGuardService.SetMatchThreshold:input_type -> koinon.leakguard.v1alpha1.SetMatchThresholdRequest
-	5, // 6: koinon.leakguard.v1alpha1.LeakGuardService.AddTrustedHost:input_type -> koinon.leakguard.v1alpha1.AddTrustedHostRequest
-	7, // 7: koinon.leakguard.v1alpha1.LeakGuardService.RemoveTrustedHost:input_type -> koinon.leakguard.v1alpha1.RemoveTrustedHostRequest
-	2, // 8: koinon.leakguard.v1alpha1.LeakGuardService.GetLeakGuard:output_type -> koinon.leakguard.v1alpha1.GetLeakGuardResponse
-	4, // 9: koinon.leakguard.v1alpha1.LeakGuardService.SetMatchThreshold:output_type -> koinon.leakguard.v1alpha1.SetMatchThresholdResponse
-	6, // 10: koinon.leakguard.v1alpha1.LeakGuardService.AddTrustedHost:output_type -> koinon.leakguard.v1alpha1.AddTrustedHostResponse
-	8, // 11: koinon.leakguard.v1alpha1.LeakGuardService.RemoveTrustedHost:output_type -> koinon.leakguard.v1alpha1.RemoveTrustedHostResponse
-	8, // [8:12] is the sub-list for method output_type
-	4, // [4:8] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	1,  // 0: koinon.leakguard.v1alpha1.LeakGuard.code_host_scope:type_name -> koinon.leakguard.v1alpha1.CodeHostScope
+	10, // 1: koinon.leakguard.v1alpha1.CodeHostScope.oldest_checked_at:type_name -> google.protobuf.Timestamp
+	0,  // 2: koinon.leakguard.v1alpha1.GetLeakGuardResponse.leak_guard:type_name -> koinon.leakguard.v1alpha1.LeakGuard
+	0,  // 3: koinon.leakguard.v1alpha1.SetMatchThresholdResponse.leak_guard:type_name -> koinon.leakguard.v1alpha1.LeakGuard
+	0,  // 4: koinon.leakguard.v1alpha1.AddTrustedHostResponse.leak_guard:type_name -> koinon.leakguard.v1alpha1.LeakGuard
+	0,  // 5: koinon.leakguard.v1alpha1.RemoveTrustedHostResponse.leak_guard:type_name -> koinon.leakguard.v1alpha1.LeakGuard
+	2,  // 6: koinon.leakguard.v1alpha1.LeakGuardService.GetLeakGuard:input_type -> koinon.leakguard.v1alpha1.GetLeakGuardRequest
+	4,  // 7: koinon.leakguard.v1alpha1.LeakGuardService.SetMatchThreshold:input_type -> koinon.leakguard.v1alpha1.SetMatchThresholdRequest
+	6,  // 8: koinon.leakguard.v1alpha1.LeakGuardService.AddTrustedHost:input_type -> koinon.leakguard.v1alpha1.AddTrustedHostRequest
+	8,  // 9: koinon.leakguard.v1alpha1.LeakGuardService.RemoveTrustedHost:input_type -> koinon.leakguard.v1alpha1.RemoveTrustedHostRequest
+	3,  // 10: koinon.leakguard.v1alpha1.LeakGuardService.GetLeakGuard:output_type -> koinon.leakguard.v1alpha1.GetLeakGuardResponse
+	5,  // 11: koinon.leakguard.v1alpha1.LeakGuardService.SetMatchThreshold:output_type -> koinon.leakguard.v1alpha1.SetMatchThresholdResponse
+	7,  // 12: koinon.leakguard.v1alpha1.LeakGuardService.AddTrustedHost:output_type -> koinon.leakguard.v1alpha1.AddTrustedHostResponse
+	9,  // 13: koinon.leakguard.v1alpha1.LeakGuardService.RemoveTrustedHost:output_type -> koinon.leakguard.v1alpha1.RemoveTrustedHostResponse
+	10, // [10:14] is the sub-list for method output_type
+	6,  // [6:10] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_koinon_leakguard_v1alpha1_leakguard_proto_init() }
@@ -576,7 +705,7 @@ func file_koinon_leakguard_v1alpha1_leakguard_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_leakguard_v1alpha1_leakguard_proto_rawDesc), len(file_koinon_leakguard_v1alpha1_leakguard_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -13,18 +13,16 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
-// The data class of a server (ADR 0084 decision 8) says which legs of the lethal trifecta it
-// carries. A server may carry several: a fetch server reads untrusted input and is an outbound sink.
-// The leak guard and the templates test read the declaration instead of guessing from names.
+// The data class of a server (ADR 0084 decision 8, ADR 0091 decision 4) says which session legs its
+// results can set. A server may carry both. Outbound is not a leg of the server: ADR 0091 makes it the
+// sink class of each tool (SetToolDeclaration). The leak guard and the templates test read the
+// declaration instead of guessing from names.
 const (
 	// LegUntrustedInput: the server returns text an outsider controls (web pages, issues, mail).
 	LegUntrustedInput = "untrusted_input"
 	// LegPrivateData: the server returns data the org does not want to leave (repositories, internal
 	// documents, FinOps data).
 	LegPrivateData = "private_data"
-	// LegOutbound: a call to the server sends its arguments somewhere outside the org (a fetch, a
-	// search query, a comment, a message).
-	LegOutbound = "outbound"
 )
 
 // Kinds of server. KindOther is the default and says nothing about the server.
@@ -34,8 +32,8 @@ const (
 	KindOther  = "other"
 )
 
-// Legs are the three legs in their canonical order, the order Server.DataClass lists them in.
-var Legs = []string{LegUntrustedInput, LegPrivateData, LegOutbound}
+// Legs are the two legs in their canonical order, the order Server.DataClass lists them in.
+var Legs = []string{LegUntrustedInput, LegPrivateData}
 
 // Kinds are the kinds a server can declare.
 var Kinds = []string{KindFetch, KindSearch, KindOther}
@@ -48,7 +46,7 @@ type Declaration struct {
 	Legs []string
 }
 
-// DefaultDeclaration is what a server that nobody classified declares: kind other and all three
+// DefaultDeclaration is what a server that nobody classified declares: kind other and both
 // legs. The cautious reading, so a server is not exempt from the guard because nobody described it.
 // It is also what migration 00048 gave the servers that existed.
 func DefaultDeclaration() Declaration {
@@ -82,7 +80,7 @@ func declarationOf(r store.McpServer) Declaration {
 	for _, l := range []struct {
 		on  bool
 		leg string
-	}{{r.ExposesUntrustedInput, LegUntrustedInput}, {r.ExposesPrivateData, LegPrivateData}, {r.ExposesOutbound, LegOutbound}} {
+	}{{r.ExposesUntrustedInput, LegUntrustedInput}, {r.ExposesPrivateData, LegPrivateData}} {
 		if l.on {
 			d.Legs = append(d.Legs, l.leg)
 		}
@@ -98,7 +96,6 @@ func createClass(p *store.CreateMCPServerParams, d *Declaration) {
 	p.Kind = store.NullMcpServerKind{McpServerKind: store.McpServerKind(d.Kind), Valid: true}
 	p.ExposesUntrustedInput = pgtype.Bool{Bool: slices.Contains(d.Legs, LegUntrustedInput), Valid: true}
 	p.ExposesPrivateData = pgtype.Bool{Bool: slices.Contains(d.Legs, LegPrivateData), Valid: true}
-	p.ExposesOutbound = pgtype.Bool{Bool: slices.Contains(d.Legs, LegOutbound), Valid: true}
 }
 
 // SetDataClass sets what a server exposes. It works for every source: a declared server's Secret
@@ -122,7 +119,6 @@ func (s *Service) SetDataClass(ctx context.Context, org pgtype.UUID, actor audit
 			OrgID: org, ID: sid, Kind: store.McpServerKind(d.Kind),
 			ExposesUntrustedInput: slices.Contains(d.Legs, LegUntrustedInput),
 			ExposesPrivateData:    slices.Contains(d.Legs, LegPrivateData),
-			ExposesOutbound:       slices.Contains(d.Legs, LegOutbound),
 		})
 		if err != nil {
 			return err

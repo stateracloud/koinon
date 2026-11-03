@@ -119,7 +119,7 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 			return err
 		}
 		if cur != nil {
-			return recordClassReset(ctx, q, org, actor, *cur, row)
+			return resetOnURLChange(ctx, q, org, actor, *cur, row)
 		}
 		return nil
 	})

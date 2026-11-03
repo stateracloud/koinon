@@ -10,7 +10,7 @@ import { LeakGuardService } from '@/gen/koinon/leakguard/v1alpha1/leakguard_pb'
 import { McpServerService } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import { renderApp, whoAmI } from '@/test-utils'
 
-function setup(opts: { hosts?: string[]; threshold?: number; failAdd?: string } = {}) {
+function setup(opts: { hosts?: string[]; threshold?: number; failAdd?: string; scope?: object } = {}) {
   let hosts = opts.hosts ?? []
   let threshold = opts.threshold ?? 24
   const calls = {
@@ -25,6 +25,7 @@ function setup(opts: { hosts?: string[]; threshold?: number; failAdd?: string } 
       minMatchThreshold: 12,
       maxMatchThreshold: 256,
       trustedHosts: hosts,
+      codeHostScope: opts.scope,
     },
   })
   const transport = createRouterTransport(({ service }) => {
@@ -61,6 +62,17 @@ function setup(opts: { hosts?: string[]; threshold?: number; failAdd?: string } 
 }
 
 describe('LeakGuardSettings', () => {
+  it('says an empty code-host scope makes every code-host write external', async () => {
+    setup()
+    expect(await screen.findByText(/No repositories listed: every code-host write counts as external/)).toBeInTheDocument()
+  })
+
+  it('counts the repositories of the code-host scope by visibility', async () => {
+    setup({ scope: { repositories: 5, private: 2, internal: 1, public: 1, unknown: 1, stale: 1, visibilityMaxAgeSeconds: 3600 } })
+    expect(await screen.findByLabelText('Code-host scope')).toHaveTextContent('5 repositories: 2 private, 1 internal, 1 public, 1 unknown; 1 stale.')
+    expect(screen.getByText(/within the last 60\s+minutes/)).toBeInTheDocument()
+  })
+
   it('starts at the default threshold with no trusted host', async () => {
     setup()
     expect(await screen.findByLabelText('Match threshold (characters)')).toHaveValue(24)

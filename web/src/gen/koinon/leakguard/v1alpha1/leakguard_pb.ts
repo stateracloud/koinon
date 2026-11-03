@@ -7,13 +7,15 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file koinon/leakguard/v1alpha1/leakguard.proto.
  */
 export const file_koinon_leakguard_v1alpha1_leakguard: GenFile = /*@__PURE__*/
-  fileDesc("Cilrb2lub24vbGVha2d1YXJkL3YxYWxwaGExL2xlYWtndWFyZC5wcm90bxIZa29pbm9uLmxlYWtndWFyZC52MWFscGhhMSKWAQoJTGVha0d1YXJkEhcKD21hdGNoX3RocmVzaG9sZBgBIAEoBRIfChdkZWZhdWx0X21hdGNoX3RocmVzaG9sZBgCIAEoBRIbChNtaW5fbWF0Y2hfdGhyZXNob2xkGAMgASgFEhsKE21heF9tYXRjaF90aHJlc2hvbGQYBCABKAUSFQoNdHJ1c3RlZF9ob3N0cxgFIAMoCSIlChNHZXRMZWFrR3VhcmRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJQChRHZXRMZWFrR3VhcmRSZXNwb25zZRI4CgpsZWFrX2d1YXJkGAEgASgLMiQua29pbm9uLmxlYWtndWFyZC52MWFscGhhMS5MZWFrR3VhcmQiQwoYU2V0TWF0Y2hUaHJlc2hvbGRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIXCg9tYXRjaF90aHJlc2hvbGQYAiABKAUiVQoZU2V0TWF0Y2hUaHJlc2hvbGRSZXNwb25zZRI4CgpsZWFrX2d1YXJkGAEgASgLMiQua29pbm9uLmxlYWtndWFyZC52MWFscGhhMS5MZWFrR3VhcmQiNQoVQWRkVHJ1c3RlZEhvc3RSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIMCgRob3N0GAIgASgJIlIKFkFkZFRydXN0ZWRIb3N0UmVzcG9uc2USOAoKbGVha19ndWFyZBgBIAEoCzIkLmtvaW5vbi5sZWFrZ3VhcmQudjFhbHBoYTEuTGVha0d1YXJkIjgKGFJlbW92ZVRydXN0ZWRIb3N0UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDAoEaG9zdBgCIAEoCSJVChlSZW1vdmVUcnVzdGVkSG9zdFJlc3BvbnNlEjgKCmxlYWtfZ3VhcmQYASABKAsyJC5rb2lub24ubGVha2d1YXJkLnYxYWxwaGExLkxlYWtHdWFyZDL/AwoQTGVha0d1YXJkU2VydmljZRJ0CgxHZXRMZWFrR3VhcmQSLi5rb2lub24ubGVha2d1YXJkLnYxYWxwaGExLkdldExlYWtHdWFyZFJlcXVlc3QaLy5rb2lub24ubGVha2d1YXJkLnYxYWxwaGExLkdldExlYWtHdWFyZFJlc3BvbnNlIgOQAgESfgoRU2V0TWF0Y2hUaHJlc2hvbGQSMy5rb2lub24ubGVha2d1YXJkLnYxYWxwaGExLlNldE1hdGNoVGhyZXNob2xkUmVxdWVzdBo0LmtvaW5vbi5sZWFrZ3VhcmQudjFhbHBoYTEuU2V0TWF0Y2hUaHJlc2hvbGRSZXNwb25zZRJ1Cg5BZGRUcnVzdGVkSG9zdBIwLmtvaW5vbi5sZWFrZ3VhcmQudjFhbHBoYTEuQWRkVHJ1c3RlZEhvc3RSZXF1ZXN0GjEua29pbm9uLmxlYWtndWFyZC52MWFscGhhMS5BZGRUcnVzdGVkSG9zdFJlc3BvbnNlEn4KEVJlbW92ZVRydXN0ZWRIb3N0EjMua29pbm9uLmxlYWtndWFyZC52MWFscGhhMS5SZW1vdmVUcnVzdGVkSG9zdFJlcXVlc3QaNC5rb2lub24ubGVha2d1YXJkLnYxYWxwaGExLlJlbW92ZVRydXN0ZWRIb3N0UmVzcG9uc2VCWVpXZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vbGVha2d1YXJkL3YxYWxwaGExO2xlYWtndWFyZHYxYWxwaGExYgZwcm90bzM");
+  fileDesc("Cilrb2lub24vbGVha2d1YXJkL3YxYWxwaGExL2xlYWtndWFyZC5wcm90bxIZa29pbm9uLmxlYWtndWFyZC52MWFscGhhMSLZAQoJTGVha0d1YXJkEhcKD21hdGNoX3RocmVzaG9sZBgBIAEoBRIfChdkZWZhdWx0X21hdGNoX3RocmVzaG9sZBgCIAEoBRIbChNtaW5fbWF0Y2hfdGhyZXNob2xkGAMgASgFEhsKE21heF9tYXRjaF90aHJlc2hvbGQYBCABKAUSFQoNdHJ1c3RlZF9ob3N0cxgFIAMoCRJBCg9jb2RlX2hvc3Rfc2NvcGUYBiABKAsyKC5rb2lub24ubGVha2d1YXJkLnYxYWxwaGExLkNvZGVIb3N0U2NvcGUi0wEKDUNvZGVIb3N0U2NvcGUSFAoMcmVwb3NpdG9yaWVzGAEgASgFEg8KB3ByaXZhdGUYAiABKAUSEAoIaW50ZXJuYWwYAyABKAUSDgoGcHVibGljGAQgASgFEg8KB3Vua25vd24YBSABKAUSDQoFc3RhbGUYBiABKAUSNQoRb2xkZXN0X2NoZWNrZWRfYXQYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiIKGnZpc2liaWxpdHlfbWF4X2FnZV9zZWNvbmRzGAggASgFIiUKE0dldExlYWtHdWFyZFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJIlAKFEdldExlYWtHdWFyZFJlc3BvbnNlEjgKCmxlYWtfZ3VhcmQYASABKAsyJC5rb2lub24ubGVha2d1YXJkLnYxYWxwaGExLkxlYWtHdWFyZCJDChhTZXRNYXRjaFRocmVzaG9sZFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhcKD21hdGNoX3RocmVzaG9sZBgCIAEoBSJVChlTZXRNYXRjaFRocmVzaG9sZFJlc3BvbnNlEjgKCmxlYWtfZ3VhcmQYASABKAsyJC5rb2lub24ubGVha2d1YXJkLnYxYWxwaGExLkxlYWtHdWFyZCI1ChVBZGRUcnVzdGVkSG9zdFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEgwKBGhvc3QYAiABKAkiUgoWQWRkVHJ1c3RlZEhvc3RSZXNwb25zZRI4CgpsZWFrX2d1YXJkGAEgASgLMiQua29pbm9uLmxlYWtndWFyZC52MWFscGhhMS5MZWFrR3VhcmQiOAoYUmVtb3ZlVHJ1c3RlZEhvc3RSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIMCgRob3N0GAIgASgJIlUKGVJlbW92ZVRydXN0ZWRIb3N0UmVzcG9uc2USOAoKbGVha19ndWFyZBgBIAEoCzIkLmtvaW5vbi5sZWFrZ3VhcmQudjFhbHBoYTEuTGVha0d1YXJkMv8DChBMZWFrR3VhcmRTZXJ2aWNlEnQKDEdldExlYWtHdWFyZBIuLmtvaW5vbi5sZWFrZ3VhcmQudjFhbHBoYTEuR2V0TGVha0d1YXJkUmVxdWVzdBovLmtvaW5vbi5sZWFrZ3VhcmQudjFhbHBoYTEuR2V0TGVha0d1YXJkUmVzcG9uc2UiA5ACARJ+ChFTZXRNYXRjaFRocmVzaG9sZBIzLmtvaW5vbi5sZWFrZ3VhcmQudjFhbHBoYTEuU2V0TWF0Y2hUaHJlc2hvbGRSZXF1ZXN0GjQua29pbm9uLmxlYWtndWFyZC52MWFscGhhMS5TZXRNYXRjaFRocmVzaG9sZFJlc3BvbnNlEnUKDkFkZFRydXN0ZWRIb3N0EjAua29pbm9uLmxlYWtndWFyZC52MWFscGhhMS5BZGRUcnVzdGVkSG9zdFJlcXVlc3QaMS5rb2lub24ubGVha2d1YXJkLnYxYWxwaGExLkFkZFRydXN0ZWRIb3N0UmVzcG9uc2USfgoRUmVtb3ZlVHJ1c3RlZEhvc3QSMy5rb2lub24ubGVha2d1YXJkLnYxYWxwaGExLlJlbW92ZVRydXN0ZWRIb3N0UmVxdWVzdBo0LmtvaW5vbi5sZWFrZ3VhcmQudjFhbHBoYTEuUmVtb3ZlVHJ1c3RlZEhvc3RSZXNwb25zZUJZWldnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9sZWFrZ3VhcmQvdjFhbHBoYTE7bGVha2d1YXJkdjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_timestamp]);
 
 /**
  * LeakGuard is the org's effective configuration.
@@ -49,6 +51,13 @@ export type LeakGuard = Message<"koinon.leakguard.v1alpha1.LeakGuard"> & {
    * @generated from field: repeated string trusted_hosts = 5;
    */
   trustedHosts: string[];
+
+  /**
+   * code_host_scope summarises the org's code-host scope (ADR 0091 decision 3).
+   *
+   * @generated from field: koinon.leakguard.v1alpha1.CodeHostScope code_host_scope = 6;
+   */
+  codeHostScope?: CodeHostScope | undefined;
 };
 
 /**
@@ -57,6 +66,66 @@ export type LeakGuard = Message<"koinon.leakguard.v1alpha1.LeakGuard"> & {
  */
 export const LeakGuardSchema: GenMessage<LeakGuard> = /*@__PURE__*/
   messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 0);
+
+/**
+ * CodeHostScope counts the repositories of the org's code-host connections by the visibility the
+ * connector last read. The code-host derivation calls a write internal only for a listed repository
+ * that is not public and whose reading is fresh; unknown and stale ones count as external-high.
+ *
+ * @generated from message koinon.leakguard.v1alpha1.CodeHostScope
+ */
+export type CodeHostScope = Message<"koinon.leakguard.v1alpha1.CodeHostScope"> & {
+  /**
+   * @generated from field: int32 repositories = 1;
+   */
+  repositories: number;
+
+  /**
+   * @generated from field: int32 private = 2;
+   */
+  private: number;
+
+  /**
+   * @generated from field: int32 internal = 3;
+   */
+  internal: number;
+
+  /**
+   * @generated from field: int32 public = 4;
+   */
+  public: number;
+
+  /**
+   * @generated from field: int32 unknown = 5;
+   */
+  unknown: number;
+
+  /**
+   * stale counts the readings older than visibility_max_age_seconds.
+   *
+   * @generated from field: int32 stale = 6;
+   */
+  stale: number;
+
+  /**
+   * oldest_checked_at is the oldest reading; unset for an empty scope.
+   *
+   * @generated from field: google.protobuf.Timestamp oldest_checked_at = 7;
+   */
+  oldestCheckedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: int32 visibility_max_age_seconds = 8;
+   */
+  visibilityMaxAgeSeconds: number;
+};
+
+/**
+ * Describes the message koinon.leakguard.v1alpha1.CodeHostScope.
+ * Use `create(CodeHostScopeSchema)` to create a new message.
+ */
+export const CodeHostScopeSchema: GenMessage<CodeHostScope> = /*@__PURE__*/
+  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 1);
 
 /**
  * @generated from message koinon.leakguard.v1alpha1.GetLeakGuardRequest
@@ -73,7 +142,7 @@ export type GetLeakGuardRequest = Message<"koinon.leakguard.v1alpha1.GetLeakGuar
  * Use `create(GetLeakGuardRequestSchema)` to create a new message.
  */
 export const GetLeakGuardRequestSchema: GenMessage<GetLeakGuardRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 1);
+  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 2);
 
 /**
  * @generated from message koinon.leakguard.v1alpha1.GetLeakGuardResponse
@@ -90,7 +159,7 @@ export type GetLeakGuardResponse = Message<"koinon.leakguard.v1alpha1.GetLeakGua
  * Use `create(GetLeakGuardResponseSchema)` to create a new message.
  */
 export const GetLeakGuardResponseSchema: GenMessage<GetLeakGuardResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 2);
+  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 3);
 
 /**
  * @generated from message koinon.leakguard.v1alpha1.SetMatchThresholdRequest
@@ -114,7 +183,7 @@ export type SetMatchThresholdRequest = Message<"koinon.leakguard.v1alpha1.SetMat
  * Use `create(SetMatchThresholdRequestSchema)` to create a new message.
  */
 export const SetMatchThresholdRequestSchema: GenMessage<SetMatchThresholdRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 3);
+  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 4);
 
 /**
  * @generated from message koinon.leakguard.v1alpha1.SetMatchThresholdResponse
@@ -131,7 +200,7 @@ export type SetMatchThresholdResponse = Message<"koinon.leakguard.v1alpha1.SetMa
  * Use `create(SetMatchThresholdResponseSchema)` to create a new message.
  */
 export const SetMatchThresholdResponseSchema: GenMessage<SetMatchThresholdResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 4);
+  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 5);
 
 /**
  * @generated from message koinon.leakguard.v1alpha1.AddTrustedHostRequest
@@ -156,7 +225,7 @@ export type AddTrustedHostRequest = Message<"koinon.leakguard.v1alpha1.AddTruste
  * Use `create(AddTrustedHostRequestSchema)` to create a new message.
  */
 export const AddTrustedHostRequestSchema: GenMessage<AddTrustedHostRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 5);
+  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 6);
 
 /**
  * @generated from message koinon.leakguard.v1alpha1.AddTrustedHostResponse
@@ -173,7 +242,7 @@ export type AddTrustedHostResponse = Message<"koinon.leakguard.v1alpha1.AddTrust
  * Use `create(AddTrustedHostResponseSchema)` to create a new message.
  */
 export const AddTrustedHostResponseSchema: GenMessage<AddTrustedHostResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 6);
+  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 7);
 
 /**
  * @generated from message koinon.leakguard.v1alpha1.RemoveTrustedHostRequest
@@ -195,7 +264,7 @@ export type RemoveTrustedHostRequest = Message<"koinon.leakguard.v1alpha1.Remove
  * Use `create(RemoveTrustedHostRequestSchema)` to create a new message.
  */
 export const RemoveTrustedHostRequestSchema: GenMessage<RemoveTrustedHostRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 7);
+  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 8);
 
 /**
  * @generated from message koinon.leakguard.v1alpha1.RemoveTrustedHostResponse
@@ -212,7 +281,7 @@ export type RemoveTrustedHostResponse = Message<"koinon.leakguard.v1alpha1.Remov
  * Use `create(RemoveTrustedHostResponseSchema)` to create a new message.
  */
 export const RemoveTrustedHostResponseSchema: GenMessage<RemoveTrustedHostResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 8);
+  messageDesc(file_koinon_leakguard_v1alpha1_leakguard, 9);
 
 /**
  * LeakGuardService manages an org's leak-guard settings (ADR 0084): the match threshold and the
