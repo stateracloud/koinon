@@ -259,6 +259,13 @@ func StaticBoundOnly(b BoundOnly) BoundOnlySource {
 	return func(context.Context) (BoundOnly, error) { return b, nil }
 }
 
+// UnreadableBoundOnly is a source that always fails with err: for a process that has no database
+// to read the marker from. KMS KEKs stored unbound (format 1) then never open (fail closed); local
+// KEKs and bound KEKs are not affected.
+func UnreadableBoundOnly(err error) BoundOnlySource {
+	return func(context.Context) (BoundOnly, error) { return BoundOnly{}, err }
+}
+
 // UnboundKEKs returns the IDs, sorted, of the KEKs a KMS wrapped without the install binding
 // (format 1). Local KEKs are not wrapped, so never unbound.
 func UnboundKEKs(stored map[string]StoredKEK) []string {
@@ -297,20 +304,11 @@ type Wrappers struct {
 	boundOnly BoundOnlySource
 }
 
-// WithBoundOnly returns ws reading the "bound only" marker from src before it unwraps a KMS KEK
-// stored unbound (format 1): with the marker set, such a KEK is [ErrBoundOnly]; when the marker
-// cannot be read, it is refused too (fail closed). Without a source, ws reads format 1 KEKs as
-// before #615 (tests, and tools that have no database); every Koinon process that loads the key set
-// sets one.
-func (ws Wrappers) WithBoundOnly(src BoundOnlySource) Wrappers {
-	ws.boundOnly = src
-	return ws
-}
-
 // acceptUnbound reports whether ws may open the KMS KEK id stored unbound (format 1).
 func (ws Wrappers) acceptUnbound(ctx context.Context, id string) error {
 	if ws.boundOnly == nil {
-		return nil
+		// Only the zero value has no source, and it opens local KEKs only; refuse rather than guess.
+		return fmt.Errorf("secretstore: KEK %q is stored unbound (format 1) and these wrappers read no bound-only marker", id)
 	}
 	b, err := ws.boundOnly(ctx)
 	if err != nil {
@@ -357,14 +355,23 @@ const CallTimeout = 10 * time.Second
 
 // NewWrappers returns a service's wrappers: primary is the wrapping key of the key set (new KEKs
 // are wrapped with it only when it is [Local]). Each backend and key ID pair appears once.
-func NewWrappers(primary Wrapper, more ...Wrapper) (Wrappers, error) {
-	return newWrappers(false, primary, more)
+//
+// boundOnly is required (#615): it reads the install's "bound only" marker before a KMS KEK stored
+// unbound (format 1) is unwrapped. With the marker set, such a KEK is [ErrBoundOnly]; when the
+// marker cannot be read, it is refused too (fail closed). There is no "no marker" mode: a process
+// without a database passes a source that returns an error, and tests pass [StaticBoundOnly].
+func NewWrappers(boundOnly BoundOnlySource, primary Wrapper, more ...Wrapper) (Wrappers, error) {
+	return newWrappers(false, boundOnly, primary, more)
 }
 
 // NewKeyAdminWrappers returns the key-admin Job's wrappers: they wrap new KEKs with primary.
-func NewKeyAdminWrappers(primary Wrapper, more ...Wrapper) (Wrappers, error) {
-	return newWrappers(true, primary, more)
+// boundOnly is required, as for [NewWrappers].
+func NewKeyAdminWrappers(boundOnly BoundOnlySource, primary Wrapper, more ...Wrapper) (Wrappers, error) {
+	return newWrappers(true, boundOnly, primary, more)
 }
+
+// ErrNoBoundOnlySource means wrappers were built without a source for the bound-only marker.
+var ErrNoBoundOnlySource = errors.New("secretstore: no source for the bound-only marker (#615)")
 
 // WithCallTimeout returns ws with another per-call bound than [CallTimeout] (tests).
 func (ws Wrappers) WithCallTimeout(d time.Duration) Wrappers {
@@ -380,7 +387,10 @@ func (ws Wrappers) call(ctx context.Context) (context.Context, context.CancelFun
 	return context.WithTimeout(ctx, d)
 }
 
-func newWrappers(keyAdmin bool, primary Wrapper, more []Wrapper) (Wrappers, error) {
+func newWrappers(keyAdmin bool, boundOnly BoundOnlySource, primary Wrapper, more []Wrapper) (Wrappers, error) {
+	if boundOnly == nil {
+		return Wrappers{}, ErrNoBoundOnlySource
+	}
 	if primary == nil {
 		return Wrappers{}, errors.New("secretstore: no key-wrapping key to wrap new keys with")
 	}
@@ -395,7 +405,7 @@ func newWrappers(keyAdmin bool, primary Wrapper, more []Wrapper) (Wrappers, erro
 		}
 		seen[k] = true
 	}
-	return Wrappers{primary: primary, more: more, keyAdmin: keyAdmin}, nil
+	return Wrappers{primary: primary, more: more, keyAdmin: keyAdmin, boundOnly: boundOnly}, nil
 }
 
 // Primary is the wrapper new KEKs are wrapped with.

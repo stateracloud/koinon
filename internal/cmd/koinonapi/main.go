@@ -487,14 +487,14 @@ func serve(ctx context.Context, cfg config) error {
 	// cfg.kekWrapping says (ADR 0085 decision 12). koinon-api is decrypt-only: with a KMS, new KEKs
 	// come from the key-admin Job.
 	var keyring *secretstore.Keyring
-	wrappers, err := wrapping.New(ctx, cfg.kekWrapping, wrapping.Service)
+	// Once the install is bound-only (#615), KEKs stored unbound are refused; the marker is read on
+	// every load until it is set.
+	wrappers, err := wrapping.New(ctx, cfg.kekWrapping, wrapping.Service, installid.BoundOnlySource(pool))
 	if err != nil {
 		return err
 	}
 	// KMS-wrapped KEKs are bound to the install ID the database holds (#615).
-	// Once the install is bound-only, KEKs stored unbound are refused; the marker is read on every
-	// load until it is set.
-	wrappers = wrappers.WithInstallID(installid.Source(pool)).WithBoundOnly(installid.BoundOnlySource(pool))
+	wrappers = wrappers.WithInstallID(installid.Source(pool))
 	// On every load and reload: probe the active KEK's wrapping key (koinon_kek_active_reachable,
 	// registered below with the other metrics) and record the KEK fingerprints (#591).
 	kekMetrics := kekhealth.NewMetrics(nil)

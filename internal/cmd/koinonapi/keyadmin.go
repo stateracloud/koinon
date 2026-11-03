@@ -66,10 +66,6 @@ func newKeyAdminCommand() *cobra.Command {
 }
 
 func runKeyAdmin(ctx context.Context, o keyAdminOptions, out io.Writer) error {
-	wrappers, err := wrapping.New(ctx, o.wrapping, wrapping.KeyAdmin)
-	if err != nil {
-		return err
-	}
 	pool, err := waitForPool(ctx, o.dbURL, o.wait)
 	if err != nil {
 		return err
@@ -82,7 +78,11 @@ func runKeyAdmin(ctx context.Context, o keyAdminOptions, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	wrappers = wrappers.WithInstallID(secretstore.StaticInstallID(install)).WithBoundOnly(installid.BoundOnlySource(pool))
+	wrappers, err := wrapping.New(ctx, o.wrapping, wrapping.KeyAdmin, installid.BoundOnlySource(pool))
+	if err != nil {
+		return err
+	}
+	wrappers = wrappers.WithInstallID(secretstore.StaticInstallID(install))
 	rc, err := restConfig(o.kubeconfig)
 	if err != nil {
 		return err

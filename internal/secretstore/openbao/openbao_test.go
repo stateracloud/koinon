@@ -150,7 +150,7 @@ var _ = Describe("the OpenBao transit wrapper", func() {
 	})
 
 	It("binds a KEK to its ID and the install through secretstore.Wrappers", func(ctx SpecContext) {
-		ws, err := secretstore.NewKeyAdminWrappers(withToken(adminToken))
+		ws, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, withToken(adminToken))
 		Expect(err).NotTo(HaveOccurred())
 		ws = ws.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 		stored, err := ws.Wrap(ctx, "koinon-test-1", kek)
@@ -162,7 +162,7 @@ var _ = Describe("the OpenBao transit wrapper", func() {
 		_, err = ws.Unwrap(ctx, "koinon-test-2", stored)
 		Expect(err).To(MatchError(secretstore.ErrOpen))
 
-		svc, err := secretstore.NewWrappers(withToken(decryptToken))
+		svc, err := secretstore.NewWrappers(secretstoretest.BoundOnlyUnset, withToken(decryptToken))
 		Expect(err).NotTo(HaveOccurred())
 		svc = svc.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 		got, err = svc.Unwrap(ctx, "koinon-test-1", stored)

@@ -19,6 +19,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/keyscli"
+	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 )
 
@@ -103,19 +104,25 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 	var store keyscli.Store
 	// These commands run in the koinon-api pod, so they are a service: with the default local KEK
 	// they add keys as before; with an opted-in KMS, only the key-admin Job adds them.
-	wrappers, err := wrapping.New(ctx, o.wrapping, wrapping.Service)
-	if err != nil {
-		return err
-	}
-	// KMS-wrapped KEKs are bound to the install ID in the database (#615): every command that opens
-	// them, export too, reads it there. It is read only when a bound KEK is opened.
+	// KMS-wrapped KEKs are bound to the install ID in the database (#615), and the bound-only marker
+	// is there too: every command that opens them, export too, reads both there, and only when such
+	// a KEK is opened. Without a database a KMS KEK stored unbound does not open (fail closed).
 	var pool *pgxpool.Pool
+	boundOnly := secretstore.UnreadableBoundOnly(errors.New("no --database-url to read the bound-only marker from"))
 	if o.dbURL != "" {
+		var err error
 		if pool, err = pgxpool.New(ctx, o.dbURL); err != nil {
 			return fmt.Errorf("connect to postgres: %w", err)
 		}
 		defer pool.Close()
-		wrappers = wrappers.WithInstallID(installid.Source(pool)).WithBoundOnly(installid.BoundOnlySource(pool))
+		boundOnly = installid.BoundOnlySource(pool)
+	}
+	wrappers, err := wrapping.New(ctx, o.wrapping, wrapping.Service, boundOnly)
+	if err != nil {
+		return err
+	}
+	if pool != nil {
+		wrappers = wrappers.WithInstallID(installid.Source(pool))
 	}
 	switch {
 	case o.kekSecret != "":

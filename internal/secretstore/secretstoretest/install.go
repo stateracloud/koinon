@@ -26,6 +26,10 @@ const (
 // BoundOnlySet is a set bound-only marker for tests (#615).
 var BoundOnlySet = secretstore.BoundOnly{Set: true, At: time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC), How: secretstore.BoundOnlyRewrap}
 
+// BoundOnlyUnset is the bound-only marker source of an install that still accepts KEKs stored
+// unbound (format 1): tests pass it, or another explicit source, to the wrappers' constructors.
+var BoundOnlyUnset = secretstore.StaticBoundOnly(secretstore.BoundOnly{})
+
 // LegacyKEKAAD is the associated data of a KEK in stored format 1 (#416), written out here apart
 // from secretstore, so that a change to it there fails the contract: KEKs wrapped with it are in
 // Secrets and backups and must keep unwrapping.
@@ -47,14 +51,18 @@ func InstallBindingContract(newWrapper func() secretstore.Wrapper) {
 	kek := bytes.Repeat([]byte("k"), secretstore.KeySize) // obviously fake
 	expect := gomega.Expect
 
-	wrappers := func(w secretstore.Wrapper, install string) secretstore.Wrappers {
+	wrappersWith := func(w secretstore.Wrapper, install string, marker secretstore.BoundOnlySource) secretstore.Wrappers {
 		ginkgo.GinkgoHelper()
-		ws, err := secretstore.NewKeyAdminWrappers(w)
+		ws, err := secretstore.NewKeyAdminWrappers(marker, w)
 		expect(err).NotTo(gomega.HaveOccurred())
 		if install != "" {
 			ws = ws.WithInstallID(secretstore.StaticInstallID(install))
 		}
 		return ws
+	}
+	wrappers := func(w secretstore.Wrapper, install string) secretstore.Wrappers {
+		ginkgo.GinkgoHelper()
+		return wrappersWith(w, install, BoundOnlyUnset)
 	}
 	// stored is s as a process reads it back from the KEK Secret.
 	stored := func(s secretstore.StoredKEK) secretstore.StoredKEK {
@@ -145,7 +153,8 @@ func InstallBindingContract(newWrapper func() secretstore.Wrapper) {
 			legacy = stored(secretstore.StoredKEK{Backend: w.Backend(), KeyID: w.KeyID(), Wrapped: v})
 		})
 		withMarker := func(src secretstore.BoundOnlySource) secretstore.Wrappers {
-			return wrappers(w, InstallA).WithBoundOnly(src)
+			ginkgo.GinkgoHelper()
+			return wrappersWith(w, InstallA, src)
 		}
 
 		ginkgo.It("still opens a KEK stored unbound (format 1) while it is not set", func(ctx ginkgo.SpecContext) {
@@ -212,7 +221,9 @@ func LocalBindingContract() {
 	expect := gomega.Expect
 
 	ginkgo.It("stores a local KEK as before, unbound, and reads it whatever the install ID", func(ctx ginkgo.SpecContext) {
-		var local secretstore.Wrappers
+		// The bound-only marker is about KMS KEKs: a local one opens with it set.
+		local, err := secretstore.NewWrappers(secretstore.StaticBoundOnly(BoundOnlySet), secretstore.Local{})
+		expect(err).NotTo(gomega.HaveOccurred())
 		s, err := local.WithInstallID(secretstore.StaticInstallID(InstallA)).Wrap(ctx, id, kek)
 		expect(err).NotTo(gomega.HaveOccurred())
 		expect(s.Bound()).To(gomega.BeFalse(), "a local KEK cannot be bound")
@@ -220,8 +231,7 @@ func LocalBindingContract() {
 		expect(err).NotTo(gomega.HaveOccurred())
 		expect(v).To(gomega.Equal(secretstore.EncodeKey(kek)))
 		for _, install := range []string{"", InstallA, InstallB} {
-			// The bound-only marker is about KMS KEKs: a local one opens with it set.
-			ws := local.WithBoundOnly(secretstore.StaticBoundOnly(BoundOnlySet))
+			ws := local
 			if install != "" {
 				ws = ws.WithInstallID(secretstore.StaticInstallID(install))
 			}
