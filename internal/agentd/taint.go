@@ -20,22 +20,31 @@ import (
 // A finished repository read, search, shell command or file edit sets the private-data leg of the
 // agent's session, and its output is fingerprinted with the session's key, in this process; a
 // finished fetch sets the untrusted-input leg. Only fingerprints are stored: no tool output leaves
-// agentd. MCP tools (kind other) are the guard's own to see, through the gateway.
+// agentd. A kind the feed does not know (other, which covers MCP tools, a missing kind, or a kind
+// newer than this list) sets both legs: ADR 0091 reads what is unclassified as the most exposed.
 
 // TaintFeed records one tool result of an agent's sandbox (mcpguard.Feed).
 type TaintFeed interface {
 	Report(ctx context.Context, org, agent pgtype.UUID, legs mcpguard.Legs, texts []string) error
 }
 
-// taintLegs are the legs a finished tool call of each kind sets. A kind not listed sets none and
-// is not fingerprinted.
+// taintLegs are the legs a finished tool call of each known kind sets; a known kind with no legs
+// (switch_mode changes the harness's mode and carries no data) reports nothing. Any other kind
+// sets unknownLegs.
 var taintLegs = map[acp.ToolKind]mcpguard.Legs{
-	acp.ToolKindRead:    {PrivateData: true},
-	acp.ToolKindSearch:  {PrivateData: true},
-	acp.ToolKindExecute: {PrivateData: true},
-	acp.ToolKindEdit:    {PrivateData: true},
-	acp.ToolKindFetch:   {UntrustedInput: true},
+	acp.ToolKindRead:       {PrivateData: true},
+	acp.ToolKindSearch:     {PrivateData: true},
+	acp.ToolKindExecute:    {PrivateData: true},
+	acp.ToolKindEdit:       {PrivateData: true},
+	acp.ToolKindDelete:     {PrivateData: true},
+	acp.ToolKindMove:       {PrivateData: true},
+	acp.ToolKindThink:      {PrivateData: true},
+	acp.ToolKindFetch:      {UntrustedInput: true},
+	acp.ToolKindSwitchMode: {},
 }
+
+// unknownLegs are the legs of a finished tool call whose kind is not in taintLegs: both.
+var unknownLegs = mcpguard.Legs{UntrustedInput: true, PrivateData: true}
 
 // taintTries is how often a report is tried before the feed gives it up (and counts it).
 const taintTries = 3
@@ -115,6 +124,9 @@ func (t *taintCalls) finished(update []byte) (mcpguard.Legs, []string, bool) {
 	delete(t.calls, u.ID)
 	legs, ok := taintLegs[c.kind]
 	if !ok {
+		legs = unknownLegs
+	}
+	if !legs.PrivateData && !legs.UntrustedInput {
 		return mcpguard.Legs{}, nil, false
 	}
 	return legs, c.texts, true

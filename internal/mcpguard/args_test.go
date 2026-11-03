@@ -1,0 +1,82 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package mcpguard_test
+
+import (
+	"encoding/json"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/mcpguard"
+	"github.com/stateracloud/koinon/internal/sinkclass"
+)
+
+// trusts is a fetch-host trust list for the specs.
+type trusts []string
+
+func (t trusts) TrustsHost(h string) bool {
+	for _, x := range t {
+		if x == h {
+			return true
+		}
+	}
+	return false
+}
+
+var _ = Describe("splitting a call's arguments (ADR 0091 decision 7)", func() {
+	fetch := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.Fetch, AddressArgs: []string{"url"}}
+	nested := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.Fetch, AddressArgs: []string{"opts.url"}}
+	split := func(raw string, d sinkclass.Declaration, hosts sinkclass.HostTrust) (mcpguard.Args, error) {
+		return mcpguard.SplitArgs(json.RawMessage(raw), d, hosts)
+	}
+
+	It("reads a nested address argument once, as plain keys", func() {
+		a, err := split(`{"opts":{"url":"https://docs.example.com/a"},"note":"n"}`, nested, trusts{"docs.example.com"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(a.Address).To(Equal(map[string]string{"opts.url": "https://docs.example.com/a"}))
+	})
+
+	DescribeTable("refuses an address with more than one reading",
+		func(raw string, d sinkclass.Declaration) {
+			_, err := split(raw, d, trusts{"trusted.example.com"})
+			Expect(err).To(MatchError(mcpguard.ErrAmbiguousAddress))
+		},
+		Entry("a dotted literal key beside the nested path",
+			`{"opts":{"url":"https://evil.example/x"},"opts.url":"https://trusted.example.com/"}`, nested),
+		Entry("the nested path beside a dotted literal key (other order)",
+			`{"opts.url":"https://trusted.example.com/","opts":{"url":"https://evil.example/x"}}`, nested),
+		Entry("a dotted literal key alone", `{"opts.url":"https://trusted.example.com/"}`, nested),
+		Entry("a repeated key in the raw JSON", `{"url":"https://trusted.example.com/","url":"https://evil.example/x"}`, fetch),
+		Entry("a repeated nested key", `{"opts":{"url":"https://trusted.example.com/","url":"https://evil.example/x"}}`, nested),
+		Entry("the same name in another case", `{"url":"https://trusted.example.com/","URL":"https://evil.example/x"}`, fetch),
+		Entry("another case alone", `{"Url":"https://trusted.example.com/"}`, fetch),
+		Entry("a parent key in another case", `{"OPTS":{"url":"https://trusted.example.com/"}}`, nested),
+		Entry("a Unicode case fold (KELVIN SIGN for k)", `{"Key":"https://trusted.example.com/"}`,
+			sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.Fetch, AddressArgs: []string{"key"}}),
+		Entry("inside a list", `{"opts":[{"url":"https://trusted.example.com/"}]}`, nested),
+		Entry("a repeated key of a code-host tool", `{"owner":"northwind","repo":"platform-handbook","repo":"dump"}`,
+			sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}}),
+	)
+
+	It("counts a fixed tool's address arguments as payload", func() {
+		d := sinkclass.Declaration{Class: sinkclass.ExternalLow, Derivation: sinkclass.Fixed, AddressArgs: []string{"channel"}}
+		a, err := split(`{"channel":"general","text":"hello"}`, d, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(a.Address).To(HaveKeyWithValue("channel", "general"))
+		Expect(a.Payload).To(Equal([]string{"general", "text", "hello"}))
+		Expect(a.PayloadBytes()).To(Equal(len("general") + len("text") + len("hello")))
+	})
+
+	It("counts the host labels of a fetch to a host the org does not trust, and not of one it trusts", func() {
+		a, err := split(`{"url":"https://c2VjcmV0.evil.example/x?q=1"}`, fetch, trusts{"docs.example.com"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(a.Payload).To(Equal([]string{"c2VjcmV0.evil.example/x?q=1"}))
+		a, err = split(`{"url":"https://docs.example.com/x?q=1"}`, fetch, trusts{"docs.example.com"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(a.Payload).To(Equal([]string{"/x?q=1"}))
+		a, err = split(`{"url":"https://docs.example.com/x"}`, fetch, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(a.Payload).To(Equal([]string{"docs.example.com/x"}), "no trust list trusts nothing")
+	})
+})

@@ -9,15 +9,17 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/stateracloud/koinon/internal/sinkclass"
 )
 
 // Args is one call's arguments split by ADR 0091 decision 7: the address arguments, which decide
-// the sink class and never reach the text match, and the payload, every other string the call
-// carries in call order.
+// the sink class, and the payload, every string the call carries in call order. A derived tool's
+// address is not payload, except what of it can carry data: the path, query and fragment of a
+// fetched URL, and the whole URL after its scheme when the host is not one the org trusts (its
+// labels can carry data too). A fixed tool's address arguments decide nothing, so they are payload.
 type Args struct {
 	// Address holds the value of each address argument the declaration names, by name. A named
 	// argument that is missing or not a string is absent, so a derived class reads it as unparsable.
@@ -38,6 +40,11 @@ func (a Args) PayloadBytes() int {
 	return n
 }
 
+// ErrAmbiguousAddress refuses a call whose address the guard and the server could read differently
+// (ADR 0091 decision 7: the class comes from the address, so it must have exactly one reading).
+var ErrAmbiguousAddress = errors.New("an address argument of this tool is given more than once, or in a form a server may read differently " +
+	"(a repeated key, a key with a dot in it, a different case, or inside a list); send each address argument once, as a plain key")
+
 // MaxArgumentBytes bounds the arguments of one call the guard reads; a larger call is refused.
 const MaxArgumentBytes = 1 << 20
 
@@ -46,12 +53,13 @@ const maxNesting = 64
 
 var errArgs = errors.New("the arguments must be a JSON object")
 
-// SplitArgs reads a call's arguments (a JSON object, or empty) under declaration d.
-func SplitArgs(raw json.RawMessage, d sinkclass.Declaration) (Args, error) {
-	return split(raw, d, MaxArgumentBytes)
+// SplitArgs reads a call's arguments (a JSON object, or empty) under declaration d. hosts says which
+// fetch hosts the org trusts (nil: none). An ambiguous address is ErrAmbiguousAddress.
+func SplitArgs(raw json.RawMessage, d sinkclass.Declaration, hosts sinkclass.HostTrust) (Args, error) {
+	return split(raw, d, hosts, MaxArgumentBytes)
 }
 
-func split(raw json.RawMessage, d sinkclass.Declaration, limit int) (Args, error) {
+func split(raw json.RawMessage, d sinkclass.Declaration, hosts sinkclass.HostTrust, limit int) (Args, error) {
 	out := Args{Address: map[string]string{}}
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
@@ -66,8 +74,11 @@ func split(raw json.RawMessage, d sinkclass.Declaration, limit int) (Args, error
 	if err != nil || tok != json.Delim('{') {
 		return Args{}, errArgs
 	}
-	w := walker{dec: dec, decl: d, out: &out}
-	if err := w.object("", 1); err != nil {
+	w := walker{dec: dec, decl: d, hosts: hosts, out: &out, addr: map[string]string{}, seen: map[string]int{}}
+	for _, a := range d.AddressArgs {
+		w.addr[foldKey(a)] = a
+	}
+	if err := w.object("", 1, false); err != nil {
 		return Args{}, err
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
@@ -77,13 +88,34 @@ func split(raw json.RawMessage, d sinkclass.Declaration, limit int) (Args, error
 }
 
 type walker struct {
-	dec  *json.Decoder
-	decl sinkclass.Declaration
-	out  *Args
+	dec   *json.Decoder
+	decl  sinkclass.Declaration
+	hosts sinkclass.HostTrust
+	out   *Args
+	// addr maps the case-folded name of each address argument to its declared name; seen counts
+	// the members whose dotted, case-folded name is one of them, at any depth and in any list.
+	addr map[string]string
+	seen map[string]int
 }
 
-// object reads the members of an object whose '{' was read; path is its dotted name ("" at the top).
-func (w walker) object(path string, depth int) error {
+// foldKey is a name under Unicode simple case folding: two keys a case-insensitive JSON decoder
+// (Go's encoding/json among them) would match to the same field have the same foldKey.
+func foldKey(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		m := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			m = min(m, f)
+		}
+		b.WriteRune(m)
+	}
+	return b.String()
+}
+
+// object reads the members of an object whose '{' was read; path is its dotted name ("" at the
+// top). odd is true below a key that has a dot in it, or inside a list: a name met there is not
+// one a server reads as the dotted path.
+func (w walker) object(path string, depth int, odd bool) error {
 	if depth > maxNesting {
 		return errors.New("the arguments are nested too deeply")
 	}
@@ -100,14 +132,22 @@ func (w walker) object(path string, depth int) error {
 		if path != "" {
 			name = path + "." + key
 		}
-		if slices.Contains(w.decl.AddressArgs, name) {
+		keyOdd := odd || strings.Contains(key, ".")
+		if declared, ok := w.addr[foldKey(name)]; ok {
+			// One reading only: the name exactly as declared, once, as plain nested keys. A repeated
+			// key (the raw JSON's, which a map would have collapsed), a dotted literal key, another
+			// case or a list makes the guard and the server read different addresses.
+			w.seen[foldKey(name)]++
+			if w.seen[foldKey(name)] > 1 || keyOdd || name != declared {
+				return ErrAmbiguousAddress
+			}
 			if err := w.address(name); err != nil {
 				return err
 			}
 			continue
 		}
 		w.out.Payload = append(w.out.Payload, key)
-		if err := w.value(name, depth); err != nil {
+		if err := w.value(name, depth, keyOdd); err != nil {
 			return err
 		}
 	}
@@ -124,7 +164,7 @@ func (w walker) address(name string) error {
 	}
 	var s string
 	if json.Unmarshal(v, &s) != nil {
-		inner, err := split(json.RawMessage(`{"v":`+string(v)+`}`), sinkclass.Declaration{}, MaxArgumentBytes+16)
+		inner, err := split(json.RawMessage(`{"v":`+string(v)+`}`), sinkclass.Declaration{}, nil, MaxArgumentBytes+16)
 		if err != nil {
 			return err
 		}
@@ -132,20 +172,33 @@ func (w walker) address(name string) error {
 		return nil
 	}
 	w.out.Address[name] = s
-	if w.decl.Derivation == sinkclass.Fetch {
-		if rest := urlPayload(s); rest != "" {
+	switch w.decl.Derivation {
+	case sinkclass.Fixed:
+		// A fixed class does not depend on the address, so it is data like any other argument.
+		w.out.Payload = append(w.out.Payload, s)
+	case sinkclass.Fetch:
+		if rest := w.urlPayload(s); rest != "" {
 			w.out.Payload = append(w.out.Payload, rest)
 		}
 	}
 	return nil
 }
 
-// urlPayload is the part of a fetched URL that is payload: everything after the host (path, query
-// and fragment), as sent. A URL that does not parse is payload whole.
-func urlPayload(raw string) string {
+// urlPayload is the part of a fetched URL that is payload, as sent. To a host the org trusts it is
+// everything after the host (path, query and fragment). To any other host it is everything after
+// the scheme: host labels carry data as well as a path does (ADR 0091 decision 8, whatever the
+// encoding). A URL that does not parse is payload whole.
+func (w walker) urlPayload(raw string) string {
 	s := strings.TrimSpace(raw)
 	u, err := url.Parse(s)
 	if err != nil || u.Host == "" {
+		return s
+	}
+	host, ok := sinkclass.FetchHost(s)
+	if !ok || w.hosts == nil || !w.hosts.TrustsHost(host) {
+		if i := strings.Index(s, "://"); i >= 0 {
+			return s[i+len("://"):]
+		}
 		return s
 	}
 	i := strings.Index(s, u.Host)
@@ -155,7 +208,7 @@ func urlPayload(raw string) string {
 	return s[i+len(u.Host):]
 }
 
-func (w walker) value(path string, depth int) error {
+func (w walker) value(path string, depth int, odd bool) error {
 	tok, err := w.dec.Token()
 	if err != nil {
 		return errArgs
@@ -164,10 +217,10 @@ func (w walker) value(path string, depth int) error {
 	case json.Delim:
 		switch t {
 		case '{':
-			return w.object(path, depth+1)
+			return w.object(path, depth+1, odd)
 		case '[':
 			for w.dec.More() {
-				if err := w.value(path, depth+1); err != nil {
+				if err := w.value(path, depth+1, true); err != nil {
 					return err
 				}
 			}
@@ -193,7 +246,7 @@ const MaxResultBytes = 8 << 20
 // Strings returns every string of a JSON value in order (values, numbers as written and object
 // keys): what the taint feed fingerprints of a tool result.
 func Strings(raw []byte) []string {
-	a, err := split(json.RawMessage(`{"v":`+string(bytes.TrimSpace(raw))+`}`), sinkclass.Declaration{}, MaxResultBytes)
+	a, err := split(json.RawMessage(`{"v":`+string(bytes.TrimSpace(raw))+`}`), sinkclass.Declaration{}, nil, MaxResultBytes)
 	if err != nil {
 		return []string{string(raw)}
 	}

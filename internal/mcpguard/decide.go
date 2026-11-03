@@ -10,6 +10,10 @@ import (
 )
 
 // Action is what the guard does with one tool call.
+// NoRunApprovalText is the refusal of a call that needs a person's approval while its agent works
+// on no task: an approval belongs to a run, so none can be made (the e2e asserts these words).
+const NoRunApprovalText = "refused by the leak guard: this call needs a person's approval, which is only possible while the agent works on a task"
+
 type Action string
 
 const (
@@ -28,18 +32,19 @@ const (
 
 // Reasons, the fixed label set of the decision metric (ADR 0023: no IDs).
 const (
-	ReasonInternal  = "internal"   // none or internal sink: carries nothing out
-	ReasonClean     = "clean"      // external, nothing matched, within the limits
-	ReasonBothLegs  = "both_legs"  // external-high with both legs: approval
-	ReasonTaint     = "taint"      // the payload carries private text: approval
-	ReasonByteCap   = "byte_cap"   // external-low over the byte cap with both legs: refusal
-	ReasonURLRule   = "url_rule"   // the ADR 0084 URL shape rule or its budgets: refusal
-	ReasonCheck     = "check"      // the taint check ran out of a budget: refusal (fail closed)
-	ReasonError     = "error"      // the guard failed: refusal (fail closed)
-	ReasonIdentity  = "identity"   // the call does not come from a known agent: refusal
-	ReasonNoRun     = "no_run"     // an external call outside a running run: refusal
-	ReasonExempt    = "exempt"     // a call of Koinon's own executor or probe
-	ReasonAskTarget = "ask_target" // approval-gated tool: mcpask records the one card
+	ReasonInternal  = "internal"          // none or internal sink: carries nothing out
+	ReasonClean     = "clean"             // external, nothing matched, within the limits
+	ReasonBothLegs  = "both_legs"         // external-high with both legs: approval
+	ReasonTaint     = "taint"             // the payload carries private text: approval
+	ReasonByteCap   = "byte_cap"          // external-low over the byte cap with both legs: refusal
+	ReasonURLRule   = "url_rule"          // the ADR 0084 URL shape rule or its budgets: refusal
+	ReasonCheck     = "check"             // the taint check ran out of a budget: refusal (fail closed)
+	ReasonAmbiguous = "ambiguous_address" // an address argument with more than one reading: refusal
+	ReasonError     = "error"             // the guard failed: refusal (fail closed)
+	ReasonIdentity  = "identity"          // the call does not come from a known agent: refusal
+	ReasonNoRun     = "no_run"            // an external call outside a running run: refusal
+	ReasonExempt    = "exempt"            // a call of Koinon's own executor or probe
+	ReasonAskTarget = "ask_target"        // approval-gated tool: mcpask records the one card
 )
 
 // Facts are what the decision table reads about one call (ADR 0091 decision 5).

@@ -16,10 +16,18 @@
 // both-legs one. A tool on an ask-tier target already gets a card from mcpask, which asks Assess
 // for the guard's reasons, so the guard lets that call on.
 //
+// What counts as payload (ADR 0091 decision 7, SplitArgs): every argument but a derived tool's
+// address arguments, which decide the class. A fixed tool's address arguments decide nothing, so
+// they are payload. Of a fetched URL the path, query and fragment are payload, and to a host the
+// org does not trust the host labels too. An address argument with more than one reading (a
+// repeated key in the raw JSON, a dotted literal key, another case, a list) is refused
+// (ReasonAmbiguous): the guard and the server must read the same address.
+//
 // The table never escalates by itself: what it cannot pass or refuse is NeedsDecision, with its
 // reasons, destination and payload size (Pending), and goes to Options.Decider. The only Decider
 // is PersonDecider, which turns every NeedsDecision into that ADR 0042 approval; the seam is where
-// another step between the rules and a person would go, and it can change no rule's outcome.
+// another step between the rules and a person would go (ADR 0092). Only a call whose one reason is
+// both legs, with no text match, reaches Options.Decider; a match always goes to a person.
 //
 // # Legs and taint (ADR 0091 decision 4)
 //

@@ -21,6 +21,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/test/scenarios"
 )
 
@@ -197,7 +198,8 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 // same text to every call); once the session holds it, the agent's attempt to send it out through an
 // auto-tier tool of the same server must be stopped at the gateway by the guard, and never reach the
 // server. The call is made outside a task, so the guard refuses it (an approval needs a run); inside
-// a task the same call is an approval of the exact call (internal/mcpguard and the gateway specs).
+// a task the same call is an approval of the exact call (step 6b's in-task case, internal/mcpguard).
+// write_item stays auto until the step ends: the in-task case calls it on the server's own target.
 func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, string, ...string) (int, []byte), session *mcp.ClientSession, fake, serverID, private string) {
 	GinkgoHelper()
 	By("with both legs, an external-high call carrying what the session read is stopped by the leak guard")
@@ -242,7 +244,7 @@ func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, 
 	} else {
 		text = err.Error()
 	}
-	Expect(text).To(ContainSubstring("leak guard"), "the agent reads why it was stopped")
+	Expect(text).To(ContainSubstring(mcpguard.NoRunApprovalText), "the agent reads why it was stopped: no task, so no approval")
 	for _, r := range fakeMCPRequests(ctx, fake) {
 		Expect(r.Tool).NotTo(Equal("write_item"), "nothing the guard stopped reached the server")
 	}
