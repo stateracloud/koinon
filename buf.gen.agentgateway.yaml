@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+# The agentgateway ExtMcp protocol (third_party/agentgateway), served by koinon-api's MCP guard
+# (internal/mcpguard, ADR 0084 and 0091). Go only, with a grpc-go server: agentgateway speaks gRPC.
+version: v2
+clean: true
+inputs:
+  - directory: third_party/agentgateway/proto
+plugins:
+  - local: ["go", "tool", "protoc-gen-go"]
+    out: internal/gen/agentgateway
+    opt: &opts
+      - module=github.com/stateracloud/koinon/internal/gen/agentgateway
+      - Mext_mcp.proto=github.com/stateracloud/koinon/internal/gen/agentgateway/extmcp;extmcp
+  - local: ["go", "tool", "protoc-gen-go-grpc"]
+    out: internal/gen/agentgateway
+    opt: *opts
