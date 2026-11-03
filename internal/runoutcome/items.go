@@ -93,11 +93,12 @@ func (o *Owner) RecordUpdate(ctx context.Context, kind string, payload []byte) e
 
 // FlushItems stores the item in progress, if any. partial marks it cut off. The write does not
 // stop with ctx: an item the run is ending on is worth its few seconds. A fenced Owner has nothing
-// to store, and that is not an error.
+// to store, and that is not an error, except after a cancel: the control plane ended the run, and
+// the item the agent was in the middle of is still stored (partial), so the run keeps what was said.
 func (o *Owner) FlushItems(ctx context.Context, partial bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.pend.kind == "" || o.IsFenced() {
+	if o.pend.kind == "" || o.IsFenced() && o.FenceKind() != FenceCanceled {
 		o.pend = pending{}
 		return
 	}

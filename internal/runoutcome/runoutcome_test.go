@@ -509,6 +509,23 @@ var _ = Describe("RecordUpdate: items, not chunks (#344)", func() {
 		Expect(partial).To(Equal([]bool{true}))
 	})
 
+	It("stores the item in progress, cut off, after the control plane canceled the run, and nothing else", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		Expect(w.own.RecordUpdate(ctx, "acp.agent_message_chunk", chunk("agent_message_chunk", "said so far"))).To(Succeed())
+		_, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: w.org, ID: w.run.ID, OutcomeReason: "user canceled"})
+		Expect(err).NotTo(HaveOccurred())
+		w.own.FenceFromDB(ctx)
+		Expect(w.own.FenceKind()).To(Equal(runoutcome.FenceCanceled))
+
+		w.own.FlushItems(ctx, true)
+		Expect(w.own.RecordRaw(ctx, "run.prompt", []byte(`{}`))).To(MatchError(runoutcome.ErrFenced))
+		kinds, text, partial := texts(ctx, w)
+		Expect(kinds).To(ContainElement("acp.agent_message_chunk"))
+		Expect(text).To(ContainElement("said so far"))
+		Expect(partial).To(ContainElement(true))
+		Expect(kinds).NotTo(ContainElement("run.prompt"))
+	})
+
 	It("stores the item in progress, cut off, before a verb ends the run, so the reply has it", func(ctx SpecContext) {
 		w := newWorld(ctx, true)
 		turn := w.openTurn(ctx)

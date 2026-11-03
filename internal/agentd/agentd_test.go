@@ -344,7 +344,7 @@ var _ = Describe("Pool", func() {
 		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(ContainElement("run.requeued"))
 	})
 
-	It("honours a cancel with session/cancel and records nothing after it", func(ctx SpecContext) {
+	It("honours a cancel with session/cancel and records only the cut-off message after it", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		r := e.enqueue(ctx, e.task(ctx, markWait))
 		e.pool("agentd-a")
@@ -354,10 +354,12 @@ var _ = Describe("Pool", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(func() int { _, _, c, _ := e.harness.snapshot(); return c }).WithTimeout(5 * time.Second).Should(Equal(1))
 
-		// The message in progress ("working") is never stored: the worker is fenced, and a chunk is
-		// only stored as part of an item (#344).
+		// The message in progress ("working") is stored as a cut-off item, although the run is
+		// canceled: a stopped run keeps what the agent said (#344).
+		Eventually(func() []string { return chunks(events(ctx, r)) }).WithTimeout(5 * time.Second).Should(Equal([]string{"working"}))
 		Consistently(func() []string { return kinds(events(ctx, r)) }, 500*time.Millisecond).
-			Should(Equal([]string{"run.session", "run.prompt"}))
+			Should(Equal([]string{"run.session", "run.prompt", "acp.agent_message_chunk"}))
+		Expect(payload(events(ctx, r)[2])).To(HaveKeyWithValue("partial", true))
 		final := getRun(ctx, r)
 		Expect(final.State).To(Equal(store.RunStateCanceled))
 		Expect(final.OutcomeReason.String).To(Equal("user canceled"))

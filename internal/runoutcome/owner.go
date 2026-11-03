@@ -257,10 +257,19 @@ func (o *Owner) tryAppend(ctx context.Context, class EventClass, kind string, pa
 		ctx, cancel = context.WithTimeout(ctx, diagnosticTryTimeout)
 		defer cancel()
 	}
-	_, err := o.q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
-		OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
-		Kind: kind, Payload: payload, SourceSeq: src,
-	})
+	var err error
+	if o.FenceKind() == FenceCanceled {
+		// Only the item in progress is written to a canceled run (FlushItems).
+		_, err = o.q.AppendCanceledRunEventOnce(ctx, store.AppendCanceledRunEventOnceParams{
+			OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
+			Kind: kind, Payload: payload, SourceSeq: src,
+		})
+	} else {
+		_, err = o.q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
+			OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
+			Kind: kind, Payload: payload, SourceSeq: src,
+		})
+	}
 	if err == nil {
 		return nil
 	}
