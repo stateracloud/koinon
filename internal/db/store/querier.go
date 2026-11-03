@@ -16,6 +16,10 @@ type Querier interface {
 	// (a trigger-only proposal, ADR 0066). No row: archived, or the agent already runs this version
 	// (a concurrent duplicate activation re-evaluates the WHERE clause and gets no row).
 	ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error)
+	// Adding a fingerprint again makes it new, so the eviction keeps what the session saw last.
+	AddLeakGuardFingerprints(ctx context.Context, arg AddLeakGuardFingerprintsParams) (int64, error)
+	// The legs only grow: a leg already set stays set whatever @untrusted_input and @private_data say.
+	AddLeakGuardLegs(ctx context.Context, arg AddLeakGuardLegsParams) (LeakGuardSession, error)
 	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
 	// Adding a host that is on the list changes nothing (0 rows).
 	AddOrgFetchTrustedHost(ctx context.Context, arg AddOrgFetchTrustedHostParams) (int64, error)
@@ -121,6 +125,7 @@ type Querier interface {
 	// no org-owned row, so it takes no @org_id.
 	CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error)
 	CountEnabledTraceDestinations(ctx context.Context, orgID pgtype.UUID) (int64, error)
+	CountLeakGuardFingerprints(ctx context.Context, arg CountLeakGuardFingerprintsParams) (int64, error)
 	// Questions of the run that still wait for a person (asked or open).
 	CountOpenQuestionsForRun(ctx context.Context, arg CountOpenQuestionsForRunParams) (int64, error)
 	// Recreations in the last 24 hours, since the agent was last resumed: ADR 0054's loop guard,
@@ -230,6 +235,7 @@ type Querier interface {
 	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	// Removing a mapping cascades to the memberships it granted.
 	DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) error
+	DeleteLeakGuardSession(ctx context.Context, arg DeleteLeakGuardSessionParams) error
 	DeleteMCPServer(ctx context.Context, arg DeleteMCPServerParams) (int64, error)
 	DeleteModel(ctx context.Context, arg DeleteModelParams) (int64, error)
 	// A nonce only matters while its token could still be good (5 minutes); older ones go.
@@ -250,8 +256,18 @@ type Querier interface {
 	// no run of it is queued (a follow-up message already asked for another turn). No row: the task is
 	// elsewhere (canceled, ended by a person) or has more work queued.
 	EndTaskFrom(ctx context.Context, arg EndTaskFromParams) (Task, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The leak guard's state (ADR 0084, ADR 0091; #349): sessions per home generation with their legs,
+	// the taint store of fingerprints, and the budgets of a run. Every query takes @org_id and filters
+	// on it (TestQueriesAreOrgScoped).
+	// The session of one home generation, created with @fp_key the first time. A concurrent first call
+	// keeps the key the first insert wrote.
+	EnsureLeakGuardSession(ctx context.Context, arg EnsureLeakGuardSessionParams) (LeakGuardSession, error)
 	// Makes sure the org has an org_settings row, so LockOrgSettings has a row to lock.
 	EnsureOrgSettings(ctx context.Context, orgID pgtype.UUID) error
+	// Drops the @n oldest fingerprints of a session.
+	EvictLeakGuardFingerprints(ctx context.Context, arg EvictLeakGuardFingerprintsParams) (int64, error)
 	// pending -> expired once expires_at has passed (ADR 0049: 7 days).
 	ExpirePendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	// Saved work is kept for 14 days; the sealed files go with it.
@@ -359,6 +375,7 @@ type Querier interface {
 	// error without a status). Only the statuses in @statuses count. No row when the provider
 	// refused nothing in the window.
 	GetLastUpstreamRefusal(ctx context.Context, arg GetLastUpstreamRefusalParams) (GetLastUpstreamRefusalRow, error)
+	GetLeakGuardSession(ctx context.Context, arg GetLeakGuardSessionParams) (LeakGuardSession, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	GetMCPServer(ctx context.Context, arg GetMCPServerParams) (McpServer, error)
@@ -756,6 +773,9 @@ type Querier interface {
 	// principal and sync IdP groups at login), always keyed by user_id.
 	// Serialises bootstrap across API replicas for the rest of the transaction.
 	LockBootstrap(ctx context.Context) error
+	// The budgets of a run, locked for the rest of the transaction so two replicas charging one run at
+	// once count both calls.
+	LockLeakGuardRun(ctx context.Context, arg LockLeakGuardRunParams) (LeakGuardRun, error)
 	// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
 	LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error)
 	LockPlatformTraceDestination(ctx context.Context) (PlatformTraceDestination, error)
@@ -766,6 +786,8 @@ type Querier interface {
 	// Serialises a park decision (agentd) with the resolution of the run's
 	// approvals (the executor), so neither misses the other.
 	LockRun(ctx context.Context, arg LockRunParams) (Run, error)
+	// The fingerprints of @fps the session holds.
+	LookupLeakGuardFingerprints(ctx context.Context, arg LookupLeakGuardFingerprintsParams) ([]int64, error)
 	// Lowers every org above a new platform ceiling to it, and the platform copies that follow, in the
 	// caller's transaction. Returns the orgs it changed with their levels before, for the audit log.
 	LowerOrgTraceLevels(ctx context.Context, arg LowerOrgTraceLevelsParams) ([]LowerOrgTraceLevelsRow, error)
@@ -774,6 +796,7 @@ type Querier interface {
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
 	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
 	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
+	MarkLeakGuardEvicted(ctx context.Context, arg MarkLeakGuardEvictedParams) error
 	// The declaring Secret was deleted: keep the row, stop serving it.
 	MarkMCPServerRemoved(ctx context.Context, arg MarkMCPServerRemovedParams) error
 	// Tools the server did not list this time.
@@ -904,6 +927,7 @@ type Querier interface {
 	// Logout: revokes a live session and says whose it was, for the audit log. No row: nothing was live.
 	RevokeSessionReturningUser(ctx context.Context, arg RevokeSessionReturningUserParams) (pgtype.UUID, error)
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
+	SaveLeakGuardRun(ctx context.Context, arg SaveLeakGuardRunParams) error
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
 	// Whether an org admin asks for the agent's sandbox to stay up (#315). The operator's per-org cap
 	// decides how many of the requests the reconciler grants. Not a new version.
