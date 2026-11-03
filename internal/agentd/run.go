@@ -127,6 +127,9 @@ type runner struct {
 	toolsMu sync.Mutex
 	tools   map[string]chan struct{} // tool call IDs; closed once the tool call is recorded
 
+	// taint follows tool calls for the leak guard's feed (taint.go).
+	taint taintCalls
+
 	// delivered are the approval requests whose outcomes this turn's prompt carries; they are
 	// marked delivered when the turn ends.
 	delivered []pgtype.UUID
@@ -1050,12 +1053,17 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 		h.r.setCommands(acp.Flatten(n).Commands)
 		return nil
 	}
-	if h.r.replaying.Load() {
-		return nil
-	}
 	b, err := json.Marshal(n.Update)
 	if err != nil {
 		return err
+	}
+	// The leak guard's feed (taint.go) reads the replay of a resumed session too: a worker that gave
+	// the run up may have failed to report a result.
+	if err := h.r.feedTaint(ctx, b); err != nil {
+		return err
+	}
+	if h.r.replaying.Load() {
+		return nil
 	}
 	if err := h.r.own.RecordRaw(ctx, "acp."+updateKind(b), b); err != nil {
 		return err
