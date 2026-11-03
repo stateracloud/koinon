@@ -73,3 +73,25 @@ RETURNING *;
 UPDATE leak_guard_runs
 SET capped_bytes = @capped_bytes, url_state = @url_state, updated_at = now()
 WHERE org_id = @org_id AND run_id = @run_id;
+
+-- name: StartLeakGuardFeed :exec
+-- A worker starts the run's harness under its epoch: the counts start at zero, and what an earlier
+-- worker read and never recorded is gone with it (the harness's replay reports it again).
+INSERT INTO leak_guard_runs (org_id, run_id, feed_epoch)
+VALUES (@org_id, @run_id, @epoch)
+ON CONFLICT (org_id, run_id) DO UPDATE
+SET feed_epoch = @epoch, feed_read = 0, feed_done = 0, updated_at = now()
+WHERE leak_guard_runs.feed_epoch <= @epoch;
+
+-- name: MarkLeakGuardFeedRead :execrows
+-- The worker of epoch read a finished tool call from the harness; it has not recorded it yet.
+UPDATE leak_guard_runs SET feed_read = feed_read + 1, updated_at = now()
+WHERE org_id = @org_id AND run_id = @run_id AND feed_epoch = @epoch;
+
+-- name: MarkLeakGuardFeedDone :execrows
+-- The worker of epoch recorded (or had nothing to record of) the next finished tool call it read.
+UPDATE leak_guard_runs SET feed_done = feed_done + 1, updated_at = now()
+WHERE org_id = @org_id AND run_id = @run_id AND feed_epoch = @epoch;
+
+-- name: GetLeakGuardFeed :one
+SELECT feed_read, feed_done FROM leak_guard_runs WHERE org_id = @org_id AND run_id = @run_id;

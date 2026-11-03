@@ -36,6 +36,14 @@ const LookupBudget = 2 * time.Second
 // -32603 instead of the guard's reason.
 const Deadline = 5*time.Second + LookupBudget
 
+// DefaultFeedWait bounds how long the guard waits for agentd's feed to record the tool results the
+// harness has finished (ADR 0091 decision 4, amendment 2026-11-03). Past it the session is read as
+// holding both legs: the call gets a card or a refusal, never a pass on legs that may be stale.
+const DefaultFeedWait = 2 * time.Second
+
+// feedPoll is how often the guard rereads the feed's counts while it waits.
+const feedPoll = 20 * time.Millisecond
+
 // GatewayProcessorTimeout is agentgateway's fixed timeout of a remote guardrail processor (v1.7.0,
 // crates/agentgateway/src/mcp/guardrails/client.rs: with_default_timeout, 10 s). It has no
 // configuration field; third_party/agentgateway/README.md records where to check it.
@@ -58,6 +66,8 @@ type Options struct {
 	// Approve records approvals for the default PersonDecider. Without it, and without a Decider,
 	// a call that needs a decision is refused.
 	Approve ApproveFunc
+	// FeedWait bounds the wait for agentd's feed (DefaultFeedWait when <= 0).
+	FeedWait time.Duration
 	// OwnTargets are the gateway targets of Koinon's own tool servers (the code-host tools and
 	// gateway.KoinonTarget). Every write they offer is already an ADR 0042 approval of the exact
 	// call and their results carry no org data, so the guard lets them through. Any other target
@@ -79,6 +89,10 @@ type Guard struct {
 	person  Decider
 	own     []string
 	url     leakguard.URLPolicy
+	// feedWait bounds the wait for agentd's feed; feedPolled, when set, runs before each wait step
+	// (a test seam).
+	feedWait   time.Duration
+	feedPolled func()
 }
 
 // New returns a Guard on pool.
@@ -95,10 +109,13 @@ func New(pool *pgxpool.Pool, o Options) *Guard {
 	if o.Decider == nil {
 		o.Decider = PersonDecider{Approve: o.Approve}
 	}
+	if o.FeedWait <= 0 {
+		o.FeedWait = DefaultFeedWait
+	}
 	return &Guard{
 		pool: pool, q: store.New(pool), state: NewState(pool, o.MaxFingerprints, o.Metrics), log: o.Logger, metrics: o.Metrics,
 		now: o.Now, cap: o.ByteCap, limits: o.Limits, decider: o.Decider, person: PersonDecider{Approve: o.Approve}, own: slices.Clone(o.OwnTargets),
-		url: leakguard.DefaultURLPolicy(),
+		url: leakguard.DefaultURLPolicy(), feedWait: o.FeedWait,
 	}
 }
 
@@ -323,6 +340,8 @@ type assessment struct {
 	legs    Legs
 	verdict Verdict
 	refused *Outcome
+	// feedStalled: agentd's feed did not catch up in time, so the legs were taken as both.
+	feedStalled bool
 }
 
 func (a assessment) risk() map[string]any {
@@ -330,6 +349,9 @@ func (a assessment) risk() map[string]any {
 		"reasons": a.verdict.Reasons, "sink_class": string(a.class), "destination": a.args.Address,
 		"payload_bytes": a.args.PayloadBytes(),
 		"legs":          map[string]bool{"untrusted_input": a.legs.UntrustedInput, "private_data": a.legs.PrivateData},
+	}
+	if a.feedStalled {
+		leak["feed_stalled"] = true
 	}
 	if m := a.verdict.Match; m != nil {
 		leak["match"] = map[string]any{"excerpt": m.Excerpt, "encoding": m.Encoding, "length": m.Length}
@@ -370,12 +392,23 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 		a.refused = &o
 		return a, nil
 	}
+	// The legs must include every tool result the harness finished before this call: agentd may not
+	// have recorded the last one yet (its updates and the call travel different ways).
+	stalled, err := g.awaitFeed(ctx, c)
+	if err != nil {
+		return a, err
+	}
 	sess := Session{Org: c.org.ID, Agent: c.agent.ID, Generation: gen}
 	row, err := g.state.Ensure(ctx, sess)
 	if err != nil {
 		return a, err
 	}
 	a.legs = Legs{UntrustedInput: row.UntrustedInput, PrivateData: row.PrivateData}
+	if stalled {
+		g.log.Warn("mcp guard: agentd's feed did not catch up; the call is decided as if the session held both legs",
+			"org", c.org.Slug, "agent", c.agent.ID.String(), "wait", g.feedWait)
+		a.legs, a.feedStalled = Legs{UntrustedInput: true, PrivateData: true}, true
+	}
 	fp, err := Fingerprinter(row, pol.threshold())
 	if err != nil {
 		return a, err
@@ -434,6 +467,56 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 		return q.SaveLeakGuardRun(ctx, store.SaveLeakGuardRunParams{OrgID: c.org.ID, RunID: run.ID, CappedBytes: int32(min(capped, 1<<30)), UrlState: state}) //nolint:gosec // bounded
 	})
 	return a, err
+}
+
+// awaitFeed waits until agentd has recorded every finished tool call of the agent's running run it
+// had read from the harness when the call arrived (leak_guard_runs.feed_done reaching that
+// feed_read). It reports true when the feed did not catch up within feedWait: the caller then takes
+// the session as holding both legs. Without a running run, or a feed for it, there is nothing to
+// wait for.
+func (g *Guard) awaitFeed(ctx context.Context, c caller) (bool, error) {
+	run, err := g.q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: c.org.ID, AgentID: c.agent.ID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	key := store.GetLeakGuardFeedParams{OrgID: c.org.ID, RunID: run.ID}
+	feed, err := g.q.GetLeakGuardFeed(ctx, key)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	target := feed.FeedRead
+	if feed.FeedDone >= target {
+		return false, nil
+	}
+	deadline := time.NewTimer(g.feedWait)
+	defer deadline.Stop()
+	tick := time.NewTicker(feedPoll)
+	defer tick.Stop()
+	for {
+		if g.feedPolled != nil {
+			g.feedPolled()
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-deadline.C:
+			return true, nil
+		case <-tick.C:
+		}
+		feed, err = g.q.GetLeakGuardFeed(ctx, key)
+		if err != nil {
+			return false, err
+		}
+		if feed.FeedDone >= target {
+			return false, nil
+		}
+	}
 }
 
 // urlRule applies ADR 0084 decision 5 to an external-low call: a fetch tool's URL, a search

@@ -593,6 +593,11 @@ func (r *runner) execute(ctx context.Context) error {
 	sweepOnce := sync.OnceFunc(func() { r.sweepAfter(ctx, workspace, sandbox) })
 	defer sweepOnce()
 	defer closeHarness()
+	if err := r.feedStart(fctx); err != nil {
+		// The leak guard could not be told this worker's epoch: resume later rather than run unwatched.
+		r.interrupted(ctx, "start the leak guard's feed: "+err.Error(), nil, "")
+		return errDropped
+	}
 	conn := acp.NewConn(handler{r: r}, proc.Stdin(), proc.Stdout())
 	conn.SetLogger(log)
 	harnessErr := func(what string, err error) error {
@@ -1043,8 +1048,19 @@ func (r *runner) concludeShutdown(ctx context.Context, turn runoutcome.Turn) {
 // handler records the harness's session updates and answers its permission requests.
 type handler struct{ r *runner }
 
-func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
+func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) (err error) {
 	at := time.Now() // for the trace, before the event write
+	if feed := h.r.p.cfg.Taint; feed != nil && (n.Update.ToolCall != nil || n.Update.ToolCallUpdate != nil) {
+		// The leak guard waits for this count (taint.go): it is written once the update is handled,
+		// on every path below that does not fail.
+		if b, merr := json.Marshal(n.Update); merr == nil && finishesTool(b) {
+			defer func() {
+				if err == nil {
+					err = h.r.feedCount(ctx, "done", feed.Done)
+				}
+			}()
+		}
+	}
 	if h.r.summaryUpdate(n) {
 		return nil // the summary prompt's reply is the task's note, not a run event
 	}

@@ -252,6 +252,92 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Expect(string(risk)).To(ContainSubstring(`"taint"`))
 	})
 
+	Describe("waiting for agentd's feed (ADR 0091 decision 4, amendment 2026-11-03)", func() {
+		var (
+			feed *mcpguard.Feed
+			run  store.Run
+		)
+		BeforeEach(func(ctx SpecContext) {
+			feed = mcpguard.NewFeed(pool, nil)
+			var err error
+			run, err = q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: org, AgentID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(feed.Start(ctx, org, run.ID, run.Epoch)).To(Succeed())
+			// The session already read a page someone outside wrote: the untrusted leg.
+			Expect(result(ctx, "web", "search_web", "a page someone outside wrote").GetPass()).NotTo(BeNil())
+		})
+
+		It("decides a call that overtook the shell read's update on that read's result", func(ctx SpecContext) {
+			// agentd has read the finished shell read off the harness's stream, not recorded it yet;
+			// the harness's next call, carrying the read's text, reaches the guard first.
+			Expect(feed.Read(ctx, org, run.ID, run.Epoch)).To(Succeed())
+			polled := make(chan struct{})
+			var once bool
+			mcpguard.SetFeedPolled(guard, func() {
+				if !once {
+					once = true
+					close(polled)
+				}
+			})
+			decided := make(chan struct{})
+			recorded := make(chan error, 1)
+			go func() {
+				defer GinkgoRecover()
+				// agentd catches up only once the guard waits (or, without the wait, after it decided).
+				select {
+				case <-polled:
+				case <-decided:
+				}
+				err := feed.Report(context.WithoutCancel(ctx), org, agent.ID, mcpguard.Legs{PrivateData: true}, []string{secretPage})
+				if err == nil {
+					err = feed.Done(context.WithoutCancel(ctx), org, run.ID, run.Epoch)
+				}
+				recorded <- err
+			}()
+			r := call(ctx, "tracker", "post_message", map[string]any{"text": "fyi: " + secretPage[40:300]})
+			close(decided)
+			Expect(<-recorded).To(Succeed())
+			Expect(passed(r)).To(BeFalse(), "the call was decided on the shell read's result")
+			Expect(reason(r)).To(HavePrefix("approval requested: id="))
+			var risk []byte
+			Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE org_id = $1`, org).Scan(&risk)).To(Succeed())
+			Expect(string(risk)).To(ContainSubstring(`"taint"`))
+			Expect(string(risk)).To(ContainSubstring(`"private_data": true`))
+		})
+
+		It("takes both legs when the feed does not catch up in time", func(ctx SpecContext) {
+			o := opts
+			o.FeedWait = 200 * time.Millisecond
+			srv = mcpguard.NewServer(mcpguard.New(pool, o))
+			// A clean call passes while the feed is level.
+			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"}))).To(BeTrue())
+			Expect(feed.Read(ctx, org, run.ID, run.Epoch)).To(Succeed()) // and never Done: agentd stalled
+			r := call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"})
+			Expect(passed(r)).To(BeFalse())
+			Expect(reason(r)).To(HavePrefix("approval requested: id="))
+			var risk []byte
+			Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE org_id = $1`, org).Scan(&risk)).To(Succeed())
+			Expect(string(risk)).To(ContainSubstring(`"feed_stalled": true`))
+			// An internal call does not wait for the feed.
+			polls := 0
+			g := mcpguard.New(pool, o)
+			mcpguard.SetFeedPolled(g, func() { polls++ })
+			srv = mcpguard.NewServer(g)
+			r = call(ctx, "tracker", "commit_file", map[string]any{"owner": "northwind", "repo": "platform-handbook", "content": "x"})
+			Expect(passed(r)).To(BeTrue(), reason(r))
+			Expect(polls).To(BeZero())
+		})
+
+		It("counts nothing from a worker of an earlier epoch", func(ctx SpecContext) {
+			Expect(feed.Start(ctx, org, run.ID, run.Epoch+1)).To(Succeed())
+			Expect(feed.Read(ctx, org, run.ID, run.Epoch)).To(Succeed())
+			Expect(feed.Done(ctx, org, run.ID, run.Epoch)).To(Succeed())
+			var read, done int64
+			Expect(pool.QueryRow(ctx, `SELECT feed_read, feed_done FROM leak_guard_runs WHERE org_id = $1 AND run_id = $2`, org, run.ID).Scan(&read, &done)).To(Succeed())
+			Expect([]int64{read, done}).To(Equal([]int64{0, 0}))
+		})
+	})
+
 	It("refuses agentd's feed for an agent with no home generation", func(ctx SpecContext) {
 		other := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 		Expect(mcpguard.NewFeed(pool, nil).Report(ctx, org, other, mcpguard.Legs{PrivateData: true}, nil)).To(MatchError(mcpguard.ErrNoGeneration))

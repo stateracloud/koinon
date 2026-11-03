@@ -3,6 +3,7 @@
 package agentd
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -115,4 +116,16 @@ func OutcomeMetrics(m *Metrics) runoutcome.Metrics { return outcomeMetrics{m} }
 // each session update as agentd marshals it and returns what a finished call reports.
 func NewTaintCalls() func(update []byte) (mcpguard.Legs, []string, bool) {
 	return (&taintCalls{}).finished
+}
+
+// FeedCounts reports whether the leak guard's feed counts an update as a finished tool call, once
+// as the reader reads the notification line and once as the handler gets the update.
+func FeedCounts(line []byte) (read, handled bool) {
+	var m struct {
+		Params struct {
+			Update json.RawMessage `json:"update"`
+		} `json:"params"`
+	}
+	_ = json.Unmarshal(line, &m)
+	return lineFinishesTool(line), finishesTool(m.Params.Update)
 }

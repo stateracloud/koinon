@@ -121,6 +121,16 @@ a generation clears them, not the end of a run, not a new run, not an admin acti
 generation starts with both legs clear. The third leg, outbound, is no longer a session flag: it is
 the sink class of the call being decided.
 
+agentd's tool results and the harness's MCP calls reach Koinon by different paths, so a call can
+overtake the update that finished a shell read. The guard therefore waits for the feed (Andre,
+2026-11-03, option A): agentd counts each finished tool call when it reads the update off the
+harness's stream and again once it has reported it, per run and worker epoch; before it reads the
+legs for an `external-low` or `external-high` call, the guard waits until the second count reaches
+what the first was when the call arrived. If it does not within 2 s, the call is decided as if the
+session held both legs: a card or a refusal, never a pass. `none` and `internal` calls do not wait.
+A tool kind agentd does not know (ACP `other`, which covers MCP tools, a missing kind, or a newer
+kind) sets both legs.
+
 ### 5. The decision table
 
 | Session state | `none`, `internal` | `external-low` | `external-high` |
