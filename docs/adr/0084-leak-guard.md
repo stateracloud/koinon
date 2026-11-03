@@ -175,6 +175,26 @@ The decisions on #265 leave these open; each is settled in the implementation is
 - **An emergency bypass:** whether an org or platform admin can switch the guard off for an org while
   koinon-api is degraded; none is decided, so none is built.
 
+## Amendment (2026-11-03, #348): the work budget decides, the clock is a 5 s backstop
+
+Andre, 2026-11-03: "A work limit decides; 5 s backstop". The first core (#348) bounded one taint
+check by a work counter (`MaxWorkBytes`, 32 MiB) and a wall clock of 1 s. On a loaded lab node (3 CPUs,
+other test packages in parallel) benign calls took 1.0 to 1.1 s and the one-core smoke test 2.8 s, so
+the clock refused calls that were fine: how long a check takes depends on the machine, not on the
+call. Now:
+
+- `MaxWorkBytes` is the budget that decides. It counts the bytes decoded, normalised and
+  fingerprinted, which are the same on every machine, so a call that blows up decoding (deep
+  nesting, variant explosion, pairs of many arguments) ends with the same verdict (`budget_work`,
+  `budget_variants`, `budget_args` for the pair budget, `decode_depth`) everywhere. The benign
+  shapes measured are charged under half of it.
+- `MaxDuration` defaults to 5 s and is a safety net for a stuck or starved machine, not a policy. A
+  benign call must not depend on it. It stays fail-closed (`budget_time`), and a cancelled context
+  still ends a check at once.
+- The guard timeout the reconciler renders for the ExtMcp processor (open question above, #349)
+  must be longer than the 5 s backstop plus the store lookup, so the guard answers before agentgateway
+  gives up.
+
 ## Upstream verification
 
 agentgateway v1.6.0 ExtMcp (`ext_mcp.proto`, request and response checks) was exercised in the
