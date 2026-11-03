@@ -52,9 +52,13 @@ const recordKEKFingerprint = `-- name: RecordKEKFingerprint :one
 INSERT INTO kek_fingerprints (kek_id, fingerprint, backend, key_id, activated_at)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (kek_id) DO UPDATE
-SET backend = EXCLUDED.backend,
-    key_id = EXCLUDED.key_id,
-    activated_at = COALESCE(EXCLUDED.activated_at, kek_fingerprints.activated_at)
+SET backend = CASE WHEN kek_fingerprints.fingerprint = EXCLUDED.fingerprint
+                   THEN EXCLUDED.backend ELSE kek_fingerprints.backend END,
+    key_id = CASE WHEN kek_fingerprints.fingerprint = EXCLUDED.fingerprint
+                  THEN EXCLUDED.key_id ELSE kek_fingerprints.key_id END,
+    activated_at = CASE WHEN kek_fingerprints.fingerprint = EXCLUDED.fingerprint
+                        THEN COALESCE(EXCLUDED.activated_at, kek_fingerprints.activated_at)
+                        ELSE kek_fingerprints.activated_at END
 RETURNING kek_id, fingerprint, backend, key_id, first_seen, activated_at
 `
 
@@ -66,8 +70,9 @@ type RecordKEKFingerprintParams struct {
 	ActivatedAt pgtype.Timestamptz
 }
 
-// Inserts the KEK or, when it is known, keeps its fingerprint and first_seen and updates what wraps
-// it and (when given) its activation time. Returns the row as stored, so the caller sees a
+// Inserts the KEK or, when it is known, keeps its fingerprint and first_seen. What wraps it and its
+// activation time are updated only when the fingerprint matches: a different key under a known ID
+// (a wrong backup) must not rewrite the record. Returns the row as stored, so the caller sees a
 // fingerprint that differs from the one it holds.
 func (q *Queries) RecordKEKFingerprint(ctx context.Context, arg RecordKEKFingerprintParams) (KekFingerprint, error) {
 	row := q.db.QueryRow(ctx, recordKEKFingerprint,

@@ -264,6 +264,15 @@ What changes once you opt in (ADR 0085 decision 12):
 - Moving to the KMS uses the rotation steps above: the key-admin Job adds a KMS-wrapped KEK, then
   `keys activate`, `keys rewrap` and `keys retire` on the local ones. `keys status` shows WRAPPED BY
   for each KEK. A KEK's fingerprint does not depend on its wrapping.
+- koinon-api records each KEK's fingerprint in the database (`kek_fingerprints`) when it loads the key
+  set and `keys activate` records it too. `keys status` warns when a loaded KEK's fingerprint differs
+  from the recorded one for its ID, which means a restored or wrong KEK Secret. Rows of retired KEKs
+  stay: IDs are never reused, and the history is what a later `keys forget` needs.
+- `keys status` also says whether the active KEK's wrapping key answers, and warns when the active KEK
+  is a local one on an install that has a KMS configured. koinon-api and the reconciler export
+  `koinon_kek_active_reachable{backend}` (1 or 0), probed on every reload. A local install always
+  reads 1 and logs nothing. If the KMS is down when a pod starts, the pod does not start (it cannot
+  unwrap the KEKs: fail closed), so the gauge never shows 0 then; alert on the pod not being ready.
 
 A local install has none of this: no key-admin Job, and koinon-api creates and adds KEKs exactly as
 before.

@@ -532,7 +532,8 @@ var _ = Describe("koinon-api keys", func() {
 			kms := &secretstoretest.FakeKMS{}
 			admin, err := secretstore.NewKeyAdminWrappers(kms)
 			Expect(err).NotTo(HaveOccurred())
-			ks.Wrappers, tool.Store, tool.Wrappers = admin, ks, admin
+			ks.Wrappers = admin
+			tool.Store, tool.Wrappers = ks, admin
 			out.Reset()
 			Expect(tool.Status(ctx)).To(Succeed())
 			Expect(out.String()).To(ContainSubstring("WARNING: the active KEK kek-20260101-aaaa is a local key but a KMS (fakekms)"))
@@ -550,6 +551,7 @@ var _ = Describe("koinon-api keys", func() {
 			kms.Down.Store(true)
 			out.Reset()
 			Expect(tool.Status(ctx)).To(MatchError(secretstore.ErrUnreachable), "the load cannot unwrap the KEKs")
+			Expect(out.String()).To(ContainSubstring("is unreachable"), "status says so before it fails")
 		})
 	})
 

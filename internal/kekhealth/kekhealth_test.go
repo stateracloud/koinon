@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -103,11 +104,11 @@ var _ = Describe("the KEK monitor", func() {
 		Expect(gauge(secretstoretest.FakeKMSBackend)).To(Equal(0.0))
 		Expect(logs.String()).To(ContainSubstring("unreachable"))
 
-		By("a load that already failed as unreachable is 0 without a second probe")
+		By("a failed load of another KEK does not blame the active one")
 		kms.Down.Store(false)
 		l.Err = secretstore.ErrUnreachable
 		mon.Observe(ctx, l)
-		Expect(gauge(secretstoretest.FakeKMSBackend)).To(Equal(0.0))
+		Expect(gauge(secretstoretest.FakeKMSBackend)).To(Equal(1.0))
 
 		By("a local active KEK replaces the series")
 		mon.Observe(ctx, loadedLocal(key(1)))
@@ -151,9 +152,26 @@ var _ = Describe("the KEK monitor", func() {
 
 	It("registers its gauge once", func() {
 		reg := prometheus.NewRegistry()
-		kekhealth.NewMetrics(reg)
+		rm := kekhealth.NewMetrics(reg)
+		Expect(func() { kekhealth.NewMetrics(reg) }).To(Panic(), "a second registration collides")
+		rm.ActiveReachable.WithLabelValues("local").Set(1)
 		mfs, err := reg.Gather()
 		Expect(err).NotTo(HaveOccurred())
-		Expect(mfs).To(BeEmpty(), "a vec without series has no samples")
+		Expect(mfs).To(HaveLen(1))
+		Expect(mfs[0].GetName()).To(Equal("koinon_kek_active_reachable"))
+	})
+
+	It("warns about an unreachable key once, not on every retry", func(ctx SpecContext) {
+		kms := &secretstoretest.FakeKMS{}
+		ws, err := secretstore.NewWrappers(kms)
+		Expect(err).NotTo(HaveOccurred())
+		mon := &kekhealth.Monitor{Wrappers: ws, Metrics: m, Log: log}
+		wrapped := secretstore.StoredKEK{Backend: secretstoretest.FakeKMSBackend, KeyID: kms.KeyID(), Wrapped: []byte("x")}
+		l := secretstore.Loaded{Stored: map[string]secretstore.StoredKEK{"kek-1": wrapped}, Active: "kek-1"}
+		kms.Down.Store(true)
+		for range 3 {
+			mon.Observe(ctx, l)
+		}
+		Expect(strings.Count(logs.String(), "the key-wrapping key of the active")).To(Equal(1))
 	})
 })

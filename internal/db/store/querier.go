@@ -811,8 +811,9 @@ type Querier interface {
 	// observed) keeps the recorded one.
 	RecordAgentSandbox(ctx context.Context, arg RecordAgentSandboxParams) (AgentSandbox, error)
 	RecordConnectionTest(ctx context.Context, arg RecordConnectionTestParams) (Connection, error)
-	// Inserts the KEK or, when it is known, keeps its fingerprint and first_seen and updates what wraps
-	// it and (when given) its activation time. Returns the row as stored, so the caller sees a
+	// Inserts the KEK or, when it is known, keeps its fingerprint and first_seen. What wraps it and its
+	// activation time are updated only when the fingerprint matches: a different key under a known ID
+	// (a wrong backup) must not rewrite the record. Returns the row as stored, so the caller sees a
 	// fingerprint that differs from the one it holds.
 	RecordKEKFingerprint(ctx context.Context, arg RecordKEKFingerprintParams) (KekFingerprint, error)
 	// One probe's result. Three failures in a row make a server unhealthy; one success makes it

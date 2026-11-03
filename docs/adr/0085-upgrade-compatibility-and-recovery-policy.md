@@ -322,8 +322,14 @@ Implementation-level unknowns, to settle in the sub-issues:
     same however it is wrapped: a KEK's fingerprint does not depend on its wrapping, so an export
     matches the KEKs it holds whichever backend wraps them; a wrapping key's identity is already in the stored form (backend and key). `keys status`
     and `keys export` print it.
-  - Still owed (415b): the fingerprints recorded in the database (on load and on activate) and the
-    unreachable-key metric (`Wrappers.Probe` in the reload loops, plus a line in `keys status`).
+  - Built (415b, #591): koinon-api records each KEK's fingerprint in `kek_fingerprints` on load, on
+    reload and on `keys activate`; `keys status` warns when a loaded KEK differs from the recorded
+    one, says whether the active KEK's wrapping key answers, and warns about a local active KEK only
+    when a KMS is configured. koinon-api and the reconciler probe the active KEK's wrapper on every
+    reload and export `koinon_kek_active_reachable{backend}`; the reconciler records nothing. Rows of
+    retired KEKs are kept: IDs are never reused and `keys forget` needs the history. Binding an
+    install ID into the KEK AAD is deferred to #416. If the KMS is down at start the pod exits (fail
+    closed) and the gauge never shows 0.
     agentd holds no keyring (it asks koinon-api for repository passwords), so it needs no adapter.
   - N-1 and rollback: once a KMS-wrapped KEK is in the Secret, a binary from before 415a cannot parse
     the key set (it wants base64): koinon-api will not start and the reconciler keeps waiting for
