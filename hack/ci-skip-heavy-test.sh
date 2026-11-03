@@ -44,7 +44,7 @@ export PATH="$tmp/bin:$PATH" FAKE_DIR="$tmp"
 cat >"$tmp/required.txt" <<'EOF'
 # comment
 aggregator go
-proto
+quick checks
 generated code   # trailing comment
 external dco
 advisory flavors
@@ -122,31 +122,31 @@ g checkout -q main; g merge -q --no-ff feat3 -m "Merge feat3"
 merge_flav=$(g rev-parse HEAD)
 export CI_CHANGES_FLAVORS_DIRS=test/flavors # the directories the flavors suite builds (no go list in the scratch repo)
 
-all_green=(go:success proto:success "generated code:skipped" dco:failure)
+all_green=(go:success "quick checks:success" "generated code:skipped" dco:failure)
 checks "${all_green[@]}"
 cd "$repo"
 push() { echo "EVENT_NAME=push REF=refs/heads/main SHA=$1"; }
 # shellcheck disable=SC2046 # push prints separate KEY=VALUE words
 expect "merge tree equals a green head: skip" true "equals the tree" $(push "$merge_same")
 # dco is external and failing above: it must not matter. Now break a required one.
-checks go:success proto:failure "generated code:success"
+checks go:success "quick checks:failure" "generated code:success"
 # shellcheck disable=SC2046
-expect "a red required check runs everything" false "proto" $(push "$merge_same")
+expect "a red required check runs everything" false "quick checks" $(push "$merge_same")
 checks go:success "generated code:success"
 # shellcheck disable=SC2046
 expect "a missing required check runs everything" false "no run" $(push "$merge_same")
-checks go:success proto:running "generated code:success"
+checks go:success "quick checks:running" "generated code:success"
 # shellcheck disable=SC2046
 expect "a running required check runs everything" false "not completed" $(push "$merge_same")
-checks go:success proto:other-app "generated code:success"
+checks go:success "quick checks:other"-app "generated code:success"
 # shellcheck disable=SC2046
 expect "a check from another app does not count" false "no run" $(push "$merge_same")
-checks go:success proto:failure:1 proto:success:2 "generated code:success"
+checks go:success "quick checks:failure:1" "quick checks:success:2" "generated code:success"
 # shellcheck disable=SC2046
 expect "a newer green run replaces an older red one" true "equals the tree" $(push "$merge_same")
-checks go:success proto:success:1 proto:cancelled:2 "generated code:success"
+checks go:success "quick checks:success:1" "quick checks:cancelled:2" "generated code:success"
 # shellcheck disable=SC2046
-expect "a newer red run replaces an older green one" false "proto" $(push "$merge_same")
+expect "a newer red run replaces an older green one" false "quick checks" $(push "$merge_same")
 checks "${all_green[@]}"
 # shellcheck disable=SC2046
 expect "a head that does not contain the first parent runs everything" false "not an ancestor" $(push "$merge_noanc")
@@ -166,16 +166,16 @@ checks "${all_green[@]}" flavors:success
 # shellcheck disable=SC2046
 expect "flavors green and its files changed: skip" true "equals the tree" $(push "$merge_flav")
 # a draft run leaves a failed go and web (by design); the ready run is still going, or was cancelled
-checks proto:success "generated code:success" go:success:1 go:failure:2 flavors:success
+checks "quick checks:success" "generated code:success" go:success:1 go:failure:2 flavors:success
 # shellcheck disable=SC2046
 expect "the newest go is a draft run's failure: run everything" false "'go'" $(push "$merge_same")
-checks proto:success "generated code:success" go:failure:1 go:running:2 flavors:success
+checks "quick checks:success" "generated code:success" go:failure:1 go:running:2 flavors:success
 # shellcheck disable=SC2046
 expect "ready run still going after a draft failure: run everything" false "not completed" $(push "$merge_same")
-checks proto:success "generated code:success" go:failure:1 go:cancelled:2 flavors:success
+checks "quick checks:success" "generated code:success" go:failure:1 go:cancelled:2 flavors:success
 # shellcheck disable=SC2046
 expect "ready run cancelled: run everything" false "'go'" $(push "$merge_same")
-checks proto:success "generated code:success" go:success:1 go:failure:2 go:success:3 flavors:success
+checks "quick checks:success" "generated code:success" go:success:1 go:failure:2 go:success:3 flavors:success
 # shellcheck disable=SC2046
 expect "ready, draft, push, ready again: the newest green go counts" true "equals the tree" $(push "$merge_same")
 checks "${all_green[@]}"
@@ -208,6 +208,42 @@ check_apply "apply with skip unset changes nothing" "$want_keep" "" "$input"
 check_apply "flavors_publish keeps a false flavors" $'go=false\nflavors=false\nflavors_publish=false' true $'go=true\nflavors=false'
 # an unknown name passes through untouched
 check_apply "unknown outputs pass through" $'extra=true\nflavors_publish=true' true $'extra=true'
+
+# --- ci.yml wiring (#594) --------------------------------------------------------------------------
+# `scripts` and `lint-shell` are skipped on a push to main whose heavy jobs are switched off (#595):
+# their job-level `if:` carries the condition. `quick-checks` never waits for `changes`, never skips,
+# and every step after its first check (buf lint) runs even when an earlier one failed.
+ci_yml=$(cd "$(dirname "$script")/.." && pwd)/.github/workflows/ci.yml
+job_block() { awk -v j="$1" '$0 == "  " j ":" { on = 1; next } on && /^  [a-z0-9-]+:/ { exit } on' "$ci_yml"; }
+for j in scripts lint-shell; do
+	b=$(job_block "$j")
+	cond=$(grep -E '^    if:' <<<"$b" || true)
+	if grep -q 'needs: changes' <<<"$b" && grep -q "github.event_name == 'push' && needs.changes.outputs.skip == 'true'" <<<"$cond" && grep -q '!cancelled()' <<<"$cond"; then
+		echo "ok: ci.yml skips $j on a push to main with skip=true"
+	else
+		echo "FAIL: the if: of ci.yml job $j lacks the push/skip/!cancelled() condition (or needs: changes)"
+		fails=1
+	fi
+done
+b=$(job_block quick-checks)
+if [[ -n $b ]] && ! grep -qE '^    (needs|if):|outputs\.skip' <<<"$b"; then
+	echo "ok: ci.yml quick-checks always runs, without waiting for changes"
+else
+	echo "FAIL: ci.yml quick-checks is missing, has needs:/if: or depends on the skip decision"
+	fails=1
+fi
+# Steps after "proto (buf lint)": each step is a '      - ' item; its text must hold !cancelled().
+bad=$(awk '/^      - /{ if (n && after && !ok) print name; n = 1; ok = 0; name = $0 }
+	/!cancelled\(\)/{ ok = 1 }
+	/name: proto \(buf lint\)/{ seen = 1; next }
+	/^      - /{ after = seen }
+	END { if (n && after && !ok) print name }' <<<"$b" || true)
+if [[ -z $bad ]] && grep -q 'name: proto (buf lint)' <<<"$b"; then
+	echo "ok: every quick-checks step after buf lint has !cancelled()"
+else
+	echo "FAIL: quick-checks steps without !cancelled(): ${bad:-(buf lint step missing)}"
+	fails=1
+fi
 
 ((fails == 0)) || exit 1
 echo "all ci-skip-heavy tests passed"

@@ -64,11 +64,13 @@ Instructions for coding agents working on Koinon.
 - What `ci` runs when (Actions minutes cost money; `hack/ci-skip-heavy.sh` decides, its header and
   `hack/ci-skip-heavy-test.sh` are the rule). The heavy jobs are the ones the `changes` job gates:
   `go` (go-tidy, go-lint, go-vet, go-test, go-race), `web` (web-lint, web-test, web-e2e),
-  `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. The fast jobs
-  (`changes`, `proto`, `migrations`, `adr-lint`, `claim-tests`, `lint-shell`, `scripts`,
-  `dependency age`) and the other workflows (`dco`, `gitleaks`, `claim`, `e2e result`) always run.
+  `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. `changes` and
+  `quick checks` (proto, migrations, adr-lint, claim-tests and the dependency age steps in one job,
+  #594: every job bills a whole minute) and the other workflows (`dco`, `gitleaks`, `claim`,
+  `e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
+  are skipped only on a push to main whose heavy jobs are skipped.
   A skipped heavy job reports success, so every required check still reports.
-  - Draft pull request (#593): only the fast jobs run, and `go` and `web` are RED on purpose
+  - Draft pull request (#593): only `changes`, `quick checks`, `lint-shell` and `scripts` run, and `go` and `web` are RED on purpose
     ("draft: not tested, mark ready for review"): a green draft `go` would otherwise stay the newest
     run on the head while the ready run is still going. A draft cannot merge, so get WIP feedback
     from `hack/preflight.sh`, not CI. Marking it ready fires
@@ -81,7 +83,7 @@ Instructions for coding agents working on Koinon.
     skipped) on that head, newest run per check, made by GitHub Actions. Then the heavy jobs are
     skipped: the merge brought nothing the head was not tested with. The head must also contain the
     first parent, and `flavors` (advisory, but `flavor-publish` ships what it tested) must have passed
-    on the head unless nothing it builds from changed. On such a push `go` and `web` report skipped. Any doubt (a merge of an
+    on the head unless nothing it builds from changed. On such a push `go`, `web`, `scripts` and `lint-shell` report skipped (#594). Any doubt (a merge of an
     out-of-date branch, an admin or direct push, a squash, a missing or red check, an API error) runs
     everything. `flavor-publish` and the kind e2e (batched on main, nightly) are unaffected. So what
     no single commit explains is caught by the nightly and batched e2e, not by `ci` on main.
