@@ -52,7 +52,7 @@ type Declaration struct {
 
 // DefaultDeclaration is what a server that nobody classified declares: kind other and both
 // legs. The cautious reading, so a server is not exempt from the guard because nobody described it.
-// It is also what migration 00048 gave the servers that existed.
+// It is also what migration 00050 gave the servers that existed.
 func DefaultDeclaration() Declaration {
 	return Declaration{Kind: KindOther, Legs: slices.Clone(Legs)}
 }

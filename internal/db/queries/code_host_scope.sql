@@ -5,9 +5,12 @@
 -- (TestQueriesAreOrgScoped).
 
 -- name: ListOrgCodeHostRepos :many
-SELECT * FROM org_code_host_repos
-WHERE org_id = @org_id
-ORDER BY owner, repo, connection_id;
+-- A connection marked removed (its declaring Secret is gone) contributes nothing: its readings may
+-- still be fresh, but the credential behind them is gone, so a repository is not internal through it.
+SELECT r.* FROM org_code_host_repos r
+JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
+WHERE r.org_id = @org_id AND c.removed_at IS NULL
+ORDER BY r.owner, r.repo, r.connection_id;
 
 -- name: DeleteCodeHostConnectionRepos :execrows
 DELETE FROM org_code_host_repos
