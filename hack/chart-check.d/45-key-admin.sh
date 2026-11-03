@@ -19,8 +19,12 @@ has "key-admin Job runs key-admin" '^            - key-admin$' "${ka[@]}" "${kms
 has "key-admin Job uses its own ServiceAccount" '^      serviceAccountName: koinon-key-admin$' "${ka[@]}" "${kms[@]}"
 has "key-admin Job signs in as its role" 'value: "koinon-key-admin"' "${ka[@]}" "${kms[@]}"
 has "key-admin Job creates the KEK Secret" '^            - --kek-create$' "${ka[@]}" "${kms[@]}"
-has "key-admin Job reads the database (the re-create guard)" 'name: DATABASE_URL' "${ka[@]}" "${kms[@]}"
+has "key-admin Job reads the database (the install ID, the re-create guard)" 'name: DATABASE_URL' "${ka[@]}" "${kms[@]}"
 lacks "key-admin Job adds no KEK unless asked" 'add-key' "${ka[@]}" "${kms[@]}"
+# Binding the KEKs wrapped before #615 is opt-in: a binary older than #615 cannot read a bound KEK.
+lacks "key-admin Job binds no old KEK unless asked (#615)" 'rewrap-unbound' "${ka[@]}" "${kms[@]}"
+has "key-admin Job binds the old KEKs when asked (#615)" '^            - --rewrap-unbound$' "${ka[@]}" "${kms[@]}" \
+	--set secrets.kek.kms.keyAdmin.rewrapUnbound=true
 has "key-admin Job adds the asked-for KEK" '"--add-key=kek-20261103-aaaa"' "${ka[@]}" "${kms[@]}" \
 	--set secrets.kek.kms.keyAdmin.addKey=kek-20261103-aaaa
 ka_out=$(render "${ka[@]}" "${kms[@]}")
@@ -39,6 +43,8 @@ n1=$(job_name) n2=$(job_name) n3=$(job_name --set secrets.kek.kms.keyAdmin.addKe
 [[ $n1 != "$n3" ]] || fail "key-admin Job name changes with addKey"
 n4=$(job_name --set image.tag=9.9.9)
 [[ $n1 != "$n4" ]] || fail "key-admin Job name changes with the image"
+n5=$(job_name --set secrets.kek.kms.keyAdmin.rewrapUnbound=true)
+[[ $n1 != "$n5" ]] || fail "key-admin Job name changes with rewrapUnbound"
 # A long release name cuts the prefix, never the hash: otherwise a changed template would keep the
 # name and the upgrade would fail on the Job's immutable spec.
 long=(--set fullnameOverride=koinon-a-release-name-long-enough-to-fill-sixty-three-chars)
@@ -63,11 +69,12 @@ if grep -Fq 'value: "koinon-key-admin"' <<<"$deploy"; then fail "no Deployment s
 [[ $(grep -c 'name: KOINON_KEK_BACKEND' <<<"$deploy") == 2 ]] || fail "exactly koinon-api and the reconciler get the KMS settings (agentd holds no keyring)"
 env_is KOINON_OPENBAO_ROLE '"bao-api"' "${kms[@]}" --set secrets.kek.kms.openbao.roles.api=bao-api
 
-# The operator's own KEK Secret is never created: no --kek-create, no create right, no database.
+# The operator's own KEK Secret is never created: no --kek-create, no create right. The Job still
+# reads the database: every KEK it adds is bound to the install ID there (#615).
 ka_out=$(render "${ka[@]}" "${kms[@]}" --set secrets.kek.existingSecret=my-kek)
 if grep -q -- '--kek-create' <<<"$ka_out"; then fail "no --kek-create with secrets.kek.existingSecret"; fi
 if grep -Fq -- 'verbs: [create]' <<<"$ka_out"; then fail "no create right with secrets.kek.existingSecret"; fi
-if grep -q 'DATABASE_URL' <<<"$ka_out"; then fail "no database with secrets.kek.existingSecret"; fi
+grep -q 'name: DATABASE_URL' <<<"$ka_out" || fail "the Job reads the install ID with secrets.kek.existingSecret too (#615)"
 grep -Fq -- '"--kek-secret=my-kek"' <<<"$ka_out" || fail "the Job adds to secrets.kek.existingSecret"
 
 # The OpenBao CA, when named, is mounted wherever the KMS is called.

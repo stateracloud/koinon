@@ -357,6 +357,44 @@ Implementation-level unknowns, to settle in the sub-issues:
     retires every KMS-wrapped KEK, so the Secret holds local KEKs only. 415a itself cannot configure
     a KMS, so no install reaches that state before an adapter ships; a local install's Secret is
     byte-for-byte what N-1 reads.
+  - Amended (#615, 2026-11-03): the install ID is bound into the KEK AAD. The install ID is a
+    random UUID the first migration writes into `install_identity` (one row; triggers refuse
+    update, delete and truncate as a guard against mistakes; the table owner, `pg_restore
+    --disable-triggers` and `session_replication_role = replica` bypass them, which can only close
+    bound KEKs, never open one). A database clone is the same install, so a staging copy that must
+    not open production KEKs needs its own KMS key; a data-only restore onto a migrated database
+    stops on the singleton key. `koinon_kek_unbound` (no labels) counts the KMS KEKs not bound yet,
+    set on every load, with a warning while above 0. The database is the source because it is born with the data and
+    travels with it: an upgrade, a database restore, a KEK Secret restore, a reinstall that keeps
+    the database and a namespace or cluster move all keep it, restore order does not matter, and an
+    empty database is a new install whose left-over KEK Secret does not open. A chart value (lost on
+    a reinstall, not born with the data), a generated Secret (restored with the KEK Secret, which
+    defeats the binding) and a namespace or cluster UID (changes on a move) were rejected. The
+    version lives in the stored KEK, not in the KMS frame (which is only readable after the KMS
+    call, while the AAD must be chosen before it): `"fmt":1` keeps the #416 AAD and opens as
+    before; `"fmt":2` records the install ID and uses a separate AAD with the process's own install
+    ID, never the recorded one (that only names both IDs in the error). Relabelling a KEK between
+    the formats, or opening it in another install, is `ErrOpen`, never `ErrUnreachable`; a process
+    without the install ID refuses a bound KEK with `ErrNoInstallID`. Every new KMS wrap is bound
+    (the key-admin Job now always reads the database and waits for the first migration). Binding
+    the KEKs wrapped before is opt-in, in the key-admin Job only (`keyAdmin.rewrapUnbound`,
+    idempotent, primary wrapping key only), because N-1: a binary before #615 refuses `"fmt":2`
+    ("unsupported format 2") and fails closed, so rolling back below #615 needs the 415a steps
+    above. Local KEKs are not wrapped and stay unbound. `keys status` prints the install ID and
+    marks each KMS KEK bound or unbound.
+  - Amended (#615, 2026-11-03, Andre): a strict switch after binding. Re-binding keeps the KEK
+    material, so an old `"fmt":1` backup of the KEK Secret would open forever. A "bound only" marker,
+    one row in its own table `kek_bound_only` (expand-only migration, triggers refuse UPDATE, DELETE
+    and TRUNCATE; they guard against mistakes, not against the table owner), is set at first install
+    (before the first KEK Secret is created) and by the key-admin Job's `rewrapUnbound` once no KMS
+    KEK is unbound, never while one is. Once set, every process refuses a KMS `"fmt":1` KEK
+    (`ErrBoundOnly`, an `ErrOpen`), naming when and how the marker was set; an unreadable marker
+    refuses too. Koinon only sets it. A process reads it on every key-set load while it is unset
+    (start and the reload about once a minute) and caches it once set, so one that loaded before the
+    switch refuses from its next load. Setting it ends rollback below #615 for that key set, and the
+    Job says so. The marker protects only databases that hold it; rotating the KEKs is what kills an
+    old backup everywhere, so the docs tell operators to rotate as well if one may have leaked.
+    `keys status` prints the marker; `koinon_kek_unbound` stays.
 - Resolved (detection of the decision 6 rule): the lint reads a marker file, `hack/migrate-patch-line`
   (`none` or the shipped minor line, for example `v0.1`), at the merge base. Patch tags are cut from
   `main` (the release gate requires an ancestor of `origin/main`), so the marker, not a branch name,

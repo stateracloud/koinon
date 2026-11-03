@@ -103,8 +103,13 @@ type Binding struct {
 // aad encodes the binding with a purpose tag, length-prefixed so fields cannot
 // run into each other.
 func (b Binding) aad(purpose, kekID string) []byte {
+	return lengthPrefixed("koinon/secretstore/v1", purpose, kekID, b.OrgID, b.Table, b.RowID, b.Column)
+}
+
+// lengthPrefixed encodes fields, each with its length first, so fields cannot run into each other.
+func lengthPrefixed(fields ...string) []byte {
 	var out []byte
-	for _, f := range []string{"koinon/secretstore/v1", purpose, kekID, b.OrgID, b.Table, b.RowID, b.Column} {
+	for _, f := range fields {
 		out = binary.BigEndian.AppendUint32(out, uint32(len(f))) //nolint:gosec // short strings
 		out = append(out, f...)
 	}

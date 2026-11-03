@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/mcpservers"
@@ -395,10 +396,14 @@ var _ = Describe("koinon-api keys", func() {
 		BeforeEach(func(ctx SpecContext) {
 			kms = &secretstoretest.FakeKMS{}
 			var err error
-			admin, err = secretstore.NewKeyAdminWrappers(kms)
+			// Both read the bound-only marker and the install ID from the database, as koinon-api and
+			// the key-admin Job do.
+			admin, err = secretstore.NewKeyAdminWrappers(installid.BoundOnlySource(pool), kms)
 			Expect(err).NotTo(HaveOccurred())
-			service, err = secretstore.NewWrappers(kms)
+			service, err = secretstore.NewWrappers(installid.BoundOnlySource(pool), kms)
 			Expect(err).NotTo(HaveOccurred())
+			admin = admin.WithInstallID(installid.Source(pool))
+			service = service.WithInstallID(installid.Source(pool))
 			use(admin)
 		})
 
@@ -407,7 +412,10 @@ var _ = Describe("koinon-api keys", func() {
 			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
 			raw, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(string(raw.Data["kek-20261023-bbbb"])).To(HavePrefix(`{"fmt":1,"backend":"fakekms","key":"koinon-test"`))
+			Expect(string(raw.Data["kek-20261023-bbbb"])).To(HavePrefix(`{"fmt":2,"backend":"fakekms","key":"koinon-test"`))
+			install, err := installid.Read(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(raw.Data["kek-20261023-bbbb"])).To(HaveSuffix(`"install":"`+install+`"}`), "bound to this database's install ID")
 			Expect(raw.Data["kek-20260101-aaaa"]).NotTo(HavePrefix("{"), "the local KEK is not rewrapped")
 
 			By("koinon-api, decrypt-only, can activate and rewrap: no KEK is wrapped again")
@@ -420,7 +428,86 @@ var _ = Describe("koinon-api keys", func() {
 
 			out.Reset()
 			Expect(tool.Status(ctx)).To(Succeed())
-			Expect(out.String()).To(And(ContainSubstring("WRAPPED BY"), ContainSubstring("fakekms:koinon-test"), ContainSubstring("local")))
+			Expect(out.String()).To(And(ContainSubstring("WRAPPED BY"), ContainSubstring("fakekms:koinon-test, bound"), ContainSubstring("local")))
+			Expect(out.String()).To(ContainSubstring("The install ID is " + install))
+			Expect(out.String()).NotTo(ContainSubstring("not bound to the install"))
+		})
+
+		It("does not open a KEK Secret of another install, and says so (#615)", func(ctx SpecContext) {
+			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			install, err := installid.Read(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+
+			// The same Secret next to another install's database.
+			use(service.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallB)))
+			_, err = ks.Load(ctx)
+			Expect(err).To(MatchError(secretstore.ErrOpen))
+			Expect(err).NotTo(MatchError(secretstore.ErrUnreachable))
+			Expect(err.Error()).To(ContainSubstring("wrapped for install " + install + " and this is install " + secretstoretest.InstallB))
+			out.Reset()
+			Expect(tool.Export(ctx)).To(MatchError(secretstore.ErrOpen))
+			Expect(out.String()).To(BeEmpty())
+		})
+
+		It("names a KEK wrapped before the binding as unbound, and still opens it (#615)", func(ctx SpecContext) {
+			legacy, err := kms.Wrap(ctx, newKey(), secretstoretest.LegacyKEKAAD("kek-20261001-old1"))
+			Expect(err).NotTo(HaveOccurred())
+			v, err := secretstore.StoredKEK{Backend: kms.Backend(), KeyID: kms.KeyID(), Wrapped: legacy}.Encode()
+			Expect(err).NotTo(HaveOccurred())
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			sec.Data["kek-20261001-old1"] = v
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			use(service)
+			Expect(tool.Activate(ctx, "kek-20261001-old1")).To(Succeed())
+			out.Reset()
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).To(And(
+				ContainSubstring("fakekms:koinon-test, unbound"),
+				ContainSubstring("KEK kek-20261001-old1 is not bound to the install"),
+				ContainSubstring("Bound only: not set."),
+			))
+		})
+
+		It("shows the bound-only marker, and once it is set refuses a KEK stored unbound (#615)", func(ctx SpecContext) {
+			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			// Its own database: the suite's pool must stay without the marker for the other specs.
+			marked := pgtest.Start(ctx)
+			_, err := installid.SetBoundOnly(ctx, marked, secretstore.BoundOnlyRewrap)
+			Expect(err).NotTo(HaveOccurred())
+			markedService, err := secretstore.NewWrappers(installid.BoundOnlySource(marked), kms)
+			Expect(err).NotTo(HaveOccurred())
+			use(markedService.WithInstallID(installid.Source(pool)))
+			tool.Pool = marked
+			DeferCleanup(func() { tool.Pool = pool })
+
+			out.Reset()
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).To(MatchRegexp(`Bound only: set at \d{4}-\d\d-\d\dT[0-9:]+Z, when the key-admin Job \(--rewrap-unbound\) bound the last unbound KEK`))
+
+			By("unbound KEKs, from an old backup, no longer open, and status names every one of them")
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			for _, id := range []string{"kek-20261001-old1", "kek-20261001-old2"} {
+				legacy, err := kms.Wrap(ctx, newKey(), secretstoretest.LegacyKEKAAD(id))
+				Expect(err).NotTo(HaveOccurred())
+				v, err := secretstore.StoredKEK{Backend: kms.Backend(), KeyID: kms.KeyID(), Wrapped: legacy}.Encode()
+				Expect(err).NotTo(HaveOccurred())
+				sec.Data[id] = v
+			}
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			out.Reset()
+			Expect(tool.Status(ctx)).To(MatchError(secretstore.ErrBoundOnly))
+			Expect(out.String()).To(And(
+				ContainSubstring("Bound only: set at"),
+				ContainSubstring("REFUSED: KEK kek-20261001-old1 is stored unbound"),
+				ContainSubstring("REFUSED: KEK kek-20261001-old2 is stored unbound"),
+				ContainSubstring("rerun the key-admin Job"),
+				Not(ContainSubstring("REFUSED: KEK kek-20261023-bbbb")),
+			))
 		})
 
 		It("koinon-api never wraps a new KEK with the KMS: keys add and the first start point at the key-admin Job", func(ctx SpecContext) {
@@ -530,8 +617,9 @@ var _ = Describe("koinon-api keys", func() {
 			Expect(out.String()).NotTo(ContainSubstring("WARNING"), "a local-only install is never warned")
 
 			kms := &secretstoretest.FakeKMS{}
-			admin, err := secretstore.NewKeyAdminWrappers(kms)
+			admin, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, kms)
 			Expect(err).NotTo(HaveOccurred())
+			admin = admin.WithInstallID(installid.Source(pool))
 			ks.Wrappers = admin
 			tool.Store, tool.Wrappers = ks, admin
 			out.Reset()
