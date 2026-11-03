@@ -145,6 +145,14 @@ func (DirStore) Save(context.Context, KeySet) error {
 // It also refuses to create the Secret when the database already holds envelopes (hasValues): a new
 // KEK could not open any of them, so a deleted Secret must be restored from backup, not replaced.
 func (k KubeStore) Ensure(ctx context.Context, now time.Time, hasValues func(context.Context) (bool, error)) (bool, error) {
+	return k.EnsureWith(ctx, now, hasValues, nil)
+}
+
+// EnsureWith is [KubeStore.Ensure] that calls beforeCreate, when it is not nil, once it has decided
+// to create the Secret and before it does: the key-admin Job and koinon-api set the install's
+// bound-only marker there (#615), so the first KEK of an install never exists without it. When
+// beforeCreate fails, nothing is created and the next run decides again.
+func (k KubeStore) EnsureWith(ctx context.Context, now time.Time, hasValues func(context.Context) (bool, error), beforeCreate func(context.Context) error) (bool, error) {
 	client, namespace, name := k.Client, k.Namespace, k.Name
 	secrets := client.CoreV1().Secrets(namespace)
 	if _, err := secrets.Get(ctx, name, metav1.GetOptions{}); err == nil {
@@ -159,6 +167,11 @@ func (k KubeStore) Ensure(ctx context.Context, now time.Time, hasValues func(con
 		}
 		if used {
 			return false, fmt.Errorf("%w: the KEK Secret %s/%s is missing but the database holds encrypted values that only its keys can open; restore the Secret from your backup (docs/ops/secret-keys.md). Nothing was created", ErrKEKMissing, namespace, name)
+		}
+	}
+	if beforeCreate != nil {
+		if err := beforeCreate(ctx); err != nil {
+			return false, fmt.Errorf("before creating the KEK Secret %s/%s: %w", namespace, name, err)
 		}
 	}
 	id, err := NewID(now)
@@ -184,6 +197,10 @@ func (k KubeStore) Ensure(ctx context.Context, now time.Time, hasValues func(con
 		Data: data,
 	}, metav1.CreateOptions{FieldManager: "koinon-api"})
 	if apierrors.IsAlreadyExists(err) {
+		// Someone else created it meanwhile: it is used as found. If that is an old Secret with KEKs
+		// stored unbound (GitOps or a backup restore on a new install), the marker set above makes the
+		// next load refuse them with secretstore.ErrBoundOnly, whose message says to delete the Secret
+		// and rerun the key-admin Job (#615).
 		return false, nil
 	}
 	if err != nil {

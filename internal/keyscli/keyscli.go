@@ -38,6 +38,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/project"
@@ -214,8 +215,13 @@ func ageFromID(id string) (time.Time, bool) {
 func (t *Tool) Status(ctx context.Context) error {
 	ks, err := t.Store.Load(ctx)
 	if err != nil {
+		// Say what can be said without the keys: whether the wrapping key answers, and which KEKs
+		// the bound-only policy refused (all of them, not only the first error).
 		if errors.Is(err, secretstore.ErrUnreachable) && ks.Stored != nil {
 			t.reachability(ctx, ks)
+		}
+		if errors.Is(err, secretstore.ErrBoundOnly) && ks.Stored != nil {
+			t.boundOnlyRefused(ctx, ks)
 		}
 		return err
 	}
@@ -240,7 +246,7 @@ func (t *Tool) Status(ctx context.Context) error {
 			state = "MISSING"
 		}
 		if k := ks.Keys[id]; k != nil {
-			wrapped, fp = storedName(ks, id), secretstore.Fingerprint(k)
+			wrapped, fp = storedName(ks, id)+bindingNote(ks, id), secretstore.Fingerprint(k)
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", id, state, usage[id], wrapped, fp)
 	}
@@ -268,7 +274,80 @@ func (t *Tool) Status(ctx context.Context) error {
 		}
 	}
 	t.reachability(ctx, ks)
+	if err := t.installBinding(ctx, ks); err != nil {
+		return err
+	}
 	return t.fingerprintCheck(ctx, ks)
+}
+
+// bindingNote says whether a KMS-wrapped KEK is bound to the install (#615): ", bound" or
+// ", unbound" (wrapped before #615). A local KEK cannot be bound and gets nothing.
+func bindingNote(ks KeySet, id string) string {
+	s, ok := ks.Stored[id]
+	switch {
+	case !ok || s.Backend == secretstore.BackendLocal:
+		return ""
+	case s.Bound():
+		return ", bound"
+	default:
+		return ", unbound"
+	}
+}
+
+// boundOnlyRefused prints the bound-only marker and every KEK of ks it makes this install refuse:
+// the KMS KEKs stored unbound (#615).
+func (t *Tool) boundOnlyRefused(ctx context.Context, ks KeySet) {
+	if t.Pool != nil {
+		if b, err := installid.ReadBoundOnly(ctx, t.Pool); err == nil && b.Set {
+			_, _ = fmt.Fprintf(t.Out, "Bound only: %s.\n", b)
+		}
+	}
+	for _, id := range secretstore.UnboundKEKs(ks.Stored) {
+		_, _ = fmt.Fprintf(t.Out, "REFUSED: KEK %s is stored unbound (wrapped before #615) and this install accepts bound KEKs only. "+
+			"Restore a KEK Secret taken after the KEKs were bound, or, while the database holds no encrypted values, delete the KEK Secret and rerun the key-admin Job.\n", id)
+	}
+}
+
+// installBinding prints the install ID the KMS-wrapped KEKs are bound to, and names the KEKs that
+// are not bound yet. A key set of local KEKs only says nothing: they cannot be bound.
+func (t *Tool) installBinding(ctx context.Context, ks KeySet) error {
+	var unbound []string
+	kms := false
+	for _, id := range slices.Sorted(maps.Keys(ks.Stored)) {
+		s := ks.Stored[id]
+		if s.Backend == secretstore.BackendLocal {
+			continue
+		}
+		kms = true
+		if !s.Bound() {
+			unbound = append(unbound, id)
+		}
+	}
+	if t.Pool != nil {
+		b, err := installid.ReadBoundOnly(ctx, t.Pool)
+		if err != nil {
+			return err
+		}
+		if b.Set {
+			_, _ = fmt.Fprintf(t.Out, "Bound only: %s. KEKs stored unbound (wrapped before #615) never open here.\n", b)
+		} else {
+			_, _ = fmt.Fprintln(t.Out, "Bound only: not set. KEKs stored unbound (wrapped before #615) still open; the key-admin Job sets it once every KEK is bound (secrets.kek.kms.keyAdmin.rewrapUnbound).")
+		}
+	}
+	if !kms {
+		return nil
+	}
+	if t.Pool != nil {
+		install, err := installid.Read(ctx, t.Pool)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(t.Out, "The install ID is %s: KEKs wrapped by a KMS since #615 are bound to it and open only next to this database.\n", install)
+	}
+	for _, id := range unbound {
+		_, _ = fmt.Fprintf(t.Out, "KEK %s is not bound to the install (wrapped before #615): it would also open next to another install's database. Bind it with the key-admin Job (secrets.kek.kms.keyAdmin.rewrapUnbound), or rotate it out.\n", id)
+	}
+	return nil
 }
 
 // reachability prints whether the active KEK's wrapping key answers a probe, and warns about a
