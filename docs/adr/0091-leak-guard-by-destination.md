@@ -188,7 +188,14 @@ the legs, whether a run was found and whether the feed stalled; never an argumen
 - **Both legs and `external-high`**: the call becomes an ADR 0042 approval for that exact call. The
   card shows what would leave: the destination (the address arguments) and the full payload. An
   ask-tier tool that hits this branch gets one approval, not two, and its card carries the leak
-  reason.
+  reason. The approved call runs with the org's executor key (ADR 0057), which the gateway
+  therefore opens to every tool a person can approve a call of: present tools of the auto and ask
+  tiers whose names agents can see, never the never tier. The key is koinon-api's alone and runs
+  only approved calls with their exact arguments, so this gives no agent a tool. What may still run
+  is decided in koinon-api when it executes: the server, its URL, the tool still offered and its
+  content unchanged, not the never tier, the agent's allowance. An approval stays valid when its
+  tool moves between the auto and ask tiers: a person approved that exact call, which is more than
+  either tier asks.
 - **Both legs and `external-low`**: a **byte cap per run** on what goes to untrusted hosts. It counts
   the payload bytes as sent (the URL's path, query and fragment, the search query), with no decoding,
   so it holds whatever the encoding. It counts from the first call after the run holds both legs,
