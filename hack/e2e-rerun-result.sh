@@ -32,6 +32,11 @@ if [[ -z $id ]]; then
 fi
 # A re-run joins the pull request's concurrency group, and that group cancels the run in progress (#675):
 # when the branch has a live e2e-kind run on another commit (a newer head), re-running here would kill it.
+# Without a branch the live-run check cannot be made (`--branch ""` would list every branch): skip the re-run.
+if [[ -z $branch ]]; then
+  echo "e2e-rerun-result: run $id has no head branch, so a live e2e-kind run on a newer head cannot be ruled out; not re-running (use \"Re-run failed jobs\")"
+  exit 0
+fi
 live=$("$GH" run list --workflow e2e-kind.yml --branch "$branch" --event pull_request --limit 20 \
   --json status,headSha 2>/dev/null | jq -r --arg sha "$sha" '.[] | select((.status == "in_progress" or .status == "queued" or .status == "waiting" or .status == "pending") and .headSha != $sha) | .headSha' 2>/dev/null || true)
 if [[ -n $live ]]; then

@@ -524,9 +524,16 @@ reset_state
 export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PR_DRAFT=false
 export FAKE_PR_JSON='[{"number":123,"state":"OPEN","autoMergeRequest":null}]'
 w=$(newwork); cd "$w"
+# shellcheck disable=SC2016 # $FAKE_LOG expands when the hook runs
+printf '#!/bin/sh\necho "git-push" >>"$FAKE_LOG"\n' >.git/hooks/pre-push
+chmod +x .git/hooks/pre-push
 echo rd2 >rd2.txt
 rc=$(run "$tmp/o24b" -m "feat: r" --pr-title t --pr-body "$tmp/body.md" --ready)
 check "already ready PR: exit 0" eq "$rc" 0
+# ship.sh marks ready before the push only a draft; an already ready PR gets its one idempotent
+# `gh pr ready` in step 7, after the push
+check "already ready PR: gh pr ready exactly once" eq "$(grep -c '^gh pr ready' "$FAKE_LOG")" 1
+check "already ready PR: gh pr ready only after the push" bash -c "awk '/^gh pr ready/ { r = NR } /^git-push/ { p = NR } END { exit !(r && p && p < r) }' $FAKE_LOG"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 reset_state
 export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PR_DRAFT=true
@@ -540,6 +547,21 @@ rc=$(run "$tmp/o24c" -m "feat: r" --pr-title t --pr-body "$tmp/body.md" --ready 
 check "lab: exit 0" eq "$rc" 0
 check "lab: ready only after the push and the lab" bash -c "awk '/^git-push/ { p = NR } /e2e-remote/ { l = NR } /^gh pr ready/ { r = NR } END { exit !(p && l && r && p < l && l < r) }' $FAKE_LOG"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
+
+# 25. (#675) the push fails after the PR was marked ready: the PR is put back to draft, and the error says so
+reset_state
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PR_DRAFT=true
+export FAKE_PR_JSON='[{"number":123,"state":"OPEN","autoMergeRequest":null}]'
+w=$(newwork); cd "$w"
+printf '#!/bin/sh\nexit 1\n' >.git/hooks/pre-push
+chmod +x .git/hooks/pre-push
+echo pf >pf.txt
+rc=$(run "$tmp/o25" -m "feat: r" --pr-title t --pr-body "$tmp/body.md" --ready)
+check "push failed after ready: exit 1" eq "$rc" 1
+check "push failed after ready: marked ready first" has '^gh pr ready 123' "$FAKE_LOG"
+check "push failed after ready: PR put back to draft" has '^gh pr ready --undo 123' "$FAKE_LOG"
+check "push failed after ready: the error says so" has 'put back to draft' "$tmp/o25"
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x 2>/dev/null || true
 
 echo "$pass passed, $fail failed"
 exit $((fail > 0))

@@ -224,6 +224,13 @@ else
 	# git prints the server's "remote:" banner on stderr even with -q; keep it out of the step lines.
 	if ! pushlog=$(git push -q -u origin "$branch" 2>&1); then
 		printf '%s\n' "$pushlog" >&2
+		if [[ $ready_done == 1 ]]; then
+			# The PR was marked ready before the push; without the push it would sit ready at the old head.
+			if gh pr ready --undo "$pr_num" >/dev/null 2>&1; then
+				fail "push failed (the pull request was put back to draft with gh pr ready --undo)"
+			fi
+			fail "push failed, and gh pr ready --undo $pr_num failed too: the pull request is still ready at the old head; run it by hand"
+		fi
 		fail "push failed"
 	fi
 	say "pushed $branch"
