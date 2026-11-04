@@ -484,6 +484,34 @@ var _ = Describe("MCP servers", func() {
 		Expect(lk.issued).To(Equal(2))
 	})
 
+	It("asks for a probe of a server that is newly served or whose credential or URL changed, and of none else (#226)", func() {
+		p := newPlanner(0)
+		apply := func(mut func(*gatewayplan.Input)) []string {
+			in := mcpInput()
+			in.Allowances = allow
+			if mut != nil {
+				mut(&in)
+			}
+			var names []string
+			for _, pr := range settle(p.Begin(in), nil, nil, lk).Applied(gatewayplan.ApplyResult{}).Probe {
+				names = append(names, pr.Name)
+			}
+			return names
+		}
+		Expect(apply(nil)).To(ConsistOf("wiki", "sick"), "every server is new to a fresh process")
+		Expect(apply(nil)).To(BeEmpty(), "an unchanged server waits for the ticker")
+		Expect(apply(func(in *gatewayplan.Input) {
+			in.MCP[0].File = "mcp-wiki-f2"
+			in.MCPFiles = map[string][]byte{"mcp-wiki-f2": []byte("koinon_test_not-a-real-token")}
+		})).To(ConsistOf("wiki"), "a changed credential")
+		Expect(apply(func(in *gatewayplan.Input) { in.MCP[0].URL = "https://wiki2.example.test/mcp" })).To(ConsistOf("wiki"), "a changed URL")
+
+		in := mcpInput()
+		in.Allowances = allow
+		out := settle(p.Begin(in), nil, nil, lk).Applied(gatewayplan.ApplyResult{Failed: true})
+		Expect(out.Probe).To(BeEmpty(), "nothing was applied")
+	})
+
 	It("leaves a server out while its new credential settles, and serves it with the previous one", func() {
 		p := newPlanner(time.Minute)
 		old := mcpInput()
