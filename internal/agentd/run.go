@@ -27,6 +27,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runoutcome"
+	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/thinking"
 )
@@ -244,9 +245,12 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 		p: p, q: p.q, run: run, cmdChanged: make(chan struct{}),
 		log: log.With("org", run.OrgID.String(), "run", run.ID.String(), "epoch", run.Epoch),
 	}
+	// The text the agent types reaches watchers live, batched; only the completed items are stored (#344).
+	live := runwatch.NewChunkPublisher(p.db, run.OrgID, run.ID, 0, r.log)
+	defer live.Close()
 	r.own = runoutcome.New(runoutcome.Config{
 		DB: p.db, Queries: p.q, Run: run, Log: r.log, Now: p.cfg.Now,
-		Metrics: outcomeMetrics{p.cfg.Metrics}, Stop: r.stopped,
+		Metrics: outcomeMetrics{p.cfg.Metrics}, Stop: r.stopped, Live: live.Add,
 	})
 	r.log.Info("driving run", "state", run.State, "takeovers", run.Takeovers)
 	r.tr = p.traceStart(ctx, run, r.own.Fenced(), r.log)

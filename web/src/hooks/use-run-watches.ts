@@ -2,7 +2,7 @@
 
 import { useTransport } from '@connectrpc/connect-query'
 import { useEffect, useReducer, useRef } from 'react'
-import type { Run, RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
+import type { LiveChunk, Run, RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { watchRun, type WatchStatus } from '@/lib/run-watch'
 
 export type RunWatch = {
@@ -11,6 +11,11 @@ export type RunWatch = {
   events: RunEvent[]
   status: WatchStatus
   error?: string
+  /**
+   * The text of the message or thought the agent is typing, as far as it has been streamed (#344).
+   * Cleared when the next event arrives: the stored event carries the whole text.
+   */
+  live: readonly LiveChunk[]
 }
 
 type State = Record<string, RunWatch>
@@ -18,9 +23,10 @@ type State = Record<string, RunWatch>
 type Action =
   | { type: 'run'; runId: string; run: Run }
   | { type: 'event'; runId: string; event: RunEvent }
+  | { type: 'live'; runId: string; chunks: readonly LiveChunk[] }
   | { type: 'status'; runId: string; status: WatchStatus; error?: string }
 
-const empty: RunWatch = { events: [], status: 'connecting' }
+const empty: RunWatch = { events: [], status: 'connecting', live: [] }
 
 /**
  * appendEvent adds ev to events unless its seq is already there. watchRun
@@ -34,6 +40,17 @@ export function appendEvent(events: RunEvent[], ev: RunEvent): RunEvent[] {
   return [...events, ev].sort((a, b) => (a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0))
 }
 
+/** joinLive appends chunks to the live text, joining neighbours of one kind. */
+export function joinLive(live: readonly LiveChunk[], more: readonly LiveChunk[]): LiveChunk[] {
+  const out = [...live]
+  for (const c of more) {
+    const last = out.at(-1)
+    if (last?.kind === c.kind) out[out.length - 1] = { ...last, text: last.text + c.text }
+    else out.push(c)
+  }
+  return out
+}
+
 function reducer(state: State, a: Action): State {
   const cur = state[a.runId] ?? empty
   switch (a.type) {
@@ -41,8 +58,10 @@ function reducer(state: State, a: Action): State {
       return { ...state, [a.runId]: { ...cur, run: a.run } }
     case 'event': {
       const events = appendEvent(cur.events, a.event)
-      return events === cur.events ? state : { ...state, [a.runId]: { ...cur, events } }
+      return events === cur.events ? state : { ...state, [a.runId]: { ...cur, events, live: [] } }
     }
+    case 'live':
+      return { ...state, [a.runId]: { ...cur, live: joinLive(cur.live, a.chunks) } }
     case 'status':
       return { ...state, [a.runId]: { ...cur, status: a.status, error: a.error } }
   }
@@ -83,6 +102,7 @@ export function useRunWatches(
             lastSeq.current.set(runId, event.seq)
             dispatch({ type: 'event', runId, event })
           },
+          onLive: (chunks) => dispatch({ type: 'live', runId, chunks }),
           onStatus: (status, err) => {
             if (status === 'ended') ended.current.add(runId)
             dispatch({ type: 'status', runId, status, error: err?.rawMessage })

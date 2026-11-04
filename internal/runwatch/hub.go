@@ -8,7 +8,8 @@
 // Hub fans each notification out in process to the streams watching that
 // run. A wake-up carries no data: streams re-read run_events after the last
 // seq they sent, so lost or coalesced notifications never lose or duplicate
-// events. To bound the delay after a missed notification (for example while
+// events. (Live text is the exception: a notification may carry a batch of chunks
+// of the text the agent is typing, chunks.go.) To bound the delay after a missed notification (for example while
 // the listener reconnects), the Hub wakes every stream when it (re)connects,
 // and streams also poll on their own at a slow interval.
 package runwatch
@@ -16,7 +17,6 @@ package runwatch
 import (
 	"context"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -54,12 +54,16 @@ func New(cfg *pgx.ConnConfig, log *slog.Logger) *Hub {
 }
 
 // Subscription receives a wake-up on C whenever its run may have changed.
-// Wake-ups coalesce: C has room for one.
+// Wake-ups coalesce: C has room for one. Chunks carries the run's live text
+// (chunks.go); a subscriber that reads too slowly loses batches, never blocks
+// the Hub.
 type Subscription struct {
-	C   <-chan struct{}
-	c   chan struct{}
-	hub *Hub
-	key string
+	C      <-chan struct{}
+	Chunks <-chan []Chunk
+	c      chan struct{}
+	chunks chan []Chunk
+	hub    *Hub
+	key    string
 }
 
 // Subscribe starts waking the returned subscription for the run. Subscribe
@@ -67,7 +71,8 @@ type Subscription struct {
 // first wait is missed.
 func (h *Hub) Subscribe(org, run pgtype.UUID) *Subscription {
 	c := make(chan struct{}, 1)
-	s := &Subscription{C: c, c: c, hub: h, key: Key(org, run)}
+	ch := make(chan []Chunk, chunkBacklog)
+	s := &Subscription{C: c, c: c, Chunks: ch, chunks: ch, hub: h, key: Key(org, run)}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	m := h.subs[s.key]
@@ -108,6 +113,21 @@ func (h *Hub) Notify(key string) {
 	defer h.mu.Unlock()
 	for s := range h.subs[key] {
 		s.wake()
+	}
+}
+
+// chunkBacklog is how many batches of live chunks a subscription holds.
+const chunkBacklog = 256
+
+// NotifyChunks hands a batch of live chunks to the local subscribers of a run.
+func (h *Hub) NotifyChunks(key string, cs []Chunk) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for s := range h.subs[key] {
+		select {
+		case s.chunks <- cs:
+		default:
+		}
 	}
 }
 
@@ -175,9 +195,19 @@ func (h *Hub) listen(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if n.Channel != Channel || !strings.Contains(n.Payload, "/") {
+		if n.Channel != Channel {
 			continue
 		}
-		h.Notify(n.Payload)
+		key, body, ok := splitPayload(n.Payload)
+		if !ok {
+			continue
+		}
+		if body == "" {
+			h.Notify(key)
+			continue
+		}
+		if cs := parseChunks(body); len(cs) > 0 {
+			h.NotifyChunks(key, cs)
+		}
 	}
 }

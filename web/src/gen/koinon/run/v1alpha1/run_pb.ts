@@ -15,7 +15,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file koinon/run/v1alpha1/run.proto.
  */
 export const file_koinon_run_v1alpha1_run: GenFile = /*@__PURE__*/
-  fileDesc("Ch1rb2lub24vcnVuL3YxYWxwaGExL3J1bi5wcm90bxITa29pbm9uLnJ1bi52MWFscGhhMSLoBAoDUnVuEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgl0aWNrZXRfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkSGAoQYWdlbnRfdmVyc2lvbl9pZBgFIAEoCRIsCgVzdGF0ZRgGIAEoDjIdLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuU3RhdGUSNAoLcGFya19yZWFzb24YByABKA4yHy5rb2lub24ucnVuLnYxYWxwaGExLlBhcmtSZWFzb24SFgoOb3V0Y29tZV9yZWFzb24YCCABKAkSHgoWbWF4X3dhbGxfY2xvY2tfc2Vjb25kcxgJIAEoAxIWCgptYXhfdG9rZW5zGAogASgDQgIYARITCgt0b2tlbnNfdXNlZBgLIAEoAxIWCg5sYXN0X2V2ZW50X3NlcRgMIAEoAxIuCgpjcmVhdGVkX2F0GA0gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpzdGFydGVkX2F0GA4gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIvCgtmaW5pc2hlZF9hdBgPIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASJwoEY29zdBgQIAEoCzIZLmtvaW5vbi5ydW4udjFhbHBoYTEuQ29zdBI4Cg1mYWlsdXJlX2NsYXNzGBEgASgOMiEua29pbm9uLnJ1bi52MWFscGhhMS5GYWlsdXJlQ2xhc3MSGgoSbWF4X21vZGVsX3JlcXVlc3RzGBIgASgDEhUKDW1heF9zcGVuZF91c2QYEyABKAkizwEKBENvc3QSEAoIcmVxdWVzdHMYASABKAMSFAoMaW5wdXRfdG9rZW5zGAIgASgDEhUKDW91dHB1dF90b2tlbnMYAyABKAMSCwoDdXNkGAQgASgJEg4KBnByaWNlZBgFIAEoCBIaChJlc3RpbWF0ZWRfcmVxdWVzdHMYBiABKAMSGQoRY2FjaGVfcmVhZF90b2tlbnMYByABKAMSGgoSY2FjaGVfd3JpdGVfdG9rZW5zGAggASgDEhgKEHJlYXNvbmluZ190b2tlbnMYCSABKAMijwEKCFJ1bkV2ZW50Eg4KBnJ1bl9pZBgBIAEoCRILCgNzZXEYAiABKAMSDAoEa2luZBgDIAEoCRIoCgdwYXlsb2FkGAQgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBIuCgpjcmVhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCIvCg1HZXRSdW5SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIOCgZydW5faWQYAiABKAkiNwoOR2V0UnVuUmVzcG9uc2USJQoDcnVuGAEgASgLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW4iQgoQQ2FuY2VsUnVuUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEg4KBnJlYXNvbhgDIAEoCSI6ChFDYW5jZWxSdW5SZXNwb25zZRIlCgNydW4YASABKAsyGC5rb2lub24ucnVuLnYxYWxwaGExLlJ1biJECg9XYXRjaFJ1blJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCRIRCglhZnRlcl9zZXEYAyABKAMiqAEKEFdhdGNoUnVuUmVzcG9uc2USJwoDcnVuGAEgASgLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW5IABIuCgVldmVudBgCIAEoCzIdLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuRXZlbnRIABIzCgloZWFydGJlYXQYAyABKAsyHi5rb2lub24ucnVuLnYxYWxwaGExLkhlYXJ0YmVhdEgAQgYKBGl0ZW0iCwoJSGVhcnRiZWF0KscBCghSdW5TdGF0ZRIZChVSVU5fU1RBVEVfVU5TUEVDSUZJRUQQABIUChBSVU5fU1RBVEVfUVVFVUVEEAESFgoSUlVOX1NUQVRFX1NUQVJUSU5HEAISFQoRUlVOX1NUQVRFX1JVTk5JTkcQAxIUChBSVU5fU1RBVEVfUEFSS0VEEAQSFwoTUlVOX1NUQVRFX1NVQ0NFRURFRBAFEhQKEFJVTl9TVEFURV9GQUlMRUQQBhIWChJSVU5fU1RBVEVfQ0FOQ0VMRUQQByqQAQoKUGFya1JlYXNvbhIbChdQQVJLX1JFQVNPTl9VTlNQRUNJRklFRBAAEhgKFFBBUktfUkVBU09OX0FQUFJPVkFMEAESFgoSUEFSS19SRUFTT05fQlVER0VUEAISEwoPUEFSS19SRUFTT05fQTJBEAMSHgoaUEFSS19SRUFTT05fSU5QVVRfUkVRVUlSRUQQBCr/AQoMRmFpbHVyZUNsYXNzEh0KGUZBSUxVUkVfQ0xBU1NfVU5TUEVDSUZJRUQQABIbChdGQUlMVVJFX0NMQVNTX1RSQU5TSUVOVBABEhsKF0ZBSUxVUkVfQ0xBU1NfVEhST1RUTEVEEAISIgoeRkFJTFVSRV9DTEFTU19DT05URVhUX09WRVJGTE9XEAMSGAoURkFJTFVSRV9DTEFTU19CVURHRVQQBBIYChRGQUlMVVJFX0NMQVNTX1BPTElDWRAFEhcKE0ZBSUxVUkVfQ0xBU1NfRkFUQUwQBhIlCiFGQUlMVVJFX0NMQVNTX1NBTkRCT1hfVU5BVkFJTEFCTEUQBzKgAgoKUnVuU2VydmljZRJWCgZHZXRSdW4SIi5rb2lub24ucnVuLnYxYWxwaGExLkdldFJ1blJlcXVlc3QaIy5rb2lub24ucnVuLnYxYWxwaGExLkdldFJ1blJlc3BvbnNlIgOQAgESWgoJQ2FuY2VsUnVuEiUua29pbm9uLnJ1bi52MWFscGhhMS5DYW5jZWxSdW5SZXF1ZXN0GiYua29pbm9uLnJ1bi52MWFscGhhMS5DYW5jZWxSdW5SZXNwb25zZRJeCghXYXRjaFJ1bhIkLmtvaW5vbi5ydW4udjFhbHBoYTEuV2F0Y2hSdW5SZXF1ZXN0GiUua29pbm9uLnJ1bi52MWFscGhhMS5XYXRjaFJ1blJlc3BvbnNlIgOQAgEwAUJNWktnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9ydW4vdjFhbHBoYTE7cnVudjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
+  fileDesc("Ch1rb2lub24vcnVuL3YxYWxwaGExL3J1bi5wcm90bxITa29pbm9uLnJ1bi52MWFscGhhMSLoBAoDUnVuEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgl0aWNrZXRfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkSGAoQYWdlbnRfdmVyc2lvbl9pZBgFIAEoCRIsCgVzdGF0ZRgGIAEoDjIdLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuU3RhdGUSNAoLcGFya19yZWFzb24YByABKA4yHy5rb2lub24ucnVuLnYxYWxwaGExLlBhcmtSZWFzb24SFgoOb3V0Y29tZV9yZWFzb24YCCABKAkSHgoWbWF4X3dhbGxfY2xvY2tfc2Vjb25kcxgJIAEoAxIWCgptYXhfdG9rZW5zGAogASgDQgIYARITCgt0b2tlbnNfdXNlZBgLIAEoAxIWCg5sYXN0X2V2ZW50X3NlcRgMIAEoAxIuCgpjcmVhdGVkX2F0GA0gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpzdGFydGVkX2F0GA4gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIvCgtmaW5pc2hlZF9hdBgPIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASJwoEY29zdBgQIAEoCzIZLmtvaW5vbi5ydW4udjFhbHBoYTEuQ29zdBI4Cg1mYWlsdXJlX2NsYXNzGBEgASgOMiEua29pbm9uLnJ1bi52MWFscGhhMS5GYWlsdXJlQ2xhc3MSGgoSbWF4X21vZGVsX3JlcXVlc3RzGBIgASgDEhUKDW1heF9zcGVuZF91c2QYEyABKAkizwEKBENvc3QSEAoIcmVxdWVzdHMYASABKAMSFAoMaW5wdXRfdG9rZW5zGAIgASgDEhUKDW91dHB1dF90b2tlbnMYAyABKAMSCwoDdXNkGAQgASgJEg4KBnByaWNlZBgFIAEoCBIaChJlc3RpbWF0ZWRfcmVxdWVzdHMYBiABKAMSGQoRY2FjaGVfcmVhZF90b2tlbnMYByABKAMSGgoSY2FjaGVfd3JpdGVfdG9rZW5zGAggASgDEhgKEHJlYXNvbmluZ190b2tlbnMYCSABKAMijwEKCFJ1bkV2ZW50Eg4KBnJ1bl9pZBgBIAEoCRILCgNzZXEYAiABKAMSDAoEa2luZBgDIAEoCRIoCgdwYXlsb2FkGAQgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBIuCgpjcmVhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCIvCg1HZXRSdW5SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIOCgZydW5faWQYAiABKAkiNwoOR2V0UnVuUmVzcG9uc2USJQoDcnVuGAEgASgLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW4iQgoQQ2FuY2VsUnVuUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEg4KBnJlYXNvbhgDIAEoCSI6ChFDYW5jZWxSdW5SZXNwb25zZRIlCgNydW4YASABKAsyGC5rb2lub24ucnVuLnYxYWxwaGExLlJ1biJECg9XYXRjaFJ1blJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCRIRCglhZnRlcl9zZXEYAyABKAMi2QEKEFdhdGNoUnVuUmVzcG9uc2USJwoDcnVuGAEgASgLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW5IABIuCgVldmVudBgCIAEoCzIdLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuRXZlbnRIABIzCgloZWFydGJlYXQYAyABKAsyHi5rb2lub24ucnVuLnYxYWxwaGExLkhlYXJ0YmVhdEgAEi8KBGxpdmUYBCABKAsyHy5rb2lub24ucnVuLnYxYWxwaGExLkxpdmVDaHVua3NIAEIGCgRpdGVtIjwKCkxpdmVDaHVua3MSLgoGY2h1bmtzGAEgAygLMh4ua29pbm9uLnJ1bi52MWFscGhhMS5MaXZlQ2h1bmsiJwoJTGl2ZUNodW5rEgwKBGtpbmQYASABKAkSDAoEdGV4dBgCIAEoCSILCglIZWFydGJlYXQqxwEKCFJ1blN0YXRlEhkKFVJVTl9TVEFURV9VTlNQRUNJRklFRBAAEhQKEFJVTl9TVEFURV9RVUVVRUQQARIWChJSVU5fU1RBVEVfU1RBUlRJTkcQAhIVChFSVU5fU1RBVEVfUlVOTklORxADEhQKEFJVTl9TVEFURV9QQVJLRUQQBBIXChNSVU5fU1RBVEVfU1VDQ0VFREVEEAUSFAoQUlVOX1NUQVRFX0ZBSUxFRBAGEhYKElJVTl9TVEFURV9DQU5DRUxFRBAHKpABCgpQYXJrUmVhc29uEhsKF1BBUktfUkVBU09OX1VOU1BFQ0lGSUVEEAASGAoUUEFSS19SRUFTT05fQVBQUk9WQUwQARIWChJQQVJLX1JFQVNPTl9CVURHRVQQAhITCg9QQVJLX1JFQVNPTl9BMkEQAxIeChpQQVJLX1JFQVNPTl9JTlBVVF9SRVFVSVJFRBAEKv8BCgxGYWlsdXJlQ2xhc3MSHQoZRkFJTFVSRV9DTEFTU19VTlNQRUNJRklFRBAAEhsKF0ZBSUxVUkVfQ0xBU1NfVFJBTlNJRU5UEAESGwoXRkFJTFVSRV9DTEFTU19USFJPVFRMRUQQAhIiCh5GQUlMVVJFX0NMQVNTX0NPTlRFWFRfT1ZFUkZMT1cQAxIYChRGQUlMVVJFX0NMQVNTX0JVREdFVBAEEhgKFEZBSUxVUkVfQ0xBU1NfUE9MSUNZEAUSFwoTRkFJTFVSRV9DTEFTU19GQVRBTBAGEiUKIUZBSUxVUkVfQ0xBU1NfU0FOREJPWF9VTkFWQUlMQUJMRRAHMqACCgpSdW5TZXJ2aWNlElYKBkdldFJ1bhIiLmtvaW5vbi5ydW4udjFhbHBoYTEuR2V0UnVuUmVxdWVzdBojLmtvaW5vbi5ydW4udjFhbHBoYTEuR2V0UnVuUmVzcG9uc2UiA5ACARJaCglDYW5jZWxSdW4SJS5rb2lub24ucnVuLnYxYWxwaGExLkNhbmNlbFJ1blJlcXVlc3QaJi5rb2lub24ucnVuLnYxYWxwaGExLkNhbmNlbFJ1blJlc3BvbnNlEl4KCFdhdGNoUnVuEiQua29pbm9uLnJ1bi52MWFscGhhMS5XYXRjaFJ1blJlcXVlc3QaJS5rb2lub24ucnVuLnYxYWxwaGExLldhdGNoUnVuUmVzcG9uc2UiA5ACATABQk1aS2dpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL3J1bi92MWFscGhhMTtydW52MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
 
 /**
  * Run is one execution of an agent for a ticket.
@@ -392,7 +392,7 @@ export const WatchRunRequestSchema: GenMessage<WatchRunRequest> = /*@__PURE__*/
   messageDesc(file_koinon_run_v1alpha1_run, 7);
 
 /**
- * WatchRunResponse carries a run snapshot, one event or a heartbeat.
+ * WatchRunResponse carries a run snapshot, one event, live text or a heartbeat.
  *
  * @generated from message koinon.run.v1alpha1.WatchRunResponse
  */
@@ -421,6 +421,16 @@ export type WatchRunResponse = Message<"koinon.run.v1alpha1.WatchRunResponse"> &
      */
     value: Heartbeat;
     case: "heartbeat";
+  } | {
+    /**
+     * Text the agent is typing, sent about every 100 ms while it types. Live only: never stored,
+     * not part of the seq order, and a client that joins late or drops a stream misses it. The
+     * event for the finished message or thought follows with its whole text and replaces it.
+     *
+     * @generated from field: koinon.run.v1alpha1.LiveChunks live = 4;
+     */
+    value: LiveChunks;
+    case: "live";
   } | { case: undefined; value?: undefined };
 };
 
@@ -430,6 +440,52 @@ export type WatchRunResponse = Message<"koinon.run.v1alpha1.WatchRunResponse"> &
  */
 export const WatchRunResponseSchema: GenMessage<WatchRunResponse> = /*@__PURE__*/
   messageDesc(file_koinon_run_v1alpha1_run, 8);
+
+/**
+ * LiveChunks is a batch of live text, in the order it was typed.
+ *
+ * @generated from message koinon.run.v1alpha1.LiveChunks
+ */
+export type LiveChunks = Message<"koinon.run.v1alpha1.LiveChunks"> & {
+  /**
+   * @generated from field: repeated koinon.run.v1alpha1.LiveChunk chunks = 1;
+   */
+  chunks: LiveChunk[];
+};
+
+/**
+ * Describes the message koinon.run.v1alpha1.LiveChunks.
+ * Use `create(LiveChunksSchema)` to create a new message.
+ */
+export const LiveChunksSchema: GenMessage<LiveChunks> = /*@__PURE__*/
+  messageDesc(file_koinon_run_v1alpha1_run, 9);
+
+/**
+ * LiveChunk is a piece of the message or thought in progress.
+ *
+ * @generated from message koinon.run.v1alpha1.LiveChunk
+ */
+export type LiveChunk = Message<"koinon.run.v1alpha1.LiveChunk"> & {
+  /**
+   * kind is the run event kind of the item the text belongs to, for example
+   * "acp.agent_message_chunk" or "acp.agent_thought_chunk".
+   *
+   * @generated from field: string kind = 1;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: string text = 2;
+   */
+  text: string;
+};
+
+/**
+ * Describes the message koinon.run.v1alpha1.LiveChunk.
+ * Use `create(LiveChunkSchema)` to create a new message.
+ */
+export const LiveChunkSchema: GenMessage<LiveChunk> = /*@__PURE__*/
+  messageDesc(file_koinon_run_v1alpha1_run, 10);
 
 /**
  * Heartbeat is an empty keep-alive message.
@@ -444,7 +500,7 @@ export type Heartbeat = Message<"koinon.run.v1alpha1.Heartbeat"> & {
  * Use `create(HeartbeatSchema)` to create a new message.
  */
 export const HeartbeatSchema: GenMessage<Heartbeat> = /*@__PURE__*/
-  messageDesc(file_koinon_run_v1alpha1_run, 9);
+  messageDesc(file_koinon_run_v1alpha1_run, 11);
 
 /**
  * RunState is the ADR 0030 state machine.

@@ -14,7 +14,14 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
+	"github.com/stateracloud/koinon/internal/runwatch"
 )
+
+func countRunEvents(ctx context.Context, e *env, run store.Run) int {
+	var n int
+	Expect(e.pool.QueryRow(ctx, "SELECT count(*) FROM run_events WHERE org_id = $1 AND run_id = $2", run.OrgID, run.ID).Scan(&n)).To(Succeed())
+	return n
+}
 
 // watcher reads one WatchRun stream in the background.
 type watcher struct {
@@ -103,6 +110,40 @@ var _ = Describe("WatchRun", func() {
 		Expect(ev.GetSeq()).To(Equal(int64(5)))
 		Expect(ev.GetKind()).To(Equal("session.update"))
 		Expect(ev.GetPayload().AsMap()).To(HaveKeyWithValue("n", BeEquivalentTo(5)))
+	})
+
+	It("streams the text the agent is typing, live and unstored (#344)", func(ctx SpecContext) {
+		w := watch(ctx, f.owner, f.org, f.run.GetId(), 0)
+		Expect((<-w.items).GetRun()).NotTo(BeNil())
+		before := countRunEvents(ctx, e, run)
+
+		// agentd's publisher batches chunks into NOTIFYs; polling is off, so only NOTIFY can deliver them.
+		pub := runwatch.NewChunkPublisher(e.pool, run.OrgID, run.ID, 20*time.Millisecond, nil)
+		for _, t := range []string{"Hel", "lo ", "wor", "ld"} {
+			pub.Add("acp.agent_message_chunk", []byte(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"`+t+`"}}`))
+		}
+		pub.Add("acp.agent_thought_chunk", []byte(`{"content":{"type":"text","text":"hm"}}`))
+		pub.Close()
+
+		var text, thought string
+		deadline := time.After(5 * time.Second)
+		for text != "Hello world" || thought != "hm" {
+			select {
+			case msg, ok := <-w.items:
+				Expect(ok).To(BeTrue(), "stream ended before the live text arrived")
+				Expect(msg.GetEvent()).To(BeNil(), "chunks are not events")
+				for _, c := range msg.GetLive().GetChunks() {
+					if c.GetKind() == "acp.agent_message_chunk" {
+						text += c.GetText()
+					} else {
+						thought += c.GetText()
+					}
+				}
+			case <-deadline:
+				Fail("live text not received: " + text + " / " + thought)
+			}
+		}
+		Expect(countRunEvents(ctx, e, run)).To(Equal(before), "chunks are never stored")
 	})
 
 	It("ends after the run finishes and its last event is sent", func(ctx SpecContext) {

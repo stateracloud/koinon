@@ -4,7 +4,7 @@
 // connect-query supports unary methods only (ADR 0022).
 
 import { Code, ConnectError, createClient, type Transport } from '@connectrpc/connect'
-import { RunService, RunState, type Run, type RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
+import { RunService, RunState, type LiveChunk, type Run, type RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
 
 export type WatchStatus = 'connecting' | 'live' | 'reconnecting' | 'ended' | 'failed'
 
@@ -14,6 +14,11 @@ export type WatchHandlers = {
   /** A new event, never one at or below a seq already delivered. */
   onEvent: (event: RunEvent) => void
   onStatus: (status: WatchStatus, error?: ConnectError) => void
+  /**
+   * Text the agent is typing, in the order typed (#344). Live only: it has no seq, a reconnect does
+   * not replay it, and the event of the finished message follows with its whole text.
+   */
+  onLive?: (chunks: readonly LiveChunk[]) => void
 }
 
 export type WatchOptions = {
@@ -121,6 +126,8 @@ export async function watchRun(opts: WatchOptions, h: WatchHandlers): Promise<bi
           after = ev.seq
           progressed = true
           h.onEvent(ev)
+        } else if (res.item.case === 'live') {
+          h.onLive?.(res.item.value.chunks)
         }
       }
       // The server ends the stream once the run has finished and drained.

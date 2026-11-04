@@ -3,7 +3,7 @@
 import { create } from '@bufbuild/protobuf'
 import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
 import { describe, expect, it } from 'vitest'
-import { HeartbeatSchema, RunEventSchema, RunSchema, RunService, RunState, type RunEvent, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
+import { HeartbeatSchema, LiveChunksSchema, RunEventSchema, RunSchema, RunService, RunState, type RunEvent, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { watchRun, type WatchStatus } from '@/lib/run-watch'
 
 const runMsg = (state: RunState) => create(RunSchema, { id: 'r', state })
@@ -50,6 +50,29 @@ async function run(transport: ReturnType<typeof drive>['transport']) {
 }
 
 describe('watchRun', () => {
+  it('delivers live text without a seq and without counting it as an event', async () => {
+    const transport = createRouterTransport(({ service }) => {
+      service(RunService, {
+        async *watchRun() {
+          yield { item: { case: 'run', value: runMsg(RunState.RUNNING) } }
+          yield { item: { case: 'live', value: create(LiveChunksSchema, { chunks: [{ kind: 'acp.agent_message_chunk', text: 'Hel' }] }) } }
+          yield { item: { case: 'live', value: create(LiveChunksSchema, { chunks: [{ kind: 'acp.agent_message_chunk', text: 'lo' }] }) } }
+          yield { item: { case: 'event', value: ev(1) } }
+          yield { item: { case: 'run', value: runMsg(RunState.SUCCEEDED) } }
+        },
+      })
+    })
+    const live: string[] = []
+    const got: bigint[] = []
+    const last = await watchRun(
+      { transport, orgId: 'o', runId: 'r', signal: new AbortController().signal, backoff: () => 0, sleep: async () => {} },
+      { onRun: () => {}, onEvent: (e) => got.push(e.seq), onStatus: () => {}, onLive: (cs) => live.push(...cs.map((c) => c.text)) },
+    )
+    expect(live).toEqual(['Hel', 'lo'])
+    expect(got).toEqual([1n])
+    expect(last).toBe(1n)
+  })
+
   it('resumes after the last delivered seq and drops repeats', async () => {
     const unavailable = new ConnectError('reset', Code.Unavailable)
     const { transport, calls } = drive([
