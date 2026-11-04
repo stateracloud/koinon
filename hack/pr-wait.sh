@@ -226,7 +226,7 @@ while :; do
         drop='def rid: ((.detailsUrl // "") | capture("/runs/(?<r>[0-9]+)")? | .r);
           def draft($ids): (.workflowName // "") == "ci" and
             (if $ids == "" or rid == null then (.startedAt // "") != "" and .startedAt < $r
-             else (($ids | split(",")) | index(rid)) == null end);'
+             else rid as $id | (($ids | split(",")) | index($id)) == null end);'
         if jq -e --arg r "$ready" --arg ids "$ready_ids" "$drop any((.statusCheckRollup // [])[]; draft(\$ids))" <<<"$json" >/dev/null; then
           ready_dropped=1
           json=$(jq --arg r "$ready" --arg ids "$ready_ids" "$drop"' .statusCheckRollup |= map(select(draft($ids) | not))' <<<"$json")
