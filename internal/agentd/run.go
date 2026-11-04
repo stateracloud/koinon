@@ -481,6 +481,7 @@ func (r *runner) execute(ctx context.Context) error {
 	cmd = append(cmd, harnessArgs(agent.Flavor, vc)...)
 	r.vcfg = vc
 	r.flavor = agent.Flavor
+	r.taint.setMCPPrefix(mcpToolPrefix(agent.Flavor))
 	// The gateway may not serve the model yet: a new provider's key file is still reaching the
 	// gateway pod (issue #174). The reconciler starts the sandbox meanwhile, because this run is
 	// demand for it, so the two waits overlap.

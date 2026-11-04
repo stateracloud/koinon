@@ -44,18 +44,32 @@ func (g *Guard) CheckResult(ctx context.Context, r Result) error {
 	if refused != nil {
 		return refusedError{text: refused.Text}
 	}
-	if c.exempt || c.own {
+	if c.exempt {
 		return nil
+	}
+	if c.own {
+		legs := OwnResultLegs(r.Tool)
+		if legs.Any() {
+			// An own tool nobody declared sets both legs on the agent's session; find the agent.
+			org, agent, o, err := g.agentOf(ctx, c.ref)
+			if err != nil {
+				return err
+			}
+			if o != nil {
+				return refusedError{text: o.Text}
+			}
+			c.org, c.agent = org, agent
+		}
+		return g.record(ctx, c, legs, r.Result)
 	}
 	_, decl, err := g.tool(ctx, c, r.Tool)
 	if err != nil {
 		return err
 	}
-	return g.record(ctx, c, decl, r.Result)
+	return g.record(ctx, c, resultLegs(c.server, decl), r.Result)
 }
 
-func (g *Guard) record(ctx context.Context, c caller, decl sinkclass.Declaration, result json.RawMessage) error {
-	legs := resultLegs(c.server, decl)
+func (g *Guard) record(ctx context.Context, c caller, legs Legs, result json.RawMessage) error {
 	if !legs.Any() {
 		return nil
 	}
@@ -100,7 +114,7 @@ func (g *Guard) RecordApproved(ctx context.Context, row store.ApprovalRequest, s
 	if err != nil {
 		return err
 	}
-	return g.record(ctx, c, decl, result)
+	return g.record(ctx, c, resultLegs(c.server, decl), result)
 }
 
 // Assess decides an ask-tier call without charging anything, for mcpask's single card: the

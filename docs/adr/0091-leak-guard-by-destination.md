@@ -74,7 +74,10 @@ The class is declared **per tool**, not per server. Each tool's declaration says
 - which arguments are **address arguments** (where the call goes: `owner`, `repo`, `url`) and,
   by elimination, which are **payload arguments** (what it carries: a title, a body, a query);
 - what its results carry for the session legs (decision 4): untrusted input, private data or
-  neither. A tool without its own declaration takes its server's legs (#350).
+  neither. The declaration is pinned to the tool's content hash, like the rest of it. A tool
+  without its own declaration takes its server's legs (#350), which are both until an admin says
+  otherwise. Koinon's own tools declare theirs in code (`mcpguard.OwnResultLegs`): none of them
+  returns third-party text or org data, so none sets a leg, and an own tool nobody declared sets both.
 
 Declarations live on the MCP server records of #350 (per tool, next to the server's kind and legs)
 and in the code-host connector's data for its own write tools (ADR 0062, `connector.yaml`). They are
@@ -128,8 +131,13 @@ harness's stream and again once it has reported it, per run and worker epoch; be
 legs for an `external-low` or `external-high` call, the guard waits until the second count reaches
 what the first was when the call arrived. If it does not within 2 s, the call is decided as if the
 session held both legs: a card or a refusal, never a pass. `none` and `internal` calls do not wait.
-A tool kind agentd does not know (ACP `other`, which covers MCP tools, a missing kind, or a newer
-kind) sets both legs.
+A tool kind agentd does not know (ACP `other`, a missing kind, or a newer kind) sets both legs.
+An MCP tool is the exception (Andre, 2026-11-03, #643): its result passed the gateway, which sets the
+legs from the tool's own declaration, so agentd reports nothing for a finished call whose title
+carries the flavor's MCP prefix (`flavor.Descriptor.MCPToolPrefix`, `koinon_` for OpenCode). Without
+this a single MCP call, Koinon's own `create_pull_request` included, held both legs until the home was
+replaced, and every declared result leg was undone. A flavor with no prefix keeps both legs for kind
+`other`.
 
 How the wait works, and what it leaves open (#349 review, 2026-11-03):
 
@@ -168,7 +176,7 @@ How the wait works, and what it leaves open (#349 review, 2026-11-03):
   leg is assumed: the call is decided on the legs the generation holds. Those are what earlier tasks
   left, and they only grow, so an `external-high` call outside a task from a generation that holds
   both legs needs an approval, and is refused because no approval exists outside a run (ADR 0042).
-  A tool that only reads from a system the org owns is declared `internal` to be called that way.
+  A read-only tool is declared `none` (no address arguments), which is not `external-high`.
 
 Every refusal and every call sent to a person is logged at info, with the reason codes, the class,
 the legs, whether a run was found and whether the feed stalled; never an argument value or payload.

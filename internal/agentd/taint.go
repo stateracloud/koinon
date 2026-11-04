@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"sync"
 	"time"
 
@@ -21,8 +22,8 @@ import (
 // A finished repository read, search, shell command or file edit sets the private-data leg of the
 // agent's session, and its output is fingerprinted with the session's key, in this process; a
 // finished fetch sets the untrusted-input leg. Only fingerprints are stored: no tool output leaves
-// agentd. A kind the feed does not know (other, which covers MCP tools, a missing kind, or a kind
-// newer than this list) sets both legs: ADR 0091 reads what is unclassified as the most exposed.
+// agentd. A kind the feed does not know (other, a missing kind, or a kind newer than this list;
+// not Koinon's MCP tools, whose legs the gateway sets) sets both legs: ADR 0091 reads what is unclassified as the most exposed.
 
 // The guard must not decide a call on legs that miss a tool result the harness finished before the
 // call (ADR 0091 decision 4, amendment 2026-11-03: Andre, option A). The harness's session updates
@@ -196,6 +197,12 @@ var taintLegs = map[acp.ToolKind]mcpguard.Legs{
 	acp.ToolKindSwitchMode: {},
 }
 
+// An MCP tool's result does not set legs here. It passed the gateway, and the guard set the
+// session's legs there from the tool's own declaration (ADR 0091 decision 4, #643): reporting the
+// ACP kind other as well would hold both legs for the first MCP call of a home generation and
+// undo every declaration. The call is recognised by the flavor's title prefix
+// (flavor.Descriptor.MCPToolPrefix); a call of kind other without it still sets both legs.
+
 // unknownLegs are the legs of a finished tool call whose kind is not in taintLegs: both.
 var unknownLegs = mcpguard.Legs{UntrustedInput: true, PrivateData: true}
 
@@ -205,12 +212,27 @@ const taintTries = 3
 // taintCalls follows the run's tool calls until they finish: a tool_call_update may leave out the
 // kind and the content its tool_call or an earlier update carried.
 type taintCalls struct {
-	mu    sync.Mutex
-	calls map[string]*taintCall
+	mu        sync.Mutex
+	calls     map[string]*taintCall
+	mcpPrefix string
+	mcpRE     *regexp.Regexp
+}
+
+// setMCPPrefix sets the title prefix of the harness's MCP tool calls ("" for none).
+func (t *taintCalls) setMCPPrefix(p string) {
+	t.mu.Lock()
+	t.mcpPrefix = p
+	t.mcpRE = nil
+	if p != "" {
+		t.mcpRE = regexp.MustCompile("^" + regexp.QuoteMeta(p) + `[A-Za-z0-9_.-]+$`)
+	}
+	t.mu.Unlock()
 }
 
 type taintCall struct {
 	kind  acp.ToolKind
+	title string
+	named bool
 	texts []string
 }
 
@@ -219,6 +241,7 @@ type taintUpdate struct {
 	Update  string  `json:"sessionUpdate"`
 	ID      string  `json:"toolCallId"`
 	Kind    *string `json:"kind"`
+	Title   *string `json:"title"`
 	Status  *string `json:"status"`
 	Content []struct {
 		Content *struct {
@@ -250,6 +273,14 @@ func (t *taintCalls) finished(update []byte) (mcpguard.Legs, []string, bool) {
 	if u.Kind != nil {
 		c.kind = acp.ToolKind(*u.Kind)
 	}
+	// Only the opening tool_call names the tool (OpenCode); a later update's title is free text the
+	// model can write, so it never replaces the first one.
+	if u.Update == "tool_call" && !c.named {
+		c.named = true
+		if u.Title != nil {
+			c.title = *u.Title
+		}
+	}
 	// Content, when present, replaces what the call showed before (ACP); the raw output adds to it.
 	if u.Content != nil {
 		c.texts = c.texts[:0]
@@ -275,6 +306,9 @@ func (t *taintCalls) finished(update []byte) (mcpguard.Legs, []string, bool) {
 		return mcpguard.Legs{}, nil, false
 	}
 	delete(t.calls, u.ID)
+	if c.kind == acp.ToolKindOther && t.mcpRE != nil && t.mcpRE.MatchString(c.title) {
+		return mcpguard.Legs{}, nil, false
+	}
 	legs, ok := taintLegs[c.kind]
 	if !ok {
 		legs = unknownLegs
