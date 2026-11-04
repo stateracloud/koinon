@@ -55,6 +55,32 @@ describe('reducer live text', () => {
     expect(st.r.live.map((c) => c.text)).toEqual(['two'])
   })
 
+  it('clears an orphan of an older epoch when the first item of the next epoch is stored', () => {
+    let st = reducer({}, { type: 'live', runId: 'r', chunks: [chunk(msg, 'lost', '1-4'), chunk(msg, 'next', '2-2')] })
+    st = reducer(st, { type: 'event', runId: 'r', event: event(1, msg, '2-1') })
+    expect(st.r.live.map((c) => c.text)).toEqual(['next'])
+    const late = reducer(st, { type: 'live', runId: 'r', chunks: [chunk(msg, 'old', '1-9')] })
+    expect(late.r.live.map((c) => c.text)).toEqual(['next'])
+  })
+
+  it('clears an item that was never stored when a later one of the same epoch is', () => {
+    let st = reducer({}, { type: 'live', runId: 'r', chunks: [chunk(msg, 'skipped', '1-2'), chunk(msg, 'next', '1-4')] })
+    st = reducer(st, { type: 'event', runId: 'r', event: event(1, msg, '1-3') })
+    expect(st.r.live.map((c) => c.text)).toEqual(['next'])
+  })
+
+  it('clears item-less live text of the kind next to a named event', () => {
+    let st = reducer({}, { type: 'live', runId: 'r', chunks: [chunk(msg, 'old worker'), chunk('acp.agent_thought_chunk', 'thought')] })
+    st = reducer(st, { type: 'event', runId: 'r', event: event(1, msg, '1-1') })
+    expect(st.r.live.map((c) => c.text)).toEqual(['thought'])
+  })
+
+  it('treats a malformed item name as no item', () => {
+    let st = reducer({}, { type: 'live', runId: 'r', chunks: [chunk(msg, 'text', 'x-y')] })
+    st = reducer(st, { type: 'event', runId: 'r', event: event(1, msg, 'x-y') })
+    expect(st.r.live).toEqual([])
+  })
+
   it('drops the live text when the stream ends, and when a run succeeds', () => {
     let st = reducer({}, { type: 'live', runId: 'r', chunks: [chunk(msg, 'tail')] })
     st = reducer(st, { type: 'status', runId: 'r', status: 'ended' })
