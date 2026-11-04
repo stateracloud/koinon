@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -17,6 +18,11 @@ import (
 // as a chunk, so readers of the timeline (internal/runreply, the run page) work on it unchanged,
 // and its text is the whole item. Chunks are never stored; they reach live subscribers through
 // Config.Live.
+//
+// Every item has a name, "<epoch>-<n>", unique in the run (a takeover has a new epoch). The live
+// chunks carry it, and the stored event carries it as "item" in its payload. A viewer that has the
+// stored event drops the live text of that item, so a live tail that arrives after its event (the
+// two travel separate paths) never shows twice.
 //
 // An item is complete when the next thing happens: a chunk of another kind, any other run event,
 // a verb that ends the run, or the end of the prompt (FlushItems). An item that is cut off, because
@@ -44,6 +50,7 @@ func IsChunkKind(kind string) bool { return coalesced[kind] }
 // pending is the item being built; the zero value is none.
 type pending struct {
 	kind   string
+	item   string         // its name, in the live chunks and in the stored event's "item"
 	first  map[string]any // the first chunk's update, with its text replaced at the flush
 	text   strings.Builder
 	chunks int
@@ -69,9 +76,6 @@ func (o *Owner) RecordUpdate(ctx context.Context, kind string, payload []byte) e
 	if !ok {
 		return o.RecordRaw(ctx, kind, payload) // an image or a resource: one event as it is
 	}
-	if o.cfg.Live != nil {
-		o.cfg.Live(kind, payload)
-	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.IsFenced() {
@@ -81,7 +85,11 @@ func (o *Owner) RecordUpdate(ctx context.Context, kind string, payload []byte) e
 		if err := o.flushLocked(ctx, false); err != nil {
 			return err
 		}
-		o.pend = pending{kind: kind, first: u}
+		o.itemSeq++
+		o.pend = pending{kind: kind, first: u, item: fmt.Sprintf("%d-%d", o.run.Epoch, o.itemSeq)}
+	}
+	if o.cfg.Live != nil {
+		o.cfg.Live(kind, o.pend.item, payload) // does not block
 	}
 	o.pend.text.WriteString(text)
 	o.pend.chunks++
@@ -121,6 +129,7 @@ func (o *Owner) flushLocked(ctx context.Context, partial bool) error {
 	}
 	c, _ := p.first["content"].(map[string]any)
 	c["text"] = p.text.String()
+	p.first["item"] = p.item
 	if p.chunks > 1 {
 		p.first["chunks"] = p.chunks
 	}

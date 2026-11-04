@@ -13,10 +13,20 @@ export type RunWatch = {
   error?: string
   /**
    * The text of the message or thought the agent is typing, as far as it has been streamed (#344).
-   * A stored event of the same kind replaces the live text of that kind (it carries the whole
-   * text); other events leave it alone, so text still being typed stays on screen.
+   * Every chunk names its item. The stored event of an item carries the same name in its payload
+   * ("item") and the whole text, so it replaces the item's live text, and live text of an item the
+   * run already has as an event is dropped on arrival, whichever of the two came first. Other
+   * events leave the live text alone, so text still being typed stays on screen.
    */
   live: readonly LiveChunk[]
+  /** The names of the items that are stored events, so a late live tail of one can be dropped. */
+  stored?: ReadonlySet<string>
+}
+
+/** itemOf is the item name a stored event carries, "" for an event that is not an item. */
+export function itemOf(ev: RunEvent): string {
+  const item = ev.payload?.item
+  return typeof item === 'string' ? item : ''
 }
 
 type State = Record<string, RunWatch>
@@ -41,12 +51,12 @@ export function appendEvent(events: RunEvent[], ev: RunEvent): RunEvent[] {
   return [...events, ev].sort((a, b) => (a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0))
 }
 
-/** joinLive appends chunks to the live text, joining neighbours of one kind. */
+/** joinLive appends chunks to the live text, joining neighbours of one kind and item. */
 export function joinLive(live: readonly LiveChunk[], more: readonly LiveChunk[]): LiveChunk[] {
   const out = [...live]
   for (const c of more) {
     const last = out.at(-1)
-    if (last?.kind === c.kind) out[out.length - 1] = { ...last, text: last.text + c.text }
+    if (last?.kind === c.kind && last.item === c.item) out[out.length - 1] = { ...last, text: last.text + c.text }
     else out.push(c)
   }
   return out
@@ -61,10 +71,18 @@ export function reducer(state: State, a: Action): State {
       return { ...state, [a.runId]: { ...cur, run: a.run, live: a.run.state === RunState.SUCCEEDED || a.run.state === RunState.FAILED ? [] : cur.live } }
     case 'event': {
       const events = appendEvent(cur.events, a.event)
-      return events === cur.events ? state : { ...state, [a.runId]: { ...cur, events, live: cur.live.filter((c) => c.kind !== a.event.kind) } }
+      if (events === cur.events) return state
+      const item = itemOf(a.event)
+      // An event that names its item replaces that item's live text. One that does not (an
+      // older worker) replaces the live text of its kind.
+      const live = item ? cur.live.filter((c) => c.item !== item) : cur.live.filter((c) => c.kind !== a.event.kind)
+      const stored = item ? new Set(cur.stored).add(item) : cur.stored
+      return { ...state, [a.runId]: { ...cur, events, live, stored } }
     }
-    case 'live':
-      return { ...state, [a.runId]: { ...cur, live: joinLive(cur.live, a.chunks) } }
+    case 'live': {
+      const chunks = cur.stored?.size ? a.chunks.filter((c) => !c.item || !cur.stored?.has(c.item)) : a.chunks
+      return chunks.length === 0 ? state : { ...state, [a.runId]: { ...cur, live: joinLive(cur.live, chunks) } }
+    }
     case 'status':
       return { ...state, [a.runId]: { ...cur, status: a.status, error: a.error, live: a.status === 'ended' ? [] : cur.live } }
   }

@@ -141,9 +141,10 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 		return stream.Send(resp)
 	}
 	// drain sends the live batches the Hub already holds. It runs before every read of the stored
-	// events, so a batch handed over before an event was stored always precedes that event: the
-	// web client replaces an item's live text with the event, and a tail that arrived after it
-	// would stay on screen as a duplicate (#344).
+	// events, so a batch handed over before an event was stored usually precedes that event. That is
+	// an optimisation only: a batch can still arrive after its item's event (the Hub hands over
+	// notifications and the store is read on separate paths). Every chunk names its item and the
+	// stored event carries the same name, so the client drops a late tail (#344).
 	drain := func() error {
 		for {
 			select {
@@ -241,7 +242,7 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 func liveProto(cs []runwatch.Chunk) *runv1alpha1.WatchRunResponse {
 	out := make([]*runv1alpha1.LiveChunk, len(cs))
 	for i, c := range cs {
-		out[i] = &runv1alpha1.LiveChunk{Kind: c.Kind, Text: c.Text}
+		out[i] = &runv1alpha1.LiveChunk{Kind: c.Kind, Text: c.Text, Item: c.Item}
 	}
 	return &runv1alpha1.WatchRunResponse{Item: &runv1alpha1.WatchRunResponse_Live{Live: &runv1alpha1.LiveChunks{Chunks: out}}}
 }

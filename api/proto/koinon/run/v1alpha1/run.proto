@@ -187,7 +187,8 @@ message WatchRunResponse {
     Heartbeat heartbeat = 3;
     // Text the agent is typing, sent about every 100 ms while it types. Live only: never stored,
     // not part of the seq order, and a client that joins late or drops a stream misses it. The
-    // event for the finished message or thought follows with its whole text and replaces it.
+    // event for the finished message or thought follows with its whole text and replaces it; a
+    // client that has that event drops the item's live text (LiveChunk.item).
     LiveChunks live = 4;
   }
 }
@@ -203,6 +204,10 @@ message LiveChunk {
   // "acp.agent_message_chunk" or "acp.agent_thought_chunk".
   string kind = 1;
   string text = 2;
+  // item names the item the text belongs to. The run event stored for the item carries the same
+  // name as "item" in its payload. A client that has that event drops the item's live text, in
+  // whatever order the two arrive. Empty for a sender that does not name items.
+  string item = 3;
 }
 
 // Heartbeat is an empty keep-alive message.

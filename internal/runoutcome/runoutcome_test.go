@@ -478,7 +478,7 @@ var _ = Describe("RecordUpdate: items, not chunks (#344)", func() {
 	It("stores one event per message, however many chunks it came in, and sends every chunk live", func(ctx SpecContext) {
 		w := newWorld(ctx, true)
 		var live []string
-		own := runoutcome.New(runoutcome.Config{DB: pool, Queries: q, Run: w.run, Live: func(kind string, p []byte) { live = append(live, kind) }})
+		own := runoutcome.New(runoutcome.Config{DB: pool, Queries: q, Run: w.run, Live: func(kind, item string, p []byte) { live = append(live, kind) }})
 		for range 500 {
 			Expect(own.RecordUpdate(ctx, "acp.agent_message_chunk", chunk("agent_message_chunk", "ab"))).To(Succeed())
 		}
@@ -493,6 +493,40 @@ var _ = Describe("RecordUpdate: items, not chunks (#344)", func() {
 		Expect(text[2]).To(Equal("done"))
 		Expect(partial).To(Equal([]bool{false, false, false}))
 		Expect(live).To(HaveLen(501))
+	})
+
+	It("gives the stored event and its live chunks the same item name, and each item its own", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		liveItems := map[string]int{}
+		var order []string
+		own := runoutcome.New(runoutcome.Config{DB: pool, Queries: q, Run: w.run, Live: func(kind, item string, p []byte) {
+			if liveItems[item] == 0 {
+				order = append(order, item)
+			}
+			liveItems[item]++
+		}})
+		for _, c := range []struct{ kind, text string }{
+			{"agent_thought_chunk", "a"}, {"agent_thought_chunk", "b"}, {"agent_message_chunk", "c"}, {"agent_message_chunk", "d"}, {"agent_message_chunk", "e"},
+		} {
+			Expect(own.RecordUpdate(ctx, "acp."+c.kind, chunk(c.kind, c.text))).To(Succeed())
+		}
+		own.FlushItems(ctx, false)
+
+		evs, err := q.ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{OrgID: w.org, RunID: w.run.ID, MaxEvents: 1000})
+		Expect(err).NotTo(HaveOccurred())
+		var stored []string
+		for _, e := range evs {
+			var u struct {
+				Item string `json:"item"`
+			}
+			Expect(json.Unmarshal(e.Payload, &u)).To(Succeed())
+			stored = append(stored, u.Item)
+		}
+		Expect(stored).To(HaveLen(2))
+		Expect(stored[0]).NotTo(Equal(stored[1]))
+		Expect(order).To(Equal(stored), "the live chunks carry the names of the stored events")
+		Expect(liveItems[stored[0]]).To(Equal(2))
+		Expect(liveItems[stored[1]]).To(Equal(3))
 	})
 
 	It("keeps a thought and a message apart", func(ctx SpecContext) {

@@ -316,6 +316,16 @@ func (a *agentd) event(ctx context.Context, r store.Run, n int) store.RunEvent {
 	return ev
 }
 
+// item stores an event of an item, as the Owner does: the payload names the item ("item").
+func (a *agentd) item(ctx context.Context, r store.Run, name string) store.RunEvent {
+	ev, err := a.q.AppendRunEvent(ctx, store.AppendRunEventParams{
+		OrgID: r.OrgID, RunID: r.ID, Epoch: r.Epoch, Kind: "acp.agent_message_chunk",
+		Payload: fmt.Appendf(nil, `{"content":{"type":"text","text":"tail"},"item":%q}`, name),
+	})
+	Expect(err).NotTo(HaveOccurred())
+	return ev
+}
+
 func (a *agentd) finish(ctx context.Context, r store.Run) {
 	_, err := a.q.FinishRun(ctx, store.FinishRunParams{
 		OrgID: r.OrgID, ID: r.ID, Epoch: r.Epoch, Outcome: store.RunStateSucceeded,

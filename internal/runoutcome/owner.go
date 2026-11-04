@@ -91,7 +91,9 @@ type Config struct {
 	// block. Nil means none.
 	// agentd wires it to a runwatch.ChunkPublisher, which batches the chunks into koinon_run
 	// notifications for the API's WatchRun streams.
-	Live func(kind string, payload []byte)
+	// item names the item the chunk belongs to; the run event stored for that item carries the same
+	// name in its payload as "item" (items.go).
+	Live func(kind, item string, payload []byte)
 	// LiveFlush sends what Live has queued and returns when it is sent. The Owner calls it before it
 	// stores an item, so the item's live tail is delivered ahead of the event that replaces it. Nil
 	// means none.
@@ -104,9 +106,10 @@ type Owner struct {
 	run store.Run
 	q   *store.Queries
 
-	mu     sync.Mutex // serialises appends, srcSeq and pend
-	srcSeq int64
-	pend   pending // the chunks of the item in progress (items.go)
+	mu      sync.Mutex // serialises appends, srcSeq and pend
+	srcSeq  int64
+	itemSeq int64   // the last item number handed out (items.go)
+	pend    pending // the chunks of the item in progress (items.go)
 
 	fenceOnce sync.Once
 	fenced    chan struct{}

@@ -5,8 +5,8 @@ package api_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	connect "connectrpc.com/connect/v2"
@@ -122,9 +122,9 @@ var _ = Describe("WatchRun", func() {
 		// agentd's publisher batches chunks into NOTIFYs; polling is off, so only NOTIFY can deliver them.
 		pub := runwatch.NewChunkPublisher(e.pool, run.OrgID, run.ID, 20*time.Millisecond, nil)
 		for _, t := range []string{"Hel", "lo ", "wor", "ld"} {
-			pub.Add("acp.agent_message_chunk", []byte(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"`+t+`"}}`))
+			pub.Add("acp.agent_message_chunk", "1-1", []byte(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"`+t+`"}}`))
 		}
-		pub.Add("acp.agent_thought_chunk", []byte(`{"content":{"type":"text","text":"hm"}}`))
+		pub.Add("acp.agent_thought_chunk", "1-2", []byte(`{"content":{"type":"text","text":"hm"}}`))
 		pub.Close()
 
 		var text, thought string
@@ -148,7 +148,7 @@ var _ = Describe("WatchRun", func() {
 		Expect(countRunEvents(ctx, e, run)).To(Equal(before), "chunks are never stored")
 	})
 
-	It("delivers the live tail of an item before the event that replaces it (#344)", func(ctx SpecContext) {
+	It("names the item on every live batch, and the event that replaces it names the same item (#344)", func(ctx SpecContext) {
 		w := watch(ctx, f.owner, f.org, f.run.GetId(), 0)
 		Expect((<-w.items).GetRun()).NotTo(BeNil())
 		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))
@@ -156,67 +156,70 @@ var _ = Describe("WatchRun", func() {
 		// A tick far away: only Flush sends, as the Owner does before it stores the item.
 		pub := runwatch.NewChunkPublisher(e.pool, run.OrgID, run.ID, time.Hour, nil)
 		defer pub.Close()
-		pub.Add("acp.agent_message_chunk", []byte(`{"content":{"type":"text","text":"Hello world"}}`))
+		pub.Add("acp.agent_message_chunk", "1-1", []byte(`{"content":{"type":"text","text":"Hello world"}}`))
 		pub.Flush()
-		ad.event(ctx, run, 2)
+		ad.item(ctx, run, "1-1")
 
-		var order []string
-		for len(order) < 2 {
+		var liveItems, eventItems []string
+		for len(liveItems) < 1 || len(eventItems) < 1 {
 			select {
 			case msg, ok := <-w.items:
 				Expect(ok).To(BeTrue())
-				if len(msg.GetLive().GetChunks()) > 0 {
-					order = append(order, "live")
-				} else if msg.GetEvent() != nil {
-					order = append(order, "event")
+				for _, c := range msg.GetLive().GetChunks() {
+					liveItems = append(liveItems, c.GetItem())
+				}
+				if ev := msg.GetEvent(); ev != nil {
+					eventItems = append(eventItems, ev.GetPayload().AsMap()["item"].(string))
 				}
 			case <-time.After(5 * time.Second):
-				Fail("nothing arrived: " + strings.Join(order, ","))
+				Fail("nothing arrived")
 			}
 		}
-		Expect(order).To(Equal([]string{"live", "event"}))
+		Expect(liveItems).To(Equal([]string{"1-1"}))
+		Expect(eventItems).To(Equal([]string{"1-1"}))
 	})
 
-	It("never sends a live tail after the event that replaces it, even when the stream is busy (#344)", func(ctx SpecContext) {
+	It("lets a client drop every live tail of a stored item, whatever order they arrive in, even when the stream is busy (#344)", func(ctx SpecContext) {
 		w := watch(ctx, f.owner, f.org, f.run.GetId(), 0)
 		Expect((<-w.items).GetRun()).NotTo(BeNil())
 		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))
 
-		// The batch and the event's wake-up are both queued for the stream, again and again.
+		// The batch and the event's wake-up are both queued for the stream, again and again. The
+		// server sends a batch before its event when it can, but the client must not depend on it.
 		pub := runwatch.NewChunkPublisher(e.pool, run.OrgID, run.ID, time.Hour, nil)
 		defer pub.Close()
 		const rounds = 30
 		for i := 0; i < rounds; i++ {
-			pub.Add("acp.agent_message_chunk", []byte(`{"content":{"type":"text","text":"tail"}}`))
+			name := fmt.Sprintf("1-%d", i+1)
+			pub.Add("acp.agent_message_chunk", name, []byte(`{"content":{"type":"text","text":"tail"}}`))
 			pub.Flush()
-			ad.event(ctx, run, i+2)
+			ad.item(ctx, run, name)
 		}
-		var order []string
+		// What the web reducer does: show the live text of an item only while it is not a stored event.
+		stored := map[string]bool{}
+		shown := map[string]string{}
 		for events := 0; events < rounds; {
 			select {
 			case msg, ok := <-w.items:
 				Expect(ok).To(BeTrue())
-				if len(msg.GetLive().GetChunks()) > 0 {
-					order = append(order, "live")
-				} else if msg.GetEvent() != nil {
-					order = append(order, "event")
+				for _, c := range msg.GetLive().GetChunks() {
+					Expect(c.GetItem()).NotTo(BeEmpty(), "every live chunk names its item")
+					if !stored[c.GetItem()] {
+						shown[c.GetItem()] += c.GetText()
+					}
+				}
+				if ev := msg.GetEvent(); ev != nil {
+					item := ev.GetPayload().AsMap()["item"].(string)
+					stored[item] = true
+					delete(shown, item)
 					events++
 				}
 			case <-time.After(5 * time.Second):
-				Fail("nothing arrived: " + strings.Join(order, ","))
+				Fail("nothing arrived")
 			}
 		}
-		// Each batch was handed over before its event was stored, so the k-th event is preceded by
-		// at least k batches. (Both are NOTIFYs on one connection: the batch reaches the Hub first.)
-		live, k := 0, 0
-		for _, o := range order {
-			if o == "live" {
-				live++
-				continue
-			}
-			k++
-			Expect(live).To(BeNumerically(">=", k), "event %d came before its tail: %s", k, strings.Join(order, ","))
-		}
+		// A tail that came after its event was dropped by name; one before it was replaced.
+		Expect(shown).To(BeEmpty())
 	})
 
 	It("sends the item a canceled run's worker stores after the cancel, then a second final snapshot (#344)", func(ctx SpecContext) {

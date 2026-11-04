@@ -46,6 +46,10 @@ type Chunk struct {
 	// Kind is the run event kind of the item it belongs to ("acp.agent_message_chunk" and so on).
 	Kind string `json:"k"`
 	Text string `json:"t"`
+	// Item names the item the text belongs to; the run event stored for the item carries the same
+	// name in its payload ("item"). A viewer that has the stored event drops the item's live text,
+	// whatever order the two arrived in.
+	Item string `json:"i,omitempty"`
 }
 
 // Execer is what a ChunkPublisher needs of the database; *pgxpool.Pool is one.
@@ -85,9 +89,9 @@ func NewChunkPublisher(db Execer, org, run pgtype.UUID, interval time.Duration, 
 	return p
 }
 
-// Add queues the chunk of a harness update ("acp.<update>", the update's JSON). It never blocks on
-// the database. An update without text is ignored.
-func (p *ChunkPublisher) Add(kind string, payload []byte) {
+// Add queues the chunk of a harness update ("acp.<update>", the update's JSON) of the given item.
+// It never blocks on the database. An update without text is ignored.
+func (p *ChunkPublisher) Add(kind, item string, payload []byte) {
 	var u struct {
 		Content struct {
 			Type string `json:"type"`
@@ -103,16 +107,18 @@ func (p *ChunkPublisher) Add(kind string, payload []byte) {
 		return
 	}
 	p.size += len(u.Content.Text)
-	if n := len(p.pending); n > 0 && p.pending[n-1].Kind == kind {
+	if n := len(p.pending); n > 0 && p.pending[n-1].Kind == kind && p.pending[n-1].Item == item {
 		p.pending[n-1].Text += u.Content.Text
 		return
 	}
-	p.pending = append(p.pending, Chunk{Kind: kind, Text: u.Content.Text})
+	p.pending = append(p.pending, Chunk{Kind: kind, Item: item, Text: u.Content.Text})
 }
 
 // Flush sends what is queued now and returns when it is sent (or dropped). The Owner calls it before
-// it stores an item: Postgres delivers notifications in commit order, so the tail of the item's
-// live text then reaches a watcher before the event that replaces it, never after.
+// it stores an item, so the tail of the item's live text usually reaches a watcher before the event
+// that replaces it. That is an optimisation: a tail can still arrive after the event (a Hub hands
+// over a notification and a stored item on separate paths), and the Item name on every chunk is what
+// lets a viewer drop it.
 func (p *ChunkPublisher) Flush() { p.flush() }
 
 // Close sends what is queued and stops the publisher.
@@ -175,7 +181,7 @@ func Payloads(chunks []Chunk) []string {
 	}
 	for _, c := range chunks {
 		for _, piece := range splitText(c.Text, maxPiece) {
-			ch := Chunk{Kind: c.Kind, Text: piece}
+			ch := Chunk{Kind: c.Kind, Item: c.Item, Text: piece}
 			b, _ := json.Marshal(ch)
 			if curSize+len(b)+1 > maxPayload-80 { // 80: the prefix "<org>/<run>/"
 				emit()
