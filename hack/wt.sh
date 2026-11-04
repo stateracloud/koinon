@@ -13,12 +13,22 @@
 #       because make generate needs it; when that fails it says how to fix it and still succeeds.
 #       KOINON_WT_NO_INSTALL=1 skips the install.
 #   wt.sh rm <name> [--branch] [--force]
-#       remove the worktree. Refuses when it is dirty or has commits on no remote branch (--force
-#       skips both). --branch also deletes its local branch, never one with an open PR.
+#       remove the worktree (<name> is found through `git worktree list`, wherever $TMPDIR points).
+#       Refuses, naming each check that failed, when: a live claim (claim/<N> on origin, N from a
+#       branch named <type>/<N>-<slug>) is held on its branch; a process has its working directory in
+#       it; it has uncommitted changes; or it has commits on no remote branch. --force overrides all
+#       of them and prints what it overrides. --branch also deletes its local branch, never one with
+#       an open PR. Remove worktrees only through this script, never `git worktree remove`.
+#   wt.sh gc [--dry-run]
+#       remove every worktree under the root with proof it is finished (its branch's PR is merged, or
+#       its upstream is gone) that has no open PR and passes all the rm checks; a fresh or detached
+#       worktree is kept. Prints one keep/remove line each; a removal that fails is reported, the
+#       next worktree still runs, and the exit status is 1. Never forces.
 #   wt.sh ls
 #       one line per worktree: name branch clean|dirty +ahead/-behind (vs origin/main) #PR|-
 #   wt.sh path <name>
 #       print the worktree path (exit 1 when it does not exist)
+#   KOINON_WT_NO_FETCH=1 skips the fetch of claim refs that rm and gc make before the claim check.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -101,50 +111,251 @@ cmd_new() {
   echo "$dir"
 }
 
+# wt_dir <name>: the path of the linked worktree <root>/<name>, resolved through
+# `git worktree list --porcelain` with realpaths on both sides, so it works when $TMPDIR (and so the
+# root) is spelled differently in a sandbox and on the host. Only worktrees under the root count: a
+# linked worktree of the same name elsewhere (.claude/worktrees/<name>, a human's checkout) is never
+# returned. Fails when there is none.
+wt_dir() {
+	local name=$1 line path="" first=1 real="" rp
+	[ -d "$root" ] || return 1
+	real=$(cd "$root" && pwd -P)
+	while IFS= read -r line || [ -n "$line" ]; do
+		case $line in
+		"worktree "*) path=${line#worktree } ;;
+		"")
+			if [ -n "$path" ]; then
+				if [ "$first" -eq 1 ]; then
+					first=0 # the main checkout is never a candidate
+				elif [ "$(basename "$path")" = "$name" ]; then
+					rp=$(cd "$path" 2>/dev/null && pwd -P) || rp=""
+					case $rp in
+					"$real"/*) echo "$path"; return 0 ;;
+					esac
+				fi
+			fi
+			path=""
+			;;
+		esac
+	done < <(git worktree list --porcelain; echo)
+	return 1
+}
+
+# claim_reason <branch>: prints a refusal reason when a live claim points at the branch. Claims are
+# the refs claim/<issue> on origin (ADR 0082); the issue number is the one in <type>/<N>-<slug>. The
+# claim ref is read from the fetched copy, no network call besides the optional fetch.
+# The fetch runs once, in the calling shell (claim_reason itself runs in a command substitution);
+# a failed fetch leaves claim_fetch_failed=1 and the check then reports unknown claim state.
+claim_fetched=0
+claim_fetch_failed=0
+claim_fetch() {
+	[ "$claim_fetched" -eq 0 ] || return 0
+	claim_fetched=1
+	[ -z "${KOINON_WT_NO_FETCH:-}" ] || return 0
+	git fetch -q origin '+refs/heads/claim/*:refs/remotes/origin/claim/*' >/dev/null 2>&1 || claim_fetch_failed=1
+}
+claim_reason() {
+	local branch=$1 n ref msg state holder lease now
+	[[ $branch =~ ^[a-z]+/([0-9]+)- ]] || return 0
+	n=${BASH_REMATCH[1]}
+	if [ "$claim_fetch_failed" -eq 1 ]; then
+		echo "could not fetch claim refs from origin; claim state of #$n unknown"
+		return 0
+	fi
+	if ! command -v jq >/dev/null 2>&1; then
+		echo "jq is not installed; claim state of #$n unknown"
+		return 0
+	fi
+	for ref in "refs/remotes/origin/claim/$n" "refs/heads/claim/$n"; do
+		git rev-parse -q --verify "$ref" >/dev/null 2>&1 || continue
+		msg=$(git log -1 --format=%B "$ref" 2>/dev/null) || continue
+		state=$(sed -n 's/^state: *//p' <<<"$msg" | head -n1)
+		holder=$(sed -n 's/^holder: *//p' <<<"$msg" | head -n1)
+		lease=$(sed -n 's/^lease_until: *//p' <<<"$msg" | head -n1)
+		[ "$state" = held ] || continue
+		now=$(date -u +%s)
+		lease=$(jq -rn --arg l "$lease" '$l | fromdateiso8601' 2>/dev/null) || lease=""
+		if ! [[ $lease =~ ^[0-9]+$ ]]; then
+			echo "claim on #$n has a lease_until that does not parse; claim state of #$n unknown"
+			return 0
+		fi
+		if [ "$now" -le "$lease" ]; then
+			echo "a live claim on #$n is held by ${holder:-unknown} (lease until $(jq -rn --argjson e "$lease" '$e | todate'))"
+			return 0
+		fi
+	done
+}
+
+# proc_reason <dir>: prints a refusal reason when a process other than this one has its working
+# directory inside <dir>. Read-only: lsof, or /proc where there is no lsof.
+proc_reason() {
+	local dir real pid="" line cwd hits=""
+	real=$(cd "$1" && pwd -P)
+	dir=$1
+	if command -v lsof >/dev/null 2>&1; then
+		while IFS= read -r line; do
+			case $line in
+			p*) pid=${line#p} ;;
+			n*)
+				cwd=${line#n}
+				case $cwd in "$real" | "$real"/* | "$dir" | "$dir"/*)
+					[ "$pid" = "$$" ] || hits="$hits $pid"
+					;;
+				esac
+				;;
+			esac
+		done < <(lsof -w -d cwd -Fpn 2>/dev/null || true)
+	else
+		for cwd in /proc/[0-9]*/cwd; do
+			pid=${cwd#/proc/}
+			pid=${pid%/cwd}
+			line=$(readlink "$cwd" 2>/dev/null) || continue
+			case $line in "$real" | "$real"/*) [ "$pid" = "$$" ] || hits="$hits $pid" ;; esac
+		done
+	fi
+	[ -z "$hits" ] || echo "a process has its working directory inside (pid${hits})"
+}
+
+# guard <dir> <name>: fills reasons[] with every reason not to remove the worktree.
+reasons=()
+guard() {
+	local dir=$1 name=$2 branch unpushed r
+	reasons=()
+	branch=$(git -C "$dir" symbolic-ref -q --short HEAD || true)
+	if [ -n "$branch" ]; then
+		claim_fetch
+		r=$(claim_reason "$branch")
+		[ -z "$r" ] || reasons+=("$r")
+	fi
+	r=$(proc_reason "$dir")
+	[ -z "$r" ] || reasons+=("$r")
+	[ -z "$(git -C "$dir" status --porcelain)" ] || reasons+=("$name has uncommitted changes")
+	unpushed=$(git -C "$dir" rev-list --count HEAD --not --remotes)
+	[ "$unpushed" -eq 0 ] || reasons+=("$name has $unpushed commit(s) on no remote branch")
+}
+
+remove_wt() { # <dir> <name> <force> <delbranch>
+	local dir=$1 name=$2 force=$3 delbranch=$4 branch="" r
+	guard "$dir" "$name"
+	if [ "${#reasons[@]}" -gt 0 ]; then
+		if [ "$force" -eq 0 ]; then
+			for r in "${reasons[@]}"; do echo "wt: refusing to remove $name: $r" >&2; done
+			echo "wt: --force overrides these checks" >&2
+			return 1
+		fi
+		for r in "${reasons[@]}"; do echo "wt: --force overrides: $r" >&2; done
+	fi
+	branch=$(git -C "$dir" symbolic-ref -q --short HEAD || true)
+	# Every step checks its status: callers run this left of `||`, where set -e is off.
+	if [ "$force" -eq 1 ]; then
+		git worktree remove --force "$dir" || return 1
+	else
+		git worktree remove "$dir" || return 1
+	fi
+	if [ "$delbranch" -eq 1 ] && [ -n "$branch" ]; then
+		case $branch in
+		main | master) echo "wt: not deleting branch $branch" >&2 ;;
+		*)
+			local pr
+			pr=$(open_pr "$branch")
+			if [ -n "$pr" ]; then
+				echo "wt: kept branch $branch (open PR #$pr)" >&2
+			else
+				git branch -q -D "$branch" || return 1
+			fi
+			;;
+		esac
+	fi
+	return 0
+}
+
 cmd_rm() {
-  local name="" delbranch=0 force=0
-  while [ $# -gt 0 ]; do
-    case $1 in
-    --branch) delbranch=1 ;;
-    --force) force=1 ;;
-    -*) usage ;;
-    *)
-      [ -z "$name" ] || usage
-      name=$1
-      ;;
-    esac
-    shift
-  done
-  check_name "$name"
-  local dir=$root/$name
-  [ -d "$dir" ] || die "no worktree $name"
-  if [ "$force" -eq 0 ]; then
-    [ -z "$(git -C "$dir" status --porcelain)" ] || die "$name is dirty (--force to remove anyway)"
-    local unpushed
-    unpushed=$(git -C "$dir" rev-list --count HEAD --not --remotes)
-    [ "$unpushed" -eq 0 ] || die "$name has $unpushed commit(s) on no remote branch (--force to remove anyway)"
-  fi
-  local branch=""
-  branch=$(git -C "$dir" symbolic-ref -q --short HEAD || true)
-  if [ "$force" -eq 1 ]; then
-    git worktree remove --force "$dir"
-  else
-    git worktree remove "$dir"
-  fi
-  if [ "$delbranch" -eq 1 ] && [ -n "$branch" ]; then
-    case $branch in
-    main | master) echo "wt: not deleting branch $branch" >&2 ;;
-    *)
-      local pr
-      pr=$(open_pr "$branch")
-      if [ -n "$pr" ]; then
-        echo "wt: kept branch $branch (open PR #$pr)" >&2
-      else
-        git branch -q -D "$branch"
-      fi
-      ;;
-    esac
-  fi
+	local name="" delbranch=0 force=0
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--branch) delbranch=1 ;;
+		--force) force=1 ;;
+		-*) usage ;;
+		*)
+			[ -z "$name" ] || usage
+			name=$1
+			;;
+		esac
+		shift
+	done
+	check_name "$name"
+	local dir
+	dir=$(wt_dir "$name") || die "no worktree $name"
+	remove_wt "$dir" "$name" "$force" "$delbranch" || exit 1
+}
+
+# gc_finished <dir>: succeeds only on positive proof the work is finished: the branch's PR is merged,
+# or its upstream is gone (the remote branch existed and was deleted). A HEAD that is merely an
+# ancestor of origin/main (a fresh `wt new`) or a detached HEAD proves nothing, so it is kept.
+gc_finished() {
+	local dir=$1 branch track
+	branch=$(git -C "$dir" symbolic-ref -q --short HEAD || true)
+	[ -n "$branch" ] || return 1
+	track=$(git -C "$dir" for-each-ref --format='%(upstream:track)' "refs/heads/$branch")
+	[ "$track" = "[gone]" ] && return 0
+	[ -n "$(gh pr list --head "$branch" --state merged --json number 2>/dev/null | jq -r '.[0].number // empty' 2>/dev/null || true)" ]
+}
+
+cmd_gc() {
+	local dry=0 line path="" real first=1 name branch pr r rc=0
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--dry-run) dry=1 ;;
+		*) usage ;;
+		esac
+		shift
+	done
+	[ -d "$root" ] || return 0
+	real=$(cd "$root" && pwd -P)
+	local paths=()
+	while IFS= read -r line || [ -n "$line" ]; do
+		case $line in
+		"worktree "*) path=${line#worktree } ;;
+		"")
+			if [ -n "$path" ]; then
+				[ "$first" -eq 1 ] || case $path in "$real"/*) paths+=("$path") ;; esac
+				first=0
+			fi
+			path=""
+			;;
+		esac
+	done < <(git worktree list --porcelain; echo)
+	for path in "${paths[@]}"; do
+		name=$(basename "$path")
+		branch=$(git -C "$path" symbolic-ref -q --short HEAD || true)
+		if [ -n "$branch" ]; then
+			pr=$(open_pr "$branch")
+			if [ -n "$pr" ]; then
+				echo "keep $name: open PR #$pr"
+				continue
+			fi
+		fi
+		if ! gc_finished "$path"; then
+			echo "keep $name: branch is not merged or gone"
+			continue
+		fi
+		guard "$path" "$name"
+		if [ "${#reasons[@]}" -gt 0 ]; then
+			echo "keep $name: ${reasons[0]}"
+			continue
+		fi
+		if [ "$dry" -eq 1 ]; then
+			echo "would remove $name"
+		else
+			if git worktree remove "$path"; then
+				echo "removed $name"
+			else
+				echo "keep $name: git worktree remove failed"
+				rc=1
+			fi
+		fi
+	done
+	return "$rc"
 }
 
 cmd_ls() {
@@ -186,8 +397,7 @@ print_wt() { # <path> <branch>
 cmd_path() {
   [ $# -eq 1 ] || usage
   check_name "$1"
-  [ -d "$root/$1" ] || die "no worktree $1"
-  echo "$root/$1"
+  wt_dir "$1" || die "no worktree $1"
 }
 
 [ $# -ge 1 ] || usage
@@ -197,6 +407,7 @@ case $sub in
 new) cmd_new "$@" ;;
 rm) cmd_rm "$@" ;;
 ls) cmd_ls ;;
+gc) cmd_gc "$@" ;;
 path) cmd_path "$@" ;;
 *) usage ;;
 esac
