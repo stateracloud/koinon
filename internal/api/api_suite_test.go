@@ -110,6 +110,8 @@ type envOptions struct {
 	watchPoll time.Duration
 	// watchHeartbeat is WatchRun's idle heartbeat interval; 0 keeps the default.
 	watchHeartbeat time.Duration
+	// watchCancelGrace is how long WatchRun waits for late events of a canceled run; 0 keeps the default.
+	watchCancelGrace time.Duration
 	// ui is the web UI to serve, if any.
 	ui fs.FS
 	// keys and github back ConnectionService and the repository binding
@@ -251,7 +253,7 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 		Catalog:    catalog.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
 		MCP:        mcpservers.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
 		ModelCheck: modelcheck.New(e.pool, opts.modelChat, prices.NewResolver(pricing.Embedded())),
-		Hub:        e.hub, WatchPollInterval: opts.watchPoll, WatchHeartbeatInterval: opts.watchHeartbeat, DirectMessages: opts.directMessages, RunNow: opts.runNow,
+		Hub:        e.hub, WatchPollInterval: opts.watchPoll, WatchHeartbeatInterval: opts.watchHeartbeat, WatchCancelGrace: opts.watchCancelGrace, DirectMessages: opts.directMessages, RunNow: opts.runNow,
 		Logger: slog.New(slog.NewTextHandler(logOut, nil)),
 		Keys:   servicesKeys(opts.keys), GitHub: opts.github,
 		URLPolicy: catalog.URLPolicy{Namespace: "koinon", AllowedHosts: opts.allowedHosts},

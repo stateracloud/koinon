@@ -93,7 +93,9 @@ func (s *Server) CancelRun(ctx context.Context, req *runv1alpha1.CancelRunReques
 // sent only once the cursor has reached the run's last_event_seq, so it never
 // precedes an event it already includes, and the last snapshot of a finished
 // run follows its last event (the web client relies on this to tell a finished
-// run from a cut stream). The stream ends once the run has finished and its
+// run from a cut stream). A canceled run is the exception: its worker may still store the item it
+// was typing after the cancel (ADR 0074 item 8), so a canceled run that was claimed keeps its stream
+// open for cancelGrace, sends such late events and then a second final snapshot. The stream ends once the run has finished and its
 // last event and final snapshot have been sent. A stream that has sent nothing for
 // the heartbeat interval sends a heartbeat message (issue #141). Live text, the chunks of the
 // message or thought the agent is typing (runwatch/chunks.go), is forwarded as it arrives; it is not
@@ -138,7 +140,31 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 		beat.Reset(s.heartbeat)
 		return stream.Send(resp)
 	}
+	// drain sends the live batches the Hub already holds. It runs before every read of the stored
+	// events, so a batch handed over before an event was stored always precedes that event: the
+	// web client replaces an item's live text with the event, and a tail that arrived after it
+	// would stay on screen as a duplicate (#344).
+	drain := func() error {
+		for {
+			select {
+			case cs := <-sub.Chunks:
+				if err := sent(liveProto(cs)); err != nil {
+					return err
+				}
+			default:
+				return nil
+			}
+		}
+	}
+	// A canceled run whose worker had claimed it may still store the item it was typing (ADR 0074),
+	// after the run is terminal. Its stream stays open for the grace and sends the late events and
+	// a second final snapshot.
+	var graceEnd <-chan time.Time
+	graceOver := false
 	for {
+		if err := drain(); err != nil {
+			return err
+		}
 		events, err := s.q.ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{
 			OrgID: c.org, RunID: id, AfterSeq: cursor, MaxEvents: watchBatch,
 		})
@@ -168,14 +194,22 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 			// includes, and the final one must follow the last event (#140).
 			continue
 		}
-		if run.State != state {
+		// A finished run gets another snapshot when events arrived after the one it had.
+		if run.State != state || (len(events) > 0 && state.Finished()) {
 			state = run.State
 			if err := sent(&runv1alpha1.WatchRunResponse{Item: &runv1alpha1.WatchRunResponse_Run{Run: runProto(run)}}); err != nil {
 				return err
 			}
 		}
 		if run.State.Finished() {
-			return nil
+			if run.State != store.RunStateCanceled || run.Epoch == 0 || s.cancelGrace <= 0 || graceOver {
+				return nil
+			}
+			if graceEnd == nil {
+				t := time.NewTimer(s.cancelGrace)
+				defer t.Stop()
+				graceEnd = t.C
+			}
 		}
 	wait:
 		for {
@@ -185,6 +219,9 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 			case <-sub.C:
 				break wait
 			case <-poll.C:
+				break wait
+			case <-graceEnd:
+				graceOver = true
 				break wait
 			case cs := <-sub.Chunks:
 				// Live text (#344): forwarded as it comes, without re-reading the events.

@@ -760,7 +760,14 @@ event classes. The code lands in #344 (items), #345 (business and diagnostic eve
    which has no seq, is never replayed and is never stored. A lost batch costs a viewer some live text,
    not an event: the stored item that follows carries the whole text, and the run page replaces the
    live text with it. This is the one exception to [0022](0022-frontend-architecture.md)'s rule that
-   NOTIFY carries keys only; the plain wake-up (`<org_id>/<run_id>`) is unchanged.
+   NOTIFY carries keys only; the plain wake-up (`<org_id>/<run_id>`) is unchanged. A batch the Hub holds
+   is sent before the stored events read after it (WatchRun drains `Subscription.Chunks` before every
+   read), so a tail never trails the item that replaces it.
+   A canceled run is not complete when it turns terminal: its worker stores the item it was typing
+   after the cancel (`AppendCanceledRunEventOnce`), so item 1's "every event is committed when the run
+   finishes" does not hold for a canceled run that was claimed. WatchRun keeps such a stream open for a
+   grace (10 s, `WatchCancelGrace`), sends the late item and then a second final snapshot; the run page
+   drops live text when the stream ends.
 
 ### Open questions
 

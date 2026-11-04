@@ -2,7 +2,7 @@
 
 import { create } from '@bufbuild/protobuf'
 import { describe, expect, it } from 'vitest'
-import { LiveChunkSchema, RunEventSchema } from '@/gen/koinon/run/v1alpha1/run_pb'
+import { LiveChunkSchema, RunEventSchema, RunSchema, RunState } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { joinLive, reducer } from '@/hooks/use-run-watches'
 
 const chunk = (kind: string, text: string) => create(LiveChunkSchema, { kind, text })
@@ -37,6 +37,17 @@ describe('reducer live text', () => {
     let st = reducer({}, { type: 'live', runId: 'r', chunks: [chunk(msg, 'Hello world')] })
     st = reducer(st, { type: 'event', runId: 'r', event: event(1, msg) })
     st = reducer(st, { type: 'event', runId: 'r', event: event(2, 'acp.tool_call') })
+    expect(st.r.live).toEqual([])
+  })
+
+  it('drops the live text when the stream ends, and when a run succeeds', () => {
+    let st = reducer({}, { type: 'live', runId: 'r', chunks: [chunk(msg, 'tail')] })
+    st = reducer(st, { type: 'status', runId: 'r', status: 'ended' })
+    expect(st.r.live).toEqual([])
+    st = reducer({}, { type: 'live', runId: 'r', chunks: [chunk(msg, 'tail')] })
+    st = reducer(st, { type: 'run', runId: 'r', run: create(RunSchema, { state: RunState.CANCELED }) })
+    expect(st.r.live).toHaveLength(1)
+    st = reducer(st, { type: 'run', runId: 'r', run: create(RunSchema, { state: RunState.SUCCEEDED }) })
     expect(st.r.live).toEqual([])
   })
 })
