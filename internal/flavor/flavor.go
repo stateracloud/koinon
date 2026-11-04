@@ -93,6 +93,12 @@ type Descriptor struct {
 	// (flavors/common/koinon-entry-lib.sh) and makes the harness follow them, not its own defaults.
 	// A flavor whose harness retries but cannot be given the policy has no place here.
 	RetriesModelRequests bool
+	// MCPToolPrefix is what the harness puts before the name of a tool it got from Koinon's MCP
+	// server in a tool call's title (OpenCode: the server is "koinon", the title "koinon_<tool>").
+	// agentd's leak guard feed reports nothing for such a finished call: the gateway saw its
+	// result and set the legs from the tool's declaration (ADR 0091 decision 4). "" when the
+	// flavor's titles cannot be told apart, and every call of kind other then sets both legs.
+	MCPToolPrefix string
 }
 
 var table = []Descriptor{
@@ -126,6 +132,7 @@ var table = []Descriptor{
 		// from the read-only config, overrides each decision through the session.retry hook
 		// (flavors/opencode/README.md, "Model retries").
 		RetriesModelRequests: true,
+		MCPToolPrefix:        "koinon_",
 	},
 }
 
