@@ -145,9 +145,17 @@ with `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
 
 The maintainer lab (`hack/e2e-remote.sh --argo`, `e2e-lab`, lanes): `docs/dev/maintainer-homelab.md`.
 
-`hack/pr-merge.sh <PR> [--admin] [--approved-at <time>]` does all of this in one script (#647): it refuses a
-draft, runs `pr-wait.sh --checks` (with `--require e2e` when `needs-e2e.sh` says so), reads every
-required context of `hack/ci-required.txt` on the head SHA (newest run per name, success or skipped),
-and only then runs `claim.sh review`, `gh pr merge --merge` (`--admin`, else `--auto`) and comments the
-head SHA and the number of contexts it read. `pr-wait.sh --checks` exits 5 on a draft and, after
-`ready_for_review`, ignores runs that started before it.
+`hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]` does all of this in one script (#647): it refuses a
+draft, runs `pr-wait.sh --checks` (with `--require e2e` when `needs-e2e.sh` says so; it reads the PR's whole
+file list with `gh api pulls/<PR>/files --paginate` and requires e2e when that read fails or is empty),
+reads every required context of `hack/ci-required.txt` on the head SHA (newest run per name, success or
+skipped), re-reads the PR (not OPEN: exit 3; head not origin's branch tip: exit 6 `STALE-HEAD`), runs
+`gh pr merge --merge` (`--admin`, else `--auto`, which prints `auto-merge enabled`), and only after that
+succeeded `claim.sh review` in the claim's lane (from `claim.sh mine`, or `--lane`) and a PR comment with the
+head SHA and the number of contexts it read. `pr-wait.sh --checks` exits 5 on a draft. After
+`ready_for_review` it ignores only the draft's `ci` workflow runs: those created more than about 30 s before
+the last ready event whose newest attempt (a by-hand re-run counts) also started before it. dco, gitleaks,
+claim and commit statuses (`e2e-lab`) keep their result; when gh cannot list the runs, each `ci` check run's
+start time decides instead. It exits 6 `STALE-HEAD` when the PR's head stays different from
+`git ls-remote origin refs/heads/<branch>` for `PR_WAIT_STALE_GRACE` seconds (default 120); re-sync with
+`gh api -X PATCH repos/{owner}/{repo}/pulls/<PR> -f base=<base>`.

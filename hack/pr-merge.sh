@@ -5,20 +5,26 @@
 # hand-written wait-then-merge loops: a draft's green rollup, a ready run that has not started yet and a
 # required context that never reported have each been merged over by hand before.
 #
-# Usage: hack/pr-merge.sh <PR> [--admin] [--approved-at <time>]
+# Usage: hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]
 #   1. refuses a draft (exit 5) and a PR that is not open
 #   2. hack/pr-wait.sh <PR> --checks, plus `--require e2e` when hack/needs-e2e.sh says the change needs
 #      the kind e2e (the ruleset's required contexts are read by --checks itself)
 #   3. reads every context of hack/ci-required.txt (not `advisory`) on the head SHA, newest run per
 #      name; each must be success or skipped, otherwise it exits 1 without merging
-#   4. only then: hack/claim.sh review <N> for each issue the PR closes (a failure is a warning: the
-#      merge does not depend on the claim), `gh pr merge --merge` (with --admin when given, else --auto),
-#      pinned to the head SHA that was read, and a PR comment naming that SHA and the number of green
-#      contexts read
+#   4. only then: re-reads the PR (no longer OPEN: exit 3; head moved: exit 2; head not origin's
+#      branch tip: exit 6 STALE-HEAD), `gh pr merge --merge` (with --admin when given, else --auto),
+#      pinned to the head SHA that was read, then hack/claim.sh review <N> for each issue the PR closes,
+#      in the claim's lane (read from `claim.sh mine`, or --lane), and only after the merge command
+#      succeeded (a review failure is a warning: the merge does not depend on the claim), and a PR
+#      comment naming that SHA and the number of green contexts read. With --auto the PR is merged later:
+#      the output says `auto-merge enabled`.
+#   The e2e decision reads the PR's whole file list (`gh api pulls/<PR>/files --paginate`); when that read
+#   fails or is empty, e2e is required (fail closed).
 #   --admin        merge now with admin rights (main merges ready PRs this way, AGENTS.md "Merging")
+#   --lane L       the claim lane for `claim.sh review` (default: the lane of the claim in `claim.sh mine`)
 #   --approved-at  when the human approved the admin merge; recorded in the comment, not checked
 # Exit: 0 merged (or auto-merge enabled), 1 a required context is not green, 2 the wait timed out or
-#       a tool failed, 3 closed, 4 conflict, 5 draft, 64 usage (pr-wait.sh's code passes through).
+#       a tool failed, 3 closed, 4 conflict, 5 draft, 6 stale head, 64 usage (pr-wait.sh's code passes through).
 # Test hooks: PR_MERGE_WAIT, PR_MERGE_NEEDS_E2E, PR_MERGE_CLAIM replace the three helper scripts.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -34,14 +40,19 @@ claim_sh=${PR_MERGE_CLAIM:-$here/claim.sh}
 required_txt=${PR_MERGE_REQUIRED:-$here/ci-required.txt}
 
 usage() {
-  echo "usage: hack/pr-merge.sh <PR> [--admin] [--approved-at <time>]" >&2
+  echo "usage: hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]" >&2
   exit 64
 }
 
-pr="" admin=0 approved=""
+pr="" admin=0 approved="" lane=""
 while [ $# -gt 0 ]; do
   case $1 in
   --admin) admin=1 ;;
+  --lane)
+    [ $# -ge 2 ] || usage
+    lane=$2
+    shift
+    ;;
   --approved-at)
     [ $# -ge 2 ] || usage
     approved=$2
@@ -57,7 +68,8 @@ while [ $# -gt 0 ]; do
 done
 case $pr in '' | *[!0-9]*) usage ;; esac
 
-json=$(gh pr view "$pr" --json state,isDraft,headRefOid,baseRefName,closingIssuesReferences) || { echo "pr-merge: cannot read PR $pr" >&2; exit 2; }
+pr_json=$(gh pr view "$pr" --json state,isDraft,headRefOid,baseRefName,closingIssuesReferences) || { echo "pr-merge: cannot read PR $pr" >&2; exit 2; }
+json=$pr_json
 state=$(jq -r '.state' <<<"$json")
 sha=$(jq -r '.headRefOid' <<<"$json")
 base=$(jq -r '.baseRefName' <<<"$json")
@@ -70,7 +82,13 @@ fi
 # Does the change need the kind e2e? Judged on the PR's own file list, not on the local checkout.
 req=()
 rc=0
-gh pr view "$pr" --json files --jq '.files[].path' | "$needs_sh" --stdin >/dev/null 2>&1 || rc=$?
+# Fail closed: an unreadable or empty list requires e2e. `gh pr view --json files` stops at 100 files.
+if files=$(gh api "repos/{owner}/{repo}/pulls/$pr/files" --paginate --jq '.[].filename' 2>/dev/null) && [ -n "$files" ]; then
+  "$needs_sh" --stdin <<<"$files" >/dev/null 2>&1 || rc=$?
+else
+  echo "pr-merge: cannot read the file list of PR $pr; requiring e2e" >&2
+  rc=2
+fi
 case $rc in
 1) ;;                  # not needed
 *) req=(--require e2e) # needed, or it could not be decided (exit 2): treat as needed
@@ -111,15 +129,46 @@ if [ "$bad" -gt 0 ]; then
   exit 1
 fi
 
-for n in $(jq -r '.closingIssuesReferences[]?.number' <<<"$json"); do
-  "$claim_sh" review "$n" || echo "pr-merge: warning: claim.sh review $n failed ($?); merging anyway" >&2
-done
+# The wait can take an hour: read the PR again before merging (state, head, and origin's branch tip).
+json=$(gh pr view "$pr" --json state,headRefOid,headRefName,isCrossRepository) || { echo "pr-merge: cannot re-read PR $pr" >&2; exit 2; }
+[ "$(jq -r '.state' <<<"$json")" = OPEN ] || { echo "pr-merge: PR $pr is no longer open ($(jq -r '.state' <<<"$json")); not merging" >&2; exit 3; }
+now=$(jq -r '.headRefOid' <<<"$json")
+[ "$now" = "$sha" ] || { echo "pr-merge: PR $pr head moved from ${sha:0:7} to ${now:0:7} while waiting; run it again" >&2; exit 2; }
+br=$(jq -r '.headRefName // ""' <<<"$json")
+if [ -n "$br" ] && [ "$(jq -r '.isCrossRepository // false' <<<"$json")" != true ]; then
+  rem=$(git ls-remote origin "refs/heads/$br" 2>/dev/null | awk 'NR == 1 { print $1 }') || rem=""
+  if [ -n "$rem" ] && [ "$rem" != "$sha" ]; then
+    echo "STALE-HEAD: PR $pr head is ${sha:0:7} but origin/$br is ${rem:0:7}; GitHub has not picked up the push. Re-sync: gh api -X PATCH repos/{owner}/{repo}/pulls/$pr -f base=$base" >&2
+    exit 6
+  fi
+fi
 
 mode=--auto
 [ "$admin" = 0 ] || mode=--admin
-gh pr merge "$pr" --merge "$mode" --match-head-commit "$sha"
+gh pr merge "$pr" --merge "$mode" --match-head-commit "$sha" || { rc=$?; echo "pr-merge: gh pr merge failed ($rc); the claim stays as it is" >&2; exit "$rc"; }
 
-note="pr-merge.sh: read $green required contexts on head \`$sha\` (newest run per name; all success or skipped) against $base, then merged ($mode)."
+# The claim moves to review only now. A lane claim (`holder#lane`) is reviewable only under its lane.
+mine=$("$claim_sh" mine 2>/dev/null) || mine=""
+for n in $(jq -r '.closingIssuesReferences[]?.number' <<<"$pr_json"); do
+  l=$lane
+  if [ -z "$l" ]; then
+    holder=$(awk -F'\t' -v n="#$n" '$1 == n { print $NF; exit }' <<<"$mine")
+    holder=${holder##*/}
+    case $holder in *'#'*) l=${holder#*#} ;; esac
+  fi
+  if [ -n "$l" ]; then
+    "$claim_sh" review "$n" --lane "$l" || echo "pr-merge: warning: claim.sh review $n --lane $l failed ($?)" >&2
+  else
+    "$claim_sh" review "$n" || echo "pr-merge: warning: claim.sh review $n failed ($?)" >&2
+  fi
+done
+
+if [ "$mode" = --auto ]; then
+  verb="auto-merge enabled"
+else
+  verb="merged ($mode)"
+fi
+note="pr-merge.sh: read $green required contexts on head \`$sha\` (newest run per name; all success or skipped) against $base, then $verb."
 [ -z "$approved" ] || note+=" Approved at $approved."
 gh pr comment "$pr" --body "$note"
-echo "pr-merge: $mode merge of PR $pr at ${sha:0:7} ($green contexts green)"
+echo "pr-merge: $verb for PR $pr at ${sha:0:7} ($green contexts green)"
