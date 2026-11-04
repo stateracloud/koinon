@@ -286,10 +286,16 @@ func splitHosts(s string) []string {
 // agentgateway CRDs next to the existing controller (plan item G2, ADR 0058) and confirms each
 // revision with the same probe key.
 func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (gateway.ModelGateway, error) {
+	if err := gateway.ValidateGuardURL(cfg.mcpGuardURL); err != nil {
+		return nil, fmt.Errorf("--mcp-guard-url: %w", err)
+	}
+	if cfg.mcpGuardURL == "" {
+		log.Warn("no --mcp-guard-url: the gateway refuses every call to an org's MCP server (the leak guard fails closed)")
+	}
 	switch cfg.gatewayMode {
 	case project.GatewayStandalone:
 		driver := &standalone.Driver{
-			Options: standalone.Options{Port: cfg.gatewayPort, DatabaseURL: cfg.gatewayDBURL},
+			Options: standalone.Options{Port: cfg.gatewayPort, DatabaseURL: cfg.gatewayDBURL, GuardURL: cfg.mcpGuardURL},
 			Deliverer: standalone.ConfigMapDeliverer{
 				Client: kube, Namespace: cfg.namespace, Name: cfg.gatewayConfigMap, FieldManager: reconciler.ManagedByValue,
 				OwnerDeployment: cfg.gatewayDeployment,
@@ -336,6 +342,7 @@ func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (
 			Options: gwk8s.Options{
 				Namespace: cfg.namespace, GatewayName: cfg.gatewayName, GatewayClassName: cfg.gatewayClass,
 				Port: cfg.gatewayPort, ProviderKeysSecret: cfg.providerKeysSecret, ManagedBy: reconciler.ManagedByValue,
+				GuardURL: cfg.mcpGuardURL,
 			},
 			Store:  gwk8s.DynamicStore{Client: dyn, FieldManager: reconciler.ManagedByValue},
 			Events: kube,

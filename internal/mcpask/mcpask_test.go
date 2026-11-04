@@ -305,6 +305,10 @@ var _ = Describe("the ask-tier proxy", func() {
 			"allowance removed": func(ctx SpecContext) {
 				Expect(q.DeleteAgentMCPServers(ctx, store.DeleteAgentMCPServersParams{OrgID: org, AgentID: agent.ID})).To(Succeed())
 			},
+			"tool no longer offered": func(ctx SpecContext) {
+				_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{{Name: "search", Description: "Search"}})
+				Expect(err).NotTo(HaveOccurred())
+			},
 			"new URL": func(ctx SpecContext) {
 				u := "https://mcp2.example.com/mcp"
 				_, err := svc.Update(ctx, org, audit.System(), server.ID, mcpservers.Patch{URL: &u})
@@ -327,6 +331,18 @@ var _ = Describe("the ask-tier proxy", func() {
 			_, _ = svc.SetTier(ctx, org, audit.System(), server.ID, "create_issue", "ask")
 		}
 		Expect(gw.count()).To(BeZero())
+	})
+
+	It("runs an approved call whose tool has moved to the auto tier since: a person approved this exact call", func(ctx SpecContext) {
+		// The gateway opens the executor's key to the auto tier too, for the leak guard's cards (ADR
+		// 0091), so the call reaches the server; only the never tier stops an approved call.
+		row := request(ctx, map[string]any{"title": "b"})
+		_, err := svc.SetTier(ctx, org, audit.System(), server.ID, "create_issue", "auto")
+		Expect(err).NotTo(HaveOccurred())
+		got, err := exec().Approve(ctx, org, row.ID, user, row.ArgsSha256, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.Status).To(Equal(store.ApprovalStatusExecuted), got.Error.String)
+		Expect(gw.calls).To(Equal([]string{row.ArgsJson}))
 	})
 
 	Describe("scoped approvals", func() {

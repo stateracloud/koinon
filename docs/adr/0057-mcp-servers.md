@@ -131,7 +131,8 @@ procoduck decided these points on 2026-10-24. They answer the open questions abo
    Only a failure before the request is sent is retried; once it is sent, a lost answer fails the request
    with "outcome unknown" and it is never run again. The auto tier is offered on the server's own target,
    directly through the gateway.
-8. **Health.** The reconciler probes each served server every 60 s through the gateway with a probe key
+8. **Health.** The reconciler probes each served server every 60 s through the gateway with a probe key,
+   and also right after the pass that first serves a server or serves it with another URL or credential (#226)
    (initialize and `tools/list`, as an agent would), which also syncs the tool list. With `failOpen` an
    unreachable target is skipped without an error, so "no tools came back" is the failure the prober sees,
    and the Servers page shows that: the credential never leaves the gateway, so the prober cannot ask the

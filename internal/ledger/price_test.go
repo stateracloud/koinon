@@ -464,7 +464,7 @@ var _ = Describe("An unusable stored price", func() {
 			})
 		}
 
-		It("settles a 5xx as it did: not waived, and the provider's status is kept", func(ctx SpecContext) {
+		It("charges a 5xx without usage its input estimate only: not waived, no reserve, the provider's status kept (#340)", func(ctx SpecContext) {
 			e := newEnv(ctx, uniq("org"), "", "100.00")
 			e.model(ctx, "openrouter", flash)
 			x := rejected(e, 502)
@@ -472,6 +472,8 @@ var _ = Describe("An unusable stored price", func() {
 			Expect(err).NotTo(HaveOccurred())
 			s := e.lastEntry(ctx)
 			Expect(s.OutputTokens).To(BeZero(), "a 5xx is charged what it streamed, nothing here")
+			Expect(s.InputTokens).To(Equal(int64(1_000_000)))
+			Expect(string(s.Estimate)).To(ContainSubstring(`"failed_by_upstream": true`))
 			Expect(s.Estimated).To(BeTrue())
 			Expect(string(s.Estimate)).To(ContainSubstring(`"usage_missing": true`))
 			Expect(string(s.Estimate)).NotTo(ContainSubstring("charge_waived"))

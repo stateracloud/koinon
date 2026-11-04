@@ -80,6 +80,9 @@ data:
           request: {min: {{ .Values.sandbox.resources.bounds.memory.request.min | quote }}, max: {{ .Values.sandbox.resources.bounds.memory.request.max | quote }}}
           limit: {min: {{ .Values.sandbox.resources.bounds.memory.limit.min | quote }}, max: {{ .Values.sandbox.resources.bounds.memory.limit.max | quote }}}
       memoryRequestEqualsLimit: {{ .Values.sandbox.resources.memoryRequestEqualsLimit }}
+    # The MCP leak guard (ADR 0091): every org MCP route's mcpGuardrails, failClosed.
+    mcpGuard:
+      url: http://{{ include "koinon.componentName" (list . "api-guard") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.guardPort }}
     mcpAsk:
       url: http://{{ include "koinon.componentName" (list . "api-tools") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.toolsPort }}/mcp-ask
     koinonTools:

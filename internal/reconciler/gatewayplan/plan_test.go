@@ -406,6 +406,7 @@ func mcpInput() gatewayplan.Input {
 			{Name: "edit", Present: true, Tier: gatewayplan.TierAsk},
 			{Name: "drop", Present: true, Tier: gatewayplan.TierNever},
 			{Name: "gone", Present: false, Tier: gatewayplan.TierAuto},
+			{Name: "bad.name", Present: true, Tier: gatewayplan.TierAuto},
 		},
 	}
 	sick := srv
@@ -445,8 +446,13 @@ var _ = Describe("MCP servers", func() {
 		}
 		Expect(names).To(ContainElements("acme-wiki", "acme-wiki-ask", "acme-sick"))
 		exec := gateway.AgentRef{Org: "acme", Name: gateway.MCPExecAgentName}
-		// The executor opens every ask-tier tool of the org's servers, healthy or not (as before #455).
-		Expect(pl.State.Tools[exec]).To(Equal([]gateway.ToolGrant{{Target: "acme-wiki", Tools: []string{"edit"}}, {Target: "acme-sick", Tools: []string{"edit"}}}))
+		// The executor opens every tool a person can approve a call of, healthy server or not (as
+		// before #455): the ask tier (ADR 0042) and the auto tier, whose external calls the leak
+		// guard sends to a person (ADR 0091). Never a never-tier, absent or unnamable tool.
+		Expect(pl.State.Tools[exec]).To(Equal([]gateway.ToolGrant{
+			{Target: "acme-wiki", Tools: []string{"search", "edit"}},
+			{Target: "acme-sick", Tools: []string{"search", "edit"}},
+		}))
 		Expect(pl.State.Tools).To(HaveKey(gateway.AgentRef{Org: "acme", Name: gateway.MCPProbeAgentPrefix + "wiki"}))
 		Expect(lk.issued).To(Equal(2))
 		Expect(p.Probes()).To(BeEmpty(), "probes exist only once the state is applied")
@@ -482,6 +488,34 @@ var _ = Describe("MCP servers", func() {
 			settle(d, nil, nil, lk).Applied(gatewayplan.ApplyResult{})
 		}
 		Expect(lk.issued).To(Equal(2))
+	})
+
+	It("asks for a probe of a server that is newly served or whose credential or URL changed, and of none else (#226)", func() {
+		p := newPlanner(0)
+		apply := func(mut func(*gatewayplan.Input)) []string {
+			in := mcpInput()
+			in.Allowances = allow
+			if mut != nil {
+				mut(&in)
+			}
+			var names []string
+			for _, pr := range settle(p.Begin(in), nil, nil, lk).Applied(gatewayplan.ApplyResult{}).Probe {
+				names = append(names, pr.Name)
+			}
+			return names
+		}
+		Expect(apply(nil)).To(ConsistOf("wiki", "sick"), "every server is new to a fresh process")
+		Expect(apply(nil)).To(BeEmpty(), "an unchanged server waits for the ticker")
+		Expect(apply(func(in *gatewayplan.Input) {
+			in.MCP[0].File = "mcp-wiki-f2"
+			in.MCPFiles = map[string][]byte{"mcp-wiki-f2": []byte("koinon_test_not-a-real-token")}
+		})).To(ConsistOf("wiki"), "a changed credential")
+		Expect(apply(func(in *gatewayplan.Input) { in.MCP[0].URL = "https://wiki2.example.test/mcp" })).To(ConsistOf("wiki"), "a changed URL")
+
+		in := mcpInput()
+		in.Allowances = allow
+		out := settle(p.Begin(in), nil, nil, lk).Applied(gatewayplan.ApplyResult{Failed: true})
+		Expect(out.Probe).To(BeEmpty(), "nothing was applied")
 	})
 
 	It("leaves a server out while its new credential settles, and serves it with the previous one", func() {

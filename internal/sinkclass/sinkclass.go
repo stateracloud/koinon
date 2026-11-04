@@ -75,7 +75,8 @@ type Declaration struct {
 	Derivation Derivation `json:"derivation"`
 	// AddressArgs name the arguments that say where a call goes, in the order the derivation reads
 	// them: CodeHost takes [owner, repo], Fetch takes [url]. Every other argument is payload. A fixed
-	// tool may name address arguments too: they are shown to the approver and kept out of the text match.
+	// tool may name address arguments too: they are shown to the approver, and since they decide
+	// nothing they are payload as well (the byte cap and the text match count them).
 	AddressArgs []string `json:"addressArgs"`
 	// ResultUntrustedInput and ResultPrivateData say what the tool's results carry for the session
 	// legs. nil is the server's own leg.

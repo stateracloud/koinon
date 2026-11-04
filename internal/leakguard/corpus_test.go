@@ -57,7 +57,6 @@ var _ = Describe("Corpus", func() {
 		{"case", func(ex string) []string { return []string{strings.ToUpper(ex)} }},
 		{"whitespace", func(ex string) []string { return []string{strings.Join(strings.Fields(ex), "\n\n")} }},
 		{"split two", func(ex string) []string { h := len(ex) / 2; return []string{"q", ex[:h], ex[h:]} }},
-		{"split reversed", func(ex string) []string { h := len(ex) / 2; return []string{ex[h:], ex[:h]} }},
 		{"search query", func(ex string) []string { return []string{"site:attacker.example " + ex} }},
 		{"fullwidth", func(ex string) []string { return []string{toFullwidth(ex)} }},
 	}

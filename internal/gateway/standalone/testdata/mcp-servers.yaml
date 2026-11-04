@@ -12,7 +12,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"3e00d56b4e908ced"'
+      koinon.config: '"87cb40e639e18582"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -50,7 +50,7 @@ llm:
             agent: globex/analyst
             org: globex
           allowedModels: []
-        - keyHash: sha256:dabacd505d3745187317c742d02e27d30904b174964c9410151348046e2df051
+        - keyHash: sha256:52e738559a2bcd72d3d2df2bebcc92db2d4c66387904ea13016475802c621d9d
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -95,6 +95,13 @@ mcp:
         - apiKey.agent == "acme/repo-helper" && ((mcp.tool.target == "acme-wiki" && mcp.tool.name in ["read_page", "search"]) || (mcp.tool.target == "acme-legacy" && mcp.tool.name in ["ping"]))
         - apiKey.agent == "globex/analyst" && ((mcp.tool.target == "globex-search" && mcp.tool.name in ["query"]))
         - mcp.prompt.name == "koinon-ready"
+    mcpGuardrails:
+      processors:
+        - kind: expression
+          methods:
+            tools/call: full
+          condition: mcp.tool.target in ["acme-legacy", "acme-wiki", "globex-search"]
+          reject: 'refused: the MCP leak guard is not configured on this installation'
     transformations:
       request:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id", "user-agent"])

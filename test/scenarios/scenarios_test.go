@@ -62,6 +62,18 @@ var _ = Describe("the repo-helper scenario", func() {
 		Expect(string(raw)).To(Equal(p.TrackerAskArgs), "the e2e compares the approval's arguments to this exactly")
 	})
 
+	It("reads from the tracker, then calls its write tool with the arguments the guard's case names", func() {
+		p := scenarios.PullRequest
+		read, _ := toolTurn(script, p.TrackerReadTool)
+		Expect(read.When.UserContains).To(Equal(p.TrackerGuardPrompt))
+		write, call := toolTurn(script, p.TrackerGuardTool)
+		Expect(write.When.UserContains).To(Equal(p.TrackerGuardPrompt))
+		Expect(write.When.ToolResult).To(Equal(p.TrackerReadTool), "the write comes after the read: both legs first")
+		raw, err := json.Marshal(call.Arguments)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).To(Equal(p.TrackerGuardArgs), "the e2e compares the approval's arguments to this exactly")
+	})
+
 	It("files the branch under the agent's namespace", func() {
 		got, err := scenarios.PullRequest.Branch("Repo Helper", "0194f2c0-1111-7000-8000-00000000abcd")
 		Expect(err).NotTo(HaveOccurred())

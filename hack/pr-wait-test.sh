@@ -20,6 +20,11 @@ export FAKE_DIR="$tmp/seq" PATH="$tmp/bin:$PATH"
 cat >"$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 echo "$*" >>"$FAKE_DIR/calls"
+if [ "$1 $2" = "run list" ] && [[ $* == *--workflow\ ci.yml* ]]; then # the ci runs on the head: $FAKE_DIR/ciruns (JSON), else gh "fails"
+  [ -f "$FAKE_DIR/ciruns" ] || exit 9
+  cat "$FAKE_DIR/ciruns"
+  exit 0
+fi
 if [ "$1 $2" = "run list" ]; then
   [ -f "$FAKE_DIR/runs" ] || exit 0
   m=$(($(cat "$FAKE_DIR/rn" 2>/dev/null || echo 0) + 1))
@@ -30,6 +35,11 @@ fi
 if [ "$1" = api ] && [[ $2 == */rules/branches/* ]]; then # the ruleset's required contexts, one per line
   [ -f "$FAKE_DIR/rules" ] || exit 9
   cat "$FAKE_DIR/rules"
+  exit 0
+fi
+if [ "$1" = api ] && [[ $2 == */issues/*/events ]]; then # the last ready_for_review time, if $FAKE_DIR/ready exists
+  [ -f "$FAKE_DIR/ready" ] || exit 9
+  cat "$FAKE_DIR/ready"
   exit 0
 fi
 if [ "$1" = api ]; then # gh api .../check-runs --jq ...: $FAKE_DIR/rows holds the --jq output (one row per line)
@@ -367,6 +377,57 @@ seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"
 run 7 --interval 0 --timeout 0
 expect "without --checks the ruleset is not consulted" 2 "checks 2/2 green
 TIMEOUT"
+
+# 7c. (#647) a draft is never green; after ready_for_review the draft's runs are ignored
+seq_set '{"state":"OPEN","isDraft":true,"mergeStateStatus":"BLOCKED","mergeCommit":null,"statusCheckRollup":[{"name":"quick checks","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-01T10:00:00Z"}]}'
+run 7 --checks --interval 0
+expect "--checks on a draft: DRAFT, exit 5" 5 "DRAFT: not tested, mark ready for review (hack/ship.sh --ready, gh pr ready)"
+rd() { # <rollup>: a ready PR
+  printf '{"state":"OPEN","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":null,"statusCheckRollup":[%s]}' "$1"
+}
+cr_ci() { cr_at "$@" | sed 's/^{/{"workflowName":"ci",/'; }
+old_go=$(cr_ci go SUCCESS 61 2026-11-01T10:00:00Z)
+new_go=$(cr_ci go SUCCESS 62 2026-11-01T11:05:00Z)
+seq_set "$(rd "$old_go")" "$(rd "$old_go")" "$(rd "$old_go,$new_go")"
+printf '2026-11-01T11:00:00Z\n' >"$FAKE_DIR/ready"
+printf 'go\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "after ready: the draft's green run is ignored until the ready run exists" 0 "waiting for the ready run
+checks 1/1 green"
+# dco has no ready run: its draft-era verdict stands
+dco_old=$(cr_at dco SUCCESS 63 2026-11-01T10:00:00Z | sed 's/^{/{"workflowName":"dco",/')
+seq_set "$(rd "$old_go,$new_go,$dco_old")"
+printf 'go\ndco\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "after ready: a draft-era dco run still counts" 0 "checks 3/3 green"
+# a draft-era e2e-lab status still satisfies --require e2e
+lab_old='{"context":"e2e-lab","state":"SUCCESS","startedAt":"2026-11-01T10:00:00Z","targetUrl":"https://argo.example.invalid/workflows/x/y"}'
+seq_set "$(rd "$old_go,$new_go,$lab_old")"
+printf 'go\n' >"$FAKE_DIR/rules"
+run 7 --checks --require e2e --interval 0
+expect "after ready: a draft-era e2e-lab status satisfies --require e2e" 0 "checks 3/3 green"
+# per workflow run: a draft-era FAILURE (#628) and a draft run cancelled after the ready event (#649)
+rdh() { # <rollup>: a ready PR with a head commit
+  printf '{"state":"OPEN","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":null,"headRefOid":"abc1234","statusCheckRollup":[%s]}' "$1"
+}
+printf '[{"databaseId":61,"createdAt":"2026-11-01T10:00:00Z"},{"databaseId":62,"createdAt":"2026-11-01T11:00:05Z"}]' >"$FAKE_DIR/ciruns"
+bad_go=$(cr_at go FAILURE 61 2026-11-01T10:30:00Z | sed 's/^{/{"workflowName":"ci",/')
+seq_set "$(rdh "$bad_go")" "$(rdh "$bad_go,$new_go")"
+printf '2026-11-01T11:00:00Z\n' >"$FAKE_DIR/ready"
+printf 'go\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "after ready: a draft-era red go is superseded by the ready run" 0 "waiting for the ready run
+checks 1/1 green"
+cx_go=$(cr_at go CANCELLED 61 2026-11-01T11:00:09Z | sed 's/^{/{"workflowName":"ci",/')
+cx_web=$(cr_at web CANCELLED 61 2026-11-01T11:00:10Z | sed 's/^{/{"workflowName":"ci",/')
+new_web=$(cr_ci web SUCCESS 62 2026-11-01T11:05:00Z)
+seq_set "$(rdh "$cx_go,$cx_web,$new_go,$new_web")"
+printf '2026-11-01T11:00:00Z\n' >"$FAKE_DIR/ready"
+printf '[{"databaseId":61,"createdAt":"2026-11-01T10:00:00Z"},{"databaseId":62,"createdAt":"2026-11-01T11:00:05Z"}]' >"$FAKE_DIR/ciruns"
+printf 'go\nweb\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "after ready: a draft run cancelled after the ready event is superseded" 0 "checks 2/2 green"
+rm -f "$FAKE_DIR/ready" "$FAKE_DIR/rules" "$FAKE_DIR/ciruns"
 
 # 8. a transient gh failure is retried
 rm -rf "$FAKE_DIR"

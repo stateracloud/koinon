@@ -1808,6 +1808,37 @@ type KekFingerprint struct {
 	ActivatedAt pgtype.Timestamptz
 }
 
+type LeakGuardFingerprint struct {
+	OrgID      pgtype.UUID
+	AgentID    pgtype.UUID
+	Generation string
+	Fp         int64
+	AddedAt    pgtype.Timestamptz
+}
+
+type LeakGuardRun struct {
+	OrgID       pgtype.UUID
+	RunID       pgtype.UUID
+	CappedBytes int32
+	UrlState    []byte
+	FeedEpoch   int64
+	FeedRead    int64
+	FeedDone    int64
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type LeakGuardSession struct {
+	OrgID          pgtype.UUID
+	AgentID        pgtype.UUID
+	Generation     string
+	FpKey          []byte
+	UntrustedInput bool
+	PrivateData    bool
+	Evicted        bool
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+}
+
 type LocalCredential struct {
 	UserID             pgtype.UUID
 	Username           string

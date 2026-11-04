@@ -531,3 +531,82 @@ var _ = Describe("Render", func() {
 		Expect(err).To(MatchError(ContainSubstring("invalid agent ref")))
 	})
 })
+
+// The MCP leak guard (ADR 0091) sits on every MCP call as a remote processor that fails closed;
+// without a guard address the gateway refuses every call to an org's server instead.
+var _ = Describe("Render the MCP leak guard", func() {
+	type processor struct {
+		Kind          string            `yaml:"kind"`
+		Methods       map[string]string `yaml:"methods"`
+		Host          string            `yaml:"host"`
+		FailureMode   string            `yaml:"failureMode"`
+		Metadata      map[string]string `yaml:"metadata"`
+		Condition     string            `yaml:"condition"`
+		Reject        string            `yaml:"reject"`
+		RequestHeader struct {
+			Allowed    []string `yaml:"allowed"`
+			Disallowed []string `yaml:"disallowed"`
+		} `yaml:"requestHeaders"`
+	}
+	processors := func(f fixture) []processor {
+		got, _, err := standalone.Render(f.state, f.options)
+		Expect(err).NotTo(HaveOccurred())
+		var doc struct {
+			MCP struct {
+				Policies struct {
+					Guardrails struct {
+						Processors []processor `yaml:"processors"`
+					} `yaml:"mcpGuardrails"`
+				} `yaml:"policies"`
+			} `yaml:"mcp"`
+		}
+		Expect(yaml.Unmarshal(got, &doc)).To(Succeed())
+		return doc.MCP.Policies.Guardrails.Processors
+	}
+	byName := func(name string) fixture {
+		for _, f := range fixtures() {
+			if f.name == name {
+				return f
+			}
+		}
+		Fail("no fixture " + name)
+		return fixture{}
+	}
+
+	It("sends every tools/call to the guard in both phases and fails closed", func() {
+		f := byName("mcp-servers")
+		f.options.GuardURL = "http://koinon-api-guard.koinon.svc:8083"
+		ps := processors(f)
+		Expect(ps).To(HaveLen(1))
+		p := ps[0]
+		Expect(p.Kind).To(Equal("remote"))
+		Expect(p.Host).To(Equal("koinon-api-guard.koinon.svc:8083"))
+		Expect(p.FailureMode).To(Equal("failClosed"))
+		Expect(p.Methods).To(Equal(map[string]string{gateway.GuardMethod: "full"}))
+		Expect(p.Metadata).To(Equal(gateway.GuardMetadata()))
+		Expect(p.RequestHeader.Allowed).To(Equal(gateway.GuardAllowedHeaders))
+		Expect(p.RequestHeader.Disallowed).To(ContainElements("authorization", "x-api-key"))
+	})
+
+	It("refuses every call to an org's server when no guard is configured", func() {
+		ps := processors(byName("mcp-servers"))
+		Expect(ps).To(HaveLen(1))
+		Expect(ps[0].Kind).To(Equal("expression"))
+		Expect(ps[0].Methods).To(Equal(map[string]string{gateway.GuardMethod: "full"}))
+		Expect(ps[0].Condition).To(Equal(`mcp.tool.target in ["acme-legacy", "acme-wiki", "globex-search"]`))
+		Expect(ps[0].Reject).To(Equal(gateway.GuardUnconfiguredReason))
+	})
+
+	DescribeTable("refuses a guard address agentgateway would not accept",
+		func(raw string) {
+			f := byName("mcp-servers")
+			f.options.GuardURL = raw
+			_, _, err := standalone.Render(f.state, f.options)
+			Expect(err).To(HaveOccurred())
+		},
+		Entry("no port", "http://koinon-api-guard"),
+		Entry("a path", "http://koinon-api-guard:8083/check"),
+		Entry("another scheme", "grpc://koinon-api-guard:8083"),
+		Entry("credentials", "http://u:p@koinon-api-guard:8083"),
+	)
+})

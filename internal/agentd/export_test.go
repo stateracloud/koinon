@@ -3,11 +3,13 @@
 package agentd
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/runoutcome"
 )
 
@@ -109,3 +111,21 @@ func RefusalNote(refs []Refusal, cwd string) string { return refusalNote(refs, c
 
 // OutcomeMetrics is what the run owner counts with (internal/runoutcome).
 func OutcomeMetrics(m *Metrics) runoutcome.Metrics { return outcomeMetrics{m} }
+
+// NewTaintCalls returns the leak guard feed's view of one run's tool calls (taint.go): it takes
+// each session update as agentd marshals it and returns what a finished call reports.
+func NewTaintCalls() func(update []byte) (mcpguard.Legs, []string, bool) {
+	return (&taintCalls{}).finished
+}
+
+// FeedCounts reports whether the leak guard's feed counts an update as a finished tool call, once
+// as the reader reads the notification line and once as the handler gets the update.
+func FeedCounts(line []byte) (read, handled bool) {
+	var m struct {
+		Params struct {
+			Update json.RawMessage `json:"update"`
+		} `json:"params"`
+	}
+	_ = json.Unmarshal(line, &m)
+	return lineFinishesTool(line), finishesTool(m.Params.Update)
+}

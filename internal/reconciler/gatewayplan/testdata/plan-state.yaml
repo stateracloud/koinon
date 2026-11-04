@@ -29,7 +29,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"a365ea2f053b1a93"'
+      koinon.config: '"611b2144419eea51"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -148,7 +148,7 @@ llm:
               window:
                 rolling: 24h
               onBudgetExceeded: Block
-        - keyHash: sha256:1d7d29a7e53ca611578866383e04f7e6ae3d15bd0bb8689be1e2ff465312ea45
+        - keyHash: sha256:22a975066ab353910329a9412361db1a8d8fa767178991c81535f0f83145a472
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -264,10 +264,17 @@ mcp:
       rules:
         - apiKey.agent == "acme/a1" && ((mcp.tool.target == "acme-wiki" && mcp.tool.name in ["search"]) || (mcp.tool.target == "acme-wiki-ask" && mcp.tool.name in ["edit", "get_approval_status"]))
         - apiKey.agent == "acme/a2" && ((mcp.tool.target == "github" && mcp.tool.name in ["get_issue"]) || (mcp.tool.target == "acme-wiki" && mcp.tool.name in ["search"]))
-        - apiKey.agent == "acme/mcp-exec" && ((mcp.tool.target == "acme-wiki" && mcp.tool.name in ["edit"]) || (mcp.tool.target == "acme-sick" && mcp.tool.name in ["edit"]))
+        - apiKey.agent == "acme/mcp-exec" && ((mcp.tool.target == "acme-wiki" && mcp.tool.name in ["search", "edit"]) || (mcp.tool.target == "acme-sick" && mcp.tool.name in ["search", "edit"]))
         - apiKey.agent == "acme/mcp-probe-sick" && ((mcp.tool.target == "acme-sick"))
         - apiKey.agent == "acme/mcp-probe-wiki" && ((mcp.tool.target == "acme-wiki"))
         - mcp.prompt.name == "koinon-ready"
+    mcpGuardrails:
+      processors:
+        - kind: expression
+          methods:
+            tools/call: full
+          condition: mcp.tool.target in ["acme-sick", "acme-wiki", "acme-wiki-ask"]
+          reject: 'refused: the MCP leak guard is not configured on this installation'
     transformations:
       request:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id", "user-agent"])
