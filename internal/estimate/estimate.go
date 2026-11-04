@@ -20,6 +20,8 @@
 //     stream, and hidden thinking. When max_tokens was not logged (OpenAI's
 //     max_completion_tokens), the price entry's max_output stands in and the result is flagged
 //     MaxOutputFallback.
+//     A 5xx without usage ([Input].Failed) is charged its input estimate only, with no output and no
+//     reserve: the provider generated nothing (ADR 0056, amendment 2026-10-31).
 //  4. For OpenAI-family models, [CountTiktoken] counts text exactly with the offline encoding
 //     (BPE files compiled into the binary, github.com/pkoukk/tiktoken-go-loader, MIT; nothing is
 //     downloaded at run time). Koinon never logs or buffers prompt or response text, so the live
@@ -73,6 +75,10 @@ type Input struct {
 	// Rejected is true when the provider refused the request (a 4xx without usage): only the
 	// input is charged, estimated from the request bytes, and no output.
 	Rejected bool
+	// Failed is true when the provider answered with a 5xx and no usage: it generated nothing, so only
+	// the input is charged, estimated from the request bytes, and no output is charged or reserved
+	// (ADR 0056, amendment 2026-10-31).
+	Failed bool
 	// MaxTokens is the request's max_tokens (0 if unknown).
 	MaxTokens int64
 }
@@ -205,7 +211,7 @@ func Estimate(p Params, in Input) Result {
 	switch {
 	case in.ReportedOutput != nil:
 		res.OutputTokens, res.OutputReported = *in.ReportedOutput, true
-	case in.Rejected:
+	case in.Rejected || in.Failed:
 		res.Estimated, res.Method = true, "bytes"
 	case in.Aborted:
 		// Charge what was reported. Reserve up to the request's max_tokens, but never above the
