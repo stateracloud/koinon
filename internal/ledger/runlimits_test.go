@@ -14,6 +14,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/providerusage"
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
@@ -101,6 +102,37 @@ var _ = Describe("run limits", func() {
 		_, err := ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.001", 10, 1), failed, e.entry(time.Now(), "0.001", 10, 1)})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(e.run(ctx, r.ID).State).To(Equal(store.RunStateCanceled))
+	})
+
+	// ADR 0056, amendment 2026-10-31 (#340): a failed call costs its input estimate only, never
+	// max_tokens, holds no reserve even from a provider that could settle it, and still counts.
+	It("charges three failed 5xx calls their input estimates only, and counts all three requests", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "10.00")
+		e.model(ctx, "openrouter", flash)
+		r := e.startLimitedRun(ctx, e.task(ctx), runLimits{requests: 4}, time.Now().Add(-time.Minute))
+		failed := func() ledger.Entry {
+			return ledger.Entry{
+				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, Status: 502,
+				UpstreamKnown: true, Upstream: true, MaxTokens: 32_000, ResponseID: uniq("gen"),
+				RequestBytes: 3_000_000, ResponseBytes: -1, Time: time.Now(), // 1M input tokens at 3.0 bytes per token
+			}
+		}
+		settling := &ledger.Ingester{DB: db, Log: ing.Log, Prices: ing.Prices, Sources: providerusage.Registry{"openrouter": &fakeSource{}}}
+		_, err := settling.Ingest(ctx, []ledger.Entry{failed(), failed(), failed()})
+		Expect(err).NotTo(HaveOccurred())
+
+		var n int
+		var cost, reserve string
+		Expect(db.QueryRow(ctx, `SELECT count(*), sum(cost_usd)::text, coalesce(sum(reserve_usd), 0)::text FROM spend_entries
+			WHERE org_id = $1 AND output_tokens = 0 AND input_tokens = 1000000 AND estimated AND NOT provisional`, e.org).Scan(&n, &cost, &reserve)).To(Succeed())
+		Expect(n).To(Equal(3))
+		Expect(ledger.FormatUSD(cost)).To(Equal("0.60"), "three input estimates of $0.20, no output")
+		Expect(ledger.FormatUSD(reserve)).To(Equal("0.00"), "no max_tokens bound is held back")
+		Expect(e.run(ctx, r.ID).State).To(Equal(store.RunStateRunning), "three requests are below the limit of four")
+
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.001", 10, 1)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(e.run(ctx, r.ID).State).To(Equal(store.RunStateCanceled), "the fourth request reaches the limit: the three failed ones counted")
 	})
 
 	It("cancels the run when its settled spend reaches the spend limit, and names it", func(ctx SpecContext) {
