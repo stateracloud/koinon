@@ -1,0 +1,9 @@
+{
+  "ask_user": {"sinkClass": "none", "derivation": "fixed", "addressArgs": [], "resultUntrustedInput": false, "resultPrivateData": false},
+  "create_pull_request": {"sinkClass": "external-high", "derivation": "code_host", "addressArgs": ["owner", "repo"], "resultUntrustedInput": false, "resultPrivateData": true},
+  "github_create_pull_request": {"sinkClass": "external-high", "derivation": "code_host", "addressArgs": ["owner", "repo"], "resultUntrustedInput": false, "resultPrivateData": true},
+  "gitea_create_pull_request": {"sinkClass": "external-high", "derivation": "code_host", "addressArgs": ["owner", "repo"], "resultUntrustedInput": false, "resultPrivateData": true},
+  "comment_on_issue": {"sinkClass": "external-high", "derivation": "code_host", "addressArgs": ["owner", "repo"], "resultUntrustedInput": false, "resultPrivateData": true},
+  "web_url_read": {"sinkClass": "external-high", "derivation": "fetch", "addressArgs": ["url"], "resultUntrustedInput": true, "resultPrivateData": false},
+  "searxng_web_search": {"sinkClass": "external-low", "derivation": "fixed", "addressArgs": [], "resultUntrustedInput": true, "resultPrivateData": false}
+}
