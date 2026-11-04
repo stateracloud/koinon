@@ -17,6 +17,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/gatewaytest"
 )
 
 // An org MCP server's approval-gated tools are offered on a second gateway target,
@@ -34,6 +35,7 @@ var _ = Describe("agentgateway v1.7.0 ask-tier target (standalone)", Ordered, fu
 	)
 	var (
 		r        *running
+		guard    *gatewaytest.FakeGuard
 		llm      string
 		key      gateway.IssuedKey
 		agent    = gateway.AgentRef{Org: "acme", Name: "tracker-user"}
@@ -65,7 +67,11 @@ var _ = Describe("agentgateway v1.7.0 ask-tier target (standalone)", Ordered, fu
 		DeferCleanup(func() { ask.CloseClientConnections(); ask.Close() })
 
 		var err error
-		r, err = startStandalone(ctx, []int{portOf(real), portOf(ask)}, map[string]string{"tracker-key": "koinon_test_not-a-real-token-tracker"})
+		guard, err = gatewaytest.NewFakeGuard()
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(guard.Stop)
+		r, err = startStandalone(ctx, []int{portOf(real), portOf(ask), guard.Port()}, map[string]string{"tracker-key": "koinon_test_not-a-real-token-tracker"},
+			guard.URL(testcontainers.HostInternal))
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(r.Stop)
 		llm = r.URL
@@ -117,6 +123,9 @@ var _ = Describe("agentgateway v1.7.0 ask-tier target (standalone)", Ordered, fu
 		Expect(seenCall(realLog, "write_item")).To(BeFalse(), "nothing reaches the remote server itself")
 		Expect(askLog.header(gateway.AgentHeader)).To(ContainElement(agent.String()), "the proxy learns who asks from the gateway")
 		Expect(askLog.header("X-Api-Key")).To(BeEmpty(), "the ask target holds no credential")
+		// The leak guard sees the call on the ask target, so it leaves the risk to mcpask's card.
+		Expect(guard.Requests()).To(ContainElement(SatisfyAll(
+			HaveField("Targets", ConsistOf(askServer)), HaveField("Agent", agent.String()), HaveField("Tool", "write_item"))))
 		for _, h := range []string{"Authorization", "Cookie", "User-Agent"} {
 			Expect(strings.Join(askLog.header(h), ",")).NotTo(ContainSubstring(gateway.KeyPrefix), h)
 		}

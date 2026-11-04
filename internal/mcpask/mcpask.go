@@ -67,15 +67,20 @@ type Options struct {
 	// ApprovalTTL defaults to githubtools.DefaultApprovalTTL.
 	ApprovalTTL time.Duration
 	Now         func() time.Time
+	// Assess is the leak guard's view of an ask-tier call (mcpguard.Guard.Assess): a risk to show
+	// on the call's one card, nil for none. Its error refuses the call, and its text is what the
+	// agent reads. Nil adds nothing.
+	Assess func(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, tool string, args json.RawMessage) (map[string]any, error)
 }
 
 // Server is the ask-tier proxy.
 type Server struct {
-	pool *pgxpool.Pool
-	q    *store.Queries
-	log  *slog.Logger
-	ttl  time.Duration
-	now  func() time.Time
+	pool   *pgxpool.Pool
+	q      *store.Queries
+	log    *slog.Logger
+	ttl    time.Duration
+	now    func() time.Time
+	assess func(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, tool string, args json.RawMessage) (map[string]any, error)
 }
 
 // New returns a Server.
@@ -89,7 +94,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.ApprovalTTL, now: opts.Now}
+	return &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.ApprovalTTL, now: opts.Now, assess: opts.Assess}
 }
 
 var errNoIdentity = errors.New("this request does not come from an agent of Koinon")
@@ -258,8 +263,46 @@ func (s *Server) callTool(serverName, tool string) mcp.ToolHandler {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return s.record(ctx, c, tools[i], canonical)
+		var risk map[string]any
+		if s.assess != nil {
+			risk, err = s.assess(ctx, c.org, c.agent, c.server, tool, req.Params.Arguments)
+			if err != nil {
+				return toolError(err.Error())
+			}
+		}
+		return s.record(ctx, c, tools[i], canonical, risk)
 	}
+}
+
+// RequestApproval records an approval request for exactly this call of an auto-tier tool that the
+// leak guard holds back (ADR 0091 decision 5), with the guard's risk on the card, and returns the
+// status line the agent reads. A leak approval is never covered by an approval scope: the person
+// approves this call, this destination and this payload.
+func (s *Server) RequestApproval(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, t store.McpTool, args json.RawMessage, risk map[string]any) (string, error) {
+	if len(args) > MaxArgsBytes {
+		return fmt.Sprintf("refused: the arguments are larger than %d bytes", MaxArgsBytes), nil
+	}
+	canonical, err := Canonical(args)
+	if err != nil {
+		return "refused: " + err.Error(), nil
+	}
+	if risk == nil {
+		risk = map[string]any{}
+	}
+	res, err := s.record(ctx, caller{org: org, agent: agent, server: srv}, t, canonical, risk)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			b.WriteString(tc.Text)
+		}
+	}
+	if res.IsError {
+		return "", errors.New(b.String())
+	}
+	return b.String(), nil
 }
 
 // scopeBindingMatches is true when the scope was granted for this server, URL and tool version.
@@ -279,8 +322,19 @@ func hash(canonical []byte) string {
 
 // record stores the call as an approval request, or returns the existing one for the same call in
 // the same run.
-func (s *Server) record(ctx context.Context, c caller, t store.McpTool, canonical []byte) (*mcp.CallToolResult, error) {
+//
+// A non-nil risk is the leak guard's: it is shown on the card, and no approval scope covers the
+// call.
+func (s *Server) record(ctx context.Context, c caller, t store.McpTool, canonical []byte, risk map[string]any) (*mcp.CallToolResult, error) {
 	tool := t.Name
+	riskJSON := []byte(`{}`)
+	if risk != nil {
+		b, err := json.Marshal(risk)
+		if err != nil {
+			return toolError("internal error; try again later")
+		}
+		riskJSON = b
+	}
 	run, err := s.q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: c.org.ID, AgentID: c.agent.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return toolError("this agent has no running run; tools are only available while working on a task")
@@ -296,7 +350,7 @@ func (s *Server) record(ctx context.Context, c caller, t store.McpTool, canonica
 	params := store.CreateApprovalRequestParams{
 		OrgID: c.org.ID, TaskID: run.TaskID, RunID: run.ID, AgentID: c.agent.ID,
 		Connector: ConnectorID, Tool: tool, Target: Target(c.server.Name),
-		ArgsJson: string(canonical), ArgsSha256: hash(canonical), Risk: []byte(`{}`),
+		ArgsJson: string(canonical), ArgsSha256: hash(canonical), Risk: riskJSON,
 		Decision: store.ApprovalDecisionAsk, Status: store.ApprovalStatusPending,
 		ExpiresAt: pgtype.Timestamptz{Time: s.now().Add(s.ttl), Valid: true},
 		// The call is bound to this server, URL and published version of the tool; the executor
@@ -315,7 +369,7 @@ func (s *Server) record(ctx context.Context, c caller, t store.McpTool, canonica
 		// run without parking. A tool that needs two approvers is never covered: the second
 		// person cannot be waived.
 		var scope store.ApprovalScope
-		if !t.RequiresTwoApprovers {
+		if !t.RequiresTwoApprovers && risk == nil {
 			sc, ok, err := approvalscope.Match(ctx, q, params.OrgID, params.AgentID, params.TaskID, ConnectorID, tool, params.Target, nil, s.now())
 			if err != nil {
 				return err
@@ -340,7 +394,7 @@ func (s *Server) record(ctx context.Context, c caller, t store.McpTool, canonica
 		}
 		pm := map[string]any{
 			"approval_id": row.ID.String(), "tool": tool, "target": row.Target, "args_sha256": row.ArgsSha256,
-			"decision": string(row.Decision), "risk": map[string]any{}, "approvals_required": row.ApprovalsRequired,
+			"decision": string(row.Decision), "risk": json.RawMessage(row.Risk), "approvals_required": row.ApprovalsRequired,
 		}
 		if scope.ID.Valid {
 			for k, v := range approvalscope.Payload(scope) {

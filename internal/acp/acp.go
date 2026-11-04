@@ -125,6 +125,13 @@ type Handler interface {
 	RequestPermission(ctx context.Context, req PermissionRequest) (Decision, error)
 }
 
+// ReadObserver is a [Handler] that also sees each session/update notification as the connection
+// reads it off the agent's stream, before the SDK queues it for SessionUpdate. UpdateRead runs on
+// the reading goroutine, so the stream waits for it; line is only valid during the call.
+type ReadObserver interface {
+	UpdateRead(line []byte)
+}
+
 // Conn is an ACP client connection to one harness process.
 type Conn struct {
 	c *sdk.ClientSideConnection
@@ -136,8 +143,9 @@ type Conn struct {
 // or end-of-file.
 func NewConn(h Handler, toAgent io.Writer, fromAgent io.Reader) *Conn {
 	t := newTracker()
+	obs, _ := h.(ReadObserver)
 	return &Conn{
-		c: sdk.NewClientSideConnection(client{h: h, t: t}, toAgent, &countingReader{r: fromAgent, t: t}),
+		c: sdk.NewClientSideConnection(client{h: h, t: t}, toAgent, &countingReader{r: fromAgent, t: t, obs: obs}),
 		t: t,
 	}
 }
@@ -349,7 +357,15 @@ func (t *tracker) handled() { t.update(func() { t.done++ }) }
 type countingReader struct {
 	r       io.Reader
 	t       *tracker
+	obs     ReadObserver
 	partial []byte
+}
+
+func (cr *countingReader) counted(line []byte) {
+	cr.t.update(func() { cr.t.read++ })
+	if cr.obs != nil {
+		cr.obs.UpdateRead(line)
+	}
 }
 
 func (cr *countingReader) Read(p []byte) (int, error) {
@@ -367,13 +383,13 @@ func (cr *countingReader) Read(p []byte) (int, error) {
 			cr.partial = nil
 		}
 		if isUpdate(line) {
-			cr.t.update(func() { cr.t.read++ })
+			cr.counted(line)
 		}
 		data = data[i+1:]
 	}
 	if err != nil {
 		if len(cr.partial) > 0 && isUpdate(cr.partial) {
-			cr.t.update(func() { cr.t.read++ })
+			cr.counted(cr.partial)
 		}
 		cr.partial = nil
 		cr.t.update(func() { cr.t.eof = true })

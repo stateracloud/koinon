@@ -72,15 +72,6 @@ var _ = Describe("Evasions of the third review", func() {
 		Entry("base64 with a NUL every 7 bytes", b64(nulEvery(excerpt, 7))),
 	)
 
-	It("pairs the arguments of a call with more than 64 of them", func() {
-		half := len(excerpt) / 2
-		args := spread(100, 3, excerpt[:half], 97, excerpt[half:])
-		d, err := checker.Check(context.Background(), testScope, fp, args)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
-		Expect(d.Match.Args).To(Equal([]int{3, 97}))
-	})
-
 	It("lets a benign call of 100 arguments through", func() {
 		args := make([]string, 100)
 		for i := range args {
@@ -92,17 +83,7 @@ var _ = Describe("Evasions of the third review", func() {
 		Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
 	})
 
-	It("still fails closed when no pair of the arguments can be checked", func() {
-		args := make([]string, 400)
-		for i := range args {
-			args[i] = strings.Repeat("filler ", 80)
-		}
-		d, err := checker.Check(context.Background(), testScope, fp, args)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(d.Reason).To(Equal(leakguard.ReasonBudgetArgs))
-	})
-
-	It("shortens the join of long arguments instead of running out of time", func() {
+	It("checks a call of 64 long arguments in time", func() {
 		args := make([]string, 64)
 		for i := range args {
 			args[i] = strings.Repeat("kubernetes release notes ", 30)
@@ -110,10 +91,10 @@ var _ = Describe("Evasions of the third review", func() {
 		d, err := checker.Check(context.Background(), testScope, fp, args)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
-		// the leak is split at the boundary of two long arguments
+		// the leak is split at the boundary of two adjacent long arguments
 		half := len(excerpt) / 2
 		args[5] = strings.Repeat("padding ", 90) + excerpt[:half]
-		args[60] = excerpt[half:] + strings.Repeat(" padding", 90)
+		args[6] = excerpt[half:] + strings.Repeat(" padding", 90)
 		d, err = checker.Check(context.Background(), testScope, fp, args)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
@@ -434,10 +415,9 @@ var _ = Describe("Fifth review", func() {
 	)
 })
 
-// Sixth review: above MaxPairArgs arguments the pairs are built from the decoded forms of the
-// arguments, not by decoding every joined pair again. What they still catch, with 40 arguments
-// and the halves of the leak 3 and 37 apart (so not adjacent):
-var _ = Describe("Pairs of many arguments", func() {
+// Sixth review, kept for the call-order join (ADR 0091 decision 6): halves of a leak in adjacent
+// arguments of a call of 40.
+var _ = Describe("Splits across adjacent arguments of many", func() {
 	var fp *leakguard.Fingerprinter
 	excerpt := "payroll export job runs nightly on the finance" // 40 canonical characters
 	cyrillic := strings.NewReplacer("a", "а", "e", "е", "o", "о", "p", "р", "c", "с", "x", "х").Replace(excerpt)
@@ -446,12 +426,12 @@ var _ = Describe("Pairs of many arguments", func() {
 	DescribeTable("catches",
 		func(private string, first, second string) {
 			checker := leakguard.TaintChecker{Store: taintedStore(fp, private)}
-			args := spread(40, 3, first, 37, second)
+			args := spread(40, 3, first, 4, second)
 			d, err := checker.Check(context.Background(), testScope, fp, args)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(d.Allow).To(BeFalse(), "%+v", d)
 			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
-			Expect(d.Match.Args).To(ConsistOf(3, 37))
+			Expect(d.Match.Args).To(ContainElements(3, 4))
 		},
 		Entry("plain halves", excerpt, excerpt[:20], excerpt[20:]),
 		Entry("halves, each base64", excerpt, b64(excerpt[:21]), b64(excerpt[21:])),
@@ -460,21 +440,12 @@ var _ = Describe("Pairs of many arguments", func() {
 		Entry("one half percent-encoded", excerpt, excerpt[:20], percentAll(excerpt[20:])),
 		Entry("hex cut between bytes", excerpt, hexOf(excerpt)[:36], hexOf(excerpt)[36:]),
 		Entry("base64 of cyrillic, halves", cyrillic, b64(cyrillic[:len(cyrillic)/2]), b64(cyrillic[len(cyrillic)/2:])),
-		Entry("halves in the other order", excerpt, excerpt[20:], excerpt[:20]),
 	)
 
 	It("catches a base64 stream cut inside a block between adjacent arguments of 40", func() {
 		checker := leakguard.TaintChecker{Store: taintedStore(fp, excerpt)}
 		enc := b64(excerpt)
 		d, err := checker.Check(context.Background(), testScope, fp, spread(40, 20, enc[:27], 21, enc[27:]))
-		Expect(err).NotTo(HaveOccurred())
-		Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
-	})
-
-	It("still catches a base64 stream cut inside a block with up to 32 arguments", func() {
-		checker := leakguard.TaintChecker{Store: taintedStore(fp, excerpt)}
-		enc := b64(excerpt)
-		d, err := checker.Check(context.Background(), testScope, fp, spread(32, 3, enc[:27], 30, enc[27:]))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
 	})
@@ -505,8 +476,8 @@ var _ = Describe("Readings of UTF-8 base64", func() {
 	)
 })
 
-// Sixth review, second finding: a stream cut anywhere between two arguments that are not
-// adjacent, in a call of more than 32 arguments, padded with arguments that hold base64 letters.
+// Sixth review, second finding, kept for the call-order join: a stream cut anywhere between two
+// adjacent arguments of a call of 40, padded with arguments that hold base64 letters.
 var _ = Describe("Streams cut inside an encoding unit in a call of many arguments", func() {
 	var fp *leakguard.Fingerprinter
 	excerpt := "payroll export job runs nightly on the finance" // 40 canonical characters
@@ -524,10 +495,10 @@ var _ = Describe("Streams cut inside an encoding unit in a call of many argument
 	DescribeTable("catches",
 		func(first, second string) {
 			checker := leakguard.TaintChecker{Store: taintedStore(fp, excerpt)}
-			d, err := checker.Check(context.Background(), testScope, fp, padded(40, 1, first, 38, second))
+			d, err := checker.Check(context.Background(), testScope, fp, padded(40, 1, first, 2, second))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
-			Expect(d.Match.Args).To(ConsistOf(1, 38))
+			Expect(d.Match.Args).To(ContainElements(1, 2))
 		},
 		Entry("base64 cut at 27", b64raw(excerpt)[:27], b64raw(excerpt)[27:]),
 		Entry("base64 cut at 30", b64raw(excerpt)[:30], b64raw(excerpt)[30:]),
@@ -619,7 +590,7 @@ var _ = Describe("Blow-ups end on the work budget", func() {
 		},
 		Entry("nesting beyond the depth", []string{percentAll(percentAll(percentAll(percentAll(percentAll("payroll export job runs nightly")))))}, leakguard.Limits{}, leakguard.ReasonDecodeDepth),
 		Entry("a megabyte of base64 of base64 on a small work budget", []string{b64(b64(prose[:9<<16]))}, leakguard.Limits{MaxWorkBytes: 1 << 20}, leakguard.ReasonBudgetWork),
-		Entry("many long arguments, whose pairs do not fit the pair budget", sliced(100, func(i int) string { return b64(randomBytes(i, 6000)) }), leakguard.Limits{MaxWorkBytes: 4 << 20}, leakguard.ReasonBudgetArgs),
+		Entry("many long arguments on a small work budget", sliced(100, func(i int) string { return b64(randomBytes(i, 6000)) }), leakguard.Limits{MaxWorkBytes: 1 << 20}, leakguard.ReasonBudgetWork),
 		Entry("prose projected into every alphabet on a small work budget", []string{prose[:1<<19]}, leakguard.Limits{MaxWorkBytes: 1 << 20}, leakguard.ReasonBudgetWork),
 	)
 })

@@ -67,7 +67,6 @@ var _ = Describe("TaintChecker", func() {
 		Entry("zero width characters", []string{strings.Join(strings.Split(excerpt, ""), "\u200b")}, []int{0}),
 		Entry("combining marks", []string{strings.Join(strings.Split(excerpt, ""), "\u0301")}, []int{0}),
 		Entry("split across two arguments", []string{"q=" + excerpt[:half], excerpt[half:] + " thanks"}, []int{0, 1}),
-		Entry("split across two arguments, reversed", []string{excerpt[half:], "ignored", excerpt[:half]}, []int{2, 0}),
 		Entry("split three ways in order", []string{excerpt[:13], excerpt[13:26], excerpt[26:]}, []int{0, 1, 2}),
 		Entry("split, each half base64", []string{b64(excerpt[:half]), b64(excerpt[half:])}, []int{0, 1}),
 		Entry("base64 split mid-run", []string{b64(excerpt)[:20], b64(excerpt)[20:]}, []int{0, 1}),
@@ -109,7 +108,7 @@ var _ = Describe("TaintChecker", func() {
 		Entry("hex after NUL padding (found by FuzzTaint)", []string{"000000000000 " + hexOf(excerpt) + " 0"}, []int{0}),
 		Entry("hex after long NUL padding", []string{strings.Repeat("00", 40) + hexOf(excerpt)}, []int{0}),
 		Entry("base64 after NUL padding", []string{"AAAAAAAAAAAAAAAA" + b64raw(excerpt)}, []int{0}),
-		Entry("split across arguments 1 and n-1 of 33", spread(33, 1, excerpt[:half], 32, excerpt[half:]), []int{1, 32}),
+		Entry("split across adjacent arguments of 33", spread(33, 16, excerpt[:half], 17, excerpt[half:]), allArgs(33)),
 	)
 
 	DescribeTable("folds the digits of every script",
@@ -130,15 +129,24 @@ var _ = Describe("TaintChecker", func() {
 		Entry("mathematical monospace", '\U0001d7f6'),
 	)
 
-	It("fails closed when the arguments are too many to pair", func() {
-		args := make([]string, 200)
+	It("fails closed when the arguments are more than it checks", func() {
+		args := make([]string, leakguard.DefaultLimits().MaxArgs+1)
 		for i := range args {
-			args[i] = strings.Repeat("filler ", 80)
+			args[i] = "filler"
 		}
 		d := check(args...)
 		Expect(d.Allow).To(BeFalse())
 		Expect(d.Reason).To(Equal(leakguard.ReasonBudgetArgs))
 	})
+
+	// ADR 0091 decision 6: the arguments are joined in call order only. A text split across
+	// arguments that are not adjacent, or put back to front, is not reassembled; the sink class
+	// and the byte cap carry that case, not the text match.
+	DescribeTable("does not reassemble out of call order",
+		func(args ...string) { Expect(check(args...).Reason).To(Equal(leakguard.ReasonPass)) },
+		Entry("halves reversed", excerpt[half:], excerpt[:half]),
+		Entry("halves with an argument between", excerpt[:half], "ignored", excerpt[half:]),
+	)
 
 	It("reports an evicted scope without changing the decision", func() {
 		st := leakguard.NewMemoryStore(leakguard.MemoryStoreOptions{MaxFingerprints: 4})
@@ -310,6 +318,15 @@ func htmlRefs(s string) string {
 }
 
 // spread returns n filler arguments with a at index i and b at index j.
+// allArgs is the argument indexes 0..n-1, what a match in the call-order join reports.
+func allArgs(n int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = i
+	}
+	return out
+}
+
 func spread(n, i int, a string, j int, b string) []string {
 	out := make([]string, n)
 	for k := range out {

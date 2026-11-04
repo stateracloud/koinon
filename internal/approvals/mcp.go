@@ -19,8 +19,13 @@ import (
 // executeMCP makes the approved call to the remote MCP server through the gateway, with the org's
 // executor key (ADR 0042, 0057): the gateway applies its egress policy and injects the server's
 // credential, which this process never holds. Everything the approval was bound to is checked again:
-// the server (ID and URL), the tool and its published content, the tier and the agent's allowance.
-// The arguments are sent exactly as approved.
+// the server (ID and URL), the tool (still offered) and its published content, the tier and the
+// agent's allowance. The arguments are sent exactly as approved.
+//
+// The tier check refuses only the never tier. An approval of an ask-tier call whose tool has since
+// moved to auto still runs, as does a leak guard card of an auto-tier call (ADR 0091) whose tool has
+// since moved to ask: a person approved this exact call, which is more than either tier asks. The
+// gateway opens the executor's key to the auto and ask tiers alike (gatewayplan, applyMCP).
 //
 // Only a failure before the call was sent is retried. After that the outcome may be unknown and the
 // request fails; it is never run twice.
@@ -56,6 +61,9 @@ func (s *Service) executeMCP(ctx context.Context, row store.ApprovalRequest) (ma
 	if err != nil {
 		return nil, err
 	}
+	if !tool.Present {
+		return nil, permanent("the server %s no longer offers %s", name, row.Tool)
+	}
 	if tool.ContentHash != bound.ContentHash {
 		return nil, permanent("the description or input schema of %s changed since the request was made; ask again", row.Tool)
 	}
@@ -86,6 +94,16 @@ func (s *Service) executeMCP(ctx context.Context, row store.ApprovalRequest) (ma
 	})
 	switch {
 	case err == nil:
+		if s.onMCP != nil {
+			raw, err := json.Marshal(res)
+			if err == nil {
+				err = s.onMCP(ctx, row, srv, raw)
+			}
+			if err != nil {
+				s.log.Error("approvals: the leak guard could not record an MCP result", append(attrs(row), "err", err)...)
+				return nil, permanent("the call ran, but the leak guard could not record its result, so the result is withheld")
+			}
+		}
 		return res, nil
 	case errors.Is(err, mcpservers.ErrNotSent):
 		return nil, err // retried by the sweeper

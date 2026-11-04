@@ -97,7 +97,8 @@ A derived class is decided per call from the address arguments only:
   fetch-trusted list (#350's contract: an exact lower-case name, or a `*.example.com` wildcard that
   covers subdomains at any depth but not `example.com` itself) makes the call `internal`. Any other
   host makes it `external-low`. The path, query and fragment of the URL are **payload** and count
-  toward the byte cap.
+  toward the byte cap; to a host that is not trusted, so are the host's labels (they carry data as
+  well as a path does).
 - **Search.** A search query always leaves for the provider (ADR 0084 decision 6), so a search tool
   is `external-low` and its query is payload.
 
@@ -120,6 +121,58 @@ a generation clears them, not the end of a run, not a new run, not an admin acti
 generation starts with both legs clear. The third leg, outbound, is no longer a session flag: it is
 the sink class of the call being decided.
 
+agentd's tool results and the harness's MCP calls reach Koinon by different paths, so a call can
+overtake the update that finished a shell read. The guard therefore waits for the feed (procoduck,
+2026-11-03, option A): agentd counts each finished tool call when it reads the update off the
+harness's stream and again once it has reported it, per run and worker epoch; before it reads the
+legs for an `external-low` or `external-high` call, the guard waits until the second count reaches
+what the first was when the call arrived. If it does not within 2 s, the call is decided as if the
+session held both legs: a card or a refusal, never a pass. `none` and `internal` calls do not wait.
+A tool kind agentd does not know (ACP `other`, which covers MCP tools, a missing kind, or a newer
+kind) sets both legs.
+
+How the wait works, and what it leaves open (#349 review, 2026-11-03):
+
+- **The reader never waits for the database.** agentd counts in memory as it reads, and one writer
+  per harness copies both counts to the database, in order and as absolute values that only grow.
+  A slow report holds the handler, not the reader: the next result in the pipe is still counted,
+  so the guard sees that the session is behind and waits. **Residual:** the guard can only wait
+  for what agentd has read and written. The harness must write a tool's update to its stream before
+  it makes its next gateway call, and the read count reaches the database only after the writer's
+  goroutine runs and its write lands: a few milliseconds when the database answers, up to the
+  writer's retry backoff (0.2 s, then 0.4 s, each try bounded by 10 s) when a write fails. The call
+  races that write. A harness that sends the call first, or a call that wins that race, is decided
+  on the legs before the result.
+- **The wait covers the end-of-turn summary.** The harness still runs then, and a tool can finish
+  during the summary (it blocks permission requests, not tools), so the guard waits for the run's
+  feed whether or not it is summarizing, and agentd feeds such a result before it counts it as done.
+- **A worker whose feed is already fenced** (a newer epoch started it) stops as taken over,
+  records nothing, and leaves the run to that worker; the counts writer does the same.
+- **A stall is a reason of its own.** A call decided as if both legs were held because the feed
+  stalled carries the reason `feed_stalled`, and goes to a person, never to an automatic Decider:
+  the legs were assumed, not read. Only a call whose one reason is `both_legs`, with no text match
+  and no stall, may reach the Decider seam; ADR 0092's judge must keep that rule.
+- **A takeover does not wait for the old worker.** The new worker starts the counts at zero under
+  its epoch, and the old worker's later writes count nothing (they are fenced). Its in-flight
+  reports are not waited for: the new worker loads the session, and the harness replays its history
+  as updates, each counted and reported again, before it answers the load; the guard sees the new
+  harness's calls only after that. Reports are idempotent (legs only grow, fingerprints are a set).
+- **One report may repeat its own fingerprints.** A tool's update carries its text as content and
+  again as raw output, and an edit's two sides share most lines, so the texts of one report winnow
+  to the same fingerprints more than once. The store holds each once and its write takes the
+  repeats in one statement; a store that refuses them fails every report of such a tool, and the
+  run is given up worker after worker. A feed write that fails gives the run up whatever the
+  error, as a business event does (ADR 0074): telling a deterministic error from a transient one is
+  left to a classification shared with the run's event writes.
+- **A call outside a task adds no leg.** With no running run there is no feed to wait for and no
+  leg is assumed: the call is decided on the legs the generation holds. Those are what earlier tasks
+  left, and they only grow, so an `external-high` call outside a task from a generation that holds
+  both legs needs an approval, and is refused because no approval exists outside a run (ADR 0042).
+  A tool that only reads from a system the org owns is declared `internal` to be called that way.
+
+Every refusal and every call sent to a person is logged at info, with the reason codes, the class,
+the legs, whether a run was found and whether the feed stalled; never an argument value or payload.
+
 ### 5. The decision table
 
 | Session state | `none`, `internal` | `external-low` | `external-high` |
@@ -135,7 +188,14 @@ the sink class of the call being decided.
 - **Both legs and `external-high`**: the call becomes an ADR 0042 approval for that exact call. The
   card shows what would leave: the destination (the address arguments) and the full payload. An
   ask-tier tool that hits this branch gets one approval, not two, and its card carries the leak
-  reason.
+  reason. The approved call runs with the org's executor key (ADR 0057), which the gateway
+  therefore opens to every tool a person can approve a call of: present tools of the auto and ask
+  tiers whose names agents can see, never the never tier. The key is koinon-api's alone and runs
+  only approved calls with their exact arguments, so this gives no agent a tool. What may still run
+  is decided in koinon-api when it executes: the server, its URL, the tool still offered and its
+  content unchanged, not the never tier, the agent's allowance. An approval stays valid when its
+  tool moves between the auto and ask tiers: a person approved that exact call, which is more than
+  either tier asks.
 - **Both legs and `external-low`**: a **byte cap per run** on what goes to untrusted hosts. It counts
   the payload bytes as sent (the URL's path, query and fragment, the search query), with no decoding,
   so it holds whatever the encoding. It counts from the first call after the run holds both legs,
@@ -154,7 +214,8 @@ The taint store, the keyed winnowing, the normaliser and the single-layer decode
 Their role changes:
 
 - They run **only on payload arguments of `external-low` and `external-high` calls**, never on
-  address arguments and never on `none` or `internal` calls.
+  the address arguments of a derived class and never on `none` or `internal` calls. A fixed tool's
+  address arguments decide nothing, so they are payload.
 - The decoder set is **frozen**: no new evasion heuristics. The package documentation says plainly
   that it catches verbatim and simply-encoded copies, not an adaptive attacker.
 - Joins happen **only in call order**: the payload arguments of one call, joined in their order in
@@ -170,6 +231,11 @@ Their role changes:
 The guard no longer decides on `[]string`. Its input per call is the tool, its sink class (fixed or
 derived), the address arguments, the payload arguments and the session legs. It maintains the legs
 from responses and from agentd's feed.
+
+The address must have one reading, the one the server acts on. A call that gives an address
+argument more than once (a repeated key in the raw JSON, which a decoder would collapse to one of
+them), as a dotted literal key, in another case (decoders that match names case-insensitively) or
+inside a list is refused, whatever its class would be.
 
 ### 8. Guarantees and non-guarantees
 

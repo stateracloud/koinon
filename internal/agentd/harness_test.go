@@ -69,11 +69,13 @@ type harness struct {
 	summaryAnswer string
 	// onSummary runs when the summary prompt arrives.
 	onSummary func()
-	loads     []string
-	cancels   int
-	crashed   bool
-	hung      bool
-	hangs     chan struct{} // receives when a hang starts
+	// summaryUpdates are sent during the summary prompt, before its reply: tools that run then.
+	summaryUpdates []sdk.SessionUpdate
+	loads          []string
+	cancels        int
+	crashed        bool
+	hung           bool
+	hangs          chan struct{} // receives when a hang starts
 	// onPrompt, if set, may answer a prompt itself (for example by calling Koinon's tools as
 	// the agent would): it returns the reply and true, or false to fall through.
 	onPrompt func(ctx context.Context, text string) (string, bool)
@@ -191,10 +193,15 @@ func (p *process) announce(id sdk.SessionId) {
 func (p *process) summary(ctx context.Context, id sdk.SessionId, text string) (sdk.PromptResponse, error) {
 	p.h.mu.Lock()
 	p.h.summaries = append(p.h.summaries, text)
-	reply, tool, hang, hook := p.h.summaryReply, p.h.summaryTool, p.h.summaryHang, p.h.onSummary
+	reply, tool, hang, hook, updates := p.h.summaryReply, p.h.summaryTool, p.h.summaryHang, p.h.onSummary, p.h.summaryUpdates
 	p.h.mu.Unlock()
 	if hook != nil {
 		hook()
+	}
+	for _, u := range updates {
+		if err := p.agent().SessionUpdate(ctx, sdk.SessionNotification{SessionId: id, Update: u}); err != nil {
+			return sdk.PromptResponse{}, err
+		}
 	}
 	if reply == "" {
 		reply = "Notes: the task is done; nothing is left."

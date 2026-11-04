@@ -406,6 +406,7 @@ func mcpInput() gatewayplan.Input {
 			{Name: "edit", Present: true, Tier: gatewayplan.TierAsk},
 			{Name: "drop", Present: true, Tier: gatewayplan.TierNever},
 			{Name: "gone", Present: false, Tier: gatewayplan.TierAuto},
+			{Name: "bad.name", Present: true, Tier: gatewayplan.TierAuto},
 		},
 	}
 	sick := srv
@@ -445,8 +446,13 @@ var _ = Describe("MCP servers", func() {
 		}
 		Expect(names).To(ContainElements("acme-wiki", "acme-wiki-ask", "acme-sick"))
 		exec := gateway.AgentRef{Org: "acme", Name: gateway.MCPExecAgentName}
-		// The executor opens every ask-tier tool of the org's servers, healthy or not (as before #455).
-		Expect(pl.State.Tools[exec]).To(Equal([]gateway.ToolGrant{{Target: "acme-wiki", Tools: []string{"edit"}}, {Target: "acme-sick", Tools: []string{"edit"}}}))
+		// The executor opens every tool a person can approve a call of, healthy server or not (as
+		// before #455): the ask tier (ADR 0042) and the auto tier, whose external calls the leak
+		// guard sends to a person (ADR 0091). Never a never-tier, absent or unnamable tool.
+		Expect(pl.State.Tools[exec]).To(Equal([]gateway.ToolGrant{
+			{Target: "acme-wiki", Tools: []string{"search", "edit"}},
+			{Target: "acme-sick", Tools: []string{"search", "edit"}},
+		}))
 		Expect(pl.State.Tools).To(HaveKey(gateway.AgentRef{Org: "acme", Name: gateway.MCPProbeAgentPrefix + "wiki"}))
 		Expect(lk.issued).To(Equal(2))
 		Expect(p.Probes()).To(BeEmpty(), "probes exist only once the state is applied")
