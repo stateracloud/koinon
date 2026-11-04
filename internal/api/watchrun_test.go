@@ -177,6 +177,80 @@ var _ = Describe("WatchRun", func() {
 		Expect(order).To(Equal([]string{"live", "event"}))
 	})
 
+	It("never sends a live tail after the event that replaces it, even when the stream is busy (#344)", func(ctx SpecContext) {
+		w := watch(ctx, f.owner, f.org, f.run.GetId(), 0)
+		Expect((<-w.items).GetRun()).NotTo(BeNil())
+		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))
+
+		// The batch and the event's wake-up are both queued for the stream, again and again.
+		pub := runwatch.NewChunkPublisher(e.pool, run.OrgID, run.ID, time.Hour, nil)
+		defer pub.Close()
+		const rounds = 30
+		for i := 0; i < rounds; i++ {
+			pub.Add("acp.agent_message_chunk", []byte(`{"content":{"type":"text","text":"tail"}}`))
+			pub.Flush()
+			ad.event(ctx, run, i+2)
+		}
+		var order []string
+		for events := 0; events < rounds; {
+			select {
+			case msg, ok := <-w.items:
+				Expect(ok).To(BeTrue())
+				if len(msg.GetLive().GetChunks()) > 0 {
+					order = append(order, "live")
+				} else if msg.GetEvent() != nil {
+					order = append(order, "event")
+					events++
+				}
+			case <-time.After(5 * time.Second):
+				Fail("nothing arrived: " + strings.Join(order, ","))
+			}
+		}
+		// Each batch was handed over before its event was stored, so the k-th event is preceded by
+		// at least k batches. (Both are NOTIFYs on one connection: the batch reaches the Hub first.)
+		live, k := 0, 0
+		for _, o := range order {
+			if o == "live" {
+				live++
+				continue
+			}
+			k++
+			Expect(live).To(BeNumerically(">=", k), "event %d came before its tail: %s", k, strings.Join(order, ","))
+		}
+	})
+
+	It("sends the item a canceled run's worker stores after the cancel, then a second final snapshot (#344)", func(ctx SpecContext) {
+		quick := newEnvOn(ctx, e, envOptions{watchPoll: time.Hour, watchCancelGrace: 3 * time.Second})
+		w := watch(ctx, f.owner.on(quick), f.org, f.run.GetId(), 0)
+		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))
+		_, err := f.owner.runs.CancelRun(ctx, &runv1alpha1.CancelRunRequest{OrgId: f.org, RunId: f.run.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(w.nextEvent(2 * time.Second).GetKind()).To(Equal("run.canceled"))
+
+		time.Sleep(300 * time.Millisecond) // the stream has sent the canceled snapshot and waits
+		// The worker's cut-off item arrives after the run is terminal.
+		_, err = store.New(e.pool).AppendCanceledRunEventOnce(ctx, store.AppendCanceledRunEventOnceParams{
+			OrgID: run.OrgID, RunID: run.ID, Epoch: run.Epoch,
+			Kind: "acp.agent_message_chunk", Payload: []byte(`{"content":{"type":"text","text":"half a sen"}}`), SourceSeq: 1000,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		var kinds []string
+		var last *runv1alpha1.WatchRunResponse
+		for msg := range w.items {
+			if ev := msg.GetEvent(); ev != nil {
+				kinds = append(kinds, ev.GetKind())
+			}
+			if msg.GetRun() != nil {
+				last = msg
+				kinds = append(kinds, "snapshot")
+			}
+		}
+		Expect(<-w.done).To(Succeed())
+		Expect(kinds).To(Equal([]string{"snapshot", "acp.agent_message_chunk", "snapshot"}))
+		Expect(last.GetRun().GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_CANCELED))
+	})
+
 	It("ends after the run finishes and its last event is sent", func(ctx SpecContext) {
 		w := watch(ctx, f.owner, f.org, f.run.GetId(), 0)
 		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))

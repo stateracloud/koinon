@@ -2,7 +2,7 @@
 
 import { useTransport } from '@connectrpc/connect-query'
 import { useEffect, useReducer, useRef } from 'react'
-import type { LiveChunk, Run, RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
+import { RunState, type LiveChunk, type Run, type RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { watchRun, type WatchStatus } from '@/lib/run-watch'
 
 export type RunWatch = {
@@ -56,7 +56,9 @@ export function reducer(state: State, a: Action): State {
   const cur = state[a.runId] ?? empty
   switch (a.type) {
     case 'run':
-      return { ...state, [a.runId]: { ...cur, run: a.run } }
+      // Live text does not outlive its run. A canceled run keeps it: its worker may still store the
+      // item it was typing, which replaces the text (the stream ends after that, ADR 0074 item 8).
+      return { ...state, [a.runId]: { ...cur, run: a.run, live: a.run.state === RunState.SUCCEEDED || a.run.state === RunState.FAILED ? [] : cur.live } }
     case 'event': {
       const events = appendEvent(cur.events, a.event)
       return events === cur.events ? state : { ...state, [a.runId]: { ...cur, events, live: cur.live.filter((c) => c.kind !== a.event.kind) } }
@@ -64,7 +66,7 @@ export function reducer(state: State, a: Action): State {
     case 'live':
       return { ...state, [a.runId]: { ...cur, live: joinLive(cur.live, a.chunks) } }
     case 'status':
-      return { ...state, [a.runId]: { ...cur, status: a.status, error: a.error } }
+      return { ...state, [a.runId]: { ...cur, status: a.status, error: a.error, live: a.status === 'ended' ? [] : cur.live } }
   }
 }
 
