@@ -212,9 +212,24 @@ while :; do
       ready=$(gh api "repos/{owner}/{repo}/issues/$pr/events" --paginate \
         --jq '[.[] | select(.event == "ready_for_review") | .created_at] | max // empty' 2>/dev/null | sort | tail -n 1) || ready=""
       if [ -n "$ready" ]; then
-        if jq -e --arg r "$ready" 'any((.statusCheckRollup // [])[]; (.workflowName // "") == "ci" and (.startedAt // "") != "" and .startedAt < $r)' <<<"$json" >/dev/null; then
+        # Decide per workflow run, not per check run: a draft run cancelled by the ready run has check runs that
+        # start (and are cancelled) after the ready event, and `needs: changes` jobs of a cancelled run never ran.
+        # ready_ids: the ci runs on the head created at or after the ready event ("none": the ready run is not
+        # there yet); empty: gh could not say, fall back to each check run's own start time.
+        ready_ids=""
+        hd=$(jq -r '.headRefOid // ""' <<<"$json")
+        if [ -n "$hd" ]; then
+          ready_ids=$(gh run list --commit "$hd" --workflow ci.yml --limit 50 --json databaseId,createdAt 2>/dev/null |
+            jq -r --arg r "$ready" '[.[] | select(.createdAt >= $r) | .databaseId | tostring] | join(",") | if . == "" then "none" else . end' 2>/dev/null) || ready_ids=""
+        fi
+        # shellcheck disable=SC2016 # jq program
+        drop='def rid: ((.detailsUrl // "") | capture("/runs/(?<r>[0-9]+)")? | .r);
+          def draft($ids): (.workflowName // "") == "ci" and
+            (if $ids == "" or rid == null then (.startedAt // "") != "" and .startedAt < $r
+             else (($ids | split(",")) | index(rid)) == null end);'
+        if jq -e --arg r "$ready" --arg ids "$ready_ids" "$drop any((.statusCheckRollup // [])[]; draft(\$ids))" <<<"$json" >/dev/null; then
           ready_dropped=1
-          json=$(jq --arg r "$ready" '.statusCheckRollup |= map(select((.workflowName // "") != "ci" or (.startedAt // "") == "" or .startedAt >= $r))' <<<"$json")
+          json=$(jq --arg r "$ready" --arg ids "$ready_ids" "$drop"' .statusCheckRollup |= map(select(draft($ids) | not))' <<<"$json")
         fi
       fi
     fi
