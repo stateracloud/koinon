@@ -58,6 +58,7 @@ PARALLEL_SUITES=(
 	./internal/api
 	./internal/durable
 	./internal/checkpoint
+	./internal/compat
 )
 
 if [[ ${1:-} == "--list" ]]; then
