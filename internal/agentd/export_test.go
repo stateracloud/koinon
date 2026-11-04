@@ -115,7 +115,14 @@ func OutcomeMetrics(m *Metrics) runoutcome.Metrics { return outcomeMetrics{m} }
 // NewTaintCalls returns the leak guard feed's view of one run's tool calls (taint.go): it takes
 // each session update as agentd marshals it and returns what a finished call reports.
 func NewTaintCalls() func(update []byte) (mcpguard.Legs, []string, bool) {
-	return (&taintCalls{}).finished
+	return NewTaintCallsFor("")
+}
+
+// NewTaintCallsFor is NewTaintCalls for a flavor whose MCP tool calls have the title prefix.
+func NewTaintCallsFor(mcpPrefix string) func(update []byte) (mcpguard.Legs, []string, bool) {
+	t := &taintCalls{}
+	t.setMCPPrefix(mcpPrefix)
+	return t.finished
 }
 
 // FeedCounts reports whether the leak guard's feed counts an update as a finished tool call, once

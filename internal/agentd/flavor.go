@@ -121,6 +121,12 @@ func readyCommand(f store.AgentFlavor) string {
 	return d.ReadyCommand
 }
 
+// mcpToolPrefix is the title prefix of the flavor's calls to Koinon's MCP tools, or "".
+func mcpToolPrefix(f store.AgentFlavor) string {
+	d, _ := flavor.Lookup(f)
+	return d.MCPToolPrefix
+}
+
 // modelOption is the value agentd selects for the session's model option
 // (session/set_config_option), or "" when the flavor takes its model from the launch command
 // alone. OpenCode names models <provider>/<model>; the provider is the flavor's entry for the

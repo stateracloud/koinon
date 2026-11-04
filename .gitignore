@@ -39,3 +39,7 @@ docs/site/.astro/
 # Per-spec JUnit reports of hack/go-test.sh (#221)
 /reports/
 /junit.xml
+# Ginkgo's --junit-report/--json-report write these into each suite's package dir (hack/go-test.sh
+# moves them to reports/; a bare `go tool ginkgo` or `go test -args -ginkgo.junit-report` leaves them)
+**/junit.xml
+**/report.json
