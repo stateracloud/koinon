@@ -15,6 +15,7 @@ import (
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/runoutcome"
+	"github.com/stateracloud/koinon/internal/runwatch"
 )
 
 // watchBatch is how many events WatchRun reads per query.
@@ -94,7 +95,9 @@ func (s *Server) CancelRun(ctx context.Context, req *runv1alpha1.CancelRunReques
 // run follows its last event (the web client relies on this to tell a finished
 // run from a cut stream). The stream ends once the run has finished and its
 // last event and final snapshot have been sent. A stream that has sent nothing for
-// the heartbeat interval sends a heartbeat message (issue #141).
+// the heartbeat interval sends a heartbeat message (issue #141). Live text, the chunks of the
+// message or thought the agent is typing (runwatch/chunks.go), is forwarded as it arrives; it is not
+// stored, not replayed and not in seq order (#344).
 func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest, stream runv1alpha1connect.RunServiceWatchRunServerStream) error {
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleViewer)
 	if err != nil {
@@ -174,15 +177,34 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 		if run.State.Finished() {
 			return nil
 		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-sub.C:
-		case <-poll.C:
-		case <-beat.C:
-			if err := sent(&runv1alpha1.WatchRunResponse{Item: &runv1alpha1.WatchRunResponse_Heartbeat{Heartbeat: &runv1alpha1.Heartbeat{}}}); err != nil {
-				return err
+	wait:
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-sub.C:
+				break wait
+			case <-poll.C:
+				break wait
+			case cs := <-sub.Chunks:
+				// Live text (#344): forwarded as it comes, without re-reading the events.
+				if err := sent(liveProto(cs)); err != nil {
+					return err
+				}
+			case <-beat.C:
+				if err := sent(&runv1alpha1.WatchRunResponse{Item: &runv1alpha1.WatchRunResponse_Heartbeat{Heartbeat: &runv1alpha1.Heartbeat{}}}); err != nil {
+					return err
+				}
 			}
 		}
 	}
+}
+
+// liveProto is a batch of live chunks as a WatchRun message.
+func liveProto(cs []runwatch.Chunk) *runv1alpha1.WatchRunResponse {
+	out := make([]*runv1alpha1.LiveChunk, len(cs))
+	for i, c := range cs {
+		out[i] = &runv1alpha1.LiveChunk{Kind: c.Kind, Text: c.Text}
+	}
+	return &runv1alpha1.WatchRunResponse{Item: &runv1alpha1.WatchRunResponse_Live{Live: &runv1alpha1.LiveChunks{Chunks: out}}}
 }

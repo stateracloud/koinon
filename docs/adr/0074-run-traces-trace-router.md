@@ -751,6 +751,16 @@ event classes. The code lands in #344 (items), #345 (business and diagnostic eve
    the tool calls as the boundaries between the agent's messages; a dropped tool call would merge the
    agent's interim narration ("I'll pull the data ...") into the reply the task posts. When #344 turns
    chunks into items, the reply still needs those boundaries, so the items keep the class.
+8. **Live chunks travel in the NOTIFY payload** (#344, procoduck, 2026-11-02 and 2026-11-04). Chunks are
+   live-only (item 1), and the way to the run page is the `koinon_run` NOTIFY that already reaches every
+   API replica. agentd batches the chunks of a run about every 100 ms (`runwatch.ChunkPublisher`),
+   joins neighbours of one kind, and sends each batch as `<org_id>/<run_id>/<JSON array of {k, t}>`,
+   split so that a payload stays under 7,500 bytes (Postgres refuses 8,000). The Hub parses the third
+   part and gives the batch to the run's subscriptions; WatchRun sends it as a `LiveChunks` message,
+   which has no seq, is never replayed and is never stored. A lost batch costs a viewer some live text,
+   not an event: the stored item that follows carries the whole text, and the run page replaces the
+   live text with it. This is the one exception to [0022](0022-frontend-architecture.md)'s rule that
+   NOTIFY carries keys only; the plain wake-up (`<org_id>/<run_id>`) is unchanged.
 
 ### Open questions
 

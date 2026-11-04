@@ -891,7 +891,7 @@ func (x *WatchRunRequest) GetAfterSeq() int64 {
 	return 0
 }
 
-// WatchRunResponse carries a run snapshot, one event or a heartbeat.
+// WatchRunResponse carries a run snapshot, one event, live text or a heartbeat.
 type WatchRunResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Item:
@@ -899,6 +899,7 @@ type WatchRunResponse struct {
 	//	*WatchRunResponse_Run
 	//	*WatchRunResponse_Event
 	//	*WatchRunResponse_Heartbeat
+	//	*WatchRunResponse_Live
 	Item          isWatchRunResponse_Item `protobuf_oneof:"item"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -968,6 +969,15 @@ func (x *WatchRunResponse) GetHeartbeat() *Heartbeat {
 	return nil
 }
 
+func (x *WatchRunResponse) GetLive() *LiveChunks {
+	if x != nil {
+		if x, ok := x.Item.(*WatchRunResponse_Live); ok {
+			return x.Live
+		}
+	}
+	return nil
+}
+
 type isWatchRunResponse_Item interface {
 	isWatchRunResponse_Item()
 }
@@ -986,11 +996,120 @@ type WatchRunResponse_Heartbeat struct {
 	Heartbeat *Heartbeat `protobuf:"bytes,3,opt,name=heartbeat,proto3,oneof"`
 }
 
+type WatchRunResponse_Live struct {
+	// Text the agent is typing, sent about every 100 ms while it types. Live only: never stored,
+	// not part of the seq order, and a client that joins late or drops a stream misses it. The
+	// event for the finished message or thought follows with its whole text and replaces it.
+	Live *LiveChunks `protobuf:"bytes,4,opt,name=live,proto3,oneof"`
+}
+
 func (*WatchRunResponse_Run) isWatchRunResponse_Item() {}
 
 func (*WatchRunResponse_Event) isWatchRunResponse_Item() {}
 
 func (*WatchRunResponse_Heartbeat) isWatchRunResponse_Item() {}
+
+func (*WatchRunResponse_Live) isWatchRunResponse_Item() {}
+
+// LiveChunks is a batch of live text, in the order it was typed.
+type LiveChunks struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Chunks        []*LiveChunk           `protobuf:"bytes,1,rep,name=chunks,proto3" json:"chunks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LiveChunks) Reset() {
+	*x = LiveChunks{}
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LiveChunks) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LiveChunks) ProtoMessage() {}
+
+func (x *LiveChunks) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LiveChunks.ProtoReflect.Descriptor instead.
+func (*LiveChunks) Descriptor() ([]byte, []int) {
+	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *LiveChunks) GetChunks() []*LiveChunk {
+	if x != nil {
+		return x.Chunks
+	}
+	return nil
+}
+
+// LiveChunk is a piece of the message or thought in progress.
+type LiveChunk struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// kind is the run event kind of the item the text belongs to, for example
+	// "acp.agent_message_chunk" or "acp.agent_thought_chunk".
+	Kind          string `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Text          string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LiveChunk) Reset() {
+	*x = LiveChunk{}
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LiveChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LiveChunk) ProtoMessage() {}
+
+func (x *LiveChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LiveChunk.ProtoReflect.Descriptor instead.
+func (*LiveChunk) Descriptor() ([]byte, []int) {
+	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *LiveChunk) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *LiveChunk) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
 
 // Heartbeat is an empty keep-alive message.
 type Heartbeat struct {
@@ -1001,7 +1120,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[9]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1013,7 +1132,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[9]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1026,7 +1145,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{9}
+	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{11}
 }
 
 var File_koinon_run_v1alpha1_run_proto protoreflect.FileDescriptor
@@ -1092,12 +1211,19 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\x0fWatchRunRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x15\n" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12\x1b\n" +
-	"\tafter_seq\x18\x03 \x01(\x03R\bafterSeq\"\xbf\x01\n" +
+	"\tafter_seq\x18\x03 \x01(\x03R\bafterSeq\"\xf6\x01\n" +
 	"\x10WatchRunResponse\x12,\n" +
 	"\x03run\x18\x01 \x01(\v2\x18.koinon.run.v1alpha1.RunH\x00R\x03run\x125\n" +
 	"\x05event\x18\x02 \x01(\v2\x1d.koinon.run.v1alpha1.RunEventH\x00R\x05event\x12>\n" +
-	"\theartbeat\x18\x03 \x01(\v2\x1e.koinon.run.v1alpha1.HeartbeatH\x00R\theartbeatB\x06\n" +
-	"\x04item\"\v\n" +
+	"\theartbeat\x18\x03 \x01(\v2\x1e.koinon.run.v1alpha1.HeartbeatH\x00R\theartbeat\x125\n" +
+	"\x04live\x18\x04 \x01(\v2\x1f.koinon.run.v1alpha1.LiveChunksH\x00R\x04liveB\x06\n" +
+	"\x04item\"D\n" +
+	"\n" +
+	"LiveChunks\x126\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x1e.koinon.run.v1alpha1.LiveChunkR\x06chunks\"3\n" +
+	"\tLiveChunk\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"\v\n" +
 	"\tHeartbeat*\xc7\x01\n" +
 	"\bRunState\x12\x19\n" +
 	"\x15RUN_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
@@ -1143,7 +1269,7 @@ func file_koinon_run_v1alpha1_run_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_run_v1alpha1_run_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_koinon_run_v1alpha1_run_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_koinon_run_v1alpha1_run_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_koinon_run_v1alpha1_run_proto_goTypes = []any{
 	(RunState)(0),                 // 0: koinon.run.v1alpha1.RunState
 	(ParkReason)(0),               // 1: koinon.run.v1alpha1.ParkReason
@@ -1157,36 +1283,40 @@ var file_koinon_run_v1alpha1_run_proto_goTypes = []any{
 	(*CancelRunResponse)(nil),     // 9: koinon.run.v1alpha1.CancelRunResponse
 	(*WatchRunRequest)(nil),       // 10: koinon.run.v1alpha1.WatchRunRequest
 	(*WatchRunResponse)(nil),      // 11: koinon.run.v1alpha1.WatchRunResponse
-	(*Heartbeat)(nil),             // 12: koinon.run.v1alpha1.Heartbeat
-	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),       // 14: google.protobuf.Struct
+	(*LiveChunks)(nil),            // 12: koinon.run.v1alpha1.LiveChunks
+	(*LiveChunk)(nil),             // 13: koinon.run.v1alpha1.LiveChunk
+	(*Heartbeat)(nil),             // 14: koinon.run.v1alpha1.Heartbeat
+	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),       // 16: google.protobuf.Struct
 }
 var file_koinon_run_v1alpha1_run_proto_depIdxs = []int32{
 	0,  // 0: koinon.run.v1alpha1.Run.state:type_name -> koinon.run.v1alpha1.RunState
 	1,  // 1: koinon.run.v1alpha1.Run.park_reason:type_name -> koinon.run.v1alpha1.ParkReason
-	13, // 2: koinon.run.v1alpha1.Run.created_at:type_name -> google.protobuf.Timestamp
-	13, // 3: koinon.run.v1alpha1.Run.started_at:type_name -> google.protobuf.Timestamp
-	13, // 4: koinon.run.v1alpha1.Run.finished_at:type_name -> google.protobuf.Timestamp
+	15, // 2: koinon.run.v1alpha1.Run.created_at:type_name -> google.protobuf.Timestamp
+	15, // 3: koinon.run.v1alpha1.Run.started_at:type_name -> google.protobuf.Timestamp
+	15, // 4: koinon.run.v1alpha1.Run.finished_at:type_name -> google.protobuf.Timestamp
 	4,  // 5: koinon.run.v1alpha1.Run.cost:type_name -> koinon.run.v1alpha1.Cost
 	2,  // 6: koinon.run.v1alpha1.Run.failure_class:type_name -> koinon.run.v1alpha1.FailureClass
-	14, // 7: koinon.run.v1alpha1.RunEvent.payload:type_name -> google.protobuf.Struct
-	13, // 8: koinon.run.v1alpha1.RunEvent.created_at:type_name -> google.protobuf.Timestamp
+	16, // 7: koinon.run.v1alpha1.RunEvent.payload:type_name -> google.protobuf.Struct
+	15, // 8: koinon.run.v1alpha1.RunEvent.created_at:type_name -> google.protobuf.Timestamp
 	3,  // 9: koinon.run.v1alpha1.GetRunResponse.run:type_name -> koinon.run.v1alpha1.Run
 	3,  // 10: koinon.run.v1alpha1.CancelRunResponse.run:type_name -> koinon.run.v1alpha1.Run
 	3,  // 11: koinon.run.v1alpha1.WatchRunResponse.run:type_name -> koinon.run.v1alpha1.Run
 	5,  // 12: koinon.run.v1alpha1.WatchRunResponse.event:type_name -> koinon.run.v1alpha1.RunEvent
-	12, // 13: koinon.run.v1alpha1.WatchRunResponse.heartbeat:type_name -> koinon.run.v1alpha1.Heartbeat
-	6,  // 14: koinon.run.v1alpha1.RunService.GetRun:input_type -> koinon.run.v1alpha1.GetRunRequest
-	8,  // 15: koinon.run.v1alpha1.RunService.CancelRun:input_type -> koinon.run.v1alpha1.CancelRunRequest
-	10, // 16: koinon.run.v1alpha1.RunService.WatchRun:input_type -> koinon.run.v1alpha1.WatchRunRequest
-	7,  // 17: koinon.run.v1alpha1.RunService.GetRun:output_type -> koinon.run.v1alpha1.GetRunResponse
-	9,  // 18: koinon.run.v1alpha1.RunService.CancelRun:output_type -> koinon.run.v1alpha1.CancelRunResponse
-	11, // 19: koinon.run.v1alpha1.RunService.WatchRun:output_type -> koinon.run.v1alpha1.WatchRunResponse
-	17, // [17:20] is the sub-list for method output_type
-	14, // [14:17] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	14, // 13: koinon.run.v1alpha1.WatchRunResponse.heartbeat:type_name -> koinon.run.v1alpha1.Heartbeat
+	12, // 14: koinon.run.v1alpha1.WatchRunResponse.live:type_name -> koinon.run.v1alpha1.LiveChunks
+	13, // 15: koinon.run.v1alpha1.LiveChunks.chunks:type_name -> koinon.run.v1alpha1.LiveChunk
+	6,  // 16: koinon.run.v1alpha1.RunService.GetRun:input_type -> koinon.run.v1alpha1.GetRunRequest
+	8,  // 17: koinon.run.v1alpha1.RunService.CancelRun:input_type -> koinon.run.v1alpha1.CancelRunRequest
+	10, // 18: koinon.run.v1alpha1.RunService.WatchRun:input_type -> koinon.run.v1alpha1.WatchRunRequest
+	7,  // 19: koinon.run.v1alpha1.RunService.GetRun:output_type -> koinon.run.v1alpha1.GetRunResponse
+	9,  // 20: koinon.run.v1alpha1.RunService.CancelRun:output_type -> koinon.run.v1alpha1.CancelRunResponse
+	11, // 21: koinon.run.v1alpha1.RunService.WatchRun:output_type -> koinon.run.v1alpha1.WatchRunResponse
+	19, // [19:22] is the sub-list for method output_type
+	16, // [16:19] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_koinon_run_v1alpha1_run_proto_init() }
@@ -1198,6 +1328,7 @@ func file_koinon_run_v1alpha1_run_proto_init() {
 		(*WatchRunResponse_Run)(nil),
 		(*WatchRunResponse_Event)(nil),
 		(*WatchRunResponse_Heartbeat)(nil),
+		(*WatchRunResponse_Live)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1205,7 +1336,7 @@ func file_koinon_run_v1alpha1_run_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_run_v1alpha1_run_proto_rawDesc), len(file_koinon_run_v1alpha1_run_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
