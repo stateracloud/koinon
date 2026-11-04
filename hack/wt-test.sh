@@ -165,6 +165,17 @@ wt new live2 --branch fix/700-live2 >/dev/null 2>&1
 git -C "$tmp/kw/live2" push -q origin fix/700-live2
 check "rm ignores a released claim" wt rm live2
 
+# rm fails closed when the claim refs cannot be fetched
+wt new offl --branch fix/702-offl >/dev/null 2>&1
+git -C "$tmp/kw/offl" push -q origin fix/702-offl
+origin_url=$(git remote get-url origin)
+git remote set-url origin "$tmp/missing.git"
+err=$(wt rm offl 2>&1 || true)
+git remote set-url origin "$origin_url"
+check "rm refuses when claim refs cannot be fetched" test -d "$tmp/kw/offl"
+check "rm says the claim state is unknown" grep -q "could not fetch claim refs from origin" <<<"$err"
+check "rm removes it once origin is back" wt rm offl
+
 # rm resolves <name> through git worktree list, not the root
 wt new moved --branch fix/701-moved >/dev/null 2>&1
 git -C "$tmp/kw/moved" push -q origin fix/701-moved
