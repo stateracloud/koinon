@@ -170,7 +170,7 @@ func anthropicSpec(env Env) {
 			// One request costs about $0.0044, so a limit of $0.006 lets two through.
 			state.SetLimit(agentL, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("0.006"), Window: 24 * time.Hour})
 
-			gw, err := env.Start(ctx, []int{port(srv)}, map[string]string{"provider_key": providerKey})
+			gw, err := env.Start(ctx, []int{port(srv)}, map[string]string{"provider_key": providerKey}, "")
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
 			llmURL, logs = gw.URL, gw.Logs

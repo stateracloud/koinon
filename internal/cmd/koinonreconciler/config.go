@@ -141,6 +141,7 @@ type config struct {
 
 	githubToolsURL string
 	mcpAskURL      string
+	mcpGuardURL    string
 	koinonToolsURL string
 	githubAPIURL   string
 }

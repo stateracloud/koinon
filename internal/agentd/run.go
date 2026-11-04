@@ -24,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runoutcome"
@@ -126,6 +127,11 @@ type runner struct {
 
 	toolsMu sync.Mutex
 	tools   map[string]chan struct{} // tool call IDs; closed once the tool call is recorded
+
+	// taint follows tool calls for the leak guard's feed (taint.go).
+	taint taintCalls
+	// feedCounts are the current harness's counts for the leak guard (taint.go); nil without a feed.
+	feedCounts atomic.Pointer[feedCounts]
 
 	// delivered are the approval requests whose outcomes this turn's prompt carries; they are
 	// marked delivered when the turn ends.
@@ -590,6 +596,18 @@ func (r *runner) execute(ctx context.Context) error {
 	sweepOnce := sync.OnceFunc(func() { r.sweepAfter(ctx, workspace, sandbox) })
 	defer sweepOnce()
 	defer closeHarness()
+	if err := r.feedStart(fctx); err != nil {
+		if errors.Is(err, mcpguard.ErrFeedFenced) {
+			// A newer epoch already started the run's feed: another worker owns the run, as when the
+			// feed's writer finds it fenced (taint.go). Nothing is recorded; that worker drives it.
+			r.log.Warn("the leak guard's feed belongs to a newer worker of the run; this worker stops")
+			r.own.Fence(fenceLost)
+			return errDropped
+		}
+		// The leak guard could not be told this worker's epoch: resume later rather than run unwatched.
+		r.interrupted(ctx, "start the leak guard's feed: "+err.Error(), nil, "")
+		return errDropped
+	}
 	conn := acp.NewConn(handler{r: r}, proc.Stdin(), proc.Stdout())
 	conn.SetLogger(log)
 	harnessErr := func(what string, err error) error {
@@ -1042,6 +1060,24 @@ type handler struct{ r *runner }
 
 func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
 	at := time.Now() // for the trace, before the event write
+	var b []byte
+	if n.Update.ToolCall != nil || n.Update.ToolCallUpdate != nil {
+		var err error
+		if b, err = json.Marshal(n.Update); err != nil {
+			return err
+		}
+		// The leak guard's feed (taint.go) comes before every path below that returns early: a tool
+		// can finish during the end-of-turn summary too, and its result must set its legs. It reads
+		// the replay of a resumed session as well: a worker that gave the run up may have failed to
+		// report a result.
+		if err := h.r.feedTaint(ctx, b); err != nil {
+			return err
+		}
+		// The leak guard waits for this count: it is added only once the update has been fed.
+		if c := h.r.feedCounts.Load(); c != nil && finishesTool(b) {
+			c.add(0, 1)
+		}
+	}
 	if h.r.summaryUpdate(n) {
 		return nil // the summary prompt's reply is the task's note, not a run event
 	}
@@ -1050,12 +1086,14 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 		h.r.setCommands(acp.Flatten(n).Commands)
 		return nil
 	}
+	if b == nil {
+		var err error
+		if b, err = json.Marshal(n.Update); err != nil {
+			return err
+		}
+	}
 	if h.r.replaying.Load() {
 		return nil
-	}
-	b, err := json.Marshal(n.Update)
-	if err != nil {
-		return err
 	}
 	if err := h.r.own.RecordRaw(ctx, "acp."+updateKind(b), b); err != nil {
 		return err

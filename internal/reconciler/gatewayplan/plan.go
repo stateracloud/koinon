@@ -840,18 +840,23 @@ func (pl *Plan) applyMCP(ctx context.Context, lk Lookups) ([]Probe, error) {
 	execGrants := map[string][]gateway.ToolGrant{}
 	execOrg := map[string]Org{}
 	for _, s := range pl.servers {
-		// Only the ask-tier tools: the executor makes calls a human approved, and those are ask-tier
-		// calls (a tool moved to auto meanwhile is called by the agent directly, so an approval made
-		// before the move is refused by the gateway). Defence in depth: the key opens nothing else.
-		var asked []string
+		// The executor makes calls a person approved, and an approval can come from either tier: an
+		// ask-tier call (ADR 0042) or an auto-tier call the leak guard sent to a person (ADR 0091
+		// decision 5). So it opens every present tool of the auto and ask tiers whose name agents
+		// can see, and never a tool that is in the never tier, absent or unnamable. The key is
+		// koinon-api's alone and runs only approved calls with their exact arguments, so this
+		// gives no agent a tool. What an approval may still run when it executes (the server, the
+		// tool's content, the never tier, the agent's allowance) is checked in koinon-api
+		// (approvals.executeMCP), not here.
+		var approvable []string
 		for _, t := range s.Tools {
-			if t.Present && t.Tier == TierAsk && mcpservers.ToolNameProblem(s.Org.Slug, s.Name, t.Name) == "" {
-				asked = append(asked, t.Name)
+			if t.Present && (t.Tier == TierAuto || t.Tier == TierAsk) && mcpservers.ToolNameProblem(s.Org.Slug, s.Name, t.Name) == "" {
+				approvable = append(approvable, t.Name)
 			}
 		}
 		execOrg[s.Org.Slug] = s.Org
-		if len(asked) > 0 {
-			execGrants[s.Org.Slug] = append(execGrants[s.Org.Slug], gateway.ToolGrant{Target: s.target(), Tools: asked})
+		if len(approvable) > 0 {
+			execGrants[s.Org.Slug] = append(execGrants[s.Org.Slug], gateway.ToolGrant{Target: s.target(), Tools: approvable})
 		}
 	}
 	// Each org with servers gets an executor key, for the calls a human approved: they go through the

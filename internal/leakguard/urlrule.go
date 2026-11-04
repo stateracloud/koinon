@@ -3,9 +3,13 @@
 package leakguard
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"math"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"unicode"
@@ -54,8 +58,9 @@ func (p URLPolicy) withDefaults() URLPolicy {
 	return p
 }
 
-// RunState holds the budgets one run has used. It is safe for concurrent use; where it lives
-// across koinon-api replicas is #349's.
+// RunState holds the budgets one run has used. It is safe for concurrent use. It marshals to
+// JSON (MarshalJSON, UnmarshalJSON) so a guard with several replicas keeps it in its database; the
+// paths and queries it remembers are SHA-256 digests, not the text.
 type RunState struct {
 	mu          sync.Mutex
 	hosts       map[string]*hostUse
@@ -69,6 +74,52 @@ type hostUse struct {
 
 // NewRunState returns the state of a new run.
 func NewRunState() *RunState { return &RunState{hosts: map[string]*hostUse{}} }
+
+type runStateJSON struct {
+	Hosts       map[string]hostUseJSON `json:"hosts,omitempty"`
+	SearchBytes int                    `json:"searchBytes,omitempty"`
+}
+
+type hostUseJSON struct {
+	Bytes int      `json:"bytes"`
+	Seen  []string `json:"seen"`
+}
+
+// MarshalJSON encodes the budgets used.
+func (st *RunState) MarshalJSON() ([]byte, error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	out := runStateJSON{Hosts: map[string]hostUseJSON{}, SearchBytes: st.searchBytes}
+	for host, h := range st.hosts {
+		seen := make([]string, 0, len(h.seen))
+		for k := range h.seen {
+			seen = append(seen, k)
+		}
+		slices.Sort(seen)
+		out.Hosts[host] = hostUseJSON{Bytes: h.bytes, Seen: seen}
+	}
+	return json.Marshal(out)
+}
+
+// UnmarshalJSON restores the budgets MarshalJSON encoded. Empty input is a new run.
+func (st *RunState) UnmarshalJSON(b []byte) error {
+	var in runStateJSON
+	if err := json.Unmarshal(b, &in); err != nil {
+		return err
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.hosts = map[string]*hostUse{}
+	st.searchBytes = max(in.SearchBytes, 0)
+	for host, h := range in.Hosts {
+		u := &hostUse{bytes: max(h.Bytes, 0), seen: map[string]struct{}{}}
+		for _, k := range h.Seen {
+			u.seen[k] = struct{}{}
+		}
+		st.hosts[host] = u
+	}
+	return nil
+}
 
 // CheckURL applies the rule to an outbound URL of the run and, when it allows the URL to an
 // untrusted host, charges the run's budgets.
@@ -164,12 +215,14 @@ func (st *RunState) chargeHost(p URLPolicy, host, pathQuery string) Decision {
 		}
 		h = &hostUse{seen: map[string]struct{}{}}
 	}
-	if _, ok := h.seen[pathQuery]; !ok {
+	sum := sha256.Sum256([]byte(pathQuery))
+	key := hex.EncodeToString(sum[:])
+	if _, ok := h.seen[key]; !ok {
 		if h.bytes+len(pathQuery) > p.MaxBytesPerHost {
 			return block(ReasonURLBytesBudget, "the run has sent %d bytes of paths and queries to this host; the limit is %d per host per run", h.bytes, p.MaxBytesPerHost)
 		}
 		h.bytes += len(pathQuery)
-		h.seen[pathQuery] = struct{}{}
+		h.seen[key] = struct{}{}
 	}
 	st.hosts[host] = h
 	return allow(ReasonPass)
