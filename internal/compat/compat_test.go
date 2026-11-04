@@ -3,15 +3,19 @@
 package compat_test
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/compat"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
@@ -27,12 +31,11 @@ func checkFolder(dir string) {
 	It("loads the stored agent configs", func() {
 		Expect(compat.CheckAgentConfigs(dir)).To(Succeed())
 	})
-	It("restores the recorded home backup", func(ctx SpecContext) {
-		Expect(compat.CheckHomeBackup(ctx, dir)).To(Succeed())
-	}, SpecTimeout(2*time.Minute))
-	It("reads the home checkpoints after migrating from the recorded schema to head", func(ctx SpecContext) {
-		Expect(compat.CheckHomeCheckpoints(ctx, pgtest.Run(ctx), dir)).To(Succeed())
-	}, SpecTimeout(3*time.Minute))
+	It("reads the home checkpoints after migrating to head and restores the home backup with the password from its envelope", func(ctx SpecContext) {
+		repo, err := compat.CheckHomeCheckpoints(ctx, pgtest.Run(ctx), dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(compat.CheckHomeBackup(ctx, dir, repo)).To(Succeed())
+	}, SpecTimeout(5*time.Minute))
 }
 
 // The compatibility check itself: every release folder recorded under testdata/compat/.
@@ -72,13 +75,38 @@ var _ = Describe("harness self-test (a folder recorded at head, not a compatibil
 	It("loads the stored agent configs", func() {
 		Expect(compat.CheckAgentConfigs(dir)).To(Succeed())
 	})
-	It("restores the recorded home backup", func(ctx SpecContext) {
-		Expect(compat.CheckHomeBackup(ctx, dir)).To(Succeed())
-	}, SpecTimeout(2*time.Minute))
-	It("reads the home checkpoints after migrating from the recorded schema to head", func(ctx SpecContext) {
-		Expect(compat.CheckHomeCheckpoints(ctx, pgtest.Run(ctx), dir)).To(Succeed())
-	}, SpecTimeout(3*time.Minute))
+	It("reads the home checkpoints after migrating to head and restores the home backup with the password from its envelope", func(ctx SpecContext) {
+		repo, err := compat.CheckHomeCheckpoints(ctx, pgtest.Run(ctx), dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(compat.CheckHomeBackup(ctx, dir, repo)).To(Succeed())
+	}, SpecTimeout(5*time.Minute))
 
+	It("records a full config that sets every field of agentconfig.Config", func() {
+		for _, noTemplate := range []bool{false, true} {
+			raw, err := compat.FullConfig(noTemplate).Marshal()
+			Expect(err).NotTo(HaveOccurred())
+			var got map[string]any
+			Expect(json.Unmarshal(raw, &got)).To(Succeed())
+			typ := reflect.TypeFor[agentconfig.Config]()
+			for i := range typ.NumField() {
+				key, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+				if noTemplate && key == "template" {
+					Expect(got).NotTo(HaveKey(key))
+					continue
+				}
+				Expect(got).To(HaveKey(key), "add the new Config field %s to compat.FullConfig", typ.Field(i).Name)
+				Expect(got[key]).NotTo(BeZero(), "compat.FullConfig leaves %s zero", typ.Field(i).Name)
+				if m, ok := got[key].(map[string]any); ok {
+					Expect(m).NotTo(BeEmpty(), "compat.FullConfig leaves %s empty", typ.Field(i).Name)
+				}
+			}
+		}
+	})
+	It("records the full configs", func() {
+		for _, n := range []string{"full", "full-no-template"} {
+			Expect(filepath.Join(dir, "agent_configs", n+".json")).To(BeAnExistingFile())
+		}
+	})
 	It("fails when a stored config decodes differently than recorded", func() {
 		entries, err := filepath.Glob(filepath.Join(dir, "agent_configs", "*.decoded.json"))
 		Expect(err).NotTo(HaveOccurred())

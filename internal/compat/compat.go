@@ -11,6 +11,7 @@
 package compat
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/stateracloud/koinon/internal/checkpoint"
+	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
 // Root is the folder, relative to the repository root, that holds one subfolder per release.
@@ -26,6 +32,27 @@ const Root = "testdata/compat"
 // Password opens the recorded kopia repository. It is obviously fake: the repository holds only
 // the fixture files.
 const Password = "koinon_test_not-a-real-password"
+
+// KEK is the obviously fake key-encryption key that seals the recorded repository password
+// envelope; the keyring is built from its SHA-256 and the ID kekID.
+const (
+	KEK   = "koinon_test_not-a-real-kek"
+	kekID = "compat"
+)
+
+// Keyring is the test secret store the recorded envelope is sealed with and opened by.
+func Keyring() (*secretstore.Keyring, error) {
+	k := sha256.Sum256([]byte(KEK))
+	return secretstore.NewKeyring(map[string][]byte{kekID: k[:]}, kekID)
+}
+
+func uuid(s string) pgtype.UUID {
+	var u pgtype.UUID
+	if err := u.Scan(s); err != nil {
+		panic(err) // the IDs are constants in this package
+	}
+	return u
+}
 
 // ManifestFile names the manifest at the top of a release folder.
 const ManifestFile = "manifest.json"
@@ -123,4 +150,18 @@ func subset(got, want any) bool {
 	default:
 		return got == want
 	}
+}
+
+// sealedPassword is the envelope the recorder stores in home_repositories for the backup agent,
+// sealed under the binding the runtime opens it with (checkpoint.Binding).
+func sealedPassword() ([]byte, error) {
+	ring, err := Keyring()
+	if err != nil {
+		return nil, err
+	}
+	env, err := ring.Seal(checkpoint.Binding(uuid(backupOrg), uuid(backupAgent)), []byte(Password))
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(env)
 }
