@@ -12,9 +12,16 @@ on:
 permissions:
   contents: read
 
+# One run per head (#675). Runs never cancel each other through the group: the group is the PR head
+# SHA (a push to main: its own SHA), cancel-in-progress is off. So a push followed by ready_for_review,
+# or a re-run, on one head queue behind each other instead of killing a live run (a cancelled run reads
+# as FAILED to hack/pr-wait.sh). GitHub keeps one running and one pending run per group; a third run
+# on the same head replaces the pending one, which is fine: it is the same head and the same suite.
+# Runs on an OLDER head of the pull request are cancelled by hack/ci-supersede.sh (first step of
+# `changes`); a push to main never cancels or is cancelled. docs/dev/ci.md#one-run-per-head
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) || format('ci-push-{0}', github.sha) }}
+  cancel-in-progress: false
 
 jobs:
   # Which parts of the tree a pull request touches, so the slow jobs run only when they can be
@@ -32,13 +39,14 @@ jobs:
     name: changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
-    # Read rights only: the draft state of the pull request, the check runs of its head and, for
-    # go-test-lab (#610), its commit statuses.
+    # Read rights: the draft state of the pull request, the check runs of its head and, for
+    # go-test-lab (#610), its commit statuses. Write on actions only to cancel older heads' runs (#675).
     permissions:
       contents: read
       pull-requests: read
       checks: read
       statuses: read
+      actions: write # hack/ci-supersede.sh cancels the runs of older heads (#675)
     outputs:
       skip: ${{ steps.skip.outputs.skip }}
       reason: ${{ steps.skip.outputs.reason }}
@@ -69,6 +77,15 @@ jobs:
           key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+      - name: Cancel runs of older heads of this pull request
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: hack/ci-supersede.sh
       - id: skip
         env:
           GH_TOKEN: ${{ github.token }}
@@ -711,6 +728,9 @@ jobs:
       - run: hack/dep-age-check-test.sh
       - run: hack/ci-changes-test.sh
       - run: hack/ci-skip-heavy-test.sh
+      - run: hack/ci-supersede-test.sh
+      - run: hack/e2e-rerun-result-test.sh
+      - run: hack/ci-concurrency-test.sh
 
   # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
