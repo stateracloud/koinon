@@ -26,6 +26,9 @@
 # request back into a draft first (`gh pr ready --undo`), push, and ship with --ready --lab-go-test.
 # The lab run takes minutes; the claim must be renewed (hack/claim.sh beat) around it.
 #
+# --ready without --lab-go-test on a draft PR that exists marks it ready BEFORE the push (#675): ready
+# after the push starts a second ci run on the same head. A new PR is created ready, so it has one run.
+#
 # Run it inside a checkout or worktree on a feature branch named <type>/<N>-<slug> (the claim and the
 # PR hang off N); any other name is refused before anything is pushed (#485). Work that needs no issue
 # (the claim check exempts chore/ci/build(deps) PRs without source changes, and PRs labelled
@@ -44,7 +47,7 @@
 
 set -euo pipefail
 
-msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 lab=0 auto=0 hold=0 review="" dry=0 no_issue=0
+msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 lab=0 auto=0 hold=0 review="" dry=0 no_issue=0 ready_done=0
 need() { [[ $# -ge 2 ]] || { echo "ship: $1 needs a value" >&2; exit 2; }; }
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -207,6 +210,17 @@ else
 			say "label e2e"
 		fi
 	fi
+	# Ready BEFORE the push (#675): a draft PR marked ready after the push runs the ci workflow twice on
+	# one head (the synchronize run, then the ready_for_review run), seconds apart. Marked ready first,
+	# the ready_for_review run starts on the old head and the push's run supersedes it (an older head is
+	# cancelled, ci.yml). Not with --lab-go-test: that gate needs the pushed head and runs before ready.
+	if [[ $ready == 1 && $lab != 1 && $pr_state == OPEN ]]; then
+		if [[ $(gh pr view "$pr_num" --json isDraft --jq .isDraft 2>/dev/null || echo false) == true ]]; then
+			gh pr ready "$pr_num" >/dev/null || fail "gh pr ready failed"
+			ready_done=1
+			say "ready"
+		fi
+	fi
 	# git prints the server's "remote:" banner on stderr even with -q; keep it out of the step lines.
 	if ! pushlog=$(git push -q -u origin "$branch" 2>&1); then
 		printf '%s\n' "$pushlog" >&2
@@ -266,7 +280,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			*) fail "lab go-test failed (exit $lab_rc); fix it and run again (the pull request was not marked ready)" ;;
 			esac
 		fi
-		if [[ $ready == 1 ]]; then
+		if [[ $ready == 1 && $ready_done != 1 ]]; then
 			gh pr ready "$pr_url" >/dev/null || fail "gh pr ready failed"
 			say "ready"
 		fi
