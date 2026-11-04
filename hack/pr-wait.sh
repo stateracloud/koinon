@@ -33,13 +33,17 @@
 #              branch's rules (gh api repos/{owner}/{repo}/rules/branches/<base>) to exist on the head:
 #              a workflow run that is still queued has no jobs yet, so its required checks are missing
 #              from the rollup (`waiting for required checks not on the head yet: ci,...`, #562).
+#              A draft PR is never green (#647): with --checks, `isDraft` exits 5 with `DRAFT` (a draft runs
+#              almost nothing, and `go`/`web` are red on purpose). After `ready_for_review`, check runs that
+#              started before the last ready event (the draft's) are ignored, and it prints
+#              `waiting for the ready run` until the ready run's checks exist.
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
 #   --interval 20 seconds by default
 #
 # Output lines: `checks 7/9 pending: go,web`, `FAILED go (run 123)`, `MERGED abc1234`,
 # `needs-update`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
 # Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout,
-#       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 64 usage.
+#       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks), 64 usage.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -183,7 +187,7 @@ emit() { # print only when the line differs from the previous one
 
 start=$SECONDS
 while :; do
-  if json=$(gh pr view "$pr" --json state,mergeStateStatus,mergeCommit,statusCheckRollup,headRefName,headRefOid,baseRefName 2>/dev/null) && [ -n "$json" ]; then
+  if json=$(gh pr view "$pr" --json state,isDraft,mergeStateStatus,mergeCommit,statusCheckRollup,headRefName,headRefOid,baseRefName 2>/dev/null) && [ -n "$json" ]; then
     state=$(jq -r '.state // ""' <<<"$json")
     mstate=$(jq -r '.mergeStateStatus // ""' <<<"$json")
     case $state in
@@ -197,6 +201,38 @@ while :; do
       exit 3
       ;;
     esac
+    ready_dropped=0
+    if [ "$mode" = checks ]; then
+      if [ "$(jq -r '.isDraft // false' <<<"$json")" = true ]; then
+        echo "DRAFT: not tested, mark ready for review (hack/ship.sh --ready, gh pr ready)"
+        exit 5
+      fi
+      # The last ready_for_review event: runs of the `ci` workflow that started before it belong to the draft.
+      # Only ci re-runs on ready_for_review; dco, gitleaks and commit statuses (e2e-lab) keep their draft-era verdict.
+      ready=$(gh api "repos/{owner}/{repo}/issues/$pr/events" --paginate \
+        --jq '[.[] | select(.event == "ready_for_review") | .created_at] | max // empty' 2>/dev/null | sort | tail -n 1) || ready=""
+      if [ -n "$ready" ]; then
+        # Decide per workflow run, not per check run: a draft run cancelled by the ready run has check runs that
+        # start (and are cancelled) after the ready event, and `needs: changes` jobs of a cancelled run never ran.
+        # ready_ids: the ci runs on the head created at or after the ready event ("none": the ready run is not
+        # there yet); empty: gh could not say, fall back to each check run's own start time.
+        ready_ids=""
+        hd=$(jq -r '.headRefOid // ""' <<<"$json")
+        if [ -n "$hd" ]; then
+          ready_ids=$(gh run list --commit "$hd" --workflow ci.yml --limit 50 --json databaseId,createdAt 2>/dev/null |
+            jq -r --arg r "$ready" '[.[] | select(.createdAt >= $r) | .databaseId | tostring] | join(",") | if . == "" then "none" else . end' 2>/dev/null) || ready_ids=""
+        fi
+        # shellcheck disable=SC2016 # jq program
+        drop='def rid: ((.detailsUrl // "") | capture("/runs/(?<r>[0-9]+)")? | .r);
+          def draft($ids): (.workflowName // "") == "ci" and
+            (if $ids == "" or rid == null then (.startedAt // "") != "" and .startedAt < $r
+             else rid as $id | (($ids | split(",")) | index($id)) == null end);'
+        if jq -e --arg r "$ready" --arg ids "$ready_ids" "$drop any((.statusCheckRollup // [])[]; draft(\$ids))" <<<"$json" >/dev/null; then
+          ready_dropped=1
+          json=$(jq --arg r "$ready" --arg ids "$ready_ids" "$drop"' .statusCheckRollup |= map(select(draft($ids) | not))' <<<"$json")
+        fi
+      fi
+    fi
     branch=$(jq -r '.headRefName // "<branch>"' <<<"$json")
     head=$(jq -r '.headRefOid // ""' <<<"$json")
     live=""
@@ -273,6 +309,9 @@ while :; do
       [ -z "$head" ] || live=$(live_e2e "$head")
       if [ -n "$live" ]; then
         emit "waiting for e2e-kind run $live on ${head:0:7}"
+      elif [ -n "$missing_ctx" ] && [ "$ready_dropped" = 1 ]; then
+        emit "waiting for the ready run"
+        live=$missing_ctx
       elif [ -n "$missing_ctx" ]; then
         emit "checks $ndone/$total done; waiting for required checks not on the head yet: $missing_ctx"
         live=$missing_ctx
@@ -302,6 +341,8 @@ while :; do
       [ -n "$live" ] || emit "checks $total/$total green"
     elif [ -n "$pending" ]; then
       emit "checks $ndone/$total pending: $pending"
+    elif [ "$ready_dropped" = 1 ]; then
+      emit "waiting for the ready run"
     else
       emit "checks 0/0"
     fi
