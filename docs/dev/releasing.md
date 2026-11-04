@@ -73,6 +73,21 @@ Checklist step for every `vX.Y.0`: after the final tag is published, open a pull
 `hack/migrate-patch-line` to `vX.Y` (for v0.1.0: `v0.1`). Until it merges, main can still contract
 the schema that the shipped release runs on (ADR 0085).
 
+Checklist step for every `vX.Y.0`, with the one above: record the persisted-state compatibility
+folder (#652) from the tagged commit, so later changes are checked against what that release wrote:
+
+```sh
+git switch --detach vX.Y.0
+hack/record-compat-fixtures.sh vX.Y.0 --out "${TMPDIR:-/tmp}/compat-vX.Y.0"
+git switch -c test/compat-vX.Y.0 origin/main
+mkdir -p testdata/compat && cp -R "${TMPDIR:-/tmp}/compat-vX.Y.0" testdata/compat/vX.Y.0
+```
+
+Commit the folder on a branch from `main` and merge it by pull request. `internal/compat` loads every
+folder under `testdata/compat/` and, until the first one exists, reports "NO RECORDED RELEASE". Do
+not record a release candidate. Refreshing and what to do when a folder stops loading:
+[docs/dev/ci.md](ci.md#persisted-state-compatibility).
+
 ## Release notes: "Upgrading from vX.Y"
 
 The generated notes list commits only. Before you publish the draft (step 4), add an "Upgrading from

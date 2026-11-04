@@ -7,7 +7,7 @@ The detail behind the short CI bullets in `AGENTS.md`. The rules an agent must n
 
 ## Go test suites
 
-`hack/go-test.sh` is what `make test` runs: the agentd, api, durable and checkpoint suites under
+`hack/go-test.sh` is what `make test` runs: the agentd, api, durable, checkpoint and compat suites under
 Ginkgo `-p` (one shared Postgres server per run, a template-copied database per process, see
 `internal/testing/pgtest`), the rest under `go test` (Postgres tests need Docker; they skip without
 it). A new suite joins the parallel list in that script once it shares no database, fixed port or
@@ -15,6 +15,35 @@ fixed path between processes. `hack/testverdict` reports a skipped suite as SKIP
 fails one that did not run (NOT RUN); `hack/go-test.sh` exits 3 when an expected requirement
 (docker, git, helm) was missing. One package: `go test ./internal/x` (serial) or
 `go tool ginkgo -p ./internal/x`. `test/flavors` needs the flavor images: `make test-flavors`.
+
+## Persisted-state compatibility
+
+`internal/compat` (#652) checks that what a shipped release wrote still loads at head. Each folder
+`testdata/compat/<release>/` is recorded by `hack/record-compat-fixtures.sh <release>` from that
+release's code and holds three formats:
+
+- `agent_configs/`: the stored `agent_versions.config` of every shipped template, with the decode
+  `agentconfig.Parse` made of it then; head must decode it to the same value.
+- `home_checkpoints.sql` and `manifest.json`: `home_checkpoints` rows written for the schema version
+  in the manifest; the check migrates an empty database to that version, loads them, migrates to head
+  and compares the recorded columns (Postgres, needs Docker).
+- `home_backup/`: a kopia repository (password `koinon_test_not-a-real-password`) restored with
+  `checkpoint.Writer.Restore` and compared file by file.
+
+The suite is in the parallel list of `hack/go-test.sh`: it takes its databases from `pgtest.Run`
+(one per spec, unique per process), binds no port and writes only to temp directories. It sits in
+its own package, not in `internal/db/migrations`, because it spans three subsystems.
+
+The first folder is recorded at the v0.1.0 cut (`docs/dev/releasing.md`); until then the suite reports
+"NO RECORDED RELEASE" and checks nothing. Its "harness self-test" records a folder at head into a
+temp dir with the script and loads it: that proves the recorder and the loader agree and is not the
+compatibility check.
+
+A folder is never refreshed to make a failure go away. If a spec fails, head broke the reader of an
+old format: fix the reader or add a migration (a patch line only expands, ADR 0085). Only a decided,
+documented break of a format (an ADR, and a release that says so in its upgrade notes) may change a
+folder, by deleting it and recording it again from the tag of its release with the script, in a
+commit that names the break.
 
 ## Chart and admission tests
 
