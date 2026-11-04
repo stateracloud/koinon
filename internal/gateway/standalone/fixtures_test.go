@@ -127,6 +127,7 @@ func fixtures() []fixture {
 		{name: "full", state: full, options: standalone.Options{
 			DatabaseURL:   "sqlite:///data/agentgateway.db?mode=rwc",
 			AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318", TokenFile: "/secrets/otlp/token"},
+			GuardURL:      "http://koinon-api-guard.koinon.svc:8083",
 		}},
 		{name: "mcp-no-grants", state: mcpNoGrants},
 		{name: "mcp-servers", state: mcpServers},

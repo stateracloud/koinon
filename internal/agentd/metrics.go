@@ -7,6 +7,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/runoutcome"
 )
@@ -41,6 +42,9 @@ type Metrics struct {
 	// (diagnostic: dropped, the run went on; business: the run was abandoned) and reason (ADR 0074,
 	// amendment of 2026-10-31).
 	RunEventWriteFailures *prometheus.CounterVec
+	// TaintReports counts the leak guard feed's reports of finished tool calls, by the leg they set
+	// (private_data, untrusted_input) and result (recorded, failed).
+	TaintReports *prometheus.CounterVec
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered).
@@ -76,6 +80,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		RunEventWriteFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koinon_agentd_run_event_write_failures_total", Help: "Run events that could not be written after their tries, by class (diagnostic: dropped and the run went on; business: the run was abandoned) and reason (timeout, conn, transient, other).",
 		}, []string{"class", "reason"}),
+		TaintReports: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_agentd_taint_reports_total", Help: "Finished tool calls of a sandbox reported to the MCP leak guard, by the leg they set (private_data, untrusted_input) and result (recorded; failed: the run was given up).",
+		}, []string{"leg", "result"}),
 		SandboxWait: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name: "koinon_agentd_sandbox_wait_duration_seconds", Help: "Time a run waited for its agent's sandbox to be ready, whatever the result.",
 			Buckets: []float64{0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300},
@@ -102,8 +109,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			m.RunEventWriteFailures.WithLabelValues(c.String(), string(r))
 		}
 	}
+	for _, l := range []string{legPrivate, legUntrusted} {
+		for _, r := range []string{taintRecorded, taintFailed} {
+			m.TaintReports.WithLabelValues(l, r)
+		}
+	}
 	if reg != nil {
-		reg.MustRegister(m.Claimed, m.Finished, m.Takeovers, m.SandboxWait, m.ModelWait, m.Requeued,
+		reg.MustRegister(m.TaintReports, m.Claimed, m.Finished, m.Takeovers, m.SandboxWait, m.ModelWait, m.Requeued,
 			m.SandboxWaitCap, m.WrapUpNotices, m.TimeLimitStops, m.TraceSpansDropped, m.TraceSpansExported,
 			m.RunEventWriteFailures)
 	}
@@ -125,4 +137,26 @@ func (o outcomeMetrics) SandboxWaitCap(cause execution.SandboxWaitCause) {
 
 func (o outcomeMetrics) EventWriteFailed(class runoutcome.EventClass, reason runoutcome.WriteFailure) {
 	o.m.RunEventWriteFailures.WithLabelValues(class.String(), string(reason)).Inc()
+}
+
+// The labels of TaintReports.
+const (
+	legPrivate    = "private_data"
+	legUntrusted  = "untrusted_input"
+	taintRecorded = "recorded"
+	taintFailed   = "failed"
+)
+
+// taintReport counts one report of the leak guard's feed.
+func (m *Metrics) taintReport(legs mcpguard.Legs, ok bool) {
+	result := taintRecorded
+	if !ok {
+		result = taintFailed
+	}
+	if legs.PrivateData {
+		m.TaintReports.WithLabelValues(legPrivate, result).Inc()
+	}
+	if legs.UntrustedInput {
+		m.TaintReports.WithLabelValues(legUntrusted, result).Inc()
+	}
 }

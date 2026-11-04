@@ -51,9 +51,11 @@ type Env struct {
 	// file Start was given under name.
 	KeyFile func(name string) string
 	// Start brings up an empty gateway that can reach the given test-host ports, and writes files
-	// (name to content) where KeyFile(name) points. The specs then call Apply on the returned
-	// driver. It skips the spec when the environment is missing.
-	Start func(ctx context.Context, hostPorts []int, files map[string]string) (*Gateway, error)
+	// (name to content) where KeyFile(name) points. guardURL is the MCP leak guard the driver
+	// renders (Options.GuardURL; "" for none, when every call to an org's server is refused). The
+	// specs then call Apply on the returned driver. It skips the spec when the environment is
+	// missing.
+	Start func(ctx context.Context, hostPorts []int, files map[string]string, guardURL string) (*Gateway, error)
 	// GatewayBudgets is true when the gateway itself blocks a key over its limit with 429 (standalone
 	// mode). In Kubernetes mode the ledger revokes the key instead, which that driver's own suite tests.
 	GatewayBudgets bool
@@ -94,6 +96,7 @@ func Register(env Env) {
 	anthropicSpec(env)
 	mcpServersSpec(env)
 	loneTargetSpec(env)
+	guardSpec(env)
 }
 
 func llmSpec(env Env) {
@@ -254,7 +257,7 @@ func llmSpec(env Env) {
 			state.GrantTools(agentA, gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}})
 
 			gw, err := env.Start(ctx, []int{port(upstream), port(tools), port(ups["globex"].Server), port(ups["guarded"].Server), port(ups["private"].Server), port(redirector)},
-				map[string]string{"globex_key": "globex-upstream-key"})
+				map[string]string{"globex_key": "globex-upstream-key"}, "")
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
 			driver, logs, llmURL = gw.Driver, gw.Logs, gw.URL
@@ -733,9 +736,10 @@ func mcpServersSpec(env Env) {
 			state.GrantTools(agentCross, gateway.ToolGrant{Target: "globex-wiki", Tools: []string{"read_item", "write_item"}})
 
 			// A trailing newline is part of the file as kubelet writes it only if the Secret has one.
-			gw, err := env.Start(ctx, []int{port(acme), port(bearerSrv), port(globex), port(tools), port(open)}, map[string]string{
+			guard := startGuard()
+			gw, err := env.Start(ctx, []int{port(acme), port(bearerSrv), port(globex), port(tools), port(open), guard.Port()}, map[string]string{
 				"acme-wiki-key": "not-a-real-token-acme", "acme-bearer-key": "not-a-real-token-bearer", "globex-wiki-key": "not-a-real-token-globex",
-			})
+			}, guard.URL(env.Host))
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
 			logs, llmURL = gw.Logs, gw.URL
@@ -911,7 +915,8 @@ func loneTargetSpec(env Env) {
 			state.AddKey(keyGl.Key)
 			state.GrantTools(keyAcme.Agent, gateway.ToolGrant{Target: "acme-only", Tools: []string{"read_item"}})
 			state.GrantTools(keyGl.Agent, gateway.ToolGrant{Target: "acme-only", Tools: []string{"read_item"}})
-			gw, err := env.Start(ctx, []int{port(srv)}, nil)
+			guard := startGuard()
+			gw, err := env.Start(ctx, []int{port(srv), guard.Port()}, nil, guard.URL(env.Host))
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
 			llmURL = gw.URL

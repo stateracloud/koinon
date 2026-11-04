@@ -49,8 +49,8 @@ type running struct {
 }
 
 // startStandalone starts agentgateway in a container on an empty config; files land in the directory
-// mounted at /secrets/upstream.
-func startStandalone(ctx context.Context, hostPorts []int, files map[string]string) (*running, error) {
+// mounted at /secrets/upstream. guardURL is the MCP leak guard the driver renders ("" for none).
+func startStandalone(ctx context.Context, hostPorts []int, files map[string]string, guardURL string) (*running, error) {
 	testenv.Require(testenv.Docker)
 	cfgDir, err := os.MkdirTemp("", "koinon-agw-cfg-")
 	if err != nil {
@@ -71,7 +71,9 @@ func startStandalone(ctx context.Context, hostPorts []int, files map[string]stri
 		}
 	}
 	file := standalone.FileDeliverer{Path: filepath.Join(cfgDir, "config.yaml")}
-	first, _, err := standalone.Render(gateway.State{}, options)
+	opts := options
+	opts.GuardURL = guardURL
+	first, _, err := standalone.Render(gateway.State{}, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +114,7 @@ func startStandalone(ctx context.Context, hostPorts []int, files map[string]stri
 		return nil, err
 	}
 	r.driver = &standalone.Driver{
-		Options:   options,
+		Options:   opts,
 		Deliverer: file,
 		Waiter:    standalone.ProbeWaiter{GatewayURL: r.URL, StatsURL: r.statsURL, Interval: 200 * time.Millisecond},
 	}
@@ -126,8 +128,8 @@ var _ = func() bool {
 		Name:    "standalone",
 		Host:    testcontainers.HostInternal,
 		KeyFile: func(name string) string { return "/secrets/upstream/" + name },
-		Start: func(ctx context.Context, ports []int, files map[string]string) (*gatewaytest.Gateway, error) {
-			r, err := startStandalone(ctx, ports, files)
+		Start: func(ctx context.Context, ports []int, files map[string]string, guardURL string) (*gatewaytest.Gateway, error) {
+			r, err := startStandalone(ctx, ports, files, guardURL)
 			if err != nil {
 				return nil, err
 			}
@@ -170,7 +172,7 @@ var _ = Describe("agentgateway v1.7.0 reload detection (standalone only)", Order
 		}))
 		DeferCleanup(upstream.Close)
 		var err error
-		r, err = startStandalone(ctx, []int{portOf(upstream)}, nil)
+		r, err = startStandalone(ctx, []int{portOf(upstream)}, nil, "")
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(r.Stop)
 		key, err = gateway.NewKey(agent)

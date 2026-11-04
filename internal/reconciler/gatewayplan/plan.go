@@ -227,6 +227,9 @@ type Planner struct {
 	// MCP servers.
 	appliedFile    map[string]string
 	appliedMCPFile map[string]string
+	// appliedMCPSig is what each served MCP server was last applied as (its URL, transport and
+	// credential file); a server whose signature is new or changed is probed at once (issue #226).
+	appliedMCPSig map[string]string
 	// probeKeys are the prober's keys, in memory only; probes are the servers the last applied state
 	// lets the prober list.
 	probeKeys map[gateway.AgentRef]gateway.IssuedKey
@@ -415,6 +418,9 @@ type Outcome struct {
 	Run, Held []int
 	// Served is set when the Apply took effect: the models to record, one entry per org.
 	Served []ServedModels
+	// Probe is set when the Apply took effect: the MCP servers it newly serves or serves with another
+	// URL, transport or credential. The prober lists them now instead of at its next tick.
+	Probe []Probe
 }
 
 // Applied feeds the Apply's result back: the keys it carried become live, the key files and probes it
@@ -425,7 +431,7 @@ func (pl *Plan) Applied(res ApplyResult) Outcome {
 		pl.p.keysLive(pl.State, res.Rejections)
 		pl.p.recordApplied(pl.providers, pl.State, res.Rejections)
 		out.Served = pl.served(res.Rejections)
-		pl.p.recordAppliedMCP(pl.servers, pl.probes)
+		out.Probe = pl.p.recordAppliedMCP(pl.servers, pl.probes)
 	}
 	for _, i := range pl.Late {
 		if res.Failed || pl.p.KeyNotLive(pl.in.Agents[i].Key.ID) {
@@ -707,18 +713,33 @@ func (p *Planner) recordApplied(providers []Provider, state gateway.State, rejec
 }
 
 // recordAppliedMCP remembers the credential file each served server was applied with and the probes
-// the applied state makes possible.
-func (p *Planner) recordAppliedMCP(servers []*MCPServer, probes []Probe) {
+// the applied state makes possible. It returns the probes of the servers whose applied signature is
+// new or changed since the previous applied state.
+func (p *Planner) recordAppliedMCP(servers []*MCPServer, probes []Probe) []Probe {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	next := map[string]string{}
+	sigs := map[string]string{}
+	changed := map[string]bool{}
 	for _, s := range servers {
+		k := uuidKey(s.ID)
 		if s.File != "" {
-			next[uuidKey(s.ID)] = s.File
+			next[k] = s.File
+		}
+		sigs[k] = fmt.Sprintf("%s\x00%t\x00%s\x00%s\x00%s", s.URL, s.SSE, s.CredentialHeader, s.CredentialPrefix, s.File)
+		if old, ok := p.appliedMCPSig[k]; !ok || old != sigs[k] {
+			changed[k] = true
 		}
 	}
 	p.appliedMCPFile = next
+	p.appliedMCPSig = sigs
 	p.probes = probes
+	var fresh []Probe
+	for _, pr := range probes {
+		if changed[uuidKey(pr.Server)] {
+			fresh = append(fresh, pr)
+		}
+	}
 	live := map[gateway.AgentRef]bool{}
 	for _, s := range servers {
 		live[s.probeAgent()] = true
@@ -728,6 +749,7 @@ func (p *Planner) recordAppliedMCP(servers []*MCPServer, probes []Probe) {
 			delete(p.probeKeys, ref)
 		}
 	}
+	return fresh
 }
 
 func (s *MCPServer) target() string { return mcpservers.TargetName(s.Org.Slug, s.Name) }
@@ -818,18 +840,23 @@ func (pl *Plan) applyMCP(ctx context.Context, lk Lookups) ([]Probe, error) {
 	execGrants := map[string][]gateway.ToolGrant{}
 	execOrg := map[string]Org{}
 	for _, s := range pl.servers {
-		// Only the ask-tier tools: the executor makes calls a human approved, and those are ask-tier
-		// calls (a tool moved to auto meanwhile is called by the agent directly, so an approval made
-		// before the move is refused by the gateway). Defence in depth: the key opens nothing else.
-		var asked []string
+		// The executor makes calls a person approved, and an approval can come from either tier: an
+		// ask-tier call (ADR 0042) or an auto-tier call the leak guard sent to a person (ADR 0091
+		// decision 5). So it opens every present tool of the auto and ask tiers whose name agents
+		// can see, and never a tool that is in the never tier, absent or unnamable. The key is
+		// koinon-api's alone and runs only approved calls with their exact arguments, so this
+		// gives no agent a tool. What an approval may still run when it executes (the server, the
+		// tool's content, the never tier, the agent's allowance) is checked in koinon-api
+		// (approvals.executeMCP), not here.
+		var approvable []string
 		for _, t := range s.Tools {
-			if t.Present && t.Tier == TierAsk && mcpservers.ToolNameProblem(s.Org.Slug, s.Name, t.Name) == "" {
-				asked = append(asked, t.Name)
+			if t.Present && (t.Tier == TierAuto || t.Tier == TierAsk) && mcpservers.ToolNameProblem(s.Org.Slug, s.Name, t.Name) == "" {
+				approvable = append(approvable, t.Name)
 			}
 		}
 		execOrg[s.Org.Slug] = s.Org
-		if len(asked) > 0 {
-			execGrants[s.Org.Slug] = append(execGrants[s.Org.Slug], gateway.ToolGrant{Target: s.target(), Tools: asked})
+		if len(approvable) > 0 {
+			execGrants[s.Org.Slug] = append(execGrants[s.Org.Slug], gateway.ToolGrant{Target: s.target(), Tools: approvable})
 		}
 	}
 	// Each org with servers gets an executor key, for the calls a human approved: they go through the

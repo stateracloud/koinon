@@ -70,6 +70,20 @@ spec:
             matchLabels:
               {{- include "koinon.proxySelectorLabels" . | nindent 14 }}
         {{- end }}
+    # The MCP leak guard (ADR 0091) trusts the agent the gateway names in its metadata, so only the
+    # gateway may reach it. koinon-agentd's taint feed writes to the database, not to this port.
+    - ports:
+        - port: guard
+      from:
+        {{- if eq .Values.gateway.mode "standalone" }}
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "gateway") | nindent 14 }}
+        {{- else }}
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.proxySelectorLabels" . | nindent 14 }}
+        {{- end }}
     # Prometheus /metrics: nobody unless metrics.allowFrom names the scraper.
     {{- with .Values.metrics.allowFrom }}
     - ports:
@@ -118,8 +132,8 @@ spec:
     matchLabels:
       {{- include "koinon.selectorLabels" (list . "gateway") | nindent 6 }}
   policyTypes: [Ingress, Egress]
-  # Egress, standard networking.k8s.io/v1 only. Allowed: DNS; koinon-api's OTLP receiver and tools
-  # listener; the public internet (model providers and remote MCP servers; the private, shared, link-local and loopback ranges are carved out,
+  # Egress, standard networking.k8s.io/v1 only. Allowed: DNS; koinon-api's OTLP receiver, tools
+  # listener and leak guard; the public internet (model providers and remote MCP servers; the private, shared, link-local and loopback ranges are carved out,
   # which keeps the cloud metadata address, the node and the cluster's Services and pods out of
   # reach); and whatever networkPolicy.gatewayEgressTo adds for internal upstreams. Limits: the
   # carve-outs are the standard private ranges, so a cluster whose pods or Services use public
@@ -137,6 +151,7 @@ spec:
       ports:
         - port: {{ .Values.api.otlpPort }}
         - port: {{ .Values.api.toolsPort }}
+        - port: {{ .Values.api.guardPort }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
@@ -211,6 +226,7 @@ spec:
       ports:
         - port: {{ .Values.api.otlpPort }}
         - port: {{ .Values.api.toolsPort }}
+        - port: {{ .Values.api.guardPort }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

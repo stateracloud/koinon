@@ -28,7 +28,7 @@ Instructions for coding agents working on Koinon.
 - Before you hand over or push: `hack/preflight.sh` (the gates your change touches, one line each).
   Ship a branch with `hack/ship.sh` (sign-off, blob and gitleaks checks, merge of `origin/main`,
   push, PR, board, optional auto-merge and `claim.sh review`). Wait on a PR with `hack/pr-wait.sh`
-  (in the background); read why CI failed with `hack/ci-fail.sh <PR>`. Worktrees: `hack/wt.sh`.
+  (in the background) and merge it with `hack/pr-merge.sh <PR> [--admin]` (refuses a draft, reads every required context on the head); read why CI failed with `hack/ci-fail.sh <PR>`. Worktrees: `hack/wt.sh`.
 - Migrations: `hack/migrate-lint.sh origin/main` (merged migrations unchanged, numbers contiguous;
   also the patch-line rule under Conventions, from the `hack/migrate-patch-line` marker);
   after merging main, `hack/migrate-renumber.sh` renumbers your branch's migrations.
@@ -190,10 +190,11 @@ Lessons that cost time more than once. They apply to humans and agents alike.
 - **OpenShell exec stdin is capped.** More than about 4 MiB of stdin that the command does not read
   makes `exec` exit 74. Code that restores or uploads data through exec must chunk it and have the
   command consume each chunk.
-- **Merging.** The only merge method is a merge commit: `gh pr merge --auto --merge`. A pull request
-  that changes startup flags, chart Jobs or hooks, or anything the e2e expects does not get
-  auto-merge until `hack/pr-wait.sh <PR> --checks --require e2e` passes; then enable auto-merge and
-  `hack/claim.sh review <N>` (step 8 above). Details: `docs/dev/ci.md#merging`.
+- **Merging.** The only merge method is a merge commit, and `hack/pr-merge.sh <PR> [--admin]` does
+  it: it refuses a draft, runs `hack/pr-wait.sh --checks` (with `--require e2e` when the change needs
+  the e2e: startup flags, chart Jobs or hooks, anything the e2e expects), reads every required context
+  on the head, then `claim.sh review`, `gh pr merge --merge` and a PR comment. Do not hand-write the
+  wait or the merge. Details: `docs/dev/ci.md#merging`.
 - **Root causes, not workarounds.** When you hit the same workaround twice, find out why and fix the
   cause. An interim fix is allowed only with an issue that names the exit condition (when it can be
   removed), linked from the code or doc that carries it.

@@ -51,6 +51,13 @@ func (e Entry) rejectedByUpstream() bool {
 	return !e.InputKnown && !e.OutputKnown && e.Status >= 400 && e.Status < 500
 }
 
+// failedByUpstream: the provider answered with a 5xx and reported no usage. It generated nothing, so
+// the request is charged its input estimate only, with no output and no max_tokens reserve, and still
+// counts as a model request (ADR 0056, amendment 2026-10-31, #340).
+func (e Entry) failedByUpstream() bool {
+	return !e.InputKnown && !e.OutputKnown && e.Status >= 500 && e.Status < 600
+}
+
 // waivesRejected reports whether a request the provider refused is charged nothing: only when the
 // model's provider type documents that it does not bill refused requests, an explicit per-type
 // catalog flag (package providertype, issue #241). A request whose provider Koinon cannot tell (no
@@ -139,7 +146,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		}
 		// Unknown output is the cut signal of a completions stream; a logged proxy error covers a
 		// Messages stream, whose message_start already logged output.
-		x := estimate.Input{Aborted: !e.OutputKnown || e.Error != "", MaxTokens: e.MaxTokens, Rejected: e.rejectedByUpstream()}
+		x := estimate.Input{Aborted: !e.OutputKnown || e.Error != "", MaxTokens: e.MaxTokens, Rejected: e.rejectedByUpstream(), Failed: e.failedByUpstream()}
 		if e.RequestBytes > 0 {
 			x.RequestBytes = e.RequestBytes
 		}
@@ -168,10 +175,13 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 			// A response without usage: say why it was estimated, and flag it.
 			meta["usage_missing"] = true
 			meta["rejected_by_upstream"] = x.Rejected
+			if x.Failed {
+				meta["failed_by_upstream"] = true
+			}
 			p.flagged = true
 		}
 		p.inTokens, p.outTokens, p.estimated = r.InputTokens, r.OutputTokens, !p.waived
-		p.aborted = x.Aborted && !x.Rejected
+		p.aborted = x.Aborted && !x.Rejected && !x.Failed
 		meta["estimate"] = map[string]any{
 			"method": r.Method, "input_reported": r.InputReported, "output_reported": r.OutputReported,
 			"thinking_unmeasured": r.ThinkingUnmeasured, "max_output_fallback": r.MaxOutputFallback, "max_output_capped": r.MaxOutputCapped, "ratio_static": r.RatioStatic, "ratio_effective": r.RatioEffective,

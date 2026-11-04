@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -271,6 +272,25 @@ var _ = Describe("Org MCP servers", func() {
 			Expect(after.ToolsSyncedAt).NotTo(BeNil())
 		})
 
+		It("probes a newly served server right after the pass that applied it, not at the next tick (#226)", func(ctx SpecContext) {
+			s := server(ctx, org, "wiki", "", nil)
+			host, port, stop := fakeGateway(slug+"-wiki", "read")
+			DeferCleanup(stop)
+			rr := probing(ctx, host, port)
+			pctx, cancel := context.WithCancel(ctx)
+			done := make(chan struct{})
+			go func() { defer close(done); rr.RunProber(pctx) }() // the default tick is a minute
+			DeferCleanup(func() { cancel(); <-done })
+
+			Expect(rr.ReconcileAll(ctx)).To(Succeed())
+			Eventually(func(g Gomega) {
+				got, err := svc.Get(ctx, org, s.ID)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(got.Health).To(Equal("healthy"))
+			}).WithTimeout(10 * time.Second).Should(Succeed())
+			Expect(tiers(ctx, s)).To(HaveKey("read"))
+		})
+
 		It("turns a server unhealthy after three probes with no tools, and says why", func(ctx SpecContext) {
 			s := server(ctx, org, "wiki", "", nil)
 			host, port, stop := fakeGateway(slug + "-wiki") // lists nothing: the gateway skipped an unreachable target
@@ -296,7 +316,8 @@ var _ = Describe("Org MCP servers", func() {
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
 		st := mg.last()
 		exec := gateway.AgentRef{Org: slug, Name: gateway.MCPExecAgentName}
-		Expect(st.Tools[exec]).To(Equal([]gateway.ToolGrant{{Target: slug + "-wiki", Tools: []string{"write"}}}), "only the ask-tier tools")
+		Expect(st.Tools[exec]).To(Equal([]gateway.ToolGrant{{Target: slug + "-wiki", Tools: []string{"read", "write"}}}),
+			"the tools a person can approve a call of: ask tier, and auto tier for the leak guard's cards (ADR 0091); never the never tier")
 		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, mcpservers.ExecSecretName(org), metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(sec.Data[mcpservers.ExecKeyDataKey]).NotTo(BeEmpty())

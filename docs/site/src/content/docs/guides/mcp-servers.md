@@ -120,7 +120,8 @@ here, and replies with a three-part report. Allow those servers on the agent's p
 ## Health
 
 Koinon checks every server every 60 seconds through the gateway: it connects like an agent would and
-lists the tools. The result also keeps the tool list up to date.
+lists the tools. A server you add, or whose URL or credential you change, is checked right away, as
+soon as the gateway serves it. The result also keeps the tool list up to date.
 
 - After **three failed checks in a row** the server is **Unhealthy**: the MCP servers page shows why
   (the gateway got no tools back: the server is unreachable, rejected the credential, or lists none), and its tools leave every

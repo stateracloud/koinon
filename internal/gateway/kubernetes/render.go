@@ -56,6 +56,10 @@ type Options struct {
 	// ManagedBy is the app.kubernetes.io/managed-by label value on every object; the driver
 	// prunes only objects that carry it and its gateway's label. Default "koinon-reconciler".
 	ManagedBy string
+	// GuardURL is the MCP leak guard in koinon-api, "http://host:port" with no path (the CRD
+	// refuses one): mcpGuardrails' remote processor on the MCP Backend, failureMode FailClosed
+	// (ADR 0091). Empty refuses every call to an org's MCP server at the gateway.
+	GuardURL string
 }
 
 const (
@@ -159,6 +163,9 @@ func Render(s gateway.State, o Options) (Rendered, error) {
 	}
 	if err := s.Validate(); err != nil {
 		return Rendered{}, err
+	}
+	if err := gateway.ValidateGuardURL(o.GuardURL); err != nil {
+		return Rendered{}, fmt.Errorf("kubernetes: Options.GuardURL: %w", err)
 	}
 	o = o.withDefaults()
 	if o.Namespace == "" {
@@ -655,10 +662,13 @@ func (b *builder) mcp(s gateway.State) {
 			"targets":    targets,
 		},
 		"policies": map[string]any{
-			"mcp": map[string]any{"authorization": map[string]any{
-				"action": "Allow",
-				"policy": map[string]any{"matchExpressions": anySlice(gateway.ToolRules(ownTargets(s)))},
-			}},
+			"mcp": map[string]any{
+				"authorization": map[string]any{
+					"action": "Allow",
+					"policy": map[string]any{"matchExpressions": anySlice(gateway.ToolRules(ownTargets(s)))},
+				},
+				"guardrails": b.guardrails(s),
+			},
 		},
 	}, nil, nil)
 	b.add("", groupGateway+"/v1", KindHTTPRoute, name, map[string]any{
@@ -690,6 +700,33 @@ func (b *builder) mcp(s gateway.State) {
 			},
 		},
 	}, nil, nil)
+}
+
+// guardrails is the MCP leak guard on the Backend (ADR 0091): every tools/call, before the call
+// and after its result, goes to koinon-api's ExtMcp service, and the call fails when the guard
+// cannot answer (FailClosed). Without a guard URL, calls to org servers are refused here.
+func (b *builder) guardrails(s gateway.State) map[string]any {
+	methods := map[string]any{gateway.GuardMethod: "Full"}
+	if b.o.GuardURL == "" {
+		return map[string]any{"processors": []any{map[string]any{
+			"expression": map[string]any{"condition": gateway.GuardUnconfiguredCondition(s), "reject": gateway.GuardUnconfiguredReason},
+			"methods":    methods,
+		}}}
+	}
+	meta := map[string]any{}
+	for k, v := range gateway.GuardMetadata() {
+		meta[k] = v
+	}
+	return map[string]any{"processors": []any{map[string]any{
+		"remote": map[string]any{
+			"url":                      b.o.GuardURL,
+			"failureMode":              "FailClosed",
+			"metadata":                 meta,
+			"allowedRequestHeaders":    anySlice(gateway.GuardAllowedHeaders),
+			"disallowedRequestHeaders": anySlice(gateway.GuardDisallowedHeaders),
+		},
+		"methods": methods,
+	}}}
 }
 
 // ownTargets drops the grants that name another org's server, so the tool rules never allow a call

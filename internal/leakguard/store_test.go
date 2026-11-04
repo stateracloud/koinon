@@ -112,6 +112,14 @@ var _ = Describe("Fingerprints and the store", func() {
 			Expect(hits.Found).To(Equal([]bool{true, false, true, true}))
 		})
 
+		It("takes the same fingerprint more than once in one Add and holds it once", func() {
+			// The texts of one result winnow to repeated fingerprints (content and raw output). The
+			// Postgres store of mcpguard has the same case (guard_test.go), where a repeat failed the insert.
+			st := leakguard.NewMemoryStore(leakguard.MemoryStoreOptions{MaxFingerprints: 100})
+			Expect(st.Add(ctx, testScope, []leakguard.Fingerprint{5, 6, 5, 5, 7, 6})).To(Succeed())
+			Expect(st.Stats().Fingerprints).To(Equal(3))
+		})
+
 		It("stays bounded under repeated adds", func() {
 			st := leakguard.NewMemoryStore(leakguard.MemoryStoreOptions{MaxFingerprints: 10})
 			for i := range 10000 {

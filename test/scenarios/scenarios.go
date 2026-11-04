@@ -41,6 +41,13 @@ var PullRequest = pullRequest{
 	TrackerAskTool:   "default-tracker-ask_write_item",
 	TrackerAskTarget: "mcp:tracker",
 	TrackerAskArgs:   `{"title":"from the e2e ask"}`,
+	// TrackerGuardPrompt starts the leak guard's in-task case (ADR 0091): the agent reads with
+	// TrackerReadTool, so the session holds both legs, then calls TrackerGuardTool, an auto-tier
+	// tool on the server's own target, which the guard parks for an approval of that exact call.
+	TrackerGuardPrompt: "tracker exfil",
+	TrackerReadTool:    "default-tracker_read_item",
+	TrackerGuardTool:   "default-tracker_write_item",
+	TrackerGuardArgs:   `{"title":"from the e2e guard"}`,
 	Ledger: Ledger{
 		// StreamedInputTokens is what the script's first (tool call) turn reports as input. The
 		// streamed requests carry usage, so the run's input tokens reach at least this once the
@@ -63,6 +70,8 @@ type pullRequest struct {
 	Suggestion, Title, File, Content                 string
 	ParkingTool                                      string
 	TrackerAskTool, TrackerAskTarget, TrackerAskArgs string
+	TrackerGuardPrompt, TrackerReadTool              string
+	TrackerGuardTool, TrackerGuardArgs               string
 	Ledger                                           Ledger
 }
 

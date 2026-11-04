@@ -30,6 +30,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/mcpcheck"
+	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/otlpauth"
@@ -235,6 +236,9 @@ func run(ctx context.Context, cfg config) error {
 	}
 	reg := metrics.NewRegistry()
 	cfg.pool.Metrics = agentd.NewMetrics(reg)
+	// The MCP leak guard's feed (ADR 0091 decision 4): agentd fingerprints the sandbox's own tool
+	// results in this process and stores the fingerprints only.
+	cfg.pool.Taint = mcpguard.NewFeed(db, nil)
 	cfg.pool.Prices = prices.NewResolver(pricing.Embedded())
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, slog.Default()); err != nil {
 		return err

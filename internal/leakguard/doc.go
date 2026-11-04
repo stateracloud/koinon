@@ -3,7 +3,24 @@
 // Package leakguard is the pure core of the leak guard of ADR 0084: it decides whether the
 // arguments of an outbound MCP tool call carry private text, and whether an outbound URL or
 // search query has the shape of an exfiltration. It does no I/O; koinon-api's guard endpoint
-// and agentd (#349) call it, and the taint store behind the Store interface is persisted there.
+// (internal/mcpguard) calls it, agentd feeds the store, and the taint store behind the Store
+// interface is persisted there.
+//
+// # A secondary signal, frozen (ADR 0091 decision 6)
+//
+// The text match is not the leak guard's boundary. The guard decides by destination (the sink
+// class of the call and the session's legs, internal/sinkclass and internal/mcpguard); this
+// package is a secondary alarm on top of it. It catches private text copied verbatim or in a
+// simple encoding (the decoders below) into the payload of an external call, the mistakes and
+// the unsophisticated attempts. It does not stop an adaptive attacker, who can always rewrite a
+// secret into a form no decoder undoes (paraphrase, a cipher, a scheme of its own); the byte cap
+// and the approval of an external-high call with both legs are what bound that case.
+//
+// The decoders are frozen: a new encoding or evasion is not added here as it is found, since each
+// one added widens the cost and the false positives and still leaves the next. The arguments of
+// a call are joined in call order only; a text split across arguments that are not adjacent, or
+// reordered, is not reassembled. Fixes for wrong verdicts on what the decoders already read, and
+// for the budgets, still belong here.
 //
 // # Matching form (Normalise)
 //
@@ -52,8 +69,8 @@
 //     by side, as a speed-up only: a pod with a small CPU limit gets no benefit.
 //
 //     The specs do not assert these times, which depend on the machine. They assert the work
-//     the call is charged (the bytes decoded, normalised and fingerprinted, and a fixed charge
-//     for a window): the same on every machine, and read from the meter that also enforces
+//     the call is charged (the bytes decoded, normalised and fingerprinted):
+//     the same on every machine, and read from the meter that also enforces
 //     MaxWorkBytes. Each benign shape has a cap of 1.1 times its measured work, rounded up to
 //     100 KB (0.5 to 17 MB): the caps keep the cost of a shape from growing unnoticed, and they
 //     are chosen by shape because the time a byte of work takes differs (19 to 35 ms a MB here,
@@ -98,11 +115,6 @@
 // Random bytes are 44% printable and 45% invalid, and are given up after 256 bytes. A reading
 // with one invalid byte in eight or more is dropped when another reading with less holds at
 // least four fifths as many letters (the same alignments, of a script of two-byte letters).
-// The short windows of a call of more than 32 arguments (see below) do not strip: there are
-// thousands of them, and a window of the wrong alignment reads as text with an invalid byte in
-// five as often as a real one does. So a stream cut across two arguments of such a call, with
-// invalid bytes of three or more kinds in it, is the one noisy case not read; it is also not
-// read when another alignment of the same stream is clean text, which an attacker must craft.
 // Each reading makes a
 // child of the text, the k-th reading of each run the k-th child (see the known limits). Data wrapped so
 // that no 12 printable characters stand together is the "own cipher" case the URL rule
@@ -112,31 +124,13 @@
 //
 // # Split reassembly
 //
-// Text split across several arguments of one call is reassembled two ways: all arguments
-// joined in call order, and every ordered pair of arguments (the last PairJoinBytes of one
-// joined to the first PairJoinBytes of the other), so a two-way split matches in either order.
-// The joined text of all pairs is bounded (MaxWorkBytes/16 before decoding): long arguments are
-// joined shorter (halving PairJoinBytes down to 64 bytes) rather than running out of time. With
-// more than MaxPairArgs non-empty arguments every pair is still checked when there are at most
-// 16*MaxPairArgs^2 pairs and the joined text fits at 64 bytes a side; otherwise the call fails
-// closed (ReasonBudgetArgs). Splits across calls are not reassembled; the per-host
-// and per-run URL budgets bound them.
-//
-// Up to MaxPairArgs (32) arguments each pair is the joined text of the two ends, decoded again,
-// so an encoded stream cut anywhere, mid-block or mid-byte, is reassembled. Above that, decoding
-// every pair again costs a call of 128 arguments seconds on one core, so a pair is checked two
-// ways that cost little. First, from the decoded forms the arguments already have (the argument
-// as it is, and its deepest decoding, 40 bytes of each end, only the k-grams across the cut):
-// this catches a cut in plain text, and halves that each decode on their own (each half base64
-// or percent-encoded, whatever the other half is). Second, from a window: where the ends
-// facing each other are runs of base64 characters (either alphabet, hex and base32 among them) of
-// 4 or more, 48 characters of each are joined and decoded as a stream (the alignments, hex,
-// base32 and base64), so a stream cut anywhere, mid-block or mid-byte, between any two
-// arguments is reassembled. A window shows 36 bytes of each end, 18 characters of UTF-16, so
-// a UTF-16 leak of 24 characters cut leaving 5 or fewer on one side is not seen whole. A window costs about 15 us on one core,
-// so a call in which more than 8000 pairs of ends are runs of base64 (about 90 arguments that
-// all begin and end in base64) has no windows: its stream cut inside an encoding unit is
-// caught only for adjacent arguments, by the joined text of all arguments in call order.
+// Text split across several arguments of one call is reassembled one way: all non-empty
+// arguments joined in call order (an argument longer than 2*JoinEndBytes contributes its two
+// ends, which hold the boundaries to its neighbours). A split across arguments that are not
+// adjacent, or in the other order, is not reassembled (ADR 0091 decision 6; earlier rounds
+// joined every ordered pair of arguments and decoded windows around each boundary, removed with
+// the rescope). Splits across calls are not reassembled; the per-host and per-run URL budgets and
+// the byte cap of a session with both legs bound them.
 //
 // # Fingerprints (winnowing)
 //
@@ -177,9 +171,9 @@
 // exceeds a budget fails closed: it returns a blocking Decision whose Reason names the budget.
 //
 // The work budget decides; the clock does not. MaxWorkBytes (32 MiB) is the same on every machine:
-// a call that blows up decoding (deep nesting, a variant explosion, pairs of many arguments)
-// reaches it, or the pair budget (MaxWorkBytes/16), with the same verdict on a laptop, a lab
-// node under load and a pod with a small CPU limit. The benign shapes measured (up to 1 MiB of
+// a call that blows up decoding (deep nesting, a variant explosion, many long arguments)
+// reaches it with the same verdict on a laptop, a lab node under load and a pod with a small CPU
+// limit. The benign shapes measured (up to 1 MiB of
 // arguments in the slowest encodings) are charged 0.5 to 15 MB, under half of the budget, and
 // the specs assert both that and a cap per shape. MaxDuration (5 s) is a safety net for a stuck
 // or starved machine, not a policy: a benign call must never depend on it (the specs run the
@@ -193,7 +187,7 @@
 // evicted) and the total across scopes: an Add past the total fails with ErrStoreFull rather
 // than evict another scope. Lookup reports a scope that lost fingerprints to eviction
 // or was refused by a full store (Hits.Evicted), and Check copies it to Decision.Evicted
-// without changing Allow: whether an evicted scope blocks, asks or passes is #349's choice. The
+// without changing Allow: internal/mcpguard lets the verdict stand and counts the eviction. The
 // store remembers the last 4*MaxScopes scopes evicted whole; an older one is forgotten
 // (StoreStats.ForgottenEvictions counts them) and then reports Evicted false, so alert on
 // that counter rather than rely on the flag alone.
@@ -201,8 +195,8 @@
 // # Known limits
 //
 // The guard does not catch:
-//   - text split into three or more pieces of k-1 (20) canonical characters or fewer each,
-//     unless they are in call order; text reordered inside one argument (words swapped);
+//   - text split across arguments that are not adjacent, or out of call order, in pieces of k-1
+//     (20) canonical characters or fewer each; text reordered inside one argument (words swapped);
 //   - reversed text, ciphers, compression and encodings other than the ones above (base85,
 //     uuencode, punycode, ...);
 //   - an encoded stream whose separators are themselves symbols of its alphabet ("/" between
@@ -214,11 +208,6 @@
 //   - a secret split into small pieces that are each encoded on their own and joined by a
 //     separator: base64 pieces under about 6 bytes, base32 pieces under about 10 and pieces of
 //     non-ASCII text are too short to decode, and the resynchronisation does not chain them;
-//   - a stream cut inside a unit of its encoding between two arguments that are not adjacent, in
-//     a call of more than 90 arguments that all begin and end in base64 (see Split reassembly);
-//     and, in a call of more than 32 arguments, a UTF-16 stream cut so that one side holds fewer
-//     than 6 characters of a leak whose other side is 18 or more (the window shows 18 characters
-//     of each end);
 //   - when one text holds several runs that each have several UTF-16 readings (at most 4 each),
 //     only the k-th reading of each run is combined into the k-th child, so a leak that needs
 //     the second reading of one run and the third of another is not read;
@@ -226,12 +215,12 @@
 //     blocks of ASCII only (textBlock), so short chains of Cyrillic, Chinese or other scripts are
 //     not recovered, while the same text in one stretch is.
 //
-// # Notes for the wiring (#349)
+// # Notes for the wiring
 //
-//   - MemoryStore holds one mutex for every scope, so one large check (a 1 MiB argument looked
-//     up in 255 ms) stalls every other agent's checks; a production store should shard by scope.
-//   - The wiring must pass every string the call carries, including the elements of numeric
-//     arrays (as text) and the keys of JSON objects, not only string values.
+//   - MemoryStore holds one mutex for every scope; koinon-api uses the Postgres store of
+//     internal/mcpguard, keyed by scope.
+//   - The caller passes every string the payload carries, including the elements of numeric
+//     arrays (as text) and the keys of JSON objects, in call order (internal/mcpguard.Flatten).
 //   - The fetch server must parse a URL the way net/url.Parse does; a URL another parser reads
 //     differently can reach a host CheckURL did not see.
 package leakguard
