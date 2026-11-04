@@ -20,8 +20,10 @@
 #       of them and prints what it overrides. --branch also deletes its local branch, never one with
 #       an open PR. Remove worktrees only through this script, never `git worktree remove`.
 #   wt.sh gc [--dry-run]
-#       remove every worktree under the root whose branch is merged (or gone) and that has no open PR
-#       and passes all the rm checks; prints one keep/remove line each. Never forces.
+#       remove every worktree under the root with proof it is finished (its branch's PR is merged, or
+#       its upstream is gone) that has no open PR and passes all the rm checks; a fresh or detached
+#       worktree is kept. Prints one keep/remove line each; a removal that fails is reported, the
+#       next worktree still runs, and the exit status is 1. Never forces.
 #   wt.sh ls
 #       one line per worktree: name branch clean|dirty +ahead/-behind (vs origin/main) #PR|-
 #   wt.sh path <name>
@@ -109,12 +111,15 @@ cmd_new() {
   echo "$dir"
 }
 
-# wt_dir <name>: the worktree's path, resolved through `git worktree list --porcelain` so it works
-# when $TMPDIR (and so the default root) differs between a sandbox and the host. A worktree under
-# the root wins; otherwise any linked worktree with that directory name. Fails when there is none.
+# wt_dir <name>: the path of the linked worktree <root>/<name>, resolved through
+# `git worktree list --porcelain` with realpaths on both sides, so it works when $TMPDIR (and so the
+# root) is spelled differently in a sandbox and on the host. Only worktrees under the root count: a
+# linked worktree of the same name elsewhere (.claude/worktrees/<name>, a human's checkout) is never
+# returned. Fails when there is none.
 wt_dir() {
-	local name=$1 line path="" first=1 found="" real=""
-	[ ! -d "$root" ] || real=$(cd "$root" && pwd -P)
+	local name=$1 line path="" first=1 real="" rp
+	[ -d "$root" ] || return 1
+	real=$(cd "$root" && pwd -P)
 	while IFS= read -r line || [ -n "$line" ]; do
 		case $line in
 		"worktree "*) path=${line#worktree } ;;
@@ -123,9 +128,9 @@ wt_dir() {
 				if [ "$first" -eq 1 ]; then
 					first=0 # the main checkout is never a candidate
 				elif [ "$(basename "$path")" = "$name" ]; then
-					case $path in
+					rp=$(cd "$path" 2>/dev/null && pwd -P) || rp=""
+					case $rp in
 					"$real"/*) echo "$path"; return 0 ;;
-					*) [ -n "$found" ] || found=$path ;;
 					esac
 				fi
 			fi
@@ -133,11 +138,6 @@ wt_dir() {
 			;;
 		esac
 	done < <(git worktree list --porcelain; echo)
-	if [ -n "$found" ]; then
-		echo "$found"
-		return 0
-	fi
-	[ -d "$root/$name" ] && { echo "$root/$name"; return 0; }
 	return 1
 }
 
@@ -162,6 +162,10 @@ claim_reason() {
 		echo "could not fetch claim refs from origin; claim state of #$n unknown"
 		return 0
 	fi
+	if ! command -v jq >/dev/null 2>&1; then
+		echo "jq is not installed; claim state of #$n unknown"
+		return 0
+	fi
 	for ref in "refs/remotes/origin/claim/$n" "refs/heads/claim/$n"; do
 		git rev-parse -q --verify "$ref" >/dev/null 2>&1 || continue
 		msg=$(git log -1 --format=%B "$ref" 2>/dev/null) || continue
@@ -170,7 +174,11 @@ claim_reason() {
 		lease=$(sed -n 's/^lease_until: *//p' <<<"$msg" | head -n1)
 		[ "$state" = held ] || continue
 		now=$(date -u +%s)
-		lease=$(jq -rn --arg l "$lease" '$l | fromdateiso8601? // 0')
+		lease=$(jq -rn --arg l "$lease" '$l | fromdateiso8601' 2>/dev/null) || lease=""
+		if ! [[ $lease =~ ^[0-9]+$ ]]; then
+			echo "claim on #$n has a lease_until that does not parse; claim state of #$n unknown"
+			return 0
+		fi
 		if [ "$now" -le "$lease" ]; then
 			echo "a live claim on #$n is held by ${holder:-unknown} (lease until $(jq -rn --argjson e "$lease" '$e | todate'))"
 			return 0
@@ -238,10 +246,11 @@ remove_wt() { # <dir> <name> <force> <delbranch>
 		for r in "${reasons[@]}"; do echo "wt: --force overrides: $r" >&2; done
 	fi
 	branch=$(git -C "$dir" symbolic-ref -q --short HEAD || true)
+	# Every step checks its status: callers run this left of `||`, where set -e is off.
 	if [ "$force" -eq 1 ]; then
-		git worktree remove --force "$dir"
+		git worktree remove --force "$dir" || return 1
 	else
-		git worktree remove "$dir"
+		git worktree remove "$dir" || return 1
 	fi
 	if [ "$delbranch" -eq 1 ] && [ -n "$branch" ]; then
 		case $branch in
@@ -252,11 +261,12 @@ remove_wt() { # <dir> <name> <force> <delbranch>
 			if [ -n "$pr" ]; then
 				echo "wt: kept branch $branch (open PR #$pr)" >&2
 			else
-				git branch -q -D "$branch"
+				git branch -q -D "$branch" || return 1
 			fi
 			;;
 		esac
 	fi
+	return 0
 }
 
 cmd_rm() {
@@ -279,10 +289,11 @@ cmd_rm() {
 	remove_wt "$dir" "$name" "$force" "$delbranch" || exit 1
 }
 
-# gc_reason <dir>: prints why the worktree is not finished (empty: its branch is merged or gone).
-gc_finished() { # <dir> -> 0 when HEAD is on origin/main, the PR merged, or the upstream is gone
+# gc_finished <dir>: succeeds only on positive proof the work is finished: the branch's PR is merged,
+# or its upstream is gone (the remote branch existed and was deleted). A HEAD that is merely an
+# ancestor of origin/main (a fresh `wt new`) or a detached HEAD proves nothing, so it is kept.
+gc_finished() {
 	local dir=$1 branch track
-	git -C "$dir" merge-base --is-ancestor HEAD origin/main 2>/dev/null && return 0
 	branch=$(git -C "$dir" symbolic-ref -q --short HEAD || true)
 	[ -n "$branch" ] || return 1
 	track=$(git -C "$dir" for-each-ref --format='%(upstream:track)' "refs/heads/$branch")
@@ -291,7 +302,7 @@ gc_finished() { # <dir> -> 0 when HEAD is on origin/main, the PR merged, or the 
 }
 
 cmd_gc() {
-	local dry=0 line path="" real first=1 name branch pr r
+	local dry=0 line path="" real first=1 name branch pr r rc=0
 	while [ $# -gt 0 ]; do
 		case $1 in
 		--dry-run) dry=1 ;;
@@ -336,10 +347,15 @@ cmd_gc() {
 		if [ "$dry" -eq 1 ]; then
 			echo "would remove $name"
 		else
-			git worktree remove "$path"
-			echo "removed $name"
+			if git worktree remove "$path"; then
+				echo "removed $name"
+			else
+				echo "keep $name: git worktree remove failed"
+				rc=1
+			fi
 		fi
 	done
+	return "$rc"
 }
 
 cmd_ls() {
