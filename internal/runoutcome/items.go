@@ -116,6 +116,9 @@ func (o *Owner) flushLocked(ctx context.Context, partial bool) error {
 	if p.kind == "" || p.text.Len() == 0 {
 		return nil
 	}
+	if o.cfg.LiveFlush != nil {
+		o.cfg.LiveFlush() // the item's live tail goes out before the event that replaces it
+	}
 	c, _ := p.first["content"].(map[string]any)
 	c["text"] = p.text.String()
 	if p.chunks > 1 {

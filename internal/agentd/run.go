@@ -250,7 +250,7 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	defer live.Close()
 	r.own = runoutcome.New(runoutcome.Config{
 		DB: p.db, Queries: p.q, Run: run, Log: r.log, Now: p.cfg.Now,
-		Metrics: outcomeMetrics{p.cfg.Metrics}, Stop: r.stopped, Live: live.Add,
+		Metrics: outcomeMetrics{p.cfg.Metrics}, Stop: r.stopped, Live: live.Add, LiveFlush: live.Flush,
 	})
 	r.log.Info("driving run", "state", run.State, "takeovers", run.Takeovers)
 	r.tr = p.traceStart(ctx, run, r.own.Fenced(), r.log)

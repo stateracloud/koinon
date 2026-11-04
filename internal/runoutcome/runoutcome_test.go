@@ -464,6 +464,17 @@ var _ = Describe("RecordUpdate: items, not chunks (#344)", func() {
 		return
 	}
 
+	It("flushes the live chunks before it stores the item they make up", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		var stored []int
+		own := runoutcome.New(runoutcome.Config{DB: pool, Queries: q, Run: w.run, LiveFlush: func() {
+			stored = append(stored, len(w.runKinds(ctx)))
+		}})
+		Expect(own.RecordUpdate(ctx, "acp.agent_message_chunk", chunk("agent_message_chunk", "ab"))).To(Succeed())
+		Expect(own.RecordUpdate(ctx, "acp.tool_call", []byte(`{"sessionUpdate":"tool_call","toolCallId":"t1"}`))).To(Succeed())
+		Expect(stored).To(Equal([]int{0}), "flushed once, with the item not yet stored")
+	})
+
 	It("stores one event per message, however many chunks it came in, and sends every chunk live", func(ctx SpecContext) {
 		w := newWorld(ctx, true)
 		var live []string

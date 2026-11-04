@@ -59,6 +59,7 @@ type ChunkPublisher struct {
 	prefix string // "<org>/<run>/"
 	log    *slog.Logger
 
+	sendMu  sync.Mutex // one send at a time, so Flush returns only after earlier batches are out
 	mu      sync.Mutex
 	pending []Chunk
 	size    int
@@ -109,6 +110,11 @@ func (p *ChunkPublisher) Add(kind string, payload []byte) {
 	p.pending = append(p.pending, Chunk{Kind: kind, Text: u.Content.Text})
 }
 
+// Flush sends what is queued now and returns when it is sent (or dropped). The Owner calls it before
+// it stores an item: Postgres delivers notifications in commit order, so the tail of the item's
+// live text then reaches a watcher before the event that replaces it, never after.
+func (p *ChunkPublisher) Flush() { p.flush() }
+
 // Close sends what is queued and stops the publisher.
 func (p *ChunkPublisher) Close() {
 	select {
@@ -135,6 +141,8 @@ func (p *ChunkPublisher) loop(interval time.Duration) {
 }
 
 func (p *ChunkPublisher) flush() {
+	p.sendMu.Lock()
+	defer p.sendMu.Unlock()
 	p.mu.Lock()
 	batch := p.pending
 	p.pending, p.size = nil, 0
