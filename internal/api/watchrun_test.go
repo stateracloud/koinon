@@ -250,6 +250,21 @@ var _ = Describe("WatchRun", func() {
 		Expect(last.GetRun().GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_CANCELED))
 	})
 
+	It("ends at once on a run canceled longer ago than the grace (#660)", func(ctx SpecContext) {
+		quick := newEnvOn(ctx, e, envOptions{watchPoll: time.Hour, watchCancelGrace: 30 * time.Second})
+		_, err := f.owner.runs.CancelRun(ctx, &runv1alpha1.CancelRunRequest{OrgId: f.org, RunId: f.run.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = e.pool.Exec(ctx, `UPDATE runs SET finished_at = now() - interval '1 hour' WHERE id = $1`, run.ID)
+		Expect(err).NotTo(HaveOccurred())
+
+		start := time.Now()
+		w := watch(ctx, f.owner.on(quick), f.org, f.run.GetId(), 0)
+		for range w.items {
+		}
+		Expect(<-w.done).To(Succeed())
+		Expect(time.Since(start)).To(BeNumerically("<", 5*time.Second), "an old canceled run does not hold the stream for the grace")
+	})
+
 	It("ends after the run finishes and its last event is sent", func(ctx SpecContext) {
 		w := watch(ctx, f.owner, f.org, f.run.GetId(), 0)
 		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))

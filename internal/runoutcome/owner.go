@@ -213,14 +213,15 @@ func (o *Owner) RecordRaw(ctx context.Context, kind string, payload []byte) erro
 		return ErrFenced
 	}
 	// The item in progress comes first on the timeline (items.go).
-	if err := o.flushLocked(ctx, false); err != nil {
+	if err := o.flushLocked(ctx, false, false); err != nil {
 		return err
 	}
-	return o.recordLocked(ctx, kind, payload)
+	return o.recordLocked(ctx, kind, payload, false)
 }
 
-// recordLocked is RecordRaw with o.mu held and the Owner not fenced.
-func (o *Owner) recordLocked(ctx context.Context, kind string, payload []byte) error {
+// recordLocked is RecordRaw with o.mu held and the Owner not fenced. cutOff is true only for the
+// item FlushItems stores after a cancel.
+func (o *Owner) recordLocked(ctx context.Context, kind string, payload []byte, cutOff bool) error {
 	o.srcSeq++
 	src := o.srcSeq
 	class := ClassOf(kind)
@@ -230,7 +231,7 @@ func (o *Owner) recordLocked(ctx context.Context, kind string, payload []byte) e
 	}
 	backoff := 100 * time.Millisecond
 	for attempt := 1; ; attempt++ {
-		err := o.tryAppend(ctx, class, kind, payload, src)
+		err := o.tryAppend(ctx, class, kind, payload, src, cutOff)
 		if err == nil {
 			return nil
 		}
@@ -260,15 +261,17 @@ func (o *Owner) recordLocked(ctx context.Context, kind string, payload []byte) e
 // (pgx.ErrNoRows) or hit a unique violation, and the event is there under its source seq. A
 // diagnostic try has its own short deadline, so a hung connection holds o.mu, and with it the
 // run's other writes, for at most diagnosticTryTimeout; a business try runs under ctx alone.
-func (o *Owner) tryAppend(ctx context.Context, class EventClass, kind string, payload []byte, src int64) error {
+func (o *Owner) tryAppend(ctx context.Context, class EventClass, kind string, payload []byte, src int64, cutOff bool) error {
 	if class == ClassDiagnostic {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, diagnosticTryTimeout)
 		defer cancel()
 	}
 	var err error
-	if o.FenceKind() == FenceCanceled {
-		// Only the item in progress is written to a canceled run (FlushItems).
+	if cutOff {
+		// Only the item FlushItems stores after a cancel takes this path, and the caller says so:
+		// the fence is never read here, because another goroutine can set it between a caller's
+		// check and this write, and an event that raced the cancel must be refused, not written.
 		_, err = o.q.AppendCanceledRunEventOnce(ctx, store.AppendCanceledRunEventOnceParams{
 			OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
 			Kind: kind, Payload: payload, SourceSeq: src,

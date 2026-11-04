@@ -571,6 +571,21 @@ var _ = Describe("RecordUpdate: items, not chunks (#344)", func() {
 		Expect(kinds).NotTo(ContainElement("run.prompt"))
 	})
 
+	It("refuses an event that races the cancel: the fence is set after RecordRaw's check (#660)", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		Expect(w.own.RecordUpdate(ctx, "acp.agent_message_chunk", chunk("agent_message_chunk", "said so far"))).To(Succeed())
+		_, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: w.org, ID: w.run.ID, OutcomeReason: "user canceled"})
+		Expect(err).NotTo(HaveOccurred())
+		// The Owner has not noticed the cancel yet: RecordRaw's IsFenced check passes, and the
+		// pending item is flushed as a normal event, which the canceled run refuses.
+		Expect(w.own.IsFenced()).To(BeFalse())
+		Expect(w.own.RecordRaw(ctx, "acp.tool_call", []byte(`{}`))).To(MatchError(runoutcome.ErrFenced))
+		Expect(w.own.FenceKind()).To(Equal(runoutcome.FenceCanceled))
+		kinds, _, _ := texts(ctx, w)
+		Expect(kinds).NotTo(ContainElement("acp.tool_call"))
+		Expect(kinds).NotTo(ContainElement("acp.agent_message_chunk"))
+	})
+
 	It("stores the item in progress, cut off, before a verb ends the run, so the reply has it", func(ctx SpecContext) {
 		w := newWorld(ctx, true)
 		turn := w.openTurn(ctx)

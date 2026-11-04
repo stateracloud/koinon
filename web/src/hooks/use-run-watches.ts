@@ -90,7 +90,7 @@ export function reducer(state: State, a: Action): State {
       const item = parseItem(itemOf(a.event))
       // An event that names its item replaces the live text of that item and of every older one,
       // and the item-less text of its kind (an older worker). One that does not name it replaces
-      // the live text of its kind.
+      // the item-less live text of its kind.
       let mark = cur.mark
       let live: readonly LiveChunk[]
       if (item) {
@@ -101,7 +101,8 @@ export function reducer(state: State, a: Action): State {
           return ci ? !atOrBelow(ci, m) : c.kind !== a.event.kind
         })
       } else {
-        live = cur.live.filter((c) => c.kind !== a.event.kind)
+        // Text that names its item is the current item's; this event (an image, say) did not store it.
+        live = cur.live.filter((c) => parseItem(c.item) !== undefined || c.kind !== a.event.kind)
       }
       return { ...state, [a.runId]: { ...cur, events, live, mark } }
     }

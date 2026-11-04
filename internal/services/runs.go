@@ -95,7 +95,7 @@ func (s *Server) CancelRun(ctx context.Context, req *runv1alpha1.CancelRunReques
 // run follows its last event (the web client relies on this to tell a finished
 // run from a cut stream). A canceled run is the exception: its worker may still store the item it
 // was typing after the cancel (ADR 0074 item 8), so a canceled run that was claimed keeps its stream
-// open for cancelGrace, sends such late events and then a second final snapshot. The stream ends once the run has finished and its
+// open until finished_at + cancelGrace (at once for an old canceled run), sends such late events and then a second final snapshot. The stream ends once the run has finished and its
 // last event and final snapshot have been sent. A stream that has sent nothing for
 // the heartbeat interval sends a heartbeat message (issue #141). Live text, the chunks of the
 // message or thought the agent is typing (runwatch/chunks.go), is forwarded as it arrives; it is not
@@ -207,7 +207,16 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 				return nil
 			}
 			if graceEnd == nil {
-				t := time.NewTimer(s.cancelGrace)
+				// The grace counts from the cancel, not from this stream: a stream opened on an old
+				// canceled run has no late event to wait for and ends at once.
+				left := s.cancelGrace
+				if run.FinishedAt.Valid {
+					left = time.Until(run.FinishedAt.Time.Add(s.cancelGrace))
+				}
+				if left <= 0 {
+					return nil
+				}
+				t := time.NewTimer(left)
 				defer t.Stop()
 				graceEnd = t.C
 			}
