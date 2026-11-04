@@ -427,7 +427,53 @@ printf '[{"databaseId":61,"createdAt":"2026-11-01T10:00:00Z"},{"databaseId":62,"
 printf 'go\nweb\n' >"$FAKE_DIR/rules"
 run 7 --checks --interval 0
 expect "after ready: a draft run cancelled after the ready event is superseded" 0 "checks 2/2 green"
+# (#661) a draft-era run re-run by hand after the ready event counts as a ready run
+rr_go=$(cr_at go SUCCESS 61 2026-11-01T11:10:00Z | sed 's/^{/{"workflowName":"ci",/')
+seq_set "$(rdh "$rr_go")"
+printf '2026-11-01T11:00:00Z\n' >"$FAKE_DIR/ready"
+printf 'go\n' >"$FAKE_DIR/rules"
+printf '[{"databaseId":61,"createdAt":"2026-11-01T10:00:00Z","startedAt":"2026-11-01T11:10:00Z"}]' >"$FAKE_DIR/ciruns"
+run 7 --checks --interval 0
+expect "after ready: a re-run draft-era run is kept" 0 "checks 1/1 green"
+printf '[{"databaseId":61,"createdAt":"2026-11-01T10:00:00Z","startedAt":"2026-11-01T10:00:00Z"}]' >"$FAKE_DIR/ciruns"
+run 7 --checks --interval 0 --timeout 0
+expect "after ready: the same run without a re-run is still dropped" 2 "waiting for the ready run
+TIMEOUT"
+# clock skew: a ready run created 20 s before the ready event is kept (30 s slack)
+sk_go=$(cr_at go SUCCESS 62 2026-11-01T10:59:45Z | sed 's/^{/{"workflowName":"ci",/')
+seq_set "$(rdh "$sk_go")"
+printf '[{"databaseId":62,"createdAt":"2026-11-01T10:59:40Z","startedAt":"2026-11-01T10:59:40Z"}]' >"$FAKE_DIR/ciruns"
+run 7 --checks --interval 0
+expect "after ready: a run 20 s before the ready event is kept (clock skew)" 0 "checks 1/1 green"
 rm -f "$FAKE_DIR/ready" "$FAKE_DIR/rules" "$FAKE_DIR/ciruns"
+
+# 7d. (#661) a stale PR head: GitHub's headRefOid is not origin's branch tip
+cat >"$tmp/bin/git" <<'SH'
+#!/usr/bin/env bash
+[ "$1" = ls-remote ] && [ -f "$FAKE_DIR/remote" ] || exit 2
+m=$(($(cat "$FAKE_DIR/gn" 2>/dev/null || echo 0) + 1))
+echo "$m" >"$FAKE_DIR/gn"
+r=$(sed -n "${m}p" "$FAKE_DIR/remote" | grep . || tail -n 1 "$FAKE_DIR/remote")
+printf '%s\t%s\n' "$r" "$3"
+SH
+chmod +x "$tmp/bin/git"
+sh_pr() { # <head sha>
+  printf '{"state":"OPEN","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":null,"headRefName":"feat/x","headRefOid":"%s","baseRefName":"main","statusCheckRollup":[%s]}' "$1" "$go_ok"
+}
+seq_set "$(sh_pr 52d44399aaaa)"
+printf 'eac36103bbbb\n' >"$FAKE_DIR/remote"
+PR_WAIT_STALE_GRACE=0 run 7 --checks --interval 0
+expect "a stale head exits 6 STALE-HEAD" 6 "STALE-HEAD: PR 7 head is 52d4439 but origin/feat/x is eac3610; GitHub has not picked up the push. Re-sync: gh api -X PATCH repos/{owner}/{repo}/pulls/7 -f base=main"
+seq_set "$(sh_pr 52d44399aaaa)" "$(sh_pr eac36103bbbb)"
+printf 'eac36103bbbb\n' >"$FAKE_DIR/remote"
+PR_WAIT_STALE_GRACE=600 run 7 --checks --interval 0
+expect "a head that catches up within the grace is judged" 0 "waiting: PR head 52d4439 is not origin/feat/x eac3610 yet
+checks 1/1 green"
+seq_set "$(sh_pr 52d44399aaaa)"
+printf '52d44399aaaa\n' >"$FAKE_DIR/remote"
+run 7 --checks --interval 0
+expect "a matching head is judged" 0 "checks 1/1 green"
+rm -f "$tmp/bin/git"
 
 # 8. a transient gh failure is retried
 rm -rf "$FAKE_DIR"

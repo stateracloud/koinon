@@ -24,15 +24,25 @@ cat >"$tmp/bin/gh" <<'SH'
 echo "gh $*" >>"$FAKE_DIR/calls"
 case "$1 $2" in
 "pr view")
-  if [[ "$*" == *"--json files"* ]]; then echo "hack/x.sh"; else cat "$FAKE_DIR/pr.json"; fi ;;
-"pr merge" | "pr comment") ;;
+  cat "$FAKE_DIR/pr.json" ;;
+"pr merge") exit "${MERGE_RC:-0}" ;;
+"pr comment") ;;
+"api repos/{owner}/{repo}/pulls/"*"/files")
+  [ -f "$FAKE_DIR/files" ] || exit 9
+  cat "$FAKE_DIR/files" ;;
 "api repos/{owner}/{repo}/commits/"*"/status") cat "$FAKE_DIR/statuses" ;;
 *) if [ "$1" = api ]; then cat "$FAKE_DIR/runs"; else exit 9; fi ;;
 esac
 SH
+cat >"$tmp/bin/git" <<'SH'
+#!/usr/bin/env bash
+[ "$1" = ls-remote ] && [ -f "$FAKE_DIR/remote" ] || exit 2
+printf '%s\t%s\n' "$(cat "$FAKE_DIR/remote")" "$3"
+SH
 cat >"$tmp/bin/wait" <<'SH'
 #!/usr/bin/env bash
 echo "wait $*" >>"$FAKE_DIR/calls"
+if [ -f "$FAKE_DIR/close-after-wait" ]; then sed -i.bak 's/"OPEN"/"CLOSED"/' "$FAKE_DIR/pr.json"; fi
 exit "${WAIT_RC:-0}"
 SH
 cat >"$tmp/bin/needs" <<'SH'
@@ -44,6 +54,7 @@ SH
 cat >"$tmp/bin/claim" <<'SH'
 #!/usr/bin/env bash
 echo "claim $*" >>"$FAKE_DIR/calls"
+if [ "$1" = mine ] && [ -f "$FAKE_DIR/mine" ]; then cat "$FAKE_DIR/mine"; fi
 SH
 chmod +x "$tmp/bin"/*
 
@@ -51,8 +62,9 @@ fail=0
 setup() { # <isDraft> <runs rows, one JSON object per line>
   rm -rf "$FAKE_DIR"
   mkdir -p "$FAKE_DIR"
-  printf '{"state":"OPEN","isDraft":%s,"headRefOid":"abc1234def","baseRefName":"main","closingIssuesReferences":[{"number":647}]}' "$1" >"$FAKE_DIR/pr.json"
+  printf '{"state":"OPEN","isDraft":%s,"headRefOid":"abc1234def","headRefName":"feat/x","isCrossRepository":false,"baseRefName":"main","closingIssuesReferences":[{"number":647}]}' "$1" >"$FAKE_DIR/pr.json"
   printf '%s\n' "$2" >"$FAKE_DIR/runs"
+  printf 'hack/x.sh\n' >"$FAKE_DIR/files"
   printf '{"name":"dco","ts":"2026-11-01T10:00:00Z","v":"success"}\n' >"$FAKE_DIR/statuses"
 }
 run() {
@@ -111,5 +123,56 @@ check "pr-wait failing stops the merge" 1 nomerge
 setup false "$green"
 run 7 8
 check "usage" 64 nomerge
+
+# 1. the e2e decision fails closed
+setup false "$green"
+rm "$FAKE_DIR/files"
+NEEDS_RC=1 run 7
+check "an unreadable file list still merges, but requires e2e" 0 merge
+grep -q '^wait 7 --checks --require e2e' "$FAKE_DIR/calls" || { echo "FAIL: unreadable file list requires e2e" >&2; fail=1; }
+setup false "$green"
+: >"$FAKE_DIR/files"
+NEEDS_RC=1 run 7
+grep -q '^wait 7 --checks --require e2e' "$FAKE_DIR/calls" || { echo "FAIL: empty file list requires e2e" >&2; fail=1; }
+setup false "$green"
+NEEDS_RC=1 run 7
+grep -q 'pulls/7/files --paginate' "$FAKE_DIR/calls" || { echo "FAIL: file list is paginated" >&2; fail=1; }
+grep -q -- '--require' "$FAKE_DIR/calls" && { echo "FAIL: a not-needed change adds no --require" >&2; fail=1; }
+
+# 2. claim review only after a successful merge; early exit when no longer OPEN; --auto wording
+setup false "$green"
+MERGE_RC=1 run 7
+check "a failed merge fails" 1 merge
+grep -q '^claim review' "$FAKE_DIR/calls" && { echo "FAIL: no claim review after a failed merge" >&2; fail=1; }
+setup false "$green"
+touch "$FAKE_DIR/close-after-wait"
+run 7
+check "a PR closed while waiting is not merged" 3 nomerge
+grep -q '^claim review' "$FAKE_DIR/calls" && { echo "FAIL: no claim review for a closed PR" >&2; fail=1; }
+setup false "$green"
+run 7
+grep -q 'auto-merge enabled' <<<"$out" || { echo "FAIL: --auto says auto-merge enabled" >&2; fail=1; }
+grep -q 'then auto-merge enabled' "$FAKE_DIR/calls" || { echo "FAIL: comment says auto-merge enabled" >&2; fail=1; }
+
+# 5. the claim's lane is passed to claim.sh review
+setup false "$green"
+printf '#647\tactive\tlease 2026-11-04T12:00:00Z\tpr 0\tme/host/sess#l226\n#648\tactive\tlease x\tpr 0\tme/host/sess\n' >"$FAKE_DIR/mine"
+run 7 --admin
+check "lane claim merges" 0 merge
+grep -q '^claim review 647 --lane l226$' "$FAKE_DIR/calls" || { echo "FAIL: lane read from claim.sh mine" >&2; fail=1; }
+setup false "$green"
+run 7 --admin --lane cloud5
+grep -q '^claim review 647 --lane cloud5$' "$FAKE_DIR/calls" || { echo "FAIL: --lane passed through" >&2; fail=1; }
+
+# 6. a stale PR head
+setup false "$green"
+printf 'eac36103ffff' >"$FAKE_DIR/remote"
+run 7 --admin
+check "a stale head is refused" 6 nomerge
+grep -q 'STALE-HEAD' <<<"$out" || { echo "FAIL: STALE-HEAD message" >&2; fail=1; }
+setup false "$green"
+printf 'abc1234def' >"$FAKE_DIR/remote"
+run 7 --admin
+check "a matching remote head merges" 0 merge
 
 exit "$fail"
