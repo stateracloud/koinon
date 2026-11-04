@@ -291,6 +291,9 @@ func (d *turnDriver) cancel(a turnpolicy.Action) turnpolicy.Event {
 // that ends because it was cancelled is not a failed turn.
 func (d *turnDriver) promptDone(res promptResult) turnpolicy.Event {
 	r := d.r
+	// The prompt is over: the message the agent was writing is complete after an end_turn and cut
+	// off after anything else (#344).
+	r.own.FlushItems(d.ctx, res.err != nil || res.stop != acp.StopEndTurn)
 	out := turnpolicy.Result{}
 	switch {
 	case res.err != nil && d.c.NeedsClassification():

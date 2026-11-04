@@ -80,6 +80,10 @@ const DefaultWatchPollInterval = 5 * time.Second
 // a heartbeat, so proxies and load balancers keep a quiet run's stream open (issue #141).
 const DefaultWatchHeartbeatInterval = 30 * time.Second
 
+// DefaultWatchCancelGrace is how long WatchRun keeps a canceled, once-claimed run's stream open for
+// the item its worker was typing when the cancel landed (#344, ADR 0074).
+const DefaultWatchCancelGrace = 10 * time.Second
+
 // Options configures a Server.
 type Options struct {
 	// Hub wakes WatchRun streams. Required.
@@ -88,6 +92,8 @@ type Options struct {
 	WatchPollInterval time.Duration
 	// WatchHeartbeatInterval defaults to DefaultWatchHeartbeatInterval.
 	WatchHeartbeatInterval time.Duration
+	// WatchCancelGrace defaults to DefaultWatchCancelGrace; negative turns the grace off.
+	WatchCancelGrace time.Duration
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Prices is the default price list; required (pricing.Embedded in production).
@@ -140,7 +146,9 @@ type Server struct {
 	poll time.Duration
 	// heartbeat is the idle interval after which WatchRun sends a heartbeat.
 	heartbeat time.Duration
-	log       *slog.Logger
+	// cancelGrace is how long WatchRun waits for late events after a canceled run's snapshot.
+	cancelGrace time.Duration
+	log         *slog.Logger
 
 	keys      Keys
 	tokens    *tokens.Service
@@ -171,6 +179,9 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	if opts.WatchHeartbeatInterval <= 0 {
 		opts.WatchHeartbeatInterval = DefaultWatchHeartbeatInterval
 	}
+	if opts.WatchCancelGrace == 0 {
+		opts.WatchCancelGrace = DefaultWatchCancelGrace
+	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
@@ -187,7 +198,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	s := &Server{
 		dm:       opts.DirectMessages,
 		notifier: opts.Notifier, urlPolicy: opts.URLPolicy,
-		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, log: opts.Logger,
+		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, cancelGrace: opts.WatchCancelGrace, log: opts.Logger,
 		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
 		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces, leakGuard: orgsettings.NewService(pool),

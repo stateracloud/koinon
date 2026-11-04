@@ -15,6 +15,7 @@ import (
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/runoutcome"
+	"github.com/stateracloud/koinon/internal/runwatch"
 )
 
 // watchBatch is how many events WatchRun reads per query.
@@ -92,9 +93,13 @@ func (s *Server) CancelRun(ctx context.Context, req *runv1alpha1.CancelRunReques
 // sent only once the cursor has reached the run's last_event_seq, so it never
 // precedes an event it already includes, and the last snapshot of a finished
 // run follows its last event (the web client relies on this to tell a finished
-// run from a cut stream). The stream ends once the run has finished and its
+// run from a cut stream). A canceled run is the exception: its worker may still store the item it
+// was typing after the cancel (ADR 0074 item 8), so a canceled run that was claimed keeps its stream
+// open for cancelGrace, sends such late events and then a second final snapshot. The stream ends once the run has finished and its
 // last event and final snapshot have been sent. A stream that has sent nothing for
-// the heartbeat interval sends a heartbeat message (issue #141).
+// the heartbeat interval sends a heartbeat message (issue #141). Live text, the chunks of the
+// message or thought the agent is typing (runwatch/chunks.go), is forwarded as it arrives; it is not
+// stored, not replayed and not in seq order (#344).
 func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest, stream runv1alpha1connect.RunServiceWatchRunServerStream) error {
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleViewer)
 	if err != nil {
@@ -135,7 +140,32 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 		beat.Reset(s.heartbeat)
 		return stream.Send(resp)
 	}
+	// drain sends the live batches the Hub already holds. It runs before every read of the stored
+	// events, so a batch handed over before an event was stored usually precedes that event. That is
+	// an optimisation only: a batch can still arrive after its item's event (the Hub hands over
+	// notifications and the store is read on separate paths). Every chunk names its item and the
+	// stored event carries the same name, so the client drops a late tail (#344).
+	drain := func() error {
+		for {
+			select {
+			case cs := <-sub.Chunks:
+				if err := sent(liveProto(cs)); err != nil {
+					return err
+				}
+			default:
+				return nil
+			}
+		}
+	}
+	// A canceled run whose worker had claimed it may still store the item it was typing (ADR 0074),
+	// after the run is terminal. Its stream stays open for the grace and sends the late events and
+	// a second final snapshot.
+	var graceEnd <-chan time.Time
+	graceOver := false
 	for {
+		if err := drain(); err != nil {
+			return err
+		}
 		events, err := s.q.ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{
 			OrgID: c.org, RunID: id, AfterSeq: cursor, MaxEvents: watchBatch,
 		})
@@ -165,24 +195,54 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 			// includes, and the final one must follow the last event (#140).
 			continue
 		}
-		if run.State != state {
+		// A finished run gets another snapshot when events arrived after the one it had.
+		if run.State != state || (len(events) > 0 && state.Finished()) {
 			state = run.State
 			if err := sent(&runv1alpha1.WatchRunResponse{Item: &runv1alpha1.WatchRunResponse_Run{Run: runProto(run)}}); err != nil {
 				return err
 			}
 		}
 		if run.State.Finished() {
-			return nil
+			if run.State != store.RunStateCanceled || run.Epoch == 0 || s.cancelGrace <= 0 || graceOver {
+				return nil
+			}
+			if graceEnd == nil {
+				t := time.NewTimer(s.cancelGrace)
+				defer t.Stop()
+				graceEnd = t.C
+			}
 		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-sub.C:
-		case <-poll.C:
-		case <-beat.C:
-			if err := sent(&runv1alpha1.WatchRunResponse{Item: &runv1alpha1.WatchRunResponse_Heartbeat{Heartbeat: &runv1alpha1.Heartbeat{}}}); err != nil {
-				return err
+	wait:
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-sub.C:
+				break wait
+			case <-poll.C:
+				break wait
+			case <-graceEnd:
+				graceOver = true
+				break wait
+			case cs := <-sub.Chunks:
+				// Live text (#344): forwarded as it comes, without re-reading the events.
+				if err := sent(liveProto(cs)); err != nil {
+					return err
+				}
+			case <-beat.C:
+				if err := sent(&runv1alpha1.WatchRunResponse{Item: &runv1alpha1.WatchRunResponse_Heartbeat{Heartbeat: &runv1alpha1.Heartbeat{}}}); err != nil {
+					return err
+				}
 			}
 		}
 	}
+}
+
+// liveProto is a batch of live chunks as a WatchRun message.
+func liveProto(cs []runwatch.Chunk) *runv1alpha1.WatchRunResponse {
+	out := make([]*runv1alpha1.LiveChunk, len(cs))
+	for i, c := range cs {
+		out[i] = &runv1alpha1.LiveChunk{Kind: c.Kind, Text: c.Text, Item: c.Item}
+	}
+	return &runv1alpha1.WatchRunResponse{Item: &runv1alpha1.WatchRunResponse_Live{Live: &runv1alpha1.LiveChunks{Chunks: out}}}
 }
