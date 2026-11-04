@@ -19,10 +19,13 @@
 #                                  must run whatever is skipped.
 #
 # decide, by event (EVENT_NAME, REPO, GH_TOKEN, and per event):
-#   pull_request  PR_NUMBER. skip=true while the pull request is a draft, read live from the API (the
-#                 event payload of a re-run is stale: a draft run re-run after "ready" would still say
-#                 draft). Marking it ready fires ready_for_review, which runs everything on the same
-#                 head, and so does every push to a ready pull request.
+#   pull_request  PR_DRAFT (github.event.pull_request.draft, true|false). skip=true while the event
+#                 says draft; the payload flag, not the live state, so the decision always matches the
+#                 run's name (`ci (draft)`, ci.yml run-name, #676). A re-run replays the original
+#                 event: a re-run of a draft run is a draft run again, even after the PR is ready
+#                 (red go/web, safe; re-run the ready_for_review run instead, see docs/dev/ci.md).
+#                 Marking it ready fires ready_for_review, which runs everything on the same
+#                 head, and so does every push to a ready pull request. No flag: skip=false.
 #   push          REF, SHA. skip=true only when all of this holds, else everything runs:
 #                   - REF is refs/heads/main and SHA is a merge commit with two parents;
 #                   - the merge commit's tree equals the tree of its second parent (the pull request
@@ -76,21 +79,15 @@ required_names() {
 	done <"$required_file"
 }
 
-# decide_pull_request: skip while the pull request is a draft.
+# decide_pull_request: skip while the event says the pull request is a draft (#676). The flag is
+# the one in the event payload (PR_DRAFT: github.event.pull_request.draft), the same one the
+# workflow's run-name labels the run with, so a run's behaviour and its label cannot disagree. No
+# API call: a re-run replays the original event, so a re-run of a draft run is a draft run again.
 decide_pull_request() {
-	local draft
-	if [[ -z ${PR_NUMBER:-} || -z ${REPO:-} ]]; then
-		emit false "no pull request number or repository: running everything"
-		return
-	fi
-	if ! draft=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq .draft 2>/dev/null); then
-		emit false "could not read the draft state of #$PR_NUMBER: running everything"
-		return
-	fi
-	case $draft in
+	case ${PR_DRAFT:-} in
 	true) emit true "draft pull request: the heavy jobs run when it is marked ready for review" ;;
 	false) emit false "ready pull request: running everything" ;;
-	*) emit false "unexpected draft state '$draft': running everything" ;;
+	*) emit false "no draft flag in the event ('${PR_DRAFT:-}'): running everything" ;;
 	esac
 }
 

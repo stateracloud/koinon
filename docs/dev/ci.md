@@ -128,8 +128,16 @@ Only `changes`, `quick checks`, `lint-shell` and `scripts` run, and `go` and `we
 purpose ("draft: not tested, mark ready for review"): a green draft `go` would otherwise stay the
 newest run on the head while the ready run is still going. A draft cannot merge, so get WIP
 feedback from `hack/preflight.sh`, not CI. Marking it ready fires `ready_for_review`, which runs
-everything on the same head, and so does every push to a ready PR. The draft state is read live (a
-re-run of an old draft run does not skip). Mark the PR ready (`hack/ship.sh --ready`,
+everything on the same head, and so does every push to a ready PR. The draft flag comes from the
+event payload (#676), not from the live state: the run is named `ci (draft)` (ci.yml `run-name`)
+when `github.event.pull_request.draft` is true, else `ci`, and `hack/ci-skip-heavy.sh` decides from
+that same flag (`PR_DRAFT`), so a run's name and its behaviour always agree. A gate that must
+ignore draft runs drops the runs named `ci (draft)` (the workflow-run `name` / `display_title`);
+`pr-wait.sh` and `pr-merge.sh` still use their time window until #678. A re-run replays the
+original event: re-running a `ci (draft)` run after the PR is ready is a draft run again (`go` and
+`web` red, "not tested"). That is safe (it can never leave a green `go` on an untested head) but
+the newer red check runs shadow the ready run's; re-run the `ci` run of `ready_for_review` (or push)
+instead. Mark the PR ready (`hack/ship.sh --ready`,
 `gh pr ready`) before you wait on it with `hack/pr-wait.sh`: a draft's green is not merge
 evidence.
 
