@@ -17,6 +17,13 @@ web-research pods have internet egress (see Web research).
 | Internal docs | `docs-repo/` | A fictional platform handbook to push to Gitea | n/a (Gitea MCP) |
 | Manifests | `manifests/` | Deployments, Services, NetworkPolicies, kustomization | n/a |
 
+**Keep the legs apart.** The web-research fixture is untrusted input, and the docs repo and the cost
+fixtures are private data. Give the web-research server to the `web-researcher` template (no private
+data) and the docs repo to `researcher` (no web reads); `researcher` and `web-researcher` never hold both, because an
+agent with untrusted input, private data and an outbound tool is the exfiltration path of ADR 0084.
+Do not allow the web-research server on an agent that also reads the docs repo or the cost servers,
+except in a test that is about the leak guard.
+
 ## Planted anomalies
 
 The write-up checks whether the agent found these. "Yesterday" is the UTC day before the test runs.
