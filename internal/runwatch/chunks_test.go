@@ -66,11 +66,11 @@ var _ = Describe("live chunks", func() {
 		org, run := uuid(1), uuid(2)
 		pub := runwatch.NewChunkPublisher(db, org, run, time.Hour, nil)
 		for _, t := range []string{"a", "b", "c"} {
-			pub.Add("acp.agent_message_chunk", update(t))
+			pub.Add("acp.agent_message_chunk", "1-1", update(t))
 		}
-		pub.Add("acp.agent_thought_chunk", update("t"))
-		pub.Add("acp.tool_call", []byte(`{"title":"x"}`)) // no text: not live
-		pub.Close()                                       // sends what is queued
+		pub.Add("acp.agent_thought_chunk", "1-2", update("t"))
+		pub.Add("acp.tool_call", "", []byte(`{"title":"x"}`)) // no text: not live
+		pub.Close()                                           // sends what is queued
 
 		got := db.got()
 		Expect(got).To(HaveLen(1))
@@ -83,7 +83,7 @@ var _ = Describe("live chunks", func() {
 		db := &recorder{}
 		pub := runwatch.NewChunkPublisher(db, uuid(1), uuid(2), 10*time.Millisecond, nil)
 		DeferCleanup(pub.Close)
-		pub.Add("acp.agent_message_chunk", update("hi"))
+		pub.Add("acp.agent_message_chunk", "1-1", update("hi"))
 		Eventually(db.got, 2*time.Second).Should(HaveLen(1))
 	})
 })

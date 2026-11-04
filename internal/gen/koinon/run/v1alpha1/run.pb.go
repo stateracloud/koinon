@@ -999,7 +999,8 @@ type WatchRunResponse_Heartbeat struct {
 type WatchRunResponse_Live struct {
 	// Text the agent is typing, sent about every 100 ms while it types. Live only: never stored,
 	// not part of the seq order, and a client that joins late or drops a stream misses it. The
-	// event for the finished message or thought follows with its whole text and replaces it.
+	// event for the finished message or thought follows with its whole text and replaces it; a
+	// client that has that event drops the item's live text (LiveChunk.item).
 	Live *LiveChunks `protobuf:"bytes,4,opt,name=live,proto3,oneof"`
 }
 
@@ -1061,8 +1062,12 @@ type LiveChunk struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// kind is the run event kind of the item the text belongs to, for example
 	// "acp.agent_message_chunk" or "acp.agent_thought_chunk".
-	Kind          string `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
-	Text          string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	Kind string `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Text string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	// item names the item the text belongs to. The run event stored for the item carries the same
+	// name as "item" in its payload. A client that has that event drops the item's live text, in
+	// whatever order the two arrive. Empty for a sender that does not name items.
+	Item          string `protobuf:"bytes,3,opt,name=item,proto3" json:"item,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1107,6 +1112,13 @@ func (x *LiveChunk) GetKind() string {
 func (x *LiveChunk) GetText() string {
 	if x != nil {
 		return x.Text
+	}
+	return ""
+}
+
+func (x *LiveChunk) GetItem() string {
+	if x != nil {
+		return x.Item
 	}
 	return ""
 }
@@ -1220,10 +1232,11 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\x04item\"D\n" +
 	"\n" +
 	"LiveChunks\x126\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x1e.koinon.run.v1alpha1.LiveChunkR\x06chunks\"3\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x1e.koinon.run.v1alpha1.LiveChunkR\x06chunks\"G\n" +
 	"\tLiveChunk\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\"\v\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\x12\x12\n" +
+	"\x04item\x18\x03 \x01(\tR\x04item\"\v\n" +
 	"\tHeartbeat*\xc7\x01\n" +
 	"\bRunState\x12\x19\n" +
 	"\x15RUN_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
