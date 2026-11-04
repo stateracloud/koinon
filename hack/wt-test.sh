@@ -179,29 +179,66 @@ check "rm removes it once origin is back" wt rm offl
 # rm resolves <name> through git worktree list, not the root
 wt new moved --branch fix/701-moved >/dev/null 2>&1
 git -C "$tmp/kw/moved" push -q origin fix/701-moved
-check "rm finds a worktree when the root differs" env KOINON_WT_ROOT="$tmp/elsewhere" "$repo/hack/wt.sh" rm moved
+ln -s "$tmp/kw" "$tmp/kwlink"
+check "rm finds a worktree when the root is spelled differently" env KOINON_WT_ROOT="$tmp/kwlink" "$repo/hack/wt.sh" rm moved
 check "rm removed it" test ! -e "$tmp/kw/moved"
 
-# gc
+# a linked worktree of the same name outside the root is never resolved
+git worktree add -q --detach "$tmp/outside-wt" origin/main 2>/dev/null
+mkdir -p "$tmp/other"
+git worktree add -q --detach "$tmp/other/ext" origin/main 2>/dev/null
+check "path ignores a same-named worktree outside the root" refuses wt path ext
+check "rm ignores a same-named worktree outside the root" refuses wt rm ext
+check "rm left the outside worktree alone" test -d "$tmp/other/ext"
+git worktree remove --force "$tmp/other/ext"
+git worktree remove --force "$tmp/outside-wt"
+
+# a malformed lease fails closed
+wt new badl --branch fix/703-badl >/dev/null 2>&1
+git -C "$tmp/kw/badl" push -q origin fix/703-badl
+claim_ref 703 held "not-a-date" "alice/host/sess#l703"
+err=$(wt rm badl 2>&1 || true)
+check "rm refuses on a malformed lease" test -d "$tmp/kw/badl"
+check "rm says the claim state is unknown" grep -q "claim state of #703 unknown" <<<"$err"
+claim_ref 703 released "$future" "alice/host/sess#l703"
+check "rm removes it once the claim is released" wt rm badl
+
+# gc: removes only on proof (merged PR, gone upstream)
+wt new gaalock --branch fix/719-lock >/dev/null 2>&1
+git worktree lock "$tmp/kw/gaalock"
 wt new gdone --branch fix/710-done >/dev/null 2>&1
+wt new ggone --branch fix/715-gone >/dev/null 2>&1
+git -C "$tmp/kw/ggone" push -q -u origin fix/715-gone 2>/dev/null
+git push -q origin --delete fix/715-gone
+wt new gfresh --branch fix/714-fresh >/dev/null 2>&1
+wt new gdet >/dev/null 2>&1
 wt new gwip --branch fix/711-wip >/dev/null 2>&1
 echo w >"$tmp/kw/gwip/w.txt"
 git -C "$tmp/kw/gwip" add w.txt
 git -C "$tmp/kw/gwip" commit -q -m w
 git -C "$tmp/kw/gwip" push -q origin fix/711-wip
 wt new gopen --branch fix/712-open >/dev/null 2>&1
-echo "fix/712-open 55 open" >"$FAKE_PRS"
 wt new gdirty --branch fix/713-dirty >/dev/null 2>&1
 echo d >"$tmp/kw/gdirty/d.txt"
+printf '%s\n' "fix/712-open 55 open" "fix/710-done 56 merged" "fix/719-lock 57 merged" >"$FAKE_PRS"
+check "rm fails on a locked worktree" refuses wt rm gaalock
+check "rm left the locked worktree" test -d "$tmp/kw/gaalock"
 out=$(wt gc --dry-run)
-check "gc --dry-run would remove the merged clean worktree" grep -q "^would remove gdone$" <<<"$out"
+check "gc --dry-run would remove the worktree with a merged PR" grep -q "^would remove gdone$" <<<"$out"
+check "gc --dry-run would remove the gone-upstream worktree" grep -q "^would remove ggone$" <<<"$out"
+check "gc keeps a fresh worktree with no commits" grep -q "^keep gfresh:" <<<"$out"
+check "gc keeps a detached worktree" grep -q "^keep gdet:" <<<"$out"
 check "gc keeps an unmerged worktree" grep -q "^keep gwip:" <<<"$out"
 check "gc keeps a worktree with an open PR" grep -q "^keep gopen: open PR #55" <<<"$out"
 check "gc keeps a dirty worktree" grep -q "^keep gdirty:" <<<"$out"
 check "gc --dry-run removes nothing" test -d "$tmp/kw/gdone"
-wt gc >/dev/null
-check "gc removes the merged clean worktree" test ! -e "$tmp/kw/gdone"
-check "gc leaves the others" test -d "$tmp/kw/gwip" -a -d "$tmp/kw/gopen" -a -d "$tmp/kw/gdirty"
+gc_rc=0
+out=$(wt gc 2>/dev/null) || gc_rc=$?
+check "gc reports a failed removal" grep -q "^keep gaalock: git worktree remove failed" <<<"$out"
+check "gc exits non-zero after a failed removal" eq "$gc_rc" 1
+check "gc continues after a failure (merged PR)" test ! -e "$tmp/kw/gdone"
+check "gc continues after a failure (gone upstream)" test ! -e "$tmp/kw/ggone"
+check "gc leaves the others" test -d "$tmp/kw/gwip" -a -d "$tmp/kw/gopen" -a -d "$tmp/kw/gdirty" -a -d "$tmp/kw/gfresh" -a -d "$tmp/kw/gdet" -a -d "$tmp/kw/gaalock"
 
 # the main checkout was never touched
 check "main checkout HEAD unchanged" eq "$(git rev-parse HEAD)" "$head_before"
