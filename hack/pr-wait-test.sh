@@ -32,6 +32,11 @@ if [ "$1" = api ] && [[ $2 == */rules/branches/* ]]; then # the ruleset's requir
   cat "$FAKE_DIR/rules"
   exit 0
 fi
+if [ "$1" = api ] && [[ $2 == */issues/*/events ]]; then # the last ready_for_review time, if $FAKE_DIR/ready exists
+  [ -f "$FAKE_DIR/ready" ] || exit 9
+  cat "$FAKE_DIR/ready"
+  exit 0
+fi
 if [ "$1" = api ]; then # gh api .../check-runs --jq ...: $FAKE_DIR/rows holds the --jq output (one row per line)
   [ -f "$FAKE_DIR/rows" ] || exit 9
   cat "$FAKE_DIR/rows"
@@ -367,6 +372,23 @@ seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"
 run 7 --interval 0 --timeout 0
 expect "without --checks the ruleset is not consulted" 2 "checks 2/2 green
 TIMEOUT"
+
+# 7c. (#647) a draft is never green; after ready_for_review the draft's runs are ignored
+seq_set '{"state":"OPEN","isDraft":true,"mergeStateStatus":"BLOCKED","mergeCommit":null,"statusCheckRollup":[{"name":"quick checks","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-01T10:00:00Z"}]}'
+run 7 --checks --interval 0
+expect "--checks on a draft: DRAFT, exit 5" 5 "DRAFT: not tested, mark ready for review (hack/ship.sh --ready, gh pr ready)"
+rd() { # <rollup>: a ready PR
+  printf '{"state":"OPEN","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":null,"statusCheckRollup":[%s]}' "$1"
+}
+old_go=$(cr_at go SUCCESS 61 2026-11-01T10:00:00Z)
+new_go=$(cr_at go SUCCESS 62 2026-11-01T11:05:00Z)
+seq_set "$(rd "$old_go")" "$(rd "$old_go")" "$(rd "$old_go,$new_go")"
+printf '2026-11-01T11:00:00Z\n' >"$FAKE_DIR/ready"
+printf 'go\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "after ready: the draft's green run is ignored until the ready run exists" 0 "waiting for the ready run
+checks 1/1 green"
+rm -f "$FAKE_DIR/ready" "$FAKE_DIR/rules"
 
 # 8. a transient gh failure is retried
 rm -rf "$FAKE_DIR"
