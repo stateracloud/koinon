@@ -61,6 +61,22 @@ var _ = Describe("live chunks", func() {
 		Expect(back.String()).To(Equal(text), "split on rune boundaries, in order, nothing lost")
 	})
 
+	It("keeps the item on every piece when it splits a text longer than a piece", func() {
+		text := strings.Repeat("x", 100000)
+		payloads := runwatch.Payloads([]runwatch.Chunk{{Kind: "acp.agent_message_chunk", Item: "3-7", Text: text}})
+		Expect(len(payloads)).To(BeNumerically(">", 1))
+		var back strings.Builder
+		for _, p := range payloads {
+			var cs []runwatch.Chunk
+			Expect(json.Unmarshal([]byte(p), &cs)).To(Succeed())
+			for _, c := range cs {
+				Expect(c.Item).To(Equal("3-7"))
+				back.WriteString(c.Text)
+			}
+		}
+		Expect(back.String()).To(Equal(text))
+	})
+
 	It("batches what arrives within an interval into one notification, joining neighbours of a kind", func() {
 		db := &recorder{}
 		org, run := uuid(1), uuid(2)
@@ -76,7 +92,7 @@ var _ = Describe("live chunks", func() {
 		Expect(got).To(HaveLen(1))
 		prefix := runwatch.Key(org, run) + "/"
 		Expect(got[0]).To(HavePrefix(prefix))
-		Expect(got[0][len(prefix):]).To(MatchJSON(`[{"k":"acp.agent_message_chunk","t":"abc"},{"k":"acp.agent_thought_chunk","t":"t"}]`))
+		Expect(got[0][len(prefix):]).To(MatchJSON(`[{"k":"acp.agent_message_chunk","t":"abc","i":"1-1"},{"k":"acp.agent_thought_chunk","t":"t","i":"1-2"}]`))
 	})
 
 	It("sends on its own while the agent types", func() {

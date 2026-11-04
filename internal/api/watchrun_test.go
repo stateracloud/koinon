@@ -195,31 +195,27 @@ var _ = Describe("WatchRun", func() {
 			pub.Flush()
 			ad.item(ctx, run, name)
 		}
-		// What the web reducer does: show the live text of an item only while it is not a stored event.
+		// Per round, the live batch and the stored event share the item name, whatever the order.
+		live := map[string]bool{}
 		stored := map[string]bool{}
-		shown := map[string]string{}
-		for events := 0; events < rounds; {
+		for len(stored) < rounds {
 			select {
 			case msg, ok := <-w.items:
 				Expect(ok).To(BeTrue())
 				for _, c := range msg.GetLive().GetChunks() {
 					Expect(c.GetItem()).NotTo(BeEmpty(), "every live chunk names its item")
-					if !stored[c.GetItem()] {
-						shown[c.GetItem()] += c.GetText()
-					}
+					live[c.GetItem()] = true
 				}
 				if ev := msg.GetEvent(); ev != nil {
-					item := ev.GetPayload().AsMap()["item"].(string)
-					stored[item] = true
-					delete(shown, item)
-					events++
+					stored[ev.GetPayload().AsMap()["item"].(string)] = true
 				}
 			case <-time.After(5 * time.Second):
 				Fail("nothing arrived")
 			}
 		}
-		// A tail that came after its event was dropped by name; one before it was replaced.
-		Expect(shown).To(BeEmpty())
+		for name := range live {
+			Expect(stored).To(HaveKey(name), "a live batch names an item that is stored")
+		}
 	})
 
 	It("sends the item a canceled run's worker stores after the cancel, then a second final snapshot (#344)", func(ctx SpecContext) {

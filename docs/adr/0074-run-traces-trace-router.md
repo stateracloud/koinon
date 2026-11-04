@@ -763,6 +763,9 @@ event classes. The code lands in #344 (items), #345 (business and diagnostic eve
    NOTIFY carries keys only; the plain wake-up (`<org_id>/<run_id>`) is unchanged. Every item has a name,
    `<epoch>-<n>`, unique in the run (the Owner counts items; a takeover has a new epoch). The chunks of
    an item carry it (`i`, `LiveChunk.item`) and the stored event carries it as `item` in its payload.
+   Items are stored in order and epochs only grow within a run, so the client keeps the newest stored
+   item as a watermark and drops live text at or below it. An item that is never stored (its owner was
+   fenced or taken over) is cleared when a later item is stored, and by the end of the run otherwise.
    A client that has the stored event drops the live text of that item, in whatever order the two
    arrive: the Hub hands over notifications and WatchRun reads the store on separate paths, so a tail
    can trail its item, and correctness rests on the name. WatchRun still drains `Subscription.Chunks`

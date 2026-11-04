@@ -14,13 +14,28 @@ export type RunWatch = {
   /**
    * The text of the message or thought the agent is typing, as far as it has been streamed (#344).
    * Every chunk names its item. The stored event of an item carries the same name in its payload
-   * ("item") and the whole text, so it replaces the item's live text, and live text of an item the
-   * run already has as an event is dropped on arrival, whichever of the two came first. Other
-   * events leave the live text alone, so text still being typed stays on screen.
+   * ("item") and the whole text, so it replaces that item's live text and that of every older item
+   * (an item that was never stored is cleared by a later stored one); live text at or below the
+   * newest stored item is dropped on arrival, whichever of the two came first. Other events leave
+   * the live text alone, so text still being typed stays on screen.
    */
   live: readonly LiveChunk[]
-  /** The names of the items that are stored events, so a late live tail of one can be dropped. */
-  stored?: ReadonlySet<string>
+  /** The newest item that is a stored event, so a late live tail of it or of an older item can be dropped. */
+  mark?: ItemMark
+}
+
+/** An item name `<epoch>-<n>` as numbers. Items are stored in order and epochs only grow within a run. */
+export type ItemMark = { epoch: number; n: number }
+
+/** parseItem reads `<epoch>-<n>`; undefined for an empty or malformed name (treated as no item). */
+export function parseItem(item: string): ItemMark | undefined {
+  const m = /^(\d+)-(\d+)$/.exec(item)
+  return m ? { epoch: Number(m[1]), n: Number(m[2]) } : undefined
+}
+
+/** atOrBelow reports whether item is the mark or older. */
+function atOrBelow(item: ItemMark, mark: ItemMark): boolean {
+  return item.epoch < mark.epoch || (item.epoch === mark.epoch && item.n <= mark.n)
 }
 
 /** itemOf is the item name a stored event carries, "" for an event that is not an item. */
@@ -72,15 +87,32 @@ export function reducer(state: State, a: Action): State {
     case 'event': {
       const events = appendEvent(cur.events, a.event)
       if (events === cur.events) return state
-      const item = itemOf(a.event)
-      // An event that names its item replaces that item's live text. One that does not (an
-      // older worker) replaces the live text of its kind.
-      const live = item ? cur.live.filter((c) => c.item !== item) : cur.live.filter((c) => c.kind !== a.event.kind)
-      const stored = item ? new Set(cur.stored).add(item) : cur.stored
-      return { ...state, [a.runId]: { ...cur, events, live, stored } }
+      const item = parseItem(itemOf(a.event))
+      // An event that names its item replaces the live text of that item and of every older one,
+      // and the item-less text of its kind (an older worker). One that does not name it replaces
+      // the live text of its kind.
+      let mark = cur.mark
+      let live: readonly LiveChunk[]
+      if (item) {
+        if (!mark || !atOrBelow(item, mark)) mark = item
+        const m = mark
+        live = cur.live.filter((c) => {
+          const ci = parseItem(c.item)
+          return ci ? !atOrBelow(ci, m) : c.kind !== a.event.kind
+        })
+      } else {
+        live = cur.live.filter((c) => c.kind !== a.event.kind)
+      }
+      return { ...state, [a.runId]: { ...cur, events, live, mark } }
     }
     case 'live': {
-      const chunks = cur.stored?.size ? a.chunks.filter((c) => !c.item || !cur.stored?.has(c.item)) : a.chunks
+      const mark = cur.mark
+      const chunks = mark
+        ? a.chunks.filter((c) => {
+            const ci = parseItem(c.item)
+            return !ci || !atOrBelow(ci, mark)
+          })
+        : a.chunks
       return chunks.length === 0 ? state : { ...state, [a.runId]: { ...cur, live: joinLive(cur.live, chunks) } }
     }
     case 'status':
