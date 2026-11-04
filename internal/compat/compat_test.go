@@ -83,9 +83,17 @@ var _ = Describe("harness self-test (a folder recorded at head, not a compatibil
 		entries, err := filepath.Glob(filepath.Join(dir, "agent_configs", "*.decoded.json"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(entries).NotTo(BeEmpty())
-		Expect(os.WriteFile(entries[0], []byte(`{"instructions":"something the reader does not produce"}`), 0o644)).To(Succeed())
+		Expect(os.WriteFile(entries[0], []byte(`{"instructions":"something the reader does not produce"}`), 0o600)).To(Succeed())
 		DeferCleanup(func() { _ = os.RemoveAll(filepath.Join(dir, "agent_configs")) })
 		Expect(compat.CheckAgentConfigs(dir)).NotTo(Succeed())
+	})
+	It("accepts a key that only head produces", func() {
+		ok, err := compat.JSONContains([]byte(`{"a":1,"new":{"x":0},"l":[{"b":2,"c":3}]}`), []byte(`{"a":1,"l":[{"b":2}]}`))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ok).To(BeTrue())
+		ok, err = compat.JSONContains([]byte(`{"a":1}`), []byte(`{"a":1,"gone":2}`))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ok).To(BeFalse())
 	})
 	It("refuses to overwrite a recorded folder", func(ctx SpecContext) {
 		Expect(compat.Record(ctx, dir, "again")).NotTo(Succeed())
