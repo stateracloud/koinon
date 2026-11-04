@@ -85,7 +85,7 @@ func homeTar(files map[string]string) (*bytes.Buffer, error) {
 func recordHomeBackup(ctx context.Context, out string) error {
 	dir := filepath.Join(out, homeBackupDir)
 	repo := filepath.Join(dir, homeBackupRepo)
-	if err := os.MkdirAll(repo, 0o755); err != nil {
+	if err := os.MkdirAll(repo, 0o750); err != nil {
 		return err
 	}
 	scratch, err := os.MkdirTemp("", "koinon-compat-record-")
@@ -110,7 +110,7 @@ func recordHomeBackup(ctx context.Context, out string) error {
 // files with what was recorded. The repository is copied first: opening one can write to it.
 func CheckHomeBackup(ctx context.Context, dir string) error {
 	var meta backupMeta
-	b, err := os.ReadFile(filepath.Join(dir, homeBackupDir, homeBackupMeta))
+	b, err := os.ReadFile(filepath.Join(dir, homeBackupDir, homeBackupMeta)) //nolint:gosec // G304: path inside the recorded release folder
 	if err != nil {
 		return err
 	}

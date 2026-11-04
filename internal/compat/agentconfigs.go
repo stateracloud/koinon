@@ -20,7 +20,7 @@ const agentConfigsDir = "agent_configs"
 // (agentconfig.FromTemplate and Marshal, the path CreateAgentFromTemplate takes).
 func recordAgentConfigs(out string) error {
 	dir := filepath.Join(out, agentConfigsDir)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	all, err := templates.All()
@@ -43,10 +43,10 @@ func recordAgentConfigs(out string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(dir, t.Metadata.ID+".json"), raw, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, t.Metadata.ID+".json"), raw, 0o600); err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(dir, t.Metadata.ID+".decoded.json"), decoded, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, t.Metadata.ID+".decoded.json"), decoded, 0o600); err != nil {
 			return err
 		}
 	}
@@ -54,8 +54,9 @@ func recordAgentConfigs(out string) error {
 }
 
 // CheckAgentConfigs decodes every recorded config with agentconfig.Parse, the path a stored
-// agent version is read through, and requires the result to equal what the recording release
-// decoded: a field the reader now drops or renames shows as a difference.
+// agent version is read through, and requires the result to contain everything the recording release
+// decoded (as a subset, so a field head adds is fine): a field the reader now drops, renames or
+// changes shows as a difference.
 func CheckAgentConfigs(dir string) error {
 	files, err := filepath.Glob(filepath.Join(dir, agentConfigsDir, "*.json"))
 	if err != nil {
@@ -67,7 +68,7 @@ func CheckAgentConfigs(dir string) error {
 			continue
 		}
 		n++
-		raw, err := os.ReadFile(f)
+		raw, err := os.ReadFile(f) //nolint:gosec // G304: path inside the recorded release folder
 		if err != nil {
 			return err
 		}
@@ -83,7 +84,7 @@ func CheckAgentConfigs(dir string) error {
 		if err != nil {
 			return err
 		}
-		same, err := sameJSON(got, want)
+		same, err := JSONContains(got, want)
 		if err != nil {
 			return fmt.Errorf("%s: %w", filepath.Base(f), err)
 		}

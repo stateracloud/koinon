@@ -20,7 +20,7 @@ func Record(ctx context.Context, out, release string) error {
 	if ents, err := os.ReadDir(out); err == nil && len(ents) > 0 {
 		return fmt.Errorf("%s is not empty: a recorded release is not overwritten", out)
 	}
-	if err := os.MkdirAll(out, 0o755); err != nil {
+	if err := os.MkdirAll(out, 0o750); err != nil {
 		return err
 	}
 	schema, err := migrations.Latest()

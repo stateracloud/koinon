@@ -59,7 +59,7 @@ var checkpointsExpectedRows = []map[string]any{
 // recordHomeCheckpoints writes the fixture for the schema version of this build. No database is
 // needed to record: the SQL is plain and the check is what runs it.
 func recordHomeCheckpoints(out string) error {
-	if err := os.WriteFile(filepath.Join(out, checkpointsSQL), []byte(checkpointsFixtureSQL), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(out, checkpointsSQL), []byte(checkpointsFixtureSQL), 0o600); err != nil {
 		return err
 	}
 	return writeJSON(filepath.Join(out, checkpointsExpected), checkpointsExpectedRows)
@@ -79,12 +79,12 @@ func CheckHomeCheckpoints(ctx context.Context, dsn, dir string) error {
 	if m.SchemaVersion > head {
 		return fmt.Errorf("the folder was recorded at schema %d, newer than this build's %d", m.SchemaVersion, head)
 	}
-	stmts, err := os.ReadFile(filepath.Join(dir, checkpointsSQL))
+	stmts, err := os.ReadFile(filepath.Join(dir, checkpointsSQL)) //nolint:gosec // G304: path inside the recorded release folder
 	if err != nil {
 		return err
 	}
 	var want []map[string]any
-	b, err := os.ReadFile(filepath.Join(dir, checkpointsExpected))
+	b, err := os.ReadFile(filepath.Join(dir, checkpointsExpected)) //nolint:gosec // G304: path inside the recorded release folder
 	if err != nil {
 		return err
 	}

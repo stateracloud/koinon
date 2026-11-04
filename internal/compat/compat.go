@@ -60,7 +60,7 @@ func Releases(root string) ([]string, error) {
 // ReadManifest reads the manifest of the release folder dir.
 func ReadManifest(dir string) (Manifest, error) {
 	var m Manifest
-	b, err := os.ReadFile(filepath.Join(dir, ManifestFile))
+	b, err := os.ReadFile(filepath.Join(dir, ManifestFile)) //nolint:gosec // G304: path inside the recorded release folder
 	if err != nil {
 		return m, err
 	}
@@ -78,19 +78,49 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return os.WriteFile(path, append(b, '\n'), 0o600)
 }
 
-// sameJSON reports whether a and b are the same JSON value.
-func sameJSON(a, b []byte) (bool, error) {
+// JSONContains reports whether every key and value of want appears unchanged in got. Objects are
+// compared key by key and arrays element by element; keys only got has are allowed, so a field a
+// later release adds to a decoded config does not fail a recorded folder.
+func JSONContains(got, want []byte) (bool, error) {
 	var x, y any
-	if err := json.Unmarshal(a, &x); err != nil {
+	if err := json.Unmarshal(got, &x); err != nil {
 		return false, err
 	}
-	if err := json.Unmarshal(b, &y); err != nil {
+	if err := json.Unmarshal(want, &y); err != nil {
 		return false, err
 	}
-	xb, _ := json.Marshal(x)
-	yb, _ := json.Marshal(y)
-	return string(xb) == string(yb), nil
+	return subset(x, y), nil
+}
+
+func subset(got, want any) bool {
+	switch w := want.(type) {
+	case map[string]any:
+		g, ok := got.(map[string]any)
+		if !ok {
+			return false
+		}
+		for k, wv := range w {
+			gv, ok := g[k]
+			if !ok || !subset(gv, wv) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		g, ok := got.([]any)
+		if !ok || len(g) != len(w) {
+			return false
+		}
+		for i := range w {
+			if !subset(g[i], w[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		return got == want
+	}
 }
