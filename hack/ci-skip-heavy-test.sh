@@ -109,6 +109,7 @@ if grep -q "^run-name: .*github.event.pull_request.draft.*'ci (draft)'" "$(dirna
 else
 	echo "FAIL: ci.yml run-name does not label draft runs"; fails=1
 fi
+# shellcheck disable=SC2016 # a literal workflow expression, not a shell one
 if grep -q 'PR_DRAFT: ${{ github.event.pull_request.draft }}' "$(dirname "$script")/../.github/workflows/ci.yml"; then
 	echo "ok: ci.yml feeds PR_DRAFT from the event"
 else
