@@ -30,6 +30,14 @@ const defaultParkTTL = 7 * 24 * time.Hour
 func (o *Owner) begin(ctx context.Context, fn func(q *store.Queries, src int64) error) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	// What the agent was saying when the run ends is cut off: the reply the verb posts reads it.
+	if !o.IsFenced() {
+		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), flushTimeout)
+		if err := o.flushLocked(fctx, true); err != nil && !errors.Is(err, ErrFenced) {
+			o.cfg.Log.Warn("storing the item in progress failed", "err", err)
+		}
+		cancel()
+	}
 	src := o.nextSrc()
 	return pgx.BeginFunc(ctx, o.cfg.DB, func(tx pgx.Tx) error {
 		return fn(o.q.WithTx(tx), src)
@@ -395,6 +403,7 @@ func (o *Owner) Requeue(ctx context.Context, turn Turn, reason string) error {
 
 // Release gives the lease up so a worker takes the run over at once. The turn row ends first.
 func (o *Owner) Release(ctx context.Context, turn Turn) {
+	o.FlushItems(ctx, true)
 	o.CloseTurn(ctx, turn)
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

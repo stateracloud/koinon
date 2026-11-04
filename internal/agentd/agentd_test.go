@@ -344,18 +344,22 @@ var _ = Describe("Pool", func() {
 		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(ContainElement("run.requeued"))
 	})
 
-	It("honours a cancel with session/cancel and records nothing after it", func(ctx SpecContext) {
+	It("honours a cancel with session/cancel and records only the cut-off message after it", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		r := e.enqueue(ctx, e.task(ctx, markWait))
 		e.pool("agentd-a")
-		Eventually(func() []string { return chunks(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(Equal([]string{"working"}))
+		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(10 * time.Second).Should(Equal(1))
 
 		_, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: e.org, ID: r.ID, OutcomeReason: "user canceled"})
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(func() int { _, _, c, _ := e.harness.snapshot(); return c }).WithTimeout(5 * time.Second).Should(Equal(1))
 
+		// The message in progress ("working") is stored as a cut-off item, although the run is
+		// canceled: a stopped run keeps what the agent said (#344).
+		Eventually(func() []string { return chunks(events(ctx, r)) }).WithTimeout(5 * time.Second).Should(Equal([]string{"working"}))
 		Consistently(func() []string { return kinds(events(ctx, r)) }, 500*time.Millisecond).
 			Should(Equal([]string{"run.session", "run.prompt", "acp.agent_message_chunk"}))
+		Expect(payload(events(ctx, r)[2])).To(HaveKeyWithValue("partial", true))
 		final := getRun(ctx, r)
 		Expect(final.State).To(Equal(store.RunStateCanceled))
 		Expect(final.OutcomeReason.String).To(Equal("user canceled"))
@@ -411,11 +415,11 @@ var _ = Describe("Pool", func() {
 		r := e.enqueue(ctx, t)
 		killA := e.pool("agentd-a", func(c *agentd.Config) { c.KeepLeaseOnShutdown = true })
 		Eventually(e.harness.hangs).WithTimeout(10 * time.Second).Should(Receive())
-		Eventually(func() []string { return chunks(events(ctx, r)) }).Should(Equal([]string{"one ", "two "}))
 		claimed := getRun(ctx, r)
 		Expect(claimed.OwnerID.String).To(HavePrefix("agentd-a/"))
 
-		// SIGKILL: the worker stops without another write; its lease runs out.
+		// The worker stops; its lease runs out. The message it was writing ("one two ") is stored
+		// as it stops, cut off, as one item (#344).
 		killA()
 		e.pool("agentd-b")
 		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -428,14 +432,18 @@ var _ = Describe("Pool", func() {
 		evs := events(ctx, r)
 		expectOrdered(evs)
 		Expect(kinds(evs)).To(Equal([]string{
-			"run.session", "run.prompt", "acp.agent_message_chunk", "acp.agent_message_chunk",
+			"run.session", "run.prompt", "acp.agent_message_chunk",
 			"run.session", "run.prompt", "acp.agent_message_chunk", "run.summary", "run.succeeded",
 		}))
-		Expect(chunks(evs)).To(Equal([]string{"one ", "two ", "resumed"}), "the replayed history is not recorded again")
-		for _, ev := range evs[:4] {
+		got := chunks(evs)
+		Expect(got).To(HaveLen(2), "the replayed history is not recorded again")
+		Expect(got[0]).To(HavePrefix("one "), "the worker may stop before the second chunk is handled")
+		Expect(got[1]).To(Equal("resumed"))
+		Expect(payload(evs[2])).To(HaveKeyWithValue("partial", true))
+		for _, ev := range evs[:3] {
 			Expect(ev.Epoch).To(Equal(claimed.Epoch))
 		}
-		for _, ev := range evs[4:] {
+		for _, ev := range evs[3:] {
 			Expect(ev.Epoch).To(Equal(claimed.Epoch + 1))
 		}
 		_, loads, _, _ := e.harness.snapshot()

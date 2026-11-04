@@ -85,6 +85,19 @@ type Config struct {
 	// down). It is asked before a database error is read as a fence, and its error is returned as it
 	// is. Nil means there is none.
 	Stop func(ctx context.Context) error
+	// Live receives every text chunk of a message or thought as it arrives (kind "acp.<update>",
+	// the update's JSON). Chunks are never stored, only the items they make up (items.go); this is
+	// how a live subscriber sees them. It runs on the harness's notification path, so it must not
+	// block. Nil means none.
+	// agentd wires it to a runwatch.ChunkPublisher, which batches the chunks into koinon_run
+	// notifications for the API's WatchRun streams.
+	// item names the item the chunk belongs to; the run event stored for that item carries the same
+	// name in its payload as "item" (items.go).
+	Live func(kind, item string, payload []byte)
+	// LiveFlush sends what Live has queued and returns when it is sent. The Owner calls it before it
+	// stores an item, so the item's live tail is delivered ahead of the event that replaces it. Nil
+	// means none.
+	LiveFlush func()
 }
 
 // Owner is the writer of one run under one epoch. It is safe for concurrent use.
@@ -93,8 +106,10 @@ type Owner struct {
 	run store.Run
 	q   *store.Queries
 
-	mu     sync.Mutex // serialises appends and srcSeq
-	srcSeq int64
+	mu      sync.Mutex // serialises appends, srcSeq and pend
+	srcSeq  int64
+	itemSeq int64   // the last item number handed out (items.go)
+	pend    pending // the chunks of the item in progress (items.go)
 
 	fenceOnce sync.Once
 	fenced    chan struct{}
@@ -197,6 +212,15 @@ func (o *Owner) RecordRaw(ctx context.Context, kind string, payload []byte) erro
 	if o.IsFenced() {
 		return ErrFenced
 	}
+	// The item in progress comes first on the timeline (items.go).
+	if err := o.flushLocked(ctx, false); err != nil {
+		return err
+	}
+	return o.recordLocked(ctx, kind, payload)
+}
+
+// recordLocked is RecordRaw with o.mu held and the Owner not fenced.
+func (o *Owner) recordLocked(ctx context.Context, kind string, payload []byte) error {
 	o.srcSeq++
 	src := o.srcSeq
 	class := ClassOf(kind)
@@ -242,10 +266,19 @@ func (o *Owner) tryAppend(ctx context.Context, class EventClass, kind string, pa
 		ctx, cancel = context.WithTimeout(ctx, diagnosticTryTimeout)
 		defer cancel()
 	}
-	_, err := o.q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
-		OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
-		Kind: kind, Payload: payload, SourceSeq: src,
-	})
+	var err error
+	if o.FenceKind() == FenceCanceled {
+		// Only the item in progress is written to a canceled run (FlushItems).
+		_, err = o.q.AppendCanceledRunEventOnce(ctx, store.AppendCanceledRunEventOnceParams{
+			OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
+			Kind: kind, Payload: payload, SourceSeq: src,
+		})
+	} else {
+		_, err = o.q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
+			OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
+			Kind: kind, Payload: payload, SourceSeq: src,
+		})
+	}
 	if err == nil {
 		return nil
 	}

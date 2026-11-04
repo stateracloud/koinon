@@ -28,6 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runoutcome"
+	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/thinking"
 )
@@ -250,9 +251,12 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 		p: p, q: p.q, run: run, cmdChanged: make(chan struct{}),
 		log: log.With("org", run.OrgID.String(), "run", run.ID.String(), "epoch", run.Epoch),
 	}
+	// The text the agent types reaches watchers live, batched; only the completed items are stored (#344).
+	live := runwatch.NewChunkPublisher(p.db, run.OrgID, run.ID, 0, r.log)
+	defer live.Close()
 	r.own = runoutcome.New(runoutcome.Config{
 		DB: p.db, Queries: p.q, Run: run, Log: r.log, Now: p.cfg.Now,
-		Metrics: outcomeMetrics{p.cfg.Metrics}, Stop: r.stopped,
+		Metrics: outcomeMetrics{p.cfg.Metrics}, Stop: r.stopped, Live: live.Add, LiveFlush: live.Flush,
 	})
 	r.log.Info("driving run", "state", run.State, "takeovers", run.Takeovers)
 	r.tr = p.traceStart(ctx, run, r.own.Fenced(), r.log)
@@ -826,6 +830,7 @@ func (r *runner) interrupted(ctx context.Context, reason string, exit *int, stde
 	if stderr != "" {
 		payload["stderrTail"] = stderr
 	}
+	r.own.FlushItems(ctx, true) // a message the harness was in the middle of is cut off
 	if err := r.own.Record(ctx, "run.interrupted", payload); err != nil {
 		r.log.Warn("recording the interruption failed", "err", err)
 	}
@@ -1037,6 +1042,7 @@ func (r *runner) concludeFenced(ctx context.Context, turn runoutcome.Turn) {
 	switch r.own.FenceKind() {
 	case fenceCanceled:
 		r.log.Info("run canceled")
+		r.own.FlushItems(ctx, true) // what the agent was saying when it was canceled
 		r.own.CloseTurn(ctx, turn)
 	case fenceAbandon:
 		r.log.Warn("giving the run up")
@@ -1049,6 +1055,7 @@ func (r *runner) concludeFenced(ctx context.Context, turn runoutcome.Turn) {
 // concludeShutdown ends a worker whose pool is stopping.
 func (r *runner) concludeShutdown(ctx context.Context, turn runoutcome.Turn) {
 	if r.p.cfg.KeepLeaseOnShutdown {
+		r.own.FlushItems(ctx, true)
 		r.own.CloseTurn(ctx, turn)
 	} else {
 		r.own.Release(context.WithoutCancel(ctx), turn)
@@ -1095,7 +1102,7 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	if h.r.replaying.Load() {
 		return nil
 	}
-	if err := h.r.own.RecordRaw(ctx, "acp."+updateKind(b), b); err != nil {
+	if err := h.r.own.RecordUpdate(ctx, "acp."+updateKind(b), b); err != nil {
 		return err
 	}
 	h.r.tr.update(n, at)

@@ -11,6 +11,61 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const appendCanceledRunEventOnce = `-- name: AppendCanceledRunEventOnce :one
+WITH run AS (
+    UPDATE runs
+    SET last_event_seq = last_event_seq + 1
+    WHERE runs.org_id = $4 AND runs.id = $5 AND runs.epoch = $6
+      AND runs.state = 'canceled'
+      AND NOT EXISTS (
+          SELECT 1 FROM run_events e
+          WHERE e.org_id = $4 AND e.run_id = $5 AND e.epoch = $6
+            AND e.source_seq = $3::bigint)
+    RETURNING runs.org_id, runs.id, runs.epoch, runs.last_event_seq
+)
+INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload, source_seq)
+SELECT run.org_id, run.id, run.last_event_seq, run.epoch, $1, $2, $3::bigint
+FROM run
+RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq
+`
+
+type AppendCanceledRunEventOnceParams struct {
+	Kind      string
+	Payload   []byte
+	SourceSeq int64
+	OrgID     pgtype.UUID
+	RunID     pgtype.UUID
+	Epoch     int64
+}
+
+// AppendRunEventOnce for the run's own epoch after the control plane canceled it: the worker
+// stores the item (a message or a thought) the agent was in the middle of, so a stopped run keeps
+// what was said (#344). Nothing else is recorded this way. No row: another epoch, the run is not
+// canceled, or the event exists.
+func (q *Queries) AppendCanceledRunEventOnce(ctx context.Context, arg AppendCanceledRunEventOnceParams) (RunEvent, error) {
+	row := q.db.QueryRow(ctx, appendCanceledRunEventOnce,
+		arg.Kind,
+		arg.Payload,
+		arg.SourceSeq,
+		arg.OrgID,
+		arg.RunID,
+		arg.Epoch,
+	)
+	var i RunEvent
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.RunID,
+		&i.Seq,
+		&i.Epoch,
+		&i.Kind,
+		&i.Payload,
+		&i.CreatedAt,
+		&i.SourceSeq,
+	)
+	return i, err
+}
+
 const appendRunControlEvent = `-- name: AppendRunControlEvent :one
 WITH run AS (
     UPDATE runs
