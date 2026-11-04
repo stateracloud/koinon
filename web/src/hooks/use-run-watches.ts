@@ -13,7 +13,8 @@ export type RunWatch = {
   error?: string
   /**
    * The text of the message or thought the agent is typing, as far as it has been streamed (#344).
-   * Cleared when the next event arrives: the stored event carries the whole text.
+   * A stored event of the same kind replaces the live text of that kind (it carries the whole
+   * text); other events leave it alone, so text still being typed stays on screen.
    */
   live: readonly LiveChunk[]
 }
@@ -51,14 +52,14 @@ export function joinLive(live: readonly LiveChunk[], more: readonly LiveChunk[])
   return out
 }
 
-function reducer(state: State, a: Action): State {
+export function reducer(state: State, a: Action): State {
   const cur = state[a.runId] ?? empty
   switch (a.type) {
     case 'run':
       return { ...state, [a.runId]: { ...cur, run: a.run } }
     case 'event': {
       const events = appendEvent(cur.events, a.event)
-      return events === cur.events ? state : { ...state, [a.runId]: { ...cur, events, live: [] } }
+      return events === cur.events ? state : { ...state, [a.runId]: { ...cur, events, live: cur.live.filter((c) => c.kind !== a.event.kind) } }
     }
     case 'live':
       return { ...state, [a.runId]: { ...cur, live: joinLive(cur.live, a.chunks) } }

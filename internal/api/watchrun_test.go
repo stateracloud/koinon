@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"time"
 
 	connect "connectrpc.com/connect/v2"
@@ -115,6 +116,7 @@ var _ = Describe("WatchRun", func() {
 	It("streams the text the agent is typing, live and unstored (#344)", func(ctx SpecContext) {
 		w := watch(ctx, f.owner, f.org, f.run.GetId(), 0)
 		Expect((<-w.items).GetRun()).NotTo(BeNil())
+		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))
 		before := countRunEvents(ctx, e, run)
 
 		// agentd's publisher batches chunks into NOTIFYs; polling is off, so only NOTIFY can deliver them.
@@ -144,6 +146,35 @@ var _ = Describe("WatchRun", func() {
 			}
 		}
 		Expect(countRunEvents(ctx, e, run)).To(Equal(before), "chunks are never stored")
+	})
+
+	It("delivers the live tail of an item before the event that replaces it (#344)", func(ctx SpecContext) {
+		w := watch(ctx, f.owner, f.org, f.run.GetId(), 0)
+		Expect((<-w.items).GetRun()).NotTo(BeNil())
+		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))
+
+		// A tick far away: only Flush sends, as the Owner does before it stores the item.
+		pub := runwatch.NewChunkPublisher(e.pool, run.OrgID, run.ID, time.Hour, nil)
+		defer pub.Close()
+		pub.Add("acp.agent_message_chunk", []byte(`{"content":{"type":"text","text":"Hello world"}}`))
+		pub.Flush()
+		ad.event(ctx, run, 2)
+
+		var order []string
+		for len(order) < 2 {
+			select {
+			case msg, ok := <-w.items:
+				Expect(ok).To(BeTrue())
+				if len(msg.GetLive().GetChunks()) > 0 {
+					order = append(order, "live")
+				} else if msg.GetEvent() != nil {
+					order = append(order, "event")
+				}
+			case <-time.After(5 * time.Second):
+				Fail("nothing arrived: " + strings.Join(order, ","))
+			}
+		}
+		Expect(order).To(Equal([]string{"live", "event"}))
 	})
 
 	It("ends after the run finishes and its last event is sent", func(ctx SpecContext) {

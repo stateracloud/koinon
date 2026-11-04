@@ -92,6 +92,10 @@ type Config struct {
 	// agentd wires it to a runwatch.ChunkPublisher, which batches the chunks into koinon_run
 	// notifications for the API's WatchRun streams.
 	Live func(kind string, payload []byte)
+	// LiveFlush sends what Live has queued and returns when it is sent. The Owner calls it before it
+	// stores an item, so the item's live tail is delivered ahead of the event that replaces it. Nil
+	// means none.
+	LiveFlush func()
 }
 
 // Owner is the writer of one run under one epoch. It is safe for concurrent use.
