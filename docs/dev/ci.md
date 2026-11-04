@@ -132,7 +132,7 @@ everything on the same head, and so does every push to a ready PR. The draft fla
 event payload (#676), not from the live state: the run is named `ci (draft)` (ci.yml `run-name`)
 when `github.event.pull_request.draft` is true, else `ci`, and `hack/ci-skip-heavy.sh` decides from
 that same flag (`PR_DRAFT`), so a run's name and its behaviour always agree. A gate that must
-ignore draft runs drops the runs named `ci (draft)` (the workflow-run `name` / `display_title`);
+ignore draft runs drops the runs whose `display_title` (`displayTitle` in `gh run list --json`) is `ci (draft)`; the run `name` stays `ci` for every run, so never filter on it;
 `pr-wait.sh` and `pr-merge.sh` still use their time window until #678. A re-run replays the
 original event: re-running a `ci (draft)` run after the PR is ready is a draft run again (`go` and
 `web` red, "not tested"). That is safe (it can never leave a green `go` on an untested head) but

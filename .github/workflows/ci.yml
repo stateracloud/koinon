@@ -3,7 +3,8 @@ name: ci
 
 # The run says whether it ran for a draft, from the event payload (#676). hack/ci-skip-heavy.sh decides
 # from the same flag (PR_DRAFT below), so a run's label and its behaviour always agree; a gate
-# can drop `ci (draft)` runs without a time window. A re-run replays the event, so keeps its label.
+# can drop runs whose `display_title` (`displayTitle` in `gh run list --json`) is `ci (draft)`
+# (the run `name` stays `ci`) without a time window. A re-run replays the event, so keeps its label.
 run-name: ${{ github.event.pull_request.draft && 'ci (draft)' || 'ci' }}
 
 on:
