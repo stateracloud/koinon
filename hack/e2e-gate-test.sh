@@ -126,7 +126,7 @@ reset
 rc=0
 hack/e2e-rerun-result.sh "$SHA" >/dev/null || rc=$?
 if [[ $rc -eq 0 ]] && ! grep -q '^run rerun' "$tmp/calls"; then echo "ok: rerun: nothing failed, nothing re-run"; else echo "FAIL: rerun without a failed run" >&2; fail=1; fi
-echo '[{"databaseId":55,"status":"completed","conclusion":"failure"}]' >"$tmp/failed.json"
+echo '[{"databaseId":55,"status":"completed","conclusion":"failure","headBranch":"feat/x"}]' >"$tmp/failed.json"
 job 55 failure success
 hack/e2e-rerun-result.sh "$SHA" >/dev/null
 if grep -q '^run rerun 55 --job 8$' "$tmp/calls" && ! grep -q -- '--failed' "$tmp/calls"; then echo "ok: rerun: only the e2e result job is re-run"; else echo "FAIL: rerun did not re-run job 8 of run 55 alone" >&2; fail=1; fi
@@ -134,10 +134,16 @@ echo '[{"databaseId":55,"status":"in_progress","conclusion":null}]' >"$tmp/faile
 : >"$tmp/calls"
 hack/e2e-rerun-result.sh "$SHA" >/dev/null
 if ! grep -q '^run rerun' "$tmp/calls"; then echo "ok: rerun: a run still in progress is left alone"; else echo "FAIL: rerun touched an in-progress run" >&2; fail=1; fi
-echo '[{"databaseId":55,"status":"completed","conclusion":"failure"}]' >"$tmp/failed.json"
+echo '[{"databaseId":55,"status":"completed","conclusion":"failure","headBranch":"feat/x"}]' >"$tmp/failed.json"
 rc=0
 T_RERUN_FAILS=1 hack/e2e-rerun-result.sh "$SHA" >/dev/null 2>&1 || rc=$?
 if [[ $rc -eq 0 ]]; then echo "ok: rerun: a gh failure is not an error"; else echo "FAIL: rerun failed hard (rc $rc)" >&2; fail=1; fi
+# no head branch: the live-run check cannot run, so nothing is re-run and no branchless run list is made
+echo '[{"databaseId":55,"status":"completed","conclusion":"failure","headBranch":""}]' >"$tmp/failed.json"
+: >"$tmp/calls"
+rc=0
+out=$(hack/e2e-rerun-result.sh "$SHA" 2>&1) || rc=$?
+if [[ $rc -eq 0 ]] && ! grep -q '^run rerun' "$tmp/calls" && ! grep -q -- '--branch' "$tmp/calls" && grep -q 'no head branch' <<<"$out"; then echo "ok: rerun: an empty head branch skips the re-run"; else echo "FAIL: rerun with an empty head branch" >&2; fail=1; fi
 rc=0
 hack/e2e-rerun-result.sh not-a-sha >/dev/null 2>&1 || rc=$?
 if [[ $rc -eq 64 ]]; then echo "ok: rerun: usage"; else echo "FAIL: rerun usage rc $rc" >&2; fail=1; fi
