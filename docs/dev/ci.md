@@ -22,13 +22,18 @@ fails one that did not run (NOT RUN); `hack/go-test.sh` exits 3 when an expected
 `testdata/compat/<release>/` is recorded by `hack/record-compat-fixtures.sh <release>` from that
 release's code and holds three formats:
 
-- `agent_configs/`: the stored `agent_versions.config` of every shipped template, with the decode
+- `agent_configs/`: the stored `agent_versions.config` of every shipped template, plus `full` and
+  `full-no-template` (`compat.FullConfig`: every `agentconfig.Config` field set, bindings included;
+  a field added to `Config` must be added there, the self-test fails otherwise), each with the decode
   `agentconfig.Parse` made of it then; head must decode it to the same value.
 - `home_checkpoints.sql` and `manifest.json`: `home_checkpoints` rows written for the schema version
-  in the manifest; the check migrates an empty database to that version, loads them, migrates to head
-  and compares the recorded columns (Postgres, needs Docker).
-- `home_backup/`: a kopia repository (password `koinon_test_not-a-real-password`) restored with
-  `checkpoint.Writer.Restore` and compared file by file.
+  in the manifest, and the backup agent's `home_repositories` row with its `password_envelope`
+  sealed under the fake KEK `koinon_test_not-a-real-kek`; the check migrates an empty database to that
+  version, loads them, migrates to head, compares the recorded columns raw and through the generated
+  store queries, and opens the envelope with `checkpoint.Passwords.Get` (Postgres, needs Docker).
+- `home_backup/`: a kopia repository restored with `checkpoint.Writer.Restore`, using the prefix and
+  password that came out of the envelope above (fake password `koinon_test_not-a-real-password`),
+  and compared file by file.
 
 The suite is in the parallel list of `hack/go-test.sh`: it takes its databases from `pgtest.Run`
 (one per spec, unique per process), binds no port and writes only to temp directories. It sits in

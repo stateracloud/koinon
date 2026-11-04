@@ -107,8 +107,10 @@ func recordHomeBackup(ctx context.Context, out string) error {
 }
 
 // CheckHomeBackup restores the recorded snapshot with checkpoint.Writer.Restore and compares the
-// files with what was recorded. The repository is copied first: opening one can write to it.
-func CheckHomeBackup(ctx context.Context, dir string) error {
+// files with what was recorded. repo is what CheckHomeCheckpoints read from the migrated database
+// (the prefix and the password out of the sealed envelope), so the restore uses the runtime's
+// password path, not a constant. The repository is copied first: opening one can write to it.
+func CheckHomeBackup(ctx context.Context, dir string, repo checkpoint.Repository) error {
 	var meta backupMeta
 	b, err := os.ReadFile(filepath.Join(dir, homeBackupDir, homeBackupMeta)) //nolint:gosec // G304: path inside the recorded release folder
 	if err != nil {
@@ -122,18 +124,21 @@ func CheckHomeBackup(ctx context.Context, dir string) error {
 		return err
 	}
 	defer checkpoint.RemoveAll(work)
-	repo := filepath.Join(work, "repo")
-	if err := os.CopyFS(repo, os.DirFS(filepath.Join(dir, homeBackupDir, homeBackupRepo))); err != nil {
+	repoDir := filepath.Join(work, "repo")
+	if repo.Prefix != meta.Prefix {
+		return fmt.Errorf("the home_repositories prefix %q differs from the recorded backup's %q", repo.Prefix, meta.Prefix)
+	}
+	if err := os.CopyFS(repoDir, os.DirFS(filepath.Join(dir, homeBackupDir, homeBackupRepo))); err != nil {
 		return err
 	}
 	scratch := filepath.Join(work, "scratch")
 	if err := os.Mkdir(scratch, 0o700); err != nil {
 		return err
 	}
-	w := &checkpoint.Writer{Storage: checkpoint.Dir(repo), Scratch: scratch}
+	w := &checkpoint.Writer{Storage: checkpoint.Dir(repoDir), Scratch: scratch}
 	for _, id := range []string{meta.SnapshotID, ""} { // the named snapshot, and "newest"
 		var buf bytes.Buffer
-		if err := w.Restore(ctx, meta.Prefix, Password, id, &buf); err != nil {
+		if err := w.Restore(ctx, repo.Prefix, repo.Password, id, &buf); err != nil {
 			return fmt.Errorf("restoring snapshot %q: %w", id, err)
 		}
 		got, err := regularFiles(&buf)

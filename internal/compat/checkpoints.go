@@ -9,11 +9,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // the "pgx" database/sql driver
 	"github.com/pressly/goose/v3"
 
+	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/db/store"
 )
 
 const (
@@ -24,12 +28,23 @@ const (
 // checkpointsFixtureSQL is written for the schema at the recorded version: an org and two agents
 // (a deleted org skips the owner rule, which is not what is under test) and one checkpoint row in
 // every status. Two agents because at most one request per agent is open.
-const checkpointsFixtureSQL = `-- Written for the schema at the recorded version; loaded by internal/compat.
+func checkpointsFixtureSQL(envelope []byte) string {
+	return fmt.Sprintf(checkpointsFixtureFmt, strings.ReplaceAll(string(envelope), "'", "''"), checkpoint.Prefix(backupOrg, backupAgent))
+}
+
+const checkpointsFixtureFmt = `-- Written for the schema at the recorded version; loaded by internal/compat.
 INSERT INTO orgs (id, slug, display_name, kind, deleted_at)
 VALUES ('0198a000-0000-7000-8000-0000000000d0', 'compat', 'Compat', 'personal', '2026-01-01T00:00:00Z');
 INSERT INTO agents (org_id, id, display_name, flavor) VALUES
   ('0198a000-0000-7000-8000-0000000000d0', '0198a000-0000-7000-8000-0000000000d1', 'one', 'opencode'),
   ('0198a000-0000-7000-8000-0000000000d0', '0198a000-0000-7000-8000-0000000000d2', 'two', 'opencode');
+-- The agent whose home the kopia backup holds: its repository row carries the password envelope.
+INSERT INTO orgs (id, slug, display_name, kind, deleted_at)
+VALUES ('0198a000-0000-7000-8000-0000000000c1', 'compat-backup', 'Compat backup', 'personal', '2026-01-01T00:00:00Z');
+INSERT INTO agents (org_id, id, display_name, flavor)
+VALUES ('0198a000-0000-7000-8000-0000000000c1', '0198a000-0000-7000-8000-0000000000c2', 'backup', 'opencode');
+INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope)
+VALUES ('0198a000-0000-7000-8000-0000000000c1', '0198a000-0000-7000-8000-0000000000c2', '%[2]s', '%[1]s'::jsonb);
 INSERT INTO home_checkpoints
   (org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at)
 VALUES
@@ -59,15 +74,102 @@ var checkpointsExpectedRows = []map[string]any{
 // recordHomeCheckpoints writes the fixture for the schema version of this build. No database is
 // needed to record: the SQL is plain and the check is what runs it.
 func recordHomeCheckpoints(out string) error {
-	if err := os.WriteFile(filepath.Join(out, checkpointsSQL), []byte(checkpointsFixtureSQL), 0o600); err != nil {
+	env, err := sealedPassword()
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(out, checkpointsSQL), []byte(checkpointsFixtureSQL(env)), 0o600); err != nil {
 		return err
 	}
 	return writeJSON(filepath.Join(out, checkpointsExpected), checkpointsExpectedRows)
 }
 
 // CheckHomeCheckpoints loads the fixture into the empty database at dsn at the recorded schema
-// version, migrates it to head, and requires every recorded row to read back unchanged.
-func CheckHomeCheckpoints(ctx context.Context, dsn, dir string) error {
+// version, migrates it to head, and requires every recorded row to read back unchanged: raw
+// (to_jsonb, so a dropped or changed column shows) and through the generated store queries the
+// services use. It also opens the backup agent's repository password the way the runtime does
+// (checkpoint.Passwords.Get: the home_repositories row, then the envelope under the test KEK) and
+// returns that repository for CheckHomeBackup.
+func CheckHomeCheckpoints(ctx context.Context, dsn, dir string) (checkpoint.Repository, error) {
+	if err := checkHomeCheckpoints(ctx, dsn, dir); err != nil {
+		return checkpoint.Repository{}, err
+	}
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return checkpoint.Repository{}, err
+	}
+	defer pool.Close()
+	q := store.New(pool)
+	if err := checkCheckpointQueries(ctx, q, dir); err != nil {
+		return checkpoint.Repository{}, err
+	}
+	ring, err := Keyring()
+	if err != nil {
+		return checkpoint.Repository{}, err
+	}
+	repo, err := checkpoint.Passwords{Q: q, Keys: ring}.Get(ctx, uuid(backupOrg), uuid(backupAgent))
+	if err != nil {
+		return checkpoint.Repository{}, fmt.Errorf("the recorded repository password no longer opens: %w", err)
+	}
+	return repo, nil
+}
+
+// checkCheckpointQueries reads the recorded rows through the store queries.
+func checkCheckpointQueries(ctx context.Context, q *store.Queries, dir string) error {
+	var want []map[string]any
+	b, err := os.ReadFile(filepath.Join(dir, checkpointsExpected)) //nolint:gosec // G304: path inside the recorded release folder
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(b, &want); err != nil {
+		return fmt.Errorf("%s: %w", checkpointsExpected, err)
+	}
+	org := uuid("0198a000-0000-7000-8000-0000000000d0")
+	for _, w := range want {
+		id := fmt.Sprint(w["id"])
+		c, err := q.GetHomeCheckpoint(ctx, store.GetHomeCheckpointParams{OrgID: org, ID: uuid(id)})
+		if err != nil {
+			return fmt.Errorf("GetHomeCheckpoint %s: %w", id, err)
+		}
+		got := map[string]any{
+			"agent_id": c.AgentID.String(), "reason": string(c.Reason), "status": string(c.Status),
+			"sandbox_id": c.SandboxID, "generation": c.Generation, "epoch": c.Epoch, "attempts": c.Attempts,
+			"snapshot_id": textOrNil(c.SnapshotID.String, c.SnapshotID.Valid), "error": textOrNil(c.Error.String, c.Error.Valid),
+		}
+		if c.SizeBytes.Valid {
+			got["size_bytes"] = c.SizeBytes.Int64
+		} else {
+			got["size_bytes"] = nil
+		}
+		for k, g := range got {
+			wb, _ := json.Marshal(w[k])
+			gb, _ := json.Marshal(g)
+			if string(wb) != string(gb) {
+				return fmt.Errorf("GetHomeCheckpoint %s field %s: got %s, recorded %s", id, k, gb, wb)
+			}
+		}
+	}
+	// The recreate gate's read: the newest complete checkpoint of a sandbox.
+	latest, err := q.LatestCompleteHomeCheckpointOfSandbox(ctx, store.LatestCompleteHomeCheckpointOfSandboxParams{
+		OrgID: org, AgentID: uuid("0198a000-0000-7000-8000-0000000000d1"), SandboxID: "sbx-1",
+	})
+	if err != nil {
+		return fmt.Errorf("LatestCompleteHomeCheckpointOfSandbox: %w", err)
+	}
+	if latest.ID.String() != "0198a000-0000-7000-8000-0000000000e1" || latest.SnapshotID.String != "snap-1" {
+		return fmt.Errorf("LatestCompleteHomeCheckpointOfSandbox returned %s (snapshot %q), recorded e1 (snap-1)", latest.ID.String(), latest.SnapshotID.String)
+	}
+	return nil
+}
+
+func textOrNil(s string, valid bool) any {
+	if !valid {
+		return nil
+	}
+	return s
+}
+
+func checkHomeCheckpoints(ctx context.Context, dsn, dir string) error {
 	m, err := ReadManifest(dir)
 	if err != nil {
 		return err
