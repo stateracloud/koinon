@@ -774,8 +774,10 @@ event classes. The code lands in #344 (items), #345 (business and diagnostic eve
    A canceled run is not complete when it turns terminal: its worker stores the item it was typing
    after the cancel (`AppendCanceledRunEventOnce`), so item 1's "every event is committed when the run
    finishes" does not hold for a canceled run that was claimed. WatchRun keeps such a stream open for a
-   grace (10 s, `WatchCancelGrace`), sends the late item and then a second final snapshot; the run page
-   drops live text when the stream ends.
+   grace (10 s, `WatchCancelGrace`, counted from the run's `finished_at`, so a stream opened on an old
+   canceled run ends at once), sends the late item and then a second final snapshot; the run page
+   drops live text when the stream ends. The worker chooses the cut-off write itself (only
+   `FlushItems` does); an event that races the cancel is refused like any other.
 
 ### Open questions
 

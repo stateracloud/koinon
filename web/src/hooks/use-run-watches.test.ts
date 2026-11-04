@@ -75,6 +75,30 @@ describe('reducer live text', () => {
     expect(st.r.live.map((c) => c.text)).toEqual(['thought'])
   })
 
+  it('keeps the current item live text when a stored event of its kind names no item (an image)', () => {
+    let st = reducer({}, { type: 'live', runId: 'r', chunks: [chunk(msg, 'typing', '1-2'), chunk(msg, 'old worker')] })
+    st = reducer(st, { type: 'event', runId: 'r', event: event(1, msg) })
+    expect(st.r.live.map((c) => c.text)).toEqual(['typing'])
+  })
+
+  it('compares item numbers as numbers: 1-10 is after 1-9, epoch 10 after epoch 9', () => {
+    let st = reducer({}, { type: 'live', runId: 'r', chunks: [chunk(msg, 'ten', '1-10')] })
+    st = reducer(st, { type: 'event', runId: 'r', event: event(1, msg, '1-9') })
+    expect(st.r.live.map((c) => c.text)).toEqual(['ten'])
+    st = reducer({}, { type: 'live', runId: 'r', chunks: [chunk(msg, 'later epoch', '10-1')] })
+    st = reducer(st, { type: 'event', runId: 'r', event: event(1, msg, '9-5') })
+    expect(st.r.live.map((c) => c.text)).toEqual(['later epoch'])
+    st = reducer(st, { type: 'event', runId: 'r', event: event(2, msg, '10-1') })
+    expect(st.r.live).toEqual([])
+  })
+
+  it('never moves the mark back: a late event of an older item does not revive its live text', () => {
+    let st = reducer({}, { type: 'event', runId: 'r', event: event(2, msg, '1-5') })
+    st = reducer(st, { type: 'event', runId: 'r', event: event(1, msg, '1-3') })
+    st = reducer(st, { type: 'live', runId: 'r', chunks: [chunk(msg, 'stale', '1-4'), chunk(msg, 'fresh', '1-6')] })
+    expect(st.r.live.map((c) => c.text)).toEqual(['fresh'])
+  })
+
   it('treats a malformed item name as no item', () => {
     let st = reducer({}, { type: 'live', runId: 'r', chunks: [chunk(msg, 'text', 'x-y')] })
     st = reducer(st, { type: 'event', runId: 'r', event: event(1, msg, 'x-y') })

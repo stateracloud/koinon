@@ -82,7 +82,7 @@ func (o *Owner) RecordUpdate(ctx context.Context, kind string, payload []byte) e
 		return ErrFenced
 	}
 	if o.pend.kind != kind {
-		if err := o.flushLocked(ctx, false); err != nil {
+		if err := o.flushLocked(ctx, false, false); err != nil {
 			return err
 		}
 		o.itemSeq++
@@ -94,7 +94,7 @@ func (o *Owner) RecordUpdate(ctx context.Context, kind string, payload []byte) e
 	o.pend.text.WriteString(text)
 	o.pend.chunks++
 	if o.pend.text.Len() >= maxItemBytes {
-		return o.flushLocked(ctx, false)
+		return o.flushLocked(ctx, false, false)
 	}
 	return nil
 }
@@ -106,19 +106,21 @@ func (o *Owner) RecordUpdate(ctx context.Context, kind string, payload []byte) e
 func (o *Owner) FlushItems(ctx context.Context, partial bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.pend.kind == "" || o.IsFenced() && o.FenceKind() != FenceCanceled {
+	cutOff := o.IsFenced() && o.FenceKind() == FenceCanceled
+	if o.pend.kind == "" || o.IsFenced() && !cutOff {
 		o.pend = pending{}
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), flushTimeout)
 	defer cancel()
-	if err := o.flushLocked(ctx, partial); err != nil && !errors.Is(err, ErrFenced) {
+	if err := o.flushLocked(ctx, partial, cutOff); err != nil && !errors.Is(err, ErrFenced) {
 		o.cfg.Log.Warn("storing the item in progress failed", "err", err)
 	}
 }
 
 // flushLocked stores the item in progress as one run event; the caller holds o.mu.
-func (o *Owner) flushLocked(ctx context.Context, partial bool) error {
+// cutOff is set by FlushItems alone, for the item stored after a cancel.
+func (o *Owner) flushLocked(ctx context.Context, partial, cutOff bool) error {
 	p := o.pend
 	o.pend = pending{}
 	if p.kind == "" || p.text.Len() == 0 {
@@ -142,5 +144,5 @@ func (o *Owner) flushLocked(ctx context.Context, partial bool) error {
 	if err := enc.Encode(p.first); err != nil {
 		return err
 	}
-	return o.recordLocked(ctx, p.kind, bytes.TrimSpace(b.Bytes()))
+	return o.recordLocked(ctx, p.kind, bytes.TrimSpace(b.Bytes()), cutOff)
 }
