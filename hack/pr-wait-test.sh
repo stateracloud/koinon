@@ -380,14 +380,27 @@ expect "--checks on a draft: DRAFT, exit 5" 5 "DRAFT: not tested, mark ready for
 rd() { # <rollup>: a ready PR
   printf '{"state":"OPEN","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":null,"statusCheckRollup":[%s]}' "$1"
 }
-old_go=$(cr_at go SUCCESS 61 2026-11-01T10:00:00Z)
-new_go=$(cr_at go SUCCESS 62 2026-11-01T11:05:00Z)
+cr_ci() { cr_at "$@" | sed 's/^{/{"workflowName":"ci",/'; }
+old_go=$(cr_ci go SUCCESS 61 2026-11-01T10:00:00Z)
+new_go=$(cr_ci go SUCCESS 62 2026-11-01T11:05:00Z)
 seq_set "$(rd "$old_go")" "$(rd "$old_go")" "$(rd "$old_go,$new_go")"
 printf '2026-11-01T11:00:00Z\n' >"$FAKE_DIR/ready"
 printf 'go\n' >"$FAKE_DIR/rules"
 run 7 --checks --interval 0
 expect "after ready: the draft's green run is ignored until the ready run exists" 0 "waiting for the ready run
 checks 1/1 green"
+# dco has no ready run: its draft-era verdict stands
+dco_old=$(cr_at dco SUCCESS 63 2026-11-01T10:00:00Z | sed 's/^{/{"workflowName":"dco",/')
+seq_set "$(rd "$old_go,$new_go,$dco_old")"
+printf 'go\ndco\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "after ready: a draft-era dco run still counts" 0 "checks 3/3 green"
+# a draft-era e2e-lab status still satisfies --require e2e
+lab_old='{"context":"e2e-lab","state":"SUCCESS","startedAt":"2026-11-01T10:00:00Z","targetUrl":"https://argo.example.invalid/workflows/x/y"}'
+seq_set "$(rd "$old_go,$new_go,$lab_old")"
+printf 'go\n' >"$FAKE_DIR/rules"
+run 7 --checks --require e2e --interval 0
+expect "after ready: a draft-era e2e-lab status satisfies --require e2e" 0 "checks 3/3 green"
 rm -f "$FAKE_DIR/ready" "$FAKE_DIR/rules"
 
 # 8. a transient gh failure is retried

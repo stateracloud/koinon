@@ -207,13 +207,14 @@ while :; do
         echo "DRAFT: not tested, mark ready for review (hack/ship.sh --ready, gh pr ready)"
         exit 5
       fi
-      # The last ready_for_review event: runs that started before it belong to the draft.
+      # The last ready_for_review event: runs of the `ci` workflow that started before it belong to the draft.
+      # Only ci re-runs on ready_for_review; dco, gitleaks and commit statuses (e2e-lab) keep their draft-era verdict.
       ready=$(gh api "repos/{owner}/{repo}/issues/$pr/events" --paginate \
         --jq '[.[] | select(.event == "ready_for_review") | .created_at] | max // empty' 2>/dev/null | sort | tail -n 1) || ready=""
       if [ -n "$ready" ]; then
-        if jq -e --arg r "$ready" 'any((.statusCheckRollup // [])[]; (.startedAt // "") != "" and .startedAt < $r)' <<<"$json" >/dev/null; then
+        if jq -e --arg r "$ready" 'any((.statusCheckRollup // [])[]; (.workflowName // "") == "ci" and (.startedAt // "") != "" and .startedAt < $r)' <<<"$json" >/dev/null; then
           ready_dropped=1
-          json=$(jq --arg r "$ready" '.statusCheckRollup |= map(select((.startedAt // "") == "" or .startedAt >= $r))' <<<"$json")
+          json=$(jq --arg r "$ready" '.statusCheckRollup |= map(select((.workflowName // "") != "ci" or (.startedAt // "") == "" or .startedAt >= $r))' <<<"$json")
         fi
       fi
     fi
