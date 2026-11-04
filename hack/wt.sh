@@ -144,14 +144,23 @@ wt_dir() {
 # claim_reason <branch>: prints a refusal reason when a live claim points at the branch. Claims are
 # the refs claim/<issue> on origin (ADR 0082); the issue number is the one in <type>/<N>-<slug>. The
 # claim ref is read from the fetched copy, no network call besides the optional fetch.
+# The fetch runs once, in the calling shell (claim_reason itself runs in a command substitution);
+# a failed fetch leaves claim_fetch_failed=1 and the check then reports unknown claim state.
 claim_fetched=0
+claim_fetch_failed=0
+claim_fetch() {
+	[ "$claim_fetched" -eq 0 ] || return 0
+	claim_fetched=1
+	[ -z "${KOINON_WT_NO_FETCH:-}" ] || return 0
+	git fetch -q origin '+refs/heads/claim/*:refs/remotes/origin/claim/*' >/dev/null 2>&1 || claim_fetch_failed=1
+}
 claim_reason() {
 	local branch=$1 n ref msg state holder lease now
 	[[ $branch =~ ^[a-z]+/([0-9]+)- ]] || return 0
 	n=${BASH_REMATCH[1]}
-	if [ "$claim_fetched" -eq 0 ]; then
-		claim_fetched=1
-		[ -n "${KOINON_WT_NO_FETCH:-}" ] || git fetch -q origin '+refs/heads/claim/*:refs/remotes/origin/claim/*' >/dev/null 2>&1 || true
+	if [ "$claim_fetch_failed" -eq 1 ]; then
+		echo "could not fetch claim refs from origin; claim state of #$n unknown"
+		return 0
 	fi
 	for ref in "refs/remotes/origin/claim/$n" "refs/heads/claim/$n"; do
 		git rev-parse -q --verify "$ref" >/dev/null 2>&1 || continue
@@ -206,6 +215,7 @@ guard() {
 	reasons=()
 	branch=$(git -C "$dir" symbolic-ref -q --short HEAD || true)
 	if [ -n "$branch" ]; then
+		claim_fetch
 		r=$(claim_reason "$branch")
 		[ -z "$r" ] || reasons+=("$r")
 	fi
