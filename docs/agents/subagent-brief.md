@@ -43,6 +43,7 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
   another lane's processes. Never `pkill`/`pgrep` by script name (`pkill -f hack/preflight.sh` kills
   every lane's run): stop your own preflight with `hack/preflight.sh --stop`, which uses the pid file
   of your worktree's log directory.
+- Remove worktrees only through `hack/wt.sh rm <name>` (or `hack/wt.sh gc`), never `git worktree remove` or `rm -rf`: it refuses a worktree that has a live claim, a process in it, uncommitted changes or unpushed commits, because another session may be using it. `--force` is for your own worktree only.
 - Never `git stash`: it is shared across worktrees. Commit, or leave the change in place.
 
 ## Check and ship

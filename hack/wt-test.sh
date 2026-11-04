@@ -126,6 +126,72 @@ git -C "$tmp/kw/baz" push -q origin feat/baz
 check "rm --branch deletes the branch of a merged PR" wt rm baz --branch
 check "rm --branch deleted it" refuses git show-ref --verify -q refs/heads/feat/baz
 
+# rm: live claim, process in the worktree, --force and what it prints
+claim_ref() { # <issue> <state> <lease_until> <holder>: a claim ref on origin, as hack/claim.sh writes it
+	local tree c
+	tree=$(git hash-object -t tree -w /dev/null)
+	c=$(printf 'claim #%s: x\n\nholder: %s\nhuman: h\nlease_until: %s\npr: \nnote: \nstate: %s\n' "$1" "$4" "$3" "$2" |
+		git commit-tree "$tree")
+	git push -q -f origin "$c:refs/heads/claim/$1"
+}
+future=$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+1H +%Y-%m-%dT%H:%M:%SZ)
+past=$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1H +%Y-%m-%dT%H:%M:%SZ)
+: >"$FAKE_PRS"
+wt new live --branch fix/700-live >/dev/null 2>&1
+git -C "$tmp/kw/live" push -q origin fix/700-live
+claim_ref 700 held "$future" "alice/host/sess#l700"
+err=$(wt rm live 2>&1 || true)
+check "rm refuses a worktree with a live claim" test -d "$tmp/kw/live"
+check "rm names the claim check and the holder" grep -q "live claim on #700 is held by alice/host/sess#l700" <<<"$err"
+claim_ref 700 held "$past" "alice/host/sess#l700"
+# the lease has expired: the claim no longer guards, the process does
+(cd "$tmp/kw/live" && exec sleep 60) &
+sleeper=$!
+for _ in $(seq 1 50); do # wait until the dummy process runs with its cwd in the worktree
+	lsof -w -d cwd -Fpn 2>/dev/null | grep -q "^n$tmp/kw/live\$" && break
+	read -r -t 0.1 <> <(:) || true
+done
+err=$(wt rm live 2>&1 || true)
+check "rm refuses when a process has its cwd inside" test -d "$tmp/kw/live"
+check "rm names the process check" grep -q "working directory inside" <<<"$err"
+claim_ref 700 held "$future" "alice/host/sess#l700"
+err=$(wt rm live --force 2>&1) || true
+check "rm --force prints what it overrides" grep -q -- "--force overrides: a live claim" <<<"$err"
+check "rm --force removes it" test ! -e "$tmp/kw/live"
+kill "$sleeper" 2>/dev/null || true
+wait "$sleeper" 2>/dev/null || true
+claim_ref 700 released "$future" "alice/host/sess#l700"
+wt new live2 --branch fix/700-live2 >/dev/null 2>&1
+git -C "$tmp/kw/live2" push -q origin fix/700-live2
+check "rm ignores a released claim" wt rm live2
+
+# rm resolves <name> through git worktree list, not the root
+wt new moved --branch fix/701-moved >/dev/null 2>&1
+git -C "$tmp/kw/moved" push -q origin fix/701-moved
+check "rm finds a worktree when the root differs" env KOINON_WT_ROOT="$tmp/elsewhere" "$repo/hack/wt.sh" rm moved
+check "rm removed it" test ! -e "$tmp/kw/moved"
+
+# gc
+wt new gdone --branch fix/710-done >/dev/null 2>&1
+wt new gwip --branch fix/711-wip >/dev/null 2>&1
+echo w >"$tmp/kw/gwip/w.txt"
+git -C "$tmp/kw/gwip" add w.txt
+git -C "$tmp/kw/gwip" commit -q -m w
+git -C "$tmp/kw/gwip" push -q origin fix/711-wip
+wt new gopen --branch fix/712-open >/dev/null 2>&1
+echo "fix/712-open 55 open" >"$FAKE_PRS"
+wt new gdirty --branch fix/713-dirty >/dev/null 2>&1
+echo d >"$tmp/kw/gdirty/d.txt"
+out=$(wt gc --dry-run)
+check "gc --dry-run would remove the merged clean worktree" grep -q "^would remove gdone$" <<<"$out"
+check "gc keeps an unmerged worktree" grep -q "^keep gwip:" <<<"$out"
+check "gc keeps a worktree with an open PR" grep -q "^keep gopen: open PR #55" <<<"$out"
+check "gc keeps a dirty worktree" grep -q "^keep gdirty:" <<<"$out"
+check "gc --dry-run removes nothing" test -d "$tmp/kw/gdone"
+wt gc >/dev/null
+check "gc removes the merged clean worktree" test ! -e "$tmp/kw/gdone"
+check "gc leaves the others" test -d "$tmp/kw/gwip" -a -d "$tmp/kw/gopen" -a -d "$tmp/kw/gdirty"
+
 # the main checkout was never touched
 check "main checkout HEAD unchanged" eq "$(git rev-parse HEAD)" "$head_before"
 check "main checkout stays clean" eq "$(git status --porcelain)" ""
