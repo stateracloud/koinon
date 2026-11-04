@@ -33,7 +33,7 @@ func (o *Owner) begin(ctx context.Context, fn func(q *store.Queries, src int64) 
 	// What the agent was saying when the run ends is cut off: the reply the verb posts reads it.
 	if !o.IsFenced() {
 		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), flushTimeout)
-		if err := o.flushLocked(fctx, true); err != nil && !errors.Is(err, ErrFenced) {
+		if err := o.flushLocked(fctx, true, false); err != nil && !errors.Is(err, ErrFenced) {
 			o.cfg.Log.Warn("storing the item in progress failed", "err", err)
 		}
 		cancel()
