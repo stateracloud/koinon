@@ -34,16 +34,24 @@
 #              a workflow run that is still queued has no jobs yet, so its required checks are missing
 #              from the rollup (`waiting for required checks not on the head yet: ci,...`, #562).
 #              A draft PR is never green (#647): with --checks, `isDraft` exits 5 with `DRAFT` (a draft runs
-#              almost nothing, and `go`/`web` are red on purpose). After `ready_for_review`, check runs that
-#              started before the last ready event (the draft's) are ignored, and it prints
-#              `waiting for the ready run` until the ready run's checks exist.
+#              almost nothing, and `go`/`web` are red on purpose). After `ready_for_review`, only runs of the
+#              `ci` workflow that belong to the draft are ignored (#661): a run created more than ~30 s before
+#              the last ready event whose newest attempt also started before it (a by-hand re-run of a
+#              draft-era run counts as a ready run). dco, gitleaks, claim and commit statuses (e2e-lab) keep
+#              their result. It prints `waiting for the ready run` until the ready run's checks exist. When gh
+#              cannot list the runs, each ci check run's own start time decides instead.
+#              A stale PR head (#661): with --checks, when `git ls-remote origin refs/heads/<branch>` names
+#              another commit than the PR's headRefOid for PR_WAIT_STALE_GRACE seconds (default 120; GitHub
+#              lags a push by a few seconds), it exits 6 with `STALE-HEAD` instead of judging the old head.
+#              Not checked for a fork PR or when the remote cannot be read.
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
 #   --interval 20 seconds by default
 #
 # Output lines: `checks 7/9 pending: go,web`, `FAILED go (run 123)`, `MERGED abc1234`,
 # `needs-update`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
 # Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout,
-#       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks), 64 usage.
+#       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
+#       6 stale PR head (with --checks), 64 usage.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -185,9 +193,10 @@ emit() { # print only when the line differs from the previous one
   fi
 }
 
+stale_grace=${PR_WAIT_STALE_GRACE:-120} stale_since=""
 start=$SECONDS
 while :; do
-  if json=$(gh pr view "$pr" --json state,isDraft,mergeStateStatus,mergeCommit,statusCheckRollup,headRefName,headRefOid,baseRefName 2>/dev/null) && [ -n "$json" ]; then
+  if json=$(gh pr view "$pr" --json state,isDraft,mergeStateStatus,mergeCommit,statusCheckRollup,headRefName,headRefOid,baseRefName,isCrossRepository 2>/dev/null) && [ -n "$json" ]; then
     state=$(jq -r '.state // ""' <<<"$json")
     mstate=$(jq -r '.mergeStateStatus // ""' <<<"$json")
     case $state in
@@ -207,6 +216,25 @@ while :; do
         echo "DRAFT: not tested, mark ready for review (hack/ship.sh --ready, gh pr ready)"
         exit 5
       fi
+      # A stale PR head: the push is on origin but GitHub's headRefOid still names the old commit (#661).
+      sb=$(jq -r '.headRefName // ""' <<<"$json")
+      sh=$(jq -r '.headRefOid // ""' <<<"$json")
+      rem=""
+      if [ -n "$sb" ] && [ -n "$sh" ] && [ "$(jq -r '.isCrossRepository // false' <<<"$json")" != true ]; then
+        rem=$(git ls-remote origin "refs/heads/$sb" 2>/dev/null | awk 'NR == 1 { print $1 }') || rem=""
+      fi
+      if [ -n "$rem" ] && [ "$rem" != "$sh" ]; then
+        stale_since=${stale_since:-$SECONDS}
+        if [ $((SECONDS - stale_since)) -ge "$stale_grace" ]; then
+          echo "STALE-HEAD: PR $pr head is ${sh:0:7} but origin/$sb is ${rem:0:7}; GitHub has not picked up the push. Re-sync: gh api -X PATCH repos/{owner}/{repo}/pulls/$pr -f base=$(jq -r '.baseRefName // "main"' <<<"$json")"
+          exit 6
+        fi
+        emit "waiting: PR head ${sh:0:7} is not origin/$sb ${rem:0:7} yet"
+        if [ $((SECONDS - start)) -ge "$timeout" ]; then echo "TIMEOUT"; exit 2; fi
+        [ "$interval" -eq 0 ] || sleep "$interval"
+        continue
+      fi
+      stale_since=""
       # The last ready_for_review event: runs of the `ci` workflow that started before it belong to the draft.
       # Only ci re-runs on ready_for_review; dco, gitleaks and commit statuses (e2e-lab) keep their draft-era verdict.
       ready=$(gh api "repos/{owner}/{repo}/issues/$pr/events" --paginate \
@@ -214,13 +242,14 @@ while :; do
       if [ -n "$ready" ]; then
         # Decide per workflow run, not per check run: a draft run cancelled by the ready run has check runs that
         # start (and are cancelled) after the ready event, and `needs: changes` jobs of a cancelled run never ran.
-        # ready_ids: the ci runs on the head created at or after the ready event ("none": the ready run is not
-        # there yet); empty: gh could not say, fall back to each check run's own start time.
+        # ready_ids: the ci runs on the head created at or after the ready event (30 s of clock skew allowed) or
+        # whose newest attempt started after it, i.e. re-run ("none": the ready run is not there yet); empty: gh could not say, fall back to each check run's own start time.
         ready_ids=""
         hd=$(jq -r '.headRefOid // ""' <<<"$json")
         if [ -n "$hd" ]; then
-          ready_ids=$(gh run list --commit "$hd" --workflow ci.yml --limit 50 --json databaseId,createdAt 2>/dev/null |
-            jq -r --arg r "$ready" '[.[] | select(.createdAt >= $r) | .databaseId | tostring] | join(",") | if . == "" then "none" else . end' 2>/dev/null) || ready_ids=""
+          ready_ids=$(gh run list --commit "$hd" --workflow ci.yml --limit 50 --json databaseId,createdAt,startedAt 2>/dev/null |
+            jq -r --arg r "$ready" '($r | fromdateiso8601 - 30 | todateiso8601) as $slack
+              | [.[] | select(.createdAt >= $slack or (.startedAt // "") >= $r) | .databaseId | tostring] | join(",") | if . == "" then "none" else . end' 2>/dev/null) || ready_ids=""
         fi
         # shellcheck disable=SC2016 # jq program
         drop='def rid: ((.detailsUrl // "") | capture("/runs/(?<r>[0-9]+)")? | .r);
