@@ -3,9 +3,11 @@
 package templates_test
 
 import (
+	"encoding/json"
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -17,67 +19,100 @@ import (
 
 // A template does not name MCP servers: an admin allows them on the agent. What a template does
 // fix is its grants (the org's repositories, private data) and the tools its instructions tell the
-// agent to call. This test reads both, classifies the tools the instructions name with the same
-// declaration a server record carries (ADR 0084 decision 8, ADR 0091 decision 4), and fails when
-// one template holds all three legs of the lethal trifecta (ADR 0084 decision 9).
-
-// webTools matches the instructions that send an agent to the public web: the RT1 search server's
-// tools and the generic fetch and search tools an admin may allow.
-var webTools = regexp.MustCompile(`(?i)web_url_read|searxng_web_search|web search|search and fetch|search or fetch|fetch tool|search tool`)
-
-// webDeclaration is what such a tool declares: a fetch server whose results an outsider controls.
-// Fetches and search queries are external-low sinks (ADR 0091 decisions 1, 4 and 5): they get a byte
-// cap and never an approval, so they are not the outbound leg.
-var webDeclaration = mcpservers.Declaration{Kind: mcpservers.KindFetch, Legs: []string{mcpservers.LegUntrustedInput}}
+// agent to call. This test reads both, classifies the backticked tools the instructions name with
+// sinkclass.Classify, the function the guard calls, over the declarations in
+// testdata/legs/tool-declarations.json (ADR 0084 decision 8, ADR 0091 decision 4), and fails when
+// one template holds all three legs of the lethal trifecta (ADR 0084 decision 9). Prose that sends
+// the agent to "the fetch tool" is not read; a structured tools field on the template schema is the
+// follow-up that replaces reading instruction text.
 
 // toolCall matches a tool the instructions tell the agent to call, written in backticks.
 var toolCall = regexp.MustCompile("`([a-z]+(?:_[a-z]+)+)`")
 
-func boolPtr(b bool) *bool { return &b }
+// The org the classifier runs for: one code-host connection that lists one private repository, the
+// repository a code-host tool of a template acts on (ADR 0091 decision 3).
+const (
+	testConnection = "conn-1"
+	testOwner      = "acme"
+	testRepo       = "app"
+)
 
-// knownTools are the tools the shipped templates name, each with the declaration a server record
-// would carry for it (ADR 0091 decision 2): the platform's own questions (none), the forge tools
-// (code-host derived: the class follows the repository, and the org's own repositories are internal,
-// ask-tier) and the external-low web tools whose results an outsider controls. A tool that is not
-// here comes from an admin-allowed server nobody classified: sinkclass.Default() on a server with
-// mcpservers.DefaultDeclaration(), external-high with both data legs (ADR 0091 decision 4).
-var knownTools = map[string]sinkclass.Declaration{
-	"ask_user":                   {Class: sinkclass.None, Derivation: sinkclass.Fixed},
-	"create_pull_request":        {Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}},
-	"github_create_pull_request": {Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}},
-	"gitea_create_pull_request":  {Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}},
-	"comment_on_issue":           {Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}},
-	"web_url_read":               {Class: sinkclass.ExternalLow, Derivation: sinkclass.Fetch, AddressArgs: []string{"url"}, ResultUntrustedInput: boolPtr(true), ResultPrivateData: boolPtr(false)},
-	"searxng_web_search":         {Class: sinkclass.ExternalLow, Derivation: sinkclass.Fixed, ResultUntrustedInput: boolPtr(true), ResultPrivateData: boolPtr(false)},
-}
+var testNow = time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 
-// toolLegs returns the declaration of a named tool and the legs its results carry. An unlisted tool
-// is the default of both.
-func toolLegs(name string) (sinkclass.Declaration, []string) {
-	if d, ok := knownTools[name]; ok {
-		var legs []string
-		if d.ResultUntrustedInput != nil && *d.ResultUntrustedInput {
-			legs = append(legs, mcpservers.LegUntrustedInput)
-		}
-		if d.ResultPrivateData != nil && *d.ResultPrivateData {
-			legs = append(legs, mcpservers.LegPrivateData)
-		}
-		return d, legs
+// declarations are the tool records an admin or a server's publisher sets (ADR 0091 decision 2),
+// read from testdata/legs/tool-declarations.json in the shape the API takes them. A tool that is not
+// in the file comes from an admin-allowed server nobody classified and gets sinkclass.Default() and
+// the legs of mcpservers.DefaultDeclaration(): external-high with both data legs (decision 4).
+func declarations() map[string]sinkclass.Declaration {
+	var raw map[string]sinkclass.Declaration
+	Expect(json.Unmarshal(readFile("testdata/legs/tool-declarations.json"), &raw)).To(Succeed())
+	out := map[string]sinkclass.Declaration{}
+	for name, d := range raw {
+		n, err := d.Normalize()
+		Expect(err).NotTo(HaveOccurred(), name)
+		out[name] = n
 	}
-	return sinkclass.Default(), mcpservers.DefaultDeclaration().Legs
+	return out
 }
 
-// autoExternalHigh reports whether a call of d would run without approval to a party outside the
-// org: a fixed external-high tool. A code-host tool is derived per call and is internal for the
-// org's own repositories.
-func autoExternalHigh(d sinkclass.Declaration) bool {
-	return d.Class == sinkclass.ExternalHigh && d.Derivation == sinkclass.Fixed
+// testScope is the org's code-host scope for the classifier.
+func testScope() sinkclass.Scope {
+	return sinkclass.NewScope([]sinkclass.Repo{{
+		Connection: testConnection, Owner: testOwner, Name: testRepo,
+		Visibility: sinkclass.VisPrivate, CheckedAt: testNow,
+	}}, 0)
+}
+
+// toolAddress is a call's address arguments for a tool: the org's repository for a code-host tool and
+// a public URL for a fetch tool, the worst case the template's text allows for each.
+func toolAddress(d sinkclass.Declaration) map[string]string {
+	addr := map[string]string{}
+	switch d.Derivation {
+	case sinkclass.CodeHost:
+		addr[d.AddressArgs[0]], addr[d.AddressArgs[1]] = testOwner, testRepo
+	case sinkclass.Fetch:
+		addr[d.AddressArgs[0]] = "https://example.com/page"
+	}
+	return addr
+}
+
+// classOf is the sink class of one call to the named tool, through sinkclass.Classify, the function
+// the guard calls (internal/mcpguard/classify.go).
+func classOf(name string) sinkclass.Class {
+	d, ok := declarations()[name]
+	if !ok {
+		d = sinkclass.Default()
+	}
+	return sinkclass.Classify(d, toolAddress(d), testConnection, testScope(), nil, testNow)
+}
+
+// toolLegs returns the legs a named tool's results carry: its declared result legs, the server's
+// legs where it declares none.
+func toolLegs(name string) []string {
+	d, ok := declarations()[name]
+	if !ok {
+		return mcpservers.DefaultDeclaration().Legs
+	}
+	server := mcpservers.DefaultDeclaration().Legs
+	pick := func(set *bool, leg string) []string {
+		if set == nil {
+			if slices.Contains(server, leg) {
+				return []string{leg}
+			}
+			return nil
+		}
+		if *set {
+			return []string{leg}
+		}
+		return nil
+	}
+	return append(pick(d.ResultUntrustedInput, mcpservers.LegUntrustedInput), pick(d.ResultPrivateData, mcpservers.LegPrivateData)...)
 }
 
 type templateLegs struct {
 	untrustedInput bool
 	privateData    bool
-	// autoOutbound is an auto-tier external-high tool (ADR 0091 line 146).
+	// autoOutbound is a tool whose call classifies external-high, the auto tier (ADR 0091 line 146).
 	autoOutbound bool
 }
 
@@ -98,21 +133,15 @@ func legsOf(t *templates.Template) templateLegs {
 	if strings.Contains(t.Spec.Instructions, "MCP") {
 		l.privateData = true
 	}
-	text := t.Metadata.Description + "\n" + t.Spec.Instructions
-	if webTools.MatchString(text) {
-		d := webDeclaration
-		l.untrustedInput = slices.Contains(d.Legs, mcpservers.LegUntrustedInput)
-		l.privateData = l.privateData || slices.Contains(d.Legs, mcpservers.LegPrivateData)
-	}
 	for _, m := range toolCall.FindAllStringSubmatch(t.Spec.Instructions, -1) {
-		d, legs := toolLegs(m[1])
+		legs := toolLegs(m[1])
 		if slices.Contains(legs, mcpservers.LegUntrustedInput) {
 			l.untrustedInput = true
 		}
 		if slices.Contains(legs, mcpservers.LegPrivateData) {
 			l.privateData = true
 		}
-		if autoExternalHigh(d) {
+		if classOf(m[1]) == sinkclass.ExternalHigh {
 			l.autoOutbound = true
 		}
 	}
@@ -125,7 +154,6 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 		Expect(ok).To(BeTrue())
 		Expect(legsOf(r)).To(Equal(templateLegs{privateData: true}), "researcher is private-only")
 		Expect(r.Spec.Grants).NotTo(BeEmpty())
-		Expect(webTools.MatchString(r.Spec.Instructions+r.Metadata.Description)).To(BeFalse(), "researcher has no web-read tool")
 
 		w, ok := templates.Get("web-researcher")
 		Expect(ok).To(BeTrue())
@@ -150,12 +178,21 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 		Expect(legsOf(t).all()).To(BeTrue())
 	})
 
-	It("reports a template that names an unlisted tool and no web phrasing (negative fixture)", func() {
+	It("reports a template that names an unlisted tool (negative fixture)", func() {
 		t, err := templates.Parse(readFile("testdata/legs/unlisted-tool.yaml"))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(webTools.MatchString(t.Spec.Instructions + t.Metadata.Description)).To(BeFalse())
+		_, declared := declarations()["fetch_url"]
+		Expect(declared).To(BeFalse(), "fetch_url is nobody's declared tool: the default applies")
 		Expect(legsOf(t)).To(Equal(templateLegs{untrustedInput: true, privateData: true, autoOutbound: true}))
 		Expect(legsOf(t).all()).To(BeTrue())
+	})
+
+	It("classifies tools through sinkclass.Classify", func() {
+		Expect(classOf("ask_user")).To(Equal(sinkclass.None))
+		Expect(classOf("create_pull_request")).To(Equal(sinkclass.Internal), "the org's own repository")
+		Expect(classOf("web_url_read")).To(Equal(sinkclass.ExternalLow))
+		Expect(classOf("searxng_web_search")).To(Equal(sinkclass.ExternalLow))
+		Expect(classOf("post_webhook")).To(Equal(sinkclass.ExternalHigh), "an unlisted tool is the default")
 	})
 
 	It("reports researcher again when it gets a web read tool back", func() {
