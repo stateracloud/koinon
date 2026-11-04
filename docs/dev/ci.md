@@ -144,3 +144,10 @@ with `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
 `hack/claim.sh review <N>` (step 8 of "Picking up work" in `AGENTS.md`).
 
 The maintainer lab (`hack/e2e-remote.sh --argo`, `e2e-lab`, lanes): `docs/dev/maintainer-homelab.md`.
+
+`hack/pr-merge.sh <PR> [--admin] [--approved-at <time>]` does all of this in one script (#647): it refuses a
+draft, runs `pr-wait.sh --checks` (with `--require e2e` when `needs-e2e.sh` says so), reads every
+required context of `hack/ci-required.txt` on the head SHA (newest run per name, success or skipped),
+and only then runs `claim.sh review`, `gh pr merge --merge` (`--admin`, else `--auto`) and comments the
+head SHA and the number of contexts it read. `pr-wait.sh --checks` exits 5 on a draft and, after
+`ready_for_review`, ignores runs that started before it.
