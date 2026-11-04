@@ -6,12 +6,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
@@ -286,6 +288,75 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		var risk []byte
 		Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE org_id = $1`, org).Scan(&risk)).To(Succeed())
 		Expect(string(risk)).To(ContainSubstring(`"taint"`))
+	})
+
+	Describe("a tool's declared result legs (ADR 0091 decision 4, #643)", func() {
+		legsOf := func(ctx SpecContext) mcpguard.Legs {
+			GinkgoHelper()
+			var l mcpguard.Legs
+			err := pool.QueryRow(ctx, `SELECT untrusted_input, private_data FROM leak_guard_sessions WHERE org_id = $1 AND agent_id = $2`,
+				org, agent.ID).Scan(&l.UntrustedInput, &l.PrivateData)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return mcpguard.Legs{}
+			}
+			Expect(err).NotTo(HaveOccurred())
+			return l
+		}
+		no, yes := false, true
+		resultOf := func(ctx SpecContext, target, tool string) {
+			GinkgoHelper()
+			body, err := json.Marshal(map[string]any{"content": []any{map[string]any{"type": "text", "text": "ok"}}})
+			Expect(err).NotTo(HaveOccurred())
+			res, err := srv.CheckResponse(ctx, &extmcp.McpResponse{
+				ServiceNames: []string{target}, Method: "tools/call", MetadataContext: meta(me(), tool), McpResponse: body,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetPass()).NotTo(BeNil(), res.GetError().GetReason())
+		}
+
+		It("sets the legs the tool declares, not its server's", func(ctx SpecContext) {
+			declare(ctx, tracker, "read_issue", sinkclass.Declaration{
+				Class: sinkclass.Internal, Derivation: sinkclass.Fixed, ResultUntrustedInput: &no, ResultPrivateData: &yes,
+			})
+			resultOf(ctx, mcpservers.TargetName(slug, "tracker"), "read_issue")
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{PrivateData: true}))
+		})
+
+		It("sets no leg for a tool declared to return neither", func(ctx SpecContext) {
+			declare(ctx, tracker, "read_issue", sinkclass.Declaration{
+				Class: sinkclass.Internal, Derivation: sinkclass.Fixed, ResultUntrustedInput: &no, ResultPrivateData: &no,
+			})
+			resultOf(ctx, mcpservers.TargetName(slug, "tracker"), "read_issue")
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{}))
+		})
+
+		It("keeps both legs for a tool nobody declared on a server with both", func(ctx SpecContext) {
+			resultOf(ctx, mcpservers.TargetName(slug, "tracker"), "ping")
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}))
+		})
+
+		It("keeps both legs for a tool the server never published", func(ctx SpecContext) {
+			resultOf(ctx, mcpservers.TargetName(slug, "tracker"), "not_a_tool")
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}))
+		})
+
+		It("goes back to both legs when the tool's content changes, because the declaration described the old tool", func(ctx SpecContext) {
+			declare(ctx, tracker, "read_issue", sinkclass.Declaration{
+				Class: sinkclass.Internal, Derivation: sinkclass.Fixed, ResultUntrustedInput: &no, ResultPrivateData: &no,
+			})
+			_, err := svc.SyncTools(ctx, org, uuidOf(tracker.ID), []mcpservers.ListedTool{{Name: "read_issue", Description: "now it also reads private notes"}})
+			Expect(err).NotTo(HaveOccurred())
+			resultOf(ctx, mcpservers.TargetName(slug, "tracker"), "read_issue")
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}))
+		})
+
+		It("sets no leg for Koinon's own tools, and both for an own tool nobody declared", func(ctx SpecContext) {
+			resultOf(ctx, "github", "create_pull_request")
+			resultOf(ctx, "koinon", "ask_user")
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{}))
+			resultOf(ctx, "github", "a_new_tool")
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}))
+		})
 	})
 
 	Describe("one result that carries the same text more than once", func() {

@@ -68,12 +68,46 @@ var _ = Describe("The leak guard's feed (ADR 0091 decision 4)", func() {
 		Expect(legs).To(Equal(mcpguard.Legs{UntrustedInput: true}))
 	})
 
-	It("counts a tool of kind other (MCP tools among them) as both legs, cautiously", func() {
+	It("counts a tool of kind other as both legs, cautiously, when its name is not a Koinon MCP tool", func() {
 		legs, texts, ok := finished(update(`{"sessionUpdate":"tool_call","toolCallId":"t5","title":"mcp__acme-wiki_read_page","kind":"other","status":"completed",
 			"content":[{"type":"content","content":{"type":"text","text":"a wiki page"}}]}`))
 		Expect(ok).To(BeTrue())
 		Expect(legs).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}))
 		Expect(texts).To(ConsistOf("a wiki page"))
+	})
+
+	Describe("with the flavor's MCP tool prefix", func() {
+		BeforeEach(func() { finished = agentd.NewTaintCallsFor("koinon_") })
+
+		It("reports nothing for a finished Koinon MCP call: the gateway set its legs", func() {
+			_, _, ok := finished(update(`{"sessionUpdate":"tool_call","toolCallId":"m1","title":"koinon_create_pull_request","kind":"other","status":"pending"}`))
+			Expect(ok).To(BeFalse())
+			_, _, ok = finished(update(`{"sessionUpdate":"tool_call_update","toolCallId":"m1","status":"completed",
+				"content":[{"type":"content","content":{"type":"text","text":"opened"}}]}`))
+			Expect(ok).To(BeFalse())
+		})
+
+		It("still sets both legs for another MCP naming and for an unprefixed call of kind other", func() {
+			for i, title := range []string{"mcp__x", "task", "koinon_", "xkoinon_y", "koinon_a b"} {
+				legs, _, ok := finished(update(fmt.Sprintf(`{"sessionUpdate":"tool_call","toolCallId":"o%d","title":%q,"kind":"other","status":"completed"}`, i, title)))
+				Expect(ok).To(BeTrue(), title)
+				Expect(legs).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}), title)
+			}
+		})
+
+		It("keeps its own legs for a call of another kind titled like a Koinon tool", func() {
+			legs, _, ok := finished(update(`{"sessionUpdate":"tool_call","toolCallId":"r1","title":"koinon_x","kind":"read","status":"completed"}`))
+			Expect(ok).To(BeTrue())
+			Expect(legs).To(Equal(mcpguard.Legs{PrivateData: true}))
+		})
+
+		It("does not let a later title rename the call: a task that finishes as koinon_x sets both legs", func() {
+			_, _, ok := finished(update(`{"sessionUpdate":"tool_call","toolCallId":"k1","title":"task","kind":"other","status":"pending"}`))
+			Expect(ok).To(BeFalse())
+			legs, _, ok := finished(update(`{"sessionUpdate":"tool_call_update","toolCallId":"k1","title":"koinon_x","status":"completed"}`))
+			Expect(ok).To(BeTrue())
+			Expect(legs).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}))
+		})
 	})
 
 	It("counts a tool call without a kind, or of a kind it does not know, as both legs", func() {

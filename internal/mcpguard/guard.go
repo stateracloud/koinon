@@ -160,6 +160,32 @@ type caller struct {
 	exempt bool // Koinon's executor or probe
 }
 
+// agentOf resolves the org and agent a call's identity names. A non-nil outcome is a refusal.
+func (g *Guard) agentOf(ctx context.Context, ref gateway.AgentRef) (store.Org, store.Agent, *Outcome, error) {
+	org, err := g.q.GetOrgBySlug(ctx, ref.Org)
+	if errors.Is(err, pgx.ErrNoRows) {
+		o := refuse(ReasonIdentity, "refused by the leak guard: unknown org")
+		return store.Org{}, store.Agent{}, &o, nil
+	}
+	if err != nil {
+		return store.Org{}, store.Agent{}, nil, err
+	}
+	var id pgtype.UUID
+	if err := id.Scan(ref.Name); err != nil {
+		o := refuse(ReasonIdentity, "refused by the leak guard: the call does not come from an agent of Koinon")
+		return store.Org{}, store.Agent{}, &o, nil
+	}
+	a, err := g.q.GetAgent(ctx, store.GetAgentParams{OrgID: org.ID, ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
+		o := refuse(ReasonIdentity, "refused by the leak guard: unknown agent")
+		return store.Org{}, store.Agent{}, &o, nil
+	}
+	if err != nil {
+		return store.Org{}, store.Agent{}, nil, err
+	}
+	return org, a, nil, nil
+}
+
 func (g *Guard) identify(ctx context.Context, agent, target string) (caller, *Outcome, error) {
 	ref, err := gateway.ParseAgentRef(agent)
 	if err != nil {
@@ -177,26 +203,9 @@ func (g *Guard) identify(ctx context.Context, agent, target string) (caller, *Ou
 		c.own = true
 		return c, nil, nil
 	}
-	org, err := g.q.GetOrgBySlug(ctx, ref.Org)
-	if errors.Is(err, pgx.ErrNoRows) {
-		o := refuse(ReasonIdentity, "refused by the leak guard: unknown org")
-		return caller{}, &o, nil
-	}
-	if err != nil {
-		return caller{}, nil, err
-	}
-	var id pgtype.UUID
-	if err := id.Scan(ref.Name); err != nil {
-		o := refuse(ReasonIdentity, "refused by the leak guard: the call does not come from an agent of Koinon")
-		return caller{}, &o, nil
-	}
-	a, err := g.q.GetAgent(ctx, store.GetAgentParams{OrgID: org.ID, ID: id})
-	if errors.Is(err, pgx.ErrNoRows) {
-		o := refuse(ReasonIdentity, "refused by the leak guard: unknown agent")
-		return caller{}, &o, nil
-	}
-	if err != nil {
-		return caller{}, nil, err
+	org, a, o, err := g.agentOf(ctx, ref)
+	if o != nil || err != nil {
+		return caller{}, o, err
 	}
 	name, ok := strings.CutPrefix(target, org.Slug+"-")
 	if !ok {
