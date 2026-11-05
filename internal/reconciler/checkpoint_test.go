@@ -305,7 +305,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 	})
 
 	// The gates count from when the home was last written (a harness ran), not from the sandbox's
-	// last activity (issue #329, ADR 0032 amendment): a wake or a start writes nothing.
+	// last activity (issue koinon-private#329, ADR 0032 amendment): a wake or a start writes nothing.
 	Describe("the home-written clock", func() {
 		fail := func() {
 			GinkgoHelper()

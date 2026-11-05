@@ -12,9 +12,9 @@
 # PR that has auto-merge on prints a warning (it can merge at the old head before CI sees the new
 # commits); --hold turns auto-merge off before the push and prints the command that turns it back on.
 # --e2e adds the `e2e` label before the push (an open PR) or at PR creation. Creation labels in a
-# second call; e2e-kind's `opened` run reads the labels live and runs the e2e (#468).
+# second call; e2e-kind's `opened` run reads the labels live and runs the e2e (koinon-private#468).
 #
-# --lab-go-test (with --ready, #610) runs the go-test gate on the lab after the push and BEFORE the pull
+# --lab-go-test (with --ready, koinon-private#610) runs the go-test gate on the lab after the push and BEFORE the pull
 # request is marked ready: `hack/e2e-remote.sh --argo --gate go-test` posts the commit status go-test-lab
 # on the pushed head, and the ready run of ci.yml then skips its hosted go-test (a draft skips the
 # heavy jobs, so nothing is lost by running the lab first). Exit 75 (lab cannot run it now, no free slot),
@@ -26,11 +26,11 @@
 # request back into a draft first (`gh pr ready --undo`), push, and ship with --ready --lab-go-test.
 # The lab run takes minutes; the claim must be renewed (hack/claim.sh beat) around it.
 #
-# --ready without --lab-go-test on a draft PR that exists marks it ready BEFORE the push (#675): ready
+# --ready without --lab-go-test on a draft PR that exists marks it ready BEFORE the push (koinon-private#675): ready
 # after the push starts a second ci run on the same head. A new PR is created ready, so it has one run.
 #
 # Run it inside a checkout or worktree on a feature branch named <type>/<N>-<slug> (the claim and the
-# PR hang off N); any other name is refused before anything is pushed (#485). Work that needs no issue
+# PR hang off N); any other name is refused before anything is pushed (koinon-private#485). Work that needs no issue
 # (the claim check exempts chore/ci/build(deps) PRs without source changes, and PRs labelled
 # unclaimed-ok) passes --no-issue, which accepts <type>/<slug> instead. Environment:
 #   KOINON_SHIP_ALLOWED_EMAILS  comma list of user.email values that may commit (default: any)
@@ -85,7 +85,7 @@ branch=$(git symbolic-ref --short -q HEAD) || fail "detached HEAD; check out a f
 [[ $branch != main && $branch != master ]] || fail "refusing to ship from $branch; use a feature branch"
 # A branch is <type>/<N>-<slug> (the claim and the PR hang off N), or <type>/<slug> with --no-issue for
 # work the claim check exempts. A stray name, such as the one a broken test helper once checked out in
-# a real worktree (#485), is refused before anything is pushed.
+# a real worktree (koinon-private#485), is refused before anything is pushed.
 if [[ $no_issue == 1 ]]; then
 	[[ $branch =~ ^[a-z]+/[a-z0-9][a-z0-9._-]{2,}$ ]] || fail "branch '$branch' is not <type>/<slug>; rename it (git branch -m) before shipping"
 else
@@ -166,7 +166,7 @@ else
 		fi
 	fi
 
-	# 4b. the branch's PR: a merged or closed one cannot take this push (#431)
+	# 4b. the branch's PR: a merged or closed one cannot take this push (koinon-private#431)
 	prinfo=$(gh pr list --head "$branch" --state all --json number,state,autoMergeRequest --jq \
 		'(map(select(.state == "OPEN"))[0] // (sort_by(.number) | last)) // empty | [.state, (.number | tostring), (.autoMergeRequest != null | tostring)] | @tsv' 2>/dev/null || true)
 	pr_state="" pr_num="" pr_auto=false
@@ -210,7 +210,7 @@ else
 			say "label e2e"
 		fi
 	fi
-	# Ready BEFORE the push (#675): a draft PR marked ready after the push runs the ci workflow twice on
+	# Ready BEFORE the push (koinon-private#675): a draft PR marked ready after the push runs the ci workflow twice on
 	# one head (the synchronize run, then the ready_for_review run), seconds apart. Marked ready first,
 	# the ready_for_review run starts on the old head and the push's run supersedes it (an older head is
 	# cancelled, ci.yml). Not with --lab-go-test: that gate needs the pushed head and runs before ready.
@@ -268,7 +268,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			echo "ship: lab go-test: PR already ready: go-test runs on the hosted runner (CI started on the push); gh pr ready --undo to use the lab" >&2
 			say "lab go-test skipped (PR already ready)"
 		elif [[ $lab == 1 ]]; then
-			# The status must exist on the pushed head before the ready run reads it (#610).
+			# The status must exist on the pushed head before the ready run reads it (koinon-private#610).
 			lab_rc=0
 			hack/e2e-remote.sh --argo --gate go-test || lab_rc=$?
 			case $lab_rc in

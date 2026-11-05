@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// The do-not-retry marker (ADR 0056, 2026-11-01 amendment, points 4 and 6; #342).
+// The do-not-retry marker (ADR 0056, 2026-11-01 amendment, points 4 and 6; koinon-private#342).
 //
 // Contract, for every consumer of a model or MCP response from the gateway:
 //
@@ -24,7 +24,7 @@ import (
 //     budget_exceeded, the LLM route's authorization 403 and the MCP route's 401. A consumer treats
 //     every 401 as final by its status, and a 429 that has a Retry-After beyond its cap as final
 //     (the standalone budget 429 sends the seconds until the window ends).
-//     Interim: tracked in #590; exit condition there (an agentgateway release that runs response
+//     Interim: tracked in #112; exit condition there (an agentgateway release that runs response
 //     policies on key-stage refusals, which makes gatewaytest Env.Unmarked fail loudly).
 //  4. A response without the marker is not a refusal. A provider's own 429, 5xx and network
 //     failure stay retryable; a gateway failure that is not a refusal (5xx) carries no marker.

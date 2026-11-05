@@ -6,8 +6,8 @@
 #       go<GO_VERSION>-<first 12 hex of the Dockerfile's sha256> (hack/e2e-remote.sh builds the
 #       same Dockerfile locally under the same tag, so a tag names exactly one Dockerfile)
 #   ghcr.io/stateracloud/koinon-e2e-toolchain-web  hack/e2e-toolchain/web.Dockerfile on top of that
-#       image (#358), tag <toolchain tag>-web-<first 12 hex of web.Dockerfile's sha256>
-#   ghcr.io/stateracloud/koinon-spike-probe        hack/spike/probe (#357), tag <first 12 hex of
+#       image (koinon-private#358), tag <toolchain tag>-web-<first 12 hex of web.Dockerfile's sha256>
+#   ghcr.io/stateracloud/koinon-spike-probe        hack/spike/probe (koinon-private#357), tag <first 12 hex of
 #       its git tree>: the escape suite's sandbox image, for test/escape/kind.sh without nvcr.io
 # A tag that already exists is not rebuilt, so its digest stays what the lab pinned. The digests
 # are in the job summary.

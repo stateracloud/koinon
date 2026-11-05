@@ -10,7 +10,7 @@
 #                      or carries the `e2e` label. Otherwise not needed, and the summary says so
 #                      when the full rule (needs-e2e.sh) would have wanted it. The labels are the
 #                      event's plus the PR's current ones: `gh pr create --label` opens the PR and
-#                      then labels it (two events, #468), and the run of `opened` should already see
+#                      then labels it (two events, koinon-private#468), and the run of `opened` should already see
 #                      the label. Label events do not start the workflow; adding `e2e` later
 #                      dispatches it (hack/e2e-label.sh).
 #   push               (main) needed when the full rule matches anything since the last green e2e
@@ -19,7 +19,7 @@
 #                      image, downloads) is what it is for.
 #   workflow_dispatch  always needed.
 #
-# `required=true` (pull requests only) is what `e2e result` enforces (hack/e2e-gate.sh, #562): the
+# `required=true` (pull requests only) is what `e2e result` enforces (hack/e2e-gate.sh, koinon-private#562): the
 # change needs an e2e (the full rule, the e2e's own files or the label), so the job fails unless the
 # head has a green quickstart or the lab's `e2e-lab` status. Every other event: `required=false`.
 #
