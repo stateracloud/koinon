@@ -105,6 +105,10 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
   pull request to main and nightly. `g2-kind.yml` keeps Blacksmith: it creates no OpenShell
   sandbox. `spike-kind.yml` is a draft that has never run; its removal is tracked in issue #234.
   _Note (2026-11-02):_ `spike-kind.yml` was removed in #561.
+- _Amended (2026-11-05, public repository, #692):_ the repository is public, so GitHub-hosted runners
+  are free and every workflow runs on them: `ubuntu-latest` (4 vCPU, 16 GB) replaces both Blacksmith
+  labels, and Blacksmith is no longer used anywhere. `e2e-kind.yml` stays on `ubuntu-24.04`
+  (Landlock). The `.github/actionlint.yaml` custom-label list is gone.
 - _Amended (2026-10-29, later):_ while the repository is private, `e2e-kind.yml` also runs its go
   suite on ready (non-draft) pull requests to main that touch `internal/ledger`, `internal/gateway`,
   `flavors`, `test/e2e`, `test/fakemodel` or the workflow itself. Dispatching it only per release
