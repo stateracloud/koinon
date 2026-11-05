@@ -318,3 +318,5 @@ start time decides instead. It exits 6 `STALE-HEAD` when the PR's head stays dif
 `.github/workflows/scorecard.yml` runs `ossf/scorecard-action` weekly and on every push to main,
 publishes the result (`publish_results`) and uploads the SARIF to code scanning. It is advisory: not
 in `hack/ci-required.txt` (that file lists `ci.yml` jobs and the external required checks only).
+
+Probe for CodeRabbit (do not merge): this line exists only to check that CodeRabbit answers a review request on a fresh pull request.
