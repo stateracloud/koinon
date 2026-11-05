@@ -22,12 +22,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	openapi_types "github.com/oapi-codegen/runtime/types"
@@ -153,7 +155,9 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		if err != nil {
 			var ae *tokens.AuthError
 			if !errors.As(err, &ae) {
-				s.log.Error("admin API token check failed", "err", err)
+				// Log a class, never the error: the raw token and header are inputs of this call, and an
+				// error value from a lower layer is not ours to vouch for (CodeQL go/clear-text-logging, #152).
+				s.log.Error("admin API token check failed", "error_class", errorClass(err))
 				writeError(w, http.StatusInternalServerError, Internal, "internal error")
 				return
 			}
@@ -191,6 +195,24 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			s.log.Error("could not audit an admin API call", "err", err)
 		}
 	})
+}
+
+// errorClass names the kind of an unexpected token-check failure without carrying its text.
+func errorClass(err error) string {
+	var pgErr *pgconn.PgError
+	var netErr net.Error
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.As(err, &pgErr):
+		return "database_error_" + pgErr.Code
+	case errors.As(err, &netErr):
+		return "database_unreachable"
+	default:
+		return "internal"
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, code ErrorCode, msg string) {
