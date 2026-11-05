@@ -2,7 +2,11 @@
 
 [ADR 0082](../adr/0082-work-claims-and-ready-queue.md) adds `hack/claim.sh`, `.github/workflows/claims.yml`, `.github/workflows/updater.yml`
 and `hack/adr-lint.sh`. Nothing below is applied by the pull request; an organization owner does it
-in this order. Until step 7 the workflows skip their App-dependent jobs with a notice.
+in this order. The `sweeper` and `release claims` jobs of `claims.yml` need none of it: they run on
+`GITHUB_TOKEN` (job permissions `contents: write`, `issues: write`, `pull-requests: read`), make no
+board writes (`KOINON_CLAIM_PROJECT=none`; the board's built-in workflows set Done) and fail red when
+a permission is missing ([ADR 0094](../adr/0094-work-claims-on-the-public-repository.md) decision 3).
+Only `updater.yml` still uses the App of step 7 until the native merge queue replaces it.
 
 ## 1. Project board (https://github.com/orgs/stateracloud/projects/1)
 
