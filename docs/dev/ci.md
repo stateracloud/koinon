@@ -270,6 +270,12 @@ analysers, generated code and fixtures excluded, no code formatters (a bot commi
 CI run on a new head) and Autofix only when a person clicks it. Read its PR comments as review
 input; make it required only by a decision recorded in an issue.
 
+Socket (GitHub App, #185) scans dependencies and reads `socket.yml` at the root: it runs on changes
+to `go.mod`, `go.sum`, `package.json`, `pnpm-lock.yaml` and workflows, skips spike code and
+fixtures, and posts PR alerts without a separate dependency overview comment. It is advisory like
+DeepSource: answer and resolve its inline comments before merge (#187). On 2026-12-05 check whether
+it caught anything Dependabot, govulncheck or OSV did not; if not, remove it.
+
 ## Merging
 
 The only merge method is a merge commit: `gh pr merge --auto --merge`. `e2e result` is required
