@@ -151,16 +151,20 @@ in_nested_module() {
 	return 1
 }
 
-go_pkgs() { # changed Go packages as ./dir args; every package (minus test/flavors) when none changed
-	local f d out=""
+go_pkgs() { # changed Go packages as ./dir args; every package (minus test/flavors) when no Go file changed;
+	# nothing when every changed Go file sits in a nested module
+	local f d out="" seen=0
 	for f in $(existing '\.go$'); do
+		seen=1
 		d=${f%/*}
 		[[ $d == "$f" ]] && d=.
 		[[ $d == . ]] || d=./$d
 		in_nested_module "$d" && continue
 		case " $out " in *" $d "*) ;; *) out="$out $d" ;; esac
 	done
-	if [[ -z $out ]]; then
+	if [[ -z $out && $seen == 1 ]]; then
+		return 0
+	elif [[ -z $out ]]; then
 		go list ./... | grep -v '/test/flavors$' | tr '\n' ' '
 	else
 		echo "$out"
@@ -170,6 +174,10 @@ go_pkgs() { # changed Go packages as ./dir args; every package (minus test/flavo
 g_go() {
 	local pkgs files out
 	pkgs=$(go_pkgs)
+	if [[ -z ${pkgs// /} ]]; then
+		echo "only nested-module Go files changed; nothing to lint in the root module"
+		return 0
+	fi
 	if command -v golangci-lint >/dev/null; then
 		# `|| return 1`: golangci-lint exits 3 on findings, which run_gate would read as INCOMPLETE;
 		# only go-test.sh may report 3.
