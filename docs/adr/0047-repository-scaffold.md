@@ -156,6 +156,12 @@ React 19, Zot chart 0.1.128 / Zot v2.1.22, Helm 4.3.1. The migration suite passe
 (with SBOMs) to Zot, the pods pull them through the `dev-registry` secret, and `koinon-pg` reaches
 a healthy state.
 
+## Update 2026-11-05: CI cache ownership
+
+`go-vet` is no longer a CI job: `.golangci.yml` runs `default: standard`, which includes govet, so
+`go-lint` covers it. Caches are owned by main's `warm-caches` job and restored read-only by every
+other job (docs/dev/ci.md#cache-ownership, issue #147).
+
 ## Links
 
 - ADR 0004, 0022, 0026, 0027, 0034, 0037, 0038, 0039
