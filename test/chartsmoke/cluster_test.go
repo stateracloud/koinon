@@ -3,6 +3,7 @@
 package chartsmoke_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -15,6 +16,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -69,14 +71,37 @@ func startCluster() *cluster {
 	api.Address = "0.0.0.0"
 	api.Port = port
 	api.CA = caPEM // envtest sets it only when it generates the certificates itself
+	// envtest drops the processes' output unless asked; a start failure ("timeout waiting for
+	// process kube-apiserver to start") says nothing about why (#149), so keep it and print it then.
+	out := &lockedBuffer{}
+	api.Out, api.Err = out, out
+	env.ControlPlane.Etcd = &envtest.Etcd{Out: out, Err: out}
 	cfg, err := env.Start()
 	if err != nil {
-		panic(fmt.Sprintf("start envtest (KUBEBUILDER_ASSETS=%q): %v", os.Getenv("KUBEBUILDER_ASSETS"), err))
+		panic(fmt.Sprintf("start envtest (KUBEBUILDER_ASSETS=%q): %v\n--- kube-apiserver and etcd output ---\n%s", os.Getenv("KUBEBUILDER_ASSETS"), err, out.String()))
 	}
 	cfg.Host = "https://127.0.0.1:" + port
 	cfg.TLSClientConfig = rest.TLSClientConfig{CAData: caPEM, CertData: cfg.CertData, KeyData: cfg.KeyData}
 	c.Admin, c.Port, c.CACert = kubernetes.NewForConfigOrDie(cfg), port, caPEM
 	return c
+}
+
+// lockedBuffer collects the output of envtest's two processes, which write from separate goroutines.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func (c *cluster) Stop() {
