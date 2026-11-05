@@ -111,6 +111,15 @@ lab cannot produce it. The merge rule is the agents' (`AGENTS.md`), checked with
 the required check stays `e2e result`. `e2e-lab` is a plain commit status, trusted as far as the
 maintainer's lab credentials are; it asserts only that a lab run passed on that exact commit.
 
+Note (2026-11-05, issue #148): point 2 above no longer holds for pull requests. `hack/e2e-decide.sh` now
+runs the quickstart in the pull request's own run whenever the full rule (`hack/needs-e2e.sh`) says the
+change is e2e-relevant, not only for the e2e's own files or the `e2e` label. The earlier "required but not
+run here" state could never go green for a fork pull request (it cannot label, dispatch or post `e2e-lab`),
+which blocked Dependabot's. The `e2e` label (now: force a run for a change the rule thinks irrelevant) and
+the lab's `e2e-lab` status remain accelerators and still satisfy `e2e result` (the result job waits for the pull request's own quickstart; if that fails or is cancelled, `hack/e2e-gate.sh` falls through to `e2e-lab` or another run's quickstart); the lab-first order is a
+way to get the verdict sooner, not a precondition. Cost: a needs-e2e pull request pays for a GitHub run
+even when the lab also passes.
+
 Exit codes of `hack/e2e-remote.sh --argo` separate the cases a caller acts on differently: 0 passed,
 1 the e2e failed, 2 usage, 75 the lab cannot run it now (fall back), 76 not run, 78 no lab configured,
 79 refused for flavors.
