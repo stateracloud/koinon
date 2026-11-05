@@ -101,7 +101,7 @@ are in [0046](0046-adr-conventions.md).
 | [0079](0079-dependency-cooldown.md) | Dependency cooldown: three days everywhere, and a checked fast path for security fixes | Accepted |
 | [0080](0080-tool-set-matches-egress-and-escape-hosts.md) | The tool set matches the sandbox's egress, and escape cases observe proxy decisions | Accepted |
 | [0081](0081-run-limits.md) | Run limits: model requests, spend and time; tokens are reported, not enforced | Accepted |
-| [0082](0082-work-claims-and-ready-queue.md) | Work claims and the ready queue: a claim branch is the lock, the board is the queue | Accepted |
+| [0082](0082-work-claims-and-ready-queue.md) | Work claims and the ready queue: a claim branch is the lock, the board is the queue | Accepted; amended by [0094](0094-work-claims-on-the-public-repository.md) (2026-11-05) |
 | [0083](0083-sandbox-resources.md) | Sandbox resources: template defaults, platform bounds, requests and limits | Accepted |
 | [0084](0084-leak-guard.md) | Leak guard: a taint check on every MCP tool call, in koinon-api | Accepted (decisions by Andre, 2026-10-31; delivery before v0.1.0); amended by [0091](0091-leak-guard-by-destination.md) (2026-11-03: the main protection is where a call sends data; the text check is a frozen secondary alarm) |
 | [0085](0085-upgrade-compatibility-and-recovery-policy.md) | Upgrade, compatibility and recovery policy | Accepted (scope decided by Andre, 2026-10-31; decisions of 2026-11-01; a v0.1.0 gate) |
@@ -112,3 +112,4 @@ are in [0046](0046-adr-conventions.md).
 | [0090](0090-scripts-require-bash-5.md) | Every repository script requires bash 5 | Accepted |
 | [0091](0091-leak-guard-by-destination.md) | Leak guard by destination: sink classes, session legs and a byte cap | Accepted (decisions by Andre, 2026-11-03); amended by [0092](0092-leak-guard-judge-model.md) (2026-11-03: the both-legs `external-high` approval becomes rules, a judge model, then a person) |
 | [0092](0092-leak-guard-judge-model.md) | Leak guard judge: rules, then a cheap judge model, then a person | Accepted (decisions by Andre, 2026-11-03) |
+| [0094](0094-work-claims-on-the-public-repository.md) | Work claims on the public repository: one lock, claims by comment, a conflict check, the native merge queue | Accepted (Andre, 2026-11-05, after the grilling session and the probes, which changed no decision) |
