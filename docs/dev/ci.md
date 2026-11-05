@@ -66,17 +66,20 @@ escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./
 ## Testing layers
 
 Every PR: unit and package tests, the smoke test and the scenarios (`make test` and CI). The kind
-e2e (`test/e2e`, ~15-25 min) is not per PR: it runs on a PR only when the PR changes the e2e's own
-files or carries the `e2e` label, and otherwise batched on main (each push that changed something
+e2e (`test/e2e`, ~15-25 min) runs on a PR whenever `hack/needs-e2e.sh` says the change is e2e-relevant
+(the e2e's own files included) or the PR carries the `e2e` label, in the PR's own run, so a fork PR
+needs nothing from a maintainer to get one (issue #148). A PR nothing in the rule touches does not run
+it. It also runs batched on main (each push that changed something
 e2e-relevant, one running and the newest pending) and nightly, always, to catch drift no commit
 explains.
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
-observes (the rule lives only there). If yes, with a lab run `hack/e2e-remote.sh --argo`: a green
-run posts the commit status `e2e-lab` on your pushed head and that is enough to merge. Without a
-lab, or when it exits 75 (the lab cannot run it now), 78 (no lab configured) or 79 (the change
-touches `flavors/`, which the lab cannot build; nothing triggers GitHub for it, dispatch it by
-hand), run it on GitHub (`gh workflow run e2e-kind.yml --ref <branch>`, or the `e2e` label).
+observes (the rule lives only there). If yes, the PR's own run already runs the quickstart on GitHub;
+with a lab you can get there sooner: `hack/e2e-remote.sh --argo`, a green run posts the commit status
+`e2e-lab` on your pushed head and that is enough to merge. When it exits 75 (the lab cannot run it
+now), 78 (no lab configured) or 79 (the change touches `flavors/`, which the lab cannot build), wait
+for the PR's quickstart, or dispatch it earlier (`gh workflow run e2e-kind.yml --ref <branch>`). The
+`e2e` label is for a change the rule thinks irrelevant but you want tested.
 `hack/e2e-remote.sh` on your own Docker (`--local`) is a dev and debug tool only: it produces
 neither `e2e-lab` nor `quickstart`, so it is not merge evidence. `SUITE_LABEL=smoke` (not with
 `--argo`) runs steps 1-6 only.
