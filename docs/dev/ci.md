@@ -143,6 +143,33 @@ instead. Mark the PR ready (`hack/ship.sh --ready`,
 `gh pr ready`) before you wait on it with `hack/pr-wait.sh`: a draft's green is not merge
 evidence.
 
+### One run per head (#675)
+
+`ci.yml` groups `pull_request` runs by the pull request's head SHA (`ci-pr-<N>-<sha>`) and a push to
+main by its own SHA (`ci-push-<sha>`), with `cancel-in-progress: false`. So runs on one head (the push's
+run and the `ready_for_review` run, a re-run, `gh run rerun` on a cancelled run) never cancel each
+other, and a push to main never cancels or is cancelled by another one. A cancelled run on the head
+you wait for therefore means a person or a timeout cancelled it, not the workflow.
+
+GitHub allows one running and one pending run per group; a third run on the same head replaces the
+pending one. That is accepted: the replaced run and the new one are the same head and the same suite
+(the draft state is read live), so the newest one carries the verdict. Only the older of two
+waiting runs shows as cancelled.
+
+Runs of an older head of the same pull request are cancelled on purpose: the first step of
+`changes` runs `hack/ci-supersede.sh`, which cancels the queued or running ci runs of the PR with
+another head SHA, and cancels its own run when the PR head has already moved on (a late start).
+It needs `actions: write` on `changes` and is best effort (a fork's read-only token cannot cancel).
+
+`hack/ship.sh --ready` on an existing draft PR marks it ready BEFORE the push, so the push is the only
+event that starts a run on the new head. With `--lab-go-test` the order stays push, lab gate, ready
+(the lab status must exist on the pushed head); the ready run is then the second run on that head and
+queues behind the first.
+`hack/e2e-rerun-result.sh` does not re-run `e2e result` while the branch has a live `e2e-kind` run on
+another commit: that workflow's PR group still cancels in progress, and a re-run joins it. Tests:
+`hack/ci-concurrency-test.sh`, `hack/ci-supersede-test.sh`, `hack/e2e-rerun-result-test.sh`,
+`hack/ship-test.sh`.
+
 ### Push to main (#595)
 
 Everything runs, except when the push is a merge commit whose tree equals the tree of its second
