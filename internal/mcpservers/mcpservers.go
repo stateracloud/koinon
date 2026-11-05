@@ -891,7 +891,7 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 				schema = json.RawMessage(`{"type":"object"}`)
 			}
 			// The description and the schema's strings reach the model verbatim, so what is stored,
-			// hashed and offered is the sanitised text (ADR 0057 amendment, #267).
+			// hashed and offered is the sanitised text (ADR 0057 amendment, #52).
 			desc, rep := mcpsanitize.Description(lt.Description)
 			schema, srep := mcpsanitize.Schema(schema)
 			rep.Capped, rep.Cleaned = rep.Capped || srep.Capped, rep.Cleaned || srep.Cleaned

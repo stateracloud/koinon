@@ -333,7 +333,7 @@ var _ = Describe("Service", func() {
 			Expect(errors.As(err, &inv)).To(BeTrue())
 		})
 
-		It("makes the org's first model its default model and never moves it (#256)", func(ctx SpecContext) {
+		It("makes the org's first model its default model and never moves it (koinon-private#256)", func(ctx SpecContext) {
 			q := store.New(pool)
 			def := func() string {
 				GinkgoHelper()
@@ -354,7 +354,7 @@ var _ = Describe("Service", func() {
 			Expect(n).To(Equal(1))
 		})
 
-		Describe("deleting the default model (#256)", func() {
+		Describe("deleting the default model (koinon-private#256)", func() {
 			var q *store.Queries
 			def := func(ctx SpecContext) string {
 				GinkgoHelper()
@@ -479,7 +479,7 @@ var _ = Describe("Service", func() {
 			router := create(ctx, "openrouter", "")
 			Expect(model(ctx, direct, "claude-haiku-4-5", "")).To(And(HaveField("Format", "anthropic"), HaveField("FormatOverridden", false)))
 			Expect(model(ctx, router, "deepseek/flash", "")).To(HaveField("Format", "openai"))
-			// OpenRouter's Claude models speak Messages like any other Claude (#242).
+			// OpenRouter's Claude models speak Messages like any other Claude (koinon-private#242).
 			routed := model(ctx, router, "anthropic/claude-haiku-5.5", "")
 			Expect(routed).To(And(HaveField("Format", "anthropic"), HaveField("FormatOverridden", false)))
 

@@ -37,7 +37,7 @@ use cases besides Copilot will need in-sandbox auth.
 6. **Revocation.** Revoking from the UI wipes the encrypted path and, where the provider allows it,
    revokes the token upstream.
 7. **Scope.** Personal-org agents only by default. Team orgs only if the platform admin allows it and
-   the vendor's terms permit it (vendor terms review, open item #9).
+   the vendor's terms permit it (vendor terms review, open item #4).
 8. **Timing.** Both modes ship in v0.2 with the connector framework; not in the v0.1 demo.
 
 ## Alternatives considered
@@ -63,7 +63,7 @@ use cases besides Copilot will need in-sandbox auth.
 
 ## Open questions
 
-- GitHub Copilot terms of service for agent and gateway use (open item #9).
+- GitHub Copilot terms of service for agent and gateway use (open item #4).
 - Which other auth types to allowlist first.
 - Encryption key custody for the encrypted path (per agent key in Vault?).
 

@@ -3,7 +3,7 @@
 - Status: Accepted (delivery after v0.1.0)
 - Date: 2026-10-28
 - Amends: [0006](0006-identity-layers.md), [0043](0043-workload-identity-adapters-and-koinon-issuer.md)
-- Relates to: [0005](0005-agent-identity.md), [0019](0019-personal-agents-and-teams.md), [0023](0023-observability-and-audit.md), [0042](0042-ask-tier-park-and-execute.md), [0057](0057-mcp-servers.md), [0058](0058-gateway-modes.md), [0065](0065-work-model-tasks-inbox.md), [#154](https://github.com/stateracloud/koinon/issues/154)
+- Relates to: [0005](0005-agent-identity.md), [0019](0019-personal-agents-and-teams.md), [0023](0023-observability-and-audit.md), [0042](0042-ask-tier-park-and-execute.md), [0057](0057-mcp-servers.md), [0058](0058-gateway-modes.md), [0065](0065-work-model-tasks-inbox.md), [#28](https://github.com/stateracloud/koinon/issues/28)
 - Pending verification: the gateway delivery spike (decision 6)
 
 ## Context
@@ -48,7 +48,7 @@ calls learns almost nothing it can check.
   calling, on whose behalf, or under which approval.
 - **Per-user MCP access has no input.** It needs to know which user a call is for. The gateway knows
   only the agent.
-- **Preview URLs need the same piece.** Authenticated preview URLs ([#154](https://github.com/stateracloud/koinon/issues/154))
+- **Preview URLs need the same piece.** Authenticated preview URLs ([#28](https://github.com/stateracloud/koinon/issues/28))
   need a short-lived token for a viewer, which is the same issuer with a different audience.
 
 **Prior art.**
@@ -195,7 +195,7 @@ Andre decided the open points on 2026-10-28.
 
     Then: opt-in for third-party servers, [0043](0043-workload-identity-adapters-and-koinon-issuer.md)
     cloud adapters on the same issuer, the OAuth authorization server with per-user OAuth (v0.2),
-    viewer tokens for preview URLs ([#154](https://github.com/stateracloud/koinon/issues/154), v0.3)
+    viewer tokens for preview URLs ([#28](https://github.com/stateracloud/koinon/issues/28), v0.3)
     and the external A2A gateway (v1.0).
 
 ```mermaid

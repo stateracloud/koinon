@@ -4,7 +4,7 @@
 # Chart assertions: registry mirrors and pull secrets.
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
-# Registry mirrors and pull secrets (#130): global.imageRegistry, global.registryMirrors and
+# Registry mirrors and pull secrets (koinon-private#130): global.imageRegistry, global.registryMirrors and
 # global.imagePullSecrets reach every image the chart runs or names. image_refs lists every image
 # reference (image:, imageName:, --probe-image, the supervisor pin) of a render, sorted and unique.
 image_refs() {

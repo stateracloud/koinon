@@ -4,7 +4,7 @@
 - Date: 2026-11-03
 - Amends: [0084](0084-leak-guard.md) (the main protection moves from the text check to where a call sends data; decisions 2, 3, 5, 7, 8 and 12 change)
 - Relates to: [0042](0042-ask-tier-park-and-execute.md) (approvals), [0051](0051-session-home-generations.md) (home generations), [0057](0057-mcp-servers.md) (tool tiers), [0062](0062-code-host-connectors.md) (code-host repository list), [0080](0080-tool-set-matches-egress-and-escape-hosts.md) (no web egress from the sandbox)
-- Issue: #625, part of #265; changes #348, #349, #350, #351, #352 and #609
+- Issue: koinon-private#625, part of #51; changes koinon-private#348, koinon-private#349, koinon-private#350, koinon-private#351, #70 and koinon-private#609
 
 ## Context
 
@@ -14,11 +14,11 @@ every round of work on it found a new gap or a new false alarm:
 
 | Round | What happened |
 |---|---|
-| #348, review rounds 1 to 10 (PR #582) | Each review found a new spelling the decoders missed: punctuation between letters, UTF-16 with emoji, chunked base64 of non-ASCII text, 13 to 14 byte pieces, a NUL every 11 bytes, invalid-byte polyglots. Each got a new decoder heuristic. |
-| #348, cost | Readings times alignments times argument pairs blew past the 1 s clock. That led to the work budget, the 5 s backstop (ADR 0084 amendment), `budget_args` and pair windows switched off above 8000 pairs, which is a bypass in its own right. |
-| #609 | A list of accepted gaps (tiny separately-encoded pieces, padding that turns off the windows). The issue itself says the approach probably needs to change. |
-| #350 (PR #621) | Legs are declared per server, but the risk depends on where one call sends its data. |
-| #352 (PR #623) | Pair reassembly glued owner `northwind` and repo `platform-handbook`, the address of a write into the org's own repo, into 25 characters that matched a private title: 91 of 272 benign Gitea writes blocked. The pending fix, "glued text needs both halves", was one more heuristic. |
+| koinon-private#348, review rounds 1 to 10 (PR koinon-private#582) | Each review found a new spelling the decoders missed: punctuation between letters, UTF-16 with emoji, chunked base64 of non-ASCII text, 13 to 14 byte pieces, a NUL every 11 bytes, invalid-byte polyglots. Each got a new decoder heuristic. |
+| koinon-private#348, cost | Readings times alignments times argument pairs blew past the 1 s clock. That led to the work budget, the 5 s backstop (ADR 0084 amendment), `budget_args` and pair windows switched off above 8000 pairs, which is a bypass in its own right. |
+| koinon-private#609 | A list of accepted gaps (tiny separately-encoded pieces, padding that turns off the windows). The issue itself says the approach probably needs to change. |
+| koinon-private#350 (PR koinon-private#621) | Legs are declared per server, but the risk depends on where one call sends its data. |
+| #70 (PR koinon-private#623) | Pair reassembly glued owner `northwind` and repo `platform-handbook`, the address of a write into the org's own repo, into 25 characters that matched a private title: 91 of 272 benign Gitea writes blocked. The pending fix, "glued text needs both halves", was one more heuristic. |
 
 **Root cause.** The guard decides by what the outgoing bytes look like, without knowing where they
 go. `TaintChecker.Check(ctx, scope, fp, args []string)` gets a flat list of strings: no tool, no
@@ -33,7 +33,7 @@ design-patterns paper); twelve published prompt-injection defences fell to adapt
 at over 90% success ("The Attacker Moves Second"). The guarantees in Meta's Rule of Two, CaMeL and
 FIDES come from structure: which session holds which legs, and which sinks it may reach. Comparable
 products (Codex cloud, Claude Code's sandbox, the Copilot coding agent firewall, Gemini) limit the
-destination, not the content. The GitHub MCP exploit (Invariant Labs) is the #352 shape with an
+destination, not the content. The GitHub MCP exploit (Invariant Labs) is the #70 shape with an
 attacker in it: one server is private data, untrusted input and outbound at once, and only a class
 that depends on the destination of the call (a public repo versus a private one) tells them apart.
 
@@ -42,7 +42,7 @@ bits, not spellings. A text match holds only for the spellings it decodes. So th
 destination are the guarantee, and the text match is an alarm.
 
 Koinon's own benign numbers are weaker than ADR 0084 suggests: G1's "0 of 218, 0 of 272" predates the
-pair joins, and the #352 replay corpus is hand-built, not real recordings. The benign rate on real
+pair joins, and the #70 replay corpus is hand-built, not real recordings. The benign rate on real
 traffic is unmeasured.
 
 ## Decision
@@ -63,7 +63,7 @@ Every tool call has one sink class:
 | `external-high` | Free text to a party outside the org. | an issue or PR on a public repo or a foreign owner, an email, a chat post, an arbitrary POST |
 
 **Unknown or unclassified tools count as `external-high`.** That is the cautious reading, the same
-choice as #350's all-three-legs default for an unclassified server.
+choice as koinon-private#350's all-three-legs default for an unclassified server.
 
 ### 2. Where the class is declared
 
@@ -75,15 +75,15 @@ The class is declared **per tool**, not per server. Each tool's declaration says
   by elimination, which are **payload arguments** (what it carries: a title, a body, a query);
 - what its results carry for the session legs (decision 4): untrusted input, private data or
   neither. The declaration is pinned to the tool's content hash, like the rest of it. A tool
-  without its own declaration takes its server's legs (#350), which are both until an admin says
+  without its own declaration takes its server's legs (koinon-private#350), which are both until an admin says
   otherwise. Koinon's own tools declare theirs in code (`mcpguard.OwnResultLegs`): none of them
   returns third-party text or org data, so none sets a leg, and an own tool nobody declared sets both.
 
-Declarations live on the MCP server records of #350 (per tool, next to the server's kind and legs)
+Declarations live on the MCP server records of koinon-private#350 (per tool, next to the server's kind and legs)
 and in the code-host connector's data for its own write tools (ADR 0062, `connector.yaml`). They are
 set through the admin API and the console and audited with before and after, like the data class.
 A tool's declaration goes back to the default (`external-high`, server legs) when the server's URL
-changes (the #350 rule) or when the tool's content hash changes (the ADR 0057 rule that moves a
+changes (the koinon-private#350 rule) or when the tool's content hash changes (the ADR 0057 rule that moves a
 changed tool back to the ask tier): the declaration described the old tool.
 
 ### 3. How one call's class is derived
@@ -97,7 +97,7 @@ A derived class is decided per call from the address arguments only:
   `northwind/platform-handbook` is internal and never counts as a leak; a PR on a public repo is
   external-high, which is what the Invariant case needs.
 - **Fetch.** The tool names its URL argument. The host is the address. A host on the org's
-  fetch-trusted list (#350's contract: an exact lower-case name, or a `*.example.com` wildcard that
+  fetch-trusted list (koinon-private#350's contract: an exact lower-case name, or a `*.example.com` wildcard that
   covers subdomains at any depth but not `example.com` itself) makes the call `internal`. Any other
   host makes it `external-low`. The path, query and fragment of the URL are **payload** and count
   toward the byte cap; to a host that is not trusted, so are the host's labels (they carry data as
@@ -132,14 +132,14 @@ legs for an `external-low` or `external-high` call, the guard waits until the se
 what the first was when the call arrived. If it does not within 2 s, the call is decided as if the
 session held both legs: a card or a refusal, never a pass. `none` and `internal` calls do not wait.
 A tool kind agentd does not know (ACP `other`, a missing kind, or a newer kind) sets both legs.
-An MCP tool is the exception (Andre, 2026-11-03, #643): its result passed the gateway, which sets the
+An MCP tool is the exception (Andre, 2026-11-03, koinon-private#643): its result passed the gateway, which sets the
 legs from the tool's own declaration, so agentd reports nothing for a finished call whose title
 carries the flavor's MCP prefix (`flavor.Descriptor.MCPToolPrefix`, `koinon_` for OpenCode). Without
 this a single MCP call, Koinon's own `create_pull_request` included, held both legs until the home was
 replaced, and every declared result leg was undone. A flavor with no prefix keeps both legs for kind
 `other`.
 
-How the wait works, and what it leaves open (#349 review, 2026-11-03):
+How the wait works, and what it leaves open (koinon-private#349 review, 2026-11-03):
 
 - **The reader never waits for the database.** agentd counts in memory as it reads, and one writer
   per harness copies both counts to the database, in order and as absolute values that only grow.
@@ -212,13 +212,13 @@ the legs, whether a run was found and whether the feed stalled; never an argumen
   over the cap is a **plain refusal** with a reason the agent can read, not an approval. The URL
   shape rule keeps applying inside the cap.
 - **Shipped templates never reach the approval branch.** No shipped template combines a leg-setting
-  read of untrusted input, private data and an auto-tier `external-high` tool; the #351 templates
+  read of untrusted input, private data and an auto-tier `external-high` tool; the koinon-private#351 templates
   test reads the sink classes and fails if one does. So normal use adds no click ("no agent
   nannies", 2026-10-31).
 
 ### 6. Text matching: a frozen secondary alarm
 
-The taint store, the keyed winnowing, the normaliser and the single-layer decoders of #348 stay.
+The taint store, the keyed winnowing, the normaliser and the single-layer decoders of koinon-private#348 stay.
 Their role changes:
 
 - They run **only on payload arguments of `external-low` and `external-high` calls**, never on
@@ -249,14 +249,14 @@ inside a list is refused, whatever its class would be.
 
 **Guaranteed:**
 
-- No shipped template holds both legs with an auto-tier `external-high` tool (a static test, #351).
+- No shipped template holds both legs with an auto-tier `external-high` tool (a static test, koinon-private#351).
 - Once a session holds both legs, no free-text body reaches a party outside the org without a person
   approving that exact call, with the payload on the card.
 - Through `external-low` sinks, such a run sends at most the byte cap to untrusted hosts, whatever
   the encoding.
 - Verbatim and simply-encoded copies of private text in the payload of an external call are shown to
   a person.
-- Writes into the org's own private repos are never blocked as leaks, so the #352 class of false
+- Writes into the org's own private repos are never blocked as leaks, so the #70 class of false
   alarm is gone by construction.
 
 **Not guaranteed:**
@@ -277,7 +277,7 @@ inside a list is refused, whatever its class would be.
 
 Per-value labels in the CaMeL or FIDES style (a planner that takes control flow from the trusted
 query, values that carry their confidentiality and integrity labels, policy checked at each sink)
-need Koinon to own the agent loop, so they belong in koinon-harness (#249), not in OpenCode. They
+need Koinon to own the agent loop, so they belong in koinon-harness (#48), not in OpenCode. They
 use the same vocabulary: the four sink classes, the two legs and the address-versus-payload split.
 Nothing in this ADR is a stopgap that work would throw away; it moves the labels from the whole
 session to single values.
@@ -306,26 +306,26 @@ flowchart TD
 - **Keep the text check as the main protection** (ADR 0084 as written). Rejected: the attacker
   picks the encoding, so each round finds a new gap, and the check cannot tell an in-org write from a
   leak. The patch rounds in Context are the evidence.
-- **Fix the #352 false alarm with "glued text needs both halves".** Rejected: one more heuristic of
+- **Fix the #70 false alarm with "glued text needs both halves".** Rejected: one more heuristic of
   the same kind. The false alarm goes away because in-org writes are internal and address arguments
   are never matched.
-- **Chase #609's small encoded pieces.** Rejected: the byte cap bounds that class whatever the
+- **Chase koinon-private#609's small encoded pieces.** Rejected: the byte cap bounds that class whatever the
   encoding.
 - **Keep the legs per server only.** Rejected: it cannot tell a private repo from a public one on the
-  same server, so both the #352 false alarm and the GitHub public-repo leak stay possible.
+  same server, so both the #70 false alarm and the GitHub public-repo leak stay possible.
 - **Refuse, instead of asking, for `external-high` in a session with both legs.** Not chosen: shipped
   templates never get there, and an admin-built agent that needs it should be able to have a person
   approve the exact call.
-- **Rebuild the loop the CaMeL way now.** Strongest, but it needs Koinon's own harness (#249); it is
+- **Rebuild the loop the CaMeL way now.** Strongest, but it needs Koinon's own harness (#48); it is
   the v0.2+ path.
-- **Force the ask tier on every outbound tool of a three-leg agent** (the first #265 proposal).
+- **Force the ask tier on every outbound tool of a three-leg agent** (the first #51 proposal).
   Still rejected: approval fatigue. Here a person sees only the rare call that would send free text
   out of a session that holds both legs.
 
 ## Consequences
 
 - Positive: the guarantee no longer depends on the encoding, and the decoders stop growing.
-- Positive: in-org writes never trip the guard, so the 91-of-272 false alarm class of #352 disappears.
+- Positive: in-org writes never trip the guard, so the 91-of-272 false alarm class of #70 disappears.
 - Positive: the text check gets cheaper (no any-pair joins, no windows, external payloads only).
 - Negative: correctness now rests on the sink-class declarations. A wrong `internal` is a hole, so
   the default is `external-high` and a declaration resets when the tool or URL changes.
@@ -342,17 +342,17 @@ flowchart TD
 
 | Issue | Change |
 |---|---|
-| #348 (merged core) | Freeze the decoders. Drop the any-pair joins and the pair windows; join payload arguments in call order. `doc.go` calls it a secondary signal. |
-| #609 | Superseded by the byte cap; close as by design. |
-| #349 (wiring) | The guard's input becomes tool, sink class, address args, payload args and session legs. It maintains the legs from responses and agentd's feed. Text matching on external payloads only. Byte-cap and URL-rule refusals are plain refusals; a text match or a both-legs `external-high` call is an approval. failClosed and a timeout over 5 s stay. |
-| #350 / PR #621 (schema) | Keep kind, legs, the URL reset, the fetch-trusted hosts and the threshold. Add a sink class per tool (default `external-high`), the address-argument declaration, and the org's own code-host scope. Can follow in #349. |
-| #351 (templates) | Keep. The test reads sink classes and fails on untrusted input, private data and an auto-tier `external-high` tool together. |
-| #352 / PR #623 (tests) | Build the replay from real, scrubbed recordings, not the generated corpus, and assert per sink class. Keep the planted leaks and the RT1 canaries. The `northwind/platform-handbook` case becomes the "internal write passes" regression. |
+| koinon-private#348 (merged core) | Freeze the decoders. Drop the any-pair joins and the pair windows; join payload arguments in call order. `doc.go` calls it a secondary signal. |
+| koinon-private#609 | Superseded by the byte cap; close as by design. |
+| koinon-private#349 (wiring) | The guard's input becomes tool, sink class, address args, payload args and session legs. It maintains the legs from responses and agentd's feed. Text matching on external payloads only. Byte-cap and URL-rule refusals are plain refusals; a text match or a both-legs `external-high` call is an approval. failClosed and a timeout over 5 s stay. |
+| koinon-private#350 / PR koinon-private#621 (schema) | Keep kind, legs, the URL reset, the fetch-trusted hosts and the threshold. Add a sink class per tool (default `external-high`), the address-argument declaration, and the org's own code-host scope. Can follow in koinon-private#349. |
+| koinon-private#351 (templates) | Keep. The test reads sink classes and fails on untrusted input, private data and an auto-tier `external-high` tool together. |
+| #70 / PR koinon-private#623 (tests) | Build the replay from real, scrubbed recordings, not the generated corpus, and assert per sink class. Keep the planted leaks and the RT1 canaries. The `northwind/platform-handbook` case becomes the "internal write passes" regression. |
 | "Glued text needs both halves" | Dropped. |
 
 ## Open questions
 
-These need numbers from real traffic: the scrubbed recordings of #352. The implementer of #352
+These need numbers from real traffic: the scrubbed recordings of #70. The implementer of #70
 measures; Andre decides each number.
 
 - **The byte cap.** The starting value (about 2 KB) against the `external-low` payload bytes real
@@ -364,7 +364,7 @@ measures; Andre decides each number.
 - **The cap's scope.** Per run, as decided, or per home generation like the legs, if recordings
   show agents spreading work across runs of one generation.
 - **Repository visibility.** How fresh the connector's view of a repository being public must be,
-  and what a call does when the visibility is unknown (this ADR: `external-high`). Decided in #350
+  and what a call does when the visibility is unknown (this ADR: `external-high`). Decided in koinon-private#350
   with Andre.
 
 ## Upstream verification
@@ -391,7 +391,7 @@ No upstream behaviour changes. The guard still runs behind agentgateway v1.6.0 E
 
 ## Links
 
-- Andre's decisions, 2026-11-03: [#265 comment](https://github.com/stateracloud/koinon/issues/265#issuecomment-6608053150)
+- Andre's decisions, 2026-11-03: [#51 comment](https://github.com/stateracloud/koinon/issues/51#issuecomment-6608053150)
 - The design review behind them is kept by the maintainers (not in the repository).
-- Issues #265, #348, #349, #350, #351, #352, #609, #249; PRs #582, #621, #623
+- Issues #51, koinon-private#348, koinon-private#349, koinon-private#350, koinon-private#351, #70, koinon-private#609, #48; PRs koinon-private#582, koinon-private#621, koinon-private#623
 - ADRs [0084](0084-leak-guard.md), [0042](0042-ask-tier-park-and-execute.md), [0051](0051-session-home-generations.md), [0057](0057-mcp-servers.md), [0062](0062-code-host-connectors.md), [0080](0080-tool-set-matches-egress-and-escape-hosts.md), [0023](0023-observability-and-audit.md)

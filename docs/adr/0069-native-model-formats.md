@@ -1,8 +1,8 @@
 # 0069. Models speak their family's native API format
 
-- Status: Accepted. The OpenRouter live check (decision 7) passed in the rc.7 home-lab re-run on 2026-10-29 (`anthropic/claude-haiku-5.5` in the `anthropic` format, 5 requests, charged 31% of the uncached list price so cache reads were priced, no `run.uncached` events), and the OpenRouter pin rows are deleted (#242): OpenRouter `anthropic/*` models default to `anthropic` like every other Claude model. Thinking: see the amendments of 2026-10-29 and 2026-10-31.
+- Status: Accepted. The OpenRouter live check (decision 7) passed in the rc.7 home-lab re-run on 2026-10-29 (`anthropic/claude-haiku-5.5` in the `anthropic` format, 5 requests, charged 31% of the uncached list price so cache reads were priced, no `run.uncached` events), and the OpenRouter pin rows are deleted (koinon-private#242): OpenRouter `anthropic/*` models default to `anthropic` like every other Claude model. Thinking: see the amendments of 2026-10-29 and 2026-10-31.
 - Date: 2026-10-28
-- Relates to: [#148](https://github.com/stateracloud/koinon/issues/148), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0045](0045-openshell-hardening-defaults.md), [0048](0048-openshell-spike-results.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0058](0058-gateway-modes.md), [0068](0068-prompt-caching-always-on.md)
+- Relates to: [#22](https://github.com/stateracloud/koinon/issues/22), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0045](0045-openshell-hardening-defaults.md), [0048](0048-openshell-spike-results.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0058](0058-gateway-modes.md), [0068](0068-prompt-caching-always-on.md)
 
 ## Context
 
@@ -353,7 +353,7 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
   show a cache write and then `cache_read_tokens > 0`, each priced at its own rate. The ledger's
   `input_tokens` includes cache reads and writes.
 
-## Amendment (2026-10-29, rc.8): thinking is on unless the agent turns it off (#240, #242)
+## Amendment (2026-10-29, rc.8): thinking is on unless the agent turns it off (koinon-private#240, koinon-private#242)
 
 ### Context
 
@@ -430,7 +430,7 @@ tokens are billed as output).
    price names a reasoning rate (ADR 0056). Nothing about the ledger changes except visibility: the spend
    report line gains `reasoningTokens` (the part providers report separately, inside `outputTokens`).
    Anthropic Messages reports no such split, so for direct and OpenRouter Claude models the line is
-   `null` ("not reported"), never 0: a 0 would read as "no thinking happened" (#240 comment 2), and the
+   `null` ("not reported"), never 0: a 0 would read as "no thinking happened" (koinon-private#240 comment 2), and the
    thinking is in `outputTokens`. **Corrected 2026-10-31: Anthropic does report the split; agentgateway
    v1.7.0 does not read it. See below.** It is a number once any request of the model reported a split. The
    price list marks every thinking-capable model `hidden_thinking` (Haiku 5.5 lacked it; list version
@@ -438,7 +438,7 @@ tokens are billed as output).
    price list and the catalog in step. The budget reserve of a cut stream is the request's `max_tokens`
    capped at the entry's `max_output`; Anthropic counts thinking inside `max_tokens`, so the reserve
    already covers it.
-7. **#242: the OpenRouter pin rows are deleted** after the live check (decision 7) passed on 2026-10-29,
+7. **koinon-private#242: the OpenRouter pin rows are deleted** after the live check (decision 7) passed on 2026-10-29,
    as decision 4 said. `anthropic/*` models on OpenRouter default to `anthropic` through the family
    preference; the startup re-derivation moves every model whose format no admin set and writes
    `model.format_rederived`. The per-model overrides the home lab applied stay (they are overrides,
@@ -481,7 +481,7 @@ tokens are billed as output).
 - Open questions are listed in the pull request: the OpenAI-style effort mode, no CLI in this
   repository to carry the setting, and the beta pin for OpenRouter.
 
-## Amendment (2026-10-31): one row per model and route, on and off sent explicitly (#316)
+## Amendment (2026-10-31): one row per model and route, on and off sent explicitly (koinon-private#316)
 
 ### Context
 
@@ -534,7 +534,7 @@ defaults that differ per route.
 4. **Decision 6 corrected.** Anthropic does report the thinking split, as
    `usage.output_tokens_details.thinking_tokens` (on the last `message_delta` when streaming).
    agentgateway v1.7.0's Messages parser does not read it, so the ledger still has no split for Claude
-   models; reading it is #377. Until then the trace exporter leaves `gen_ai.usage.reasoning.output_tokens`
+   models; reading it is #78. Until then the trace exporter leaves `gen_ai.usage.reasoning.output_tokens`
    out of a model-call span and a turn root when no call reported a split, instead of writing 0. The
    ledger column stays `NOT NULL DEFAULT 0`, so 0 and "not reported" are one value there; the spend
    report already reads a split as reported only when it is above 0.
