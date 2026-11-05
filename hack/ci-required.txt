@@ -41,3 +41,4 @@ external e2e result
 # runs after a push to main cannot gate a pull request.
 advisory flavors
 advisory flavor-publish
+advisory warm-caches
