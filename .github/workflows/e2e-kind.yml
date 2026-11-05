@@ -130,7 +130,7 @@ jobs:
         run: hack/versions-env.sh >> "$GITHUB_ENV"
 
       # cache: false, and an explicit cache with a fallback prefix: a new go.sum still starts from
-      # the last build cache (main saves one on every run), which is most of the ko and driver builds.
+      # the last build cache (main saves one per go.sum), which is most of the ko and driver builds.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -138,14 +138,14 @@ jobs:
 
       # Restored everywhere, saved only by pushes to main (below): a pull request, or a dispatch on
       # an arbitrary commit, can never write the cache that main's runs read.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - id: e2ego
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          key: e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             e2e-go-${{ runner.os }}-
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
@@ -266,12 +266,12 @@ jobs:
         run: test/e2e/kind/down.sh
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.e2ego.outputs.cache-hit != 'true'
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          key: e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
   # The one check to require. Passes when the e2e was skipped because nothing needed it (or a draft),
   # fails when it failed or was cancelled (the composite-check pattern). Fails too when a pull request

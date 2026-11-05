@@ -102,7 +102,7 @@ migrate Job lacked) passed every package test and failed only in a full install.
 
 Actions minutes cost money; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
-`go` (go-tidy, go-lint, go-vet, go-test, go-race), `web` (web-lint, web-test, web-e2e),
+`go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
 `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. `changes` and
 `quick checks` (proto, migrations, adr-lint, claim-tests and the dependency age steps in one job,
 koinon-private#594: every job bills a whole minute) and the other workflows (`dco`, `gitleaks`, `claim`,
@@ -183,6 +183,30 @@ squash, a missing or red check, an API error) runs everything. `flavor-publish` 
 (batched on main, nightly) are unaffected. So what no single commit explains is caught by the
 nightly and batched e2e, not by `ci` on main. `hack/release-gate.sh` reads a check that main
 skipped from the merged PR's head.
+
+## Cache ownership (#147)
+
+A pull request can read its own caches and the default branch's, never another pull request's, so a
+cache only helps a pull request if main saved it. Main owns them all: the `warm-caches` job runs on
+every push to main and is never skipped (`hack/ci-skip-heavy.sh` switches the heavy jobs off on a
+push whose tree already passed as a pull request head, which used to leave main without fresh
+entries). For each cache it does a `lookup-only` restore (no download) and, on a miss, the cheapest
+work that fills it, then saves:
+
+| Cache | Key | Filled by |
+| --- | --- | --- |
+| Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>` | `go build ./...`, `go test -run '^$' ./...`, one lint run |
+| envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
+| Playwright browser | `playwright-<os>-<arch>-<@playwright/test version>` | `playwright install chromium` |
+| pnpm stores (`web`, `docs/site`) | setup-node's, by lockfile | `pnpm install` (setup-node saves after a miss) |
+| golangci-lint cache | the action's | the lint run above (`go-lint` has `skip-save-cache`) |
+
+Every other job restores and never saves: one Go cache scheme (`go-ci`, `setup-go` with
+`cache: false` plus an explicit `actions/cache/restore`), and `e2e-go` is one entry per `go.sum`
+(no run id; saved by main only when the exact key was missing). The flavor layer cache stays with
+`flavors` and `flavor-publish` (see below). `warm-caches` is advisory in `hack/ci-required.txt`: it
+reports on pushes only. A new key goes into the warm job and the restoring jobs together;
+`hack/ci-cache-test.sh` checks the rule.
 
 ## Image builds: authenticated downloads and layer cache (#145)
 
