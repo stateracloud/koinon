@@ -629,7 +629,7 @@ jobs:
       - run: make test-chart-smoke
 
   # Docs site (plan item DOC1): builds the Starlight site and checks the quickstart against
-  # test/e2e, the chart and the web spec. No deploy while the repository is private. Required: a
+  # test/e2e, the chart and the web spec. This job does not deploy the site. Required: a
   # run skipped because no docs file changed reports success.
   docs:
     needs: changes
