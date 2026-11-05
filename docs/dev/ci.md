@@ -270,6 +270,12 @@ analysers, generated code and fixtures excluded, no code formatters (a bot commi
 CI run on a new head) and Autofix only when a person clicks it. Read its PR comments as review
 input; make it required only by a decision recorded in an issue.
 
+CodeRabbit (GitHub App) is advisory too and reads `.coderabbit.yaml` (#184). Every built-in linter is
+off (CI runs them), there are no status checks or comments per push, and the summary stays in its own
+walkthrough comment. Reviews are manual while the repository is small: `hack/ship.sh --ready` posts
+`@coderabbitai review` once per head, and you can post it again after a push. Its finishing touches
+(docstrings, unit tests) open a stacked pull request when asked; none commits to the reviewed branch.
+
 ## Merging
 
 The only merge method is a merge commit: `gh pr merge --auto --merge`. `e2e result` is required
