@@ -253,6 +253,12 @@ list in the same PR, and a required job must report on every pull request and pu
 `if:` skip reports success and is fine; only a workflow-level `paths:` filter leaves a check
 absent).
 
+Third-party analysers are advisory: their checks never enter the list or the ruleset. DeepSource
+(GitHub App) reads `.deepsource.toml` at the root (#180): Go, JS/TS, shell and Dockerfile
+analysers, generated code and fixtures excluded, no code formatters (a bot commit would start a new
+CI run on a new head) and Autofix only when a person clicks it. Read its PR comments as review
+input; make it required only by a decision recorded in an issue.
+
 ## Merging
 
 The only merge method is a merge commit: `gh pr merge --auto --merge`. `e2e result` is required
