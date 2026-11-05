@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 name: ci
 
+# The run says whether it ran for a draft, from the event payload (#676). hack/ci-skip-heavy.sh decides
+# from the same flag (PR_DRAFT below), so a run's label and its behaviour always agree; a gate
+# can drop runs whose `display_title` (`displayTitle` in `gh run list --json`) is `ci (draft)`
+# (the run `name` stays `ci`) without a time window. A re-run replays the event, so keeps its label.
+run-name: ${{ github.event.pull_request.draft && 'ci (draft)' || 'ci' }}
+
 on:
   # ready_for_review is not a default type: it runs the full suite on the same head when a draft is
   # marked ready (#593).
@@ -39,11 +45,11 @@ jobs:
     name: changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
-    # Read rights: the draft state of the pull request, the check runs of its head and, for
+    # Read rights: the pull request's head (hack/ci-supersede.sh), the check runs of its head and, for
     # go-test-lab (#610), its commit statuses. Write on actions only to cancel older heads' runs (#675).
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: read # hack/ci-supersede.sh reads pulls/<n> for the current head
       checks: read
       statuses: read
       actions: write # hack/ci-supersede.sh cancels the runs of older heads (#675)
@@ -92,7 +98,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
           REF: ${{ github.ref }}
           SHA: ${{ github.sha }}
         run: |
