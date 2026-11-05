@@ -21,8 +21,8 @@ prepull=(--set flavorPrepull.enabled=true --set-string 'flavorPrepull.nodeSelect
 lacks "no flavor pre-pull by default" 'kind: DaemonSet'
 has "flavor pre-pull renders a DaemonSet" '^kind: DaemonSet$' "${prepull[@]}" --show-only templates/flavor-prepull.yaml
 has "flavor pre-pull selects the Kata nodes" 'katacontainers.io/kata-runtime: "true"' "${prepull[@]}" --show-only templates/flavor-prepull.yaml
-has "flavor pre-pull pulls the flavor image" 'image: "ghcr.io/stateracloud/flavor-opencode:' "${prepull[@]}" --show-only templates/flavor-prepull.yaml
-has "flavor pre-pull image follows the registry mirror" 'image: "mirror.example.com/stateracloud/flavor-opencode:' "${prepull[@]}" \
+has "flavor pre-pull pulls the flavor image" 'image: "ghcr.io/stateracloud/koinon/flavors/opencode:' "${prepull[@]}" --show-only templates/flavor-prepull.yaml
+has "flavor pre-pull image follows the registry mirror" 'image: "mirror.example.com/stateracloud/koinon/flavors/opencode:' "${prepull[@]}" \
 	--set global.imageRegistry=mirror.example.com --show-only templates/flavor-prepull.yaml
 has "flavor pre-pull pause image follows the registry mirror" 'image: "mirror.example.com/pause:3.10"' "${prepull[@]}" \
 	--set global.imageRegistry=mirror.example.com --show-only templates/flavor-prepull.yaml

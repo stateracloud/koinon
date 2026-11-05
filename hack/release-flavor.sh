@@ -3,10 +3,10 @@
 #
 # Builds and pushes the OpenCode flavor image for a release (plan item REL1, ADR 0059) for
 # linux/amd64 and linux/arm64, tagged <version> and, for a final release, latest. Prints
-# "ref=<registry>/flavor-opencode@sha256:<hex>" for the release workflow's sign job. Needs a buildx
+# "ref=<registry>/flavors/opencode@sha256:<hex>" for the release workflow's sign job. Needs a buildx
 # builder that can build both platforms and a docker login to the registry.
 #
-#   hack/release-flavor.sh 0.1.0-rc.1 ghcr.io/stateracloud <commit>
+#   hack/release-flavor.sh 0.1.0-rc.1 ghcr.io/stateracloud/koinon <commit>
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -18,7 +18,7 @@ if (($# != 3)); then
 	exit 2
 fi
 version=${1#v}
-repo=${2%/}/flavor-opencode
+repo=${2%/}/flavors/opencode
 commit=$3
 cd "$(dirname "$0")/.."
 

@@ -11,18 +11,18 @@ cd "$(dirname "$0")/.."
 
 h=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 
-# check <name> <registry> <input>: the output must name koinon-api and koinon-agentd in <registry>.
+# check <name> <registry> <input>: the output must name api and agentd in <registry>.
 check() {
 	local want got
-	want="koinon-api $2/koinon-api@sha256:$h"$'\n'"koinon-agentd $2/koinon-agentd@sha256:$h"
+	want="api $2/api@sha256:$h"$'\n'"agentd $2/agentd@sha256:$h"
 	got=$(hack/release-refs.sh <<<"$3")
 	if [[ $got == "$want" ]]; then echo "ok: $1"; else echo "FAIL: $1"$'\n'"$got" >&2; exit 1; fi
 }
 
-R=ghcr.io/stateracloud
-check "release candidate (tagged repository)" $R "$h  $R/koinon-api:0.1.0-rc.1
-$h  $R/koinon-agentd:0.1.0-rc.1"
-check "final release (bare repository)" $R "$h  $R/koinon-api
-$h  $R/koinon-agentd"
-check "registry with a port" localhost:5000 "$h  localhost:5000/koinon-api:0.1.0-rc.1
-$h  localhost:5000/koinon-agentd"
+R=ghcr.io/stateracloud/koinon
+check "release candidate (tagged repository)" $R "$h  $R/api:0.1.0-rc.1
+$h  $R/agentd:0.1.0-rc.1"
+check "final release (bare repository)" $R "$h  $R/api
+$h  $R/agentd"
+check "registry with a port" localhost:5000 "$h  localhost:5000/api:0.1.0-rc.1
+$h  localhost:5000/agentd"
