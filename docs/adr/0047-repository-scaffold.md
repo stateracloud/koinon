@@ -116,6 +116,11 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
   late. Those paths are where the full install catches what unit and flavor tests miss: spend
   accounting, the rendered gateway config and the harness launch. Every other change still relies
   on the dispatch before a tag. Each run costs about 22 of the plan's included minutes.
+- _Note (2026-11-05, public repository):_ the repository is public. Every "while the repository is
+  private" statement above (free minutes in item 13, Blacksmith, hand-dispatched `e2e-kind.yml`, the
+  go suite on selected paths) describes the private period and no longer applies: `e2e-kind.yml`
+  runs on every pull request to main and nightly, on GitHub-hosted runners, and standard runners
+  cost no Actions minutes. The decided text above is kept as the record.
 
 ## Alternatives considered
 
