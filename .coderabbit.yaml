@@ -1,0 +1,225 @@
+# SPDX-License-Identifier: Apache-2.0
+# yaml-language-server: $schema=https://www.coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit, an advisory reviewer (#184). Modelled on crossplane/crossplane's .coderabbit.yaml.
+# Its check is never in hack/ci-required.txt or the main ruleset. Reviews are manual on a
+# repository below 10 stars: `hack/ship.sh --ready` posts `@coderabbitai review` once per head.
+# Every key is checked against the live schema (docs/dev/ci.md, "Third-party analysers").
+language: "en-US"
+early_access: false
+
+reviews:
+  profile: "chill"
+  # The summary goes into the walkthrough comment; the PR description and the title stay the author's.
+  high_level_summary: false
+  high_level_summary_in_walkthrough: true
+  collapse_walkthrough: true
+  # One comment per review, no status chatter, no extra check on the head (one CI run per head).
+  review_status: false
+  review_info: false
+  review_progress: false
+  commit_status: false
+  fail_commit_status: false
+  in_progress_fortune: false
+  poem: false
+  sequence_diagrams: false
+  auto_apply_labels: false
+  suggested_labels: false
+  auto_assign_reviewers: false
+  suggested_reviewers: false
+  auto_approvals:
+    enabled: false
+  auto_review:
+    drafts: false
+    auto_incremental_review: false
+    ignore_usernames:
+      - "dependabot[bot]"
+      - "renovate[bot]"
+      - "github-actions[bot]"
+  # Same exclusions as exclude_patterns in .deepsource.toml.
+  path_filters:
+    - "!internal/gen/**"
+    - "!internal/db/store/**"
+    - "!internal/adminapi/*.gen.go"
+    - "!web/src/gen/**"
+    - "!hack/spike/**"
+    - "!**/testdata/**"
+    - "!test/fixtures/**"
+    - "!vendor/**"
+  path_instructions:
+    - path: "internal/db/migrations/**"
+      instructions: |
+        Migrations are forward-only goose files. A merged migration is never edited. Within a
+        shipped minor line (ADR 0085) they only expand: no RENAME, DROP COLUMN, DROP TABLE,
+        DROP TYPE and no column type change. Tables owned by an org are keyed by (org_id, id)
+        with composite foreign keys.
+    - path: "charts/koinon/**"
+      instructions: |
+        Chart renders are deterministic: no Helm lookup and no random values in templates.
+        Every image reference goes through koinon.imageRef and every pod spec gets
+        koinon.imagePullSecrets (ADR 0061). Admission policy is native ValidatingAdmissionPolicy
+        only, never Kyverno.
+    - path: "internal/gateway/**"
+      instructions: |
+        agentgateway log and tracer CEL expressions never read response.body or bodyPrefix: that
+        makes the gateway buffer and record every response. Use the status, the headers and the
+        parsed LLM fields.
+  # Findings only. The finishing touches that can commit to the reviewed branch stay off; the
+  # ones that open a follow-up pull request run only when asked (a checkbox or a command).
+  finishing_touches:
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+    simplify:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+    title:
+      mode: "off"
+    description:
+      mode: "off"
+    issue_assessment:
+      mode: "off"
+  # CI runs the linters; a tool run on a PR-supplied config is an attack surface.
+  tools:
+    ast-grep:
+      enabled: false
+    shellcheck:
+      enabled: false
+    ruff:
+      enabled: false
+    markdownlint:
+      enabled: false
+    github-checks:
+      enabled: false
+    languagetool:
+      enabled: false
+    biome:
+      enabled: false
+    hadolint:
+      enabled: false
+    swiftlint:
+      enabled: false
+    phpstan:
+      enabled: false
+    phpmd:
+      enabled: false
+    phpcs:
+      enabled: false
+    golangci-lint:
+      enabled: false
+    yamllint:
+      enabled: false
+    gitleaks:
+      enabled: false
+    trufflehog:
+      enabled: false
+    checkov:
+      enabled: false
+    tflint:
+      enabled: false
+    detekt:
+      enabled: false
+    eslint:
+      enabled: false
+    flake8:
+      enabled: false
+    fbinfer:
+      enabled: false
+    fortitudeLint:
+      enabled: false
+    rubocop:
+      enabled: false
+    buf:
+      enabled: false
+    regal:
+      enabled: false
+    actionlint:
+      enabled: false
+    zizmor:
+      enabled: false
+    pmd:
+      enabled: false
+    clang:
+      enabled: false
+    cppcheck:
+      enabled: false
+    vale:
+      enabled: false
+    verilator:
+      enabled: false
+    opengrep:
+      enabled: false
+    semgrep:
+      enabled: false
+    circleci:
+      enabled: false
+    clippy:
+      enabled: false
+    sqlfluff:
+      enabled: false
+    squawk:
+      enabled: false
+    trivy:
+      enabled: false
+    prismaLint:
+      enabled: false
+    pylint:
+      enabled: false
+    oxc:
+      enabled: false
+    shopifyThemeCheck:
+      enabled: false
+    luacheck:
+      enabled: false
+    brakeman:
+      enabled: false
+    dotenvLint:
+      enabled: false
+    htmlhint:
+      enabled: false
+    stylelint:
+      enabled: false
+    checkmake:
+      enabled: false
+    osvScanner:
+      enabled: false
+    oasdiff:
+      enabled: false
+    reactDoctor:
+      enabled: false
+    presidio:
+      enabled: false
+    blinter:
+      enabled: false
+    smartyLint:
+      enabled: false
+    emberTemplateLint:
+      enabled: false
+    skillspector:
+      enabled: false
+    psscriptanalyzer:
+      enabled: false
+
+chat:
+  art: false
+
+issue_enrichment:
+  auto_enrich:
+    enabled: false
+  planning:
+    enabled: false
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"

@@ -242,7 +242,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 	if [[ $dry == 1 ]]; then
 		say "dry-run: would create or update the PR${pr_title:+ \"$pr_title\"}$([[ $draft == 1 ]] && echo ' (draft)'), add it to the board"
 		[[ $lab == 1 ]] && say "dry-run: would run the go-test gate on the lab (hack/e2e-remote.sh --argo --gate go-test) before marking ready"
-		[[ $ready == 1 ]] && say "dry-run: would mark ready"
+		[[ $ready == 1 ]] && say "dry-run: would mark ready, then post @coderabbitai review once per head (stateracloud/koinon only)"
 		[[ $auto == 1 ]] && say "dry-run: would check hack/needs-e2e.sh and enable auto-merge"
 	else
 		pr_url=$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)
@@ -290,6 +290,24 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 		if [[ $ready == 1 && $ready_done != 1 ]]; then
 			gh pr ready "$pr_url" >/dev/null || fail "gh pr ready failed"
 			say "ready"
+		fi
+		# CodeRabbit (#184) reviews manually here: ask once per head, after the push. Advisory: a failure only warns.
+		if [[ $ready == 1 && $pr_url == */stateracloud/koinon/pull/* ]]; then
+			# shellcheck disable=SC2016 # $h is a jq variable
+			cr_n=$(gh pr view "$pr_url" --json comments,commits --jq '(.commits[-1].committedDate // "") as $h | [.comments[] | select((.body | rtrimstr("\n")) == "@coderabbitai review") | select(.createdAt > $h)] | length' 2>/dev/null || echo err)
+			if [[ $cr_n == 0 ]]; then
+				if gh pr comment "$pr_url" --body "@coderabbitai review" >/dev/null 2>&1; then
+					say "coderabbit review requested"
+				else
+					echo "ship: warning: could not post @coderabbitai review on $pr_url" >&2
+					say "coderabbit warn"
+				fi
+			elif [[ $cr_n =~ ^[0-9]+$ ]]; then
+				say "coderabbit review already requested on this head"
+			else
+				echo "ship: warning: could not read the comments of $pr_url; no @coderabbitai review posted" >&2
+				say "coderabbit warn"
+			fi
 		fi
 		if [[ $auto == 1 ]]; then
 			rc=0
