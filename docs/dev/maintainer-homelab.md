@@ -52,6 +52,8 @@ these in `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/`:
 
 Without `lab.env`, `hack/e2e-remote.sh --argo` exits 78 (no lab configured) and names what is missing.
 
+`lab.env` also holds `KOINON_LAB_DOMAIN`, the lab's DNS domain: lab hosts are `<name>.apps.<domain>` and `ollama.<domain>`, and the lane label of gate runs is `<domain>/lane`. The real value is never tracked: docs, fixtures and spikes use `lab.example.invalid`, and `hack/lab-domain-lint.sh` (CI `scripts` job) fails when a tracked file names a lab host (#693).
+
 ## Where a pull request's kind e2e runs (#547)
 
 A needs-e2e pull request (`hack/needs-e2e.sh`) is tested lab first. A green lab run is enough to merge,

@@ -139,15 +139,32 @@ fi
 
 # --- gates: each runs in a subshell with `set -e`; its output goes to the gate's log ---------------
 
-go_pkgs() { # changed Go packages as ./dir args; every package (minus test/flavors) when none changed
-	local f d out=""
+# A directory below a nested go.mod (hack/spike/*) is not a package of the root module: golangci-lint
+# on ./hack/spike/x fails with "main module does not contain package".
+in_nested_module() {
+	local d=$1
+	while [[ $d != . && $d != "" ]]; do
+		[[ -f $d/go.mod ]] && return 0
+		d=${d%/*}
+		[[ $d == . || $d == "${d%/*}" ]] && break
+	done
+	return 1
+}
+
+go_pkgs() { # changed Go packages as ./dir args; every package (minus test/flavors) when no Go file changed;
+	# nothing when every changed Go file sits in a nested module
+	local f d out="" seen=0
 	for f in $(existing '\.go$'); do
+		seen=1
 		d=${f%/*}
 		[[ $d == "$f" ]] && d=.
 		[[ $d == . ]] || d=./$d
+		in_nested_module "$d" && continue
 		case " $out " in *" $d "*) ;; *) out="$out $d" ;; esac
 	done
-	if [[ -z $out ]]; then
+	if [[ -z $out && $seen == 1 ]]; then
+		return 0
+	elif [[ -z $out ]]; then
 		go list ./... | grep -v '/test/flavors$' | tr '\n' ' '
 	else
 		echo "$out"
@@ -157,6 +174,10 @@ go_pkgs() { # changed Go packages as ./dir args; every package (minus test/flavo
 g_go() {
 	local pkgs files out
 	pkgs=$(go_pkgs)
+	if [[ -z ${pkgs// /} ]]; then
+		echo "only nested-module Go files changed; nothing to lint in the root module"
+		return 0
+	fi
 	if command -v golangci-lint >/dev/null; then
 		# `|| return 1`: golangci-lint exits 3 on findings, which run_gate would read as INCOMPLETE;
 		# only go-test.sh may report 3.
@@ -232,6 +253,8 @@ g_actionlint() { actionlint; } # the whole tree, as CI does: a workflow's lint c
 g_mktemp() { # independent of shellcheck, so it runs where shellcheck is missing (#535)
 	hack/mktemp-lint-test.sh
 	hack/mktemp-lint.sh
+	hack/lab-domain-lint-test.sh
+	hack/lab-domain-lint.sh
 }
 g_bash5() { # every bash script starts with the bash 5 guard (ADR 0090, #553)
 	hack/bash5-lint-test.sh
