@@ -1,6 +1,6 @@
 # 0094. Work claims on the public repository: one lock, claims by comment, a conflict check, the native merge queue
 
-- Status: Proposed (2026-11-05); the probes ran on 2026-11-05 and changed no decision; procoduck accepts it
+- Status: Accepted (procoduck, 2026-11-05, after the grilling session and the probes, which changed no decision)
 - Reviewed with procoduck 2026-11-05 (grilling). Confirmed as drafted:
   - outsiders claim only on `good first issue` or `help wanted` issues;
   - leases of 3 days for people and 14 days for outsiders, with a day-10 reminder and a cap of 2;
