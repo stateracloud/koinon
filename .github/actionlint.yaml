@@ -1,6 +1,0 @@
-# SPDX-License-Identifier: Apache-2.0
-# Runner labels actionlint does not know: Blacksmith runners (ADR 0047, amendment CI runners).
-self-hosted-runner:
-  labels:
-    - blacksmith-2vcpu-ubuntu-2404
-    - blacksmith-4vcpu-ubuntu-2404

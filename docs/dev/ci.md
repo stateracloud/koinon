@@ -116,8 +116,8 @@ success, so every required check still reports.
 draft head (a free gate slot) and the lab posts the commit status `go-test-lab`; `changes` reads
 it for the exact PR head SHA and the ready run skips `go-test`, which `go` accepts (the required
 name stays `go`; no change to the ruleset). Exit 75/78/76/2 or no status: `go-test` runs on
-Blacksmith, as it does without a lab. Nothing waits for a late status, so a push to a ready PR
-runs `go-test` on Blacksmith (go back to draft first to keep the lab). Push to main
+the hosted runner, as it does without a lab. Nothing waits for a late status, so a push to a ready PR
+runs `go-test` on the hosted runner (go back to draft first to keep the lab). Push to main
 (`ci-skip-heavy.sh decide`) and `hack/release-gate.sh` count a skipped `go-test` only with that
 status or a change with no Go. Trust limit as `e2e-lab` (#568). See also
 `docs/dev/maintainer-homelab.md`.
