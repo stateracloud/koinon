@@ -721,6 +721,8 @@ jobs:
       - run: hack/e2e-decide-test.sh
       - run: hack/e2e-gate-test.sh
       - run: hack/e2e-label-test.sh
+      - run: hack/lab-domain-lint-test.sh
+      - run: hack/lab-domain-lint.sh
       - run: hack/e2e-bisect-test.sh
       - run: hack/hooks/agent-spawn-check_test.sh
       - run: hack/hooks/read-hooks_test.sh
