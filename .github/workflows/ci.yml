@@ -808,11 +808,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: flavorcache
         with:
           path: ${{ runner.temp }}/flavor-cache
           key: flavors-${{ hashFiles('flavors/**') }}
           restore-keys: flavors-
       - name: Push ghcr.io/<repo>/flavor-opencode:<content tag>
+        id: build
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -827,6 +829,19 @@ jobs:
           fi
           secret=()
           [[ -z ${GITHUB_TOKEN:-} ]] || secret=(--secret "id=github_token,env=GITHUB_TOKEN")
+          # The new cache goes to its own directory (buildx must not read and write one), then
+          # replaces the restored one for the save step below.
           docker buildx build --push --build-context common=flavors/common "${secret[@]}" \
             --cache-from "type=local,src=$RUNNER_TEMP/flavor-cache/opencode" \
+            --cache-to "type=local,dest=$RUNNER_TEMP/flavor-cache-new/opencode,mode=max" \
             --tag "$image" flavors/opencode
+          rm -rf "$RUNNER_TEMP/flavor-cache"
+          mv "$RUNNER_TEMP/flavor-cache-new" "$RUNNER_TEMP/flavor-cache"
+          echo "cache_written=true" >>"$GITHUB_OUTPUT"
+      # Main saves what its builds wrote: this job builds on every main push that changes the
+      # flavors, also the ones where the flavors job was skipped (#595).
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.build.outputs.cache_written == 'true' && steps.flavorcache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/flavor-cache
+          key: flavors-${{ hashFiles('flavors/**') }}
