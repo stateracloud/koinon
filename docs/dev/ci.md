@@ -76,7 +76,7 @@ explains.
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
 observes (the rule lives only there). If yes, the PR's own run already runs the quickstart on GitHub;
 with a lab you can get there sooner: `hack/e2e-remote.sh --argo`, a green run posts the commit status
-`e2e-lab` on your pushed head and that is enough to merge. When it exits 75 (the lab cannot run it
+`e2e-lab` on your pushed head and that is enough to merge once the PR's own quickstart has finished (a flaky red one does not hide a green lab run). When it exits 75 (the lab cannot run it
 now), 78 (no lab configured) or 79 (the change touches `flavors/`, which the lab cannot build), wait
 for the PR's quickstart, or dispatch it earlier (`gh workflow run e2e-kind.yml --ref <branch>`). The
 `e2e` label is for a change the rule thinks irrelevant but you want tested.
