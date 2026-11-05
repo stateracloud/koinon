@@ -224,6 +224,13 @@ sha256 is still checked. No token means an anonymous download from github.com, s
 builds work. The token is never an ARG, ENV, log line or layer (`hack/koinon-fetch-test.sh` pins
 this; a new `ADD` of a release asset fails it, also with the URL on a continuation line).
 
+Every Dockerfile `apt-get update` and `apt-get install` carries `-o Acquire::Retries=5 -o
+Acquire::http::Timeout=30`, because snapshot.ubuntu.com answers 5xx now and then (#149); a step that
+runs apt through another tool (`playwright install --with-deps`) writes an `apt.conf.d` snippet with
+both settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call without them. The
+chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
+not start.
+
 The flavor layer cache (`flavors-<hash of flavors/**>`, prefix `flavors-`) is restored by `flavors`,
 `quickstart` (e2e-kind) and `flavor-publish`. Only pushes to main save it: `flavors` and
 `flavor-publish` (which exports with `--cache-to` and saves, so a main push where `flavors` was
