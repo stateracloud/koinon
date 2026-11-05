@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# E1 quickstart e2e on kind (plan item E1): test/e2e/run.sh on a GitHub-hosted runner. Not on
-# Blacksmith like the other workflows (ADR 0047): its kernel has no Landlock, which the OpenShell
-# sandbox supervisor requires (issue #159). It calls no external service besides image and manifest
+# E1 quickstart e2e on kind (plan item E1): test/e2e/run.sh on a GitHub-hosted runner (ubuntu-24.04: its kernel has
+# Landlock, which the OpenShell sandbox supervisor requires, issue #159). It calls no external service besides image and manifest
 # downloads: the model is the fake model server and GitHub is the fake GitHub, both in the cluster.
 #
 # When it runs (the `decide` job, hack/e2e-decide.sh):

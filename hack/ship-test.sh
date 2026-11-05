@@ -456,8 +456,8 @@ for c in 75 76 78 2; do
 	w=$(newwork); cd "$w"
 	echo "l$c" >"l$c.txt"
 	rc=$(run "$tmp/o21-$c" -m "feat: l" --pr-title t --pr-body "$tmp/body.md" --ready --lab-go-test)
-	check "lab exit $c: falls back to Blacksmith, exit 0" eq "$rc" 0
-	check "lab exit $c: the reason is printed" has "lab go-test:.*go-test runs on Blacksmith" "$tmp/o21-$c"
+	check "lab exit $c: falls back to the hosted runner, exit 0" eq "$rc" 0
+	check "lab exit $c: the reason is printed" has "lab go-test:.*go-test runs on the hosted runner" "$tmp/o21-$c"
 	check "lab exit $c: skipped line" has "^lab go-test skipped (exit $c)" "$tmp/o21-$c"
 	check "lab exit $c: still marked ready" has '^ready$' "$tmp/o21-$c"
 	check "lab exit $c: no status read" hasnt 'go-test-lab state' "$FAKE_LOG"
