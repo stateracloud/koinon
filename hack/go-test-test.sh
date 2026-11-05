@@ -27,6 +27,14 @@ for s in $suites; do
 done
 echo "ok: $(echo "$suites" | tr '\n' ' ')"
 
+# #171: one testcontainers session per run, exported before pgserver starts and Ryuk left on.
+sid=$(grep -n '^export TESTCONTAINERS_SESSION_ID=' hack/go-test.sh | head -1 | cut -d: -f1)
+pgs=$(grep -n 'pgserver" -dsn-file' hack/go-test.sh | head -1 | cut -d: -f1)
+[[ -n $sid ]] || { echo "FAIL: go-test.sh does not export TESTCONTAINERS_SESSION_ID"; exit 1; }
+[[ -n $pgs && $sid -lt $pgs ]] || { echo "FAIL: TESTCONTAINERS_SESSION_ID must be exported before pgserver starts"; exit 1; }
+! grep -q 'TESTCONTAINERS_RYUK_DISABLED' hack/go-test.sh .github/workflows/ci.yml || { echo "FAIL: Ryuk must stay on (#171)"; exit 1; }
+echo "ok: one testcontainers session per run, exported before pgserver"
+
 # Per-spec reports (koinon-private#221): the script writes them and CI uploads them even when tests fail.
 grep -q -- '--junit-report' hack/go-test.sh || { echo "FAIL: go-test.sh writes no Ginkgo JUnit report"; exit 1; }
 grep -q -- 'gotestsum --junitfile' hack/go-test.sh || { echo "FAIL: go-test.sh writes no gotestsum JUnit file"; exit 1; }
