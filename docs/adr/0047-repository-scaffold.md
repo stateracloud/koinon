@@ -116,6 +116,13 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
   late. Those paths are where the full install catches what unit and flavor tests miss: spend
   accounting, the rendered gateway config and the harness launch. Every other change still relies
   on the dispatch before a tag. Each run costs about 22 of the plan's included minutes.
+- _Note (2026-11-05, public repository):_ the repository is public. Every "while the repository is
+  private" statement above (free minutes in item 13, Blacksmith, hand-dispatched `e2e-kind.yml`, the
+  go suite on selected paths) describes the private period and no longer applies: `e2e-kind.yml`
+  triggers on every pull request to main, on pushes to main (batched) and nightly, on GitHub-hosted
+  runners, and standard runners cost no Actions minutes. Its `decide` job runs the quickstart on a
+  pull request only for the e2e's own files or the `e2e` label; `e2e result` gates every needs-e2e
+  PR on a green e2e on its head (see the workflow header). The decided text above is kept as the record.
 
 ## Alternatives considered
 
@@ -155,6 +162,12 @@ React 19, Zot chart 0.1.128 / Zot v2.1.22, Helm 4.3.1. The migration suite passe
 `postgres:18-alpine` (10 specs). `tilt ci` passes on the `homelab` context: ko pushes both images
 (with SBOMs) to Zot, the pods pull them through the `dev-registry` secret, and `koinon-pg` reaches
 a healthy state.
+
+## Update 2026-11-05: CI cache ownership
+
+`go-vet` is no longer a CI job: `.golangci.yml` runs `default: standard`, which includes govet, so
+`go-lint` covers it. Caches are owned by main's `warm-caches` job and restored read-only by every
+other job (docs/dev/ci.md#cache-ownership, issue #147).
 
 ## Links
 

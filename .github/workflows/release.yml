@@ -8,7 +8,7 @@
 #
 # Signing and SBOM attestations (cosign, keyless) are a separate `sign` job, the only one with
 # id-token: write. It runs only when the repository variable RELEASE_SIGNING is 'true' (ADR 0049:
-# they write to the public Rekor log, so they stay off while the repository is private).
+# they write to the public Rekor log, so they stay opt-in behind the variable).
 name: release
 
 on:

@@ -95,8 +95,12 @@ has "e2e-lab is failure"
 echo '[{"context":"e2e-lab","state":"pending"}]' >"$tmp/lab.json"
 gate 1 "required, e2e-lab is pending" "${G[@]}"
 echo '[{"context":"e2e-lab","state":"success"}]' >"$tmp/lab.json"
-gate 1 "required and quickstart failed, a lab success does not hide it" DECIDE=success QUICKSTART=failure REQUIRED=true
+gate 0 "required, this run quickstart failed but e2e-lab is success (the lab is an accelerator)" DECIDE=success QUICKSTART=failure REQUIRED=true
+gate 0 "required, this run quickstart cancelled but e2e-lab is success" DECIDE=success QUICKSTART=cancelled REQUIRED=true
 gate 1 "required, no head sha is read as no evidence" "${G[@]}" SHA=
+rm -f "$tmp/lab.json"
+gate 1 "required, quickstart failed and no other evidence" DECIDE=success QUICKSTART=failure REQUIRED=true
+echo '[{"context":"e2e-lab","state":"success"}]' >"$tmp/lab.json"
 
 rm -f "$tmp/lab.json"
 echo "gh: Resource not accessible by integration (HTTP 403)" >"$tmp/lab.err"
