@@ -28,10 +28,14 @@ cd "$(dirname "$0")/.."
 tags=(--tag "$repo:$version")
 [[ $version == *-rc.* ]] || tags+=(--tag "$repo:latest") # latest moves for final releases only, like GoReleaser's
 
+# GITHUB_TOKEN authenticates the Dockerfile's GitHub release downloads (BuildKit secret, #145).
+secret=()
+[[ -z ${GITHUB_TOKEN:-} ]] || secret=(--secret "id=github_token,env=GITHUB_TOKEN")
+
 meta=$(mktemp "${TMPDIR:-/tmp}/release-flavor.XXXXXX")
 trap 'rm -f "$meta"' EXIT
 docker buildx build --push --platform linux/amd64,linux/arm64 \
-	--build-context common=flavors/common "${tags[@]}" \
+	--build-context common=flavors/common "${secret[@]}" "${tags[@]}" \
 	--label org.opencontainers.image.source=https://github.com/stateracloud/koinon \
 	--label org.opencontainers.image.version="$version" \
 	--label org.opencontainers.image.revision="$commit" \

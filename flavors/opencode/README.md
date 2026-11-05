@@ -370,7 +370,11 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
 | ast-grep | 0.51.0 | GitHub release (`sg` is not installed: it would shadow `/usr/bin/sg`) | MIT |
 | DuckDB CLI | 2.0.0 | GitHub release | MIT |
 
-- **Pins.** The release binaries are fetched per architecture with `ADD --checksum=sha256:`; each
+- **Pins.** The release binaries are fetched per architecture by `koinon-fetch` (`flavors/common`:
+  curl, then `sha256sum -c` against the pin). CI passes its `GITHUB_TOKEN` as the BuildKit secret
+  `github_token` (`--secret id=github_token,env=GITHUB_TOKEN`), so the downloads are authenticated and
+  not rate limited per runner IP (#145); without the secret they are anonymous, and the token is
+  never an ARG, ENV, log line or layer. Each
   digest is the release asset's `digest` from the GitHub API, also hashed locally (yq's and ripgrep's match the
   upstream `checksums` / `.sha256` files; fd, ast-grep and DuckDB publish none), and the build runs each tool's
   `--version`. The licence texts of yq, ast-grep and DuckDB are fetched the same way into
