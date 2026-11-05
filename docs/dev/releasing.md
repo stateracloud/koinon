@@ -4,14 +4,15 @@
 
 A release is a Git tag. Pushing `vX.Y.Z` or `vX.Y.Z-rc.N` runs
 [`.github/workflows/release.yml`](../../.github/workflows/release.yml), which publishes to the
-private `ghcr.io/stateracloud` and drafts the GitHub release. Nothing is committed for a version:
+private `ghcr.io/stateracloud/koinon` (every package lives under the repository that builds it, so
+the workflow's own token owns it; #167) and drafts the GitHub release. Nothing is committed for a version:
 the images, the chart's `version` and `appVersion` all come from the tag, without the leading `v`.
 
 | Artifact | Where |
 | --- | --- |
-| `koinon-api` (with the web UI), `koinon-reconciler`, `koinon-agentd` | `ghcr.io/stateracloud/<name>:<version>`, linux/amd64 and linux/arm64, ko SPDX SBOMs. `latest` moves only for final releases |
-| `flavor-opencode`, the OpenCode flavor (ADR 0059) | `ghcr.io/stateracloud/flavor-opencode:<version>`, linux/amd64 and linux/arm64, BuildKit SBOM and provenance attestations. `latest` moves only for final releases |
-| Helm chart | `oci://ghcr.io/stateracloud/charts/koinon`, tag `<version>` |
+| `api` (with the web UI), `reconciler`, `agentd` | `ghcr.io/stateracloud/koinon/<name>:<version>`, linux/amd64 and linux/arm64, ko SPDX SBOMs. `latest` moves only for final releases |
+| `flavors/opencode`, the OpenCode flavor (ADR 0059) | `ghcr.io/stateracloud/koinon/flavors/opencode:<version>`, linux/amd64 and linux/arm64, BuildKit SBOM and provenance attestations. `latest` moves only for final releases |
+| Helm chart | `oci://ghcr.io/stateracloud/koinon/charts/koinon`, tag `<version>` |
 | Release notes | A draft GitHub release, from the Conventional Commits since the previous tag: features, fixes, others. `docs`, `ci`, `test`, `chore` and `style` commits are left out |
 
 ## Cut a release candidate
@@ -155,7 +156,7 @@ Install the mirrored chart with
 
 ### The flavor image when installing a release
 
-The packaged chart defaults `flavors.opencode.image` to `<image.registry>/flavor-opencode:<appVersion>`,
+The packaged chart defaults `flavors.opencode.image` to `<image.registry>/flavors/opencode:<appVersion>`,
 which the release publishes (the `flavor` job, `hack/release-flavor.sh`) and `hack/mirror-release.sh`
 copies, so a default install needs no flavor values. To run a flavor you built yourself (`make
 flavors`, then tag and push), set `flavors.opencode.image.repository` and `.tag`.

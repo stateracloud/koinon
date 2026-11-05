@@ -4,7 +4,7 @@
 # The escape suite's OpenShell cases (ADR 0025) against the OpenShell gateway that
 # `make dev-kind-up` installs on kind-koinon-dev (or DEV_KIND_CLUSTER). No registry, no home lab:
 # the probe image is built from hack/spike/probe (or, when KOINON_OPENSHELL_IMAGE names an image that
-# pulls, e.g. the published ghcr.io/stateracloud/koinon-spike-probe by digest, pulled instead: no
+# pulls (it is no longer published; #167), pulled instead: no
 # nvcr.io or apt at run time, koinon-private#357) and loaded into the node; the gateway is reached through a
 # port-forward with the client certificate it generated.
 #
