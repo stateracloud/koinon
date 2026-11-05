@@ -3,7 +3,8 @@
 #
 # CodeRabbit, an advisory reviewer (#184). Modelled on crossplane/crossplane's .coderabbit.yaml.
 # Its check is never in hack/ci-required.txt or the main ruleset. Reviews are manual on a
-# repository below 10 stars: `hack/ship.sh --ready` posts `@coderabbitai review` once per head.
+# repository below 10 stars, and by design after that: `hack/ship.sh --ready` posts
+# `@coderabbitai review` once per head (auto_review.enabled is false).
 # Every key is checked against the live schema (docs/dev/ci.md, "Third-party analysers").
 language: "en-US"
 early_access: false
@@ -13,6 +14,10 @@ reviews:
   # The summary goes into the walkthrough comment; the PR description and the title stay the author's.
   high_level_summary: false
   high_level_summary_in_walkthrough: true
+  # The placeholders are triggers that make CodeRabbit rewrite the description or title. An empty string
+  # may match every PR, so they are tokens nobody types: CodeRabbit never edits either.
+  high_level_summary_placeholder: "@koinon-never-rewrite-description"
+  auto_title_placeholder: "@koinon-never-rewrite-title"
   collapse_walkthrough: true
   # One comment per review, no status chatter, no extra check on the head (one CI run per head).
   review_status: false
@@ -29,7 +34,9 @@ reviews:
   suggested_reviewers: false
   auto_approvals:
     enabled: false
+  # Reviews are requested by hack/ship.sh --ready (`@coderabbitai review`), never automatic.
   auto_review:
+    enabled: false
     drafts: false
     auto_incremental_review: false
     ignore_usernames:
@@ -64,13 +71,13 @@ reviews:
         agentgateway log and tracer CEL expressions never read response.body or bodyPrefix: that
         makes the gateway buffer and record every response. Use the status, the headers and the
         parsed LLM fields.
-  # Findings only. The finishing touches that can commit to the reviewed branch stay off; the
-  # ones that open a follow-up pull request run only when asked (a checkbox or a command).
+  # Findings only. Docstrings is the one finishing touch on: it opens a follow-up pull request and
+  # runs only when asked. The ones that can commit to the reviewed branch stay off.
   finishing_touches:
     docstrings:
       enabled: true
     unit_tests:
-      enabled: true
+      enabled: false
     simplify:
       enabled: false
     autofix:
@@ -211,6 +218,8 @@ reviews:
 
 chat:
   art: false
+  # Public repository: only organization members trigger finishing touches and chat.
+  allow_non_org_members: false
 
 issue_enrichment:
   auto_enrich:

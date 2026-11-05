@@ -272,9 +272,10 @@ input; make it required only by a decision recorded in an issue.
 
 CodeRabbit (GitHub App) is advisory too and reads `.coderabbit.yaml` (#184). Every built-in linter is
 off (CI runs them), there are no status checks or comments per push, and the summary stays in its own
-walkthrough comment. Reviews are manual while the repository is small: `hack/ship.sh --ready` posts
-`@coderabbitai review` once per head, and you can post it again after a push. Its finishing touches
-(docstrings, unit tests) open a stacked pull request when asked; none commits to the reviewed branch.
+walkthrough comment. Reviews are manual by design (`auto_review.enabled: false`): `hack/ship.sh --ready`
+posts `@coderabbitai review` once per pushed head, and you can post it again after a push. Its only
+finishing touch is docstrings, delivered as a follow-up pull request when asked; nothing commits to
+the reviewed branch.
 
 ## Merging
 
