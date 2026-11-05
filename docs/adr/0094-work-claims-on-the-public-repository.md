@@ -1,6 +1,6 @@
 # 0094. Work claims on the public repository: one lock, claims by comment, a conflict check, the native merge queue
 
-- Status: Proposed (2026-11-05); Accepted after the probes under Open verification run
+- Status: Proposed (2026-11-05); the probes ran on 2026-11-05 and changed no decision; procoduck accepts it
 - Reviewed with procoduck 2026-11-05 (grilling). Confirmed as drafted:
   - outsiders claim only on `good first issue` or `help wanted` issues;
   - leases of 3 days for people and 14 days for outsiders, with a day-10 reminder and a cap of 2;
@@ -16,7 +16,7 @@
 - Amends: ADR 0082 (work claims and the ready queue): decisions 2, 3, 4, 6, 7, 8 and 10, and its Context
 - Relates to: [0082](0082-work-claims-and-ready-queue.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
 - Issue: #159 (draft PR #160)
-- Verification: read-only API reads on 2026-11-05 (below); the write probes under Open verification are still to run
+- Verification: read-only API reads and write probes on a throwaway repository, 2026-11-05 (below)
 
 ## Context
 
@@ -239,7 +239,7 @@ So the App, the `claims-bot` Environment and their two secrets are retired, with
   | `ci.yml` | `go`, `web`, `quick checks`, `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)`, `lint-shell`, `scripts` | Runs as on a ready pull request. `changes`, the proto breaking check and `migrate-lint` take their base from `github.event.merge_group.base_sha` |
   | `dco.yml` | `dco` | Checks `base_sha..head_sha` without the queue's merge commits |
   | `secrets.yml` | `gitleaks` | Scans `base_sha..head_sha` |
-  | `claims.yml` | `claim` | A `merge_group` job reads `<N>` from the queue ref (`gh-readonly-queue/main/pr-<N>-<sha>`) and runs the base's `check-pr <N>`. This is the fencing point: a claim someone else took while the PR waited fails here |
+  | `claims.yml` | `claim` | A `merge_group` job reads `<N>` from the queue ref (`gh-readonly-queue/main/pr-<N>-<base sha>`, verified by probe 1) and runs the base's `check-pr <N>`. This is the fencing point: a claim someone else took while the PR waited fails here |
   | `e2e-kind.yml` | `e2e result` | See below |
 
   `hack/ci-required-test.sh` learns to fail a required check whose workflow has no `merge_group`
@@ -331,58 +331,56 @@ only a release on pull request close.
     bypass actors.
 - Merge queue: GraphQL `repository.mergeQueue(branch: "main")` is `null` (none configured). The
   schema's `RepositoryRuleType` offers `MERGE_QUEUE`. The effective rules on `main` contain no
-  `merge_queue`. Whether the API accepts the rule on the public repository needs the write probe
-  below. GitHub's 2023 GA note says public organization repositories qualify.
+  `merge_queue`. GitHub's 2023 GA note says public organization repositories qualify; probe 1
+  (below) confirmed that the API accepts the rule.
 - ADR reservations: `claim/adr-0093` and `claim/adr-0094` exist, both created on 2026-11-05 by the
   same session. Open PR #136 adds `docs/adr/0093-koinon-core-opencode-plugin.md`, so 0093 was
   handed out twice; decision 6's scan would have skipped it.
 - Labels `good first issue`, `help wanted`, `claim:stale`, `needs-update`, `unclaimed-ok`,
   `start-here` and `agent-ok` exist.
 
-## Open verification
+## Verification by probe
 
-The main session runs these, not procoduck, before the code that depends on them lands. Decisions 6
-and 7 depend on none of them. Each probe says which result changes the decision.
+The main session ran the probes on 2026-11-05.
 
-- **Where they run.** Probes 1, 2, 4 and 5 run on a throwaway public repository in the org,
-  `stateracloud/koinon-queue-probe`. It gets a copy of koinon's `claims` ruleset (on
-  `refs/heads/claim/**`: block non-fast-forward updates and deletion, no bypass actors).
-- **The one run on koinon itself** is the disabled merge-queue ruleset check of probe 1.
-- **Afterwards** the probe repository is archived, never deleted.
+- Probes 1, 2, 4 and 5 ran on a throwaway public repository in the org,
+  `stateracloud/koinon-queue-probe`, which got a copy of koinon's `claims` ruleset (on
+  `refs/heads/claim/**`: block non-fast-forward updates and deletion, no bypass actors). The
+  repository is archived now, not deleted.
+- Only the disabled merge-queue ruleset check of probe 1 ran on koinon itself.
 
-1. **Merge queue rule.** On `stateracloud/koinon`: `POST repos/stateracloud/koinon/rulesets` with
-   `enforcement: "disabled"`, target `~DEFAULT_BRANCH`, and one `merge_queue` rule with the
-   parameters of decision 4. Delete that disabled ruleset right after. Then on
-   `stateracloud/koinon-queue-probe`, the same rule with `enforcement: active`. That second run checks
-   that:
-   - a `merge_group` run starts and reports the required checks;
-   - the queue ref is `gh-readonly-queue/main/pr-<N>-<sha>`;
-   - the merge it makes is a merge commit;
-   - a push to main follows it.
+No result changes a decision.
 
-   *Changes the decision:* a 422 keeps `updater.yml` and the App for the updater alone, so decision 4
-   is deferred and decision 3 keeps the App for that job. A queue ref that does not name the pull
-   request moves the `claim` and `e2e result` mapping to `merge_group.head_commit` and the PR
-   lookup through `commits/{sha}/pulls`.
-2. **`GITHUB_TOKEN` writes `claim/*` refs.** On the probe repository, a test workflow with
-   `permissions: contents: write` creates `refs/heads/claim/probe-<run>` through `POST git/refs` on
-   an empty-tree commit, fast-forwards it (`PATCH`, `force=false`), and gets 422 on a non-fast-forward.
-   The ref is left in place (claims are never deleted). *Changes the decision:* a refusal (an org
-   ceiling, or the `claims` ruleset applying to the Actions bot) puts the App back for ref writes,
-   and decisions 1 and 3 are then rewritten around it.
+1. **Merge queue rule: decision 4 stands.**
+   - On `stateracloud/koinon`: `POST rulesets` with `enforcement: "disabled"` and one `merge_queue`
+     rule answered 201 (ruleset 26632458). `DELETE` answered 204, and koinon's rulesets are unchanged.
+     The 2026-11-02 refusal was the private repository.
+   - On the probe repository, with an active queue (`MERGE`, 5 built, 1 merged, 60 minutes):
+     - `gh pr merge --auto --merge` enqueues the pull request.
+     - A `merge_group` run of the required check started and passed.
+     - The queue ref is `gh-readonly-queue/main/pr-<N>-<base sha>`, so `<N>` parses from the ref,
+       and the `commits/{sha}/pulls` fallback is not needed.
+     - The landed commit is a real merge commit, made by `github-merge-queue[bot]`: its parents are
+       the old main and the PR head, and its message is "Merge pull request #N".
+     - An `on: push` workflow ran on main after a queue merge (actor `github-merge-queue[bot]`), so
+       the batched e2e backstop on main still fires.
+2. **`GITHUB_TOKEN` writes `claim/*` refs: decisions 1 and 3 stand.** With `contents: write`:
+   - `POST git/refs` for `claim/probe-<run>` answered 201;
+   - `PATCH` with `force=false` to a descendant answered 200;
+   - a non-fast-forward `PATCH` answered 422;
+   - a non-fast-forward `PATCH` with `force=true` also answered 422, so the `claims` ruleset binds
+     the Actions bot as well.
 3. **`issue_comment` from a non-collaborator: skipped** (procoduck, 2026-11-05). It would need a second
    GitHub account. Decision 1's fallback covers the failure instead: a refused write makes the bot
    point the outsider to a pull request with `Closes #N`, open one deduplicated Backlog issue for the
-   maintainers and exit 0. The first real outsider `/claim` is therefore the test. Whether GitHub
-   silently drops an assignee it refuses stays open too; it changes only the mirror text.
-4. **Re-running the `claim` check with `GITHUB_TOKEN`.** On the probe repository, a workflow with
-   `actions: write`, `POST actions/runs/{id}/rerun-failed-jobs` on a red `claim` run. *Changes the
-   decision:* if refused, a `/release` that frees a blocked pull request does not re-run its check,
-   and the author pushes or edits the PR body instead. The fixed message then says so.
-5. **Admin bypass with a queue.** On the probe repository with probe 1's active queue, `gh pr merge --admin
-   --merge` with the queue active. *Changes the decision:* if it enqueues instead of merging,
-   `hack/pr-merge.sh --admin` and the sensitive-path admin merges need a new path, which is written
-   up before the queue is turned on.
+   maintainers and exit 0. The first real outsider `/claim` is the test. Whether GitHub silently drops
+   an assignee it refuses also stays open; it changes only the mirror text.
+4. **Re-running the `claim` check with `GITHUB_TOKEN`: decision 1 stands.** `POST
+   actions/runs/{id}/rerun-failed-jobs` with `actions: write` answered 201, and attempt 2 ran as
+   `github-actions[bot]`.
+5. **Admin bypass with a queue: `hack/pr-merge.sh --admin` keeps working.** With the queue active,
+   `gh pr merge --admin --merge` merged directly, without enqueueing; the result is a merge commit
+   with two parents.
 
 ## Alternatives considered
 
