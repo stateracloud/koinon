@@ -154,9 +154,14 @@ fi
 if [[ "$SKIP_BUILD" != 1 ]]; then
   arch=$(go env GOARCH)
   step "Koinon images (ko, linux/$arch) into kind"
+  # The chart's images are <image.registry>/api, /reconciler and /agentd (#167), so each is built --bare
+  # into its own repository; the fakes keep ko's import-path names.
+  for pair in api:./cmd/koinon-api reconciler:./cmd/koinon-reconciler agentd:./cmd/koinon-agentd; do
+    KO_DOCKER_REPO="kind.local/${pair%%:*}" KIND_CLUSTER_NAME="$CLUSTER" "${KO:-ko}" build --bare --tags e2e \
+      --platform "linux/$arch" "${pair#*:}"
+  done
   KO_DOCKER_REPO=kind.local KIND_CLUSTER_NAME="$CLUSTER" "${KO:-ko}" build --base-import-paths --tags e2e \
-    --platform "linux/$arch" ./cmd/koinon-api ./cmd/koinon-reconciler ./cmd/koinon-agentd \
-    ./cmd/koinon-fakemodel ./cmd/koinon-fakegithub ./cmd/koinon-fakemcp
+    --platform "linux/$arch" ./cmd/koinon-fakemodel ./cmd/koinon-fakegithub ./cmd/koinon-fakemcp
   done_step "Images: ko build and load (6 binaries)"
 
   step "OpenCode flavor into kind"
@@ -181,7 +186,7 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
   fi
   if [[ $pulled == 1 ]]; then
     echo "flavor image $FLAVOR_PULL_REPO:$flavor_tag pulled"
-    docker tag "$FLAVOR_PULL_REPO:$flavor_tag" kind.local/flavor-opencode:e2e
+    docker tag "$FLAVOR_PULL_REPO:$flavor_tag" kind.local/flavors/opencode:e2e
   else
     # GITHUB_TOKEN (CI) authenticates the Dockerfile's GitHub release downloads as a BuildKit secret (#145).
     secret=()
@@ -190,9 +195,9 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
     cache=()
     [[ -z ${FLAVOR_CACHE:-} || ! -d $FLAVOR_CACHE/opencode ]] || cache=(--cache-from "type=local,src=$FLAVOR_CACHE/opencode")
     docker buildx build --load --build-context common=flavors/common "${secret[@]}" "${cache[@]}" \
-      --tag kind.local/flavor-opencode:e2e flavors/opencode
+      --tag kind.local/flavors/opencode:e2e flavors/opencode
   fi
-  kind load docker-image --name "$CLUSTER" kind.local/flavor-opencode:e2e
+  kind load docker-image --name "$CLUSTER" kind.local/flavors/opencode:e2e
   done_step "Image: OpenCode flavor (pull or buildx) and kind load"
 fi
 

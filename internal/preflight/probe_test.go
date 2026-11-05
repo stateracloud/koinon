@@ -78,7 +78,7 @@ var _ = Describe("KubeProber", func() {
 	prober := func() preflight.KubeProber {
 		return preflight.KubeProber{
 			Client: client, Namespace: "koinon", NamePrefix: "koinon-preflight-probe",
-			Image: "ghcr.io/stateracloud/koinon-api:0.1.0", ImagePullSecrets: []string{"ghcr"},
+			Image: "ghcr.io/stateracloud/koinon/api:0.1.0", ImagePullSecrets: []string{"ghcr"},
 			RuntimeClassName: "kata", Labels: map[string]string{"app.kubernetes.io/component": "preflight-probe"},
 			Timeout: time.Second, PollInterval: 10 * time.Millisecond,
 			Logs: func(_ context.Context, ns, name string) (string, error) {
@@ -116,7 +116,7 @@ var _ = Describe("KubeProber", func() {
 		Expect(created.Spec.SecurityContext.SeccompProfile.Type).To(Equal(corev1.SeccompProfileTypeRuntimeDefault))
 		Expect(created.Labels).To(HaveKeyWithValue("app.kubernetes.io/component", "preflight-probe"))
 		ctr := created.Spec.Containers[0]
-		Expect(ctr.Image).To(Equal("ghcr.io/stateracloud/koinon-api:0.1.0"))
+		Expect(ctr.Image).To(Equal("ghcr.io/stateracloud/koinon/api:0.1.0"))
 		Expect(ctr.Args).To(Equal([]string{"preflight", "probe"}))
 		Expect(*ctr.SecurityContext.Privileged).To(BeFalse())
 		Expect(*ctr.SecurityContext.AllowPrivilegeEscalation).To(BeFalse())

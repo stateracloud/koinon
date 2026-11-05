@@ -991,7 +991,7 @@ jobs:
           path: ${{ runner.temp }}/flavor-cache
           key: flavors-${{ hashFiles('flavors/**') }}
           restore-keys: flavors-
-      - name: Push ghcr.io/<repo>/flavor-opencode:<content tag>
+      - name: Push ghcr.io/<repo>/flavors/opencode:<content tag>
         id: build
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -1000,7 +1000,7 @@ jobs:
         run: |
           echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           tag=$(hack/flavor-tag.sh opencode)
-          image="ghcr.io/$REPO/flavor-opencode:$tag"
+          image="ghcr.io/$REPO/flavors/opencode:$tag"
           if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
             echo "$image already exists"
             exit 0

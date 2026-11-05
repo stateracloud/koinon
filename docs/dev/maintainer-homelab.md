@@ -237,7 +237,7 @@ With `crane` and `jq` installed and `docker login` done for both registries:
 hack/mirror-release.sh 0.1.0-rc.1 <registry host from lab.env>/koinon
 ```
 
-It copies the four images (the three Go images and `flavor-opencode`, every platform, plus any
+It copies the four images (the three Go images and `flavors/opencode`, every platform, plus any
 cosign signature, attestation and SBOM tags) and the chart to `<registry>/<name>:<version>` and `<registry>/charts/koinon:<version>`. The script
 uses the credentials in the docker config and never prints them. Cosign 3 stores its bundles as
 OCI referrers; the script copies them only where they also exist under the `sha256-<hex>` tag, so
