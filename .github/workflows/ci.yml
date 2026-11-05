@@ -703,6 +703,7 @@ jobs:
         run: |
           sudo locale-gen en_US.UTF-8
           hack/flavor-tag-test.sh
+      - run: hack/koinon-fetch-test.sh
       - run: hack/e2e-remote-test.sh
       - run: hack/versions-check-test.sh
       - run: hack/versions-check.sh
@@ -765,15 +766,28 @@ jobs:
       # The docker-container driver is needed for the local layer cache below; --load still puts
       # the images in the runner's Docker store, where the suite looks for them.
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Restored everywhere, saved only by pushes to main (the save step below), so a pull request
+      # never writes the cache main reads (#145). The key is the build inputs' hash; a changed input
+      # starts from the newest older entry through the restore prefix.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: flavorcache
         with:
           path: ${{ runner.temp }}/flavor-cache
           key: flavors-${{ hashFiles('flavors/**') }}
           restore-keys: flavors-
+      # GITHUB_TOKEN authenticates the Dockerfile's GitHub release downloads as a BuildKit secret
+      # (make flavors passes it); anonymous downloads intermittently fail from shared runner IPs.
       - run: make flavors FLAVOR_CACHE=${{ runner.temp }}/flavor-cache
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - run: go test -count=1 ./test/flavors/...
         env:
           KOINON_REQUIRE: docker
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.flavorcache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/flavor-cache
+          key: flavors-${{ hashFiles('flavors/**') }}
 
   # On main only: publish the flavor image under its content tag (hack/flavor-tag.sh) so the kind
   # e2e pulls it instead of building it. A separate job, so only it holds packages: write and
@@ -794,11 +808,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: flavorcache
         with:
           path: ${{ runner.temp }}/flavor-cache
           key: flavors-${{ hashFiles('flavors/**') }}
           restore-keys: flavors-
       - name: Push ghcr.io/<repo>/flavor-opencode:<content tag>
+        id: build
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -811,6 +827,21 @@ jobs:
             echo "$image already exists"
             exit 0
           fi
-          docker buildx build --push --build-context common=flavors/common \
+          secret=()
+          [[ -z ${GITHUB_TOKEN:-} ]] || secret=(--secret "id=github_token,env=GITHUB_TOKEN")
+          # The new cache goes to its own directory (buildx must not read and write one), then
+          # replaces the restored one for the save step below.
+          docker buildx build --push --build-context common=flavors/common "${secret[@]}" \
             --cache-from "type=local,src=$RUNNER_TEMP/flavor-cache/opencode" \
+            --cache-to "type=local,dest=$RUNNER_TEMP/flavor-cache-new/opencode,mode=max" \
             --tag "$image" flavors/opencode
+          rm -rf "$RUNNER_TEMP/flavor-cache"
+          mv "$RUNNER_TEMP/flavor-cache-new" "$RUNNER_TEMP/flavor-cache"
+          echo "cache_written=true" >>"$GITHUB_OUTPUT"
+      # Main saves what its builds wrote: this job builds on every main push that changes the
+      # flavors, also the ones where the flavors job was skipped (#595).
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.build.outputs.cache_written == 'true' && steps.flavorcache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/flavor-cache
+          key: flavors-${{ hashFiles('flavors/**') }}

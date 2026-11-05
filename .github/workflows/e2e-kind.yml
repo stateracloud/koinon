@@ -195,6 +195,16 @@ jobs:
           tar xzf "$RUNNER_TEMP/ko.tgz" -C "$RUNNER_TEMP/bin" ko
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
+      # The flavor image is built here when the pull below misses. The docker-container driver is
+      # needed to import the layer cache the flavors job saved on main; this job only restores it
+      # (a pull request never writes it, #145).
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/flavor-cache
+          key: flavors-${{ hashFiles('flavors/**') }}
+          restore-keys: flavors-
+
       - name: Log in to GHCR (reads the flavor image; a miss falls back to building it)
         env:
           GHCR_TOKEN: ${{ github.token }}
@@ -215,6 +225,10 @@ jobs:
           KEEP: "1"
           # Pull the flavor image the flavors job pushed for this flavors/ tree, if there is one.
           FLAVOR_PULL_REPO: ghcr.io/${{ github.repository }}/flavor-opencode
+          # A flavor build (the pull missed) imports the restored layer cache and authenticates the
+          # Dockerfile's GitHub release downloads with the workflow token as a BuildKit secret.
+          FLAVOR_CACHE: ${{ runner.temp }}/flavor-cache
+          GITHUB_TOKEN: ${{ github.token }}
         run: test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
 
       - name: Timings

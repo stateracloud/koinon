@@ -9,7 +9,7 @@
 #     trailing `# vX.Y.Z` comment; the younger counts; a tag that does not point at the SHA warns)
 #   - any non-doc file: image references pinned by digest (`name:tag@sha256:...`): the registry's
 #     build time of the newest platform image
-#   - Dockerfile `ADD` URLs of GitHub release assets, raw.githubusercontent.com tags and npm tarballs
+#   - Dockerfile `ADD` and `koinon-fetch` URLs of GitHub release assets, raw.githubusercontent.com tags and npm tarballs
 #   - the `<TOOL>_VERSION` pins in hack/versions.env (the release's publish time)
 #   - the ADR 0077 platform pins in test/e2e/kind/up.sh, and any line that carries a marker
 #     `# dep-age: github=<owner/repo> [tag-prefix=<prefix>]` (use it where release/versions.yaml

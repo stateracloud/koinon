@@ -5,6 +5,9 @@
 # OpenShell's non-TTY exec. No Koinon binary is in this image (ADR 0049).
 #
 # Build: make flavor-opencode (docker buildx, linux/amd64 and linux/arm64).
+# GitHub release downloads use the optional BuildKit secret github_token (--secret id=github_token,
+# env=GITHUB_TOKEN; CI passes its token, #145). Without it they are anonymous. It is never an ARG
+# or ENV and no layer keeps it.
 
 # OpenShell's default sandbox base (ADR 0035), multi-arch index digest, checked 2026-10-22.
 ARG BASE=nvcr.io/nvidia/base/ubuntu:24.04@sha256:7e0f726d635d440d28a7f18e6498d3bdb76c7038bd4c90a090c21eb7c9f40686
@@ -38,28 +41,48 @@ RUN tar -xzf /tmp/opencode.tgz -C /tmp package/bin/opencode \
 #   yq 4.54.1         MIT                mikefarah/yq, static Go build
 #   ast-grep 0.51.0   MIT                glibc build; `sg` is left out, it would shadow /usr/bin/sg
 #   DuckDB CLI 2.0.0  MIT                glibc build; reached through the koinon-duckdb wrapper
-FROM ${BASE} AS fetch-tools-amd64
-ADD --checksum=sha256:33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c \
+# The downloader for the GitHub release assets below (flavors/common/koinon-fetch): curl with the
+# build's optional github_token secret (#145), then a sha256sum check against the pin. The base has
+# no curl or CA bundle; like ca-bootstrap this stage takes both from the archive over HTTP, and it
+# never reaches the final image, so its apt state does not matter to the result.
+FROM ${BASE} AS dl
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=common --chmod=0755 koinon-fetch /usr/local/bin/koinon-fetch
+
+FROM dl AS fetch-tools-amd64
+RUN --mount=type=secret,id=github_token,required=false \
+    koinon-fetch 33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c \
     https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz /tmp/rg.tgz
-ADD --checksum=sha256:761c72dc8e120d85b22292063be8a796e2eeb20eb3e4f38b8fa2343ccf3514a7 \
+RUN --mount=type=secret,id=github_token,required=false \
+    koinon-fetch 761c72dc8e120d85b22292063be8a796e2eeb20eb3e4f38b8fa2343ccf3514a7 \
     https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-x86_64-unknown-linux-musl.tar.gz /tmp/fd.tgz
-ADD --checksum=sha256:e68a456f90c577af3fe4960184b3a3cf5c461e0348407c10f107da3a5fec8972 \
+RUN --mount=type=secret,id=github_token,required=false \
+    koinon-fetch e68a456f90c577af3fe4960184b3a3cf5c461e0348407c10f107da3a5fec8972 \
     https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_amd64.tar.gz /tmp/yq.tgz
-ADD --checksum=sha256:a7eead5552d3a8daad70f5d50d935da44bd0c138e946b5b0a96b1d38169fa639 \
+RUN --mount=type=secret,id=github_token,required=false \
+    koinon-fetch a7eead5552d3a8daad70f5d50d935da44bd0c138e946b5b0a96b1d38169fa639 \
     https://github.com/ast-grep/ast-grep/releases/download/0.51.0/app-x86_64-unknown-linux-gnu.zip /tmp/ast-grep.zip
-ADD --checksum=sha256:c6507206baf7793c6013dbd82368469a45f20dc0e17a6f92f204602f652ed2bc \
+RUN --mount=type=secret,id=github_token,required=false \
+    koinon-fetch c6507206baf7793c6013dbd82368469a45f20dc0e17a6f92f204602f652ed2bc \
     https://github.com/duckdb/duckdb/releases/download/v2.0.0/duckdb-cli-linux-amd64.tar.gz /tmp/duckdb.tgz
 
-FROM ${BASE} AS fetch-tools-arm64
-ADD --checksum=sha256:800b1e7206afe799dfb5a6901f23147cfaabe0e52210538100f61e86e1740915 \
+FROM dl AS fetch-tools-arm64
+RUN --mount=type=secret,id=github_token,required=false \
+    koinon-fetch 800b1e7206afe799dfb5a6901f23147cfaabe0e52210538100f61e86e1740915 \
     https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-musl.tar.gz /tmp/rg.tgz
-ADD --checksum=sha256:d76c4317f7d5dba69f8a2a15856c90c777e7f0dd4e85f0de8c76de6992c374d4 \
+RUN --mount=type=secret,id=github_token,required=false \
+    koinon-fetch d76c4317f7d5dba69f8a2a15856c90c777e7f0dd4e85f0de8c76de6992c374d4 \
     https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-aarch64-unknown-linux-musl.tar.gz /tmp/fd.tgz
-ADD --checksum=sha256:8c27f6e7476fb5acefb9352e3d30f6bc2dc93f1956eb92e8da727173fb7ec6d3 \
+RUN --mount=type=secret,id=github_token,required=false \
+    koinon-fetch 8c27f6e7476fb5acefb9352e3d30f6bc2dc93f1956eb92e8da727173fb7ec6d3 \
     https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_arm64.tar.gz /tmp/yq.tgz
-ADD --checksum=sha256:73af0ebe5958acee012754a5b2826a186580ef83333092408a7a01096fc30b8b \
+RUN --mount=type=secret,id=github_token,required=false \
+    koinon-fetch 73af0ebe5958acee012754a5b2826a186580ef83333092408a7a01096fc30b8b \
     https://github.com/ast-grep/ast-grep/releases/download/0.51.0/app-aarch64-unknown-linux-gnu.zip /tmp/ast-grep.zip
-ADD --checksum=sha256:859e1875d2a9515fbb4bf8871061437a14af82320da68c753f094c4b776348fe \
+RUN --mount=type=secret,id=github_token,required=false \
+    koinon-fetch 859e1875d2a9515fbb4bf8871061437a14af82320da68c753f094c4b776348fe \
     https://github.com/duckdb/duckdb/releases/download/v2.0.0/duckdb-cli-linux-arm64.tar.gz /tmp/duckdb.tgz
 
 # The tarballs of yq, ast-grep and DuckDB carry no licence file, so the MIT texts come from the

@@ -27,6 +27,7 @@
 # deleted at the end unless KEEP=1.
 #
 #   SUITE_LABEL=smoke runs only the Ginkgo specs with that label (SUITE=go; smoke is steps 1-6).
+#   FLAVOR_CACHE=<dir> imports the flavor build's layer cache from <dir>/opencode (needs the docker-container driver).
 #   FLAVOR_PULL_REPO=<repo> pulls the flavor image <repo>:<hack/flavor-tag.sh tag> instead of building it.
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 #
@@ -182,7 +183,13 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
     echo "flavor image $FLAVOR_PULL_REPO:$flavor_tag pulled"
     docker tag "$FLAVOR_PULL_REPO:$flavor_tag" kind.local/flavor-opencode:e2e
   else
-    docker buildx build --load --build-context common=flavors/common \
+    # GITHUB_TOKEN (CI) authenticates the Dockerfile's GitHub release downloads as a BuildKit secret (#145).
+    secret=()
+    [[ -z ${GITHUB_TOKEN:-} ]] || secret=(--secret "id=github_token,env=GITHUB_TOKEN")
+    # FLAVOR_CACHE=<dir> imports the layer cache CI restored there (import only; main's flavors job saves it).
+    cache=()
+    [[ -z ${FLAVOR_CACHE:-} || ! -d $FLAVOR_CACHE/opencode ]] || cache=(--cache-from "type=local,src=$FLAVOR_CACHE/opencode")
+    docker buildx build --load --build-context common=flavors/common "${secret[@]}" "${cache[@]}" \
       --tag kind.local/flavor-opencode:e2e flavors/opencode
   fi
   kind load docker-image --name "$CLUSTER" kind.local/flavor-opencode:e2e
