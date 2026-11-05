@@ -47,9 +47,10 @@ check() {
   ' "$1"
 }
 
-if [ "${1:-}" = --self-test ]; then
+self_test() {
+  local tmp
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/apt-retries-test.XXXXXX")
-  trap 'rm -rf "$tmp"' EXIT
+  trap 'rm -rf "$tmp"' RETURN
   printf 'FROM x\nRUN apt-get update \\\n && apt-get install -y curl\n' >"$tmp/bad"
   printf 'FROM x\nRUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update \\\n && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y curl\n' >"$tmp/good"
   printf 'FROM x\nRUN npx playwright install --with-deps chromium\n' >"$tmp/deps"
@@ -59,8 +60,12 @@ if [ "${1:-}" = --self-test ]; then
   [ "$(check "$tmp/deps" | wc -l)" -eq 1 ] || { echo "self-test: --with-deps without snippet not flagged" >&2; exit 1; }
   [ "$(check "$tmp/second" | wc -l)" -eq 1 ] || { echo "self-test: second apt-get on a line not flagged" >&2; exit 1; }
   echo "apt-retries-test self-test: ok"
-  exit 0
-fi
+}
+
+# The checker is proven on bad input before it judges the tree, so a green run never rests on a
+# broken checker (and the self-test needs mktemp, which the run then stops without).
+self_test
+[ "${1:-}" != --self-test ] || exit 0
 
 cd "$root"
 n=0
