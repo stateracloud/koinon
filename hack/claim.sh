@@ -431,6 +431,16 @@ claim_liveness() {
 # ---- board mirrors (best effort) ----
 
 PROJECT_META=
+# board_unreadable: the project could not be read. In Actions that is the expected state (GITHUB_TOKEN
+# cannot read or write an organization Project v2; ADR 0094 decision 3): one log line, no warning, and
+# the board's own workflows set Done. Elsewhere it is a missing token scope.
+board_unreadable() {
+  if [[ ${GITHUB_ACTIONS:-} == true ]]; then
+    echo "claim: board update skipped: the workflow token cannot write the organization project (the board workflows set Done)"
+  else
+    warn "cannot read project $PROJECT_OWNER/$PROJECT (gh auth refresh -s project?)"
+  fi
+}
 project_meta() {
   [[ $PROJECT != none ]] || return 1
   if [[ -z $PROJECT_META ]]; then
@@ -438,7 +448,7 @@ project_meta() {
     PROJECT_META=$(gh api graphql -f o="$PROJECT_OWNER" -F n="$PROJECT" -f query='
       query($o:String!,$n:Int!){organization(login:$o){projectV2(number:$n){id fields(first:50){nodes{
         ... on ProjectV2SingleSelectField{id name options{id name}} ... on ProjectV2Field{id name}}}}}}' \
-      --jq .data.organization.projectV2 2>/dev/null) || { warn "cannot read project $PROJECT_OWNER/$PROJECT (gh auth refresh -s project?)"; PROJECT=none; return 1; }
+      --jq .data.organization.projectV2 2>/dev/null) || { board_unreadable; PROJECT=none; return 1; }
   fi
 }
 

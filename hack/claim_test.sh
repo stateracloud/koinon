@@ -496,6 +496,44 @@ r=$(lanecmd "$same_lane" adopt --from old)
 eq "adopt respects the session cap per lane" "$(rc_of "$r")" 2
 rm -f "$LOG"
 
+# ---- board skip in the token-limited jobs (ADR 0094 decision 3, #169) ----
+# release-pr and the sweeper run on GITHUB_TOKEN, which cannot read an organization project. The board
+# write must skip with one log line and the release must still complete.
+board_release() { # PROJECT_VALUE: release one open-issue claim with the real set_status; prints output and rc
+  local out rc=0
+  out=$( {
+    GITHUB_ACTIONS=true; PROJECT=$1; PROJECT_OWNER=acme; PROJECT_META=; REPO=acme/koinon; OWNER=acme; NAME=koinon
+    GH_CALLS=0
+    gh() {
+      if [[ $1 == api && $2 == graphql ]]; then echo "graphql" >>"$LOG"; echo "Resource not accessible by integration" >&2; return 1; fi
+      if [[ $1 == api && $2 == repos/acme/koinon/issues/7 ]]; then echo open; return 0; fi
+      return 0
+    }
+    server_now() { echo 1000; }
+    write_claim() { echo "write $1 $2 by=${9:-}" >>"$LOG"; return 0; }
+    unassign() { :; }
+    drop_label() { :; }
+    upsert_comment() { echo "comment $1" >>"$LOG"; }
+    c='{"issue":7,"sha":"s7","state":"held","holder":"alice/mac/s1","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"100","note":""}'
+    do_release_claim "$c" "pull request #100 closed" 0 pr-close
+  } 2>&1) || rc=$?
+  echo "$out"
+  echo "rc=$rc"
+}
+: >"$LOG"
+r=$(board_release acme-board)
+eq "release with an unreadable board still releases (rc 0)" "$(rc_of "$r")" 0
+eq "release records released_by pr-close" "$(grep -c 'write 7 released by=pr-close' "$LOG")" 1
+eq "release still updates the marker comment after the board skip" "$(grep -c 'comment 7' "$LOG")" 1
+eq "the board skip logs exactly one line" "$(grep -c 'board update skipped' <<<"$r")" 1
+eq "the board skip is not a warning and does not ask for gh auth refresh" "$(grep -c 'warning\|auth refresh' <<<"$r")" 0
+: >"$LOG"
+r=$(board_release none)
+eq "PROJECT=none releases without touching the board" "$(rc_of "$r")" 0
+eq "PROJECT=none makes no graphql call" "$(grep -c graphql "$LOG")" 0
+eq "PROJECT=none logs nothing about the board" "$(grep -c 'board' <<<"$r")" 0
+rm -f "$LOG"
+
 if [[ -z ${KOINON_CLAIM_TEST_REPO:-} ]]; then
   echo "(set KOINON_CLAIM_TEST_REPO=owner/scratch-repo to run the live tests)"
   exit "$fail"
