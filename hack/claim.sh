@@ -1147,10 +1147,10 @@ cmd_check_pr() {
   return "$fail"
 }
 
-# ADR_PR_JQ: the ADR numbers that open pull requests ADD, from the pages of open_pr_adr_numbers (slurped).
+# ADR_PR_JQ: the ADR numbers that open pull requests ADD (added, renamed or copied files), from the pages of open_pr_adr_numbers (slurped).
 # shellcheck disable=SC2016
 ADR_PR_JQ='[.[].data.repository.pullRequests.nodes[] | .files.nodes[]
-  | select(.changeType == "ADDED") | .path | capture("^docs/adr/(?<n>[0-9]{4})-[^/]*\\.md$").n] | unique | .[]'
+  | select(.changeType == "ADDED" or .changeType == "RENAMED" or .changeType == "COPIED") | .path | capture("^docs/adr/(?<n>[0-9]{4})-[^/]*\\.md$").n] | unique | .[]'
 
 # open_pr_adr_numbers -> the four-digit ADR numbers that open pull requests add (ADR 0094 decision 6),
 # one per line. An API error dies: a number handed out from a partial view is how 0093 was duplicated.
@@ -1166,7 +1166,7 @@ open_pr_adr_numbers() {
     die "cannot list the open pull requests' files (API error); retry, no ADR number was reserved"
   jq -r "$ADR_PR_JQ" <<<"$pages" || die "cannot read the open pull requests' files"
   for p in $(jq -r '[.[].data.repository.pullRequests.nodes[] | select(.files.pageInfo.hasNextPage) | .number] | .[]' <<<"$pages"); do
-    gh api --paginate "repos/$REPO/pulls/$p/files" --jq '.[] | select(.status == "added") | .filename' |
+    gh api --paginate "repos/$REPO/pulls/$p/files" --jq '.[] | select(.status == "added" or .status == "renamed" or .status == "copied") | .filename' |
       { grep -oE '^docs/adr/[0-9]{4}-[^/]*\.md$' || true; } | cut -c10-13 ||
       die "cannot list the files of pull request #$p (API error); retry"
   done

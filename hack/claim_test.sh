@@ -118,10 +118,10 @@ eq "next adr number from none" "$(next_adr_number)" "0001"
 # ADR 0094 decision 6: numbers that open pull requests ADD count, nothing else does.
 adr_page='[{"data":{"repository":{"pullRequests":{"nodes":[
  {"number":136,"files":{"pageInfo":{"hasNextPage":false},"nodes":[{"path":"docs/adr/0093-koinon-core-opencode-plugin.md","changeType":"ADDED"},{"path":"docs/adr/README.md","changeType":"MODIFIED"}]}},
- {"number":137,"files":{"pageInfo":{"hasNextPage":false},"nodes":[{"path":"docs/adr/0070-old.md","changeType":"MODIFIED"},{"path":"docs/adr/0071-gone.md","changeType":"DELETED"},{"path":"docs/adr/0095-x.md","changeType":"ADDED"},{"path":"docs/other/0099-nope.md","changeType":"ADDED"}]}}]}}}}]'
-eq "open pull requests: only ADDED docs/adr files count" "$(jq -r "$ADR_PR_JQ" <<<"$adr_page" | paste -sd, -)" "0093,0095"
+ {"number":137,"files":{"pageInfo":{"hasNextPage":false},"nodes":[{"path":"docs/adr/0070-old.md","changeType":"MODIFIED"},{"path":"docs/adr/0071-gone.md","changeType":"DELETED"},{"path":"docs/adr/0095-x.md","changeType":"ADDED"},{"path":"docs/other/0099-nope.md","changeType":"ADDED"},{"path":"docs/adr/0097-renamed.md","changeType":"RENAMED"}]}}]}}}}]'
+eq "open pull requests: ADDED and RENAMED docs/adr files count" "$(jq -r "$ADR_PR_JQ" <<<"$adr_page" | paste -sd, -)" "0093,0095,0097"
 # shellcheck disable=SC2046
-eq "adr number counts an open pull request's file" "$(next_adr_number 0092 $(jq -r "$ADR_PR_JQ" <<<"$adr_page"))" "0096"
+eq "adr number counts an open pull request's file" "$(next_adr_number 0092 $(jq -r "$ADR_PR_JQ" <<<"$adr_page"))" "0098"
 eq "adr number: no open pull request adds one" "$(jq -r "$ADR_PR_JQ" <<<'[{"data":{"repository":{"pullRequests":{"nodes":[]}}}}]' | wc -l | tr -d ' ')" "0"
 
 for t in "chore: x" "chore(ci): x" "ci: pin" "build(deps): bump" "build(deps-dev): bump" "chore!: x"; do
