@@ -31,5 +31,6 @@ Thanks to [@thanker](https://github.com/thanker) for the logo.
 '
 eq "only the maintainers table" "$(printf '%s' "$fixture" | "$here/waiver-approvers.sh" - | paste -sd, -)" "alice,bob-2"
 eq "the real file has the project lead" "$("$here/waiver-approvers.sh" "$here/../MAINTAINERS.md" | grep -cx procoduck)" "1"
+eq "the real file has the second maintainer" "$("$here/waiver-approvers.sh" "$here/../MAINTAINERS.md" | grep -cx ovirandunu)" "1"
 eq "no table, no approvers" "$(printf '# Maintainers\n\n[@x](https://github.com/x)\n' | "$here/waiver-approvers.sh" - | wc -l | tr -d ' ')" "0"
 exit $fail

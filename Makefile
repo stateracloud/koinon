@@ -161,6 +161,10 @@ test-e2e-web: ## Browser e2e (Playwright, web/e2e-real) against a real install o
 ENVTEST_K8S_VERSION ?= 1.37.0
 SETUP_ENVTEST       ?= $(GO) run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2
 
+.PHONY: envtest-assets
+envtest-assets: ## Download (or find) the envtest API server binaries and print their directory
+	@$(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path
+
 .PHONY: test-admission
 test-admission: ## Run the escape suite's admission policy cases against envtest (needs helm)
 	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \

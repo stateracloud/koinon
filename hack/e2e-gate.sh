@@ -39,9 +39,15 @@ DECIDE=${DECIDE:-} QUICKSTART=${QUICKSTART:-} REQUIRED=${REQUIRED:-false}
 SHA=${SHA:-} BRANCH=${BRANCH:-<branch>} GH=${GH:-gh} GH_REPO=${GH_REPO:-}
 
 echo "decide: $DECIDE, quickstart: $QUICKSTART, e2e required: ${REQUIRED:-false}"
-for r in "$DECIDE" "$QUICKSTART"; do
-  case $r in success | skipped) ;; *) echo "::error::the e2e did not pass ($r)"; exit 1 ;; esac
-done
+case $DECIDE in success | skipped) ;; *) echo "::error::the e2e did not pass (decide: $DECIDE)"; exit 1 ;; esac
+case $QUICKSTART in
+success | skipped) ;;
+# This run's own quickstart failed or was cancelled (a flake, say). When the e2e is required, the
+# lab stays an accelerator: fall through to the evidence checks (another run's quickstart, e2e-lab)
+# instead of failing here; with none, the gate still fails below.
+failure | cancelled) [[ $REQUIRED == true ]] || { echo "::error::the e2e did not pass (quickstart: $QUICKSTART)"; exit 1; } ;;
+*) echo "::error::the e2e did not pass (quickstart: $QUICKSTART)"; exit 1 ;;
+esac
 [[ $REQUIRED == true ]] || exit 0
 
 pass() {
@@ -87,7 +93,7 @@ else
   lab="" laberr=""
 fi
 
-msg="This change needs the kind e2e (hack/needs-e2e.sh, or the e2e label) and the head ${SHA:0:12} has no passing one: no successful quickstart job in this or another e2e-kind run${lab:+, e2e-lab is $lab}${laberr:+, and e2e-lab could not be read ($laberr; the job needs statuses: read)}."
+msg="This change needs the kind e2e (hack/needs-e2e.sh, or the e2e label) and the head ${SHA:0:12} has no passing one: no successful quickstart job in this${QUICKSTART:+ ($QUICKSTART)} or another e2e-kind run${lab:+, e2e-lab is $lab}${laberr:+, and e2e-lab could not be read ($laberr; the job needs statuses: read)}."
 how="Produce one: run \`hack/e2e-remote.sh --argo\` (the lab posts the status e2e-lab), or run \`gh workflow run e2e-kind.yml --ref $BRANCH\` on GitHub. Then re-run this job: \"Re-run failed jobs\" on this e2e-kind run (hack/e2e-status.sh and a dispatched run's result job do it for you)."
 echo "::error::$msg"
 echo "$how"
