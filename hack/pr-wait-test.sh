@@ -427,18 +427,14 @@ printf '[{"databaseId":61,"createdAt":"2026-11-01T10:00:00Z"},{"databaseId":62,"
 printf 'go\nweb\n' >"$FAKE_DIR/rules"
 run 7 --checks --interval 0
 expect "after ready: a draft run cancelled after the ready event is superseded" 0 "checks 2/2 green"
-# (#661) a draft-era run re-run by hand after the ready event counts as a ready run
-rr_go=$(cr_at go SUCCESS 61 2026-11-01T11:10:00Z | sed 's/^{/{"workflowName":"ci",/')
-seq_set "$(rdh "$rr_go")"
+# (#676) a draft-era run re-run by hand after the ready event replays draft=true (red); it is ignored
+rr_go=$(cr_at go FAILURE 61 2026-11-01T11:10:00Z | sed 's/^{/{"workflowName":"ci",/')
+seq_set "$(rdh "$rr_go,$new_go")"
 printf '2026-11-01T11:00:00Z\n' >"$FAKE_DIR/ready"
 printf 'go\n' >"$FAKE_DIR/rules"
-printf '[{"databaseId":61,"createdAt":"2026-11-01T10:00:00Z","startedAt":"2026-11-01T11:10:00Z"}]' >"$FAKE_DIR/ciruns"
+printf '[{"databaseId":61,"createdAt":"2026-11-01T10:00:00Z","startedAt":"2026-11-01T11:10:00Z"},{"databaseId":62,"createdAt":"2026-11-01T11:00:05Z","startedAt":"2026-11-01T11:00:05Z"}]' >"$FAKE_DIR/ciruns"
 run 7 --checks --interval 0
-expect "after ready: a re-run draft-era run is kept" 0 "checks 1/1 green"
-printf '[{"databaseId":61,"createdAt":"2026-11-01T10:00:00Z","startedAt":"2026-11-01T10:00:00Z"}]' >"$FAKE_DIR/ciruns"
-run 7 --checks --interval 0 --timeout 0
-expect "after ready: the same run without a re-run is still dropped" 2 "waiting for the ready run
-TIMEOUT"
+expect "after ready: a re-run draft-era run is ignored, not reported FAILED" 0 "checks 1/1 green"
 # clock skew: a ready run created 20 s before the ready event is kept (30 s slack)
 sk_go=$(cr_at go SUCCESS 62 2026-11-01T10:59:45Z | sed 's/^{/{"workflowName":"ci",/')
 seq_set "$(rdh "$sk_go")"
