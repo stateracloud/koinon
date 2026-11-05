@@ -5,10 +5,13 @@
 # downloads: the model is the fake model server and GitHub is the fake GitHub, both in the cluster.
 #
 # When it runs (the `decide` job, hack/e2e-decide.sh):
-#   - pull requests: only if they change the e2e's own files (hack/needs-e2e.sh --forced-only) or
-#     carry the `e2e` label (read live, so `gh pr create --label e2e` counts on `opened`). A PR that
-#     is e2e-relevant by the full rule does not run it here, but its `e2e result` fails until the head
-#     has a green e2e (hack/e2e-remote.sh --argo, the label, or a dispatch).
+#   - pull requests: when the full rule (hack/needs-e2e.sh) says the change is e2e-relevant, the PR
+#     changes the e2e's own files or it carries the `e2e` label (read live, so `gh pr create --label e2e`
+#     counts on `opened`). Relevance alone runs it, so a fork PR (which cannot label, dispatch or post
+#     `e2e-lab`) can go green (issue #148). The label and the lab (hack/e2e-remote.sh --argo) are
+#     accelerators: the label forces a run for a change the rule thinks irrelevant, a green `e2e-lab`
+#     satisfies `e2e result` once this run's quickstart has finished; if that quickstart
+#     fails or is cancelled, hack/e2e-gate.sh still passes on the lab status or another run's quickstart.
 #     Label events do not start this workflow (koinon-private#468): adding `e2e` later dispatches it
 #     once on the head (e2e-label.yml, hack/e2e-label.sh), unless a run there is live or passed the
 #     e2e. To retry a red e2e: "Re-run failed jobs", remove and add the label, or
