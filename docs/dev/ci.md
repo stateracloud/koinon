@@ -270,6 +270,13 @@ analysers, generated code and fixtures excluded, no code formatters (a bot commi
 CI run on a new head) and Autofix only when a person clicks it. Read its PR comments as review
 input; make it required only by a decision recorded in an issue.
 
+CodeRabbit (GitHub App) is advisory too and reads `.coderabbit.yaml` (#184). Every built-in linter is
+off (CI runs them), there are no status checks or comments per push, and the summary stays in its own
+walkthrough comment. Reviews are manual by design (`auto_review.enabled: false`): `hack/ship.sh --ready`
+posts `@coderabbitai review` once per pushed head, and you can post it again after a push. Its only
+finishing touch is docstrings, delivered as a follow-up pull request when asked; nothing commits to
+the reviewed branch.
+
 Socket (GitHub App, #185) scans dependencies and reads `socket.yml` at the root: it runs on changes
 to `go.mod`, `go.sum`, `package.json`, `pnpm-lock.yaml` and workflows, skips spike code and
 fixtures, and posts PR alerts without a separate dependency overview comment. It is advisory like

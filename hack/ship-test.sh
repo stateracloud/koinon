@@ -36,8 +36,19 @@ case "$1 $2" in
 		echo "${FAKE_PR_URL:-}"
 	fi
 	;;
-"pr view") echo "${FAKE_PR_DRAFT:-true}" ;;
-"pr create") echo "https://example.invalid/o/r/pull/123" ;;
+"pr view")
+	if [[ " $* " == *" headRefOid,comments,commits "* ]]; then
+		# the CodeRabbit guard (#184): apply the caller's --jq to FAKE_CR_JSON ({comments, commits}); no file = a read failure
+		q=""
+		while [[ $# -gt 0 ]]; do [[ $1 == --jq ]] && q=$2; shift; done
+		[[ -n ${FAKE_CR_JSON:-} ]] || exit 1
+		jq -r "$q" <<<"$FAKE_CR_JSON"
+	else
+		echo "${FAKE_PR_DRAFT:-true}"
+	fi
+	;;
+"pr comment") exit "${FAKE_COMMENT_RC:-0}" ;;
+"pr create") echo "${FAKE_PR_CREATE_URL:-https://example.invalid/o/r/pull/123}" ;;
 "project item-add") exit "${FAKE_BOARD_RC:-0}" ;;
 esac
 exit 0
@@ -110,7 +121,7 @@ printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
 chmod +x "$tmp/failbin/mktemp"
 mktemp_fail_rc=0
 (cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(newwork)) >/dev/null 2>&1 || mktemp_fail_rc=$?
-reset_state() { : >"$FAKE_LOG"; unset FAKE_PR_URL FAKE_PR_JSON FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_SHIP_ALLOWED_EMAILS KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; echo 0 >"$FAKE_LAB_RC"; echo success >"$FAKE_LAB_STATE"; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_PR_URL FAKE_PR_JSON FAKE_CR_JSON FAKE_COMMENT_RC FAKE_PR_CREATE_URL FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_SHIP_ALLOWED_EMAILS KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; echo 0 >"$FAKE_LAB_RC"; echo success >"$FAKE_LAB_STATE"; }
 
 fail=0
 pass=0
@@ -562,6 +573,61 @@ check "push failed after ready: marked ready first" has '^gh pr ready 123' "$FAK
 check "push failed after ready: PR put back to draft" has '^gh pr ready --undo 123' "$FAKE_LOG"
 check "push failed after ready: the error says so" has 'put back to draft' "$tmp/o25"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x 2>/dev/null || true
+
+# 26. (#184) --ready asks CodeRabbit for a review once per head, only on stateracloud/koinon; a failure only warns
+cr_url=https://github.com/stateracloud/koinon/pull/123
+cr_ship() { # <tag> <cr json or empty> [comment rc] [again]: a fresh branch, ready PR, one new commit
+	reset_state
+	export FAKE_PR_URL=$cr_url FAKE_PR_DRAFT=true FAKE_PR_JSON='[{"number":123,"state":"OPEN","autoMergeRequest":null}]'
+	[[ -z $2 ]] || export FAKE_CR_JSON=$2
+	[[ -z ${3:-} ]] || export FAKE_COMMENT_RC=$3
+	w=$(newwork); cd "$w"
+	echo "$1" >"$1.txt"
+	if [[ -n ${4:-} ]]; then # not a new head: ship once, then ship again with nothing new
+		run "$tmp/o26$1-first" -m "feat: $1" --pr-title t --pr-body "$tmp/body.md" --ready >/dev/null
+		: >"$FAKE_LOG"
+	fi
+	run "$tmp/o26$1" -m "feat: $1" --pr-title t --pr-body "$tmp/body.md" --ready
+	git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
+}
+c_old='{"headRefOid":"h1","commits":[{"oid":"h1","committedDate":"2026-01-02T00:00:00Z"}],"comments":[{"body":"@coderabbitai review","createdAt":"2026-01-01T00:00:00Z"}]}'
+c_new='{"headRefOid":"h1","commits":[{"oid":"h1","committedDate":"2026-01-01T00:00:00Z"}],"comments":[{"body":"@coderabbitai review\n","createdAt":"2026-01-02T00:00:00Z"}]}'
+c_none='{"headRefOid":"h1","commits":[{"oid":"h1","committedDate":"2026-01-01T00:00:00Z"}],"comments":[{"body":"looks good","createdAt":"2026-01-02T00:00:00Z"}]}'
+rc=$(cr_ship none "$c_none")
+check "coderabbit: exit 0" eq "$rc" 0
+check "coderabbit: posts the review request" has '^gh pr comment https://github.com/stateracloud/koinon/pull/123 --body @coderabbitai review$' "$FAKE_LOG"
+check "coderabbit: says so" has '^coderabbit review requested$' "$tmp/o26none"
+rc=$(cr_ship fresh "$c_new")
+check "coderabbit: a just-pushed head posts even with a newer-dated request comment" has '^gh pr comment ' "$FAKE_LOG"
+rc=$(cr_ship old "$c_old" "" again)
+check "coderabbit: unchanged head, request dated before the head commit: posts" has '^gh pr comment ' "$FAKE_LOG"
+rc=$(cr_ship new "$c_new" "" again)
+check "coderabbit: already asked on this head: exit 0" eq "$rc" 0
+check "coderabbit: already asked on this head: no second comment" hasnt '^gh pr comment ' "$FAKE_LOG"
+check "coderabbit: already asked on this head: says so" has '^coderabbit review already requested on this head$' "$tmp/o26new"
+rc=$(cr_ship fail "$c_none" 1)
+check "coderabbit: a failed comment never fails ship" eq "$rc" 0
+check "coderabbit: a failed comment warns" has 'could not post @coderabbitai review' "$tmp/o26fail"
+rc=$(cr_ship rd "" "" again)
+check "coderabbit: unreadable comments never fail ship" eq "$rc" 0
+check "coderabbit: unreadable comments warn and post nothing" bash -c "grep -q 'could not read the comments' $tmp/o26rd && ! grep -q '^gh pr comment ' $FAKE_LOG"
+# another repository, and a pull request that is not marked ready: nothing is asked
+reset_state
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PR_JSON='[{"number":123,"state":"OPEN","autoMergeRequest":null}]' FAKE_CR_JSON=$c_none
+w=$(newwork); cd "$w"
+echo other >other.txt
+rc=$(run "$tmp/o26o" -m "feat: o" --pr-title t --pr-body "$tmp/body.md" --ready)
+check "coderabbit: other repository: exit 0" eq "$rc" 0
+check "coderabbit: other repository: no comment" hasnt '^gh pr comment ' "$FAKE_LOG"
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
+reset_state
+export FAKE_PR_URL=$cr_url FAKE_PR_JSON='[{"number":123,"state":"OPEN","autoMergeRequest":null}]' FAKE_CR_JSON=$c_none
+w=$(newwork); cd "$w"
+echo nr >nr.txt
+rc=$(run "$tmp/o26n" -m "feat: n" --pr-title t --pr-body "$tmp/body.md")
+check "coderabbit: without --ready: exit 0" eq "$rc" 0
+check "coderabbit: without --ready: no comment" hasnt '^gh pr comment ' "$FAKE_LOG"
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
 echo "$pass passed, $fail failed"
 exit $((fail > 0))
