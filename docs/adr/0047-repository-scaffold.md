@@ -119,8 +119,10 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
 - _Note (2026-11-05, public repository):_ the repository is public. Every "while the repository is
   private" statement above (free minutes in item 13, Blacksmith, hand-dispatched `e2e-kind.yml`, the
   go suite on selected paths) describes the private period and no longer applies: `e2e-kind.yml`
-  runs on every pull request to main and nightly, on GitHub-hosted runners, and standard runners
-  cost no Actions minutes. The decided text above is kept as the record.
+  triggers on every pull request to main, on pushes to main (batched) and nightly, on GitHub-hosted
+  runners, and standard runners cost no Actions minutes. Its `decide` job runs the quickstart on a
+  pull request only for the e2e's own files or the `e2e` label; `e2e result` gates every needs-e2e
+  PR on a green e2e on its head (see the workflow header). The decided text above is kept as the record.
 
 ## Alternatives considered
 
