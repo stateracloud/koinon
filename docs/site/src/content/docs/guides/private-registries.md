@@ -43,7 +43,7 @@ Values may carry a path prefix. With `--set`, escape the dots in a host key:
 
 | Reference | `registryMirrors: {ghcr.io: art.example.com/ghcr-remote}` | `imageRegistry: art.example.com/proxy` |
 | --- | --- | --- |
-| `ghcr.io/stateracloud/koinon-api:1.0.0` | `art.example.com/ghcr-remote/stateracloud/koinon-api:1.0.0` | `art.example.com/proxy/stateracloud/koinon-api:1.0.0` |
+| `ghcr.io/stateracloud/koinon/api:1.0.0` | `art.example.com/ghcr-remote/stateracloud/koinon/api:1.0.0` | `art.example.com/proxy/stateracloud/koinon/api:1.0.0` |
 | `ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie@sha256:…` | `art.example.com/ghcr-remote/cloudnative-pg/postgresql:18.6-system-trixie@sha256:…` | `art.example.com/proxy/cloudnative-pg/postgresql:18.6-system-trixie@sha256:…` |
 | `quay.io/org/img:1` | unchanged | `art.example.com/proxy/org/img:1` |
 | `postgres:18` | unchanged | `art.example.com/proxy/library/postgres:18` |
@@ -52,14 +52,14 @@ Values may carry a path prefix. With `--set`, escape the dots in a host key:
 
 | Image | Where |
 | --- | --- |
-| `koinon-api`, `koinon-reconciler`, `koinon-agentd` | the three Deployments |
-| `koinon-api` | the migrate, ensure-secrets and preflight Jobs, and the preflight probe pods (`--probe-image`) |
-| `flavor-opencode` and any other flavor | `flavors.*.image`: the reconciler gives it to OpenShell as the sandbox image |
+| `api`, `reconciler`, `agentd` | the three Deployments |
+| `api` | the migrate, ensure-secrets and preflight Jobs, and the preflight probe pods (`--probe-image`) |
+| `flavors/opencode` and any other flavor | `flavors.*.image`: the reconciler gives it to OpenShell as the sandbox image |
 | agentgateway | `gateway.standalone.image`, in standalone mode |
 | PostgreSQL | `postgres.cnpg.imageName` (the CNPG `Cluster`), in cnpg mode |
 | OpenShell's supervisor image | the default `sandboxPolicy.supervisorImages`, see below |
 
-`image.registry` is the upstream the Koinon images are published at, `ghcr.io/stateracloud`. The rewrite
+`image.registry` is the upstream the Koinon images are published at, `ghcr.io/stateracloud/koinon`. The rewrite
 starts from it, so leave it at its default when you use `imageRegistry` or `registryMirrors`. If you
 copied the images to your own registry with `hack/mirror-release.sh` and set `image.registry` to it
 without a mirror setting, nothing is rewritten and that keeps working.

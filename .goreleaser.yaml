@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Release configuration (plan item REL1, ADR 0027). GoReleaser OSS builds the three Koinon images
-# with its kos pipe, pushes them to ghcr.io/stateracloud, signs the manifests when the workflow
+# with its kos pipe, pushes them to ghcr.io/stateracloud/koinon, signs the manifests when the workflow
 # asks for it and drafts the GitHub release with notes from the Conventional Commits.
 # .github/workflows/release.yml runs it on a tag; docs/dev/releasing.md describes the process.
 #
@@ -48,16 +48,18 @@ builds:
     main: ./cmd/koinon-agentd
     flags: [-trimpath]
 
-# Image names have no leading v: the tag v0.1.0 gives ghcr.io/stateracloud/koinon-api:0.1.0, the
+# Image names have no leading v: the tag v0.1.0 gives ghcr.io/stateracloud/koinon/api:0.1.0, the
 # chart's appVersion. `latest` only moves for final releases (.Prerelease is empty for them).
-# KOINON_IMAGE_REGISTRY redirects the push to another registry, for dry runs against a throwaway
-# one (hack/mirror-release.sh is tested that way); the release workflow never sets it.
+# KOINON_IMAGE_REGISTRY is the registry path the images go under (<registry>/api, /reconciler,
+# /agentd). The release workflow sets it from github.repository (the packages belong to the
+# repository that builds them, #167); the default is for local dry runs and for a throwaway
+# registry (hack/mirror-release.sh is tested that way).
 # The flavor image is built by the release workflow's flavor job (hack/release-flavor.sh), not here.
 kos:
   - &ko
     id: koinon-api
     build: koinon-api
-    repositories: ["{{ envOrDefault \"KOINON_IMAGE_REGISTRY\" \"ghcr.io/stateracloud\" }}/koinon-api"]
+    repositories: ["{{ envOrDefault \"KOINON_IMAGE_REGISTRY\" \"ghcr.io/stateracloud/koinon\" }}/api"]
     bare: true
     base_image: gcr.io/distroless/static:nonroot
     platforms: [linux/amd64, linux/arm64]
@@ -76,11 +78,11 @@ kos:
   - <<: *ko
     id: koinon-reconciler
     build: koinon-reconciler
-    repositories: ["{{ envOrDefault \"KOINON_IMAGE_REGISTRY\" \"ghcr.io/stateracloud\" }}/koinon-reconciler"]
+    repositories: ["{{ envOrDefault \"KOINON_IMAGE_REGISTRY\" \"ghcr.io/stateracloud/koinon\" }}/reconciler"]
   - <<: *ko
     id: koinon-agentd
     build: koinon-agentd
-    repositories: ["{{ envOrDefault \"KOINON_IMAGE_REGISTRY\" \"ghcr.io/stateracloud\" }}/koinon-agentd"]
+    repositories: ["{{ envOrDefault \"KOINON_IMAGE_REGISTRY\" \"ghcr.io/stateracloud/koinon\" }}/agentd"]
 
 # Signing and attestations are not done here: the release workflow's `sign` job does them with
 # cosign, from dist/digests.txt and dist/sbom, only when RELEASE_SIGNING is 'true' (ADR 0049).

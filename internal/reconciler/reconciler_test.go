@@ -46,7 +46,7 @@ import (
 
 const (
 	namespace = "koinon"
-	image     = "ghcr.io/stateracloud/flavor-opencode:test"
+	image     = "ghcr.io/stateracloud/koinon/flavors/opencode:test"
 )
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)

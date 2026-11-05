@@ -54,7 +54,7 @@ githubTools:
   url: http://koinon-api-tools.koinon.svc:8081/mcp
 flavors:
   opencode:
-    image: ghcr.io/stateracloud/flavor-opencode:0.1.0
+    image: ghcr.io/stateracloud/koinon/flavors/opencode:0.1.0
 bootstrapAdmin:
   enabled: true
 `
@@ -190,7 +190,7 @@ var _ = Describe("parseConfig", func() {
 		}))
 
 		f := c.flavors()[store.AgentFlavorOpencode]
-		Expect(f.Image).To(Equal("ghcr.io/stateracloud/flavor-opencode:0.1.0"))
+		Expect(f.Image).To(Equal("ghcr.io/stateracloud/koinon/flavors/opencode:0.1.0"))
 		Expect(f.Binaries).To(HaveLen(1))
 	})
 
