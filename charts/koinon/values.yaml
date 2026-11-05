@@ -23,8 +23,8 @@ global:
   # release (the preflight checks it).
   imagePullSecrets: []
   # Replace the registry host of every image with this one (a path prefix is fine):
-  # imageRegistry: artifactory.example.com/proxy turns ghcr.io/stateracloud/koinon-api:1 into
-  # artifactory.example.com/proxy/stateracloud/koinon-api:1. The rest of the reference, digest
+  # imageRegistry: artifactory.example.com/proxy turns ghcr.io/stateracloud/koinon/api:1 into
+  # artifactory.example.com/proxy/stateracloud/koinon/api:1. The rest of the reference, digest
   # included, is kept. Empty leaves every image as is.
   imageRegistry: ""
   # Replace the registry host per upstream, for mirrors that have one repository per upstream:
@@ -37,7 +37,7 @@ global:
 # registry is the upstream the images are published at; leave it at its default when you use
 # global.imageRegistry or global.registryMirrors, which rewrite whatever this says.
 image:
-  registry: ghcr.io/stateracloud
+  registry: ghcr.io/stateracloud/koinon
   tag: ""
   pullPolicy: IfNotPresent
 # DEPRECATED: use global.imagePullSecrets. Still honoured, and merged with it.
@@ -45,7 +45,7 @@ imagePullSecrets: []
 
 api:
   image:
-    repository: koinon-api
+    repository: api
     tag: ""
     digest: ""
   replicas: 1
@@ -102,7 +102,7 @@ api:
 
 reconciler:
   image:
-    repository: koinon-reconciler
+    repository: reconciler
     tag: ""
     digest: ""
   # Extra replicas stand by: one reconciles at a time, holding a Postgres advisory lock.
@@ -148,7 +148,7 @@ reconciler:
 
 agentd:
   image:
-    repository: koinon-agentd
+    repository: agentd
     tag: ""
     digest: ""
   replicas: 1
@@ -465,7 +465,7 @@ github:
 flavors:
   opencode:
     image:
-      repository: flavor-opencode
+      repository: flavors/opencode
       tag: ""
       digest: ""
 
