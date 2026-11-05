@@ -16,13 +16,13 @@
 #
 # --lab-go-test (with --ready, koinon-private#610) runs the go-test gate on the lab after the push and BEFORE the pull
 # request is marked ready: `hack/e2e-remote.sh --argo --gate go-test` posts the commit status go-test-lab
-# on the pushed head, and the ready run of ci.yml then skips its Blacksmith go-test (a draft skips the
+# on the pushed head, and the ready run of ci.yml then skips its hosted go-test (a draft skips the
 # heavy jobs, so nothing is lost by running the lab first). Exit 75 (lab cannot run it now, no free slot),
 # 76 (NOT RUN), 78 (no lab configured) or 2 (the lab rejected the call) print the reason and go on: go-test runs on
-# Blacksmith, as it does for anyone without a lab. Only a failed gate (a posted failure status) stops.
+# the hosted runner, as it does for anyone without a lab. Only a failed gate (a posted failure status) stops.
 # A new pull request is created as a draft; one that is already ready skips the lab run (see below). A push to a pull request that is already ready runs CI
 # on the new head at once, before any lab status can exist, and ci.yml does not wait for one (a waiting
-# Blacksmith job is billed): that go-test runs on Blacksmith. To keep it on the lab, turn the pull
+# hosted job runs): that go-test runs on the hosted runner. To keep it on the lab, turn the pull
 # request back into a draft first (`gh pr ready --undo`), push, and ship with --ready --lab-go-test.
 # The lab run takes minutes; the claim must be renewed (hack/claim.sh beat) around it.
 #
@@ -265,7 +265,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			say "board warn"
 		fi
 		if [[ $lab == 1 ]] && [[ $(gh pr view "$pr_url" --json isDraft --jq .isDraft 2>/dev/null || echo true) == false ]]; then
-			echo "ship: lab go-test: PR already ready: go-test runs on Blacksmith (CI started on the push); gh pr ready --undo to use the lab" >&2
+			echo "ship: lab go-test: PR already ready: go-test runs on the hosted runner (CI started on the push); gh pr ready --undo to use the lab" >&2
 			say "lab go-test skipped (PR already ready)"
 		elif [[ $lab == 1 ]]; then
 			# The status must exist on the pushed head before the ready run reads it (koinon-private#610).
@@ -276,14 +276,14 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 				if [[ $(hack/go-test-lab.sh state "$(git rev-parse HEAD)" 2>/dev/null || true) == success ]]; then
 					say "lab go-test ok (go-test-lab is success on $(git rev-parse --short HEAD); go-test is skipped in CI)"
 				else
-					echo "ship: warning: the lab go-test passed but go-test-lab is not visible on $(git rev-parse --short HEAD) (status not posted, or KOINON_E2E_NO_STATUS is set); go-test runs on Blacksmith" >&2
+					echo "ship: warning: the lab go-test passed but go-test-lab is not visible on $(git rev-parse --short HEAD) (status not posted, or KOINON_E2E_NO_STATUS is set); go-test runs on the hosted runner" >&2
 					say "lab go-test skipped (no status)"
 				fi
 				;;
-			75) echo "ship: lab go-test: the lab cannot run it now (unreachable, no free gate slot, or no verdict); go-test runs on Blacksmith" >&2; say "lab go-test skipped (exit 75)" ;;
-			76) echo "ship: lab go-test: NOT RUN (the gate skipped what it expected to run); go-test runs on Blacksmith" >&2; say "lab go-test skipped (exit 76)" ;;
-			78) echo "ship: lab go-test: no lab configured; go-test runs on Blacksmith" >&2; say "lab go-test skipped (exit 78)" ;;
-			2) echo "ship: lab go-test: the lab rejected the request (exit 2: usage or a 4xx answer); go-test runs on Blacksmith" >&2; say "lab go-test skipped (exit 2)" ;;
+			75) echo "ship: lab go-test: the lab cannot run it now (unreachable, no free gate slot, or no verdict); go-test runs on the hosted runner" >&2; say "lab go-test skipped (exit 75)" ;;
+			76) echo "ship: lab go-test: NOT RUN (the gate skipped what it expected to run); go-test runs on the hosted runner" >&2; say "lab go-test skipped (exit 76)" ;;
+			78) echo "ship: lab go-test: no lab configured; go-test runs on the hosted runner" >&2; say "lab go-test skipped (exit 78)" ;;
+			2) echo "ship: lab go-test: the lab rejected the request (exit 2: usage or a 4xx answer); go-test runs on the hosted runner" >&2; say "lab go-test skipped (exit 2)" ;;
 			*) fail "lab go-test failed (exit $lab_rc); fix it and run again (the pull request was not marked ready)" ;;
 			esac
 		fi
