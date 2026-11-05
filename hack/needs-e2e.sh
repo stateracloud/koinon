@@ -7,8 +7,9 @@
 #   hack/needs-e2e.sh [base]     base defaults to origin/main; the changed files are
 #                                `git diff --name-only $(git merge-base base HEAD) HEAD`
 #   hack/needs-e2e.sh --stdin    read the changed paths from stdin, one per line (tests)
-#   --forced-only                only the FORCED set below (the e2e's own files): what makes a pull
-#                                request run the kind e2e by itself; needs no Go toolchain
+#   --forced-only                only the FORCED set below (the e2e's own files); needs no Go toolchain.
+#                                The full rule (no flag) is what makes a pull request run the kind e2e
+#                                in its own run, so a fork PR needs no label or lab (issue #148)
 #
 #   --flavors                    only whether a flavor image input changed (flavors/**, Markdown included:
 #                                the image tag hashes the whole flavors/<flavor> and flavors/common trees,

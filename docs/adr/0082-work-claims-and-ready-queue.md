@@ -1,6 +1,6 @@
 # 0082. Work claims and the ready queue: a claim branch is the lock, the board is the queue
 
-- Status: Accepted
+- Status: Accepted; amended by [0094](0094-work-claims-on-the-public-repository.md) (2026-11-05)
 - Date: 2026-10-30
 - Relates to: [0038](0038-governance.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
 - Verification: ref compare-and-set semantics spiked on 2026-10-30 (see Upstream verification)
@@ -201,3 +201,25 @@ The human cap of decision 5 is now **8** (it was 4). One human runs several loca
 lane at once, and four claims was the bottleneck. The default of `KOINON_CLAIM_HUMAN_CAP` in
 `hack/claim.sh` changes from 4 to 8; the variable still overrides it. The session cap (one claim per
 session and lane) is unchanged, as is everything else in decision 5 and the lanes amendment.
+
+## Amendment: amended by ADR 0094 (2026-11-05, procoduck)
+
+The repository is public since 2026-11-05. [ADR 0094](0094-work-claims-on-the-public-repository.md)
+keeps decision 1 (the claim ref is the lock), the agent lease, takeover, lanes and the caps, and
+changes the rest as follows. Where the two differ, 0094 wins.
+
+- Decisions 2 and 5: comment claims (`/claim`, `/release`) for people (3 days) and outsiders
+  (14 days, at most 2, only on `good first issue` or `help wanted` issues).
+- Decision 4: `next` and `take` also skip issues that an open pull request closes or that someone
+  else is assigned to.
+- Decisions 3 and 10: the App and the `claims-bot` Environment are retired, and the bots make no
+  board writes.
+- Decision 6: the sweeper runs on `GITHUB_TOKEN`.
+- Decision 7: the `claim` check fails only on a live claim held by someone else; its exemptions and
+  `unclaimed-ok` are retired.
+- Decision 8: the native merge queue replaces `updater.yml` and the strict rule, and `adr` also
+  counts the ADR files that open pull requests add.
+- Lanes amendment and `beat --mine`: a release records `released_by`, and a claim its own session
+  released is dropped silently instead of being reported as lost.
+- The Context line "merge queue is not available" and the Alternatives entry "Merge queue" no longer
+  hold.
