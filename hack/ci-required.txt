@@ -42,3 +42,5 @@ external e2e result
 advisory flavors
 advisory flavor-publish
 advisory warm-caches
+advisory warm-caches-web
+advisory warm-caches-docs
