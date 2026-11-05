@@ -366,6 +366,14 @@ jobs:
       - name: claim-tests (migrate-renumber)
         if: ${{ !cancelled() }}
         run: hack/migrate-renumber-test.sh
+      # Conventional Commits subjects of the pull request's non-merge commits (AGENTS.md
+      # "Conventions"); Dependabot and merge commits are exempt.
+      - name: commit subjects (tests)
+        if: ${{ !cancelled() }}
+        run: hack/commit-subject-check-test.sh
+      - name: commit subjects
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: hack/commit-subject-check.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
       - id: waiver
         name: dependency age (waiver)
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}

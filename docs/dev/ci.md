@@ -104,7 +104,7 @@ Actions minutes cost money; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
 `go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
 `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. `changes` and
-`quick checks` (proto, migrations, adr-lint, claim-tests and the dependency age steps in one job,
+`quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check and the dependency age steps in one job,
 koinon-private#594: every job bills a whole minute) and the other workflows (`dco`, `gitleaks`, `claim`,
 `e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
 are skipped only on a push to main whose heavy jobs are skipped. A skipped heavy job reports
@@ -272,3 +272,9 @@ claim and commit statuses (`e2e-lab`) keep their result; when gh cannot list the
 start time decides instead. It exits 6 `STALE-HEAD` when the PR's head stays different from
 `git ls-remote origin refs/heads/<branch>` for `PR_WAIT_STALE_GRACE` seconds (default 120); re-sync with
 `gh api -X PATCH repos/{owner}/{repo}/pulls/<PR> -f base=<base>`.
+
+## OpenSSF Scorecard
+
+`.github/workflows/scorecard.yml` runs `ossf/scorecard-action` weekly and on every push to main,
+publishes the result (`publish_results`) and uploads the SARIF to code scanning. It is advisory: not
+in `hack/ci-required.txt` (that file lists `ci.yml` jobs and the external required checks only).
