@@ -9,7 +9,8 @@ never enter the agent's sandbox.
 
 Pronounced **KOY-non**, after the leagues of independent Greek city-states.
 
-**Status: pre-alpha.** Nothing here is usable yet. The design lives in
+**Status: pre-release (v0.1 release candidates, currently rc.9).** The quickstart works on kind;
+expect rough edges and changes between candidates. The design lives in
 [`docs/design.md`](docs/design.md) and the decisions in [`docs/adr/`](docs/adr/).
 
 ## Layout

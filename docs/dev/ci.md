@@ -103,7 +103,7 @@ migrate Job lacked) passed every package test and failed only in a full install.
 
 ## What `ci` runs when
 
-Actions minutes cost money; `hack/ci-skip-heavy.sh` decides, its header and
+Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
 `go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
 `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. `changes` and
@@ -223,6 +223,13 @@ shows the response's `x-ratelimit-limit`, which proves the request was authentic
 sha256 is still checked. No token means an anonymous download from github.com, so local and fork
 builds work. The token is never an ARG, ENV, log line or layer (`hack/koinon-fetch-test.sh` pins
 this; a new `ADD` of a release asset fails it, also with the URL on a continuation line).
+
+Every Dockerfile `apt-get update` and `apt-get install` carries `-o Acquire::Retries=5 -o
+Acquire::http::Timeout=30`, because snapshot.ubuntu.com answers 5xx now and then (#149); a step that
+runs apt through another tool (`playwright install --with-deps`) writes an `apt.conf.d` snippet with
+both settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call without them. The
+chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
+not start.
 
 The flavor layer cache (`flavors-<hash of flavors/**>`, prefix `flavors-`) is restored by `flavors`,
 `quickstart` (e2e-kind) and `flavor-publish`. Only pushes to main save it: `flavors` and
