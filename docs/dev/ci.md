@@ -103,7 +103,7 @@ migrate Job lacked) passed every package test and failed only in a full install.
 
 ## What `ci` runs when
 
-Actions minutes cost money; `hack/ci-skip-heavy.sh` decides, its header and
+Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
 `go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
 `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. `changes` and
