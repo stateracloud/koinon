@@ -1074,12 +1074,14 @@ sweep_one() {
 }
 
 cmd_sweep() {
-  local claims now n c
+  local claims now n c failed=0
   claims=$(list_claims); now=$(server_now)
   for n in $(jq -r '.[] | select(.state == "held") | .issue' <<<"$claims"); do
     c=$(jq -c --argjson n "$n" '.[] | select(.issue == $n)' <<<"$claims")
-    ( sweep_one "$c" "$now" ) || warn "#$n: sweep failed"
+    ( sweep_one "$c" "$now" ) || { warn "#$n: sweep failed"; failed=$((failed + 1)); }
   done
+  # Keep sweeping the other claims, but end red: a missing permission must not look like a clean run.
+  ((failed == 0)) || { echo "claim: $failed claim(s) failed to sweep" >&2; return 1; }
 }
 
 # release-pr P: release the held claims of the issues pull request P closes, but only claims that

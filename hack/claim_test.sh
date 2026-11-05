@@ -534,6 +534,19 @@ eq "PROJECT=none makes no graphql call" "$(grep -c graphql "$LOG")" 0
 eq "PROJECT=none logs nothing about the board" "$(grep -c 'board' <<<"$r")" 0
 rm -f "$LOG"
 
+# A sweep whose write_claim dies (missing contents:write, ruleset refusal) must end red, after trying every claim.
+LOG=$(mktemp "${TMPDIR:-/tmp}/claim_sweep.XXXXXX")
+sweep_rc=0
+(
+  list_claims() { echo '[{"issue":7,"state":"held"},{"issue":8,"state":"held"}]'; }
+  server_now() { echo 1000; }
+  sweep_one() { echo "tried" >>"$LOG"; die "cannot write the claim ref"; }
+  cmd_sweep
+) >/dev/null 2>&1 || sweep_rc=$?
+if ((sweep_rc != 0)); then ok "sweep exits non-zero when a claim write dies"; else bad "sweep exited 0 after a write died"; fi
+eq "sweep still tries every claim after a failure" "$(grep -c tried "$LOG")" 2
+rm -f "$LOG"
+
 if [[ -z ${KOINON_CLAIM_TEST_REPO:-} ]]; then
   echo "(set KOINON_CLAIM_TEST_REPO=owner/scratch-repo to run the live tests)"
   exit "$fail"
