@@ -52,6 +52,7 @@ jobs:
         env:
           OWNER: ghcr.io/stateracloud
           SHA: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ github.token }} # BuildKit secret for the Dockerfile's GitHub release downloads (#145)
         run: |
           # publish <repo> <tag> <context> [build args...]: build and push unless the tag exists;
           # prints the digest either way.
@@ -62,6 +63,7 @@ jobs:
               return
             fi
             docker buildx build --platform linux/amd64 --provenance=mode=max --sbom=true \
+              --secret id=github_token,env=GITHUB_TOKEN \
               --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
               --label "org.opencontainers.image.revision=${SHA}" \
               --metadata-file /tmp/meta.json -t "${repo}:${tag}" --push "$@" "$ctx" >&2

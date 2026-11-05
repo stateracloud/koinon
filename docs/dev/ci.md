@@ -184,6 +184,24 @@ squash, a missing or red check, an API error) runs everything. `flavor-publish` 
 nightly and batched e2e, not by `ci` on main. `hack/release-gate.sh` reads a check that main
 skipped from the merged PR's head.
 
+## Image builds: authenticated downloads and layer cache (#145)
+
+Anonymous GitHub release downloads from shared runner IPs sometimes return a fixed error body,
+which fails a pinned checksum. Every Dockerfile download of a release asset goes through
+`flavors/common/koinon-fetch` (or the same logic in `hack/e2e-toolchain/Dockerfile`): the job passes
+`GITHUB_TOKEN` as the BuildKit secret `github_token`. The github.com web download URL ignores a
+token, so the script resolves the asset id from the release (`api.github.com/.../releases/tags/<tag>`)
+and downloads `.../releases/assets/<id>` with `Accept: application/octet-stream`; the build log
+shows the response's `x-ratelimit-limit`, which proves the request was authenticated. The pinned
+sha256 is still checked. No token means an anonymous download from github.com, so local and fork
+builds work. The token is never an ARG, ENV, log line or layer (`hack/koinon-fetch-test.sh` pins
+this; a new `ADD` of a release asset fails it, also with the URL on a continuation line).
+
+The flavor layer cache (`flavors-<hash of flavors/**>`, prefix `flavors-`) is restored by `flavors`,
+`quickstart` (e2e-kind) and `flavor-publish`. Only pushes to main save it: `flavors` and
+`flavor-publish` (which exports with `--cache-to` and saves, so a main push where `flavors` was
+skipped by #595 still writes the entry). A pull request never writes it.
+
 ## Main's e2e regressions and release tags
 
 When main's kind e2e goes from green to red, `hack/e2e-bisect.sh` opens one `e2e-regression` issue

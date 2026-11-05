@@ -152,6 +152,7 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: hack/release-flavor.sh "${TAG#v}" ghcr.io/stateracloud "$SHA" >>"$GITHUB_OUTPUT"
 
   # Keyless cosign signing and SBOM attestations. Off unless RELEASE_SIGNING is 'true'.

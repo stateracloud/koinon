@@ -41,10 +41,27 @@ RUN apt-get update \
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=buildx /buildx /usr/local/lib/docker/cli-plugins/docker-buildx
 
-RUN set -eu; \
+# The optional BuildKit secret github_token (--secret id=github_token,env=GITHUB_TOKEN) authenticates
+# the github.com release downloads (#145); without it they are anonymous. The github.com web URL
+# ignores a token, so an authenticated download goes through the REST API (release by tag, asset by
+# id, Accept: application/octet-stream), as in flavors/common/koinon-fetch (this build context cannot
+# copy that script). curl reads the header from stdin, so the token is in no argv, env var, log or layer.
+RUN --mount=type=secret,id=github_token,required=false set -eu; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     sha() { eval "echo \$$1_$arch"; }; \
-    fetch() { curl -fsSL --retry 3 -o "$1" "$2"; echo "$3  $1" | sha256sum -c -; }; \
+    token=; [ ! -r /run/secrets/github_token ] || token=$(tr -d '\r\n' </run/secrets/github_token); \
+    authed() { printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -fsSL --retry 3 --retry-all-errors -K - "$@"; }; \
+    fetch() { \
+      if [ -n "$token" ] && [ "${2#https://github.com/}" != "$2" ]; then \
+        r=${2#https://github.com/}; repo=${r%%/releases/download/*}; r=${r#*/releases/download/}; tag=${r%%/*}; name=${r#*/}; \
+        id=$(authed -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$repo/releases/tags/$tag" | jq -er --arg n "$name" '.assets[] | select(.name == $n) | .id'); \
+        authed -H 'Accept: application/octet-stream' -D /tmp/fetch.headers -o "$1" "https://api.github.com/repos/$repo/releases/assets/$id"; \
+        grep -i '^x-ratelimit-limit' /tmp/fetch.headers | sed 's/^/fetch: authenticated, /' || true; rm -f /tmp/fetch.headers; \
+      else \
+        curl -fsSL --retry 3 --retry-all-errors -o "$1" "$2"; \
+      fi; \
+      echo "$3  $1" | sha256sum -c -; \
+    }; \
     fetch /usr/local/bin/kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-${arch}" "$(sha KIND_SHA256)"; \
     fetch /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl" "$(sha KUBECTL_SHA256)"; \
     chmod +x /usr/local/bin/kind /usr/local/bin/kubectl; \
