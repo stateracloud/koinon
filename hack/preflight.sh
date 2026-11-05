@@ -139,12 +139,25 @@ fi
 
 # --- gates: each runs in a subshell with `set -e`; its output goes to the gate's log ---------------
 
+# A directory below a nested go.mod (hack/spike/*) is not a package of the root module: golangci-lint
+# on ./hack/spike/x fails with "main module does not contain package".
+in_nested_module() {
+	local d=$1
+	while [[ $d != . && $d != "" ]]; do
+		[[ -f $d/go.mod ]] && return 0
+		d=${d%/*}
+		[[ $d == . || $d == "${d%/*}" ]] && break
+	done
+	return 1
+}
+
 go_pkgs() { # changed Go packages as ./dir args; every package (minus test/flavors) when none changed
 	local f d out=""
 	for f in $(existing '\.go$'); do
 		d=${f%/*}
 		[[ $d == "$f" ]] && d=.
 		[[ $d == . ]] || d=./$d
+		in_nested_module "$d" && continue
 		case " $out " in *" $d "*) ;; *) out="$out $d" ;; esac
 	done
 	if [[ -z $out ]]; then
