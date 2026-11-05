@@ -17,7 +17,7 @@
 # --argo exit status: 0 pass, 1 the run failed (the target's own status unless it collides with a code
 # below), 2 usage, 75 the lab cannot run it now (unreachable, no slot, Pending too long, no verdict):
 # fall back to GitHub's e2e-kind (the gate: run it locally), 76 NOT RUN (the gate skipped what it
-# expected to run, #507), 78 no lab configured, 79 refused: the change touches flavors/ and the lab
+# expected to run, koinon-private#507), 78 no lab configured, 79 refused: the change touches flavors/ and the lab
 # cannot build flavors (--allow-flavors if the image is in Zot). A followed kind e2e posts the commit
 # status `e2e-lab` on the tested commit (success/failure, not on a fallback; --no-status or
 # KOINON_E2E_NO_STATUS=1 opts out; hack/e2e-status.sh). Details: the header of hack/e2e-argo.sh.

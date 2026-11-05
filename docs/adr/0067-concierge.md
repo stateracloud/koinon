@@ -2,10 +2,10 @@
 
 - Status: Accepted
 - Date: 2026-10-26
-- Relates to: [#146](https://github.com/stateracloud/koinon/issues/146) (round 4 and the releases)
+- Relates to: [koinon-private#146](https://github.com/stateracloud/koinon-private/issues/146) (round 4 and the releases)
 - Amends: [0005](0005-agent-identity.md) (an explicit exception: the concierge acts as the
   logged-in user)
-- Delivery: v0.3 (#146)
+- Delivery: v0.3 (koinon-private#146)
 
 ## Context
 
@@ -61,7 +61,7 @@ model.
 5. **Bootstrap.** A fresh install shows a setup checklist built from the setup guides: provider,
    then model, then code-host connection, then first agent, then first trigger. The concierge
    switches on once the first model works.
-6. **Separate from the personal agent ([#55](https://github.com/stateracloud/koinon/issues/55)).**
+6. **Separate from the personal agent ([#11](https://github.com/stateracloud/koinon/issues/11)).**
    The personal agent can hand over to the concierge for admin tasks, but holds no admin power
    itself.
 7. **Optional.** Everything stays doable without it.
@@ -138,7 +138,7 @@ Zapier and Rovo rest on search summaries only.
 
 ## Links
 
-- Issues [#146](https://github.com/stateracloud/koinon/issues/146), [#55](https://github.com/stateracloud/koinon/issues/55)
+- Issues [koinon-private#146](https://github.com/stateracloud/koinon-private/issues/146), [#11](https://github.com/stateracloud/koinon/issues/11)
 - ADRs [0005](0005-agent-identity.md), [0019](0019-personal-agents-and-teams.md),
   [0020](0020-agent-builder-and-templates.md), [0021](0021-connector-setup-guides.md),
   [0023](0023-observability-and-audit.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md),

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Post the commit status `e2e-lab` on a commit: the record that a lab run of the kind e2e passed (or
-# failed) on exactly that commit (#547). hack/e2e-remote.sh --argo calls it after the run; run it by
+# failed) on exactly that commit (koinon-private#547). hack/e2e-remote.sh --argo calls it after the run; run it by
 # hand to post a result again, for example when the commit was not pushed yet at the time.
 #
 #   hack/e2e-status.sh <sha> <success|failure> <description> [target url]
@@ -18,7 +18,7 @@
 # 64 usage. The caller treats a failed post as a warning: the run's own result is not affected.
 #
 # KOINON_STATUS_CONTEXT names another context (default e2e-lab). The lab's go-test gate run posts
-# `go-test-lab` this way (#610, hack/go-test-lab.sh); only `e2e-lab` re-runs `e2e result` afterwards.
+# `go-test-lab` this way (koinon-private#610, hack/go-test-lab.sh); only `e2e-lab` re-runs `e2e result` afterwards.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }

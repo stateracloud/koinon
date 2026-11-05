@@ -312,7 +312,7 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
   )
 }
 
-/** SanitisedNote says Koinon changed what the server published before showing it to agents (ADR 0057, #267). */
+/** SanitisedNote says Koinon changed what the server published before showing it to agents (ADR 0057, #52). */
 function SanitisedNote({ tool }: { tool: Tool }) {
   const parts: string[] = []
   if (tool.descriptionCleaned) parts.push('hidden characters removed or lookalike tags escaped')

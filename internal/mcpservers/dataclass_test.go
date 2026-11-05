@@ -53,7 +53,7 @@ var _ = Describe("Declaration", func() {
 	})
 })
 
-var _ = Describe("the data class of a server (ADR 0084, #350)", func() {
+var _ = Describe("the data class of a server (ADR 0084, koinon-private#350)", func() {
 	var (
 		svc   *mcpservers.Service
 		org   pgtype.UUID
