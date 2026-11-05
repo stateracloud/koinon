@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { randomBytes } from 'node:crypto'
+
 import { expect, test } from '@playwright/test'
 
 // W1 acceptance (issue koinon-private#50): create a task and watch the run in the browser, against the real
@@ -9,7 +11,7 @@ import { expect, test } from '@playwright/test'
 
 const fakeGitHub = process.env.KOINON_E2E_FAKEGITHUB_URL
 const bootstrapPassword = process.env.KOINON_E2E_PASSWORD
-const newPassword = 'e2e-browser-' + Math.random().toString(36).slice(2, 12)
+const newPassword = 'e2e-browser-' + randomBytes(8).toString('hex')
 // The fake model server in the cluster (test/e2e/run.sh passes the address the gateway reaches it by).
 const fakeModelURL = process.env.KOINON_E2E_FAKEMODEL_URL
 const repository = 'koinon-demo/hello'
