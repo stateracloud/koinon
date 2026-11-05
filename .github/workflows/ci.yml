@@ -747,6 +747,8 @@ jobs:
           sudo locale-gen en_US.UTF-8
           hack/flavor-tag-test.sh
       - run: hack/koinon-fetch-test.sh
+      - run: hack/apt-retries-test.sh --self-test
+      - run: hack/apt-retries-test.sh
       - run: hack/e2e-remote-test.sh
       - run: hack/versions-check-test.sh
       - run: hack/versions-check.sh
