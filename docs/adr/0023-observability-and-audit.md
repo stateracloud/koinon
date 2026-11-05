@@ -110,7 +110,7 @@ length of a transaction. HMAC key custody and which OCSF events enter the log st
 
 ## Amendment (2026-10-26): metrics
 
-Metrics are built for the three Go components (issue #106). The amendment records what exists, the
+Metrics are built for the three Go components (issue koinon-private#106). The amendment records what exists, the
 label rule and what is deferred; the metric list is in the docs site, guide "Metrics".
 
 - **Built.** koinon-api, koinon-reconciler and koinon-agentd each serve `/metrics` on their own
@@ -162,9 +162,9 @@ CRD unless `skipCapabilityCheck` is set. The label rule holds: agentgateway's se
 gateway, listener, route, backend, status and model, with no key or agent ID. `networkPolicy.metricsFrom`
 still decides who may reach the port, and a non-operator scraper works with the monitors off.
 
-## Amendment (2026-10-31, #343): business and diagnostic run events, retention
+## Amendment (2026-10-31, koinon-private#343): business and diagnostic run events, retention
 
-Decision of procoduck, 2026-10-31 ([#264](https://github.com/stateracloud/koinon/issues/264)). The
+Decision of procoduck, 2026-10-31 ([#50](https://github.com/stateracloud/koinon/issues/50)). The
 details and the open questions are in the [0074 amendment of the same date](0074-run-traces-trace-router.md);
 the parts that belong to this ADR:
 
@@ -181,9 +181,9 @@ the parts that belong to this ADR:
   days, a platform admin can set a lower platform maximum, and every change is audited (old and new).
   A purge removes content only: event rows keep type, time, state and cost. The hash-chained audit
   log, run traces and the spend ledger are not stored run content and are unaffected. Audit records
-  are never deleted by run-content retention; audit retention is its own policy (#155).
+  are never deleted by run-content retention; audit retention is its own policy (#29).
 
-The metric is `koinon_agentd_run_event_write_failures_total{class, reason}` (#345); the event classes
+The metric is `koinon_agentd_run_event_write_failures_total{class, reason}` (koinon-private#345); the event classes
 and the tries are in the [0074 amendment](0074-run-traces-trace-router.md), whose item 7 makes tool
 calls and the agent's message chunks business events.
 

@@ -77,11 +77,11 @@ type Keys interface {
 const DefaultWatchPollInterval = 5 * time.Second
 
 // DefaultWatchHeartbeatInterval is how often a WatchRun stream that has sent nothing else sends
-// a heartbeat, so proxies and load balancers keep a quiet run's stream open (issue #141).
+// a heartbeat, so proxies and load balancers keep a quiet run's stream open (issue koinon-private#141).
 const DefaultWatchHeartbeatInterval = 30 * time.Second
 
 // DefaultWatchCancelGrace is how long WatchRun keeps a canceled, once-claimed run's stream open for
-// the item its worker was typing when the cancel landed (#344, ADR 0074).
+// the item its worker was typing when the cancel landed (koinon-private#344, ADR 0074).
 const DefaultWatchCancelGrace = 10 * time.Second
 
 // Options configures a Server.
@@ -167,7 +167,7 @@ type Server struct {
 	modelCheck  *modelcheck.Service
 	runNow      *RunNowQueue
 	traces      *tracedest.Service
-	// leakGuard changes the org's leak-guard threshold and fetch-trusted host list (#350).
+	// leakGuard changes the org's leak-guard threshold and fetch-trusted host list (koinon-private#350).
 	leakGuard *orgsettings.Service
 }
 
