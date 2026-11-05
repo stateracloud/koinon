@@ -86,14 +86,35 @@ checks() { # checks NAME:CONCLUSION[:ID] ... -> checks.json (status completed un
 }
 
 # --- pull requests ---------------------------------------------------------------------------------
-echo '{"draft":true}' >"$tmp/pull.json"
-expect "draft PR skips" true "draft" EVENT_NAME=pull_request PR_NUMBER=7
+# The decision comes from the event payload flag (PR_DRAFT), never from the API (#676): the fake
+# pull.json says the opposite, and FAKE_FAIL=1 makes every gh call fail, to prove gh is not asked.
 echo '{"draft":false}' >"$tmp/pull.json"
-expect "ready PR runs everything" false "ready" EVENT_NAME=pull_request PR_NUMBER=7
-expect "API error runs everything" false "could not read" EVENT_NAME=pull_request PR_NUMBER=7 FAKE_FAIL=1
-echo '{"draft":"maybe"}' >"$tmp/pull.json"
-expect "odd draft value runs everything" false "unexpected" EVENT_NAME=pull_request PR_NUMBER=7
-expect "no PR number runs everything" false "no pull request" EVENT_NAME=pull_request PR_NUMBER=
+expect "draft event skips, whatever the live state" true "draft" EVENT_NAME=pull_request PR_DRAFT=true
+expect "draft event skips with the API down" true "draft" EVENT_NAME=pull_request PR_DRAFT=true FAKE_FAIL=1
+echo '{"draft":true}' >"$tmp/pull.json"
+expect "ready event runs everything, whatever the live state" false "ready" EVENT_NAME=pull_request PR_DRAFT=false
+expect "ready event runs everything with the API down" false "ready" EVENT_NAME=pull_request PR_DRAFT=false FAKE_FAIL=1
+expect "odd draft flag runs everything" false "no draft flag" EVENT_NAME=pull_request PR_DRAFT=maybe
+expect "no draft flag runs everything" false "no draft flag" EVENT_NAME=pull_request PR_DRAFT=
+# Recorded payloads: the shape of github.event.pull_request.draft for the event types ci.yml listens to.
+for ev in opened synchronize reopened; do
+	expect "recorded $ev payload of a draft" true "draft" EVENT_NAME=pull_request PR_DRAFT="$(printf '{"action":"%s","pull_request":{"draft":true}}' "$ev" | jq -r .pull_request.draft)"
+done
+expect "recorded ready_for_review payload" false "ready" EVENT_NAME=pull_request PR_DRAFT="$(echo '{"action":"ready_for_review","pull_request":{"draft":false}}' | jq -r .pull_request.draft)"
+# A re-run of a draft run after the PR became ready replays the draft payload: still a draft run.
+expect "re-run of a draft run after ready is a draft run again" true "draft" EVENT_NAME=pull_request PR_DRAFT=true
+# ci.yml labels the run from the same flag as it feeds the script.
+if grep -q "^run-name: .*github.event.pull_request.draft.*'ci (draft)'" "$(dirname "$script")/../.github/workflows/ci.yml"; then
+	echo "ok: ci.yml run-name labels draft runs"
+else
+	echo "FAIL: ci.yml run-name does not label draft runs"; fails=1
+fi
+# shellcheck disable=SC2016 # a literal workflow expression, not a shell one
+if grep -q 'PR_DRAFT: ${{ github.event.pull_request.draft }}' "$(dirname "$script")/../.github/workflows/ci.yml"; then
+	echo "ok: ci.yml feeds PR_DRAFT from the event"
+else
+	echo "FAIL: ci.yml does not feed PR_DRAFT from the event"; fails=1
+fi
 expect "other event runs everything" false "event" EVENT_NAME=schedule
 
 # --- push to main ----------------------------------------------------------------------------------
