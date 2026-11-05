@@ -239,7 +239,7 @@ chmod +x "$tmp/bin/curl"
 argo_env() { # <dir>: a fresh fake server state
   rm -rf "$1"; mkdir -p "$1"
   export ARGO_REPO=$tmp/repo ARGO_DIR=$1 FAKE_CFG=$1/cfg KOINON_E2E_ARGO_CREDS="$tmp/creds.sh" KOINON_E2E_ARGO_POLL=0
-  export KOINON_E2E_ARGO_SERVER=https://argo.example.invalid KOINON_E2E_BUNDLE_URL=https://s3.example.invalid/e2e-bundles
+  export KOINON_LAB_DOMAIN=lab.example.invalid KOINON_E2E_ARGO_SERVER=https://argo.example.invalid KOINON_E2E_BUNDLE_URL=https://s3.example.invalid/e2e-bundles
   export KOINON_E2E_RESULTS_URL=https://s3.example.invalid/e2e-artifacts KOINON_E2E_LIGHT_MANIFEST="$tmp/light.workflow.json"
 }
 
@@ -419,6 +419,9 @@ check "--gate passes gate-set, ref, bundle, agent" sh -c "grep -q 'gate-set=go-t
 check "--gate picks a slot with no unfinished run" has 'slot=gate-2' "$tmp/gate1/submitted"
 check "--gate passes no labels (the template sets lane, target and agent)" test "$(jq -r '.submitOptions.labels // ""' "$tmp/gate1/submitted")" = ""
 check "--gate selects busy slots by the lane=gate label" has 'labelSelector=lab.example.invalid/lane=gate' "$FAKE_LOG"
+gate "$tmp/gate1n" "target=go-test ref=x rc=0 seconds=1 verdict=pass" FAKE_PHASE=Succeeded KOINON_LAB_DOMAIN=
+check "--gate without KOINON_LAB_DOMAIN exits 78" test "$rc" -eq 78
+check "... naming the variable" has 'KOINON_LAB_DOMAIN' "$tmp/gate1n/log"
 check "--gate follows the log" has 'logOptions.follow=true' "$FAKE_LOG"
 check "--gate fetches \$OUT" test -f "$tmp/gate1/out/result.txt"
 gate "$tmp/gate2" "target=go-test ref=x rc=1 seconds=1 verdict=fail" FAKE_PHASE=Failed
