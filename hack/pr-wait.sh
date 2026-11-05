@@ -36,8 +36,8 @@
 #              A draft PR is never green (#647): with --checks, `isDraft` exits 5 with `DRAFT` (a draft runs
 #              almost nothing, and `go`/`web` are red on purpose). After `ready_for_review`, only runs of the
 #              `ci` workflow that belong to the draft are ignored (#661): a run created more than ~30 s before
-#              the last ready event whose newest attempt also started before it (a by-hand re-run of a
-#              draft-era run counts as a ready run). dco, gitleaks, claim and commit statuses (e2e-lab) keep
+#              the last ready event (a by-hand re-run of a draft-era run replays draft=true and is ignored too, #676; #678
+#              will filter on the `ci (draft)` display_title instead of this window). dco, gitleaks, claim and commit statuses (e2e-lab) keep
 #              their result. It prints `waiting for the ready run` until the ready run's checks exist. When gh
 #              cannot list the runs, each ci check run's own start time decides instead.
 #              A stale PR head (#661): with --checks, when `git ls-remote origin refs/heads/<branch>` names
@@ -242,14 +242,14 @@ while :; do
       if [ -n "$ready" ]; then
         # Decide per workflow run, not per check run: a draft run cancelled by the ready run has check runs that
         # start (and are cancelled) after the ready event, and `needs: changes` jobs of a cancelled run never ran.
-        # ready_ids: the ci runs on the head created at or after the ready event (30 s of clock skew allowed) or
-        # whose newest attempt started after it, i.e. re-run ("none": the ready run is not there yet); empty: gh could not say, fall back to each check run's own start time.
+        # ready_ids: the ci runs on the head created at or after the ready event (30 s of clock skew allowed;
+        # a re-run of a draft-era run replays draft=true and does not count, #676) ("none": the ready run is not there yet); empty: gh could not say, fall back to each check run's own start time.
         ready_ids=""
         hd=$(jq -r '.headRefOid // ""' <<<"$json")
         if [ -n "$hd" ]; then
-          ready_ids=$(gh run list --commit "$hd" --workflow ci.yml --limit 50 --json databaseId,createdAt,startedAt 2>/dev/null |
+          ready_ids=$(gh run list --commit "$hd" --workflow ci.yml --limit 50 --json databaseId,createdAt 2>/dev/null |
             jq -r --arg r "$ready" '($r | fromdateiso8601 - 30 | todateiso8601) as $slack
-              | [.[] | select(.createdAt >= $slack or (.startedAt // "") >= $r) | .databaseId | tostring] | join(",") | if . == "" then "none" else . end' 2>/dev/null) || ready_ids=""
+              | [.[] | select(.createdAt >= $slack) | .databaseId | tostring] | join(",") | if . == "" then "none" else . end' 2>/dev/null) || ready_ids=""
         fi
         # shellcheck disable=SC2016 # jq program
         drop='def rid: ((.detailsUrl // "") | capture("/runs/(?<r>[0-9]+)")? | .r);
