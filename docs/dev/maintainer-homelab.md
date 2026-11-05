@@ -94,7 +94,8 @@ recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendm
 
 `e2e-lab` is not a required check of the ruleset, because contributors without a lab cannot produce it;
 the required check stays `e2e result`, and it enforces the rule on GitHub (koinon-private#562): when `hack/needs-e2e.sh`
-(or the e2e's own files, or the `e2e` label) says the PR needs the e2e, `e2e result` fails unless the head
+(or the e2e's own files, or the `e2e` label) says the PR needs the e2e, the PR's own run runs the quickstart
+(issue #148) and `e2e result` fails unless the head
 has a successful `quickstart` job (this run, or an e2e-kind run dispatched on the head) or the commit
 status `e2e-lab` = success (`hack/e2e-gate.sh`; the failure message names `hack/e2e-remote.sh --argo` and
 `gh workflow run e2e-kind.yml --ref <branch>`). A status event starts no workflow, so
