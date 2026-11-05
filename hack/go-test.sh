@@ -118,6 +118,15 @@ while IFS= read -r dir; do
 	fi
 done <<<"$dirs"
 
+# One testcontainers session for the whole run (#171). By default every test process is its own
+# session lead and shares the run's single Ryuk reaper by name; Ryuk exits 10 s after its last
+# client disconnects, and on a cold runner an image pull leaves gaps that long, so a later package
+# finds the dying reaper and waits 60 s for it (upstream testcontainers-go#3867, v0.44.0). A fixed
+# session ID, exported before hack/pgserver starts, is inherited by pgserver and by every test
+# process; pgserver holds a reaper connection until the run ends, so Ryuk stays up the whole run
+# and still cleans up after a crashed one. Ryuk stays on. Details: docs/dev/ci.md#go-test-suites.
+export TESTCONTAINERS_SESSION_ID=${TESTCONTAINERS_SESSION_ID:-koinon-$$-$(date +%s)-$RANDOM$RANDOM}
+
 # The run's shared Postgres (see the header). The DSN goes through a private temporary directory,
 # not the report directory, which CI uploads.
 if [[ -z ${KOINON_PGTEST_DSN:-} ]] && ((${#parallel[@]} + ${#ginkgo_rest[@]})); then
