@@ -41,10 +41,17 @@ RUN apt-get update \
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=buildx /buildx /usr/local/lib/docker/cli-plugins/docker-buildx
 
-RUN set -eu; \
+# The optional BuildKit secret github_token (--secret id=github_token,env=GITHUB_TOKEN) authenticates
+# the github.com downloads (#145); without it they are anonymous. curl reads the header from stdin,
+# so the token is in no argv, env var, log or layer.
+RUN --mount=type=secret,id=github_token,required=false set -eu; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     sha() { eval "echo \$$1_$arch"; }; \
-    fetch() { curl -fsSL --retry 3 -o "$1" "$2"; echo "$3  $1" | sha256sum -c -; }; \
+    token=; [ ! -r /run/secrets/github_token ] || token=$(tr -d '\r\n' </run/secrets/github_token); \
+    fetch() { \
+      case $2 in https://github.com/*) [ -z "$token" ] || { printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -fsSL --retry 3 --retry-all-errors -K - -o "$1" "$2"; echo "$3  $1" | sha256sum -c -; return; } ;; esac; \
+      curl -fsSL --retry 3 --retry-all-errors -o "$1" "$2"; echo "$3  $1" | sha256sum -c -; \
+    }; \
     fetch /usr/local/bin/kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-${arch}" "$(sha KIND_SHA256)"; \
     fetch /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl" "$(sha KUBECTL_SHA256)"; \
     chmod +x /usr/local/bin/kind /usr/local/bin/kubectl; \

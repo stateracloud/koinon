@@ -119,11 +119,15 @@ FLAVOR_CACHE     ?=
 comma            := ,
 flavor_cache      = $(if $(FLAVOR_CACHE),--cache-from type=local$(comma)src=$(FLAVOR_CACHE)/$(1) --cache-to type=local$(comma)dest=$(FLAVOR_CACHE)/$(1)$(comma)mode=max)
 
+# GITHUB_TOKEN (set in CI) is handed to the build as the BuildKit secret github_token, which the
+# Dockerfile's GitHub release downloads use to authenticate (#145). Unset, they are anonymous.
+flavor_secret     = $(if $(GITHUB_TOKEN),--secret id=github_token$(comma)env=GITHUB_TOKEN)
+
 FLAVORS          := opencode
 
 .PHONY: flavor-opencode
 flavor-opencode: ## Build the OpenCode flavor image (koinon/flavor-opencode:dev-<hash>)
-	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) $(call flavor_cache,opencode) \
+	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) $(call flavor_cache,opencode) $(flavor_secret) \
 		--build-context common=flavors/common --tag koinon/flavor-opencode:$(call flavor_tag,opencode) flavors/opencode
 
 .PHONY: flavors

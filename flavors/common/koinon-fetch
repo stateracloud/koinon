@@ -1,0 +1,42 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# koinon-fetch <sha256> <url> <dest>: download <url> to <dest> and fail unless its SHA-256 is <sha256>.
+#
+# Build-time only (a flavor Dockerfile's fetch stages, #145). Anonymous GitHub release downloads
+# are rate limited per runner IP and sometimes return a fixed error body, which fails a pinned
+# checksum; an authenticated request has its own limit. When the BuildKit secret github_token is
+# mounted and non-empty the request to github.com carries it, otherwise (a local or fork build) it
+# goes anonymously. Mount it with
+#   RUN --mount=type=secret,id=github_token,required=false koinon-fetch ...
+# The token stays out of argv, the environment, the log and every image layer: curl reads the
+# header from stdin, and it only goes to github.com (curl drops it on a redirect to another host).
+set -eu
+
+if [ "$#" -ne 3 ]; then
+  echo "usage: koinon-fetch <sha256> <url> <dest>" >&2
+  exit 2
+fi
+sha=$1
+url=$2
+dest=$3
+
+token_file=${KOINON_FETCH_TOKEN_FILE:-/run/secrets/github_token}
+token=
+if [ -r "$token_file" ]; then
+  token=$(tr -d '\r\n' <"$token_file")
+fi
+
+case $url in
+  https://github.com/*) ;;
+  *) token= ;;
+esac
+
+if [ -n "$token" ]; then
+  printf 'header = "Authorization: Bearer %s"\n' "$token" |
+    curl -fsSL --retry 3 --retry-all-errors -K - -o "$dest" "$url"
+else
+  curl -fsSL --retry 3 --retry-all-errors -o "$dest" "$url"
+fi
+
+echo "$sha  $dest" | sha256sum -c -
