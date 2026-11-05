@@ -1,6 +1,17 @@
 # 0094. Work claims on the public repository: one lock, claims by comment, a conflict check, the native merge queue
 
-- Status: Accepted (procoduck, 2026-11-05); the probes under Open verification can still change decisions 1, 3 and 4
+- Status: Proposed (2026-11-05); Accepted after the probes under Open verification run
+- Reviewed with procoduck 2026-11-05 (grilling). Confirmed as drafted:
+  - outsiders claim only on `good first issue` or `help wanted` issues;
+  - leases of 3 days for people and 14 days for outsiders, with a day-10 reminder and a cap of 2;
+  - the conflict-only check;
+  - no kind e2e in the queue (PR-head evidence plus the main backstop);
+  - `/release` by the holder or any person;
+  - `next` and `take` skip issues assigned to another person;
+  - the App retired, with no fallback unless procoduck asks later;
+  - decisions 6 and 7 ship first, as one PR.
+
+  Probe 3 is skipped; decision 1 has a built-in fallback instead.
 - Date: 2026-11-05
 - Amends: ADR 0082 (work claims and the ready queue): decisions 2, 3, 4, 6, 7, 8 and 10, and its Context
 - Relates to: [0082](0082-work-claims-and-ready-queue.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
@@ -125,6 +136,18 @@ commented here can be assigned); the claim is recorded in the ref `claim/N`." Af
 release it re-runs the failed `claim` check of any open pull request that closes the issue, as `take`
 does today.
 
+**Fallback when GitHub refuses the write.** Nobody has proven that a non-collaborator's
+`issue_comment` run gets a write token (probe 3 is skipped). So the workflow handles a refusal
+itself. When the claim ref write, or any other write, answers 401, 403 or a permission error, the
+bot does three things:
+
+1. It comments "comment claims are not available for outside contributors yet; open a pull request
+   that says Closes #N instead". An open pull request already makes `next` and `take` skip the issue
+   (decision 5).
+2. It opens one Backlog issue for the maintainers, deduplicated by its fixed title: it looks for an
+   open issue with that title first.
+3. It exits 0, so the run is not red.
+
 ### 2. The `claim` check is a conflict check
 
 The required check `claim` (`claims.yml`, `pull_request_target`, read-only token, the base branch's
@@ -191,9 +214,9 @@ writes at all:
   is In Progress or In Review, with no live claim and no open pull request that closes it, as Ready
   (it was Ready before a `take` moved it). `take` writes In Progress again.
 
-So the App, the `claims-bot` Environment and their two secrets are retired. If procoduck wants the
-board's Status exact after a sweep, the App comes back for exactly those two writes (sweeper Ready,
-close-without-merge Ready) and nothing else. That is the fallback, not the default.
+So the App, the `claims-bot` Environment and their two secrets are retired, with no fallback (procoduck,
+2026-11-05). Only if procoduck asks later would the App come back, and then for exactly those two writes
+(sweeper Ready, close-without-merge Ready).
 
 ### 4. GitHub's native merge queue replaces `updater.yml`
 
@@ -318,13 +341,20 @@ only a release on pull request close.
 
 ## Open verification
 
-procoduck runs these before any code lands (issue #159's "before any code"). Each says which result
-changes the decision.
+The main session runs these, not procoduck, before the code that depends on them lands. Decisions 6
+and 7 depend on none of them. Each probe says which result changes the decision.
 
-1. **Merge queue rule.** `POST repos/stateracloud/koinon/rulesets` with `enforcement: "disabled"`,
-   target `~DEFAULT_BRANCH`, one `merge_queue` rule with the parameters of decision 4. Delete the
-   ruleset right after. Then the same on a scratch public repository in the org, with
-   `enforcement: active`. That second run checks that:
+- **Where they run.** Probes 1, 2, 4 and 5 run on a throwaway public repository in the org,
+  `stateracloud/koinon-queue-probe`. It gets a copy of koinon's `claims` ruleset (on
+  `refs/heads/claim/**`: block non-fast-forward updates and deletion, no bypass actors).
+- **The one run on koinon itself** is the disabled merge-queue ruleset check of probe 1.
+- **Afterwards** the probe repository is archived, never deleted.
+
+1. **Merge queue rule.** On `stateracloud/koinon`: `POST repos/stateracloud/koinon/rulesets` with
+   `enforcement: "disabled"`, target `~DEFAULT_BRANCH`, and one `merge_queue` rule with the
+   parameters of decision 4. Delete that disabled ruleset right after. Then on
+   `stateracloud/koinon-queue-probe`, the same rule with `enforcement: active`. That second run checks
+   that:
    - a `merge_group` run starts and reports the required checks;
    - the queue ref is `gh-readonly-queue/main/pr-<N>-<sha>`;
    - the merge it makes is a merge commit;
@@ -334,28 +364,22 @@ changes the decision.
    is deferred and decision 3 keeps the App for that job. A queue ref that does not name the pull
    request moves the `claim` and `e2e result` mapping to `merge_group.head_commit` and the PR
    lookup through `commits/{sha}/pulls`.
-2. **`GITHUB_TOKEN` writes `claim/*` refs.** A test workflow on a scratch branch with
+2. **`GITHUB_TOKEN` writes `claim/*` refs.** On the probe repository, a test workflow with
    `permissions: contents: write` creates `refs/heads/claim/probe-<run>` through `POST git/refs` on
    an empty-tree commit, fast-forwards it (`PATCH`, `force=false`), and gets 422 on a non-fast-forward.
    The ref is left in place (claims are never deleted). *Changes the decision:* a refusal (an org
    ceiling, or the `claims` ruleset applying to the Actions bot) puts the App back for ref writes,
    and decisions 1 and 3 are then rewritten around it.
-3. **`issue_comment` from a non-collaborator.** A test account with no access comments `/claim` on a
-   `good first issue` issue. Check that:
-   - the workflow runs with the write permissions it asked for (not read-only as for fork
-     `pull_request` events);
-   - the bot's comment and label land;
-   - `POST issues/{n}/assignees` for that commenter either assigns them or leaves them out of the
-     response (which shows whether GitHub refuses silently, as triagebot's source assumes).
-
-   *Changes the decision:* a read-only token on `issue_comment` makes outsider claims impossible
-   from Actions. Outsiders would then claim by opening a pull request only (`pull_request_target`),
-   and decision 1 shrinks to people. The assignee outcome only changes the mirror text.
-4. **Re-running the `claim` check with `GITHUB_TOKEN`.** From the probe-3 workflow, with
+3. **`issue_comment` from a non-collaborator: skipped** (procoduck, 2026-11-05). It would need a second
+   GitHub account. Decision 1's fallback covers the failure instead: a refused write makes the bot
+   point the outsider to a pull request with `Closes #N`, open one deduplicated Backlog issue for the
+   maintainers and exit 0. The first real outsider `/claim` is therefore the test. Whether GitHub
+   silently drops an assignee it refuses stays open too; it changes only the mirror text.
+4. **Re-running the `claim` check with `GITHUB_TOKEN`.** On the probe repository, a workflow with
    `actions: write`, `POST actions/runs/{id}/rerun-failed-jobs` on a red `claim` run. *Changes the
    decision:* if refused, a `/release` that frees a blocked pull request does not re-run its check,
    and the author pushes or edits the PR body instead. The fixed message then says so.
-5. **Admin bypass with a queue.** On the scratch repository from probe 1, `gh pr merge --admin
+5. **Admin bypass with a queue.** On the probe repository with probe 1's active queue, `gh pr merge --admin
    --merge` with the queue active. *Changes the decision:* if it enqueues instead of merging,
    `hack/pr-merge.sh --admin` and the sensitive-path admin merges need a new path, which is written
    up before the queue is turned on.
@@ -375,7 +399,7 @@ changes the decision.
 - **Run the kind e2e in the merge queue.** It is exact, but costs 15-25 minutes per needs-e2e entry
   and holds the queue. Deferred, with the exit condition in decision 4.
 - **Keep the App only for board Status.** It is a second identity for a mirror that ADR 0082 already
-  calls best effort. It is kept as the named fallback in decision 3.
+  calls best effort. Rejected; procoduck may ask for it later (decision 3).
 - **Tide or bors as the queue.** They are services with their own state; the native queue needs no
   code of ours.
 
@@ -391,15 +415,18 @@ changes the decision.
     AGENTS.md, not on the merge check; the check still fences conflicts.
   - Every queued pull request runs CI once more on its queue commit, even when it was not behind main.
   - The board's Status can lag after a sweep until the next `claim.sh` call.
-- Follow-ups, each its own issue after the probes:
-  1. `claim-comment.yml` and the `claim.sh` commands behind it, with `claim_test.sh` cases;
-  2. `check-pr`, `next`, `take`, `sweep`, `adr`, `released_by` and `beat --mine` changes, with
-     `claim_test.sh` cases (the `beat --mine` fix of decision 7 needs no probe and can go first);
-  3. `merge_group` on the five workflows and the `ci-required-test.sh` rule;
-  4. the ruleset change, and removing `updater.yml` and `update-oldest`;
-  5. retiring the App, the Environment and the `needs-update` and `unclaimed-ok` labels, and updating
-     `docs/dev/work-claims-setup.md`, `docs/dev/ci.md` (Merging), AGENTS.md ("Picking up work"
-     step 11) and the `claims.yml` header.
+- Follow-ups, in this order, each its own issue, all with `claim_test.sh` cases:
+  1. **Decisions 6 and 7, as one PR.** The `adr` scan of open PRs, plus `released_by` and the
+     `beat --mine` fix. It needs no probe, so it goes first.
+  2. **The conflict-only check and the skips:** `check-pr` (decision 2), and the `next` and `take`
+     skips (decision 5).
+  3. **Comment claims and the token move:** `claim-comment.yml` with its fallback, and the sweeper
+     and release-on-close on `GITHUB_TOKEN` (decisions 1 and 3). After that, retire the App, the
+     Environment and the `unclaimed-ok` label, and update `docs/dev/work-claims-setup.md` and the
+     `claims.yml` header.
+  4. **The merge queue:** `merge_group` on the five workflows and the `ci-required-test.sh` rule.
+     Then the ruleset change, and removing `updater.yml`, `update-oldest` and the `needs-update`
+     label, with `docs/dev/ci.md` (Merging) and AGENTS.md ("Picking up work" step 11) updated.
 
 ## Links
 
