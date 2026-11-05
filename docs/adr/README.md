@@ -112,4 +112,4 @@ are in [0046](0046-adr-conventions.md).
 | [0090](0090-scripts-require-bash-5.md) | Every repository script requires bash 5 | Accepted |
 | [0091](0091-leak-guard-by-destination.md) | Leak guard by destination: sink classes, session legs and a byte cap | Accepted (decisions by Andre, 2026-11-03); amended by [0092](0092-leak-guard-judge-model.md) (2026-11-03: the both-legs `external-high` approval becomes rules, a judge model, then a person) |
 | [0092](0092-leak-guard-judge-model.md) | Leak guard judge: rules, then a cheap judge model, then a person | Accepted (decisions by Andre, 2026-11-03) |
-| [0094](0094-work-claims-on-the-public-repository.md) | Work claims on the public repository: one lock, claims by comment, a conflict check, the native merge queue | Proposed (2026-11-05); Accepted after the probes under Open verification run |
+| [0094](0094-work-claims-on-the-public-repository.md) | Work claims on the public repository: one lock, claims by comment, a conflict check, the native merge queue | Proposed (2026-11-05); the probes ran on 2026-11-05 and changed no decision; Andre accepts it |
