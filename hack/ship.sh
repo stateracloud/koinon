@@ -47,7 +47,7 @@
 
 set -euo pipefail
 
-msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 lab=0 auto=0 hold=0 review="" dry=0 no_issue=0 ready_done=0
+msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 lab=0 auto=0 hold=0 review="" dry=0 no_issue=0 ready_done=0 cr_fresh=0
 need() { [[ $# -ge 2 ]] || { echo "ship: $1 needs a value" >&2; exit 2; }; }
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -221,6 +221,7 @@ else
 			say "ready"
 		fi
 	fi
+	old_head=$(git rev-parse -q --verify "origin/$branch" 2>/dev/null || true)
 	# git prints the server's "remote:" banner on stderr even with -q; keep it out of the step lines.
 	if ! pushlog=$(git push -q -u origin "$branch" 2>&1); then
 		printf '%s\n' "$pushlog" >&2
@@ -234,6 +235,7 @@ else
 		fail "push failed"
 	fi
 	say "pushed $branch"
+	[[ $(git rev-parse HEAD) == "$old_head" ]] || cr_fresh=1
 fi
 
 # 7. pull request
@@ -242,7 +244,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 	if [[ $dry == 1 ]]; then
 		say "dry-run: would create or update the PR${pr_title:+ \"$pr_title\"}$([[ $draft == 1 ]] && echo ' (draft)'), add it to the board"
 		[[ $lab == 1 ]] && say "dry-run: would run the go-test gate on the lab (hack/e2e-remote.sh --argo --gate go-test) before marking ready"
-		[[ $ready == 1 ]] && say "dry-run: would mark ready"
+		[[ $ready == 1 ]] && say "dry-run: would mark ready, then post @coderabbitai review once per head (stateracloud/koinon only)"
 		[[ $auto == 1 ]] && say "dry-run: would check hack/needs-e2e.sh and enable auto-merge"
 	else
 		pr_url=$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)
@@ -290,6 +292,30 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 		if [[ $ready == 1 && $ready_done != 1 ]]; then
 			gh pr ready "$pr_url" >/dev/null || fail "gh pr ready failed"
 			say "ready"
+		fi
+		# CodeRabbit (#184) reviews manually here: ask once per head, after the push. Advisory: a failure only warns.
+		if [[ $ready == 1 && $pr_url == */stateracloud/koinon/pull/* ]]; then
+			# A head this run pushed is new: ask without the date check (GitHub moves the PR head after the push, and a
+			# request on the old head says nothing about this one). Otherwise a request dated after the head commit counts.
+			if [[ $cr_fresh == 1 ]]; then
+				cr_n=0
+			else
+				# shellcheck disable=SC2016 # $o and $h are jq variables
+				cr_n=$(gh pr view "$pr_url" --json headRefOid,comments,commits --jq '.headRefOid as $o | ([.commits[] | select(.oid == $o) | .committedDate][0] // "") as $h | [.comments[] | select((.body | rtrimstr("\n")) == "@coderabbitai review") | select(.createdAt > $h)] | length' 2>/dev/null || echo err)
+			fi
+			if [[ $cr_n == 0 ]]; then
+				if gh pr comment "$pr_url" --body "@coderabbitai review" >/dev/null 2>&1; then
+					say "coderabbit review requested"
+				else
+					echo "ship: warning: could not post @coderabbitai review on $pr_url" >&2
+					say "coderabbit warn"
+				fi
+			elif [[ $cr_n =~ ^[0-9]+$ ]]; then
+				say "coderabbit review already requested on this head"
+			else
+				echo "ship: warning: could not read the comments of $pr_url; no @coderabbitai review posted" >&2
+				say "coderabbit warn"
+			fi
 		fi
 		if [[ $auto == 1 ]]; then
 			rc=0
