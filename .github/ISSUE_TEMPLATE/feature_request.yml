@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Feature request
+description: Suggest a change or a new capability.
+labels: ["type:feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: Who needs this and what they are trying to do, as a short user story.
+      placeholder: As an operator, I want ... so that ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
