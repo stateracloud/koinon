@@ -42,7 +42,7 @@ jobs:
   sweeper:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     name: sweeper
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     environment: claims-bot
     concurrency:
       group: claims-sweeper
@@ -81,7 +81,7 @@ jobs:
   release:
     if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
     name: release claims
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     environment: claims-bot
     concurrency:
       group: claims-release-${{ github.event.pull_request.number }}
@@ -127,7 +127,7 @@ jobs:
     # run counts as passing, so skipping here would turn a failed claim green.
     if: github.event_name == 'pull_request_target' && github.event.action != 'closed'
     name: claim
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       issues: read
