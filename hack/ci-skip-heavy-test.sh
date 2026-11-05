@@ -242,7 +242,7 @@ expect "go-test skipped, no status, and the change is documentation only: skip" 
 expect "an unreadable status list does not excuse a skipped go-test" false "go-test was skipped" $(push "$merge_same") FAKE_FAIL_STATUSES=1
 checks "${all_green[@]}" go-test:success
 # shellcheck disable=SC2046
-expect "go-test succeeded on Blacksmith: skip" true "equals the tree" $(push "$merge_same")
+expect "go-test succeeded on a hosted runner: skip" true "equals the tree" $(push "$merge_same")
 checks "${all_green[@]}"
 # shellcheck disable=SC2046
 expect "a different tree runs everything" false "differs" $(push "$merge_diff")
