@@ -22,7 +22,7 @@
 # Gate (--gate <set>, #512) submits the queue's WorkflowTemplate koinon-gate for one gate set of
 # hack/lab/gate-run.sh (go-test, agentd-ginkgo, ...), which replaces the light lane. Parameters
 # gate-set, ref (the 40-hex commit), bundle, agent and slot (gate-1..gate-4, the one with no unfinished
-# run: label lab.example.invalid/lane=gate). The template sets the lane, target and agent labels
+# run: label $KOINON_LAB_DOMAIN/lane=gate). The template sets the lane, target and agent labels
 # itself (agent from the agent parameter); the submit passes none. Every
 # slot busy, or the run still Pending after 120 s (KOINON_E2E_GATE_PENDING: the slot mutex, the
 # namespace limit or a ResourceQuota), deletes the run and exits 75 so the caller runs the gate
@@ -71,6 +71,8 @@
 #
 # Environment (or the lab config file, ${XDG_CONFIG_HOME:-~/.config}/koinon/lab.env; the environment wins):
 #   KOINON_E2E_ARGO_SERVER     Argo Server URL (required)
+#   KOINON_LAB_DOMAIN          the lab's DNS domain (required for --gate): the lane label of the gate runs is
+#                              <KOINON_LAB_DOMAIN>/lane. Lab hosts are <name>.apps.<domain>; never tracked
 #   KOINON_E2E_BUNDLE_URL      S3 bucket URL for the bundles (required)
 #   KOINON_E2E_RESULTS_URL     S3 bucket URL of the run results (required)
 #   KOINON_E2E_ARGO_CREDS      credentials file (required)
@@ -137,6 +139,7 @@ esac
 MANIFEST=${KOINON_E2E_LIGHT_MANIFEST:-}
 lab_require "e2e-remote --argo" KOINON_E2E_ARGO_SERVER KOINON_E2E_BUNDLE_URL KOINON_E2E_RESULTS_URL KOINON_E2E_ARGO_CREDS
 [[ $lane != light ]] || lab_require "e2e-remote --argo --lane light" KOINON_E2E_LIGHT_MANIFEST
+[[ $lane != gate ]] || lab_require "e2e-remote --argo --gate" KOINON_LAB_DOMAIN
 [[ -r $CREDS ]] || { echo "e2e-remote --argo: credentials file $CREDS is not readable (KOINON_E2E_ARGO_CREDS)" >&2; exit 78; }
 [[ $lane != light || -r $MANIFEST ]] || { echo "e2e-remote --argo: manifest $MANIFEST is not readable (KOINON_E2E_LIGHT_MANIFEST)" >&2; exit 78; }
 if [[ -n ${SUITE_LABEL:-} ]]; then
@@ -275,7 +278,7 @@ pick_slot() {
   if [[ $lane == gate ]]; then
     # A gate slot is free only with no unfinished run at all: Running, or Pending on the slot mutex,
     # the namespace limit or a ResourceQuota. Prints nothing when every slot is taken.
-    api GET "/api/v1/workflows/$NS?listOptions.labelSelector=lab.example.invalid/lane=gate,workflows.argoproj.io/completed!=true&fields=items.spec.arguments.parameters" |
+    api GET "/api/v1/workflows/$NS?listOptions.labelSelector=$KOINON_LAB_DOMAIN/lane=gate,workflows.argoproj.io/completed!=true&fields=items.spec.arguments.parameters" |
       jq -r --arg all "$all" '
         ($all | split(" ")) as $slots
         | [.items[]? | .spec.arguments.parameters[]? | select(.name == "slot") | .value] as $busy

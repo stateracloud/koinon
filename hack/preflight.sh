@@ -232,6 +232,8 @@ g_actionlint() { actionlint; } # the whole tree, as CI does: a workflow's lint c
 g_mktemp() { # independent of shellcheck, so it runs where shellcheck is missing (#535)
 	hack/mktemp-lint-test.sh
 	hack/mktemp-lint.sh
+	hack/lab-domain-lint-test.sh
+	hack/lab-domain-lint.sh
 }
 g_bash5() { # every bash script starts with the bash 5 guard (ADR 0090, #553)
 	hack/bash5-lint-test.sh
