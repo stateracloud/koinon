@@ -56,7 +56,7 @@ Agents use tools through MCP. Two problems shape the design:
 - Does agentgateway provide a progressive search + call mode, or does Koinon add a small
   "tool search" MCP server in front?
 - Whether to run shared MCP servers through ToolHive or as plain Deployments rendered by the
-  reconciler (evaluation issue #7).
+  reconciler (evaluation issue #6).
 
 ## Upstream verification
 

@@ -19,7 +19,7 @@
 # test logic of its own. --repo names the checkout to test (default: the one the current directory
 # is in), so a worktree can be tested without changing directory.
 #
-# Gate (--gate <set>, #512) submits the queue's WorkflowTemplate koinon-gate for one gate set of
+# Gate (--gate <set>, koinon-private#512) submits the queue's WorkflowTemplate koinon-gate for one gate set of
 # hack/lab/gate-run.sh (go-test, agentd-ginkgo, ...), which replaces the light lane. Parameters
 # gate-set, ref (the 40-hex commit), bundle, agent and slot (gate-1..gate-4, the one with no unfinished
 # run: label $KOINON_LAB_DOMAIN/lane=gate). The template sets the lane, target and agent labels
@@ -30,7 +30,7 @@
 # sensor pushes a false "Failed". Only a Running run is stopped (Ctrl-C). The log is followed as it is written, then $OUT (result.txt, driver.log, reports) is
 # fetched. A set the template does not accept, or a 4xx answer to the submit, exits 2.
 #
-# Exit status (every lane; a caller tells "the e2e failed" from "no lab" by it, #547):
+# Exit status (every lane; a caller tells "the e2e failed" from "no lab" by it, koinon-private#547):
 #   0   the run passed
 #   1   the run failed: the target's own status, or 1 when that status would collide with a code
 #       below (make reports a failed target as 2). The gate lane passes the gate's own status through
@@ -39,13 +39,13 @@
 #       still Pending after 120 s, or the run ended with no verdict): nothing was decided, fall back
 #       (the gate: run it locally; the e2e: GitHub's e2e-kind, `gh workflow run e2e-kind.yml --ref <branch>`)
 #   76  NOT RUN (gate: result.txt verdict=notrun, hack/go-test.sh exited 3, the run proved less than
-#       it should, #507)
+#       it should, koinon-private#507)
 #   78  no lab configured (a setting or the credentials/manifest file is missing): there is no lab to
 #       use; run the e2e on your own Docker (--local) or on GitHub
 #   79  refused up front: the change touches flavors/ and the lab cannot build a flavor image (nvcr.io
 #       is not reachable from it). GitHub's e2e-kind runs it; --allow-flavors when the image is in Zot
 #
-# Commit status (#547): a followed kind e2e run posts `e2e-lab` on the commit it ran (the ref it
+# Commit status (koinon-private#547): a followed kind e2e run posts `e2e-lab` on the commit it ran (the ref it
 # submitted): success on exit 0, failure when the target failed, nothing on a fallback (75), when no lab
 # is configured, with --no-wait (a later --follow posts it), or with --no-status / KOINON_E2E_NO_STATUS=1.
 # A run that ends Failed with no result.txt (a hang, an OOM, a pod that died first) is a lab fault, exit
@@ -55,7 +55,7 @@
 # that is not on GitHub yet cannot take a status: the script says so and prints the command to post it
 # after the push (hack/e2e-status.sh). `hack/pr-wait.sh <PR> --checks --require e2e` accepts it.
 # The followed gate run of the set go-test posts `go-test-lab` the same way (success on exit 0, failure when the
-# gate failed, nothing on 75/76 or with --no-status, #610): ci.yml's go-test job is skipped for a pull request
+# gate failed, nothing on 75/76 or with --no-status, koinon-private#610): ci.yml's go-test job is skipped for a pull request
 # head that has a green one (hack/go-test-lab.sh, docs/dev/maintainer-homelab.md). A gate run picks a free
 # slot, gate-1..gate-4 with no unfinished gate run (pick_slot), never a fixed one.
 #
@@ -191,7 +191,7 @@ fail_rc() {
 }
 
 # post_status <success|failure> <description> [context]: a commit status (e2e-lab by default, go-test-lab
-# for the go-test gate, #610) on the commit the run tested. A failed post is a warning; the run's own
+# for the go-test gate, koinon-private#610) on the commit the run tested. A failed post is a warning; the run's own
 # result stands.
 post_status() {
   local top ctx=${3:-e2e-lab}
@@ -440,7 +440,7 @@ follow_run() {
   rc=0
   if [[ $lane == gate ]]; then
     gate_exit "$phase" "$out/result.txt" || rc=$?
-    # The go-test gate leaves the commit status go-test-lab (#610): ci.yml's go-test job is satisfied
+    # The go-test gate leaves the commit status go-test-lab (koinon-private#610): ci.yml's go-test job is satisfied
     # by a green one on the pull request head. Only a verdict posts: pass (0) or the gate's own
     # failure; NOT RUN (76) and the fallbacks (75) leave nothing, so CI runs go-test itself.
     if [[ $target == go-test ]]; then
@@ -501,7 +501,7 @@ cd "$root"
 sha=$(git rev-parse HEAD)
 
 # The kind e2e builds the flavor image; the lab cannot (nvcr.io is fenced), so a change under flavors/
-# goes to GitHub's e2e-kind (#547). The rule is hack/needs-e2e.sh --flavors. A check that cannot be
+# goes to GitHub's e2e-kind (koinon-private#547). The rule is hack/needs-e2e.sh --flavors. A check that cannot be
 # evaluated (no origin/main) lets the run go on: the lab then fails after minutes, not never.
 if [[ $lane == kind && $target == test-e2e-kind && $allow_flavors == 0 ]]; then
   frc=0

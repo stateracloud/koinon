@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-28
-- Relates to: [#148](https://github.com/stateracloud/koinon/issues/148), [0048](0048-openshell-spike-results.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md)
+- Relates to: [#22](https://github.com/stateracloud/koinon/issues/22), [0048](0048-openshell-spike-results.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md)
 
 ## Context
 

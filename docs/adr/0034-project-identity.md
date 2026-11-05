@@ -34,7 +34,7 @@ regardless of a later repository move.
 ## Alternatives considered
 
 - **Create the `koinon` org first** _(reconstructed)_: avoids a move, but the availability and
-  trademark checks are not done yet ([#10](https://github.com/stateracloud/koinon/issues/10)), and it
+  trademark checks are not done yet ([#7](https://github.com/stateracloud/koinon/issues/7)), and it
   would slow the start.
 - **A vanity import path** (`koinon.dev/koinon` with a `go-import` meta tag) _(reconstructed)_:
   makes the module path independent of the GitHub owner for good. It needs the domain to serve
@@ -56,7 +56,7 @@ regardless of a later repository move.
   - A constant `GroupSuffix = "koinon.dev"` in `api/` and a lint check (grep in CI) against
     hardcoded copies _(inferred)_.
   - Decide on the GitHub org and vanity import path before v0.1 (tracked in
-    [#10](https://github.com/stateracloud/koinon/issues/10) and the v0.1 plan).
+    [#7](https://github.com/stateracloud/koinon/issues/7) and the v0.1 plan).
 
 ## Open questions
 
@@ -86,10 +86,10 @@ on 2026-10-23 and was recreated with new issue numbers. What the code has today:
   `koinon`. The vanity import path was not adopted. The path is frozen from v0.1.
 
 Issue links in this ADR now point at `stateracloud/koinon`. Where this ADR names `procoduck/koinon`
-above, read the repository as it was on 2026-10-21. [#10](https://github.com/stateracloud/koinon/issues/10)
+above, read the repository as it was on 2026-10-21. [#7](https://github.com/stateracloud/koinon/issues/7)
 still tracks the name checks.
 
 ## Links
 
 - [0027 Repo and versioning](0027-repo-and-versioning.md), [0028 Name](0028-name-koinon.md)
-- [#10 Check availability](https://github.com/stateracloud/koinon/issues/10)
+- [#7 Check availability](https://github.com/stateracloud/koinon/issues/7)

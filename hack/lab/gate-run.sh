@@ -3,7 +3,7 @@
 #
 # Runs one gate set inside a lab's koinon-gate workflow, in the checked-out commit: a fixed command
 # per gate set, its output in $OUT/driver.log, the per-spec reports in $OUT/reports and a result line in
-# $OUT/result.txt. The successor of hack/lab/light-run.sh (ADR 0042 stage 2, #512). The gate set is
+# $OUT/result.txt. The successor of hack/lab/light-run.sh (ADR 0042 stage 2, koinon-private#512). The gate set is
 # an enum; anything else exits 2, so the workflow's gate-set parameter is never a free-form command.
 #
 #   hack/lab/gate-run.sh <gate-set>
@@ -15,11 +15,11 @@
 # result.txt: `target=<set> ref=<sha> rc=<n> seconds=<n> verdict=pass|fail|notrun`.
 #   pass    the command exited 0.
 #   fail    it exited non-zero (rc is its status; 1 when it reported none).
-#   notrun  the run proved less than it should (#507): hack/go-test.sh exited 3, an expected
+#   notrun  the run proved less than it should (koinon-private#507): hack/go-test.sh exited 3, an expected
 #           requirement such as docker was missing, so suites or specs skipped. Only the Go gates can
 #           say so. `make` turns a recipe's 3 into its own 2, so go-test.sh also writes its status to
 #           KOINON_RC_FILE and that file is what is read here.
-# Exit status: 0 for pass, the command's status for fail, 3 for notrun (the #507 contract).
+# Exit status: 0 for pass, the command's status for fail, 3 for notrun (the koinon-private#507 contract).
 #
 # Environment: OUT (required), PROCS (parallel Ginkgo processes; default 4: ginkgo -p sizes itself
 # from the node's cores, not from the pod's cgroup limit, and each process starts a Postgres

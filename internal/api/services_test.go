@@ -370,7 +370,7 @@ var _ = Describe("TicketService and run scheduling", func() {
 		Expect(member.getRun(ctx, org, r3.GetId()).GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_QUEUED))
 	})
 
-	// Behaviour from #19, awaiting Andre's decision: a parked run does not
+	// Behaviour from koinon-private#19, awaiting Andre's decision: a parked run does not
 	// hold the agent's slot, so another ticket runs while one waits for an
 	// approval. A ticket's own next run still waits for its parked run.
 	It("lets another ticket run while one is parked, but not the parked ticket's next run", func(ctx SpecContext) {

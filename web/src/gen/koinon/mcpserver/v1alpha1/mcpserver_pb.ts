@@ -290,7 +290,7 @@ export type Tool = Message<"koinon.mcpserver.v1alpha1.Tool"> & {
   unavailable: string;
 
   /**
-   * description is the sanitised text (ADR 0057 amendment, #267). description_original_length is the
+   * description is the sanitised text (ADR 0057 amendment, #52). description_original_length is the
    * length in characters of the description as the server published it; description_capped says it,
    * or a description in the input schema, was cut to its cap; description_cleaned says control,
    * invisible or tag characters were removed or harness-lookalike tags escaped.
