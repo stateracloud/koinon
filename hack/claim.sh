@@ -27,8 +27,10 @@
 #                                     error (exit 1) is retried next round. The loop ends (exit 0)
 #                                     after --for (default 12h, the backstop) or when PID is gone
 #                                     (in the background use --while-pid $PPID, the agent that
-#                                     started the shell; $$ dies with that one call); any release but
-#                                     the merge/close one counts as a lost claim.
+#                                     started the shell; $$ dies with that one call). A claim this
+#                                     session released itself (released_by) or that its pull request
+#                                     close released is dropped quietly; a takeover or a release by
+#                                     the sweeper, another session or person is lost (exit 3, named).
 #   claim.sh adopt --from <session> [N...]
 #                                     re-key the claims of your dead session to this one, each in
 #                                     its own lane (all of them without N). The holder must be dead
@@ -43,7 +45,9 @@
 #                                     merged or closed); exit 0, or 1 on timeout (default 7200)
 #   claim.sh block <N> <M>            N waits for issue M: add "blocked by", release, Status Ready
 #   claim.sh show <N> | mine [--lane L] | limits [--lane L]
-#   claim.sh adr                      reserve the next free ADR number (claim/adr-NNNN) and print it
+#   claim.sh adr                      reserve the next free ADR number (claim/adr-NNNN) and print it;
+#                                     counts docs/adr files, claim/adr-* refs and ADR files that open
+#                                     pull requests add
 #   claim.sh sensitive-paths          the ruleset patterns for CODEOWNERS' sensitive section
 #   claim.sh sweep | check-pr <PR> | release-pr <PR> | update-oldest     (used by claims.yml, updater.yml)
 #
@@ -116,23 +120,30 @@ else
   http_date_to_epoch() { LC_ALL=C date -u -j -f '%a, %d %b %Y %H:%M:%S GMT' "$1" +%s; }
 fi
 
-# claim_format ISSUE STATE HOLDER HUMAN LEASE_UNTIL PR NOTE -> the commit message.
+# claim_format ISSUE STATE HOLDER HUMAN LEASE_UNTIL PR NOTE [RELEASED_BY] -> the commit message.
+# RELEASED_BY (ADR 0094 decision 7) is written only on a release, as its own line; a commit without
+# it is a claim from before the field existed and parses with released_by "".
 claim_format() {
-  local note=${7//$'\n'/ }
+  local note=${7//$'\n'/ } by=${8:-}
   note=${note//$'\r'/ }
-  printf 'claim #%s: %s\n\nholder: %s\nhuman: %s\nlease_until: %s\npr: %s\nnote: %s\nstate: %s\n' \
-    "$1" "$2" "$3" "$4" "$5" "$6" "$note" "$2"
+  by=${by//$'\n'/ }
+  by=${by//$'\r'/ }
+  printf 'claim #%s: %s\n\nholder: %s\nhuman: %s\nlease_until: %s\npr: %s\nnote: %s\n' \
+    "$1" "$2" "$3" "$4" "$5" "$6" "$note"
+  if [[ -n $by ]]; then printf 'released_by: %s\n' "$by"; fi
+  printf 'state: %s\n' "$2"
 }
 
 # JQ_PARSE: jq definition turning a claim commit message (string) into an object.
 # shellcheck disable=SC2016
 JQ_PARSE='def claim_parse:
-  ([split("\n")[] | capture("^(?<k>holder|human|lease_until|pr|note|state): ?(?<v>.*)$")]
+  ([split("\n")[] | capture("^(?<k>holder|human|lease_until|pr|note|released_by|state): ?(?<v>.*)$")]
     | map({(.k): .v}) | add // {})
   | {state: (.state // ""), holder: (.holder // ""), human: (.human // ""),
-     lease_until: (.lease_until // ""), pr: (.pr // ""), note: (.note // "")};'
+     lease_until: (.lease_until // ""), pr: (.pr // ""), note: (.note // ""),
+     released_by: (.released_by // "")};'
 
-# claim_parse MESSAGE -> compact JSON {state,holder,human,lease_until,pr,note}.
+# claim_parse MESSAGE -> compact JSON {state,holder,human,lease_until,pr,note,released_by}.
 claim_parse() { printf '%s' "$1" | jq -Rsc "$JQ_PARSE claim_parse"; }
 
 # claim_status STATE LEASE_EPOCH NOW -> released | active | grace | takeover
@@ -313,7 +324,7 @@ my_base_holder() {
 
 session_id() { local h; h=$(my_holder) || return 1; holder_key "$h"; }
 
-# read_claim N -> JSON {issue,sha,state,holder,human,lease_until,pr,note}.
+# read_claim N -> JSON {issue,sha,state,holder,human,lease_until,pr,note,released_by}.
 # Returns 0 found, 1 no claim ref, 4 API error (message on stderr). Callers must tell 1 from 4: a
 # network blip is not a lost claim.
 read_claim() {
@@ -347,12 +358,12 @@ list_claims() {
         | (.target.message | claim_parse) + {issue: (.name | tonumber), sha: .target.oid}]'
 }
 
-# write_claim ISSUE STATE HOLDER HUMAN LEASE PR NOTE [PARENT_SHA]
+# write_claim ISSUE STATE HOLDER HUMAN LEASE PR NOTE [PARENT_SHA] [RELEASED_BY]
 # Creates the commit, then the ref (no parent) or fast-forwards it. Returns 0 won, 1 lost the
 # compare-and-set; any other failure (including other 422s, e.g. a ruleset) dies.
 write_claim() {
   local issue=$1 parent=${8:-} msg sha
-  msg=$(claim_format "$issue" "$2" "$3" "$4" "$5" "$6" "$7")
+  msg=$(claim_format "$issue" "$2" "$3" "$4" "$5" "$6" "$7" "${9:-}")
   local args=(-X POST "repos/$REPO/git/commits" -f "message=$msg" -f "tree=$EMPTY_TREE")
   [[ -z $parent ]] || args+=(-f "parents[]=$parent")
   sha=$(gh api "${args[@]}" --jq .sha) || die "cannot create the claim commit"
@@ -676,7 +687,7 @@ cmd_take() {
     if ((${#taken[@]})); then
       for t in "${taken[@]}"; do
         if load_claim "$t"; then
-          write_claim "$t" released "$holder" "$human" "$(epoch_to_iso "$now")" "" "rolled back: #$n was not available" "$(jq -r .sha <<<"$C")" || true
+          write_claim "$t" released "$holder" "$human" "$(epoch_to_iso "$now")" "" "rolled back: #$n was not available" "$(jq -r .sha <<<"$C")" "$holder" || true
           echo "rolled back #$t" >&2
         fi
       done
@@ -742,6 +753,7 @@ mine_claims() {
     | "\(.issue)\t\(.holder)"' <<<"$1"
 }
 
+join_semi() { local IFS=';'; local out="$*"; echo "${out//;/; }"; }
 join_or_none() { if (($#)); then local IFS=' '; echo "$*"; else echo none; fi; }
 
 # beat_identity: sets BEAT_LOGIN and BEAT_SESS once per run (three tries; a gh blip must not end a
@@ -755,17 +767,36 @@ beat_identity() {
   die "cannot resolve your login and session after 3 tries"
 }
 
+# beat_ended CLAIM_JSON LOGIN SESSION: how a tracked claim that is no longer ours ended (ADR 0094
+# decision 7). Prints "drop" (our own session released it, in any lane, or its pull request closed: not
+# a loss) or "lost <who ended it>". CLAIM_JSON "" is a claim that is gone. Only a held claim under
+# another holder (a takeover) or a release by someone else is lost. A release commit without
+# released_by (written before the field) keeps the old rule: only the pull request close note drops it.
+beat_ended() {
+  local c=$1 login=$2 sess=$3 state holder by note
+  if [[ -z $c ]]; then echo "lost it is gone"; return; fi
+  state=$(jq -r .state <<<"$c"); holder=$(jq -r .holder <<<"$c")
+  by=$(jq -r '.released_by // ""' <<<"$c"); note=$(jq -r '.note // ""' <<<"$c")
+  if [[ $state != released ]]; then echo "lost taken over by $holder"; return; fi
+  if [[ -z $by ]]; then
+    if [[ $note =~ ^pull\ request\ \#[0-9]+\ closed$ ]]; then echo drop; else echo "lost released by someone else (no released_by: $note)"; fi
+    return
+  fi
+  if [[ $by == pr-close ]]; then echo drop; return; fi
+  if [[ $by == */* && $(holder_login "$by") == "$login" && $(holder_session "$by") == "$sess" ]]; then echo drop; return; fi
+  echo "lost released by $by"
+}
+
 # beat_round: renew every claim of this session once. Sets BEAT_OK, BEAT_LOST (exit 3: the claim is
-# not ours any more) and BEAT_ERR (exit 1 or anything else: retry next round; no gh failure of a round
-# ends the loop) and BEAT_DROP (released because its pull request merged or closed). TRACKED holds
-# the issues renewed or failed in earlier rounds, so a claim that left our hands is noticed instead
-# of silently forgotten. A release does not change the holder, so only the note tells the releases
-# apart: the merge/close release is expected; any other (the sweeper, `release --force`, a manual
-# `release`) counts as lost. This process makes no releases of its own.
+# not ours any more; BEAT_WHY says who ended each), BEAT_ERR (exit 1 or anything else: retry next
+# round; no gh failure of a round ends the loop) and BEAT_DROP (released by this session or because
+# its pull request merged or closed). TRACKED holds the issues renewed or failed in earlier rounds, so
+# a claim that left our hands is noticed instead of silently forgotten. The release commit records
+# who released it (released_by), see beat_ended. This process makes no releases of its own.
 TRACKED=()
 beat_round() {
-  local claims lines n holder rc t e state note
-  BEAT_OK=(); BEAT_LOST=(); BEAT_ERR=(); BEAT_DROP=()
+  local claims lines n holder rc t e v
+  BEAT_OK=(); BEAT_LOST=(); BEAT_ERR=(); BEAT_DROP=(); BEAT_WHY=()
   if ! claims=$(list_claims); then BEAT_ERR+=("(listing the claims)"); return 0; fi
   if ! lines=$(mine_claims "$claims" "$BEAT_LOGIN" "$BEAT_SESS"); then BEAT_ERR+=("(reading the claims)"); return 0; fi
   local mine=()
@@ -783,9 +814,9 @@ beat_round() {
   done <<<"$lines"
   for t in ${TRACKED[@]+"${TRACKED[@]}"}; do
     [[ " ${mine[*]-} " != *" $t "* ]] || continue
-    e=$(jq -r --argjson n "$t" '.[] | select(.issue == $n) | [.state, (.note // "")] | @tsv' <<<"$claims")
-    state=${e%%$'\t'*}; note=${e#*$'\t'}
-    if [[ $state == released && $note =~ ^pull\ request\ \#[0-9]+\ closed$ ]]; then BEAT_DROP+=("#$t"); else BEAT_LOST+=("#$t"); fi
+    e=$(jq -c --argjson n "$t" '.[] | select(.issue == $n)' <<<"$claims")
+    v=$(beat_ended "$e" "$BEAT_LOGIN" "$BEAT_SESS")
+    if [[ $v == drop ]]; then BEAT_DROP+=("#$t"); else BEAT_LOST+=("#$t"); BEAT_WHY+=("#$t ${v#lost }"); fi
   done
   TRACKED=(${mine[@]+"${mine[@]}"})
 }
@@ -805,7 +836,7 @@ beat_mine() {
     beat_round
     echo "beat $(date -u +%Y-%m-%dT%H:%M:%SZ): renewed $(join_or_none ${BEAT_OK[@]+"${BEAT_OK[@]}"}); lost $(join_or_none ${BEAT_LOST[@]+"${BEAT_LOST[@]}"}); errors $(join_or_none ${BEAT_ERR[@]+"${BEAT_ERR[@]}"})$( ((${#BEAT_DROP[@]})) && echo "; released $(join_or_none "${BEAT_DROP[@]}")" || true)"
     if ((${#BEAT_LOST[@]})); then
-      CLAIM_EXIT=3 die "lost ${BEAT_LOST[*]}: stop work on it and tell your human"
+      CLAIM_EXIT=3 die "lost ${BEAT_LOST[*]}: stop work on it and tell your human${BEAT_WHY[*]+ ($(join_semi "${BEAT_WHY[@]}"))}"
     fi
     if [[ -z $every ]]; then
       if ((${#BEAT_ERR[@]})); then exit 1; fi
@@ -921,14 +952,16 @@ cmd_review() {
   upsert_comment "$n" "$(claim_comment held "$HOLDER" "$HUMAN" "$lease_until" "$pr" "in review")"
 }
 
-# do_release_claim CLAIM_JSON NOTE MERGED: write state released on top of the given claim's sha (so a
-# claim that moved since the snapshot makes the write fail: returns 1, nothing released).
+# do_release_claim CLAIM_JSON NOTE MERGED RELEASED_BY: write state released on top of the given claim's
+# sha (so a claim that moved since the snapshot makes the write fail: returns 1, nothing released).
+# RELEASED_BY is recorded in the release commit (ADR 0094 decision 7): the releasing holder, `sweeper`,
+# `pr-close` or `comment:<login>`. The commit keeps the claim's holder.
 do_release_claim() {
-  local c=$1 note=$2 merged=${3:-0} n human now
+  local c=$1 note=$2 merged=${3:-0} by=${4:-} n human now
   n=$(jq -r .issue <<<"$c")
   if [[ $(jq -r .state <<<"$c") == released ]]; then echo "#$n is already released"; return 0; fi
   human=$(jq -r .human <<<"$c"); now=$(server_now)
-  if ! write_claim "$n" released "$(jq -r .holder <<<"$c")" "$human" "$(epoch_to_iso "$now")" "$(jq -r .pr <<<"$c")" "$note" "$(jq -r .sha <<<"$c")"; then
+  if ! write_claim "$n" released "$(jq -r .holder <<<"$c")" "$human" "$(epoch_to_iso "$now")" "$(jq -r .pr <<<"$c")" "$note" "$(jq -r .sha <<<"$c")" "$by"; then
     echo "claim: #$n changed since it was read; not released" >&2; return 1
   fi
   echo "released #$n"
@@ -957,7 +990,7 @@ cmd_release() {
   else
     require_mine "$n"
   fi
-  do_release_claim "$C" "$note" 0 || { CLAIM_EXIT=3 die "#$n changed while releasing it: re-read with show"; }
+  do_release_claim "$C" "$note" 0 "$(my_holder)" || { CLAIM_EXIT=3 die "#$n changed while releasing it: re-read with show"; }
 }
 
 # wait-release N: poll until the claim is released or its PR is closed. An API error dies (load_claim),
@@ -996,7 +1029,7 @@ cmd_block() {
   gh_try -X POST "repos/$REPO/issues/$n/dependencies/blocked_by" -F "issue_id=$id"
   if ((TRY_RC != 0)) && [[ $TRY_OUT != *"already"* && $TRY_OUT != *"HTTP 422"* ]]; then die "cannot add the dependency: $TRY_OUT"; fi
   echo "#$n is now blocked by #$m"
-  do_release_claim "$C" "blocked by #$m" 0 || { CLAIM_EXIT=3 die "#$n changed while releasing it"; }
+  do_release_claim "$C" "blocked by #$m" 0 "$(my_holder)" || { CLAIM_EXIT=3 die "#$n changed while releasing it"; }
 }
 
 # ---- workflow commands ----
@@ -1010,13 +1043,13 @@ sweep_one() {
   if ((rc != 0)); then warn "#$n: API error judging liveness; skipping"; return 0; fi
   case $PR_STATE in
     closed) echo "#$n: pull request #$PR_NUM is closed; releasing"
-      do_release_claim "$c" "pull request #$PR_NUM closed" 1 || true; return 0 ;;
+      do_release_claim "$c" "pull request #$PR_NUM closed" 1 pr-close || true; return 0 ;;
     ready) echo "#$n: pull request #$PR_NUM is in review; skipping"; return 0 ;;
   esac
   labels=$(gh api "repos/$REPO/issues/$n/labels" --jq '.[].name' 2>/dev/null || true)
   if ((now > LIVE + RELEASE_AFTER)); then
     echo "#$n: no activity since $(epoch_to_iso "$LIVE"); releasing"
-    do_release_claim "$c" "released by the sweeper: no heartbeat or pull request activity" 0 || true
+    do_release_claim "$c" "released by the sweeper: no heartbeat or pull request activity" 0 sweeper || true
   elif ((now > LIVE + GRACE)); then
     if ! grep -qxF claim:stale <<<"$labels"; then
       echo "#$n: stale; marking"
@@ -1059,7 +1092,7 @@ cmd_release_pr() {
     else
       echo "#$n: claimed for pull request #$(jq -r .pr <<<"$C"), not #$p; keeping the claim"; continue
     fi
-    do_release_claim "$C" "pull request #$p closed" "$merged" || true
+    do_release_claim "$C" "pull request #$p closed" "$merged" pr-close || true
   done
 }
 
@@ -1114,18 +1147,45 @@ cmd_check_pr() {
   return "$fail"
 }
 
+# ADR_PR_JQ: the ADR numbers that open pull requests ADD, from the pages of open_pr_adr_numbers (slurped).
+# shellcheck disable=SC2016
+ADR_PR_JQ='[.[].data.repository.pullRequests.nodes[] | .files.nodes[]
+  | select(.changeType == "ADDED") | .path | capture("^docs/adr/(?<n>[0-9]{4})-[^/]*\\.md$").n] | unique | .[]'
+
+# open_pr_adr_numbers -> the four-digit ADR numbers that open pull requests add (ADR 0094 decision 6),
+# one per line. An API error dies: a number handed out from a partial view is how 0093 was duplicated.
+# A pull request with more than 100 files is read file by file through the REST list.
+open_pr_adr_numbers() {
+  local pages p
+  # shellcheck disable=SC2016
+  pages=$(gh api graphql --paginate -f o="$OWNER" -f n="$NAME" -f query='
+    query($o:String!,$n:String!,$endCursor:String){repository(owner:$o,name:$n){
+      pullRequests(states:OPEN,first:50,after:$endCursor){
+        pageInfo{hasNextPage endCursor}
+        nodes{number files(first:100){pageInfo{hasNextPage} nodes{path changeType}}}}}}' | jq -s .) ||
+    die "cannot list the open pull requests' files (API error); retry, no ADR number was reserved"
+  jq -r "$ADR_PR_JQ" <<<"$pages" || die "cannot read the open pull requests' files"
+  for p in $(jq -r '[.[].data.repository.pullRequests.nodes[] | select(.files.pageInfo.hasNextPage) | .number] | .[]' <<<"$pages"); do
+    gh api --paginate "repos/$REPO/pulls/$p/files" --jq '.[] | select(.status == "added") | .filename' |
+      { grep -oE '^docs/adr/[0-9]{4}-[^/]*\.md$' || true; } | cut -c10-13 ||
+      die "cannot list the files of pull request #$p (API error); retry"
+  done
+}
+
 # adr: reserve the next free ADR number. claim/adr-NNNN is created like a claim (create fails when it
-# exists), so two sessions cannot take one number. Numbers are free when neither a docs/adr file on
-# the default branch nor a claim/adr-* ref uses them.
+# exists), so two sessions cannot take one number. A number is free when no docs/adr file on the
+# default branch, no claim/adr-* ref and no file an open pull request adds uses it (ADR 0094
+# decision 6).
 cmd_adr() {
-  local files refs nums n holder human lease_until tries=0
+  local files refs prs nums n holder human lease_until tries=0
   holder=$(my_holder); human=$(human_login)
   while ((tries < 5)); do
     tries=$((tries + 1))
     files=$(gh api "repos/$REPO/contents/docs/adr" --jq '.[].name' | grep -oE '^[0-9]{4}' || true)
     refs=$(gh api "repos/$REPO/git/matching-refs/heads/claim/adr-" --jq '.[].ref' | grep -oE '[0-9]{4}$' || true)
+    prs=$(open_pr_adr_numbers)
     # shellcheck disable=SC2086
-    nums=$(next_adr_number $files $refs)
+    nums=$(next_adr_number $files $refs $prs)
     n=$nums
     lease_until=$(epoch_to_iso $(($(server_now) + HUMAN_LEASE)))
     if write_adr_claim "$n" "$holder" "$human" "$lease_until"; then
