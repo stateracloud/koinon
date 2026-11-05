@@ -66,17 +66,20 @@ escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./
 ## Testing layers
 
 Every PR: unit and package tests, the smoke test and the scenarios (`make test` and CI). The kind
-e2e (`test/e2e`, ~15-25 min) is not per PR: it runs on a PR only when the PR changes the e2e's own
-files or carries the `e2e` label, and otherwise batched on main (each push that changed something
+e2e (`test/e2e`, ~15-25 min) runs on a PR whenever `hack/needs-e2e.sh` says the change is e2e-relevant
+(the e2e's own files included) or the PR carries the `e2e` label, in the PR's own run, so a fork PR
+needs nothing from a maintainer to get one (issue #148). A PR nothing in the rule touches does not run
+it. It also runs batched on main (each push that changed something
 e2e-relevant, one running and the newest pending) and nightly, always, to catch drift no commit
 explains.
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
-observes (the rule lives only there). If yes, with a lab run `hack/e2e-remote.sh --argo`: a green
-run posts the commit status `e2e-lab` on your pushed head and that is enough to merge. Without a
-lab, or when it exits 75 (the lab cannot run it now), 78 (no lab configured) or 79 (the change
-touches `flavors/`, which the lab cannot build; nothing triggers GitHub for it, dispatch it by
-hand), run it on GitHub (`gh workflow run e2e-kind.yml --ref <branch>`, or the `e2e` label).
+observes (the rule lives only there). If yes, the PR's own run already runs the quickstart on GitHub;
+with a lab you can get there sooner: `hack/e2e-remote.sh --argo`, a green run posts the commit status
+`e2e-lab` on your pushed head and that is enough to merge once the PR's own quickstart has finished (a flaky red one does not hide a green lab run). When it exits 75 (the lab cannot run it
+now), 78 (no lab configured) or 79 (the change touches `flavors/`, which the lab cannot build), wait
+for the PR's quickstart, or dispatch it earlier (`gh workflow run e2e-kind.yml --ref <branch>`). The
+`e2e` label is for a change the rule thinks irrelevant but you want tested.
 `hack/e2e-remote.sh` on your own Docker (`--local`) is a dev and debug tool only: it produces
 neither `e2e-lab` nor `quickstart`, so it is not merge evidence. `SUITE_LABEL=smoke` (not with
 `--argo`) runs steps 1-6 only.
@@ -102,9 +105,9 @@ migrate Job lacked) passed every package test and failed only in a full install.
 
 Actions minutes cost money; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
-`go` (go-tidy, go-lint, go-vet, go-test, go-race), `web` (web-lint, web-test, web-e2e),
+`go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
 `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. `changes` and
-`quick checks` (proto, migrations, adr-lint, claim-tests and the dependency age steps in one job,
+`quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check and the dependency age steps in one job,
 koinon-private#594: every job bills a whole minute) and the other workflows (`dco`, `gitleaks`, `claim`,
 `e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
 are skipped only on a push to main whose heavy jobs are skipped. A skipped heavy job reports
@@ -184,6 +187,30 @@ squash, a missing or red check, an API error) runs everything. `flavor-publish` 
 nightly and batched e2e, not by `ci` on main. `hack/release-gate.sh` reads a check that main
 skipped from the merged PR's head.
 
+## Cache ownership (#147)
+
+A pull request can read its own caches and the default branch's, never another pull request's, so a
+cache only helps a pull request if main saved it. Main owns them all: the `warm-caches` jobs (`warm-caches`, `warm-caches-web`, `warm-caches-docs`) run on
+every push to main and is never skipped (`hack/ci-skip-heavy.sh` switches the heavy jobs off on a
+push whose tree already passed as a pull request head, which used to leave main without fresh
+entries). For each cache it does a `lookup-only` restore (no download) and, on a miss, the cheapest
+work that fills it, then saves:
+
+| Cache | Key | Filled by |
+| --- | --- | --- |
+| Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>` | `go build ./...`, `go test -run '^$' ./...`, one lint run |
+| envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
+| Playwright browser | `playwright-<os>-<arch>-<@playwright/test version>` | `playwright install chromium` |
+| pnpm stores (`web`, `docs/site`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web` and `warm-caches-docs`, each with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
+| golangci-lint cache | the action's | a lint run on every push to main, not only on a go-ci miss: the action's key has a 7-day interval (`go-lint` has `skip-save-cache`) |
+
+Every other job restores and never saves: one Go cache scheme (`go-ci`, `setup-go` with
+`cache: false` plus an explicit `actions/cache/restore`), and `e2e-go` is one entry per `go.sum`
+(no run id; saved by main only when the exact key was missing). The flavor layer cache stays with
+`flavors` and `flavor-publish` (see below). The `warm-caches*` jobs are advisory in `hack/ci-required.txt`: it
+reports on pushes only. A new key goes into the warm job and the restoring jobs together;
+`hack/ci-cache-test.sh` checks the rule.
+
 ## Image builds: authenticated downloads and layer cache (#145)
 
 Anonymous GitHub release downloads from shared runner IPs sometimes return a fixed error body,
@@ -248,3 +275,9 @@ claim and commit statuses (`e2e-lab`) keep their result; when gh cannot list the
 start time decides instead. It exits 6 `STALE-HEAD` when the PR's head stays different from
 `git ls-remote origin refs/heads/<branch>` for `PR_WAIT_STALE_GRACE` seconds (default 120); re-sync with
 `gh api -X PATCH repos/{owner}/{repo}/pulls/<PR> -f base=<base>`.
+
+## OpenSSF Scorecard
+
+`.github/workflows/scorecard.yml` runs `ossf/scorecard-action` weekly and on every push to main,
+publishes the result (`publish_results`) and uploads the SARIF to code scanning. It is advisory: not
+in `hack/ci-required.txt` (that file lists `ci.yml` jobs and the external required checks only).
