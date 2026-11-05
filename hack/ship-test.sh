@@ -37,7 +37,7 @@ case "$1 $2" in
 	fi
 	;;
 "pr view")
-	if [[ " $* " == *" comments,commits "* ]]; then
+	if [[ " $* " == *" headRefOid,comments,commits "* ]]; then
 		# the CodeRabbit guard (#184): apply the caller's --jq to FAKE_CR_JSON ({comments, commits}); no file = a read failure
 		q=""
 		while [[ $# -gt 0 ]]; do [[ $1 == --jq ]] && q=$2; shift; done
@@ -576,33 +576,39 @@ git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x 2>/dev/null ||
 
 # 26. (#184) --ready asks CodeRabbit for a review once per head, only on stateracloud/koinon; a failure only warns
 cr_url=https://github.com/stateracloud/koinon/pull/123
-cr_ship() { # <tag> <cr json or empty> [comment rc]: a fresh branch, ready PR, one new commit
+cr_ship() { # <tag> <cr json or empty> [comment rc] [again]: a fresh branch, ready PR, one new commit
 	reset_state
 	export FAKE_PR_URL=$cr_url FAKE_PR_DRAFT=true FAKE_PR_JSON='[{"number":123,"state":"OPEN","autoMergeRequest":null}]'
 	[[ -z $2 ]] || export FAKE_CR_JSON=$2
 	[[ -z ${3:-} ]] || export FAKE_COMMENT_RC=$3
 	w=$(newwork); cd "$w"
 	echo "$1" >"$1.txt"
+	if [[ -n ${4:-} ]]; then # not a new head: ship once, then ship again with nothing new
+		run "$tmp/o26$1-first" -m "feat: $1" --pr-title t --pr-body "$tmp/body.md" --ready >/dev/null
+		: >"$FAKE_LOG"
+	fi
 	run "$tmp/o26$1" -m "feat: $1" --pr-title t --pr-body "$tmp/body.md" --ready
 	git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 }
-c_old='{"commits":[{"committedDate":"2026-01-02T00:00:00Z"}],"comments":[{"body":"@coderabbitai review","createdAt":"2026-01-01T00:00:00Z"}]}'
-c_new='{"commits":[{"committedDate":"2026-01-01T00:00:00Z"}],"comments":[{"body":"@coderabbitai review\n","createdAt":"2026-01-02T00:00:00Z"}]}'
-c_none='{"commits":[{"committedDate":"2026-01-01T00:00:00Z"}],"comments":[{"body":"looks good","createdAt":"2026-01-02T00:00:00Z"}]}'
+c_old='{"headRefOid":"h1","commits":[{"oid":"h1","committedDate":"2026-01-02T00:00:00Z"}],"comments":[{"body":"@coderabbitai review","createdAt":"2026-01-01T00:00:00Z"}]}'
+c_new='{"headRefOid":"h1","commits":[{"oid":"h1","committedDate":"2026-01-01T00:00:00Z"}],"comments":[{"body":"@coderabbitai review\n","createdAt":"2026-01-02T00:00:00Z"}]}'
+c_none='{"headRefOid":"h1","commits":[{"oid":"h1","committedDate":"2026-01-01T00:00:00Z"}],"comments":[{"body":"looks good","createdAt":"2026-01-02T00:00:00Z"}]}'
 rc=$(cr_ship none "$c_none")
 check "coderabbit: exit 0" eq "$rc" 0
 check "coderabbit: posts the review request" has '^gh pr comment https://github.com/stateracloud/koinon/pull/123 --body @coderabbitai review$' "$FAKE_LOG"
 check "coderabbit: says so" has '^coderabbit review requested$' "$tmp/o26none"
-rc=$(cr_ship old "$c_old")
-check "coderabbit: a comment from before the latest push does not count" has '^gh pr comment ' "$FAKE_LOG"
-rc=$(cr_ship new "$c_new")
+rc=$(cr_ship fresh "$c_new")
+check "coderabbit: a just-pushed head posts even with a newer-dated request comment" has '^gh pr comment ' "$FAKE_LOG"
+rc=$(cr_ship old "$c_old" "" again)
+check "coderabbit: unchanged head, request dated before the head commit: posts" has '^gh pr comment ' "$FAKE_LOG"
+rc=$(cr_ship new "$c_new" "" again)
 check "coderabbit: already asked on this head: exit 0" eq "$rc" 0
 check "coderabbit: already asked on this head: no second comment" hasnt '^gh pr comment ' "$FAKE_LOG"
 check "coderabbit: already asked on this head: says so" has '^coderabbit review already requested on this head$' "$tmp/o26new"
 rc=$(cr_ship fail "$c_none" 1)
 check "coderabbit: a failed comment never fails ship" eq "$rc" 0
 check "coderabbit: a failed comment warns" has 'could not post @coderabbitai review' "$tmp/o26fail"
-rc=$(cr_ship rd "")
+rc=$(cr_ship rd "" "" again)
 check "coderabbit: unreadable comments never fail ship" eq "$rc" 0
 check "coderabbit: unreadable comments warn and post nothing" bash -c "grep -q 'could not read the comments' $tmp/o26rd && ! grep -q '^gh pr comment ' $FAKE_LOG"
 # another repository, and a pull request that is not marked ready: nothing is asked
