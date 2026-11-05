@@ -16,6 +16,17 @@ fails one that did not run (NOT RUN); `hack/go-test.sh` exits 3 when an expected
 (docker, git, helm) was missing. One package: `go test ./internal/x` (serial) or
 `go tool ginkgo -p ./internal/x`. `test/flavors` needs the flavor images: `make test-flavors`.
 
+`hack/go-test.sh` also exports one `TESTCONTAINERS_SESSION_ID` for the whole run, before `hack/pgserver`
+starts, so pgserver and every test process share one testcontainers session and one Ryuk reaper.
+Why: Ryuk exits 10 s after its last client disconnects. On a fresh runner a cold image pull leaves
+gaps that long between packages; testcontainers-go v0.44.0 then finds the dying reaper without
+checking that it runs and waits a fixed 60 s for it, failing a BeforeSuite with `wait for reaper ...:
+context deadline exceeded` ([testcontainers-go#3867](https://github.com/testcontainers/testcontainers-go/issues/3867)).
+pgserver keeps a container, hence a reaper connection, for the whole run, so Ryuk never idles out
+mid-run and still cleans up after a crashed one. Ryuk stays on everywhere; do not set
+`TESTCONTAINERS_RYUK_DISABLED` in CI. Runs without pgserver (a single-package `go test`) are not
+covered; the upgrade path is #173. `hack/go-test-test.sh` pins the export and its order.
+
 ## Persisted-state compatibility
 
 `internal/compat` (koinon-private#652) checks that what a shipped release wrote still loads at head. Each folder
