@@ -17,17 +17,21 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 # continuations; comment lines inside it are dropped.
 check() {
   awk '
-    function flush(   n, rest, i, parts, cmd) {
+    function flush(   rest, tool, cmd) {
       if (instr == "") return
       if (instr ~ /^RUN[ \t]/) {
         rest = instr
-        n = split(rest, parts, /apt-get[ \t]+/)
-        for (i = 2; i <= n; i++) {
-          # parts[i] starts with the options and subcommand of one apt-get call
-          cmd = parts[i]
+        # `apt` and `apt-get` as whole words (not apt-cache, aptitude, /etc/apt/ or apt.conf.d)
+        while (match(rest, /(^|[^A-Za-z0-9_\/.-])apt(-get)?[ \t]+/)) {
+          tool = substr(rest, RSTART, RLENGTH)
+          sub(/^[^a]*/, "", tool)
+          sub(/[ \t]+$/, "", tool)
+          # cmd is the options and subcommand of this one call
+          cmd = substr(rest, RSTART + RLENGTH)
+          rest = cmd
           sub(/[;&|].*/, "", cmd)
           if (cmd !~ /-o Acquire::Retries=5/ || cmd !~ /-o Acquire::http::Timeout=30/)
-            printf "%s:%d: apt-get without -o Acquire::Retries=5 -o Acquire::http::Timeout=30: apt-get %s\n", FILENAME, start, cmd
+            printf "%s:%d: %s without -o Acquire::Retries=5 -o Acquire::http::Timeout=30: %s %s\n", FILENAME, start, tool, tool, cmd
         }
         if (instr ~ /--with-deps/ && (instr !~ /Acquire::Retries "5"/ || instr !~ /Acquire::http::Timeout "30"/))
           printf "%s:%d: --with-deps runs apt without an apt.conf.d snippet setting Acquire::Retries and Acquire::http::Timeout\n", FILENAME, start
@@ -55,6 +59,12 @@ self_test() {
   printf 'FROM x\nRUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update \\\n && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y curl\n' >"$tmp/good"
   printf 'FROM x\nRUN npx playwright install --with-deps chromium\n' >"$tmp/deps"
   printf 'FROM x\nRUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update; apt-get install -y curl\n' >"$tmp/second"
+  printf 'FROM x\nRUN apt install -y curl\n' >"$tmp/plain"
+  printf 'FROM x\nRUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y curl\n' >"$tmp/goodget"
+  printf 'FROM x\nRUN echo x > /etc/apt/apt.conf.d/80retries && apt-cache policy curl\n' >"$tmp/conf"
+  [ "$(check "$tmp/plain" | wc -l)" -eq 1 ] || { echo "self-test: plain apt not flagged" >&2; exit 1; }
+  [ -z "$(check "$tmp/goodget")" ] || { echo "self-test: good apt-get flagged" >&2; exit 1; }
+  [ -z "$(check "$tmp/conf")" ] || { echo "self-test: apt.conf.d path or apt-cache flagged" >&2; exit 1; }
   [ "$(check "$tmp/bad" | wc -l)" -eq 2 ] || { echo "self-test: bad file should give 2 violations" >&2; exit 1; }
   [ -z "$(check "$tmp/good")" ] || { echo "self-test: good file flagged" >&2; exit 1; }
   [ "$(check "$tmp/deps" | wc -l)" -eq 1 ] || { echo "self-test: --with-deps without snippet not flagged" >&2; exit 1; }
