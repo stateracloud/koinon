@@ -37,7 +37,7 @@
 #   2   usage, or the lab rejected the request (4xx)
 #   75  the lab cannot run it now (unreachable, a failed upload or submit, every slot busy, a gate run
 #       still Pending after 120 s, or the run ended with no verdict): nothing was decided, fall back
-#       (the gate: run it locally; the e2e: GitHub's e2e-kind, `gh workflow run e2e-kind.yml --ref <branch>`)
+#       (the gate: run it locally; the e2e: the PR's own quickstart, dispatch `gh workflow run e2e-kind.yml --ref <branch>` only to re-run)
 #   76  NOT RUN (gate: result.txt verdict=notrun, hack/go-test.sh exited 3, the run proved less than
 #       it should, koinon-private#507)
 #   78  no lab configured (a setting or the credentials/manifest file is missing): there is no lab to
@@ -180,7 +180,7 @@ lab_down() {
   [[ -z ${bundle:-} ]] || rm -f "$bundle"
   echo "e2e-remote --argo: $1" >&2
   if [[ $lane == gate ]]; then echo "e2e-remote --argo: the lab is unreachable; run the gate locally" >&2
-  else echo "e2e-remote --argo: the lab is unreachable; use GitHub's e2e-kind (gh workflow run e2e-kind.yml) or --local" >&2; fi
+  else echo "e2e-remote --argo: the lab is unreachable; wait for the PR's own quickstart (dispatch gh workflow run e2e-kind.yml only to re-run) or use --local" >&2; fi
   exit 75
 }
 
@@ -511,7 +511,7 @@ if [[ $lane == kind && $target == test-e2e-kind && $allow_flavors == 0 ]]; then
     {
       echo "e2e-remote --argo: refused: this change touches flavors/, and the lab cannot build a flavor image (nvcr.io is not reachable from it)."
       echo "$fchanged"
-      echo "  Run the e2e on GitHub: gh workflow run e2e-kind.yml --ref <branch>   (or your own Docker: hack/e2e-remote.sh --local)."
+      echo "  The PR's own run runs the quickstart on GitHub; wait for it (dispatch gh workflow run e2e-kind.yml --ref <branch> only to re-run)   (or your own Docker: hack/e2e-remote.sh --local)."
       echo "  If the flavor image for this change is already in the lab's registry, add --allow-flavors."
     } >&2
     exit 79 ;;
