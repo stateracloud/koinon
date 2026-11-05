@@ -68,15 +68,15 @@ recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendm
 2. `hack/pr-wait.sh <PR> --checks --require e2e` is the merge gate: it passes on a green `e2e-lab` on the
    head, or on any green `quickstart` check run on the head (also a dispatched one next to a skipped
    pull_request run). Then auto-merge as usual.
-3. GitHub's `e2e-kind` is the fallback, `gh workflow run e2e-kind.yml --ref <branch>`, when:
+3. Otherwise wait for the PR's own quickstart on GitHub (dispatch `gh workflow run e2e-kind.yml --ref <branch>` only to re-run), when:
 
 | Exit of `--argo` | Meaning | What to do |
 | --- | --- | --- |
 | 0 | the e2e passed, `e2e-lab` is success | merge gate 2 |
 | 1 | the e2e failed, `e2e-lab` is failure | fix it |
-| 75 | the lab cannot run it now: unreachable, a failed upload or submit, no verdict | GitHub e2e-kind |
-| 78 | no lab configured | GitHub e2e-kind |
-| 79 | the change touches `flavors/`: the lab cannot build a flavor image (`nvcr.io` is fenced) | GitHub e2e-kind, dispatched by hand (nothing triggers it for a flavors/ PR); `--allow-flavors` if the image is already in Zot |
+| 75 | the lab cannot run it now: unreachable, a failed upload or submit, no verdict | wait for the PR's quickstart (dispatch only to re-run) |
+| 78 | no lab configured | wait for the PR's quickstart (dispatch only to re-run) |
+| 79 | the change touches `flavors/`: the lab cannot build a flavor image (`nvcr.io` is fenced) | wait for the PR's quickstart (dispatch only to re-run); `--allow-flavors` if the image is already in Zot |
 | 2 | usage, or the lab rejected the request | fix the call |
 
    `hack/e2e-remote.sh --local` (your own Docker) is a dev and debug tool, not merge evidence: it yields
@@ -87,14 +87,15 @@ recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendm
    The `koinon-gate` lane (`--gate <set>`, not the e2e) has the same 75 / 76 contract: 75 is "run the gate
    locally", including the 120 s Pending fallback (reasons `quota`, `unschedulable`, `namespace-limit`,
    `slot`; the run is deleted, never stopped).
-4. A pull request that changes the e2e's own files (`needs-e2e.sh --forced-only`) gets `e2e-kind` on GitHub
-   by itself, so the lab run is optional there; the `e2e` label dispatches it too.
+4. Any e2e-relevant pull request (`hack/needs-e2e.sh`, including the e2e's own files) runs the quickstart in
+   its own run on GitHub, so the lab run is optional there; the `e2e` label dispatches it too.
 5. Main stays batched on GitHub (each push that changed something e2e-relevant, one running and the newest
    pending) and nightly, always.
 
 `e2e-lab` is not a required check of the ruleset, because contributors without a lab cannot produce it;
 the required check stays `e2e result`, and it enforces the rule on GitHub (koinon-private#562): when `hack/needs-e2e.sh`
-(or the e2e's own files, or the `e2e` label) says the PR needs the e2e, `e2e result` fails unless the head
+(or the e2e's own files, or the `e2e` label) says the PR needs the e2e, the PR's own run runs the quickstart
+(issue #148) and `e2e result` fails unless the head
 has a successful `quickstart` job (this run, or an e2e-kind run dispatched on the head) or the commit
 status `e2e-lab` = success (`hack/e2e-gate.sh`; the failure message names `hack/e2e-remote.sh --argo` and
 `gh workflow run e2e-kind.yml --ref <branch>`). A status event starts no workflow, so
