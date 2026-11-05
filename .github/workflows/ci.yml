@@ -813,16 +813,18 @@ jobs:
           go build ./...
           go test -count=1 -run '^$' ./...
       - if: steps.gocache.outputs.cache-hit != 'true'
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: v2.15.0
-      - if: steps.gocache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
           key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      # The golangci-lint cache is keyed on a time interval (cache-invalidation-interval, 7 days) as well as
+      # go.mod, so it must be refreshed on every push to main, not only when go-ci missed. The action
+      # skips the save on an exact hit and downloads modules itself when go-ci was only looked up.
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
       # The envtest API server binaries; the key is the Makefile's ENVTEST_K8S_VERSION.
       - id: envtestcache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -837,8 +839,19 @@ jobs:
         with:
           path: ~/.local/share/kubebuilder-envtest
           key: envtest-1.37.0
-      # pnpm stores: setup-node saves its store cache after a job that missed it, so installing is all
-      # this needs to do, once per lockfile.
+
+  # pnpm stores, one job per lockfile (no matrix: hack/ci-required-test.sh cannot name matrix checks), each
+  # with the cache-dependency-path the consuming jobs use: setup-node hashes the listed files into its
+  # key, so a combined list would never match a consumer. setup-node saves the store after a job that
+  # missed it, so installing is all a job does. `warm-caches-web` also warms the Playwright browser, by
+  # @playwright/test version (the key web-e2e restores). Never skipped by `changes`.
+  warm-caches-web:
+    name: warm-caches-web
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: web/package.json
@@ -846,13 +859,9 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: |
-            web/pnpm-lock.yaml
-            docs/site/pnpm-lock.yaml
+          cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: web
-      - run: pnpm install --frozen-lockfile
-        working-directory: docs/site
       # The Playwright browser, by @playwright/test version (the key web-e2e restores).
       - id: pw
         run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >>"$GITHUB_OUTPUT"
@@ -871,6 +880,24 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
+
+  warm-caches-docs:
+    name: warm-caches-docs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: docs/site/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: docs/site/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: docs/site
 
   # Flavor contract suite (plan item E3, issue koinon-private#76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as

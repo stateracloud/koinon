@@ -27,17 +27,37 @@ check "warm-caches exists" test -n "$warm"
 check "warm-caches runs on pushes to main only" has "$warm" "if: github.event_name == 'push' && github.ref == 'refs/heads/main'"
 check "warm-caches does not wait for changes (never skipped by ci-skip-heavy)" hasnt "$warm" 'needs:'
 check "warm-caches looks up with lookup-only" has "$warm" 'lookup-only: true'
-for k in 'go-ci-' 'envtest-' 'playwright-'; do
+warmweb=$(job_body "$wf" warm-caches-web)
+warmdocs=$(job_body "$wf" warm-caches-docs)
+for k in 'go-ci-' 'envtest-'; do
   check "warm-caches saves $k" has "$warm" "key: ${k}"
   check "warm-caches saves $k only on a miss" has "$warm" "cache-hit != 'true'"
 done
 check "warm-caches uses actions/cache/save" has "$warm" 'actions/cache/save@'
+check "warm-caches-web saves playwright- only on a miss" has "$warmweb" "key: playwright-"
+check "warm-caches-web saves with actions/cache/save" has "$warmweb" 'actions/cache/save@'
+for j in warm-caches-web warm-caches-docs; do
+  check "$j runs on pushes to main only" has "$(job_body "$wf" $j)" "if: github.event_name == 'push' && github.ref == 'refs/heads/main'"
+  check "$j does not wait for changes" hasnt "$(job_body "$wf" $j)" 'needs:'
+  check "$j is advisory" grep -qx "advisory $j" "$repo/hack/ci-required.txt"
+done
+
+# setup-node keys its pnpm cache on the hash of every cache-dependency-path entry, so each lockfile
+# list a consumer uses must be warmed by one job with exactly that list (a single path per warm job).
+check "warm-caches-web warms web/pnpm-lock.yaml alone" has "$warmweb" '^          cache-dependency-path: web/pnpm-lock.yaml$'
+check "warm-caches-docs warms docs/site/pnpm-lock.yaml alone" has "$warmdocs" '^          cache-dependency-path: docs/site/pnpm-lock.yaml$'
+warmpaths=$(printf '%s\n%s\n' "$warmweb" "$warmdocs" | grep -E '^          cache-dependency-path: ' | sort -u)
+while read -r job path; do
+  [ "$job" = warm-caches-web ] || [ "$job" = warm-caches-docs ] && continue
+  if [ "$path" = '|' ] || [ -z "$path" ]; then continue; fi
+  check "consumer $job cache-dependency-path '$path' is warmed" has "$warmpaths" "cache-dependency-path: ${path}\$"
+done < <(awk '/^  [a-zA-Z0-9_-]+:/ { job = $1 } /cache-dependency-path:/ { sub(/.*cache-dependency-path: */, ""); print job, $0 }' "$wf")
 
 # No job but warm-caches and flavor-publish/flavors (their own layer cache) may use the saving form.
 saving=$(awk '/^  [a-zA-Z0-9_-]+:/ { job = $1 } /uses: actions\/cache@/ { print job }' "$wf")
 check "no ci.yml job restores-and-saves with actions/cache@" test -z "$saving"
 saves=$(awk '/^  [a-zA-Z0-9_-]+:/ { job = $1 } /uses: actions\/cache\/save@/ { print job }' "$wf" | sort -u | tr '\n' ' ')
-check "only warm-caches and the flavor jobs save a cache (got: $saves)" test "$saves" = "flavor-publish: flavors: warm-caches: "
+check "only the warm-caches jobs and the flavor jobs save a cache (got: $saves)" test "$saves" = "flavor-publish: flavors: warm-caches-web: warm-caches: "
 
 # One Go cache scheme: every setup-go in ci.yml has cache: false (the go-ci restore is explicit).
 total=$(grep -c 'uses: actions/setup-go@' "$wf")
@@ -53,6 +73,10 @@ check "go-vet is not in ci-required.txt" hasnt "$(cat "$repo/hack/ci-required.tx
 check "warm-caches is advisory" grep -qx 'advisory warm-caches' "$repo/hack/ci-required.txt"
 check "golangci-lint default set still runs govet (standard)" grep -Eq '^  default: standard' "$repo/.golangci.yml"
 check "go-lint does not save the lint cache" has "$(job_body "$wf" go-lint)" 'skip-save-cache: true'
+# The lint action's cache has a time-interval key: warm-caches must run it on every push to main,
+# so the step carries no go-ci miss condition.
+check "warm-caches runs golangci-lint on every push (no if:)" test "$(awk '/^      - /{blk=$0} /golangci-lint-action@/{print prev} {prev=$0}' <<<"$warm" | grep -c 'if:')" = 0
+check "warm-caches runs golangci-lint" has "$warm" 'golangci-lint-action@'
 
 # The envtest key follows the Makefile's version.
 ver=$(sed -n 's/^ENVTEST_K8S_VERSION ?= //p' "$repo/Makefile")
