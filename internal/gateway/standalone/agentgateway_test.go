@@ -137,7 +137,7 @@ var _ = func() bool {
 		},
 		GatewayBudgets:  true,
 		HeaderAllowlist: true,
-		// agentgateway v1.7.0 answers these in the key stage, before any response policy runs (#342).
+		// agentgateway v1.7.0 answers these in the key stage, before any response policy runs (koinon-private#342).
 		Unmarked: []string{gatewaytest.RefusalLLMKey, gatewaytest.RefusalLLMAuthorization, gatewaytest.RefusalMCPKey, gatewaytest.RefusalBudget},
 	})
 	return true
@@ -243,7 +243,7 @@ var _ = Describe("agentgateway v1.7.0 reload detection (standalone only)", Order
 		Expect(err).NotTo(HaveOccurred())
 	}, SpecTimeout(time.Minute))
 
-	It("reports a good file that arrives long after a rejected one as live (issue #245)", func(ctx SpecContext) {
+	It("reports a good file that arrives long after a rejected one as live (issue koinon-private#245)", func(ctx SpecContext) {
 		// A ConfigMap delivers a file 60 to 80 s after the write; the gauge reads 0 from the earlier
 		// rejection until then.
 		Expect(r.file.Deliver(ctx, []byte("llm: {models: [{name: 1, provider: nope}]}\n"), "")).To(Succeed())

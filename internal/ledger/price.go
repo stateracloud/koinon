@@ -53,14 +53,14 @@ func (e Entry) rejectedByUpstream() bool {
 
 // failedByUpstream: the provider answered with a 5xx and reported no usage. It generated nothing, so
 // the request is charged its input estimate only, with no output and no max_tokens reserve, and still
-// counts as a model request (ADR 0056, amendment 2026-10-31, #340).
+// counts as a model request (ADR 0056, amendment 2026-10-31, koinon-private#340).
 func (e Entry) failedByUpstream() bool {
 	return !e.InputKnown && !e.OutputKnown && e.Status >= 500 && e.Status < 600
 }
 
 // waivesRejected reports whether a request the provider refused is charged nothing: only when the
 // model's provider type documents that it does not bill refused requests, an explicit per-type
-// catalog flag (package providertype, issue #241). A request whose provider Koinon cannot tell (no
+// catalog flag (package providertype, issue koinon-private#241). A request whose provider Koinon cannot tell (no
 // priced model, a custom or unknown type) keeps the conservative charge, whatever the status.
 func waivesRejected(m prices.Model) bool {
 	return m.ProviderType != "" && !providertype.For(m.ProviderType).BillsRejectedRequests

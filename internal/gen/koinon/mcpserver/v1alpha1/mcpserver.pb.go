@@ -451,7 +451,7 @@ type Tool struct {
 	// unavailable says why agents are not offered the tool ("unavailable: name too long ..."); empty when
 	// they are.
 	Unavailable string `protobuf:"bytes,14,opt,name=unavailable,proto3" json:"unavailable,omitempty"`
-	// description is the sanitised text (ADR 0057 amendment, #267). description_original_length is the
+	// description is the sanitised text (ADR 0057 amendment, #52). description_original_length is the
 	// length in characters of the description as the server published it; description_capped says it,
 	// or a description in the input schema, was cut to its cap; description_cleaned says control,
 	// invisible or tag characters were removed or harness-lookalike tags escaped.

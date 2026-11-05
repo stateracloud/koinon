@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Fails when a tracked file names a maintainer lab host (#693, umbrella #692). The lab's domain lives only
+# Fails when a tracked file names a maintainer lab host (koinon-private#693, umbrella #135). The lab's domain lives only
 # in the untracked lab config (hack/lab/lab.env.example, KOINON_LAB_DOMAIN); docs, fixtures and spikes use
 # lab.example.invalid. The check carries no real domain: it matches the shape of a lab host, a name under
 # `.lab.<domain>` (zot.apps.lab.<domain>, ollama.lab.<domain>) or a bare `lab.<domain>/...` label key, that is

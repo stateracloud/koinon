@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package remotekms is what the adapters of a remote KMS share (OpenBao transit #416, AWS KMS #417):
+// Package remotekms is what the adapters of a remote KMS share (OpenBao transit koinon-private#416, AWS KMS koinon-private#417):
 // the per-call deadline, the plaintext frame that binds the associated data, and the error rules
 // of secretstore.Wrapper. An adapter only speaks its KMS's protocol and classifies its answers.
 //

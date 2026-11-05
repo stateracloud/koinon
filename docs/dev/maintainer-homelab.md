@@ -40,7 +40,7 @@ Then `make dev` (see [loop.md](loop.md)). The Tiltfile allows `kind-koinon-*` an
 
 ## Maintainer config outside the repository
 
-Nothing of the lab is tracked (issue #508): the repository works without it. The maintainers keep
+Nothing of the lab is tracked (issue koinon-private#508): the repository works without it. The maintainers keep
 these in `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/`:
 
 | File | What |
@@ -52,9 +52,9 @@ these in `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/`:
 
 Without `lab.env`, `hack/e2e-remote.sh --argo` exits 78 (no lab configured) and names what is missing.
 
-`lab.env` also holds `KOINON_LAB_DOMAIN`, the lab's DNS domain: lab hosts are `<name>.apps.<domain>` and `ollama.<domain>`, and the lane label of gate runs is `<domain>/lane`. The real value is never tracked: docs, fixtures and spikes use `lab.example.invalid`, and `hack/lab-domain-lint.sh` (CI `scripts` job) fails when a tracked file names a lab host (#693).
+`lab.env` also holds `KOINON_LAB_DOMAIN`, the lab's DNS domain: lab hosts are `<name>.apps.<domain>` and `ollama.<domain>`, and the lane label of gate runs is `<domain>/lane`. The real value is never tracked: docs, fixtures and spikes use `lab.example.invalid`, and `hack/lab-domain-lint.sh` (CI `scripts` job) fails when a tracked file names a lab host (koinon-private#693).
 
-## Where a pull request's kind e2e runs (#547)
+## Where a pull request's kind e2e runs (koinon-private#547)
 
 A needs-e2e pull request (`hack/needs-e2e.sh`) is tested lab first. A green lab run is enough to merge,
 recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendment) has the decision.
@@ -93,7 +93,7 @@ recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendm
    pending) and nightly, always.
 
 `e2e-lab` is not a required check of the ruleset, because contributors without a lab cannot produce it;
-the required check stays `e2e result`, and it enforces the rule on GitHub (#562): when `hack/needs-e2e.sh`
+the required check stays `e2e result`, and it enforces the rule on GitHub (koinon-private#562): when `hack/needs-e2e.sh`
 (or the e2e's own files, or the `e2e` label) says the PR needs the e2e, `e2e result` fails unless the head
 has a successful `quickstart` job (this run, or an e2e-kind run dispatched on the head) or the commit
 status `e2e-lab` = success (`hack/e2e-gate.sh`; the failure message names `hack/e2e-remote.sh --argo` and
@@ -101,20 +101,20 @@ status `e2e-lab` = success (`hack/e2e-gate.sh`; the failure message names `hack/
 `hack/e2e-status.sh` re-runs the PR run's `e2e result` job (only that job, not a failed quickstart) after posting `success`
 (`hack/e2e-rerun-result.sh`), as does a passing dispatched run; if that did not happen, use "Re-run failed
 jobs" on the PR's e2e-kind run. Anyone with write access can still post `e2e-lab` by hand: the lab's own
-GitHub App that makes the status verifiable is a separate, later issue (#568).
+GitHub App that makes the status verifiable is a separate, later issue (koinon-private#568).
 
 The re-run only happens once the PR run has finished: an `e2e-lab` posted while it is still in progress gets
 no re-run, use "Re-run failed jobs" afterwards. Trust limit: `result` runs from the PR's own `e2e-kind.yml`, so
 a PR can edit the YAML to drop the gate. The guard is the ruleset's required review on `.github/**` (not
 CODEOWNERS: `require_code_owner_review` is false); `e2e result` is not pinned to an app and `e2e-lab` can be
 posted by anyone with write access. This is a guardrail against mistakes, not against a malicious member;
-the follow-up is a pinned `integration_id` / the lab's own App (#568).
+the follow-up is a pinned `integration_id` / the lab's own App (koinon-private#568).
 
-### go-test on the lab gate first (#610)
+### go-test on the lab gate first (koinon-private#610)
 
 CI's `go-test` job is the longest CI job. With a lab, run it there first and let CI skip it:
 
-1. Pull request as a draft (a draft skips the heavy jobs, #593). Then
+1. Pull request as a draft (a draft skips the heavy jobs, koinon-private#593). Then
    `hack/ship.sh --ready --lab-go-test ...`: after the push it runs `hack/e2e-remote.sh --argo --gate go-test`
    on a free gate slot (`gate-1`..`gate-4` with no unfinished `lane=gate` run, never always `gate-1`),
    which posts the commit status `go-test-lab` on the pushed head (`success`, or `failure` when the gate
@@ -135,7 +135,7 @@ CI's `go-test` job is the longest CI job. With a lab, run it there first and let
    `hack/release-gate.sh` accept a skipped `go-test` only with a green `go-test-lab` on the pull request
    head, or when the change touches no Go (`hack/go-test-lab.sh touches-go`).
 
-Trust limit, as for `e2e-lab` (#568): anyone with write access can post `go-test-lab`, and the `changes` job
+Trust limit, as for `e2e-lab` (koinon-private#568): anyone with write access can post `go-test-lab`, and the `changes` job
 runs from the pull request's own `ci.yml`; the guard is the required review on `.github/**`. A guardrail
 against mistakes, not against a malicious member. `changes` and the release `gate` job need `statuses: read`.
 

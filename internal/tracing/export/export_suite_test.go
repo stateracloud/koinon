@@ -11,7 +11,7 @@ import (
 
 func TestExport(t *testing.T) {
 	RegisterFailHandler(Fail)
-	// Eventually returns at the first success; its deadline only tells a hang from a slow machine (#612).
+	// Eventually returns at the first success; its deadline only tells a hang from a slow machine (koinon-private#612).
 	SetDefaultEventuallyTimeout(hangBound)
 	RunSpecs(t, "Trace Export Suite")
 }

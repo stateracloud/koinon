@@ -25,7 +25,7 @@ import (
 // whose visibility is unknown, or whose reading is older than the freshness window, is not internal.
 //
 // The freshness window is DefaultVisibilityMaxAge. ADR 0091 left "how fresh" and "what unknown does"
-// open for #350: unknown is external-high, and a reading older than an hour counts as unknown, because
+// open for koinon-private#350: unknown is external-high, and a reading older than an hour counts as unknown, because
 // a repository that turned public after the reading is a leak the guard would not see.
 
 // DefaultVisibilityMaxAge is how old a repository's visibility reading may be and still count.
