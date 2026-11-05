@@ -14,20 +14,22 @@ image_refs() {
 agw=ghcr.io/agentgateway/agentgateway:v1.7.0@sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b
 pg=ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie@sha256:f7e00138159bb45d70b624ba25e446924cb3ed1bf366d13e936c3f81b914064e
 # (a) nothing set: every reference is the upstream one, unchanged.
-want=$(printf '%s\n' "$agw" "$pg" ghcr.io/nvidia/openshell/supervisor:0.1.5 ghcr.io/stateracloud/flavor-opencode:0.0.0 \
-	ghcr.io/stateracloud/koinon-agentd:0.0.0 ghcr.io/stateracloud/koinon-api:0.0.0 ghcr.io/stateracloud/koinon-reconciler:0.0.0 | sort -u)
+want=$(printf '%s\n' "$agw" "$pg" ghcr.io/nvidia/openshell/supervisor:0.1.5 ghcr.io/stateracloud/koinon/flavors/opencode:0.0.0 \
+	ghcr.io/stateracloud/koinon/agentd:0.0.0 ghcr.io/stateracloud/koinon/api:0.0.0 ghcr.io/stateracloud/koinon/reconciler:0.0.0 | sort -u)
 [[ $(image_refs) == "$want" ]] || fail "default image references changed: $(image_refs | tr '\n' ' ')"
+# The public repository's packages (#167): none of the old koinon-private names may come back.
+image_refs | grep -Eq -- 'stateracloud/(koinon-|flavor-opencode)' && fail "an old package name is rendered: $(image_refs | tr '\n' ' ')"
 # (b) imageRegistry replaces every host and keeps path, tag and digest.
 want=$(printf '%s\n' "art.example.com/proxy/${agw#ghcr.io/}" "art.example.com/proxy/${pg#ghcr.io/}" art.example.com/proxy/nvidia/openshell/supervisor:0.1.5 \
-	art.example.com/proxy/stateracloud/flavor-opencode:0.0.0 art.example.com/proxy/stateracloud/koinon-agentd:0.0.0 \
-	art.example.com/proxy/stateracloud/koinon-api:0.0.0 art.example.com/proxy/stateracloud/koinon-reconciler:0.0.0 | sort -u)
+	art.example.com/proxy/stateracloud/koinon/flavors/opencode:0.0.0 art.example.com/proxy/stateracloud/koinon/agentd:0.0.0 \
+	art.example.com/proxy/stateracloud/koinon/api:0.0.0 art.example.com/proxy/stateracloud/koinon/reconciler:0.0.0 | sort -u)
 [[ $(image_refs --set global.imageRegistry=art.example.com/proxy) == "$want" ]] ||
 	fail "global.imageRegistry did not rewrite every image: $(image_refs --set global.imageRegistry=art.example.com/proxy | tr '\n' ' ')"
 # (c) the map wins for its host; imageRegistry rewrites the others (the CNPG image is on another upstream here).
 mixed=(--set global.imageRegistry=art.example.com/proxy --set 'global.registryMirrors.ghcr\.io=art.example.com/ghcr-remote'
 	--set postgres.cnpg.imageName=quay.io/enterprisedb/postgresql:18@sha256:f7e00138159bb45d70b624ba25e446924cb3ed1bf366d13e936c3f81b914064e)
 refs=$(image_refs "${mixed[@]}")
-grep -Fxq -- "art.example.com/ghcr-remote/stateracloud/koinon-api:0.0.0" <<<"$refs" || fail "registryMirrors[ghcr.io] must rewrite Koinon's images: $refs"
+grep -Fxq -- "art.example.com/ghcr-remote/stateracloud/koinon/api:0.0.0" <<<"$refs" || fail "registryMirrors[ghcr.io] must rewrite Koinon's images: $refs"
 grep -Fxq -- "art.example.com/ghcr-remote/${agw#ghcr.io/}" <<<"$refs" || fail "registryMirrors[ghcr.io] must rewrite agentgateway, digest kept: $refs"
 grep -Fxq -- "art.example.com/proxy/enterprisedb/postgresql:18@sha256:f7e00138159bb45d70b624ba25e446924cb3ed1bf366d13e936c3f81b914064e" <<<"$refs" || fail "imageRegistry must rewrite hosts the map lacks: $refs"
 grep -Fq -- "ghcr.io/" <<<"$refs" && fail "a ghcr.io reference survived the mirror: $refs"
@@ -41,8 +43,8 @@ has "a registry with a port is a host" 'imageName: art.example.com/p/img:1$' \
 # A reference already under the mirror is not prefixed again, whichever setting names the mirror.
 has "a reference under another mirror value stays" 'imageName: art.example.com/ghcr-remote/org/x:1$' --set global.imageRegistry=proxy.example.com/p \
 	--set 'global.registryMirrors.ghcr\.io=art.example.com/ghcr-remote' --set postgres.cnpg.imageName=art.example.com/ghcr-remote/org/x:1
-has "image.registry already under imageRegistry does not double" 'image: art.example.com/ghcr-remote/stateracloud/koinon-api:0.0.0$' \
-	--set image.registry=art.example.com/ghcr-remote/stateracloud --set global.imageRegistry=art.example.com/ghcr-remote
+has "image.registry already under imageRegistry does not double" 'image: art.example.com/ghcr-remote/stateracloud/koinon/api:0.0.0$' \
+	--set image.registry=art.example.com/ghcr-remote/stateracloud/koinon --set global.imageRegistry=art.example.com/ghcr-remote
 # Docker Hub's other names and upper case are docker.io.
 for h in index.docker.io registry-1.docker.io Docker.IO; do
 	has "$h is docker.io" 'imageName: art.example.com/docker-remote/library/postgres:18$' \
@@ -55,9 +57,9 @@ if render --set 'global.registryMirrors.ghcr\.io=https://art.example.com' >/dev/
 notes=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set openshell.insecure=true --set "$ADDRESS" --set image.registry=quay.io/m --set global.imageRegistry=art.example.com 2>&1) || true
 grep -q 'WARNING: image.registry is quay.io/m' <<<"$notes" || fail "no NOTES warning for image.registry with a global mirror"
 # An explicit image.registry is the upstream that the rewrite starts from.
-has "image.registry is rewritten too" 'image: art.example.com/ghcr-remote/mine/koinon-api:0.0.0$' \
+has "image.registry is rewritten too" 'image: art.example.com/ghcr-remote/mine/api:0.0.0$' \
 	--set image.registry=quay.io/mine --set 'global.registryMirrors.quay\.io=art.example.com/ghcr-remote'
-has "an explicit image.registry stands without a mirror" 'image: quay.io/mine/koinon-api:0.0.0$' --set image.registry=quay.io/mine
+has "an explicit image.registry stands without a mirror" 'image: quay.io/mine/api:0.0.0$' --set image.registry=quay.io/mine
 # (e) the default supervisor pin follows the mirror, so the admission policy admits the rewritten image; an explicit list is used as written.
 has "supervisor pin is rewritten" 'c.image in \["art.example.com/ghcr-remote/nvidia/openshell/supervisor:0.1.5"\]' \
 	--set 'global.registryMirrors.ghcr\.io=art.example.com/ghcr-remote'

@@ -64,6 +64,18 @@ SBOMs.
   (the only one with `id-token: write`) runs cosign over the pushed digests and the chart, and only
   when the repository variable `RELEASE_SIGNING` is `true` (ADR [0049](0049-v01-scope-decisions.md)).
 
+## Amendment (#167, 2026-11-05)
+
+- Every published package moved under the public repository's namespace, `ghcr.io/stateracloud/koinon/*`,
+  so the repository's own Actions token owns them: the packages created while the code lived in
+  `koinon-private` stayed linked to that repository, and Actions access to a package can only be
+  granted in the browser. The images are `koinon/api`, `koinon/reconciler`, `koinon/agentd` and
+  `koinon/flavors/opencode`; the chart is `oci://ghcr.io/stateracloud/koinon/charts/koinon`; the e2e
+  toolchain images are `koinon/e2e-toolchain` and `koinon/e2e-toolchain-web`. Where a workflow can,
+  the prefix comes from `github.repository`; elsewhere it is the chart's `image.registry` default.
+  The old packages (`koinon-api`, `flavor-opencode` and the rest) are neither deleted nor changed.
+  The packages stay private until v0.3. The spike probe image is no longer built.
+
 ## Upstream verification
 
 Checked 2026-10-21:

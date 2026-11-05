@@ -75,13 +75,14 @@ for f in flavors:
 # `dev` is the chart's image.tag, which the preflight Job's probe pods use. On kind ko loads the
 # image into the node itself (KIND_CLUSTER_NAME); on a remote cluster it pushes to your registry.
 def ko_image(name):
+    # The chart's images are <image.registry>/api, /reconciler and /agentd (#167); the binary is cmd/koinon-<name>.
     repo = registry + '/' + name
     ref_file = '.tilt-ko-' + name
     custom_build(
         repo,
         'TAG=tilt-$(date +%s) && ' +
         'KO_DOCKER_REPO="' + repo + '" KIND_CLUSTER_NAME="' + kind_cluster + '" ' +
-        'ko build --bare --platform=' + platform + ' --tags "$TAG,dev" ./cmd/' + name +
+        'ko build --bare --platform=' + platform + ' --tags "$TAG,dev" ./cmd/koinon-' + name +
         ' >/dev/null && echo "' + repo + ':$TAG" > "$TILT_KO_REF"',
         deps=['cmd', 'internal', 'go.mod', 'go.sum'],
         env={'TILT_KO_REF': ref_file},
@@ -89,7 +90,7 @@ def ko_image(name):
         skips_local_docker=True,
     )
 
-for n in ['koinon-api', 'koinon-reconciler', 'koinon-agentd']:
+for n in ['api', 'reconciler', 'agentd']:
     ko_image(n)
 
 # Flavor images are not in any pod spec Tilt sees (the reconciler starts sandboxes from them), so
@@ -101,7 +102,7 @@ for f in flavors:
     # The load-time tag is only the chart's value; the build computes its own, so a flavor edit
     # that has not reloaded the Tiltfile yet is still built and tagged consistently.
     flavor_tags[f] = str(local('hack/flavor-tag.sh ' + f, quiet=True)).strip()
-    ref = '%s/flavor-%s:$T' % (registry, f)
+    ref = '%s/flavors/%s:$T' % (registry, f)
     publish = ('kind load docker-image --name %s %s' % (kind_cluster, ref)) if KIND else ('docker push %s' % ref)
     local_resource(
         'flavor-' + f,

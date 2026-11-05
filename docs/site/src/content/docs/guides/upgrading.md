@@ -37,7 +37,7 @@ encryption keys is `<name>-kek`, or the Secret you set in `secrets.kek.existingS
 2. Your values file must still render with the new chart:
 
    ```sh
-   helm template <release> oci://ghcr.io/stateracloud/charts/koinon --version <version> \
+   helm template <release> oci://ghcr.io/stateracloud/koinon/charts/koinon --version <version> \
      --namespace koinon -f values.yaml > /dev/null
    ```
 
@@ -78,7 +78,7 @@ encryption keys is `<name>-kek`, or the Secret you set in `secrets.kek.existingS
 A patch release shares the schema with the one before it. Upgrade in place:
 
 ```sh
-helm upgrade <release> oci://ghcr.io/stateracloud/charts/koinon --version <version> \
+helm upgrade <release> oci://ghcr.io/stateracloud/koinon/charts/koinon --version <version> \
   --namespace koinon -f values.yaml --wait --timeout 10m
 ```
 
@@ -133,7 +133,7 @@ So stop first.
    ```
 
    ```sh
-   helm upgrade <release> oci://ghcr.io/stateracloud/charts/koinon --version <version> \
+   helm upgrade <release> oci://ghcr.io/stateracloud/koinon/charts/koinon --version <version> \
      --namespace koinon -f values.yaml -f stop.yaml --wait --timeout 15m
    ```
 
@@ -154,7 +154,7 @@ So stop first.
 3. **Start.** Upgrade again without `stop.yaml`, so the replicas return to your values:
 
    ```sh
-   helm upgrade <release> oci://ghcr.io/stateracloud/charts/koinon --version <version> \
+   helm upgrade <release> oci://ghcr.io/stateracloud/koinon/charts/koinon --version <version> \
      --namespace koinon -f values.yaml --wait --timeout 10m
    ```
 
@@ -239,7 +239,7 @@ Not Ready. The only way back is a restore:
 4. Install the previous chart version with the values you used then:
 
    ```sh
-   helm upgrade <release> oci://ghcr.io/stateracloud/charts/koinon --version <previous-version> \
+   helm upgrade <release> oci://ghcr.io/stateracloud/koinon/charts/koinon --version <previous-version> \
      --namespace koinon -f values.yaml --wait --timeout 10m
    ```
 

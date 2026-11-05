@@ -3,7 +3,7 @@
 # The web variant of the kind e2e toolchain (koinon-private#358): the toolchain image (Dockerfile here, passed in as
 # BASE by digest) plus Node, pnpm and Playwright's Chromium with its system packages, so
 # `SUITE=web test/e2e/run.sh` (make test-e2e-web) needs neither the Playwright CDN nor apt at run
-# time; only the npm registry for `pnpm install`. Published to ghcr.io/stateracloud/koinon-e2e-toolchain-web
+# time; only the npm registry for `pnpm install`. Published to ghcr.io/stateracloud/koinon/e2e-toolchain-web
 # by .github/workflows/e2e-toolchain.yml.
 #
 # Keep the versions in step with the repository: NODE_VERSION's major with actions/setup-node in
