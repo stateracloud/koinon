@@ -114,4 +114,4 @@ are in [0046](0046-adr-conventions.md).
 | [0092](0092-leak-guard-judge-model.md) | Leak guard judge: rules, then a cheap judge model, then a person | Accepted (decisions by procoduck, 2026-11-03) |
 | [0093](0093-koinon-core-opencode-plugin.md) | koinon.core: one Koinon-owned OpenCode plugin instead of a fork | Proposed |
 | [0094](0094-work-claims-on-the-public-repository.md) | Work claims on the public repository: one lock, claims by comment, a conflict check, the native merge queue | Accepted (procoduck, 2026-11-05, after the grilling session and the probes, which changed no decision) |
-| [0097](0097-koinon-owned-gateway.md) | A Koinon-owned gateway, in three steps | Proposed |
+| [0097](0097-koinon-owned-gateway.md) | A Koinon-owned gateway, in three steps | Accepted (2026-11-06) |

@@ -1,6 +1,6 @@
 # 0097. A Koinon-owned gateway, in three steps
 
-- Status: Proposed
+- Status: Accepted (2026-11-06)
 - Date: 2026-11-06
 - Amends: [0040](0040-agentgateway-model-and-mcp-gateway.md) (supersedes in part decisions 1, 2 and 6 and
   the "Our own Go proxy" rejection: agentgateway becomes the first driver, not the destination),
@@ -201,7 +201,7 @@ change.
 
 Scope:
 
-- **The gateway behaviour suite.** Extend `internal/gateway/gatewaytest` from "what the driver renders"
+- **The gateway behaviour suite** (#272). Extend `internal/gateway/gatewaytest` from "what the driver renders"
   to "what the running gateway does", run against the pinned agentgateway image with the fake model
   server and fake MCP servers (no paid model, `testenv.Require` for Docker). Cases:
   - key refusals: missing, unknown, revoked and over-budget keys, each with its status and the marker
@@ -233,14 +233,14 @@ Scope:
   sampling, and in ACP mode it cancels MCP elicitations), not because of Koinon, so it is an interim
   fix with its own issue (issue to file), exit condition: "the step 2 gateway refuses these itself"
   (decision 5).
-- **The usage record** (decision 3) and the leakage cleanup (decision 2.5).
+- **The usage record** (decision 3; #273) and the leakage cleanup (decision 2.5).
 - **The guard scans arguments in a canonical form** (#256): keys sorted, each value scanned on its own.
 - **Fix the `gateway.Limit` comment** (`internal/gateway/gateway.go:300-302`): a limit can be overshot
   by one in-flight response per concurrent call, not by one response.
 - **Supply chain (#238).** One mirrored, digest-pinned agentgateway image for the chart, the Go tests
   and kind; no test pulls from `cr.agentgateway.dev`.
-- **Kubernetes mode is frozen, then dropped, not ported** (maintainer decision 2026-11-06, second
-  review). It keeps passing the suite in v0.1 and gets no new features; Koinon's gateway never gets a
+- **Kubernetes mode is frozen, then dropped, not ported** (#274; maintainer decision 2026-11-06,
+  second review). It keeps passing the suite in v0.1 and gets no new features; Koinon's gateway never gets a
   Kubernetes mode, and it is deleted with agentgateway in step 3. A platform that runs its own
   Kubernetes gateway puts it behind Koinon's (decision 10). Shared mode (ADR 0058) is not built: an
   existing gateway an org already runs is reached as a provider upstream, as ADR 0058 decision 2
@@ -262,7 +262,7 @@ Go on the official MCP Go SDK (`github.com/modelcontextprotocol/go-sdk`), design
 sign-in (#237, ADR 0096) and the agent passport (#40, ADR 0073). The model path does what agentgateway
 does today, no more (model path at parity, below).
 
-**The MCP path.**
+**The MCP path** (#278).
 
 - The MCP path is an aggregating go-sdk server with one go-sdk client per upstream target. The guard
   **wraps each upstream client's `Connection`**, the pattern of the SDK's `LoggingTransport`, so every
@@ -282,7 +282,7 @@ does today, no more (model path at parity, below).
     and can `get`, `list` and `watch` every Secret in the namespace (`charts/koinon/templates/rbac.yaml:4-11`).
     A Kubernetes Secret in the same namespace therefore cannot hold the gateway-only key.
   - Unverified: whether OpenBao can hold a gateway-only key in all three DB modes without new
-    infrastructure (open question 1).
+    infrastructure (open question 1, #279).
 - **Server-initiated requests** (maintainer decision 2026-11-06). Koinon's gateway owns the client
   side of every upstream session. At initialize it advertises neither `sampling` nor `elicitation` to
   upstream servers, and it answers `roots/list` itself with one fixed folder. A sampling or elicitation
@@ -302,7 +302,7 @@ does today, no more (model path at parity, below).
   the MCP sign-in token (ADR 0096) and the passport (ADR 0073). Each exists only between the gateway and
   the MCP server. This replaces ADR 0073's delivery through ext_authz and `backendAuth`, its delivery
   spike, and ADR 0096's gateway spike; the token service in koinon-api stays.
-- **The agent header for Koinon's own tool servers.** The GitHub tools MCP server trusts agentgateway's
+- **The agent header for Koinon's own tool servers** (#281). The GitHub tools MCP server trusts agentgateway's
   agent header today (`charts/koinon/templates/deployments.yaml:265`; removal research A14). Koinon's
   MCP path sets an equivalent, Koinon-named header after the key check, and NetworkPolicy keeps the tool
   servers reachable only from the gateway. Without it the tools break when the default driver changes.
@@ -311,7 +311,7 @@ does today, no more (model path at parity, below).
 - The same code runs in every cluster as a plain Deployment and Service, so the standalone/Kubernetes
   split ends.
 
-**The model path at parity** (maintainer decision 2026-11-06, second review). Each model family speaks
+**The model path at parity** (#279; maintainer decision 2026-11-06, second review). Each model family speaks
 its native format (ADR 0069), so the gateway forwards bodies and does no format translation.
 
 - **A thin pass-through proxy Koinon writes**: `httputil.ReverseProxy` with `Rewrite`, building each
@@ -400,6 +400,8 @@ Koinon-only prices. Then agentgateway, its drivers and Kubernetes mode are delet
   that window.** The run caps (requests, USD, wall clock; ADR 0081) still apply. The gateway counts
   calls allowed without a reservation and alerts on them, with fixed metric labels (ADR 0023).
 - **Entry work for step 3: three measurements**, recorded in this ADR before step 3 commits to numbers.
+  They run at the start of v0.2 (maintainer decision 2026-11-06; #280), since memory per open stream
+  matters as soon as the model path exists.
   Docker-gated tests, no cluster:
   1. single-row writes per second on Postgres 18, plain per-call versus batched;
   2. gateway memory per open stream at 1k, 5k and 10k streams per replica, against the fake model
@@ -416,7 +418,8 @@ Koinon-only prices. Then agentgateway, its drivers and Kubernetes mode are delet
   ledger row and shown on the spend page. Charging $0, as LiteLLM and Portkey do, is rejected: a $0
   call does not count against any budget.
 - To fill the default price list, a reviewed import tool may propose entries from LiteLLM's MIT price
-  JSON for a person to approve; nothing is downloaded at runtime.
+  JSON for a person to approve; nothing is downloaded at runtime (ADR 0098,
+  [0098-price-catalogue-updates-from-public-sources.md](0098-price-catalogue-updates-from-public-sources.md)).
 
 Exit criteria:
 
@@ -527,8 +530,8 @@ Maintainer decision 2026-11-06, second review (removal research, section C, Link
    exchange subject stays the agent; the gateway is the actor. Koinon installs no SPIRE.
 2. **Never in a sandbox.** The SPIRE socket is never mounted into a sandbox: an agent with the socket
    could fetch a usable identity, which breaks "no secrets in sandboxes". A ValidatingAdmissionPolicy
-   refuses SPIFFE CSI volumes and the socket's hostPath in sandbox pods (issue to file), and an
-   escape-suite test checks that no SPIFFE socket is reachable from a sandbox (issue to file).
+   refuses SPIFFE CSI volumes and the socket's hostPath in sandbox pods (#282), and an
+   escape-suite test checks that no SPIFFE socket is reachable from a sandbox (#282).
 3. **Agents are not SPIRE workloads.** One agent spans many sandboxes over its life, and SPIRE attests
    pods and processes. Minting agent IDs in the platform's SPIRE would need an admin identity that can
    mint any ID in the platform's trust domain. Instead, Koinon's own issuer (ADR 0043) runs an
@@ -617,17 +620,16 @@ The rule in item 2 holds either way.
 
 ## Open questions
 
-Each gets a tracking issue when this ADR is accepted.
+Tracked in #279 (the model path design).
 
 1. **OpenBao and the gateway-only key** (unverified): whether OpenBao can hold a key only the gateway
    can use, in all three DB modes, without new infrastructure. Checked in the step 2 design; the
    placement decision (step 2) does not change, only how the key is provisioned.
-2. **When the step 3 entry measurements run** (unverified): the removal research recommends the
-   start of v0.2, since memory per open stream matters as soon as the model path exists.
 
 Decided and moved into the decision sections: gateway placement, MCP server-initiated requests and
 MCP replicas (step 2), unpriced models and runaway calls (step 3), all at the maintainer's 2026-11-06
-review; the call reservation details (step 3). At the second 2026-11-06 review: the new order (decision
+review; the call reservation details (step 3). On 2026-11-06 (acceptance): the step 3 entry
+measurements run at the start of v0.2 (decision 6, #280). At the second 2026-11-06 review: the new order (decision
 1), when the agentgateway driver is removed (in step 3, decision 6), Kubernetes mode (dropped, not
 ported, decision 4), platform gateways (decision 10) and SPIRE (decision 11).
 
