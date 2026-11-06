@@ -166,6 +166,10 @@ type Config struct {
 	KeyDir string
 	// KeySettle is how long a new key file needs to reach the gateway pod.
 	KeySettle time.Duration
+	// Wake, when set, is called once KeySettle after a pass wrote new key files: the exact end of the
+	// settle, so the next pass serves the provider or MCP server at once instead of at the next resync
+	// (#249). It runs on its own goroutine and must not block for long.
+	Wake func()
 	// ToolServers maps a connector type ID to its MCP tool server URL.
 	ToolServers map[string]string
 	// MCPAskURL is the base URL of the approval-gated MCP tool proxy; empty offers no ask-tier tools.
@@ -215,6 +219,9 @@ type Planner struct {
 	// keyWrittenAt is when each key file written by this process was written, until it has had
 	// KeySettle to reach the gateway.
 	keyWrittenAt map[string]time.Time
+	// wakeTimers are the pending settle-end wakes; closed (set by Close) stops them and any new one.
+	wakeTimers map[*time.Timer]struct{}
+	closed     bool
 	// lastLimit is the budget last pushed per agent key, so one agent whose budget cannot be computed
 	// keeps it (and never gets more) instead of stopping the pass for everyone.
 	lastLimit map[gateway.AgentRef]gateway.Limit
@@ -244,6 +251,18 @@ func New(cfg Config) *Planner {
 		cfg.Logger = slog.Default()
 	}
 	return &Planner{cfg: cfg, log: cfg.Logger}
+}
+
+// Close stops the pending settle-end wake timers and keeps later passes from scheduling more. The
+// reconciler calls it when Run ends, so no timer fires into a pool that is closing.
+func (p *Planner) Close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.closed = true
+	for t := range p.wakeTimers {
+		t.Stop()
+	}
+	p.wakeTimers = nil
 }
 
 // KeyIssued records that this process issued key id: it is not live until an applied state carries it.
@@ -568,6 +587,26 @@ func (p *Planner) keysSettling(written []string, now time.Time) map[string]bool 
 	}
 	for _, name := range written {
 		p.keyWrittenAt[name] = now
+	}
+	if len(written) > 0 && p.cfg.Wake != nil && p.cfg.KeySettle > 0 {
+		// One timer per pass. The settle ends when KeySettle has passed since now, and the timer starts
+		// after now, so the settle is over when it fires.
+		if !p.closed {
+			if p.wakeTimers == nil {
+				p.wakeTimers = map[*time.Timer]struct{}{}
+			}
+			var t *time.Timer
+			t = time.AfterFunc(p.cfg.KeySettle, func() {
+				p.mu.Lock()
+				delete(p.wakeTimers, t)
+				closed := p.closed
+				p.mu.Unlock()
+				if !closed {
+					p.cfg.Wake()
+				}
+			})
+			p.wakeTimers[t] = struct{}{}
+		}
 	}
 	settling := map[string]bool{}
 	for name, at := range p.keyWrittenAt {
