@@ -90,6 +90,7 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 		Id: idString(c.ID), OrgId: idString(c.OrgID), Connector: c.Connector, DisplayName: c.DisplayName,
 		Status: connectionStatusToProto[c.Status], LastTestedAt: tsProto(c.LastTestedAt), CreatedAt: tsProto(c.CreatedAt),
 		Source: string(c.Source), ManagedBySecret: c.ManagedBySecret.String, Removed: c.RemovedAt.Valid,
+		CredentialLostAt: tsProto(c.CredentialLostAt),
 	}
 	var results []connections.CheckResult
 	if err := json.Unmarshal(c.LastTest, &results); err == nil {
@@ -494,6 +495,9 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection) (stor
 		res := connections.CheckResult{Check: "secret", Step: "generate-key", Message: "Koinon could not read this connection's private key; create the connection again"}
 		if p.ID() != providers.GitHub {
 			res.Step, res.Message = "create-tokens", "Koinon could not read this connection's tokens or address; create the connection again"
+		}
+		if errors.Is(err, connections.ErrCredentialLost) {
+			res.Message = "this connection's stored credential was lost with a key-encryption key; create the connection again"
 		}
 		results = []connections.CheckResult{res}
 	} else {

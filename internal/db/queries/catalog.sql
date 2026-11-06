@@ -23,16 +23,19 @@ ORDER BY name, source, id;
 -- name: UpdateProvider :one
 -- api_key is written only when @set_api_key is true (the patch sets it): the caller read the row
 -- without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the envelope since.
+-- Setting the key, or removing it, ends a lost key (#85): the trigger credential_lost_clear covers
+-- a stored key, this a removed one.
 UPDATE providers
 SET type = @type, url = @url, anthropic_workspace_id = sqlc.narg(anthropic_workspace_id),
-    api_key = CASE WHEN @set_api_key::boolean THEN sqlc.narg(api_key) ELSE api_key END
+    api_key = CASE WHEN @set_api_key::boolean THEN sqlc.narg(api_key) ELSE api_key END,
+    credential_lost_at = CASE WHEN @set_api_key::boolean THEN NULL ELSE credential_lost_at END
 WHERE org_id = @org_id AND id = @id
 RETURNING *;
 
 -- name: UpdateDeclaredProvider :one
 UPDATE providers
 SET type = @type, url = @url, api_key = sqlc.narg(api_key), anthropic_workspace_id = sqlc.narg(anthropic_workspace_id), declared_version = @declared_version,
-    removed_at = NULL, disabled_reason = NULL
+    removed_at = NULL, disabled_reason = NULL, credential_lost_at = NULL
 WHERE org_id = @org_id AND id = @id AND source = 'secret'
 RETURNING *;
 
@@ -93,18 +96,20 @@ DELETE FROM models
 WHERE org_id = @org_id AND id = @id;
 
 -- name: ListServedCatalog :many
--- Every enabled provider of the org with its enabled models, for the gateway.
+-- Every enabled provider of the org with its enabled models, for the gateway. A provider whose key
+-- was lost (#85) is not served until the key is entered again.
 SELECT p.id AS provider_id, p.name AS provider_name, p.type AS provider_type, p.url, p.api_key,
        p.anthropic_workspace_id, m.id AS model_id, m.name AS model_name, m.guard, m.format AS model_format
 FROM providers p
 JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
-WHERE p.org_id = @org_id AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND m.disabled_reason IS NULL
+WHERE p.org_id = @org_id AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND p.credential_lost_at IS NULL
+  AND m.disabled_reason IS NULL
 ORDER BY p.name, m.name;
 
 -- name: ListServedProviders :many
--- Enabled providers (with or without models), for key delivery.
+-- Enabled providers (with or without models), for key delivery; not those whose key was lost.
 SELECT * FROM providers
-WHERE org_id = @org_id AND disabled_reason IS NULL AND removed_at IS NULL
+WHERE org_id = @org_id AND disabled_reason IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
 ORDER BY name;
 
 -- name: ShadowUIProviders :exec
@@ -187,8 +192,9 @@ WHERE org_id = @org_id AND model_id <> ALL (@model_ids::uuid[]);
 -- koinon-agentd, before a run starts its harness: the org's enabled model of this name, its
 -- provider and whether the gateway serves it (gateway_served_models). Enabled models have unique
 -- names in an org (a declared one disables a UI one of the same name), so there is one at most.
+-- credential_lost: the provider's key was lost (#85), so it is not served until entered again.
 SELECT m.id AS model_id, p.id AS provider_id, p.name AS provider_name, p.type AS provider_type,
-       (s.model_id IS NOT NULL)::boolean AS served
+       (s.model_id IS NOT NULL)::boolean AS served, (p.credential_lost_at IS NOT NULL)::boolean AS credential_lost
 FROM models m
 JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
 LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id

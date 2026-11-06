@@ -171,7 +171,9 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
           <p id="server-secret-help" className="text-muted-foreground text-xs">
             {stored
               ? 'A credential is stored. Leave empty to keep it.'
-              : f.mode === 'bearer'
+              : server?.credentialLostAt && !f.removeCredential
+                ? 'The stored credential was lost with a key-encryption key. Type it again.'
+                : f.mode === 'bearer'
                 ? 'Sent as Authorization: Bearer <token>.'
                 : 'Sent as the value of this header, without a prefix.'}{' '}
             Koinon stores it encrypted and never shows it again. A new credential takes about three minutes to reach the gateway.
@@ -188,7 +190,7 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
           )}
         </div>
       )}
-      {editing && server.hasCredential && (
+      {editing && (server.hasCredential || !!server.credentialLostAt) && (
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={f.removeCredential} onChange={(e) => set({ removeCredential: e.target.checked, value: e.target.checked ? '' : f.value })} />
           Remove credential

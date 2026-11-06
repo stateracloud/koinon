@@ -488,6 +488,9 @@ func (r *runner) execute(ctx context.Context) error {
 	if err := r.waitModel(fctx, model); err != nil {
 		return r.execErr(ctx, "wait for the model", err)
 	}
+	if err := r.checkCodeHostCredential(fctx); err != nil {
+		return r.execErr(ctx, "code-host connection", err)
+	}
 	sb, err := r.waitSandbox(fctx)
 	if err != nil {
 		return r.execErr(ctx, "sandbox", err)

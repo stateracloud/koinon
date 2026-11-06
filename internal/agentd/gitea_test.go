@@ -106,6 +106,22 @@ func (g *ghEnv) everythingInTheSandbox() string {
 }
 
 var _ = Describe("A repo-helper agent on Gitea", func() {
+	It("fails the run with the reason, before the sandbox, when the connection's credential was lost", func(ctx SpecContext) {
+		g := newGiteaEnv(ctx)
+		// What keys forget leaves behind (ADR 0085 decision 13): no envelope, and the mark.
+		tag, err := db.Exec(ctx, `UPDATE connections SET secret_envelope = NULL, credential_lost_at = now() WHERE org_id = $1`, g.org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tag.RowsAffected()).To(BeEquivalentTo(1))
+		r := g.enqueue(ctx, g.task(ctx, "fix the typo"))
+		g.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring(
+			`the stored credential of the gitea connection "lab" was lost; create the connection again on the Connections page`))
+		Expect(g.gw.Execs()).To(BeEmpty(), "nothing runs in a sandbox")
+		_, _, _, args := g.harness.snapshot()
+		Expect(args).To(BeEmpty(), "the harness never starts")
+	})
+
 	It("opens a pull request after one approval, and no token ever reaches the sandbox", func(ctx SpecContext) {
 		g := newGiteaEnv(ctx)
 		ids := g.script()

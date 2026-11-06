@@ -129,7 +129,8 @@ func (s *Service) connectionFor(ctx context.Context, p codehost.Provider, row st
 	}
 	conn, err := connections.Load(ctx, s.keys, row2)
 	if err != nil {
-		if errors.Is(err, connections.ErrNoKeyring) || errors.Is(err, connections.ErrRemoved) {
+		if errors.Is(err, connections.ErrNoKeyring) || errors.Is(err, connections.ErrRemoved) ||
+			errors.Is(err, connections.ErrCredentialLost) {
 			return codehost.Connection{}, permanentError{err}
 		}
 		return codehost.Connection{}, err

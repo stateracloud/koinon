@@ -104,9 +104,12 @@ type Provider struct {
 	// formats are the model formats the provider's type offers, preferred first (ADR 0069).
 	Formats []*ModelFormat `protobuf:"bytes,13,rep,name=formats,proto3" json:"formats,omitempty"`
 	// echo_check is the latest echo check of the provider; unset when none ran.
-	EchoCheck     *EchoCheck `protobuf:"bytes,14,opt,name=echo_check,json=echoCheck,proto3" json:"echo_check,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	EchoCheck *EchoCheck `protobuf:"bytes,14,opt,name=echo_check,json=echoCheck,proto3" json:"echo_check,omitempty"`
+	// credential_lost_at is set when the API key was lost with the key that encrypted it (`koinon-api keys
+	// forget`, ADR 0085 decision 13): the provider is not served until the key is entered again; has_key is false. Unset otherwise.
+	CredentialLostAt *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=credential_lost_at,json=credentialLostAt,proto3" json:"credential_lost_at,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Provider) Reset() {
@@ -233,6 +236,13 @@ func (x *Provider) GetFormats() []*ModelFormat {
 func (x *Provider) GetEchoCheck() *EchoCheck {
 	if x != nil {
 		return x.EchoCheck
+	}
+	return nil
+}
+
+func (x *Provider) GetCredentialLostAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CredentialLostAt
 	}
 	return nil
 }
@@ -2104,7 +2114,7 @@ var File_koinon_provider_v1alpha1_provider_proto protoreflect.FileDescriptor
 
 const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"\n" +
-	"'koinon/provider/v1alpha1/provider.proto\x12\x18koinon.provider.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa5\x04\n" +
+	"'koinon/provider/v1alpha1/provider.proto\x12\x18koinon.provider.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xef\x04\n" +
 	"\bProvider\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -2123,7 +2133,8 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"\x16anthropic_workspace_id\x18\f \x01(\tR\x14anthropicWorkspaceId\x12?\n" +
 	"\aformats\x18\r \x03(\v2%.koinon.provider.v1alpha1.ModelFormatR\aformats\x12B\n" +
 	"\n" +
-	"echo_check\x18\x0e \x01(\v2#.koinon.provider.v1alpha1.EchoCheckR\techoCheck\"\xe9\x01\n" +
+	"echo_check\x18\x0e \x01(\v2#.koinon.provider.v1alpha1.EchoCheckR\techoCheck\x12H\n" +
+	"\x12credential_lost_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\x10credentialLostAt\"\xe9\x01\n" +
 	"\tEchoCheck\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x1c\n" +
 	"\tunchanged\x18\x02 \x01(\bR\tunchanged\x12\x12\n" +
@@ -2336,54 +2347,55 @@ var file_koinon_provider_v1alpha1_provider_proto_depIdxs = []int32{
 	34, // 1: koinon.provider.v1alpha1.Provider.updated_at:type_name -> google.protobuf.Timestamp
 	6,  // 2: koinon.provider.v1alpha1.Provider.formats:type_name -> koinon.provider.v1alpha1.ModelFormat
 	2,  // 3: koinon.provider.v1alpha1.Provider.echo_check:type_name -> koinon.provider.v1alpha1.EchoCheck
-	3,  // 4: koinon.provider.v1alpha1.EchoCheck.diff:type_name -> koinon.provider.v1alpha1.EchoDiffSegment
-	34, // 5: koinon.provider.v1alpha1.EchoCheck.checked_at:type_name -> google.protobuf.Timestamp
-	0,  // 6: koinon.provider.v1alpha1.EchoDiffSegment.op:type_name -> koinon.provider.v1alpha1.EchoDiffSegment.Op
-	2,  // 7: koinon.provider.v1alpha1.CheckProviderEchoResponse.echo_check:type_name -> koinon.provider.v1alpha1.EchoCheck
-	7,  // 8: koinon.provider.v1alpha1.Model.rates:type_name -> koinon.provider.v1alpha1.Rates
-	34, // 9: koinon.provider.v1alpha1.Model.created_at:type_name -> google.protobuf.Timestamp
-	34, // 10: koinon.provider.v1alpha1.Model.updated_at:type_name -> google.protobuf.Timestamp
-	1,  // 11: koinon.provider.v1alpha1.ListProvidersResponse.providers:type_name -> koinon.provider.v1alpha1.Provider
-	1,  // 12: koinon.provider.v1alpha1.CreateProviderResponse.provider:type_name -> koinon.provider.v1alpha1.Provider
-	1,  // 13: koinon.provider.v1alpha1.UpdateProviderResponse.provider:type_name -> koinon.provider.v1alpha1.Provider
-	8,  // 14: koinon.provider.v1alpha1.ListModelsResponse.models:type_name -> koinon.provider.v1alpha1.Model
-	7,  // 15: koinon.provider.v1alpha1.CreateModelRequest.rates:type_name -> koinon.provider.v1alpha1.Rates
-	8,  // 16: koinon.provider.v1alpha1.CreateModelResponse.model:type_name -> koinon.provider.v1alpha1.Model
-	7,  // 17: koinon.provider.v1alpha1.UpdateModelRequest.rates:type_name -> koinon.provider.v1alpha1.Rates
-	8,  // 18: koinon.provider.v1alpha1.UpdateModelResponse.model:type_name -> koinon.provider.v1alpha1.Model
-	6,  // 19: koinon.provider.v1alpha1.ProviderTypeInfoResponse.formats:type_name -> koinon.provider.v1alpha1.ModelFormat
-	30, // 20: koinon.provider.v1alpha1.GetDefaultModelResponse.available:type_name -> koinon.provider.v1alpha1.DefaultModelChoice
-	9,  // 21: koinon.provider.v1alpha1.ProviderService.ListProviders:input_type -> koinon.provider.v1alpha1.ListProvidersRequest
-	11, // 22: koinon.provider.v1alpha1.ProviderService.CreateProvider:input_type -> koinon.provider.v1alpha1.CreateProviderRequest
-	13, // 23: koinon.provider.v1alpha1.ProviderService.UpdateProvider:input_type -> koinon.provider.v1alpha1.UpdateProviderRequest
-	15, // 24: koinon.provider.v1alpha1.ProviderService.DeleteProvider:input_type -> koinon.provider.v1alpha1.DeleteProviderRequest
-	17, // 25: koinon.provider.v1alpha1.ProviderService.ListModels:input_type -> koinon.provider.v1alpha1.ListModelsRequest
-	19, // 26: koinon.provider.v1alpha1.ProviderService.CreateModel:input_type -> koinon.provider.v1alpha1.CreateModelRequest
-	21, // 27: koinon.provider.v1alpha1.ProviderService.UpdateModel:input_type -> koinon.provider.v1alpha1.UpdateModelRequest
-	23, // 28: koinon.provider.v1alpha1.ProviderService.DeleteModel:input_type -> koinon.provider.v1alpha1.DeleteModelRequest
-	25, // 29: koinon.provider.v1alpha1.ProviderService.ModelFormats:input_type -> koinon.provider.v1alpha1.ModelFormatsRequest
-	29, // 30: koinon.provider.v1alpha1.ProviderService.GetDefaultModel:input_type -> koinon.provider.v1alpha1.GetDefaultModelRequest
-	32, // 31: koinon.provider.v1alpha1.ProviderService.SetDefaultModel:input_type -> koinon.provider.v1alpha1.SetDefaultModelRequest
-	4,  // 32: koinon.provider.v1alpha1.ProviderService.CheckProviderEcho:input_type -> koinon.provider.v1alpha1.CheckProviderEchoRequest
-	27, // 33: koinon.provider.v1alpha1.ProviderService.ProviderTypeInfo:input_type -> koinon.provider.v1alpha1.ProviderTypeInfoRequest
-	10, // 34: koinon.provider.v1alpha1.ProviderService.ListProviders:output_type -> koinon.provider.v1alpha1.ListProvidersResponse
-	12, // 35: koinon.provider.v1alpha1.ProviderService.CreateProvider:output_type -> koinon.provider.v1alpha1.CreateProviderResponse
-	14, // 36: koinon.provider.v1alpha1.ProviderService.UpdateProvider:output_type -> koinon.provider.v1alpha1.UpdateProviderResponse
-	16, // 37: koinon.provider.v1alpha1.ProviderService.DeleteProvider:output_type -> koinon.provider.v1alpha1.DeleteProviderResponse
-	18, // 38: koinon.provider.v1alpha1.ProviderService.ListModels:output_type -> koinon.provider.v1alpha1.ListModelsResponse
-	20, // 39: koinon.provider.v1alpha1.ProviderService.CreateModel:output_type -> koinon.provider.v1alpha1.CreateModelResponse
-	22, // 40: koinon.provider.v1alpha1.ProviderService.UpdateModel:output_type -> koinon.provider.v1alpha1.UpdateModelResponse
-	24, // 41: koinon.provider.v1alpha1.ProviderService.DeleteModel:output_type -> koinon.provider.v1alpha1.DeleteModelResponse
-	26, // 42: koinon.provider.v1alpha1.ProviderService.ModelFormats:output_type -> koinon.provider.v1alpha1.ModelFormatsResponse
-	31, // 43: koinon.provider.v1alpha1.ProviderService.GetDefaultModel:output_type -> koinon.provider.v1alpha1.GetDefaultModelResponse
-	33, // 44: koinon.provider.v1alpha1.ProviderService.SetDefaultModel:output_type -> koinon.provider.v1alpha1.SetDefaultModelResponse
-	5,  // 45: koinon.provider.v1alpha1.ProviderService.CheckProviderEcho:output_type -> koinon.provider.v1alpha1.CheckProviderEchoResponse
-	28, // 46: koinon.provider.v1alpha1.ProviderService.ProviderTypeInfo:output_type -> koinon.provider.v1alpha1.ProviderTypeInfoResponse
-	34, // [34:47] is the sub-list for method output_type
-	21, // [21:34] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	34, // 4: koinon.provider.v1alpha1.Provider.credential_lost_at:type_name -> google.protobuf.Timestamp
+	3,  // 5: koinon.provider.v1alpha1.EchoCheck.diff:type_name -> koinon.provider.v1alpha1.EchoDiffSegment
+	34, // 6: koinon.provider.v1alpha1.EchoCheck.checked_at:type_name -> google.protobuf.Timestamp
+	0,  // 7: koinon.provider.v1alpha1.EchoDiffSegment.op:type_name -> koinon.provider.v1alpha1.EchoDiffSegment.Op
+	2,  // 8: koinon.provider.v1alpha1.CheckProviderEchoResponse.echo_check:type_name -> koinon.provider.v1alpha1.EchoCheck
+	7,  // 9: koinon.provider.v1alpha1.Model.rates:type_name -> koinon.provider.v1alpha1.Rates
+	34, // 10: koinon.provider.v1alpha1.Model.created_at:type_name -> google.protobuf.Timestamp
+	34, // 11: koinon.provider.v1alpha1.Model.updated_at:type_name -> google.protobuf.Timestamp
+	1,  // 12: koinon.provider.v1alpha1.ListProvidersResponse.providers:type_name -> koinon.provider.v1alpha1.Provider
+	1,  // 13: koinon.provider.v1alpha1.CreateProviderResponse.provider:type_name -> koinon.provider.v1alpha1.Provider
+	1,  // 14: koinon.provider.v1alpha1.UpdateProviderResponse.provider:type_name -> koinon.provider.v1alpha1.Provider
+	8,  // 15: koinon.provider.v1alpha1.ListModelsResponse.models:type_name -> koinon.provider.v1alpha1.Model
+	7,  // 16: koinon.provider.v1alpha1.CreateModelRequest.rates:type_name -> koinon.provider.v1alpha1.Rates
+	8,  // 17: koinon.provider.v1alpha1.CreateModelResponse.model:type_name -> koinon.provider.v1alpha1.Model
+	7,  // 18: koinon.provider.v1alpha1.UpdateModelRequest.rates:type_name -> koinon.provider.v1alpha1.Rates
+	8,  // 19: koinon.provider.v1alpha1.UpdateModelResponse.model:type_name -> koinon.provider.v1alpha1.Model
+	6,  // 20: koinon.provider.v1alpha1.ProviderTypeInfoResponse.formats:type_name -> koinon.provider.v1alpha1.ModelFormat
+	30, // 21: koinon.provider.v1alpha1.GetDefaultModelResponse.available:type_name -> koinon.provider.v1alpha1.DefaultModelChoice
+	9,  // 22: koinon.provider.v1alpha1.ProviderService.ListProviders:input_type -> koinon.provider.v1alpha1.ListProvidersRequest
+	11, // 23: koinon.provider.v1alpha1.ProviderService.CreateProvider:input_type -> koinon.provider.v1alpha1.CreateProviderRequest
+	13, // 24: koinon.provider.v1alpha1.ProviderService.UpdateProvider:input_type -> koinon.provider.v1alpha1.UpdateProviderRequest
+	15, // 25: koinon.provider.v1alpha1.ProviderService.DeleteProvider:input_type -> koinon.provider.v1alpha1.DeleteProviderRequest
+	17, // 26: koinon.provider.v1alpha1.ProviderService.ListModels:input_type -> koinon.provider.v1alpha1.ListModelsRequest
+	19, // 27: koinon.provider.v1alpha1.ProviderService.CreateModel:input_type -> koinon.provider.v1alpha1.CreateModelRequest
+	21, // 28: koinon.provider.v1alpha1.ProviderService.UpdateModel:input_type -> koinon.provider.v1alpha1.UpdateModelRequest
+	23, // 29: koinon.provider.v1alpha1.ProviderService.DeleteModel:input_type -> koinon.provider.v1alpha1.DeleteModelRequest
+	25, // 30: koinon.provider.v1alpha1.ProviderService.ModelFormats:input_type -> koinon.provider.v1alpha1.ModelFormatsRequest
+	29, // 31: koinon.provider.v1alpha1.ProviderService.GetDefaultModel:input_type -> koinon.provider.v1alpha1.GetDefaultModelRequest
+	32, // 32: koinon.provider.v1alpha1.ProviderService.SetDefaultModel:input_type -> koinon.provider.v1alpha1.SetDefaultModelRequest
+	4,  // 33: koinon.provider.v1alpha1.ProviderService.CheckProviderEcho:input_type -> koinon.provider.v1alpha1.CheckProviderEchoRequest
+	27, // 34: koinon.provider.v1alpha1.ProviderService.ProviderTypeInfo:input_type -> koinon.provider.v1alpha1.ProviderTypeInfoRequest
+	10, // 35: koinon.provider.v1alpha1.ProviderService.ListProviders:output_type -> koinon.provider.v1alpha1.ListProvidersResponse
+	12, // 36: koinon.provider.v1alpha1.ProviderService.CreateProvider:output_type -> koinon.provider.v1alpha1.CreateProviderResponse
+	14, // 37: koinon.provider.v1alpha1.ProviderService.UpdateProvider:output_type -> koinon.provider.v1alpha1.UpdateProviderResponse
+	16, // 38: koinon.provider.v1alpha1.ProviderService.DeleteProvider:output_type -> koinon.provider.v1alpha1.DeleteProviderResponse
+	18, // 39: koinon.provider.v1alpha1.ProviderService.ListModels:output_type -> koinon.provider.v1alpha1.ListModelsResponse
+	20, // 40: koinon.provider.v1alpha1.ProviderService.CreateModel:output_type -> koinon.provider.v1alpha1.CreateModelResponse
+	22, // 41: koinon.provider.v1alpha1.ProviderService.UpdateModel:output_type -> koinon.provider.v1alpha1.UpdateModelResponse
+	24, // 42: koinon.provider.v1alpha1.ProviderService.DeleteModel:output_type -> koinon.provider.v1alpha1.DeleteModelResponse
+	26, // 43: koinon.provider.v1alpha1.ProviderService.ModelFormats:output_type -> koinon.provider.v1alpha1.ModelFormatsResponse
+	31, // 44: koinon.provider.v1alpha1.ProviderService.GetDefaultModel:output_type -> koinon.provider.v1alpha1.GetDefaultModelResponse
+	33, // 45: koinon.provider.v1alpha1.ProviderService.SetDefaultModel:output_type -> koinon.provider.v1alpha1.SetDefaultModelResponse
+	5,  // 46: koinon.provider.v1alpha1.ProviderService.CheckProviderEcho:output_type -> koinon.provider.v1alpha1.CheckProviderEchoResponse
+	28, // 47: koinon.provider.v1alpha1.ProviderService.ProviderTypeInfo:output_type -> koinon.provider.v1alpha1.ProviderTypeInfoResponse
+	35, // [35:48] is the sub-list for method output_type
+	22, // [22:35] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_koinon_provider_v1alpha1_provider_proto_init() }
