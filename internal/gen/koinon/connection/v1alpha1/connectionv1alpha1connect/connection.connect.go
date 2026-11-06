@@ -35,6 +35,9 @@ const (
 	// ConnectionServiceCreateGiteaConnectionProcedure is the procedure name of the ConnectionService's
 	// CreateGiteaConnection RPC.
 	ConnectionServiceCreateGiteaConnectionProcedure = "/koinon.connection.v1alpha1.ConnectionService/CreateGiteaConnection"
+	// ConnectionServiceSetConnectionSecretProcedure is the procedure name of the ConnectionService's
+	// SetConnectionSecret RPC.
+	ConnectionServiceSetConnectionSecretProcedure = "/koinon.connection.v1alpha1.ConnectionService/SetConnectionSecret"
 	// ConnectionServiceGetConnectionProcedure is the procedure name of the ConnectionService's
 	// GetConnection RPC.
 	ConnectionServiceGetConnectionProcedure = "/koinon.connection.v1alpha1.ConnectionService/GetConnection"
@@ -73,6 +76,13 @@ var (
 			StreamType: connect.StreamTypeUnary,
 			Schema:     v1alpha1.File_koinon_connection_v1alpha1_connection_proto.Services().ByName("ConnectionService").Methods().ByName("CreateGiteaConnection"),
 			Procedure:  ConnectionServiceCreateGiteaConnectionProcedure,
+		}
+	})
+	connectionServiceSetConnectionSecretSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_connection_v1alpha1_connection_proto.Services().ByName("ConnectionService").Methods().ByName("SetConnectionSecret"),
+			Procedure:  ConnectionServiceSetConnectionSecretProcedure,
 		}
 	})
 	connectionServiceGetConnectionSpec = sync.OnceValue(func() connect.Spec {
@@ -127,6 +137,13 @@ type ConnectionServiceClient interface {
 	// token and a write token (ADR 0063). Both tokens are stored encrypted and never returned.
 	// Admins and owners.
 	CreateGiteaConnection(context.Context, *v1alpha1.CreateGiteaConnectionRequest) (*v1alpha1.CreateGiteaConnectionResponse, error)
+	// SetConnectionSecret replaces the secret fields of a connection entered here: a GitHub App's private
+	// key, or a Gitea connection's two tokens. It is how a secret lost with its key-encryption key is
+	// entered again (ADR 0085 decision 13), and how one is rotated. Every secret field of the connector
+	// is required; the other settings stay. It clears the lost mark and the last test result. A
+	// declared connection's secret is changed in its Kubernetes Secret instead (FAILED_PRECONDITION).
+	// Audited without the secret. Admins and owners.
+	SetConnectionSecret(context.Context, *v1alpha1.SetConnectionSecretRequest) (*v1alpha1.SetConnectionSecretResponse, error)
 	// GetConnection returns one connection. Viewers and above.
 	GetConnection(context.Context, *v1alpha1.GetConnectionRequest) (*v1alpha1.GetConnectionResponse, error)
 	// ListConnections returns the org's connections, oldest first. Viewers and
@@ -166,6 +183,13 @@ type ConnectionServiceHandler interface {
 	// token and a write token (ADR 0063). Both tokens are stored encrypted and never returned.
 	// Admins and owners.
 	CreateGiteaConnection(context.Context, *v1alpha1.CreateGiteaConnectionRequest) (*v1alpha1.CreateGiteaConnectionResponse, error)
+	// SetConnectionSecret replaces the secret fields of a connection entered here: a GitHub App's private
+	// key, or a Gitea connection's two tokens. It is how a secret lost with its key-encryption key is
+	// entered again (ADR 0085 decision 13), and how one is rotated. Every secret field of the connector
+	// is required; the other settings stay. It clears the lost mark and the last test result. A
+	// declared connection's secret is changed in its Kubernetes Secret instead (FAILED_PRECONDITION).
+	// Audited without the secret. Admins and owners.
+	SetConnectionSecret(context.Context, *v1alpha1.SetConnectionSecretRequest) (*v1alpha1.SetConnectionSecretResponse, error)
 	// GetConnection returns one connection. Viewers and above.
 	GetConnection(context.Context, *v1alpha1.GetConnectionRequest) (*v1alpha1.GetConnectionResponse, error)
 	// ListConnections returns the org's connections, oldest first. Viewers and
@@ -193,6 +217,7 @@ func RegisterConnectionServiceHandler(server *connect.Server, svc ConnectionServ
 		connect.Method{Spec: connectionServiceListConnectorTypesSpec(), Handler: adapter.listConnectorTypes},
 		connect.Method{Spec: connectionServiceCreateGitHubConnectionSpec(), Handler: adapter.createGitHubConnection},
 		connect.Method{Spec: connectionServiceCreateGiteaConnectionSpec(), Handler: adapter.createGiteaConnection},
+		connect.Method{Spec: connectionServiceSetConnectionSecretSpec(), Handler: adapter.setConnectionSecret},
 		connect.Method{Spec: connectionServiceGetConnectionSpec(), Handler: adapter.getConnection},
 		connect.Method{Spec: connectionServiceListConnectionsSpec(), Handler: adapter.listConnections},
 		connect.Method{Spec: connectionServiceTestConnectionSpec(), Handler: adapter.testConnection},
@@ -214,6 +239,10 @@ func (UnimplementedConnectionServiceHandler) CreateGitHubConnection(context.Cont
 
 func (UnimplementedConnectionServiceHandler) CreateGiteaConnection(context.Context, *v1alpha1.CreateGiteaConnectionRequest) (*v1alpha1.CreateGiteaConnectionResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.CreateGiteaConnection is not implemented")
+}
+
+func (UnimplementedConnectionServiceHandler) SetConnectionSecret(context.Context, *v1alpha1.SetConnectionSecretRequest) (*v1alpha1.SetConnectionSecretResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.SetConnectionSecret is not implemented")
 }
 
 func (UnimplementedConnectionServiceHandler) GetConnection(context.Context, *v1alpha1.GetConnectionRequest) (*v1alpha1.GetConnectionResponse, error) {
@@ -259,6 +288,14 @@ func (c *connectionServiceClient) CreateGitHubConnection(ctx context.Context, re
 func (c *connectionServiceClient) CreateGiteaConnection(ctx context.Context, req *v1alpha1.CreateGiteaConnectionRequest) (*v1alpha1.CreateGiteaConnectionResponse, error) {
 	var res v1alpha1.CreateGiteaConnectionResponse
 	if err := c.client.CallUnary(ctx, connectionServiceCreateGiteaConnectionSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *connectionServiceClient) SetConnectionSecret(ctx context.Context, req *v1alpha1.SetConnectionSecretRequest) (*v1alpha1.SetConnectionSecretResponse, error) {
+	var res v1alpha1.SetConnectionSecretResponse
+	if err := c.client.CallUnary(ctx, connectionServiceSetConnectionSecretSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -336,6 +373,18 @@ func (h connectionServiceHandler) createGiteaConnection(ctx context.Context, _ c
 		return err
 	}
 	res, err := h.svc.CreateGiteaConnection(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h connectionServiceHandler) setConnectionSecret(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetConnectionSecretRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetConnectionSecret(ctx, &req)
 	if err != nil {
 		return err
 	}

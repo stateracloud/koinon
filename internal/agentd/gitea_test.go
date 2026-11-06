@@ -130,7 +130,7 @@ var _ = Describe("A repo-helper agent on Gitea", func() {
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(eventOf(events(ctx, r), "run.waiting_for_model")).To(BeEmpty(), "it never waits for the model")
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring(
-			`the stored credential of the gitea connection "lab" was lost; create the connection again on the Connections page`))
+			`the stored credential of the gitea connection "lab" was lost; enter the secret of the connection "lab" again on the Connections page, then run the task again`))
 		Expect(g.gw.Execs()).To(BeEmpty(), "nothing runs in a sandbox")
 		_, _, _, args := g.harness.snapshot()
 		Expect(args).To(BeEmpty(), "the harness never starts")
