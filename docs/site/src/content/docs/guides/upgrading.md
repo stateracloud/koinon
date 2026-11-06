@@ -1,19 +1,27 @@
 ---
 title: Upgrading Koinon
-description: Patch upgrades roll. Minor upgrades are stop, migrate, start. How to check, and how to go back.
+description: No schema or upgrade promise before v0.3. From v0.3, patch upgrades roll and minor upgrades are stop, migrate, start. How to check, and how to go back.
 ---
 
 How you upgrade depends on the version you move between.
 [ADR 0085](https://github.com/stateracloud/koinon/blob/main/docs/adr/0085-upgrade-compatibility-and-recovery-policy.md)
 has the decisions behind this page.
 
+Before v0.3 there is no schema or upgrade promise
+([ADR 0099](https://github.com/stateracloud/koinon/blob/main/docs/adr/0099-no-schema-or-upgrade-promise-before-v0-3.md)).
+An upgrade between any two releases before v0.3.0, patch upgrades and release candidates included,
+may need a reinstall or the manual steps in the release notes. Read them and take the database
+backup first.
+
+From v0.3.0 the following applies:
+
 | Upgrade | Example | How | Rollback |
 | --- | --- | --- | --- |
-| Patch, same minor line | v0.1.0 to v0.1.3 | Rolling: one `helm upgrade` | Roll the images back |
-| Minor | v0.1.x to v0.2.0 | Stop, migrate, start | Restore the database from your backup |
-| A release candidate to v0.1.0 | v0.1.0-rc.9 to v0.1.0 | Stop, migrate, start | None to an rc (see below) |
+| Patch, same minor line | v0.3.0 to v0.3.3 | Rolling: one `helm upgrade` | Roll the images back |
+| Minor | v0.3.x to v0.4.0 | Stop, migrate, start | Restore the database from your backup |
+| Before v0.3.0 to v0.3.0 | v0.2.x to v0.3.0 | Stop, migrate, start, or reinstall (see below) | None (see below) |
 
-Koinon promises schema compatibility within a minor line, starting at v0.1.0. Migrations only move
+Koinon promises schema compatibility within a minor line, starting at v0.3.0. Migrations only move
 forward: nothing runs a `Down`. Inside a minor line they only add (new columns and tables, no rename,
 no drop, no type change), so the previous patch release keeps working on the new schema. A new
 minor line may remove and rename things, so its schema can break the previous minor.
@@ -28,7 +36,7 @@ Commands use the namespace `koinon`. Two names depend on your release:
 
 The Deployments are `<name>-api`, `<name>-reconciler` and `<name>-agentd`. The Secret with the
 encryption keys is `<name>-kek`, or the Secret you set in `secrets.kek.existingSecret`. Replace
-`<version>` with the chart version you move to, without the leading `v` (for example `0.1.3`).
+`<version>` with the chart version you move to, without the leading `v` (for example `0.3.3`).
 
 ## Before you start
 
@@ -165,13 +173,15 @@ automated sync or self-heal for the window, or they scale back up), commit the n
 together with the values of `stop.yaml` and sync, wait for the migration, then commit your normal
 replica counts and sync again.
 
-### The v0.1.0 baseline and release candidates
+### The v0.3.0 baseline and earlier releases
 
-v0.1.0 is the first release with the compatibility promise, and its schema is the first baseline.
-An install made from a release candidate upgrades to v0.1.0 with the stop, migrate, start above and
-cannot go back to a release candidate: the rcs have no promise, and migration 00020 (rc.3) renamed
-tables in place. Take the database backup first. An install older than rc.3 is not supported
-by any upgrade path: Koinon ships no compatibility views for the tables that migration 00020 renamed,
+v0.3.0 is the first release with the compatibility promise, and its schema is the first baseline.
+Releases before it (v0.1.x, v0.2.x and their release candidates) have no promise: their migrations
+may rename, drop or retype. The release notes of v0.3.0 say how an earlier install reaches it:
+either the stop, migrate, start above, or a reinstall. It cannot go back to an earlier release,
+because migrations are forward-only and some of them renamed tables in place (for example
+migration 00020). Take the database backup first. An install older than rc.3 is not supported by
+any upgrade path: Koinon ships no compatibility views for the tables that migration 00020 renamed,
 so re-install instead of upgrading.
 
 ## Check afterwards
@@ -200,7 +210,8 @@ kubectl -n koinon logs deployment/<name>-api --tail=50
 
 ## Roll back
 
-**Within a minor line (patch upgrades).** The old and new releases share the schema, so going back is
+**Within a minor line from v0.3.0 (patch upgrades).** Before v0.3 there is no promise, and a patch
+upgrade may have changed the schema, so treat it as a minor upgrade. The old and new releases share the schema, so going back is
 an image rollback. Use the previous revision or an explicit version:
 
 ```sh
@@ -212,7 +223,7 @@ or `helm upgrade` with `--version <previous>` and the same values. The migration
 rollback. A schema-version check keeps an old release from starting on a schema it cannot read, so a
 mistake shows as pods that are not Ready, not as errors in queries.
 
-**Across a minor, or from a release candidate.** There is no app-only rollback. A minor release may
+**Across a minor, before v0.3.0, or from a release candidate.** There is no app-only rollback. A minor release may
 contract the schema: it can rename tables and drop columns and types, and a migration cannot be
 undone, because Koinon migrations are forward-only and a dropped column cannot return its data. The
 previous release's pods would fail on their first query, and the schema-version check keeps them

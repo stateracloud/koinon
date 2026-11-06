@@ -113,8 +113,10 @@ say what is specific to this release. Template:
 - **Other manual steps:** anything an operator must do before or after.
 ```
 
-For `v0.1.0`, write that a release candidate install upgrades with a stop and cannot roll back to an
-rc, and that v0.1.0 is the compatibility baseline.
+For `v0.1.0` and `v0.2.0`, write that there is no schema or upgrade promise before v0.3 (ADR 0099)
+and that an upgrade, a patch upgrade included, may need a reinstall or the manual steps the notes
+list. For `v0.3.0`, write that it is the compatibility baseline, and how an earlier install reaches
+it (stop, migrate, start, or a reinstall) and that it cannot roll back to an earlier release.
 
 ## Signing and SBOM attestations
 
