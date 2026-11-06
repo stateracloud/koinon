@@ -138,12 +138,14 @@ kubectl -n koinon exec -it deploy/koinon-api -- koinon-api keys retire
 - `keys rewrap` asks with the number of values it will change.
 - `keys reencrypt` asks you to type the active KEK's ID, because it decrypts every payload.
 - `keys forget` asks you to type the lost KEK's ID, because it cannot be undone.
+- `keys new-repositories` asks you to type `replace`, because the agents' older checkpoints are deleted.
 - `--yes` skips the questions you would be asked (it never picks a KEK for you).
 
 Without a terminal (no `-t`, a script, CI, a pod's own command), or with `--no-input`
 (`KOINON_NO_INPUT=true`), nothing is ever asked: a missing ID is the usual error
-(`accepts 1 arg(s), received 0`) and nothing needs `--yes`, except `keys forget`: it cannot be undone,
-so without a terminal it refuses unless you pass `--yes`. `--no-input` is a flag of every Koinon
+(`accepts 1 arg(s), received 0`) and nothing needs `--yes`, except `keys forget` and
+`keys new-repositories`: they cannot be undone, so without a terminal they refuse unless you pass
+`--yes`. `--no-input` is a flag of every Koinon
 binary; `kubectl exec -it ... keys retire --no-input <id>` runs the plain form on a terminal. The chart
 does not set it. With `TERM=dumb` the questions are plain lines, one per answer.
 
@@ -189,6 +191,61 @@ can already open every DEK they copied. Do this, in this order:
    seals it again under a fresh DEK and the active KEK. Then `keys retire <compromised-id>`. Do not
    escrow the compromised key with your normal backups; keep it only for backups you must still read,
    in a place the attacker cannot reach.
+
+   **2b. Replace the agents' home repositories.** The KEK opens each agent's kopia repository
+   password, and kopia derives the repository's master key from it once: re-sealing the password
+   (step 2) or changing it in kopia does not revoke what was copied, and with the checkpoint bucket's
+   S3 key whoever holds it reads every saved home. So each agent gets a new repository, and the
+   bucket a new key, in this order:
+
+   1. Issue a new access key for the checkpoint bucket at your S3 provider. Put it in the Secret
+      named by `checkpoints.s3.existingSecret` (keys `AWS_ACCESS_KEY_ID` and
+      `AWS_SECRET_ACCESS_KEY`), then restart koinon-agentd, which reads it at start and is the only
+      component that holds it:
+
+      ```sh
+      kubectl -n koinon rollout restart deploy/koinon-agentd
+      kubectl -n koinon rollout status deploy/koinon-agentd
+      kubectl -n koinon logs -l app.kubernetes.io/component=agentd --prefix | grep 'checkpoint storage'
+      ```
+
+      Each replica logs `access_key=sha256:…`, the fingerprint of the key's ID (never the key):
+      check that every replica shows the new one. Koinon does not issue or rotate S3 keys itself.
+   2. Start a new home repository for every agent:
+
+      ```sh
+      kubectl -n koinon exec -it deploy/koinon-api -- koinon-api keys new-repositories --all
+      ```
+
+      (`--agent <id>`, repeated or comma-separated, for only some agents.) Each agent gets a new
+      repository epoch with a random password that nobody has seen, sealed with the active KEK; the
+      old repository is retired with a deadline of now. Each agent gets one
+      `home.repository_replaced` audit event (actor `cli`). An agent without a repository is skipped:
+      its first one is made under the active KEK.
+   3. koinon-agentd copies each agent's newest checkpoint into its new repository (a restore piped
+      into a backup, falling back to older checkpoints when one does not copy) and records the copy
+      with the source's times (audit `home.repository_seeded`, actor `system`). The command does
+      not wait for it: `koinon_agentd_home_repository_seeds{state="pending"}` falls to 0 when every
+      seed is done. The sweeper then deletes each old repository, once the new one holds a
+      checkpoint at least as new as the old one's newest and no checkpoint of the agent is running.
+      Only the copied checkpoint survives: the older history is dropped with the old repository.
+   4. A seed is tried three times, with a growing delay, like a checkpoint. One that keeps failing is given up
+      (audit `home.repository_seed_failed`, `koinon_agentd_home_repository_seeds{state="failed"}`
+      counts it) and its old repository is kept, since nothing newer holds that home; the agent's
+      next backup goes to the new repository and releases the old one. Fix the cause (the log and
+      the audit event give the error), then run `keys new-repositories --agent <id>` again for a new
+      seed.
+   5. Revoke the old S3 key at the provider once every replica logs the new fingerprint and a
+      checkpoint has completed with it.
+
+   The agents' sandboxes, homes and generations are not touched; their next backups go to the new
+   repositories. Without a terminal `keys new-repositories` refuses unless you pass `--yes`, as
+   `keys forget` does, because the older checkpoints are deleted. Running it again replaces the
+   repositories again (a seed not yet done moves on to the newest epoch). These choices are recorded
+   in [ADR 0085](../adr/0085-upgrade-compatibility-and-recovery-policy.md) decision 14 and #86.
+
+   If only the **bucket's S3 key** leaked, not a KEK, the repository passwords are safe: do step 2b.1
+   and 2b.5 only.
 3. **Rotate the real credentials at their providers.** Re-encrypting does not undo a leak. Issue new
    OpenRouter, OpenAI or other provider keys and a new GitHub App private key, and replace them in
    Koinon (the admin API, or by editing the declarative Secrets). Revoke the old ones at the provider.
