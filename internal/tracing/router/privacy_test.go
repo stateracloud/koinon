@@ -147,7 +147,7 @@ var _ = Describe("Settings that change while spans wait", func() {
 		be = newBackend()
 		// The router's clock decides when the set is checked again (ConfigCheck, 1 ms) and when the
 		// grace ends: the spec moves it past each, rather than sleeping and hoping the machine kept up
-		// (#612).
+		// (koinon-private#612).
 		e = newEnv(func(c *router.Config) {
 			c.Sender = g
 			c.SecretsGrace = 30 * time.Second

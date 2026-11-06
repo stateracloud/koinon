@@ -59,6 +59,7 @@ export function TraceDestinationCard({ destination: d, title, full, test, edit, 
         <Badge variant="outline">{backendLabel(d.backend)}</Badge>
         <Badge variant={d.enabled ? 'secondary' : 'outline'}>{d.enabled ? 'Enabled' : 'Disabled'}</Badge>
         {full && <FullContentBadge />}
+        {d.credentialLostAt && <Badge variant="destructive">Credentials lost</Badge>}
       </div>
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-muted-foreground">Endpoint</dt>
@@ -70,7 +71,13 @@ export function TraceDestinationCard({ destination: d, title, full, test, edit, 
           </div>
         ))}
         <dt className="text-muted-foreground">Credentials</dt>
-        <dd>{d.secretFields.length === 0 ? 'None' : `Set (${d.secretFields.join(', ')}); stored encrypted, never shown`}</dd>
+        <dd>
+          {d.credentialLostAt
+            ? `Lost (${d.secretFields.join(', ')}); edit the destination and enter them again. Nothing is exported until then.`
+            : d.secretFields.length === 0
+              ? 'None'
+              : `Set (${d.secretFields.join(', ')}); stored encrypted, never shown`}
+        </dd>
         <dt className="text-muted-foreground">Last test</dt>
         <dd>{t ? `${t.ok ? 'Passed' : 'Failed'}, ${formatTime(t.testedAt, 'time unknown')}` : 'Not tested yet'}</dd>
         <dt className="text-muted-foreground">Last success</dt>

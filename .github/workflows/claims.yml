@@ -12,16 +12,16 @@
 # the base branch and never run the pull request's code, so a pull request cannot weaken its own
 # check. They check out the base commit only, with minimal permissions.
 #
-# Billed minutes (#596): every job here costs at least one rounded-up minute. The `claim` job runs
+# Billed minutes (koinon-private#596): every job here costs at least one rounded-up minute. The `claim` job runs
 # only for events that can change its answer (title, body, files, labels, state). A job skipped by
 # an `if:` reports "skipped", which a required check counts as passing and which replaces an earlier
 # failure of the same name, so the claim is never filtered at job level: unwanted events are left out
 # of `types:` below instead (no run, the earlier result stays).
 #
-# The Project board writes need a GitHub App token (GITHUB_TOKEN cannot write an
-# organization project, and a push made with it does not start CI). The App ID and key are secrets of
-# the `claims-bot` Environment, which is limited to the main branch. While they are absent those jobs
-# skip with a notice, so CI stays green before the App exists. The `claim` check needs no App.
+# Token (ADR 0094 decision 3): the sweeper and release jobs run on GITHUB_TOKEN with the permissions
+# they list; no App, no Environment, no gate step. GITHUB_TOKEN cannot write an organization project,
+# so they make no board writes (KOINON_CLAIM_PROJECT=none): the board's built-in workflows set Done and
+# the next `claim.sh next` or `take` repairs the rest. The `claim` check needs no write access.
 name: claims
 
 on:
@@ -42,81 +42,46 @@ jobs:
   sweeper:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     name: sweeper
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    environment: claims-bot
+    runs-on: ubuntu-latest
+    # GITHUB_TOKEN: claim refs (contents), labels, comments, unassign (issues), PR state (pull-requests).
+    # A missing permission makes a call fail and the job red; nothing here skips silently.
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: read
     concurrency:
       group: claims-sweeper
       cancel-in-progress: false
-    env:
-      APP_ID: ${{ secrets.KOINON_BOT_APP_ID }}
-      APP_KEY: ${{ secrets.KOINON_BOT_PRIVATE_KEY }}
     steps:
-      - id: gate
-        run: |
-          if [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; then
-            echo "::notice::KOINON_BOT_APP_ID / KOINON_BOT_PRIVATE_KEY are not set; the claim sweeper is skipped"
-            echo "enabled=false" >>"$GITHUB_OUTPUT"
-          else
-            echo "enabled=true" >>"$GITHUB_OUTPUT"
-          fi
-      - if: steps.gate.outputs.enabled == 'true'
-        id: app
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          app-id: ${{ secrets.KOINON_BOT_APP_ID }}
-          private-key: ${{ secrets.KOINON_BOT_PRIVATE_KEY }}
-          permission-contents: write
-          permission-issues: write
-          permission-pull-requests: read
-          permission-organization-projects: write
-      - if: steps.gate.outputs.enabled == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - if: steps.gate.outputs.enabled == 'true'
-        env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - env:
+          GH_TOKEN: ${{ github.token }}
           KOINON_CLAIM_REPO: ${{ github.repository }}
+          # GITHUB_TOKEN cannot write an organization project: no board writes (ADR 0094 decision 3).
+          KOINON_CLAIM_PROJECT: none
         run: hack/claim.sh sweep
 
   # One group per pull request: a release must not be cancelled or replaced by another one.
   release:
     if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
     name: release claims
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    environment: claims-bot
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: read
     concurrency:
       group: claims-release-${{ github.event.pull_request.number }}
       cancel-in-progress: false
-    env:
-      APP_ID: ${{ secrets.KOINON_BOT_APP_ID }}
-      APP_KEY: ${{ secrets.KOINON_BOT_PRIVATE_KEY }}
     steps:
-      - id: gate
-        run: |
-          if [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; then
-            echo "::notice::KOINON_BOT_APP_ID / KOINON_BOT_PRIVATE_KEY are not set; claims are not released on close"
-            echo "enabled=false" >>"$GITHUB_OUTPUT"
-          else
-            echo "enabled=true" >>"$GITHUB_OUTPUT"
-          fi
-      - if: steps.gate.outputs.enabled == 'true'
-        id: app
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          app-id: ${{ secrets.KOINON_BOT_APP_ID }}
-          private-key: ${{ secrets.KOINON_BOT_PRIVATE_KEY }}
-          permission-contents: write
-          permission-issues: write
-          permission-pull-requests: read
-          permission-organization-projects: write
       # The base branch's script (the commit the pull request targets), never the pull request's own.
-      - if: steps.gate.outputs.enabled == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
-      - if: steps.gate.outputs.enabled == 'true'
-        env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
+      - env:
+          GH_TOKEN: ${{ github.token }}
           KOINON_CLAIM_REPO: ${{ github.repository }}
+          KOINON_CLAIM_PROJECT: none
           PR: ${{ github.event.pull_request.number }}
         run: hack/claim.sh release-pr "$PR"
 
@@ -127,7 +92,7 @@ jobs:
     # run counts as passing, so skipping here would turn a failed claim green.
     if: github.event_name == 'pull_request_target' && github.event.action != 'closed'
     name: claim
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       issues: read

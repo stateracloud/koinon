@@ -40,7 +40,7 @@ Then `make dev` (see [loop.md](loop.md)). The Tiltfile allows `kind-koinon-*` an
 
 ## Maintainer config outside the repository
 
-Nothing of the lab is tracked (issue #508): the repository works without it. The maintainers keep
+Nothing of the lab is tracked (issue koinon-private#508): the repository works without it. The maintainers keep
 these in `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/`:
 
 | File | What |
@@ -52,9 +52,9 @@ these in `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/`:
 
 Without `lab.env`, `hack/e2e-remote.sh --argo` exits 78 (no lab configured) and names what is missing.
 
-`lab.env` also holds `KOINON_LAB_DOMAIN`, the lab's DNS domain: lab hosts are `<name>.apps.<domain>` and `ollama.<domain>`, and the lane label of gate runs is `<domain>/lane`. The real value is never tracked: docs, fixtures and spikes use `lab.example.invalid`, and `hack/lab-domain-lint.sh` (CI `scripts` job) fails when a tracked file names a lab host (#693).
+`lab.env` also holds `KOINON_LAB_DOMAIN`, the lab's DNS domain: lab hosts are `<name>.apps.<domain>` and `ollama.<domain>`, and the lane label of gate runs is `<domain>/lane`. The real value is never tracked: docs, fixtures and spikes use `lab.example.invalid`, and `hack/lab-domain-lint.sh` (CI `scripts` job) fails when a tracked file names a lab host (koinon-private#693).
 
-## Where a pull request's kind e2e runs (#547)
+## Where a pull request's kind e2e runs (koinon-private#547)
 
 A needs-e2e pull request (`hack/needs-e2e.sh`) is tested lab first. A green lab run is enough to merge,
 recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendment) has the decision.
@@ -68,15 +68,14 @@ recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendm
 2. `hack/pr-wait.sh <PR> --checks --require e2e` is the merge gate: it passes on a green `e2e-lab` on the
    head, or on any green `quickstart` check run on the head (also a dispatched one next to a skipped
    pull_request run). Then auto-merge as usual.
-3. GitHub's `e2e-kind` is the fallback, `gh workflow run e2e-kind.yml --ref <branch>`, when:
+3. Otherwise wait for the PR's own quickstart on GitHub (dispatch `gh workflow run e2e-kind.yml --ref <branch>` only to re-run), when:
 
 | Exit of `--argo` | Meaning | What to do |
 | --- | --- | --- |
 | 0 | the e2e passed, `e2e-lab` is success | merge gate 2 |
 | 1 | the e2e failed, `e2e-lab` is failure | fix it |
-| 75 | the lab cannot run it now: unreachable, a failed upload or submit, no verdict | GitHub e2e-kind |
-| 78 | no lab configured | GitHub e2e-kind |
-| 79 | the change touches `flavors/`: the lab cannot build a flavor image (`nvcr.io` is fenced) | GitHub e2e-kind, dispatched by hand (nothing triggers it for a flavors/ PR); `--allow-flavors` if the image is already in Zot |
+| 75 | the lab cannot run it now: unreachable, a failed upload or submit, no verdict | wait for the PR's quickstart (dispatch only to re-run) |
+| 78 | no lab configured | wait for the PR's quickstart (dispatch only to re-run) |
 | 2 | usage, or the lab rejected the request | fix the call |
 
    `hack/e2e-remote.sh --local` (your own Docker) is a dev and debug tool, not merge evidence: it yields
@@ -87,55 +86,69 @@ recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendm
    The `koinon-gate` lane (`--gate <set>`, not the e2e) has the same 75 / 76 contract: 75 is "run the gate
    locally", including the 120 s Pending fallback (reasons `quota`, `unschedulable`, `namespace-limit`,
    `slot`; the run is deleted, never stopped).
-4. A pull request that changes the e2e's own files (`needs-e2e.sh --forced-only`) gets `e2e-kind` on GitHub
-   by itself, so the lab run is optional there; the `e2e` label dispatches it too.
+4. Any e2e-relevant pull request (`hack/needs-e2e.sh`, including the e2e's own files) runs the quickstart in
+   its own run on GitHub, so the lab run is optional there; the `e2e` label dispatches it too.
 5. Main stays batched on GitHub (each push that changed something e2e-relevant, one running and the newest
    pending) and nightly, always.
 
 `e2e-lab` is not a required check of the ruleset, because contributors without a lab cannot produce it;
-the required check stays `e2e result`, and it enforces the rule on GitHub (#562): when `hack/needs-e2e.sh`
-(or the e2e's own files, or the `e2e` label) says the PR needs the e2e, `e2e result` fails unless the head
+the required check stays `e2e result`, and it enforces the rule on GitHub (koinon-private#562): when `hack/needs-e2e.sh`
+(or the e2e's own files, or the `e2e` label) says the PR needs the e2e, the PR's own run runs the quickstart
+(issue #148) and `e2e result` fails unless the head
 has a successful `quickstart` job (this run, or an e2e-kind run dispatched on the head) or the commit
 status `e2e-lab` = success (`hack/e2e-gate.sh`; the failure message names `hack/e2e-remote.sh --argo` and
 `gh workflow run e2e-kind.yml --ref <branch>`). A status event starts no workflow, so
 `hack/e2e-status.sh` re-runs the PR run's `e2e result` job (only that job, not a failed quickstart) after posting `success`
 (`hack/e2e-rerun-result.sh`), as does a passing dispatched run; if that did not happen, use "Re-run failed
 jobs" on the PR's e2e-kind run. Anyone with write access can still post `e2e-lab` by hand: the lab's own
-GitHub App that makes the status verifiable is a separate, later issue (#568).
+GitHub App that makes the status verifiable is a separate, later issue (koinon-private#568).
 
 The re-run only happens once the PR run has finished: an `e2e-lab` posted while it is still in progress gets
 no re-run, use "Re-run failed jobs" afterwards. Trust limit: `result` runs from the PR's own `e2e-kind.yml`, so
 a PR can edit the YAML to drop the gate. The guard is the ruleset's required review on `.github/**` (not
 CODEOWNERS: `require_code_owner_review` is false); `e2e result` is not pinned to an app and `e2e-lab` can be
 posted by anyone with write access. This is a guardrail against mistakes, not against a malicious member;
-the follow-up is a pinned `integration_id` / the lab's own App (#568).
+the follow-up is a pinned `integration_id` / the lab's own App (koinon-private#568).
 
-### go-test on the lab gate first (#610)
+### Flavor images on the lab (#200)
 
-CI's `go-test` job is the longest Blacksmith job. With a lab, run it there first and let CI skip it:
+A change under `flavors/` runs on the lab like any other: the kind e2e builds the OpenCode flavor image
+there (`test/e2e/run.sh`), and the lab reaches `nvcr.io` only through Zot's mirror of it. The base image is
+a build input, `FLAVOR_BASE` (`make flavor-opencode FLAVOR_BASE=...`, `test/e2e/run.sh`), checked by
+`hack/flavor-base.sh`: it must end with the digest the Dockerfile's `ARG BASE=` pins, which is the same
+through the mirror, so the base never changes without a change to the Dockerfile. Unset, the Dockerfile's
+public default builds. The lab's `koinon-make` WorkflowTemplate (the kind lane; the light lane and the
+gates build no flavor image) sets `FLAVOR_BASE=<registry host from lab.env>/nvcr.io/<the Dockerfile's ref
+and digest>` from the lab's own config, and `make test-e2e-kind` hands it to `test/e2e/run.sh`; the mirror
+address is never tracked. A lab runner without `FLAVOR_BASE` fails the image build
+(exit 1, `e2e-lab` failure), not a refusal: the up-front exit 79 and `--allow-flavors` are gone.
 
-1. Pull request as a draft (a draft skips the heavy jobs, #593). Then
+### go-test on the lab gate first (koinon-private#610)
+
+CI's `go-test` job is the longest CI job. With a lab, run it there first and let CI skip it:
+
+1. Pull request as a draft (a draft skips the heavy jobs, koinon-private#593). Then
    `hack/ship.sh --ready --lab-go-test ...`: after the push it runs `hack/e2e-remote.sh --argo --gate go-test`
    on a free gate slot (`gate-1`..`gate-4` with no unfinished `lane=gate` run, never always `gate-1`),
    which posts the commit status `go-test-lab` on the pushed head (`success`, or `failure` when the gate
-   failed; nothing on 75 / 76 / 78 / 79 or with `--no-status`), and only then marks the pull request ready.
+   failed; nothing on 75 / 76 / 78 or with `--no-status`), and only then marks the pull request ready.
 2. The ready run's `changes` job reads that status (`hack/ci-skip-heavy.sh lab`, `hack/go-test-lab.sh`):
    for the exact head SHA of the pull request and state `success` it sets `go_test_lab=true`, `go-test` is
    skipped, and the required `go` check accepts that one skip (any other skipped part, or a skipped
    `go-test` without the status, is still a failure). The required check name stays `go`; the merge rule
    and the ruleset's required contexts do not change.
 3. Without the status (no lab: exit 78; lab cannot run it now or no free slot: 75; NOT RUN: 76;
-   the lab rejected the call: 2; the flavors refusal 79 is the kind lane's only), `go-test` runs on Blacksmith as before. `hack/ship.sh` prints the reason and goes on.
+   the lab rejected the call: 2), `go-test` runs on the hosted runner as before. `hack/ship.sh` prints the reason and goes on.
    A gate that really failed (any other non-zero) stops the ship before ready.
 4. A push to a ready pull request runs CI on the new head at once, before any status can exist, and `go-test`
-   runs on Blacksmith: nothing waits for a status (a waiting Blacksmith job is billed). To keep the lab for
+   runs on the hosted runner: nothing waits for a status (a waiting job holds a runner). To keep the lab for
    a fix, turn the pull request into a draft (`gh pr ready --undo`), push, and ship with
    `--ready --lab-go-test` again. A status posted after the ready run started changes nothing.
 5. A push to main and the release gate do not trust a skip blindly: `hack/ci-skip-heavy.sh decide` and
    `hack/release-gate.sh` accept a skipped `go-test` only with a green `go-test-lab` on the pull request
    head, or when the change touches no Go (`hack/go-test-lab.sh touches-go`).
 
-Trust limit, as for `e2e-lab` (#568): anyone with write access can post `go-test-lab`, and the `changes` job
+Trust limit, as for `e2e-lab` (koinon-private#568): anyone with write access can post `go-test-lab`, and the `changes` job
 runs from the pull request's own `ci.yml`; the guard is the required review on `.github/**`. A guardrail
 against mistakes, not against a malicious member. `changes` and the release `gate` job need `statuses: read`.
 
@@ -236,7 +249,7 @@ With `crane` and `jq` installed and `docker login` done for both registries:
 hack/mirror-release.sh 0.1.0-rc.1 <registry host from lab.env>/koinon
 ```
 
-It copies the four images (the three Go images and `flavor-opencode`, every platform, plus any
+It copies the four images (the three Go images and `flavors/opencode`, every platform, plus any
 cosign signature, attestation and SBOM tags) and the chart to `<registry>/<name>:<version>` and `<registry>/charts/koinon:<version>`. The script
 uses the credentials in the docker config and never prints them. Cosign 3 stores its bundles as
 OCI referrers; the script copies them only where they also exist under the `sha256-<hex>` tag, so

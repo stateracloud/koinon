@@ -140,7 +140,7 @@ any of these:
 - Agent Sandbox is missing, or its controller image is not `v1.0.x`.
 - The OpenShell gateway is not reachable at `openshell.address`, or its version is not 0.1.5.
 - The RuntimeClass in `openshell.runtimeClassName` does not exist.
-- OpenShell's gateway ConfigMap (`preflight.openshell.namespace` and `.configMap`, default `openshell/openshell-config`) cannot be read or has no `gateway.toml` while a supervisor image is configured, which the chart always does (#489).
+- OpenShell's gateway ConfigMap (`preflight.openshell.namespace` and `.configMap`, default `openshell/openshell-config`) cannot be read or has no `gateway.toml` while a supervisor image is configured, which the chart always does (koinon-private#489).
 - The CloudNativePG operator is missing (when `postgres.mode` is `cnpg`).
 - The agentgateway `GatewayClass`, its `agentgateway.dev` CRDs or a v1.7.x controller are missing (when `gateway.mode` is `kubernetes`; see [Gateway modes](/guides/gateway-modes/)).
 
@@ -151,9 +151,9 @@ on `runc`, where it does not apply.
 
 ## Koinon's images and chart
 
-Each release tag publishes the images and the chart to `ghcr.io/stateracloud`
-(`koinon-api`, `koinon-reconciler`, `koinon-agentd`, `flavor-opencode`, and the chart at
-`oci://ghcr.io/stateracloud/charts/koinon`). The packages are private while the repository is
+Each release tag publishes the images and the chart to `ghcr.io/stateracloud/koinon`
+(`api`, `reconciler`, `agentd`, `flavors/opencode`, and the chart at
+`oci://ghcr.io/stateracloud/koinon/charts/koinon`). The packages are private while the repository is
 private, so log in to `ghcr.io` with a token that can read packages before you pull them. The
 [quickstart](/quickstart/#get-koinon) shows how to install from a release, and how to build the images
 yourself instead.

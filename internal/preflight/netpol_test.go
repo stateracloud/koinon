@@ -144,7 +144,7 @@ var _ = Describe("KubeNetPolProber", func() {
 	prober := func(log string) preflight.KubeNetPolProber {
 		return preflight.KubeNetPolProber{
 			Client: kube, Namespace: ns, NamePrefix: "koinon-preflight-netpol", Token: "t0k3n",
-			Image: "ghcr.io/stateracloud/koinon-api:0.1.0", ImagePullSecrets: []string{"ghcr"},
+			Image: "ghcr.io/stateracloud/koinon/api:0.1.0", ImagePullSecrets: []string{"ghcr"},
 			Labels:  map[string]string{"app.kubernetes.io/instance": "koinon"},
 			Timeout: 300 * time.Millisecond, PollInterval: 10 * time.Millisecond,
 			Logs: func(_ context.Context, namespace, name string) (string, error) {
@@ -188,7 +188,7 @@ var _ = Describe("KubeNetPolProber", func() {
 		Expect(srv.Labels).To(HaveKeyWithValue("app.kubernetes.io/component", "preflight-netpol-server"))
 		Expect(srv.Labels).To(HaveKeyWithValue("app.kubernetes.io/instance", "koinon"))
 		ctr := srv.Spec.Containers[0]
-		Expect(ctr.Image).To(Equal("ghcr.io/stateracloud/koinon-api:0.1.0"))
+		Expect(ctr.Image).To(Equal("ghcr.io/stateracloud/koinon/api:0.1.0"))
 		Expect(ctr.Args).To(Equal([]string{"preflight", "netpol-server"}))
 		Expect(*ctr.SecurityContext.AllowPrivilegeEscalation).To(BeFalse())
 		Expect(*ctr.SecurityContext.ReadOnlyRootFilesystem).To(BeTrue())

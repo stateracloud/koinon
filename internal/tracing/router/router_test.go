@@ -192,7 +192,7 @@ var _ = Describe("Router", func() {
 			Eventually(func() int { return len(be.spans()) }).Should(Equal(1), "the tool span goes at once")
 			Expect(be.named("invoke_agent Support Bot")).To(BeNil(), "the root waits for the ledger")
 			// The root is held asynchronously, by another intake worker than the tool span's: a sweep
-			// before it is held finds nothing, and no later sweep would release it (#396, #612).
+			// before it is held finds nothing, and no later sweep would release it (koinon-private#396, koinon-private#612).
 			Eventually(func() int { return e.r.HeldRoots() }).Should(Equal(1))
 
 			settle(e) // the first poll finds two rows
@@ -229,7 +229,7 @@ var _ = Describe("Router", func() {
 			Expect(testutil.ToFloat64(e.r.Metrics().Received.WithLabelValues("ledger"))).To(Equal(2.0))
 		})
 
-		It("leaves the reasoning tokens out when no call reported a split, rather than write 0 (#316)", func() {
+		It("leaves the reasoning tokens out when no call reported a split, rather than write 0 (koinon-private#316)", func() {
 			unsplit := func(id string, at time.Duration) router.ModelCall {
 				c := call(id, at, 0.25)
 				c.Reasoning = 0
@@ -239,7 +239,7 @@ var _ = Describe("Router", func() {
 			e.post(tr.root(false))
 			// The root is held asynchronously after the POST returns. A sweep that runs
 			// before it is held finds nothing, and the fake clock never sweeps again, so
-			// the spec would wait for spans that no later sweep releases (#396).
+			// the spec would wait for spans that no later sweep releases (koinon-private#396).
 			Eventually(func() int { return e.r.HeldRoots() }).Should(Equal(1))
 			finishTurn(e)
 			Eventually(func() int { return len(be.spans()) }).Should(Equal(3))
@@ -253,6 +253,11 @@ var _ = Describe("Router", func() {
 			nocost := call("req-late", 3*time.Second, 0)
 			nocost.Cost = nil
 			e.store.setCalls([]router.ModelCall{call("req-1", 2*time.Second, 0.25), nocost})
+			// The 30 s are counted on the router's clock from when the root was held. A clock that also
+			// ran with real time would leave the "still waiting at 27 s" check a margin of 3 s of the
+			// spec's own run time, which a loaded machine can use up (#134); frozen, it moves only by
+			// the steps below.
+			e.clock.Freeze()
 			e.post(tr.root(false))
 			Eventually(func() int { return e.r.HeldRoots() }).Should(Equal(1))
 
@@ -433,7 +438,7 @@ var _ = Describe("Router", func() {
 			req := &coltracepb.ExportTraceServiceRequest{ResourceSpans: []*tracepb.ResourceSpans{{ScopeSpans: []*tracepb.ScopeSpans{{Spans: spans}}}}}
 			body, _ := proto.Marshal(req)
 			// Nothing drains the intake, so a handler that waited for room would never answer: the
-			// answer itself is the proof (httpDo gives up after hangBound) (#612).
+			// answer itself is the proof (httpDo gives up after hangBound) (koinon-private#612).
 			resp := httpDo(http.MethodPost, srv.URL, "application/x-protobuf", bytes.NewReader(body))
 			defer func() { _ = resp.Body.Close() }()
 			var out coltracepb.ExportTraceServiceResponse

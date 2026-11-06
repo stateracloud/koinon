@@ -211,6 +211,48 @@ var _ = Describe("Settling responses cut short", func() {
 		Expect(ledger.AgentLimit(ctx, q, e.agent, clock)).To(HaveField("Amount", Equal(money.MustParse("0.9998"))))
 	})
 
+	It("does not ask a provider whose key was lost, and settles once the key is entered again", func(ctx SpecContext) {
+		_, err := in.Ingest(ctx, []ledger.Entry{cut("gen-lost")})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `UPDATE providers SET api_key = NULL, credential_lost_at = now() WHERE org_id = $1`, e.org)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("lost: the provider is not asked, and the entry stays provisional with the reason")
+		clock = clock.Add(time.Minute)
+		_, err = settler.SettleDue(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(src.callsFor("gen-lost")).To(BeZero(), "no request without the key")
+		Expect(e.provisional(ctx)).To(Equal(1), "a key entered again before the deadline can still settle it")
+		var lastErr string
+		Expect(db.QueryRow(ctx, `SELECT last_error FROM spend_settlements WHERE org_id = $1`, e.org).Scan(&lastErr)).To(Succeed())
+		Expect(lastErr).To(ContainSubstring("API key was lost"))
+
+		By("the key is entered again: the next attempt asks the provider and settles")
+		_, err = db.Exec(ctx, `UPDATE providers SET credential_lost_at = NULL WHERE org_id = $1`, e.org)
+		Expect(err).NotTo(HaveOccurred())
+		src.answer("gen-lost", providerusage.Usage{InputTokens: 1000, OutputTokens: 250, Cost: money.MustParse("0.0007")})
+		clock = clock.Add(time.Hour)
+		_, err = settler.SettleDue(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(src.callsFor("gen-lost")).To(Equal(1))
+		Expect(e.provisional(ctx)).To(BeZero())
+		Expect(revisions(ctx)).To(ConsistOf(HaveField("Reason", "provider")))
+	})
+
+	It("keeps the logged usage as final when the provider's key is still lost at the deadline", func(ctx SpecContext) {
+		_, err := in.Ingest(ctx, []ledger.Entry{cut("gen-lost2")})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `UPDATE providers SET api_key = NULL, credential_lost_at = now() WHERE org_id = $1`, e.org)
+		Expect(err).NotTo(HaveOccurred())
+		clock = clock.Add(ledger.SettleWindow + time.Minute)
+		_, err = settler.SettleDue(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(src.callsFor("gen-lost2")).To(BeZero())
+		charges, held, _ := spent(ctx)
+		Expect([]any{charges, held}).To(Equal([]any{"0.0002", "0.00"}))
+		Expect(revisions(ctx)).To(ConsistOf(HaveField("Reason", "expired")))
+	})
+
 	It("holds the reserve back from the gateway key only; budgets, alerts and stops count the charges", func(ctx SpecContext) {
 		// Limit $1.00: each cut response is charged $0.0002 and holds back $0.40 more ($0.4002).
 		for i := range 5 {
@@ -308,7 +350,7 @@ var _ = Describe("Settling responses cut short", func() {
 		})
 	})
 
-	It("pushes a limit with at most nine fraction digits, rounded down (issue #245)", func(ctx SpecContext) {
+	It("pushes a limit with at most nine fraction digits, rounded down (issue koinon-private#245)", func(ctx SpecContext) {
 		// A provider's own cost can carry ten digits; the remainder of a $1.00 limit then has ten
 		// too, and agentgateway rejects its whole config for a budget with more than nine.
 		_, err := db.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model, input_tokens, output_tokens, cost_usd, priced, occurred_at)

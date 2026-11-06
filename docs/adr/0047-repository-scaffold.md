@@ -99,19 +99,30 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
 - When the repository goes public, standard GitHub-hosted runners are free again; revisit then.
 - _Amended (2026-10-29):_ `e2e-kind.yml` runs on GitHub-hosted `ubuntu-24.04`, not Blacksmith.
   Blacksmith's kernel (6.6, `lsm=capability,bpf,integrity`) has no Landlock, which the OpenShell
-  sandbox supervisor requires (issue #159); `ubuntu-24.04` has it. The job's first step fails in
+  sandbox supervisor requires (issue koinon-private#159); `ubuntu-24.04` has it. The job's first step fails in
   seconds when the kernel lacks Landlock. While the repository is private, the job is dispatched by
   hand (about 22 minutes of the plan's included minutes per run); once it is public it runs on every
   pull request to main and nightly. `g2-kind.yml` keeps Blacksmith: it creates no OpenShell
-  sandbox. `spike-kind.yml` is a draft that has never run; its removal is tracked in issue #234.
-  _Note (2026-11-02):_ `spike-kind.yml` was removed in #561.
+  sandbox. `spike-kind.yml` is a draft that has never run; its removal is tracked in issue koinon-private#234.
+  _Note (2026-11-02):_ `spike-kind.yml` was removed in koinon-private#561.
+- _Amended (2026-11-05, public repository, #135):_ the repository is public, so GitHub-hosted runners
+  are free and every workflow runs on them: `ubuntu-latest` (4 vCPU, 16 GB) replaces both Blacksmith
+  labels, and Blacksmith is no longer used anywhere. `e2e-kind.yml` stays on `ubuntu-24.04`
+  (Landlock). The `.github/actionlint.yaml` custom-label list is gone.
 - _Amended (2026-10-29, later):_ while the repository is private, `e2e-kind.yml` also runs its go
   suite on ready (non-draft) pull requests to main that touch `internal/ledger`, `internal/gateway`,
   `flavors`, `test/e2e`, `test/fakemodel` or the workflow itself. Dispatching it only per release
-  candidate let #253 and #254 merge with e2e regressions that surfaced at the rc.8 tag, two rounds
+  candidate let koinon-private#253 and koinon-private#254 merge with e2e regressions that surfaced at the rc.8 tag, two rounds
   late. Those paths are where the full install catches what unit and flavor tests miss: spend
   accounting, the rendered gateway config and the harness launch. Every other change still relies
   on the dispatch before a tag. Each run costs about 22 of the plan's included minutes.
+- _Note (2026-11-05, public repository):_ the repository is public. Every "while the repository is
+  private" statement above (free minutes in item 13, Blacksmith, hand-dispatched `e2e-kind.yml`, the
+  go suite on selected paths) describes the private period and no longer applies: `e2e-kind.yml`
+  triggers on every pull request to main, on pushes to main (batched) and nightly, on GitHub-hosted
+  runners, and standard runners cost no Actions minutes. Its `decide` job runs the quickstart on a
+  pull request only for the e2e's own files or the `e2e` label; `e2e result` gates every needs-e2e
+  PR on a green e2e on its head (see the workflow header). The decided text above is kept as the record.
 
 ## Alternatives considered
 
@@ -134,14 +145,14 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
 - Negative: composite keys make every foreign key two columns wide; Postgres 18 excludes older
   managed offerings _(inferred)_; the dev loop depends on the home-lab registry and CloudNativePG operator.
 - Follow-ups: the branch ruleset is applied once the scaffold PR merges (so the checks exist);
-  `docs/adr/README.md` needs this ADR in its index after PR #12 merges; the Starlight site and the
+  `docs/adr/README.md` needs this ADR in its index after PR koinon-private#12 merges; the Starlight site and the
   Helm chart content come later.
 
 ## Open questions
 
 - GitHub org name for the move (`koinon` is taken): decided before the v0.1 plan.
 - A project contact address for the code of conduct and security reports (needs `koinon.dev`).
-- Row-level security as a backstop (follow-up issue from PR #12).
+- Row-level security as a backstop (follow-up issue from PR koinon-private#12).
 
 ## Upstream verification
 
@@ -152,8 +163,14 @@ React 19, Zot chart 0.1.128 / Zot v2.1.22, Helm 4.3.1. The migration suite passe
 (with SBOMs) to Zot, the pods pull them through the `dev-registry` secret, and `koinon-pg` reaches
 a healthy state.
 
+## Update 2026-11-05: CI cache ownership
+
+`go-vet` is no longer a CI job: `.golangci.yml` runs `default: standard`, which includes govet, so
+`go-lint` covers it. Caches are owned by main's `warm-caches` job and restored read-only by every
+other job (docs/dev/ci.md#cache-ownership, issue #147).
+
 ## Links
 
 - ADR 0004, 0022, 0026, 0027, 0034, 0037, 0038, 0039
 - [docs/dev/maintainer-homelab.md](../dev/maintainer-homelab.md)
-- Issue [#2](https://github.com/stateracloud/koinon/issues/2)
+- Issue [koinon-private#2](https://github.com/stateracloud/koinon-private/issues/2)

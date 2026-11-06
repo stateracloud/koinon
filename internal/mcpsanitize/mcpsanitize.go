@@ -3,7 +3,7 @@
 // Package mcpsanitize normalises the free text a third-party MCP server publishes about its tools
 // (a tool's description and the description strings of its input schema) before anything stores it
 // or shows it to a model. Those strings reach the model verbatim, so they are untrusted input
-// (research TP22, issue #267): a server can hide instructions in them with control characters,
+// (research TP22, issue #52): a server can hide instructions in them with control characters,
 // ANSI escapes, Unicode tag characters, bidi overrides, zero-width characters or tags that imitate
 // the harness's own blocks.
 //

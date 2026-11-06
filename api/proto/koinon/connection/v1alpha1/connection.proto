@@ -173,6 +173,10 @@ message Connection {
   // the agents bound to it, but is not usable: bound agents report why and runs that need it fail
   // with that reason. Restoring the Secret restores the connection.
   bool removed = 13;
+  // credential_lost_at is set when the secret was lost with the key that encrypted it (`koinon-api keys
+  // forget`, ADR 0085 decision 13): the connection is not usable (bound agents report it and runs that need it fail) until the
+  // secret is entered again. Unset otherwise.
+  google.protobuf.Timestamp credential_lost_at = 15;
 
   oneof settings {
     GitHubConnection github = 10;

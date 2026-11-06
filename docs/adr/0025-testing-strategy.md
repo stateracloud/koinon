@@ -3,7 +3,7 @@
 - Status: Accepted; amended 2026-11-02 (below)
 - Date: 2026-10-21
 - Decision: [design.md#25](../design.md)
-- Verification: escape suite design depends on the OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))
+- Verification: escape suite design depends on the OpenShell spike ([koinon-private#3](https://github.com/stateracloud/koinon-private/issues/3))
 
 ## Context
 
@@ -75,12 +75,12 @@ Checked 2026-10-21:
   https://golang.testcontainers.org/modules/postgres/
 - ACP methods and optional `session/load`: https://agentclientprotocol.com/protocol/session-setup
 
-## Amendment (2026-11-02, #512 and #547): the optional lab lane and where the kind e2e runs
+## Amendment (2026-11-02, koinon-private#512 and koinon-private#547): the optional lab lane and where the kind e2e runs
 
 CI stays free and public (above). This amendment records the lab lane a maintainer may add and the
 routing of the kind e2e. It does not change what CI requires.
 
-**What #512 built.** `hack/e2e-remote.sh --argo --gate <set>` runs one gate set of `hack/lab/gate-run.sh`
+**What koinon-private#512 built.** `hack/e2e-remote.sh --argo --gate <set>` runs one gate set of `hack/lab/gate-run.sh`
 (go-test, agentd-ginkgo, ...) on an Argo Workflows queue the operator runs, in the WorkflowTemplate
 `koinon-gate` (the `koinon-gate` lane, replacing the light lane):
 
@@ -92,7 +92,7 @@ routing of the kind e2e. It does not change what CI requires.
   script exits 75: the caller runs the gate locally.
 - Measured on the lab: go-test warm about 700 s, agentd-ginkgo about 175 s.
 
-**Decision (procoduck, 2026-11-02, #547): a green lab run is enough to merge a needs-e2e pull request.**
+**Decision (procoduck, 2026-11-02, koinon-private#547): a green lab run is enough to merge a needs-e2e pull request.**
 The kind e2e of a pull request is tested like this, in this order:
 
 1. With a lab: `hack/e2e-remote.sh --argo` runs it on the lab. A followed run posts the commit status
@@ -111,11 +111,26 @@ lab cannot produce it. The merge rule is the agents' (`AGENTS.md`), checked with
 the required check stays `e2e result`. `e2e-lab` is a plain commit status, trusted as far as the
 maintainer's lab credentials are; it asserts only that a lab run passed on that exact commit.
 
+Note (2026-11-05, issue #148): point 2 above no longer holds for pull requests. `hack/e2e-decide.sh` now
+runs the quickstart in the pull request's own run whenever the full rule (`hack/needs-e2e.sh`) says the
+change is e2e-relevant, not only for the e2e's own files or the `e2e` label. The earlier "required but not
+run here" state could never go green for a fork pull request (it cannot label, dispatch or post `e2e-lab`),
+which blocked Dependabot's. The `e2e` label (now: force a run for a change the rule thinks irrelevant) and
+the lab's `e2e-lab` status remain accelerators and still satisfy `e2e result` (the result job waits for the pull request's own quickstart; if that fails or is cancelled, `hack/e2e-gate.sh` falls through to `e2e-lab` or another run's quickstart); the lab-first order is a
+way to get the verdict sooner, not a precondition. Cost: a needs-e2e pull request pays for a GitHub run
+even when the lab also passes.
+
 Exit codes of `hack/e2e-remote.sh --argo` separate the cases a caller acts on differently: 0 passed,
 1 the e2e failed, 2 usage, 75 the lab cannot run it now (fall back), 76 not run, 78 no lab configured,
 79 refused for flavors.
 
-## Amendment (2026-11-03, #610): CI's go-test on the lab gate first
+Note (2026-11-06, issue #200): exit 79 and `--allow-flavors` are gone. The lab builds the flavor image
+through its registry's mirror of `nvcr.io`: the base image is the build input `FLAVOR_BASE`, which must
+carry the digest the Dockerfile pins (`hack/flavor-base.sh`), and the lab's runner sets it from its own
+config. A change under `flavors/` is tested on the lab like any other (point 2's flavors case no longer
+applies).
+
+## Amendment (2026-11-03, koinon-private#610): CI's go-test on the lab gate first
 
 The same lab lane serves CI's longest Blacksmith job. A followed `hack/e2e-remote.sh --argo --gate go-test`
 posts the commit status `go-test-lab` (named like `e2e-lab`) on the tested commit; `hack/ship.sh --ready
@@ -127,8 +142,17 @@ CI does not wait for a status that arrives later (a waiting Blacksmith job is bi
 pull request runs `go-test` on Blacksmith. `hack/ci-skip-heavy.sh decide` (push to main) and
 `hack/release-gate.sh` treat a skipped `go-test` as green only with a green `go-test-lab` on the pull
 request head or a change with no Go in it. The required check name (`go`), the ruleset and the merge rule do
-not change. Trust limit as for `e2e-lab` (#568): a status anyone with write access can post, behind the
+not change. Trust limit as for `e2e-lab` (koinon-private#568): a status anyone with write access can post, behind the
 required review on `.github/**`. Details: `docs/dev/maintainer-homelab.md`.
+
+## Note (2026-11-05, public repository)
+
+The repository is public. Statements above that tie CI choices to the private period (for example
+that a waiting Blacksmith job is billed, or that Actions minutes are scarce) describe that period:
+the workflows now run on GitHub-hosted runners, which cost nothing on a public repository. The
+decisions stand; only the cost reasoning changed. What runs where: CI runs the admission half of the
+escape suite (`escape (admission)`); the OpenShell cases run on kind (`make test-escape-kind`) and
+on the maintainers' lab, where the Kata tier can be tested.
 
 ## Links
 

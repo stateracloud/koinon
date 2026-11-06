@@ -14,7 +14,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
-// A run waits until the gateway serves its model (issue #174): a new provider is left out of the
+// A run waits until the gateway serves its model (issue koinon-private#174): a new provider is left out of the
 // gateway state until its key file has reached the gateway pod, and a harness started before that
 // gets a 403 on its first model call.
 var _ = Describe("Waiting for the gateway to serve the model", func() {
@@ -112,6 +112,22 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal(`the model "` + model + `" has no price, so the gateway does not serve it; ` +
 			"add a price for it on the Prices page and run the task again"))
+		Expect(waitEvents(ctx, r)()).To(BeEmpty())
+		Expect(e.gw.Execs()).To(BeEmpty())
+	})
+
+	It("fails at once when the provider's key was lost, even while the gateway still serves it", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		id := addModel(ctx, e, "lost-upstream")
+		serve(ctx, e, id)
+		// What keys forget does (ADR 0085 decision 13); the keyless provider has no envelope to clear.
+		_, err := db.Exec(ctx, `UPDATE providers SET credential_lost_at = now() WHERE org_id = $1 AND name = 'lost-upstream'`, e.org)
+		Expect(err).NotTo(HaveOccurred())
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal(`the API key of the model provider "lost-upstream" was lost, so the gateway does not ` +
+			`serve the model "` + model + `"; enter the key again on the Providers page and run the task again`))
 		Expect(waitEvents(ctx, r)()).To(BeEmpty())
 		Expect(e.gw.Execs()).To(BeEmpty())
 	})

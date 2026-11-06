@@ -26,7 +26,7 @@ Save this as `values.yaml`. It uses Kata. Set `image.registry` and `image.tag` t
 are ([Get Koinon](#get-koinon)), and `openshell.address` to where your gateway listens (the chart requires it).
 
 ```yaml chart-values
-# From a release these are the defaults (ghcr.io/stateracloud, the chart's own version), so you
+# From a release these are the defaults (ghcr.io/stateracloud/koinon, the chart's own version), so you
 # can leave the image block out. Set them if you built and pushed the images yourself.
 image:
   registry: registry.example.com/koinon
@@ -293,9 +293,9 @@ missing from the ledger. Upgrade at a quiet time. Later rotations lose nothing w
 
 ### From a release
 
-A release tag (for example `v0.1.0-rc.2`) publishes `koinon-api`, `koinon-reconciler`, `koinon-agentd`
-and `flavor-opencode` to `ghcr.io/stateracloud`, and the chart to
-`oci://ghcr.io/stateracloud/charts/koinon`, all at the version of the tag without the `v`. The
+A release tag (for example `v0.1.0-rc.2`) publishes `api`, `reconciler`, `agentd`
+and `flavors/opencode` to `ghcr.io/stateracloud/koinon`, and the chart to
+`oci://ghcr.io/stateracloud/koinon/charts/koinon`, all at the version of the tag without the `v`. The
 packages are private while the repository is private. Log in with a GitHub token that has
 `read:packages`. After you create the namespace in step 2, give the cluster a pull Secret for `ghcr.io`:
 
@@ -311,11 +311,11 @@ Secret too: create `ghcr-pull` in the `openshell` namespace as well and set
 `server.sandboxImagePullSecrets: [{name: ghcr-pull}]` on the OpenShell release
 (`test/e2e/kind/openshell-values.yaml` shows the line). To pull through Artifactory, Nexus or Harbor
 instead, see [Private registries and mirrors](/guides/private-registries/). Leave out the `image` block (the
-registry defaults to `ghcr.io/stateracloud` and the tag to the chart's version), and install the
+registry defaults to `ghcr.io/stateracloud/koinon` and the tag to the chart's version), and install the
 chart in step 2 from the registry instead of the clone:
 
 ```sh
-helm install koinon oci://ghcr.io/stateracloud/charts/koinon --version 0.1.0-rc.2 \
+helm install koinon oci://ghcr.io/stateracloud/koinon/charts/koinon --version 0.1.0-rc.2 \
   --namespace koinon -f values.yaml --wait --timeout 10m
 ```
 
@@ -331,16 +331,18 @@ a tag, the same ones as `image.registry` and `image.tag` in `values.yaml`.
 pnpm -C web install --frozen-lockfile
 pnpm -C web build
 
-# 2. The three Koinon images: registry.example.com/koinon/koinon-api:v0.1.0 and so on.
-KO_DOCKER_REPO=registry.example.com/koinon GOFLAGS=-tags=webui \
-  ko build --base-import-paths --tags v0.1.0 ./cmd/koinon-api ./cmd/koinon-reconciler ./cmd/koinon-agentd
+# 2. The three Koinon images: registry.example.com/koinon/api:v0.1.0, /reconciler and /agentd.
+for name in api reconciler agentd; do
+  KO_DOCKER_REPO=registry.example.com/koinon/$name GOFLAGS=-tags=webui \
+    ko build --bare --tags v0.1.0 ./cmd/koinon-$name
+done
 
-# 3. The OpenCode flavor image: registry.example.com/koinon/flavor-opencode:v0.1.0.
+# 3. The OpenCode flavor image: registry.example.com/koinon/flavors/opencode:v0.1.0.
 docker buildx build --push --build-context common=flavors/common \
-  --tag registry.example.com/koinon/flavor-opencode:v0.1.0 flavors/opencode
+  --tag registry.example.com/koinon/flavors/opencode:v0.1.0 flavors/opencode
 ```
 
-Without `-tags=webui`, `koinon-api` serves no UI. Without `--base-import-paths`, `ko` gives the images
+Without `-tags=webui`, `koinon-api` serves no UI. Without `--bare` and one repository per image, `ko` gives the images
 other names than the chart expects. The chart takes the flavor image tag from `image.tag`. The images
 have to be pullable by the cluster; add `global.imagePullSecrets` for a private registry (see
 [Private registries and mirrors](/guides/private-registries/)).

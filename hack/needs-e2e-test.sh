@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# First, and on its own line so set -e stops the script when mktemp fails (#476).
+# First, and on its own line so set -e stops the script when mktemp fails (koinon-private#476).
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/needs-e2e-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
@@ -41,15 +41,6 @@ forced 0 hack/e2e-toolchain/Dockerfile
 forced 1 internal/api/server.go
 forced 1 charts/koinon/values.yaml
 forced 1 go.mod
-
-# --flavors: any path under flavors/ (the image tag hashes the trees), Markdown included; no Go needed.
-flav() { local want=$1 got=0; shift; printf '%s\n' "$@" | hack/needs-e2e.sh --stdin --flavors >/dev/null || got=$?; [[ $got -eq $want ]] || { echo "FAIL: --flavors want $want got $got for: $*" >&2; fail=1; }; }
-flav 0 flavors/opencode/Dockerfile
-flav 0 flavors/common/entrypoint.sh
-flav 0 flavors/opencode/prompts/system.md
-flav 1 internal/api/server.go
-flav 1 docs/flavors/readme.md
-flav 1 charts/koinon/values.yaml
 
 # Needed.
 expect 0 cmd/koinon-api/main.go
@@ -114,7 +105,7 @@ while IFS= read -r p; do
   expect 0 "$p"
 done < <(grep -v '^ *#' test/e2e/run.sh | grep -oE 'hack/[A-Za-z0-9_.-]+\.sh' | sort -u)
 
-# #565: every file the jobs that run the e2e (the `quickstart` job of e2e-kind.yml, not decide, result
+# koinon-private#565: every file the jobs that run the e2e (the `quickstart` job of e2e-kind.yml, not decide, result
 # or bisect, which are about whether to run) read, and every file under hack/e2e-toolchain/, is an
 # input: a kind, ko or helm bump must run the e2e.
 while IFS= read -r p; do

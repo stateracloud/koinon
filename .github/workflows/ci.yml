@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 name: ci
 
-# The run says whether it ran for a draft, from the event payload (#676). hack/ci-skip-heavy.sh decides
+# The run says whether it ran for a draft, from the event payload (koinon-private#676). hack/ci-skip-heavy.sh decides
 # from the same flag (PR_DRAFT below), so a run's label and its behaviour always agree; a gate
 # can drop runs whose `display_title` (`displayTitle` in `gh run list --json`) is `ci (draft)`
 # (the run `name` stays `ci`) without a time window. A re-run replays the event, so keeps its label.
@@ -9,7 +9,7 @@ run-name: ${{ github.event.pull_request.draft && 'ci (draft)' || 'ci' }}
 
 on:
   # ready_for_review is not a default type: it runs the full suite on the same head when a draft is
-  # marked ready (#593).
+  # marked ready (koinon-private#593).
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
@@ -18,7 +18,7 @@ on:
 permissions:
   contents: read
 
-# One run per head (#675). Runs never cancel each other through the group: the group is the PR head
+# One run per head (koinon-private#675). Runs never cancel each other through the group: the group is the PR head
 # SHA (a push to main: its own SHA), cancel-in-progress is off. So a push followed by ready_for_review,
 # or a re-run, on one head queue behind each other instead of killing a live run (a cancelled run reads
 # as FAILED to hack/pr-wait.sh). GitHub keeps one running and one pending run per group; a third run
@@ -36,23 +36,23 @@ jobs:
   # so required checks still pass when it does not apply.
   #
   # hack/ci-skip-heavy.sh also switches every heavy output below to false (the go, web, generate,
-  # chart, chartsmoke, docs, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (#593; `go` and `web` then FAIL on
+  # chart, chartsmoke, docs, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (koinon-private#593; `go` and `web` then FAIL on
   # purpose, "not tested", so a draft never leaves a green `go` behind; marking it ready runs
   # everything on the same head), and a push to main whose merge tree equals a pull request head whose required checks
-  # passed (#595). `changes`, `quick checks` (#594) and flavor-publish always run; `scripts` and
-  # `lint-shell` run except on that push to main (#594). Read the script's header before changing this.
+  # passed (koinon-private#595). `changes`, `quick checks` (koinon-private#594) and flavor-publish always run; `scripts` and
+  # `lint-shell` run except on that push to main (koinon-private#594). Read the script's header before changing this.
   changes:
     name: changes
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     # Read rights: the pull request's head (hack/ci-supersede.sh), the check runs of its head and, for
-    # go-test-lab (#610), its commit statuses. Write on actions only to cancel older heads' runs (#675).
+    # go-test-lab (koinon-private#610), its commit statuses. Write on actions only to cancel older heads' runs (koinon-private#675).
     permissions:
       contents: read
       pull-requests: read # hack/ci-supersede.sh reads pulls/<n> for the current head
       checks: read
       statuses: read
-      actions: write # hack/ci-supersede.sh cancels the runs of older heads (#675)
+      actions: write # hack/ci-supersede.sh cancels the runs of older heads (koinon-private#675)
     outputs:
       skip: ${{ steps.skip.outputs.skip }}
       reason: ${{ steps.skip.outputs.reason }}
@@ -113,11 +113,11 @@ jobs:
           # No pipe: a failing step must fail the job, not leave outputs empty (empty reads as "nothing to gate").
           hack/ci-skip-heavy.sh apply <"$RUNNER_TEMP/changes.txt" >"$RUNNER_TEMP/outputs.txt"
           tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/outputs.txt"
-      # go-test on the lab gate first (#610): a ready pull request whose head has the commit status
+      # go-test on the lab gate first (koinon-private#610): a ready pull request whose head has the commit status
       # go-test-lab = success (posted by `hack/e2e-remote.sh --argo --gate go-test` through hack/ship.sh
-      # --lab-go-test, before the pull request is marked ready) does not run go-test on Blacksmith; the
+      # --lab-go-test, before the pull request is marked ready) does not run go-test on the runner; the
       # `go` gate accepts that skip. No status, a draft, a push or an API error: go-test runs as before.
-      # Trust limit as for e2e-lab (#568): anyone with write access can post the status, and this job
+      # Trust limit as for e2e-lab (koinon-private#568): anyone with write access can post the status, and this job
       # runs from the pull request's own ci.yml; the guard is the required review on .github/**.
       - id: lab
         env:
@@ -130,17 +130,18 @@ jobs:
           hack/ci-skip-heavy.sh lab >"$RUNNER_TEMP/lab.txt"
           tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/lab.txt"
 
-  # The Go checks run as parallel jobs (#217). They share one module and build cache, keyed on the
-  # Go version and go.sum. Only go-test saves it, because it compiles the most; the others restore
-  # it (actions/cache/restore) and never save, so a job that builds little cannot fill the entry
-  # first and leave go-test and go-race with nothing compiled. go-race adds -race objects the cache
-  # does not hold. Each job is its own check. `go` below aggregates them and keeps the required
-  # check name stable: branch protection names `go`, not the parts.
+  # The Go checks run as parallel jobs (koinon-private#217). They share one module and build cache
+  # (`go-ci-...`), keyed on the Go version and go.sum. No Go job saves it: `warm-caches` does, on every
+  # push to main, so a pull request starts from main's entry (docs/dev/ci.md#cache-ownership). A job that
+  # builds little can therefore never fill the entry first and leave go-test and go-race with nothing
+  # compiled. go-race adds -race objects the cache does not hold. `go vet` is not a job of its own:
+  # golangci-lint's `standard` set runs govet. Each job is its own check. `go` below aggregates them
+  # and keeps the required check name stable: branch protection names `go`, not the parts.
   go-tidy:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     name: go-tidy
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: go
@@ -165,7 +166,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     name: go-lint
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: go
@@ -184,35 +185,14 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.15.0
+          skip-save-cache: true # warm-caches on main saves it
 
-  go-vet:
-    needs: changes
-    if: needs.changes.outputs.go == 'true'
-    name: go-vet
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
-      - run: go vet ./...
-
-  # Skipped (and accepted by `go`) when the pull request head has a green go-test-lab status (#610).
+  # Skipped (and accepted by `go`) when the pull request head has a green go-test-lab status (koinon-private#610).
   go-test:
     needs: changes
     if: needs.changes.outputs.go == 'true' && needs.changes.outputs.go_test_lab != 'true'
     name: go-test
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: go
@@ -224,7 +204,7 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod
@@ -236,7 +216,7 @@ jobs:
       # test/flavors needs the flavor images, which the flavors job builds and tests.
       - run: hack/go-test.sh
         env:
-          KOINON_REQUIRE: docker,git,helm # a missing prerequisite must fail, not skip (#507): Postgres suites need Docker, agentd and codehost git, gateway/standalone helm (installed by this job)
+          KOINON_REQUIRE: docker,git,helm # a missing prerequisite must fail, not skip (koinon-private#507): Postgres suites need Docker, agentd and codehost git, gateway/standalone helm (installed by this job)
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -250,7 +230,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     name: go-race
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: go
@@ -285,11 +265,11 @@ jobs:
   # failure, so a skipped job cannot pass the gate. hack/ci-go-gate-test.sh keeps this list whole.
   go:
     name: go
-    needs: [changes, go-tidy, go-lint, go-vet, go-test, go-race]
-    # Not on a push to main whose heavy jobs were switched off (#595): the check then reports skipped
+    needs: [changes, go-tidy, go-lint, go-test, go-race]
+    # Not on a push to main whose heavy jobs were switched off (koinon-private#595): the check then reports skipped
     # and hack/release-gate.sh reads the merged pull request's head instead.
     if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - env:
           CHANGES: ${{ needs.changes.result }}
@@ -305,13 +285,13 @@ jobs:
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
           # A draft was not tested: red on purpose (neutral and skipped both count as passing). The newest
           # `go` check run on a head must never be a vacuous success while the ready run is still
-          # going (#593). Drafts cannot merge; marking ready runs everything on the same head.
+          # going (koinon-private#593). Drafts cannot merge; marking ready runs everything on the same head.
           if [[ $SKIP == true && $EVENT == pull_request ]]; then
             echo "::error::draft pull request: not tested ($REASON); mark it ready for review to run the Go checks"
             exit 1
           fi
           [[ $GO == true ]] || { echo "no Go changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
-          # go-test skipped because the lab proved it (#610): that one skip counts as success. Any other
+          # go-test skipped because the lab proved it (koinon-private#610): that one skip counts as success. Any other
           # skipped part stays a failure, and so does a go-test skip with no green lab status.
           if [[ $GO_TEST == skipped && $LAB == true ]]; then
             echo "go-test passed on the lab: $LAB_REASON"
@@ -321,7 +301,7 @@ jobs:
             [[ $r == success ]] || { echo "::error::a Go job finished $r (results: $RESULTS)"; exit 1; }
           done
 
-  # The short checks in one job (#594). Every job is billed at least one whole minute and each of
+  # The short checks in one job (koinon-private#594). Every job is billed at least one whole minute and each of
   # these did about 10 s of work, so five jobs (proto, migrations, adr-lint, claim-tests, dependency
   # age) cost five minutes for under one minute of work. The steps run one after another and each
   # runs even when an earlier one failed (!cancelled()), so one run still shows every failure, as
@@ -337,7 +317,7 @@ jobs:
   # not proof.
   quick-checks:
     name: quick checks
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
@@ -386,6 +366,14 @@ jobs:
       - name: claim-tests (migrate-renumber)
         if: ${{ !cancelled() }}
         run: hack/migrate-renumber-test.sh
+      # Conventional Commits subjects of the pull request's non-merge commits (AGENTS.md
+      # "Conventions"); Dependabot and merge commits are exempt.
+      - name: commit subjects (tests)
+        if: ${{ !cancelled() }}
+        run: hack/commit-subject-check-test.sh
+      - name: commit subjects
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: hack/commit-subject-check.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
       - id: waiver
         name: dependency age (waiver)
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
@@ -418,13 +406,13 @@ jobs:
           DEP_AGE_WAIVER: ${{ steps.waiver.outputs.by }}
         run: hack/dep-age-check.sh "origin/${{ github.base_ref }}"
 
-  # The web checks run as parallel jobs (#218), each its own check; `web` below aggregates them and
+  # The web checks run as parallel jobs (koinon-private#218), each its own check; `web` below aggregates them and
   # keeps the required check name stable.
   web-lint:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     name: web-lint
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: web
@@ -446,7 +434,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     name: web-test
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: web
@@ -471,7 +459,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     name: web-e2e
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: web
@@ -489,7 +477,7 @@ jobs:
       - id: pw
         run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >>"$GITHUB_OUTPUT"
       - id: pwcache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
@@ -508,10 +496,10 @@ jobs:
   web:
     name: web
     needs: [changes, web-lint, web-test, web-e2e]
-    # Not on a push to main whose heavy jobs were switched off (#595): the check then reports skipped
+    # Not on a push to main whose heavy jobs were switched off (koinon-private#595): the check then reports skipped
     # and hack/release-gate.sh reads the merged pull request's head instead.
     if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - env:
           CHANGES: ${{ needs.changes.result }}
@@ -524,7 +512,7 @@ jobs:
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
           # A draft was not tested: red on purpose (neutral and skipped both count as passing). The newest
           # `web` check run on a head must never be a vacuous success while the ready run is still
-          # going (#593). Drafts cannot merge; marking ready runs everything on the same head.
+          # going (koinon-private#593). Drafts cannot merge; marking ready runs everything on the same head.
           if [[ $SKIP == true && $EVENT == pull_request ]]; then
             echo "::error::draft pull request: not tested ($REASON); mark it ready for review to run the web checks"
             exit 1
@@ -538,12 +526,23 @@ jobs:
     needs: changes
     if: needs.changes.outputs.generate == 'true'
     name: generated code
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+      # The one Go cache (go-ci), saved by warm-caches on main; restore only here.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: web/package.json
@@ -569,52 +568,74 @@ jobs:
     needs: changes
     if: needs.changes.outputs.chart == 'true'
     name: chart
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+      # The one Go cache (go-ci), saved by warm-caches on main; restore only here.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
       # helm lint, helm template for each mode and kubeconform; render only, no cluster.
       - run: make chart-check
 
-  # Rendered startup smoke test (#284): the chart's Jobs and Deployments run as containers, with
+  # Rendered startup smoke test (koinon-private#284): the chart's Jobs and Deployments run as containers, with
   # the rendered args, env and mounts, against Postgres and envtest. See test/chartsmoke. Required:
   # a run skipped because no chart file changed reports success.
   chart-smoke:
     needs: changes
     if: needs.changes.outputs.chartsmoke == 'true'
     name: chart smoke
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     # Above the test's own timeouts (go test 20m, ginkgo 15m), so a hang fails the test and cleans up.
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+      # The one Go cache (go-ci), saved by warm-caches on main; restore only here.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
       # setup-envtest downloads the API server binaries into this directory; Go's own caches come
       # from setup-go.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.local/share/kubebuilder-envtest
           key: envtest-1.37.0
       - run: make test-chart-smoke
 
   # Docs site (plan item DOC1): builds the Starlight site and checks the quickstart against
-  # test/e2e, the chart and the web spec. No deploy while the repository is private. Required: a
+  # test/e2e, the chart and the web spec. This job does not deploy the site. Required: a
   # run skipped because no docs file changed reports success.
   docs:
     needs: changes
     if: needs.changes.outputs.docs == 'true'
     name: docs
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
@@ -637,12 +658,23 @@ jobs:
     needs: changes
     if: needs.changes.outputs.escape == 'true'
     name: escape (admission)
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+      # The one Go cache (go-ci), saved by warm-caches on main; restore only here.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
@@ -654,14 +686,14 @@ jobs:
   # keeps the lint result separate from the script tests. Both tools are release binaries checked
   # against a pinned SHA-256, versions at least 3 days old when pinned (ADR 0079; shellcheck 0.11.0 is
   # from 2025-08-04, actionlint 1.7.12 from 2026-03-30). Bump them together with hack/preflight.sh's use.
-  # Skipped like `go` on a push to main whose heavy jobs are off (#594): the pull request head passed it.
+  # Skipped like `go` on a push to main whose heavy jobs are off (koinon-private#594): the pull request head passed it.
   lint-shell:
     name: lint-shell
     needs: changes
     # !cancelled() and no outputs-based gate on the way in: when `changes` itself fails, this still
     # runs (empty output is not 'true'), so a red `changes` cannot turn this check into a skip.
     if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: tool versions (hack/versions.env)
@@ -687,22 +719,36 @@ jobs:
 
   # Tests of the e2e tooling scripts: the decision rule (needs the Go toolchain for `go list`) and
   # the remote runner (needs flock, so Linux).
-  # Skipped like `go` on a push to main whose heavy jobs are off (#594); see lint-shell.
+  # Skipped like `go` on a push to main whose heavy jobs are off (koinon-private#594); see lint-shell.
   scripts:
     name: scripts
     needs: changes
     if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+      # The one Go cache (go-ci), saved by warm-caches on main; restore only here.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       - run: hack/needs-e2e-test.sh
       - name: flavor-tag-test (needs a UTF-8 locale with its own collation)
         run: |
           sudo locale-gen en_US.UTF-8
           hack/flavor-tag-test.sh
+      - run: hack/koinon-fetch-test.sh
+      - run: hack/apt-retries-test.sh --self-test
+      - run: hack/apt-retries-test.sh
       - run: hack/e2e-remote-test.sh
       - run: hack/versions-check-test.sh
       - run: hack/versions-check.sh
@@ -740,8 +786,130 @@ jobs:
       - run: hack/ci-supersede-test.sh
       - run: hack/e2e-rerun-result-test.sh
       - run: hack/ci-concurrency-test.sh
+      - run: hack/ci-cache-test.sh
 
-  # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this
+  # Main owns every CI cache (docs/dev/ci.md#cache-ownership, koinon-private#147). A pull request can read
+  # its own and main's caches only, and `go-test` and the other jobs now restore without saving, so
+  # this job fills them on every push to main. It is never skipped by `changes`: hack/ci-skip-heavy.sh
+  # skips the heavy jobs on a push whose tree already passed as a pull request head, which used to
+  # leave main without fresh entries. Per cache: `lookup-only` restore (no download), work and save
+  # only on a miss. Advisory: it reports on pushes only, so it cannot gate a pull request.
+  # hack/ci-cache-test.sh keeps the keys here and in the restoring jobs identical.
+  warm-caches:
+    name: warm-caches
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - id: gocache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          lookup-only: true
+      # Modules, then every package and every test binary (the objects go-test, go-race, go-lint and
+      # the chart jobs compile), without running a test.
+      - if: steps.gocache.outputs.cache-hit != 'true'
+        run: |
+          go mod download
+          go build ./...
+          go test -count=1 -run '^$' ./...
+      - if: steps.gocache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      # The golangci-lint cache is keyed on a time interval (cache-invalidation-interval, 7 days) as well as
+      # go.mod, so it must be refreshed on every push to main, not only when go-ci missed. The action
+      # skips the save on an exact hit and downloads modules itself when go-ci was only looked up.
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
+      # The envtest API server binaries; the key is the Makefile's ENVTEST_K8S_VERSION.
+      - id: envtestcache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/kubebuilder-envtest
+          key: envtest-1.37.0
+          lookup-only: true
+      - if: steps.envtestcache.outputs.cache-hit != 'true'
+        run: make envtest-assets
+      - if: steps.envtestcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/kubebuilder-envtest
+          key: envtest-1.37.0
+
+  # pnpm stores, one job per lockfile (no matrix: hack/ci-required-test.sh cannot name matrix checks), each
+  # with the cache-dependency-path the consuming jobs use: setup-node hashes the listed files into its
+  # key, so a combined list would never match a consumer. setup-node saves the store after a job that
+  # missed it, so installing is all a job does. `warm-caches-web` also warms the Playwright browser, by
+  # @playwright/test version (the key web-e2e restores). Never skipped by `changes`.
+  warm-caches-web:
+    name: warm-caches-web
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      # The Playwright browser, by @playwright/test version (the key web-e2e restores).
+      - id: pw
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >>"$GITHUB_OUTPUT"
+        working-directory: web
+      - id: pwcache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
+          lookup-only: true
+      - if: steps.pwcache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install chromium
+        working-directory: web
+      - if: steps.pwcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
+
+  warm-caches-docs:
+    name: warm-caches-docs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: docs/site/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: docs/site/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: docs/site
+
+  # Flavor contract suite (plan item E3, issue koinon-private#76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
   # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
   # a fake key; it never reaches a real or paid model. The only advisory job on pull requests (hack/ci-required.txt); flavor-publish below is push-only.
@@ -749,8 +917,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.flavors == 'true'
     name: flavors
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       # The flavor image, the builder's own store and the layer cache outgrow the runner's disk
       # (the first run died with "no space left on device"); drop what the job does not use.
@@ -759,21 +927,45 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+      # The one Go cache (go-ci), saved by warm-caches on main; restore only here.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       # The docker-container driver is needed for the local layer cache below; --load still puts
       # the images in the runner's Docker store, where the suite looks for them.
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Restored everywhere, saved only by pushes to main (the save step below), so a pull request
+      # never writes the cache main reads (#145). The key is the build inputs' hash; a changed input
+      # starts from the newest older entry through the restore prefix.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: flavorcache
         with:
           path: ${{ runner.temp }}/flavor-cache
           key: flavors-${{ hashFiles('flavors/**') }}
           restore-keys: flavors-
+      # GITHUB_TOKEN authenticates the Dockerfile's GitHub release downloads as a BuildKit secret
+      # (make flavors passes it); anonymous downloads intermittently fail from shared runner IPs.
       - run: make flavors FLAVOR_CACHE=${{ runner.temp }}/flavor-cache
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - run: go test -count=1 ./test/flavors/...
         env:
           KOINON_REQUIRE: docker
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.flavorcache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/flavor-cache
+          key: flavors-${{ hashFiles('flavors/**') }}
 
   # On main only: publish the flavor image under its content tag (hack/flavor-tag.sh) so the kind
   # e2e pulls it instead of building it. A separate job, so only it holds packages: write and
@@ -782,11 +974,11 @@ jobs:
     name: flavor-publish
     needs: [changes, flavors]
     # Always runs on main when the flavors changed, also when the flavors job was switched off because
-    # the merge tree is a tested pull request head (#595): publishing is not a test. A failed or
+    # the merge tree is a tested pull request head (koinon-private#595): publishing is not a test. A failed or
     # cancelled flavors job still stops it. flavors_publish is the value before the switch.
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.flavors_publish == 'true' && (needs.flavors.result == 'success' || needs.flavors.result == 'skipped') }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
     permissions:
       contents: read
       packages: write
@@ -794,11 +986,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: flavorcache
         with:
           path: ${{ runner.temp }}/flavor-cache
           key: flavors-${{ hashFiles('flavors/**') }}
           restore-keys: flavors-
-      - name: Push ghcr.io/<repo>/flavor-opencode:<content tag>
+      - name: Push ghcr.io/<repo>/flavors/opencode:<content tag>
+        id: build
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -806,11 +1000,26 @@ jobs:
         run: |
           echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           tag=$(hack/flavor-tag.sh opencode)
-          image="ghcr.io/$REPO/flavor-opencode:$tag"
+          image="ghcr.io/$REPO/flavors/opencode:$tag"
           if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
             echo "$image already exists"
             exit 0
           fi
-          docker buildx build --push --build-context common=flavors/common \
+          secret=()
+          [[ -z ${GITHUB_TOKEN:-} ]] || secret=(--secret "id=github_token,env=GITHUB_TOKEN")
+          # The new cache goes to its own directory (buildx must not read and write one), then
+          # replaces the restored one for the save step below.
+          docker buildx build --push --build-context common=flavors/common "${secret[@]}" \
             --cache-from "type=local,src=$RUNNER_TEMP/flavor-cache/opencode" \
+            --cache-to "type=local,dest=$RUNNER_TEMP/flavor-cache-new/opencode,mode=max" \
             --tag "$image" flavors/opencode
+          rm -rf "$RUNNER_TEMP/flavor-cache"
+          mv "$RUNNER_TEMP/flavor-cache-new" "$RUNNER_TEMP/flavor-cache"
+          echo "cache_written=true" >>"$GITHUB_OUTPUT"
+      # Main saves what its builds wrote: this job builds on every main push that changes the
+      # flavors, also the ones where the flavors job was skipped (#595).
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.build.outputs.cache_written == 'true' && steps.flavorcache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/flavor-cache
+          key: flavors-${{ hashFiles('flavors/**') }}

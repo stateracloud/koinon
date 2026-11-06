@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package money is Koinon's one money type (issue #48, ADR 0056 amendment 2026-10-24).
+// Package money is Koinon's one money type (issue #8, ADR 0056 amendment 2026-10-24).
 //
 // A [USD] is an exact integer number of pico-USD (10^-12 USD). A price is written in USD per
 // million tokens with at most six fraction digits, so the cost of one token is a whole number

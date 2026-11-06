@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/gitea"
+	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/declarative"
@@ -49,9 +50,9 @@ var _ = Describe("Importer", func() {
 		slug string
 		logs strings.Builder
 		n    int
+		ring = secretstoretest.Keyring()
 	)
 	BeforeEach(func(ctx SpecContext) {
-		ring := secretstoretest.Keyring()
 		kube = fake.NewClientset()
 		svc = catalog.New(pool, ring, nil)
 		mcp = mcpservers.New(pool, ring, nil)
@@ -415,7 +416,38 @@ var _ = Describe("Importer", func() {
 			Expect(again[0].RemovedAt.Valid).To(BeFalse())
 		})
 
-		It("stops a removed connection from making a repository internal, at once (ADR 0091, #350)", func(ctx SpecContext) {
+		It("writes a lost secret again from the Secret at the next sync, at the same version", func(ctx SpecContext) {
+			put(ctx, "gh", declarative.TypeConnection, slug, conn())
+			Expect(imp.Sync(ctx)).To(Succeed())
+			// What keys forget leaves behind (ADR 0085 decision 13): no envelope, and the mark.
+			tag, err := pool.Exec(ctx, `UPDATE connections SET secret_envelope = NULL, credential_lost_at = now() WHERE org_id = $1`, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tag.RowsAffected()).To(BeEquivalentTo(1))
+			rows, err := store.New(pool).ListConnections(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = connections.LoadGitHubApp(ctx, secretstoretest.Keyring(), rows[0])
+			Expect(err).To(MatchError(connections.ErrCredentialLost))
+
+			By("the Secret is unchanged, and the next sync stores its key again")
+			Expect(imp.Sync(ctx)).To(Succeed())
+			again, err := store.New(pool).ListConnections(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again).To(HaveLen(1))
+			Expect(again[0].ID).To(Equal(rows[0].ID))
+			Expect(again[0].CredentialLostAt.Valid).To(BeFalse())
+			Expect(again[0].SecretEnvelope).NotTo(BeEmpty())
+			app, err := connections.LoadGitHubApp(ctx, ring, again[0])
+			Expect(err).NotTo(HaveOccurred())
+			want, err := github.ParsePrivateKey(gh.PEM)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(app.Key.Fingerprint()).To(Equal(want.Fingerprint()), "the Secret's key, as before it was lost")
+
+			By("once stored, the same version is not written again")
+			Expect(imp.Sync(ctx)).To(Succeed())
+			Expect(auditOf(ctx, "connection.declare")).To(HaveLen(2), "the first import and the re-write")
+		})
+
+		It("stops a removed connection from making a repository internal, at once (ADR 0091, koinon-private#350)", func(ctx SpecContext) {
 			put(ctx, "gh", declarative.TypeConnection, slug, conn())
 			Expect(imp.Sync(ctx)).To(Succeed())
 			rows, err := store.New(pool).ListConnections(ctx, org)

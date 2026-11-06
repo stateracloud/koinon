@@ -4,14 +4,15 @@
 
 A release is a Git tag. Pushing `vX.Y.Z` or `vX.Y.Z-rc.N` runs
 [`.github/workflows/release.yml`](../../.github/workflows/release.yml), which publishes to the
-private `ghcr.io/stateracloud` and drafts the GitHub release. Nothing is committed for a version:
+private `ghcr.io/stateracloud/koinon` (every package lives under the repository that builds it, so
+the workflow's own token owns it; #167) and drafts the GitHub release. Nothing is committed for a version:
 the images, the chart's `version` and `appVersion` all come from the tag, without the leading `v`.
 
 | Artifact | Where |
 | --- | --- |
-| `koinon-api` (with the web UI), `koinon-reconciler`, `koinon-agentd` | `ghcr.io/stateracloud/<name>:<version>`, linux/amd64 and linux/arm64, ko SPDX SBOMs. `latest` moves only for final releases |
-| `flavor-opencode`, the OpenCode flavor (ADR 0059) | `ghcr.io/stateracloud/flavor-opencode:<version>`, linux/amd64 and linux/arm64, BuildKit SBOM and provenance attestations. `latest` moves only for final releases |
-| Helm chart | `oci://ghcr.io/stateracloud/charts/koinon`, tag `<version>` |
+| `api` (with the web UI), `reconciler`, `agentd` | `ghcr.io/stateracloud/koinon/<name>:<version>`, linux/amd64 and linux/arm64, ko SPDX SBOMs. `latest` moves only for final releases |
+| `flavors/opencode`, the OpenCode flavor (ADR 0059) | `ghcr.io/stateracloud/koinon/flavors/opencode:<version>`, linux/amd64 and linux/arm64, BuildKit SBOM and provenance attestations. `latest` moves only for final releases |
+| Helm chart | `oci://ghcr.io/stateracloud/koinon/charts/koinon`, tag `<version>` |
 | Release notes | A draft GitHub release, from the Conventional Commits since the previous tag: features, fixes, others. `docs`, `ci`, `test`, `chore` and `style` commits are left out |
 
 ## Cut a release candidate
@@ -36,7 +37,7 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    Each context must have succeeded on the tagged commit itself, except three that a push to main does
    not report as a result: `dco` (pull requests only), `claim` (`pull_request_target`; skipped on main) and
    `e2e result` (a composite that also passes when the e2e was skipped on main; on a pull request it
-   fails when the change needs the e2e and the head has none, #562; its real subject, the kind
+   fails when the change needs the e2e and the head has none, koinon-private#562; its real subject, the kind
    e2e, the gate asks for through the `quickstart` rule below). `quick checks` (proto, migrations, adr-lint, claim-tests and the dependency age
    steps, which run on pull requests only) must succeed on the tagged commit and also on the merged
    pull request's head (`both` in the script). The three above are listed in the script
@@ -74,7 +75,7 @@ Checklist step for every `vX.Y.0`: after the final tag is published, open a pull
 the schema that the shipped release runs on (ADR 0085).
 
 Checklist step for every `vX.Y.0`, with the one above: record the persisted-state compatibility
-folder (#652) from the tagged commit, so later changes are checked against what that release wrote:
+folder (koinon-private#652) from the tagged commit, so later changes are checked against what that release wrote:
 
 ```sh
 git switch --detach vX.Y.0
@@ -155,7 +156,7 @@ Install the mirrored chart with
 
 ### The flavor image when installing a release
 
-The packaged chart defaults `flavors.opencode.image` to `<image.registry>/flavor-opencode:<appVersion>`,
+The packaged chart defaults `flavors.opencode.image` to `<image.registry>/flavors/opencode:<appVersion>`,
 which the release publishes (the `flavor` job, `hack/release-flavor.sh`) and `hack/mirror-release.sh`
 copies, so a default install needs no flavor values. To run a flavor you built yourself (`make
 flavors`, then tag and push), set `flavors.opencode.image.repository` and `.tag`.

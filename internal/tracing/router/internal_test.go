@@ -214,8 +214,29 @@ func newRouter(t *testing.T, cfg Config) *Router {
 
 // hangBound tells a hang from a slow machine: a test waits on state, never on a time, and this
 // deadline only ends a wait that would otherwise never end. The lab's loaded 3-CPU gate has taken
-// more than 2 s for a step that takes milliseconds alone (#533, #612).
+// more than 2 s for a step that takes milliseconds alone (koinon-private#533, koinon-private#612).
 const hangBound = time.Minute
+
+// manualClock is a router clock that moves only when a spec advances it, so an interval the spec is
+// about (ConfigCheck, a read that hangs past it) does not depend on how fast the machine runs.
+type manualClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newManualClock() *manualClock { return &manualClock{now: time.Unix(1_000_000, 0)} }
+
+func (c *manualClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *manualClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	c.now = c.now.Add(d)
+	c.mu.Unlock()
+}
 
 func eventually(t *testing.T, what string, ok func() bool) {
 	t.Helper()
@@ -343,7 +364,7 @@ func TestSecretsAreNotServedStaleAfterAKnownChange(t *testing.T) {
 }
 
 // Two roots of one trace arriving together make the model calls once. The spec waits on the router's
-// state, not on time (#612): the second root arrives while the first is inside its ledger read (or
+// state, not on time (koinon-private#612): the second root arrives while the first is inside its ledger read (or
 // held), the gate opens only once the second has been dropped as a duplicate, and the sends are
 // counted when they have happened.
 func TestDuplicateRootsArrivingTogetherEmitOnce(t *testing.T) {
@@ -502,14 +523,15 @@ func TestHugeRejectedCountIsClamped(t *testing.T) {
 func TestUnreadableDestinationKeepsItsQueue(t *testing.T) {
 	snd := &pSender{spans: map[string]int{}, fail: map[string]bool{"http://d1": true}}
 	rs := &pRoutes{routes: map[pgtype.UUID][]tracedest.Route{pOrg: {route("d1", "http://d1")}}}
-	r := newRouter(t, Config{Routes: rs, Sender: snd, Linger: time.Millisecond, BackoffBase: time.Hour, ConfigCheck: time.Millisecond})
+	clk := newManualClock()
+	r := newRouter(t, Config{Routes: rs, Sender: snd, Linger: time.Millisecond, BackoffBase: time.Hour, ConfigCheck: time.Millisecond, Now: clk.Now})
 	r.dispatch(context.Background(), pOrg, span(pOrg, [16]byte{1}, false, 0))
 	eventually(t, "the first attempt fails", func() bool { return snd.calls.Load() >= 1 })
 
 	un := route("d1", "http://d1")
 	un.Unreadable = true
 	rs.set(pOrg, un)
-	time.Sleep(5 * time.Millisecond)
+	clk.Advance(time.Millisecond) // past ConfigCheck: the next dispatch reads the settings again
 	r.dispatch(context.Background(), pOrg, span(pOrg, [16]byte{2}, false, 0))
 	if r.QueueCount() != 1 {
 		t.Errorf("queues = %d; an unreadable destination keeps its queue", r.QueueCount())
@@ -533,7 +555,7 @@ func (f *flight) waiting(key string) int {
 }
 
 // The leader panics while a second caller waits on its call: both get an error, neither hangs. The
-// spec waits on the flight's own state, not on time (#533): the leader panics only once the second
+// spec waits on the flight's own state, not on time (koinon-private#533): the leader panics only once the second
 // caller has joined, and the deadline only tells a hang from a slow machine.
 func TestFlightReleasesWaitersWhenTheLeaderPanics(t *testing.T) {
 	var f flight
@@ -633,11 +655,16 @@ func TestEstimateChargesTheObjectsAroundTheBytes(t *testing.T) {
 
 // A database that does not answer must not stop the receiver, and is asked once, not once per span.
 // The database hangs until the spec releases it, far longer than any post may take, so a receiver that
-// waited for it could not answer; the reads are counted, not timed (#612).
+// waited for it could not answer; the reads are counted, not timed (koinon-private#612). The failure is
+// remembered from when the read failed, not from when it started: a read that hung past ConfigCheck
+// used to be remembered until a time already past, so the next span asked again (#134).
 func TestHangingDatabaseDoesNotStopTheReceiver(t *testing.T) {
 	st := &pStore{hang: true, release: make(chan struct{})}
-	// The failure is remembered for ConfigCheck: an hour, so a slow machine cannot outlast it.
-	r := newRouter(t, Config{Store: st, ConfigTimeout: 2 * hangBound, ConfigCheck: time.Hour, Workers: 2, IngestQueue: 8, NegativeTTL: time.Hour})
+	// The failure is remembered for ConfigCheck on the router's clock, which moves only when the spec
+	// advances it, so a slow machine cannot outlast it.
+	clk := newManualClock()
+	const check = time.Second
+	r := newRouter(t, Config{Store: st, ConfigTimeout: 2 * hangBound, ConfigCheck: check, Workers: 2, IngestQueue: 8, NegativeTTL: time.Hour, Now: clk.Now})
 	var once sync.Once
 	release := func() { once.Do(func() { close(st.release) }) }
 	t.Cleanup(release) // before r.Close, which waits for the workers
@@ -672,7 +699,9 @@ func TestHangingDatabaseDoesNotStopTheReceiver(t *testing.T) {
 	trace := [16]byte{1}
 	fkey := "attr/" + pOrg.String() + "/" + pRun.String() + "/" + string(trace[:]) // as Router.attribute keys it
 	eventually(t, "the second worker joined the read", func() bool { return r.fl.waiting(fkey) >= 1 })
-	// The read fails; the spans still in the intake are dropped on the remembered failure.
+	// The read hangs past ConfigCheck, as one that runs into the default 3 s ConfigTimeout does, then
+	// fails; the spans still in the intake are dropped on the failure, remembered from when it failed.
+	clk.Advance(3 * check)
 	release()
 	discarded := func(reason string) float64 { return testutilValue(r.metrics.Discarded.WithLabelValues(reason)) }
 	eventually(t, "every span was refused at the intake or dropped", func() bool {
@@ -823,7 +852,7 @@ func TestSettingsReadFailureIsNotTheDestinationsFailure(t *testing.T) {
 	snd := &pSender{spans: map[string]int{}}
 	h := &cHealth{}
 	// The worker's first sleep is the linger before it makes the copy: it waits until the settings
-	// are broken, then lingers (longer than ConfigCheck, so the copy reads them again) (#612).
+	// are broken, then lingers (longer than ConfigCheck, so the copy reads them again) (koinon-private#612).
 	broken := make(chan struct{})
 	var lingered atomic.Bool
 	r := newRouter(t, Config{

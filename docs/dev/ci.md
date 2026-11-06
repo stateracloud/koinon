@@ -16,9 +16,20 @@ fails one that did not run (NOT RUN); `hack/go-test.sh` exits 3 when an expected
 (docker, git, helm) was missing. One package: `go test ./internal/x` (serial) or
 `go tool ginkgo -p ./internal/x`. `test/flavors` needs the flavor images: `make test-flavors`.
 
+`hack/go-test.sh` also exports one `TESTCONTAINERS_SESSION_ID` for the whole run, before `hack/pgserver`
+starts, so pgserver and every test process share one testcontainers session and one Ryuk reaper.
+Why: Ryuk exits 10 s after its last client disconnects. On a fresh runner a cold image pull leaves
+gaps that long between packages; testcontainers-go v0.44.0 then finds the dying reaper without
+checking that it runs and waits a fixed 60 s for it, failing a BeforeSuite with `wait for reaper ...:
+context deadline exceeded` ([testcontainers-go#3867](https://github.com/testcontainers/testcontainers-go/issues/3867)).
+pgserver keeps a container, hence a reaper connection, for the whole run, so Ryuk never idles out
+mid-run and still cleans up after a crashed one. Ryuk stays on everywhere; do not set
+`TESTCONTAINERS_RYUK_DISABLED` in CI. Runs without pgserver (a single-package `go test`) are not
+covered; the upgrade path is #173. `hack/go-test-test.sh` pins the export and its order.
+
 ## Persisted-state compatibility
 
-`internal/compat` (#652) checks that what a shipped release wrote still loads at head. Each folder
+`internal/compat` (koinon-private#652) checks that what a shipped release wrote still loads at head. Each folder
 `testdata/compat/<release>/` is recorded by `hack/record-compat-fixtures.sh <release>` from that
 release's code and holds three formats:
 
@@ -56,7 +67,7 @@ commit that names the break.
 that changes how a Koinon binary starts (a flag or env var it requires, a mount, a Secret key, an
 RBAC rule) is covered by `make test-chart-smoke` (`test/chartsmoke`: runs the rendered Jobs and
 Deployments as containers); extend it when you add a component or a startup input, since a unit
-test of the flag parser does not see what the chart really passes (#284).
+test of the flag parser does not see what the chart really passes (koinon-private#284).
 
 The sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`) is tested by the
 escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./test/escape/ -ginkgo.label-filter=admission`
@@ -66,17 +77,20 @@ escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./
 ## Testing layers
 
 Every PR: unit and package tests, the smoke test and the scenarios (`make test` and CI). The kind
-e2e (`test/e2e`, ~15-25 min) is not per PR: it runs on a PR only when the PR changes the e2e's own
-files or carries the `e2e` label, and otherwise batched on main (each push that changed something
+e2e (`test/e2e`, ~15-25 min) runs on a PR whenever `hack/needs-e2e.sh` says the change is e2e-relevant
+(the e2e's own files included) or the PR carries the `e2e` label, in the PR's own run, so a fork PR
+needs nothing from a maintainer to get one (issue #148). A PR nothing in the rule touches does not run
+it. It also runs batched on main (each push that changed something
 e2e-relevant, one running and the newest pending) and nightly, always, to catch drift no commit
 explains.
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
-observes (the rule lives only there). If yes, with a lab run `hack/e2e-remote.sh --argo`: a green
-run posts the commit status `e2e-lab` on your pushed head and that is enough to merge. Without a
-lab, or when it exits 75 (the lab cannot run it now), 78 (no lab configured) or 79 (the change
-touches `flavors/`, which the lab cannot build; nothing triggers GitHub for it, dispatch it by
-hand), run it on GitHub (`gh workflow run e2e-kind.yml --ref <branch>`, or the `e2e` label).
+observes (the rule lives only there). If yes, the PR's own run already runs the quickstart on GitHub;
+with a lab you can get there sooner: `hack/e2e-remote.sh --argo`, a green run posts the commit status
+`e2e-lab` on your pushed head and that is enough to merge once the PR's own quickstart has finished (a flaky red one does not hide a green lab run). When it exits 75 (the lab cannot run it
+now) or 78 (no lab configured), wait
+for the PR's quickstart, or dispatch it earlier (`gh workflow run e2e-kind.yml --ref <branch>`). The
+`e2e` label is for a change the rule thinks irrelevant but you want tested.
 `hack/e2e-remote.sh` on your own Docker (`--local`) is a dev and debug tool only: it produces
 neither `e2e-lab` nor `quickstart`, so it is not merge evidence. `SUITE_LABEL=smoke` (not with
 `--argo`) runs steps 1-6 only.
@@ -85,7 +99,7 @@ neither `e2e-lab` nor `quickstart`, so it is not merge evidence. `SUITE_LABEL=sm
 
 The required check is `e2e result`: green when nothing needs the e2e, but for a PR that needs one
 (`hack/needs-e2e.sh`) it is red until the head has a green `quickstart` (this run or a dispatched
-one) or `e2e-lab` success (`hack/e2e-gate.sh`, #562); a later `e2e-lab` or a passing dispatch
+one) or `e2e-lab` success (`hack/e2e-gate.sh`, koinon-private#562); a later `e2e-lab` or a passing dispatch
 re-runs the `e2e result` job itself (not when the PR run is still in progress: then "Re-run failed
 jobs"). `e2e-lab` is not a required context of its own, contributors without a lab cannot produce
 it.
@@ -93,47 +107,47 @@ it.
 Trust limit: `result` runs from the PR's own `e2e-kind.yml`, so a PR can edit the YAML to drop the
 gate; the guard is the ruleset's required review on `.github/**` (not CODEOWNERS), `e2e result` is
 not pinned to an app and anyone with write access can post `e2e-lab`: a guardrail against
-mistakes, not a malicious member (pinned integration_id / lab App: #568).
+mistakes, not a malicious member (pinned integration_id / lab App: koinon-private#568).
 
-Why the e2e exists: #281 (branch naming in githubtools) and #284 (a startup flag the chart's
+Why the e2e exists: koinon-private#281 (branch naming in githubtools) and koinon-private#284 (a startup flag the chart's
 migrate Job lacked) passed every package test and failed only in a full install.
 
 ## What `ci` runs when
 
-Actions minutes cost money; `hack/ci-skip-heavy.sh` decides, its header and
+Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
-`go` (go-tidy, go-lint, go-vet, go-test, go-race), `web` (web-lint, web-test, web-e2e),
+`go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
 `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. `changes` and
-`quick checks` (proto, migrations, adr-lint, claim-tests and the dependency age steps in one job,
-#594: every job bills a whole minute) and the other workflows (`dco`, `gitleaks`, `claim`,
+`quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check and the dependency age steps in one job,
+koinon-private#594: every job bills a whole minute) and the other workflows (`dco`, `gitleaks`, `claim`,
 `e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
 are skipped only on a push to main whose heavy jobs are skipped. A skipped heavy job reports
 success, so every required check still reports.
 
-### go-test on the lab gate first (#610)
+### go-test on the lab gate first (koinon-private#610)
 
 `hack/ship.sh --ready --lab-go-test` runs `hack/e2e-remote.sh --argo --gate go-test` on the pushed
 draft head (a free gate slot) and the lab posts the commit status `go-test-lab`; `changes` reads
 it for the exact PR head SHA and the ready run skips `go-test`, which `go` accepts (the required
 name stays `go`; no change to the ruleset). Exit 75/78/76/2 or no status: `go-test` runs on
-Blacksmith, as it does without a lab. Nothing waits for a late status, so a push to a ready PR
-runs `go-test` on Blacksmith (go back to draft first to keep the lab). Push to main
+the hosted runner, as it does without a lab. Nothing waits for a late status, so a push to a ready PR
+runs `go-test` on the hosted runner (go back to draft first to keep the lab). Push to main
 (`ci-skip-heavy.sh decide`) and `hack/release-gate.sh` count a skipped `go-test` only with that
-status or a change with no Go. Trust limit as `e2e-lab` (#568). See also
+status or a change with no Go. Trust limit as `e2e-lab` (koinon-private#568). See also
 `docs/dev/maintainer-homelab.md`.
 
-### Draft pull request (#593)
+### Draft pull request (koinon-private#593)
 
 Only `changes`, `quick checks`, `lint-shell` and `scripts` run, and `go` and `web` are RED on
 purpose ("draft: not tested, mark ready for review"): a green draft `go` would otherwise stay the
 newest run on the head while the ready run is still going. A draft cannot merge, so get WIP
 feedback from `hack/preflight.sh`, not CI. Marking it ready fires `ready_for_review`, which runs
 everything on the same head, and so does every push to a ready PR. The draft flag comes from the
-event payload (#676), not from the live state: the run is named `ci (draft)` (ci.yml `run-name`)
+event payload (koinon-private#676), not from the live state: the run is named `ci (draft)` (ci.yml `run-name`)
 when `github.event.pull_request.draft` is true, else `ci`, and `hack/ci-skip-heavy.sh` decides from
 that same flag (`PR_DRAFT`), so a run's name and its behaviour always agree. A gate that must
 ignore draft runs drops the runs whose `display_title` (`displayTitle` in `gh run list --json`) is `ci (draft)`; the run `name` stays `ci` for every run, so never filter on it;
-`pr-wait.sh` (and `pr-merge.sh`, which calls it) still uses its time window until #678, which will
+`pr-wait.sh` (and `pr-merge.sh`, which calls it) still uses its time window until #133, which will
 filter on the `ci (draft)` display_title instead. A re-run replays the
 original event: re-running a `ci (draft)` run after the PR is ready is a draft run again (`go` and
 `web` red, "not tested"). That is safe (it can never leave a green `go` on an untested head) but
@@ -143,7 +157,7 @@ instead. Mark the PR ready (`hack/ship.sh --ready`,
 `gh pr ready`) before you wait on it with `hack/pr-wait.sh`: a draft's green is not merge
 evidence.
 
-### One run per head (#675)
+### One run per head (koinon-private#675)
 
 `ci.yml` groups `pull_request` runs by the pull request's head SHA (`ci-pr-<N>-<sha>`) and a push to
 main by its own SHA (`ci-push-<sha>`), with `cancel-in-progress: false`. So runs on one head (the push's
@@ -170,7 +184,7 @@ another commit: that workflow's PR group still cancels in progress, and a re-run
 `hack/ci-concurrency-test.sh`, `hack/ci-supersede-test.sh`, `hack/e2e-rerun-result-test.sh`,
 `hack/ship-test.sh`.
 
-### Push to main (#595)
+### Push to main (koinon-private#595)
 
 Everything runs, except when the push is a merge commit whose tree equals the tree of its second
 parent (the PR head) and every required check `ci.yml` produces is green (or skipped) on that
@@ -178,11 +192,60 @@ head, newest run per check, made by GitHub Actions. Then the heavy jobs are skip
 brought nothing the head was not tested with. The head must also contain the first parent, and
 `flavors` (advisory, but `flavor-publish` ships what it tested) must have passed on the head
 unless nothing it builds from changed. On such a push `go`, `web`, `scripts` and `lint-shell`
-report skipped (#594). Any doubt (a merge of an out-of-date branch, an admin or direct push, a
+report skipped (koinon-private#594). Any doubt (a merge of an out-of-date branch, an admin or direct push, a
 squash, a missing or red check, an API error) runs everything. `flavor-publish` and the kind e2e
 (batched on main, nightly) are unaffected. So what no single commit explains is caught by the
 nightly and batched e2e, not by `ci` on main. `hack/release-gate.sh` reads a check that main
 skipped from the merged PR's head.
+
+## Cache ownership (#147)
+
+A pull request can read its own caches and the default branch's, never another pull request's, so a
+cache only helps a pull request if main saved it. Main owns them all: the `warm-caches` jobs (`warm-caches`, `warm-caches-web`, `warm-caches-docs`) run on
+every push to main and is never skipped (`hack/ci-skip-heavy.sh` switches the heavy jobs off on a
+push whose tree already passed as a pull request head, which used to leave main without fresh
+entries). For each cache it does a `lookup-only` restore (no download) and, on a miss, the cheapest
+work that fills it, then saves:
+
+| Cache | Key | Filled by |
+| --- | --- | --- |
+| Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>` | `go build ./...`, `go test -run '^$' ./...`, one lint run |
+| envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
+| Playwright browser | `playwright-<os>-<arch>-<@playwright/test version>` | `playwright install chromium` |
+| pnpm stores (`web`, `docs/site`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web` and `warm-caches-docs`, each with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
+| golangci-lint cache | the action's | a lint run on every push to main, not only on a go-ci miss: the action's key has a 7-day interval (`go-lint` has `skip-save-cache`) |
+
+Every other job restores and never saves: one Go cache scheme (`go-ci`, `setup-go` with
+`cache: false` plus an explicit `actions/cache/restore`), and `e2e-go` is one entry per `go.sum`
+(no run id; saved by main only when the exact key was missing). The flavor layer cache stays with
+`flavors` and `flavor-publish` (see below). The `warm-caches*` jobs are advisory in `hack/ci-required.txt`: it
+reports on pushes only. A new key goes into the warm job and the restoring jobs together;
+`hack/ci-cache-test.sh` checks the rule.
+
+## Image builds: authenticated downloads and layer cache (#145)
+
+Anonymous GitHub release downloads from shared runner IPs sometimes return a fixed error body,
+which fails a pinned checksum. Every Dockerfile download of a release asset goes through
+`flavors/common/koinon-fetch` (or the same logic in `hack/e2e-toolchain/Dockerfile`): the job passes
+`GITHUB_TOKEN` as the BuildKit secret `github_token`. The github.com web download URL ignores a
+token, so the script resolves the asset id from the release (`api.github.com/.../releases/tags/<tag>`)
+and downloads `.../releases/assets/<id>` with `Accept: application/octet-stream`; the build log
+shows the response's `x-ratelimit-limit`, which proves the request was authenticated. The pinned
+sha256 is still checked. No token means an anonymous download from github.com, so local and fork
+builds work. The token is never an ARG, ENV, log line or layer (`hack/koinon-fetch-test.sh` pins
+this; a new `ADD` of a release asset fails it, also with the URL on a continuation line).
+
+Every Dockerfile `apt-get update` and `apt-get install` carries `-o Acquire::Retries=5 -o
+Acquire::http::Timeout=30`, because snapshot.ubuntu.com answers 5xx now and then (#149); a step that
+runs apt through another tool (`playwright install --with-deps`) writes an `apt.conf.d` snippet with
+both settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call without them. The
+chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
+not start.
+
+The flavor layer cache (`flavors-<hash of flavors/**>`, prefix `flavors-`) is restored by `flavors`,
+`quickstart` (e2e-kind) and `flavor-publish`. Only pushes to main save it: `flavors` and
+`flavor-publish` (which exports with `--cache-to` and saves, so a main push where `flavors` was
+skipped by #595 still writes the entry). A pull request never writes it.
 
 ## Main's e2e regressions and release tags
 
@@ -201,10 +264,33 @@ list in the same PR, and a required job must report on every pull request and pu
 `if:` skip reports success and is fine; only a workflow-level `paths:` filter leaves a check
 absent).
 
+Third-party analysers are advisory: their checks never enter the list or the ruleset, and
+`hack/pr-wait.sh` (so `hack/pr-merge.sh`) judges only the base branch's required contexts, the
+`--require` names and the e2e aliases: any other check that is red or pending is printed as
+`advisory <name> failed|pending` and ignored. When the required contexts cannot be read, it exits 2
+instead of judging every check. DeepSource
+(GitHub App) reads `.deepsource.toml` at the root (#180): Go, JS/TS, shell and Dockerfile
+analysers, generated code and fixtures excluded, no code formatters (a bot commit would start a new
+CI run on a new head) and Autofix only when a person clicks it. Read its PR comments as review
+input; make it required only by a decision recorded in an issue.
+
+CodeRabbit (GitHub App) is advisory too and reads `.coderabbit.yaml` (#184). Every built-in linter is
+off (CI runs them), there are no status checks or comments per push, and the summary stays in its own
+walkthrough comment. Reviews are manual by design (`auto_review.enabled: false`): `hack/ship.sh --ready`
+posts `@coderabbitai review` once per pushed head, and you can post it again after a push. Its only
+finishing touch is docstrings, delivered as a follow-up pull request when asked; nothing commits to
+the reviewed branch.
+
+Socket (GitHub App, #185) scans dependencies and reads `socket.yml` at the root: it runs on changes
+to `go.mod`, `go.sum`, `package.json`, `pnpm-lock.yaml` and workflows, skips spike code and
+fixtures, and posts PR alerts without a separate dependency overview comment. It is advisory like
+DeepSource: answer and resolve its inline comments before merge (#187). On 2026-12-05 check whether
+it caught anything Dependabot, govulncheck or OSV did not; if not, remove it.
+
 ## Merging
 
 The only merge method is a merge commit: `gh pr merge --auto --merge`. `e2e result` is required
-and fails a needs-e2e PR without a passing e2e on its head (#562), so a plain auto-merge cannot
+and fails a needs-e2e PR without a passing e2e on its head (koinon-private#562), so a plain auto-merge cannot
 skip it; still, a pull request that changes startup flags, chart Jobs or hooks, or anything the
 e2e expects does not get auto-merge until `hack/pr-wait.sh <PR> --checks --require e2e` passes
 (`--checks` also waits for every required context of the ruleset to exist on the head, so a
@@ -216,7 +302,7 @@ with `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
 
 The maintainer lab (`hack/e2e-remote.sh --argo`, `e2e-lab`, lanes): `docs/dev/maintainer-homelab.md`.
 
-`hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]` does all of this in one script (#647): it refuses a
+`hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]` does all of this in one script (koinon-private#647): it refuses a
 draft, runs `pr-wait.sh --checks` (with `--require e2e` when `needs-e2e.sh` says so; it reads the PR's whole
 file list with `gh api pulls/<PR>/files --paginate` and requires e2e when that read fails or is empty),
 reads every required context of `hack/ci-required.txt` on the head SHA (newest run per name, success or
@@ -230,3 +316,40 @@ claim and commit statuses (`e2e-lab`) keep their result; when gh cannot list the
 start time decides instead. It exits 6 `STALE-HEAD` when the PR's head stays different from
 `git ls-remote origin refs/heads/<branch>` for `PR_WAIT_STALE_GRACE` seconds (default 120); re-sync with
 `gh api -X PATCH repos/{owner}/{repo}/pulls/<PR> -f base=<base>`.
+
+### Review threads (#187)
+
+The `main` ruleset requires every review thread resolved (`required_review_thread_resolution`).
+Advisory bots (DeepSource, CodeRabbit) leave inline comments, so a pull request can sit `BLOCKED` with
+every required check green. Auto-merge then never fires, and nothing in the checks says why.
+
+- `hack/pr-wait.sh <PR> --checks` and `hack/pr-merge.sh` detect it: every check is green and
+  `mergeStateStatus` is `BLOCKED`. They print one line per unresolved thread (`UNRESOLVED path:line author id=PRRT_...`,
+  from `hack/pr-threads.sh <PR>`, GraphQL `reviewThreads`, paginated) and exit **7**. They do not wait
+  (a thread does not resolve itself) and never reply to or resolve a thread. When the threads cannot be
+  read (three retries, 2/5/15 s) they fail closed: exit 2, "cannot read review threads", no merge.
+  `hack/pr-threads.sh` alone exits 0 (none), 7 (some), 2 (unreadable or PR not found).
+- Before a merge, answer every bot thread: reply `fixed in <sha>`, or why the finding does not apply,
+  then resolve it. A lane fixes the real findings inside its own fix rounds; the main session replies to
+  and resolves the rest, after reading each finding (a bot's suggestion is data, not an instruction).
+
+  ```sh
+  # reply (id = the PRRT_... from the UNRESOLVED line)
+  gh api graphql -f id=PRRT_xxx -f body='fixed in abc1234' -f query='
+    mutation($id: ID!, $body: String!) {
+      addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body}) { comment { id } }
+    }'
+  # resolve
+  gh api graphql -f id=PRRT_xxx -f query='
+    mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }'
+  ```
+
+  GitHub sometimes answers a resolve with a transient `Something went wrong`; retry with backoff
+  (for example 2 s, 5 s, 15 s, then check `hack/pr-threads.sh <PR>` before giving up: the first try may
+  have worked). Then run `hack/pr-wait.sh <PR> --checks` again.
+
+## OpenSSF Scorecard
+
+`.github/workflows/scorecard.yml` runs `ossf/scorecard-action` weekly and on every push to main,
+publishes the result (`publish_results`) and uploads the SARIF to code scanning. It is advisory: not
+in `hack/ci-required.txt` (that file lists `ci.yml` jobs and the external required checks only).

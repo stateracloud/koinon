@@ -148,6 +148,7 @@ function ServerCard({
         <HealthBadge health={s.health} />
         {s.removed && <Badge variant="destructive">Removed</Badge>}
         {!s.removed && s.disabledReason && <Badge variant="destructive">Disabled</Badge>}
+        {!s.removed && s.credentialLostAt && <Badge variant="destructive">Credential lost</Badge>}
         <span className="text-muted-foreground ml-auto text-sm">{sourceLabel(s)}</span>
       </div>
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
@@ -156,7 +157,7 @@ function ServerCard({
         <dt className="text-muted-foreground">Transport</dt>
         <dd>{transportLabel(s.transport)}</dd>
         <dt className="text-muted-foreground">Credential</dt>
-        <dd>{s.hasCredential ? 'Stored encrypted; it cannot be shown' : 'None'}</dd>
+        <dd>{s.credentialLostAt ? 'Lost; enter it again' : s.hasCredential ? 'Stored encrypted; it cannot be shown' : 'None'}</dd>
         <dt className="text-muted-foreground">Gateway target</dt>
         <dd className="break-all">
           <code>{s.gatewayTarget}</code>
@@ -175,6 +176,15 @@ function ServerCard({
         <Alert variant="destructive" role="note">
           <AlertDescription>
             {s.removed ? 'Removed' : 'Disabled'}: {s.disabledReason || 'its Kubernetes Secret was deleted'}.
+          </AlertDescription>
+        </Alert>
+      )}
+      {s.credentialLostAt && !s.removed && (
+        <Alert variant="destructive" role="note">
+          <AlertDescription>
+            {editable
+              ? 'The stored credential was lost with a key-encryption key, so agents cannot use this server. Edit it and enter the credential again.'
+              : `The stored credential was lost with a key-encryption key, so agents cannot use this server. Koinon reads it again from the Secret ${s.managedBySecret} on its next sync.`}
           </AlertDescription>
         </Alert>
       )}
@@ -312,7 +322,7 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
   )
 }
 
-/** SanitisedNote says Koinon changed what the server published before showing it to agents (ADR 0057, #267). */
+/** SanitisedNote says Koinon changed what the server published before showing it to agents (ADR 0057, #52). */
 function SanitisedNote({ tool }: { tool: Tool }) {
   const parts: string[] = []
   if (tool.descriptionCleaned) parts.push('hidden characters removed or lookalike tags escaped')

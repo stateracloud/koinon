@@ -302,6 +302,55 @@ var _ = Describe("Service", func() {
 			Expect(errors.As(err, &inv)).To(BeTrue())
 		})
 
+		It("serves nothing of a provider whose key was lost, until the key is entered again", func(ctx SpecContext) {
+			p := create(ctx, "openrouter", "sk-lost")
+			_, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: "deepseek/flash"})
+			Expect(err).NotTo(HaveOccurred())
+			q := store.New(pool)
+			// What keys forget does (ADR 0085 decision 13).
+			_, err = pool.Exec(ctx, `UPDATE providers SET api_key = NULL, credential_lost_at = now() WHERE id = $1`, p.ID)
+			Expect(err).NotTo(HaveOccurred())
+
+			got, err := svc.GetProvider(ctx, org, p.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CredentialLostAt).NotTo(BeNil())
+			Expect(got.HasKey).To(BeFalse())
+			served, err := q.ListServedCatalog(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(served).To(BeEmpty())
+			providers, err := q.ListServedProviders(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(providers).To(BeEmpty(), "no key file is delivered for it")
+			m, err := q.GetModelServing(ctx, store.GetModelServingParams{OrgID: org, Name: "deepseek/flash"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(m.CredentialLost).To(BeTrue(), "agentd fails the run with the reason")
+
+			By("a change that sets no key keeps it lost")
+			newURL := "https://openrouter.ai/api/v1/"
+			got, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{URL: &newURL})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CredentialLostAt).NotTo(BeNil())
+
+			By("entering the key again serves it again")
+			key := "sk-again"
+			got, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{APIKey: &key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CredentialLostAt).To(BeNil())
+			Expect(got.HasKey).To(BeTrue())
+			served, _ = q.ListServedCatalog(ctx, org)
+			Expect(served).To(HaveLen(1))
+		})
+
+		It("ends the lost state of a keyless provider when its key is removed on purpose", func(ctx SpecContext) {
+			p := create(ctx, "openrouter", "sk-lost")
+			_, err := pool.Exec(ctx, `UPDATE providers SET api_key = NULL, credential_lost_at = now() WHERE id = $1`, p.ID)
+			Expect(err).NotTo(HaveOccurred())
+			empty := ""
+			got, err := svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{APIKey: &empty})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CredentialLostAt).To(BeNil(), "the admin chose a keyless upstream")
+		})
+
 		It("cannot store a key without key-encryption keys", func(ctx SpecContext) {
 			noKeys := catalog.New(pool, nil, nil)
 			_, err := noKeys.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "k", Type: "openai", URL: "https://x.example.com/v1", APIKey: "sk"})
@@ -333,7 +382,7 @@ var _ = Describe("Service", func() {
 			Expect(errors.As(err, &inv)).To(BeTrue())
 		})
 
-		It("makes the org's first model its default model and never moves it (#256)", func(ctx SpecContext) {
+		It("makes the org's first model its default model and never moves it (koinon-private#256)", func(ctx SpecContext) {
 			q := store.New(pool)
 			def := func() string {
 				GinkgoHelper()
@@ -354,7 +403,7 @@ var _ = Describe("Service", func() {
 			Expect(n).To(Equal(1))
 		})
 
-		Describe("deleting the default model (#256)", func() {
+		Describe("deleting the default model (koinon-private#256)", func() {
 			var q *store.Queries
 			def := func(ctx SpecContext) string {
 				GinkgoHelper()
@@ -479,7 +528,7 @@ var _ = Describe("Service", func() {
 			router := create(ctx, "openrouter", "")
 			Expect(model(ctx, direct, "claude-haiku-4-5", "")).To(And(HaveField("Format", "anthropic"), HaveField("FormatOverridden", false)))
 			Expect(model(ctx, router, "deepseek/flash", "")).To(HaveField("Format", "openai"))
-			// OpenRouter's Claude models speak Messages like any other Claude (#242).
+			// OpenRouter's Claude models speak Messages like any other Claude (koinon-private#242).
 			routed := model(ctx, router, "anthropic/claude-haiku-5.5", "")
 			Expect(routed).To(And(HaveField("Format", "anthropic"), HaveField("FormatOverridden", false)))
 
@@ -643,6 +692,20 @@ var _ = Describe("Service", func() {
 			Expect(ev[0].ActorKind).To(Equal("secret"))
 			Expect(ev[0].ActorID).To(Equal("openrouter-secret"))
 			Expect(string(ev[0].Summary)).NotTo(ContainSubstring("sk-declared"))
+		})
+
+		It("writes the key again from the Secret when it was lost, even at the same version", func(ctx SpecContext) {
+			_, err := svc.ApplyDeclaredProvider(ctx, org, declared("v1", flash))
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE providers SET api_key = NULL, credential_lost_at = now() WHERE org_id = $1`, org)
+			Expect(err).NotTo(HaveOccurred())
+			changed, err := svc.ApplyDeclaredProvider(ctx, org, declared("v1", flash))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(changed).To(BeTrue())
+			list, err := svc.ListProviders(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(list[0].CredentialLostAt).To(BeNil())
+			Expect(list[0].HasKey).To(BeTrue())
 		})
 
 		It("wins a name collision: the UI entry is disabled with a reason, and back when the Secret goes", func(ctx SpecContext) {

@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# The web variant of the kind e2e toolchain (#358): the toolchain image (Dockerfile here, passed in as
+# The web variant of the kind e2e toolchain (koinon-private#358): the toolchain image (Dockerfile here, passed in as
 # BASE by digest) plus Node, pnpm and Playwright's Chromium with its system packages, so
 # `SUITE=web test/e2e/run.sh` (make test-e2e-web) needs neither the Playwright CDN nor apt at run
-# time; only the npm registry for `pnpm install`. Published to ghcr.io/stateracloud/koinon-e2e-toolchain-web
+# time; only the npm registry for `pnpm install`. Published to ghcr.io/stateracloud/koinon/e2e-toolchain-web
 # by .github/workflows/e2e-toolchain.yml.
 #
 # Keep the versions in step with the repository: NODE_VERSION's major with actions/setup-node in
@@ -28,10 +28,11 @@ RUN set -eu; \
     sum=$(eval "echo \$NODE_SHA256_$arch"); \
     curl -fsSL --retry 3 -o /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
     echo "$sum  /tmp/node.tar.xz" | sha256sum -c -; \
-    apt-get update; apt-get install -y --no-install-recommends xz-utils; \
+    apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update; apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends xz-utils; \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --exclude='*/CHANGELOG.md' --exclude='*/README.md'; \
     rm -f /tmp/node.tar.xz; \
     npm install -g --no-fund --no-audit "pnpm@${PNPM_VERSION}"; \
+    printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\n' > /etc/apt/apt.conf.d/80-koinon-retries; \
     npx -y "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium; \
     rm -rf /var/lib/apt/lists/* /root/.npm; \
     node --version; pnpm --version

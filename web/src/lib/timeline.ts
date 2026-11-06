@@ -69,7 +69,7 @@ function approvalTarget(p: JsonObject): string {
 }
 
 /**
- * approvalText describes an approval task event (#34). The GitHub tools
+ * approvalText describes an approval task event (koinon-private#34). The GitHub tools
  * server writes approval.requested ({decision, risk}); package approvals
  * writes the decision ({note}) and the outcome (executed {result: {url}},
  * failed {error}, expired, canceled {reason}). Every payload carries
@@ -135,7 +135,7 @@ function taskItem(ev: TaskEvent): TimelineItem {
     case 'run.queued':
       return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} queued`, runId }
     case 'run.parked': {
-      // agentd parks a run whose turn ended with approvals outstanding (#34):
+      // agentd parks a run whose turn ended with approvals outstanding (koinon-private#34):
       // {reason: "approval", approvals: [ids]}.
       const n = Array.isArray(p.approvals) ? p.approvals.length : 0
       return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} paused for ${n === 1 ? '1 approval' : `${n} approvals`}`, runId }
@@ -276,7 +276,7 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
     }
     case 'run.waiting_for_model': {
       // agentd waits before it starts the harness until the gateway serves the run's model: a new
-      // provider's key is still reaching the gateway (#174). {model, provider, reason}.
+      // provider's key is still reaching the gateway (koinon-private#174). {model, provider, reason}.
       const provider = str(p.provider)
       const model = str(p.model)
       const what = provider ? `the model provider ${provider}` : 'the model provider'
@@ -284,7 +284,7 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
     }
     case 'run.mcp_server_missing': {
       // agentd found an MCP server the agent may use not serving tools before it started the harness
-      // (#326). {attempt, servers: [{name, reason}], reason}: the first miss is retried, the second
+      // (koinon-private#326). {attempt, servers: [{name, reason}], reason}: the first miss is retried, the second
       // fails the run.
       const names = arr(p.servers)
         .map((s) => str(obj(s)?.name))
@@ -308,7 +308,8 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
 }
 
 /**
- * buildTimeline merges the task's events and its runs' events by time.
+ * buildTimeline merges the task's events and its runs' events by time (at equal time, a
+ * persisted agent reply comes after run items, then task events before run events).
  * Consecutive agent text chunks of one run become one item; a tool call's
  * updates fold into the call's item. agentd also persists each reply as an
  * agent message on the task (with the run's id); once that message exists,
@@ -317,16 +318,25 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
  * stays.
  */
 export function buildTimeline(taskEvents: readonly TaskEvent[], runEvents: Readonly<Record<string, readonly RunEvent[]>>): TimelineItem[] {
-  const raw: { item: TimelineItem; order: number }[] = []
+  const raw: { item: TimelineItem; order: number; rank: number }[] = []
   let order = 0
-  for (const ev of taskEvents) raw.push({ item: taskItem(ev), order: order++ })
+  // At one millisecond a persisted agent reply sorts after the run's streamed text it covers, whatever
+  // the order the two lists were read in; otherwise dropPersistedReplies would keep the last chunk. The
+  // task events that follow the reply at that millisecond share its rank, so they stay behind it.
+  let replyAt: number | undefined
+  for (const ev of taskEvents) {
+    const item = taskItem(ev)
+    const reply = item.type === 'message' && item.actor === ActorKind.AGENT && !!item.runId
+    if (reply) replyAt = item.at
+    raw.push({ item, order: order++, rank: reply || replyAt === item.at ? 1 : 0 })
+  }
   for (const events of Object.values(runEvents)) {
     for (const ev of events) {
       const item = runItem(ev)
-      if (item) raw.push({ item, order: order++ })
+      if (item) raw.push({ item, order: order++, rank: 0 })
     }
   }
-  raw.sort((a, b) => a.item.at - b.item.at || a.order - b.order)
+  raw.sort((a, b) => a.item.at - b.item.at || a.rank - b.rank || a.order - b.order)
 
   const out: TimelineItem[] = []
   const tools = new Map<string, number>()

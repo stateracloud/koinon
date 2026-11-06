@@ -14,6 +14,17 @@ git commit -s -m "feat(api): add org lookup"
 The sign-off must match the commit author. CI rejects pull requests with unsigned commits; fix them
 with `git rebase --signoff main`. There is no CLA.
 
+## AI-assisted contributions
+
+You may use AI tools. The rules are the same as for any contribution:
+
+- The human author signs off the commits (DCO above) and is responsible for the change: you must
+  understand it, have run it, and be able to answer review questions about it.
+- Disclose the tool with a `Co-Authored-By:` trailer on the commit. Never add an AI as
+  `Signed-off-by`: only a person can certify the DCO.
+- Maintainers may close a pull request that shows no understanding of the change, however
+  well-formed it looks.
+
 ## Requirements
 
 You need nothing from the maintainers' infrastructure: no registry login, no home lab, no model

@@ -251,7 +251,7 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 		p: p, q: p.q, run: run, cmdChanged: make(chan struct{}),
 		log: log.With("org", run.OrgID.String(), "run", run.ID.String(), "epoch", run.Epoch),
 	}
-	// The text the agent types reaches watchers live, batched; only the completed items are stored (#344).
+	// The text the agent types reaches watchers live, batched; only the completed items are stored (koinon-private#344).
 	live := runwatch.NewChunkPublisher(p.db, run.OrgID, run.ID, 0, r.log)
 	defer live.Close()
 	r.own = runoutcome.New(runoutcome.Config{
@@ -431,7 +431,7 @@ func (r *runner) execute(ctx context.Context) error {
 		}
 	}
 	if model == "" {
-		// The org's stored default model (#256); it is never derived from what the org serves.
+		// The org's stored default model (koinon-private#256); it is never derived from what the org serves.
 		var err error
 		if model, err = agentmodel.OrgDefault(fctx, r.q, r.run.OrgID); err != nil {
 			return r.dbErr(ctx, "load the org's default model", err)
@@ -482,8 +482,13 @@ func (r *runner) execute(ctx context.Context) error {
 	r.vcfg = vc
 	r.flavor = agent.Flavor
 	r.taint.setMCPPrefix(mcpToolPrefix(agent.Flavor))
+	// A code-host connection whose credential was lost fails the run at once, before the waits for
+	// the model and the sandbox: nothing it would wait for can bring the credential back.
+	if err := r.checkCodeHostCredential(fctx); err != nil {
+		return r.execErr(ctx, "code-host connection", err)
+	}
 	// The gateway may not serve the model yet: a new provider's key file is still reaching the
-	// gateway pod (issue #174). The reconciler starts the sandbox meanwhile, because this run is
+	// gateway pod (issue koinon-private#174). The reconciler starts the sandbox meanwhile, because this run is
 	// demand for it, so the two waits overlap.
 	if err := r.waitModel(fctx, model); err != nil {
 		return r.execErr(ctx, "wait for the model", err)
@@ -493,7 +498,7 @@ func (r *runner) execute(ctx context.Context) error {
 		return r.execErr(ctx, "sandbox", err)
 	}
 	// An allowed MCP server that is not serving tools is recorded, retried once and then fails the
-	// run (mcpwait.go, issues #326 and #488). It runs once the sandbox is ready: the live check
+	// run (mcpwait.go, issues koinon-private#326 and koinon-private#488). It runs once the sandbox is ready: the live check
 	// uses the agent's key, which exists by then.
 	if err := r.waitMCPServers(fctx); err != nil {
 		return r.execErr(ctx, "check the agent's MCP servers", err)

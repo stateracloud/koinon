@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package router is Koinon's trace router (ADR 0074, issue #213). It lives in koinon-api and takes
+// Package router is Koinon's trace router (ADR 0074, issue koinon-private#213). It lives in koinon-api and takes
 // the spans koinon-agentd sends to the internal OTLP listener's /v1/traces, and for each org:
 //
 //   - attributes a span to a run it can prove (the run is in that org, the trace ID is one of the
@@ -582,10 +582,17 @@ func (r *Router) attribute(ctx context.Context, org, run pgtype.UUID, trace [16]
 		turn Turn
 		err  error
 	}
+	refusal := func(err error) bool {
+		return errors.Is(err, ErrUnknownRun) || errors.Is(err, ErrUnknownTrace) || errors.Is(err, ErrUntraced)
+	}
 	v, ferr := r.fl.do(fkey, func() (any, error) {
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.cfg.ConfigTimeout)
 		defer cancel()
 		t, err := r.store.Attribute(cctx, org, run, trace)
+		if err != nil && !refusal(err) {
+			// Remembered by the leader, before the callers that joined it are released (see read).
+			r.fail(fkey, err)
+		}
 		return result{t, err}, nil
 	})
 	if ferr != nil {
@@ -595,10 +602,9 @@ func (r *Router) attribute(ctx context.Context, org, run pgtype.UUID, trace [16]
 	ttl := r.cfg.AttributionTTL
 	switch {
 	case err == nil:
-	case errors.Is(err, ErrUnknownRun), errors.Is(err, ErrUnknownTrace), errors.Is(err, ErrUntraced):
+	case refusal(err):
 		ttl = r.cfg.NegativeTTL
 	default:
-		r.fail(fkey, err, now)
 		return Turn{}, err
 	}
 	r.cmu.Lock()
@@ -648,10 +654,32 @@ func (r *Router) failed(key string, now time.Time) error {
 	return nil
 }
 
-func (r *Router) fail(key string, err error, now time.Time) {
+// fail remembers a failed read for ConfigCheck from the moment it failed, not from when it started: a
+// read that hung until ConfigTimeout (3 s by default, longer than the 1 s ConfigCheck) would otherwise
+// be remembered until a time already past, and every span behind it would ask the database again.
+func (r *Router) fail(key string, err error) {
+	until := r.now().Add(r.cfg.ConfigCheck)
 	r.cmu.Lock()
-	r.fails[key] = failEntry{err: err, until: now.Add(r.cfg.ConfigCheck)}
+	r.fails[key] = failEntry{err: err, until: until}
 	r.cmu.Unlock()
+}
+
+// read runs fn once per key at a time (see flight). The leader remembers a failure before the callers
+// that joined it are released, so no caller can start the same read between the failure and its
+// record. Each caller records the error again once released, which also covers a read that panicked
+// (flight turns the panic into the error after fn has gone).
+func (r *Router) read(key string, fn func() (any, error)) (any, error) {
+	v, err := r.fl.do(key, func() (any, error) {
+		v, err := fn()
+		if err != nil {
+			r.fail(key, err)
+		}
+		return v, err
+	})
+	if err != nil {
+		r.fail(key, err)
+	}
+	return v, err
 }
 
 // routesFor returns the org's destinations. With a versioned source the cache is confirmed against
@@ -677,7 +705,7 @@ func (r *Router) routesFor(ctx context.Context, org pgtype.UUID) ([]tracedest.Ro
 	if err := r.failed(key, now); err != nil {
 		return nil, err
 	}
-	v, err := r.fl.do(key, func() (any, error) {
+	v, err := r.read(key, func() (any, error) {
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.cfg.ConfigTimeout)
 		defer cancel()
 		var ver string
@@ -713,7 +741,6 @@ func (r *Router) routesFor(ctx context.Context, org pgtype.UUID) ([]tracedest.Ro
 		return routes, nil
 	})
 	if err != nil {
-		r.fail(key, err, now)
 		return nil, err
 	}
 	return v.([]tracedest.Route), nil
@@ -745,7 +772,7 @@ func (r *Router) secretsFor(ctx context.Context, org pgtype.UUID) (*scrub.Secret
 	if err := r.failed(key, now); err != nil {
 		return r.graceOrFail(e, ok, versioned, err, now)
 	}
-	v, err := r.fl.do(key, func() (any, error) {
+	v, err := r.read(key, func() (any, error) {
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.cfg.ConfigTimeout)
 		defer cancel()
 		var ver string
@@ -775,7 +802,6 @@ func (r *Router) secretsFor(ctx context.Context, org pgtype.UUID) (*scrub.Secret
 		return set, nil
 	})
 	if err != nil {
-		r.fail(key, err, now)
 		return r.graceOrFail(e, ok, versioned, err, now)
 	}
 	return v.(*scrub.Secrets), nil

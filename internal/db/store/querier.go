@@ -36,7 +36,7 @@ type Querier interface {
 	AddWaitingQuestionRecipients(ctx context.Context, arg AddWaitingQuestionRecipientsParams) ([]pgtype.UUID, error)
 	// AppendRunEventOnce for the run's own epoch after the control plane canceled it: the worker
 	// stores the item (a message or a thought) the agent was in the middle of, so a stopped run keeps
-	// what was said (#344). Nothing else is recorded this way. No row: another epoch, the run is not
+	// what was said (koinon-private#344). Nothing else is recorded this way. No row: another epoch, the run is not
 	// canceled, or the event exists.
 	AppendCanceledRunEventOnce(ctx context.Context, arg AppendCanceledRunEventOnceParams) (RunEvent, error)
 	// Appends an event from the control plane (API, scheduler) without an epoch,
@@ -132,6 +132,7 @@ type Querier interface {
 	// Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
 	// no org-owned row, so it takes no @org_id.
 	CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error)
+	// A destination whose credentials were lost (#85) receives nothing, so it does not count.
 	CountEnabledTraceDestinations(ctx context.Context, orgID pgtype.UUID) (int64, error)
 	CountLeakGuardFingerprints(ctx context.Context, arg CountLeakGuardFingerprintsParams) (int64, error)
 	// Questions of the run that still wait for a person (asked or open).
@@ -266,7 +267,7 @@ type Querier interface {
 	EndTaskFrom(ctx context.Context, arg EndTaskFromParams) (Task, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
-	// The leak guard's state (ADR 0084, ADR 0091; #349): sessions per home generation with their legs,
+	// The leak guard's state (ADR 0084, ADR 0091; koinon-private#349): sessions per home generation with their legs,
 	// the taint store of fingerprints, and the budgets of a run. Every query takes @org_id and filters
 	// on it (TestQueriesAreOrgScoped).
 	// The session of one home generation, created with @fp_key the first time. A concurrent first call
@@ -380,7 +381,7 @@ type Querier interface {
 	GetHomeRepository(ctx context.Context, arg GetHomeRepositoryParams) (HomeRepository, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
-	// The install ID (#615): created once by a migration, never changed. KMS-wrapped KEKs are bound
+	// The install ID (koinon-private#615): created once by a migration, never changed. KMS-wrapped KEKs are bound
 	// to it.
 	GetInstallID(ctx context.Context) (pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -410,6 +411,7 @@ type Querier interface {
 	// koinon-agentd, before a run starts its harness: the org's enabled model of this name, its
 	// provider and whether the gateway serves it (gateway_served_models). Enabled models have unique
 	// names in an org (a declared one disables a UI one of the same name), so there is one at most.
+	// credential_lost: the provider's key was lost (#85), so it is not served until entered again.
 	GetModelServing(ctx context.Context, arg GetModelServingParams) (GetModelServingRow, error)
 	GetOpenHomeCheckpoint(ctx context.Context, arg GetOpenHomeCheckpointParams) (HomeCheckpoint, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -419,7 +421,7 @@ type Querier interface {
 	GetOrgBudget(ctx context.Context, orgID pgtype.UUID) (GetOrgBudgetRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
-	// The model agents without a model setting run on (#256); '' when the org has none.
+	// The model agents without a model setting run on (koinon-private#256); '' when the org has none.
 	GetOrgDefaultModel(ctx context.Context, orgID pgtype.UUID) (string, error)
 	// The part of an org's spend since @since that came from estimated usage.
 	GetOrgEstimatedSpendSince(ctx context.Context, arg GetOrgEstimatedSpendSinceParams) (string, error)
@@ -634,7 +636,7 @@ type Querier interface {
 	ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesParams) ([]ListFlaggedPricesRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
-	// KEK fingerprints (#591, ADR 0085 decision 12): what each key-encryption key was when a process
+	// KEK fingerprints (koinon-private#591, ADR 0085 decision 12): what each key-encryption key was when a process
 	// first loaded it. No key material.
 	ListKEKFingerprints(ctx context.Context) ([]KekFingerprint, error)
 	ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpServer, error)
@@ -642,7 +644,7 @@ type Querier interface {
 	// unlink the foreign key (ON DELETE SET NULL) is about to do.
 	ListMCPServersLinkedToConnectionForUpdate(ctx context.Context, arg ListMCPServersLinkedToConnectionForUpdateParams) ([]McpServer, error)
 	// The servers an agent may use that the gateway should serve right now, with the tools it should
-	// list for each by tier, for the live check agentd runs before the harness starts (issue #488). An
+	// list for each by tier, for the live check agentd runs before the harness starts (issue koinon-private#488). An
 	// unhealthy server is left out: ListMissingMCPServersOfAgent has it already and the planner withdraws
 	// its tools. A server with no present, permitted tool (never probed, or all in the never tier) is
 	// returned with empty lists and not expected to list anything.
@@ -650,9 +652,9 @@ type Querier interface {
 	ListMCPTools(ctx context.Context, orgID pgtype.UUID) ([]McpTool, error)
 	ListMCPToolsOfServer(ctx context.Context, arg ListMCPToolsOfServerParams) ([]McpTool, error)
 	// The servers an agent may use that Koinon has found not serving tools right now, and has not
-	// withdrawn on purpose (a disabled or removed server is only mentioned in the note, see
+	// withdrawn on purpose (a disabled, removed or credential-lost server is only mentioned in the note, see
 	// ListUnavailableMCPServersOfAgent): unhealthy, or failing probes that have not yet reached the
-	// threshold, which is what a server overloaded for a minute looks like (issue #326). agentd checks
+	// threshold, which is what a server overloaded for a minute looks like (issue koinon-private#326). agentd checks
 	// this before it starts the harness; a server never probed (unknown) is not a miss.
 	ListMissingMCPServersOfAgent(ctx context.Context, arg ListMissingMCPServersOfAgentParams) ([]ListMissingMCPServersOfAgentRow, error)
 	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
@@ -753,11 +755,13 @@ type Querier interface {
 	ListRunModelCalls(ctx context.Context, arg ListRunModelCallsParams) ([]ListRunModelCallsRow, error)
 	ListRunTurns(ctx context.Context, arg ListRunTurnsParams) ([]RunTurn, error)
 	ListRunsForTask(ctx context.Context, arg ListRunsForTaskParams) ([]Run, error)
-	// Every enabled provider of the org with its enabled models, for the gateway.
+	// Every enabled provider of the org with its enabled models, for the gateway. A provider whose key
+	// was lost (#85) is not served until the key is entered again.
 	ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]ListServedCatalogRow, error)
-	// Enabled servers, for the gateway and the prober.
+	// Enabled servers, for the gateway and the prober. A server whose credential was lost (#85) is not
+	// served until the credential is entered again.
 	ListServedMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpServer, error)
-	// Enabled providers (with or without models), for key delivery.
+	// Enabled providers (with or without models), for key delivery; not those whose key was lost.
 	ListServedProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
 	ListSpendEntryRevisions(ctx context.Context, arg ListSpendEntryRevisionsParams) ([]SpendEntryRevision, error)
 	// The timeline after a sequence number (0 for the start), in order.
@@ -780,7 +784,7 @@ type Querier interface {
 	// the turns of a run. Every query on an org-owned table takes @org_id (TestQueriesAreOrgScoped).
 	ListTraceDestinations(ctx context.Context, orgID pgtype.UUID) ([]TraceDestination, error)
 	// The servers an agent may use that are down or disabled right now, for the note agentd gives the
-	// agent when a session starts.
+	// agent when a session starts. credential_lost: its credential was lost (#85), so it is not served.
 	ListUnavailableMCPServersOfAgent(ctx context.Context, arg ListUnavailableMCPServersOfAgentParams) ([]ListUnavailableMCPServersOfAgentRow, error)
 	// A run's requests whose outcome the agent has not been sent yet.
 	ListUndeliveredApprovalRequestsForRun(ctx context.Context, arg ListUndeliveredApprovalRequestsForRunParams) ([]ApprovalRequest, error)
@@ -957,7 +961,7 @@ type Querier interface {
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	SaveLeakGuardRun(ctx context.Context, arg SaveLeakGuardRunParams) error
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
-	// Whether an org admin asks for the agent's sandbox to stay up (#315). The operator's per-org cap
+	// Whether an org admin asks for the agent's sandbox to stay up (koinon-private#315). The operator's per-org cap
 	// decides how many of the requests the reconciler grants. Not a new version.
 	SetAgentKeepWarm(ctx context.Context, arg SetAgentKeepWarmParams) (Agent, error)
 	// An agent's model setting (NULL: use the version's model, then the org default). Not a new version.
@@ -1093,7 +1097,9 @@ type Querier interface {
 	// envelope since, so writing back the envelope that was read would undo it. credential_header and
 	// credential_prefix go with it: they are written only when @set_credential_meta is true (the patch
 	// touches the credential at all), so a URL-only patch cannot pair a concurrent change's envelope with
-	// stale metadata, or break the CHECK that ties header and envelope together.
+	// stale metadata, or break the CHECK that ties header and envelope together. Setting or removing
+	// the credential ends a lost one (#85): the trigger credential_lost_clear covers a stored credential,
+	// this a removed one.
 	UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams) (McpServer, error)
 	// The server published a different description or schema for a known tool: remember it and flag
 	// the tool for review. An auto tool drops to ask until an admin reviews it; ask and never stay.
@@ -1101,11 +1107,15 @@ type Querier interface {
 	UpdateModel(ctx context.Context, arg UpdateModelParams) (Model, error)
 	// api_key is written only when @set_api_key is true (the patch sets it): the caller read the row
 	// without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the envelope since.
+	// Setting the key, or removing it, ends a lost key (#85): the trigger credential_lost_clear covers
+	// a stored key, this a removed one.
 	UpdateProvider(ctx context.Context, arg UpdateProviderParams) (Provider, error)
 	// Replaces the settings of a destination. Applies only to the version the caller read
 	// (@expected_version), so two admins editing at once do not overwrite each other's secrets, and bumps
 	// config_version. @set_test says the change was tested and the test columns are recorded; otherwise the
-	// previous test result stays. The router's health columns stay.
+	// previous test result stays. The router's health columns stay. A tested change ends lost credentials
+	// (#85): it carried every secret the backend needs (the trigger credential_lost_clear also clears the
+	// mark when credentials are stored).
 	UpdateTraceDestination(ctx context.Context, arg UpdateTraceDestinationParams) (TraceDestination, error)
 	// One connection's repositories, from parallel arrays (owner, repo and visibility at the same index).
 	UpsertCodeHostRepos(ctx context.Context, arg UpsertCodeHostReposParams) (int64, error)

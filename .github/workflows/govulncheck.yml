@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Nightly govulncheck on main (ADR 0079). It is the only govulncheck run: a new advisory needs no
-# code change to apply, so a per-pull-request job (removed in #561) added nothing. A reachable finding fails the run, which
+# code change to apply, so a per-pull-request job (removed in koinon-private#561) added nothing. A reachable finding fails the run, which
 # notifies the maintainer and is what starts the security fast path.
 name: govulncheck
 
@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   govulncheck:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

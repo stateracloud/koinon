@@ -34,17 +34,41 @@ ARG KUBECTL_SHA256_arm64=922df28df248cc00a9e025f947704f1d1482de64ece54cfe57e61f1
 # GOTOOLCHAIN=local: the image's Go is the one go.mod asks for; never download another.
 ENV GOTOOLCHAIN=local
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git jq make netcat-openbsd openssl procps unzip \
+# The apt packages are not version-pinned (hadolint DL3008) on purpose: this is a local dev and lab
+# toolchain, not a shipped image, and the base is pinned by digest. Debian bookworm's archive drops
+# superseded versions, so an exact pin would break the build as soon as a security update lands,
+# while the flavor images pin against an Ubuntu snapshot (flavors/opencode/Dockerfile) because they
+# ship. Everything that decides the e2e's behaviour (go, kind, ko, helm, kubectl, buildx) is pinned
+# above by version and sha256.
+# hadolint ignore=DL3008
+RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update \
+ && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends ca-certificates curl git jq make netcat-openbsd openssl procps unzip \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=buildx /buildx /usr/local/lib/docker/cli-plugins/docker-buildx
 
-RUN set -eu; \
+# The optional BuildKit secret github_token (--secret id=github_token,env=GITHUB_TOKEN) authenticates
+# the github.com release downloads (#145); without it they are anonymous. The github.com web URL
+# ignores a token, so an authenticated download goes through the REST API (release by tag, asset by
+# id, Accept: application/octet-stream), as in flavors/common/koinon-fetch (this build context cannot
+# copy that script). curl reads the header from stdin, so the token is in no argv, env var, log or layer.
+RUN --mount=type=secret,id=github_token,required=false set -eu; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     sha() { eval "echo \$$1_$arch"; }; \
-    fetch() { curl -fsSL --retry 3 -o "$1" "$2"; echo "$3  $1" | sha256sum -c -; }; \
+    token=; [ ! -r /run/secrets/github_token ] || token=$(tr -d '\r\n' </run/secrets/github_token); \
+    authed() { printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -fsSL --retry 3 --retry-all-errors -K - "$@"; }; \
+    fetch() { \
+      if [ -n "$token" ] && [ "${2#https://github.com/}" != "$2" ]; then \
+        r=${2#https://github.com/}; repo=${r%%/releases/download/*}; r=${r#*/releases/download/}; tag=${r%%/*}; name=${r#*/}; \
+        id=$(authed -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$repo/releases/tags/$tag" | jq -er --arg n "$name" '.assets[] | select(.name == $n) | .id'); \
+        authed -H 'Accept: application/octet-stream' -D /tmp/fetch.headers -o "$1" "https://api.github.com/repos/$repo/releases/assets/$id"; \
+        grep -i '^x-ratelimit-limit' /tmp/fetch.headers | sed 's/^/fetch: authenticated, /' || true; rm -f /tmp/fetch.headers; \
+      else \
+        curl -fsSL --retry 3 --retry-all-errors -o "$1" "$2"; \
+      fi; \
+      echo "$3  $1" | sha256sum -c -; \
+    }; \
     fetch /usr/local/bin/kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-${arch}" "$(sha KIND_SHA256)"; \
     fetch /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl" "$(sha KUBECTL_SHA256)"; \
     chmod +x /usr/local/bin/kind /usr/local/bin/kubectl; \
