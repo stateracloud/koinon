@@ -58,6 +58,11 @@
 # Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout (or, with --checks, the required contexts / review threads unreadable),
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
 #       6 stale PR head (with --checks), 7 unresolved review threads (BLOCKED with --checks, all green), 64 usage.
+#       8 the PR was in the merge queue and left it without merging (DEQUEUED).
+#       Merge queue (koinon-private#225): a queued PR is OPEN until the queue build merges it; the wait prints
+#       `in the merge queue (<position> <state>)` and continues to `MERGED` (exit 0). With --checks the head's
+#       checks are judged as before: they gate entry to the queue; the queue build's own checks are on the
+#       queue commit (gh-readonly-queue/...), not on the head.
 # Test hook: PR_WAIT_THREADS replaces hack/pr-threads.sh.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -199,7 +204,18 @@ load_contexts() {
   return 0
 }
 
-no_live=0 last=""
+# queue_state <PR>: `queued <position> <state>` while the PR is in the base branch's merge queue
+# (koinon-private#225), else `no`. `gh pr view --json` has no queue fields, so GraphQL; best effort: an
+# API error reads as `no` (a repository without a queue answers `no` too).
+# shellcheck disable=SC2016 # $owner, $repo, $number are GraphQL variables
+queue_query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { isInMergeQueue mergeQueueEntry { position state } } } }'
+queue_state() {
+  local raw
+  raw=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -F number="$1" -f query="$queue_query" 2>/dev/null) || { echo no; return 0; }
+  jq -r '.data.repository.pullRequest | if (type == "object" and .isInMergeQueue == true) then "queued \(.mergeQueueEntry.position // "?") \(.mergeQueueEntry.state // "")" else "no" end' <<<"$raw" 2>/dev/null || echo no
+}
+
+no_live=0 last="" was_queued=0
 emit() { # print only when the line differs from the previous one
   if [ "$1" != "$last" ]; then
     echo "$1"
@@ -223,6 +239,26 @@ while :; do
     CLOSED)
       echo "CLOSED"
       exit 3
+      ;;
+    esac
+    # The merge queue (koinon-private#225): an enqueued PR stays OPEN until the queue build merges it, so
+    # --merged keeps waiting and says where it stands. A PR that was in the queue and is OPEN and out of it
+    # again was removed (a failed queue build, a conflict with the entry ahead, or by hand): exit 8, with
+    # the checks of the queue build named by `hack/ci-fail.sh`/the PR page. Never re-enqueues.
+    qs=$(queue_state "$pr")
+    case $qs in
+    queued*)
+      was_queued=1
+      emit "in the merge queue (${qs#queued })"
+      if [ $((SECONDS - start)) -ge "$timeout" ]; then echo "TIMEOUT"; exit 2; fi
+      [ "$interval" -eq 0 ] || sleep "$interval"
+      continue
+      ;;
+    *)
+      if [ "$was_queued" = 1 ]; then
+        echo "DEQUEUED: PR $pr left the merge queue without merging (the queue build failed, it conflicted with an entry ahead, or it was removed); read the queue build's failures on the PR page, fix, and enqueue again with hack/pr-merge.sh"
+        exit 8
+      fi
       ;;
     esac
     ready_dropped=0

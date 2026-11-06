@@ -15,6 +15,11 @@
 #                      then labels it (two events, koinon-private#468), and the run of `opened` should already see
 #                      the label. Label events do not start the workflow; adding `e2e` later
 #                      dispatches it (hack/e2e-label.sh).
+#   merge_group        (the merge queue, koinon-private#225) needed when the entry's own diff against
+#                      MG_BASE (merge_group.base_sha) matches the full rule or touches the e2e's own
+#                      files; `required=false`, so the quickstart of this very run is the evidence
+#                      (no PR head, no e2e-lab status exists for a queue commit). A failing rule
+#                      script other than "not needed" reads as needed.
 #   push               (main) needed when the full rule matches anything since the last green e2e
 #                      run on main (push or schedule), or when there is no such run.
 #   schedule           (nightly) always: drift no commit explains (upstream images, the runner
@@ -26,7 +31,7 @@
 # head has a green quickstart or the lab's `e2e-lab` status. On a pull request required implies
 # needed. Every other event: `required=false`.
 #
-# Environment: EVENT, BASE (pull request base branch), LABELS (JSON array of the PR's label names),
+# Environment: EVENT, BASE (pull request base branch), MG_BASE (merge group base sha), LABELS (JSON array of the PR's label names),
 # PR (its number), NEEDS_E2E (path of the rule script, default hack/needs-e2e.sh), GH (the gh
 # command), GH_REPO.
 # Any failure of the rule script other than "not needed" reads as needed.
@@ -99,6 +104,30 @@ pull_request)
       summary "Does not run: nothing in this pull request needs the kind e2e."
       emit false false
     fi
+  fi
+  ;;
+merge_group)
+  mg=${MG_BASE:-}
+  if [[ -z $mg ]]; then
+    echo "::warning::no merge group base sha; running the e2e to be safe"
+    emit true
+    exit 0
+  fi
+  rule --forced-only "$mg"
+  forced=$rc
+  if [[ $forced -eq 0 ]]; then
+    summary "Runs: this merge queue entry changes the e2e's own files."$'\n\n'"$text"
+    emit true
+  elif [[ $forced -ge 2 ]]; then
+    echo "::warning::needs-e2e.sh exited $forced; running the e2e to be safe"
+    emit true
+  else
+    rule "$mg"
+    case $rc in
+    1) summary "Does not run: nothing in this merge queue entry needs the kind e2e."; emit false ;;
+    0) summary "Runs: this merge queue entry is e2e-relevant per hack/needs-e2e.sh:"$'\n\n'"$text"; emit true ;;
+    *) echo "::warning::needs-e2e.sh exited $rc; running the e2e to be safe"; emit true ;;
+    esac
   fi
   ;;
 workflow_dispatch)

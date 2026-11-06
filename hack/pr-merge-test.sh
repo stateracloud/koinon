@@ -31,6 +31,8 @@ case "$1 $2" in
 "api repos/{owner}/{repo}/pulls/"*"/files")
   [ -f "$FAKE_DIR/files" ] || exit 9
   cat "$FAKE_DIR/files" ;;
+"api repos/{owner}/{repo}/rules/branches/"*)
+  if [ -f "$FAKE_DIR/rules" ]; then cat "$FAKE_DIR/rules"; else exit 1; fi ;;
 "api repos/{owner}/{repo}/commits/"*"/status") cat "$FAKE_DIR/statuses" ;;
 *) if [ "$1" = api ]; then cat "$FAKE_DIR/runs"; else exit 9; fi ;;
 esac
@@ -122,6 +124,29 @@ NEEDS_RC=0 run 7
 check "without --admin it enables auto-merge" 0 merge
 grep -q -- '--auto' "$FAKE_DIR/calls" || { echo "FAIL: --auto" >&2; fail=1; }
 grep -q '^wait 7 --checks --require e2e' "$FAKE_DIR/calls" || { echo "FAIL: a needs-e2e change waits with --require e2e" >&2; fail=1; }
+
+# koinon-private#225: the merge queue, detected from the ruleset at run time
+setup false "$green"
+echo true >"$FAKE_DIR/rules"
+run 7
+check "with a merge queue it enqueues (gh pr merge --auto)" 0 merge
+grep -q -- '--merge --auto --match-head-commit abc1234def' "$FAKE_DIR/calls" || { echo "FAIL: queue: --auto pinned to the head" >&2; fail=1; }
+grep -q 'added to the merge queue' <<<"$out" || { echo "FAIL: queue: output says queued: $out" >&2; fail=1; }
+setup false "$green"
+echo true >"$FAKE_DIR/rules"
+run 7 --admin
+check "with a merge queue --admin still merges directly" 0 merge
+grep -q -- '--merge --admin --match-head-commit' "$FAKE_DIR/calls" || { echo "FAIL: queue: admin bypass" >&2; fail=1; }
+grep -q 'added to the merge queue' <<<"$out" && { echo "FAIL: queue: admin is not queued" >&2; fail=1; }
+setup false "$green"
+echo false >"$FAKE_DIR/rules"
+run 7
+check "a ruleset without the queue keeps auto-merge" 0 merge
+grep -q 'auto-merge enabled' <<<"$out" || { echo "FAIL: no queue: auto-merge enabled: $out" >&2; fail=1; }
+setup false "$green"
+run 7
+check "an unreadable ruleset reads as no queue" 0 merge
+grep -q 'auto-merge enabled' <<<"$out" || { echo "FAIL: unreadable rules: auto-merge enabled: $out" >&2; fail=1; }
 
 setup false "$green"
 WAIT_RC=1 run 7

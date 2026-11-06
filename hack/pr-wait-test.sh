@@ -50,6 +50,13 @@ if [ "$1" = api ] && [[ $2 == */issues/*/events ]]; then # the last ready_for_re
   cat "$FAKE_DIR/ready"
   exit 0
 fi
+if [ "$1 $2" = "api graphql" ] && [[ $* == *mergeQueueEntry* ]]; then # the queue state: $FAKE_DIR/queue (JSON, one answer per call, the last repeats), else "not in a queue"
+  [ -f "$FAKE_DIR/queue" ] || { echo '{"data":{"repository":{"pullRequest":{"isInMergeQueue":false,"mergeQueueEntry":null}}}}'; exit 0; }
+  m=$(($(cat "$FAKE_DIR/qn" 2>/dev/null || echo 0) + 1))
+  echo "$m" >"$FAKE_DIR/qn"
+  sed -n "${m}p" "$FAKE_DIR/queue" | grep . || tail -n 1 "$FAKE_DIR/queue"
+  exit 0
+fi
 if [ "$1 $2" = "api graphql" ]; then # the review threads (hack/pr-threads.sh): $FAKE_DIR/threads holds the pages as gh prints them
   [ -f "$FAKE_DIR/threads" ] || exit 9
   cat "$FAKE_DIR/threads"
@@ -129,7 +136,7 @@ expect "merged: one line per change" 0 "checks 1/3 pending: go,web
 checks 2/3 pending: web
 checks 3/3 green
 MERGED abc1234"
-if grep -q -v -e '^pr view 7 --json' -e '^api repos/{owner}/{repo}/rules/branches/'"$FAKE_DIR/calls"; then
+if grep -q -v -e '^pr view 7 --json' -e '^api repos/{owner}/{repo}/rules/branches/' -e '^api graphql .*mergeQueueEntry' "$FAKE_DIR/calls"; then
   echo "FAIL: only gh pr view is called" >&2
   fail=1
 else echo "ok: only gh pr view is called"; fi
@@ -586,6 +593,28 @@ expect "pr-threads: pullRequest null exits 2" 2 "pr-threads: PR 7 not found (pul
 rc=0
 out=$("$repo/hack/pr-threads.sh" 2>&1) || rc=$?
 expect "pr-threads: usage" 64 "usage: hack/pr-threads.sh <PR>"
+
+# 8b. the merge queue (koinon-private#225): OPEN while queued, merged by the queue build; or removed from it
+q1='{"data":{"repository":{"pullRequest":{"isInMergeQueue":true,"mergeQueueEntry":{"position":2,"state":"QUEUED"}}}}}'
+q2='{"data":{"repository":{"pullRequest":{"isInMergeQueue":true,"mergeQueueEntry":{"position":1,"state":"AWAITING_CHECKS"}}}}}'
+qno='{"data":{"repository":{"pullRequest":{"isInMergeQueue":false,"mergeQueueEntry":null}}}}'
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" \
+  "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" "$(pr MERGED CLEAN abc1234def "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n%s\n%s\n' "$q1" "$q2" "$q2" >"$FAKE_DIR/queue"
+run 7 --interval 0
+expect "a queued PR is waited for until the queue build merges it" 0 "in the merge queue (2 QUEUED)
+in the merge queue (1 AWAITING_CHECKS)
+MERGED abc1234"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n%s\n' "$q1" "$qno" >"$FAKE_DIR/queue"
+run 7 --interval 0
+expect "a PR that left the queue without merging exits 8" 8 "in the merge queue (2 QUEUED)
+DEQUEUED: PR 7 left the merge queue without merging (the queue build failed, it conflicted with an entry ahead, or it was removed); read the queue build's failures on the PR page, fix, and enqueue again with hack/pr-merge.sh"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n' "$q1" >"$FAKE_DIR/queue"
+run 7 --interval 0 --timeout 0
+expect "a queued PR times out like any wait" 2 "in the merge queue (2 QUEUED)
+TIMEOUT"
 
 # 8. a transient gh failure is retried
 rm -rf "$FAKE_DIR"

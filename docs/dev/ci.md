@@ -262,7 +262,10 @@ on pull requests (`flavor-publish` is advisory and push-only). `hack/ci-required
 `hack/ci-required-test.sh --ruleset` diffs the list with the live ruleset. A new job goes into the
 list in the same PR, and a required job must report on every pull request and push (a job-level
 `if:` skip reports success and is fine; only a workflow-level `paths:` filter leaves a check
-absent).
+absent). With the merge queue (below) a required job must also report on `merge_group`: the
+workflows that produce a required context listen to it (`ci`, `dco`, `secrets`, `claims`,
+`e2e-kind`), `hack/ci-merge-group-test.sh` keeps them subscribed, and a new required workflow
+subscribes in the same PR.
 
 Third-party analysers are advisory: their checks never enter the list or the ruleset, and
 `hack/pr-wait.sh` (so `hack/pr-merge.sh`) judges only the base branch's required contexts, the
@@ -324,7 +327,7 @@ draft, runs `pr-wait.sh --checks` (with `--require e2e` when `needs-e2e.sh` says
 file list with `gh api pulls/<PR>/files --paginate` and requires e2e when that read fails or is empty),
 reads every required context of `hack/ci-required.txt` on the head SHA (newest run per name, success or
 skipped), re-reads the PR (not OPEN: exit 3; head not origin's branch tip: exit 6 `STALE-HEAD`), runs
-`gh pr merge --merge` (`--admin`, else `--auto`, which prints `auto-merge enabled`), and only after that
+`gh pr merge --merge` (`--admin`, else `--auto`, which prints `auto-merge enabled`, or `added to the merge queue` when the ruleset has a queue), and only after that
 succeeded `claim.sh review` in the claim's lane (from `claim.sh mine`, or `--lane`) and a PR comment with the
 head SHA and the number of contexts it read. `pr-wait.sh --checks` exits 5 on a draft. After
 `ready_for_review` it ignores only the draft's `ci` workflow runs: those created more than about 30 s before
@@ -333,6 +336,54 @@ claim and commit statuses (`e2e-lab`) keep their result; when gh cannot list the
 start time decides instead. It exits 6 `STALE-HEAD` when the PR's head stays different from
 `git ls-remote origin refs/heads/<branch>` for `PR_WAIT_STALE_GRACE` seconds (default 120); re-sync with
 `gh api -X PATCH repos/{owner}/{repo}/pulls/<PR> -f base=<base>`.
+
+### The merge queue (#225)
+
+Strict "up to date with main" made every merge put every other open PR behind. The merge queue
+builds main plus the queued PRs on a `gh-readonly-queue/main/...` branch, runs the required checks
+there and merges in order, so strict stays true without manual syncs (the `needs-update` updater bot has
+nothing to do for a queued PR). The repository half is in place and inert until the ruleset has a
+`merge_queue` rule; the ruleset change itself is made by the maintainer's session through
+`gh api` (backup, diff), never from a pull request.
+
+What a `merge_group` build runs (event `checks_requested`, no pull request in the payload):
+
+- `ci`: everything. `hack/ci-skip-heavy.sh decide` answers `skip=false` and `ci-changes.sh` gets no
+  base, because the queue commit is a tree no check has seen. The concurrency group is the queue commit
+  (`ci-mq-<sha>`), so queue builds never cancel one another (a cancelled required check ejects the
+  entry and the ones behind it); `ci-supersede.sh`, `buf breaking`, commit subjects, dependency age
+  and the migration base compare are pull-request-only steps and are skipped (a step skip is green).
+- `dco` and `gitleaks`: the range `merge_group.base_sha..head_sha`, the entry's own commits.
+- `claim`: passes at once. An entry was enqueued only with a green `claim` on its head, and a queue
+  commit has no pull request to read; `release` and `sweeper` do not run.
+- `e2e result`: `hack/e2e-decide.sh` runs the quickstart in the queue build when the entry's diff
+  against `base_sha` is e2e-relevant (`required=false`: this run's own quickstart is the evidence; a
+  lab status or label on the PR head says nothing about main plus the entry). Not relevant: skipped,
+  green. The base branch's copies of the rule and the gate (at `base_sha`) are used.
+
+Cost: one full `ci` run per queue build, plus a 25 minute e2e for relevant entries; set group size and
+concurrency in the ruleset to trade throughput against runner minutes (start at group size 1, merge
+method `MERGE`). A push to main after a queue merge still runs `decide_push`, which skips the heavy jobs
+only when the merge tree equals a green PR head; after a queue build that is rarely true, so main is
+tested once more (follow-up: accept the queue commit's own green check runs).
+
+Scripts, with the rule detected at run time (no queue: nothing changes):
+
+- `hack/pr-merge.sh` runs the same waits and reads, then `gh pr merge --merge --auto`, which enqueues
+  when the ruleset has a queue (output `added to the merge queue`). A PR must pass its pull request
+  checks, review and threads rules to be enqueued; the queue then re-runs the required checks on the
+  queue commit.
+- `hack/pr-wait.sh <PR>` prints `in the merge queue (<position> <state>)` while the PR is queued
+  (GraphQL `isInMergeQueue`/`mergeQueueEntry`; `gh pr view --json` has no queue fields) and ends with
+  `MERGED`. A PR that was queued and is open and out of the queue again exits **8** `DEQUEUED` (failed
+  queue build, conflict with an entry ahead, removed by hand; `gh` cannot remove an entry, the PR page
+  can). Read the queue build's failures on the PR page, fix, and run `pr-merge.sh` again.
+- `--admin` (CODEOWNERS paths): GitHub documents "Merge without waiting for requirements to be met
+  (bypass branch protections)" for administrators and bypass actors, a direct merge that skips the
+  queue and the review rule. The docs do not spell out the ruleset-bypass case for the `merge_queue`
+  rule, so the maintainer's session must confirm on the first sensitive-path PR after the ruleset
+  change; if `--admin` is refused, the fallback is the review, then a normal enqueue. Until
+  then, treat `--admin` as unverified under a queue.
 
 ### Review threads (#187)
 

@@ -14,6 +14,11 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+  # The merge queue (koinon-private#225): GitHub builds main plus the queued pull requests on a
+  # gh-readonly-queue/* branch and waits for every required check on that commit. A required job must
+  # report there too, so this workflow listens; hack/ci-skip-heavy.sh runs everything for it.
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
@@ -23,10 +28,12 @@ permissions:
 # or a re-run, on one head queue behind each other instead of killing a live run (a cancelled run reads
 # as FAILED to hack/pr-wait.sh). GitHub keeps one running and one pending run per group; a third run
 # on the same head replaces the pending one, which is fine: it is the same head and the same suite.
+# A merge group build (the queue) has its own group per queue commit: queue builds never cancel one
+# another (a cancelled required check would eject the entry and every entry behind it).
 # Runs on an OLDER head of the pull request are cancelled by hack/ci-supersede.sh (first step of
 # `changes`); a push to main never cancels or is cancelled. docs/dev/ci.md#one-run-per-head
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) || format('ci-push-{0}', github.sha) }}
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) || github.event_name == 'merge_group' && format('ci-mq-{0}', github.sha) || format('ci-push-{0}', github.sha) }}
   cancel-in-progress: false
 
 jobs:
@@ -786,6 +793,7 @@ jobs:
       - run: hack/ci-supersede-test.sh
       - run: hack/e2e-rerun-result-test.sh
       - run: hack/ci-concurrency-test.sh
+      - run: hack/ci-merge-group-test.sh
       - run: hack/ci-cache-test.sh
 
   # Main owns every CI cache (docs/dev/ci.md#cache-ownership, koinon-private#147). A pull request can read

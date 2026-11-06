@@ -35,6 +35,11 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
+  # The merge queue (koinon-private#225): `e2e result` is required, so it reports on the queue's commit.
+  # decide runs the quickstart there when the entry's own diff (against merge_group.base_sha) is
+  # e2e-relevant; that run is the evidence, no lab status exists for a queue commit.
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
   schedule:
@@ -59,7 +64,8 @@ permissions:
   contents: read
 
 # Pull requests: a new push cancels the old run. Main: one running, one pending, the newest pending
-# replaces the older (batching). Everything else (dispatch, nightly) runs alone.
+# replaces the older (batching). Everything else (dispatch, nightly, a merge queue build) runs alone:
+# a queue build is never cancelled (its group is its run id, cancel-in-progress is off for it).
 concurrency:
   group: ${{ github.event_name == 'push' && 'e2e-main' || github.event_name == 'pull_request' && format('e2e-kind-pr-{0}', github.ref) || format('e2e-kind-{0}-{1}', github.event_name, github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -94,6 +100,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.base_ref }}
+          MG_BASE: ${{ github.event.merge_group.base_sha }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           PR: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ github.token }}
@@ -101,10 +108,13 @@ jobs:
         run: |
           # Run the base branch's copy of the rule and the decision: a pull request must not be
           # able to change what decides whether it is tested. This PR's own copy only when the
-          # base has none (the commit that introduces them).
+          # base has none (the commit that introduces them). A merge queue build uses main as it was when
+          # the entry was built (merge_group.base_sha), for the same reason.
+          ref=""
+          if [[ $EVENT == pull_request ]]; then ref="origin/$BASE"; elif [[ $EVENT == merge_group ]]; then ref="$MG_BASE"; fi
           for f in needs-e2e e2e-decide; do
-            if [[ $EVENT == pull_request ]] && git show "origin/$BASE:hack/$f.sh" > "$RUNNER_TEMP/$f.sh" 2>/dev/null; then
-              echo "using hack/$f.sh from origin/$BASE"
+            if [[ -n $ref ]] && git show "$ref:hack/$f.sh" > "$RUNNER_TEMP/$f.sh" 2>/dev/null; then
+              echo "using hack/$f.sh from $ref"
             else
               cp "hack/$f.sh" "$RUNNER_TEMP/$f.sh"
             fi
@@ -304,6 +314,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.base_ref }}
+          MG_BASE: ${{ github.event.merge_group.base_sha }}
           DECIDE: ${{ needs.decide.result }}
           QUICKSTART: ${{ needs.quickstart.result }}
           REQUIRED: ${{ needs.decide.outputs.required }}
@@ -313,8 +324,11 @@ jobs:
           # The base branch's copy of the gate, like decide: a pull request must not be able to
           # change what decides whether its e2e is enough. This PR's own copy only when the base has none.
           if [[ $EVENT == pull_request ]]; then git fetch --no-tags --depth=1 origin "$BASE"; fi
+          if [[ $EVENT == merge_group ]]; then git fetch --no-tags --depth=1 origin "$MG_BASE"; fi
           if [[ $EVENT == pull_request ]] && git show "origin/$BASE:hack/e2e-gate.sh" > "$RUNNER_TEMP/e2e-gate.sh" 2>/dev/null; then
             echo "using hack/e2e-gate.sh from origin/$BASE"
+          elif [[ $EVENT == merge_group ]] && git show "$MG_BASE:hack/e2e-gate.sh" > "$RUNNER_TEMP/e2e-gate.sh" 2>/dev/null; then
+            echo "using hack/e2e-gate.sh from $MG_BASE"
           else
             cp hack/e2e-gate.sh "$RUNNER_TEMP/e2e-gate.sh"
           fi

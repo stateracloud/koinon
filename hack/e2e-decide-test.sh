@@ -68,6 +68,16 @@ want true "push with no green run to compare with runs" EVENT=push
 want true "push with e2e-relevant changes since the last green run" EVENT=push STUB_COVERED=abc123 STUB_FULL=0
 want false "push without them does not" EVENT=push STUB_COVERED=abc123 STUB_FULL=1
 want true "push: a rule failure fails closed" EVENT=push STUB_COVERED=abc123 STUB_FULL=2
+# koinon-private#225: the merge queue. The quickstart of the queue run is the evidence, never required from outside.
+MG=(EVENT=merge_group MG_BASE=abc123)
+want true "queue entry touching the e2e's files runs" "${MG[@]}" STUB_FORCED=0
+want true "queue entry that is e2e-relevant runs" "${MG[@]}" STUB_FULL=0
+want false "queue entry with nothing relevant does not run" "${MG[@]}"
+want true "queue entry: a forced-rule failure fails closed" "${MG[@]}" STUB_FORCED=2
+want true "queue entry: a full-rule failure fails closed" "${MG[@]}" STUB_FULL=2
+want true "queue entry without a base sha fails closed" EVENT=merge_group
+req false "queue entry never requires outside evidence" "${MG[@]}" STUB_FULL=0
+req false "queue entry never requires outside evidence (forced)" "${MG[@]}" STUB_FORCED=0
 want true "nightly always runs (drift detection)" EVENT=schedule STUB_COVERED=abc123 STUB_FULL=1
 
 # required: the pull request needs an e2e, whether or not it runs here.
