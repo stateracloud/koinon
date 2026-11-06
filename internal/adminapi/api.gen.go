@@ -66,6 +66,7 @@ func (e AgentThinkingUpdateThinking) Valid() bool {
 // Defines values for AuditEventActorKind.
 const (
 	AuditEventActorKindAgent  AuditEventActorKind = "agent"
+	AuditEventActorKindCli    AuditEventActorKind = "cli"
 	AuditEventActorKindSecret AuditEventActorKind = "secret"
 	AuditEventActorKindSystem AuditEventActorKind = "system"
 	AuditEventActorKindToken  AuditEventActorKind = "token"
@@ -76,6 +77,8 @@ const (
 func (e AuditEventActorKind) Valid() bool {
 	switch e {
 	case AuditEventActorKindAgent:
+		return true
+	case AuditEventActorKindCli:
 		return true
 	case AuditEventActorKindSecret:
 		return true
@@ -465,6 +468,7 @@ func (e ThinkingStateVersionSetting) Valid() bool {
 // Defines values for ListAuditEventsParamsActorKind.
 const (
 	ListAuditEventsParamsActorKindAgent  ListAuditEventsParamsActorKind = "agent"
+	ListAuditEventsParamsActorKindCli    ListAuditEventsParamsActorKind = "cli"
 	ListAuditEventsParamsActorKindSecret ListAuditEventsParamsActorKind = "secret"
 	ListAuditEventsParamsActorKindSystem ListAuditEventsParamsActorKind = "system"
 	ListAuditEventsParamsActorKindToken  ListAuditEventsParamsActorKind = "token"
@@ -475,6 +479,8 @@ const (
 func (e ListAuditEventsParamsActorKind) Valid() bool {
 	switch e {
 	case ListAuditEventsParamsActorKindAgent:
+		return true
+	case ListAuditEventsParamsActorKindCli:
 		return true
 	case ListAuditEventsParamsActorKindSecret:
 		return true

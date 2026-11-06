@@ -173,3 +173,11 @@ func value(e ast.Expr, consts map[string]string) string {
 	}
 	return ""
 }
+
+// keys forget must know what to do with a row of every column it may find sealed with a lost KEK.
+func TestForgetHasARuleForEveryColumn(t *testing.T) {
+	g := NewWithT(t)
+	for _, c := range keyscli.Columns {
+		g.Expect(keyscli.HasLostRule(c)).To(BeTrue(), "keys forget has no rule for %s.%s", c.Table, c.Column)
+	}
+}

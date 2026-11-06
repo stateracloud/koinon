@@ -308,6 +308,10 @@ type Pool struct {
 	sink *traceSink
 	// stopping is closed when Run's context ends: the pool drains. Nil (never closed) before Run.
 	stopping <-chan struct{}
+	// sweepRefused holds the retired repositories (org/agent/epoch) the sweep has refused and
+	// logged, so each is logged once per process; the SweepRefused gauge counts them every sweep.
+	// An entry goes when its row next passes the check (a fixed row is logged again if it regresses).
+	sweepRefused sync.Map
 }
 
 // DefaultDrainDeadline is Config.DrainDeadline's default.

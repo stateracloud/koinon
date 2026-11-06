@@ -704,8 +704,11 @@ SELECT agent_id, repository_epoch, prefix FROM (
 ) due
 WHERE due.credential_lost_at IS NOT NULL
    OR EXISTS (SELECT 1 FROM home_checkpoints c
+              JOIN home_repository_epochs later
+                ON later.org_id = c.org_id AND later.agent_id = c.agent_id AND later.repository_epoch = c.repository_epoch
               WHERE c.org_id = $1 AND c.agent_id = due.agent_id AND c.status = 'complete'
-                AND c.repository_epoch > due.repository_epoch)
+                AND c.repository_epoch > due.repository_epoch
+                AND later.credential_lost_at IS NULL AND later.deleted_at IS NULL)
 ORDER BY due.delete_after, due.agent_id, due.repository_epoch
 LIMIT $2::int
 `
@@ -725,7 +728,9 @@ type ListDueHomeRepositoriesRow struct {
 // longest overdue first so a row that keeps failing does not hold back the others. A repository past
 // its deadline is kept while it is the agent's newest restorable home: it goes only once its
 // password is lost (nothing restores from it any more) or a later epoch holds a complete checkpoint
-// (a new epoch starts empty, so until its first backup the retired one is all there is).
+// (a new epoch starts empty, so until its first backup the retired one is all there is). That later
+// epoch must itself still restore: neither lost nor deleted (a later epoch is always a
+// home_repository_epochs row, since epoch 0 is the first).
 func (q *Queries) ListDueHomeRepositories(ctx context.Context, arg ListDueHomeRepositoriesParams) ([]ListDueHomeRepositoriesRow, error) {
 	rows, err := q.db.Query(ctx, listDueHomeRepositories, arg.OrgID, arg.MaxRows)
 	if err != nil {

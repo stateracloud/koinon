@@ -55,7 +55,9 @@ WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @reposito
 -- longest overdue first so a row that keeps failing does not hold back the others. A repository past
 -- its deadline is kept while it is the agent's newest restorable home: it goes only once its
 -- password is lost (nothing restores from it any more) or a later epoch holds a complete checkpoint
--- (a new epoch starts empty, so until its first backup the retired one is all there is).
+-- (a new epoch starts empty, so until its first backup the retired one is all there is). That later
+-- epoch must itself still restore: neither lost nor deleted (a later epoch is always a
+-- home_repository_epochs row, since epoch 0 is the first).
 SELECT agent_id, repository_epoch, prefix FROM (
     SELECT h.agent_id, 0::integer AS repository_epoch, h.prefix, h.delete_after, h.credential_lost_at
     FROM home_repositories h
@@ -67,8 +69,11 @@ SELECT agent_id, repository_epoch, prefix FROM (
 ) due
 WHERE due.credential_lost_at IS NOT NULL
    OR EXISTS (SELECT 1 FROM home_checkpoints c
+              JOIN home_repository_epochs later
+                ON later.org_id = c.org_id AND later.agent_id = c.agent_id AND later.repository_epoch = c.repository_epoch
               WHERE c.org_id = @org_id AND c.agent_id = due.agent_id AND c.status = 'complete'
-                AND c.repository_epoch > due.repository_epoch)
+                AND c.repository_epoch > due.repository_epoch
+                AND later.credential_lost_at IS NULL AND later.deleted_at IS NULL)
 ORDER BY due.delete_after, due.agent_id, due.repository_epoch
 LIMIT @max_rows::int;
 
