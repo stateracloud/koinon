@@ -27,11 +27,13 @@ test_patterns = [
   "web/src/**/*.test.tsx",
   "hack/*-test.sh",
   "hack/*_test.sh",
+  "web/src/test-setup.ts",
+  "web/src/test-utils.tsx",
+  "web/src/test-fixtures.ts",
 ]
 
-# Go modules: no import_root needed (it is only for GOPATH layouts).
-[[analyzers]]
-name = "go"
+# No Go analyzer for now (#198): DeepSource supports Go up to 1.26 and go.mod is newer, so its check
+# failed on every PR with 0 findings. Go is covered by `make lint` and CodeQL. Exit condition in #198.
 
 [[analyzers]]
 name = "javascript"
