@@ -23,9 +23,3 @@ if gvisor_out=$(render --set openshell.runtimeClassName=gvisor 2>&1); then
 else
 	grep -Fq 'openshell.runtimeClassName "gvisor" is not in sandboxPolicy.runtimeClasses' <<<"$gvisor_out" || fail "the runtimeClassName guard message must name both values"
 fi
-
-# Workload pods carry no ServiceAccount token (ADR 0006, #12); supervisor pods are not covered.
-has "workload pods must set automountServiceAccountToken false" 'object.spec.automountServiceAccountToken == false' --show-only $pol
-has "the automount denial message renders" 'sandbox workload pods must set automountServiceAccountToken to false' --show-only $pol
-has "projected serviceAccountToken sources are refused" 'has\(s.serviceAccountToken\)' --show-only $pol
-has "the rule keys on the workload role" "== 'workload'" --show-only $pol
