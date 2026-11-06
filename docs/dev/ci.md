@@ -341,8 +341,8 @@ start time decides instead. It exits 6 `STALE-HEAD` when the PR's head stays dif
 
 Strict "up to date with main" made every merge put every other open PR behind. The merge queue
 builds main plus the queued PRs on a `gh-readonly-queue/main/...` branch, runs the required checks
-there and merges in order, so strict stays true without manual syncs (the `needs-update` updater bot has
-nothing to do for a queued PR). The repository half is in place and inert until the ruleset has a
+there and merges in order, so the ruleset drops strict (ADR 0094 decision 4) and nothing syncs a branch by
+hand. The repository half is in place and inert until the ruleset has a
 `merge_queue` rule; the ruleset change itself is made by the maintainer's session through
 `gh api` (backup, diff), never from a pull request.
 
@@ -368,9 +368,16 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   is re-checked at queue time. Not relevant: green. Running the e2e in the queue instead is deferred (ADR
   0094 decision 4, Alternatives); it needs a new ADR.
 
-Cost: one full `ci` run per queue build, and no e2e; set group size and
-concurrency in the ruleset to trade throughput against runner minutes (start at group size 1, merge
-method `MERGE`). A push to main after a queue merge still runs `decide_push`, which skips the heavy jobs
+Ruleset values (ADR 0094 decision 4), set by the maintainer's session: `strict_required_status_checks_policy`
+`false`, `merge_queue` with grouping strategy `ALLGREEN`, merge method `MERGE`, 1 entry merged per group (`min` and `max`
+group size 1), at most 5 builds at once, check timeout 60 minutes.
+
+The updater: `updater.yml` and `claim.sh update-oldest` stay until the queue is live. Meanwhile `update-oldest` skips
+a PR with `isInMergeQueue` (pushing to a queued PR's branch drops it from the queue) and is a no-op once the ruleset has
+a `merge_queue` rule (read at run time, as `pr-merge.sh` does). Retiring `updater.yml`, `update-oldest`, `update_target`
+and the `needs-update` label is follow-up work: exit condition is the first week of green queue merges with strict off.
+
+Cost: one full `ci` run per queue build, and no e2e; the ruleset values above trade throughput against runner minutes. A push to main after a queue merge still runs `decide_push`, which skips the heavy jobs
 only when the merge tree equals a green PR head; after a queue build that is rarely true, so main is
 tested once more (follow-up: accept the queue commit's own green check runs).
 

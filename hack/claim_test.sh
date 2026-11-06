@@ -41,6 +41,7 @@ ut_pr() { # NUMBER CREATED DRAFT MERGESTATE AUTOMERGE ROLLUP
   jq -n --argjson n "$1" --arg c "$2" --argjson d "$3" --arg m "$4" --argjson a "$5" --argjson r "$6" \
     '{number: $n, createdAt: $c, isDraft: $d, mergeStateStatus: $m, autoMergeRequest: (if $a then {enabledAt: $c} else null end), statusCheckRollup: $r}'
 }
+ut_pr_q() { ut_pr "$@" | jq '. + {isInMergeQueue: true}'; }
 ut_req='["a","b","c"]'
 ut() { jq -s . | update_target "$ut_req"; }
 cr() { # NAME STATUS CONCLUSION STARTED -> a CheckRun
@@ -68,6 +69,8 @@ eq "updater: a running head is left alone" "$(ut_pr 5 2026-01-02 false BEHIND tr
 eq "updater: no checks at all is not green" "$(ut_pr 5 2026-01-02 false BEHIND true '[]' | ut)" ""
 eq "updater: up to date is left alone" "$(ut_pr 5 2026-01-02 false CLEAN true "$ut_ok" | ut)" ""
 eq "updater: a conflict is left to the needs-update label" "$(ut_pr 5 2026-01-02 false DIRTY true "$ut_ok" | ut)" ""
+eq "updater: a pull request in the merge queue is left alone" "$(ut_pr_q 5 2026-01-02 false BEHIND true "$ut_ok" | ut)" ""
+eq "updater: a pull request outside the queue is still updated" "$(ut_pr 5 2026-01-02 false BEHIND true "$ut_ok" | jq '. + {isInMergeQueue: false}' | ut)" 5
 eq "updater: without auto-merge is left alone" "$(ut_pr 5 2026-01-02 false BEHIND false "$ut_ok" | ut)" ""
 eq "updater: the oldest eligible one wins, skipping a red older one" \
   "$({ ut_pr 3 2026-01-01 false BEHIND true "$ut_red"; ut_pr 9 2026-01-03 false BEHIND true "$ut_ok"; ut_pr 7 2026-01-02 false BEHIND true "$ut_ok"; } | ut)" 7
