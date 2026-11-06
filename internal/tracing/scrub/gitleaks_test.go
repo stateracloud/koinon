@@ -99,7 +99,7 @@ func TestGitleaksExemptions(t *testing.T) {
 	for name, in := range map[string]string{
 		"git sha":    "commit 3f2b8c1e9a4d4e7b8c215d6f7a8b9c0d1e2f3a4b fixes it",
 		"trace id":   `{"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7"}`,
-		"digest":     "image@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+		"digest":     "registry.example/image@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
 		"prose":      "The key to a good review is to read the diff and the token budget before the tests.",
 		"model name": "claude-sonnet-4-5-20250929 via openrouter",
 	} {
