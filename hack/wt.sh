@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Short-lived git worktrees under one root, so agents do not carry long paths or worktree plumbing.
-# The root is ${KOINON_WT_ROOT:-${TMPDIR:-/tmp}/kw}. Run it from any checkout of the repository; it
+# The root is ${KOINON_WT_ROOT:-/tmp/kw}, independent of TMPDIR. Run it from any checkout; it
 # never changes the checkout you run it from.
 #
 # Usage:
@@ -38,8 +38,7 @@
 set -euo pipefail
 export GH_PAGER=cat PAGER=cat
 
-tmp=${TMPDIR:-/tmp}
-root=${KOINON_WT_ROOT:-${tmp%/}/kw}
+root=${KOINON_WT_ROOT:-/tmp/kw}
 root=${root%/}
 
 die() {
@@ -100,10 +99,11 @@ cmd_new() {
     shift
   done
   check_name "$name"
-  local dir=$root/$name
-  [ ! -e "$dir" ] || die "$dir already exists"
   git fetch -q origin >&2 || die "git fetch origin failed"
   mkdir -p "$root"
+  local dir
+  dir=$(cd "$root" && pwd -P)/$name
+  [ ! -e "$dir" ] || die "$dir already exists"
   if [ -n "$branch" ]; then
     git worktree add -q -b "$branch" "$dir" "$from" >&2
   else

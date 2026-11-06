@@ -1,4 +1,9 @@
 {
+  "sandbox": {
+    "filesystem": {
+      "allowWrite": ["/tmp/kw", "/private/tmp/kw"]
+    }
+  },
   "hooks": {
     "PreToolUse": [
       {
