@@ -27,6 +27,23 @@ mid-run and still cleans up after a crashed one. Ryuk stays on everywhere; do no
 `TESTCONTAINERS_RYUK_DISABLED` in CI. Runs without pgserver (a single-package `go test`) are not
 covered; the upgrade path is #173. `hack/go-test-test.sh` pins the export and its order.
 
+### The gateway behaviour suite (#272, ADR 0097 step 1)
+
+`internal/gateway/gatewaytest` is what Koinon needs from a gateway, stated as behaviour a client or
+the spend ledger sees. `internal/gateway/standalone` runs it against the pinned agentgateway image
+(`internal/gateway/kubernetes` against kind); in step 2 Koinon's own gateway runs the same specs by
+supplying a `gatewaytest.Env`. Cases: key refusals and the do-not-retry marker, header allowlist
+and `kgw_` refusal, usage per API format and dialect (`usagespec.go`), guard coverage per MCP
+message kind (`mcpkindspec.go`), the budget stop with the overshoot measured (`budgetspec.go`),
+and a returned revision being served (`revisionspec.go`). The rendered config's ban on
+`response.body` and `bodyPrefix` stays in the driver render tests.
+
+A case the pinned gateway fails is `gatewaytest.KnownGap("#N", ...)`, and `N` is listed with its
+reason in `gatewaytest.KnownGaps`. The case fails when the gap closes, so an upgrade that fixes one
+flips it, and an upgrade that breaks a passing case fails as usual. A gateway bump is "suite green";
+a changed `KnownGaps` list is reviewed like code. The overshoot and the outcome of each MCP kind are
+written to the Ginkgo report (`-v`, or the JSON report).
+
 ### The agentgateway test image (#238)
 
 The `internal/gateway/standalone` and `internal/ledger` suites start a real agentgateway container.

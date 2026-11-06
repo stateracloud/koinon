@@ -123,12 +123,17 @@ func (r reply) messageID() string { return fmt.Sprintf("msg_fake_%d", r.seq) }
 // anthropicUsage reports uncached input as input_tokens and cache reads and writes separately, as
 // the Messages API does.
 func anthropicUsage(u Usage, outputTokens int) map[string]any {
-	return map[string]any{
+	m := map[string]any{
 		"input_tokens":                u.InputTokens - u.CachedInputTokens - u.CacheWriteTokens,
 		"cache_creation_input_tokens": u.CacheWriteTokens,
 		"cache_read_input_tokens":     u.CachedInputTokens,
 		"output_tokens":               outputTokens,
 	}
+	// The thinking split is on the final count only; message_start (outputTokens 1) has none.
+	if u.ReasoningTokens > 0 && outputTokens == u.OutputTokens {
+		m["output_tokens_details"] = map[string]any{"thinking_tokens": u.ReasoningTokens}
+	}
+	return m
 }
 
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {

@@ -78,6 +78,10 @@ type Gateway struct {
 	URL string
 	// Logs returns the gateway's recent log, for failure reports. Optional.
 	Logs func(ctx context.Context) string
+	// Observe returns what the gateway recorded about the requests of one key (Key.ID), oldest
+	// first. Optional: when nil the specs read it from Logs as agentgateway's access log
+	// ([ObservedFromAgentgatewayLog]); a gateway of Koinon's own sets it to read its usage record.
+	Observe func(ctx context.Context, keyID string) ([]Observed, error)
 	// Stop tears the gateway down. Optional.
 	Stop func(ctx context.Context) error
 }
@@ -97,6 +101,10 @@ func Register(env Env) {
 	mcpServersSpec(env)
 	loneTargetSpec(env)
 	guardSpec(env)
+	usageSpec(env)
+	mcpKindSpec(env)
+	budgetOvershootSpec(env)
+	revisionSpec(env)
 }
 
 func llmSpec(env Env) {
