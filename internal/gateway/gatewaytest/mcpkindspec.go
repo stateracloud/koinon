@@ -95,8 +95,9 @@ func canaryServer(log *headerLog) *httptest.Server {
 // the guard's verdict is what sets the session's untrusted-input flag (ADR 0091). A kind the
 // gateway refuses, or does not deliver at all, satisfies it too.
 //
-// A kind that reaches the agent unseen is an expected failure naming #254; Koinon's fail-closed
-// rule for it is a separate case in guardspec.go.
+// A kind that reaches the agent unseen is an expected failure naming #254 on a driver that lists
+// it in Env.KnownGaps. Koinon's fail-closed rule for it, with the real leak guard, is not part of
+// this suite (it uses a fake guard); see the follow-up on #272.
 func mcpKindSpec(env Env) {
 	const target = "acme-canary"
 	agent := gateway.AgentRef{Org: "acme", Name: "canary-reader"}
@@ -252,11 +253,12 @@ func mcpKindSpec(env Env) {
 						Expect(seen).NotTo(BeEmpty(), "%s reached the agent and the guard never saw it", k.name)
 					}
 				}
-				if k.gap != "" {
-					KnownGap(k.gap, func() {
-						Expect(delivered).To(BeTrue(), "the kind must reach the agent for the gap to show; it was refused or not delivered")
-						check()
-					})
+				if k.gap != "" && env.KnownGaps[k.gap] != "" {
+					// An undelivered kind satisfies the property, so the gap is closed (or the trigger is broken).
+					if !delivered {
+						Fail(k.name + " did not reach the agent: the gap is closed or the trigger is broken; remove the KnownGap")
+					}
+					KnownGap(env, k.gap, func() { Expect(seen).NotTo(BeEmpty(), "%s reached the agent and the guard never saw it", k.name) })
 					return
 				}
 				check()

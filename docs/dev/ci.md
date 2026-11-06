@@ -38,10 +38,12 @@ message kind (`mcpkindspec.go`), the budget stop with the overshoot measured (`b
 and a returned revision being served (`revisionspec.go`). The rendered config's ban on
 `response.body` and `bodyPrefix` stays in the driver render tests.
 
-A case the pinned gateway fails is `gatewaytest.KnownGap("#N", ...)`, and `N` is listed with its
-reason in `gatewaytest.KnownGaps`. The case fails when the gap closes, so an upgrade that fixes one
+A case the pinned gateway fails is `gatewaytest.KnownGap(env, "#N", ...)`. A driver lists the gaps
+of its gateway in `Env.KnownGaps` (agentgateway v1.7.0: `gatewaytest.AgentgatewayV170Gaps`, with
+the reason of each); a driver that does not list `N` runs the case plainly, so Koinon's own gateway
+passes the same suite untouched. The case fails when the gap closes, so an upgrade that fixes one
 flips it, and an upgrade that breaks a passing case fails as usual. A gateway bump is "suite green";
-a changed `KnownGaps` list is reviewed like code. The overshoot and the outcome of each MCP kind are
+a changed gap list is reviewed like code. The overshoot and the outcome of each MCP kind are
 written to the Ginkgo report (`-v`, or the JSON report).
 
 ### The agentgateway test image (#238)

@@ -69,6 +69,9 @@ type Env struct {
 	// marker contract (gateway.DoNotRetry) holds for every other refusal; a consumer treats these as
 	// final by their status.
 	Unmarked []string
+	// KnownGaps maps an issue ("#N") to why this driver's gateway fails the cases wrapped in
+	// [KnownGap] for it. A gateway without the gap leaves it out and the case runs plainly.
+	KnownGaps map[string]string
 }
 
 // Gateway is a started gateway under test.

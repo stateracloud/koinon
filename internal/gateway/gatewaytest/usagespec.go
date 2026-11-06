@@ -222,7 +222,7 @@ func usageSpec(env Env) {
 			}
 			if c.format == modelformat.Anthropic {
 				It("records the thinking split of "+c.name+" (expected failure, #78)", func(ctx SpecContext) {
-					KnownGap("#78", func() { check(ctx) })
+					KnownGap(env, "#78", func() { check(ctx) })
 				}, SpecTimeout(time.Minute))
 			} else {
 				It("records the reasoning split of "+c.name, check, SpecTimeout(time.Minute))
