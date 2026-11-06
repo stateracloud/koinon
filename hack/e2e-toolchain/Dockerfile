@@ -34,6 +34,13 @@ ARG KUBECTL_SHA256_arm64=922df28df248cc00a9e025f947704f1d1482de64ece54cfe57e61f1
 # GOTOOLCHAIN=local: the image's Go is the one go.mod asks for; never download another.
 ENV GOTOOLCHAIN=local
 
+# The apt packages are not version-pinned (hadolint DL3008) on purpose: this is a local dev and lab
+# toolchain, not a shipped image, and the base is pinned by digest. Debian bookworm's archive drops
+# superseded versions, so an exact pin would break the build as soon as a security update lands,
+# while the flavor images pin against an Ubuntu snapshot (flavors/opencode/Dockerfile) because they
+# ship. Everything that decides the e2e's behaviour (go, kind, ko, helm, kubectl, buildx) is pinned
+# above by version and sha256.
+# hadolint ignore=DL3008
 RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update \
  && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends ca-certificates curl git jq make netcat-openbsd openssl procps unzip \
  && rm -rf /var/lib/apt/lists/*
