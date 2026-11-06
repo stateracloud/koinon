@@ -482,14 +482,16 @@ func (r *runner) execute(ctx context.Context) error {
 	r.vcfg = vc
 	r.flavor = agent.Flavor
 	r.taint.setMCPPrefix(mcpToolPrefix(agent.Flavor))
+	// A code-host connection whose credential was lost fails the run at once, before the waits for
+	// the model and the sandbox: nothing it would wait for can bring the credential back.
+	if err := r.checkCodeHostCredential(fctx); err != nil {
+		return r.execErr(ctx, "code-host connection", err)
+	}
 	// The gateway may not serve the model yet: a new provider's key file is still reaching the
 	// gateway pod (issue koinon-private#174). The reconciler starts the sandbox meanwhile, because this run is
 	// demand for it, so the two waits overlap.
 	if err := r.waitModel(fctx, model); err != nil {
 		return r.execErr(ctx, "wait for the model", err)
-	}
-	if err := r.checkCodeHostCredential(fctx); err != nil {
-		return r.execErr(ctx, "code-host connection", err)
 	}
 	sb, err := r.waitSandbox(fctx)
 	if err != nil {

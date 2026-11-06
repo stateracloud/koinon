@@ -106,15 +106,29 @@ func (g *ghEnv) everythingInTheSandbox() string {
 }
 
 var _ = Describe("A repo-helper agent on Gitea", func() {
-	It("fails the run with the reason, before the sandbox, when the connection's credential was lost", func(ctx SpecContext) {
+	It("fails the run with the reason, before the model and the sandbox, when the connection's credential was lost", func(ctx SpecContext) {
 		g := newGiteaEnv(ctx)
 		// What keys forget leaves behind (ADR 0085 decision 13): no envelope, and the mark.
 		tag, err := db.Exec(ctx, `UPDATE connections SET secret_envelope = NULL, credential_lost_at = now() WHERE org_id = $1`, g.org)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(tag.RowsAffected()).To(BeEquivalentTo(1))
+		// A priced model the gateway does not serve yet: the run would wait for it (minutes), but a
+		// lost connection fails it before that wait.
+		var providerID pgtype.UUID
+		Expect(db.QueryRow(ctx, `INSERT INTO providers (org_id, name, type, url) VALUES ($1, 'pending-upstream', 'openai', 'http://fakemodel.example.com/v1') RETURNING id`,
+			g.org).Scan(&providerID)).To(Succeed())
+		_, err = db.Exec(ctx, `INSERT INTO models (org_id, provider_id, name) VALUES ($1, $2, $3)`, g.org, providerID, model)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by)
+			VALUES ($1, $2, jsonb_build_object('provider', 'openai', 'match', jsonb_build_object('glob', $3::text),
+			'validFrom', '2020-01-01', 'prices', jsonb_build_object('input', '1', 'output', '2'),
+			'tokenizer', 'bytes', 'ratio', '3.0', 'maxOutput', 10), now() - interval '1 hour', 'test')`,
+			g.org, uniq("price"), model)
+		Expect(err).NotTo(HaveOccurred())
 		r := g.enqueue(ctx, g.task(ctx, "fix the typo"))
 		g.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(eventOf(events(ctx, r), "run.waiting_for_model")).To(BeEmpty(), "it never waits for the model")
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring(
 			`the stored credential of the gitea connection "lab" was lost; create the connection again on the Connections page`))
 		Expect(g.gw.Execs()).To(BeEmpty(), "nothing runs in a sandbox")
