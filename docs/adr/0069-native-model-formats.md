@@ -581,7 +581,7 @@ read `response.body` (AGENTS.md, working rules).
 
 ### Decision (procoduck, 2026-11-06)
 
-1. **`spend_entries.reasoning_known boolean`** (migration 00061, nullable, expand only per ADR 0085)
+1. **`spend_entries.reasoning_known boolean`** (migration 00062, nullable, expand only per ADR 0085)
    says whether `reasoning_tokens` is the provider's split. The OTLP decoder sets it when the gateway
    logged `koinon.reasoning`, a 0 included; an absent field writes `false` and 0 tokens.
 2. **Legacy rows** (NULL) read as `coalesce(reasoning_known, reasoning_tokens > 0)`: a stored split
