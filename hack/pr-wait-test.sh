@@ -402,8 +402,8 @@ TIMEOUT"
 
 # 7b2. only required checks decide: third-party checks (DeepSource, CodeRabbit, Socket) are advisory
 printf 'lint\ngo\n' >"$FAKE_DIR/rules"
-ds_bad=$(cr "DeepSource: Go" COMPLETED FAILURE 71)
-ds_pend=$(cr "CodeRabbit" IN_PROGRESS "" 72)
+ds_bad='{"context":"DeepSource: Go","state":"FAILURE","targetUrl":"https://deepsource.io/x"}' # a StatusContext, as live
+ds_pend='{"context":"CodeRabbit","state":"PENDING","targetUrl":"https://coderabbit.ai/x"}'
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$ds_bad")"
 printf 'lint\ngo\n' >"$FAKE_DIR/rules"
 run 7 --checks --interval 0
@@ -423,6 +423,7 @@ seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$ds_bad")"
 touch "$FAKE_DIR/rules-fail"
 run 7 --checks --interval 0
 expect "required contexts unreadable: fail closed, exit 2" 2 "pr-wait: cannot read the required status checks of the base branch; not judging checks"
+[ "$(grep -c '/rules/branches/' "$FAKE_DIR/calls")" = 4 ] || { echo "FAIL: the rules read is tried 4 times" >&2; fail=1; }
 
 # 7c. (koinon-private#647) a draft is never green; after ready_for_review the draft's runs are ignored
 seq_set '{"state":"OPEN","isDraft":true,"mergeStateStatus":"BLOCKED","mergeCommit":null,"statusCheckRollup":[{"name":"quick checks","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-01T10:00:00Z"}]}'

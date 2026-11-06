@@ -151,7 +151,9 @@ fi
 # BLOCKED with every required context green: unresolved review threads (the ruleset's
 # required_review_thread_resolution, #187; the wait above already checks, but threads can arrive during it).
 # Never resolved from here; the PR is not merged and --auto is not enabled on a PR that cannot merge.
-if [ "$(jq -r '.mergeStateStatus // ""' <<<"$json")" = BLOCKED ]; then
+# Read whatever mergeStateStatus says: GitHub often reports UNKNOWN right after a push, and --admin
+# bypasses the rule, so a BLOCKED-only read could admin-merge over unresolved threads.
+{
   trc=0
   threads=$("$threads_sh" "$pr" 2>&1) || trc=$?
   case $trc in
@@ -167,7 +169,7 @@ if [ "$(jq -r '.mergeStateStatus // ""' <<<"$json")" = BLOCKED ]; then
     exit 2
     ;;
   esac
-fi
+}
 
 mode=--auto
 [ "$admin" = 0 ] || mode=--admin

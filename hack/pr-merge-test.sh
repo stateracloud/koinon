@@ -201,7 +201,10 @@ check "BLOCKED with unreadable threads is refused (fail closed)" 2 nomerge
 grep -q 'cannot read review threads; not merging' <<<"$out" || { echo "FAIL: names the unreadable threads" >&2; fail=1; }
 setup false "$green"
 THREADS_RC=7 run 7 --admin
-check "a CLEAN PR does not read threads" 0 merge
-grep -q '^threads' "$FAKE_DIR/calls" && { echo "FAIL: threads read on a CLEAN PR" >&2; fail=1; }
+check "a CLEAN PR with unresolved threads is refused (threads are always read)" 7 nomerge
+grep -q '^threads' "$FAKE_DIR/calls" || { echo "FAIL: threads not read on a CLEAN PR" >&2; fail=1; }
+setup false "$green"
+MSTATE=UNKNOWN THREADS_RC=7 run 7 --admin
+check "an UNKNOWN PR with unresolved threads is refused under --admin" 7 nomerge
 
 exit "$fail"

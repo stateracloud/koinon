@@ -55,7 +55,7 @@
 #
 # Output lines: `checks 7/9 pending: go,web`, `FAILED go (run 123)`, `MERGED abc1234`,
 # `needs-update`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
-# Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout,
+# Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout (or the required contexts / review threads unreadable),
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
 #       6 stale PR head (with --checks), 7 unresolved review threads (BLOCKED with --checks, all green), 64 usage.
 # Test hook: PR_WAIT_THREADS replaces hack/pr-threads.sh.
@@ -185,11 +185,18 @@ shown() { if [ "$alias_show" = 1 ] && [ "$1" = quickstart ]; then echo e2e; else
 ctx_ok=0 ctxs=""
 load_contexts() {
   [ "$ctx_ok" = 0 ] || return 0
-  local out
-  if out=$(gh api "repos/{owner}/{repo}/rules/branches/$1" \
-    --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique | .[]' 2>/dev/null); then
-    ctxs=$out ctx_ok=1
-  fi
+  local out try
+  local -a sleeps
+  read -r -a sleeps <<<"${PR_THREADS_RETRY_SLEEPS:-2 5 15}" # the same retries (and test override) as pr-threads.sh
+  for ((try = 0; try <= ${#sleeps[@]}; try++)); do
+    if out=$(gh api "repos/{owner}/{repo}/rules/branches/$1" \
+      --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique | .[]' 2>/dev/null); then
+      ctxs=$out ctx_ok=1
+      return 0
+    fi
+    [ "$try" -lt "${#sleeps[@]}" ] && sleep "${sleeps[$try]}"
+  done
+  return 0
 }
 
 no_live=0 last=""
