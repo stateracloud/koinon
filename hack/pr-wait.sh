@@ -205,14 +205,15 @@ load_contexts() {
 }
 
 # queue_state <PR>: `queued <position> <state>` while the PR is in the base branch's merge queue
-# (#225), else `no`. `gh pr view --json` has no queue fields, so GraphQL; best effort: an
-# API error reads as `no` (a repository without a queue answers `no` too).
+# (#225), `no` when the answer says it is not (a repository without a queue answers `no` too), and
+# `unknown` when the answer cannot be read (gh or jq failed, a GraphQL error, no pullRequest object).
+# `gh pr view --json` has no queue fields, so GraphQL. Callers must not take `unknown` for "left the queue".
 # shellcheck disable=SC2016 # $owner, $repo, $number are GraphQL variables
 queue_query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { isInMergeQueue mergeQueueEntry { position state } } } }'
 queue_state() {
   local raw
-  raw=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -F number="$1" -f query="$queue_query" 2>/dev/null) || { echo no; return 0; }
-  jq -r '.data.repository.pullRequest | if (type == "object" and .isInMergeQueue == true) then "queued \(.mergeQueueEntry.position // "?") \(.mergeQueueEntry.state // "")" else "no" end' <<<"$raw" 2>/dev/null || echo no
+  raw=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -F number="$1" -f query="$queue_query" 2>/dev/null) || { echo unknown; return 0; }
+  jq -r '.data.repository.pullRequest | if type != "object" then "unknown" elif .isInMergeQueue == true then "queued \(.mergeQueueEntry.position // "?") \(.mergeQueueEntry.state // "")" else "no" end' <<<"$raw" 2>/dev/null || echo unknown
 }
 
 no_live=0 last="" was_queued=0 dq_polls=0
@@ -255,6 +256,18 @@ while :; do
       if [ $((SECONDS - start)) -ge "$timeout" ]; then echo "TIMEOUT"; exit 2; fi
       [ "$interval" -eq 0 ] || sleep "$interval"
       continue
+      ;;
+    unknown)
+      # The queue state could not be read (rate limit, outage). Once the PR was queued that says nothing about
+      # whether it left: keep waiting. It neither counts toward dq_polls nor resets it, so DEQUEUED still needs
+      # two real "not queued" answers in a row, however many unreadable ones sit between them. Before anything
+      # was queued it is read as "not queued", as it always was.
+      if [ "$was_queued" = 1 ]; then
+        emit "merge queue state unreadable; waiting"
+        if [ $((SECONDS - start)) -ge "$timeout" ]; then echo "TIMEOUT"; exit 2; fi
+        [ "$interval" -eq 0 ] || sleep "$interval"
+        continue
+      fi
       ;;
     *)
       if [ "$was_queued" = 1 ]; then

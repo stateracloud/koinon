@@ -54,7 +54,9 @@ if [ "$1 $2" = "api graphql" ] && [[ $* == *mergeQueueEntry* ]]; then # the queu
   [ -f "$FAKE_DIR/queue" ] || { echo '{"data":{"repository":{"pullRequest":{"isInMergeQueue":false,"mergeQueueEntry":null}}}}'; exit 0; }
   m=$(($(cat "$FAKE_DIR/qn" 2>/dev/null || echo 0) + 1))
   echo "$m" >"$FAKE_DIR/qn"
-  sed -n "${m}p" "$FAKE_DIR/queue" | grep . || tail -n 1 "$FAKE_DIR/queue"
+  l=$(sed -n "${m}p" "$FAKE_DIR/queue" | grep . || tail -n 1 "$FAKE_DIR/queue")
+  [ "$l" != FAIL ] || exit 1 # an API failure
+  echo "$l"
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then # the review threads (hack/pr-threads.sh): $FAKE_DIR/threads holds the pages as gh prints them
@@ -622,6 +624,23 @@ printf '%s\n' "$q1" >"$FAKE_DIR/queue"
 run 7 --interval 0 --timeout 0
 expect "a queued PR times out like any wait" 2 "in the merge queue (2 QUEUED)
 TIMEOUT"
+# An unreadable queue state (API failure) while queued is not a dequeue: keep waiting.
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" \
+  "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" "$(pr MERGED CLEAN abc1234def "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n' "$q1" FAIL FAIL "$qno" >"$FAKE_DIR/queue"
+rm -f "$FAKE_DIR/qn"
+run 7 --interval 0
+expect "queued, two API failures, then MERGED: keeps waiting and exits 0" 0 "in the merge queue (2 QUEUED)
+merge queue state unreadable; waiting
+MERGED abc1234"
+# Unreadable answers neither count toward nor reset the two not-queued polls that make a dequeue.
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n' "$q1" FAIL FAIL "$qno" "$qno" >"$FAKE_DIR/queue"
+rm -f "$FAKE_DIR/qn"
+run 7 --interval 0
+expect "queued, two API failures, then two real not-queued polls: DEQUEUED" 8 "in the merge queue (2 QUEUED)
+merge queue state unreadable; waiting
+DEQUEUED: PR 7 left the merge queue without merging (the queue build failed, it conflicted with an entry ahead, or it was removed); read the queue build's failures on the PR page, fix, and enqueue again with hack/pr-merge.sh"
 # --checks judges the head's checks and never asks the queue (pr-merge --admin on an enqueued PR).
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
 printf '%s\n' "$q1" >"$FAKE_DIR/queue"
