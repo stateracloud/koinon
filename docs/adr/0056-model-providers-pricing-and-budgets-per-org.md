@@ -685,17 +685,22 @@ dearer provider. The maintainers decided (2026-10-31, on the issue) that the bil
    charged and the 1% flag shows the gap. The metadata records `byok` and `upstream_cost_usd`.
 5. **Direct providers charge the catalog price.** Anthropic and OpenAI answer no per-request cost,
    so their entries stay at Koinon's price (the org's override, else the list). Each entry now
-   records its `provider_id`.
+   records its `provider_id`; a deleted provider leaves its entries with none (`ON DELETE SET NULL`).
 6. **Daily reconciliation per key.** A direct provider may hold a second, optional credential, a
    cost API key (an Anthropic Admin key or an OpenAI admin key), sealed like the inference key in
    `providers.cost_api_key` (its own AAD binding, rewrapped and forgotten with the other envelope
    columns; `cost_api_key_lost_at` marks a forgotten one), and a `cost_scope`: the Anthropic
-   workspace (`wrkspc_…`, or `default`) or the OpenAI project (`proj_…`) that holds the provider's
-   inference key. The providers' cost APIs report by workspace or project, not by key, so the scope
-   must hold this key alone for the figures to compare. koinon-reconciler, once a day per provider,
-   reads the scope's cost for each of the last three complete UTC days (the reports are revised for
-   a while) from the provider's pinned cost endpoint, never a URL from the provider record and with
-   no redirect, and records in `provider_cost_reconciliations` the ledger's sum and count for the
+   workspace (`wrkspc_…`, or `default`) that holds the provider's inference key, or for OpenAI the
+   project (`proj_…`) that holds it or the key's own ID (`key_…`). Anthropic's cost report is by
+   workspace, not by key, so there the workspace must hold this key alone for the figures to
+   compare; OpenAI's costs API filters and groups by API key (`api_key_ids`, `group_by=api_key_id`),
+   so a `key_…` scope compares exactly one key. koinon-reconciler, once a day per provider, reads the
+   scope's cost for each of the last three complete UTC days (the reports are revised for a while)
+   from the provider's pinned cost endpoint, never a URL from the provider record and with no
+   redirect. It asks for one bucket (`limit=1`) and reads only the bucket that starts at the day; a
+   report without that bucket records `error`, never $0. It reads only the days that start after the
+   cost key was stored on the provider (`cost_reconcile_since`), so a day whose entries predate
+   `provider_id` or the key is never compared with a whole day's bill. It records in `provider_cost_reconciliations` the ledger's sum and count for the
    provider's entries of that day, the provider's figure, the difference and a status (`ok`,
    `out_of_tolerance`, `error` with the reason). It never changes an entry. A day is read again
    after 23 hours, a failed read after one hour; one replica runs a pass at a time (an advisory
@@ -707,10 +712,16 @@ dearer provider. The maintainers decided (2026-10-31, on the issue) that the bil
    the bill exactly; the ledger suite asserts that a day of settled requests sums to the billed total
    and is within the tolerance.
 
-Not verified in the session that built this: OpenRouter's `is_byok` and `upstream_inference_cost`
-fields and the Anthropic and OpenAI cost API shapes were written from their documentation as
-remembered, not re-read (the hosts were unreachable); the fake servers in the tests encode that
-reading. Re-read them before the first real-key run.
+The shapes were read on 2026-11-06: OpenRouter's `/generation` (its docs and the `@openrouter/sdk`
+1.5.61 schema), Anthropic's cost report
+(platform.claude.com/docs/en/api/beta/organization/cost_report/retrieve) and OpenAI's costs API
+(the `openai-openapi` description). Two points stay open:
+
+- Anthropic marks `/v1/organizations/cost_report` [Legacy]; its successor is
+  `/v1/organizations/analytics/cost`. The legacy endpoint remains supported; moving is a follow-up.
+- The cost report's generated example sends `Authorization: Bearer`; the Admin API page says an
+  Admin key goes in `x-api-key` and Bearer carries OAuth tokens only. Koinon sends `x-api-key`, as
+  the Admin API page says; the first real-key run confirms it.
 
 ## Open questions
 

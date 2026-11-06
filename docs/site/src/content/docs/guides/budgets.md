@@ -90,18 +90,67 @@ this out from the gateway's record of the request, because some harnesses report
 "authentication required". Because the gateway exports that record in batches, a run that failed with
 an authentication error can take up to 20 seconds to finish while Koinon waits for it.
 
-## Responses cut short
+## Charges settled at the provider's bill
 
 Stopping a run cuts its response short, and a response cut short usually carries no usage. Koinon
 charges what the gateway saw, never the response's maximum output: usually an estimate of the prompt
-and no output. When the provider can say what it billed for that response (OpenRouter can), the charge
-is provisional: Koinon asks the provider for up to
-an hour and replaces the charge with the provider's figure, keeping the old and new figures in the
-entry's history. Until then the gateway holds back the most the response could cost (its maximum
-output) from the agent's key, so the agent cannot spend past a limit while the figure is pending; the
-hold is released when the figure arrives. The hold is not spend: what the Budgets page shows, the
-notifications and the stops count the charges only. The spend report shows provisional requests and the
-amount held apart from the cost. With a provider that cannot report, that charge is final. The
+and no output.
+
+When the provider can say what it billed for a request (OpenRouter can, at `openrouter.ai`), every
+request's charge is provisional, complete responses included: Koinon charges its own price at once,
+asks the provider for up to an hour, and replaces the charge with the provider's figure, keeping the
+old and new figures in the entry's history. A request on the org's own key with OpenRouter (BYOK) is
+charged OpenRouter's fee plus the provider's cost it reports. While a cut response's figure is
+pending, the gateway holds back the most the response could cost (its maximum output) from the
+agent's key, so the agent cannot spend past a limit; the hold is released when the figure arrives. The
+hold is not spend: what the Budgets page shows, the notifications and the stops count the charges
+only. The spend report shows provisional requests and the amount held apart from the cost. Requests
+the provider refused and requests on a system key are not settled.
+
+Anthropic and OpenAI, called directly, report no per-request cost: their requests are charged
+Koinon's price, final at once. Each day of such a provider can be compared with its bill instead, see
+below.
+
+## Comparing a direct provider with its bill
+
+An `anthropic` or `openai` provider at its own API URL can hold a second, optional key that reads
+the provider's cost API: an Anthropic Admin key (`sk-ant-admin…`) or an OpenAI admin key. It is
+sealed like the provider's key and never sent to the gateway or shown again. With it goes a cost
+scope, the part of the account whose cost is this provider key's:
+
+- Anthropic: the workspace that holds the provider's API key (`wrkspc_…`, or `default` for the
+  default workspace). Anthropic reports cost by workspace, not by key, so the workspace must hold
+  this key alone for the figures to compare.
+- OpenAI: the project that holds the key (`proj_…`), or the key's own ID (`key_…`, as the
+  Admin API's project API keys list names it; the ID, never the key), which compares exactly this one key.
+
+For now the key and scope are set with `ProviderService.UpdateProvider`, the API the web UI uses
+(`cost_api_key` and `cost_scope`; an empty `cost_api_key` removes both). The admin REST API, the
+web UI and declared providers follow in
+[#241](https://github.com/stateracloud/koinon/issues/241).
+
+```json
+{"orgId": "<org ID>", "providerId": "<provider ID>",
+ "costApiKey": "<admin key>", "costScope": "key_abc123"}
+```
+
+Once a day `koinon-reconciler` reads each of the last three complete UTC days that started after the
+key was stored (the day it is stored is skipped) and records one row per provider and day in
+`provider_cost_reconciliations`: the ledger's cost of the provider's requests (`ledger_usd`,
+`entries`), the provider's figure (`provider_usd`), the difference (`diff_usd`, negative when the
+ledger is below the bill) and a `status`: `ok` within 2% or one cent, `out_of_tolerance`, or
+`error` when the cost API could not be read (`error` says why). It never changes a charge. The
+metric `koinon_reconciler_cost_reconciliations_total{provider_type,outcome}` counts the outcomes;
+alert on `out_of_tolerance` and `error`. To read the rows:
+
+```sql
+SELECT day, status, ledger_usd, provider_usd, diff_usd, entries, error, checked_at
+FROM provider_cost_reconciliations
+WHERE org_id = '<org ID>' AND provider_id = '<provider ID>'
+ORDER BY day DESC;
+```
+
+The
 details are in
 [ADR 0041](https://github.com/stateracloud/koinon/blob/main/docs/adr/0041-koinon-spend-ledger-and-budget-stops.md)
 and [ADR 0056](https://github.com/stateracloud/koinon/blob/main/docs/adr/0056-model-providers-pricing-and-budgets-per-org.md).
