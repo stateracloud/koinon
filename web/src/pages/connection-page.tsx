@@ -187,7 +187,7 @@ export function ConnectionPage() {
         <ConnectionSecretForm
           key={connectionId}
           connector={gt ? 'gitea' : 'github'}
-          lost={!!c.credentialLostAt}
+          lost={Boolean(c.credentialLostAt)}
           pending={setSecret.pending}
           error={setSecret.error ? `Could not store the ${gt ? 'tokens' : 'private key'}: ${ConnectError.from(setSecret.error).rawMessage}` : undefined}
           onSubmit={storeSecret}

@@ -67,7 +67,7 @@ export function ConnectionSecretForm({ connector, lost, onSubmit, pending, error
     const props = {
       id: htmlId,
       value: values[id] ?? '',
-      'aria-invalid': !!err,
+      'aria-invalid': Boolean(err),
       'aria-describedby': [`${htmlId}-help`, err && `${htmlId}-error`].filter(Boolean).join(' '),
       onChange: (e: { target: { value: string } }) => {
         setValues((s) => ({ ...s, [id]: e.target.value }))
@@ -97,7 +97,11 @@ export function ConnectionSecretForm({ connector, lost, onSubmit, pending, error
   return (
     <details className="rounded-md border p-3" open={lost || undefined}>
       <summary className="cursor-pointer text-sm font-medium">{lost ? `Enter the ${noun} again` : `Replace the ${noun}`}</summary>
-      <form onSubmit={(e) => void submit(e)} aria-label={`Set the connection's ${noun}`} className="mt-3 grid gap-3" noValidate>
+      <form
+        onSubmit={(e) => {
+          submit(e)
+        }}
+        aria-label={`Set the connection's ${noun}`} className="mt-3 grid gap-3" noValidate>
         {connector === 'github'
           ? field(
               'privateKey',
@@ -121,7 +125,7 @@ export function ConnectionSecretForm({ connector, lost, onSubmit, pending, error
         )}
         <div className="flex justify-end">
           <Button type="submit" disabled={pending}>
-            {pending ? 'Storing…' : `Store and test`}
+            {pending ? 'Storing…' : 'Store and test'}
           </Button>
         </div>
       </form>
