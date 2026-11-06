@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1/leakguardv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1/orgsettingsv1alpha1connect"
 	providerv1alpha1connect "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
@@ -44,38 +45,40 @@ var fixtureHash = sync.OnceValues(func() (string, error) { return auth.HashPassw
 
 // client is a logged-in user with typed clients for every service.
 type client struct {
-	b         *browser
-	userID    string
-	agents    agentv1alpha1connect.AgentServiceClient
-	tickets   ticketv1alpha1connect.TicketServiceClient
-	tasks     taskv1alpha1connect.TaskServiceClient
-	runs      runv1alpha1connect.RunServiceClient
-	templates templatev1alpha1connect.TemplateServiceClient
-	conns     connectionv1alpha1connect.ConnectionServiceClient
-	approvals approvalv1alpha1connect.ApprovalServiceClient
-	tokens    tokenv1alpha1connect.TokenServiceClient
-	providers providerv1alpha1connect.ProviderServiceClient
-	mcps      mcpserverv1alpha1connect.McpServerServiceClient
-	questions questionv1alpha1connect.QuestionServiceClient
-	leakguard leakguardv1alpha1connect.LeakGuardServiceClient
+	b           *browser
+	userID      string
+	agents      agentv1alpha1connect.AgentServiceClient
+	tickets     ticketv1alpha1connect.TicketServiceClient
+	tasks       taskv1alpha1connect.TaskServiceClient
+	runs        runv1alpha1connect.RunServiceClient
+	templates   templatev1alpha1connect.TemplateServiceClient
+	conns       connectionv1alpha1connect.ConnectionServiceClient
+	approvals   approvalv1alpha1connect.ApprovalServiceClient
+	tokens      tokenv1alpha1connect.TokenServiceClient
+	providers   providerv1alpha1connect.ProviderServiceClient
+	mcps        mcpserverv1alpha1connect.McpServerServiceClient
+	questions   questionv1alpha1connect.QuestionServiceClient
+	leakguard   leakguardv1alpha1connect.LeakGuardServiceClient
+	orgsettings orgsettingsv1alpha1connect.OrgSettingsServiceClient
 }
 
 func newClient(b *browser) *client {
 	cc := connect.NewClient(connecthttp.NewTransport(b.http, b.e.srv.URL))
 	return &client{
-		b:         b,
-		agents:    agentv1alpha1connect.NewAgentServiceClient(cc),
-		tickets:   ticketv1alpha1connect.NewTicketServiceClient(cc),
-		tasks:     taskv1alpha1connect.NewTaskServiceClient(cc),
-		runs:      runv1alpha1connect.NewRunServiceClient(cc),
-		templates: templatev1alpha1connect.NewTemplateServiceClient(cc),
-		conns:     connectionv1alpha1connect.NewConnectionServiceClient(cc),
-		approvals: approvalv1alpha1connect.NewApprovalServiceClient(cc),
-		tokens:    tokenv1alpha1connect.NewTokenServiceClient(cc),
-		providers: providerv1alpha1connect.NewProviderServiceClient(cc),
-		mcps:      mcpserverv1alpha1connect.NewMcpServerServiceClient(cc),
-		questions: questionv1alpha1connect.NewQuestionServiceClient(cc),
-		leakguard: leakguardv1alpha1connect.NewLeakGuardServiceClient(cc),
+		b:           b,
+		agents:      agentv1alpha1connect.NewAgentServiceClient(cc),
+		tickets:     ticketv1alpha1connect.NewTicketServiceClient(cc),
+		tasks:       taskv1alpha1connect.NewTaskServiceClient(cc),
+		runs:        runv1alpha1connect.NewRunServiceClient(cc),
+		templates:   templatev1alpha1connect.NewTemplateServiceClient(cc),
+		conns:       connectionv1alpha1connect.NewConnectionServiceClient(cc),
+		approvals:   approvalv1alpha1connect.NewApprovalServiceClient(cc),
+		tokens:      tokenv1alpha1connect.NewTokenServiceClient(cc),
+		providers:   providerv1alpha1connect.NewProviderServiceClient(cc),
+		mcps:        mcpserverv1alpha1connect.NewMcpServerServiceClient(cc),
+		questions:   questionv1alpha1connect.NewQuestionServiceClient(cc),
+		leakguard:   leakguardv1alpha1connect.NewLeakGuardServiceClient(cc),
+		orgsettings: orgsettingsv1alpha1connect.NewOrgSettingsServiceClient(cc),
 	}
 }
 
