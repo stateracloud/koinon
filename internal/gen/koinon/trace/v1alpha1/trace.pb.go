@@ -290,7 +290,7 @@ type Destination struct {
 	// config_version changes with every change of the configuration and with nothing the router records.
 	// Send it back as expected_version when updating.
 	ConfigVersion int64 `protobuf:"varint,13,opt,name=config_version,json=configVersion,proto3" json:"config_version,omitempty"`
-	// credential_lost_at is set when the credentials was lost with the key that encrypted it (`koinon-api keys
+	// credential_lost_at is set when the credentials were lost with the key that encrypted them (`koinon-api keys
 	// forget`, ADR 0085 decision 13): the destination receives nothing until a tested update enters every secret
 	// in secret_fields again. Unset otherwise.
 	CredentialLostAt *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=credential_lost_at,json=credentialLostAt,proto3" json:"credential_lost_at,omitempty"`

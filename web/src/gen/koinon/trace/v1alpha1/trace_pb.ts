@@ -163,7 +163,7 @@ export type Destination = Message<"koinon.trace.v1alpha1.Destination"> & {
   configVersion: bigint;
 
   /**
-   * credential_lost_at is set when the credentials was lost with the key that encrypted it (`koinon-api keys
+   * credential_lost_at is set when the credentials were lost with the key that encrypted them (`koinon-api keys
    * forget`, ADR 0085 decision 13): the destination receives nothing until a tested update enters every secret
    * in secret_fields again. Unset otherwise.
    *
