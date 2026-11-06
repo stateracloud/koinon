@@ -148,6 +148,22 @@ var _ = Describe("TaintChecker", func() {
 		Entry("halves with an argument between", excerpt[:half], "ignored", excerpt[half:]),
 	)
 
+	// A known gap, not a promise (#286, found in the #267 review): separator-padded base64 cut across
+	// two arguments that each exceed 2*JoinEndBytes. The join keeps only each argument's two ends, and
+	// the padding spreads the encoded text past them. This pins today's decision so a fix shows up as
+	// a failing spec: when #286 lands, move the entry into "catches the leak" and drop this one.
+	It("passes separator-padded base64 split across two long arguments (known gap, #286)", func() {
+		w := leakguard.DefaultLimits().JoinEndBytes
+		// one separator of 150 bytes per four base64 characters: each half is longer than 2*w, and the
+		// 512 bytes that reach the join hold only a few characters of the encoded text
+		enc := chunks(b64raw(excerpt), 4, " "+strings.Repeat("-", 150)+" ")
+		h := len(enc) / 2
+		args := []string{enc[:h], enc[h:]}
+		Expect(len(args[0])).To(BeNumerically(">", 2*w))
+		Expect(len(args[1])).To(BeNumerically(">", 2*w))
+		Expect(check(args...).Reason).To(Equal(leakguard.ReasonPass), "#286 is fixed: this is now a catch")
+	})
+
 	It("reports an evicted scope without changing the decision", func() {
 		st := leakguard.NewMemoryStore(leakguard.MemoryStoreOptions{MaxFingerprints: 4})
 		Expect(st.Add(ctx, testScope, fp.Winnow(privateLine))).To(Succeed())
