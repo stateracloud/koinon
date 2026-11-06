@@ -125,9 +125,10 @@ Limits:
   are lost with that password. A repository's location in the bucket follows from the agent and the
   repository number, so the restored database's next number can point at that repository. Koinon
   never writes over it: run `checkpoints resync` before you run either command again. The resync
-  opens each repository the database knows, and it looks one repository number past the newest. It
-  records each location it finds taken by a repository the database has no password for, and the
-  next free number after it (audit `home.repository_prefix_taken`). `keys forget` and
+  opens each repository the database knows, and it lists the agent's repository folders in the
+  bucket to find those past the newest number. It records each location it finds taken by a
+  repository the database has no password for, and the next free number, past every folder that
+  holds anything (audit `home.repository_prefix_taken`). Its summary counts the taken locations. `keys forget` and
   `keys new-repositories` then start the agent's next repository at that free number. The taken
   repository's blobs are never deleted by the sweeper; delete them yourself once you are sure
   nothing in them is needed ([#262](https://github.com/stateracloud/koinon/issues/262)).
@@ -135,6 +136,10 @@ Limits:
   it fails at once, records the same, and names the location and the next step: run
   `koinon-api keys new-repositories --agent <id>`, which starts the agent's repository at the free
   number. Until then the agent's backups fail.
+- A repository that does not open with the password that wrote its complete checkpoints is not
+  taken: koinon-agentd uses the wrong bucket, or the repository's `kopia.repository` is damaged. The
+  backup fails with an error that says so, and nothing is recorded. Do not start a new repository
+  for that agent: it would retire this one, and the sweeper would delete the homes in it.
 - A recreate checkpoint whose snapshot the resync found gone is marked failed with the snapshot
   missing, which is not a failed backup: the sandbox is not blocked, and the next pass requests a new
   backup before it recreates the sandbox ([#263](https://github.com/stateracloud/koinon/issues/263)).

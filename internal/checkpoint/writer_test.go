@@ -89,6 +89,20 @@ var _ = Describe("Writer", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
+	It("lists the agent's later epoch folders that hold anything, past a gap (#262)", func() {
+		org, agent := "0198a000-0000-7000-8000-000000000001", "0198a000-0000-7000-8000-000000000009"
+		held, err := w.HeldEpochs(ctx, org, agent)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(held).To(BeEmpty(), "nothing written yet")
+		for _, n := range []int32{0, 1, 3, 12} {
+			_, err := w.Backup(ctx, checkpoint.EpochPrefix(org, agent, n), "koinon_test_not-a-real-token", home(), checkpoint.Meta{CheckpointID: "c"})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		held, err = w.HeldEpochs(ctx, org, agent)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(held).To(Equal([]int32{1, 3, 12}), "sorted, r2/ absent, epoch 0's own blobs not an epoch")
+	})
+
 	It("tells a prefix that holds another password's repository apart, and creates nothing over it (#262)", func() {
 		held, err := w.HoldsRepository(ctx, prefix)
 		Expect(err).NotTo(HaveOccurred())

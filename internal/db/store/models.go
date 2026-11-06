@@ -1796,6 +1796,7 @@ type HomeCheckpointResync struct {
 	Added       pgtype.Int4
 	Missing     pgtype.Int4
 	Skipped     pgtype.Int4
+	Taken       pgtype.Int4
 }
 
 type HomeRepository struct {

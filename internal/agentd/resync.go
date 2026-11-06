@@ -35,10 +35,12 @@ package agentd
 //   - A repository the bucket does not hold is an empty one when the sweeper may have deleted it
 //     (retired and past its deadline: the dump can predate the sweep). Otherwise, with checkpoints
 //     that name it, the try fails and nothing changes: koinon-agentd may be using another bucket.
-//   - A repository at the prefix after the agent's newest epoch, or at the prefix of an epoch with
-//     no checkpoints whose password does not open it, was started after the dump (keys forget or
-//     keys new-repositories). It is recorded (prefixtaken.go): the agent's next epoch starts after
-//     it, and the sweeper never deletes it. Its homes cannot be read without the lost password.
+//   - A repository in a folder after the agent's newest epoch (one listing of the agent's epoch
+//     folders), or at the prefix of an epoch with no checkpoints whose password does not open it,
+//     was started after the dump (keys forget or keys new-repositories). It is recorded
+//     (prefixtaken.go): the agent's next epoch starts past every held folder, and the sweeper
+//     never deletes it. Its homes cannot be read without the lost password. The summary counts
+//     the taken prefixes.
 //
 // The bucket is listed outside any transaction; the changes are then made in one transaction per
 // agent under the agent's home_repositories row lock (LockHomeRepository, which starting a
@@ -117,7 +119,10 @@ func (p *Pool) resyncTick(ctx context.Context) {
 // resyncCounts is what one resync found and changed.
 type resyncCounts struct {
 	snapshots, added, missing, skipped int32
-	epochs                             []int32
+	// taken counts the agent's prefixes known to hold a repository the database has no password
+	// for (#262): rows marked taken, and repositories after the newest epoch.
+	taken  int32
+	epochs []int32
 	// ownership is the newest ownership epoch of an added checkpoint; raised to the agent's.
 	ownership int64
 	raised    bool // the agent's ownership epoch was raised to ownership
@@ -136,18 +141,18 @@ func (p *Pool) resyncAgent(ctx context.Context, r store.HomeCheckpointResync) {
 	c := p.cfg.Checkpoints
 	log := p.log.With("agent", r.AgentID.String(), "attempt", r.Attempts)
 	tctx, cancel := context.WithTimeout(ctx, c.Timeout)
-	listings, err := p.listRepositories(tctx, r)
+	listings, taken, err := p.listRepositories(tctx, r)
 	cancel()
 	if ctx.Err() != nil {
 		return // shutting down: the lease runs out and another replica takes the resync over
 	}
 	if err == nil {
 		var n resyncCounts
-		n, err = p.recordResync(ctx, r, listings)
+		n, err = p.recordResync(ctx, r, listings, taken)
 		if err == nil {
 			p.cfg.Metrics.HomeCheckpointResyncChanges.WithLabelValues("added").Add(float64(n.added))
 			p.cfg.Metrics.HomeCheckpointResyncChanges.WithLabelValues("missing").Add(float64(n.missing))
-			log.Info("home checkpoints resynced from the bucket", "snapshots", n.snapshots, "added", n.added, "missing", n.missing, "skipped", n.skipped)
+			log.Info("home checkpoints resynced from the bucket", "snapshots", n.snapshots, "added", n.added, "missing", n.missing, "skipped", n.skipped, "taken", n.taken)
 			return
 		}
 		if errors.Is(err, errResyncClaimLost) {
@@ -188,17 +193,21 @@ func (p *Pool) resyncAgent(ctx context.Context, r store.HomeCheckpointResync) {
 }
 
 // listRepositories lists the snapshots of each of the agent's repositories that still opens,
-// each after reading the checkpoints the database has for it.
-func (p *Pool) listRepositories(ctx context.Context, r store.HomeCheckpointResync) ([]repositoryListing, error) {
+// each after reading the checkpoints the database has for it, and counts the agent's taken prefixes.
+func (p *Pool) listRepositories(ctx context.Context, r store.HomeCheckpointResync) ([]repositoryListing, int32, error) {
 	c := p.cfg.Checkpoints
 	epochs, err := p.q.ListHomeRepositoryEpochsOfAgent(ctx, store.ListHomeRepositoryEpochsOfAgentParams{OrgID: r.OrgID, AgentID: r.AgentID})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	var out []repositoryListing
+	var taken int32
 	newest := int32(-1)
 	for _, e := range epochs {
 		newest = max(newest, e.RepositoryEpoch)
+		if e.Taken {
+			taken++
+		}
 		if e.Deleted || e.Lost || e.Taken {
 			continue // nothing restores from it; its checkpoints are already skipped
 		}
@@ -206,13 +215,13 @@ func (p *Pool) listRepositories(ctx context.Context, r store.HomeCheckpointResyn
 			OrgID: r.OrgID, AgentID: r.AgentID, RepositoryEpoch: e.RepositoryEpoch,
 		})
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		repo, err := c.Repositories.At(ctx, r.OrgID, r.AgentID, e.RepositoryEpoch)
 		if errors.Is(err, checkpoint.ErrRepositoryLost) || errors.Is(err, checkpoint.ErrNoRepository) {
 			continue // lost since the epochs were read
 		} else if err != nil {
-			return nil, fmt.Errorf("repository epoch %d: %w", e.RepositoryEpoch, err)
+			return nil, 0, fmt.Errorf("repository epoch %d: %w", e.RepositoryEpoch, err)
 		}
 		snaps, err := c.Store.Snapshots(ctx, repo.Prefix, repo.Password)
 		switch {
@@ -220,42 +229,53 @@ func (p *Pool) listRepositories(ctx context.Context, r store.HomeCheckpointResyn
 			// Another repository, started after the dump at a prefix this epoch reused (#262): none of
 			// the row's is there. Recorded, so the sweeper keeps those blobs and the next epoch skips it.
 			if _, err := p.recordTakenPrefix(ctx, r.OrgID, r.AgentID, e.RepositoryEpoch, true); err != nil {
-				return nil, fmt.Errorf("repository epoch %d: %w", e.RepositoryEpoch, err)
+				return nil, 0, fmt.Errorf("repository epoch %d: %w", e.RepositoryEpoch, err)
 			}
+			taken++
 			continue
 		case errors.Is(err, checkpoint.ErrNoRepositoryInBucket) && (e.Due || len(before) == 0):
 			// Swept (the dump predates the sweep), or never written to: it holds nothing.
 			snaps = nil
 		case errors.Is(err, checkpoint.ErrNoRepositoryInBucket):
-			return nil, fmt.Errorf("repository epoch %d is not in the bucket, but %d complete checkpoints name it and it was not due for deletion; nothing was changed: is koinon-agentd using the bucket this database belongs to?", e.RepositoryEpoch, len(before))
+			return nil, 0, fmt.Errorf("repository epoch %d is not in the bucket, but %d complete checkpoints name it and it was not due for deletion; nothing was changed: is koinon-agentd using the bucket this database belongs to?", e.RepositoryEpoch, len(before))
 		case err != nil:
-			return nil, fmt.Errorf("listing the snapshots of repository epoch %d: %w", e.RepositoryEpoch, err)
+			return nil, 0, fmt.Errorf("listing the snapshots of repository epoch %d: %w", e.RepositoryEpoch, err)
 		}
 		out = append(out, repositoryListing{epoch: e.RepositoryEpoch, before: before, snaps: snaps})
 	}
 	if newest >= 0 {
 		// A repository after the newest epoch the database has was started after the dump (keys
-		// forget or keys new-repositories): the next epoch must not reuse its prefix (#262).
-		after := newest + 1
-		held, err := c.Store.HoldsRepository(ctx, checkpoint.EpochPrefix(r.OrgID.String(), r.AgentID.String(), after))
+		// forget or keys new-repositories): the next epoch must start past every one (#262). One
+		// listing of the agent's prefix finds them, gaps included.
+		held, err := c.Store.HeldEpochs(ctx, r.OrgID.String(), r.AgentID.String())
 		if err != nil {
-			return nil, fmt.Errorf("looking at repository epoch %d: %w", after, err)
+			return nil, 0, err
 		}
-		if held {
-			if _, err := p.recordTakenPrefix(ctx, r.OrgID, r.AgentID, after, false); err != nil {
-				return nil, fmt.Errorf("repository epoch %d: %w", after, err)
+		var after []int32
+		for _, n := range held {
+			if n > newest {
+				after = append(after, n)
+			}
+		}
+		if len(after) > 0 {
+			free, err := p.recordTakenPrefix(ctx, r.OrgID, r.AgentID, after[0], false)
+			if err != nil {
+				return nil, 0, fmt.Errorf("repository epoch %d: %w", after[0], err)
+			}
+			if free > 0 { // 0: a keys command started that epoch meanwhile
+				taken += int32(len(after)) //nolint:gosec // a handful of folders
 			}
 		}
 	}
-	return out, nil
+	return out, taken, nil
 }
 
 // recordResync makes the listings' changes, completes the resync and audits it, in one
 // transaction under the agent's repository row lock.
-func (p *Pool) recordResync(ctx context.Context, r store.HomeCheckpointResync, listings []repositoryListing) (resyncCounts, error) {
+func (p *Pool) recordResync(ctx context.Context, r store.HomeCheckpointResync, listings []repositoryListing, taken int32) (resyncCounts, error) {
 	var n resyncCounts
 	err := pgx.BeginFunc(ctx, p.db, func(tx pgx.Tx) error {
-		n = resyncCounts{}
+		n = resyncCounts{taken: taken}
 		q := p.q.WithTx(tx)
 		// The agent row first, as a claim and a cascading delete take it, then the repository row.
 		if _, err := q.GetAgentForUpdate(ctx, store.GetAgentForUpdateParams{OrgID: r.OrgID, ID: r.AgentID}); err != nil {
@@ -314,6 +334,7 @@ func (p *Pool) recordResync(ctx context.Context, r store.HomeCheckpointResync, l
 			OrgID: r.OrgID, AgentID: r.AgentID, RequestID: r.RequestID, Attempts: r.Attempts,
 			Snapshots: pgtype.Int4{Int32: n.snapshots, Valid: true}, Added: pgtype.Int4{Int32: n.added, Valid: true},
 			Missing: pgtype.Int4{Int32: n.missing, Valid: true}, Skipped: pgtype.Int4{Int32: n.skipped, Valid: true},
+			Taken: pgtype.Int4{Int32: n.taken, Valid: true},
 		}); err != nil {
 			return err
 		} else if m != 1 {
@@ -330,7 +351,7 @@ func (p *Pool) recordResync(ctx context.Context, r store.HomeCheckpointResync, l
 			Org: r.OrgID, Actor: audit.System(), Action: ResyncedAction, TargetKind: "agent", TargetID: r.AgentID.String(),
 			After: map[string]any{
 				"repositoryEpochs": slices.Clone(n.epochs), "snapshots": n.snapshots, "added": n.added,
-				"missing": n.missing, "skipped": n.skipped, "ownershipEpochRaisedTo": raisedTo(n),
+				"missing": n.missing, "skipped": n.skipped, "takenPrefixes": n.taken, "ownershipEpochRaisedTo": raisedTo(n),
 			},
 		})
 	})

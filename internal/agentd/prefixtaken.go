@@ -38,9 +38,6 @@ import (
 // prefix of the agent's repositories holds a repository the database has no password for.
 const PrefixTakenAction = "home.repository_prefix_taken"
 
-// maxTakenProbe bounds how many prefixes after a taken one are looked at for a free one.
-const maxTakenProbe = 64
-
 // errPrefixTaken is the error a backup or seed into a taken prefix fails with.
 func errPrefixTaken(agent pgtype.UUID, prefix string, free int32) error {
 	return fmt.Errorf("the repository prefix %s already holds a kopia repository this database has no password for "+
@@ -48,32 +45,75 @@ func errPrefixTaken(agent pgtype.UUID, prefix string, free int32) error {
 		"which starts the agent's next repository at the free epoch %d (docs/ops/secret-keys.md)", prefix, agent, free)
 }
 
-// freeEpochAfter returns the first epoch after epoch whose prefix holds no repository.
+// unopenedError is a repository epoch whose prefix does not open with the epoch's password although
+// the database records complete checkpoints written there with it: not a repository started after
+// a dump, but the wrong bucket or a damaged kopia.repository. Nothing is recorded for it, since
+// another epoch would retire this one and let the sweeper delete the homes it holds.
+type unopenedError struct {
+	prefix      string
+	checkpoints int
+}
+
+func (e *unopenedError) Error() string {
+	return fmt.Sprintf("the repository at %s does not open with the password that wrote its %d complete checkpoint(s): "+
+		"koinon-agentd uses the wrong bucket, or the repository's kopia.repository is damaged; do not start a new repository "+
+		"for the agent, which would retire this one and its homes (docs/ops/secret-keys.md)", e.prefix, e.checkpoints)
+}
+
+// freeEpochAfter returns the first epoch after epoch and after every epoch whose folder in the
+// bucket holds anything: one listing, so a gap the lost database's sweeper left (r<N+2>/ empty,
+// r<N+3>/ held) does not end the search early.
 func (p *Pool) freeEpochAfter(ctx context.Context, org, agent pgtype.UUID, epoch int32) (int32, error) {
-	for next := epoch + 1; next <= epoch+maxTakenProbe; next++ {
-		held, err := p.cfg.Checkpoints.Store.HoldsRepository(ctx, checkpoint.EpochPrefix(org.String(), agent.String(), next))
-		if err != nil {
-			return 0, fmt.Errorf("looking for a free repository prefix: %w", err)
-		}
-		if !held {
-			return next, nil
-		}
+	held, err := p.cfg.Checkpoints.Store.HeldEpochs(ctx, org.String(), agent.String())
+	if err != nil {
+		return 0, fmt.Errorf("looking for a free repository prefix: %w", err)
 	}
-	return 0, fmt.Errorf("the %d repository prefixes after epoch %d all hold a repository", maxTakenProbe, epoch)
+	free := epoch + 1
+	for _, n := range held {
+		free = max(free, n+1)
+	}
+	return free, nil
 }
 
 // recordTakenPrefix records that the prefix of the agent's repository epoch (one the database has,
 // markRow, or one after its newest, !markRow) holds a repository the database has no password
-// for, and returns the free epoch the next repository starts at. It audits a change once.
+// for, and returns the free epoch the next repository starts at; 0 when nothing was recorded since
+// a keys command started that epoch meanwhile (!markRow). It audits a change once. An epoch the
+// database records complete checkpoints of is not taken: *unopenedError, and nothing is recorded.
 func (p *Pool) recordTakenPrefix(ctx context.Context, org, agent pgtype.UUID, epoch int32, markRow bool) (int32, error) {
-	free, err := p.freeEpochAfter(ctx, org, agent, epoch)
-	if err != nil {
-		return 0, err
-	}
-	err = pgx.BeginFunc(ctx, p.db, func(tx pgx.Tx) error {
+	prefix := checkpoint.EpochPrefix(org.String(), agent.String(), epoch)
+	var free int32
+	changed := false
+	err := pgx.BeginFunc(ctx, p.db, func(tx pgx.Tx) error {
+		free, changed = 0, false
 		q := p.q.WithTx(tx)
 		if _, err := q.LockHomeRepository(ctx, store.LockHomeRepositoryParams{OrgID: org, AgentID: agent}); err != nil {
 			return fmt.Errorf("locking the agent's repository: %w", err)
+		}
+		if markRow {
+			complete, err := q.ListCompleteHomeCheckpointsOfRepository(ctx, store.ListCompleteHomeCheckpointsOfRepositoryParams{
+				OrgID: org, AgentID: agent, RepositoryEpoch: epoch,
+			})
+			if err != nil {
+				return err
+			}
+			if len(complete) > 0 {
+				return &unopenedError{prefix: prefix, checkpoints: len(complete)}
+			}
+		} else {
+			// The epochs were read before this lock: a keys command may have started this epoch since,
+			// and then the repository found is the database's own.
+			latest, err := q.LatestHomeRepositoryEpoch(ctx, store.LatestHomeRepositoryEpochParams{OrgID: org, AgentID: agent})
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if err == nil && latest.RepositoryEpoch >= epoch {
+				return nil
+			}
+		}
+		var err error
+		if free, err = p.freeEpochAfter(ctx, org, agent, epoch); err != nil {
+			return err
 		}
 		var marked int64
 		if markRow && epoch == 0 {
@@ -91,29 +131,42 @@ func (p *Pool) recordTakenPrefix(ctx context.Context, org, agent pgtype.UUID, ep
 		if marked == 0 && raised == 0 {
 			return nil // recorded already
 		}
+		changed = true
 		return audit.RecordErr(ctx, q, audit.Event{
 			Org: org, Actor: audit.System(), Action: PrefixTakenAction, TargetKind: "agent", TargetID: agent.String(),
 			After: map[string]any{
-				"repositoryEpoch": epoch, "prefix": checkpoint.EpochPrefix(org.String(), agent.String(), epoch),
-				"knownToDatabase": markRow, "nextEpochAtLeast": free,
+				"repositoryEpoch": epoch, "prefix": prefix, "knownToDatabase": markRow, "nextEpochAtLeast": free,
 			},
 		})
 	})
 	if err != nil {
 		return 0, err
 	}
-	p.log.Error("home repository: the prefix holds a repository this database has no password for; the agent's next repository starts at a free epoch",
-		"org", org.String(), "agent", agent.String(), "repository_epoch", epoch, "next_epoch_at_least", free)
+	log := p.log.Info
+	if changed {
+		log = p.log.Error
+	}
+	if free > 0 {
+		log("home repository: the prefix holds a repository this database has no password for; the agent's next repository starts at a free epoch",
+			"org", org.String(), "agent", agent.String(), "repository_epoch", epoch, "next_epoch_at_least", free)
+	}
 	return free, nil
 }
 
-// prefixTaken turns err into the error a backup or seed into repo fails with when repo's prefix is
-// taken (after recording it), and returns err unchanged otherwise.
+// prefixTaken turns err into the error a backup or seed into repo fails with when repo's prefix
+// does not open with its password (after recording a taken prefix), and returns err unchanged
+// otherwise.
 func (p *Pool) prefixTaken(ctx context.Context, org, agent pgtype.UUID, repo checkpoint.Repository, err error) error {
 	if !checkpoint.TakenPrefix(err, repo.Prefix) {
 		return err
 	}
 	free, rerr := p.recordTakenPrefix(ctx, org, agent, repo.Epoch, true)
+	var unopened *unopenedError
+	if errors.As(rerr, &unopened) {
+		p.log.Error("home repository: the repository does not open with the password that wrote its checkpoints",
+			"org", org.String(), "agent", agent.String(), "repository_epoch", repo.Epoch, "complete_checkpoints", unopened.checkpoints)
+		return &permanent{unopened}
+	}
 	if rerr != nil {
 		return errors.Join(err, fmt.Errorf("recording the taken prefix: %w", rerr))
 	}

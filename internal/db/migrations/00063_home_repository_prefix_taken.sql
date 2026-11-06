@@ -32,3 +32,6 @@ ALTER TABLE home_repositories
 ALTER TABLE home_repository_epochs ADD COLUMN prefix_taken_at timestamptz;
 
 ALTER TABLE home_checkpoints ADD COLUMN snapshot_missing_at timestamptz;
+
+-- How many of the agent's prefixes a resync found taken; NULL from a binary before it (counted as 0).
+ALTER TABLE home_checkpoint_resyncs ADD COLUMN taken integer;

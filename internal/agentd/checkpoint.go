@@ -48,9 +48,9 @@ type HomeStore interface {
 	DeleteRepository(ctx context.Context, prefix string) (int, error)
 	// Snapshots lists a repository's complete snapshots, for checkpoints resync (resync.go).
 	Snapshots(ctx context.Context, prefix, password string) ([]checkpoint.Snapshot, error)
-	// HoldsRepository reports whether a prefix holds a repository, whatever its password
-	// (prefixtaken.go).
-	HoldsRepository(ctx context.Context, prefix string) (bool, error)
+	// HeldEpochs lists, in one listing, the agent's repository epochs after 0 whose folder in the
+	// bucket holds anything, whatever its password (prefixtaken.go, #262).
+	HeldEpochs(ctx context.Context, org, agent string) ([]int32, error)
 }
 
 // Repositories gives an agent's repositories and their passwords (checkpoint.Remote): Get the

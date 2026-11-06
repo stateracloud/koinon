@@ -74,7 +74,7 @@ WHERE r.org_id = $2 AND (r.org_id, r.agent_id) = (
     ORDER BY s.resync_after, s.agent_id
     FOR UPDATE SKIP LOCKED
     LIMIT 1)
-RETURNING org_id, agent_id, request_id, requested_at, resync_after, attempts, error, finished_at, failed_at, snapshots, added, missing, skipped
+RETURNING org_id, agent_id, request_id, requested_at, resync_after, attempts, error, finished_at, failed_at, snapshots, added, missing, skipped, taken
 `
 
 type ClaimHomeCheckpointResyncParams struct {
@@ -103,6 +103,7 @@ func (q *Queries) ClaimHomeCheckpointResync(ctx context.Context, arg ClaimHomeCh
 		&i.Added,
 		&i.Missing,
 		&i.Skipped,
+		&i.Taken,
 	)
 	return i, err
 }
@@ -276,8 +277,8 @@ func (q *Queries) CompleteHomeCheckpoint(ctx context.Context, arg CompleteHomeCh
 
 const completeHomeCheckpointResync = `-- name: CompleteHomeCheckpointResync :execrows
 UPDATE home_checkpoint_resyncs
-SET finished_at = now(), error = NULL, snapshots = $1, added = $2, missing = $3, skipped = $4
-WHERE org_id = $5 AND agent_id = $6 AND request_id = $7 AND attempts = $8
+SET finished_at = now(), error = NULL, snapshots = $1, added = $2, missing = $3, skipped = $4, taken = $5
+WHERE org_id = $6 AND agent_id = $7 AND request_id = $8 AND attempts = $9
   AND finished_at IS NULL AND failed_at IS NULL
 `
 
@@ -286,6 +287,7 @@ type CompleteHomeCheckpointResyncParams struct {
 	Added     pgtype.Int4
 	Missing   pgtype.Int4
 	Skipped   pgtype.Int4
+	Taken     pgtype.Int4
 	OrgID     pgtype.UUID
 	AgentID   pgtype.UUID
 	RequestID pgtype.UUID
@@ -300,6 +302,7 @@ func (q *Queries) CompleteHomeCheckpointResync(ctx context.Context, arg Complete
 		arg.Added,
 		arg.Missing,
 		arg.Skipped,
+		arg.Taken,
 		arg.OrgID,
 		arg.AgentID,
 		arg.RequestID,
@@ -1837,8 +1840,8 @@ INSERT INTO home_checkpoint_resyncs (org_id, agent_id)
 VALUES ($1, $2)
 ON CONFLICT (org_id, agent_id) DO UPDATE
 SET request_id = gen_random_uuid(), requested_at = now(), resync_after = now(), attempts = 0, error = NULL,
-    finished_at = NULL, failed_at = NULL, snapshots = NULL, added = NULL, missing = NULL, skipped = NULL
-RETURNING org_id, agent_id, request_id, requested_at, resync_after, attempts, error, finished_at, failed_at, snapshots, added, missing, skipped
+    finished_at = NULL, failed_at = NULL, snapshots = NULL, added = NULL, missing = NULL, skipped = NULL, taken = NULL
+RETURNING org_id, agent_id, request_id, requested_at, resync_after, attempts, error, finished_at, failed_at, snapshots, added, missing, skipped, taken
 `
 
 type RequestHomeCheckpointResyncParams struct {
@@ -1868,6 +1871,7 @@ func (q *Queries) RequestHomeCheckpointResync(ctx context.Context, arg RequestHo
 		&i.Added,
 		&i.Missing,
 		&i.Skipped,
+		&i.Taken,
 	)
 	return i, err
 }

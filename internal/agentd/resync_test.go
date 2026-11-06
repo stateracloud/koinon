@@ -21,6 +21,19 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
+// racingEpochs runs before its first listing of an agent's epoch folders: a keys command that
+// starts an epoch while the resync looks at the bucket.
+type racingEpochs struct {
+	agentd.HomeStore
+	before func(ctx context.Context)
+	once   *sync.Once
+}
+
+func (r racingEpochs) HeldEpochs(ctx context.Context, org, agent string) ([]int32, error) {
+	r.once.Do(func() { r.before(ctx) })
+	return r.HomeStore.HeldEpochs(ctx, org, agent)
+}
+
 // gatedListing holds the first listing until release is closed: a resync whose request is replaced
 // while it lists the bucket.
 type gatedListing struct {
@@ -141,6 +154,12 @@ var _ = Describe("home checkpoint resync", func() {
 	}
 	finished := func(ctx context.Context) func() bool {
 		return func() bool { return resync(ctx)().FinishedAt.Valid }
+	}
+	taken := func(ctx context.Context) int32 {
+		GinkgoHelper()
+		var n pgtype.Int4
+		Expect(db.QueryRow(ctx, `SELECT taken FROM home_checkpoint_resyncs WHERE org_id = $1 AND agent_id = $2`, e.org, agent).Scan(&n)).To(Succeed())
+		return n.Int32
 	}
 	counts := func(r store.HomeCheckpointResync) []int32 {
 		return []int32{r.Snapshots.Int32, r.Added.Int32, r.Missing.Int32, r.Skipped.Int32}
@@ -304,10 +323,10 @@ var _ = Describe("home checkpoint resync", func() {
 		Expect(counts(r)).To(Equal([]int32{1, 0, 0, 0}), "epoch 1 is skipped, not listed under the wrong password")
 
 		By("epoch 1's row is marked taken, and the next epoch starts at 3, past r2/ that no row names")
-		var taken bool
+		var marked bool
 		Expect(db.QueryRow(ctx, `SELECT prefix_taken_at IS NOT NULL FROM home_repository_epochs WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = 1`,
-			e.org, agent).Scan(&taken)).To(Succeed())
-		Expect(taken).To(BeTrue())
+			e.org, agent).Scan(&marked)).To(Succeed())
+		Expect(marked).To(BeTrue())
 		var floor pgtype.Int4
 		Expect(db.QueryRow(ctx, `SELECT next_epoch_at_least FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, agent).Scan(&floor)).To(Succeed())
 		Expect(floor).To(Equal(pgtype.Int4{Int32: 3, Valid: true}))
@@ -315,25 +334,52 @@ var _ = Describe("home checkpoint resync", func() {
 			And(HavePrefix("system "+agent.String()), ContainSubstring(`"repositoryEpoch": 1`), ContainSubstring(`"knownToDatabase": true`), ContainSubstring(`"nextEpochAtLeast": 3`)),
 		))
 
+		Expect(taken(ctx)).To(BeEquivalentTo(2), "r1/ and r2/")
+
 		By("a second run finds the same and records nothing new")
 		request(ctx)
 		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
 		Expect(audited(ctx, agentd.PrefixTakenAction)).To(HaveLen(1))
+		Expect(taken(ctx)).To(BeEquivalentTo(2))
 	})
 
-	It("reports a repository found at the prefix of the epoch after the latest one (#262)", func(ctx SpecContext) {
-		_, err := writer.Backup(ctx, prefix(1), "koinon_test_foreign-1", tarOf(map[string]string{"notes/v.md": "after the dump"}), checkpoint.Meta{CheckpointID: "x"})
-		Expect(err).NotTo(HaveOccurred())
+	It("reports the repositories found after the latest epoch, past a gap, and counts them (#262)", func(ctx SpecContext) {
+		// The lost database started epochs 1 to 3 and its sweeper deleted epoch 2's.
+		for _, n := range []int32{1, 3} {
+			_, err := writer.Backup(ctx, prefix(n), fmt.Sprintf("koinon_test_foreign-%d", n), tarOf(map[string]string{"notes/v.md": "after the dump"}),
+				checkpoint.Meta{CheckpointID: "x"})
+			Expect(err).NotTo(HaveOccurred())
+		}
 		request(ctx)
 		e.pool("agentd-a", cps())
 
 		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
 		var floor pgtype.Int4
 		Expect(db.QueryRow(ctx, `SELECT next_epoch_at_least FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, agent).Scan(&floor)).To(Succeed())
-		Expect(floor).To(Equal(pgtype.Int4{Int32: 2, Valid: true}))
+		Expect(floor).To(Equal(pgtype.Int4{Int32: 4, Valid: true}), "past r3/, not at the gap r2/")
 		Expect(audited(ctx, agentd.PrefixTakenAction)).To(ConsistOf(
-			And(ContainSubstring(`"repositoryEpoch": 1`), ContainSubstring(`"knownToDatabase": false`), ContainSubstring(prefix(1))),
+			And(ContainSubstring(`"repositoryEpoch": 1`), ContainSubstring(`"knownToDatabase": false`), ContainSubstring(prefix(1)), ContainSubstring(`"nextEpochAtLeast": 4`)),
 		))
+		Expect(taken(ctx)).To(BeEquivalentTo(2))
+		Expect(audited(ctx, agentd.ResyncedAction)).To(ConsistOf(ContainSubstring(`"takenPrefixes": 2`)))
+	})
+
+	It("records nothing for a repository after the latest epoch that a keys command started while the resync listed (#262)", func(ctx SpecContext) {
+		request(ctx)
+		e.pool("agentd-a", cps(func(c *agentd.Checkpoints) {
+			c.Store = racingEpochs{HomeStore: writer, once: &sync.Once{}, before: func(ctx context.Context) {
+				// keys forget commits epoch 1 after the resync read the epochs, and a backup writes there.
+				newEpoch(ctx, 1, 7*24*time.Hour)
+				snapshot(ctx, 1, map[string]string{"notes/v.md": "new epoch"}, checkpoint.Meta{CheckpointID: "x"})
+			}}
+		}))
+
+		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		var floor pgtype.Int4
+		Expect(db.QueryRow(ctx, `SELECT next_epoch_at_least FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, agent).Scan(&floor)).To(Succeed())
+		Expect(floor.Valid).To(BeFalse(), "the repository is the database's own")
+		Expect(audited(ctx, agentd.PrefixTakenAction)).To(BeEmpty())
+		Expect(taken(ctx)).To(BeEquivalentTo(0))
 	})
 
 	It("leaves out a snapshot whose backup is still recording it or was given up, and keeps a copy as old as its source", func(ctx SpecContext) {

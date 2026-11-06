@@ -397,7 +397,7 @@ INSERT INTO home_checkpoint_resyncs (org_id, agent_id)
 VALUES (@org_id, @agent_id)
 ON CONFLICT (org_id, agent_id) DO UPDATE
 SET request_id = gen_random_uuid(), requested_at = now(), resync_after = now(), attempts = 0, error = NULL,
-    finished_at = NULL, failed_at = NULL, snapshots = NULL, added = NULL, missing = NULL, skipped = NULL
+    finished_at = NULL, failed_at = NULL, snapshots = NULL, added = NULL, missing = NULL, skipped = NULL, taken = NULL
 RETURNING *;
 
 -- name: ClaimHomeCheckpointResync :one
@@ -423,7 +423,7 @@ RETURNING *;
 -- Complete, Release and Fail hold only for the claim that made @attempts of request @request_id.
 -- No row: the claim was lost (its lease ran out) or a new request replaced it.
 UPDATE home_checkpoint_resyncs
-SET finished_at = now(), error = NULL, snapshots = @snapshots, added = @added, missing = @missing, skipped = @skipped
+SET finished_at = now(), error = NULL, snapshots = @snapshots, added = @added, missing = @missing, skipped = @skipped, taken = @taken
 WHERE org_id = @org_id AND agent_id = @agent_id AND request_id = @request_id AND attempts = @attempts
   AND finished_at IS NULL AND failed_at IS NULL;
 
