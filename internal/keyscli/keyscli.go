@@ -10,6 +10,7 @@
 //	rewrap      wrap every stored data key under the active KEK; payloads are not decrypted
 //	retire      remove a KEK, only when no value uses it
 //	reencrypt   seal every value again under a new data key: the compromise path
+//	forget      give up on a lost KEK: mark what it sealed lost, start new home repositories
 //	export      print the key set as a Secret manifest: the KEK backup and its restore
 package keyscli
 

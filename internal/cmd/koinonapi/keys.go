@@ -52,7 +52,7 @@ func newKeysCommand() *cobra.Command {
 		Long:  "Run it in a koinon-api pod: kubectl exec deploy/koinon-api -- koinon-api keys status",
 	}
 	pf := keys.PersistentFlags()
-	pf.StringVar(&o.dbURL, "database-url", "", "Postgres connection string (status, rewrap, retire and reencrypt; every command for the install ID that KMS-wrapped KEKs are bound to)")
+	pf.StringVar(&o.dbURL, "database-url", "", "Postgres connection string (status, rewrap, retire, reencrypt and forget; every command for the install ID that KMS-wrapped KEKs are bound to)")
 	pf.StringVar(&o.kekSecret, "kek-secret", "", "name of the KEK Secret; the key set is read and changed through the Kubernetes API")
 	pf.StringVar(&o.kekDir, "kek-dir", "", "mounted KEK directory, read-only; used when --kek-secret is not set")
 	pf.StringVar(&o.namespace, "namespace", "", "namespace of the KEK Secret")
@@ -95,6 +95,7 @@ func newKeysCommand() *cobra.Command {
 		confirmed(sub("rewrap", "Wrap every stored data key under the active KEK (payloads are not decrypted)", cobra.NoArgs, true)),
 		confirmed(sub("retire [ID]", "Remove a KEK; refuses while any value uses it (on a terminal, pick it from a list without ID)", oneOrPrompt, true)),
 		confirmed(sub("reencrypt", "Seal every value again under a new data key (the compromise path)", cobra.NoArgs, true)),
+		confirmed(sub("forget [ID]", "Give up on a lost KEK: mark every value it sealed as lost and start new home repositories (on a terminal, pick it from a list without ID)", oneOrPrompt, true)),
 		sub("export", "Print the key set as a Secret manifest, the KEK backup (redirect it into a file; restore with kubectl apply)", cobra.NoArgs, false),
 	)
 	return keys
@@ -158,6 +159,8 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		return tool.Retire(ctx, firstOrEmpty(rest))
 	case "reencrypt":
 		return tool.Reencrypt(ctx)
+	case "forget":
+		return tool.Forget(ctx, firstOrEmpty(rest))
 	case "export":
 		return tool.Export(ctx)
 	}

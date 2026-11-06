@@ -460,6 +460,32 @@ func (q *Queries) ListEffectiveMemberships(ctx context.Context, userID pgtype.UU
 	return items, nil
 }
 
+const listPlatformAdminPersonalOrgs = `-- name: ListPlatformAdminPersonalOrgs :many
+SELECT u.personal_org_id FROM platform_admins pa JOIN users u ON u.id = pa.user_id ORDER BY u.personal_org_id
+`
+
+// The personal orgs of the platform admins: where a platform change made by no user (a koinon-api
+// command) is audited, as the platform API audits in the acting admin's personal org.
+func (q *Queries) ListPlatformAdminPersonalOrgs(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listPlatformAdminPersonalOrgs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var personal_org_id pgtype.UUID
+		if err := rows.Scan(&personal_org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, personal_org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUsersByIDs = `-- name: ListUsersByIDs :many
 SELECT id, display_name, email, deleted_at FROM users
 WHERE id = ANY($1::uuid[])

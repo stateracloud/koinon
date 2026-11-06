@@ -66,6 +66,7 @@ func (e AgentThinkingUpdateThinking) Valid() bool {
 // Defines values for AuditEventActorKind.
 const (
 	AuditEventActorKindAgent  AuditEventActorKind = "agent"
+	AuditEventActorKindCli    AuditEventActorKind = "cli"
 	AuditEventActorKindSecret AuditEventActorKind = "secret"
 	AuditEventActorKindSystem AuditEventActorKind = "system"
 	AuditEventActorKindToken  AuditEventActorKind = "token"
@@ -76,6 +77,8 @@ const (
 func (e AuditEventActorKind) Valid() bool {
 	switch e {
 	case AuditEventActorKindAgent:
+		return true
+	case AuditEventActorKindCli:
 		return true
 	case AuditEventActorKindSecret:
 		return true
@@ -465,6 +468,7 @@ func (e ThinkingStateVersionSetting) Valid() bool {
 // Defines values for ListAuditEventsParamsActorKind.
 const (
 	ListAuditEventsParamsActorKindAgent  ListAuditEventsParamsActorKind = "agent"
+	ListAuditEventsParamsActorKindCli    ListAuditEventsParamsActorKind = "cli"
 	ListAuditEventsParamsActorKindSecret ListAuditEventsParamsActorKind = "secret"
 	ListAuditEventsParamsActorKindSystem ListAuditEventsParamsActorKind = "system"
 	ListAuditEventsParamsActorKindToken  ListAuditEventsParamsActorKind = "token"
@@ -475,6 +479,8 @@ const (
 func (e ListAuditEventsParamsActorKind) Valid() bool {
 	switch e {
 	case ListAuditEventsParamsActorKindAgent:
+		return true
+	case ListAuditEventsParamsActorKindCli:
 		return true
 	case ListAuditEventsParamsActorKindSecret:
 		return true
@@ -692,6 +698,20 @@ type FlaggedPrice struct {
 // FlaggedPriceList defines model for FlaggedPriceList.
 type FlaggedPriceList struct {
 	Flagged []FlaggedPrice `json:"flagged"`
+}
+
+// HomeBackupRetention A key change starts a new backup repository for each agent's home. The old one stays readable for the checkpoints written to it for `days`, then it is deleted. The deadline is set when the new repository starts, so a change applies to later key changes only.
+type HomeBackupRetention struct {
+	Days        int `json:"days"`
+	DefaultDays int `json:"defaultDays"`
+	MaxDays     int `json:"maxDays"`
+	MinDays     int `json:"minDays"`
+}
+
+// HomeBackupRetentionSettings defines model for HomeBackupRetentionSettings.
+type HomeBackupRetentionSettings struct {
+	// Days Days to keep an old home backup repository. Leave out for the default (7).
+	Days *int `json:"days,omitempty"`
 }
 
 // LeakGuard defines model for LeakGuard.
@@ -1505,6 +1525,9 @@ type SetBudgetJSONRequestBody = OrgBudgetUpdate
 // SetDefaultModelJSONRequestBody defines body for SetDefaultModel for application/json ContentType.
 type SetDefaultModelJSONRequestBody = DefaultModel
 
+// SetHomeBackupRetentionJSONRequestBody defines body for SetHomeBackupRetention for application/json ContentType.
+type SetHomeBackupRetentionJSONRequestBody = HomeBackupRetentionSettings
+
 // SetLeakGuardJSONRequestBody defines body for SetLeakGuard for application/json ContentType.
 type SetLeakGuardJSONRequestBody = LeakGuardSettings
 
@@ -1596,6 +1619,12 @@ type ServerInterface interface {
 	// SetDefaultModel Set the org's default model, or clear it by leaving `model` out. Audited.
 	// (PUT /default-model)
 	SetDefaultModel(w http.ResponseWriter, r *http.Request)
+	// GetHomeBackupRetention How long an old home backup repository is kept after a key change (issue
+	// (GET /home-backup-retention)
+	GetHomeBackupRetention(w http.ResponseWriter, r *http.Request)
+	// SetHomeBackupRetention Set the retention in days, or return it to the default (7) by leaving `days` out. Audited.
+	// (PUT /home-backup-retention)
+	SetHomeBackupRetention(w http.ResponseWriter, r *http.Request)
 	// GetLeakGuard The org's leak-guard settings, with defaults filled in, and its fetch-trusted host list.
 	// (GET /leak-guard)
 	GetLeakGuard(w http.ResponseWriter, r *http.Request)
@@ -2099,6 +2128,34 @@ func (siw *ServerInterfaceWrapper) SetDefaultModel(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetDefaultModel(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetHomeBackupRetention operation middleware
+func (siw *ServerInterfaceWrapper) GetHomeBackupRetention(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetHomeBackupRetention(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetHomeBackupRetention operation middleware
+func (siw *ServerInterfaceWrapper) SetHomeBackupRetention(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetHomeBackupRetention(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3122,6 +3179,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/default-model", wrapper.SetDefaultModel)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/run-content-retention", wrapper.GetRunContentRetention)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/run-content-retention", wrapper.SetRunContentRetention)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/home-backup-retention", wrapper.GetHomeBackupRetention)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/home-backup-retention", wrapper.SetHomeBackupRetention)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/leak-guard", wrapper.GetLeakGuard)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/leak-guard", wrapper.SetLeakGuard)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/leak-guard/trusted-hosts", wrapper.AddFetchTrustedHost)
@@ -3650,6 +3709,83 @@ type SetDefaultModeldefaultJSONResponse struct {
 }
 
 func (response SetDefaultModeldefaultJSONResponse) VisitSetDefaultModelResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHomeBackupRetentionRequestObject struct {
+}
+
+type GetHomeBackupRetentionResponseObject interface {
+	VisitGetHomeBackupRetentionResponse(w http.ResponseWriter) error
+}
+
+type GetHomeBackupRetention200JSONResponse HomeBackupRetention
+
+func (response GetHomeBackupRetention200JSONResponse) VisitGetHomeBackupRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHomeBackupRetentiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetHomeBackupRetentiondefaultJSONResponse) VisitGetHomeBackupRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetHomeBackupRetentionRequestObject struct {
+	Body *SetHomeBackupRetentionJSONRequestBody
+}
+
+type SetHomeBackupRetentionResponseObject interface {
+	VisitSetHomeBackupRetentionResponse(w http.ResponseWriter) error
+}
+
+type SetHomeBackupRetention200JSONResponse HomeBackupRetention
+
+func (response SetHomeBackupRetention200JSONResponse) VisitSetHomeBackupRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetHomeBackupRetentiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetHomeBackupRetentiondefaultJSONResponse) VisitSetHomeBackupRetentionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -5160,6 +5296,12 @@ type StrictServerInterface interface {
 	// SetDefaultModel Set the org's default model, or clear it by leaving `model` out. Audited.
 	// (PUT /default-model)
 	SetDefaultModel(ctx context.Context, request SetDefaultModelRequestObject) (SetDefaultModelResponseObject, error)
+	// GetHomeBackupRetention How long an old home backup repository is kept after a key change (issue
+	// (GET /home-backup-retention)
+	GetHomeBackupRetention(ctx context.Context, request GetHomeBackupRetentionRequestObject) (GetHomeBackupRetentionResponseObject, error)
+	// SetHomeBackupRetention Set the retention in days, or return it to the default (7) by leaving `days` out. Audited.
+	// (PUT /home-backup-retention)
+	SetHomeBackupRetention(ctx context.Context, request SetHomeBackupRetentionRequestObject) (SetHomeBackupRetentionResponseObject, error)
 	// GetLeakGuard The org's leak-guard settings, with defaults filled in, and its fetch-trusted host list.
 	// (GET /leak-guard)
 	GetLeakGuard(ctx context.Context, request GetLeakGuardRequestObject) (GetLeakGuardResponseObject, error)
@@ -5684,6 +5826,61 @@ func (sh *strictHandler) SetDefaultModel(w http.ResponseWriter, r *http.Request)
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetDefaultModelResponseObject); ok {
 		if err := validResponse.VisitSetDefaultModelResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetHomeBackupRetention operation middleware
+func (sh *strictHandler) GetHomeBackupRetention(w http.ResponseWriter, r *http.Request) {
+	var request GetHomeBackupRetentionRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetHomeBackupRetention(ctx, request.(GetHomeBackupRetentionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetHomeBackupRetention")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetHomeBackupRetentionResponseObject); ok {
+		if err := validResponse.VisitGetHomeBackupRetentionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetHomeBackupRetention operation middleware
+func (sh *strictHandler) SetHomeBackupRetention(w http.ResponseWriter, r *http.Request) {
+	var request SetHomeBackupRetentionRequestObject
+
+	var body SetHomeBackupRetentionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetHomeBackupRetention(ctx, request.(SetHomeBackupRetentionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetHomeBackupRetention")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetHomeBackupRetentionResponseObject); ok {
+		if err := validResponse.VisitSetHomeBackupRetentionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

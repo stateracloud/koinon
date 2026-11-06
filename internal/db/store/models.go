@@ -2039,6 +2039,7 @@ type OrgSetting struct {
 	SandboxWaitCapSeconds   pgtype.Int4
 	LeakMatchThreshold      pgtype.Int4
 	RunContentRetentionDays pgtype.Int4
+	HomeBackupRetentionDays pgtype.Int4
 }
 
 type OrgTraceSetting struct {

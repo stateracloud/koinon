@@ -147,15 +147,28 @@ func (p Passwords) NewEpoch(ctx context.Context, org, agent pgtype.UUID, reason 
 	if p.Begin == nil {
 		return Repository{}, false, errors.New("checkpoint: Passwords.NewEpoch needs Begin")
 	}
-	if reason != ReasonKeyLost && reason != ReasonKeyCompromised {
-		return Repository{}, false, fmt.Errorf("checkpoint: unknown repository epoch reason %q", reason)
-	}
 	tx, err := p.Begin(ctx)
 	if err != nil {
 		return Repository{}, false, err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	q := p.Q.WithTx(tx)
+	r, ok, err := p.NewEpochIn(ctx, p.Q.WithTx(tx), org, agent, reason, retain)
+	if err != nil || !ok {
+		return r, ok, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Repository{}, false, err
+	}
+	return r, true, nil
+}
+
+// NewEpochIn is [Passwords.NewEpoch] with q, inside the caller's transaction, so that a caller
+// (koinon-api keys forget) can mark the old password lost, start the new epoch and audit both
+// at once.
+func (p Passwords) NewEpochIn(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, reason string, retain time.Duration) (Repository, bool, error) {
+	if reason != ReasonKeyLost && reason != ReasonKeyCompromised {
+		return Repository{}, false, fmt.Errorf("checkpoint: unknown repository epoch reason %q", reason)
+	}
 	if _, err := q.LockHomeRepository(ctx, store.LockHomeRepositoryParams{OrgID: org, AgentID: agent}); errors.Is(err, pgx.ErrNoRows) {
 		return Repository{}, false, nil
 	} else if err != nil {
@@ -186,9 +199,6 @@ func (p Passwords) NewEpoch(ctx context.Context, org, agent pgtype.UUID, reason 
 		_, err = q.RetireHomeRepositoryEpoch(ctx, store.RetireHomeRepositoryEpochParams{OrgID: org, AgentID: agent, RepositoryEpoch: cur, DeleteAfter: deadline})
 	}
 	if err != nil {
-		return Repository{}, false, err
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return Repository{}, false, err
 	}
 	return Repository{Epoch: next, Prefix: row.Prefix, Password: pw}, true, nil

@@ -55,6 +55,9 @@ type Settings struct {
 	TriggerConcurrency, TriggerRatePerMinute int
 	// RunContentRetention is how long a finished run's stored content is kept (retention.go).
 	RunContentRetention time.Duration
+	// HomeBackupRetention is how long an old home backup repository is kept after a key change
+	// (homebackup.go).
+	HomeBackupRetention time.Duration
 }
 
 // Defaults are the platform defaults a Settings falls back to.
@@ -63,7 +66,7 @@ func Defaults() Settings {
 		IdleTimeout: DefaultIdleTimeout, ParkWarm: DefaultParkWarm, QueueWait: DefaultQueueWait,
 		SandboxWaitCap: DefaultSandboxWaitCap, RunContentRetention: DefaultRunContentRetention,
 		MaxConcurrentRuns: DefaultMaxConcurrentRuns, TriggerConcurrency: DefaultTriggerConcurrency,
-		TriggerRatePerMinute: DefaultTriggerRatePerMinute,
+		TriggerRatePerMinute: DefaultTriggerRatePerMinute, HomeBackupRetention: DefaultHomeBackupRetention,
 	}
 }
 
@@ -103,6 +106,9 @@ func apply(def Settings, row store.OrgSetting) Settings {
 	}
 	if row.RunContentRetentionDays.Valid {
 		def.RunContentRetention = time.Duration(row.RunContentRetentionDays.Int32) * 24 * time.Hour
+	}
+	if row.HomeBackupRetentionDays.Valid {
+		def.HomeBackupRetention = time.Duration(row.HomeBackupRetentionDays.Int32) * 24 * time.Hour
 	}
 	return def
 }

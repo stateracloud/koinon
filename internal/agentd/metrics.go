@@ -45,6 +45,9 @@ type Metrics struct {
 	// TaintReports counts the leak guard feed's reports of finished tool calls, by the leg they set
 	// (private_data, untrusted_input) and result (recorded, failed).
 	TaintReports *prometheus.CounterVec
+	// SweepRefused is how many retired home repositories the last repository sweep refused to
+	// delete because their stored prefix is not their own (ADR 0085 decision 13).
+	SweepRefused prometheus.Gauge
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered).
@@ -83,6 +86,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		TaintReports: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koinon_agentd_taint_reports_total", Help: "Finished tool calls of a sandbox reported to the MCP leak guard, by the leg they set (private_data, untrusted_input) and result (recorded; failed: the run was given up).",
 		}, []string{"leg", "result"}),
+		SweepRefused: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "koinon_agentd_home_repository_sweep_refused", Help: "Retired home repositories the last repository sweep did not delete because their stored prefix is not their own; anything above 0 needs a person (the log names each once).",
+		}),
 		SandboxWait: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name: "koinon_agentd_sandbox_wait_duration_seconds", Help: "Time a run waited for its agent's sandbox to be ready, whatever the result.",
 			Buckets: []float64{0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300},
@@ -117,7 +123,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	if reg != nil {
 		reg.MustRegister(m.TaintReports, m.Claimed, m.Finished, m.Takeovers, m.SandboxWait, m.ModelWait, m.Requeued,
 			m.SandboxWaitCap, m.WrapUpNotices, m.TimeLimitStops, m.TraceSpansDropped, m.TraceSpansExported,
-			m.RunEventWriteFailures)
+			m.RunEventWriteFailures, m.SweepRefused)
 	}
 	return m
 }

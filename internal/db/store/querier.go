@@ -628,7 +628,9 @@ type Querier interface {
 	// longest overdue first so a row that keeps failing does not hold back the others. A repository past
 	// its deadline is kept while it is the agent's newest restorable home: it goes only once its
 	// password is lost (nothing restores from it any more) or a later epoch holds a complete checkpoint
-	// (a new epoch starts empty, so until its first backup the retired one is all there is).
+	// (a new epoch starts empty, so until its first backup the retired one is all there is). That later
+	// epoch must itself still restore: neither lost nor deleted (a later epoch is always a
+	// home_repository_epochs row, since epoch 0 is the first).
 	ListDueHomeRepositories(ctx context.Context, arg ListDueHomeRepositoriesParams) ([]ListDueHomeRepositoriesRow, error)
 	// Open questions past their expiry (the expiry sweep applies the default to them).
 	ListDueQuestions(ctx context.Context, arg ListDueQuestionsParams) ([]Question, error)
@@ -735,6 +737,9 @@ type Querier interface {
 	// the matching default entry, in every org (startup: prices.CompleteMigrated).
 	ListPendingMigratedPrices(ctx context.Context) ([]ListPendingMigratedPricesRow, error)
 	ListPlatformAdminIDs(ctx context.Context) ([]pgtype.UUID, error)
+	// The personal orgs of the platform admins: where a platform change made by no user (a koinon-api
+	// command) is audited, as the platform API audits in the acting admin's personal org.
+	ListPlatformAdminPersonalOrgs(ctx context.Context) ([]pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Org price overrides, default list versions and the model lookup that prices a request
@@ -1043,6 +1048,9 @@ type Querier interface {
 	SetOrgDefaultModel(ctx context.Context, arg SetOrgDefaultModelParams) (string, error)
 	// The org's first model becomes its default; a default that is set stays.
 	SetOrgDefaultModelIfUnset(ctx context.Context, arg SetOrgDefaultModelIfUnsetParams) (int64, error)
+	// How long an old home backup repository is kept after a key change (#219); NULL is the platform
+	// default. It touches only this column.
+	SetOrgHomeBackupRetention(ctx context.Context, arg SetOrgHomeBackupRetentionParams) error
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
 	// The leak guard's match threshold in characters (ADR 0084 decision 3); NULL is the platform
 	// default. It touches only this column, so the latency and limit overrides stay.

@@ -551,6 +551,39 @@ paths:
                 $ref: "#/components/schemas/RunContentRetention"
         default:
           $ref: "#/components/responses/Error"
+  /home-backup-retention:
+    get:
+      tags: [org-settings]
+      operationId: getHomeBackupRetention
+      summary: How long an old home backup repository is kept after a key change (issue #219), with the default and bounds.
+      responses:
+        "200":
+          description: The retention.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HomeBackupRetention"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [org-settings]
+      operationId: setHomeBackupRetention
+      summary: Set the retention in days, or return it to the default (7) by leaving `days` out. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HomeBackupRetentionSettings"
+      responses:
+        "200":
+          description: The retention.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HomeBackupRetention"
+        default:
+          $ref: "#/components/responses/Error"
   /leak-guard:
     get:
       tags: [leak-guard]
@@ -1007,7 +1040,7 @@ paths:
         - name: actorKind
           in: query
           required: false
-          schema: {type: string, enum: [user, token, agent, secret, system]}
+          schema: {type: string, enum: [user, token, agent, secret, system, cli]}
         - name: actorId
           in: query
           required: false
@@ -1448,6 +1481,24 @@ components:
         days:
           type: integer
           description: Days to keep a finished run's content. Leave out for the default (30).
+    HomeBackupRetention:
+      type: object
+      required: [days, defaultDays, minDays, maxDays]
+      description: >-
+        A key change starts a new backup repository for each agent's home. The old one stays readable for
+        the checkpoints written to it for `days`, then it is deleted. The deadline is set when the new
+        repository starts, so a change applies to later key changes only.
+      properties:
+        days: {type: integer}
+        defaultDays: {type: integer}
+        minDays: {type: integer}
+        maxDays: {type: integer}
+    HomeBackupRetentionSettings:
+      type: object
+      properties:
+        days:
+          type: integer
+          description: Days to keep an old home backup repository. Leave out for the default (7).
     LeakGuardSettings:
       type: object
       properties:
@@ -1884,7 +1935,7 @@ components:
       required: [id, actorKind, actorId, action, targetKind, targetId, summary, requestId, createdAt, chainSeq, prevHash, hash]
       properties:
         id: {type: string, format: uuid}
-        actorKind: {type: string, enum: [user, token, agent, secret, system]}
+        actorKind: {type: string, enum: [user, token, agent, secret, system, cli]}
         actorId: {type: string}
         action: {type: string, description: "<area>.<verb>, for example approval.approve."}
         targetKind: {type: string}

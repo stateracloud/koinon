@@ -280,6 +280,263 @@ func (x *SetRunContentRetentionResponse) GetRetention() *RunContentRetention {
 	return nil
 }
 
+// HomeBackupRetention is the org's effective retention of old home backup repositories. A key change
+// starts a new backup repository for each agent's home; the old one stays readable for the
+// checkpoints written to it for days, then it is deleted. The deadline is set when the new repository
+// starts, so a change applies to later key changes only.
+type HomeBackupRetention struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Days          int32                  `protobuf:"varint,1,opt,name=days,proto3" json:"days,omitempty"`
+	DefaultDays   int32                  `protobuf:"varint,2,opt,name=default_days,json=defaultDays,proto3" json:"default_days,omitempty"`
+	MinDays       int32                  `protobuf:"varint,3,opt,name=min_days,json=minDays,proto3" json:"min_days,omitempty"`
+	MaxDays       int32                  `protobuf:"varint,4,opt,name=max_days,json=maxDays,proto3" json:"max_days,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HomeBackupRetention) Reset() {
+	*x = HomeBackupRetention{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HomeBackupRetention) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HomeBackupRetention) ProtoMessage() {}
+
+func (x *HomeBackupRetention) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HomeBackupRetention.ProtoReflect.Descriptor instead.
+func (*HomeBackupRetention) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *HomeBackupRetention) GetDays() int32 {
+	if x != nil {
+		return x.Days
+	}
+	return 0
+}
+
+func (x *HomeBackupRetention) GetDefaultDays() int32 {
+	if x != nil {
+		return x.DefaultDays
+	}
+	return 0
+}
+
+func (x *HomeBackupRetention) GetMinDays() int32 {
+	if x != nil {
+		return x.MinDays
+	}
+	return 0
+}
+
+func (x *HomeBackupRetention) GetMaxDays() int32 {
+	if x != nil {
+		return x.MaxDays
+	}
+	return 0
+}
+
+type GetHomeBackupRetentionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetHomeBackupRetentionRequest) Reset() {
+	*x = GetHomeBackupRetentionRequest{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetHomeBackupRetentionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetHomeBackupRetentionRequest) ProtoMessage() {}
+
+func (x *GetHomeBackupRetentionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetHomeBackupRetentionRequest.ProtoReflect.Descriptor instead.
+func (*GetHomeBackupRetentionRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GetHomeBackupRetentionRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+type GetHomeBackupRetentionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Retention     *HomeBackupRetention   `protobuf:"bytes,1,opt,name=retention,proto3" json:"retention,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetHomeBackupRetentionResponse) Reset() {
+	*x = GetHomeBackupRetentionResponse{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetHomeBackupRetentionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetHomeBackupRetentionResponse) ProtoMessage() {}
+
+func (x *GetHomeBackupRetentionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetHomeBackupRetentionResponse.ProtoReflect.Descriptor instead.
+func (*GetHomeBackupRetentionResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *GetHomeBackupRetentionResponse) GetRetention() *HomeBackupRetention {
+	if x != nil {
+		return x.Retention
+	}
+	return nil
+}
+
+type SetHomeBackupRetentionRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	OrgId string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	// days to keep an old home backup repository; 0 returns it to the default.
+	Days          int32 `protobuf:"varint,2,opt,name=days,proto3" json:"days,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetHomeBackupRetentionRequest) Reset() {
+	*x = SetHomeBackupRetentionRequest{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetHomeBackupRetentionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetHomeBackupRetentionRequest) ProtoMessage() {}
+
+func (x *SetHomeBackupRetentionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetHomeBackupRetentionRequest.ProtoReflect.Descriptor instead.
+func (*SetHomeBackupRetentionRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *SetHomeBackupRetentionRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *SetHomeBackupRetentionRequest) GetDays() int32 {
+	if x != nil {
+		return x.Days
+	}
+	return 0
+}
+
+type SetHomeBackupRetentionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Retention     *HomeBackupRetention   `protobuf:"bytes,1,opt,name=retention,proto3" json:"retention,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetHomeBackupRetentionResponse) Reset() {
+	*x = SetHomeBackupRetentionResponse{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetHomeBackupRetentionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetHomeBackupRetentionResponse) ProtoMessage() {}
+
+func (x *SetHomeBackupRetentionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetHomeBackupRetentionResponse.ProtoReflect.Descriptor instead.
+func (*SetHomeBackupRetentionResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SetHomeBackupRetentionResponse) GetRetention() *HomeBackupRetention {
+	if x != nil {
+		return x.Retention
+	}
+	return nil
+}
+
 var File_koinon_orgsettings_v1alpha1_orgsettings_proto protoreflect.FileDescriptor
 
 const file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDesc = "" +
@@ -298,10 +555,26 @@ const file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDesc = "" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
 	"\x04days\x18\x02 \x01(\x05R\x04days\"p\n" +
 	"\x1eSetRunContentRetentionResponse\x12N\n" +
-	"\tretention\x18\x01 \x01(\v20.koinon.orgsettings.v1alpha1.RunContentRetentionR\tretention2\xc1\x02\n" +
+	"\tretention\x18\x01 \x01(\v20.koinon.orgsettings.v1alpha1.RunContentRetentionR\tretention\"\x82\x01\n" +
+	"\x13HomeBackupRetention\x12\x12\n" +
+	"\x04days\x18\x01 \x01(\x05R\x04days\x12!\n" +
+	"\fdefault_days\x18\x02 \x01(\x05R\vdefaultDays\x12\x19\n" +
+	"\bmin_days\x18\x03 \x01(\x05R\aminDays\x12\x19\n" +
+	"\bmax_days\x18\x04 \x01(\x05R\amaxDays\"6\n" +
+	"\x1dGetHomeBackupRetentionRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"p\n" +
+	"\x1eGetHomeBackupRetentionResponse\x12N\n" +
+	"\tretention\x18\x01 \x01(\v20.koinon.orgsettings.v1alpha1.HomeBackupRetentionR\tretention\"J\n" +
+	"\x1dSetHomeBackupRetentionRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
+	"\x04days\x18\x02 \x01(\x05R\x04days\"p\n" +
+	"\x1eSetHomeBackupRetentionResponse\x12N\n" +
+	"\tretention\x18\x01 \x01(\v20.koinon.orgsettings.v1alpha1.HomeBackupRetentionR\tretention2\xee\x04\n" +
 	"\x12OrgSettingsService\x12\x96\x01\n" +
 	"\x16GetRunContentRetention\x12:.koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse\"\x03\x90\x02\x01\x12\x91\x01\n" +
-	"\x16SetRunContentRetention\x12:.koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.SetRunContentRetentionResponseB]Z[github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1;orgsettingsv1alpha1b\x06proto3"
+	"\x16SetRunContentRetention\x12:.koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse\x12\x96\x01\n" +
+	"\x16GetHomeBackupRetention\x12:.koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse\"\x03\x90\x02\x01\x12\x91\x01\n" +
+	"\x16SetHomeBackupRetention\x12:.koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponseB]Z[github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1;orgsettingsv1alpha1b\x06proto3"
 
 var (
 	file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescOnce sync.Once
@@ -315,26 +588,37 @@ func file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP() []byte {
 	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescData
 }
 
-var file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_koinon_orgsettings_v1alpha1_orgsettings_proto_goTypes = []any{
 	(*RunContentRetention)(nil),            // 0: koinon.orgsettings.v1alpha1.RunContentRetention
 	(*GetRunContentRetentionRequest)(nil),  // 1: koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest
 	(*GetRunContentRetentionResponse)(nil), // 2: koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse
 	(*SetRunContentRetentionRequest)(nil),  // 3: koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest
 	(*SetRunContentRetentionResponse)(nil), // 4: koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse
+	(*HomeBackupRetention)(nil),            // 5: koinon.orgsettings.v1alpha1.HomeBackupRetention
+	(*GetHomeBackupRetentionRequest)(nil),  // 6: koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest
+	(*GetHomeBackupRetentionResponse)(nil), // 7: koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse
+	(*SetHomeBackupRetentionRequest)(nil),  // 8: koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest
+	(*SetHomeBackupRetentionResponse)(nil), // 9: koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse
 }
 var file_koinon_orgsettings_v1alpha1_orgsettings_proto_depIdxs = []int32{
 	0, // 0: koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.RunContentRetention
 	0, // 1: koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.RunContentRetention
-	1, // 2: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunContentRetention:input_type -> koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest
-	3, // 3: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunContentRetention:input_type -> koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest
-	2, // 4: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunContentRetention:output_type -> koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse
-	4, // 5: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunContentRetention:output_type -> koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	5, // 2: koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.HomeBackupRetention
+	5, // 3: koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.HomeBackupRetention
+	1, // 4: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunContentRetention:input_type -> koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest
+	3, // 5: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunContentRetention:input_type -> koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest
+	6, // 6: koinon.orgsettings.v1alpha1.OrgSettingsService.GetHomeBackupRetention:input_type -> koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest
+	8, // 7: koinon.orgsettings.v1alpha1.OrgSettingsService.SetHomeBackupRetention:input_type -> koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest
+	2, // 8: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunContentRetention:output_type -> koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse
+	4, // 9: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunContentRetention:output_type -> koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse
+	7, // 10: koinon.orgsettings.v1alpha1.OrgSettingsService.GetHomeBackupRetention:output_type -> koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse
+	9, // 11: koinon.orgsettings.v1alpha1.OrgSettingsService.SetHomeBackupRetention:output_type -> koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse
+	8, // [8:12] is the sub-list for method output_type
+	4, // [4:8] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_koinon_orgsettings_v1alpha1_orgsettings_proto_init() }
@@ -348,7 +632,7 @@ func file_koinon_orgsettings_v1alpha1_orgsettings_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDesc), len(file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

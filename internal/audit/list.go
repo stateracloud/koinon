@@ -26,7 +26,7 @@ var ErrBadFilter = errors.New("audit: invalid filter")
 
 var (
 	actionPrefixRE = regexp.MustCompile(`^[a-z0-9_.-]{1,100}$`)
-	actorKinds     = map[string]bool{KindUser: true, KindToken: true, KindAgent: true, KindSecret: true, KindSystem: true}
+	actorKinds     = map[string]bool{KindUser: true, KindToken: true, KindAgent: true, KindSecret: true, KindSystem: true, KindCLI: true}
 )
 
 // Filter narrows List. The zero value lists every event of the org.
@@ -39,7 +39,7 @@ type Filter struct {
 	Since, Until time.Time
 	// ActionPrefix matches the start of the action, for example "approval." or "agent.create".
 	ActionPrefix string
-	// ActorKind is user, token, agent, secret or system; ActorID narrows it to one actor.
+	// ActorKind is user, token, agent, secret, system or cli; ActorID narrows it to one actor.
 	ActorKind, ActorID string
 	// PageSize defaults to DefaultPageSize and is at most MaxPageSize.
 	PageSize int
