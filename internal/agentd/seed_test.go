@@ -205,6 +205,12 @@ var _ = Describe("home repository seeds", func() {
 	}
 
 	BeforeEach(func(ctx SpecContext) {
+		// The seed gauge counts every org in the database, and the orgs of earlier specs stay: one
+		// that ended with a seed still pending (its pool stopped first) or given up would count in
+		// this spec's gauge. Their seeds are recorded as done, so only this spec's org counts.
+		_, err := db.Exec(ctx, `UPDATE home_repository_epochs SET seeded_at = now(), seed_failed_at = NULL
+			WHERE seed_from_epoch IS NOT NULL AND seeded_at IS NULL`)
+		Expect(err).NotTo(HaveOccurred())
 		e = newEnv(ctx, store.AgentFlavorOpencode)
 		home = &fakeHome{files: map[string]string{"notes/v.md": "live"}}
 		e.files.tar = home.tar
@@ -214,7 +220,7 @@ var _ = Describe("home repository seeds", func() {
 		m = agentd.NewMetrics(nil)
 		e0 = checkpoint.Prefix(e.org.String(), e.agent.ID.String())
 		e1 = checkpoint.EpochPrefix(e.org.String(), e.agent.ID.String(), 1)
-		_, err := db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope) VALUES ($1, $2, $3, '{}')`, e.org, e.agent.ID, e0)
+		_, err = db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope) VALUES ($1, $2, $3, '{}')`, e.org, e.agent.ID, e0)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
