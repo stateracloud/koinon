@@ -215,6 +215,15 @@ var ErrRemoved = errors.New("connections: the connection was removed")
 // decision 13); they must be entered again.
 var ErrCredentialLost = errors.New("connections: the connection's stored credential was lost")
 
+// LostRemedy says how a connection's lost secret comes back: entered again on the Connections page
+// for a connection entered there, stored again from its Kubernetes Secret for a declared one.
+func LostRemedy(c store.Connection) string {
+	if c.Source == store.ConfigSourceSecret {
+		return fmt.Sprintf("the Kubernetes Secret %s that declares the connection %q stores it again at the next sync", c.ManagedBySecret.String, c.DisplayName)
+	}
+	return fmt.Sprintf("enter the secret of the connection %q again on the Connections page", c.DisplayName)
+}
+
 // Load opens a connection's stored secret fields for its code-host provider.
 func Load(_ context.Context, opener Opener, c store.Connection) (codehost.Connection, error) {
 	if c.RemovedAt.Valid {
@@ -222,7 +231,7 @@ func Load(_ context.Context, opener Opener, c store.Connection) (codehost.Connec
 			ErrRemoved, c.ManagedBySecret.String, c.DisplayName)
 	}
 	if c.CredentialLostAt.Valid {
-		return codehost.Connection{}, fmt.Errorf("%w: create the connection %q again on the Connections page", ErrCredentialLost, c.DisplayName)
+		return codehost.Connection{}, fmt.Errorf("%w: %s", ErrCredentialLost, LostRemedy(c))
 	}
 	fields, err := OpenFields(opener, c)
 	if err != nil {
