@@ -92,9 +92,9 @@ neither deleted nor lost with its key, and makes two kinds of change:
   source.
 - A snapshot is left out if its backup is still running or was given up, or if its tags cannot be
   read. It is also left out if it is another attempt at a checkpoint that already has its snapshot in
-  the same repository, or an earlier attempt where a later snapshot carries the same tag. Release
-  candidates before v0.1.0 saved a snapshot before they checked that the home was read whole, and a retry kept the
-  checkpoint's ID. The summary counts the snapshots left out.
+  the same repository, or an earlier attempt where a later snapshot carries the same tag. Builds
+  before checkpoints resync ([#89](https://github.com/stateracloud/koinon/issues/89)), v0.1.0-rc.9 and earlier and main before it merged, saved a snapshot
+  before they checked that the home was read whole, and a retry kept the checkpoint's ID. The summary counts the snapshots left out.
 - A complete checkpoint whose snapshot is gone is marked failed, with an error that names the snapshot.
   No checkpoint is deleted.
 
@@ -117,8 +117,8 @@ marked missing.
 
 Limits:
 
-- The resync cannot recognize one partial home: a checkpoint written after the dump by a release
-  candidate before v0.1.0, whose last attempt failed after its snapshot was saved. The restored database has no row
+- The resync cannot recognize one partial home: a checkpoint written after the dump by a build
+  before checkpoints resync ([#89](https://github.com/stateracloud/koinon/issues/89)), whose last attempt failed after its snapshot was saved. The restored database has no row
   that records the failure.
 - A repository started after the dump, by `keys forget` or `keys new-repositories`, is not in the
   restored database, and its password was sealed only in the database you lost. The homes saved in it
