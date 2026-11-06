@@ -241,6 +241,14 @@ describe('buildTimeline', () => {
     expect(items.map((i) => i.type)).toEqual(['message'])
   })
 
+  it('keeps a task event that follows the reply in the same millisecond after it', () => {
+    const items = buildTimeline(
+      [taskEvent(1, 1020, 'message', { text: 'Hello there' }, ActorKind.AGENT), taskEvent(2, 1020, 'message', { text: 'thanks' }, ActorKind.USER)],
+      { [run]: [chunk(1, 'Hello '), chunk(2, 'there')] },
+    )
+    expect(items.map((i) => (i.type === 'message' ? i.text : i.type))).toEqual(['Hello there', 'thanks'])
+  })
+
   it('keeps a user message that shares a millisecond with a chunk in its place', () => {
     const items = buildTimeline([taskEvent(1, 1010, 'message', { text: 'hi' }, ActorKind.USER)], { [run]: [chunk(1, 'Hello')] })
     expect(items.map((i) => i.type)).toEqual(['message', 'agent-text'])
