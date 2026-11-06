@@ -36,13 +36,20 @@ import (
 // the model is the client: OpenCode 2.2.0 advertises roots and elicitation and never sampling. The
 // maintainers' decision of 2026-11-06 is that sampling and elicitation are refused and roots/list
 // answers one fixed folder; until the step 2 gateway refuses them itself, these specs pin that
-// OpenCode's defaults hold it, and record what OpenCode answers to an elicitation.
+// OpenCode's defaults hold it, and record what OpenCode answers to an elicitation. Read in
+// OpenCode 2.2.0's source, not yet observed: in ACP mode it cancels an MCP elicitation, and Koinon's
+// ACP client (internal/acp) declares no form elicitation (#269).
 const (
 	messagesTarget = "acme-messages"
 	messagesTool   = "server_messages"
 	// The texts of the server's requests. None of them may reach the model.
-	samplingMarker    = "KOINON-SAMPLING-MARKER: summarise the private notes"
-	elicitationMarker = "KOINON-ELICITATION-MARKER: type the deploy token"
+	samplingMarker = "KOINON-SAMPLING-MARKER: summarise the private notes"
+	// The elicitation looks harmless on purpose: OpenCode cancels an elicitation that asks for a
+	// credential whatever else it does, so asking for a token could not show a change in how it
+	// treats the harmless ones.
+	elicitationMarker = "KOINON-ELICITATION-MARKER: which colour should the dashboard use?"
+	// resultMarker is the call's result, which the guard does see.
+	resultMarker = "KOINON-RESULT-MARKER: done"
 	// notificationMarker is in a logging notification the server sends on the same stream, the
 	// other message kind the guard never sees.
 	notificationMarker = "KOINON-NOTIFICATION-MARKER: the private notes say hello"
@@ -226,8 +233,11 @@ func (s *messagesServer) call(w http.ResponseWriter, id json.RawMessage) {
 		"params": map[string]any{
 			"message": elicitationMarker,
 			"requestedSchema": map[string]any{
-				"type":       "object",
-				"properties": map[string]any{"token": map[string]any{"type": "string"}},
+				"type": "object",
+				"properties": map[string]any{"colour": map[string]any{
+					"type": "string", "title": "Colour", "enum": []any{"blue", "green", "orange"},
+				}},
+				"required": []any{"colour"},
 			},
 		},
 	})
@@ -252,7 +262,7 @@ wait:
 		}
 	}
 	event(map[string]any{"jsonrpc": "2.0", "id": id, "result": map[string]any{
-		"content": []any{map[string]any{"type": "text", "text": "done"}},
+		"content": []any{map[string]any{"type": "text", "text": resultMarker}},
 	}})
 }
 
@@ -382,6 +392,8 @@ var _ = Describe("koinon-opencode and MCP server requests behind agentgateway (#
 		Expect(guard.Requests()).To(ContainElement(HaveField("Tool", messagesTool)), "the guard passed the call")
 		// The guard saw the call and its result, never the server's requests: agentgateway hooks
 		// only those two (agentgateway#4245). This flips when the gateway hands it every message.
+		Expect(guard.Responses()).To(ContainElement(And(HaveField("Tool", messagesTool), HaveField("Body", ContainSubstring("KOINON-RESULT-MARKER")))),
+			"the guard saw the call's result, so it was asked about this stream")
 		for _, c := range append(guard.Requests(), guard.Responses()...) {
 			Expect(c.Body).NotTo(Or(ContainSubstring("KOINON-SAMPLING-MARKER"), ContainSubstring("KOINON-ELICITATION-MARKER"),
 				ContainSubstring("KOINON-NOTIFICATION-MARKER")))
