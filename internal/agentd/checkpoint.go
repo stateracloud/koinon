@@ -122,12 +122,24 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 	defer wg.Wait()
 	slots := make(chan struct{}, c.Concurrency)
 	var swept time.Time
+	sweeping := make(chan struct{}, 1)
 	for ctx.Err() == nil {
 		// One tick at a time, so a panic is logged and the hourly checkpoints go on.
 		safego.Do(p.log, "checkpoint-tick", func() { p.checkpointTick(ctx, slots, &wg) })
 		if now := time.Now(); now.Sub(swept) >= c.Sweep {
-			swept = now
-			safego.Do(p.log, "repository-sweep", func() { p.sweepRepositories(ctx) })
+			// Beside the loop: a long sweep (serial blob deletes) must not delay the ticks.
+			// A sweep that is still running means this one is skipped.
+			select {
+			case sweeping <- struct{}{}:
+				swept = now
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					defer func() { <-sweeping }()
+					safego.Do(p.log, "repository-sweep", func() { p.sweepRepositories(ctx) })
+				}()
+			default:
+			}
 		}
 		if !sleep(ctx, c.Poll) {
 			return
