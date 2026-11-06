@@ -210,9 +210,8 @@ kubectl -n koinon logs deployment/<name>-api --tail=50
 
 ## Roll back
 
-**Within a minor line from v0.3.0 (patch upgrades).** Before v0.3 there is no promise, and a patch
-upgrade may have changed the schema, so treat it as a minor upgrade. The old and new releases share the schema, so going back is
-an image rollback. Use the previous revision or an explicit version:
+**Within a minor line from v0.3.0 (patch upgrades).** The old and new releases share the schema, so
+going back is an image rollback. Use the previous revision or an explicit version:
 
 ```sh
 helm -n koinon history <release>
@@ -223,7 +222,8 @@ or `helm upgrade` with `--version <previous>` and the same values. The migration
 rollback. A schema-version check keeps an old release from starting on a schema it cannot read, so a
 mistake shows as pods that are not Ready, not as errors in queries.
 
-**Across a minor, before v0.3.0, or from a release candidate.** There is no app-only rollback. A minor release may
+**Across a minor, before v0.3.0 (patch upgrades included), or from a release candidate.** There is
+no app-only rollback. A minor release, or any release before v0.3.0, may
 contract the schema: it can rename tables and drop columns and types, and a migration cannot be
 undone, because Koinon migrations are forward-only and a dropped column cannot return its data. The
 previous release's pods would fail on their first query, and the schema-version check keeps them

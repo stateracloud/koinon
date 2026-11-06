@@ -171,7 +171,8 @@ section says what the recommended option would have bought.
    covered by the documented stop, migrate, start and by the restore test (decision 18), not by an
    N-1 test.
 7. **The promise starts at v0.1.0** (procoduck, 2026-11-01). _Amended 2026-11-06: the promise starts
-   at v0.3.0, see [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md)._ The v0.1.0 schema is the first baseline.
+   at v0.3.0, see [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md)._ The v0.1.0 schema is
+   the first baseline.
    An rc install upgrades to v0.1.0 with a documented stop and cannot roll back to an rc. There is
    no retrofit for 00020 or older installs.
 8. **Binaries gate on the schema version** (procoduck, 2026-11-01). Each binary declares the range of
@@ -402,6 +403,8 @@ Implementation-level unknowns, to settle in the sub-issues:
   `main` (the release gate requires an ancestor of `origin/main`), so the marker, not a branch name,
   makes the rule bite: it is set when a minor line's `.0` ships and reset to `none` in the change that
   opens the next minor. A base ref named `release/*` and `MIGRATE_LINT_PATCH_LINE=1` also enable it.
+  _Amended 2026-11-06 ([0099](0099-no-schema-or-upgrade-promise-before-v0-3.md)): a `release/*` base
+  no longer enables it; only the marker and `MIGRATE_LINT_PATCH_LINE=1` do._
 
 ## Alternatives considered
 
@@ -475,8 +478,9 @@ the N-1 patch test, the baseline, the schema-version gate as a promise) bind fro
 v0.3.0 schema is the baseline of decision 7. Until then migrations may rename and drop, and an
 upgrade between pre-v0.3 releases may need a reinstall or documented manual steps. The gate of
 decision 1 on v0.1.0 no longer includes the schema decisions; it still covers backups, the restore
-runbook and the restore drill (decisions 13 to 16). The marker `hack/migrate-patch-line` stays
-`none` until v0.3.0 ships, and a `release/*` base is not a patch line by its name.
+runbook and the restore drill (decisions 13 to 16), and the drain and rollout decisions 2 to 4.
+The marker `hack/migrate-patch-line` stays `none` until v0.3.0 ships, and a `release/*` base is not
+a patch line by its name.
 
 ## Implementation sub-issues
 

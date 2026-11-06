@@ -73,9 +73,13 @@ What the tree does today:
 - Positive: v0.1 and v0.2 can fix a schema mistake directly, with no expand/contract pair.
 - Positive: one switch (the marker) explains when the lint bites, on `main` and on release branches.
 - Negative: an operator who installs v0.1 or v0.2 may have to reinstall to upgrade. The upgrade
-  guide and release notes must say so (ADR 0085 sub-issue 7 covers the guide).
+  upgrade guide says so from this ADR on, and the release notes of each pre-v0.3 release say which
+  upgrade path applies.
 - Negative: a release branch cut after v0.3.0 only enforces the rule if it carries the marker. The
   v0.3.0 checklist in `docs/dev/releasing.md` says to land the marker change before cutting
   `release/v0.3`.
-- Docs changed with this ADR: `docs/dev/releasing.md`, the Makefile help of `migrate-lint`, and the
-  header of `hack/migrate-lint.sh`. ADR 0085 carries a dated amendment that points here.
+- Changed with this ADR: `hack/migrate-lint.sh` (its rule and header) and its test
+  `hack/migrate-lint-test.sh`, the Makefile help of `migrate-lint`, `docs/dev/releasing.md`, the
+  operator upgrade guide (`docs/site/src/content/docs/guides/upgrading.md`), the patch-line
+  paragraph of `AGENTS.md` and the migration instructions in `.coderabbit.yaml`. ADR 0085 carries a
+  dated amendment that points here.

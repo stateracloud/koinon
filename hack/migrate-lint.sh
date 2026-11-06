@@ -6,8 +6,8 @@
 #   - numbers are unique and contiguous from 00001
 #   - with a base ref argument: migrations present on the base are unchanged
 #     (forward-only, ADR 0027), except the one-time edits listed in allowed_edits
-#   - on a patch line (ADR 0085, decisions 5 and 6; ADR 0099): migrations the branch adds must not contain
-#     RENAME, DROP COLUMN, DROP TABLE, DROP TYPE or a column type change, so the previous patch
+#   - on a patch line (ADR 0085, decisions 5 and 6; ADR 0099): migrations the branch adds must not
+#     contain RENAME, DROP COLUMN, DROP TABLE, DROP TYPE or a column type change, so the previous patch
 #     release's binaries keep working on the new schema (expand now, contract in the next minor).
 #
 # A patch line is either: the marker file hack/migrate-patch-line, read at the merge base, names a
