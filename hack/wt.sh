@@ -114,18 +114,29 @@ cmd_new() {
 }
 
 # is_managed <path>: succeeds for a worktree this script manages. $TMPDIR differs between a sandboxed
-# and an unsandboxed shell (/private/tmp/claude-502 against /var/folders/.../T), so the managed set is
-# not "under $root" but "directly inside a directory named kw" (or named like a custom root), plus
-# anything under $root itself when the root is spelled through a symlink. A linked worktree elsewhere
-# (.claude/worktrees/<name>, a human's checkout) is never managed.
-root_base=$(basename "$root")
+# and an unsandboxed shell (/private/tmp/claude-502 against /var/folders/.../T), so a worktree is
+# managed when it is under the realpath of $root, or, when KOINON_WT_ROOT is not set, when its parent
+# is exactly <temp base>/kw. A temp base is $TMPDIR, /tmp, /private/tmp, /private/tmp/claude-*,
+# /var/folders/*/*/T (also under /private) or an entry of KOINON_WT_TMP_BASES (colon separated). A
+# linked worktree elsewhere (.claude/worktrees/<name>, a human's checkout) is never managed.
 is_managed() {
-	local path=$1 parent real=""
-	parent=$(basename "$(dirname "$path")")
-	case $parent in kw | "$root_base") return 0 ;; esac
-	[ -d "$root" ] || return 1
-	real=$(cd "$root" && pwd -P)
-	case $(cd "$path" 2>/dev/null && pwd -P) in "$real"/*) return 0 ;; esac
+	local path=$1 real parent grand base
+	real=$(cd "$path" 2>/dev/null && pwd -P) || return 1
+	if [ -d "$root" ]; then
+		case $real in "$(cd "$root" && pwd -P)"/*) return 0 ;; esac
+	fi
+	[ -z "${KOINON_WT_ROOT:-}" ] || return 1
+	parent=$(dirname "$real")
+	[ "$(basename "$parent")" = kw ] || return 1
+	grand=$(dirname "$parent")
+	case $grand in
+	/tmp | /private/tmp | /private/tmp/claude-* | /var/folders/*/*/T | /private/var/folders/*/*/T) return 0 ;;
+	esac
+	local IFS=:
+	for base in ${TMPDIR:-} ${KOINON_WT_TMP_BASES:-}; do
+		[ -n "$base" ] && [ -d "$base" ] || continue
+		[ "$(cd "$base" && pwd -P)" = "$grand" ] && return 0
+	done
 	return 1
 }
 
@@ -151,15 +162,29 @@ managed_wts() {
 	done < <(git worktree list --porcelain; echo)
 }
 
-# wt_dir <name>: the path of the managed worktree named <name>. Fails when there is none.
+# wt_dir <name>: prints the path of the managed worktree named <name>. Returns 1 when there is none;
+# returns 2 and prints every path (one per line) when the name is ambiguous.
 wt_dir() {
-	local name=$1 path branch
+	local name=$1 path branch n=0 found=""
 	while IFS=$'\t' read -r path branch; do
 		[ "$(basename "$path")" = "$name" ] || continue
-		echo "$path"
-		return 0
+		found+="$path"$'\n'
+		n=$((n + 1))
 	done < <(managed_wts)
-	return 1
+	[ "$n" -ge 1 ] || return 1
+	printf '%s' "$found"
+	[ "$n" -eq 1 ] || return 2
+}
+
+# wt_dir_or_die <name>: wt_dir, but dies on none and on an ambiguous name.
+wt_dir_or_die() {
+	local out rc=0
+	out=$(wt_dir "$1") || rc=$?
+	case $rc in
+	0) printf '%s\n' "$out" ;;
+	1) die "no worktree $1" ;;
+	*) die "ambiguous name $1: $(tr '\n' ' ' <<<"$out")" ;;
+	esac
 }
 
 # claim_reason <branch>: prints a refusal reason when a live claim points at the branch. Claims are
@@ -306,7 +331,7 @@ cmd_rm() {
 	done
 	check_name "$name"
 	local dir
-	dir=$(wt_dir "$name") || die "no worktree $name"
+	dir=$(wt_dir_or_die "$name") || exit 1
 	remove_wt "$dir" "$name" "$force" "$delbranch" || exit 1
 }
 
@@ -388,7 +413,7 @@ print_wt() { # <path> <branch>
 cmd_path() {
   [ $# -eq 1 ] || usage
   check_name "$1"
-  wt_dir "$1" || die "no worktree $1"
+  wt_dir_or_die "$1"
 }
 
 [ $# -ge 1 ] || usage
