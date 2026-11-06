@@ -193,6 +193,16 @@ check "rm left the outside worktree alone" test -d "$tmp/other/ext"
 git worktree remove --force "$tmp/other/ext"
 git worktree remove --force "$tmp/outside-wt"
 
+# a worktree created under another $TMPDIR (sandbox against host) is found by ls, path, rm and gc
+mkdir -p "$tmp/otherroot/kw"
+git worktree add -q -b feat/other "$tmp/otherroot/kw/otmp" origin/main 2>/dev/null
+git -C "$tmp/otherroot/kw/otmp" push -q origin feat/other
+check "path finds a worktree under another TMPDIR" eq "$(wt path otmp)" "$tmp/otherroot/kw/otmp"
+check "ls lists a worktree under another TMPDIR" grep -q '^otmp feat/other ' <<<"$(wt ls)"
+check "gc sees a worktree under another TMPDIR" grep -q '^keep otmp:' <<<"$(wt gc --dry-run)"
+check "rm removes a worktree under another TMPDIR" wt rm otmp
+check "rm removed it" test ! -e "$tmp/otherroot/kw/otmp"
+
 # a malformed lease fails closed
 wt new badl --branch fix/703-badl >/dev/null 2>&1
 git -C "$tmp/kw/badl" push -q origin fix/703-badl

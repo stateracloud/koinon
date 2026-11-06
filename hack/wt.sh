@@ -13,7 +13,9 @@
 #       because make generate needs it; when that fails it says how to fix it and still succeeds.
 #       KOINON_WT_NO_INSTALL=1 skips the install.
 #   wt.sh rm <name> [--branch] [--force]
-#       remove the worktree (<name> is found through `git worktree list`, wherever $TMPDIR points).
+#       remove the worktree (<name> is found through `git worktree list`, wherever $TMPDIR points:
+#       rm, ls, gc and path manage every linked worktree that lives in a directory named kw, also one
+#       created under another $TMPDIR, as a sandboxed and an unsandboxed shell resolve it differently).
 #       Refuses, naming each check that failed, when: a live claim (claim/<N> on origin, N from a
 #       branch named <type>/<N>-<slug>) is held on its branch; a process has its working directory in
 #       it; it has uncommitted changes; or it has commits on no remote branch. --force overrides all
@@ -111,33 +113,52 @@ cmd_new() {
   echo "$dir"
 }
 
-# wt_dir <name>: the path of the linked worktree <root>/<name>, resolved through
-# `git worktree list --porcelain` with realpaths on both sides, so it works when $TMPDIR (and so the
-# root) is spelled differently in a sandbox and on the host. Only worktrees under the root count: a
-# linked worktree of the same name elsewhere (.claude/worktrees/<name>, a human's checkout) is never
-# returned. Fails when there is none.
-wt_dir() {
-	local name=$1 line path="" first=1 real="" rp
+# is_managed <path>: succeeds for a worktree this script manages. $TMPDIR differs between a sandboxed
+# and an unsandboxed shell (/private/tmp/claude-502 against /var/folders/.../T), so the managed set is
+# not "under $root" but "directly inside a directory named kw" (or named like a custom root), plus
+# anything under $root itself when the root is spelled through a symlink. A linked worktree elsewhere
+# (.claude/worktrees/<name>, a human's checkout) is never managed.
+root_base=$(basename "$root")
+is_managed() {
+	local path=$1 parent real=""
+	parent=$(basename "$(dirname "$path")")
+	case $parent in kw | "$root_base") return 0 ;; esac
 	[ -d "$root" ] || return 1
 	real=$(cd "$root" && pwd -P)
+	case $(cd "$path" 2>/dev/null && pwd -P) in "$real"/*) return 0 ;; esac
+	return 1
+}
+
+# managed_wts: prints "<path><TAB><branch>" for every managed linked worktree, from
+# `git worktree list --porcelain`; the main checkout is never listed. Branch is "(detached)" if none.
+managed_wts() {
+	local line path="" branch="(detached)" first=1
 	while IFS= read -r line || [ -n "$line" ]; do
 		case $line in
 		"worktree "*) path=${line#worktree } ;;
+		"branch "*) branch=${line#branch refs/heads/} ;;
 		"")
 			if [ -n "$path" ]; then
 				if [ "$first" -eq 1 ]; then
-					first=0 # the main checkout is never a candidate
-				elif [ "$(basename "$path")" = "$name" ]; then
-					rp=$(cd "$path" 2>/dev/null && pwd -P) || rp=""
-					case $rp in
-					"$real"/*) echo "$path"; return 0 ;;
-					esac
+					first=0
+				elif is_managed "$path"; then
+					printf '%s\t%s\n' "$path" "$branch"
 				fi
 			fi
-			path=""
+			path="" branch="(detached)"
 			;;
 		esac
 	done < <(git worktree list --porcelain; echo)
+}
+
+# wt_dir <name>: the path of the managed worktree named <name>. Fails when there is none.
+wt_dir() {
+	local name=$1 path branch
+	while IFS=$'\t' read -r path branch; do
+		[ "$(basename "$path")" = "$name" ] || continue
+		echo "$path"
+		return 0
+	done < <(managed_wts)
 	return 1
 }
 
@@ -302,7 +323,7 @@ gc_finished() {
 }
 
 cmd_gc() {
-	local dry=0 line path="" real first=1 name branch pr r rc=0
+	local dry=0 path="" name branch pr r rc=0
 	while [ $# -gt 0 ]; do
 		case $1 in
 		--dry-run) dry=1 ;;
@@ -310,22 +331,9 @@ cmd_gc() {
 		esac
 		shift
 	done
-	[ -d "$root" ] || return 0
-	real=$(cd "$root" && pwd -P)
 	local paths=()
-	while IFS= read -r line || [ -n "$line" ]; do
-		case $line in
-		"worktree "*) path=${line#worktree } ;;
-		"")
-			if [ -n "$path" ]; then
-				[ "$first" -eq 1 ] || case $path in "$real"/*) paths+=("$path") ;; esac
-				first=0
-			fi
-			path=""
-			;;
-		esac
-	done < <(git worktree list --porcelain; echo)
-	for path in "${paths[@]}"; do
+	while IFS=$'\t' read -r path _; do paths+=("$path"); done < <(managed_wts)
+	for path in ${paths[@]+"${paths[@]}"}; do
 		name=$(basename "$path")
 		branch=$(git -C "$path" symbolic-ref -q --short HEAD || true)
 		if [ -n "$branch" ]; then
@@ -359,25 +367,8 @@ cmd_gc() {
 }
 
 cmd_ls() {
-  [ -d "$root" ] || return 0
-  local real line="" path="" branch=""
-  real=$(cd "$root" && pwd -P)
-  # Records are blank-line separated; the trailing blank line flushes the last one.
-  while IFS= read -r line || [ -n "$line" ]; do
-    case $line in
-    "worktree "*)
-      path=${line#worktree }
-      branch="(detached)"
-      ;;
-    "branch "*) branch=${line#branch refs/heads/} ;;
-    "")
-      if [ -n "$path" ]; then
-        case $path in "$real"/*) print_wt "$path" "$branch" ;; esac
-      fi
-      path=""
-      ;;
-    esac
-  done < <(git worktree list --porcelain)
+	local path branch
+	while IFS=$'\t' read -r path branch; do print_wt "$path" "$branch"; done < <(managed_wts)
 }
 
 print_wt() { # <path> <branch>
