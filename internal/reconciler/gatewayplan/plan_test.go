@@ -503,6 +503,27 @@ var _ = Describe("MCP servers", func() {
 		Consistently(woken, 200*time.Millisecond).ShouldNot(Receive())
 	})
 
+	It("does not wake after Close: a pending settle-end timer is stopped (#249)", func() {
+		woken := make(chan struct{}, 4)
+		p := gatewayplan.New(gatewayplan.Config{
+			KeyDir: keyDir, KeySettle: 100 * time.Millisecond, MCPAskURL: "http://koinon-api:8080/mcp",
+			Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+			ToolServers: map[string]string{gateway.KoinonTarget: "http://koinon-api:8081/koinon"},
+			Wake:        func() { woken <- struct{}{} },
+		})
+		in := mcpInput()
+		in.Allowances = allow
+		_, err := p.Begin(in).Settle(context.Background(), []string{"mcp-wiki-f1"}, nil, lk)
+		Expect(err).NotTo(HaveOccurred())
+		p.Close()
+		Consistently(woken, 300*time.Millisecond).ShouldNot(Receive())
+
+		// A pass after Close schedules nothing either.
+		_, err = p.Begin(in).Settle(context.Background(), []string{"mcp-wiki-f2"}, nil, lk)
+		Expect(err).NotTo(HaveOccurred())
+		Consistently(woken, 300*time.Millisecond).ShouldNot(Receive())
+	})
+
 	It("keeps the probe keys across passes, so a pass does not revoke them", func() {
 		p := newPlanner(0)
 		for range 2 {

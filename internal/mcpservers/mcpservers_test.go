@@ -616,6 +616,30 @@ var _ = Describe("Service", func() {
 			Expect(woken(ctx, 500*time.Millisecond)).To(BeFalse(), "a probe that finds the same tools is not a change to plan")
 		})
 
+		It("wakes it when a tool goes absent or comes back, and not for a re-probe of an unchanged present tool (#249)", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "")
+			sid := uuidOf(s.ID)
+			schema := json.RawMessage(`{"type":"object"}`)
+			a := mcpservers.ListedTool{Name: "a", Description: "A", InputSchema: schema}
+			b := mcpservers.ListedTool{Name: "b", Description: "B", InputSchema: schema}
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
+			_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{a, b})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "new tools")
+
+			_, err = svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{a})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "b went absent")
+
+			_, err = svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{a})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, 500*time.Millisecond)).To(BeFalse(), "a re-probe that changes nothing")
+
+			_, err = svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{a, b})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "b came back")
+		})
+
 		It("wakes it when an agent's server allowlist changes (#249)", func(ctx SpecContext) {
 			s := create(ctx, "wiki", "")
 			var agent pgtype.UUID
