@@ -323,7 +323,8 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 			cur = &all[k]
 		}
 	}
-	if cur != nil && cur.DeclaredVersion.String == version && !cur.RemovedAt.Valid {
+	// A lost secret (keys forget) is written again from the Secret, which still holds it.
+	if cur != nil && cur.DeclaredVersion.String == version && !cur.RemovedAt.Valid && !cur.CredentialLostAt.Valid {
 		return nil
 	}
 	var prevConfig []byte

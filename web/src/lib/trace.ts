@@ -143,10 +143,11 @@ export function normalEndpoint(raw: string): string {
 
 /**
  * keepsSecrets says the stored secrets stay: the backend and the endpoint's origin are those the
- * destination was saved with. Otherwise the server drops them and every secret must be given again.
+ * destination was saved with, and they were not lost with a key-encryption key. Otherwise every
+ * secret must be given again.
  */
 export function keepsSecrets(f: { backend: Backend; endpoint: string }, d: Destination | undefined): boolean {
-  return !!d && d.backend === f.backend && sameOrigin(d.endpointUrl, f.endpoint)
+  return !!d && !d.credentialLostAt && d.backend === f.backend && sameOrigin(d.endpointUrl, f.endpoint)
 }
 
 /** isStored says the destination already holds that secret (a preset field or a header name). */

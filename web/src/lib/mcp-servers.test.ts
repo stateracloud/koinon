@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from '@bufbuild/protobuf'
+import { timestampFromDate } from '@bufbuild/protobuf/wkt'
 import { describe, expect, it } from 'vitest'
 import { Health, ServerSchema, Tier, ToolSchema } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import {
@@ -9,6 +10,7 @@ import {
   buildAllowlist,
   buildCreateRequest,
   buildUpdateRequest,
+  formErrors,
   healthLabel,
   initialForm,
   serverErrorField,
@@ -70,6 +72,13 @@ describe('buildUpdateRequest', () => {
   })
   it('replaces the credential when a value is typed', () => {
     expect(buildUpdateRequest(stored, { ...initialForm(stored), mode: 'custom', header: 'X-Key', value: not })).toEqual({ credentialHeader: 'X-Key', credentialPrefix: '', credentialValue: not })
+  })
+  it('keeps the mode and header of a lost credential and asks for its value', () => {
+    const lost = create(ServerSchema, { id: 's-2', name: 'docs', url: 'https://mcp.example.com/mcp', transport: 'streamable-http', credentialHeader: 'X-Api-Key', credentialLostAt: timestampFromDate(new Date('2026-11-01T00:00:00Z')) })
+    expect(initialForm(lost)).toMatchObject({ mode: 'custom', header: 'X-Api-Key', value: '' })
+    expect(formErrors(initialForm(lost), lost).value).toBeDefined()
+    expect(buildUpdateRequest(lost, { ...initialForm(lost), value: not })).toEqual({ credentialHeader: 'X-Api-Key', credentialPrefix: '', credentialValue: not })
+    expect(buildUpdateRequest(lost, { ...initialForm(lost), removeCredential: true })).toEqual({ removeCredential: true })
   })
   it('removes the credential on request or when set to none', () => {
     expect(buildUpdateRequest(stored, { ...initialForm(stored), removeCredential: true })).toEqual({ removeCredential: true })

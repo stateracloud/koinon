@@ -64,12 +64,20 @@ export function ConnectionPage() {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">{c.displayName}</h1>
         <Badge variant={c.status === ConnectionStatus.FAILING ? 'destructive' : 'secondary'}>{connectionStatusLabel(c.status)}</Badge>
+        {c.credentialLostAt && <Badge variant="destructive">Credential lost</Badge>}
         {isApprover(org.role) && (
           <Button size="sm" className="ml-auto" disabled={test.isPending} onClick={() => test.mutate({ orgId, connectionId })}>
             {test.isPending ? 'Testing…' : 'Test connection'}
           </Button>
         )}
       </div>
+      {c.credentialLostAt && !c.removed && (
+        <p role="note" className="text-destructive text-sm">
+          {declared
+            ? `The stored ${gt ? 'tokens were' : 'private key was'} lost with a key-encryption key, so runs that need this connection fail. Koinon reads ${gt ? 'them' : 'it'} again from the Secret ${c.managedBySecret} on its next sync.`
+            : `The stored ${gt ? 'tokens were' : 'private key was'} lost with a key-encryption key, so runs that need this connection fail. Create the connection again.`}
+        </p>
+      )}
       {c.source === 'secret' && (
         <p className="text-muted-foreground text-sm">
           {c.removed

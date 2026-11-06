@@ -233,6 +233,50 @@ var _ = Describe("Service", func() {
 		})
 	})
 
+	Describe("a lost credential", func() {
+		It("is not served, keeps its header, and needs a value to end", func(ctx SpecContext) {
+			srv := create(ctx, "lost", "koinon_test_not-a-real-token")
+			q := store.New(pool)
+			// What keys forget does (ADR 0085 decision 13).
+			_, err := pool.Exec(ctx, `UPDATE mcp_servers SET credential = NULL, credential_lost_at = now() WHERE org_id = $1 AND id = $2`, org, srv.ID)
+			Expect(err).NotTo(HaveOccurred())
+
+			got, err := svc.Get(ctx, org, srv.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CredentialLostAt).NotTo(BeNil())
+			Expect(got.HasCredential).To(BeFalse())
+			Expect(got.CredentialHeader).To(Equal("Authorization"), "the form asks for the value only")
+			served, err := q.ListServedMCPServers(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(served).To(BeEmpty())
+			_, err = q.GetServedMCPServerByName(ctx, store.GetServedMCPServerByNameParams{OrgID: org, Name: "lost"})
+			Expect(err).To(HaveOccurred())
+
+			By("a change with the header and no value is refused")
+			_, err = svc.Update(ctx, org, actor, srv.ID, mcpservers.Patch{Credential: &mcpservers.CredentialPatch{Header: "Authorization", Prefix: "Bearer "}})
+			Expect(err).To(MatchError(ContainSubstring("needs a value")))
+
+			By("entering the value again serves it again")
+			v := "koinon_test_not-a-real-token-2"
+			got, err = svc.Update(ctx, org, actor, srv.ID, mcpservers.Patch{Credential: &mcpservers.CredentialPatch{Header: "Authorization", Prefix: "Bearer ", Value: &v}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CredentialLostAt).To(BeNil())
+			Expect(got.HasCredential).To(BeTrue())
+			served, _ = q.ListServedMCPServers(ctx, org)
+			Expect(served).To(HaveLen(1))
+		})
+
+		It("ends when the credential is removed on purpose", func(ctx SpecContext) {
+			srv := create(ctx, "gone", "koinon_test_not-a-real-token")
+			_, err := pool.Exec(ctx, `UPDATE mcp_servers SET credential = NULL, credential_lost_at = now() WHERE org_id = $1 AND id = $2`, org, srv.ID)
+			Expect(err).NotTo(HaveOccurred())
+			got, err := svc.Update(ctx, org, actor, srv.ID, mcpservers.Patch{RemoveCredential: true})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CredentialLostAt).To(BeNil())
+			Expect(got.CredentialHeader).To(BeEmpty())
+		})
+	})
+
 	Describe("declared servers", func() {
 		decl := func(secret, version, name string) mcpservers.Declared {
 			return mcpservers.Declared{
@@ -240,6 +284,18 @@ var _ = Describe("Service", func() {
 				CredentialHeader: "X-Api-Key", CredentialValue: "not-a-real-token",
 			}
 		}
+		It("writes the credential again from the Secret when it was lost, even at the same version", func(ctx SpecContext) {
+			_, err := svc.ApplyDeclared(ctx, org, decl("s1", "uid/1", "wiki"))
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE mcp_servers SET credential = NULL, credential_lost_at = now() WHERE org_id = $1`, org)
+			Expect(err).NotTo(HaveOccurred())
+			changed, err := svc.ApplyDeclared(ctx, org, decl("s1", "uid/1", "wiki"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(changed).To(BeTrue())
+			list, _ := svc.List(ctx, org)
+			Expect(list[0].CredentialLostAt).To(BeNil())
+			Expect(list[0].HasCredential).To(BeTrue())
+		})
 		It("is read-only, wins a name collision and disables the UI server", func(ctx SpecContext) {
 			ui := create(ctx, "wiki", "")
 			changed, err := svc.ApplyDeclared(ctx, org, decl("s1", "uid/1", "wiki"))

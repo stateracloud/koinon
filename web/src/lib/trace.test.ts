@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from '@bufbuild/protobuf'
+import { timestampFromDate } from '@bufbuild/protobuf/wkt'
 import { describe, expect, it } from 'vitest'
 import { Backend, ContentLevel, DestinationSchema } from '@/gen/koinon/trace/v1alpha1/trace_pb'
 import { normalEndpoint, sameOrigin, buildInput, connectionChanged, clampLevel, destinationNameError, formErrors, hasErrors, initialForm, levelDisabledReason, percentToRate, rateToPercent } from '@/lib/trace'
@@ -49,6 +50,16 @@ describe('formErrors', () => {
   it('asks again for the secrets when the backend differs from the stored one', () => {
     const d = create(DestinationSchema, { id: 'd', name: 'lf', backend: Backend.LANGFUSE, endpointUrl: 'https://lf.example.com/x', secretFields: ['api_key'] })
     expect(formErrors({ ...initialForm(d), backend: Backend.DATADOG }, d, false).fields.api_key).toBeDefined()
+  })
+  it('asks again for every secret when the stored ones were lost with a key', () => {
+    const lostAt = timestampFromDate(new Date('2026-11-01T00:00:00Z'))
+    const d = create(DestinationSchema, { id: 'd', name: 'lf', backend: Backend.LANGFUSE, endpointUrl: 'https://lf.example.com/x', secretFields: ['public_key', 'secret_key'], credentialLostAt: lostAt })
+    expect(Object.keys(formErrors(initialForm(d), d, false).fields).sort()).toEqual(['public_key', 'secret_key'])
+    const f = { ...initialForm(d), secrets: { public_key: not, secret_key: not } }
+    expect(hasErrors(formErrors(f, d, false))).toBe(false)
+    expect(connectionChanged(f, d)).toBe(true)
+    const g = create(DestinationSchema, { id: 'g', name: 'g', backend: Backend.GENERIC, endpointUrl: 'https://c.example.com/v1', secretFields: ['X-A'], credentialLostAt: lostAt })
+    expect(formErrors(initialForm(g), g, false).headers[0]).toBeDefined()
   })
   it('needs no name for the platform destination', () => {
     const f = { ...initialForm(), endpoint: 'https://dd.example.com', backend: Backend.DATADOG, secrets: { api_key: not } }

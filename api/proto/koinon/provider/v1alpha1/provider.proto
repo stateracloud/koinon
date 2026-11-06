@@ -85,6 +85,9 @@ message Provider {
   repeated ModelFormat formats = 13;
   // echo_check is the latest echo check of the provider; unset when none ran.
   EchoCheck echo_check = 14;
+  // credential_lost_at is set when the API key was lost with the key that encrypted it (`koinon-api keys
+  // forget`, ADR 0085 decision 13): the provider is not served until the key is entered again; has_key is false. Unset otherwise.
+  google.protobuf.Timestamp credential_lost_at = 15;
 }
 
 // EchoCheck is the result of an echo check (CheckProviderEcho).

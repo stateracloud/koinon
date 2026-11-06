@@ -28,7 +28,7 @@ func providerProto(p catalog.Provider) *providerv1alpha1.Provider {
 	return &providerv1alpha1.Provider{
 		Id: p.ID, Name: p.Name, Type: p.Type, Url: p.URL, HasKey: p.HasKey, Source: p.Source,
 		ManagedBySecret: p.ManagedBySecret, DisabledReason: p.DisabledReason, Removed: p.Removed,
-		AnthropicWorkspaceId: p.AnthropicWorkspaceID, Formats: formatProtos(p.Formats),
+		AnthropicWorkspaceId: p.AnthropicWorkspaceID, Formats: formatProtos(p.Formats), CredentialLostAt: optTime(p.CredentialLostAt),
 		CreatedAt: timestamppb.New(p.CreatedAt), UpdatedAt: timestamppb.New(p.UpdatedAt),
 	}
 }

@@ -729,7 +729,10 @@ type McpServer struct {
 	CodeHostConnectionId *openapi_types.UUID `json:"codeHostConnectionId,omitempty"`
 	CreatedAt            time.Time           `json:"createdAt"`
 	CredentialHeader     *string             `json:"credentialHeader,omitempty"`
-	CredentialPrefix     *string             `json:"credentialPrefix,omitempty"`
+
+	// CredentialLostAt Set when the credential was lost with the key that encrypted it (`koinon-api keys forget`): the server is not served until the credential is entered again.
+	CredentialLostAt *time.Time `json:"credentialLostAt,omitempty"`
+	CredentialPrefix *string    `json:"credentialPrefix,omitempty"`
 
 	// DataClass The session legs (ADR 0091) the server's results can set: `untrusted_input` (returns text an
 	// outsider controls) and `private_data` (returns data the org does not want to leave). A server
@@ -1207,6 +1210,9 @@ type Provider struct {
 	// AnthropicWorkspaceId The Anthropic workspace the gateway names for this provider's models. Only for type `anthropic`; unset when not given.
 	AnthropicWorkspaceId *string   `json:"anthropicWorkspaceId,omitempty"`
 	CreatedAt            time.Time `json:"createdAt"`
+
+	// CredentialLostAt Set when the API key was lost with the key that encrypted it (`koinon-api keys forget`): the provider is not served until the key is entered again.
+	CredentialLostAt *time.Time `json:"credentialLostAt,omitempty"`
 
 	// DisabledReason Set while a declared provider of the same name shadows this one; it is not served.
 	DisabledReason *string `json:"disabledReason,omitempty"`

@@ -211,11 +211,18 @@ func ParseGitHubConfig(raw []byte) (GitHubConfig, error) { return github.ParseCo
 // ErrRemoved means the connection was declared by a Secret that has been deleted.
 var ErrRemoved = errors.New("connections: the connection was removed")
 
+// ErrCredentialLost means the connection's stored secret fields were lost with a key (ADR 0085
+// decision 13); they must be entered again.
+var ErrCredentialLost = errors.New("connections: the connection's stored credential was lost")
+
 // Load opens a connection's stored secret fields for its code-host provider.
 func Load(_ context.Context, opener Opener, c store.Connection) (codehost.Connection, error) {
 	if c.RemovedAt.Valid {
 		return codehost.Connection{}, fmt.Errorf("%w: the Kubernetes Secret %s that declared %q was deleted; restore the Secret, or bind the agent to another connection",
 			ErrRemoved, c.ManagedBySecret.String, c.DisplayName)
+	}
+	if c.CredentialLostAt.Valid {
+		return codehost.Connection{}, fmt.Errorf("%w: create the connection %q again on the Connections page", ErrCredentialLost, c.DisplayName)
 	}
 	fields, err := OpenFields(opener, c)
 	if err != nil {
