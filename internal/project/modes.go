@@ -11,7 +11,8 @@ type GatewayMode string
 const (
 	// GatewayStandalone runs agentgateway from a rendered local config file.
 	GatewayStandalone GatewayMode = "standalone"
-	// GatewayKubernetes runs agentgateway's Kubernetes controller behind a GatewayClass.
+	// GatewayKubernetes runs agentgateway's Kubernetes controller behind a GatewayClass. It is
+	// frozen: no new features, deleted with agentgateway in ADR 0097 step 3 (v0.3) (ADR 0097 decision 4, issue #274).
 	GatewayKubernetes GatewayMode = "kubernetes"
 )
 
