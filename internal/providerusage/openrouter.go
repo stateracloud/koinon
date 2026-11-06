@@ -144,10 +144,13 @@ func (o OpenRouter) Usage(ctx context.Context, p Provider, id string) (Usage, er
 		OutputTokens:    first(g.Data.NativeTokensCompletion, g.Data.TokensCompletion),
 		CacheReadTokens: first(g.Data.NativeTokensCached),
 		ReasoningTokens: first(g.Data.NativeTokensReasoning),
-		Cost:            cost,
-		UpstreamCost:    upstream,
-		BYOK:            byok,
-		Cancelled:       g.Data.Cancelled != nil && *g.Data.Cancelled,
+		// Only a positive count makes the split known: a 0 has not been shown to mean "no
+		// thinking" on every route, so 0 and null leave the gateway's split and flag (#78).
+		ReasoningKnown: g.Data.NativeTokensReasoning != nil && *g.Data.NativeTokensReasoning > 0,
+		Cost:           cost,
+		UpstreamCost:   upstream,
+		BYOK:           byok,
+		Cancelled:      g.Data.Cancelled != nil && *g.Data.Cancelled,
 	}
 	out.CacheReadTokens = min(out.CacheReadTokens, out.InputTokens)
 	out.ReasoningTokens = min(out.ReasoningTokens, out.OutputTokens)
