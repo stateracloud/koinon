@@ -80,9 +80,10 @@ type ForgetResult struct {
 // old repositories are deleted after the org's home backup retention.
 //
 // Each org changes in one transaction, audited there as [ForgetAction] with the cli actor; the
-// platform's trace destination belongs to no org and is reported, not audited. A KEK still in the
-// key set is not lost: Forget refuses it (rewrap, then retire it). Running Forget again finds
-// nothing left to do.
+// platform's trace destination, which belongs to no org, is audited in each platform admin's
+// personal org. A KEK still in the key set is not lost: Forget refuses it (rewrap, then retire it),
+// also when it is restored while the confirmation is open. Without a terminal it needs --yes.
+// Running Forget again finds nothing left to do.
 func (t *Tool) Forget(ctx context.Context, id string) error {
 	ks, err := t.Store.Load(ctx)
 	if err != nil {
@@ -108,11 +109,19 @@ func (t *Tool) Forget(ctx context.Context, id string) error {
 		_, _ = fmt.Fprintf(t.Out, "No stored value is sealed with KEK %s; nothing to forget.\n", id)
 		return nil
 	}
-	ring, err := t.ring(ks)
-	if err != nil {
+	if err := t.confirmForget(ctx, id, n); err != nil {
 		return err
 	}
-	if err := t.confirmForget(ctx, id, n); err != nil {
+	// The question can stay open for minutes: the KEK may have been restored from escrow meanwhile,
+	// and the new repositories are sealed with the KEK active now.
+	if ks, err = t.Store.Load(ctx); err != nil {
+		return err
+	}
+	if _, ok := ks.Keys[id]; ok {
+		return fmt.Errorf("KEK %s is in the key set again, so it is not lost; nothing was changed", id)
+	}
+	ring, err := t.ring(ks)
+	if err != nil {
 		return err
 	}
 	res, err := t.forget(ctx, ring, id)
@@ -120,10 +129,17 @@ func (t *Tool) Forget(ctx context.Context, id string) error {
 	return err
 }
 
-// confirmForget asks the person to type the KEK ID: forgetting cannot be undone.
+// errForgetUnconfirmed refuses keys forget where nobody can be asked and --yes was not given.
+var errForgetUnconfirmed = errors.New("keys forget cannot be undone: run it on a terminal (kubectl exec -it) or pass --yes")
+
+// confirmForget asks the person to type the KEK ID: forgetting cannot be undone. Unlike the other
+// commands it does not run unasked without a terminal: only --yes skips the question.
 func (t *Tool) confirmForget(ctx context.Context, id string, n int) error {
-	if t.Prompt == nil || t.Yes {
+	if t.Yes {
 		return nil
+	}
+	if t.Prompt == nil {
+		return errForgetUnconfirmed
 	}
 	got, err := t.Prompt.Input(ctx,
 		fmt.Sprintf("Forget KEK %s and mark the %d value(s) it seals as lost? Type the KEK ID to continue", id, n),
@@ -161,16 +177,54 @@ func (t *Tool) forget(ctx context.Context, ring *secretstore.Keyring, id string)
 			errs = append(errs, fmt.Errorf("org %s: %w", org.String(), err))
 		}
 	}
-	platform := Column{tracedest.PlatformTable, tracedest.CredentialsColumn}
-	tag, err := t.Pool.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s WHERE %s->>'kek_id' = $1`,
-		platform.Table, lostRules[platform].set(platform), platform.Column), id)
-	if err != nil {
+	if err := t.forgetPlatform(ctx, id, &res); err != nil {
 		errs = append(errs, fmt.Errorf("platform trace destination: %w", err))
-	} else if tag.RowsAffected() > 0 {
+	}
+	return res, errors.Join(errs...)
+}
+
+// forgetPlatform marks the platform's trace destination lost when id sealed it. It belongs to no
+// org, so, as the platform admin API does (tracedest.SetPlatformDestination), the change is
+// audited in a platform admin's personal org: here in every platform admin's, since the command
+// acts for none of them. In one transaction: without a platform admin nothing changes.
+func (t *Tool) forgetPlatform(ctx context.Context, id string, res *ForgetResult) error {
+	platform := Column{tracedest.PlatformTable, tracedest.CredentialsColumn}
+	changed := false
+	err := pgx.BeginFunc(ctx, t.Pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s WHERE %s->>'kek_id' = $1`,
+			platform.Table, lostRules[platform].set(platform), platform.Column), id)
+		if err != nil {
+			return err
+		}
+		if changed = tag.RowsAffected() > 0; !changed {
+			return nil
+		}
+		q := store.New(tx)
+		orgs, err := q.ListPlatformAdminPersonalOrgs(ctx)
+		if err != nil {
+			return err
+		}
+		if len(orgs) == 0 {
+			return errors.New("no platform admin exists to audit the change in; grant one, then run keys forget again")
+		}
+		for _, org := range orgs {
+			if err := audit.RecordErr(ctx, q, audit.Event{
+				Org: org, Actor: forgetActor, Action: ForgetAction, TargetKind: "kek", TargetID: id,
+				After: map[string]any{"lost": map[string][]string{"platformTraceDestination": {"platform"}}},
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if changed {
 		res.Platform = true
 		res.Lost["platformTraceDestination"]++
 	}
-	return res, errors.Join(errs...)
+	return nil
 }
 
 // orgsSealedWith lists the orgs with a value sealed with id.
@@ -315,7 +369,7 @@ func (t *Tool) reportForget(id string, res ForgetResult) {
 		_, _ = fmt.Fprintln(t.Out, "Org admins see \"credential lost\" on each provider, connection, MCP server and trace destination concerned; enter those credentials again.")
 	}
 	if res.Platform {
-		_, _ = fmt.Fprintln(t.Out, "The platform's trace destination lost its credentials: a platform admin enters them again. (It belongs to no org, so it is not in an org's audit log.)")
+		_, _ = fmt.Fprintln(t.Out, "The platform's trace destination lost its credentials: a platform admin enters them again. (Audited in each platform admin's personal org.)")
 	}
 }
 

@@ -657,10 +657,15 @@ var _ = Describe("home checkpoints", func() {
 		Consistently(func() float64 { return testutil.ToFloat64(m.SweepRefused) }).WithTimeout(500*time.Millisecond).Should(Equal(1.0), "every sweep counts it again")
 		Expect(strings.Count(logs.String(), "stored prefix is not its own")).To(Equal(1), "about ten sweeps, one log line")
 
-		By("once the row is fixed, the gauge goes back to 0")
+		By("once the row is fixed, the gauge goes back to 0 (and the row is swept)")
 		_, err = db.Exec(ctx, `UPDATE home_repositories SET prefix = $3 WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID, checkpoint.Prefix(org, e.agent.ID.String()))
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(func() float64 { return testutil.ToFloat64(m.SweepRefused) }).WithTimeout(10 * time.Second).Should(BeZero())
+
+		By("a fixed row that regresses is logged again")
+		_, err = db.Exec(ctx, `UPDATE home_repositories SET prefix = $3, deleted_at = NULL WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID, other)
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() int { return strings.Count(logs.String(), "stored prefix is not its own") }).WithTimeout(10 * time.Second).Should(Equal(2))
 	})
 
 	It("keeps a retired repository while the only later checkpoints are in a lost or deleted epoch", func(ctx SpecContext) {

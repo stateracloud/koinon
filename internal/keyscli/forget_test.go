@@ -4,8 +4,10 @@ package keyscli_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/json"
+	"io"
 	"strings"
 	"time"
 
@@ -43,6 +45,8 @@ var _ = Describe("koinon-api keys forget", func() {
 		tool *keyscli.Tool
 		out  *bytes.Buffer
 		now  time.Time
+		// lostKey is the lost KEK's bytes, for a spec that restores it from "escrow".
+		lostKey []byte
 	)
 
 	ring := func(ctx SpecContext) *secretstore.Keyring {
@@ -79,11 +83,11 @@ var _ = Describe("koinon-api keys forget", func() {
 		DeferCleanup(func(ctx SpecContext) { _, _ = pool.Exec(ctx, `DELETE FROM platform_trace_destination`) })
 		now = time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 		kube = fake.NewClientset()
-		key := make([]byte, secretstore.KeySize)
-		_, _ = rand.Read(key)
+		lostKey = make([]byte, secretstore.KeySize)
+		_, _ = rand.Read(lostKey)
 		_, err = kube.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "koinon-kek", Namespace: ns},
-			Data:       map[string][]byte{lostKEK: secretstore.EncodeKey(key), "active": []byte(lostKEK)},
+			Data:       map[string][]byte{lostKEK: secretstore.EncodeKey(lostKey), "active": []byte(lostKEK)},
 		}, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		ks = keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}
@@ -110,6 +114,10 @@ var _ = Describe("koinon-api keys forget", func() {
 	It("marks every value the lost KEK sealed lost, starts new home repositories, and audits each org", func(ctx SpecContext) {
 		org, user, _ := pgtest.NewOrg(ctx, pool)
 		other, otherUser, _ := pgtest.NewOrg(ctx, pool)
+		// A platform admin of their own, whose personal org holds no sealed value.
+		personal, admin, _ := pgtest.NewOrg(ctx, pool)
+		_, err := pool.Exec(ctx, `INSERT INTO platform_admins (user_id) VALUES ($1)`, admin)
+		Expect(err).NotTo(HaveOccurred())
 		settings := orgsettings.NewService(pool)
 		three := 3
 		Expect(settings.SetHomeBackupRetention(ctx, org, audit.User(user), &three)).To(Succeed())
@@ -191,6 +199,7 @@ var _ = Describe("koinon-api keys forget", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 11, nextKEK: 1}))
 
+		tool.Yes = true // no terminal: --yes is what lets it run
 		Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
 		Expect(out.String()).To(And(
 			ContainSubstring("Forgot KEK "+lostKEK+": 11 value(s) marked lost in 2 org(s)."),
@@ -255,7 +264,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			kind, id, actor string
 			summary         []byte
 		}
-		rows, err := pool.Query(ctx, `SELECT org_id, actor_kind, actor_id, target_id, summary FROM audit_events WHERE action = $1 ORDER BY org_id`, keyscli.ForgetAction)
+		rows, err := pool.Query(ctx, `SELECT org_id, actor_kind, actor_id, target_id, summary FROM audit_events WHERE action = $1 AND org_id <> $2 ORDER BY org_id`, keyscli.ForgetAction, personal)
 		Expect(err).NotTo(HaveOccurred())
 		var events []event
 		for rows.Next() {
@@ -276,10 +285,59 @@ var _ = Describe("koinon-api keys forget", func() {
 			}
 		}
 
+		By("the platform's trace destination is audited in the platform admin's personal org")
+		var platformSummary []byte
+		var kind string
+		Expect(pool.QueryRow(ctx, `SELECT actor_kind, summary FROM audit_events WHERE action = $1 AND org_id = $2`, keyscli.ForgetAction, personal).Scan(&kind, &platformSummary)).To(Succeed())
+		Expect(kind).To(Equal(audit.KindCLI))
+		Expect(string(platformSummary)).To(ContainSubstring("platformTraceDestination"))
+
 		By("running it again finds nothing left")
 		out.Reset()
 		Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
 		Expect(out.String()).To(ContainSubstring("nothing to forget"))
+	})
+
+	Describe("without a terminal", func() {
+		var org pgtype.UUID
+		BeforeEach(func(ctx SpecContext) {
+			var user pgtype.UUID
+			org, user, _ = pgtest.NewOrg(ctx, pool)
+			_, err := catalog.New(pool, ring(ctx), nil).CreateProvider(ctx, org, audit.User(user), user, catalog.ProviderInput{
+				Name: pgtest.Uniq("p"), Type: "openai", URL: "https://x.example.com/v1", APIKey: "sk-a",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			rotateAndLose(ctx)
+		})
+
+		It("refuses without --yes, because it cannot be undone", func(ctx SpecContext) {
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(And(ContainSubstring("cannot be undone"), ContainSubstring("--yes"))))
+			Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 1}), "nothing changed")
+			tool.Yes = true
+			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
+			Expect(usage(ctx)).To(BeEmpty())
+		})
+
+		It("changes nothing of the platform without a platform admin to audit it in, and finishes once there is one", func(ctx SpecContext) {
+			_, err := pool.Exec(ctx, `INSERT INTO platform_trace_destination (backend, endpoint_url) VALUES ('datadog', 'https://otlp.example.com')
+				ON CONFLICT (singleton) DO NOTHING`)
+			Expect(err).NotTo(HaveOccurred())
+			// Sealed with the lost KEK: copy a provider's envelope's kek_id into a stand-in row.
+			_, err = pool.Exec(ctx, `UPDATE platform_trace_destination SET credentials = jsonb_build_object('kek_id', $1::text)`, lostKEK)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `DELETE FROM platform_admins`)
+			Expect(err).NotTo(HaveOccurred())
+			tool.Yes = true
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(ContainSubstring("no platform admin exists")))
+			Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 1}), "the org's values are done; the platform's is left as it was")
+
+			var user pgtype.UUID
+			Expect(pool.QueryRow(ctx, `SELECT id FROM users ORDER BY id LIMIT 1`).Scan(&user)).To(Succeed())
+			_, err = pool.Exec(ctx, `INSERT INTO platform_admins (user_id) VALUES ($1)`, user)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
+			Expect(usage(ctx)).To(BeEmpty())
+		})
 	})
 
 	Describe("on a terminal", func() {
@@ -316,6 +374,20 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(usage(ctx)).To(BeEmpty())
 		})
 
+		It("changes nothing when the KEK is restored while the question is open", func(ctx SpecContext) {
+			restore := func() {
+				sec, err := kube.CoreV1().Secrets(ns).Get(context.Background(), "koinon-kek", metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				sec.Data[lostKEK] = secretstore.EncodeKey(lostKey)
+				_, err = kube.CoreV1().Secrets(ns).Update(context.Background(), sec, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+			}
+			asked = &bytes.Buffer{}
+			tool.Prompt = &cli.Prompter{In: &onRead{r: strings.NewReader(lostKEK + "\n"), first: restore}, Out: asked, Accessible: true}
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(ContainSubstring("in the key set again")))
+			Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 1}), "nothing changed")
+		})
+
 		It("has nothing to pick when every KEK in use is in the key set", func(ctx SpecContext) {
 			Expect(tool.Add(ctx, lostKEK)).To(Succeed()) // restored from escrow after all
 			ask("1\n")
@@ -323,3 +395,18 @@ var _ = Describe("koinon-api keys forget", func() {
 		})
 	})
 })
+
+// onRead calls first before its first read: what happens while a question waits for its answer.
+type onRead struct {
+	r     io.Reader
+	first func()
+	done  bool
+}
+
+func (o *onRead) Read(p []byte) (int, error) {
+	if !o.done {
+		o.done = true
+		o.first()
+	}
+	return o.r.Read(p)
+}

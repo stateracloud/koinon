@@ -214,14 +214,17 @@ func (p *Pool) sweepRepositories(ctx context.Context) {
 			// The prefix is recomputed, never taken from the row: a row that names another agent's
 			// or org's folder is refused, so the sweep deletes only this agent's own repository.
 			want := checkpoint.EpochPrefix(org.String(), r.AgentID.String(), r.RepositoryEpoch)
+			key := org.String() + "/" + checkpoint.EpochRow(r.AgentID.String(), r.RepositoryEpoch)
 			if r.Prefix != want {
-				// Logged once per process; the gauge counts it on every sweep, for an alert.
+				// Logged once per process (until the row is fixed); the gauge counts it on every
+				// sweep, for an alert.
 				refused++
-				if _, seen := p.sweepRefused.LoadOrStore(org.String()+"/"+checkpoint.EpochRow(r.AgentID.String(), r.RepositoryEpoch), true); !seen {
+				if _, seen := p.sweepRefused.LoadOrStore(key, true); !seen {
 					log.Error("repository sweep: a retired repository's stored prefix is not its own; not deleting it (logged once; see koinon_agentd_home_repository_sweep_refused)", "prefix", r.Prefix, "want", want)
 				}
 				continue
 			}
+			p.sweepRefused.Delete(key) // fixed: a later refusal of the row is logged again
 			n, err := homes.DeleteRepository(ctx, want)
 			if err != nil {
 				if ctx.Err() == nil {

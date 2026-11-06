@@ -737,6 +737,9 @@ type Querier interface {
 	// the matching default entry, in every org (startup: prices.CompleteMigrated).
 	ListPendingMigratedPrices(ctx context.Context) ([]ListPendingMigratedPricesRow, error)
 	ListPlatformAdminIDs(ctx context.Context) ([]pgtype.UUID, error)
+	// The personal orgs of the platform admins: where a platform change made by no user (a koinon-api
+	// command) is audited, as the platform API audits in the acting admin's personal org.
+	ListPlatformAdminPersonalOrgs(ctx context.Context) ([]pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Org price overrides, default list versions and the model lookup that prices a request

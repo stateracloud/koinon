@@ -310,6 +310,7 @@ type Pool struct {
 	stopping <-chan struct{}
 	// sweepRefused holds the retired repositories (org/agent/epoch) the sweep has refused and
 	// logged, so each is logged once per process; the SweepRefused gauge counts them every sweep.
+	// An entry goes when its row next passes the check (a fixed row is logged again if it regresses).
 	sweepRefused sync.Map
 }
 
