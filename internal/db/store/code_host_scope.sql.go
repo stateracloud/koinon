@@ -48,6 +48,28 @@ func (q *Queries) DeleteCodeHostConnectionRepos(ctx context.Context, arg DeleteC
 	return result.RowsAffected(), nil
 }
 
+const keyShareConnection = `-- name: KeyShareConnection :one
+SELECT id FROM connections
+WHERE org_id = $1 AND id = $2
+FOR KEY SHARE
+`
+
+type KeyShareConnectionParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// The first lock of a scope replacement: the connection row, FOR KEY SHARE, which the inserts'
+// foreign key check takes anyway. Taking it first keeps the order every path uses (connection row,
+// then the scope lock, then the repository rows), so a replacement never holds the scope lock while
+// it waits for a SetConnectionSecret or DeleteConnection that holds the row and waits for the lock.
+func (q *Queries) KeyShareConnection(ctx context.Context, arg KeyShareConnectionParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, keyShareConnection, arg.OrgID, arg.ID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const listCodeHostConnectionRepos = `-- name: ListCodeHostConnectionRepos :many
 SELECT owner, repo, visibility, checked_at FROM org_code_host_repos
 WHERE org_id = $1 AND connection_id = $2

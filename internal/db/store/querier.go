@@ -548,6 +548,11 @@ type Querier interface {
 	// Whether the user may answer questions in the org: role member or higher.
 	IsOrgMember(ctx context.Context, arg IsOrgMemberParams) (bool, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
+	// The first lock of a scope replacement: the connection row, FOR KEY SHARE, which the inserts'
+	// foreign key check takes anyway. Taking it first keeps the order every path uses (connection row,
+	// then the scope lock, then the repository rows), so a replacement never holds the scope lock while
+	// it waits for a SetConnectionSecret or DeleteConnection that holds the row and waits for the lock.
+	KeyShareConnection(ctx context.Context, arg KeyShareConnectionParams) (pgtype.UUID, error)
 	// The newest complete checkpoint of the home's lineage, whichever sandbox took it. A sandbox no
 	// harness ever ran in (home_dirtied_at NULL) holds exactly what this checkpoint holds, so it is
 	// the restore of a recreation or archive of that sandbox.

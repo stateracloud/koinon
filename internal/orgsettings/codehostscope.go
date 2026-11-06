@@ -106,8 +106,10 @@ func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, act
 	}
 	err := s.tx(ctx, func(q *store.Queries) error {
 		// The connection must be the org's, also for an empty report, which would write nothing the
-		// foreign key could refuse.
-		if _, err := q.GetConnection(ctx, store.GetConnectionParams{OrgID: org, ID: cid}); err != nil {
+		// foreign key could refuse. Its row is locked first (FOR KEY SHARE), before the scope lock:
+		// SetConnectionSecret and DeleteConnection lock the row and then the scope, so the reverse
+		// order here would deadlock with them.
+		if _, err := q.KeyShareConnection(ctx, store.KeyShareConnectionParams{OrgID: org, ID: cid}); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}

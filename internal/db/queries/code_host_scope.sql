@@ -12,6 +12,15 @@ JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
 WHERE r.org_id = @org_id AND c.removed_at IS NULL
 ORDER BY r.owner, r.repo, r.connection_id;
 
+-- name: KeyShareConnection :one
+-- The first lock of a scope replacement: the connection row, FOR KEY SHARE, which the inserts'
+-- foreign key check takes anyway. Taking it first keeps the order every path uses (connection row,
+-- then the scope lock, then the repository rows), so a replacement never holds the scope lock while
+-- it waits for a SetConnectionSecret or DeleteConnection that holds the row and waits for the lock.
+SELECT id FROM connections
+WHERE org_id = @org_id AND id = @id
+FOR KEY SHARE;
+
 -- name: LockCodeHostConnectionScope :exec
 -- Serialises the replacements of one connection's repositories until the transaction ends, so a
 -- reading is compared with, and written after, the one stored before it.
