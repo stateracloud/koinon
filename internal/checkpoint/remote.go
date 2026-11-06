@@ -132,7 +132,7 @@ func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(repositoryReply{Epoch: repo.Epoch, Prefix: repo.Prefix, Password: repo.Password}) //nolint:gosec // the password is the reply: released to the writer only
+	_ = json.NewEncoder(w).Encode(repositoryReply(repo)) //nolint:gosec // the password is the reply: released to the writer only
 }
 
 // Remote is the agentd side: it asks koinon-api for each repository, per checkpoint, and keeps
@@ -200,5 +200,5 @@ func (c Remote) ask(ctx context.Context, org, agent pgtype.UUID, epoch *int32) (
 		// An older koinon-api ignores the parameter and answers with epoch 0.
 		return Repository{}, fmt.Errorf("koinon-api answered with repository epoch %d of agent %s, not %d; is it older than this koinon-agentd?", out.Epoch, agent, *epoch)
 	}
-	return Repository{Epoch: out.Epoch, Prefix: out.Prefix, Password: out.Password}, nil
+	return Repository(out), nil
 }

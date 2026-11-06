@@ -186,8 +186,8 @@ var _ = Describe("Postgres", Ordered, func() {
 		set, err := secrets.Secrets(ctx, org)
 		Expect(err).NotTo(HaveOccurred())
 		sc := scrub.New(scrub.Config{Level: scrub.LevelFull, Secrets: set})
-		Expect(sc.Text("pw=" + e0.Password)).To(Equal("pw=[redacted:secret]"), "the retired epoch's")
-		Expect(sc.Text("pw=" + e1.Password)).To(Equal("pw=[redacted:secret]"), "the current epoch's")
+		Expect(sc.Text("pw="+e0.Password)).To(Equal("pw=[redacted:secret]"), "the retired epoch's")
+		Expect(sc.Text("pw="+e1.Password)).To(Equal("pw=[redacted:secret]"), "the current epoch's")
 	})
 
 	It("records a destination's health, the platform's too", func(ctx SpecContext) {
