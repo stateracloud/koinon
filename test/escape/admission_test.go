@@ -230,6 +230,33 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		}
 	})
 
+	It("denies a ServiceAccount token on workload pods, the controller's included", func(ctx SpecContext) {
+		const mount = "sandbox workload pods must set automountServiceAccountToken to false"
+		const project = "sandbox workload pods must not project a ServiceAccount token"
+		tokenVolume := corev1.Volume{Name: "token", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
+			Sources: []corev1.VolumeProjection{
+				{ConfigMap: &corev1.ConfigMapProjection{LocalObjectReference: corev1.LocalObjectReference{Name: "kube-root-ca.crt"}}},
+				{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{Path: "token"}},
+			},
+		}}}
+		denied(createPod(ctx, controllerUser, ns, workload("automount-true", func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = new(true) })), mount)
+		denied(createPod(ctx, controllerUser, ns, workload("automount-unset", func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = nil })), mount)
+		denied(createPod(ctx, controllerUser, ns, workload("projected-token", func(p *corev1.Pod) {
+			p.Spec.ServiceAccountName = "default" // the API server rejects a token projection without one
+			p.Spec.Volumes = []corev1.Volume{tokenVolume}
+		})), project)
+
+		By("a projected volume without a token is fine (control)")
+		Expect(createPod(ctx, controllerUser, ns, workload("projected-config", func(p *corev1.Pod) {
+			v := tokenVolume.DeepCopy()
+			v.Projected.Sources = v.Projected.Sources[:1]
+			p.Spec.Volumes = []corev1.Volume{*v}
+		}))).To(Succeed())
+
+		By("supervisor pods are not covered: the gateway creates them")
+		Expect(createPod(ctx, gatewayUser, ns, supervisor("supervisor-automount"))).To(Succeed())
+	})
+
 	It("denies ephemeral containers, the controller's included", func(ctx SpecContext) {
 		for _, user := range []string{controllerUser, gatewayUser, otherUser, "admin"} {
 			p, err := admin.CoreV1().Pods(ns).Get(ctx, existingPod, metav1.GetOptions{})
