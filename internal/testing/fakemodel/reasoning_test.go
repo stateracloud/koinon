@@ -18,7 +18,7 @@ var _ = Describe("reasoning tokens", func() {
 	post := func(srv *fakemodel.Server, path, body string) string {
 		ts := httptest.NewServer(srv)
 		DeferCleanup(ts.Close)
-		resp, err := http.Post(ts.URL+path, "application/json", strings.NewReader(body)) //nolint:noctx // a local test server
+		resp, err := http.Post(ts.URL+path, "application/json", strings.NewReader(body))
 		Expect(err).NotTo(HaveOccurred())
 		defer func() { _ = resp.Body.Close() }()
 		b, err := io.ReadAll(resp.Body)

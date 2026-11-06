@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+// This file drives MCP logging and sampling on purpose: the gateway must guard those
+// server-to-client channels even though go-sdk marks them deprecated (SEP-2577, still on the wire).
+//
+//nolint:staticcheck // SA1019: the deprecated features are the thing under test
 package gatewaytest
 
 import (
