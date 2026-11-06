@@ -6,9 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -24,6 +26,12 @@ func uuidOf(s string) pgtype.UUID {
 	var id pgtype.UUID
 	Expect(id.Scan(s)).To(Succeed())
 	return id
+}
+
+func uuidString(id pgtype.UUID) string {
+	s, err := id.Value()
+	Expect(err).NotTo(HaveOccurred())
+	return s.(string)
 }
 
 var _ = Describe("Service", func() {
@@ -508,6 +516,61 @@ var _ = Describe("Service", func() {
 			other, otherUser, _ := pgtest.NewOrg(ctx, pool)
 			_, err = svc.SetTier(ctx, other, audit.User(otherUser), s.ID, "search", "auto")
 			Expect(err).To(MatchError(mcpservers.ErrNotFound))
+		})
+	})
+
+	Describe("waking the reconciler", func() {
+		var conn *pgxpool.Conn
+		BeforeEach(func(ctx SpecContext) {
+			var err error
+			conn, err = pool.Acquire(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(conn.Release)
+			_, err = conn.Exec(ctx, `LISTEN koinon_reconcile`)
+			Expect(err).NotTo(HaveOccurred())
+		})
+		// woken reports whether this org was notified within the wait; other specs' orgs are
+		// ignored because the suite shares one database.
+		woken := func(ctx SpecContext, wait time.Duration) bool {
+			GinkgoHelper()
+			got := false
+			for {
+				wctx, cancel := context.WithTimeout(ctx, wait)
+				n, err := conn.Conn().WaitForNotification(wctx)
+				cancel()
+				if err != nil {
+					return got
+				}
+				if n.Payload == uuidString(org) {
+					got = true
+				}
+			}
+		}
+
+		It("wakes it when a server is created, its credential or URL changes, and it is deleted", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "not-a-real-token")
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
+
+			v := "not-another-token"
+			_, err := svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{Credential: &mcpservers.CredentialPatch{Header: "X-Api-Key", Value: &v}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "credential change")
+
+			u := "https://other.example.com/mcp"
+			_, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &u})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "URL change")
+
+			Expect(svc.Delete(ctx, org, actor, s.ID)).To(Succeed())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "delete")
+		})
+
+		It("does not wake it for the prober's own health writes", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "")
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
+			_, _, err := svc.RecordProbe(ctx, org, uuidOf(s.ID), true, "", true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, 500*time.Millisecond)).To(BeFalse(), "a probe result is not a change to plan")
 		})
 	})
 
