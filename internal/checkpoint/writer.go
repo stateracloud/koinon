@@ -7,9 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"time"
 
 	"github.com/kopia/kopia/fs/localfs"
 	"github.com/kopia/kopia/repo"
@@ -42,12 +46,57 @@ type Writer struct {
 	Limits  Limits
 }
 
-// Meta is stamped on a snapshot as tags.
+// Meta is stamped on a snapshot as tags: what checkpoints resync records for a snapshot that no
+// checkpoint names (ADR 0085 decision 17), so the bucket alone tells which home a snapshot holds.
 type Meta struct {
 	CheckpointID string
 	Generation   string
 	Epoch        int64
+	// Reason and Sandbox are the checkpoint's reason and the OpenShell sandbox read; empty leaves
+	// the tag out (snapshots written before they were stamped have neither).
+	Reason, Sandbox string
+	// Ready, when set, is called once the whole stream is staged and before the snapshot is
+	// written: an error stops the backup with no snapshot. The backup checks there that the home
+	// was read whole (tar's exit code), so that every snapshot in the bucket holds a whole home and
+	// checkpoints resync may record any snapshot it finds. Not a tag.
+	Ready func() error
 }
+
+// tags is what m stamps on a snapshot.
+func (m Meta) tags() map[string]string {
+	t := map[string]string{"checkpoint": m.CheckpointID, "generation": m.Generation, "epoch": strconv.FormatInt(m.Epoch, 10)}
+	if m.Reason != "" {
+		t["reason"] = m.Reason
+	}
+	if m.Sandbox != "" {
+		t["sandbox"] = m.Sandbox
+	}
+	return t
+}
+
+// metaOf reads the tags of a snapshot back.
+func metaOf(t map[string]string) (Meta, error) {
+	epoch, err := strconv.ParseInt(t["epoch"], 10, 64)
+	if err != nil {
+		return Meta{}, fmt.Errorf("the epoch tag %q is not a number", t["epoch"])
+	}
+	return Meta{CheckpointID: t["checkpoint"], Generation: t["generation"], Epoch: epoch, Reason: t["reason"], Sandbox: t["sandbox"]}, nil
+}
+
+// Snapshot is a complete snapshot of a repository, as Snapshots lists it.
+type Snapshot struct {
+	ID string
+	// Start and End are when the snapshot was taken; Bytes is the size of its files.
+	Start, End time.Time
+	Bytes      int64
+	// Meta is what its tags say; MetaErr is set instead when they cannot be read.
+	Meta    Meta
+	MetaErr error
+}
+
+// ErrNoRepositoryInBucket is returned by Snapshots for a prefix that holds no repository: one
+// that was never backed up into, or a bucket that is not the one the database belongs to.
+var ErrNoRepositoryInBucket = errors.New("checkpoint: the bucket holds no repository at that prefix")
 
 // Result is a finished snapshot.
 type Result struct {
@@ -81,6 +130,11 @@ func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream 
 	if err != nil {
 		return Result{}, fmt.Errorf("reading the home: %w", err)
 	}
+	if m.Ready != nil {
+		if err := m.Ready(); err != nil {
+			return Result{}, err
+		}
+	}
 	rep, err := w.open(ctx, work, prefix, password, true)
 	if err != nil {
 		return Result{}, err
@@ -110,7 +164,7 @@ func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream 
 		if man.IncompleteReason != "" {
 			return fmt.Errorf("the snapshot is incomplete: %s", man.IncompleteReason)
 		}
-		man.Tags = map[string]string{"checkpoint": m.CheckpointID, "generation": m.Generation, "epoch": fmt.Sprint(m.Epoch)}
+		man.Tags = m.tags()
 		if id, err = snapshot.SaveSnapshot(ctx, wr, man); err != nil {
 			return err
 		}
@@ -195,6 +249,46 @@ func (w *Writer) Verify(ctx context.Context, prefix, password, snapshotID string
 		return fmt.Errorf("snapshot %s is incomplete: %s", snapshotID, man.IncompleteReason)
 	}
 	return nil
+}
+
+// Snapshots lists the complete snapshots of the repository at prefix, oldest first: what the
+// bucket holds after kopia's retention (checkpoints resync, ADR 0085 decision 17). It opens the
+// repository afresh, so it sees every snapshot saved before the call. A prefix with no repository
+// is [ErrNoRepositoryInBucket]; it is never created.
+func (w *Writer) Snapshots(ctx context.Context, prefix, password string) ([]Snapshot, error) {
+	work, err := os.MkdirTemp(w.Scratch, "list-")
+	if err != nil {
+		return nil, err
+	}
+	defer RemoveAll(work)
+	rep, err := w.open(ctx, work, prefix, password, false)
+	if errors.Is(err, repo.ErrRepositoryNotInitialized) || errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("%w: %s", ErrNoRepositoryInBucket, prefix)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rep.Close(ctx) }()
+	all, err := snapshot.ListSnapshots(ctx, rep, source)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Snapshot, 0, len(all))
+	for _, man := range all {
+		if man.IncompleteReason != "" {
+			continue // a checkpoint is a complete snapshot; restore never offers one either
+		}
+		s := Snapshot{ID: string(man.ID), Start: man.StartTime.ToTime(), End: man.EndTime.ToTime(), Bytes: man.Stats.TotalFileSize}
+		s.Meta, s.MetaErr = metaOf(man.Tags)
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].Start.Equal(out[j].Start) {
+			return out[i].Start.Before(out[j].Start)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
 }
 
 // open connects to the repository (creating it first when create is set and it is new) with a
