@@ -166,6 +166,10 @@ type Config struct {
 	KeyDir string
 	// KeySettle is how long a new key file needs to reach the gateway pod.
 	KeySettle time.Duration
+	// Wake, when set, is called once KeySettle after a pass wrote new key files: the exact end of the
+	// settle, so the next pass serves the provider or MCP server at once instead of at the next resync
+	// (#249). It runs on its own goroutine and must not block for long.
+	Wake func()
 	// ToolServers maps a connector type ID to its MCP tool server URL.
 	ToolServers map[string]string
 	// MCPAskURL is the base URL of the approval-gated MCP tool proxy; empty offers no ask-tier tools.
@@ -568,6 +572,11 @@ func (p *Planner) keysSettling(written []string, now time.Time) map[string]bool 
 	}
 	for _, name := range written {
 		p.keyWrittenAt[name] = now
+	}
+	if len(written) > 0 && p.cfg.Wake != nil && p.cfg.KeySettle > 0 {
+		// One timer per pass. The settle ends when KeySettle has passed since now, and the timer starts
+		// after now, so the settle is over when it fires.
+		time.AfterFunc(p.cfg.KeySettle, p.cfg.Wake)
 	}
 	settling := map[string]bool{}
 	for name, at := range p.keyWrittenAt {

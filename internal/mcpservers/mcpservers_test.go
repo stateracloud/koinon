@@ -593,6 +593,44 @@ var _ = Describe("Service", func() {
 			Expect(woken(ctx, time.Second)).To(BeTrue(), "credential lost")
 		})
 
+		It("wakes it when a tool's tier or sink declaration changes, and not for the prober's touch of a known tool (#249)", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "")
+			sid := uuidOf(s.ID)
+			schema := json.RawMessage(`{"type":"object"}`)
+			listed := []mcpservers.ListedTool{{Name: "search", Description: "Search", InputSchema: schema}}
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
+			_, err := svc.SyncTools(ctx, org, sid, listed)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "a new tool")
+
+			_, err = svc.SetTier(ctx, org, actor, s.ID, "search", "auto")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "tier")
+
+			_, err = pool.Exec(ctx, `UPDATE mcp_tools SET sink_class = 'none' WHERE org_id = $1 AND server_id = $2 AND name = 'search'`, org, sid)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "sink declaration")
+
+			_, err = svc.SyncTools(ctx, org, sid, listed)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, 500*time.Millisecond)).To(BeFalse(), "a probe that finds the same tools is not a change to plan")
+		})
+
+		It("wakes it when an agent's server allowlist changes (#249)", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "")
+			var agent pgtype.UUID
+			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor, created_by) VALUES ($1, 'Wake agent', 'opencode', $2) RETURNING id`, org, user).Scan(&agent)).To(Succeed())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
+
+			_, err := svc.SetAgentServers(ctx, org, actor, agent, []mcpservers.Allowance{{ServerID: s.ID}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "allow")
+
+			_, err = svc.SetAgentServers(ctx, org, actor, agent, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "revoke")
+		})
+
 		It("does not wake it for the prober's own health writes", func(ctx SpecContext) {
 			s := create(ctx, "wiki", "")
 			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
