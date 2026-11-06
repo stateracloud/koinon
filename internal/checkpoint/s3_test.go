@@ -45,7 +45,7 @@ func s3Ready(ctx context.Context, mc *minio.Client, bucket, region string) error
 	if err != nil {
 		return err
 	}
-	defer obj.Close()
+	defer func() { _ = obj.Close() }()
 	if _, err := io.Copy(io.Discard, obj); err != nil {
 		return err
 	}
