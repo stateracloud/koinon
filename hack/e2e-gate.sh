@@ -3,7 +3,7 @@
 #
 # The e2e-kind workflow's `e2e result` job (the required check): did the e2e pass, and when this
 # pull request needs one (hack/e2e-decide.sh says `required=true`), is there evidence on its head?
-# Without this, a needs-e2e change merged on a green `e2e result` because the e2e was skipped (#562).
+# Without this, a needs-e2e change merged on a green `e2e result` because the e2e was skipped (koinon-private#562).
 #
 # Evidence, any one of (all on the PR's head commit):
 #   1. this run's `quickstart` job succeeded;
@@ -22,7 +22,7 @@
 # drop this gate. The guard is the ruleset's required review on `.github/**` (not CODEOWNERS:
 # require_code_owner_review is false). `e2e result` is not pinned to an app and `e2e-lab` can be
 # posted by anyone with write access: a guardrail against mistakes, not against a malicious member.
-# The follow-up is a pinned integration_id / the lab's own GitHub App (#568).
+# The follow-up is a pinned integration_id / the lab's own GitHub App (koinon-private#568).
 #
 # Environment: DECIDE and QUICKSTART (the `needs.<job>.result` values), REQUIRED (true|false), SHA
 # (the pull request head), BRANCH (its head branch, for the hint), GH (the gh command), GH_REPO,
@@ -39,9 +39,15 @@ DECIDE=${DECIDE:-} QUICKSTART=${QUICKSTART:-} REQUIRED=${REQUIRED:-false}
 SHA=${SHA:-} BRANCH=${BRANCH:-<branch>} GH=${GH:-gh} GH_REPO=${GH_REPO:-}
 
 echo "decide: $DECIDE, quickstart: $QUICKSTART, e2e required: ${REQUIRED:-false}"
-for r in "$DECIDE" "$QUICKSTART"; do
-  case $r in success | skipped) ;; *) echo "::error::the e2e did not pass ($r)"; exit 1 ;; esac
-done
+case $DECIDE in success | skipped) ;; *) echo "::error::the e2e did not pass (decide: $DECIDE)"; exit 1 ;; esac
+case $QUICKSTART in
+success | skipped) ;;
+# This run's own quickstart failed or was cancelled (a flake, say). When the e2e is required, the
+# lab stays an accelerator: fall through to the evidence checks (another run's quickstart, e2e-lab)
+# instead of failing here; with none, the gate still fails below.
+failure | cancelled) [[ $REQUIRED == true ]] || { echo "::error::the e2e did not pass (quickstart: $QUICKSTART)"; exit 1; } ;;
+*) echo "::error::the e2e did not pass (quickstart: $QUICKSTART)"; exit 1 ;;
+esac
 [[ $REQUIRED == true ]] || exit 0
 
 pass() {
@@ -68,7 +74,7 @@ if [[ -n $SHA && -n $GH_REPO ]]; then
     fi
   done
   # The lab's status (the newest e2e-lab status is first). An API error (a 403 when the job lacks
-  # `statuses: read`, #588) or a body that is not JSON is reported as such, not as "no e2e-lab";
+  # `statuses: read`, koinon-private#588) or a body that is not JSON is reported as such, not as "no e2e-lab";
   # the gate still fails closed.
   lab="" laberr=""
   errf=$(mktemp "${TMPDIR:-/tmp}/e2e-gate.XXXXXX")
@@ -87,7 +93,7 @@ else
   lab="" laberr=""
 fi
 
-msg="This change needs the kind e2e (hack/needs-e2e.sh, or the e2e label) and the head ${SHA:0:12} has no passing one: no successful quickstart job in this or another e2e-kind run${lab:+, e2e-lab is $lab}${laberr:+, and e2e-lab could not be read ($laberr; the job needs statuses: read)}."
+msg="This change needs the kind e2e (hack/needs-e2e.sh, or the e2e label) and the head ${SHA:0:12} has no passing one: no successful quickstart job in this${QUICKSTART:+ ($QUICKSTART)} or another e2e-kind run${lab:+, e2e-lab is $lab}${laberr:+, and e2e-lab could not be read ($laberr; the job needs statuses: read)}."
 how="Produce one: run \`hack/e2e-remote.sh --argo\` (the lab posts the status e2e-lab), or run \`gh workflow run e2e-kind.yml --ref $BRANCH\` on GitHub. Then re-run this job: \"Re-run failed jobs\" on this e2e-kind run (hack/e2e-status.sh and a dispatched run's result job do it for you)."
 echo "::error::$msg"
 echo "$how"

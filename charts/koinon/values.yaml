@@ -23,8 +23,8 @@ global:
   # release (the preflight checks it).
   imagePullSecrets: []
   # Replace the registry host of every image with this one (a path prefix is fine):
-  # imageRegistry: artifactory.example.com/proxy turns ghcr.io/stateracloud/koinon-api:1 into
-  # artifactory.example.com/proxy/stateracloud/koinon-api:1. The rest of the reference, digest
+  # imageRegistry: artifactory.example.com/proxy turns ghcr.io/stateracloud/koinon/api:1 into
+  # artifactory.example.com/proxy/stateracloud/koinon/api:1. The rest of the reference, digest
   # included, is kept. Empty leaves every image as is.
   imageRegistry: ""
   # Replace the registry host per upstream, for mirrors that have one repository per upstream:
@@ -37,7 +37,7 @@ global:
 # registry is the upstream the images are published at; leave it at its default when you use
 # global.imageRegistry or global.registryMirrors, which rewrite whatever this says.
 image:
-  registry: ghcr.io/stateracloud
+  registry: ghcr.io/stateracloud/koinon
   tag: ""
   pullPolicy: IfNotPresent
 # DEPRECATED: use global.imagePullSecrets. Still honoured, and merged with it.
@@ -45,7 +45,7 @@ imagePullSecrets: []
 
 api:
   image:
-    repository: koinon-api
+    repository: api
     tag: ""
     digest: ""
   replicas: 1
@@ -102,7 +102,7 @@ api:
 
 reconciler:
   image:
-    repository: koinon-reconciler
+    repository: reconciler
     tag: ""
     digest: ""
   # Extra replicas stand by: one reconciles at a time, holding a Postgres advisory lock.
@@ -124,7 +124,7 @@ reconciler:
   sandboxJobs: 8
   # A sandbox starts on demand (the first run, claimable work or a pre-wake signal), not when its
   # agent is activated. An org admin can mark an agent keep-warm; this caps the keep-warm sandboxes
-  # per org (the oldest agents win). 0 is the default of 2; a negative value grants none (#315).
+  # per org (the oldest agents win). 0 is the default of 2; a negative value grants none (koinon-private#315).
   keepWarmPerOrg: 2
   # A changed sandbox spec (a new OpenShell supervisor image, flavor image or resources) recreates
   # each sandbox through the usual path: held runs finish, the home gate passes, a checkpoint is taken
@@ -148,7 +148,7 @@ reconciler:
 
 agentd:
   image:
-    repository: koinon-agentd
+    repository: agentd
     tag: ""
     digest: ""
   replicas: 1
@@ -200,7 +200,7 @@ preflight:
   # sandbox pull secrets (when global.imagePullSecrets, imageRegistry or registryMirrors is set) and
   # that sandboxPolicy admits its supervisor image. Read-only, by name; a ConfigMap it cannot read
   # fails the preflight while sandboxPolicy pins a supervisor image (the reconciler reads the same
-  # ConfigMap for the sandbox spec hash, #489) and only warns otherwise.
+  # ConfigMap for the sandbox spec hash, koinon-private#489) and only warns otherwise.
   openshell:
     namespace: openshell
     configMap: openshell-config
@@ -402,10 +402,10 @@ secrets:
         # rewrap, keys retire the old ones. The Job runs again whenever this or the KMS settings
         # change; with nothing to do it changes nothing.
         addKey: ""
-        # Every KEK the Job wraps is bound to the install ID in the database (#615): a KEK Secret
+        # Every KEK the Job wraps is bound to the install ID in the database (koinon-private#615): a KEK Secret
         # copied to another install, or a database restored into the wrong one, does not open. true
         # also binds the KEKs of the primary wrapping key wrapped before that (the KEKs themselves
-        # are unchanged). A binary older than #615 cannot read a bound KEK, so leave it false until
+        # are unchanged). A binary older than koinon-private#615 cannot read a bound KEK, so leave it false until
         # you will not roll back below it (docs/ops/secret-keys.md).
         rewrapUnbound: false
         resources:
@@ -465,7 +465,7 @@ github:
 flavors:
   opencode:
     image:
-      repository: flavor-opencode
+      repository: flavors/opencode
       tag: ""
       digest: ""
 
@@ -706,7 +706,7 @@ sandboxPolicy:
       openshell.ai/managed-by: openshell
   # Runtime classes allowed for sandbox workload pods (the vm tier, ADR 0075). Any class not
   # listed here is refused by the policy. kata-qemu-runtime-rs is the Rust runtime that Kata 4.x's
-  # kata-deploy (4.3.1) creates by default; it marks the Go-runtime kata-qemu deprecated (#442).
+  # kata-deploy (4.3.1) creates by default; it marks the Go-runtime kata-qemu deprecated (koinon-private#442).
   # openshell.runtimeClassName, the class the reconciler requests, must be one of these: the chart
   # fails the render when it is not.
   runtimeClasses: [kata, kata-qemu, kata-qemu-runtime-rs]

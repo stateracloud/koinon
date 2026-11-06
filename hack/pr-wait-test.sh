@@ -15,7 +15,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/pr-wait-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
-export FAKE_DIR="$tmp/seq" PATH="$tmp/bin:$PATH"
+export FAKE_DIR="$tmp/seq" PATH="$tmp/bin:$PATH" PR_THREADS_RETRY_SLEEPS="0 0 0"
 
 cat >"$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
@@ -33,13 +33,26 @@ if [ "$1 $2" = "run list" ]; then
   exit 0
 fi
 if [ "$1" = api ] && [[ $2 == */rules/branches/* ]]; then # the ruleset's required contexts, one per line
-  [ -f "$FAKE_DIR/rules" ] || exit 9
+  [ ! -f "$FAKE_DIR/rules-fail" ] || exit 9
+  # No $FAKE_DIR/rules: every check of the current PR json is required (most tests judge all of them).
+  if [ ! -f "$FAKE_DIR/rules" ]; then
+    n=$(cat "$FAKE_DIR/n" 2>/dev/null || echo 1)
+    f="$FAKE_DIR/$n.json"
+    [ -f "$f" ] || f=$(ls "$FAKE_DIR"/*.json | sort -V | tail -n 1)
+    jq -r '(.statusCheckRollup // [])[] | .name // .context' "$f" | grep -vx -e quickstart -e e2e-lab | sort -u
+    exit 0
+  fi
   cat "$FAKE_DIR/rules"
   exit 0
 fi
 if [ "$1" = api ] && [[ $2 == */issues/*/events ]]; then # the last ready_for_review time, if $FAKE_DIR/ready exists
   [ -f "$FAKE_DIR/ready" ] || exit 9
   cat "$FAKE_DIR/ready"
+  exit 0
+fi
+if [ "$1 $2" = "api graphql" ]; then # the review threads (hack/pr-threads.sh): $FAKE_DIR/threads holds the pages as gh prints them
+  [ -f "$FAKE_DIR/threads" ] || exit 9
+  cat "$FAKE_DIR/threads"
   exit 0
 fi
 if [ "$1" = api ]; then # gh api .../check-runs --jq ...: $FAKE_DIR/rows holds the --jq output (one row per line)
@@ -93,6 +106,14 @@ pr() {
   printf '{"state":"%s","mergeStateStatus":"%s","mergeCommit":%s,"statusCheckRollup":[%s]}' "$1" "$2" "$mc" "$4"
 }
 
+# page <thread nodes, comma separated> <hasNextPage>: one GraphQL reviewThreads page, as gh api prints it.
+page() { printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":%s,"endCursor":"c1"},"nodes":[%s]}}}}}\n' "$2" "$1"; }
+thread() { # <id> <resolved> <path> <line|null> <outdated> <author|null>
+  local a=null
+  [ "$6" = null ] || a="{\"login\":\"$6\"}"
+  printf '{"id":"%s","isResolved":%s,"isOutdated":%s,"path":"%s","line":%s,"originalLine":null,"comments":{"nodes":[{"author":%s}]}}' "$1" "$2" "$5" "$3" "$4" "$a"
+}
+
 go_p=$(cr go IN_PROGRESS "" 11)
 web_p=$(cr web QUEUED "" 12)
 lint_ok=$(cr lint COMPLETED SUCCESS 13)
@@ -108,13 +129,14 @@ expect "merged: one line per change" 0 "checks 1/3 pending: go,web
 checks 2/3 pending: web
 checks 3/3 green
 MERGED abc1234"
-if grep -q -v '^pr view 7 --json' "$FAKE_DIR/calls"; then
+if grep -q -v -e '^pr view 7 --json' -e '^api repos/{owner}/{repo}/rules/branches/'"$FAKE_DIR/calls"; then
   echo "FAIL: only gh pr view is called" >&2
   fail=1
 else echo "ok: only gh pr view is called"; fi
 
 # 2. --checks exits 0 when all finished, before the merge
 seq_set "$(pr OPEN BLOCKED "" "$lint_ok,$go_p")" "$(pr OPEN BLOCKED "" "$lint_ok,$go_ok")"
+page '' false >"$FAKE_DIR/threads" # BLOCKED for another reason: no unresolved thread, still green
 run 7 --checks --interval 0
 expect "--checks all green" 0 "checks 1/2 pending: go
 checks 2/2 green"
@@ -148,7 +170,7 @@ expect "timeout" 2 "checks 0/1 pending: go
 TIMEOUT"
 
 # 10. --require: missing, skipped, failed, green
-# 10a. (#392) two runs of one required check on the head: only the newest counts
+# 10a. (koinon-private#392) two runs of one required check on the head: only the newest counts
 q_skip=$(cr_at quickstart SKIPPED 21 2026-11-01T10:00:00Z)
 q_ok=$(cr_at quickstart SUCCESS 22 2026-11-01T10:05:00Z)
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$q_skip,$q_ok")"
@@ -159,7 +181,7 @@ run 7 --checks --require quickstart --interval 0
 expect "newest run wins whatever the rollup order" 0 "checks 2/2 green"
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$q_ok,$(cr_at quickstart SKIPPED 23 2026-11-01T10:10:00Z)")"
 run 7 --checks --require quickstart --interval 0
-expect "a success on the head wins over a newer skip (#547: any run that passed counts)" 0 "checks 2/2 green"
+expect "a success on the head wins over a newer skip (koinon-private#547: any run that passed counts)" 0 "checks 2/2 green"
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$(cr_at quickstart CANCELLED 21 2026-11-01T10:00:00Z),$q_ok")"
 run 7 --checks --require quickstart --interval 0
 expect "later success supersedes an earlier cancel" 0 "checks 2/2 green"
@@ -169,7 +191,7 @@ expect "only a cancelled run: failed, with the dispatch hint" 1 "FAILED quicksta
 REQUIRED quickstart failed
 only cancelled runs of quickstart on this head; run: gh workflow run e2e-kind.yml --ref <branch>"
 
-# 10b. (#431) cancelled and in progress with the same startedAt: keep waiting for the live run
+# 10b. (koinon-private#431) cancelled and in progress with the same startedAt: keep waiting for the live run
 t0=2026-11-01T10:00:00Z
 q_cancel=$(cr_at quickstart CANCELLED 41261362803 $t0)
 q_live=$(printf '{"name":"quickstart","status":"IN_PROGRESS","conclusion":"","startedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/41261363000/job/9"}' $t0)
@@ -185,7 +207,7 @@ expect "cancelled plus live that then fails: the failure is reported" 1 "checks 
 FAILED quickstart (run 41261363000)
 REQUIRED quickstart failed"
 
-# 10c. (#468) the only quickstart on the head is cancelled while a second e2e-kind run has not created
+# 10c. (koinon-private#468) the only quickstart on the head is cancelled while a second e2e-kind run has not created
 # its jobs yet: wait for that run, then judge its result; with no live run, fail as before.
 prh() { # <rollup>: an open PR whose head is abc1234…
   printf '{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"headRefOid":"abc1234def","statusCheckRollup":[%s]}' "$1"
@@ -249,7 +271,7 @@ run 7 --checks --require "e2e result" --interval 0
 expect "all green while a dispatched e2e-kind run is queued: waits" 0 "waiting for e2e-kind run 41265167595 on abc1234
 checks 2/2 green"
 
-# 11. (#547) --require looks at every check run of the head (gh api), not only the PR rollup, and
+# 11. (koinon-private#547) --require looks at every check run of the head (gh api), not only the PR rollup, and
 # `--require e2e` passes on a green e2e-lab status or a green quickstart run.
 row() { # <name> <status> <conclusion> <run id> <startedAt>: one row of head_runs' output
   printf '{"name":"%s","status":"%s","conclusion":"%s","startedAt":"%s","completedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/%s/job/9","workflowName":""}\n' "$1" "$2" "$3" "$5" "$5" "$4"
@@ -306,7 +328,7 @@ printf '\n' >"$FAKE_DIR/runs"
 run 7 --checks --require e2e --require go --interval 0
 expect "--require e2e together with another required check" 0 "checks 3/3 green"
 
-# success then a newer FAILURE stays red; success then a newer skip is green (#392 intent for failures)
+# success then a newer FAILURE stays red; success then a newer skip is green (koinon-private#392 intent for failures)
 seq_set "$(prh "$lint_ok,$q_ok,$(cr_at quickstart FAILURE 24 2026-11-01T10:20:00Z)")"
 printf '\n' >"$FAKE_DIR/runs"
 run 7 --checks --require quickstart --interval 0
@@ -357,7 +379,7 @@ expect "required checks green" 0 "checks 3/3 green"
 run 7 --require go --interval 0
 expect "--require needs --checks" 64 "$usage_line"
 
-# 7b. #562: the ruleset's required contexts must exist on the head. A queued workflow run has no
+# 7b. koinon-private#562: the ruleset's required contexts must exist on the head. A queued workflow run has no
 # jobs yet, so a rollup of finished checks is not "all green" while a required context is absent.
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")" "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
 printf 'lint\ngo\nweb\n' >"$FAKE_DIR/rules"
@@ -375,10 +397,53 @@ run 7 --checks --interval 0
 expect "--checks green when every required context exists" 0 "checks 3/3 green"
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"
 run 7 --interval 0 --timeout 0
-expect "without --checks the ruleset is not consulted" 2 "checks 2/2 green
+expect "without --checks a required context absent from the head does not wait" 2 "checks 2/2 green
 TIMEOUT"
 
-# 7c. (#647) a draft is never green; after ready_for_review the draft's runs are ignored
+# 7b2. only required checks decide: third-party checks (DeepSource, CodeRabbit, Socket) are advisory
+printf 'lint\ngo\n' >"$FAKE_DIR/rules"
+ds_bad='{"context":"DeepSource: Go","state":"FAILURE","targetUrl":"https://deepsource.io/x"}' # a StatusContext, as live
+ds_pend='{"context":"CodeRabbit","state":"PENDING","targetUrl":"https://coderabbit.ai/x"}'
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$ds_bad")"
+printf 'lint\ngo\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "a red third-party check with every required check green: advisory, exits 0" 0 "advisory DeepSource: Go failed
+checks 2/2 green"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$ds_pend")"
+printf 'lint\ngo\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "a pending advisory check does not keep the wait going" 0 "advisory CodeRabbit pending
+checks 2/2 green"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$(cr go COMPLETED FAILURE 11),$ds_bad")"
+printf 'lint\ngo\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "a red required check still exits 1 (advisory ones are listed apart)" 1 "advisory DeepSource: Go failed
+FAILED go (run 11)"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$ds_bad")"
+touch "$FAKE_DIR/rules-fail"
+run 7 --checks --interval 0
+expect "required contexts unreadable: fail closed, exit 2" 2 "pr-wait: cannot read the required status checks of the base branch; not judging checks"
+[ "$(grep -c '/rules/branches/' "$FAKE_DIR/calls")" = 4 ] || { echo "FAIL: the rules read is tried 4 times" >&2; fail=1; }
+# (#201) --merged does not need the rules: an unreadable read is noted once and the wait goes on to the merge.
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_p")" "$(pr OPEN CLEAN "" "$lint_ok,$(cr go COMPLETED FAILURE 11)")" \
+  "$(pr MERGED CLEAN abc1234def "$lint_ok,$go_ok")"
+touch "$FAKE_DIR/rules-fail"
+run 7 --interval 0
+expect "--merged with the rules unreadable: no exit 2, waits for the merge" 0 "pr-wait: cannot read the required status checks of the base branch; waiting for the merge without judging checks
+advisory go pending
+checks 0/0
+advisory go failed
+MERGED abc1234"
+[ "$(grep -c '/rules/branches/' "$FAKE_DIR/calls")" = 4 ] || { echo "FAIL: --merged tries the rules read once (4 calls), not on every poll" >&2; fail=1; }
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_p")" "$(pr CLOSED UNKNOWN "" "$lint_ok,$go_p")"
+touch "$FAKE_DIR/rules-fail"
+run 7 --interval 0
+expect "--merged with the rules unreadable: a close still exits 3" 3 "pr-wait: cannot read the required status checks of the base branch; waiting for the merge without judging checks
+advisory go pending
+checks 0/0
+CLOSED"
+
+# 7c. (koinon-private#647) a draft is never green; after ready_for_review the draft's runs are ignored
 seq_set '{"state":"OPEN","isDraft":true,"mergeStateStatus":"BLOCKED","mergeCommit":null,"statusCheckRollup":[{"name":"quick checks","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-01T10:00:00Z"}]}'
 run 7 --checks --interval 0
 expect "--checks on a draft: DRAFT, exit 5" 5 "DRAFT: not tested, mark ready for review (hack/ship.sh --ready, gh pr ready)"
@@ -406,7 +471,7 @@ seq_set "$(rd "$old_go,$new_go,$lab_old")"
 printf 'go\n' >"$FAKE_DIR/rules"
 run 7 --checks --require e2e --interval 0
 expect "after ready: a draft-era e2e-lab status satisfies --require e2e" 0 "checks 3/3 green"
-# per workflow run: a draft-era FAILURE (#628) and a draft run cancelled after the ready event (#649)
+# per workflow run: a draft-era FAILURE (koinon-private#628) and a draft run cancelled after the ready event (koinon-private#649)
 rdh() { # <rollup>: a ready PR with a head commit
   printf '{"state":"OPEN","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":null,"headRefOid":"abc1234","statusCheckRollup":[%s]}' "$1"
 }
@@ -427,7 +492,7 @@ printf '[{"databaseId":61,"createdAt":"2026-11-01T10:00:00Z"},{"databaseId":62,"
 printf 'go\nweb\n' >"$FAKE_DIR/rules"
 run 7 --checks --interval 0
 expect "after ready: a draft run cancelled after the ready event is superseded" 0 "checks 2/2 green"
-# (#676) a draft-era run re-run by hand after the ready event replays draft=true (red); it is ignored
+# (koinon-private#676) a draft-era run re-run by hand after the ready event replays draft=true (red); it is ignored
 rr_go=$(cr_at go FAILURE 61 2026-11-01T11:10:00Z | sed 's/^{/{"workflowName":"ci",/')
 seq_set "$(rdh "$rr_go,$new_go")"
 printf '2026-11-01T11:00:00Z\n' >"$FAKE_DIR/ready"
@@ -443,7 +508,7 @@ run 7 --checks --interval 0
 expect "after ready: a run 20 s before the ready event is kept (clock skew)" 0 "checks 1/1 green"
 rm -f "$FAKE_DIR/ready" "$FAKE_DIR/rules" "$FAKE_DIR/ciruns"
 
-# 7d. (#661) a stale PR head: GitHub's headRefOid is not origin's branch tip
+# 7d. (koinon-private#661) a stale PR head: GitHub's headRefOid is not origin's branch tip
 cat >"$tmp/bin/git" <<'SH'
 #!/usr/bin/env bash
 [ "$1" = ls-remote ] && [ -f "$FAKE_DIR/remote" ] || exit 2
@@ -470,6 +535,57 @@ printf '52d44399aaaa\n' >"$FAKE_DIR/remote"
 run 7 --checks --interval 0
 expect "a matching head is judged" 0 "checks 1/1 green"
 rm -f "$tmp/bin/git"
+
+# 7b. BLOCKED with every check green: the unresolved review threads (#187)
+seq_set "$(pr OPEN BLOCKED "" "$go_ok")"
+{ page "$(thread PRRT_1 true a.go 3 false coderabbitai),$(thread PRRT_2 false hack/x.sh 42 false deepsource-io)" true
+  page "$(thread PRRT_3 false docs/y.md null true coderabbitai),$(thread PRRT_4 false z.go 7 false null)" false; } >"$FAKE_DIR/threads"
+run 7 --checks --interval 0
+expect "BLOCKED and green lists the unresolved threads, over two pages, and exits 7" 7 "checks 1/1 green
+UNRESOLVED hack/x.sh:42 deepsource-io id=PRRT_2
+UNRESOLVED docs/y.md:? coderabbitai (outdated) id=PRRT_3
+UNRESOLVED z.go:7 ghost id=PRRT_4
+BLOCKED: PR 7 has unresolved review threads; reply and resolve each one (docs/dev/ci.md \"Merging\"), then run this again"
+seq_set "$(pr OPEN BLOCKED "" "$go_ok")" # no threads file: the graphql call fails
+run 7 --checks --interval 0
+expect "BLOCKED, green, threads unreadable: exits 2, never ready" 2 "checks 1/1 green
+pr-wait: PR 7 is BLOCKED and its review threads could not be read: pr-threads: cannot read the review threads of PR 7
+pr-wait: cannot read review threads; not ready"
+seq_set "$(pr OPEN CLEAN "" "$go_ok")"
+page "$(thread PRRT_2 false hack/x.sh 42 false deepsource-io)" false >"$FAKE_DIR/threads"
+run 7 --checks --interval 0
+expect "a CLEAN PR does not look at threads" 0 "checks 1/1 green"
+seq_set "$(pr OPEN BLOCKED "" "$go_p")"
+page "$(thread PRRT_2 false hack/x.sh 42 false deepsource-io)" false >"$FAKE_DIR/threads"
+run 7 --checks --timeout 1s --interval 1
+expect "BLOCKED with a check still pending keeps waiting (no thread read)" 2 "checks 0/1 pending: go
+TIMEOUT"
+
+# 7c. hack/pr-threads.sh on its own
+page "$(thread PRRT_1 true a.go 3 false x)" false >"$FAKE_DIR/threads"
+rc=0
+out=$("$repo/hack/pr-threads.sh" 7 2>&1) || rc=$?
+expect "pr-threads: every thread resolved" 0 ""
+page "$(thread PRRT_2 false hack/x.sh 42 false deepsource-io)" false >"$FAKE_DIR/threads"
+rc=0
+out=$("$repo/hack/pr-threads.sh" 7 2>&1) || rc=$?
+expect "pr-threads: one unresolved thread exits 7" 7 "UNRESOLVED hack/x.sh:42 deepsource-io id=PRRT_2"
+grep -q '^api graphql --paginate' "$FAKE_DIR/calls" || { echo "FAIL: pr-threads paginates with gh api graphql --paginate" >&2; fail=1; }
+rm "$FAKE_DIR/threads"
+rc=0
+out=$("$repo/hack/pr-threads.sh" 7 2>&1) || rc=$?
+expect "pr-threads: gh failing exits 2" 2 "pr-threads: cannot read the review threads of PR 7"
+: >"$FAKE_DIR/calls"
+rc=0
+out=$("$repo/hack/pr-threads.sh" 7 2>&1) || rc=$?
+[ "$(grep -c '^api graphql' "$FAKE_DIR/calls")" = 4 ] || { echo "FAIL: pr-threads tries 4 times (1 + 3 retries)" >&2; fail=1; }
+printf '%s\n' '{"data":{"repository":{"pullRequest":null}}}' >"$FAKE_DIR/threads"
+rc=0
+out=$("$repo/hack/pr-threads.sh" 7 2>&1) || rc=$?
+expect "pr-threads: pullRequest null exits 2" 2 "pr-threads: PR 7 not found (pullRequest is null in the answer)"
+rc=0
+out=$("$repo/hack/pr-threads.sh" 2>&1) || rc=$?
+expect "pr-threads: usage" 64 "usage: hack/pr-threads.sh <PR>"
 
 # 8. a transient gh failure is retried
 rm -rf "$FAKE_DIR"

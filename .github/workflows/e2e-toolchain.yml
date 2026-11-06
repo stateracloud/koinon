@@ -2,13 +2,14 @@
 #
 # Publishes the images the home lab's Argo e2e queue (home-lab ADR 036) pulls by digest through its
 # registry mirror:
-#   ghcr.io/stateracloud/koinon-e2e-toolchain      hack/e2e-toolchain/Dockerfile, tag
+#   ghcr.io/<owner>/<repo>/e2e-toolchain      hack/e2e-toolchain/Dockerfile, tag
 #       go<GO_VERSION>-<first 12 hex of the Dockerfile's sha256> (hack/e2e-remote.sh builds the
 #       same Dockerfile locally under the same tag, so a tag names exactly one Dockerfile)
-#   ghcr.io/stateracloud/koinon-e2e-toolchain-web  hack/e2e-toolchain/web.Dockerfile on top of that
-#       image (#358), tag <toolchain tag>-web-<first 12 hex of web.Dockerfile's sha256>
-#   ghcr.io/stateracloud/koinon-spike-probe        hack/spike/probe (#357), tag <first 12 hex of
-#       its git tree>: the escape suite's sandbox image, for test/escape/kind.sh without nvcr.io
+#   ghcr.io/<owner>/<repo>/e2e-toolchain-web  hack/e2e-toolchain/web.Dockerfile on top of that
+#       image (koinon-private#358), tag <toolchain tag>-web-<first 12 hex of web.Dockerfile's sha256>
+# The names derive from github.repository (ghcr.io/stateracloud/koinon/...), so the repository that
+# builds them owns the packages (#167). The spike probe image is no longer built: no test pulls it
+# (test/escape/kind.sh builds or takes KOINON_OPENSHELL_IMAGE).
 # A tag that already exists is not rebuilt, so its digest stays what the lab pinned. The digests
 # are in the job summary.
 #
@@ -20,7 +21,6 @@ on:
     branches: [main]
     paths:
       - hack/e2e-toolchain/**
-      - hack/spike/probe/**
       - .github/workflows/e2e-toolchain.yml
   workflow_dispatch:
 
@@ -50,8 +50,9 @@ jobs:
         run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
       - name: build and push
         env:
-          OWNER: ghcr.io/stateracloud
+          OWNER: ghcr.io/${{ github.repository }}
           SHA: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ github.token }} # BuildKit secret for the Dockerfile's GitHub release downloads (#145)
         run: |
           # publish <repo> <tag> <context> [build args...]: build and push unless the tag exists;
           # prints the digest either way.
@@ -62,6 +63,7 @@ jobs:
               return
             fi
             docker buildx build --platform linux/amd64 --provenance=mode=max --sbom=true \
+              --secret id=github_token,env=GITHUB_TOKEN \
               --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
               --label "org.opencontainers.image.revision=${SHA}" \
               --metadata-file /tmp/meta.json -t "${repo}:${tag}" --push "$@" "$ctx" >&2
@@ -69,15 +71,12 @@ jobs:
           }
           gov=$(sed -n 's/^ARG GO_VERSION=//p' hack/e2e-toolchain/Dockerfile)
           tag="go${gov}-$(sha256sum hack/e2e-toolchain/Dockerfile | cut -c1-12)"
-          base=$(publish "$OWNER/koinon-e2e-toolchain" "$tag" hack/e2e-toolchain)
+          base=$(publish "$OWNER/e2e-toolchain" "$tag" hack/e2e-toolchain)
           webtag="${tag}-web-$(sha256sum hack/e2e-toolchain/web.Dockerfile | cut -c1-12)"
-          web=$(publish "$OWNER/koinon-e2e-toolchain-web" "$webtag" hack/e2e-toolchain \
-            -f hack/e2e-toolchain/web.Dockerfile --build-arg "BASE=$OWNER/koinon-e2e-toolchain:${tag}@${base}")
-          ptag=$(git rev-parse HEAD:hack/spike/probe | cut -c1-12)
-          probe=$(publish "$OWNER/koinon-spike-probe" "$ptag" hack/spike/probe)
+          web=$(publish "$OWNER/e2e-toolchain-web" "$webtag" hack/e2e-toolchain \
+            -f hack/e2e-toolchain/web.Dockerfile --build-arg "BASE=$OWNER/e2e-toolchain:${tag}@${base}")
           {
             echo "Images (commit ${SHA}):"
-            echo "- **$OWNER/koinon-e2e-toolchain:${tag}@${base}**"
-            echo "- **$OWNER/koinon-e2e-toolchain-web:${webtag}@${web}**"
-            echo "- **$OWNER/koinon-spike-probe:${ptag}@${probe}**"
+            echo "- **$OWNER/e2e-toolchain:${tag}@${base}**"
+            echo "- **$OWNER/e2e-toolchain-web:${webtag}@${web}**"
           } | tee -a "$GITHUB_STEP_SUMMARY"

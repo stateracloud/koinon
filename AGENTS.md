@@ -18,7 +18,7 @@ Instructions for coding agents working on Koinon.
 - Chart: `hack/chart-check.sh`. Add an assertion for every chart behaviour you change, in the matching
   `hack/chart-check.d/NN-<feature>.sh`. Anything that changes how a Koinon binary starts (a flag or
   env var it requires, a mount, a Secret key, an RBAC rule) is covered by `make test-chart-smoke`;
-  extend it when you add a component or a startup input (#284). Details: `docs/dev/ci.md#chart-and-admission-tests`.
+  extend it when you add a component or a startup input (koinon-private#284). Details: `docs/dev/ci.md#chart-and-admission-tests`.
 - Sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`): `make test-admission`; its
   OpenShell cases run on kind: `make dev-kind-up`, then `make test-escape-kind`.
 - Local cluster: kind is the dev loop (`make dev-kind-up`, `make dev`, `make test-e2e-kind`). Nothing
@@ -35,12 +35,12 @@ Instructions for coding agents working on Koinon.
 - CI and e2e (details: `docs/dev/ci.md`). Mark the PR ready (`hack/ship.sh --ready`, `gh pr ready`)
   before you wait on it with `hack/pr-wait.sh`: a draft runs almost nothing (`go` and `web` show red
   on purpose) and its green is not merge evidence; get WIP feedback from `hack/preflight.sh`.
-  To run `go-test` on the lab gate instead of CI: `hack/ship.sh --ready --lab-go-test` (#610).
+  To run `go-test` on the lab gate instead of CI: `hack/ship.sh --ready --lab-go-test` (koinon-private#610).
   [Testing layers](docs/dev/ci.md#testing-layers) · [what `ci` runs when](docs/dev/ci.md#what-ci-runs-when)
 - Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. A needs-e2e PR needs a green
-  `e2e-lab` status or `quickstart` run on its head (`e2e result` is red without one); with a lab run
-  `hack/e2e-remote.sh --argo`, else `gh workflow run e2e-kind.yml --ref <branch>` (or the `e2e`
-  label). Exit 75/78/79 and `--local` (not merge evidence): [testing layers](docs/dev/ci.md#testing-layers).
+  `e2e-lab` status or `quickstart` run on its head (`e2e result` is red without one). The PR's own
+  run runs the quickstart by itself; `hack/e2e-remote.sh --argo` (lab) is an optional faster path, and
+  you dispatch `gh workflow run e2e-kind.yml --ref <branch>` only to re-run. Exit 75/78/79 and `--local` (not merge evidence): [testing layers](docs/dev/ci.md#testing-layers).
 - When main's kind e2e goes red, fix forward within 2 hours or revert the merge (`hack/e2e-bisect.sh`
   opens an `e2e-regression` issue). RC and release tags are cut only from a commit whose `quickstart`
   job succeeded (`hack/release-gate.sh` checks it).

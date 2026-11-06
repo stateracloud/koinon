@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Offline test of hack/lab-domain-lint.sh (#693). The "real" lab domain below is a made-up one, built
+# Offline test of hack/lab-domain-lint.sh (koinon-private#693). The "real" lab domain below is a made-up one, built
 # from parts so that this file itself names no lab host.
 
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }

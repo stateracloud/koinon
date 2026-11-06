@@ -6,11 +6,13 @@
 # summary ($GITHUB_STEP_SUMMARY). The workflow runs the BASE branch's copy of this script and of
 # hack/needs-e2e.sh, so a pull request cannot change the rule that decides whether it is tested.
 #
-#   pull_request       needed when the PR touches the e2e's own files (needs-e2e.sh --forced-only)
-#                      or carries the `e2e` label. Otherwise not needed, and the summary says so
-#                      when the full rule (needs-e2e.sh) would have wanted it. The labels are the
+#   pull_request       needed when the full rule (needs-e2e.sh) says the change is e2e-relevant, when
+#                      the PR touches the e2e's own files (--forced-only) or when it carries the
+#                      `e2e` label. Otherwise not needed. A fork PR cannot label, dispatch or post
+#                      `e2e-lab`, so relevance alone must run the quickstart (issue #148); the
+#                      label and the lab are accelerators. The labels are the
 #                      event's plus the PR's current ones: `gh pr create --label` opens the PR and
-#                      then labels it (two events, #468), and the run of `opened` should already see
+#                      then labels it (two events, koinon-private#468), and the run of `opened` should already see
 #                      the label. Label events do not start the workflow; adding `e2e` later
 #                      dispatches it (hack/e2e-label.sh).
 #   push               (main) needed when the full rule matches anything since the last green e2e
@@ -19,9 +21,10 @@
 #                      image, downloads) is what it is for.
 #   workflow_dispatch  always needed.
 #
-# `required=true` (pull requests only) is what `e2e result` enforces (hack/e2e-gate.sh, #562): the
+# `required=true` (pull requests only) is what `e2e result` enforces (hack/e2e-gate.sh, koinon-private#562): the
 # change needs an e2e (the full rule, the e2e's own files or the label), so the job fails unless the
-# head has a green quickstart or the lab's `e2e-lab` status. Every other event: `required=false`.
+# head has a green quickstart or the lab's `e2e-lab` status. On a pull request required implies
+# needed. Every other event: `required=false`.
 #
 # Environment: EVENT, BASE (pull request base branch), LABELS (JSON array of the PR's label names),
 # PR (its number), NEEDS_E2E (path of the rule script, default hack/needs-e2e.sh), GH (the gh
@@ -85,10 +88,13 @@ pull_request)
   else
     rule "$base"
     if [[ $rc -ne 1 ]]; then
-      # Not run here, but required: `e2e result` stays red until the head has a green quickstart or
-      # the lab's e2e-lab status (hack/e2e-gate.sh).
-      summary "Does not run here, and \`e2e result\` fails until the head has a passing e2e. This PR is e2e-relevant per hack/needs-e2e.sh (or the rule could not be evaluated, exit $rc):"$'\n\n'"$text"$'\n\n'"Run \`hack/e2e-remote.sh --argo\` (the lab posts \`e2e-lab\`), or \`gh workflow run e2e-kind.yml --ref <branch>\`, or add the \`e2e\` label to run it here."
-      emit false true
+      # E2e-relevant by the full rule (or the rule could not be evaluated): run the quickstart in this
+      # run. A fork pull request cannot label, dispatch or post `e2e-lab`, so "required but not run
+      # here" could never go green for it (issue #148). The label and the lab stay accelerators: the
+      # label only matters for the nothing-relevant case above, a green `e2e-lab` also satisfies
+      # `e2e result` (hack/e2e-gate.sh) and may land first.
+      summary "Runs: this pull request is e2e-relevant per hack/needs-e2e.sh (or the rule could not be evaluated, exit $rc):"$'\n\n'"$text"$'\n\n'"The lab's \`e2e-lab\` status (\`hack/e2e-remote.sh --argo\`) also satisfies \`e2e result\`."
+      emit true true
     else
       summary "Does not run: nothing in this pull request needs the kind e2e."
       emit false false

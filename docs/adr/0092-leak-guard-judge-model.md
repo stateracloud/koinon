@@ -4,12 +4,12 @@
 - Date: 2026-11-03
 - Amends: [0091](0091-leak-guard-by-destination.md) (decision 5: the both-legs `external-high` approval becomes rules, judge, person; decision 8: the guarantee wording)
 - Relates to: [0042](0042-ask-tier-park-and-execute.md) (approvals), [0084](0084-leak-guard.md) (the 5 s backstop, failClosed), [0068](0068-prompt-caching-always-on.md) (prompt caching), [0023](0023-observability-and-audit.md) (metrics and audit), [0041](0041-koinon-spend-ledger-and-budget-stops.md) and [0081](0081-run-limits.md) (the run's USD ledger), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (providers and prices), [0072](0072-agent-model-run-now-echo-check.md) (calls Koinon makes itself)
-- Issue: #630, part of #265; built by #631; measured by #352
+- Issue: koinon-private#630, part of #51; built by #116; measured by #70
 
 ## Context
 
 ADR 0091 decision 5 sends every `external-high` call of a session that holds both legs to a person,
-as an ADR 0042 approval. Shipped templates never get there (#351). Admin-built agents can, and for
+as an ADR 0042 approval. Shipped templates never get there (koinon-private#351). Admin-built agents can, and for
 them each such call is a click. procoduck, 2026-11-03: asking a person on every risky call is nannying.
 
 Claude Code's auto mode solves the same problem in three tiers. Fixed rules let the obvious calls
@@ -63,7 +63,7 @@ match**, on a call of an auto-tier tool. Everything else stays rules:
 - An ask-tier tool already gets its one ADR 0042 card (ADR 0091 decision 5); the judge does not run
   for it.
 
-The judge can only turn that one approval into allow, block or a card. In PR #628 the seam is in
+The judge can only turn that one approval into allow, block or a card. In PR koinon-private#628 the seam is in
 `Guard.check`, between `Decide` and `ApproveFunc`; `Decide` stays pure. With no judge configured the
 branch is an approval, as today.
 
@@ -138,7 +138,7 @@ this branch gets the card. A person's answer on a card resets the count in a row
 
 - **A judge byte budget per run** on the payload bytes the judge allows, counted as sent, with no
   decoding, like ADR 0091's byte cap. It is separate from the 2 KB `external-low` cap. Starting
-  value **about 8 KB**, tuned from #352's data. A call that would go over it gets the card. This
+  value **about 8 KB**, tuned from #70's data. A call that would go over it gets the card. This
   keeps a fooled judge's leak bounded whatever the encoding.
 - **A cap on judge calls per run**, starting at 30. Past it, the card.
 - **Money.** Each judge call is charged to the run's USD ledger (ADR 0041, 0081) as its own line,
@@ -250,10 +250,10 @@ flowchart TD
 
 ## Open questions
 
-Numbers from #352's scrubbed recordings and a real-model evaluation outside CI
+Numbers from #70's scrubbed recordings and a real-model evaluation outside CI
 (`docs/dev/real-model-tests.md`); procoduck decides each:
 
-- how often real runs reach this branch at all, which decides whether #631 is worth building;
+- how often real runs reach this branch at all, which decides whether #116 is worth building;
 - the judge byte budget (about 8 KB) and the call cap (30);
 - the timeout (about 3 s);
 - the judge model, by its false alarms and misses on the recordings plus planted attacks.
@@ -270,9 +270,9 @@ Numbers from #352's scrubbed recordings and a real-model evaluation outside CI
 
 ## Follow-ups
 
-- #631 builds the judge Decider: the interface, the fake, the bounds, the cache, the audit table, the
+- #116 builds the judge Decider: the interface, the fake, the bounds, the cache, the audit table, the
   org setting for the judge model and its check.
-- #352 first measures how often real runs reach this branch and what payload sizes they send.
+- #70 first measures how often real runs reach this branch and what payload sizes they send.
 
 ## Upstream verification
 
@@ -297,6 +297,6 @@ failClosed, inside the gateway's processor timeout (ADR 0084, ADR 0091).
 
 ## Links
 
-- procoduck's decision, 2026-11-03: issue #630
-- Issues #265, #349, #351, #352, #630, #631; PR #628
+- procoduck's decision, 2026-11-03: issue koinon-private#630
+- Issues #51, koinon-private#349, koinon-private#351, #70, koinon-private#630, #116; PR koinon-private#628
 - ADRs [0091](0091-leak-guard-by-destination.md), [0084](0084-leak-guard.md), [0042](0042-ask-tier-park-and-execute.md), [0068](0068-prompt-caching-always-on.md), [0023](0023-observability-and-audit.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0081](0081-run-limits.md), [0072](0072-agent-model-run-now-echo-check.md)

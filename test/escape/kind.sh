@@ -4,22 +4,22 @@
 # The escape suite's OpenShell cases (ADR 0025) against the OpenShell gateway that
 # `make dev-kind-up` installs on kind-koinon-dev (or DEV_KIND_CLUSTER). No registry, no home lab:
 # the probe image is built from hack/spike/probe (or, when KOINON_OPENSHELL_IMAGE names an image that
-# pulls, e.g. the published ghcr.io/stateracloud/koinon-spike-probe by digest, pulled instead: no
-# nvcr.io or apt at run time, #357) and loaded into the node; the gateway is reached through a
+# pulls (it is no longer published; #167), pulled instead: no
+# nvcr.io or apt at run time, koinon-private#357) and loaded into the node; the gateway is reached through a
 # port-forward with the client certificate it generated.
 #
-# The gateway-route case needs a stand-in for agentgateway on port 4000 (ADR 0080, #270): unless
+# The gateway-route case needs a stand-in for agentgateway on port 4000 (ADR 0080, koinon-private#270): unless
 # KOINON_ESCAPE_GATEWAY_HOST already names one, or KOINON_ESCAPE_STANDIN=0, it is built from
 # cmd/koinon-fakemodel with ko and run in namespace koinon-fixtures, as the RT1 fixtures do.
 #
 # The Gitea read-grant specs need a TLS server behind the host their grant names, because the proxy
-# dials an allowed host before it judges the request (#371). Unless KOINON_ESCAPE_GITEA_URL is set,
+# dials an allowed host before it judges the request (koinon-private#371). Unless KOINON_ESCAPE_GITEA_URL is set,
 # or KOINON_ESCAPE_STANDIN=0, a stand-in (koinon-fakemodel -standin over TLS, in koinon-fixtures)
 # gets a certificate from a throwaway CA. OpenShell 0.1.5's supervisor (its own container and image,
 # not the sandbox image) verifies upstream TLS against webpki roots plus the supervisor image's
 # /etc/ssl/certs/ca-certificates.crt, so the gateway is re-pointed at a supervisor image derived
 # with that CA appended. Interim until OpenShell >= 0.1.7 (supervisor.network.additionalCaConfigMapName),
-# #394. Nothing leaves the cluster.
+# #80. Nothing leaves the cluster.
 #
 # kind runs sandboxes under runc, so the Kata guest case skips (it needs KOINON_ESCAPE_HOST_KERNEL
 # and a Kata node, the maintainer's release gate). Cases that need other fixtures skip with their
@@ -131,7 +131,7 @@ if (( need_gitea )); then
   # /etc/ssl/certs/ca-certificates.crt in the SUPERVISOR image (distroless, no shell), not in the
   # sandbox image. Derive a supervisor image from the exact one the install runs, with the throwaway
   # CA appended, and point the gateway at it. Interim, until OpenShell >= 0.1.7 can take an extra CA
-  # (supervisor.network.additionalCaConfigMapName): #394 removes this block. The chart ref is the one
+  # (supervisor.network.additionalCaConfigMapName): #80 removes this block. The chart ref is the one
   # test/e2e/kind/up.sh installs.
   os_version=$(sed -n 's/^OS_VERSION=//p' "$root/test/e2e/kind/up.sh")
   os_digest=$(sed -n 's/^OS_DIGEST=//p' "$root/test/e2e/kind/up.sh")

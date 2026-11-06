@@ -12,25 +12,25 @@
 # PR that has auto-merge on prints a warning (it can merge at the old head before CI sees the new
 # commits); --hold turns auto-merge off before the push and prints the command that turns it back on.
 # --e2e adds the `e2e` label before the push (an open PR) or at PR creation. Creation labels in a
-# second call; e2e-kind's `opened` run reads the labels live and runs the e2e (#468).
+# second call; e2e-kind's `opened` run reads the labels live and runs the e2e (koinon-private#468).
 #
-# --lab-go-test (with --ready, #610) runs the go-test gate on the lab after the push and BEFORE the pull
+# --lab-go-test (with --ready, koinon-private#610) runs the go-test gate on the lab after the push and BEFORE the pull
 # request is marked ready: `hack/e2e-remote.sh --argo --gate go-test` posts the commit status go-test-lab
-# on the pushed head, and the ready run of ci.yml then skips its Blacksmith go-test (a draft skips the
+# on the pushed head, and the ready run of ci.yml then skips its hosted go-test (a draft skips the
 # heavy jobs, so nothing is lost by running the lab first). Exit 75 (lab cannot run it now, no free slot),
 # 76 (NOT RUN), 78 (no lab configured) or 2 (the lab rejected the call) print the reason and go on: go-test runs on
-# Blacksmith, as it does for anyone without a lab. Only a failed gate (a posted failure status) stops.
+# the hosted runner, as it does for anyone without a lab. Only a failed gate (a posted failure status) stops.
 # A new pull request is created as a draft; one that is already ready skips the lab run (see below). A push to a pull request that is already ready runs CI
 # on the new head at once, before any lab status can exist, and ci.yml does not wait for one (a waiting
-# Blacksmith job is billed): that go-test runs on Blacksmith. To keep it on the lab, turn the pull
+# hosted job runs): that go-test runs on the hosted runner. To keep it on the lab, turn the pull
 # request back into a draft first (`gh pr ready --undo`), push, and ship with --ready --lab-go-test.
 # The lab run takes minutes; the claim must be renewed (hack/claim.sh beat) around it.
 #
-# --ready without --lab-go-test on a draft PR that exists marks it ready BEFORE the push (#675): ready
+# --ready without --lab-go-test on a draft PR that exists marks it ready BEFORE the push (koinon-private#675): ready
 # after the push starts a second ci run on the same head. A new PR is created ready, so it has one run.
 #
 # Run it inside a checkout or worktree on a feature branch named <type>/<N>-<slug> (the claim and the
-# PR hang off N); any other name is refused before anything is pushed (#485). Work that needs no issue
+# PR hang off N); any other name is refused before anything is pushed (koinon-private#485). Work that needs no issue
 # (the claim check exempts chore/ci/build(deps) PRs without source changes, and PRs labelled
 # unclaimed-ok) passes --no-issue, which accepts <type>/<slug> instead. Environment:
 #   KOINON_SHIP_ALLOWED_EMAILS  comma list of user.email values that may commit (default: any)
@@ -47,7 +47,7 @@
 
 set -euo pipefail
 
-msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 lab=0 auto=0 hold=0 review="" dry=0 no_issue=0 ready_done=0
+msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 lab=0 auto=0 hold=0 review="" dry=0 no_issue=0 ready_done=0 cr_fresh=0
 need() { [[ $# -ge 2 ]] || { echo "ship: $1 needs a value" >&2; exit 2; }; }
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -85,7 +85,7 @@ branch=$(git symbolic-ref --short -q HEAD) || fail "detached HEAD; check out a f
 [[ $branch != main && $branch != master ]] || fail "refusing to ship from $branch; use a feature branch"
 # A branch is <type>/<N>-<slug> (the claim and the PR hang off N), or <type>/<slug> with --no-issue for
 # work the claim check exempts. A stray name, such as the one a broken test helper once checked out in
-# a real worktree (#485), is refused before anything is pushed.
+# a real worktree (koinon-private#485), is refused before anything is pushed.
 if [[ $no_issue == 1 ]]; then
 	[[ $branch =~ ^[a-z]+/[a-z0-9][a-z0-9._-]{2,}$ ]] || fail "branch '$branch' is not <type>/<slug>; rename it (git branch -m) before shipping"
 else
@@ -166,7 +166,7 @@ else
 		fi
 	fi
 
-	# 4b. the branch's PR: a merged or closed one cannot take this push (#431)
+	# 4b. the branch's PR: a merged or closed one cannot take this push (koinon-private#431)
 	prinfo=$(gh pr list --head "$branch" --state all --json number,state,autoMergeRequest --jq \
 		'(map(select(.state == "OPEN"))[0] // (sort_by(.number) | last)) // empty | [.state, (.number | tostring), (.autoMergeRequest != null | tostring)] | @tsv' 2>/dev/null || true)
 	pr_state="" pr_num="" pr_auto=false
@@ -210,7 +210,7 @@ else
 			say "label e2e"
 		fi
 	fi
-	# Ready BEFORE the push (#675): a draft PR marked ready after the push runs the ci workflow twice on
+	# Ready BEFORE the push (koinon-private#675): a draft PR marked ready after the push runs the ci workflow twice on
 	# one head (the synchronize run, then the ready_for_review run), seconds apart. Marked ready first,
 	# the ready_for_review run starts on the old head and the push's run supersedes it (an older head is
 	# cancelled, ci.yml). Not with --lab-go-test: that gate needs the pushed head and runs before ready.
@@ -221,6 +221,7 @@ else
 			say "ready"
 		fi
 	fi
+	old_head=$(git rev-parse -q --verify "origin/$branch" 2>/dev/null || true)
 	# git prints the server's "remote:" banner on stderr even with -q; keep it out of the step lines.
 	if ! pushlog=$(git push -q -u origin "$branch" 2>&1); then
 		printf '%s\n' "$pushlog" >&2
@@ -234,6 +235,7 @@ else
 		fail "push failed"
 	fi
 	say "pushed $branch"
+	[[ $(git rev-parse HEAD) == "$old_head" ]] || cr_fresh=1
 fi
 
 # 7. pull request
@@ -242,7 +244,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 	if [[ $dry == 1 ]]; then
 		say "dry-run: would create or update the PR${pr_title:+ \"$pr_title\"}$([[ $draft == 1 ]] && echo ' (draft)'), add it to the board"
 		[[ $lab == 1 ]] && say "dry-run: would run the go-test gate on the lab (hack/e2e-remote.sh --argo --gate go-test) before marking ready"
-		[[ $ready == 1 ]] && say "dry-run: would mark ready"
+		[[ $ready == 1 ]] && say "dry-run: would mark ready, then post @coderabbitai review once per head (stateracloud/koinon only)"
 		[[ $auto == 1 ]] && say "dry-run: would check hack/needs-e2e.sh and enable auto-merge"
 	else
 		pr_url=$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)
@@ -265,10 +267,10 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			say "board warn"
 		fi
 		if [[ $lab == 1 ]] && [[ $(gh pr view "$pr_url" --json isDraft --jq .isDraft 2>/dev/null || echo true) == false ]]; then
-			echo "ship: lab go-test: PR already ready: go-test runs on Blacksmith (CI started on the push); gh pr ready --undo to use the lab" >&2
+			echo "ship: lab go-test: PR already ready: go-test runs on the hosted runner (CI started on the push); gh pr ready --undo to use the lab" >&2
 			say "lab go-test skipped (PR already ready)"
 		elif [[ $lab == 1 ]]; then
-			# The status must exist on the pushed head before the ready run reads it (#610).
+			# The status must exist on the pushed head before the ready run reads it (koinon-private#610).
 			lab_rc=0
 			hack/e2e-remote.sh --argo --gate go-test || lab_rc=$?
 			case $lab_rc in
@@ -276,20 +278,44 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 				if [[ $(hack/go-test-lab.sh state "$(git rev-parse HEAD)" 2>/dev/null || true) == success ]]; then
 					say "lab go-test ok (go-test-lab is success on $(git rev-parse --short HEAD); go-test is skipped in CI)"
 				else
-					echo "ship: warning: the lab go-test passed but go-test-lab is not visible on $(git rev-parse --short HEAD) (status not posted, or KOINON_E2E_NO_STATUS is set); go-test runs on Blacksmith" >&2
+					echo "ship: warning: the lab go-test passed but go-test-lab is not visible on $(git rev-parse --short HEAD) (status not posted, or KOINON_E2E_NO_STATUS is set); go-test runs on the hosted runner" >&2
 					say "lab go-test skipped (no status)"
 				fi
 				;;
-			75) echo "ship: lab go-test: the lab cannot run it now (unreachable, no free gate slot, or no verdict); go-test runs on Blacksmith" >&2; say "lab go-test skipped (exit 75)" ;;
-			76) echo "ship: lab go-test: NOT RUN (the gate skipped what it expected to run); go-test runs on Blacksmith" >&2; say "lab go-test skipped (exit 76)" ;;
-			78) echo "ship: lab go-test: no lab configured; go-test runs on Blacksmith" >&2; say "lab go-test skipped (exit 78)" ;;
-			2) echo "ship: lab go-test: the lab rejected the request (exit 2: usage or a 4xx answer); go-test runs on Blacksmith" >&2; say "lab go-test skipped (exit 2)" ;;
+			75) echo "ship: lab go-test: the lab cannot run it now (unreachable, no free gate slot, or no verdict); go-test runs on the hosted runner" >&2; say "lab go-test skipped (exit 75)" ;;
+			76) echo "ship: lab go-test: NOT RUN (the gate skipped what it expected to run); go-test runs on the hosted runner" >&2; say "lab go-test skipped (exit 76)" ;;
+			78) echo "ship: lab go-test: no lab configured; go-test runs on the hosted runner" >&2; say "lab go-test skipped (exit 78)" ;;
+			2) echo "ship: lab go-test: the lab rejected the request (exit 2: usage or a 4xx answer); go-test runs on the hosted runner" >&2; say "lab go-test skipped (exit 2)" ;;
 			*) fail "lab go-test failed (exit $lab_rc); fix it and run again (the pull request was not marked ready)" ;;
 			esac
 		fi
 		if [[ $ready == 1 && $ready_done != 1 ]]; then
 			gh pr ready "$pr_url" >/dev/null || fail "gh pr ready failed"
 			say "ready"
+		fi
+		# CodeRabbit (#184) reviews manually here: ask once per head, after the push. Advisory: a failure only warns.
+		if [[ $ready == 1 && $pr_url == */stateracloud/koinon/pull/* ]]; then
+			# A head this run pushed is new: ask without the date check (GitHub moves the PR head after the push, and a
+			# request on the old head says nothing about this one). Otherwise a request dated after the head commit counts.
+			if [[ $cr_fresh == 1 ]]; then
+				cr_n=0
+			else
+				# shellcheck disable=SC2016 # $o and $h are jq variables
+				cr_n=$(gh pr view "$pr_url" --json headRefOid,comments,commits --jq '.headRefOid as $o | ([.commits[] | select(.oid == $o) | .committedDate][0] // "") as $h | [.comments[] | select((.body | rtrimstr("\n")) == "@coderabbitai review") | select(.createdAt > $h)] | length' 2>/dev/null || echo err)
+			fi
+			if [[ $cr_n == 0 ]]; then
+				if gh pr comment "$pr_url" --body "@coderabbitai review" >/dev/null 2>&1; then
+					say "coderabbit review requested"
+				else
+					echo "ship: warning: could not post @coderabbitai review on $pr_url" >&2
+					say "coderabbit warn"
+				fi
+			elif [[ $cr_n =~ ^[0-9]+$ ]]; then
+				say "coderabbit review already requested on this head"
+			else
+				echo "ship: warning: could not read the comments of $pr_url; no @coderabbitai review posted" >&2
+				say "coderabbit warn"
+			fi
 		fi
 		if [[ $auto == 1 ]]; then
 			rc=0

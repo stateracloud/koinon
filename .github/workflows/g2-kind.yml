@@ -2,7 +2,8 @@
 #
 # G2 gateway suite on kind (plan item G2): the shared G1 suite and the Kubernetes-mode specs of
 # internal/gateway/kubernetes against agentgateway's real controller v1.7.0, via hack/g2-kind.sh. Manual
-# trigger only while the repository is private, where Actions minutes cost money. Calls no external
+# trigger only: the suite is slow and the kind e2e already covers the gateway path on every
+# needs-e2e change. Calls no external
 # service besides image, chart and manifest downloads: the model and the MCP servers are fakes in the
 # test process.
 name: g2-kind
@@ -24,8 +25,8 @@ concurrency:
 
 jobs:
   kubernetes-gateway:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
     defaults:
       run:
         shell: bash

@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# DeepSource static analysis (#180). Advisory only: its check is not in hack/ci-required.txt or the
+# main ruleset. No [[code_formatters]]: gofmt and prettier are enforced by `make lint`, and a bot
+# pushing formatting commits to a branch would start a second CI run on a new head. Autofix runs
+# only when a person clicks it. Secrets detection is not on the open-source plan; gitleaks covers it.
+version = 1
+
+# Generated code (make generate), throwaway spikes and test inputs are not reviewed here.
+exclude_patterns = [
+  "internal/gen/**",
+  "internal/db/store/**",
+  "internal/adminapi/*.gen.go",
+  "web/src/gen/**",
+  "hack/spike/**",
+  "**/testdata/**",
+  "test/fixtures/**",
+  "vendor/**",
+]
+
+test_patterns = [
+  "**/*_test.go",
+  "test/**",
+  "web/e2e/**",
+  "web/e2e-real/**",
+  "web/src/**/*.test.ts",
+  "web/src/**/*.test.tsx",
+  "hack/*-test.sh",
+  "hack/*_test.sh",
+  "web/src/test-setup.ts",
+  "web/src/test-utils.tsx",
+  "web/src/test-fixtures.ts",
+]
+
+# No Go analyzer for now (#198): DeepSource supports Go up to 1.26 and go.mod is newer, so its check
+# failed on every PR with 0 findings. Go is covered by `make lint` and CodeQL. Exit condition in #198.
+
+[[analyzers]]
+name = "javascript"
+
+  [analyzers.meta]
+  plugins = ["react"]
+  environment = ["nodejs", "browser", "vitest"]
+  dialect = "typescript"
+
+[[analyzers]]
+name = "shell"
+
+  [analyzers.meta]
+  dialect = "bash"
+
+[[analyzers]]
+name = "docker"
+
+  [analyzers.meta]
+  dockerfile_paths = [
+    "flavors/opencode/Dockerfile",
+    "hack/e2e-toolchain/Dockerfile",
+    "hack/e2e-toolchain/web.Dockerfile",
+  ]

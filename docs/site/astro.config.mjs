@@ -2,7 +2,7 @@
 import { defineConfig } from 'astro/config'
 import starlight from '@astrojs/starlight'
 
-// No analytics, no external fonts, no deploy: the repository is private (plan item DOC1).
+// No analytics, no external fonts, no deploy from this repository's CI (plan item DOC1).
 export default defineConfig({
   integrations: [
     starlight({

@@ -20,7 +20,7 @@ import (
 // the KEK an operator asked for (rotation, the move from local KEKs). It runs on every install and
 // upgrade and is idempotent: a KEK that is already there is left alone, so a rerun changes nothing.
 // It never activates, retires or rewraps values: koinon-api does (keys activate, rewrap, retire). It
-// binds the KEKs it wraps to the install (#615) and, when asked, wraps unbound ones again, bound.
+// binds the KEKs it wraps to the install (koinon-private#615) and, when asked, wraps unbound ones again, bound.
 type KeyAdmin struct {
 	// Store is the KEK Secret, with key-admin wrappers (secretstore.NewKeyAdminWrappers).
 	Store KubeStore
@@ -30,13 +30,13 @@ type KeyAdmin struct {
 	// AddID is a KEK to add, wrapped by the KMS, unless the key set holds it already.
 	AddID string
 	// RewrapUnbound wraps again each KEK of the primary wrapping key that is not bound to the install
-	// (stored format 1, from before #615), bound this time. The KEK itself, and so its fingerprint
+	// (stored format 1, from before koinon-private#615), bound this time. The KEK itself, and so its fingerprint
 	// and every value it wraps, stays the same. A bound KEK is left alone, so a rerun wraps nothing.
 	RewrapUnbound bool
 	// HasValues tells whether the database holds encrypted values: a missing Secret is then
 	// restored from backup, never created (KubeStore.Ensure).
 	HasValues func(context.Context) (bool, error)
-	// Marker is the install's bound-only marker (#615). Creating the first KEK sets it (before the
+	// Marker is the install's bound-only marker (koinon-private#615). Creating the first KEK sets it (before the
 	// Secret exists), and so does RewrapUnbound once no unbound KEK remains. Required with Create
 	// or RewrapUnbound.
 	Marker BoundOnlyMarker
@@ -52,7 +52,7 @@ type BoundOnlyMarker interface {
 }
 
 // rollbackNote is said whenever the marker is set or about to be.
-const rollbackNote = "a rollback below #615 no longer works (those releases cannot read bound KEKs). " +
+const rollbackNote = "a rollback below koinon-private#615 no longer works (those releases cannot read bound KEKs). " +
 	"If an old KEK Secret backup may have leaked, rotate the KEKs as well (keys add, activate, rewrap, retire): " +
 	"only rotation makes an old backup useless everywhere"
 

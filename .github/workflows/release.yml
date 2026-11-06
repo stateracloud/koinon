@@ -2,13 +2,13 @@
 #
 # Release (plan item REL1, ADR 0027, docs/dev/releasing.md). A pushed tag vX.Y.Z or vX.Y.Z-rc.N
 # publishes the three Go images, the OpenCode flavor image (ADR 0059) and the OCI Helm chart to
-# ghcr.io/stateracloud and drafts the GitHub release (-rc.N is a prerelease). Nothing is rebuilt or
+# ghcr.io/<owner>/<repo> (ghcr.io/stateracloud/koinon) and drafts the GitHub release (-rc.N is a prerelease). Nothing is rebuilt or
 # retested for the gate: it only checks that the tagged commit is on main and that the required CI
 # checks succeeded on it.
 #
 # Signing and SBOM attestations (cosign, keyless) are a separate `sign` job, the only one with
 # id-token: write. It runs only when the repository variable RELEASE_SIGNING is 'true' (ADR 0049:
-# they write to the public Rekor log, so they stay off while the repository is private).
+# they write to the public Rekor log, so they stay opt-in behind the variable).
 name: release
 
 on:
@@ -26,7 +26,10 @@ concurrency:
 env:
   # binfmt for the flavor's arm64 build under QEMU (tonistiigi/binfmt qemu-v10.2.3-68).
   BINFMT_IMAGE: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
-  CHART_REPOSITORY: oci://ghcr.io/stateracloud/charts
+  # Every package lives under the repository that builds it (#167): ghcr.io/<owner>/<repo>/api,
+  # /reconciler, /agentd, /flavors/opencode and /charts/koinon.
+  KOINON_IMAGE_REGISTRY: ghcr.io/${{ github.repository }}
+  CHART_REPOSITORY: oci://ghcr.io/${{ github.repository }}/charts
 
 jobs:
   # The release gate. Replace this job (and keep its name in `needs`) to gate on something else.
@@ -36,7 +39,7 @@ jobs:
     permissions:
       contents: read
       checks: read
-      statuses: read # go-test-lab on the merged pull request's head (#610)
+      statuses: read # go-test-lab on the merged pull request's head (koinon-private#610)
       pull-requests: read # the merged pull request's head commit, for the pull-request-only dco check
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -107,7 +110,7 @@ jobs:
           helm push "dist/chart/koinon-$version.tgz" "$CHART_REPOSITORY" 2>&1 | tee dist/chart/push.log
           digest=$(awk '/^Digest:/ { print $2 }' dist/chart/push.log)
           [[ $digest == sha256:* ]] || { echo "no chart digest in the helm push output" >&2; exit 1; }
-          echo "ref=${CHART_REPOSITORY#oci://}/koinon@$digest" >>"$GITHUB_OUTPUT"
+          echo "ref=${CHART_REPOSITORY#oci://}/koinon@$digest" >>"$GITHUB_OUTPUT" # package <repo>/charts/koinon
 
       # What the sign job needs: the image digests and SBOMs from GoReleaser.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -119,7 +122,7 @@ jobs:
           if-no-files-found: error
 
   # The OpenCode flavor image (ADR 0059), which the chart defaults to as
-  # <image.registry>/flavor-opencode:<appVersion>. GoReleaser builds only Go images, so this is
+  # <image.registry>/flavors/opencode:<appVersion>. GoReleaser builds only Go images, so this is
   # buildx, for both platforms (arm64 under QEMU: the Dockerfile runs apt-get), with BuildKit's
   # SBOM and provenance attestations stored next to the image.
   flavor:
@@ -147,12 +150,13 @@ jobs:
           TOKEN: ${{ github.token }}
           ACTOR: ${{ github.actor }}
         run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-      - name: build and push flavor-opencode
+      - name: build and push flavors/opencode
         id: build
         env:
           TAG: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
-        run: hack/release-flavor.sh "${TAG#v}" ghcr.io/stateracloud "$SHA" >>"$GITHUB_OUTPUT"
+          GITHUB_TOKEN: ${{ github.token }}
+        run: hack/release-flavor.sh "${TAG#v}" "$KOINON_IMAGE_REGISTRY" "$SHA" >>"$GITHUB_OUTPUT"
 
   # Keyless cosign signing and SBOM attestations. Off unless RELEASE_SIGNING is 'true'.
   sign:
@@ -192,7 +196,11 @@ jobs:
           cosign sign --yes "$FLAVOR_REF"
           # dist/digests.txt holds one line per image; hack/release-refs.sh turns it into digest refs.
           # dist/sbom/<name>-index.spdx.json is the SPDX SBOM of the image index.
+          # <name> is the last path element of the repository (api, reconciler, agentd); ko may
+          # prefix the SBOM file with the registry path, so match on the suffix and demand one file.
           while read -r name ref; do
             cosign sign --yes "$ref"
-            cosign attest --yes --type spdxjson --predicate "dist/sbom/$name-index.spdx.json" "$ref"
+            sboms=(dist/sbom/*"$name"-index.spdx.json)
+            [[ ${#sboms[@]} -eq 1 && -f ${sboms[0]} ]] || { echo "want one SBOM for $name, got: ${sboms[*]}" >&2; exit 1; }
+            cosign attest --yes --type spdxjson --predicate "${sboms[0]}" "$ref"
           done < <(hack/release-refs.sh <dist/digests.txt)

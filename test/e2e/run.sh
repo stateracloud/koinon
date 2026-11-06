@@ -18,7 +18,7 @@
 #      hack/docs-check.sh (make docs-check) fails when this script and the doc disagree;
 #   4. SUITE=go (default): the Go driver in test/e2e drives the quickstart steps through the API
 #      and prints the wall clock of each step and the total from `helm install`.
-#      SUITE=web: Playwright (web/e2e-real, issue #50) drives the same install through the
+#      SUITE=web: Playwright (web/e2e-real, issue koinon-private#50) drives the same install through the
 #      browser: login, GitHub connection, agent, task, streamed reply, approval, terminal run.
 #      The two suites each need a fresh install (the bootstrap password is one-time), so run one
 #      per cluster.
@@ -27,6 +27,7 @@
 # deleted at the end unless KEEP=1.
 #
 #   SUITE_LABEL=smoke runs only the Ginkgo specs with that label (SUITE=go; smoke is steps 1-6).
+#   FLAVOR_CACHE=<dir> imports the flavor build's layer cache from <dir>/opencode (needs the docker-container driver).
 #   FLAVOR_PULL_REPO=<repo> pulls the flavor image <repo>:<hack/flavor-tag.sh tag> instead of building it.
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 #
@@ -115,7 +116,7 @@ diagnostics() {
     "${K[@]}" -n "$FAKES" logs "deploy/$c" --tail=-1 >"$d/$c.log" 2>&1 || true
   done
   "${K[@]}" -n openshell logs statefulset/openshell --tail=-1 >"$d/openshell.log" 2>&1 || true
-  # Sandbox namespaces (issue #159): pod status with exit codes and termination messages. Koinon's
+  # Sandbox namespaces (issue koinon-private#159): pod status with exit codes and termination messages. Koinon's
   # admission policy denies pods/log there, so the containers' output is read on the kind node
   # with crictl, below the API.
   local ns
@@ -153,9 +154,14 @@ fi
 if [[ "$SKIP_BUILD" != 1 ]]; then
   arch=$(go env GOARCH)
   step "Koinon images (ko, linux/$arch) into kind"
+  # The chart's images are <image.registry>/api, /reconciler and /agentd (#167), so each is built --bare
+  # into its own repository; the fakes keep ko's import-path names.
+  for pair in api:./cmd/koinon-api reconciler:./cmd/koinon-reconciler agentd:./cmd/koinon-agentd; do
+    KO_DOCKER_REPO="kind.local/${pair%%:*}" KIND_CLUSTER_NAME="$CLUSTER" "${KO:-ko}" build --bare --tags e2e \
+      --platform "linux/$arch" "${pair#*:}"
+  done
   KO_DOCKER_REPO=kind.local KIND_CLUSTER_NAME="$CLUSTER" "${KO:-ko}" build --base-import-paths --tags e2e \
-    --platform "linux/$arch" ./cmd/koinon-api ./cmd/koinon-reconciler ./cmd/koinon-agentd \
-    ./cmd/koinon-fakemodel ./cmd/koinon-fakegithub ./cmd/koinon-fakemcp
+    --platform "linux/$arch" ./cmd/koinon-fakemodel ./cmd/koinon-fakegithub ./cmd/koinon-fakemcp
   done_step "Images: ko build and load (6 binaries)"
 
   step "OpenCode flavor into kind"
@@ -180,12 +186,23 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
   fi
   if [[ $pulled == 1 ]]; then
     echo "flavor image $FLAVOR_PULL_REPO:$flavor_tag pulled"
-    docker tag "$FLAVOR_PULL_REPO:$flavor_tag" kind.local/flavor-opencode:e2e
+    docker tag "$FLAVOR_PULL_REPO:$flavor_tag" kind.local/flavors/opencode:e2e
   else
-    docker buildx build --load --build-context common=flavors/common \
-      --tag kind.local/flavor-opencode:e2e flavors/opencode
+    # GITHUB_TOKEN (CI) authenticates the Dockerfile's GitHub release downloads as a BuildKit secret (#145).
+    secret=()
+    [[ -z ${GITHUB_TOKEN:-} ]] || secret=(--secret "id=github_token,env=GITHUB_TOKEN")
+    # FLAVOR_CACHE=<dir> imports the layer cache CI restored there (import only; main's flavors job saves it).
+    cache=()
+    [[ -z ${FLAVOR_CACHE:-} || ! -d $FLAVOR_CACHE/opencode ]] || cache=(--cache-from "type=local,src=$FLAVOR_CACHE/opencode")
+    # FLAVOR_BASE=<ref>@sha256:<digest> sets the base image (#200: the maintainers' lab builds through
+    # its registry mirror); hack/flavor-base.sh checks the digest pin and prints nothing when it is unset.
+    base_out=$("$root/hack/flavor-base.sh" opencode)
+    base_args=()
+    [[ -z $base_out ]] || mapfile -t base_args <<<"$base_out"
+    docker buildx build --load --build-context common=flavors/common "${secret[@]}" "${cache[@]}" "${base_args[@]}" \
+      --tag kind.local/flavors/opencode:e2e flavors/opencode
   fi
-  kind load docker-image --name "$CLUSTER" kind.local/flavor-opencode:e2e
+  kind load docker-image --name "$CLUSTER" kind.local/flavors/opencode:e2e
   done_step "Image: OpenCode flavor (pull or buildx) and kind load"
 fi
 

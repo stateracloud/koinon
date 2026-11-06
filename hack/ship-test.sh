@@ -11,7 +11,7 @@ set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 ship=$repo/hack/ship.sh
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-test.XXXXXX") || exit 1 # explicit template: macOS mktemp -d ignores TMPDIR (#466)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-test.XXXXXX") || exit 1 # explicit template: macOS mktemp -d ignores TMPDIR (koinon-private#466)
 trap '[[ -n ${KEEP_TMP:-} ]] || rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export PATH="$tmp/bin:$PATH" FAKE_LOG="$tmp/calls.log" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
@@ -36,8 +36,19 @@ case "$1 $2" in
 		echo "${FAKE_PR_URL:-}"
 	fi
 	;;
-"pr view") echo "${FAKE_PR_DRAFT:-true}" ;;
-"pr create") echo "https://example.invalid/o/r/pull/123" ;;
+"pr view")
+	if [[ " $* " == *" headRefOid,comments,commits "* ]]; then
+		# the CodeRabbit guard (#184): apply the caller's --jq to FAKE_CR_JSON ({comments, commits}); no file = a read failure
+		q=""
+		while [[ $# -gt 0 ]]; do [[ $1 == --jq ]] && q=$2; shift; done
+		[[ -n ${FAKE_CR_JSON:-} ]] || exit 1
+		jq -r "$q" <<<"$FAKE_CR_JSON"
+	else
+		echo "${FAKE_PR_DRAFT:-true}"
+	fi
+	;;
+"pr comment") exit "${FAKE_COMMENT_RC:-0}" ;;
+"pr create") echo "${FAKE_PR_CREATE_URL:-https://example.invalid/o/r/pull/123}" ;;
 "project item-add") exit "${FAKE_BOARD_RC:-0}" ;;
 esac
 exit 0
@@ -69,7 +80,7 @@ cat >"$seed/hack/claim.sh" <<'SH'
 echo "claim $*" >>"$FAKE_LOG"
 exit "$(cat "$FAKE_CLAIM_RC")"
 SH
-# The lab client and the status reader (#610): the gate's exit code and the visible status come from files.
+# The lab client and the status reader (koinon-private#610): the gate's exit code and the visible status come from files.
 cat >"$seed/hack/e2e-remote.sh" <<'SH'
 #!/usr/bin/env bash
 echo "e2e-remote $*" >>"$FAKE_LOG"
@@ -88,7 +99,7 @@ printf '# 0001. First\n\n- Status: accepted\n' >"$seed/docs/adr/0001-first.md"
 
 newwork() { # prints the path of a fresh clone on branch feat/1-x with an identity
 	local w
-	# Fail hard (#485): a failed mktemp or clone must never leave $w empty, or the git -C calls below
+	# Fail hard (koinon-private#485): a failed mktemp or clone must never leave $w empty, or the git -C calls below
 	# would run in the caller's own checkout and switch its branch.
 	w=$(mktemp -d "$tmp/w.XXXXXX") || exit 1
 	[[ -n $w && -d $w ]] || { echo "mktemp gave no directory" >&2; exit 1; }
@@ -101,7 +112,7 @@ newwork() { # prints the path of a fresh clone on branch feat/1-x with an identi
 }
 # shellcheck disable=SC2329 # called through check
 branch_on_origin() { git --git-dir="$tmp/origin.git" rev-parse --verify -q "refs/heads/$1" >/dev/null; }
-# #485: when mktemp fails, newwork() must stop and leave the caller's checkout alone.
+# koinon-private#485: when mktemp fails, newwork() must stop and leave the caller's checkout alone.
 guard=$(mktemp -d "$tmp/guard.XXXXXX")
 git -C "$guard" init -q -b keep
 git -C "$guard" -c user.name=d -c user.email=d@example.invalid commit -q --allow-empty -m g
@@ -110,7 +121,7 @@ printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
 chmod +x "$tmp/failbin/mktemp"
 mktemp_fail_rc=0
 (cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(newwork)) >/dev/null 2>&1 || mktemp_fail_rc=$?
-reset_state() { : >"$FAKE_LOG"; unset FAKE_PR_URL FAKE_PR_JSON FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_SHIP_ALLOWED_EMAILS KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; echo 0 >"$FAKE_LAB_RC"; echo success >"$FAKE_LAB_STATE"; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_PR_URL FAKE_PR_JSON FAKE_CR_JSON FAKE_COMMENT_RC FAKE_PR_CREATE_URL FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_SHIP_ALLOWED_EMAILS KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; echo 0 >"$FAKE_LAB_RC"; echo success >"$FAKE_LAB_STATE"; }
 
 fail=0
 pass=0
@@ -299,7 +310,7 @@ check "auto-merge on line" has '^auto-merge on$' "$tmp/o11b"
 check "gh pr merge --auto --merge" has 'gh pr merge .* --auto --merge' "$FAKE_LOG"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
-# 11c. (#392) --e2e: the label goes on an open PR before the push, on a new PR at creation
+# 11c. (koinon-private#392) --e2e: the label goes on an open PR before the push, on a new PR at creation
 reset_state
 unset FAKE_PR_URL
 w=$(newwork); cd "$w"
@@ -356,7 +367,7 @@ echo u >u.txt
 rc=$(run "$tmp/o14b")
 check "changes without a message: exit 2" eq "$rc" 2
 
-# 15. (#431) the branch's PR: merged or closed refuses before the push; auto-merge on warns; --hold
+# 15. (koinon-private#431) the branch's PR: merged or closed refuses before the push; auto-merge on warns; --hold
 reset_state
 w=$(newwork); cd "$w"
 echo m >m.txt
@@ -403,7 +414,7 @@ unset FAKE_PR_JSON
 check "mktemp failure: newwork() fails" test "$mktemp_fail_rc" -ne 0
 check "mktemp failure: caller's checkout branch unchanged" eq "$(git -C "$guard" branch --show-current)" keep
 
-# #485: ship.sh refuses a branch that is not <type>/<N>-<slug>
+# koinon-private#485: ship.sh refuses a branch that is not <type>/<N>-<slug>
 reset_state
 w=$(newwork); cd "$w"
 git checkout -q -b stray
@@ -413,7 +424,7 @@ check "stray branch name: refused" eq "$rc" 1
 check "stray branch name: message" has 'is not <type>/<N>-<slug>' "$tmp/o16"
 check "stray branch name: nothing pushed" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/stray"
 
-# #485: unnumbered branches (exempt work) need --no-issue
+# koinon-private#485: unnumbered branches (exempt work) need --no-issue
 reset_state
 w=$(newwork); cd "$w"
 git checkout -q -b chore/light-lane-cpu
@@ -429,7 +440,7 @@ git checkout -q -b stray
 echo t >t.txt
 rc=$(run "$tmp/o19" --no-issue -m "chore: t")
 check "--no-issue still refuses a stray name" eq "$rc" 1
-# 20. (#610) --lab-go-test: the lab gate runs after the push and before the pull request is marked ready
+# 20. (koinon-private#610) --lab-go-test: the lab gate runs after the push and before the pull request is marked ready
 reset_state
 w=$(newwork); cd "$w"
 echo l >l.txt
@@ -456,8 +467,8 @@ for c in 75 76 78 2; do
 	w=$(newwork); cd "$w"
 	echo "l$c" >"l$c.txt"
 	rc=$(run "$tmp/o21-$c" -m "feat: l" --pr-title t --pr-body "$tmp/body.md" --ready --lab-go-test)
-	check "lab exit $c: falls back to Blacksmith, exit 0" eq "$rc" 0
-	check "lab exit $c: the reason is printed" has "lab go-test:.*go-test runs on Blacksmith" "$tmp/o21-$c"
+	check "lab exit $c: falls back to the hosted runner, exit 0" eq "$rc" 0
+	check "lab exit $c: the reason is printed" has "lab go-test:.*go-test runs on the hosted runner" "$tmp/o21-$c"
 	check "lab exit $c: skipped line" has "^lab go-test skipped (exit $c)" "$tmp/o21-$c"
 	check "lab exit $c: still marked ready" has '^ready$' "$tmp/o21-$c"
 	check "lab exit $c: no status read" hasnt 'go-test-lab state' "$FAKE_LOG"
@@ -502,7 +513,7 @@ check "...skipped line" has '^lab go-test skipped (no status)' "$tmp/o23"
 check "...ready happened" has '^ready$' "$tmp/o23"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
-# 24. (#675) --ready on an existing draft PR marks it ready BEFORE the push, so one head never gets a
+# 24. (koinon-private#675) --ready on an existing draft PR marks it ready BEFORE the push, so one head never gets a
 # synchronize run and a ready_for_review run seconds apart
 reset_state
 export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PR_DRAFT=true
@@ -548,7 +559,7 @@ check "lab: exit 0" eq "$rc" 0
 check "lab: ready only after the push and the lab" bash -c "awk '/^git-push/ { p = NR } /e2e-remote/ { l = NR } /^gh pr ready/ { r = NR } END { exit !(p && l && r && p < l && l < r) }' $FAKE_LOG"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
-# 25. (#675) the push fails after the PR was marked ready: the PR is put back to draft, and the error says so
+# 25. (koinon-private#675) the push fails after the PR was marked ready: the PR is put back to draft, and the error says so
 reset_state
 export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PR_DRAFT=true
 export FAKE_PR_JSON='[{"number":123,"state":"OPEN","autoMergeRequest":null}]'
@@ -562,6 +573,61 @@ check "push failed after ready: marked ready first" has '^gh pr ready 123' "$FAK
 check "push failed after ready: PR put back to draft" has '^gh pr ready --undo 123' "$FAKE_LOG"
 check "push failed after ready: the error says so" has 'put back to draft' "$tmp/o25"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x 2>/dev/null || true
+
+# 26. (#184) --ready asks CodeRabbit for a review once per head, only on stateracloud/koinon; a failure only warns
+cr_url=https://github.com/stateracloud/koinon/pull/123
+cr_ship() { # <tag> <cr json or empty> [comment rc] [again]: a fresh branch, ready PR, one new commit
+	reset_state
+	export FAKE_PR_URL=$cr_url FAKE_PR_DRAFT=true FAKE_PR_JSON='[{"number":123,"state":"OPEN","autoMergeRequest":null}]'
+	[[ -z $2 ]] || export FAKE_CR_JSON=$2
+	[[ -z ${3:-} ]] || export FAKE_COMMENT_RC=$3
+	w=$(newwork); cd "$w"
+	echo "$1" >"$1.txt"
+	if [[ -n ${4:-} ]]; then # not a new head: ship once, then ship again with nothing new
+		run "$tmp/o26$1-first" -m "feat: $1" --pr-title t --pr-body "$tmp/body.md" --ready >/dev/null
+		: >"$FAKE_LOG"
+	fi
+	run "$tmp/o26$1" -m "feat: $1" --pr-title t --pr-body "$tmp/body.md" --ready
+	git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
+}
+c_old='{"headRefOid":"h1","commits":[{"oid":"h1","committedDate":"2026-01-02T00:00:00Z"}],"comments":[{"body":"@coderabbitai review","createdAt":"2026-01-01T00:00:00Z"}]}'
+c_new='{"headRefOid":"h1","commits":[{"oid":"h1","committedDate":"2026-01-01T00:00:00Z"}],"comments":[{"body":"@coderabbitai review\n","createdAt":"2026-01-02T00:00:00Z"}]}'
+c_none='{"headRefOid":"h1","commits":[{"oid":"h1","committedDate":"2026-01-01T00:00:00Z"}],"comments":[{"body":"looks good","createdAt":"2026-01-02T00:00:00Z"}]}'
+rc=$(cr_ship none "$c_none")
+check "coderabbit: exit 0" eq "$rc" 0
+check "coderabbit: posts the review request" has '^gh pr comment https://github.com/stateracloud/koinon/pull/123 --body @coderabbitai review$' "$FAKE_LOG"
+check "coderabbit: says so" has '^coderabbit review requested$' "$tmp/o26none"
+rc=$(cr_ship fresh "$c_new")
+check "coderabbit: a just-pushed head posts even with a newer-dated request comment" has '^gh pr comment ' "$FAKE_LOG"
+rc=$(cr_ship old "$c_old" "" again)
+check "coderabbit: unchanged head, request dated before the head commit: posts" has '^gh pr comment ' "$FAKE_LOG"
+rc=$(cr_ship new "$c_new" "" again)
+check "coderabbit: already asked on this head: exit 0" eq "$rc" 0
+check "coderabbit: already asked on this head: no second comment" hasnt '^gh pr comment ' "$FAKE_LOG"
+check "coderabbit: already asked on this head: says so" has '^coderabbit review already requested on this head$' "$tmp/o26new"
+rc=$(cr_ship fail "$c_none" 1)
+check "coderabbit: a failed comment never fails ship" eq "$rc" 0
+check "coderabbit: a failed comment warns" has 'could not post @coderabbitai review' "$tmp/o26fail"
+rc=$(cr_ship rd "" "" again)
+check "coderabbit: unreadable comments never fail ship" eq "$rc" 0
+check "coderabbit: unreadable comments warn and post nothing" bash -c "grep -q 'could not read the comments' $tmp/o26rd && ! grep -q '^gh pr comment ' $FAKE_LOG"
+# another repository, and a pull request that is not marked ready: nothing is asked
+reset_state
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PR_JSON='[{"number":123,"state":"OPEN","autoMergeRequest":null}]' FAKE_CR_JSON=$c_none
+w=$(newwork); cd "$w"
+echo other >other.txt
+rc=$(run "$tmp/o26o" -m "feat: o" --pr-title t --pr-body "$tmp/body.md" --ready)
+check "coderabbit: other repository: exit 0" eq "$rc" 0
+check "coderabbit: other repository: no comment" hasnt '^gh pr comment ' "$FAKE_LOG"
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
+reset_state
+export FAKE_PR_URL=$cr_url FAKE_PR_JSON='[{"number":123,"state":"OPEN","autoMergeRequest":null}]' FAKE_CR_JSON=$c_none
+w=$(newwork); cd "$w"
+echo nr >nr.txt
+rc=$(run "$tmp/o26n" -m "feat: n" --pr-title t --pr-body "$tmp/body.md")
+check "coderabbit: without --ready: exit 0" eq "$rc" 0
+check "coderabbit: without --ready: no comment" hasnt '^gh pr comment ' "$FAKE_LOG"
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
 echo "$pass passed, $fail failed"
 exit $((fail > 0))

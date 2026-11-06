@@ -329,7 +329,7 @@ func (b *builder) gatewayObjects() {
 					map[string]any{"name": gateway.OrgHeader, "value": `default(apiKey.org, "")`},
 				}},
 				// The gateway's own refusals (401, 403, 404, 429) and a provider's 403 are final: no
-				// layer retries them (gateway.DoNotRetryCEL, ADR 0056 amendment 2026-11-01, #342).
+				// layer retries them (gateway.DoNotRetryCEL, ADR 0056 amendment 2026-11-01, koinon-private#342).
 				"response": map[string]any{"set": []any{
 					map[string]any{"name": gateway.DoNotRetryHeader, "value": gateway.DoNotRetryCEL},
 				}},
@@ -483,7 +483,7 @@ func (b *builder) models(s gateway.State) {
 				admit += " && !has(llmRequest." + f + ")"
 			}
 			// A request that carries a gateway key in the URL or in a header but the key header is refused
-			// (#262); the CRD cannot allowlist headers, so this is the only header guard here.
+			// (koinon-private#262); the CRD cannot allowlist headers, so this is the only header guard here.
 			admit += " && " + gateway.NoKeyInURLExpr() + " && " + gateway.NoKeyInHeadersExpr()
 			policies := map[string]any{
 				"authorization": map[string]any{
@@ -693,7 +693,7 @@ func (b *builder) mcp(s gateway.State) {
 		"targetRefs": b.policyTargets(KindHTTPRoute, name),
 		"traffic": map[string]any{
 			"transformation": map[string]any{"request": request},
-			// A request that carries a gateway key in a header but the key header is refused (#262).
+			// A request that carries a gateway key in a header but the key header is refused (koinon-private#262).
 			"authorization": map[string]any{
 				"action": "Require",
 				"policy": map[string]any{"matchExpressions": []any{gateway.NoKeyInHeadersExpr()}},

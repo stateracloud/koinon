@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Socket.dev GitHub App configuration (#185). Keys: https://docs.socket.dev/docs/socket-yml
+#
+# Advisory only: Socket's checks are not in hack/ci-required.txt or the ruleset. Its inline
+# comments are answered and resolved before merge (#187). Review on 2026-12-05 whether it caught
+# anything Dependabot, govulncheck or OSV did not (#185); drop it if not.
+version: 2
+
+projectIgnorePaths:
+  - "hack/spike/**"
+  - "**/testdata/**"
+  - "test/fixtures/**"
+
+# Run pull request alert scans only when a manifest, lockfile or workflow changes.
+triggerPaths:
+  - "go.mod"
+  - "go.sum"
+  - "**/package.json"
+  - "pnpm-lock.yaml"
+  - "**/pnpm-lock.yaml"
+  - ".github/workflows/**"
+
+githubApp:
+  enabled: true
+  pullRequestAlertsEnabled: true
+  # Less PR noise: no separate dependency overview comment.
+  dependencyOverviewEnabled: false
+  projectReportsEnabled: true

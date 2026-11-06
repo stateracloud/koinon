@@ -33,7 +33,7 @@ export CLAIM_LIB_ONLY=1
 source "$claim"
 unset CLAIM_LIB_ONLY
 
-# update_target: the updater only touches a ready, green pull request that is behind main (#596).
+# update_target: the updater only touches a ready, green pull request that is behind main (koinon-private#596).
 ut_ok='[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"b","status":"COMPLETED","conclusion":"SKIPPED"},{"__typename":"StatusContext","context":"c","state":"SUCCESS"}]'
 ut_red='[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"FAILURE"}]'
 ut_run='[{"__typename":"CheckRun","name":"a","status":"IN_PROGRESS","conclusion":null}]'
@@ -85,9 +85,15 @@ eq "parse note joins lines" "$(jq -r .note <<<"$parsed")" "two lines"
 eq "parse state" "$(jq -r .state <<<"$parsed")" "held"
 inj=$(claim_format 1 held h u 2026-10-30T16:00:00Z "" $'x\nstate: released')
 eq "note cannot inject a field" "$(jq -r .state <<<"$(claim_parse "$inj")")" "held"
-eq "parse garbage" "$(claim_parse 'hello')" '{"state":"","holder":"","human":"","lease_until":"","pr":"","note":""}'
+eq "parse garbage" "$(claim_parse 'hello')" '{"state":"","holder":"","human":"","lease_until":"","pr":"","note":"","released_by":""}'
 rel=$(claim_format 12 released "alice/mac/s1" alice 2026-10-30T16:00:00Z "" "done")
 eq "parse released" "$(jq -r .state <<<"$(claim_parse "$rel")")" "released"
+eq "a release from before released_by parses with an empty field" "$(jq -r .released_by <<<"$(claim_parse "$rel")")" ""
+rel2=$(claim_format 12 released "alice/mac/s1" alice 2026-10-30T16:00:00Z "" "done" "alice/mac/s1#x")
+eq "released_by is written and parsed" "$(jq -r .released_by <<<"$(claim_parse "$rel2")")" "alice/mac/s1#x"
+eq "released_by keeps state last" "$(tail -1 <<<"$rel2")" "state: released"
+eq "released_by cannot inject a field" "$(jq -r .state <<<"$(claim_parse "$(claim_format 1 released h u t "" n $'x\nstate: held')")")" "released"
+eq "a held claim has no released_by line" "$(grep -c released_by <<<"$(claim_format 1 held h u t "" n)")" "0"
 
 e=$(iso_to_epoch 2026-10-30T16:00:00Z)
 eq "iso round trip" "$(epoch_to_iso "$e")" "2026-10-30T16:00:00Z"
@@ -109,6 +115,14 @@ eq "no sensitive section" "$(sensitive_paths "$tmp.co")" ""
 rm -f "$tmp.co"
 eq "next adr number" "$(next_adr_number 0081 0082 0090 0003)" "0091"
 eq "next adr number from none" "$(next_adr_number)" "0001"
+# ADR 0094 decision 6: numbers that open pull requests ADD count, nothing else does.
+adr_page='[{"data":{"repository":{"pullRequests":{"nodes":[
+ {"number":136,"files":{"pageInfo":{"hasNextPage":false},"nodes":[{"path":"docs/adr/0093-koinon-core-opencode-plugin.md","changeType":"ADDED"},{"path":"docs/adr/README.md","changeType":"MODIFIED"}]}},
+ {"number":137,"files":{"pageInfo":{"hasNextPage":false},"nodes":[{"path":"docs/adr/0070-old.md","changeType":"MODIFIED"},{"path":"docs/adr/0071-gone.md","changeType":"DELETED"},{"path":"docs/adr/0095-x.md","changeType":"ADDED"},{"path":"docs/other/0099-nope.md","changeType":"ADDED"},{"path":"docs/adr/0097-renamed.md","changeType":"RENAMED"}]}}]}}}}]'
+eq "open pull requests: ADDED and RENAMED docs/adr files count" "$(jq -r "$ADR_PR_JQ" <<<"$adr_page" | paste -sd, -)" "0093,0095,0097"
+# shellcheck disable=SC2046
+eq "adr number counts an open pull request's file" "$(next_adr_number 0092 $(jq -r "$ADR_PR_JQ" <<<"$adr_page"))" "0098"
+eq "adr number: no open pull request adds one" "$(jq -r "$ADR_PR_JQ" <<<'[{"data":{"repository":{"pullRequests":{"nodes":[]}}}}]' | wc -l | tr -d ' ')" "0"
 
 for t in "chore: x" "chore(ci): x" "ci: pin" "build(deps): bump" "build(deps-dev): bump" "chore!: x"; do
   if title_exempt "$t"; then ok "title exempt: $t"; else bad "title exempt: $t"; fi
@@ -147,6 +161,23 @@ eq "priority then age" "$ranked" '"P09,P20,P21,0"'
 holder=alice/host.local/sess-1
 eq "holder login" "$(holder_login "$holder")" alice
 eq "holder session" "$(holder_session "$holder")" sess-1
+
+# beat_ended (ADR 0094 decision 7): who ended a tracked claim.
+be() { # STATE HOLDER NOTE RELEASED_BY
+  beat_ended "$(jq -nc --arg s "$1" --arg h "$2" --arg n "$3" --arg b "$4" '{issue:1,state:$s,holder:$h,note:$n,released_by:$b}')" alice s1; }
+eq "beat_ended: released by this session" "$(be released alice/mac/s1 x alice/mac/s1)" drop
+eq "beat_ended: released by this session on another host name" "$(be released alice/mac/s1 x alice/other/s1)" drop
+eq "beat_ended: the parent releasing a lane's claim" "$(be released alice/mac/s1#x x alice/mac/s1)" drop
+eq "beat_ended: released by a lane of this session" "$(be released alice/mac/s1 x alice/mac/s1#y)" drop
+eq "beat_ended: pr-close" "$(be released alice/mac/s1 x pr-close)" drop
+eq "beat_ended: the sweeper" "$(be released alice/mac/s1 x sweeper)" "lost released by sweeper"
+eq "beat_ended: another session" "$(be released alice/mac/s1 x alice/mac/s2)" "lost released by alice/mac/s2"
+eq "beat_ended: another person" "$(be released alice/mac/s1 x comment:bob)" "lost released by comment:bob"
+eq "beat_ended: a session id that only starts with ours" "$(be released alice/mac/s1 x alice/mac/s10)" "lost released by alice/mac/s10"
+eq "beat_ended: a takeover names the new holder" "$(be held alice/mac/s2 '' '')" "lost taken over by alice/mac/s2"
+eq "beat_ended: no released_by, pr close note keeps dropping" "$(be released alice/mac/s1 'pull request #7 closed' '')" drop
+if [[ $(be released alice/mac/s1 'released by the sweeper: x' '') == lost* && $(be released alice/mac/s1 handing '') == lost* ]]; then ok "beat_ended: no released_by, other notes stay lost"; else bad "beat_ended old rule"; fi
+eq "beat_ended: a claim that is gone" "$(beat_ended '' alice s1)" "lost it is gone"
 
 # ---- lanes (ADR 0082 amendment), offline: gh and the GitHub-facing functions are stubbed ----
 eq "holder login with a lane" "$(holder_login alice/h/s1#x)" alice
@@ -360,6 +391,27 @@ r=$(lanecmd "$mine_only" beat --mine --every 30m)
 eq "a sweeper release is a lost claim" "$(rc_of "$r")" 3
 ON_SLEEP=$(rel_note "handing over")
 eq "a manual or --force release is a lost claim" "$(rc_of "$(lanecmd "$mine_only" beat --mine --every 30m)")" 3
+# released_by (ADR 0094 decision 7): this session's own release is not a loss, anyone else's is, and is named.
+rel_by() { jq -c --arg b "$1" '[.[] | .state = "released" | .note = "handing over" | .released_by = $b]' <<<"$mine_only"; }
+ON_SLEEP=$(rel_by "alice/mac/s1")
+r=$(lanecmd "$mine_only" beat --mine --every 30m --for 3500)
+eq "beat --every: a release by this session is not a lost claim" "$(rc_of "$r")" 0
+if grep -q 'released #10' <<<"$r"; then ok "own release reported as released"; else bad "own release: $r"; fi
+ON_SLEEP=$(rel_by "alice/mac/s1#x")
+eq "beat --every: a release by a lane of this session is not lost" "$(rc_of "$(lanecmd "$mine_only" beat --mine --every 30m --for 3500)")" 0
+ON_SLEEP=$(rel_by "pr-close")
+eq "beat --every: released_by pr-close is not lost" "$(rc_of "$(lanecmd "$mine_only" beat --mine --every 30m --for 3500)")" 0
+ON_SLEEP=$(rel_by "sweeper")
+r=$(lanecmd "$mine_only" beat --mine --every 30m)
+eq "beat --every: a sweeper release is lost (released_by)" "$(rc_of "$r")" 3
+if grep -q 'lost #10: stop work' <<<"$r" && grep -q '#10 released by sweeper' <<<"$r"; then ok "the loss names who released it"; else bad "sweeper named: $r"; fi
+ON_SLEEP=$(rel_by "comment:bob")
+r=$(lanecmd "$mine_only" beat --mine --every 30m)
+eq "beat --every: a release by another person is lost" "$(rc_of "$r")" 3
+if grep -q 'released by comment:bob' <<<"$r"; then ok "the loss names the person"; else bad "person named: $r"; fi
+ON_SLEEP=$other10
+r=$(lanecmd "$mine_only" beat --mine --every 30m)
+if grep -q 'taken over by alice/mac/other' <<<"$r"; then ok "a takeover names the new holder"; else bad "takeover named: $r"; fi
 ON_SLEEP=$(rel_note "pull request #100 closed")
 r=$(lanecmd "$mine_only" beat --mine --every 30m --for 3500)
 eq "a merge/close release ends the claim quietly, then --for ends the loop" "$(rc_of "$r")" 0
@@ -442,6 +494,57 @@ if grep -q 'cap of 8' <<<"$r"; then ok "adopt cap message"; else bad "cap messag
 same_lane=$(jq -nc "[$(dead 30 alice/mac/old#x 2026-10-30T15:00:00Z), $(dead 35 alice/mac/old#x 2026-10-30T15:00:00Z)]")
 r=$(lanecmd "$same_lane" adopt --from old)
 eq "adopt respects the session cap per lane" "$(rc_of "$r")" 2
+rm -f "$LOG"
+
+# ---- board skip in the token-limited jobs (ADR 0094 decision 3, #169) ----
+# release-pr and the sweeper run on GITHUB_TOKEN, which cannot read an organization project. The board
+# write must skip with one log line and the release must still complete.
+board_release() { # PROJECT_VALUE: release one open-issue claim with the real set_status; prints output and rc
+  local out rc=0
+  out=$( {
+    GITHUB_ACTIONS=true; PROJECT=$1; PROJECT_OWNER=acme; PROJECT_META=; REPO=acme/koinon; OWNER=acme; NAME=koinon
+    GH_CALLS=0
+    gh() {
+      if [[ $1 == api && $2 == graphql ]]; then echo "graphql" >>"$LOG"; echo "Resource not accessible by integration" >&2; return 1; fi
+      if [[ $1 == api && $2 == repos/acme/koinon/issues/7 ]]; then echo open; return 0; fi
+      return 0
+    }
+    server_now() { echo 1000; }
+    write_claim() { echo "write $1 $2 by=${9:-}" >>"$LOG"; return 0; }
+    unassign() { :; }
+    drop_label() { :; }
+    upsert_comment() { echo "comment $1" >>"$LOG"; }
+    c='{"issue":7,"sha":"s7","state":"held","holder":"alice/mac/s1","human":"alice","lease_until":"2026-10-30T17:00:00Z","pr":"100","note":""}'
+    do_release_claim "$c" "pull request #100 closed" 0 pr-close
+  } 2>&1) || rc=$?
+  echo "$out"
+  echo "rc=$rc"
+}
+: >"$LOG"
+r=$(board_release acme-board)
+eq "release with an unreadable board still releases (rc 0)" "$(rc_of "$r")" 0
+eq "release records released_by pr-close" "$(grep -c 'write 7 released by=pr-close' "$LOG")" 1
+eq "release still updates the marker comment after the board skip" "$(grep -c 'comment 7' "$LOG")" 1
+eq "the board skip logs exactly one line" "$(grep -c 'board update skipped' <<<"$r")" 1
+eq "the board skip is not a warning and does not ask for gh auth refresh" "$(grep -c 'warning\|auth refresh' <<<"$r")" 0
+: >"$LOG"
+r=$(board_release none)
+eq "PROJECT=none releases without touching the board" "$(rc_of "$r")" 0
+eq "PROJECT=none makes no graphql call" "$(grep -c graphql "$LOG")" 0
+eq "PROJECT=none logs nothing about the board" "$(grep -c 'board' <<<"$r")" 0
+rm -f "$LOG"
+
+# A sweep whose write_claim dies (missing contents:write, ruleset refusal) must end red, after trying every claim.
+LOG=$(mktemp "${TMPDIR:-/tmp}/claim_sweep.XXXXXX")
+sweep_rc=0
+(
+  list_claims() { echo '[{"issue":7,"state":"held"},{"issue":8,"state":"held"}]'; }
+  server_now() { echo 1000; }
+  sweep_one() { echo "tried" >>"$LOG"; die "cannot write the claim ref"; }
+  cmd_sweep
+) >/dev/null 2>&1 || sweep_rc=$?
+if ((sweep_rc != 0)); then ok "sweep exits non-zero when a claim write dies"; else bad "sweep exited 0 after a write died"; fi
+eq "sweep still tries every claim after a failure" "$(grep -c tried "$LOG")" 2
 rm -f "$LOG"
 
 if [[ -z ${KOINON_CLAIM_TEST_REPO:-} ]]; then

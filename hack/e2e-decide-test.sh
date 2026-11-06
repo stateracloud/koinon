@@ -38,7 +38,7 @@ want() {
   got=$(env "$@" hack/e2e-decide.sh | sed -n 's/^needed=//p' | tail -1)
   if [[ $got == "$expect" ]]; then echo "ok: $desc"; else echo "FAIL: $desc (got '$got', want $expect)" >&2; fail=1; fi
 }
-# req <true|false> <description> [VAR=value...]: the `required=` line (what e2e result enforces, #562).
+# req <true|false> <description> [VAR=value...]: the `required=` line (what e2e result enforces, koinon-private#562).
 req() {
   local expect=$1 desc=$2 got
   shift 2
@@ -52,13 +52,14 @@ summary_has() { grep -q -- "$1" "$tmp/summary" || { echo "FAIL: summary lacks '$
 want true "PR touching the e2e's files runs" EVENT=pull_request STUB_FORCED=0
 want true "PR with the e2e label runs" EVENT=pull_request 'LABELS=["bug","e2e"]'
 want false "PR with other labels and nothing relevant does not run" EVENT=pull_request 'LABELS=["bug"]'
-want false "PR that is e2e-relevant but unlabelled does not run" EVENT=pull_request STUB_FULL=0
-summary_has "hack/e2e-remote.sh"
-summary_has "e2e\` label"
+want true "PR that is e2e-relevant but unlabelled runs (fork PRs cannot label, issue #148)" EVENT=pull_request STUB_FULL=0
+summary_has "e2e-relevant"
+summary_has "e2e-lab"
+want true "PR: full-rule failure runs the e2e" EVENT=pull_request STUB_FULL=2
 want true "PR: a rule failure fails closed" EVENT=pull_request STUB_FORCED=2
 want false "PR: nothing relevant says so" EVENT=pull_request
 summary_has "nothing in this pull request"
-# #468: `gh pr create --label e2e` fires `opened` without the label, then `labeled`.
+# koinon-private#468: `gh pr create --label e2e` fires `opened` without the label, then `labeled`.
 PRV=(PR=524 GH_REPO=o/r)
 want true "opened: the label added after the event counts" EVENT=pull_request ACTION=opened "${PRV[@]}" 'STUB_LABELS=["e2e"]'
 want false "opened: no label now either" EVENT=pull_request ACTION=opened "${PRV[@]}" 'STUB_LABELS=["bug"]'
@@ -79,9 +80,8 @@ req false "PR with nothing relevant requires none" EVENT=pull_request
 req false "dispatch requires nothing of itself" EVENT=workflow_dispatch
 req false "push requires nothing" EVENT=push STUB_COVERED=abc123 STUB_FULL=0
 req false "nightly requires nothing" EVENT=schedule
-want false "relevant unlabelled PR still does not run here" EVENT=pull_request STUB_FULL=0
-summary_has "e2e result"
-summary_has "gh workflow run e2e-kind.yml"
+# On a pull request, required implies needed: no PR is left waiting for evidence it cannot produce.
+want true "relevant unlabelled PR runs here" EVENT=pull_request STUB_FULL=0 'LABELS=[]'
 
 [[ $fail -eq 0 ]] && echo "e2e-decide tests passed"
 exit "$fail"

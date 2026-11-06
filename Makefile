@@ -119,11 +119,22 @@ FLAVOR_CACHE     ?=
 comma            := ,
 flavor_cache      = $(if $(FLAVOR_CACHE),--cache-from type=local$(comma)src=$(FLAVOR_CACHE)/$(1) --cache-to type=local$(comma)dest=$(FLAVOR_CACHE)/$(1)$(comma)mode=max)
 
+# GITHUB_TOKEN (set in CI) is handed to the build as the BuildKit secret github_token, which the
+# Dockerfile's GitHub release downloads use to authenticate (#145). Unset, they are anonymous.
+flavor_secret     = $(if $(GITHUB_TOKEN),--secret id=github_token$(comma)env=GITHUB_TOKEN)
+
+# FLAVOR_BASE=<ref>@sha256:<digest> builds on that base image instead of the Dockerfile's `ARG BASE=`
+# default (#200), for example the same image through a registry mirror. It must carry the digest the
+# Dockerfile pins: hack/flavor-base.sh checks it and prints the --build-arg (nothing when unset).
+FLAVOR_BASE      ?=
+export FLAVOR_BASE
+
 FLAVORS          := opencode
 
 .PHONY: flavor-opencode
-flavor-opencode: ## Build the OpenCode flavor image (koinon/flavor-opencode:dev-<hash>)
-	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) $(call flavor_cache,opencode) \
+flavor-opencode: ## Build the OpenCode flavor image (koinon/flavor-opencode:dev-<hash>; FLAVOR_BASE=<ref@digest> to set the base)
+	base_args=$$(hack/flavor-base.sh opencode) && \
+	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) $(call flavor_cache,opencode) $(flavor_secret) $$base_args \
 		--build-context common=flavors/common --tag koinon/flavor-opencode:$(call flavor_tag,opencode) flavors/opencode
 
 .PHONY: flavors
@@ -156,6 +167,10 @@ test-e2e-web: ## Browser e2e (Playwright, web/e2e-real) against a real install o
 # them against the one `make dev-kind-up` installs, `make test-escape` against any other.
 ENVTEST_K8S_VERSION ?= 1.37.0
 SETUP_ENVTEST       ?= $(GO) run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2
+
+.PHONY: envtest-assets
+envtest-assets: ## Download (or find) the envtest API server binaries and print their directory
+	@$(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path
 
 .PHONY: test-admission
 test-admission: ## Run the escape suite's admission policy cases against envtest (needs helm)

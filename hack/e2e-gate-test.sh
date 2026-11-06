@@ -95,8 +95,12 @@ has "e2e-lab is failure"
 echo '[{"context":"e2e-lab","state":"pending"}]' >"$tmp/lab.json"
 gate 1 "required, e2e-lab is pending" "${G[@]}"
 echo '[{"context":"e2e-lab","state":"success"}]' >"$tmp/lab.json"
-gate 1 "required and quickstart failed, a lab success does not hide it" DECIDE=success QUICKSTART=failure REQUIRED=true
+gate 0 "required, this run quickstart failed but e2e-lab is success (the lab is an accelerator)" DECIDE=success QUICKSTART=failure REQUIRED=true
+gate 0 "required, this run quickstart cancelled but e2e-lab is success" DECIDE=success QUICKSTART=cancelled REQUIRED=true
 gate 1 "required, no head sha is read as no evidence" "${G[@]}" SHA=
+rm -f "$tmp/lab.json"
+gate 1 "required, quickstart failed and no other evidence" DECIDE=success QUICKSTART=failure REQUIRED=true
+echo '[{"context":"e2e-lab","state":"success"}]' >"$tmp/lab.json"
 
 rm -f "$tmp/lab.json"
 echo "gh: Resource not accessible by integration (HTTP 403)" >"$tmp/lab.err"
@@ -110,8 +114,8 @@ has "could not read e2e-lab: invalid JSON"
 echo '[{"context":"e2e-lab","state":"success"}]' >"$tmp/lab.json"
 
 wf=.github/workflows/e2e-kind.yml
-# The result job can read commit statuses (without it e2e-lab is a 403, #588).
-awk '/^  result:/{f=1;next} f&&/^  [a-z-]+:/{f=0} f' "$wf" | grep -qxF '      statuses: read # hack/e2e-gate.sh reads the e2e-lab commit status; without it the API answers 403 (#588)' || { echo "FAIL: the result job lacks statuses: read" >&2; fail=1; }
+# The result job can read commit statuses (without it e2e-lab is a 403, koinon-private#588).
+awk '/^  result:/{f=1;next} f&&/^  [a-z-]+:/{f=0} f' "$wf" | grep -qxF '      statuses: read # hack/e2e-gate.sh reads the e2e-lab commit status; without it the API answers 403 (koinon-private#588)' || { echo "FAIL: the result job lacks statuses: read" >&2; fail=1; }
 echo ok: result job statuses pinned
 
 # The YAML and the gate agree on the marker step: its exact name, and the `if` that makes the default

@@ -9,7 +9,7 @@
 #     trailing `# vX.Y.Z` comment; the younger counts; a tag that does not point at the SHA warns)
 #   - any non-doc file: image references pinned by digest (`name:tag@sha256:...`): the registry's
 #     build time of the newest platform image
-#   - Dockerfile `ADD` URLs of GitHub release assets, raw.githubusercontent.com tags and npm tarballs
+#   - Dockerfile `ADD` and `koinon-fetch` URLs of GitHub release assets, raw.githubusercontent.com tags and npm tarballs
 #   - the `<TOOL>_VERSION` pins in hack/versions.env (the release's publish time)
 #   - the ADR 0077 platform pins in test/e2e/kind/up.sh, and any line that carries a marker
 #     `# dep-age: github=<owner/repo> [tag-prefix=<prefix>]` (use it where release/versions.yaml
@@ -347,7 +347,7 @@ while IFS=$'\t' read -r file line; do
 	done
 done < <(added_lines '**/Dockerfile*' 'Dockerfile*' 'hack/*.sh' 'test/e2e/**/*.sh' '.github/workflows/*.yml' '.github/workflows/*.yaml')
 
-# 4b. The tool versions of hack/versions.env (#544): the release each <TOOL>_VERSION names. The file
+# 4b. The tool versions of hack/versions.env (koinon-private#544): the release each <TOOL>_VERSION names. The file
 # is also what the workflows, Dockerfile and CONTRIBUTING copies are checked against
 # (hack/versions-check.sh), so dating it dates the release assets they download.
 # tool_repo <TOOL>: the GitHub repository of the release; an unknown name warns (like pin_repo).

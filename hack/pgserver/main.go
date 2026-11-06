@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Command pgserver starts the Postgres server every process of a hack/go-test.sh run shares
-// (pgtest.ServerVar, #224) and keeps it until it is told to stop.
+// (pgtest.ServerVar, koinon-private#224) and keeps it until it is told to stop.
 //
 // It writes the server's superuser DSN to -dsn-file once Postgres accepts connections, then waits
 // for SIGTERM or SIGINT and removes the container. If it dies without that, the testcontainers
-// reaper removes the container. Without Docker (testenv's check, so KOINON_TESTENV_UNAVAILABLE
+// reaper removes the container.
+//
+// pgserver holds the run's reaper connection on purpose (#171): the Postgres container it keeps
+// until SIGTERM keeps one client connected to the Ryuk of the TESTCONTAINERS_SESSION_ID that
+// hack/go-test.sh exported, so Ryuk does not idle out between packages (testcontainers-go#3867).
+// Do not start Postgres lazily or release the container early. Without Docker (testenv's check, so KOINON_TESTENV_UNAVAILABLE
 // applies) it exits 3 and writes nothing: the suites then start their own containers or skip.
 package main
 

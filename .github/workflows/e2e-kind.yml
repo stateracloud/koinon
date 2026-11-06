@@ -1,16 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# E1 quickstart e2e on kind (plan item E1): test/e2e/run.sh on a GitHub-hosted runner. Not on
-# Blacksmith like the other workflows (ADR 0047): its kernel has no Landlock, which the OpenShell
-# sandbox supervisor requires (issue #159). It calls no external service besides image and manifest
+# E1 quickstart e2e on kind (plan item E1): test/e2e/run.sh on a GitHub-hosted runner (ubuntu-24.04: its kernel has
+# Landlock, which the OpenShell sandbox supervisor requires, issue koinon-private#159). It calls no external service besides image and manifest
 # downloads: the model is the fake model server and GitHub is the fake GitHub, both in the cluster.
 #
 # When it runs (the `decide` job, hack/e2e-decide.sh):
-#   - pull requests: only if they change the e2e's own files (hack/needs-e2e.sh --forced-only) or
-#     carry the `e2e` label (read live, so `gh pr create --label e2e` counts on `opened`). A PR that
-#     is e2e-relevant by the full rule does not run it here, but its `e2e result` fails until the head
-#     has a green e2e (hack/e2e-remote.sh --argo, the label, or a dispatch).
-#     Label events do not start this workflow (#468): adding `e2e` later dispatches it
+#   - pull requests: when the full rule (hack/needs-e2e.sh) says the change is e2e-relevant, the PR
+#     changes the e2e's own files or it carries the `e2e` label (read live, so `gh pr create --label e2e`
+#     counts on `opened`). Relevance alone runs it, so a fork PR (which cannot label, dispatch or post
+#     `e2e-lab`) can go green (issue #148). The label and the lab (hack/e2e-remote.sh --argo) are
+#     accelerators: the label forces a run for a change the rule thinks irrelevant, a green `e2e-lab`
+#     satisfies `e2e result` once this run's quickstart has finished; if that quickstart
+#     fails or is cancelled, hack/e2e-gate.sh still passes on the lab status or another run's quickstart.
+#     Label events do not start this workflow (koinon-private#468): adding `e2e` later dispatches it
 #     once on the head (e2e-label.yml, hack/e2e-label.sh), unless a run there is live or passed the
 #     e2e. To retry a red e2e: "Re-run failed jobs", remove and add the label, or
 #     `gh workflow run e2e-kind.yml --ref <branch>`.
@@ -22,10 +24,10 @@
 # The `e2e result` job is the one to require: it passes when the e2e was skipped because nothing needed
 # it, and for a pull request that needs one (hack/needs-e2e.sh) it fails until the head has a passing
 # e2e: a quickstart job here or in a dispatched run on the head, or the lab's `e2e-lab` commit status
-# (hack/e2e-gate.sh, #562). Trust limit: `result` runs from this very file, so a PR can edit it to drop the
+# (hack/e2e-gate.sh, koinon-private#562). Trust limit: `result` runs from this very file, so a PR can edit it to drop the
 # gate; the guard is the ruleset's required review on `.github/**` (not CODEOWNERS), `e2e result` is not
 # pinned to an app and anyone with write access can post `e2e-lab`: a guardrail against mistakes, not a
-# malicious member (pinned integration_id / lab App: #568).
+# malicious member (pinned integration_id / lab App: koinon-private#568).
 name: e2e-kind
 run-name: e2e-kind${{ inputs.commit && format(' ({0}) bisect {1}', inputs.commit, inputs.bisect_id) || '' }}
 
@@ -40,7 +42,7 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: 'go: API-driven quickstart (test/e2e). web: the browser, Playwright against the real API (web/e2e-real, issue #50). Each needs its own install, so one per run.'
+        description: 'go: API-driven quickstart (test/e2e). web: the browser, Playwright against the real API (web/e2e-real, issue koinon-private#50). Each needs its own install, so one per run.'
         type: choice
         options: [go, web]
         default: go
@@ -131,7 +133,7 @@ jobs:
         run: hack/versions-env.sh >> "$GITHUB_ENV"
 
       # cache: false, and an explicit cache with a fallback prefix: a new go.sum still starts from
-      # the last build cache (main saves one on every run), which is most of the ko and driver builds.
+      # the last build cache (main saves one per go.sum), which is most of the ko and driver builds.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -139,14 +141,14 @@ jobs:
 
       # Restored everywhere, saved only by pushes to main (below): a pull request, or a dispatch on
       # an arbitrary commit, can never write the cache that main's runs read.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - id: e2ego
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          key: e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             e2e-go-${{ runner.os }}-
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
@@ -179,7 +181,7 @@ jobs:
       - name: Kernel has Landlock
         run: |
           if ! grep -qw landlock /sys/kernel/security/lsm; then
-            echo "::error::this runner's kernel ($(uname -r)) has no Landlock; OpenShell's sandbox supervisor needs it (issue #159)"
+            echo "::error::this runner's kernel ($(uname -r)) has no Landlock; OpenShell's sandbox supervisor needs it (issue koinon-private#159)"
             exit 1
           fi
 
@@ -195,6 +197,16 @@ jobs:
           echo "${KO_SHA256_AMD64}  $RUNNER_TEMP/ko.tgz" | sha256sum -c -
           tar xzf "$RUNNER_TEMP/ko.tgz" -C "$RUNNER_TEMP/bin" ko
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # The flavor image is built here when the pull below misses. The docker-container driver is
+      # needed to import the layer cache the flavors job saved on main; this job only restores it
+      # (a pull request never writes it, #145).
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/flavor-cache
+          key: flavors-${{ hashFiles('flavors/**') }}
+          restore-keys: flavors-
 
       - name: Log in to GHCR (reads the flavor image; a miss falls back to building it)
         env:
@@ -215,7 +227,11 @@ jobs:
           # The workflow deletes the cluster in its own step, after collecting resource use.
           KEEP: "1"
           # Pull the flavor image the flavors job pushed for this flavors/ tree, if there is one.
-          FLAVOR_PULL_REPO: ghcr.io/${{ github.repository }}/flavor-opencode
+          FLAVOR_PULL_REPO: ghcr.io/${{ github.repository }}/flavors/opencode
+          # A flavor build (the pull missed) imports the restored layer cache and authenticates the
+          # Dockerfile's GitHub release downloads with the workflow token as a BuildKit secret.
+          FLAVOR_CACHE: ${{ runner.temp }}/flavor-cache
+          GITHUB_TOKEN: ${{ github.token }}
         run: test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
 
       - name: Timings
@@ -233,7 +249,7 @@ jobs:
           kubectl --context kind-koinon-e1 get pods -A -o wide || true
           docker stats --no-stream || true
           free -m
-          # Issue #159: what the runner's kernel offers the OpenShell sandbox supervisor.
+          # Issue koinon-private#159: what the runner's kernel offers the OpenShell sandbox supervisor.
           uname -a
           cat /sys/kernel/security/lsm 2>/dev/null; echo
           sysctl kernel.unprivileged_userns_clone user.max_user_namespaces kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true
@@ -253,17 +269,17 @@ jobs:
         run: test/e2e/kind/down.sh
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.e2ego.outputs.cache-hit != 'true'
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          key: e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
   # The one check to require. Passes when the e2e was skipped because nothing needed it (or a draft),
   # fails when it failed or was cancelled (the composite-check pattern). Fails too when a pull request
   # needs an e2e (decide's `required`) and its head has no passing one: neither a quickstart job in this
-  # or another e2e-kind run nor the lab's `e2e-lab` status (hack/e2e-gate.sh, #562). A status event
+  # or another e2e-kind run nor the lab's `e2e-lab` status (hack/e2e-gate.sh, koinon-private#562). A status event
   # starts no workflow, so a later e2e-lab or a dispatched run re-runs this job through
   # hack/e2e-rerun-result.sh (only that job, and only once the PR run has finished); by hand: "Re-run
   # failed jobs" on the pull request's e2e-kind run.
@@ -276,7 +292,7 @@ jobs:
     permissions:
       contents: read
       actions: write # re-run the pull request run's failed `e2e result` after a passing dispatched run
-      statuses: read # hack/e2e-gate.sh reads the e2e-lab commit status; without it the API answers 403 (#588)
+      statuses: read # hack/e2e-gate.sh reads the e2e-lab commit status; without it the API answers 403 (koinon-private#588)
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}

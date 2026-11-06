@@ -14,14 +14,14 @@
 #              earlier skip or cancel, and a cancelled or skipped run never outranks one that is queued or
 #              in progress (even at the same startedAt): it keeps waiting for the live run. A required check
 #              that is missing, skipped or cancelled while an e2e-kind run on the head is still queued or in
-#              progress (whose jobs may not exist yet, #468) is waited for too: `waiting for e2e-kind run <id>`;
+#              progress (whose jobs may not exist yet, koinon-private#468) is waited for too: `waiting for e2e-kind run <id>`;
 #              so are failed or cancelled checks of an earlier e2e-kind run on the head (its `decide`
 #              cancelled, its `e2e result` red). Checks of e2e-kind count by their newest run, like
 #              required ones. All green is not final while an e2e-kind run on the head is queued or
 #              in progress either (the `e2e` label dispatches one, whose `e2e result` comes last).
 #              Otherwise, if the newest is skipped or cancelled, the next line suggests
 #              `gh workflow run e2e-kind.yml --ref <branch>`.
-#              `--require e2e` is the merge gate for a needs-e2e PR (#547): it passes when the commit status
+#              `--require e2e` is the merge gate for a needs-e2e PR (koinon-private#547): it passes when the commit status
 #              `e2e-lab` (posted by hack/e2e-remote.sh --argo after a green lab run) is success on the head,
 #              OR any `quickstart` check run on the head succeeded. Otherwise it behaves like
 #              `--require quickstart` and prints `REQUIRED e2e missing|skipped|failed` with how to produce one.
@@ -32,26 +32,33 @@
 #              With --checks, "all green" also needs every required status check context of the base
 #              branch's rules (gh api repos/{owner}/{repo}/rules/branches/<base>) to exist on the head:
 #              a workflow run that is still queued has no jobs yet, so its required checks are missing
-#              from the rollup (`waiting for required checks not on the head yet: ci,...`, #562).
-#              A draft PR is never green (#647): with --checks, `isDraft` exits 5 with `DRAFT` (a draft runs
+#              from the rollup (`waiting for required checks not on the head yet: ci,...`, koinon-private#562).
+#              A draft PR is never green (koinon-private#647): with --checks, `isDraft` exits 5 with `DRAFT` (a draft runs
 #              almost nothing, and `go`/`web` are red on purpose). After `ready_for_review`, only runs of the
-#              `ci` workflow that belong to the draft are ignored (#661): a run created more than ~30 s before
-#              the last ready event (a by-hand re-run of a draft-era run replays draft=true and is ignored too, #676; #678
+#              `ci` workflow that belong to the draft are ignored (koinon-private#661): a run created more than ~30 s before
+#              the last ready event (a by-hand re-run of a draft-era run replays draft=true and is ignored too, koinon-private#676; #133
 #              will filter on the `ci (draft)` display_title instead of this window). dco, gitleaks, claim and commit statuses (e2e-lab) keep
 #              their result. It prints `waiting for the ready run` until the ready run's checks exist. When gh
 #              cannot list the runs, each ci check run's own start time decides instead.
-#              A stale PR head (#661): with --checks, when `git ls-remote origin refs/heads/<branch>` names
+#              A stale PR head (koinon-private#661): with --checks, when `git ls-remote origin refs/heads/<branch>` names
 #              another commit than the PR's headRefOid for PR_WAIT_STALE_GRACE seconds (default 120; GitHub
 #              lags a push by a few seconds), it exits 6 with `STALE-HEAD` instead of judging the old head.
 #              Not checked for a fork PR or when the remote cannot be read.
+#              Unresolved review threads (#187): when every check is green but mergeStateStatus is BLOCKED, the
+#              ruleset's required_review_thread_resolution is the usual cause (advisory bots comment inline).
+#              hack/pr-threads.sh lists the unresolved threads (`UNRESOLVED path:line author`) and this exits 7
+#              at once, without waiting: threads do not resolve by themselves. It never resolves one; reply
+#              and resolve them as docs/dev/ci.md "Merging" says. When the threads cannot be read (after
+#              three tries), it exits 2: it never reports a PR as ready on a guess.
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
 #   --interval 20 seconds by default
 #
 # Output lines: `checks 7/9 pending: go,web`, `FAILED go (run 123)`, `MERGED abc1234`,
 # `needs-update`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
-# Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout,
+# Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout (or, with --checks, the required contexts / review threads unreadable),
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
-#       6 stale PR head (with --checks), 64 usage.
+#       6 stale PR head (with --checks), 7 unresolved review threads (BLOCKED with --checks, all green), 64 usage.
+# Test hook: PR_WAIT_THREADS replaces hack/pr-threads.sh.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -128,7 +135,7 @@ fi
 
 # One normalised row per check: CheckRuns (status/conclusion) and commit statuses (state) alike.
 # A required check is judged on its newest run only (by start time; rollup order breaks ties). A
-# cancelled or skipped run never outranks a queued or in-progress one (#431): wait for the live run.
+# cancelled or skipped run never outranks a queued or in-progress one (koinon-private#431): wait for the live run.
 # The checks of the e2e-kind workflow count the same way: several runs on one head are normal there.
 # shellcheck disable=SC2016 # $req is a jq variable, bound by jqn
 norm='def ok: .done and (.bad | not) and (.skipped | not);
@@ -175,14 +182,21 @@ shown() { if [ "$alias_show" = 1 ] && [ "$1" = quickstart ]; then echo e2e; else
 # ruleset), one per line, into $ctxs. Read until it succeeds once; a failed read leaves it empty.
 # A workflow run that is queued has no jobs yet, so its required checks are absent from the head's
 # rollup: "everything in the rollup is green" is not "every required check is green".
-ctx_ok=0 ctxs=""
+ctx_ok=0 ctx_tried=0 ctxs=""
 load_contexts() {
   [ "$ctx_ok" = 0 ] || return 0
-  local out
-  if out=$(gh api "repos/{owner}/{repo}/rules/branches/$1" \
-    --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique | .[]' 2>/dev/null); then
-    ctxs=$out ctx_ok=1
-  fi
+  local out try
+  local -a sleeps
+  read -r -a sleeps <<<"${PR_THREADS_RETRY_SLEEPS:-2 5 15}" # the same retries (and test override) as pr-threads.sh
+  for ((try = 0; try <= ${#sleeps[@]}; try++)); do
+    if out=$(gh api "repos/{owner}/{repo}/rules/branches/$1" \
+      --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique | .[]' 2>/dev/null); then
+      ctxs=$out ctx_ok=1
+      return 0
+    fi
+    [ "$try" -lt "${#sleeps[@]}" ] && sleep "${sleeps[$try]}"
+  done
+  return 0
 }
 
 no_live=0 last=""
@@ -193,6 +207,7 @@ emit() { # print only when the line differs from the previous one
   fi
 }
 
+threads_sh=${PR_WAIT_THREADS:-$(cd "$(dirname "$0")" && pwd)/pr-threads.sh}
 stale_grace=${PR_WAIT_STALE_GRACE:-120} stale_since=""
 start=$SECONDS
 while :; do
@@ -216,7 +231,7 @@ while :; do
         echo "DRAFT: not tested, mark ready for review (hack/ship.sh --ready, gh pr ready)"
         exit 5
       fi
-      # A stale PR head: the push is on origin but GitHub's headRefOid still names the old commit (#661).
+      # A stale PR head: the push is on origin but GitHub's headRefOid still names the old commit (koinon-private#661).
       sb=$(jq -r '.headRefName // ""' <<<"$json")
       sh=$(jq -r '.headRefOid // ""' <<<"$json")
       rem=""
@@ -243,7 +258,7 @@ while :; do
         # Decide per workflow run, not per check run: a draft run cancelled by the ready run has check runs that
         # start (and are cancelled) after the ready event, and `needs: changes` jobs of a cancelled run never ran.
         # ready_ids: the ci runs on the head created at or after the ready event (30 s of clock skew allowed;
-        # a re-run of a draft-era run replays draft=true and does not count, #676) ("none": the ready run is not there yet); empty: gh could not say, fall back to each check run's own start time.
+        # a re-run of a draft-era run replays draft=true and does not count, koinon-private#676) ("none": the ready run is not there yet); empty: gh could not say, fall back to each check run's own start time.
         ready_ids=""
         hd=$(jq -r '.headRefOid // ""' <<<"$json")
         if [ -n "$hd" ]; then
@@ -292,10 +307,38 @@ while :; do
         no_live=1
       fi
     fi
+    # Only required checks decide (AGENTS.md: advisory and third-party checks, DeepSource, CodeRabbit, Socket,
+    # do not count): the base branch's required contexts, the explicit --require names, the e2e aliases and
+    # the checks of the e2e-kind workflow. Any other failed or pending check is printed and dropped.
+    # Fail closed: when the required contexts cannot be read, nothing is judged (never "every check").
+    # With --merged (#201) the read is best effort: it is tried once (with its retries), and when it fails
+    # the wait goes on to the merge or the close with no check judged (every check is printed as advisory);
+    # the merge itself is what --merged waits for, and GitHub applies the rules there.
+    if [ "$mode" = checks ] || [ "$ctx_tried" = 0 ]; then
+      load_contexts "$(jq -r '.baseRefName // "main"' <<<"$json")"
+      if [ "$ctx_ok" != 1 ] && [ "$mode" = checks ]; then
+        echo "pr-wait: cannot read the required status checks of the base branch; not judging checks" >&2
+        exit 2
+      fi
+      if [ "$ctx_ok" != 1 ] && [ "$ctx_tried" = 0 ]; then
+        echo "pr-wait: cannot read the required status checks of the base branch; waiting for the merge without judging checks" >&2
+      fi
+      ctx_tried=1
+    fi
+    keep_names=("$ctxs" ${required[@]+"${required[@]}"} ${req_now[@]+"${req_now[@]}"})
+    [ "$alias_e2e" = 0 ] || keep_names+=(quickstart e2e-lab)
+    keep=$(printf '%s\n' "${keep_names[@]}" | jq -R . | jq -sc 'map(select(. != ""))')
+    adv_json=$(jq --argjson keep "$keep" '.statusCheckRollup |= map(select(((.name // .context // "?") as $n | ($keep | index($n)) == null) and (.workflowName // "") != "e2e-kind"))' <<<"$json")
+    adv=$(jq -r "$norm"' | .[] | select((.done | not) or .bad) | "advisory \(.name) \(if .done then "failed" else "pending" end)"' --argjson req '[]' <<<"$adv_json" | sort -u)
+    json=$(jq --argjson keep "$keep" '.statusCheckRollup |= map(select(((.name // .context // "?") as $n | ($keep | index($n)) != null) or (.workflowName // "") == "e2e-kind"))' <<<"$json")
+    if [ -n "$adv" ] && [ "$adv" != "${last_adv:-}" ]; then
+      echo "$adv"
+      last_adv=$adv
+    fi
     reqjson=$(printf '%s\n' ${req_now[@]+"${req_now[@]}"} | jq -R . | jq -sc .)
     failed=$(jqn -r "$norm | .[] | select(.bad) | [.name, .cancelled, ((.url | capture(\"/runs/(?<r>[0-9]+)\")? | .r) // \"\")] | @tsv" <<<"$json")
     # The only failures are cancelled runs of required checks, or checks of an earlier e2e-kind run:
-    # an e2e-kind run on the head that is still queued or running brings newer ones (#468), so wait
+    # an e2e-kind run on the head that is still queued or running brings newer ones (koinon-private#468), so wait
     # for it instead of failing.
     if [ -n "$failed" ] && [ -n "$head" ] &&
       jqn -e "$norm | [.[] | select(.bad)] | all((.cancelled and (.name | IN(\$req[]))) or .wf == \"e2e-kind\")" <<<"$json" >/dev/null; then
@@ -320,7 +363,6 @@ while :; do
     # Required contexts of the ruleset that have no check on the head yet (a queued workflow run).
     missing_ctx=""
     if [ "$mode" = checks ]; then
-      load_contexts "$(jq -r '.baseRefName // "main"' <<<"$json")"
       while IFS= read -r c; do
         [ -n "$c" ] || continue
         jq -e --arg c "$c" 'any((.statusCheckRollup // [])[]; (.name // .context // "") == $c)' <<<"$json" >/dev/null ||
@@ -334,7 +376,7 @@ while :; do
       emit "waiting for e2e-kind run $live on ${head:0:7}"
     elif [ "$total" -gt 0 ] && [ -z "$pending" ]; then
       # Every check has finished, but an e2e-kind run on the head that has not created its jobs yet
-      # (queued; or dispatched by the `e2e` label, #468) brings newer ones: wait for it.
+      # (queued; or dispatched by the `e2e` label, koinon-private#468) brings newer ones: wait for it.
       [ -z "$head" ] || live=$(live_e2e "$head")
       if [ -n "$live" ]; then
         emit "waiting for e2e-kind run $live on ${head:0:7}"
@@ -365,6 +407,25 @@ while :; do
       fi
       if [ -z "$live" ] && [ "$mode" = checks ]; then
         echo "checks $total/$total green"
+        # BLOCKED with every check green: the ruleset's required_review_thread_resolution (#187). Threads do
+        # not resolve themselves, so list them and stop instead of waiting; never resolve them from here.
+        if [ "$mstate" = BLOCKED ]; then
+          trc=0
+          threads=$("$threads_sh" "$pr" 2>&1) || trc=$?
+          case $trc in
+          0) ;;
+          7)
+            echo "$threads"
+            echo "BLOCKED: PR $pr has unresolved review threads; reply and resolve each one (docs/dev/ci.md \"Merging\"), then run this again"
+            exit 7
+            ;;
+          *)
+            echo "pr-wait: PR $pr is BLOCKED and its review threads could not be read: $threads" >&2
+            echo "pr-wait: cannot read review threads; not ready" >&2
+            exit 2
+            ;;
+          esac
+        fi
         exit 0
       fi
       [ -n "$live" ] || emit "checks $total/$total green"
