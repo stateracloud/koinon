@@ -1,6 +1,6 @@
 # 0098. Update the model price catalogue from public sources
 
-- Status: Proposed (decisions 1 to 3 taken by procoduck on 2026-11-06; the auto-apply bounds are draft defaults for review)
+- Status: Proposed (decisions 1 to 3 taken by procoduck on 2026-11-06; bounds and the rest confirmed at the 2026-11-06 review)
 - Date: 2026-11-06
 - Amends: [0070](0070-model-metadata.md) (decisions 4 and 8: price differences can now become
   prices), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (the price order of the
@@ -81,8 +81,9 @@ off (ADR 0068), with no release.
    platform entry whose rates, tiers and limits equal the new default entry of the same `id` is
    removed in a new platform version. The removal is audited with the release's list version as the
    reason. This is how ADR 0070's overlays fade out.
-6. **Org admins accept for their own org only.** An org admin can turn a proposal into an org price
-   entry for their org, through the same validation and audit as `SetOverride`. Org prices still win
+6. **Org admins accept for their own org only.** An org admin sees proposals only for models their
+   org has used or has its own price for (maintainer decision 2026-11-06), and can turn one into an
+   org price entry for their org only, through the same validation and audit as `SetOverride`. Org prices still win
    over the platform list. The Prices page shows "source differs" when a lower layer later differs
    from the org's entry, so a stale org price stays visible.
 7. **Past charges never change.** A new version is valid from the moment it is written, or from a
@@ -97,7 +98,7 @@ off (ADR 0068), with no release.
 2. **When it runs.** On demand (a *Check sources* button on the Platform *Prices* page, and the
    command), and on a schedule when a platform admin turns it on. Helm `prices.refresh.enabled:
    false` and `prices.refresh.interval: 24h` are the defaults. With the setting off, `koinon-api`
-   makes no request to any source.
+   makes no request to any source. The same setting turns on auto-apply (decision 3).
 3. **Fetch rules.**
    - Pinned hosts per adapter (`openrouter.ai`, `models.dev`, `api.github.com`,
      `raw.githubusercontent.com`), HTTPS only, no redirects, a body cap (16 MiB) and a strict
@@ -110,8 +111,9 @@ off (ADR 0068), with no release.
    a branch head. The adapter takes the newest commit of the default branch that is at least 24
    hours old, and reads the file at that SHA. A broken or malicious commit that is reverted within a
    day therefore never reaches a proposal. This is ADR 0079's cooldown applied to data. OpenRouter
-   and models.dev `api.json` have no commit; for them a value counts only after two fetches at least
-   24 hours apart returned it unchanged.
+   has no commit; for it a value counts only after two fetches at least 24 hours apart returned it
+   unchanged. models.dev `api.json` has no commit either, and it only ever makes proposals (decision
+   7), so it needs no pinning rule.
 5. **Normalization** follows ADR 0070 decision 3. Rates become USD per million tokens as decimal
    strings with at most six fraction digits. Per-token strings are scaled by 10^6 exactly with
    `big.Rat`. LiteLLM floats are parsed from their decimal text, never through float64 arithmetic.
@@ -128,15 +130,15 @@ off (ADR 0068), with no release.
 
 The scheduled fetch may apply small changes by itself. Everything else waits for a person.
 
-**Auto-apply is a second setting.** Turning the scheduled fetch on does not turn auto-apply on. A
-platform admin turns it on in the Platform *Prices* page (stored in the database, audited, off by
-default). Uploads (decision 6) are never auto-applied: a person is there to review them.
+**One switch, not two** (maintainer decision 2026-11-06). The scheduled fetch and auto-apply are one
+setting, off by default (decision 2.2). The chart values comment and the Platform *Prices* page say
+plainly that turning it on lets small price changes apply by themselves. Uploads (decision 6) are
+never auto-applied: a person is there to review them.
 
-**Draft default bounds.** A proposal is auto-applied only when every rule holds. These numbers are
-the draft defaults for review (Open questions). They are constants in code. Helm can tighten them,
-never loosen them.
+**Bounds** (confirmed by the maintainer, 2026-11-06). A proposal is auto-applied only when every rule
+holds. They are constants in code. Helm can tighten them, never loosen them.
 
-| Rule | Draft default |
+| Rule | Default |
 |---|---|
 | The model already has a Koinon price (platform or default entry) | required |
 | Same provider type, same `id`, same tier boundaries (`context_over`) | required |
@@ -149,7 +151,8 @@ never loosen them.
 
 "Independent" means a separate maintainer and data path. models.dev's `openrouter` provider is a bot
 copy of OpenRouter's API, so it does not count as a second source for an OpenRouter route. For a
-direct Anthropic model there is no provider list, so two aggregators must agree.
+direct Anthropic model there is no provider list, so two independent sources, such as OpenRouter and
+LiteLLM, must agree. models.dev never counts towards auto-apply (decision 7).
 
 **Waits for a person** (class `needs_review`): a new model, a new or removed bucket, a tier change, a
 move over 25%, a price only one aggregator reports, sources that disagree, and any rule above that
@@ -222,6 +225,13 @@ records the page URL and "manual" as its source.
 - **models.dev, LiteLLM, genai-prices.** MIT. Their licence and copyright line go in the provenance.
   They are aggregators: on their own they never auto-apply a change for a direct provider; two must
   agree. Only LiteLLM's repository file is read, never its PyPI package.
+- **models.dev makes proposals only** (maintainer decision 2026-11-06). It never counts towards
+  auto-apply, as a primary source or as one of two. It has no versioned feed: `api.json` is rebuilt
+  from about 1,000 TOML files that change more than 100 times a day, mostly bot syncs copied from other
+  catalogues, and wrong prices have been merged and reverted several times (for example commits
+  `cd7c70b4` and `6a0da0a9` in `github.com/anomalyco/models.dev`, formerly `sst/models.dev`).
+  Auto-apply relies on the provider's own source, or on two independent sources such as OpenRouter
+  and LiteLLM.
 - **genai-prices lags** the providers (no Claude 5.5 family on 2026-11-06). A model it lacks is not
   a disagreement; it just does not count as an agreeing source.
 - **Anthropic** has no machine-readable list. Its models auto-apply only on agreement of two
@@ -277,7 +287,7 @@ records the page URL and "manual" as its source.
   stored, versioned, audited platform or org entry. ADR 0097 rejects a runtime download of a price
   list "as a supply-chain path into cost truth". Bounded auto-apply narrows that path to small moves
   of existing models, confirmed by two sources or the provider, pinned, audited and reversible. It
-  does not remove it, which is why it is a second opt-in.
+  does not remove it, which is why it is off by default and its one setting says so plainly.
 - ADR 0070's metadata snapshot still never prices a request by itself.
 - The default list keeps changing only through a reviewed pull request (`docs/ops/prices.md`).
 
@@ -318,6 +328,8 @@ in `hack/chart-check.d` checks that the default values render the refresh off.
 | **Proposals only, no auto-apply** | No bounds to maintain | Prices drift whenever no admin looks; the maintainer chose bounded auto-apply. It remains the default, since auto-apply is off until turned on. |
 | **Scheduled auto-apply without bounds** (LiteLLM at start, Bifrost) | No admin work | A wrong or malicious commit charges every org until someone notices; a unit mix-up bills a million times over; aggregator data against `docs/ops/prices.md`; ADR 0097 rejects it. Removing it later means rebuilding trust in past charges. |
 | **Bounds measured against the last version** instead of the last person-reviewed rate | Simpler diff | Repeated 25% moves compound without a person ever seeing them. |
+| **Auto-apply as a second setting**, apart from the scheduled fetch | An admin who wants fresh proposals need not accept automation | Two switches to explain, and a fetch that only proposes still needs weekly clicks; the maintainer chose one switch whose description says what it does (2026-11-06). |
+| **models.dev counts towards auto-apply** | A third agreeing source for direct providers | No versioned feed, more than 100 changes a day mostly copied from other catalogues, and wrong prices merged and reverted several times; its "agreement" is often a copy of another source. |
 | **Fetch without provenance** | Less schema | A bad price cannot be traced to a source, a commit or an approver, and there is no clean rollback target. |
 | **Import 1-hour cache and time-of-day prices now** | One import pass | A sixth bucket and time-dependent prices with no usage data to match them: wrong charges instead of missing ones. |
 | **Signed Koinon bundle only**, no third-party fetch in installs | No source adapters in installs | Every change waits for a maintainer, and OpenRouter routes still need their own fetch. Good later (decision 13), not as the only path. |
@@ -349,22 +361,20 @@ others come from the research report.
 
 All tracked in #265 until it is split.
 
-1. **The bounds.** 25%, 24 hours, two sources and 10 a day are draft defaults, not measured. Confirm
-   or change them before the build.
-2. **Auto-apply as a second opt-in.** This draft keeps it off even when the scheduled fetch is on.
-   Should turning on the fetch turn it on instead?
-3. **models.dev pinning.** `api.json` names no commit. Read the repository's data at a commit at
-   least a day old (a second parser, unlike ADR 0070), or keep the two-fetch stability rule?
-4. **OpenRouter tier boundaries.** Does `min_prompt_tokens` mean "at least" or "more than"? A test
+1. **OpenRouter tier boundaries.** Does `min_prompt_tokens` mean "at least" or "more than"? A test
    from its docs decides the conversion.
-5. **Other provider lists.** Do OpenAI, Google or DeepSeek publish a machine-readable price list
-   that could count as a primary source? Not checked.
-6. **Org proposals.** Which proposals does an org admin see: only for models of the org's
-   providers? Should org entries made from proposals also retire when a release catches up?
-7. **ADR 0097's wording.** Its line on a "reviewed import tool" for LiteLLM's JSON should point to
+2. **Other provider lists.** Do OpenAI, Google or DeepSeek publish a machine-readable price list
+   that could count as a primary source? Checked in the v0.2 build (#265).
+3. **Org entries from proposals.** Should org entries made from proposals also retire when a release
+   catches up?
+4. **ADR 0097's wording.** Its line on a "reviewed import tool" for LiteLLM's JSON should point to
    this ADR when 0097 is accepted.
-8. **The signed bundle** (decision 13): the signing tool (Sigstore or minisign), key custody, and
+5. **The signed bundle** (decision 13): the signing tool (Sigstore or minisign), key custody, and
    whether a verified bundle may auto-apply beyond the bounds.
+
+Decided at the maintainer's 2026-11-06 review and moved into the decisions: the bounds (decision 3),
+one switch for fetch and auto-apply (decisions 2.2 and 3), which proposals org admins see (decision
+1.6), and models.dev as a proposals-only source (decision 7).
 
 ## Upstream verification
 
@@ -381,6 +391,8 @@ All tracked in #265 until it is split.
 ## Links
 
 - Research: `2026-11-06-price-catalogue-updates.md`, kept privately by the maintainers
+- models.dev history: [github.com/anomalyco/models.dev](https://github.com/anomalyco/models.dev)
+  (formerly `sst/models.dev`), reverted wrong-price commits `cd7c70b4` and `6a0da0a9`
 - Issues: [#264](https://github.com/stateracloud/koinon/issues/264),
   [#265](https://github.com/stateracloud/koinon/issues/265),
   [#65](https://github.com/stateracloud/koinon/issues/65),
