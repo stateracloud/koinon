@@ -83,6 +83,29 @@ SELECT run.org_id, run.id, run.last_event_seq, run.epoch, @kind, @payload, @sour
 FROM run
 RETURNING *;
 
+-- name: PurgeRunEventContent :execrows
+-- Blanks the payload of up to @batch_size events of the org's runs that finished before @cutoff
+-- (issue #69). The row stays, so the run page keeps its skeleton and seq stays gap-free; only the
+-- payload goes and content_purged_at says when. A batch locks its rows with SKIP LOCKED, so two
+-- purgers never wait for each other, and a second pass finds nothing left to do (idempotent).
+-- Rows 0: nothing is left to purge.
+WITH batch AS (
+    SELECT e.org_id, e.id
+    FROM run_events e
+    JOIN runs r ON r.org_id = e.org_id AND r.id = e.run_id
+    WHERE e.org_id = @org_id
+      AND e.content_purged_at IS NULL
+      AND r.state IN ('succeeded', 'failed', 'canceled')
+      AND r.finished_at < @cutoff::timestamptz
+    ORDER BY e.id
+    LIMIT @batch_size::int
+    FOR UPDATE OF e SKIP LOCKED
+)
+UPDATE run_events
+SET payload = '{}', content_purged_at = @purged_at::timestamptz
+FROM batch
+WHERE run_events.org_id = batch.org_id AND run_events.id = batch.id;
+
 -- name: GetRunEventBySource :one
 SELECT * FROM run_events
 WHERE org_id = @org_id AND run_id = @run_id AND epoch = @epoch AND source_seq = @source_seq::bigint;

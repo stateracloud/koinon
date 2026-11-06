@@ -394,6 +394,10 @@ func serve(ctx context.Context, cfg config) error {
 	purgeCtx, cancelPurge := context.WithCancel(ctx)
 	defer cancelPurge() // before pool.Close
 	safego.GoOrStop(purgeCtx, slog.Default(), "auth-purger", stop, func(ctx context.Context) { authSvc.RunPurger(ctx, time.Hour, 7*24*time.Hour) })
+	// Run content past its org's retention is blanked (issue #69). Idempotent and batched with
+	// SKIP LOCKED, so every replica may run it.
+	contentPurger := orgsettings.NewPurger(pool, slog.Default(), time.Now)
+	safego.GoOrStop(purgeCtx, slog.Default(), "run-content-purger", stop, func(ctx context.Context) { contentPurger.Run(ctx, time.Hour) })
 
 	// Templates embedded in the binary become rows, versioned by content hash.
 	embedded, err := templates.All()
