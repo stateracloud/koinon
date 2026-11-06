@@ -55,7 +55,11 @@ CREATE TABLE home_repository_epochs (
     CONSTRAINT home_repository_epochs_lifecycle
         CHECK ((delete_after IS NULL OR retired_at IS NOT NULL) AND (deleted_at IS NULL OR delete_after IS NOT NULL)),
     CONSTRAINT home_repository_epochs_credential
-        CHECK ((password_envelope IS NULL) = (credential_lost_at IS NOT NULL))
+        CHECK ((password_envelope IS NULL) = (credential_lost_at IS NOT NULL)),
+    -- The prefix is the row's own folder (checkpoint.EpochPrefix), never another agent's or org's:
+    -- the sweeper deletes what is under it.
+    CONSTRAINT home_repository_epochs_own_prefix
+        CHECK (prefix = 'orgs/' || org_id::text || '/homes/' || agent_id::text || '/r' || repository_epoch::text || '/')
 );
 
 -- The repositories whose blobs are due for deletion.

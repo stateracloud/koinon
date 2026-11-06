@@ -693,18 +693,26 @@ func (q *Queries) ListCompleteHomeCheckpoints(ctx context.Context, arg ListCompl
 }
 
 const listDueHomeRepositories = `-- name: ListDueHomeRepositories :many
-SELECT h.agent_id, 0::integer AS repository_epoch, h.prefix FROM home_repositories h
-WHERE h.org_id = $2 AND h.deleted_at IS NULL AND h.delete_after <= now()
-UNION ALL
-SELECT e.agent_id, e.repository_epoch, e.prefix FROM home_repository_epochs e
-WHERE e.org_id = $2 AND e.deleted_at IS NULL AND e.delete_after <= now()
-ORDER BY agent_id, repository_epoch
-LIMIT $1::int
+SELECT agent_id, repository_epoch, prefix FROM (
+    SELECT h.agent_id, 0::integer AS repository_epoch, h.prefix, h.delete_after, h.credential_lost_at
+    FROM home_repositories h
+    WHERE h.org_id = $1 AND h.deleted_at IS NULL AND h.delete_after <= now()
+    UNION ALL
+    SELECT e.agent_id, e.repository_epoch, e.prefix, e.delete_after, e.credential_lost_at
+    FROM home_repository_epochs e
+    WHERE e.org_id = $1 AND e.deleted_at IS NULL AND e.delete_after <= now()
+) due
+WHERE due.credential_lost_at IS NOT NULL
+   OR EXISTS (SELECT 1 FROM home_checkpoints c
+              WHERE c.org_id = $1 AND c.agent_id = due.agent_id AND c.status = 'complete'
+                AND c.repository_epoch > due.repository_epoch)
+ORDER BY due.delete_after, due.agent_id, due.repository_epoch
+LIMIT $2::int
 `
 
 type ListDueHomeRepositoriesParams struct {
-	MaxRows int32
 	OrgID   pgtype.UUID
+	MaxRows int32
 }
 
 type ListDueHomeRepositoriesRow struct {
@@ -713,9 +721,13 @@ type ListDueHomeRepositoriesRow struct {
 	Prefix          string
 }
 
-// Retired repositories whose blobs may now be deleted (the sweeper's work), epoch 0 and later.
+// Retired repositories whose blobs may now be deleted (the sweeper's work), epoch 0 and later,
+// longest overdue first so a row that keeps failing does not hold back the others. A repository past
+// its deadline is kept while it is the agent's newest restorable home: it goes only once its
+// password is lost (nothing restores from it any more) or a later epoch holds a complete checkpoint
+// (a new epoch starts empty, so until its first backup the retired one is all there is).
 func (q *Queries) ListDueHomeRepositories(ctx context.Context, arg ListDueHomeRepositoriesParams) ([]ListDueHomeRepositoriesRow, error) {
-	rows, err := q.db.Query(ctx, listDueHomeRepositories, arg.MaxRows, arg.OrgID)
+	rows, err := q.db.Query(ctx, listDueHomeRepositories, arg.OrgID, arg.MaxRows)
 	if err != nil {
 		return nil, err
 	}

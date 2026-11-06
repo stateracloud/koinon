@@ -66,6 +66,7 @@ var _ = Describe("the home repository epochs migration (ADR 0085 decision 13, #2
 		bad := map[string]string{
 			"epoch 0 is home_repositories'": `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason) VALUES ($1, $2, 0, $3, '{}', 'key_lost')`,
 			"a prefix outside the agent's":  `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason) VALUES ($1, $2, 2, 'orgs/x/', '{}', 'key_lost')`,
+			"another epoch's folder":        `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason) VALUES ($1, $2, 3, $3, '{}', 'key_lost')`,
 			"an unknown reason":             `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason) VALUES ($1, $2, 2, $3, '{}', 'rotation')`,
 			"no envelope without the mark":  `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason) VALUES ($1, $2, 2, $3, NULL, 'key_lost')`,
 		}

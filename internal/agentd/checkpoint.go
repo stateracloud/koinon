@@ -204,7 +204,14 @@ func (p *Pool) sweepRepositories(ctx context.Context) {
 		}
 		for _, r := range due {
 			log := p.log.With("agent", r.AgentID.String(), "repository_epoch", r.RepositoryEpoch)
-			n, err := homes.DeleteRepository(ctx, r.Prefix)
+			// The prefix is recomputed, never taken from the row: a row that names another agent's
+			// or org's folder is refused, so the sweep deletes only this agent's own repository.
+			want := checkpoint.EpochPrefix(org.String(), r.AgentID.String(), r.RepositoryEpoch)
+			if r.Prefix != want {
+				log.Error("repository sweep: a retired repository's stored prefix is not its own; not deleting it", "prefix", r.Prefix, "want", want)
+				continue
+			}
+			n, err := homes.DeleteRepository(ctx, want)
 			if err != nil {
 				if ctx.Err() == nil {
 					log.Warn("repository sweep: deleting a retired repository failed; trying again later", "err", err)

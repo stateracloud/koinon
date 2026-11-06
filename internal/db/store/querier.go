@@ -623,7 +623,11 @@ type Querier interface {
 	ListCurrentTemplates(ctx context.Context) ([]Template, error)
 	// Every default list version this installation has run, newest first.
 	ListDefaultPriceLists(ctx context.Context) ([]DefaultPriceList, error)
-	// Retired repositories whose blobs may now be deleted (the sweeper's work), epoch 0 and later.
+	// Retired repositories whose blobs may now be deleted (the sweeper's work), epoch 0 and later,
+	// longest overdue first so a row that keeps failing does not hold back the others. A repository past
+	// its deadline is kept while it is the agent's newest restorable home: it goes only once its
+	// password is lost (nothing restores from it any more) or a later epoch holds a complete checkpoint
+	// (a new epoch starts empty, so until its first backup the retired one is all there is).
 	ListDueHomeRepositories(ctx context.Context, arg ListDueHomeRepositoriesParams) ([]ListDueHomeRepositoriesRow, error)
 	// Open questions past their expiry (the expiry sweep applies the default to them).
 	ListDueQuestions(ctx context.Context, arg ListDueQuestionsParams) ([]Question, error)

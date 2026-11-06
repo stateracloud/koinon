@@ -16,10 +16,14 @@ import (
 // kopiaBlobPrefixes are the blob ID prefixes kopia writes (kopia v0.23: content.PackBlobIDPrefixRegular
 // p and PackBlobIDPrefixSpecial q, content.BlobIDPrefixSession s, indexblob's V0 n, m and l, the
 // epoch manager's x, the log blobs _log_, and kopia.repository, kopia.blobcfg and their backups).
-// None of them is r followed by a digit, the name of a later epoch's folder (EpochPrefix).
+// None of them is r followed by a digit, the name of a later epoch's folder (EpochPrefix): listing
+// only these is what keeps the sweep out of a later epoch. A spec lists every blob a repository
+// holds and fails on one outside this list, so a kopia version that adds a prefix shows up there
+// rather than as storage the sweep never frees.
 var kopiaBlobPrefixes = []blob.ID{"p", "q", "s", "n", "m", "l", "x", "_log_", "kopia."}
 
-// laterEpoch matches a blob ID inside a later repository epoch's folder.
+// laterEpoch matches a blob ID inside a later repository epoch's folder. With the prefix list above
+// it never matches; it is a second belt, should a listed prefix ever start with r.
 var laterEpoch = regexp.MustCompile(`^r[0-9]`)
 
 // DeleteRepository deletes the blobs of the repository at prefix and returns how many it deleted.
