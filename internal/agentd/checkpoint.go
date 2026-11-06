@@ -126,6 +126,8 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 	for ctx.Err() == nil {
 		// One tick at a time, so a panic is logged and the hourly checkpoints go on.
 		safego.Do(p.log, "checkpoint-tick", func() { p.checkpointTick(ctx, slots, &wg) })
+		// Seeds take the backup slots the requests left free (seed.go).
+		safego.Do(p.log, "seed-tick", func() { p.seedTick(ctx, slots, &wg) })
 		if now := time.Now(); now.Sub(swept) >= c.Sweep {
 			// Beside the loop: a long sweep (serial blob deletes) must not delay the ticks.
 			// A sweep that is still running means this one is skipped.

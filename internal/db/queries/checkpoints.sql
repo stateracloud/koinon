@@ -59,7 +59,11 @@ WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @reposito
 -- epoch must itself still restore: neither lost nor deleted (a later epoch is always a
 -- home_repository_epochs row, since epoch 0 is the first). Its checkpoint must also be at least as
 -- new as the retired one's newest: a backup that was running when the epoch changed can finish into
--- the retired repository after a seed (#86), and that home is then the newest.
+-- the retired repository after a seed (#86), and that home is then the newest. And no repository
+-- of the agent goes while one of its checkpoints runs: that backup may have opened the retired
+-- repository before the new epoch started, and its snapshot would be written after the delete
+-- (lost to the restore, and left in the bucket under the retired password). A running checkpoint
+-- ends within its lease.
 SELECT agent_id, repository_epoch, prefix FROM (
     SELECT h.agent_id, 0::integer AS repository_epoch, h.prefix, h.delete_after, h.credential_lost_at
     FROM home_repositories h
@@ -69,7 +73,9 @@ SELECT agent_id, repository_epoch, prefix FROM (
     FROM home_repository_epochs e
     WHERE e.org_id = @org_id AND e.deleted_at IS NULL AND e.delete_after <= now()
 ) due
-WHERE due.credential_lost_at IS NOT NULL
+WHERE NOT EXISTS (SELECT 1 FROM home_checkpoints r
+                  WHERE r.org_id = @org_id AND r.agent_id = due.agent_id AND r.status = 'running')
+  AND (due.credential_lost_at IS NOT NULL
    OR EXISTS (SELECT 1 FROM home_checkpoints c
               JOIN home_repository_epochs later
                 ON later.org_id = c.org_id AND later.agent_id = c.agent_id AND later.repository_epoch = c.repository_epoch
@@ -80,7 +86,7 @@ WHERE due.credential_lost_at IS NOT NULL
                     (SELECT max(d.finished_at) FROM home_checkpoints d
                      WHERE d.org_id = @org_id AND d.agent_id = due.agent_id
                        AND d.repository_epoch = due.repository_epoch AND d.status = 'complete'),
-                    '-infinity'::timestamptz))
+                    '-infinity'::timestamptz)))
 ORDER BY due.delete_after, due.agent_id, due.repository_epoch
 LIMIT @max_rows::int;
 
@@ -112,7 +118,7 @@ RETURNING *;
 UPDATE home_repository_epochs
 SET seeded_at = now(), seed_error = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch
-  AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND seed_failed_at IS NULL;
+  AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND seed_failed_at IS NULL AND retired_at IS NULL;
 
 -- name: ReleaseHomeRepositorySeed :execrows
 -- A failed try, tried again after @delay_seconds.

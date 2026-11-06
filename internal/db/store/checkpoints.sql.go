@@ -229,7 +229,7 @@ const completeHomeRepositorySeed = `-- name: CompleteHomeRepositorySeed :execrow
 UPDATE home_repository_epochs
 SET seeded_at = now(), seed_error = NULL
 WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = $3
-  AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND seed_failed_at IS NULL
+  AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND seed_failed_at IS NULL AND retired_at IS NULL
 `
 
 type CompleteHomeRepositorySeedParams struct {
@@ -890,7 +890,9 @@ SELECT agent_id, repository_epoch, prefix FROM (
     FROM home_repository_epochs e
     WHERE e.org_id = $1 AND e.deleted_at IS NULL AND e.delete_after <= now()
 ) due
-WHERE due.credential_lost_at IS NOT NULL
+WHERE NOT EXISTS (SELECT 1 FROM home_checkpoints r
+                  WHERE r.org_id = $1 AND r.agent_id = due.agent_id AND r.status = 'running')
+  AND (due.credential_lost_at IS NOT NULL
    OR EXISTS (SELECT 1 FROM home_checkpoints c
               JOIN home_repository_epochs later
                 ON later.org_id = c.org_id AND later.agent_id = c.agent_id AND later.repository_epoch = c.repository_epoch
@@ -901,7 +903,7 @@ WHERE due.credential_lost_at IS NOT NULL
                     (SELECT max(d.finished_at) FROM home_checkpoints d
                      WHERE d.org_id = $1 AND d.agent_id = due.agent_id
                        AND d.repository_epoch = due.repository_epoch AND d.status = 'complete'),
-                    '-infinity'::timestamptz))
+                    '-infinity'::timestamptz)))
 ORDER BY due.delete_after, due.agent_id, due.repository_epoch
 LIMIT $2::int
 `
@@ -925,7 +927,11 @@ type ListDueHomeRepositoriesRow struct {
 // epoch must itself still restore: neither lost nor deleted (a later epoch is always a
 // home_repository_epochs row, since epoch 0 is the first). Its checkpoint must also be at least as
 // new as the retired one's newest: a backup that was running when the epoch changed can finish into
-// the retired repository after a seed (#86), and that home is then the newest.
+// the retired repository after a seed (#86), and that home is then the newest. And no repository
+// of the agent goes while one of its checkpoints runs: that backup may have opened the retired
+// repository before the new epoch started, and its snapshot would be written after the delete
+// (lost to the restore, and left in the bucket under the retired password). A running checkpoint
+// ends within its lease.
 func (q *Queries) ListDueHomeRepositories(ctx context.Context, arg ListDueHomeRepositoriesParams) ([]ListDueHomeRepositoriesRow, error) {
 	rows, err := q.db.Query(ctx, listDueHomeRepositories, arg.OrgID, arg.MaxRows)
 	if err != nil {

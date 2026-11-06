@@ -646,7 +646,11 @@ type Querier interface {
 	// epoch must itself still restore: neither lost nor deleted (a later epoch is always a
 	// home_repository_epochs row, since epoch 0 is the first). Its checkpoint must also be at least as
 	// new as the retired one's newest: a backup that was running when the epoch changed can finish into
-	// the retired repository after a seed (#86), and that home is then the newest.
+	// the retired repository after a seed (#86), and that home is then the newest. And no repository
+	// of the agent goes while one of its checkpoints runs: that backup may have opened the retired
+	// repository before the new epoch started, and its snapshot would be written after the delete
+	// (lost to the restore, and left in the bucket under the retired password). A running checkpoint
+	// ends within its lease.
 	ListDueHomeRepositories(ctx context.Context, arg ListDueHomeRepositoriesParams) ([]ListDueHomeRepositoriesRow, error)
 	// Open questions past their expiry (the expiry sweep applies the default to them).
 	ListDueQuestions(ctx context.Context, arg ListDueQuestionsParams) ([]Question, error)
