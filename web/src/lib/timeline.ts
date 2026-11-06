@@ -308,7 +308,8 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
 }
 
 /**
- * buildTimeline merges the task's events and its runs' events by time.
+ * buildTimeline merges the task's events and its runs' events by time (at equal time, a
+ * persisted agent reply comes after run items, then task events before run events).
  * Consecutive agent text chunks of one run become one item; a tool call's
  * updates fold into the call's item. agentd also persists each reply as an
  * agent message on the task (with the run's id); once that message exists,
@@ -317,16 +318,25 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
  * stays.
  */
 export function buildTimeline(taskEvents: readonly TaskEvent[], runEvents: Readonly<Record<string, readonly RunEvent[]>>): TimelineItem[] {
-  const raw: { item: TimelineItem; order: number }[] = []
+  const raw: { item: TimelineItem; order: number; rank: number }[] = []
   let order = 0
-  for (const ev of taskEvents) raw.push({ item: taskItem(ev), order: order++ })
+  // At one millisecond a persisted agent reply sorts after the run's streamed text it covers, whatever
+  // the order the two lists were read in; otherwise dropPersistedReplies would keep the last chunk. The
+  // task events that follow the reply at that millisecond share its rank, so they stay behind it.
+  let replyAt: number | undefined
+  for (const ev of taskEvents) {
+    const item = taskItem(ev)
+    const reply = item.type === 'message' && item.actor === ActorKind.AGENT && !!item.runId
+    if (reply) replyAt = item.at
+    raw.push({ item, order: order++, rank: reply || replyAt === item.at ? 1 : 0 })
+  }
   for (const events of Object.values(runEvents)) {
     for (const ev of events) {
       const item = runItem(ev)
-      if (item) raw.push({ item, order: order++ })
+      if (item) raw.push({ item, order: order++, rank: 0 })
     }
   }
-  raw.sort((a, b) => a.item.at - b.item.at || a.order - b.order)
+  raw.sort((a, b) => a.item.at - b.item.at || a.rank - b.rank || a.order - b.order)
 
   const out: TimelineItem[] = []
   const tools = new Map<string, number>()
