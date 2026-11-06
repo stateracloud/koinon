@@ -14,6 +14,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
@@ -50,7 +51,7 @@ var _ = Describe("Render", func() {
 		}
 		Expect(yaml.Unmarshal(got, &doc)).To(Succeed())
 		add := doc.Frontend.AccessLog.Add
-		Expect(add).To(HaveKeyWithValue(gateway.LogFieldUpstream, gateway.UpstreamCEL))
+		Expect(add).To(HaveKeyWithValue(agentgateway.LogFieldUpstream, agentgateway.UpstreamCEL))
 		for name, expr := range add {
 			Expect(expr).NotTo(ContainSubstring("$"), name+": agentgateway expands $ in its config file as an environment variable")
 		}

@@ -15,7 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/prices"
 )
@@ -26,19 +26,19 @@ var _ = Describe("metrics", func() {
 		e := newEnv(ctx, uniq("metrics"), "", "10.00")
 		reg := prometheus.NewRegistry()
 		m := ledger.NewMetrics(reg)
-		srv := httptest.NewServer(ledger.Handler(&ledger.Ingester{DB: db, Metrics: m, Prices: prices.NewResolver(priceList)}, slog.New(slog.NewTextHandler(io.Discard, nil))))
+		srv := httptest.NewServer(agentgateway.Handler(&ledger.Ingester{DB: db, Metrics: m, Prices: prices.NewResolver(priceList)}, slog.New(slog.NewTextHandler(io.Discard, nil))))
 		DeferCleanup(srv.Close)
 
 		agent := e.slug + "/" + e.agent.ID.String()
 		body, err := proto.Marshal(export(
-			llmRecord(str(gateway.LogFieldAgent, agent), str(gateway.LogFieldRequest, uniq("req"))),
-			llmRecord(str(gateway.LogFieldAgent, agent), str(gateway.LogFieldRequest, uniq("req"))),
-			llmRecord(str(gateway.LogFieldAgent, agent), str(gateway.LogFieldRequest, uniq("req")), str(gateway.LogFieldKey, "")),
-			llmRecord(str(gateway.LogFieldAgent, "no-such-org/"+e.agent.ID.String()), str(gateway.LogFieldRequest, uniq("req"))),
+			llmRecord(str(agentgateway.LogFieldAgent, agent), str(agentgateway.LogFieldRequest, uniq("req"))),
+			llmRecord(str(agentgateway.LogFieldAgent, agent), str(agentgateway.LogFieldRequest, uniq("req"))),
+			llmRecord(str(agentgateway.LogFieldAgent, agent), str(agentgateway.LogFieldRequest, uniq("req")), str(agentgateway.LogFieldKey, "")),
+			llmRecord(str(agentgateway.LogFieldAgent, "no-such-org/"+e.agent.ID.String()), str(agentgateway.LogFieldRequest, uniq("req"))),
 		))
 		Expect(err).NotTo(HaveOccurred())
 		post := func() {
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+ledger.LogsPath, bytes.NewReader(body))
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+agentgateway.LogsPath, bytes.NewReader(body))
 			Expect(err).NotTo(HaveOccurred())
 			req.Header.Set("Content-Type", "application/x-protobuf")
 			resp, err := http.DefaultClient.Do(req)

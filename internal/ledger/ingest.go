@@ -208,7 +208,7 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 			Priced: pr.priced, Estimated: pr.estimated, Estimate: pr.estimate, CostFlagged: pr.flagged,
 			RequestBytes: pr.reqBytes, ResponseBytes: pr.respBytes, OccurredAt: at,
 			Provisional: provisional, ReserveUsd: pgtype.Text{String: pr.reserve.Numeric(), Valid: pr.reserve > 0}, ResponseID: responseID,
-			UpstreamStatus: e.upstreamStatus(), ProviderID: pr.model.ProviderID,
+			UpstreamStatus: upstreamStatus(e), ProviderID: pr.model.ProviderID,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // already recorded
@@ -257,7 +257,7 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 // billedLater reports whether a request may carry a provider bill worth settling: anything but a
 // request the provider refused or failed without usage, or one charged nothing.
 func billedLater(e Entry, pr priced) bool {
-	return !pr.waived && !e.rejectedByUpstream() && !e.failedByUpstream()
+	return !pr.waived && !rejectedByUpstream(e) && !failedByUpstream(e)
 }
 
 // ingestSystem records a request of an org's system key: the principal is system, there is no
@@ -287,7 +287,7 @@ func (in *Ingester) ingestSystem(ctx context.Context, e Entry) (bool, error) {
 			CostUsd: pr.cost.Numeric(), GatewayCostUsd: pr.gatewayCost, PriceRef: pr.ref,
 			Priced: pr.priced, Estimated: pr.estimated, Estimate: pr.estimate, CostFlagged: pr.flagged,
 			RequestBytes: pr.reqBytes, ResponseBytes: pr.respBytes, OccurredAt: pgtype.Timestamptz{Time: e.Time, Valid: true},
-			UpstreamStatus: e.upstreamStatus(), ProviderID: pr.model.ProviderID,
+			UpstreamStatus: upstreamStatus(e), ProviderID: pr.model.ProviderID,
 		}); errors.Is(err, pgx.ErrNoRows) {
 			return nil // already recorded
 		} else if err != nil {
@@ -438,7 +438,7 @@ func templateLimit(ctx context.Context, q *store.Queries, org, agent pgtype.UUID
 }
 
 // upstreamStatus is the status the provider answered when it was an error, else NULL.
-func (e Entry) upstreamStatus() pgtype.Int2 {
+func upstreamStatus(e Entry) pgtype.Int2 {
 	if e.Upstream && e.Status >= 400 && e.Status <= 599 {
 		return pgtype.Int2{Int16: int16(e.Status), Valid: true}
 	}

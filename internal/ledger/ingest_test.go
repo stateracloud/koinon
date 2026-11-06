@@ -15,6 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
@@ -371,7 +372,7 @@ var _ = Describe("An Ingester without prices", func() {
 	It("is refused at startup instead of recording every request unpriced", func(ctx SpecContext) {
 		in := &ledger.Ingester{}
 		Expect(in.Validate()).To(MatchError(ContainSubstring("Prices is required")))
-		Expect(ledger.Serve(ctx, "127.0.0.1:0", in, nil)).To(MatchError(ContainSubstring("Prices is required")))
+		Expect(agentgateway.Serve(ctx, "127.0.0.1:0", in, nil)).To(MatchError(ContainSubstring("Prices is required")))
 		Expect((&ledger.Ingester{Prices: prices.NewResolver(priceList)}).Validate()).To(Succeed())
 		Expect((&ledger.Settler{}).Validate()).To(MatchError(ContainSubstring("Settler.Prices is required")))
 		_, err := (&ledger.Settler{}).SettleDue(context.Background())

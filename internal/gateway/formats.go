@@ -157,7 +157,7 @@ func (r Rendering) RequestHeaders(p Provider, m Model) []Header {
 	return r.Headers(p, m)
 }
 
-// FormatLogExpr is the CEL expression of the access-log field LogFieldFormat: the format whose route
+// FormatLogExpr is the CEL expression of the access-log field agentgateway.LogFieldFormat: the format whose route
 // the request used, from the table's paths.
 func FormatLogExpr() string {
 	expr := `""`

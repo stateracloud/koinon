@@ -28,6 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/modelformat"
@@ -163,7 +164,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		Expect(os.WriteFile(filepath.Join(tokenDir, "token"), []byte("koinon_test_not-a-real-token-gateway-0001"), 0o644)).To(Succeed())
 		tokens, err := otlpauth.NewTokens(tokenDir, slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
 		Expect(err).NotTo(HaveOccurred())
-		receiver := httptest.NewServer(otlpauth.Middleware(tokens, otlpauth.NewMetrics(nil))(ledger.Handler(settling, slog.New(slog.NewTextHandler(GinkgoWriter, nil)))))
+		receiver := httptest.NewServer(otlpauth.Middleware(tokens, otlpauth.NewMetrics(nil))(agentgateway.Handler(settling, slog.New(slog.NewTextHandler(GinkgoWriter, nil)))))
 		DeferCleanup(receiver.Close)
 
 		key, err = gateway.NewKey(e.ref())

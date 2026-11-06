@@ -50,7 +50,7 @@ func DoNotRetry(h http.Header) bool {
 // It is "false" for a refusal: a 403 (a gateway authorization refusal or an aggregator's policy
 // refusal, ADR 0056 point 6), or any other 4xx the gateway answered without calling a provider
 // (401 key, 404 model_not_found, 429 budget_exceeded). proxy.upstreamDuration exists exactly when
-// the gateway made the outbound call (UpstreamCEL), so a provider's own 429 or 400 is not marked.
+// the gateway made the outbound call (agentgateway.UpstreamCEL), so a provider's own 429 or 400 is not marked.
 //
 // For any other response it reads the response's own header, which fails to evaluate when the
 // response has none, and agentgateway then leaves the header out: a provider's answer is passed
