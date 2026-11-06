@@ -366,6 +366,8 @@ var _ = Describe("koinon-opencode and MCP server requests behind agentgateway (#
 		})
 		sb.start(bg)
 		sb.run(bg, "mkdir", "-p", workdir)
+		// koinon-opencode refuses to start without the file koinon-agentd writes first.
+		sb.write(bg, instructionsPath, "# Koinon\n\n"+instructionsMarker+": you are a contract test agent.\n")
 		h = sb.harness(bg, workdir, opencode.command(gw.url("/v1"), contractModel, agURL+"/mcp"))
 	}, NodeTimeout(5*time.Minute))
 
