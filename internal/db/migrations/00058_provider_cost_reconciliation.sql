@@ -24,9 +24,15 @@
 
 ALTER TABLE spend_entries
     ADD COLUMN provider_id uuid,
-    -- Every value is NULL when this runs, so the constraint validates without reading the ledger.
-    ADD FOREIGN KEY (org_id, provider_id) REFERENCES providers (org_id, id) ON DELETE SET NULL (provider_id);
+    -- NOT VALID: validating the key would scan all of spend_entries under this statement's ACCESS
+    -- EXCLUSIVE lock, and there is nothing to check, since the new column is NULL in every existing
+    -- row. The key is still enforced for every row inserted or updated from here on, and ON DELETE
+    -- SET NULL applies to every row. A later migration may VALIDATE CONSTRAINT it, which takes only
+    -- a SHARE UPDATE EXCLUSIVE lock.
+    ADD FOREIGN KEY (org_id, provider_id) REFERENCES providers (org_id, id) ON DELETE SET NULL (provider_id) NOT VALID;
 
+-- Building this index still reads spend_entries once, under a SHARE lock: writes to the ledger wait
+-- for it, reads do not.
 CREATE INDEX spend_entries_provider_day ON spend_entries (org_id, provider_id, occurred_at)
     WHERE provider_id IS NOT NULL;
 
