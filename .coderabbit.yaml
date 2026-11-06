@@ -20,7 +20,7 @@ reviews:
   auto_title_placeholder: "@koinon-never-rewrite-title"
   collapse_walkthrough: true
   # One comment per review, no status chatter, no extra check on the head (one CI run per head).
-  review_status: true
+  review_status: false
   review_info: false
   review_progress: false
   commit_status: false
@@ -219,7 +219,7 @@ reviews:
 chat:
   art: false
   # Public repository: only organization members trigger finishing touches and chat.
-  allow_non_org_members: true
+  allow_non_org_members: false
 
 issue_enrichment:
   auto_enrich:
