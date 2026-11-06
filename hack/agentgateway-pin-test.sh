@@ -4,7 +4,7 @@
 # Offline tests of hack/agentgateway-pin.sh (#238): it reads gateway.standalone.image from a values
 # file (and not another component's image block), and --check fails on a tag-only pin, a short or
 # malformed digest, a workflow that does not read the pin, a workflow with a literal digest, a Go
-# test constant that differs from the pin, and a Go file that names an image of its own.
+# test digest or repository that differs from the pin, and a Go file that names an image of its own.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -59,7 +59,7 @@ workflow() { # <body>
 }
 mkdir -p "$tmp/go/testing/agentgatewayimage" "$tmp/go/ledger"
 goconst() { # <digest>
-	printf 'package agentgatewayimage\n\nconst (\n\t// Digest is the pin.\n\tDigest = "%s"\n\tMirror = "ghcr.io/x/agentgateway@" + Digest\n)\n' "$1" >"$tmp/go/testing/agentgatewayimage/image.go"
+	printf 'package agentgatewayimage\n\nconst (\n\t// Digest is the pin.\n\tDigest = "%s"\n\tUpstream = "%s@" + Digest\n)\n' "$1" "${2:-ghcr.io/agentgateway/agentgateway}" >"$tmp/go/testing/agentgatewayimage/image.go"
 }
 run() { VALUES=$tmp/values.yaml WORKFLOW=$tmp/wf.yml GOCONST=$tmp/go/testing/agentgatewayimage/image.go GO_TREE=$tmp/go "$pin" "$@" 2>"$tmp/err"; }
 quiet() { "$@" >/dev/null; }
@@ -104,6 +104,8 @@ values "      digest: $d1"
 workflow "$good_wf"
 goconst "$d2"
 check "--check fails when the Go constant differs from the pin" fails "has Digest" --check
+goconst "$d1" cr.agentgateway.dev/agentgateway
+check "--check fails when the Go upstream repository differs from the chart's" fails "has Upstream repository" --check
 goconst "$d1"
 printf 'package ledger\n\nconst img = "cr.agentgateway.dev/agentgateway:v1.7.0"\n' >"$tmp/go/ledger/x_test.go"
 check "--check fails on a Go file with its own tag reference" fails "name an agentgateway image themselves" --check

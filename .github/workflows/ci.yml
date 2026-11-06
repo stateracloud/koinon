@@ -223,17 +223,29 @@ jobs:
           key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
-      # The agentgateway suites pull the image from GHCR (internal/testing/agentgatewayimage, #238);
-      # testcontainers reads Docker's credentials.
-      - name: log in to GHCR
+      # The agentgateway suites start the chart's digest from this repository owner's GHCR copy
+      # (internal/testing/agentgatewayimage, #238). Pulled once here; the tests then find it locally.
+      # A fork's own CI, which cannot read the copy, warns and leaves the tests on the chart's repository.
+      - name: agentgateway test image
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$GITHUB_TOKEN"
+          OWNER: ${{ github.repository_owner }}
+          FORK: ${{ github.event.repository.fork }}
+        run: |
+          read -r _ _ digest < <(hack/agentgateway-pin.sh)
+          mirror="ghcr.io/${OWNER,,}/agentgateway"
+          if docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$GITHUB_TOKEN" && docker pull "$mirror@$digest"; then
+            echo "KOINON_AGENTGATEWAY_MIRROR=$mirror" >>"$GITHUB_ENV"
+          elif [[ $FORK == true ]]; then
+            echo "::warning::cannot pull $mirror@$digest; the agentgateway tests pull the chart's repository"
+          else
+            echo "::error::cannot pull $mirror@$digest: dispatch mirror-agentgateway-test-image.yml on this ref, or check the package's Manage Actions access (docs/dev/ci.md)"
+            exit 1
+          fi
       # Postgres tests use testcontainers; Docker is available on ubuntu runners.
       # test/flavors needs the flavor images, which the flavors job builds and tests.
       - run: hack/go-test.sh
         env:
-          KOINON_AGENTGATEWAY_MIRROR: "true"
           KOINON_REQUIRE: docker,git,helm # a missing prerequisite must fail, not skip (koinon-private#507): Postgres suites need Docker, agentd and codehost git, gateway/standalone helm (installed by this job)
       - name: Upload test reports
         if: always()

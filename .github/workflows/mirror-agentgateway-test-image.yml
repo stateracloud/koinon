@@ -5,9 +5,11 @@
 # control instead of the upstream registry (#238: an outage of cr.agentgateway.dev turned every Go
 # job red). Run it by hand after the pin moves; docs/dev/ci.md, "The agentgateway test image".
 #
-# It copies by digest, so the mirror holds exactly the image an install runs, under the pin's tag,
-# and fails unless the copy has that digest. It runs on main only: the pin is read from the ref it
-# runs on, and a branch's pin must not overwrite the tag. The GHCR package stays private until v0.3:
+# It copies by digest, so the mirror holds exactly the image an install runs, and fails unless the
+# copy has that digest. It runs on any ref, so a pull request that moves the pin can fill the mirror
+# before its own go-test pulls it: the pin is read from the ref it runs on, and by-digest content
+# cannot be wrong. Only main moves the pin's tag (v1.7.0); another ref tags the copy by its digest
+# (sha256-<hex>), so a branch never changes what a version tag names. The GHCR package stays private until v0.3:
 # the go-test job pulls it with its own GITHUB_TOKEN (packages: read), which works only while the
 # package's "Manage Actions access" lists this repository with read. The image's source label names
 # the upstream repository, so GHCR does not link the package here by itself: after the first run,
@@ -34,8 +36,6 @@ concurrency:
 
 jobs:
   mirror:
-    # The pin comes from the checked-out ref: only main's pin may move the mirror's tag.
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -69,8 +69,11 @@ jobs:
           TAG: ${{ steps.pin.outputs.tag }}
           DIGEST: ${{ steps.pin.outputs.digest }}
           OWNER: ${{ github.repository_owner }}
+          REF: ${{ github.ref }}
         run: |
           dst="ghcr.io/${OWNER,,}/agentgateway"
+          # Only main's pin moves the version tag; any other ref tags the copy by its own digest.
+          if [[ $REF != refs/heads/main ]]; then TAG=${DIGEST/:/-}; fi
           crane copy "$SOURCE@$DIGEST" "$dst:$TAG"
           got=$(crane digest "$dst:$TAG")
           if [[ $got != "$DIGEST" ]]; then

@@ -9,11 +9,12 @@
 #   hack/agentgateway-pin.sh            print "<repository> <tag> <digest>"
 #   hack/agentgateway-pin.sh --check    fail unless the pin is a full sha256 digest, the mirror
 #                                       workflow takes it from here (no literal digest of its own),
-#                                       the Go tests' constant (internal/testing/agentgatewayimage)
-#                                       is the same digest, and no other Go file names an image
+#                                       the Go tests' image (internal/testing/agentgatewayimage) is
+#                                       the same repository and digest, and no other Go file in the
+#                                       repository names an agentgateway image itself
 #
 # Reads values.yaml with awk, not yq, so it runs wherever bash does. VALUES=<file>, WORKFLOW=<file>,
-# GOCONST=<file> and GO_TREE=<dir> (the tree searched for other image references) point it
+# GOCONST=<file> and GO_TREE=<dir> (searched instead of the repository's tracked Go files) point it
 # elsewhere (the tests do).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -25,7 +26,7 @@ cd "$(dirname "$0")/.."
 values=${VALUES:-charts/koinon/values.yaml}
 workflow=${WORKFLOW:-.github/workflows/mirror-agentgateway-test-image.yml}
 goconst=${GOCONST:-internal/testing/agentgatewayimage/image.go}
-gotree=${GO_TREE:-internal}
+gotree=${GO_TREE:-}
 
 # The scalars under gateway: > standalone: > image:, by indentation; comments and quotes stripped.
 read_pin() {
@@ -64,8 +65,14 @@ fi
 if [[ -f $goconst ]]; then
 	godigest=$(sed -n 's/^[[:space:]]*Digest[[:space:]]*=[[:space:]]*"\(sha256:[0-9a-f]*\)".*/\1/p' "$goconst")
 	[[ $godigest == "$digest" ]] || err "$goconst has Digest '${godigest}', the chart pins '${digest}'"
+	gorepo=$(sed -n 's/^[[:space:]]*Upstream[[:space:]]*=[[:space:]]*"\([^"@]*\)@".*/\1/p' "$goconst")
+	[[ $gorepo == "$repo" ]] || err "$goconst has Upstream repository '${gorepo}', the chart pins '${repo}'"
 	# Every other Go file takes the image from that package: no agentgateway image reference of its own.
-	others=$(grep -rlE --include='*.go' 'agentgateway(:v[0-9]|@sha256:)' "$gotree" | grep -vxF "$goconst" || true)
+	if [[ -n $gotree ]]; then
+		others=$(grep -rlE --include='*.go' 'agentgateway(:v[0-9]|@sha256:)' "$gotree" | grep -vxF "$goconst" || true)
+	else
+		others=$(git ls-files -z '*.go' | xargs -0 grep -lE 'agentgateway(:v[0-9]|@sha256:)' | grep -vxF "$goconst" || true)
+	fi
 	[[ -z $others ]] || err "Go files name an agentgateway image themselves; use agentgatewayimage.Ref(): ${others//$'\n'/ }"
 else
 	err "$goconst is missing"
