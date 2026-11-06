@@ -44,6 +44,12 @@
 #              another commit than the PR's headRefOid for PR_WAIT_STALE_GRACE seconds (default 120; GitHub
 #              lags a push by a few seconds), it exits 6 with `STALE-HEAD` instead of judging the old head.
 #              Not checked for a fork PR or when the remote cannot be read.
+#              Unresolved review threads (#187): when every check is green but mergeStateStatus is BLOCKED, the
+#              ruleset's required_review_thread_resolution is the usual cause (advisory bots comment inline).
+#              hack/pr-threads.sh lists the unresolved threads (`UNRESOLVED path:line author`) and this exits 7
+#              at once, without waiting: threads do not resolve by themselves. It never resolves one; reply
+#              and resolve them as docs/dev/ci.md "Merging" says. When the threads cannot be read, it warns
+#              and exits 0 as before.
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
 #   --interval 20 seconds by default
 #
@@ -51,7 +57,8 @@
 # `needs-update`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
 # Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout,
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
-#       6 stale PR head (with --checks), 64 usage.
+#       6 stale PR head (with --checks), 7 unresolved review threads (BLOCKED with --checks, all green), 64 usage.
+# Test hook: PR_WAIT_THREADS replaces hack/pr-threads.sh.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -193,6 +200,7 @@ emit() { # print only when the line differs from the previous one
   fi
 }
 
+threads_sh=${PR_WAIT_THREADS:-$(cd "$(dirname "$0")" && pwd)/pr-threads.sh}
 stale_grace=${PR_WAIT_STALE_GRACE:-120} stale_since=""
 start=$SECONDS
 while :; do
@@ -365,6 +373,21 @@ while :; do
       fi
       if [ -z "$live" ] && [ "$mode" = checks ]; then
         echo "checks $total/$total green"
+        # BLOCKED with every check green: the ruleset's required_review_thread_resolution (#187). Threads do
+        # not resolve themselves, so list them and stop instead of waiting; never resolve them from here.
+        if [ "$mstate" = BLOCKED ]; then
+          trc=0
+          threads=$("$threads_sh" "$pr" 2>&1) || trc=$?
+          case $trc in
+          0) ;;
+          7)
+            echo "$threads"
+            echo "BLOCKED: PR $pr has unresolved review threads; reply and resolve each one (docs/dev/ci.md \"Merging\"), then run this again"
+            exit 7
+            ;;
+          *) echo "pr-wait: PR $pr is BLOCKED and its review threads could not be read: $threads" >&2 ;;
+          esac
+        fi
         exit 0
       fi
       [ -n "$live" ] || emit "checks $total/$total green"

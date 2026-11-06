@@ -42,6 +42,11 @@ if [ "$1" = api ] && [[ $2 == */issues/*/events ]]; then # the last ready_for_re
   cat "$FAKE_DIR/ready"
   exit 0
 fi
+if [ "$1 $2" = "api graphql" ]; then # the review threads (hack/pr-threads.sh): $FAKE_DIR/threads holds the pages as gh prints them
+  [ -f "$FAKE_DIR/threads" ] || exit 9
+  cat "$FAKE_DIR/threads"
+  exit 0
+fi
 if [ "$1" = api ]; then # gh api .../check-runs --jq ...: $FAKE_DIR/rows holds the --jq output (one row per line)
   [ -f "$FAKE_DIR/rows" ] || exit 9
   cat "$FAKE_DIR/rows"
@@ -93,6 +98,14 @@ pr() {
   printf '{"state":"%s","mergeStateStatus":"%s","mergeCommit":%s,"statusCheckRollup":[%s]}' "$1" "$2" "$mc" "$4"
 }
 
+# page <thread nodes, comma separated> <hasNextPage>: one GraphQL reviewThreads page, as gh api prints it.
+page() { printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":%s,"endCursor":"c1"},"nodes":[%s]}}}}}\n' "$2" "$1"; }
+thread() { # <id> <resolved> <path> <line|null> <outdated> <author|null>
+  local a=null
+  [ "$6" = null ] || a="{\"login\":\"$6\"}"
+  printf '{"id":"%s","isResolved":%s,"isOutdated":%s,"path":"%s","line":%s,"originalLine":null,"comments":{"nodes":[{"author":%s}]}}' "$1" "$2" "$5" "$3" "$4" "$a"
+}
+
 go_p=$(cr go IN_PROGRESS "" 11)
 web_p=$(cr web QUEUED "" 12)
 lint_ok=$(cr lint COMPLETED SUCCESS 13)
@@ -115,6 +128,7 @@ else echo "ok: only gh pr view is called"; fi
 
 # 2. --checks exits 0 when all finished, before the merge
 seq_set "$(pr OPEN BLOCKED "" "$lint_ok,$go_p")" "$(pr OPEN BLOCKED "" "$lint_ok,$go_ok")"
+page '' false >"$FAKE_DIR/threads" # BLOCKED for another reason: no unresolved thread, still green
 run 7 --checks --interval 0
 expect "--checks all green" 0 "checks 1/2 pending: go
 checks 2/2 green"
@@ -470,6 +484,48 @@ printf '52d44399aaaa\n' >"$FAKE_DIR/remote"
 run 7 --checks --interval 0
 expect "a matching head is judged" 0 "checks 1/1 green"
 rm -f "$tmp/bin/git"
+
+# 7b. BLOCKED with every check green: the unresolved review threads (#187)
+seq_set "$(pr OPEN BLOCKED "" "$go_ok")"
+{ page "$(thread PRRT_1 true a.go 3 false coderabbitai),$(thread PRRT_2 false hack/x.sh 42 false deepsource-io)" true
+  page "$(thread PRRT_3 false docs/y.md null true coderabbitai),$(thread PRRT_4 false z.go 7 false null)" false; } >"$FAKE_DIR/threads"
+run 7 --checks --interval 0
+expect "BLOCKED and green lists the unresolved threads, over two pages, and exits 7" 7 "checks 1/1 green
+UNRESOLVED hack/x.sh:42 deepsource-io id=PRRT_2
+UNRESOLVED docs/y.md:? coderabbitai (outdated) id=PRRT_3
+UNRESOLVED z.go:7 ghost id=PRRT_4
+BLOCKED: PR 7 has unresolved review threads; reply and resolve each one (docs/dev/ci.md \"Merging\"), then run this again"
+seq_set "$(pr OPEN BLOCKED "" "$go_ok")" # no threads file: the graphql call fails
+run 7 --checks --interval 0
+expect "BLOCKED, green, threads unreadable: warns, exits 0" 0 "checks 1/1 green
+pr-wait: PR 7 is BLOCKED and its review threads could not be read: pr-threads: cannot read the review threads of PR 7"
+seq_set "$(pr OPEN CLEAN "" "$go_ok")"
+page "$(thread PRRT_2 false hack/x.sh 42 false deepsource-io)" false >"$FAKE_DIR/threads"
+run 7 --checks --interval 0
+expect "a CLEAN PR does not look at threads" 0 "checks 1/1 green"
+seq_set "$(pr OPEN BLOCKED "" "$go_p")"
+page "$(thread PRRT_2 false hack/x.sh 42 false deepsource-io)" false >"$FAKE_DIR/threads"
+run 7 --checks --timeout 1s --interval 1
+expect "BLOCKED with a check still pending keeps waiting (no thread read)" 2 "checks 0/1 pending: go
+TIMEOUT"
+
+# 7c. hack/pr-threads.sh on its own
+page "$(thread PRRT_1 true a.go 3 false x)" false >"$FAKE_DIR/threads"
+rc=0
+out=$("$repo/hack/pr-threads.sh" 7 2>&1) || rc=$?
+expect "pr-threads: every thread resolved" 0 ""
+page "$(thread PRRT_2 false hack/x.sh 42 false deepsource-io)" false >"$FAKE_DIR/threads"
+rc=0
+out=$("$repo/hack/pr-threads.sh" 7 2>&1) || rc=$?
+expect "pr-threads: one unresolved thread exits 7" 7 "UNRESOLVED hack/x.sh:42 deepsource-io id=PRRT_2"
+grep -q '^api graphql --paginate' "$FAKE_DIR/calls" || { echo "FAIL: pr-threads paginates with gh api graphql --paginate" >&2; fail=1; }
+rm "$FAKE_DIR/threads"
+rc=0
+out=$("$repo/hack/pr-threads.sh" 7 2>&1) || rc=$?
+expect "pr-threads: gh failing exits 2" 2 "pr-threads: cannot read the review threads of PR 7"
+rc=0
+out=$("$repo/hack/pr-threads.sh" 2>&1) || rc=$?
+expect "pr-threads: usage" 64 "usage: hack/pr-threads.sh <PR>"
 
 # 8. a transient gh failure is retried
 rm -rf "$FAKE_DIR"
