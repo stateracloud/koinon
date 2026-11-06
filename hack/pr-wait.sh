@@ -44,14 +44,21 @@
 #              another commit than the PR's headRefOid for PR_WAIT_STALE_GRACE seconds (default 120; GitHub
 #              lags a push by a few seconds), it exits 6 with `STALE-HEAD` instead of judging the old head.
 #              Not checked for a fork PR or when the remote cannot be read.
+#              Unresolved review threads (#187): when every check is green but mergeStateStatus is BLOCKED, the
+#              ruleset's required_review_thread_resolution is the usual cause (advisory bots comment inline).
+#              hack/pr-threads.sh lists the unresolved threads (`UNRESOLVED path:line author`) and this exits 7
+#              at once, without waiting: threads do not resolve by themselves. It never resolves one; reply
+#              and resolve them as docs/dev/ci.md "Merging" says. When the threads cannot be read (after
+#              three tries), it exits 2: it never reports a PR as ready on a guess.
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
 #   --interval 20 seconds by default
 #
 # Output lines: `checks 7/9 pending: go,web`, `FAILED go (run 123)`, `MERGED abc1234`,
 # `needs-update`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
-# Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout,
+# Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout (or the required contexts / review threads unreadable),
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
-#       6 stale PR head (with --checks), 64 usage.
+#       6 stale PR head (with --checks), 7 unresolved review threads (BLOCKED with --checks, all green), 64 usage.
+# Test hook: PR_WAIT_THREADS replaces hack/pr-threads.sh.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -178,11 +185,18 @@ shown() { if [ "$alias_show" = 1 ] && [ "$1" = quickstart ]; then echo e2e; else
 ctx_ok=0 ctxs=""
 load_contexts() {
   [ "$ctx_ok" = 0 ] || return 0
-  local out
-  if out=$(gh api "repos/{owner}/{repo}/rules/branches/$1" \
-    --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique | .[]' 2>/dev/null); then
-    ctxs=$out ctx_ok=1
-  fi
+  local out try
+  local -a sleeps
+  read -r -a sleeps <<<"${PR_THREADS_RETRY_SLEEPS:-2 5 15}" # the same retries (and test override) as pr-threads.sh
+  for ((try = 0; try <= ${#sleeps[@]}; try++)); do
+    if out=$(gh api "repos/{owner}/{repo}/rules/branches/$1" \
+      --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique | .[]' 2>/dev/null); then
+      ctxs=$out ctx_ok=1
+      return 0
+    fi
+    [ "$try" -lt "${#sleeps[@]}" ] && sleep "${sleeps[$try]}"
+  done
+  return 0
 }
 
 no_live=0 last=""
@@ -193,6 +207,7 @@ emit() { # print only when the line differs from the previous one
   fi
 }
 
+threads_sh=${PR_WAIT_THREADS:-$(cd "$(dirname "$0")" && pwd)/pr-threads.sh}
 stale_grace=${PR_WAIT_STALE_GRACE:-120} stale_since=""
 start=$SECONDS
 while :; do
@@ -292,6 +307,25 @@ while :; do
         no_live=1
       fi
     fi
+    # Only required checks decide (AGENTS.md: advisory and third-party checks, DeepSource, CodeRabbit, Socket,
+    # do not count): the base branch's required contexts, the explicit --require names, the e2e aliases and
+    # the checks of the e2e-kind workflow. Any other failed or pending check is printed and dropped.
+    # Fail closed: when the required contexts cannot be read, nothing is judged (never "every check").
+    load_contexts "$(jq -r '.baseRefName // "main"' <<<"$json")"
+    if [ "$ctx_ok" != 1 ]; then
+      echo "pr-wait: cannot read the required status checks of the base branch; not judging checks" >&2
+      exit 2
+    fi
+    keep_names=("$ctxs" ${required[@]+"${required[@]}"} ${req_now[@]+"${req_now[@]}"})
+    [ "$alias_e2e" = 0 ] || keep_names+=(quickstart e2e-lab)
+    keep=$(printf '%s\n' "${keep_names[@]}" | jq -R . | jq -sc 'map(select(. != ""))')
+    adv_json=$(jq --argjson keep "$keep" '.statusCheckRollup |= map(select(((.name // .context // "?") as $n | ($keep | index($n)) == null) and (.workflowName // "") != "e2e-kind"))' <<<"$json")
+    adv=$(jq -r "$norm"' | .[] | select((.done | not) or .bad) | "advisory \(.name) \(if .done then "failed" else "pending" end)"' --argjson req '[]' <<<"$adv_json" | sort -u)
+    json=$(jq --argjson keep "$keep" '.statusCheckRollup |= map(select(((.name // .context // "?") as $n | ($keep | index($n)) != null) or (.workflowName // "") == "e2e-kind"))' <<<"$json")
+    if [ -n "$adv" ] && [ "$adv" != "${last_adv:-}" ]; then
+      echo "$adv"
+      last_adv=$adv
+    fi
     reqjson=$(printf '%s\n' ${req_now[@]+"${req_now[@]}"} | jq -R . | jq -sc .)
     failed=$(jqn -r "$norm | .[] | select(.bad) | [.name, .cancelled, ((.url | capture(\"/runs/(?<r>[0-9]+)\")? | .r) // \"\")] | @tsv" <<<"$json")
     # The only failures are cancelled runs of required checks, or checks of an earlier e2e-kind run:
@@ -320,7 +354,6 @@ while :; do
     # Required contexts of the ruleset that have no check on the head yet (a queued workflow run).
     missing_ctx=""
     if [ "$mode" = checks ]; then
-      load_contexts "$(jq -r '.baseRefName // "main"' <<<"$json")"
       while IFS= read -r c; do
         [ -n "$c" ] || continue
         jq -e --arg c "$c" 'any((.statusCheckRollup // [])[]; (.name // .context // "") == $c)' <<<"$json" >/dev/null ||
@@ -365,6 +398,25 @@ while :; do
       fi
       if [ -z "$live" ] && [ "$mode" = checks ]; then
         echo "checks $total/$total green"
+        # BLOCKED with every check green: the ruleset's required_review_thread_resolution (#187). Threads do
+        # not resolve themselves, so list them and stop instead of waiting; never resolve them from here.
+        if [ "$mstate" = BLOCKED ]; then
+          trc=0
+          threads=$("$threads_sh" "$pr" 2>&1) || trc=$?
+          case $trc in
+          0) ;;
+          7)
+            echo "$threads"
+            echo "BLOCKED: PR $pr has unresolved review threads; reply and resolve each one (docs/dev/ci.md \"Merging\"), then run this again"
+            exit 7
+            ;;
+          *)
+            echo "pr-wait: PR $pr is BLOCKED and its review threads could not be read: $threads" >&2
+            echo "pr-wait: cannot read review threads; not ready" >&2
+            exit 2
+            ;;
+          esac
+        fi
         exit 0
       fi
       [ -n "$live" ] || emit "checks $total/$total green"

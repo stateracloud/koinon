@@ -174,6 +174,8 @@ COPY --from=licenses /ast-grep /usr/share/doc/koinon-tools/ast-grep/LICENSE
 COPY --from=licenses /duckdb /usr/share/doc/koinon-tools/duckdb/LICENSE
 # Build-time check, as root: fail the image if the standard library the agent relies on is
 # incomplete, if pip came in with a dependency, or if a tool or the DuckDB defaults do not work.
+# RUN uses dash, which has no pipefail: `tool | head -1` would pass with the tool missing (head
+# exits 0), so unzip and xz run in a command substitution, where `set -e` sees their status (#190).
 RUN set -eux; \
     python3 -I -c 'import json, csv, sqlite3, gzip, zipfile, statistics, decimal, datetime, re, subprocess, shutil, tarfile'; \
     ! command -v pip || exit 1; ! command -v pip3 || exit 1; ! command -v ensurepip || exit 1; \
@@ -182,7 +184,7 @@ RUN set -eux; \
     ! command -v uv ruff || exit 1; \
     python --version; \
     jq --version; sqlite3 --version; pdftotext -v; pdfinfo -v; file --version; tree --version; \
-    unzip -v | head -1; zstd --version; xz --version | head -1; \
+    unzip_v=$(unzip -v); echo "$unzip_v" | head -1; zstd --version; xz_v=$(xz --version); echo "$xz_v" | head -1; \
     fd --version; yq --version; \
     rg --version | head -1 | grep -q '^ripgrep 15\.2\.0'; test "$(ast-grep --version)" = 'ast-grep 0.51.0'; \
     duckdb -c "SELECT version()"; \
