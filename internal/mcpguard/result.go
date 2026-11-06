@@ -76,6 +76,11 @@ func (g *Guard) recordResult(ctx context.Context, c caller, r Result, legs Legs)
 	if err != nil || sess == nil {
 		return err
 	}
+	// The result is matched to a call by target and tool, not by JSON-RPC id: agentgateway v1.7.0
+	// does not give the guard the id, and it runs this hook on every response on the call's stream,
+	// whatever its id (agentgateway#4245). A server that sends an error and then a response of its
+	// own closes the call here although the guard never saw the error: the ledger covers honest
+	// servers and cut calls, not that (ADR 0097 step 2 closes it).
 	return g.closeCall(ctx, *sess, r.Target, r.Tool)
 }
 

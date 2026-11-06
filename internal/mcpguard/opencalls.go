@@ -22,9 +22,17 @@ import (
 // (ReasonReplyUnseen: a person decides, never a Decider); once it is older than UnseenAfter, both
 // legs are recorded on the session for good and the call goes.
 //
-// Not covered: notifications on a call's stream, and the stream that ends in a guarded result.
-// The guard cannot tell they happened; the gateway of ADR 0097 step 2 (v0.2) hands it every
-// message. Server-initiated requests are covered by the client meanwhile (#269).
+// What it covers: servers that end a call honestly, in one result or one error, and calls the
+// gateway or the server cut. A result is matched to its call by target and tool, the oldest open
+// call first: agentgateway v1.7.0 gives the guard no JSON-RPC id, and it runs the response hook on
+// every response on the call's stream, whatever its id, and keeps relaying after the terminal
+// message (agentgateway#4245, handler.rs wrap_with_guardrails and into_sse_stream). So a hostile
+// server that sends an error for the call and then a response of its own, with any id, closes the
+// call: the guard sees the stray response, never the error. Koinon cannot close that alone.
+//
+// Not covered: that server; notifications on a call's stream; anything else on a stream that ends
+// in a guarded result. The guard cannot tell they happened; the gateway of ADR 0097 step 2 (v0.2)
+// hands it every message. Server-initiated requests are covered by the client meanwhile (#269).
 
 // DefaultUnseenAfter is how long a passed call may wait for its guarded result before its reply
 // counts as unseen for good. Tool calls can take minutes; a call still open after this did not end
@@ -52,7 +60,9 @@ func (g *Guard) openCall(ctx context.Context, c caller, target, tool string) err
 	})
 }
 
-// closeCall closes the oldest open call of tool on target in sess: the guard recorded its result.
+// closeCall closes the oldest open call of tool on target in sess: the guard recorded a result for
+// it. Without the JSON-RPC id this trusts the server's stream to carry one terminal message for the
+// call (see the top of this file): a response a server appends after its own error closes the call.
 func (g *Guard) closeCall(ctx context.Context, sess Session, target, tool string) error {
 	_, err := g.q.CloseLeakGuardCall(ctx, store.CloseLeakGuardCallParams{
 		OrgID: sess.Org, AgentID: sess.Agent, Generation: sess.Generation, Target: target, Tool: tool,
