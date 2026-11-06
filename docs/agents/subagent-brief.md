@@ -56,6 +56,16 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
   push or open pull requests unless the prompt says so; the parent ships with `hack/ship.sh`.
 - Fake secrets in tests are obviously fake from the first commit (`koinon_test_not-a-real-token`).
 
+## Review threads from bots
+- The ruleset requires every review thread resolved; DeepSource and CodeRabbit leave inline comments that
+  block the merge with every check green (#187). `hack/pr-wait.sh <PR> --checks` and `hack/pr-merge.sh`
+  list them (`UNRESOLVED path:line author id=PRRT_...`) and exit 7; `hack/pr-threads.sh <PR>` lists them alone.
+- A lane fixes the real findings inside its fix rounds. The parent, before the merge, replies to every
+  remaining bot thread (`fixed in <sha>`, or why not) and resolves it: GraphQL
+  `addPullRequestReviewThreadReply`, then `resolveReviewThread` (commands in docs/dev/ci.md "Review
+  threads"). A transient `Something went wrong` on resolve is retried with backoff. Never resolve a thread
+  unread, and never from a lane that does not own the PR's replies.
+
 ## Hand back
 - At most 40 lines: what changed (files grouped), the commits, each check with its real result,
   what you could not run and why, and where you deviated from the prompt.

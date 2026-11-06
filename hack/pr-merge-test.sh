@@ -15,6 +15,7 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export FAKE_DIR="$tmp/fake" PATH="$tmp/bin:$PATH"
 export PR_MERGE_WAIT="$tmp/bin/wait" PR_MERGE_NEEDS_E2E="$tmp/bin/needs" PR_MERGE_CLAIM="$tmp/bin/claim"
+export PR_MERGE_THREADS="$tmp/bin/threads"
 export PR_MERGE_REQUIRED="$tmp/required.txt"
 
 printf '# comment\naggregator go\nquick checks\nexternal dco\nadvisory flavors\n' >"$PR_MERGE_REQUIRED"
@@ -24,7 +25,7 @@ cat >"$tmp/bin/gh" <<'SH'
 echo "gh $*" >>"$FAKE_DIR/calls"
 case "$1 $2" in
 "pr view")
-  cat "$FAKE_DIR/pr.json" ;;
+  sed "s/\"mergeStateStatus\":\"CLEAN\"/\"mergeStateStatus\":\"${MSTATE:-CLEAN}\"/" "$FAKE_DIR/pr.json" ;;
 "pr merge") exit "${MERGE_RC:-0}" ;;
 "pr comment") ;;
 "api repos/{owner}/{repo}/pulls/"*"/files")
@@ -56,13 +57,19 @@ cat >"$tmp/bin/claim" <<'SH'
 echo "claim $*" >>"$FAKE_DIR/calls"
 if [ "$1" = mine ] && [ -f "$FAKE_DIR/mine" ]; then cat "$FAKE_DIR/mine"; fi
 SH
+cat >"$tmp/bin/threads" <<'SH'
+#!/usr/bin/env bash
+echo "threads $*" >>"$FAKE_DIR/calls"
+[ "${THREADS_RC:-0}" != 7 ] || echo "UNRESOLVED hack/x.sh:42 deepsource-io id=PRRT_2"
+exit "${THREADS_RC:-0}"
+SH
 chmod +x "$tmp/bin"/*
 
 fail=0
 setup() { # <isDraft> <runs rows, one JSON object per line>
   rm -rf "$FAKE_DIR"
   mkdir -p "$FAKE_DIR"
-  printf '{"state":"OPEN","isDraft":%s,"headRefOid":"abc1234def","headRefName":"feat/x","isCrossRepository":false,"baseRefName":"main","closingIssuesReferences":[{"number":647}]}' "$1" >"$FAKE_DIR/pr.json"
+  printf '{"state":"OPEN","isDraft":%s,"headRefOid":"abc1234def","headRefName":"feat/x","isCrossRepository":false,"baseRefName":"main","mergeStateStatus":"CLEAN","closingIssuesReferences":[{"number":647}]}' "$1" >"$FAKE_DIR/pr.json"
   printf '%s\n' "$2" >"$FAKE_DIR/runs"
   printf 'hack/x.sh\n' >"$FAKE_DIR/files"
   printf '{"name":"dco","ts":"2026-11-01T10:00:00Z","v":"success"}\n' >"$FAKE_DIR/statuses"
@@ -174,5 +181,30 @@ setup false "$green"
 printf 'abc1234def' >"$FAKE_DIR/remote"
 run 7 --admin
 check "a matching remote head merges" 0 merge
+
+# 7. unresolved review threads (#187): pr-wait's exit 7 passes through; a BLOCKED re-read looks again
+setup false "$green"
+WAIT_RC=7 run 7
+check "pr-wait exit 7 (unresolved threads) stops the merge" 7 nomerge
+setup false "$green"
+MSTATE=BLOCKED THREADS_RC=7 run 7 --admin
+check "BLOCKED by unresolved threads right before the merge is refused" 7 nomerge
+grep -q 'UNRESOLVED hack/x.sh:42 deepsource-io' <<<"$out" || { echo "FAIL: lists the thread" >&2; fail=1; }
+grep -q 'BLOCKED by unresolved review threads' <<<"$out" || { echo "FAIL: names the block" >&2; fail=1; }
+grep -q '^claim review' "$FAKE_DIR/calls" && { echo "FAIL: no claim review when blocked by threads" >&2; fail=1; }
+setup false "$green"
+MSTATE=BLOCKED THREADS_RC=0 run 7 --admin
+check "BLOCKED without unresolved threads still merges" 0 merge
+setup false "$green"
+MSTATE=BLOCKED THREADS_RC=2 run 7 --admin
+check "BLOCKED with unreadable threads is refused (fail closed)" 2 nomerge
+grep -q 'cannot read review threads; not merging' <<<"$out" || { echo "FAIL: names the unreadable threads" >&2; fail=1; }
+setup false "$green"
+THREADS_RC=7 run 7 --admin
+check "a CLEAN PR with unresolved threads is refused (threads are always read)" 7 nomerge
+grep -q '^threads' "$FAKE_DIR/calls" || { echo "FAIL: threads not read on a CLEAN PR" >&2; fail=1; }
+setup false "$green"
+MSTATE=UNKNOWN THREADS_RC=7 run 7 --admin
+check "an UNKNOWN PR with unresolved threads is refused under --admin" 7 nomerge
 
 exit "$fail"
