@@ -73,6 +73,9 @@ type Options struct {
 	// call and their results carry no org data, so the guard lets them through. Any other target
 	// that is not an org's server is refused.
 	OwnTargets []string
+	// UnseenAfter is how long a passed call may wait for its guarded result before both legs are
+	// recorded on its session (DefaultUnseenAfter when <= 0; #254).
+	UnseenAfter time.Duration
 }
 
 // Guard is the MCP leak guard of ADR 0084 and ADR 0091, behind agentgateway's mcpGuardrails.
@@ -93,6 +96,8 @@ type Guard struct {
 	// (a test seam).
 	feedWait   time.Duration
 	feedPolled func()
+	// unseenAfter: see Options.UnseenAfter.
+	unseenAfter time.Duration
 }
 
 // New returns a Guard on pool.
@@ -112,10 +117,13 @@ func New(pool *pgxpool.Pool, o Options) *Guard {
 	if o.FeedWait <= 0 {
 		o.FeedWait = DefaultFeedWait
 	}
+	if o.UnseenAfter <= 0 {
+		o.UnseenAfter = DefaultUnseenAfter
+	}
 	return &Guard{
 		pool: pool, q: store.New(pool), state: NewState(pool, o.MaxFingerprints, o.Metrics), log: o.Logger, metrics: o.Metrics,
 		now: o.Now, cap: o.ByteCap, limits: o.Limits, decider: o.Decider, person: PersonDecider{Approve: o.Approve}, own: slices.Clone(o.OwnTargets),
-		url: leakguard.DefaultURLPolicy(), feedWait: o.FeedWait,
+		url: leakguard.DefaultURLPolicy(), feedWait: o.FeedWait, unseenAfter: o.UnseenAfter,
 	}
 }
 
@@ -235,6 +243,11 @@ func (g *Guard) Check(ctx context.Context, call Call) Outcome {
 	defer cancel()
 	var f decisionFacts
 	out, err := g.check(ctx, call, &f)
+	if err == nil && out.Verdict.Action == Pass && f.opens != nil {
+		// The call goes to its server: its reply must reach the guard, or the session takes both
+		// legs (#254). A call the guard cannot open is refused, as any check that fails.
+		err = g.openCall(ctx, *f.opens, call.Target, call.Tool)
+	}
 	if err != nil {
 		g.log.Error("mcp guard: check failed", "target", call.Target, "tool", call.Tool, "err", err)
 		out = refuse(ReasonError, errText)
@@ -254,6 +267,10 @@ type decisionFacts struct {
 	// run is "found" or "none" once the guard looked for the agent's running run, else empty.
 	run         string
 	feedStalled bool
+	replyUnseen bool
+	// opens is the caller whose session opens the call once it passes: set when its result would
+	// set a leg (#254).
+	opens *caller
 }
 
 // logDecision logs every refusal and every call sent to a person (an ask target or an approval),
@@ -267,6 +284,7 @@ func (g *Guard) logDecision(call Call, out Outcome, f decisionFacts) {
 	attrs := []any{
 		"target", call.Target, "tool", call.Tool, "action", string(v.Action), "reason", v.Reason,
 		"reasons", v.Reasons, "class", string(f.class), "run", f.run, "feed_stalled", f.feedStalled,
+		"reply_unseen", f.replyUnseen,
 	}
 	if f.legs != nil {
 		attrs = append(attrs, "untrusted_input", f.legs.UntrustedInput, "private_data", f.legs.PrivateData)
@@ -282,15 +300,32 @@ func (g *Guard) check(ctx context.Context, call Call, f *decisionFacts) (Outcome
 	if refused != nil {
 		return *refused, nil
 	}
-	if c.exempt || c.own {
+	if c.exempt {
+		return Outcome{Verdict: Verdict{Action: Pass, Reason: ReasonExempt}}, nil
+	}
+	if c.own {
+		// An own tool nobody declared brings both legs (OwnResultLegs), so its reply must be seen too.
+		if OwnResultLegs(call.Tool).Any() {
+			org, agent, o, err := g.agentOf(ctx, c.ref)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if o == nil {
+				c.org, c.agent = org, agent
+				f.opens = &c
+			}
+		}
 		return Outcome{Verdict: Verdict{Action: Pass, Reason: ReasonExempt}}, nil
 	}
 	tool, decl, err := g.tool(ctx, c, call.Tool)
 	if err != nil {
 		return Outcome{}, err
 	}
+	if resultLegs(c.server, decl).Any() {
+		f.opens = &c
+	}
 	a, err := g.assess(ctx, c, decl, call.Arguments, true)
-	f.class, f.run, f.feedStalled = a.class, a.run, a.feedStalled
+	f.class, f.run, f.feedStalled, f.replyUnseen = a.class, a.run, a.feedStalled, a.replyUnseen
 	if a.legsRead {
 		l := a.legs
 		f.legs = &l
@@ -397,6 +432,9 @@ type assessment struct {
 	run string
 	// feedStalled: agentd's feed did not catch up in time, so the legs were taken as both.
 	feedStalled bool
+	// replyUnseen: a call the guard passed has no result it saw yet, so the legs were taken as both
+	// (#254).
+	replyUnseen bool
 }
 
 func (a assessment) risk() map[string]any {
@@ -407,6 +445,9 @@ func (a assessment) risk() map[string]any {
 	}
 	if a.feedStalled {
 		leak["feed_stalled"] = true
+	}
+	if a.replyUnseen {
+		leak["reply_unseen"] = true
 	}
 	if m := a.verdict.Match; m != nil {
 		leak["match"] = map[string]any{"excerpt": m.Excerpt, "encoding": m.Encoding, "length": m.Length}
@@ -468,12 +509,26 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 			"org", c.org.Slug, "agent", c.agent.ID.String(), "wait", g.feedWait)
 		a.legs, a.feedStalled = Legs{UntrustedInput: true, PrivateData: true}, true
 	}
+	// A reply the guard never saw counts as both legs (#254): for good once its call is older than
+	// unseenAfter (charged checks only; mcpask's card writes nothing), and for this decision while any
+	// call is still open.
+	persisted, open, err := g.unseenReplies(ctx, sess, charge)
+	if err != nil {
+		return a, err
+	}
+	if persisted != nil && !a.feedStalled {
+		a.legs = *persisted
+	}
+	if open > 0 {
+		a.legs, a.replyUnseen = Legs{UntrustedInput: true, PrivateData: true}, true
+	}
 	fp, err := Fingerprinter(row, pol.threshold())
 	if err != nil {
 		return a, err
 	}
-	// The text match: payload only, joined in call order (ADR 0091 decision 6).
-	taint, err := leakguard.TaintChecker{Store: &taintStore{q: g.q, sess: sess, evicted: row.Evicted}, Limits: g.limits}.Check(ctx, sess.scope(), fp, args.Payload)
+	// The text match: payload only, each string alone and joined in canonical order (ADR 0091
+	// decision 6, #256).
+	taint, err := leakguard.TaintChecker{Store: &taintStore{q: g.q, sess: sess, evicted: row.Evicted}, Limits: g.limits}.CheckJoins(ctx, sess.scope(), fp, args.Payload, args.Canonical, args.Values, args.CallValues)
 	if err != nil {
 		return a, err
 	}
@@ -538,11 +593,18 @@ func (g *Guard) decideExternalLow(st *leakguard.RunState, used int, srv store.Mc
 	return Decide(f), used
 }
 
-// stallMarked adds ReasonFeedStalled to a verdict that is open while the feed stalled: the legs
-// were assumed, not read, so the call goes to a person and never to a Decider (onlyBothLegs).
+// stallMarked adds ReasonFeedStalled to a verdict that is open while the feed stalled, and
+// ReasonReplyUnseen to one open while a reply was unseen: the legs were assumed, not read, so the
+// call goes to a person and never to a Decider (onlyBothLegs).
 func (a assessment) stallMarked(v Verdict) Verdict {
-	if a.feedStalled && v.Action == NeedsDecision {
+	if v.Action != NeedsDecision {
+		return v
+	}
+	if a.feedStalled {
 		v.Reasons = append(slices.Clone(v.Reasons), ReasonFeedStalled)
+	}
+	if a.replyUnseen {
+		v.Reasons = append(slices.Clone(v.Reasons), ReasonReplyUnseen)
 	}
 	return v
 }

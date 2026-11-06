@@ -176,8 +176,8 @@ var _ = g.Describe("Replay (#352, ADR 0091)", func() {
 						Expect(v.Match).NotTo(BeNil(), c.line.Case)
 					}
 				case "not_promised":
-					// Out of call order the text match does not join (ADR 0091 decision 6); the both-legs
-					// replay of the same case asserts it is caught there.
+					// Against both call order and key order the text match does not join (ADR 0091
+					// decision 6, #256); the both-legs replay of the same case asserts it is caught there.
 				default:
 					g.Fail("unknown expect " + c.line.Expect)
 				}

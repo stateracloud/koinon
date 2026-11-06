@@ -12,8 +12,11 @@
 // the session holds both legs under a byte cap per run (DefaultByteCap) counted in raw payload
 // bytes; over it the call is refused with text the agent reads. external-high with both legs is an
 // ADR 0042 approval of that exact call. The text match (internal/leakguard) runs on the payload of
-// external calls only, joined in call order; a match is an approval, on the same card as the
-// both-legs one. A tool on an ask-tier target already gets a card from mcpask, which asks Assess
+// external calls only, each string on its own and joined in call order and in three key orders
+// (#256: Args.Canonical, members sorted by key, each key next to its value; Args.Values, the
+// sorted keys and then their values; Args.CallValues, the keys and then their values, in call
+// order), so the order an encoder wrote the keys in decides nothing; a match is an approval, on the
+// same card as the both-legs one. A tool on an ask-tier target already gets a card from mcpask, which asks Assess
 // for the guard's reasons, so the guard lets that call on.
 //
 // What counts as payload (ADR 0091 decision 7, SplitArgs): every argument but a derived tool's
