@@ -219,7 +219,9 @@ can already open every DEK they copied. Do this, in this order:
 
       (`--agent <id>`, repeated or comma-separated, for only some agents.) Each agent gets a new
       repository epoch with a random password that nobody has seen, sealed with the active KEK; the
-      old repository is retired with a deadline of now. Each agent gets one
+      old repository is retired with a deadline of now, and so is every older retired repository of
+      the agent still kept for its retention (as `keys forget` leaves one): it may be under an
+      exposed password too. Each agent gets one
       `home.repository_replaced` audit event (actor `cli`). An agent without a repository is skipped:
       its first one is made under the active KEK.
    3. koinon-agentd copies each agent's newest checkpoint into its new repository (a restore piped
@@ -227,12 +229,15 @@ can already open every DEK they copied. Do this, in this order:
       with the source's times (audit `home.repository_seeded`, actor `system`). The command does
       not wait for it: `koinon_agentd_home_repository_seeds{state="pending"}` falls to 0 when every
       seed is done. The sweeper then deletes each old repository, once the new one holds a
-      checkpoint at least as new as the old one's newest and no checkpoint of the agent is running.
-      Only the copied checkpoint survives: the older history is dropped with the old repository.
+      checkpoint at least as new as the old one's newest and no checkpoint of the agent is running
+      (one whose writer died counts only within its lease). Only the copied checkpoint survives:
+      the older history is dropped with the old repositories. Seeds use at most all but one of a
+      replica's backup writers, so stop and hourly checkpoints go on meanwhile.
    4. A seed is tried three times, with a growing delay, like a checkpoint. One that keeps failing is given up
       (audit `home.repository_seed_failed`, `koinon_agentd_home_repository_seeds{state="failed"}`
       counts it) and its old repository is kept, since nothing newer holds that home; the agent's
-      next backup goes to the new repository and releases the old one. Fix the cause (the log and
+      next backup goes to the new repository and releases the old one, and the seed then no longer
+      counts as failed. Fix the cause (the log and
       the audit event give the error), then run `keys new-repositories --agent <id>` again for a new
       seed.
    5. Revoke the old S3 key at the provider once every replica logs the new fingerprint and a
