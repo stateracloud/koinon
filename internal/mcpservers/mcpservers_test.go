@@ -5,6 +5,7 @@ package mcpservers_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -527,9 +528,15 @@ var _ = Describe("Service", func() {
 			Expect(err).NotTo(HaveOccurred())
 			// A pooled connection must not go back still listening.
 			DeferCleanup(func(ctx SpecContext) {
+				defer conn.Release()
 				_, err := conn.Exec(ctx, `UNLISTEN *`)
+				if err != nil {
+					// Never return a still-listening connection to the pool.
+					closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+					_ = conn.Conn().Close(closeCtx)
+				}
 				Expect(err).NotTo(HaveOccurred())
-				conn.Release()
 			})
 			_, err = conn.Exec(ctx, `LISTEN koinon_reconcile`)
 			Expect(err).NotTo(HaveOccurred())
@@ -544,6 +551,10 @@ var _ = Describe("Service", func() {
 				n, err := conn.Conn().WaitForNotification(wctx)
 				cancel()
 				if err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return got
+					}
+					Expect(err).NotTo(HaveOccurred(), "waiting for a notification")
 					return got
 				}
 				if n.Payload == uuidString(org) {
