@@ -1,6 +1,6 @@
 # 0098. Update the model price catalogue from public sources
 
-- Status: Proposed (decisions 1 to 3 taken by procoduck on 2026-11-06; bounds and the rest confirmed at the 2026-11-06 review)
+- Status: Accepted (2026-11-06)
 - Date: 2026-11-06
 - Amends: [0070](0070-model-metadata.md) (decisions 4 and 8: price differences can now become
   prices), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (the price order of the
@@ -374,9 +374,7 @@ All tracked in #265 until it is split.
    from its docs decides the conversion.
 2. **Other provider lists.** Do OpenAI, Google or DeepSeek publish a machine-readable price list
    that could count as a primary source? Checked in the v0.2 build (#265).
-3. **ADR 0097's wording.** Its line on a "reviewed import tool" for LiteLLM's JSON should point to
-   this ADR when 0097 is accepted.
-4. **The signed bundle** (decision 13): the signing tool (Sigstore or minisign), key custody, and
+3. **The signed bundle** (decision 13): the signing tool (Sigstore or minisign), key custody, and
    whether a verified bundle may auto-apply beyond the bounds.
 
 Decided at the maintainer's 2026-11-06 review and moved into the decisions: the bounds (decision 3),
