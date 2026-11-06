@@ -280,6 +280,13 @@ guard() {
 	[ "$unpushed" -eq 0 ] || reasons+=("$name has $unpushed commit(s) on no remote branch")
 }
 
+# lint_clean <dir>: delete the worktree's golangci-lint lock and cache directory (hack/golangci-lint.sh,
+# #236) while the worktree still exists, since its key is the worktree root. Never fails.
+lint_clean() {
+	[ -x "$1/hack/golangci-lint.sh" ] || return 0
+	(cd "$1" && hack/golangci-lint.sh --clean) >/dev/null 2>&1 || true
+}
+
 remove_wt() { # <dir> <name> <force> <delbranch>
 	local dir=$1 name=$2 force=$3 delbranch=$4 branch="" r
 	guard "$dir" "$name"
@@ -292,6 +299,7 @@ remove_wt() { # <dir> <name> <force> <delbranch>
 		for r in "${reasons[@]}"; do echo "wt: --force overrides: $r" >&2; done
 	fi
 	branch=$(git -C "$dir" symbolic-ref -q --short HEAD || true)
+	lint_clean "$dir"
 	# Every step checks its status: callers run this left of `||`, where set -e is off.
 	if [ "$force" -eq 1 ]; then
 		git worktree remove --force "$dir" || return 1
@@ -380,6 +388,7 @@ cmd_gc() {
 		if [ "$dry" -eq 1 ]; then
 			echo "would remove $name"
 		else
+			lint_clean "$path"
 			if git worktree remove "$path"; then
 				echo "removed $name"
 			else
