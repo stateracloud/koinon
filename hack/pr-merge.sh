@@ -161,7 +161,11 @@ if [ "$(jq -r '.mergeStateStatus // ""' <<<"$json")" = BLOCKED ]; then
     echo "pr-merge: PR $pr is BLOCKED by unresolved review threads; reply and resolve each one (docs/dev/ci.md \"Merging\"), then run it again; not merging" >&2
     exit 7
     ;;
-  *) echo "pr-merge: warning: PR $pr is BLOCKED and its review threads could not be read: $threads" >&2 ;;
+  *)
+    echo "pr-merge: PR $pr is BLOCKED and its review threads could not be read: $threads" >&2
+    echo "pr-merge: cannot read review threads; not merging" >&2
+    exit 2
+    ;;
   esac
 fi
 

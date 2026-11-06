@@ -48,8 +48,8 @@
 #              ruleset's required_review_thread_resolution is the usual cause (advisory bots comment inline).
 #              hack/pr-threads.sh lists the unresolved threads (`UNRESOLVED path:line author`) and this exits 7
 #              at once, without waiting: threads do not resolve by themselves. It never resolves one; reply
-#              and resolve them as docs/dev/ci.md "Merging" says. When the threads cannot be read, it warns
-#              and exits 0 as before.
+#              and resolve them as docs/dev/ci.md "Merging" says. When the threads cannot be read (after
+#              three tries), it exits 2: it never reports a PR as ready on a guess.
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
 #   --interval 20 seconds by default
 #
@@ -385,7 +385,11 @@ while :; do
             echo "BLOCKED: PR $pr has unresolved review threads; reply and resolve each one (docs/dev/ci.md \"Merging\"), then run this again"
             exit 7
             ;;
-          *) echo "pr-wait: PR $pr is BLOCKED and its review threads could not be read: $threads" >&2 ;;
+          *)
+            echo "pr-wait: PR $pr is BLOCKED and its review threads could not be read: $threads" >&2
+            echo "pr-wait: cannot read review threads; not ready" >&2
+            exit 2
+            ;;
           esac
         fi
         exit 0

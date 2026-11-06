@@ -48,8 +48,23 @@ query='query($owner: String!, $repo: String!, $number: Int!, $endCursor: String)
 
 # One JSON document per page. The stream goes through jq here, not gh's --jq, which would run per page too
 # but could not be tested without a real gh.
-pages=$(gh api graphql --paginate -F owner='{owner}' -F repo='{repo}' -F number="$pr" -f query="$query") ||
-  { echo "pr-threads: cannot read the review threads of PR $pr" >&2; exit 2; }
+# The read is retried 3 times with backoff 2, 5, 15 s (PR_THREADS_RETRY_SLEEPS="0 0 0" in tests): callers
+# treat exit 2 as "do not merge", so one transient gh failure must not end there.
+read -r -a sleeps <<<"${PR_THREADS_RETRY_SLEEPS:-2 5 15}"
+pages=""
+ok=0
+for ((try = 0; try <= ${#sleeps[@]}; try++)); do
+  if pages=$(gh api graphql --paginate -F owner='{owner}' -F repo='{repo}' -F number="$pr" -f query="$query"); then
+    ok=1
+    break
+  fi
+  [ "$try" -lt "${#sleeps[@]}" ] && sleep "${sleeps[$try]}"
+done
+[ "$ok" = 1 ] || { echo "pr-threads: cannot read the review threads of PR $pr" >&2; exit 2; }
+
+# A missing pull request is not "no threads".
+jq -e -s 'all(.[]; .data.repository.pullRequest != null)' <<<"$pages" >/dev/null 2>&1 ||
+  { echo "pr-threads: PR $pr not found (pullRequest is null in the answer)" >&2; exit 2; }
 
 rows=$(jq -r '
   (.data.repository.pullRequest.reviewThreads.nodes // [])[]

@@ -15,7 +15,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/pr-wait-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
-export FAKE_DIR="$tmp/seq" PATH="$tmp/bin:$PATH"
+export FAKE_DIR="$tmp/seq" PATH="$tmp/bin:$PATH" PR_THREADS_RETRY_SLEEPS="0 0 0"
 
 cat >"$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
@@ -497,8 +497,9 @@ UNRESOLVED z.go:7 ghost id=PRRT_4
 BLOCKED: PR 7 has unresolved review threads; reply and resolve each one (docs/dev/ci.md \"Merging\"), then run this again"
 seq_set "$(pr OPEN BLOCKED "" "$go_ok")" # no threads file: the graphql call fails
 run 7 --checks --interval 0
-expect "BLOCKED, green, threads unreadable: warns, exits 0" 0 "checks 1/1 green
-pr-wait: PR 7 is BLOCKED and its review threads could not be read: pr-threads: cannot read the review threads of PR 7"
+expect "BLOCKED, green, threads unreadable: exits 2, never ready" 2 "checks 1/1 green
+pr-wait: PR 7 is BLOCKED and its review threads could not be read: pr-threads: cannot read the review threads of PR 7
+pr-wait: cannot read review threads; not ready"
 seq_set "$(pr OPEN CLEAN "" "$go_ok")"
 page "$(thread PRRT_2 false hack/x.sh 42 false deepsource-io)" false >"$FAKE_DIR/threads"
 run 7 --checks --interval 0
@@ -523,6 +524,14 @@ rm "$FAKE_DIR/threads"
 rc=0
 out=$("$repo/hack/pr-threads.sh" 7 2>&1) || rc=$?
 expect "pr-threads: gh failing exits 2" 2 "pr-threads: cannot read the review threads of PR 7"
+: >"$FAKE_DIR/calls"
+rc=0
+out=$("$repo/hack/pr-threads.sh" 7 2>&1) || rc=$?
+[ "$(grep -c '^api graphql' "$FAKE_DIR/calls")" = 4 ] || { echo "FAIL: pr-threads tries 4 times (1 + 3 retries)" >&2; fail=1; }
+printf '%s\n' '{"data":{"repository":{"pullRequest":null}}}' >"$FAKE_DIR/threads"
+rc=0
+out=$("$repo/hack/pr-threads.sh" 7 2>&1) || rc=$?
+expect "pr-threads: pullRequest null exits 2" 2 "pr-threads: PR 7 not found (pullRequest is null in the answer)"
 rc=0
 out=$("$repo/hack/pr-threads.sh" 2>&1) || rc=$?
 expect "pr-threads: usage" 64 "usage: hack/pr-threads.sh <PR>"

@@ -197,8 +197,8 @@ MSTATE=BLOCKED THREADS_RC=0 run 7 --admin
 check "BLOCKED without unresolved threads still merges" 0 merge
 setup false "$green"
 MSTATE=BLOCKED THREADS_RC=2 run 7 --admin
-check "BLOCKED with unreadable threads warns and merges" 0 merge
-grep -q 'review threads could not be read' <<<"$out" || { echo "FAIL: warns when threads are unreadable" >&2; fail=1; }
+check "BLOCKED with unreadable threads is refused (fail closed)" 2 nomerge
+grep -q 'cannot read review threads; not merging' <<<"$out" || { echo "FAIL: names the unreadable threads" >&2; fail=1; }
 setup false "$green"
 THREADS_RC=7 run 7 --admin
 check "a CLEAN PR does not read threads" 0 merge
