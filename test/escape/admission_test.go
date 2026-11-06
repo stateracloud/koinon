@@ -241,7 +241,10 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		}}}
 		denied(createPod(ctx, controllerUser, ns, workload("automount-true", func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = new(true) })), mount)
 		denied(createPod(ctx, controllerUser, ns, workload("automount-unset", func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = nil })), mount)
-		denied(createPod(ctx, controllerUser, ns, workload("projected-token", func(p *corev1.Pod) { p.Spec.Volumes = []corev1.Volume{tokenVolume} })), project)
+		denied(createPod(ctx, controllerUser, ns, workload("projected-token", func(p *corev1.Pod) {
+			p.Spec.ServiceAccountName = "default" // the API server rejects a token projection without one
+			p.Spec.Volumes = []corev1.Volume{tokenVolume}
+		})), project)
 
 		By("a projected volume without a token is fine (control)")
 		Expect(createPod(ctx, controllerUser, ns, workload("projected-config", func(p *corev1.Pod) {
