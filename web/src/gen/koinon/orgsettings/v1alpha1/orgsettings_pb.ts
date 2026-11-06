@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/orgsettings/v1alpha1/orgsettings.proto.
  */
 export const file_koinon_orgsettings_v1alpha1_orgsettings: GenFile = /*@__PURE__*/
-  fileDesc("Ci1rb2lub24vb3Jnc2V0dGluZ3MvdjFhbHBoYTEvb3Jnc2V0dGluZ3MucHJvdG8SG2tvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMSJdChNSdW5Db250ZW50UmV0ZW50aW9uEgwKBGRheXMYASABKAUSFAoMZGVmYXVsdF9kYXlzGAIgASgFEhAKCG1pbl9kYXlzGAMgASgFEhAKCG1heF9kYXlzGAQgASgFIi8KHUdldFJ1bkNvbnRlbnRSZXRlbnRpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJlCh5HZXRSdW5Db250ZW50UmV0ZW50aW9uUmVzcG9uc2USQwoJcmV0ZW50aW9uGAEgASgLMjAua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLlJ1bkNvbnRlbnRSZXRlbnRpb24iPQodU2V0UnVuQ29udGVudFJldGVudGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEgwKBGRheXMYAiABKAUiZQoeU2V0UnVuQ29udGVudFJldGVudGlvblJlc3BvbnNlEkMKCXJldGVudGlvbhgBIAEoCzIwLmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5SdW5Db250ZW50UmV0ZW50aW9uMsECChJPcmdTZXR0aW5nc1NlcnZpY2USlgEKFkdldFJ1bkNvbnRlbnRSZXRlbnRpb24SOi5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuR2V0UnVuQ29udGVudFJldGVudGlvblJlcXVlc3QaOy5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuR2V0UnVuQ29udGVudFJldGVudGlvblJlc3BvbnNlIgOQAgESkQEKFlNldFJ1bkNvbnRlbnRSZXRlbnRpb24SOi5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuU2V0UnVuQ29udGVudFJldGVudGlvblJlcXVlc3QaOy5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuU2V0UnVuQ29udGVudFJldGVudGlvblJlc3BvbnNlQl1aW2dpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL29yZ3NldHRpbmdzL3YxYWxwaGExO29yZ3NldHRpbmdzdjFhbHBoYTFiBnByb3RvMw");
+  fileDesc("Ci1rb2lub24vb3Jnc2V0dGluZ3MvdjFhbHBoYTEvb3Jnc2V0dGluZ3MucHJvdG8SG2tvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMSJdChNSdW5Db250ZW50UmV0ZW50aW9uEgwKBGRheXMYASABKAUSFAoMZGVmYXVsdF9kYXlzGAIgASgFEhAKCG1pbl9kYXlzGAMgASgFEhAKCG1heF9kYXlzGAQgASgFIi8KHUdldFJ1bkNvbnRlbnRSZXRlbnRpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJlCh5HZXRSdW5Db250ZW50UmV0ZW50aW9uUmVzcG9uc2USQwoJcmV0ZW50aW9uGAEgASgLMjAua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLlJ1bkNvbnRlbnRSZXRlbnRpb24iPQodU2V0UnVuQ29udGVudFJldGVudGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEgwKBGRheXMYAiABKAUiZQoeU2V0UnVuQ29udGVudFJldGVudGlvblJlc3BvbnNlEkMKCXJldGVudGlvbhgBIAEoCzIwLmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5SdW5Db250ZW50UmV0ZW50aW9uIl0KE0hvbWVCYWNrdXBSZXRlbnRpb24SDAoEZGF5cxgBIAEoBRIUCgxkZWZhdWx0X2RheXMYAiABKAUSEAoIbWluX2RheXMYAyABKAUSEAoIbWF4X2RheXMYBCABKAUiLwodR2V0SG9tZUJhY2t1cFJldGVudGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJImUKHkdldEhvbWVCYWNrdXBSZXRlbnRpb25SZXNwb25zZRJDCglyZXRlbnRpb24YASABKAsyMC5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuSG9tZUJhY2t1cFJldGVudGlvbiI9Ch1TZXRIb21lQmFja3VwUmV0ZW50aW9uUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDAoEZGF5cxgCIAEoBSJlCh5TZXRIb21lQmFja3VwUmV0ZW50aW9uUmVzcG9uc2USQwoJcmV0ZW50aW9uGAEgASgLMjAua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLkhvbWVCYWNrdXBSZXRlbnRpb24y7gQKEk9yZ1NldHRpbmdzU2VydmljZRKWAQoWR2V0UnVuQ29udGVudFJldGVudGlvbhI6LmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5HZXRSdW5Db250ZW50UmV0ZW50aW9uUmVxdWVzdBo7LmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5HZXRSdW5Db250ZW50UmV0ZW50aW9uUmVzcG9uc2UiA5ACARKRAQoWU2V0UnVuQ29udGVudFJldGVudGlvbhI6LmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5TZXRSdW5Db250ZW50UmV0ZW50aW9uUmVxdWVzdBo7LmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5TZXRSdW5Db250ZW50UmV0ZW50aW9uUmVzcG9uc2USlgEKFkdldEhvbWVCYWNrdXBSZXRlbnRpb24SOi5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuR2V0SG9tZUJhY2t1cFJldGVudGlvblJlcXVlc3QaOy5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuR2V0SG9tZUJhY2t1cFJldGVudGlvblJlc3BvbnNlIgOQAgESkQEKFlNldEhvbWVCYWNrdXBSZXRlbnRpb24SOi5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuU2V0SG9tZUJhY2t1cFJldGVudGlvblJlcXVlc3QaOy5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuU2V0SG9tZUJhY2t1cFJldGVudGlvblJlc3BvbnNlQl1aW2dpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL29yZ3NldHRpbmdzL3YxYWxwaGExO29yZ3NldHRpbmdzdjFhbHBoYTFiBnByb3RvMw");
 
 /**
  * RunContentRetention is the org's effective retention of stored run content. Once a finished run is
@@ -128,6 +128,118 @@ export const SetRunContentRetentionResponseSchema: GenMessage<SetRunContentReten
   messageDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 4);
 
 /**
+ * HomeBackupRetention is the org's effective retention of old home backup repositories. A key change
+ * starts a new backup repository for each agent's home; the old one stays readable for the
+ * checkpoints written to it for days, then it is deleted. The deadline is set when the new repository
+ * starts, so a change applies to later key changes only.
+ *
+ * @generated from message koinon.orgsettings.v1alpha1.HomeBackupRetention
+ */
+export type HomeBackupRetention = Message<"koinon.orgsettings.v1alpha1.HomeBackupRetention"> & {
+  /**
+   * @generated from field: int32 days = 1;
+   */
+  days: number;
+
+  /**
+   * @generated from field: int32 default_days = 2;
+   */
+  defaultDays: number;
+
+  /**
+   * @generated from field: int32 min_days = 3;
+   */
+  minDays: number;
+
+  /**
+   * @generated from field: int32 max_days = 4;
+   */
+  maxDays: number;
+};
+
+/**
+ * Describes the message koinon.orgsettings.v1alpha1.HomeBackupRetention.
+ * Use `create(HomeBackupRetentionSchema)` to create a new message.
+ */
+export const HomeBackupRetentionSchema: GenMessage<HomeBackupRetention> = /*@__PURE__*/
+  messageDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 5);
+
+/**
+ * @generated from message koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest
+ */
+export type GetHomeBackupRetentionRequest = Message<"koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+};
+
+/**
+ * Describes the message koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest.
+ * Use `create(GetHomeBackupRetentionRequestSchema)` to create a new message.
+ */
+export const GetHomeBackupRetentionRequestSchema: GenMessage<GetHomeBackupRetentionRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 6);
+
+/**
+ * @generated from message koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse
+ */
+export type GetHomeBackupRetentionResponse = Message<"koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse"> & {
+  /**
+   * @generated from field: koinon.orgsettings.v1alpha1.HomeBackupRetention retention = 1;
+   */
+  retention?: HomeBackupRetention | undefined;
+};
+
+/**
+ * Describes the message koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse.
+ * Use `create(GetHomeBackupRetentionResponseSchema)` to create a new message.
+ */
+export const GetHomeBackupRetentionResponseSchema: GenMessage<GetHomeBackupRetentionResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 7);
+
+/**
+ * @generated from message koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest
+ */
+export type SetHomeBackupRetentionRequest = Message<"koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * days to keep an old home backup repository; 0 returns it to the default.
+   *
+   * @generated from field: int32 days = 2;
+   */
+  days: number;
+};
+
+/**
+ * Describes the message koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest.
+ * Use `create(SetHomeBackupRetentionRequestSchema)` to create a new message.
+ */
+export const SetHomeBackupRetentionRequestSchema: GenMessage<SetHomeBackupRetentionRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 8);
+
+/**
+ * @generated from message koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse
+ */
+export type SetHomeBackupRetentionResponse = Message<"koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse"> & {
+  /**
+   * @generated from field: koinon.orgsettings.v1alpha1.HomeBackupRetention retention = 1;
+   */
+  retention?: HomeBackupRetention | undefined;
+};
+
+/**
+ * Describes the message koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse.
+ * Use `create(SetHomeBackupRetentionResponseSchema)` to create a new message.
+ */
+export const SetHomeBackupRetentionResponseSchema: GenMessage<SetHomeBackupRetentionResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 9);
+
+/**
  * OrgSettingsService is the UI's face of the org's settings that are not owned by another service
  * (leak guard and trace settings have their own). It is the connect-rpc face of the same service
  * layer the admin API uses. Admins and owners only. Every change is audited.
@@ -153,6 +265,25 @@ export const OrgSettingsService: GenService<{
     methodKind: "unary";
     input: typeof SetRunContentRetentionRequestSchema;
     output: typeof SetRunContentRetentionResponseSchema;
+  },
+  /**
+   * @generated from rpc koinon.orgsettings.v1alpha1.OrgSettingsService.GetHomeBackupRetention
+   */
+  getHomeBackupRetention: {
+    methodKind: "unary";
+    input: typeof GetHomeBackupRetentionRequestSchema;
+    output: typeof GetHomeBackupRetentionResponseSchema;
+  },
+  /**
+   * SetHomeBackupRetention sets how long an old home backup repository is kept after a key change, or
+   * returns it to the default (7 days) when days is 0. Audited as org.home_backup_retention.set.
+   *
+   * @generated from rpc koinon.orgsettings.v1alpha1.OrgSettingsService.SetHomeBackupRetention
+   */
+  setHomeBackupRetention: {
+    methodKind: "unary";
+    input: typeof SetHomeBackupRetentionRequestSchema;
+    output: typeof SetHomeBackupRetentionResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 0);

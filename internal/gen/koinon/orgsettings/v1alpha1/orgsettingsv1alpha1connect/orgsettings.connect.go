@@ -32,6 +32,12 @@ const (
 	// OrgSettingsServiceSetRunContentRetentionProcedure is the procedure name of the
 	// OrgSettingsService's SetRunContentRetention RPC.
 	OrgSettingsServiceSetRunContentRetentionProcedure = "/koinon.orgsettings.v1alpha1.OrgSettingsService/SetRunContentRetention"
+	// OrgSettingsServiceGetHomeBackupRetentionProcedure is the procedure name of the
+	// OrgSettingsService's GetHomeBackupRetention RPC.
+	OrgSettingsServiceGetHomeBackupRetentionProcedure = "/koinon.orgsettings.v1alpha1.OrgSettingsService/GetHomeBackupRetention"
+	// OrgSettingsServiceSetHomeBackupRetentionProcedure is the procedure name of the
+	// OrgSettingsService's SetHomeBackupRetention RPC.
+	OrgSettingsServiceSetHomeBackupRetentionProcedure = "/koinon.orgsettings.v1alpha1.OrgSettingsService/SetHomeBackupRetention"
 )
 
 var (
@@ -50,6 +56,21 @@ var (
 			Procedure:  OrgSettingsServiceSetRunContentRetentionProcedure,
 		}
 	})
+	orgSettingsServiceGetHomeBackupRetentionSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_orgsettings_v1alpha1_orgsettings_proto.Services().ByName("OrgSettingsService").Methods().ByName("GetHomeBackupRetention"),
+			Procedure:        OrgSettingsServiceGetHomeBackupRetentionProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	orgSettingsServiceSetHomeBackupRetentionSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_orgsettings_v1alpha1_orgsettings_proto.Services().ByName("OrgSettingsService").Methods().ByName("SetHomeBackupRetention"),
+			Procedure:  OrgSettingsServiceSetHomeBackupRetentionProcedure,
+		}
+	})
 )
 
 // OrgSettingsServiceClient is a client for the koinon.orgsettings.v1alpha1.OrgSettingsService
@@ -59,6 +80,10 @@ type OrgSettingsServiceClient interface {
 	// SetRunContentRetention sets how long a finished run's stored content is kept, or returns it to the
 	// default (30 days) when days is 0. Audited as org.run_content_retention.set.
 	SetRunContentRetention(context.Context, *v1alpha1.SetRunContentRetentionRequest) (*v1alpha1.SetRunContentRetentionResponse, error)
+	GetHomeBackupRetention(context.Context, *v1alpha1.GetHomeBackupRetentionRequest) (*v1alpha1.GetHomeBackupRetentionResponse, error)
+	// SetHomeBackupRetention sets how long an old home backup repository is kept after a key change, or
+	// returns it to the default (7 days) when days is 0. Audited as org.home_backup_retention.set.
+	SetHomeBackupRetention(context.Context, *v1alpha1.SetHomeBackupRetentionRequest) (*v1alpha1.SetHomeBackupRetentionResponse, error)
 }
 
 // NewOrgSettingsServiceClient constructs a client for the
@@ -75,6 +100,10 @@ type OrgSettingsServiceHandler interface {
 	// SetRunContentRetention sets how long a finished run's stored content is kept, or returns it to the
 	// default (30 days) when days is 0. Audited as org.run_content_retention.set.
 	SetRunContentRetention(context.Context, *v1alpha1.SetRunContentRetentionRequest) (*v1alpha1.SetRunContentRetentionResponse, error)
+	GetHomeBackupRetention(context.Context, *v1alpha1.GetHomeBackupRetentionRequest) (*v1alpha1.GetHomeBackupRetentionResponse, error)
+	// SetHomeBackupRetention sets how long an old home backup repository is kept after a key change, or
+	// returns it to the default (7 days) when days is 0. Audited as org.home_backup_retention.set.
+	SetHomeBackupRetention(context.Context, *v1alpha1.SetHomeBackupRetentionRequest) (*v1alpha1.SetHomeBackupRetentionResponse, error)
 }
 
 // RegisterOrgSettingsServiceHandler registers svc as the
@@ -84,6 +113,8 @@ func RegisterOrgSettingsServiceHandler(server *connect.Server, svc OrgSettingsSe
 	server.Register(
 		connect.Method{Spec: orgSettingsServiceGetRunContentRetentionSpec(), Handler: adapter.getRunContentRetention},
 		connect.Method{Spec: orgSettingsServiceSetRunContentRetentionSpec(), Handler: adapter.setRunContentRetention},
+		connect.Method{Spec: orgSettingsServiceGetHomeBackupRetentionSpec(), Handler: adapter.getHomeBackupRetention},
+		connect.Method{Spec: orgSettingsServiceSetHomeBackupRetentionSpec(), Handler: adapter.setHomeBackupRetention},
 	)
 }
 
@@ -96,6 +127,14 @@ func (UnimplementedOrgSettingsServiceHandler) GetRunContentRetention(context.Con
 
 func (UnimplementedOrgSettingsServiceHandler) SetRunContentRetention(context.Context, *v1alpha1.SetRunContentRetentionRequest) (*v1alpha1.SetRunContentRetentionResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunContentRetention is not implemented")
+}
+
+func (UnimplementedOrgSettingsServiceHandler) GetHomeBackupRetention(context.Context, *v1alpha1.GetHomeBackupRetentionRequest) (*v1alpha1.GetHomeBackupRetentionResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.orgsettings.v1alpha1.OrgSettingsService.GetHomeBackupRetention is not implemented")
+}
+
+func (UnimplementedOrgSettingsServiceHandler) SetHomeBackupRetention(context.Context, *v1alpha1.SetHomeBackupRetentionRequest) (*v1alpha1.SetHomeBackupRetentionResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.orgsettings.v1alpha1.OrgSettingsService.SetHomeBackupRetention is not implemented")
 }
 
 type orgSettingsServiceClient struct {
@@ -113,6 +152,22 @@ func (c *orgSettingsServiceClient) GetRunContentRetention(ctx context.Context, r
 func (c *orgSettingsServiceClient) SetRunContentRetention(ctx context.Context, req *v1alpha1.SetRunContentRetentionRequest) (*v1alpha1.SetRunContentRetentionResponse, error) {
 	var res v1alpha1.SetRunContentRetentionResponse
 	if err := c.client.CallUnary(ctx, orgSettingsServiceSetRunContentRetentionSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *orgSettingsServiceClient) GetHomeBackupRetention(ctx context.Context, req *v1alpha1.GetHomeBackupRetentionRequest) (*v1alpha1.GetHomeBackupRetentionResponse, error) {
+	var res v1alpha1.GetHomeBackupRetentionResponse
+	if err := c.client.CallUnary(ctx, orgSettingsServiceGetHomeBackupRetentionSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *orgSettingsServiceClient) SetHomeBackupRetention(ctx context.Context, req *v1alpha1.SetHomeBackupRetentionRequest) (*v1alpha1.SetHomeBackupRetentionResponse, error) {
+	var res v1alpha1.SetHomeBackupRetentionResponse
+	if err := c.client.CallUnary(ctx, orgSettingsServiceSetHomeBackupRetentionSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -138,6 +193,30 @@ func (h orgSettingsServiceHandler) setRunContentRetention(ctx context.Context, _
 		return err
 	}
 	res, err := h.svc.SetRunContentRetention(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h orgSettingsServiceHandler) getHomeBackupRetention(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.GetHomeBackupRetentionRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetHomeBackupRetention(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h orgSettingsServiceHandler) setHomeBackupRetention(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetHomeBackupRetentionRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetHomeBackupRetention(ctx, &req)
 	if err != nil {
 		return err
 	}

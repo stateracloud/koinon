@@ -83,7 +83,10 @@ function setup(opts: Opts = {}) {
   let version = 7n
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
-    service(OrgSettingsService, { getRunContentRetention: () => ({ retention: { days: 30, defaultDays: 30, minDays: 1, maxDays: 365 } }) })
+    service(OrgSettingsService, {
+      getRunContentRetention: () => ({ retention: { days: 30, defaultDays: 30, minDays: 1, maxDays: 365 } }),
+      getHomeBackupRetention: () => ({ retention: { days: 7, defaultDays: 7, minDays: 1, maxDays: 90 } }),
+    })
     service(TraceDestinationService, {
       listDestinations: () => {
         calls.listed++

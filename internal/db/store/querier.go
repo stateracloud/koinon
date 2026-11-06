@@ -1043,6 +1043,9 @@ type Querier interface {
 	SetOrgDefaultModel(ctx context.Context, arg SetOrgDefaultModelParams) (string, error)
 	// The org's first model becomes its default; a default that is set stays.
 	SetOrgDefaultModelIfUnset(ctx context.Context, arg SetOrgDefaultModelIfUnsetParams) (int64, error)
+	// How long an old home backup repository is kept after a key change (#219); NULL is the platform
+	// default. It touches only this column.
+	SetOrgHomeBackupRetention(ctx context.Context, arg SetOrgHomeBackupRetentionParams) error
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
 	// The leak guard's match threshold in characters (ADR 0084 decision 3); NULL is the platform
 	// default. It touches only this column, so the latency and limit overrides stay.

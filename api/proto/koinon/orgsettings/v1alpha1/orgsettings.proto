@@ -16,6 +16,12 @@ service OrgSettingsService {
   // SetRunContentRetention sets how long a finished run's stored content is kept, or returns it to the
   // default (30 days) when days is 0. Audited as org.run_content_retention.set.
   rpc SetRunContentRetention(SetRunContentRetentionRequest) returns (SetRunContentRetentionResponse);
+  rpc GetHomeBackupRetention(GetHomeBackupRetentionRequest) returns (GetHomeBackupRetentionResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // SetHomeBackupRetention sets how long an old home backup repository is kept after a key change, or
+  // returns it to the default (7 days) when days is 0. Audited as org.home_backup_retention.set.
+  rpc SetHomeBackupRetention(SetHomeBackupRetentionRequest) returns (SetHomeBackupRetentionResponse);
 }
 
 // RunContentRetention is the org's effective retention of stored run content. Once a finished run is
@@ -45,4 +51,33 @@ message SetRunContentRetentionRequest {
 
 message SetRunContentRetentionResponse {
   RunContentRetention retention = 1;
+}
+
+// HomeBackupRetention is the org's effective retention of old home backup repositories. A key change
+// starts a new backup repository for each agent's home; the old one stays readable for the
+// checkpoints written to it for days, then it is deleted. The deadline is set when the new repository
+// starts, so a change applies to later key changes only.
+message HomeBackupRetention {
+  int32 days = 1;
+  int32 default_days = 2;
+  int32 min_days = 3;
+  int32 max_days = 4;
+}
+
+message GetHomeBackupRetentionRequest {
+  string org_id = 1;
+}
+
+message GetHomeBackupRetentionResponse {
+  HomeBackupRetention retention = 1;
+}
+
+message SetHomeBackupRetentionRequest {
+  string org_id = 1;
+  // days to keep an old home backup repository; 0 returns it to the default.
+  int32 days = 2;
+}
+
+message SetHomeBackupRetentionResponse {
+  HomeBackupRetention retention = 1;
 }
