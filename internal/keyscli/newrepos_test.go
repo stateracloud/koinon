@@ -1,0 +1,261 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package keyscli_test
+
+import (
+	"bytes"
+	"crypto/rand"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/checkpoint"
+	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/keyscli"
+	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
+)
+
+// keys new-repositories (issue #86, ADR 0085 decision 14): after a compromise, every agent named
+// gets a new home repository that koinon-agentd seeds with its newest checkpoint.
+var _ = Describe("koinon-api keys new-repositories", func() {
+	const (
+		oldKEK = "kek-20260101-aaaa"
+		newKEK = "kek-20261023-bbbb"
+	)
+	var (
+		kube *fake.Clientset
+		tool *keyscli.Tool
+		out  *bytes.Buffer
+		now  time.Time
+		q    *store.Queries
+		pw   checkpoint.Passwords
+	)
+
+	ring := func(ctx SpecContext) *secretstore.Keyring {
+		GinkgoHelper()
+		set, err := tool.Store.Load(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		r, err := secretstore.NewKeyring(set.Keys, set.Active)
+		Expect(err).NotTo(HaveOccurred())
+		return r
+	}
+	usage := func(ctx SpecContext) map[string]int {
+		GinkgoHelper()
+		u, err := tool.Usage(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		return u
+	}
+	newAgent := func(ctx SpecContext, org pgtype.UUID) pgtype.UUID {
+		GinkgoHelper()
+		var a pgtype.UUID
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&a)).To(Succeed())
+		return a
+	}
+	// withRepository makes an agent with a home repository (epoch 0) under the active KEK.
+	withRepository := func(ctx SpecContext, org pgtype.UUID) pgtype.UUID {
+		GinkgoHelper()
+		a := newAgent(ctx, org)
+		_, err := pw.Current(ctx, org, a)
+		Expect(err).NotTo(HaveOccurred())
+		return a
+	}
+	latest := func(ctx SpecContext, org, agent pgtype.UUID) store.HomeRepositoryEpoch {
+		GinkgoHelper()
+		e, err := q.LatestHomeRepositoryEpoch(ctx, store.LatestHomeRepositoryEpochParams{OrgID: org, AgentID: agent})
+		Expect(err).NotTo(HaveOccurred())
+		return e
+	}
+	epochs := func(ctx SpecContext) int {
+		GinkgoHelper()
+		var n int
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM home_repository_epochs`).Scan(&n)).To(Succeed())
+		return n
+	}
+	// compromise activates a new KEK; the old one stays in the key set (it leaked, it is not lost).
+	compromise := func(ctx SpecContext) {
+		GinkgoHelper()
+		Expect(tool.Add(ctx, newKEK)).To(Succeed())
+		Expect(tool.Activate(ctx, newKEK)).To(Succeed())
+		now = now.Add(6 * time.Minute)
+		pw.Keys = ring(ctx)
+	}
+
+	BeforeEach(func(ctx SpecContext) {
+		pgtest.TruncateOrgs(ctx, pool)
+		_, err := pool.Exec(ctx, `DELETE FROM kek_fingerprints`)
+		Expect(err).NotTo(HaveOccurred())
+		now = time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+		kube = fake.NewClientset()
+		key := make([]byte, secretstore.KeySize)
+		_, _ = rand.Read(key)
+		_, err = kube.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "koinon-kek", Namespace: ns},
+			Data:       map[string][]byte{oldKEK: secretstore.EncodeKey(key), "active": []byte(oldKEK)},
+		}, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		out = &bytes.Buffer{}
+		tool = &keyscli.Tool{Pool: pool, Store: keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}, Out: out, Now: func() time.Time { return now }}
+		q = store.New(pool)
+		pw = checkpoint.Passwords{Q: q, Keys: ring(ctx), Begin: pool.Begin}
+	})
+
+	It("wants exactly one of --all and --agent, valid agent IDs that have a repository, and a database", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		agent := withRepository(ctx, org)
+		bare := newAgent(ctx, org)
+		tool.Yes = true
+
+		Expect(tool.NewRepositories(ctx, false, nil)).To(MatchError(ContainSubstring("--agent, or pass --all")))
+		Expect(tool.NewRepositories(ctx, true, []string{agent.String()})).To(MatchError(ContainSubstring("--agent, or pass --all")))
+		Expect(tool.NewRepositories(ctx, false, []string{"nope"})).To(MatchError(ContainSubstring(`"nope" is not an agent ID`)))
+		Expect(tool.NewRepositories(ctx, false, []string{agent.String(), bare.String()})).To(MatchError(And(
+			ContainSubstring("no home repository for agent(s) "+bare.String()), ContainSubstring("nothing was changed"))))
+		Expect(epochs(ctx)).To(BeZero(), "one agent without a repository refuses the whole command")
+
+		noDB := *tool
+		noDB.Pool = nil
+		Expect(noDB.NewRepositories(ctx, true, nil)).To(MatchError(ContainSubstring("needs --database-url")))
+		Expect(epochs(ctx)).To(BeZero())
+	})
+
+	It("has nothing to replace when no agent has a repository", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		newAgent(ctx, org)
+		Expect(tool.NewRepositories(ctx, true, nil)).To(Succeed(), "nothing to confirm, so no --yes needed")
+		Expect(out.String()).To(ContainSubstring("No agent has a home repository; nothing to replace."))
+		Expect(epochs(ctx)).To(BeZero())
+	})
+
+	It("starts a new epoch for every agent with a repository, sealed with the active KEK, asks for its seed and audits each agent", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		other, _, _ := pgtest.NewOrg(ctx, pool)
+		a1, a2 := withRepository(ctx, org), withRepository(ctx, org)
+		_, _, err := pw.NewEpoch(ctx, org, a2, checkpoint.ReasonKeyLost, checkpoint.DefaultRetain) // a2 is at epoch 1
+		Expect(err).NotTo(HaveOccurred())
+		b := withRepository(ctx, other)
+		bare := newAgent(ctx, org)
+		Expect(usage(ctx)).To(Equal(map[string]int{oldKEK: 4}))
+
+		compromise(ctx)
+		tool.Yes = true
+		start := time.Now()
+		Expect(tool.NewRepositories(ctx, true, nil)).To(Succeed())
+		Expect(out.String()).To(And(
+			ContainSubstring("Started a new home repository for 3 agent(s) in 2 org(s)."),
+			ContainSubstring(`koinon_agentd_home_repository_seeds{state="pending"}`),
+			ContainSubstring("Rotate the checkpoint bucket's S3 key"),
+		))
+		Expect(usage(ctx)).To(Equal(map[string]int{oldKEK: 4, newKEK: 3}), "each new password is sealed with the active KEK")
+
+		By("each agent's new epoch asks to be seeded from the one before, which is retired with a deadline of now")
+		for _, c := range []struct {
+			org, agent pgtype.UUID
+			epoch      int32
+		}{{org, a1, 1}, {org, a2, 2}, {other, b, 1}} {
+			e := latest(ctx, c.org, c.agent)
+			Expect(e.RepositoryEpoch).To(Equal(c.epoch))
+			Expect(e.Reason).To(Equal(checkpoint.ReasonKeyCompromised))
+			Expect(e.SeedFromEpoch).To(Equal(pgtype.Int4{Int32: c.epoch - 1, Valid: true}))
+			Expect(e.SeedAfter.Valid).To(BeTrue())
+			Expect(e.SeedAfter.Time).To(BeTemporally("<=", time.Now()))
+			Expect(e.SeededAt.Valid || e.SeedFailedAt.Valid).To(BeFalse())
+			Expect(e.SeedAttempts).To(BeZero())
+			cur, err := pw.Current(ctx, c.org, c.agent)
+			Expect(err).NotTo(HaveOccurred(), "the new password opens with the key set")
+			Expect(cur.Epoch).To(Equal(c.epoch))
+
+			var deleteAfter time.Time
+			if c.epoch == 1 {
+				h, err := q.GetHomeRepository(ctx, store.GetHomeRepositoryParams{OrgID: c.org, AgentID: c.agent})
+				Expect(err).NotTo(HaveOccurred())
+				deleteAfter = h.DeleteAfter.Time
+			} else {
+				Expect(pool.QueryRow(ctx, `SELECT delete_after FROM home_repository_epochs WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = $3`,
+					c.org, c.agent, c.epoch-1).Scan(&deleteAfter)).To(Succeed())
+			}
+			Expect(deleteAfter).To(BeTemporally("~", start, time.Minute), "no retention: the sweeper's guard keeps it until the seed is there")
+		}
+		_, err = q.GetHomeRepository(ctx, store.GetHomeRepositoryParams{OrgID: org, AgentID: bare})
+		Expect(err).To(HaveOccurred(), "an agent without a repository gets its first one under the active KEK, later")
+
+		By("one audit event per agent, in the agent's org, by the cli actor")
+		rows, err := pool.Query(ctx, `SELECT org_id, actor_kind, actor_id, target_kind, target_id, summary::text FROM audit_events WHERE action = $1 ORDER BY target_id`, keyscli.NewRepositoriesAction)
+		Expect(err).NotTo(HaveOccurred())
+		got := map[string]string{}
+		for rows.Next() {
+			var o pgtype.UUID
+			var kind, actor, targetKind, target, summary string
+			Expect(rows.Scan(&o, &kind, &actor, &targetKind, &target, &summary)).To(Succeed())
+			Expect(kind).To(Equal(audit.KindCLI))
+			Expect(actor).To(Equal("keys new-repositories"))
+			Expect(targetKind).To(Equal("agent"))
+			if target == b.String() {
+				Expect(o).To(Equal(other))
+			} else {
+				Expect(o).To(Equal(org))
+			}
+			got[target] = summary
+		}
+		Expect(rows.Err()).NotTo(HaveOccurred())
+		Expect(got).To(HaveLen(3))
+		Expect(got[a2.String()]).To(And(ContainSubstring(`"seedFromEpoch": 1`), ContainSubstring(`"repositoryEpoch": 2`), ContainSubstring(checkpoint.ReasonKeyCompromised)))
+		for _, s := range got {
+			Expect(s).NotTo(ContainSubstring("password"))
+		}
+
+		By("running it again replaces the replacements: a seed that has not run yet moves on to the newest epoch")
+		out.Reset()
+		Expect(tool.NewRepositories(ctx, false, []string{a1.String()})).To(Succeed())
+		Expect(out.String()).To(ContainSubstring("Started a new home repository for 1 agent(s) in 1 org(s)."))
+		e := latest(ctx, org, a1)
+		Expect(e.RepositoryEpoch).To(Equal(int32(2)))
+		Expect(e.SeedFromEpoch).To(Equal(pgtype.Int4{Int32: 1, Valid: true}))
+		Expect(latest(ctx, org, a2).RepositoryEpoch).To(Equal(int32(2)), "only the agent named")
+	})
+
+	Describe("without a terminal", func() {
+		It("refuses without --yes, because the older checkpoints are dropped", func(ctx SpecContext) {
+			org, _, _ := pgtest.NewOrg(ctx, pool)
+			a := withRepository(ctx, org)
+			Expect(tool.NewRepositories(ctx, false, []string{a.String()})).To(MatchError(And(ContainSubstring("older checkpoints"), ContainSubstring("--yes"))))
+			Expect(epochs(ctx)).To(BeZero())
+			tool.Yes = true
+			Expect(tool.NewRepositories(ctx, false, []string{a.String()})).To(Succeed())
+			Expect(epochs(ctx)).To(Equal(1))
+		})
+	})
+
+	Describe("on a terminal", func() {
+		var asked *bytes.Buffer
+		ask := func(input string) {
+			asked = &bytes.Buffer{}
+			tool.Prompt = &cli.Prompter{In: strings.NewReader(input), Out: asked, Accessible: true}
+		}
+
+		It("wants the word typed", func(ctx SpecContext) {
+			org, _, _ := pgtest.NewOrg(ctx, pool)
+			a := withRepository(ctx, org)
+			ask("")
+			Expect(tool.NewRepositories(ctx, true, nil)).To(MatchError(cli.ErrCancelled))
+			Expect(epochs(ctx)).To(BeZero())
+
+			ask("yes\nreplace\n")
+			Expect(tool.NewRepositories(ctx, true, nil)).To(Succeed())
+			Expect(asked.String()).To(And(
+				ContainSubstring(`Replace the home repositories of 1 agent(s)? Type "replace" to continue`),
+				ContainSubstring("type replace to continue"),
+				ContainSubstring("older checkpoints are deleted"),
+			))
+			Expect(latest(ctx, org, a).RepositoryEpoch).To(Equal(int32(1)))
+		})
+	})
+})
