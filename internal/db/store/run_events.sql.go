@@ -26,7 +26,7 @@ WITH run AS (
 INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload, source_seq)
 SELECT run.org_id, run.id, run.last_event_seq, run.epoch, $1, $2, $3::bigint
 FROM run
-RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq
+RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq, content_purged_at
 `
 
 type AppendCanceledRunEventOnceParams struct {
@@ -62,6 +62,7 @@ func (q *Queries) AppendCanceledRunEventOnce(ctx context.Context, arg AppendCanc
 		&i.Payload,
 		&i.CreatedAt,
 		&i.SourceSeq,
+		&i.ContentPurgedAt,
 	)
 	return i, err
 }
@@ -76,7 +77,7 @@ WITH run AS (
 INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload)
 SELECT run.org_id, run.id, run.last_event_seq, run.epoch, $1, $2
 FROM run
-RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq
+RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq, content_purged_at
 `
 
 type AppendRunControlEventParams struct {
@@ -106,6 +107,7 @@ func (q *Queries) AppendRunControlEvent(ctx context.Context, arg AppendRunContro
 		&i.Payload,
 		&i.CreatedAt,
 		&i.SourceSeq,
+		&i.ContentPurgedAt,
 	)
 	return i, err
 }
@@ -122,7 +124,7 @@ WITH run AS (
 INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload)
 SELECT run.org_id, run.id, run.last_event_seq, run.epoch, $1, $2
 FROM run
-RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq
+RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq, content_purged_at
 `
 
 type AppendRunEventParams struct {
@@ -159,6 +161,7 @@ func (q *Queries) AppendRunEvent(ctx context.Context, arg AppendRunEventParams) 
 		&i.Payload,
 		&i.CreatedAt,
 		&i.SourceSeq,
+		&i.ContentPurgedAt,
 	)
 	return i, err
 }
@@ -178,7 +181,7 @@ WITH run AS (
 INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload, source_seq)
 SELECT run.org_id, run.id, run.last_event_seq, run.epoch, $1, $2, $3::bigint
 FROM run
-RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq
+RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq, content_purged_at
 `
 
 type AppendRunEventOnceParams struct {
@@ -214,12 +217,13 @@ func (q *Queries) AppendRunEventOnce(ctx context.Context, arg AppendRunEventOnce
 		&i.Payload,
 		&i.CreatedAt,
 		&i.SourceSeq,
+		&i.ContentPurgedAt,
 	)
 	return i, err
 }
 
 const getRunEventBySource = `-- name: GetRunEventBySource :one
-SELECT org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq FROM run_events
+SELECT org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq, content_purged_at FROM run_events
 WHERE org_id = $1 AND run_id = $2 AND epoch = $3 AND source_seq = $4::bigint
 `
 
@@ -248,12 +252,13 @@ func (q *Queries) GetRunEventBySource(ctx context.Context, arg GetRunEventBySour
 		&i.Payload,
 		&i.CreatedAt,
 		&i.SourceSeq,
+		&i.ContentPurgedAt,
 	)
 	return i, err
 }
 
 const listRunEventsAfter = `-- name: ListRunEventsAfter :many
-SELECT org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq FROM run_events
+SELECT org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq, content_purged_at FROM run_events
 WHERE org_id = $1 AND run_id = $2 AND seq > $3
 ORDER BY seq
 LIMIT $4
@@ -292,6 +297,7 @@ func (q *Queries) ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfter
 			&i.Payload,
 			&i.CreatedAt,
 			&i.SourceSeq,
+			&i.ContentPurgedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -301,4 +307,146 @@ func (q *Queries) ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfter
 		return nil, err
 	}
 	return items, nil
+}
+
+const listRunsToPurgeContent = `-- name: ListRunsToPurgeContent :many
+SELECT r.id, r.finished_at
+FROM runs r
+WHERE r.org_id = $1
+  AND r.finished_at IS NOT NULL
+  AND r.content_purged_at IS NULL
+  AND r.finished_at < $2::timestamptz
+  AND (r.finished_at, r.id) > ($3::timestamptz, $4::uuid)
+ORDER BY r.finished_at, r.id
+LIMIT $5::int
+`
+
+type ListRunsToPurgeContentParams struct {
+	OrgID           pgtype.UUID
+	Cutoff          pgtype.Timestamptz
+	AfterFinishedAt pgtype.Timestamptz
+	AfterID         pgtype.UUID
+	BatchSize       int32
+}
+
+type ListRunsToPurgeContentRow struct {
+	ID         pgtype.UUID
+	FinishedAt pgtype.Timestamptz
+}
+
+// Finished runs of the org that finished before @cutoff and whose content the purge has not
+// cleared yet (issue #69), oldest first and after the (finished_at, id) keyset the caller passes
+// (the epoch and the nil UUID to start). It reads runs_content_unpurged only, never run_events.
+func (q *Queries) ListRunsToPurgeContent(ctx context.Context, arg ListRunsToPurgeContentParams) ([]ListRunsToPurgeContentRow, error) {
+	rows, err := q.db.Query(ctx, listRunsToPurgeContent,
+		arg.OrgID,
+		arg.Cutoff,
+		arg.AfterFinishedAt,
+		arg.AfterID,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRunsToPurgeContentRow
+	for rows.Next() {
+		var i ListRunsToPurgeContentRow
+		if err := rows.Scan(&i.ID, &i.FinishedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markRunContentPurged = `-- name: MarkRunContentPurged :execrows
+UPDATE runs
+SET content_purged_at = $1::timestamptz
+WHERE runs.org_id = $2 AND runs.id = $3
+  AND runs.finished_at IS NOT NULL
+  AND runs.content_purged_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM run_events e
+      WHERE e.org_id = $2 AND e.run_id = $3
+        AND e.kind = ANY($4::text[])
+        AND e.content_purged_at IS NULL)
+`
+
+type MarkRunContentPurgedParams struct {
+	PurgedAt pgtype.Timestamptz
+	OrgID    pgtype.UUID
+	RunID    pgtype.UUID
+	Kinds    []string
+}
+
+// Marks a finished run as purged once none of its content events carries content, so later passes
+// skip it. A row still locked by another purger leaves the run unmarked; the next pass finishes it.
+func (q *Queries) MarkRunContentPurged(ctx context.Context, arg MarkRunContentPurgedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markRunContentPurged,
+		arg.PurgedAt,
+		arg.OrgID,
+		arg.RunID,
+		arg.Kinds,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeRunEventContent = `-- name: PurgeRunEventContent :execrows
+WITH batch AS (
+    SELECT e.org_id, e.id
+    FROM run_events e
+    WHERE e.org_id = $3 AND e.run_id = $4
+      AND e.kind = ANY($5::text[])
+      AND e.content_purged_at IS NULL
+    ORDER BY e.seq
+    LIMIT $6::int
+    FOR UPDATE OF e SKIP LOCKED
+)
+UPDATE run_events
+SET payload = CASE
+        WHEN $1::jsonb -> run_events.kind IS NOT NULL
+        THEN run_events.payload - ARRAY(SELECT jsonb_array_elements_text($1::jsonb -> run_events.kind))
+        ELSE '{}'::jsonb
+    END,
+    content_purged_at = $2::timestamptz
+FROM batch
+WHERE run_events.org_id = batch.org_id AND run_events.id = batch.id
+`
+
+type PurgeRunEventContentParams struct {
+	Strip     []byte
+	PurgedAt  pgtype.Timestamptz
+	OrgID     pgtype.UUID
+	RunID     pgtype.UUID
+	Kinds     []string
+	BatchSize int32
+}
+
+// Blanks the payload of up to @batch_size content events (@kinds: messages, thoughts, tool calls)
+// of one run (issue #69). The row stays, so the run page keeps its skeleton and seq stays gap-free;
+// only the payload goes and content_purged_at says when. A kind that is a key of @strip (a JSON
+// object of kind -> content keys) loses only those keys and keeps its state fields (run.prompt keeps
+// throughSeq, acp.permission keeps decision). Events of other kinds (state, park, cost notes) keep
+// their payload. Rows are locked with SKIP LOCKED, so two purgers never
+// wait for each other. Rows 0: nothing left to blank in this run.
+func (q *Queries) PurgeRunEventContent(ctx context.Context, arg PurgeRunEventContentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeRunEventContent,
+		arg.Strip,
+		arg.PurgedAt,
+		arg.OrgID,
+		arg.RunID,
+		arg.Kinds,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

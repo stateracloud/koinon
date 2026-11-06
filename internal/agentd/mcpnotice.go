@@ -35,6 +35,9 @@ func mcpNoticeText(rows []store.ListUnavailableMCPServersOfAgentRow) string {
 		if s.DisabledReason.Valid {
 			reason = s.DisabledReason.String
 		}
+		if s.CredentialLost {
+			reason = "its credential was lost and an admin has to enter it again"
+		}
 		if reason == "" {
 			reason = "it is not responding"
 		}

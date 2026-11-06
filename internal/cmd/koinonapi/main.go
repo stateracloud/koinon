@@ -394,6 +394,10 @@ func serve(ctx context.Context, cfg config) error {
 	purgeCtx, cancelPurge := context.WithCancel(ctx)
 	defer cancelPurge() // before pool.Close
 	safego.GoOrStop(purgeCtx, slog.Default(), "auth-purger", stop, func(ctx context.Context) { authSvc.RunPurger(ctx, time.Hour, 7*24*time.Hour) })
+	// Run content past its org's retention is blanked (issue #69). Idempotent and batched with
+	// SKIP LOCKED, so every replica may run it.
+	contentPurger := orgsettings.NewPurger(pool, slog.Default(), time.Now)
+	safego.GoOrStop(purgeCtx, slog.Default(), "run-content-purger", stop, func(ctx context.Context) { contentPurger.Run(ctx, time.Hour) })
 
 	// Templates embedded in the binary become rows, versioned by content hash.
 	embedded, err := templates.All()
@@ -750,7 +754,7 @@ func serve(ctx context.Context, cfg config) error {
 		}
 		// The password of an agent's home repository (ADR 0032): koinon-agentd, the checkpoint
 		// writer, asks per checkpoint and holds no key-encryption key.
-		mux.Handle(checkpoint.RepositoryPath, checkpoint.Server{Passwords: checkpoint.Passwords{Q: store.New(pool), Keys: keyring}, Key: keyFn})
+		mux.Handle(checkpoint.RepositoryPath, checkpoint.Server{Passwords: checkpoint.Passwords{Q: store.New(pool), Keys: keyring, Begin: pool.Begin}, Key: keyFn})
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		swSrv := &http.Server{Addr: cfg.savedWorkAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, swSrv)

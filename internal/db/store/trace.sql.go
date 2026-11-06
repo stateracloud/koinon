@@ -13,9 +13,10 @@ import (
 
 const countEnabledTraceDestinations = `-- name: CountEnabledTraceDestinations :one
 SELECT count(*) FROM trace_destinations
-WHERE org_id = $1 AND enabled
+WHERE org_id = $1 AND enabled AND credential_lost_at IS NULL
 `
 
+// A destination whose credentials were lost (#85) receives nothing, so it does not count.
 func (q *Queries) CountEnabledTraceDestinations(ctx context.Context, orgID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countEnabledTraceDestinations, orgID)
 	var count int64
@@ -126,7 +127,7 @@ func (q *Queries) GetOrgTraceSettings(ctx context.Context, orgID pgtype.UUID) (O
 }
 
 const getPlatformTraceDestination = `-- name: GetPlatformTraceDestination :one
-SELECT singleton, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, updated_by, updated_at FROM platform_trace_destination
+SELECT singleton, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, updated_by, updated_at, credential_lost_at FROM platform_trace_destination
 WHERE singleton
 `
 
@@ -153,6 +154,7 @@ func (q *Queries) GetPlatformTraceDestination(ctx context.Context) (PlatformTrac
 		&i.SpansDropped,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -245,7 +247,7 @@ func (q *Queries) GetRunTurnByTrace(ctx context.Context, arg GetRunTurnByTracePa
 }
 
 const getTraceDestination = `-- name: GetTraceDestination :one
-SELECT org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at FROM trace_destinations
+SELECT org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at, credential_lost_at FROM trace_destinations
 WHERE org_id = $1 AND id = $2
 `
 
@@ -280,6 +282,7 @@ func (q *Queries) GetTraceDestination(ctx context.Context, arg GetTraceDestinati
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -376,7 +379,7 @@ INSERT INTO trace_destinations (org_id, id, name, backend, endpoint_url, params,
                                 resource_attributes, enabled, last_test_at, last_test_ok, last_test_message, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
         $9, $10, $11, $12, $13, $14)
-RETURNING org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at
+RETURNING org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at, credential_lost_at
 `
 
 type InsertTraceDestinationParams struct {
@@ -437,6 +440,7 @@ func (q *Queries) InsertTraceDestination(ctx context.Context, arg InsertTraceDes
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -577,7 +581,7 @@ func (q *Queries) ListRunTurns(ctx context.Context, arg ListRunTurnsParams) ([]R
 
 const listTraceDestinations = `-- name: ListTraceDestinations :many
 
-SELECT org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at FROM trace_destinations
+SELECT org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at, credential_lost_at FROM trace_destinations
 WHERE org_id = $1
 ORDER BY name
 `
@@ -618,6 +622,7 @@ func (q *Queries) ListTraceDestinations(ctx context.Context, orgID pgtype.UUID) 
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CredentialLostAt,
 		); err != nil {
 			return nil, err
 		}
@@ -630,7 +635,7 @@ func (q *Queries) ListTraceDestinations(ctx context.Context, orgID pgtype.UUID) 
 }
 
 const lockPlatformTraceDestination = `-- name: LockPlatformTraceDestination :one
-SELECT singleton, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, updated_by, updated_at FROM platform_trace_destination
+SELECT singleton, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, updated_by, updated_at, credential_lost_at FROM platform_trace_destination
 WHERE singleton
 FOR UPDATE
 `
@@ -658,6 +663,7 @@ func (q *Queries) LockPlatformTraceDestination(ctx context.Context) (PlatformTra
 		&i.SpansDropped,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -913,12 +919,13 @@ const updateTraceDestination = `-- name: UpdateTraceDestination :one
 UPDATE trace_destinations
 SET name = $1, backend = $2, endpoint_url = $3, params = $4,
     credentials = $5, secret_fields = $6, resource_attributes = $7,
-    enabled = $8, config_version = config_version + 1,
-    last_test_at = CASE WHEN $9::boolean THEN $10 ELSE last_test_at END,
-    last_test_ok = CASE WHEN $9::boolean THEN $11 ELSE last_test_ok END,
-    last_test_message = CASE WHEN $9::boolean THEN $12 ELSE last_test_message END
+    credential_lost_at = CASE WHEN $8::boolean THEN NULL ELSE credential_lost_at END,
+    enabled = $9, config_version = config_version + 1,
+    last_test_at = CASE WHEN $8::boolean THEN $10 ELSE last_test_at END,
+    last_test_ok = CASE WHEN $8::boolean THEN $11 ELSE last_test_ok END,
+    last_test_message = CASE WHEN $8::boolean THEN $12 ELSE last_test_message END
 WHERE org_id = $13 AND id = $14 AND config_version = $15
-RETURNING org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at
+RETURNING org_id, id, name, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, created_by, created_at, updated_at, credential_lost_at
 `
 
 type UpdateTraceDestinationParams struct {
@@ -929,8 +936,8 @@ type UpdateTraceDestinationParams struct {
 	Credentials        []byte
 	SecretFields       []string
 	ResourceAttributes []byte
-	Enabled            bool
 	SetTest            bool
+	Enabled            bool
 	LastTestAt         pgtype.Timestamptz
 	LastTestOk         pgtype.Bool
 	LastTestMessage    pgtype.Text
@@ -942,7 +949,9 @@ type UpdateTraceDestinationParams struct {
 // Replaces the settings of a destination. Applies only to the version the caller read
 // (@expected_version), so two admins editing at once do not overwrite each other's secrets, and bumps
 // config_version. @set_test says the change was tested and the test columns are recorded; otherwise the
-// previous test result stays. The router's health columns stay.
+// previous test result stays. The router's health columns stay. A tested change ends lost credentials
+// (#85): it carried every secret the backend needs (the trigger credential_lost_clear also clears the
+// mark when credentials are stored).
 func (q *Queries) UpdateTraceDestination(ctx context.Context, arg UpdateTraceDestinationParams) (TraceDestination, error) {
 	row := q.db.QueryRow(ctx, updateTraceDestination,
 		arg.Name,
@@ -952,8 +961,8 @@ func (q *Queries) UpdateTraceDestination(ctx context.Context, arg UpdateTraceDes
 		arg.Credentials,
 		arg.SecretFields,
 		arg.ResourceAttributes,
-		arg.Enabled,
 		arg.SetTest,
+		arg.Enabled,
 		arg.LastTestAt,
 		arg.LastTestOk,
 		arg.LastTestMessage,
@@ -985,6 +994,7 @@ func (q *Queries) UpdateTraceDestination(ctx context.Context, arg UpdateTraceDes
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -1036,12 +1046,13 @@ ON CONFLICT (singleton) DO UPDATE
 SET backend = EXCLUDED.backend, endpoint_url = EXCLUDED.endpoint_url, params = EXCLUDED.params,
     credentials = EXCLUDED.credentials, secret_fields = EXCLUDED.secret_fields,
     resource_attributes = EXCLUDED.resource_attributes, enabled = EXCLUDED.enabled,
+    credential_lost_at = CASE WHEN $12::boolean THEN NULL ELSE platform_trace_destination.credential_lost_at END,
     config_version = platform_trace_destination.config_version + 1,
     last_test_at = CASE WHEN $12::boolean THEN EXCLUDED.last_test_at ELSE platform_trace_destination.last_test_at END,
     last_test_ok = CASE WHEN $12::boolean THEN EXCLUDED.last_test_ok ELSE platform_trace_destination.last_test_ok END,
     last_test_message = CASE WHEN $12::boolean THEN EXCLUDED.last_test_message ELSE platform_trace_destination.last_test_message END,
     updated_by = EXCLUDED.updated_by, updated_at = now()
-RETURNING singleton, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, updated_by, updated_at
+RETURNING singleton, backend, protocol, endpoint_url, params, credentials, secret_fields, resource_attributes, enabled, config_version, last_test_at, last_test_ok, last_test_message, last_success_at, last_error_at, last_error, spans_dropped, updated_by, updated_at, credential_lost_at
 `
 
 type UpsertPlatformTraceDestinationParams struct {
@@ -1097,6 +1108,7 @@ func (q *Queries) UpsertPlatformTraceDestination(ctx context.Context, arg Upsert
 		&i.SpansDropped,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }

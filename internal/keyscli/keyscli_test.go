@@ -22,6 +22,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -295,6 +296,34 @@ var _ = Describe("koinon-api keys", func() {
 		plain, err := ring(ctx).Open(tracedest.PlatformBinding(), env)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(plain)).To(ContainSubstring("api_key"))
+	})
+
+	It("rewraps and reencrypts home repository passwords, every repository epoch included", func(ctx SpecContext) {
+		var agent pgtype.UUID
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'a', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
+		pw := checkpoint.Passwords{Q: store.New(pool), Keys: ring(ctx), Begin: pool.Begin}
+		e0, err := pw.Current(ctx, org, agent)
+		Expect(err).NotTo(HaveOccurred())
+		e1, _, err := pw.NewEpoch(ctx, org, agent, checkpoint.ReasonKeyLost, checkpoint.DefaultRetain)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(usage(ctx)).To(Equal(map[string]int{"kek-20260101-aaaa": 2}))
+
+		Expect(tool.Add(ctx, "")).To(Succeed())
+		set, _ := ks.Load(ctx)
+		for k := range set.Keys {
+			if k != "kek-20260101-aaaa" {
+				Expect(tool.Activate(ctx, k)).To(Succeed())
+			}
+		}
+		Expect(tool.Rewrap(ctx)).To(Succeed())
+		Expect(out.String()).To(ContainSubstring("2 value(s) rewrapped"))
+		Expect(tool.Reencrypt(ctx)).To(Succeed())
+		now = now.Add(6 * time.Minute)
+		Expect(tool.Retire(ctx, "kek-20260101-aaaa")).To(Succeed(), "no value uses the old KEK any more")
+
+		pw.Keys = ring(ctx)
+		Expect(pw.At(ctx, org, agent, 0)).To(Equal(e0))
+		Expect(pw.At(ctx, org, agent, 1)).To(Equal(e1))
 	})
 
 	It("refuses to make a new KEK Secret when the database holds encrypted values", func(ctx SpecContext) {

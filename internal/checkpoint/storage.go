@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/kopia/kopia/repo/blob"
@@ -16,13 +17,25 @@ import (
 )
 
 // Storage opens the blob storage of one repository, identified by its prefix
-// (orgs/<org>/homes/<agent>/).
+// (orgs/<org>/homes/<agent>/, or orgs/<org>/homes/<agent>/r<N>/ for a later repository epoch).
 type Storage interface {
 	Open(ctx context.Context, prefix string, create bool) (blob.Storage, error)
 }
 
-// Prefix is the storage prefix of an agent's repository.
+// Prefix is the storage prefix of an agent's first repository (epoch 0).
 func Prefix(org, agent string) string { return "orgs/" + org + "/homes/" + agent + "/" }
+
+// EpochPrefix is the storage prefix of an agent's repository of the given epoch: Prefix for epoch
+// 0, and r<N>/ under it for each later one. kopia names its own blobs with fixed prefixes (p, q, x,
+// n, kopia.*; repo.GetLockingStoragePrefixes) and its maintenance lists only those, none of them r,
+// so the repository at Prefix never keeps or deletes a later epoch's blobs. Only a listing of every
+// blob (kopia blob list) sees them.
+func EpochPrefix(org, agent string, epoch int32) string {
+	if epoch == 0 {
+		return Prefix(org, agent)
+	}
+	return Prefix(org, agent) + "r" + strconv.FormatInt(int64(epoch), 10) + "/"
+}
 
 // S3 is an S3-compatible bucket: AWS S3, Garage, SeaweedFS, Ceph RGW and the like. The client is
 // minio-go: it addresses a bucket path-style on every endpoint but AWS's and Google's, so there

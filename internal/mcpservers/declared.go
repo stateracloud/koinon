@@ -65,7 +65,8 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 				}
 			}
 		}
-		if cur != nil && cur.DeclaredVersion.String == d.Version && !cur.RemovedAt.Valid {
+		// A lost credential (keys forget) is written again from the Secret, which still holds it.
+		if cur != nil && cur.DeclaredVersion.String == d.Version && !cur.RemovedAt.Valid && !cur.CredentialLostAt.Valid {
 			return nil
 		}
 		// A credential-less probe of the new settings is not run here: a declared server may be

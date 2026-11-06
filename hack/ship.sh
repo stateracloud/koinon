@@ -31,8 +31,8 @@
 #
 # Run it inside a checkout or worktree on a feature branch named <type>/<N>-<slug> (the claim and the
 # PR hang off N); any other name is refused before anything is pushed (koinon-private#485). Work that needs no issue
-# (the claim check exempts chore/ci/build(deps) PRs without source changes, and PRs labelled
-# unclaimed-ok) passes --no-issue, which accepts <type>/<slug> instead. Environment:
+# (the claim check only fails on someone else's live claim, so a PR without Closes #N passes, ADR 0094
+# decision 2) passes --no-issue, which accepts <type>/<slug> instead. Environment:
 #   KOINON_SHIP_ALLOWED_EMAILS  comma list of user.email values that may commit (default: any)
 #   KOINON_COMMIT_FOOTER        text appended to the commit message (attribution lines)
 #   KOINON_SHIP_MAX_BLOB_MIB    blob size limit in MiB (default 5)
@@ -84,7 +84,7 @@ cd "$(git rev-parse --show-toplevel)"
 branch=$(git symbolic-ref --short -q HEAD) || fail "detached HEAD; check out a feature branch"
 [[ $branch != main && $branch != master ]] || fail "refusing to ship from $branch; use a feature branch"
 # A branch is <type>/<N>-<slug> (the claim and the PR hang off N), or <type>/<slug> with --no-issue for
-# work the claim check exempts. A stray name, such as the one a broken test helper once checked out in
+# work without an issue. A stray name, such as the one a broken test helper once checked out in
 # a real worktree (koinon-private#485), is refused before anything is pushed.
 if [[ $no_issue == 1 ]]; then
 	[[ $branch =~ ^[a-z]+/[a-z0-9][a-z0-9._-]{2,}$ ]] || fail "branch '$branch' is not <type>/<slug>; rename it (git branch -m) before shipping"

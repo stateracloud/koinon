@@ -34,8 +34,8 @@ export type AuditEvent = Message<"koinon.audit.v1alpha1.AuditEvent"> & {
   orgId: string;
 
   /**
-   * actor_kind is user, token, agent, secret or system; actor_id is that actor's ID, or the declaring
-   * Secret's name for secret.
+   * actor_kind is user, token, agent, secret, system or cli; actor_id is that actor's ID, the
+   * declaring Secret's name for secret, or the command for cli (keys forget).
    *
    * @generated from field: string actor_kind = 3;
    */

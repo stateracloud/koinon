@@ -95,11 +95,15 @@ in [docs/dev/maintainer-homelab.md](docs/dev/maintainer-homelab.md); you do not 
   bypass. Merge with a merge commit (keeps stacked pull requests intact); squash and rebase merges
   are off. CODEOWNERS requests the other maintainer's review; approval is required on sensitive
   paths (workflows, ADRs, migrations, auth, gateway, secret store, sandbox policy).
-- Every pull request names its issue with `Closes #N`, and its author holds the claim on that issue
-  (`hack/claim.sh take N`; [ADR 0082](docs/adr/0082-work-claims-and-ready-queue.md)). The `claim`
-  check enforces it; `chore`, `ci` and `deps` titles, Dependabot and the label `unclaimed-ok` are
-  exempt. With strict checks, keep the branch up to date with `main`; the updater bot also does it
-  for auto-merge pull requests.
+- A pull request names the issue it closes with `Closes #N`. Claim the issue first, so nobody else
+  starts on it: comment `/claim` on the issue (outside contributors: on issues labelled
+  `good first issue` or `help wanted`, at most 2 at a time, 14 days, renewed by commenting again),
+  or `hack/claim.sh take N` as a maintainer's agent; `/release` gives it back
+  ([ADR 0082](docs/adr/0082-work-claims-and-ready-queue.md),
+  [ADR 0094](docs/adr/0094-work-claims-on-the-public-repository.md)). The `claim` check fails only
+  when someone else holds a live claim on an issue the pull request closes, or on the number of an
+  ADR it adds; it names the holder and what to do. With strict checks, keep the branch up to date
+  with `main`; the updater bot also does it for auto-merge pull requests.
 - ADR numbers are unique and contiguous (`hack/adr-lint.sh`): if yours collides, renumber it.
 - Dependabot opens one grouped update per ecosystem (Go, web, GitHub Actions, Docker) each Monday
   (see [Dependency updates](#dependency-updates)); security updates arrive as soon as they are

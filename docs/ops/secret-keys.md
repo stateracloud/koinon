@@ -61,11 +61,45 @@ Restore it with `kubectl -n <namespace> apply -f koinon-kek-backup.yaml`.
 Keep the file with your other secrets, apart from the database backups. **A database backup needs the
 KEKs that wrapped it.** Keep every KEK, including retired ones, for as long as a database backup that
 used it exists. Retiring a KEK removes it from the Secret, not from your escrow. If every copy of a KEK
-is lost, the values wrapped by it are lost: add the providers, connections and MCP server credentials
-again.
+is lost, the values wrapped by it are lost: see [A lost KEK](#a-lost-kek).
 
 The Secret is not part of the Helm release, so `helm uninstall` leaves it, and so does a GitOps prune.
 Delete it yourself when you delete the database.
+
+## A lost KEK
+
+`keys status` names a KEK that values use but the Secret does not hold as MISSING. First look for a
+copy: your escrow, an older `keys export`, another cluster restored from the same backup. Restore it
+with `kubectl apply` and nothing is lost. If the KEK was just deleted from the Secret by accident, the
+running koinon-api pods may still hold it in memory for about a minute (they reload the Secret every
+minute), but they cannot export it: only your escrow brings it back, so check it before you go on.
+Only when no copy exists anywhere, give it up:
+
+```sh
+kubectl -n koinon exec -it deploy/koinon-api -- koinon-api keys forget <kek-id>
+```
+
+It refuses a KEK that is still in the Secret (that one is not lost: `keys rewrap`, then `keys retire`).
+On a terminal it asks you to type the KEK ID, because it cannot be undone; without an ID it offers the
+KEKs that seal values but are missing from the Secret. Without a terminal it does nothing unless you
+pass `--yes`. It reads the Secret again after you answer, and changes nothing if the KEK was
+restored meanwhile. Then:
+
+- Provider keys, connection secrets, MCP server and trace destination credentials sealed with it are
+  marked lost. Their pages say "credential lost" and ask for the value again (an MCP server keeps its
+  header and prefix); nothing uses them until then. A declared one is stored again from its Secret.
+- Saved work sealed with it expires, as it does after its retention.
+- An agent whose current home repository password was sealed with it starts a new home repository,
+  sealed with the active KEK, and its next sandbox starts with a fresh home: its earlier checkpoints
+  cannot be restored. The old repository is deleted after the org's home backup retention
+  ([retention guide](../site/src/content/docs/guides/retention.md)).
+- Each org it changed gets one `keys.forget` audit event (actor `cli`, `keys forget`) listing what was
+  lost and the new repositories. The platform's own trace destination belongs to no org: like the
+  platform admin API, the command audits it in a platform admin's personal org (each platform
+  admin's, since it acts for none of them), and a platform admin enters it again. With no platform
+  admin it leaves that destination as it is and says so; grant one and run it again.
+
+Running it again finds nothing left to forget. Then check that `keys status` no longer shows the KEK.
 
 ## Rotate on schedule
 
@@ -103,11 +137,13 @@ kubectl -n koinon exec -it deploy/koinon-api -- koinon-api keys retire
   cannot be picked. It asks again, with the escrow reminder, before it removes the key.
 - `keys rewrap` asks with the number of values it will change.
 - `keys reencrypt` asks you to type the active KEK's ID, because it decrypts every payload.
+- `keys forget` asks you to type the lost KEK's ID, because it cannot be undone.
 - `--yes` skips the questions you would be asked (it never picks a KEK for you).
 
 Without a terminal (no `-t`, a script, CI, a pod's own command), or with `--no-input`
 (`KOINON_NO_INPUT=true`), nothing is ever asked: a missing ID is the usual error
-(`accepts 1 arg(s), received 0`) and nothing needs `--yes`. `--no-input` is a flag of every Koinon
+(`accepts 1 arg(s), received 0`) and nothing needs `--yes`, except `keys forget`: it cannot be undone,
+so without a terminal it refuses unless you pass `--yes`. `--no-input` is a flag of every Koinon
 binary; `kubectl exec -it ... keys retire --no-input <id>` runs the plain form on a terminal. The chart
 does not set it. With `TERM=dumb` the questions are plain lines, one per answer.
 

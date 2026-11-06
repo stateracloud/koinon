@@ -287,6 +287,23 @@ fixtures, and posts PR alerts without a separate dependency overview comment. It
 DeepSource: answer and resolve its inline comments before merge (#187). On 2026-12-05 check whether
 it caught anything Dependabot, govulncheck or OSV did not; if not, remove it.
 
+### The `claim` check and claims by comment (ADR 0094, #163, #164)
+
+`claim` (`.github/workflows/claims.yml`, `pull_request_target`, read-only, `hack/claim.sh check-pr`)
+is required and is a conflict check: it fails only when someone else's human holds a live claim on an
+issue the pull request closes, or a live `claim/adr-NNNN` reservation for an ADR file it adds. The
+issues it reads are GitHub's closing links of the pull request (`closingIssuesReferences`: closing
+keywords in any form, `owner/repo#N` and URLs included, and the sidebar) plus the body's `Closes #N`.
+A pull request that names no issue, an unclaimed issue, the author's own claim and a stale one pass;
+there is no exemption label, title or author any more (`unclaimed-ok` and the Dependabot exemption
+are retired). The failure and success texts are fixed and pinned in `hack/claim_test.sh`.
+
+`claim-comment` (`.github/workflows/claim-comment.yml`, `issue_comment`, `hack/claim.sh comment N`)
+handles `/claim` and `/release` on issues with `GITHUB_TOKEN`; it is no status check. The sweeper,
+release and comment jobs run on `GITHUB_TOKEN` with `actions: write` (to re-run a failed `claim`
+check when a claim changes); no GitHub App and no Environment are involved. Leases, classes and the
+fallback when GitHub refuses the token's write: `docs/dev/work-claims-setup.md`.
+
 ## Merging
 
 The only merge method is a merge commit: `gh pr merge --auto --merge`. `e2e result` is required

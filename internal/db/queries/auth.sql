@@ -64,6 +64,11 @@ DELETE FROM platform_admins
 WHERE user_id = @user_id AND source = 'oidc_group'
 RETURNING user_id;
 
+-- name: ListPlatformAdminPersonalOrgs :many
+-- The personal orgs of the platform admins: where a platform change made by no user (a koinon-api
+-- command) is audited, as the platform API audits in the acting admin's personal org.
+SELECT u.personal_org_id FROM platform_admins pa JOIN users u ON u.id = pa.user_id ORDER BY u.personal_org_id;
+
 -- name: IsPlatformAdmin :one
 SELECT EXISTS (SELECT 1 FROM platform_admins WHERE user_id = @user_id);
 

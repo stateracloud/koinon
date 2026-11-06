@@ -6,7 +6,9 @@ in this order. The `sweeper` and `release claims` jobs of `claims.yml` need none
 `GITHUB_TOKEN` (job permissions `contents: write`, `issues: write`, `pull-requests: read`), make no
 board writes (`KOINON_CLAIM_PROJECT=none`; the board's built-in workflows set Done) and fail red when
 a permission is missing ([ADR 0094](../adr/0094-work-claims-on-the-public-repository.md) decision 3).
-Only `updater.yml` still uses the App of step 7 until the native merge queue replaces it.
+`claim-comment.yml` (`/claim` and `/release` comments, decision 1) runs the default branch's
+`hack/claim.sh comment N` on `GITHUB_TOKEN` too. Only `updater.yml` still uses the App of step 7
+until the native merge queue replaces it (decision 4).
 
 ## 1. Project board (https://github.com/orgs/stateracloud/projects/1)
 
@@ -24,8 +26,9 @@ Only `updater.yml` still uses the App of step 7 until the native merge queue rep
 
 `agent-ok` (a human judged the issue safe for an agent), `start-here` (Ready issues for the
 contributor; `claim.sh next --label start-here`), `claim:stale` (set and cleared by the sweeper),
-`needs-update` (set and cleared by the updater when a PR conflicts with main), `unclaimed-ok` (a PR
-may skip `Closes #N`; only counts when a maintainer added it).
+`needs-update` (set and cleared by the updater when a PR conflicts with main; it goes with the
+updater, decision 4), `good first issue` and `help wanted` (GitHub's defaults: the only issues an
+outside contributor may `/claim`). `unclaimed-ok` is retired (decision 2): delete the label.
 
 ## 3. Milestone
 
@@ -45,9 +48,9 @@ current milestone a due date, and put Ready issues in it.
 - Require branches to be up to date before merging (`strict_required_status_checks_policy: true`).
 - Required checks: `hack/ci-required.txt` is the list (`hack/ci-required-test.sh --ruleset` diffs it
   against the live ruleset); the existing ones plus **`claim`** (required from day one) and **`adr-lint`**.
-  The first pull request after this needs `Closes #N` with a held claim, or an exemption (a
-  `chore`/`ci`/`build(deps)` title without source changes, Dependabot, or the label `unclaimed-ok`
-  added by a maintainer). Use the label for the pull request that introduces the checks.
+  `claim` fails only on someone else's live claim on an issue the pull request closes, or on
+  someone else's live `claim/adr-NNNN` reservation for an ADR file it adds (decision 2); a pull
+  request without `Closes #N`, a Dependabot one and a `chore` one pass, so no exemption exists.
 - Review on sensitive paths only: in the `pull_request` rule add **Require reviewers**
   (`required_reviewers`): one approval, from a team holding `@procoduck` and `@ovirandunu`, for the
   file patterns printed by `hack/claim.sh sensitive-paths` (the `# Sensitive paths` section of
@@ -68,6 +71,14 @@ current milestone a due date, and put Ready issues in it.
 - Either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay procoduck's.
 
 ## 7. The GitHub App, step by step
+
+Only `updater.yml` uses it. Once the native merge queue replaces the updater (ADR 0094 decision 4),
+an organization owner retires it: uninstall and delete the `koinon-bot` App, delete the
+`claims-bot` Environment with its two secrets, delete the stored `.pem`, and delete the
+`needs-update` label. Until then keep the steps below. Comment claims need none of it; if GitHub
+ever refuses their token's write for an outside contributor, `claim.sh comment` answers with a
+pointer to a pull request and opens one Backlog issue titled "Comment claims: GitHub refused the
+claim write for an outside contributor": that issue is the signal to revisit decision 1.
 
 1. As an organization owner: Settings -> Developer settings -> GitHub Apps -> **New GitHub App**.
 2. Name **koinon-bot**. Homepage URL: the repository URL. Webhook: **uncheck Active**.

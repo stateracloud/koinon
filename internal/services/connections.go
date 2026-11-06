@@ -90,6 +90,7 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 		Id: idString(c.ID), OrgId: idString(c.OrgID), Connector: c.Connector, DisplayName: c.DisplayName,
 		Status: connectionStatusToProto[c.Status], LastTestedAt: tsProto(c.LastTestedAt), CreatedAt: tsProto(c.CreatedAt),
 		Source: string(c.Source), ManagedBySecret: c.ManagedBySecret.String, Removed: c.RemovedAt.Valid,
+		CredentialLostAt: tsProto(c.CredentialLostAt),
 	}
 	var results []connections.CheckResult
 	if err := json.Unmarshal(c.LastTest, &results); err == nil {
@@ -355,6 +356,120 @@ func (s *Server) CreateGiteaConnection(ctx context.Context, req *connectionv1alp
 	return res, nil
 }
 
+// SetConnectionSecret implements ConnectionService: a new secret for a connection entered here, by
+// the rules of the create calls (validated first, sealed straight into an envelope, never returned,
+// logged or quoted). It enters a secret lost with its key-encryption key again (ADR 0085 decision
+// 13) and rotates one; the connection's other settings stay.
+func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha1.SetConnectionSecretRequest) (*connectionv1alpha1.SetConnectionSecretResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("connection_id", req.GetConnectionId())
+	if err != nil {
+		return nil, err
+	}
+	// Take the secret out of the request, so nothing that prints the request later (protobuf-go
+	// ignores debug_redact) can show it.
+	var (
+		connector, field string
+		secrets          map[string][]byte
+	)
+	switch sec := req.GetSecret().(type) {
+	case *connectionv1alpha1.SetConnectionSecretRequest_Github:
+		connector, field = providers.GitHub, "private_key"
+		secrets = map[string][]byte{connections.GitHubPrivateKeyField: []byte(sec.Github.GetPrivateKey())}
+		sec.Github.PrivateKey = ""
+	case *connectionv1alpha1.SetConnectionSecretRequest_Gitea:
+		connector, field = providers.Gitea, "tokens"
+		secrets = map[string][]byte{
+			gitea.ReadTokenField:  []byte(strings.TrimSpace(sec.Gitea.GetReadToken())),
+			gitea.WriteTokenField: []byte(strings.TrimSpace(sec.Gitea.GetWriteToken())),
+		}
+		sec.Gitea.ReadToken, sec.Gitea.WriteToken = "", ""
+	default:
+		return nil, connect.NewError(connect.CodeInvalidArgument, "secret is required: github or gitea")
+	}
+	host, ok := s.hosts.Get(connector)
+	if !ok {
+		return nil, s.dbError(fmt.Errorf("%s provider is not registered", connector), "connector type")
+	}
+	if err := host.ValidateSecrets(secrets); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, field+": "+strings.TrimPrefix(err.Error(), connector+": "))
+	}
+	if s.keys == nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, connections.ErrNoKeyring.Error())
+	}
+
+	rctx := requestCtx(ctx)
+	var row store.Connection
+	err = s.inTx(rctx, func(q *store.Queries) error {
+		cur, err := q.GetConnectionForUpdate(rctx, store.GetConnectionForUpdateParams{OrgID: c.org, ID: id})
+		if err != nil {
+			return err
+		}
+		switch {
+		case cur.Connector != connector:
+			return connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf("this is a %s connection; send its %s secret", cur.Connector, cur.Connector))
+		case cur.Source != store.ConfigSourceUi:
+			return connect.NewError(connect.CodeFailedPrecondition, "this connection is declared by the Kubernetes Secret "+cur.ManagedBySecret.String+"; change the secret there")
+		}
+		config, fingerprint := cur.Config, ""
+		switch connector {
+		case providers.GitHub:
+			key, _ := github.ParsePrivateKey(secrets[connections.GitHubPrivateKeyField]) // validated above
+			fingerprint = key.Fingerprint()
+		case providers.Gitea:
+			prev, err := gitea.ParseConfig(cur.Config)
+			if err != nil {
+				return err
+			}
+			next := gitea.NewConfig(prev.Site, secrets[gitea.ReadTokenField], secrets[gitea.WriteTokenField], &prev, time.Now())
+			if config, err = json.Marshal(next); err != nil {
+				return err
+			}
+			fingerprint = next.ReadTokenFingerprint + "." + next.WriteTokenFingerprint
+		}
+		envelope, err := connections.SealFields(s.keys, c.org, cur.ID, secrets)
+		if err != nil {
+			s.log.Error("could not seal connection secret", "org", c.org.String(), "connection", cur.ID.String(), "err", err)
+			return connect.NewError(connect.CodeUnavailable, "could not store the secret; try again")
+		}
+		row, err = q.SetUIConnectionSecret(rctx, store.SetUIConnectionSecretParams{
+			OrgID: c.org, ID: cur.ID, Config: config, SecretEnvelope: envelope, SecretFingerprint: fingerprint,
+		})
+		if err != nil {
+			return err
+		}
+		return audit.RecordErr(rctx, q, audit.Event{
+			Org: c.org, Actor: c.auditActor(), Action: "connection.secret.set", TargetKind: "connection", TargetID: cur.ID.String(),
+			Before: map[string]any{"displayName": cur.DisplayName, "fingerprint": cur.SecretFingerprint, "lost": cur.CredentialLostAt.Valid},
+			After:  map[string]any{"displayName": cur.DisplayName, "fingerprint": fingerprint},
+		})
+	})
+	if err != nil {
+		return nil, s.dbError(err, "connection")
+	}
+	s.log.Info("connection secret set", "org", c.org.String(), "connection", row.ID.String(), "connector", row.Connector,
+		"fingerprint", row.SecretFingerprint, "by", c.actor().String())
+
+	res := &connectionv1alpha1.SetConnectionSecretResponse{}
+	if req.GetTest() {
+		tested, results, err := s.testConnection(ctx, row)
+		if err != nil {
+			// The secret is stored and cannot be entered again by a retry that fails the same way:
+			// answer with the stored connection and a failed test, not an error.
+			s.log.Warn("test after storing a connection secret failed", "org", c.org.String(), "connection", row.ID.String(), "err", err)
+			results = []*connectionv1alpha1.CheckResult{{Check: "test", Message: "the secret is stored, but Koinon could not run the checks; test the connection again"}}
+		} else {
+			row = tested
+		}
+		res.Results = results
+	}
+	res.Connection = s.connectionProto(row)
+	return res, nil
+}
+
 // DeleteConnection implements ConnectionService, by the rules of DeleteProvider: a connection entered
 // here can be deleted, a declared one only after its Secret was deleted (removed), and none while an
 // agent is bound to it.
@@ -494,6 +609,9 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection) (stor
 		res := connections.CheckResult{Check: "secret", Step: "generate-key", Message: "Koinon could not read this connection's private key; create the connection again"}
 		if p.ID() != providers.GitHub {
 			res.Step, res.Message = "create-tokens", "Koinon could not read this connection's tokens or address; create the connection again"
+		}
+		if errors.Is(err, connections.ErrCredentialLost) {
+			res.Message = "this connection's stored credential was lost with a key-encryption key; " + connections.LostRemedy(row)
 		}
 		results = []connections.CheckResult{res}
 	} else {
