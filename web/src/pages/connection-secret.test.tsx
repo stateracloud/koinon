@@ -25,7 +25,10 @@ const pemKey = '-----BEGIN RSA PRIVATE KEY-----\nkoinon_test_not-a-real-key\n---
 const readTok = 'koinon_test_not-a-real-read-token'
 const writeTok = 'koinon_test_not-a-real-write-token'
 
-function github(over: Partial<Connection> = {}) {
+// Overrides of a test connection: any field but the message's own brand.
+type ConnectionOverrides = Partial<Omit<Connection, '$typeName' | '$unknown'>>
+
+function github(over: ConnectionOverrides = {}) {
   return create(ConnectionSchema, {
     id: 'c-1',
     orgId,
@@ -38,7 +41,7 @@ function github(over: Partial<Connection> = {}) {
   })
 }
 
-function gitea(over: Partial<Connection> = {}) {
+function gitea(over: ConnectionOverrides = {}) {
   return create(ConnectionSchema, {
     id: 'c-1',
     orgId,
