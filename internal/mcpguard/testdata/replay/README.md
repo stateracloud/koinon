@@ -21,5 +21,10 @@ Everything is fake: the tokens are `koinon_test_not-a-real-token...`, the canari
 `koinon-canary-rt1-...-not-a-secret`, the hosts `example` domains or public documentation URLs that are
 never fetched (the suite has no network), the connection ID `00000000-0000-4000-8000-000000000352`.
 
+`model_replay_test.go` replays a sample of both corpora (each server/tool and expectation, the split
+shapes, the run over the cap) with the in-process fake model in the loop: the model emits each call
+as a tool_use and the guard decides the arguments the model sent. One case differs from the direct
+replay because the fake model sorts argument keys; the test names it (`keyOrder`) and why.
+
 A recorded corpus does not belong here: it is measured from its own path with
 `KOINON_LEAKGUARD_CORPUS` (`docs/dev/real-model-tests.md`).
