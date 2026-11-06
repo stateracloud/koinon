@@ -1,6 +1,6 @@
 # 0096. MCP sign-in: OAuth-authorized remote MCP servers
 
-- Status: Proposed
+- Status: Accepted (2026-11-06)
 - Date: 2026-11-06
 - Amends: [0057](0057-mcp-servers.md) (amendment 2026-10-24, items 2 and 5: the OAuth refusal and the
   injection path for servers that need a sign-in)
@@ -223,6 +223,8 @@ credential), in the gateway behaviour suite and the stage A e2e:
 A failing check goes back to the maintainer before the build continues, not into a workaround.
 
 ## Open, unverified points
+
+These are checked in the build stages named in the table; a failed check leads to an amendment of this ADR.
 
 | Point | How it is answered |
 |---|---|
