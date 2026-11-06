@@ -402,8 +402,9 @@ destination credentials included.
 - Once the key is gone for good, koinon-api cannot load the key set: it fails when any one KEK does
   not unwrap, so it does not start and `keys forget` cannot run. Remove the entries of the KEKs that
   key wrapped from the KEK Secret first (keep a copy of the Secret), then `keys forget` each of them.
-  If the active KEK is among them, the key set has no active KEK left; that procedure is not written
-  yet, so stop there and ask on the issue tracker.
+  If the active KEK is among them, the key set has no active KEK left and does not load; that
+  procedure is not written yet
+  ([#255](https://github.com/stateracloud/koinon/issues/255)), so stop there.
 
 A local install has none of this: no key-admin Job, and koinon-api creates and adds KEKs exactly as
 before.
