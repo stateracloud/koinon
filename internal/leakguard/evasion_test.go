@@ -22,6 +22,16 @@ import (
 
 // Bypasses the third review found, and the benign text each fix must leave alone. Every entry
 // of "catches" passed the guard before the fix.
+// scaledLimits is the product's DefaultLimits with only the wall-clock backstop scaled by
+// raceFactor: under -race the decoders run about 10x slower while the work bounds, which count
+// bytes, do not change. Every spec here that runs on the default limits takes them from this, so
+// none can forget the scaling; the 5 s itself is asserted against DefaultLimits.
+func scaledLimits() leakguard.Limits {
+	lim := leakguard.DefaultLimits()
+	lim.MaxDuration *= raceFactor
+	return lim
+}
+
 var _ = Describe("Evasions of the third review", func() {
 	var (
 		fp      *leakguard.Fingerprinter
@@ -32,7 +42,7 @@ var _ = Describe("Evasions of the third review", func() {
 
 	BeforeEach(func() {
 		fp = newFingerprinter(testKey)
-		checker = leakguard.TaintChecker{Store: taintedStore(fp, privateLine)}
+		checker = leakguard.TaintChecker{Store: taintedStore(fp, privateLine), Limits: scaledLimits()}
 	})
 
 	DescribeTable("catches",
@@ -220,7 +230,7 @@ var _ = Describe("Fourth review", func() {
 	BeforeEach(func() { fp = newFingerprinter(testKey) })
 
 	check := func(private string, args ...string) leakguard.Decision {
-		checker := leakguard.TaintChecker{Store: taintedStore(fp, private)}
+		checker := leakguard.TaintChecker{Store: taintedStore(fp, private), Limits: scaledLimits()}
 		d, err := checker.Check(context.Background(), testScope, fp, args)
 		Expect(err).NotTo(HaveOccurred())
 		return d
@@ -279,9 +289,8 @@ var _ = Describe("Fourth review", func() {
 			func(args []string, workCap int) {
 				// The default work budget decides and the clock is a backstop (5 s): a benign
 				// shape is allowed on one core, and uses under half of the budget.
-				// Under -race only the clock scales (raceFactor); the work bounds do not.
-				lim := leakguard.DefaultLimits()
-				lim.MaxDuration *= raceFactor
+				// Under -race only the clock scales (scaledLimits); the work bounds do not.
+				lim := scaledLimits()
 				checker := leakguard.TaintChecker{Store: taintedStore(fp, privateLine), Limits: lim}
 				d, work, err := checker.CheckWork(context.Background(), testScope, fp, args)
 				Expect(err).NotTo(HaveOccurred())
@@ -312,9 +321,8 @@ var _ = Describe("Fourth review", func() {
 		// failed on a loaded lab node (3 CPUs, other packages in parallel).
 		It("is allowed within the 5 s backstop and the default work budget on one core", Serial, func() {
 			args := sliced(128, func(i int) string { return b64(string([]rune(russianProse)[i*50 : i*50+3000])) })
-			lim := leakguard.DefaultLimits()
-			lim.MaxDuration *= raceFactor // 5 s as shipped; scaled only under -race
-			d, err := leakguard.TaintChecker{Store: taintedStore(fp, privateLine), Limits: lim}.Check(context.Background(), testScope, fp, args)
+			// 5 s as shipped; scaled only under -race (scaledLimits).
+			d, err := leakguard.TaintChecker{Store: taintedStore(fp, privateLine), Limits: scaledLimits()}.Check(context.Background(), testScope, fp, args)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
 		})
@@ -385,7 +393,7 @@ var _ = Describe("Fifth review", func() {
 	russian := "Платёжная ведомость формируется каждую ночь на узле финансовой пакетной обработки номер семь"
 
 	catches := func(private string, arg string) {
-		checker := leakguard.TaintChecker{Store: taintedStore(fp, private)}
+		checker := leakguard.TaintChecker{Store: taintedStore(fp, private), Limits: scaledLimits()}
 		d, err := checker.Check(context.Background(), testScope, fp, []string{arg})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(d.Allow).To(BeFalse(), "%+v", d)
@@ -429,7 +437,7 @@ var _ = Describe("Splits across adjacent arguments of many", func() {
 
 	DescribeTable("catches",
 		func(private string, first, second string) {
-			checker := leakguard.TaintChecker{Store: taintedStore(fp, private)}
+			checker := leakguard.TaintChecker{Store: taintedStore(fp, private), Limits: scaledLimits()}
 			args := spread(40, 3, first, 4, second)
 			d, err := checker.Check(context.Background(), testScope, fp, args)
 			Expect(err).NotTo(HaveOccurred())
@@ -447,7 +455,7 @@ var _ = Describe("Splits across adjacent arguments of many", func() {
 	)
 
 	It("catches a base64 stream cut inside a block between adjacent arguments of 40", func() {
-		checker := leakguard.TaintChecker{Store: taintedStore(fp, excerpt)}
+		checker := leakguard.TaintChecker{Store: taintedStore(fp, excerpt), Limits: scaledLimits()}
 		enc := b64(excerpt)
 		d, err := checker.Check(context.Background(), testScope, fp, spread(40, 20, enc[:27], 21, enc[27:]))
 		Expect(err).NotTo(HaveOccurred())
@@ -465,7 +473,7 @@ var _ = Describe("Readings of UTF-8 base64", func() {
 
 	DescribeTable("catches",
 		func(private, arg string) {
-			checker := leakguard.TaintChecker{Store: taintedStore(fp, private)}
+			checker := leakguard.TaintChecker{Store: taintedStore(fp, private), Limits: scaledLimits()}
 			d, err := checker.Check(context.Background(), testScope, fp, []string{arg})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
@@ -498,7 +506,7 @@ var _ = Describe("Streams cut inside an encoding unit in a call of many argument
 
 	DescribeTable("catches",
 		func(first, second string) {
-			checker := leakguard.TaintChecker{Store: taintedStore(fp, excerpt)}
+			checker := leakguard.TaintChecker{Store: taintedStore(fp, excerpt), Limits: scaledLimits()}
 			d, err := checker.Check(context.Background(), testScope, fp, padded(40, 1, first, 2, second))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
@@ -547,7 +555,7 @@ var _ = Describe("Invalid bytes interleaved in an encoded stream", func() {
 
 	DescribeTable("catches",
 		func(private, arg string) {
-			checker := leakguard.TaintChecker{Store: taintedStore(fp, private)}
+			checker := leakguard.TaintChecker{Store: taintedStore(fp, private), Limits: scaledLimits()}
 			d, err := checker.Check(context.Background(), testScope, fp, []string{arg})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
@@ -567,7 +575,7 @@ var _ = Describe("Invalid bytes interleaved in an encoded stream", func() {
 	)
 
 	It("passes base64 of random bytes", func() {
-		checker := leakguard.TaintChecker{Store: taintedStore(fp, prose)}
+		checker := leakguard.TaintChecker{Store: taintedStore(fp, prose), Limits: scaledLimits()}
 		for seed := range 40 {
 			d, err := checker.Check(context.Background(), testScope, fp, []string{b64(randomBytes(seed, 600)), b64(randomBytes(seed+99, 40))})
 			Expect(err).NotTo(HaveOccurred())
