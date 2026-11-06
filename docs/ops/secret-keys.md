@@ -2,10 +2,11 @@
 
 Koinon stores provider API keys (and a provider's optional cost key), connection secrets (a GitHub
 App's private key), remote MCP server credentials, home repository passwords (the kopia repositories
-that hold agent home checkpoints) and trace destination credentials in Postgres as envelopes: each value has its own data key (DEK), wrapped by a key-encryption key (KEK) that lives
-in a Kubernetes Secret. This runbook says how to look after the KEKs. The design is in
-[ADR 0056](../adr/0056-model-providers-pricing-and-budgets-per-org.md); the sources for the
-numbers and the procedure are in [the research](../research/kek-rotation.md).
+that hold agent home checkpoints) and trace destination credentials in Postgres as envelopes: each
+value has its own data key (DEK), wrapped by a key-encryption key (KEK) that lives in a Kubernetes
+Secret. This runbook says how to look after the KEKs. The design is in
+[ADR 0056](../adr/0056-model-providers-pricing-and-budgets-per-org.md); the sources for the numbers and
+the procedure are in [the research](../research/kek-rotation.md).
 
 ## What is where
 
@@ -87,8 +88,9 @@ pass `--yes`. It reads the Secret again after you answer, and changes nothing if
 restored meanwhile. Then:
 
 - Provider keys and cost keys, connection secrets, MCP server and trace destination credentials sealed
-  with it are marked lost. Their pages say "credential lost" and ask for the value again (an MCP server keeps its
-  header and prefix); nothing uses them until then. A declared one is stored again from its Secret.
+  with it are marked lost. Their pages say "credential lost" and ask for the value again (an MCP
+  server keeps its header and prefix); nothing uses them until then. A declared one is stored again
+  from its Secret.
 - Saved work sealed with it expires, as it does after its retention.
 - An agent whose current home repository password was sealed with it starts a new home repository,
   sealed with the active KEK, and its next sandbox starts with a fresh home: its earlier checkpoints
@@ -253,10 +255,10 @@ can already open every DEK they copied. Do this, in this order:
    If only the **bucket's S3 key** leaked, not a KEK, the repository passwords are safe: do step 2b.1
    and 2b.5 only.
 3. **Rotate the real credentials at their providers.** Re-encrypting does not undo a leak. Issue new
-   OpenRouter, OpenAI or other provider keys (and cost keys), a new GitHub App private key, new
-   remote MCP server credentials and new trace destination credentials (the trace backend's API keys,
-   or a generic destination's header values), and replace them in Koinon (the admin API, or by editing the declarative Secrets). Revoke
-   the old ones where they were issued.
+   OpenRouter, OpenAI or other provider keys (and cost keys), a new GitHub App private key, new remote
+   MCP server credentials and new trace destination credentials (the trace backend's API keys, or a
+   generic destination's header values), and replace them in Koinon (the admin API, or by editing the
+   declarative Secrets). Revoke the old ones where they were issued.
 4. Rotate the admin API tokens: revoke every token and create new ones.
 5. Look at the audit log for changes made while the key was exposed.
 
@@ -388,10 +390,10 @@ then lost, with the same consequences as [A lost KEK](#a-lost-kek), home checkpo
 destination credentials included.
 
 - Protect the KMS key as you protect the KEK backup. OpenBao: leave `deletion_allowed` off on the
-  transit key, do not disable the transit mount, and back up OpenBao itself (a raft snapshot, with
-  the unseal or recovery keys). A transit key backup is not the way: it needs `exportable` and
-  `allow_plaintext_backup`, which cannot be turned off again and let the key leave the KMS. AWS: a
-  key policy that denies `kms:ScheduleKeyDeletion`.
+  transit key, do not disable the transit mount, and back up OpenBao itself (a raft snapshot, or your
+  storage backend's backup, with the unseal or recovery keys). A transit key backup is not the way: it
+  needs `exportable` and `allow_plaintext_backup`, which cannot be turned off again and let the key
+  leave the KMS. AWS: a key policy that denies `kms:ScheduleKeyDeletion`.
 - AWS deletion waits 7 to 30 days. While it is pending, pods fail to start (see the bullet on
   disabling the key above); `aws kms cancel-key-deletion` and then `aws kms enable-key` bring the key
   back and nothing is lost.

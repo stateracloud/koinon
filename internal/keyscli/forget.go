@@ -52,8 +52,8 @@ func (r lostRule) set(c Column) string { return c.Column + " = NULL, " + r.mark 
 // Seam for ADR 0096 (MCP sign-in, draft #248), not built here: its sealed values (the access and
 // refresh tokens, the pending PKCE verifier, admin-entered and dynamically registered client
 // secrets) join [Columns] and get a rule here: a lost sign-in parks the runs that need it and
-// posts "Sign in again", and a lost client secret or pending flow is entered or started again (the
-// ADR's keys forget section). TestColumnsListEveryBinding fails for a binding missing from Columns,
+// posts "Sign in again"; a lost admin-entered client secret is entered again, a dynamically
+// registered one registered again, and a pending flow started again (ADR 0096 section 4). TestColumnsListEveryBinding fails for a binding missing from Columns,
 // and TestForgetHasARuleForEveryColumn for a column with no rule here.
 var lostRules = map[Column]lostRule{
 	{catalog.ProvidersTable, catalog.KeyColumn}:                {markLost, "providers"},
