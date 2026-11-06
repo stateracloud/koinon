@@ -180,9 +180,9 @@ g_go() {
 	fi
 	if command -v golangci-lint >/dev/null; then
 		# `|| return 1`: golangci-lint exits 3 on findings, which run_gate would read as INCOMPLETE;
-		# only go-test.sh may report 3.
+		# only go-test.sh may report 3. The wrapper gives this worktree its own lock and cache (#236).
 		# shellcheck disable=SC2086 # pkgs is a word list
-		golangci-lint run $pkgs || return 1
+		hack/golangci-lint.sh run $pkgs || return 1
 	else
 		files=$(existing '\.go$')
 		if [[ -n $files ]]; then

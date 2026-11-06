@@ -178,8 +178,7 @@ event payload (koinon-private#676), not from the live state: the run is named `c
 when `github.event.pull_request.draft` is true, else `ci`, and `hack/ci-skip-heavy.sh` decides from
 that same flag (`PR_DRAFT`), so a run's name and its behaviour always agree. A gate that must
 ignore draft runs drops the runs whose `display_title` (`displayTitle` in `gh run list --json`) is `ci (draft)`; the run `name` stays `ci` for every run, so never filter on it;
-`pr-wait.sh` (and `pr-merge.sh`, which calls it) still uses its time window until #133, which will
-filter on the `ci (draft)` display_title instead. A re-run replays the
+`pr-wait.sh` (and `pr-merge.sh`, which calls it) does exactly that (#218): no time window. A re-run replays the
 original event: re-running a `ci (draft)` run after the PR is ready is a draft run again (`go` and
 `web` red, "not tested"). That is safe (it can never leave a green `go` on an untested head) but
 `pr-wait.sh` ignores such a re-run (it was created before the ready event), so the ready run's
@@ -361,10 +360,12 @@ skipped), re-reads the PR (not OPEN: exit 3; head not origin's branch tip: exit 
 `gh pr merge --merge` (`--admin`, else `--auto`, which prints `auto-merge enabled`, or `added to the merge queue` when the ruleset has a queue), and only after that
 succeeded `claim.sh review` in the claim's lane (from `claim.sh mine`, or `--lane`) and a PR comment with the
 head SHA and the number of contexts it read. `pr-wait.sh --checks` exits 5 on a draft. After
-`ready_for_review` it ignores only the draft's `ci` workflow runs: those created more than about 30 s before
-the last ready event (a by-hand re-run of a draft-era run is ignored too). dco, gitleaks,
-claim and commit statuses (`e2e-lab`) keep their result; when gh cannot list the runs, each `ci` check run's
-start time decides instead. It exits 6 `STALE-HEAD` when the PR's head stays different from
+`ready_for_review` it ignores only the draft's `ci` workflow runs, in every mode (with or without
+`--checks`): the runs on the head whose display title is `ci (draft)`, matched by run id (a by-hand
+re-run of a draft run is ignored too). A red or cancelled run of the ready `ci` is never dropped, and
+while the ready run has no checks yet it prints `waiting for the ready run`, never green. dco, gitleaks,
+claim and commit statuses (`e2e-lab`) keep their result; when gh cannot list the runs, nothing is
+dropped (a draft run's red then shows as `FAILED`). It exits 6 `STALE-HEAD` when the PR's head stays different from
 `git ls-remote origin refs/heads/<branch>` for `PR_WAIT_STALE_GRACE` seconds (default 120); re-sync with
 `gh api -X PATCH repos/{owner}/{repo}/pulls/<PR> -f base=<base>`.
 
