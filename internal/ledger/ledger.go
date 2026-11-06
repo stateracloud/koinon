@@ -65,7 +65,12 @@ type Entry struct {
 	InputTokens, OutputTokens         int64
 	InputKnown, OutputKnown           bool
 	CacheReadTokens, CacheWriteTokens int64
-	ReasoningTokens                   int64
+	// ReasoningTokens is the part of OutputTokens the provider reported as reasoning (thinking).
+	// ReasoningKnown says the gateway logged the split (koinon.reasoning); without it the 0 means
+	// "not reported", not "no thinking". agentgateway v1.7.0 logs none for Anthropic Messages,
+	// whose thinking is inside OutputTokens all the same (#78).
+	ReasoningTokens int64
+	ReasoningKnown  bool
 	// CostUSD is the decimal cost as the gateway logged it; empty when the gateway could not
 	// price the request. It is compared with Koinon's own computation, never charged.
 	CostUSD string

@@ -2373,6 +2373,7 @@ type SpendEntry struct {
 	Principal        string
 	UpstreamStatus   pgtype.Int2
 	ProviderID       pgtype.UUID
+	ReasoningKnown   pgtype.Bool
 }
 
 type SpendEntryRevision struct {

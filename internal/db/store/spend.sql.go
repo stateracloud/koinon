@@ -14,7 +14,8 @@ import (
 const claimDueSettlements = `-- name: ClaimDueSettlements :many
 SELECT st.entry_id, st.provider_id, st.provider_type, st.response_id, st.attempts, st.deadline,
        e.agent_id, e.run_id, e.model, e.occurred_at, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_write_tokens,
-       e.reasoning_tokens, e.cost_usd::text AS cost_usd, e.reserve_usd::text AS reserve_usd, e.estimate,
+       e.reasoning_tokens, coalesce(e.reasoning_known, e.reasoning_tokens > 0)::boolean AS reasoning_known,
+       e.cost_usd::text AS cost_usd, e.reserve_usd::text AS reserve_usd, e.estimate,
        coalesce(e.price_ref, '')::text AS price_ref
 FROM spend_settlements st
 JOIN spend_entries e ON e.org_id = st.org_id AND e.id = st.entry_id
@@ -46,6 +47,7 @@ type ClaimDueSettlementsRow struct {
 	CacheReadTokens  int64
 	CacheWriteTokens int64
 	ReasoningTokens  int64
+	ReasoningKnown   bool
 	CostUsd          string
 	ReserveUsd       string
 	Estimate         []byte
@@ -79,6 +81,7 @@ func (q *Queries) ClaimDueSettlements(ctx context.Context, arg ClaimDueSettlemen
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
 			&i.ReasoningTokens,
+			&i.ReasoningKnown,
 			&i.CostUsd,
 			&i.ReserveUsd,
 			&i.Estimate,
@@ -385,18 +388,18 @@ func (q *Queries) GetSystemSpendSince(ctx context.Context, arg GetSystemSpendSin
 const insertSpendEntry = `-- name: InsertSpendEntry :one
 INSERT INTO spend_entries (
     org_id, agent_id, principal, run_id, task_id, request_id, key_id, model,
-    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, reasoning_known,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
     request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id,
     upstream_status, provider_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8,
-    $9, $10, $11, $12, $13,
-    ($14::text)::numeric, ($15::text)::numeric,
-    $16, $17, $18, $19::jsonb, $20,
-    $21, $22, $23,
-    $24, coalesce(($25::text)::numeric, 0), $26,
-    $27, $28
+    $9, $10, $11, $12, $13, $14::boolean,
+    ($15::text)::numeric, ($16::text)::numeric,
+    $17, $18, $19, $20::jsonb, $21,
+    $22, $23, $24,
+    $25, coalesce(($26::text)::numeric, 0), $27,
+    $28, $29
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id
@@ -416,6 +419,7 @@ type InsertSpendEntryParams struct {
 	CacheReadTokens  int64
 	CacheWriteTokens int64
 	ReasoningTokens  int64
+	ReasoningKnown   bool
 	CostUsd          string
 	GatewayCostUsd   pgtype.Text
 	PriceRef         pgtype.Text
@@ -440,7 +444,8 @@ type InsertSpendEntryParams struct {
 // what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
 // for every entry that is not provisional, so a caller that holds nothing passes nothing.
 // provider_id is the provider that served the request, when Koinon knows its model; the daily cost
-// reconciliation sums a provider's entries by it.
+// reconciliation sums a provider's entries by it. reasoning_known says whether reasoning_tokens is
+// the provider's split or 0 for want of one (#78).
 func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, insertSpendEntry,
 		arg.OrgID,
@@ -456,6 +461,7 @@ func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryPara
 		arg.CacheReadTokens,
 		arg.CacheWriteTokens,
 		arg.ReasoningTokens,
+		arg.ReasoningKnown,
 		arg.CostUsd,
 		arg.GatewayCostUsd,
 		arg.PriceRef,
@@ -691,13 +697,13 @@ const settleSpendEntry = `-- name: SettleSpendEntry :one
 UPDATE spend_entries
 SET input_tokens = $1, output_tokens = $2,
     cache_read_tokens = $3, cache_write_tokens = $4,
-    reasoning_tokens = $5,
-    cost_usd = ($6::text)::numeric,
-    price_ref = coalesce($7, price_ref),
-    estimated = $8, estimate = $9::jsonb,
-    cost_flagged = cost_flagged OR $10,
+    reasoning_tokens = $5, reasoning_known = $6::boolean,
+    cost_usd = ($7::text)::numeric,
+    price_ref = coalesce($8, price_ref),
+    estimated = $9, estimate = $10::jsonb,
+    cost_flagged = cost_flagged OR $11,
     provisional = false, reserve_usd = 0
-WHERE org_id = $11 AND id = $12 AND provisional
+WHERE org_id = $12 AND id = $13 AND provisional
 RETURNING id
 `
 
@@ -707,6 +713,7 @@ type SettleSpendEntryParams struct {
 	CacheReadTokens  int64
 	CacheWriteTokens int64
 	ReasoningTokens  int64
+	ReasoningKnown   bool
 	CostUsd          string
 	PriceRef         pgtype.Text
 	Estimated        bool
@@ -725,6 +732,7 @@ func (q *Queries) SettleSpendEntry(ctx context.Context, arg SettleSpendEntryPara
 		arg.CacheReadTokens,
 		arg.CacheWriteTokens,
 		arg.ReasoningTokens,
+		arg.ReasoningKnown,
 		arg.CostUsd,
 		arg.PriceRef,
 		arg.Estimated,
@@ -746,9 +754,10 @@ SELECT model,
        -- Reasoning (thinking) tokens are part of output_tokens, billed at the output rate unless the
        -- price names a reasoning rate; this is the part the provider reported separately.
        coalesce(sum(reasoning_tokens), 0)::bigint AS reasoning_tokens,
-       -- False when no request reported a split (Anthropic Messages never does), so the report says
-       -- "not reported" instead of 0.
-       coalesce(bool_or(reasoning_tokens > 0), false)::boolean AS reasoning_reported,
+       -- False when no request reported a split (agentgateway v1.7.0 logs none for Anthropic
+       -- Messages, #78), so the report says "not reported" instead of 0. An entry written before
+       -- reasoning_known existed counts as reported when its split is above 0.
+       coalesce(bool_or(coalesce(reasoning_known, reasoning_tokens > 0)), false)::boolean AS reasoning_reported,
        coalesce(sum(cost_usd) FILTER (WHERE NOT estimated), 0)::text AS reported_usd,
        coalesce(sum(cost_usd) FILTER (WHERE estimated), 0)::text AS estimated_usd,
        count(*) FILTER (WHERE estimated)::bigint AS estimated_requests,

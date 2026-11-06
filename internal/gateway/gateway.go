@@ -883,8 +883,13 @@ type UsageRecord struct {
 	Model        string
 	InputTokens  int64
 	OutputTokens int64
-	CostUSD      float64
-	Time         time.Time
+	// ReasoningTokens is the part of OutputTokens the provider reported as reasoning (thinking);
+	// ReasoningKnown says it reported one, so 0 without it means "not reported" (#78: agentgateway
+	// v1.7.0 logs no split for Anthropic Messages, whose output count includes the thinking).
+	ReasoningTokens int64
+	ReasoningKnown  bool
+	CostUSD         float64
+	Time            time.Time
 }
 
 // UsageReader yields usage records, for drivers whose gateway can be polled.

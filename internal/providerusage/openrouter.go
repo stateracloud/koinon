@@ -144,6 +144,7 @@ func (o OpenRouter) Usage(ctx context.Context, p Provider, id string) (Usage, er
 		OutputTokens:    first(g.Data.NativeTokensCompletion, g.Data.TokensCompletion),
 		CacheReadTokens: first(g.Data.NativeTokensCached),
 		ReasoningTokens: first(g.Data.NativeTokensReasoning),
+		ReasoningKnown:  g.Data.NativeTokensReasoning != nil && *g.Data.NativeTokensReasoning >= 0,
 		Cost:            cost,
 		UpstreamCost:    upstream,
 		BYOK:            byok,

@@ -78,7 +78,7 @@ func TestOpenRouterReadsTheGenerationsBill(t *testing.T) {
 	if (*seen)[0] != providerusage.OpenRouterGenerationURL+"?id=gen-ready-1" {
 		t.Fatalf("asked %q, not the pinned endpoint", (*seen)[0])
 	}
-	want := providerusage.Usage{InputTokens: 1250, OutputTokens: 42, CacheReadTokens: 1000, ReasoningTokens: 10, Cost: money.MustParse("0.0001234"), Cancelled: true}
+	want := providerusage.Usage{InputTokens: 1250, OutputTokens: 42, CacheReadTokens: 1000, ReasoningTokens: 10, ReasoningKnown: true, Cost: money.MustParse("0.0001234"), Cancelled: true}
 	if u != want {
 		t.Fatalf("got %+v, want %+v", u, want)
 	}
@@ -88,6 +88,9 @@ func TestOpenRouterReadsTheGenerationsBill(t *testing.T) {
 	byok, err := src.Usage(context.Background(), p, "gen-byok-1")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if byok.ReasoningKnown || byok.ReasoningTokens != 0 {
+		t.Fatalf("a generation without native_tokens_reasoning reports no split: %+v", byok)
 	}
 	if !byok.BYOK || byok.Cost != money.MustParse("0.00005") || byok.UpstreamCost != money.MustParse("0.001") {
 		t.Fatalf("BYOK generation: %+v", byok)
