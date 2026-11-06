@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Copies the agentgateway image the chart pins (gateway.standalone.image in charts/koinon/values.yaml,
+# read by hack/agentgateway-pin.sh) to GHCR, so the Go tests that start agentgateway pull a copy we
+# control instead of the upstream registry (#238: an outage of cr.agentgateway.dev turned every Go
+# job red). Run it by hand after the pin moves; docs/dev/ci.md, "The agentgateway test image".
+#
+# It copies by digest, so the mirror holds exactly the image an install runs, under the pin's tag,
+# and fails unless the copy has that digest. The GHCR package stays private until v0.3: the go-test
+# job pulls it with its own GITHUB_TOKEN (packages: read), which works because the package grants this
+# repository access (a package this workflow creates is linked to the repository; check it under
+# the package's settings, "Manage Actions access").
+name: mirror agentgateway test image
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Registry repository to copy the pinned digest from
+        type: choice
+        default: cr.agentgateway.dev/agentgateway
+        options:
+          - cr.agentgateway.dev/agentgateway
+          - ghcr.io/agentgateway/agentgateway
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-agentgateway-test-image
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: tool versions (hack/versions.env)
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
+      - name: read the pin
+        id: pin
+        run: |
+          hack/agentgateway-pin.sh --check
+          read -r _ tag digest < <(hack/agentgateway-pin.sh)
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+      - name: install crane
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "github.com/google/go-containerregistry/cmd/crane@${CRANE_VERSION}"
+          echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
+      - name: log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: crane auth login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$GITHUB_TOKEN"
+      - name: copy and verify
+        env:
+          SOURCE: ${{ inputs.source }}
+          TAG: ${{ steps.pin.outputs.tag }}
+          DIGEST: ${{ steps.pin.outputs.digest }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          dst="ghcr.io/${OWNER,,}/agentgateway"
+          crane copy "$SOURCE@$DIGEST" "$dst:$TAG"
+          got=$(crane digest "$dst:$TAG")
+          if [[ $got != "$DIGEST" ]]; then
+            echo "::error::$dst:$TAG has digest $got, want $DIGEST"
+            exit 1
+          fi
+          crane manifest "$dst@$DIGEST" >/dev/null
+          echo "mirrored $SOURCE@$DIGEST to $dst:$TAG"
+          echo "image: $dst@$DIGEST"
+          {
+            echo "### agentgateway test image"
+            echo
+            echo "\`$dst@$DIGEST\` (tag \`$TAG\`, copied from \`$SOURCE\`)"
+          } >>"$GITHUB_STEP_SUMMARY"

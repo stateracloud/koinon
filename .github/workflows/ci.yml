@@ -779,6 +779,8 @@ jobs:
       - run: hack/bash5-lint.sh
       - run: hack/ship-test.sh
       - run: hack/preflight-test.sh
+      - run: hack/agentgateway-pin-test.sh
+      - run: hack/agentgateway-pin.sh --check
       - run: hack/preflight-stop-test.sh
       - run: hack/e2e-decide-test.sh
       - run: hack/e2e-gate-test.sh

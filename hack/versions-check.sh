@@ -83,10 +83,10 @@ for n in $names; do
 done
 
 # 4a. Go tools run by version (`go run <module>@vX`) and buf-action without a `version:`: a literal
-# version of govulncheck or gofumpt anywhere in workflows or scripts, or a buf-action with no pinned
+# version of govulncheck, gofumpt or crane anywhere in workflows or scripts, or a buf-action with no pinned
 # version (it would pull "latest", ADR 0079's cooldown cannot apply), is a second copy.
-hits=$(grep -nE '(govulncheck|gofumpt)@v?[0-9]' .github/workflows/*.yml hack/*.sh test/e2e/*.sh test/e2e/*/*.sh 2>/dev/null | grep -v '^hack/versions-check' | grep -v '^hack/preflight-test.sh:' || true)
-[[ -z $hits ]] || fail "a literal govulncheck/gofumpt version (read GOVULNCHECK_VERSION/GOFUMPT_VERSION from $env_file): $(head -1 <<<"$hits")"
+hits=$(grep -nE '(govulncheck|gofumpt|crane)@v?[0-9]' .github/workflows/*.yml hack/*.sh test/e2e/*.sh test/e2e/*/*.sh 2>/dev/null | grep -v '^hack/versions-check' | grep -v '^hack/preflight-test.sh:' || true)
+[[ -z $hits ]] || fail "a literal govulncheck/gofumpt/crane version (read GOVULNCHECK_VERSION/GOFUMPT_VERSION/CRANE_VERSION from $env_file): $(head -1 <<<"$hits")"
 # Every buf-action step needs `version:` and `checksum:`, and (when they read the env) a step earlier
 # in the same job that runs hack/versions-env.sh; without the load both expand to "" and buf-action
 # installs the latest buf and skips the checksum.

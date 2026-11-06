@@ -27,6 +27,35 @@ mid-run and still cleans up after a crashed one. Ryuk stays on everywhere; do no
 `TESTCONTAINERS_RYUK_DISABLED` in CI. Runs without pgserver (a single-package `go test`) are not
 covered; the upgrade path is #173. `hack/go-test-test.sh` pins the export and its order.
 
+### The agentgateway test image (#238)
+
+The `internal/gateway/standalone` and `internal/ledger` suites start a real agentgateway container.
+Pulling it from its upstream registry at test time made every Go job depend on that registry: on
+2026-11-06 `cr.agentgateway.dev` answered 522 and every pull request with Go changes went red. The
+image is named once, by digest: the chart's `gateway.standalone.image` in `charts/koinon/values.yaml`
+(repository, tag and digest), printed by `hack/agentgateway-pin.sh`. CI tests against a copy of that
+digest in GHCR, `ghcr.io/stateracloud/agentgateway`, kept by the manually dispatched workflow
+`mirror-agentgateway-test-image.yml`. `hack/agentgateway-pin.sh --check` (in the `scripts` job, with
+`hack/agentgateway-pin-test.sh`) fails when the pin is not a full sha256 digest or the workflow
+carries a digest of its own.
+
+When the pin moves (an agentgateway bump changes the chart's tag and digest):
+
+1. Change `gateway.standalone.image` in the chart and merge it.
+2. Dispatch the workflow on `main`: `gh workflow run mirror-agentgateway-test-image.yml --ref main`
+   (input `source`: `cr.agentgateway.dev/agentgateway`, or `ghcr.io/agentgateway/agentgateway` while
+   the first is down; both serve the same digest). It copies the digest under the pin's tag, fails
+   unless the copy has that digest, and prints `image: ghcr.io/stateracloud/agentgateway@sha256:...`
+   in its log and summary.
+3. Point the tests' image constant at that reference.
+
+The GHCR package stays private until v0.3. The go-test job pulls it with its own `GITHUB_TOKEN`
+(`packages: read` on the job), which works only because the package grants this repository read
+access: a package the workflow creates is linked to the repository, and its settings ("Manage Actions
+access") must keep `stateracloud/koinon` listed. Crane is `CRANE_VERSION` in `hack/versions.env`,
+installed with `go install` (the Go checksum database verifies it) and dated by
+`hack/dep-age-check.sh` (ADR 0079).
+
 ## Persisted-state compatibility
 
 `internal/compat` (koinon-private#652) checks that what a shipped release wrote still loads at head. Each folder
