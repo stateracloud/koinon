@@ -194,7 +194,12 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
     # FLAVOR_CACHE=<dir> imports the layer cache CI restored there (import only; main's flavors job saves it).
     cache=()
     [[ -z ${FLAVOR_CACHE:-} || ! -d $FLAVOR_CACHE/opencode ]] || cache=(--cache-from "type=local,src=$FLAVOR_CACHE/opencode")
-    docker buildx build --load --build-context common=flavors/common "${secret[@]}" "${cache[@]}" \
+    # FLAVOR_BASE=<ref>@sha256:<digest> sets the base image (#200: the maintainers' lab builds through
+    # its registry mirror); hack/flavor-base.sh checks the digest pin and prints nothing when it is unset.
+    base_out=$("$root/hack/flavor-base.sh" opencode)
+    base_args=()
+    [[ -z $base_out ]] || mapfile -t base_args <<<"$base_out"
+    docker buildx build --load --build-context common=flavors/common "${secret[@]}" "${cache[@]}" "${base_args[@]}" \
       --tag kind.local/flavors/opencode:e2e flavors/opencode
   fi
   kind load docker-image --name "$CLUSTER" kind.local/flavors/opencode:e2e

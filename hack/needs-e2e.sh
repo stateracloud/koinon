@@ -11,11 +11,6 @@
 #                                The full rule (no flag) is what makes a pull request run the kind e2e
 #                                in its own run, so a fork PR needs no label or lab (issue #148)
 #
-#   --flavors                    only whether a flavor image input changed (flavors/**, Markdown included:
-#                                the image tag hashes the whole flavors/<flavor> and flavors/common trees,
-#                                hack/flavor-tag.sh). Exit 0 and print the paths, or exit 1; needs no Go.
-#                                hack/e2e-remote.sh --argo uses it: the lab cannot build a flavor image.
-#
 # Needs the Go toolchain (it asks `go list` for the binaries' dependencies).
 # Exit 0 and print the paths that matter when the e2e is needed; exit 1 and print "not needed"
 # otherwise. Exit 2 on a usage, git or `go list` error: callers must treat that as "needed".
@@ -66,6 +61,7 @@ FORCED=(
   '^flavors/.*\.md$'        # agent prompts and instructions may be Markdown
   '^hack/docs-e1\.sh$'      # run.sh runs the quickstart blocks through it
   '^hack/flavor-tag\.sh$'    # run.sh names the pulled flavor image with it
+  '^hack/flavor-base\.sh$'   # run.sh sets the flavor's base image with it (FLAVOR_BASE, #200)
   '^hack/versions\.env$'    # the kind, ko and helm versions e2e-kind.yml installs (koinon-private#565)
   '^hack/versions-env\.sh$' # the filter that loads them into the workflow's environment
   '^hack/e2e-toolchain/'    # the web toolchain image run.sh uses (Chromium for the browser suite)
@@ -124,12 +120,11 @@ classify() { # reads paths on stdin; prints the relevant ones
   done
 }
 
-forced_only=0 stdin=0 flavors=0 base=origin/main
+forced_only=0 stdin=0 base=origin/main
 for a in "$@"; do
   case $a in
   --forced-only) forced_only=1 ;;
   --stdin) stdin=1 ;;
-  --flavors) flavors=1 ;;
   -*) echo "needs-e2e: unknown option $a" >&2; exit 2 ;;
   *) base=$a ;;
   esac
@@ -137,21 +132,6 @@ done
 
 cd "$(git rev-parse --show-toplevel)"
 DEPDIRS=""
-if [[ $flavors == 1 ]]; then
-  # The image tag (hack/flavor-tag.sh) hashes the flavor trees, so any change under flavors/ is a new image.
-  if [[ $stdin == 1 ]]; then files=$(cat); else
-    mb=$(git merge-base "$base" HEAD 2>/dev/null) || { echo "needs-e2e: no merge base with $base (fetch it?)" >&2; exit 2; }
-    files=$(git diff --name-only --no-renames "$mb" HEAD)
-  fi
-  matched=$(grep -E '^flavors/' <<<"$files" || true)
-  if [[ -n $matched ]]; then
-    echo "flavor image inputs changed:"
-    echo "  ${matched//$'\n'/$'\n'  }"
-    exit 0
-  fi
-  echo "no flavor changes"
-  exit 1
-fi
 if [[ $forced_only == 0 ]]; then
   bin_dirs=$(godirs "${BINARIES[@]}") || exit 2
   drv_dirs=$(godirs -test ./test/e2e) || exit 2

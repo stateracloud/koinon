@@ -76,7 +76,6 @@ recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendm
 | 1 | the e2e failed, `e2e-lab` is failure | fix it |
 | 75 | the lab cannot run it now: unreachable, a failed upload or submit, no verdict | wait for the PR's quickstart (dispatch only to re-run) |
 | 78 | no lab configured | wait for the PR's quickstart (dispatch only to re-run) |
-| 79 | the change touches `flavors/`: the lab cannot build a flavor image (`nvcr.io` is fenced) | wait for the PR's quickstart (dispatch only to re-run); `--allow-flavors` if the image is already in Zot |
 | 2 | usage, or the lab rejected the request | fix the call |
 
    `hack/e2e-remote.sh --local` (your own Docker) is a dev and debug tool, not merge evidence: it yields
@@ -111,6 +110,19 @@ CODEOWNERS: `require_code_owner_review` is false); `e2e result` is not pinned to
 posted by anyone with write access. This is a guardrail against mistakes, not against a malicious member;
 the follow-up is a pinned `integration_id` / the lab's own App (koinon-private#568).
 
+### Flavor images on the lab (#200)
+
+A change under `flavors/` runs on the lab like any other: the kind e2e builds the OpenCode flavor image
+there (`test/e2e/run.sh`), and the lab reaches `nvcr.io` only through Zot's mirror of it. The base image is
+a build input, `FLAVOR_BASE` (`make flavor-opencode FLAVOR_BASE=...`, `test/e2e/run.sh`), checked by
+`hack/flavor-base.sh`: it must end with the digest the Dockerfile's `ARG BASE=` pins, which is the same
+through the mirror, so the base never changes without a change to the Dockerfile. Unset, the Dockerfile's
+public default builds. The lab's `koinon-make` WorkflowTemplate (the kind lane; the light lane and the
+gates build no flavor image) sets `FLAVOR_BASE=<registry host from lab.env>/nvcr.io/<the Dockerfile's ref
+and digest>` from the lab's own config, and `make test-e2e-kind` hands it to `test/e2e/run.sh`; the mirror
+address is never tracked. A lab runner without `FLAVOR_BASE` fails the image build
+(exit 1, `e2e-lab` failure), not a refusal: the up-front exit 79 and `--allow-flavors` are gone.
+
 ### go-test on the lab gate first (koinon-private#610)
 
 CI's `go-test` job is the longest CI job. With a lab, run it there first and let CI skip it:
@@ -119,14 +131,14 @@ CI's `go-test` job is the longest CI job. With a lab, run it there first and let
    `hack/ship.sh --ready --lab-go-test ...`: after the push it runs `hack/e2e-remote.sh --argo --gate go-test`
    on a free gate slot (`gate-1`..`gate-4` with no unfinished `lane=gate` run, never always `gate-1`),
    which posts the commit status `go-test-lab` on the pushed head (`success`, or `failure` when the gate
-   failed; nothing on 75 / 76 / 78 / 79 or with `--no-status`), and only then marks the pull request ready.
+   failed; nothing on 75 / 76 / 78 or with `--no-status`), and only then marks the pull request ready.
 2. The ready run's `changes` job reads that status (`hack/ci-skip-heavy.sh lab`, `hack/go-test-lab.sh`):
    for the exact head SHA of the pull request and state `success` it sets `go_test_lab=true`, `go-test` is
    skipped, and the required `go` check accepts that one skip (any other skipped part, or a skipped
    `go-test` without the status, is still a failure). The required check name stays `go`; the merge rule
    and the ruleset's required contexts do not change.
 3. Without the status (no lab: exit 78; lab cannot run it now or no free slot: 75; NOT RUN: 76;
-   the lab rejected the call: 2; the flavors refusal 79 is the kind lane's only), `go-test` runs on the hosted runner as before. `hack/ship.sh` prints the reason and goes on.
+   the lab rejected the call: 2), `go-test` runs on the hosted runner as before. `hack/ship.sh` prints the reason and goes on.
    A gate that really failed (any other non-zero) stops the ship before ready.
 4. A push to a ready pull request runs CI on the new head at once, before any status can exist, and `go-test`
    runs on the hosted runner: nothing waits for a status (a waiting job holds a runner). To keep the lab for

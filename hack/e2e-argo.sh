@@ -42,8 +42,9 @@
 #       it should, koinon-private#507)
 #   78  no lab configured (a setting or the credentials/manifest file is missing): there is no lab to
 #       use; run the e2e on your own Docker (--local) or on GitHub
-#   79  refused up front: the change touches flavors/ and the lab cannot build a flavor image (nvcr.io
-#       is not reachable from it). GitHub's e2e-kind runs it; --allow-flavors when the image is in Zot
+# (79, the up-front refusal of a change under flavors/, is gone since #200: the lab builds the flavor
+# image through its registry mirror, the lab runner setting FLAVOR_BASE from its own config, see
+# hack/flavor-base.sh. A lab runner without it fails the image build, exit 1.)
 #
 # Commit status (koinon-private#547): a followed kind e2e run posts `e2e-lab` on the commit it ran (the ref it
 # submitted): success on exit 0, failure when the target failed, nothing on a fallback (75), when no lab
@@ -59,7 +60,7 @@
 # head that has a green one (hack/go-test-lab.sh, docs/dev/maintainer-homelab.md). A gate run picks a free
 # slot, gate-1..gate-4 with no unfinished gate run (pick_slot), never a fixed one.
 #
-#   hack/e2e-remote.sh --argo [--lane kind|light] [--repo DIR] [--target T] [--slot S] [--out DIR] [--no-wait] [--no-status] [--allow-flavors] [--dry-run]
+#   hack/e2e-remote.sh --argo [--lane kind|light] [--repo DIR] [--target T] [--slot S] [--out DIR] [--no-wait] [--no-status] [--dry-run]
 #   hack/e2e-remote.sh --argo --gate <set> [--repo DIR] [--out DIR] [--no-wait] [--dry-run]
 #   hack/e2e-remote.sh --argo --follow <workflow name> [--out DIR]
 #
@@ -84,8 +85,6 @@
 #   KOINON_E2E_GATE_PENDING    seconds a gate run may stay Pending before it is given up (120)
 #   KOINON_E2E_ARGO_POLL       seconds between status polls (30)
 #   KOINON_E2E_NO_STATUS       1: do not post the e2e-lab commit status (same as --no-status)
-#   KOINON_E2E_ALLOW_FLAVORS   1: run although flavors/ changed (same as --allow-flavors)
-#   KOINON_E2E_BASE            the base the flavors check diffs against (origin/main)
 #   KOINON_E2E_AGENT           who submits, a label on the run (KOINON_AGENT_SESSION, else $USER)
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -110,8 +109,7 @@ CREDS=${KOINON_E2E_ARGO_CREDS:-}
 POLL=${KOINON_E2E_ARGO_POLL:-30}
 AGENT=${KOINON_E2E_AGENT:-${KOINON_AGENT_SESSION:-${USER:-agent}}}
 
-lane=kind target="" slot="" out=${KOINON_E2E_OUT:-} wait=1 dry=0 follow="" repo="" allow_flavors=0
-[[ ${KOINON_E2E_ALLOW_FLAVORS:-} != 1 ]] || allow_flavors=1
+lane=kind target="" slot="" out=${KOINON_E2E_OUT:-} wait=1 dry=0 follow="" repo=""
 while [[ $# -gt 0 ]]; do
   case $1 in
   --argo) ;;
@@ -123,7 +121,6 @@ while [[ $# -gt 0 ]]; do
   --out) out=${2:?--out needs a directory}; shift ;;
   --no-wait) wait=0 ;;
   --no-status) export KOINON_E2E_NO_STATUS=1 ;;
-  --allow-flavors) allow_flavors=1 ;;
   --follow) follow=${2:?--follow needs a workflow name}; shift ;;
   --dry-run) dry=1 ;;
   *) echo "e2e-remote --argo: unknown argument $1" >&2; exit 2 ;;
@@ -187,7 +184,7 @@ lab_down() {
 # fail_rc <status>: a failed run's status, kept unless it collides with a reserved code above (make
 # reports a failed target as 2); then 1.
 fail_rc() {
-  case $1 in 0 | 2 | 75 | 76 | 77 | 78 | 79) echo 1 ;; *) echo "$1" ;; esac
+  case $1 in 0 | 2 | 75 | 76 | 77 | 78) echo 1 ;; *) echo "$1" ;; esac
 }
 
 # post_status <success|failure> <description> [context]: a commit status (e2e-lab by default, go-test-lab
@@ -446,7 +443,7 @@ follow_run() {
     if [[ $target == go-test ]]; then
       case $rc in
       0) post_status success "$name: go-test passed on the lab" go-test-lab ;;
-      75 | 76 | 78 | 79) ;;
+      75 | 76 | 78) ;;
       *) post_status failure "$name: go-test failed on the lab (exit $rc)" go-test-lab ;;
       esac
     fi
@@ -500,25 +497,6 @@ root=$(git -C "${repo:-.}" rev-parse --show-toplevel)
 cd "$root"
 sha=$(git rev-parse HEAD)
 
-# The kind e2e builds the flavor image; the lab cannot (nvcr.io is fenced), so a change under flavors/
-# goes to GitHub's e2e-kind (koinon-private#547). The rule is hack/needs-e2e.sh --flavors. A check that cannot be
-# evaluated (no origin/main) lets the run go on: the lab then fails after minutes, not never.
-if [[ $lane == kind && $target == test-e2e-kind && $allow_flavors == 0 ]]; then
-  frc=0
-  fchanged=$("$here/needs-e2e.sh" --flavors "${KOINON_E2E_BASE:-origin/main}" 2>/dev/null) || frc=$?
-  case $frc in
-  0)
-    {
-      echo "e2e-remote --argo: refused: this change touches flavors/, and the lab cannot build a flavor image (nvcr.io is not reachable from it)."
-      echo "$fchanged"
-      echo "  The PR's own run runs the quickstart on GitHub; wait for it (dispatch gh workflow run e2e-kind.yml --ref <branch> only to re-run)   (or your own Docker: hack/e2e-remote.sh --local)."
-      echo "  If the flavor image for this change is already in the lab's registry, add --allow-flavors."
-    } >&2
-    exit 79 ;;
-  1) ;;
-  *) echo "warning: could not check for flavor changes against ${KOINON_E2E_BASE:-origin/main}; going on" >&2 ;;
-  esac
-fi
 id="$(date -u +%Y%m%d-%H%M%S)-${sha:0:8}-$$"
 object="koinon-${sha:0:12}-$id.bundle"
 if [[ -n $(git status --porcelain --untracked-files=no) ]]; then

@@ -540,8 +540,8 @@ rc=0
 (unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --gate go-test --dry-run >"$tmp/gate6/log3" 2>&1) || rc=$?
 check "--gate without --argo exits 2" test "$rc" -eq 2
 
-# 7f. flavors (koinon-private#547): the lab cannot build a flavor image, so a change under flavors/ is refused up front
-# (79) before any upload; --allow-flavors / KOINON_E2E_ALLOW_FLAVORS=1 override; the gate lane is not affected.
+# 7f. flavors (#200, was koinon-private#547's exit 79): the lab builds the flavor image itself (its runner sets
+# FLAVOR_BASE), so a change under flavors/ is submitted like any other; --allow-flavors is gone.
 git clone -q "$tmp/repo" "$tmp/frepo"
 git -C "$tmp/frepo" checkout -q -b feat
 mkdir -p "$tmp/frepo/flavors/opencode"
@@ -550,22 +550,18 @@ git -C "$tmp/frepo" add -A
 git -C "$tmp/frepo" -c user.name=t -c user.email=t@example.invalid commit -q -m "feat: flavor"
 argo_env "$tmp/flav1"; : >"$FAKE_GH_LOG"
 rc=0
-(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --repo "$tmp/frepo" >"$tmp/flav1/log" 2>&1) || rc=$?
-check "a change under flavors/ is refused with exit 79" test "$rc" -eq 79
-check "... saying why, naming the file and the GitHub e2e" sh -c "grep -q 'cannot build a flavor image' '$tmp/flav1/log' && grep -q 'flavors/opencode/Dockerfile' '$tmp/flav1/log' && grep -q 'gh workflow run e2e-kind.yml' '$tmp/flav1/log'"
-check "... before any upload, submit or status" test ! -e "$tmp/flav1/last.bundle" -a ! -e "$tmp/flav1/submitted" -a ! -s "$FAKE_GH_LOG"
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --repo "$tmp/frepo" --no-wait >"$tmp/flav1/log" 2>&1) || rc=$?
+check "a change under flavors/ is submitted to the lab" test "$rc" -eq 0 -a -e "$tmp/flav1/submitted"
+check "... with no flavors refusal" sh -c "! grep -q 'cannot build a flavor image' '$tmp/flav1/log'"
 rc=0
 (unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --repo "$tmp/frepo" --dry-run >"$tmp/flav1/log2" 2>&1) || rc=$?
-check "... also with --dry-run" test "$rc" -eq 79
+check "... also with --dry-run" test "$rc" -eq 0
 rc=0
-(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --repo "$tmp/frepo" --allow-flavors --no-wait >"$tmp/flav1/log3" 2>&1) || rc=$?
-check "--allow-flavors lets it through" test "$rc" -eq 0 -a -e "$tmp/flav1/submitted"
-rc=0
-(unset KOINON_E2E_REMOTE; KOINON_E2E_ALLOW_FLAVORS=1 hack/e2e-remote.sh --argo --repo "$tmp/frepo" --no-wait >"$tmp/flav1/log4" 2>&1) || rc=$?
-check "KOINON_E2E_ALLOW_FLAVORS=1 lets it through" test "$rc" -eq 0
+(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --repo "$tmp/frepo" --allow-flavors --dry-run >"$tmp/flav1/log3" 2>&1) || rc=$?
+check "--allow-flavors is no option any more (exit 2)" test "$rc" -eq 2
 rc=0
 (unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --repo "$tmp/frepo" --gate go-test --dry-run >"$tmp/flav1/log5" 2>&1) || rc=$?
-check "the gate lane is not refused for flavors" test "$rc" -eq 0
+check "the gate lane runs a flavors change too" test "$rc" -eq 0
 git -C "$tmp/frepo" checkout -q main
 echo y >"$tmp/frepo/notes.txt"
 git -C "$tmp/frepo" add -A
