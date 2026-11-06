@@ -279,6 +279,8 @@ func checkpointsFrom(cfg config) (*agentd.Checkpoints, error) {
 	if err := s3.Validate(); err != nil {
 		return nil, fmt.Errorf("checkpoint storage: %w", err)
 	}
+	// Never the key: its ID's fingerprint, to check a rotation took (docs/ops/secret-keys.md).
+	slog.Info("checkpoint storage", "bucket", s3.Bucket, "access_key", s3.AccessKeyFingerprint())
 	if err := os.MkdirAll(cfg.checkpointScratch, 0o700); err != nil {
 		return nil, fmt.Errorf("checkpoint scratch directory: %w", err)
 	}

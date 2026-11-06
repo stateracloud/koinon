@@ -1806,6 +1806,12 @@ type HomeRepositoryEpoch struct {
 	RetiredAt        pgtype.Timestamptz
 	DeleteAfter      pgtype.Timestamptz
 	DeletedAt        pgtype.Timestamptz
+	SeedFromEpoch    pgtype.Int4
+	SeedAfter        pgtype.Timestamptz
+	SeedAttempts     int32
+	SeedError        pgtype.Text
+	SeededAt         pgtype.Timestamptz
+	SeedFailedAt     pgtype.Timestamptz
 }
 
 type InstallIdentity struct {

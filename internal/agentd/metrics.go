@@ -48,6 +48,9 @@ type Metrics struct {
 	// SweepRefused is how many retired home repositories the last repository sweep refused to
 	// delete because their stored prefix is not their own (ADR 0085 decision 13).
 	SweepRefused prometheus.Gauge
+	// HomeRepositorySeeds is how many new home repositories wait for their seed (state pending) and
+	// how many seeds were given up (state failed), after keys new-repositories (#86).
+	HomeRepositorySeeds *prometheus.GaugeVec
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered).
@@ -89,6 +92,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		SweepRefused: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "koinon_agentd_home_repository_sweep_refused", Help: "Retired home repositories the last repository sweep did not delete because their stored prefix is not their own; anything above 0 needs a person (the log names each once).",
 		}),
+		HomeRepositorySeeds: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "koinon_agentd_home_repository_seeds", Help: "New home repositories after keys new-repositories: state pending waits for koinon-agentd to copy the agent's newest checkpoint in, state failed was given up and keeps the old repository (needs a person; the audit log names each).",
+		}, []string{"state"}),
 		SandboxWait: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name: "koinon_agentd_sandbox_wait_duration_seconds", Help: "Time a run waited for its agent's sandbox to be ready, whatever the result.",
 			Buckets: []float64{0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300},
@@ -120,10 +126,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			m.TaintReports.WithLabelValues(l, r)
 		}
 	}
+	for _, state := range []string{"pending", "failed"} {
+		m.HomeRepositorySeeds.WithLabelValues(state)
+	}
 	if reg != nil {
 		reg.MustRegister(m.TaintReports, m.Claimed, m.Finished, m.Takeovers, m.SandboxWait, m.ModelWait, m.Requeued,
 			m.SandboxWaitCap, m.WrapUpNotices, m.TimeLimitStops, m.TraceSpansDropped, m.TraceSpansExported,
-			m.RunEventWriteFailures, m.SweepRefused)
+			m.RunEventWriteFailures, m.SweepRefused, m.HomeRepositorySeeds)
 	}
 	return m
 }
