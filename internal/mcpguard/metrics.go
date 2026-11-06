@@ -17,6 +17,7 @@ var (
 	reasons = []string{
 		ReasonInternal, ReasonClean, ReasonBothLegs, ReasonTaint, ReasonByteCap, ReasonURLRule, ReasonCheck,
 		ReasonError, ReasonAmbiguous, ReasonIdentity, ReasonNoRun, ReasonExempt, ReasonAskTarget, ReasonFeedStalled,
+		ReasonReplyUnseen,
 	}
 	// classUnknown labels a decision taken before the class was known (identity, errors).
 	classUnknown = "unknown"
@@ -31,6 +32,9 @@ type Metrics struct {
 	Evictions prometheus.Counter
 	// Legs counts responses that set a leg, by leg.
 	Legs *prometheus.CounterVec
+	// Unseen counts calls the guard passed whose reply it never saw (#254): no label, the session
+	// they set both legs on is in the guard's warning.
+	Unseen prometheus.Counter
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered).
@@ -49,6 +53,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Legs: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koinon_api_mcp_guard_legs_total", Help: "Tool results and feed reports that set a session leg, by leg.",
 		}, []string{"leg"}),
+		Unseen: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_api_mcp_guard_unseen_replies_total",
+			Help: "Tool calls the MCP leak guard passed that never ended in a result it saw (an error reply or a cut call), so their session holds both legs.",
+		}),
 	}
 	for _, a := range actions {
 		for _, r := range reasons {
@@ -60,7 +68,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.Legs.WithLabelValues("untrusted_input")
 	m.Legs.WithLabelValues("private_data")
 	if reg != nil {
-		reg.MustRegister(m.Decisions, m.Duration, m.Evictions, m.Legs)
+		reg.MustRegister(m.Decisions, m.Duration, m.Evictions, m.Legs, m.Unseen)
 	}
 	return m
 }
@@ -90,6 +98,12 @@ func (m *Metrics) evicted() {
 	}
 }
 
+func (m *Metrics) unseen(n int64) {
+	if m != nil {
+		m.Unseen.Add(float64(n))
+	}
+}
+
 func (m *Metrics) legs(l Legs) {
 	if m == nil {
 		return
@@ -104,5 +118,5 @@ func (m *Metrics) legs(l Legs) {
 
 // Collectors are the metrics to register.
 func (m *Metrics) Collectors() []prometheus.Collector {
-	return []prometheus.Collector{m.Decisions, m.Duration, m.Evictions, m.Legs}
+	return []prometheus.Collector{m.Decisions, m.Duration, m.Evictions, m.Legs, m.Unseen}
 }

@@ -1,6 +1,6 @@
 # 0056. Model providers, models, pricing and budgets per org
 
-- Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31 and 2026-11-06 (below)
+- Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31 and 2026-11-06 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md)
 - Date: 2026-10-23
 - Amends: [0049](0049-v01-scope-decisions.md) (the single Helm-configured upstream, now dropped, and
   template-only budgets), [0007](0007-connector-model.md) and [0021](0021-connector-setup-guides.md)
@@ -157,6 +157,9 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    version with a later `valid_from`; deleting one sets `retired_at`. A request is priced with the
    entry valid at its time (if none was, the current one, noted on the entry). Every ledger entry stores
    `price_ref` (`default@<list version>#<id>`, `org#<id>` or `model#<id>@<time>`).
+   _Amended by [ADR 0098](0098-price-catalogue-updates-from-public-sources.md):_ the order is org
+   entries, then the platform price list, then the default list, and `price_ref` gains
+   `platform@<version>#<id>`.
 4. **Default price list.** `pricing/default.yaml`, embedded in the binary, holds 14 entries read only
    from the providers' own pricing pages (or OpenRouter's models API for OpenRouter routes), each with
    its URL and access date; a price that could not be verified from a primary source is left out. A

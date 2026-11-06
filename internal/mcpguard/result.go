@@ -60,38 +60,58 @@ func (g *Guard) CheckResult(ctx context.Context, r Result) error {
 			}
 			c.org, c.agent = org, agent
 		}
-		return g.record(ctx, c, legs, r.Result)
+		return g.recordResult(ctx, c, r, legs)
 	}
 	_, decl, err := g.tool(ctx, c, r.Tool)
 	if err != nil {
 		return err
 	}
-	return g.record(ctx, c, resultLegs(c.server, decl), r.Result)
+	return g.recordResult(ctx, c, r, resultLegs(c.server, decl))
 }
 
-func (g *Guard) record(ctx context.Context, c caller, legs Legs, result json.RawMessage) error {
+// recordResult records a result the gateway reported and closes its call (#254): only once the
+// legs are recorded, so a result the guard could not record leaves its call open, and fails closed.
+func (g *Guard) recordResult(ctx context.Context, c caller, r Result, legs Legs) error {
+	sess, err := g.record(ctx, c, legs, r.Result)
+	if err != nil || sess == nil {
+		return err
+	}
+	// The result is matched to a call by target and tool, not by JSON-RPC id: agentgateway v1.7.0
+	// does not give the guard the id, and it runs this hook on every response on the call's stream,
+	// whatever its id (agentgateway#4245). A server that sends an error and then a response of its
+	// own closes the call here although the guard never saw the error: the ledger covers honest
+	// servers and cut calls, not that (ADR 0097 step 2 closes it).
+	return g.closeCall(ctx, *sess, r.Target, r.Tool)
+}
+
+// record sets legs, and the fingerprints of result, on c's session, and returns the session (nil
+// when legs is empty: nothing was recorded, and no call was opened).
+func (g *Guard) record(ctx context.Context, c caller, legs Legs, result json.RawMessage) (*Session, error) {
 	if !legs.Any() {
-		return nil
+		return nil, nil
 	}
 	gen, ok, err := Generation(ctx, g.q, c.org.ID, c.agent.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !ok {
 		// Without a sandbox there is no session to carry the legs. The agent's next external call
 		// is refused for the same reason, so nothing leaks through the gap.
-		return refusedError{text: "refused by the leak guard: this agent has no sandbox session yet"}
+		return nil, refusedError{text: "refused by the leak guard: this agent has no sandbox session yet"}
 	}
 	pol, err := loadPolicy(ctx, g.q, c.org)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var texts []string
 	if legs.PrivateData && len(result) > 0 {
 		texts = Strings(result)
 	}
-	_, err = g.state.Record(ctx, Session{Org: c.org.ID, Agent: c.agent.ID, Generation: gen}, legs, pol.threshold(), texts)
-	return err
+	sess := Session{Org: c.org.ID, Agent: c.agent.ID, Generation: gen}
+	if _, err := g.state.Record(ctx, sess, legs, pol.threshold(), texts); err != nil {
+		return nil, err
+	}
+	return &sess, nil
 }
 
 // RecordApproved records the result of a call a person approved and Koinon's executor ran for the
@@ -114,7 +134,8 @@ func (g *Guard) RecordApproved(ctx context.Context, row store.ApprovalRequest, s
 	if err != nil {
 		return err
 	}
-	return g.record(ctx, c, resultLegs(c.server, decl), result)
+	_, err = g.record(ctx, c, resultLegs(c.server, decl), result)
+	return err
 }
 
 // Assess decides an ask-tier call without charging anything, for mcpask's single card: the

@@ -1864,6 +1864,16 @@ type LeakGuardFingerprint struct {
 	AddedAt    pgtype.Timestamptz
 }
 
+type LeakGuardOpenCall struct {
+	OrgID      pgtype.UUID
+	ID         pgtype.UUID
+	AgentID    pgtype.UUID
+	Generation string
+	Target     string
+	Tool       string
+	OpenedAt   pgtype.Timestamptz
+}
+
 type LeakGuardRun struct {
 	OrgID       pgtype.UUID
 	RunID       pgtype.UUID

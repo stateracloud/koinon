@@ -139,14 +139,79 @@ var _ = Describe("TaintChecker", func() {
 		Expect(d.Reason).To(Equal(leakguard.ReasonBudgetArgs))
 	})
 
-	// ADR 0091 decision 6: the arguments are joined in call order only. A text split across
-	// arguments that are not adjacent, or put back to front, is not reassembled; the sink class
-	// and the byte cap carry that case, not the text match.
+	// ADR 0091 decision 6: the arguments are joined in call order, and in the orders a caller names
+	// (CheckJoins), only. A text split across arguments that are not adjacent in one of them, or put
+	// back to front, is not reassembled; the sink class and the byte cap carry that case, not the
+	// text match.
 	DescribeTable("does not reassemble out of call order",
 		func(args ...string) { Expect(check(args...).Reason).To(Equal(leakguard.ReasonPass)) },
 		Entry("halves reversed", excerpt[half:], excerpt[:half]),
 		Entry("halves with an argument between", excerpt[:half], "ignored", excerpt[half:]),
 	)
+
+	Describe("joining in the orders the caller names (#256)", func() {
+		joins := func(args []string, orders ...[]int) leakguard.Decision {
+			GinkgoHelper()
+			d, err := checker.CheckJoins(ctx, testScope, fp, args, orders...)
+			Expect(err).NotTo(HaveOccurred())
+			return d
+		}
+
+		It("reassembles halves that are adjacent in a named order", func() {
+			Expect(joins([]string{excerpt[half:], excerpt[:half]}, []int{1, 0}).Reason).To(Equal(leakguard.ReasonTaint))
+			Expect(joins([]string{excerpt[:half], "ignored", excerpt[half:]}, []int{1, 0, 2}).Reason).To(Equal(leakguard.ReasonTaint))
+		})
+
+		It("still joins in call order", func() {
+			Expect(joins([]string{excerpt[:half], excerpt[half:]}, []int{1, 0}).Reason).To(Equal(leakguard.ReasonTaint))
+		})
+
+		It("joins an order given twice once", func() {
+			args := []string{excerpt[half:], excerpt[:half], "kubernetes release notes"}
+			_, once, err := checker.CheckJoinsWork(ctx, testScope, fp, args, []int{1, 0, 2})
+			Expect(err).NotTo(HaveOccurred())
+			_, twice, err := checker.CheckJoinsWork(ctx, testScope, fp, args, []int{1, 0, 2}, []int{2, 1, 0}, []int{1, 0, 2})
+			Expect(err).NotTo(HaveOccurred())
+			_, two, err := checker.CheckJoinsWork(ctx, testScope, fp, args, []int{1, 0, 2}, []int{2, 1, 0})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(once).To(BeNumerically("<", two))
+			Expect(twice).To(Equal(two))
+		})
+
+		// Review of #256: a call padded with heavy benign arguments still has its extra orders
+		// joined with the full ends. Each half is percent-encoded \UHHHHHHHH escapes (two promised
+		// decoders, about 30 bytes a character), so the 24-character window needs more than 128
+		// bytes on each side of the boundary; shorter ends under load let it through.
+		It("reassembles a split in a named order in a call padded past a quarter of the work budget", func() {
+			enc := func(s string) string { return percentAll(bigUEscapes(s)) }
+			pad := sliced(120, func(i int) string { return b64(utf16le(string([]rune(russianProse)[i*50 : i*50+1500]))) })
+			args := append([]string{enc(privateLine[23:46]) + " tail of b", "head of a " + enc(privateLine[0:23])}, pad...)
+			order := []int{1, 0}
+			for i := 2; i < len(args); i++ {
+				order = append(order, i)
+			}
+			lim := leakguard.DefaultLimits()
+			c := leakguard.TaintChecker{Store: checker.Store, Limits: lim}
+			d, work, err := c.CheckWork(ctx, testScope, fp, args)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.Reason).To(Equal(leakguard.ReasonPass), "in call order the halves are the wrong way round")
+			Expect(work).To(BeNumerically(">", int64(lim.MaxWorkBytes/4)), "the padding is heavy")
+			d, err = c.CheckJoins(ctx, testScope, fp, args, order)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
+		})
+
+		DescribeTable("adds nothing for an order that is not one",
+			func(order []int) {
+				Expect(joins([]string{excerpt[half:], excerpt[:half]}, order).Reason).To(Equal(leakguard.ReasonPass))
+			},
+			Entry("call order", []int{0, 1}),
+			Entry("an index out of range", []int{1, 2, 0}),
+			Entry("a negative index", []int{1, -1, 0}),
+			Entry("an index twice", []int{1, 0, 1}),
+			Entry("one index", []int{1}),
+		)
+	})
 
 	It("reports an evicted scope without changing the decision", func() {
 		st := leakguard.NewMemoryStore(leakguard.MemoryStoreOptions{MaxFingerprints: 4})
@@ -291,6 +356,15 @@ func uEscapes(s string) string {
 	var b strings.Builder
 	for _, u := range utf16.Encode([]rune(s)) {
 		fmt.Fprintf(&b, `\u%04x`, u)
+	}
+	return b.String()
+}
+
+// bigUEscapes writes s as \UHHHHHHHH escapes, one per character.
+func bigUEscapes(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		fmt.Fprintf(&b, `\U%08X`, r)
 	}
 	return b.String()
 }
