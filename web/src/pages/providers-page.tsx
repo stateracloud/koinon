@@ -159,6 +159,8 @@ function ProviderCard({
           <Badge variant="destructive">Removed</Badge>
         ) : disabled ? (
           <Badge variant="destructive">Disabled</Badge>
+        ) : p.credentialLostAt ? (
+          <Badge variant="destructive">Key lost</Badge>
         ) : p.source === 'ui' && savedRecently(p.updatedAt, now) ? (
           <Badge variant="outline">Saved, available to agents within about {availabilityMinutes} minutes</Badge>
         ) : (
@@ -170,7 +172,7 @@ function ProviderCard({
         <dt className="text-muted-foreground">URL</dt>
         <dd className="break-all">{p.url}</dd>
         <dt className="text-muted-foreground">API key</dt>
-        <dd>{p.hasKey ? 'Stored encrypted; it cannot be shown' : 'None'}</dd>
+        <dd>{p.credentialLostAt ? 'Lost; enter it again' : p.hasKey ? 'Stored encrypted; it cannot be shown' : 'None'}</dd>
         {p.anthropicWorkspaceId && (
           <>
             <dt className="text-muted-foreground">Workspace ID</dt>
@@ -182,6 +184,15 @@ function ProviderCard({
         <Alert variant="destructive" role="note">
           <AlertDescription>
             {p.removed ? 'Removed' : 'Disabled'}: {p.disabledReason || 'its Kubernetes Secret was deleted'}.
+          </AlertDescription>
+        </Alert>
+      )}
+      {p.credentialLostAt && !p.removed && (
+        <Alert variant="destructive" role="note">
+          <AlertDescription>
+            {editable
+              ? 'The stored API key was lost with a key-encryption key, so agents cannot use this provider. Edit it and enter the key again.'
+              : `The stored API key was lost with a key-encryption key, so agents cannot use this provider. Koinon reads it again from the Secret ${p.managedBySecret} on its next sync.`}
           </AlertDescription>
         </Alert>
       )}

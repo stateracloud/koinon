@@ -167,6 +167,9 @@ func (s *Service) TestPlatform(ctx context.Context, auditOrg pgtype.UUID, actor 
 	if err != nil {
 		return Destination{}, export.Outcome{}, err
 	}
+	if cur.CredentialLostAt.Valid {
+		return Destination{}, export.Outcome{}, ErrCredentialLost
+	}
 	secrets, err := s.open(cur.Credentials, PlatformBinding())
 	if err != nil {
 		return Destination{}, export.Outcome{}, err

@@ -49,7 +49,8 @@ RETURNING *;
 -- name: UpdateDeclaredConnection :one
 UPDATE connections
 SET display_name = @display_name, config = @config, secret_envelope = @secret_envelope,
-    secret_fingerprint = @secret_fingerprint, declared_version = @declared_version, removed_at = NULL
+    secret_fingerprint = @secret_fingerprint, declared_version = @declared_version, removed_at = NULL,
+    credential_lost_at = NULL
 WHERE org_id = @org_id AND id = @id AND source = 'secret'
 RETURNING *;
 

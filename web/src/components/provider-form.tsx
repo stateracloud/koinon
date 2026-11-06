@@ -168,7 +168,9 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
         <Input id="provider-key" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="new-password" spellCheck={false} aria-describedby="provider-key-help" disabled={removeKey} />
         <p id="provider-key-help" className="text-muted-foreground text-xs">
           {editing
-            ? provider.hasKey
+            ? provider.credentialLostAt
+              ? 'The stored key was lost with a key-encryption key. Type it again to restore the provider.'
+              : provider.hasKey
               ? 'A key is stored and cannot be shown. Leave this empty to keep it, or type a new key to replace it.'
               : 'No key is stored. Type one to add it.'
             : 'Optional for keyless upstreams such as Ollama. Koinon stores it encrypted and never shows it again.'}

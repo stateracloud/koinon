@@ -196,6 +196,10 @@ type Server struct {
 	DisabledReason   string `json:"disabledReason,omitempty"`
 	// Removed is set when the declaring Secret was deleted.
 	Removed bool `json:"removed,omitempty"`
+	// CredentialLostAt is set when the credential was lost with the KEK that encrypted it (keys
+	// forget, ADR 0085 decision 13): the server is not served until the credential is entered again.
+	// CredentialHeader and CredentialPrefix are kept.
+	CredentialLostAt *time.Time `json:"credentialLostAt,omitempty"`
 	// Kind and DataClass are what the server declares it exposes (ADR 0084 decision 8): its kind and
 	// the legs it carries, in the order of Legs. A server nobody classified is DefaultDeclaration.
 	Kind      string   `json:"kind"`
@@ -320,7 +324,7 @@ func toServer(r store.McpServer) Server {
 		ID: r.ID.String(), Name: r.Name, URL: r.Url, Transport: string(r.Transport),
 		HasCredential: len(r.Credential) > 0, CredentialHeader: r.CredentialHeader.String, CredentialPrefix: r.CredentialPrefix,
 		Source: string(r.Source), ManagedBySecret: r.ManagedBySecret.String, DisabledReason: r.DisabledReason.String,
-		Removed: r.RemovedAt.Valid, Health: string(r.Health), HealthReason: r.HealthReason.String,
+		Removed: r.RemovedAt.Valid, CredentialLostAt: timePtr(r.CredentialLostAt), Health: string(r.Health), HealthReason: r.HealthReason.String,
 		HealthCheckedAt: timePtr(r.HealthCheckedAt), HealthSince: timePtr(r.HealthSince), ToolsSyncedAt: timePtr(r.ToolsSyncedAt),
 		CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
 		Kind: declarationOf(r).Kind, DataClass: declarationOf(r).Legs, CodeHostConnectionID: declarationOf(r).CodeHostConnection,

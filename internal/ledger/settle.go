@@ -87,6 +87,12 @@ var errHold = errors.New("the provider cannot report its usage; the reserve is h
 // moved to a URL its source does not serve): it is final now.
 var errNoSource = errors.New("no usage source serves the provider")
 
+// errKeyLost means the provider's API key was lost with its key-encryption key (ADR 0085 decision
+// 13): the provider is not asked without it. The attempt is deferred like a pending one, so a key
+// entered again before the deadline still settles the entry; at the deadline the logged usage is
+// final.
+var errKeyLost = errors.New("the provider's API key was lost with a key-encryption key; enter it again to settle")
+
 // Validate reports a wiring mistake: a Settler without prices could not re-price what it settles.
 func (s *Settler) Validate() error {
 	if s.Prices.IsZero() {
@@ -431,6 +437,9 @@ func (s *Settler) lookup(ctx context.Context, q *store.Queries, org pgtype.UUID,
 	src, ok := s.sources().For(prov.Type, prov.Url, row.ResponseID.String)
 	if !ok {
 		return providerusage.Usage{}, errNoSource
+	}
+	if prov.CredentialLostAt.Valid {
+		return providerusage.Usage{}, errKeyLost
 	}
 	key, err := catalog.OpenKey(s.Keys, org, prov.ID, prov.ApiKey)
 	if err != nil {

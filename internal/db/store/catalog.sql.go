@@ -72,7 +72,7 @@ const createProvider = `-- name: CreateProvider :one
 
 INSERT INTO providers (org_id, id, name, type, url, api_key, anthropic_workspace_id, source, managed_by_secret, declared_version, disabled_reason, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at
 `
 
 type CreateProviderParams struct {
@@ -129,6 +129,7 @@ func (q *Queries) CreateProvider(ctx context.Context, arg CreateProviderParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AnthropicWorkspaceID,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -276,7 +277,7 @@ func (q *Queries) GetModel(ctx context.Context, arg GetModelParams) (Model, erro
 
 const getModelServing = `-- name: GetModelServing :one
 SELECT m.id AS model_id, p.id AS provider_id, p.name AS provider_name, p.type AS provider_type,
-       (s.model_id IS NOT NULL)::boolean AS served
+       (s.model_id IS NOT NULL)::boolean AS served, (p.credential_lost_at IS NOT NULL)::boolean AS credential_lost
 FROM models m
 JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
 LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
@@ -291,16 +292,18 @@ type GetModelServingParams struct {
 }
 
 type GetModelServingRow struct {
-	ModelID      pgtype.UUID
-	ProviderID   pgtype.UUID
-	ProviderName string
-	ProviderType string
-	Served       bool
+	ModelID        pgtype.UUID
+	ProviderID     pgtype.UUID
+	ProviderName   string
+	ProviderType   string
+	Served         bool
+	CredentialLost bool
 }
 
 // koinon-agentd, before a run starts its harness: the org's enabled model of this name, its
 // provider and whether the gateway serves it (gateway_served_models). Enabled models have unique
 // names in an org (a declared one disables a UI one of the same name), so there is one at most.
+// credential_lost: the provider's key was lost (#85), so it is not served until entered again.
 func (q *Queries) GetModelServing(ctx context.Context, arg GetModelServingParams) (GetModelServingRow, error) {
 	row := q.db.QueryRow(ctx, getModelServing, arg.OrgID, arg.Name)
 	var i GetModelServingRow
@@ -310,12 +313,13 @@ func (q *Queries) GetModelServing(ctx context.Context, arg GetModelServingParams
 		&i.ProviderName,
 		&i.ProviderType,
 		&i.Served,
+		&i.CredentialLost,
 	)
 	return i, err
 }
 
 const getProvider = `-- name: GetProvider :one
-SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id FROM providers
+SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at FROM providers
 WHERE org_id = $1 AND id = $2
 `
 
@@ -343,6 +347,7 @@ func (q *Queries) GetProvider(ctx context.Context, arg GetProviderParams) (Provi
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AnthropicWorkspaceID,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -471,7 +476,7 @@ func (q *Queries) ListProviderEchoChecks(ctx context.Context, orgID pgtype.UUID)
 }
 
 const listProviders = `-- name: ListProviders :many
-SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id FROM providers
+SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at FROM providers
 WHERE org_id = $1
 ORDER BY name, source, id
 `
@@ -501,6 +506,7 @@ func (q *Queries) ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provi
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AnthropicWorkspaceID,
+			&i.CredentialLostAt,
 		); err != nil {
 			return nil, err
 		}
@@ -517,7 +523,8 @@ SELECT p.id AS provider_id, p.name AS provider_name, p.type AS provider_type, p.
        p.anthropic_workspace_id, m.id AS model_id, m.name AS model_name, m.guard, m.format AS model_format
 FROM providers p
 JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
-WHERE p.org_id = $1 AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND m.disabled_reason IS NULL
+WHERE p.org_id = $1 AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND p.credential_lost_at IS NULL
+  AND m.disabled_reason IS NULL
 ORDER BY p.name, m.name
 `
 
@@ -534,7 +541,8 @@ type ListServedCatalogRow struct {
 	ModelFormat          string
 }
 
-// Every enabled provider of the org with its enabled models, for the gateway.
+// Every enabled provider of the org with its enabled models, for the gateway. A provider whose key
+// was lost (#85) is not served until the key is entered again.
 func (q *Queries) ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]ListServedCatalogRow, error) {
 	rows, err := q.db.Query(ctx, listServedCatalog, orgID)
 	if err != nil {
@@ -567,12 +575,12 @@ func (q *Queries) ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]L
 }
 
 const listServedProviders = `-- name: ListServedProviders :many
-SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id FROM providers
-WHERE org_id = $1 AND disabled_reason IS NULL AND removed_at IS NULL
+SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at FROM providers
+WHERE org_id = $1 AND disabled_reason IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
 ORDER BY name
 `
 
-// Enabled providers (with or without models), for key delivery.
+// Enabled providers (with or without models), for key delivery; not those whose key was lost.
 func (q *Queries) ListServedProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error) {
 	rows, err := q.db.Query(ctx, listServedProviders, orgID)
 	if err != nil {
@@ -598,6 +606,7 @@ func (q *Queries) ListServedProviders(ctx context.Context, orgID pgtype.UUID) ([
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AnthropicWorkspaceID,
+			&i.CredentialLostAt,
 		); err != nil {
 			return nil, err
 		}
@@ -797,9 +806,9 @@ func (q *Queries) SyncGatewayServedModels(ctx context.Context, arg SyncGatewaySe
 const updateDeclaredProvider = `-- name: UpdateDeclaredProvider :one
 UPDATE providers
 SET type = $1, url = $2, api_key = $3, anthropic_workspace_id = $4, declared_version = $5,
-    removed_at = NULL, disabled_reason = NULL
+    removed_at = NULL, disabled_reason = NULL, credential_lost_at = NULL
 WHERE org_id = $6 AND id = $7 AND source = 'secret'
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at
 `
 
 type UpdateDeclaredProviderParams struct {
@@ -839,6 +848,7 @@ func (q *Queries) UpdateDeclaredProvider(ctx context.Context, arg UpdateDeclared
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AnthropicWorkspaceID,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -891,9 +901,10 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 const updateProvider = `-- name: UpdateProvider :one
 UPDATE providers
 SET type = $1, url = $2, anthropic_workspace_id = $3,
-    api_key = CASE WHEN $4::boolean THEN $5 ELSE api_key END
+    api_key = CASE WHEN $4::boolean THEN $5 ELSE api_key END,
+    credential_lost_at = CASE WHEN $4::boolean THEN NULL ELSE credential_lost_at END
 WHERE org_id = $6 AND id = $7
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at
 `
 
 type UpdateProviderParams struct {
@@ -908,6 +919,8 @@ type UpdateProviderParams struct {
 
 // api_key is written only when @set_api_key is true (the patch sets it): the caller read the row
 // without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the envelope since.
+// Setting the key, or removing it, ends a lost key (#85): the trigger credential_lost_clear covers
+// a stored key, this a removed one.
 func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) (Provider, error) {
 	row := q.db.QueryRow(ctx, updateProvider,
 		arg.Type,
@@ -935,6 +948,7 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AnthropicWorkspaceID,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
