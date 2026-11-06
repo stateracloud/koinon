@@ -124,22 +124,92 @@ eq "open pull requests: ADDED and RENAMED docs/adr files count" "$(jq -r "$ADR_P
 eq "adr number counts an open pull request's file" "$(next_adr_number 0092 $(jq -r "$ADR_PR_JQ" <<<"$adr_page"))" "0098"
 eq "adr number: no open pull request adds one" "$(jq -r "$ADR_PR_JQ" <<<'[{"data":{"repository":{"pullRequests":{"nodes":[]}}}}]' | wc -l | tr -d ' ')" "0"
 
-for t in "chore: x" "chore(ci): x" "ci: pin" "build(deps): bump" "build(deps-dev): bump" "chore!: x"; do
-  if title_exempt "$t"; then ok "title exempt: $t"; else bad "title exempt: $t"; fi
+# ADR 0094 decision 2: the exemptions are retired (the check fails only on a conflict).
+for f in title_exempt is_dependabot pr_touches_code humans_list unclaimed_ok_by_human; do
+  if declare -F "$f" >/dev/null; then bad "retired exemption $f is gone"; else ok "retired exemption $f is gone"; fi
 done
-for t in "feat: x" "fix(chore): x" "builder: x" "build: x" "Chore: x"; do
-  if title_exempt "$t"; then bad "title not exempt: $t"; else ok "title not exempt: $t"; fi
-done
-if is_dependabot "app/dependabot"; then ok "dependabot by actor"; else bad "dependabot by actor"; fi
-if is_dependabot "dependabot[bot]"; then ok "dependabot[bot]"; else bad "dependabot[bot]"; fi
-if is_dependabot "not-dependabot"; then bad "lookalike is not dependabot"; else ok "lookalike is not dependabot"; fi
-if printf 'docs/a.md\n.github/CODEOWNERS\n' | pr_touches_code; then bad "docs are not code"; else ok "docs are not code"; fi
-if printf 'docs/a.md\ninternal/x/y.go\n' | pr_touches_code; then ok "go is code"; else bad "go is code"; fi
-if printf 'charts/koinon/values.yaml\n' | pr_touches_code; then ok "chart is code"; else bad "chart is code"; fi
-co=$(mktemp "${TMPDIR:-/tmp}/claim_test.XXXXXX")
-printf '# c\n* @ProcoDuck @ovirandunu\n/docs/ @x\n' >"$co"
-eq "humans list" "$(humans_list "$co" | paste -sd, -)" "procoduck,ovirandunu"
-rm -f "$co"
+
+# The fixed failure texts of the claim check, pinned: outsiders and agents match on them.
+eq "conflict text: issue with a pull request" \
+  "$(conflict_issue_text 159 procoduck 2026-11-07T10:00:00Z 160 outsider1 2026-11-07T12:00:00Z)" \
+  "::error::#159 is claimed by @procoduck until 2026-11-07T10:00:00Z (pull request #160); this pull request is by @outsider1. Ask @procoduck on #159 to comment /release, or ask a maintainer. If the claim goes stale the sweeper frees it at 2026-11-07T12:00:00Z, and this check runs again when it does."
+eq "conflict text: issue without a pull request" \
+  "$(conflict_issue_text 7 ovirandunu 2026-11-07T10:00:00Z "" bob 2026-11-07T12:00:00Z)" \
+  "::error::#7 is claimed by @ovirandunu until 2026-11-07T10:00:00Z (no pull request yet); this pull request is by @bob. Ask @ovirandunu on #7 to comment /release, or ask a maintainer. If the claim goes stale the sweeper frees it at 2026-11-07T12:00:00Z, and this check runs again when it does."
+eq "conflict text: ADR number" \
+  "$(conflict_adr_text docs/adr/0095-x.md 0095 procoduck 2026-11-08T10:00:00Z)" \
+  "::error::docs/adr/0095-x.md uses ADR number 0095, which @procoduck reserved (claim/adr-0095) until 2026-11-08T10:00:00Z. Take a free number with hack/claim.sh adr (a maintainer can do it for you) and rename the file."
+
+# claim_verdict: only someone else's live claim conflicts.
+RELEASE_AFTER=7200
+eq "verdict: released is free" "$(claim_verdict released bob alice 1000 900 none)" free
+eq "verdict: the author's own claim (any case)" "$(claim_verdict held Alice alice 1000 900 none)" own
+eq "verdict: someone else's live claim" "$(claim_verdict held bob alice 1000 900 none)" conflict
+eq "verdict: within the release delay still conflicts" "$(claim_verdict held bob alice 8000 900 draft)" conflict
+eq "verdict: past liveness + release delay is stale" "$(claim_verdict held bob alice 8101 900 draft)" stale
+eq "verdict: a ready pull request is never swept" "$(claim_verdict held bob alice 99999 900 ready)" conflict
+eq "verdict: a closed pull request releases the claim" "$(claim_verdict held bob alice 1000 900 closed)" stale
+
+# Claim classes (ADR 0094 decision 1).
+OUTSIDER_LEASE=1209600 HUMAN_LEASE=259200 LEASE=7200 GRACE=900
+eq "class: agent" "$(holder_class alice/mac/s1#x)" agent
+eq "class: take --human" "$(holder_class alice/mac/human)" person
+eq "class: /claim by a maintainer" "$(holder_class alice/github/human)" person
+eq "class: outsider" "$(holder_class carol/github/outsider)" outsider
+eq "lease: outsider 14 days" "$(lease_for_holder carol/github/outsider)" 1209600
+eq "lease: person by comment 3 days" "$(lease_for_holder alice/github/human)" 259200
+eq "stale: outsiders at liveness" "$(stale_after carol/github/outsider)" 0
+eq "stale: agents after the grace" "$(stale_after alice/mac/s1)" 900
+eq "comment holder: person" "$(comment_holder alice person)" alice/github/human
+eq "comment holder: outsider" "$(comment_holder carol outsider)" carol/github/outsider
+for p in admin maintain write; do eq "permission $p is a person" "$(perm_class "$p")" person; done
+for p in triage read none ""; do eq "permission '$p' is an outsider" "$(perm_class "$p")" outsider; done
+eq "a session cannot be named outsider" "$(env -u CLAUDE_CODE_SESSION_ID KOINON_AGENT_SESSION=outsider KOINON_CLAIM_HUMAN=alice bash -c 'CLAIM_LIB_ONLY=1; source "$1"; my_holder' _ "$claim" 2>/dev/null || echo refused)" refused
+
+# comment_command: only a first line of exactly /claim or /release.
+eq "command: /claim" "$(comment_command '/claim')" claim
+eq "command: /release with trailing space and CR" "$(comment_command $'/release  \r\nthanks')" release
+eq "command: /claim then more lines" "$(comment_command $'/claim\nI will do it')" claim
+eq "command: not on the first line" "$(comment_command $'hi\n/claim')" ""
+eq "command: words after it" "$(comment_command '/claim this')" ""
+eq "command: leading space" "$(comment_command ' /claim')" ""
+eq "command: another command" "$(comment_command '/assign')" ""
+eq "denied: 403" "$(is_denied 'Resource not accessible by integration (HTTP 403)' && echo y || echo n)" y
+eq "denied: 401" "$(is_denied 'Bad credentials (HTTP 401)' && echo y || echo n)" y
+eq "denied: a lost race is not" "$(is_denied 'Reference already exists (HTTP 422)' && echo y || echo n)" n
+eq "denied: a ruleset refusal is not" "$(is_denied 'Repository rule violations found: you do not have permission to update this ref (HTTP 422)' && echo y || echo n)" n
+eq "denied: a word in a title is not" "$(is_denied 'missing permission label' && echo y || echo n)" n
+eq "fallback text" "$(text_fallback carol 42)" "@carol comment claims are not available for outside contributors yet; open a pull request that says Closes #42 instead. An open pull request already makes agents skip this issue."
+eq "unassignable note" "$(text_unassignable carol 42)" 'GitHub did not allow assigning @carol (only collaborators, org members with read access and people who commented here can be assigned); the claim is recorded in the ref `claim/42`.'
+
+# JQ_PR_CLOSERS: closingIssuesReferences of this repository plus the body's closing keywords.
+closers_page='[{"data":{"repository":{"pullRequests":{"nodes":[
+ {"number":200,"body":"Closes #5\nfixes: #6","author":{"login":"Carol"},"closingIssuesReferences":{"nodes":[{"number":5,"repository":{"nameWithOwner":"acme/koinon"}},{"number":9,"repository":{"nameWithOwner":"acme/other"}}]}},
+ {"number":201,"body":null,"author":{"login":"alice"},"closingIssuesReferences":{"nodes":[{"number":7,"repository":{"nameWithOwner":"acme/koinon"}}]}},
+ {"number":202,"body":"see #8","author":null,"closingIssuesReferences":{"nodes":[]}}]}}}}]'
+CL=$(jq -c --arg repo acme/koinon "$JQ_PR_CLOSERS" <<<"$closers_page")
+eq "closers: references and body keywords, this repository only" "$(jq -c '[.[] | [.number, .author, .issues]]' <<<"$CL")" '[[200,"Carol",[5,6]],[201,"alice",[7]],[202,"",[]]]'
+eq "pr conflicts: another author" "$(pr_conflicts "$CL" 5 alice)" "#200 by @Carol"
+eq "pr conflicts: the caller's own pull request is none" "$(pr_conflicts "$CL" 7 Alice)" ""
+eq "pr conflicts: a takeover excuses the dead claim's human" "$(pr_conflicts "$CL" 5 alice carol)" ""
+eq "own pr: linked" "$(own_pr "$CL" 7 alice)" 201
+eq "own pr: never another author's" "$(own_pr "$CL" 5 alice)" ""
+eq "assignees: others" "$(other_assignees '{"assignees":["bob","Alice"]}' alice)" "@bob"
+eq "assignees: only the caller's human" "$(other_assignees '{"assignees":["ALICE"]}' alice)" ""
+eq "assignees: a takeover excuses the dead claim's human" "$(other_assignees '{"assignees":["bob"]}' alice bob)" ""
+eq "assignees: none" "$(other_assignees '{}' alice)" ""
+
+# JQ_NEXT (ADR 0094 decision 5): skip held claims, open closing pull requests and other assignees;
+# In Progress / In Review with nothing holding the issue count as Ready (decision 3).
+item() { # N STATUS ASSIGNEES_JSON [LABELS_JSON]
+  jq -nc --argjson n "$1" --arg s "$2" --argjson a "$3" --argjson l "${4:-[\"agent-ok\"]}" \
+    '{status:{name:$s},priority:{name:"P1"},component:null,content:{number:$n,title:"t\($n)",state:"OPEN",createdAt:"2026-01-0\($n % 9 + 1)T00:00:00Z",repository:{nameWithOwner:"acme/koinon"},milestone:{title:"m1"},labels:{nodes:($l|map({name:.}))},assignees:{nodes:($a|map({login:.}))}}}'
+}
+board=$(jq -sc '[{data:{organization:{projectV2:{items:{nodes:.}}}}}]' < <(
+  item 1 Ready '[]'; item 2 Ready '[]'; item 3 Ready '[]'; item 4 Ready '["bob"]'; item 5 Ready '["Alice"]'
+  item 6 "In Progress" '[]'; item 7 "In Review" '[]'; item 8 Backlog '[]'; item 9 Ready '[]' '[]'))
+nx() { jq -r --arg repo acme/koinon --arg ms m1 --arg label "" --argjson held '[2]' --argjson prs '[3]' --arg human alice "$JQ_RANK$JQ_NEXT"' | map(.n) | join(",")' <<<"$board"; }
+eq "next: skips held, PR-closed, other-assigned, Backlog and non-agent-ok issues" "$(nx)" "1,5,6,7"
 
 eq "same holder ignores the host" "$(same_holder a/h1/s1 a/h2/s1 && echo y || echo n)" y
 eq "different session" "$(same_holder a/h1/s1 a/h1/s2 && echo y || echo n)" n
@@ -251,9 +321,15 @@ stub_github() {
     echo "$FIX"
   }
   beat_clock() { echo $((1000 + ${SLEEPS:-0} * 1000)); }
-  issue_json() { echo '{"number":1,"state":"open","pull":false,"labels":["agent-ok"],"milestone":""}'; }
-  load_claim() { C=$(jq -c --argjson n "$1" '.[] | select(.issue == $n)' <<<"$FIX"); [[ -n $C ]] || return 1; }
+  issue_json() {
+    if [[ -n ${ISSUE_FIX:-} ]]; then echo "$ISSUE_FIX"; return; fi
+    echo '{"number":1,"state":"open","pull":false,"labels":["agent-ok"],"assignees":[],"milestone":""}'
+  }
+  load_claim() { C=$(jq -c --arg n "$1" '.[] | select((.issue | tostring) == $n)' <<<"$FIX"); [[ -n $C ]] || return 1; }
   find_pr() { :; }
+  open_pr_closers() { echo "${CLOSERS_FIX:-[]}"; }
+  rerun_checks_for_issue() { :; }
+  rerun_claim_check() { :; }
   pr_is_open() { return 1; }
   write_claim() {
     if [[ -n ${WRITE_RC:-} ]]; then echo "claim: boom" >&2; exit "$WRITE_RC"; fi
@@ -320,6 +396,57 @@ if grep -q 'cap of 8' <<<"$r"; then ok "human cap message"; else bad "human cap 
 r=$(lanecmd "$eight" take 23 --lane w --human)
 eq "a human claim is not stopped by the session cap but by the human cap" "$(rc_of "$r")" 2
 eq "a bad lane is an error" "$(rc_of "$(lanecmd "$mine_only" take 24 --lane NO)")" 1
+
+# take (ADR 0094 decision 5): another author's open pull request, another assignee and another
+# class's live claim refuse with exit 2; the caller's own human's open pull request is linked.
+export CLOSERS_FIX='[{"number":300,"author":"Carol","issues":[25]},{"number":301,"author":"alice","issues":[26]}]'
+r=$(lanecmd '[]' take 25)
+eq "take: another author's open pull request refuses" "$(rc_of "$r")" 2
+if grep -q '#300 by @Carol' <<<"$r"; then ok "take names the pull request and its author"; else bad "pr refusal text: $r"; fi
+: >"$LOG"
+r=$(lanecmd '[]' take 26)
+eq "take: the own human's open pull request is no refusal" "$(rc_of "$r")" 0
+r=$( {
+  FIX='[]'; export KOINON_AGENT_SESSION=s1; unset CLAUDE_CODE_SESSION_ID KOINON_CLAIM_LANE
+  stub_github
+  write_claim() { echo "write $1 $2 pr=$6" >>"$LOG"; }
+  LANE=; HUMAN_CAP=8; SESSION_CAP=1
+  CLOSERS=$CLOSERS_FIX
+  take_one 26 0 alice/mac/s1 alice '[]' "$LNOW"
+} 2>&1 )
+eq "take links the own human's pull request as pr" "$(grep -c 'write 26 held pr=301' "$LOG")" 1
+r=$(ISSUE_FIX='{"number":27,"state":"open","pull":false,"labels":["agent-ok"],"assignees":["bob"],"milestone":""}' lanecmd '[]' take 27)
+eq "take: another assignee refuses" "$(rc_of "$r")" 2
+if grep -q 'assigned to @bob' <<<"$r"; then ok "take names the assignee"; else bad "assignee refusal text: $r"; fi
+r=$(ISSUE_FIX='{"number":27,"state":"open","pull":false,"labels":["agent-ok"],"assignees":["Alice"],"milestone":""}' lanecmd '[]' take 27)
+eq "take: assigned to the caller's own human is fine" "$(rc_of "$r")" 0
+unset CLOSERS_FIX
+person_live='[{"issue":28,"sha":"s28","state":"held","holder":"carol/github/outsider","human":"carol","lease_until":"2026-11-10T16:00:00Z","pr":"","note":""}]'
+r=$( { FIX=$person_live; export KOINON_AGENT_SESSION=s1; unset CLAUDE_CODE_SESSION_ID KOINON_CLAIM_LANE; stub_github
+  claim_liveness() { LIVE=$(iso_to_epoch 2026-11-10T16:00:00Z); PR_STATE=none; PR_NUM=; return 0; }
+  LANE=; HUMAN_CAP=8; SESSION_CAP=1; cmd_take 28; } 2>&1 ) && rc=0 || rc=$?
+eq "take: a live outsider claim refuses" "$rc" 2
+if grep -q '@carol (outsider claim)' <<<"$r" && ! grep -q 'github/outsider' <<<"$r"; then ok "the refusal names the human and class, not the holder"; else bad "class refusal text: $r"; fi
+outsider_old='[{"issue":29,"sha":"s29","state":"held","holder":"carol/github/outsider","human":"carol","lease_until":"2026-10-30T15:00:00Z","pr":"","note":""}]'
+r=$( { FIX=$outsider_old; export KOINON_AGENT_SESSION=s1; unset CLAUDE_CODE_SESSION_ID KOINON_CLAIM_LANE; stub_github
+  claim_liveness() { LIVE=$(iso_to_epoch 2026-10-30T15:00:00Z); PR_STATE=none; PR_NUM=; return 0; }
+  LANE=; HUMAN_CAP=8; SESSION_CAP=1; cmd_take 29 --takeover; } 2>&1 ) && rc=0 || rc=$?
+eq "take --takeover of a dead outsider claim" "$rc" 0
+# Liveness uses the lease of the holder's class: pull request activity keeps an outsider claim 14 days.
+lv() { (
+  REPO=acme/koinon
+  find_pr() { echo 50; }
+  gh() {
+    if [[ $1 == api ]]; then echo '{"state":"open","draft":true,"merged":false}'; return; fi
+    echo '{"commits":[{"authors":[{"login":"carol"}],"committedDate":"2026-10-30T10:00:00Z"}],"comments":[]}'
+  }
+  claim_liveness "$(jq -nc --arg h "$1" '{issue:5,holder:$h,human:"carol",lease_until:"2026-10-30T09:00:00Z",pr:""}')"
+  echo "$LIVE"
+) }
+act=$(iso_to_epoch 2026-10-30T10:00:00Z)
+eq "liveness: an outsider claim lives 14 days past its activity" "$(lv carol/github/outsider)" $((act + 1209600))
+eq "liveness: a person claim lives 3 days past its activity" "$(lv carol/github/human)" $((act + 259200))
+eq "liveness: an agent claim lives 2 h past its activity" "$(lv carol/mac/s1)" $((act + 7200))
 
 # beat, review and release with --lane touch only that lane's claim.
 : >"$LOG"
@@ -496,6 +623,199 @@ r=$(lanecmd "$same_lane" adopt --from old)
 eq "adopt respects the session cap per lane" "$(rc_of "$r")" 2
 rm -f "$LOG"
 
+# ---- check-pr: a conflict check (ADR 0094 decision 2), offline ----
+LOG=$(mktemp "${TMPDIR:-/tmp}/claim_check.XXXXXX")
+# ckpr CLAIMS_JSON AUTHOR BODY [ADDED_ADR_FILES] -> the check's output and rc. Claims carry `prs` (the
+# pull request state claim_liveness would find) and their lease is their liveness.
+ckpr() {
+  local out rc=0
+  out=$( {
+    FIX=$1; stub_github; REPO=acme/koinon; RELEASE_AFTER=7200
+    # shellcheck disable=SC2154 # ck_body and ck_closers come from chk's caller (an env prefix)
+    pr_meta() { jq -nc --arg a "$AUTHOR" --arg b "$ck_body" --argjson c "${ck_closers:-[]}" '{author: $a, body: $b, closers: $c}'; }
+    pr_added_adr_files() { if [[ -n ${ADDED_FAIL:-} ]]; then return 1; fi; printf '%s' "$ADDED"; }
+    claim_liveness() {
+      if [[ -n ${LIVE_FAIL:-} ]]; then return 4; fi
+      LIVE=$(parse_lease "$(jq -r .lease_until <<<"$1")"); PR_STATE=$(jq -r '.prs // "none"' <<<"$1"); PR_NUM=$(jq -r .pr <<<"$1")
+    }
+    cmd_check_pr 77
+  } 2>&1 ) || rc=$?
+  echo "$out"
+  echo "rc=$rc"
+}
+chk() { AUTHOR=$2 ck_body=$3 ADDED=${4:-} ckpr "$1"; }
+cl() { # ISSUE STATE HUMAN LEASE [PR] [PR_STATE]
+  jq -nc --arg i "$1" --arg s "$2" --arg h "$3" --arg l "$4" --arg p "${5:-}" --arg ps "${6:-none}" \
+    '{issue: ($i | tonumber? // $i), sha: "x", state: $s, holder: "\($h)/mac/s1", human: $h, lease_until: $l, pr: $p, note: "", prs: $ps}'
+}
+CK=$(jq -sc . < <(
+  cl 5 held bob 2026-10-30T17:00:00Z 60 draft
+  cl 6 held bob 2026-10-30T10:00:00Z
+  cl 7 released bob 2026-10-30T17:00:00Z
+  cl 8 held Alice 2026-10-30T17:00:00Z
+  cl 9 held bob 2026-10-30T10:00:00Z 61 ready
+  cl adr-0095 held bob 2026-11-02T16:00:00Z
+  cl adr-0096 held alice 2026-11-02T16:00:00Z
+  cl adr-0097 held bob 2026-10-30T10:00:00Z))
+r=$(chk "$CK" alice "no issue named")
+eq "check: no Closes #N passes" "$(rc_of "$r")" 0
+if grep -q '^::notice::' <<<"$r" && grep -qx 'claim check: no Closes #N; nothing to check' <<<"$r"; then ok "check: no Closes #N asks for one and says so"; else bad "no-issue text: $r"; fi
+r=$(chk "$CK" alice "Closes #4")
+eq "check: an issue without a claim passes" "$(rc_of "$r")" 0
+if grep -qx 'claim check: #4 is free' <<<"$r"; then ok "check: free line"; else bad "free line: $r"; fi
+eq "check: a released claim passes" "$(rc_of "$(chk "$CK" alice "Closes #7")")" 0
+r=$(chk "$CK" alice "Fixes #8")
+eq "check: the author's own claim passes (any case)" "$(rc_of "$r")" 0
+if grep -qx 'claim check: #8 is claimed by @Alice (the author)' <<<"$r"; then ok "check: own line"; else bad "own line: $r"; fi
+r=$(chk "$CK" alice "Closes #5")
+eq "check: someone else's live claim fails" "$(rc_of "$r")" 1
+eq "check: the failure is the fixed text" "$(grep '^::error::' <<<"$r")" \
+  "$(conflict_issue_text 5 bob 2026-10-30T17:00:00Z 60 alice 2026-10-30T19:00:00Z)"
+r=$(chk "$CK" alice "Closes #6")
+eq "check: a dead claim (past the release delay) passes" "$(rc_of "$r")" 0
+if grep -q '#6 is free (the claim of @bob went stale' <<<"$r"; then ok "check: stale line"; else bad "stale line: $r"; fi
+eq "check: a claim with a ready pull request is never stale" "$(rc_of "$(chk "$CK" alice "Closes #9")")" 1
+eq "check: one conflict among several issues fails" "$(rc_of "$(chk "$CK" alice "Closes #4, closes #5 and closes #8")")" 1
+r=$(LIVE_FAIL=1 chk "$CK" alice "Closes #5")
+eq "check: an API error is exit 1, never a pass" "$(rc_of "$r")" 1
+r=$(chk "$CK" alice "" "docs/adr/0095-x.md")
+eq "check: someone else's ADR reservation fails" "$(rc_of "$r")" 1
+eq "check: the ADR failure is the fixed text" "$(grep '^::error::' <<<"$r")" "$(conflict_adr_text docs/adr/0095-x.md 0095 bob 2026-11-02T16:00:00Z)"
+eq "check: the author's own ADR reservation passes" "$(rc_of "$(chk "$CK" alice "" "docs/adr/0096-x.md")")" 0
+eq "check: a reservation that ran out passes" "$(rc_of "$(chk "$CK" alice "" "docs/adr/0097-x.md")")" 0
+eq "check: an unreserved ADR number passes" "$(rc_of "$(chk "$CK" alice "" "docs/adr/0098-x.md")")" 0
+eq "check: the files cannot be listed is exit 1" "$(rc_of "$(ADDED_FAIL=1 chk "$CK" alice "Closes #4")")" 1
+eq "check: a bot or Dependabot author has no exemption to need" "$(rc_of "$(chk "$CK" 'dependabot[bot]' "bump")")" 0
+r=$(ck_closers='[5]' chk "$CK" alice "Closes stateracloud/koinon#5")
+eq "check: GitHub's closing link fails without a body keyword (owner/repo#N, a URL, the sidebar)" "$(rc_of "$r")" 1
+eq "check: the linked issue's failure is the fixed text" "$(grep '^::error::' <<<"$r")" \
+  "$(conflict_issue_text 5 bob 2026-10-30T17:00:00Z 60 alice 2026-10-30T19:00:00Z)"
+eq "check: a link and a keyword for one issue check it once" "$(ck_closers='[8]' chk "$CK" alice "Fixes #8" | grep -c '#8 is claimed')" 1
+# pr_meta reads closingIssuesReferences and keeps this repository's issues only.
+r=$( (
+  REPO=acme/koinon; OWNER=acme; NAME=koinon
+  gh() { [[ $1 == api && $2 == graphql ]] || return 9
+    echo '{"data":{"repository":{"pullRequest":{"author":{"login":"alice"},"body":"see the sidebar","closingIssuesReferences":{"nodes":[{"number":5,"repository":{"nameWithOwner":"acme/koinon"}},{"number":6,"repository":{"nameWithOwner":"other/repo"}}]}}}}}'; }
+  pr_meta 77 ) )
+eq "pr_meta: author, body and this repository's closing links" "$r" '{"author":"alice","body":"see the sidebar","closers":[5]}'
+eq "pr_meta: an unknown pull request fails, never an empty pass" "$( (
+  REPO=acme/koinon; OWNER=acme; NAME=koinon
+  gh() { echo '{"data":{"repository":{"pullRequest":null}}}'; }
+  pr_meta 77 >/dev/null && echo pass || echo fail ) )" fail
+
+# ---- claims by comment (ADR 0094 decision 1), offline ----
+# cmt CLAIMS_JSON LOGIN PERMISSION BODY [N] -> output and rc of `comment N` (default 40).
+cmt() {
+  local fx=$1 login=$2 perm=$3 body=$4 n=${5:-40} out rc=0
+  out=$( {
+    FIX=$fx; stub_github; REPO=acme/koinon; HUMAN_CAP=8; OUTSIDER_CAP=2
+    commenter_class() { if [[ $perm == error ]]; then return 1; fi; perm_class "$perm"; }
+    reply() { echo "reply #$1: $2" >>"$LOG"; return "${REPLY_RC:-0}"; }
+    assign_checked() { if [[ -n ${ASSIGN_DROP:-} ]]; then text_unassignable "$2" "$1"; fi; }
+    write_claim() { echo "write $1 $2 $3 $4 lease=$5 parent=${8:-} by=${9:-}" >>"$LOG"; return "${WRITE_RC2:-0}"; }
+    upsert_comment() { echo "marker #$1: $2" >>"$LOG"; }
+    unassign() { echo "unassign #$1 $2" >>"$LOG"; }
+    gh() { echo "gh $*" >>"$LOG"; if [[ $* == *"issues?state=open"* ]]; then printf '%s' "${OPEN_ISSUES:-}"; fi; return 0; }
+    KOINON_CLAIM_COMMENT_BODY=$body KOINON_CLAIM_COMMENT_LOGIN=$login cmd_comment "$n"
+  } 2>&1 ) || rc=$?
+  echo "$out"
+  echo "rc=$rc"
+}
+open_issue() { jq -nc --argjson l "${1:-[]}" '{number:40,state:"open",pull:false,labels:$l,assignees:[],milestone:""}'; }
+gfi=$(open_issue '["good first issue"]')
+: >"$LOG"; r=$(cmt '[]' alice write /claim)
+eq "comment: a person claims an open issue" "$(rc_of "$r")" 0
+eq "comment: a person claim is 3 days, holder <login>/github/human" "$(grep '^write' "$LOG")" "write 40 held alice/github/human alice lease=2026-11-02T16:00:00Z parent= by="
+: >"$LOG"; r=$(cmt '[]' carol read /claim)
+eq "comment: an outsider on an unlabelled issue is answered" "$(rc_of "$r")" 0
+eq "comment: the label refusal" "$(grep -c "^reply #40: $(text_label carol 40 | head -c 40)" "$LOG")" 1
+eq "comment: a refusal writes no claim" "$(grep -c '^write' "$LOG")" 0
+: >"$LOG"; r=$(ISSUE_FIX=$gfi cmt '[]' carol read /claim)
+eq "comment: an outsider claim is 14 days, holder <login>/github/outsider" "$(grep '^write' "$LOG")" "write 40 held carol/github/outsider carol lease=2026-11-13T16:00:00Z parent= by="
+: >"$LOG"; r=$(ISSUE_FIX=$(open_issue '["help wanted"]') cmt '[]' carol none /claim)
+eq "comment: help wanted opens an issue to outsiders" "$(grep -c '^write 40 held carol/github/outsider' "$LOG")" 1
+two=$(jq -sc . < <(cl 41 held carol 2026-11-10T16:00:00Z | jq -c '.holder = "carol/github/outsider"'; cl 42 held carol 2026-11-10T16:00:00Z | jq -c '.holder = "carol/github/outsider"'))
+: >"$LOG"; r=$(ISSUE_FIX=$gfi cmt "$two" carol read /claim)
+eq "comment: the outsider cap of 2" "$(grep -c '^write' "$LOG")" 0
+if grep -q 'reply #40: @carol you already hold 2 live claim(s), the cap is 2: #41, #42' "$LOG"; then ok "comment: the cap refusal lists the live claims"; else bad "cap text: $(cat "$LOG")"; fi
+bobs=$(cl 40 held bob 2026-10-30T17:00:00Z)
+: >"$LOG"; r=$(cmt "[$bobs]" alice admin /claim)
+eq "comment: a claim held by someone else is answered" "$(grep -c '^write' "$LOG")" 0
+if grep -q 'reply #40: @alice #40 is claimed by @bob until 2026-10-30T17:00:00Z' "$LOG" && ! grep -q 'bob/mac' "$LOG"; then ok "comment: the held refusal names the human and the lease, not the session"; else bad "held text: $(cat "$LOG")"; fi
+deadbob=$(cl 40 held bob 2026-10-30T10:00:00Z)
+: >"$LOG"; r=$(cmt "[$deadbob]" alice admin /claim)
+eq "comment: a dead claim is taken over" "$(grep -c '^write 40 held alice/github/human alice lease=2026-11-02T16:00:00Z parent=x' "$LOG")" 1
+eq "comment: the dead claim's human is unassigned" "$(grep -c '^unassign #40 bob' "$LOG")" 1
+mine40=$(cl 40 held carol 2026-11-01T16:00:00Z | jq -c '.holder = "carol/github/outsider"')
+: >"$LOG"; r=$(ISSUE_FIX=$gfi cmt "[$mine40]" Carol read /claim)
+if grep -q '^write 40 held Carol/github/outsider Carol lease=2026-11-13T16:00:00Z parent=x' "$LOG" && grep -q renewed <<<"$r"; then ok "comment: /claim again renews the holder's own claim"; else bad "renew: $r $(cat "$LOG")"; fi
+: >"$LOG"; r=$(ISSUE_FIX='{"number":40,"state":"closed","pull":false,"labels":[],"assignees":[]}' cmt '[]' alice write /claim)
+eq "comment: a closed issue is answered" "$(grep -c '^reply #40: @alice #40 is closed' "$LOG")" 1
+: >"$LOG"; r=$(WRITE_RC2=1 cmt '[]' alice write /claim)
+eq "comment: a lost race is answered with retry" "$(grep -c 'comment `/claim` again to retry' "$LOG")" 1
+: >"$LOG"; r=$(ASSIGN_DROP=1 ISSUE_FIX=$gfi cmt '[]' carol read /claim)
+eq "comment: an assignment GitHub refused is noted in the marker" "$(grep -c "GitHub did not allow assigning @carol" "$LOG")" 1
+: >"$LOG"; r=$(cmt '[]' alice write $'thanks!\n/claim')
+eq "comment: not a command does nothing" "$(rc_of "$r"):$(wc -l <"$LOG" | tr -d ' ')" "0:0"
+: >"$LOG"; r=$(cmt '[]' 'renovate[bot]' write /claim)
+eq "comment: a bot's comment is ignored" "$(rc_of "$r"):$(wc -l <"$LOG" | tr -d ' ')" "0:0"
+eq "comment: a permission read error is exit 1" "$(rc_of "$(cmt '[]' alice error /claim)")" 1
+# The write-refused fallback: pointer to a pull request, one deduplicated Backlog issue, exit 0.
+: >"$LOG"; r=$(WRITE_RC2=5 ISSUE_FIX=$gfi cmt '[]' carol read /claim)
+eq "fallback: exit 0" "$(rc_of "$r")" 0
+eq "fallback: the commenter is pointed to a pull request" "$(grep -c "issues/40/comments -f body=$(text_fallback carol 40)" "$LOG")" 1
+eq "fallback: one Backlog issue is opened" "$(grep -c "POST repos/acme/koinon/issues -f title=$FALLBACK_TITLE" "$LOG")" 1
+: >"$LOG"; r=$(OPEN_ISSUES=$'12\t'"$FALLBACK_TITLE"$'\n' WRITE_RC2=5 ISSUE_FIX=$gfi cmt '[]' carol read /claim)
+eq "fallback: the Backlog issue is deduplicated by its title" "$(grep -c 'POST repos/acme/koinon/issues -f title' "$LOG")" 0
+: >"$LOG"; r=$(REPLY_RC=5 cmt '[]' carol read /claim)
+eq "fallback: a refused answer also falls back, exit 0" "$(rc_of "$r"):$(grep -c 'not available for outside contributors' "$LOG")" "0:1"
+# /release: the claim's human or any person.
+c40=$(cl 40 held carol 2026-11-10T16:00:00Z | jq -c '.holder = "carol/github/outsider"')
+: >"$LOG"; r=$(cmt "[$c40]" carol read /release)
+eq "release: by the holder records the holder" "$(grep '^write' "$LOG")" "write 40 released carol/github/outsider carol lease=2026-10-30T16:00:00Z parent=x by=carol/github/outsider"
+: >"$LOG"; r=$(cmt "[$c40]" alice maintain /release)
+eq "release: by a person records comment:<login>" "$(grep -c '^write 40 released .* by=comment:alice$' "$LOG")" 1
+agent40=$(cl 40 held alice 2026-10-30T17:00:00Z)
+: >"$LOG"; r=$(cmt "[$agent40]" alice write /release)
+eq "release: a person releasing their own agent's claim is comment:<login>" "$(grep -c 'by=comment:alice$' "$LOG")" 1
+: >"$LOG"; r=$(cmt "[$c40]" dave read /release)
+eq "release: another outsider is refused" "$(grep -c '^write' "$LOG")" 0
+eq "release: the refusal names whose claim it is" "$(grep -c '^reply #40: @dave only @carol (whose claim it is) or a maintainer can release #40' "$LOG")" 1
+: >"$LOG"; r=$(cmt '[]' alice write /release)
+eq "release: nothing held is answered" "$(grep -c '^reply #40: @alice #40 has no held claim' "$LOG")" 1
+: >"$LOG"; r=$(WRITE_RC2=5 cmt "[$c40]" carol read /release)
+eq "release: a refused write falls back with exit 0" "$(rc_of "$r"):$(grep -c 'not available for outside contributors' "$LOG")" "0:1"
+eq "live claims of: class filter" "$(live_claims_of "$two" "$LNOW" CAROL outsider | paste -sd, -)" "#41,#42"
+eq "live claims of: the person class ignores outsider claims" "$(live_claims_of "$two" "$LNOW" carol person)" ""
+
+# ---- sweeper classes (ADR 0094 decision 3), offline ----
+# swp HOLDER LIVE_ISO -> what sweep_one did to one claim at LNOW (2026-10-30T16:00Z).
+swp() {
+  : >"$LOG"
+  ( REPO=acme/koinon; GRACE=900; RELEASE_AFTER=7200; OUTSIDER_WARN=345600
+    claim_liveness() { LIVE=$(iso_to_epoch "$LV"); PR_STATE=none; PR_NUM=; }
+    add_label() { echo "label $2" >>"$LOG"; }
+    drop_label() { :; }
+    upsert_comment() { echo "marker $2" >>"$LOG"; }
+    do_release_claim() { echo "release by=$4" >>"$LOG"; }
+    gh() {
+      if [[ $* == *"/comments --jq"* ]]; then printf '%s' "${SEEN:-}"; return 0; fi
+      if [[ $* == *"/labels --jq"* ]]; then return 0; fi
+      echo "gh $*" >>"$LOG"
+    }
+    LV=$2 sweep_one "$(jq -nc --arg h "$1" '{issue:40,sha:"abc",state:"held",holder:$h,human:"carol",lease_until:"x",pr:""}')" "$LNOW" >/dev/null 2>&1 )
+  cat "$LOG"
+}
+eq "sweep: an outsider far from the end is left alone" "$(swp carol/github/outsider 2026-11-10T16:00:00Z)" ""
+if [[ $(swp carol/github/outsider 2026-11-02T16:00:00Z) == *"koinon-claim-reminder abc -->"*"@carol your claim on #40 runs out at 2026-11-02T16:00:00Z"* ]]; then ok "sweep: day 10 of 14 reminds the outsider in a new comment"; else bad "reminder: $(swp carol/github/outsider 2026-11-02T16:00:00Z)"; fi
+eq "sweep: the reminder is sent once per claim commit" "$(SEEN=123 swp carol/github/outsider 2026-11-02T16:00:00Z)" ""
+eq "sweep: an agent claim gets no reminder" "$(swp carol/mac/s1 2026-10-30T17:00:00Z)" ""
+if [[ $(swp carol/github/outsider 2026-10-30T15:59:00Z) == "label claim:stale"*'comment `/claim`'* ]]; then ok "sweep: an outsider claim is stale when liveness runs out, with the comment hint"; else bad "outsider stale: $(swp carol/github/outsider 2026-10-30T15:59:00Z)"; fi
+eq "sweep: an agent claim keeps its 15-minute grace" "$(swp carol/mac/s1 2026-10-30T15:59:00Z)" ""
+if [[ $(swp carol/mac/human 2026-10-30T15:00:00Z) == "label claim:stale"*'--human'* ]]; then ok "sweep: a person claim's hint names /claim and beat --human"; else bad "person stale: $(swp carol/mac/human 2026-10-30T15:00:00Z)"; fi
+eq "sweep: released 2 h after liveness" "$(swp carol/github/outsider 2026-10-30T13:59:00Z)" "release by=sweeper"
+rm -f "$LOG"
+
 # ---- board skip in the token-limited jobs (ADR 0094 decision 3, #169) ----
 # release-pr and the sweeper run on GITHUB_TOKEN, which cannot read an organization project. The board
 # write must skip with one log line and the release must still complete.
@@ -659,7 +979,8 @@ KOINON_CLAIM_GRACE_SECONDS=1 KOINON_CLAIM_STALE_RELEASE_SECONDS=2 "$claim" sweep
 eq "sweeper keeps a live claim" "$("$claim" show "$i10" | head -1 | grep -c active)" 1
 "$claim" release "$i10" --note x >/dev/null
 
-# check-pr: a pull request closing a claimed issue passes, an unclaimed one fails
+# check-pr (ADR 0094 decision 2): it fails only on someone else's live claim, so every case the
+# scratch repository can make with one login passes. The conflict itself is covered offline.
 i11=$(newissue pr-check)
 
 default=$(gh api "repos/$repo" --jq .default_branch)
@@ -669,13 +990,13 @@ gh api -X POST "repos/$repo/git/refs" -f ref="refs/heads/$br" -f sha="$base" >/d
 printf 'x\n' | base64 | { read -r b64; gh api -X PUT "repos/$repo/contents/src-$i11.go" -f message=add -f content="$b64" -f branch="$br" >/dev/null; }
 prn=$(gh pr create -R "$repo" -H "$br" -B "$default" -t "chore: sneaky $i11" -b "Closes #$i11" | grep -oE '[0-9]+$')
 export KOINON_CLAIM_CODEOWNERS=$here/../.github/CODEOWNERS
-eq "chore title with source files and no claim fails" "$(code "$claim" check-pr "$prn")" 1
+eq "no claim passes (no title or label exemption to need)" "$(code "$claim" check-pr "$prn")" 0
 sess C
-"$claim" take "$i11" >/dev/null
+eq "take links the caller's own open pull request" "$(code "$claim" take "$i11")" 0
 eq "claimed by the author passes" "$(code "$claim" check-pr "$prn")" 0
 sess C
 "$claim" release "$i11" --note x >/dev/null
-eq "released claim fails" "$(code "$claim" check-pr "$prn")" 1
+eq "released claim passes" "$(code "$claim" check-pr "$prn")" 0
 gh pr close -R "$repo" "$prn" >/dev/null
 
 sess K

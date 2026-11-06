@@ -66,7 +66,7 @@ var _ = Describe("Repository passwords over HTTP", func() {
 		var asked []string
 		stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// A koinon-api older than repository epochs: no epoch in the reply, whatever is asked.
-			asked = append(asked, r.URL.Query().Get("epoch")+"|"+strconv.FormatBool(r.URL.Query().Has("epoch")))
+			asked = append(asked, r.URL.Query().Get("epoch")+"|"+strconv.FormatBool(r.URL.Query().Has("epoch"))+"|"+r.URL.Query().Get("current"))
 			_, _ = w.Write([]byte(`{"prefix":"orgs/o/homes/a/","password":"koinon_test_not-a-real-token"}`))
 		}))
 		DeferCleanup(stub.Close)
@@ -78,7 +78,17 @@ var _ = Describe("Repository passwords over HTTP", func() {
 		Expect(zero.Epoch).To(BeZero())
 		_, err = remote.At(context.Background(), org, agent, 1)
 		Expect(err).To(MatchError(ContainSubstring("not 1")))
-		Expect(asked).To(Equal([]string{"|false", "0|true", "1|true"}))
+		Expect(asked).To(Equal([]string{"|false|1", "0|true|", "1|true|"}), "the current repository is asked for by name")
+	})
+
+	It("the Server refuses an epoch and current together", func() {
+		srv := httptest.NewServer(checkpoint.Server{Key: func(context.Context) ([]byte, error) { return key, nil }})
+		DeferCleanup(srv.Close)
+		exp := strconv.FormatInt(time.Now().Add(20*time.Second).Unix(), 10)
+		res, err := http.Post(srv.URL+checkpoint.RepositoryPath+"?org="+org.String()+"&agent="+agent.String()+"&exp="+exp+"&epoch=0&current=1", "", nil)
+		Expect(err).NotTo(HaveOccurred())
+		_ = res.Body.Close()
+		Expect(res.StatusCode).To(Equal(http.StatusBadRequest))
 	})
 
 	It("the Server refuses a malformed epoch", func() {

@@ -538,7 +538,7 @@ var _ = Describe("home checkpoints", func() {
 		Expect(home.get()).To(HaveKeyWithValue("notes/v.md", "old"), "epoch 1's password is lost; epoch 0's checkpoint restored")
 	})
 
-	It("deletes a retired repository past its deadline and no longer restores its checkpoints", func(ctx SpecContext) {
+	It("deletes a retired repository past its deadline once a later epoch holds a checkpoint, and no longer restores its own", func(ctx SpecContext) {
 		org, agent := e.org.String(), e.agent.ID.String()
 		e0 := checkpoint.Prefix(org, agent)
 		e1 := checkpoint.EpochPrefix(org, agent, 1)
@@ -551,27 +551,42 @@ var _ = Describe("home checkpoints", func() {
 			VALUES ($1, $2, $3, '{}', now() - interval '8 days', now() - interval '1 minute')`, e.org, e.agent.ID, e0)
 		Expect(err).NotTo(HaveOccurred())
 		_, err = db.Exec(ctx, `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason)
-			VALUES ($1, $2, 1, $3, '{}', 'key_lost')`, e.org, e.agent.ID, e1)
+			VALUES ($1, $2, 1, $3, '{}', 'key_compromised')`, e.org, e.agent.ID, e1)
 		Expect(err).NotTo(HaveOccurred())
-		old := request(ctx, store.CheckpointReasonStop)
-		_, err = db.Exec(ctx, `UPDATE home_checkpoints SET status = 'complete', snapshot_id = 'gone', finished_at = now(), repository_epoch = 0 WHERE org_id = $1 AND id = $2`, e.org, old)
-		Expect(err).NotTo(HaveOccurred())
+		complete := func(epoch int, snapshot string) pgtype.UUID {
+			GinkgoHelper()
+			// Inserted complete, so the running pool has no request to claim.
+			var id pgtype.UUID
+			Expect(db.QueryRow(ctx, `INSERT INTO home_checkpoints (org_id, agent_id, reason, status, snapshot_id, finished_at, repository_epoch)
+				VALUES ($1, $2, 'stop', 'complete', $3, now(), $4) RETURNING id`, e.org, e.agent.ID, snapshot, epoch).Scan(&id)).To(Succeed())
+			return id
+		}
+		old := complete(0, "gone")
 		listed := func() int {
 			cps, err := q.ListCompleteHomeCheckpoints(ctx, store.ListCompleteHomeCheckpointsParams{OrgID: e.org, AgentID: e.agent.ID, MaxRows: 10})
 			Expect(err).NotTo(HaveOccurred())
 			return len(cps)
 		}
-		Expect(listed()).To(Equal(1))
-
-		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) { c.Sweep = 50 * time.Millisecond }))
-		Eventually(func() bool {
+		deleted0 := func() bool {
 			var deleted pgtype.Timestamptz
 			Expect(db.QueryRow(ctx, `SELECT deleted_at FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID).Scan(&deleted)).To(Succeed())
 			return deleted.Valid
-		}).WithTimeout(10 * time.Second).Should(BeTrue())
-		Expect(listed()).To(BeZero(), "a deleted repository's checkpoint is not offered to a restore")
+		}
+		Expect(listed()).To(Equal(1))
 
+		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) { c.Sweep = 50 * time.Millisecond }))
+		By("past its deadline, but the agent's newest restorable home: kept")
+		Consistently(deleted0).WithTimeout(time.Second).Should(BeFalse())
 		var out bytes.Buffer
+		Expect(writer.Restore(ctx, e0, "koinon_test_not-a-real-token", "", &out)).To(Succeed(), "epoch 0 still restores")
+
+		By("epoch 1's first checkpoint completes: epoch 0 goes")
+		complete(1, s1.SnapshotID)
+		Expect(listed()).To(Equal(2))
+		Eventually(deleted0).WithTimeout(10 * time.Second).Should(BeTrue())
+		Expect(listed()).To(Equal(1), "a deleted repository's checkpoint is not offered to a restore")
+
+		out.Reset()
 		Expect(writer.Restore(ctx, e0, "koinon_test_not-a-real-token", "", &out)).NotTo(Succeed(), "epoch 0's blobs are deleted")
 		out.Reset()
 		Expect(writer.Restore(ctx, e1, "koinon_test_not-a-real-token-1", s1.SnapshotID, &out)).To(Succeed(), "epoch 1 under it is untouched")
@@ -582,10 +597,45 @@ var _ = Describe("home checkpoints", func() {
 		By("a checkpoint of a later epoch, once that epoch is deleted, is not offered either")
 		_, err = db.Exec(ctx, `UPDATE home_checkpoints SET repository_epoch = 1 WHERE org_id = $1 AND id = $2`, e.org, old)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(listed()).To(Equal(1))
+		Expect(listed()).To(Equal(2))
 		_, err = db.Exec(ctx, `UPDATE home_repository_epochs SET retired_at = now(), delete_after = now(), deleted_at = now() WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(listed()).To(BeZero())
+	})
+
+	It("deletes a retired repository whose password was lost without waiting for a later checkpoint, and never one whose stored prefix is not its own", func(ctx SpecContext) {
+		org, agent := e.org.String(), e.agent.ID.String()
+		e0 := checkpoint.Prefix(org, agent)
+		_, err := writer.Backup(ctx, e0, "koinon_test_not-a-real-token", tarOf(map[string]string{"notes/v.md": "lost"}), checkpoint.Meta{CheckpointID: "c0"})
+		Expect(err).NotTo(HaveOccurred())
+		// Another agent's repository, which a tampered row of this agent names.
+		other := checkpoint.Prefix(org, "0198a000-0000-7000-8000-0000000000aa")
+		_, err = writer.Backup(ctx, other, "koinon_test_not-a-real-token-other", tarOf(map[string]string{"notes/v.md": "theirs"}), checkpoint.Meta{CheckpointID: "x"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope, credential_lost_at, retired_at, delete_after)
+			VALUES ($1, $2, $3, NULL, now(), now() - interval '8 days', now() - interval '1 minute')`, e.org, e.agent.ID, other)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason)
+			VALUES ($1, $2, 1, $3, '{}', 'key_lost')`, e.org, e.agent.ID, checkpoint.EpochPrefix(org, agent, 1))
+		Expect(err).NotTo(HaveOccurred())
+		deleted0 := func() bool {
+			var deleted pgtype.Timestamptz
+			Expect(db.QueryRow(ctx, `SELECT deleted_at FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID).Scan(&deleted)).To(Succeed())
+			return deleted.Valid
+		}
+
+		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) { c.Sweep = 50 * time.Millisecond }))
+		By("the stored prefix names another agent's folder: refused, nothing deleted")
+		Consistently(deleted0).WithTimeout(time.Second).Should(BeFalse())
+		var out bytes.Buffer
+		Expect(writer.Restore(ctx, other, "koinon_test_not-a-real-token-other", "", &out)).To(Succeed(), "the other agent's repository is untouched")
+
+		By("with its own prefix, a lost repository goes although no later epoch has a checkpoint")
+		_, err = db.Exec(ctx, `UPDATE home_repositories SET prefix = $3 WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID, e0)
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(deleted0).WithTimeout(10 * time.Second).Should(BeTrue())
+		out.Reset()
+		Expect(writer.Restore(ctx, e0, "koinon_test_not-a-real-token", "", &out)).NotTo(Succeed(), "its blobs are deleted")
 	})
 
 	It("does not start the harness when the home cannot be restored", func(ctx SpecContext) {

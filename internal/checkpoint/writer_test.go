@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -137,6 +138,35 @@ var _ = Describe("Writer", func() {
 		Expect(w.DeleteRepository(ctx, checkpoint.Prefix(org, "0198a000-0000-7000-8000-000000000009"))).To(BeZero())
 		_, err = w.DeleteRepository(ctx, "orgs/x")
 		Expect(err).To(MatchError(ContainSubstring("not a repository prefix")))
+	})
+
+	// koinon never runs kopia maintenance, so these are all the blobs a repository holds.
+	It("names every blob a backup, restore and verify write with a prefix the sweep lists (a kopia bump that adds one fails here)", func() {
+		pass := "koinon_test_not-a-real-token"
+		for i := range 3 {
+			_, err := w.Backup(ctx, prefix, pass, home(entry{name: fmt.Sprintf("./notes/%d.md", i), body: strings.Repeat("x", i+1)}), checkpoint.Meta{CheckpointID: fmt.Sprintf("c%d", i)})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		var out bytes.Buffer
+		Expect(w.Restore(ctx, prefix, pass, "", &out)).To(Succeed())
+		last, err := w.Backup(ctx, prefix, pass, home(), checkpoint.Meta{CheckpointID: "last"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(w.Verify(ctx, prefix, pass, last.SnapshotID)).To(Succeed())
+
+		ids, err := w.BlobIDs(ctx, prefix)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ids).NotTo(BeEmpty())
+		for _, id := range ids {
+			listed := false
+			for _, p := range checkpoint.KopiaBlobPrefixes {
+				listed = listed || strings.HasPrefix(string(id), string(p))
+			}
+			Expect(listed).To(BeTrue(), "blob %q has a prefix the sweep does not list: add it to kopiaBlobPrefixes", id)
+		}
+		Expect(w.DeleteRepository(ctx, prefix)).To(Equal(len(ids)))
+		left, err := w.BlobIDs(ctx, prefix)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(left).To(BeEmpty())
 	})
 
 	It("restores from a repository that has no snapshot as an error", func() {

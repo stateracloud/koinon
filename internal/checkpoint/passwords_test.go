@@ -5,6 +5,8 @@ package checkpoint_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"time"
 
@@ -155,6 +157,68 @@ var _ = Describe("Repository passwords and epochs", Ordered, func() {
 		By("the table keeps the envelope and the mark together")
 		_, err = pool.Exec(ctx, `UPDATE home_repository_epochs SET password_envelope = NULL WHERE org_id = $1 AND agent_id = $2`, org, agent)
 		Expect(err).To(MatchError(ContainSubstring("home_repository_epochs_credential")))
+	})
+
+	It("answers an older koinon-agentd, which names no epoch, only while epoch 0 is current", func(ctx SpecContext) {
+		key := []byte("koinon_test_not-a-real-key")
+		srv := httptest.NewServer(checkpoint.Server{Passwords: pw, Key: func(context.Context) ([]byte, error) { return key, nil }})
+		DeferCleanup(srv.Close)
+		old := func() (int, checkpoint.Repository) {
+			GinkgoHelper()
+			exp := time.Now().Add(20 * time.Second).Unix()
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s%s?org=%s&agent=%s&exp=%d",
+				srv.URL, checkpoint.RepositoryPath, org.String(), agent.String(), exp), nil)
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Authorization", "Bearer "+checkpoint.RepositoryToken(key, org.String(), agent.String(), exp))
+			res, err := http.DefaultClient.Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = res.Body.Close() }()
+			var out checkpoint.Repository
+			if res.StatusCode == http.StatusOK {
+				var raw struct {
+					Epoch            int32
+					Prefix, Password string
+				}
+				Expect(json.NewDecoder(res.Body).Decode(&raw)).To(Succeed())
+				out = checkpoint.Repository(raw)
+			}
+			return res.StatusCode, out
+		}
+
+		code, e0 := old()
+		Expect(code).To(Equal(http.StatusOK))
+		Expect(e0.Epoch).To(BeZero())
+		e1, _, err := pw.NewEpoch(ctx, org, agent, checkpoint.ReasonKeyCompromised, time.Hour)
+		Expect(err).NotTo(HaveOccurred())
+		code, _ = old()
+		Expect(code).To(Equal(http.StatusConflict), "it would write to epoch 1 and record epoch 0")
+
+		remote := checkpoint.Remote{BaseURL: srv.URL, Key: func() ([]byte, error) { return key, nil }}
+		Expect(remote.Get(ctx, org, agent)).To(Equal(e1), "a current koinon-agentd names the current repository")
+	})
+
+	It("lists the longest overdue repository first, so a row that keeps failing does not hold back the rest", func(ctx SpecContext) {
+		first, second := pgtest.Uniq("a"), pgtest.Uniq("b")
+		ids := map[string]pgtype.UUID{}
+		for _, name := range []string{first, second} {
+			var id pgtype.UUID
+			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, $2, 'opencode') RETURNING id`, org, name).Scan(&id)).To(Succeed())
+			ids[name] = id
+		}
+		// Lost, so due without a later checkpoint; the higher agent ID is the longer overdue.
+		lo, hi := ids[first], ids[second]
+		if lo.String() > hi.String() {
+			lo, hi = hi, lo
+		}
+		for id, age := range map[pgtype.UUID]string{lo: "1 hour", hi: "3 days"} {
+			_, err := pool.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope, credential_lost_at, retired_at, delete_after)
+				VALUES ($1, $2, $3, NULL, now(), now() - interval '10 days', now() - $4::interval)`, org, id, checkpoint.Prefix(org.String(), id.String()), age)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		due, err := store.New(pool).ListDueHomeRepositories(ctx, store.ListDueHomeRepositoriesParams{OrgID: org, MaxRows: 1})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(due).To(HaveLen(1))
+		Expect(due[0].AgentID).To(Equal(hi))
 	})
 
 	It("serves the current repository and a given epoch over HTTP", func(ctx SpecContext) {
