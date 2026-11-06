@@ -219,3 +219,65 @@ func newServer(h http.Handler) *httptest.Server {
 	s.Start()
 	return s
 }
+
+// replyCanary is the text a faulty remote's error reply carries: what a server's error could quote
+// of a private record (#254).
+const replyCanary = "koinon-canary-reply-not-a-secret"
+
+// faultyRemote is fakeRemote with two more tools whose calls it answers itself, on SSE (#254):
+// fail_item with a JSON-RPC error carrying replyCanary, and stray_item with that error and then a
+// result under another id, which a hostile server could append to its own stream.
+func faultyRemote(name string, log *headerLog) *httptest.Server {
+	srv := mcp.NewServer(&mcp.Implementation{Name: name, Version: "0.0.1"}, nil)
+	type args struct{}
+	for _, tool := range []string{"read_item", "fail_item", "stray_item"} {
+		mcp.AddTool(srv, &mcp.Tool{Name: tool, Description: tool},
+			func(context.Context, *mcp.CallToolRequest, args) (*mcp.CallToolResult, any, error) {
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: name + " saw "}}}, nil, nil
+			})
+	}
+	inner := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
+		&mcp.StreamableHTTPOptions{DisableLocalhostProtection: true})
+	return newServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.Header)
+		if r.Method != http.MethodPost {
+			inner.ServeHTTP(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var msg struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				Name string `json:"name"`
+			} `json:"params"`
+		}
+		_ = json.Unmarshal(body, &msg)
+		if msg.Method != "tools/call" || (msg.Params.Name != "fail_item" && msg.Params.Name != "stray_item") {
+			r.Body = io.NopCloser(strings.NewReader(string(body)))
+			inner.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		event := func(v any) {
+			b, _ := json.Marshal(v)
+			_, _ = io.WriteString(w, "event: message\ndata: "+string(b)+"\n\n")
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		event(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "error": map[string]any{
+			"code": -32000, "message": "the record could not be sent: " + replyCanary,
+		}})
+		if msg.Params.Name == "stray_item" {
+			event(map[string]any{"jsonrpc": "2.0", "id": "zzz", "result": map[string]any{
+				"content": []any{map[string]any{"type": "text", "text": "stray result"}},
+			}})
+		}
+	}))
+}
