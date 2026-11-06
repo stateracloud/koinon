@@ -98,10 +98,16 @@ term.
    v0.2. The agentgateway delivery spike is dropped: a token handoff built on agentgateway would be
    built twice, once there and again when Koinon's MCP path replaces agentgateway's MCP configuration
    in the same release.
+6. **The gateway renews sign-in tokens** (maintainer decision 2026-11-06, second review). Only
+   koinon-gateway can decrypt stored credentials (ADR 0097), so it refreshes sign-ins too. koinon-api
+   runs discovery, the browser sign-in start and the callback, and seals the new tokens under the KEK
+   without ever decrypting them.
 
-### 3. Koinon is the OAuth client; the gateway only attaches the token
+### 3. Koinon is the OAuth client, split between koinon-api and the gateway
 
-agentgateway cannot sign in, store or refresh, so all of that is Koinon's job, in koinon-api.
+agentgateway cannot sign in, store or refresh, so all of that is Koinon's job. koinon-api starts and
+finishes the sign-in and seals the tokens; koinon-gateway, the only process that decrypts them,
+refreshes and attaches them.
 
 - **Discovery.** The anonymous probe of ADR 0057 item 2 becomes discovery: follow `resource_metadata`
   (RFC 9728), else the well-known protected-resource URIs; read the AS metadata by RFC 8414 or OIDC
@@ -129,18 +135,20 @@ agentgateway cannot sign in, store or refresh, so all of that is Koinon's job, i
 - **Storage.** Access and refresh tokens are envelopes under the KEK (ADR 0056), in an org-owned
   table keyed by `(org_id, id)` with the owner kind and ID, the server, issuer, resource, scopes,
   expiry, status (`active`, `needs_sign_in`, `lost`, `revoked`), who signed in and when, the last
-  refresh and the last error.
-- **Refresh by Koinon.** koinon-api refreshes when less than 5 minutes remain, single-flight per
-  sign-in (a row lock, since several replicas run), and stores a rotated refresh token in the same
-  transaction before it returns the new access token. `invalid_grant` makes the sign-in
-  `needs_sign_in` at once; network and 5xx errors retry with backoff while an unexpired access token is
-  still served.
-- **Delivery through the ADR 0073 token service.** Koinon's MCP path (ADR 0097 step 2) gets the
-  current access token per upstream call and per target from the token service, and attaches it to
-  that target's upstream client only. The token exists only between the gateway and the MCP server; the sandbox holds only its
-  gateway key placeholder. One gateway target per org and server stays (ADR 0057 item 4).
+  refresh and the last error. koinon-api writes the envelopes after the callback (it seals, never
+  decrypts); koinon-gateway alone decrypts them and rewrites them on refresh.
+- **Refresh by koinon-gateway.** The gateway refreshes when less than 5 minutes remain, single-flight
+  per sign-in: a Postgres row lock, so only one of several gateway replicas refreshes. It stores a
+  rotated refresh token in the same transaction, before the new access token is used. `invalid_grant`
+  makes the sign-in `needs_sign_in` at once; network and 5xx errors retry with backoff while an
+  unexpired access token is still served.
+- **Delivery by Koinon's MCP path.** Koinon's MCP path (ADR 0097 step 2) reads the target's sign-in
+  per upstream call, decrypts the current access token (refreshing it first when due), and attaches
+  it to that target's upstream client only. The token exists only between the gateway and the MCP
+  server; the sandbox holds only its gateway key placeholder. One gateway target per org and server
+  stays (ADR 0057 item 4).
 - **Approvals.** An approved call runs through koinon-api with the executor key (ADR 0091 section 5).
-  The token service maps an executor call to the asking run's sign-in: the org sign-in now; for a
+  The gateway maps an executor call to the asking run's sign-in: the org sign-in now; for a
   per-user sign-in later, the run's `on_behalf_of` through the passport's `act` chain.
 - **Library.** go-sdk `oauthex` (protected-resource and AS metadata, DCR) and `golang.org/x/oauth2`
   (code exchange, refresh), both already in `go.mod`. Koinon owns the persisted state machine; the
@@ -149,9 +157,10 @@ agentgateway cannot sign in, store or refresh, so all of that is Koinon's job, i
 
 ### 4. Traps the design must avoid
 
-- **Never deliver a token through the leak guard hook's header.** The ExtMcp `header_mutation`
-  applies to every backend of the call, and `tools/list` fans out, so one server's token would reach
-  every server of the org.
+- **Never let the token reach the sandbox or the agent.** The token goes only on the upstream
+  request to its own server, never into a header, field or result the agent can see, and never into
+  anything shared by every server of a call: `tools/list` fans out, so a shared header would send one
+  server's token to every server of the org.
 - **Never rewrite the gateway Secret on refresh.** Kubelet propagation lag would force early refresh,
   every refresh would churn the Secret and the config, and per-user sign-in would need a target per
   user. Static credentials keep ADR 0057 item 5; sign-ins never go into that Secret.
@@ -204,11 +213,12 @@ credential), in the gateway behaviour suite and the stage A e2e:
    criterion 2).
 2. **`initialize` carries the token.** The upstream session's `initialize` request already carries
    the target's token.
-3. **A dead sign-in parks the run cleanly.** When the token service refuses (a dead, lost or revoked
-   sign-in), the agent gets a clean error the run parks on with `authorization_required` (decision
+3. **A dead sign-in parks the run cleanly.** When the target's sign-in is dead, lost, revoked or
+   cannot be refreshed, the agent gets a clean error the run parks on with `authorization_required` (decision
    2.2), not a 500.
-4. **Refreshed tokens are picked up without reload.** After koinon-api refreshes a sign-in, the next
-   upstream call uses the new access token, with no config reload and no gateway restart.
+4. **Refreshed tokens are picked up without reload.** After one gateway replica refreshes a sign-in, the
+   next upstream call on any replica uses the new access token, with no config reload and no gateway
+   restart; concurrent calls on one sign-in refresh it once.
 
 A failing check goes back to the maintainer before the build continues, not into a workaround.
 
@@ -216,7 +226,7 @@ A failing check goes back to the maintainer before the build continues, not into
 
 | Point | How it is answered |
 |---|---|
-| Where refresh and the token service run, now that ADR 0097 (step 2) lets only the gateway decrypt stored credentials while koinon-api only seals them | The ADR 0097 step 2 design, with this ADR |
+| How the gateway's refresh row lock behaves under load (lock wait, a replica that dies mid-refresh) | ADR 0097 step 2 tests: concurrent calls on one sign-in refresh once; a killed refresher leaves the old refresh token usable |
 | Cloudflare's access-token lifetime, and whether a refresh token comes without `offline_access` | Stage C: record `expires_in` and the refresh behaviour over a day |
 | Cloudflare accepts a redirect URI on a private hostname | Stage C: CIMD with the lab callback; fall back to a public callback if refused |
 | Pocket ID supports RFC 8707 `resource` (and DCR) | Stage B: a live check of the authorize and token requests with `resource` |
@@ -252,11 +262,11 @@ A failing check goes back to the maintainer before the build continues, not into
 
 - Positive: servers like Cloudflare's connect with a browser sign-in and no token to copy; unattended
   runs ask for a sign-in instead of failing; per-user sign-in needs no table migration.
-- Positive: one delivery path (the ADR 0073 token service, attached by Koinon's MCP path) for
-  passports and sign-ins.
+- Positive: sign-in tokens are decrypted only in koinon-gateway, the same as every other stored
+  credential (ADR 0097); the internet-facing koinon-api only seals them.
 - Negative: Koinon owns an OAuth client state machine (discovery, three client-identity methods,
-  pending flows, refresh, revocation), and the token service becomes a per-call dependency of the
-  gateway for these servers.
+  pending flows, refresh, revocation), split across koinon-api (sign-in) and koinon-gateway
+  (refresh), and the gateway needs Postgres and egress to each AS for these servers.
 - Negative: an org sign-in acts as one person's upstream account _(inferred)_.
 - Follow-ups: the checks for Koinon's MCP path, in ADR 0097's step 2 work; amend ADR 0057 items 2 and 5 when the build lands; the stage A fixtures and
   the quickstart step that replaces 6b; issues for stages B and C to the lab owner; the "revoke all
