@@ -367,6 +367,7 @@ tool_repo() {
 	BUF) echo "bufbuild/buf" ;;
 	GOVULNCHECK) echo "golang/vuln" ;;
 	GOFUMPT) echo "mvdan/gofumpt" ;;
+	CRANE) echo "google/go-containerregistry" ;;
 	esac
 }
 while IFS=$'\t' read -r file line; do

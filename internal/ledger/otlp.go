@@ -97,7 +97,11 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 				}
 				cacheRead, _ := intValue(attrs[gateway.LogFieldCacheRead])
 				cacheWrite, _ := intValue(attrs[gateway.LogFieldCacheWrite])
-				reasoning, _ := intValue(attrs[gateway.LogFieldReasoning])
+				// The split is absent, not 0, when the gateway had none to log (agentgateway v1.7.0
+				// on Anthropic Messages, #78): the entry then records it as unknown. Interim until
+				// agentgateway sets llm.reasoningTokens from Messages usage; #78 links the upstream
+				// issue, and the exit condition is that field logged on a Messages call.
+				reasoning, reasoningOK := intValue(attrs[gateway.LogFieldReasoning])
 				status, statusOK := intValue(attrs[gateway.LogFieldStatus])
 				cost := decimalValue(attrs[attrCostTotal])
 				// Usage or a non-zero cost is charged whatever the status. agentgateway logs a zero
@@ -137,7 +141,8 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 					InputTokens:  in,
 					OutputTokens: out,
 					InputKnown:   inOK, OutputKnown: outOK,
-					CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite, ReasoningTokens: reasoning,
+					CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
+					ReasoningTokens: reasoning, ReasoningKnown: reasoningOK,
 					CostUSD: cost, Status: status,
 					UpstreamKnown: upstreamKnown, Upstream: upstream,
 					RequestBytes: -1, ResponseBytes: -1,

@@ -27,6 +27,52 @@ mid-run and still cleans up after a crashed one. Ryuk stays on everywhere; do no
 `TESTCONTAINERS_RYUK_DISABLED` in CI. Runs without pgserver (a single-package `go test`) are not
 covered; the upgrade path is #173. `hack/go-test-test.sh` pins the export and its order.
 
+### The agentgateway test image (#238)
+
+The `internal/gateway/standalone` and `internal/ledger` suites start a real agentgateway container.
+Pulling it from its upstream registry at test time made every Go job depend on that registry: on
+2026-11-06 `cr.agentgateway.dev` answered 522 and every pull request with Go changes went red. The
+image is named once, by digest: the chart's `gateway.standalone.image` in `charts/koinon/values.yaml`
+(repository, tag and digest), printed by `hack/agentgateway-pin.sh`. The tests take it from
+`internal/testing/agentgatewayimage` (`Digest`, and `Upstream`, the chart's repository at that digest).
+CI tests against a copy of that digest in GHCR, `ghcr.io/<owner>/agentgateway`, kept by the manually
+dispatched workflow `mirror-agentgateway-test-image.yml`.
+
+`hack/agentgateway-pin.sh --check` (in the `scripts` job, with `hack/agentgateway-pin-test.sh`) fails
+when the pin is not a full sha256 digest, when the workflow carries a digest of its own, when
+`Digest` or `Upstream`'s repository differs from the chart's, and when any other tracked Go file names
+an agentgateway image itself.
+
+When the pin moves (an agentgateway bump changes the chart's tag and digest), do it in one pull
+request:
+
+1. Change `gateway.standalone.image` in the chart, and `Digest` in
+   `internal/testing/agentgatewayimage/image.go` to the same digest (`--check` fails until they match).
+2. Push the branch and dispatch the workflow on it:
+   `gh workflow run mirror-agentgateway-test-image.yml --ref <branch>` (input `source`:
+   `cr.agentgateway.dev/agentgateway`, or `ghcr.io/agentgateway/agentgateway` while the first is
+   down; both serve the same digest). It copies the digest, fails unless the copy has that digest, and
+   prints `image: ghcr.io/<owner>/agentgateway@sha256:...` in its log and summary. On a branch it tags
+   the copy by its digest (`pin-<hex>`); only on `main` does it move the version tag. On the first
+   dispatch for a new package, GHCR can answer DENIED to a manifest PUT right after the run created the
+   package: re-run the job once.
+3. Re-run the pull request's go-test, which now finds the copy. After the merge, dispatch the workflow
+   on `main` to point the version tag at the new digest.
+
+The go-test job logs in to GHCR, pulls `ghcr.io/<owner>/agentgateway@<digest>` once, and sets
+`KOINON_AGENTGATEWAY_MIRROR` to that repository; `agentgatewayimage.Ref()` then returns the copy, and
+the chart's repository at the same digest when the variable is unset, so a laptop or the lab needs no
+GHCR credentials. When the pull fails, go-test fails with a pointer to step 2, except in a fork's own
+CI, which cannot read the copy: there it warns and the tests pull the chart's repository.
+
+The GHCR package stays private until v0.3. The go-test job pulls it with its own `GITHUB_TOKEN`
+(`packages: read` on the job), which works only while the package's settings ("Manage Actions
+access") list this repository with read. The image's `org.opencontainers.image.source` label names
+the upstream repository (changing it would change the digest), so GHCR does not link the package to
+Koinon by itself: after the first run, check that setting and add the repository if it is missing.
+Crane is `CRANE_VERSION` in `hack/versions.env`, installed with `go install` (the Go checksum database
+verifies it) and dated by `hack/dep-age-check.sh` (ADR 0079).
+
 ## Persisted-state compatibility
 
 `internal/compat` (koinon-private#652) checks that what a shipped release wrote still loads at head. Each folder
@@ -147,8 +193,7 @@ event payload (koinon-private#676), not from the live state: the run is named `c
 when `github.event.pull_request.draft` is true, else `ci`, and `hack/ci-skip-heavy.sh` decides from
 that same flag (`PR_DRAFT`), so a run's name and its behaviour always agree. A gate that must
 ignore draft runs drops the runs whose `display_title` (`displayTitle` in `gh run list --json`) is `ci (draft)`; the run `name` stays `ci` for every run, so never filter on it;
-`pr-wait.sh` (and `pr-merge.sh`, which calls it) still uses its time window until #133, which will
-filter on the `ci (draft)` display_title instead. A re-run replays the
+`pr-wait.sh` (and `pr-merge.sh`, which calls it) does exactly that (#218): no time window. A re-run replays the
 original event: re-running a `ci (draft)` run after the PR is ready is a draft run again (`go` and
 `web` red, "not tested"). That is safe (it can never leave a green `go` on an untested head) but
 `pr-wait.sh` ignores such a re-run (it was created before the ready event), so the ready run's
@@ -330,10 +375,12 @@ skipped), re-reads the PR (not OPEN: exit 3; head not origin's branch tip: exit 
 `gh pr merge --merge` (`--admin`, else `--auto`, which prints `auto-merge enabled`, or `added to the merge queue` when the ruleset has a queue), and only after that
 succeeded `claim.sh review` in the claim's lane (from `claim.sh mine`, or `--lane`) and a PR comment with the
 head SHA and the number of contexts it read. `pr-wait.sh --checks` exits 5 on a draft. After
-`ready_for_review` it ignores only the draft's `ci` workflow runs: those created more than about 30 s before
-the last ready event (a by-hand re-run of a draft-era run is ignored too). dco, gitleaks,
-claim and commit statuses (`e2e-lab`) keep their result; when gh cannot list the runs, each `ci` check run's
-start time decides instead. It exits 6 `STALE-HEAD` when the PR's head stays different from
+`ready_for_review` it ignores only the draft's `ci` workflow runs, in every mode (with or without
+`--checks`): the runs on the head whose display title is `ci (draft)`, matched by run id (a by-hand
+re-run of a draft run is ignored too). A red or cancelled run of the ready `ci` is never dropped, and
+while the ready run has no checks yet it prints `waiting for the ready run`, never green. dco, gitleaks,
+claim and commit statuses (`e2e-lab`) keep their result; when gh cannot list the runs, nothing is
+dropped (a draft run's red then shows as `FAILED`). It exits 6 `STALE-HEAD` when the PR's head stays different from
 `git ls-remote origin refs/heads/<branch>` for `PR_WAIT_STALE_GRACE` seconds (default 120); re-sync with
 `gh api -X PATCH repos/{owner}/{repo}/pulls/<PR> -f base=<base>`.
 

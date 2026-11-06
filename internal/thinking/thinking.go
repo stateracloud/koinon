@@ -105,8 +105,10 @@ type UsageSplit string
 
 const (
 	// SplitAnthropic is usage.output_tokens_details.thinking_tokens of the Messages API (on the last
-	// message_delta when streaming). agentgateway v1.7.0 does not read it, so the ledger has no split
-	// for these models yet (#78).
+	// message_delta when streaming). agentgateway v1.7.0 does not read it, so the gateway logs no
+	// split for these models: the ledger records it as unknown (spend_entries.reasoning_known false)
+	// unless an OpenRouter settlement reports one, and the thinking stays billed inside the output
+	// count, which agentgateway takes from the final message_delta (#78).
 	SplitAnthropic UsageSplit = "anthropic-thinking-tokens"
 	// SplitCompletions is usage.completion_tokens_details.reasoning_tokens of chat completions, which
 	// agentgateway reads into the ledger.

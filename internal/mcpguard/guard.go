@@ -508,14 +508,9 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 				return err
 			}
 		}
-		f.URL, f.URLChecked = g.urlRule(st, c.server, decl, args)
-		capped := int(budget.CappedBytes)
-		f.CapUsed = capped
-		if f.BothLegs {
-			f.OverCap = capped+f.PayloadBytes > g.cap
-			capped += f.PayloadBytes
-		}
-		a.verdict = a.stallMarked(Decide(f))
+		var capped int
+		a.verdict, capped = g.decideExternalLow(st, int(budget.CappedBytes), c.server, decl, args, f)
+		a.verdict = a.stallMarked(a.verdict)
 		if a.verdict.Action == Refuse {
 			return nil // nothing is charged for a call that does not leave
 		}
@@ -526,6 +521,21 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 		return q.SaveLeakGuardRun(ctx, store.SaveLeakGuardRunParams{OrgID: c.org.ID, RunID: run.ID, CappedBytes: int32(min(capped, 1<<30)), UrlState: state}) //nolint:gosec // bounded
 	})
 	return a, err
+}
+
+// decideExternalLow decides an external-low call (ADR 0091 decision 5): the ADR 0084 URL rule,
+// which charges st, and, once the session holds both legs, the byte cap per run, where used is what
+// the run has sent since it held them. It returns the verdict and the run's count after the call. A
+// call that is refused leaves the run as it was: the caller saves neither st nor the count. The
+// replay suite drives it without Postgres, so the cap it checks is this one.
+func (g *Guard) decideExternalLow(st *leakguard.RunState, used int, srv store.McpServer, decl sinkclass.Declaration, args Args, f Facts) (Verdict, int) {
+	f.URL, f.URLChecked = g.urlRule(st, srv, decl, args)
+	f.CapUsed = used
+	if f.BothLegs {
+		f.OverCap = used+f.PayloadBytes > g.cap
+		used += f.PayloadBytes
+	}
+	return Decide(f), used
 }
 
 // stallMarked adds ReasonFeedStalled to a verdict that is open while the feed stalled: the legs

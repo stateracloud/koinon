@@ -58,8 +58,8 @@ test-web: ## Run web tests
 lint: lint-go lint-web lint-proto migrate-lint adr-lint ## Run all linters
 
 .PHONY: lint-go
-lint-go: ## Lint Go code
-	golangci-lint run
+lint-go: ## Lint Go code (per-worktree lock and cache, #236)
+	hack/golangci-lint.sh run
 
 .PHONY: lint-web
 lint-web: ## Lint and typecheck the web UI

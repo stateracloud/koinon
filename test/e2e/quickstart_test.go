@@ -45,9 +45,10 @@ var (
 	ledger     = scenarios.PullRequest.Ledger
 )
 
-// quickstartBudget is plan item E1's bound: the quickstart takes at most 15 minutes from
-// `helm install`.
-const quickstartBudget = 15 * time.Minute
+// quickstartBudget is plan item E1's bound for v0.1.0: the quickstart takes at most 20 minutes from
+// `helm install` (the maintainer relaxed it from 15 on 2026-10-31, to be tightened later; the goal
+// stays 12 minutes, #57). The per-phase table is printed either way.
+const quickstartBudget = 20 * time.Minute
 
 // timing is one measured step.
 type timing struct {
@@ -749,7 +750,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("6d. Direct Anthropic model: Messages through the gateway, cache read priced")
 	})
 
-	It("7. took at most 15 minutes from helm install", func() {
+	It("7. took at most 20 minutes from helm install", func() {
 		total := time.Since(t.t0)
 		Expect(total).To(BeNumerically("<=", quickstartBudget),
 			"the quickstart took %s from helm install, more than the plan's %s", total.Round(time.Second), quickstartBudget)

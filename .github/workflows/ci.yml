@@ -200,6 +200,10 @@ jobs:
     if: needs.changes.outputs.go == 'true' && needs.changes.outputs.go_test_lab != 'true'
     name: go-test
     runs-on: ubuntu-latest
+    # packages: read pulls the private GHCR copy of the agentgateway test image (#238, docs/dev/ci.md).
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: go
@@ -219,6 +223,25 @@ jobs:
           key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+      # The agentgateway suites start the chart's digest from this repository owner's GHCR copy
+      # (internal/testing/agentgatewayimage, #238). Pulled once here; the tests then find it locally.
+      # A fork's own CI, which cannot read the copy, warns and leaves the tests on the chart's repository.
+      - name: agentgateway test image
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          FORK: ${{ github.event.repository.fork }}
+        run: |
+          read -r _ _ digest < <(hack/agentgateway-pin.sh)
+          mirror="ghcr.io/${OWNER,,}/agentgateway"
+          if docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$GITHUB_TOKEN" && docker pull "$mirror@$digest"; then
+            echo "KOINON_AGENTGATEWAY_MIRROR=$mirror" >>"$GITHUB_ENV"
+          elif [[ $FORK == true ]]; then
+            echo "::warning::cannot pull $mirror@$digest; the agentgateway tests pull the chart's repository"
+          else
+            echo "::error::cannot pull $mirror@$digest: dispatch mirror-agentgateway-test-image.yml on this ref, or check the package's Manage Actions access (docs/dev/ci.md)"
+            exit 1
+          fi
       # Postgres tests use testcontainers; Docker is available on ubuntu runners.
       # test/flavors needs the flavor images, which the flavors job builds and tests.
       - run: hack/go-test.sh
@@ -779,6 +802,9 @@ jobs:
       - run: hack/bash5-lint.sh
       - run: hack/ship-test.sh
       - run: hack/preflight-test.sh
+      - run: hack/agentgateway-pin-test.sh
+      - run: hack/agentgateway-pin.sh --check
+      - run: hack/golangci-lint-test.sh
       - run: hack/preflight-stop-test.sh
       - run: hack/e2e-decide-test.sh
       - run: hack/e2e-gate-test.sh

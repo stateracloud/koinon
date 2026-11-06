@@ -92,6 +92,11 @@ type Querier interface {
 	// (started more than @lease_seconds ago), for an agent whose sandbox is ready. No row: nothing to
 	// do.
 	ClaimHomeCheckpoint(ctx context.Context, arg ClaimHomeCheckpointParams) (HomeCheckpoint, error)
+	// The org's next resync that is due, held for @lease_seconds. An agent whose new repository still
+	// waits for its seed is left until the seed is recorded: the seed writes its copy's checkpoint
+	// itself, and a resync between its snapshot and that record would add the copy twice. No row:
+	// nothing to do.
+	ClaimHomeCheckpointResync(ctx context.Context, arg ClaimHomeCheckpointResyncParams) (HomeCheckpointResync, error)
 	// The next seed due in the org, held for @lease_seconds: a writer that dies leaves it to another
 	// after the lease. A superseded epoch (retired: a later one started) is not seeded; the later
 	// one is. No row: nothing to do.
@@ -132,6 +137,9 @@ type Querier interface {
 	// executions). No row: another executor took it over.
 	CompleteApprovalExecution(ctx context.Context, arg CompleteApprovalExecutionParams) (ApprovalRequest, error)
 	CompleteHomeCheckpoint(ctx context.Context, arg CompleteHomeCheckpointParams) (HomeCheckpoint, error)
+	// Complete, Release and Fail hold only for the claim that made @attempts of request @request_id.
+	// No row: the claim was lost (its lease ran out) or a new request replaced it.
+	CompleteHomeCheckpointResync(ctx context.Context, arg CompleteHomeCheckpointResyncParams) (int64, error)
 	// Complete, Release and Fail hold only for the claim that made @seed_attempts: a writer whose lease
 	// ran out (another claimed the seed since) changes nothing. No row: superseded, or the claim lost.
 	CompleteHomeRepositorySeed(ctx context.Context, arg CompleteHomeRepositorySeedParams) (int64, error)
@@ -143,6 +151,8 @@ type Querier interface {
 	CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error)
 	// A destination whose credentials were lost (#85) receives nothing, so it does not count.
 	CountEnabledTraceDestinations(ctx context.Context, orgID pgtype.UUID) (int64, error)
+	// The org's resyncs still to do and those given up on, for koinon-agentd's gauge.
+	CountHomeCheckpointResyncs(ctx context.Context, orgID pgtype.UUID) (CountHomeCheckpointResyncsRow, error)
 	// The org's seeds still to do and those given up on, for koinon-agentd's gauge. A superseded epoch
 	// is neither.
 	// A seed given up on stops counting once a backup wrote the agent's home into the new repository
@@ -306,6 +316,7 @@ type Querier interface {
 	// failed, so they do not sit as running and the agent can be checkpointed again.
 	FailAbandonedHomeCheckpoints(ctx context.Context, arg FailAbandonedHomeCheckpointsParams) ([]HomeCheckpoint, error)
 	FailHomeCheckpoint(ctx context.Context, arg FailHomeCheckpointParams) (HomeCheckpoint, error)
+	FailHomeCheckpointResync(ctx context.Context, arg FailHomeCheckpointResyncParams) (int64, error)
 	// Given up: the retired epoch keeps the home (the sweeper's guard) until another epoch starts.
 	FailHomeRepositorySeed(ctx context.Context, arg FailHomeRepositorySeedParams) (int64, error)
 	// Requests that never started because the sandbox was not ready for the configured wait.
@@ -402,6 +413,9 @@ type Querier interface {
 	// while it was down keeps being served with the previous file until the new one has arrived.
 	GetGatewayServedKeyFile(ctx context.Context, arg GetGatewayServedKeyFileParams) (string, error)
 	GetHomeCheckpoint(ctx context.Context, arg GetHomeCheckpointParams) (HomeCheckpoint, error)
+	// The checkpoint a snapshot's tag names, and whether a backup is still recording it: requested
+	// (tried again later), or running within @lease_seconds (its writer is alive).
+	GetHomeCheckpointForResync(ctx context.Context, arg GetHomeCheckpointForResyncParams) (GetHomeCheckpointForResyncRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Home checkpoints (plan item HC1; ADR 0032): the kopia repositories of each agent (one per
@@ -553,6 +567,9 @@ type Querier interface {
 	// lost the run) is ended as interrupted in the same statement, before the new one starts.
 	InsertOwnedRunTurn(ctx context.Context, arg InsertOwnedRunTurnParams) (RunTurn, error)
 	InsertPriceOverride(ctx context.Context, arg InsertPriceOverrideParams) (PriceOverride, error)
+	// A complete checkpoint for a snapshot no checkpoint of the repository names. No row: one does (a
+	// backup recorded it since the listing), or @id is taken.
+	InsertResyncedHomeCheckpoint(ctx context.Context, arg InsertResyncedHomeCheckpointParams) (HomeCheckpoint, error)
 	// Starts the run's next turn with the given trace ID. seq comes from the run's counter, taken under
 	// the run's row lock (the way run_events.seq does), so concurrent writers cannot pick the same number.
 	InsertRunTurn(ctx context.Context, arg InsertRunTurnParams) (RunTurn, error)
@@ -569,7 +586,8 @@ type Querier interface {
 	// what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
 	// for every entry that is not provisional, so a caller that holds nothing passes nothing.
 	// provider_id is the provider that served the request, when Koinon knows its model; the daily cost
-	// reconciliation sums a provider's entries by it.
+	// reconciliation sums a provider's entries by it. reasoning_known says whether reasoning_tokens is
+	// the provider's split or 0 for want of one (#78).
 	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
 	InsertSpendEntryRevision(ctx context.Context, arg InsertSpendEntryRevisionParams) error
 	// Queues a provisional entry for the settler. Without a response ID it is a hold until the deadline.
@@ -657,6 +675,8 @@ type Querier interface {
 	// Newest first, for the restore. A checkpoint from a higher ownership epoch than any run of the
 	// agent has seen is not restored (ADR 0032).
 	ListCompleteHomeCheckpoints(ctx context.Context, arg ListCompleteHomeCheckpointsParams) ([]HomeCheckpoint, error)
+	// The complete checkpoints written to one repository epoch of the agent, and their snapshots.
+	ListCompleteHomeCheckpointsOfRepository(ctx context.Context, arg ListCompleteHomeCheckpointsOfRepositoryParams) ([]ListCompleteHomeCheckpointsOfRepositoryRow, error)
 	ListConnections(ctx context.Context, orgID pgtype.UUID) ([]Connection, error)
 	ListConnectionsByConnector(ctx context.Context, arg ListConnectionsByConnectorParams) ([]Connection, error)
 	// Connections that still name a Kubernetes Secret: not yet moved, or moved but the old Secret not
@@ -707,6 +727,10 @@ type Querier interface {
 	// provider reported no usage (usage_missing), an estimated output was capped at the entry's
 	// max_output, or the price could not be used (price_error).
 	ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesParams) ([]ListFlaggedPricesRow, error)
+	// Every repository epoch of the agent, epoch 0 first, with whether it still opens (a deleted one
+	// has no blobs, a lost one no password) and whether the sweeper may have deleted its blobs (retired
+	// and past its deadline: after a database restore, deleted_at can predate the sweep).
+	ListHomeRepositoryEpochsOfAgent(ctx context.Context, arg ListHomeRepositoryEpochsOfAgentParams) ([]ListHomeRepositoryEpochsOfAgentRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// KEK fingerprints (koinon-private#591, ADR 0085 decision 12): what each key-encryption key was when a process
@@ -918,6 +942,9 @@ type Querier interface {
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
 	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
 	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
+	// The checkpoint's snapshot is not in the bucket: it is failed, not deleted, so its history stays
+	// (the snapshot ID goes into @error; a complete checkpoint is one with a snapshot).
+	MarkHomeCheckpointSnapshotMissing(ctx context.Context, arg MarkHomeCheckpointSnapshotMissingParams) (int64, error)
 	MarkHomeRepositoryDeleted(ctx context.Context, arg MarkHomeRepositoryDeletedParams) (int64, error)
 	MarkHomeRepositoryEpochDeleted(ctx context.Context, arg MarkHomeRepositoryEpochDeletedParams) (int64, error)
 	MarkLeakGuardEvicted(ctx context.Context, arg MarkLeakGuardEvictedParams) error
@@ -981,6 +1008,12 @@ type Querier interface {
 	// their payload. Rows are locked with SKIP LOCKED, so two purgers never
 	// wait for each other. Rows 0: nothing left to blank in this run.
 	PurgeRunEventContent(ctx context.Context, arg PurgeRunEventContentParams) (int64, error)
+	// After a database restore the agent's ownership epoch is the dump's, older than the epochs the
+	// resynced checkpoints were written under. Raising it to the newest of them makes the next claim
+	// (agents.epoch + 1) a run that sees them, so its restore takes the newest home rather than a
+	// pre-dump one. Monotonic: a claim or takeover in progress keeps its run's own epoch, and each
+	// later one still takes a new, higher epoch.
+	RaiseAgentEpochForResync(ctx context.Context, arg RaiseAgentEpochForResyncParams) (int64, error)
 	// A tool turned two-approver on after the request was recorded: the pending request needs two too.
 	RaiseApprovalsRequired(ctx context.Context, arg RaiseApprovalsRequiredParams) (ApprovalRequest, error)
 	// Records the observed sandbox. started_at and stopped_at are stamped on the
@@ -1016,6 +1049,8 @@ type Querier interface {
 	// A failed attempt that will be tried again after @delay_seconds.
 	ReleaseHomeCheckpoint(ctx context.Context, arg ReleaseHomeCheckpointParams) (HomeCheckpoint, error)
 	// A failed try, tried again after @delay_seconds.
+	ReleaseHomeCheckpointResync(ctx context.Context, arg ReleaseHomeCheckpointResyncParams) (int64, error)
+	// A failed try, tried again after @delay_seconds.
 	ReleaseHomeRepositorySeed(ctx context.Context, arg ReleaseHomeRepositorySeedParams) (int64, error)
 	// The owner gives the run up without finishing it, for example because the
 	// exec stream to the harness dropped: the lease ends now, so any agentd can
@@ -1025,6 +1060,12 @@ type Querier interface {
 	// No row: the agent already has an open request (home_checkpoints_open); read it with
 	// GetOpenHomeCheckpoint.
 	RequestHomeCheckpoint(ctx context.Context, arg RequestHomeCheckpointParams) (HomeCheckpoint, error)
+	// checkpoints resync (ADR 0085 decision 17; #89): home_checkpoints rebuilt from the bucket after a
+	// database restore. koinon-api checkpoints resync requests it per agent; koinon-agentd lists each
+	// repository's snapshots and records what it finds.
+	// A new request replaces the agent's last one, done or not: a try of the old one still running
+	// records nothing (its request_id is gone).
+	RequestHomeCheckpointResync(ctx context.Context, arg RequestHomeCheckpointResyncParams) (HomeCheckpointResync, error)
 	// The new epoch is to hold the agent's newest home (keys new-repositories, #86): koinon-agentd
 	// copies it there from @seed_from_epoch or older.
 	RequestHomeRepositorySeed(ctx context.Context, arg RequestHomeRepositorySeedParams) (int64, error)

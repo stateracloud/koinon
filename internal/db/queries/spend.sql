@@ -35,16 +35,17 @@ LIMIT 1;
 -- what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
 -- for every entry that is not provisional, so a caller that holds nothing passes nothing.
 -- provider_id is the provider that served the request, when Koinon knows its model; the daily cost
--- reconciliation sums a provider's entries by it.
+-- reconciliation sums a provider's entries by it. reasoning_known says whether reasoning_tokens is
+-- the provider's split or 0 for want of one (#78).
 INSERT INTO spend_entries (
     org_id, agent_id, principal, run_id, task_id, request_id, key_id, model,
-    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, reasoning_known,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
     request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id,
     upstream_status, provider_id
 ) VALUES (
     @org_id, sqlc.narg(agent_id), @principal, sqlc.narg(run_id), sqlc.narg(task_id), @request_id, @key_id, @model,
-    @input_tokens, @output_tokens, @cache_read_tokens, @cache_write_tokens, @reasoning_tokens,
+    @input_tokens, @output_tokens, @cache_read_tokens, @cache_write_tokens, @reasoning_tokens, @reasoning_known::boolean,
     (sqlc.arg(cost_usd)::text)::numeric, (sqlc.narg(gateway_cost_usd)::text)::numeric,
     sqlc.narg(price_ref), @priced, @estimated, sqlc.narg(estimate)::jsonb, @cost_flagged,
     sqlc.narg(request_bytes), sqlc.narg(response_bytes), @occurred_at,
@@ -174,9 +175,10 @@ SELECT model,
        -- Reasoning (thinking) tokens are part of output_tokens, billed at the output rate unless the
        -- price names a reasoning rate; this is the part the provider reported separately.
        coalesce(sum(reasoning_tokens), 0)::bigint AS reasoning_tokens,
-       -- False when no request reported a split (Anthropic Messages never does), so the report says
-       -- "not reported" instead of 0.
-       coalesce(bool_or(reasoning_tokens > 0), false)::boolean AS reasoning_reported,
+       -- False when no request reported a split (agentgateway v1.7.0 logs none for Anthropic
+       -- Messages, #78), so the report says "not reported" instead of 0. An entry written before
+       -- reasoning_known existed counts as reported when its split is above 0.
+       coalesce(bool_or(coalesce(reasoning_known, reasoning_tokens > 0)), false)::boolean AS reasoning_reported,
        coalesce(sum(cost_usd) FILTER (WHERE NOT estimated), 0)::text AS reported_usd,
        coalesce(sum(cost_usd) FILTER (WHERE estimated), 0)::text AS estimated_usd,
        count(*) FILTER (WHERE estimated)::bigint AS estimated_requests,
@@ -212,7 +214,8 @@ ORDER BY min(next_attempt_at), org_id;
 -- them. The row is the work item; the entry is read with it.
 SELECT st.entry_id, st.provider_id, st.provider_type, st.response_id, st.attempts, st.deadline,
        e.agent_id, e.run_id, e.model, e.occurred_at, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_write_tokens,
-       e.reasoning_tokens, e.cost_usd::text AS cost_usd, e.reserve_usd::text AS reserve_usd, e.estimate,
+       e.reasoning_tokens, coalesce(e.reasoning_known, e.reasoning_tokens > 0)::boolean AS reasoning_known,
+       e.cost_usd::text AS cost_usd, e.reserve_usd::text AS reserve_usd, e.estimate,
        coalesce(e.price_ref, '')::text AS price_ref
 FROM spend_settlements st
 JOIN spend_entries e ON e.org_id = st.org_id AND e.id = st.entry_id
@@ -236,7 +239,7 @@ DELETE FROM spend_settlements WHERE org_id = @org_id AND entry_id = @entry_id;
 UPDATE spend_entries
 SET input_tokens = @input_tokens, output_tokens = @output_tokens,
     cache_read_tokens = @cache_read_tokens, cache_write_tokens = @cache_write_tokens,
-    reasoning_tokens = @reasoning_tokens,
+    reasoning_tokens = @reasoning_tokens, reasoning_known = @reasoning_known::boolean,
     cost_usd = (sqlc.arg(cost_usd)::text)::numeric,
     price_ref = coalesce(sqlc.narg(price_ref), price_ref),
     estimated = @estimated, estimate = sqlc.narg(estimate)::jsonb,

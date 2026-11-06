@@ -260,6 +260,7 @@ type entrySnapshot struct {
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
 	ReasoningTokens  int64  `json:"reasoning_tokens"`
+	ReasoningKnown   bool   `json:"reasoning_known"`
 	CostUSD          string `json:"cost_usd"`
 	ReserveUSD       string `json:"reserve_usd"`
 	Provisional      bool   `json:"provisional"`
@@ -277,7 +278,7 @@ func (s *Settler) settleOne(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row
 	q := store.New(tx)
 	before := entrySnapshot{
 		InputTokens: row.InputTokens, OutputTokens: row.OutputTokens, CacheReadTokens: row.CacheReadTokens,
-		CacheWriteTokens: row.CacheWriteTokens, ReasoningTokens: row.ReasoningTokens,
+		CacheWriteTokens: row.CacheWriteTokens, ReasoningTokens: row.ReasoningTokens, ReasoningKnown: row.ReasoningKnown,
 		CostUSD: row.CostUsd, ReserveUSD: row.ReserveUsd, Provisional: true,
 	}
 	meta := map[string]any{}
@@ -294,13 +295,18 @@ func (s *Settler) settleOne(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row
 		if u.CacheWriteTokens == 0 && row.CacheWriteTokens > 0 {
 			u.CacheWriteTokens = min(row.CacheWriteTokens, max(u.InputTokens-u.CacheReadTokens, 0))
 		}
+		// A generation without a reasoning figure keeps the split the gateway logged, within the
+		// provider's output count; when neither reported one it stays unknown (#78).
+		if !u.ReasoningKnown && row.ReasoningKnown {
+			u.ReasoningTokens, u.ReasoningKnown = min(row.ReasoningTokens, u.OutputTokens), true
+		}
 		cost, koinon, ref, flagged, priceNote, err := s.charge(ctx, q, org, row, u)
 		if err != nil {
 			return false, err
 		}
 		after := entrySnapshot{
 			InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheReadTokens: u.CacheReadTokens,
-			CacheWriteTokens: u.CacheWriteTokens, ReasoningTokens: u.ReasoningTokens,
+			CacheWriteTokens: u.CacheWriteTokens, ReasoningTokens: u.ReasoningTokens, ReasoningKnown: u.ReasoningKnown,
 			CostUSD: cost.Numeric(), ReserveUSD: money.USD(0).Numeric(), ProviderCostUSD: u.Cost.Numeric(),
 		}
 		settled := map[string]any{
@@ -478,7 +484,8 @@ func (s *Settler) finish(ctx context.Context, q *store.Queries, org pgtype.UUID,
 		OrgID: org, ID: row.EntryID,
 		InputTokens: after.InputTokens, OutputTokens: after.OutputTokens,
 		CacheReadTokens: after.CacheReadTokens, CacheWriteTokens: after.CacheWriteTokens, ReasoningTokens: after.ReasoningTokens,
-		CostUsd: after.CostUSD, PriceRef: ref, Estimated: estimated, Estimate: meta, CostFlagged: flagged,
+		ReasoningKnown: after.ReasoningKnown,
+		CostUsd:        after.CostUSD, PriceRef: ref, Estimated: estimated, Estimate: meta, CostFlagged: flagged,
 	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return false, fmt.Errorf("settle spend entry: %w", err)
 	} else if err == nil {

@@ -112,6 +112,10 @@ printf 'go run mvdan.cc/gofumpt@v0.12.0 -l x\n' >"$w/hack/x.sh"
 expect_fail "a gofumpt version literal in a script" "$w" "literal govulncheck/gofumpt"
 
 w=$(fresh)
+subst "$w/.github/workflows/mirror-agentgateway-test-image.yml" '"github.com/google/go-containerregistry/cmd/crane@${CRANE_VERSION}"' 'github.com/google/go-containerregistry/cmd/crane@v0.22.1'
+expect_fail "a crane version literal in a workflow" "$w" "literal govulncheck/gofumpt/crane"
+
+w=$(fresh)
 printf 'GOFUMPT_VERSION=v0.1.0\n' >"$w/hack/x.sh"
 expect_fail "a script assigns GOFUMPT_VERSION" "$w" "GOFUMPT_VERSION is set outside"
 

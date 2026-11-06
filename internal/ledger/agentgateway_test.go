@@ -35,14 +35,12 @@ import (
 	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/providerusage"
+	"github.com/stateracloud/koinon/internal/testing/agentgatewayimage"
 	"github.com/stateracloud/koinon/internal/testing/containerhost"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/test/scenarios"
 )
-
-// agentgatewayImage is the agentgateway release Koinon targets (ADR 0048).
-const agentgatewayImage = "cr.agentgateway.dev/agentgateway:v1.7.0"
 
 const (
 	pricedModel   = "fake/ledger-model"
@@ -194,7 +192,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		Expect(err).NotTo(HaveOccurred())
 		Expect(file.Deliver(ctx, first, "")).To(Succeed())
 
-		ctr, err = testcontainers.Run(ctx, agentgatewayImage,
+		ctr, err = testcontainers.Run(ctx, agentgatewayimage.Ref(),
 			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
 			testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
 			testcontainers.WithHostPortAccess(hostPort(upstream), hostPort(receiver), slowPort, cutPort, refusePort),
@@ -597,12 +595,55 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 			Expect(answered).To(HaveLen(1))
 			Expect(sc.CheckRefused(refused[0])).To(Succeed())
 			Expect(sc.CheckStreamed(answered[0])).To(Succeed())
+			// No completion_tokens_details: the gateway logs no split, so it is unknown (#78).
+			var known bool
+			Expect(db.QueryRow(ctx, `SELECT reasoning_known FROM spend_entries WHERE org_id = $1 AND upstream_status IS NULL`, c.org).Scan(&known)).To(Succeed())
+			Expect(known).To(BeFalse())
 			Expect(sc.CheckTotals(func() scenarios.Totals {
 				r, err := q.SumRunCosts(ctx, store.SumRunCostsParams{OrgID: c.org, RunIds: []pgtype.UUID{crun.ID}})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(r).To(HaveLen(1))
 				return scenarios.Totals{Requests: r[0].Requests, EstimatedRequests: r[0].EstimatedRequests, InputTokens: r[0].InputTokens, OutputTokens: r[0].OutputTokens}
 			}())).To(Succeed())
+		}, SpecTimeout(2*time.Minute))
+
+		It("records a reported split of 0 as known, from completion_tokens_details (#78)", func(ctx SpecContext) {
+			c := newEnv(ctx, uniq("org"), "", "100.00")
+			c.model(ctx, "openai", flash)
+			_, err := prices.New(db, nil, priceList).SetOverride(ctx, c.org, audit.User(c.user), prices.OverrideInput{
+				Entry: pricing.Entry{
+					ID: "split-openai", Provider: "openai", Match: pricing.Match{Glob: flash},
+					Spec:      pricing.Spec{Prices: pricing.Wire{Input: "0.20", Output: "2"}},
+					Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 1000000,
+				},
+				ValidFrom: time.Now().Add(-time.Hour),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			c.startRun(ctx, c.task(ctx), time.Now().Add(-time.Minute))
+			ckey, err := gateway.NewKey(c.ref())
+			Expect(err).NotTo(HaveOccurred())
+			state.Providers = append(state.Providers, gateway.Provider{
+				Org: c.ref().Org, Name: "openai-split", Type: "openai",
+				BaseURL: fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, refusePort),
+				Models:  []gateway.Model{{Name: flash, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "0.20", Output: "2"}}},
+			})
+			state.AddKey(ckey.Key)
+			_, err = driver.Apply(ctx, state)
+			Expect(err).NotTo(HaveOccurred())
+
+			refuseStatus.Store(http.StatusOK)
+			refuseBody.Store(`{"id":"x","object":"chat.completion","model":"m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],` +
+				`"usage":{"prompt_tokens":100,"completion_tokens":60,"total_tokens":160,"completion_tokens_details":{"reasoning_tokens":0}}}`)
+			Expect(chat(ctx, ckey.Material, flash)).To(Equal(http.StatusOK))
+			type split struct {
+				Tokens int64
+				Known  bool
+			}
+			Eventually(func() (split, error) {
+				var x split
+				err := db.QueryRow(ctx, `SELECT reasoning_tokens, reasoning_known FROM spend_entries WHERE org_id = $1`, c.org).Scan(&x.Tokens, &x.Known)
+				return x, err
+			}).WithTimeout(30 * time.Second).WithPolling(200 * time.Millisecond).Should(Equal(split{Tokens: 0, Known: true}))
 		}, SpecTimeout(2*time.Minute))
 	})
 })

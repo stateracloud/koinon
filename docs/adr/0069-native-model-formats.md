@@ -537,7 +537,8 @@ defaults that differ per route.
    models; reading it is #78. Until then the trace exporter leaves `gen_ai.usage.reasoning.output_tokens`
    out of a model-call span and a turn root when no call reported a split, instead of writing 0. The
    ledger column stays `NOT NULL DEFAULT 0`, so 0 and "not reported" are one value there; the spend
-   report already reads a split as reported only when it is above 0.
+   report already reads a split as reported only when it is above 0. **Amended 2026-11-06: the ledger
+   now tells them apart with `reasoning_known`, see below.**
 
 ### Tests
 
@@ -567,3 +568,34 @@ defaults that differ per route.
 - A live check in the next home-lab window confirms the forms: OpenRouter Messages Haiku with
   `disabled`, direct Haiku with `adaptive` and `display: summarized`, Luna and DeepSeek with
   `effort: none` reporting no reasoning tokens.
+
+## Amendment (2026-11-06): the ledger records whether the split is known (#47, #78)
+
+### Context
+
+Decision 4 of 2026-10-31 left 0 and "not reported" as one value in `spend_entries.reasoning_tokens`.
+A chat-completions call that reported a split of 0 and a Claude call through agentgateway v1.7.0's
+Messages parser, which logs no split, were indistinguishable. Koinon cannot read the split itself
+today: the gateway's access log carries no response body, and gateway log and tracer fields never
+read `response.body` (AGENTS.md, working rules).
+
+### Decision (procoduck, 2026-11-06)
+
+1. **`spend_entries.reasoning_known boolean`** (migration 00062, nullable, expand only per ADR 0085)
+   says whether `reasoning_tokens` is the provider's split. The OTLP decoder sets it when the gateway
+   logged `koinon.reasoning`, a 0 included; an absent field writes `false` and 0 tokens.
+2. **Legacy rows** (NULL) read as `coalesce(reasoning_known, reasoning_tokens > 0)`: a stored split
+   above 0 was reported, a stored 0 is taken as not reported, as the spend report read it before.
+3. **OpenRouter settlement** makes the split known only from `native_tokens_reasoning` above 0. A 0 or
+   a missing field has not been shown to mean "no thinking" on every route (the false "no thinking"
+   that koinon-private#316 removed), so it keeps the gateway's split and flag. A positive count
+   replaces them.
+4. The spend report's `reasoning_reported` and the ledger's trace spans use the flag, so a reported 0
+   is written as 0 and an unknown split is left out.
+
+### Consequences
+
+- Direct Claude calls still record the split as unknown until agentgateway reads
+  `usage.output_tokens_details.thinking_tokens`, or Koinon's own gateway (ADR 0097) does; #78 stays
+  open for that. Thinking is billed either way: it is inside the output count.
+- If a live check shows OpenRouter's 0 is reliable on a route, decision 3 can accept it there.
