@@ -237,6 +237,26 @@ var _ = Describe("Decode", func() {
 		Expect(got["r-plain"]).To(And(HaveField("Format", modelformat.OpenAI), HaveField("Stream", false), HaveField("Error", "")))
 	})
 
+	// agentgateway v1.7.0's Messages path sets no reasoning count, so the record carries no
+	// koinon.reasoning (a failed log expression is left out); the output count still includes the
+	// thinking (#78).
+	It("records the thinking split as known only when the gateway logged it, 0 included", func() {
+		id := func(n string) *commonpb.KeyValue { return str(gateway.LogFieldRequest, n) }
+		entries, rejected, reason := ledger.Decode(export(
+			llmRecord(id("r-messages"), str(gateway.LogFieldFormat, string(modelformat.Anthropic)), num(gateway.LogFieldOutput, 900)),
+			llmRecord(id("r-zero"), num(gateway.LogFieldReasoning, 0)),
+			llmRecord(id("r-split"), num(gateway.LogFieldOutput, 900), num(gateway.LogFieldReasoning, 600)),
+		))
+		Expect(rejected).To(BeZero(), reason)
+		got := map[string]ledger.Entry{}
+		for _, e := range entries {
+			got[e.RequestID] = e
+		}
+		Expect(got["r-messages"]).To(And(HaveField("ReasoningKnown", false), HaveField("ReasoningTokens", int64(0)), HaveField("OutputTokens", int64(900))))
+		Expect(got["r-zero"]).To(And(HaveField("ReasoningKnown", true), HaveField("ReasoningTokens", int64(0))))
+		Expect(got["r-split"]).To(And(HaveField("ReasoningKnown", true), HaveField("ReasoningTokens", int64(600)), HaveField("OutputTokens", int64(900))))
+	})
+
 	It("accepts numeric costs and tokens", func() {
 		rec := llmRecord(&commonpb.KeyValue{
 			Key:   "agw.ai.usage.cost.total",

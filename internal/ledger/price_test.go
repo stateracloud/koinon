@@ -149,6 +149,51 @@ var _ = Describe("Cost truth", func() {
 		Expect(ledger.FormatUSD(e.lastEntry(ctx).CostUsd)).To(Equal("3.80"))
 	})
 
+	// #78: agentgateway v1.7.0 logs no koinon.reasoning for Anthropic Messages, whose thinking is inside
+	// the output count. The entry records the split as unknown, so a 0 is never read as "no thinking",
+	// and a split the provider did report is a figure even at 0.
+	It("records whether the provider reported the thinking split, and the report says so per model", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "100.00")
+		e.model(ctx, "openrouter", flash)
+		e.model(ctx, "openrouter", frontier)
+		known := func() (k *bool) {
+			Expect(db.QueryRow(ctx, `SELECT reasoning_known FROM spend_entries WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, e.org).Scan(&k)).To(Succeed())
+			return k
+		}
+		report := func() map[string]bool {
+			rep, err := q.SpendReport(ctx, store.SpendReportParams{OrgID: e.org, Since: pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true}})
+			Expect(err).NotTo(HaveOccurred())
+			out := map[string]bool{}
+			for _, r := range rep {
+				out[r.Model] = r.ReasoningReported
+			}
+			return out
+		}
+
+		By("a Messages record without the split: unknown, and its thinking is billed inside the output")
+		_, err := ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), frontier, 1000, 1000, 0, "")})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(known()).To(HaveValue(BeFalse()))
+		Expect(e.lastEntry(ctx).OutputTokens).To(Equal(int64(1000)))
+
+		By("a chat-completions record that reports 0 reasoning tokens: known, 0 is a figure")
+		u := e.usage(time.Now(), flash, 1000, 1000, 0, "")
+		u.ReasoningKnown = true
+		_, err = ing.Ingest(ctx, []ledger.Entry{u})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(known()).To(HaveValue(BeTrue()))
+		Expect(report()).To(Equal(map[string]bool{flash: true, frontier: false}))
+
+		By("an entry written before reasoning_known existed reads as reported when its split is above 0")
+		u = e.usage(time.Now(), frontier, 1000, 1000, 0, "")
+		u.ReasoningTokens, u.ReasoningKnown = 300, true
+		_, err = ing.Ingest(ctx, []ledger.Entry{u})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `UPDATE spend_entries SET reasoning_known = NULL WHERE org_id = $1 AND reasoning_tokens = 300`, e.org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(report()).To(Equal(map[string]bool{flash: true, frontier: true}))
+	})
+
 	It("charges its own cost and flags the entry when the gateway differs by more than 1%", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00")
 		e.model(ctx, "openrouter", flash)
