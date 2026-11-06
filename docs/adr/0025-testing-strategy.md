@@ -124,6 +124,12 @@ Exit codes of `hack/e2e-remote.sh --argo` separate the cases a caller acts on di
 1 the e2e failed, 2 usage, 75 the lab cannot run it now (fall back), 76 not run, 78 no lab configured,
 79 refused for flavors.
 
+Note (2026-11-06, issue #200): exit 79 and `--allow-flavors` are gone. The lab builds the flavor image
+through its registry's mirror of `nvcr.io`: the base image is the build input `FLAVOR_BASE`, which must
+carry the digest the Dockerfile pins (`hack/flavor-base.sh`), and the lab's runner sets it from its own
+config. A change under `flavors/` is tested on the lab like any other (point 2's flavors case no longer
+applies).
+
 ## Amendment (2026-11-03, koinon-private#610): CI's go-test on the lab gate first
 
 The same lab lane serves CI's longest Blacksmith job. A followed `hack/e2e-remote.sh --argo --gate go-test`
