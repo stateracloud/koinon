@@ -254,11 +254,16 @@ func guardSpec(env Env) {
 
 			text, failed = call(ctx, url, key, rg.Target(sink)+"_write_item")
 			Expect(failed).To(BeTrue(), text)
-			Expect(text).To(ContainSubstring("approval requested: id="))
+			Expect(text).To(ContainSubstring("approval requested: id="), "the next external call needs an approval")
 			risk := rg.Risk(ctx)
-			Expect(risk).To(ContainSubstring(`"reply_unseen"`))
-			Expect(risk).To(ContainSubstring(`"private_data": true`))
-			Expect(risk).To(ContainSubstring(`"untrusted_input": true`), "a reply never seen sets both legs")
+			if env.KnownGaps["#254"] != "" {
+				// The gateway never shows the guard the error reply: it holds the session fail-closed.
+				Expect(risk).To(ContainSubstring(`"reply_unseen"`), "gap closed: update KnownGaps (the guard now sees the error reply)")
+				Expect(risk).To(ContainSubstring(`"private_data": true`))
+				Expect(risk).To(ContainSubstring(`"untrusted_input": true`), "a reply never seen sets both legs")
+				return
+			}
+			Expect(risk).NotTo(ContainSubstring(`"reply_unseen"`), "the guard saw the error reply")
 		})
 	})
 

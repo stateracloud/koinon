@@ -129,6 +129,9 @@ func mcpKindSpec(env Env) {
 		// toServer is true for a kind the agent sends: it is delivered when the server received the canary,
 		// and seen when a CheckRequest carried it, before the server.
 		toServer bool
+		// mustDeliver is true for a kind that must reach the agent (or the server, for toServer) in
+		// every driver: if it does not, the trigger is broken and the property would hold vacuously.
+		mustDeliver bool
 		// trigger makes the server send the kind; whatever the agent reads goes to read.
 		trigger func(ctx context.Context, s *mcp.ClientSession, read func(string)) error
 	}
@@ -148,7 +151,7 @@ func mcpKindSpec(env Env) {
 		}
 	}
 	kinds := []kind{
-		{name: "a tools/call reply", canary: canaryResult, trigger: callTool("echo")},
+		{name: "a tools/call reply", canary: canaryResult, mustDeliver: true, trigger: callTool("echo")},
 		{name: "a tools/list reply (a tool description)", canary: canaryDesc, gap: "#254", trigger: func(ctx context.Context, s *mcp.ClientSession, read func(string)) error {
 			res, err := s.ListTools(ctx, nil)
 			if err != nil {
@@ -167,7 +170,7 @@ func mcpKindSpec(env Env) {
 		{name: "a server-initiated sampling request", canary: canarySampling, gap: "#254", trigger: callTool("sample")},
 		{name: "a server-initiated elicitation request (form mode)", canary: canaryElicit, trigger: callTool("elicit")},
 		{name: "a server-initiated elicitation request (URL mode)", canary: canaryElicitURL, trigger: callTool("elicit_url")},
-		{name: "a tools/call request (its arguments)", canary: canaryArgs, toServer: true, trigger: func(ctx context.Context, s *mcp.ClientSession, _ func(string)) error {
+		{name: "a tools/call request (its arguments)", canary: canaryArgs, toServer: true, mustDeliver: true, trigger: func(ctx context.Context, s *mcp.ClientSession, _ func(string)) error {
 			_, err := s.CallTool(ctx, &mcp.CallToolParams{Name: target + "_record", Arguments: map[string]any{"note": canaryArgs}})
 			return err
 		}},

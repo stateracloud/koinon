@@ -44,7 +44,8 @@ the reason of each); a driver that does not list `N` runs the case plainly, so K
 passes the same suite untouched. The case fails when the gap closes, so an upgrade that fixes one
 flips it, and an upgrade that breaks a passing case fails as usual. A gateway bump is "suite green";
 a changed gap list is reviewed like code. The overshoot and the outcome of each MCP kind are
-written to the Ginkgo report (`-v`, or the JSON report).
+written to the Ginkgo report (`-v`, or the JSON report). The real-guard case (`guardspec.go`) needs
+Postgres (pgtest) and runs in both the standalone and the kind suites.
 
 ### The agentgateway test image (#238)
 

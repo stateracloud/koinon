@@ -135,7 +135,7 @@ func budgetOvershootSpec(env Env) {
 				"limit $0.0025 at $%s a response: %d concurrent calls, %d served, %d refused, overshoot %d responses ($%.4f)",
 				perRequest, concurrent, served, refused, overshoot, float64(overshoot)*0.001))
 
-			// The limit is a floor on service and a ceiling of one response per concurrent call.
+			// The limit is a floor on service.
 			Expect(served).To(BeNumerically(">=", allowed), "the key's own budget is served")
 			Expect(served).To(BeNumerically("<=", concurrent))
 			Expect(served + refused).To(Equal(concurrent))

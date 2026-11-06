@@ -122,15 +122,15 @@ func (r reply) messageID() string { return fmt.Sprintf("msg_fake_%d", r.seq) }
 
 // anthropicUsage reports uncached input as input_tokens and cache reads and writes separately, as
 // the Messages API does.
-func anthropicUsage(u Usage, outputTokens int) map[string]any {
+func anthropicUsage(u Usage, outputTokens int, final bool) map[string]any {
 	m := map[string]any{
 		"input_tokens":                u.InputTokens - u.CachedInputTokens - u.CacheWriteTokens,
 		"cache_creation_input_tokens": u.CacheWriteTokens,
 		"cache_read_input_tokens":     u.CachedInputTokens,
 		"output_tokens":               outputTokens,
 	}
-	// The thinking split is on the final count only; message_start (outputTokens 1) has none.
-	if u.ReasoningTokens > 0 && outputTokens == u.OutputTokens {
+	// The thinking split is on the final count only; message_start (final false) has none.
+	if u.ReasoningTokens > 0 && final {
 		m["output_tokens_details"] = map[string]any{"thinking_tokens": u.ReasoningTokens}
 	}
 	return m
@@ -196,7 +196,7 @@ func (r reply) anthropicMessage() map[string]any {
 	return map[string]any{
 		"id": r.messageID(), "type": "message", "role": "assistant", "model": r.model,
 		"content": r.anthropicContent(), "stop_reason": r.stopReason(), "stop_sequence": nil,
-		"usage": anthropicUsage(r.turn.Usage, r.turn.Usage.OutputTokens),
+		"usage": anthropicUsage(r.turn.Usage, r.turn.Usage.OutputTokens, true),
 	}
 }
 
@@ -213,7 +213,7 @@ func (r reply) anthropicEvents() []sseEvent {
 	add("message_start", map[string]any{"message": map[string]any{
 		"id": r.messageID(), "type": "message", "role": "assistant", "model": r.model,
 		"content": []any{}, "stop_reason": nil, "stop_sequence": nil,
-		"usage": anthropicUsage(r.turn.Usage, 1),
+		"usage": anthropicUsage(r.turn.Usage, 1, false),
 	}})
 	add("ping", map[string]any{})
 
@@ -241,7 +241,7 @@ func (r reply) anthropicEvents() []sseEvent {
 
 	add("message_delta", map[string]any{
 		"delta": map[string]any{"stop_reason": r.stopReason(), "stop_sequence": nil},
-		"usage": anthropicUsage(r.turn.Usage, r.turn.Usage.OutputTokens),
+		"usage": anthropicUsage(r.turn.Usage, r.turn.Usage.OutputTokens, true),
 	})
 	add("message_stop", map[string]any{})
 	return events

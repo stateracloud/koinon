@@ -221,15 +221,20 @@ func usageSpec(env Env) {
 			check := func(ctx SpecContext) {
 				send(ctx, c, c.name+thinkingSuffix)
 				got := record(ctx, c.name+thinkingSuffix)
-				Expect(got.Reasoning).NotTo(BeNil(), "the gateway recorded no thinking split")
-				if got.Reasoning != nil { // a failed Expect inside KnownGap does not stop the check
-					Expect(*got.Reasoning).To(Equal(c.wantReasoning))
+				expect := func() {
+					Expect(got.Reasoning).NotTo(BeNil(), "the gateway recorded no thinking split")
+					if got.Reasoning != nil { // a failed Expect inside KnownGap does not stop the check
+						Expect(*got.Reasoning).To(Equal(c.wantReasoning))
+					}
 				}
+				if c.format == modelformat.Anthropic {
+					KnownGap(env, "#78", expect)
+					return
+				}
+				expect()
 			}
 			if c.format == modelformat.Anthropic {
-				It("records the thinking split of "+c.name+" (expected failure, #78)", func(ctx SpecContext) {
-					KnownGap(env, "#78", func() { check(ctx) })
-				}, SpecTimeout(time.Minute))
+				It("records the thinking split of "+c.name+" (expected failure, #78)", check, SpecTimeout(time.Minute))
 			} else {
 				It("records the reasoning split of "+c.name, check, SpecTimeout(time.Minute))
 			}
