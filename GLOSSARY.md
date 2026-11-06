@@ -244,8 +244,20 @@ _Avoid_: Protocol, dialect, schema
 ### Cost and budgets
 
 **Price**:
-US dollars per million tokens for each kind of token, for the models whose name matches a pattern, with optional price tiers for long inputs. An org's own price wins over the default price list.
+US dollars per million tokens for each kind of token, for the models whose name matches a pattern, with optional price tiers for long inputs. An org's own price wins over the platform price list, which wins over the default price list.
 _Avoid_: Rate, rate card, tariff
+
+**Default price list**:
+The prices shipped in the Koinon binary, checked by hand against each provider's own page; it changes only with a release.
+_Avoid_: Catalog, built-in prices, shipped defaults
+
+**Platform price list**:
+The install-wide, versioned prices a platform admin accepts (or the bounded auto-apply writes) between org prices and the default price list; an entry retires once a release ships the same price.
+_Avoid_: Install overlay (for prices), global prices, price override
+
+**Price proposal**:
+A difference between a public price source and the price Koinon uses for a model, waiting to be accepted, dismissed or auto-applied, with its source, commit, hash and fetch time.
+_Avoid_: Price suggestion, price update, sync
 
 **Cost**:
 What a model request, run or task cost in US dollars, as the spend ledger records it: the provider's billed cost where the provider reports one per request (an OpenRouter request, once settled), otherwise worked out by Koinon from the tokens reported and the price valid at the time (Anthropic and OpenAI direct, whose days are compared with the provider's cost API by the cost reconciliation).
