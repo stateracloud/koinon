@@ -47,8 +47,8 @@ func (c TaintChecker) Check(ctx context.Context, scope Scope, fp *Fingerprinter,
 
 // CheckJoins is Check, and also scans args joined in each of orders: an order lists indices of
 // args, each at most once (a caller's other reading of the same call, such as the canonical order
-// of its JSON members, #256). An order equal to call order, or naming an index out of range, adds
-// nothing.
+// of its JSON members, #256). An order equal to call order or to an earlier order, or naming an
+// index out of range, adds nothing.
 func (c TaintChecker) CheckJoins(ctx context.Context, scope Scope, fp *Fingerprinter, args []string, orders ...[]int) (Decision, error) {
 	return c.check(ctx, scope, fp, args, orders, nil)
 }
@@ -159,7 +159,7 @@ type rawText struct {
 // across arguments that are not adjacent in one of those orders is not reassembled (ADR 0091
 // decision 6: the text match is a secondary signal).
 func candidates(args []string, orders [][]int, lim Limits, fp *Fingerprinter, m *meter) ([]candidate, error) {
-	raws := make([]rawText, 0, len(args)+1+len(orders))
+	raws := make([]rawText, 0, len(args)+1)
 	for i, a := range args {
 		if a != "" {
 			raws = append(raws, rawText{a, []int{i}})
@@ -169,33 +169,37 @@ func candidates(args []string, orders [][]int, lim Limits, fp *Fingerprinter, m 
 	for _, r := range raws {
 		callOrder = append(callOrder, r.args[0])
 	}
-	if j, ok := join(args, callOrder, lim); ok {
+	if j, ok := join(args, callOrder, lim.JoinEndBytes); ok {
 		raws = append(raws, j)
 	}
-	for _, o := range orders {
-		idx := make([]int, 0, len(o))
-		used := make(map[int]bool, len(o))
-		valid := true
-		for _, i := range o {
-			if i < 0 || i >= len(args) || used[i] {
-				valid = false
-				break
-			}
-			used[i] = true
-			if args[i] != "" {
-				idx = append(idx, i)
-			}
-		}
-		if !valid || slices.Equal(idx, callOrder) {
-			continue
-		}
-		if j, ok := join(args, idx, lim); ok {
-			raws = append(raws, j)
-		}
-	}
+	extra := extraOrders(args, orders, callOrder)
 	res, err := decodeRaws(raws, lim, fp, m)
 	if err != nil {
 		return nil, err
+	}
+	if len(extra) > 0 {
+		// The extra orders are the same arguments again, so each costs about as much as the
+		// call-order join (up to a third more of the call's work, with the MCP guard's three).
+		// A call whose arguments and call-order join already took a quarter of the work budget
+		// joins them with ends of a quarter of JoinEndBytes: still the boundaries between the
+		// arguments (128 bytes each side by default, more than a threshold-length leak in three
+		// layers of base64 of UTF-16), at a quarter of the cost. The orders are never dropped:
+		// dropping them under load would let a padded call split text in key order unseen.
+		ends := lim.JoinEndBytes
+		if m.used.Load() > int64(lim.MaxWorkBytes/heavyWorkShare) {
+			ends = max(lim.JoinEndBytes/heavyWorkShare, 1)
+		}
+		jr := make([]rawText, 0, len(extra))
+		for _, idx := range extra {
+			if j, ok := join(args, idx, ends); ok {
+				jr = append(jr, j)
+			}
+		}
+		more, err := decodeRaws(jr, lim, fp, m)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, more...)
 	}
 	seen := map[string]struct{}{}
 	var out []candidate
@@ -211,8 +215,43 @@ func candidates(args []string, orders [][]int, lim Limits, fp *Fingerprinter, m 
 	return out, nil
 }
 
-// join is the non-empty arguments idx names, joined in that order; false for fewer than two.
-func join(args []string, idx []int, lim Limits) (rawText, bool) {
+// heavyWorkShare: a call that has used more than 1/heavyWorkShare of MaxWorkBytes before its
+// extra orders joins them with ends of JoinEndBytes/heavyWorkShare (see candidates).
+const heavyWorkShare = 4
+
+// extraOrders returns the orders to join besides call order: each valid order once, without its
+// empty arguments. An order that names an index twice or out of range is skipped, and so is one
+// that call order or an earlier order already gave: it would only charge the work budget again for
+// the same text.
+func extraOrders(args []string, orders [][]int, callOrder []int) [][]int {
+	done := [][]int{callOrder}
+	var out [][]int
+	for _, o := range orders {
+		idx := make([]int, 0, len(o))
+		used := make(map[int]bool, len(o))
+		valid := true
+		for _, i := range o {
+			if i < 0 || i >= len(args) || used[i] {
+				valid = false
+				break
+			}
+			used[i] = true
+			if args[i] != "" {
+				idx = append(idx, i)
+			}
+		}
+		if !valid || slices.ContainsFunc(done, func(d []int) bool { return slices.Equal(d, idx) }) {
+			continue
+		}
+		done = append(done, idx)
+		out = append(out, idx)
+	}
+	return out
+}
+
+// join is the non-empty arguments idx names, joined in that order, each longer than 2*ends cut to
+// its two ends; false for fewer than two.
+func join(args []string, idx []int, ends int) (rawText, bool) {
 	if len(idx) < 2 {
 		return rawText{}, false
 	}
@@ -222,9 +261,9 @@ func join(args []string, idx []int, lim Limits) (rawText, bool) {
 		// An argument is decoded whole on its own; in the joined text a long one is cut to its two
 		// ends, which hold the boundaries to its neighbours. Joined whole, a call of two halves of
 		// 1 MiB would cost twice a call of one.
-		if w := lim.JoinEndBytes; len(t) > 2*w {
-			b.WriteString(head(t, w))
-			b.WriteString(tail(t, w))
+		if len(t) > 2*ends {
+			b.WriteString(head(t, ends))
+			b.WriteString(tail(t, ends))
 		} else {
 			b.WriteString(t)
 		}

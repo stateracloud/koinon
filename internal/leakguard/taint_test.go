@@ -166,6 +166,34 @@ var _ = Describe("TaintChecker", func() {
 			Expect(joins([]string{excerpt[:half], excerpt[half:]}, []int{1, 0}).Reason).To(Equal(leakguard.ReasonTaint))
 		})
 
+		It("joins an order given twice once", func() {
+			args := []string{excerpt[half:], excerpt[:half], "kubernetes release notes"}
+			_, once, err := checker.CheckJoinsWork(ctx, testScope, fp, args, []int{1, 0, 2})
+			Expect(err).NotTo(HaveOccurred())
+			_, twice, err := checker.CheckJoinsWork(ctx, testScope, fp, args, []int{1, 0, 2}, []int{2, 1, 0}, []int{1, 0, 2})
+			Expect(err).NotTo(HaveOccurred())
+			_, two, err := checker.CheckJoinsWork(ctx, testScope, fp, args, []int{1, 0, 2}, []int{2, 1, 0})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(once).To(BeNumerically("<", two))
+			Expect(twice).To(Equal(two))
+		})
+
+		// A call that has used a quarter of the work budget before its extra orders joins them
+		// with shorter ends: the boundary between two long halves is still read.
+		It("reassembles long halves in a named order when the call is heavy", func() {
+			pad := strings.Repeat("kubernetes release notes, chapter one. ", 60)
+			args := []string{excerpt[half:] + " " + pad, pad + " " + excerpt[:half]}
+			order := []int{1, 0}
+			d, full, err := checker.CheckJoinsWork(ctx, testScope, fp, args, order)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
+			heavy := leakguard.TaintChecker{Store: checker.Store, Limits: leakguard.Limits{MaxWorkBytes: int(full)}}
+			d, short, err := heavy.CheckJoinsWork(ctx, testScope, fp, args, order)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
+			Expect(short).To(BeNumerically("<", full), "the extra order was joined with the shorter ends")
+		})
+
 		DescribeTable("adds nothing for an order that is not one",
 			func(order []int) {
 				Expect(joins([]string{excerpt[half:], excerpt[:half]}, order).Reason).To(Equal(leakguard.ReasonPass))

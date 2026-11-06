@@ -403,12 +403,17 @@ must not depend on it. The text match now scans:
   - keys sorted, then the values in that order, so no key stands between two values;
   - keys in call order, then the values in call order.
 
-An order equal to call order adds nothing, so a call with one member costs what it did. A split in
+An order equal to call order or to an earlier order adds nothing, so a call with one member costs
+what it did. A split in
 the order the call wrote its members, or in key order, is caught whatever the encoder did. A split
 against both orders (the keys written sorted and the halves the other way round) is still not
 promised: the replay corpus pins it as `not_promised` (`split-args-against-both`). Nothing else in
 decision 6 changes: no any-pair joins, no pair windows, the same budgets (each join is one more
-text under the work budget, cut to its ends by `JoinEndBytes`).
+text under the work budget, cut to its ends by `JoinEndBytes`). A call that has already used a
+quarter of the work budget before its extra orders joins them with ends of a quarter of
+`JoinEndBytes` (128 bytes by default, more than a threshold-length leak in three layers of base64
+of UTF-16), so the heaviest benign shapes stay under half the budget. The orders are never
+dropped under load, which would let a padded call split text in key order unseen.
 
 ## Upstream verification
 

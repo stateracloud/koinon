@@ -316,6 +316,30 @@ var _ = Describe("Fourth review", func() {
 			Entry("128 arguments of 8 KiB, each base64 of UTF-8 of Russian", sliced(128, func(i int) string { return b64(string([]rune(russianProse)[i*50 : i*50+3000])) }), 15900000),
 		)
 
+		// The same shapes as the values of one JSON object whose keys the call wrote against key
+		// order, through CheckJoins with the three key orders mcpguard passes (#256): the extra
+		// joins must fit the same caps.
+		DescribeTable("within the work cap through CheckJoins, keys against key order",
+			func(values []string, workCap int) {
+				lim := scaledLimits()
+				checker := leakguard.TaintChecker{Store: taintedStore(fp, privateLine), Limits: lim}
+				args, orders := keysAgainstKeyOrder(values)
+				d, work, err := checker.CheckJoinsWork(context.Background(), testScope, fp, args, orders...)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
+				Expect(work).To(BeNumerically("<=", int64(workCap)))
+				Expect(work).To(BeNumerically("<=", int64(lim.MaxWorkBytes/2)))
+			},
+			// 8<<16, not 9<<16: the keys would take the call over MaxInputBytes.
+			Entry("two halves of base64 of base64", halves(b64(b64(prose[:8<<16]))), 10700000),
+			Entry("128 arguments of 8 KiB, each base64 of UTF-16 of prose", sliced(128, func(i int) string { return b64(utf16le(prose[i*3000 : i*3000+3000])) }), 11100000),
+			Entry("128 arguments of 8 KiB, each base64 of random bytes", sliced(128, func(i int) string { return b64(randomBytes(i, 6000)) }), 5300000),
+			Entry("128 arguments of 3 KiB, each base64 of UTF-16 of Russian", sliced(128, func(i int) string { return b64(utf16le(string([]rune(russianProse)[i*50 : i*50+1500]))) }), 13800000),
+			Entry("128 arguments of 8 KiB, each base64 of UTF-16 of Chinese", sliced(128, func(i int) string { return b64(utf16le(string([]rune(chineseProse)[i*20 : i*20+2000]))) }), 13000000),
+			// 127, not 128: the keys would take the call over MaxInputBytes.
+			Entry("127 arguments of 8 KiB, each base64 of UTF-8 of Russian", sliced(127, func(i int) string { return b64(string([]rune(russianProse)[i*50 : i*50+3000])) }), 12600000),
+		)
+
 		// The one spec against the wall clock: the 5 s backstop, on one core, and serial, so that
 		// no other spec of a parallel run shares the core. The shape is the slowest one that
 		// failed on a loaded lab node (3 CPUs, other packages in parallel).
@@ -358,6 +382,31 @@ func utf16be(s string) string {
 		b = append(b, byte(u>>8), byte(u))
 	}
 	return string(b)
+}
+
+// keysAgainstKeyOrder lays values out as mcpguard splits one JSON object whose keys the call
+// wrote in descending order: key, value, key, value. It returns that payload and the three orders
+// mcpguard passes to CheckJoins (canonical, values, call values; see mcpguard.Args), all of which
+// differ from call order and from each other.
+func keysAgainstKeyOrder(values []string) ([]string, [][]int) {
+	n := len(values)
+	args := make([]string, 0, 2*n)
+	for p := range n {
+		// A key with a space: "k0001" is base64 alphabet, which would read as part of the value.
+		args = append(args, fmt.Sprintf("key %d", n-1-p), values[p])
+	}
+	var canonical, keys, vals, callKeys, callVals []int
+	for q := range n { // key q ascending sits at call position n-1-q
+		p := n - 1 - q
+		canonical = append(canonical, 2*p, 2*p+1)
+		keys = append(keys, 2*p)
+		vals = append(vals, 2*p+1)
+	}
+	for p := range n {
+		callKeys = append(callKeys, 2*p)
+		callVals = append(callVals, 2*p+1)
+	}
+	return args, [][]int{canonical, append(keys, vals...), append(callKeys, callVals...)}
 }
 
 func sliced(n int, mk func(i int) string) []string {
