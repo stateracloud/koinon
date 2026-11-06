@@ -214,6 +214,14 @@ _Avoid_: Proxy, LLM router, model gateway, MCP gateway, OpenShell gateway
 How the gateway is run for an install: standalone, kubernetes or shared.
 _Avoid_: Deployment mode, gateway type
 
+**Gateway driver**:
+The Koinon code that runs one gateway product behind Koinon's gateway interfaces: agentgateway's today, Koinon's own from v0.2 (ADR 0097, proposed). Nothing outside a driver names the product.
+_Avoid_: Gateway adapter, backend, plugin
+
+**Gateway behaviour suite**:
+The tests of what a running gateway does on the request path (key refusals, header handling, usage per format, which MCP messages the guard sees, budget stops), run against the real image. A gateway version or driver is accepted only when it passes (ADR 0097).
+_Avoid_: Conformance tests, gateway e2e, contract tests
+
 **Gateway key**:
 The key an agent's sandbox uses to call the gateway. It carries the agent's spend limits and is worthless outside the gateway.
 _Avoid_: Virtual key, agent API key, model key
@@ -244,8 +252,20 @@ _Avoid_: Protocol, dialect, schema
 ### Cost and budgets
 
 **Price**:
-US dollars per million tokens for each kind of token, for the models whose name matches a pattern, with optional price tiers for long inputs. An org's own price wins over the default price list.
+US dollars per million tokens for each kind of token, for the models whose name matches a pattern, with optional price tiers for long inputs. An org's own price wins over the platform price list, which wins over the default price list.
 _Avoid_: Rate, rate card, tariff
+
+**Default price list**:
+The prices shipped in the Koinon binary, checked by hand against each provider's own page; it changes only with a release.
+_Avoid_: Catalog, built-in prices, shipped defaults
+
+**Platform price list**:
+The install-wide, versioned prices a platform admin accepts (or the bounded auto-apply writes) between org prices and the default price list; an entry retires once a release ships the same price.
+_Avoid_: Install overlay (for prices), global prices, price override
+
+**Price proposal**:
+A difference between a public price source and the price Koinon uses for a model, waiting to be accepted, dismissed or auto-applied, with its source, commit, hash and fetch time.
+_Avoid_: Price suggestion, price update, sync
 
 **Cost**:
 What a model request, run or task cost in US dollars, as the spend ledger records it: the provider's billed cost where the provider reports one per request (an OpenRouter request, once settled), otherwise worked out by Koinon from the tokens reported and the price valid at the time (Anthropic and OpenAI direct, whose days are compared with the provider's cost API by the cost reconciliation).
@@ -262,6 +282,14 @@ _Avoid_: Usage, consumption, burn
 **Spend ledger**:
 Koinon's authoritative record of every model request and its cost, from which budgets, run limits and reports are computed.
 _Avoid_: Billing log, usage log, cost table
+
+**Usage record**:
+One gateway request as the spend ledger reads it: request, key, agent and model, status, and the token counts per kind. Every gateway driver yields them; the ledger reads no gateway's own log fields (ADR 0097).
+_Avoid_: Access log entry, usage event, log record
+
+**Call reservation**:
+The worst-case cost of a model call (its input plus its `max_tokens` of output) held against every budget level before the gateway forwards the call, and settled to the real cost when it ends (ADR 0097, from v0.3).
+_Avoid_: Pre-charge, hold, reserve (that is a provisional entry's `max_tokens` bound)
 
 **Budget**:
 A spend limit on one scope and window: an agent's daily limit, an org's monthly cap or the platform
@@ -347,6 +375,10 @@ _Avoid_: Forge, SCM, VCS provider, Git provider
 **MCP server**:
 A remote tool server an org connects. Agents reach its tools only through the gateway, which adds the server's credential.
 _Avoid_: Tool server, plugin, server (unqualified)
+
+**MCP sign-in**:
+Koinon's stored OAuth authorization to one MCP server, owned by an org or a user and made once in the browser; the gateway adds its token to each call.
+_Avoid_: OAuth grant, grant, token, OAuth connection
 
 **Koinon tools**:
 The tools Koinon itself offers every active agent without a grant, such as asking a person a question or canceling its own task.

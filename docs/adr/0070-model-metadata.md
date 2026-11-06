@@ -1,6 +1,6 @@
 # 0070. Model metadata: a reviewed snapshot from models.dev and OpenRouter
 
-- Status: Accepted (procoduck, 2026-10-28; built after v0.1.0, with the UI milestone)
+- Status: Accepted (procoduck, 2026-10-28; built after v0.1.0, with the UI milestone); decisions 4 and 8 amended by [0098](0098-price-catalogue-updates-from-public-sources.md)
 - Date: 2026-10-28
 - Relates to: [0052](0052-opencode-v2-flavor.md),
   [0056](0056-model-providers-pricing-and-budgets-per-org.md),
@@ -192,7 +192,8 @@ API", and "Do not copy prices from aggregators". models.dev is an aggregator.
    Each fact has one precedence order, highest first:
 
    - **Prices, tiers:** org price entry → `pricing/default.yaml`. The snapshot never prices a
-     request.
+     request. _Amended by ADR 0098:_ org price entry → platform price list →
+     `pricing/default.yaml`.
    - **Wire format:** admin override → `internal/modelformat` table (ADR 0069). The snapshot only
      gives hints.
    - **Output limit:** org model limit → `max_output` in `pricing/default.yaml` → install overlay →
@@ -297,6 +298,9 @@ API", and "Do not copy prices from aggregators". models.dev is an aggregator.
      one at a time or all together. Accepting writes overlay rows (decision 7) and is audited.
    - Price differences are never accepted as prices. They appear on the Prices page as "source
      differs" with a link to the price form, so an org admin can add an org price.
+     _Amended by ADR 0098:_ price differences become price proposals. A platform admin accepts them
+     into the platform price list, an org admin into their own org's prices, and a bounded
+     auto-apply may accept small ones. The price fetch has its own setting, `prices.refresh`.
    - Live upstream fields (`uptime_*`, `latency_*`) are fetched only in this mode. They are shown
      with their time on the discovery page and are never stored as metadata.
    - Air-gapped installs keep it off. `koinon-api model-metadata fetch --out <file>`, run anywhere

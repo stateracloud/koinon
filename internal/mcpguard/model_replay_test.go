@@ -30,11 +30,13 @@ import (
 
 // keyOrder is the one planted leak the model loop decides differently, and why: the fake model
 // emits a tool call's arguments with their keys sorted (a Go map, as any encoder that sorts keys
-// would), so the mail's subject and body arrive as body, subject. The guard joins payload arguments
-// in their order in the call (ADR 0091 decision 6), so two base64 halves too short to match alone
-// no longer join, and the leak passes before both legs. ADR 0091 does not promise more (the corpus
-// marks the reversed split not_promised); the both-legs replay of the same case is still caught.
-// Joining payload arguments in an order that does not depend on the encoder is #256.
+// would), so the mail's subject and body arrive as body, subject, and the halves the corpus wrote in
+// call order (subject first) arrive against both call order and key order. The guard joins the
+// payload in call order and in key order (#256, ADR 0091 decision 6), so two base64 halves too
+// short to match alone do not join, and the leak passes before both legs. No reading of the JSON
+// the model sent puts them in order: the corpus pins that shape as not_promised
+// (split-args-against-both), and the both-legs replay of the same case is still caught. The
+// swapped shapes (split-args-reversed, split-args-b64-swapped) arrive in key order and are caught.
 const keyOrder = "leak/handbook-rule/split-args-b64-halves/private-only"
 
 // modelToolName is the name a corpus tool is declared under to the fake model.

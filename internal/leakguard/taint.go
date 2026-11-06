@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,12 +42,20 @@ type TaintChecker struct {
 // that scope's store holds. A budget that runs out blocks with its reason (fail closed). A store
 // failure blocks with ReasonStoreError and returns the error too.
 func (c TaintChecker) Check(ctx context.Context, scope Scope, fp *Fingerprinter, args []string) (Decision, error) {
-	return c.check(ctx, scope, fp, args, nil)
+	return c.check(ctx, scope, fp, args, nil, nil)
 }
 
-// check is Check, and also stores in work, when it is not nil, the bytes of work the call was
+// CheckJoins is Check, and also scans args joined in each of orders: an order lists indices of
+// args, each at most once (a caller's other reading of the same call, such as the canonical order
+// of its JSON members, #256). An order equal to call order or to an earlier order, or naming an
+// index out of range, adds nothing.
+func (c TaintChecker) CheckJoins(ctx context.Context, scope Scope, fp *Fingerprinter, args []string, orders ...[]int) (Decision, error) {
+	return c.check(ctx, scope, fp, args, orders, nil)
+}
+
+// check is CheckJoins, and also stores in work, when it is not nil, the bytes of work the call was
 // charged (the figure the work caps of the specs read, see export_test.go).
-func (c TaintChecker) check(ctx context.Context, scope Scope, fp *Fingerprinter, args []string, work *int64) (Decision, error) {
+func (c TaintChecker) check(ctx context.Context, scope Scope, fp *Fingerprinter, args []string, orders [][]int, work *int64) (Decision, error) {
 	lim := c.Limits.withDefaults()
 	if fp == nil || c.Store == nil {
 		err := errors.New("leakguard: taint check without a store or fingerprinter")
@@ -69,7 +78,7 @@ func (c TaintChecker) check(ctx context.Context, scope Scope, fp *Fingerprinter,
 	if err := m.clock(); err != nil {
 		return budgetDecision(err), nil
 	}
-	cands, err := candidates(args, lim, fp, m)
+	cands, err := candidates(args, orders, lim, fp, m)
 	if err != nil {
 		return budgetDecision(err), nil
 	}
@@ -145,36 +154,45 @@ type rawText struct {
 	args []int
 }
 
-// candidates decodes and fingerprints each argument and the arguments joined in call order (see
-// the package documentation): nothing else. A text split across arguments that are not adjacent, or
-// reordered, is not reassembled (ADR 0091 decision 6: the text match is a secondary signal).
-func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candidate, error) {
+// candidates decodes and fingerprints each argument, the arguments joined in call order, and the
+// arguments joined in each of orders (see the package documentation): nothing else. A text split
+// across arguments that are not adjacent in one of those orders is not reassembled (ADR 0091
+// decision 6: the text match is a secondary signal).
+func candidates(args []string, orders [][]int, lim Limits, fp *Fingerprinter, m *meter) ([]candidate, error) {
 	raws := make([]rawText, 0, len(args)+1)
 	for i, a := range args {
 		if a != "" {
 			raws = append(raws, rawText{a, []int{i}})
 		}
 	}
-	if n := len(raws); n > 1 {
-		idx := make([]int, 0, n)
-		var b strings.Builder
-		for _, r := range raws {
-			idx = append(idx, r.args[0])
-			// An argument is decoded whole on its own; in the joined text a long one is cut to
-			// its two ends, which hold the boundaries to its neighbours. Joined whole, a call of
-			// two halves of 1 MiB would cost twice a call of one.
-			if w := lim.JoinEndBytes; len(r.text) > 2*w {
-				b.WriteString(head(r.text, w))
-				b.WriteString(tail(r.text, w))
-			} else {
-				b.WriteString(r.text)
-			}
-		}
-		raws = append(raws, rawText{b.String(), idx})
+	callOrder := make([]int, 0, len(raws))
+	for _, r := range raws {
+		callOrder = append(callOrder, r.args[0])
 	}
+	if j, ok := join(args, callOrder, lim.JoinEndBytes); ok {
+		raws = append(raws, j)
+	}
+	extra := extraOrders(args, orders, callOrder)
 	res, err := decodeRaws(raws, lim, fp, m)
 	if err != nil {
 		return nil, err
+	}
+	if len(extra) > 0 {
+		// The extra orders are the same arguments again, so each costs about as much as the
+		// call-order join; they are joined with the same ends. Shorter ends under load would let a
+		// padded call split text in key order unseen: an encoding of 30 bytes a character needs
+		// more than 128 bytes each side. A call over MaxWorkBytes fails closed (ReasonBudgetWork).
+		jr := make([]rawText, 0, len(extra))
+		for _, idx := range extra {
+			if j, ok := join(args, idx, lim.JoinEndBytes); ok {
+				jr = append(jr, j)
+			}
+		}
+		more, err := decodeRaws(jr, lim, fp, m)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, more...)
 	}
 	seen := map[string]struct{}{}
 	var out []candidate
@@ -188,6 +206,58 @@ func candidates(args []string, lim Limits, fp *Fingerprinter, m *meter) ([]candi
 		}
 	}
 	return out, nil
+}
+
+// extraOrders returns the orders to join besides call order: each valid order once, without its
+// empty arguments. An order that names an index twice or out of range is skipped, and so is one
+// that call order or an earlier order already gave: it would only charge the work budget again for
+// the same text.
+func extraOrders(args []string, orders [][]int, callOrder []int) [][]int {
+	done := [][]int{callOrder}
+	var out [][]int
+	for _, o := range orders {
+		idx := make([]int, 0, len(o))
+		used := make(map[int]bool, len(o))
+		valid := true
+		for _, i := range o {
+			if i < 0 || i >= len(args) || used[i] {
+				valid = false
+				break
+			}
+			used[i] = true
+			if args[i] != "" {
+				idx = append(idx, i)
+			}
+		}
+		if !valid || slices.ContainsFunc(done, func(d []int) bool { return slices.Equal(d, idx) }) {
+			continue
+		}
+		done = append(done, idx)
+		out = append(out, idx)
+	}
+	return out
+}
+
+// join is the non-empty arguments idx names, joined in that order, each longer than 2*ends cut to
+// its two ends; false for fewer than two.
+func join(args []string, idx []int, ends int) (rawText, bool) {
+	if len(idx) < 2 {
+		return rawText{}, false
+	}
+	var b strings.Builder
+	for _, i := range idx {
+		t := args[i]
+		// An argument is decoded whole on its own; in the joined text a long one is cut to its two
+		// ends, which hold the boundaries to its neighbours. Joined whole, a call of two halves of
+		// 1 MiB would cost twice a call of one.
+		if len(t) > 2*ends {
+			b.WriteString(head(t, ends))
+			b.WriteString(tail(t, ends))
+		} else {
+			b.WriteString(t)
+		}
+	}
+	return rawText{b.String(), slices.Clone(idx)}, true
 }
 
 type keyedCandidate struct {
