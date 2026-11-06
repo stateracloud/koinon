@@ -146,6 +146,9 @@ type Site struct {
 	// SelfHosted means there is no default host: a connection always names its base URL, which
 	// may have a sub-path, and BaseURL and APIURL are placeholders.
 	SelfHosted bool `json:"selfHosted,omitempty"`
+	// MCPHosts are the hosts of MCP servers known to act on the default host besides its web and API
+	// hosts, for example api.githubcopilot.com for github.com (see Type.ServesMCP).
+	MCPHosts []string `json:"mcpHosts,omitempty"`
 }
 
 // Capabilities is a code host's capability descriptor (ADR 0062, 0063).
@@ -439,6 +442,9 @@ func (t *Type) check() error {
 	}
 	if st := t.Spec.Site; st != nil && st.SelfHosted && st.APIPath == "" {
 		return errors.New("site: a selfHosted connector needs an apiPath")
+	}
+	if err := t.checkMCPHosts(); err != nil {
+		return err
 	}
 	seen := map[string]bool{}
 	for i, s := range t.Spec.Scopes {

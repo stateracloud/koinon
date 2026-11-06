@@ -41,6 +41,13 @@ WHERE org_id = @org_id AND code_host_connection_id = @connection_id
 ORDER BY name, id
 FOR UPDATE;
 
+-- name: GetConnectionForMCPLink :one
+-- The connection a server is being linked to, locked against a change of its host (a declared
+-- connection's baseUrl) until the link is written, so the host check sees the host the link keeps.
+SELECT * FROM connections
+WHERE org_id = @org_id AND id = @id
+FOR SHARE;
+
 -- name: ListMCPServers :many
 SELECT * FROM mcp_servers
 WHERE org_id = @org_id

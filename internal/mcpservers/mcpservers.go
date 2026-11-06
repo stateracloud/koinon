@@ -546,6 +546,15 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 			Source: store.ConfigSourceUi, CreatedBy: creator,
 		}
 		createClass(&p, in.Class)
+		if in.Class != nil {
+			link, err := lockLinkTarget(ctx, q, org, *in.Class)
+			if err != nil {
+				return err
+			}
+			if err := link.check(in.URL); err != nil {
+				return err
+			}
+		}
 		row, err = q.CreateMCPServer(ctx, p)
 		if err != nil {
 			return err

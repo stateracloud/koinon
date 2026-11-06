@@ -179,10 +179,22 @@ var _ = Describe("the leak guard settings in the UI API", func() {
 		Expect(orgID.Scan(org)).To(Succeed())
 		conn := pgtype.UUID{Bytes: guuid.New(), Valid: true}
 		_, err = store.New(e.pool).CreateConnection(ctx, store.CreateConnectionParams{
-			OrgID: orgID, ID: conn, Connector: "github", DisplayName: "gh", Config: []byte(`{}`),
+			// A GitHub Enterprise Server at the server's host, so the server may act through it (#117).
+			OrgID: orgID, ID: conn, Connector: "github", DisplayName: "gh", Config: []byte(`{"baseUrl":"https://mcp.example.com"}`),
 			SecretName: pgtype.Text{String: "conn-" + conn.String(), Valid: true},
 		})
 		Expect(err).NotTo(HaveOccurred())
+		gitea := pgtype.UUID{Bytes: guuid.New(), Valid: true}
+		_, err = store.New(e.pool).CreateConnection(ctx, store.CreateConnectionParams{
+			OrgID: orgID, ID: gitea, Connector: "gitea", DisplayName: "forge", Config: []byte(`{"baseUrl":"https://git.example.com"}`),
+			SecretName: pgtype.Text{String: "conn-" + gitea.String(), Valid: true},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = owner.mcps.SetServerClass(ctx, &mcpserverv1alpha1.SetServerClassRequest{
+			OrgId: org, ServerId: srv.GetServer().GetId(), Class: &mcpserverv1alpha1.ServerClass{Kind: "other", CodeHostConnectionId: gitea.String()},
+		})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "a server at another host than the connection's (#117)")
 
 		set, err := owner.mcps.SetServerClass(ctx, &mcpserverv1alpha1.SetServerClassRequest{
 			OrgId: org, ServerId: srv.GetServer().GetId(), Class: &mcpserverv1alpha1.ServerClass{Kind: "other", DataClass: []string{"untrusted_input"}, CodeHostConnectionId: conn.String()},
