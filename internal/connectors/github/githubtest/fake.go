@@ -33,6 +33,9 @@ type Fake struct {
 	Repositories []string
 	// Private marks repositories (by name) as private; the rest are public.
 	Private map[string]bool
+	// Internal marks repositories (by name) as GitHub Enterprise "internal": private=true and
+	// visibility "internal", readable by the whole enterprise.
+	Internal map[string]bool
 	// Permissions the App was granted.
 	Permissions map[string]string
 	// Now defaults to time.Now; tokens expire an hour after Now.

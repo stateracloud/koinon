@@ -715,6 +715,9 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	// The reconciler walks orgs one at a time, so every later query is org-scoped.
 	ListOrgsToReconcile(ctx context.Context) ([]ListOrgsToReconcileRow, error)
+	// The code-host scope refresh: finds every org that has a live connection of one of these connector
+	// types, to refresh its repositories' visibility. Across orgs, like the question sweeps.
+	ListOrgsWithCodeHostConnections(ctx context.Context, connectors []string) ([]pgtype.UUID, error)
 	// Orgs with an open question past its expiry at @now or a reminder due at @now.
 	ListOrgsWithDueQuestions(ctx context.Context, now pgtype.Timestamptz) ([]pgtype.UUID, error)
 	// The settler: every org with a provisional entry due for an attempt, the longest waiting first.

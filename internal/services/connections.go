@@ -243,6 +243,8 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		s.syncScope(ctx, row)
 	}
 	res.Connection = s.connectionProto(row)
 	return res, nil
@@ -351,6 +353,8 @@ func (s *Server) CreateGiteaConnection(ctx context.Context, req *connectionv1alp
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		s.syncScope(ctx, row)
 	}
 	res.Connection = s.connectionProto(row)
 	return res, nil
@@ -465,6 +469,8 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 			row = tested
 		}
 		res.Results = results
+	} else {
+		s.syncScope(ctx, row)
 	}
 	res.Connection = s.connectionProto(row)
 	return res, nil
@@ -634,7 +640,23 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection) (stor
 		return row, nil, s.dbError(err, "connection")
 	}
 	s.log.Info("connection tested", "org", row.OrgID.String(), "connection", row.ID.String(), "status", string(status))
+	if status == store.ConnectionStatusOk {
+		s.syncScope(ctx, row)
+	}
 	return row, checksProto(results), nil
+}
+
+// syncScope reads the connection's repositories into the org's code-host scope (ADR 0091), so a
+// write into one of the org's own private repositories is not external-high from the first call.
+// It is best effort: a failure leaves the stored scope to age out, which is the safe side, and
+// the periodic refresh retries.
+func (s *Server) syncScope(ctx context.Context, row store.Connection) {
+	if s.scopeSync == nil {
+		return
+	}
+	if err := s.scopeSync.Sync(ctx, row); err != nil {
+		s.log.Warn("could not read the connection's repositories into the code-host scope", "org", row.OrgID.String(), "connection", row.ID.String(), "err", err)
+	}
 }
 
 // Paging of ListInstallationRepos. The page token is GitHub's page number, in pages of

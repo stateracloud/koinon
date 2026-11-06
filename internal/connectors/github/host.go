@@ -197,7 +197,17 @@ func (a *access) Token() codehost.Token {
 
 func (a *access) Repository(ctx context.Context, r codehost.Repo) (codehost.Repository, error) {
 	got, err := a.c.GetRepository(ctx, a.tok, repo(r))
-	return codehost.Repository{FullName: got.FullName, DefaultBranch: got.DefaultBranch, Private: got.Private}, err
+	return codehost.Repository{FullName: got.FullName, DefaultBranch: got.DefaultBranch, Private: got.Private, Visibility: scopeVisibility(got)}, err
+}
+
+// scopeVisibility is the visibility Koinon records for a repository: private only when GitHub says
+// so on both fields, public otherwise. An internal repository is readable by the whole enterprise,
+// and an unsure answer must not hide a leak (ADR 0091).
+func scopeVisibility(r Repository) string {
+	if r.Private && (r.Visibility == "" || r.Visibility == "private") {
+		return codehost.VisibilityPrivate
+	}
+	return codehost.VisibilityPublic
 }
 
 func (a *access) Repositories(ctx context.Context, page, perPage int) (codehost.RepositoryPage, error) {
@@ -207,7 +217,7 @@ func (a *access) Repositories(ctx context.Context, page, perPage int) (codehost.
 	}
 	out := codehost.RepositoryPage{Total: got.TotalCount}
 	for _, r := range got.Repositories {
-		out.Repositories = append(out.Repositories, codehost.Repository{FullName: r.FullName, DefaultBranch: r.DefaultBranch, Private: r.Private})
+		out.Repositories = append(out.Repositories, codehost.Repository{FullName: r.FullName, DefaultBranch: r.DefaultBranch, Private: r.Private, Visibility: scopeVisibility(r)})
 	}
 	return out, nil
 }

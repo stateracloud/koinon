@@ -259,9 +259,16 @@ func (f *Fake) getRepo(w http.ResponseWriter, _ *http.Request, r *Repo) {
 }
 
 func (f *Fake) repoJSON(r *Repo) map[string]any {
+	visibility := "public"
+	switch {
+	case f.Internal[r.Name]:
+		visibility = "internal"
+	case f.Private[r.Name]:
+		visibility = "private"
+	}
 	return map[string]any{
 		"name": r.Name, "full_name": f.Account + "/" + r.Name, "owner": map[string]string{"login": f.Account},
-		"private": f.Private[r.Name], "default_branch": r.DefaultBranch,
+		"private": f.Private[r.Name] || f.Internal[r.Name], "visibility": visibility, "default_branch": r.DefaultBranch,
 	}
 }
 

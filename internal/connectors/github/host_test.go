@@ -47,6 +47,25 @@ var _ = Describe("Host", func() {
 		Expect(caps.ExactModes).To(BeTrue())
 	})
 
+	It("reports private only for a private repository, and public when unsure (ADR 0091)", func(ctx SpecContext) {
+		fake.Repositories = []string{"secret", "open", "enterprise"}
+		fake.Private = map[string]bool{"secret": true}
+		fake.Internal = map[string]bool{"enterprise": true}
+		acc, err := host.Open(ctx, conn, host.MetadataScope(nil))
+		Expect(err).NotTo(HaveOccurred())
+		page, err := acc.Repositories(ctx, 1, codehost.MaxPerPage)
+		Expect(err).NotTo(HaveOccurred())
+		got := map[string]string{}
+		for _, r := range page.Repositories {
+			got[r.FullName] = r.Visibility
+		}
+		Expect(got).To(Equal(map[string]string{"acme/secret": "private", "acme/open": "public", "acme/enterprise": "public"}),
+			"a GitHub internal repository is readable by the enterprise: public")
+		one, err := acc.Repository(ctx, codehost.Repo{Owner: "acme", Name: "enterprise"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(one.Visibility).To(Equal(codehost.VisibilityPublic))
+	})
+
 	Describe("on a host with its own CA", func() {
 		// A GitHub Enterprise Server stand-in: TLS with a certificate no system root signs,
 		// and the REST API under /api/v3 of the same host.
