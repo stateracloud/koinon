@@ -37,8 +37,8 @@ type Ingester struct {
 	// Prices finds the prices of requests; required (prices.NewResolver).
 	Prices prices.Resolver
 	// Sources are the providers that can report their own usage of a response later; nil is
-	// providerusage.Default. A response cut short of such a provider is recorded provisional and
-	// settled by the Settler; of any other provider the logged usage is final.
+	// providerusage.Default. A response of such a provider is recorded provisional and settled by
+	// the Settler at the provider's bill; of any other provider the logged usage is final.
 	Sources providerusage.Registry
 }
 
@@ -181,15 +181,17 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 		if err != nil {
 			return err
 		}
-		// A response cut short is settled later when its provider can say what it billed (a
-		// settlement with its response ID); a cut Anthropic stream whose provider cannot is held (a
-		// settlement without one) until the deadline. Meanwhile the request's max_tokens bound is
-		// held back from the gateway key. Any other entry is final at once.
+		// A response whose provider can say what it billed (an OpenRouter generation) is settled
+		// later at that bill (a settlement with its response ID; ADR 0056, amendment 2026-11-06),
+		// whether it completed or was cut short; a cut Anthropic stream whose provider cannot is held
+		// (a settlement without one) until the deadline. Meanwhile a cut response's max_tokens bound
+		// is held back from the gateway key. A request the provider refused or failed without usage
+		// is final at once (it generated nothing to bill), as is every other entry.
 		provisional, settleID := false, pgtype.Text{}
-		if pr.aborted && pr.model.ProviderID.Valid {
+		if pr.model.ProviderID.Valid && billedLater(e, pr) {
 			if _, ok := in.sources().For(pr.model.ProviderType, pr.model.ProviderURL, e.ResponseID); ok {
 				provisional, settleID = true, pgtype.Text{String: e.ResponseID, Valid: true}
-			} else if e.Cut {
+			} else if pr.aborted && e.Cut {
 				provisional = true
 			}
 		}
@@ -206,7 +208,7 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 			Priced: pr.priced, Estimated: pr.estimated, Estimate: pr.estimate, CostFlagged: pr.flagged,
 			RequestBytes: pr.reqBytes, ResponseBytes: pr.respBytes, OccurredAt: at,
 			Provisional: provisional, ReserveUsd: pgtype.Text{String: pr.reserve.Numeric(), Valid: pr.reserve > 0}, ResponseID: responseID,
-			UpstreamStatus: e.upstreamStatus(),
+			UpstreamStatus: e.upstreamStatus(), ProviderID: pr.model.ProviderID,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // already recorded
@@ -252,6 +254,12 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 	return recorded, err
 }
 
+// billedLater reports whether a request may carry a provider bill worth settling: anything but a
+// request the provider refused or failed without usage, or one charged nothing.
+func billedLater(e Entry, pr priced) bool {
+	return !pr.waived && !e.rejectedByUpstream() && !e.failedByUpstream()
+}
+
 // ingestSystem records a request of an org's system key: the principal is system, there is no
 // agent and no run. The spend counts toward the org's monthly cap and the platform ceiling; the
 // key's own daily budget bounds it, and the reconciler, woken when a level is crossed, takes the key
@@ -279,7 +287,7 @@ func (in *Ingester) ingestSystem(ctx context.Context, e Entry) (bool, error) {
 			CostUsd: pr.cost.Numeric(), GatewayCostUsd: pr.gatewayCost, PriceRef: pr.ref,
 			Priced: pr.priced, Estimated: pr.estimated, Estimate: pr.estimate, CostFlagged: pr.flagged,
 			RequestBytes: pr.reqBytes, ResponseBytes: pr.respBytes, OccurredAt: pgtype.Timestamptz{Time: e.Time, Valid: true},
-			UpstreamStatus: e.upstreamStatus(),
+			UpstreamStatus: e.upstreamStatus(), ProviderID: pr.model.ProviderID,
 		}); errors.Is(err, pgx.ErrNoRows) {
 			return nil // already recorded
 		} else if err != nil {

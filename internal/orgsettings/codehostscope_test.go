@@ -5,6 +5,7 @@ package orgsettings_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -147,6 +148,62 @@ var _ = Describe("the org's code-host scope (ADR 0091, koinon-private#350)", fun
 		Expect(sum.After).To(HaveKeyWithValue("repositories", BeNumerically("==", 2)))
 		Expect(sum.After).To(HaveKeyWithValue("public", BeNumerically("==", 1)))
 		Expect(string(ev[0].Summary)).NotTo(ContainSubstring(`"p"`))
+	})
+
+	It("audits the system's refresh only on a change, and a person's sync always", func(ctx SpecContext) {
+		repos := []orgsettings.CodeHostRepo{{Owner: "a", Name: "p", Visibility: "private"}, {Owner: "a", Name: "pub", Visibility: "public"}}
+		sys := audit.System()
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, sys, conn, repos, now.Add(-3*time.Minute))).To(Succeed())
+		Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(1), "the first reading is a change")
+
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, sys, conn, repos, now.Add(-2*time.Minute))).To(Succeed())
+		Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(1), "the same list, read again, is not audited")
+		l, _ := svc.LeakGuard(ctx, org)
+		Expect(l.ScopeSummary(now).OldestCheckedAt).To(HaveValue(BeTemporally("~", now.Add(-2*time.Minute), time.Millisecond)), "but its freshness is stored")
+
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, repos, now.Add(-time.Minute))).To(Succeed())
+		Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(2), "a person's sync is always audited")
+
+		changed := []orgsettings.CodeHostRepo{{Owner: "a", Name: "p", Visibility: "public"}, {Owner: "a", Name: "pub", Visibility: "public"}}
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, sys, conn, changed, now)).To(Succeed())
+		Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(3), "a visibility that changed is")
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, sys, conn, changed[:1], now)).To(Succeed())
+		Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(4), "and so is a repository that left")
+	})
+
+	It("keeps the newer reading when an older one arrives after it", func(ctx SpecContext) {
+		newer := []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "public"}}
+		older := []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}, {Owner: "a", Name: "c", Visibility: "private"}}
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, newer, now)).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, older, now.Add(-time.Minute))).To(Succeed(), "dropped, not an error")
+		l, _ := svc.LeakGuard(ctx, org)
+		Expect(l.CodeHostRepos).To(HaveLen(1))
+		Expect(l.Scope().Internal(conn, "a", "b", now)).To(BeFalse(), "the older private reading must not win over the newer public one")
+		Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(1), "a dropped reading is not audited")
+	})
+
+	It("ends with the newest reading whatever order concurrent replacements finish in", func(ctx SpecContext) {
+		const n = 12
+		errs := make(chan error, n)
+		for i := range n {
+			go func() {
+				defer GinkgoRecover()
+				// Reading i lists i+1 repositories, read i seconds after the first.
+				var repos []orgsettings.CodeHostRepo
+				for j := range i + 1 {
+					repos = append(repos, orgsettings.CodeHostRepo{Owner: "a", Name: fmt.Sprintf("r%02d", j), Visibility: "private"})
+				}
+				errs <- svc.ReplaceCodeHostRepos(ctx, org, actor, conn, repos, now.Add(time.Duration(i-n)*time.Second))
+			}()
+		}
+		for range n {
+			Expect(<-errs).To(Succeed())
+		}
+		l, _ := svc.LeakGuard(ctx, org)
+		Expect(l.CodeHostRepos).To(HaveLen(n), "the newest reading lists n repositories")
+		for _, r := range l.CodeHostRepos {
+			Expect(r.CheckedAt).To(BeTemporally("~", now.Add(-time.Second), time.Millisecond))
+		}
 	})
 
 	DescribeTable("refuses what it cannot store, and changes nothing",

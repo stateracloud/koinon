@@ -85,6 +85,20 @@ message Provider {
   repeated ModelFormat formats = 13;
   // echo_check is the latest echo check of the provider; unset when none ran.
   EchoCheck echo_check = 14;
+  // credential_lost_at is set when the API key was lost with the key that encrypted it (`koinon-api keys
+  // forget`, ADR 0085 decision 13): the provider is not served until the key is entered again; has_key is false. Unset otherwise.
+  google.protobuf.Timestamp credential_lost_at = 15;
+  // has_cost_key is whether a cost API key is stored: an admin key with which koinon-reconciler reads
+  // the provider's cost API once a day and records the ledger's difference from it (ADR 0056,
+  // amendment 2026-11-06). anthropic and openai providers at their own API URL only.
+  bool has_cost_key = 16;
+  // cost_scope is the part of the provider's account whose cost is this provider key's: the
+  // Anthropic workspace ID ("default" for the default workspace), or the OpenAI project ID or API
+  // key ID (key_..., the key's ID, never the key).
+  string cost_scope = 17;
+  // cost_key_lost_at is set when the cost API key was lost with the key that encrypted it; it must
+  // be entered again. Unset otherwise.
+  google.protobuf.Timestamp cost_key_lost_at = 18;
 }
 
 // EchoCheck is the result of an echo check (CheckProviderEcho).
@@ -199,6 +213,11 @@ message UpdateProviderRequest {
   optional string api_key = 5 [debug_redact = true];
   // anthropic_workspace_id replaces the workspace ID; set to "" it removes it.
   optional string anthropic_workspace_id = 6;
+  // cost_api_key replaces the cost API key (an Anthropic or OpenAI admin key that may read the cost
+  // API; write-only, never returned); set to "" it removes the key and its scope.
+  optional string cost_api_key = 7 [debug_redact = true];
+  // cost_scope replaces the cost scope; required with a cost API key (see Provider.cost_scope).
+  optional string cost_scope = 8;
 }
 
 message UpdateProviderResponse {

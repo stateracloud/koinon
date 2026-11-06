@@ -7,6 +7,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { OrgSettingsService } from '@/gen/koinon/orgsettings/v1alpha1/orgsettings_pb'
 import {
   Backend,
   ContentLevel,
@@ -82,6 +83,10 @@ function setup(opts: Opts = {}) {
   let version = 7n
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
+    service(OrgSettingsService, {
+      getRunContentRetention: () => ({ retention: { days: 30, defaultDays: 30, minDays: 1, maxDays: 365 } }),
+      getHomeBackupRetention: () => ({ retention: { days: 7, defaultDays: 7, minDays: 1, maxDays: 90 } }),
+    })
     service(TraceDestinationService, {
       listDestinations: () => {
         calls.listed++

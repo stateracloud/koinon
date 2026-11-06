@@ -272,6 +272,11 @@ func (c *Config) defaults() error {
 			return errors.New("agentd: Checkpoints needs a Store and Repositories")
 		}
 		c.Checkpoints.defaults()
+		if c.Checkpoints.Timeout >= c.Checkpoints.Lease {
+			// A writer must end before its lease: the sweeper counts a running checkpoint only
+			// within its lease (ListDueHomeRepositories), and another writer takes it over after.
+			return errors.New("agentd: Checkpoints.Timeout must be shorter than Checkpoints.Lease")
+		}
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
@@ -308,6 +313,10 @@ type Pool struct {
 	sink *traceSink
 	// stopping is closed when Run's context ends: the pool drains. Nil (never closed) before Run.
 	stopping <-chan struct{}
+	// sweepRefused holds the retired repositories (org/agent/epoch) the sweep has refused and
+	// logged, so each is logged once per process; the SweepRefused gauge counts them every sweep.
+	// An entry goes when its row next passes the check (a fixed row is logged again if it regresses).
+	sweepRefused sync.Map
 }
 
 // DefaultDrainDeadline is Config.DrainDeadline's default.

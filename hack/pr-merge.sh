@@ -18,14 +18,21 @@
 #      succeeded (a review failure is a warning: the merge does not depend on the claim), and a PR
 #      comment naming that SHA and the number of green contexts read. With --auto the PR is merged later:
 #      the output says `auto-merge enabled`.
+#   Merge queue (#225): when the base branch's ruleset has a `merge_queue` rule (read at run time), the
+#   same `gh pr merge --merge --auto` adds the PR to the queue and the output says `added to the merge queue`;
+#   --admin still merges directly (bypass). Without the rule nothing changes. docs/dev/ci.md "Merging".
+#   Unresolved review threads (#187): pr-wait.sh --checks exits 7 when every check is green but the PR is
+#   BLOCKED by them (it lists them, path:line and author), and this script passes the 7 through; it also
+#   looks again right before merging (mergeStateStatus BLOCKED). It never replies to or resolves a thread.
 #   The e2e decision reads the PR's whole file list (`gh api pulls/<PR>/files --paginate`); when that read
 #   fails or is empty, e2e is required (fail closed).
 #   --admin        merge now with admin rights (main merges ready PRs this way, AGENTS.md "Merging")
 #   --lane L       the claim lane for `claim.sh review` (default: the lane of the claim in `claim.sh mine`)
 #   --approved-at  when the human approved the admin merge; recorded in the comment, not checked
-# Exit: 0 merged (or auto-merge enabled), 1 a required context is not green, 2 the wait timed out or
-#       a tool failed, 3 closed, 4 conflict, 5 draft, 6 stale head, 64 usage (pr-wait.sh's code passes through).
-# Test hooks: PR_MERGE_WAIT, PR_MERGE_NEEDS_E2E, PR_MERGE_CLAIM replace the three helper scripts.
+# Exit: 0 merged (or auto-merge enabled, or queued), 1 a required context is not green, 2 the wait timed out or
+#       a tool failed, 3 closed, 4 conflict, 5 draft, 6 stale head, 7 unresolved review threads, 64 usage
+#       (pr-wait.sh's code passes through).
+# Test hooks: PR_MERGE_WAIT, PR_MERGE_NEEDS_E2E, PR_MERGE_CLAIM, PR_MERGE_THREADS replace the helper scripts.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -37,6 +44,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 wait_sh=${PR_MERGE_WAIT:-$here/pr-wait.sh}
 needs_sh=${PR_MERGE_NEEDS_E2E:-$here/needs-e2e.sh}
 claim_sh=${PR_MERGE_CLAIM:-$here/claim.sh}
+threads_sh=${PR_MERGE_THREADS:-$here/pr-threads.sh}
 required_txt=${PR_MERGE_REQUIRED:-$here/ci-required.txt}
 
 usage() {
@@ -130,7 +138,7 @@ if [ "$bad" -gt 0 ]; then
 fi
 
 # The wait can take an hour: read the PR again before merging (state, head, and origin's branch tip).
-json=$(gh pr view "$pr" --json state,headRefOid,headRefName,isCrossRepository) || { echo "pr-merge: cannot re-read PR $pr" >&2; exit 2; }
+json=$(gh pr view "$pr" --json state,headRefOid,headRefName,isCrossRepository,mergeStateStatus) || { echo "pr-merge: cannot re-read PR $pr" >&2; exit 2; }
 [ "$(jq -r '.state' <<<"$json")" = OPEN ] || { echo "pr-merge: PR $pr is no longer open ($(jq -r '.state' <<<"$json")); not merging" >&2; exit 3; }
 now=$(jq -r '.headRefOid' <<<"$json")
 [ "$now" = "$sha" ] || { echo "pr-merge: PR $pr head moved from ${sha:0:7} to ${now:0:7} while waiting; run it again" >&2; exit 2; }
@@ -143,6 +151,40 @@ if [ -n "$br" ] && [ "$(jq -r '.isCrossRepository // false' <<<"$json")" != true
   fi
 fi
 
+# BLOCKED with every required context green: unresolved review threads (the ruleset's
+# required_review_thread_resolution, #187; the wait above already checks, but threads can arrive during it).
+# Never resolved from here; the PR is not merged and --auto is not enabled on a PR that cannot merge.
+# Read whatever mergeStateStatus says: GitHub often reports UNKNOWN right after a push, and --admin
+# bypasses the rule, so a BLOCKED-only read could admin-merge over unresolved threads.
+{
+  trc=0
+  threads=$("$threads_sh" "$pr" 2>&1) || trc=$?
+  case $trc in
+  0) ;;
+  7)
+    echo "$threads" >&2
+    echo "pr-merge: PR $pr is BLOCKED by unresolved review threads; reply and resolve each one (docs/dev/ci.md \"Merging\"), then run it again; not merging" >&2
+    exit 7
+    ;;
+  *)
+    echo "pr-merge: PR $pr is BLOCKED and its review threads could not be read: $threads" >&2
+    echo "pr-merge: cannot read review threads; not merging" >&2
+    exit 2
+    ;;
+  esac
+}
+
+# Does the base branch have a merge queue (#225)? Read from the ruleset at run time, so the same script
+# serves the repository before and after the ruleset gains the rule. Only an exact `true` counts: an
+# unreadable answer is "no queue" (the merge below is the same command either way; only the report differs).
+queue=0
+if [ "$(gh api "repos/{owner}/{repo}/rules/branches/$base" --jq 'any(.[]; .type == "merge_queue")' 2>/dev/null || true)" = true ]; then
+  queue=1
+fi
+
+# With a queue, `gh pr merge --auto` enqueues the PR (it already passed every check that gates entry, read
+# above) and GitHub merges it after the queue build is green: no manual sync. --admin is GitHub's "merge
+# without waiting for requirements" (a bypass actor merges directly, skipping the queue and the review rule).
 mode=--auto
 [ "$admin" = 0 ] || mode=--admin
 gh pr merge "$pr" --merge "$mode" --match-head-commit "$sha" || { rc=$?; echo "pr-merge: gh pr merge failed ($rc); the claim stays as it is" >&2; exit "$rc"; }
@@ -163,7 +205,9 @@ for n in $(jq -r '.closingIssuesReferences[]?.number' <<<"$pr_json"); do
   fi
 done
 
-if [ "$mode" = --auto ]; then
+if [ "$mode" = --auto ] && [ "$queue" = 1 ]; then
+  verb="added to the merge queue (merged by GitHub when the queue build is green; hack/pr-wait.sh $pr waits for it)"
+elif [ "$mode" = --auto ]; then
   verb="auto-merge enabled"
 else
   verb="merged ($mode)"

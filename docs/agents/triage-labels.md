@@ -16,5 +16,6 @@ string from this table.
 
 `agent-ok` alone does not make an issue pickable: `hack/claim.sh next` also needs the board Status
 **Ready**, which only a human sets, a milestone, and no open blocker. `start-here` (a starter issue
-for a new contributor) and `claim:stale`, `unclaimed-ok`, `needs-update` belong to the claims
-workflow, not to triage.
+for a new contributor) and `claim:stale`, `needs-update` belong to the claims workflow, not to
+triage. `good first issue` and `help wanted` open an issue to `/claim` comments by outside
+contributors ([ADR 0094](../adr/0094-work-claims-on-the-public-repository.md) decision 1).

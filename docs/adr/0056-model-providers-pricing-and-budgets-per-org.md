@@ -1,6 +1,6 @@
 # 0056. Model providers, models, pricing and budgets per org
 
-- Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29 and 2026-10-31 (below)
+- Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31 and 2026-11-06 (below)
 - Date: 2026-10-23
 - Amends: [0049](0049-v01-scope-decisions.md) (the single Helm-configured upstream, now dropped, and
   template-only budgets), [0007](0007-connector-model.md) and [0021](0021-connector-setup-guides.md)
@@ -384,7 +384,8 @@ replaces decision 6.3 for responses cut short.
      client is passed). An `openrouter`-typed provider elsewhere is never sent its key: ingest does
      not queue it, and a queued entry whose provider moved, changed type or was deleted is made final
      at once. Only IDs of OpenRouter's documented form (`gen-…`) are asked.
-   - **Koinon's price counts.** The provider's reported tokens (`native_tokens_*`, or `tokens_*`:
+   - **Koinon's price counts.** *Superseded by the 2026-11-06 amendment below: OpenRouter's billed
+     `total_cost` counts, and Koinon's price is the figure kept beside it.* The provider's reported tokens (`native_tokens_*`, or `tokens_*`:
      prompt, completion, cached, reasoning) replace the entry's and are priced like any request
      (decision 5 of the 2026-10-24 amendment): with the price valid at the request's time, which is
      the entry's `price_ref` unless the org's prices changed since (the settlement then notes the old
@@ -649,6 +650,78 @@ streamed. The code lands in koinon-private#340 (ledger), koinon-private#341 (age
   flavor's read-only config, replaces each `session.retry` decision with the policy above, which
   agentd passes as launch switches (`flavors/opencode/README.md`, "Model retries"); the flavor
   contract suite asserts the tries and waits.
+
+## Amendment (2026-11-06, issue #47): billed cost counts
+
+Context: the ledger charged OpenRouter requests at Koinon's price list, and settled only responses
+cut short. OpenRouter's invoice is the sum of each generation's `total_cost`, so the ledger drifted
+from the bill whenever the list was stale, a provider added a surcharge, or OpenRouter routed to a
+dearer provider. The maintainers decided (2026-10-31, on the issue) that the bill counts.
+
+1. **Every OpenRouter entry settles at the billed cost.** An entry of a provider whose usage source
+   serves it (OpenRouter at `openrouter.ai`, decision 3 of the 2026-10-28 RT1 amendment) is
+   provisional from ingest until its generation is read from `/generation`, asynchronously, in the
+   existing `spend_settlements` queue (same window, backoff, `Retry-After` and per-pass cap). This
+   now covers complete responses, not only cut ones. A complete response is charged Koinon's price
+   meanwhile and holds no reserve; a cut one keeps the `max_tokens` reserve of the RT1 amendment.
+   Not queued: requests the provider refused or failed without usage (the 2026-10-29 and
+   2026-10-31 amendments: they ran up no bill to read), waived requests, and system-key entries
+   (the rc.6 amendment), which stay at Koinon's price.
+2. **What the settled entry charges.** `cost_usd` becomes OpenRouter's `total_cost`. The provider's
+   reported tokens still replace the entry's, and Koinon prices them as before (the price valid at
+   the request's time, cache writes kept from the gateway's log) to keep that figure beside the
+   bill: `koinon_cost_usd` in the entry's metadata and revision, with `charged: provider`, and the
+   1% `provider_diff` flag when they differ. `price_ref` names the price Koinon compared with. The
+   entry stands at the bill even when Koinon has no usable price.
+3. **An org price override** no longer changes what a settled OpenRouter entry charges: it is the
+   org's own figure, and its difference from the bill is flagged per entry. It still prices the
+   provisional charge, every entry that is never settled (direct providers, system keys, entries
+   whose generation never appears before the settlement deadline), and the budget estimates before
+   a request. An org whose contract price differs from OpenRouter's list therefore sees the bill,
+   not the contract, in the ledger; a contract with OpenRouter itself is what `total_cost` reports.
+4. **A BYOK request** (OpenRouter's `is_byok`, the org's own provider key) charges OpenRouter's fee
+   (`total_cost`) plus `upstream_inference_cost`, the provider's cost OpenRouter reports for it:
+   what the org pays for the request across both bills. Without an upstream cost the fee alone is
+   charged and the 1% flag shows the gap. The metadata records `byok` and `upstream_cost_usd`.
+5. **Direct providers charge the catalog price.** Anthropic and OpenAI answer no per-request cost,
+   so their entries stay at Koinon's price (the org's override, else the list). Each entry now
+   records its `provider_id`; a deleted provider leaves its entries with none (`ON DELETE SET NULL`).
+6. **Daily reconciliation per key.** A direct provider may hold a second, optional credential, a
+   cost API key (an Anthropic Admin key or an OpenAI admin key), sealed like the inference key in
+   `providers.cost_api_key` (its own AAD binding, rewrapped and forgotten with the other envelope
+   columns; `cost_api_key_lost_at` marks a forgotten one), and a `cost_scope`: the Anthropic
+   workspace (`wrkspc_…`, or `default`) that holds the provider's inference key, or for OpenAI the
+   project (`proj_…`) that holds it or the key's own ID (`key_…`). Anthropic's cost report is by
+   workspace, not by key, so there the workspace must hold this key alone for the figures to
+   compare; OpenAI's costs API filters and groups by API key (`api_key_ids`, `group_by=api_key_id`),
+   so a `key_…` scope compares exactly one key. koinon-reconciler, once a day per provider, reads the
+   scope's cost for each of the last three complete UTC days (the reports are revised for a while)
+   from the provider's pinned cost endpoint, never a URL from the provider record and with no
+   redirect. It asks for one bucket (`limit=1`) and reads only the bucket that starts at the day; a
+   report without that bucket records `error`, never $0. It reads only the days that start after the
+   cost key was stored on the provider (`cost_reconcile_since`), so a day whose entries predate
+   `provider_id` or the key is never compared with a whole day's bill. It records in `provider_cost_reconciliations` the ledger's sum and count for the
+   provider's entries of that day, the provider's figure, the difference and a status (`ok`,
+   `out_of_tolerance`, `error` with the reason). It never changes an entry. A day is read again
+   after 23 hours, a failed read after one hour; one replica runs a pass at a time (an advisory
+   lock). `koinon_reconciler_cost_reconciliations_total{provider_type,outcome}` counts the outcomes,
+   with fixed labels only (ADR 0023). A cost key is accepted only for an `anthropic` or `openai`
+   provider at that provider's own API URL, and only through `UpdateProvider` for now.
+7. **Tolerance.** A day is `ok` when the ledger is within 2% of the provider's figure or within one
+   cent of it, whichever is wider (`ledger.WithinCostTolerance`). Settled OpenRouter entries equal
+   the bill exactly; the ledger suite asserts that a day of settled requests sums to the billed total
+   and is within the tolerance.
+
+The shapes were read on 2026-11-06: OpenRouter's `/generation` (its docs and the `@openrouter/sdk`
+1.5.61 schema), Anthropic's cost report
+(platform.claude.com/docs/en/api/beta/organization/cost_report/retrieve) and OpenAI's costs API
+(the `openai-openapi` description). Two points stay open:
+
+- Anthropic marks `/v1/organizations/cost_report` [Legacy]; its successor is
+  `/v1/organizations/analytics/cost`. The legacy endpoint remains supported; moving is a follow-up.
+- The cost report's generated example sends `Authorization: Bearer`; the Admin API page says an
+  Admin key goes in `x-api-key` and Bearer carries OAuth tokens only. Koinon sends `x-api-key`, as
+  the Admin API page says; the first real-key run confirms it.
 
 ## Open questions
 

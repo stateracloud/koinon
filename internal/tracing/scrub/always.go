@@ -44,27 +44,9 @@ var (
 	// yamlPairRE matches a Kubernetes env entry written as "name: DB_PASSWORD" with "value:" on
 	// the next line (group 1 the name, group 3 the value).
 	yamlPairRE = regexp.MustCompile(`(?i)\bname:[ \t]*["']?([A-Za-z0-9_.-]+)["']?[ \t]*\r?\n[ \t]*(?:- )?value:[ \t]*(["']?)([^\r\n"']+)`)
-	// vendorKeyRE matches the documented shapes of common vendor credentials. They are secrets
-	// the org may never have stored in Koinon (a key an agent found on disk), so the known-secret
-	// set cannot catch them.
-	vendorKeyRE = regexp.MustCompile(`(?:` +
-		`sk-(?:ant|or|proj)-[A-Za-z0-9_-]{8,}` + // Anthropic, OpenRouter, OpenAI project keys
-		`|sk-[A-Za-z0-9_-]{20,}` + // OpenAI (svcacct, admin, legacy)
-		`|[sr]k_live_[A-Za-z0-9]{16,}` + // Stripe
-		`|gh[pousr]_[A-Za-z0-9]{20,}` + // GitHub tokens
-		`|github_pat_[A-Za-z0-9_]{20,}` + // GitHub fine-grained tokens
-		`|glpat-[A-Za-z0-9_-]{16,}` + // GitLab
-		`|xox[abprse][.-][A-Za-z0-9.-]{10,}` + // Slack
-		`|hvs\.[A-Za-z0-9_-]{16,}` + // Vault service token
-		`|hf_[A-Za-z0-9]{20,}` + // Hugging Face
-		`|ya29\.[A-Za-z0-9_-]{20,}` + // Google OAuth access token
-		`|GOCSPX-[A-Za-z0-9_-]{20,}` + // Google OAuth client secret
-		`|npm_[A-Za-z0-9]{30,}` + // npm
-		`|glsa_[A-Za-z0-9_]{20,}` + // Grafana service account
-		`|dop_v1_[a-f0-9]{20,}` + // DigitalOcean
-		`|AIza[A-Za-z0-9_-]{20,}` + // Google API key
-		`|AKIA[0-9A-Z]{16}` + // AWS access key ID
-		`)`)
+	// Vendor credential shapes are not listed here: they come from the gitleaks rule set
+	// (gitleaks.go). They are secrets the org may never have stored in Koinon (a key an agent
+	// found on disk), so the known-secret set cannot catch them.
 )
 
 // findAlways appends the spans of the always rules.
@@ -134,14 +116,7 @@ func findAlways(in string, spans []span) []span {
 	if spans, sawWord = findHeaders(in, spans); sawWord {
 		spans = findForcedLeaves(in, spans)
 	}
-	if hasVendorPrefix(in) {
-		for _, m := range vendorKeyRE.FindAllStringIndex(in, -1) {
-			if leftOK(in, m[0]) {
-				spans = append(spans, span{m[0], m[1], KindAPIKey})
-			}
-		}
-	}
-	return spans
+	return findGitleaks(in, spans)
 }
 
 // leftOK reports whether a token may start at i: after a non-word character, or after the tail of
@@ -162,52 +137,6 @@ func leftOK(in string, i int) bool {
 
 func isHex(b byte) bool {
 	return isDigit(b) || ('a' <= b && b <= 'f') || ('A' <= b && b <= 'F')
-}
-
-func hasVendorPrefix(in string) bool {
-	for i := 0; i < len(in); i++ {
-		switch in[i] {
-		case 's', 'r':
-			if strings.HasPrefix(in[i:], "sk-") || strings.HasPrefix(in[i:], "sk_") || strings.HasPrefix(in[i:], "rk_") {
-				return true
-			}
-		case 'g':
-			if strings.HasPrefix(in[i:], "ghp_") || strings.HasPrefix(in[i:], "gho_") || strings.HasPrefix(in[i:], "ghu_") ||
-				strings.HasPrefix(in[i:], "ghs_") || strings.HasPrefix(in[i:], "ghr_") || strings.HasPrefix(in[i:], "github_pat_") ||
-				strings.HasPrefix(in[i:], "glpat-") || strings.HasPrefix(in[i:], "glsa_") {
-				return true
-			}
-		case 'x':
-			if strings.HasPrefix(in[i:], "xox") {
-				return true
-			}
-		case 'h':
-			if strings.HasPrefix(in[i:], "hvs.") || strings.HasPrefix(in[i:], "hf_") {
-				return true
-			}
-		case 'y':
-			if strings.HasPrefix(in[i:], "ya29.") {
-				return true
-			}
-		case 'n':
-			if strings.HasPrefix(in[i:], "npm_") {
-				return true
-			}
-		case 'd':
-			if strings.HasPrefix(in[i:], "dop_v1_") {
-				return true
-			}
-		case 'G':
-			if strings.HasPrefix(in[i:], "GOCSPX-") {
-				return true
-			}
-		case 'A':
-			if strings.HasPrefix(in[i:], "AIza") || strings.HasPrefix(in[i:], "AKIA") {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // containsFold reports whether s contains the lower-case ASCII word sub, ignoring case, without

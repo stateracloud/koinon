@@ -1,7 +1,8 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
--- Home checkpoints (plan item HC1; ADR 0032): the kopia repository per agent, the checkpoint
--- records koinon-agentd's writer works through, and the restore a recreated sandbox waits for.
+-- Home checkpoints (plan item HC1; ADR 0032): the kopia repositories of each agent (one per
+-- repository epoch, ADR 0085 decision 13), the checkpoint records koinon-agentd's writer works
+-- through, and the restore a recreated sandbox waits for.
 --
 -- Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
 
@@ -15,6 +16,182 @@ INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope)
 VALUES (@org_id, @agent_id, @prefix, @password_envelope)
 ON CONFLICT (org_id, agent_id) DO NOTHING
 RETURNING *;
+
+-- name: LockHomeRepository :one
+-- Serializes the start of a repository epoch for the agent.
+SELECT * FROM home_repositories
+WHERE org_id = @org_id AND agent_id = @agent_id
+FOR UPDATE;
+
+-- name: GetHomeRepositoryEpoch :one
+SELECT * FROM home_repository_epochs
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch;
+
+-- name: LatestHomeRepositoryEpoch :one
+-- The agent's current repository when it has epochs; no row: epoch 0 (home_repositories) is current.
+SELECT * FROM home_repository_epochs
+WHERE org_id = @org_id AND agent_id = @agent_id
+ORDER BY repository_epoch DESC
+LIMIT 1;
+
+-- name: InsertHomeRepositoryEpoch :one
+INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason)
+VALUES (@org_id, @agent_id, @repository_epoch, @prefix, @password_envelope, @reason)
+RETURNING *;
+
+-- name: RetireHomeRepository :execrows
+-- Epoch 0 was superseded: its blobs may be deleted after @delete_after.
+UPDATE home_repositories
+SET retired_at = now(), delete_after = @delete_after
+WHERE org_id = @org_id AND agent_id = @agent_id AND retired_at IS NULL;
+
+-- name: RetireHomeRepositoryEpoch :execrows
+UPDATE home_repository_epochs
+SET retired_at = now(), delete_after = @delete_after
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch AND retired_at IS NULL;
+
+-- name: ExpireRetiredHomeRepository :execrows
+-- After a compromise (#86) no older repository outlives the seed: epoch 0, if retired and not yet
+-- deleted, is due now (an earlier, later deadline came from a retention such as keys forget's).
+-- The sweeper's guard still keeps it until a later epoch holds a newer home.
+UPDATE home_repositories
+SET delete_after = least(delete_after, now())
+WHERE org_id = @org_id AND agent_id = @agent_id AND retired_at IS NOT NULL AND deleted_at IS NULL;
+
+-- name: ExpireRetiredHomeRepositoryEpochs :execrows
+-- The same for the agent's retired epochs after epoch 0.
+UPDATE home_repository_epochs
+SET delete_after = least(delete_after, now())
+WHERE org_id = @org_id AND agent_id = @agent_id AND retired_at IS NOT NULL AND deleted_at IS NULL;
+
+-- name: ListDueHomeRepositories :many
+-- Retired repositories whose blobs may now be deleted (the sweeper's work), epoch 0 and later,
+-- longest overdue first so a row that keeps failing does not hold back the others. A repository past
+-- its deadline is kept while it is the agent's newest restorable home: it goes only once its
+-- password is lost (nothing restores from it any more) or a later epoch holds a complete checkpoint
+-- (a new epoch starts empty, so until its first backup the retired one is all there is). That later
+-- epoch must itself still restore: neither lost nor deleted (a later epoch is always a
+-- home_repository_epochs row, since epoch 0 is the first). Its checkpoint must also be at least as
+-- new as the retired one's newest: a backup that was running when the epoch changed can finish into
+-- the retired repository after a seed (#86), and that home is then the newest. And no repository
+-- of the agent goes while one of its checkpoints runs: that backup may have opened the retired
+-- repository before the new epoch started, and its snapshot would be written after the delete
+-- (lost to the restore, and left in the bucket under the retired password). A running checkpoint
+-- ends within its lease (a writer's Timeout is shorter), so a row still running after
+-- @lease_seconds has lost its writer and holds nothing back: a dead writer's row is taken over
+-- only once the sandbox is ready again, and an agent that stays stopped would otherwise keep every
+-- retired repository, the compromised one included.
+SELECT agent_id, repository_epoch, prefix FROM (
+    SELECT h.agent_id, 0::integer AS repository_epoch, h.prefix, h.delete_after, h.credential_lost_at
+    FROM home_repositories h
+    WHERE h.org_id = @org_id AND h.deleted_at IS NULL AND h.delete_after <= now()
+    UNION ALL
+    SELECT e.agent_id, e.repository_epoch, e.prefix, e.delete_after, e.credential_lost_at
+    FROM home_repository_epochs e
+    WHERE e.org_id = @org_id AND e.deleted_at IS NULL AND e.delete_after <= now()
+) due
+WHERE NOT EXISTS (SELECT 1 FROM home_checkpoints r
+                  WHERE r.org_id = @org_id AND r.agent_id = due.agent_id AND r.status = 'running'
+                    AND r.started_at > now() - make_interval(secs => @lease_seconds::int))
+  AND (due.credential_lost_at IS NOT NULL
+   OR EXISTS (SELECT 1 FROM home_checkpoints c
+              JOIN home_repository_epochs later
+                ON later.org_id = c.org_id AND later.agent_id = c.agent_id AND later.repository_epoch = c.repository_epoch
+              WHERE c.org_id = @org_id AND c.agent_id = due.agent_id AND c.status = 'complete'
+                AND c.repository_epoch > due.repository_epoch
+                AND later.credential_lost_at IS NULL AND later.deleted_at IS NULL
+                AND c.finished_at >= coalesce(
+                    (SELECT max(d.finished_at) FROM home_checkpoints d
+                     WHERE d.org_id = @org_id AND d.agent_id = due.agent_id
+                       AND d.repository_epoch = due.repository_epoch AND d.status = 'complete'),
+                    '-infinity'::timestamptz)))
+ORDER BY due.delete_after, due.agent_id, due.repository_epoch
+LIMIT @max_rows::int;
+
+-- name: RequestHomeRepositorySeed :execrows
+-- The new epoch is to hold the agent's newest home (keys new-repositories, #86): koinon-agentd
+-- copies it there from @seed_from_epoch or older.
+UPDATE home_repository_epochs
+SET seed_from_epoch = @seed_from_epoch, seed_after = now()
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch
+  AND reason = 'key_compromised' AND seed_from_epoch IS NULL;
+
+-- name: ClaimHomeRepositorySeed :one
+-- The next seed due in the org, held for @lease_seconds: a writer that dies leaves it to another
+-- after the lease. A superseded epoch (retired: a later one started) is not seeded; the later
+-- one is. No row: nothing to do.
+UPDATE home_repository_epochs AS e
+SET seed_after = now() + make_interval(secs => @lease_seconds::int), seed_attempts = e.seed_attempts + 1
+WHERE e.org_id = @org_id AND (e.org_id, e.agent_id, e.repository_epoch) = (
+    SELECT s.org_id, s.agent_id, s.repository_epoch FROM home_repository_epochs s
+    WHERE s.org_id = @org_id AND s.seed_from_epoch IS NOT NULL AND s.seeded_at IS NULL
+      AND s.seed_failed_at IS NULL AND s.seed_after <= now() AND s.retired_at IS NULL
+      AND s.credential_lost_at IS NULL
+    ORDER BY s.seed_after, s.agent_id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1)
+RETURNING *;
+
+-- name: CompleteHomeRepositorySeed :execrows
+-- Complete, Release and Fail hold only for the claim that made @seed_attempts: a writer whose lease
+-- ran out (another claimed the seed since) changes nothing. No row: superseded, or the claim lost.
+UPDATE home_repository_epochs
+SET seeded_at = now(), seed_error = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch
+  AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND seed_failed_at IS NULL AND retired_at IS NULL
+  AND seed_attempts = @seed_attempts;
+
+-- name: ReleaseHomeRepositorySeed :execrows
+-- A failed try, tried again after @delay_seconds.
+UPDATE home_repository_epochs
+SET seed_error = @error, seed_after = now() + make_interval(secs => @delay_seconds::int)
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch
+  AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND seed_failed_at IS NULL
+  AND seed_attempts = @seed_attempts;
+
+-- name: FailHomeRepositorySeed :execrows
+-- Given up: the retired epoch keeps the home (the sweeper's guard) until another epoch starts.
+UPDATE home_repository_epochs
+SET seed_failed_at = now(), seed_error = @error
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch
+  AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND seed_failed_at IS NULL
+  AND seed_attempts = @seed_attempts;
+
+-- name: CountHomeRepositorySeeds :one
+-- The org's seeds still to do and those given up on, for koinon-agentd's gauge. A superseded epoch
+-- is neither.
+-- A seed given up on stops counting once a backup wrote the agent's home into the new repository
+-- (that backup then releases the old repository, as a seed would have).
+SELECT count(*) FILTER (WHERE e.seed_failed_at IS NULL)::bigint AS pending,
+       count(*) FILTER (WHERE e.seed_failed_at IS NOT NULL)::bigint AS failed
+FROM home_repository_epochs e
+WHERE e.org_id = @org_id AND e.seed_from_epoch IS NOT NULL AND e.seeded_at IS NULL AND e.retired_at IS NULL
+  AND e.credential_lost_at IS NULL
+  AND (e.seed_failed_at IS NULL
+       OR NOT EXISTS (SELECT 1 FROM home_checkpoints c
+                      WHERE c.org_id = e.org_id AND c.agent_id = e.agent_id
+                        AND c.repository_epoch = e.repository_epoch AND c.status = 'complete'));
+
+-- name: InsertSeededHomeCheckpoint :one
+-- The copy of checkpoint @source_id in the new epoch's repository: the same home, taken when the
+-- source was, so it sorts with it (and just before it: a newer id) and the recreate gate reads the
+-- same times. No row: the source is gone or not complete.
+INSERT INTO home_checkpoints (org_id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id,
+                              size_bytes, requested_at, started_at, finished_at, repository_epoch)
+SELECT c.org_id, c.agent_id, c.reason, 'complete', c.sandbox_id, c.generation, c.epoch, @snapshot_id,
+       @size_bytes, c.requested_at, c.started_at, c.finished_at, @repository_epoch
+FROM home_checkpoints c
+WHERE c.org_id = @org_id AND c.id = @source_id AND c.status = 'complete'
+RETURNING *;
+
+-- name: MarkHomeRepositoryDeleted :execrows
+UPDATE home_repositories SET deleted_at = now()
+WHERE org_id = @org_id AND agent_id = @agent_id AND deleted_at IS NULL AND delete_after <= now();
+
+-- name: MarkHomeRepositoryEpochDeleted :execrows
+UPDATE home_repository_epochs SET deleted_at = now()
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch
+  AND deleted_at IS NULL AND delete_after <= now();
 
 -- name: RequestHomeCheckpoint :one
 -- No row: the agent already has an open request (home_checkpoints_open); read it with
@@ -65,6 +242,12 @@ LIMIT 1;
 SELECT c.* FROM home_checkpoints c
 WHERE c.org_id = @org_id AND c.agent_id = @agent_id AND c.status = 'complete'
   AND c.epoch <= coalesce((SELECT max(r.epoch) FROM runs r WHERE r.org_id = c.org_id AND r.agent_id = c.agent_id), 0)
+  -- A checkpoint whose repository was deleted is gone.
+  AND NOT EXISTS (SELECT 1 FROM home_repositories h
+                  WHERE h.org_id = c.org_id AND h.agent_id = c.agent_id AND c.repository_epoch = 0 AND h.deleted_at IS NOT NULL)
+  AND NOT EXISTS (SELECT 1 FROM home_repository_epochs e
+                  WHERE e.org_id = c.org_id AND e.agent_id = c.agent_id AND e.repository_epoch = c.repository_epoch
+                    AND e.deleted_at IS NOT NULL)
 ORDER BY c.finished_at DESC, c.id DESC
 LIMIT @max_rows::int;
 
@@ -90,7 +273,7 @@ RETURNING *;
 -- name: CompleteHomeCheckpoint :one
 UPDATE home_checkpoints
 SET status = 'complete', snapshot_id = @snapshot_id, size_bytes = @size_bytes, epoch = @epoch,
-    generation = @generation, error = NULL, finished_at = now()
+    generation = @generation, repository_epoch = @repository_epoch, error = NULL, finished_at = now()
 WHERE org_id = @org_id AND id = @id AND status = 'running'
 RETURNING *;
 
@@ -163,4 +346,14 @@ SET status = 'failed', finished_at = now(),
     error = @error
 WHERE org_id = @org_id AND status = 'requested' AND attempts = 0
   AND requested_at < now() - make_interval(secs => @wait_seconds::int)
+RETURNING *;
+
+-- name: FailAbandonedHomeCheckpoints :many
+-- Running requests whose writer died (past @lease_seconds) and that nobody took over for
+-- @wait_seconds more, because the sandbox was not ready (ClaimHomeCheckpoint takes over only then):
+-- failed, so they do not sit as running and the agent can be checkpointed again.
+UPDATE home_checkpoints
+SET status = 'failed', finished_at = now(), error = @error
+WHERE org_id = @org_id AND status = 'running'
+  AND started_at < now() - make_interval(secs => @lease_seconds::int) - make_interval(secs => @wait_seconds::int)
 RETURNING *;

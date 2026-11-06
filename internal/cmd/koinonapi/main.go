@@ -66,6 +66,7 @@ import (
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
+	"github.com/stateracloud/koinon/internal/codehost/scopesync"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/migrations"
@@ -394,6 +395,10 @@ func serve(ctx context.Context, cfg config) error {
 	purgeCtx, cancelPurge := context.WithCancel(ctx)
 	defer cancelPurge() // before pool.Close
 	safego.GoOrStop(purgeCtx, slog.Default(), "auth-purger", stop, func(ctx context.Context) { authSvc.RunPurger(ctx, time.Hour, 7*24*time.Hour) })
+	// Run content past its org's retention is blanked (issue #69). Idempotent and batched with
+	// SKIP LOCKED, so every replica may run it.
+	contentPurger := orgsettings.NewPurger(pool, slog.Default(), time.Now)
+	safego.GoOrStop(purgeCtx, slog.Default(), "run-content-purger", stop, func(ctx context.Context) { contentPurger.Run(ctx, time.Hour) })
 
 	// Templates embedded in the binary become rows, versioned by content hash.
 	embedded, err := templates.All()
@@ -615,8 +620,13 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	// The org's code-host scope (ADR 0091): each code-host connection's repositories and their
+	// visibility, read when a connection is created or tested and again every few minutes, so the
+	// leak guard calls a write into the org's own private repository internal only on a fresh reading.
+	scopeSyncer := scopesync.New(pool, hosts, opener, slog.Default())
+	safego.GoOrStop(bgCtx, slog.Default(), "code-host-scope", stop, func(ctx context.Context) { scopeSyncer.Run(ctx, scopesync.DefaultInterval) })
 	svc := services.New(pool, services.Options{
-		ModelCheck: echo, Traces: traceSvc,
+		ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc,
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
 	// The notification of an opened question (the park that opens it commits in koinon-agentd).
@@ -750,7 +760,7 @@ func serve(ctx context.Context, cfg config) error {
 		}
 		// The password of an agent's home repository (ADR 0032): koinon-agentd, the checkpoint
 		// writer, asks per checkpoint and holds no key-encryption key.
-		mux.Handle(checkpoint.RepositoryPath, checkpoint.Server{Passwords: checkpoint.Passwords{Q: store.New(pool), Keys: keyring}, Key: keyFn})
+		mux.Handle(checkpoint.RepositoryPath, checkpoint.Server{Passwords: checkpoint.Passwords{Q: store.New(pool), Keys: keyring, Begin: pool.Begin}, Key: keyFn})
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		swSrv := &http.Server{Addr: cfg.savedWorkAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, swSrv)

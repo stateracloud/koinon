@@ -323,7 +323,8 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 			cur = &all[k]
 		}
 	}
-	if cur != nil && cur.DeclaredVersion.String == version && !cur.RemovedAt.Valid {
+	// A lost secret (keys forget) is written again from the Secret, which still holds it.
+	if cur != nil && cur.DeclaredVersion.String == version && !cur.RemovedAt.Valid && !cur.CredentialLostAt.Valid {
 		return nil
 	}
 	var prevConfig []byte
@@ -372,16 +373,21 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 		if err != nil {
 			return err
 		}
-		if _, err := tq.UpdateDeclaredConnection(ctx, store.UpdateDeclaredConnectionParams{
+		updated, err := tq.UpdateDeclaredConnection(ctx, store.UpdateDeclaredConnectionParams{
 			OrgID: org, ID: cur.ID, DisplayName: d.DisplayName, Config: config, SecretEnvelope: env,
 			SecretFingerprint: d.Fingerprint, DeclaredVersion: pgtype.Text{String: version, Valid: true},
+		})
+		if err != nil {
+			return err
+		}
+		if err := audit.RecordErr(ctx, tq, audit.Event{
+			Org: org, Actor: actor, Action: "connection.declare", TargetKind: "connection", TargetID: cur.ID.String(),
+			Before: map[string]any{"displayName": cur.DisplayName, "keyFingerprint": cur.SecretFingerprint}, After: after,
 		}); err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, tq, audit.Event{
-			Org: org, Actor: actor, Action: "connection.declare", TargetKind: "connection", TargetID: cur.ID.String(),
-			Before: map[string]any{"displayName": cur.DisplayName, "keyFingerprint": cur.SecretFingerprint}, After: after,
-		})
+		// A new baseUrl can leave MCP servers linked to a host that is no longer the connection's (#117).
+		return mcpservers.UnlinkMismatchedServers(ctx, tq, actor, updated)
 	})
 	if err != nil {
 		return err

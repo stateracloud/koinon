@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { create } from '@bufbuild/protobuf'
 import { createRouterTransport } from '@connectrpc/connect'
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { ConnectionService, ConnectorTypeSchema } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { TemplateService } from '@/gen/koinon/template/v1alpha1/template_pb'
 import { codeHostInfo } from '@/lib/connector'
 import { giteaConnection, giteaConnectorType, githubConnection, githubConnectorType, repoHelperGiteaTemplate, repoHelperTemplate } from '@/test-fixtures'
@@ -34,7 +35,8 @@ async function chooseTemplate(name: RegExp) {
 describe('codeHostInfo', () => {
   it('reads the capability descriptor: Gitea is the weaker credential, GitHub is not', () => {
     expect(codeHostInfo(giteaConnectorType())).toEqual({ name: 'Gitea', credentialClass: 'static-token', weakerCredential: true, connectPath: '/connections/new/gitea' })
-    expect(codeHostInfo(githubConnectorType())).toBeUndefined()
+    expect(codeHostInfo(githubConnectorType())).toEqual({ name: 'GitHub', credentialClass: 'app-installation', weakerCredential: false, connectPath: '/connections/new/github' })
+    expect(codeHostInfo(create(ConnectorTypeSchema, { id: 'slack', displayName: 'Slack' }))).toBeUndefined()
     expect(codeHostInfo(undefined)).toBeUndefined()
   })
 })

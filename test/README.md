@@ -17,7 +17,9 @@ End-to-end tests (kind), flavor contract tests and the sandbox escape suite (ADR
   - `make test-admission` (label `admission`): the chart's ValidatingAdmissionPolicies, rendered
     with `helm template` and applied to a real API server from envtest. Pod creation by anyone but
     the Agent Sandbox controller, `io.katacontainers.*` annotations, runtime classes outside the
-    list, host namespaces, hostPath, privileged and ephemeral containers, spec changes, and writes
+    list, ServiceAccount tokens on workload pods (automount not explicitly false, or a projected
+    serviceAccountToken source), host namespaces, hostPath, privileged and ephemeral containers,
+    spec changes, and writes
     to Secrets and Sandbox objects are denied. Runs in CI (`escape-admission` job); skipped
     without `KUBEBUILDER_ASSETS`.
   - `make test-escape-kind` (label `openshell`): the same cases against the OpenShell gateway that

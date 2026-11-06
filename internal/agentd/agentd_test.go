@@ -15,12 +15,15 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // chunks returns the text of the run's agent message chunks, in order.
@@ -882,5 +885,18 @@ var _ = Describe("New", func() {
 		Expect(err).To(HaveOccurred())
 		_, err = agentd.New(db, nil, agentd.Config{OwnerID: "x", GatewayURL: "gw:8080"})
 		Expect(err).To(HaveOccurred())
+	})
+
+	It("wants a checkpoint Timeout shorter than the checkpoint Lease", func() {
+		cfg := func(cp agentd.Checkpoints) agentd.Config {
+			return agentd.Config{OwnerID: "x", GatewayURL: gatewayURL, Prices: prices.NewResolver(pricing.Embedded()), Checkpoints: &cp}
+		}
+		repos := fixedRepo{}
+		_, err := agentd.New(db, nil, cfg(agentd.Checkpoints{Store: &checkpoint.Writer{}, Repositories: repos, Timeout: 20 * time.Minute, Lease: 20 * time.Minute}))
+		Expect(err).To(MatchError(ContainSubstring("Checkpoints.Timeout must be shorter than Checkpoints.Lease")))
+		_, err = agentd.New(db, nil, cfg(agentd.Checkpoints{Store: &checkpoint.Writer{}, Repositories: repos, Timeout: 30 * time.Minute}))
+		Expect(err).To(MatchError(ContainSubstring("Checkpoints.Timeout")), "against the default Lease")
+		_, err = agentd.New(db, nil, cfg(agentd.Checkpoints{Store: &checkpoint.Writer{}, Repositories: repos}))
+		Expect(err).NotTo(HaveOccurred(), "the defaults")
 	})
 })

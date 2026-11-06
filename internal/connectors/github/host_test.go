@@ -47,6 +47,59 @@ var _ = Describe("Host", func() {
 		Expect(caps.ExactModes).To(BeTrue())
 	})
 
+	// visibilities lists the repositories the access reaches with the visibility it reports.
+	visibilities := func(ctx SpecContext, acc codehost.Access) map[string]string {
+		GinkgoHelper()
+		page, err := acc.Repositories(ctx, 1, codehost.MaxPerPage)
+		Expect(err).NotTo(HaveOccurred())
+		got := map[string]string{}
+		for _, r := range page.Repositories {
+			got[r.FullName] = r.Visibility
+		}
+		return got
+	}
+
+	It("reports private only for a private repository, and unknown for an internal one (ADR 0091)", func(ctx SpecContext) {
+		fake.Repositories = []string{"secret", "open", "enterprise"}
+		fake.Private = map[string]bool{"secret": true}
+		fake.Internal = map[string]bool{"enterprise": true}
+		acc, err := host.Open(ctx, conn, host.MetadataScope(nil))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(visibilities(ctx, acc)).To(Equal(map[string]string{"acme/secret": "private", "acme/open": "public", "acme/enterprise": "unknown"}),
+			"a GitHub internal repository is readable by the enterprise: not private")
+		one, err := acc.Repository(ctx, codehost.Repo{Owner: "acme", Name: "enterprise"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(one.Visibility).To(Equal(codehost.VisibilityUnknown))
+	})
+
+	It("reports unknown, not private, when the server leaves the visibility field out (an older GitHub Enterprise Server)", func(ctx SpecContext) {
+		fake.Repositories = []string{"secret", "open", "enterprise"}
+		fake.Private = map[string]bool{"secret": true}
+		fake.Internal = map[string]bool{"enterprise": true}
+		fake.OmitVisibility = true
+		acc, err := host.Open(ctx, conn, host.MetadataScope(nil))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(visibilities(ctx, acc)).To(Equal(map[string]string{"acme/secret": "unknown", "acme/open": "unknown", "acme/enterprise": "unknown"}),
+			"private=true alone is also what an internal repository sends there")
+		one, err := acc.Repository(ctx, codehost.Repo{Owner: "acme", Name: "enterprise"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(one.Visibility).To(Equal(codehost.VisibilityUnknown))
+	})
+
+	It("drops a repository that leaves the installation from a token minted for selected repositories (the fake, as GitHub)", func(ctx SpecContext) {
+		fake.Repositories = []string{"secret", "open", "other"}
+		acc, err := host.Open(ctx, conn, host.MetadataScope([]string{"acme/secret", "acme/open"}))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(visibilities(ctx, acc)).To(HaveLen(2))
+
+		fake.Repositories = []string{"secret", "other"}
+		Expect(visibilities(ctx, acc)).To(Equal(map[string]string{"acme/secret": "public"}), "open left the installation; other was never in the token")
+		_, err = acc.Repository(ctx, codehost.Repo{Owner: "acme", Name: "open"})
+		Expect(err).To(HaveOccurred())
+		_, err = acc.Repository(ctx, codehost.Repo{Owner: "acme", Name: "other"})
+		Expect(err).To(HaveOccurred())
+	})
+
 	Describe("on a host with its own CA", func() {
 		// A GitHub Enterprise Server stand-in: TLS with a certificate no system root signs,
 		// and the REST API under /api/v3 of the same host.

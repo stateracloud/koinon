@@ -125,9 +125,18 @@ type Provider struct {
 	DisabledReason  string `json:"disabledReason,omitempty"`
 	// Removed is set when the declaring Secret was deleted.
 	Removed bool `json:"removed,omitempty"`
+	// CredentialLostAt is set when the API key was lost with the KEK that encrypted it (keys forget,
+	// ADR 0085 decision 13): the provider is not served until the key is entered again.
+	CredentialLostAt *time.Time `json:"credentialLostAt,omitempty"`
 	// AnthropicWorkspaceID is the workspace the gateway names for the provider's models (type
 	// anthropic only). An identifier, not a credential.
 	AnthropicWorkspaceID string `json:"anthropicWorkspaceId,omitempty"`
+	// HasCostKey is whether a cost API key is stored; CostScope is the workspace, project or API key
+	// whose cost the daily reconciliation compares with the ledger (ADR 0056, amendment 2026-11-06).
+	HasCostKey bool   `json:"hasCostKey"`
+	CostScope  string `json:"costScope,omitempty"`
+	// CostKeyLostAt is set when the cost API key was lost with its KEK; it must be entered again.
+	CostKeyLostAt *time.Time `json:"costKeyLostAt,omitempty"`
 	// Formats are the model formats the provider's type offers, preferred first (ADR 0069).
 	Formats   []string  `json:"formats"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -201,8 +210,17 @@ func toProvider(p store.Provider) Provider {
 		ID: p.ID.String(), Name: p.Name, Type: p.Type, URL: p.Url, HasKey: len(p.ApiKey) > 0,
 		AnthropicWorkspaceID: p.AnthropicWorkspaceID.String, Formats: offered,
 		Source: string(p.Source), ManagedBySecret: p.ManagedBySecret.String, DisabledReason: p.DisabledReason.String,
-		Removed: p.RemovedAt.Valid, CreatedAt: p.CreatedAt.Time, UpdatedAt: p.UpdatedAt.Time,
+		Removed: p.RemovedAt.Valid, CredentialLostAt: optTime(p.CredentialLostAt), CreatedAt: p.CreatedAt.Time, UpdatedAt: p.UpdatedAt.Time,
+		HasCostKey: len(p.CostApiKey) > 0, CostScope: p.CostScope.String, CostKeyLostAt: optTime(p.CostApiKeyLostAt),
 	}
+}
+
+// optTime is t, or nil when it is NULL.
+func optTime(t pgtype.Timestamptz) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	return &t.Time
 }
 
 func toModel(m store.Model) Model {
@@ -280,7 +298,7 @@ func ValidateModel(name string, guard bool, providerType string) error {
 func providerSummary(p store.Provider) map[string]any {
 	return map[string]any{
 		"name": p.Name, "type": p.Type, "url": p.Url, "hasKey": len(p.ApiKey) > 0, "source": string(p.Source),
-		"anthropicWorkspaceId": p.AnthropicWorkspaceID.String,
+		"anthropicWorkspaceId": p.AnthropicWorkspaceID.String, "hasCostKey": len(p.CostApiKey) > 0, "costScope": p.CostScope.String,
 	}
 }
 

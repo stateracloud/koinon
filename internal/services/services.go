@@ -32,6 +32,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
@@ -48,6 +49,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1/leakguardv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1/orgsettingsv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
@@ -65,6 +67,11 @@ import (
 	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/pricing"
 )
+
+// ScopeSyncer refreshes the code-host scope of one connection (codehost/scopesync.Syncer).
+type ScopeSyncer interface {
+	Sync(ctx context.Context, row store.Connection, actor audit.Actor) error
+}
 
 // Keys is the secret store as the services use it.
 type Keys interface {
@@ -103,6 +110,10 @@ type Options struct {
 	Keys Keys
 	// Tokens issues admin API tokens; defaults to a service on the pool.
 	Tokens *tokens.Service
+	// ScopeSync reads a code-host connection's repositories into the org's code-host scope when it
+	// is created, given a new secret or tested, in the background (the periodic refresh runs
+	// outside the services). Nil skips that.
+	ScopeSync ScopeSyncer
 	// Hosts are the code-host providers that run connection checks and list repositories. Without
 	// it the shipped providers are used, with GitHub as the client below.
 	Hosts *codehost.Registry
@@ -151,6 +162,7 @@ type Server struct {
 	log         *slog.Logger
 
 	keys      Keys
+	scopeSync ScopeSyncer
 	tokens    *tokens.Service
 	budgets   *budget.Service
 	prices    *prices.Service
@@ -199,7 +211,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		dm:       opts.DirectMessages,
 		notifier: opts.Notifier, urlPolicy: opts.URLPolicy,
 		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, cancelGrace: opts.WatchCancelGrace, log: opts.Logger,
-		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
+		keys: opts.Keys, scopeSync: opts.ScopeSync, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
 		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces, leakGuard: orgsettings.NewService(pool),
 	}
@@ -228,24 +240,26 @@ func (s *Server) Register(server *connect.Server) {
 	providerv1alpha1connect.RegisterProviderServiceHandler(server, s)
 	mcpserverv1alpha1connect.RegisterMcpServerServiceHandler(server, s)
 	leakguardv1alpha1connect.RegisterLeakGuardServiceHandler(server, s)
+	orgsettingsv1alpha1connect.RegisterOrgSettingsServiceHandler(server, s)
 	auditv1alpha1connect.RegisterAuditServiceHandler(server, s)
 	tracev1alpha1connect.RegisterTraceDestinationServiceHandler(server, traceAPI{s})
 }
 
 var (
-	_ agentv1alpha1connect.AgentServiceHandler           = (*Server)(nil)
-	_ ticketv1alpha1connect.TicketServiceHandler         = (*Server)(nil)
-	_ runv1alpha1connect.RunServiceHandler               = (*Server)(nil)
-	_ templatev1alpha1connect.TemplateServiceHandler     = (*Server)(nil)
-	_ connectionv1alpha1connect.ConnectionServiceHandler = (*Server)(nil)
-	_ approvalv1alpha1connect.ApprovalServiceHandler     = (*Server)(nil)
-	_ tokenv1alpha1connect.TokenServiceHandler           = (*Server)(nil)
-	_ budgetv1alpha1connect.BudgetServiceHandler         = (*Server)(nil)
-	_ budgetv1alpha1connect.PriceServiceHandler          = (*Server)(nil)
-	_ providerv1alpha1connect.ProviderServiceHandler     = (*Server)(nil)
-	_ mcpserverv1alpha1connect.McpServerServiceHandler   = (*Server)(nil)
-	_ leakguardv1alpha1connect.LeakGuardServiceHandler   = (*Server)(nil)
-	_ auditv1alpha1connect.AuditServiceHandler           = (*Server)(nil)
+	_ agentv1alpha1connect.AgentServiceHandler             = (*Server)(nil)
+	_ ticketv1alpha1connect.TicketServiceHandler           = (*Server)(nil)
+	_ runv1alpha1connect.RunServiceHandler                 = (*Server)(nil)
+	_ templatev1alpha1connect.TemplateServiceHandler       = (*Server)(nil)
+	_ connectionv1alpha1connect.ConnectionServiceHandler   = (*Server)(nil)
+	_ approvalv1alpha1connect.ApprovalServiceHandler       = (*Server)(nil)
+	_ tokenv1alpha1connect.TokenServiceHandler             = (*Server)(nil)
+	_ budgetv1alpha1connect.BudgetServiceHandler           = (*Server)(nil)
+	_ budgetv1alpha1connect.PriceServiceHandler            = (*Server)(nil)
+	_ providerv1alpha1connect.ProviderServiceHandler       = (*Server)(nil)
+	_ mcpserverv1alpha1connect.McpServerServiceHandler     = (*Server)(nil)
+	_ leakguardv1alpha1connect.LeakGuardServiceHandler     = (*Server)(nil)
+	_ orgsettingsv1alpha1connect.OrgSettingsServiceHandler = (*Server)(nil)
+	_ auditv1alpha1connect.AuditServiceHandler             = (*Server)(nil)
 )
 
 // caller is an authorised request in one org.

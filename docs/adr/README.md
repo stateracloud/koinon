@@ -75,7 +75,7 @@ are in [0046](0046-adr-conventions.md).
 | [0053](0053-hermes-context-file-patch.md) | Hermes context-file build patch: redo on every upgrade, with a guard test | Superseded by [0059](0059-v01-opencode-only.md) |
 | [0054](0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is recreated | Accepted; amended 2026-10-24 (below): detection, saving the work, the loop guard |
 | [0055](0055-chat-as-its-own-object.md) | Chat is its own object | Accepted |
-| [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29 and 2026-10-31 (below) |
+| [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31 and 2026-11-06 (below) |
 | [0057](0057-mcp-servers.md) | MCP servers: remote and container, catalog, allowlists and discovery | Accepted; amended 2026-10-24, 2026-10-30, 2026-10-31 and 2026-11-01 by [0084](0084-leak-guard.md) (below) |
 | [0058](0058-gateway-modes.md) | Gateway modes: standalone, kubernetes and shared | Accepted; amended 2026-10-25 and 2026-10-26 (below) |
 | [0059](0059-v01-opencode-only.md) | v0.1 ships one harness: OpenCode v2 | Accepted |
@@ -112,4 +112,5 @@ are in [0046](0046-adr-conventions.md).
 | [0090](0090-scripts-require-bash-5.md) | Every repository script requires bash 5 | Accepted |
 | [0091](0091-leak-guard-by-destination.md) | Leak guard by destination: sink classes, session legs and a byte cap | Accepted (decisions by procoduck, 2026-11-03); amended by [0092](0092-leak-guard-judge-model.md) (2026-11-03: the both-legs `external-high` approval becomes rules, a judge model, then a person) |
 | [0092](0092-leak-guard-judge-model.md) | Leak guard judge: rules, then a cheap judge model, then a person | Accepted (decisions by procoduck, 2026-11-03) |
+| [0093](0093-koinon-core-opencode-plugin.md) | koinon.core: one Koinon-owned OpenCode plugin instead of a fork | Proposed |
 | [0094](0094-work-claims-on-the-public-repository.md) | Work claims on the public repository: one lock, claims by comment, a conflict check, the native merge queue | Accepted (procoduck, 2026-11-05, after the grilling session and the probes, which changed no decision) |

@@ -31,7 +31,7 @@ const createConnection = `-- name: CreateConnection :one
 
 INSERT INTO connections (org_id, id, connector, display_name, config, secret_name, secret_fingerprint, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at
 `
 
 type CreateConnectionParams struct {
@@ -83,6 +83,7 @@ func (q *Queries) CreateConnection(ctx context.Context, arg CreateConnectionPara
 		&i.ManagedBySecret,
 		&i.DeclaredVersion,
 		&i.RemovedAt,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -90,7 +91,7 @@ func (q *Queries) CreateConnection(ctx context.Context, arg CreateConnectionPara
 const createConnectionWithEnvelope = `-- name: CreateConnectionWithEnvelope :one
 INSERT INTO connections (org_id, id, connector, display_name, config, secret_envelope, secret_fingerprint, source, managed_by_secret, declared_version, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at
 `
 
 type CreateConnectionWithEnvelopeParams struct {
@@ -142,6 +143,7 @@ func (q *Queries) CreateConnectionWithEnvelope(ctx context.Context, arg CreateCo
 		&i.ManagedBySecret,
 		&i.DeclaredVersion,
 		&i.RemovedAt,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -165,7 +167,7 @@ func (q *Queries) DeleteConnection(ctx context.Context, arg DeleteConnectionPara
 }
 
 const getConnection = `-- name: GetConnection :one
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at FROM connections
 WHERE org_id = $1 AND id = $2
 `
 
@@ -196,6 +198,45 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (C
 		&i.ManagedBySecret,
 		&i.DeclaredVersion,
 		&i.RemovedAt,
+		&i.CredentialLostAt,
+	)
+	return i, err
+}
+
+const getConnectionForUpdate = `-- name: GetConnectionForUpdate :one
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at FROM connections
+WHERE org_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type GetConnectionForUpdateParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+func (q *Queries) GetConnectionForUpdate(ctx context.Context, arg GetConnectionForUpdateParams) (Connection, error) {
+	row := q.db.QueryRow(ctx, getConnectionForUpdate, arg.OrgID, arg.ID)
+	var i Connection
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Connector,
+		&i.DisplayName,
+		&i.Config,
+		&i.SecretName,
+		&i.SecretFingerprint,
+		&i.Status,
+		&i.LastTestedAt,
+		&i.LastTest,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SecretEnvelope,
+		&i.Source,
+		&i.ManagedBySecret,
+		&i.DeclaredVersion,
+		&i.RemovedAt,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -243,7 +284,7 @@ func (q *Queries) ListAgentsBoundToConnection(ctx context.Context, arg ListAgent
 }
 
 const listConnections = `-- name: ListConnections :many
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at FROM connections
 WHERE org_id = $1
 ORDER BY created_at, id
 `
@@ -276,6 +317,7 @@ func (q *Queries) ListConnections(ctx context.Context, orgID pgtype.UUID) ([]Con
 			&i.ManagedBySecret,
 			&i.DeclaredVersion,
 			&i.RemovedAt,
+			&i.CredentialLostAt,
 		); err != nil {
 			return nil, err
 		}
@@ -288,7 +330,7 @@ func (q *Queries) ListConnections(ctx context.Context, orgID pgtype.UUID) ([]Con
 }
 
 const listConnectionsByConnector = `-- name: ListConnectionsByConnector :many
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at FROM connections
 WHERE org_id = $1 AND connector = $2
 ORDER BY created_at, id
 `
@@ -326,6 +368,7 @@ func (q *Queries) ListConnectionsByConnector(ctx context.Context, arg ListConnec
 			&i.ManagedBySecret,
 			&i.DeclaredVersion,
 			&i.RemovedAt,
+			&i.CredentialLostAt,
 		); err != nil {
 			return nil, err
 		}
@@ -338,7 +381,7 @@ func (q *Queries) ListConnectionsByConnector(ctx context.Context, arg ListConnec
 }
 
 const listConnectionsToMigrate = `-- name: ListConnectionsToMigrate :many
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at FROM connections
 WHERE secret_name IS NOT NULL
 ORDER BY org_id, id
 `
@@ -373,10 +416,39 @@ func (q *Queries) ListConnectionsToMigrate(ctx context.Context) ([]Connection, e
 			&i.ManagedBySecret,
 			&i.DeclaredVersion,
 			&i.RemovedAt,
+			&i.CredentialLostAt,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgsWithCodeHostConnections = `-- name: ListOrgsWithCodeHostConnections :many
+SELECT DISTINCT org_id FROM connections
+WHERE connector = ANY($1::text[]) AND removed_at IS NULL AND credential_lost_at IS NULL
+ORDER BY org_id
+`
+
+// The code-host scope refresh: finds every org that has a live connection of one of these connector
+// types, to refresh its repositories' visibility. Across orgs, like the question sweeps.
+func (q *Queries) ListOrgsWithCodeHostConnections(ctx context.Context, connectors []string) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgsWithCodeHostConnections, connectors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var org_id pgtype.UUID
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -405,7 +477,7 @@ const recordConnectionTest = `-- name: RecordConnectionTest :one
 UPDATE connections
 SET status = $1, last_tested_at = now(), last_test = $2
 WHERE org_id = $3 AND id = $4
-RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at
 `
 
 type RecordConnectionTestParams struct {
@@ -442,6 +514,7 @@ func (q *Queries) RecordConnectionTest(ctx context.Context, arg RecordConnection
 		&i.ManagedBySecret,
 		&i.DeclaredVersion,
 		&i.RemovedAt,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -450,7 +523,7 @@ const setConnectionEnvelope = `-- name: SetConnectionEnvelope :one
 UPDATE connections
 SET secret_envelope = $1
 WHERE org_id = $2 AND id = $3
-RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at
 `
 
 type SetConnectionEnvelopeParams struct {
@@ -484,6 +557,58 @@ func (q *Queries) SetConnectionEnvelope(ctx context.Context, arg SetConnectionEn
 		&i.ManagedBySecret,
 		&i.DeclaredVersion,
 		&i.RemovedAt,
+		&i.CredentialLostAt,
+	)
+	return i, err
+}
+
+const setUIConnectionSecret = `-- name: SetUIConnectionSecret :one
+UPDATE connections
+SET config = $1, secret_envelope = $2, secret_fingerprint = $3,
+    credential_lost_at = NULL, status = 'untested', last_tested_at = NULL, last_test = '[]'
+WHERE org_id = $4 AND id = $5 AND source = 'ui'
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at
+`
+
+type SetUIConnectionSecretParams struct {
+	Config            []byte
+	SecretEnvelope    []byte
+	SecretFingerprint string
+	OrgID             pgtype.UUID
+	ID                pgtype.UUID
+}
+
+// A new secret for a connection entered here (ADR 0085 decision 13: entering a lost one again, or
+// rotating one). The old test result was about the old secret: the connection is untested again.
+func (q *Queries) SetUIConnectionSecret(ctx context.Context, arg SetUIConnectionSecretParams) (Connection, error) {
+	row := q.db.QueryRow(ctx, setUIConnectionSecret,
+		arg.Config,
+		arg.SecretEnvelope,
+		arg.SecretFingerprint,
+		arg.OrgID,
+		arg.ID,
+	)
+	var i Connection
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Connector,
+		&i.DisplayName,
+		&i.Config,
+		&i.SecretName,
+		&i.SecretFingerprint,
+		&i.Status,
+		&i.LastTestedAt,
+		&i.LastTest,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SecretEnvelope,
+		&i.Source,
+		&i.ManagedBySecret,
+		&i.DeclaredVersion,
+		&i.RemovedAt,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -491,9 +616,10 @@ func (q *Queries) SetConnectionEnvelope(ctx context.Context, arg SetConnectionEn
 const updateDeclaredConnection = `-- name: UpdateDeclaredConnection :one
 UPDATE connections
 SET display_name = $1, config = $2, secret_envelope = $3,
-    secret_fingerprint = $4, declared_version = $5, removed_at = NULL
+    secret_fingerprint = $4, declared_version = $5, removed_at = NULL,
+    credential_lost_at = NULL
 WHERE org_id = $6 AND id = $7 AND source = 'secret'
-RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at
 `
 
 type UpdateDeclaredConnectionParams struct {
@@ -536,6 +662,7 @@ func (q *Queries) UpdateDeclaredConnection(ctx context.Context, arg UpdateDeclar
 		&i.ManagedBySecret,
 		&i.DeclaredVersion,
 		&i.RemovedAt,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }

@@ -44,11 +44,16 @@ type HomeStore interface {
 	Backup(ctx context.Context, prefix, password string, tarStream io.Reader, m checkpoint.Meta) (checkpoint.Result, error)
 	Restore(ctx context.Context, prefix, password, snapshotID string, dst io.Writer) error
 	Verify(ctx context.Context, prefix, password, snapshotID string) error
+	// DeleteRepository deletes the blobs of a retired repository, never a later epoch's under it.
+	DeleteRepository(ctx context.Context, prefix string) (int, error)
 }
 
-// Repositories gives an agent's repository and password (checkpoint.Passwords).
+// Repositories gives an agent's repositories and their passwords (checkpoint.Remote): Get the
+// current one, which checkpoints are written to, and At the one of a given repository epoch, which
+// a checkpoint written there is restored from (ADR 0085 decision 13).
 type Repositories interface {
 	Get(ctx context.Context, org, agent pgtype.UUID) (checkpoint.Repository, error)
+	At(ctx context.Context, org, agent pgtype.UUID, epoch int32) (checkpoint.Repository, error)
 }
 
 // Checkpoints turns the writer on. A nil Config.Checkpoints leaves checkpoints off: nothing is
@@ -60,8 +65,11 @@ type Checkpoints struct {
 	Interval time.Duration
 	// Poll is how often the writer looks for requests (default 10 seconds).
 	Poll time.Duration
+	// Sweep is how often retired repositories past their deletion deadline are deleted (default
+	// 10 minutes).
+	Sweep time.Duration
 	// Lease is how long a running request is left to its writer before another takes it over
-	// (default 20 minutes).
+	// (default 20 minutes). It must be longer than Timeout.
 	Lease time.Duration
 	// Timeout bounds one backup or restore attempt (default 15 minutes).
 	Timeout time.Duration
@@ -87,6 +95,7 @@ type Checkpoints struct {
 func (c *Checkpoints) defaults() {
 	setDefault(&c.Interval, time.Hour)
 	setDefault(&c.Poll, 10*time.Second)
+	setDefault(&c.Sweep, 10*time.Minute)
 	setDefault(&c.Lease, 20*time.Minute)
 	setDefault(&c.Timeout, 15*time.Minute)
 	setDefault(&c.Attempts, 3)
@@ -112,9 +121,31 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	slots := make(chan struct{}, c.Concurrency)
+	// Seeds hold at most Concurrency-1 of the backup slots (at least one), so that after keys
+	// new-repositories --all the stop and hourly checkpoints still get a writer.
+	seeds := make(chan struct{}, max(1, c.Concurrency-1))
+	var swept time.Time
+	sweeping := make(chan struct{}, 1)
 	for ctx.Err() == nil {
 		// One tick at a time, so a panic is logged and the hourly checkpoints go on.
 		safego.Do(p.log, "checkpoint-tick", func() { p.checkpointTick(ctx, slots, &wg) })
+		// Seeds take the backup slots the requests left free (seed.go).
+		safego.Do(p.log, "seed-tick", func() { p.seedTick(ctx, slots, seeds, &wg) })
+		if now := time.Now(); now.Sub(swept) >= c.Sweep {
+			// Beside the loop: a long sweep (serial blob deletes) must not delay the ticks.
+			// A sweep that is still running means this one is skipped.
+			select {
+			case sweeping <- struct{}{}:
+				swept = now
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					defer func() { <-sweeping }()
+					safego.Do(p.log, "repository-sweep", func() { p.sweepRepositories(ctx) })
+				}()
+			default:
+			}
+		}
 		if !sleep(ctx, c.Poll) {
 			return
 		}
@@ -143,6 +174,14 @@ func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync
 		}); err != nil && ctx.Err() == nil {
 			p.log.Warn("checkpoints: failing stale requests failed", "err", err)
 		}
+		// A running request whose writer died is taken over once the sandbox is ready; one whose
+		// sandbox stays not ready (a stopped or archived agent) is failed after the same wait.
+		if _, err := p.q.FailAbandonedHomeCheckpoints(ctx, store.FailAbandonedHomeCheckpointsParams{
+			OrgID: org, LeaseSeconds: int32(c.Lease.Seconds()), WaitSeconds: wait,
+			Error: pgtype.Text{String: fmt.Sprintf("the writer stopped and the sandbox was not ready to be read again within %s", c.SandboxWait), Valid: true},
+		}); err != nil && ctx.Err() == nil {
+			p.log.Warn("checkpoints: failing abandoned requests failed", "err", err)
+		}
 		for {
 			select {
 			case slots <- struct{}{}:
@@ -168,6 +207,72 @@ func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync
 	}
 }
 
+// sweepRepositories deletes the blobs of retired repositories past their deletion deadline and
+// marks them deleted (ADR 0085 decision 13); their checkpoints are no longer listed for a restore.
+// Several replicas may sweep the same repository: deleting is idempotent, and the mark is set once.
+func (p *Pool) sweepRepositories(ctx context.Context) {
+	orgs, err := p.q.ListOrgIDs(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			p.log.Warn("repository sweep: listing orgs failed", "err", err)
+		}
+		return
+	}
+	homes := p.cfg.Checkpoints.Store
+	refused, complete := 0, true
+	defer func() {
+		if complete {
+			p.cfg.Metrics.SweepRefused.Set(float64(refused))
+		}
+	}()
+	for _, org := range orgs {
+		due, err := p.q.ListDueHomeRepositories(ctx, store.ListDueHomeRepositoriesParams{
+			OrgID: org, LeaseSeconds: int32(p.cfg.Checkpoints.Lease.Seconds()), MaxRows: 50,
+		})
+		if err != nil {
+			if ctx.Err() == nil {
+				p.log.Warn("repository sweep: listing due repositories failed", "err", err)
+			}
+			complete = false
+			continue
+		}
+		for _, r := range due {
+			log := p.log.With("agent", r.AgentID.String(), "repository_epoch", r.RepositoryEpoch)
+			// The prefix is recomputed, never taken from the row: a row that names another agent's
+			// or org's folder is refused, so the sweep deletes only this agent's own repository.
+			want := checkpoint.EpochPrefix(org.String(), r.AgentID.String(), r.RepositoryEpoch)
+			key := org.String() + "/" + checkpoint.EpochRow(r.AgentID.String(), r.RepositoryEpoch)
+			if r.Prefix != want {
+				// Logged once per process (until the row is fixed); the gauge counts it on every
+				// sweep, for an alert.
+				refused++
+				if _, seen := p.sweepRefused.LoadOrStore(key, true); !seen {
+					log.Error("repository sweep: a retired repository's stored prefix is not its own; not deleting it (logged once; see koinon_agentd_home_repository_sweep_refused)", "prefix", r.Prefix, "want", want)
+				}
+				continue
+			}
+			p.sweepRefused.Delete(key) // fixed: a later refusal of the row is logged again
+			n, err := homes.DeleteRepository(ctx, want)
+			if err != nil {
+				if ctx.Err() == nil {
+					log.Warn("repository sweep: deleting a retired repository failed; trying again later", "err", err)
+				}
+				continue
+			}
+			if r.RepositoryEpoch == 0 {
+				_, err = p.q.MarkHomeRepositoryDeleted(ctx, store.MarkHomeRepositoryDeletedParams{OrgID: org, AgentID: r.AgentID})
+			} else {
+				_, err = p.q.MarkHomeRepositoryEpochDeleted(ctx, store.MarkHomeRepositoryEpochDeletedParams{OrgID: org, AgentID: r.AgentID, RepositoryEpoch: r.RepositoryEpoch})
+			}
+			if err != nil {
+				log.Warn("repository sweep: marking a repository deleted failed", "err", err)
+				continue
+			}
+			log.Info("retired home repository deleted", "blobs", n)
+		}
+	}
+}
+
 // takeCheckpoint backs up one claimed request: it reads the home over exec into the writer and
 // records the outcome.
 func (p *Pool) takeCheckpoint(ctx context.Context, cp store.HomeCheckpoint) {
@@ -181,7 +286,7 @@ func (p *Pool) takeCheckpoint(ctx context.Context, cp store.HomeCheckpoint) {
 		log.Info("home checkpoint complete", "bytes", res.Bytes, "files", res.Files)
 		if _, err := p.q.CompleteHomeCheckpoint(ctx, store.CompleteHomeCheckpointParams{
 			OrgID: cp.OrgID, ID: cp.ID, SnapshotID: pgtype.Text{String: res.SnapshotID, Valid: true}, SizeBytes: pgtype.Int8{Int64: res.Bytes, Valid: true},
-			Epoch: res.epoch, Generation: res.generation,
+			Epoch: res.epoch, Generation: res.generation, RepositoryEpoch: res.repositoryEpoch,
 		}); err != nil {
 			log.Warn("recording a complete checkpoint failed", "err", err)
 		}
@@ -215,6 +320,8 @@ type backupResult struct {
 	checkpoint.Result
 	epoch      int64
 	generation string
+	// repositoryEpoch is the repository the snapshot was written to.
+	repositoryEpoch int32
 }
 
 func (p *Pool) backupHome(ctx context.Context, cp store.HomeCheckpoint) (backupResult, error) {
@@ -276,7 +383,7 @@ func (p *Pool) backupHome(ctx context.Context, cp store.HomeCheckpoint) (backupR
 			return backupResult{}, fmt.Errorf("verifying the snapshot: %w", err)
 		}
 	}
-	return backupResult{Result: res, epoch: epoch, generation: generation}, nil
+	return backupResult{Result: res, epoch: epoch, generation: generation, repositoryEpoch: repo.Epoch}, nil
 }
 
 func truncateText(s string, n int) string {
@@ -348,12 +455,26 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 	if len(cps) == 0 {
 		return &failure{reason: "restoring the home: the agent has no complete checkpoint, so the new sandbox's home is left empty and the run is not started"}
 	}
-	repo, err := c.Repositories.Get(ctx, org, agent)
-	if err != nil {
-		return &failure{reason: "restoring the home: " + err.Error(), class: classTransient}
-	}
+	// Each checkpoint is restored from the repository it was written to; a later repository epoch
+	// does not hold the checkpoints written before it started.
+	repos := map[int32]checkpoint.Repository{}
 	var errs []error
 	for i, cp := range cps {
+		repo, ok := repos[cp.RepositoryEpoch]
+		if !ok {
+			var err error
+			repo, err = c.Repositories.At(ctx, org, agent, cp.RepositoryEpoch)
+			if errors.Is(err, checkpoint.ErrNoRepository) || errors.Is(err, checkpoint.ErrRepositoryLost) {
+				// Nothing to open it with: an older checkpoint, in another epoch, may still restore.
+				r.log.Warn("restoring the home: the checkpoint's repository cannot be opened", "checkpoint", cp.ID.String(), "repository_epoch", cp.RepositoryEpoch, "err", err)
+				errs = append(errs, fmt.Errorf("checkpoint %s (repository epoch %d): %w", cp.ID, cp.RepositoryEpoch, err))
+				continue
+			}
+			if err != nil {
+				return &failure{reason: "restoring the home: " + err.Error(), class: classTransient}
+			}
+			repos[cp.RepositoryEpoch] = repo
+		}
 		for try := 1; try <= c.RestoreTries; try++ {
 			err := r.restoreOne(ctx, sb, repo, cp)
 			if err == nil {

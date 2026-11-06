@@ -12,6 +12,32 @@ JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
 WHERE r.org_id = @org_id AND c.removed_at IS NULL
 ORDER BY r.owner, r.repo, r.connection_id;
 
+-- name: KeyShareConnection :one
+-- The first lock of a scope replacement: the connection row, FOR KEY SHARE, which the inserts'
+-- foreign key check takes anyway. Taking it first keeps the order every path uses (connection row,
+-- then the scope lock, then the repository rows), so a replacement never holds the scope lock while
+-- it waits for a SetConnectionSecret or DeleteConnection that holds the row and waits for the lock.
+SELECT id FROM connections
+WHERE org_id = @org_id AND id = @id
+FOR KEY SHARE;
+
+-- name: LockCodeHostConnectionScope :exec
+-- Serialises the replacements of one connection's repositories until the transaction ends, so a
+-- reading is compared with, and written after, the one stored before it.
+SELECT pg_advisory_xact_lock(hashtextextended(concat('code-host-scope:', sqlc.arg(org_id)::uuid, ':', sqlc.arg(connection_id)::uuid), 0));
+
+-- name: ListCodeHostConnectionRepos :many
+-- One connection's part of the scope, to compare a new reading with.
+SELECT owner, repo, visibility, checked_at FROM org_code_host_repos
+WHERE org_id = @org_id AND connection_id = @connection_id
+ORDER BY owner, repo;
+
+-- name: CodeHostConnectionReadAt :one
+-- When one connection's repositories were last read: -infinity when nothing of it is stored.
+SELECT coalesce(max(checked_at), '-infinity'::timestamptz)::timestamptz AS checked_at
+FROM org_code_host_repos
+WHERE org_id = @org_id AND connection_id = @connection_id;
+
 -- name: DeleteCodeHostConnectionRepos :execrows
 DELETE FROM org_code_host_repos
 WHERE org_id = @org_id AND connection_id = @connection_id;

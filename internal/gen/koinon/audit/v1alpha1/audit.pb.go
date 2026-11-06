@@ -30,8 +30,8 @@ type AuditEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	OrgId string                 `protobuf:"bytes,2,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	// actor_kind is user, token, agent, secret or system; actor_id is that actor's ID, or the declaring
-	// Secret's name for secret.
+	// actor_kind is user, token, agent, secret, system or cli; actor_id is that actor's ID, the
+	// declaring Secret's name for secret, or the command for cli (keys forget).
 	ActorKind string `protobuf:"bytes,3,opt,name=actor_kind,json=actorKind,proto3" json:"actor_kind,omitempty"`
 	ActorId   string `protobuf:"bytes,4,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
 	// action reads <area>.<verb>, for example approval.approve or agent.archive.

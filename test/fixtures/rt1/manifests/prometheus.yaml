@@ -10,6 +10,19 @@
 #
 # Memory at run time: prometheus request 48Mi / limit 128Mi (measured 31 MiB idle, 57 MiB under a 30-day range-query loop),
 # prometheus-mcp request 48Mi / limit 112Mi (measured about 78 MiB), so the pod is capped at 240Mi. The init containers run first and one at a time (promtool limit 256Mi).
+# prometheus-mcp has CPU limit 1 and PROMETHEUS_REQUEST_TIMEOUT=10; the pod runs in PriorityClass rt1-fixtures.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: rt1-fixtures
+  labels:
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+# Above the default (0), far below system classes: the fixtures outrank sandbox pods under pressure.
+value: 1000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: RT1 fixture servers (prometheus-mcp); evicted after sandbox pods, not before.
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -40,6 +53,8 @@ spec:
     metadata:
       labels: *labels
     spec:
+      # Keeps the pod from being evicted or starved first when a node is overloaded (issue 62).
+      priorityClassName: rt1-fixtures
       automountServiceAccountToken: false
       enableServiceLinks: false
       securityContext:
@@ -101,12 +116,16 @@ spec:
           image: rt1-prometheus-mcp:dev
           env:
             - {name: PROMETHEUS_URL, value: "http://127.0.0.1:9090"}
+            # prometheus-mcp 1.6.2 makes blocking requests.get calls inside async tools, so one slow
+            # upstream call stalls the event loop and the gateway answers 500 "failed to send message".
+            # A short timeout bounds that stall (issue 62).
+            - {name: PROMETHEUS_REQUEST_TIMEOUT, value: "10"}
           ports:
             - {name: mcp, containerPort: 8080}
           securityContext: *sc
           resources:
-            requests: {cpu: 20m, memory: 48Mi}
-            limits: {cpu: 300m, memory: 112Mi}
+            requests: {cpu: 100m, memory: 48Mi}
+            limits: {cpu: "1", memory: 112Mi}
           readinessProbe:
             tcpSocket: {port: mcp}
             periodSeconds: 10

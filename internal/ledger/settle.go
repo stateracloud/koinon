@@ -39,13 +39,14 @@ func settleBackoff(attempts int32) time.Duration {
 	return min(d, 5*time.Minute)
 }
 
-// Settler makes provisional entries (responses cut short) final, so the ledger converges on the
-// provider's bill (ADR 0056, amendment 2026-10-28). It asks the entry's provider for its own
-// record of the response and re-prices the reported tokens with Koinon's price, as ingest prices
-// every request: the provider's billed cost is kept beside it and the entry is flagged when the two
-// differ by more than 1% (an org price override, a BYOK fee). An entry whose provider has no
-// figure by the deadline, or cannot report at all (a hold), becomes final at its logged usage,
-// never max_tokens. Each change is recorded in spend_entry_revisions with the entry before and
+// Settler makes provisional entries final at the provider's bill (ADR 0056, amendments 2026-10-28
+// and 2026-11-06): every response of a provider that reports its own record (OpenRouter), complete
+// or cut short. It asks the entry's provider for that record; the reported tokens replace the
+// entry's and the billed cost (with the org's own upstream key, the aggregator's fee plus what the
+// upstream billed that key) becomes the entry's cost. Koinon's price of the same tokens is kept
+// beside it and the entry is flagged when the two differ by more than 1%, which shows where the
+// price list is off. An entry whose provider has no figure by the deadline, or cannot report at
+// all (a hold), becomes final at its logged usage, never max_tokens. Each change is recorded in spend_entry_revisions with the entry before and
 // after. Several settlers may run: a row is claimed with SKIP LOCKED and leased. A pass asks at most
 // MaxPerPass times, takes the orgs in turn from the longest waiting, and does not ask a provider
 // that answered 429 before its Retry-After, across passes.
@@ -53,8 +54,8 @@ type Settler struct {
 	DB *pgxpool.Pool
 	// Keys opens the provider keys (the secret store's keyring).
 	Keys catalog.Opener
-	// Prices re-prices the provider's tokens; required (prices.NewResolver), the same list the
-	// Ingester prices with.
+	// Prices prices the provider's tokens for the comparison with its bill; required
+	// (prices.NewResolver), the same list the Ingester prices with.
 	Prices prices.Resolver
 	// Sources looks responses up per provider type; nil is providerusage.Default.
 	Sources providerusage.Registry
@@ -87,7 +88,13 @@ var errHold = errors.New("the provider cannot report its usage; the reserve is h
 // moved to a URL its source does not serve): it is final now.
 var errNoSource = errors.New("no usage source serves the provider")
 
-// Validate reports a wiring mistake: a Settler without prices could not re-price what it settles.
+// errKeyLost means the provider's API key was lost with its key-encryption key (ADR 0085 decision
+// 13): the provider is not asked without it. The attempt is deferred like a pending one, so a key
+// entered again before the deadline still settles the entry; at the deadline the logged usage is
+// final.
+var errKeyLost = errors.New("the provider's API key was lost with a key-encryption key; enter it again to settle")
+
+// Validate reports a wiring mistake: a Settler without prices could not compare what it settles.
 func (s *Settler) Validate() error {
 	if s.Prices.IsZero() {
 		return errors.New("ledger: Settler.Prices is required (prices.NewResolver)")
@@ -256,11 +263,14 @@ type entrySnapshot struct {
 	CostUSD          string `json:"cost_usd"`
 	ReserveUSD       string `json:"reserve_usd"`
 	Provisional      bool   `json:"provisional"`
-	// ProviderCostUSD is what the provider billed, when it reported (not charged: Koinon re-prices).
+	// ProviderCostUSD is the provider's own cost figure, when it reported (with BYOK, the
+	// aggregator's fee; CostUSD then adds the upstream's cost).
 	ProviderCostUSD string `json:"provider_cost_usd,omitempty"`
+	// KoinonCostUSD is Koinon's price of the reported tokens, kept for the comparison.
+	KoinonCostUSD string `json:"koinon_cost_usd,omitempty"`
 }
 
-// settleOne records the outcome of asking the provider: its tokens, re-priced, replace the entry;
+// settleOne records the outcome of asking the provider: its tokens and its bill replace the entry;
 // or, for a hold, a provider no source serves any more, or past the deadline, the logged usage
 // becomes final; or the attempt is deferred (no sooner than a provider's Retry-After).
 func (s *Settler) settleOne(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row store.ClaimDueSettlementsRow, u providerusage.Usage, lookupErr error) (bool, error) {
@@ -284,7 +294,7 @@ func (s *Settler) settleOne(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row
 		if u.CacheWriteTokens == 0 && row.CacheWriteTokens > 0 {
 			u.CacheWriteTokens = min(row.CacheWriteTokens, max(u.InputTokens-u.CacheReadTokens, 0))
 		}
-		cost, ref, flagged, priceNote, err := s.reprice(ctx, q, org, row, u)
+		cost, koinon, ref, flagged, priceNote, err := s.charge(ctx, q, org, row, u)
 		if err != nil {
 			return false, err
 		}
@@ -295,7 +305,14 @@ func (s *Settler) settleOne(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row
 		}
 		settled := map[string]any{
 			"source": row.ProviderType, "response_id": row.ResponseID.String, "provisional_cost_usd": row.CostUsd,
-			"provider_cost_usd": u.Cost.String(), "cost_usd": cost.String(), "cancelled": u.Cancelled,
+			"provider_cost_usd": u.Cost.String(), "cost_usd": cost.String(), "charged": "provider", "cancelled": u.Cancelled,
+		}
+		if koinon != nil {
+			after.KoinonCostUSD = koinon.Numeric()
+			settled["koinon_cost_usd"] = koinon.String()
+		}
+		if u.BYOK {
+			settled["byok"], settled["upstream_cost_usd"] = true, u.UpstreamCost.String()
 		}
 		for k, v := range priceNote {
 			settled[k] = v
@@ -379,23 +396,27 @@ func (s *Settler) enforceSettled(ctx context.Context, tx pgx.Tx, org pgtype.UUID
 	return enforce(ctx, tx, s.Notifier, s.now(), x)
 }
 
-// reprice prices the provider-reported tokens with Koinon's price valid at the request's time, as
-// ingest does (decision 5 of the 2026-10-24 amendment: Koinon's cost counts). The provider's billed
-// cost is compared and the entry flagged when they differ by more than 1%. The price is resolved
-// again for the request's time, which gives the entry's price_ref unless the org's prices changed
-// since (the note says so). Without a usable Koinon price the provider's cost stands in, as the
-// gateway's does at ingest.
-func (s *Settler) reprice(ctx context.Context, q *store.Queries, org pgtype.UUID, row store.ClaimDueSettlementsRow,
+// charge is what a settled entry costs: the provider's bill, [providerusage.Usage.Billed] (ADR 0056,
+// amendment 2026-11-06: billed cost counts, an org price override included). Koinon's price of the
+// reported tokens, valid at the request's time, is computed beside it (koinon; nil without a usable
+// price) and the entry is flagged when the two differ by more than 1%. The price is resolved again
+// for the request's time, which gives the entry's price_ref unless the org's prices changed since
+// (the note says so); the ref names the price the bill was compared with.
+func (s *Settler) charge(ctx context.Context, q *store.Queries, org pgtype.UUID, row store.ClaimDueSettlementsRow,
 	u providerusage.Usage,
-) (cost money.USD, ref pgtype.Text, flagged bool, note map[string]any, err error) {
+) (cost money.USD, koinon *money.USD, ref pgtype.Text, flagged bool, note map[string]any, err error) {
 	note = map[string]any{}
+	if cost, err = u.Billed(); err != nil {
+		return 0, nil, ref, false, nil, fmt.Errorf("the provider's bill: %w", err)
+	}
 	model, err := prices.Lookup(ctx, q, org, row.Model)
 	var res prices.Resolution
+	var listed money.USD
 	if err == nil {
 		res, err = s.Prices.Resolve(ctx, q, org, model, row.OccurredAt.Time)
 	}
 	if err == nil {
-		_, cost, err = res.Price.Cost(pricing.Split(u.InputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.OutputTokens, u.ReasoningTokens))
+		_, listed, err = res.Price.Cost(pricing.Split(u.InputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.OutputTokens, u.ReasoningTokens))
 		if err != nil {
 			err = &prices.BadPriceError{Err: err}
 		}
@@ -407,17 +428,21 @@ func (s *Settler) reprice(ctx context.Context, q *store.Queries, org pgtype.UUID
 		if res.Ref != row.PriceRef && row.PriceRef != "" {
 			note["price_ref_was"] = row.PriceRef
 		}
-	case errors.Is(err, prices.ErrUnpriced), errors.As(err, &bad):
+	case errors.Is(err, prices.ErrUnpriced):
+		// No Koinon price: the bill needs none; nothing to compare.
+		return cost, nil, ref, false, note, nil
+	case errors.As(err, &bad):
+		// A stored price that cannot be used is flagged, as at ingest; the bill still counts.
 		note["price_error"] = err.Error()
-		return u.Cost, pgtype.Text{}, true, note, nil
+		return cost, nil, ref, true, note, nil
 	default:
-		return 0, ref, false, nil, err
+		return 0, nil, ref, false, nil, err
 	}
-	if differs(cost, u.Cost) {
+	if differs(listed, cost) {
 		flagged = true
-		note["provider_diff"] = map[string]any{"cost_usd": cost.String(), "provider_cost_usd": u.Cost.String()}
+		note["provider_diff"] = map[string]any{"koinon_cost_usd": listed.String(), "provider_cost_usd": cost.String()}
 	}
-	return cost, ref, flagged, note, nil
+	return cost, &listed, ref, flagged, note, nil
 }
 
 // lookup asks the entry's provider for its record of the response.
@@ -431,6 +456,9 @@ func (s *Settler) lookup(ctx context.Context, q *store.Queries, org pgtype.UUID,
 	src, ok := s.sources().For(prov.Type, prov.Url, row.ResponseID.String)
 	if !ok {
 		return providerusage.Usage{}, errNoSource
+	}
+	if prov.CredentialLostAt.Valid {
+		return providerusage.Usage{}, errKeyLost
 	}
 	key, err := catalog.OpenKey(s.Keys, org, prov.ID, prov.ApiKey)
 	if err != nil {

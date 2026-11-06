@@ -41,6 +41,13 @@ WHERE org_id = @org_id AND code_host_connection_id = @connection_id
 ORDER BY name, id
 FOR UPDATE;
 
+-- name: GetConnectionForMCPLink :one
+-- The connection a server is being linked to, locked against a change of its host (a declared
+-- connection's baseUrl) until the link is written, so the host check sees the host the link keeps.
+SELECT * FROM connections
+WHERE org_id = @org_id AND id = @id
+FOR SHARE;
+
 -- name: ListMCPServers :many
 SELECT * FROM mcp_servers
 WHERE org_id = @org_id
@@ -53,9 +60,12 @@ ORDER BY name, source, id;
 -- envelope since, so writing back the envelope that was read would undo it. credential_header and
 -- credential_prefix go with it: they are written only when @set_credential_meta is true (the patch
 -- touches the credential at all), so a URL-only patch cannot pair a concurrent change's envelope with
--- stale metadata, or break the CHECK that ties header and envelope together.
+-- stale metadata, or break the CHECK that ties header and envelope together. Setting or removing
+-- the credential ends a lost one (#85): the trigger credential_lost_clear covers a stored credential,
+-- this a removed one.
 UPDATE mcp_servers
 SET url = @url, transport = @transport,
+    credential_lost_at = CASE WHEN @set_credential::boolean THEN NULL ELSE credential_lost_at END,
     credential_header = CASE WHEN @set_credential_meta::boolean THEN sqlc.narg(credential_header) ELSE credential_header END,
     credential_prefix = CASE WHEN @set_credential_meta::boolean THEN @credential_prefix ELSE credential_prefix END,
     credential = CASE WHEN @set_credential::boolean THEN sqlc.narg(credential) ELSE credential END,
@@ -75,7 +85,7 @@ RETURNING *;
 UPDATE mcp_servers
 SET url = @url, transport = @transport, credential_header = sqlc.narg(credential_header),
     credential_prefix = @credential_prefix, credential = sqlc.narg(credential),
-    declared_version = @declared_version, removed_at = NULL, disabled_reason = NULL,
+    declared_version = @declared_version, removed_at = NULL, disabled_reason = NULL, credential_lost_at = NULL,
     -- A new URL is a different server: its data class goes back to the cautious default (kind other,
     -- both legs), so a class declared for the old endpoint cannot narrow the guard for the new one (ADR 0084).
     kind = CASE WHEN url IS DISTINCT FROM @url THEN 'other'::mcp_server_kind ELSE kind END,
@@ -112,9 +122,10 @@ SET removed_at = now(), disabled_reason = @reason
 WHERE org_id = @org_id AND id = @id AND source = 'secret';
 
 -- name: ListServedMCPServers :many
--- Enabled servers, for the gateway and the prober.
+-- Enabled servers, for the gateway and the prober. A server whose credential was lost (#85) is not
+-- served until the credential is entered again.
 SELECT * FROM mcp_servers
-WHERE org_id = @org_id AND disabled_reason IS NULL AND removed_at IS NULL
+WHERE org_id = @org_id AND disabled_reason IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
 ORDER BY name;
 
 -- name: RecordMCPServerProbe :one
@@ -263,7 +274,7 @@ VALUES (@org_id, @agent_id, @server_id, sqlc.narg(tools));
 
 -- name: GetServedMCPServerByName :one
 SELECT * FROM mcp_servers
-WHERE org_id = @org_id AND name = @name AND disabled_reason IS NULL AND removed_at IS NULL;
+WHERE org_id = @org_id AND name = @name AND disabled_reason IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL;
 
 -- name: GetAgentMCPServer :one
 SELECT * FROM agent_mcp_servers
@@ -271,17 +282,18 @@ WHERE org_id = @org_id AND agent_id = @agent_id AND server_id = @server_id;
 
 -- name: ListUnavailableMCPServersOfAgent :many
 -- The servers an agent may use that are down or disabled right now, for the note agentd gives the
--- agent when a session starts.
-SELECT s.name, s.health::text AS health, s.health_reason, s.disabled_reason
+-- agent when a session starts. credential_lost: its credential was lost (#85), so it is not served.
+SELECT s.name, s.health::text AS health, s.health_reason, s.disabled_reason,
+       (s.credential_lost_at IS NOT NULL)::boolean AS credential_lost
 FROM agent_mcp_servers a
 JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
 WHERE a.org_id = @org_id AND a.agent_id = @agent_id
-  AND (s.health = 'unhealthy' OR s.disabled_reason IS NOT NULL OR s.removed_at IS NOT NULL)
+  AND (s.health = 'unhealthy' OR s.disabled_reason IS NOT NULL OR s.removed_at IS NOT NULL OR s.credential_lost_at IS NOT NULL)
 ORDER BY s.name;
 
 -- name: ListMissingMCPServersOfAgent :many
 -- The servers an agent may use that Koinon has found not serving tools right now, and has not
--- withdrawn on purpose (a disabled or removed server is only mentioned in the note, see
+-- withdrawn on purpose (a disabled, removed or credential-lost server is only mentioned in the note, see
 -- ListUnavailableMCPServersOfAgent): unhealthy, or failing probes that have not yet reached the
 -- threshold, which is what a server overloaded for a minute looks like (issue koinon-private#326). agentd checks
 -- this before it starts the harness; a server never probed (unknown) is not a miss.
@@ -289,7 +301,7 @@ SELECT s.name, s.health::text AS health, s.health_reason, s.consecutive_failures
 FROM agent_mcp_servers a
 JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
 WHERE a.org_id = @org_id AND a.agent_id = @agent_id
-  AND s.disabled_reason IS NULL AND s.removed_at IS NULL
+  AND s.disabled_reason IS NULL AND s.removed_at IS NULL AND s.credential_lost_at IS NULL
   AND (s.health = 'unhealthy' OR (s.health = 'healthy' AND s.consecutive_failures > 0))
 ORDER BY s.name;
 
@@ -308,7 +320,7 @@ JOIN orgs o ON o.id = s.org_id
 LEFT JOIN mcp_tools t ON t.org_id = s.org_id AND t.server_id = s.id AND t.present
   AND (a.tools IS NULL OR t.name = ANY(a.tools))
 WHERE a.org_id = @org_id AND a.agent_id = @agent_id
-  AND s.disabled_reason IS NULL AND s.removed_at IS NULL AND s.health <> 'unhealthy'
+  AND s.disabled_reason IS NULL AND s.removed_at IS NULL AND s.credential_lost_at IS NULL AND s.health <> 'unhealthy'
 GROUP BY s.id, s.name, o.slug
 ORDER BY s.name;
 

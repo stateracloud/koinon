@@ -10,7 +10,8 @@
 //
 //   - Always, at every level including full: Koinon gateway keys (kgw_...) and the OpenShell
 //     placeholder that stands for one in a sandbox, Authorization and cookie header values,
-//     bearer tokens, JWT-shaped strings, well-known vendor API key shapes, and the verbatim values
+//     bearer tokens, JWT-shaped strings, vendor API key shapes (the rule set of gitleaks, pinned
+//     by version; see gitleaks.go), and the verbatim values
 //     of the org's known secrets (its secret store and provider records, passed in as a Secrets set).
 //   - At redacted, also: email addresses, phone numbers, IBANs (mod-97 checked), payment-card
 //     numbers (Luhn checked, known issuer ranges) and high-entropy tokens.

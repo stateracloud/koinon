@@ -226,7 +226,8 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 
 		conn := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 		_, err = q.CreateConnection(ctx, store.CreateConnectionParams{
-			OrgID: org, ID: conn, Connector: "github", DisplayName: "gh", Config: []byte(`{}`),
+			// A GitHub Enterprise Server at the tracker's host, so the tracker may act through it (#117).
+			OrgID: org, ID: conn, Connector: "github", DisplayName: "gh", Config: []byte(`{"baseUrl":"https://tracker.example.com"}`),
 			SecretName: pgtype.Text{String: "conn-" + conn.String(), Valid: true},
 		})
 		Expect(err).NotTo(HaveOccurred())

@@ -27,12 +27,15 @@ const (
 	KindAgent  = "agent"
 	KindSecret = "secret"
 	KindSystem = "system"
+	// KindCLI is an operator's koinon-api command run in the pod (koinon-api keys forget); its ID
+	// names the command.
+	KindCLI = "cli"
 )
 
 // Actor is who made a change.
 type Actor struct {
 	Kind string
-	// ID is the user, token or agent ID, or the declaring Secret's name.
+	// ID is the user, token or agent ID, the declaring Secret's name, or the command a CLI actor ran.
 	ID string
 }
 
@@ -50,6 +53,10 @@ func Secret(name string) Actor { return Actor{Kind: KindSecret, ID: name} }
 
 // System is Koinon itself.
 func System() Actor { return Actor{Kind: KindSystem} }
+
+// CLI is an operator's koinon-api command, named by command ("keys forget"). The command runs in
+// the pod with the database's credentials, so there is no signed-in person to name.
+func CLI(command string) Actor { return Actor{Kind: KindCLI, ID: command} }
 
 // String renders the actor as it reads in the log.
 func (a Actor) String() string {

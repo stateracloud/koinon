@@ -28,7 +28,8 @@ func providerProto(p catalog.Provider) *providerv1alpha1.Provider {
 	return &providerv1alpha1.Provider{
 		Id: p.ID, Name: p.Name, Type: p.Type, Url: p.URL, HasKey: p.HasKey, Source: p.Source,
 		ManagedBySecret: p.ManagedBySecret, DisabledReason: p.DisabledReason, Removed: p.Removed,
-		AnthropicWorkspaceId: p.AnthropicWorkspaceID, Formats: formatProtos(p.Formats),
+		AnthropicWorkspaceId: p.AnthropicWorkspaceID, Formats: formatProtos(p.Formats), CredentialLostAt: optTime(p.CredentialLostAt),
+		HasCostKey: p.HasCostKey, CostScope: p.CostScope, CostKeyLostAt: optTime(p.CostKeyLostAt),
 		CreatedAt: timestamppb.New(p.CreatedAt), UpdatedAt: timestamppb.New(p.UpdatedAt),
 	}
 }
@@ -137,6 +138,7 @@ func (s *Server) UpdateProvider(ctx context.Context, req *providerv1alpha1.Updat
 	}
 	p, err := s.catalog.UpdateProvider(requestCtx(ctx), c.org, c.auditActor(), req.GetProviderId(), catalog.ProviderPatch{
 		Type: req.Type, URL: req.Url, APIKey: req.ApiKey, AnthropicWorkspaceID: req.AnthropicWorkspaceId,
+		CostAPIKey: req.CostApiKey, CostScope: req.CostScope,
 	})
 	if err != nil {
 		return nil, s.catalogError(err)

@@ -253,6 +253,11 @@ var _ = Describe("Router", func() {
 			nocost := call("req-late", 3*time.Second, 0)
 			nocost.Cost = nil
 			e.store.setCalls([]router.ModelCall{call("req-1", 2*time.Second, 0.25), nocost})
+			// The 30 s are counted on the router's clock from when the root was held. A clock that also
+			// ran with real time would leave the "still waiting at 27 s" check a margin of 3 s of the
+			// spec's own run time, which a loaded machine can use up (#134); frozen, it moves only by
+			// the steps below.
+			e.clock.Freeze()
 			e.post(tr.root(false))
 			Eventually(func() int { return e.r.HeldRoots() }).Should(Equal(1))
 

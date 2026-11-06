@@ -30,7 +30,8 @@ const modelWaitKind = "run.waiting_for_model"
 // have is not waited for (the gateway answers for it as before). While the run waits it records
 // run.waiting_for_model once, which the task timeline shows, and NOTIFYs the reconciler every
 // ReconcileNudge so the pass that applies the provider follows soon after its key file settles.
-// A model without a usable price fails the run at once, since the gateway never serves it. After
+// A model without a usable price, or whose provider's key was lost, fails the run at once, since the
+// gateway never serves it. After
 // ModelServeTimeout the run fails with a reason that names the provider. ModelServeTimeout must
 // comfortably exceed the reconciler's --provider-key-settle plus a gateway apply.
 func (r *runner) waitModel(ctx context.Context, model string) error {
@@ -60,6 +61,11 @@ func (r *runner) waitModel(ctx context.Context, model string) error {
 				return ctx.Err()
 			}
 			continue
+		case m.CredentialLost:
+			// The provider's key was lost with a key-encryption key (ADR 0085 decision 13): the
+			// gateway stops serving it and no wait brings it back.
+			return &failure{reason: fmt.Sprintf("the API key of the model provider %q was lost, so the gateway does not "+
+				"serve the model %q; enter the key again on the Providers page and run the task again", m.ProviderName, model)}
 		case m.Served:
 			if recorded {
 				r.p.cfg.Metrics.ModelWait.Observe(now().Sub(started).Seconds())

@@ -32,6 +32,7 @@ tags:
   - name: models
   - name: mcp
   - name: leak-guard
+  - name: org-settings
   - name: tokens
   - name: prices
   - name: budgets
@@ -517,6 +518,72 @@ paths:
                 $ref: "#/components/schemas/DefaultModel"
         default:
           $ref: "#/components/responses/Error"
+  /run-content-retention:
+    get:
+      tags: [org-settings]
+      operationId: getRunContentRetention
+      summary: How long a finished run's stored content is kept (issue #69), with the default and bounds.
+      responses:
+        "200":
+          description: The retention.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunContentRetention"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [org-settings]
+      operationId: setRunContentRetention
+      summary: Set the retention in days, or return it to the default (30) by leaving `days` out. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunContentRetentionSettings"
+      responses:
+        "200":
+          description: The retention.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunContentRetention"
+        default:
+          $ref: "#/components/responses/Error"
+  /home-backup-retention:
+    get:
+      tags: [org-settings]
+      operationId: getHomeBackupRetention
+      summary: How long an old home backup repository is kept after a key change (issue #219), with the default and bounds.
+      responses:
+        "200":
+          description: The retention.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HomeBackupRetention"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [org-settings]
+      operationId: setHomeBackupRetention
+      summary: Set the retention in days, or return it to the default (7) by leaving `days` out. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HomeBackupRetentionSettings"
+      responses:
+        "200":
+          description: The retention.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HomeBackupRetention"
+        default:
+          $ref: "#/components/responses/Error"
   /leak-guard:
     get:
       tags: [leak-guard]
@@ -973,7 +1040,7 @@ paths:
         - name: actorKind
           in: query
           required: false
-          schema: {type: string, enum: [user, token, agent, secret, system]}
+          schema: {type: string, enum: [user, token, agent, secret, system, cli]}
         - name: actorId
           in: query
           required: false
@@ -1071,6 +1138,12 @@ components:
         hasKey:
           type: boolean
           description: Whether an API key is stored. The key itself is never returned.
+        credentialLostAt:
+          type: string
+          format: date-time
+          description: >-
+            Set when the API key was lost with the key that encrypted it (`koinon-api keys forget`):
+            the provider is not served until the key is entered again.
         anthropicWorkspaceId:
           type: string
           example: wrkspc_01AbCdEf
@@ -1267,6 +1340,12 @@ components:
         hasCredential:
           type: boolean
           description: Whether a credential is stored. The credential itself is never returned.
+        credentialLostAt:
+          type: string
+          format: date-time
+          description: >-
+            Set when the credential was lost with the key that encrypted it (`koinon-api keys forget`):
+            the server is not served until the credential is entered again.
         credentialHeader: {type: string, example: Authorization}
         credentialPrefix: {type: string, example: "Bearer "}
         source: {$ref: "#/components/schemas/Source"}
@@ -1384,6 +1463,42 @@ components:
         resultPrivateData:
           type: boolean
           description: The tool's results carry data the org does not want to leave. Leave out for the server's own leg.
+    RunContentRetention:
+      type: object
+      required: [days, defaultDays, minDays, maxDays]
+      description: >-
+        Once a finished run is older than `days`, the purge job blanks the payload of its content events
+        (messages, thoughts and tool calls) and strips the text from prompt, permission and refusal events,
+        whose state fields stay. Other events, the run's status, traces and the spend ledger stay.
+      properties:
+        days: {type: integer}
+        defaultDays: {type: integer}
+        minDays: {type: integer}
+        maxDays: {type: integer}
+    RunContentRetentionSettings:
+      type: object
+      properties:
+        days:
+          type: integer
+          description: Days to keep a finished run's content. Leave out for the default (30).
+    HomeBackupRetention:
+      type: object
+      required: [days, defaultDays, minDays, maxDays]
+      description: >-
+        A key change starts a new backup repository for each agent's home. The old one stays readable for
+        the checkpoints written to it for `days`, then it is deleted. The deadline is set when the new
+        repository starts, so a change applies to later key changes only.
+      properties:
+        days: {type: integer}
+        defaultDays: {type: integer}
+        minDays: {type: integer}
+        maxDays: {type: integer}
+    HomeBackupRetentionSettings:
+      type: object
+      properties:
+        days:
+          type: integer
+          description: Days to keep an old home backup repository. Leave out for the default (7).
     LeakGuardSettings:
       type: object
       properties:
@@ -1794,7 +1909,7 @@ components:
         gatewayUsd: {type: string, description: "agentgateway's own cost of those requests."}
         gatewayComparedUsd: {type: string, description: "Koinon's cost of the same requests, to compare with gatewayUsd."}
         flaggedRequests: {type: integer, format: int64, description: "Requests flagged for review (cost differs from the gateway's by more than 1%, usage missing, or an unusable price)."}
-        provisionalRequests: {type: integer, format: int64, description: "Responses cut short whose provider figure is pending; their cost is the usage the gateway logged until the provider reports."}
+        provisionalRequests: {type: integer, format: int64, description: "Requests whose provider bill is pending; their cost is Koinon's price of the usage the gateway logged until the provider reports."}
         reservedUsd: {type: string, description: "What the provisional requests hold back from the gateway keys' limits (their max_tokens bound minus the charge). Not a cost and not counted by budgets; released when they settle."}
     SpendReport:
       type: object
@@ -1820,7 +1935,7 @@ components:
       required: [id, actorKind, actorId, action, targetKind, targetId, summary, requestId, createdAt, chainSeq, prevHash, hash]
       properties:
         id: {type: string, format: uuid}
-        actorKind: {type: string, enum: [user, token, agent, secret, system]}
+        actorKind: {type: string, enum: [user, token, agent, secret, system, cli]}
         actorId: {type: string}
         action: {type: string, description: "<area>.<verb>, for example approval.approve."}
         targetKind: {type: string}

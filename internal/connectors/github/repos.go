@@ -125,6 +125,9 @@ type Repository struct {
 	FullName      string `json:"full_name"`
 	DefaultBranch string `json:"default_branch"`
 	Private       bool   `json:"private"`
+	// Visibility is "public", "private" or "internal" (GitHub Enterprise); empty when the server
+	// does not send it.
+	Visibility string `json:"visibility"`
 }
 
 // GetRepository returns the repository.

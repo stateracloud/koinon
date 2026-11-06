@@ -66,6 +66,7 @@ func (e AgentThinkingUpdateThinking) Valid() bool {
 // Defines values for AuditEventActorKind.
 const (
 	AuditEventActorKindAgent  AuditEventActorKind = "agent"
+	AuditEventActorKindCli    AuditEventActorKind = "cli"
 	AuditEventActorKindSecret AuditEventActorKind = "secret"
 	AuditEventActorKindSystem AuditEventActorKind = "system"
 	AuditEventActorKindToken  AuditEventActorKind = "token"
@@ -76,6 +77,8 @@ const (
 func (e AuditEventActorKind) Valid() bool {
 	switch e {
 	case AuditEventActorKindAgent:
+		return true
+	case AuditEventActorKindCli:
 		return true
 	case AuditEventActorKindSecret:
 		return true
@@ -465,6 +468,7 @@ func (e ThinkingStateVersionSetting) Valid() bool {
 // Defines values for ListAuditEventsParamsActorKind.
 const (
 	ListAuditEventsParamsActorKindAgent  ListAuditEventsParamsActorKind = "agent"
+	ListAuditEventsParamsActorKindCli    ListAuditEventsParamsActorKind = "cli"
 	ListAuditEventsParamsActorKindSecret ListAuditEventsParamsActorKind = "secret"
 	ListAuditEventsParamsActorKindSystem ListAuditEventsParamsActorKind = "system"
 	ListAuditEventsParamsActorKindToken  ListAuditEventsParamsActorKind = "token"
@@ -475,6 +479,8 @@ const (
 func (e ListAuditEventsParamsActorKind) Valid() bool {
 	switch e {
 	case ListAuditEventsParamsActorKindAgent:
+		return true
+	case ListAuditEventsParamsActorKindCli:
 		return true
 	case ListAuditEventsParamsActorKindSecret:
 		return true
@@ -694,6 +700,20 @@ type FlaggedPriceList struct {
 	Flagged []FlaggedPrice `json:"flagged"`
 }
 
+// HomeBackupRetention A key change starts a new backup repository for each agent's home. The old one stays readable for the checkpoints written to it for `days`, then it is deleted. The deadline is set when the new repository starts, so a change applies to later key changes only.
+type HomeBackupRetention struct {
+	Days        int `json:"days"`
+	DefaultDays int `json:"defaultDays"`
+	MaxDays     int `json:"maxDays"`
+	MinDays     int `json:"minDays"`
+}
+
+// HomeBackupRetentionSettings defines model for HomeBackupRetentionSettings.
+type HomeBackupRetentionSettings struct {
+	// Days Days to keep an old home backup repository. Leave out for the default (7).
+	Days *int `json:"days,omitempty"`
+}
+
 // LeakGuard defines model for LeakGuard.
 type LeakGuard struct {
 	// CodeHostScope The org's code-host scope (ADR 0091): the repositories of its code-host connections with the
@@ -729,7 +749,10 @@ type McpServer struct {
 	CodeHostConnectionId *openapi_types.UUID `json:"codeHostConnectionId,omitempty"`
 	CreatedAt            time.Time           `json:"createdAt"`
 	CredentialHeader     *string             `json:"credentialHeader,omitempty"`
-	CredentialPrefix     *string             `json:"credentialPrefix,omitempty"`
+
+	// CredentialLostAt Set when the credential was lost with the key that encrypted it (`koinon-api keys forget`): the server is not served until the credential is entered again.
+	CredentialLostAt *time.Time `json:"credentialLostAt,omitempty"`
+	CredentialPrefix *string    `json:"credentialPrefix,omitempty"`
 
 	// DataClass The session legs (ADR 0091) the server's results can set: `untrusted_input` (returns text an
 	// outsider controls) and `private_data` (returns data the org does not want to leave). A server
@@ -1208,6 +1231,9 @@ type Provider struct {
 	AnthropicWorkspaceId *string   `json:"anthropicWorkspaceId,omitempty"`
 	CreatedAt            time.Time `json:"createdAt"`
 
+	// CredentialLostAt Set when the API key was lost with the key that encrypted it (`koinon-api keys forget`): the provider is not served until the key is entered again.
+	CredentialLostAt *time.Time `json:"credentialLostAt,omitempty"`
+
 	// DisabledReason Set while a declared provider of the same name shadows this one; it is not served.
 	DisabledReason *string `json:"disabledReason,omitempty"`
 
@@ -1275,6 +1301,20 @@ type Rates struct {
 // Role defines model for Role.
 type Role string
 
+// RunContentRetention Once a finished run is older than `days`, the purge job blanks the payload of its content events (messages, thoughts and tool calls) and strips the text from prompt, permission and refusal events, whose state fields stay. Other events, the run's status, traces and the spend ledger stay.
+type RunContentRetention struct {
+	Days        int `json:"days"`
+	DefaultDays int `json:"defaultDays"`
+	MaxDays     int `json:"maxDays"`
+	MinDays     int `json:"minDays"`
+}
+
+// RunContentRetentionSettings defines model for RunContentRetentionSettings.
+type RunContentRetentionSettings struct {
+	// Days Days to keep a finished run's content. Leave out for the default (30).
+	Days *int `json:"days,omitempty"`
+}
+
 // Source `secret` entries are declared by a Kubernetes Secret and read-only here.
 type Source string
 
@@ -1304,7 +1344,7 @@ type SpendLine struct {
 	// OutputTokens Output tokens, reasoning (thinking) tokens included.
 	OutputTokens int64 `json:"outputTokens"`
 
-	// ProvisionalRequests Responses cut short whose provider figure is pending; their cost is the usage the gateway logged until the provider reports.
+	// ProvisionalRequests Requests whose provider bill is pending; their cost is Koinon's price of the usage the gateway logged until the provider reports.
 	ProvisionalRequests int64 `json:"provisionalRequests"`
 
 	// ReasoningTokens The part of outputTokens the provider reported as reasoning, or null when no request of the model reported a split. Null does not mean the model did not think: Anthropic Messages has no separate reasoning count and counts thinking inside outputTokens. Thinking is billed as output: at the output rate unless the price names a reasoning rate (ADR 0069 amendment 2026-10-29).
@@ -1485,6 +1525,9 @@ type SetBudgetJSONRequestBody = OrgBudgetUpdate
 // SetDefaultModelJSONRequestBody defines body for SetDefaultModel for application/json ContentType.
 type SetDefaultModelJSONRequestBody = DefaultModel
 
+// SetHomeBackupRetentionJSONRequestBody defines body for SetHomeBackupRetention for application/json ContentType.
+type SetHomeBackupRetentionJSONRequestBody = HomeBackupRetentionSettings
+
 // SetLeakGuardJSONRequestBody defines body for SetLeakGuard for application/json ContentType.
 type SetLeakGuardJSONRequestBody = LeakGuardSettings
 
@@ -1526,6 +1569,9 @@ type UpdateProviderJSONRequestBody = ProviderUpdate
 
 // CheckProviderEchoJSONRequestBody defines body for CheckProviderEcho for application/json ContentType.
 type CheckProviderEchoJSONRequestBody = EchoCheckRequest
+
+// SetRunContentRetentionJSONRequestBody defines body for SetRunContentRetention for application/json ContentType.
+type SetRunContentRetentionJSONRequestBody = RunContentRetentionSettings
 
 // CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
 type CreateTokenJSONRequestBody = TokenCreate
@@ -1573,6 +1619,12 @@ type ServerInterface interface {
 	// SetDefaultModel Set the org's default model, or clear it by leaving `model` out. Audited.
 	// (PUT /default-model)
 	SetDefaultModel(w http.ResponseWriter, r *http.Request)
+	// GetHomeBackupRetention How long an old home backup repository is kept after a key change (issue
+	// (GET /home-backup-retention)
+	GetHomeBackupRetention(w http.ResponseWriter, r *http.Request)
+	// SetHomeBackupRetention Set the retention in days, or return it to the default (7) by leaving `days` out. Audited.
+	// (PUT /home-backup-retention)
+	SetHomeBackupRetention(w http.ResponseWriter, r *http.Request)
 	// GetLeakGuard The org's leak-guard settings, with defaults filled in, and its fetch-trusted host list.
 	// (GET /leak-guard)
 	GetLeakGuard(w http.ResponseWriter, r *http.Request)
@@ -1672,6 +1724,12 @@ type ServerInterface interface {
 	// CheckProviderEcho Check whether the provider changes the text it is sent.
 	// (POST /providers/{providerId}/echo-check)
 	CheckProviderEcho(w http.ResponseWriter, r *http.Request, providerId ProviderId)
+	// GetRunContentRetention How long a finished run's stored content is kept (issue
+	// (GET /run-content-retention)
+	GetRunContentRetention(w http.ResponseWriter, r *http.Request)
+	// SetRunContentRetention Set the retention in days, or return it to the default (30) by leaving `days` out. Audited.
+	// (PUT /run-content-retention)
+	SetRunContentRetention(w http.ResponseWriter, r *http.Request)
 	// GetSpendReport Spend per model, with estimated usage shown apart from reported usage.
 	// (GET /spend)
 	GetSpendReport(w http.ResponseWriter, r *http.Request, params GetSpendReportParams)
@@ -2070,6 +2128,34 @@ func (siw *ServerInterfaceWrapper) SetDefaultModel(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetDefaultModel(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetHomeBackupRetention operation middleware
+func (siw *ServerInterfaceWrapper) GetHomeBackupRetention(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetHomeBackupRetention(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetHomeBackupRetention operation middleware
+func (siw *ServerInterfaceWrapper) SetHomeBackupRetention(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetHomeBackupRetention(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2830,6 +2916,34 @@ func (siw *ServerInterfaceWrapper) CheckProviderEcho(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetRunContentRetention operation middleware
+func (siw *ServerInterfaceWrapper) GetRunContentRetention(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRunContentRetention(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetRunContentRetention operation middleware
+func (siw *ServerInterfaceWrapper) SetRunContentRetention(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetRunContentRetention(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetSpendReport operation middleware
 func (siw *ServerInterfaceWrapper) GetSpendReport(w http.ResponseWriter, r *http.Request) {
 
@@ -3063,6 +3177,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/models/{modelId}", wrapper.UpdateModel)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/default-model", wrapper.GetDefaultModel)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/default-model", wrapper.SetDefaultModel)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/run-content-retention", wrapper.GetRunContentRetention)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/run-content-retention", wrapper.SetRunContentRetention)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/home-backup-retention", wrapper.GetHomeBackupRetention)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/home-backup-retention", wrapper.SetHomeBackupRetention)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/leak-guard", wrapper.GetLeakGuard)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/leak-guard", wrapper.SetLeakGuard)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/leak-guard/trusted-hosts", wrapper.AddFetchTrustedHost)
@@ -3591,6 +3709,83 @@ type SetDefaultModeldefaultJSONResponse struct {
 }
 
 func (response SetDefaultModeldefaultJSONResponse) VisitSetDefaultModelResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHomeBackupRetentionRequestObject struct {
+}
+
+type GetHomeBackupRetentionResponseObject interface {
+	VisitGetHomeBackupRetentionResponse(w http.ResponseWriter) error
+}
+
+type GetHomeBackupRetention200JSONResponse HomeBackupRetention
+
+func (response GetHomeBackupRetention200JSONResponse) VisitGetHomeBackupRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHomeBackupRetentiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetHomeBackupRetentiondefaultJSONResponse) VisitGetHomeBackupRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetHomeBackupRetentionRequestObject struct {
+	Body *SetHomeBackupRetentionJSONRequestBody
+}
+
+type SetHomeBackupRetentionResponseObject interface {
+	VisitSetHomeBackupRetentionResponse(w http.ResponseWriter) error
+}
+
+type SetHomeBackupRetention200JSONResponse HomeBackupRetention
+
+func (response SetHomeBackupRetention200JSONResponse) VisitSetHomeBackupRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetHomeBackupRetentiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetHomeBackupRetentiondefaultJSONResponse) VisitSetHomeBackupRetentionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -4832,6 +5027,83 @@ func (response CheckProviderEchodefaultJSONResponse) VisitCheckProviderEchoRespo
 	return err
 }
 
+type GetRunContentRetentionRequestObject struct {
+}
+
+type GetRunContentRetentionResponseObject interface {
+	VisitGetRunContentRetentionResponse(w http.ResponseWriter) error
+}
+
+type GetRunContentRetention200JSONResponse RunContentRetention
+
+func (response GetRunContentRetention200JSONResponse) VisitGetRunContentRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRunContentRetentiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetRunContentRetentiondefaultJSONResponse) VisitGetRunContentRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetRunContentRetentionRequestObject struct {
+	Body *SetRunContentRetentionJSONRequestBody
+}
+
+type SetRunContentRetentionResponseObject interface {
+	VisitSetRunContentRetentionResponse(w http.ResponseWriter) error
+}
+
+type SetRunContentRetention200JSONResponse RunContentRetention
+
+func (response SetRunContentRetention200JSONResponse) VisitSetRunContentRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetRunContentRetentiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetRunContentRetentiondefaultJSONResponse) VisitSetRunContentRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetSpendReportRequestObject struct {
 	Params GetSpendReportParams
 }
@@ -5024,6 +5296,12 @@ type StrictServerInterface interface {
 	// SetDefaultModel Set the org's default model, or clear it by leaving `model` out. Audited.
 	// (PUT /default-model)
 	SetDefaultModel(ctx context.Context, request SetDefaultModelRequestObject) (SetDefaultModelResponseObject, error)
+	// GetHomeBackupRetention How long an old home backup repository is kept after a key change (issue
+	// (GET /home-backup-retention)
+	GetHomeBackupRetention(ctx context.Context, request GetHomeBackupRetentionRequestObject) (GetHomeBackupRetentionResponseObject, error)
+	// SetHomeBackupRetention Set the retention in days, or return it to the default (7) by leaving `days` out. Audited.
+	// (PUT /home-backup-retention)
+	SetHomeBackupRetention(ctx context.Context, request SetHomeBackupRetentionRequestObject) (SetHomeBackupRetentionResponseObject, error)
 	// GetLeakGuard The org's leak-guard settings, with defaults filled in, and its fetch-trusted host list.
 	// (GET /leak-guard)
 	GetLeakGuard(ctx context.Context, request GetLeakGuardRequestObject) (GetLeakGuardResponseObject, error)
@@ -5123,6 +5401,12 @@ type StrictServerInterface interface {
 	// CheckProviderEcho Check whether the provider changes the text it is sent.
 	// (POST /providers/{providerId}/echo-check)
 	CheckProviderEcho(ctx context.Context, request CheckProviderEchoRequestObject) (CheckProviderEchoResponseObject, error)
+	// GetRunContentRetention How long a finished run's stored content is kept (issue
+	// (GET /run-content-retention)
+	GetRunContentRetention(ctx context.Context, request GetRunContentRetentionRequestObject) (GetRunContentRetentionResponseObject, error)
+	// SetRunContentRetention Set the retention in days, or return it to the default (30) by leaving `days` out. Audited.
+	// (PUT /run-content-retention)
+	SetRunContentRetention(ctx context.Context, request SetRunContentRetentionRequestObject) (SetRunContentRetentionResponseObject, error)
 	// GetSpendReport Spend per model, with estimated usage shown apart from reported usage.
 	// (GET /spend)
 	GetSpendReport(ctx context.Context, request GetSpendReportRequestObject) (GetSpendReportResponseObject, error)
@@ -5542,6 +5826,61 @@ func (sh *strictHandler) SetDefaultModel(w http.ResponseWriter, r *http.Request)
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetDefaultModelResponseObject); ok {
 		if err := validResponse.VisitSetDefaultModelResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetHomeBackupRetention operation middleware
+func (sh *strictHandler) GetHomeBackupRetention(w http.ResponseWriter, r *http.Request) {
+	var request GetHomeBackupRetentionRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetHomeBackupRetention(ctx, request.(GetHomeBackupRetentionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetHomeBackupRetention")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetHomeBackupRetentionResponseObject); ok {
+		if err := validResponse.VisitGetHomeBackupRetentionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetHomeBackupRetention operation middleware
+func (sh *strictHandler) SetHomeBackupRetention(w http.ResponseWriter, r *http.Request) {
+	var request SetHomeBackupRetentionRequestObject
+
+	var body SetHomeBackupRetentionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetHomeBackupRetention(ctx, request.(SetHomeBackupRetentionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetHomeBackupRetention")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetHomeBackupRetentionResponseObject); ok {
+		if err := validResponse.VisitSetHomeBackupRetentionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -6452,6 +6791,61 @@ func (sh *strictHandler) CheckProviderEcho(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CheckProviderEchoResponseObject); ok {
 		if err := validResponse.VisitCheckProviderEchoResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRunContentRetention operation middleware
+func (sh *strictHandler) GetRunContentRetention(w http.ResponseWriter, r *http.Request) {
+	var request GetRunContentRetentionRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRunContentRetention(ctx, request.(GetRunContentRetentionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRunContentRetention")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRunContentRetentionResponseObject); ok {
+		if err := validResponse.VisitGetRunContentRetentionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetRunContentRetention operation middleware
+func (sh *strictHandler) SetRunContentRetention(w http.ResponseWriter, r *http.Request) {
+	var request SetRunContentRetentionRequestObject
+
+	var body SetRunContentRetentionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetRunContentRetention(ctx, request.(SetRunContentRetentionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetRunContentRetention")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetRunContentRetentionResponseObject); ok {
+		if err := validResponse.VisitSetRunContentRetentionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

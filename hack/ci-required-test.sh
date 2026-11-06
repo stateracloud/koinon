@@ -146,6 +146,26 @@ check() {
   return "$problems"
 }
 
+# workflows_of LIST: the workflow files that produce a required check, one basename per line: ci.yml and the
+# external ones the header of the list names (`#   <check>   .github/workflows/<file>.yml`).
+workflows_of() {
+  { echo ci.yml; sed -n -E 's@^#[[:space:]]+[^[:space:]].*[[:space:]]\.github/workflows/([A-Za-z0-9_.-]+\.yml)[[:space:]]*$@\1@p' "$1"; } | sort -u
+}
+
+# merge_group_problems LIST WFDIR: the merge queue (ADR 0094 decision 4) waits for every required check on its
+# own build, so a workflow that produces one must listen to `merge_group`; else the check stays absent and the
+# queue entry times out.
+merge_group_problems() {
+  local wf n=0 problems=0
+  while IFS= read -r wf; do
+    n=$((n + 1))
+    if [[ ! -f $2/$wf ]]; then echo "FAIL: required workflow $wf is not in $2"; problems=1; continue; fi
+    grep -Eq '^  merge_group:' "$2/$wf" || { echo "FAIL: workflow $wf produces a required check but has no merge_group trigger (ADR 0094)"; problems=1; }
+  done < <(workflows_of "$1")
+  [[ $n -gt 1 ]] || { echo "FAIL: no external workflows found in the header of $(basename "$1")"; problems=1; }
+  return "$problems"
+}
+
 # contexts LIST: the names the ruleset must require, sorted, one per line.
 contexts() {
   local line
@@ -200,6 +220,9 @@ fi
 
 check "$yml" "$list"
 echo "ok: every job of $(basename "$yml") is required, advisory or a part of an aggregator; every required name has a job"
+
+merge_group_problems "$list" "${CI_WORKFLOWS:-$root/.github/workflows}"
+echo "ok: every workflow that produces a required check listens to merge_group"
 
 # Negative cases, on small fixtures: the check has to fail where it should.
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/ci-required-test.XXXXXX")
@@ -273,4 +296,13 @@ grep -qF "lacks !cancelled()" <<<"$out" || { echo "FAIL: nocancel: wrong message
 printf 'jobs:\n  m:\n    name: m\n    strategy:\n      matrix:\n        a: [1]\n' >"$tmp/m.yml"
 printf 'm\n' >"$tmp/m.txt"
 if check "$tmp/m.yml" "$tmp/m.txt" >/dev/null 2>&1; then echo "FAIL: a matrix job passed"; exit 1; fi
+# A required external workflow without merge_group fails.
+mkdir "$tmp/wf"
+printf 'on:\n  merge_group:\n    types: [checks_requested]\n' >"$tmp/wf/ci.yml"
+printf 'on:\n  merge_group:\n    types: [checks_requested]\n' >"$tmp/wf/ext.yml"
+printf '# Required checks that other workflows produce:\n#   dco              .github/workflows/ext.yml\n\nexternal dco\n' >"$tmp/mg.txt"
+merge_group_problems "$tmp/mg.txt" "$tmp/wf" >/dev/null || { echo "FAIL: the merge_group fixture that should pass failed"; exit 1; }
+printf 'on:\n  pull_request:\n' >"$tmp/wf/ext.yml"
+if out=$(merge_group_problems "$tmp/mg.txt" "$tmp/wf" 2>&1); then echo "FAIL: a required workflow without merge_group passed"; exit 1; fi
+grep -qF "workflow ext.yml produces a required check but has no merge_group" <<<"$out" || { echo "FAIL: merge_group: wrong message: $out"; exit 1; }
 echo "ok: the negative cases fail as they should"

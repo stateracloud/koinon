@@ -49,7 +49,8 @@ RETURNING *;
 -- name: UpdateDeclaredConnection :one
 UPDATE connections
 SET display_name = @display_name, config = @config, secret_envelope = @secret_envelope,
-    secret_fingerprint = @secret_fingerprint, declared_version = @declared_version, removed_at = NULL
+    secret_fingerprint = @secret_fingerprint, declared_version = @declared_version, removed_at = NULL,
+    credential_lost_at = NULL
 WHERE org_id = @org_id AND id = @id AND source = 'secret'
 RETURNING *;
 
@@ -85,3 +86,24 @@ WHERE a.org_id = @org_id AND a.status <> 'archived'
   AND (v.id = a.active_version_id OR v.version = a.latest_version)
   AND v.config -> 'bindings' @> jsonb_build_array(jsonb_build_object('connectionId', @connection_id::text))
 ORDER BY a.display_name, a.id;
+
+-- name: GetConnectionForUpdate :one
+SELECT * FROM connections
+WHERE org_id = @org_id AND id = @id
+FOR UPDATE;
+
+-- name: SetUIConnectionSecret :one
+-- A new secret for a connection entered here (ADR 0085 decision 13: entering a lost one again, or
+-- rotating one). The old test result was about the old secret: the connection is untested again.
+UPDATE connections
+SET config = @config, secret_envelope = @secret_envelope, secret_fingerprint = @secret_fingerprint,
+    credential_lost_at = NULL, status = 'untested', last_tested_at = NULL, last_test = '[]'
+WHERE org_id = @org_id AND id = @id AND source = 'ui'
+RETURNING *;
+
+-- name: ListOrgsWithCodeHostConnections :many
+-- The code-host scope refresh: finds every org that has a live connection of one of these connector
+-- types, to refresh its repositories' visibility. Across orgs, like the question sweeps.
+SELECT DISTINCT org_id FROM connections
+WHERE connector = ANY(@connectors::text[]) AND removed_at IS NULL AND credential_lost_at IS NULL
+ORDER BY org_id;

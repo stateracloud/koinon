@@ -121,6 +121,10 @@ message Destination {
   // config_version changes with every change of the configuration and with nothing the router records.
   // Send it back as expected_version when updating.
   int64 config_version = 13;
+  // credential_lost_at is set when the credentials were lost with the key that encrypted them (`koinon-api keys
+  // forget`, ADR 0085 decision 13): the destination receives nothing until a tested update enters every secret
+  // in secret_fields again. Unset otherwise.
+  google.protobuf.Timestamp credential_lost_at = 14;
 }
 
 // DestinationInput is what a caller writes.

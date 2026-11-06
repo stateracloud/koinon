@@ -44,14 +44,26 @@
 #              another commit than the PR's headRefOid for PR_WAIT_STALE_GRACE seconds (default 120; GitHub
 #              lags a push by a few seconds), it exits 6 with `STALE-HEAD` instead of judging the old head.
 #              Not checked for a fork PR or when the remote cannot be read.
+#              Unresolved review threads (#187): when every check is green but mergeStateStatus is BLOCKED, the
+#              ruleset's required_review_thread_resolution is the usual cause (advisory bots comment inline).
+#              hack/pr-threads.sh lists the unresolved threads (`UNRESOLVED path:line author`) and this exits 7
+#              at once, without waiting: threads do not resolve by themselves. It never resolves one; reply
+#              and resolve them as docs/dev/ci.md "Merging" says. When the threads cannot be read (after
+#              three tries), it exits 2: it never reports a PR as ready on a guess.
 #   --timeout  90m by default; 30s, 15m, 2h or plain seconds
 #   --interval 20 seconds by default
 #
 # Output lines: `checks 7/9 pending: go,web`, `FAILED go (run 123)`, `MERGED abc1234`,
 # `needs-update`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
-# Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout,
+# Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout (or, with --checks, the required contexts / review threads unreadable),
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
-#       6 stale PR head (with --checks), 64 usage.
+#       6 stale PR head (with --checks), 7 unresolved review threads (BLOCKED with --checks, all green), 64 usage.
+#       8 the PR was in the merge queue and left it without merging (DEQUEUED).
+#       Merge queue (#225): a queued PR is OPEN until the queue build merges it; the wait prints
+#       `in the merge queue (<position> <state>)` and continues to `MERGED` (exit 0). With --checks the head's
+#       checks are judged as before: they gate entry to the queue; the queue build's own checks are on the
+#       queue commit (gh-readonly-queue/...), not on the head.
+# Test hook: PR_WAIT_THREADS replaces hack/pr-threads.sh.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -175,17 +187,36 @@ shown() { if [ "$alias_show" = 1 ] && [ "$1" = quickstart ]; then echo e2e; else
 # ruleset), one per line, into $ctxs. Read until it succeeds once; a failed read leaves it empty.
 # A workflow run that is queued has no jobs yet, so its required checks are absent from the head's
 # rollup: "everything in the rollup is green" is not "every required check is green".
-ctx_ok=0 ctxs=""
+ctx_ok=0 ctx_tried=0 ctxs=""
 load_contexts() {
   [ "$ctx_ok" = 0 ] || return 0
-  local out
-  if out=$(gh api "repos/{owner}/{repo}/rules/branches/$1" \
-    --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique | .[]' 2>/dev/null); then
-    ctxs=$out ctx_ok=1
-  fi
+  local out try
+  local -a sleeps
+  read -r -a sleeps <<<"${PR_THREADS_RETRY_SLEEPS:-2 5 15}" # the same retries (and test override) as pr-threads.sh
+  for ((try = 0; try <= ${#sleeps[@]}; try++)); do
+    if out=$(gh api "repos/{owner}/{repo}/rules/branches/$1" \
+      --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique | .[]' 2>/dev/null); then
+      ctxs=$out ctx_ok=1
+      return 0
+    fi
+    [ "$try" -lt "${#sleeps[@]}" ] && sleep "${sleeps[$try]}"
+  done
+  return 0
 }
 
-no_live=0 last=""
+# queue_state <PR>: `queued <position> <state>` while the PR is in the base branch's merge queue
+# (#225), `no` when the answer says it is not (a repository without a queue answers `no` too), and
+# `unknown` when the answer cannot be read (gh or jq failed, a GraphQL error, no pullRequest object).
+# `gh pr view --json` has no queue fields, so GraphQL. Callers must not take `unknown` for "left the queue".
+# shellcheck disable=SC2016 # $owner, $repo, $number are GraphQL variables
+queue_query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { isInMergeQueue mergeQueueEntry { position state } } } }'
+queue_state() {
+  local raw
+  raw=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -F number="$1" -f query="$queue_query" 2>/dev/null) || { echo unknown; return 0; }
+  jq -r '.data.repository.pullRequest | if type != "object" then "unknown" elif .isInMergeQueue == true then "queued \(.mergeQueueEntry.position // "?") \(.mergeQueueEntry.state // "")" else "no" end' <<<"$raw" 2>/dev/null || echo unknown
+}
+
+no_live=0 last="" was_queued=0 dq_polls=0
 emit() { # print only when the line differs from the previous one
   if [ "$1" != "$last" ]; then
     echo "$1"
@@ -193,6 +224,7 @@ emit() { # print only when the line differs from the previous one
   fi
 }
 
+threads_sh=${PR_WAIT_THREADS:-$(cd "$(dirname "$0")" && pwd)/pr-threads.sh}
 stale_grace=${PR_WAIT_STALE_GRACE:-120} stale_since=""
 start=$SECONDS
 while :; do
@@ -208,6 +240,49 @@ while :; do
     CLOSED)
       echo "CLOSED"
       exit 3
+      ;;
+    esac
+    # The merge queue (#225): an enqueued PR stays OPEN until the queue build merges it, so
+    # --merged keeps waiting and says where it stands. A PR that was in the queue and is OPEN and out of it
+    # again was removed (a failed queue build, a conflict with the entry ahead, or by hand): exit 8, with
+    # the checks of the queue build named by `hack/ci-fail.sh`/the PR page. Never re-enqueues.
+    # Only in the merged mode: --checks judges the head's checks as before, queued or not (pr-merge --admin).
+    qs=""
+    [ "$mode" != merged ] || qs=$(queue_state "$pr")
+    case $qs in
+    queued*)
+      was_queued=1 dq_polls=0
+      emit "in the merge queue (${qs#queued })"
+      if [ $((SECONDS - start)) -ge "$timeout" ]; then echo "TIMEOUT"; exit 2; fi
+      [ "$interval" -eq 0 ] || sleep "$interval"
+      continue
+      ;;
+    unknown)
+      # The queue state could not be read (rate limit, outage). Once the PR was queued that says nothing about
+      # whether it left: keep waiting. It neither counts toward dq_polls nor resets it, so DEQUEUED still needs
+      # two real "not queued" answers in a row, however many unreadable ones sit between them. Before anything
+      # was queued it is read as "not queued", as it always was.
+      if [ "$was_queued" = 1 ]; then
+        emit "merge queue state unreadable; waiting"
+        if [ $((SECONDS - start)) -ge "$timeout" ]; then echo "TIMEOUT"; exit 2; fi
+        [ "$interval" -eq 0 ] || sleep "$interval"
+        continue
+      fi
+      ;;
+    *)
+      if [ "$was_queued" = 1 ]; then
+        # The queue pushes main first and the PR reads MERGED a moment later, and the PR state is read before the
+        # queue state: one poll of "OPEN and not queued" can be a merge in progress. Look again (the next pass
+        # reads the PR first) and report DEQUEUED only on the second consecutive poll.
+        dq_polls=$((dq_polls + 1))
+        if [ "$dq_polls" -lt 2 ]; then
+          if [ $((SECONDS - start)) -ge "$timeout" ]; then echo "TIMEOUT"; exit 2; fi
+          [ "$interval" -eq 0 ] || sleep "$interval"
+          continue
+        fi
+        echo "DEQUEUED: PR $pr left the merge queue without merging (the queue build failed, it conflicted with an entry ahead, or it was removed); read the queue build's failures on the PR page, fix, and enqueue again with hack/pr-merge.sh"
+        exit 8
+      fi
       ;;
     esac
     ready_dropped=0
@@ -292,6 +367,34 @@ while :; do
         no_live=1
       fi
     fi
+    # Only required checks decide (AGENTS.md: advisory and third-party checks, DeepSource, CodeRabbit, Socket,
+    # do not count): the base branch's required contexts, the explicit --require names, the e2e aliases and
+    # the checks of the e2e-kind workflow. Any other failed or pending check is printed and dropped.
+    # Fail closed: when the required contexts cannot be read, nothing is judged (never "every check").
+    # With --merged (#201) the read is best effort: it is tried once (with its retries), and when it fails
+    # the wait goes on to the merge or the close with no check judged (every check is printed as advisory);
+    # the merge itself is what --merged waits for, and GitHub applies the rules there.
+    if [ "$mode" = checks ] || [ "$ctx_tried" = 0 ]; then
+      load_contexts "$(jq -r '.baseRefName // "main"' <<<"$json")"
+      if [ "$ctx_ok" != 1 ] && [ "$mode" = checks ]; then
+        echo "pr-wait: cannot read the required status checks of the base branch; not judging checks" >&2
+        exit 2
+      fi
+      if [ "$ctx_ok" != 1 ] && [ "$ctx_tried" = 0 ]; then
+        echo "pr-wait: cannot read the required status checks of the base branch; waiting for the merge without judging checks" >&2
+      fi
+      ctx_tried=1
+    fi
+    keep_names=("$ctxs" ${required[@]+"${required[@]}"} ${req_now[@]+"${req_now[@]}"})
+    [ "$alias_e2e" = 0 ] || keep_names+=(quickstart e2e-lab)
+    keep=$(printf '%s\n' "${keep_names[@]}" | jq -R . | jq -sc 'map(select(. != ""))')
+    adv_json=$(jq --argjson keep "$keep" '.statusCheckRollup |= map(select(((.name // .context // "?") as $n | ($keep | index($n)) == null) and (.workflowName // "") != "e2e-kind"))' <<<"$json")
+    adv=$(jq -r "$norm"' | .[] | select((.done | not) or .bad) | "advisory \(.name) \(if .done then "failed" else "pending" end)"' --argjson req '[]' <<<"$adv_json" | sort -u)
+    json=$(jq --argjson keep "$keep" '.statusCheckRollup |= map(select(((.name // .context // "?") as $n | ($keep | index($n)) != null) or (.workflowName // "") == "e2e-kind"))' <<<"$json")
+    if [ -n "$adv" ] && [ "$adv" != "${last_adv:-}" ]; then
+      echo "$adv"
+      last_adv=$adv
+    fi
     reqjson=$(printf '%s\n' ${req_now[@]+"${req_now[@]}"} | jq -R . | jq -sc .)
     failed=$(jqn -r "$norm | .[] | select(.bad) | [.name, .cancelled, ((.url | capture(\"/runs/(?<r>[0-9]+)\")? | .r) // \"\")] | @tsv" <<<"$json")
     # The only failures are cancelled runs of required checks, or checks of an earlier e2e-kind run:
@@ -320,7 +423,6 @@ while :; do
     # Required contexts of the ruleset that have no check on the head yet (a queued workflow run).
     missing_ctx=""
     if [ "$mode" = checks ]; then
-      load_contexts "$(jq -r '.baseRefName // "main"' <<<"$json")"
       while IFS= read -r c; do
         [ -n "$c" ] || continue
         jq -e --arg c "$c" 'any((.statusCheckRollup // [])[]; (.name // .context // "") == $c)' <<<"$json" >/dev/null ||
@@ -365,6 +467,25 @@ while :; do
       fi
       if [ -z "$live" ] && [ "$mode" = checks ]; then
         echo "checks $total/$total green"
+        # BLOCKED with every check green: the ruleset's required_review_thread_resolution (#187). Threads do
+        # not resolve themselves, so list them and stop instead of waiting; never resolve them from here.
+        if [ "$mstate" = BLOCKED ]; then
+          trc=0
+          threads=$("$threads_sh" "$pr" 2>&1) || trc=$?
+          case $trc in
+          0) ;;
+          7)
+            echo "$threads"
+            echo "BLOCKED: PR $pr has unresolved review threads; reply and resolve each one (docs/dev/ci.md \"Merging\"), then run this again"
+            exit 7
+            ;;
+          *)
+            echo "pr-wait: PR $pr is BLOCKED and its review threads could not be read: $threads" >&2
+            echo "pr-wait: cannot read review threads; not ready" >&2
+            exit 2
+            ;;
+          esac
+        fi
         exit 0
       fi
       [ -n "$live" ] || emit "checks $total/$total green"

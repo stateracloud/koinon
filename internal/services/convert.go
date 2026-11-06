@@ -233,6 +233,8 @@ func runEventProto(e store.RunEvent) *runv1alpha1.RunEvent {
 		Kind:      e.Kind,
 		Payload:   payloadProto(e.Payload),
 		CreatedAt: tsProto(e.CreatedAt),
+
+		ContentPurged: e.ContentPurgedAt.Valid,
 	}
 }
 

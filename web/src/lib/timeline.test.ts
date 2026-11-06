@@ -231,6 +231,53 @@ describe('buildTimeline', () => {
     })
     expect(agentTexts(items)).toEqual(['Asked for approval.', 'Resumed, still typing'])
   })
+
+  it('shows a reply once when its last chunk lands in the same millisecond as the persisted message', () => {
+    // chunk(2) is at 1020 ms; the message is persisted in that same millisecond, and the task event sorts first by order.
+    const items = buildTimeline([taskEvent(1, 1020, 'message', { text: 'Hello there' }, ActorKind.AGENT)], {
+      [run]: [chunk(1, 'Hello '), chunk(2, 'there')],
+    })
+    expect(agentTexts(items)).toEqual(['Hello there'])
+    expect(items.map((i) => i.type)).toEqual(['message'])
+  })
+
+  it('keeps a task event that follows the reply in the same millisecond after it', () => {
+    const items = buildTimeline(
+      [taskEvent(1, 1020, 'message', { text: 'Hello there' }, ActorKind.AGENT), taskEvent(2, 1020, 'message', { text: 'thanks' }, ActorKind.USER)],
+      { [run]: [chunk(1, 'Hello '), chunk(2, 'there')] },
+    )
+    expect(items.map((i) => (i.type === 'message' ? i.text : i.type))).toEqual(['Hello there', 'thanks'])
+  })
+
+  it('keeps a user message that shares a millisecond with a chunk in its place', () => {
+    const items = buildTimeline([taskEvent(1, 1010, 'message', { text: 'hi' }, ActorKind.USER)], { [run]: [chunk(1, 'Hello')] })
+    expect(items.map((i) => i.type)).toEqual(['message', 'agent-text'])
+  })
+
+  it('drops the streamed text of each run once, for two runs on one ticket', () => {
+    const run2 = 'r-2234567890'
+    const chunk2 = (seq: number, t: string) =>
+      create(RunEventSchema, { runId: run2, seq: BigInt(seq), kind: 'acp.agent_message_chunk', payload: { sessionUpdate: 'agent_message_chunk', content: text(t) }, createdAt: timestampFromMs(2000 + seq * 10) })
+    const reply2 = create(TaskEventSchema, { seq: 2n, runId: run2, kind: 'message', actorKind: ActorKind.AGENT, payload: { text: 'Second' }, createdAt: timestampFromMs(2020) })
+    const items = buildTimeline([taskEvent(1, 1020, 'message', { text: 'First' }, ActorKind.AGENT), reply2], {
+      [run]: [chunk(1, 'Fir'), chunk(2, 'st')],
+      [run2]: [chunk2(1, 'Sec'), chunk2(2, 'ond')],
+    })
+    expect(agentTexts(items)).toEqual(['First', 'Second'])
+  })
+
+  it('keeps a thought chunk when the reply is persisted', () => {
+    const thought = runEvent(1, 'acp.agent_thought_chunk', { sessionUpdate: 'agent_thought_chunk', content: text('Thinking') })
+    const items = buildTimeline([taskEvent(1, 1020, 'message', { text: 'Done' }, ActorKind.AGENT)], { [run]: [thought, chunk(2, 'Done')] })
+    expect(items.map((i) => i.type)).toEqual(['agent-text', 'message'])
+    expect(items[0]).toMatchObject({ thought: true, text: 'Thinking' })
+  })
+
+  it('keeps the streamed text of a failed run that persisted no reply', () => {
+    const items = buildTimeline([taskEvent(1, 1030, 'run.failed', { reason: 'boom' })], { [run]: [chunk(1, 'Half a rep'), chunk(2, 'ly')] })
+    expect(agentTexts(items)).toEqual(['Half a reply'])
+    expect(items.map((i) => i.type)).toEqual(['agent-text', 'note'])
+  })
 })
 
 describe('a spend limit', () => {
@@ -311,5 +358,19 @@ describe('a spend limit', () => {
       expect(noteText(runEvent(1, 'run.wrap_up_notice', { limit: 'requests', modelRequests: 120, maxModelRequests: 150 }))[0]).toContain('120 of 150 model requests used')
       expect(noteText(runEvent(1, 'run.wrap_up_notice', { limit: 'spend', spentUSD: '1.62', maxSpendUSD: '2.00' }))[0]).toContain('$1.62 of $2.00 spent')
     })
+  })
+})
+
+describe('buildTimeline with purged content', () => {
+  const purged = (seq: number, kind: string) => create(RunEventSchema, { runId: run, seq: BigInt(seq), kind, payload: {}, contentPurged: true, createdAt: timestampFromMs(1000 + seq * 10) })
+
+  it('shows one "content expired after N days" note per run', () => {
+    const items = buildTimeline([], { [run]: [purged(1, 'acp.agent_message_chunk'), purged(2, 'acp.tool_call'), runEvent(3, 'run.wrap_up_notice', { limit: 'requests', modelRequests: 5, maxModelRequests: 10 })] }, 30)
+    expect(items.map((i) => ('text' in i ? i.text : i.type))).toEqual(['Run r-123456: content expired after 30 days', 'Run r-123456: 5 of 10 model requests used; the agent was asked to wrap up'])
+  })
+
+  it('says only "content expired" when the retention is not known', () => {
+    const items = buildTimeline([], { [run]: [purged(1, 'acp.agent_thought_chunk')] })
+    expect(items.map((i) => ('text' in i ? i.text : i.type))).toEqual(['Run r-123456: content expired'])
   })
 })

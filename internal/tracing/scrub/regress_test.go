@@ -60,20 +60,20 @@ func TestLeakRegressions(t *testing.T) {
 		{"JWT after %3D", scrub.LevelFull, nil, `https://x/cb?next=%2Fa%3Fq%3DeyJhbGciOi.eyJzdWIiOi.c2lnbmF0dXJl`, "eyJzdWIiOi"},
 		{"JWT after escaped newline", scrub.LevelFull, nil, `{"log":"line1\\neyJhbGciOi.eyJzdWIiOi.c2lnbmF0dXJl"}`, "eyJzdWIiOi"},
 		{"JWT eyA header", scrub.LevelFull, nil, "eyAiYWxnIjogIkhTMjU2In0.eyAic3ViIjogIngifQ.c2lnbmF0dXJlc2ln", "eyAic3ViIjogIngifQ"},
-		{"ghp after %3D", scrub.LevelFull, nil, `?t%3Dghp_notrealnotrealnotrealnotreal`, "ghp_notrealnotreal"},
-		{"ghp after escaped newline in double-encoded JSON", scrub.LevelFull, nil, `{"c":"{\"f\":\"a\\nghp_notrealnotrealnotrealnotreal\"}"}`, "ghp_notrealnotreal"},
+		{"ghp after %3D", scrub.LevelFull, nil, `?t%3Dghp_` + fk(36), "ghp_" + fk(8)},
+		{"ghp after escaped newline in double-encoded JSON", scrub.LevelFull, nil, `{"c":"{\"f\":\"a\\nghp_` + fk(36) + `\"}"}`, "ghp_" + fk(8)},
 		{"sk-svcacct", scrub.LevelFull, nil, `OPENAI_API_KEY=sk-svcacct-notrealnotrealnotreal`, "notrealnotrealnotreal"},
-		{"sk-admin", scrub.LevelFull, nil, `sk-admin-notrealnotrealnotreal`, "notrealnotrealnotreal"},
+		{"sk-admin", scrub.LevelFull, nil, `sk-admin-` + fk(74) + `T3BlbkFJ` + fk(74), fk(30)},
 		{"api-key header", scrub.LevelFull, nil, `api-` + `key: notreal0notreal0notreal0`, "notreal0notreal0"},
 		{"x-vault-token header", scrub.LevelFull, nil, `X-Vault-Token: hvs.notrealnotrealnotreal`, "hvs.notrealnotrealnotreal"},
 		{"private-token header", scrub.LevelFull, nil, `Private-Token: notrealnotrealnotreal`, "notrealnotrealnotreal"},
 		{"x-goog-api-key header", scrub.LevelFull, nil, `X-Goog-Api-Key: notrealnotrealnotreal`, "notrealnotrealnotreal"},
 		{"x-gitlab-token header", scrub.LevelFull, nil, `X-Gitlab-Token: notrealnotrealnotreal`, "notrealnotrealnotreal"},
-		{"hvs token alone", scrub.LevelFull, nil, `vault hvs.notrealnotrealnotreal`, "hvs.notreal"},
-		{"hf token", scrub.LevelFull, nil, "hf_" + strings.Repeat("a", 30), "hf_aaaa"},
-		{"AIza key", scrub.LevelFull, nil, "key=AIza" + strings.Repeat("b", 35), "AIzabbbb"},
-		{"stripe live key", scrub.LevelFull, nil, "sk_live_" + strings.Repeat("c", 24), "sk_live_cccc"},
-		{"slack xoxe", scrub.LevelFull, nil, "xoxe-1-" + strings.Repeat("d", 30), "xoxe-1-dddd"},
+		{"hvs token alone", scrub.LevelFull, nil, `vault hvs.` + fk(95), "hvs." + fk(8)},
+		{"hf token", scrub.LevelFull, nil, "hf_" + fake(fakeAlpha, 34, 0), "hf_" + fake(fakeAlpha, 8, 0)},
+		{"AIza key", scrub.LevelFull, nil, "key=AIza" + fk(35), "AIza" + fk(8)},
+		{"stripe live key", scrub.LevelFull, nil, "sk_live_" + fk(24), "sk_live_" + fk(8)},
+		{"slack xoxe", scrub.LevelFull, nil, "xoxe-1-" + fake("QZKVLMXPRWTYNBCJDFHGSAEU0123456789", 146, 0), "xoxe-1-" + fake("QZKVLMXPRWTYNBCJDFHGSAEU0123456789", 8, 0)},
 		{"placeholder with hyphen", scrub.LevelFull, nil, "openshell:resolve:env:v1104-SPIKE_TOKEN", "SPIKE_TOKEN"},
 		{"known secret JS-escaped quote, raw <&", scrub.LevelFull, []string{sec}, `{"a":1} pw="Xq7_notreal_pw\"&<x"`, "Xq7_notreal_pw"},
 		{"known secret URL-encoded in a DSN", scrub.LevelFull, []string{"notreal:p@ss/w0rd"}, `postgres://u:notreal%3Ap%40ss%2Fw0rd@db/x`, "notreal%3Ap%40ss"},
@@ -259,6 +259,31 @@ func randomWord(n int) string {
 	return string(b)
 }
 
+func distinctBytes(s string) int {
+	var seen [256]bool
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if !seen[s[i]] {
+			seen[s[i]] = true
+			n++
+		}
+	}
+	return n
+}
+
+// pad repeats w to exactly n characters: vendor shapes have a fixed length.
+func pad(w string, n int) string { return strings.Repeat(w, n/len(w)+1)[:n] }
+
+// awsID maps w onto the 16 characters of an AWS key ID tail (A-Z and 2-7, in the order of w).
+func awsID(w string) string {
+	const a = fakeUpper
+	b := make([]byte, 16)
+	for i := range b {
+		b[i] = a[(int(w[i%len(w)])+i)%len(a)]
+	}
+	return string(b)
+}
+
 func b64Of(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
 func alwaysShapes(w string) []shape {
@@ -270,9 +295,9 @@ func alwaysShapes(w string) []shape {
 		{"Authorization: Bearer " + w + w, w},
 		{"Cookie: sid=" + w + "; theme=dark", w},
 		{"X-Api-Key: " + w + "abcdefgh", w},
-		{"ghp_" + w + w, w},
-		{"sk-ant-api03-" + w + w, w},
-		{"AKIA" + strings.ToUpper(w[:16]), strings.ToUpper(w[:16])},
+		{"ghp_" + pad(w, 36), w},
+		{"sk-ant-api03-" + pad(w, 93) + "AA", w},
+		{"AKIA" + awsID(w), awsID(w)},
 		{pemBegin + "\nMII" + w + "\n" + pemEnd, w},
 		{"password=" + w, w},
 		{"PGPASSWORD=" + w, w},
@@ -282,7 +307,7 @@ func alwaysShapes(w string) []shape {
 		{"https://svc:" + w + "@host.example.test/p", w},
 		{"cu" + "rl -u svc:" + w + " https://host.example.test", w},
 		{"ya29." + w + w, w},
-		{"npm_" + w + w + w, w},
+		{"npm_" + pad(w, 36), w},
 		{"Authorization: Digest realm=\"r\", response=\"" + w + "\"", w},
 		{`{"name":"DB_PASSWORD","value":"` + w + `"}`, w},
 		{`{"value":"` + w + `","name":"DB_PASSWORD"}`, w},
@@ -342,7 +367,9 @@ func FuzzAlwaysShapesNeverSurvive(f *testing.F) {
 					b.WriteRune(c)
 				}
 			}
-			if b.Len() >= 8 {
+			// A vendor key has entropy; a seed like "aaaaaaaa" is not one, and the gitleaks rules
+			// rightly leave it alone.
+			if b.Len() >= 8 && distinctBytes(b.String()) >= 10 {
 				w = b.String()
 			}
 		}
@@ -357,8 +384,6 @@ func FuzzAlwaysShapesNeverSurvive(f *testing.F) {
 		}
 	})
 }
-
-func fill(c byte, n int) string { return strings.Repeat(string(c), n) }
 
 // TestReview2Leaks are the leaks of the second adversarial review.
 func TestReview2Leaks(t *testing.T) {
@@ -393,11 +418,11 @@ func TestReview2Leaks(t *testing.T) {
 		{"text client_secret yaml", "client_secret: notreal-clientsecret", "notreal-clientsecret"},
 		{"text json-ish password with spaces", `log {"password": "notreal pw words"} end`, "pw words"},
 		{"text accessToken json", `log {"accessToken":"notreal-access-js"}`, "notreal-access-js"},
-		{"ya29", "t=ya29." + fill('a', 30), "ya29.aaaa"},
-		{"GOCSPX", "s=GOCSPX-" + fill('b', 28), "GOCSPX-bbbb"},
-		{"npm", "//registry/:_authToken=npm_" + fill('c', 36), "npm_cccc"},
-		{"glsa", "glsa_" + fill('d', 30), "glsa_dddd"},
-		{"dop_v1", "dop_v1_" + fill('e', 40), "dop_v1_eeee"},
+		{"ya29", "t=ya29." + fk(30), "ya29." + fk(8)},
+		{"GOCSPX", "s=GOCSPX-" + fk(28), "GOCSPX-" + fk(8)},
+		{"npm", "//registry/:_authToken=npm_" + fake(fakeAlpha, 36, 0), "npm_" + fake(fakeAlpha, 8, 0)},
+		{"glsa", "glsa_" + fk(32) + "_" + fake(fakeHex, 8, 0), "glsa_" + fk(8)},
+		{"dop_v1", "dop_v1_" + fake(fakeHex, 64, 0), "dop_v1_" + fake(fakeHex, 8, 0)},
 		{"url userinfo", "clone https://deploy:notreal-urlpw@git.example.test/x.git", "notreal-urlpw"},
 		{"basic user flag", "cu" + "rl -u admin:notreal-curlpw https://api.example.test", "notreal-curlpw"},
 		{"long user flag, quoted", "cu" + `rl --user "admin:notreal-curlpw2" https://api.example.test`, "notreal-curlpw2"},
