@@ -409,11 +409,10 @@ the order the call wrote its members, or in key order, is caught whatever the en
 against both orders (the keys written sorted and the halves the other way round) is still not
 promised: the replay corpus pins it as `not_promised` (`split-args-against-both`). Nothing else in
 decision 6 changes: no any-pair joins, no pair windows, the same budgets (each join is one more
-text under the work budget, cut to its ends by `JoinEndBytes`). A call that has already used a
-quarter of the work budget before its extra orders joins them with ends of a quarter of
-`JoinEndBytes` (128 bytes by default, more than a threshold-length leak in three layers of base64
-of UTF-16), so the heaviest benign shapes stay under half the budget. The orders are never
-dropped under load, which would let a padded call split text in key order unseen.
+text under the work budget, cut to its ends by `JoinEndBytes`). Every order is joined with the
+same ends, however heavy the call: shorter ends under load would let a padded call split text in
+key order unseen (an encoding of 30 bytes a character needs more than 128 bytes each side). The
+heaviest benign shape takes about 19 MB of the 32 MiB work budget; a call over it fails closed.
 
 ## Upstream verification
 

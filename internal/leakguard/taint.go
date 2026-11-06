@@ -179,19 +179,12 @@ func candidates(args []string, orders [][]int, lim Limits, fp *Fingerprinter, m 
 	}
 	if len(extra) > 0 {
 		// The extra orders are the same arguments again, so each costs about as much as the
-		// call-order join (up to a third more of the call's work, with the MCP guard's three).
-		// A call whose arguments and call-order join already took a quarter of the work budget
-		// joins them with ends of a quarter of JoinEndBytes: still the boundaries between the
-		// arguments (128 bytes each side by default, more than a threshold-length leak in three
-		// layers of base64 of UTF-16), at a quarter of the cost. The orders are never dropped:
-		// dropping them under load would let a padded call split text in key order unseen.
-		ends := lim.JoinEndBytes
-		if m.used.Load() > int64(lim.MaxWorkBytes/heavyWorkShare) {
-			ends = max(lim.JoinEndBytes/heavyWorkShare, 1)
-		}
+		// call-order join; they are joined with the same ends. Shorter ends under load would let a
+		// padded call split text in key order unseen: an encoding of 30 bytes a character needs
+		// more than 128 bytes each side. A call over MaxWorkBytes fails closed (ReasonBudgetWork).
 		jr := make([]rawText, 0, len(extra))
 		for _, idx := range extra {
-			if j, ok := join(args, idx, ends); ok {
+			if j, ok := join(args, idx, lim.JoinEndBytes); ok {
 				jr = append(jr, j)
 			}
 		}
@@ -214,10 +207,6 @@ func candidates(args []string, orders [][]int, lim Limits, fp *Fingerprinter, m 
 	}
 	return out, nil
 }
-
-// heavyWorkShare: a call that has used more than 1/heavyWorkShare of MaxWorkBytes before its
-// extra orders joins them with ends of JoinEndBytes/heavyWorkShare (see candidates).
-const heavyWorkShare = 4
 
 // extraOrders returns the orders to join besides call order: each valid order once, without its
 // empty arguments. An order that names an index twice or out of range is skipped, and so is one

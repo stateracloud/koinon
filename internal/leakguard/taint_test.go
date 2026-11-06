@@ -178,20 +178,27 @@ var _ = Describe("TaintChecker", func() {
 			Expect(twice).To(Equal(two))
 		})
 
-		// A call that has used a quarter of the work budget before its extra orders joins them
-		// with shorter ends: the boundary between two long halves is still read.
-		It("reassembles long halves in a named order when the call is heavy", func() {
-			pad := strings.Repeat("kubernetes release notes, chapter one. ", 60)
-			args := []string{excerpt[half:] + " " + pad, pad + " " + excerpt[:half]}
+		// Review of #256: a call padded with heavy benign arguments still has its extra orders
+		// joined with the full ends. Each half is percent-encoded \UHHHHHHHH escapes (two promised
+		// decoders, about 30 bytes a character), so the 24-character window needs more than 128
+		// bytes on each side of the boundary; shorter ends under load let it through.
+		It("reassembles a split in a named order in a call padded past a quarter of the work budget", func() {
+			enc := func(s string) string { return percentAll(bigUEscapes(s)) }
+			pad := sliced(120, func(i int) string { return b64(utf16le(string([]rune(russianProse)[i*50 : i*50+1500]))) })
+			args := append([]string{enc(privateLine[23:46]) + " tail of b", "head of a " + enc(privateLine[0:23])}, pad...)
 			order := []int{1, 0}
-			d, full, err := checker.CheckJoinsWork(ctx, testScope, fp, args, order)
+			for i := 2; i < len(args); i++ {
+				order = append(order, i)
+			}
+			lim := leakguard.DefaultLimits()
+			c := leakguard.TaintChecker{Store: checker.Store, Limits: lim}
+			d, work, err := c.CheckWork(ctx, testScope, fp, args)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.Reason).To(Equal(leakguard.ReasonPass), "in call order the halves are the wrong way round")
+			Expect(work).To(BeNumerically(">", int64(lim.MaxWorkBytes/4)), "the padding is heavy")
+			d, err = c.CheckJoins(ctx, testScope, fp, args, order)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
-			heavy := leakguard.TaintChecker{Store: checker.Store, Limits: leakguard.Limits{MaxWorkBytes: int(full)}}
-			d, short, err := heavy.CheckJoinsWork(ctx, testScope, fp, args, order)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(d.Reason).To(Equal(leakguard.ReasonTaint))
-			Expect(short).To(BeNumerically("<", full), "the extra order was joined with the shorter ends")
 		})
 
 		DescribeTable("adds nothing for an order that is not one",
@@ -349,6 +356,15 @@ func uEscapes(s string) string {
 	var b strings.Builder
 	for _, u := range utf16.Encode([]rune(s)) {
 		fmt.Fprintf(&b, `\u%04x`, u)
+	}
+	return b.String()
+}
+
+// bigUEscapes writes s as \UHHHHHHHH escapes, one per character.
+func bigUEscapes(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		fmt.Fprintf(&b, `\U%08X`, r)
 	}
 	return b.String()
 }

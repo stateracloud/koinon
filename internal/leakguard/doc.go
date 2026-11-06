@@ -128,9 +128,9 @@
 // arguments in call order, and again in each order the caller names (CheckJoins; the MCP guard
 // names the canonical order of the call's JSON members, #256, so a split joins whatever order the
 // encoder wrote the keys in). An argument longer than 2*JoinEndBytes contributes its two ends,
-// which hold the boundaries to its neighbours. Each named order is joined once, and in a call
-// that has used a quarter of MaxWorkBytes before them with ends of a quarter of JoinEndBytes, so
-// the extra orders stay within the benign shapes' work caps without being dropped. A split across arguments that are not adjacent in
+// which hold the boundaries to its neighbours. Each named order is joined once, with the same
+// ends however heavy the call: shorter ends under load would let a padded call split text in
+// key order unseen, and a call over MaxWorkBytes fails closed. A split across arguments that are not adjacent in
 // one of those orders is not reassembled (ADR 0091 decision 6; earlier rounds
 // joined every ordered pair of arguments and decoded windows around each boundary, removed with
 // the rescope). Splits across calls are not reassembled; the per-host and per-run URL budgets and

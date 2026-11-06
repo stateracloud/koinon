@@ -317,8 +317,12 @@ var _ = Describe("Fourth review", func() {
 		)
 
 		// The same shapes as the values of one JSON object whose keys the call wrote against key
-		// order, through CheckJoins with the three key orders mcpguard passes (#256): the extra
-		// joins must fit the same caps.
+		// order, through CheckJoins with the three key orders mcpguard passes (#256). Each shape has
+		// its own cap, as above. The half-budget bound of the table above does not apply: it is a
+		// cap the specs chose, not a limit of the guard, and the three extra joins take the heaviest
+		// shape above it. A call over MaxWorkBytes fails closed (ReasonBudgetWork), which is safe;
+		// shortening the joins to stay under half is not (see taint_test.go, "padded past a
+		// quarter of the work budget").
 		DescribeTable("within the work cap through CheckJoins, keys against key order",
 			func(values []string, workCap int) {
 				lim := scaledLimits()
@@ -328,13 +332,13 @@ var _ = Describe("Fourth review", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
 				Expect(work).To(BeNumerically("<=", int64(workCap)))
-				Expect(work).To(BeNumerically("<=", int64(lim.MaxWorkBytes/2)))
+				Expect(work).To(BeNumerically("<", int64(lim.MaxWorkBytes)))
 			},
 			// 8<<16, not 9<<16: the keys would take the call over MaxInputBytes.
 			Entry("two halves of base64 of base64", halves(b64(b64(prose[:8<<16]))), 10700000),
-			Entry("128 arguments of 8 KiB, each base64 of UTF-16 of prose", sliced(128, func(i int) string { return b64(utf16le(prose[i*3000 : i*3000+3000])) }), 11100000),
+			Entry("128 arguments of 8 KiB, each base64 of UTF-16 of prose", sliced(128, func(i int) string { return b64(utf16le(prose[i*3000 : i*3000+3000])) }), 15100000),
 			Entry("128 arguments of 8 KiB, each base64 of random bytes", sliced(128, func(i int) string { return b64(randomBytes(i, 6000)) }), 5300000),
-			Entry("128 arguments of 3 KiB, each base64 of UTF-16 of Russian", sliced(128, func(i int) string { return b64(utf16le(string([]rune(russianProse)[i*50 : i*50+1500]))) }), 13800000),
+			Entry("128 arguments of 3 KiB, each base64 of UTF-16 of Russian", sliced(128, func(i int) string { return b64(utf16le(string([]rune(russianProse)[i*50 : i*50+1500]))) }), 21100000),
 			Entry("128 arguments of 8 KiB, each base64 of UTF-16 of Chinese", sliced(128, func(i int) string { return b64(utf16le(string([]rune(chineseProse)[i*20 : i*20+2000]))) }), 13000000),
 			// 127, not 128: the keys would take the call over MaxInputBytes.
 			Entry("127 arguments of 8 KiB, each base64 of UTF-8 of Russian", sliced(127, func(i int) string { return b64(string([]rune(russianProse)[i*50 : i*50+3000])) }), 12600000),
