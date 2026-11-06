@@ -472,7 +472,8 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 	if err != nil {
 		return a, err
 	}
-	// The text match: payload only, joined in call order (ADR 0091 decision 6).
+	// The text match: payload only, each string alone and joined in canonical order (ADR 0091
+	// decision 6, #256).
 	taint, err := leakguard.TaintChecker{Store: &taintStore{q: g.q, sess: sess, evicted: row.Evicted}, Limits: g.limits}.Check(ctx, sess.scope(), fp, args.Payload)
 	if err != nil {
 		return a, err

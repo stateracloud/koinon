@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -16,7 +17,7 @@ import (
 )
 
 // Args is one call's arguments split by ADR 0091 decision 7: the address arguments, which decide
-// the sink class, and the payload, every string the call carries in call order. A derived tool's
+// the sink class, and the payload, every string the call carries in canonical order. A derived tool's
 // address is not payload, except what of it can carry data: the path, query and fragment of a
 // fetched URL, and the whole URL after its scheme when the host is not one the org trusts (its
 // labels can carry data too). A fixed tool's address arguments decide nothing, so they are payload.
@@ -24,10 +25,13 @@ type Args struct {
 	// Address holds the value of each address argument the declaration names, by name. A named
 	// argument that is missing or not a string is absent, so a derived class reads it as unparsable.
 	Address map[string]string
-	// Payload is every other string of the call in the order it was sent: string values, numbers
-	// and booleans as written, and the keys of objects (ADR 0084: the wiring passes them all). For a
-	// fetch tool the path, query and fragment of its URL are payload too (ADR 0091 decision 3), at
-	// the URL argument's place.
+	// Payload is every other string of the call: string values, numbers and booleans as written,
+	// and the keys of objects (ADR 0084: the wiring passes them all). For a fetch tool the path,
+	// query and fragment of its URL are payload too (ADR 0091 decision 3), at the URL argument's
+	// place. The order is canonical (#256): of every object its keys sorted, then its members'
+	// values in that order, recursively; lists in their order. The text match scans each string on
+	// its own and the strings joined in this order, so a text split across two members joins
+	// whatever order the encoder wrote them in; a split against the keys' order does not.
 	Payload []string
 }
 
@@ -119,7 +123,12 @@ func (w walker) object(path string, depth int, odd bool) error {
 	if depth > maxNesting {
 		return errors.New("the arguments are nested too deeply")
 	}
+	// Each member appends its own strings and nothing else, so one ends where the next starts.
+	var members []member
 	for w.dec.More() {
+		if n := len(members); n > 0 {
+			members[n-1].end = len(w.out.Payload)
+		}
 		tok, err := w.dec.Token()
 		if err != nil {
 			return errArgs
@@ -128,6 +137,7 @@ func (w walker) object(path string, depth int, odd bool) error {
 		if !ok {
 			return errArgs
 		}
+		members = append(members, member{key: key, start: len(w.out.Payload)})
 		name := key
 		if path != "" {
 			name = path + "." + key
@@ -146,13 +156,57 @@ func (w walker) object(path string, depth int, odd bool) error {
 			}
 			continue
 		}
+		members[len(members)-1].keyed = true
 		w.out.Payload = append(w.out.Payload, key)
 		if err := w.value(name, depth, keyOdd); err != nil {
 			return err
 		}
 	}
-	_, err := w.dec.Token() // '}'
-	return err
+	if _, err := w.dec.Token(); err != nil { // '}'
+		return err
+	}
+	if n := len(members); n > 0 {
+		members[n-1].end = len(w.out.Payload)
+	}
+	w.canonical(members)
+	return nil
+}
+
+// member is the payload one object member added, the strings from start to end: its key first,
+// unless it is an address argument (keyed false), then what its value added.
+type member struct {
+	key        string
+	keyed      bool
+	start, end int
+}
+
+// canonical rewrites the payload an object added (#256): its keys in sorted order, then the values
+// of its members in the same order. A JSON object has no order, so the payload, and the join the
+// text match scans, must not depend on the order an encoder wrote the keys in; and no key stands
+// between the values of two members, so a text split across them joins. Members with the same key
+// (a raw repeated key) keep their order. A nested object was rewritten when it was read, so the
+// order is recursive; a list keeps its order, which is data.
+func (w walker) canonical(members []member) {
+	if len(members) < 2 {
+		return
+	}
+	first := members[0].start
+	sorted := slices.Clone(members)
+	slices.SortStableFunc(sorted, func(a, b member) int { return strings.Compare(a.key, b.key) })
+	out := make([]string, 0, members[len(members)-1].end-first)
+	for _, m := range sorted {
+		if m.keyed {
+			out = append(out, w.out.Payload[m.start])
+		}
+	}
+	for _, m := range sorted {
+		values := w.out.Payload[m.start:m.end]
+		if m.keyed {
+			values = values[1:]
+		}
+		out = append(out, values...)
+	}
+	copy(w.out.Payload[first:], out)
 }
 
 // address reads the value of an address argument. A string is the address; anything else leaves

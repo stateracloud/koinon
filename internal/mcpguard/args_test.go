@@ -65,8 +65,50 @@ var _ = Describe("splitting a call's arguments (ADR 0091 decision 7)", func() {
 		a, err := split(`{"channel":"general","text":"hello"}`, d, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(a.Address).To(HaveKeyWithValue("channel", "general"))
-		Expect(a.Payload).To(Equal([]string{"general", "text", "hello"}))
+		// Canonical order: the keys that are payload, then the values by key (channel, text).
+		Expect(a.Payload).To(Equal([]string{"text", "general", "hello"}))
 		Expect(a.PayloadBytes()).To(Equal(len("general") + len("text") + len("hello")))
+	})
+
+	Describe("the canonical order of the payload (#256)", func() {
+		plain := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.Fixed}
+		payload := func(raw string) []string {
+			GinkgoHelper()
+			a, err := split(raw, plain, nil)
+			Expect(err).NotTo(HaveOccurred())
+			return a.Payload
+		}
+
+		It("is the same whatever order the encoder wrote the keys in", func() {
+			want := []string{"a", "b", "koinon_test_", "not-a-real"}
+			Expect(payload(`{"a":"koinon_test_","b":"not-a-real"}`)).To(Equal(want))
+			Expect(payload(`{"b":"not-a-real","a":"koinon_test_"}`)).To(Equal(want))
+		})
+
+		It("puts no key between the values of two members, so a split text is adjacent", func() {
+			Expect(payload(`{"subject":"half two","body":"half one","to":"x"}`)).To(Equal(
+				[]string{"body", "subject", "to", "half one", "half two", "x"}))
+		})
+
+		It("sorts nested objects too, and keeps a list in its order", func() {
+			want := []string{"m", "n", "a", "b", "one", "two", "z", "y"}
+			Expect(payload(`{"n":["z","y"],"m":{"b":"two","a":"one"}}`)).To(Equal(want))
+			Expect(payload(`{"m":{"a":"one","b":"two"},"n":["z","y"]}`)).To(Equal(want))
+			Expect(payload(`{"l":[{"d":"4","c":"3"},{"b":"2","a":"1"}]}`)).To(Equal(
+				[]string{"l", "c", "d", "3", "4", "a", "b", "1", "2"}))
+		})
+
+		It("keeps a raw repeated key in its order", func() {
+			Expect(payload(`{"k":"first","j":"x","k":"second"}`)).To(Equal([]string{"j", "k", "k", "x", "first", "second"}))
+		})
+
+		It("puts an address argument's payload at its key's place, without the key", func() {
+			fixed := sinkclass.Declaration{Class: sinkclass.ExternalLow, Derivation: sinkclass.Fixed, AddressArgs: []string{"opts.channel"}}
+			a, err := split(`{"z":"last","opts":{"note":"n","channel":"general"}}`, fixed, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.Address).To(HaveKeyWithValue("opts.channel", "general"))
+			Expect(a.Payload).To(Equal([]string{"opts", "z", "note", "general", "n", "last"}))
+		})
 	})
 
 	It("counts the host labels of a fetch to a host the org does not trust, and not of one it trusts", func() {

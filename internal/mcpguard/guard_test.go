@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -273,6 +274,28 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Expect(reason(r)).To(HavePrefix("approval requested: id="))
 		Expect(approvals(ctx)).To(Equal(1))
 	})
+
+	// #256: the payload is read in canonical order (keys sorted, recursively), so private text split
+	// across two keys is joined whatever order the call wrote them in. Each half is shorter than the
+	// threshold, so neither matches alone.
+	DescribeTable("catches private text split across two keys, in either order the encoder wrote them",
+		func(ctx SpecContext, args string, caught bool) {
+			Expect(result(ctx, "wiki", "read_page", secretPage).GetPass()).NotTo(BeNil())
+			r := rawCall(ctx, "tracker", "post_message", args)
+			if !caught {
+				Expect(passed(r)).To(BeTrue(), reason(r))
+				return
+			}
+			Expect(reason(r)).To(HavePrefix("approval requested: id="))
+			var risk []byte
+			Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE org_id = $1`, org).Scan(&risk)).To(Succeed())
+			Expect(string(risk)).To(ContainSubstring(`"taint"`))
+		},
+		Entry("in key order", `{"a":`+strconv.Quote(secretPage[100:118])+`,"b":`+strconv.Quote(secretPage[118:136])+`}`, true),
+		Entry("reordered by the encoder", `{"b":`+strconv.Quote(secretPage[118:136])+`,"a":`+strconv.Quote(secretPage[100:118])+`}`, true),
+		Entry("nested and reordered", `{"m":{"z":`+strconv.Quote(secretPage[118:136])+`,"y":`+strconv.Quote(secretPage[100:118])+`}}`, true),
+		Entry("one half alone", `{"a":`+strconv.Quote(secretPage[100:118])+`}`, false),
+	)
 
 	It("takes agentd's feed: a sandbox read sets the private leg and its text is caught, from fingerprints only", func(ctx SpecContext) {
 		feed := mcpguard.NewFeed(pool, nil)
