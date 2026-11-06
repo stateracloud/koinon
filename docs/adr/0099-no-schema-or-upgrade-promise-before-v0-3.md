@@ -1,6 +1,6 @@
 # 0099. No schema or upgrade promise before v0.3
 
-- Status: Proposed (maintainer decision of 2026-11-06; for the maintainer to review)
+- Status: Accepted (maintainer decision 2026-11-07)
 - Date: 2026-11-06
 - Amends: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (decisions 1, 5, 6, 7 and 8: when
   the schema promise and its enforcement start)

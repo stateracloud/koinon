@@ -117,4 +117,4 @@ are in [0046](0046-adr-conventions.md).
 | [0096](0096-mcp-oauth-sign-in.md) | MCP sign-in: OAuth-authorized remote MCP servers | Accepted (2026-11-06) |
 | [0097](0097-koinon-owned-gateway.md) | A Koinon-owned gateway, in three steps | Accepted (2026-11-06) |
 | [0098](0098-price-catalogue-updates-from-public-sources.md) | Update the model price catalogue from public sources | Accepted (2026-11-06) |
-| [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md) | No schema or upgrade promise before v0.3 | Proposed (maintainer decision of 2026-11-06; for the maintainer to review) |
+| [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md) | No schema or upgrade promise before v0.3 | Accepted (maintainer decision 2026-11-07) |
