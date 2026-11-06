@@ -234,6 +234,36 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
 	})
 
+	It("does not block on a recreate checkpoint that checkpoints resync marked failed for a missing snapshot: it backs the home up again (#263)", func(ctx SpecContext) {
+		oldID := sandboxID()
+		dirtyHome(ctx, org, user, agent.ID)
+		bump()
+		pass(ctx)
+		cp := finish(ctx, true)
+		// Before the next pass, a database restore and a resync: the snapshot is gone from the bucket.
+		n, err := q.MarkHomeCheckpointSnapshotMissing(ctx, store.MarkHomeCheckpointSnapshotMissingParams{
+			OrgID: org, ID: cp.ID, SnapshotID: cp.SnapshotID.String,
+			Error: pgtype.Text{String: "checkpoints resync: snapshot " + cp.SnapshotID.String + " is no longer in the bucket (repository epoch 0)", Valid: true},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(BeEquivalentTo(1))
+
+		pass(ctx)
+		Expect(osg.Calls("DeleteSandbox")).To(Equal(0), "no backup of the home is complete")
+		Expect(sandboxID()).To(Equal(oldID))
+		a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(a.UnhealthyAt.Valid).To(BeFalse(), "not blocked as after a failed backup")
+		Expect(row(ctx).Message).NotTo(ContainSubstring("the home backup failed"))
+		next := open(ctx)
+		Expect(next.ID).NotTo(Equal(cp.ID), "a new backup is asked for")
+		Expect(next.Reason).To(Equal(store.CheckpointReasonRecreate))
+
+		finish(ctx, true)
+		pass(ctx)
+		Expect(osg.Calls("DeleteSandbox")).To(Equal(1), "recreated once the new backup is complete")
+	})
+
 	It("recreates a sandbox found stuck only after its backup, and the new one keeps the generation", func(ctx SpecContext) {
 		lineage, oldID := row(ctx).HomeGeneration.String, sandboxID()
 		dirtyHome(ctx, org, user, agent.ID)

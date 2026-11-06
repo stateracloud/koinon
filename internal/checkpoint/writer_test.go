@@ -89,6 +89,43 @@ var _ = Describe("Writer", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
+	It("lists the agent's later epoch folders that hold anything, past a gap (#262)", func() {
+		org, agent := "0198a000-0000-7000-8000-000000000001", "0198a000-0000-7000-8000-000000000009"
+		held, err := w.HeldEpochs(ctx, org, agent)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(held).To(BeEmpty(), "nothing written yet")
+		for _, n := range []int32{0, 1, 3, 12} {
+			_, err := w.Backup(ctx, checkpoint.EpochPrefix(org, agent, n), "koinon_test_not-a-real-token", home(), checkpoint.Meta{CheckpointID: "c"})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		held, err = w.HeldEpochs(ctx, org, agent)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(held).To(Equal([]int32{1, 3, 12}), "sorted, r2/ absent, epoch 0's own blobs not an epoch")
+	})
+
+	It("tells a prefix that holds another password's repository apart, and creates nothing over it (#262)", func() {
+		held, err := w.HoldsRepository(ctx, prefix)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(held).To(BeFalse(), "nothing written yet")
+		r1, err := w.Backup(ctx, prefix, "koinon_test_not-a-real-token", home(), checkpoint.Meta{CheckpointID: "c1"})
+		Expect(err).NotTo(HaveOccurred())
+		held, err = w.HoldsRepository(ctx, prefix)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(held).To(BeTrue())
+
+		_, err = w.Backup(ctx, prefix, "koinon_test_wrong", home(), checkpoint.Meta{CheckpointID: "c2"})
+		Expect(err).To(MatchError(checkpoint.ErrPrefixTaken))
+		Expect(err.Error()).To(ContainSubstring(prefix))
+		Expect(checkpoint.TakenPrefix(fmt.Errorf("wrapped: %w", err), prefix)).To(BeTrue())
+		Expect(checkpoint.TakenPrefix(err, prefix+"r1/")).To(BeFalse(), "names the prefix it was")
+		_, err = w.Snapshots(ctx, prefix, "koinon_test_wrong")
+		Expect(err).To(MatchError(checkpoint.ErrPrefixTaken))
+		snaps, err := w.Snapshots(ctx, prefix, "koinon_test_not-a-real-token")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(snaps).To(HaveLen(1), "the other password wrote nothing")
+		Expect(snaps[0].ID).To(Equal(r1.SnapshotID))
+	})
+
 	It("keeps agents' repositories apart", func() {
 		other := checkpoint.Prefix("0198a000-0000-7000-8000-000000000001", "0198a000-0000-7000-8000-000000000003")
 		_, err := w.Backup(ctx, prefix, "koinon_test_not-a-real-token", home(), checkpoint.Meta{})
