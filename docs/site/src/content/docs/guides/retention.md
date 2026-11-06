@@ -39,7 +39,7 @@ once (they skip rows another batch holds).
 
 When an agent's home backup key changes, its backups start again in a new repository and the old
 one is kept for **7 days** by default, then deleted, but only once the new repository holds a
-checkpoint (or at once if the old one's password was lost). An org admin can change that period,
+checkpoint (or at the deadline even without one, if the old one's password was lost). An org admin can change that period,
 from 1 to 90 days: `GET` and `PUT /home-backup-retention` of the admin API (`days`; leave it out or
 send 0 to return to the default), `OrgSettingsService.SetHomeBackupRetention`, or **Old home
 backups** on the console's observability settings page. Admins and owners only; every change is

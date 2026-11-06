@@ -16,6 +16,9 @@ type runContentRetentionJSON struct {
 	MaxDays     int `json:"maxDays"`
 }
 
+// homeBackupRetentionJSON is the home backup retention's view: the same fields.
+type homeBackupRetentionJSON = runContentRetentionJSON
+
 var _ = Describe("run content retention in the admin API", func() {
 	var e *env
 	BeforeEach(func(ctx SpecContext) { e = newEnv(ctx) })
@@ -74,16 +77,16 @@ var _ = Describe("home backup retention in the admin API", func() {
 	It("starts at 7 days with the bounds, sets it, returns to the default with 0, and refuses 91, auditing changes only", func(ctx SpecContext) {
 		code, raw := e.call(ctx, e.token, http.MethodGet, "/home-backup-retention", nil)
 		Expect(code).To(Equal(http.StatusOK), string(raw))
-		Expect(decode[runContentRetentionJSON](raw)).To(Equal(runContentRetentionJSON{Days: 7, DefaultDays: 7, MinDays: 1, MaxDays: 90}))
+		Expect(decode[homeBackupRetentionJSON](raw)).To(Equal(homeBackupRetentionJSON{Days: 7, DefaultDays: 7, MinDays: 1, MaxDays: 90}))
 
 		code, raw = e.call(ctx, e.token, http.MethodPut, "/home-backup-retention", map[string]any{"days": 30})
 		Expect(code).To(Equal(http.StatusOK), string(raw))
-		Expect(decode[runContentRetentionJSON](raw).Days).To(Equal(30))
+		Expect(decode[homeBackupRetentionJSON](raw).Days).To(Equal(30))
 		code, raw = e.call(ctx, e.token, http.MethodPut, "/home-backup-retention", map[string]any{"days": 91})
 		Expect(code).To(Equal(http.StatusBadRequest), string(raw))
 		code, raw = e.call(ctx, e.token, http.MethodPut, "/home-backup-retention", map[string]any{"days": 0})
 		Expect(code).To(Equal(http.StatusOK), string(raw))
-		Expect(decode[runContentRetentionJSON](raw).Days).To(Equal(7))
+		Expect(decode[homeBackupRetentionJSON](raw).Days).To(Equal(7))
 
 		var n int
 		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'org.home_backup_retention.set' AND actor_kind = 'token'`, e.org).Scan(&n)).To(Succeed())
