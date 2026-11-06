@@ -34,6 +34,7 @@ import (
 // in their order in the call (ADR 0091 decision 6), so two base64 halves too short to match alone
 // no longer join, and the leak passes before both legs. ADR 0091 does not promise more (the corpus
 // marks the reversed split not_promised); the both-legs replay of the same case is still caught.
+// Joining payload arguments in an order that does not depend on the encoder is #256.
 const keyOrder = "leak/handbook-rule/split-args-b64-halves/private-only"
 
 // modelToolName is the name a corpus tool is declared under to the fake model.
