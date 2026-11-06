@@ -5,6 +5,7 @@ import { useQuery } from '@connectrpc/connect-query'
 import { useState } from 'react'
 import { RequireAdmin } from '@/components/require-admin'
 import { FullContentBadge, TraceDestinationCard } from '@/components/trace-destination-card'
+import { HomeBackupRetentionSettings } from '@/components/home-backup-retention-settings'
 import { RunContentRetentionSettings } from '@/components/run-content-retention-settings'
 import { TraceDestinationForm } from '@/components/trace-destination-form'
 import { TraceSettingsForm } from '@/components/trace-settings-form'
@@ -150,6 +151,7 @@ function ObservabilityContent() {
         s && <TraceSettingsForm key={`${s.contentLevel}-${s.sampleRate}-${s.platformCopyLevel}-${s.ceiling}-${s.hasPlatformDestination}`} settings={s} isOwner={org.role === OrgRole.OWNER} save={actions.updateSettings} onSaved={() => say('Saved the settings.')} />
       )}
       <RunContentRetentionSettings orgId={orgId} />
+      <HomeBackupRetentionSettings orgId={orgId} />
     </>
   )
 }

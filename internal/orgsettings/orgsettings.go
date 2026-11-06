@@ -65,9 +65,8 @@ func Defaults() Settings {
 	return Settings{
 		IdleTimeout: DefaultIdleTimeout, ParkWarm: DefaultParkWarm, QueueWait: DefaultQueueWait,
 		SandboxWaitCap: DefaultSandboxWaitCap, RunContentRetention: DefaultRunContentRetention,
-		HomeBackupRetention: DefaultHomeBackupRetention,
 		MaxConcurrentRuns: DefaultMaxConcurrentRuns, TriggerConcurrency: DefaultTriggerConcurrency,
-		TriggerRatePerMinute: DefaultTriggerRatePerMinute,
+		TriggerRatePerMinute: DefaultTriggerRatePerMinute, HomeBackupRetention: DefaultHomeBackupRetention,
 	}
 }
 

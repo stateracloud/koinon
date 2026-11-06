@@ -34,3 +34,14 @@ come back when the period is raised again.
 `koinon-api` runs the purge once an hour, org by org, in batches of 1000 events, each batch in its
 own short transaction. Running it again finds nothing left to do, and several replicas can run it at
 once (they skip rows another batch holds).
+
+## Old home backups
+
+When an agent's home backup key changes, its backups start again in a new repository and the old
+one is kept for **7 days** by default, then deleted, but only once the new repository holds a
+checkpoint (or at once if the old one's password was lost). An org admin can change that period,
+from 1 to 90 days: `GET` and `PUT /home-backup-retention` of the admin API (`days`; leave it out or
+send 0 to return to the default), `OrgSettingsService.SetHomeBackupRetention`, or **Old home
+backups** on the console's observability settings page. Admins and owners only; every change is
+audited as `org.home_backup_retention.set`. The period applies to keys changed after the change; a
+repository already retired keeps its deadline.

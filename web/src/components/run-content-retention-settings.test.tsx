@@ -18,6 +18,7 @@ function setup() {
     service(TraceDestinationService, { listDestinations: () => ({ destinations: [] }), getSettings: () => ({}) })
     service(OrgSettingsService, {
       getRunContentRetention: () => view(),
+      getHomeBackupRetention: () => ({ retention: { days: 7, defaultDays: 7, minDays: 1, maxDays: 90 } }),
       setRunContentRetention: (req) => {
         sets.push(req.days)
         days = req.days || 30
