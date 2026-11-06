@@ -122,12 +122,16 @@ func writeOpenAIError(w http.ResponseWriter, err error) {
 }
 
 func openAIUsage(u Usage) map[string]any {
-	return map[string]any{
+	m := map[string]any{
 		"prompt_tokens":         u.InputTokens,
 		"completion_tokens":     u.OutputTokens,
 		"total_tokens":          u.InputTokens + u.OutputTokens,
 		"prompt_tokens_details": map[string]any{"cached_tokens": u.CachedInputTokens},
 	}
+	if u.ReasoningTokens > 0 {
+		m["completion_tokens_details"] = map[string]any{"reasoning_tokens": u.ReasoningTokens}
+	}
+	return m
 }
 
 func (r reply) finishReason() string {

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -29,6 +30,18 @@ type Args struct {
 	// fetch tool the path, query and fragment of its URL are payload too (ADR 0091 decision 3), at
 	// the URL argument's place.
 	Payload []string
+	// Canonical, Values and CallValues are three more readings of the payload (#256), as indices
+	// into Payload; each recurses into nested objects and keeps a list in its order:
+	//   - Canonical: of every object its members sorted by key, each its key and then what its value
+	//     holds, so a key stays next to its value;
+	//   - Values: of every object its keys sorted, then its members' values in that order, so no key
+	//     stands between two values;
+	//   - CallValues: the same in call order.
+	// The text match scans each string on its own, the strings joined in call order and joined in
+	// each of these (leakguard.TaintChecker.CheckJoins): a text split across two members joins in
+	// the order the call wrote them and in key order, whatever order the encoder used, with or
+	// without a key between the halves.
+	Canonical, Values, CallValues []int
 }
 
 // PayloadBytes is what the byte cap counts: the payload as sent, no decoding.
@@ -119,7 +132,13 @@ func (w walker) object(path string, depth int, odd bool) error {
 	if depth > maxNesting {
 		return errors.New("the arguments are nested too deeply")
 	}
+	// Each member appends its own strings and nothing else, so one ends where the next starts.
+	first := len(w.out.Payload)
+	var members []member
 	for w.dec.More() {
+		if n := len(members); n > 0 {
+			members[n-1].end = len(w.out.Payload)
+		}
 		tok, err := w.dec.Token()
 		if err != nil {
 			return errArgs
@@ -128,6 +147,7 @@ func (w walker) object(path string, depth int, odd bool) error {
 		if !ok {
 			return errArgs
 		}
+		members = append(members, member{key: key, start: len(w.out.Payload)})
 		name := key
 		if path != "" {
 			name = path + "." + key
@@ -146,13 +166,80 @@ func (w walker) object(path string, depth int, odd bool) error {
 			}
 			continue
 		}
+		members[len(members)-1].keyed = true
 		w.out.Payload = append(w.out.Payload, key)
 		if err := w.value(name, depth, keyOdd); err != nil {
 			return err
 		}
 	}
-	_, err := w.dec.Token() // '}'
-	return err
+	if _, err := w.dec.Token(); err != nil { // '}'
+		return err
+	}
+	if n := len(members); n > 0 {
+		members[n-1].end = len(w.out.Payload)
+	}
+	w.canonical(first, members)
+	return nil
+}
+
+// member is the payload one object member added, the strings from start to end: its key first,
+// unless it is an address argument (keyed false), then what its value added.
+type member struct {
+	key        string
+	keyed      bool
+	start, end int
+}
+
+// canonical orders what an object added to the payload (#256) in Canonical, Values and
+// CallValues (see Args). A JSON object has no order, so the key-sorted readings must not depend on
+// the order an encoder wrote the keys in. Members with the same key (a raw repeated key) keep their
+// order. A nested object was ordered when it was read, so the orders are recursive; a list keeps
+// its order, which is data. The strings are not moved: Payload stays in call order.
+func (w walker) canonical(first int, members []member) {
+	w.extend()
+	if len(members) < 2 {
+		return
+	}
+	sorted := slices.Clone(members)
+	slices.SortStableFunc(sorted, func(a, b member) int { return strings.Compare(a.key, b.key) })
+	end := len(w.out.Payload)
+	canon := make([]int, 0, end-first)
+	for _, m := range sorted {
+		canon = append(canon, w.out.Canonical[m.start:m.end]...)
+	}
+	copy(w.out.Canonical[first:end], canon)
+	valuesAfterKeys(w.out.Values, first, end, sorted)
+	valuesAfterKeys(w.out.CallValues, first, end, members)
+}
+
+// valuesAfterKeys rewrites order[first:end], an object's members in their segments, as the keys of
+// members in that order and then their values' strings in that order. A member's segment starts
+// with its key, when it has one: a nested object reordered only what its value added.
+func valuesAfterKeys(order []int, first, end int, members []member) {
+	out := make([]int, 0, end-first)
+	for _, m := range members {
+		if m.keyed {
+			out = append(out, order[m.start])
+		}
+	}
+	for _, m := range members {
+		seg := order[m.start:m.end]
+		if m.keyed {
+			seg = seg[1:]
+		}
+		out = append(out, seg...)
+	}
+	copy(order[first:end], out)
+}
+
+// extend puts the strings the payload gained since the last ordering into each order, in call
+// order: a scalar's place in an order is its member's.
+func (w walker) extend() {
+	for i := len(w.out.Canonical); i < len(w.out.Payload); i++ {
+		w.out.Canonical = append(w.out.Canonical, i)
+		w.out.Values = append(w.out.Values, i)
+		w.out.CallValues = append(w.out.CallValues, i)
+	}
 }
 
 // address reads the value of an address argument. A string is the address; anything else leaves
@@ -168,7 +255,14 @@ func (w walker) address(name string) error {
 		if err != nil {
 			return err
 		}
+		w.extend()
+		base := len(w.out.Payload) - 1
 		w.out.Payload = append(w.out.Payload, inner.Payload[1:]...)
+		for k, i := range inner.Canonical[1:] {
+			w.out.Canonical = append(w.out.Canonical, base+i)
+			w.out.Values = append(w.out.Values, base+inner.Values[k+1])
+			w.out.CallValues = append(w.out.CallValues, base+inner.CallValues[k+1])
+		}
 		return nil
 	}
 	w.out.Address[name] = s

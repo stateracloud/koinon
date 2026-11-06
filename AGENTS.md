@@ -153,13 +153,16 @@ Two humans' agents change the same tree. Before you start, after `take`:
   `internal/project`; never hard-code them elsewhere in Go.
 - Migrations are forward-only goose files `internal/db/migrations/NNNNN_name.sql`. Never edit a
   merged migration. Tables owned by an org are keyed by `(org_id, id)` with composite foreign keys.
-- **Patch-line migrations (ADR 0085).** Within a shipped minor line (`hack/migrate-patch-line`
-  names it, e.g. `v0.1`) the old and the new binaries share the schema, so migrations only expand:
-  no `RENAME`, `DROP COLUMN`, `DROP TABLE`, `DROP TYPE` and no column type change. Add the new
-  column or table, keep the old one working (see `00014` and `00036` for the pattern), and contract
-  in the next minor. `main` may contract only while the marker is `none`, i.e. after the change that
-  opens the next minor. `hack/migrate-lint.sh` enforces this from the marker at the merge base, a
-  `release/*` base or `MIGRATE_LINT_PATCH_LINE=1`. When to flip the marker: `docs/dev/releasing.md`.
+- **Patch-line migrations (ADR 0085, from v0.3: ADR 0099).** There is no schema or upgrade promise
+  before v0.3: until the marker names a line (it is `none` until v0.3.0 ships), migrations may
+  rename and drop, on `main` and on `release/*` branches. Within a shipped minor line
+  (`hack/migrate-patch-line` names it, e.g. `v0.3`) the old and the new binaries share the schema,
+  so migrations only expand: no `RENAME`, `DROP COLUMN`, `DROP TABLE`, `DROP TYPE` and no column
+  type change. Add the new column or table, keep the old one working (see `00014` and `00036` for
+  the pattern), and contract in the next minor. `main` may contract only while the marker is `none`,
+  i.e. after the change that opens the next minor. `hack/migrate-lint.sh` enforces this from the
+  marker at the merge base or `MIGRATE_LINT_PATCH_LINE=1`; a `release/*` base alone does not turn it
+  on. When to flip the marker: `docs/dev/releasing.md`.
 - Every source file starts with `SPDX-License-Identifier: Apache-2.0`.
 - Tests: Ginkgo/Gomega and testcontainers-go in Go, Vitest in `web/`. CI never calls paid models:
   use the fake model server. Fake secrets in tests are obviously fake and low-entropy

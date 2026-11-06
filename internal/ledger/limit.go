@@ -23,7 +23,7 @@ import (
 // agent's remaining daily limit, its org's remaining monthly cap, the remaining platform ceiling
 // and, while the agent has a run, the run's remaining spend limit (package budget; ADR 0041 decision
 // 5, ADR 0081), net of the spend recorded in each window. The run level is why the gateway can stop
-// a run between ledger passes: overshoot is bounded by one in-flight response, as for the others.
+// a run between ledger passes: overshoot is bounded by one in-flight response per concurrent call (ADR 0097), as for the others.
 //
 // agentgateway charges a budget after each response and keeps the running total per key and
 // budget name. Pushing the full limit after the gateway lost that total (proxy pod replaced,
@@ -71,7 +71,7 @@ func AgentLimit(ctx context.Context, q *store.Queries, agent store.Agent, now ti
 // max_tokens and can exceed the whole run limit, which would push a limit of zero for a run the
 // ledger has not stopped, and the gateway would refuse the run's wrap-up turn. The agent, org and
 // platform levels still hold the reserve, so the key stays bounded by them; the run level's
-// overshoot is one in-flight response, as for every level, and the settlement of the cut response
+// overshoot is one in-flight response per concurrent call (ADR 0097), as for every level, and the settlement of the cut response
 // checks the run's limits when its cost is known.
 func withReserves(ctx context.Context, q *store.Queries, st budget.Status) (budget.Status, error) {
 	out := st

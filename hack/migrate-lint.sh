@@ -6,16 +6,19 @@
 #   - numbers are unique and contiguous from 00001
 #   - with a base ref argument: migrations present on the base are unchanged
 #     (forward-only, ADR 0027), except the one-time edits listed in allowed_edits
-#   - on a patch line (ADR 0085, decisions 5 and 6): migrations the branch adds must not contain
-#     RENAME, DROP COLUMN, DROP TABLE, DROP TYPE or a column type change, so the previous patch
+#   - on a patch line (ADR 0085, decisions 5 and 6; ADR 0099): migrations the branch adds must not
+#     contain RENAME, DROP COLUMN, DROP TABLE, DROP TYPE or a column type change, so the previous patch
 #     release's binaries keep working on the new schema (expand now, contract in the next minor).
 #
-# A patch line is any of: the marker file hack/migrate-patch-line, read at the merge base, names a
-# shipped minor line (for example v0.1) instead of "none"; the base ref is named release/<anything>;
-# or MIGRATE_LINT_PATCH_LINE=1. Patch tags are cut from main (hack/release-gate.sh requires an
-# ancestor of origin/main), so the marker is what makes the rule bite on main: it is set to the
-# minor line when that line's .0 ships, and reset to "none" in the change that opens the next
-# minor line (ADR 0085, open question on detection). Before the first final release it is "none".
+# A patch line is either: the marker file hack/migrate-patch-line, read at the merge base, names a
+# shipped minor line (for example v0.1) instead of "none"; or MIGRATE_LINT_PATCH_LINE=1. The marker
+# is the only switch, for main and for release/* bases alike: a release branch is not a patch line
+# by its name, because ADR 0099 promises no schema before v0.3, so v0.1 and v0.2 release branches
+# may contract. Patch tags are cut from main (hack/release-gate.sh requires an ancestor of
+# origin/main), so the marker is what makes the rule bite on main: it is set to the minor line when
+# that line's .0 ships (and must be on a release branch before it is cut or by cherry-pick), and
+# reset to "none" in the change that opens the next minor line (ADR 0085, open question on
+# detection). It stays "none" until v0.3.0 ships (ADR 0099).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -78,8 +81,7 @@ patch_line() {
   local m
   m=$(git show "$(git merge-base "$base" HEAD):$marker" 2>/dev/null || cat "$marker" 2>/dev/null || true)
   m=$(echo "$m" | tr -d '[:space:]')
-  [[ -n $m && $m != none ]] && return 0
-  [[ $base == release/* || $base == */release/* ]]
+  [[ -n $m && $m != none ]]
 }
 
 # Remove "--" line comments and "/* */" block comments (also multi-line) outside single-quoted

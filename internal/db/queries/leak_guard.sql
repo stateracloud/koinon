@@ -104,3 +104,31 @@ SELECT feed_read, feed_done FROM leak_guard_runs WHERE org_id = @org_id AND run_
 -- approval belongs to it).
 SELECT * FROM runs
 WHERE org_id = @org_id AND agent_id = @agent_id AND state = 'running';
+
+-- name: OpenLeakGuardCall :exec
+-- A tools/call the guard passed whose result would set a leg (#254): open until the guard records
+-- that result.
+INSERT INTO leak_guard_open_calls (org_id, agent_id, generation, target, tool, opened_at)
+VALUES (@org_id, @agent_id, @generation, @target, @tool, @opened_at);
+
+-- name: CloseLeakGuardCall :execrows
+-- The guard recorded a result of @target's @tool: the oldest call of it still open is closed. SKIP
+-- LOCKED lets two results of one tool close two calls.
+DELETE FROM leak_guard_open_calls d
+WHERE d.org_id = @org_id AND d.id = (
+    SELECT o.id FROM leak_guard_open_calls o
+    WHERE o.org_id = @org_id AND o.agent_id = @agent_id AND o.generation = @generation
+      AND o.target = @target AND o.tool = @tool
+    ORDER BY o.opened_at, o.id
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED);
+
+-- name: ExpireLeakGuardCalls :execrows
+-- The session's calls opened before @before, whose replies the guard never saw: they go, and the
+-- caller records both legs in the same transaction.
+DELETE FROM leak_guard_open_calls
+WHERE org_id = @org_id AND agent_id = @agent_id AND generation = @generation AND opened_at < @before;
+
+-- name: CountLeakGuardOpenCalls :one
+SELECT count(*) FROM leak_guard_open_calls
+WHERE org_id = @org_id AND agent_id = @agent_id AND generation = @generation;

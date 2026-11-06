@@ -11,8 +11,8 @@ changes how the gateway runs, not what Koinon does
 | Mode | State | `gateway.mode` |
 | --- | --- | --- |
 | Standalone | Built. This is the default. | `standalone` |
-| Kubernetes | Built (plan item G2). | `kubernetes` |
-| Shared | **Not built yet.** Planned for v0.2. | none yet |
+| Kubernetes | Built (plan item G2), frozen: no new features, removed in v0.3 ([ADR 0097](https://github.com/stateracloud/koinon/blob/main/docs/adr/0097-koinon-owned-gateway.md)). | `kubernetes` |
+| Shared | **Not built** ([ADR 0097](https://github.com/stateracloud/koinon/blob/main/docs/adr/0097-koinon-owned-gateway.md) decision 4). | none |
 
 ## Standalone
 
@@ -47,6 +47,10 @@ Run one replica only. The budget database is not shared.
 
 For clusters that already run the agentgateway controller. Koinon creates its own `Gateway` and the
 objects around it in its namespace and never touches the gateways of others.
+
+Kubernetes mode is frozen ([ADR 0097](https://github.com/stateracloud/koinon/blob/main/docs/adr/0097-koinon-owned-gateway.md)
+decision 4): it keeps working and gets no new features, and it is removed in v0.3 (ADR 0097 step 3) when
+Koinon's own gateway replaces agentgateway.
 
 When you upgrade from v1.6, upgrade the agentgateway CRDs and controller first, then Koinon: the
 preflight refuses a controller outside v1.7.x.
@@ -98,7 +102,7 @@ Every org keeps its plain model names; the gateway picks the org's own model fro
   gateway does not stop a key by itself, so a key can spend for roughly one second after the request that
   reaches the limit (the proxy batches its log for about a second before the ledger sees it, then Koinon
   runs a pass). At ten requests a second of $0.001 that was four requests past the limit on kind, without
-  the database time. Standalone mode stops a key after at most one response. A proxy restart cannot reset
+  the database time. Standalone mode overshoots by at most one in-flight response per concurrent call. A proxy restart cannot reset
   spend: the ledger holds it, and a revoked key stays out of the key list.
 - **A rejected object does not stop the others.** If the controller or the API server refuses one org's
   model or keys, that org's agents show the reason in their status and in the reconciler's log, and every
@@ -109,6 +113,6 @@ Every org keeps its plain model names; the gateway picks the org's own model fro
 
 ## Shared
 
-Planned for v0.2. Koinon will use a gateway that a platform team already runs, through its management
+Not built (ADR 0097 decision 4). Koinon would use a gateway that a platform team already runs, through its management
 API, and change only the models it registered. When the platform issues model keys, you treat the
 platform gateway as a provider upstream in standalone mode. There is no separate mode for that.

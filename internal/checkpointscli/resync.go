@@ -51,6 +51,7 @@ type outcome struct {
 	err                                string
 	finished, failed, replaced         bool
 	snapshots, added, missing, skipped int32
+	taken                              int32 // prefixes holding a repository the database has no password for (#262)
 }
 
 // Resync asks koinon-agentd to rebuild the home checkpoints of the given agents, or of every agent
@@ -215,7 +216,7 @@ func (t *Tool) outcomes(ctx context.Context, requested []target) ([]outcome, err
 	byAgent := map[[2]pgtype.UUID]outcome{}
 	rows, err := t.Pool.Query(ctx, `SELECT r.org_id, r.agent_id, r.request_id, r.attempts, coalesce(r.error, ''),
 			r.finished_at IS NOT NULL, r.failed_at IS NOT NULL,
-			coalesce(r.snapshots, 0), coalesce(r.added, 0), coalesce(r.missing, 0), coalesce(r.skipped, 0)
+			coalesce(r.snapshots, 0), coalesce(r.added, 0), coalesce(r.missing, 0), coalesce(r.skipped, 0), coalesce(r.taken, 0)
 		FROM home_checkpoint_resyncs r
 		JOIN unnest($1::uuid[], $2::uuid[]) AS t(org_id, agent_id) USING (org_id, agent_id)`, orgs, agents)
 	if err != nil {
@@ -224,7 +225,7 @@ func (t *Tool) outcomes(ctx context.Context, requested []target) ([]outcome, err
 	var o outcome
 	if _, err := pgx.ForEachRow(rows, []any{
 		&o.org, &o.agent, &o.request, &o.attempts, &o.err, &o.finished, &o.failed,
-		&o.snapshots, &o.added, &o.missing, &o.skipped,
+		&o.snapshots, &o.added, &o.missing, &o.skipped, &o.taken,
 	}, func() error {
 		byAgent[[2]pgtype.UUID{o.org, o.agent}] = o
 		return nil
@@ -249,7 +250,9 @@ func (t *Tool) outcomes(ctx context.Context, requested []target) ([]outcome, err
 func (t *Tool) summary(got []outcome) error {
 	var snapshots, added, missing, skipped int32
 	var failed, replaced int
+	var taken int32
 	for _, o := range got {
+		taken += o.taken
 		snapshots += o.snapshots
 		added += o.added
 		missing += o.missing
@@ -263,6 +266,10 @@ func (t *Tool) summary(got []outcome) error {
 	}
 	_, _ = fmt.Fprintf(t.Out, "Resynced %d of %d agent(s): %d snapshot(s) in the bucket, %d checkpoint(s) added, %d marked failed because their snapshot is gone, %d snapshot(s) left out.\n",
 		len(got)-failed-replaced, len(got), snapshots, added, missing, skipped)
+	if taken > 0 {
+		_, _ = fmt.Fprintf(t.Out, "%d repository prefix(es) hold a repository this database has no password for, started after the dump: "+
+			"the agents' next repositories start past them (audit home.repository_prefix_taken, docs/ops/secret-keys.md).\n", taken)
+	}
 	for _, o := range got {
 		who := fmt.Sprintf("agent %s (org %s)", o.agent.String(), o.org.String())
 		switch {
@@ -272,6 +279,9 @@ func (t *Tool) summary(got []outcome) error {
 			_, _ = fmt.Fprintf(t.Out, "  %s: a newer request replaced this one\n", who)
 		case o.missing > 0 || o.skipped > 0:
 			_, _ = fmt.Fprintf(t.Out, "  %s: %d checkpoint(s) marked failed (snapshot gone), %d snapshot(s) left out\n", who, o.missing, o.skipped)
+		}
+		if !o.failed && !o.replaced && o.taken > 0 {
+			_, _ = fmt.Fprintf(t.Out, "  %s: %d repository prefix(es) taken\n", who, o.taken)
 		}
 	}
 	if failed+replaced > 0 {

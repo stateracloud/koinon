@@ -5,6 +5,7 @@ package gatewaytest
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"time"
 
@@ -124,6 +125,145 @@ func guardSpec(env Env) {
 			Expect(failed).To(BeTrue(), text)
 			Expect(text).NotTo(ContainSubstring(target + " saw"))
 			Expect(toolCalls(srvLog)).To(Equal(before), "the server never saw the call")
+		})
+	})
+
+	// #254, ADR 0097 step 1 exit criterion 2: what the real gateway shows the guard of a reply that
+	// is not a successful result. The guard (internal/mcpguard) fails closed on a call it passed whose
+	// result it never saw; guard_test there drives its own Server and shows the legs it then sets.
+	// These specs show the trigger on the real gateway: an error reply reaches the agent and the
+	// guard is not asked about it.
+	Describe(env.Name+": replies the MCP leak guard never sees (#254)", Ordered, func() {
+		const faulty = "acme-faulty"
+		var (
+			url, key string
+			logs     func(context.Context) string
+			guard    *FakeGuard
+		)
+		BeforeAll(func(ctx SpecContext) {
+			srv := faultyRemote(faulty, &headerLog{})
+			DeferCleanup(func() { srv.CloseClientConnections(); go srv.Close() })
+			guard = startGuard()
+			k, err := gateway.NewKey(agent)
+			Expect(err).NotTo(HaveOccurred())
+			key = k.Material
+			state := gateway.State{MCP: []gateway.MCPTarget{{Name: faulty, Org: "acme", URL: "http://" + env.Host + ":" + itoa(port(srv)) + "/mcp"}}}
+			state.AddKey(k.Key)
+			state.GrantTools(agent, gateway.ToolGrant{Target: faulty, Tools: []string{"read_item", "fail_item", "stray_item"}})
+			gw, err := env.Start(ctx, []int{port(srv), guard.Port()}, nil, guard.URL(env.Host))
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(gw.Stop)
+			url, logs = gw.URL, gw.Logs
+			_, err = gw.Driver.Apply(ctx, state)
+			Expect(err).NotTo(HaveOccurred())
+		}, NodeTimeout(5*time.Minute))
+
+		AfterEach(func(ctx SpecContext) {
+			if CurrentSpecReport().Failed() && logs != nil {
+				AddReportEntry("gateway logs", logs(ctx))
+			}
+		})
+
+		responsesFor := func(tool string) []GuardCall {
+			return slices.DeleteFunc(guard.Responses(), func(c GuardCall) bool { return c.Tool != tool })
+		}
+
+		It("passes a JSON-RPC error reply to the agent without asking the guard about it", func(ctx SpecContext) {
+			text, failed := call(ctx, url, key, faulty+"_fail_item")
+			Expect(failed).To(BeTrue(), text)
+			Expect(text).To(ContainSubstring(replyCanary), "the error reached the agent")
+			Expect(guard.Requests()).To(ContainElement(HaveField("Tool", "fail_item")), "the guard passed the call")
+			Consistently(func() []GuardCall { return responsesFor("fail_item") }).WithTimeout(2*time.Second).Should(BeEmpty(),
+				"the guard was never asked about the error reply: the gap the ledger closes")
+			for _, c := range guard.Responses() {
+				Expect(c.Body).NotTo(ContainSubstring(replyCanary))
+			}
+		})
+
+		// Expected upstream behaviour (agentgateway#4245): the response hook runs on every response
+		// on the call's stream, whatever its id. A server that appends a result of its own after its
+		// error gets the guard asked about that result, never the error, so the guard closes the call
+		// (internal/mcpguard opencalls.go). This flips when the gateway hooks only the terminal reply.
+		It("asks the guard about a result a server appends after its error, and never about the error (agentgateway#4245)", func(ctx SpecContext) {
+			text, failed := call(ctx, url, key, faulty+"_stray_item")
+			Expect(failed).To(BeTrue(), text)
+			Expect(text).To(ContainSubstring(replyCanary))
+			Eventually(func() []GuardCall { return responsesFor("stray_item") }).WithTimeout(10*time.Second).Should(HaveLen(1),
+				"one CheckResponse, for the appended result")
+			Consistently(func() []GuardCall { return responsesFor("stray_item") }).WithTimeout(2 * time.Second).Should(ConsistOf(
+				HaveField("Body", SatisfyAll(ContainSubstring("stray result"), Not(ContainSubstring(replyCanary))))))
+		})
+	})
+
+	// #254, ADR 0097 step 1 exit criterion 2 as one case: the real gateway, the real leak guard
+	// (internal/mcpguard.Server on Postgres) and a server that answers a guarded call with a JSON-RPC
+	// error. The error reaches the agent unseen by the guard, and the guard then holds the session
+	// fail-closed. Runs in both modes: the guard is an ExtMcp server at Env.Host either way.
+	Describe(env.Name+": the real MCP leak guard holds a session fail-closed after a reply it never saw (#254)", Ordered, func() {
+		const (
+			wiki = "wiki" // private data, answers with an error
+			sink = "sink" // sets no leg; its tools are external-high
+		)
+		var (
+			url, key string
+			logs     func(context.Context) string
+			rg       *RealGuard
+		)
+		BeforeAll(func(ctx SpecContext) {
+			rg = startRealGuard(ctx)
+			wikiSrv := faultyRemote(rg.Target(wiki), &headerLog{})
+			DeferCleanup(func() { wikiSrv.CloseClientConnections(); go wikiSrv.Close() })
+			sinkSrv := fakeRemote(rg.Target(sink), &headerLog{}, "Authorization")
+			DeferCleanup(func() { sinkSrv.CloseClientConnections(); go sinkSrv.Close() })
+			rg.Server(ctx, wiki, []string{"private_data"}, "read_item", "fail_item")
+			rg.Server(ctx, sink, nil, "write_item")
+
+			k, err := gateway.NewKey(rg.AgentRef())
+			Expect(err).NotTo(HaveOccurred())
+			key = k.Material
+			host := func(s *httptest.Server) string { return "http://" + env.Host + ":" + itoa(port(s)) + "/mcp" }
+			state := gateway.State{MCP: []gateway.MCPTarget{
+				{Name: rg.Target(wiki), Org: rg.Slug, URL: host(wikiSrv)},
+				{Name: rg.Target(sink), Org: rg.Slug, URL: host(sinkSrv)},
+			}}
+			state.AddKey(k.Key)
+			state.GrantTools(rg.AgentRef(),
+				gateway.ToolGrant{Target: rg.Target(wiki), Tools: []string{"read_item", "fail_item"}},
+				gateway.ToolGrant{Target: rg.Target(sink), Tools: []string{"write_item"}})
+			gw, err := env.Start(ctx, []int{port(wikiSrv), port(sinkSrv), rg.Port()}, nil, rg.URL(env.Host))
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(gw.Stop)
+			url, logs = gw.URL, gw.Logs
+			_, err = gw.Driver.Apply(ctx, state)
+			Expect(err).NotTo(HaveOccurred())
+		}, NodeTimeout(10*time.Minute))
+
+		AfterEach(func(ctx SpecContext) {
+			if CurrentSpecReport().Failed() && logs != nil {
+				AddReportEntry("gateway logs", logs(ctx))
+			}
+		})
+
+		It("lets the error reach the agent, then needs an approval, with both legs, for the next clean external-high call", func(ctx SpecContext) {
+			text, failed := call(ctx, url, key, rg.Target(sink)+"_write_item")
+			Expect(failed).To(BeFalse(), "a clean session passes a clean external-high call: "+text)
+
+			text, failed = call(ctx, url, key, rg.Target(wiki)+"_fail_item")
+			Expect(failed).To(BeTrue(), text)
+			Expect(text).To(ContainSubstring(replyCanary), "the error reply reached the agent, which the guard never saw")
+
+			text, failed = call(ctx, url, key, rg.Target(sink)+"_write_item")
+			Expect(failed).To(BeTrue(), text)
+			Expect(text).To(ContainSubstring("approval requested: id="), "the next external call needs an approval")
+			risk := rg.Risk(ctx)
+			if env.KnownGaps["#254"] != "" {
+				// The gateway never shows the guard the error reply: it holds the session fail-closed.
+				Expect(risk).To(ContainSubstring(`"reply_unseen"`), "gap closed: update KnownGaps (the guard now sees the error reply)")
+				Expect(risk).To(ContainSubstring(`"private_data": true`))
+				Expect(risk).To(ContainSubstring(`"untrusted_input": true`), "a reply never seen sets both legs")
+				return
+			}
+			Expect(risk).NotTo(ContainSubstring(`"reply_unseen"`), "the guard saw the error reply")
 		})
 	})
 

@@ -189,7 +189,7 @@ func (t *Tool) newRepository(ctx context.Context, ring *secretstore.Keyring, h h
 		if _, err := q.ExpireRetiredHomeRepositoryEpochs(ctx, store.ExpireRetiredHomeRepositoryEpochsParams{OrgID: h.org, AgentID: h.agent}); err != nil {
 			return err
 		}
-		prev := r.Epoch - 1
+		prev := r.Replaced // not always r.Epoch - 1: a taken prefix is skipped (#262)
 		n, err := q.RequestHomeRepositorySeed(ctx, store.RequestHomeRepositorySeedParams{
 			OrgID: h.org, AgentID: h.agent, RepositoryEpoch: r.Epoch, SeedFromEpoch: pgtype.Int4{Int32: prev, Valid: true},
 		})

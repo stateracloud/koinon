@@ -8,8 +8,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
+	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -22,6 +26,35 @@ import (
 // (orgs/<org>/homes/<agent>/, or orgs/<org>/homes/<agent>/r<N>/ for a later repository epoch).
 type Storage interface {
 	Open(ctx context.Context, prefix string, create bool) (blob.Storage, error)
+	// Epochs lists, in one delimited listing of the agent's prefix (Prefix), the epochs after 0
+	// whose folder (r<N>/) holds anything, in no particular order.
+	Epochs(ctx context.Context, agentPrefix string) ([]int32, error)
+}
+
+// epochFolder matches a later epoch's folder under an agent's prefix, as a delimited listing names
+// it (r<N>/) or as a directory entry names it (r<N>).
+var epochFolder = regexp.MustCompile(`^r([1-9][0-9]{0,8})/?$`)
+
+// epochOfFolder is the epoch whose folder name is, if it is one.
+func epochOfFolder(name string) (int32, bool) {
+	m := epochFolder.FindStringSubmatch(name)
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(m[1], 10, 32)
+	return int32(n), err == nil
+}
+
+// HeldEpochs lists the agent's repository epochs after 0 whose folder in the bucket holds anything,
+// in ascending order: a repository, or what is left of one. It is one listing, so a repository
+// started at r<N+3>/ is found even when r<N+2>/ is empty.
+func (w *Writer) HeldEpochs(ctx context.Context, org, agent string) ([]int32, error) {
+	epochs, err := w.Storage.Epochs(ctx, Prefix(org, agent))
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint: listing the repository epochs of %s: %w", Prefix(org, agent), err)
+	}
+	slices.Sort(epochs)
+	return slices.Compact(epochs), nil
 }
 
 // Prefix is the storage prefix of an agent's first repository (epoch 0).
@@ -94,6 +127,61 @@ func (s S3) Open(ctx context.Context, prefix string, create bool) (blob.Storage,
 		BucketName: s.Bucket, Prefix: prefix, Endpoint: host, DoNotUseTLS: plain,
 		AccessKeyID: s.AccessKeyID, SecretAccessKey: s.SecretAccessKey, Region: s.Region,
 	}, create)
+}
+
+// Epochs implements Storage. Without a delimiter kopia's S3 listing (minio-go's ListObjects, not
+// recursive) names each folder under the prefix once, as r<N>/, and no blob of the agent's epoch 0
+// repository starts with r (EpochPrefix).
+func (s S3) Epochs(ctx context.Context, agentPrefix string) ([]int32, error) {
+	st, err := s.Open(ctx, agentPrefix, false)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = st.Close(context.WithoutCancel(ctx)) }()
+	var out []int32
+	err = st.ListBlobs(ctx, "r", func(m blob.Metadata) error {
+		if n, ok := epochOfFolder(string(m.BlobID)); ok {
+			out = append(out, n)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// Epochs implements Storage: the r<N> directories that hold a file.
+func (d Dir) Epochs(_ context.Context, agentPrefix string) ([]int32, error) {
+	root := filepath.Join(string(d), filepath.FromSlash(agentPrefix))
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	var out []int32
+	for _, e := range entries {
+		n, ok := epochOfFolder(e.Name())
+		if !ok || !e.IsDir() {
+			continue
+		}
+		held := false
+		err := filepath.WalkDir(filepath.Join(root, e.Name()), func(_ string, f fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if f.Type().IsRegular() {
+				held = true
+				return fs.SkipAll
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if held {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }
 
 // Dir keeps repositories in a directory, one folder per prefix. It is for tests and development.

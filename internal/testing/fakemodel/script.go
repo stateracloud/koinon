@@ -116,6 +116,10 @@ type Usage struct {
 	// report it as cache_creation_input_tokens; chat completions have no field for it.
 	CacheWriteTokens int `yaml:"cacheWriteTokens,omitempty"`
 	OutputTokens     int `yaml:"outputTokens,omitempty"`
+	// ReasoningTokens is the part of OutputTokens spent thinking. It is reported only when set:
+	// chat completions as completion_tokens_details.reasoning_tokens, Messages as
+	// output_tokens_details.thinking_tokens.
+	ReasoningTokens int `yaml:"reasoningTokens,omitempty"`
 }
 
 // Validate reports problems that would make the script unusable.
