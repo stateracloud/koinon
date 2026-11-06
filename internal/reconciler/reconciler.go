@@ -288,15 +288,26 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 			cfg.Observer.Log = cfg.Logger
 		}
 	}
+	wake := func() { notifySelf(pool, cfg.Logger) }
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{},
 		mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		plan: gatewayplan.New(gatewayplan.Config{
 			KeyDir: cfg.ProviderKeyDir, KeySettle: cfg.ProviderKeySettle, ToolServers: cfg.ToolServers,
-			MCPAskURL: cfg.MCPAskURL, Logger: cfg.Logger,
+			MCPAskURL: cfg.MCPAskURL, Logger: cfg.Logger, Wake: wake,
 		}),
 	}, nil
+}
+
+// notifySelf wakes the leading reconciler through the same channel the triggers use (#249). The
+// payload is empty: the loop ignores it.
+func notifySelf(pool *pgxpool.Pool, log *slog.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := pool.Exec(ctx, "SELECT pg_notify($1, '')", NotifyChannel); err != nil {
+		log.Warn("waking the reconciler at the end of the key settle failed; the next resync picks it up", "err", err)
+	}
 }
 
 // errAbortPass marks errors after which applying the gateway state could revoke working keys.
