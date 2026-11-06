@@ -627,6 +627,11 @@ var _ = Describe("home checkpoints", func() {
 			return deleted.Valid
 		}
 
+		// Inserted complete, so the running pool has no hourly request to claim and back up into e0 beside the sweep.
+		_, err = db.Exec(ctx, `INSERT INTO home_checkpoints (org_id, agent_id, reason, status, snapshot_id, finished_at, repository_epoch)
+			VALUES ($1, $2, 'stop', 'complete', 'lost', now(), 0)`, e.org, e.agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+
 		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) { c.Sweep = 50 * time.Millisecond }))
 		By("the stored prefix names another agent's folder: refused, nothing deleted")
 		Consistently(deleted0).WithTimeout(time.Second).Should(BeFalse())
