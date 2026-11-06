@@ -500,6 +500,39 @@ var _ = Describe("Settling responses cut short", func() {
 		Expect(revisions(ctx)).To(HaveLen(1))
 	})
 
+	// #78: agentgateway logs no thinking split for Anthropic Messages; OpenRouter's generation may
+	// report one (native_tokens_reasoning), and a generation without one must not erase the split
+	// the gateway did log.
+	It("takes the thinking split from the bill, keeps the logged one when the bill has none, and says when neither had one", func(ctx SpecContext) {
+		split := func(id string) (n int64, known *bool) {
+			Expect(db.QueryRow(ctx, `SELECT reasoning_tokens, reasoning_known FROM spend_entries WHERE org_id = $1 AND response_id = $2`,
+				e.org, id).Scan(&n, &known)).To(Succeed())
+			return n, known
+		}
+		logged := complete("gen-t1") // chat completions: the gateway logged the split
+		logged.ReasoningTokens, logged.ReasoningKnown = 80, true
+		_, err := in.Ingest(ctx, []ledger.Entry{logged, complete("gen-t2"), complete("gen-t3")})
+		Expect(err).NotTo(HaveOccurred())
+		n, known := split("gen-t2")
+		Expect(n).To(BeZero())
+		Expect(known).To(HaveValue(BeFalse()), "a Messages record without koinon.reasoning: not reported, not 0")
+
+		src.answer("gen-t1", providerusage.Usage{InputTokens: 1000, OutputTokens: 250, Cost: money.MustParse("0.0007")})
+		src.answer("gen-t2", providerusage.Usage{InputTokens: 1000, OutputTokens: 250, ReasoningTokens: 120, ReasoningKnown: true, Cost: money.MustParse("0.0007")})
+		src.answer("gen-t3", providerusage.Usage{InputTokens: 1000, OutputTokens: 250, Cost: money.MustParse("0.0007")})
+		clock = clock.Add(time.Minute)
+		_, err = settler.SettleDue(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(e.provisional(ctx)).To(BeZero())
+
+		n, known = split("gen-t1")
+		Expect([]any{n, *known}).To(Equal([]any{int64(80), true}), "the bill had no figure: the gateway's split stays")
+		n, known = split("gen-t2")
+		Expect([]any{n, *known}).To(Equal([]any{int64(120), true}), "the bill's split fills the one the gateway could not log")
+		n, known = split("gen-t3")
+		Expect([]any{n, *known}).To(Equal([]any{int64(0), false}), "neither reported one: still unknown")
+	})
+
 	It("does not wait for a bill of a request the provider refused or failed without usage", func(ctx SpecContext) {
 		refused := cut("gen-x4")
 		refused.InputKnown, refused.InputTokens, refused.Status = false, 0, 400

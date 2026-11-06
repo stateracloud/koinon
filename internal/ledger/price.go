@@ -28,6 +28,7 @@ type priced struct {
 	inTokens, outTokens        int64
 	cacheRead, cacheWrite      int64
 	reasoning                  int64
+	reasoningKnown             bool
 	cost                       money.USD
 	gatewayCost                pgtype.Text
 	ref                        pgtype.Text
@@ -72,6 +73,7 @@ func (in *Ingester) price(ctx context.Context, q *store.Queries, org pgtype.UUID
 	p := priced{
 		inTokens: e.InputTokens, outTokens: e.OutputTokens,
 		cacheRead: e.CacheReadTokens, cacheWrite: e.CacheWriteTokens, reasoning: e.ReasoningTokens,
+		reasoningKnown: e.ReasoningKnown,
 	}
 	if e.RequestBytes >= 0 {
 		p.reqBytes = pgtype.Int8{Int64: e.RequestBytes, Valid: true}

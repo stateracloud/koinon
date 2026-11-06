@@ -29,6 +29,10 @@ type Usage struct {
 	InputTokens, OutputTokens         int64
 	CacheReadTokens, CacheWriteTokens int64
 	ReasoningTokens                   int64
+	// ReasoningKnown says the record reports the reasoning split (OpenRouter's
+	// native_tokens_reasoning above 0, ADR 0069 amendment of 2026-11-06); without it
+	// ReasoningTokens is 0 for want of a figure and settling keeps the gateway's split.
+	ReasoningKnown bool
 	// Cost is what the provider billed (OpenRouter's total_cost).
 	Cost money.USD
 	// UpstreamCost is what the upstream provider billed the org's own key for the response, when

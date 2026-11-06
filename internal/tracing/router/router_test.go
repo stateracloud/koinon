@@ -249,6 +249,22 @@ var _ = Describe("Router", func() {
 			Expect(av(be.named("invoke_agent Support Bot"), semconv.GenAIUsageOutputTokens)).NotTo(BeEmpty(), "the output tokens, thinking included, are still there")
 		})
 
+		It("writes a reported split of 0, since the provider said so (#78)", func() {
+			reported := func(id string, at time.Duration) router.ModelCall {
+				c := call(id, at, 0.25)
+				c.Reasoning, c.ReasoningKnown = 0, true
+				return c
+			}
+			e.store.setCalls([]router.ModelCall{reported("req-1", 2*time.Second), reported("req-2", 5*time.Second)})
+			e.post(tr.root(false))
+			Eventually(func() int { return e.r.HeldRoots() }).Should(Equal(1))
+			finishTurn(e)
+			Eventually(func() int { return len(be.spans()) }).Should(Equal(3))
+			for _, sp := range be.spans() {
+				Expect(av(sp, semconv.GenAIUsageReasoningTokens)).To(Equal("0"), sp.Name)
+			}
+		})
+
 		It("waits up to 30 seconds for a late row and marks a cost still missing as pending", func() {
 			nocost := call("req-late", 3*time.Second, 0)
 			nocost.Cost = nil

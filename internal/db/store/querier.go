@@ -593,7 +593,8 @@ type Querier interface {
 	// what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
 	// for every entry that is not provisional, so a caller that holds nothing passes nothing.
 	// provider_id is the provider that served the request, when Koinon knows its model; the daily cost
-	// reconciliation sums a provider's entries by it.
+	// reconciliation sums a provider's entries by it. reasoning_known says whether reasoning_tokens is
+	// the provider's split or 0 for want of one (#78).
 	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
 	InsertSpendEntryRevision(ctx context.Context, arg InsertSpendEntryRevisionParams) error
 	// Queues a provisional entry for the settler. Without a response ID it is a hold until the deadline.
