@@ -142,7 +142,7 @@ func (r *Router) Handler() http.Handler {
 }
 
 // Mount returns a middleware that serves TracesPath with the router and passes every other request to
-// the next handler. Pass it to ledger.Serve after the token check, so the token covers it.
+// the next handler. Pass it to agentgateway.Serve after the token check, so the token covers it.
 func (r *Router) Mount() func(http.Handler) http.Handler {
 	h := r.Handler()
 	return func(next http.Handler) http.Handler {

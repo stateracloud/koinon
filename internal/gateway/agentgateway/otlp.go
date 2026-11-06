@@ -12,7 +12,6 @@ import (
 	"math"
 	"mime"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -52,8 +51,6 @@ const LogsPath = "/v1/logs"
 // maxBody bounds an export request. agentgateway's batch processor sends at
 // most 512 records per export, a few KiB each.
 const maxBody = 16 << 20
-
-var decimalRE = regexp.MustCompile(`^[0-9]{1,10}(\.[0-9]{1,18})?$`)
 
 // Decode maps the charged LLM requests of an OTLP logs export to usage records. Records
 // that are not charged requests (MCP calls, rejected requests, requests
@@ -240,7 +237,7 @@ func decimalValue(v *commonpb.AnyValue) string {
 	case *commonpb.AnyValue_IntValue:
 		s = strconv.FormatInt(x.IntValue, 10)
 	}
-	if !decimalRE.MatchString(s) {
+	if !ledger.ValidGatewayCost(s) {
 		return ""
 	}
 	return s

@@ -263,4 +263,8 @@ func gatewayCost(s string) (money.USD, error) {
 	return money.FromRat(r)
 }
 
+// ValidGatewayCost reports whether s is a plain non-negative decimal a gateway may report as a cost
+// (up to 10 integer and 18 fractional digits).
+func ValidGatewayCost(s string) bool { return decimalRE.MatchString(s) }
+
 var decimalRE = regexp.MustCompile(`^[0-9]{1,10}(\.[0-9]{1,18})?$`)

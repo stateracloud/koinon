@@ -605,7 +605,7 @@ func build(s gateway.State, o Options) document {
 			agentgateway.LogFieldCacheRead:    `llm.cachedInputTokens`,
 			agentgateway.LogFieldCacheWrite:   `llm.cacheCreationInputTokens`,
 			agentgateway.LogFieldReasoning:    `llm.reasoningTokens`,
-			agentgateway.LogFieldFormat:       gateway.FormatLogExpr(),
+			agentgateway.LogFieldFormat:       agentgateway.FormatLogExpr(),
 			agentgateway.LogFieldStream:       `llm.streaming`,
 			agentgateway.LogFieldError:        `proxy.error.reason`,
 			agentgateway.LogFieldStatus:       `response.code`,

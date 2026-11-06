@@ -347,7 +347,7 @@ func (b *builder) gatewayObjects() {
 		attr(agentgateway.LogFieldCacheRead, `llm.cachedInputTokens`),
 		attr(agentgateway.LogFieldCacheWrite, `llm.cacheCreationInputTokens`),
 		attr(agentgateway.LogFieldReasoning, `llm.reasoningTokens`),
-		attr(agentgateway.LogFieldFormat, gateway.FormatLogExpr()),
+		attr(agentgateway.LogFieldFormat, agentgateway.FormatLogExpr()),
 		attr(agentgateway.LogFieldStream, `llm.streaming`),
 		attr(agentgateway.LogFieldError, `proxy.error.reason`),
 		attr(agentgateway.LogFieldStatus, `response.code`),

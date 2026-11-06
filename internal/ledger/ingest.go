@@ -72,18 +72,27 @@ type Result struct {
 	Duplicates int
 	// Unattributed entries name an org or agent that does not exist.
 	Unattributed int
+	// Rejected entries failed [CheckRecord] and were not recorded.
+	Rejected int
 }
 
 var errUnattributed = errors.New("unknown org or agent")
 
 // Ingest records each entry in its own transaction: the entry, the run's token
 // usage (reported, not enforced) and, when the agent's
-// recorded spend reaches its limit, the run's cancel. A replayed entry changes
+// recorded spend reaches its limit, the run's cancel. An entry that fails CheckRecord is counted
+// as rejected and skipped. A replayed entry changes
 // nothing. It stops at the first database error; entries before it stay
 // recorded, and replaying the whole batch is safe.
 func (in *Ingester) Ingest(ctx context.Context, entries []Entry) (Result, error) {
 	var res Result
 	for _, e := range entries {
+		// Every driver is held to the same rules, whether or not it checked the record itself.
+		if kind, _ := CheckRecord(e); kind != "" {
+			res.Rejected++
+			in.Metrics.Reject(kind)
+			continue
+		}
 		recorded, err := in.ingest(ctx, e)
 		switch {
 		case errors.Is(err, errUnattributed):

@@ -157,18 +157,6 @@ func (r Rendering) RequestHeaders(p Provider, m Model) []Header {
 	return r.Headers(p, m)
 }
 
-// FormatLogExpr is the CEL expression of the access-log field agentgateway.LogFieldFormat: the format whose route
-// the request used, from the table's paths.
-func FormatLogExpr() string {
-	expr := `""`
-	for _, f := range modelformat.All() {
-		if r, ok := renderings[f]; ok {
-			expr = fmt.Sprintf(`request.path == %q ? %q : %s`, r.Path, string(f), expr)
-		}
-	}
-	return expr
-}
-
 // RejectExpr is the CEL condition under which a request is admitted as far as body fields go: none of
 // the fields any format rejects is present. "" when no format rejects a field.
 func RejectExpr() string {

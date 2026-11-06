@@ -203,6 +203,11 @@ Checked 2026-10-22 against the agentgateway `v1.6.0` tag: `schema/config.md`
 container `cr.agentgateway.dev/agentgateway:v1.6.0` exported the fixture in
 `internal/ledger/testdata/` and passes the end-to-end test in `internal/ledger`.
 
+Note 2026-11-07 (path fix only): the fixture now lives in `internal/gateway/agentgateway/testdata/`
+and is decoded by the test in `internal/gateway/agentgateway`, since the OTLP receiver moved there
+with the Koinon usage record (ADR 0097, issue #273). The container end-to-end test stays in
+`internal/ledger`.
+
 ## Links
 
 - [docs/plans/v0.1.md](../plans/v0.1.md) items L1, A4, G1, G2
