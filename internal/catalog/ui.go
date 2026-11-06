@@ -42,6 +42,12 @@ type ProviderPatch struct {
 	APIKey *string
 	// AnthropicWorkspaceID replaces the workspace ID; a pointer to "" removes it.
 	AnthropicWorkspaceID *string
+	// CostAPIKey replaces the cost API key (an admin key that reads the provider's cost API, for the
+	// daily reconciliation); a pointer to "" removes it, and its scope with it.
+	CostAPIKey *string
+	// CostScope replaces the cost scope: the workspace (anthropic), or the project or API key ID
+	// (openai), whose cost is the provider key's.
+	CostScope *string
 }
 
 // ListProviders returns the org's providers, declared and entered.
@@ -175,8 +181,12 @@ func (s *Service) UpdateProvider(ctx context.Context, org pgtype.UUID, actor aud
 				return err
 			}
 		}
+		if out, err = s.applyCostKey(ctx, q, org, out, patch); err != nil {
+			return err
+		}
 		after := providerSummary(out)
 		after["keyChanged"] = patch.APIKey != nil
+		after["costKeyChanged"] = patch.CostAPIKey != nil
 		_, err = audit.Record(ctx, q, audit.Event{
 			Org: org, Actor: actor, Action: "provider.update", TargetKind: "provider", TargetID: id,
 			Before: providerSummary(cur), After: after,

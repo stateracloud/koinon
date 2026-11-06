@@ -1909,7 +1909,7 @@ components:
         gatewayUsd: {type: string, description: "agentgateway's own cost of those requests."}
         gatewayComparedUsd: {type: string, description: "Koinon's cost of the same requests, to compare with gatewayUsd."}
         flaggedRequests: {type: integer, format: int64, description: "Requests flagged for review (cost differs from the gateway's by more than 1%, usage missing, or an unusable price)."}
-        provisionalRequests: {type: integer, format: int64, description: "Responses cut short whose provider figure is pending; their cost is the usage the gateway logged until the provider reports."}
+        provisionalRequests: {type: integer, format: int64, description: "Requests whose provider bill is pending; their cost is Koinon's price of the usage the gateway logged until the provider reports."}
         reservedUsd: {type: string, description: "What the provisional requests hold back from the gateway keys' limits (their max_tokens bound minus the charge). Not a cost and not counted by budgets; released when they settle."}
     SpendReport:
       type: object

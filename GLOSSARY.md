@@ -248,8 +248,12 @@ US dollars per million tokens for each kind of token, for the models whose name 
 _Avoid_: Rate, rate card, tariff
 
 **Cost**:
-What a model request, run or task cost in US dollars, worked out by Koinon from the tokens reported and the price valid at the time.
+What a model request, run or task cost in US dollars, as the spend ledger records it: the provider's billed cost where the provider reports one per request (an OpenRouter request, once settled), otherwise worked out by Koinon from the tokens reported and the price valid at the time (Anthropic and OpenAI direct, whose days are compared with the provider's cost API by the cost reconciliation).
 _Avoid_: Bill, usage, charge (for a total)
+
+**Cost reconciliation**:
+The daily comparison of the spend ledger's cost of one direct provider key with the cost the provider's own cost API reports for that key's workspace, project or API key, recorded per UTC day as ok, out of tolerance or error. It never changes an entry.
+_Avoid_: Billing sync, cost import
 
 **Spend**:
 The sum of costs counted against a budget in its window: the UTC day for an agent, the calendar month for an org.
