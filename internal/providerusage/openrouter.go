@@ -21,7 +21,9 @@ import (
 // OpenRouter reads a generation's stats: GET https://openrouter.ai/api/v1/generation?id=<generation
 // ID>, with the provider key as a bearer token (https://openrouter.ai/docs/api/api-reference/generations/get-generation,
 // read 2026-10-28). The generation ID is the id of every chunk of a chat completion stream.
-// total_cost is what OpenRouter billed; the native_* counts are the upstream's own tokens.
+// total_cost is what OpenRouter billed; the native_* counts are the upstream's own tokens. With the
+// org's own upstream key (is_byok), total_cost is OpenRouter's fee and upstream_inference_cost what
+// the upstream billed that key.
 // It serves only providers whose URL is https://openrouter.ai, and asks only its pinned endpoint.
 type OpenRouter struct {
 	// Client is the HTTP client (nil: NewClient's settings); redirects are never followed.
@@ -54,6 +56,8 @@ type generation struct {
 		NativeTokensReasoning  *int64      `json:"native_tokens_reasoning"`
 		NativeTokensCached     *int64      `json:"native_tokens_cached"`
 		Cancelled              *bool       `json:"cancelled"`
+		IsBYOK                 *bool       `json:"is_byok"`
+		UpstreamInferenceCost  json.Number `json:"upstream_inference_cost"`
 	} `json:"data"`
 }
 
@@ -114,13 +118,16 @@ func (o OpenRouter) Usage(ctx context.Context, p Provider, id string) (Usage, er
 	if g.Data.TotalCost == "" {
 		return Usage{}, ErrPending
 	}
-	r, ok := new(big.Rat).SetString(g.Data.TotalCost.String())
-	if !ok {
-		return Usage{}, fmt.Errorf("providerusage: openrouter: total_cost %q is not a number", g.Data.TotalCost)
-	}
-	cost, err := money.FromRat(r)
+	cost, err := usd("total_cost", g.Data.TotalCost)
 	if err != nil {
-		return Usage{}, fmt.Errorf("providerusage: openrouter: total_cost: %w", err)
+		return Usage{}, err
+	}
+	byok := g.Data.IsBYOK != nil && *g.Data.IsBYOK
+	var upstream money.USD
+	if byok && g.Data.UpstreamInferenceCost != "" {
+		if upstream, err = usd("upstream_inference_cost", g.Data.UpstreamInferenceCost); err != nil {
+			return Usage{}, err
+		}
 	}
 	first := func(vs ...*int64) int64 {
 		for _, v := range vs {
@@ -138,11 +145,26 @@ func (o OpenRouter) Usage(ctx context.Context, p Provider, id string) (Usage, er
 		CacheReadTokens: first(g.Data.NativeTokensCached),
 		ReasoningTokens: first(g.Data.NativeTokensReasoning),
 		Cost:            cost,
+		UpstreamCost:    upstream,
+		BYOK:            byok,
 		Cancelled:       g.Data.Cancelled != nil && *g.Data.Cancelled,
 	}
 	out.CacheReadTokens = min(out.CacheReadTokens, out.InputTokens)
 	out.ReasoningTokens = min(out.ReasoningTokens, out.OutputTokens)
 	return out, nil
+}
+
+// usd reads a JSON number of dollars; a negative one is refused (money.FromRat).
+func usd(field string, n json.Number) (money.USD, error) {
+	r, ok := new(big.Rat).SetString(n.String())
+	if !ok {
+		return 0, fmt.Errorf("providerusage: openrouter: %s %q is not a number", field, n)
+	}
+	c, err := money.FromRat(r)
+	if err != nil {
+		return 0, fmt.Errorf("providerusage: openrouter: %s: %w", field, err)
+	}
+	return c, nil
 }
 
 // retryAfter reads a Retry-After header (seconds or an HTTP date), at least a second and at most

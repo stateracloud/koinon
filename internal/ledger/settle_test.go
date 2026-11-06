@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -422,7 +423,7 @@ var _ = Describe("Settling responses cut short", func() {
 		Expect(limited.calls).To(Equal(2), "three of this org's rows are due; the pass asks twice")
 	})
 
-	It("re-prices the provider's tokens with the org's price and keeps the provider's bill beside it", func(ctx SpecContext) {
+	It("charges the provider's bill, not the org's price, and keeps Koinon's price beside it", func(ctx SpecContext) {
 		_, err := prices.New(db, nil, priceList).SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
 			Entry: pricing.Entry{
 				ID: "ds-contract", Provider: "openrouter", Match: pricing.Match{Glob: "acme/*"},
@@ -439,27 +440,111 @@ var _ = Describe("Settling responses cut short", func() {
 		_, err = settler.SettleDue(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
-		// The override: 1000 in at 1 + 250 out at 2, per million.
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.0015"), "the org's contract price, not OpenRouter's list")
-		Expect(s.PriceRef).To(HavePrefix("org#"))
+		// The bill counts (ADR 0056, amendment 2026-11-06); the override (1000 in at 1 + 250 out at
+		// 2, per million) is Koinon's price, kept beside it and flagged where they differ.
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.0007"), "OpenRouter's bill, not the org's contract price")
+		Expect(s.PriceRef).To(HavePrefix("org#"), "the price Koinon compared it with")
 		Expect(s.CostFlagged).To(BeTrue())
 		Expect(string(s.Estimate)).To(ContainSubstring(`"provider_diff"`))
-		Expect(string(s.Estimate)).To(ContainSubstring(`"provider_cost_usd": "0.0007"`))
+		Expect(string(s.Estimate)).To(ContainSubstring(`"koinon_cost_usd": "0.0015"`))
+		Expect(string(s.Estimate)).To(ContainSubstring(`"charged": "provider"`))
 		rs := revisions(ctx)
-		Expect(string(rs[0].After)).To(ContainSubstring(`"provider_cost_usd": "0.000700000000"`))
+		Expect(string(rs[0].After)).To(ContainSubstring(`"cost_usd": "0.000700000000"`))
 	})
 
-	It("does not charge a BYOK fee as the model's cost", func(ctx SpecContext) {
+	It("charges a BYOK request OpenRouter's fee plus the upstream cost it reports", func(ctx SpecContext) {
 		_, err := in.Ingest(ctx, []ledger.Entry{cut("gen-b1")})
 		Expect(err).NotTo(HaveOccurred())
-		// With the org's own provider key, OpenRouter bills a small fee, not the tokens.
-		src.answer("gen-b1", providerusage.Usage{InputTokens: 1000, OutputTokens: 250, Cost: money.MustParse("0.000001")})
+		// With the org's own provider key, OpenRouter bills a small fee; the provider bills the
+		// tokens to the org's key, and OpenRouter reports that as upstream_inference_cost.
+		src.answer("gen-b1", providerusage.Usage{
+			InputTokens: 1000, OutputTokens: 250, Cost: money.MustParse("0.000001"),
+			BYOK: true, UpstreamCost: money.MustParse("0.0007"),
+		})
 		clock = clock.Add(time.Minute)
 		_, err = settler.SettleDue(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.0007"), "the tokens at Koinon's price")
-		Expect(string(s.Estimate)).To(ContainSubstring(`"provider_diff"`))
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.000701"), "the fee and the upstream cost: what the org pays for the request")
+		Expect(string(s.Estimate)).To(ContainSubstring(`"byok": true`))
+		Expect(string(s.Estimate)).NotTo(ContainSubstring(`"provider_diff"`), "within 1% of Koinon's price")
+	})
+
+	// complete is a response the gateway logged in full: 1000 in, 250 out.
+	complete := func(id string) ledger.Entry {
+		x := cut(id)
+		x.OutputKnown, x.OutputTokens, x.ResponseBytes = true, 250, 1000
+		return x
+	}
+
+	It("settles a complete response at the bill too, with nothing held back meanwhile", func(ctx SpecContext) {
+		_, err := in.Ingest(ctx, []ledger.Entry{complete("gen-c1")})
+		Expect(err).NotTo(HaveOccurred())
+		charges, held, _ := spent(ctx)
+		Expect([]any{charges, held}).To(Equal([]any{"0.0007", "0.00"}), "Koinon's price until the bill arrives; no max_tokens reserve")
+		Expect(e.provisional(ctx)).To(Equal(1), "waiting for OpenRouter's total_cost")
+		Expect(string(e.lastEntry(ctx).Estimate)).NotTo(ContainSubstring("usage_partial"))
+
+		By("OpenRouter bills more than the price list says (a provider's own surcharge)")
+		src.answer("gen-c1", providerusage.Usage{InputTokens: 1000, OutputTokens: 250, Cost: money.MustParse("0.0009")})
+		clock = clock.Add(time.Minute)
+		_, err = settler.SettleDue(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		charges, held, rows := spent(ctx)
+		Expect([]any{charges, held, rows}).To(Equal([]any{"0.0009", "0.00", 1}), "the bill counts")
+		s := e.lastEntry(ctx)
+		Expect(e.provisional(ctx)).To(BeZero())
+		Expect(s.CostFlagged).To(BeTrue(), "the price list is 22% off the bill")
+		Expect(string(s.Estimate)).To(ContainSubstring(`"koinon_cost_usd": "0.0007"`))
+		Expect(string(s.Estimate)).To(ContainSubstring(`"provider_cost_usd": "0.0009"`))
+		Expect(revisions(ctx)).To(HaveLen(1))
+	})
+
+	It("does not wait for a bill of a request the provider refused or failed without usage", func(ctx SpecContext) {
+		refused := cut("gen-x4")
+		refused.InputKnown, refused.InputTokens, refused.Status = false, 0, 400
+		failed := cut("gen-x5")
+		failed.InputKnown, failed.InputTokens, failed.Status = false, 0, 502
+		_, err := in.Ingest(ctx, []ledger.Entry{refused, failed})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(e.provisional(ctx)).To(BeZero())
+		clock = clock.Add(time.Minute)
+		_, err = settler.SettleDue(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(src.callsFor("gen-x4") + src.callsFor("gen-x5")).To(BeZero())
+	})
+
+	It("keeps a day of OpenRouter requests within the tolerance of the provider's bill", func(ctx SpecContext) {
+		// The tolerance test of issue #47: many requests, each billed a little off the price list
+		// (rounding, a surcharge, a discount). Once settled, the ledger is the sum of the bills
+		// exactly, and so within CostTolerancePercent (and the cent floor) of OpenRouter's invoice.
+		const n = 40
+		want := money.USD(0)
+		var batch []ledger.Entry
+		for i := range n {
+			id := fmt.Sprintf("gen-t%02d", i)
+			batch = append(batch, complete(id))
+			// 0.0007 at the price list; the bill swings from -10% to +9.5% of it.
+			bill := money.MustParse("0.0007") * money.USD(200+i) / 210
+			src.answer(id, providerusage.Usage{InputTokens: 1000, OutputTokens: 250, Cost: bill})
+			var err error
+			want, err = want.Add(bill)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		_, err := in.Ingest(ctx, batch)
+		Expect(err).NotTo(HaveOccurred())
+		clock = clock.Add(time.Minute)
+		_, err = settler.SettleDue(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(e.provisional(ctx)).To(BeZero())
+		var sum string
+		Expect(db.QueryRow(ctx, `SELECT sum(cost_usd)::text FROM spend_entries WHERE org_id = $1`, e.org).Scan(&sum)).To(Succeed())
+		got, err := money.ParseNumeric(sum)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal(want), "settled entries are the bill to the pico-dollar")
+		Expect(ledger.WithinCostTolerance(got, want)).To(BeTrue())
+		listed := money.MustParse("0.0007") * n
+		Expect(ledger.WithinCostTolerance(listed, want)).To(BeTrue(), "the price list alone is within it here too")
 	})
 
 	It("never contacts a provider whose URL is not its source's service", func(ctx SpecContext) {
@@ -568,15 +653,20 @@ var _ = Describe("Settling responses cut short", func() {
 		}
 
 		It("is complete when its run was not canceled, and an absent format is OpenAI", func(ctx SpecContext) {
+			// A complete response waits for its bill too, but holds nothing back and is not partial.
 			_, err := in.Ingest(ctx, []ledger.Entry{partial("gen-m1")})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(e.provisional(ctx)).To(BeZero())
+			_, held, _ := spent(ctx)
+			Expect(held).To(Equal("0.00"))
+			Expect(string(e.lastEntry(ctx).Estimate)).NotTo(ContainSubstring("usage_partial"))
 			cancelRun(ctx, clock.Add(-time.Second))
 			x := partial("gen-m2")
 			x.Format = "" // a record from before koinon.format
 			_, err = in.Ingest(ctx, []ledger.Entry{x})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(e.provisional(ctx)).To(BeZero(), "OpenAI: logged output usage means a complete response")
+			_, held, _ = spent(ctx)
+			Expect(held).To(Equal("0.00"), "OpenAI: logged output usage means a complete response")
+			Expect(string(e.lastEntry(ctx).Estimate)).NotTo(ContainSubstring("usage_partial"))
 		})
 
 		It("is cut when its run was canceled at or before the log time, and settled by generation ID", func(ctx SpecContext) {
@@ -622,7 +712,8 @@ var _ = Describe("Settling responses cut short", func() {
 			x.Time = t.Add(30 * time.Second) // B's complete response, logged at T+30s
 			_, err := in.Ingest(ctx, []ledger.Entry{x})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(e.provisional(ctx)).To(BeZero(), "B was not canceled: its response is complete")
+			_, held, _ := spent(ctx)
+			Expect(held).To(Equal("0.00"), "B was not canceled: its response is complete")
 			s := e.lastEntry(ctx)
 			Expect(string(s.Estimate)).NotTo(ContainSubstring("usage_partial"))
 			var runID pgtype.UUID
