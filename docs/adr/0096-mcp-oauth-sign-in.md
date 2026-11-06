@@ -9,9 +9,11 @@
   [0056](0056-model-providers-pricing-and-budgets-per-org.md) (the KEK and envelopes),
   [0085](0085-upgrade-compatibility-and-recovery-policy.md) (`keys forget`, `keys reencrypt`, decisions 13 and 14),
   [0084](0084-leak-guard.md) and [0091](0091-leak-guard-by-destination.md) (the leak guard and sink classes),
-  [0065](0065-work-model-tasks-inbox.md) (parks and the inbox), [0023](0023-observability-and-audit.md) (fixed metric labels)
+  [0065](0065-work-model-tasks-inbox.md) (parks and the inbox), [0023](0023-observability-and-audit.md) (fixed metric labels),
+  ADR 0097 (Koinon's own gateway; step 2 is the MCP path that delivers sign-in tokens; Proposed, on
+  branch `docs/258-own-gateway-adr`)
 - Issue: #237
-- Verification: Pending: the gateway spike (below) on kind with agentgateway v1.7.0
+- Verification: Pending: the checks Koinon's own MCP path must pass (below), in ADR 0097 step 2 (v0.2)
 
 ## Context
 
@@ -81,8 +83,8 @@ term.
    `403 insufficient_scope`, during the run parks it on that call the same way. A run is never failed
    outright for this, and the server's tools are never quietly dropped (the target's `failOpen` must
    not hide a missing sign-in).
-3. **Milestone: v0.2, with the agent passport.** This ADR and the gateway spike are written now. The
-   build lands in v0.2 together with ADR 0073's token service. Until then the quickstart keeps refusing
+3. **Milestone: v0.2, with the agent passport.** This ADR is written now. The build lands in v0.2
+   together with ADR 0073's token service and Koinon's own MCP path (ADR 0097 step 2). Until then the quickstart keeps refusing
    servers that ask each user to sign in, and `diagnose.go` keeps its refusal.
 4. **Testing in three stages.**
    - A: a fake AS and a fake OAuth MCP server in the kind e2e. This is the merge gate, and it replaces
@@ -91,6 +93,11 @@ term.
      then CIMD (off by default, since Pocket ID v2.13).
    - C: Cloudflare's MCP server, read-only scopes, the maintainer authorizing in the browser.
    - B and C are home-lab changes and go to the lab owner as change requests, each in its own issue.
+5. **Delivery only through Koinon's own MCP path** (maintainer decision 2026-11-06). Sign-in tokens
+   reach MCP servers only through Koinon's MCP path (ADR 0097 step 2), which ships in the same release,
+   v0.2. The agentgateway delivery spike is dropped: a token handoff built on agentgateway would be
+   built twice, once there and again when Koinon's MCP path replaces agentgateway's MCP configuration
+   in the same release.
 
 ### 3. Koinon is the OAuth client; the gateway only attaches the token
 
@@ -128,9 +135,9 @@ agentgateway cannot sign in, store or refresh, so all of that is Koinon's job, i
   transaction before it returns the new access token. `invalid_grant` makes the sign-in
   `needs_sign_in` at once; network and 5xx errors retry with backoff while an unexpired access token is
   still served.
-- **Delivery through the ADR 0073 token service.** The gateway fetches the current access token per
-  upstream call and per target from the token service in koinon-api, by the delivery the spike picks
-  (below). The token exists only between the gateway and the MCP server; the sandbox holds only its
+- **Delivery through the ADR 0073 token service.** Koinon's MCP path (ADR 0097 step 2) gets the
+  current access token per upstream call and per target from the token service, and attaches it to
+  that target's upstream client only. The token exists only between the gateway and the MCP server; the sandbox holds only its
   gateway key placeholder. One gateway target per org and server stays (ADR 0057 item 4).
 - **Approvals.** An approved call runs through koinon-api with the executor key (ADR 0091 section 5).
   The token service maps an executor call to the asking run's sign-in: the org sign-in now; for a
@@ -185,48 +192,34 @@ agentgateway cannot sign in, store or refresh, so all of that is Koinon's job, i
   `egress.allowedInternalHosts`.
 - Metric labels never carry org, agent, user, ticket or run IDs.
 
-## Gateway spike
+## Checks for Koinon's MCP path
 
-Throwaway code on kind, not merged into the product, with agentgateway v1.7.0 (the pinned line). It
-extends ADR 0073's delivery spike to sign-ins.
+The agentgateway delivery spike is dropped (decision 2.5). Koinon's MCP path (ADR 0097 step 2) must
+pass these checks instead, as tests with a fake AS and fake MCP servers (one that requires a bearer
+token for its audience and records every `Authorization` header it sees, and one with a static
+credential), in the gateway behaviour suite and the stage A e2e:
 
-**Build:**
+1. **Each server gets only its own token on fan-out.** On a fan-out `tools/list` and `tools/call`,
+   each server receives only its own token, and the static server none (ADR 0097 step 2, exit
+   criterion 2).
+2. **`initialize` carries the token.** The upstream session's `initialize` request already carries
+   the target's token.
+3. **A dead sign-in parks the run cleanly.** When the token service refuses (a dead, lost or revoked
+   sign-in), the agent gets a clean error the run parks on with `authorization_required` (decision
+   2.2), not a 500.
+4. **Refreshed tokens are picked up without reload.** After koinon-api refreshes a sign-in, the next
+   upstream call uses the new access token, with no config reload and no gateway restart.
 
-- A fake AS (Go, in a test directory): RFC 8414 metadata, an auto-approving authorize endpoint, a
-  token endpoint with refresh, and an RFC 8693 endpoint that stands in for the koinon-api token
-  service.
-- Two fake MCP servers: one that requires a bearer token for its audience and records every
-  `Authorization` header it sees, and one with a static credential.
-- A gateway config with both as targets of one org (`prefixMode: always`), trying both deliveries:
-  (a) per-target `oauthTokenExchange` against the stand-in token service, the agent's opaque gateway
-  key as subject and the target in `additionalParams`; (b) the ExtMcp processor returning
-  `extMcp.oauth_<target>` metadata, placed by per-target `backendAuth` CEL.
-
-**Pass or fail:**
-
-1. Does v1.7.0 have `oauthTokenExchange` and CEL `additionalParams` per target? (Read on main only.)
-2. Can per-target `backendAuth` CEL read the ExtMcp metadata (delivery b)?
-3. On a fan-out `tools/list`, does each server receive only its own token, and the static server none?
-4. Does `initialize` carry the token, and does the upstream session survive a token change mid-session?
-5. When the token service refuses (a dead sign-in), what does the agent get: a clean error the run can
-   park on, or the 500 of agentgateway issue #3907?
-6. Does the gateway cache honour `expires_in`, and is a refreshed token picked up without a config
-   reload?
-
-Delivery (a) or (b) passes when questions 3 to 6 pass for it; if both pass, (b) is preferred for fewer
-moving parts. If neither passes on v1.7.0, the result goes back to the maintainer before any build
-(an agentgateway upgrade or an upstream change), not into a workaround.
+A failing check goes back to the maintainer before the build continues, not into a workaround.
 
 ## Open, unverified points
 
 | Point | How it is answered |
 |---|---|
-| agentgateway v1.7.0 has the per-server `oauthTokenExchange` (seen on main only) | Spike question 1 |
-| Per-server `backendAuth` rules can read the ExtMcp hook's output | Spike question 2 |
+| Where refresh and the token service run, now that ADR 0097 (step 2) lets only the gateway decrypt stored credentials while koinon-api only seals them | The ADR 0097 step 2 design, with this ADR |
 | Cloudflare's access-token lifetime, and whether a refresh token comes without `offline_access` | Stage C: record `expires_in` and the refresh behaviour over a day |
 | Cloudflare accepts a redirect URI on a private hostname | Stage C: CIMD with the lab callback; fall back to a public callback if refused |
 | Pocket ID supports RFC 8707 `resource` (and DCR) | Stage B: a live check of the authorize and token requests with `resource` |
-| The agentgateway #3907 fix (500 instead of 401) is in v1.7.0 | Spike question 5 |
 
 ## Alternatives considered
 
@@ -244,6 +237,10 @@ moving parts. If neither passes on v1.7.0, the result goes back to the maintaine
   refresh, Secret churn, and no path to per-user. Rejected.
 - **The ExtMcp `header_mutation` as delivery.** Sends one server's token to every server on a fan-out.
   Rejected.
+- **Token delivery through agentgateway** (per-target `oauthTokenExchange`, or ExtMcp metadata placed
+  by `backendAuth` CEL, tested in a spike). Koinon's MCP path replaces agentgateway's MCP
+  configuration in the same release (ADR 0097 step 2), so the handoff would be built twice. Dropped
+  (decision 2.5).
 - **The sign-in flow in agentgateway.** It has none (no consent flow, store or refresh), and an
   upstream feature would still not hold per-org state under the KEK. Rejected.
 - **DCR only.** Works with Cloudflare today, but DCR is deprecated, leaves a registration per install
@@ -255,12 +252,13 @@ moving parts. If neither passes on v1.7.0, the result goes back to the maintaine
 
 - Positive: servers like Cloudflare's connect with a browser sign-in and no token to copy; unattended
   runs ask for a sign-in instead of failing; per-user sign-in needs no table migration.
-- Positive: one delivery path (the ADR 0073 token service) for passports and sign-ins.
+- Positive: one delivery path (the ADR 0073 token service, attached by Koinon's MCP path) for
+  passports and sign-ins.
 - Negative: Koinon owns an OAuth client state machine (discovery, three client-identity methods,
   pending flows, refresh, revocation), and the token service becomes a per-call dependency of the
   gateway for these servers.
 - Negative: an org sign-in acts as one person's upstream account _(inferred)_.
-- Follow-ups: the spike; amend ADR 0057 items 2 and 5 when the build lands; the stage A fixtures and
+- Follow-ups: the checks for Koinon's MCP path, in ADR 0097's step 2 work; amend ADR 0057 items 2 and 5 when the build lands; the stage A fixtures and
   the quickstart step that replaces 6b; issues for stages B and C to the lab owner; the "revoke all
   sign-ins" step in the compromise runbook; the keys tool list.
 
@@ -280,7 +278,6 @@ moving parts. If neither passes on v1.7.0, the result goes back to the maintaine
 - https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization
 - https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-00
 - RFC 9728, RFC 8414, RFC 8707, RFC 9207, RFC 7591, RFC 7009, RFC 8693
-- https://github.com/agentgateway/agentgateway/issues/3907
 - https://claude.com/docs/connectors/building/authentication.md
 - https://pocket-id.org/docs/guides/client-id-metadata-documents
 - [0005](0005-agent-identity.md), [0057](0057-mcp-servers.md), [0073](0073-agent-passport.md),
