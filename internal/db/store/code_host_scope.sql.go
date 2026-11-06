@@ -11,6 +11,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const codeHostConnectionReadAt = `-- name: CodeHostConnectionReadAt :one
+SELECT coalesce(max(checked_at), '-infinity'::timestamptz)::timestamptz AS checked_at
+FROM org_code_host_repos
+WHERE org_id = $1 AND connection_id = $2
+`
+
+type CodeHostConnectionReadAtParams struct {
+	OrgID        pgtype.UUID
+	ConnectionID pgtype.UUID
+}
+
+// When one connection's repositories were last read: -infinity when nothing of it is stored.
+func (q *Queries) CodeHostConnectionReadAt(ctx context.Context, arg CodeHostConnectionReadAtParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, codeHostConnectionReadAt, arg.OrgID, arg.ConnectionID)
+	var checked_at pgtype.Timestamptz
+	err := row.Scan(&checked_at)
+	return checked_at, err
+}
+
 const deleteCodeHostConnectionRepos = `-- name: DeleteCodeHostConnectionRepos :execrows
 DELETE FROM org_code_host_repos
 WHERE org_id = $1 AND connection_id = $2
@@ -27,6 +46,50 @@ func (q *Queries) DeleteCodeHostConnectionRepos(ctx context.Context, arg DeleteC
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const listCodeHostConnectionRepos = `-- name: ListCodeHostConnectionRepos :many
+SELECT owner, repo, visibility, checked_at FROM org_code_host_repos
+WHERE org_id = $1 AND connection_id = $2
+ORDER BY owner, repo
+`
+
+type ListCodeHostConnectionReposParams struct {
+	OrgID        pgtype.UUID
+	ConnectionID pgtype.UUID
+}
+
+type ListCodeHostConnectionReposRow struct {
+	Owner      string
+	Repo       string
+	Visibility CodeHostRepoVisibility
+	CheckedAt  pgtype.Timestamptz
+}
+
+// One connection's part of the scope, to compare a new reading with.
+func (q *Queries) ListCodeHostConnectionRepos(ctx context.Context, arg ListCodeHostConnectionReposParams) ([]ListCodeHostConnectionReposRow, error) {
+	rows, err := q.db.Query(ctx, listCodeHostConnectionRepos, arg.OrgID, arg.ConnectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCodeHostConnectionReposRow
+	for rows.Next() {
+		var i ListCodeHostConnectionReposRow
+		if err := rows.Scan(
+			&i.Owner,
+			&i.Repo,
+			&i.Visibility,
+			&i.CheckedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listOrgCodeHostRepos = `-- name: ListOrgCodeHostRepos :many
@@ -69,6 +132,22 @@ func (q *Queries) ListOrgCodeHostRepos(ctx context.Context, orgID pgtype.UUID) (
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockCodeHostConnectionScope = `-- name: LockCodeHostConnectionScope :exec
+SELECT pg_advisory_xact_lock(hashtextextended(concat('code-host-scope:', $1::uuid, ':', $2::uuid), 0))
+`
+
+type LockCodeHostConnectionScopeParams struct {
+	OrgID        pgtype.UUID
+	ConnectionID pgtype.UUID
+}
+
+// Serialises the replacements of one connection's repositories until the transaction ends, so a
+// reading is compared with, and written after, the one stored before it.
+func (q *Queries) LockCodeHostConnectionScope(ctx context.Context, arg LockCodeHostConnectionScopeParams) error {
+	_, err := q.db.Exec(ctx, lockCodeHostConnectionScope, arg.OrgID, arg.ConnectionID)
+	return err
 }
 
 const upsertCodeHostRepos = `-- name: UpsertCodeHostRepos :execrows

@@ -24,9 +24,9 @@ import (
 // takes one connection's whole list, with the time it read it); admins read the scope. A repository
 // whose visibility is unknown, or whose reading is older than the freshness window, is not internal.
 //
-// The freshness window is DefaultVisibilityMaxAge. ADR 0091 left "how fresh" and "what unknown does"
-// open for koinon-private#350: unknown is external-high, and a reading older than an hour counts as unknown, because
-// a repository that turned public after the reading is a leak the guard would not see.
+// The freshness window is DefaultVisibilityMaxAge. ADR 0091 decision 3 (settled in #115): unknown is
+// external-high, and a reading older than an hour counts as unknown, because a repository that
+// turned public after the reading is a leak the guard would not see.
 
 // DefaultVisibilityMaxAge is how old a repository's visibility reading may be and still count.
 const DefaultVisibilityMaxAge = sinkclass.DefaultMaxAge
@@ -57,8 +57,14 @@ func (l LeakGuard) Scope() sinkclass.Scope {
 
 // ReplaceCodeHostRepos replaces the repositories of one code-host connection with repos, read at
 // checkedAt: a repository the connection no longer reports leaves the scope. Names are lower-cased.
-// ErrNotFound when the connection is not the org's. Audited as org.code_host_scope.replace with counts,
-// not the list.
+// ErrNotFound when the connection is not the org's.
+//
+// Replacements of one connection are serialised, and a reading older than the stored one is dropped
+// (nil, nothing written): the newest reading wins whatever order the replicas finish in.
+//
+// Audited as org.code_host_scope.replace with counts, not the list: always for a person's (or any
+// non-system) actor, and for the system's periodic refresh only when the repositories or their
+// visibilities changed.
 func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, actor audit.Actor, connectionID string, repos []CodeHostRepo, checkedAt time.Time) error {
 	var cid pgtype.UUID
 	if err := cid.Scan(connectionID); err != nil || !cid.Valid {
@@ -104,6 +110,33 @@ func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, act
 			}
 			return err
 		}
+		// Every replica and every RPC may read the same connection at once: one replacement at a
+		// time, and an older reading that arrives last does not overwrite a newer one.
+		if err := q.LockCodeHostConnectionScope(ctx, store.LockCodeHostConnectionScopeParams{OrgID: org, ConnectionID: cid}); err != nil {
+			return err
+		}
+		stored, err := q.ListCodeHostConnectionRepos(ctx, store.ListCodeHostConnectionReposParams{OrgID: org, ConnectionID: cid})
+		if err != nil {
+			return err
+		}
+		for _, r := range stored {
+			if r.CheckedAt.Time.After(checkedAt) {
+				return nil
+			}
+		}
+		changed := len(stored) != len(owners)
+		if !changed {
+			idx := make(map[string]string, len(owners))
+			for i := range owners {
+				idx[owners[i]+"/"+names[i]] = vis[i]
+			}
+			for _, r := range stored {
+				if v, ok := idx[r.Owner+"/"+r.Repo]; !ok || v != string(r.Visibility) {
+					changed = true
+					break
+				}
+			}
+		}
 		before, err := q.DeleteCodeHostConnectionRepos(ctx, store.DeleteCodeHostConnectionReposParams{OrgID: org, ConnectionID: cid})
 		if err != nil {
 			return err
@@ -114,6 +147,10 @@ func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, act
 			}); err != nil {
 				return err
 			}
+		}
+		if !changed && actor.Kind == audit.KindSystem {
+			// The periodic refresh of an unchanged list: its freshness shows in ScopeSummary and the log.
+			return nil
 		}
 		return audit.RecordErr(ctx, q, audit.Event{
 			Org: org, Actor: actor, Action: "org.code_host_scope.replace", TargetKind: "connection", TargetID: connectionID,
