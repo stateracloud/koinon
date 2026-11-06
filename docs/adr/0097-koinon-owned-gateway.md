@@ -247,6 +247,14 @@ agent passport (#40, ADR 0073). agentgateway keeps the model path.
   7 may fold into the main target (decided in the step 2 design). _(inferred)_
 - The same code runs in every cluster as a plain Deployment and Service, so the MCP half of the
   standalone/Kubernetes split ends.
+- **Design notes for the step 2 design** (per-replica limits, with Envoy's timeout, stream-limit and
+  drain defaults as the checklist):
+  - a cap on open streams per replica that answers 503 with `Retry-After` before anything is reserved;
+  - scaling on an open-streams gauge (fixed labels), not on CPU, since idle streams use no CPU;
+  - the upstream connection pool sized up from Go's default of 2 idle connections per host;
+  - per-stage timeouts;
+  - a shutdown grace period as long as the longest allowed stream, and a PodDisruptionBudget;
+  - MCP session affinity across replicas (open question 5).
 
 Exit criteria:
 
@@ -278,9 +286,38 @@ forwards bodies and does no format translation.
   calls, and `Reserve` is one conditional update per budget level in one Postgres transaction. The
   gateway holds no counters, in memory or in Redis. A call whose reservation does not fit is refused
   with the budget marker. When the call ends, the reservation settles to the usage record's cost and
-  the rest is released. Concurrent calls can then no longer overshoot together, which agentgateway's
-  read-then-charge check allows; ADR 0041's "at most one response per agent" bound and the pushed
-  per-key limits fall away. The details (estimator, default ceiling, timeouts) are open question 5.
+  the rest is released. While the ledger is reachable, concurrent calls can no longer overshoot
+  together, which agentgateway's read-then-charge check allows; ADR 0041's "at most one response per
+  agent" bound and the pushed per-key limits fall away. The input estimator and the default ceiling
+  are set in the step 3 design.
+- **Budgets at scale: Postgres only, batched** (decided by the maintainer, 2026-11-06).
+  - The ledger keeps at most one reservation write in flight per org. Reservations that arrive
+    meanwhile are folded into the next batch: one conditional `UPDATE` that adds their sum when it
+    fits, split and retried per call when it does not. Settles and releases only free budget, so they
+    may be delayed and batched freely.
+  - Step 3 adds a **budget totals table** (spent and reserved per scope and window). Today every check
+    sums a month of spend entries (`internal/db/queries/spend.sql:121, 263-274`). The migration is
+    expand-only (ADR 0085), and the summing path keeps working beside it until step 3 retires it.
+  - Step 3 adds an **expiring reservations table** and a cleanup job that releases money held by a
+    gateway that died. A settle that arrives after expiry still records its spend.
+  - No Redis or Valkey (Alternatives). No leases now: they are a later option, only if load tests show
+    the org row above about 30% of its measured limit with batching. They would live inside the ledger
+    client, so the gateway's `Reserve` interface does not change, and they follow the expiry rules of
+    Envoy's RLQS and Google's Doorman.
+  - Request-rate limits, if open question 4 adds them, use a token bucket inside each replica; they are
+    a safety limit, not money.
+- **Ledger unreachable at reserve time: allow the call, charge it afterwards** (decided by the
+  maintainer, 2026-11-06). The gateway forwards the call without a reservation and charges it from its
+  usage record once the ledger is back, for every call it allowed, idempotent on the request ID. The
+  consequence, stated plainly: **during a ledger outage, budgets can be overspent by whatever runs in
+  that window.** The run caps (requests, USD, wall clock; ADR 0081) still apply. The gateway counts
+  calls allowed without a reservation and alerts on them, with fixed metric labels (ADR 0023).
+- **Entry work for step 3: three measurements**, recorded in this ADR before step 3 commits to numbers.
+  Docker-gated tests, no cluster:
+  1. single-row writes per second on Postgres 18, plain per-call versus batched;
+  2. gateway memory per open stream at 1k, 5k and 10k streams per replica, against the fake model
+     server;
+  3. the MCP `Connection` wrapper on Streamable HTTP.
 - Streaming usage parsing for each routed format, writing usage records; cut streams follow ADR 0056
   decision 6.
 - Cost comes only from Koinon's prices; agentgateway's catalog, the `gateway_cost_usd` cross-check and
@@ -294,7 +331,8 @@ Exit criteria:
 
 1. The whole suite passes against Koinon's gateway with no expected failures, including usage for
    every routed format and dialect against recorded fixtures.
-2. A concurrency test holds the budget: N parallel calls near a limit never record spend above it.
+2. A concurrency test holds the budget: with the ledger reachable, N parallel calls near a limit
+   never record spend above it. A ledger-outage test shows every allowed call charged once afterwards.
 3. The quickstart e2e is green with Koinon's gateway as the default driver.
 4. Every catalog model with a `cache_read` price runs with caching on through Koinon's gateway (ADR
    0068's test).
@@ -361,7 +399,10 @@ selectable and keeps running the suite in CI; removing it is a separate, later d
 | **Build the whole gateway in v0.1** | Delays v0.1 by ADR 0040's 4-8 weeks plus the MCP path, and builds OAuth plumbing before ADR 0096 settles. The suite would not exist yet to say when the new gateway is good enough. |
 | Embed a gateway engine (Bifrost) for the model path, as Obot (MIT) did | Less parsing code, but: a large dependency tree whose internal API is no stable contract (Obot's ADR), format translation Koinon does not want (ADR 0069), budgets that overshoot across replicas, a pricing datasheet whose terms forbid redistribution, and frequent releases against the 3-day rule (ADR 0079). Obot still had to write budgets itself, and Koinon would still write budgets, the guard and usage records. At most a source of ideas for step 3. |
 | MCP path with the guard in method middleware only (as Docker's MCP gateway does) | Errors reach middleware as Go `error` values and transport-level messages are out of reach, so the guard would again miss replies: the #254 class in Koinon's own code. |
-| Budget counters in the gateway (in memory or Redis) | In-memory counters overshoot by up to N times with N replicas; Redis adds a component with no gain at model-call latency. The ledger's conditional update in Postgres is enough. |
+| Budget counters in the gateway's memory | Overshoot by up to N times with N replicas. |
+| Redis or Valkey for budget counters | Budgets are money. Redis replication is asynchronous and can lose acknowledged writes on failover, so Postgres would still be the truth and Koinon would run two stores and a reconcile between them, the class of bug LiteLLM keeps fixing. It adds a stateful service to size, persist, fail over and back up in all three DB modes, and a fail-open or fail-closed choice when it is down (and Redis 8's licence means Valkey, one more supply-chain line). The headroom is not needed: one batched Postgres row per org covers the expected load. |
+| Envoy AI Gateway (Agent Router) as the data plane | Charges after the response and accepts overshoot, needs Redis for its limits, and brings several components plus the vendor coupling this ADR removes. |
+| Envoy in front, with a Koinon `ext_proc` server | Buys connection handling only. Koinon would still write the usage tap, reservation, guard and MCP aggregator, every stream chunk would cross gRPC, and operators would run one more component. Kept as an escape hatch if Go's connection handling ever proves to be the limit. Koinon borrows Envoy's designs instead: RLQS and Doorman lease expiry, and its timeout, stream-limit and drain defaults as a checklist. |
 | Download a price list (LiteLLM's) at runtime | A supply-chain path into cost truth; LiteLLM had two compromised releases in 2026. A reviewed import is used instead. |
 
 ## Consequences
@@ -370,7 +411,10 @@ selectable and keeps running the suite in CI; removing it is a separate, later d
   that Koinon tests and patches.
 - Positive: the suite is useful at once (every agentgateway bump becomes a test run) and is the
   acceptance test for Koinon's gateway, so step 1's work is not thrown away.
-- Positive: budgets hold under concurrency from step 3; one code path runs in every cluster.
+- Positive: budgets hold under concurrency from step 3, with Postgres as the only store for money; one
+  code path runs in every cluster.
+- Negative: during a ledger outage, budgets can be overspent by what runs in that window; only the run
+  caps bound it, and the calls are charged afterwards.
 - Positive: about 2.9k lines of config rendering for another project's schema, a vendored proto, the
   Kubernetes-mode driver and two upstream registries go away over the three steps. _(inferred)_
 - Negative: Koinon owns per-provider streaming usage parsing, MCP spec churn and a high-traffic data
@@ -413,11 +457,16 @@ Each gets a tracking issue when this ADR is accepted.
    The maintainer decides in v0.3 planning. Default: refuse, unless a fallback price is set.
 3. **MCP sampling and elicitation**: whether servers may send these requests, or Koinon refuses them.
    Answered by the #254 test in step 1 and fixed in the step 2 design.
-4. **Per-key request rate limits**: whether step 3 adds a token bucket per key, or USD and run caps
-   stay the only bounds. Answered in the step 3 design.
-5. **Call reservation details**: the input estimator, the default output ceiling when a request sets
-   no `max_tokens`, the release timeout, and what the run sees on a refusal. Answered in the step 3
+4. **Per-key request rate limits**: whether step 3 adds them, or USD and run caps stay the only
+   bounds. If added, they are a token bucket inside each replica (decided). Answered in the step 3
    design.
+5. **MCP session affinity across replicas**: Service `sessionAffinity: ClientIP` on the sandbox's
+   address (plain Kubernetes), forwarding to the replica that owns the session, or the go-sdk's
+   stateless mode, whose existence is unverified. Answered in the step 2 design; default `ClientIP`
+   unless stateless mode is confirmed.
+
+(The call reservation details, formerly an open question, are decided in step 3: Postgres only,
+batched, with an allow-and-charge-afterwards rule for a ledger outage.)
 6. **When the agentgateway driver is removed**: a short later ADR, once Koinon's gateway has been the
    default for one minor and #98's fallback check is done.
 7. **Whether anyone needs Kubernetes mode**: asked on the release checklist before step 3; the answer
@@ -451,6 +500,8 @@ Checked 2026-11-06 in the research reports (Links), from source and docs; nothin
 - Research: "Koinon's own gateway: gaps, prior art, libraries, architecture, user stories"
   (`2026-11-06-own-gateway-design.md`, research store), and its page:
   https://claude.ai/artifact/XvE2bhuyVvbnjPrSjpT2BH
+- Research: "Koinon gateway: what is open, why not Redis, scaling, Envoy prior art"
+  (`2026-11-06-gateway-scale-redis-envoy.md`, research store)
 - [0040](0040-agentgateway-model-and-mcp-gateway.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md),
   [0049](0049-v01-scope-decisions.md), [0057](0057-mcp-servers.md), [0058](0058-gateway-modes.md),
   [0073](0073-agent-passport.md), [0084](0084-leak-guard.md), [0091](0091-leak-guard-by-destination.md)
