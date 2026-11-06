@@ -206,12 +206,23 @@ var _ = Describe("the leak guard in the admin API (koinon-private#350)", func() 
 			id := setup(ctx)
 			conn := uuid.New()
 			_, err := store.New(pool).CreateConnection(ctx, store.CreateConnectionParams{
-				OrgID: e.org, ID: pgtype.UUID{Bytes: conn, Valid: true}, Connector: "github", DisplayName: "gh", Config: []byte(`{}`),
+				// A GitHub Enterprise Server at the server's host, so the server may act through it (#117).
+				OrgID: e.org, ID: pgtype.UUID{Bytes: conn, Valid: true}, Connector: "github", DisplayName: "gh", Config: []byte(`{"baseUrl":"https://mcp.example.com"}`),
 				SecretName: pgtype.Text{String: "conn-" + conn.String(), Valid: true},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			gitea := uuid.New()
+			_, err = store.New(pool).CreateConnection(ctx, store.CreateConnectionParams{
+				OrgID: e.org, ID: pgtype.UUID{Bytes: gitea, Valid: true}, Connector: "gitea", DisplayName: "forge", Config: []byte(`{"baseUrl":"https://git.example.com"}`),
+				SecretName: pgtype.Text{String: "conn-" + gitea.String(), Valid: true},
+			})
+			Expect(err).NotTo(HaveOccurred())
 
-			code, raw := e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/data-class", map[string]any{"kind": "other", "dataClass": []string{"untrusted_input", "private_data"}, "codeHostConnectionId": conn.String()})
+			code, raw := e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/data-class", map[string]any{"kind": "other", "dataClass": []string{}, "codeHostConnectionId": gitea.String()})
+			Expect(code).To(Equal(http.StatusBadRequest), string(raw))
+			Expect(string(raw)).To(ContainSubstring("does not act on the Gitea connection"), "a server at another host than the connection's (#117)")
+
+			code, raw = e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+id+"/data-class", map[string]any{"kind": "other", "dataClass": []string{"untrusted_input", "private_data"}, "codeHostConnectionId": conn.String()})
 			Expect(code).To(Equal(http.StatusOK), string(raw))
 			Expect(decode[struct {
 				CodeHostConnectionID string `json:"codeHostConnectionId"`

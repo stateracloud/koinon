@@ -43,6 +43,7 @@ export function githubConnectorType() {
     authType: 'app-credential',
     document: {
       spec: {
+        capabilities: { displayName: 'GitHub', credentialClass: 'app-installation', narrowsRepositories: true, narrowsPermissions: true },
         targets: { kind: 'repository', pattern: '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$' },
         setupGuide: {
           fields: [

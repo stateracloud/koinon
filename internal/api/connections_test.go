@@ -418,6 +418,38 @@ var _ = Describe("ConnectionService", func() {
 		Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'mcp_server.data_class.reset' AND summary->'after'->>'reason' = 'connection_deleted' AND summary->'before'->>'codeHostConnectionId' = $2`, org, id)).To(Equal(2))
 	})
 
+	It("takes the connection's lock before its servers', as the link check does, so the two cannot deadlock (#117)", func(ctx SpecContext) {
+		id := e.githubConnection(ctx, org)
+		var srv string
+		Expect(e.pool.QueryRow(ctx, `INSERT INTO mcp_servers (org_id, name, url, code_host_connection_id) VALUES ($1, 'tracker', 'https://api.githubcopilot.com/mcp/', $2) RETURNING id::text`, org, id).Scan(&srv)).To(Succeed())
+
+		By("a link check holds the connection (FOR SHARE) and is about to lock the server")
+		tx, err := e.pool.Begin(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = tx.Rollback(ctx) })
+		_, err = tx.Exec(ctx, `SELECT 1 FROM connections WHERE org_id = $1 AND id = $2 FOR SHARE`, org, id)
+		Expect(err).NotTo(HaveOccurred())
+
+		deleted := make(chan error, 1)
+		go func() {
+			defer GinkgoRecover()
+			_, err := owner.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: id})
+			deleted <- err
+		}()
+		Eventually(func() int {
+			return count(ctx, e, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`)
+		}).WithTimeout(10*time.Second).Should(Equal(1), "the delete waits on a lock")
+
+		By("the link check locks the server: the delete must not hold it")
+		_, err = tx.Exec(ctx, `SET LOCAL lock_timeout = '5s'`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = tx.Exec(ctx, `SELECT 1 FROM mcp_servers WHERE org_id = $1 AND id = $2 FOR UPDATE`, org, srv)
+		Expect(err).NotTo(HaveOccurred(), "no deadlock: the delete waits for the connection first")
+		Expect(tx.Commit(ctx)).To(Succeed())
+		Eventually(deleted).WithTimeout(10 * time.Second).Should(Receive(BeNil()))
+		Expect(count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND code_host_connection_id IS NULL`, org)).To(Equal(1))
+	})
+
 	It("deletes a declared connection only after its Secret was deleted", func(ctx SpecContext) {
 		res, err := create(ctx, owner, gh.PEM, false)
 		Expect(err).NotTo(HaveOccurred())

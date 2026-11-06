@@ -500,7 +500,9 @@ func (s *Server) DeleteConnection(ctx context.Context, req *connectionv1alpha1.D
 	}
 	rctx := requestCtx(ctx)
 	err = s.inTx(rctx, func(q *store.Queries) error {
-		row, err := q.GetConnection(rctx, store.GetConnectionParams{OrgID: c.org, ID: id})
+		// Lock order: the connection, then its linked MCP servers, as the link check
+		// (mcpservers.lockLinkTarget) and the importer's unlink take them; the other order deadlocks.
+		row, err := q.GetConnectionForUpdate(rctx, store.GetConnectionForUpdateParams{OrgID: c.org, ID: id})
 		if err != nil {
 			return err
 		}

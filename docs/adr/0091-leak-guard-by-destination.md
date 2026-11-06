@@ -96,6 +96,14 @@ A derived class is decided per call from the address arguments only:
   an owner outside the org makes the call `external-high`. So an issue in
   `northwind/platform-handbook` is internal and never counts as a leak; a PR on a public repo is
   external-high, which is what the Invariant case needs.
+
+  The list is that of the connection the server is linked to, so a server may be linked only to a
+  connection of its own code host (#117). The server's URL must be https and name the connection's
+  own web or API host, or, for a connection on the connector's default host only, one of the
+  connector's `mcpHosts` (`api.githubcopilot.com` for github.com). A GitHub Enterprise Server or
+  Gitea connection accepts only its own host. Hosts are compared by name without the port. A change
+  of a connection's `baseUrl` unlinks the servers it no longer serves, audited as
+  `mcp_server.data_class.reset`.
 - **Repository visibility** (settled 2026-11-06 by procoduck, #115). The connector reads each
   code-host connection's repositories and their visibility when the connection is created, given a
   new secret or tested, and every 20 minutes after that (one koinon-api replica per round). A reading
@@ -104,8 +112,9 @@ A derived class is decided per call from the address arguments only:
   the code host reports as private is `internal`. Unknown (no reading, a stale reading, a server that
   leaves the visibility out), GitHub's or Gitea's internal (readable beyond the repository's
   collaborators) and any answer the connector is unsure of all count as public, so the call is
-  `external-high`. A newer reading is never replaced by an older one, and a new secret drops the
-  readings taken with the old one.
+  `external-high`. A newer reading is never replaced by an older one, and a secret entered anew in
+  Koinon drops the readings taken with the old one (a declared Secret's rotation, a reading in flight
+  and an empty newest reading are #244).
 - **Fetch.** The tool names its URL argument. The host is the address. A host on the org's
   fetch-trusted list (koinon-private#350's contract: an exact lower-case name, or a `*.example.com` wildcard that
   covers subdomains at any depth but not `example.com` itself) makes the call `internal`. Any other

@@ -46,7 +46,10 @@ large is committed and the pod needs no egress. The dates are shifted when the c
 Microsoft and Oracle charges), multiplies costs by 100 so the figures look like a small company's bill,
 plants the anomaly, and serves the copy read-only. Python packages are hash-locked
 (`requirements.txt`, installed with `--require-hashes`) and the base image is pinned by digest. SQL runs
-with `enable_external_access=false` and a locked configuration, on a read-only database (the server is
+with `enable_external_access=false`, `memory_limit='96MB'` and `threads=2` (`init_sql.py`), on a read-only database. The
+configuration is deliberately not locked: the server opens a connection per query, concurrent connections share one DuckDB instance, and
+`lock_configuration` made every connection after the first fail with "Cannot change configuration option lock_configuration" (DuckDB
+refuses to re-enable external access anyway). `test_init_sql.py` runs 16 concurrent connections (the server is
 read-only unless started with `--read-write`; there is no flag to ask for it explicitly). The tool to use is
 `execute_query`.
 
@@ -117,7 +120,7 @@ Streamable HTTP mode with a static bearer token (`MCP_HTTP_HARDEN`, `MCP_HTTP_AU
 `rt1-searxng-secrets`, stateless). Tools: `searxng_web_search` and `web_url_read`. SearXNG's config is
 `manifests/searxng-settings.yml`: JSON and HTML formats, engines brave, wikipedia, github and
 stackoverflow (DuckDuckGo is out: it answers a CAPTCHA to a server-side client; mojeek and bing are out
-because SearXNG's defaults mark them inactive and disabled, so listing them in `keep_only` never ran them), limiter and image proxy off, no Valkey or Redis. Its secret key comes from the Secret
+because SearXNG's defaults mark them inactive and disabled, so listing them in `keep_only` never ran them; since issue 62 mojeek is back, with `inactive: false` set explicitly, and a rate-limited engine is suspended for 60 s, not an hour: `search.suspended_times.SearxEngineTooManyRequests: 60`; there is no Brave API key), limiter and image proxy off, no Valkey or Redis. Its secret key comes from the Secret
 (placeholder; set the real one out of band). Nothing is built: the build script copies both images to your registry
 by digest.
 
@@ -138,6 +141,13 @@ by digest.
   testing; its code is not vendored, patched or bundled into any Koinon image, and `searxng-settings.yml`
   is configuration only. Keep it that way. Do not ship it as a Koinon component.
 - Duckduckgo and others may answer a CAPTCHA to a home IP; wikipedia, github, brave and stackoverflow normally work.
+- **Parallel runs.** Every agent shares the egress IP, so Brave's free scrape answers 429 under load; that is
+  expected, not a fixture fault. The 60 s suspension and mojeek keep searches returning results. Do not
+  size a window beyond what these fixtures hold: motherduck takes 16 concurrent queries (tested), the
+  searxng-mcp caps at 16 per IP, prometheus-mcp is single-process and blocking, so keep it to a handful of
+  concurrent calls and keep the fixtures off overloaded (sandbox) nodes with an overlay `nodeSelector`; the
+  pod runs in PriorityClass `rt1-fixtures` so pressure evicts sandbox pods first. Record fixture restarts
+  (`kubectl get pod -n koinon-fixtures`) with the window's results.
 
 Run locally (public internet needed):
 
@@ -225,7 +235,7 @@ The two tokens are the credentials registered for the MCP servers in Koinon.
 | rt1-searxng | searxng 256Mi (about 87 MiB measured) | 256Mi |
 | rt1-searxng-mcp | mcp-searxng 256Mi (about 43 MiB at rest; CPU limit 2; readiness and liveness probes time out after 5 s) | 256Mi |
 | escape-gateway-standin | standin 32Mi (about 10 MiB expected) | 32Mi |
-| rt1-prometheus | prometheus 128Mi (31 MiB idle, 57 MiB under a 30-day query loop), prometheus-mcp 112Mi (about 78 MiB); init: promgen 64Mi, promtool 256Mi | 240Mi at run time |
+| rt1-prometheus | prometheus 128Mi (31 MiB idle, 57 MiB under a 30-day query loop), prometheus-mcp 112Mi (about 78 MiB; CPU limit 1, `PROMETHEUS_REQUEST_TIMEOUT=10`); init: promgen 64Mi, promtool 256Mi | 240Mi at run time |
 
 To let agents use them, the gateway must be allowed to reach the four hosts
 (`rt1-motherduck.koinon-fixtures.svc.cluster.local:8000`, `rt1-fakecicost.koinon-fixtures.svc.cluster.local:8080`,

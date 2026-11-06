@@ -203,19 +203,44 @@ var _ = Describe("the data class of a server (ADR 0084, koinon-private#350)", fu
 	})
 
 	Describe("the code-host connection link (ADR 0091 decision 3)", func() {
-		newConn := func(ctx SpecContext, org pgtype.UUID) string {
+		// GitHub's own MCP server, which acts on github.com (connectors/github spec.site.mcpHosts).
+		const copilot = "https://api.githubcopilot.com/mcp/"
+		// connAt adds a connection of the connector at baseURL ("" for the connector's default host).
+		connAt := func(ctx SpecContext, org pgtype.UUID, connector, baseURL string) string {
 			GinkgoHelper()
 			id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
-			_, err := store.New(pool).CreateConnection(ctx, store.CreateConnectionParams{
-				OrgID: org, ID: id, Connector: "github", DisplayName: "gh", Config: []byte(`{}`),
+			config, err := json.Marshal(map[string]string{"baseUrl": baseURL})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = store.New(pool).CreateConnection(ctx, store.CreateConnectionParams{
+				OrgID: org, ID: id, Connector: connector, DisplayName: connector + " " + baseURL, Config: config,
 				SecretName: pgtype.Text{String: "conn-" + id.String(), Valid: true},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			return id.String()
 		}
+		// newConn is a github.com connection.
+		newConn := func(ctx SpecContext, org pgtype.UUID) string {
+			GinkgoHelper()
+			return connAt(ctx, org, "github", "")
+		}
+		createAt := func(ctx SpecContext, name, u string, class *mcpservers.Declaration) mcpservers.Server {
+			GinkgoHelper()
+			s, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: name, URL: u, Class: class})
+			Expect(err).NotTo(HaveOccurred())
+			return s
+		}
+		linkTo := func(conn string) mcpservers.Declaration {
+			return mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn}
+		}
+		expectInvalid := func(err error, substr string) {
+			GinkgoHelper()
+			var inv *mcpservers.InvalidError
+			Expect(errors.As(err, &inv)).To(BeTrue(), "%v", err)
+			Expect(inv.Error()).To(ContainSubstring(substr))
+		}
 
 		It("is none for a server nobody linked, and set, read back and audited with the class", func(ctx SpecContext) {
-			s := create(ctx, "forge", nil)
+			s := createAt(ctx, "forge", copilot, nil)
 			Expect(s.CodeHostConnectionID).To(BeEmpty())
 			conn := newConn(ctx, org)
 			got, err := svc.SetDataClass(ctx, org, actor, s.ID, mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn})
@@ -236,12 +261,111 @@ var _ = Describe("the data class of a server (ADR 0084, koinon-private#350)", fu
 
 		It("can be given at create", func(ctx SpecContext) {
 			conn := newConn(ctx, org)
-			s := create(ctx, "forge", &mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn})
+			s := createAt(ctx, "forge", copilot, &mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn})
 			Expect(s.CodeHostConnectionID).To(Equal(conn))
 		})
 
+		Describe("checks that the server acts on the connection's host (#117)", func() {
+			DescribeTable("allows a server at a host known to act on the connection's host, at create and at update",
+				func(ctx SpecContext, connector, baseURL, serverURL string) {
+					conn := connAt(ctx, org, connector, baseURL)
+					s := createAt(ctx, "forge", serverURL, &mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn})
+					Expect(s.CodeHostConnectionID).To(Equal(conn))
+					u := createAt(ctx, "forge-later", serverURL, nil)
+					got, err := svc.SetDataClass(ctx, org, actor, u.ID, linkTo(conn))
+					Expect(err).NotTo(HaveOccurred())
+					Expect(got.CodeHostConnectionID).To(Equal(conn))
+				},
+				Entry("GitHub's MCP server for github.com", "github", "", copilot),
+				Entry("github.com named explicitly", "github", "https://github.com", copilot),
+				Entry("the github.com API host", "github", "", "https://api.github.com/mcp"),
+				Entry("a GitHub Enterprise Server's own host", "github", "https://ghe.example.com", "https://ghe.example.com/mcp"),
+				Entry("a GitHub Enterprise Server's own host on another port, in another case", "github", "https://ghe.example.com", "https://GHE.example.com:8443/mcp"),
+				Entry("a Gitea's own host", "gitea", "https://git.example.com", "https://git.example.com/mcp"),
+				Entry("a Gitea under a sub-path", "gitea", "https://git.example.com/forge", "https://git.example.com/gitea-mcp/mcp"),
+			)
+
+			DescribeTable("refuses a server at another host, at create and at update, and writes nothing",
+				func(ctx SpecContext, connector, baseURL, serverURL, why string) {
+					conn := connAt(ctx, org, connector, baseURL)
+					_, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "forge", URL: serverURL, Class: &mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn}})
+					expectInvalid(err, why)
+					list, err := svc.List(ctx, org)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(list).To(BeEmpty(), "the create wrote nothing")
+
+					s := createAt(ctx, "forge", serverURL, &mcpservers.Declaration{Kind: "fetch", Legs: []string{"untrusted_input"}})
+					_, err = svc.SetDataClass(ctx, org, actor, s.ID, linkTo(conn))
+					expectInvalid(err, why)
+					got, err := svc.Get(ctx, org, s.ID)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(got.CodeHostConnectionID).To(BeEmpty())
+					Expect(got.Kind).To(Equal("fetch"), "the update wrote nothing")
+					Expect(events(ctx, "mcp_server.data_class.set")).To(BeEmpty())
+				},
+				Entry("GitHub's MCP server to a Gitea connection (koinon-private#621)", "gitea", "https://git.example.com", copilot, "does not act on the Gitea connection at https://git.example.com"),
+				Entry("GitHub's MCP server to a GitHub Enterprise Server connection", "github", "https://ghe.example.com", copilot, "accepts MCP servers at ghe.example.com"),
+				Entry("a Gitea MCP server to a github.com connection", "github", "", "https://git.example.com/mcp", "accepts MCP servers at github.com, api.github.com, api.githubcopilot.com"),
+				Entry("another host of the same domain", "gitea", "https://git.example.com", "https://mcp.git.example.com/mcp", "an MCP server at mcp.git.example.com"),
+				Entry("a host that only ends like the connection's", "github", "https://ghe.example.com", "https://notghe.example.com/mcp", "an MCP server at notghe.example.com"),
+			)
+
+			It("refuses a connection that is not a code host", func(ctx SpecContext) {
+				conn := connAt(ctx, org, "slack", "")
+				s := createAt(ctx, "forge", "https://slack.example.com/mcp", nil)
+				_, err := svc.SetDataClass(ctx, org, actor, s.ID, linkTo(conn))
+				expectInvalid(err, "is not a code-host connection")
+			})
+
+			It("refuses to keep an old link that no longer matches when the class is set again", func(ctx SpecContext) {
+				conn := connAt(ctx, org, "gitea", "https://git.example.com")
+				s := createAt(ctx, "forge", copilot, nil)
+				// A link written before the check existed.
+				var cid, sid pgtype.UUID
+				Expect(cid.Scan(conn)).To(Succeed())
+				Expect(sid.Scan(s.ID)).To(Succeed())
+				_, err := pool.Exec(ctx, `UPDATE mcp_servers SET code_host_connection_id = $3 WHERE org_id = $1 AND id = $2`, org, sid, cid)
+				Expect(err).NotTo(HaveOccurred())
+				_, err = svc.SetDataClass(ctx, org, actor, s.ID, mcpservers.Declaration{Kind: "search", Legs: mcpservers.Legs, CodeHostConnection: conn})
+				expectInvalid(err, "does not act on the Gitea connection")
+				By("unlinking it is allowed")
+				got, err := svc.SetDataClass(ctx, org, actor, s.ID, mcpservers.Declaration{Kind: "search", Legs: mcpservers.Legs})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got.CodeHostConnectionID).To(BeEmpty())
+			})
+
+			It("unlinks, audited, the servers a declared connection no longer serves after its host changes", func(ctx SpecContext) {
+				conn := connAt(ctx, org, "gitea", "https://git.example.com")
+				moved := createAt(ctx, "moved", "https://git.example.com/mcp", &mcpservers.Declaration{Kind: "fetch", Legs: []string{"private_data"}, CodeHostConnection: conn})
+				kept := createAt(ctx, "kept", "https://git2.example.com/mcp", nil)
+				var cid pgtype.UUID
+				Expect(cid.Scan(conn)).To(Succeed())
+				q := store.New(pool)
+				_, err := pool.Exec(ctx, `UPDATE connections SET config = '{"baseUrl":"https://git2.example.com"}' WHERE org_id = $1 AND id = $2`, org, cid)
+				Expect(err).NotTo(HaveOccurred())
+				_, err = svc.SetDataClass(ctx, org, actor, kept.ID, linkTo(conn))
+				Expect(err).NotTo(HaveOccurred())
+				row, err := q.GetConnection(ctx, store.GetConnectionParams{OrgID: org, ID: cid})
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(mcpservers.UnlinkMismatchedServers(ctx, q, audit.Secret("forge"), row)).To(Succeed())
+				got, err := svc.Get(ctx, org, moved.ID)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got.CodeHostConnectionID).To(BeEmpty(), "git.example.com is no longer the connection's host")
+				Expect(got.Kind).To(Equal("fetch"), "the rest of the class stays")
+				Expect(got.DataClass).To(Equal([]string{"private_data"}))
+				still, err := svc.Get(ctx, org, kept.ID)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(still.CodeHostConnectionID).To(Equal(conn), "git2.example.com is")
+				ev := events(ctx, "mcp_server.data_class.reset")
+				Expect(ev).To(HaveLen(1))
+				Expect(ev[0].TargetID).To(Equal(moved.ID))
+				Expect(string(ev[0].Summary)).To(ContainSubstring("connection_host_changed"))
+			})
+		})
+
 		It("refuses a connection of another org, one that does not exist and one that is not an ID", func(ctx SpecContext) {
-			s := create(ctx, "forge", nil)
+			s := createAt(ctx, "forge", copilot, nil)
 			other, _, _ := pgtest.NewOrg(ctx, pool)
 			for _, c := range []string{newConn(ctx, other), uuid.NewString(), "not-an-id"} {
 				_, err := svc.SetDataClass(ctx, org, actor, s.ID, mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: c})
@@ -257,7 +381,7 @@ var _ = Describe("the data class of a server (ADR 0084, koinon-private#350)", fu
 
 		It("is cleared, and audited as a class reset, when the URL changes", func(ctx SpecContext) {
 			conn := newConn(ctx, org)
-			s := create(ctx, "forge", &mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn})
+			s := createAt(ctx, "forge", copilot, &mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn})
 			same := s.URL
 			got, err := svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &same})
 			Expect(err).NotTo(HaveOccurred())
@@ -274,7 +398,7 @@ var _ = Describe("the data class of a server (ADR 0084, koinon-private#350)", fu
 
 		It("is unlinked when the connection is deleted", func(ctx SpecContext) {
 			conn := newConn(ctx, org)
-			s := create(ctx, "forge", &mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn})
+			s := createAt(ctx, "forge", copilot, &mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn})
 			var cid pgtype.UUID
 			Expect(cid.Scan(conn)).To(Succeed())
 			_, err := pool.Exec(ctx, `DELETE FROM connections WHERE org_id = $1 AND id = $2`, org, cid)
