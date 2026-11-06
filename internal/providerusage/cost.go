@@ -22,8 +22,12 @@ import (
 // A CostSource reads what a direct provider billed one part of an account for one UTC day, from the
 // provider's cost API, with an admin key that is not the provider's inference key. The ledger's
 // daily reconciliation compares it with the ledger's sum of the provider's entries for the day (ADR
-// 0056, amendment 2026-11-06). The cost APIs report by workspace (Anthropic) or project (OpenAI),
-// not by API key: the scope must hold this provider's key alone for the figures to compare.
+// 0056, amendment 2026-11-06). Anthropic's cost report is by workspace, so there the scope must hold
+// this provider's key alone for the figures to compare; OpenAI's reports by project or by API key.
+//
+// A source asks for exactly one bucket, the requested day, and reads only a bucket that starts at
+// that day: a report without it is an error, never $0, so a missing day reads as an error and not
+// as out of tolerance.
 //
 // A source asks only its own pinned endpoint, follows no redirect, and serves only providers whose
 // inference URL is that provider's own API, so the bill it reads is the one the ledger's entries ran
@@ -41,7 +45,7 @@ type CostSource interface {
 type CostProvider struct {
 	// AdminKey reads the cost API; it never leaves the request to the provider.
 	AdminKey string
-	// Scope is the workspace or project the provider's key belongs to.
+	// Scope is the workspace or project the provider's key belongs to, or (OpenAI) the key's ID.
 	Scope string
 }
 
@@ -139,10 +143,12 @@ func ratOf(name, field, s string) (*big.Rat, error) {
 
 // AnthropicCost reads the Admin API's cost report: GET
 // https://api.anthropic.com/v1/organizations/cost_report, grouped by workspace, one 1-day bucket
-// (https://docs.anthropic.com/en/api/admin-api/usage-cost/get-cost-report, from memory of the
-// documented shape; not re-read in the session that wrote this). amount is a decimal string in the
-// currency's lowest unit (cents). The default workspace has no workspace_id; its scope is
-// "default".
+// (https://platform.claude.com/docs/en/api/beta/organization/cost_report/retrieve, read
+// 2026-11-06). The Admin key goes in the x-api-key header (Bearer is for OAuth tokens only,
+// https://platform.claude.com/docs/en/manage-claude/admin-api). amount is a decimal string in the
+// currency's lowest unit (cents); a bucket's starting_at is the day it covers. The default
+// workspace has no workspace_id; its scope is "default". The endpoint is marked legacy; its
+// successor is /v1/organizations/analytics/cost.
 type AnthropicCost struct {
 	Client *http.Client
 }
@@ -165,7 +171,8 @@ func (AnthropicCost) ValidScope(scope string) bool {
 
 type anthropicCostReport struct {
 	Data []struct {
-		Results []struct {
+		StartingAt string `json:"starting_at"`
+		Results    []struct {
 			Currency    string  `json:"currency"`
 			Amount      string  `json:"amount"`
 			WorkspaceID *string `json:"workspace_id"`
@@ -181,13 +188,14 @@ func (a AnthropicCost) DayCost(ctx context.Context, p CostProvider, day time.Tim
 		return 0, fmt.Errorf("providerusage: anthropic: %q is not a workspace", p.Scope)
 	}
 	day = day.UTC().Truncate(24 * time.Hour)
-	total, page := new(big.Rat), ""
+	total, page, found := new(big.Rat), "", false
 	for range maxCostPages {
 		q := url.Values{
 			"starting_at":  {day.Format(time.RFC3339)},
 			"ending_at":    {day.Add(24 * time.Hour).Format(time.RFC3339)},
 			"bucket_width": {"1d"},
 			"group_by[]":   {"workspace_id"},
+			"limit":        {"1"},
 		}
 		if page != "" {
 			q.Set("page", page)
@@ -198,6 +206,10 @@ func (a AnthropicCost) DayCost(ctx context.Context, p CostProvider, day time.Tim
 			return 0, err
 		}
 		for _, b := range rep.Data {
+			if start, err := time.Parse(time.RFC3339, b.StartingAt); err != nil || !start.Equal(day) {
+				continue
+			}
+			found = true
 			for _, r := range b.Results {
 				ws := AnthropicDefaultWorkspace
 				if r.WorkspaceID != nil && *r.WorkspaceID != "" {
@@ -217,6 +229,9 @@ func (a AnthropicCost) DayCost(ctx context.Context, p CostProvider, day time.Tim
 			}
 		}
 		if !rep.HasMore || rep.NextPage == "" {
+			if !found {
+				return 0, fmt.Errorf("providerusage: anthropic cost report: no bucket for %s", day.Format(time.DateOnly))
+			}
 			return money.FromRat(total)
 		}
 		page = rep.NextPage
@@ -225,9 +240,11 @@ func (a AnthropicCost) DayCost(ctx context.Context, p CostProvider, day time.Tim
 }
 
 // OpenAICost reads the organization costs API: GET https://api.openai.com/v1/organization/costs,
-// grouped by project, one 1-day bucket (https://platform.openai.com/docs/api-reference/usage/costs,
-// from memory of the documented shape; not re-read in the session that wrote this). amount.value
-// is in dollars.
+// one 1-day bucket, filtered to and grouped by the scope: a project (project_ids, group_by
+// project_id) or one API key (api_key_ids, group_by api_key_id)
+// (https://platform.openai.com/docs/api-reference/usage/costs; shapes read from OpenAI's OpenAPI
+// description, github.com/openai/openai-openapi, 2026-11-06). amount.value is in dollars; a
+// bucket's start_time (Unix seconds) is the day it covers.
 type OpenAICost struct {
 	Client *http.Client
 }
@@ -235,23 +252,30 @@ type OpenAICost struct {
 // OpenAICostURL is the one URL OpenAI's cost source asks.
 const OpenAICostURL = "https://api.openai.com/v1/organization/costs"
 
-// openAIProject is OpenAI's project ID form.
-var openAIProject = regexp.MustCompile(`^proj_[A-Za-z0-9]{1,123}$`)
+// openAIProject and openAIKey are OpenAI's project and API key ID forms (the key's ID, never the key).
+var (
+	openAIProject = regexp.MustCompile(`^proj_[A-Za-z0-9]{1,123}$`)
+	openAIKey     = regexp.MustCompile(`^key_[A-Za-z0-9]{1,124}$`)
+)
 
 // Serves implements CostSource.
 func (OpenAICost) Serves(providerURL string) bool { return servesHost(providerURL, "api.openai.com") }
 
-// ValidScope implements CostSource: a project ID.
-func (OpenAICost) ValidScope(scope string) bool { return openAIProject.MatchString(scope) }
+// ValidScope implements CostSource: a project ID or an API key ID.
+func (OpenAICost) ValidScope(scope string) bool {
+	return openAIProject.MatchString(scope) || openAIKey.MatchString(scope)
+}
 
 type openAICostPage struct {
 	Data []struct {
-		Results []struct {
+		StartTime int64 `json:"start_time"`
+		Results   []struct {
 			Amount struct {
 				Value    json.Number `json:"value"`
 				Currency string      `json:"currency"`
 			} `json:"amount"`
 			ProjectID *string `json:"project_id"`
+			APIKeyID  *string `json:"api_key_id"`
 		} `json:"results"`
 	} `json:"data"`
 	HasMore  bool   `json:"has_more"`
@@ -261,16 +285,22 @@ type openAICostPage struct {
 // DayCost implements CostSource.
 func (o OpenAICost) DayCost(ctx context.Context, p CostProvider, day time.Time) (money.USD, error) {
 	if !o.ValidScope(p.Scope) {
-		return 0, fmt.Errorf("providerusage: openai: %q is not a project", p.Scope)
+		return 0, fmt.Errorf("providerusage: openai: %q is not a project or API key ID", p.Scope)
+	}
+	filter, group := "project_ids", "project_id"
+	if openAIKey.MatchString(p.Scope) {
+		filter, group = "api_key_ids", "api_key_id"
 	}
 	day = day.UTC().Truncate(24 * time.Hour)
-	total, page := new(big.Rat), ""
+	total, page, found := new(big.Rat), "", false
 	for range maxCostPages {
 		q := url.Values{
 			"start_time":   {strconv.FormatInt(day.Unix(), 10)},
 			"end_time":     {strconv.FormatInt(day.Add(24*time.Hour).Unix(), 10)},
 			"bucket_width": {"1d"},
-			"group_by":     {"project_id"},
+			"limit":        {"1"},
+			filter:         {p.Scope},
+			"group_by":     {group},
 		}
 		if page != "" {
 			q.Set("page", page)
@@ -281,8 +311,16 @@ func (o OpenAICost) DayCost(ctx context.Context, p CostProvider, day time.Time) 
 			return 0, err
 		}
 		for _, b := range rep.Data {
+			if b.StartTime != day.Unix() {
+				continue
+			}
+			found = true
 			for _, r := range b.Results {
-				if r.ProjectID == nil || *r.ProjectID != p.Scope {
+				id := r.ProjectID
+				if group == "api_key_id" {
+					id = r.APIKeyID
+				}
+				if id == nil || *id != p.Scope {
 					continue
 				}
 				if !strings.EqualFold(r.Amount.Currency, "usd") {
@@ -296,6 +334,9 @@ func (o OpenAICost) DayCost(ctx context.Context, p CostProvider, day time.Time) 
 			}
 		}
 		if !rep.HasMore || rep.NextPage == "" {
+			if !found {
+				return 0, fmt.Errorf("providerusage: openai costs: no bucket for %s", day.Format(time.DateOnly))
+			}
 			return money.FromRat(total)
 		}
 		page = rep.NextPage

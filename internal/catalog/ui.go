@@ -45,8 +45,8 @@ type ProviderPatch struct {
 	// CostAPIKey replaces the cost API key (an admin key that reads the provider's cost API, for the
 	// daily reconciliation); a pointer to "" removes it, and its scope with it.
 	CostAPIKey *string
-	// CostScope replaces the cost scope: the workspace (anthropic) or project (openai) whose cost is
-	// the provider key's.
+	// CostScope replaces the cost scope: the workspace (anthropic), or the project or API key ID
+	// (openai), whose cost is the provider key's.
 	CostScope *string
 }
 

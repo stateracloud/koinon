@@ -13,7 +13,8 @@ import (
 
 const listCostReportProviders = `-- name: ListCostReportProviders :many
 
-SELECT org_id, id, type, url, cost_api_key, cost_scope::text AS cost_scope
+SELECT org_id, id, type, url, cost_api_key, cost_scope::text AS cost_scope,
+       cost_reconcile_since::timestamptz AS cost_reconcile_since
 FROM providers
 WHERE cost_api_key IS NOT NULL AND cost_scope IS NOT NULL AND removed_at IS NULL
   AND type = ANY($1::text[])
@@ -21,12 +22,13 @@ ORDER BY org_id, id
 `
 
 type ListCostReportProvidersRow struct {
-	OrgID      pgtype.UUID
-	ID         pgtype.UUID
-	Type       string
-	Url        string
-	CostApiKey []byte
-	CostScope  string
+	OrgID              pgtype.UUID
+	ID                 pgtype.UUID
+	Type               string
+	Url                string
+	CostApiKey         []byte
+	CostScope          string
+	CostReconcileSince pgtype.Timestamptz
 }
 
 // SPDX-License-Identifier: Apache-2.0
@@ -52,6 +54,7 @@ func (q *Queries) ListCostReportProviders(ctx context.Context, types []string) (
 			&i.Url,
 			&i.CostApiKey,
 			&i.CostScope,
+			&i.CostReconcileSince,
 		); err != nil {
 			return nil, err
 		}
@@ -151,10 +154,15 @@ func (q *Queries) ProviderLedgerForDay(ctx context.Context, arg ProviderLedgerFo
 const setProviderCostKey = `-- name: SetProviderCostKey :one
 UPDATE providers
 SET cost_api_key = CASE WHEN $1::boolean THEN $2 ELSE cost_api_key END,
+    cost_reconcile_since = CASE
+        WHEN NOT $1::boolean THEN cost_reconcile_since
+        WHEN $2::jsonb IS NULL THEN NULL
+        WHEN cost_api_key IS NULL THEN now()
+        ELSE cost_reconcile_since END,
     cost_api_key_lost_at = CASE WHEN $1::boolean THEN NULL ELSE cost_api_key_lost_at END,
     cost_scope = $3
 WHERE org_id = $4 AND id = $5
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since
 `
 
 type SetProviderCostKeyParams struct {
@@ -166,7 +174,8 @@ type SetProviderCostKeyParams struct {
 }
 
 // Sets, replaces or (both NULL) removes a provider's cost API key and scope. Writing the key ends a
-// lost one. The scope can change alone (@set_key false keeps the envelope).
+// lost one. The scope can change alone (@set_key false keeps the envelope). A key stored where none
+// was starts cost_reconcile_since; a replaced key keeps it; a removed key clears it.
 func (q *Queries) SetProviderCostKey(ctx context.Context, arg SetProviderCostKeyParams) (Provider, error) {
 	row := q.db.QueryRow(ctx, setProviderCostKey,
 		arg.SetKey,
@@ -196,6 +205,7 @@ func (q *Queries) SetProviderCostKey(ctx context.Context, arg SetProviderCostKey
 		&i.CostApiKey,
 		&i.CostScope,
 		&i.CostApiKeyLostAt,
+		&i.CostReconcileSince,
 	)
 	return i, err
 }

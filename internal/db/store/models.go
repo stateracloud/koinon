@@ -2134,6 +2134,7 @@ type Provider struct {
 	CostApiKey           []byte
 	CostScope            pgtype.Text
 	CostApiKeyLostAt     pgtype.Timestamptz
+	CostReconcileSince   pgtype.Timestamptz
 }
 
 type ProviderCostReconciliation struct {

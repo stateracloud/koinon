@@ -69,7 +69,7 @@ const costLockKey int64 = 0x6b6f696e6f6e4372 // "koinonCr"
 
 // CostReconciler compares, once a day for each direct provider key with a cost API key, the
 // ledger's cost of the key's entries for each UTC day with the provider's cost API for the key's
-// workspace or project, and records the difference (provider_cost_reconciliations). It changes no
+// workspace, project or API key, and records the difference (provider_cost_reconciliations). It changes no
 // entry: direct requests are charged the catalog price (ADR 0056, amendment 2026-11-06); the
 // record shows how far that is from the bill. One replica runs a pass at a time.
 type CostReconciler struct {
@@ -152,8 +152,8 @@ func (c *CostReconciler) Run(ctx context.Context) {
 	}
 }
 
-// ReconcileDue records every due day of every provider with a cost API key and returns how many it
-// recorded. A pass that finds another replica's pass running does nothing.
+// ReconcileDue records every due day of every provider with a cost API key, from the first UTC day
+// that starts after the key was stored, and returns how many it recorded. A pass that finds another replica's pass running does nothing.
 func (c *CostReconciler) ReconcileDue(ctx context.Context) (int, error) {
 	conn, err := c.DB.Acquire(ctx)
 	if err != nil {
@@ -197,6 +197,12 @@ func (c *CostReconciler) ReconcileDue(ctx context.Context) (int, error) {
 			seen[r.Day.Time.UTC()] = r
 		}
 		for day := first; day.Before(today); day = day.AddDate(0, 0, 1) {
+			// A day that started before the cost key was stored is not read: its entries may predate
+			// provider_id or the key, and the ledger's part of the day against the whole day's bill
+			// would read as out of tolerance.
+			if day.Before(p.CostReconcileSince.Time) {
+				continue
+			}
 			if r, ok := seen[day]; ok {
 				wait := costRecheck
 				if r.Status == CostError {

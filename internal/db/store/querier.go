@@ -1123,7 +1123,8 @@ type Querier interface {
 	// destination matches nothing and is not brought back.
 	SetPlatformTraceDestinationTest(ctx context.Context, arg SetPlatformTraceDestinationTestParams) (int64, error)
 	// Sets, replaces or (both NULL) removes a provider's cost API key and scope. Writing the key ends a
-	// lost one. The scope can change alone (@set_key false keeps the envelope).
+	// lost one. The scope can change alone (@set_key false keeps the envelope). A key stored where none
+	// was starts cost_reconcile_since; a replaced key keeps it; a removed key clears it.
 	SetProviderCostKey(ctx context.Context, arg SetProviderCostKeyParams) (Provider, error)
 	SetProviderDisabled(ctx context.Context, arg SetProviderDisabledParams) error
 	// Records, before the prompt is sent, the task timeline seq through which

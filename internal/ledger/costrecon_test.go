@@ -84,7 +84,7 @@ var _ = Describe("Reconciling direct providers against their cost API", func() {
 	)
 	BeforeEach(func(ctx SpecContext) {
 		// Only this spec's provider holds a cost key: the reconciliation lists every org's.
-		_, err := db.Exec(ctx, `UPDATE providers SET cost_api_key = NULL, cost_scope = NULL WHERE cost_api_key IS NOT NULL`)
+		_, err := db.Exec(ctx, `UPDATE providers SET cost_api_key = NULL, cost_scope = NULL, cost_reconcile_since = NULL WHERE cost_api_key IS NOT NULL`)
 		Expect(err).NotTo(HaveOccurred())
 		e = newEnv(ctx, uniq("org"), "", "100.00")
 		id := e.modelAt(ctx, "anthropic", model, "https://api.anthropic.com")
@@ -105,11 +105,12 @@ var _ = Describe("Reconciling direct providers against their cost API", func() {
 		Expect(err).NotTo(HaveOccurred())
 		sealed, err := json.Marshal(env)
 		Expect(err).NotTo(HaveOccurred())
-		_, err = db.Exec(ctx, `UPDATE providers SET cost_api_key = $3, cost_scope = 'wrkspc_test' WHERE org_id = $1 AND id = $2`,
-			e.org, id, sealed)
+		today = time.Now().UTC().Truncate(24 * time.Hour)
+		// The key was stored a week ago: every day the reconciliation looks at is after it.
+		_, err = db.Exec(ctx, `UPDATE providers SET cost_api_key = $3, cost_scope = 'wrkspc_test', cost_reconcile_since = $4
+			WHERE org_id = $1 AND id = $2`, e.org, id, sealed, today.AddDate(0, 0, -7))
 		Expect(err).NotTo(HaveOccurred())
 
-		today = time.Now().UTC().Truncate(24 * time.Hour)
 		clock = today.Add(12 * time.Hour)
 		cost = &fakeCost{days: map[string]money.USD{}}
 		rec = &ledger.CostReconciler{
@@ -206,8 +207,40 @@ var _ = Describe("Reconciling direct providers against their cost API", func() {
 		Expect(row(ctx, d2).Status).To(Equal(ledger.CostOK))
 	})
 
+	It("reads no day that started before the cost key was stored", func(ctx SpecContext) {
+		d1, d2 := today.AddDate(0, 0, -1), today.AddDate(0, 0, -2)
+		// Stored during d2: d2's earlier entries could predate provider_id, so d2 and d3 are not read.
+		_, err := db.Exec(ctx, `UPDATE providers SET cost_reconcile_since = $3 WHERE org_id = $1 AND id = $2`,
+			e.org, pid, d2.Add(5*time.Hour))
+		Expect(err).NotTo(HaveOccurred())
+		charge(ctx, d2.Add(time.Hour))
+		cost.set(d1, "0")
+		cost.set(d2, "0.0500")
+		n, err := rec.ReconcileDue(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(Equal(1))
+		Expect(cost.calls()).To(Equal(1))
+		Expect(row(ctx, d1).Status).To(Equal(ledger.CostOK))
+		var older int
+		Expect(db.QueryRow(ctx, `SELECT count(*) FROM provider_cost_reconciliations WHERE org_id = $1 AND day < $2`,
+			e.org, d1.Format(time.DateOnly)).Scan(&older)).To(Succeed())
+		Expect(older).To(BeZero())
+	})
+
+	It("keeps a deleted provider's entries, with no provider", func(ctx SpecContext) {
+		charge(ctx, today.AddDate(0, 0, -1).Add(time.Hour))
+		_, err := db.Exec(ctx, `DELETE FROM models WHERE org_id = $1 AND provider_id = $2`, e.org, pid)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `DELETE FROM providers WHERE org_id = $1 AND id = $2`, e.org, pid)
+		Expect(err).NotTo(HaveOccurred())
+		var entries, orphans int
+		Expect(db.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE provider_id IS NOT NULL) FROM spend_entries WHERE org_id = $1`, e.org).
+			Scan(&entries, &orphans)).To(Succeed())
+		Expect([]int{entries, orphans}).To(Equal([]int{1, 0}))
+	})
+
 	It("asks no provider without a cost key", func(ctx SpecContext) {
-		_, err := db.Exec(ctx, `UPDATE providers SET cost_api_key = NULL, cost_scope = NULL WHERE org_id = $1`, e.org)
+		_, err := db.Exec(ctx, `UPDATE providers SET cost_api_key = NULL, cost_scope = NULL, cost_reconcile_since = NULL WHERE org_id = $1`, e.org)
 		Expect(err).NotTo(HaveOccurred())
 		n, err := rec.ReconcileDue(ctx)
 		Expect(err).NotTo(HaveOccurred())

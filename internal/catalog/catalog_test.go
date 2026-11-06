@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/netip"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
@@ -397,12 +398,26 @@ var _ = Describe("Service", func() {
 			for _, e := range events(ctx, "provider.update") {
 				Expect(string(e.Summary)).NotTo(ContainSubstring(admin))
 			}
+			since := func() *time.Time {
+				GinkgoHelper()
+				var t *time.Time
+				Expect(pool.QueryRow(ctx, `SELECT cost_reconcile_since FROM providers WHERE id = $1`, p.ID).Scan(&t)).To(Succeed())
+				return t
+			}
+			first := since()
+			Expect(first).NotTo(BeNil(), "the reconciliation reads the days after the key was stored")
 
 			By("the default workspace, alone")
 			def := "default"
 			got, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{CostScope: &def})
 			Expect(err).NotTo(HaveOccurred())
 			Expect([]any{got.HasCostKey, got.CostScope}).To(Equal([]any{true, def}))
+
+			By("a replaced key keeps the day the reconciliation starts from")
+			rotated := "koinon_test_not-a-real-admin-key-2"
+			_, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{CostAPIKey: &rotated})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(since()).To(HaveValue(BeTemporally("==", *first)))
 
 			By("its URL can no longer move off the provider's own API while it holds the key")
 			elsewhere := "https://anthropic-proxy.example.com"
@@ -414,6 +429,7 @@ var _ = Describe("Service", func() {
 			got, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{CostAPIKey: &empty})
 			Expect(err).NotTo(HaveOccurred())
 			Expect([]any{got.HasCostKey, got.CostScope}).To(Equal([]any{false, ""}))
+			Expect(since()).To(BeNil())
 		})
 
 		It("takes a cost API key for anthropic and openai providers at their own API only", func(ctx SpecContext) {
@@ -430,6 +446,15 @@ var _ = Describe("Service", func() {
 			got, err := svc.UpdateProvider(ctx, org, actor, o.ID, catalog.ProviderPatch{CostAPIKey: &admin, CostScope: &scope})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got.HasCostKey).To(BeTrue())
+
+			By("an OpenAI scope may name one API key instead of a project")
+			key := "key_abc123"
+			got, err = svc.UpdateProvider(ctx, org, actor, o.ID, catalog.ProviderPatch{CostScope: &key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CostScope).To(Equal(key))
+			sk := "sk-proj-abc"
+			_, err = svc.UpdateProvider(ctx, org, actor, o.ID, catalog.ProviderPatch{CostScope: &sk})
+			Expect(errors.As(err, &inv)).To(BeTrue(), "the key's ID, never the key: %v", err)
 		})
 	})
 

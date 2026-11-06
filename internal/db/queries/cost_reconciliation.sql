@@ -7,7 +7,8 @@
 -- name: ListCostReportProviders :many
 -- Every provider of every org with a cost API key, in a type that has a cost source; the
 -- reconciliation asks each of them once a day.
-SELECT org_id, id, type, url, cost_api_key, cost_scope::text AS cost_scope
+SELECT org_id, id, type, url, cost_api_key, cost_scope::text AS cost_scope,
+       cost_reconcile_since::timestamptz AS cost_reconcile_since
 FROM providers
 WHERE cost_api_key IS NOT NULL AND cost_scope IS NOT NULL AND removed_at IS NULL
   AND type = ANY(@types::text[])
@@ -15,9 +16,15 @@ ORDER BY org_id, id;
 
 -- name: SetProviderCostKey :one
 -- Sets, replaces or (both NULL) removes a provider's cost API key and scope. Writing the key ends a
--- lost one. The scope can change alone (@set_key false keeps the envelope).
+-- lost one. The scope can change alone (@set_key false keeps the envelope). A key stored where none
+-- was starts cost_reconcile_since; a replaced key keeps it; a removed key clears it.
 UPDATE providers
 SET cost_api_key = CASE WHEN @set_key::boolean THEN sqlc.narg(cost_api_key) ELSE cost_api_key END,
+    cost_reconcile_since = CASE
+        WHEN NOT @set_key::boolean THEN cost_reconcile_since
+        WHEN sqlc.narg(cost_api_key)::jsonb IS NULL THEN NULL
+        WHEN cost_api_key IS NULL THEN now()
+        ELSE cost_reconcile_since END,
     cost_api_key_lost_at = CASE WHEN @set_key::boolean THEN NULL ELSE cost_api_key_lost_at END,
     cost_scope = sqlc.narg(cost_scope)
 WHERE org_id = @org_id AND id = @id

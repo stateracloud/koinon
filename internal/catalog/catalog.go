@@ -131,8 +131,8 @@ type Provider struct {
 	// AnthropicWorkspaceID is the workspace the gateway names for the provider's models (type
 	// anthropic only). An identifier, not a credential.
 	AnthropicWorkspaceID string `json:"anthropicWorkspaceId,omitempty"`
-	// HasCostKey is whether a cost API key is stored; CostScope is the workspace or project whose
-	// cost the daily reconciliation compares with the ledger (ADR 0056, amendment 2026-11-06).
+	// HasCostKey is whether a cost API key is stored; CostScope is the workspace, project or API key
+	// whose cost the daily reconciliation compares with the ledger (ADR 0056, amendment 2026-11-06).
 	HasCostKey bool   `json:"hasCostKey"`
 	CostScope  string `json:"costScope,omitempty"`
 	// CostKeyLostAt is set when the cost API key was lost with its KEK; it must be entered again.
