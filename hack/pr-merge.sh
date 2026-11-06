@@ -18,6 +18,9 @@
 #      succeeded (a review failure is a warning: the merge does not depend on the claim), and a PR
 #      comment naming that SHA and the number of green contexts read. With --auto the PR is merged later:
 #      the output says `auto-merge enabled`.
+#   Merge queue (#225): when the base branch's ruleset has a `merge_queue` rule (read at run time), the
+#   same `gh pr merge --merge --auto` adds the PR to the queue and the output says `added to the merge queue`;
+#   --admin still merges directly (bypass). Without the rule nothing changes. docs/dev/ci.md "Merging".
 #   Unresolved review threads (#187): pr-wait.sh --checks exits 7 when every check is green but the PR is
 #   BLOCKED by them (it lists them, path:line and author), and this script passes the 7 through; it also
 #   looks again right before merging (mergeStateStatus BLOCKED). It never replies to or resolves a thread.
@@ -26,7 +29,7 @@
 #   --admin        merge now with admin rights (main merges ready PRs this way, AGENTS.md "Merging")
 #   --lane L       the claim lane for `claim.sh review` (default: the lane of the claim in `claim.sh mine`)
 #   --approved-at  when the human approved the admin merge; recorded in the comment, not checked
-# Exit: 0 merged (or auto-merge enabled), 1 a required context is not green, 2 the wait timed out or
+# Exit: 0 merged (or auto-merge enabled, or queued), 1 a required context is not green, 2 the wait timed out or
 #       a tool failed, 3 closed, 4 conflict, 5 draft, 6 stale head, 7 unresolved review threads, 64 usage
 #       (pr-wait.sh's code passes through).
 # Test hooks: PR_MERGE_WAIT, PR_MERGE_NEEDS_E2E, PR_MERGE_CLAIM, PR_MERGE_THREADS replace the helper scripts.
@@ -171,6 +174,17 @@ fi
   esac
 }
 
+# Does the base branch have a merge queue (#225)? Read from the ruleset at run time, so the same script
+# serves the repository before and after the ruleset gains the rule. Only an exact `true` counts: an
+# unreadable answer is "no queue" (the merge below is the same command either way; only the report differs).
+queue=0
+if [ "$(gh api "repos/{owner}/{repo}/rules/branches/$base" --jq 'any(.[]; .type == "merge_queue")' 2>/dev/null || true)" = true ]; then
+  queue=1
+fi
+
+# With a queue, `gh pr merge --auto` enqueues the PR (it already passed every check that gates entry, read
+# above) and GitHub merges it after the queue build is green: no manual sync. --admin is GitHub's "merge
+# without waiting for requirements" (a bypass actor merges directly, skipping the queue and the review rule).
 mode=--auto
 [ "$admin" = 0 ] || mode=--admin
 gh pr merge "$pr" --merge "$mode" --match-head-commit "$sha" || { rc=$?; echo "pr-merge: gh pr merge failed ($rc); the claim stays as it is" >&2; exit "$rc"; }
@@ -191,7 +205,9 @@ for n in $(jq -r '.closingIssuesReferences[]?.number' <<<"$pr_json"); do
   fi
 done
 
-if [ "$mode" = --auto ]; then
+if [ "$mode" = --auto ] && [ "$queue" = 1 ]; then
+  verb="added to the merge queue (merged by GitHub when the queue build is green; hack/pr-wait.sh $pr waits for it)"
+elif [ "$mode" = --auto ]; then
   verb="auto-merge enabled"
 else
   verb="merged ($mode)"

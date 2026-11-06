@@ -1639,7 +1639,7 @@ query($o: String!, $n: String!) {
   repository(owner: $o, name: $n) {
     pullRequests(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: ASC}) {
       nodes {
-        number createdAt isDraft headRefOid mergeStateStatus
+        number createdAt isDraft headRefOid mergeStateStatus isInMergeQueue
         autoMergeRequest { enabledAt }
         labels(first: 50) { nodes { name } }
         commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
@@ -1650,7 +1650,7 @@ query($o: String!, $n: String!) {
       }
     }
   }
-}' --jq '[.data.repository.pullRequests.nodes[] | {number, createdAt, isDraft, headRefOid, mergeStateStatus,
+}' --jq '[.data.repository.pullRequests.nodes[] | {number, createdAt, isDraft, headRefOid, mergeStateStatus, isInMergeQueue,
     autoMergeRequest, labels: .labels.nodes,
     statusCheckRollup: (.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])}]'
 }
@@ -1684,7 +1684,7 @@ def green: if .__typename == "StatusContext" then .state == "SUCCESS"
 # merge, a red or running head changes anyway, and a conflicting one (DIRTY) is labelled needs-update.
 update_target() {
   jq -r --argjson req "${1:?required contexts}" "$JQ_LATEST"'
-    [.[] | select(.autoMergeRequest != null and .mergeStateStatus == "BEHIND" and (.isDraft | not)
+    [.[] | select(.autoMergeRequest != null and .mergeStateStatus == "BEHIND" and (.isDraft | not) and ((.isInMergeQueue // false) | not)
       and ($req | length > 0)
       and (latest($req) as $l | all($req[]; . as $r | any($l[]; nm == $r)) and all($l[]; green)))]
     | sort_by(.createdAt) | first.number // empty'
@@ -1692,6 +1692,13 @@ update_target() {
 
 cmd_update_oldest() {
   local prs inflight target head tries=0 now req
+  # With a merge queue on main (#225, ADR 0094 decision 4) the queue builds main plus the entry, so
+  # nothing here is needed, and a push to a queued PR's branch would drop it from the queue. Read at run time;
+  # an unreadable answer means "no queue" (the pre-queue behaviour). Exit condition for removing this command
+  # and updater.yml: #227 (also linked from docs/dev/ci.md "The merge queue").
+  if [[ $(gh api "repos/$REPO/rules/branches/${KOINON_BASE_BRANCH:-main}" --jq 'any(.[]; .type == "merge_queue")' 2>/dev/null || true) == true ]]; then
+    echo "::notice::main has a merge queue; the updater has nothing to do"; return 0
+  fi
   now=$(server_now)
   req=$(required_contexts)
   while :; do
@@ -1704,14 +1711,14 @@ cmd_update_oldest() {
   # In flight: an up-to-date auto-merge PR whose required checks are still running, started within the last hour
   # (a stuck check does not block the others for ever).
   inflight=$(jq -r --argjson now "$now" --argjson req "$req" "$JQ_LATEST"'
-    [.[] | select(.autoMergeRequest != null and .mergeStateStatus != "BEHIND"
+    [.[] | select(.autoMergeRequest != null and .mergeStateStatus != "BEHIND" and ((.isInMergeQueue // false) | not)
     and ([latest($req)[] | select(((.status // "COMPLETED") != "COMPLETED" or .state == "PENDING")
          and (((.startedAt // "1970-01-01T00:00:00Z") | fromdateiso8601) > ($now - 3600)))] | length > 0)) | .number] | first // empty' <<<"$prs")
   if [[ -n $inflight ]]; then echo "::notice::#$inflight is up to date and its checks are running; not updating another branch"; return 0; fi
   # A conflicting auto-merge pull request is labelled for its author and skipped; the bot never
   # pushes code to a pull request branch. The label goes when the conflict does.
   local n
-  for n in $(jq -r '.[] | select(.autoMergeRequest != null and .mergeStateStatus == "DIRTY") | .number' <<<"$prs"); do
+  for n in $(jq -r '.[] | select(.autoMergeRequest != null and .mergeStateStatus == "DIRTY" and ((.isInMergeQueue // false) | not)) | .number' <<<"$prs"); do
     if ! jq -e --argjson n "$n" '.[] | select(.number == $n) | .labels[]? | select(.name == "needs-update")' <<<"$prs" >/dev/null; then
       echo "#$n conflicts with main; labelling needs-update"
       add_label "$n" needs-update

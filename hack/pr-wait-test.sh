@@ -50,6 +50,15 @@ if [ "$1" = api ] && [[ $2 == */issues/*/events ]]; then # the last ready_for_re
   cat "$FAKE_DIR/ready"
   exit 0
 fi
+if [ "$1 $2" = "api graphql" ] && [[ $* == *mergeQueueEntry* ]]; then # the queue state: $FAKE_DIR/queue (JSON, one answer per call, the last repeats), else "not in a queue"
+  [ -f "$FAKE_DIR/queue" ] || { echo '{"data":{"repository":{"pullRequest":{"isInMergeQueue":false,"mergeQueueEntry":null}}}}'; exit 0; }
+  m=$(($(cat "$FAKE_DIR/qn" 2>/dev/null || echo 0) + 1))
+  echo "$m" >"$FAKE_DIR/qn"
+  l=$(sed -n "${m}p" "$FAKE_DIR/queue" | grep . || tail -n 1 "$FAKE_DIR/queue")
+  [ "$l" != FAIL ] || exit 1 # an API failure
+  echo "$l"
+  exit 0
+fi
 if [ "$1 $2" = "api graphql" ]; then # the review threads (hack/pr-threads.sh): $FAKE_DIR/threads holds the pages as gh prints them
   [ -f "$FAKE_DIR/threads" ] || exit 9
   cat "$FAKE_DIR/threads"
@@ -129,7 +138,7 @@ expect "merged: one line per change" 0 "checks 1/3 pending: go,web
 checks 2/3 pending: web
 checks 3/3 green
 MERGED abc1234"
-if grep -q -v -e '^pr view 7 --json' -e '^api repos/{owner}/{repo}/rules/branches/'"$FAKE_DIR/calls"; then
+if grep -q -v -e '^pr view 7 --json' -e '^api repos/{owner}/{repo}/rules/branches/' -e '^api graphql .*mergeQueueEntry' "$FAKE_DIR/calls"; then
   echo "FAIL: only gh pr view is called" >&2
   fail=1
 else echo "ok: only gh pr view is called"; fi
@@ -586,6 +595,60 @@ expect "pr-threads: pullRequest null exits 2" 2 "pr-threads: PR 7 not found (pul
 rc=0
 out=$("$repo/hack/pr-threads.sh" 2>&1) || rc=$?
 expect "pr-threads: usage" 64 "usage: hack/pr-threads.sh <PR>"
+
+# 8b. the merge queue (#225): OPEN while queued, merged by the queue build; or removed from it
+q1='{"data":{"repository":{"pullRequest":{"isInMergeQueue":true,"mergeQueueEntry":{"position":2,"state":"QUEUED"}}}}}'
+q2='{"data":{"repository":{"pullRequest":{"isInMergeQueue":true,"mergeQueueEntry":{"position":1,"state":"AWAITING_CHECKS"}}}}}'
+qno='{"data":{"repository":{"pullRequest":{"isInMergeQueue":false,"mergeQueueEntry":null}}}}'
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" \
+  "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" "$(pr MERGED CLEAN abc1234def "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n%s\n%s\n' "$q1" "$q2" "$q2" >"$FAKE_DIR/queue"
+run 7 --interval 0
+expect "a queued PR is waited for until the queue build merges it" 0 "in the merge queue (2 QUEUED)
+in the merge queue (1 AWAITING_CHECKS)
+MERGED abc1234"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n%s\n' "$q1" "$qno" >"$FAKE_DIR/queue"
+run 7 --interval 0
+expect "a PR that left the queue without merging exits 8" 8 "in the merge queue (2 QUEUED)
+DEQUEUED: PR 7 left the merge queue without merging (the queue build failed, it conflicted with an entry ahead, or it was removed); read the queue build's failures on the PR page, fix, and enqueue again with hack/pr-merge.sh"
+# The queue clears before the PR reads MERGED: one OPEN-and-not-queued poll is not a dequeue.
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" \
+  "$(pr MERGED CLEAN abc1234def "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n%s\n%s\n' "$q1" "$qno" "$qno" >"$FAKE_DIR/queue"
+run 7 --interval 0
+expect "a queue that clears just before the PR reads MERGED is a merge, not a dequeue" 0 "in the merge queue (2 QUEUED)
+MERGED abc1234"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n' "$q1" >"$FAKE_DIR/queue"
+run 7 --interval 0 --timeout 0
+expect "a queued PR times out like any wait" 2 "in the merge queue (2 QUEUED)
+TIMEOUT"
+# An unreadable queue state (API failure) while queued is not a dequeue: keep waiting.
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" \
+  "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" "$(pr MERGED CLEAN abc1234def "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n' "$q1" FAIL FAIL "$qno" >"$FAKE_DIR/queue"
+rm -f "$FAKE_DIR/qn"
+run 7 --interval 0
+expect "queued, two API failures, then MERGED: keeps waiting and exits 0" 0 "in the merge queue (2 QUEUED)
+merge queue state unreadable; waiting
+MERGED abc1234"
+# Unreadable answers neither count toward nor reset the two not-queued polls that make a dequeue.
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n' "$q1" FAIL FAIL "$qno" "$qno" >"$FAKE_DIR/queue"
+rm -f "$FAKE_DIR/qn"
+run 7 --interval 0
+expect "queued, two API failures, then two real not-queued polls: DEQUEUED" 8 "in the merge queue (2 QUEUED)
+merge queue state unreadable; waiting
+DEQUEUED: PR 7 left the merge queue without merging (the queue build failed, it conflicted with an entry ahead, or it was removed); read the queue build's failures on the PR page, fix, and enqueue again with hack/pr-merge.sh"
+# --checks judges the head's checks and never asks the queue (pr-merge --admin on an enqueued PR).
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n' "$q1" >"$FAKE_DIR/queue"
+rm -f "$FAKE_DIR/qn"
+page '' false >"$FAKE_DIR/threads"
+run 7 --checks --interval 0
+expect "--checks on a queued PR with green checks exits 0" 0 "checks 3/3 green"
+if [ ! -e "$FAKE_DIR/qn" ]; then echo "ok: --checks never calls the queue GraphQL"; else echo "FAIL: --checks called the queue GraphQL"; fail=1; fi
 
 # 8. a transient gh failure is retried
 rm -rf "$FAKE_DIR"

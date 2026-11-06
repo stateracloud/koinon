@@ -45,7 +45,8 @@ current milestone a due date, and put Ready issues in it.
 
 ## 5. Ruleset `main`
 
-- Require branches to be up to date before merging (`strict_required_status_checks_policy: true`).
+- With the merge queue (ADR 0094 decision 4) `strict_required_status_checks_policy` is `false` and a `merge_queue` rule
+  builds main plus the queued pull requests; values in the queue section of `docs/dev/ci.md`. (Before the queue: `true`.)
 - Required checks: `hack/ci-required.txt` is the list (`hack/ci-required-test.sh --ruleset` diffs it
   against the live ruleset); the existing ones plus **`claim`** (required from day one) and **`adr-lint`**.
   `claim` fails only on someone else's live claim on an issue the pull request closes, or on

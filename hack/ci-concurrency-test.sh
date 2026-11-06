@@ -24,6 +24,9 @@ check "the workflow has a concurrency block" test -n "$block"
 check "pull_request runs are grouped by the head SHA" inblock 'github\.event\.pull_request\.head\.sha'
 check "the group is not the ref (the old per-ref group)" notinblock 'github\.ref'
 check "pushes have their own group" inblock "ci-push-"
+check "merge group builds have their own group per queue commit (#225)" inblock "ci-mq-"
+check "ci.yml listens to merge_group" grep -Eq '^  merge_group:' "$wf"
+check "the supersede step is pull_request only" grep -Eq "if: github.event_name == 'pull_request'" "$wf"
 check "cancel-in-progress is off" inblock 'cancel-in-progress: false'
 check "cancel-in-progress is never true or an expression" notinblock 'cancel-in-progress: (true|\$)'
 check "changes cancels older heads" grep -q 'hack/ci-supersede.sh' "$wf"
