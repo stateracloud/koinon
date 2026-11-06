@@ -364,6 +364,10 @@ _Avoid_: Forge, SCM, VCS provider, Git provider
 A remote tool server an org connects. Agents reach its tools only through the gateway, which adds the server's credential.
 _Avoid_: Tool server, plugin, server (unqualified)
 
+**MCP sign-in**:
+Koinon's stored OAuth authorization to one MCP server, owned by an org or a user and made once in the browser; the gateway adds its token to each call.
+_Avoid_: OAuth grant, grant, token, OAuth connection
+
 **Koinon tools**:
 The tools Koinon itself offers every active agent without a grant, such as asking a person a question or canceling its own task.
 _Avoid_: Built-in tools, system tools
