@@ -72,8 +72,8 @@ function setup(conn: Connection, opts: { role?: OrgRole; fail?: string } = {}) {
       },
     })
   })
-  renderApp(transport, '/connections/c-1')
-  return sets
+  const { queryClient } = renderApp(transport, '/connections/c-1')
+  return Object.assign(sets, { queryClient })
 }
 
 describe('ConnectionPage secret re-entry', () => {
@@ -99,6 +99,17 @@ describe('ConnectionPage secret re-entry', () => {
     expect(sets[0].secret.case === 'github' && sets[0].secret.value.privateKey).toBe(pemKey)
     expect(screen.getByLabelText('Private key')).toHaveValue('')
     expect(document.body.textContent).not.toContain('not-a-real')
+  })
+
+  it('keeps the secret out of the query client\'s mutation cache', async () => {
+    const sets = setup(github())
+    await userEvent.click(await screen.findByText('Replace the private key'))
+    await userEvent.click(screen.getByLabelText('Private key'))
+    await userEvent.paste(pemKey)
+    await userEvent.click(screen.getByRole('button', { name: 'Store and test' }))
+    expect(await screen.findByText('Stored. All checks passed.')).toBeInTheDocument()
+    expect(sets).toHaveLength(1)
+    expect(JSON.stringify(sets.queryClient.getMutationCache().getAll().map((m) => m.state.variables))).not.toContain('not-a-real')
   })
 
   it('replaces both Gitea tokens, trimmed, and refuses the same token twice', async () => {

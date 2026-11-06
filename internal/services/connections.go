@@ -455,10 +455,16 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 
 	res := &connectionv1alpha1.SetConnectionSecretResponse{}
 	if req.GetTest() {
-		row, res.Results, err = s.testConnection(ctx, row)
+		tested, results, err := s.testConnection(ctx, row)
 		if err != nil {
-			return nil, err
+			// The secret is stored and cannot be entered again by a retry that fails the same way:
+			// answer with the stored connection and a failed test, not an error.
+			s.log.Warn("test after storing a connection secret failed", "org", c.org.String(), "connection", row.ID.String(), "err", err)
+			results = []*connectionv1alpha1.CheckResult{{Check: "test", Message: "the secret is stored, but Koinon could not run the checks; test the connection again"}}
+		} else {
+			row = tested
 		}
+		res.Results = results
 	}
 	res.Connection = s.connectionProto(row)
 	return res, nil

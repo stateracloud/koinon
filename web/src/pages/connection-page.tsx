@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { timestampDate } from '@bufbuild/protobuf/wkt'
-import { ConnectError } from '@connectrpc/connect'
-import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
+import { ConnectError, createClient } from '@connectrpc/connect'
+import { createConnectQueryKey, useMutation, useQuery, useTransport } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
@@ -14,7 +14,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TokenAge } from '@/components/token-age'
-import { BoundAgentsSchema, ConnectionService, ConnectionStatus } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { BoundAgentsSchema, ConnectionService, ConnectionStatus, type SetConnectionSecretResponse } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { isApprover } from '@/lib/approvals'
 import { setSecretRequest } from '@/lib/connection-secret'
 import { codeHostInfo, setupGuide } from '@/lib/connector'
@@ -41,12 +41,22 @@ export function ConnectionPage() {
   const [refusal, setRefusal] = useState<{ message: string; agents: { id: string; displayName: string }[] }>()
   const invalidate = () => queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ConnectionService, cardinality: undefined }) })
   const test = useMutation(ConnectionService.method.testConnection, { onSuccess: invalidate })
-  const setSecret = useMutation(ConnectionService.method.setConnectionSecret, {
-    onSuccess: () => {
+  const transport = useTransport()
+  const [setSecret, setSetSecret] = useState<{ pending: boolean; error?: unknown; data?: SetConnectionSecretResponse }>({ pending: false })
+  // A plain client call rather than useMutation: TanStack Query keeps a
+  // mutation's variables in its cache, and these hold the private key or tokens.
+  async function storeSecret(input: Parameters<typeof setSecretRequest>[2]) {
+    setSetSecret({ pending: true })
+    try {
+      const data = await createClient(ConnectionService, transport).setConnectionSecret(setSecretRequest(orgId, connectionId, input))
       test.reset()
-      return invalidate()
-    },
-  })
+      setSetSecret({ pending: false, data })
+      await invalidate()
+    } catch (error) {
+      setSetSecret({ pending: false, error })
+      throw error
+    }
+  }
 
   if (get.isPending) return <p role="status">Loading connection…</p>
   if (get.isError || !c) {
@@ -178,12 +188,12 @@ export function ConnectionPage() {
           key={connectionId}
           connector={gt ? 'gitea' : 'github'}
           lost={!!c.credentialLostAt}
-          pending={setSecret.isPending}
+          pending={setSecret.pending}
           error={setSecret.error ? `Could not store the ${gt ? 'tokens' : 'private key'}: ${ConnectError.from(setSecret.error).rawMessage}` : undefined}
-          onSubmit={(input) => setSecret.mutateAsync(setSecretRequest(orgId, connectionId, input))}
+          onSubmit={storeSecret}
         />
       )}
-      {setSecret.isSuccess && !test.data && (
+      {setSecret.data && !test.data && (
         <p role="status" className="text-sm">
           {setSecret.data.results.every((r) => r.ok) ? 'Stored. All checks passed.' : 'Stored, but some checks failed; see the steps below.'}
         </p>

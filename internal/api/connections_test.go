@@ -508,6 +508,27 @@ var _ = Describe("ConnectionService", func() {
 			Expect(res.GetConnection().GetLastTestedAt()).To(BeNil())
 		})
 
+		It("answers with the stored connection and a failed check when the test after storing cannot be recorded", func(ctx SpecContext) {
+			_, err := e.pool.Exec(ctx, `
+CREATE FUNCTION koinon_test_refuse_test_record() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'test record refused'; END $$;
+CREATE TRIGGER koinon_test_refuse_test_record BEFORE UPDATE ON connections
+FOR EACH ROW WHEN (NEW.last_tested_at IS NOT NULL) EXECUTE FUNCTION koinon_test_refuse_test_record()`)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) {
+				_, err := e.pool.Exec(ctx, `DROP TRIGGER koinon_test_refuse_test_record ON connections; DROP FUNCTION koinon_test_refuse_test_record()`)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			res, err := set(ctx, owner, org, gh.PEM, true)
+			Expect(err).NotTo(HaveOccurred(), "the secret is stored, so the call succeeds")
+			Expect(res.GetConnection().GetId()).To(Equal(id))
+			Expect(res.GetResults()).To(HaveExactElements(And(HaveField("Ok", BeFalse()), HaveField("Message", ContainSubstring("test the connection again")))))
+			stored, err := store.New(e.pool).GetConnection(ctx, store.GetConnectionParams{OrgID: mustUUID(org), ID: mustUUID(id)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(stored.SecretFingerprint).To(HavePrefix("SHA256:"))
+		})
+
 		It("refuses a bad key, another connector's secret, no secret, a declared connection, members and other orgs, and changes nothing", func(ctx SpecContext) {
 			lose(ctx)
 			_, err := set(ctx, owner, org, []byte("-----BEGIN RSA PRIVATE KEY-----\nTOPSECRETSTUFF\n-----END RSA PRIVATE KEY-----\n"), false)
