@@ -68,11 +68,19 @@ if [[ -f $goconst ]]; then
 	gorepo=$(sed -n 's/^[[:space:]]*Upstream[[:space:]]*=[[:space:]]*"\([^"@]*\)@".*/\1/p' "$goconst")
 	[[ $gorepo == "$repo" ]] || err "$goconst has Upstream repository '${gorepo}', the chart pins '${repo}'"
 	# Every other Go file takes the image from that package: no agentgateway image reference of its own.
+	# grep -l exits 1 for no match, which passes; any other failure (no checkout, an unreadable file)
+	# fails the check.
+	pattern='agentgateway(:v[0-9]|@sha256:)'
+	matched='' rc=0
 	if [[ -n $gotree ]]; then
-		others=$(grep -rlE --include='*.go' 'agentgateway(:v[0-9]|@sha256:)' "$gotree" | grep -vxF "$goconst" || true)
+		matched=$(grep -rlE --include='*.go' "$pattern" "$gotree") || rc=$?
+	elif mapfile -t gofiles < <(git ls-files '*.go') && wait $! && ((${#gofiles[@]})); then
+		matched=$(grep -lE "$pattern" -- "${gofiles[@]}") || rc=$?
 	else
-		others=$(git ls-files -z '*.go' | xargs -0 grep -lE 'agentgateway(:v[0-9]|@sha256:)' | grep -vxF "$goconst" || true)
+		rc=2
 	fi
+	((rc <= 1)) || err "cannot search the Go files for image references (exit $rc; not a git checkout?)"
+	others=$(grep -vxF "$goconst" <<<"${matched:-}" || true)
 	[[ -z $others ]] || err "Go files name an agentgateway image themselves; use agentgatewayimage.Ref(): ${others//$'\n'/ }"
 else
 	err "$goconst is missing"

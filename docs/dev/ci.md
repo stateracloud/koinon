@@ -53,7 +53,7 @@ request:
    `cr.agentgateway.dev/agentgateway`, or `ghcr.io/agentgateway/agentgateway` while the first is
    down; both serve the same digest). It copies the digest, fails unless the copy has that digest, and
    prints `image: ghcr.io/<owner>/agentgateway@sha256:...` in its log and summary. On a branch it tags
-   the copy by its digest (`sha256-<hex>`); only on `main` does it move the version tag. On the first
+   the copy by its digest (`pin-<hex>`); only on `main` does it move the version tag. On the first
    dispatch for a new package, GHCR can answer DENIED to a manifest PUT right after the run created the
    package: re-run the job once.
 3. Re-run the pull request's go-test, which now finds the copy. After the merge, dispatch the workflow
