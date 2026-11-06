@@ -424,6 +424,24 @@ touch "$FAKE_DIR/rules-fail"
 run 7 --checks --interval 0
 expect "required contexts unreadable: fail closed, exit 2" 2 "pr-wait: cannot read the required status checks of the base branch; not judging checks"
 [ "$(grep -c '/rules/branches/' "$FAKE_DIR/calls")" = 4 ] || { echo "FAIL: the rules read is tried 4 times" >&2; fail=1; }
+# (#201) --merged does not need the rules: an unreadable read is noted once and the wait goes on to the merge.
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_p")" "$(pr OPEN CLEAN "" "$lint_ok,$(cr go COMPLETED FAILURE 11)")" \
+  "$(pr MERGED CLEAN abc1234def "$lint_ok,$go_ok")"
+touch "$FAKE_DIR/rules-fail"
+run 7 --interval 0
+expect "--merged with the rules unreadable: no exit 2, waits for the merge" 0 "pr-wait: cannot read the required status checks of the base branch; waiting for the merge without judging checks
+advisory go pending
+checks 0/0
+advisory go failed
+MERGED abc1234"
+[ "$(grep -c '/rules/branches/' "$FAKE_DIR/calls")" = 4 ] || { echo "FAIL: --merged tries the rules read once (4 calls), not on every poll" >&2; fail=1; }
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_p")" "$(pr CLOSED UNKNOWN "" "$lint_ok,$go_p")"
+touch "$FAKE_DIR/rules-fail"
+run 7 --interval 0
+expect "--merged with the rules unreadable: a close still exits 3" 3 "pr-wait: cannot read the required status checks of the base branch; waiting for the merge without judging checks
+advisory go pending
+checks 0/0
+CLOSED"
 
 # 7c. (koinon-private#647) a draft is never green; after ready_for_review the draft's runs are ignored
 seq_set '{"state":"OPEN","isDraft":true,"mergeStateStatus":"BLOCKED","mergeCommit":null,"statusCheckRollup":[{"name":"quick checks","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-01T10:00:00Z"}]}'

@@ -55,7 +55,7 @@
 #
 # Output lines: `checks 7/9 pending: go,web`, `FAILED go (run 123)`, `MERGED abc1234`,
 # `needs-update`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
-# Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout (or the required contexts / review threads unreadable),
+# Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout (or, with --checks, the required contexts / review threads unreadable),
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
 #       6 stale PR head (with --checks), 7 unresolved review threads (BLOCKED with --checks, all green), 64 usage.
 # Test hook: PR_WAIT_THREADS replaces hack/pr-threads.sh.
@@ -182,7 +182,7 @@ shown() { if [ "$alias_show" = 1 ] && [ "$1" = quickstart ]; then echo e2e; else
 # ruleset), one per line, into $ctxs. Read until it succeeds once; a failed read leaves it empty.
 # A workflow run that is queued has no jobs yet, so its required checks are absent from the head's
 # rollup: "everything in the rollup is green" is not "every required check is green".
-ctx_ok=0 ctxs=""
+ctx_ok=0 ctx_tried=0 ctxs=""
 load_contexts() {
   [ "$ctx_ok" = 0 ] || return 0
   local out try
@@ -311,10 +311,19 @@ while :; do
     # do not count): the base branch's required contexts, the explicit --require names, the e2e aliases and
     # the checks of the e2e-kind workflow. Any other failed or pending check is printed and dropped.
     # Fail closed: when the required contexts cannot be read, nothing is judged (never "every check").
-    load_contexts "$(jq -r '.baseRefName // "main"' <<<"$json")"
-    if [ "$ctx_ok" != 1 ]; then
-      echo "pr-wait: cannot read the required status checks of the base branch; not judging checks" >&2
-      exit 2
+    # With --merged (#201) the read is best effort: it is tried once (with its retries), and when it fails
+    # the wait goes on to the merge or the close with no check judged (every check is printed as advisory);
+    # the merge itself is what --merged waits for, and GitHub applies the rules there.
+    if [ "$mode" = checks ] || [ "$ctx_tried" = 0 ]; then
+      load_contexts "$(jq -r '.baseRefName // "main"' <<<"$json")"
+      if [ "$ctx_ok" != 1 ] && [ "$mode" = checks ]; then
+        echo "pr-wait: cannot read the required status checks of the base branch; not judging checks" >&2
+        exit 2
+      fi
+      if [ "$ctx_ok" != 1 ] && [ "$ctx_tried" = 0 ]; then
+        echo "pr-wait: cannot read the required status checks of the base branch; waiting for the merge without judging checks" >&2
+      fi
+      ctx_tried=1
     fi
     keep_names=("$ctxs" ${required[@]+"${required[@]}"} ${req_now[@]+"${req_now[@]}"})
     [ "$alias_e2e" = 0 ] || keep_names+=(quickstart e2e-lab)
