@@ -1,0 +1,176 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Copied into a checkout of gitleaks by hack/gitleaks-rules.sh as cmd/generate/config/export.go
+// (a .txt file here so this repository does not compile it). It writes the rule set that gitleaks
+// ships (the same rules it generates config/gitleaks.toml from) as JSON; no sample is exported. See hack/gitleaks-rules.sh.
+
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"slices"
+	"sort"
+	"strings"
+
+	"github.com/zricethezav/gitleaks/v8/cmd/generate/config/base"
+	"github.com/zricethezav/gitleaks/v8/config"
+	"github.com/zricethezav/gitleaks/v8/logging"
+)
+
+type outAllowlist struct {
+	MatchCondition string   `json:"matchCondition,omitempty"`
+	RegexTarget    string   `json:"regexTarget,omitempty"`
+	Regexes        []string `json:"regexes,omitempty"`
+	StopWords      []string `json:"stopWords,omitempty"`
+	HasPaths       bool     `json:"hasPaths,omitempty"`
+	HasCommits     bool     `json:"hasCommits,omitempty"`
+}
+
+type outRule struct {
+	ID          string         `json:"id"`
+	Regex       string         `json:"regex"`
+	SecretGroup int            `json:"secretGroup,omitempty"`
+	Entropy     float64        `json:"entropy,omitempty"`
+	Keywords    []string       `json:"keywords,omitempty"`
+	Allowlists  []outAllowlist `json:"allowlists,omitempty"`
+}
+
+type outRules struct {
+	Version string         `json:"version"`
+	Global  []outAllowlist `json:"global"`
+	Rules   []outRule      `json:"rules"`
+}
+
+// No key-shaped string may be committed (a push scanner would flag it), and some rules carry such
+// strings: the allowlist of gcp-api-key lists leaked example keys, the generic allowlist lists a
+// sample UUID and hash, and the Bedrock rule has the base64 of a host name as its fixed prefix.
+//
+//   - a stop word or an allowlist expression with a key-shaped literal is dropped: the allowlist
+//     then allows less, so the scrubber redacts that example too, which is the safe direction;
+//   - the same literal in a rule's own expression is broken by empty groups, which keeps the meaning.
+//
+// A key-shaped literal is a run of 20 or more letters, digits, '-' and '_' with a digit in it,
+// outside of a character class.
+
+func isWordByte(c byte) bool {
+	return c == '-' || c == '_' || '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+}
+
+// keyRuns returns the key-shaped literal runs of a regular expression.
+func keyRuns(re string) (runs [][2]int) {
+	inClass := false
+	start := -1
+	flush := func(end int) {
+		if start >= 0 && end-start >= 20 && strings.ContainsAny(re[start:end], "0123456789") {
+			runs = append(runs, [2]int{start, end})
+		}
+		start = -1
+	}
+	for i := 0; i < len(re); i++ {
+		c := re[i]
+		switch {
+		case c == '\\':
+			flush(i)
+			i++
+		case inClass:
+			inClass = c != ']'
+		case c == '[':
+			flush(i)
+			inClass = true
+		case isWordByte(c):
+			if start < 0 {
+				start = i
+			}
+		default:
+			flush(i)
+		}
+	}
+	flush(len(re))
+	return runs
+}
+
+// breakLiterals breaks every key-shaped literal of a rule's expression with empty groups.
+func breakLiterals(re string) string {
+	var out strings.Builder
+	last := 0
+	for _, r := range keyRuns(re) {
+		out.WriteString(re[last:r[0]])
+		for s := re[r[0]:r[1]]; ; {
+			if len(s) <= 12 {
+				out.WriteString(s)
+				break
+			}
+			out.WriteString(s[:12] + "(?:)")
+			s = s[12:]
+		}
+		last = r[1]
+	}
+	out.WriteString(re[last:])
+	return out.String()
+}
+
+func keyShapedStop(w string) bool {
+	return len(w) >= 20 && len(keyRuns(w)) == 1 && keyRuns(w)[0] == [2]int{0, len(w)}
+}
+
+func allowlist(a *config.Allowlist) outAllowlist {
+	o := outAllowlist{RegexTarget: a.RegexTarget, StopWords: a.StopWords,
+		HasPaths: len(a.Paths) > 0, HasCommits: len(a.Commits) > 0}
+	if a.MatchCondition == config.AllowlistMatchAnd {
+		o.MatchCondition = "AND"
+	}
+	for _, re := range a.Regexes {
+		if len(keyRuns(re.String())) == 0 {
+			o.Regexes = append(o.Regexes, re.String())
+		}
+	}
+	o.StopWords = slices.DeleteFunc(slices.Clone(o.StopWords), keyShapedStop)
+	return o
+}
+
+func writeJSON(path string, v any) {
+	f, err := os.Create(path)
+	if err != nil {
+		logging.Fatal().Err(err).Msg("create")
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", " ")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		logging.Fatal().Err(err).Msg("encode")
+	}
+}
+
+// exportRules writes <dir>/rules.json.
+func exportRules(rules map[string]config.Rule, version, dir string) {
+	out := outRules{Version: version, Global: []outAllowlist{}}
+	for _, a := range base.CreateGlobalConfig().Allowlists {
+		o := allowlist(a)
+		sort.Strings(o.StopWords)
+		out.Global = append(out.Global, o)
+	}
+	ids := make([]string, 0, len(rules))
+	for id := range rules {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		r := rules[id]
+		// Path-only rules match file names, and composite rules only add context to other rules.
+		if r.Regex == nil || len(r.RequiredRules) > 0 || r.SkipReport {
+			continue
+		}
+		or := outRule{ID: id, Regex: breakLiterals(r.Regex.String()), SecretGroup: r.SecretGroup, Entropy: r.Entropy, Keywords: r.Keywords}
+		sort.Strings(or.Keywords)
+		for _, a := range r.Allowlists {
+			// An allowlist that held only key-shaped examples is empty now and is left out.
+			if o := allowlist(a); len(o.Regexes)+len(o.StopWords) > 0 || o.HasPaths || o.HasCommits {
+				or.Allowlists = append(or.Allowlists, o)
+			}
+		}
+		out.Rules = append(out.Rules, or)
+	}
+	writeJSON(dir+"/rules.json", out)
+}

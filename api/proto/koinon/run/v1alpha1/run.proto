@@ -143,6 +143,8 @@ message RunEvent {
   string kind = 3;
   google.protobuf.Struct payload = 4;
   google.protobuf.Timestamp created_at = 5;
+  // True when the org's retention has passed and the payload was removed; the event itself stays.
+  bool content_purged = 6;
 }
 
 // GetRunRequest names a run.

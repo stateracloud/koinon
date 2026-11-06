@@ -10,13 +10,25 @@
 # never deleted. Mirrors for humans (assignee, Project Status, one marked comment) are best effort:
 # the ref is the truth.
 #
+# Claim classes (ADR 0094 decision 1): an agent claim (`take`, 2 h lease, holder
+# `<login>/<host>/<session>[#lane]`), a person claim (`take --human`, holder `<login>/<host>/human`, or a
+# maintainer's `/claim` comment, holder `<login>/github/human`; 3 days) and an outsider claim (an outside
+# contributor's `/claim` comment, holder `<login>/github/outsider`; 14 days, at most 2 per login, only
+# on `good first issue` and `help wanted` issues).
+#
 # Usage:
-#   claim.sh next [--label L]         Ready, agent-ok, current-milestone, unblocked, unclaimed issues
+#   claim.sh next [--label L]         Ready (or In Progress/In Review without a claim), agent-ok,
+#                                     current-milestone, unblocked issues with no held claim, no open
+#                                     pull request that closes them and no assignee but your human
 #   claim.sh take <N>... [--takeover] [--human] [--lane L]
 #                                     claim issue(s) N as one unit (several only for one PR that
 #                                     closes them all). --takeover: the holder is dead (lease and
-#                                     PR activity + grace). --human: a 3-day claim by a person.
-#                                     --lane L: claim in lane L (see Lanes below).
+#                                     PR activity + grace, by the lease of the holder's class).
+#                                     --human: a 3-day claim by a person. --lane L: claim in lane L
+#                                     (see Lanes below). Refused (exit 2) while someone else holds
+#                                     it, another author's open pull request closes it or someone
+#                                     other than your human is assigned; your human's own open pull
+#                                     request is linked as the claim's pr.
 #   claim.sh beat <N>... [--pr P] [--lane L]
 #                                     extend the lease (every 30 min and before long steps; PR
 #                                     pushes alone are not liveness). Human claims: daily.
@@ -50,6 +62,14 @@
 #                                     pull requests add
 #   claim.sh sensitive-paths          the ruleset patterns for CODEOWNERS' sensitive section
 #   claim.sh sweep | check-pr <PR> | release-pr <PR> | update-oldest     (used by claims.yml, updater.yml)
+#                                     check-pr fails only on a conflict: someone else's human holds a
+#                                     live claim on an issue the PR closes, or reserved an ADR number
+#                                     the PR adds a file under (ADR 0094 decision 2)
+#   claim.sh comment <N>              (used by claim-comment.yml) run the /claim or /release comment in
+#                                     KOINON_CLAIM_COMMENT_BODY by KOINON_CLAIM_COMMENT_LOGIN on issue
+#                                     N; every refusal is answered on the issue, and a write GitHub
+#                                     refuses (401/403) points the commenter to a pull request, opens
+#                                     one Backlog issue for the maintainers and exits 0
 #
 # Lanes (ADR 0082, amendment):
 #   The session cap is one claim per (session, lane). A session that runs several agents at once,
@@ -86,6 +106,8 @@
 #   KOINON_CLAIM_LANE           the lane (same as --lane)
 #   KOINON_CLAIM_WAIT_INTERVAL  poll interval of wait-release in seconds (30)
 #   _STALE_RELEASE_SECONDS (7200: the sweeper releases this long after the lease ran out)
+#   _OUTSIDER_LEASE_SECONDS (1209600), _OUTSIDER_CAP (2), _OUTSIDER_WARN_SECONDS (345600: the
+#   sweeper reminds an outsider this long before the claim runs out, day 10 of 14)
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -99,7 +121,15 @@ GRACE=${KOINON_CLAIM_GRACE_SECONDS:-900}
 HUMAN_CAP=${KOINON_CLAIM_HUMAN_CAP:-8}
 SESSION_CAP=${KOINON_CLAIM_SESSION_CAP:-1}
 RELEASE_AFTER=${KOINON_CLAIM_STALE_RELEASE_SECONDS:-7200}
+OUTSIDER_LEASE=${KOINON_CLAIM_OUTSIDER_LEASE_SECONDS:-1209600}
+OUTSIDER_CAP=${KOINON_CLAIM_OUTSIDER_CAP:-2}
+OUTSIDER_WARN=${KOINON_CLAIM_OUTSIDER_WARN_SECONDS:-345600}
+# The labels that open an issue to outsider claims (ADR 0094 decision 1).
+OUTSIDER_LABELS='["good first issue","help wanted"]'
+# The fixed title of the one Backlog issue the write-refused fallback opens (deduplicated by it).
+FALLBACK_TITLE='Comment claims: GitHub refused the claim write for an outside contributor'
 MARKER='<!-- koinon-claim -->'
+REMINDER_MARKER='<!-- koinon-claim-reminder'
 EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
 
 # ---------------------------------------------------------------------------------------------
@@ -210,31 +240,13 @@ split_globals() {
   return 0
 }
 
-# title_exempt TITLE: chore, ci and build(deps) titles may skip a claim (only when the pull request
-# touches no code, see pr_touches_code: the title alone is spoofable).
-title_exempt() { [[ $1 =~ ^(chore|ci)(\([^\)]*\))?!?: || $1 =~ ^build\(deps(-dev)?\)!?: ]]; }
-
-# is_dependabot AUTHOR_LOGIN: by actor, never by title.
-is_dependabot() { [[ $1 =~ ^(app/)?dependabot(\[bot\])?$ ]]; }
-
-# pr_touches_code: reads changed file names on stdin; exit 0 when any is source a claim must cover.
-# lower S: S in lower case. The PR check compares logins with it; without it both sides were empty
-# and any author passed.
+# lower S: S in lower case. Logins are compared with it (GitHub logins are case-insensitive).
 lower() { printf '%s' "${1,,}"; }
-
-pr_touches_code() {
-  grep -qE '\.(go|ts|tsx|js|jsx|mjs|proto|sql|py|sh|yaml|yml|tpl|css)$|^go\.(mod|sum)$|(^|/)(Dockerfile|Makefile)$|^charts/' || return 1
-}
-
-# humans_list FILE: the @logins on the `*` line of CODEOWNERS, lower case, one per line.
-humans_list() {
-  [[ -r $1 ]] || return 0
-  grep -E '^\*[[:space:]]' "$1" | head -1 | tr -s ' \t' '\n' | grep '^@' | sed 's/^@//' | tr '[:upper:]' '[:lower:]' || true
-}
 
 # same_holder A B: same login, session and lane (the host name can change, e.g. macOS hostname -s).
 same_holder() {
-  [[ $(holder_login "$1") == "$(holder_login "$2")" && $(holder_key "$1") == "$(holder_key "$2")" ]]
+  # GitHub logins are case-insensitive; the host/session key is not.
+  [[ $(lower "$(holder_login "$1")") == "$(lower "$(holder_login "$2")")" && $(holder_key "$1") == "$(holder_key "$2")" ]]
 }
 
 # parse_lease LEASE_UNTIL -> epoch, or fail on anything that is not RFC 3339 UTC.
@@ -249,13 +261,137 @@ is_lost_race() {
   [[ $1 == *"Reference already exists"* || $1 == *"not a fast forward"* || $1 == *"Reference cannot be updated"* ]]
 }
 
-# lease_for_holder HOLDER -> lease seconds (human claims are `<login>/<host>/human`).
-lease_for_holder() { if [[ $(holder_session "$1") == human ]]; then echo "$HUMAN_LEASE"; else echo "$LEASE"; fi; }
+# holder_class HOLDER -> agent | person | outsider (ADR 0094 decision 1). Person claims are
+# `<login>/<host>/human` (take --human) and `<login>/github/human` (/claim by a maintainer); outsider
+# claims are `<login>/github/outsider`. Session ids are never `human` or `outsider` (my_base_holder).
+holder_class() {
+  case $(holder_session "$1") in
+    human) echo person ;;
+    outsider) echo outsider ;;
+    *) echo agent ;;
+  esac
+}
+
+# lease_for_holder HOLDER -> lease seconds of the holder's class.
+lease_for_holder() {
+  case $(holder_class "$1") in
+    person) echo "$HUMAN_LEASE" ;;
+    outsider) echo "$OUTSIDER_LEASE" ;;
+    *) echo "$LEASE" ;;
+  esac
+}
+
+# stale_after HOLDER -> seconds after liveness at which the sweeper marks the claim stale: the grace
+# for agents and people, none for outsiders (they were reminded 4 days before, ADR 0094 decision 3).
+stale_after() { if [[ $(holder_class "$1") == outsider ]]; then echo 0; else echo "$GRACE"; fi; }
 
 # closing_issues BODY -> issue numbers named by closing keywords, one per line.
 closing_issues() {
   printf '%s\n' "$1" | grep -oiE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[: ]+#[0-9]+' | grep -oE '[0-9]+$' | sort -un || true
 }
+
+# claim_verdict STATE HUMAN AUTHOR NOW LIVE PR_STATE -> free | own | stale | conflict: what a claim
+# means for a pull request by AUTHOR (ADR 0094 decision 2). Live is `held` and not what the sweeper
+# would release now: a claim whose pull request is ready for review is never swept, one whose pull
+# request closed is released, any other is released RELEASE_AFTER after its liveness (LIVE).
+claim_verdict() {
+  local state=$1 human=$2 author=$3 now=$4 live=$5 prs=$6
+  if [[ $state != held ]]; then echo free; return; fi
+  if [[ $(lower "$human") == "$(lower "$author")" ]]; then echo own; return; fi
+  if [[ $prs == closed ]]; then echo stale; return; fi
+  if [[ $prs != ready ]] && ((now > live + RELEASE_AFTER)); then echo stale; return; fi
+  echo conflict
+}
+
+# The fixed failure texts of the `claim` check (ADR 0094 decision 2). hack/claim_test.sh pins them:
+# outsiders and agents match on them.
+# conflict_issue_text N HUMAN UNTIL PR AUTHOR RELEASE_AT (PR "" = no pull request yet)
+conflict_issue_text() {
+  local pr="no pull request yet"
+  [[ -z $4 ]] || pr="pull request #$4"
+  printf '::error::#%s is claimed by @%s until %s (%s); this pull request is by @%s. Ask @%s on #%s to comment /release, or ask a maintainer. If the claim goes stale the sweeper frees it at %s, and this check runs again when it does.\n' \
+    "$1" "$2" "$3" "$pr" "$5" "$2" "$1" "$6"
+}
+# conflict_adr_text PATH NNNN HUMAN LEASE
+conflict_adr_text() {
+  printf '::error::%s uses ADR number %s, which @%s reserved (claim/adr-%s) until %s. Take a free number with hack/claim.sh adr (a maintainer can do it for you) and rename the file.\n' \
+    "$1" "$2" "$3" "$2" "$4"
+}
+
+# comment_command BODY -> claim | release | nothing: a comment is a command only when its first line
+# is exactly /claim or /release (ADR 0094 decision 1).
+comment_command() {
+  local first=${1%%$'\n'*}
+  first=${first%$'\r'}
+  if [[ $first =~ ^/(claim|release)[[:space:]]*$ ]]; then echo "${BASH_REMATCH[1]}"; fi
+}
+
+# perm_class PERMISSION -> person | outsider: the `permission` of collaborators/{login}/permission.
+perm_class() { case $1 in admin | maintain | write) echo person ;; *) echo outsider ;; esac; }
+
+# comment_holder LOGIN CLASS -> the holder a comment claim writes.
+comment_holder() { if [[ $2 == person ]]; then echo "$1/github/human"; else echo "$1/github/outsider"; fi; }
+
+# is_denied OUTPUT: GitHub refused a write for lack of permission (the comment fallback's trigger): HTTP
+# 401 or 403, or GraphQL's "Resource not accessible". Only those: a ruleset refusal is a 422 whose text
+# can say "permission", and answering it as a read-only token would hide a real failure.
+is_denied() {
+  [[ $1 == *"HTTP 401"* || $1 == *"HTTP 403"* || $1 == *"Resource not accessible"* ]]
+}
+
+# The answers of the comment commands (refusals are always answered, never silent).
+# shellcheck disable=SC2016
+text_held() { printf '@%s #%s is claimed by @%s until %s, so it cannot be claimed now. Ask @%s to comment `/release`, or ask a maintainer.\n' "$1" "$2" "$3" "$4" "$3"; }
+text_closed() { printf '@%s #%s is closed; there is nothing to claim.\n' "$1" "$2"; }
+# shellcheck disable=SC2016
+text_label() { printf '@%s maintainers have not opened #%s to outside claims (it has neither the `good first issue` nor the `help wanted` label). A pull request that says `Closes #%s` is welcome anyway.\n' "$1" "$2" "$2"; }
+# shellcheck disable=SC2016
+text_cap() { printf '@%s you already hold %s live claim(s), the cap is %s: %s. Finish one or comment `/release` on it first.\n' "$1" "$2" "$3" "$4"; }
+# shellcheck disable=SC2016
+text_race() { printf '@%s another claim on #%s was written at the same moment; comment `/claim` again to retry.\n' "$1" "$2"; }
+text_no_claim() { printf '@%s #%s has no held claim; there is nothing to release.\n' "$1" "$2"; }
+text_release_refused() { printf '@%s only @%s (whose claim it is) or a maintainer can release #%s.\n' "$1" "$2" "$3"; }
+# shellcheck disable=SC2016
+text_fallback() { printf '@%s comment claims are not available for outside contributors yet; open a pull request that says Closes #%s instead. An open pull request already makes agents skip this issue.\n' "$1" "$2"; }
+# shellcheck disable=SC2016
+text_unassignable() { printf 'GitHub did not allow assigning @%s (only collaborators, org members with read access and people who commented here can be assigned); the claim is recorded in the ref `claim/%s`.\n' "$1" "$2"; }
+
+# renew_hint CLASS N -> how the holder of that class keeps or ends the claim (sweeper messages).
+# shellcheck disable=SC2016
+renew_hint() {
+  case $1 in
+    person) printf 'If the work continues, comment `/claim` (or run `hack/claim.sh beat %s --human`); otherwise comment `/release`.' "$2" ;;
+    outsider) printf 'If the work continues, comment `/claim` or push to your pull request; otherwise comment `/release`.' ;;
+    *) printf 'If the work continues, run `hack/claim.sh beat %s`; otherwise `hack/claim.sh release %s --note ...`.' "$2" "$2" ;;
+  esac
+}
+
+# JQ_PR_CLOSERS: the open pull requests (GraphQL pages, slurped) as [{number, author, issues}], issues
+# being what the pull request closes: GitHub's closingIssuesReferences in this repository plus the
+# closing keywords of its body (the claim check reads the body).
+# shellcheck disable=SC2016
+JQ_PR_CLOSERS='[.[].data.repository.pullRequests.nodes[]
+  | {number, author: (.author.login // ""),
+     issues: ([(.closingIssuesReferences.nodes // [])[] | select(.repository.nameWithOwner == $repo) | .number]
+              + [(.body // "") | scan("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[: ]+#([0-9]+)\\b") | .[0] | tonumber]
+              | unique)}]'
+
+# JQ_NEXT: the pickable items of the board pages (slurped), sorted by priority then age. Args: $repo,
+# $ms, $label, $held (issue numbers with a held claim), $prs (issue numbers an open pull request
+# closes), $human (the caller's human). In Progress and In Review count as Ready when nothing holds
+# the issue: the bots make no board writes, so a released claim can leave the item there (ADR 0094
+# decision 3).
+# shellcheck disable=SC2016
+JQ_NEXT='[.[].data.organization.projectV2.items.nodes[]
+  | select(.content.number != null and .content.state == "OPEN" and .content.repository.nameWithOwner == $repo)
+  | select(.status.name // "" | IN("Ready", "In Progress", "In Review"))
+  | select([.content.labels.nodes[].name] | index("agent-ok"))
+  | select($ms == "" or .content.milestone.title == $ms)
+  | select($label == "" or ([.content.labels.nodes[].name] | index($label)))
+  | select(.content.number as $n | ($held | index($n) | not) and ($prs | index($n) | not))
+  | select([(.content.assignees.nodes // [])[].login | ascii_downcase] | all(. == ($human | ascii_downcase)))
+  | {n: .content.number, p: (.priority.name // ""), c: (.component.name // ""), t: .content.title, at: .content.createdAt}]
+  | sort_by([(.p | rank), .at])'
 
 # JQ_PRIORITY: sort key for `next`: P0..P3, anything else last.
 # shellcheck disable=SC2016
@@ -279,6 +415,8 @@ init_repo() {
 
 # gh_try ARGS...: run `gh api`, keep output in TRY_OUT and exit status in TRY_RC.
 TRY_OUT=
+# CLOSERS: open_pr_closers of this `take` (JSON), read by take_one.
+CLOSERS="[]"
 TRY_RC=0
 gh_try() {
   TRY_RC=0
@@ -313,6 +451,7 @@ my_base_holder() {
   login=$(human_login)
   if ((HUMAN_MODE)); then echo "$login/$(host_short)/human"; return; fi
   s=${KOINON_AGENT_SESSION:-${CLAUDE_CODE_SESSION_ID:-}}
+  if [[ $s == human || $s == outsider ]]; then echo "claim: the session id '$s' names a claim class; pick another KOINON_AGENT_SESSION" >&2; return 1; fi
   if [[ -n $s ]]; then echo "$login/$(host_short)/${s//[^A-Za-z0-9._-]/-}"; return; fi
   gd=$(git rev-parse --git-dir 2>/dev/null) || { echo "claim: no session id: export KOINON_AGENT_SESSION" >&2; return 1; }
   f=$gd/koinon-claim-holder
@@ -334,8 +473,9 @@ read_claim() {
     query($o:String!,$n:String!,$q:String!){repository(owner:$o,name:$n){ref(qualifiedName:$q){target{... on Commit{oid message}}}}}' \
     --jq '.data.repository.ref.target // empty | [.oid, .message] | @json') || { echo "claim: cannot read claim/$1" >&2; return 4; }
   [[ -n $out ]] || return 1
-  jq -c --argjson n "$1" "$JQ_PARSE"'
-    . as [$sha, $msg] | ($msg | claim_parse) + {issue: $n, sha: $sha}' <<<"$out" || return 4
+  # N is an issue number, or adr-NNNN for an ADR number reservation (issue stays that string).
+  jq -c --arg n "$1" "$JQ_PARSE"'
+    . as [$sha, $msg] | ($msg | claim_parse) + {issue: ($n | tonumber? // $n), sha: $sha}' <<<"$out" || return 4
 }
 
 # load_claim N: sets C and returns read_claim's code; code 4 dies (exit 1), never "lost".
@@ -360,13 +500,20 @@ list_claims() {
 
 # write_claim ISSUE STATE HOLDER HUMAN LEASE PR NOTE [PARENT_SHA] [RELEASED_BY]
 # Creates the commit, then the ref (no parent) or fast-forwards it. Returns 0 won, 1 lost the
-# compare-and-set; any other failure (including other 422s, e.g. a ruleset) dies.
+# compare-and-set; any other failure (including other 422s, e.g. a ruleset) dies. With CLAIM_SOFT_DENY
+# set (the comment commands), a write GitHub refuses for lack of permission returns 5 instead of dying.
+CLAIM_SOFT_DENY=
 write_claim() {
   local issue=$1 parent=${8:-} msg sha
   msg=$(claim_format "$issue" "$2" "$3" "$4" "$5" "$6" "$7" "${9:-}")
   local args=(-X POST "repos/$REPO/git/commits" -f "message=$msg" -f "tree=$EMPTY_TREE")
   [[ -z $parent ]] || args+=(-f "parents[]=$parent")
-  sha=$(gh api "${args[@]}" --jq .sha) || die "cannot create the claim commit"
+  gh_try "${args[@]}" --jq .sha
+  if ((TRY_RC != 0)); then
+    if [[ -n $CLAIM_SOFT_DENY ]] && is_denied "$TRY_OUT"; then return 5; fi
+    die "cannot create the claim commit: $TRY_OUT"
+  fi
+  sha=$TRY_OUT
   if [[ -z $parent ]]; then
     gh_try -X POST "repos/$REPO/git/refs" -f "ref=refs/heads/claim/$issue" -f "sha=$sha"
   else
@@ -374,19 +521,54 @@ write_claim() {
   fi
   if ((TRY_RC == 0)); then return 0; fi
   if [[ $TRY_OUT == *"HTTP 422"* ]] && is_lost_race "$TRY_OUT"; then return 1; fi
+  if [[ -n $CLAIM_SOFT_DENY ]] && is_denied "$TRY_OUT"; then return 5; fi
   die "claim write failed: $TRY_OUT"
 }
 
-# issue_json N -> {number,state,title,labels[],milestone}
+# issue_json N -> {number,state,title,pull,labels[],assignees[],milestone}
 issue_json() {
   gh api "repos/$REPO/issues/$1" --jq '{number, state, title, pull: (.pull_request != null),
-    labels: [.labels[].name], milestone: (.milestone.title // "")}'
+    labels: [.labels[].name], assignees: [.assignees[]?.login], milestone: (.milestone.title // "")}'
 }
 
-# find_pr N -> number of the open PR whose body closes issue N (empty if none).
+# find_pr N [AUTHOR] -> number of the open PR whose body closes issue N (empty if none); with AUTHOR,
+# only a pull request by that login (a claim links and draws liveness only from its own human's).
 find_pr() {
-  gh pr list -R "$REPO" --state open --limit 100 --json number,body |
-    jq -r --arg n "$1" '.[] | select(.body // "" | test("(?i)\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[: ]+#" + $n + "\\b")) | .number' | head -1
+  gh pr list -R "$REPO" --state open --limit 100 --json number,body,author |
+    jq -r --arg n "$1" --arg a "$(lower "${2:-}")" '.[] | select(.body // "" | test("(?i)\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[: ]+#" + $n + "\\b"))
+      | select($a == "" or ((.author.login // "") | ascii_downcase) == $a) | .number' | head -1
+}
+
+# open_pr_closers -> the open pull requests as JSON [{number, author, issues}] (JQ_PR_CLOSERS). An API
+# error fails: `next` and `take` must not hand out an issue from a partial view.
+open_pr_closers() {
+  local pages
+  # shellcheck disable=SC2016
+  pages=$(gh api graphql --paginate -f o="$OWNER" -f n="$NAME" -f query='
+    query($o:String!,$n:String!,$endCursor:String){repository(owner:$o,name:$n){
+      pullRequests(states:OPEN,first:50,after:$endCursor){pageInfo{hasNextPage endCursor}
+        nodes{number body author{login} closingIssuesReferences(first:25){nodes{number repository{nameWithOwner}}}}}}}' | jq -s .) || return 1
+  jq -c --arg repo "$REPO" "$JQ_PR_CLOSERS" <<<"$pages"
+}
+
+# pr_conflicts CLOSERS N HUMAN [PREV_HUMAN] -> "#P by @author" for each open pull request that closes
+# N and is by neither HUMAN nor PREV_HUMAN (the human of a dead claim being taken over), one per line.
+pr_conflicts() {
+  jq -r --argjson n "$2" --arg h "$(lower "$3")" --arg p "$(lower "${4:-}")" '
+    .[] | select(.issues | index($n)) | select((.author | ascii_downcase) as $a | $a != $h and ($p == "" or $a != $p))
+    | "#\(.number) by @\(.author)"' <<<"$1"
+}
+
+# own_pr CLOSERS N HUMAN -> the first open pull request by HUMAN that closes N (empty if none).
+own_pr() {
+  jq -r --argjson n "$2" --arg h "$(lower "$3")" '
+    [.[] | select((.issues | index($n)) and (.author | ascii_downcase) == $h) | .number] | first // empty' <<<"$1"
+}
+
+# other_assignees ISSUE_JSON HUMAN [PREV_HUMAN] -> the assignees that are neither, space separated.
+other_assignees() {
+  jq -r --arg h "$(lower "$2")" --arg p "$(lower "${3:-}")" '
+    [(.assignees // [])[] | select((ascii_downcase) as $a | $a != $h and ($p == "" or $a != $p)) | "@" + .] | join(" ")' <<<"$1"
 }
 
 # open_prs_closing N -> every open PR number that closes issue N.
@@ -405,7 +587,8 @@ claim_liveness() {
   n=$(jq -r .issue <<<"$c"); holder=$(jq -r .holder <<<"$c")
   LIVE=$lease_s; PR_STATE=none; PR_NUM=
   pr=$(jq -r .pr <<<"$c")
-  if [[ -z $pr ]]; then pr=$(find_pr "$n") || return 4; fi
+  # Only a pull request of the claim's own human is the claim's activity.
+  if [[ -z $pr ]]; then pr=$(find_pr "$n" "$(jq -r .human <<<"$c")") || return 4; fi
   [[ -n $pr ]] || return 0
   PR_NUM=$pr
   gh_try "repos/$REPO/pulls/$pr"
@@ -511,6 +694,14 @@ rerun_claim_check() {
   [[ -z $id ]] || gh run rerun "$id" -R "$REPO" --failed >/dev/null 2>&1 || true
 }
 
+# rerun_checks_for_issue N: after a claim changed (released, claimed by comment), re-run the failed
+# `claim` check of every open pull request that closes N (best effort; needs actions: write in CI).
+rerun_checks_for_issue() {
+  local p
+  for p in $(open_prs_closing "$1" 2>/dev/null || true); do rerun_claim_check "$p"; done
+  return 0
+}
+
 # ---------------------------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------------------------
@@ -519,7 +710,7 @@ active_counts() { # CLAIMS_JSON NOW HUMAN KEY -> "human_count key_count"; KEY is
   jq -r --argjson now "$2" --arg h "$3" --arg s "$4" '
     [.[] | select(.state == "held" and (.lease_until | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$")))] as $held
     | ($held | map(select((.lease_until | fromdateiso8601) >= $now))) as $act
-    | "\($act | map(select(.human == $h)) | length) \($act | map(select((.holder | split("/") | last) == $s and $s != "human")) | length)"' <<<"$1"
+    | "\($act | map(select(.human == $h)) | length) \($act | map(select((.holder | split("/") | last) == $s and ($s | IN("human", "outsider") | not))) | length)"' <<<"$1"
 }
 
 # held_by_key CLAIMS_JSON NOW KEY -> the active claims of that session and lane, one per line:
@@ -528,8 +719,19 @@ held_by_key() {
   jq -r --argjson now "$2" --arg s "$3" '
     .[] | select(.state == "held" and (.lease_until | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$"))
                  and (.lease_until | fromdateiso8601) >= $now
-                 and (.holder | split("/") | last) == $s and $s != "human")
+                 and (.holder | split("/") | last) == $s and ($s | IN("human", "outsider") | not))
     | "#\(.issue)" + (if .pr != "" then " (PR #\(.pr))" else "" end)' <<<"$1"
+}
+
+# live_claims_of CLAIMS_JSON NOW LOGIN [CLASS] -> "#N" for each held claim of human LOGIN whose lease
+# has not run out, only of holder class CLASS when given; one per line (the comment caps).
+live_claims_of() {
+  jq -r --argjson now "$2" --arg l "$(lower "$3")" --arg cls "${4:-}" '
+    .[] | select(.state == "held" and (.human | ascii_downcase) == $l
+                 and (.lease_until | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$")) and (.lease_until | fromdateiso8601) >= $now
+                 and ($cls == "" or ((.holder | split("/") | last) as $k
+                      | if $cls == "outsider" then $k == "outsider" elif $cls == "person" then $k == "human" else ($k != "human" and $k != "outsider") end)))
+    | "#\(.issue)"' <<<"$1"
 }
 
 cmd_limits() {
@@ -571,8 +773,12 @@ cmd_next() {
   if [[ -z $ms ]]; then
     ms=$(gh api "repos/$REPO/milestones?state=open" --jq 'sort_by(.due_on // "9999", .number) | .[0].title // empty')
   fi
+  local human closers prs
+  human=$(human_login)
   claims=$(list_claims)
   held=$(jq -c '[.[] | select(.state == "held") | .issue]' <<<"$claims")
+  closers=$(open_pr_closers) || die "cannot list the open pull requests (API error); retry"
+  prs=$(jq -c '[.[].issues[]] | unique' <<<"$closers")
   # shellcheck disable=SC2016
   json=$(gh api graphql --paginate -f o="$PROJECT_OWNER" -F n="$PROJECT" -f query='
     query($o:String!,$n:Int!,$endCursor:String){organization(login:$o){projectV2(number:$n){
@@ -581,17 +787,9 @@ cmd_next() {
         priority:fieldValueByName(name:"Priority"){... on ProjectV2ItemFieldSingleSelectValue{name}}
         component:fieldValueByName(name:"Component"){... on ProjectV2ItemFieldSingleSelectValue{name}}
         content{... on Issue{number title state createdAt repository{nameWithOwner} milestone{title}
-          labels(first:50){nodes{name}}}}}}}}}' |
-    jq -s --arg repo "$REPO" --arg ms "$ms" --arg label "$label" --argjson held "$held" "$JQ_RANK"'
-      [.[].data.organization.projectV2.items.nodes[]
-        | select(.content.number != null and .content.state == "OPEN" and .content.repository.nameWithOwner == $repo)
-        | select(.status.name == "Ready")
-        | select([.content.labels.nodes[].name] | index("agent-ok"))
-        | select($ms == "" or .content.milestone.title == $ms)
-        | select($label == "" or ([.content.labels.nodes[].name] | index($label)))
-        | select(.content.number as $n | $held | index($n) | not)
-        | {n: .content.number, p: (.priority.name // ""), c: (.component.name // ""), t: .content.title, at: .content.createdAt}]
-      | sort_by([(.p | rank), .at])')
+          labels(first:50){nodes{name}} assignees(first:10){nodes{login}}}}}}}}}' |
+    jq -s --arg repo "$REPO" --arg ms "$ms" --arg label "$label" --argjson held "$held" --argjson prs "$prs" \
+      --arg human "$human" "$JQ_RANK$JQ_NEXT")
   local n p c t blockers
   while IFS=$'\037' read -r n p c t; do
     blockers=$(gh api "repos/$REPO/issues/$n/dependencies/blocked_by" --jq '[.[] | select(.state == "open")] | length' 2>/dev/null || echo 0)
@@ -612,17 +810,27 @@ warn_area_overlap() { # N CLAIMS_JSON NOW
   done
 }
 
-# dead_holder_check N CLAIM_JSON NOW: the one dead-holder rule of `take --takeover` and `adopt`.
+# holder_desc CLAIM_JSON CALLER_HUMAN -> who holds a claim, for messages: the full holder for an agent
+# claim of the caller's own human (its sessions), else the human and the class, never the session.
+holder_desc() {
+  local holder human cls
+  holder=$(jq -r .holder <<<"$1"); human=$(jq -r .human <<<"$1"); cls=$(holder_class "$holder")
+  if [[ $cls == agent && $(lower "$human") == "$(lower "$2")" ]]; then echo "$holder"; else echo "@$human ($cls claim)"; fi
+}
+
+# dead_holder_check N CLAIM_JSON NOW [CALLER_HUMAN]: the one dead-holder rule of `take --takeover`,
+# `adopt` and a /claim over a dead claim, with the lease of the holder's class (ADR 0094 decision 5).
 # 0: the holder is dead and the claim may be taken over (LIVE is set); 2: refused, reason printed
 # (the holder is alive or in grace, its liveness is unknown, or a pull request is ready for review).
 dead_holder_check() {
-  local n=$1 existing=$2 now=$3
+  local n=$1 existing=$2 now=$3 who
+  who=$(holder_desc "$existing" "${4:-}")
   if ! claim_liveness "$existing"; then
-    echo "claim: #$n: cannot judge liveness of $(jq -r .holder <<<"$existing") (unparsable lease or API error); not taking it" >&2; return 2
+    echo "claim: #$n: cannot judge liveness of $who (unparsable lease or API error); not taking it" >&2; return 2
   fi
   case $(claim_status held "$LIVE" "$now") in
     active | grace)
-      echo "claim: #$n is held by $(jq -r .holder <<<"$existing"), alive until $(epoch_to_iso "$LIVE") (takeover after +${GRACE}s grace). Pick another issue." >&2; return 2 ;;
+      echo "claim: #$n is held by $who, alive until $(epoch_to_iso "$LIVE") (takeover after +${GRACE}s grace). Pick another issue." >&2; return 2 ;;
   esac
   if [[ $PR_STATE == ready ]]; then
     echo "claim: #$n has an open pull request #$PR_NUM that is ready for review; ask $(jq -r .human <<<"$existing") to release it" >&2; return 2
@@ -646,15 +854,26 @@ take_one() {
         echo "#$n is already yours; extending the lease"
         beat_one "$n" ""; return
       fi
-      dead_holder_check "$n" "$existing" "$now" || return 2
+      dead_holder_check "$n" "$existing" "$now" "$human" || return 2
       if ((!takeover)); then echo "claim: #$n's holder is dead (since $(epoch_to_iso "$LIVE")); use: take $n --takeover" >&2; return 2; fi
       prev_human=$(jq -r .human <<<"$existing")
     fi
   elif ((takeover)); then
     echo "#$n has no claim; taking it normally"
   fi
+  # ADR 0094 decision 5: an open pull request by another author, or another assignee, is someone's
+  # work in flight (a takeover excuses those of the dead claim's own human).
+  local conflicts others
+  conflicts=$(pr_conflicts "$CLOSERS" "$n" "$human" "$prev_human" | paste -sd, - | sed 's/,/, /g')
+  if [[ -n $conflicts ]]; then
+    echo "claim: #$n has an open pull request by someone else: $conflicts. Pick another issue." >&2; return 2
+  fi
+  others=$(other_assignees "$issue" "$human" "$prev_human")
+  if [[ -n $others ]]; then
+    echo "claim: #$n is assigned to $others (an assignee is a person's claim). Pick another issue." >&2; return 2
+  fi
   lease_until=$(epoch_to_iso $((now + $(lease_for_holder "$holder"))))
-  pr=$(find_pr "$n")
+  pr=$(own_pr "$CLOSERS" "$n" "$human")
   if ! write_claim "$n" held "$holder" "$human" "$lease_until" "$pr" "" "$parent"; then
     echo "claim: lost the race for #$n: another session claimed it first. Pick another issue." >&2; return 2
   fi
@@ -689,6 +908,7 @@ cmd_take() {
   if ((${counts% *} + ${#issues[@]} > HUMAN_CAP)); then
     CLAIM_EXIT=2 die "$human holds ${counts% *} claims; ${#issues[@]} more would pass the cap of $HUMAN_CAP."
   fi
+  CLOSERS=$(open_pr_closers) || die "cannot list the open pull requests (API error); retry, nothing was claimed"
   for n in "${issues[@]}"; do
     rc=0
     take_one "$n" "$takeover" "$holder" "$human" "$claims" "$now" || rc=$?
@@ -734,7 +954,7 @@ beat_one() { # N PR_OVERRIDE
   require_mine "$n"
   [[ -n $pr ]] || pr=$(jq -r .pr <<<"$C")
   if [[ -n $pr ]] && ! pr_is_open "$pr"; then pr=""; fi
-  [[ -n $pr ]] || pr=$(find_pr "$n")
+  [[ -n $pr ]] || pr=$(find_pr "$n" "$HUMAN")
   lease_until=$(epoch_to_iso $((NOW + $(lease_for_holder "$HOLDER"))))
   note=$(jq -r .note <<<"$C")
   if ! write_claim "$n" held "$HOLDER" "$HUMAN" "$lease_until" "$pr" "$note" "$(jq -r .sha <<<"$C")"; then
@@ -936,7 +1156,7 @@ cmd_adopt() {
   for i in "${!plan_n[@]}"; do
     n=${plan_n[$i]}; c=${plan_c[$i]}
     lease_until=$(epoch_to_iso $((now + $(lease_for_holder "${plan_h[$i]}"))))
-    pr=$(jq -r .pr <<<"$c"); [[ -n $pr ]] || pr=$(find_pr "$n")
+    pr=$(jq -r .pr <<<"$c"); [[ -n $pr ]] || pr=$(find_pr "$n" "$human")
     if ! write_claim "$n" held "${plan_h[$i]}" "$human" "$lease_until" "$pr" "adopted from $(jq -r .holder <<<"$c")" "$(jq -r .sha <<<"$c")"; then
       CLAIM_EXIT=2 die "#$n changed while adopting it (the holder woke up or another session adopted it first); re-read with show"
     fi
@@ -952,7 +1172,7 @@ cmd_review() {
   local pr lease_until
   pr=$(jq -r .pr <<<"$C")
   if [[ -n $pr ]] && ! pr_is_open "$pr"; then pr=""; fi
-  [[ -n $pr ]] || pr=$(find_pr "$n")
+  [[ -n $pr ]] || pr=$(find_pr "$n" "$HUMAN")
   [[ -n $pr ]] || warn "no open pull request closes #$n"
   lease_until=$(epoch_to_iso $((NOW + $(lease_for_holder "$HOLDER"))))
   write_claim "$n" held "$HOLDER" "$HUMAN" "$lease_until" "$pr" "in review" "$(jq -r .sha <<<"$C")" ||
@@ -971,9 +1191,10 @@ do_release_claim() {
   n=$(jq -r .issue <<<"$c")
   if [[ $(jq -r .state <<<"$c") == released ]]; then echo "#$n is already released"; return 0; fi
   human=$(jq -r .human <<<"$c"); now=$(server_now)
-  if ! write_claim "$n" released "$(jq -r .holder <<<"$c")" "$human" "$(epoch_to_iso "$now")" "$(jq -r .pr <<<"$c")" "$note" "$(jq -r .sha <<<"$c")" "$by"; then
-    echo "claim: #$n changed since it was read; not released" >&2; return 1
-  fi
+  local wrc=0
+  write_claim "$n" released "$(jq -r .holder <<<"$c")" "$human" "$(epoch_to_iso "$now")" "$(jq -r .pr <<<"$c")" "$note" "$(jq -r .sha <<<"$c")" "$by" || wrc=$?
+  if ((wrc == 5)); then return 5; fi
+  if ((wrc != 0)); then echo "claim: #$n changed since it was read; not released" >&2; return 1; fi
   echo "released #$n"
   drop_label "$n" claim:stale
   if ((!merged)) && [[ $(gh api "repos/$REPO/issues/$n" --jq .state 2>/dev/null) == open ]]; then
@@ -981,6 +1202,8 @@ do_release_claim() {
     set_status "$n" Ready || true
   fi
   upsert_comment "$n" "$(claim_comment released "$(jq -r .holder <<<"$c")" "$human" "" "$(jq -r .pr <<<"$c")" "$note")"
+  # A pull request whose `claim` check failed on this claim passes now (ADR 0094 decision 2).
+  rerun_checks_for_issue "$n"
 }
 
 cmd_release() {
@@ -1057,19 +1280,42 @@ sweep_one() {
     ready) echo "#$n: pull request #$PR_NUM is in review; skipping"; return 0 ;;
   esac
   labels=$(gh api "repos/$REPO/issues/$n/labels" --jq '.[].name' 2>/dev/null || true)
+  local cls
+  cls=$(holder_class "$holder")
   if ((now > LIVE + RELEASE_AFTER)); then
     echo "#$n: no activity since $(epoch_to_iso "$LIVE"); releasing"
     do_release_claim "$c" "released by the sweeper: no heartbeat or pull request activity" 0 sweeper || true
-  elif ((now > LIVE + GRACE)); then
+  elif ((now > LIVE + $(stale_after "$holder"))); then
     if ! grep -qxF claim:stale <<<"$labels"; then
       echo "#$n: stale; marking"
       add_label "$n" claim:stale
       upsert_comment "$n" "$(claim_comment held "$holder" "$human" "$(epoch_to_iso "$LIVE")" "$PR_NUM" "" \
-        "@$human the claim ran out at $(epoch_to_iso "$LIVE") with no heartbeat or pull request activity. If the work continues, run \`hack/claim.sh beat $n\`; otherwise \`hack/claim.sh release $n --note ...\`. The sweeper releases it at $(epoch_to_iso $((LIVE + RELEASE_AFTER))) and keeps the draft pull request.")"
+        "@$human the claim ran out at $(epoch_to_iso "$LIVE") with no heartbeat or pull request activity. $(renew_hint "$cls" "$n") The sweeper releases it at $(epoch_to_iso $((LIVE + RELEASE_AFTER))) and keeps the draft pull request.")"
     fi
-  elif grep -qxF claim:stale <<<"$labels"; then
-    drop_label "$n" claim:stale
+  else
+    if [[ $cls == outsider ]] && ((now > LIVE - OUTSIDER_WARN)); then
+      remind_once "$n" "$(jq -r .sha <<<"$c")" "$(reminder_text "$human" "$n" "$(epoch_to_iso "$LIVE")" "$(epoch_to_iso $((LIVE + RELEASE_AFTER)))")"
+    fi
+    if grep -qxF claim:stale <<<"$labels"; then drop_label "$n" claim:stale; fi
   fi
+  return 0
+}
+
+# reminder_text LOGIN N LIVE RELEASE_AT: the day-10 reminder of an outsider claim (ADR 0094 decision 3).
+# shellcheck disable=SC2016
+reminder_text() {
+  printf '@%s your claim on #%s runs out at %s (14 days without a push or comment on your pull request). Comment `/claim` to keep it, or `/release` to hand it back. Otherwise the sweeper releases it at %s; your pull request stays open.\n' "$1" "$2" "$3" "$4"
+}
+
+# remind_once N SHA BODY: post BODY as a new comment (a mention in an edited comment notifies no one),
+# once per claim commit: a renewal is a new commit and earns a new reminder.
+remind_once() {
+  local tag="$REMINDER_MARKER $2 -->" seen
+  seen=$(gh api --paginate "repos/$REPO/issues/$1/comments" --jq ".[] | select(.body | startswith(\"$tag\")) | .id" 2>/dev/null | head -1) ||
+    { warn "#$1: cannot read the comments; no reminder"; return 0; }
+  [[ -z $seen ]] || return 0
+  echo "#$1: outsider claim runs out within $((OUTSIDER_WARN / 86400)) days; reminding"
+  gh api -X POST "repos/$REPO/issues/$1/comments" -f "body=$tag"$'\n'"$3" >/dev/null 2>&1 || warn "cannot comment on #$1"
   return 0
 }
 
@@ -1108,55 +1354,218 @@ cmd_release_pr() {
   done
 }
 
-# unclaimed_ok_by_human PR HUMANS: the label's latest `labeled` event was made by one of the humans.
-# An agent running with a human's token is indistinguishable from that human; the label is reviewed
-# like any change to the pull request.
-unclaimed_ok_by_human() {
-  local actor
-  actor=$(gh api --paginate "repos/$REPO/issues/$1/events" \
-    --jq '.[] | select(.event == "labeled" and .label.name == "unclaimed-ok") | .actor.login' | tail -1 | tr '[:upper:]' '[:lower:]')
-  [[ -n $actor ]] && grep -qxF "$actor" <<<"$2"
+# pr_meta P -> {author, body} of pull request P (REST: the check runs on GITHUB_TOKEN).
+# pr_meta P -> {author, body, closers}: closers are the issues of this repository GitHub links pull
+# request P to as closed by it (closingIssuesReferences: a closing keyword in the body in any form,
+# owner/repo#N and URLs included, and the sidebar's links), so the check sees what a merge closes.
+pr_meta() {
+  local out
+  # shellcheck disable=SC2016
+  out=$(gh api graphql -f o="$OWNER" -f n="$NAME" -F p="$1" -f query='
+    query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){
+      author{login} body closingIssuesReferences(first:100){nodes{number repository{nameWithOwner}}}}}}') || return 1
+  jq -ce --arg repo "$REPO" '.data.repository.pullRequest | select(. != null)
+    | {author: (.author.login // ""), body: (.body // ""),
+       closers: [(.closingIssuesReferences.nodes // [])[] | select(.repository.nameWithOwner == $repo) | .number]}' <<<"$out"
 }
 
+# pr_added_adr_files P -> the docs/adr/NNNN-*.md files pull request P adds (added, renamed or copied),
+# one per line. An API error fails: the check must not pass on a partial view.
+pr_added_adr_files() {
+  local files
+  files=$(gh api --paginate "repos/$REPO/pulls/$1/files" \
+    --jq '.[] | select(.status == "added" or .status == "renamed" or .status == "copied") | .filename') || return 1
+  grep -E '^docs/adr/[0-9]{4}-[^/]*\.md$' <<<"$files" || true
+}
+
+# check-pr P: the required `claim` check is a conflict check (ADR 0094 decision 2). It fails only when
+# someone else's human holds a live claim on an issue the pull request closes, or reserved
+# (claim/adr-NNNN, lease not run out) an ADR number the pull request adds a file under. Free, released,
+# dead and own claims pass, and so does a pull request that closes no issue. Read-only: opening a pull
+# request creates no claim; `next` and `take` respect the open pull request itself.
 cmd_check_pr() {
-  local p=${1:-} pr title author labels body n c fail=0 issues files humans co
+  local p=${1:-} pr author body n c fail=0 issues now rc human path num lease verdict
   [[ $p =~ ^[0-9]+$ ]] || die "usage: check-pr <PR>"
-  pr=$(gh pr view "$p" -R "$REPO" --json title,body,author,labels)
-  title=$(jq -r .title <<<"$pr"); author=$(jq -r .author.login <<<"$pr"); body=$(jq -r '.body // ""' <<<"$pr")
-  labels=$(jq -r '[.labels[].name] | join(",")' <<<"$pr")
-  co=${KOINON_CLAIM_CODEOWNERS:-$(cd "$(dirname "$0")/.." && pwd)/.github/CODEOWNERS}
-  humans=$(humans_list "$co")
-  if is_dependabot "$author"; then echo "claim check: exempt (Dependabot)"; return 0; fi
-  files=$(gh api --paginate "repos/$REPO/pulls/$p/files" --jq '.[].filename')
-  if title_exempt "$title"; then
-    if pr_touches_code <<<"$files"; then
-      echo "claim check: a chore/ci/build(deps) title does not exempt a pull request that changes source files"
-    else
-      echo "claim check: exempt (chore/ci/build(deps) title and no source files)"; return 0
-    fi
-  fi
-  if [[ ",$labels," == *,unclaimed-ok,* ]]; then
-    if unclaimed_ok_by_human "$p" "$humans"; then echo "claim check: exempt (unclaimed-ok set by a maintainer)"; return 0; fi
-    echo "::error::the unclaimed-ok label was not set by a maintainer ($(paste -sd, - <<<"$humans")); remove it or ask one to add it"
-    return 1
-  fi
-  issues=$(closing_issues "$body")
+  pr=$(pr_meta "$p") || die "cannot read pull request #$p (API error); re-run the check"
+  author=$(jq -r .author <<<"$pr"); body=$(jq -r .body <<<"$pr")
+  now=$(server_now)
+  # GitHub's links and the body's keywords: a body keyword alone misses the sidebar, owner/repo#N and URLs.
+  issues=$({ jq -r '.closers[]?' <<<"$pr"; closing_issues "$body"; } | sort -un)
   if [[ -z $issues ]]; then
-    echo "::error::the pull request must reference its issue with 'Closes #N' and hold its claim (hack/claim.sh take N), or be exempt (chore/ci/build(deps) title without source changes, Dependabot, or the unclaimed-ok label set by a maintainer)"
-    return 1
+    echo "::notice::this pull request names no issue; say 'Closes #N' in its description so agents and this check see what it takes"
+    echo "claim check: no Closes #N; nothing to check"
   fi
   for n in $issues; do
-    local rc=0
+    rc=0
     load_claim "$n" || rc=$?
-    if ((rc == 1)); then echo "::error::#$n has no claim; run hack/claim.sh take $n (then re-run this check)"; fail=1; continue; fi
-    c=$C
-    if [[ $(jq -r .state <<<"$c") != held ]]; then echo "::error::the claim on #$n is $(jq -r .state <<<"$c"); take it again"; fail=1; continue; fi
-    if [[ $(lower "$author") != "$(lower "$(jq -r .human <<<"$c")")" ]]; then
-      echo "::error::#$n is claimed for $(jq -r .human <<<"$c"), not the pull request author $author"; fail=1; continue
-    fi
-    echo "claim check: #$n is claimed for $author"
+    if ((rc == 1)); then echo "claim check: #$n is free"; continue; fi
+    c=$C; human=$(jq -r .human <<<"$c")
+    if [[ $(jq -r .state <<<"$c") != held ]]; then echo "claim check: #$n is free (the claim was released)"; continue; fi
+    if [[ $(lower "$human") == "$(lower "$author")" ]]; then echo "claim check: #$n is claimed by @$human (the author)"; continue; fi
+    rc=0
+    claim_liveness "$c" || rc=$?
+    # The sweeper skips a claim with an unparsable lease, so it would block for ever: not a conflict.
+    if ((rc == 1)); then echo "claim check: #$n is free (the claim of @$human has an unparsable lease)"; continue; fi
+    ((rc == 0)) || die "cannot judge the liveness of the claim on #$n (API error); re-run the check"
+    verdict=$(claim_verdict held "$human" "$author" "$now" "$LIVE" "$PR_STATE")
+    case $verdict in
+      stale) echo "claim check: #$n is free (the claim of @$human went stale at $(epoch_to_iso "$LIVE"))" ;;
+      *)
+        conflict_issue_text "$n" "$human" "$(epoch_to_iso "$LIVE")" "$PR_NUM" "$author" "$(epoch_to_iso $((LIVE + RELEASE_AFTER)))"
+        fail=1 ;;
+    esac
   done
+  local added
+  added=$(pr_added_adr_files "$p") || die "cannot list the files of pull request #$p (API error); re-run the check"
+  while IFS= read -r path; do
+    [[ -n $path ]] || continue
+    num=${path:9:4}
+    rc=0
+    load_claim "adr-$num" || rc=$?
+    if ((rc == 1)); then echo "claim check: $path: ADR $num is not reserved"; continue; fi
+    c=$C; human=$(jq -r .human <<<"$c"); lease=$(jq -r .lease_until <<<"$c")
+    if [[ $(jq -r .state <<<"$c") != held ]]; then echo "claim check: $path: the reservation of ADR $num was released"; continue; fi
+    if [[ $(lower "$human") == "$(lower "$author")" ]]; then echo "claim check: $path: ADR $num is reserved by @$human (the author)"; continue; fi
+    if ! parse_lease "$lease" >/dev/null || (($(parse_lease "$lease") < now)); then
+      echo "claim check: $path: the reservation of ADR $num by @$human ran out at $lease"; continue
+    fi
+    conflict_adr_text "$path" "$num" "$human" "$lease"
+    fail=1
+  done <<<"$added"
   return "$fail"
+}
+
+# ---- claims by comment (ADR 0094 decision 1; claim-comment.yml) ----
+
+# commenter_class LOGIN -> person (write, maintain or admin on the repository) or outsider. A login
+# GitHub does not know as a collaborator (404) is an outsider; any other API error fails.
+commenter_class() {
+  gh_try "repos/$REPO/collaborators/$1/permission" --jq .permission
+  if ((TRY_RC == 0)); then perm_class "$TRY_OUT"; return 0; fi
+  if [[ $TRY_OUT == *"HTTP 404"* ]]; then echo outsider; return 0; fi
+  echo "claim: cannot read the permission of $1: $TRY_OUT" >&2
+  return 1
+}
+
+# reply N BODY: answer on the issue. Returns 5 when GitHub refuses the write (the fallback's trigger).
+reply() {
+  gh_try -X POST "repos/$REPO/issues/$1/comments" -f "body=$2"
+  if ((TRY_RC == 0)); then echo "answered on #$1: ${2%%$'\n'*}"; return 0; fi
+  if is_denied "$TRY_OUT"; then return 5; fi
+  warn "cannot answer on #$1: $TRY_OUT"
+  return 0
+}
+
+# assign_checked N LOGIN -> prints the marker note when GitHub left LOGIN out of the assignees it
+# returned (Prow's rule: compare the answer with the request); the claim never depends on it.
+assign_checked() {
+  gh_try -X POST "repos/$REPO/issues/$1/assignees" -f "assignees[]=$2" --jq '[.assignees[]?.login | ascii_downcase]'
+  if ((TRY_RC == 0)) && jq -e --arg l "$(lower "$2")" 'index($l)' <<<"$TRY_OUT" >/dev/null 2>&1; then return 0; fi
+  text_unassignable "$2" "$1"
+}
+
+# write_refused_fallback N LOGIN: GitHub refused a write of the comment command (a non-collaborator's
+# run may get a read-only token; probe 3 of ADR 0094 was skipped). Point the commenter to a pull
+# request, open one Backlog issue for the maintainers (deduplicated by its fixed title), never fail.
+write_refused_fallback() {
+  local n=$1 login=$2 open
+  echo "::warning::GitHub refused a claim write for @$login on #$n; answering with the fallback"
+  gh api -X POST "repos/$REPO/issues/$n/comments" -f "body=$(text_fallback "$login" "$n")" >/dev/null 2>&1 ||
+    warn "cannot answer on #$n either"
+  open=$(gh api --paginate "repos/$REPO/issues?state=open&per_page=100" --jq '.[] | select(.pull_request == null) | [.number, .title] | @tsv' 2>/dev/null |
+    awk -F'\t' -v t="$FALLBACK_TITLE" '$2 == t {print $1; exit}') || open=""
+  if [[ -n $open ]]; then
+    echo "the maintainers' issue #$open already tracks this"
+  else
+    gh api -X POST "repos/$REPO/issues" -f "title=$FALLBACK_TITLE" -f "body=A \`/claim\` or \`/release\` comment by an outside contributor (first seen: @$login on #$n) could not write: GitHub refused the claim-comment workflow's token (401/403). Comment claims stay unavailable for outside contributors until the workflow gets a write token for their comments; they are told to open a pull request that says Closes #N, which \`claim.sh next\` and \`take\` already respect. See ADR 0094 decision 1 (fallback) and the run log of claim-comment.yml." \
+      >/dev/null 2>&1 || warn "cannot open the maintainers' issue"
+  fi
+  return 0
+}
+
+# comment_claim N LOGIN CLASS: a /claim comment. Returns 5 when GitHub refused a write.
+comment_claim() {
+  local n=$1 login=$2 class=$3 holder issue now claims rc=0 existing="" parent="" renew=0 lease_until pr wrc=0 held cap note
+  holder=$(comment_holder "$login" "$class")
+  issue=$(issue_json "$n") || die "cannot read issue #$n (API error)"
+  if [[ $(jq -r .pull <<<"$issue") != false ]]; then echo "#$n is a pull request; ignoring"; return 0; fi
+  if [[ $(jq -r .state <<<"$issue") != open ]]; then reply "$n" "$(text_closed "$login" "$n")"; return; fi
+  if [[ $class == outsider ]] && ! jq -e --argjson ok "$OUTSIDER_LABELS" '.labels | any(IN($ok[]))' <<<"$issue" >/dev/null; then
+    reply "$n" "$(text_label "$login" "$n")"; return
+  fi
+  now=$(server_now); claims=$(list_claims)
+  load_claim "$n" || rc=$?
+  if ((rc == 0)); then
+    existing=$C; parent=$(jq -r .sha <<<"$existing")
+    if [[ $(jq -r .state <<<"$existing") == held ]]; then
+      if same_holder "$(jq -r .holder <<<"$existing")" "$holder"; then
+        renew=1
+      else
+        LIVE=$(parse_lease "$(jq -r .lease_until <<<"$existing")" 2>/dev/null) || LIVE=$now
+        if ! dead_holder_check "$n" "$existing" "$now" >/dev/null 2>&1; then
+          reply "$n" "$(text_held "$login" "$n" "$(jq -r .human <<<"$existing")" "$(epoch_to_iso "$LIVE")")"; return
+        fi
+        echo "#$n: the claim of @$(jq -r .human <<<"$existing") is dead since $(epoch_to_iso "$LIVE"); taking it over"
+      fi
+    fi
+  fi
+  if ((!renew)); then
+    if [[ $class == outsider ]]; then cap=$OUTSIDER_CAP; held=$(live_claims_of "$claims" "$now" "$login" outsider)
+    else cap=$HUMAN_CAP; held=$(live_claims_of "$claims" "$now" "$login"); fi
+    if (($(grep -c . <<<"$held" || true) >= cap)); then
+      reply "$n" "$(text_cap "$login" "$(grep -c . <<<"$held")" "$cap" "$(paste -sd, - <<<"$held" | sed 's/,/, /g')")"; return
+    fi
+  fi
+  lease_until=$(epoch_to_iso $((now + $(lease_for_holder "$holder"))))
+  pr=$(find_pr "$n" "$login")
+  write_claim "$n" held "$holder" "$login" "$lease_until" "$pr" "claimed by comment" "$parent" || wrc=$?
+  if ((wrc == 5)); then return 5; fi
+  if ((wrc != 0)); then reply "$n" "$(text_race "$login" "$n")"; return; fi
+  if ((renew)); then echo "renewed #$n for $holder until $lease_until"; else echo "claimed #$n as $holder until $lease_until"; fi
+  if [[ -n $existing && $(jq -r .state <<<"$existing") == held && $(lower "$(jq -r .human <<<"$existing")") != "$(lower "$login")" ]]; then
+    unassign "$n" "$(jq -r .human <<<"$existing")"
+  fi
+  note=$(assign_checked "$n" "$login")
+  drop_label "$n" claim:stale
+  upsert_comment "$n" "$(claim_comment held "$holder" "$login" "$lease_until" "$pr" "claimed by comment" "$note")"
+  rerun_checks_for_issue "$n"
+  return 0
+}
+
+# comment_release N LOGIN CLASS: a /release comment, by the claim's human or any person.
+comment_release() {
+  local n=$1 login=$2 class=$3 rc=0 human by wrc=0
+  load_claim "$n" || rc=$?
+  if ((rc == 1)) || [[ $(jq -r .state <<<"$C") != held ]]; then reply "$n" "$(text_no_claim "$login" "$n")"; return; fi
+  human=$(jq -r .human <<<"$C")
+  if [[ $(lower "$login") != "$(lower "$human")" && $class != person ]]; then
+    reply "$n" "$(text_release_refused "$login" "$human" "$n")"; return
+  fi
+  # released_by (ADR 0094 decision 7): the holder when the holder itself comments, else comment:<login>.
+  if same_holder "$(jq -r .holder <<<"$C")" "$(comment_holder "$login" "$class")"; then by=$(jq -r .holder <<<"$C"); else by="comment:$login"; fi
+  do_release_claim "$C" "released by a /release comment from @$login" 0 "$by" || wrc=$?
+  if ((wrc == 5)); then return 5; fi
+  if ((wrc != 0)); then reply "$n" "$(text_race "$login" "$n")"; return; fi
+  return 0
+}
+
+# comment N: the entry point of claim-comment.yml. The comment's body and author come in through
+# KOINON_CLAIM_COMMENT_BODY and KOINON_CLAIM_COMMENT_LOGIN (never through the command line).
+cmd_comment() {
+  local n=${1:-} body=${KOINON_CLAIM_COMMENT_BODY:-} login=${KOINON_CLAIM_COMMENT_LOGIN:-} cmd class rc=0
+  [[ $n =~ ^[0-9]+$ && -n $login ]] || die "usage: KOINON_CLAIM_COMMENT_BODY=... KOINON_CLAIM_COMMENT_LOGIN=... comment <N>"
+  cmd=$(comment_command "$body")
+  if [[ -z $cmd ]]; then echo "#$n: the comment is not /claim or /release; nothing to do"; return 0; fi
+  if [[ $login == *"[bot]" ]]; then echo "#$n: ignoring a bot's comment"; return 0; fi
+  class=$(commenter_class "$login") || die "cannot tell whether @$login is a maintainer; nothing changed"
+  echo "#$n: /$cmd by @$login ($class)"
+  CLAIM_SOFT_DENY=1
+  case $cmd in
+    claim) comment_claim "$n" "$login" "$class" || rc=$? ;;
+    release) comment_release "$n" "$login" "$class" || rc=$? ;;
+  esac
+  if ((rc == 5)); then write_refused_fallback "$n" "$login"; return 0; fi
+  return "$rc"
 }
 
 # ADR_PR_JQ: the ADR numbers that open pull requests ADD (added, renamed or copied files), from the pages of open_pr_adr_numbers (slurped).
@@ -1320,7 +1729,7 @@ cmd_update_oldest() {
   else die "update-branch failed for #$target: $TRY_OUT"; fi
 }
 
-usage() { sed -n '4,90p' "$0" | sed -n '1,/^set -euo/p' | sed '$d' | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '4,/^# Needs bash 5/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 
 main() {
   command -v gh >/dev/null || die "gh is required"
@@ -1349,6 +1758,7 @@ main() {
     sweep) cmd_sweep ;;
     check-pr) cmd_check_pr "$@" ;;
     release-pr) cmd_release_pr "$@" ;;
+    comment) cmd_comment "$@" ;;
     update-oldest) cmd_update_oldest ;;
     adr) cmd_adr ;;
     sensitive-paths) sensitive_paths "${KOINON_CLAIM_CODEOWNERS:-$(cd "$(dirname "$0")/.." && pwd)/.github/CODEOWNERS}" ;;

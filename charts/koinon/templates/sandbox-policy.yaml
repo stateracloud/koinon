@@ -21,8 +21,9 @@ never Kyverno). Rules key on the requesting identity, which a pod's creator cann
   binding, which shows in the audit log and as GitOps drift).
 Shape rules apply to every pod: no ephemeral containers, host namespaces, hostPath or privileged
 containers, no io.katacontainers.* annotations (they can switch off guest seccomp, spike 8.16), and
-sandbox workload pods run on an allowed runtime class; supervisor pods run only the pinned
-supervisor image (sandboxPolicy.supervisorImages).
+sandbox workload pods run on an allowed runtime class, set automountServiceAccountToken=false and
+project no ServiceAccount token (ADR 0006); supervisor pods run only the pinned supervisor image
+(sandboxPolicy.supervisorImages).
 A CEL error denies under failurePolicy Fail; test against real OpenShell pods before relying on it.
 */ -}}
 {{- if .Values.sandboxPolicy.enabled }}
@@ -73,6 +74,10 @@ spec:
         (!has(object.spec.activeDeadlineSeconds) || object.spec.activeDeadlineSeconds == oldObject.spec.activeDeadlineSeconds) &&
         (!has(object.spec.schedulingGates) ||
           (has(oldObject.spec.schedulingGates) && object.spec.schedulingGates.all(g, g in oldObject.spec.schedulingGates)))
+    - name: workload
+      expression: >-
+        has(object.metadata.labels) && 'openshell.ai/boundary-role' in object.metadata.labels &&
+        object.metadata.labels['openshell.ai/boundary-role'] == 'workload'
     - name: supervisorCreator
       expression: {{ printf "request.userInfo.username in %s" (toJson ($p.identities.supervisorPods | default list)) | quote }}
   validations:
@@ -99,6 +104,19 @@ spec:
         object.metadata.labels['openshell.ai/boundary-role'] != 'workload' ||
         (has(object.spec.runtimeClassName) && object.spec.runtimeClassName in {{ toJson $p.runtimeClasses }})
       message: {{ printf "sandbox workload pods must use runtimeClassName %s" (join " or " $p.runtimeClasses) | quote }}
+    # Defence in depth for ADR 0006: Agent Sandbox templates default to no token, but nothing at
+    # admission held a controller regression or compromise to it. The explicit false also keeps the
+    # ServiceAccount admission plugin from injecting its kube-api-access projected volume. Supervisor
+    # pods are not covered: the gateway creates them and the supervisor's needs are unverified.
+    - expression: >-
+        !variables.workload ||
+        (has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false)
+      message: sandbox workload pods must set automountServiceAccountToken to false
+    - expression: >-
+        !variables.workload || !has(object.spec.volumes) ||
+        object.spec.volumes.all(v, !has(v.projected) || !has(v.projected.sources) ||
+          v.projected.sources.all(s, !has(s.serviceAccountToken)))
+      message: sandbox workload pods must not project a ServiceAccount token
     - expression: >-
         !variables.supervisor ||
         (object.spec.containers.all(c, c.image in {{ include "koinon.supervisorImages" . }}) &&
