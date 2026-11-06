@@ -50,6 +50,11 @@ func (t *Type) ServesMCP(loc Location, serverURL string) error {
 	if err != nil || u.Hostname() == "" {
 		return fmt.Errorf("the MCP server URL %q has no host", serverURL)
 	}
+	// Over plain http the server's host is not authenticated: anything on the path could answer as
+	// the code host and its calls would count as inside.
+	if u.Scheme != "https" {
+		return fmt.Errorf("an MCP server linked to a code-host connection must use https, not %q", u.Scheme)
+	}
 	host := normalHost(u.Hostname())
 	allowed := t.MCPHosts(loc)
 	if slices.Contains(allowed, host) {
