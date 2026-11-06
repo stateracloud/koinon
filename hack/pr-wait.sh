@@ -300,6 +300,25 @@ while :; do
         no_live=1
       fi
     fi
+    # Only required checks decide (AGENTS.md: advisory and third-party checks, DeepSource, CodeRabbit, Socket,
+    # do not count): the base branch's required contexts, the explicit --require names, the e2e aliases and
+    # the checks of the e2e-kind workflow. Any other failed or pending check is printed and dropped.
+    # Fail closed: when the required contexts cannot be read, nothing is judged (never "every check").
+    load_contexts "$(jq -r '.baseRefName // "main"' <<<"$json")"
+    if [ "$ctx_ok" != 1 ]; then
+      echo "pr-wait: cannot read the required status checks of the base branch; not judging checks" >&2
+      exit 2
+    fi
+    keep_names=("$ctxs" ${required[@]+"${required[@]}"} ${req_now[@]+"${req_now[@]}"})
+    [ "$alias_e2e" = 0 ] || keep_names+=(quickstart e2e-lab)
+    keep=$(printf '%s\n' "${keep_names[@]}" | jq -R . | jq -sc 'map(select(. != ""))')
+    adv_json=$(jq --argjson keep "$keep" '.statusCheckRollup |= map(select(((.name // .context // "?") as $n | ($keep | index($n)) == null) and (.workflowName // "") != "e2e-kind"))' <<<"$json")
+    adv=$(jq -r "$norm"' | .[] | select((.done | not) or .bad) | "advisory \(.name) \(if .done then "failed" else "pending" end)"' --argjson req '[]' <<<"$adv_json" | sort -u)
+    json=$(jq --argjson keep "$keep" '.statusCheckRollup |= map(select(((.name // .context // "?") as $n | ($keep | index($n)) != null) or (.workflowName // "") == "e2e-kind"))' <<<"$json")
+    if [ -n "$adv" ] && [ "$adv" != "${last_adv:-}" ]; then
+      echo "$adv"
+      last_adv=$adv
+    fi
     reqjson=$(printf '%s\n' ${req_now[@]+"${req_now[@]}"} | jq -R . | jq -sc .)
     failed=$(jqn -r "$norm | .[] | select(.bad) | [.name, .cancelled, ((.url | capture(\"/runs/(?<r>[0-9]+)\")? | .r) // \"\")] | @tsv" <<<"$json")
     # The only failures are cancelled runs of required checks, or checks of an earlier e2e-kind run:
@@ -328,7 +347,6 @@ while :; do
     # Required contexts of the ruleset that have no check on the head yet (a queued workflow run).
     missing_ctx=""
     if [ "$mode" = checks ]; then
-      load_contexts "$(jq -r '.baseRefName // "main"' <<<"$json")"
       while IFS= read -r c; do
         [ -n "$c" ] || continue
         jq -e --arg c "$c" 'any((.statusCheckRollup // [])[]; (.name // .context // "") == $c)' <<<"$json" >/dev/null ||

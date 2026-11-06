@@ -264,7 +264,11 @@ list in the same PR, and a required job must report on every pull request and pu
 `if:` skip reports success and is fine; only a workflow-level `paths:` filter leaves a check
 absent).
 
-Third-party analysers are advisory: their checks never enter the list or the ruleset. DeepSource
+Third-party analysers are advisory: their checks never enter the list or the ruleset, and
+`hack/pr-wait.sh` (so `hack/pr-merge.sh`) judges only the base branch's required contexts, the
+`--require` names and the e2e aliases: any other check that is red or pending is printed as
+`advisory <name> failed|pending` and ignored. When the required contexts cannot be read, it exits 2
+instead of judging every check. DeepSource
 (GitHub App) reads `.deepsource.toml` at the root (#180): Go, JS/TS, shell and Dockerfile
 analysers, generated code and fixtures excluded, no code formatters (a bot commit would start a new
 CI run on a new head) and Autofix only when a person clicks it. Read its PR comments as review

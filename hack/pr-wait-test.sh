@@ -33,7 +33,15 @@ if [ "$1 $2" = "run list" ]; then
   exit 0
 fi
 if [ "$1" = api ] && [[ $2 == */rules/branches/* ]]; then # the ruleset's required contexts, one per line
-  [ -f "$FAKE_DIR/rules" ] || exit 9
+  [ ! -f "$FAKE_DIR/rules-fail" ] || exit 9
+  # No $FAKE_DIR/rules: every check of the current PR json is required (most tests judge all of them).
+  if [ ! -f "$FAKE_DIR/rules" ]; then
+    n=$(cat "$FAKE_DIR/n" 2>/dev/null || echo 1)
+    f="$FAKE_DIR/$n.json"
+    [ -f "$f" ] || f=$(ls "$FAKE_DIR"/*.json | sort -V | tail -n 1)
+    jq -r '(.statusCheckRollup // [])[] | .name // .context' "$f" | grep -vx -e quickstart -e e2e-lab | sort -u
+    exit 0
+  fi
   cat "$FAKE_DIR/rules"
   exit 0
 fi
@@ -121,7 +129,7 @@ expect "merged: one line per change" 0 "checks 1/3 pending: go,web
 checks 2/3 pending: web
 checks 3/3 green
 MERGED abc1234"
-if grep -q -v '^pr view 7 --json' "$FAKE_DIR/calls"; then
+if grep -q -v -e '^pr view 7 --json' -e '^api repos/{owner}/{repo}/rules/branches/'"$FAKE_DIR/calls"; then
   echo "FAIL: only gh pr view is called" >&2
   fail=1
 else echo "ok: only gh pr view is called"; fi
@@ -389,8 +397,32 @@ run 7 --checks --interval 0
 expect "--checks green when every required context exists" 0 "checks 3/3 green"
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"
 run 7 --interval 0 --timeout 0
-expect "without --checks the ruleset is not consulted" 2 "checks 2/2 green
+expect "without --checks a required context absent from the head does not wait" 2 "checks 2/2 green
 TIMEOUT"
+
+# 7b2. only required checks decide: third-party checks (DeepSource, CodeRabbit, Socket) are advisory
+printf 'lint\ngo\n' >"$FAKE_DIR/rules"
+ds_bad=$(cr "DeepSource: Go" COMPLETED FAILURE 71)
+ds_pend=$(cr "CodeRabbit" IN_PROGRESS "" 72)
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$ds_bad")"
+printf 'lint\ngo\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "a red third-party check with every required check green: advisory, exits 0" 0 "advisory DeepSource: Go failed
+checks 2/2 green"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$ds_pend")"
+printf 'lint\ngo\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "a pending advisory check does not keep the wait going" 0 "advisory CodeRabbit pending
+checks 2/2 green"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$(cr go COMPLETED FAILURE 11),$ds_bad")"
+printf 'lint\ngo\n' >"$FAKE_DIR/rules"
+run 7 --checks --interval 0
+expect "a red required check still exits 1 (advisory ones are listed apart)" 1 "advisory DeepSource: Go failed
+FAILED go (run 11)"
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$ds_bad")"
+touch "$FAKE_DIR/rules-fail"
+run 7 --checks --interval 0
+expect "required contexts unreadable: fail closed, exit 2" 2 "pr-wait: cannot read the required status checks of the base branch; not judging checks"
 
 # 7c. (koinon-private#647) a draft is never green; after ready_for_review the draft's runs are ignored
 seq_set '{"state":"OPEN","isDraft":true,"mergeStateStatus":"BLOCKED","mergeCommit":null,"statusCheckRollup":[{"name":"quick checks","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-01T10:00:00Z"}]}'
