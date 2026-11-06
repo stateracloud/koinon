@@ -33,30 +33,45 @@ The `internal/gateway/standalone` and `internal/ledger` suites start a real agen
 Pulling it from its upstream registry at test time made every Go job depend on that registry: on
 2026-11-06 `cr.agentgateway.dev` answered 522 and every pull request with Go changes went red. The
 image is named once, by digest: the chart's `gateway.standalone.image` in `charts/koinon/values.yaml`
-(repository, tag and digest), printed by `hack/agentgateway-pin.sh`. CI tests against a copy of that
-digest in GHCR, `ghcr.io/stateracloud/agentgateway`, kept by the manually dispatched workflow
-`mirror-agentgateway-test-image.yml`. `hack/agentgateway-pin.sh --check` (in the `scripts` job, with
-`hack/agentgateway-pin-test.sh`) fails when the pin is not a full sha256 digest or the workflow
-carries a digest of its own.
+(repository, tag and digest), printed by `hack/agentgateway-pin.sh`. The tests take it from
+`internal/testing/agentgatewayimage` (`Digest`, and `Upstream`, the chart's repository at that digest).
+CI tests against a copy of that digest in GHCR, `ghcr.io/<owner>/agentgateway`, kept by the manually
+dispatched workflow `mirror-agentgateway-test-image.yml`.
 
-When the pin moves (an agentgateway bump changes the chart's tag and digest):
+`hack/agentgateway-pin.sh --check` (in the `scripts` job, with `hack/agentgateway-pin-test.sh`) fails
+when the pin is not a full sha256 digest, when the workflow carries a digest of its own, when
+`Digest` or `Upstream`'s repository differs from the chart's, and when any other tracked Go file names
+an agentgateway image itself.
 
-1. Change `gateway.standalone.image` in the chart and merge it.
-2. Dispatch the workflow on `main`: `gh workflow run mirror-agentgateway-test-image.yml --ref main`
-   (input `source`: `cr.agentgateway.dev/agentgateway`, or `ghcr.io/agentgateway/agentgateway` while
-   the first is down; both serve the same digest). It copies the digest under the pin's tag, fails
-   unless the copy has that digest, and prints `image: ghcr.io/stateracloud/agentgateway@sha256:...`
-   in its log and summary.
-3. Point the tests' image constant at that reference.
+When the pin moves (an agentgateway bump changes the chart's tag and digest), do it in one pull
+request:
+
+1. Change `gateway.standalone.image` in the chart, and `Digest` in
+   `internal/testing/agentgatewayimage/image.go` to the same digest (`--check` fails until they match).
+2. Push the branch and dispatch the workflow on it:
+   `gh workflow run mirror-agentgateway-test-image.yml --ref <branch>` (input `source`:
+   `cr.agentgateway.dev/agentgateway`, or `ghcr.io/agentgateway/agentgateway` while the first is
+   down; both serve the same digest). It copies the digest, fails unless the copy has that digest, and
+   prints `image: ghcr.io/<owner>/agentgateway@sha256:...` in its log and summary. On a branch it tags
+   the copy by its digest (`pin-<hex>`); only on `main` does it move the version tag. On the first
+   dispatch for a new package, GHCR can answer DENIED to a manifest PUT right after the run created the
+   package: re-run the job once.
+3. Re-run the pull request's go-test, which now finds the copy. After the merge, dispatch the workflow
+   on `main` to point the version tag at the new digest.
+
+The go-test job logs in to GHCR, pulls `ghcr.io/<owner>/agentgateway@<digest>` once, and sets
+`KOINON_AGENTGATEWAY_MIRROR` to that repository; `agentgatewayimage.Ref()` then returns the copy, and
+the chart's repository at the same digest when the variable is unset, so a laptop or the lab needs no
+GHCR credentials. When the pull fails, go-test fails with a pointer to step 2, except in a fork's own
+CI, which cannot read the copy: there it warns and the tests pull the chart's repository.
 
 The GHCR package stays private until v0.3. The go-test job pulls it with its own `GITHUB_TOKEN`
 (`packages: read` on the job), which works only while the package's settings ("Manage Actions
-access") list `stateracloud/koinon` with read. The image's `org.opencontainers.image.source` label
-names the upstream repository (changing it would change the digest), so GHCR does not link the
-package to Koinon by itself: after the first run, check that setting and add the repository if it is
-missing. The workflow runs on `main` only, since it reads the pin from the ref it runs on. Crane is `CRANE_VERSION` in `hack/versions.env`,
-installed with `go install` (the Go checksum database verifies it) and dated by
-`hack/dep-age-check.sh` (ADR 0079).
+access") list this repository with read. The image's `org.opencontainers.image.source` label names
+the upstream repository (changing it would change the digest), so GHCR does not link the package to
+Koinon by itself: after the first run, check that setting and add the repository if it is missing.
+Crane is `CRANE_VERSION` in `hack/versions.env`, installed with `go install` (the Go checksum database
+verifies it) and dated by `hack/dep-age-check.sh` (ADR 0079).
 
 ## Persisted-state compatibility
 

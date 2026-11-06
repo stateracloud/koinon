@@ -35,14 +35,12 @@ import (
 	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/providerusage"
+	"github.com/stateracloud/koinon/internal/testing/agentgatewayimage"
 	"github.com/stateracloud/koinon/internal/testing/containerhost"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/test/scenarios"
 )
-
-// agentgatewayImage is the agentgateway release Koinon targets (ADR 0048).
-const agentgatewayImage = "cr.agentgateway.dev/agentgateway:v1.7.0"
 
 const (
 	pricedModel   = "fake/ledger-model"
@@ -194,7 +192,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		Expect(err).NotTo(HaveOccurred())
 		Expect(file.Deliver(ctx, first, "")).To(Succeed())
 
-		ctr, err = testcontainers.Run(ctx, agentgatewayImage,
+		ctr, err = testcontainers.Run(ctx, agentgatewayimage.Ref(),
 			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
 			testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
 			testcontainers.WithHostPortAccess(hostPort(upstream), hostPort(receiver), slowPort, cutPort, refusePort),
