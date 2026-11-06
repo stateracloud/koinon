@@ -717,6 +717,7 @@ type Querier interface {
 	// @lease_seconds has lost its writer and holds nothing back: a dead writer's row is taken over
 	// only once the sandbox is ready again, and an agent that stays stopped would otherwise keep every
 	// retired repository, the compromised one included.
+	// prefix_taken: the prefix holds another repository (#262); the row is marked deleted, its blobs kept.
 	ListDueHomeRepositories(ctx context.Context, arg ListDueHomeRepositoriesParams) ([]ListDueHomeRepositoriesRow, error)
 	// Open questions past their expiry (the expiry sweep applies the default to them).
 	ListDueQuestions(ctx context.Context, arg ListDueQuestionsParams) ([]Question, error)
@@ -736,7 +737,8 @@ type Querier interface {
 	ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesParams) ([]ListFlaggedPricesRow, error)
 	// Every repository epoch of the agent, epoch 0 first, with whether it still opens (a deleted one
 	// has no blobs, a lost one no password) and whether the sweeper may have deleted its blobs (retired
-	// and past its deadline: after a database restore, deleted_at can predate the sweep).
+	// and past its deadline: after a database restore, deleted_at can predate the sweep). A taken one's
+	// prefix holds another repository, none of the row's (#262).
 	ListHomeRepositoryEpochsOfAgent(ctx context.Context, arg ListHomeRepositoryEpochsOfAgentParams) ([]ListHomeRepositoryEpochsOfAgentRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -951,9 +953,17 @@ type Querier interface {
 	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
 	// The checkpoint's snapshot is not in the bucket: it is failed, not deleted, so its history stays
 	// (the snapshot ID goes into @error; a complete checkpoint is one with a snapshot).
+	// snapshot_missing_at tells it apart from a backup that failed: the recreate gate does not block on
+	// it (#263).
 	MarkHomeCheckpointSnapshotMissing(ctx context.Context, arg MarkHomeCheckpointSnapshotMissingParams) (int64, error)
 	MarkHomeRepositoryDeleted(ctx context.Context, arg MarkHomeRepositoryDeletedParams) (int64, error)
 	MarkHomeRepositoryEpochDeleted(ctx context.Context, arg MarkHomeRepositoryEpochDeletedParams) (int64, error)
+	// The same for a later epoch.
+	MarkHomeRepositoryEpochPrefixTaken(ctx context.Context, arg MarkHomeRepositoryEpochPrefixTakenParams) (int64, error)
+	// Epoch 0's prefix holds a repository its password does not open: nothing of the row's is in it,
+	// so the sweeper never deletes those blobs. Only while no checkpoint was written to it (one that
+	// was opened it with this password).
+	MarkHomeRepositoryPrefixTaken(ctx context.Context, arg MarkHomeRepositoryPrefixTakenParams) (int64, error)
 	MarkLeakGuardEvicted(ctx context.Context, arg MarkLeakGuardEvictedParams) error
 	// The declaring Secret was deleted: keep the row, stop serving it.
 	MarkMCPServerRemoved(ctx context.Context, arg MarkMCPServerRemovedParams) error
@@ -1026,6 +1036,9 @@ type Querier interface {
 	RaiseAgentEpochForResync(ctx context.Context, arg RaiseAgentEpochForResyncParams) (int64, error)
 	// A tool turned two-approver on after the request was recorded: the pending request needs two too.
 	RaiseApprovalsRequired(ctx context.Context, arg RaiseApprovalsRequiredParams) (ApprovalRequest, error)
+	// The prefixes of the agent's epochs below @next_epoch hold repositories this database has no
+	// password for (#262): the next repository epoch starts at @next_epoch or later. Monotonic.
+	RaiseHomeRepositoryNextEpoch(ctx context.Context, arg RaiseHomeRepositoryNextEpochParams) (int64, error)
 	// Records the observed sandbox. started_at and stopped_at are stamped on the
 	// transition into ready and stopped. An empty home_generation (no sandbox
 	// observed) keeps the recorded one.

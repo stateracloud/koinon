@@ -1763,22 +1763,23 @@ type GatewayServedModel struct {
 }
 
 type HomeCheckpoint struct {
-	OrgID           pgtype.UUID
-	ID              pgtype.UUID
-	AgentID         pgtype.UUID
-	Reason          CheckpointReason
-	Status          CheckpointStatus
-	SandboxID       string
-	Generation      string
-	Epoch           int64
-	SnapshotID      pgtype.Text
-	SizeBytes       pgtype.Int8
-	Attempts        int32
-	Error           pgtype.Text
-	RequestedAt     pgtype.Timestamptz
-	StartedAt       pgtype.Timestamptz
-	FinishedAt      pgtype.Timestamptz
-	RepositoryEpoch int32
+	OrgID             pgtype.UUID
+	ID                pgtype.UUID
+	AgentID           pgtype.UUID
+	Reason            CheckpointReason
+	Status            CheckpointStatus
+	SandboxID         string
+	Generation        string
+	Epoch             int64
+	SnapshotID        pgtype.Text
+	SizeBytes         pgtype.Int8
+	Attempts          int32
+	Error             pgtype.Text
+	RequestedAt       pgtype.Timestamptz
+	StartedAt         pgtype.Timestamptz
+	FinishedAt        pgtype.Timestamptz
+	RepositoryEpoch   int32
+	SnapshotMissingAt pgtype.Timestamptz
 }
 
 type HomeCheckpointResync struct {
@@ -1795,6 +1796,7 @@ type HomeCheckpointResync struct {
 	Added       pgtype.Int4
 	Missing     pgtype.Int4
 	Skipped     pgtype.Int4
+	Taken       pgtype.Int4
 }
 
 type HomeRepository struct {
@@ -1807,6 +1809,8 @@ type HomeRepository struct {
 	DeleteAfter      pgtype.Timestamptz
 	DeletedAt        pgtype.Timestamptz
 	CredentialLostAt pgtype.Timestamptz
+	NextEpochAtLeast pgtype.Int4
+	PrefixTakenAt    pgtype.Timestamptz
 }
 
 type HomeRepositoryEpoch struct {
@@ -1828,6 +1832,7 @@ type HomeRepositoryEpoch struct {
 	SeedError        pgtype.Text
 	SeededAt         pgtype.Timestamptz
 	SeedFailedAt     pgtype.Timestamptz
+	PrefixTakenAt    pgtype.Timestamptz
 }
 
 type InstallIdentity struct {

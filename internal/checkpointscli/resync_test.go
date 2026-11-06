@@ -55,6 +55,8 @@ var _ = Describe("koinon-api checkpoints resync", func() {
 					_, _ = pool.Exec(ctx, `UPDATE home_checkpoint_resyncs SET failed_at = now(), attempts = 5, error = 'repository epoch 0 is not in the bucket' WHERE agent_id = $1`, a)
 				case "missing":
 					_, _ = pool.Exec(ctx, `UPDATE home_checkpoint_resyncs SET finished_at = now(), attempts = 1, snapshots = 3, added = 1, missing = 2, skipped = 1 WHERE agent_id = $1`, a)
+				case "taken":
+					_, _ = pool.Exec(ctx, `UPDATE home_checkpoint_resyncs SET finished_at = now(), attempts = 1, snapshots = 1, added = 0, missing = 0, skipped = 0, taken = 2 WHERE agent_id = $1`, a)
 				case "clean":
 					_, _ = pool.Exec(ctx, `UPDATE home_checkpoint_resyncs SET finished_at = now(), attempts = 1, snapshots = 4, added = 2, missing = 0, skipped = 0 WHERE agent_id = $1`, a)
 				}
@@ -130,6 +132,24 @@ var _ = Describe("koinon-api checkpoints resync", func() {
 		Expect(out.String()).To(ContainSubstring("2 of 2 agent(s) resynced or given up."))
 		Expect(out.String()).To(ContainSubstring("Resynced 2 of 2 agent(s): 7 snapshot(s) in the bucket, 3 checkpoint(s) added, 2 marked failed because their snapshot is gone, 1 snapshot(s) left out."))
 		Expect(out.String()).To(ContainSubstring("agent " + missing.String()))
+		Expect(out.String()).NotTo(ContainSubstring("agent " + clean.String()))
+	})
+
+	It("names the agents whose repository prefixes koinon-agentd found taken (#262)", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		clean, taken := agentIn(ctx, org, true), agentIn(ctx, org, true)
+		run, stop := context.WithCancel(ctx)
+		defer stop()
+		go agentd(run, func(a pgtype.UUID) string {
+			if a == taken {
+				return "taken"
+			}
+			return "clean"
+		})
+		Expect(tool.Resync(ctx, true, nil, true, time.Minute)).To(Succeed())
+		Expect(out.String()).To(ContainSubstring("2 repository prefix(es) hold a repository this database has no password for"))
+		Expect(out.String()).To(ContainSubstring("home.repository_prefix_taken"))
+		Expect(out.String()).To(ContainSubstring("agent " + taken.String() + " (org " + org.String() + "): 2 repository prefix(es) taken"))
 		Expect(out.String()).NotTo(ContainSubstring("agent " + clean.String()))
 	})
 

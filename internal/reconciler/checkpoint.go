@@ -125,9 +125,13 @@ func (r *Reconciler) homeGate(ctx context.Context, w *work, ws string, sb execut
 	case hasCP && (cp.Status == store.CheckpointStatusRequested || cp.Status == store.CheckpointStatusRunning):
 		// Waiting. A stopped sandbox is started so that agentd can read it.
 		return false, "waiting for the home backup before recreating the sandbox", r.wakeForBackup(ctx, w, ws, sb)
-	case hasCP && cp.Status == store.CheckpointStatusFailed && cp.Reason == store.CheckpointReasonRecreate && !resumedSince(w.agent, cp):
+	case hasCP && cp.Status == store.CheckpointStatusFailed && cp.Reason == store.CheckpointReasonRecreate &&
+		!cp.SnapshotMissingAt.Valid && !resumedSince(w.agent, cp):
 		return false, "the home backup failed, so the sandbox is not recreated: " + cp.Error.String, r.blockRecreate(ctx, w, sb, cp)
 	}
+	// Otherwise a new backup is asked for. That includes a recreate checkpoint that checkpoints
+	// resync marked failed because its snapshot is gone from the bucket (#263): the backup did not
+	// fail, and the home is still on the sandbox's volume, so it is backed up again.
 	if err := r.requestCheckpoint(ctx, w, sb, store.CheckpointReasonRecreate); err != nil {
 		return false, "", fmt.Errorf("request a home checkpoint: %w", err)
 	}
