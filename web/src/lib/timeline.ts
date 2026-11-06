@@ -219,6 +219,9 @@ function taskItem(ev: TaskEvent): TimelineItem {
   }
 }
 
+/** The run event kinds the purge job blanks (orgsettings.ContentEventKinds). */
+const PURGED_KINDS = new Set(['acp.agent_message_chunk', 'acp.agent_thought_chunk', 'acp.user_message_chunk', 'acp.tool_call', 'acp.tool_call_update', 'acp.plan'])
+
 /**
  * runItem reads one of agentd's run events (internal/agentd). Session updates
  * are recorded as kind "acp.<sessionUpdate>" with the ACP SessionUpdate as the
@@ -229,10 +232,16 @@ function taskItem(ev: TaskEvent): TimelineItem {
  * run.* events are bookkeeping (session, prompt) or are also written to the
  * task (parked, the outcome), which shows them.
  */
-function runItem(ev: RunEvent): TimelineItem | undefined {
+function runItem(ev: RunEvent, retentionDays?: number): TimelineItem | undefined {
   const key = `r:${ev.runId}:${ev.seq}`
   const at = ms(ev.createdAt)
   const runId = ev.runId
+  // The purge job blanked the content of this event after the org's retention (issue #69): the
+  // run keeps its skeleton, so say so once for the run instead of showing empty messages.
+  if (ev.contentPurged && PURGED_KINDS.has(ev.kind)) {
+    const after = retentionDays ? ` after ${retentionDays} ${retentionDays === 1 ? 'day' : 'days'}` : ''
+    return { key: `r:${runId}:content-expired`, at, type: 'note', text: `Run ${shortId(runId)}: content expired${after}`, runId }
+  }
   const p = ev.payload ?? {}
   switch (ev.kind) {
     case 'acp.agent_message_chunk':
@@ -315,11 +324,13 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
  * agent message on the task (with the run's id); once that message exists,
  * the streamed text it covers (this run's agent text since its previous
  * message) is dropped so the reply shows once. Until it arrives, the live text
- * stays.
+ * stays. A run event the purge job blanked shows as one "content expired after N days" note per run
+ * (retentionDays is the org's retention when the caller knows it).
  */
-export function buildTimeline(taskEvents: readonly TaskEvent[], runEvents: Readonly<Record<string, readonly RunEvent[]>>): TimelineItem[] {
+export function buildTimeline(taskEvents: readonly TaskEvent[], runEvents: Readonly<Record<string, readonly RunEvent[]>>, retentionDays?: number): TimelineItem[] {
   const raw: { item: TimelineItem; order: number; rank: number }[] = []
   let order = 0
+  const expired = new Set<string>()
   // At one millisecond a persisted agent reply sorts after the run's streamed text it covers, whatever
   // the order the two lists were read in; otherwise dropPersistedReplies would keep the last chunk. The
   // task events that follow the reply at that millisecond share its rank, so they stay behind it.
@@ -332,8 +343,14 @@ export function buildTimeline(taskEvents: readonly TaskEvent[], runEvents: Reado
   }
   for (const events of Object.values(runEvents)) {
     for (const ev of events) {
-      const item = runItem(ev)
-      if (item) raw.push({ item, order: order++, rank: 0 })
+      const item = runItem(ev, retentionDays)
+      if (!item) continue
+      // One "content expired" note per run, at its first purged event.
+      if (item.key.endsWith(':content-expired')) {
+        if (expired.has(item.key)) continue
+        expired.add(item.key)
+      }
+      raw.push({ item, order: order++, rank: 0 })
     }
   }
   raw.sort((a, b) => a.item.at - b.item.at || a.rank - b.rank || a.order - b.order)

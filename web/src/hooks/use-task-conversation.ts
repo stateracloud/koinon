@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { create } from '@bufbuild/protobuf'
 import { timestampNow } from '@bufbuild/protobuf/wkt'
 import { useMemo } from 'react'
+import { OrgSettingsService } from '@/gen/koinon/orgsettings/v1alpha1/orgsettings_pb'
 import { TaskService } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { RunEventSchema, type RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { useRunWatches, type RunWatch } from '@/hooks/use-run-watches'
@@ -39,6 +40,10 @@ export function useTaskConversation(orgId: string, taskId: string) {
   const watches = useRunWatches(orgId, runIds, () => void refresh())
   // The text the agent is typing follows the stored events as one more event with no seq of its own (koinon-private#344).
   const runEvents = useMemo(() => Object.fromEntries(Object.entries(watches).map(([id, w]) => [id, [...w.events, ...liveEvents(id, w)]])), [watches])
-  const items = useMemo(() => buildTimeline(task.data?.events ?? [], runEvents), [task.data, runEvents])
+  // Only when a run's content was purged, and only an admin can read the retention; others see "content expired".
+  const anyPurged = useMemo(() => Object.values(runEvents).some((evs) => evs.some((e) => e.contentPurged)), [runEvents])
+  const retention = useQuery(OrgSettingsService.method.getRunContentRetention, { orgId }, { enabled: anyPurged, retry: false })
+  const retentionDays = retention.data?.retention?.days
+  const items = useMemo(() => buildTimeline(task.data?.events ?? [], runEvents, retentionDays), [task.data, runEvents, retentionDays])
   return { task, watches, items, refresh }
 }

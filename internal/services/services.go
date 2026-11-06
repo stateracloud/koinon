@@ -48,6 +48,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1/leakguardv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1/orgsettingsv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
@@ -228,24 +229,26 @@ func (s *Server) Register(server *connect.Server) {
 	providerv1alpha1connect.RegisterProviderServiceHandler(server, s)
 	mcpserverv1alpha1connect.RegisterMcpServerServiceHandler(server, s)
 	leakguardv1alpha1connect.RegisterLeakGuardServiceHandler(server, s)
+	orgsettingsv1alpha1connect.RegisterOrgSettingsServiceHandler(server, s)
 	auditv1alpha1connect.RegisterAuditServiceHandler(server, s)
 	tracev1alpha1connect.RegisterTraceDestinationServiceHandler(server, traceAPI{s})
 }
 
 var (
-	_ agentv1alpha1connect.AgentServiceHandler           = (*Server)(nil)
-	_ ticketv1alpha1connect.TicketServiceHandler         = (*Server)(nil)
-	_ runv1alpha1connect.RunServiceHandler               = (*Server)(nil)
-	_ templatev1alpha1connect.TemplateServiceHandler     = (*Server)(nil)
-	_ connectionv1alpha1connect.ConnectionServiceHandler = (*Server)(nil)
-	_ approvalv1alpha1connect.ApprovalServiceHandler     = (*Server)(nil)
-	_ tokenv1alpha1connect.TokenServiceHandler           = (*Server)(nil)
-	_ budgetv1alpha1connect.BudgetServiceHandler         = (*Server)(nil)
-	_ budgetv1alpha1connect.PriceServiceHandler          = (*Server)(nil)
-	_ providerv1alpha1connect.ProviderServiceHandler     = (*Server)(nil)
-	_ mcpserverv1alpha1connect.McpServerServiceHandler   = (*Server)(nil)
-	_ leakguardv1alpha1connect.LeakGuardServiceHandler   = (*Server)(nil)
-	_ auditv1alpha1connect.AuditServiceHandler           = (*Server)(nil)
+	_ agentv1alpha1connect.AgentServiceHandler             = (*Server)(nil)
+	_ ticketv1alpha1connect.TicketServiceHandler           = (*Server)(nil)
+	_ runv1alpha1connect.RunServiceHandler                 = (*Server)(nil)
+	_ templatev1alpha1connect.TemplateServiceHandler       = (*Server)(nil)
+	_ connectionv1alpha1connect.ConnectionServiceHandler   = (*Server)(nil)
+	_ approvalv1alpha1connect.ApprovalServiceHandler       = (*Server)(nil)
+	_ tokenv1alpha1connect.TokenServiceHandler             = (*Server)(nil)
+	_ budgetv1alpha1connect.BudgetServiceHandler           = (*Server)(nil)
+	_ budgetv1alpha1connect.PriceServiceHandler            = (*Server)(nil)
+	_ providerv1alpha1connect.ProviderServiceHandler       = (*Server)(nil)
+	_ mcpserverv1alpha1connect.McpServerServiceHandler     = (*Server)(nil)
+	_ leakguardv1alpha1connect.LeakGuardServiceHandler     = (*Server)(nil)
+	_ orgsettingsv1alpha1connect.OrgSettingsServiceHandler = (*Server)(nil)
+	_ auditv1alpha1connect.AuditServiceHandler             = (*Server)(nil)
 )
 
 // caller is an authorised request in one org.

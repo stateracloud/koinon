@@ -61,7 +61,7 @@ func (q *Queries) EnsureOrgSettings(ctx context.Context, orgID pgtype.UUID) erro
 
 const getOrgSettings = `-- name: GetOrgSettings :one
 
-SELECT org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold FROM org_settings
+SELECT org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold, run_content_retention_days FROM org_settings
 WHERE org_id = $1
 `
 
@@ -83,6 +83,7 @@ func (q *Queries) GetOrgSettings(ctx context.Context, orgID pgtype.UUID) (OrgSet
 		&i.TriggerRatePerMinute,
 		&i.SandboxWaitCapSeconds,
 		&i.LeakMatchThreshold,
+		&i.RunContentRetentionDays,
 	)
 	return i, err
 }
@@ -149,6 +150,24 @@ func (q *Queries) SetOrgLeakMatchThreshold(ctx context.Context, arg SetOrgLeakMa
 	return err
 }
 
+const setOrgRunContentRetention = `-- name: SetOrgRunContentRetention :exec
+INSERT INTO org_settings (org_id, run_content_retention_days)
+VALUES ($1, $2)
+ON CONFLICT (org_id) DO UPDATE SET run_content_retention_days = EXCLUDED.run_content_retention_days
+`
+
+type SetOrgRunContentRetentionParams struct {
+	OrgID                   pgtype.UUID
+	RunContentRetentionDays pgtype.Int4
+}
+
+// How many days a finished run's stored content is kept (issue #69); NULL is the platform default.
+// It touches only this column, so the latency and limit overrides stay.
+func (q *Queries) SetOrgRunContentRetention(ctx context.Context, arg SetOrgRunContentRetentionParams) error {
+	_, err := q.db.Exec(ctx, setOrgRunContentRetention, arg.OrgID, arg.RunContentRetentionDays)
+	return err
+}
+
 const upsertOrgSettings = `-- name: UpsertOrgSettings :one
 INSERT INTO org_settings (org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds,
                           max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute,
@@ -164,7 +183,7 @@ SET idle_timeout_seconds = EXCLUDED.idle_timeout_seconds,
     trigger_concurrency = EXCLUDED.trigger_concurrency,
     trigger_rate_per_minute = EXCLUDED.trigger_rate_per_minute,
     sandbox_wait_cap_seconds = EXCLUDED.sandbox_wait_cap_seconds
-RETURNING org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold
+RETURNING org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold, run_content_retention_days
 `
 
 type UpsertOrgSettingsParams struct {
@@ -202,6 +221,7 @@ func (q *Queries) UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsPa
 		&i.TriggerRatePerMinute,
 		&i.SandboxWaitCapSeconds,
 		&i.LeakMatchThreshold,
+		&i.RunContentRetentionDays,
 	)
 	return i, err
 }

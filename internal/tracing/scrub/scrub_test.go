@@ -60,9 +60,10 @@ func TestText(t *testing.T) {
 		{"set-cookie", "Set-Cookie: sid=abc; HttpOnly", "Set-Cookie: " + redacted(scrub.KindCookie), ""},
 		{"bearer", "got Bearer abcdefghijklmnop1234 back", "got " + redacted(scrub.KindBearer) + " back", ""},
 		{"bearer in prose", "the bearer of bad news", "the bearer of bad news", "the bearer of bad news"},
-		{"anthropic key", "sk-ant-api03-" + strings.Repeat("a", 20), redacted(scrub.KindAPIKey), ""},
-		{"github token", "ghp_" + strings.Repeat("0", 36), redacted(scrub.KindAPIKey), ""},
-		{"aws id", "id AKIA" + strings.Repeat("X", 16) + " ok", "id " + redacted(scrub.KindAPIKey) + " ok", ""},
+		{"anthropic key", "sk-ant-api03-" + fk(93) + "AA", redacted(scrub.KindAPIKey), ""},
+		{"anthropic key, truncated", "sk-ant-api03-" + fk(20), redacted(scrub.KindAPIKey), ""},
+		{"github token", "ghp_" + fk(36), redacted(scrub.KindAPIKey), ""},
+		{"aws id", "id AKIA" + fake(fakeUpper, 16, 0) + " ok", "id " + redacted(scrub.KindAPIKey) + " ok", ""},
 		{"two in a row", fakeGatewayKey + " " + fakeJWT, redacted(scrub.KindGatewayKey) + " " + redacted(scrub.KindJWT), ""},
 
 		// redacted-only rules
