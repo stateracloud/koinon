@@ -241,6 +241,17 @@ var _ = Describe("the key-admin Job", func() {
 			Expect(ks.Stored).To(HaveKey(fresh), "the KEK is added, inactive, as without the flag")
 		})
 
+		It("refuses the ID of the lost active KEK and leaves the Secret unchanged", func(ctx SpecContext) {
+			seed(ctx, lost, survivor)
+			Expect(recover(lost).Run(ctx)).To(MatchError(ContainSubstring("is the lost active KEK")))
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, secret, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sec.Data).To(HaveLen(2))
+			Expect(string(sec.Data[secretstore.ActiveFile])).To(Equal(lost))
+			Expect(sec.Data).NotTo(HaveKey(lost))
+			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")
+		})
+
 		It("needs the ID of the KEK to add, refuses an ID in use, and stops while a held KEK does not unwrap", func(ctx SpecContext) {
 			seed(ctx, lost, survivor)
 			Expect(recover("").Run(ctx)).To(MatchError(ContainSubstring("needs the ID of the KEK to add")))

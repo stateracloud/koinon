@@ -150,6 +150,10 @@ func (a KeyAdmin) recoverActive(ctx context.Context, now func() time.Time, prima
 	if _, ok := ks.Stored[a.AddID]; ok {
 		return false, fmt.Errorf("KEK %s exists; IDs are never reused: pick a new ID", a.AddID)
 	}
+	if a.AddID == ks.Active {
+		// The lost KEK's entry is gone but envelopes sealed by it still carry its ID.
+		return false, fmt.Errorf("KEK %s is the lost active KEK; IDs are never reused: pick a new ID", a.AddID)
+	}
 	key := make([]byte, secretstore.KeySize)
 	if _, err := rand.Read(key); err != nil {
 		return false, err
