@@ -277,9 +277,12 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Expect(approvals(ctx)).To(Equal(1))
 	})
 
-	// #256: the payload is read in canonical order (keys sorted, recursively), so private text split
-	// across two keys is joined whatever order the call wrote them in. Each half is shorter than the
-	// threshold, so neither matches alone.
+	// #256: the payload is joined in call order, in key order (Args.Canonical, each key next to its
+	// value) and values-only in key order and in call order (Args.Values, Args.CallValues: no key
+	// between two values), so private text split across two keys is joined in the order the call
+	// wrote them and in key order, whatever the encoder did.
+	// Each half is shorter than the threshold, so neither matches alone. Against both orders is not
+	// promised (ADR 0091 decision 6).
 	DescribeTable("catches private text split across two keys, in either order the encoder wrote them",
 		func(ctx SpecContext, args string, caught bool) {
 			Expect(result(ctx, "wiki", "read_page", secretPage).GetPass()).NotTo(BeNil())
@@ -296,6 +299,11 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Entry("in key order", `{"a":`+strconv.Quote(secretPage[100:118])+`,"b":`+strconv.Quote(secretPage[118:136])+`}`, true),
 		Entry("reordered by the encoder", `{"b":`+strconv.Quote(secretPage[118:136])+`,"a":`+strconv.Quote(secretPage[100:118])+`}`, true),
 		Entry("nested and reordered", `{"m":{"z":`+strconv.Quote(secretPage[118:136])+`,"y":`+strconv.Quote(secretPage[100:118])+`}}`, true),
+		Entry("in call order, against key order", `{"subject":`+strconv.Quote(secretPage[100:118])+`,"body":`+strconv.Quote(secretPage[118:136])+`}`, true),
+		Entry("in key order, against call order", `{"subject":`+strconv.Quote(secretPage[118:136])+`,"body":`+strconv.Quote(secretPage[100:118])+`}`, true),
+		Entry("from a key into its value", `{`+strconv.Quote(secretPage[100:118])+`:`+strconv.Quote(secretPage[118:136])+`,"zz":"x"}`, true),
+		Entry("from a value into the next key in key order", `{`+strconv.Quote(secretPage[118:136])+`:"y","a":`+strconv.Quote(secretPage[100:118])+`}`, true),
+		Entry("against both call order and key order", `{"body":`+strconv.Quote(secretPage[118:136])+`,"subject":`+strconv.Quote(secretPage[100:118])+`}`, false),
 		Entry("one half alone", `{"a":`+strconv.Quote(secretPage[100:118])+`}`, false),
 	)
 

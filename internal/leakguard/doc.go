@@ -18,8 +18,8 @@
 //
 // The decoders are frozen: a new encoding or evasion is not added here as it is found, since each
 // one added widens the cost and the false positives and still leaves the next. The arguments of
-// a call are joined in call order only; a text split across arguments that are not adjacent, or
-// reordered, is not reassembled. Fixes for wrong verdicts on what the decoders already read, and
+// a call are joined in call order and in the orders the caller names (CheckJoins) only; a text
+// split across arguments that are not adjacent in one of them is not reassembled. Fixes for wrong verdicts on what the decoders already read, and
 // for the budgets, still belong here.
 //
 // # Matching form (Normalise)
@@ -124,10 +124,12 @@
 //
 // # Split reassembly
 //
-// Text split across several arguments of one call is reassembled one way: all non-empty
-// arguments joined in call order (an argument longer than 2*JoinEndBytes contributes its two
-// ends, which hold the boundaries to its neighbours). A split across arguments that are not
-// adjacent, or in the other order, is not reassembled (ADR 0091 decision 6; earlier rounds
+// Text split across several arguments of one call is reassembled by joining all non-empty
+// arguments in call order, and again in each order the caller names (CheckJoins; the MCP guard
+// names the canonical order of the call's JSON members, #256, so a split joins whatever order the
+// encoder wrote the keys in). An argument longer than 2*JoinEndBytes contributes its two ends,
+// which hold the boundaries to its neighbours. A split across arguments that are not adjacent in
+// one of those orders is not reassembled (ADR 0091 decision 6; earlier rounds
 // joined every ordered pair of arguments and decoded windows around each boundary, removed with
 // the rescope). Splits across calls are not reassembled; the per-host and per-run URL budgets and
 // the byte cap of a session with both legs bound them.
@@ -195,7 +197,7 @@
 // # Known limits
 //
 // The guard does not catch:
-//   - text split across arguments that are not adjacent, or out of call order, in pieces of k-1
+//   - text split across arguments that are not adjacent in call order or a named order, in pieces of k-1
 //     (20) canonical characters or fewer each; text reordered inside one argument (words swapped);
 //   - reversed text, ciphers, compression and encodings other than the ones above (base85,
 //     uuencode, punycode, ...);
@@ -220,7 +222,7 @@
 //   - MemoryStore holds one mutex for every scope; koinon-api uses the Postgres store of
 //     internal/mcpguard, keyed by scope.
 //   - The caller passes every string the payload carries, including the elements of numeric
-//     arrays (as text) and the keys of JSON objects, in call order (internal/mcpguard.Flatten).
+//     arrays (as text) and the keys of JSON objects, in call order (internal/mcpguard.SplitArgs).
 //   - The fetch server must parse a URL the way net/url.Parse does; a URL another parser reads
 //     differently can reach a host CheckURL did not see.
 package leakguard

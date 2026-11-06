@@ -28,11 +28,16 @@ import (
 // What it does not cover: the gateway hop (agentgateway, the MCP session, Guard.Check against
 // Postgres) and a real harness. Those are the escape suite's and the kind e2e's (#70's exfil case).
 
-// The fake model emits a tool call's arguments with their keys sorted (a Go map, as any encoder
-// that sorts keys would), so the mail's subject and body arrive as body, subject. The guard reads
-// the payload in canonical order, the keys sorted (#256), so the order an encoder wrote the keys in
-// decides nothing: every call the model loop sends is decided exactly as the direct replay decides
-// the corpus's own bytes, the split shapes included.
+// keyOrder is the one planted leak the model loop decides differently, and why: the fake model
+// emits a tool call's arguments with their keys sorted (a Go map, as any encoder that sorts keys
+// would), so the mail's subject and body arrive as body, subject, and the halves the corpus wrote in
+// call order (subject first) arrive against both call order and key order. The guard joins the
+// payload in call order and in key order (#256, ADR 0091 decision 6), so two base64 halves too
+// short to match alone do not join, and the leak passes before both legs. No reading of the JSON
+// the model sent puts them in order: the corpus pins that shape as not_promised
+// (split-args-against-both), and the both-legs replay of the same case is still caught. The
+// swapped shapes (split-args-reversed, split-args-b64-swapped) arrive in key order and are caught.
+const keyOrder = "leak/handbook-rule/split-args-b64-halves/private-only"
 
 // modelToolName is the name a corpus tool is declared under to the fake model.
 func modelToolName(server, tool string) string { return server + "__" + tool }
@@ -211,7 +216,7 @@ func sampleGenerations(lines []corpusLine, shapes ...string) []string {
 
 var _ = g.Describe("Replay with the fake model in the loop (#70)", func() {
 	// Every call of the sampled generations is decided as the direct replay decides it, and the
-	// expectations hold on what the model sent.
+	// expectations hold on what the model sent. The one exception is keyOrder.
 	sameAsDirect := func(ctx g.SpecContext, path string, extra []string, shapes ...string) []replayed {
 		g.GinkgoHelper()
 		lines := mustCorpus(path)
@@ -240,6 +245,11 @@ var _ = g.Describe("Replay with the fake model in the loop (#70)", func() {
 			Expect(c.line.Args).To(MatchJSON(d.line.Args), "%s: the model sent other arguments", where(c))
 			Expect(c.class).To(Equal(d.class), where(c))
 			Expect(c.bytes).To(Equal(d.bytes), where(c))
+			if c.line.Generation == keyOrder {
+				Expect(d.verdict.Action).To(Equal(NeedsDecision), where(c))
+				Expect(c.verdict.Action).To(Equal(Pass), "%s: the guard now joins the halves in either key order: drop keyOrder", where(c))
+				continue
+			}
 			Expect(c.verdict.Action).To(Equal(d.verdict.Action), where(c))
 			Expect(c.verdict.Reason).To(Equal(d.verdict.Reason), where(c))
 			Expect(c.verdict.Reasons).To(Equal(d.verdict.Reasons), where(c))
@@ -266,12 +276,11 @@ var _ = g.Describe("Replay with the fake model in the loop (#70)", func() {
 	g.It("blocks a sample of the planted leaks per sink class, split ones included, on what the model sent", func(ctx g.SpecContext) {
 		calls := sameAsDirect(ctx, leakCorpus, nil, "split-args", "split-calls", "split-args-b64-halves", "whole-b64")
 		caught := map[string]int{}
-		// The split whose halves the model reorders (subject and body arrive sorted) is in the sample,
-		// and decided as the direct replay decides it (#256).
-		Expect(slices.ContainsFunc(calls, func(c replayed) bool {
-			return c.line.Generation == "leak/handbook-rule/split-args-b64-halves/private-only"
-		})).To(BeTrue(), "the split with reordered keys is in the sample")
+		Expect(slices.ContainsFunc(calls, func(c replayed) bool { return c.line.Generation == keyOrder })).To(BeTrue(), "the key-order case is in the sample")
 		for _, c := range calls {
+			if c.line.Generation == keyOrder {
+				continue
+			}
 			switch c.line.Expect {
 			case "caught", "caught_before_both_legs":
 				Expect(c.verdict.Action).NotTo(Equal(Pass), "%s: %s", c.line.Case, where(c))

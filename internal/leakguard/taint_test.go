@@ -139,14 +139,44 @@ var _ = Describe("TaintChecker", func() {
 		Expect(d.Reason).To(Equal(leakguard.ReasonBudgetArgs))
 	})
 
-	// ADR 0091 decision 6: the arguments are joined in call order only. A text split across
-	// arguments that are not adjacent, or put back to front, is not reassembled; the sink class
-	// and the byte cap carry that case, not the text match.
+	// ADR 0091 decision 6: the arguments are joined in call order, and in the orders a caller names
+	// (CheckJoins), only. A text split across arguments that are not adjacent in one of them, or put
+	// back to front, is not reassembled; the sink class and the byte cap carry that case, not the
+	// text match.
 	DescribeTable("does not reassemble out of call order",
 		func(args ...string) { Expect(check(args...).Reason).To(Equal(leakguard.ReasonPass)) },
 		Entry("halves reversed", excerpt[half:], excerpt[:half]),
 		Entry("halves with an argument between", excerpt[:half], "ignored", excerpt[half:]),
 	)
+
+	Describe("joining in the orders the caller names (#256)", func() {
+		joins := func(args []string, orders ...[]int) leakguard.Decision {
+			GinkgoHelper()
+			d, err := checker.CheckJoins(ctx, testScope, fp, args, orders...)
+			Expect(err).NotTo(HaveOccurred())
+			return d
+		}
+
+		It("reassembles halves that are adjacent in a named order", func() {
+			Expect(joins([]string{excerpt[half:], excerpt[:half]}, []int{1, 0}).Reason).To(Equal(leakguard.ReasonTaint))
+			Expect(joins([]string{excerpt[:half], "ignored", excerpt[half:]}, []int{1, 0, 2}).Reason).To(Equal(leakguard.ReasonTaint))
+		})
+
+		It("still joins in call order", func() {
+			Expect(joins([]string{excerpt[:half], excerpt[half:]}, []int{1, 0}).Reason).To(Equal(leakguard.ReasonTaint))
+		})
+
+		DescribeTable("adds nothing for an order that is not one",
+			func(order []int) {
+				Expect(joins([]string{excerpt[half:], excerpt[:half]}, order).Reason).To(Equal(leakguard.ReasonPass))
+			},
+			Entry("call order", []int{0, 1}),
+			Entry("an index out of range", []int{1, 2, 0}),
+			Entry("a negative index", []int{1, -1, 0}),
+			Entry("an index twice", []int{1, 0, 1}),
+			Entry("one index", []int{1}),
+		)
+	})
 
 	It("reports an evicted scope without changing the decision", func() {
 		st := leakguard.NewMemoryStore(leakguard.MemoryStoreOptions{MaxFingerprints: 4})

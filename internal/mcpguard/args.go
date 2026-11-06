@@ -17,7 +17,7 @@ import (
 )
 
 // Args is one call's arguments split by ADR 0091 decision 7: the address arguments, which decide
-// the sink class, and the payload, every string the call carries in canonical order. A derived tool's
+// the sink class, and the payload, every string the call carries in call order. A derived tool's
 // address is not payload, except what of it can carry data: the path, query and fragment of a
 // fetched URL, and the whole URL after its scheme when the host is not one the org trusts (its
 // labels can carry data too). A fixed tool's address arguments decide nothing, so they are payload.
@@ -25,14 +25,23 @@ type Args struct {
 	// Address holds the value of each address argument the declaration names, by name. A named
 	// argument that is missing or not a string is absent, so a derived class reads it as unparsable.
 	Address map[string]string
-	// Payload is every other string of the call: string values, numbers and booleans as written,
-	// and the keys of objects (ADR 0084: the wiring passes them all). For a fetch tool the path,
-	// query and fragment of its URL are payload too (ADR 0091 decision 3), at the URL argument's
-	// place. The order is canonical (#256): of every object its keys sorted, then its members'
-	// values in that order, recursively; lists in their order. The text match scans each string on
-	// its own and the strings joined in this order, so a text split across two members joins
-	// whatever order the encoder wrote them in; a split against the keys' order does not.
+	// Payload is every other string of the call in the order it was sent: string values, numbers
+	// and booleans as written, and the keys of objects (ADR 0084: the wiring passes them all). For a
+	// fetch tool the path, query and fragment of its URL are payload too (ADR 0091 decision 3), at
+	// the URL argument's place.
 	Payload []string
+	// Canonical, Values and CallValues are three more readings of the payload (#256), as indices
+	// into Payload; each recurses into nested objects and keeps a list in its order:
+	//   - Canonical: of every object its members sorted by key, each its key and then what its value
+	//     holds, so a key stays next to its value;
+	//   - Values: of every object its keys sorted, then its members' values in that order, so no key
+	//     stands between two values;
+	//   - CallValues: the same in call order.
+	// The text match scans each string on its own, the strings joined in call order and joined in
+	// each of these (leakguard.TaintChecker.CheckJoins): a text split across two members joins in
+	// the order the call wrote them and in key order, whatever order the encoder used, with or
+	// without a key between the halves.
+	Canonical, Values, CallValues []int
 }
 
 // PayloadBytes is what the byte cap counts: the payload as sent, no decoding.
@@ -124,6 +133,7 @@ func (w walker) object(path string, depth int, odd bool) error {
 		return errors.New("the arguments are nested too deeply")
 	}
 	// Each member appends its own strings and nothing else, so one ends where the next starts.
+	first := len(w.out.Payload)
 	var members []member
 	for w.dec.More() {
 		if n := len(members); n > 0 {
@@ -168,7 +178,7 @@ func (w walker) object(path string, depth int, odd bool) error {
 	if n := len(members); n > 0 {
 		members[n-1].end = len(w.out.Payload)
 	}
-	w.canonical(members)
+	w.canonical(first, members)
 	return nil
 }
 
@@ -180,33 +190,56 @@ type member struct {
 	start, end int
 }
 
-// canonical rewrites the payload an object added (#256): its keys in sorted order, then the values
-// of its members in the same order. A JSON object has no order, so the payload, and the join the
-// text match scans, must not depend on the order an encoder wrote the keys in; and no key stands
-// between the values of two members, so a text split across them joins. Members with the same key
-// (a raw repeated key) keep their order. A nested object was rewritten when it was read, so the
-// order is recursive; a list keeps its order, which is data.
-func (w walker) canonical(members []member) {
+// canonical orders what an object added to the payload (#256) in Canonical, Values and
+// CallValues (see Args). A JSON object has no order, so the key-sorted readings must not depend on
+// the order an encoder wrote the keys in. Members with the same key (a raw repeated key) keep their
+// order. A nested object was ordered when it was read, so the orders are recursive; a list keeps
+// its order, which is data. The strings are not moved: Payload stays in call order.
+func (w walker) canonical(first int, members []member) {
+	w.extend()
 	if len(members) < 2 {
 		return
 	}
-	first := members[0].start
 	sorted := slices.Clone(members)
 	slices.SortStableFunc(sorted, func(a, b member) int { return strings.Compare(a.key, b.key) })
-	out := make([]string, 0, members[len(members)-1].end-first)
+	end := len(w.out.Payload)
+	canon := make([]int, 0, end-first)
 	for _, m := range sorted {
+		canon = append(canon, w.out.Canonical[m.start:m.end]...)
+	}
+	copy(w.out.Canonical[first:end], canon)
+	valuesAfterKeys(w.out.Values, first, end, sorted)
+	valuesAfterKeys(w.out.CallValues, first, end, members)
+}
+
+// valuesAfterKeys rewrites order[first:end], an object's members in their segments, as the keys of
+// members in that order and then their values' strings in that order. A member's segment starts
+// with its key, when it has one: a nested object reordered only what its value added.
+func valuesAfterKeys(order []int, first, end int, members []member) {
+	out := make([]int, 0, end-first)
+	for _, m := range members {
 		if m.keyed {
-			out = append(out, w.out.Payload[m.start])
+			out = append(out, order[m.start])
 		}
 	}
-	for _, m := range sorted {
-		values := w.out.Payload[m.start:m.end]
+	for _, m := range members {
+		seg := order[m.start:m.end]
 		if m.keyed {
-			values = values[1:]
+			seg = seg[1:]
 		}
-		out = append(out, values...)
+		out = append(out, seg...)
 	}
-	copy(w.out.Payload[first:], out)
+	copy(order[first:end], out)
+}
+
+// extend puts the strings the payload gained since the last ordering into each order, in call
+// order: a scalar's place in an order is its member's.
+func (w walker) extend() {
+	for i := len(w.out.Canonical); i < len(w.out.Payload); i++ {
+		w.out.Canonical = append(w.out.Canonical, i)
+		w.out.Values = append(w.out.Values, i)
+		w.out.CallValues = append(w.out.CallValues, i)
+	}
 }
 
 // address reads the value of an address argument. A string is the address; anything else leaves
@@ -222,7 +255,14 @@ func (w walker) address(name string) error {
 		if err != nil {
 			return err
 		}
+		w.extend()
+		base := len(w.out.Payload) - 1
 		w.out.Payload = append(w.out.Payload, inner.Payload[1:]...)
+		for k, i := range inner.Canonical[1:] {
+			w.out.Canonical = append(w.out.Canonical, base+i)
+			w.out.Values = append(w.out.Values, base+inner.Values[k+1])
+			w.out.CallValues = append(w.out.CallValues, base+inner.CallValues[k+1])
+		}
 		return nil
 	}
 	w.out.Address[name] = s

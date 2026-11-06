@@ -65,41 +65,80 @@ var _ = Describe("splitting a call's arguments (ADR 0091 decision 7)", func() {
 		a, err := split(`{"channel":"general","text":"hello"}`, d, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(a.Address).To(HaveKeyWithValue("channel", "general"))
-		// Canonical order: the keys that are payload, then the values by key (channel, text).
-		Expect(a.Payload).To(Equal([]string{"text", "general", "hello"}))
+		Expect(a.Payload).To(Equal([]string{"general", "text", "hello"}))
 		Expect(a.PayloadBytes()).To(Equal(len("general") + len("text") + len("hello")))
 	})
 
 	Describe("the canonical order of the payload (#256)", func() {
 		plain := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.Fixed}
-		payload := func(raw string) []string {
+		// orders is the payload in call order and in canonical order.
+		orders := func(raw string) (call, canonical []string) {
 			GinkgoHelper()
 			a, err := split(raw, plain, nil)
 			Expect(err).NotTo(HaveOccurred())
-			return a.Payload
+			Expect(a.Canonical).To(HaveLen(len(a.Payload)))
+			for _, i := range a.Canonical {
+				canonical = append(canonical, a.Payload[i])
+			}
+			Expect(canonical).To(ConsistOf(a.Payload), "a permutation of the payload")
+			return a.Payload, canonical
 		}
 
-		It("is the same whatever order the encoder wrote the keys in", func() {
-			want := []string{"a", "b", "koinon_test_", "not-a-real"}
-			Expect(payload(`{"a":"koinon_test_","b":"not-a-real"}`)).To(Equal(want))
-			Expect(payload(`{"b":"not-a-real","a":"koinon_test_"}`)).To(Equal(want))
+		It("keeps the payload in call order and orders the members by key, whatever order the encoder used", func() {
+			call, canon := orders(`{"b":"not-a-real","a":"koinon_test_"}`)
+			Expect(call).To(Equal([]string{"b", "not-a-real", "a", "koinon_test_"}))
+			Expect(canon).To(Equal([]string{"a", "koinon_test_", "b", "not-a-real"}))
+			_, again := orders(`{"a":"koinon_test_","b":"not-a-real"}`)
+			Expect(again).To(Equal(canon))
 		})
 
-		It("puts no key between the values of two members, so a split text is adjacent", func() {
-			Expect(payload(`{"subject":"half two","body":"half one","to":"x"}`)).To(Equal(
-				[]string{"body", "subject", "to", "half one", "half two", "x"}))
+		It("keeps each key next to its value", func() {
+			_, canon := orders(`{"zz":"x","half one":"half two"}`)
+			Expect(canon).To(Equal([]string{"half one", "half two", "zz", "x"}))
 		})
 
 		It("sorts nested objects too, and keeps a list in its order", func() {
+			want := []string{"m", "a", "one", "b", "two", "n", "z", "y"}
+			_, canon := orders(`{"n":["z","y"],"m":{"b":"two","a":"one"}}`)
+			Expect(canon).To(Equal(want))
+			_, canon = orders(`{"m":{"a":"one","b":"two"},"n":["z","y"]}`)
+			Expect(canon).To(Equal(want))
+			_, canon = orders(`{"l":[{"d":"4","c":"3"},{"b":"2","a":"1"}]}`)
+			Expect(canon).To(Equal([]string{"l", "c", "3", "d", "4", "a", "1", "b", "2"}))
+		})
+
+		It("reads the values in key order with no key between them, nested and in lists too", func() {
+			read := func(raw string) []string {
+				GinkgoHelper()
+				a, err := split(raw, plain, nil)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(a.Values).To(HaveLen(len(a.Payload)))
+				var out []string
+				for _, i := range a.Values {
+					out = append(out, a.Payload[i])
+				}
+				Expect(out).To(ConsistOf(a.Payload))
+				return out
+			}
+			Expect(read(`{"subject":"half two","body":"half one","to":"x"}`)).To(Equal(
+				[]string{"body", "subject", "to", "half one", "half two", "x"}))
+			a, err := split(`{"subject":"half one","body":"half two","m":{"z":"1","y":"2"}}`, plain, nil)
+			Expect(err).NotTo(HaveOccurred())
+			var call []string
+			for _, i := range a.CallValues {
+				call = append(call, a.Payload[i])
+			}
+			Expect(call).To(Equal([]string{"subject", "body", "m", "half one", "half two", "z", "y", "1", "2"}), "CallValues keeps call order")
 			want := []string{"m", "n", "a", "b", "one", "two", "z", "y"}
-			Expect(payload(`{"n":["z","y"],"m":{"b":"two","a":"one"}}`)).To(Equal(want))
-			Expect(payload(`{"m":{"a":"one","b":"two"},"n":["z","y"]}`)).To(Equal(want))
-			Expect(payload(`{"l":[{"d":"4","c":"3"},{"b":"2","a":"1"}]}`)).To(Equal(
+			Expect(read(`{"n":["z","y"],"m":{"b":"two","a":"one"}}`)).To(Equal(want))
+			Expect(read(`{"m":{"a":"one","b":"two"},"n":["z","y"]}`)).To(Equal(want))
+			Expect(read(`{"l":[{"d":"4","c":"3"},{"b":"2","a":"1"}]}`)).To(Equal(
 				[]string{"l", "c", "d", "3", "4", "a", "b", "1", "2"}))
 		})
 
 		It("keeps a raw repeated key in its order", func() {
-			Expect(payload(`{"k":"first","j":"x","k":"second"}`)).To(Equal([]string{"j", "k", "k", "x", "first", "second"}))
+			_, canon := orders(`{"k":"first","j":"x","k":"second"}`)
+			Expect(canon).To(Equal([]string{"j", "x", "k", "first", "k", "second"}))
 		})
 
 		It("puts an address argument's payload at its key's place, without the key", func() {
@@ -107,7 +146,24 @@ var _ = Describe("splitting a call's arguments (ADR 0091 decision 7)", func() {
 			a, err := split(`{"z":"last","opts":{"note":"n","channel":"general"}}`, fixed, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(a.Address).To(HaveKeyWithValue("opts.channel", "general"))
-			Expect(a.Payload).To(Equal([]string{"opts", "z", "note", "general", "n", "last"}))
+			Expect(a.Payload).To(Equal([]string{"z", "last", "opts", "note", "n", "general"}))
+			var canon []string
+			for _, i := range a.Canonical {
+				canon = append(canon, a.Payload[i])
+			}
+			Expect(canon).To(Equal([]string{"opts", "general", "note", "n", "z", "last"}))
+		})
+
+		It("orders a non-string address argument's content too", func() {
+			fixed := sinkclass.Declaration{Class: sinkclass.ExternalLow, Derivation: sinkclass.Fixed, AddressArgs: []string{"to"}}
+			a, err := split(`{"to":{"y":"2","x":"1"},"a":"z"}`, fixed, nil)
+			Expect(err).NotTo(HaveOccurred())
+			var canon []string
+			for _, i := range a.Canonical {
+				canon = append(canon, a.Payload[i])
+			}
+			Expect(a.Payload).To(Equal([]string{"y", "2", "x", "1", "a", "z"}))
+			Expect(canon).To(Equal([]string{"a", "z", "x", "1", "y", "2"}))
 		})
 	})
 

@@ -528,7 +528,7 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 	}
 	// The text match: payload only, each string alone and joined in canonical order (ADR 0091
 	// decision 6, #256).
-	taint, err := leakguard.TaintChecker{Store: &taintStore{q: g.q, sess: sess, evicted: row.Evicted}, Limits: g.limits}.Check(ctx, sess.scope(), fp, args.Payload)
+	taint, err := leakguard.TaintChecker{Store: &taintStore{q: g.q, sess: sess, evicted: row.Evicted}, Limits: g.limits}.CheckJoins(ctx, sess.scope(), fp, args.Payload, args.Canonical, args.Values, args.CallValues)
 	if err != nil {
 		return a, err
 	}
