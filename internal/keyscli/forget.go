@@ -48,6 +48,12 @@ func (r lostRule) set(c Column) string { return c.Column + " = NULL, " + r.mark 
 // becomes lost (credential_lost_at, migration 00052; the home repositories, 00054): the UI asks
 // for it again and nothing serves it. Saved work cannot be entered again, so it expires as it
 // does after its retention (status expired, the envelope dropped).
+//
+// Seam for ADR 0096 (MCP sign-in, draft #248), not built here: its sealed values (the access and
+// refresh tokens, the pending PKCE verifier, admin-entered and dynamically registered client
+// secrets) join [Columns] and get a rule here that marks the sign-in lost, which parks the runs
+// that need it and posts "Sign in again" (ADR 0096 section 4). columns_test.go fails for a sealed
+// binding with no rule.
 var lostRules = map[Column]lostRule{
 	{catalog.ProvidersTable, catalog.KeyColumn}:                {markLost, "providers"},
 	{catalog.ProvidersTable, catalog.CostKeyColumn}:            {"cost_api_key_lost_at = now()", "providerCostKeys"},
