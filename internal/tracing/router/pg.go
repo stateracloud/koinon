@@ -73,7 +73,7 @@ func (s *PGStore) ModelCalls(ctx context.Context, org, run pgtype.UUID, seq int3
 	for _, r := range rows {
 		c := ModelCall{
 			RequestID: r.RequestID, Model: r.Model, Provider: r.ProviderType,
-			Input: r.InputTokens, Output: r.OutputTokens, CacheRead: r.CacheReadTokens, CacheWrite: r.CacheWriteTokens, Reasoning: r.ReasoningTokens,
+			Input: r.InputTokens, Output: r.OutputTokens, CacheRead: r.CacheReadTokens, CacheWrite: r.CacheWriteTokens, Reasoning: r.ReasoningTokens, ReasoningKnown: r.ReasoningKnown,
 			Provisional: r.Provisional, Estimated: r.Estimated, UpstreamStatus: int(r.UpstreamStatus.Int16), Time: r.OccurredAt.Time,
 		}
 		if r.ModelID.Valid {

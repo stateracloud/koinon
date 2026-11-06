@@ -1,18 +1,19 @@
 # Secret keys: rotation, backup and compromise
 
-Koinon stores provider API keys, connection secrets (a GitHub App's private key) and remote MCP
-server credentials in Postgres as
-envelopes: each value has its own data key (DEK), wrapped by a key-encryption key (KEK) that lives
-in a Kubernetes Secret. This runbook says how to look after the KEKs. The design is in
-[ADR 0056](../adr/0056-model-providers-pricing-and-budgets-per-org.md); the sources for the
-numbers and the procedure are in [the research](../research/kek-rotation.md).
+Koinon stores provider API keys (and a provider's optional cost key), connection secrets (a GitHub
+App's private key), remote MCP server credentials, home repository passwords (the kopia repositories
+that hold agent home checkpoints) and trace destination credentials in Postgres as envelopes: each
+value has its own data key (DEK), wrapped by a key-encryption key (KEK) that lives in a Kubernetes
+Secret. This runbook says how to look after the KEKs. The design is in
+[ADR 0056](../adr/0056-model-providers-pricing-and-budgets-per-org.md); the sources for the numbers and
+the procedure are in [the research](../research/kek-rotation.md).
 
 ## What is where
 
 | What | Where | Who can read it |
 | --- | --- | --- |
 | KEKs | Secret `koinon-kek` (or `secrets.kek.existingSecret`): one file per KEK, named by its ID, plus `active` | `koinon-api` reads it through the Kubernetes API; `koinon-reconciler` mounts it. Nothing else does. |
-| Wrapped DEKs and ciphertext | `providers.api_key`, `connections.secret_envelope`, `mcp_servers.credential`, `saved_work.envelope` (uncommitted work saved from a stuck sandbox, sealed by koinon-api, gone after 14 days) in Postgres | Anyone with the database, but they need the KEK to open them. |
+| Wrapped DEKs and ciphertext | `providers.api_key` and `providers.cost_api_key`, `connections.secret_envelope`, `mcp_servers.credential`, `home_repositories.password_envelope` and `home_repository_epochs.password_envelope` (an agent's first home repository, and each one that replaced it; the current one is the newest epoch), `trace_destinations.credentials` and `platform_trace_destination.credentials`, `saved_work.envelope` (uncommitted work saved from a stuck sandbox, sealed by koinon-api, gone after 14 days) in Postgres | Anyone with the database, but they need the KEK to open them. |
 | Saved-work upload key | Secret `<release>-saved-work`, key `key` (random, created by `koinon-api` on first use, never overwritten) | `koinon-api` reads it through the Kubernetes API; `koinon-agentd` mounts it read-only. It signs agentd's posts of a stuck sandbox's work; it is not a KEK and opens nothing. |
 | Opened provider keys | Secret `koinon-gateway-providers` | Only the gateway pod mounts it. |
 | Install ID | Table `install_identity` in Postgres (one UUID, written by the first migration, never changed) | Anyone with the database; it is not secret. A KEK wrapped by a KMS is bound to it (see "The install binding" below). |
@@ -61,7 +62,8 @@ Restore it with `kubectl -n <namespace> apply -f koinon-kek-backup.yaml`.
 Keep the file with your other secrets, apart from the database backups. **A database backup needs the
 KEKs that wrapped it.** Keep every KEK, including retired ones, for as long as a database backup that
 used it exists. Retiring a KEK removes it from the Secret, not from your escrow. If every copy of a KEK
-is lost, the values wrapped by it are lost: see [A lost KEK](#a-lost-kek).
+is lost, the values wrapped by it are lost, and that includes every home checkpoint whose repository
+password it sealed and the trace destination credentials it sealed: see [A lost KEK](#a-lost-kek).
 
 The Secret is not part of the Helm release, so `helm uninstall` leaves it, and so does a GitOps prune.
 Delete it yourself when you delete the database.
@@ -85,9 +87,10 @@ KEKs that seal values but are missing from the Secret. Without a terminal it doe
 pass `--yes`. It reads the Secret again after you answer, and changes nothing if the KEK was
 restored meanwhile. Then:
 
-- Provider keys, connection secrets, MCP server and trace destination credentials sealed with it are
-  marked lost. Their pages say "credential lost" and ask for the value again (an MCP server keeps its
-  header and prefix); nothing uses them until then. A declared one is stored again from its Secret.
+- Provider keys and cost keys, connection secrets, MCP server and trace destination credentials sealed
+  with it are marked lost. Their pages say "credential lost" and ask for the value again (an MCP
+  server keeps its header and prefix); nothing uses them until then. A declared one is stored again
+  from its Secret.
 - Saved work sealed with it expires, as it does after its retention.
 - An agent whose current home repository password was sealed with it starts a new home repository,
   sealed with the active KEK, and its next sandbox starts with a fresh home: its earlier checkpoints
@@ -252,8 +255,10 @@ can already open every DEK they copied. Do this, in this order:
    If only the **bucket's S3 key** leaked, not a KEK, the repository passwords are safe: do step 2b.1
    and 2b.5 only.
 3. **Rotate the real credentials at their providers.** Re-encrypting does not undo a leak. Issue new
-   OpenRouter, OpenAI or other provider keys and a new GitHub App private key, and replace them in
-   Koinon (the admin API, or by editing the declarative Secrets). Revoke the old ones at the provider.
+   OpenRouter, OpenAI or other provider keys (and cost keys), a new GitHub App private key, new remote
+   MCP server credentials and new trace destination credentials (the trace backend's API keys, or a
+   generic destination's header values), and replace them in Koinon (the admin API, or by editing the
+   declarative Secrets). Revoke the old ones where they were issued.
 4. Rotate the admin API tokens: revoke every token and create new ones.
 5. Look at the audit log for changes made while the key was exposed.
 
@@ -377,6 +382,29 @@ What changes once you opt in (ADR 0085 decision 12):
   `koinon_kek_active_reachable{backend}` (1 or 0), probed on every reload. A local install always
   reads 1 and logs nothing. If the KMS is down when a pod starts, the pod does not start (it cannot
   unwrap the KEKs: fail closed), so the gauge never shows 0 then; alert on the pod not being ready.
+
+**Losing the KMS key loses the KEKs it wraps.** A transit key deleted in OpenBao (or a disabled transit
+mount, which deletes every key in it), or an AWS KMS key whose deletion completed, cannot unwrap the
+KEKs any more, and a KEK Secret backup holds only their ciphertext. Every KEK wrapped by that key is
+then lost, with the same consequences as [A lost KEK](#a-lost-kek), home checkpoints and trace
+destination credentials included.
+
+- Protect the KMS key as you protect the KEK backup. OpenBao: leave `deletion_allowed` off on the
+  transit key, do not disable the transit mount, and back up OpenBao itself (a raft snapshot, or your
+  storage backend's backup, with the unseal or recovery keys). A transit key backup is not the way: it
+  needs `exportable` and `allow_plaintext_backup`, which cannot be turned off again and let the key
+  leave the KMS. AWS: a key policy that denies `kms:ScheduleKeyDeletion`.
+- AWS deletion waits 7 to 30 days. While it is pending, pods fail to start (see the bullet on
+  disabling the key above); `aws kms cancel-key-deletion` and then `aws kms enable-key` bring the key
+  back and nothing is lost.
+- Before you retire a KMS key, move the KEKs to a new key (add with the new key, activate, rewrap,
+  retire) and keep the old key until `keys status` lists no KEK wrapped by it.
+- Once the key is gone for good, koinon-api cannot load the key set: it fails when any one KEK does
+  not unwrap, so it does not start and `keys forget` cannot run. Remove the entries of the KEKs that
+  key wrapped from the KEK Secret first (keep a copy of the Secret), then `keys forget` each of them.
+  If the active KEK is among them, the key set has no active KEK left and does not load; that
+  procedure is not written yet
+  ([#255](https://github.com/stateracloud/koinon/issues/255)), so stop there.
 
 A local install has none of this: no key-admin Job, and koinon-api creates and adds KEKs exactly as
 before.

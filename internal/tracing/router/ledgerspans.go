@@ -26,6 +26,9 @@ type ModelCall struct {
 	// Token counts as the ledger keeps them: Input includes cache reads and writes, Output includes
 	// reasoning, which is what the GenAI conventions mean by the same names.
 	Input, Output, CacheRead, CacheWrite, Reasoning int64
+	// ReasoningKnown: the provider reported the thinking split, so Reasoning is a figure even at 0
+	// (spend_entries.reasoning_known, #78).
+	ReasoningKnown bool
 	// Cost is Koinon's cost (the ledger's); nil when the entry is not priced.
 	Cost *float64
 	// GatewayCost is what agentgateway logged; nil when it logged none.
@@ -45,6 +48,7 @@ func (c ModelCall) pending() bool { return c.Cost == nil || c.Provisional }
 type turnUsage struct {
 	Calls                                           int
 	Input, Output, CacheRead, CacheWrite, Reasoning int64
+	ReasoningKnown                                  bool
 	Cost                                            float64
 	Pending                                         bool
 	// ModelID is the first call's model ID, for the root.
@@ -95,9 +99,10 @@ func modelCallSpans(root *tracepb.Span, trace [16]byte, seq int32, calls []Model
 			kvInt(semconv.GenAIUsageCacheReadTokens, c.CacheRead),
 			kvInt(semconv.GenAIUsageCacheWriteTokens, c.CacheWrite),
 		)
-		// The ledger keeps 0 when the provider reported no thinking split (Anthropic Messages until
-		// #78), so the attribute is left out rather than claim no thinking happened (koinon-private#316).
-		if c.Reasoning > 0 {
+		// The ledger keeps 0 when the provider reported no thinking split (agentgateway logs none for
+		// Anthropic Messages, #78), so the attribute is left out rather than claim no thinking happened
+		// (koinon-private#316). A reported split is written, 0 included.
+		if c.ReasoningKnown || c.Reasoning > 0 {
 			a = append(a, kvInt(semconv.GenAIUsageReasoningTokens, c.Reasoning))
 		}
 		a = append(a, kvStr(semconv.KoinonRequest, c.RequestID))
@@ -132,6 +137,7 @@ func modelCallSpans(root *tracepb.Span, trace [16]byte, seq int32, calls []Model
 		use.CacheRead += c.CacheRead
 		use.CacheWrite += c.CacheWrite
 		use.Reasoning += c.Reasoning
+		use.ReasoningKnown = use.ReasoningKnown || c.ReasoningKnown
 		if c.Cost != nil {
 			use.Cost += *c.Cost
 		}
@@ -142,14 +148,14 @@ func modelCallSpans(root *tracepb.Span, trace [16]byte, seq int32, calls []Model
 
 // putTotals sets the turn's totals on its root span (decision 3). They are written even when the turn
 // made no model call, so a backend shows zero rather than a missing figure; the reasoning tokens are
-// the exception, left out when no call reported a split (koinon-private#316), since 0 would read as "no thinking".
+// the exception, left out when no call reported a split (koinon-private#316, #78), since 0 would read as "no thinking".
 func putTotals(root *tracepb.Span, u turnUsage) {
 	a := root.Attributes
 	a = setAttr(a, kvInt(semconv.GenAIUsageInputTokens, u.Input))
 	a = setAttr(a, kvInt(semconv.GenAIUsageOutputTokens, u.Output))
 	a = setAttr(a, kvInt(semconv.GenAIUsageCacheReadTokens, u.CacheRead))
 	a = setAttr(a, kvInt(semconv.GenAIUsageCacheWriteTokens, u.CacheWrite))
-	if u.Reasoning > 0 {
+	if u.ReasoningKnown || u.Reasoning > 0 {
 		a = setAttr(a, kvInt(semconv.GenAIUsageReasoningTokens, u.Reasoning))
 	} else {
 		a = delAttr(a, semconv.GenAIUsageReasoningTokens)

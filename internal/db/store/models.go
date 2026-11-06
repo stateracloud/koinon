@@ -1781,6 +1781,22 @@ type HomeCheckpoint struct {
 	RepositoryEpoch int32
 }
 
+type HomeCheckpointResync struct {
+	OrgID       pgtype.UUID
+	AgentID     pgtype.UUID
+	RequestID   pgtype.UUID
+	RequestedAt pgtype.Timestamptz
+	ResyncAfter pgtype.Timestamptz
+	Attempts    int32
+	Error       pgtype.Text
+	FinishedAt  pgtype.Timestamptz
+	FailedAt    pgtype.Timestamptz
+	Snapshots   pgtype.Int4
+	Added       pgtype.Int4
+	Missing     pgtype.Int4
+	Skipped     pgtype.Int4
+}
+
 type HomeRepository struct {
 	OrgID            pgtype.UUID
 	AgentID          pgtype.UUID
@@ -2357,6 +2373,7 @@ type SpendEntry struct {
 	Principal        string
 	UpstreamStatus   pgtype.Int2
 	ProviderID       pgtype.UUID
+	ReasoningKnown   pgtype.Bool
 }
 
 type SpendEntryRevision struct {

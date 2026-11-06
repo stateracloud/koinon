@@ -5,10 +5,13 @@ package mcpservers_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -24,6 +27,12 @@ func uuidOf(s string) pgtype.UUID {
 	var id pgtype.UUID
 	Expect(id.Scan(s)).To(Succeed())
 	return id
+}
+
+func uuidString(id pgtype.UUID) string {
+	s, err := id.Value()
+	Expect(err).NotTo(HaveOccurred())
+	return s.(string)
 }
 
 var _ = Describe("Service", func() {
@@ -508,6 +517,150 @@ var _ = Describe("Service", func() {
 			other, otherUser, _ := pgtest.NewOrg(ctx, pool)
 			_, err = svc.SetTier(ctx, other, audit.User(otherUser), s.ID, "search", "auto")
 			Expect(err).To(MatchError(mcpservers.ErrNotFound))
+		})
+	})
+
+	Describe("waking the reconciler", func() {
+		var conn *pgxpool.Conn
+		BeforeEach(func(ctx SpecContext) {
+			var err error
+			conn, err = pool.Acquire(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			// A pooled connection must not go back still listening.
+			DeferCleanup(func(ctx SpecContext) {
+				defer conn.Release()
+				_, err := conn.Exec(ctx, `UNLISTEN *`)
+				if err != nil {
+					// Never return a still-listening connection to the pool.
+					closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+					_ = conn.Conn().Close(closeCtx)
+				}
+				Expect(err).NotTo(HaveOccurred())
+			})
+			_, err = conn.Exec(ctx, `LISTEN koinon_reconcile`)
+			Expect(err).NotTo(HaveOccurred())
+		})
+		// woken reports whether this org was notified within the wait; other specs' orgs are
+		// ignored because the suite shares one database.
+		woken := func(ctx SpecContext, wait time.Duration) bool {
+			GinkgoHelper()
+			got := false
+			for {
+				wctx, cancel := context.WithTimeout(ctx, wait)
+				n, err := conn.Conn().WaitForNotification(wctx)
+				cancel()
+				if err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return got
+					}
+					Expect(err).NotTo(HaveOccurred(), "waiting for a notification")
+					return got
+				}
+				if n.Payload == uuidString(org) {
+					got = true
+				}
+			}
+		}
+
+		It("wakes it when a server is created, its credential or URL changes, and it is deleted", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "not-a-real-token")
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
+
+			v := "not-another-token"
+			_, err := svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{Credential: &mcpservers.CredentialPatch{Header: "X-Api-Key", Value: &v}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "credential change")
+
+			u := "https://other.example.com/mcp"
+			_, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &u})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "URL change")
+
+			Expect(svc.Delete(ctx, org, actor, s.ID)).To(Succeed())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "delete")
+		})
+
+		It("wakes it when a server is renamed or loses its credential", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "not-a-real-token")
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
+			// The name builds the gateway target name; no service call renames a server, so write it.
+			_, err := pool.Exec(ctx, `UPDATE mcp_servers SET name = 'wiki-renamed' WHERE org_id = $1 AND id = $2`, org, s.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "rename")
+			_, err = pool.Exec(ctx, `UPDATE mcp_servers SET credential = NULL, credential_header = NULL, credential_lost_at = now() WHERE org_id = $1 AND id = $2`, org, s.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "credential lost")
+		})
+
+		It("wakes it when a tool's tier or sink declaration changes, and not for the prober's touch of a known tool (#249)", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "")
+			sid := uuidOf(s.ID)
+			schema := json.RawMessage(`{"type":"object"}`)
+			listed := []mcpservers.ListedTool{{Name: "search", Description: "Search", InputSchema: schema}}
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
+			_, err := svc.SyncTools(ctx, org, sid, listed)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "a new tool")
+
+			_, err = svc.SetTier(ctx, org, actor, s.ID, "search", "auto")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "tier")
+
+			_, err = pool.Exec(ctx, `UPDATE mcp_tools SET sink_class = 'none' WHERE org_id = $1 AND server_id = $2 AND name = 'search'`, org, sid)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "sink declaration")
+
+			_, err = svc.SyncTools(ctx, org, sid, listed)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, 500*time.Millisecond)).To(BeFalse(), "a probe that finds the same tools is not a change to plan")
+		})
+
+		It("wakes it when a tool goes absent or comes back, and not for a re-probe of an unchanged present tool (#249)", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "")
+			sid := uuidOf(s.ID)
+			schema := json.RawMessage(`{"type":"object"}`)
+			a := mcpservers.ListedTool{Name: "a", Description: "A", InputSchema: schema}
+			b := mcpservers.ListedTool{Name: "b", Description: "B", InputSchema: schema}
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
+			_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{a, b})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "new tools")
+
+			_, err = svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{a})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "b went absent")
+
+			_, err = svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{a})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, 500*time.Millisecond)).To(BeFalse(), "a re-probe that changes nothing")
+
+			_, err = svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{a, b})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "b came back")
+		})
+
+		It("wakes it when an agent's server allowlist changes (#249)", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "")
+			var agent pgtype.UUID
+			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor, created_by) VALUES ($1, 'Wake agent', 'opencode', $2) RETURNING id`, org, user).Scan(&agent)).To(Succeed())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
+
+			_, err := svc.SetAgentServers(ctx, org, actor, agent, []mcpservers.Allowance{{ServerID: s.ID}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "allow")
+
+			_, err = svc.SetAgentServers(ctx, org, actor, agent, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "revoke")
+		})
+
+		It("does not wake it for the prober's own health writes", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "")
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
+			_, _, err := svc.RecordProbe(ctx, org, uuidOf(s.ID), true, "", true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, 500*time.Millisecond)).To(BeFalse(), "a probe result is not a change to plan")
 		})
 	})
 

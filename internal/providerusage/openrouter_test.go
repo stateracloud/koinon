@@ -54,6 +54,10 @@ func TestOpenRouterReadsTheGenerationsBill(t *testing.T) {
 			// The org's own upstream key: total_cost is OpenRouter's fee, the upstream billed the rest.
 			_, _ = w.Write([]byte(`{"data":{"id":"gen-byok-1","total_cost":0.00005,"is_byok":true,"upstream_inference_cost":0.001,
 				"native_tokens_prompt":100,"native_tokens_completion":10}}`))
+		case "gen-zero-1":
+			// A reported 0 is not taken as proof of no thinking (#78).
+			_, _ = w.Write([]byte(`{"data":{"id":"gen-zero-1","total_cost":0.0001,
+				"native_tokens_prompt":100,"native_tokens_completion":10,"native_tokens_reasoning":0}}`))
 		case "gen-teapot-1":
 			w.WriteHeader(http.StatusTeapot)
 		case "gen-busy-1":
@@ -78,7 +82,7 @@ func TestOpenRouterReadsTheGenerationsBill(t *testing.T) {
 	if (*seen)[0] != providerusage.OpenRouterGenerationURL+"?id=gen-ready-1" {
 		t.Fatalf("asked %q, not the pinned endpoint", (*seen)[0])
 	}
-	want := providerusage.Usage{InputTokens: 1250, OutputTokens: 42, CacheReadTokens: 1000, ReasoningTokens: 10, Cost: money.MustParse("0.0001234"), Cancelled: true}
+	want := providerusage.Usage{InputTokens: 1250, OutputTokens: 42, CacheReadTokens: 1000, ReasoningTokens: 10, ReasoningKnown: true, Cost: money.MustParse("0.0001234"), Cancelled: true}
 	if u != want {
 		t.Fatalf("got %+v, want %+v", u, want)
 	}
@@ -89,11 +93,21 @@ func TestOpenRouterReadsTheGenerationsBill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if byok.ReasoningKnown || byok.ReasoningTokens != 0 {
+		t.Fatalf("a generation without native_tokens_reasoning reports no split: %+v", byok)
+	}
 	if !byok.BYOK || byok.Cost != money.MustParse("0.00005") || byok.UpstreamCost != money.MustParse("0.001") {
 		t.Fatalf("BYOK generation: %+v", byok)
 	}
 	if b, err := byok.Billed(); err != nil || b != money.MustParse("0.00105") {
 		t.Fatalf("billed with BYOK is the fee plus the upstream's cost: %s %v", b, err)
+	}
+	zero, err := src.Usage(context.Background(), p, "gen-zero-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if zero.ReasoningKnown || zero.ReasoningTokens != 0 {
+		t.Fatalf("native_tokens_reasoning 0 leaves the split unknown, so settling keeps the gateway's: %+v", zero)
 	}
 	if _, err := src.Usage(context.Background(), p, "gen-later-1"); !errors.Is(err, providerusage.ErrPending) {
 		t.Fatalf("404 is pending: %v", err)

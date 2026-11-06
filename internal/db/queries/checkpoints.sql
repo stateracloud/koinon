@@ -357,3 +357,123 @@ SET status = 'failed', finished_at = now(), error = @error
 WHERE org_id = @org_id AND status = 'running'
   AND started_at < now() - make_interval(secs => @lease_seconds::int) - make_interval(secs => @wait_seconds::int)
 RETURNING *;
+
+-- checkpoints resync (ADR 0085 decision 17; #89): home_checkpoints rebuilt from the bucket after a
+-- database restore. koinon-api checkpoints resync requests it per agent; koinon-agentd lists each
+-- repository's snapshots and records what it finds.
+
+-- name: RequestHomeCheckpointResync :one
+-- A new request replaces the agent's last one, done or not: a try of the old one still running
+-- records nothing (its request_id is gone).
+INSERT INTO home_checkpoint_resyncs (org_id, agent_id)
+VALUES (@org_id, @agent_id)
+ON CONFLICT (org_id, agent_id) DO UPDATE
+SET request_id = gen_random_uuid(), requested_at = now(), resync_after = now(), attempts = 0, error = NULL,
+    finished_at = NULL, failed_at = NULL, snapshots = NULL, added = NULL, missing = NULL, skipped = NULL
+RETURNING *;
+
+-- name: ClaimHomeCheckpointResync :one
+-- The org's next resync that is due, held for @lease_seconds. An agent whose new repository still
+-- waits for its seed is left until the seed is recorded: the seed writes its copy's checkpoint
+-- itself, and a resync between its snapshot and that record would add the copy twice. No row:
+-- nothing to do.
+UPDATE home_checkpoint_resyncs AS r
+SET resync_after = now() + make_interval(secs => @lease_seconds::int), attempts = r.attempts + 1
+WHERE r.org_id = @org_id AND (r.org_id, r.agent_id) = (
+    SELECT s.org_id, s.agent_id FROM home_checkpoint_resyncs s
+    WHERE s.org_id = @org_id AND s.finished_at IS NULL AND s.failed_at IS NULL AND s.resync_after <= now()
+      AND NOT EXISTS (SELECT 1 FROM home_repository_epochs e
+                      WHERE e.org_id = s.org_id AND e.agent_id = s.agent_id AND e.seed_from_epoch IS NOT NULL
+                        AND e.seeded_at IS NULL AND e.seed_failed_at IS NULL AND e.retired_at IS NULL
+                        AND e.credential_lost_at IS NULL)
+    ORDER BY s.resync_after, s.agent_id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1)
+RETURNING *;
+
+-- name: CompleteHomeCheckpointResync :execrows
+-- Complete, Release and Fail hold only for the claim that made @attempts of request @request_id.
+-- No row: the claim was lost (its lease ran out) or a new request replaced it.
+UPDATE home_checkpoint_resyncs
+SET finished_at = now(), error = NULL, snapshots = @snapshots, added = @added, missing = @missing, skipped = @skipped
+WHERE org_id = @org_id AND agent_id = @agent_id AND request_id = @request_id AND attempts = @attempts
+  AND finished_at IS NULL AND failed_at IS NULL;
+
+-- name: ReleaseHomeCheckpointResync :execrows
+-- A failed try, tried again after @delay_seconds.
+UPDATE home_checkpoint_resyncs
+SET error = @error, resync_after = now() + make_interval(secs => @delay_seconds::int)
+WHERE org_id = @org_id AND agent_id = @agent_id AND request_id = @request_id AND attempts = @attempts
+  AND finished_at IS NULL AND failed_at IS NULL;
+
+-- name: FailHomeCheckpointResync :execrows
+UPDATE home_checkpoint_resyncs
+SET failed_at = now(), error = @error
+WHERE org_id = @org_id AND agent_id = @agent_id AND request_id = @request_id AND attempts = @attempts
+  AND finished_at IS NULL AND failed_at IS NULL;
+
+-- name: CountHomeCheckpointResyncs :one
+-- The org's resyncs still to do and those given up on, for koinon-agentd's gauge.
+SELECT count(*) FILTER (WHERE finished_at IS NULL AND failed_at IS NULL)::bigint AS pending,
+       count(*) FILTER (WHERE failed_at IS NOT NULL)::bigint AS failed
+FROM home_checkpoint_resyncs
+WHERE org_id = @org_id;
+
+-- name: ListHomeRepositoryEpochsOfAgent :many
+-- Every repository epoch of the agent, epoch 0 first, with whether it still opens (a deleted one
+-- has no blobs, a lost one no password) and whether the sweeper may have deleted its blobs (retired
+-- and past its deadline: after a database restore, deleted_at can predate the sweep).
+SELECT 0::integer AS repository_epoch, (h.deleted_at IS NOT NULL)::boolean AS deleted,
+       (h.credential_lost_at IS NOT NULL)::boolean AS lost, coalesce(h.delete_after <= now(), false)::boolean AS due
+FROM home_repositories h
+WHERE h.org_id = @org_id AND h.agent_id = @agent_id
+UNION ALL
+SELECT e.repository_epoch, (e.deleted_at IS NOT NULL)::boolean, (e.credential_lost_at IS NOT NULL)::boolean,
+       coalesce(e.delete_after <= now(), false)::boolean
+FROM home_repository_epochs e
+WHERE e.org_id = @org_id AND e.agent_id = @agent_id
+ORDER BY repository_epoch;
+
+-- name: ListCompleteHomeCheckpointsOfRepository :many
+-- The complete checkpoints written to one repository epoch of the agent, and their snapshots.
+SELECT id, snapshot_id::text AS snapshot_id FROM home_checkpoints
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch AND status = 'complete'
+ORDER BY finished_at, id;
+
+-- name: GetHomeCheckpointForResync :one
+-- The checkpoint a snapshot's tag names, and whether a backup is still recording it: requested
+-- (tried again later), or running within @lease_seconds (its writer is alive).
+SELECT c.id, c.agent_id, c.reason, c.status, c.sandbox_id, c.requested_at, c.started_at, c.finished_at, c.repository_epoch,
+       (c.status = 'requested'
+        OR (c.status = 'running' AND c.started_at > now() - make_interval(secs => @lease_seconds::int)))::boolean AS in_flight
+FROM home_checkpoints c
+WHERE c.org_id = @org_id AND c.id = @id;
+
+-- name: RaiseAgentEpochForResync :execrows
+-- After a database restore the agent's ownership epoch is the dump's, older than the epochs the
+-- resynced checkpoints were written under. Raising it to the newest of them makes the next claim
+-- (agents.epoch + 1) a run that sees them, so its restore takes the newest home rather than a
+-- pre-dump one. Monotonic: a claim or takeover in progress keeps its run's own epoch, and each
+-- later one still takes a new, higher epoch.
+UPDATE agents SET epoch = greatest(epoch, @epoch::bigint)
+WHERE org_id = @org_id AND id = @agent_id AND epoch < @epoch::bigint;
+
+-- name: InsertResyncedHomeCheckpoint :one
+-- A complete checkpoint for a snapshot no checkpoint of the repository names. No row: one does (a
+-- backup recorded it since the listing), or @id is taken.
+INSERT INTO home_checkpoints (org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id,
+                              size_bytes, requested_at, started_at, finished_at, repository_epoch)
+SELECT @org_id, @id, @agent_id, @reason::checkpoint_reason, 'complete', @sandbox_id, @generation, @epoch, @snapshot_id::text,
+       @size_bytes, @requested_at, @started_at, @finished_at, @repository_epoch
+WHERE NOT EXISTS (SELECT 1 FROM home_checkpoints c
+                  WHERE c.org_id = @org_id AND c.agent_id = @agent_id AND c.repository_epoch = @repository_epoch
+                    AND c.snapshot_id = @snapshot_id::text)
+ON CONFLICT DO NOTHING
+RETURNING *;
+
+-- name: MarkHomeCheckpointSnapshotMissing :execrows
+-- The checkpoint's snapshot is not in the bucket: it is failed, not deleted, so its history stays
+-- (the snapshot ID goes into @error; a complete checkpoint is one with a snapshot).
+UPDATE home_checkpoints
+SET status = 'failed', snapshot_id = NULL, error = @error
+WHERE org_id = @org_id AND id = @id AND status = 'complete' AND snapshot_id = @snapshot_id::text;

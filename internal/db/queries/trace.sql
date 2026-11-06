@@ -246,6 +246,7 @@ ORDER BY seq;
 -- after the next turn's start belongs to that turn, so a boundary row counts once.
 SELECT e.request_id, e.model, e.agent_id, e.task_id, e.input_tokens, e.output_tokens,
        e.cache_read_tokens, e.cache_write_tokens, e.reasoning_tokens,
+       coalesce(e.reasoning_known, e.reasoning_tokens > 0)::boolean AS reasoning_known,
        e.cost_usd, e.priced, e.gateway_cost_usd, e.provisional, e.estimated, e.upstream_status,
        e.occurred_at, coalesce(p.type, '')::text AS provider_type, m.id AS model_id
 FROM spend_entries e

@@ -46,6 +46,8 @@ type HomeStore interface {
 	Verify(ctx context.Context, prefix, password, snapshotID string) error
 	// DeleteRepository deletes the blobs of a retired repository, never a later epoch's under it.
 	DeleteRepository(ctx context.Context, prefix string) (int, error)
+	// Snapshots lists a repository's complete snapshots, for checkpoints resync (resync.go).
+	Snapshots(ctx context.Context, prefix, password string) ([]checkpoint.Snapshot, error)
 }
 
 // Repositories gives an agent's repositories and their passwords (checkpoint.Remote): Get the
@@ -126,11 +128,22 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 	seeds := make(chan struct{}, max(1, c.Concurrency-1))
 	var swept time.Time
 	sweeping := make(chan struct{}, 1)
+	resyncing := make(chan struct{}, 1)
 	for ctx.Err() == nil {
 		// One tick at a time, so a panic is logged and the hourly checkpoints go on.
 		safego.Do(p.log, "checkpoint-tick", func() { p.checkpointTick(ctx, slots, &wg) })
 		// Seeds take the backup slots the requests left free (seed.go).
 		safego.Do(p.log, "seed-tick", func() { p.seedTick(ctx, slots, seeds, &wg) })
+		// Resyncs (resync.go) beside the loop, one pass at a time: listing a bucket of many agents
+		// takes a while, and needs no backup slot.
+		select {
+		case resyncing <- struct{}{}:
+			wg.Go(func() {
+				defer func() { <-resyncing }()
+				safego.Do(p.log, "checkpoint-resync", func() { p.resyncTick(ctx) })
+			})
+		default:
+		}
 		if now := time.Now(); now.Sub(swept) >= c.Sweep {
 			// Beside the loop: a long sweep (serial blob deletes) must not delay the ticks.
 			// A sweep that is still running means this one is skipped.
@@ -361,22 +374,29 @@ func (p *Pool) backupHome(ctx context.Context, cp store.HomeCheckpoint) (backupR
 	}
 	defer func() { _ = proc.Close() }()
 	_ = proc.Stdin().Close()
+	// The home is checked before the snapshot is written, not after: a snapshot of a home tar did not
+	// read whole would sit in the bucket, and checkpoints resync records what the bucket holds.
+	var readErr error
+	ready := func() error {
+		// The tar stream ends with padding after its last entry; read it so the command can exit.
+		_, _ = io.Copy(io.Discard, proc.Stdout())
+		// GNU tar exits 1 when a file changed while it was read: the home is live.
+		if code, err := proc.Wait(); err != nil {
+			readErr = fmt.Errorf("reading the home: %w", err)
+		} else if code > 1 {
+			readErr = fmt.Errorf("tar in the sandbox exited with %d: %s", code, strings.TrimSpace(stderr.String()))
+		}
+		return readErr
+	}
 	res, err := c.Store.Backup(actx, repo.Prefix, repo.Password, proc.Stdout(), checkpoint.Meta{
 		CheckpointID: cp.ID.String(), Generation: generation, Epoch: epoch,
+		Reason: string(cp.Reason), Sandbox: sb.SandboxID.String, Ready: ready,
 	})
 	if err != nil {
-		if sctx := stderr.String(); sctx != "" {
+		if sctx := stderr.String(); sctx != "" && readErr == nil {
 			err = fmt.Errorf("%w (tar: %s)", err, strings.TrimSpace(sctx))
 		}
 		return backupResult{}, err
-	}
-	// The tar stream ends with padding after its last entry; read it so the command can exit.
-	_, _ = io.Copy(io.Discard, proc.Stdout())
-	// GNU tar exits 1 when a file changed while it was read: the home is live.
-	if code, err := proc.Wait(); err != nil {
-		return backupResult{}, fmt.Errorf("reading the home: %w", err)
-	} else if code > 1 {
-		return backupResult{}, fmt.Errorf("tar in the sandbox exited with %d: %s", code, strings.TrimSpace(stderr.String()))
 	}
 	if cp.Reason == store.CheckpointReasonRecreate {
 		if err := c.Store.Verify(actx, repo.Prefix, repo.Password, res.SnapshotID); err != nil {

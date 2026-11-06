@@ -60,6 +60,52 @@ func (q *Queries) ClaimHomeCheckpoint(ctx context.Context, arg ClaimHomeCheckpoi
 	return i, err
 }
 
+const claimHomeCheckpointResync = `-- name: ClaimHomeCheckpointResync :one
+UPDATE home_checkpoint_resyncs AS r
+SET resync_after = now() + make_interval(secs => $1::int), attempts = r.attempts + 1
+WHERE r.org_id = $2 AND (r.org_id, r.agent_id) = (
+    SELECT s.org_id, s.agent_id FROM home_checkpoint_resyncs s
+    WHERE s.org_id = $2 AND s.finished_at IS NULL AND s.failed_at IS NULL AND s.resync_after <= now()
+      AND NOT EXISTS (SELECT 1 FROM home_repository_epochs e
+                      WHERE e.org_id = s.org_id AND e.agent_id = s.agent_id AND e.seed_from_epoch IS NOT NULL
+                        AND e.seeded_at IS NULL AND e.seed_failed_at IS NULL AND e.retired_at IS NULL
+                        AND e.credential_lost_at IS NULL)
+    ORDER BY s.resync_after, s.agent_id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1)
+RETURNING org_id, agent_id, request_id, requested_at, resync_after, attempts, error, finished_at, failed_at, snapshots, added, missing, skipped
+`
+
+type ClaimHomeCheckpointResyncParams struct {
+	LeaseSeconds int32
+	OrgID        pgtype.UUID
+}
+
+// The org's next resync that is due, held for @lease_seconds. An agent whose new repository still
+// waits for its seed is left until the seed is recorded: the seed writes its copy's checkpoint
+// itself, and a resync between its snapshot and that record would add the copy twice. No row:
+// nothing to do.
+func (q *Queries) ClaimHomeCheckpointResync(ctx context.Context, arg ClaimHomeCheckpointResyncParams) (HomeCheckpointResync, error) {
+	row := q.db.QueryRow(ctx, claimHomeCheckpointResync, arg.LeaseSeconds, arg.OrgID)
+	var i HomeCheckpointResync
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.RequestID,
+		&i.RequestedAt,
+		&i.ResyncAfter,
+		&i.Attempts,
+		&i.Error,
+		&i.FinishedAt,
+		&i.FailedAt,
+		&i.Snapshots,
+		&i.Added,
+		&i.Missing,
+		&i.Skipped,
+	)
+	return i, err
+}
+
 const claimHomeRepositorySeed = `-- name: ClaimHomeRepositorySeed :one
 UPDATE home_repository_epochs AS e
 SET seed_after = now() + make_interval(secs => $1::int), seed_attempts = e.seed_attempts + 1
@@ -225,6 +271,43 @@ func (q *Queries) CompleteHomeCheckpoint(ctx context.Context, arg CompleteHomeCh
 	return i, err
 }
 
+const completeHomeCheckpointResync = `-- name: CompleteHomeCheckpointResync :execrows
+UPDATE home_checkpoint_resyncs
+SET finished_at = now(), error = NULL, snapshots = $1, added = $2, missing = $3, skipped = $4
+WHERE org_id = $5 AND agent_id = $6 AND request_id = $7 AND attempts = $8
+  AND finished_at IS NULL AND failed_at IS NULL
+`
+
+type CompleteHomeCheckpointResyncParams struct {
+	Snapshots pgtype.Int4
+	Added     pgtype.Int4
+	Missing   pgtype.Int4
+	Skipped   pgtype.Int4
+	OrgID     pgtype.UUID
+	AgentID   pgtype.UUID
+	RequestID pgtype.UUID
+	Attempts  int32
+}
+
+// Complete, Release and Fail hold only for the claim that made @attempts of request @request_id.
+// No row: the claim was lost (its lease ran out) or a new request replaced it.
+func (q *Queries) CompleteHomeCheckpointResync(ctx context.Context, arg CompleteHomeCheckpointResyncParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeHomeCheckpointResync,
+		arg.Snapshots,
+		arg.Added,
+		arg.Missing,
+		arg.Skipped,
+		arg.OrgID,
+		arg.AgentID,
+		arg.RequestID,
+		arg.Attempts,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const completeHomeRepositorySeed = `-- name: CompleteHomeRepositorySeed :execrows
 UPDATE home_repository_epochs
 SET seeded_at = now(), seed_error = NULL
@@ -253,6 +336,26 @@ func (q *Queries) CompleteHomeRepositorySeed(ctx context.Context, arg CompleteHo
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const countHomeCheckpointResyncs = `-- name: CountHomeCheckpointResyncs :one
+SELECT count(*) FILTER (WHERE finished_at IS NULL AND failed_at IS NULL)::bigint AS pending,
+       count(*) FILTER (WHERE failed_at IS NOT NULL)::bigint AS failed
+FROM home_checkpoint_resyncs
+WHERE org_id = $1
+`
+
+type CountHomeCheckpointResyncsRow struct {
+	Pending int64
+	Failed  int64
+}
+
+// The org's resyncs still to do and those given up on, for koinon-agentd's gauge.
+func (q *Queries) CountHomeCheckpointResyncs(ctx context.Context, orgID pgtype.UUID) (CountHomeCheckpointResyncsRow, error) {
+	row := q.db.QueryRow(ctx, countHomeCheckpointResyncs, orgID)
+	var i CountHomeCheckpointResyncsRow
+	err := row.Scan(&i.Pending, &i.Failed)
+	return i, err
 }
 
 const countHomeRepositorySeeds = `-- name: CountHomeRepositorySeeds :one
@@ -422,6 +525,35 @@ func (q *Queries) FailHomeCheckpoint(ctx context.Context, arg FailHomeCheckpoint
 	return i, err
 }
 
+const failHomeCheckpointResync = `-- name: FailHomeCheckpointResync :execrows
+UPDATE home_checkpoint_resyncs
+SET failed_at = now(), error = $1
+WHERE org_id = $2 AND agent_id = $3 AND request_id = $4 AND attempts = $5
+  AND finished_at IS NULL AND failed_at IS NULL
+`
+
+type FailHomeCheckpointResyncParams struct {
+	Error     pgtype.Text
+	OrgID     pgtype.UUID
+	AgentID   pgtype.UUID
+	RequestID pgtype.UUID
+	Attempts  int32
+}
+
+func (q *Queries) FailHomeCheckpointResync(ctx context.Context, arg FailHomeCheckpointResyncParams) (int64, error) {
+	result, err := q.db.Exec(ctx, failHomeCheckpointResync,
+		arg.Error,
+		arg.OrgID,
+		arg.AgentID,
+		arg.RequestID,
+		arg.Attempts,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const failHomeRepositorySeed = `-- name: FailHomeRepositorySeed :execrows
 UPDATE home_repository_epochs
 SET seed_failed_at = now(), seed_error = $1
@@ -536,6 +668,53 @@ func (q *Queries) GetHomeCheckpoint(ctx context.Context, arg GetHomeCheckpointPa
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.RepositoryEpoch,
+	)
+	return i, err
+}
+
+const getHomeCheckpointForResync = `-- name: GetHomeCheckpointForResync :one
+SELECT c.id, c.agent_id, c.reason, c.status, c.sandbox_id, c.requested_at, c.started_at, c.finished_at, c.repository_epoch,
+       (c.status = 'requested'
+        OR (c.status = 'running' AND c.started_at > now() - make_interval(secs => $1::int)))::boolean AS in_flight
+FROM home_checkpoints c
+WHERE c.org_id = $2 AND c.id = $3
+`
+
+type GetHomeCheckpointForResyncParams struct {
+	LeaseSeconds int32
+	OrgID        pgtype.UUID
+	ID           pgtype.UUID
+}
+
+type GetHomeCheckpointForResyncRow struct {
+	ID              pgtype.UUID
+	AgentID         pgtype.UUID
+	Reason          CheckpointReason
+	Status          CheckpointStatus
+	SandboxID       string
+	RequestedAt     pgtype.Timestamptz
+	StartedAt       pgtype.Timestamptz
+	FinishedAt      pgtype.Timestamptz
+	RepositoryEpoch int32
+	InFlight        bool
+}
+
+// The checkpoint a snapshot's tag names, and whether a backup is still recording it: requested
+// (tried again later), or running within @lease_seconds (its writer is alive).
+func (q *Queries) GetHomeCheckpointForResync(ctx context.Context, arg GetHomeCheckpointForResyncParams) (GetHomeCheckpointForResyncRow, error) {
+	row := q.db.QueryRow(ctx, getHomeCheckpointForResync, arg.LeaseSeconds, arg.OrgID, arg.ID)
+	var i GetHomeCheckpointForResyncRow
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.Reason,
+		&i.Status,
+		&i.SandboxID,
+		&i.RequestedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.RepositoryEpoch,
+		&i.InFlight,
 	)
 	return i, err
 }
@@ -727,6 +906,74 @@ func (q *Queries) InsertHomeRepositoryEpoch(ctx context.Context, arg InsertHomeR
 		&i.SeedError,
 		&i.SeededAt,
 		&i.SeedFailedAt,
+	)
+	return i, err
+}
+
+const insertResyncedHomeCheckpoint = `-- name: InsertResyncedHomeCheckpoint :one
+INSERT INTO home_checkpoints (org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id,
+                              size_bytes, requested_at, started_at, finished_at, repository_epoch)
+SELECT $1, $2, $3, $4::checkpoint_reason, 'complete', $5, $6, $7, $8::text,
+       $9, $10, $11, $12, $13
+WHERE NOT EXISTS (SELECT 1 FROM home_checkpoints c
+                  WHERE c.org_id = $1 AND c.agent_id = $3 AND c.repository_epoch = $13
+                    AND c.snapshot_id = $8::text)
+ON CONFLICT DO NOTHING
+RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch
+`
+
+type InsertResyncedHomeCheckpointParams struct {
+	OrgID           pgtype.UUID
+	ID              pgtype.UUID
+	AgentID         pgtype.UUID
+	Reason          CheckpointReason
+	SandboxID       string
+	Generation      string
+	Epoch           int64
+	SnapshotID      string
+	SizeBytes       pgtype.Int8
+	RequestedAt     pgtype.Timestamptz
+	StartedAt       pgtype.Timestamptz
+	FinishedAt      pgtype.Timestamptz
+	RepositoryEpoch int32
+}
+
+// A complete checkpoint for a snapshot no checkpoint of the repository names. No row: one does (a
+// backup recorded it since the listing), or @id is taken.
+func (q *Queries) InsertResyncedHomeCheckpoint(ctx context.Context, arg InsertResyncedHomeCheckpointParams) (HomeCheckpoint, error) {
+	row := q.db.QueryRow(ctx, insertResyncedHomeCheckpoint,
+		arg.OrgID,
+		arg.ID,
+		arg.AgentID,
+		arg.Reason,
+		arg.SandboxID,
+		arg.Generation,
+		arg.Epoch,
+		arg.SnapshotID,
+		arg.SizeBytes,
+		arg.RequestedAt,
+		arg.StartedAt,
+		arg.FinishedAt,
+		arg.RepositoryEpoch,
+	)
+	var i HomeCheckpoint
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.AgentID,
+		&i.Reason,
+		&i.Status,
+		&i.SandboxID,
+		&i.Generation,
+		&i.Epoch,
+		&i.SnapshotID,
+		&i.SizeBytes,
+		&i.Attempts,
+		&i.Error,
+		&i.RequestedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.RepositoryEpoch,
 	)
 	return i, err
 }
@@ -1000,6 +1247,44 @@ func (q *Queries) ListCompleteHomeCheckpoints(ctx context.Context, arg ListCompl
 	return items, nil
 }
 
+const listCompleteHomeCheckpointsOfRepository = `-- name: ListCompleteHomeCheckpointsOfRepository :many
+SELECT id, snapshot_id::text AS snapshot_id FROM home_checkpoints
+WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = $3 AND status = 'complete'
+ORDER BY finished_at, id
+`
+
+type ListCompleteHomeCheckpointsOfRepositoryParams struct {
+	OrgID           pgtype.UUID
+	AgentID         pgtype.UUID
+	RepositoryEpoch int32
+}
+
+type ListCompleteHomeCheckpointsOfRepositoryRow struct {
+	ID         pgtype.UUID
+	SnapshotID string
+}
+
+// The complete checkpoints written to one repository epoch of the agent, and their snapshots.
+func (q *Queries) ListCompleteHomeCheckpointsOfRepository(ctx context.Context, arg ListCompleteHomeCheckpointsOfRepositoryParams) ([]ListCompleteHomeCheckpointsOfRepositoryRow, error) {
+	rows, err := q.db.Query(ctx, listCompleteHomeCheckpointsOfRepository, arg.OrgID, arg.AgentID, arg.RepositoryEpoch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCompleteHomeCheckpointsOfRepositoryRow
+	for rows.Next() {
+		var i ListCompleteHomeCheckpointsOfRepositoryRow
+		if err := rows.Scan(&i.ID, &i.SnapshotID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDueHomeRepositories = `-- name: ListDueHomeRepositories :many
 SELECT agent_id, repository_epoch, prefix FROM (
     SELECT h.agent_id, 0::integer AS repository_epoch, h.prefix, h.delete_after, h.credential_lost_at
@@ -1077,6 +1362,59 @@ func (q *Queries) ListDueHomeRepositories(ctx context.Context, arg ListDueHomeRe
 	return items, nil
 }
 
+const listHomeRepositoryEpochsOfAgent = `-- name: ListHomeRepositoryEpochsOfAgent :many
+SELECT 0::integer AS repository_epoch, (h.deleted_at IS NOT NULL)::boolean AS deleted,
+       (h.credential_lost_at IS NOT NULL)::boolean AS lost, coalesce(h.delete_after <= now(), false)::boolean AS due
+FROM home_repositories h
+WHERE h.org_id = $1 AND h.agent_id = $2
+UNION ALL
+SELECT e.repository_epoch, (e.deleted_at IS NOT NULL)::boolean, (e.credential_lost_at IS NOT NULL)::boolean,
+       coalesce(e.delete_after <= now(), false)::boolean
+FROM home_repository_epochs e
+WHERE e.org_id = $1 AND e.agent_id = $2
+ORDER BY repository_epoch
+`
+
+type ListHomeRepositoryEpochsOfAgentParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+type ListHomeRepositoryEpochsOfAgentRow struct {
+	RepositoryEpoch int32
+	Deleted         bool
+	Lost            bool
+	Due             bool
+}
+
+// Every repository epoch of the agent, epoch 0 first, with whether it still opens (a deleted one
+// has no blobs, a lost one no password) and whether the sweeper may have deleted its blobs (retired
+// and past its deadline: after a database restore, deleted_at can predate the sweep).
+func (q *Queries) ListHomeRepositoryEpochsOfAgent(ctx context.Context, arg ListHomeRepositoryEpochsOfAgentParams) ([]ListHomeRepositoryEpochsOfAgentRow, error) {
+	rows, err := q.db.Query(ctx, listHomeRepositoryEpochsOfAgent, arg.OrgID, arg.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListHomeRepositoryEpochsOfAgentRow
+	for rows.Next() {
+		var i ListHomeRepositoryEpochsOfAgentRow
+		if err := rows.Scan(
+			&i.RepositoryEpoch,
+			&i.Deleted,
+			&i.Lost,
+			&i.Due,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockHomeRepository = `-- name: LockHomeRepository :one
 SELECT org_id, agent_id, prefix, password_envelope, created_at, retired_at, delete_after, deleted_at, credential_lost_at FROM home_repositories
 WHERE org_id = $1 AND agent_id = $2
@@ -1104,6 +1442,34 @@ func (q *Queries) LockHomeRepository(ctx context.Context, arg LockHomeRepository
 		&i.CredentialLostAt,
 	)
 	return i, err
+}
+
+const markHomeCheckpointSnapshotMissing = `-- name: MarkHomeCheckpointSnapshotMissing :execrows
+UPDATE home_checkpoints
+SET status = 'failed', snapshot_id = NULL, error = $1
+WHERE org_id = $2 AND id = $3 AND status = 'complete' AND snapshot_id = $4::text
+`
+
+type MarkHomeCheckpointSnapshotMissingParams struct {
+	Error      pgtype.Text
+	OrgID      pgtype.UUID
+	ID         pgtype.UUID
+	SnapshotID string
+}
+
+// The checkpoint's snapshot is not in the bucket: it is failed, not deleted, so its history stays
+// (the snapshot ID goes into @error; a complete checkpoint is one with a snapshot).
+func (q *Queries) MarkHomeCheckpointSnapshotMissing(ctx context.Context, arg MarkHomeCheckpointSnapshotMissingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markHomeCheckpointSnapshotMissing,
+		arg.Error,
+		arg.OrgID,
+		arg.ID,
+		arg.SnapshotID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const markHomeRepositoryDeleted = `-- name: MarkHomeRepositoryDeleted :execrows
@@ -1161,6 +1527,30 @@ func (q *Queries) MaxAgentEpoch(ctx context.Context, arg MaxAgentEpochParams) (i
 	return column_1, err
 }
 
+const raiseAgentEpochForResync = `-- name: RaiseAgentEpochForResync :execrows
+UPDATE agents SET epoch = greatest(epoch, $1::bigint)
+WHERE org_id = $2 AND id = $3 AND epoch < $1::bigint
+`
+
+type RaiseAgentEpochForResyncParams struct {
+	Epoch   int64
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// After a database restore the agent's ownership epoch is the dump's, older than the epochs the
+// resynced checkpoints were written under. Raising it to the newest of them makes the next claim
+// (agents.epoch + 1) a run that sees them, so its restore takes the newest home rather than a
+// pre-dump one. Monotonic: a claim or takeover in progress keeps its run's own epoch, and each
+// later one still takes a new, higher epoch.
+func (q *Queries) RaiseAgentEpochForResync(ctx context.Context, arg RaiseAgentEpochForResyncParams) (int64, error) {
+	result, err := q.db.Exec(ctx, raiseAgentEpochForResync, arg.Epoch, arg.OrgID, arg.AgentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const releaseHomeCheckpoint = `-- name: ReleaseHomeCheckpoint :one
 UPDATE home_checkpoints
 SET status = 'requested', error = $1, requested_at = now() + make_interval(secs => $2::int)
@@ -1203,6 +1593,38 @@ func (q *Queries) ReleaseHomeCheckpoint(ctx context.Context, arg ReleaseHomeChec
 		&i.RepositoryEpoch,
 	)
 	return i, err
+}
+
+const releaseHomeCheckpointResync = `-- name: ReleaseHomeCheckpointResync :execrows
+UPDATE home_checkpoint_resyncs
+SET error = $1, resync_after = now() + make_interval(secs => $2::int)
+WHERE org_id = $3 AND agent_id = $4 AND request_id = $5 AND attempts = $6
+  AND finished_at IS NULL AND failed_at IS NULL
+`
+
+type ReleaseHomeCheckpointResyncParams struct {
+	Error        pgtype.Text
+	DelaySeconds int32
+	OrgID        pgtype.UUID
+	AgentID      pgtype.UUID
+	RequestID    pgtype.UUID
+	Attempts     int32
+}
+
+// A failed try, tried again after @delay_seconds.
+func (q *Queries) ReleaseHomeCheckpointResync(ctx context.Context, arg ReleaseHomeCheckpointResyncParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseHomeCheckpointResync,
+		arg.Error,
+		arg.DelaySeconds,
+		arg.OrgID,
+		arg.AgentID,
+		arg.RequestID,
+		arg.Attempts,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const releaseHomeRepositorySeed = `-- name: ReleaseHomeRepositorySeed :execrows
@@ -1296,6 +1718,47 @@ func (q *Queries) RequestHomeCheckpoint(ctx context.Context, arg RequestHomeChec
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.RepositoryEpoch,
+	)
+	return i, err
+}
+
+const requestHomeCheckpointResync = `-- name: RequestHomeCheckpointResync :one
+
+INSERT INTO home_checkpoint_resyncs (org_id, agent_id)
+VALUES ($1, $2)
+ON CONFLICT (org_id, agent_id) DO UPDATE
+SET request_id = gen_random_uuid(), requested_at = now(), resync_after = now(), attempts = 0, error = NULL,
+    finished_at = NULL, failed_at = NULL, snapshots = NULL, added = NULL, missing = NULL, skipped = NULL
+RETURNING org_id, agent_id, request_id, requested_at, resync_after, attempts, error, finished_at, failed_at, snapshots, added, missing, skipped
+`
+
+type RequestHomeCheckpointResyncParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// checkpoints resync (ADR 0085 decision 17; #89): home_checkpoints rebuilt from the bucket after a
+// database restore. koinon-api checkpoints resync requests it per agent; koinon-agentd lists each
+// repository's snapshots and records what it finds.
+// A new request replaces the agent's last one, done or not: a try of the old one still running
+// records nothing (its request_id is gone).
+func (q *Queries) RequestHomeCheckpointResync(ctx context.Context, arg RequestHomeCheckpointResyncParams) (HomeCheckpointResync, error) {
+	row := q.db.QueryRow(ctx, requestHomeCheckpointResync, arg.OrgID, arg.AgentID)
+	var i HomeCheckpointResync
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.RequestID,
+		&i.RequestedAt,
+		&i.ResyncAfter,
+		&i.Attempts,
+		&i.Error,
+		&i.FinishedAt,
+		&i.FailedAt,
+		&i.Snapshots,
+		&i.Added,
+		&i.Missing,
+		&i.Skipped,
 	)
 	return i, err
 }

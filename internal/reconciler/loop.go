@@ -29,6 +29,7 @@ const (
 // Run reconciles until ctx ends. Only the replica holding the leader lock reconciles; the
 // others retry every ResyncInterval. A failed pass is logged and retried on the next wake-up.
 func (r *Reconciler) Run(ctx context.Context) error {
+	defer r.plan.Close()
 	safego.Go(ctx, r.log, "mcp-prober", func(ctx context.Context) { r.RunProber(ctx) })
 	for {
 		err := r.lead(ctx)
