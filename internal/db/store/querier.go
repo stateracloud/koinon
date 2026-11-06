@@ -881,8 +881,10 @@ type Querier interface {
 	PruneGatewayServedModels(ctx context.Context, arg PruneGatewayServedModelsParams) error
 	// Blanks the payload of up to @batch_size content events (@kinds: messages, thoughts, tool calls)
 	// of one run (issue #69). The row stays, so the run page keeps its skeleton and seq stays gap-free;
-	// only the payload goes and content_purged_at says when. Events of other kinds (state, park,
-	// approvals, cost notes) keep their payload. Rows are locked with SKIP LOCKED, so two purgers never
+	// only the payload goes and content_purged_at says when. A kind that is a key of @strip (a JSON
+	// object of kind -> content keys) loses only those keys and keeps its state fields (run.prompt keeps
+	// throughSeq, acp.permission keeps decision). Events of other kinds (state, park, cost notes) keep
+	// their payload. Rows are locked with SKIP LOCKED, so two purgers never
 	// wait for each other. Rows 0: nothing left to blank in this run.
 	PurgeRunEventContent(ctx context.Context, arg PurgeRunEventContentParams) (int64, error)
 	// A tool turned two-approver on after the request was recorded: the pending request needs two too.

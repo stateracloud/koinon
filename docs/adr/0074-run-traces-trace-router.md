@@ -737,7 +737,8 @@ event classes. The code lands in koinon-private#344 (items), koinon-private#345 
    Audit records are not covered by run-content retention either: audit retention is its own policy
    (#29), and run-content retention never deletes audit records (procoduck, 2026-11-01).
 5. **A purge removes content only** (procoduck, 2026-11-01). Message, thought and tool payloads are
-   deleted; event rows keep type, time, state and cost, so the timeline, the costs and the audit links
+   deleted, as are the prompt text, the tool call of a permission answer and the refused calls (the
+   state fields next to them stay); event rows keep type, time, state and cost, so the timeline, the costs and the audit links
    keep working. The UI shows "content expired after N days" for a run past retention.
 6. **Content level** (procoduck, 2026-11-01). Stored run content is independent of the trace content
    level (decision 6): items are always stored, with the always-on secret scrubber, and the trace level

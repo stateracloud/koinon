@@ -5,7 +5,9 @@
 -- the row stays, with its run, seq, epoch, kind and created_at, so the run page keeps its skeleton
 -- and its sequence stays gap-free. Traces and the spend ledger are other tables and are not touched.
 -- Expand only (ADR 0085): new nullable columns and an index. Only the content kinds (messages,
--- thoughts, tool calls) are blanked; state, park, approval and cost events keep their payload.
+-- thoughts, tool calls) are blanked; kinds that mix content and state lose only the content keys
+-- (run.prompt text, acp.permission toolCall, run.refusal refusals); state, park and cost events keep
+-- their payload.
 
 -- +goose Up
 

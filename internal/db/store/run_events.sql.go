@@ -402,20 +402,26 @@ const purgeRunEventContent = `-- name: PurgeRunEventContent :execrows
 WITH batch AS (
     SELECT e.org_id, e.id
     FROM run_events e
-    WHERE e.org_id = $2 AND e.run_id = $3
-      AND e.kind = ANY($4::text[])
+    WHERE e.org_id = $3 AND e.run_id = $4
+      AND e.kind = ANY($5::text[])
       AND e.content_purged_at IS NULL
     ORDER BY e.seq
-    LIMIT $5::int
+    LIMIT $6::int
     FOR UPDATE OF e SKIP LOCKED
 )
 UPDATE run_events
-SET payload = '{}', content_purged_at = $1::timestamptz
+SET payload = CASE
+        WHEN $1::jsonb -> run_events.kind IS NOT NULL
+        THEN run_events.payload - ARRAY(SELECT jsonb_array_elements_text($1::jsonb -> run_events.kind))
+        ELSE '{}'::jsonb
+    END,
+    content_purged_at = $2::timestamptz
 FROM batch
 WHERE run_events.org_id = batch.org_id AND run_events.id = batch.id
 `
 
 type PurgeRunEventContentParams struct {
+	Strip     []byte
 	PurgedAt  pgtype.Timestamptz
 	OrgID     pgtype.UUID
 	RunID     pgtype.UUID
@@ -425,11 +431,14 @@ type PurgeRunEventContentParams struct {
 
 // Blanks the payload of up to @batch_size content events (@kinds: messages, thoughts, tool calls)
 // of one run (issue #69). The row stays, so the run page keeps its skeleton and seq stays gap-free;
-// only the payload goes and content_purged_at says when. Events of other kinds (state, park,
-// approvals, cost notes) keep their payload. Rows are locked with SKIP LOCKED, so two purgers never
+// only the payload goes and content_purged_at says when. A kind that is a key of @strip (a JSON
+// object of kind -> content keys) loses only those keys and keeps its state fields (run.prompt keeps
+// throughSeq, acp.permission keeps decision). Events of other kinds (state, park, cost notes) keep
+// their payload. Rows are locked with SKIP LOCKED, so two purgers never
 // wait for each other. Rows 0: nothing left to blank in this run.
 func (q *Queries) PurgeRunEventContent(ctx context.Context, arg PurgeRunEventContentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, purgeRunEventContent,
+		arg.Strip,
 		arg.PurgedAt,
 		arg.OrgID,
 		arg.RunID,

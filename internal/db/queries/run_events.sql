@@ -100,8 +100,10 @@ LIMIT @batch_size::int;
 -- name: PurgeRunEventContent :execrows
 -- Blanks the payload of up to @batch_size content events (@kinds: messages, thoughts, tool calls)
 -- of one run (issue #69). The row stays, so the run page keeps its skeleton and seq stays gap-free;
--- only the payload goes and content_purged_at says when. Events of other kinds (state, park,
--- approvals, cost notes) keep their payload. Rows are locked with SKIP LOCKED, so two purgers never
+-- only the payload goes and content_purged_at says when. A kind that is a key of @strip (a JSON
+-- object of kind -> content keys) loses only those keys and keeps its state fields (run.prompt keeps
+-- throughSeq, acp.permission keeps decision). Events of other kinds (state, park, cost notes) keep
+-- their payload. Rows are locked with SKIP LOCKED, so two purgers never
 -- wait for each other. Rows 0: nothing left to blank in this run.
 WITH batch AS (
     SELECT e.org_id, e.id
@@ -114,7 +116,12 @@ WITH batch AS (
     FOR UPDATE OF e SKIP LOCKED
 )
 UPDATE run_events
-SET payload = '{}', content_purged_at = @purged_at::timestamptz
+SET payload = CASE
+        WHEN @strip::jsonb -> run_events.kind IS NOT NULL
+        THEN run_events.payload - ARRAY(SELECT jsonb_array_elements_text(@strip::jsonb -> run_events.kind))
+        ELSE '{}'::jsonb
+    END,
+    content_purged_at = @purged_at::timestamptz
 FROM batch
 WHERE run_events.org_id = batch.org_id AND run_events.id = batch.id;
 

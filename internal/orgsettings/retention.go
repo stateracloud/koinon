@@ -4,8 +4,10 @@ package orgsettings
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -44,6 +46,25 @@ var ContentEventKinds = []string{
 	"acp.tool_call",
 	"acp.tool_call_update",
 	"acp.plan",
+}
+
+// StrippedContentKeys are event kinds that mix content with state: the purge removes only the listed
+// payload keys and keeps the rest (the prompt text but not throughSeq, the tool call of a permission
+// answer but not its decision). Keys are the payload's own, as agentd records them.
+var StrippedContentKeys = map[string][]string{
+	"run.prompt":     {"text"},
+	"acp.permission": {"toolCall"},
+	"run.refusal":    {"refusals"},
+}
+
+// purgedKinds is every kind a purge touches: the blanked ones and the stripped ones.
+func purgedKinds() []string {
+	kinds := slices.Clone(ContentEventKinds)
+	for k := range StrippedContentKeys {
+		kinds = append(kinds, k)
+	}
+	slices.Sort(kinds)
+	return kinds
 }
 
 // ValidateRunContentRetentionDays checks a retention in days.
@@ -163,13 +184,18 @@ func (p *Purger) PurgeOrg(ctx context.Context, org pgtype.UUID) (int64, error) {
 
 // purgeRun blanks one run's content events batch by batch, then marks the run.
 func (p *Purger) purgeRun(ctx context.Context, q *store.Queries, org, run pgtype.UUID, purgedAt pgtype.Timestamptz) (int64, error) {
+	strip, err := json.Marshal(StrippedContentKeys)
+	if err != nil {
+		return 0, err
+	}
+	kinds := purgedKinds()
 	var total int64
 	for {
 		if err := ctx.Err(); err != nil {
 			return total, err
 		}
 		n, err := q.PurgeRunEventContent(ctx, store.PurgeRunEventContentParams{
-			OrgID: org, RunID: run, Kinds: ContentEventKinds, BatchSize: p.batch, PurgedAt: purgedAt,
+			OrgID: org, RunID: run, Kinds: kinds, Strip: strip, BatchSize: p.batch, PurgedAt: purgedAt,
 		})
 		if err != nil {
 			return total, err
@@ -179,8 +205,8 @@ func (p *Purger) purgeRun(ctx context.Context, q *store.Queries, org, run pgtype
 			break
 		}
 	}
-	_, err := q.MarkRunContentPurged(ctx, store.MarkRunContentPurgedParams{
-		OrgID: org, RunID: run, Kinds: ContentEventKinds, PurgedAt: purgedAt,
+	_, err = q.MarkRunContentPurged(ctx, store.MarkRunContentPurgedParams{
+		OrgID: org, RunID: run, Kinds: kinds, PurgedAt: purgedAt,
 	})
 	return total, err
 }

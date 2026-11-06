@@ -158,6 +158,35 @@ var _ = Describe("Run content retention", func() {
 		for _, k := range orgsettings.ContentEventKinds {
 			Expect(known).To(HaveKey(k))
 		}
+		for k := range orgsettings.StrippedContentKeys {
+			Expect(known).To(HaveKey(k))
+		}
+	})
+
+	It("removes the content of prompts, permission answers and refusals and keeps their state", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		run := finishedRun(ctx, org, 40*24*time.Hour, 1)
+		for i, ev := range []struct{ kind, payload string }{
+			{"run.prompt", `{"text":"secret prompt","throughSeq":7,"resumed":true}`},
+			{"acp.permission", `{"toolCall":{"title":"rm -rf secret"},"decision":{"kind":"allow","tier":"vm"}}`},
+			{"run.refusal", `{"refusals":["secret call"],"count":2,"cwd":"/work"}`},
+		} {
+			_, err := pool.Exec(ctx, `INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload) VALUES ($1, $2, $3, 0, $4, $5::jsonb)`, org, run, 10+i, ev.kind, ev.payload)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		_, err := orgsettings.NewPurger(pool, nil, now).PurgeOrg(ctx, org)
+		Expect(err).NotTo(HaveOccurred())
+		get := func(kind string) string {
+			var p string
+			Expect(pool.QueryRow(ctx, `SELECT payload::text FROM run_events WHERE run_id = $1 AND kind = $2`, run, kind).Scan(&p)).To(Succeed())
+			return p
+		}
+		Expect(get("run.prompt")).To(And(Not(ContainSubstring("secret")), ContainSubstring(`"throughSeq": 7`), ContainSubstring(`"resumed": true`)))
+		Expect(get("acp.permission")).To(And(Not(ContainSubstring("secret")), Not(ContainSubstring("toolCall")), ContainSubstring(`"decision"`), ContainSubstring(`"tier": "vm"`)))
+		Expect(get("run.refusal")).To(And(Not(ContainSubstring("secret")), ContainSubstring(`"count": 2`)))
+		var marked bool
+		Expect(pool.QueryRow(ctx, `SELECT content_purged_at IS NOT NULL FROM runs WHERE id = $1`, run).Scan(&marked)).To(Succeed())
+		Expect(marked).To(BeTrue())
 	})
 
 	It("leaves a run that has not finished alone", func(ctx SpecContext) {
