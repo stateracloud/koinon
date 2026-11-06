@@ -203,6 +203,44 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (C
 	return i, err
 }
 
+const getConnectionForUpdate = `-- name: GetConnectionForUpdate :one
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at FROM connections
+WHERE org_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type GetConnectionForUpdateParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+func (q *Queries) GetConnectionForUpdate(ctx context.Context, arg GetConnectionForUpdateParams) (Connection, error) {
+	row := q.db.QueryRow(ctx, getConnectionForUpdate, arg.OrgID, arg.ID)
+	var i Connection
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Connector,
+		&i.DisplayName,
+		&i.Config,
+		&i.SecretName,
+		&i.SecretFingerprint,
+		&i.Status,
+		&i.LastTestedAt,
+		&i.LastTest,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SecretEnvelope,
+		&i.Source,
+		&i.ManagedBySecret,
+		&i.DeclaredVersion,
+		&i.RemovedAt,
+		&i.CredentialLostAt,
+	)
+	return i, err
+}
+
 const listAgentsBoundToConnection = `-- name: ListAgentsBoundToConnection :many
 SELECT DISTINCT a.id, a.display_name
 FROM agents a
@@ -471,6 +509,57 @@ type SetConnectionEnvelopeParams struct {
 // at the next start.
 func (q *Queries) SetConnectionEnvelope(ctx context.Context, arg SetConnectionEnvelopeParams) (Connection, error) {
 	row := q.db.QueryRow(ctx, setConnectionEnvelope, arg.SecretEnvelope, arg.OrgID, arg.ID)
+	var i Connection
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Connector,
+		&i.DisplayName,
+		&i.Config,
+		&i.SecretName,
+		&i.SecretFingerprint,
+		&i.Status,
+		&i.LastTestedAt,
+		&i.LastTest,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SecretEnvelope,
+		&i.Source,
+		&i.ManagedBySecret,
+		&i.DeclaredVersion,
+		&i.RemovedAt,
+		&i.CredentialLostAt,
+	)
+	return i, err
+}
+
+const setUIConnectionSecret = `-- name: SetUIConnectionSecret :one
+UPDATE connections
+SET config = $1, secret_envelope = $2, secret_fingerprint = $3,
+    credential_lost_at = NULL, status = 'untested', last_tested_at = NULL, last_test = '[]'
+WHERE org_id = $4 AND id = $5 AND source = 'ui'
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at
+`
+
+type SetUIConnectionSecretParams struct {
+	Config            []byte
+	SecretEnvelope    []byte
+	SecretFingerprint string
+	OrgID             pgtype.UUID
+	ID                pgtype.UUID
+}
+
+// A new secret for a connection entered here (ADR 0085 decision 13: entering a lost one again, or
+// rotating one). The old test result was about the old secret: the connection is untested again.
+func (q *Queries) SetUIConnectionSecret(ctx context.Context, arg SetUIConnectionSecretParams) (Connection, error) {
+	row := q.db.QueryRow(ctx, setUIConnectionSecret,
+		arg.Config,
+		arg.SecretEnvelope,
+		arg.SecretFingerprint,
+		arg.OrgID,
+		arg.ID,
+	)
 	var i Connection
 	err := row.Scan(
 		&i.OrgID,
