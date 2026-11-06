@@ -56,9 +56,9 @@ reviews:
   path_instructions:
     - path: "internal/db/migrations/**"
       instructions: |
-        Migrations are forward-only goose files. A merged migration is never edited. Within a
-        shipped minor line (ADR 0085) they only expand: no RENAME, DROP COLUMN, DROP TABLE,
-        DROP TYPE and no column type change. Tables owned by an org are keyed by (org_id, id)
+        Migrations are forward-only goose files. A merged migration is never edited. Before v0.3
+        there is no schema promise (ADR 0099). Within a shipped minor line (ADR 0085) they only
+        expand: no RENAME, DROP COLUMN, DROP TABLE, DROP TYPE and no column type change. Tables owned by an org are keyed by (org_id, id)
         with composite foreign keys.
     - path: "charts/koinon/**"
       instructions: |
