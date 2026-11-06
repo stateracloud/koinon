@@ -348,20 +348,27 @@ nothing to do for a queued PR). The repository half is in place and inert until 
 
 What a `merge_group` build runs (event `checks_requested`, no pull request in the payload):
 
-- `ci`: everything. `hack/ci-skip-heavy.sh decide` answers `skip=false` and `ci-changes.sh` gets no
-  base, because the queue commit is a tree no check has seen. The concurrency group is the queue commit
-  (`ci-mq-<sha>`), so queue builds never cancel one another (a cancelled required check ejects the
-  entry and the ones behind it); `ci-supersede.sh`, `buf breaking`, commit subjects, dependency age
-  and the migration base compare are pull-request-only steps and are skipped (a step skip is green).
+- `ci`: everything. `hack/ci-skip-heavy.sh decide` answers `skip=false`, because the queue commit is a
+  tree no check has seen. `changes` (`ci-changes.sh`), the proto `buf breaking` step and `migrate-lint`
+  compare against `github.event.merge_group.base_sha` (ADR 0094 decision 4), so a baseline or a
+  `hack/migrate-patch-line` change that landed on main while the entry waited is checked against the main
+  the entry lands on. The concurrency group is the queue commit (`ci-mq-<sha>`), so queue builds never
+  cancel one another (a cancelled required check ejects the entry and the ones behind it);
+  `ci-supersede.sh`, commit subjects, dependency age and the waiver are pull-request-only steps and are
+  skipped (a step skip is green).
 - `dco` and `gitleaks`: the range `merge_group.base_sha..head_sha`, the entry's own commits.
-- `claim`: passes at once. An entry was enqueued only with a green `claim` on its head, and a queue
-  commit has no pull request to read; `release` and `sweeper` do not run.
-- `e2e result`: `hack/e2e-decide.sh` runs the quickstart in the queue build when the entry's diff
-  against `base_sha` is e2e-relevant (`required=false`: this run's own quickstart is the evidence; a
-  lab status or label on the PR head says nothing about main plus the entry). Not relevant: skipped,
-  green. The base branch's copies of the rule and the gate (at `base_sha`) are used.
+- `claim`: the fencing point. It reads `<N>` from the queue ref (`gh-readonly-queue/<base>/pr-<N>-<sha>`),
+  checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim someone else took (or the
+  sweeper released) while the PR waited fails the entry. It fails closed when `<N>` cannot be read.
+  `release` and `sweeper` do not run.
+- `e2e result`: the queue commit runs no kind e2e (`decide` always answers `needed=false`; 25 minutes per
+  entry would hold the queue). When the entry's diff against `base_sha` is e2e-relevant, `decide` answers
+  `required=true` and `e2e result` runs the base's `hack/e2e-gate.sh` against the head SHA of pull
+  request `<N>` (from the queue ref), so the same `quickstart` or `e2e-lab` evidence as on the pull request
+  is re-checked at queue time. Not relevant: green. Running the e2e in the queue instead is deferred (ADR
+  0094 decision 4, Alternatives); it needs a new ADR.
 
-Cost: one full `ci` run per queue build, plus a 25 minute e2e for relevant entries; set group size and
+Cost: one full `ci` run per queue build, and no e2e; set group size and
 concurrency in the ruleset to trade throughput against runner minutes (start at group size 1, merge
 method `MERGE`). A push to main after a queue merge still runs `decide_push`, which skips the heavy jobs
 only when the merge tree equals a green PR head; after a queue build that is rarely true, so main is
@@ -375,7 +382,8 @@ Scripts, with the rule detected at run time (no queue: nothing changes):
   queue commit.
 - `hack/pr-wait.sh <PR>` prints `in the merge queue (<position> <state>)` while the PR is queued
   (GraphQL `isInMergeQueue`/`mergeQueueEntry`; `gh pr view --json` has no queue fields) and ends with
-  `MERGED`. A PR that was queued and is open and out of the queue again exits **8** `DEQUEUED` (failed
+  `MERGED`. A PR that was queued and reads open and out of the queue on two consecutive polls exits **8** `DEQUEUED`
+  (one such poll is not enough: the queue clears just before the PR reads `MERGED`) (failed
   queue build, conflict with an entry ahead, removed by hand; `gh` cannot remove an entry, the PR page
   can). Read the queue build's failures on the PR page, fix, and run `pr-merge.sh` again.
 - `--admin` (CODEOWNERS paths): GitHub documents "Merge without waiting for requirements to be met

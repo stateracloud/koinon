@@ -215,7 +215,7 @@ queue_state() {
   jq -r '.data.repository.pullRequest | if (type == "object" and .isInMergeQueue == true) then "queued \(.mergeQueueEntry.position // "?") \(.mergeQueueEntry.state // "")" else "no" end' <<<"$raw" 2>/dev/null || echo no
 }
 
-no_live=0 last="" was_queued=0
+no_live=0 last="" was_queued=0 dq_polls=0
 emit() { # print only when the line differs from the previous one
   if [ "$1" != "$last" ]; then
     echo "$1"
@@ -248,7 +248,7 @@ while :; do
     qs=$(queue_state "$pr")
     case $qs in
     queued*)
-      was_queued=1
+      was_queued=1 dq_polls=0
       emit "in the merge queue (${qs#queued })"
       if [ $((SECONDS - start)) -ge "$timeout" ]; then echo "TIMEOUT"; exit 2; fi
       [ "$interval" -eq 0 ] || sleep "$interval"
@@ -256,6 +256,15 @@ while :; do
       ;;
     *)
       if [ "$was_queued" = 1 ]; then
+        # The queue pushes main first and the PR reads MERGED a moment later, and the PR state is read before the
+        # queue state: one poll of "OPEN and not queued" can be a merge in progress. Look again (the next pass
+        # reads the PR first) and report DEQUEUED only on the second consecutive poll.
+        dq_polls=$((dq_polls + 1))
+        if [ "$dq_polls" -lt 2 ]; then
+          if [ $((SECONDS - start)) -ge "$timeout" ]; then echo "TIMEOUT"; exit 2; fi
+          [ "$interval" -eq 0 ] || sleep "$interval"
+          continue
+        fi
         echo "DEQUEUED: PR $pr left the merge queue without merging (the queue build failed, it conflicted with an entry ahead, or it was removed); read the queue build's failures on the PR page, fix, and enqueue again with hack/pr-merge.sh"
         exit 8
       fi

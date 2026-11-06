@@ -610,6 +610,13 @@ printf '%s\n%s\n' "$q1" "$qno" >"$FAKE_DIR/queue"
 run 7 --interval 0
 expect "a PR that left the queue without merging exits 8" 8 "in the merge queue (2 QUEUED)
 DEQUEUED: PR 7 left the merge queue without merging (the queue build failed, it conflicted with an entry ahead, or it was removed); read the queue build's failures on the PR page, fix, and enqueue again with hack/pr-merge.sh"
+# The queue clears before the PR reads MERGED: one OPEN-and-not-queued poll is not a dequeue.
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")" \
+  "$(pr MERGED CLEAN abc1234def "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n%s\n%s\n' "$q1" "$qno" "$qno" >"$FAKE_DIR/queue"
+run 7 --interval 0
+expect "a queue that clears just before the PR reads MERGED is a merge, not a dequeue" 0 "in the merge queue (2 QUEUED)
+MERGED abc1234"
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
 printf '%s\n' "$q1" >"$FAKE_DIR/queue"
 run 7 --interval 0 --timeout 0

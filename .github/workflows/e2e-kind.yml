@@ -36,8 +36,9 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
   # The merge queue (koinon-private#225): `e2e result` is required, so it reports on the queue's commit.
-  # decide runs the quickstart there when the entry's own diff (against merge_group.base_sha) is
-  # e2e-relevant; that run is the evidence, no lab status exists for a queue commit.
+  # ADR 0094 decision 4: decide never starts the quickstart on a queue commit; `e2e result` checks the
+  # queued pull request's head (number parsed from the queue ref) for evidence when the entry's own
+  # diff (against merge_group.base_sha) is e2e-relevant.
   merge_group:
     types: [checks_requested]
   push:
@@ -302,6 +303,7 @@ jobs:
     permissions:
       contents: read
       actions: write # re-run the pull request run's failed `e2e result` after a passing dispatched run
+      pull-requests: read # the queued pull request's head sha (merge_group)
       statuses: read # hack/e2e-gate.sh reads the e2e-lab commit status; without it the API answers 403 (koinon-private#588)
     env:
       GH_TOKEN: ${{ github.token }}
@@ -321,6 +323,18 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
           BRANCH: ${{ github.head_ref }}
         run: |
+          # Merge queue (ADR 0094 decision 4): the queue commit has no e2e of its own. The evidence must be on
+          # the head of the queued pull request, <N> from gh-readonly-queue/<base>/pr-<N>-<sha>. Fail closed.
+          if [[ $EVENT == merge_group ]]; then
+            n=${GITHUB_REF#refs/heads/gh-readonly-queue/*/pr-}
+            n=${n%%-*}
+            if [[ ! $n =~ ^[0-9]+$ ]]; then echo "::error::cannot read the pull request number from $GITHUB_REF"; exit 1; fi
+            SHA=$(gh pr view "$n" --json headRefOid --jq .headRefOid)
+            if [[ -z $SHA ]]; then echo "::error::cannot read the head of pull request $n"; exit 1; fi
+            BRANCH=$(gh pr view "$n" --json headRefName --jq .headRefName)
+            export SHA BRANCH
+            echo "merge queue entry for pull request $n, head $SHA"
+          fi
           # The base branch's copy of the gate, like decide: a pull request must not be able to
           # change what decides whether its e2e is enough. This PR's own copy only when the base has none.
           if [[ $EVENT == pull_request ]]; then git fetch --no-tags --depth=1 origin "$BASE"; fi

@@ -113,7 +113,7 @@ jobs:
           tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/skip.txt"
       - id: paths
         env:
-          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'merge_group' && github.event.merge_group.base_sha || '' }}
           SKIP: ${{ steps.skip.outputs.skip }}
         run: |
           hack/ci-changes.sh "$BASE" >"$RUNNER_TEMP/changes.txt"
@@ -344,9 +344,12 @@ jobs:
       - name: proto (buf lint)
         run: buf lint
       - name: proto (buf breaking)
-        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') }}
+        env:
+          # The main this entry lands on (ADR 0094 decision 4), not the one the PR head was checked against.
+          BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
         run: |
-          base="origin/${{ github.base_ref }}"
+          base="$BASE"
           if git cat-file -e "$base:buf.yaml" 2>/dev/null; then
             buf breaking --against ".git#ref=$base"
           else
@@ -357,7 +360,7 @@ jobs:
         run: hack/migrate-lint-test.sh
       - name: migrations (lint)
         if: ${{ !cancelled() }}
-        run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+        run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'merge_group' && github.event.merge_group.base_sha || '' }}
       # ADR numbers unique and contiguous, README index in sync (hack/adr-lint.sh, ADR 0082).
       - name: adr-lint (tests)
         if: ${{ !cancelled() }}
