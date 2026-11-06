@@ -33,6 +33,12 @@ type Fake struct {
 	Repositories []string
 	// Private marks repositories (by name) as private; the rest are public.
 	Private map[string]bool
+	// Internal marks repositories (by name) as GitHub Enterprise "internal": private=true and
+	// visibility "internal", readable by the whole enterprise.
+	Internal map[string]bool
+	// OmitVisibility leaves the "visibility" field out of repository objects, as an older GitHub
+	// Enterprise Server does: only "private" is sent, true for internal repositories too.
+	OmitVisibility bool
 	// Permissions the App was granted.
 	Permissions map[string]string
 	// Now defaults to time.Now; tokens expire an hour after Now.
@@ -66,8 +72,26 @@ type Fake struct {
 
 // tokenInfo is what a minted token may do.
 type tokenInfo struct {
-	repos []string // names; every repository of the installation when selection is all
+	repos []string // names, when the token was minted for selected repositories
+	all   bool     // minted for the whole installation: covers Repositories as they are now
 	perms map[string]string
+}
+
+// covers is the repositories a token reaches now. As on GitHub, a token follows the installation:
+// one minted for the whole installation covers what it holds now, and a repository that leaves the
+// installation leaves every token, also one minted for selected repositories (which never gains a
+// repository it was not minted for). The caller holds f.mu.
+func (f *Fake) covers(info tokenInfo) []string {
+	if info.all {
+		return f.Repositories
+	}
+	out := make([]string, 0, len(info.repos))
+	for _, r := range info.repos {
+		if slices.Contains(f.Repositories, r) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // Request is a token request the fake received.
@@ -312,7 +336,7 @@ func (f *Fake) accessToken(w http.ResponseWriter, r *http.Request) {
 	n := f.mints
 	f.requests = append(f.requests, Request{Repositories: req.Repositories, Permissions: req.Permissions})
 	token := fmt.Sprintf("ghs_faketoken%04d", n)
-	f.tokens[token] = tokenInfo{repos: slices.Clone(repos), perms: perms}
+	f.tokens[token] = tokenInfo{repos: slices.Clone(repos), all: req.Repositories == nil, perms: perms}
 	f.mu.Unlock()
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"token":                token,

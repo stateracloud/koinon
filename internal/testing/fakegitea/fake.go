@@ -12,7 +12,7 @@
 // Shapes follow Gitea's swagger (v28.2.0, templates/swagger/v1-swagger.generated.json), keeping
 // the fields a client reads. Differences from a real Gitea that tests may meet:
 //
-//   - Every repository is private. A login sees every repository of the owner with Write
+//   - Every repository is private unless SetVisibility says otherwise. A login sees every repository of the owner with Write
 //     permission, unless Collaborate restricts it to the repositories it names.
 //   - A token has a scope, "write" by default or "read" (AddScopedToken). As in Gitea 28.2, a
 //     read-scoped token is refused with 403 on every write (an API call that is not GET or HEAD, a
@@ -66,6 +66,10 @@ type Fake struct {
 	// access maps a login to its permission by lower-case repository name; absent means the
 	// login has "write" on every repository.
 	access map[string]map[string]string
+
+	// public holds the lower-case names of repositories that are not private, set by
+	// SetVisibility; every other repository is private.
+	public map[string]string
 
 	// AllowBearer also accepts "Authorization: Bearer <token>", as a real Gitea does. It is off
 	// by default so tests can prove a client sends one of the two documented forms.

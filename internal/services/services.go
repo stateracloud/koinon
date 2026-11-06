@@ -32,6 +32,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
@@ -66,6 +67,11 @@ import (
 	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/pricing"
 )
+
+// ScopeSyncer refreshes the code-host scope of one connection (codehost/scopesync.Syncer).
+type ScopeSyncer interface {
+	Sync(ctx context.Context, row store.Connection, actor audit.Actor) error
+}
 
 // Keys is the secret store as the services use it.
 type Keys interface {
@@ -104,6 +110,10 @@ type Options struct {
 	Keys Keys
 	// Tokens issues admin API tokens; defaults to a service on the pool.
 	Tokens *tokens.Service
+	// ScopeSync reads a code-host connection's repositories into the org's code-host scope when it
+	// is created, given a new secret or tested, in the background (the periodic refresh runs
+	// outside the services). Nil skips that.
+	ScopeSync ScopeSyncer
 	// Hosts are the code-host providers that run connection checks and list repositories. Without
 	// it the shipped providers are used, with GitHub as the client below.
 	Hosts *codehost.Registry
@@ -152,6 +162,7 @@ type Server struct {
 	log         *slog.Logger
 
 	keys      Keys
+	scopeSync ScopeSyncer
 	tokens    *tokens.Service
 	budgets   *budget.Service
 	prices    *prices.Service
@@ -200,7 +211,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		dm:       opts.DirectMessages,
 		notifier: opts.Notifier, urlPolicy: opts.URLPolicy,
 		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, cancelGrace: opts.WatchCancelGrace, log: opts.Logger,
-		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
+		keys: opts.Keys, scopeSync: opts.ScopeSync, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
 		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces, leakGuard: orgsettings.NewService(pool),
 	}

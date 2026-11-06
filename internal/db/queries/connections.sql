@@ -100,3 +100,10 @@ SET config = @config, secret_envelope = @secret_envelope, secret_fingerprint = @
     credential_lost_at = NULL, status = 'untested', last_tested_at = NULL, last_test = '[]'
 WHERE org_id = @org_id AND id = @id AND source = 'ui'
 RETURNING *;
+
+-- name: ListOrgsWithCodeHostConnections :many
+-- The code-host scope refresh: finds every org that has a live connection of one of these connector
+-- types, to refresh its repositories' visibility. Across orgs, like the question sweeps.
+SELECT DISTINCT org_id FROM connections
+WHERE connector = ANY(@connectors::text[]) AND removed_at IS NULL AND credential_lost_at IS NULL
+ORDER BY org_id;

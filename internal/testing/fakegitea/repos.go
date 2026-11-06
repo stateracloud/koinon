@@ -5,6 +5,7 @@ package fakegitea
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 func userJSON(base, login string) map[string]any {
@@ -24,11 +25,11 @@ func (f *Fake) repoJSONFor(base string, rp *repo, permission string) map[string]
 	html := base + "/" + f.Owner + "/" + rp.name
 	return map[string]any{
 		"id": rp.id, "owner": userJSON(base, f.Owner), "name": rp.name, "full_name": f.Owner + "/" + rp.name,
-		"description": "", "empty": false, "private": true, "fork": false, "template": false, "mirror": false,
+		"description": "", "empty": false, "private": f.public[strings.ToLower(rp.name)] == "", "fork": false, "template": false, "mirror": false,
 		"size": 1, "html_url": html, "ssh_url": "git@" + "gitea.invalid:" + f.Owner + "/" + rp.name + ".git",
 		"clone_url": html + ".git", "original_url": "", "website": "", "stars_count": 0, "forks_count": 0,
 		"watchers_count": 0, "open_issues_count": len(rp.issues), "open_pr_counter": rp.openPulls(),
-		"default_branch": rp.defaultBranch(), "archived": false, "internal": false,
+		"default_branch": rp.defaultBranch(), "archived": false, "internal": f.public[strings.ToLower(rp.name)] == "internal",
 		"has_issues": true, "has_pull_requests": true, "has_code": true,
 		"created_at": ts(rp.created), "updated_at": ts(rp.created),
 		"permissions":         map[string]bool{"admin": permission == "admin", "push": canWrite(permission), "pull": permission != ""},

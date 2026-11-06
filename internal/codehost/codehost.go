@@ -96,7 +96,20 @@ type Repository struct {
 	FullName      string
 	DefaultBranch string
 	Private       bool
+	// Visibility is VisibilityPrivate only when the provider says the repository is readable by
+	// named collaborators alone. A public repository is VisibilityPublic; anything else (a GitHub
+	// internal repository, a server that leaves the field out) is VisibilityPublic or
+	// VisibilityUnknown, which the leak guard (ADR 0091) treats alike: it must never call a
+	// repository inside the org that others can read.
+	Visibility string
 }
+
+// Repository visibilities a connector reports for the org's code-host scope.
+const (
+	VisibilityPrivate = "private"
+	VisibilityPublic  = "public"
+	VisibilityUnknown = "unknown"
+)
 
 // DefaultMaxRepositories is the bound on the repositories of one grant when the provider
 // states none.
