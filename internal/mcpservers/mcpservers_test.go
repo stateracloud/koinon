@@ -525,7 +525,12 @@ var _ = Describe("Service", func() {
 			var err error
 			conn, err = pool.Acquire(ctx)
 			Expect(err).NotTo(HaveOccurred())
-			DeferCleanup(conn.Release)
+			// A pooled connection must not go back still listening.
+			DeferCleanup(func(ctx SpecContext) {
+				_, err := conn.Exec(ctx, `UNLISTEN *`)
+				Expect(err).NotTo(HaveOccurred())
+				conn.Release()
+			})
 			_, err = conn.Exec(ctx, `LISTEN koinon_reconcile`)
 			Expect(err).NotTo(HaveOccurred())
 		})
