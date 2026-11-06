@@ -34,12 +34,14 @@ LIMIT 1;
 -- own computation from the raw usage and the dated price; gateway_cost_usd is
 -- what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
 -- for every entry that is not provisional, so a caller that holds nothing passes nothing.
+-- provider_id is the provider that served the request, when Koinon knows its model; the daily cost
+-- reconciliation sums a provider's entries by it.
 INSERT INTO spend_entries (
     org_id, agent_id, principal, run_id, task_id, request_id, key_id, model,
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
     request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id,
-    upstream_status
+    upstream_status, provider_id
 ) VALUES (
     @org_id, sqlc.narg(agent_id), @principal, sqlc.narg(run_id), sqlc.narg(task_id), @request_id, @key_id, @model,
     @input_tokens, @output_tokens, @cache_read_tokens, @cache_write_tokens, @reasoning_tokens,
@@ -47,7 +49,7 @@ INSERT INTO spend_entries (
     sqlc.narg(price_ref), @priced, @estimated, sqlc.narg(estimate)::jsonb, @cost_flagged,
     sqlc.narg(request_bytes), sqlc.narg(response_bytes), @occurred_at,
     @provisional, coalesce((sqlc.narg(reserve_usd)::text)::numeric, 0), sqlc.narg(response_id),
-    sqlc.narg(upstream_status)
+    sqlc.narg(upstream_status), sqlc.narg(provider_id)
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id;
@@ -186,7 +188,7 @@ SELECT model,
        coalesce(sum(gateway_cost_usd), 0)::text AS gateway_usd,
        coalesce(sum(cost_usd) FILTER (WHERE gateway_cost_usd IS NOT NULL), 0)::text AS gateway_compared_usd,
        count(*) FILTER (WHERE cost_flagged)::bigint AS flagged_requests,
-       -- Responses cut short whose provider figure is pending, and what they hold back from the gateway keys.
+       -- Requests whose provider bill is pending, and what they hold back from the gateway keys.
        count(*) FILTER (WHERE provisional)::bigint AS provisional_requests,
        coalesce(sum(reserve_usd), 0)::text AS reserved_usd
 FROM spend_entries
