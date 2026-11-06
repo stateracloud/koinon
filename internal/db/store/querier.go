@@ -762,6 +762,10 @@ type Querier interface {
 	ListRunModelCalls(ctx context.Context, arg ListRunModelCallsParams) ([]ListRunModelCallsRow, error)
 	ListRunTurns(ctx context.Context, arg ListRunTurnsParams) ([]RunTurn, error)
 	ListRunsForTask(ctx context.Context, arg ListRunsForTaskParams) ([]Run, error)
+	// Finished runs of the org that finished before @cutoff and whose content the purge has not
+	// cleared yet (issue #69), oldest first and after the (finished_at, id) keyset the caller passes
+	// (the epoch and the nil UUID to start). It reads runs_content_unpurged only, never run_events.
+	ListRunsToPurgeContent(ctx context.Context, arg ListRunsToPurgeContentParams) ([]ListRunsToPurgeContentRow, error)
 	// Every enabled provider of the org with its enabled models, for the gateway. A provider whose key
 	// was lost (#85) is not served until the key is entered again.
 	ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]ListServedCatalogRow, error)
@@ -851,6 +855,9 @@ type Querier interface {
 	MarkQuestionReminded(ctx context.Context, arg MarkQuestionRemindedParams) (int64, error)
 	// Records that the outcomes were sent to the agent.
 	MarkQuestionsDelivered(ctx context.Context, arg MarkQuestionsDeliveredParams) (int64, error)
+	// Marks a finished run as purged once none of its content events carries content, so later passes
+	// skip it. A row still locked by another purger leaves the run unmarked; the next pass finishes it.
+	MarkRunContentPurged(ctx context.Context, arg MarkRunContentPurgedParams) (int64, error)
 	// starting -> running once the harness session is ready.
 	MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) (Run, error)
 	// Records when the run started waiting for its sandbox, once per wait (the first requeue keeps it).
@@ -887,6 +894,14 @@ type Querier interface {
 	// The same for an org whose model objects the gateway rejected: nothing new is recorded, rows of
 	// models the state no longer serves are removed.
 	PruneGatewayServedModels(ctx context.Context, arg PruneGatewayServedModelsParams) error
+	// Blanks the payload of up to @batch_size content events (@kinds: messages, thoughts, tool calls)
+	// of one run (issue #69). The row stays, so the run page keeps its skeleton and seq stays gap-free;
+	// only the payload goes and content_purged_at says when. A kind that is a key of @strip (a JSON
+	// object of kind -> content keys) loses only those keys and keeps its state fields (run.prompt keeps
+	// throughSeq, acp.permission keeps decision). Events of other kinds (state, park, cost notes) keep
+	// their payload. Rows are locked with SKIP LOCKED, so two purgers never
+	// wait for each other. Rows 0: nothing left to blank in this run.
+	PurgeRunEventContent(ctx context.Context, arg PurgeRunEventContentParams) (int64, error)
 	// A tool turned two-approver on after the request was recorded: the pending request needs two too.
 	RaiseApprovalsRequired(ctx context.Context, arg RaiseApprovalsRequiredParams) (ApprovalRequest, error)
 	// Records the observed sandbox. started_at and stopped_at are stamped on the
@@ -1031,6 +1046,9 @@ type Querier interface {
 	SetOrgMonthlyCap(ctx context.Context, arg SetOrgMonthlyCapParams) (SetOrgMonthlyCapRow, error)
 	// Sets or clears (NULL) the platform ceiling of an org, keeping its monthly cap.
 	SetOrgPlatformCeiling(ctx context.Context, arg SetOrgPlatformCeilingParams) (SetOrgPlatformCeilingRow, error)
+	// How many days a finished run's stored content is kept (issue #69); NULL is the platform default.
+	// It touches only this column, so the latency and limit overrides stay.
+	SetOrgRunContentRetention(ctx context.Context, arg SetOrgRunContentRetentionParams) error
 	SetPlatformTraceCeiling(ctx context.Context, arg SetPlatformTraceCeilingParams) (PlatformTraceSetting, error)
 	// Records the result of a re-test, only if the configuration is the one that was tested. A deleted
 	// destination matches nothing and is not brought back.

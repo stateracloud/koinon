@@ -1281,6 +1281,20 @@ type Rates struct {
 // Role defines model for Role.
 type Role string
 
+// RunContentRetention Once a finished run is older than `days`, the purge job blanks the payload of its content events (messages, thoughts and tool calls) and strips the text from prompt, permission and refusal events, whose state fields stay. Other events, the run's status, traces and the spend ledger stay.
+type RunContentRetention struct {
+	Days        int `json:"days"`
+	DefaultDays int `json:"defaultDays"`
+	MaxDays     int `json:"maxDays"`
+	MinDays     int `json:"minDays"`
+}
+
+// RunContentRetentionSettings defines model for RunContentRetentionSettings.
+type RunContentRetentionSettings struct {
+	// Days Days to keep a finished run's content. Leave out for the default (30).
+	Days *int `json:"days,omitempty"`
+}
+
 // Source `secret` entries are declared by a Kubernetes Secret and read-only here.
 type Source string
 
@@ -1533,6 +1547,9 @@ type UpdateProviderJSONRequestBody = ProviderUpdate
 // CheckProviderEchoJSONRequestBody defines body for CheckProviderEcho for application/json ContentType.
 type CheckProviderEchoJSONRequestBody = EchoCheckRequest
 
+// SetRunContentRetentionJSONRequestBody defines body for SetRunContentRetention for application/json ContentType.
+type SetRunContentRetentionJSONRequestBody = RunContentRetentionSettings
+
 // CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
 type CreateTokenJSONRequestBody = TokenCreate
 
@@ -1678,6 +1695,12 @@ type ServerInterface interface {
 	// CheckProviderEcho Check whether the provider changes the text it is sent.
 	// (POST /providers/{providerId}/echo-check)
 	CheckProviderEcho(w http.ResponseWriter, r *http.Request, providerId ProviderId)
+	// GetRunContentRetention How long a finished run's stored content is kept (issue
+	// (GET /run-content-retention)
+	GetRunContentRetention(w http.ResponseWriter, r *http.Request)
+	// SetRunContentRetention Set the retention in days, or return it to the default (30) by leaving `days` out. Audited.
+	// (PUT /run-content-retention)
+	SetRunContentRetention(w http.ResponseWriter, r *http.Request)
 	// GetSpendReport Spend per model, with estimated usage shown apart from reported usage.
 	// (GET /spend)
 	GetSpendReport(w http.ResponseWriter, r *http.Request, params GetSpendReportParams)
@@ -2836,6 +2859,34 @@ func (siw *ServerInterfaceWrapper) CheckProviderEcho(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetRunContentRetention operation middleware
+func (siw *ServerInterfaceWrapper) GetRunContentRetention(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRunContentRetention(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetRunContentRetention operation middleware
+func (siw *ServerInterfaceWrapper) SetRunContentRetention(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetRunContentRetention(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetSpendReport operation middleware
 func (siw *ServerInterfaceWrapper) GetSpendReport(w http.ResponseWriter, r *http.Request) {
 
@@ -3069,6 +3120,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/models/{modelId}", wrapper.UpdateModel)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/default-model", wrapper.GetDefaultModel)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/default-model", wrapper.SetDefaultModel)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/run-content-retention", wrapper.GetRunContentRetention)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/run-content-retention", wrapper.SetRunContentRetention)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/leak-guard", wrapper.GetLeakGuard)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/leak-guard", wrapper.SetLeakGuard)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/leak-guard/trusted-hosts", wrapper.AddFetchTrustedHost)
@@ -4838,6 +4891,83 @@ func (response CheckProviderEchodefaultJSONResponse) VisitCheckProviderEchoRespo
 	return err
 }
 
+type GetRunContentRetentionRequestObject struct {
+}
+
+type GetRunContentRetentionResponseObject interface {
+	VisitGetRunContentRetentionResponse(w http.ResponseWriter) error
+}
+
+type GetRunContentRetention200JSONResponse RunContentRetention
+
+func (response GetRunContentRetention200JSONResponse) VisitGetRunContentRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRunContentRetentiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetRunContentRetentiondefaultJSONResponse) VisitGetRunContentRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetRunContentRetentionRequestObject struct {
+	Body *SetRunContentRetentionJSONRequestBody
+}
+
+type SetRunContentRetentionResponseObject interface {
+	VisitSetRunContentRetentionResponse(w http.ResponseWriter) error
+}
+
+type SetRunContentRetention200JSONResponse RunContentRetention
+
+func (response SetRunContentRetention200JSONResponse) VisitSetRunContentRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetRunContentRetentiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetRunContentRetentiondefaultJSONResponse) VisitSetRunContentRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetSpendReportRequestObject struct {
 	Params GetSpendReportParams
 }
@@ -5129,6 +5259,12 @@ type StrictServerInterface interface {
 	// CheckProviderEcho Check whether the provider changes the text it is sent.
 	// (POST /providers/{providerId}/echo-check)
 	CheckProviderEcho(ctx context.Context, request CheckProviderEchoRequestObject) (CheckProviderEchoResponseObject, error)
+	// GetRunContentRetention How long a finished run's stored content is kept (issue
+	// (GET /run-content-retention)
+	GetRunContentRetention(ctx context.Context, request GetRunContentRetentionRequestObject) (GetRunContentRetentionResponseObject, error)
+	// SetRunContentRetention Set the retention in days, or return it to the default (30) by leaving `days` out. Audited.
+	// (PUT /run-content-retention)
+	SetRunContentRetention(ctx context.Context, request SetRunContentRetentionRequestObject) (SetRunContentRetentionResponseObject, error)
 	// GetSpendReport Spend per model, with estimated usage shown apart from reported usage.
 	// (GET /spend)
 	GetSpendReport(ctx context.Context, request GetSpendReportRequestObject) (GetSpendReportResponseObject, error)
@@ -6458,6 +6594,61 @@ func (sh *strictHandler) CheckProviderEcho(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CheckProviderEchoResponseObject); ok {
 		if err := validResponse.VisitCheckProviderEchoResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRunContentRetention operation middleware
+func (sh *strictHandler) GetRunContentRetention(w http.ResponseWriter, r *http.Request) {
+	var request GetRunContentRetentionRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRunContentRetention(ctx, request.(GetRunContentRetentionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRunContentRetention")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRunContentRetentionResponseObject); ok {
+		if err := validResponse.VisitGetRunContentRetentionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetRunContentRetention operation middleware
+func (sh *strictHandler) SetRunContentRetention(w http.ResponseWriter, r *http.Request) {
+	var request SetRunContentRetentionRequestObject
+
+	var body SetRunContentRetentionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetRunContentRetention(ctx, request.(SetRunContentRetentionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetRunContentRetention")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetRunContentRetentionResponseObject); ok {
+		if err := validResponse.VisitSetRunContentRetentionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

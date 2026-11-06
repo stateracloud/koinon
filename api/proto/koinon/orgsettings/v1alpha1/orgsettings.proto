@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.orgsettings.v1alpha1;
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1;orgsettingsv1alpha1";
+
+// OrgSettingsService is the UI's face of the org's settings that are not owned by another service
+// (leak guard and trace settings have their own). It is the connect-rpc face of the same service
+// layer the admin API uses. Admins and owners only. Every change is audited.
+service OrgSettingsService {
+  rpc GetRunContentRetention(GetRunContentRetentionRequest) returns (GetRunContentRetentionResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // SetRunContentRetention sets how long a finished run's stored content is kept, or returns it to the
+  // default (30 days) when days is 0. Audited as org.run_content_retention.set.
+  rpc SetRunContentRetention(SetRunContentRetentionRequest) returns (SetRunContentRetentionResponse);
+}
+
+// RunContentRetention is the org's effective retention of stored run content. Once a finished run is
+// older than days, the purge job blanks the payload of its content events (messages, thoughts and tool
+// calls) and strips the text from prompt, permission and refusal events, whose state fields stay. Other
+// events, the run's status, traces and the spend ledger stay.
+message RunContentRetention {
+  int32 days = 1;
+  int32 default_days = 2;
+  int32 min_days = 3;
+  int32 max_days = 4;
+}
+
+message GetRunContentRetentionRequest {
+  string org_id = 1;
+}
+
+message GetRunContentRetentionResponse {
+  RunContentRetention retention = 1;
+}
+
+message SetRunContentRetentionRequest {
+  string org_id = 1;
+  // days to keep a finished run's content; 0 returns it to the default.
+  int32 days = 2;
+}
+
+message SetRunContentRetentionResponse {
+  RunContentRetention retention = 1;
+}

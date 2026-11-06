@@ -2027,17 +2027,18 @@ type OrgMembership struct {
 }
 
 type OrgSetting struct {
-	OrgID                 pgtype.UUID
-	IdleTimeoutSeconds    pgtype.Int4
-	ParkWarmSeconds       pgtype.Int4
-	QueueWaitSeconds      pgtype.Int4
-	CreatedAt             pgtype.Timestamptz
-	UpdatedAt             pgtype.Timestamptz
-	MaxConcurrentRuns     pgtype.Int4
-	TriggerConcurrency    pgtype.Int4
-	TriggerRatePerMinute  pgtype.Int4
-	SandboxWaitCapSeconds pgtype.Int4
-	LeakMatchThreshold    pgtype.Int4
+	OrgID                   pgtype.UUID
+	IdleTimeoutSeconds      pgtype.Int4
+	ParkWarmSeconds         pgtype.Int4
+	QueueWaitSeconds        pgtype.Int4
+	CreatedAt               pgtype.Timestamptz
+	UpdatedAt               pgtype.Timestamptz
+	MaxConcurrentRuns       pgtype.Int4
+	TriggerConcurrency      pgtype.Int4
+	TriggerRatePerMinute    pgtype.Int4
+	SandboxWaitCapSeconds   pgtype.Int4
+	LeakMatchThreshold      pgtype.Int4
+	RunContentRetentionDays pgtype.Int4
 }
 
 type OrgTraceSetting struct {
@@ -2217,18 +2218,20 @@ type Run struct {
 	MaxSpendUsd          pgtype.Numeric
 	Traced               pgtype.Bool
 	LastTurnSeq          int32
+	ContentPurgedAt      pgtype.Timestamptz
 }
 
 type RunEvent struct {
-	OrgID     pgtype.UUID
-	ID        pgtype.UUID
-	RunID     pgtype.UUID
-	Seq       int64
-	Epoch     int64
-	Kind      string
-	Payload   []byte
-	CreatedAt pgtype.Timestamptz
-	SourceSeq pgtype.Int8
+	OrgID           pgtype.UUID
+	ID              pgtype.UUID
+	RunID           pgtype.UUID
+	Seq             int64
+	Epoch           int64
+	Kind            string
+	Payload         []byte
+	CreatedAt       pgtype.Timestamptz
+	SourceSeq       pgtype.Int8
+	ContentPurgedAt pgtype.Timestamptz
 }
 
 type RunTurn struct {
