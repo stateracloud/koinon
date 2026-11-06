@@ -86,6 +86,13 @@ off (ADR 0068), with no release.
    org price entry for their org only, through the same validation and audit as `SetOverride`. Org prices still win
    over the platform list. The Prices page shows "source differs" when a lower layer later differs
    from the org's entry, so a stale org price stays visible.
+   **Org entries from proposals retire too** (maintainer decision 2026-11-06, second review). When
+   `koinon-api` starts with a new default list, an org entry that was accepted from a proposal and
+   whose rates, tiers and limits equal the new default entry of the same `id` is ended by a new org
+   version, so the lower layers price the model again. The retirement is audited
+   (`org_price.retired`, with the release's list version as the reason). An org price a person typed
+   by hand never retires: it was set on purpose, and only a person ends it. The provenance of decision
+   4 tells the two apart.
 7. **Past charges never change.** A new version is valid from the moment it is written, or from a
    later time a person sets. Backdating is refused. Ledger entries keep the `price_ref` they were
    priced with (ADR 0056).
@@ -198,7 +205,8 @@ records the page URL and "manual" as its source.
 
 - **Audit**, with `audit.RecordErr` in the same transaction as the change (as `SetOverride` does):
   `price.proposal.accepted`, `price.proposal.dismissed`, `platform_price.set` (actor a user or
-  `auto`), `platform_price.rollback`, `platform_price.retired`, `price.import.uploaded` and
+  `auto`), `platform_price.rollback`, `platform_price.retired`, `org_price.retired`,
+  `price.import.uploaded` and
   `price.refresh.settings_changed`. A refused change is not audited (ADR 0056 decision 10).
 - **Rollback** is a new version that restores an earlier version's entries from now on. History is
   never rewritten, and entries charged in between keep their `price_ref`.
@@ -352,8 +360,9 @@ others come from the research report.
   fetch loudly; the stored prices keep working.
 - Negative: auto-apply is a narrow automated path into cost truth. A coordinated wrong change in two
   sources, inside 25%, would apply. The bill comparison (decision 10) is what catches it.
-- Negative _(inferred)_: org entries made from proposals do not fade out when a release catches up,
-  unlike platform entries. Org admins who accept many proposals keep stale prices longer.
+- Positive: org entries accepted from proposals fade out when a release ships the same price, like
+  platform entries (decision 1.6). Hand-typed org prices stay until a person ends them, so an org that
+  types many prices by hand can still keep stale ones; the "source differs" mark shows them.
 - Follow-ups: issue #265 (build); `docs/ops/prices.md` platform-list section; OpenAPI and proto
   additions with `make generate`; the chart assertion; the ADR 0068 test case (decision 9).
 
@@ -365,16 +374,16 @@ All tracked in #265 until it is split.
    from its docs decides the conversion.
 2. **Other provider lists.** Do OpenAI, Google or DeepSeek publish a machine-readable price list
    that could count as a primary source? Checked in the v0.2 build (#265).
-3. **Org entries from proposals.** Should org entries made from proposals also retire when a release
-   catches up?
-4. **ADR 0097's wording.** Its line on a "reviewed import tool" for LiteLLM's JSON should point to
+3. **ADR 0097's wording.** Its line on a "reviewed import tool" for LiteLLM's JSON should point to
    this ADR when 0097 is accepted.
-5. **The signed bundle** (decision 13): the signing tool (Sigstore or minisign), key custody, and
+4. **The signed bundle** (decision 13): the signing tool (Sigstore or minisign), key custody, and
    whether a verified bundle may auto-apply beyond the bounds.
 
 Decided at the maintainer's 2026-11-06 review and moved into the decisions: the bounds (decision 3),
 one switch for fetch and auto-apply (decisions 2.2 and 3), which proposals org admins see (decision
-1.6), and models.dev as a proposals-only source (decision 7).
+1.6), and models.dev as a proposals-only source (decision 7). At the second 2026-11-06 review: org
+entries from proposals retire when a release ships the same price, hand-typed ones never (decision
+1.6).
 
 ## Upstream verification
 
