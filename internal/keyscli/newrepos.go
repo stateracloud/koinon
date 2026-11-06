@@ -180,6 +180,15 @@ func (t *Tool) newRepository(ctx context.Context, ring *secretstore.Keyring, h h
 		if err != nil || !started {
 			return err
 		}
+		// An older retired repository (kept by a retention, as keys forget leaves one) may be under
+		// an exposed password too: it is due now as well, so only the seed's copy survives. The
+		// sweeper's guard keeps each until the new repository holds the newest home.
+		if _, err := q.ExpireRetiredHomeRepository(ctx, store.ExpireRetiredHomeRepositoryParams{OrgID: h.org, AgentID: h.agent}); err != nil {
+			return err
+		}
+		if _, err := q.ExpireRetiredHomeRepositoryEpochs(ctx, store.ExpireRetiredHomeRepositoryEpochsParams{OrgID: h.org, AgentID: h.agent}); err != nil {
+			return err
+		}
 		prev := r.Epoch - 1
 		n, err := q.RequestHomeRepositorySeed(ctx, store.RequestHomeRepositorySeedParams{
 			OrgID: h.org, AgentID: h.agent, RepositoryEpoch: r.Epoch, SeedFromEpoch: pgtype.Int4{Int32: prev, Valid: true},

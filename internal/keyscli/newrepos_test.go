@@ -184,6 +184,10 @@ var _ = Describe("koinon-api keys new-repositories", func() {
 			}
 			Expect(deleteAfter).To(BeTemporally("~", start, time.Minute), "no retention: the sweeper's guard keeps it until the seed is there")
 		}
+		h, err := q.GetHomeRepository(ctx, store.GetHomeRepositoryParams{OrgID: org, AgentID: a2})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(h.DeleteAfter.Time).To(BeTemporally("~", start, time.Minute),
+			"a2's epoch 0, retired earlier with a retention, may be under an exposed password too: due now as well")
 		_, err = q.GetHomeRepository(ctx, store.GetHomeRepositoryParams{OrgID: org, AgentID: bare})
 		Expect(err).To(HaveOccurred(), "an agent without a repository gets its first one under the active KEK, later")
 
@@ -220,6 +224,45 @@ var _ = Describe("koinon-api keys new-repositories", func() {
 		Expect(e.RepositoryEpoch).To(Equal(int32(2)))
 		Expect(e.SeedFromEpoch).To(Equal(pgtype.Int4{Int32: 1, Valid: true}))
 		Expect(latest(ctx, org, a2).RepositoryEpoch).To(Equal(int32(2)), "only the agent named")
+	})
+
+	It("makes every older retired repository of the agent due now, and leaves deleted ones and other agents alone", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		a, other := withRepository(ctx, org), withRepository(ctx, org)
+		// a's epochs 0 and 1 are retired with a retention, as keys forget leaves them (forget.go:
+		// the org's HomeBackupRetention); epoch 2 is current. other's epoch 0 is retired likewise.
+		for range 2 {
+			_, _, err := pw.NewEpoch(ctx, org, a, checkpoint.ReasonKeyLost, checkpoint.DefaultRetain)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		_, _, err := pw.NewEpoch(ctx, org, other, checkpoint.ReasonKeyLost, checkpoint.DefaultRetain)
+		Expect(err).NotTo(HaveOccurred())
+		// a's epoch 0 is deleted already: its row is history and stays as it is.
+		var gone time.Time
+		Expect(pool.QueryRow(ctx, `UPDATE home_repositories SET deleted_at = now() WHERE org_id = $1 AND agent_id = $2 RETURNING delete_after`, org, a).Scan(&gone)).To(Succeed())
+		Expect(gone).To(BeTemporally(">", time.Now().Add(time.Hour)), "the fixture's retention is in the future")
+
+		compromise(ctx)
+		tool.Yes = true
+		start := time.Now()
+		Expect(tool.NewRepositories(ctx, false, []string{a.String()})).To(Succeed())
+
+		deadline := func(agent pgtype.UUID, epoch int32) time.Time {
+			GinkgoHelper()
+			var t time.Time
+			if epoch == 0 {
+				Expect(pool.QueryRow(ctx, `SELECT delete_after FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, org, agent).Scan(&t)).To(Succeed())
+			} else {
+				Expect(pool.QueryRow(ctx, `SELECT delete_after FROM home_repository_epochs WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = $3`,
+					org, agent, epoch).Scan(&t)).To(Succeed())
+			}
+			return t
+		}
+		Expect(latest(ctx, org, a).RepositoryEpoch).To(Equal(int32(3)))
+		Expect(deadline(a, 1)).To(BeTemporally("~", start, time.Minute), "retired earlier, under a retention: due now")
+		Expect(deadline(a, 2)).To(BeTemporally("~", start, time.Minute), "the epoch just replaced")
+		Expect(deadline(a, 0)).To(BeTemporally("==", gone), "deleted already")
+		Expect(deadline(other, 0)).To(BeTemporally(">", time.Now().Add(time.Hour)), "another agent's retention is kept")
 	})
 
 	Describe("without a terminal", func() {
