@@ -39,12 +39,6 @@ func fixture() []byte {
 	return b
 }
 
-func decodeFixture() *collogspb.ExportLogsServiceRequest {
-	var req collogspb.ExportLogsServiceRequest
-	Expect(proto.Unmarshal(fixture(), &req)).To(Succeed())
-	return &req
-}
-
 const fixtureAgent = "019a0000-0000-7000-8000-000000000001"
 
 func str(k, v string) *commonpb.KeyValue {
