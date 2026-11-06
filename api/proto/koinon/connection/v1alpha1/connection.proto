@@ -29,6 +29,14 @@ service ConnectionService {
   // Admins and owners.
   rpc CreateGiteaConnection(CreateGiteaConnectionRequest) returns (CreateGiteaConnectionResponse);
 
+  // SetConnectionSecret replaces the secret fields of a connection entered here: a GitHub App's private
+  // key, or a Gitea connection's two tokens. It is how a secret lost with its key-encryption key is
+  // entered again (ADR 0085 decision 13), and how one is rotated. Every secret field of the connector
+  // is required; the other settings stay. It clears the lost mark and the last test result. A
+  // declared connection's secret is changed in its Kubernetes Secret instead (FAILED_PRECONDITION).
+  // Audited without the secret. Admins and owners.
+  rpc SetConnectionSecret(SetConnectionSecretRequest) returns (SetConnectionSecretResponse);
+
   // GetConnection returns one connection. Viewers and above.
   rpc GetConnection(GetConnectionRequest) returns (GetConnectionResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
@@ -233,6 +241,40 @@ message CreateGiteaConnectionRequest {
 
 // CreateGiteaConnectionResponse holds the new connection and, when asked for, the test results.
 message CreateGiteaConnectionResponse {
+  Connection connection = 1;
+  repeated CheckResult results = 2;
+}
+
+// SetConnectionSecretRequest names a connection and carries its new secret fields. The secret's
+// connector must be the connection's.
+message SetConnectionSecretRequest {
+  string org_id = 1;
+  string connection_id = 2;
+  oneof secret {
+    GitHubConnectionSecret github = 3;
+    GiteaConnectionSecret gitea = 4;
+  }
+  // Run TestConnection right after storing the secret.
+  bool test = 5;
+}
+
+// GitHubConnectionSecret is the secret field of a GitHub App connection.
+message GitHubConnectionSecret {
+  // Secure input (ADR 0021): the App's PEM private key, a new one or the one GitHub still lists.
+  // Stored only as an envelope in Postgres (ADR 0056), never returned or logged.
+  string private_key = 1 [debug_redact = true];
+}
+
+// GiteaConnectionSecret is the secret fields of a Gitea connection (ADR 0063).
+message GiteaConnectionSecret {
+  // Secure input (ADR 0021): the bot's read token and write token, both required. A token equal to
+  // the stored one keeps the date it was entered. Stored only as an envelope, never returned or logged.
+  string read_token = 1 [debug_redact = true];
+  string write_token = 2 [debug_redact = true];
+}
+
+// SetConnectionSecretResponse holds the connection and, when asked for, the test results.
+message SetConnectionSecretResponse {
   Connection connection = 1;
   repeated CheckResult results = 2;
 }

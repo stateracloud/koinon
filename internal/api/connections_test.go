@@ -442,6 +442,129 @@ var _ = Describe("ConnectionService", func() {
 		Expect(del()).To(Succeed())
 	})
 
+	Describe("SetConnectionSecret", func() {
+		var id string
+		// What keys forget leaves behind (ADR 0085 decision 13): no envelope, and the mark.
+		lose := func(ctx SpecContext) {
+			_, err := e.pool.Exec(ctx, `UPDATE connections SET secret_envelope = NULL, credential_lost_at = now() WHERE id = $1`, id)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		set := func(ctx SpecContext, c *client, org string, key []byte, test bool) (*connectionv1alpha1.SetConnectionSecretResponse, error) {
+			return c.conns.SetConnectionSecret(ctx, &connectionv1alpha1.SetConnectionSecretRequest{
+				OrgId: org, ConnectionId: id, Test: test,
+				Secret: &connectionv1alpha1.SetConnectionSecretRequest_Github{Github: &connectionv1alpha1.GitHubConnectionSecret{PrivateKey: string(key)}},
+			})
+		}
+		BeforeEach(func(ctx SpecContext) {
+			res, err := create(ctx, owner, gh.PEM, true)
+			Expect(err).NotTo(HaveOccurred())
+			id = res.GetConnection().GetId()
+		})
+
+		It("enters a lost private key again: the mark ends, the connection works, and nothing quotes the key", func(ctx SpecContext) {
+			lose(ctx)
+			got, err := owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: id})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.GetConnection().GetCredentialLostAt()).NotTo(BeNil())
+			tested, err := owner.conns.TestConnection(ctx, &connectionv1alpha1.TestConnectionRequest{OrgId: org, ConnectionId: id})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tested.GetResults()).To(HaveExactElements(HaveField("Message",
+				ContainSubstring(`was lost with a key-encryption key; enter the secret of the connection "acme" again on the Connections page`))))
+
+			res, err := set(ctx, owner, org, gh.PEM, true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetConnection().GetCredentialLostAt()).To(BeNil())
+			Expect(res.GetConnection().GetStatus()).To(Equal(connectionv1alpha1.ConnectionStatus_CONNECTION_STATUS_OK))
+			Expect(res.GetResults()).To(HaveLen(3))
+			for _, r := range res.GetResults() {
+				Expect(r.GetOk()).To(BeTrue(), "%s: %s", r.GetCheck(), r.GetMessage())
+			}
+			Expect(res.GetConnection().GetGithub().GetAppId()).To(Equal(gh.AppID), "the settings stay")
+			Expect(res.GetConnection().GetGithub().GetKeyFingerprint()).To(HavePrefix("SHA256:"))
+
+			stored, err := store.New(e.pool).GetConnection(ctx, store.GetConnectionParams{OrgID: mustUUID(org), ID: mustUUID(id)})
+			Expect(err).NotTo(HaveOccurred())
+			fields, err := connections.OpenFields(ring, stored)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fields[connections.GitHubPrivateKeyField]).To(Equal(gh.PEM))
+
+			var summary string
+			Expect(e.pool.QueryRow(ctx, `SELECT summary::text FROM audit_events WHERE org_id = $1 AND action = 'connection.secret.set'`, org).Scan(&summary)).To(Succeed())
+			Expect(summary).To(ContainSubstring(`"lost": true`))
+			for _, s := range []string{string(mustJSON(res)), summary, logs.String()} {
+				for _, line := range pemBody(gh.PEM) {
+					Expect(s).NotTo(ContainSubstring(line))
+				}
+				Expect(s).NotTo(ContainSubstring("PRIVATE KEY"))
+			}
+			Expect(logs.String()).To(ContainSubstring("connection secret set"))
+		})
+
+		It("leaves the connection untested when it is not asked to test", func(ctx SpecContext) {
+			res, err := set(ctx, owner, org, gh.PEM, false)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetConnection().GetStatus()).To(Equal(connectionv1alpha1.ConnectionStatus_CONNECTION_STATUS_UNTESTED))
+			Expect(res.GetConnection().GetLastTest()).To(BeEmpty(), "the old result was about the old secret")
+			Expect(res.GetConnection().GetLastTestedAt()).To(BeNil())
+		})
+
+		It("answers with the stored connection and a failed check when the test after storing cannot be recorded", func(ctx SpecContext) {
+			_, err := e.pool.Exec(ctx, `
+CREATE FUNCTION koinon_test_refuse_test_record() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'test record refused'; END $$;
+CREATE TRIGGER koinon_test_refuse_test_record BEFORE UPDATE ON connections
+FOR EACH ROW WHEN (NEW.last_tested_at IS NOT NULL) EXECUTE FUNCTION koinon_test_refuse_test_record()`)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) {
+				_, err := e.pool.Exec(ctx, `DROP TRIGGER koinon_test_refuse_test_record ON connections; DROP FUNCTION koinon_test_refuse_test_record()`)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			res, err := set(ctx, owner, org, gh.PEM, true)
+			Expect(err).NotTo(HaveOccurred(), "the secret is stored, so the call succeeds")
+			Expect(res.GetConnection().GetId()).To(Equal(id))
+			Expect(res.GetResults()).To(HaveExactElements(And(HaveField("Ok", BeFalse()), HaveField("Message", ContainSubstring("test the connection again")))))
+			stored, err := store.New(e.pool).GetConnection(ctx, store.GetConnectionParams{OrgID: mustUUID(org), ID: mustUUID(id)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(stored.SecretFingerprint).To(HavePrefix("SHA256:"))
+		})
+
+		It("refuses a bad key, another connector's secret, no secret, a declared connection, members and other orgs, and changes nothing", func(ctx SpecContext) {
+			lose(ctx)
+			_, err := set(ctx, owner, org, []byte("-----BEGIN RSA PRIVATE KEY-----\nTOPSECRETSTUFF\n-----END RSA PRIVATE KEY-----\n"), false)
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+			Expect(err.Error()).NotTo(ContainSubstring("TOPSECRETSTUFF"))
+			Expect(logs.String()).NotTo(ContainSubstring("TOPSECRETSTUFF"))
+
+			_, err = owner.conns.SetConnectionSecret(ctx, &connectionv1alpha1.SetConnectionSecretRequest{
+				OrgId: org, ConnectionId: id,
+				Secret: &connectionv1alpha1.SetConnectionSecretRequest_Gitea{Gitea: &connectionv1alpha1.GiteaConnectionSecret{
+					ReadToken: "koinon_test_not-a-real-read-token", WriteToken: "koinon_test_not-a-real-write-token",
+				}},
+			})
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+			Expect(err.Error()).To(ContainSubstring("this is a github connection"))
+			_, err = owner.conns.SetConnectionSecret(ctx, &connectionv1alpha1.SetConnectionSecretRequest{OrgId: org, ConnectionId: id})
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+
+			member := e.userIn(ctx, org, store.OrgRoleMember)
+			_, err = set(ctx, member, org, gh.PEM, false)
+			Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+			other, otherOwner := e.newTeamOrg(ctx)
+			_, err = set(ctx, otherOwner, other, gh.PEM, false)
+			Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
+
+			_, err = e.pool.Exec(ctx, `UPDATE connections SET source = 'secret', managed_by_secret = 'gh' WHERE id = $1`, id)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = set(ctx, owner, org, gh.PEM, false)
+			Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+			Expect(err.Error()).To(ContainSubstring("Secret gh"))
+
+			Expect(count(ctx, e, `SELECT count(*) FROM connections WHERE credential_lost_at IS NOT NULL AND secret_envelope IS NULL`)).To(Equal(1))
+			Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE action = 'connection.secret.set'`)).To(BeZero())
+		})
+	})
+
 	It("refuses to create connections without a secret store", func(ctx SpecContext) {
 		e2 := newEnvOn(ctx, e, envOptions{noKeys: true})
 		_, err := create(ctx, owner.on(e2), gh.PEM, false)
@@ -585,6 +708,51 @@ var _ = Describe("ConnectionService for Gitea", func() {
 		member := e.userIn(ctx, org, store.OrgRoleMember)
 		_, err := create(ctx, member, nil)
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+	})
+
+	It("enters lost tokens again, and a token equal to the stored one keeps the date it was entered", func(ctx SpecContext) {
+		const newWriteTok = "koinon_test_not-a-real-write-token-2"
+		gt.AddScopedToken(newWriteTok, "koinon-bot", "write")
+		res, err := create(ctx, owner, func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.Test = false })
+		Expect(err).NotTo(HaveOccurred())
+		id, before := res.GetConnection().GetId(), res.GetConnection().GetGitea()
+		_, err = e.pool.Exec(ctx, `UPDATE connections SET secret_envelope = NULL, credential_lost_at = now() WHERE id = $1`, id)
+		Expect(err).NotTo(HaveOccurred())
+
+		set, err := owner.conns.SetConnectionSecret(ctx, &connectionv1alpha1.SetConnectionSecretRequest{
+			OrgId: org, ConnectionId: id, Test: true,
+			Secret: &connectionv1alpha1.SetConnectionSecretRequest_Gitea{Gitea: &connectionv1alpha1.GiteaConnectionSecret{
+				ReadToken: " " + readTok + " ", WriteToken: newWriteTok,
+			}},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(set.GetConnection().GetCredentialLostAt()).To(BeNil())
+		Expect(set.GetConnection().GetStatus()).To(Equal(connectionv1alpha1.ConnectionStatus_CONNECTION_STATUS_OK))
+		after := set.GetConnection().GetGitea()
+		Expect(after.GetBaseUrl()).To(Equal(before.GetBaseUrl()))
+		Expect(after.GetCaBundle()).To(Equal(before.GetCaBundle()))
+		Expect(after.GetReadTokenSetAt().AsTime()).To(Equal(before.GetReadTokenSetAt().AsTime()), "the same read token")
+		Expect(after.GetWriteTokenSetAt().AsTime()).To(BeTemporally(">", before.GetWriteTokenSetAt().AsTime()), "a new write token")
+
+		stored, err := store.New(e.pool).GetConnection(ctx, store.GetConnectionParams{OrgID: mustUUID(org), ID: mustUUID(id)})
+		Expect(err).NotTo(HaveOccurred())
+		fields, err := connections.OpenFields(ring, stored)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(fields["readToken"])).To(Equal(readTok))
+		Expect(string(fields["writeToken"])).To(Equal(newWriteTok))
+		var summary string
+		Expect(e.pool.QueryRow(ctx, `SELECT summary::text FROM audit_events WHERE org_id = $1 AND action = 'connection.secret.set'`, org).Scan(&summary)).To(Succeed())
+		for _, s := range []string{string(mustJSON(set)), summary, logs.String()} {
+			Expect(s).NotTo(ContainSubstring("not-a-real"))
+		}
+
+		By("both tokens are required, by the rules of create")
+		_, err = owner.conns.SetConnectionSecret(ctx, &connectionv1alpha1.SetConnectionSecretRequest{
+			OrgId: org, ConnectionId: id,
+			Secret: &connectionv1alpha1.SetConnectionSecretRequest_Gitea{Gitea: &connectionv1alpha1.GiteaConnectionSecret{ReadToken: readTok}},
+		})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		Expect(err.Error()).NotTo(ContainSubstring("not-a-real"))
 	})
 
 	It("lists the repositories the bot can see, for choosing what to bind", func(ctx SpecContext) {

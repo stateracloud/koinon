@@ -61,8 +61,8 @@ Restore it with `kubectl -n <namespace> apply -f koinon-kek-backup.yaml`.
 Keep the file with your other secrets, apart from the database backups. **A database backup needs the
 KEKs that wrapped it.** Keep every KEK, including retired ones, for as long as a database backup that
 used it exists. Retiring a KEK removes it from the Secret, not from your escrow. If every copy of a KEK
-is lost, the values wrapped by it are lost: add the providers, connections and MCP server credentials
-again.
+is lost, the values wrapped by it are lost: enter the provider keys, connection secrets, MCP server and
+trace destination credentials again on their pages. A declared one is stored again from its Secret.
 
 The Secret is not part of the Helm release, so `helm uninstall` leaves it, and so does a GitOps prune.
 Delete it yourself when you delete the database.

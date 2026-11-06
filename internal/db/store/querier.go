@@ -360,6 +360,7 @@ type Querier interface {
 	// (not estimated) requests of a model, and how many there were.
 	GetCalibration(ctx context.Context, arg GetCalibrationParams) (GetCalibrationRow, error)
 	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
+	GetConnectionForUpdate(ctx context.Context, arg GetConnectionForUpdateParams) (Connection, error)
 	GetDedupeRecord(ctx context.Context, arg GetDedupeRecordParams) (DedupeRecord, error)
 	GetDefaultPriceList(ctx context.Context, version string) (DefaultPriceList, error)
 	// The task an ephemeral agent's sandbox belongs to (ADR 0065 decision 13c): the task of the run
@@ -1063,6 +1064,9 @@ type Querier interface {
 	SetTaskSummary(ctx context.Context, arg SetTaskSummaryParams) (int64, error)
 	// Records the result of a re-test, only if the configuration is the one that was tested.
 	SetTraceDestinationTest(ctx context.Context, arg SetTraceDestinationTestParams) (int64, error)
+	// A new secret for a connection entered here (ADR 0085 decision 13: entering a lost one again, or
+	// rotating one). The old test result was about the old secret: the connection is untested again.
+	SetUIConnectionSecret(ctx context.Context, arg SetUIConnectionSecretParams) (Connection, error)
 	// Makes a provisional entry final: with the provider's usage and cost, or (expired) as it is. The
 	// reserve is released either way. No row: the entry was not provisional (settled already).
 	SettleSpendEntry(ctx context.Context, arg SettleSpendEntryParams) (pgtype.UUID, error)

@@ -33,6 +33,12 @@ var _ = Describe("Load", func() {
 		}
 		_, err := connections.Load(context.Background(), refusingOpener{}, c)
 		Expect(err).To(MatchError(connections.ErrCredentialLost))
-		Expect(err.Error()).To(ContainSubstring(`create the connection "GitHub" again on the Connections page`))
+		Expect(err.Error()).To(ContainSubstring(`enter the secret of the connection "GitHub" again on the Connections page`))
+
+		By("a declared connection comes back from its Secret")
+		c.Source, c.ManagedBySecret = store.ConfigSourceSecret, pgtype.Text{String: "koinon/github-app", Valid: true}
+		_, err = connections.Load(context.Background(), refusingOpener{}, c)
+		Expect(err).To(MatchError(connections.ErrCredentialLost))
+		Expect(err.Error()).To(ContainSubstring(`the Kubernetes Secret koinon/github-app that declares the connection "GitHub" stores it again at the next sync`))
 	})
 })
