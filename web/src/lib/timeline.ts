@@ -308,7 +308,8 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
 }
 
 /**
- * buildTimeline merges the task's events and its runs' events by time.
+ * buildTimeline merges the task's events and its runs' events by time (at equal time, a
+ * persisted agent reply comes after run items, then task events before run events).
  * Consecutive agent text chunks of one run become one item; a tool call's
  * updates fold into the call's item. agentd also persists each reply as an
  * agent message on the task (with the run's id); once that message exists,
@@ -326,7 +327,10 @@ export function buildTimeline(taskEvents: readonly TaskEvent[], runEvents: Reado
       if (item) raw.push({ item, order: order++ })
     }
   }
-  raw.sort((a, b) => a.item.at - b.item.at || a.order - b.order)
+  // At one millisecond a persisted agent reply sorts after the run's streamed text it covers, whatever
+  // the order the two lists were read in; otherwise dropPersistedReplies would keep the last chunk.
+  const rank = (i: TimelineItem) => (i.type === 'message' && i.actor === ActorKind.AGENT && i.runId ? 1 : 0)
+  raw.sort((a, b) => a.item.at - b.item.at || rank(a.item) - rank(b.item) || a.order - b.order)
 
   const out: TimelineItem[] = []
   const tools = new Map<string, number>()
