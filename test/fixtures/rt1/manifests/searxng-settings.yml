@@ -12,12 +12,22 @@ use_default_settings:
       - wikipedia
       - github
       - stackoverflow
+      - mojeek
+  # Re-enable mojeek: it is a second general-web engine, so one suspended engine no longer empties
+  # the results (issue 62). No Brave API key is used; brave stays on the free scrape.
+engines:
+  - name: mojeek
+    inactive: false
 general:
   instance_name: rt1-searxng
   enable_metrics: false
 search:
   formats: [html, json]
   safe_search: 0
+  # Parallel runs share one egress IP, so Brave answers 429 often. SearXNG's default is to suspend the
+  # engine for an hour after that; 60 s keeps it in rotation for the next run (issue 62).
+  suspended_times:
+    SearxEngineTooManyRequests: 60
 server:
   # Overridden by $SEARXNG_SECRET; this value is not used and is not a secret.
   secret_key: "not-a-real-secret-set-by-env"

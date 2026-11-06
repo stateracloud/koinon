@@ -13,6 +13,7 @@ import shutil
 import sys
 
 import duckdb
+from init_sql import INIT_SQL
 
 BASE = os.environ.get("BASE_DB", "/opt/focus/base.duckdb")
 WORK = os.environ.get("WORK", "/work")
@@ -71,8 +72,9 @@ os.execvp(
         "--port", "8000",
         "--db-path", db,
         # The server opens the file read-only by default (there is no flag for it; --read-write would change it).
-        # No file or network access from SQL, and the setting cannot be changed back.
-        "--init-sql", "SET enable_external_access=false; SET lock_configuration=true;",
+        # No file or network access from SQL (DuckDB refuses to turn it back on), and a small memory
+        # budget. Idempotent on purpose: no lock_configuration, see init_sql.py.
+        "--init-sql", INIT_SQL,
         "--stateless-http",
     ],
 )
