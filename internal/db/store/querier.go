@@ -92,6 +92,10 @@ type Querier interface {
 	// (started more than @lease_seconds ago), for an agent whose sandbox is ready. No row: nothing to
 	// do.
 	ClaimHomeCheckpoint(ctx context.Context, arg ClaimHomeCheckpointParams) (HomeCheckpoint, error)
+	// The next seed due in the org, held for @lease_seconds: a writer that dies leaves it to another
+	// after the lease. A superseded epoch (retired: a later one started) is not seeded; the later
+	// one is. No row: nothing to do.
+	ClaimHomeRepositorySeed(ctx context.Context, arg ClaimHomeRepositorySeedParams) (HomeRepositoryEpoch, error)
 	// queued -> starting, or a resolved parked -> starting. Takes the oldest
 	// claimable run (by ready_at) of an active agent that has no active run and
 	// whose task has no other owned or parked run, and
@@ -126,6 +130,7 @@ type Querier interface {
 	// executions). No row: another executor took it over.
 	CompleteApprovalExecution(ctx context.Context, arg CompleteApprovalExecutionParams) (ApprovalRequest, error)
 	CompleteHomeCheckpoint(ctx context.Context, arg CompleteHomeCheckpointParams) (HomeCheckpoint, error)
+	CompleteHomeRepositorySeed(ctx context.Context, arg CompleteHomeRepositorySeedParams) (int64, error)
 	// Fills a migrated price in place, once.
 	CompleteMigratedPrice(ctx context.Context, arg CompleteMigratedPriceParams) (int64, error)
 	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
@@ -134,6 +139,9 @@ type Querier interface {
 	CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error)
 	// A destination whose credentials were lost (#85) receives nothing, so it does not count.
 	CountEnabledTraceDestinations(ctx context.Context, orgID pgtype.UUID) (int64, error)
+	// The org's seeds still to do and those given up on, for koinon-agentd's gauge. A superseded epoch
+	// is neither.
+	CountHomeRepositorySeeds(ctx context.Context, orgID pgtype.UUID) (CountHomeRepositorySeedsRow, error)
 	CountLeakGuardFingerprints(ctx context.Context, arg CountLeakGuardFingerprintsParams) (int64, error)
 	// Questions of the run that still wait for a person (asked or open).
 	CountOpenQuestionsForRun(ctx context.Context, arg CountOpenQuestionsForRunParams) (int64, error)
@@ -282,6 +290,8 @@ type Querier interface {
 	// Saved work is kept for 14 days; the sealed files go with it.
 	ExpireSavedWork(ctx context.Context, orgID pgtype.UUID) ([]ExpireSavedWorkRow, error)
 	FailHomeCheckpoint(ctx context.Context, arg FailHomeCheckpointParams) (HomeCheckpoint, error)
+	// Given up: the retired epoch keeps the home (the sweeper's guard) until another epoch starts.
+	FailHomeRepositorySeed(ctx context.Context, arg FailHomeRepositorySeedParams) (int64, error)
 	// Requests that never started because the sandbox was not ready for the configured wait.
 	FailStaleHomeCheckpoints(ctx context.Context, arg FailStaleHomeCheckpointsParams) ([]HomeCheckpoint, error)
 	// The scope that allows this call now: exact on agent, connector, tool and target; a task scope
@@ -529,6 +539,10 @@ type Querier interface {
 	InsertRunTurn(ctx context.Context, arg InsertRunTurnParams) (RunTurn, error)
 	InsertSandboxIncident(ctx context.Context, arg InsertSandboxIncidentParams) (SandboxIncident, error)
 	InsertSavedWork(ctx context.Context, arg InsertSavedWorkParams) (SavedWork, error)
+	// The copy of checkpoint @source_id in the new epoch's repository: the same home, taken when the
+	// source was, so it sorts with it (and just before it: a newer id) and the recreate gate reads the
+	// same times. No row: the source is gone or not complete.
+	InsertSeededHomeCheckpoint(ctx context.Context, arg InsertSeededHomeCheckpointParams) (HomeCheckpoint, error)
 	// Records one request of an agent (principal 'agent', agent_id set) or of a system key of the org
 	// (principal 'system', no agent and no run: the provider echo check). Returns no row when the request id is already
 	// recorded, so a replayed export is not charged twice. cost_usd is Koinon's
@@ -630,7 +644,9 @@ type Querier interface {
 	// password is lost (nothing restores from it any more) or a later epoch holds a complete checkpoint
 	// (a new epoch starts empty, so until its first backup the retired one is all there is). That later
 	// epoch must itself still restore: neither lost nor deleted (a later epoch is always a
-	// home_repository_epochs row, since epoch 0 is the first).
+	// home_repository_epochs row, since epoch 0 is the first). Its checkpoint must also be at least as
+	// new as the retired one's newest: a backup that was running when the epoch changed can finish into
+	// the retired repository after a seed (#86), and that home is then the newest.
 	ListDueHomeRepositories(ctx context.Context, arg ListDueHomeRepositoriesParams) ([]ListDueHomeRepositoriesRow, error)
 	// Open questions past their expiry (the expiry sweep applies the default to them).
 	ListDueQuestions(ctx context.Context, arg ListDueQuestionsParams) ([]Question, error)
@@ -946,6 +962,8 @@ type Querier interface {
 	ReenableUIProviders(ctx context.Context, orgID pgtype.UUID) error
 	// A failed attempt that will be tried again after @delay_seconds.
 	ReleaseHomeCheckpoint(ctx context.Context, arg ReleaseHomeCheckpointParams) (HomeCheckpoint, error)
+	// A failed try, tried again after @delay_seconds.
+	ReleaseHomeRepositorySeed(ctx context.Context, arg ReleaseHomeRepositorySeedParams) (int64, error)
 	// The owner gives the run up without finishing it, for example because the
 	// exec stream to the harness dropped: the lease ends now, so any agentd can
 	// take the run over at once (TakeOverExpiredRun) and resume the session.
@@ -954,6 +972,9 @@ type Querier interface {
 	// No row: the agent already has an open request (home_checkpoints_open); read it with
 	// GetOpenHomeCheckpoint.
 	RequestHomeCheckpoint(ctx context.Context, arg RequestHomeCheckpointParams) (HomeCheckpoint, error)
+	// The new epoch is to hold the agent's newest home (keys new-repositories, #86): koinon-agentd
+	// copies it there from @seed_from_epoch or older.
+	RequestHomeRepositorySeed(ctx context.Context, arg RequestHomeRepositorySeedParams) (int64, error)
 	// Ephemeral agents have no home that outlives a run and are not checkpointed (ADR 0065 13c).
 	// One request per agent whose sandbox is ready, has no restore pending (an empty home must not
 	// become the newest checkpoint) and has had no checkpoint requested for @interval_seconds.

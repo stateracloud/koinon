@@ -57,7 +57,9 @@ WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @reposito
 -- password is lost (nothing restores from it any more) or a later epoch holds a complete checkpoint
 -- (a new epoch starts empty, so until its first backup the retired one is all there is). That later
 -- epoch must itself still restore: neither lost nor deleted (a later epoch is always a
--- home_repository_epochs row, since epoch 0 is the first).
+-- home_repository_epochs row, since epoch 0 is the first). Its checkpoint must also be at least as
+-- new as the retired one's newest: a backup that was running when the epoch changed can finish into
+-- the retired repository after a seed (#86), and that home is then the newest.
 SELECT agent_id, repository_epoch, prefix FROM (
     SELECT h.agent_id, 0::integer AS repository_epoch, h.prefix, h.delete_after, h.credential_lost_at
     FROM home_repositories h
@@ -73,9 +75,79 @@ WHERE due.credential_lost_at IS NOT NULL
                 ON later.org_id = c.org_id AND later.agent_id = c.agent_id AND later.repository_epoch = c.repository_epoch
               WHERE c.org_id = @org_id AND c.agent_id = due.agent_id AND c.status = 'complete'
                 AND c.repository_epoch > due.repository_epoch
-                AND later.credential_lost_at IS NULL AND later.deleted_at IS NULL)
+                AND later.credential_lost_at IS NULL AND later.deleted_at IS NULL
+                AND c.finished_at >= coalesce(
+                    (SELECT max(d.finished_at) FROM home_checkpoints d
+                     WHERE d.org_id = @org_id AND d.agent_id = due.agent_id
+                       AND d.repository_epoch = due.repository_epoch AND d.status = 'complete'),
+                    '-infinity'::timestamptz))
 ORDER BY due.delete_after, due.agent_id, due.repository_epoch
 LIMIT @max_rows::int;
+
+-- name: RequestHomeRepositorySeed :execrows
+-- The new epoch is to hold the agent's newest home (keys new-repositories, #86): koinon-agentd
+-- copies it there from @seed_from_epoch or older.
+UPDATE home_repository_epochs
+SET seed_from_epoch = @seed_from_epoch, seed_after = now()
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch
+  AND reason = 'key_compromised' AND seed_from_epoch IS NULL;
+
+-- name: ClaimHomeRepositorySeed :one
+-- The next seed due in the org, held for @lease_seconds: a writer that dies leaves it to another
+-- after the lease. A superseded epoch (retired: a later one started) is not seeded; the later
+-- one is. No row: nothing to do.
+UPDATE home_repository_epochs AS e
+SET seed_after = now() + make_interval(secs => @lease_seconds::int), seed_attempts = e.seed_attempts + 1
+WHERE e.org_id = @org_id AND (e.org_id, e.agent_id, e.repository_epoch) = (
+    SELECT s.org_id, s.agent_id, s.repository_epoch FROM home_repository_epochs s
+    WHERE s.org_id = @org_id AND s.seed_from_epoch IS NOT NULL AND s.seeded_at IS NULL
+      AND s.seed_failed_at IS NULL AND s.seed_after <= now() AND s.retired_at IS NULL
+      AND s.credential_lost_at IS NULL
+    ORDER BY s.seed_after, s.agent_id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1)
+RETURNING *;
+
+-- name: CompleteHomeRepositorySeed :execrows
+UPDATE home_repository_epochs
+SET seeded_at = now(), seed_error = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch
+  AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND seed_failed_at IS NULL;
+
+-- name: ReleaseHomeRepositorySeed :execrows
+-- A failed try, tried again after @delay_seconds.
+UPDATE home_repository_epochs
+SET seed_error = @error, seed_after = now() + make_interval(secs => @delay_seconds::int)
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch
+  AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND seed_failed_at IS NULL;
+
+-- name: FailHomeRepositorySeed :execrows
+-- Given up: the retired epoch keeps the home (the sweeper's guard) until another epoch starts.
+UPDATE home_repository_epochs
+SET seed_failed_at = now(), seed_error = @error
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch
+  AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND seed_failed_at IS NULL;
+
+-- name: CountHomeRepositorySeeds :one
+-- The org's seeds still to do and those given up on, for koinon-agentd's gauge. A superseded epoch
+-- is neither.
+SELECT count(*) FILTER (WHERE seed_failed_at IS NULL)::bigint AS pending,
+       count(*) FILTER (WHERE seed_failed_at IS NOT NULL)::bigint AS failed
+FROM home_repository_epochs
+WHERE org_id = @org_id AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND retired_at IS NULL
+  AND credential_lost_at IS NULL;
+
+-- name: InsertSeededHomeCheckpoint :one
+-- The copy of checkpoint @source_id in the new epoch's repository: the same home, taken when the
+-- source was, so it sorts with it (and just before it: a newer id) and the recreate gate reads the
+-- same times. No row: the source is gone or not complete.
+INSERT INTO home_checkpoints (org_id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id,
+                              size_bytes, requested_at, started_at, finished_at, repository_epoch)
+SELECT c.org_id, c.agent_id, c.reason, 'complete', c.sandbox_id, c.generation, c.epoch, @snapshot_id,
+       @size_bytes, c.requested_at, c.started_at, c.finished_at, @repository_epoch
+FROM home_checkpoints c
+WHERE c.org_id = @org_id AND c.id = @source_id AND c.status = 'complete'
+RETURNING *;
 
 -- name: MarkHomeRepositoryDeleted :execrows
 UPDATE home_repositories SET deleted_at = now()

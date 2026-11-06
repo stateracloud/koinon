@@ -60,6 +60,54 @@ func (q *Queries) ClaimHomeCheckpoint(ctx context.Context, arg ClaimHomeCheckpoi
 	return i, err
 }
 
+const claimHomeRepositorySeed = `-- name: ClaimHomeRepositorySeed :one
+UPDATE home_repository_epochs AS e
+SET seed_after = now() + make_interval(secs => $1::int), seed_attempts = e.seed_attempts + 1
+WHERE e.org_id = $2 AND (e.org_id, e.agent_id, e.repository_epoch) = (
+    SELECT s.org_id, s.agent_id, s.repository_epoch FROM home_repository_epochs s
+    WHERE s.org_id = $2 AND s.seed_from_epoch IS NOT NULL AND s.seeded_at IS NULL
+      AND s.seed_failed_at IS NULL AND s.seed_after <= now() AND s.retired_at IS NULL
+      AND s.credential_lost_at IS NULL
+    ORDER BY s.seed_after, s.agent_id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1)
+RETURNING org_id, agent_id, repository_epoch, prefix, password_envelope, credential_lost_at, binding_row, reason, created_at, retired_at, delete_after, deleted_at, seed_from_epoch, seed_after, seed_attempts, seed_error, seeded_at, seed_failed_at
+`
+
+type ClaimHomeRepositorySeedParams struct {
+	LeaseSeconds int32
+	OrgID        pgtype.UUID
+}
+
+// The next seed due in the org, held for @lease_seconds: a writer that dies leaves it to another
+// after the lease. A superseded epoch (retired: a later one started) is not seeded; the later
+// one is. No row: nothing to do.
+func (q *Queries) ClaimHomeRepositorySeed(ctx context.Context, arg ClaimHomeRepositorySeedParams) (HomeRepositoryEpoch, error) {
+	row := q.db.QueryRow(ctx, claimHomeRepositorySeed, arg.LeaseSeconds, arg.OrgID)
+	var i HomeRepositoryEpoch
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.RepositoryEpoch,
+		&i.Prefix,
+		&i.PasswordEnvelope,
+		&i.CredentialLostAt,
+		&i.BindingRow,
+		&i.Reason,
+		&i.CreatedAt,
+		&i.RetiredAt,
+		&i.DeleteAfter,
+		&i.DeletedAt,
+		&i.SeedFromEpoch,
+		&i.SeedAfter,
+		&i.SeedAttempts,
+		&i.SeedError,
+		&i.SeededAt,
+		&i.SeedFailedAt,
+	)
+	return i, err
+}
+
 const claimSandboxRestore = `-- name: ClaimSandboxRestore :one
 UPDATE agent_sandboxes
 SET restore_claimed_at = now()
@@ -177,6 +225,49 @@ func (q *Queries) CompleteHomeCheckpoint(ctx context.Context, arg CompleteHomeCh
 	return i, err
 }
 
+const completeHomeRepositorySeed = `-- name: CompleteHomeRepositorySeed :execrows
+UPDATE home_repository_epochs
+SET seeded_at = now(), seed_error = NULL
+WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = $3
+  AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND seed_failed_at IS NULL
+`
+
+type CompleteHomeRepositorySeedParams struct {
+	OrgID           pgtype.UUID
+	AgentID         pgtype.UUID
+	RepositoryEpoch int32
+}
+
+func (q *Queries) CompleteHomeRepositorySeed(ctx context.Context, arg CompleteHomeRepositorySeedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeHomeRepositorySeed, arg.OrgID, arg.AgentID, arg.RepositoryEpoch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const countHomeRepositorySeeds = `-- name: CountHomeRepositorySeeds :one
+SELECT count(*) FILTER (WHERE seed_failed_at IS NULL)::bigint AS pending,
+       count(*) FILTER (WHERE seed_failed_at IS NOT NULL)::bigint AS failed
+FROM home_repository_epochs
+WHERE org_id = $1 AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND retired_at IS NULL
+  AND credential_lost_at IS NULL
+`
+
+type CountHomeRepositorySeedsRow struct {
+	Pending int64
+	Failed  int64
+}
+
+// The org's seeds still to do and those given up on, for koinon-agentd's gauge. A superseded epoch
+// is neither.
+func (q *Queries) CountHomeRepositorySeeds(ctx context.Context, orgID pgtype.UUID) (CountHomeRepositorySeedsRow, error) {
+	row := q.db.QueryRow(ctx, countHomeRepositorySeeds, orgID)
+	var i CountHomeRepositorySeedsRow
+	err := row.Scan(&i.Pending, &i.Failed)
+	return i, err
+}
+
 const failHomeCheckpoint = `-- name: FailHomeCheckpoint :one
 UPDATE home_checkpoints
 SET status = 'failed', error = $1, finished_at = now()
@@ -212,6 +303,34 @@ func (q *Queries) FailHomeCheckpoint(ctx context.Context, arg FailHomeCheckpoint
 		&i.RepositoryEpoch,
 	)
 	return i, err
+}
+
+const failHomeRepositorySeed = `-- name: FailHomeRepositorySeed :execrows
+UPDATE home_repository_epochs
+SET seed_failed_at = now(), seed_error = $1
+WHERE org_id = $2 AND agent_id = $3 AND repository_epoch = $4
+  AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND seed_failed_at IS NULL
+`
+
+type FailHomeRepositorySeedParams struct {
+	Error           pgtype.Text
+	OrgID           pgtype.UUID
+	AgentID         pgtype.UUID
+	RepositoryEpoch int32
+}
+
+// Given up: the retired epoch keeps the home (the sweeper's guard) until another epoch starts.
+func (q *Queries) FailHomeRepositorySeed(ctx context.Context, arg FailHomeRepositorySeedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, failHomeRepositorySeed,
+		arg.Error,
+		arg.OrgID,
+		arg.AgentID,
+		arg.RepositoryEpoch,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const failStaleHomeCheckpoints = `-- name: FailStaleHomeCheckpoints :many
@@ -337,7 +456,7 @@ func (q *Queries) GetHomeRepository(ctx context.Context, arg GetHomeRepositoryPa
 }
 
 const getHomeRepositoryEpoch = `-- name: GetHomeRepositoryEpoch :one
-SELECT org_id, agent_id, repository_epoch, prefix, password_envelope, credential_lost_at, binding_row, reason, created_at, retired_at, delete_after, deleted_at FROM home_repository_epochs
+SELECT org_id, agent_id, repository_epoch, prefix, password_envelope, credential_lost_at, binding_row, reason, created_at, retired_at, delete_after, deleted_at, seed_from_epoch, seed_after, seed_attempts, seed_error, seeded_at, seed_failed_at FROM home_repository_epochs
 WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = $3
 `
 
@@ -363,6 +482,12 @@ func (q *Queries) GetHomeRepositoryEpoch(ctx context.Context, arg GetHomeReposit
 		&i.RetiredAt,
 		&i.DeleteAfter,
 		&i.DeletedAt,
+		&i.SeedFromEpoch,
+		&i.SeedAfter,
+		&i.SeedAttempts,
+		&i.SeedError,
+		&i.SeededAt,
+		&i.SeedFailedAt,
 	)
 	return i, err
 }
@@ -441,7 +566,7 @@ func (q *Queries) InsertHomeRepository(ctx context.Context, arg InsertHomeReposi
 const insertHomeRepositoryEpoch = `-- name: InsertHomeRepositoryEpoch :one
 INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING org_id, agent_id, repository_epoch, prefix, password_envelope, credential_lost_at, binding_row, reason, created_at, retired_at, delete_after, deleted_at
+RETURNING org_id, agent_id, repository_epoch, prefix, password_envelope, credential_lost_at, binding_row, reason, created_at, retired_at, delete_after, deleted_at, seed_from_epoch, seed_after, seed_attempts, seed_error, seeded_at, seed_failed_at
 `
 
 type InsertHomeRepositoryEpochParams struct {
@@ -476,6 +601,63 @@ func (q *Queries) InsertHomeRepositoryEpoch(ctx context.Context, arg InsertHomeR
 		&i.RetiredAt,
 		&i.DeleteAfter,
 		&i.DeletedAt,
+		&i.SeedFromEpoch,
+		&i.SeedAfter,
+		&i.SeedAttempts,
+		&i.SeedError,
+		&i.SeededAt,
+		&i.SeedFailedAt,
+	)
+	return i, err
+}
+
+const insertSeededHomeCheckpoint = `-- name: InsertSeededHomeCheckpoint :one
+INSERT INTO home_checkpoints (org_id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id,
+                              size_bytes, requested_at, started_at, finished_at, repository_epoch)
+SELECT c.org_id, c.agent_id, c.reason, 'complete', c.sandbox_id, c.generation, c.epoch, $1,
+       $2, c.requested_at, c.started_at, c.finished_at, $3
+FROM home_checkpoints c
+WHERE c.org_id = $4 AND c.id = $5 AND c.status = 'complete'
+RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch
+`
+
+type InsertSeededHomeCheckpointParams struct {
+	SnapshotID      pgtype.Text
+	SizeBytes       pgtype.Int8
+	RepositoryEpoch int32
+	OrgID           pgtype.UUID
+	SourceID        pgtype.UUID
+}
+
+// The copy of checkpoint @source_id in the new epoch's repository: the same home, taken when the
+// source was, so it sorts with it (and just before it: a newer id) and the recreate gate reads the
+// same times. No row: the source is gone or not complete.
+func (q *Queries) InsertSeededHomeCheckpoint(ctx context.Context, arg InsertSeededHomeCheckpointParams) (HomeCheckpoint, error) {
+	row := q.db.QueryRow(ctx, insertSeededHomeCheckpoint,
+		arg.SnapshotID,
+		arg.SizeBytes,
+		arg.RepositoryEpoch,
+		arg.OrgID,
+		arg.SourceID,
+	)
+	var i HomeCheckpoint
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.AgentID,
+		&i.Reason,
+		&i.Status,
+		&i.SandboxID,
+		&i.Generation,
+		&i.Epoch,
+		&i.SnapshotID,
+		&i.SizeBytes,
+		&i.Attempts,
+		&i.Error,
+		&i.RequestedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.RepositoryEpoch,
 	)
 	return i, err
 }
@@ -601,7 +783,7 @@ func (q *Queries) LatestHomeCheckpointOfSandbox(ctx context.Context, arg LatestH
 }
 
 const latestHomeRepositoryEpoch = `-- name: LatestHomeRepositoryEpoch :one
-SELECT org_id, agent_id, repository_epoch, prefix, password_envelope, credential_lost_at, binding_row, reason, created_at, retired_at, delete_after, deleted_at FROM home_repository_epochs
+SELECT org_id, agent_id, repository_epoch, prefix, password_envelope, credential_lost_at, binding_row, reason, created_at, retired_at, delete_after, deleted_at, seed_from_epoch, seed_after, seed_attempts, seed_error, seeded_at, seed_failed_at FROM home_repository_epochs
 WHERE org_id = $1 AND agent_id = $2
 ORDER BY repository_epoch DESC
 LIMIT 1
@@ -629,6 +811,12 @@ func (q *Queries) LatestHomeRepositoryEpoch(ctx context.Context, arg LatestHomeR
 		&i.RetiredAt,
 		&i.DeleteAfter,
 		&i.DeletedAt,
+		&i.SeedFromEpoch,
+		&i.SeedAfter,
+		&i.SeedAttempts,
+		&i.SeedError,
+		&i.SeededAt,
+		&i.SeedFailedAt,
 	)
 	return i, err
 }
@@ -708,7 +896,12 @@ WHERE due.credential_lost_at IS NOT NULL
                 ON later.org_id = c.org_id AND later.agent_id = c.agent_id AND later.repository_epoch = c.repository_epoch
               WHERE c.org_id = $1 AND c.agent_id = due.agent_id AND c.status = 'complete'
                 AND c.repository_epoch > due.repository_epoch
-                AND later.credential_lost_at IS NULL AND later.deleted_at IS NULL)
+                AND later.credential_lost_at IS NULL AND later.deleted_at IS NULL
+                AND c.finished_at >= coalesce(
+                    (SELECT max(d.finished_at) FROM home_checkpoints d
+                     WHERE d.org_id = $1 AND d.agent_id = due.agent_id
+                       AND d.repository_epoch = due.repository_epoch AND d.status = 'complete'),
+                    '-infinity'::timestamptz))
 ORDER BY due.delete_after, due.agent_id, due.repository_epoch
 LIMIT $2::int
 `
@@ -730,7 +923,9 @@ type ListDueHomeRepositoriesRow struct {
 // password is lost (nothing restores from it any more) or a later epoch holds a complete checkpoint
 // (a new epoch starts empty, so until its first backup the retired one is all there is). That later
 // epoch must itself still restore: neither lost nor deleted (a later epoch is always a
-// home_repository_epochs row, since epoch 0 is the first).
+// home_repository_epochs row, since epoch 0 is the first). Its checkpoint must also be at least as
+// new as the retired one's newest: a backup that was running when the epoch changed can finish into
+// the retired repository after a seed (#86), and that home is then the newest.
 func (q *Queries) ListDueHomeRepositories(ctx context.Context, arg ListDueHomeRepositoriesParams) ([]ListDueHomeRepositoriesRow, error) {
 	rows, err := q.db.Query(ctx, listDueHomeRepositories, arg.OrgID, arg.MaxRows)
 	if err != nil {
@@ -879,6 +1074,36 @@ func (q *Queries) ReleaseHomeCheckpoint(ctx context.Context, arg ReleaseHomeChec
 	return i, err
 }
 
+const releaseHomeRepositorySeed = `-- name: ReleaseHomeRepositorySeed :execrows
+UPDATE home_repository_epochs
+SET seed_error = $1, seed_after = now() + make_interval(secs => $2::int)
+WHERE org_id = $3 AND agent_id = $4 AND repository_epoch = $5
+  AND seed_from_epoch IS NOT NULL AND seeded_at IS NULL AND seed_failed_at IS NULL
+`
+
+type ReleaseHomeRepositorySeedParams struct {
+	Error           pgtype.Text
+	DelaySeconds    int32
+	OrgID           pgtype.UUID
+	AgentID         pgtype.UUID
+	RepositoryEpoch int32
+}
+
+// A failed try, tried again after @delay_seconds.
+func (q *Queries) ReleaseHomeRepositorySeed(ctx context.Context, arg ReleaseHomeRepositorySeedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseHomeRepositorySeed,
+		arg.Error,
+		arg.DelaySeconds,
+		arg.OrgID,
+		arg.AgentID,
+		arg.RepositoryEpoch,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const releaseSandboxRestore = `-- name: ReleaseSandboxRestore :exec
 UPDATE agent_sandboxes SET restore_claimed_at = NULL
 WHERE org_id = $1 AND agent_id = $2
@@ -939,6 +1164,35 @@ func (q *Queries) RequestHomeCheckpoint(ctx context.Context, arg RequestHomeChec
 		&i.RepositoryEpoch,
 	)
 	return i, err
+}
+
+const requestHomeRepositorySeed = `-- name: RequestHomeRepositorySeed :execrows
+UPDATE home_repository_epochs
+SET seed_from_epoch = $1, seed_after = now()
+WHERE org_id = $2 AND agent_id = $3 AND repository_epoch = $4
+  AND reason = 'key_compromised' AND seed_from_epoch IS NULL
+`
+
+type RequestHomeRepositorySeedParams struct {
+	SeedFromEpoch   pgtype.Int4
+	OrgID           pgtype.UUID
+	AgentID         pgtype.UUID
+	RepositoryEpoch int32
+}
+
+// The new epoch is to hold the agent's newest home (keys new-repositories, #86): koinon-agentd
+// copies it there from @seed_from_epoch or older.
+func (q *Queries) RequestHomeRepositorySeed(ctx context.Context, arg RequestHomeRepositorySeedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, requestHomeRepositorySeed,
+		arg.SeedFromEpoch,
+		arg.OrgID,
+		arg.AgentID,
+		arg.RepositoryEpoch,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const requestHourlyHomeCheckpoints = `-- name: RequestHourlyHomeCheckpoints :many
