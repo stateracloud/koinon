@@ -103,6 +103,7 @@ func usageSpec(env Env) {
 			want:   Observed{Format: "anthropic", Stream: true, Status: 200, Failed: true, Input: 100, Output: 1},
 		},
 	}
+	const thinkingSuffix = " (thinking split)"
 	all := append(append([]usageCase{}, cases...), cut...)
 
 	Describe(env.Name+": the usage record per API format and dialect (ADR 0097; koinon #47, #78)", Ordered, ContinueOnFailure, func() {
@@ -126,10 +127,14 @@ func usageSpec(env Env) {
 			ant := gateway.Provider{Org: "acme", Name: "usage-claude", Type: "anthropic", BaseURL: url, APIKeyFile: env.KeyFile("provider_key")}
 			state := gateway.State{}
 			for i, c := range all {
-				k, err := gateway.NewKey(gateway.AgentRef{Org: "acme", Name: fmt.Sprintf("usage-%d", i)})
-				Expect(err).NotTo(HaveOccurred())
-				keys[c.name] = k
-				state.AddKey(k.Key)
+				// A key for the case's record, and a second for its thinking split, so that each spec
+				// sends its own request and reads the record of that request alone.
+				for j, name := range []string{c.name, c.name + thinkingSuffix} {
+					k, err := gateway.NewKey(gateway.AgentRef{Org: "acme", Name: fmt.Sprintf("usage-%d-%d", i, j)})
+					Expect(err).NotTo(HaveOccurred())
+					keys[name] = k
+					state.AddKey(k.Key)
+				}
 				m := gateway.Model{Name: c.model, Format: c.format, Price: price}
 				if c.format == modelformat.OpenAI {
 					oai.Models = append(oai.Models, m)
@@ -153,7 +158,7 @@ func usageSpec(env Env) {
 		})
 
 		// send posts the case's request and drains the answer; a cut stream may fail the read.
-		send := func(ctx context.Context, c usageCase) {
+		send := func(ctx context.Context, c usageCase, keyName string) {
 			var path string
 			var body map[string]any
 			if c.format == modelformat.OpenAI {
@@ -168,7 +173,7 @@ func usageSpec(env Env) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, gw.URL+path, bytes.NewReader(raw))
 			Expect(err).NotTo(HaveOccurred())
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", "Bearer "+keys[c.name].Material)
+			req.Header.Set("Authorization", "Bearer "+keys[keyName].Material)
 			req.Header.Set("anthropic-version", "2023-06-01")
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
@@ -182,11 +187,11 @@ func usageSpec(env Env) {
 			}
 		}
 		// record is the one record the gateway kept for the case's key.
-		record := func(ctx context.Context, c usageCase) Observed {
+		record := func(ctx context.Context, keyName string) Observed {
 			var recs []Observed
 			Eventually(func() int {
 				var err error
-				recs, err = gw.observed(ctx, keys[c.name].ID)
+				recs, err = gw.observed(ctx, keys[keyName].ID)
 				Expect(err).NotTo(HaveOccurred())
 				return len(recs)
 			}).WithTimeout(30 * time.Second).WithPolling(time.Second).Should(BeNumerically(">=", 1))
@@ -196,8 +201,8 @@ func usageSpec(env Env) {
 
 		for _, c := range all {
 			It("records "+c.name, func(ctx SpecContext) {
-				send(ctx, c)
-				got := record(ctx, c)
+				send(ctx, c, c.name)
+				got := record(ctx, c.name)
 				if c.wantReasoning != 0 {
 					// The thinking split is judged on its own below, where the gateway may lack it.
 					got.Reasoning = nil
@@ -214,7 +219,8 @@ func usageSpec(env Env) {
 				continue
 			}
 			check := func(ctx SpecContext) {
-				got := record(ctx, c)
+				send(ctx, c, c.name+thinkingSuffix)
+				got := record(ctx, c.name+thinkingSuffix)
 				Expect(got.Reasoning).NotTo(BeNil(), "the gateway recorded no thinking split")
 				if got.Reasoning != nil { // a failed Expect inside KnownGap does not stop the check
 					Expect(*got.Reasoning).To(Equal(c.wantReasoning))

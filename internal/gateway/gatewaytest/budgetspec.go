@@ -5,6 +5,7 @@ package gatewaytest
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,8 +23,9 @@ import (
 
 // budgetOvershootSpec is the budget stop of ADR 0097 decision 4: a zero limit refuses, and calls
 // that arrive together near the limit overshoot it by the responses still in flight. The overshoot
-// is measured and written to the report, not asserted away; the bound the spec holds is the one
-// gateway.Limit documents: one response per concurrent call.
+// is measured and written to the report, not asserted away. The bound the spec holds is the
+// number of concurrent calls (no call is served twice, none is lost); what the gateway can promise
+// beyond that, and what gateway.Limit should say about it, is koinon #274.
 func budgetOvershootSpec(env Env) {
 	if !env.GatewayBudgets {
 		return // Kubernetes mode: the ledger revokes the key, which that driver's own suite tests.
@@ -77,17 +79,28 @@ func budgetOvershootSpec(env Env) {
 			}
 		})
 
-		call := func(ctx context.Context, key string) (int, string) {
+		// try is safe in a goroutine: it returns the error instead of failing the spec.
+		try := func(ctx context.Context, key string) (int, string, error) {
 			body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}]}`, model)
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, gw.URL+"/v1/chat/completions", bytes.NewBufferString(body))
-			Expect(err).NotTo(HaveOccurred())
+			if err != nil {
+				return 0, "", err
+			}
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", "Bearer "+key)
 			resp, err := http.DefaultClient.Do(req)
-			Expect(err).NotTo(HaveOccurred())
+			if err != nil {
+				return 0, "", err
+			}
 			defer func() { _ = resp.Body.Close() }()
 			b, _ := io.ReadAll(resp.Body)
-			return resp.StatusCode, string(b)
+			return resp.StatusCode, string(b), nil
+		}
+		call := func(ctx context.Context, key string) (int, string) {
+			GinkgoHelper()
+			code, body, err := try(ctx, key)
+			Expect(err).NotTo(HaveOccurred())
+			return code, body
 		}
 
 		It("refuses every call of a key whose limit is zero", func(ctx SpecContext) {
@@ -98,11 +111,13 @@ func budgetOvershootSpec(env Env) {
 
 		It("lets calls that arrive together past the limit by the responses in flight, and stops the next one", func(ctx SpecContext) {
 			codes := make([]int, concurrent)
+			errs := make([]error, concurrent)
 			var wg sync.WaitGroup
 			for i := range concurrent {
-				wg.Go(func() { codes[i], _ = call(ctx, nearly.Material) })
+				wg.Go(func() { codes[i], _, errs[i] = try(ctx, nearly.Material) })
 			}
 			wg.Wait()
+			Expect(errors.Join(errs...)).To(Succeed())
 			served, refused := 0, 0
 			for _, c := range codes {
 				switch c {

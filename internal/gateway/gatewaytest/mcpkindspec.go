@@ -24,20 +24,23 @@ import (
 
 // The canaries the fake server puts in each kind of message it sends.
 const (
-	canaryResult   = "CANARY-TOOL-RESULT"
-	canaryDesc     = "CANARY-TOOL-DESCRIPTION"
-	canaryRPCError = "CANARY-RPC-ERROR"
-	canaryLog      = "CANARY-LOG-NOTIFICATION"
-	canarySampling = "CANARY-SAMPLING-REQUEST"
-	canaryElicit   = "CANARY-ELICITATION-REQUEST"
-	canaryResource = "CANARY-RESOURCE"
-	canaryPrompt   = "CANARY-PROMPT"
+	canaryResult    = "CANARY-TOOL-RESULT"
+	canaryDesc      = "CANARY-TOOL-DESCRIPTION"
+	canaryRPCError  = "CANARY-RPC-ERROR"
+	canaryLog       = "CANARY-LOG-NOTIFICATION"
+	canarySampling  = "CANARY-SAMPLING-REQUEST"
+	canaryElicit    = "CANARY-ELICITATION-REQUEST"
+	canaryElicitURL = "CANARY-ELICITATION-URL-REQUEST"
+	canaryArgs      = "CANARY-TOOL-ARGUMENTS"
+	canaryResource  = "CANARY-RESOURCE"
+	canaryPrompt    = "CANARY-PROMPT"
 )
 
 // canaryServer is an MCP server that says something untrusted in every kind of message a server
 // can send an agent: a tool result, a tool description, a JSON-RPC error reply, a log
-// notification, server-initiated sampling and elicitation requests, a resource and a prompt.
-func canaryServer(log *headerLog) *httptest.Server {
+// notification, server-initiated sampling and elicitation requests (form and URL mode), a resource
+// and a prompt. It hands the arguments of every record call to gotArgs, for the request leg.
+func canaryServer(log *headerLog, gotArgs func(string)) *httptest.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "canary", Version: "0.0.1"}, &mcp.ServerOptions{
 		Capabilities: &mcp.ServerCapabilities{Logging: &mcp.LoggingCapabilities{}},
 	})
@@ -73,6 +76,21 @@ func canaryServer(log *headerLog) *httptest.Server {
 			})
 			return text("elicited"), nil, nil
 		})
+	mcp.AddTool(srv, &mcp.Tool{Name: "elicit_url", Description: "elicits by URL"},
+		func(ctx context.Context, req *mcp.CallToolRequest, _ args) (*mcp.CallToolResult, any, error) {
+			_, _ = req.Session.Elicit(ctx, &mcp.ElicitParams{
+				Mode: "url", Message: canaryElicitURL, URL: "https://canary.example.com/consent", ElicitationID: "canary-1",
+			})
+			return text("elicited by url"), nil, nil
+		})
+	mcp.AddTool(srv, &mcp.Tool{Name: "record", Description: "records its arguments"},
+		func(_ context.Context, _ *mcp.CallToolRequest, in struct {
+			Note string `json:"note"`
+		},
+		) (*mcp.CallToolResult, any, error) {
+			gotArgs(in.Note)
+			return text("recorded"), nil, nil
+		})
 	srv.AddResource(&mcp.Resource{URI: "canary://r", Name: "r", MIMEType: "text/plain"},
 		func(context.Context, *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 			return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{URI: "canary://r", MIMEType: "text/plain", Text: canaryResource}}}, nil
@@ -97,7 +115,8 @@ func canaryServer(log *headerLog) *httptest.Server {
 //
 // A kind that reaches the agent unseen is an expected failure naming #254 on a driver that lists
 // it in Env.KnownGaps. Koinon's fail-closed rule for it, with the real leak guard, is not part of
-// this suite (it uses a fake guard); see the follow-up on #272.
+// this table (it uses a fake guard): guardSpec runs the real guard end to end, "the real MCP leak
+// guard holds a session fail-closed after a reply it never saw" in guardspec.go.
 func mcpKindSpec(env Env) {
 	const target = "acme-canary"
 	agent := gateway.AgentRef{Org: "acme", Name: "canary-reader"}
@@ -107,6 +126,9 @@ func mcpKindSpec(env Env) {
 		canary string
 		// gap is the issue that tracks a kind the gateway does not show the guard ("" when it does).
 		gap string
+		// toServer is true for a kind the agent sends: it is delivered when the server received the canary,
+		// and seen when a CheckRequest carried it, before the server.
+		toServer bool
 		// trigger makes the server send the kind; whatever the agent reads goes to read.
 		trigger func(ctx context.Context, s *mcp.ClientSession, read func(string)) error
 	}
@@ -143,7 +165,12 @@ func mcpKindSpec(env Env) {
 			return callTool("log")(ctx, s, read)
 		}},
 		{name: "a server-initiated sampling request", canary: canarySampling, gap: "#254", trigger: callTool("sample")},
-		{name: "a server-initiated elicitation request", canary: canaryElicit, trigger: callTool("elicit")},
+		{name: "a server-initiated elicitation request (form mode)", canary: canaryElicit, trigger: callTool("elicit")},
+		{name: "a server-initiated elicitation request (URL mode)", canary: canaryElicitURL, trigger: callTool("elicit_url")},
+		{name: "a tools/call request (its arguments)", canary: canaryArgs, toServer: true, trigger: func(ctx context.Context, s *mcp.ClientSession, _ func(string)) error {
+			_, err := s.CallTool(ctx, &mcp.CallToolParams{Name: target + "_record", Arguments: map[string]any{"note": canaryArgs}})
+			return err
+		}},
 		{name: "a resources/read reply", canary: canaryResource, trigger: func(ctx context.Context, s *mcp.ClientSession, read func(string)) error {
 			res, err := s.ReadResource(ctx, &mcp.ReadResourceParams{URI: "canary://r"})
 			if err != nil {
@@ -170,12 +197,18 @@ func mcpKindSpec(env Env) {
 
 	Describe(env.Name+": guard coverage per MCP message kind (ADR 0097; koinon #254)", Ordered, ContinueOnFailure, func() {
 		var (
-			url, key string
-			logs     func(context.Context) string
-			guard    *FakeGuard
+			url, key  string
+			logs      func(context.Context) string
+			guard     *FakeGuard
+			argsMu    sync.Mutex
+			serverGot strings.Builder // the arguments the server received
 		)
 		BeforeAll(func(ctx SpecContext) {
-			srv := canaryServer(&headerLog{})
+			srv := canaryServer(&headerLog{}, func(s string) {
+				argsMu.Lock()
+				defer argsMu.Unlock()
+				serverGot.WriteString(s + "\n")
+			})
 			DeferCleanup(func() { srv.CloseClientConnections(); go srv.Close() })
 			guard = startGuard()
 			k, err := gateway.NewKey(agent)
@@ -183,7 +216,7 @@ func mcpKindSpec(env Env) {
 			key = k.Material
 			state := gateway.State{MCP: []gateway.MCPTarget{{Name: target, Org: "acme", URL: "http://" + env.Host + ":" + itoa(port(srv)) + "/mcp"}}}
 			state.AddKey(k.Key)
-			state.GrantTools(agent, gateway.ToolGrant{Target: target, Tools: []string{"echo", "rpc_error", "log", "sample", "elicit"}})
+			state.GrantTools(agent, gateway.ToolGrant{Target: target, Tools: []string{"echo", "rpc_error", "log", "sample", "elicit", "elicit_url", "record"}})
 			gw, err := env.Start(ctx, []int{port(srv), guard.Port()}, nil, guard.URL(env.Host))
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
@@ -221,8 +254,12 @@ func mcpKindSpec(env Env) {
 						}
 						return &mcp.CreateMessageResult{Role: "assistant", Model: "none", Content: &mcp.TextContent{Text: "no"}}, nil
 					},
+					Capabilities: &mcp.ClientCapabilities{Elicitation: &mcp.ElicitationCapabilities{
+						Form: &mcp.FormElicitationCapabilities{}, URL: &mcp.URLElicitationCapabilities{},
+					}},
 					ElicitationHandler: func(_ context.Context, r *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
 						add(r.Params.Message)
+						add(r.Params.URL)
 						return &mcp.ElicitResult{Action: "decline"}, nil
 					},
 				})
@@ -240,8 +277,16 @@ func mcpKindSpec(env Env) {
 				mu.Lock()
 				delivered := strings.Contains(read.String(), k.canary)
 				mu.Unlock()
+				checks := append(guard.Requests(), guard.Responses()...)
+				if k.toServer {
+					// The request leg: the server received the canary, so the guard must have seen it first.
+					argsMu.Lock()
+					delivered = strings.Contains(serverGot.String(), k.canary)
+					argsMu.Unlock()
+					checks = guard.Requests()
+				}
 				var seen []string
-				for _, c := range append(guard.Requests(), guard.Responses()...) {
+				for _, c := range checks {
 					if strings.Contains(c.Body, k.canary) {
 						seen = append(seen, c.Method)
 					}
