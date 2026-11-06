@@ -252,6 +252,18 @@ can already open every DEK they copied. Do this, in this order:
    repositories again (a seed not yet done moves on to the newest epoch). These choices are recorded
    in [ADR 0085](../adr/0085-upgrade-compatibility-and-recovery-policy.md) decision 14 and #86.
 
+   **After a database restore, run `koinon-api checkpoints resync --all` before `keys forget` or
+   `keys new-repositories`.** A repository started after the dump is in the bucket but not in the
+   restored database, and its location follows from the agent and the repository number, so the
+   restored database's next number can point at it. The resync records each location it finds taken
+   by a repository the database has no password for, and the next free number (audit
+   `home.repository_prefix_taken`, actor `system`, with `prefix`, `repositoryEpoch`,
+   `knownToDatabase` and `nextEpochAtLeast`). Both commands then start the agent's next repository
+   at that number. A backup or seed that reaches a taken location fails at once with an error that
+   names it and says to run `keys new-repositories --agent <id>`; it records the same, so that run
+   picks the free number. The sweeper never deletes the blobs at a taken location: they belong to
+   the lost database's repository, and you delete them by hand once nothing in them is needed (#262).
+
    If only the **bucket's S3 key** leaked, not a KEK, the repository passwords are safe: do step 2b.1
    and 2b.5 only.
 3. **Rotate the real credentials at their providers.** Re-encrypting does not undo a leak. Issue new

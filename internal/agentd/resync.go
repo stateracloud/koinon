@@ -35,6 +35,10 @@ package agentd
 //   - A repository the bucket does not hold is an empty one when the sweeper may have deleted it
 //     (retired and past its deadline: the dump can predate the sweep). Otherwise, with checkpoints
 //     that name it, the try fails and nothing changes: koinon-agentd may be using another bucket.
+//   - A repository at the prefix after the agent's newest epoch, or at the prefix of an epoch with
+//     no checkpoints whose password does not open it, was started after the dump (keys forget or
+//     keys new-repositories). It is recorded (prefixtaken.go): the agent's next epoch starts after
+//     it, and the sweeper never deletes it. Its homes cannot be read without the lost password.
 //
 // The bucket is listed outside any transaction; the changes are then made in one transaction per
 // agent under the agent's home_repositories row lock (LockHomeRepository, which starting a
@@ -192,8 +196,10 @@ func (p *Pool) listRepositories(ctx context.Context, r store.HomeCheckpointResyn
 		return nil, err
 	}
 	var out []repositoryListing
+	newest := int32(-1)
 	for _, e := range epochs {
-		if e.Deleted || e.Lost {
+		newest = max(newest, e.RepositoryEpoch)
+		if e.Deleted || e.Lost || e.Taken {
 			continue // nothing restores from it; its checkpoints are already skipped
 		}
 		before, err := p.q.ListCompleteHomeCheckpointsOfRepository(ctx, store.ListCompleteHomeCheckpointsOfRepositoryParams{
@@ -210,6 +216,13 @@ func (p *Pool) listRepositories(ctx context.Context, r store.HomeCheckpointResyn
 		}
 		snaps, err := c.Store.Snapshots(ctx, repo.Prefix, repo.Password)
 		switch {
+		case checkpoint.TakenPrefix(err, repo.Prefix) && len(before) == 0:
+			// Another repository, started after the dump at a prefix this epoch reused (#262): none of
+			// the row's is there. Recorded, so the sweeper keeps those blobs and the next epoch skips it.
+			if _, err := p.recordTakenPrefix(ctx, r.OrgID, r.AgentID, e.RepositoryEpoch, true); err != nil {
+				return nil, fmt.Errorf("repository epoch %d: %w", e.RepositoryEpoch, err)
+			}
+			continue
 		case errors.Is(err, checkpoint.ErrNoRepositoryInBucket) && (e.Due || len(before) == 0):
 			// Swept (the dump predates the sweep), or never written to: it holds nothing.
 			snaps = nil
@@ -219,6 +232,20 @@ func (p *Pool) listRepositories(ctx context.Context, r store.HomeCheckpointResyn
 			return nil, fmt.Errorf("listing the snapshots of repository epoch %d: %w", e.RepositoryEpoch, err)
 		}
 		out = append(out, repositoryListing{epoch: e.RepositoryEpoch, before: before, snaps: snaps})
+	}
+	if newest >= 0 {
+		// A repository after the newest epoch the database has was started after the dump (keys
+		// forget or keys new-repositories): the next epoch must not reuse its prefix (#262).
+		after := newest + 1
+		held, err := c.Store.HoldsRepository(ctx, checkpoint.EpochPrefix(r.OrgID.String(), r.AgentID.String(), after))
+		if err != nil {
+			return nil, fmt.Errorf("looking at repository epoch %d: %w", after, err)
+		}
+		if held {
+			if _, err := p.recordTakenPrefix(ctx, r.OrgID, r.AgentID, after, false); err != nil {
+				return nil, fmt.Errorf("repository epoch %d: %w", after, err)
+			}
+		}
 	}
 	return out, nil
 }

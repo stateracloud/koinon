@@ -4,6 +4,7 @@ package agentd_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -233,7 +234,9 @@ var _ = Describe("home checkpoint resync", func() {
 		Expect(gone.SnapshotID.Valid).To(BeFalse())
 		Expect(gone.Error.String).To(ContainSubstring("k0123456789abcdef0123456789abcdef"))
 		Expect(gone.FinishedAt.Valid).To(BeTrue())
+		Expect(gone.SnapshotMissingAt.Valid).To(BeTrue(), "told apart from a failed backup (#263)")
 		Expect(checkpointRow(ctx, keptID).Status).To(Equal(store.CheckpointStatusComplete))
+		Expect(checkpointRow(ctx, keptID).SnapshotMissingAt.Valid).To(BeFalse())
 
 		By("the agent's ownership epoch is raised to the newest added checkpoint's, as the dump had it lower")
 		var agentEpoch int64
@@ -280,6 +283,57 @@ var _ = Describe("home checkpoint resync", func() {
 		Expect(all).To(HaveLen(2))
 		Expect(all[0].ID).To(Equal(afterDump))
 		Expect(all[1].ID).To(Equal(keptID))
+	})
+
+	It("records the prefixes it finds taken by repositories the database has no password for, and the free epoch after them (#262)", func(ctx SpecContext) {
+		By("the dump knows epoch 1; after it, epoch 1 and 2 were started under passwords only the lost database had")
+		newEpoch(ctx, 1, 7*24*time.Hour)
+		for _, n := range []int32{1, 2} {
+			_, err := writer.Backup(ctx, prefix(n), fmt.Sprintf("koinon_test_foreign-%d", n), tarOf(map[string]string{"notes/v.md": "after the dump"}),
+				checkpoint.Meta{CheckpointID: "x"})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		home := snapshot(ctx, 0, map[string]string{"notes/v.md": "before"}, checkpoint.Meta{CheckpointID: "x"})
+		recorded(ctx, 0, home.SnapshotID, time.Hour)
+		request(ctx)
+		e.pool("agentd-a", cps())
+
+		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		r := resync(ctx)()
+		Expect(r.FailedAt.Valid).To(BeFalse(), r.Error.String)
+		Expect(counts(r)).To(Equal([]int32{1, 0, 0, 0}), "epoch 1 is skipped, not listed under the wrong password")
+
+		By("epoch 1's row is marked taken, and the next epoch starts at 3, past r2/ that no row names")
+		var taken bool
+		Expect(db.QueryRow(ctx, `SELECT prefix_taken_at IS NOT NULL FROM home_repository_epochs WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = 1`,
+			e.org, agent).Scan(&taken)).To(Succeed())
+		Expect(taken).To(BeTrue())
+		var floor pgtype.Int4
+		Expect(db.QueryRow(ctx, `SELECT next_epoch_at_least FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, agent).Scan(&floor)).To(Succeed())
+		Expect(floor).To(Equal(pgtype.Int4{Int32: 3, Valid: true}))
+		Expect(audited(ctx, agentd.PrefixTakenAction)).To(ConsistOf(
+			And(HavePrefix("system "+agent.String()), ContainSubstring(`"repositoryEpoch": 1`), ContainSubstring(`"knownToDatabase": true`), ContainSubstring(`"nextEpochAtLeast": 3`)),
+		))
+
+		By("a second run finds the same and records nothing new")
+		request(ctx)
+		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Expect(audited(ctx, agentd.PrefixTakenAction)).To(HaveLen(1))
+	})
+
+	It("reports a repository found at the prefix of the epoch after the latest one (#262)", func(ctx SpecContext) {
+		_, err := writer.Backup(ctx, prefix(1), "koinon_test_foreign-1", tarOf(map[string]string{"notes/v.md": "after the dump"}), checkpoint.Meta{CheckpointID: "x"})
+		Expect(err).NotTo(HaveOccurred())
+		request(ctx)
+		e.pool("agentd-a", cps())
+
+		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		var floor pgtype.Int4
+		Expect(db.QueryRow(ctx, `SELECT next_epoch_at_least FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, agent).Scan(&floor)).To(Succeed())
+		Expect(floor).To(Equal(pgtype.Int4{Int32: 2, Valid: true}))
+		Expect(audited(ctx, agentd.PrefixTakenAction)).To(ConsistOf(
+			And(ContainSubstring(`"repositoryEpoch": 1`), ContainSubstring(`"knownToDatabase": false`), ContainSubstring(prefix(1))),
+		))
 	})
 
 	It("leaves out a snapshot whose backup is still recording it or was given up, and keeps a copy as old as its source", func(ctx SpecContext) {

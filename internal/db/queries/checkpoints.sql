@@ -81,12 +81,15 @@ WHERE org_id = @org_id AND agent_id = @agent_id AND retired_at IS NOT NULL AND d
 -- @lease_seconds has lost its writer and holds nothing back: a dead writer's row is taken over
 -- only once the sandbox is ready again, and an agent that stays stopped would otherwise keep every
 -- retired repository, the compromised one included.
-SELECT agent_id, repository_epoch, prefix FROM (
-    SELECT h.agent_id, 0::integer AS repository_epoch, h.prefix, h.delete_after, h.credential_lost_at
+-- prefix_taken: the prefix holds another repository (#262); the row is marked deleted, its blobs kept.
+SELECT agent_id, repository_epoch, prefix, prefix_taken FROM (
+    SELECT h.agent_id, 0::integer AS repository_epoch, h.prefix, h.delete_after, h.credential_lost_at,
+           (h.prefix_taken_at IS NOT NULL)::boolean AS prefix_taken
     FROM home_repositories h
     WHERE h.org_id = @org_id AND h.deleted_at IS NULL AND h.delete_after <= now()
     UNION ALL
-    SELECT e.agent_id, e.repository_epoch, e.prefix, e.delete_after, e.credential_lost_at
+    SELECT e.agent_id, e.repository_epoch, e.prefix, e.delete_after, e.credential_lost_at,
+           (e.prefix_taken_at IS NOT NULL)::boolean AS prefix_taken
     FROM home_repository_epochs e
     WHERE e.org_id = @org_id AND e.deleted_at IS NULL AND e.delete_after <= now()
 ) due
@@ -183,6 +186,31 @@ SELECT c.org_id, c.agent_id, c.reason, 'complete', c.sandbox_id, c.generation, c
 FROM home_checkpoints c
 WHERE c.org_id = @org_id AND c.id = @source_id AND c.status = 'complete'
 RETURNING *;
+
+-- name: RaiseHomeRepositoryNextEpoch :execrows
+-- The prefixes of the agent's epochs below @next_epoch hold repositories this database has no
+-- password for (#262): the next repository epoch starts at @next_epoch or later. Monotonic.
+UPDATE home_repositories
+SET next_epoch_at_least = @next_epoch::integer
+WHERE org_id = @org_id AND agent_id = @agent_id AND coalesce(next_epoch_at_least, 0) < @next_epoch::integer;
+
+-- name: MarkHomeRepositoryPrefixTaken :execrows
+-- Epoch 0's prefix holds a repository its password does not open: nothing of the row's is in it,
+-- so the sweeper never deletes those blobs. Only while no checkpoint was written to it (one that
+-- was opened it with this password).
+UPDATE home_repositories h
+SET prefix_taken_at = now()
+WHERE h.org_id = @org_id AND h.agent_id = @agent_id AND h.prefix_taken_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM home_checkpoints c
+                  WHERE c.org_id = h.org_id AND c.agent_id = h.agent_id AND c.repository_epoch = 0 AND c.status = 'complete');
+
+-- name: MarkHomeRepositoryEpochPrefixTaken :execrows
+-- The same for a later epoch.
+UPDATE home_repository_epochs e
+SET prefix_taken_at = now()
+WHERE e.org_id = @org_id AND e.agent_id = @agent_id AND e.repository_epoch = @repository_epoch AND e.prefix_taken_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM home_checkpoints c
+                  WHERE c.org_id = e.org_id AND c.agent_id = e.agent_id AND c.repository_epoch = e.repository_epoch AND c.status = 'complete');
 
 -- name: MarkHomeRepositoryDeleted :execrows
 UPDATE home_repositories SET deleted_at = now()
@@ -422,14 +450,16 @@ WHERE org_id = @org_id;
 -- name: ListHomeRepositoryEpochsOfAgent :many
 -- Every repository epoch of the agent, epoch 0 first, with whether it still opens (a deleted one
 -- has no blobs, a lost one no password) and whether the sweeper may have deleted its blobs (retired
--- and past its deadline: after a database restore, deleted_at can predate the sweep).
+-- and past its deadline: after a database restore, deleted_at can predate the sweep). A taken one's
+-- prefix holds another repository, none of the row's (#262).
 SELECT 0::integer AS repository_epoch, (h.deleted_at IS NOT NULL)::boolean AS deleted,
-       (h.credential_lost_at IS NOT NULL)::boolean AS lost, coalesce(h.delete_after <= now(), false)::boolean AS due
+       (h.credential_lost_at IS NOT NULL)::boolean AS lost, coalesce(h.delete_after <= now(), false)::boolean AS due,
+       (h.prefix_taken_at IS NOT NULL)::boolean AS taken
 FROM home_repositories h
 WHERE h.org_id = @org_id AND h.agent_id = @agent_id
 UNION ALL
 SELECT e.repository_epoch, (e.deleted_at IS NOT NULL)::boolean, (e.credential_lost_at IS NOT NULL)::boolean,
-       coalesce(e.delete_after <= now(), false)::boolean
+       coalesce(e.delete_after <= now(), false)::boolean, (e.prefix_taken_at IS NOT NULL)::boolean
 FROM home_repository_epochs e
 WHERE e.org_id = @org_id AND e.agent_id = @agent_id
 ORDER BY repository_epoch;
@@ -474,6 +504,8 @@ RETURNING *;
 -- name: MarkHomeCheckpointSnapshotMissing :execrows
 -- The checkpoint's snapshot is not in the bucket: it is failed, not deleted, so its history stays
 -- (the snapshot ID goes into @error; a complete checkpoint is one with a snapshot).
+-- snapshot_missing_at tells it apart from a backup that failed: the recreate gate does not block on
+-- it (#263).
 UPDATE home_checkpoints
-SET status = 'failed', snapshot_id = NULL, error = @error
+SET status = 'failed', snapshot_id = NULL, error = @error, snapshot_missing_at = now()
 WHERE org_id = @org_id AND id = @id AND status = 'complete' AND snapshot_id = @snapshot_id::text;

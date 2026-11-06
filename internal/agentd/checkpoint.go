@@ -48,6 +48,9 @@ type HomeStore interface {
 	DeleteRepository(ctx context.Context, prefix string) (int, error)
 	// Snapshots lists a repository's complete snapshots, for checkpoints resync (resync.go).
 	Snapshots(ctx context.Context, prefix, password string) ([]checkpoint.Snapshot, error)
+	// HoldsRepository reports whether a prefix holds a repository, whatever its password
+	// (prefixtaken.go).
+	HoldsRepository(ctx context.Context, prefix string) (bool, error)
 }
 
 // Repositories gives an agent's repositories and their passwords (checkpoint.Remote): Get the
@@ -265,13 +268,16 @@ func (p *Pool) sweepRepositories(ctx context.Context) {
 				continue
 			}
 			p.sweepRefused.Delete(key) // fixed: a later refusal of the row is logged again
-			n, err := homes.DeleteRepository(ctx, want)
-			if err != nil {
-				if ctx.Err() == nil {
-					log.Warn("repository sweep: deleting a retired repository failed; trying again later", "err", err)
+			n := 0
+			if !r.PrefixTaken {
+				n, err = homes.DeleteRepository(ctx, want)
+				if err != nil {
+					if ctx.Err() == nil {
+						log.Warn("repository sweep: deleting a retired repository failed; trying again later", "err", err)
+					}
+					continue
 				}
-				continue
-			}
+			} // else: the prefix holds another repository, not the row's (prefixtaken.go); its blobs stay
 			if r.RepositoryEpoch == 0 {
 				_, err = p.q.MarkHomeRepositoryDeleted(ctx, store.MarkHomeRepositoryDeletedParams{OrgID: org, AgentID: r.AgentID})
 			} else {
@@ -393,6 +399,9 @@ func (p *Pool) backupHome(ctx context.Context, cp store.HomeCheckpoint) (backupR
 		Reason: string(cp.Reason), Sandbox: sb.SandboxID.String, Ready: ready,
 	})
 	if err != nil {
+		if checkpoint.TakenPrefix(err, repo.Prefix) {
+			return backupResult{}, p.prefixTaken(ctx, cp.OrgID, cp.AgentID, repo, err)
+		}
 		if sctx := stderr.String(); sctx != "" && readErr == nil {
 			err = fmt.Errorf("%w (tar: %s)", err, strings.TrimSpace(sctx))
 		}

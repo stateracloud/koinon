@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -416,6 +417,93 @@ var _ = Describe("home checkpoints", func() {
 		Expect(cp.Attempts).To(BeEquivalentTo(2))
 		Expect(cp.Error.String).To(ContainSubstring("access denied"))
 		Expect(cp.SnapshotID.Valid).To(BeFalse())
+	})
+
+	It("fails a backup into a prefix that holds a repository the database has no password for, at once, and records the next free epoch (#262)", func(ctx SpecContext) {
+		org, agent := e.org.String(), e.agent.ID.String()
+		// The database was restored from a dump, then keys forget started epoch 1 again: r1/ and r2/
+		// hold repositories started after the dump, under passwords only the lost database had.
+		foreign := map[int32]checkpoint.Result{}
+		for _, n := range []int32{1, 2} {
+			res, err := writer.Backup(ctx, checkpoint.EpochPrefix(org, agent, n), fmt.Sprintf("koinon_test_foreign-%d", n),
+				tarOf(map[string]string{"notes/v.md": "after the dump"}), checkpoint.Meta{CheckpointID: "x"})
+			Expect(err).NotTo(HaveOccurred())
+			foreign[n] = res
+		}
+		_, err := db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope, retired_at, delete_after)
+			VALUES ($1, $2, $3, '{}', now(), now() + interval '7 days')`, e.org, e.agent.ID, checkpoint.Prefix(org, agent))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason)
+			VALUES ($1, $2, 1, $3, '{}', 'key_lost')`, e.org, e.agent.ID, checkpoint.EpochPrefix(org, agent, 1))
+		Expect(err).NotTo(HaveOccurred())
+		current := &atomic.Int32{}
+		current.Store(1)
+
+		id := request(ctx, store.CheckpointReasonRecreate)
+		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) { c.Repositories = fixedRepo{current: current} }))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusFailed))
+		cp := checkpointOf(ctx, id)()
+		Expect(cp.Attempts).To(BeEquivalentTo(1), "another attempt cannot help")
+		Expect(cp.Error.String).To(And(ContainSubstring(checkpoint.EpochPrefix(org, agent, 1)),
+			ContainSubstring("koinon-api keys new-repositories --agent "+agent), ContainSubstring("free epoch 3")))
+
+		By("the free epoch is the floor of the next one, and the taken row is marked, once")
+		var floor pgtype.Int4
+		var taken0 bool
+		Expect(db.QueryRow(ctx, `SELECT next_epoch_at_least, prefix_taken_at IS NOT NULL FROM home_repositories WHERE org_id = $1 AND agent_id = $2`,
+			e.org, e.agent.ID).Scan(&floor, &taken0)).To(Succeed())
+		Expect(floor).To(Equal(pgtype.Int4{Int32: 3, Valid: true}), "r2/ is taken as well")
+		Expect(taken0).To(BeFalse(), "epoch 0's prefix is the agent's own")
+		var taken1 bool
+		Expect(db.QueryRow(ctx, `SELECT prefix_taken_at IS NOT NULL FROM home_repository_epochs WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = 1`,
+			e.org, e.agent.ID).Scan(&taken1)).To(Succeed())
+		Expect(taken1).To(BeTrue())
+		var events []string
+		rows, err := db.Query(ctx, `SELECT summary::text FROM audit_events WHERE org_id = $1 AND action = $2`, e.org, agentd.PrefixTakenAction)
+		Expect(err).NotTo(HaveOccurred())
+		events, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		Expect(err).NotTo(HaveOccurred())
+		Expect(events).To(ConsistOf(And(ContainSubstring(`"repositoryEpoch": 1`), ContainSubstring(`"nextEpochAtLeast": 3`))))
+
+		By("nothing was written over the repository found")
+		for n, res := range foreign {
+			snaps, err := writer.Snapshots(ctx, checkpoint.EpochPrefix(org, agent, n), fmt.Sprintf("koinon_test_foreign-%d", n))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(snaps).To(HaveLen(1))
+			Expect(snaps[0].ID).To(Equal(res.SnapshotID))
+		}
+	})
+
+	It("marks a retired repository whose prefix was taken deleted without deleting the blobs there (#262)", func(ctx SpecContext) {
+		org, agent := e.org.String(), e.agent.ID.String()
+		res, err := writer.Backup(ctx, checkpoint.EpochPrefix(org, agent, 1), "koinon_test_foreign-1",
+			tarOf(map[string]string{"notes/v.md": "after the dump"}), checkpoint.Meta{CheckpointID: "x"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope, retired_at, delete_after, deleted_at)
+			VALUES ($1, $2, $3, '{}', now(), now(), now())`, e.org, e.agent.ID, checkpoint.Prefix(org, agent))
+		Expect(err).NotTo(HaveOccurred())
+		// Epoch 1 was found taken and replaced by epoch 3 (keys new-repositories), which holds the home.
+		_, err = db.Exec(ctx, `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason, prefix_taken_at, retired_at, delete_after)
+			VALUES ($1, $2, 1, $3, '{}', 'key_lost', now(), now(), now() - interval '1 minute')`, e.org, e.agent.ID, checkpoint.EpochPrefix(org, agent, 1))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason)
+			VALUES ($1, $2, 3, $3, '{}', 'key_compromised')`, e.org, e.agent.ID, checkpoint.EpochPrefix(org, agent, 3))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `INSERT INTO home_checkpoints (org_id, agent_id, reason, status, snapshot_id, finished_at, repository_epoch)
+			VALUES ($1, $2, 'stop', 'complete', 's3', now(), 3)`, e.org, e.agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+
+		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) { c.Sweep = 50 * time.Millisecond }))
+		Eventually(func() bool {
+			var deleted bool
+			Expect(db.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM home_repository_epochs WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = 1`,
+				e.org, e.agent.ID).Scan(&deleted)).To(Succeed())
+			return deleted
+		}).WithTimeout(10 * time.Second).Should(BeTrue())
+		snaps, err := writer.Snapshots(ctx, checkpoint.EpochPrefix(org, agent, 1), "koinon_test_foreign-1")
+		Expect(err).NotTo(HaveOccurred(), "the repository found there is not the row's: kept")
+		Expect(snaps).To(HaveLen(1))
+		Expect(snaps[0].ID).To(Equal(res.SnapshotID))
 	})
 
 	It("fails a backup when tar in the sandbox fails", func(ctx SpecContext) {
