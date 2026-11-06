@@ -272,6 +272,11 @@ func (c *Config) defaults() error {
 			return errors.New("agentd: Checkpoints needs a Store and Repositories")
 		}
 		c.Checkpoints.defaults()
+		if c.Checkpoints.Timeout >= c.Checkpoints.Lease {
+			// A writer must end before its lease: the sweeper counts a running checkpoint only
+			// within its lease (ListDueHomeRepositories), and another writer takes it over after.
+			return errors.New("agentd: Checkpoints.Timeout must be shorter than Checkpoints.Lease")
+		}
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
