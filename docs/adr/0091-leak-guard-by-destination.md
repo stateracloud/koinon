@@ -246,7 +246,8 @@ Their role changes:
 - The decoder set is **frozen**: no new evasion heuristics. The package documentation says plainly
   that it catches verbatim and simply-encoded copies, not an adaptive attacker.
 - Joins happen **only in call order**: the payload arguments of one call, joined in their order in
-  the call. The any-pair joins and the pair windows go.
+  the call. The any-pair joins and the pair windows go. (Amended 2026-11-06, #256: also in three
+  key-sorted orders of the call's JSON members; see the amendment below.)
 - A match becomes an ADR 0042 approval showing the matched text (ADR 0084 decision 7 stays), on an
   `external-low` call that would otherwise pass, and on an `external-high` call before both legs.
   On an `external-high` call that is already an approval, the match is marked on the card.
@@ -386,6 +387,28 @@ measures; procoduck decides each number.
   show agents spreading work across runs of one generation.
 - ~~**Repository visibility.**~~ Settled (2026-11-06, #115): a 1 hour freshness window and a 20
   minute refresh; unknown, internal and unsure readings all count as public (decision 3).
+
+## Amendment (2026-11-06, #256): joins in call order and in key order
+
+Decision 6 joined the payload in call order only, so whether a text split across two members of
+one object was caught depended on the order an encoder wrote the keys in: a model harness that
+sorts keys turned a caught split into a missed one. A JSON object has no order, so the reading
+must not depend on it. The text match now scans:
+
+- each payload string on its own;
+- the payload joined in call order, as before;
+- the payload joined in three more orders of the same strings (`internal/mcpguard` `Args`), each
+  recursive into nested objects, with lists kept in their order:
+  - members sorted by key, each key next to its value;
+  - keys sorted, then the values in that order, so no key stands between two values;
+  - keys in call order, then the values in call order.
+
+An order equal to call order adds nothing, so a call with one member costs what it did. A split in
+the order the call wrote its members, or in key order, is caught whatever the encoder did. A split
+against both orders (the keys written sorted and the halves the other way round) is still not
+promised: the replay corpus pins it as `not_promised` (`split-args-against-both`). Nothing else in
+decision 6 changes: no any-pair joins, no pair windows, the same budgets (each join is one more
+text under the work budget, cut to its ends by `JoinEndBytes`).
 
 ## Upstream verification
 
