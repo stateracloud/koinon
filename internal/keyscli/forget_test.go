@@ -29,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/tracedest"
 )
@@ -341,6 +342,60 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
 			Expect(usage(ctx)).To(BeEmpty())
+		})
+	})
+
+	// Issue #255: the KMS key that wrapped the active KEK is gone for good, so the key set does not load
+	// (the active KEK is not among the keys). The key-admin Job adds a new active KEK, then keys forget runs.
+	Describe("when the lost KEK was the active one", func() {
+		It("goes from an active KEK that cannot be unwrapped to a new active KEK to keys forget", func(ctx SpecContext) {
+			org, user, _ := pgtest.NewOrg(ctx, pool)
+			providers := catalog.New(pool, ring(ctx), nil)
+			p, err := providers.CreateProvider(ctx, org, audit.User(user), user, catalog.ProviderInput{
+				Name: pgtest.Uniq("p"), Type: "openai", URL: "https://x.example.com/v1", APIKey: "sk-a",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 1}))
+
+			By("the operator removes the lost KEK's entry; `active` still names it, so nothing loads")
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			delete(sec.Data, lostKEK)
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			tool.Yes = true
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(ContainSubstring("is not among the keys")))
+
+			By("the key-admin Job adds a KEK and makes it active")
+			kms := &secretstoretest.FakeKMS{}
+			admin, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, kms)
+			Expect(err).NotTo(HaveOccurred())
+			admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
+			ks = keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek", Wrappers: admin}
+			Expect((keyscli.KeyAdmin{
+				Store: ks, AddID: nextKEK, ActivateIfNoActive: true, Out: out, Now: func() time.Time { return now },
+			}).Run(ctx)).To(Succeed())
+			set, err := ks.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(set.Active).To(Equal(nextKEK))
+
+			By("keys status and keys forget now run")
+			tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }, Yes: true}
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
+			Expect(usage(ctx)).To(BeEmpty())
+			var markedLost, sealed bool
+			Expect(pool.QueryRow(ctx, `SELECT credential_lost_at IS NOT NULL, api_key IS NOT NULL FROM providers WHERE org_id = $1 AND id = $2::uuid`, org, p.ID).Scan(&markedLost, &sealed)).To(Succeed())
+			Expect(markedLost).To(BeTrue(), "the provider key is marked lost")
+			Expect(sealed).To(BeFalse())
+
+			By("new values are sealed with the new active KEK")
+			r := ring(ctx)
+			_, err = catalog.New(pool, r, nil).CreateProvider(ctx, org, audit.User(user), user, catalog.ProviderInput{
+				Name: pgtest.Uniq("p"), Type: "openai", URL: "https://x.example.com/v1", APIKey: "sk-b",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(usage(ctx)).To(Equal(map[string]int{nextKEK: 1}))
 		})
 	})
 

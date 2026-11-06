@@ -169,6 +169,96 @@ var _ = Describe("the key-admin Job", func() {
 		Expect(job(false, "not a valid id", none).Run(ctx)).To(MatchError(ContainSubstring("not a valid KEK ID")))
 	})
 
+	Describe("recovering from a lost active KEK (activateIfNoActive, issue #255)", func() {
+		const (
+			lost     = "kek-20260101-aaaa"
+			survivor = "kek-20260201-cccc"
+			fresh    = "kek-20261103-bbbb"
+		)
+		fakeKey := func(b byte) []byte { return bytes.Repeat([]byte{b}, secretstore.KeySize) } // obviously fake
+		// seed makes the KEK Secret as the operator leaves it: the lost KEK's entry removed, `active` not.
+		seed := func(ctx context.Context, active string, kept ...string) {
+			GinkgoHelper()
+			data := map[string][]byte{}
+			if active != "" {
+				data[secretstore.ActiveFile] = []byte(active)
+			}
+			for _, id := range kept {
+				data[id] = secretstore.EncodeKey(fakeKey('s'))
+			}
+			_, err := kube.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: secret, Namespace: ns}, Data: data,
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		recover := func(add string) keyscli.KeyAdmin {
+			a := job(true, add, none)
+			a.ActivateIfNoActive = true
+			return a
+		}
+
+		It("adds the KEK and makes it active when the active entry names a KEK the Secret does not hold", func(ctx SpecContext) {
+			seed(ctx, lost)
+			By("nothing loads, and the Job without the flag cannot add either")
+			_, err := keyscli.KubeStore{Client: kube, Namespace: ns, Name: secret, Wrappers: admin}.Load(ctx)
+			Expect(err).To(MatchError(ContainSubstring("is not among the keys")))
+			Expect(job(true, fresh, none).Run(ctx)).To(MatchError(ContainSubstring("is not among the keys")))
+
+			By("the recovery adds the KEK, wrapped by the KMS, and activates it in one write")
+			Expect(recover(fresh).Run(ctx)).To(Succeed())
+			Expect(out.String()).To(ContainSubstring("made it active (the Secret named " + lost + ", which it does not hold)"))
+			ks := load(ctx)
+			Expect(ks.Active).To(Equal(fresh))
+			Expect(ks.Keys).To(HaveLen(1))
+			Expect(ks.Stored[fresh].Backend).To(Equal(secretstoretest.FakeKMSBackend))
+			Expect(ks.Stored[fresh].InstallID).To(Equal(secretstoretest.InstallA))
+			Expect(ks.ActivatedAt).To(Equal(clock()))
+
+			By("a rerun changes nothing")
+			wraps := kms.Wraps()
+			out.Reset()
+			Expect(recover(fresh).Run(ctx)).To(Succeed())
+			Expect(out.String()).To(ContainSubstring("nothing to recover"))
+			Expect(kms.Wraps()).To(Equal(wraps))
+			Expect(load(ctx).Active).To(Equal(fresh))
+		})
+
+		It("keeps the KEKs the Secret still holds, and also recovers a Secret with no active entry", func(ctx SpecContext) {
+			seed(ctx, "", survivor)
+			Expect(recover(fresh).Run(ctx)).To(Succeed())
+			ks := load(ctx)
+			Expect(ks.Active).To(Equal(fresh))
+			Expect(ks.Keys).To(HaveKey(survivor))
+			Expect(ks.Keys[survivor]).To(Equal(fakeKey('s')), "a surviving KEK is not changed")
+		})
+
+		It("never replaces a working active KEK", func(ctx SpecContext) {
+			seed(ctx, survivor, survivor)
+			Expect(recover(fresh).Run(ctx)).To(Succeed())
+			Expect(out.String()).To(ContainSubstring("The active KEK " + survivor + " is in the key set; nothing to recover."))
+			ks := load(ctx)
+			Expect(ks.Active).To(Equal(survivor))
+			Expect(ks.Stored).To(HaveKey(fresh), "the KEK is added, inactive, as without the flag")
+		})
+
+		It("needs the ID of the KEK to add, refuses an ID in use, and stops while a held KEK does not unwrap", func(ctx SpecContext) {
+			seed(ctx, lost, survivor)
+			Expect(recover("").Run(ctx)).To(MatchError(ContainSubstring("needs the ID of the KEK to add")))
+			Expect(recover(survivor).Run(ctx)).To(MatchError(ContainSubstring("IDs are never reused")))
+
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, secret, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			dead := secretstore.StoredKEK{Backend: secretstoretest.FakeKMSBackend, KeyID: "koinon-test", Wrapped: []byte("not wrapped by anything")}
+			raw, err := dead.Encode()
+			Expect(err).NotTo(HaveOccurred())
+			sec.Data["kek-20260301-dddd"] = raw
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(recover(fresh).Run(ctx)).To(MatchError(ContainSubstring("remove the entries of the KEKs that cannot be unwrapped")))
+			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")
+		})
+	})
+
 	It("reports a KEK that is already there even while the KMS is down, and fails to add one", func(ctx SpecContext) {
 		Expect(job(true, "kek-20261103-bbbb", none).Run(ctx)).To(Succeed())
 		kms.Down.Store(true)

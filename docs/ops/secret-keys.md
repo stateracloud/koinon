@@ -59,6 +59,24 @@ kubectl -n koinon exec deploy/koinon-api -- koinon-api keys export > koinon-kek-
 KEK that gives its fingerprint (also in `keys status`), so you can tell which backup holds which key.
 Restore it with `kubectl -n <namespace> apply -f koinon-kek-backup.yaml`.
 
+**Check that the backup holds the active KEK.** The export is a snapshot: a `keys add` and
+`keys activate` after it makes a backup that cannot open the values sealed since. After each export,
+compare the fingerprints. `keys status` prints the active KEK's, and the export names it on a comment line:
+
+```sh
+kubectl -n koinon exec deploy/koinon-api -- koinon-api keys status
+grep fingerprint koinon-kek-backup.yaml
+```
+
+The active KEK's ID and fingerprint must be in the file, and `active` in it must name that ID. Koinon
+does not check this for you: there is no metric that compares the latest backup with the live key
+set. Add the comparison to whatever job takes your backups.
+
+**The export works the same in every database mode** (`standalone`, `cnpg`, `external`;
+[ADR 0076](../adr/0076-database-modes.md)): `keys export` reads the KEK Secret through the Kubernetes API
+and does not touch the database. The Secret is not part of any database backup, so back it up by
+itself in every mode: Koinon's chart renders no job that copies it next to a database dump.
+
 Keep the file with your other secrets, apart from the database backups. **A database backup needs the
 KEKs that wrapped it.** Keep every KEK, including retired ones, for as long as a database backup that
 used it exists. Retiring a KEK removes it from the Secret, not from your escrow. If every copy of a KEK
@@ -75,7 +93,14 @@ copy: your escrow, an older `keys export`, another cluster restored from the sam
 with `kubectl apply` and nothing is lost. If the KEK was just deleted from the Secret by accident, the
 running koinon-api pods may still hold it in memory for about a minute (they reload the Secret every
 minute), but they cannot export it: only your escrow brings it back, so check it before you go on.
-Only when no copy exists anywhere, give it up:
+Only when no copy exists anywhere, give it up. **Know what it costs:** every credential the KEK
+sealed (provider and cost keys, connection secrets, MCP server credentials, trace destination
+credentials) must be entered again, and **every home checkpoint of an agent whose kopia repository
+password the KEK sealed is gone**: that password exists only in `home_repositories.password_envelope`
+(and `home_repository_epochs.password_envelope`), sealed by the KEK, so without the KEK the repository
+cannot be opened by anyone. If the lost KEK was the active one and the Secret now has no usable
+`active` entry, `keys forget` cannot run yet: see
+[Recovering from a lost KMS key](#recovering-from-a-lost-kms-key) (or its local-install paragraph).
 
 ```sh
 kubectl -n koinon exec -it deploy/koinon-api -- koinon-api keys forget <kek-id>
@@ -198,7 +223,10 @@ can already open every DEK they copied. Do this, in this order:
    **2b. Replace the agents' home repositories.** The KEK opens each agent's kopia repository
    password, and kopia derives the repository's master key from it once: re-sealing the password
    (step 2) or changing it in kopia does not revoke what was copied, and with the checkpoint bucket's
-   S3 key whoever holds it reads every saved home. So each agent gets a new repository, and the
+   S3 key whoever holds it reads every saved home. `keys reencrypt` keeps every
+   repository password the same; Koinon has no command that changes a repository's password in place.
+   The only way to change it is `keys new-repositories`: a new repository under a new random password
+   (step 2), with the newest checkpoint copied over. So each agent gets a new repository, and the
    bucket a new key, in this order:
 
    1. Issue a new access key for the checkpoint bucket at your S3 provider. Put it in the Secret
@@ -419,14 +447,77 @@ destination credentials included.
 - Before you retire a KMS key, move the KEKs to a new key (add with the new key, activate, rewrap,
   retire) and keep the old key until `keys status` lists no KEK wrapped by it.
 - Once the key is gone for good, koinon-api cannot load the key set: it fails when any one KEK does
-  not unwrap, so it does not start and `keys forget` cannot run. Remove the entries of the KEKs that
-  key wrapped from the KEK Secret first (keep a copy of the Secret), then `keys forget` each of them.
-  If the active KEK is among them, the key set has no active KEK left and does not load; that
-  procedure is not written yet
-  ([#255](https://github.com/stateracloud/koinon/issues/255)), so stop there.
+  not unwrap, so it does not start and `keys forget` cannot run. See
+  [Recovering from a lost KMS key](#recovering-from-a-lost-kms-key).
 
 A local install has none of this: no key-admin Job, and koinon-api creates and adds KEKs exactly as
 before.
+
+### Recovering from a lost KMS key
+
+Use this when the KMS key is gone for good and no copy of the KEKs it wrapped exists anywhere (a
+KEK Secret backup holds only their ciphertext, so it does not help). If the key can still be brought
+back (an AWS deletion that is only pending, a transit key restored from an OpenBao snapshot), do that
+instead: nothing is lost. What you lose is what [A lost KEK](#a-lost-kek) lists: provider, connection,
+MCP server and trace credentials (people enter them again), saved work, and every home checkpoint
+whose kopia repository password the KEK sealed (the password exists nowhere else).
+
+The hard case is a lost key that wrapped the **active** KEK. koinon-api needs an active KEK to start,
+and once the dead entries are out of the Secret `active` names a KEK that is not there, so the key set
+does not load and `keys add`, `keys activate` and `keys forget` all fail on it. The key-admin Job is
+the identity that may encrypt with the KMS, so it adds the new KEK and makes it active:
+
+1. **Keep a copy of the Secret**, then find which KEKs the lost key wrapped. This prints each
+   wrapped KEK's ID and its wrapping key, never the key material (a local KEK is not shown):
+
+   ```sh
+   kubectl -n koinon get secret koinon-kek -o yaml > koinon-kek-before-recovery.yaml
+   kubectl -n koinon get secret koinon-kek -o json | jq -r '.data | to_entries[] | select(.key != "active")
+     | .key as $id | (.value | @base64d) | select(startswith("{")) | fromjson | "\($id) \(.backend):\(.key)"'
+   ```
+
+2. **Remove the entries of those KEKs** from the Secret, and leave `active` as it is. Every KEK that
+   stays must still unwrap (a local KEK, or one wrapped by a key that answers): the Job stops with the
+   unwrap error otherwise.
+
+   ```sh
+   kubectl -n koinon patch secret koinon-kek --type=json \
+     -p '[{"op":"remove","path":"/data/<kek-id>"}]'
+   ```
+
+3. **Point Koinon at a working KMS key** (a new transit key, or a new AWS key, set up as in the
+   sections below; the chart settings of the new key replace the old ones) and run the Job with a new
+   KEK ID (`kek-YYYYMMDD-xxxx`) and recovery on:
+
+   ```yaml
+   secrets:
+     kek:
+       kms:
+         keyAdmin:
+           addKey: kek-20261106-a1b2   # a new ID: IDs are never reused
+           activateIfNoActive: true
+   ```
+
+   The Job adds the KEK, wrapped by the new key and bound to the install, and makes it active in the
+   same write, but only when `active` is missing or names a KEK the Secret does not hold. If the
+   Secret has a working active KEK it adds the KEK inactive, as without the flag, and changes nothing
+   else. It is safe to run twice. Set `activateIfNoActive` back to `false` afterwards.
+4. **Wait for koinon-api and the reconciler to start** (they reload the Secret at least once a minute),
+   then back it up: `keys export`. `keys status` now lists the removed KEKs as MISSING and the new
+   one as active.
+5. **Give up the lost KEKs**, one command each, as in [A lost KEK](#a-lost-kek):
+
+   ```sh
+   kubectl -n koinon exec -it deploy/koinon-api -- koinon-api keys forget <kek-id>
+   ```
+
+   New home repositories and sealed values use the new active KEK from here on.
+
+On a **local** install (no KMS, no key-admin Job) there is no such Job. If the active KEK's entry was
+lost from the Secret and no copy exists, add a new local KEK to the Secret by hand (an ID like
+`kek-20261106-a1b2` whose value is the base64 of 32 random bytes, for example
+`head -c 32 /dev/urandom | base64`), set `active` to it, and then run `keys forget` for the lost one.
+Back the Secret up (`keys export`) as soon as the pods are running again.
 
 ### The install binding (koinon-private#615)
 

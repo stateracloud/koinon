@@ -27,6 +27,11 @@ has "key-admin Job binds the old KEKs when asked (koinon-private#615)" '^       
 	--set secrets.kek.kms.keyAdmin.rewrapUnbound=true
 has "key-admin Job adds the asked-for KEK" '"--add-key=kek-20261103-aaaa"' "${ka[@]}" "${kms[@]}" \
 	--set secrets.kek.kms.keyAdmin.addKey=kek-20261103-aaaa
+# Recovery from a lost KMS key that wrapped the active KEK (issue #255): opt-in, with an ID to add.
+lacks "key-admin Job activates nothing unless asked (issue #255)" 'activate-if-no-active' "${ka[@]}" "${kms[@]}" \
+	--set secrets.kek.kms.keyAdmin.addKey=kek-20261103-aaaa
+has "key-admin Job makes the added KEK active when there is none (issue #255)" '^            - --activate-if-no-active$' "${ka[@]}" "${kms[@]}" \
+	--set secrets.kek.kms.keyAdmin.addKey=kek-20261103-aaaa --set secrets.kek.kms.keyAdmin.activateIfNoActive=true
 ka_out=$(render "${ka[@]}" "${kms[@]}")
 grep -Fq -- 'resourceNames: [koinon-kek]' <<<"$ka_out" || fail "key-admin Role is limited to the KEK Secret by name"
 grep -Fq -- 'verbs: [get, update]' <<<"$ka_out" || fail "key-admin Role reads and updates the KEK Secret"

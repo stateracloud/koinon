@@ -24,6 +24,25 @@ const ActiveFile = "active"
 // ParseKeySet parses the data of the KEK Secret: files named by KEK ID with
 // stored KEKs, plus ActiveFile. It unwraps nothing ([Wrappers.UnwrapAll]).
 func ParseKeySet(data map[string][]byte) (keys map[string]StoredKEK, active string, err error) {
+	keys, active, err = ParseStoredKeys(data)
+	if err != nil {
+		return nil, "", err
+	}
+	if active == "" {
+		return nil, "", fmt.Errorf("no %q entry naming the active key-encryption key", ActiveFile)
+	}
+	if _, ok := keys[active]; !ok {
+		return nil, "", fmt.Errorf("the active key-encryption key %q is not among the keys", active)
+	}
+	return keys, active, nil
+}
+
+// ParseStoredKeys parses the data of the KEK Secret like [ParseKeySet] but does not require the
+// active entry to exist or to name a KEK of the Secret: active is returned as the Secret holds it,
+// possibly empty or naming a KEK that is gone. Only recovery from a lost active KEK uses it (the
+// key-admin Job, issue #255); everything that serves values goes through ParseKeySet, which
+// refuses such a key set.
+func ParseStoredKeys(data map[string][]byte) (keys map[string]StoredKEK, active string, err error) {
 	keys = map[string]StoredKEK{}
 	var errs []error
 	for name, v := range data {
@@ -47,12 +66,6 @@ func ParseKeySet(data map[string][]byte) (keys map[string]StoredKEK, active stri
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, "", err
-	}
-	if active == "" {
-		return nil, "", fmt.Errorf("no %q entry naming the active key-encryption key", ActiveFile)
-	}
-	if _, ok := keys[active]; !ok {
-		return nil, "", fmt.Errorf("the active key-encryption key %q is not among the keys", active)
 	}
 	return keys, active, nil
 }
