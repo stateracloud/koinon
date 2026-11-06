@@ -154,43 +154,57 @@ func (p Passwords) NewEpoch(ctx context.Context, org, agent pgtype.UUID, reason 
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 	r, ok, err := p.NewEpochIn(ctx, p.Q.WithTx(tx), org, agent, reason, retain)
 	if err != nil || !ok {
-		return r, ok, err
+		return r.Repository, ok, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Repository{}, false, err
 	}
-	return r, true, nil
+	return r.Repository, true, nil
+}
+
+// StartedEpoch is a repository epoch that [Passwords.NewEpochIn] started.
+type StartedEpoch struct {
+	Repository
+	// Replaced is the epoch it replaced, now retired. It is not always Epoch - 1: an epoch whose
+	// prefix holds a repository the database has no password for is skipped (#262).
+	Replaced int32
 }
 
 // NewEpochIn is [Passwords.NewEpoch] with q, inside the caller's transaction, so that a caller
 // (koinon-api keys forget) can mark the old password lost, start the new epoch and audit both
-// at once.
-func (p Passwords) NewEpochIn(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, reason string, retain time.Duration) (Repository, bool, error) {
+// at once. The new epoch is the current one + 1, or the agent's next_epoch_at_least when that is
+// higher: koinon-agentd raises it when it finds that the next prefixes already hold repositories
+// (after a database restore, ones started after the dump).
+func (p Passwords) NewEpochIn(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, reason string, retain time.Duration) (StartedEpoch, bool, error) {
 	if reason != ReasonKeyLost && reason != ReasonKeyCompromised {
-		return Repository{}, false, fmt.Errorf("checkpoint: unknown repository epoch reason %q", reason)
+		return StartedEpoch{}, false, fmt.Errorf("checkpoint: unknown repository epoch reason %q", reason)
 	}
-	if _, err := q.LockHomeRepository(ctx, store.LockHomeRepositoryParams{OrgID: org, AgentID: agent}); errors.Is(err, pgx.ErrNoRows) {
-		return Repository{}, false, nil
+	home, err := q.LockHomeRepository(ctx, store.LockHomeRepositoryParams{OrgID: org, AgentID: agent})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return StartedEpoch{}, false, nil
 	} else if err != nil {
-		return Repository{}, false, err
+		return StartedEpoch{}, false, err
 	}
 	var cur int32
 	if e, err := q.LatestHomeRepositoryEpoch(ctx, store.LatestHomeRepositoryEpochParams{OrgID: org, AgentID: agent}); err == nil {
 		cur = e.RepositoryEpoch
 	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return Repository{}, false, err
+		return StartedEpoch{}, false, err
 	}
 	next := cur + 1
+	if home.NextEpochAtLeast.Valid {
+		next = max(next, home.NextEpochAtLeast.Int32)
+	}
 	pw, env, err := p.seal(org, agent, next)
 	if err != nil {
-		return Repository{}, false, err
+		return StartedEpoch{}, false, err
 	}
 	row, err := q.InsertHomeRepositoryEpoch(ctx, store.InsertHomeRepositoryEpochParams{
 		OrgID: org, AgentID: agent, RepositoryEpoch: next, Prefix: EpochPrefix(org.String(), agent.String(), next),
 		PasswordEnvelope: env, Reason: reason,
 	})
 	if err != nil {
-		return Repository{}, false, err
+		return StartedEpoch{}, false, err
 	}
 	deadline := pgtype.Timestamptz{Time: time.Now().Add(retain), Valid: true}
 	if cur == 0 {
@@ -199,9 +213,9 @@ func (p Passwords) NewEpochIn(ctx context.Context, q *store.Queries, org, agent 
 		_, err = q.RetireHomeRepositoryEpoch(ctx, store.RetireHomeRepositoryEpochParams{OrgID: org, AgentID: agent, RepositoryEpoch: cur, DeleteAfter: deadline})
 	}
 	if err != nil {
-		return Repository{}, false, err
+		return StartedEpoch{}, false, err
 	}
-	return Repository{Epoch: next, Prefix: row.Prefix, Password: pw}, true, nil
+	return StartedEpoch{Repository: Repository{Epoch: next, Prefix: row.Prefix, Password: pw}, Replaced: cur}, true, nil
 }
 
 func (p Passwords) open(org, agent pgtype.UUID, epoch int32, prefix string, raw []byte) (Repository, error) {
