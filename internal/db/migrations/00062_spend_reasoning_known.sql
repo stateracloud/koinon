@@ -8,10 +8,10 @@
 -- v1.7.0's Messages path never reads it, so every Claude request on Messages logged none.
 --
 -- - spend_entries.reasoning_known: true when the gateway logged the split (koinon.reasoning) or a
---   settlement took it from the provider's record (OpenRouter's native_tokens_reasoning), false
---   when neither did, so reasoning_tokens is 0 for want of a figure. NULL for entries written
---   before this migration, or by a binary of the same minor line that predates it: those read as
---   known when reasoning_tokens > 0, the rule the spend report used until now.
+--   settlement took it from the provider's record (OpenRouter's native_tokens_reasoning, when
+--   above 0), false when neither did, so reasoning_tokens is 0 for want of a figure. NULL for
+--   entries written before this migration, or by a binary of the same minor line that predates
+--   it: those read as known when reasoning_tokens > 0, the rule the spend report used until now.
 --
 -- Expand only (ADR 0085): one new nullable column; reasoning_tokens is unchanged.
 
