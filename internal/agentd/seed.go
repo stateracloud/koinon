@@ -12,9 +12,11 @@ package agentd
 // without a sandbox. The copy is recorded as a checkpoint of the new epoch with the source's times,
 // so it is no newer a home than the source; the sweeper's guard then lets the old repository go.
 //
-// A seed is claimed with a lease, like a checkpoint request, and tried up to Checkpoints.Attempts
-// times with a growing delay, each try falling back to older checkpoints (RestoreFallbacks) when
-// the newest does not copy. When every try fails the seed is given up (seed_failed_at, audited):
+// A seed is claimed with a lease that covers a whole try (seedBudget, as a sandbox restore's claim
+// covers its tries), and tried up to Checkpoints.Attempts times with a growing delay, each try
+// falling back to older checkpoints (RestoreFallbacks) when the newest does not copy. A try's
+// outcome is recorded only under its own claim (seed_attempts): a writer whose lease ran out, and
+// whose seed another claimed since, changes nothing. Seeds hold at most Concurrency-1 backup slots. When every try fails the seed is given up (seed_failed_at, audited):
 // the old repository is kept, because nothing newer holds the agent's home.
 
 import (
@@ -23,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -40,8 +43,8 @@ const (
 )
 
 // seedTick claims the seeds that are due, each in a backup slot (a seed stages a home on the
-// scratch disk as a backup does), and sets the seed gauge.
-func (p *Pool) seedTick(ctx context.Context, slots chan struct{}, wg *sync.WaitGroup) {
+// scratch disk as a backup does) and one of the seeds' own slots, and sets the seed gauge.
+func (p *Pool) seedTick(ctx context.Context, slots, seeds chan struct{}, wg *sync.WaitGroup) {
 	orgs, err := p.q.ListOrgIDs(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -62,7 +65,7 @@ func (p *Pool) seedTick(ctx context.Context, slots chan struct{}, wg *sync.WaitG
 			pending += n.Pending
 			failed += n.Failed
 		}
-		p.claimSeeds(ctx, org, slots, wg)
+		p.claimSeeds(ctx, org, slots, seeds, wg)
 	}
 	if counted {
 		p.cfg.Metrics.HomeRepositorySeeds.WithLabelValues("pending").Set(float64(pending))
@@ -70,43 +73,66 @@ func (p *Pool) seedTick(ctx context.Context, slots chan struct{}, wg *sync.WaitG
 	}
 }
 
-// claimSeeds starts the org's due seeds while a backup slot is free; the next tick takes the rest.
-func (p *Pool) claimSeeds(ctx context.Context, org pgtype.UUID, slots chan struct{}, wg *sync.WaitGroup) {
-	lease := int32(p.cfg.Checkpoints.Lease.Seconds())
+// seedBudget bounds one try of a seed: a copy of each checkpoint it may fall back to, each within
+// Timeout, the waits for a restore slot included.
+func (c *Checkpoints) seedBudget() time.Duration {
+	return c.Timeout * time.Duration(1+c.RestoreFallbacks)
+}
+
+// claimSeeds starts the org's due seeds while a seed slot and a backup slot are free; the next tick
+// takes the rest.
+func (p *Pool) claimSeeds(ctx context.Context, org pgtype.UUID, slots, seeds chan struct{}, wg *sync.WaitGroup) {
+	c := p.cfg.Checkpoints
+	// The try's budget and a Timeout more to record its outcome, as a sandbox restore's claim.
+	lease := int32((c.seedBudget() + c.Timeout).Seconds())
 	for {
+		select {
+		case seeds <- struct{}{}:
+		default:
+			return // as many seeds as may run at once
+		}
 		select {
 		case slots <- struct{}{}:
 		default:
+			<-seeds
 			return // all writers busy
 		}
 		e, err := p.q.ClaimHomeRepositorySeed(ctx, store.ClaimHomeRepositorySeedParams{OrgID: org, LeaseSeconds: lease})
 		if err != nil {
 			<-slots
+			<-seeds
 			if !errors.Is(err, pgx.ErrNoRows) && ctx.Err() == nil {
 				p.log.Warn("repository seeds: claiming a seed failed", "err", err)
 			}
 			return
 		}
 		wg.Go(func() {
-			defer func() { <-slots }()
+			defer func() { <-slots; <-seeds }()
 			// A panic is logged; the seed's lease runs out and it is tried again.
 			safego.Do(p.log, "seed-repository", func() { p.seedRepository(ctx, e) })
 		})
 	}
 }
 
-// errSeedSuperseded: a later repository epoch started while the seed ran; that one is seeded.
-var errSeedSuperseded = errors.New("a later repository epoch started")
+var (
+	// errSeedSuperseded: a later repository epoch started while the seed ran; that one is seeded.
+	errSeedSuperseded = errors.New("a later repository epoch started")
+	// errSeedClaimLost: the try outlived its lease and the seed was claimed again since; the
+	// later claim records the outcome.
+	errSeedClaimLost = errors.New("the seed was claimed again")
+)
 
 // seedRepository does one claimed seed and records the outcome.
 func (p *Pool) seedRepository(ctx context.Context, e store.HomeRepositoryEpoch) {
 	c := p.cfg.Checkpoints
 	log := p.log.With("agent", e.AgentID.String(), "repository_epoch", e.RepositoryEpoch, "attempt", e.SeedAttempts)
-	src, seeded, err := p.copyNewestHome(ctx, e)
+	tctx, cancel := context.WithTimeout(ctx, c.seedBudget())
+	src, seeded, err := p.copyNewestHome(tctx, e)
+	cancel()
 	if ctx.Err() != nil {
 		return // shutting down: the lease runs out and another replica takes the seed over
 	}
-	key := store.CompleteHomeRepositorySeedParams{OrgID: e.OrgID, AgentID: e.AgentID, RepositoryEpoch: e.RepositoryEpoch}
+	key := store.CompleteHomeRepositorySeedParams{OrgID: e.OrgID, AgentID: e.AgentID, RepositoryEpoch: e.RepositoryEpoch, SeedAttempts: e.SeedAttempts}
 	if err == nil {
 		err = pgx.BeginFunc(ctx, p.db, func(tx pgx.Tx) error {
 			q := p.q.WithTx(tx)
@@ -127,7 +153,7 @@ func (p *Pool) seedRepository(ctx context.Context, e store.HomeRepositoryEpoch) 
 			if n, err := q.CompleteHomeRepositorySeed(ctx, key); err != nil {
 				return err
 			} else if n != 1 {
-				return errSeedSuperseded
+				return whySeedNotRecorded(ctx, q, e)
 			}
 			return audit.RecordErr(ctx, q, audit.Event{
 				Org: e.OrgID, Actor: audit.System(), Action: SeededAction, TargetKind: "agent", TargetID: e.AgentID.String(), After: after,
@@ -145,6 +171,10 @@ func (p *Pool) seedRepository(ctx context.Context, e store.HomeRepositoryEpoch) 
 			log.Info("home repository seed dropped: a later repository epoch started, and that one is seeded")
 			return
 		}
+		if errors.Is(err, errSeedClaimLost) {
+			log.Warn("home repository seed: the try outlived its lease and the seed was claimed again; its copy is not recorded")
+			return
+		}
 		log.Warn("recording a home repository seed failed", "err", err)
 		// Not recorded: the copy is made again on the next try; its snapshot is left unreferenced.
 	}
@@ -154,28 +184,48 @@ func (p *Pool) seedRepository(ctx context.Context, e store.HomeRepositoryEpoch) 
 		log.Error("home repository seed failed; the old repository is kept (see koinon_agentd_home_repository_seeds)", "err", msg)
 		if err := pgx.BeginFunc(ctx, p.db, func(tx pgx.Tx) error {
 			q := p.q.WithTx(tx)
-			if _, err := q.FailHomeRepositorySeed(ctx, store.FailHomeRepositorySeedParams{
-				OrgID: e.OrgID, AgentID: e.AgentID, RepositoryEpoch: e.RepositoryEpoch, Error: pgtype.Text{String: msg, Valid: true},
+			if n, err := q.FailHomeRepositorySeed(ctx, store.FailHomeRepositorySeedParams{
+				OrgID: e.OrgID, AgentID: e.AgentID, RepositoryEpoch: e.RepositoryEpoch, SeedAttempts: e.SeedAttempts,
+				Error: pgtype.Text{String: msg, Valid: true},
 			}); err != nil {
 				return err
+			} else if n != 1 {
+				return whySeedNotRecorded(ctx, q, e)
 			}
 			return audit.RecordErr(ctx, q, audit.Event{
 				Org: e.OrgID, Actor: audit.System(), Action: SeedFailedAction, TargetKind: "agent", TargetID: e.AgentID.String(),
 				After: map[string]any{"repositoryEpoch": e.RepositoryEpoch, "attempts": e.SeedAttempts, "error": msg},
 			})
-		}); err != nil {
+		}); errors.Is(err, errSeedSuperseded) || errors.Is(err, errSeedClaimLost) {
+			log.Warn("home repository seed: not recorded as given up", "why", err)
+		} else if err != nil {
 			log.Warn("recording a failed home repository seed failed", "err", err)
 		}
 		return
 	}
 	delay := c.Retry << (e.SeedAttempts - 1)
 	log.Warn("home repository seed attempt failed; trying again", "err", msg, "in", delay)
-	if _, err := p.q.ReleaseHomeRepositorySeed(ctx, store.ReleaseHomeRepositorySeedParams{
-		OrgID: e.OrgID, AgentID: e.AgentID, RepositoryEpoch: e.RepositoryEpoch,
+	if n, err := p.q.ReleaseHomeRepositorySeed(ctx, store.ReleaseHomeRepositorySeedParams{
+		OrgID: e.OrgID, AgentID: e.AgentID, RepositoryEpoch: e.RepositoryEpoch, SeedAttempts: e.SeedAttempts,
 		Error: pgtype.Text{String: msg, Valid: true}, DelaySeconds: int32(delay.Seconds()),
 	}); err != nil {
 		log.Warn("releasing a home repository seed failed", "err", err)
+	} else if n != 1 {
+		log.Warn("home repository seed: not released for a retry", "why", whySeedNotRecorded(ctx, p.q, e))
 	}
+}
+
+// whySeedNotRecorded says why a seed's outcome matched no row: a later epoch superseded it, or
+// another claim holds it (or recorded it already).
+func whySeedNotRecorded(ctx context.Context, q *store.Queries, e store.HomeRepositoryEpoch) error {
+	r, err := q.GetHomeRepositoryEpoch(ctx, store.GetHomeRepositoryEpochParams{OrgID: e.OrgID, AgentID: e.AgentID, RepositoryEpoch: e.RepositoryEpoch})
+	if err != nil {
+		return fmt.Errorf("reading the seed: %w", err)
+	}
+	if r.RetiredAt.Valid {
+		return errSeedSuperseded
+	}
+	return errSeedClaimLost
 }
 
 // copyNewestHome copies the agent's newest restorable checkpoint into the repository of epoch e

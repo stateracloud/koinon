@@ -69,7 +69,7 @@ type Checkpoints struct {
 	// 10 minutes).
 	Sweep time.Duration
 	// Lease is how long a running request is left to its writer before another takes it over
-	// (default 20 minutes).
+	// (default 20 minutes). It must be longer than Timeout.
 	Lease time.Duration
 	// Timeout bounds one backup or restore attempt (default 15 minutes).
 	Timeout time.Duration
@@ -121,13 +121,16 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	slots := make(chan struct{}, c.Concurrency)
+	// Seeds hold at most Concurrency-1 of the backup slots (at least one), so that after keys
+	// new-repositories --all the stop and hourly checkpoints still get a writer.
+	seeds := make(chan struct{}, max(1, c.Concurrency-1))
 	var swept time.Time
 	sweeping := make(chan struct{}, 1)
 	for ctx.Err() == nil {
 		// One tick at a time, so a panic is logged and the hourly checkpoints go on.
 		safego.Do(p.log, "checkpoint-tick", func() { p.checkpointTick(ctx, slots, &wg) })
 		// Seeds take the backup slots the requests left free (seed.go).
-		safego.Do(p.log, "seed-tick", func() { p.seedTick(ctx, slots, &wg) })
+		safego.Do(p.log, "seed-tick", func() { p.seedTick(ctx, slots, seeds, &wg) })
 		if now := time.Now(); now.Sub(swept) >= c.Sweep {
 			// Beside the loop: a long sweep (serial blob deletes) must not delay the ticks.
 			// A sweep that is still running means this one is skipped.
@@ -170,6 +173,14 @@ func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync
 			OrgID: org, WaitSeconds: wait, Error: pgtype.Text{String: fmt.Sprintf("the sandbox was not ready to be read within %s", c.SandboxWait), Valid: true},
 		}); err != nil && ctx.Err() == nil {
 			p.log.Warn("checkpoints: failing stale requests failed", "err", err)
+		}
+		// A running request whose writer died is taken over once the sandbox is ready; one whose
+		// sandbox stays not ready (a stopped or archived agent) is failed after the same wait.
+		if _, err := p.q.FailAbandonedHomeCheckpoints(ctx, store.FailAbandonedHomeCheckpointsParams{
+			OrgID: org, LeaseSeconds: int32(c.Lease.Seconds()), WaitSeconds: wait,
+			Error: pgtype.Text{String: fmt.Sprintf("the writer stopped and the sandbox was not ready to be read again within %s", c.SandboxWait), Valid: true},
+		}); err != nil && ctx.Err() == nil {
+			p.log.Warn("checkpoints: failing abandoned requests failed", "err", err)
 		}
 		for {
 			select {
@@ -215,7 +226,9 @@ func (p *Pool) sweepRepositories(ctx context.Context) {
 		}
 	}()
 	for _, org := range orgs {
-		due, err := p.q.ListDueHomeRepositories(ctx, store.ListDueHomeRepositoriesParams{OrgID: org, MaxRows: 50})
+		due, err := p.q.ListDueHomeRepositories(ctx, store.ListDueHomeRepositoriesParams{
+			OrgID: org, LeaseSeconds: int32(p.cfg.Checkpoints.Lease.Seconds()), MaxRows: 50,
+		})
 		if err != nil {
 			if ctx.Err() == nil {
 				p.log.Warn("repository sweep: listing due repositories failed", "err", err)

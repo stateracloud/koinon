@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -38,6 +39,20 @@ func (g gatedStore) Backup(ctx context.Context, prefix, pw string, r io.Reader, 
 		})
 	}
 	return g.HomeStore.Backup(ctx, prefix, pw, r, m)
+}
+
+// flakyStore fails the first fail backups, then writes.
+type flakyStore struct {
+	agentd.HomeStore
+	fail  int32
+	calls atomic.Int32
+}
+
+func (f *flakyStore) Backup(ctx context.Context, prefix, pw string, r io.Reader, m checkpoint.Meta) (checkpoint.Result, error) {
+	if f.calls.Add(1) <= f.fail {
+		return checkpoint.Result{}, errors.New("the bucket was briefly unreachable")
+	}
+	return f.HomeStore.Backup(ctx, prefix, pw, r, m)
 }
 
 // Seeding a new home repository after keys new-repositories (#86, ADR 0085 decision 14).
@@ -72,36 +87,67 @@ var _ = Describe("home repository seeds", func() {
 	//
 	// backup writes a snapshot of files to repository epoch 0 and records it complete, finished ago
 	// before now (ownership epoch 0: no run of the agent has a higher one, so a restore offers it).
-	backup := func(ctx context.Context, files map[string]string, ago time.Duration) store.HomeCheckpoint {
+	backupOf := func(ctx context.Context, agent pgtype.UUID, files map[string]string, ago time.Duration) store.HomeCheckpoint {
 		GinkgoHelper()
-		res, err := writer.Backup(ctx, e0, pw0, tarOf(files), checkpoint.Meta{CheckpointID: "src", Generation: "gen-1"})
+		prefix := checkpoint.Prefix(e.org.String(), agent.String())
+		res, err := writer.Backup(ctx, prefix, pw0, tarOf(files), checkpoint.Meta{CheckpointID: "src", Generation: "gen-1"})
 		Expect(err).NotTo(HaveOccurred())
 		var id pgtype.UUID
 		Expect(db.QueryRow(ctx, `INSERT INTO home_checkpoints (org_id, agent_id, reason, status, snapshot_id, size_bytes, generation, epoch,
 				started_at, finished_at, repository_epoch)
 			VALUES ($1, $2, 'stop', 'complete', $3, 1, 'gen-1', 0, now() - $4::interval, now() - $4::interval, 0) RETURNING id`,
-			e.org, e.agent.ID, res.SnapshotID, ago.String()).Scan(&id)).To(Succeed())
+			e.org, agent, res.SnapshotID, ago.String()).Scan(&id)).To(Succeed())
 		cp, err := q.GetHomeCheckpoint(ctx, store.GetHomeCheckpointParams{OrgID: e.org, ID: id})
 		Expect(err).NotTo(HaveOccurred())
 		return cp
 	}
-	// newRepositories is what keys new-repositories leaves: epoch 0 retired with a deadline of now,
-	// epoch 1 started and waiting for its seed.
-	newRepositories := func(ctx context.Context) {
+	backup := func(ctx context.Context, files map[string]string, ago time.Duration) store.HomeCheckpoint {
 		GinkgoHelper()
-		_, err := db.Exec(ctx, `UPDATE home_repositories SET retired_at = now(), delete_after = now() WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID)
+		return backupOf(ctx, e.agent.ID, files, ago)
+	}
+	// newRepositoriesOf is what keys new-repositories leaves: the agent's current epoch (from)
+	// retired with a deadline of now, the next one started and waiting for its seed.
+	newRepositoriesOf := func(ctx context.Context, agent pgtype.UUID, from int32) {
+		GinkgoHelper()
+		var err error
+		if from == 0 {
+			_, err = db.Exec(ctx, `UPDATE home_repositories SET retired_at = now(), delete_after = now() WHERE org_id = $1 AND agent_id = $2`, e.org, agent)
+		} else {
+			_, err = db.Exec(ctx, `UPDATE home_repository_epochs SET retired_at = now(), delete_after = now() WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = $3`, e.org, agent, from)
+		}
 		Expect(err).NotTo(HaveOccurred())
 		_, err = db.Exec(ctx, `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason, seed_from_epoch, seed_after)
-			VALUES ($1, $2, 1, $3, '{}', 'key_compromised', 0, now())`, e.org, e.agent.ID, e1)
+			VALUES ($1, $2, $3, $4, '{}', 'key_compromised', $5, now())`,
+			e.org, agent, from+1, checkpoint.EpochPrefix(e.org.String(), agent.String(), from+1), from)
 		Expect(err).NotTo(HaveOccurred())
-		current.Store(1)
+		if current.Load() < from+1 {
+			current.Store(from + 1)
+		}
 	}
-	seedRow := func(ctx context.Context) func() store.HomeRepositoryEpoch {
+	newRepositories := func(ctx context.Context) {
+		GinkgoHelper()
+		newRepositoriesOf(ctx, e.agent.ID, 0)
+	}
+	// secondAgent is another agent of the org, with a home repository (epoch 0) and no sandbox: a
+	// seed needs none.
+	secondAgent := func(ctx context.Context) pgtype.UUID {
+		GinkgoHelper()
+		var b pgtype.UUID
+		Expect(db.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'second', 'opencode') RETURNING id`, e.org).Scan(&b)).To(Succeed())
+		_, err := db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope) VALUES ($1, $2, $3, '{}')`,
+			e.org, b, checkpoint.Prefix(e.org.String(), b.String()))
+		Expect(err).NotTo(HaveOccurred())
+		return b
+	}
+	seedRowOf := func(ctx context.Context, agent pgtype.UUID, epoch int32) func() store.HomeRepositoryEpoch {
 		return func() store.HomeRepositoryEpoch {
-			r, err := q.GetHomeRepositoryEpoch(ctx, store.GetHomeRepositoryEpochParams{OrgID: e.org, AgentID: e.agent.ID, RepositoryEpoch: 1})
+			r, err := q.GetHomeRepositoryEpoch(ctx, store.GetHomeRepositoryEpochParams{OrgID: e.org, AgentID: agent, RepositoryEpoch: epoch})
 			Expect(err).NotTo(HaveOccurred())
 			return r
 		}
+	}
+	seedRow := func(ctx context.Context) func() store.HomeRepositoryEpoch {
+		return seedRowOf(ctx, e.agent.ID, 1)
 	}
 	seeded := func(ctx context.Context) func() bool {
 		return func() bool { return seedRow(ctx)().SeededAt.Valid }
@@ -113,18 +159,26 @@ var _ = Describe("home repository seeds", func() {
 			return deleted.Valid
 		}
 	}
+	// inEpoch is the agent's complete checkpoints in one repository epoch.
+	inEpoch := func(ctx context.Context, agent pgtype.UUID, epoch int32) []store.HomeCheckpoint {
+		GinkgoHelper()
+		rows, err := db.Query(ctx, `SELECT id FROM home_checkpoints WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = $3 AND status = 'complete'`,
+			e.org, agent, epoch)
+		Expect(err).NotTo(HaveOccurred())
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[pgtype.UUID])
+		Expect(err).NotTo(HaveOccurred())
+		var out []store.HomeCheckpoint
+		for _, id := range ids {
+			cp, err := q.GetHomeCheckpoint(ctx, store.GetHomeCheckpointParams{OrgID: e.org, ID: id})
+			Expect(err).NotTo(HaveOccurred())
+			out = append(out, cp)
+		}
+		return out
+	}
 	// inEpoch1 is the agent's checkpoints in the new repository.
 	inEpoch1 := func(ctx context.Context) []store.HomeCheckpoint {
 		GinkgoHelper()
-		all, err := q.ListCompleteHomeCheckpoints(ctx, store.ListCompleteHomeCheckpointsParams{OrgID: e.org, AgentID: e.agent.ID, MaxRows: 10})
-		Expect(err).NotTo(HaveOccurred())
-		var out []store.HomeCheckpoint
-		for _, c := range all {
-			if c.RepositoryEpoch == 1 {
-				out = append(out, c)
-			}
-		}
-		return out
+		return inEpoch(ctx, e.agent.ID, 1)
 	}
 	restored := func(ctx context.Context, prefix, pw, snapshot string) string {
 		GinkgoHelper()
@@ -242,18 +296,71 @@ var _ = Describe("home repository seeds", func() {
 		Consistently(deleted0(ctx)).WithTimeout(time.Second).Should(BeFalse(), "nothing newer holds the home")
 		Expect(restored(ctx, e0, pw0, newest.SnapshotID.String)).To(ContainSubstring("newer home"))
 		Expect(seedRow(ctx)().SeedAttempts).To(Equal(int32(2)), "not tried again")
+
+		By("a backup into the new repository holds the home: the old one goes and the seed no longer counts as failed")
+		_, err := db.Exec(ctx, `INSERT INTO home_checkpoints (org_id, agent_id, reason, status, snapshot_id, finished_at, repository_epoch)
+			VALUES ($1, $2, 'hourly', 'complete', 'later', now(), 1)`, e.org, e.agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(gauge("failed")).WithTimeout(5 * time.Second).Should(BeZero())
+		Eventually(deleted0(ctx)).WithTimeout(10 * time.Second).Should(BeTrue())
 	})
 
-	It("keeps the old repository while a backup that opened it runs, and while that backup is the newest home", func(ctx SpecContext) {
-		backup(ctx, map[string]string{"notes/v.md": "v1"}, 2*time.Minute)
-		home.set(map[string]string{"notes/v.md": "v2 (longer)"})
-		sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
-		Expect(err).NotTo(HaveOccurred())
-		running, err := q.RequestHomeCheckpoint(ctx, store.RequestHomeCheckpointParams{
-			OrgID: e.org, AgentID: e.agent.ID, Reason: store.CheckpointReasonStop, SandboxID: sb.SandboxID.String, Generation: sb.HomeGeneration.String,
-		})
-		Expect(err).NotTo(HaveOccurred())
-		gate := gatedStore{HomeStore: writer, id: running.ID.String(), started: make(chan struct{}), release: make(chan struct{}), once: &sync.Once{}}
+	It("tries again after a failed try and then records the seed", func(ctx SpecContext) {
+		newest := backup(ctx, map[string]string{"notes/v.md": "newer home"}, 2*time.Minute)
+		newRepositories(ctx)
+		e.pool("agentd-a", cps(func(c *agentd.Checkpoints) {
+			c.Store = &flakyStore{HomeStore: writer, fail: 1}
+		}))
+
+		Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		r := seedRow(ctx)()
+		Expect(r.SeedAttempts).To(Equal(int32(2)))
+		Expect(r.SeedError.Valid).To(BeFalse(), "the error of the failed try is cleared")
+		copies := inEpoch1(ctx)
+		Expect(copies).To(HaveLen(1))
+		Expect(restored(ctx, e1, pw1, copies[0].SnapshotID.String)).To(ContainSubstring("newer home"))
+		Expect(audited(ctx, agentd.SeededAction)).To(ConsistOf(ContainSubstring(newest.ID.String())))
+		Expect(audited(ctx, agentd.SeedFailedAction)).To(BeEmpty())
+	})
+
+	It("records the seed of an agent that has no checkpoint, with nothing to copy", func(ctx SpecContext) {
+		newRepositories(ctx)
+		e.pool("agentd-a", cps())
+
+		Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Expect(seedRow(ctx)().SeedAttempts).To(Equal(int32(1)))
+		Expect(inEpoch1(ctx)).To(BeEmpty())
+		Expect(audited(ctx, agentd.SeededAction)).To(ConsistOf(And(HavePrefix("system "+e.agent.ID.String()), Not(ContainSubstring("fromCheckpoint")))))
+		Eventually(gauge("pending")).WithTimeout(5 * time.Second).Should(BeZero())
+	})
+
+	It("gives up on one agent's seed and still seeds another's", func(ctx SpecContext) {
+		bad := backup(ctx, map[string]string{"notes/v.md": "corrupt"}, 2*time.Minute)
+		b := secondAgent(ctx)
+		good := backupOf(ctx, b, map[string]string{"notes/v.md": "b's home"}, 2*time.Minute)
+		newRepositories(ctx)
+		newRepositoriesOf(ctx, b, 0)
+		e.pool("agentd-a", cps(func(c *agentd.Checkpoints) {
+			c.Store = failingStore{HomeStore: writer, failRestore: bad.SnapshotID.String}
+		}))
+
+		Eventually(func() bool { return seedRow(ctx)().SeedFailedAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(func() bool { return seedRowOf(ctx, b, 1)().SeededAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
+		Expect(inEpoch1(ctx)).To(BeEmpty())
+		copies := inEpoch(ctx, b, 1)
+		Expect(copies).To(HaveLen(1))
+		Expect(restored(ctx, checkpoint.EpochPrefix(e.org.String(), b.String(), 1), pw1, copies[0].SnapshotID.String)).To(ContainSubstring("b's home"))
+		Expect(audited(ctx, agentd.SeededAction)).To(ConsistOf(And(HavePrefix("system "+b.String()), ContainSubstring(good.ID.String()))))
+		Expect(audited(ctx, agentd.SeedFailedAction)).To(ConsistOf(HavePrefix("system " + e.agent.ID.String())))
+		Eventually(gauge("failed")).WithTimeout(5 * time.Second).Should(Equal(1.0))
+		Expect(gauge("pending")()).To(BeZero())
+		Consistently(deleted0(ctx)).WithTimeout(time.Second).Should(BeFalse(), "the agent whose seed failed keeps its old repository")
+	})
+
+	It("drops a seed superseded by a later new-repositories run and seeds the later epoch", func(ctx SpecContext) {
+		src := backup(ctx, map[string]string{"notes/v.md": "the home"}, 2*time.Minute)
+		newRepositories(ctx)
+		gate := gatedStore{HomeStore: writer, id: src.ID.String(), started: make(chan struct{}), release: make(chan struct{}), once: &sync.Once{}}
 		DeferCleanup(func() {
 			select {
 			case <-gate.release:
@@ -264,39 +371,136 @@ var _ = Describe("home repository seeds", func() {
 		e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Store = gate }))
 		Eventually(gate.started).WithTimeout(20 * time.Second).Should(BeClosed())
 
-		By("the repository epoch changes while the backup, into epoch 0, runs: the seed copies v1")
-		newRepositories(ctx)
-		Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
-		Expect(restored(ctx, e1, pw1, inEpoch1(ctx)[0].SnapshotID.String)).To(ContainSubstring("v1"))
-		Consistently(deleted0(ctx)).WithTimeout(time.Second).Should(BeFalse(), "a checkpoint of the agent is running")
-
-		By("the backup finishes into epoch 0: its home is newer than the copy, so epoch 0 is kept")
+		By("keys new-repositories runs again while epoch 1's seed copies")
+		newRepositoriesOf(ctx, e.agent.ID, 1)
 		close(gate.release)
-		Eventually(func() store.CheckpointStatus {
-			cp, err := q.GetHomeCheckpoint(ctx, store.GetHomeCheckpointParams{OrgID: e.org, ID: running.ID})
-			Expect(err).NotTo(HaveOccurred())
-			return cp.Status
-		}).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
-		done, err := q.GetHomeCheckpoint(ctx, store.GetHomeCheckpointParams{OrgID: e.org, ID: running.ID})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(done.RepositoryEpoch).To(BeZero())
-		Consistently(deleted0(ctx)).WithTimeout(time.Second).Should(BeFalse())
-		Expect(restored(ctx, e0, pw0, done.SnapshotID.String)).To(ContainSubstring("v2 (longer)"))
+		Eventually(func() bool { return seedRowOf(ctx, e.agent.ID, 2)().SeededAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
+		Expect(seedRow(ctx)().SeededAt.Valid).To(BeFalse(), "epoch 1 was superseded")
+		Expect(inEpoch1(ctx)).To(BeEmpty(), "its copy is not recorded")
+		copies := inEpoch(ctx, e.agent.ID, 2)
+		Expect(copies).To(HaveLen(1))
+		Expect(copies[0].FinishedAt.Time).To(BeTemporally("==", src.FinishedAt.Time))
+		Expect(restored(ctx, checkpoint.EpochPrefix(e.org.String(), e.agent.ID.String(), 2), pw0+"-2", copies[0].SnapshotID.String)).To(ContainSubstring("the home"))
+		Expect(audited(ctx, agentd.SeededAction)).To(ConsistOf(ContainSubstring(`"repositoryEpoch": 2`)))
 
-		By("the next backup goes to epoch 1: epoch 0 goes")
-		home.set(map[string]string{"notes/v.md": "v3 (longest yet)"})
-		next, err := q.RequestHomeCheckpoint(ctx, store.RequestHomeCheckpointParams{
+		By("both older repositories go")
+		Eventually(deleted0(ctx)).WithTimeout(10 * time.Second).Should(BeTrue())
+		Eventually(func() bool { return seedRow(ctx)().DeletedAt.Valid }).WithTimeout(10 * time.Second).Should(BeTrue())
+	})
+
+	It("records nothing for a try that outlived its claim, and the later claim seeds", func(ctx SpecContext) {
+		src := backup(ctx, map[string]string{"notes/v.md": "the home"}, 2*time.Minute)
+		newRepositories(ctx)
+		gate := gatedStore{HomeStore: writer, id: src.ID.String(), started: make(chan struct{}), release: make(chan struct{}), once: &sync.Once{}}
+		DeferCleanup(func() {
+			select {
+			case <-gate.release:
+			default:
+				close(gate.release)
+			}
+		})
+		e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Store = gate }))
+		Eventually(gate.started).WithTimeout(20 * time.Second).Should(BeClosed())
+
+		By("another writer claims the seed while this try runs (its lease ran out)")
+		_, err := db.Exec(ctx, `UPDATE home_repository_epochs SET seed_attempts = seed_attempts + 1, seed_after = now() + interval '1 hour'
+			WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = 1`, e.org, e.agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+		close(gate.release)
+		Consistently(seeded(ctx)).WithTimeout(2 * time.Second).Should(BeFalse())
+		Expect(inEpoch1(ctx)).To(BeEmpty(), "the stale try's copy is not recorded")
+		r := seedRow(ctx)()
+		Expect(r.SeedAttempts).To(Equal(int32(2)))
+		Expect(r.SeedError.Valid || r.SeedFailedAt.Valid).To(BeFalse(), "nor released or given up under the later claim")
+		Expect(audited(ctx, agentd.SeededAction)).To(BeEmpty())
+
+		By("the later claim's lease runs out too: the next try records the seed")
+		_, err = db.Exec(ctx, `UPDATE home_repository_epochs SET seed_after = now() WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = 1`, e.org, e.agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Expect(seedRow(ctx)().SeedAttempts).To(Equal(int32(3)))
+		Expect(inEpoch1(ctx)).To(HaveLen(1))
+	})
+
+	It("leaves a backup slot to the checkpoints while seeds run", func(ctx SpecContext) {
+		src := backup(ctx, map[string]string{"notes/v.md": "the home"}, 2*time.Minute)
+		b := secondAgent(ctx)
+		backupOf(ctx, b, map[string]string{"notes/v.md": "b's home"}, 2*time.Minute)
+		newRepositories(ctx)
+		newRepositoriesOf(ctx, b, 0)
+		// b's seed is due later, so the first seed claimed is the gated one.
+		_, err := db.Exec(ctx, `UPDATE home_repository_epochs SET seed_after = now() + interval '1 second' WHERE org_id = $1 AND agent_id = $2`, e.org, b)
+		Expect(err).NotTo(HaveOccurred())
+		gate := gatedStore{HomeStore: writer, id: src.ID.String(), started: make(chan struct{}), release: make(chan struct{}), once: &sync.Once{}}
+		DeferCleanup(func() {
+			select {
+			case <-gate.release:
+			default:
+				close(gate.release)
+			}
+		})
+		e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Store = gate; c.Concurrency = 2 }))
+		Eventually(gate.started).WithTimeout(20 * time.Second).Should(BeClosed())
+
+		By("with 2 writers, one seed runs at a time: b's waits, and a stop checkpoint gets the other writer")
+		Consistently(func() int32 { return seedRowOf(ctx, b, 1)().SeedAttempts }).WithTimeout(2 * time.Second).Should(BeZero())
+		home.set(map[string]string{"notes/v.md": "live home"})
+		sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		stop, err := q.RequestHomeCheckpoint(ctx, store.RequestHomeCheckpointParams{
 			OrgID: e.org, AgentID: e.agent.ID, Reason: store.CheckpointReasonStop, SandboxID: sb.SandboxID.String, Generation: sb.HomeGeneration.String,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(func() int32 {
-			cp, err := q.GetHomeCheckpoint(ctx, store.GetHomeCheckpointParams{OrgID: e.org, ID: next.ID})
+		Eventually(func() store.CheckpointStatus {
+			cp, err := q.GetHomeCheckpoint(ctx, store.GetHomeCheckpointParams{OrgID: e.org, ID: stop.ID})
 			Expect(err).NotTo(HaveOccurred())
-			if cp.Status != store.CheckpointStatusComplete {
-				return -1
+			return cp.Status
+		}).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+
+		close(gate.release)
+		Eventually(func() bool { return seedRowOf(ctx, b, 1)().SeededAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
+	})
+
+	Describe("a checkpoint whose writer died while the sandbox is not ready", func() {
+		var dead pgtype.UUID
+		BeforeEach(func(ctx SpecContext) {
+			backup(ctx, map[string]string{"notes/v.md": "the home"}, 3*time.Hour)
+			// agentd died during a stop checkpoint two hours ago; the agent is stopped since, so no
+			// writer takes the checkpoint over (that needs a ready sandbox).
+			_, err := db.Exec(ctx, `UPDATE agent_sandboxes SET state = 'stopped' WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(db.QueryRow(ctx, `INSERT INTO home_checkpoints (org_id, agent_id, reason, status, attempts, requested_at, started_at)
+				VALUES ($1, $2, 'stop', 'running', 1, now() - interval '2 hours', now() - interval '2 hours') RETURNING id`, e.org, e.agent.ID).Scan(&dead)).To(Succeed())
+			newRepositories(ctx)
+		})
+		status := func(ctx context.Context) func() store.HomeCheckpoint {
+			return func() store.HomeCheckpoint {
+				cp, err := q.GetHomeCheckpoint(ctx, store.GetHomeCheckpointParams{OrgID: e.org, ID: dead})
+				Expect(err).NotTo(HaveOccurred())
+				return cp
 			}
-			return cp.RepositoryEpoch
-		}).WithTimeout(20 * time.Second).Should(Equal(int32(1)))
-		Eventually(deleted0(ctx)).WithTimeout(10 * time.Second).Should(BeTrue())
+		}
+
+		It("holds nothing back past its lease: the old repository is deleted", func(ctx SpecContext) {
+			// A long sandbox wait, so the checkpoint is still running when the sweeper looks.
+			e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Lease = 30 * time.Minute; c.SandboxWait = 24 * time.Hour }))
+			Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+			Eventually(deleted0(ctx)).WithTimeout(10 * time.Second).Should(BeTrue())
+			Expect(status(ctx)().Status).To(Equal(store.CheckpointStatusRunning))
+		})
+
+		It("is failed after its lease and the sandbox wait", func(ctx SpecContext) {
+			e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Lease = 30 * time.Minute; c.SandboxWait = 30 * time.Minute }))
+			Eventually(status(ctx)).WithTimeout(10 * time.Second).Should(And(
+				HaveField("Status", store.CheckpointStatusFailed),
+				HaveField("Error.String", ContainSubstring("the writer stopped")),
+			))
+		})
+
+		It("is left running within its lease and the sandbox wait", func(ctx SpecContext) {
+			e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Lease = 30 * time.Minute; c.SandboxWait = 2 * time.Hour }))
+			Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+			Consistently(status(ctx)).WithTimeout(time.Second).Should(HaveField("Status", store.CheckpointStatusRunning))
+		})
 	})
 })
