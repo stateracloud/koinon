@@ -44,10 +44,17 @@ const markLost = "credential_lost_at = now()"
 // set is the SET clause of a row of c.
 func (r lostRule) set(c Column) string { return c.Column + " = NULL, " + r.mark }
 
-// lostRules covers every column of Columns; a spec fails for one without a rule. A credential
-// becomes lost (credential_lost_at, migration 00052; the home repositories, 00054): the UI asks
-// for it again and nothing serves it. Saved work cannot be entered again, so it expires as it
-// does after its retention (status expired, the envelope dropped).
+// lostRules covers every column of Columns. A credential becomes lost (credential_lost_at,
+// migration 00052; the home repositories, 00054): the UI asks for it again and nothing serves it.
+// Saved work cannot be entered again, so it expires as it does after its retention (status
+// expired, the envelope dropped).
+//
+// Seam for ADR 0096 (MCP sign-in, draft #248), not built here: its sealed values (the access and
+// refresh tokens, the pending PKCE verifier, admin-entered and dynamically registered client
+// secrets) join [Columns] and get a rule here: a lost sign-in parks the runs that need it and
+// posts "Sign in again"; a lost admin-entered client secret is entered again, a dynamically
+// registered one registered again, and a pending flow started again (ADR 0096 section 4). TestColumnsListEveryBinding fails for a binding missing from Columns,
+// and TestForgetHasARuleForEveryColumn for a column with no rule here.
 var lostRules = map[Column]lostRule{
 	{catalog.ProvidersTable, catalog.KeyColumn}:                {markLost, "providers"},
 	{catalog.ProvidersTable, catalog.CostKeyColumn}:            {"cost_api_key_lost_at = now()", "providerCostKeys"},

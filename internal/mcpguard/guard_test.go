@@ -182,6 +182,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 	var tracker, wiki, web mcpservers.Server
 
 	BeforeEach(func(ctx SpecContext) {
+		startDB(ctx)
 		org, user, slug = pgtest.NewOrg(ctx, pool)
 		a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "helper", Flavor: store.AgentFlavorOpencode, CreatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
