@@ -20,16 +20,20 @@ export TMPDIR="$tmp/shared-tmp" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/d
 unset KOINON_LINT_DIR GOLANGCI_LINT_CACHE
 mkdir -p "$tmp/bin" "$TMPDIR"
 
-# The stub: "parallel golangci-lint is running" (exit 3) when the lock in its TMPDIR is held,
-# otherwise it holds the lock for FAKE_LINT_HOLD seconds and exits FAKE_LINT_RC.
-cat >"$tmp/bin/golangci-lint" <<'EOF'
+# The stub: "parallel golangci-lint is running" (exit 3) when the lock in its TMPDIR is held. With
+# FAKE_HOLD=<name> it holds the lock, creates $tmp/<name>.held, and waits (at most 10 s) for
+# $tmp/<name>.release, so overlapping runs depend on a handshake, not on timing.
+cat >"$tmp/bin/golangci-lint" <<'EOF2'
 #!/usr/bin/env bash
 echo "args=$* TMPDIR=$TMPDIR GOLANGCI_LINT_CACHE=${GOLANGCI_LINT_CACHE:-}" >>"$FAKE_LOG"
 mkdir "$TMPDIR/golangci-lint.lock" 2>/dev/null || { echo "Error: parallel golangci-lint is running" >&2; exit 3; }
-sleep "${FAKE_LINT_HOLD:-0}"
+if [[ -n ${FAKE_HOLD:-} ]]; then
+	: >"$FAKE_DIR/$FAKE_HOLD.held"
+	for _ in $(seq 100); do [[ -e $FAKE_DIR/$FAKE_HOLD.release ]] && break; sleep 0.1; done
+fi
 rmdir "$TMPDIR/golangci-lint.lock"
 exit "${FAKE_LINT_RC:-0}"
-EOF
+EOF2
 chmod +x "$tmp/bin/golangci-lint"
 export PATH="$tmp/bin:$PATH"
 
@@ -75,40 +79,59 @@ check "exit code passes through" eq "$rc" 1
 check "arguments pass through" grep -q "^args=run ./internal/x " "$FAKE_LOG"
 check "golangci-lint sees the worktree's TMPDIR and cache" grep -qF "TMPDIR=$mt GOLANGCI_LINT_CACHE=$mc" "$FAKE_LOG"
 
+# hold <name> <dir> <command...>: start the command in <dir> in the background as a lock holder
+# and wait until the stub holds the lock; release <name> lets it finish and prints its exit code.
+hold() {
+	local n=$1 d=$2
+	shift 2
+	(cd "$d" && FAKE_HOLD=$n "$@" >"$tmp/$n.out" 2>&1) &
+	pids[$n]=$!
+	for _ in $(seq 100); do [[ -e $tmp/$n.held ]] && return 0; sleep 0.1; done
+	echo "  $n never took the lock: $(cat "$tmp/$n.out")" >&2
+	return 1
+}
+declare -A pids=() rcs=()
+release() { # sets rcs[<name>] to the holder's exit code (no subshell: only this shell can wait for it)
+	local n=$1 r=0
+	: >"$tmp/$n.release"
+	wait "${pids[$n]}" || r=$?
+	rcs[$n]=$r
+}
+export FAKE_DIR=$tmp
+
 # 3. two worktrees at once: both pass (the bug: the second exited 3 on the shared lock)
-export FAKE_LINT_HOLD=2
-(cd "$tmp/main" && hack/golangci-lint.sh run >"$tmp/a.out" 2>&1) &
-a=$!
-sleep 0.5
+hold a "$tmp/main" hack/golangci-lint.sh run
 rcb=0
 (cd "$tmp/lane" && hack/golangci-lint.sh run >"$tmp/b.out" 2>&1) || rcb=$?
-rca=0
-wait "$a" || rca=$?
-check "worktree 1 lints while worktree 2 lints" eq "$rca" 0
-check "worktree 2 lints while worktree 1 lints" eq "$rcb" 0
+check "worktree 2 lints while worktree 1 holds its lock" eq "$rcb" 0
+release a
+check "worktree 1 lints while worktree 2 lints" eq "${rcs[a]}" 0
 
 # 4. the same worktree twice at once: the lock still keeps them apart
-(cd "$tmp/main" && hack/golangci-lint.sh run >"$tmp/c.out" 2>&1) &
-c=$!
-sleep 0.5
+hold c "$tmp/main" hack/golangci-lint.sh run
 rcd=0
 (cd "$tmp/main" && hack/golangci-lint.sh run >"$tmp/d.out" 2>&1) || rcd=$?
-wait "$c" || true
 check "a second run in the same worktree still hits the lock" eq "$rcd" 3
+release c
+check "the first run in that worktree passes" eq "${rcs[c]}" 0
 
 # 5. the bug itself, as a control: bare golangci-lint in two worktrees with one TMPDIR clashes
-(cd "$tmp/main" && golangci-lint run >/dev/null 2>&1) &
-e=$!
-sleep 0.5
+hold e "$tmp/main" golangci-lint run
 rcf=0
 (cd "$tmp/lane" && golangci-lint run >/dev/null 2>&1) || rcf=$?
-wait "$e" || true
 check "control: without the wrapper the second worktree fails" eq "$rcf" 3
-unset FAKE_LINT_HOLD
+release e
+
+# 5b. --clean deletes the worktree's directory and nothing else
+(cd "$tmp/main" && hack/golangci-lint.sh --clean)
+check "--clean deletes the worktree's directory" test ! -e "${mt%/tmp}"
+check "--clean leaves another worktree's directory" test -d "$lt"
 
 # 6. every repo script and the Makefile go through the wrapper
-bare=$(grep -nE '(^|[^-/.[:alnum:]])golangci-lint run' "$repo/Makefile" "$repo"/hack/*.sh 2>/dev/null |
-	grep -vE '^[^:]*/hack/golangci-lint(-test)?\.sh:|^[^:]*/hack/preflight-test\.sh:' | grep -vE ':[0-9]+:[[:space:]]*#' || true)
+# Any golangci-lint invocation (a subcommand, after any flags) in a tracked script or makefile, except
+# the wrapper, this test, preflight-test.sh's stub, comments and `command -v` probes.
+bare=$(git -C "$repo" ls-files -z '*.sh' 'Makefile' '*.mk' | (cd "$repo" && xargs -0 grep -nE '(^|[^-/.[:alnum:]_"])golangci-lint([[:space:]]+-[^[:space:]]+)*[[:space:]]+(run|fmt|cache|config|linters|formatters|migrate)([[:space:]]|$)' 2>/dev/null) |
+	grep -vE '^hack/golangci-lint(-test)?\.sh:|^hack/preflight-test\.sh:' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#|command -v golangci-lint' || true)
 check "no script runs bare golangci-lint run" eq "$bare" ""
 
 if [[ $fail != 0 ]]; then echo "golangci-lint-test: FAILED" >&2; exit 1; fi

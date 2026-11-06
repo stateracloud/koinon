@@ -6,12 +6,15 @@
 #
 #   hack/golangci-lint.sh <golangci-lint arguments>     e.g. hack/golangci-lint.sh run ./internal/x
 #   hack/golangci-lint.sh --print-dirs                  print TMPDIR= and GOLANGCI_LINT_CACHE= and exit
+#   hack/golangci-lint.sh --clean                       delete this worktree's lock and cache directory
+#                                                       (hack/wt.sh rm and gc call it before removing a worktree)
 #
 # golangci-lint takes a file lock at $TMPDIR/golangci-lint.lock on start and exits 3 when another
 # run holds it. That keeps two runs in one checkout apart, which is right, but a shared TMPDIR (one
 # per sandbox, not per worktree) makes it machine-wide. This keys TMPDIR and GOLANGCI_LINT_CACHE by
-# a hash of the worktree root, under ${TMPDIR:-/tmp}/koinon-lint/<hash>/, the same key scheme as
-# hack/preflight.sh's logs. Two runs in the same worktree still exclude each other. The Go build
+# a hash of the worktree root (resolved with pwd -P), under ${TMPDIR:-/tmp}/koinon-lint/<hash>/, like
+# hack/preflight.sh keys its logs. #236 asks for the cache per worktree too: a lane's first lint
+# then runs cold, and --clean removes the directory with the worktree. Two runs in the same worktree still exclude each other. The Go build
 # cache (GOCACHE) stays shared: go itself makes it safe for concurrent use.
 # KOINON_LINT_DIR=<dir> puts both directories under <dir> instead.
 
@@ -24,6 +27,12 @@ root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "golangci-lint.sh: n
 root=$(cd "$root" && pwd -P)
 rootkey=$(printf '%s' "$root" | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-12)
 dir=${KOINON_LINT_DIR:-${TMPDIR:-/tmp}/koinon-lint/$rootkey}
+
+if [[ ${1:-} == --clean ]]; then
+	[[ -n ${KOINON_LINT_DIR:-} ]] || rm -rf "$dir"
+	exit 0
+fi
+
 mkdir -p "$dir/tmp" "$dir/cache"
 
 if [[ ${1:-} == --print-dirs ]]; then
