@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { CheckResult } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { caBundleError } from '@/lib/ca-bundle'
 import { ciDirsError, parseCiDirs } from '@/lib/ci-paths'
+import { tokenError } from '@/lib/connection-secret'
 import type { GuideField, SetupGuide } from '@/lib/connector'
 import { giteaBaseUrlError } from '@/lib/gitea-url'
 
@@ -29,14 +30,6 @@ export type GiteaConnectionFormProps = {
   pending?: boolean
   error?: string
   results?: readonly CheckResult[]
-}
-
-/** tokenError: a pasted token is one word; Gitea's are 40 hex characters but the format is not ours to enforce. */
-function tokenError(label: string, v: string): string | undefined {
-  if (!v.trim()) return `${label} is required.`
-  if (/\s/.test(v.trim())) return `${label} must be only the token, without spaces or line breaks.`
-  if (v.length > 256) return `${label} is longer than 256 characters.`
-  return undefined
 }
 
 /**

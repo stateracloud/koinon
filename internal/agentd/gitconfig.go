@@ -14,6 +14,7 @@ import (
 	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
+	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -105,8 +106,8 @@ func (r *runner) checkCodeHostCredential(ctx context.Context) error {
 		return fmt.Errorf("read the %s connection: %w", connector, err)
 	}
 	if conn.CredentialLostAt.Valid {
-		return &failure{reason: fmt.Sprintf("the stored credential of the %s connection %q was lost; "+
-			"create the connection again on the Connections page and run the task again", connector, conn.DisplayName)}
+		return &failure{reason: fmt.Sprintf("the stored credential of the %s connection %q was lost; %s, then run the task again",
+			connector, conn.DisplayName, connections.LostRemedy(conn))}
 	}
 	return nil
 }
