@@ -38,6 +38,11 @@ spec:
     baseURL: https://github.com
     apiURL: https://api.github.com
     apiPath: /api/v3
+    # MCP servers known to act on github.com, besides github.com and api.github.com: GitHub's own
+    # MCP server. An MCP server may be linked to a github.com connection only at one of these hosts,
+    # and to a GitHub Enterprise Server connection only at that server's host (ADR 0091, #117).
+    mcpHosts:
+      - api.githubcopilot.com
   # What the provider's credential and write API can and cannot narrow (ADR 0062, 0063), so risk
   # tiers, approvals and the UI can compensate. The token lifetime is auth.tokenLifetime.
   capabilities:

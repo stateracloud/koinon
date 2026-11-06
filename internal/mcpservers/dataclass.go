@@ -139,6 +139,10 @@ func (s *Service) SetDataClass(ctx context.Context, org pgtype.UUID, actor audit
 		if err != nil {
 			return err
 		}
+		link, err := lockLinkTarget(ctx, q, org, d)
+		if err != nil {
+			return err
+		}
 		out, err = q.SetMCPServerDataClass(ctx, store.SetMCPServerDataClassParams{
 			OrgID: org, ID: sid, Kind: store.McpServerKind(d.Kind),
 			ExposesUntrustedInput: slices.Contains(d.Legs, LegUntrustedInput),
@@ -146,6 +150,11 @@ func (s *Service) SetDataClass(ctx context.Context, org pgtype.UUID, actor audit
 			CodeHostConnectionID:  connectionParam(d),
 		})
 		if err != nil {
+			return err
+		}
+		// The URL of the row as written: a concurrent URL change committed since cur was read is
+		// checked too (the update waited for its row lock).
+		if err := link.check(out.Url); err != nil {
 			return err
 		}
 		before, after := declarationOf(cur), declarationOf(out)

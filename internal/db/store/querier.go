@@ -360,6 +360,9 @@ type Querier interface {
 	// (not estimated) requests of a model, and how many there were.
 	GetCalibration(ctx context.Context, arg GetCalibrationParams) (GetCalibrationRow, error)
 	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
+	// The connection a server is being linked to, locked against a change of its host (a declared
+	// connection's baseUrl) until the link is written, so the host check sees the host the link keeps.
+	GetConnectionForMCPLink(ctx context.Context, arg GetConnectionForMCPLinkParams) (Connection, error)
 	GetConnectionForUpdate(ctx context.Context, arg GetConnectionForUpdateParams) (Connection, error)
 	GetDedupeRecord(ctx context.Context, arg GetDedupeRecordParams) (DedupeRecord, error)
 	GetDefaultPriceList(ctx context.Context, version string) (DefaultPriceList, error)

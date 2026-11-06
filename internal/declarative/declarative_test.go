@@ -637,6 +637,44 @@ var _ = Describe("Importer", func() {
 				Expect(now.WriteTokenSetAt).To(BeTemporally("~", time.Now(), time.Minute), "a new write token is new")
 			})
 
+			It("unlinks, audited, the MCP servers a new base URL no longer serves, and keeps the others (#117)", func(ctx SpecContext) {
+				put(ctx, "gt", declarative.TypeConnection, slug, giteaConn())
+				Expect(imp.Sync(ctx)).To(Succeed())
+				rows, _ := store.New(pool).ListConnections(ctx, org)
+				Expect(rows).To(HaveLen(1))
+				link := func(name, u string) {
+					_, err := pool.Exec(ctx, `INSERT INTO mcp_servers (org_id, name, url, code_host_connection_id) VALUES ($1, $2, $3, $4)`, org, name, u, rows[0].ID)
+					Expect(err).NotTo(HaveOccurred())
+				}
+				link("old-host", "https://git.example.test/mcp")
+				linked := func(name string) bool {
+					var ok bool
+					Expect(pool.QueryRow(ctx, `SELECT code_host_connection_id IS NOT NULL FROM mcp_servers WHERE org_id = $1 AND name = $2`, org, name).Scan(&ok)).To(Succeed())
+					return ok
+				}
+
+				By("the same host keeps both links")
+				d := giteaConn()
+				d["name"] = "renamed"
+				put(ctx, "gt", declarative.TypeConnection, slug, d)
+				Expect(imp.Sync(ctx)).To(Succeed())
+				Expect(linked("old-host")).To(BeTrue())
+				Expect(auditOf(ctx, "mcp_server.data_class.reset")).To(BeEmpty())
+
+				By("a new host unlinks the server at the old one, and keeps one at the new host")
+				// Written straight to the table, past the check, as if linked for the move.
+				link("new-host", "https://git2.example.test/mcp")
+				d["baseUrl"] = "https://git2.example.test"
+				put(ctx, "gt", declarative.TypeConnection, slug, d)
+				Expect(imp.Sync(ctx)).To(Succeed())
+				Expect(linked("old-host")).To(BeFalse())
+				Expect(linked("new-host")).To(BeTrue())
+				ev := auditOf(ctx, "mcp_server.data_class.reset")
+				Expect(ev).To(HaveLen(1))
+				Expect(string(ev[0].Summary)).To(ContainSubstring("connection_host_changed"))
+				Expect(ev[0].ActorID).To(Equal("gt"), "the Secret that moved the connection")
+			})
+
 			It("refuses to change a declared connection's connector, leaving the row as it was", func(ctx SpecContext) {
 				put(ctx, "gt", declarative.TypeConnection, slug, giteaConn())
 				Expect(imp.Sync(ctx)).To(Succeed())
