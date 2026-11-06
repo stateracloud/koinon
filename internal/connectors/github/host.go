@@ -200,14 +200,19 @@ func (a *access) Repository(ctx context.Context, r codehost.Repo) (codehost.Repo
 	return codehost.Repository{FullName: got.FullName, DefaultBranch: got.DefaultBranch, Private: got.Private, Visibility: scopeVisibility(got)}, err
 }
 
-// scopeVisibility is the visibility Koinon records for a repository: private only when GitHub says
-// so on both fields, public otherwise. An internal repository is readable by the whole enterprise,
-// and an unsure answer must not hide a leak (ADR 0091).
+// scopeVisibility is the visibility Koinon records for a repository: private only when GitHub's
+// visibility field says "private", public when it says "public", unknown otherwise. An internal
+// repository is readable by the whole enterprise, and an older GitHub Enterprise Server that leaves
+// the field out sends private=true for internal repositories too, so the private flag alone is not
+// enough; an unsure answer must not hide a leak (ADR 0091).
 func scopeVisibility(r Repository) string {
-	if r.Private && (r.Visibility == "" || r.Visibility == "private") {
+	switch r.Visibility {
+	case "private":
 		return codehost.VisibilityPrivate
+	case "public":
+		return codehost.VisibilityPublic
 	}
-	return codehost.VisibilityPublic
+	return codehost.VisibilityUnknown
 }
 
 func (a *access) Repositories(ctx context.Context, page, perPage int) (codehost.RepositoryPage, error) {

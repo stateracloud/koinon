@@ -32,6 +32,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
@@ -69,7 +70,7 @@ import (
 
 // ScopeSyncer refreshes the code-host scope of one connection (codehost/scopesync.Syncer).
 type ScopeSyncer interface {
-	Sync(ctx context.Context, row store.Connection) error
+	Sync(ctx context.Context, row store.Connection, actor audit.Actor) error
 }
 
 // Keys is the secret store as the services use it.
@@ -110,7 +111,8 @@ type Options struct {
 	// Tokens issues admin API tokens; defaults to a service on the pool.
 	Tokens *tokens.Service
 	// ScopeSync reads a code-host connection's repositories into the org's code-host scope when it
-	// is created or tested (the periodic refresh runs outside the services). Nil skips that.
+	// is created, given a new secret or tested, in the background (the periodic refresh runs
+	// outside the services). Nil skips that.
 	ScopeSync ScopeSyncer
 	// Hosts are the code-host providers that run connection checks and list repositories. Without
 	// it the shipped providers are used, with GitHub as the client below.

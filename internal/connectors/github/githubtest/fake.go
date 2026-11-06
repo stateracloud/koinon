@@ -36,6 +36,9 @@ type Fake struct {
 	// Internal marks repositories (by name) as GitHub Enterprise "internal": private=true and
 	// visibility "internal", readable by the whole enterprise.
 	Internal map[string]bool
+	// OmitVisibility leaves the "visibility" field out of repository objects, as an older GitHub
+	// Enterprise Server does: only "private" is sent, true for internal repositories too.
+	OmitVisibility bool
 	// Permissions the App was granted.
 	Permissions map[string]string
 	// Now defaults to time.Now; tokens expire an hour after Now.
@@ -74,14 +77,21 @@ type tokenInfo struct {
 	perms map[string]string
 }
 
-// covers is the repositories a token reaches now. As on GitHub, a token minted for the whole
-// installation follows it: a repository that leaves the installation leaves the token. The
-// caller holds f.mu.
+// covers is the repositories a token reaches now. As on GitHub, a token follows the installation:
+// one minted for the whole installation covers what it holds now, and a repository that leaves the
+// installation leaves every token, also one minted for selected repositories (which never gains a
+// repository it was not minted for). The caller holds f.mu.
 func (f *Fake) covers(info tokenInfo) []string {
 	if info.all {
 		return f.Repositories
 	}
-	return info.repos
+	out := make([]string, 0, len(info.repos))
+	for _, r := range info.repos {
+		if slices.Contains(f.Repositories, r) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // Request is a token request the fake received.

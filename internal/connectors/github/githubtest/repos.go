@@ -266,10 +266,14 @@ func (f *Fake) repoJSON(r *Repo) map[string]any {
 	case f.Private[r.Name]:
 		visibility = "private"
 	}
-	return map[string]any{
+	out := map[string]any{
 		"name": r.Name, "full_name": f.Account + "/" + r.Name, "owner": map[string]string{"login": f.Account},
 		"private": f.Private[r.Name] || f.Internal[r.Name], "visibility": visibility, "default_branch": r.DefaultBranch,
 	}
+	if f.OmitVisibility {
+		delete(out, "visibility")
+	}
+	return out
 }
 
 // listInstallationRepos serves GET /installation/repositories as GitHub does: the

@@ -6,6 +6,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"log/slog"
+	"net/http"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -104,7 +107,7 @@ var _ = Describe("the code-host scope refresh (ADR 0091, #115)", func() {
 			conn := githubConn(ctx, fake)
 			Expect(classify(ctx, conn, "acme", "secret")).To(Equal(sinkclass.ExternalHigh), "nothing read yet")
 
-			Expect(syncer(hosts).Sync(ctx, conn)).To(Succeed())
+			Expect(syncer(hosts).Sync(ctx, conn, scopesync.Actor)).To(Succeed())
 
 			Expect(classify(ctx, conn, "acme", "secret")).To(Equal(sinkclass.Internal))
 			Expect(classify(ctx, conn, "ACME", "Secret")).To(Equal(sinkclass.Internal), "names compare case-insensitively")
@@ -116,7 +119,102 @@ var _ = Describe("the code-host scope refresh (ADR 0091, #115)", func() {
 			s := l.ScopeSummary(now())
 			Expect(s.Repositories).To(Equal(3))
 			Expect(s.Private).To(Equal(1))
-			Expect(s.Public).To(Equal(2))
+			Expect(s.Public).To(Equal(1))
+			Expect(s.Unknown).To(Equal(1), "GitHub's internal is stored as unknown, never as the scope's internal")
+		})
+
+		It("keeps a connection syncing when the last page crosses the bound, truncating the list", func(ctx SpecContext) {
+			fake.Repositories, fake.Private = nil, map[string]bool{}
+			for i := range 200 { // two full pages of 100; the bound falls inside the second
+				name := "repo-" + string(rune('a'+i/26)) + string(rune('a'+i%26))
+				fake.Repositories = append(fake.Repositories, name)
+				fake.Private[name] = true
+			}
+			conn := githubConn(ctx, fake)
+			s := syncer(hosts)
+			scopesync.SetMaxRepos(s, 150)
+			Expect(s.Sync(ctx, conn, scopesync.Actor)).To(Succeed())
+			l, err := scope.LeakGuard(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(l.ScopeSummary(now()).Repositories).To(Equal(150))
+			Expect(logBuf.String()).To(ContainSubstring("code-host scope truncated"))
+		})
+
+		It("runs one round at a time across replicas, and a later replica does not read again (one leader per round)", func(ctx SpecContext) {
+			conn := githubConn(ctx, fake)
+			var lists atomic.Int32
+			reached, release := make(chan struct{}, 1), make(chan struct{})
+			inner := fake.Server.Config.Handler
+			fake.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/installation/repositories" && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+					lists.Add(1)
+					select {
+					case reached <- struct{}{}:
+					default:
+					}
+					<-release
+				}
+				inner.ServeHTTP(w, r)
+			})
+			a, b := syncer(hosts), syncer(hosts)
+			done := make(chan error, 1)
+			go func() { done <- a.RunOnce(ctx) }()
+			Eventually(reached).Should(Receive(), "replica a reads the connection")
+
+			By("replica b's round, while a's runs, reads nothing")
+			Expect(b.RunOnce(ctx)).To(Succeed())
+			Expect(lists.Load()).To(BeEquivalentTo(1))
+
+			close(release)
+			Eventually(done).Should(Receive(BeNil()))
+			Expect(classify(ctx, conn, "acme", "secret")).To(Equal(sinkclass.Internal))
+
+			By("replica b's next round, a moment later, skips the connection a just read")
+			Expect(b.RunOnce(ctx)).To(Succeed())
+			Expect(lists.Load()).To(BeEquivalentTo(1))
+
+			By("but a sync for one connection (create, test) always reads")
+			Expect(b.Sync(ctx, conn, scopesync.Actor)).To(Succeed())
+			Expect(lists.Load()).To(BeEquivalentTo(2))
+		})
+
+		It("bounds each connection's reading, so a hanging host does not hold up the others", func(ctx SpecContext) {
+			stuck := fakegitea.NewTLS()
+			DeferCleanup(stuck.Close)
+			stuck.Server.Config.Handler = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
+			hung := giteaConn(ctx, stuck)
+			conn := githubConn(ctx, fake)
+			s := syncer(hosts)
+			scopesync.SetTimeout(s, 500*time.Millisecond)
+			start := time.Now()
+			s.SyncOrg(ctx, org)
+			Expect(time.Since(start)).To(BeNumerically("<", 10*time.Second))
+			Expect(classify(ctx, conn, "acme", "secret")).To(Equal(sinkclass.Internal), "the GitHub connection after the hanging one was read")
+			Expect(logBuf.String()).To(ContainSubstring(hung.ID.String()))
+		})
+
+		It("audits a refresh only when the repositories change", func(ctx SpecContext) {
+			conn := githubConn(ctx, fake)
+			s := syncer(hosts)
+			replaces := func() int {
+				GinkgoHelper()
+				rows, err := q.ListAuditEvents(ctx, store.ListAuditEventsParams{OrgID: org, PageSize: 100})
+				Expect(err).NotTo(HaveOccurred())
+				n := 0
+				for _, r := range rows {
+					if r.Action == "org.code_host_scope.replace" && r.TargetID == conn.ID.String() {
+						n++
+					}
+				}
+				return n
+			}
+			s.SyncOrg(ctx, org)
+			Expect(replaces()).To(Equal(1), "the first reading is a change")
+			s.SyncOrg(ctx, org)
+			Expect(replaces()).To(Equal(1), "the same list again is not")
+			fake.Private = map[string]bool{}
+			s.SyncOrg(ctx, org)
+			Expect(replaces()).To(Equal(2), "secret turned public")
 		})
 
 		It("pages through every repository", func(ctx SpecContext) {
@@ -127,7 +225,7 @@ var _ = Describe("the code-host scope refresh (ADR 0091, #115)", func() {
 				fake.Private[name] = true
 			}
 			conn := githubConn(ctx, fake)
-			Expect(syncer(hosts).Sync(ctx, conn)).To(Succeed())
+			Expect(syncer(hosts).Sync(ctx, conn, scopesync.Actor)).To(Succeed())
 			l, err := scope.LeakGuard(ctx, org)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(l.ScopeSummary(now()).Private).To(Equal(230))
@@ -135,12 +233,14 @@ var _ = Describe("the code-host scope refresh (ADR 0091, #115)", func() {
 
 		It("sees a repository turn public and one leave on the next refresh", func(ctx SpecContext) {
 			conn := githubConn(ctx, fake)
-			Expect(syncer(hosts).Sync(ctx, conn)).To(Succeed())
+			Expect(syncer(hosts).Sync(ctx, conn, scopesync.Actor)).To(Succeed())
 			Expect(classify(ctx, conn, "acme", "secret")).To(Equal(sinkclass.Internal))
 
 			fake.Private = map[string]bool{}
 			fake.Repositories = []string{"secret", "open"}
-			Expect(syncer(hosts).RunOnce(ctx)).To(Succeed())
+			next := syncer(hosts)
+			scopesync.SetMinAge(next, 0) // the next round, an interval later
+			Expect(next.RunOnce(ctx)).To(Succeed())
 
 			Expect(classify(ctx, conn, "acme", "secret")).To(Equal(sinkclass.ExternalHigh), "now public")
 			l, err := scope.LeakGuard(ctx, org)
@@ -150,16 +250,16 @@ var _ = Describe("the code-host scope refresh (ADR 0091, #115)", func() {
 
 		It("leaves the stored scope alone when the host cannot be read", func(ctx SpecContext) {
 			conn := githubConn(ctx, fake)
-			Expect(syncer(hosts).Sync(ctx, conn)).To(Succeed())
+			Expect(syncer(hosts).Sync(ctx, conn, scopesync.Actor)).To(Succeed())
 			fake.Server.Close()
-			err := syncer(hosts).Sync(ctx, conn)
+			err := syncer(hosts).Sync(ctx, conn, scopesync.Actor)
 			Expect(err).To(HaveOccurred())
 			Expect(classify(ctx, conn, "acme", "secret")).To(Equal(sinkclass.Internal), "the reading ages out on its own")
 		})
 
 		It("does not keep a reading that is older than the freshness window", func(ctx SpecContext) {
 			conn := githubConn(ctx, fake)
-			Expect(syncer(hosts).Sync(ctx, conn)).To(Succeed())
+			Expect(syncer(hosts).Sync(ctx, conn, scopesync.Actor)).To(Succeed())
 			l, err := scope.LeakGuard(ctx, org)
 			Expect(err).NotTo(HaveOccurred())
 			later := now().Add(orgsettings.DefaultVisibilityMaxAge + time.Minute)
@@ -170,13 +270,13 @@ var _ = Describe("the code-host scope refresh (ADR 0091, #115)", func() {
 
 		It("skips a connection that is not a code host", func(ctx SpecContext) {
 			row := addConn(ctx, "slack", []byte(`{}`), map[string][]byte{"token": []byte("koinon_test_not-a-real-token")})
-			Expect(syncer(hosts).Sync(ctx, row)).To(Succeed())
+			Expect(syncer(hosts).Sync(ctx, row, scopesync.Actor)).To(Succeed())
 			Expect(syncer(hosts).RunOnce(ctx)).To(Succeed())
 		})
 
 		It("refuses without key-encryption keys", func(ctx SpecContext) {
 			conn := githubConn(ctx, fake)
-			Expect(scopesync.New(pool, hosts, nil, nil).Sync(ctx, conn)).To(MatchError(connections.ErrNoKeyring))
+			Expect(scopesync.New(pool, hosts, nil, nil).Sync(ctx, conn, scopesync.Actor)).To(MatchError(connections.ErrNoKeyring))
 		})
 	})
 
@@ -213,7 +313,7 @@ var _ = Describe("the code-host scope refresh (ADR 0091, #115)", func() {
 
 		It("keeps each connection's list apart", func(ctx SpecContext) {
 			a, b := giteaConn(ctx, fake), giteaConn(ctx, fake)
-			Expect(syncer(hosts).Sync(ctx, a)).To(Succeed())
+			Expect(syncer(hosts).Sync(ctx, a, scopesync.Actor)).To(Succeed())
 			Expect(classify(ctx, a, "acme", "app")).To(Equal(sinkclass.Internal))
 			Expect(classify(ctx, b, "acme", "app")).To(Equal(sinkclass.ExternalHigh), "b was not read")
 		})
