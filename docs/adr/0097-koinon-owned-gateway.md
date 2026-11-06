@@ -24,7 +24,9 @@
   ([PR #248](https://github.com/stateracloud/koinon/pull/248), not yet merged; its section 3 delivery and
   its gateway spike are affected in step 2)
 - Issue: [#258](https://github.com/stateracloud/koinon/issues/258)
-- Decision by: the maintainer, 2026-11-06 (the three steps); the details below are drafted for review
+- Decision by: the maintainer, 2026-11-06 (the three steps, and at the 2026-11-06 review: gateway
+  placement, unpriced models, MCP server-initiated requests, MCP replicas, runaway calls); the other
+  details below are drafted for review
 
 ## Context
 
@@ -121,7 +123,7 @@ Nine more jobs, each with its gap and how it is filled (own-gateway design resea
 
 | Job | Gap, and how it is filled | Today | Step 1 | Step 2 | Step 3 |
 | --- | --- | --- | --- | --- | --- |
-| Request rate limit per key | Only USD and run caps bound a runaway loop; a token bucket per key, limits from State (open question 4) | none found | none | none | **Koinon**, if decided |
+| Runaway calls | No per-key request rate limit; a circuit breaker per provider plus the run caps bound a runaway loop (step 3, maintainer decision 2026-11-06) | none found | none | none | **Koinon**: circuit breaker |
 | Config delivery | Files, kubelet tick, 90 s settle, probe key; a revisioned State stream the gateway acks (decision 2.1) | files or CRDs | unchanged | **Koinon** (MCP half) | **Koinon** (model half) |
 | Unknown MCP message kinds | A new method passes unguarded; refuse every method not on an allowlist | agentgateway forwards | unchanged | **Koinon refuses** | Koinon |
 | Guard argument order (#256) | Arguments are joined in call order, so a secret split across reordered keys passes; scan a canonical form | Koinon | **Koinon fix** | Koinon | Koinon |
@@ -146,8 +148,8 @@ behaviour, not by config: the gateway behaviour suite (decision 4) is its specif
 2. **Usage.** Every driver yields **usage records** (decision 3). Nothing outside a driver reads
    gateway log attributes.
 3. **Koinon hooks.** The calls a gateway makes into Koinon are Koinon interfaces, with the transport a
-   driver detail: the leak guard (`internal/mcpguard`; ExtMcp gRPC for agentgateway, a Go call or
-   Koinon RPC for Koinon's gateway), the token service (ADR 0073, ADR 0096), and in step 3 the call
+   driver detail: the leak guard (`internal/mcpguard`; ExtMcp gRPC for agentgateway, a Go library call
+   inside Koinon's gateway, step 2), the token service (ADR 0073, ADR 0096), and in step 3 the call
    reservation.
 4. **The sandbox does not know which driver serves it.** The in-cluster host, ports and paths the
    sandbox calls stay fixed across drivers, so OpenShell provider records and policies do not change
@@ -205,6 +207,13 @@ Scope:
   untrusted: it sets both session legs (untrusted input and private data). The same holds for any MCP
   message kind the guard cannot see. The upstream fix is drafted for a human to post (AGENTS.md,
   OpenShell and upstream rules apply to agentgateway too).
+- **Interim pin for server-initiated requests** (maintainer decision 2026-11-06). A #254 spec runs a
+  fake MCP server that sends sampling, elicitation (form and URL) and `roots/list` during a
+  `tools/call`, and checks that sampling is refused, elicitation never reaches the model, and roots
+  shows only the sandbox folder. This holds only because of OpenCode's defaults (it declares no
+  sampling, and in ACP mode it cancels MCP elicitations), not because of Koinon, so it is an interim
+  fix with its own issue (issue to file), exit condition: "the step 2 gateway refuses these itself"
+  (decision 5).
 - **The usage record** (decision 3) and the leakage cleanup (decision 2.5).
 - **The guard scans arguments in a canonical form** (#256): keys sorted, each value scanned on its own.
 - **Fix the `gateway.Limit` comment** (`internal/gateway/gateway.go:300-302`): a limit can be overshot
@@ -234,9 +243,34 @@ agent passport (#40, ADR 0073). agentgateway keeps the model path.
   **wraps each upstream client's `Connection`**, the pattern of the SDK's `LoggingTransport`, so every
   raw JSON-RPC message (result, error, notification, server-initiated request) passes the guard before
   the SDK dispatches it. Method middleware handles grants, the ask tier and request-side checks. The
-  guard runs in the same process or over a Koinon RPC (open question 1).
-- Only methods on an allowlist are forwarded; any other method is refused. Whether servers may send
-  sampling and elicitation requests is open question 3.
+  guard runs inside the gateway process (placement, below).
+- Only methods on an allowlist are forwarded; any other method is refused.
+- **Placement** (maintainer decision 2026-11-06). The gateway is a separate `koinon-gateway`
+  Deployment from the same image, with its own ServiceAccount, 2+ replicas, a PodDisruptionBudget and
+  drain of open streams on shutdown.
+  - Only the gateway can decrypt stored credentials (provider keys, MCP credentials, sign-in tokens).
+    koinon-api may encrypt (seal) new ones, for example after an OAuth callback lands on the public
+    API, but never decrypts them. The gateway's decrypt key comes from OpenBao, the secret store.
+  - The leak guard and the passport check run inside the gateway as a library from the same image, so
+    there is no network hop per call. koinon-api keeps writing policy to Postgres.
+  - Today's facts this changes: koinon-api mounts the KEK (`charts/koinon/templates/deployments.yaml:123`)
+    and can `get`, `list` and `watch` every Secret in the namespace (`charts/koinon/templates/rbac.yaml:4-11`).
+    A Kubernetes Secret in the same namespace therefore cannot hold the gateway-only key.
+  - Unverified: whether OpenBao can hold a gateway-only key in all three DB modes without new
+    infrastructure (open question 1).
+- **Server-initiated requests** (maintainer decision 2026-11-06). Koinon's gateway owns the client
+  side of every upstream session. At initialize it advertises neither `sampling` nor `elicitation` to
+  upstream servers, and it answers `roots/list` itself with one fixed folder. A sampling or elicitation
+  request that arrives anyway is refused with a JSON-RPC error, logged as a run event, and taints the
+  run (a server that ignores the capabilities it was given is not trusted). An `input_required` reply
+  (MCP 2026-07-28 multi round-trip requests) is refused the same way. If a connector ever needs human
+  input, the question goes to the Koinon inbox for a person to answer, never to the model. Until step
+  2 ships, the interim #254 spec of step 1 pins today's behaviour.
+- **MCP replicas: stateless** (maintainer decision 2026-11-06). Koinon's MCP path runs the go-sdk
+  v1.8.0 in Stateless mode (`StreamableHTTPOptions.Stateless`, `mcp/streamable.go:129-146`). There is
+  no session affinity, and a replica restart drops nothing. It gives up server-initiated requests
+  (refused anyway) and the standing notification stream, so a changed tool list is seen on the next
+  call.
 - Each tool call writes one span and one audit row (target, tool, guard verdict, credential used), with
   no arguments, results or token values.
 - Per-target credentials are attached by Koinon's MCP path: the static credential (ADR 0057 item 5),
@@ -253,8 +287,7 @@ agent passport (#40, ADR 0073). agentgateway keeps the model path.
   - scaling on an open-streams gauge (fixed labels), not on CPU, since idle streams use no CPU;
   - the upstream connection pool sized up from Go's default of 2 idle connections per host;
   - per-stage timeouts;
-  - a shutdown grace period as long as the longest allowed stream, and a PodDisruptionBudget;
-  - MCP session affinity across replicas (open question 5).
+  - a shutdown grace period as long as the longest allowed stream, and a PodDisruptionBudget.
 
 Exit criteria:
 
@@ -304,8 +337,10 @@ forwards bodies and does no format translation.
     the org row above about 30% of its measured limit with batching. They would live inside the ledger
     client, so the gateway's `Reserve` interface does not change, and they follow the expiry rules of
     Envoy's RLQS and Google's Doorman.
-  - Request-rate limits, if open question 4 adds them, use a token bucket inside each replica; they are
-    a safety limit, not money.
+- **Runaway calls: no per-key request rate limit** (maintainer decision 2026-11-06). A circuit breaker
+  per provider pauses calls to that provider, for every agent, when its errors pile up. That breaker
+  and the existing run caps (requests, USD, wall clock; decided 2026-10-31, ADR 0081) bound a runaway
+  loop. Errors are logged and counted with fixed metric labels (ADR 0023).
 - **Ledger unreachable at reserve time: allow the call, charge it afterwards** (decided by the
   maintainer, 2026-11-06). The gateway forwards the call without a reservation and charges it from its
   usage record once the ledger is back, for every call it allowed, idempotent on the request ID. The
@@ -321,8 +356,15 @@ forwards bodies and does no format translation.
 - Streaming usage parsing for each routed format, writing usage records; cut streams follow ADR 0056
   decision 6.
 - Cost comes only from Koinon's prices; agentgateway's catalog, the `gateway_cost_usd` cross-check and
-  the "served when the gateway can price it" fallback of ADR 0056 decision 5 end (open question 2).
-  To fill the default price list, a reviewed import tool may propose entries from LiteLLM's MIT price
+  the "served when the gateway can price it" fallback of ADR 0056 decision 5 end.
+- **Unpriced models: refuse by default** (maintainer decision 2026-11-06). A call for a model with no
+  Koinon price is refused with an error that names the model and says how to price it (ADR 0098), not
+  the bare 404 of ADR 0056 decision 2. A platform admin may set an optional fallback price (ADR 0041
+  decision 7). It is never zero and must include `max_output`, so a call reservation is possible; a
+  zero or missing rate is rejected when saved. Every call charged at the fallback is flagged on its
+  ledger row and shown on the spend page. Charging $0, as LiteLLM and Portkey do, is rejected: a $0
+  call does not count against any budget.
+- To fill the default price list, a reviewed import tool may propose entries from LiteLLM's MIT price
   JSON for a person to approve; nothing is downloaded at runtime.
 - Retries, failover and do-not-retry markers are Koinon's (#112).
 - Model-call spans go from the gateway to the trace router (ADR 0074).
@@ -377,8 +419,8 @@ selectable and keeps running the suite in CI; removing it is a separate, later d
 ### 9. Rules that hold in every step
 
 - **No secrets in sandboxes.** Provider keys, MCP credentials, sign-in tokens and passports exist only
-  in the gateway and koinon-api; the sandbox holds only its placeholder, swapped by the OpenShell
-  supervisor. ADR 0044 stays the only, gated exception.
+  in the gateway and koinon-api (from step 2, koinon-api only seals them and the gateway alone decrypts
+  them); the sandbox holds only its placeholder, swapped by the OpenShell supervisor. ADR 0044 stays the only, gated exception.
 - **Never Kyverno.** Any admission fence a step needs is a native ValidatingAdmissionPolicy.
 - **No CNI-specific features.** The gateway is isolated with standard NetworkPolicy, as today.
 - **Fixed metric labels.** Gateway metrics carry no org, agent, user, ticket or run ID (ADR 0023).
@@ -403,6 +445,13 @@ selectable and keeps running the suite in CI; removing it is a separate, later d
 | Redis or Valkey for budget counters | Budgets are money. Redis replication is asynchronous and can lose acknowledged writes on failover, so Postgres would still be the truth and Koinon would run two stores and a reconcile between them, the class of bug LiteLLM keeps fixing. It adds a stateful service to size, persist, fail over and back up in all three DB modes, and a fail-open or fail-closed choice when it is down (and Redis 8's licence means Valkey, one more supply-chain line). The headroom is not needed: one batched Postgres row per org covers the expected load. |
 | Envoy AI Gateway (Agent Router) as the data plane | Charges after the response and accepts overshoot, needs Redis for its limits, and brings several components plus the vendor coupling this ADR removes. |
 | Envoy in front, with a Koinon `ext_proc` server | Buys connection handling only. Koinon would still write the usage tap, reservation, guard and MCP aggregator, every stream chunk would cross gRPC, and operators would run one more component. Kept as an escape hatch if Go's connection handling ever proves to be the limit. Koinon borrows Envoy's designs instead: RLQS and Doorman lease expiry, and its timeout, stream-limit and drain defaults as a checklist. |
+| Move only the proxy out of koinon-api, keep the KEK there | Buys availability and scaling now, but koinon-api could still decrypt every key, so "keys stay out of the internet-facing process" would be false. Fixing it later means re-encrypting every stored credential and changing RBAC on running installs (ADR 0085). |
+| Run the gateway inside koinon-api | Every API deploy cuts open model streams, the API needs 2+ replicas for the hot path, and one public-API bug exposes every key. |
+| Guard and passport check over a Koinon RPC per call | A network hop and a koinon-api dependency on every message; a library in the gateway process does the same work. |
+| Charge unpriced models $0 (LiteLLM, Portkey) | A $0 call counts against no budget: a silent hole in a hard stop for unattended agents. |
+| Allow MCP sampling and elicitation and taint the run | Taint covers what flows into the model, but the sampled completion and the elicitation answer flow back to the server, and the guard never checks that as an outgoing write. |
+| MCP session affinity (`sessionAffinity: ClientIP`) | Ties sessions to replicas, so a restart drops them; the go-sdk's Stateless mode needs no affinity. |
+| Per-key request rate limits | The run caps already bound one runaway agent, and a per-provider circuit breaker covers a failing provider for every agent at once; a third limit adds settings without a case it alone covers. |
 | Download a price list (LiteLLM's) at runtime | A supply-chain path into cost truth; LiteLLM had two compromised releases in 2026. A reviewed import is used instead. |
 
 ## Consequences
@@ -449,28 +498,17 @@ selectable and keeps running the suite in CI; removing it is a separate, later d
 
 Each gets a tracking issue when this ADR is accepted.
 
-1. **Where the gateway runs**: in koinon-api, or a separate `koinon-gateway` Deployment from the same
-   image. Answered by the step 2 design with #237 and #40. Default: separate, so provider keys and MCP
-   credentials stay out of the internet-facing process, with the guard and token service over Koinon
-   RPC.
-2. **Unpriced models in step 3**: refuse, or charge a platform fallback price (ADR 0041 decision 7).
-   The maintainer decides in v0.3 planning. Default: refuse, unless a fallback price is set.
-3. **MCP sampling and elicitation**: whether servers may send these requests, or Koinon refuses them.
-   Answered by the #254 test in step 1 and fixed in the step 2 design.
-4. **Per-key request rate limits**: whether step 3 adds them, or USD and run caps stay the only
-   bounds. If added, they are a token bucket inside each replica (decided). Answered in the step 3
-   design.
-5. **MCP session affinity across replicas**: Service `sessionAffinity: ClientIP` on the sandbox's
-   address (plain Kubernetes), forwarding to the replica that owns the session, or the go-sdk's
-   stateless mode, whose existence is unverified. Answered in the step 2 design; default `ClientIP`
-   unless stateless mode is confirmed.
-
-(The call reservation details, formerly an open question, are decided in step 3: Postgres only,
-batched, with an allow-and-charge-afterwards rule for a ledger outage.)
-6. **When the agentgateway driver is removed**: a short later ADR, once Koinon's gateway has been the
+1. **OpenBao and the gateway-only key** (unverified): whether OpenBao can hold a key only the gateway
+   can use, in all three DB modes, without new infrastructure. Checked in the step 2 design; the
+   placement decision (step 2) does not change, only how the key is provisioned.
+2. **When the agentgateway driver is removed**: a short later ADR, once Koinon's gateway has been the
    default for one minor and #98's fallback check is done.
-7. **Whether anyone needs Kubernetes mode**: asked on the release checklist before step 3; the answer
+3. **Whether anyone needs Kubernetes mode**: asked on the release checklist before step 3; the answer
    only changes the migration notes, not the plan.
+
+Decided and moved into the decision sections: gateway placement, MCP server-initiated requests and
+MCP replicas (step 2), unpriced models and runaway calls (step 3), all at the maintainer's 2026-11-06
+review; the call reservation details (step 3).
 
 ## Upstream verification
 
@@ -483,7 +521,11 @@ Checked 2026-11-06 in the research reports (Links), from source and docs; nothin
 - `github.com/modelcontextprotocol/go-sdk` v1.8.0 (already in `go.mod`): Streamable HTTP, SSE and
   stdio, client and server, Apache-2.0/MIT. It speaks the 2026-07-28 spec (`latestProtocolVersion`,
   `mcp/shared.go:50-51`), and the Go proxy serves it as a release, not a pre-release. Its transport
-  `Connection` sees every raw JSON-RPC message (`LoggingTransport`, `transport.go:356`).
+  `Connection` sees every raw JSON-RPC message (`LoggingTransport`, `transport.go:356`). It has a
+  Stateless mode (`StreamableHTTPOptions.Stateless`, `mcp/streamable.go:129-146`).
+- OpenCode 2.2.0 declares no sampling capability and in ACP mode cancels MCP elicitations; agentgateway
+  v1.7.0 relays server-initiated requests to legacy clients (MCP server-initiated requests research,
+  Links).
 - Bifrost: the open-source governance plugin has budgets and MCP governance
   (`plugins/governance/main.go:39-45`); its check is read-then-charge (`store.go:2248-2283`). Obot's
   licence is MIT (GitHub metadata).
@@ -502,6 +544,9 @@ Checked 2026-11-06 in the research reports (Links), from source and docs; nothin
   https://claude.ai/artifact/XvE2bhuyVvbnjPrSjpT2BH
 - Research: "Koinon gateway: what is open, why not Redis, scaling, Envoy prior art"
   (`2026-11-06-gateway-scale-redis-envoy.md`, research store)
+- Research (research store, 2026-11-06): "Gateway placement and unpriced models"
+  (`2026-11-06-gateway-placement-unpriced.md`) and "MCP server-initiated requests: refuse, or allow and
+  taint?" (`2026-11-06-mcp-server-initiated-requests.md`)
 - [0040](0040-agentgateway-model-and-mcp-gateway.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md),
   [0049](0049-v01-scope-decisions.md), [0057](0057-mcp-servers.md), [0058](0058-gateway-modes.md),
   [0073](0073-agent-passport.md), [0084](0084-leak-guard.md), [0091](0091-leak-guard-by-destination.md)
