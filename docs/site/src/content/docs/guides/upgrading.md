@@ -244,8 +244,10 @@ Not Ready. The only way back is a restore:
    ```
 
 Everything written after the backup is lost: runs, tasks and ledger entries made since. Home
-checkpoints in the bucket are not restored with the database, so a restored install can list snapshots
-that were newer than the backup. A full, tested restore procedure is not part of this page yet (it
-is tracked in ADR 0085, implementation items 19 and 20).
+checkpoints in the bucket are not restored with the database, so the restored list of checkpoints is
+older than the bucket. Once koinon-agentd is up, rebuild that list from the bucket with
+`koinon-api checkpoints resync --all` (see
+[After a database restore](/guides/home-checkpoints/#after-a-database-restore)). A full, tested restore
+procedure with a drill is not part of this page yet; it is tracked in ADR 0085, implementation item 19.
 
 If the migration failed halfway on your database, restoring the backup is the safe way back too.

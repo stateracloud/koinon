@@ -72,6 +72,44 @@ then up to two older ones, two tries each. If none restores, the run fails and t
 the harness never starts on an empty home. A checkpoint from a higher run epoch than the agent has seen
 is skipped.
 
+## After a database restore
+
+The database lists the checkpoints, and the bucket holds them. After you restore a database dump, the
+list is older than the bucket. It lacks the snapshots written since the dump, and it names snapshots
+that retention or the repository sweep has deleted since. Run this once koinon-agentd is up:
+
+```sh
+kubectl exec deploy/koinon-api -- koinon-api checkpoints resync --all
+```
+
+`--agent <id>` (repeatable) picks agents instead. Each agent's request is audited in its org
+(`home.checkpoints_resync_requested`). koinon-agentd then lists every repository of the agent that is
+neither deleted nor lost with its key, and makes two kinds of change:
+
+- A snapshot that no checkpoint names becomes a complete checkpoint, with the times, generation, run
+  epoch, reason and sandbox it was written with. A snapshot left out is one whose backup is still
+  running, or was given up, or whose tags cannot be read. The summary counts the snapshots left out.
+- A complete checkpoint whose snapshot is gone is marked failed, with an error that names the snapshot.
+  No checkpoint is deleted.
+
+A repository that is missing from the bucket counts as empty if it was due for deletion. If it was not
+due, the resync of that agent gives up and changes nothing, because the bucket is likely not the one
+this database belongs to. A resync also waits while the agent's new repository waits for its seed.
+Running it again changes nothing.
+
+By default the command waits (`--wait`, up to `--timeout`, 30 minutes) and prints progress and a summary.
+It exits non-zero if a resync was given up or replaced by a newer request, or if the timeout passes
+first. Requests that are still pending when the timeout passes stay, and koinon-agentd finishes them.
+koinon-agentd audits each outcome (`home.checkpoints_resynced`, `home.checkpoints_resync_failed`).
+`koinon_agentd_home_checkpoint_resyncs{state}` counts the pending and failed resyncs, and
+`koinon_agentd_home_checkpoint_resync_changes_total{change}` counts the checkpoints added and those
+marked missing.
+
+A resynced checkpoint from a run epoch later than the dump stays skipped by the restore until the
+agent's runs catch up with that epoch, as described under Restore. Repository epochs started after the
+dump (by `keys forget` or `keys new-repositories`) are not in the database and cannot be listed. Run
+those commands again after the restore if they ran after the dump.
+
 ## The archive tier
 
 An agent that has been stopped for N days (7 by default) needs neither its sandbox nor its volume. Once
