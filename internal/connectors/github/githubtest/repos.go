@@ -233,7 +233,7 @@ func (f *Fake) withRepo(perm, level string, h func(http.ResponseWriter, *http.Re
 			writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 			return
 		}
-		if !slices.Contains(info.repos, name) {
+		if !slices.Contains(f.covers(info), name) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 			return
 		}
@@ -259,10 +259,21 @@ func (f *Fake) getRepo(w http.ResponseWriter, _ *http.Request, r *Repo) {
 }
 
 func (f *Fake) repoJSON(r *Repo) map[string]any {
-	return map[string]any{
-		"name": r.Name, "full_name": f.Account + "/" + r.Name, "owner": map[string]string{"login": f.Account},
-		"private": f.Private[r.Name], "default_branch": r.DefaultBranch,
+	visibility := "public"
+	switch {
+	case f.Internal[r.Name]:
+		visibility = "internal"
+	case f.Private[r.Name]:
+		visibility = "private"
 	}
+	out := map[string]any{
+		"name": r.Name, "full_name": f.Account + "/" + r.Name, "owner": map[string]string{"login": f.Account},
+		"private": f.Private[r.Name] || f.Internal[r.Name], "visibility": visibility, "default_branch": r.DefaultBranch,
+	}
+	if f.OmitVisibility {
+		delete(out, "visibility")
+	}
+	return out
 }
 
 // listInstallationRepos serves GET /installation/repositories as GitHub does: the
@@ -300,7 +311,7 @@ func (f *Fake) listInstallationRepos(w http.ResponseWriter, req *http.Request) {
 		page = n
 	}
 	f.listCalls++
-	all := info.repos
+	all := f.covers(info)
 	start := min((page-1)*perPage, len(all))
 	end := min(start+perPage, len(all))
 	repos := make([]map[string]any, 0, end-start)

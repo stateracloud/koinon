@@ -33,6 +33,8 @@ import (
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/auth/oidctest"
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
+	"github.com/stateracloud/koinon/internal/codehost/scopesync"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
@@ -122,6 +124,10 @@ type envOptions struct {
 	github *github.Client
 	ghFake *githubtest.Fake
 	noKeys bool
+	// scopeSync reads a code-host connection's repositories into the org's code-host scope when it is
+	// created, re-keyed or tested, as koinon-api does. Off by default: the reading audits, and runs
+	// in the background past the spec.
+	scopeSync bool
 	// allowedHosts are exempt from the connection base URL policy (a test server on 127.0.0.1).
 	allowedHosts []string
 	// logs, when set, receives the services' and auth's logs as well.
@@ -247,7 +253,13 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	traces, err := tracedest.New(e.pool, catalogKeys, tracePolicy, slog.New(slog.NewTextHandler(logOut, nil)))
 	Expect(err).NotTo(HaveOccurred())
 	e.traces = traces
+	hosts := providers.New(opts.github)
+	var scopeSync services.ScopeSyncer
+	if opts.scopeSync {
+		scopeSync = scopesync.New(e.pool, hosts, openerOf(opts.keys), slog.New(slog.NewTextHandler(logOut, nil)))
+	}
 	rpc := services.New(e.pool, services.Options{
+		Hosts: hosts, ScopeSync: scopeSync,
 		Prices:     pricing.Embedded(),
 		Traces:     traces,
 		Catalog:    catalog.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),

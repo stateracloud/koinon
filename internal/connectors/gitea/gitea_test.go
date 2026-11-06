@@ -162,6 +162,27 @@ var _ = Describe("the Gitea provider", func() {
 			Expect(all.Repositories).To(HaveLen(2))
 		})
 
+		It("reports private only for a private repository, and public when unsure (ADR 0091)", func() {
+			e := newEnv(func(f *fakegitea.Fake) {
+				f.SetVisibility("lib", "public")
+				f.AddRepo("hub")
+				f.Collaborate("koinon-bot", "hub", "read")
+				f.SetVisibility("hub", "internal") // public in a private organization
+			})
+			a, err := e.host.Open(ctx, e.conn, read)
+			Expect(err).NotTo(HaveOccurred())
+			all, err := a.Repositories(ctx, 1, codehost.MaxPerPage)
+			Expect(err).NotTo(HaveOccurred())
+			got := map[string]string{}
+			for _, r := range all.Repositories {
+				got[r.FullName] = r.Visibility
+			}
+			Expect(got).To(Equal(map[string]string{"acme/app": "private", "acme/lib": "public", "acme/hub": "public"}))
+			one, err := a.Repository(ctx, app)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(one.Visibility).To(Equal(codehost.VisibilityPrivate))
+		})
+
 		It("pages across Gitea's 50-item pages", func() {
 			e := newEnv(func(f *fakegitea.Fake) {
 				for i := 0; i < 52; i++ {

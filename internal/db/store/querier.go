@@ -126,6 +126,8 @@ type Querier interface {
 	// run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
 	// runs_sandbox_waiting.
 	ClearSandboxWaitForAgent(ctx context.Context, arg ClearSandboxWaitForAgentParams) (int64, error)
+	// When one connection's repositories were last read: -infinity when nothing of it is stored.
+	CodeHostConnectionReadAt(ctx context.Context, arg CodeHostConnectionReadAtParams) (pgtype.Timestamptz, error)
 	// approved -> executed | failed, by the executor that claimed it (fenced on
 	// executions). No row: another executor took it over.
 	CompleteApprovalExecution(ctx context.Context, arg CompleteApprovalExecutionParams) (ApprovalRequest, error)
@@ -579,6 +581,11 @@ type Querier interface {
 	// Whether the user may answer questions in the org: role member or higher.
 	IsOrgMember(ctx context.Context, arg IsOrgMemberParams) (bool, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
+	// The first lock of a scope replacement: the connection row, FOR KEY SHARE, which the inserts'
+	// foreign key check takes anyway. Taking it first keeps the order every path uses (connection row,
+	// then the scope lock, then the repository rows), so a replacement never holds the scope lock while
+	// it waits for a SetConnectionSecret or DeleteConnection that holds the row and waits for the lock.
+	KeyShareConnection(ctx context.Context, arg KeyShareConnectionParams) (pgtype.UUID, error)
 	// The newest complete checkpoint of the home's lineage, whichever sandbox took it. A sandbox no
 	// harness ever ran in (home_dirtied_at NULL) holds exactly what this checkpoint holds, so it is
 	// the restore of a recreation or archive of that sandbox.
@@ -645,6 +652,8 @@ type Querier interface {
 	// The read path (AuditService.List, GET /admin/v1/audit): newest first by id, optionally narrowed
 	// by time range, action prefix and actor. before_id is the cursor, the last id of the previous page.
 	ListAuditEventsFiltered(ctx context.Context, arg ListAuditEventsFilteredParams) ([]AuditEvent, error)
+	// One connection's part of the scope, to compare a new reading with.
+	ListCodeHostConnectionRepos(ctx context.Context, arg ListCodeHostConnectionReposParams) ([]ListCodeHostConnectionReposRow, error)
 	// Newest first, for the restore. A checkpoint from a higher ownership epoch than any run of the
 	// agent has seen is not restored (ADR 0032).
 	ListCompleteHomeCheckpoints(ctx context.Context, arg ListCompleteHomeCheckpointsParams) ([]HomeCheckpoint, error)
@@ -765,6 +774,9 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	// The reconciler walks orgs one at a time, so every later query is org-scoped.
 	ListOrgsToReconcile(ctx context.Context) ([]ListOrgsToReconcileRow, error)
+	// The code-host scope refresh: finds every org that has a live connection of one of these connector
+	// types, to refresh its repositories' visibility. Across orgs, like the question sweeps.
+	ListOrgsWithCodeHostConnections(ctx context.Context, connectors []string) ([]pgtype.UUID, error)
 	// Orgs with an open question past its expiry at @now or a reminder due at @now.
 	ListOrgsWithDueQuestions(ctx context.Context, now pgtype.Timestamptz) ([]pgtype.UUID, error)
 	// The settler: every org with a provisional entry due for an attempt, the longest waiting first.
@@ -878,6 +890,9 @@ type Querier interface {
 	// principal and sync IdP groups at login), always keyed by user_id.
 	// Serialises bootstrap across API replicas for the rest of the transaction.
 	LockBootstrap(ctx context.Context) error
+	// Serialises the replacements of one connection's repositories until the transaction ends, so a
+	// reading is compared with, and written after, the one stored before it.
+	LockCodeHostConnectionScope(ctx context.Context, arg LockCodeHostConnectionScopeParams) error
 	// Serializes the start of a repository epoch for the agent.
 	LockHomeRepository(ctx context.Context, arg LockHomeRepositoryParams) (HomeRepository, error)
 	// The budgets of a run, locked for the rest of the transaction so two replicas charging one run at
