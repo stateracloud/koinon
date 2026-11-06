@@ -16,6 +16,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 
 	"github.com/stateracloud/koinon/internal/checkpoint"
 )
@@ -178,5 +179,93 @@ var _ = Describe("Writer", func() {
 		w.Limits = checkpoint.Limits{MaxBytes: 4}
 		_, err := w.Backup(ctx, prefix, "koinon_test_not-a-real-token", home(), checkpoint.Meta{})
 		Expect(err).To(MatchError(checkpoint.ErrTooLarge))
+	})
+
+	// checkpoints resync (ADR 0085 decision 17) rebuilds home_checkpoints from these listings.
+	Describe("Snapshots", func() {
+		const pass = "koinon_test_not-a-real-token"
+
+		It("lists every complete snapshot, oldest first, with what its tags say", func() {
+			r1, err := w.Backup(ctx, prefix, pass, home(), checkpoint.Meta{CheckpointID: "c1", Generation: "g1", Epoch: 3, Reason: "stop", Sandbox: "sb-1"})
+			Expect(err).NotTo(HaveOccurred())
+			r2, err := w.Backup(ctx, prefix, pass, home(entry{name: "./notes/b.md", body: "second"}), checkpoint.Meta{CheckpointID: "c2", Generation: "g1"})
+			Expect(err).NotTo(HaveOccurred())
+
+			got, err := w.Snapshots(ctx, prefix, pass)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(HaveLen(2))
+			Expect(got[0].ID).To(Equal(r1.SnapshotID))
+			Expect(got[1].ID).To(Equal(r2.SnapshotID))
+			Expect(got[0].MetaErr).NotTo(HaveOccurred())
+			Expect(got[0].Meta).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"CheckpointID": Equal("c1"), "Generation": Equal("g1"), "Epoch": BeEquivalentTo(3), "Reason": Equal("stop"), "Sandbox": Equal("sb-1"),
+			}))
+			Expect(got[1].Meta.Reason).To(BeEmpty(), "an empty reason is not stamped")
+			Expect(got[0].Bytes).To(Equal(r1.Bytes), "the size of its files, as the backup counted them")
+			Expect(got[0].Start).NotTo(BeZero())
+			Expect(got[0].End).NotTo(BeTemporally("<", got[0].Start))
+			Expect(got[1].Start).NotTo(BeTemporally("<", got[0].Start))
+		})
+
+		It("tells a prefix with no repository apart from an empty listing, and creates nothing", func() {
+			_, err := w.Snapshots(ctx, prefix, pass)
+			Expect(err).To(MatchError(checkpoint.ErrNoRepositoryInBucket))
+			_, err = w.Snapshots(ctx, prefix, pass)
+			Expect(err).To(MatchError(checkpoint.ErrNoRepositoryInBucket), "the first listing created no repository")
+		})
+
+		It("does not list a repository with another password", func() {
+			_, err := w.Backup(ctx, prefix, pass, home(), checkpoint.Meta{})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = w.Snapshots(ctx, prefix, "koinon_test_wrong")
+			Expect(err).To(HaveOccurred())
+			Expect(err).NotTo(MatchError(checkpoint.ErrNoRepositoryInBucket))
+		})
+
+		It("lists one epoch's repository only, and a deleted one as gone", func() {
+			org, agent := "0198a000-0000-7000-8000-000000000001", "0198a000-0000-7000-8000-000000000002"
+			e1 := checkpoint.EpochPrefix(org, agent, 1)
+			_, err := w.Backup(ctx, prefix, pass, home(), checkpoint.Meta{CheckpointID: "c0"})
+			Expect(err).NotTo(HaveOccurred())
+			s1, err := w.Backup(ctx, e1, pass+"-1", home(), checkpoint.Meta{CheckpointID: "c1"})
+			Expect(err).NotTo(HaveOccurred())
+			got, err := w.Snapshots(ctx, e1, pass+"-1")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(HaveLen(1))
+			Expect(got[0].ID).To(Equal(s1.SnapshotID))
+			Expect(got[0].Meta.CheckpointID).To(Equal("c1"))
+
+			_, err = w.DeleteRepository(ctx, prefix)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = w.Snapshots(ctx, prefix, pass)
+			Expect(err).To(MatchError(checkpoint.ErrNoRepositoryInBucket))
+		})
+
+		It("leaves out a snapshot kopia's retention deleted", func() {
+			var last checkpoint.Result
+			for i := range checkpoint.Retention.Latest + 2 {
+				var err error
+				last, err = w.Backup(ctx, prefix, pass, home(entry{name: "./notes/n.md", body: strings.Repeat("x", i+1)}), checkpoint.Meta{CheckpointID: fmt.Sprintf("c%d", i)})
+				Expect(err).NotTo(HaveOccurred())
+			}
+			got, err := w.Snapshots(ctx, prefix, pass)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(got)).To(BeNumerically("<", checkpoint.Retention.Latest+2))
+			Expect(got[len(got)-1].ID).To(Equal(last.SnapshotID))
+		})
+	})
+
+	It("writes no snapshot when Ready refuses the staged home", func() {
+		bad := errors.New("tar in the sandbox exited with 2")
+		calls := 0
+		_, err := w.Backup(ctx, prefix, "koinon_test_not-a-real-token", home(), checkpoint.Meta{Ready: func() error { calls++; return bad }})
+		Expect(err).To(MatchError(bad))
+		Expect(calls).To(Equal(1))
+		_, err = w.Snapshots(ctx, prefix, "koinon_test_not-a-real-token")
+		Expect(err).To(MatchError(checkpoint.ErrNoRepositoryInBucket), "not even the repository was written")
+
+		r, err := w.Backup(ctx, prefix, "koinon_test_not-a-real-token", home(), checkpoint.Meta{Ready: func() error { return nil }})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(w.Verify(ctx, prefix, "koinon_test_not-a-real-token", r.SnapshotID)).To(Succeed())
 	})
 })

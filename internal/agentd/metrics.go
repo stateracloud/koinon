@@ -51,6 +51,12 @@ type Metrics struct {
 	// HomeRepositorySeeds is how many new home repositories wait for their seed (state pending) and
 	// how many seeds were given up (state failed), after keys new-repositories (#86).
 	HomeRepositorySeeds *prometheus.GaugeVec
+	// HomeCheckpointResyncs is how many agents' checkpoint resyncs wait (state pending) and how many
+	// were given up (state failed), after checkpoints resync (#89). HomeCheckpointResyncChanges
+	// counts the checkpoints resyncs added (change added) and marked failed because their snapshot
+	// is gone (change missing).
+	HomeCheckpointResyncs       *prometheus.GaugeVec
+	HomeCheckpointResyncChanges *prometheus.CounterVec
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered).
@@ -95,6 +101,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		HomeRepositorySeeds: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "koinon_agentd_home_repository_seeds", Help: "New home repositories after keys new-repositories: state pending waits for koinon-agentd to copy the agent's newest checkpoint in, state failed was given up and keeps the old repository (needs a person; the audit log names each).",
 		}, []string{"state"}),
+		HomeCheckpointResyncs: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "koinon_agentd_home_checkpoint_resyncs", Help: "Agents' home checkpoints to rebuild from the bucket after checkpoints resync: state pending waits for koinon-agentd, state failed was given up and left the agent's checkpoints as they were (the audit log names each).",
+		}, []string{"state"}),
+		HomeCheckpointResyncChanges: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_agentd_home_checkpoint_resync_changes_total", Help: "Home checkpoints changed by checkpoints resync: change added for a snapshot no checkpoint named, change missing for a complete checkpoint whose snapshot is gone (marked failed).",
+		}, []string{"change"}),
 		SandboxWait: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name: "koinon_agentd_sandbox_wait_duration_seconds", Help: "Time a run waited for its agent's sandbox to be ready, whatever the result.",
 			Buckets: []float64{0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300},
@@ -128,11 +140,15 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	for _, state := range []string{"pending", "failed"} {
 		m.HomeRepositorySeeds.WithLabelValues(state)
+		m.HomeCheckpointResyncs.WithLabelValues(state)
+	}
+	for _, change := range []string{"added", "missing"} {
+		m.HomeCheckpointResyncChanges.WithLabelValues(change)
 	}
 	if reg != nil {
 		reg.MustRegister(m.TaintReports, m.Claimed, m.Finished, m.Takeovers, m.SandboxWait, m.ModelWait, m.Requeued,
 			m.SandboxWaitCap, m.WrapUpNotices, m.TimeLimitStops, m.TraceSpansDropped, m.TraceSpansExported,
-			m.RunEventWriteFailures, m.SweepRefused, m.HomeRepositorySeeds)
+			m.RunEventWriteFailures, m.SweepRefused, m.HomeRepositorySeeds, m.HomeCheckpointResyncs, m.HomeCheckpointResyncChanges)
 	}
 	return m
 }

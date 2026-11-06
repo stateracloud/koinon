@@ -33,7 +33,8 @@ import (
 type fakeHome struct {
 	mu    sync.Mutex
 	files map[string]string
-	// failRead makes the backup's tar fail with exit code 2.
+	// failRead makes the backup's tar fail with exit code 2, after it wrote an archive of the files
+	// it could read (as GNU tar does on a read error).
 	failRead bool
 	// dests and names are what the uploads extracted: their destination directories and the entry
 	// names of the archives.
@@ -90,10 +91,6 @@ func (h *fakeHome) tar(args []string, stdin io.Reader, stdout, stderr io.Writer)
 	defer h.mu.Unlock()
 	switch {
 	case slices.Contains(args, "-cf"):
-		if h.failRead {
-			_, _ = io.WriteString(stderr, "tar: /sandbox: Input/output error")
-			return 2
-		}
 		tw := tar.NewWriter(stdout)
 		_ = tw.WriteHeader(&tar.Header{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755})
 		for name, body := range h.files {
@@ -101,6 +98,10 @@ func (h *fakeHome) tar(args []string, stdin io.Reader, stdout, stderr io.Writer)
 			_, _ = io.WriteString(tw, body)
 		}
 		_ = tw.Close()
+		if h.failRead {
+			_, _ = io.WriteString(stderr, "tar: /sandbox: Input/output error")
+			return 2
+		}
 		return 0
 	}
 	_, _ = io.WriteString(stderr, "tar: unexpected arguments")
@@ -423,6 +424,9 @@ var _ = Describe("home checkpoints", func() {
 		e.pool("agentd-a", cps(ctx))
 		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusFailed))
 		Expect(checkpointOf(ctx, id)().Error.String).To(ContainSubstring("Input/output error"))
+		By("the home tar did not read whole is not in the bucket either: checkpoints resync records what is there")
+		_, err := writer.Snapshots(ctx, checkpoint.Prefix(e.org.String(), e.agent.ID.String()), "koinon_test_not-a-real-token")
+		Expect(err).To(MatchError(checkpoint.ErrNoRepositoryInBucket))
 	})
 
 	It("does not back up a sandbox that is waiting for its restore", func(ctx SpecContext) {

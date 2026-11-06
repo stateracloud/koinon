@@ -293,12 +293,28 @@ func (p *Pool) copyCheckpoint(ctx context.Context, src, dst checkpoint.Repositor
 		_ = pw.CloseWithError(err) // nil closes with io.EOF
 		restored <- err
 	}()
+	var rerr error
+	gotRestore := false
 	res, err := c.Store.Backup(actx, dst.Prefix, dst.Password, pr, checkpoint.Meta{
 		CheckpointID: cp.ID.String(), Generation: cp.Generation, Epoch: cp.Epoch,
+		Reason: string(cp.Reason), Sandbox: cp.SandboxID,
+		// The source must have been read whole before the copy's snapshot is written: a snapshot of
+		// a stream that ended early is not the source's home, and checkpoints resync records what
+		// the bucket holds.
+		Ready: func() error {
+			_, _ = io.Copy(io.Discard, pr) // the archive's padding, up to the restore's end
+			rerr, gotRestore = <-restored, true
+			if rerr != nil {
+				return fmt.Errorf("reading the source snapshot: %w", rerr)
+			}
+			return nil
+		},
 	})
 	// The backup stops reading at the archive's end or on an error: unblock the writer either way.
 	_ = pr.CloseWithError(errors.New("the backup ended"))
-	rerr := <-restored
+	if !gotRestore {
+		rerr = <-restored
+	}
 	if err != nil {
 		return checkpoint.Result{}, err
 	}

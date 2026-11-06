@@ -488,7 +488,7 @@ Titles only here; each is opened after this ADR is accepted.
 17. keys: new kopia repository per agent after a compromise, with S3 credential rotation (#64)
 18. docs: secret-keys runbook covers home repositories, trace credentials, KMS, loss and compromise (#64)
 19. docs: manual backup and restore procedure (`pg_dump` plus key export) for the cnpg and external modes
-20. checkpoints: `checkpoints resync` after a database restore
+20. checkpoints: `checkpoints resync` after a database restore (#89)
 21. e2e: automated backup-and-restore step in the nightly kind run
 22. home lab: run the v0.1.0 restore drill and record RTO and RPO
 

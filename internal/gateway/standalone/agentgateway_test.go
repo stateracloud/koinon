@@ -30,12 +30,10 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/gatewaytest"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/testing/agentgatewayimage"
 	"github.com/stateracloud/koinon/internal/testing/containerhost"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
-
-// AgentgatewayImage is the agentgateway release Koinon targets (ADR 0048).
-const AgentgatewayImage = "cr.agentgateway.dev/agentgateway:v1.7.0"
 
 var options = standalone.Options{DatabaseURL: "sqlite:///tmp/agentgateway.db?mode=rwc"}
 
@@ -80,7 +78,7 @@ func startStandalone(ctx context.Context, hostPorts []int, files map[string]stri
 	if err := file.Deliver(ctx, first, ""); err != nil {
 		return nil, err
 	}
-	ctr, err := testcontainers.Run(ctx, AgentgatewayImage,
+	ctr, err := testcontainers.Run(ctx, agentgatewayimage.Ref(),
 		testcontainers.WithCmd("-f", "/cfg/config.yaml"),
 		testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
 		testcontainers.WithHostPortAccess(hostPorts...),
@@ -314,7 +312,7 @@ var _ = Describe("golden files", func() {
 		Expect(os.Chmod(otlp, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(otlp, "token"), []byte("koinon_test_not-a-real-token"), 0o644)).To(Succeed())
 		for _, f := range fixtures() {
-			ctr, err := testcontainers.Run(ctx, AgentgatewayImage,
+			ctr, err := testcontainers.Run(ctx, agentgatewayimage.Ref(),
 				testcontainers.WithCmd("--validate-only", "-f", "/cfg/"+f.name+".yaml"),
 				testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
 					hc.Binds = append(hc.Binds, dir+":/cfg:ro", secrets+":/secrets/upstream:ro", otlp+":/secrets/otlp:ro")
@@ -375,7 +373,7 @@ var _ = Describe("agentgateway v1.7.0 anthropic-version header (ADR 0069)", func
 		cfg := "gateways:\n  default:\n    port: 4000\nconfig:\n  readinessAddr: '[::]:15021'\nllm:\n  models:\n" + model("pinned", true) + model("unpinned", false)
 		Expect(os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o644)).To(Succeed())
 
-		ctr, err := testcontainers.Run(ctx, AgentgatewayImage,
+		ctr, err := testcontainers.Run(ctx, agentgatewayimage.Ref(),
 			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
 			testcontainers.WithExposedPorts("4000/tcp", "15021/tcp"),
 			testcontainers.WithHostPortAccess(portOf(upstream)),
