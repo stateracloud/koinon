@@ -43,6 +43,7 @@ import (
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/providerusage"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/schemagate"
@@ -222,6 +223,14 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	safego.Go(ctx, log, "spend-settler", settler.Run)
+	// Direct provider keys with a cost API key are reconciled against the provider's cost API once
+	// a day (ADR 0056, amendment 2026-11-06); one replica at a time (an advisory lock).
+	costSources := providerusage.DefaultCosts(nil)
+	costs := &ledger.CostReconciler{
+		DB: pool, Keys: keyring, Sources: costSources, Log: log,
+		Metrics: ledger.NewCostMetrics(reg, costSources.Types()),
+	}
+	safego.Go(ctx, log, "cost-reconciliation", costs.Run)
 	err = r.Run(ctx)
 	log.Info("stopping koinon-reconciler")
 	return err

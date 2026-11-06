@@ -50,6 +50,7 @@ func (r lostRule) set(c Column) string { return c.Column + " = NULL, " + r.mark 
 // does after its retention (status expired, the envelope dropped).
 var lostRules = map[Column]lostRule{
 	{catalog.ProvidersTable, catalog.KeyColumn}:                {markLost, "providers"},
+	{catalog.ProvidersTable, catalog.CostKeyColumn}:            {"cost_api_key_lost_at = now()", "providerCostKeys"},
 	{connections.Table, connections.Column}:                    {markLost, "connections"},
 	{savedwork.Table, savedwork.Column}:                        {"status = 'expired'", "savedWork"},
 	{mcpservers.ServersTable, mcpservers.CredentialColumn}:     {markLost, "mcpServers"},

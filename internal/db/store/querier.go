@@ -384,6 +384,9 @@ type Querier interface {
 	// (not estimated) requests of a model, and how many there were.
 	GetCalibration(ctx context.Context, arg GetCalibrationParams) (GetCalibrationRow, error)
 	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
+	// The connection a server is being linked to, locked against a change of its host (a declared
+	// connection's baseUrl) until the link is written, so the host check sees the host the link keeps.
+	GetConnectionForMCPLink(ctx context.Context, arg GetConnectionForMCPLinkParams) (Connection, error)
 	GetConnectionForUpdate(ctx context.Context, arg GetConnectionForUpdateParams) (Connection, error)
 	GetDedupeRecord(ctx context.Context, arg GetDedupeRecordParams) (DedupeRecord, error)
 	GetDefaultPriceList(ctx context.Context, version string) (DefaultPriceList, error)
@@ -563,6 +566,8 @@ type Querier interface {
 	// own computation from the raw usage and the dated price; gateway_cost_usd is
 	// what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
 	// for every entry that is not provisional, so a caller that holds nothing passes nothing.
+	// provider_id is the provider that served the request, when Koinon knows its model; the daily cost
+	// reconciliation sums a provider's entries by it.
 	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
 	InsertSpendEntryRevision(ctx context.Context, arg InsertSpendEntryRevisionParams) error
 	// Queues a provisional entry for the settler. Without a response ID it is a hold until the deadline.
@@ -648,6 +653,14 @@ type Querier interface {
 	// Connections that still name a Kubernetes Secret: not yet moved, or moved but the old Secret not
 	// yet deleted. Startup migration, across orgs.
 	ListConnectionsToMigrate(ctx context.Context) ([]Connection, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The daily reconciliation of the ledger against the direct providers' cost APIs (issue #47, ADR
+	// 0056 amendment 2026-11-06). Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped), except the one listed in crossOrgQueries.
+	// Every provider of every org with a cost API key, in a type that has a cost source; the
+	// reconciliation asks each of them once a day.
+	ListCostReportProviders(ctx context.Context, types []string) ([]ListCostReportProvidersRow, error)
 	// The most recently synced content of each template.
 	ListCurrentTemplates(ctx context.Context) ([]Template, error)
 	// Every default list version this installation has run, newest first.
@@ -783,6 +796,8 @@ type Querier interface {
 	// (plan item PV2). Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
 	ListPriceOverrides(ctx context.Context, orgID pgtype.UUID) ([]PriceOverride, error)
+	// A provider's reconciled days from @since, newest first.
+	ListProviderCostReconciliations(ctx context.Context, arg ListProviderCostReconciliationsParams) ([]ProviderCostReconciliation, error)
 	ListProviderEchoChecks(ctx context.Context, orgID pgtype.UUID) ([]ProviderEchoCheck, error)
 	ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
 	// The active recipients of these questions, with names, for the API.
@@ -938,6 +953,8 @@ type Querier interface {
 	// running -> parked. The owner releases the run; a later claim resumes it
 	// after ResolveRunPark.
 	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)
+	// The ledger's cost of one provider's entries in [@since, @until), with how many there were.
+	ProviderLedgerForDay(ctx context.Context, arg ProviderLedgerForDayParams) (ProviderLedgerForDayRow, error)
 	// The same for an org whose model objects the gateway rejected: nothing new is recorded, rows of
 	// models the state no longer serves are removed.
 	PruneGatewayServedModels(ctx context.Context, arg PruneGatewayServedModelsParams) error
@@ -1108,6 +1125,10 @@ type Querier interface {
 	// Records the result of a re-test, only if the configuration is the one that was tested. A deleted
 	// destination matches nothing and is not brought back.
 	SetPlatformTraceDestinationTest(ctx context.Context, arg SetPlatformTraceDestinationTestParams) (int64, error)
+	// Sets, replaces or (both NULL) removes a provider's cost API key and scope. Writing the key ends a
+	// lost one. The scope can change alone (@set_key false keeps the envelope). A key stored where none
+	// was starts cost_reconcile_since; a replaced key keeps it; a removed key clears it.
+	SetProviderCostKey(ctx context.Context, arg SetProviderCostKeyParams) (Provider, error)
 	SetProviderDisabled(ctx context.Context, arg SetProviderDisabledParams) error
 	// Records, before the prompt is sent, the task timeline seq through which
 	// the task's messages are in it.
@@ -1219,6 +1240,8 @@ type Querier interface {
 	// The platform destination has one writer at a time: a platform admin. A change bumps config_version.
 	// @set_test as for UpdateTraceDestination.
 	UpsertPlatformTraceDestination(ctx context.Context, arg UpsertPlatformTraceDestinationParams) (PlatformTraceDestination, error)
+	// Records (or, on a later pass, replaces) the reconciliation of one provider's day.
+	UpsertProviderCostReconciliation(ctx context.Context, arg UpsertProviderCostReconciliationParams) (ProviderCostReconciliation, error)
 	// The latest echo check of a provider replaces the one before it.
 	UpsertProviderEchoCheck(ctx context.Context, arg UpsertProviderEchoCheckParams) (ProviderEchoCheck, error)
 	// SPDX-License-Identifier: Apache-2.0

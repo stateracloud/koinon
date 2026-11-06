@@ -96,6 +96,14 @@ A derived class is decided per call from the address arguments only:
   an owner outside the org makes the call `external-high`. So an issue in
   `northwind/platform-handbook` is internal and never counts as a leak; a PR on a public repo is
   external-high, which is what the Invariant case needs.
+
+  The list is that of the connection the server is linked to, so a server may be linked only to a
+  connection of its own code host (#117). The server's URL must be https and name the connection's
+  own web or API host, or, for a connection on the connector's default host only, one of the
+  connector's `mcpHosts` (`api.githubcopilot.com` for github.com). A GitHub Enterprise Server or
+  Gitea connection accepts only its own host. Hosts are compared by name without the port. A change
+  of a connection's `baseUrl` unlinks the servers it no longer serves, audited as
+  `mcp_server.data_class.reset`.
 - **Fetch.** The tool names its URL argument. The host is the address. A host on the org's
   fetch-trusted list (koinon-private#350's contract: an exact lower-case name, or a `*.example.com` wildcard that
   covers subdomains at any depth but not `example.com` itself) makes the call `internal`. Any other

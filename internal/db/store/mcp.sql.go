@@ -206,6 +206,46 @@ func (q *Queries) GetAgentMCPServer(ctx context.Context, arg GetAgentMCPServerPa
 	return i, err
 }
 
+const getConnectionForMCPLink = `-- name: GetConnectionForMCPLink :one
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at FROM connections
+WHERE org_id = $1 AND id = $2
+FOR SHARE
+`
+
+type GetConnectionForMCPLinkParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// The connection a server is being linked to, locked against a change of its host (a declared
+// connection's baseUrl) until the link is written, so the host check sees the host the link keeps.
+func (q *Queries) GetConnectionForMCPLink(ctx context.Context, arg GetConnectionForMCPLinkParams) (Connection, error) {
+	row := q.db.QueryRow(ctx, getConnectionForMCPLink, arg.OrgID, arg.ID)
+	var i Connection
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Connector,
+		&i.DisplayName,
+		&i.Config,
+		&i.SecretName,
+		&i.SecretFingerprint,
+		&i.Status,
+		&i.LastTestedAt,
+		&i.LastTest,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SecretEnvelope,
+		&i.Source,
+		&i.ManagedBySecret,
+		&i.DeclaredVersion,
+		&i.RemovedAt,
+		&i.CredentialLostAt,
+	)
+	return i, err
+}
+
 const getMCPServer = `-- name: GetMCPServer :one
 SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at FROM mcp_servers
 WHERE org_id = $1 AND id = $2

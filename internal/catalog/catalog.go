@@ -131,6 +131,12 @@ type Provider struct {
 	// AnthropicWorkspaceID is the workspace the gateway names for the provider's models (type
 	// anthropic only). An identifier, not a credential.
 	AnthropicWorkspaceID string `json:"anthropicWorkspaceId,omitempty"`
+	// HasCostKey is whether a cost API key is stored; CostScope is the workspace, project or API key
+	// whose cost the daily reconciliation compares with the ledger (ADR 0056, amendment 2026-11-06).
+	HasCostKey bool   `json:"hasCostKey"`
+	CostScope  string `json:"costScope,omitempty"`
+	// CostKeyLostAt is set when the cost API key was lost with its KEK; it must be entered again.
+	CostKeyLostAt *time.Time `json:"costKeyLostAt,omitempty"`
 	// Formats are the model formats the provider's type offers, preferred first (ADR 0069).
 	Formats   []string  `json:"formats"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -205,6 +211,7 @@ func toProvider(p store.Provider) Provider {
 		AnthropicWorkspaceID: p.AnthropicWorkspaceID.String, Formats: offered,
 		Source: string(p.Source), ManagedBySecret: p.ManagedBySecret.String, DisabledReason: p.DisabledReason.String,
 		Removed: p.RemovedAt.Valid, CredentialLostAt: optTime(p.CredentialLostAt), CreatedAt: p.CreatedAt.Time, UpdatedAt: p.UpdatedAt.Time,
+		HasCostKey: len(p.CostApiKey) > 0, CostScope: p.CostScope.String, CostKeyLostAt: optTime(p.CostApiKeyLostAt),
 	}
 }
 
@@ -291,7 +298,7 @@ func ValidateModel(name string, guard bool, providerType string) error {
 func providerSummary(p store.Provider) map[string]any {
 	return map[string]any{
 		"name": p.Name, "type": p.Type, "url": p.Url, "hasKey": len(p.ApiKey) > 0, "source": string(p.Source),
-		"anthropicWorkspaceId": p.AnthropicWorkspaceID.String,
+		"anthropicWorkspaceId": p.AnthropicWorkspaceID.String, "hasCostKey": len(p.CostApiKey) > 0, "costScope": p.CostScope.String,
 	}
 }
 

@@ -26,6 +26,7 @@ import {
   type SetToolTwoApproversRequest,
   type UpdateServerRequest,
 } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
+import { githubConnectorType } from '@/test-fixtures'
 import { renderApp, whoAmI } from '@/test-utils'
 
 const checked = timestampFromMs(Date.now() - 60_000)
@@ -96,7 +97,15 @@ function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failD
   const current = new Map(tools.map((t) => [`${t.serverId}/${t.name}`, t]))
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
-    service(ConnectionService, { listConnections: () => ({ connections: [create(ConnectionSchema, { id: 'c-gh', connector: 'github', displayName: 'Company GitHub' })] }) })
+    service(ConnectionService, {
+      listConnections: () => ({
+        connections: [
+          create(ConnectionSchema, { id: 'c-gh', connector: 'github', displayName: 'Company GitHub' }),
+          create(ConnectionSchema, { id: 'c-slack', connector: 'slack', displayName: 'Team Slack' }),
+        ],
+      }),
+      listConnectorTypes: () => ({ connectorTypes: [githubConnectorType()] }),
+    })
     service(AgentService, { getAgent: () => ({ agent: create(AgentSchema, { id: 'a-1', orgId: 'org-1', displayName: 'Helper', status: AgentStatus.ACTIVE, latestVersion: 1, activeVersion: 1 }) }) })
     service(LeakGuardService, {
       getLeakGuard: () => ({ leakGuard: { matchThreshold: 24, defaultMatchThreshold: 24, minMatchThreshold: 12, maxMatchThreshold: 256, trustedHosts: [] } }),
@@ -460,7 +469,11 @@ describe('Agent MCP allowlist', () => {
     const d = within(within(list).getByRole('region', { name: 'docs' }))
     expect(d.getByText(/No code-host connection: its code-host tools count as external, free text/)).toBeInTheDocument()
     await userEvent.click(d.getByRole('button', { name: 'Change data class of docs' }))
-    await userEvent.selectOptions(await d.findByLabelText('Code-host connection'), 'c-gh')
+    const select = await d.findByLabelText('Code-host connection')
+    // Only code-host connections can be linked: a Slack connection is not offered (#117).
+    await waitFor(() => expect(within(select).getByRole('option', { name: /Company GitHub/ })).toBeInTheDocument())
+    expect(within(select).queryByRole('option', { name: /Team Slack/ })).not.toBeInTheDocument()
+    await userEvent.selectOptions(select, 'c-gh')
     await userEvent.click(d.getByRole('button', { name: 'Save class' }))
     await waitFor(() => expect(calls.classes).toHaveLength(1))
     expect(calls.classes[0].class?.codeHostConnectionId).toBe('c-gh')

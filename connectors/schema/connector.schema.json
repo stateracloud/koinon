@@ -148,7 +148,13 @@
         "baseURL": { "description": "The web and git host.", "type": "string", "pattern": "^https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$" },
         "apiURL": { "description": "The REST API of the default host.", "type": "string", "pattern": "^https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$" },
         "apiPath": { "description": "Where the REST API is served on a connection's own host; empty when it is not served there.", "type": "string", "pattern": "^/[A-Za-z0-9._/-]*$" },
-        "selfHosted": { "description": "The connector has no host of its own: every connection names its base URL, which may carry a sub-path (https://host[:port][/path]), and baseURL and apiURL here are placeholders on a reserved .invalid host. The rules in spec.scopes are written for the root of that host and get the sub-path as a prefix.", "type": "boolean" }
+        "selfHosted": { "description": "The connector has no host of its own: every connection names its base URL, which may carry a sub-path (https://host[:port][/path]), and baseURL and apiURL here are placeholders on a reserved .invalid host. The rules in spec.scopes are written for the root of that host and get the sub-path as a prefix.", "type": "boolean" },
+        "mcpHosts": {
+          "description": "Hosts of MCP servers known to act on the default host, besides its web and API hosts (for GitHub: api.githubcopilot.com). An MCP server may be linked to a connection on the default host when its URL names one of them; a connection on its own host accepts only that host. Not allowed with selfHosted.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", "maxLength": 253 }
+        }
       }
     },
     "capabilities": {

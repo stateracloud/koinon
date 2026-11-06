@@ -2,7 +2,7 @@
 
 import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -10,6 +10,7 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import type { Server } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import type { McpActions } from '@/hooks/use-mcp-actions'
+import { codeHostInfo } from '@/lib/connector'
 import { useOrg } from '@/lib/org-context'
 import { dataLegs, kindLabel, legsText, serverKinds, toggleLeg } from '@/lib/mcp-servers'
 
@@ -21,7 +22,14 @@ import { dataLegs, kindLabel, legsText, serverKinds, toggleLeg } from '@/lib/mcp
 export function ServerClass({ server: s, actions }: { server: Server; actions: Pick<McpActions, 'setServerClass'> }) {
   const { org } = useOrg()
   const connections = useQuery(ConnectionService.method.listConnections, { orgId: org.orgId })
+  const types = useQuery(ConnectionService.method.listConnectorTypes, {})
   const linked = connections.data?.connections.find((c) => c.id === s.codeHostConnectionId)
+  // Only a code-host connection can be linked (#117); the server's current link stays listed so the
+  // select never shows a value it does not offer.
+  const linkable = useMemo(() => {
+    const hosts = new Set((types.data?.connectorTypes ?? []).filter((t) => codeHostInfo(t)).map((t) => t.id))
+    return (connections.data?.connections ?? []).filter((c) => hosts.has(c.connector) || c.id === s.codeHostConnectionId)
+  }, [types.data, connections.data, s.codeHostConnectionId])
   const [editing, setEditing] = useState(false)
   const [kind, setKind] = useState(s.kind)
   const [legs, setLegs] = useState<string[]>([...s.dataClass])
@@ -92,7 +100,7 @@ export function ServerClass({ server: s, actions }: { server: Server; actions: P
         <Label htmlFor={`class-connection-${s.id}`}>Code-host connection</Label>
         <NativeSelect id={`class-connection-${s.id}`} value={connection} onChange={(e) => setConnection(e.target.value)}>
           <option value="">None</option>
-          {(connections.data?.connections ?? []).map((c) => (
+          {linkable.map((c) => (
             <option key={c.id} value={c.id}>
               {c.displayName} ({c.connector})
             </option>
