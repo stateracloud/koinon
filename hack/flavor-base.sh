@@ -34,11 +34,18 @@ pin=""
 [[ $default =~ @(sha256:[0-9a-f]{64})$ ]] && pin=${BASH_REMATCH[1]}
 [ -n "$pin" ] || { echo "flavor-base.sh: $dockerfile has no digest-pinned ARG BASE= default" >&2; exit 2; }
 
-if [[ $base =~ [[:space:]] ]]; then
-  echo "flavor-base.sh: FLAVOR_BASE must be one image reference, got: $base" >&2
+# The image reference grammar (github.com/distribution/reference, IPv6 hosts left out): an optional
+# registry host[:port]/, lowercase path components, an optional :tag, then @sha256:<64 hex>. Only
+# those characters pass, so the printed arguments are safe to word-split unquoted (the Makefile
+# does): no glob character, space or shell metacharacter can reach a shell (#203 review).
+dc='[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?'
+pc='[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*'
+ref_re="^(${dc}(\.${dc})*(:[0-9]+)?/)?${pc}(/${pc})*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?@sha256:[0-9a-f]{64}\$"
+if ! [[ $base =~ $ref_re ]]; then
+  echo "flavor-base.sh: FLAVOR_BASE is no image reference with a digest ([host[:port]/]path[:tag]@sha256:<64 hex>): $base" >&2
   exit 1
 fi
-if [[ $base != ?*"@$pin" ]]; then
+if [[ $base != *"@$pin" ]]; then
   echo "flavor-base.sh: FLAVOR_BASE must end with the digest $dockerfile pins (@$pin): $base" >&2
   exit 1
 fi

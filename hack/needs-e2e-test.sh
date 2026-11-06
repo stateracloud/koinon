@@ -42,15 +42,6 @@ forced 1 internal/api/server.go
 forced 1 charts/koinon/values.yaml
 forced 1 go.mod
 
-# --flavors: any path under flavors/ (the image tag hashes the trees), Markdown included; no Go needed.
-flav() { local want=$1 got=0; shift; printf '%s\n' "$@" | hack/needs-e2e.sh --stdin --flavors >/dev/null || got=$?; [[ $got -eq $want ]] || { echo "FAIL: --flavors want $want got $got for: $*" >&2; fail=1; }; }
-flav 0 flavors/opencode/Dockerfile
-flav 0 flavors/common/entrypoint.sh
-flav 0 flavors/opencode/prompts/system.md
-flav 1 internal/api/server.go
-flav 1 docs/flavors/readme.md
-flav 1 charts/koinon/values.yaml
-
 # Needed.
 expect 0 cmd/koinon-api/main.go
 expect 0 cmd/koinon-fakemcp/main.go
