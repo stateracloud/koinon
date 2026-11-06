@@ -93,7 +93,8 @@ sequenceDiagram
 - The spike must confirm that the agent process sees only placeholders. OpenShell's docs say so, but
   `crates/openshell-providers/README.md` says resolved provider environment is injected into agent
   child processes.
-- Trust-domain naming for SPIFFE-style IDs (`koinon.dev`? the install's domain?).
+- Trust-domain naming for SPIFFE-style IDs (`koinon.dev`? the install's domain?). See
+  [0097](0097-koinon-owned-gateway.md) decision 11: an agents trust domain run by Koinon's issuer.
 - A2A authentication: OpenShell sandbox tokens or ServiceAccount JWTs, and their audience and
   lifetime ([0011](0011-agent-to-agent.md)).
 
