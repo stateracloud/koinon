@@ -90,6 +90,11 @@ workflow "$good_wf
   crane copy x@$d1 y"
 check "--check fails on a literal digest in the workflow" fails "literal digest" --check
 
+# A layout the parser does not know (4-space indentation) fails loudly, never picks a wrong value.
+sed 's/^\( *\)/\1\1/' "$tmp/values.yaml" >"$tmp/v4.yaml" && mv "$tmp/v4.yaml" "$tmp/values.yaml"
+check "--check fails on a re-indented values file" fails "is empty" --check
+values "      digest: $d1"
+
 rm -f "$tmp/wf.yml"
 check "--check fails when the workflow is missing" fails "is missing" --check
 

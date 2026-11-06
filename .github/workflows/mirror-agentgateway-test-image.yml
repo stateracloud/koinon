@@ -6,10 +6,12 @@
 # job red). Run it by hand after the pin moves; docs/dev/ci.md, "The agentgateway test image".
 #
 # It copies by digest, so the mirror holds exactly the image an install runs, under the pin's tag,
-# and fails unless the copy has that digest. The GHCR package stays private until v0.3: the go-test
-# job pulls it with its own GITHUB_TOKEN (packages: read), which works because the package grants this
-# repository access (a package this workflow creates is linked to the repository; check it under
-# the package's settings, "Manage Actions access").
+# and fails unless the copy has that digest. It runs on main only: the pin is read from the ref it
+# runs on, and a branch's pin must not overwrite the tag. The GHCR package stays private until v0.3:
+# the go-test job pulls it with its own GITHUB_TOKEN (packages: read), which works only while the
+# package's "Manage Actions access" lists this repository with read. The image's source label names
+# the upstream repository, so GHCR does not link the package here by itself: after the first run,
+# check that setting and add the repository if it is missing.
 name: mirror agentgateway test image
 
 on:
@@ -32,6 +34,8 @@ concurrency:
 
 jobs:
   mirror:
+    # The pin comes from the checked-out ref: only main's pin may move the mirror's tag.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

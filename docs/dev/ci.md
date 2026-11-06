@@ -50,9 +50,11 @@ When the pin moves (an agentgateway bump changes the chart's tag and digest):
 3. Point the tests' image constant at that reference.
 
 The GHCR package stays private until v0.3. The go-test job pulls it with its own `GITHUB_TOKEN`
-(`packages: read` on the job), which works only because the package grants this repository read
-access: a package the workflow creates is linked to the repository, and its settings ("Manage Actions
-access") must keep `stateracloud/koinon` listed. Crane is `CRANE_VERSION` in `hack/versions.env`,
+(`packages: read` on the job), which works only while the package's settings ("Manage Actions
+access") list `stateracloud/koinon` with read. The image's `org.opencontainers.image.source` label
+names the upstream repository (changing it would change the digest), so GHCR does not link the
+package to Koinon by itself: after the first run, check that setting and add the repository if it is
+missing. The workflow runs on `main` only, since it reads the pin from the ref it runs on. Crane is `CRANE_VERSION` in `hack/versions.env`,
 installed with `go install` (the Go checksum database verifies it) and dated by
 `hack/dep-age-check.sh` (ADR 0079).
 
