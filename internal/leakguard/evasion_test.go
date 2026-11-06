@@ -279,7 +279,9 @@ var _ = Describe("Fourth review", func() {
 			func(args []string, workCap int) {
 				// The default work budget decides and the clock is a backstop (5 s): a benign
 				// shape is allowed on one core, and uses under half of the budget.
+				// Under -race only the clock scales (raceFactor); the work bounds do not.
 				lim := leakguard.DefaultLimits()
+				lim.MaxDuration *= raceFactor
 				checker := leakguard.TaintChecker{Store: taintedStore(fp, privateLine), Limits: lim}
 				d, work, err := checker.CheckWork(context.Background(), testScope, fp, args)
 				Expect(err).NotTo(HaveOccurred())
@@ -310,7 +312,9 @@ var _ = Describe("Fourth review", func() {
 		// failed on a loaded lab node (3 CPUs, other packages in parallel).
 		It("is allowed within the 5 s backstop and the default work budget on one core", Serial, func() {
 			args := sliced(128, func(i int) string { return b64(string([]rune(russianProse)[i*50 : i*50+3000])) })
-			d, err := leakguard.TaintChecker{Store: taintedStore(fp, privateLine)}.Check(context.Background(), testScope, fp, args)
+			lim := leakguard.DefaultLimits()
+			lim.MaxDuration *= raceFactor // 5 s as shipped; scaled only under -race
+			d, err := leakguard.TaintChecker{Store: taintedStore(fp, privateLine), Limits: lim}.Check(context.Background(), testScope, fp, args)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(d).To(Equal(leakguard.Decision{Allow: true, Reason: leakguard.ReasonPass}))
 		})
