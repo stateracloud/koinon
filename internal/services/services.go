@@ -235,20 +235,20 @@ func (s *Server) Register(server *connect.Server) {
 }
 
 var (
-	_ agentv1alpha1connect.AgentServiceHandler           = (*Server)(nil)
-	_ ticketv1alpha1connect.TicketServiceHandler         = (*Server)(nil)
-	_ runv1alpha1connect.RunServiceHandler               = (*Server)(nil)
-	_ templatev1alpha1connect.TemplateServiceHandler     = (*Server)(nil)
-	_ connectionv1alpha1connect.ConnectionServiceHandler = (*Server)(nil)
-	_ approvalv1alpha1connect.ApprovalServiceHandler     = (*Server)(nil)
-	_ tokenv1alpha1connect.TokenServiceHandler           = (*Server)(nil)
-	_ budgetv1alpha1connect.BudgetServiceHandler         = (*Server)(nil)
-	_ budgetv1alpha1connect.PriceServiceHandler          = (*Server)(nil)
-	_ providerv1alpha1connect.ProviderServiceHandler     = (*Server)(nil)
-	_ mcpserverv1alpha1connect.McpServerServiceHandler   = (*Server)(nil)
-	_ leakguardv1alpha1connect.LeakGuardServiceHandler   = (*Server)(nil)
+	_ agentv1alpha1connect.AgentServiceHandler             = (*Server)(nil)
+	_ ticketv1alpha1connect.TicketServiceHandler           = (*Server)(nil)
+	_ runv1alpha1connect.RunServiceHandler                 = (*Server)(nil)
+	_ templatev1alpha1connect.TemplateServiceHandler       = (*Server)(nil)
+	_ connectionv1alpha1connect.ConnectionServiceHandler   = (*Server)(nil)
+	_ approvalv1alpha1connect.ApprovalServiceHandler       = (*Server)(nil)
+	_ tokenv1alpha1connect.TokenServiceHandler             = (*Server)(nil)
+	_ budgetv1alpha1connect.BudgetServiceHandler           = (*Server)(nil)
+	_ budgetv1alpha1connect.PriceServiceHandler            = (*Server)(nil)
+	_ providerv1alpha1connect.ProviderServiceHandler       = (*Server)(nil)
+	_ mcpserverv1alpha1connect.McpServerServiceHandler     = (*Server)(nil)
+	_ leakguardv1alpha1connect.LeakGuardServiceHandler     = (*Server)(nil)
 	_ orgsettingsv1alpha1connect.OrgSettingsServiceHandler = (*Server)(nil)
-	_ auditv1alpha1connect.AuditServiceHandler           = (*Server)(nil)
+	_ auditv1alpha1connect.AuditServiceHandler             = (*Server)(nil)
 )
 
 // caller is an authorised request in one org.

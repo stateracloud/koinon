@@ -8,6 +8,7 @@ import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { LeakGuardService } from '@/gen/koinon/leakguard/v1alpha1/leakguard_pb'
 import { McpServerService } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
+import { OrgSettingsService } from '@/gen/koinon/orgsettings/v1alpha1/orgsettings_pb'
 import { renderApp, whoAmI } from '@/test-utils'
 
 function setup(opts: { hosts?: string[]; threshold?: number; failAdd?: string; scope?: object } = {}) {
@@ -37,6 +38,7 @@ function setup(opts: { hosts?: string[]; threshold?: number; failAdd?: string; s
       listServers: () => ({ servers: [] }),
       listTools: () => ({ tools: [] }),
     })
+    service(OrgSettingsService, { getRunContentRetention: () => ({ retention: { days: 30, defaultDays: 30, minDays: 1, maxDays: 365 } }) })
     service(LeakGuardService, {
       getLeakGuard: () => view(),
       setMatchThreshold: (req) => {

@@ -5,7 +5,7 @@ description: How long Koinon keeps what a run said and did, how an org admin cha
 
 Koinon stores the content of a run: the messages, thoughts and tool calls of its events. That
 content is kept for **30 days after the run finished**, then removed. An org admin can change the
-period for their org, from 1 to 3650 days.
+period for their org, from 1 to 365 days.
 
 ## What is removed, what stays
 

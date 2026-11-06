@@ -313,3 +313,17 @@ describe('a spend limit', () => {
     })
   })
 })
+
+describe('buildTimeline with purged content', () => {
+  const purged = (seq: number, kind: string) => create(RunEventSchema, { runId: run, seq: BigInt(seq), kind, payload: {}, contentPurged: true, createdAt: timestampFromMs(1000 + seq * 10) })
+
+  it('shows one "content expired after N days" note per run', () => {
+    const items = buildTimeline([], { [run]: [purged(1, 'acp.agent_message_chunk'), purged(2, 'acp.tool_call'), runEvent(3, 'run.wrap_up_notice', { limit: 'requests', modelRequests: 5, maxModelRequests: 10 })] }, 30)
+    expect(items.map((i) => ('text' in i ? i.text : i.type))).toEqual(['Run r-123456: content expired after 30 days', 'Run r-123456: 5 of 10 model requests used; the agent was asked to wrap up'])
+  })
+
+  it('says only "content expired" when the retention is not known', () => {
+    const items = buildTimeline([], { [run]: [purged(1, 'acp.agent_thought_chunk')] })
+    expect(items.map((i) => ('text' in i ? i.text : i.type))).toEqual(['Run r-123456: content expired'])
+  })
+})

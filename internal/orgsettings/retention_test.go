@@ -11,6 +11,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
@@ -39,11 +40,11 @@ var _ = Describe("Run content retention", func() {
 		Expect(pool.QueryRow(ctx, `INSERT INTO tasks (org_id, title, agent_id, created_by_kind, created_by_user_id) VALUES ($1, 't', $2, 'user', $3) RETURNING id`, org, agent, user).Scan(&task)).To(Succeed())
 		Expect(pool.QueryRow(ctx, `INSERT INTO runs (org_id, agent_id, agent_version_id, task_id, ready_at, max_tokens) VALUES ($1, $2, $3, $4, now(), 1000) RETURNING id`, org, agent, version, task).Scan(&run)).To(Succeed())
 		for i := 1; i <= n; i++ {
-			_, err := pool.Exec(ctx, `INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload) VALUES ($1, $2, $3, 0, 'session.update', '{"text":"secret words"}')`, org, run, i)
+			_, err := pool.Exec(ctx, `INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload) VALUES ($1, $2, $3, 0, 'acp.agent_message_chunk', '{"text":"secret words"}')`, org, run, i)
 			Expect(err).NotTo(HaveOccurred())
 		}
 		if age >= 0 {
-			_, err = pool.Exec(ctx, `UPDATE runs SET state = 'canceled', finished_at = $2 WHERE id = $1`, run, t0.Add(-age))
+			_, err = pool.Exec(ctx, `UPDATE runs SET state = 'canceled', ready_at = NULL, finished_at = $2 WHERE id = $1`, run, t0.Add(-age))
 			Expect(err).NotTo(HaveOccurred())
 		}
 		return run
@@ -70,13 +71,13 @@ var _ = Describe("Run content retention", func() {
 		Expect(days).To(Equal(30))
 
 		var changes int
-		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE org_id = $1 AND action = 'org.run_content_retention.set'`, org).Scan(&changes)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'org.run_content_retention.set'`, org).Scan(&changes)).To(Succeed())
 		Expect(changes).To(Equal(2))
 	})
 
-	It("rejects a retention outside 1 to 3650 days", func(ctx SpecContext) {
+	It("rejects a retention outside 1 to 365 days", func(ctx SpecContext) {
 		org, _, _ := pgtest.NewOrg(ctx, pool)
-		for _, d := range []int{-1, 3651} {
+		for _, d := range []int{-1, 366} {
 			Expect(svc.SetRunContentRetention(ctx, org, audit.System(), &d)).To(MatchError(ContainSubstring("days")))
 		}
 	})
@@ -134,6 +135,29 @@ var _ = Describe("Run content retention", func() {
 		blank, total := purged(ctx, run)
 		Expect(blank).To(Equal(7))
 		Expect(total).To(Equal(7))
+	})
+
+	It("blanks only content kinds and marks the run purged", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		run := finishedRun(ctx, org, 40*24*time.Hour, 2)
+		_, err := pool.Exec(ctx, `INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload) VALUES ($1, $2, 3, 0, 'run.wrap_up_notice', '{"spent_usd":1.5}')`, org, run)
+		Expect(err).NotTo(HaveOccurred())
+		n, err := orgsettings.NewPurger(pool, nil, now).PurgeOrg(ctx, org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(BeEquivalentTo(2))
+		var payload string
+		Expect(pool.QueryRow(ctx, `SELECT payload::text FROM run_events WHERE run_id = $1 AND kind = 'run.wrap_up_notice'`, run).Scan(&payload)).To(Succeed())
+		Expect(payload).To(ContainSubstring("spent_usd"))
+		var marked bool
+		Expect(pool.QueryRow(ctx, `SELECT content_purged_at IS NOT NULL FROM runs WHERE id = $1`, run).Scan(&marked)).To(Succeed())
+		Expect(marked).To(BeTrue())
+	})
+
+	It("lists only content kinds the event class table knows", func() {
+		known := runoutcome.KnownEventKinds()
+		for _, k := range orgsettings.ContentEventKinds {
+			Expect(known).To(HaveKey(k))
+		}
 	})
 
 	It("leaves a run that has not finished alone", func(ctx SpecContext) {
