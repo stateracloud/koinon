@@ -235,15 +235,21 @@ func describeMode(name, valuesFile string) {
 				Expect(stored.Fmt).To(Equal(2), "KEK %s is bound to the install", id)
 				Expect(stored.Install).To(Equal(install), "KEK %s is bound to this database's install ID", id)
 			}
+			recovery := false
 			for _, j := range r.Jobs {
 				for _, c := range j.Spec.Template.Spec.Containers {
 					for _, a := range c.Args {
 						if id, ok := strings.CutPrefix(a, "--add-key="); ok {
 							Expect(ids).To(ContainElement(id), "the key-admin Job added %s", id)
+							Expect(string(s.Data["active"])).NotTo(Equal(id), "the added KEK is inactive: the Secret had a working active KEK")
 						}
+						recovery = recovery || a == "--activate-if-no-active"
 					}
 				}
 			}
+			// The values file sets keyAdmin.activateIfNoActive (#255). The Job exited 0 above, so the
+			// binary parsed the flag the chart passes; with a working active KEK it changed nothing.
+			Expect(recovery).To(BeTrue(), "the key-admin Job is rendered with --activate-if-no-active")
 			Expect(ids).To(ContainElement(string(s.Data["active"])))
 		})
 

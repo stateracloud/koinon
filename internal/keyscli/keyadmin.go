@@ -82,6 +82,10 @@ func (a KeyAdmin) Run(ctx context.Context) error {
 	if (a.Create || a.RewrapUnbound) && a.Marker == nil {
 		return errors.New("keyscli: the key-admin Job needs the bound-only marker (the database) to create or bind KEKs")
 	}
+	if a.ActivateIfNoActive && a.AddID == "" {
+		// Checked before anything is written, so a misconfigured Job changes nothing.
+		return errors.New("keyscli: recovering from a lost active KEK needs the ID of the KEK to add")
+	}
 	if a.Create {
 		// The first KEK of an install is bound, so the install is bound-only from the start: the
 		// marker is set before the Secret exists, and a failure leaves no Secret, so a rerun sets it.
@@ -99,9 +103,6 @@ func (a KeyAdmin) Run(ctx context.Context) error {
 		if created {
 			_, _ = fmt.Fprintf(a.Out, "Created the KEK Secret %s with one active KEK wrapped by %s. Back it up now (koinon-api keys export).\n", a.Store.Name, wrappedBy)
 		}
-	}
-	if a.ActivateIfNoActive && a.AddID == "" {
-		return errors.New("keyscli: recovering from a lost active KEK needs the ID of the KEK to add")
 	}
 	if a.AddID == "" {
 		_, _ = fmt.Fprintln(a.Out, "No KEK to add.")
@@ -141,7 +142,10 @@ func (a KeyAdmin) recoverActive(ctx context.Context, now func() time.Time, prima
 		}
 	}()
 	if err != nil {
-		return false, fmt.Errorf("recover the active KEK: %w; remove the entries of the KEKs that cannot be unwrapped from the KEK Secret first (docs/ops/secret-keys.md)", err)
+		if errors.Is(err, secretstore.ErrOpen) || errors.Is(err, secretstore.ErrUnreachable) {
+			return false, fmt.Errorf("recover the active KEK: %w; if the wrapping key of those KEKs is lost for good, remove the entries of the KEKs that cannot be unwrapped from the KEK Secret first (docs/ops/secret-keys.md)", err)
+		}
+		return false, err
 	}
 	if _, ok := ks.Stored[ks.Active]; ok && ks.Active != "" {
 		_, _ = fmt.Fprintf(a.Out, "The active KEK %s is in the key set; nothing to recover.\n", ks.Active)

@@ -25,3 +25,6 @@ secrets:
           keyAdmin: arn:aws:iam::000000000000:role/koinon-key-admin-encrypt
       keyAdmin:
         addKey: smoke-added-kek
+        # The Job runs with the recovery flag (#255); the Secret it just created has a working
+        # active KEK, so it must add the KEK inactive and leave the active one alone.
+        activateIfNoActive: true

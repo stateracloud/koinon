@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -252,9 +253,37 @@ var _ = Describe("the key-admin Job", func() {
 			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")
 		})
 
-		It("needs the ID of the KEK to add, refuses an ID in use, and stops while a held KEK does not unwrap", func(ctx SpecContext) {
+		It("refuses a recovery without an ID before it creates or changes anything", func(ctx SpecContext) {
+			By("no Secret: the Job does not create one")
+			Expect(recover("").Run(ctx)).To(MatchError(ContainSubstring("needs the ID of the KEK to add")))
+			list, err := kube.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(list.Items).To(BeEmpty())
+			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")
+			Expect(marker.b.Set).To(BeFalse(), "the bound-only marker is not set")
+
+			By("a Secret: it is left as it was")
 			seed(ctx, lost, survivor)
 			Expect(recover("").Run(ctx)).To(MatchError(ContainSubstring("needs the ID of the KEK to add")))
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, secret, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sec.Data).To(HaveLen(2))
+			Expect(string(sec.Data[secretstore.ActiveFile])).To(Equal(lost))
+			Expect(kms.Wraps()).To(BeZero())
+		})
+
+		It("returns a missing Secret unchanged, without the hint about removing entries", func(ctx SpecContext) {
+			a := recover(fresh)
+			a.Create = false
+			err := a.Run(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsNotFound(err)).To(BeTrue(), "the API error is still reachable")
+			Expect(err.Error()).NotTo(ContainSubstring("remove the entries"))
+			Expect(kms.Wraps()).To(BeZero())
+		})
+
+		It("needs the ID of the KEK to add, refuses an ID in use, and stops while a held KEK does not unwrap", func(ctx SpecContext) {
+			seed(ctx, lost, survivor)
 			Expect(recover(survivor).Run(ctx)).To(MatchError(ContainSubstring("IDs are never reused")))
 
 			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, secret, metav1.GetOptions{})

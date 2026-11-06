@@ -68,8 +68,14 @@ kubectl -n koinon exec deploy/koinon-api -- koinon-api keys status
 grep fingerprint koinon-kek-backup.yaml
 ```
 
-The active KEK's ID and fingerprint must be in the file, and `active` in it must name that ID. Koinon
-does not check this for you: there is no metric that compares the latest backup with the live key
+The active KEK's ID and fingerprint must be in the file, and `active` in it must name that ID. The
+export keeps every value base64-encoded under `data`, so decode `active` to read it:
+
+```sh
+grep '^  active:' koinon-kek-backup.yaml | awk '{print $2}' | base64 -d; echo
+```
+
+Koinon does not check this for you: there is no metric that compares the latest backup with the live key
 set. Add the comparison to whatever job takes your backups.
 
 **The export works the same in every database mode** (`standalone`, `cnpg`, `external`;
@@ -514,9 +520,18 @@ the identity that may encrypt with the KMS, so it adds the new KEK and makes it 
    New home repositories and sealed values use the new active KEK from here on.
 
 On a **local** install (no KMS, no key-admin Job) there is no such Job. If the active KEK's entry was
-lost from the Secret and no copy exists, add a new local KEK to the Secret by hand (an ID like
-`kek-20261106-a1b2` whose value is the base64 of 32 random bytes, for example
-`head -c 32 /dev/urandom | base64`), set `active` to it, and then run `keys forget` for the lost one.
+lost from the Secret and no copy exists, add a new local KEK and set `active` to it in one patch,
+then run `keys forget` for the lost one. A local KEK's stored form is already base64 text of 32
+random bytes, so write it through `stringData`: the API server base64-encodes it once into `data`
+(a value put straight into `/data` would have to be base64 twice). Use a new ID like
+`kek-20261106-a1b2`:
+
+```sh
+ID=kek-20261106-a1b2
+kubectl -n koinon patch secret koinon-kek --type=merge \
+  -p "{\"stringData\":{\"$ID\":\"$(head -c 32 /dev/urandom | base64)\",\"active\":\"$ID\"}}"
+```
+
 Back the Secret up (`keys export`) as soon as the pods are running again.
 
 ### The install binding (koinon-private#615)
