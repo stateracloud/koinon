@@ -388,7 +388,7 @@ INSERT INTO spend_entries (
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
     request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id,
-    upstream_status
+    upstream_status, provider_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8,
     $9, $10, $11, $12, $13,
@@ -396,7 +396,7 @@ INSERT INTO spend_entries (
     $16, $17, $18, $19::jsonb, $20,
     $21, $22, $23,
     $24, coalesce(($25::text)::numeric, 0), $26,
-    $27
+    $27, $28
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id
@@ -430,6 +430,7 @@ type InsertSpendEntryParams struct {
 	ReserveUsd       pgtype.Text
 	ResponseID       pgtype.Text
 	UpstreamStatus   pgtype.Int2
+	ProviderID       pgtype.UUID
 }
 
 // Records one request of an agent (principal 'agent', agent_id set) or of a system key of the org
@@ -438,6 +439,8 @@ type InsertSpendEntryParams struct {
 // own computation from the raw usage and the dated price; gateway_cost_usd is
 // what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
 // for every entry that is not provisional, so a caller that holds nothing passes nothing.
+// provider_id is the provider that served the request, when Koinon knows its model; the daily cost
+// reconciliation sums a provider's entries by it.
 func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, insertSpendEntry,
 		arg.OrgID,
@@ -467,6 +470,7 @@ func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryPara
 		arg.ReserveUsd,
 		arg.ResponseID,
 		arg.UpstreamStatus,
+		arg.ProviderID,
 	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
@@ -756,7 +760,7 @@ SELECT model,
        coalesce(sum(gateway_cost_usd), 0)::text AS gateway_usd,
        coalesce(sum(cost_usd) FILTER (WHERE gateway_cost_usd IS NOT NULL), 0)::text AS gateway_compared_usd,
        count(*) FILTER (WHERE cost_flagged)::bigint AS flagged_requests,
-       -- Responses cut short whose provider figure is pending, and what they hold back from the gateway keys.
+       -- Requests whose provider bill is pending, and what they hold back from the gateway keys.
        count(*) FILTER (WHERE provisional)::bigint AS provisional_requests,
        coalesce(sum(reserve_usd), 0)::text AS reserved_usd
 FROM spend_entries

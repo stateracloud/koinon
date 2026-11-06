@@ -50,6 +50,10 @@ func TestOpenRouterReadsTheGenerationsBill(t *testing.T) {
 			_, _ = w.Write([]byte(`{"data":{"id":"gen-ready-1","total_cost":1.234e-4,"usage":1.234e-4,"cancelled":true,
 				"tokens_prompt":1200,"tokens_completion":40,"native_tokens_prompt":1250,"native_tokens_completion":42,
 				"native_tokens_reasoning":10,"native_tokens_cached":1000}}`))
+		case "gen-byok-1":
+			// The org's own upstream key: total_cost is OpenRouter's fee, the upstream billed the rest.
+			_, _ = w.Write([]byte(`{"data":{"id":"gen-byok-1","total_cost":0.00005,"is_byok":true,"upstream_inference_cost":0.001,
+				"native_tokens_prompt":100,"native_tokens_completion":10}}`))
 		case "gen-teapot-1":
 			w.WriteHeader(http.StatusTeapot)
 		case "gen-busy-1":
@@ -77,6 +81,19 @@ func TestOpenRouterReadsTheGenerationsBill(t *testing.T) {
 	want := providerusage.Usage{InputTokens: 1250, OutputTokens: 42, CacheReadTokens: 1000, ReasoningTokens: 10, Cost: money.MustParse("0.0001234"), Cancelled: true}
 	if u != want {
 		t.Fatalf("got %+v, want %+v", u, want)
+	}
+	if b, err := u.Billed(); err != nil || b != money.MustParse("0.0001234") {
+		t.Fatalf("billed without BYOK is total_cost: %s %v", b, err)
+	}
+	byok, err := src.Usage(context.Background(), p, "gen-byok-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !byok.BYOK || byok.Cost != money.MustParse("0.00005") || byok.UpstreamCost != money.MustParse("0.001") {
+		t.Fatalf("BYOK generation: %+v", byok)
+	}
+	if b, err := byok.Billed(); err != nil || b != money.MustParse("0.00105") {
+		t.Fatalf("billed with BYOK is the fee plus the upstream's cost: %s %v", b, err)
 	}
 	if _, err := src.Usage(context.Background(), p, "gen-later-1"); !errors.Is(err, providerusage.ErrPending) {
 		t.Fatalf("404 is pending: %v", err)

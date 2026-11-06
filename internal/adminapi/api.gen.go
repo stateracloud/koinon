@@ -1344,7 +1344,7 @@ type SpendLine struct {
 	// OutputTokens Output tokens, reasoning (thinking) tokens included.
 	OutputTokens int64 `json:"outputTokens"`
 
-	// ProvisionalRequests Responses cut short whose provider figure is pending; their cost is the usage the gateway logged until the provider reports.
+	// ProvisionalRequests Requests whose provider bill is pending; their cost is Koinon's price of the usage the gateway logged until the provider reports.
 	ProvisionalRequests int64 `json:"provisionalRequests"`
 
 	// ReasoningTokens The part of outputTokens the provider reported as reasoning, or null when no request of the model reported a split. Null does not mean the model did not think: Anthropic Messages has no separate reasoning count and counts thinking inside outputTokens. Thinking is billed as output: at the output rate unless the price names a reasoning rate (ADR 0069 amendment 2026-10-29).

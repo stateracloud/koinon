@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package providerusage asks a model provider for its own record of one response: the usage and
-// cost it billed. The spend ledger uses it to settle a response that was cut short and so carried
-// no usage (ADR 0056, amendment 2026-10-28): the entry is charged the streamed output first and
-// replaced by the provider's figure once the provider has it.
+// Package providerusage asks a model provider for its own record of what it billed. The spend
+// ledger uses it to settle each response at the billed cost (ADR 0056, amendments 2026-10-28 and
+// 2026-11-06): the entry is charged Koinon's price first and replaced by the provider's figure once
+// the provider has it.
 //
 // A provider type has a [Source] when it publishes such a record per response. OpenRouter does
-// (GET /api/v1/generation?id=); a provider without one keeps the streamed-usage entry as final.
+// (GET /api/v1/generation?id=); a provider without one keeps the logged entry as final.
+//
+// A direct provider type has a [CostSource] when its cost API reports a day's cost for part of an
+// account (Anthropic's cost report per workspace, OpenAI's costs per project); the daily
+// reconciliation compares that with the ledger and changes no entry.
 package providerusage
 
 import (
@@ -25,11 +29,27 @@ type Usage struct {
 	InputTokens, OutputTokens         int64
 	CacheReadTokens, CacheWriteTokens int64
 	ReasoningTokens                   int64
-	// Cost is what the provider billed.
+	// Cost is what the provider billed (OpenRouter's total_cost).
 	Cost money.USD
+	// UpstreamCost is what the upstream provider billed the org's own key for the response, when
+	// the aggregator ran it with that key (OpenRouter BYOK: is_byok, upstream_inference_cost). Cost
+	// is then only the aggregator's fee. Zero otherwise.
+	UpstreamCost money.USD
+	// BYOK is set when the response ran on the org's own upstream key at the aggregator.
+	BYOK bool
 	// Cancelled is the provider's own mark that the response was canceled before it ended
 	// (OpenRouter's cancelled). It is recorded with the settlement; the figures stand either way.
 	Cancelled bool
+}
+
+// Billed is what the response cost the org: the provider's cost plus, with the org's own upstream
+// key (BYOK), what the upstream billed that key. The ledger charges it (ADR 0056, amendment
+// 2026-11-06).
+func (u Usage) Billed() (money.USD, error) {
+	if u.BYOK {
+		return u.Cost.Add(u.UpstreamCost)
+	}
+	return u.Cost, nil
 }
 
 // RetryAfterError is a provider refusing for now (HTTP 429): ask again no sooner than After.
