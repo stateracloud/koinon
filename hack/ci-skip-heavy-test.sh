@@ -116,7 +116,7 @@ else
 	echo "FAIL: ci.yml does not feed PR_DRAFT from the event"; fails=1
 fi
 expect "other event runs everything" false "event" EVENT_NAME=schedule
-expect "a merge group build runs everything (koinon-private#225)" false "merge group" EVENT_NAME=merge_group
+expect "a merge group build runs everything (#225)" false "merge group" EVENT_NAME=merge_group
 expect "a merge group build runs everything with the API down" false "merge group" EVENT_NAME=merge_group FAKE_FAIL=1
 
 # --- push to main ----------------------------------------------------------------------------------

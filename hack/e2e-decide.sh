@@ -15,7 +15,7 @@
 #                      then labels it (two events, koinon-private#468), and the run of `opened` should already see
 #                      the label. Label events do not start the workflow; adding `e2e` later
 #                      dispatches it (hack/e2e-label.sh).
-#   merge_group        (the merge queue, koinon-private#225, ADR 0094 decision 4) never needed: the
+#   merge_group        (the merge queue, #225, ADR 0094 decision 4) never needed: the
 #                      queue commit runs no kind e2e. `required=true` when the entry's own diff against
 #                      MG_BASE (merge_group.base_sha) matches the full rule or touches the e2e's own
 #                      files; `e2e result` then checks the queued PR's head for evidence. A failing

@@ -35,7 +35,7 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-  # The merge queue (koinon-private#225): `e2e result` is required, so it reports on the queue's commit.
+  # The merge queue (#225): `e2e result` is required, so it reports on the queue's commit.
   # ADR 0094 decision 4: decide never starts the quickstart on a queue commit; `e2e result` checks the
   # queued pull request's head (number parsed from the queue ref) for evidence when the entry's own
   # diff (against merge_group.base_sha) is e2e-relevant.

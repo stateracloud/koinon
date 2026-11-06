@@ -26,9 +26,10 @@
 #                 (red go/web, safe; re-run the ready_for_review run instead, see docs/dev/ci.md).
 #                 Marking it ready fires ready_for_review, which runs everything on the same
 #                 head, and so does every push to a ready pull request. No flag: skip=false.
-#   merge_group   (the merge queue, koinon-private#225) skip=false always: the queue commit is main plus the
-#                 queued pull requests, a tree no check has seen, so every job runs (ci.yml passes no
-#                 base to hack/ci-changes.sh for it, which means everything). A draft cannot be queued.
+#   merge_group   (the merge queue, #225) skip=false always: the queue commit is main plus the
+#                 queued pull requests, a tree no check has seen, so skip-heavy never skips on it.
+#                 ci.yml passes merge_group.base_sha to hack/ci-changes.sh, which path-filters against
+#                 it like a ready pull request. A draft cannot be queued.
 #   push          REF, SHA. skip=true only when all of this holds, else everything runs:
 #                   - REF is refs/heads/main and SHA is a merge commit with two parents;
 #                   - the merge commit's tree equals the tree of its second parent (the pull request
@@ -201,7 +202,7 @@ decide() {
 	case ${EVENT_NAME:-} in
 	pull_request) decide_pull_request ;;
 	push) decide_push ;;
-	merge_group) emit false "merge group build: the merge queue tests main plus the queued pull requests, so everything runs" ;;
+	merge_group) emit false "merge group build: the merge queue tests main plus the queued pull requests, so the heavy jobs are never skipped here (ci-changes.sh still path-filters against merge_group.base_sha)" ;;
 	*) emit false "event '${EVENT_NAME:-}': running everything" ;;
 	esac
 }

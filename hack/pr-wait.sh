@@ -59,7 +59,7 @@
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
 #       6 stale PR head (with --checks), 7 unresolved review threads (BLOCKED with --checks, all green), 64 usage.
 #       8 the PR was in the merge queue and left it without merging (DEQUEUED).
-#       Merge queue (koinon-private#225): a queued PR is OPEN until the queue build merges it; the wait prints
+#       Merge queue (#225): a queued PR is OPEN until the queue build merges it; the wait prints
 #       `in the merge queue (<position> <state>)` and continues to `MERGED` (exit 0). With --checks the head's
 #       checks are judged as before: they gate entry to the queue; the queue build's own checks are on the
 #       queue commit (gh-readonly-queue/...), not on the head.
@@ -205,7 +205,7 @@ load_contexts() {
 }
 
 # queue_state <PR>: `queued <position> <state>` while the PR is in the base branch's merge queue
-# (koinon-private#225), else `no`. `gh pr view --json` has no queue fields, so GraphQL; best effort: an
+# (#225), else `no`. `gh pr view --json` has no queue fields, so GraphQL; best effort: an
 # API error reads as `no` (a repository without a queue answers `no` too).
 # shellcheck disable=SC2016 # $owner, $repo, $number are GraphQL variables
 queue_query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { isInMergeQueue mergeQueueEntry { position state } } } }'
@@ -241,11 +241,13 @@ while :; do
       exit 3
       ;;
     esac
-    # The merge queue (koinon-private#225): an enqueued PR stays OPEN until the queue build merges it, so
+    # The merge queue (#225): an enqueued PR stays OPEN until the queue build merges it, so
     # --merged keeps waiting and says where it stands. A PR that was in the queue and is OPEN and out of it
     # again was removed (a failed queue build, a conflict with the entry ahead, or by hand): exit 8, with
     # the checks of the queue build named by `hack/ci-fail.sh`/the PR page. Never re-enqueues.
-    qs=$(queue_state "$pr")
+    # Only in the merged mode: --checks judges the head's checks as before, queued or not (pr-merge --admin).
+    qs=""
+    [ "$mode" != merged ] || qs=$(queue_state "$pr")
     case $qs in
     queued*)
       was_queued=1 dq_polls=0

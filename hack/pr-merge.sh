@@ -18,7 +18,7 @@
 #      succeeded (a review failure is a warning: the merge does not depend on the claim), and a PR
 #      comment naming that SHA and the number of green contexts read. With --auto the PR is merged later:
 #      the output says `auto-merge enabled`.
-#   Merge queue (koinon-private#225): when the base branch's ruleset has a `merge_queue` rule (read at run time), the
+#   Merge queue (#225): when the base branch's ruleset has a `merge_queue` rule (read at run time), the
 #   same `gh pr merge --merge --auto` adds the PR to the queue and the output says `added to the merge queue`;
 #   --admin still merges directly (bypass). Without the rule nothing changes. docs/dev/ci.md "Merging".
 #   Unresolved review threads (#187): pr-wait.sh --checks exits 7 when every check is green but the PR is
@@ -174,7 +174,7 @@ fi
   esac
 }
 
-# Does the base branch have a merge queue (koinon-private#225)? Read from the ruleset at run time, so the same script
+# Does the base branch have a merge queue (#225)? Read from the ruleset at run time, so the same script
 # serves the repository before and after the ruleset gains the rule. Only an exact `true` counts: an
 # unreadable answer is "no queue" (the merge below is the same command either way; only the report differs).
 queue=0

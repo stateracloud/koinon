@@ -594,7 +594,7 @@ rc=0
 out=$("$repo/hack/pr-threads.sh" 2>&1) || rc=$?
 expect "pr-threads: usage" 64 "usage: hack/pr-threads.sh <PR>"
 
-# 8b. the merge queue (koinon-private#225): OPEN while queued, merged by the queue build; or removed from it
+# 8b. the merge queue (#225): OPEN while queued, merged by the queue build; or removed from it
 q1='{"data":{"repository":{"pullRequest":{"isInMergeQueue":true,"mergeQueueEntry":{"position":2,"state":"QUEUED"}}}}}'
 q2='{"data":{"repository":{"pullRequest":{"isInMergeQueue":true,"mergeQueueEntry":{"position":1,"state":"AWAITING_CHECKS"}}}}}'
 qno='{"data":{"repository":{"pullRequest":{"isInMergeQueue":false,"mergeQueueEntry":null}}}}'
@@ -622,6 +622,14 @@ printf '%s\n' "$q1" >"$FAKE_DIR/queue"
 run 7 --interval 0 --timeout 0
 expect "a queued PR times out like any wait" 2 "in the merge queue (2 QUEUED)
 TIMEOUT"
+# --checks judges the head's checks and never asks the queue (pr-merge --admin on an enqueued PR).
+seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
+printf '%s\n' "$q1" >"$FAKE_DIR/queue"
+rm -f "$FAKE_DIR/qn"
+page '' false >"$FAKE_DIR/threads"
+run 7 --checks --interval 0
+expect "--checks on a queued PR with green checks exits 0" 0 "checks 3/3 green"
+if [ ! -e "$FAKE_DIR/qn" ]; then echo "ok: --checks never calls the queue GraphQL"; else echo "FAIL: --checks called the queue GraphQL"; fail=1; fi
 
 # 8. a transient gh failure is retried
 rm -rf "$FAKE_DIR"

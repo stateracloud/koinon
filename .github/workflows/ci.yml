@@ -14,7 +14,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
-  # The merge queue (koinon-private#225): GitHub builds main plus the queued pull requests on a
+  # The merge queue (#225): GitHub builds main plus the queued pull requests on a
   # gh-readonly-queue/* branch and waits for every required check on that commit. A required job must
   # report there too, so this workflow listens; hack/ci-skip-heavy.sh runs everything for it.
   merge_group:

@@ -1692,10 +1692,10 @@ update_target() {
 
 cmd_update_oldest() {
   local prs inflight target head tries=0 now req
-  # With a merge queue on main (koinon-private#225, ADR 0094 decision 4) the queue builds main plus the entry, so
+  # With a merge queue on main (#225, ADR 0094 decision 4) the queue builds main plus the entry, so
   # nothing here is needed, and a push to a queued PR's branch would drop it from the queue. Read at run time;
   # an unreadable answer means "no queue" (the pre-queue behaviour). Exit condition for removing this command
-  # and updater.yml: the follow-up issue linked from docs/dev/ci.md "The merge queue".
+  # and updater.yml: #227 (also linked from docs/dev/ci.md "The merge queue").
   if [[ $(gh api "repos/$REPO/rules/branches/${KOINON_BASE_BRANCH:-main}" --jq 'any(.[]; .type == "merge_queue")' 2>/dev/null || true) == true ]]; then
     echo "::notice::main has a merge queue; the updater has nothing to do"; return 0
   fi

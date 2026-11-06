@@ -8,7 +8,7 @@ name: dco
 
 on:
   pull_request:
-  # The merge queue (koinon-private#225): the required `dco` check must report on the queue's commit too.
+  # The merge queue (#225): the required `dco` check must report on the queue's commit too.
   # The range is the entry's own commits (base_sha is the commit the entry was built on).
   merge_group:
     types: [checks_requested]

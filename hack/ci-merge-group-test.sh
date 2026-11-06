@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# The merge queue (koinon-private#225) builds a commit that belongs to no pull request and waits for every
+# The merge queue (#225) builds a commit that belongs to no pull request and waits for every
 # required check on it. A workflow that produces a required context but does not listen to
 # `merge_group` leaves that check absent, and the queue entry waits until it times out. This test
 # keeps the workflows that produce a required context (hack/ci-required.txt) subscribed, and keeps
@@ -15,18 +15,13 @@ wfdir=${1:-$repo/.github/workflows}
 
 pass=0 fail=0
 check() { local d=$1; shift; if "$@" >/dev/null 2>&1; then echo "ok: $d"; pass=$((pass + 1)); else echo "FAIL: $d" >&2; fail=$((fail + 1)); fi; }
-# The workflows that produce a required context: ci.yml (the jobs), and the external ones named in
-# the header of hack/ci-required.txt.
-for wf in ci dco secrets claims e2e-kind; do
-	f=$wfdir/$wf.yml
-	check "$wf.yml listens to merge_group" grep -Eq '^  merge_group:' "$f"
+# The workflows that produce a required context: ci.yml (the jobs), and the external ones named in the
+# header of hack/ci-required.txt. That they listen to merge_group at all is checked by hack/ci-required-test.sh;
+# here the trigger must also ask for checks_requested only.
+while IFS= read -r wf; do
 	# shellcheck disable=SC2016
-	check "$wf.yml asks for checks_requested only" awk '/^  merge_group:/ { getline; if ($0 ~ /types: \[checks_requested\]/) ok = 1 } END { exit !ok }' "$f"
-done
-# Every external name of ci-required.txt is produced by one of the workflows above.
-# shellcheck disable=SC2016
-check "ci-required.txt names those workflows for its external checks" bash -c '
-	for w in dco.yml secrets.yml claims.yml e2e-kind.yml; do grep -q "\.github/workflows/$w" "$1" || exit 1; done' _ "$repo/hack/ci-required.txt"
+	check "$wf asks for checks_requested only" awk '/^  merge_group:/ { getline; if ($0 ~ /types: \[checks_requested\]/) ok = 1 } END { exit !ok }' "$wfdir/$wf"
+done < <({ echo ci.yml; sed -n -E 's@^#[[:space:]]+[^[:space:]].*[[:space:]]\.github/workflows/([A-Za-z0-9_.-]+\.yml)[[:space:]]*$@\1@p' "$repo/hack/ci-required.txt"; } | sort -u)
 # The jobs that are not part of a queue build stay off it: they read a pull request or push to main.
 # shellcheck disable=SC2016
 check "claims.yml: release and sweeper do not run on merge_group" bash -c '

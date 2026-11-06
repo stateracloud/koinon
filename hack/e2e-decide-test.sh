@@ -68,7 +68,7 @@ want true "push with no green run to compare with runs" EVENT=push
 want true "push with e2e-relevant changes since the last green run" EVENT=push STUB_COVERED=abc123 STUB_FULL=0
 want false "push without them does not" EVENT=push STUB_COVERED=abc123 STUB_FULL=1
 want true "push: a rule failure fails closed" EVENT=push STUB_COVERED=abc123 STUB_FULL=2
-# koinon-private#225, ADR 0094 decision 4: the queue never runs the e2e; `required` asks e2e result for evidence on the PR head.
+# #225, ADR 0094 decision 4: the queue never runs the e2e; `required` asks e2e result for evidence on the PR head.
 MG=(EVENT=merge_group MG_BASE=abc123)
 want false "queue entry touching the e2e's files does not run" "${MG[@]}" STUB_FORCED=0
 want false "queue entry that is e2e-relevant does not run" "${MG[@]}" STUB_FULL=0

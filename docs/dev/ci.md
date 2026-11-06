@@ -348,8 +348,10 @@ hand. The repository half is in place and inert until the ruleset has a
 
 What a `merge_group` build runs (event `checks_requested`, no pull request in the payload):
 
-- `ci`: everything. `hack/ci-skip-heavy.sh decide` answers `skip=false`, because the queue commit is a
-  tree no check has seen. `changes` (`ci-changes.sh`), the proto `buf breaking` step and `migrate-lint`
+- `ci`: `hack/ci-skip-heavy.sh decide` never skips on `merge_group` (`skip=false`), because the queue commit
+  is a tree no check has seen; `ci-changes.sh` path-filters against `merge_group.base_sha` like a ready pull
+  request, so a job whose files the entry does not touch still reports green without running. `changes`
+  (`ci-changes.sh`), the proto `buf breaking` step and `migrate-lint`
   compare against `github.event.merge_group.base_sha` (ADR 0094 decision 4), so a baseline or a
   `hack/migrate-patch-line` change that landed on main while the entry waited is checked against the main
   the entry lands on. The concurrency group is the queue commit (`ci-mq-<sha>`), so queue builds never
@@ -360,7 +362,10 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
 - `claim`: the fencing point. It reads `<N>` from the queue ref (`gh-readonly-queue/<base>/pr-<N>-<sha>`),
   checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim someone else took (or the
   sweeper released) while the PR waited fails the entry. It fails closed when `<N>` cannot be read.
-  `release` and `sweeper` do not run.
+  `release` and `sweeper` do not run. Limit: a `merge_group` run takes its workflow YAML from the queue
+  commit, which is the pull request's own, so a PR that edits `claims.yml` controls what runs at queue time;
+  only the script is the base's. The guard for that is the required review on `.github/**` (CODEOWNERS) plus
+  the `pull_request_target` entry gate, which runs the base's workflow on the PR before it can be enqueued.
 - `e2e result`: the queue commit runs no kind e2e (`decide` always answers `needed=false`; 25 minutes per
   entry would hold the queue). When the entry's diff against `base_sha` is e2e-relevant, `decide` answers
   `required=true` and `e2e result` runs the base's `hack/e2e-gate.sh` against the head SHA of pull
@@ -375,7 +380,7 @@ group size 1), at most 5 builds at once, check timeout 60 minutes.
 The updater: `updater.yml` and `claim.sh update-oldest` stay until the queue is live. Meanwhile `update-oldest` skips
 a PR with `isInMergeQueue` (pushing to a queued PR's branch drops it from the queue) and is a no-op once the ruleset has
 a `merge_queue` rule (read at run time, as `pr-merge.sh` does). Retiring `updater.yml`, `update-oldest`, `update_target`
-and the `needs-update` label is follow-up work: exit condition is the first week of green queue merges with strict off.
+and the `needs-update` label is follow-up work in #227: exit condition is the first week of green queue merges with strict off.
 
 Cost: one full `ci` run per queue build, and no e2e; the ruleset values above trade throughput against runner minutes. A push to main after a queue merge still runs `decide_push`, which skips the heavy jobs
 only when the merge tree equals a green PR head; after a queue build that is rarely true, so main is
@@ -393,12 +398,10 @@ Scripts, with the rule detected at run time (no queue: nothing changes):
   (one such poll is not enough: the queue clears just before the PR reads `MERGED`) (failed
   queue build, conflict with an entry ahead, removed by hand; `gh` cannot remove an entry, the PR page
   can). Read the queue build's failures on the PR page, fix, and run `pr-merge.sh` again.
-- `--admin` (CODEOWNERS paths): GitHub documents "Merge without waiting for requirements to be met
-  (bypass branch protections)" for administrators and bypass actors, a direct merge that skips the
-  queue and the review rule. The docs do not spell out the ruleset-bypass case for the `merge_queue`
-  rule, so the maintainer's session must confirm on the first sensitive-path PR after the ruleset
-  change; if `--admin` is refused, the fallback is the review, then a normal enqueue. Until
-  then, treat `--admin` as unverified under a queue.
+- `--admin` (CODEOWNERS paths): verified (ADR 0094, "Verification by probe", probe 5): `gh pr merge --admin
+  --merge` merges directly and bypasses the queue and the review rule, so a sensitive-path PR needs no
+  enqueue. `pr-merge.sh --admin` still runs `pr-wait.sh --checks` first, which judges the head's checks
+  whether or not the PR is queued.
 
 ### Review threads (#187)
 

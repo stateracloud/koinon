@@ -125,7 +125,7 @@ check "without --admin it enables auto-merge" 0 merge
 grep -q -- '--auto' "$FAKE_DIR/calls" || { echo "FAIL: --auto" >&2; fail=1; }
 grep -q '^wait 7 --checks --require e2e' "$FAKE_DIR/calls" || { echo "FAIL: a needs-e2e change waits with --require e2e" >&2; fail=1; }
 
-# koinon-private#225: the merge queue, detected from the ruleset at run time
+# #225: the merge queue, detected from the ruleset at run time
 setup false "$green"
 echo true >"$FAKE_DIR/rules"
 run 7

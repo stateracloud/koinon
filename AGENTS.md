@@ -45,7 +45,7 @@ Instructions for coding agents working on Koinon.
   opens an `e2e-regression` issue). RC and release tags are cut only from a commit whose `quickstart`
   job succeeded (`hack/release-gate.sh` checks it).
 - A new `ci.yml` job goes into `hack/ci-required.txt` (or is listed advisory) in the same PR; a
-  required job must report on every PR and push (no workflow-level `paths:`).
+  required job must report on every PR, push and merge_group build (no workflow-level `paths:`).
   ([required checks](docs/dev/ci.md#required-status-checks))
 - `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
 - Before pushing: `gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" .`. CI scans

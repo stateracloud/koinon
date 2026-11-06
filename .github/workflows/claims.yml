@@ -6,7 +6,7 @@
 #             dead ones (draft PRs are kept)
 #   release   when a pull request closes: release the claims that point at it
 #   claim     required check on every pull request: it names an issue whose claim its author holds;
-#             on a merge queue build (koinon-private#225, ADR 0094 decision 4) it reads <N> from the
+#             on a merge queue build (#225, ADR 0094 decision 4) it reads <N> from the
 #             queue ref and runs the base's `check-pr <N>`: the fencing point, a claim taken or swept
 #             while the pull request waited fails here
 #   (the branch updater lives in updater.yml: its triggers differ from the claim's, see there)
@@ -105,7 +105,10 @@ jobs:
     steps:
       # Merge queue (ADR 0094 decision 4): the fencing point. The queue ref is
       # gh-readonly-queue/<base>/pr-<N>-<base sha>; <N> is checked with the base's script, so a claim someone
-      # else took (or the sweeper released) while the pull request waited fails here. Fails closed.
+      # else took (or the sweeper released) while the pull request waited fails here. Fails closed. Limit: a
+      # merge_group run takes this workflow YAML from the queue commit (the pull request's own), so only the
+      # script is the base's; the guard against a PR that edits this file is the required review on .github/**
+      # plus the pull_request_target entry gate (docs/dev/ci.md "The merge queue").
       - if: github.event_name == 'merge_group'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
