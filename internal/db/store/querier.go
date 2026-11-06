@@ -131,6 +131,9 @@ type Querier interface {
 	// run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
 	// runs_sandbox_waiting.
 	ClearSandboxWaitForAgent(ctx context.Context, arg ClearSandboxWaitForAgentParams) (int64, error)
+	// The guard recorded a result of @target's @tool: the oldest call of it still open is closed. SKIP
+	// LOCKED lets two results of one tool close two calls.
+	CloseLeakGuardCall(ctx context.Context, arg CloseLeakGuardCallParams) (int64, error)
 	// When one connection's repositories were last read: -infinity when nothing of it is stored.
 	CodeHostConnectionReadAt(ctx context.Context, arg CodeHostConnectionReadAtParams) (pgtype.Timestamptz, error)
 	// approved -> executed | failed, by the executor that claimed it (fenced on
@@ -159,6 +162,7 @@ type Querier interface {
 	// (that backup then releases the old repository, as a seed would have).
 	CountHomeRepositorySeeds(ctx context.Context, orgID pgtype.UUID) (CountHomeRepositorySeedsRow, error)
 	CountLeakGuardFingerprints(ctx context.Context, arg CountLeakGuardFingerprintsParams) (int64, error)
+	CountLeakGuardOpenCalls(ctx context.Context, arg CountLeakGuardOpenCallsParams) (int64, error)
 	// Questions of the run that still wait for a person (asked or open).
 	CountOpenQuestionsForRun(ctx context.Context, arg CountOpenQuestionsForRunParams) (int64, error)
 	// Recreations in the last 24 hours, since the agent was last resumed: ADR 0054's loop guard,
@@ -301,6 +305,9 @@ type Querier interface {
 	EnsureOrgSettings(ctx context.Context, orgID pgtype.UUID) error
 	// Drops the @n oldest fingerprints of a session.
 	EvictLeakGuardFingerprints(ctx context.Context, arg EvictLeakGuardFingerprintsParams) (int64, error)
+	// The session's calls opened before @before, whose replies the guard never saw: they go, and the
+	// caller records both legs in the same transaction.
+	ExpireLeakGuardCalls(ctx context.Context, arg ExpireLeakGuardCallsParams) (int64, error)
 	// pending -> expired once expires_at has passed (ADR 0049: 7 days).
 	ExpirePendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	// After a compromise (#86) no older repository outlives the seed: epoch 0, if retired and not yet
@@ -991,6 +998,9 @@ type Querier interface {
 	// The turn ended: the run's asked questions become visible. Called in the transaction that parks
 	// the run.
 	OpenAskedQuestionsForRun(ctx context.Context, arg OpenAskedQuestionsForRunParams) ([]Question, error)
+	// A tools/call the guard passed whose result would set a leg (#254): open until the guard records
+	// that result.
+	OpenLeakGuardCall(ctx context.Context, arg OpenLeakGuardCallParams) error
 	// running -> parked. The owner releases the run; a later claim resumes it
 	// after ResolveRunPark.
 	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)

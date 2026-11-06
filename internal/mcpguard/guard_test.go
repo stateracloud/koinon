@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/stateracloud/koinon/internal/audit"
@@ -551,6 +553,152 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			var read, done int64
 			Expect(pool.QueryRow(ctx, `SELECT feed_read, feed_done FROM leak_guard_runs WHERE org_id = $1 AND run_id = $2`, org, run.ID).Scan(&read, &done)).To(Succeed())
 			Expect([]int64{read, done}).To(Equal([]int64{0, 0}))
+		})
+	})
+
+	// #254, ADR 0097 step 1: agentgateway v1.7.0 asks the guard about a tools/call and its successful
+	// result only. A JSON-RPC error reply, and a call cut short, reach the agent unseen, so a call the
+	// guard passed stays open until it records the result, and an open call counts as both legs.
+	Describe("replies the guard never saw (#254)", func() {
+		var clock time.Time
+		openCalls := func(ctx SpecContext) int {
+			GinkgoHelper()
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM leak_guard_open_calls WHERE org_id = $1 AND agent_id = $2`, org, agent.ID).Scan(&n)).To(Succeed())
+			return n
+		}
+		legsOf := func(ctx SpecContext) mcpguard.Legs {
+			GinkgoHelper()
+			var l mcpguard.Legs
+			err := pool.QueryRow(ctx, `SELECT untrusted_input, private_data FROM leak_guard_sessions WHERE org_id = $1 AND agent_id = $2`,
+				org, agent.ID).Scan(&l.UntrustedInput, &l.PrivateData)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return mcpguard.Legs{}
+			}
+			Expect(err).NotTo(HaveOccurred())
+			return l
+		}
+		riskOf := func(ctx SpecContext) string {
+			GinkgoHelper()
+			var risk []byte
+			Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE org_id = $1`, org).Scan(&risk)).To(Succeed())
+			return string(risk)
+		}
+		// ownCall is a call to one of Koinon's own targets, which the guard passes without a decision.
+		ownCall := func(ctx SpecContext, target, tool string) *extmcp.McpRequestResult {
+			GinkgoHelper()
+			res, err := srv.CheckRequest(ctx, &extmcp.McpRequest{
+				ServiceNames: []string{target}, Method: "tools/call",
+				MetadataContext: meta(me(), tool), McpRequest: []byte(`{"name":"` + tool + `","arguments":{"title":"x"}}`),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			return res
+		}
+		var metrics *mcpguard.Metrics
+		BeforeEach(func() {
+			clock = time.Now()
+			metrics = mcpguard.NewMetrics(nil)
+			opts.Now, opts.Metrics, opts.UnseenAfter = func() time.Time { return clock }, metrics, 10*time.Minute
+			guard = mcpguard.New(pool, opts)
+			srv = mcpguard.NewServer(guard)
+		})
+
+		It("ends an error reply in the fail-closed state: the next external call is decided with both legs, by a person", func(ctx SpecContext) {
+			stub := &stubDecider{out: mcpguard.Outcome{Verdict: mcpguard.Verdict{Action: mcpguard.Pass, Reason: "stub"}}}
+			o := opts
+			o.Decider = stub
+			srv = mcpguard.NewServer(mcpguard.New(pool, o))
+			r := call(ctx, "wiki", "read_page", map[string]any{"page": "retention-plan"})
+			Expect(passed(r)).To(BeTrue(), reason(r))
+			Expect(openCalls(ctx)).To(Equal(1))
+			// The wiki answers with a JSON-RPC error quoting the page: agentgateway never calls
+			// CheckResponse, so nothing closes the call.
+			r = call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"})
+			Expect(passed(r)).To(BeFalse())
+			Expect(reason(r)).To(HavePrefix("approval requested: id="))
+			Expect(stub.got).To(BeEmpty(), "a reply the guard never saw goes to a person, never a Decider")
+			Expect(riskOf(ctx)).To(ContainSubstring(`"reply_unseen"`))
+			Expect(riskOf(ctx)).To(ContainSubstring(`"private_data": true`))
+			Expect(riskOf(ctx)).To(ContainSubstring(`"untrusted_input": true`))
+		})
+
+		It("does not fail closed on a reply the guard saw: the result closes the call", func(ctx SpecContext) {
+			r := call(ctx, "wiki", "read_page", map[string]any{"page": "retention-plan"})
+			Expect(passed(r)).To(BeTrue(), reason(r))
+			Expect(result(ctx, "wiki", "read_page", "the page is empty").GetPass()).NotTo(BeNil())
+			Expect(openCalls(ctx)).To(BeZero())
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{PrivateData: true}), "the result's own legs, no more")
+			r = call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"})
+			Expect(passed(r)).To(BeTrue(), reason(r))
+			Expect(approvals(ctx)).To(BeZero())
+		})
+
+		It("decides a second call while the first is in flight with both legs, and the result clears it", func(ctx SpecContext) {
+			Expect(passed(call(ctx, "wiki", "read_page", map[string]any{"page": "a"}))).To(BeTrue())
+			r := call(ctx, "wiki", "read_page", map[string]any{"page": "b"})
+			Expect(reason(r)).To(HavePrefix("approval requested: id="), "the first call's reply is not seen yet")
+			Expect(result(ctx, "wiki", "read_page", "the page is empty").GetPass()).NotTo(BeNil())
+			Expect(openCalls(ctx)).To(BeZero())
+			r = call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"})
+			Expect(passed(r)).To(BeTrue(), reason(r))
+		})
+
+		It("opens a call for an own tool whose result sets a leg, and none for one that sets none", func(ctx SpecContext) {
+			Expect(passed(ownCall(ctx, "github", "create_pull_request"))).To(BeTrue())
+			Expect(openCalls(ctx)).To(BeZero())
+			Expect(passed(ownCall(ctx, "github", "a_new_tool"))).To(BeTrue())
+			Expect(openCalls(ctx)).To(Equal(1), "an own tool nobody declared returns both legs")
+		})
+
+		It("persists both legs for a call still open past the deadline, and counts it", func(ctx SpecContext) {
+			Expect(passed(call(ctx, "web", "search_web", map[string]any{"q": "weather"}))).To(BeTrue())
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{}))
+			clock = clock.Add(10*time.Minute + time.Second)
+			// The next decision sweeps the call: both legs, for good.
+			r := call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"})
+			Expect(reason(r)).To(HavePrefix("approval requested: id="))
+			Expect(openCalls(ctx)).To(BeZero())
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}))
+			Expect(testutil.ToFloat64(metrics.Unseen)).To(Equal(1.0))
+			Expect(riskOf(ctx)).NotTo(ContainSubstring(`"reply_unseen"`), "no call is open: the legs are the session's own now")
+			// A late result does not take them back: legs only grow.
+			Expect(result(ctx, "web", "search_web", "sunny").GetPass()).NotTo(BeNil())
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}))
+			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "still green"}))).To(BeFalse())
+		})
+
+		It("persists nothing for a call still short of the deadline", func(ctx SpecContext) {
+			Expect(passed(call(ctx, "web", "search_web", map[string]any{"q": "weather"}))).To(BeTrue())
+			clock = clock.Add(10*time.Minute - time.Second)
+			r := call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"})
+			Expect(reason(r)).To(HavePrefix("approval requested: id="), "open, so decided with both legs")
+			Expect(openCalls(ctx)).To(Equal(1))
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{}))
+			Expect(testutil.ToFloat64(metrics.Unseen)).To(BeZero())
+		})
+
+		// The documented gap (ADR 0097, #269): a notification on the call's stream (notifications/message,
+		// notifications/progress) is relayed by agentgateway without asking the guard, which has two
+		// inputs only, the call and its successful result. A stream that carries a notification and then
+		// a guarded result looks to the guard exactly like a stream with the result alone: the call
+		// closes and the session holds the result's legs. Exit: ADR 0097 step 2, v0.2, where Koinon's
+		// gateway hands the guard every message. When this spec fails, the gap is closed: update ADR
+		// 0097 and #254.
+		It("does not see a notification on a call's stream: the documented gap until v0.2 (#269)", func(ctx SpecContext) {
+			var inputs []string
+			ext := reflect.TypeFor[extmcp.ExtMcpServer]()
+			for i := range ext.NumMethod() {
+				if m := ext.Method(i); m.IsExported() {
+					inputs = append(inputs, m.Name)
+				}
+			}
+			Expect(inputs).To(ConsistOf("CheckRequest", "CheckResponse"), "the guard's only inputs from agentgateway")
+			Expect(passed(call(ctx, "web", "search_web", map[string]any{"q": "weather"}))).To(BeTrue())
+			// Here the server sent notifications/message quoting the private page: nothing reaches the guard.
+			Expect(result(ctx, "web", "search_web", "sunny").GetPass()).NotTo(BeNil())
+			Expect(openCalls(ctx)).To(BeZero())
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{UntrustedInput: true}), "the result's legs only: the notification left no trace")
+			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"}))).To(BeTrue())
 		})
 	})
 
