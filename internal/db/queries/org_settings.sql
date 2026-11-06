@@ -53,6 +53,13 @@ INSERT INTO org_settings (org_id, run_content_retention_days)
 VALUES (@org_id, sqlc.narg(run_content_retention_days))
 ON CONFLICT (org_id) DO UPDATE SET run_content_retention_days = EXCLUDED.run_content_retention_days;
 
+-- name: SetOrgHomeBackupRetention :exec
+-- How long an old home backup repository is kept after a key change (#219); NULL is the platform
+-- default. It touches only this column.
+INSERT INTO org_settings (org_id, home_backup_retention_days)
+VALUES (@org_id, sqlc.narg(home_backup_retention_days))
+ON CONFLICT (org_id) DO UPDATE SET home_backup_retention_days = EXCLUDED.home_backup_retention_days;
+
 -- name: EnsureOrgSettings :exec
 -- Makes sure the org has an org_settings row, so LockOrgSettings has a row to lock.
 INSERT INTO org_settings (org_id) VALUES (@org_id) ON CONFLICT (org_id) DO NOTHING;

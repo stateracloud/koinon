@@ -50,3 +50,44 @@ func (s *Server) SetRunContentRetention(ctx context.Context, req SetRunContentRe
 	st, e := s.problem(err)
 	return SetRunContentRetentiondefaultJSONResponse{Body: e, StatusCode: st}, nil
 }
+
+func (s *Server) homeBackupRetentionView(ctx context.Context, org pgtype.UUID) (HomeBackupRetention, error) {
+	days, err := s.leakGuard.HomeBackupRetentionDays(ctx, org)
+	if err != nil {
+		return HomeBackupRetention{}, err
+	}
+	return HomeBackupRetention{
+		Days: days, DefaultDays: orgsettings.DefaultHomeBackupRetentionDays,
+		MinDays: orgsettings.MinHomeBackupRetentionDays, MaxDays: orgsettings.MaxHomeBackupRetentionDays,
+	}, nil
+}
+
+// GetHomeBackupRetention implements StrictServerInterface.
+func (s *Server) GetHomeBackupRetention(ctx context.Context, _ GetHomeBackupRetentionRequestObject) (GetHomeBackupRetentionResponseObject, error) {
+	p, _ := s.actor(ctx)
+	v, err := s.homeBackupRetentionView(ctx, p.Org)
+	if err != nil {
+		st, e := s.problem(err)
+		return GetHomeBackupRetentiondefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	return GetHomeBackupRetention200JSONResponse(v), nil
+}
+
+// SetHomeBackupRetention implements StrictServerInterface.
+func (s *Server) SetHomeBackupRetention(ctx context.Context, req SetHomeBackupRetentionRequestObject) (SetHomeBackupRetentionResponseObject, error) {
+	p, actor := s.actor(ctx)
+	// 0 means the default, as on the UI API.
+	n := req.Body.Days
+	if n != nil && *n == 0 {
+		n = nil
+	}
+	err := s.leakGuard.SetHomeBackupRetention(ctx, p.Org, actor, n)
+	if err == nil {
+		var v HomeBackupRetention
+		if v, err = s.homeBackupRetentionView(ctx, p.Org); err == nil {
+			return SetHomeBackupRetention200JSONResponse(v), nil
+		}
+	}
+	st, e := s.problem(err)
+	return SetHomeBackupRetentiondefaultJSONResponse{Body: e, StatusCode: st}, nil
+}
