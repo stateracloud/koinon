@@ -2125,6 +2125,24 @@ type Provider struct {
 	UpdatedAt            pgtype.Timestamptz
 	AnthropicWorkspaceID pgtype.Text
 	CredentialLostAt     pgtype.Timestamptz
+	CostApiKey           []byte
+	CostScope            pgtype.Text
+	CostApiKeyLostAt     pgtype.Timestamptz
+}
+
+type ProviderCostReconciliation struct {
+	OrgID        pgtype.UUID
+	ProviderID   pgtype.UUID
+	Day          pgtype.Date
+	ProviderType string
+	LedgerUsd    pgtype.Numeric
+	Entries      int64
+	ProviderUsd  pgtype.Numeric
+	DiffUsd      pgtype.Numeric
+	Status       string
+	Error        pgtype.Text
+	Attempts     int32
+	CheckedAt    pgtype.Timestamptz
 }
 
 type ProviderEchoCheck struct {
@@ -2331,6 +2349,7 @@ type SpendEntry struct {
 	ResponseID       pgtype.Text
 	Principal        string
 	UpstreamStatus   pgtype.Int2
+	ProviderID       pgtype.UUID
 }
 
 type SpendEntryRevision struct {
