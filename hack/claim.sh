@@ -332,9 +332,11 @@ perm_class() { case $1 in admin | maintain | write) echo person ;; *) echo outsi
 # comment_holder LOGIN CLASS -> the holder a comment claim writes.
 comment_holder() { if [[ $2 == person ]]; then echo "$1/github/human"; else echo "$1/github/outsider"; fi; }
 
-# is_denied OUTPUT: GitHub refused a write for lack of permission (the comment fallback's trigger).
+# is_denied OUTPUT: GitHub refused a write for lack of permission (the comment fallback's trigger): HTTP
+# 401 or 403, or GraphQL's "Resource not accessible". Only those: a ruleset refusal is a 422 whose text
+# can say "permission", and answering it as a read-only token would hide a real failure.
 is_denied() {
-  [[ $1 == *"HTTP 401"* || $1 == *"HTTP 403"* || $1 == *"Resource not accessible"* || $1 == *"ermission"* ]]
+  [[ $1 == *"HTTP 401"* || $1 == *"HTTP 403"* || $1 == *"Resource not accessible"* ]]
 }
 
 # The answers of the comment commands (refusals are always answered, never silent).
@@ -1353,7 +1355,19 @@ cmd_release_pr() {
 }
 
 # pr_meta P -> {author, body} of pull request P (REST: the check runs on GITHUB_TOKEN).
-pr_meta() { gh api "repos/$REPO/pulls/$1" --jq '{author: .user.login, body: (.body // "")}'; }
+# pr_meta P -> {author, body, closers}: closers are the issues of this repository GitHub links pull
+# request P to as closed by it (closingIssuesReferences: a closing keyword in the body in any form,
+# owner/repo#N and URLs included, and the sidebar's links), so the check sees what a merge closes.
+pr_meta() {
+  local out
+  # shellcheck disable=SC2016
+  out=$(gh api graphql -f o="$OWNER" -f n="$NAME" -F p="$1" -f query='
+    query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){
+      author{login} body closingIssuesReferences(first:100){nodes{number repository{nameWithOwner}}}}}}') || return 1
+  jq -ce --arg repo "$REPO" '.data.repository.pullRequest | select(. != null)
+    | {author: (.author.login // ""), body: (.body // ""),
+       closers: [(.closingIssuesReferences.nodes // [])[] | select(.repository.nameWithOwner == $repo) | .number]}' <<<"$out"
+}
 
 # pr_added_adr_files P -> the docs/adr/NNNN-*.md files pull request P adds (added, renamed or copied),
 # one per line. An API error fails: the check must not pass on a partial view.
@@ -1375,7 +1389,8 @@ cmd_check_pr() {
   pr=$(pr_meta "$p") || die "cannot read pull request #$p (API error); re-run the check"
   author=$(jq -r .author <<<"$pr"); body=$(jq -r .body <<<"$pr")
   now=$(server_now)
-  issues=$(closing_issues "$body")
+  # GitHub's links and the body's keywords: a body keyword alone misses the sidebar, owner/repo#N and URLs.
+  issues=$({ jq -r '.closers[]?' <<<"$pr"; closing_issues "$body"; } | sort -un)
   if [[ -z $issues ]]; then
     echo "::notice::this pull request names no issue; say 'Closes #N' in its description so agents and this check see what it takes"
     echo "claim check: no Closes #N; nothing to check"

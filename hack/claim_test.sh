@@ -177,6 +177,8 @@ eq "command: another command" "$(comment_command '/assign')" ""
 eq "denied: 403" "$(is_denied 'Resource not accessible by integration (HTTP 403)' && echo y || echo n)" y
 eq "denied: 401" "$(is_denied 'Bad credentials (HTTP 401)' && echo y || echo n)" y
 eq "denied: a lost race is not" "$(is_denied 'Reference already exists (HTTP 422)' && echo y || echo n)" n
+eq "denied: a ruleset refusal is not" "$(is_denied 'Repository rule violations found: you do not have permission to update this ref (HTTP 422)' && echo y || echo n)" n
+eq "denied: a word in a title is not" "$(is_denied 'missing permission label' && echo y || echo n)" n
 eq "fallback text" "$(text_fallback carol 42)" "@carol comment claims are not available for outside contributors yet; open a pull request that says Closes #42 instead. An open pull request already makes agents skip this issue."
 eq "unassignable note" "$(text_unassignable carol 42)" 'GitHub did not allow assigning @carol (only collaborators, org members with read access and people who commented here can be assigned); the claim is recorded in the ref `claim/42`.'
 
@@ -629,7 +631,8 @@ ckpr() {
   local out rc=0
   out=$( {
     FIX=$1; stub_github; REPO=acme/koinon; RELEASE_AFTER=7200
-    pr_meta() { jq -nc --arg a "$AUTHOR" --arg b "$BODY" '{author: $a, body: $b}'; }
+    # shellcheck disable=SC2154 # ck_body and ck_closers come from chk's caller (an env prefix)
+    pr_meta() { jq -nc --arg a "$AUTHOR" --arg b "$ck_body" --argjson c "${ck_closers:-[]}" '{author: $a, body: $b, closers: $c}'; }
     pr_added_adr_files() { if [[ -n ${ADDED_FAIL:-} ]]; then return 1; fi; printf '%s' "$ADDED"; }
     claim_liveness() {
       if [[ -n ${LIVE_FAIL:-} ]]; then return 4; fi
@@ -640,7 +643,7 @@ ckpr() {
   echo "$out"
   echo "rc=$rc"
 }
-chk() { AUTHOR=$2 BODY=$3 ADDED=${4:-} ckpr "$1"; }
+chk() { AUTHOR=$2 ck_body=$3 ADDED=${4:-} ckpr "$1"; }
 cl() { # ISSUE STATE HUMAN LEASE [PR] [PR_STATE]
   jq -nc --arg i "$1" --arg s "$2" --arg h "$3" --arg l "$4" --arg p "${5:-}" --arg ps "${6:-none}" \
     '{issue: ($i | tonumber? // $i), sha: "x", state: $s, holder: "\($h)/mac/s1", human: $h, lease_until: $l, pr: $p, note: "", prs: $ps}'
@@ -683,6 +686,22 @@ eq "check: a reservation that ran out passes" "$(rc_of "$(chk "$CK" alice "" "do
 eq "check: an unreserved ADR number passes" "$(rc_of "$(chk "$CK" alice "" "docs/adr/0098-x.md")")" 0
 eq "check: the files cannot be listed is exit 1" "$(rc_of "$(ADDED_FAIL=1 chk "$CK" alice "Closes #4")")" 1
 eq "check: a bot or Dependabot author has no exemption to need" "$(rc_of "$(chk "$CK" 'dependabot[bot]' "bump")")" 0
+r=$(ck_closers='[5]' chk "$CK" alice "Closes stateracloud/koinon#5")
+eq "check: GitHub's closing link fails without a body keyword (owner/repo#N, a URL, the sidebar)" "$(rc_of "$r")" 1
+eq "check: the linked issue's failure is the fixed text" "$(grep '^::error::' <<<"$r")" \
+  "$(conflict_issue_text 5 bob 2026-10-30T17:00:00Z 60 alice 2026-10-30T19:00:00Z)"
+eq "check: a link and a keyword for one issue check it once" "$(ck_closers='[8]' chk "$CK" alice "Fixes #8" | grep -c '#8 is claimed')" 1
+# pr_meta reads closingIssuesReferences and keeps this repository's issues only.
+r=$( (
+  REPO=acme/koinon; OWNER=acme; NAME=koinon
+  gh() { [[ $1 == api && $2 == graphql ]] || return 9
+    echo '{"data":{"repository":{"pullRequest":{"author":{"login":"alice"},"body":"see the sidebar","closingIssuesReferences":{"nodes":[{"number":5,"repository":{"nameWithOwner":"acme/koinon"}},{"number":6,"repository":{"nameWithOwner":"other/repo"}}]}}}}}'; }
+  pr_meta 77 ) )
+eq "pr_meta: author, body and this repository's closing links" "$r" '{"author":"alice","body":"see the sidebar","closers":[5]}'
+eq "pr_meta: an unknown pull request fails, never an empty pass" "$( (
+  REPO=acme/koinon; OWNER=acme; NAME=koinon
+  gh() { echo '{"data":{"repository":{"pullRequest":null}}}'; }
+  pr_meta 77 >/dev/null && echo pass || echo fail ) )" fail
 
 # ---- claims by comment (ADR 0094 decision 1), offline ----
 # cmt CLAIMS_JSON LOGIN PERMISSION BODY [N] -> output and rc of `comment N` (default 40).
