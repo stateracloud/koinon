@@ -9,11 +9,14 @@ period for their org, from 1 to 365 days.
 
 ## What is removed, what stays
 
-- Removed: the payload of each event of a finished run (`run_events.payload`) once the run is older
-  than the org's retention. The event is marked as purged, and the run page shows it without its
+- Removed: once a finished run is older than the org's retention, the payload of its content events
+  (messages, thoughts and tool calls) is blanked, and the text of prompt, permission and refusal
+  events is stripped. The run is marked as purged, and the run page shows those events without their
   content.
 - Stays: the run, its status and outcome, and every event row with its sequence number, kind and
-  time, so the run page keeps its timeline. Traces sent to a destination and the spend ledger are
+  time, so the run page keeps its timeline. Events that are not content (such as a wrap-up notice
+  with its spend) and the state fields of prompts, permission decisions and refusals (for example
+  the decision and the count) keep their payload. Traces sent to a destination and the spend ledger are
   other records and are not touched.
 - A run that has not finished is never purged.
 

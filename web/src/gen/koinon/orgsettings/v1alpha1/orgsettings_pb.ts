@@ -16,9 +16,10 @@ export const file_koinon_orgsettings_v1alpha1_orgsettings: GenFile = /*@__PURE__
   fileDesc("Ci1rb2lub24vb3Jnc2V0dGluZ3MvdjFhbHBoYTEvb3Jnc2V0dGluZ3MucHJvdG8SG2tvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMSJdChNSdW5Db250ZW50UmV0ZW50aW9uEgwKBGRheXMYASABKAUSFAoMZGVmYXVsdF9kYXlzGAIgASgFEhAKCG1pbl9kYXlzGAMgASgFEhAKCG1heF9kYXlzGAQgASgFIi8KHUdldFJ1bkNvbnRlbnRSZXRlbnRpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJlCh5HZXRSdW5Db250ZW50UmV0ZW50aW9uUmVzcG9uc2USQwoJcmV0ZW50aW9uGAEgASgLMjAua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLlJ1bkNvbnRlbnRSZXRlbnRpb24iPQodU2V0UnVuQ29udGVudFJldGVudGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEgwKBGRheXMYAiABKAUiZQoeU2V0UnVuQ29udGVudFJldGVudGlvblJlc3BvbnNlEkMKCXJldGVudGlvbhgBIAEoCzIwLmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5SdW5Db250ZW50UmV0ZW50aW9uMsECChJPcmdTZXR0aW5nc1NlcnZpY2USlgEKFkdldFJ1bkNvbnRlbnRSZXRlbnRpb24SOi5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuR2V0UnVuQ29udGVudFJldGVudGlvblJlcXVlc3QaOy5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuR2V0UnVuQ29udGVudFJldGVudGlvblJlc3BvbnNlIgOQAgESkQEKFlNldFJ1bkNvbnRlbnRSZXRlbnRpb24SOi5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuU2V0UnVuQ29udGVudFJldGVudGlvblJlcXVlc3QaOy5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuU2V0UnVuQ29udGVudFJldGVudGlvblJlc3BvbnNlQl1aW2dpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL29yZ3NldHRpbmdzL3YxYWxwaGExO29yZ3NldHRpbmdzdjFhbHBoYTFiBnByb3RvMw");
 
 /**
- * RunContentRetention is the org's effective retention of stored run content. The purge job blanks
- * the payload of a finished run's events once the run is older than days; the events themselves, the
- * run's status, traces and the spend ledger stay.
+ * RunContentRetention is the org's effective retention of stored run content. Once a finished run is
+ * older than days, the purge job blanks the payload of its content events (messages, thoughts and tool
+ * calls) and strips the text from prompt, permission and refusal events, whose state fields stay. Other
+ * events, the run's status, traces and the spend ledger stay.
  *
  * @generated from message koinon.orgsettings.v1alpha1.RunContentRetention
  */

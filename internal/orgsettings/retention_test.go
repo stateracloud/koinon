@@ -189,6 +189,33 @@ var _ = Describe("Run content retention", func() {
 		Expect(marked).To(BeTrue())
 	})
 
+	It("leaves the trace rows and the spend ledger unchanged", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		run := finishedRun(ctx, org, 40*24*time.Hour, 2)
+		_, err := pool.Exec(ctx, `INSERT INTO run_turns (org_id, run_id, seq, trace_id, end_reason) VALUES ($1, $2, 1, '\x0102030405060708090a0b0c0d0e0f10'::bytea, 'end_turn')`, org, run)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model, input_tokens, output_tokens, cost_usd, priced, occurred_at)
+			SELECT org_id, agent_id, 'req-retention-1', 'key-1', 'm', 10, 20, 0.5, true, $2 FROM runs WHERE id = $1`, run, t0.Add(-40*24*time.Hour))
+		Expect(err).NotTo(HaveOccurred())
+		snapshot := func() (string, string) {
+			var turns, spend string
+			Expect(pool.QueryRow(ctx, `SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY id)::text, '') FROM run_turns t WHERE org_id = $1`, org).Scan(&turns)).To(Succeed())
+			Expect(pool.QueryRow(ctx, `SELECT coalesce(jsonb_agg(to_jsonb(s) ORDER BY id)::text, '') FROM spend_entries s WHERE org_id = $1`, org).Scan(&spend)).To(Succeed())
+			return turns, spend
+		}
+		turnsBefore, spendBefore := snapshot()
+		Expect(turnsBefore).NotTo(BeEmpty())
+		Expect(spendBefore).NotTo(BeEmpty())
+
+		n, err := orgsettings.NewPurger(pool, nil, now).PurgeOrg(ctx, org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(BeEquivalentTo(2))
+
+		turnsAfter, spendAfter := snapshot()
+		Expect(turnsAfter).To(Equal(turnsBefore))
+		Expect(spendAfter).To(Equal(spendBefore))
+	})
+
 	It("leaves a run that has not finished alone", func(ctx SpecContext) {
 		org, _, _ := pgtest.NewOrg(ctx, pool)
 		// A negative age leaves the run queued: it never finished, so its content is in use.

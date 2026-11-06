@@ -1275,7 +1275,7 @@ type Rates struct {
 // Role defines model for Role.
 type Role string
 
-// RunContentRetention The purge job blanks the payload of a finished run's events once the run is older than `days`. The events, the run's status, traces and the spend ledger stay.
+// RunContentRetention Once a finished run is older than `days`, the purge job blanks the payload of its content events (messages, thoughts and tool calls) and strips the text from prompt, permission and refusal events, whose state fields stay. Other events, the run's status, traces and the spend ledger stay.
 type RunContentRetention struct {
 	Days        int `json:"days"`
 	DefaultDays int `json:"defaultDays"`

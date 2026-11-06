@@ -18,9 +18,10 @@ service OrgSettingsService {
   rpc SetRunContentRetention(SetRunContentRetentionRequest) returns (SetRunContentRetentionResponse);
 }
 
-// RunContentRetention is the org's effective retention of stored run content. The purge job blanks
-// the payload of a finished run's events once the run is older than days; the events themselves, the
-// run's status, traces and the spend ledger stay.
+// RunContentRetention is the org's effective retention of stored run content. Once a finished run is
+// older than days, the purge job blanks the payload of its content events (messages, thoughts and tool
+// calls) and strips the text from prompt, permission and refusal events, whose state fields stay. Other
+// events, the run's status, traces and the spend ledger stay.
 message RunContentRetention {
   int32 days = 1;
   int32 default_days = 2;

@@ -6,7 +6,6 @@ import { useState } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
 import { RequireAdmin } from '@/components/require-admin'
 import { LeakGuardSettings } from '@/components/leak-guard-settings'
-import { RunContentRetentionSettings } from '@/components/run-content-retention-settings'
 import { ServerClass } from '@/components/server-class'
 import { ToolSink } from '@/components/tool-sink'
 import { ServerForm } from '@/components/server-form'
@@ -108,7 +107,6 @@ function ServersContent() {
         </ul>
       )}
       <LeakGuardSettings orgId={orgId} />
-      <RunContentRetentionSettings orgId={orgId} />
     </>
   )
 }

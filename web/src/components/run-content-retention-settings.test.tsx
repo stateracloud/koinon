@@ -5,10 +5,8 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
-import { LeakGuardService } from '@/gen/koinon/leakguard/v1alpha1/leakguard_pb'
-import { McpServerService } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import { OrgSettingsService } from '@/gen/koinon/orgsettings/v1alpha1/orgsettings_pb'
+import { TraceDestinationService } from '@/gen/koinon/trace/v1alpha1/trace_pb'
 import { renderApp, whoAmI } from '@/test-utils'
 
 function setup() {
@@ -17,9 +15,7 @@ function setup() {
   const view = () => ({ retention: { days, defaultDays: 30, minDays: 1, maxDays: 365 } })
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: OrgRole.ADMIN }) })
-    service(ConnectionService, { listConnections: () => ({ connections: [] }) })
-    service(McpServerService, { listServers: () => ({ servers: [] }), listTools: () => ({ tools: [] }) })
-    service(LeakGuardService, { getLeakGuard: () => ({ leakGuard: { matchThreshold: 24, defaultMatchThreshold: 24, minMatchThreshold: 12, maxMatchThreshold: 256, trustedHosts: [] } }) })
+    service(TraceDestinationService, { listDestinations: () => ({ destinations: [] }), getSettings: () => ({}) })
     service(OrgSettingsService, {
       getRunContentRetention: () => view(),
       setRunContentRetention: (req) => {
@@ -29,7 +25,7 @@ function setup() {
       },
     })
   })
-  renderApp(transport, '/servers')
+  renderApp(transport, '/settings/observability')
   return sets
 }
 
