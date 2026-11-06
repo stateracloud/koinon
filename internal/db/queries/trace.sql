@@ -13,8 +13,9 @@ SELECT * FROM trace_destinations
 WHERE org_id = @org_id AND id = @id;
 
 -- name: CountEnabledTraceDestinations :one
+-- A destination whose credentials were lost (#85) receives nothing, so it does not count.
 SELECT count(*) FROM trace_destinations
-WHERE org_id = @org_id AND enabled;
+WHERE org_id = @org_id AND enabled AND credential_lost_at IS NULL;
 
 -- name: InsertTraceDestination :one
 INSERT INTO trace_destinations (org_id, id, name, backend, endpoint_url, params, credentials, secret_fields,
@@ -27,10 +28,13 @@ RETURNING *;
 -- Replaces the settings of a destination. Applies only to the version the caller read
 -- (@expected_version), so two admins editing at once do not overwrite each other's secrets, and bumps
 -- config_version. @set_test says the change was tested and the test columns are recorded; otherwise the
--- previous test result stays. The router's health columns stay.
+-- previous test result stays. The router's health columns stay. A tested change ends lost credentials
+-- (#85): it carried every secret the backend needs (the trigger credential_lost_clear also clears the
+-- mark when credentials are stored).
 UPDATE trace_destinations
 SET name = @name, backend = @backend, endpoint_url = @endpoint_url, params = @params,
     credentials = @credentials, secret_fields = @secret_fields, resource_attributes = @resource_attributes,
+    credential_lost_at = CASE WHEN @set_test::boolean THEN NULL ELSE credential_lost_at END,
     enabled = @enabled, config_version = config_version + 1,
     last_test_at = CASE WHEN @set_test::boolean THEN @last_test_at ELSE last_test_at END,
     last_test_ok = CASE WHEN @set_test::boolean THEN @last_test_ok ELSE last_test_ok END,
@@ -139,6 +143,7 @@ ON CONFLICT (singleton) DO UPDATE
 SET backend = EXCLUDED.backend, endpoint_url = EXCLUDED.endpoint_url, params = EXCLUDED.params,
     credentials = EXCLUDED.credentials, secret_fields = EXCLUDED.secret_fields,
     resource_attributes = EXCLUDED.resource_attributes, enabled = EXCLUDED.enabled,
+    credential_lost_at = CASE WHEN @set_test::boolean THEN NULL ELSE platform_trace_destination.credential_lost_at END,
     config_version = platform_trace_destination.config_version + 1,
     last_test_at = CASE WHEN @set_test::boolean THEN EXCLUDED.last_test_at ELSE platform_trace_destination.last_test_at END,
     last_test_ok = CASE WHEN @set_test::boolean THEN EXCLUDED.last_test_ok ELSE platform_trace_destination.last_test_ok END,

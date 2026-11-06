@@ -50,6 +50,7 @@ func toMcpServer(m mcpservers.Server) McpServer {
 		t := true
 		out.Removed = &t
 	}
+	out.CredentialLostAt = m.CredentialLostAt
 	return out
 }
 

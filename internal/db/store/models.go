@@ -1734,6 +1734,7 @@ type Connection struct {
 	ManagedBySecret   pgtype.Text
 	DeclaredVersion   pgtype.Text
 	RemovedAt         pgtype.Timestamptz
+	CredentialLostAt  pgtype.Timestamptz
 }
 
 type DedupeRecord struct {
@@ -1876,6 +1877,7 @@ type McpServer struct {
 	ExposesUntrustedInput bool
 	ExposesPrivateData    bool
 	CodeHostConnectionID  pgtype.UUID
+	CredentialLostAt      pgtype.Timestamptz
 }
 
 type McpTool struct {
@@ -2064,6 +2066,7 @@ type PlatformTraceDestination struct {
 	SpansDropped       int64
 	UpdatedBy          string
 	UpdatedAt          pgtype.Timestamptz
+	CredentialLostAt   pgtype.Timestamptz
 }
 
 type PlatformTraceSetting struct {
@@ -2100,6 +2103,7 @@ type Provider struct {
 	CreatedAt            pgtype.Timestamptz
 	UpdatedAt            pgtype.Timestamptz
 	AnthropicWorkspaceID pgtype.Text
+	CredentialLostAt     pgtype.Timestamptz
 }
 
 type ProviderEchoCheck struct {
@@ -2406,6 +2410,7 @@ type TraceDestination struct {
 	CreatedBy          pgtype.UUID
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
+	CredentialLostAt   pgtype.Timestamptz
 }
 
 type User struct {

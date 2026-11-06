@@ -50,7 +50,12 @@ export function ConnectionsPage() {
               {c.source === 'secret' && (
                 <span className="text-muted-foreground text-sm">{c.removed ? `Removed (Secret ${c.managedBySecret} deleted)` : `Managed by Secret ${c.managedBySecret}`}</span>
               )}
-              <Badge variant={c.status === ConnectionStatus.FAILING ? 'destructive' : 'secondary'} className="ml-auto">
+              {c.credentialLostAt && (
+                <Badge variant="destructive" className="ml-auto">
+                  Credential lost
+                </Badge>
+              )}
+              <Badge variant={c.status === ConnectionStatus.FAILING ? 'destructive' : 'secondary'} className={c.credentialLostAt ? undefined : 'ml-auto'}>
                 {connectionStatusLabel(c.status)}
               </Badge>
             </li>

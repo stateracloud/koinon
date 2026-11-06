@@ -59,7 +59,7 @@ func (s *Service) settings(ctx context.Context, q *store.Queries, org pgtype.UUI
 	}
 	out := Settings{ContentLevel: LevelNone, SampleRate: 1, PlatformCopyLevel: LevelNone, Ceiling: string(plat.ContentCeiling)}
 	if d, err := q.GetPlatformTraceDestination(ctx); err == nil {
-		out.HasPlatformDestination = d.Enabled
+		out.HasPlatformDestination = d.Enabled && !d.CredentialLostAt.Valid
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return Settings{}, err
 	}
@@ -187,7 +187,8 @@ type Route struct {
 	ResourceAttributes map[string]string
 	// Unreadable: the destination is configured and enabled but its stored credentials cannot be
 	// opened. It is listed (so a caller does not mistake it for a deleted one and drop its queue) with
-	// no credentials, and nothing can be sent to it.
+	// no credentials, and nothing can be sent to it. A destination whose credentials were lost
+	// (ADR 0085 decision 13) is unreadable too, until they are entered again.
 	Unreadable bool
 	// Level is the content level for this destination: the org's own level for an org destination,
 	// and for the platform's the org's opt-in, never above the ceiling.
@@ -210,6 +211,13 @@ func (s *Service) Routes(ctx context.Context, org pgtype.UUID) ([]Route, error) 
 	var out []Route
 	for _, r := range rows {
 		if !r.Enabled {
+			continue
+		}
+		if r.CredentialLostAt.Valid {
+			out = append(out, Route{
+				ID: r.ID.String(), Name: r.Name, Unreadable: true, Level: LevelNone,
+				Destination: export.Destination{Preset: export.Preset(r.Backend), Endpoint: r.EndpointUrl},
+			})
 			continue
 		}
 		secrets, err := s.open(r.Credentials, Binding(org, r.ID))
@@ -239,6 +247,12 @@ func (s *Service) Routes(ctx context.Context, org pgtype.UUID) ([]Route, error) 
 	if err != nil {
 		return nil, err
 	}
+	if p.CredentialLostAt.Valid {
+		return append(out, Route{
+			Name: "platform", Platform: true, Unreadable: true, Level: LevelNone,
+			Destination: export.Destination{Preset: export.Preset(p.Backend), Endpoint: p.EndpointUrl},
+		}), nil
+	}
 	secrets, err := s.open(p.Credentials, PlatformBinding())
 	if err != nil {
 		s.log.Error("platform trace destination credentials cannot be opened; it receives nothing", "err", err)
@@ -260,7 +274,8 @@ func (s *Service) Routes(ctx context.Context, org pgtype.UUID) ([]Route, error) 
 // ConfigVersion is a cheap fingerprint of everything that decides where an org's spans go and at
 // which level: the platform ceiling, the org's settings, its destinations' configuration versions
 // and enabled flags, and the platform destination's (with its updated_at, because deleting and
-// recreating it resets config_version; an org destination gets a new ID when recreated). The router compares it before it sends a batch,
+// recreating it resets config_version; an org destination gets a new ID when recreated), and whether
+// their credentials were lost. The router compares it before it sends a batch,
 // so a lowered level or a deleted destination applies to spans already queued. Health writes
 // (last success, last error, spans dropped) do not change it.
 func (s *Service) ConfigVersion(ctx context.Context, org pgtype.UUID) (string, error) {
@@ -268,7 +283,7 @@ func (s *Service) ConfigVersion(ctx context.Context, org pgtype.UUID) (string, e
 	err := s.pool.QueryRow(ctx, `SELECT concat_ws('|',
 		(SELECT content_ceiling::text || '@' || updated_at::text FROM platform_trace_settings),
 		coalesce((SELECT content_level::text || '/' || platform_copy_level::text || '@' || updated_at::text FROM org_trace_settings WHERE org_id = $1), ''),
-		coalesce((SELECT string_agg(id::text || ':' || config_version::text || ':' || enabled::text, ',' ORDER BY id) FROM trace_destinations WHERE org_id = $1), ''),
-		coalesce((SELECT config_version::text || ':' || enabled::text || '@' || updated_at::text FROM platform_trace_destination), ''))`, org).Scan(&v)
+		coalesce((SELECT string_agg(id::text || ':' || config_version::text || ':' || enabled::text || ':' || (credential_lost_at IS NOT NULL)::text, ',' ORDER BY id) FROM trace_destinations WHERE org_id = $1), ''),
+		coalesce((SELECT config_version::text || ':' || enabled::text || ':' || (credential_lost_at IS NOT NULL)::text || '@' || updated_at::text FROM platform_trace_destination), ''))`, org).Scan(&v)
 	return v, err
 }

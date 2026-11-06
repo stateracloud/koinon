@@ -306,6 +306,7 @@ func toProvider(p catalog.Provider) Provider {
 	if p.AnthropicWorkspaceID != "" {
 		out.AnthropicWorkspaceId = &p.AnthropicWorkspaceID
 	}
+	out.CredentialLostAt = p.CredentialLostAt
 	out.Formats = append([]ModelFormat{}, p.Formats...)
 	return out
 }

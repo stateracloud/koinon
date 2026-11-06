@@ -61,7 +61,8 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
   // Changing the backend of a saved destination starts from no secrets, so the form asks for them again.
   const keeps = keepsSecrets(f, destination)
   const tested = connectionChanged(f, destination)
-  const droppedSecrets = !!destination && !keeps && destination.secretFields.length > 0
+  const lostSecrets = !!destination?.credentialLostAt
+  const droppedSecrets = !!destination && !keeps && !lostSecrets && destination.secretFields.length > 0
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -301,6 +302,11 @@ export function TraceDestinationForm({ destination, platform = false, save, onDo
           ? 'Saving first sends the backend one test trace with no content. Koinon saves the destination only if the backend accepts it.'
           : 'Nothing about the connection changed, so this is saved without a test. The last test result stays.'}
       </p>
+      {lostSecrets && (
+        <p role="note" className="text-sm">
+          The stored secrets were lost with a key-encryption key, so nothing is exported to this destination. Enter every secret again; Koinon tests the destination before it saves.
+        </p>
+      )}
       {droppedSecrets && (
         <p role="note" className="text-sm">
           The endpoint host, port or scheme changed, so Koinon will not send the stored secrets to the new address. Enter every secret again.

@@ -1105,6 +1105,12 @@ components:
         hasKey:
           type: boolean
           description: Whether an API key is stored. The key itself is never returned.
+        credentialLostAt:
+          type: string
+          format: date-time
+          description: >-
+            Set when the API key was lost with the key that encrypted it (`koinon-api keys forget`):
+            the provider is not served until the key is entered again.
         anthropicWorkspaceId:
           type: string
           example: wrkspc_01AbCdEf
@@ -1301,6 +1307,12 @@ components:
         hasCredential:
           type: boolean
           description: Whether a credential is stored. The credential itself is never returned.
+        credentialLostAt:
+          type: string
+          format: date-time
+          description: >-
+            Set when the credential was lost with the key that encrypted it (`koinon-api keys forget`):
+            the server is not served until the credential is entered again.
         credentialHeader: {type: string, example: Authorization}
         credentialPrefix: {type: string, example: "Bearer "}
         source: {$ref: "#/components/schemas/Source"}
