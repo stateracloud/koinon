@@ -127,6 +127,73 @@ func guardSpec(env Env) {
 		})
 	})
 
+	// #254, ADR 0097 step 1 exit criterion 2: what the real gateway shows the guard of a reply that
+	// is not a successful result. The guard (internal/mcpguard) fails closed on a call it passed whose
+	// result it never saw; guard_test there drives its own Server and shows the legs it then sets.
+	// These specs show the trigger on the real gateway: an error reply reaches the agent and the
+	// guard is not asked about it.
+	Describe(env.Name+": replies the MCP leak guard never sees (#254)", Ordered, func() {
+		const faulty = "acme-faulty"
+		var (
+			url, key string
+			logs     func(context.Context) string
+			guard    *FakeGuard
+		)
+		BeforeAll(func(ctx SpecContext) {
+			srv := faultyRemote(faulty, &headerLog{})
+			DeferCleanup(func() { srv.CloseClientConnections(); go srv.Close() })
+			guard = startGuard()
+			k, err := gateway.NewKey(agent)
+			Expect(err).NotTo(HaveOccurred())
+			key = k.Material
+			state := gateway.State{MCP: []gateway.MCPTarget{{Name: faulty, Org: "acme", URL: "http://" + env.Host + ":" + itoa(port(srv)) + "/mcp"}}}
+			state.AddKey(k.Key)
+			state.GrantTools(agent, gateway.ToolGrant{Target: faulty, Tools: []string{"read_item", "fail_item", "stray_item"}})
+			gw, err := env.Start(ctx, []int{port(srv), guard.Port()}, nil, guard.URL(env.Host))
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(gw.Stop)
+			url, logs = gw.URL, gw.Logs
+			_, err = gw.Driver.Apply(ctx, state)
+			Expect(err).NotTo(HaveOccurred())
+		}, NodeTimeout(5*time.Minute))
+
+		AfterEach(func(ctx SpecContext) {
+			if CurrentSpecReport().Failed() && logs != nil {
+				AddReportEntry("gateway logs", logs(ctx))
+			}
+		})
+
+		responsesFor := func(tool string) []GuardCall {
+			return slices.DeleteFunc(guard.Responses(), func(c GuardCall) bool { return c.Tool != tool })
+		}
+
+		It("passes a JSON-RPC error reply to the agent without asking the guard about it", func(ctx SpecContext) {
+			text, failed := call(ctx, url, key, faulty+"_fail_item")
+			Expect(failed).To(BeTrue(), text)
+			Expect(text).To(ContainSubstring(replyCanary), "the error reached the agent")
+			Expect(guard.Requests()).To(ContainElement(HaveField("Tool", "fail_item")), "the guard passed the call")
+			Consistently(func() []GuardCall { return responsesFor("fail_item") }).WithTimeout(2*time.Second).Should(BeEmpty(),
+				"the guard was never asked about the error reply: the gap the ledger closes")
+			for _, c := range guard.Responses() {
+				Expect(c.Body).NotTo(ContainSubstring(replyCanary))
+			}
+		})
+
+		// Expected upstream behaviour (agentgateway#4245): the response hook runs on every response
+		// on the call's stream, whatever its id. A server that appends a result of its own after its
+		// error gets the guard asked about that result, never the error, so the guard closes the call
+		// (internal/mcpguard opencalls.go). This flips when the gateway hooks only the terminal reply.
+		It("asks the guard about a result a server appends after its error, and never about the error (agentgateway#4245)", func(ctx SpecContext) {
+			text, failed := call(ctx, url, key, faulty+"_stray_item")
+			Expect(failed).To(BeTrue(), text)
+			Expect(text).To(ContainSubstring(replyCanary))
+			Eventually(func() []GuardCall { return responsesFor("stray_item") }).WithTimeout(10*time.Second).Should(HaveLen(1),
+				"one CheckResponse, for the appended result")
+			Consistently(func() []GuardCall { return responsesFor("stray_item") }).WithTimeout(2 * time.Second).Should(ConsistOf(
+				HaveField("Body", SatisfyAll(ContainSubstring("stray result"), Not(ContainSubstring(replyCanary))))))
+		})
+	})
+
 	Describe(env.Name+": no MCP leak guard configured", Ordered, func() {
 		var (
 			url, key string
