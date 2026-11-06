@@ -3,7 +3,8 @@
 #
 # Offline tests of hack/agentgateway-pin.sh (#238): it reads gateway.standalone.image from a values
 # file (and not another component's image block), and --check fails on a tag-only pin, a short or
-# malformed digest, a workflow that does not read the pin, and a workflow with a literal digest.
+# malformed digest, a workflow that does not read the pin, a workflow with a literal digest, a Go
+# test constant that differs from the pin, and a Go file that names an image of its own.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -56,7 +57,11 @@ EOF
 workflow() { # <body>
 	printf '%s\n' "$1" >"$tmp/wf.yml"
 }
-run() { VALUES=$tmp/values.yaml WORKFLOW=$tmp/wf.yml "$pin" "$@" 2>"$tmp/err"; }
+mkdir -p "$tmp/go/testing/agentgatewayimage" "$tmp/go/ledger"
+goconst() { # <digest>
+	printf 'package agentgatewayimage\n\nconst (\n\t// Digest is the pin.\n\tDigest = "%s"\n\tMirror = "ghcr.io/x/agentgateway@" + Digest\n)\n' "$1" >"$tmp/go/testing/agentgatewayimage/image.go"
+}
+run() { VALUES=$tmp/values.yaml WORKFLOW=$tmp/wf.yml GOCONST=$tmp/go/testing/agentgatewayimage/image.go GO_TREE=$tmp/go "$pin" "$@" 2>"$tmp/err"; }
 quiet() { "$@" >/dev/null; }
 fails() { # <stderr fragment> <args...>: the call exits non-zero and says the fragment
 	local want=$1
@@ -69,6 +74,7 @@ good_wf='run: hack/agentgateway-pin.sh --check'
 
 values "      digest: $d1"
 workflow "$good_wf"
+goconst "$d1"
 check "prints the standalone image, not a decoy" eq "$(run)" "ghcr.io/agentgateway/agentgateway v1.7.0 $d1"
 check "--check passes on a digest pin" quiet run --check
 
@@ -94,6 +100,20 @@ check "--check fails on a literal digest in the workflow" fails "literal digest"
 sed 's/^\( *\)/\1\1/' "$tmp/values.yaml" >"$tmp/v4.yaml" && mv "$tmp/v4.yaml" "$tmp/values.yaml"
 check "--check fails on a re-indented values file" fails "is empty" --check
 values "      digest: $d1"
+
+workflow "$good_wf"
+goconst "$d2"
+check "--check fails when the Go constant differs from the pin" fails "has Digest" --check
+goconst "$d1"
+printf 'package ledger\n\nconst img = "cr.agentgateway.dev/agentgateway:v1.7.0"\n' >"$tmp/go/ledger/x_test.go"
+check "--check fails on a Go file with its own tag reference" fails "name an agentgateway image themselves" --check
+printf 'package ledger\n\nconst img = "ghcr.io/x/agentgateway@%s"\n' "$d1" >"$tmp/go/ledger/x_test.go"
+check "--check fails on a Go file with its own digest reference" fails "name an agentgateway image themselves" --check
+rm -f "$tmp/go/ledger/x_test.go"
+check "--check passes again once the Go file is gone" quiet run --check
+rm -f "$tmp/go/testing/agentgatewayimage/image.go"
+check "--check fails when the Go constant file is missing" fails "is missing" --check
+goconst "$d1"
 
 rm -f "$tmp/wf.yml"
 check "--check fails when the workflow is missing" fails "is missing" --check

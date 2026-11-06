@@ -200,6 +200,10 @@ jobs:
     if: needs.changes.outputs.go == 'true' && needs.changes.outputs.go_test_lab != 'true'
     name: go-test
     runs-on: ubuntu-latest
+    # packages: read pulls the private GHCR copy of the agentgateway test image (#238, docs/dev/ci.md).
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: go
@@ -219,10 +223,17 @@ jobs:
           key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+      # The agentgateway suites pull the image from GHCR (internal/testing/agentgatewayimage, #238);
+      # testcontainers reads Docker's credentials.
+      - name: log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$GITHUB_TOKEN"
       # Postgres tests use testcontainers; Docker is available on ubuntu runners.
       # test/flavors needs the flavor images, which the flavors job builds and tests.
       - run: hack/go-test.sh
         env:
+          KOINON_AGENTGATEWAY_MIRROR: "true"
           KOINON_REQUIRE: docker,git,helm # a missing prerequisite must fail, not skip (koinon-private#507): Postgres suites need Docker, agentd and codehost git, gateway/standalone helm (installed by this job)
       - name: Upload test reports
         if: always()

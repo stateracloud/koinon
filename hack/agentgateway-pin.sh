@@ -7,11 +7,14 @@
 # GHCR, and the Go tests use the mirrored copy, so a test pulls what an install runs.
 #
 #   hack/agentgateway-pin.sh            print "<repository> <tag> <digest>"
-#   hack/agentgateway-pin.sh --check    fail unless the pin is a full sha256 digest and the mirror
-#                                       workflow takes it from here (no literal digest of its own)
+#   hack/agentgateway-pin.sh --check    fail unless the pin is a full sha256 digest, the mirror
+#                                       workflow takes it from here (no literal digest of its own),
+#                                       the Go tests' constant (internal/testing/agentgatewayimage)
+#                                       is the same digest, and no other Go file names an image
 #
-# Reads values.yaml with awk, not yq, so it runs wherever bash does. VALUES=<file> and
-# WORKFLOW=<file> point it elsewhere (the tests do).
+# Reads values.yaml with awk, not yq, so it runs wherever bash does. VALUES=<file>, WORKFLOW=<file>,
+# GOCONST=<file> and GO_TREE=<dir> (the tree searched for other image references) point it
+# elsewhere (the tests do).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -21,6 +24,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 values=${VALUES:-charts/koinon/values.yaml}
 workflow=${WORKFLOW:-.github/workflows/mirror-agentgateway-test-image.yml}
+goconst=${GOCONST:-internal/testing/agentgatewayimage/image.go}
+gotree=${GO_TREE:-internal}
 
 # The scalars under gateway: > standalone: > image:, by indentation; comments and quotes stripped.
 read_pin() {
@@ -55,6 +60,15 @@ if [[ -f $workflow ]]; then
 	! grep -Eq 'sha256:[0-9a-f]{64}' "$workflow" || err "$workflow carries a literal digest; it must take the chart's"
 else
 	err "$workflow is missing"
+fi
+if [[ -f $goconst ]]; then
+	godigest=$(sed -n 's/^[[:space:]]*Digest[[:space:]]*=[[:space:]]*"\(sha256:[0-9a-f]*\)".*/\1/p' "$goconst")
+	[[ $godigest == "$digest" ]] || err "$goconst has Digest '${godigest}', the chart pins '${digest}'"
+	# Every other Go file takes the image from that package: no agentgateway image reference of its own.
+	others=$(grep -rlE --include='*.go' 'agentgateway(:v[0-9]|@sha256:)' "$gotree" | grep -vxF "$goconst" || true)
+	[[ -z $others ]] || err "Go files name an agentgateway image themselves; use agentgatewayimage.Ref(): ${others//$'\n'/ }"
+else
+	err "$goconst is missing"
 fi
 [[ $fail == 0 ]] || exit 1
 echo "agentgateway-pin: $repo:$tag@$digest"

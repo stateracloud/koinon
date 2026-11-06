@@ -46,11 +46,19 @@ When the pin moves (an agentgateway bump changes the chart's tag and digest):
    (input `source`: `cr.agentgateway.dev/agentgateway`, or `ghcr.io/agentgateway/agentgateway` while
    the first is down; both serve the same digest). It copies the digest under the pin's tag, fails
    unless the copy has that digest, and prints `image: ghcr.io/stateracloud/agentgateway@sha256:...`
-   in its log and summary.
-3. Point the tests' image constant at that reference.
+   in its log and summary. On the first dispatch for a new package, GHCR can answer DENIED to a
+   manifest PUT right after the run created the package: re-run the job once.
+3. Set `Digest` in `internal/testing/agentgatewayimage/image.go` to the new digest.
+   `hack/agentgateway-pin.sh --check` fails until it matches the chart, and also when any other Go
+   file names an agentgateway image itself.
+
+The tests call `agentgatewayimage.Ref()`. It returns the GHCR copy when `KOINON_AGENTGATEWAY_MIRROR`
+is `true`, which only the go-test job sets after `docker login ghcr.io`, and the same digest from
+`cr.agentgateway.dev` everywhere else, so a laptop or the lab needs no GHCR credentials.
 
 The GHCR package stays private until v0.3. The go-test job pulls it with its own `GITHUB_TOKEN`
-(`packages: read` on the job), which works only while the package's settings ("Manage Actions
+(`packages: read` on the job, and a `docker login ghcr.io` step, since testcontainers reads Docker's
+credentials), which works only while the package's settings ("Manage Actions
 access") list `stateracloud/koinon` with read. The image's `org.opencontainers.image.source` label
 names the upstream repository (changing it would change the digest), so GHCR does not link the
 package to Koinon by itself: after the first run, check that setting and add the repository if it is
