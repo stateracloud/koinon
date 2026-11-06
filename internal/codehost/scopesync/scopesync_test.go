@@ -175,13 +175,27 @@ var _ = Describe("the code-host scope refresh (ADR 0091, #115)", func() {
 			Eventually(done).Should(Receive(BeNil()))
 			Expect(classify(ctx, conn, "acme", "secret")).To(Equal(sinkclass.Internal))
 
+			By("a released the round lock: no session holds it (a leaked one would be reentrant for b on the same pooled connection)")
+			var held int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks l, (SELECT hashtextextended($1, 0) AS k) key
+				WHERE l.locktype = 'advisory' AND l.granted
+				  AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+				  AND l.classid::bigint = (key.k >> 32) & 4294967295 AND l.objid::bigint = key.k & 4294967295`,
+				scopesync.RoundLock).Scan(&held)).To(Succeed())
+			Expect(held).To(BeZero())
+
 			By("replica b's next round, a moment later, skips the connection a just read")
 			Expect(b.RunOnce(ctx)).To(Succeed())
 			Expect(lists.Load()).To(BeEquivalentTo(1))
 
+			By("and that skip is MinAge, not a lock a left held: without MinAge, b's round reads")
+			scopesync.SetMinAge(b, 0)
+			Expect(b.RunOnce(ctx)).To(Succeed()) // a held lock would skip, not wait: try-lock
+			Expect(lists.Load()).To(BeEquivalentTo(2))
+
 			By("but a sync for one connection (create, test) always reads")
 			Expect(b.Sync(ctx, conn, scopesync.Actor)).To(Succeed())
-			Expect(lists.Load()).To(BeEquivalentTo(2))
+			Expect(lists.Load()).To(BeEquivalentTo(3))
 		})
 
 		It("bounds each connection's reading, so a hanging host does not hold up the others", func(ctx SpecContext) {

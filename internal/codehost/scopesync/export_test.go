@@ -12,3 +12,6 @@ func SetMinAge(s *Syncer, d time.Duration) { s.minAge = d }
 
 // SetTimeout sets the bound on one connection's reading.
 func SetTimeout(s *Syncer, d time.Duration) { s.timeout = d }
+
+// RoundLock names the advisory lock a round's leader holds.
+const RoundLock = roundLock
