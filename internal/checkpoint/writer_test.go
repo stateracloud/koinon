@@ -7,8 +7,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -91,6 +94,79 @@ var _ = Describe("Writer", func() {
 		Expect(err).NotTo(HaveOccurred())
 		var out bytes.Buffer
 		Expect(w.Restore(ctx, other, "koinon_test_not-a-real-token", "", &out)).NotTo(Succeed())
+	})
+
+	It("deletes a retired repository's blobs and leaves the later epoch under it readable", func() {
+		org, agent := "0198a000-0000-7000-8000-000000000001", "0198a000-0000-7000-8000-000000000002"
+		e1 := checkpoint.EpochPrefix(org, agent, 1)
+		Expect(e1).To(HavePrefix(prefix), "epoch 1 is nested under epoch 0")
+		_, err := w.Backup(ctx, prefix, "koinon_test_not-a-real-token", home(), checkpoint.Meta{CheckpointID: "c0"})
+		Expect(err).NotTo(HaveOccurred())
+		s1, err := w.Backup(ctx, e1, "koinon_test_not-a-real-token-1", home(entry{name: "./notes/b.md", body: "epoch one"}), checkpoint.Meta{CheckpointID: "c1"})
+		Expect(err).NotTo(HaveOccurred())
+
+		n, err := w.DeleteRepository(ctx, prefix)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(BeNumerically(">", 0))
+		var gone bytes.Buffer
+		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", "", &gone)).NotTo(Succeed(), "epoch 0 is deleted")
+
+		By("epoch 1 still opens and restores")
+		var out bytes.Buffer
+		Expect(w.Restore(ctx, e1, "koinon_test_not-a-real-token-1", "", &out)).To(Succeed())
+		Expect(readTar(out.Bytes())).To(HaveKeyWithValue("notes/b.md", "epoch one"))
+		Expect(w.Verify(ctx, e1, "koinon_test_not-a-real-token-1", s1.SnapshotID)).To(Succeed())
+
+		By("nothing of epoch 0 is left beside the r1 folder")
+		dir := filepath.Join(string(w.Storage.(checkpoint.Dir)), filepath.FromSlash(prefix))
+		var left []string
+		Expect(filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			switch {
+			case err != nil:
+				return err
+			case d.IsDir() && path == filepath.Join(dir, "r1"):
+				return filepath.SkipDir
+			case !d.IsDir() && d.Name() != ".shards": // .shards: the directory backend's layout, not a blob
+				left = append(left, path)
+			}
+			return nil
+		})).To(Succeed())
+		Expect(left).To(BeEmpty())
+
+		By("deleting again, or a repository never written, deletes nothing")
+		Expect(w.DeleteRepository(ctx, prefix)).To(BeZero())
+		Expect(w.DeleteRepository(ctx, checkpoint.Prefix(org, "0198a000-0000-7000-8000-000000000009"))).To(BeZero())
+		_, err = w.DeleteRepository(ctx, "orgs/x")
+		Expect(err).To(MatchError(ContainSubstring("not a repository prefix")))
+	})
+
+	// koinon never runs kopia maintenance, so these are all the blobs a repository holds.
+	It("names every blob a backup, restore and verify write with a prefix the sweep lists (a kopia bump that adds one fails here)", func() {
+		pass := "koinon_test_not-a-real-token"
+		for i := range 3 {
+			_, err := w.Backup(ctx, prefix, pass, home(entry{name: fmt.Sprintf("./notes/%d.md", i), body: strings.Repeat("x", i+1)}), checkpoint.Meta{CheckpointID: fmt.Sprintf("c%d", i)})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		var out bytes.Buffer
+		Expect(w.Restore(ctx, prefix, pass, "", &out)).To(Succeed())
+		last, err := w.Backup(ctx, prefix, pass, home(), checkpoint.Meta{CheckpointID: "last"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(w.Verify(ctx, prefix, pass, last.SnapshotID)).To(Succeed())
+
+		ids, err := w.BlobIDs(ctx, prefix)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ids).NotTo(BeEmpty())
+		for _, id := range ids {
+			listed := false
+			for _, p := range checkpoint.KopiaBlobPrefixes {
+				listed = listed || strings.HasPrefix(string(id), string(p))
+			}
+			Expect(listed).To(BeTrue(), "blob %q has a prefix the sweep does not list: add it to kopiaBlobPrefixes", id)
+		}
+		Expect(w.DeleteRepository(ctx, prefix)).To(Equal(len(ids)))
+		left, err := w.BlobIDs(ctx, prefix)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(left).To(BeEmpty())
 	})
 
 	It("restores from a repository that has no snapshot as an error", func() {

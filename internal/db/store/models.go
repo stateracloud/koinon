@@ -1763,21 +1763,22 @@ type GatewayServedModel struct {
 }
 
 type HomeCheckpoint struct {
-	OrgID       pgtype.UUID
-	ID          pgtype.UUID
-	AgentID     pgtype.UUID
-	Reason      CheckpointReason
-	Status      CheckpointStatus
-	SandboxID   string
-	Generation  string
-	Epoch       int64
-	SnapshotID  pgtype.Text
-	SizeBytes   pgtype.Int8
-	Attempts    int32
-	Error       pgtype.Text
-	RequestedAt pgtype.Timestamptz
-	StartedAt   pgtype.Timestamptz
-	FinishedAt  pgtype.Timestamptz
+	OrgID           pgtype.UUID
+	ID              pgtype.UUID
+	AgentID         pgtype.UUID
+	Reason          CheckpointReason
+	Status          CheckpointStatus
+	SandboxID       string
+	Generation      string
+	Epoch           int64
+	SnapshotID      pgtype.Text
+	SizeBytes       pgtype.Int8
+	Attempts        int32
+	Error           pgtype.Text
+	RequestedAt     pgtype.Timestamptz
+	StartedAt       pgtype.Timestamptz
+	FinishedAt      pgtype.Timestamptz
+	RepositoryEpoch int32
 }
 
 type HomeRepository struct {
@@ -1786,6 +1787,25 @@ type HomeRepository struct {
 	Prefix           string
 	PasswordEnvelope []byte
 	CreatedAt        pgtype.Timestamptz
+	RetiredAt        pgtype.Timestamptz
+	DeleteAfter      pgtype.Timestamptz
+	DeletedAt        pgtype.Timestamptz
+	CredentialLostAt pgtype.Timestamptz
+}
+
+type HomeRepositoryEpoch struct {
+	OrgID            pgtype.UUID
+	AgentID          pgtype.UUID
+	RepositoryEpoch  int32
+	Prefix           string
+	PasswordEnvelope []byte
+	CredentialLostAt pgtype.Timestamptz
+	BindingRow       pgtype.Text
+	Reason           string
+	CreatedAt        pgtype.Timestamptz
+	RetiredAt        pgtype.Timestamptz
+	DeleteAfter      pgtype.Timestamptz
+	DeletedAt        pgtype.Timestamptz
 }
 
 type InstallIdentity struct {

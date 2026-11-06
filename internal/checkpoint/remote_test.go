@@ -61,4 +61,45 @@ var _ = Describe("Repository passwords over HTTP", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(Equal(checkpoint.Repository{Prefix: "orgs/o/homes/a/", Password: "koinon_test_not-a-real-token"}))
 	})
+
+	It("asks for an epoch only when one is wanted, and refuses an answer from another epoch", func() {
+		var asked []string
+		stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// A koinon-api older than repository epochs: no epoch in the reply, whatever is asked.
+			asked = append(asked, r.URL.Query().Get("epoch")+"|"+strconv.FormatBool(r.URL.Query().Has("epoch"))+"|"+r.URL.Query().Get("current"))
+			_, _ = w.Write([]byte(`{"prefix":"orgs/o/homes/a/","password":"koinon_test_not-a-real-token"}`))
+		}))
+		DeferCleanup(stub.Close)
+		remote := checkpoint.Remote{BaseURL: stub.URL, Key: func() ([]byte, error) { return key, nil }}
+		_, err := remote.Get(context.Background(), org, agent)
+		Expect(err).NotTo(HaveOccurred())
+		zero, err := remote.At(context.Background(), org, agent, 0)
+		Expect(err).NotTo(HaveOccurred(), "epoch 0 is the older koinon-api's only repository")
+		Expect(zero.Epoch).To(BeZero())
+		_, err = remote.At(context.Background(), org, agent, 1)
+		Expect(err).To(MatchError(ContainSubstring("not 1")))
+		Expect(asked).To(Equal([]string{"|false|1", "0|true|", "1|true|"}), "the current repository is asked for by name")
+	})
+
+	It("the Server refuses an epoch and current together", func() {
+		srv := httptest.NewServer(checkpoint.Server{Key: func(context.Context) ([]byte, error) { return key, nil }})
+		DeferCleanup(srv.Close)
+		exp := strconv.FormatInt(time.Now().Add(20*time.Second).Unix(), 10)
+		res, err := http.Post(srv.URL+checkpoint.RepositoryPath+"?org="+org.String()+"&agent="+agent.String()+"&exp="+exp+"&epoch=0&current=1", "", nil)
+		Expect(err).NotTo(HaveOccurred())
+		_ = res.Body.Close()
+		Expect(res.StatusCode).To(Equal(http.StatusBadRequest))
+	})
+
+	It("the Server refuses a malformed epoch", func() {
+		srv := httptest.NewServer(checkpoint.Server{Key: func(context.Context) ([]byte, error) { return key, nil }})
+		DeferCleanup(srv.Close)
+		for _, e := range []string{"-1", "x", "99999999999"} {
+			exp := strconv.FormatInt(time.Now().Add(20*time.Second).Unix(), 10)
+			res, err := http.Post(srv.URL+checkpoint.RepositoryPath+"?org="+org.String()+"&agent="+agent.String()+"&exp="+exp+"&epoch="+e, "", nil)
+			Expect(err).NotTo(HaveOccurred())
+			_ = res.Body.Close()
+			Expect(res.StatusCode).To(Equal(http.StatusBadRequest), e)
+		}
+	})
 })

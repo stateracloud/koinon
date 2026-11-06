@@ -74,6 +74,8 @@ var Columns = []Column{
 	{Table: mcpservers.ServersTable, Column: mcpservers.CredentialColumn},
 	// Agent home repository passwords (ADR 0032); keyed by agent_id, see rowKey.
 	{Table: checkpoint.Table, Column: checkpoint.Column},
+	// The passwords of later repository epochs (ADR 0085 decision 13); keyed by binding_row.
+	{Table: checkpoint.EpochsTable, Column: checkpoint.Column},
 	// Run-trace destination credentials (ADR 0074): the org's, and the platform's single row.
 	{Table: tracedest.DestinationsTable, Column: tracedest.CredentialsColumn},
 	{Table: tracedest.PlatformTable, Column: tracedest.CredentialsColumn},
@@ -84,10 +86,14 @@ var Columns = []Column{
 func (c Column) singleton() bool { return c.Table == tracedest.PlatformTable }
 
 // rowKey is the column that names a row in the binding's RowID: id, except where the table is
-// keyed by the agent (one row per agent).
+// keyed by the agent (one row per agent) or by the agent and its repository epoch (binding_row,
+// checkpoint.EpochRow).
 func (c Column) rowKey() string {
-	if c.Table == checkpoint.Table {
+	switch c.Table {
+	case checkpoint.Table:
 		return "agent_id"
+	case checkpoint.EpochsTable:
+		return "binding_row"
 	}
 	return "id"
 }

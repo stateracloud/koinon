@@ -375,11 +375,13 @@ type Querier interface {
 	GetHomeCheckpoint(ctx context.Context, arg GetHomeCheckpointParams) (HomeCheckpoint, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
-	// Home checkpoints (plan item HC1; ADR 0032): the kopia repository per agent, the checkpoint
-	// records koinon-agentd's writer works through, and the restore a recreated sandbox waits for.
+	// Home checkpoints (plan item HC1; ADR 0032): the kopia repositories of each agent (one per
+	// repository epoch, ADR 0085 decision 13), the checkpoint records koinon-agentd's writer works
+	// through, and the restore a recreated sandbox waits for.
 	//
 	// Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
 	GetHomeRepository(ctx context.Context, arg GetHomeRepositoryParams) (HomeRepository, error)
+	GetHomeRepositoryEpoch(ctx context.Context, arg GetHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// The install ID (koinon-private#615): created once by a migration, never changed. KMS-wrapped KEKs are bound
@@ -513,6 +515,7 @@ type Querier interface {
 	InsertDefaultPriceList(ctx context.Context, arg InsertDefaultPriceListParams) (int64, error)
 	// No row: another writer created it first; read it with GetHomeRepository.
 	InsertHomeRepository(ctx context.Context, arg InsertHomeRepositoryParams) (HomeRepository, error)
+	InsertHomeRepositoryEpoch(ctx context.Context, arg InsertHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
 	InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error)
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
@@ -555,6 +558,8 @@ type Querier interface {
 	// reads it: a complete one newer than the sandbox's last activity lets the recreation go on, a
 	// failed one blocks it.
 	LatestHomeCheckpointOfSandbox(ctx context.Context, arg LatestHomeCheckpointOfSandboxParams) (HomeCheckpoint, error)
+	// The agent's current repository when it has epochs; no row: epoch 0 (home_repositories) is current.
+	LatestHomeRepositoryEpoch(ctx context.Context, arg LatestHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
 	// The person who wrote the task's latest user message (the person on the other end of a chat thread).
 	LatestUserMessageActor(ctx context.Context, arg LatestUserMessageActorParams) (pgtype.UUID, error)
 	// A claimed settlement is not due again until @until, so the provider is asked outside any
@@ -619,6 +624,12 @@ type Querier interface {
 	ListCurrentTemplates(ctx context.Context) ([]Template, error)
 	// Every default list version this installation has run, newest first.
 	ListDefaultPriceLists(ctx context.Context) ([]DefaultPriceList, error)
+	// Retired repositories whose blobs may now be deleted (the sweeper's work), epoch 0 and later,
+	// longest overdue first so a row that keeps failing does not hold back the others. A repository past
+	// its deadline is kept while it is the agent's newest restorable home: it goes only once its
+	// password is lost (nothing restores from it any more) or a later epoch holds a complete checkpoint
+	// (a new epoch starts empty, so until its first backup the retired one is all there is).
+	ListDueHomeRepositories(ctx context.Context, arg ListDueHomeRepositoriesParams) ([]ListDueHomeRepositoriesRow, error)
 	// Open questions past their expiry (the expiry sweep applies the default to them).
 	ListDueQuestions(ctx context.Context, arg ListDueQuestionsParams) ([]Question, error)
 	// The effective role per org honours the org's identity mode (ADR 0004):
@@ -810,6 +821,8 @@ type Querier interface {
 	// principal and sync IdP groups at login), always keyed by user_id.
 	// Serialises bootstrap across API replicas for the rest of the transaction.
 	LockBootstrap(ctx context.Context) error
+	// Serializes the start of a repository epoch for the agent.
+	LockHomeRepository(ctx context.Context, arg LockHomeRepositoryParams) (HomeRepository, error)
 	// The budgets of a run, locked for the rest of the transaction so two replicas charging one run at
 	// once count both calls.
 	LockLeakGuardRun(ctx context.Context, arg LockLeakGuardRunParams) (LeakGuardRun, error)
@@ -833,6 +846,8 @@ type Querier interface {
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
 	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
 	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
+	MarkHomeRepositoryDeleted(ctx context.Context, arg MarkHomeRepositoryDeletedParams) (int64, error)
+	MarkHomeRepositoryEpochDeleted(ctx context.Context, arg MarkHomeRepositoryEpochDeletedParams) (int64, error)
 	MarkLeakGuardEvicted(ctx context.Context, arg MarkLeakGuardEvictedParams) error
 	// The declaring Secret was deleted: keep the row, stop serving it.
 	MarkMCPServerRemoved(ctx context.Context, arg MarkMCPServerRemovedParams) error
@@ -959,6 +974,9 @@ type Querier interface {
 	ResolveRunPark(ctx context.Context, arg ResolveRunParkParams) (Run, error)
 	// Clears the unhealthy mark and starts a new count of recreations. No row: not unhealthy.
 	ResumeAgent(ctx context.Context, arg ResumeAgentParams) (Agent, error)
+	// Epoch 0 was superseded: its blobs may be deleted after @delete_after.
+	RetireHomeRepository(ctx context.Context, arg RetireHomeRepositoryParams) (int64, error)
+	RetireHomeRepositoryEpoch(ctx context.Context, arg RetireHomeRepositoryEpochParams) (int64, error)
 	// Ends every live version of a named price at @at. The rows stay: ledger entries cite them.
 	RetirePriceOverrides(ctx context.Context, arg RetirePriceOverridesParams) (int64, error)
 	// active -> draft when a grant change is proposed (ADR 0020). The approved
