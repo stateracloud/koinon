@@ -68,6 +68,8 @@ type Column struct {
 // them; a test fails for any secretstore.Binding in the code whose table and column are not here.
 var Columns = []Column{
 	{Table: catalog.ProvidersTable, Column: catalog.KeyColumn},
+	// Provider cost API keys, for the daily cost reconciliation (ADR 0056, amendment 2026-11-06).
+	{Table: catalog.ProvidersTable, Column: catalog.CostKeyColumn},
 	{Table: connections.Table, Column: connections.Column},
 	// Uncommitted work saved from a stuck sandbox (ADR 0054); NULL once pushed or expired.
 	{Table: savedwork.Table, Column: savedwork.Column},

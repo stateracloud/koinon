@@ -358,6 +358,79 @@ var _ = Describe("Service", func() {
 			_, err = noKeys.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "keyless", Type: "ollama", URL: "http://x.example.com/v1"})
 			Expect(err).NotTo(HaveOccurred())
 		})
+
+		It("seals a direct provider's cost API key with its scope, and removes both together", func(ctx SpecContext) {
+			p, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{
+				Name: "anthropic", Type: "anthropic", URL: "https://api.anthropic.com", APIKey: "koinon_test_not-a-real-token",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(p.HasCostKey).To(BeFalse())
+			invalid := func(err error) {
+				GinkgoHelper()
+				var inv *catalog.InvalidError
+				Expect(errors.As(err, &inv)).To(BeTrue(), "%v", err)
+			}
+
+			By("a key needs a workspace the cost report can name")
+			admin, scope, bad := "koinon_test_not-a-real-admin-key", "wrkspc_01TestWorkspace", "proj_abc"
+			_, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{CostAPIKey: &admin})
+			invalid(err)
+			_, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{CostAPIKey: &admin, CostScope: &bad})
+			invalid(err)
+			_, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{CostScope: &scope})
+			invalid(err)
+
+			got, err := svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{CostAPIKey: &admin, CostScope: &scope})
+			Expect(err).NotTo(HaveOccurred())
+			Expect([]any{got.HasCostKey, got.CostScope}).To(Equal([]any{true, scope}))
+			raw, _ := json.Marshal(got)
+			Expect(string(raw)).NotTo(ContainSubstring(admin))
+			var env []byte
+			Expect(pool.QueryRow(ctx, `SELECT cost_api_key FROM providers WHERE id = $1`, p.ID).Scan(&env)).To(Succeed())
+			Expect(string(env)).NotTo(ContainSubstring(admin))
+			id := mustUUID(p.ID)
+			plain, err := catalog.OpenCostKey(ring, org, id, env)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(plain).To(Equal(admin))
+			_, err = catalog.OpenKey(ring, org, id, env)
+			Expect(err).To(MatchError(secretstore.ErrOpen), "bound to its own column: it never opens as the inference key")
+			for _, e := range events(ctx, "provider.update") {
+				Expect(string(e.Summary)).NotTo(ContainSubstring(admin))
+			}
+
+			By("the default workspace, alone")
+			def := "default"
+			got, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{CostScope: &def})
+			Expect(err).NotTo(HaveOccurred())
+			Expect([]any{got.HasCostKey, got.CostScope}).To(Equal([]any{true, def}))
+
+			By("its URL can no longer move off the provider's own API while it holds the key")
+			elsewhere := "https://anthropic-proxy.example.com"
+			_, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{URL: &elsewhere})
+			invalid(err)
+
+			By("removing the key removes the scope")
+			empty := ""
+			got, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{CostAPIKey: &empty})
+			Expect(err).NotTo(HaveOccurred())
+			Expect([]any{got.HasCostKey, got.CostScope}).To(Equal([]any{false, ""}))
+		})
+
+		It("takes a cost API key for anthropic and openai providers at their own API only", func(ctx SpecContext) {
+			p := create(ctx, "router", "koinon_test_not-a-real-token")
+			admin, scope := "koinon_test_not-a-real-admin-key", "proj_abc"
+			_, err := svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{CostAPIKey: &admin, CostScope: &scope})
+			var inv *catalog.InvalidError
+			Expect(errors.As(err, &inv)).To(BeTrue(), "OpenRouter's bill comes per request: %v", err)
+
+			o, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{
+				Name: "openai", Type: "openai", URL: "https://api.openai.com/v1", APIKey: "koinon_test_not-a-real-token",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			got, err := svc.UpdateProvider(ctx, org, actor, o.ID, catalog.ProviderPatch{CostAPIKey: &admin, CostScope: &scope})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.HasCostKey).To(BeTrue())
+		})
 	})
 
 	Describe("models", func() {
