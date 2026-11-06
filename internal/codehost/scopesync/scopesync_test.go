@@ -4,6 +4,7 @@ package scopesync_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -152,7 +153,10 @@ var _ = Describe("the code-host scope refresh (ADR 0091, #115)", func() {
 					case reached <- struct{}{}:
 					default:
 					}
-					<-release
+					select {
+					case <-release:
+					case <-r.Context().Done():
+					}
 				}
 				inner.ServeHTTP(w, r)
 			})
@@ -162,7 +166,9 @@ var _ = Describe("the code-host scope refresh (ADR 0091, #115)", func() {
 			Eventually(reached).Should(Receive(), "replica a reads the connection")
 
 			By("replica b's round, while a's runs, reads nothing")
-			Expect(b.RunOnce(ctx)).To(Succeed())
+			bctx, cancel := context.WithTimeout(ctx, 3*time.Second) // a b that read would wait on a's release
+			defer cancel()
+			Expect(b.RunOnce(bctx)).To(Succeed())
 			Expect(lists.Load()).To(BeEquivalentTo(1))
 
 			close(release)
