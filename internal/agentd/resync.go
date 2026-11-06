@@ -16,9 +16,18 @@ package agentd
 //   - A snapshot no checkpoint of its epoch names becomes a complete checkpoint, with what its tags
 //     say (checkpoint.Meta): ownership epoch, generation, reason and sandbox. The checkpoint its
 //     tag names gives its ID when the database has no such row (written after the dump), or its
-//     reason, sandbox and, when complete (a seed's copy, or a backup recorded twice), its times. It
-//     is left out while a backup is still recording it (requested, or running within its lease),
-//     when the attempt that wrote it was recorded as failed, and when its tags are unreadable.
+//     reason, sandbox and, when complete in an earlier repository epoch (a seed's copy), its times.
+//     It is left out while a backup is still recording it (requested, or running within its lease),
+//     when the attempt that wrote it was recorded as failed, when that checkpoint is complete in the
+//     same repository epoch, when a later snapshot of the epoch carries the same checkpoint tag, and
+//     when its tags are unreadable. A binary before the Ready hook saved a snapshot before it checked
+//     tar, and its retry kept the checkpoint ID: these rules keep such a partial home out. One case
+//     cannot be told apart: such a checkpoint written after the dump whose last attempt failed after
+//     its save, the database having no row to say so.
+//   - The agent's ownership epoch is raised to the newest epoch of an added checkpoint. After a
+//     restore it is the dump's, and the restore reads only checkpoints of epochs a run has seen
+//     (ADR 0032): the next claim's run then sees the added ones and restores the newest home
+//     instead of a pre-dump one.
 //   - A complete checkpoint whose snapshot is not in the listing is marked failed, not deleted:
 //     restore and the sweeper's guard skip it, and its history stays. Its rows are read before the
 //     listing, and a checkpoint is complete only after its snapshot is saved, so a backup that
@@ -105,6 +114,9 @@ func (p *Pool) resyncTick(ctx context.Context) {
 type resyncCounts struct {
 	snapshots, added, missing, skipped int32
 	epochs                             []int32
+	// ownership is the newest ownership epoch of an added checkpoint; raised to the agent's.
+	ownership int64
+	raised    bool // the agent's ownership epoch was raised to ownership
 }
 
 // repositoryListing is one repository epoch's complete checkpoints, read before its snapshots were
@@ -218,6 +230,10 @@ func (p *Pool) recordResync(ctx context.Context, r store.HomeCheckpointResync, l
 	err := pgx.BeginFunc(ctx, p.db, func(tx pgx.Tx) error {
 		n = resyncCounts{}
 		q := p.q.WithTx(tx)
+		// The agent row first, as a claim and a cascading delete take it, then the repository row.
+		if _, err := q.GetAgentForUpdate(ctx, store.GetAgentForUpdateParams{OrgID: r.OrgID, ID: r.AgentID}); err != nil {
+			return fmt.Errorf("locking the agent: %w", err)
+		}
 		if _, err := q.LockHomeRepository(ctx, store.LockHomeRepositoryParams{OrgID: r.OrgID, AgentID: r.AgentID}); err != nil {
 			return fmt.Errorf("locking the agent's repository: %w", err)
 		}
@@ -227,11 +243,18 @@ func (p *Pool) recordResync(ctx context.Context, r store.HomeCheckpointResync, l
 			for _, b := range l.before {
 				known[b.SnapshotID] = true
 			}
+			last := lastPerCheckpoint(l.snaps)
 			inBucket := map[string]bool{}
 			for _, s := range l.snaps {
 				inBucket[s.ID] = true
 				n.snapshots++
 				if known[s.ID] {
+					continue
+				}
+				if id, ok := last[s.Meta.CheckpointID]; ok && id != s.ID {
+					// An earlier attempt of the same checkpoint: a binary before the Ready hook saved
+					// the snapshot before it checked tar, and its retry kept the checkpoint ID.
+					n.skipped++
 					continue
 				}
 				added, err := p.adoptSnapshot(ctx, q, r, l.epoch, s)
@@ -241,6 +264,7 @@ func (p *Pool) recordResync(ctx context.Context, r store.HomeCheckpointResync, l
 				switch added {
 				case adopted:
 					n.added++
+					n.ownership = max(n.ownership, s.Meta.Epoch)
 				case leftOut:
 					n.skipped++
 				}
@@ -268,15 +292,45 @@ func (p *Pool) recordResync(ctx context.Context, r store.HomeCheckpointResync, l
 		} else if m != 1 {
 			return errResyncClaimLost // rolls the changes back: the claim that holds the resync makes them
 		}
+		raised, err := q.RaiseAgentEpochForResync(ctx, store.RaiseAgentEpochForResyncParams{
+			OrgID: r.OrgID, AgentID: r.AgentID, Epoch: n.ownership,
+		})
+		if err != nil {
+			return err
+		}
+		n.raised = raised == 1
 		return audit.RecordErr(ctx, q, audit.Event{
 			Org: r.OrgID, Actor: audit.System(), Action: ResyncedAction, TargetKind: "agent", TargetID: r.AgentID.String(),
 			After: map[string]any{
 				"repositoryEpochs": slices.Clone(n.epochs), "snapshots": n.snapshots, "added": n.added,
-				"missing": n.missing, "skipped": n.skipped,
+				"missing": n.missing, "skipped": n.skipped, "ownershipEpochRaisedTo": raisedTo(n),
 			},
 		})
 	})
 	return n, err
+}
+
+// raisedTo is the ownership epoch the resync raised the agent's to, or nil.
+func raisedTo(n resyncCounts) any {
+	if !n.raised {
+		return nil
+	}
+	return n.ownership
+}
+
+// lastPerCheckpoint maps each checkpoint ID that tags snapshots of one repository to the latest
+// started of them (snaps are in start order). Tags that are not checkpoint IDs are not grouped.
+func lastPerCheckpoint(snaps []checkpoint.Snapshot) map[string]string {
+	last := map[string]string{}
+	for _, s := range snaps {
+		if s.MetaErr != nil {
+			continue
+		}
+		if _, err := uuid.Parse(s.Meta.CheckpointID); err == nil {
+			last[s.Meta.CheckpointID] = s.ID
+		}
+	}
+	return last
 }
 
 // adoption is what adoptSnapshot did with a snapshot.
@@ -329,10 +383,14 @@ func (p *Pool) adoptSnapshot(ctx context.Context, q *store.Queries, r store.Home
 			return leftOut, nil // its backup records it
 		case row.Status == store.CheckpointStatusFailed:
 			return leftOut, nil // the attempt that wrote it was given up
+		case row.Status == store.CheckpointStatusComplete && row.RepositoryEpoch == epoch:
+			// The checkpoint has its snapshot in this repository: this one is another attempt's
+			// (a binary before the Ready hook saved it before it checked tar), maybe a partial home.
+			return leftOut, nil
 		default:
 			cp.Reason, cp.SandboxID, cp.RequestedAt = row.Reason, row.SandboxID, row.RequestedAt
 			if row.Status == store.CheckpointStatusComplete {
-				// A copy of that checkpoint's home (a seed's, or a backup recorded twice): as old as it.
+				// A seed's copy of that checkpoint's home into a later repository epoch: as old as it.
 				cp.StartedAt, cp.FinishedAt = row.StartedAt, row.FinishedAt
 			}
 		}

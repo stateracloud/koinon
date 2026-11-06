@@ -673,7 +673,7 @@ func (q *Queries) GetHomeCheckpoint(ctx context.Context, arg GetHomeCheckpointPa
 }
 
 const getHomeCheckpointForResync = `-- name: GetHomeCheckpointForResync :one
-SELECT c.id, c.agent_id, c.reason, c.status, c.sandbox_id, c.requested_at, c.started_at, c.finished_at,
+SELECT c.id, c.agent_id, c.reason, c.status, c.sandbox_id, c.requested_at, c.started_at, c.finished_at, c.repository_epoch,
        (c.status = 'requested'
         OR (c.status = 'running' AND c.started_at > now() - make_interval(secs => $1::int)))::boolean AS in_flight
 FROM home_checkpoints c
@@ -687,15 +687,16 @@ type GetHomeCheckpointForResyncParams struct {
 }
 
 type GetHomeCheckpointForResyncRow struct {
-	ID          pgtype.UUID
-	AgentID     pgtype.UUID
-	Reason      CheckpointReason
-	Status      CheckpointStatus
-	SandboxID   string
-	RequestedAt pgtype.Timestamptz
-	StartedAt   pgtype.Timestamptz
-	FinishedAt  pgtype.Timestamptz
-	InFlight    bool
+	ID              pgtype.UUID
+	AgentID         pgtype.UUID
+	Reason          CheckpointReason
+	Status          CheckpointStatus
+	SandboxID       string
+	RequestedAt     pgtype.Timestamptz
+	StartedAt       pgtype.Timestamptz
+	FinishedAt      pgtype.Timestamptz
+	RepositoryEpoch int32
+	InFlight        bool
 }
 
 // The checkpoint a snapshot's tag names, and whether a backup is still recording it: requested
@@ -712,6 +713,7 @@ func (q *Queries) GetHomeCheckpointForResync(ctx context.Context, arg GetHomeChe
 		&i.RequestedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.RepositoryEpoch,
 		&i.InFlight,
 	)
 	return i, err
@@ -1523,6 +1525,30 @@ func (q *Queries) MaxAgentEpoch(ctx context.Context, arg MaxAgentEpochParams) (i
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const raiseAgentEpochForResync = `-- name: RaiseAgentEpochForResync :execrows
+UPDATE agents SET epoch = greatest(epoch, $1::bigint)
+WHERE org_id = $2 AND id = $3 AND epoch < $1::bigint
+`
+
+type RaiseAgentEpochForResyncParams struct {
+	Epoch   int64
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// After a database restore the agent's ownership epoch is the dump's, older than the epochs the
+// resynced checkpoints were written under. Raising it to the newest of them makes the next claim
+// (agents.epoch + 1) a run that sees them, so its restore takes the newest home rather than a
+// pre-dump one. Monotonic: a claim or takeover in progress keeps its run's own epoch, and each
+// later one still takes a new, higher epoch.
+func (q *Queries) RaiseAgentEpochForResync(ctx context.Context, arg RaiseAgentEpochForResyncParams) (int64, error) {
+	result, err := q.db.Exec(ctx, raiseAgentEpochForResync, arg.Epoch, arg.OrgID, arg.AgentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const releaseHomeCheckpoint = `-- name: ReleaseHomeCheckpoint :one

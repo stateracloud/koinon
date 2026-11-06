@@ -78,6 +78,8 @@ var _ = Describe("koinon-api checkpoints resync", func() {
 		Expect(tool.Resync(ctx, false, []string{"nope"}, false, time.Minute)).To(MatchError(ContainSubstring(`"nope" is not an agent ID`)))
 		Expect(tool.Resync(ctx, false, []string{with.String(), bare.String()}, false, time.Minute)).To(MatchError(ContainSubstring(bare.String())))
 		Expect((&checkpointscli.Tool{Out: out}).Resync(ctx, true, nil, false, time.Minute)).To(MatchError(ContainSubstring("--database-url")))
+		Expect(tool.Resync(ctx, true, nil, true, 0)).To(MatchError(ContainSubstring("--timeout must be above 0")))
+		Expect(tool.Resync(ctx, true, nil, true, -time.Second)).To(MatchError(ContainSubstring("--timeout must be above 0")))
 		var n int
 		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM home_checkpoint_resyncs`).Scan(&n)).To(Succeed())
 		Expect(n).To(BeZero(), "nothing is requested when one named agent has no repository")
@@ -150,6 +152,17 @@ var _ = Describe("koinon-api checkpoints resync", func() {
 		Expect(out.String()).To(ContainSubstring("agent " + failed.String()))
 		Expect(out.String()).To(ContainSubstring("given up after 5 attempt(s), its checkpoints are as they were: repository epoch 0 is not in the bucket"))
 		Expect(out.String()).To(ContainSubstring("agent " + replaced.String() + " (org " + org.String() + "): a newer request replaced this one"))
+	})
+
+	It("says it was interrupted, not timed out, when the command is stopped", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		agentIn(ctx, org, true)
+		run, stop := context.WithCancel(ctx)
+		defer stop()
+		time.AfterFunc(200*time.Millisecond, stop)
+		err := tool.Resync(run, true, nil, true, time.Minute)
+		Expect(err).To(MatchError(ContainSubstring("stopped waiting (context canceled) with 1 agent(s) not resynced yet")))
+		Expect(err).NotTo(MatchError(ContainSubstring("timed out")))
 	})
 
 	It("fails at the timeout and leaves the requests for koinon-agentd", func(ctx SpecContext) {

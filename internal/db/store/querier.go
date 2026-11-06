@@ -1007,6 +1007,12 @@ type Querier interface {
 	// their payload. Rows are locked with SKIP LOCKED, so two purgers never
 	// wait for each other. Rows 0: nothing left to blank in this run.
 	PurgeRunEventContent(ctx context.Context, arg PurgeRunEventContentParams) (int64, error)
+	// After a database restore the agent's ownership epoch is the dump's, older than the epochs the
+	// resynced checkpoints were written under. Raising it to the newest of them makes the next claim
+	// (agents.epoch + 1) a run that sees them, so its restore takes the newest home rather than a
+	// pre-dump one. Monotonic: a claim or takeover in progress keeps its run's own epoch, and each
+	// later one still takes a new, higher epoch.
+	RaiseAgentEpochForResync(ctx context.Context, arg RaiseAgentEpochForResyncParams) (int64, error)
 	// A tool turned two-approver on after the request was recorded: the pending request needs two too.
 	RaiseApprovalsRequired(ctx context.Context, arg RaiseApprovalsRequiredParams) (ApprovalRequest, error)
 	// Records the observed sandbox. started_at and stopped_at are stamped on the

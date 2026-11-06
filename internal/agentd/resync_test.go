@@ -207,7 +207,7 @@ var _ = Describe("home checkpoint resync", func() {
 			CheckpointID: afterDump.String(), Generation: "gen-2", Epoch: 7, Reason: "recreate", Sandbox: "sb-2",
 		})
 		request(ctx)
-		e.pool("agentd-a", cps())
+		stop := e.pool("agentd-a", cps())
 
 		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
 		r := resync(ctx)()
@@ -235,14 +235,10 @@ var _ = Describe("home checkpoint resync", func() {
 		Expect(gone.FinishedAt.Valid).To(BeTrue())
 		Expect(checkpointRow(ctx, keptID).Status).To(Equal(store.CheckpointStatusComplete))
 
-		By("a restore offers what the bucket holds, newest first (ownership epoch 7 waits for a run that saw it)")
-		_, err := db.Exec(ctx, `UPDATE home_checkpoints SET epoch = 0 WHERE org_id = $1 AND id = $2`, e.org, afterDump)
-		Expect(err).NotTo(HaveOccurred())
-		all, err := q.ListCompleteHomeCheckpoints(ctx, store.ListCompleteHomeCheckpointsParams{OrgID: e.org, AgentID: agent, MaxRows: 10})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(all).To(HaveLen(2))
-		Expect(all[0].ID).To(Equal(afterDump))
-		Expect(all[1].ID).To(Equal(keptID))
+		By("the agent's ownership epoch is raised to the newest added checkpoint's, as the dump had it lower")
+		var agentEpoch int64
+		Expect(db.QueryRow(ctx, `SELECT epoch FROM agents WHERE org_id = $1 AND id = $2`, e.org, agent).Scan(&agentEpoch)).To(Succeed())
+		Expect(agentEpoch).To(BeEquivalentTo(7))
 
 		By("audited by the system actor, in the agent's org; the gauge and the change counter follow")
 		Expect(audited(ctx, agentd.ResyncedAction)).To(ConsistOf(And(HavePrefix("system "+agent.String()), ContainSubstring(`"added": 1`), ContainSubstring(`"missing": 1`))))
@@ -259,6 +255,31 @@ var _ = Describe("home checkpoint resync", func() {
 		Expect(count(ctx)).To(Equal(before))
 		Expect(changes("added")).To(BeEquivalentTo(1))
 		Expect(audited(ctx, agentd.ResyncedAction)).To(HaveLen(2))
+		Expect(audited(ctx, agentd.ResyncedAction)).To(ContainElement(ContainSubstring(`"ownershipEpochRaisedTo": 7`)))
+
+		By("the next run's restore takes the newest home, the one written after the dump")
+		stop()
+		version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
+			OrgID: e.org, AgentID: agent, Config: []byte(`{"model":"m","instructions":"i"}`), CreatedBy: e.user,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: e.org, ID: agent, VersionID: version.ID, ActivatedBy: e.user})
+		Expect(err).NotTo(HaveOccurred())
+		t, err := q.CreateTask(ctx, store.CreateTaskParams{
+			OrgID: e.org, Title: uniq("task"), AgentID: agent, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: e.user,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: e.org, AgentID: agent, TaskID: t.ID, MaxWallClockSeconds: 1800})
+		Expect(err).NotTo(HaveOccurred())
+		run, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "test", LeaseSeconds: 60})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(run.AgentID).To(Equal(agent))
+		Expect(run.Epoch).To(BeEquivalentTo(8))
+		all, err := q.ListCompleteHomeCheckpoints(ctx, store.ListCompleteHomeCheckpointsParams{OrgID: e.org, AgentID: agent, MaxRows: 10})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(all).To(HaveLen(2))
+		Expect(all[0].ID).To(Equal(afterDump))
+		Expect(all[1].ID).To(Equal(keptID))
 	})
 
 	It("leaves out a snapshot whose backup is still recording it or was given up, and keeps a copy as old as its source", func(ctx SpecContext) {
@@ -296,6 +317,34 @@ var _ = Describe("home checkpoint resync", func() {
 		Expect(cp.FinishedAt.Time).To(BeTemporally("==", source.FinishedAt.Time), "no newer a home than its source")
 		Expect(cp.StartedAt.Time).To(BeTemporally("==", source.StartedAt.Time))
 		Expect(cp.Reason).To(Equal(source.Reason))
+	})
+
+	It("keeps out another attempt's snapshot of a checkpoint: only the latest of a tag in a repository, none beside a complete one", func(ctx SpecContext) {
+		By("a checkpoint the dump has complete, with a second snapshot under its tag: a retry of a binary before the Ready hook")
+		good := snapshot(ctx, 0, map[string]string{"notes/v.md": "whole"}, checkpoint.Meta{CheckpointID: "x", Epoch: 2})
+		completeID := recorded(ctx, 0, good.SnapshotID, time.Hour)
+		partialBeside := snapshot(ctx, 0, map[string]string{"notes/v.md": "partial"}, checkpoint.Meta{CheckpointID: completeID.String(), Epoch: 2})
+
+		By("a checkpoint written after the dump in two attempts, the first partial")
+		afterDump := pgtype.UUID{Bytes: uuid.Must(uuid.NewV7()), Valid: true}
+		partial := snapshot(ctx, 0, map[string]string{"notes/v.md": "partial"}, checkpoint.Meta{CheckpointID: afterDump.String(), Epoch: 3})
+		retry := snapshot(ctx, 0, map[string]string{"notes/v.md": "whole after the dump"}, checkpoint.Meta{CheckpointID: afterDump.String(), Epoch: 3})
+
+		By("an agent whose runs are past the adopted epoch: it is not lowered")
+		_, err := db.Exec(ctx, `UPDATE agents SET epoch = 9 WHERE org_id = $1 AND id = $2`, e.org, agent)
+		Expect(err).NotTo(HaveOccurred())
+
+		request(ctx)
+		e.pool("agentd-a", cps())
+		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Expect(counts(resync(ctx)())).To(Equal([]int32{4, 1, 0, 2}), "snapshots, added, missing, skipped")
+		var agentEpoch int64
+		Expect(db.QueryRow(ctx, `SELECT epoch FROM agents WHERE org_id = $1 AND id = $2`, e.org, agent).Scan(&agentEpoch)).To(Succeed())
+		Expect(agentEpoch).To(BeEquivalentTo(9))
+		Expect(bySnapshot(ctx, partialBeside.SnapshotID)).To(BeEmpty())
+		Expect(bySnapshot(ctx, partial.SnapshotID)).To(BeEmpty())
+		Expect(checkpointRow(ctx, afterDump).SnapshotID.String).To(Equal(retry.SnapshotID))
+		Expect(checkpointRow(ctx, completeID).SnapshotID.String).To(Equal(good.SnapshotID))
 	})
 
 	It("skips lost and deleted epochs, and takes a swept repository as empty", func(ctx SpecContext) {

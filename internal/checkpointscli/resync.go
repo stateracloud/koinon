@@ -67,6 +67,9 @@ func (t *Tool) Resync(ctx context.Context, all bool, agents []string, wait bool,
 	if all == (len(agents) > 0) {
 		return errors.New("name the agents with --agent, or pass --all for every agent")
 	}
+	if wait && timeout <= 0 {
+		return errors.New("--timeout must be above 0 (to not wait, pass --wait=false)")
+	}
 	if t.Pool == nil {
 		return errors.New("checkpoints resync needs --database-url")
 	}
@@ -167,6 +170,7 @@ func (t *Tool) wait(ctx context.Context, requested []target, timeout time.Durati
 	if poll <= 0 {
 		poll = DefaultPoll
 	}
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	tick := time.NewTicker(poll)
@@ -176,7 +180,7 @@ func (t *Tool) wait(ctx context.Context, requested []target, timeout time.Durati
 		got, err := t.outcomes(ctx, requested)
 		if err != nil {
 			if ctx.Err() != nil {
-				return t.timedOut(timeout, len(requested), nil)
+				return t.stopped(parent, timeout, len(requested), nil)
 			}
 			return err
 		}
@@ -195,7 +199,7 @@ func (t *Tool) wait(ctx context.Context, requested []target, timeout time.Durati
 		}
 		select {
 		case <-ctx.Done():
-			return t.timedOut(timeout, len(requested), got)
+			return t.stopped(parent, timeout, len(requested), got)
 		case <-tick.C:
 		}
 	}
@@ -276,14 +280,17 @@ func (t *Tool) summary(got []outcome) error {
 	return nil
 }
 
-// timedOut reports the requests still pending at the timeout; they stay, and koinon-agentd finishes
-// them.
-func (t *Tool) timedOut(timeout time.Duration, requested int, got []outcome) error {
+// stopped reports the requests still pending when the wait ended, at the timeout or because the
+// command was interrupted (parent done); they stay, and koinon-agentd finishes them.
+func (t *Tool) stopped(parent context.Context, timeout time.Duration, requested int, got []outcome) error {
 	pending := requested
 	for _, o := range got {
 		if o.finished || o.failed || o.replaced {
 			pending--
 		}
+	}
+	if err := parent.Err(); err != nil {
+		return fmt.Errorf("stopped waiting (%w) with %d agent(s) not resynced yet; the requests stay and koinon-agentd finishes them (koinon_agentd_home_checkpoint_resyncs)", err, pending)
 	}
 	return fmt.Errorf("timed out after %s with %d agent(s) not resynced yet; the requests stay and koinon-agentd finishes them (koinon_agentd_home_checkpoint_resyncs): is koinon-agentd running?", timeout, pending)
 }

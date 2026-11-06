@@ -443,11 +443,20 @@ ORDER BY finished_at, id;
 -- name: GetHomeCheckpointForResync :one
 -- The checkpoint a snapshot's tag names, and whether a backup is still recording it: requested
 -- (tried again later), or running within @lease_seconds (its writer is alive).
-SELECT c.id, c.agent_id, c.reason, c.status, c.sandbox_id, c.requested_at, c.started_at, c.finished_at,
+SELECT c.id, c.agent_id, c.reason, c.status, c.sandbox_id, c.requested_at, c.started_at, c.finished_at, c.repository_epoch,
        (c.status = 'requested'
         OR (c.status = 'running' AND c.started_at > now() - make_interval(secs => @lease_seconds::int)))::boolean AS in_flight
 FROM home_checkpoints c
 WHERE c.org_id = @org_id AND c.id = @id;
+
+-- name: RaiseAgentEpochForResync :execrows
+-- After a database restore the agent's ownership epoch is the dump's, older than the epochs the
+-- resynced checkpoints were written under. Raising it to the newest of them makes the next claim
+-- (agents.epoch + 1) a run that sees them, so its restore takes the newest home rather than a
+-- pre-dump one. Monotonic: a claim or takeover in progress keeps its run's own epoch, and each
+-- later one still takes a new, higher epoch.
+UPDATE agents SET epoch = greatest(epoch, @epoch::bigint)
+WHERE org_id = @org_id AND id = @agent_id AND epoch < @epoch::bigint;
 
 -- name: InsertResyncedHomeCheckpoint :one
 -- A complete checkpoint for a snapshot no checkpoint of the repository names. No row: one does (a

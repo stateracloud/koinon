@@ -86,11 +86,21 @@ kubectl exec deploy/koinon-api -- koinon-api checkpoints resync --all
 (`home.checkpoints_resync_requested`). koinon-agentd then lists every repository of the agent that is
 neither deleted nor lost with its key, and makes two kinds of change:
 
-- A snapshot that no checkpoint names becomes a complete checkpoint, with the times, generation, run
-  epoch, reason and sandbox it was written with. A snapshot left out is one whose backup is still
-  running, or was given up, or whose tags cannot be read. The summary counts the snapshots left out.
+- A snapshot that no checkpoint names becomes a complete checkpoint, with the generation, run epoch,
+  reason and sandbox it was written with, and the times of the snapshot. A seed's copy of a checkpoint
+  into a newer repository takes its times from the checkpoint it copies, so it is no newer than its
+  source.
+- A snapshot is left out if its backup is still running or was given up, or if its tags cannot be
+  read. It is also left out if it is another attempt at a checkpoint that already has its snapshot in
+  the same repository, or an earlier attempt where a later snapshot carries the same tag. Release
+  candidates before v0.1.0 saved a snapshot before they checked that the home was read whole, and a retry kept the
+  checkpoint's ID. The summary counts the snapshots left out.
 - A complete checkpoint whose snapshot is gone is marked failed, with an error that names the snapshot.
   No checkpoint is deleted.
+
+The agent's run epoch is raised to the newest run epoch among the added checkpoints. A restored
+database has the dump's run epoch, and a restore takes only checkpoints from run epochs that a run has
+seen. With the raise, the agent's next run restores the newest home, not one from before the dump.
 
 A repository that is missing from the bucket counts as empty if it was due for deletion. If it was not
 due, the resync of that agent gives up and changes nothing, because the bucket is likely not the one
@@ -105,10 +115,22 @@ koinon-agentd audits each outcome (`home.checkpoints_resynced`, `home.checkpoint
 `koinon_agentd_home_checkpoint_resync_changes_total{change}` counts the checkpoints added and those
 marked missing.
 
-A resynced checkpoint from a run epoch later than the dump stays skipped by the restore until the
-agent's runs catch up with that epoch, as described under Restore. Repository epochs started after the
-dump (by `keys forget` or `keys new-repositories`) are not in the database and cannot be listed. Run
-those commands again after the restore if they ran after the dump.
+Limits:
+
+- The resync cannot recognize one partial home: a checkpoint written after the dump by a release
+  candidate before v0.1.0, whose last attempt failed after its snapshot was saved. The restored database has no row
+  that records the failure.
+- A repository started after the dump, by `keys forget` or `keys new-repositories`, is not in the
+  restored database, and its password was sealed only in the database you lost. The homes saved in it
+  are lost with that password. Do not run those commands again for the same agents. A repository's
+  location in the bucket follows from the agent and the repository number, so the rerun would start
+  the same number over the repository whose password is lost. Every later backup of the agent would
+  then fail. If either command ran after the dump, stop. Leave those agents as they are and follow
+  [#262](https://github.com/stateracloud/koinon/issues/262); no safe way exists yet.
+- The resync can mark failed a recreate checkpoint whose snapshot is gone. If that is the sandbox's
+  newest checkpoint, the agent is blocked with "the home backup failed, so the sandbox is not
+  recreated". Choose **Resume agent** on the agent's page: the next pass requests a new backup
+  ([#263](https://github.com/stateracloud/koinon/issues/263)).
 
 ## The archive tier
 
