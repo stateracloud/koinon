@@ -273,7 +273,7 @@ selectable and keeps running the suite in CI; removing it is a separate, later d
 
 | What | Where today | Retires |
 | --- | --- | --- |
-| The fixed 90 s key settle | `internal/cmd/koinonreconciler/commands.go:132` (`--provider-key-settle`) | step 1, if #250's single projected volume lands (decision 8); else step 3 |
+| The fixed 90 s key settle | `internal/cmd/koinonreconciler/commands.go:132` (`--provider-key-settle`) | step 3, when Koinon's model path is the default; #250 is closed, not planned (decision 8) |
 | ExtMcp hook definitions | `third_party/agentgateway` (vendored proto), `buf.gen.agentgateway.yaml`, `Makefile` target, `internal/mcpguard/grpc.go`, `internal/gateway/guard.go` | step 2 |
 | MCP config rendering | MCP targets, `ToolRules` CEL, prefixing, MCP credential files and their settle (`gatewayplan/plan.go`) | step 2 |
 | Kubernetes mode | `internal/gateway/kubernetes`, the upstream controller and its CRDs, the #54 interim guard, `.github/workflows/g2-kind.yml` | step 3 |
@@ -284,14 +284,12 @@ selectable and keeps running the suite in CI; removing it is a separate, later d
 
 - **#254** (guard misses MCP errors and server messages): step 1, closed on Koinon's side by the
   fail-closed rule; fully closed in step 2, where the guard sees every message.
-- **#250** (config pickup ADR) and **#249** (wake on credential arrival): #249 lands in v0.1 regardless.
-  For #250, step 1 takes the **single projected volume** for config and keys, and removes the 90 s key
-  settle, since a served revision then proves the keys are on disk. The pod-annotation touch, with its
-  new `patch pods` grant and its ValidatingAdmissionPolicy fence, is not built in v0.1 unless the
-  quickstart e2e still misses its 15-minute bound (#57) after the projected volume and #249. Reason:
-  agentgateway keeps provider and agent keys until step 3, so the settle hurts for two minors, but the
-  annotation touch adds a privileged grant and an admission policy that only the agentgateway driver
-  needs. #250's ADR records this.
+- **#249** (wake on credential arrival): lands in v0.1.
+- **#250** (config pickup ADR): closed as not planned (the maintainer, 2026-11-06). Neither the single
+  projected volume nor the pod-annotation touch with its `patch pods` grant is built. The gateway's
+  config and key pickup keeps waiting on the kubelet tick, and the 90 s key settle stays, until the
+  step 3 model path retires the agentgateway driver's config delivery. The pickup research (Links)
+  stays as the evidence for that choice.
 - **#54** (Kubernetes-mode header allowlist): stays on the interim 403 guard in v0.1; its MCP half ends
   in step 2 and the rest with Kubernetes mode in step 3. Moves to v0.3.
 - **#112** (do-not-retry markers): the suite records today's markers in step 1; the MCP markers are
@@ -402,7 +400,8 @@ Checked 2026-11-06 in the research reports (Links), from source and docs; nothin
 ## Links
 
 - Research (outside the repository, 2026-11-06): "Why is Koinon so dependent on agentgateway?", "agentgateway
-  dependency review" and "Gateway config and credential pickup (#250)", in the research store.
+  dependency review" and "Gateway config and credential pickup (#250)", in the research store. The last is kept as the
+  evidence for closing #250 without building it.
 - [0040](0040-agentgateway-model-and-mcp-gateway.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md),
   [0049](0049-v01-scope-decisions.md), [0057](0057-mcp-servers.md), [0058](0058-gateway-modes.md),
   [0073](0073-agent-passport.md), [0084](0084-leak-guard.md), [0091](0091-leak-guard-by-destination.md)
