@@ -11,7 +11,7 @@ changes how the gateway runs, not what Koinon does
 | Mode | State | `gateway.mode` |
 | --- | --- | --- |
 | Standalone | Built. This is the default. | `standalone` |
-| Kubernetes | Built (plan item G2). | `kubernetes` |
+| Kubernetes | Built (plan item G2), frozen: no new features, removed in v0.3 ([ADR 0097](https://github.com/stateracloud/koinon/blob/main/docs/adr/0097-koinon-owned-gateway.md)). | `kubernetes` |
 | Shared | **Not built yet.** Planned for v0.2. | none yet |
 
 ## Standalone

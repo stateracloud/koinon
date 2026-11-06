@@ -336,6 +336,10 @@ func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (
 		}
 		return driver, nil
 	case project.GatewayKubernetes:
+		// FROZEN (ADR 0097 decision 4, ADR 0058, issue #274): Kubernetes mode keeps passing the
+		// gateway behaviour suite and gets no new features. Koinon's own gateway never gets this
+		// mode, and it is deleted with agentgateway in step 3. Put new gateway behaviour in the
+		// standalone driver and the ModelGateway contract only.
 		rc, err := restConfig(cfg.kubeconfig)
 		if err != nil {
 			return nil, err

@@ -299,7 +299,8 @@ const BudgetFractionDigits = 9
 
 // Limit is a per-agent spend limit enforced in the request path. Spend is
 // charged after a response completes, so a limit can be overshot by up to one
-// in-flight response (ADR 0041).
+// in-flight response per concurrent call: N calls in flight when the limit is
+// reached can each finish and be charged (ADR 0041).
 type Limit struct {
 	Unit LimitUnit
 	// Amount is exact, in USD with at most BudgetFractionDigits fraction digits (USDLimit rounds
