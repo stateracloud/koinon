@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
+import { ConnectionSecretForm } from '@/components/connection-secret-form'
 import { InstallationRepos } from '@/components/installation-repos'
 import { SetupGuideSteps } from '@/components/setup-guide'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -15,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { TokenAge } from '@/components/token-age'
 import { BoundAgentsSchema, ConnectionService, ConnectionStatus } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { isApprover } from '@/lib/approvals'
+import { setSecretRequest } from '@/lib/connection-secret'
 import { codeHostInfo, setupGuide } from '@/lib/connector'
 import { connectionStatusLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
@@ -37,8 +39,13 @@ export function ConnectionPage() {
   const navigate = useNavigate()
   const remove = useMutation(ConnectionService.method.deleteConnection)
   const [refusal, setRefusal] = useState<{ message: string; agents: { id: string; displayName: string }[] }>()
-  const test = useMutation(ConnectionService.method.testConnection, {
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ConnectionService, cardinality: undefined }) }),
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ConnectionService, cardinality: undefined }) })
+  const test = useMutation(ConnectionService.method.testConnection, { onSuccess: invalidate })
+  const setSecret = useMutation(ConnectionService.method.setConnectionSecret, {
+    onSuccess: () => {
+      test.reset()
+      return invalidate()
+    },
   })
 
   if (get.isPending) return <p role="status">Loading connection…</p>
@@ -49,7 +56,7 @@ export function ConnectionPage() {
       </Alert>
     )
   }
-  const results = test.data?.results ?? c.lastTest
+  const results = test.data?.results ?? setSecret.data?.results ?? c.lastTest
   const stepIds = new Set(guide.steps.map((s) => s.id))
   const loose = results.filter((r) => !stepIds.has(r.step))
   const gh = c.settings.case === 'github' ? c.settings.value : undefined
@@ -75,7 +82,7 @@ export function ConnectionPage() {
         <p role="note" className="text-destructive text-sm">
           {declared
             ? `The stored ${gt ? 'tokens were' : 'private key was'} lost with a key-encryption key, so runs that need this connection fail. Koinon reads ${gt ? 'them' : 'it'} again from the Secret ${c.managedBySecret} on its next sync.`
-            : `The stored ${gt ? 'tokens were' : 'private key was'} lost with a key-encryption key, so runs that need this connection fail. Create the connection again.`}
+            : `The stored ${gt ? 'tokens were' : 'private key was'} lost with a key-encryption key, so runs that need this connection fail. Enter ${gt ? 'them' : 'it'} again below.`}
         </p>
       )}
       {c.source === 'secret' && (
@@ -165,6 +172,21 @@ export function ConnectionPage() {
             changes itself. Koinon shows the tokens&apos; age and never rotates them: replace them in {host.name}, then in Koinon.
           </AlertDescription>
         </Alert>
+      )}
+      {isApprover(org.role) && c.source === 'ui' && (gh || gt) && (
+        <ConnectionSecretForm
+          key={connectionId}
+          connector={gt ? 'gitea' : 'github'}
+          lost={!!c.credentialLostAt}
+          pending={setSecret.isPending}
+          error={setSecret.error ? `Could not store the ${gt ? 'tokens' : 'private key'}: ${ConnectError.from(setSecret.error).rawMessage}` : undefined}
+          onSubmit={(input) => setSecret.mutateAsync(setSecretRequest(orgId, connectionId, input))}
+        />
+      )}
+      {setSecret.isSuccess && !test.data && (
+        <p role="status" className="text-sm">
+          {setSecret.data.results.every((r) => r.ok) ? 'Stored. All checks passed.' : 'Stored, but some checks failed; see the steps below.'}
+        </p>
       )}
       {test.error && (
         <Alert variant="destructive" role="alert">

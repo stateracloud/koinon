@@ -275,6 +275,14 @@ var isolationCases = map[string]isolationCase{
 			return c.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: f.connection})
 		},
 	},
+	connectionv1alpha1connect.ConnectionServiceSetConnectionSecretProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.SetConnectionSecret(ctx, &connectionv1alpha1.SetConnectionSecretRequest{
+				OrgId: org, ConnectionId: f.connection,
+				Secret: &connectionv1alpha1.SetConnectionSecretRequest_Github{Github: &connectionv1alpha1.GitHubConnectionSecret{PrivateKey: string(f.appKey)}},
+			})
+		},
+	},
 	connectionv1alpha1connect.ConnectionServiceGetConnectionProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: f.connection})
