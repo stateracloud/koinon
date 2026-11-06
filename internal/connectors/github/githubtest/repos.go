@@ -233,7 +233,7 @@ func (f *Fake) withRepo(perm, level string, h func(http.ResponseWriter, *http.Re
 			writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 			return
 		}
-		if !slices.Contains(info.repos, name) {
+		if !slices.Contains(f.covers(info), name) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 			return
 		}
@@ -307,7 +307,7 @@ func (f *Fake) listInstallationRepos(w http.ResponseWriter, req *http.Request) {
 		page = n
 	}
 	f.listCalls++
-	all := info.repos
+	all := f.covers(info)
 	start := min((page-1)*perPage, len(all))
 	end := min(start+perPage, len(all))
 	repos := make([]map[string]any, 0, end-start)

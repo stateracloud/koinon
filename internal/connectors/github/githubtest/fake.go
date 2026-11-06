@@ -69,8 +69,19 @@ type Fake struct {
 
 // tokenInfo is what a minted token may do.
 type tokenInfo struct {
-	repos []string // names; every repository of the installation when selection is all
+	repos []string // names, when the token was minted for selected repositories
+	all   bool     // minted for the whole installation: covers Repositories as they are now
 	perms map[string]string
+}
+
+// covers is the repositories a token reaches now. As on GitHub, a token minted for the whole
+// installation follows it: a repository that leaves the installation leaves the token. The
+// caller holds f.mu.
+func (f *Fake) covers(info tokenInfo) []string {
+	if info.all {
+		return f.Repositories
+	}
+	return info.repos
 }
 
 // Request is a token request the fake received.
@@ -315,7 +326,7 @@ func (f *Fake) accessToken(w http.ResponseWriter, r *http.Request) {
 	n := f.mints
 	f.requests = append(f.requests, Request{Repositories: req.Repositories, Permissions: req.Permissions})
 	token := fmt.Sprintf("ghs_faketoken%04d", n)
-	f.tokens[token] = tokenInfo{repos: slices.Clone(repos), perms: perms}
+	f.tokens[token] = tokenInfo{repos: slices.Clone(repos), all: req.Repositories == nil, perms: perms}
 	f.mu.Unlock()
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"token":                token,
