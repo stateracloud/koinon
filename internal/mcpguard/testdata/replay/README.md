@@ -10,7 +10,8 @@ fixed seed. The benign one is shaped like the rc.9 traffic of deep dive G1 and k
 decision comment on #265 (218 fetches to outside hosts, 272 writes); nothing in it came from a real
 run, so the numbers the suite prints from it are a harness self-test, not a measurement. Rerunning
 `python3 -I gen_corpus.py` must leave both files unchanged; after editing the generator, regenerate
-and commit the output.
+and commit the output. `generator_test.go` runs the generator into a scratch tree and fails when the
+committed files differ (it skips without `python3`).
 
 | File | What it holds |
 |---|---|
