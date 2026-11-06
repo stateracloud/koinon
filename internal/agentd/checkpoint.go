@@ -194,12 +194,19 @@ func (p *Pool) sweepRepositories(ctx context.Context) {
 		return
 	}
 	homes := p.cfg.Checkpoints.Store
+	refused, complete := 0, true
+	defer func() {
+		if complete {
+			p.cfg.Metrics.SweepRefused.Set(float64(refused))
+		}
+	}()
 	for _, org := range orgs {
 		due, err := p.q.ListDueHomeRepositories(ctx, store.ListDueHomeRepositoriesParams{OrgID: org, MaxRows: 50})
 		if err != nil {
 			if ctx.Err() == nil {
 				p.log.Warn("repository sweep: listing due repositories failed", "err", err)
 			}
+			complete = false
 			continue
 		}
 		for _, r := range due {
@@ -208,7 +215,11 @@ func (p *Pool) sweepRepositories(ctx context.Context) {
 			// or org's folder is refused, so the sweep deletes only this agent's own repository.
 			want := checkpoint.EpochPrefix(org.String(), r.AgentID.String(), r.RepositoryEpoch)
 			if r.Prefix != want {
-				log.Error("repository sweep: a retired repository's stored prefix is not its own; not deleting it", "prefix", r.Prefix, "want", want)
+				// Logged once per process; the gauge counts it on every sweep, for an alert.
+				refused++
+				if _, seen := p.sweepRefused.LoadOrStore(org.String()+"/"+checkpoint.EpochRow(r.AgentID.String(), r.RepositoryEpoch), true); !seen {
+					log.Error("repository sweep: a retired repository's stored prefix is not its own; not deleting it (logged once; see koinon_agentd_home_repository_sweep_refused)", "prefix", r.Prefix, "want", want)
+				}
 				continue
 			}
 			n, err := homes.DeleteRepository(ctx, want)

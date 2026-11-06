@@ -628,7 +628,9 @@ type Querier interface {
 	// longest overdue first so a row that keeps failing does not hold back the others. A repository past
 	// its deadline is kept while it is the agent's newest restorable home: it goes only once its
 	// password is lost (nothing restores from it any more) or a later epoch holds a complete checkpoint
-	// (a new epoch starts empty, so until its first backup the retired one is all there is).
+	// (a new epoch starts empty, so until its first backup the retired one is all there is). That later
+	// epoch must itself still restore: neither lost nor deleted (a later epoch is always a
+	// home_repository_epochs row, since epoch 0 is the first).
 	ListDueHomeRepositories(ctx context.Context, arg ListDueHomeRepositoriesParams) ([]ListDueHomeRepositoriesRow, error)
 	// Open questions past their expiry (the expiry sweep applies the default to them).
 	ListDueQuestions(ctx context.Context, arg ListDueQuestionsParams) ([]Question, error)

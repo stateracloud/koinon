@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/checkpoint"
@@ -638,6 +641,68 @@ var _ = Describe("home checkpoints", func() {
 		Expect(writer.Restore(ctx, e0, "koinon_test_not-a-real-token", "", &out)).NotTo(Succeed(), "its blobs are deleted")
 	})
 
+	It("counts a refused repository in a gauge on every sweep and logs it once", func(ctx SpecContext) {
+		org := e.org.String()
+		other := checkpoint.Prefix(org, "0198a000-0000-7000-8000-0000000000bb")
+		_, err := db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope, credential_lost_at, retired_at, delete_after)
+			VALUES ($1, $2, $3, NULL, now(), now() - interval '8 days', now() - interval '1 minute')`, e.org, e.agent.ID, other)
+		Expect(err).NotTo(HaveOccurred())
+		m := agentd.NewMetrics(nil)
+		logs := &syncBuffer{}
+		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) { c.Sweep = 50 * time.Millisecond }), func(c *agentd.Config) {
+			c.Metrics = m
+			c.Logger = slog.New(slog.NewTextHandler(io.MultiWriter(GinkgoWriter, logs), nil))
+		})
+		Eventually(func() float64 { return testutil.ToFloat64(m.SweepRefused) }).WithTimeout(10 * time.Second).Should(Equal(1.0))
+		Consistently(func() float64 { return testutil.ToFloat64(m.SweepRefused) }).WithTimeout(500*time.Millisecond).Should(Equal(1.0), "every sweep counts it again")
+		Expect(strings.Count(logs.String(), "stored prefix is not its own")).To(Equal(1), "about ten sweeps, one log line")
+
+		By("once the row is fixed, the gauge goes back to 0")
+		_, err = db.Exec(ctx, `UPDATE home_repositories SET prefix = $3 WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID, checkpoint.Prefix(org, e.agent.ID.String()))
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() float64 { return testutil.ToFloat64(m.SweepRefused) }).WithTimeout(10 * time.Second).Should(BeZero())
+	})
+
+	It("keeps a retired repository while the only later checkpoints are in a lost or deleted epoch", func(ctx SpecContext) {
+		org, agent := e.org.String(), e.agent.ID.String()
+		e0 := checkpoint.Prefix(org, agent)
+		_, err := writer.Backup(ctx, e0, "koinon_test_not-a-real-token", tarOf(map[string]string{"notes/v.md": "kept"}), checkpoint.Meta{CheckpointID: "c0"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope, retired_at, delete_after)
+			VALUES ($1, $2, $3, '{}', now() - interval '8 days', now() - interval '1 minute')`, e.org, e.agent.ID, e0)
+		Expect(err).NotTo(HaveOccurred())
+		// Epoch 1 lost its password (not yet due itself); epoch 2 is deleted already.
+		_, err = db.Exec(ctx, `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, credential_lost_at, reason, retired_at, delete_after)
+			VALUES ($1, $2, 1, $3, NULL, now(), 'key_lost', now(), now() + interval '7 days')`, e.org, e.agent.ID, checkpoint.EpochPrefix(org, agent, 1))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason, retired_at, delete_after, deleted_at)
+			VALUES ($1, $2, 2, $3, '{}', 'key_lost', now(), now(), now())`, e.org, e.agent.ID, checkpoint.EpochPrefix(org, agent, 2))
+		Expect(err).NotTo(HaveOccurred())
+		complete := func(epoch int) {
+			GinkgoHelper()
+			_, err := db.Exec(ctx, `INSERT INTO home_checkpoints (org_id, agent_id, reason, status, snapshot_id, finished_at, repository_epoch)
+				VALUES ($1, $2, 'stop', 'complete', $3, now(), $4)`, e.org, e.agent.ID, fmt.Sprintf("s%d", epoch), epoch)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		complete(1)
+		complete(2)
+		deleted0 := func() bool {
+			var deleted pgtype.Timestamptz
+			Expect(db.QueryRow(ctx, `SELECT deleted_at FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID).Scan(&deleted)).To(Succeed())
+			return deleted.Valid
+		}
+
+		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) { c.Sweep = 50 * time.Millisecond }))
+		Consistently(deleted0).WithTimeout(time.Second).Should(BeFalse(), "neither later checkpoint can be restored")
+
+		By("a checkpoint of a later epoch that still opens releases it")
+		_, err = db.Exec(ctx, `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason)
+			VALUES ($1, $2, 3, $3, '{}', 'key_lost')`, e.org, e.agent.ID, checkpoint.EpochPrefix(org, agent, 3))
+		Expect(err).NotTo(HaveOccurred())
+		complete(3)
+		Eventually(deleted0).WithTimeout(10 * time.Second).Should(BeTrue())
+	})
+
 	It("does not start the harness when the home cannot be restored", func(ctx SpecContext) {
 		t := e.task(ctx, "first")
 		stop := e.pool("agentd-a")
@@ -714,3 +779,21 @@ var _ = Describe("home checkpoints", func() {
 		Eventually(stopped).WithTimeout(5*time.Second).Should(BeClosed(), "the writer was cancelled, not waited for")
 	})
 })
+
+// syncBuffer is a bytes.Buffer the pool's goroutines can log to while a spec reads it.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}

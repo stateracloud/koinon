@@ -1,0 +1,325 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package keyscli_test
+
+import (
+	"bytes"
+	"crypto/rand"
+	"encoding/json"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/checkpoint"
+	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/keyscli"
+	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/savedwork"
+	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/tracedest"
+)
+
+// keys forget (issue #216, ADR 0085 decision 13): a KEK of which no copy exists any more.
+var _ = Describe("koinon-api keys forget", func() {
+	const (
+		lostKEK = "kek-20260101-aaaa"
+		nextKEK = "kek-20261023-bbbb"
+	)
+	var (
+		kube *fake.Clientset
+		ks   keyscli.KubeStore
+		tool *keyscli.Tool
+		out  *bytes.Buffer
+		now  time.Time
+	)
+
+	ring := func(ctx SpecContext) *secretstore.Keyring {
+		GinkgoHelper()
+		set, err := ks.Load(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		r, err := secretstore.NewKeyring(set.Keys, set.Active)
+		Expect(err).NotTo(HaveOccurred())
+		return r
+	}
+	usage := func(ctx SpecContext) map[string]int {
+		GinkgoHelper()
+		u, err := tool.Usage(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		return u
+	}
+	// rotateAndLose activates a second KEK and then loses the first: the Secret no longer holds it.
+	rotateAndLose := func(ctx SpecContext) {
+		GinkgoHelper()
+		Expect(tool.Add(ctx, nextKEK)).To(Succeed())
+		Expect(tool.Activate(ctx, nextKEK)).To(Succeed())
+		now = now.Add(6 * time.Minute)
+		sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		delete(sec.Data, lostKEK)
+		_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+	}
+
+	BeforeEach(func(ctx SpecContext) {
+		pgtest.TruncateOrgs(ctx, pool)
+		_, err := pool.Exec(ctx, `DELETE FROM kek_fingerprints`)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _, _ = pool.Exec(ctx, `DELETE FROM platform_trace_destination`) })
+		now = time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+		kube = fake.NewClientset()
+		key := make([]byte, secretstore.KeySize)
+		_, _ = rand.Read(key)
+		_, err = kube.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "koinon-kek", Namespace: ns},
+			Data:       map[string][]byte{lostKEK: secretstore.EncodeKey(key), "active": []byte(lostKEK)},
+		}, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		ks = keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}
+		out = &bytes.Buffer{}
+		tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }}
+	})
+
+	It("refuses a KEK still in the key set and an invalid ID, and has nothing to forget for an unused KEK", func(ctx SpecContext) {
+		org, user, _ := pgtest.NewOrg(ctx, pool)
+		_, err := catalog.New(pool, ring(ctx), nil).CreateProvider(ctx, org, audit.User(user), user, catalog.ProviderInput{
+			Name: pgtest.Uniq("p"), Type: "openai", URL: "https://x.example.com/v1", APIKey: "sk-a",
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(tool.Forget(ctx, lostKEK)).To(MatchError(And(ContainSubstring("is in the key set"), ContainSubstring("keys rewrap"))))
+		Expect(tool.Forget(ctx, "active")).To(MatchError(ContainSubstring("not a valid KEK ID")))
+		Expect(tool.Forget(ctx, "")).To(MatchError("a KEK ID is required"), "without a prompter nothing is picked")
+		Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 1}), "nothing changed")
+
+		Expect(tool.Forget(ctx, "kek-20250101-ffff")).To(Succeed())
+		Expect(out.String()).To(ContainSubstring("No stored value is sealed with KEK kek-20250101-ffff; nothing to forget."))
+	})
+
+	It("marks every value the lost KEK sealed lost, starts new home repositories, and audits each org", func(ctx SpecContext) {
+		org, user, _ := pgtest.NewOrg(ctx, pool)
+		other, otherUser, _ := pgtest.NewOrg(ctx, pool)
+		settings := orgsettings.NewService(pool)
+		three := 3
+		Expect(settings.SetHomeBackupRetention(ctx, org, audit.User(user), &three)).To(Succeed())
+		r := ring(ctx)
+		q := store.New(pool)
+
+		By("sealing a value of every kind under the KEK that will be lost")
+		provider, err := catalog.New(pool, r, nil).CreateProvider(ctx, org, audit.User(user), user, catalog.ProviderInput{
+			Name: pgtest.Uniq("p"), Type: "openai", URL: "https://x.example.com/v1", APIKey: "sk-a",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = catalog.New(pool, r, nil).CreateProvider(ctx, other, audit.User(otherUser), otherUser, catalog.ProviderInput{
+			Name: pgtest.Uniq("p"), Type: "openai", URL: "https://x.example.com/v1", APIKey: "sk-b",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		mcp, err := mcpservers.New(pool, r, nil).WithURLPolicy(catalog.URLPolicy{Namespace: ns}).Create(ctx, org, audit.User(user), user, mcpservers.Input{
+			Name: pgtest.Uniq("m"), URL: "https://mcp.example.com/mcp", CredentialPrefix: "Bearer ", CredentialValue: "fake-mcp-token",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		connID := pgtype.UUID{Bytes: [16]byte{1, 2, 3}, Valid: true}
+		env, err := connections.SealFields(r, org, connID, map[string][]byte{connections.GitHubPrivateKeyField: []byte("pem")})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+			OrgID: org, ID: connID, Connector: "github", DisplayName: "c", Config: []byte(`{}`), SecretEnvelope: env, Source: store.ConfigSourceUi,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		seal := func(b secretstore.Binding) []byte {
+			GinkgoHelper()
+			e, err := r.Seal(b, []byte(`{"api_key":"koinon_test_not-a-real-token"}`))
+			Expect(err).NotTo(HaveOccurred())
+			raw, err := json.Marshal(e)
+			Expect(err).NotTo(HaveOccurred())
+			return raw
+		}
+		var dest pgtype.UUID
+		Expect(pool.QueryRow(ctx, `INSERT INTO trace_destinations (org_id, name, backend, endpoint_url) VALUES ($1, 'dd', 'datadog', 'https://otlp.example.com') RETURNING id`, org).Scan(&dest)).To(Succeed())
+		_, err = pool.Exec(ctx, `UPDATE trace_destinations SET credentials = $3 WHERE org_id = $1 AND id = $2`, org, dest, seal(tracedest.Binding(org, dest)))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `INSERT INTO platform_trace_destination (backend, endpoint_url, credentials) VALUES ('datadog', 'https://otlp.example.com', $1)
+			ON CONFLICT (singleton) DO UPDATE SET credentials = EXCLUDED.credentials`, seal(tracedest.PlatformBinding()))
+		Expect(err).NotTo(HaveOccurred())
+
+		newAgent := func() pgtype.UUID {
+			GinkgoHelper()
+			var a pgtype.UUID
+			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&a)).To(Succeed())
+			return a
+		}
+		agent1, agent2, agent3 := newAgent(), newAgent(), newAgent()
+		var version, task, run pgtype.UUID
+		Expect(pool.QueryRow(ctx, `INSERT INTO agent_versions (org_id, agent_id, version, config) VALUES ($1, $2, 1, '{}') RETURNING id`, org, agent1).Scan(&version)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO tasks (org_id, title, agent_id, created_by_kind, created_by_user_id) VALUES ($1, 't', $2, 'user', $3) RETURNING id`, org, agent1, user).Scan(&task)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO runs (org_id, agent_id, agent_version_id, task_id, ready_at, max_tokens) VALUES ($1, $2, $3, $4, now(), 1000) RETURNING id`, org, agent1, version, task).Scan(&run)).To(Succeed())
+		var work pgtype.UUID
+		Expect(pool.QueryRow(ctx, `SELECT uuidv7()`).Scan(&work)).To(Succeed())
+		sealedWork, err := savedwork.SealPacked(r, org.String(), work.String(), []byte("packed"))
+		Expect(err).NotTo(HaveOccurred())
+		rawWork, err := json.Marshal(sealedWork)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `INSERT INTO saved_work (org_id, id, task_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, expires_at)
+			VALUES ($1, $2, $3, $4, $5, 'acme/widgets', $6, 'koinon/wip/abc-1', '{}', 6, $7, now() + interval '14 days')`,
+			org, work, task, run, agent1, strings.Repeat("a", 40), rawWork)
+		Expect(err).NotTo(HaveOccurred())
+
+		pw := checkpoint.Passwords{Q: q, Keys: r, Begin: pool.Begin}
+		_, err = pw.Current(ctx, org, agent1) // epoch 0 only
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pw.Current(ctx, org, agent2)
+		Expect(err).NotTo(HaveOccurred())
+		_, _, err = pw.NewEpoch(ctx, org, agent2, checkpoint.ReasonKeyLost, checkpoint.DefaultRetain) // epochs 0 and 1
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pw.Current(ctx, org, agent3) // epoch 0 now, epoch 1 under the next KEK below
+		Expect(err).NotTo(HaveOccurred())
+		Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 11}))
+
+		rotateAndLose(ctx)
+		pw.Keys = ring(ctx)
+		e3, _, err := pw.NewEpoch(ctx, org, agent3, checkpoint.ReasonKeyLost, checkpoint.DefaultRetain)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 11, nextKEK: 1}))
+
+		Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
+		Expect(out.String()).To(And(
+			ContainSubstring("Forgot KEK "+lostKEK+": 11 value(s) marked lost in 2 org(s)."),
+			ContainSubstring("2 agent(s) start a new home repository"),
+			ContainSubstring("platform's trace destination lost its credentials"),
+		))
+		Expect(usage(ctx)).To(Equal(map[string]int{nextKEK: 3}), "only the new repositories' and agent3's passwords remain")
+
+		By("each credential is lost and asks to be entered again; saved work expired")
+		lost := func(table, where string, args ...any) bool {
+			GinkgoHelper()
+			var ok bool
+			Expect(pool.QueryRow(ctx, `SELECT credential_lost_at IS NOT NULL FROM `+table+` WHERE `+where, args...).Scan(&ok)).To(Succeed())
+			return ok
+		}
+		Expect(lost("providers", "id = $1", provider.ID)).To(BeTrue())
+		Expect(lost("connections", "org_id = $1 AND id = $2", org, connID)).To(BeTrue())
+		Expect(lost("trace_destinations", "org_id = $1 AND id = $2", org, dest)).To(BeTrue())
+		Expect(lost("platform_trace_destination", "true")).To(BeTrue())
+		Expect(lost("mcp_servers", "org_id = $1 AND name = $2", org, mcp.Name)).To(BeTrue())
+		var prefix string
+		var header *string
+		Expect(pool.QueryRow(ctx, `SELECT credential_prefix, credential_header FROM mcp_servers WHERE org_id = $1 AND name = $2`, org, mcp.Name).Scan(&prefix, &header)).To(Succeed())
+		Expect(prefix).To(Equal("Bearer "), "the form asks for the value only")
+		Expect(header).NotTo(BeNil())
+		var status string
+		var envNull bool
+		Expect(pool.QueryRow(ctx, `SELECT status, envelope IS NULL FROM saved_work WHERE org_id = $1 AND id = $2`, org, work).Scan(&status, &envNull)).To(Succeed())
+		Expect(status).To(Equal("expired"))
+		Expect(envNull).To(BeTrue())
+
+		By("agents whose current repository was lost start a new one, sealed with the active KEK")
+		latest := func(agent pgtype.UUID) store.HomeRepositoryEpoch {
+			GinkgoHelper()
+			e, err := q.LatestHomeRepositoryEpoch(ctx, store.LatestHomeRepositoryEpochParams{OrgID: org, AgentID: agent})
+			Expect(err).NotTo(HaveOccurred())
+			return e
+		}
+		Expect(latest(agent1).RepositoryEpoch).To(Equal(int32(1)))
+		Expect(latest(agent2).RepositoryEpoch).To(Equal(int32(2)))
+		Expect(latest(agent3).RepositoryEpoch).To(Equal(int32(1)), "its current repository still opens")
+		for _, a := range []pgtype.UUID{agent1, agent2} {
+			cur, err := pw.Current(ctx, org, a)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cur.Epoch).To(Equal(latest(a).RepositoryEpoch))
+		}
+		Expect(pw.Current(ctx, org, agent3)).To(Equal(e3))
+
+		By("the lost repositories are deleted after the org's retention, not the default")
+		var h store.HomeRepository
+		h, err = q.GetHomeRepository(ctx, store.GetHomeRepositoryParams{OrgID: org, AgentID: agent1})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(h.CredentialLostAt.Valid).To(BeTrue())
+		Expect(h.DeleteAfter.Time).To(BeTemporally("~", time.Now().Add(72*time.Hour), time.Minute))
+		var after time.Time
+		Expect(pool.QueryRow(ctx, `SELECT delete_after FROM home_repository_epochs WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = 1`, org, agent2).Scan(&after)).To(Succeed())
+		Expect(after).To(BeTemporally("~", time.Now().Add(72*time.Hour), time.Minute))
+
+		By("one audit event per org, by the cli actor")
+		type event struct {
+			org             pgtype.UUID
+			kind, id, actor string
+			summary         []byte
+		}
+		rows, err := pool.Query(ctx, `SELECT org_id, actor_kind, actor_id, target_id, summary FROM audit_events WHERE action = $1 ORDER BY org_id`, keyscli.ForgetAction)
+		Expect(err).NotTo(HaveOccurred())
+		var events []event
+		for rows.Next() {
+			var e event
+			Expect(rows.Scan(&e.org, &e.kind, &e.actor, &e.id, &e.summary)).To(Succeed())
+			events = append(events, e)
+		}
+		Expect(rows.Err()).NotTo(HaveOccurred())
+		Expect(events).To(HaveLen(2))
+		for _, e := range events {
+			Expect(e.kind).To(Equal(audit.KindCLI))
+			Expect(e.actor).To(Equal("keys forget"))
+			Expect(e.id).To(Equal(lostKEK))
+			Expect(string(e.summary)).NotTo(ContainSubstring("not-a-real-token"))
+			if e.org == org {
+				Expect(string(e.summary)).To(And(ContainSubstring(`"retentionDays": 3`), ContainSubstring("newRepositoryEpochs"),
+					ContainSubstring(checkpoint.EpochRow(agent2.String(), 2))))
+			}
+		}
+
+		By("running it again finds nothing left")
+		out.Reset()
+		Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
+		Expect(out.String()).To(ContainSubstring("nothing to forget"))
+	})
+
+	Describe("on a terminal", func() {
+		var asked *bytes.Buffer
+		ask := func(input string) {
+			asked = &bytes.Buffer{}
+			tool.Prompt = &cli.Prompter{In: strings.NewReader(input), Out: asked, Accessible: true}
+		}
+		var org pgtype.UUID
+		BeforeEach(func(ctx SpecContext) {
+			var user pgtype.UUID
+			org, user, _ = pgtest.NewOrg(ctx, pool)
+			_, err := catalog.New(pool, ring(ctx), nil).CreateProvider(ctx, org, audit.User(user), user, catalog.ProviderInput{
+				Name: pgtest.Uniq("p"), Type: "openai", URL: "https://x.example.com/v1", APIKey: "sk-a",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			rotateAndLose(ctx)
+		})
+
+		It("wants the KEK ID typed; without an ID it offers the KEKs missing from the key set", func(ctx SpecContext) {
+			ask("")
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(cli.ErrCancelled))
+			Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 1}), "nothing changed")
+
+			ask("1\nnope\n" + lostKEK + "\n")
+			Expect(tool.Forget(ctx, "")).To(Succeed())
+			Expect(asked.String()).To(And(
+				ContainSubstring(lostKEK+"  seals 1 value(s), not in the key set"),
+				ContainSubstring("Type the KEK ID to continue"),
+				ContainSubstring("type "+lostKEK+" to continue"),
+				ContainSubstring("backup escrow"),
+			))
+			Expect(asked.String()).NotTo(ContainSubstring(nextKEK+"  seals"), "a KEK in the key set is not offered")
+			Expect(usage(ctx)).To(BeEmpty())
+		})
+
+		It("has nothing to pick when every KEK in use is in the key set", func(ctx SpecContext) {
+			Expect(tool.Add(ctx, lostKEK)).To(Succeed()) // restored from escrow after all
+			ask("1\n")
+			Expect(tool.Forget(ctx, "")).To(MatchError(ContainSubstring("nothing is lost")))
+		})
+	})
+})

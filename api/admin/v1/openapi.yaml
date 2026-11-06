@@ -1040,7 +1040,7 @@ paths:
         - name: actorKind
           in: query
           required: false
-          schema: {type: string, enum: [user, token, agent, secret, system]}
+          schema: {type: string, enum: [user, token, agent, secret, system, cli]}
         - name: actorId
           in: query
           required: false
@@ -1935,7 +1935,7 @@ components:
       required: [id, actorKind, actorId, action, targetKind, targetId, summary, requestId, createdAt, chainSeq, prevHash, hash]
       properties:
         id: {type: string, format: uuid}
-        actorKind: {type: string, enum: [user, token, agent, secret, system]}
+        actorKind: {type: string, enum: [user, token, agent, secret, system, cli]}
         actorId: {type: string}
         action: {type: string, description: "<area>.<verb>, for example approval.approve."}
         targetKind: {type: string}
