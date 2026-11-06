@@ -28,6 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
+	"github.com/stateracloud/koinon/internal/safego"
 )
 
 var tierToProto = map[connectors.Tier]connectionv1alpha1.Tier{
@@ -239,10 +240,12 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 
 	res := &connectionv1alpha1.CreateGitHubConnectionResponse{}
 	if req.GetTest() {
-		row, res.Results, err = s.testConnection(ctx, row)
+		row, res.Results, err = s.testConnection(ctx, row, c.auditActor())
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		s.syncScope(ctx, row, c.auditActor())
 	}
 	res.Connection = s.connectionProto(row)
 	return res, nil
@@ -347,10 +350,12 @@ func (s *Server) CreateGiteaConnection(ctx context.Context, req *connectionv1alp
 
 	res := &connectionv1alpha1.CreateGiteaConnectionResponse{}
 	if req.GetTest() {
-		row, res.Results, err = s.testConnection(ctx, row)
+		row, res.Results, err = s.testConnection(ctx, row, c.auditActor())
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		s.syncScope(ctx, row, c.auditActor())
 	}
 	res.Connection = s.connectionProto(row)
 	return res, nil
@@ -441,6 +446,15 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 		if err != nil {
 			return err
 		}
+		// What the old credential read is not what the new one reaches: the connection's part of
+		// the code-host scope goes with it, and the sync below reads it again. The lock waits out a
+		// replacement in progress, so its rows are deleted too.
+		if err := q.LockCodeHostConnectionScope(rctx, store.LockCodeHostConnectionScopeParams{OrgID: c.org, ConnectionID: cur.ID}); err != nil {
+			return err
+		}
+		if _, err := q.DeleteCodeHostConnectionRepos(rctx, store.DeleteCodeHostConnectionReposParams{OrgID: c.org, ConnectionID: cur.ID}); err != nil {
+			return err
+		}
 		return audit.RecordErr(rctx, q, audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "connection.secret.set", TargetKind: "connection", TargetID: cur.ID.String(),
 			Before: map[string]any{"displayName": cur.DisplayName, "fingerprint": cur.SecretFingerprint, "lost": cur.CredentialLostAt.Valid},
@@ -455,7 +469,7 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 
 	res := &connectionv1alpha1.SetConnectionSecretResponse{}
 	if req.GetTest() {
-		tested, results, err := s.testConnection(ctx, row)
+		tested, results, err := s.testConnection(ctx, row, c.auditActor())
 		if err != nil {
 			// The secret is stored and cannot be entered again by a retry that fails the same way:
 			// answer with the stored connection and a failed test, not an error.
@@ -465,6 +479,8 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 			row = tested
 		}
 		res.Results = results
+	} else {
+		s.syncScope(ctx, row, c.auditActor())
 	}
 	res.Connection = s.connectionProto(row)
 	return res, nil
@@ -588,14 +604,16 @@ func (s *Server) TestConnection(ctx context.Context, req *connectionv1alpha1.Tes
 	if err != nil {
 		return nil, s.dbError(err, "connection")
 	}
-	row, results, err := s.testConnection(ctx, row)
+	row, results, err := s.testConnection(ctx, row, c.auditActor())
 	if err != nil {
 		return nil, err
 	}
 	return &connectionv1alpha1.TestConnectionResponse{Connection: s.connectionProto(row), Results: results}, nil
 }
 
-func (s *Server) testConnection(ctx context.Context, row store.Connection) (store.Connection, []*connectionv1alpha1.CheckResult, error) {
+// testConnection runs the connector's checks and records them; when they pass, it reads the
+// connection's repositories into the code-host scope as actor.
+func (s *Server) testConnection(ctx context.Context, row store.Connection, actor audit.Actor) (store.Connection, []*connectionv1alpha1.CheckResult, error) {
 	t, ok := connectors.Get(row.Connector)
 	p, isHost := s.hosts.Get(row.Connector)
 	if !ok || !isHost {
@@ -636,7 +654,35 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection) (stor
 		return row, nil, s.dbError(err, "connection")
 	}
 	s.log.Info("connection tested", "org", row.OrgID.String(), "connection", row.ID.String(), "status", string(status))
+	if status == store.ConnectionStatusOk {
+		s.syncScope(ctx, row, actor)
+	}
 	return row, checksProto(results), nil
+}
+
+// scopeSyncTimeout bounds the reading syncScope starts.
+const scopeSyncTimeout = 2 * time.Minute
+
+// syncScope reads the connection's repositories into the org's code-host scope (ADR 0091), so a
+// write into one of the org's own private repositories is not external-high for long after the
+// connection is created, re-keyed or tested. The reading runs in the background, detached from the
+// request and bounded by scopeSyncTimeout: listing a large installation takes many pages, and the
+// RPC must not wait for it (nor fail behind a proxy's timeout while it still runs). Nothing is
+// lost by not waiting, because until the reading lands every code-host write on the connection is
+// external-high. It is best effort: a failure leaves the stored scope to age out, which is the safe
+// side, and the periodic refresh retries. actor is audited on the replacement.
+func (s *Server) syncScope(ctx context.Context, row store.Connection, actor audit.Actor) {
+	if s.scopeSync == nil {
+		return
+	}
+	bg := context.WithoutCancel(ctx)
+	safego.Go(bg, s.log, "code-host-scope-sync", func(bg context.Context) {
+		bg, cancel := context.WithTimeout(bg, scopeSyncTimeout)
+		defer cancel()
+		if err := s.scopeSync.Sync(bg, row, actor); err != nil {
+			s.log.Warn("could not read the connection's repositories into the code-host scope", "org", row.OrgID.String(), "connection", row.ID.String(), "err", err)
+		}
+	})
 }
 
 // Paging of ListInstallationRepos. The page token is GitHub's page number, in pages of

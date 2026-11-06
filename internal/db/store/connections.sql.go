@@ -428,6 +428,34 @@ func (q *Queries) ListConnectionsToMigrate(ctx context.Context) ([]Connection, e
 	return items, nil
 }
 
+const listOrgsWithCodeHostConnections = `-- name: ListOrgsWithCodeHostConnections :many
+SELECT DISTINCT org_id FROM connections
+WHERE connector = ANY($1::text[]) AND removed_at IS NULL AND credential_lost_at IS NULL
+ORDER BY org_id
+`
+
+// The code-host scope refresh: finds every org that has a live connection of one of these connector
+// types, to refresh its repositories' visibility. Across orgs, like the question sweeps.
+func (q *Queries) ListOrgsWithCodeHostConnections(ctx context.Context, connectors []string) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgsWithCodeHostConnections, connectors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var org_id pgtype.UUID
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markConnectionRemoved = `-- name: MarkConnectionRemoved :exec
 UPDATE connections
 SET removed_at = now()

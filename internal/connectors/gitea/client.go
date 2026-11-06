@@ -195,8 +195,16 @@ type apiRepo struct {
 	Permissions   *apiPermissions `json:"permissions"`
 }
 
+// repository maps the wire shape. Only a repository Gitea marks private is VisibilityPrivate: a
+// public repository, an internal one (public in a private organization) and one in a limited
+// organization all report public, because each is readable beyond the repository's collaborators
+// (ADR 0091: when unsure, public).
 func (r apiRepo) repository() codehost.Repository {
-	return codehost.Repository{FullName: r.FullName, DefaultBranch: r.DefaultBranch, Private: r.Private}
+	vis := codehost.VisibilityPublic
+	if r.Private {
+		vis = codehost.VisibilityPrivate
+	}
+	return codehost.Repository{FullName: r.FullName, DefaultBranch: r.DefaultBranch, Private: r.Private, Visibility: vis}
 }
 
 type apiPull struct {

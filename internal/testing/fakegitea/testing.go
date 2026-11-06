@@ -95,3 +95,18 @@ func (f *Fake) Snapshot(name string) Snapshot {
 	}
 	return s
 }
+
+// SetVisibility makes a repository "public", or "internal" (not private, in a private
+// organization: Gitea reports private=false, internal=true), or private again ("private").
+func (f *Fake) SetVisibility(repoName, visibility string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.public == nil {
+		f.public = map[string]string{}
+	}
+	if visibility == "private" {
+		delete(f.public, strings.ToLower(repoName))
+		return
+	}
+	f.public[strings.ToLower(repoName)] = visibility
+}

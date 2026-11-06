@@ -104,6 +104,17 @@ A derived class is decided per call from the address arguments only:
   Gitea connection accepts only its own host. Hosts are compared by name without the port. A change
   of a connection's `baseUrl` unlinks the servers it no longer serves, audited as
   `mcp_server.data_class.reset`.
+- **Repository visibility** (settled 2026-11-06 by procoduck, #115). The connector reads each
+  code-host connection's repositories and their visibility when the connection is created, given a
+  new secret or tested, and every 20 minutes after that (one koinon-api replica per round). A reading
+  counts for 1 hour: an older one is treated as unknown, so two failed refreshes in a row still leave
+  a fresh reading and a repository that turned public is seen well inside the hour. Only a repository
+  the code host reports as private is `internal`. Unknown (no reading, a stale reading, a server that
+  leaves the visibility out), GitHub's or Gitea's internal (readable beyond the repository's
+  collaborators) and any answer the connector is unsure of all count as public, so the call is
+  `external-high`. A newer reading is never replaced by an older one, and a secret entered anew in
+  Koinon drops the readings taken with the old one (a declared Secret's rotation, a reading in flight
+  and an empty newest reading are #244).
 - **Fetch.** The tool names its URL argument. The host is the address. A host on the org's
   fetch-trusted list (koinon-private#350's contract: an exact lower-case name, or a `*.example.com` wildcard that
   covers subdomains at any depth but not `example.com` itself) makes the call `internal`. Any other
@@ -339,8 +350,10 @@ flowchart TD
   the default is `external-high` and a declaration resets when the tool or URL changes.
 - Negative: admins must classify tools and name their address arguments before an agent holding both
   legs can use them without approvals; an unclassified write tool asks.
-- Negative: the code-host scope needs each repository's visibility, which the connector has to read
-  and keep current _(inferred)_.
+- Negative: the code-host scope needs each repository's visibility, which the connector reads and
+  keeps current (decision 3): a refresh every 20 minutes for every code-host connection, a 1 hour
+  freshness window, and code-host writes that are `external-high` until the first reading lands or
+  once the readings stop.
 - Negative: a long research run that has read private data loses most of its fetch and search room
   once it also reads the web.
 - Metrics (ADR 0023): decisions counted with fixed labels (decision, reason, sink class), never org,
@@ -371,9 +384,8 @@ measures; procoduck decides each number.
   only: whether 24 is still right, measured as false alarms on real external calls.
 - **The cap's scope.** Per run, as decided, or per home generation like the legs, if recordings
   show agents spreading work across runs of one generation.
-- **Repository visibility.** How fresh the connector's view of a repository being public must be,
-  and what a call does when the visibility is unknown (this ADR: `external-high`). Decided in koinon-private#350
-  with procoduck.
+- ~~**Repository visibility.**~~ Settled (2026-11-06, #115): a 1 hour freshness window and a 20
+  minute refresh; unknown, internal and unsure readings all count as public (decision 3).
 
 ## Upstream verification
 

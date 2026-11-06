@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package scopesync_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
+)
+
+var pool *pgxpool.Pool
+
+func TestScopeSync(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Code-host scope sync Suite")
+}
+
+var _ = BeforeSuite(func(ctx SpecContext) {
+	pool = pgtest.Start(ctx)
+}, NodeTimeout(3*time.Minute))
+
+var _ = AfterSuite(func(context.Context) {})

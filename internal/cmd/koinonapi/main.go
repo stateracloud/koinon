@@ -66,6 +66,7 @@ import (
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
+	"github.com/stateracloud/koinon/internal/codehost/scopesync"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/migrations"
@@ -619,8 +620,13 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	// The org's code-host scope (ADR 0091): each code-host connection's repositories and their
+	// visibility, read when a connection is created or tested and again every few minutes, so the
+	// leak guard calls a write into the org's own private repository internal only on a fresh reading.
+	scopeSyncer := scopesync.New(pool, hosts, opener, slog.Default())
+	safego.GoOrStop(bgCtx, slog.Default(), "code-host-scope", stop, func(ctx context.Context) { scopeSyncer.Run(ctx, scopesync.DefaultInterval) })
 	svc := services.New(pool, services.Options{
-		ModelCheck: echo, Traces: traceSvc,
+		ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc,
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
 	// The notification of an opened question (the park that opens it commits in koinon-agentd).
