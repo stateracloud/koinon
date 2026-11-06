@@ -148,6 +148,8 @@ type secretColumn struct {
 	binding            func(org, id pgtype.UUID) secretstore.Binding
 	// values turns the opened plaintext into the secret values it holds.
 	values func(plain []byte) []string
+	// rowBinding, when set, replaces binding for a table whose key is not a UUID.
+	rowBinding func(org pgtype.UUID, row string) secretstore.Binding
 }
 
 func whole(plain []byte) []string { return withAuthParts(string(plain)) }
@@ -167,15 +169,16 @@ func connectionFields(plain []byte) []string {
 }
 
 // secretColumns are the org-owned envelopes whose values must never appear in a trace: provider API
-// keys, connection fields, remote MCP server credentials, agent home repository passwords and the
-// org's own trace destination credentials (a JSON object of field to value, or, for generic, header
+// keys, connection fields, remote MCP server credentials, agent home repository passwords (every
+// repository epoch) and the org's own trace destination credentials (a JSON object of field to value, or, for generic, header
 // to value). Saved work is files, not credentials, and is left out. internal/keyscli.Columns lists
 // every envelope; a new column that holds an org credential belongs here too.
 var secretColumns = []secretColumn{
-	{catalog.ProvidersTable, catalog.KeyColumn, "id", catalog.KeyBinding, whole},
-	{connections.Table, connections.Column, "id", connections.BindingFor, connectionFields},
-	{mcpservers.ServersTable, mcpservers.CredentialColumn, "id", mcpservers.CredentialBinding, whole},
-	{checkpoint.Table, checkpoint.Column, "agent_id", checkpoint.Binding, whole},
+	{catalog.ProvidersTable, catalog.KeyColumn, "id", catalog.KeyBinding, whole, nil},
+	{connections.Table, connections.Column, "id", connections.BindingFor, connectionFields, nil},
+	{mcpservers.ServersTable, mcpservers.CredentialColumn, "id", mcpservers.CredentialBinding, whole, nil},
+	{checkpoint.Table, checkpoint.Column, "agent_id", checkpoint.Binding, whole, nil},
+	{checkpoint.EpochsTable, checkpoint.Column, "binding_row", nil, whole, checkpoint.EpochRowBinding},
 	{tracedest.DestinationsTable, tracedest.CredentialsColumn, "id", tracedest.Binding, func(plain []byte) []string {
 		var m map[string]string
 		if json.Unmarshal(plain, &m) != nil {
@@ -186,7 +189,7 @@ var secretColumns = []secretColumn{
 			out = append(out, withAuthParts(v)...)
 		}
 		return out
-	}},
+	}, nil},
 }
 
 // Opener opens an envelope; *secretstore.Keyring is one.
@@ -253,12 +256,20 @@ func (s *PGSecrets) Secrets(ctx context.Context, org pgtype.UUID) (*scrub.Secret
 				return nil, fmt.Errorf("reading %s: %w", c.table, err)
 			}
 			var env secretstore.Envelope
-			rowID, perr := parseUUID(id)
-			if json.Unmarshal(raw, &env) != nil || perr != nil {
+			if json.Unmarshal(raw, &env) != nil {
 				unopenable++
 				continue
 			}
-			plain, err := s.Keys.Open(c.binding(org, rowID), env)
+			var b secretstore.Binding
+			if c.rowBinding != nil {
+				b = c.rowBinding(org, id)
+			} else if rowID, perr := parseUUID(id); perr == nil {
+				b = c.binding(org, rowID)
+			} else {
+				unopenable++
+				continue
+			}
+			plain, err := s.Keys.Open(b, env)
 			if err != nil {
 				unopenable++
 				continue

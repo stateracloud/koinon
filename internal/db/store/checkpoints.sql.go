@@ -25,7 +25,7 @@ WHERE h.org_id = $1 AND (h.org_id, h.id) = (
     ORDER BY c.requested_at, c.id
     FOR UPDATE SKIP LOCKED
     LIMIT 1)
-RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at
+RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch
 `
 
 type ClaimHomeCheckpointParams struct {
@@ -55,6 +55,7 @@ func (q *Queries) ClaimHomeCheckpoint(ctx context.Context, arg ClaimHomeCheckpoi
 		&i.RequestedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.RepositoryEpoch,
 	)
 	return i, err
 }
@@ -129,18 +130,19 @@ func (q *Queries) ClearSandboxRestore(ctx context.Context, arg ClearSandboxResto
 const completeHomeCheckpoint = `-- name: CompleteHomeCheckpoint :one
 UPDATE home_checkpoints
 SET status = 'complete', snapshot_id = $1, size_bytes = $2, epoch = $3,
-    generation = $4, error = NULL, finished_at = now()
-WHERE org_id = $5 AND id = $6 AND status = 'running'
-RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at
+    generation = $4, repository_epoch = $5, error = NULL, finished_at = now()
+WHERE org_id = $6 AND id = $7 AND status = 'running'
+RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch
 `
 
 type CompleteHomeCheckpointParams struct {
-	SnapshotID pgtype.Text
-	SizeBytes  pgtype.Int8
-	Epoch      int64
-	Generation string
-	OrgID      pgtype.UUID
-	ID         pgtype.UUID
+	SnapshotID      pgtype.Text
+	SizeBytes       pgtype.Int8
+	Epoch           int64
+	Generation      string
+	RepositoryEpoch int32
+	OrgID           pgtype.UUID
+	ID              pgtype.UUID
 }
 
 func (q *Queries) CompleteHomeCheckpoint(ctx context.Context, arg CompleteHomeCheckpointParams) (HomeCheckpoint, error) {
@@ -149,6 +151,7 @@ func (q *Queries) CompleteHomeCheckpoint(ctx context.Context, arg CompleteHomeCh
 		arg.SizeBytes,
 		arg.Epoch,
 		arg.Generation,
+		arg.RepositoryEpoch,
 		arg.OrgID,
 		arg.ID,
 	)
@@ -169,6 +172,7 @@ func (q *Queries) CompleteHomeCheckpoint(ctx context.Context, arg CompleteHomeCh
 		&i.RequestedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.RepositoryEpoch,
 	)
 	return i, err
 }
@@ -177,7 +181,7 @@ const failHomeCheckpoint = `-- name: FailHomeCheckpoint :one
 UPDATE home_checkpoints
 SET status = 'failed', error = $1, finished_at = now()
 WHERE org_id = $2 AND id = $3 AND status IN ('requested', 'running')
-RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at
+RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch
 `
 
 type FailHomeCheckpointParams struct {
@@ -205,6 +209,7 @@ func (q *Queries) FailHomeCheckpoint(ctx context.Context, arg FailHomeCheckpoint
 		&i.RequestedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.RepositoryEpoch,
 	)
 	return i, err
 }
@@ -215,7 +220,7 @@ SET status = 'failed', finished_at = now(),
     error = $1
 WHERE org_id = $2 AND status = 'requested' AND attempts = 0
   AND requested_at < now() - make_interval(secs => $3::int)
-RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at
+RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch
 `
 
 type FailStaleHomeCheckpointsParams struct {
@@ -250,6 +255,7 @@ func (q *Queries) FailStaleHomeCheckpoints(ctx context.Context, arg FailStaleHom
 			&i.RequestedAt,
 			&i.StartedAt,
 			&i.FinishedAt,
+			&i.RepositoryEpoch,
 		); err != nil {
 			return nil, err
 		}
@@ -262,7 +268,7 @@ func (q *Queries) FailStaleHomeCheckpoints(ctx context.Context, arg FailStaleHom
 }
 
 const getHomeCheckpoint = `-- name: GetHomeCheckpoint :one
-SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at FROM home_checkpoints
+SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch FROM home_checkpoints
 WHERE org_id = $1 AND id = $2
 `
 
@@ -290,13 +296,14 @@ func (q *Queries) GetHomeCheckpoint(ctx context.Context, arg GetHomeCheckpointPa
 		&i.RequestedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.RepositoryEpoch,
 	)
 	return i, err
 }
 
 const getHomeRepository = `-- name: GetHomeRepository :one
 
-SELECT org_id, agent_id, prefix, password_envelope, created_at FROM home_repositories
+SELECT org_id, agent_id, prefix, password_envelope, created_at, retired_at, delete_after, deleted_at, credential_lost_at FROM home_repositories
 WHERE org_id = $1 AND agent_id = $2
 `
 
@@ -307,8 +314,9 @@ type GetHomeRepositoryParams struct {
 
 // SPDX-License-Identifier: Apache-2.0
 //
-// Home checkpoints (plan item HC1; ADR 0032): the kopia repository per agent, the checkpoint
-// records koinon-agentd's writer works through, and the restore a recreated sandbox waits for.
+// Home checkpoints (plan item HC1; ADR 0032): the kopia repositories of each agent (one per
+// repository epoch, ADR 0085 decision 13), the checkpoint records koinon-agentd's writer works
+// through, and the restore a recreated sandbox waits for.
 //
 // Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
 func (q *Queries) GetHomeRepository(ctx context.Context, arg GetHomeRepositoryParams) (HomeRepository, error) {
@@ -320,12 +328,47 @@ func (q *Queries) GetHomeRepository(ctx context.Context, arg GetHomeRepositoryPa
 		&i.Prefix,
 		&i.PasswordEnvelope,
 		&i.CreatedAt,
+		&i.RetiredAt,
+		&i.DeleteAfter,
+		&i.DeletedAt,
+		&i.CredentialLostAt,
+	)
+	return i, err
+}
+
+const getHomeRepositoryEpoch = `-- name: GetHomeRepositoryEpoch :one
+SELECT org_id, agent_id, repository_epoch, prefix, password_envelope, credential_lost_at, binding_row, reason, created_at, retired_at, delete_after, deleted_at FROM home_repository_epochs
+WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = $3
+`
+
+type GetHomeRepositoryEpochParams struct {
+	OrgID           pgtype.UUID
+	AgentID         pgtype.UUID
+	RepositoryEpoch int32
+}
+
+func (q *Queries) GetHomeRepositoryEpoch(ctx context.Context, arg GetHomeRepositoryEpochParams) (HomeRepositoryEpoch, error) {
+	row := q.db.QueryRow(ctx, getHomeRepositoryEpoch, arg.OrgID, arg.AgentID, arg.RepositoryEpoch)
+	var i HomeRepositoryEpoch
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.RepositoryEpoch,
+		&i.Prefix,
+		&i.PasswordEnvelope,
+		&i.CredentialLostAt,
+		&i.BindingRow,
+		&i.Reason,
+		&i.CreatedAt,
+		&i.RetiredAt,
+		&i.DeleteAfter,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getOpenHomeCheckpoint = `-- name: GetOpenHomeCheckpoint :one
-SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at FROM home_checkpoints
+SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch FROM home_checkpoints
 WHERE org_id = $1 AND agent_id = $2 AND status IN ('requested', 'running')
 `
 
@@ -353,6 +396,7 @@ func (q *Queries) GetOpenHomeCheckpoint(ctx context.Context, arg GetOpenHomeChec
 		&i.RequestedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.RepositoryEpoch,
 	)
 	return i, err
 }
@@ -361,7 +405,7 @@ const insertHomeRepository = `-- name: InsertHomeRepository :one
 INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (org_id, agent_id) DO NOTHING
-RETURNING org_id, agent_id, prefix, password_envelope, created_at
+RETURNING org_id, agent_id, prefix, password_envelope, created_at, retired_at, delete_after, deleted_at, credential_lost_at
 `
 
 type InsertHomeRepositoryParams struct {
@@ -386,12 +430,58 @@ func (q *Queries) InsertHomeRepository(ctx context.Context, arg InsertHomeReposi
 		&i.Prefix,
 		&i.PasswordEnvelope,
 		&i.CreatedAt,
+		&i.RetiredAt,
+		&i.DeleteAfter,
+		&i.DeletedAt,
+		&i.CredentialLostAt,
+	)
+	return i, err
+}
+
+const insertHomeRepositoryEpoch = `-- name: InsertHomeRepositoryEpoch :one
+INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING org_id, agent_id, repository_epoch, prefix, password_envelope, credential_lost_at, binding_row, reason, created_at, retired_at, delete_after, deleted_at
+`
+
+type InsertHomeRepositoryEpochParams struct {
+	OrgID            pgtype.UUID
+	AgentID          pgtype.UUID
+	RepositoryEpoch  int32
+	Prefix           string
+	PasswordEnvelope []byte
+	Reason           string
+}
+
+func (q *Queries) InsertHomeRepositoryEpoch(ctx context.Context, arg InsertHomeRepositoryEpochParams) (HomeRepositoryEpoch, error) {
+	row := q.db.QueryRow(ctx, insertHomeRepositoryEpoch,
+		arg.OrgID,
+		arg.AgentID,
+		arg.RepositoryEpoch,
+		arg.Prefix,
+		arg.PasswordEnvelope,
+		arg.Reason,
+	)
+	var i HomeRepositoryEpoch
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.RepositoryEpoch,
+		&i.Prefix,
+		&i.PasswordEnvelope,
+		&i.CredentialLostAt,
+		&i.BindingRow,
+		&i.Reason,
+		&i.CreatedAt,
+		&i.RetiredAt,
+		&i.DeleteAfter,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const latestCompleteHomeCheckpointOfGeneration = `-- name: LatestCompleteHomeCheckpointOfGeneration :one
-SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at FROM home_checkpoints
+SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch FROM home_checkpoints
 WHERE org_id = $1 AND agent_id = $2 AND generation = $3 AND status = 'complete'
 ORDER BY finished_at DESC, id DESC
 LIMIT 1
@@ -425,12 +515,13 @@ func (q *Queries) LatestCompleteHomeCheckpointOfGeneration(ctx context.Context, 
 		&i.RequestedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.RepositoryEpoch,
 	)
 	return i, err
 }
 
 const latestCompleteHomeCheckpointOfSandbox = `-- name: LatestCompleteHomeCheckpointOfSandbox :one
-SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at FROM home_checkpoints
+SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch FROM home_checkpoints
 WHERE org_id = $1 AND agent_id = $2 AND sandbox_id = $3 AND status = 'complete'
 ORDER BY finished_at DESC, id DESC
 LIMIT 1
@@ -464,12 +555,13 @@ func (q *Queries) LatestCompleteHomeCheckpointOfSandbox(ctx context.Context, arg
 		&i.RequestedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.RepositoryEpoch,
 	)
 	return i, err
 }
 
 const latestHomeCheckpointOfSandbox = `-- name: LatestHomeCheckpointOfSandbox :one
-SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at FROM home_checkpoints
+SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch FROM home_checkpoints
 WHERE org_id = $1 AND agent_id = $2 AND sandbox_id = $3
 ORDER BY requested_at DESC, id DESC
 LIMIT 1
@@ -503,14 +595,54 @@ func (q *Queries) LatestHomeCheckpointOfSandbox(ctx context.Context, arg LatestH
 		&i.RequestedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.RepositoryEpoch,
+	)
+	return i, err
+}
+
+const latestHomeRepositoryEpoch = `-- name: LatestHomeRepositoryEpoch :one
+SELECT org_id, agent_id, repository_epoch, prefix, password_envelope, credential_lost_at, binding_row, reason, created_at, retired_at, delete_after, deleted_at FROM home_repository_epochs
+WHERE org_id = $1 AND agent_id = $2
+ORDER BY repository_epoch DESC
+LIMIT 1
+`
+
+type LatestHomeRepositoryEpochParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// The agent's current repository when it has epochs; no row: epoch 0 (home_repositories) is current.
+func (q *Queries) LatestHomeRepositoryEpoch(ctx context.Context, arg LatestHomeRepositoryEpochParams) (HomeRepositoryEpoch, error) {
+	row := q.db.QueryRow(ctx, latestHomeRepositoryEpoch, arg.OrgID, arg.AgentID)
+	var i HomeRepositoryEpoch
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.RepositoryEpoch,
+		&i.Prefix,
+		&i.PasswordEnvelope,
+		&i.CredentialLostAt,
+		&i.BindingRow,
+		&i.Reason,
+		&i.CreatedAt,
+		&i.RetiredAt,
+		&i.DeleteAfter,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const listCompleteHomeCheckpoints = `-- name: ListCompleteHomeCheckpoints :many
-SELECT c.org_id, c.id, c.agent_id, c.reason, c.status, c.sandbox_id, c.generation, c.epoch, c.snapshot_id, c.size_bytes, c.attempts, c.error, c.requested_at, c.started_at, c.finished_at FROM home_checkpoints c
+SELECT c.org_id, c.id, c.agent_id, c.reason, c.status, c.sandbox_id, c.generation, c.epoch, c.snapshot_id, c.size_bytes, c.attempts, c.error, c.requested_at, c.started_at, c.finished_at, c.repository_epoch FROM home_checkpoints c
 WHERE c.org_id = $1 AND c.agent_id = $2 AND c.status = 'complete'
   AND c.epoch <= coalesce((SELECT max(r.epoch) FROM runs r WHERE r.org_id = c.org_id AND r.agent_id = c.agent_id), 0)
+  -- A checkpoint whose repository was deleted is gone.
+  AND NOT EXISTS (SELECT 1 FROM home_repositories h
+                  WHERE h.org_id = c.org_id AND h.agent_id = c.agent_id AND c.repository_epoch = 0 AND h.deleted_at IS NOT NULL)
+  AND NOT EXISTS (SELECT 1 FROM home_repository_epochs e
+                  WHERE e.org_id = c.org_id AND e.agent_id = c.agent_id AND e.repository_epoch = c.repository_epoch
+                    AND e.deleted_at IS NOT NULL)
 ORDER BY c.finished_at DESC, c.id DESC
 LIMIT $3::int
 `
@@ -548,6 +680,7 @@ func (q *Queries) ListCompleteHomeCheckpoints(ctx context.Context, arg ListCompl
 			&i.RequestedAt,
 			&i.StartedAt,
 			&i.FinishedAt,
+			&i.RepositoryEpoch,
 		); err != nil {
 			return nil, err
 		}
@@ -557,6 +690,115 @@ func (q *Queries) ListCompleteHomeCheckpoints(ctx context.Context, arg ListCompl
 		return nil, err
 	}
 	return items, nil
+}
+
+const listDueHomeRepositories = `-- name: ListDueHomeRepositories :many
+SELECT h.agent_id, 0::integer AS repository_epoch, h.prefix FROM home_repositories h
+WHERE h.org_id = $2 AND h.deleted_at IS NULL AND h.delete_after <= now()
+UNION ALL
+SELECT e.agent_id, e.repository_epoch, e.prefix FROM home_repository_epochs e
+WHERE e.org_id = $2 AND e.deleted_at IS NULL AND e.delete_after <= now()
+ORDER BY agent_id, repository_epoch
+LIMIT $1::int
+`
+
+type ListDueHomeRepositoriesParams struct {
+	MaxRows int32
+	OrgID   pgtype.UUID
+}
+
+type ListDueHomeRepositoriesRow struct {
+	AgentID         pgtype.UUID
+	RepositoryEpoch int32
+	Prefix          string
+}
+
+// Retired repositories whose blobs may now be deleted (the sweeper's work), epoch 0 and later.
+func (q *Queries) ListDueHomeRepositories(ctx context.Context, arg ListDueHomeRepositoriesParams) ([]ListDueHomeRepositoriesRow, error) {
+	rows, err := q.db.Query(ctx, listDueHomeRepositories, arg.MaxRows, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDueHomeRepositoriesRow
+	for rows.Next() {
+		var i ListDueHomeRepositoriesRow
+		if err := rows.Scan(&i.AgentID, &i.RepositoryEpoch, &i.Prefix); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockHomeRepository = `-- name: LockHomeRepository :one
+SELECT org_id, agent_id, prefix, password_envelope, created_at, retired_at, delete_after, deleted_at, credential_lost_at FROM home_repositories
+WHERE org_id = $1 AND agent_id = $2
+FOR UPDATE
+`
+
+type LockHomeRepositoryParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// Serializes the start of a repository epoch for the agent.
+func (q *Queries) LockHomeRepository(ctx context.Context, arg LockHomeRepositoryParams) (HomeRepository, error) {
+	row := q.db.QueryRow(ctx, lockHomeRepository, arg.OrgID, arg.AgentID)
+	var i HomeRepository
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.Prefix,
+		&i.PasswordEnvelope,
+		&i.CreatedAt,
+		&i.RetiredAt,
+		&i.DeleteAfter,
+		&i.DeletedAt,
+		&i.CredentialLostAt,
+	)
+	return i, err
+}
+
+const markHomeRepositoryDeleted = `-- name: MarkHomeRepositoryDeleted :execrows
+UPDATE home_repositories SET deleted_at = now()
+WHERE org_id = $1 AND agent_id = $2 AND deleted_at IS NULL AND delete_after <= now()
+`
+
+type MarkHomeRepositoryDeletedParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+func (q *Queries) MarkHomeRepositoryDeleted(ctx context.Context, arg MarkHomeRepositoryDeletedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markHomeRepositoryDeleted, arg.OrgID, arg.AgentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markHomeRepositoryEpochDeleted = `-- name: MarkHomeRepositoryEpochDeleted :execrows
+UPDATE home_repository_epochs SET deleted_at = now()
+WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = $3
+  AND deleted_at IS NULL AND delete_after <= now()
+`
+
+type MarkHomeRepositoryEpochDeletedParams struct {
+	OrgID           pgtype.UUID
+	AgentID         pgtype.UUID
+	RepositoryEpoch int32
+}
+
+func (q *Queries) MarkHomeRepositoryEpochDeleted(ctx context.Context, arg MarkHomeRepositoryEpochDeletedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markHomeRepositoryEpochDeleted, arg.OrgID, arg.AgentID, arg.RepositoryEpoch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const maxAgentEpoch = `-- name: MaxAgentEpoch :one
@@ -580,7 +822,7 @@ const releaseHomeCheckpoint = `-- name: ReleaseHomeCheckpoint :one
 UPDATE home_checkpoints
 SET status = 'requested', error = $1, requested_at = now() + make_interval(secs => $2::int)
 WHERE org_id = $3 AND id = $4 AND status = 'running'
-RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at
+RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch
 `
 
 type ReleaseHomeCheckpointParams struct {
@@ -615,6 +857,7 @@ func (q *Queries) ReleaseHomeCheckpoint(ctx context.Context, arg ReleaseHomeChec
 		&i.RequestedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.RepositoryEpoch,
 	)
 	return i, err
 }
@@ -638,7 +881,7 @@ const requestHomeCheckpoint = `-- name: RequestHomeCheckpoint :one
 INSERT INTO home_checkpoints (org_id, agent_id, reason, sandbox_id, generation)
 VALUES ($1, $2, $3::checkpoint_reason, $4, $5)
 ON CONFLICT (org_id, agent_id) WHERE status IN ('requested', 'running') DO NOTHING
-RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at
+RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch
 `
 
 type RequestHomeCheckpointParams struct {
@@ -676,6 +919,7 @@ func (q *Queries) RequestHomeCheckpoint(ctx context.Context, arg RequestHomeChec
 		&i.RequestedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.RepositoryEpoch,
 	)
 	return i, err
 }
@@ -695,7 +939,7 @@ WHERE s.org_id = $1 AND s.state = 'ready' AND s.unhealthy_at IS NULL
         AND (c.status IN ('requested', 'running')
              OR c.requested_at > now() - make_interval(secs => $2::int)))
 ON CONFLICT (org_id, agent_id) WHERE status IN ('requested', 'running') DO NOTHING
-RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at
+RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch
 `
 
 type RequestHourlyHomeCheckpointsParams struct {
@@ -731,6 +975,7 @@ func (q *Queries) RequestHourlyHomeCheckpoints(ctx context.Context, arg RequestH
 			&i.RequestedAt,
 			&i.StartedAt,
 			&i.FinishedAt,
+			&i.RepositoryEpoch,
 		); err != nil {
 			return nil, err
 		}
@@ -740,6 +985,53 @@ func (q *Queries) RequestHourlyHomeCheckpoints(ctx context.Context, arg RequestH
 		return nil, err
 	}
 	return items, nil
+}
+
+const retireHomeRepository = `-- name: RetireHomeRepository :execrows
+UPDATE home_repositories
+SET retired_at = now(), delete_after = $1
+WHERE org_id = $2 AND agent_id = $3 AND retired_at IS NULL
+`
+
+type RetireHomeRepositoryParams struct {
+	DeleteAfter pgtype.Timestamptz
+	OrgID       pgtype.UUID
+	AgentID     pgtype.UUID
+}
+
+// Epoch 0 was superseded: its blobs may be deleted after @delete_after.
+func (q *Queries) RetireHomeRepository(ctx context.Context, arg RetireHomeRepositoryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retireHomeRepository, arg.DeleteAfter, arg.OrgID, arg.AgentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retireHomeRepositoryEpoch = `-- name: RetireHomeRepositoryEpoch :execrows
+UPDATE home_repository_epochs
+SET retired_at = now(), delete_after = $1
+WHERE org_id = $2 AND agent_id = $3 AND repository_epoch = $4 AND retired_at IS NULL
+`
+
+type RetireHomeRepositoryEpochParams struct {
+	DeleteAfter     pgtype.Timestamptz
+	OrgID           pgtype.UUID
+	AgentID         pgtype.UUID
+	RepositoryEpoch int32
+}
+
+func (q *Queries) RetireHomeRepositoryEpoch(ctx context.Context, arg RetireHomeRepositoryEpochParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retireHomeRepositoryEpoch,
+		arg.DeleteAfter,
+		arg.OrgID,
+		arg.AgentID,
+		arg.RepositoryEpoch,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setSandboxRestore = `-- name: SetSandboxRestore :one

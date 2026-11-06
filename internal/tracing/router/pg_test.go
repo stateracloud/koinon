@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
@@ -161,6 +162,32 @@ var _ = Describe("Postgres", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		sc = scrub.New(scrub.Config{Level: scrub.LevelFull, Secrets: set})
 		Expect(sc.Text("key=" + providerKey)).To(Equal("key=" + providerKey))
+	})
+
+	It("scrubs every repository epoch's home repository password, and fingerprints a new epoch", func(ctx SpecContext) {
+		ring := secretstoretest.Keyring()
+		pw := checkpoint.Passwords{Q: q, Keys: ring, Begin: pool.Begin}
+		// An org of its own: the other specs seal this org's credentials with another keyring.
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		var agent pgtype.UUID
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'Epoch agent', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
+		e0, err := pw.Current(ctx, org, agent)
+		Expect(err).NotTo(HaveOccurred())
+		secrets := router.NewPGSecrets(pool, ring, nil)
+		before, err := secrets.Version(ctx, org)
+		Expect(err).NotTo(HaveOccurred())
+		e1, ok, err := pw.NewEpoch(ctx, org, agent, checkpoint.ReasonKeyLost, time.Hour)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ok).To(BeTrue())
+		after, err := secrets.Version(ctx, org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(after).NotTo(Equal(before), "a new epoch's password rebuilds the set")
+
+		set, err := secrets.Secrets(ctx, org)
+		Expect(err).NotTo(HaveOccurred())
+		sc := scrub.New(scrub.Config{Level: scrub.LevelFull, Secrets: set})
+		Expect(sc.Text("pw=" + e0.Password)).To(Equal("pw=[redacted:secret]"), "the retired epoch's")
+		Expect(sc.Text("pw=" + e1.Password)).To(Equal("pw=[redacted:secret]"), "the current epoch's")
 	})
 
 	It("records a destination's health, the platform's too", func(ctx SpecContext) {

@@ -1,7 +1,8 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
--- Home checkpoints (plan item HC1; ADR 0032): the kopia repository per agent, the checkpoint
--- records koinon-agentd's writer works through, and the restore a recreated sandbox waits for.
+-- Home checkpoints (plan item HC1; ADR 0032): the kopia repositories of each agent (one per
+-- repository epoch, ADR 0085 decision 13), the checkpoint records koinon-agentd's writer works
+-- through, and the restore a recreated sandbox waits for.
 --
 -- Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
 
@@ -15,6 +16,58 @@ INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope)
 VALUES (@org_id, @agent_id, @prefix, @password_envelope)
 ON CONFLICT (org_id, agent_id) DO NOTHING
 RETURNING *;
+
+-- name: LockHomeRepository :one
+-- Serializes the start of a repository epoch for the agent.
+SELECT * FROM home_repositories
+WHERE org_id = @org_id AND agent_id = @agent_id
+FOR UPDATE;
+
+-- name: GetHomeRepositoryEpoch :one
+SELECT * FROM home_repository_epochs
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch;
+
+-- name: LatestHomeRepositoryEpoch :one
+-- The agent's current repository when it has epochs; no row: epoch 0 (home_repositories) is current.
+SELECT * FROM home_repository_epochs
+WHERE org_id = @org_id AND agent_id = @agent_id
+ORDER BY repository_epoch DESC
+LIMIT 1;
+
+-- name: InsertHomeRepositoryEpoch :one
+INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason)
+VALUES (@org_id, @agent_id, @repository_epoch, @prefix, @password_envelope, @reason)
+RETURNING *;
+
+-- name: RetireHomeRepository :execrows
+-- Epoch 0 was superseded: its blobs may be deleted after @delete_after.
+UPDATE home_repositories
+SET retired_at = now(), delete_after = @delete_after
+WHERE org_id = @org_id AND agent_id = @agent_id AND retired_at IS NULL;
+
+-- name: RetireHomeRepositoryEpoch :execrows
+UPDATE home_repository_epochs
+SET retired_at = now(), delete_after = @delete_after
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch AND retired_at IS NULL;
+
+-- name: ListDueHomeRepositories :many
+-- Retired repositories whose blobs may now be deleted (the sweeper's work), epoch 0 and later.
+SELECT h.agent_id, 0::integer AS repository_epoch, h.prefix FROM home_repositories h
+WHERE h.org_id = @org_id AND h.deleted_at IS NULL AND h.delete_after <= now()
+UNION ALL
+SELECT e.agent_id, e.repository_epoch, e.prefix FROM home_repository_epochs e
+WHERE e.org_id = @org_id AND e.deleted_at IS NULL AND e.delete_after <= now()
+ORDER BY agent_id, repository_epoch
+LIMIT @max_rows::int;
+
+-- name: MarkHomeRepositoryDeleted :execrows
+UPDATE home_repositories SET deleted_at = now()
+WHERE org_id = @org_id AND agent_id = @agent_id AND deleted_at IS NULL AND delete_after <= now();
+
+-- name: MarkHomeRepositoryEpochDeleted :execrows
+UPDATE home_repository_epochs SET deleted_at = now()
+WHERE org_id = @org_id AND agent_id = @agent_id AND repository_epoch = @repository_epoch
+  AND deleted_at IS NULL AND delete_after <= now();
 
 -- name: RequestHomeCheckpoint :one
 -- No row: the agent already has an open request (home_checkpoints_open); read it with
@@ -65,6 +118,12 @@ LIMIT 1;
 SELECT c.* FROM home_checkpoints c
 WHERE c.org_id = @org_id AND c.agent_id = @agent_id AND c.status = 'complete'
   AND c.epoch <= coalesce((SELECT max(r.epoch) FROM runs r WHERE r.org_id = c.org_id AND r.agent_id = c.agent_id), 0)
+  -- A checkpoint whose repository was deleted is gone.
+  AND NOT EXISTS (SELECT 1 FROM home_repositories h
+                  WHERE h.org_id = c.org_id AND h.agent_id = c.agent_id AND c.repository_epoch = 0 AND h.deleted_at IS NOT NULL)
+  AND NOT EXISTS (SELECT 1 FROM home_repository_epochs e
+                  WHERE e.org_id = c.org_id AND e.agent_id = c.agent_id AND e.repository_epoch = c.repository_epoch
+                    AND e.deleted_at IS NOT NULL)
 ORDER BY c.finished_at DESC, c.id DESC
 LIMIT @max_rows::int;
 
@@ -90,7 +149,7 @@ RETURNING *;
 -- name: CompleteHomeCheckpoint :one
 UPDATE home_checkpoints
 SET status = 'complete', snapshot_id = @snapshot_id, size_bytes = @size_bytes, epoch = @epoch,
-    generation = @generation, error = NULL, finished_at = now()
+    generation = @generation, repository_epoch = @repository_epoch, error = NULL, finished_at = now()
 WHERE org_id = @org_id AND id = @id AND status = 'running'
 RETURNING *;
 

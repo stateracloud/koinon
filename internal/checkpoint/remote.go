@@ -8,6 +8,12 @@ package checkpoint
 // saved-work listener only koinon-agentd may reach. The request is authenticated with an HMAC
 // made with the same key as the saved-work posts, over a domain-separated message, good for
 // one agent for a minute. The password is released to the writer only, and is never logged.
+//
+// A request without an epoch parameter gets the agent's current repository; with one, that
+// repository epoch's (ADR 0085 decision 13), which a restore asks for. The credential covers the
+// agent, whichever of its repositories is asked for, so the token is the same as before epochs
+// existed and either side may be the older one during a rolling upgrade: an older koinon-api
+// answers without an epoch, which is epoch 0, its only one.
 
 import (
 	"context"
@@ -52,6 +58,7 @@ func ValidRepositoryToken(key []byte, token, org, agent string, exp int64, now t
 }
 
 type repositoryReply struct {
+	Epoch    int32  `json:"epoch"`
 	Prefix   string `json:"prefix"`
 	Password string `json:"password"`
 }
@@ -84,6 +91,15 @@ func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad parameters", http.StatusBadRequest)
 		return
 	}
+	epoch, atEpoch := int32(0), q.Has("epoch")
+	if atEpoch {
+		n, err := strconv.ParseInt(q.Get("epoch"), 10, 32)
+		if err != nil || n < 0 {
+			http.Error(w, "bad parameters", http.StatusBadRequest)
+			return
+		}
+		epoch = int32(n)
+	}
 	key, err := s.Key(r.Context())
 	if err != nil {
 		log.Error("home repository: reading the key failed", "err", err)
@@ -95,15 +111,28 @@ func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad credential", http.StatusUnauthorized)
 		return
 	}
-	repo, err := s.Passwords.Get(r.Context(), org, agent)
+	var repo Repository
+	if atEpoch {
+		repo, err = s.Passwords.At(r.Context(), org, agent, epoch)
+	} else {
+		repo, err = s.Passwords.Current(r.Context(), org, agent)
+	}
+	if errors.Is(err, ErrNoRepository) {
+		http.Error(w, "no such repository", http.StatusNotFound)
+		return
+	}
+	if errors.Is(err, ErrRepositoryLost) {
+		http.Error(w, "the repository's password was lost", http.StatusGone)
+		return
+	}
 	if err != nil {
-		log.Error("home repository: opening the password failed", "org", org.String(), "agent", agent.String(), "err", err)
+		log.Error("home repository: opening the password failed", "org", org.String(), "agent", agent.String(), "epoch", epoch, "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(repositoryReply(repo)) //nolint:gosec // the password is the reply: released to the writer only
+	_ = json.NewEncoder(w).Encode(repositoryReply{Epoch: repo.Epoch, Prefix: repo.Prefix, Password: repo.Password}) //nolint:gosec // the password is the reply: released to the writer only
 }
 
 // Remote is the agentd side: it asks koinon-api for each repository, per checkpoint, and keeps
@@ -115,8 +144,17 @@ type Remote struct {
 	Now     func() time.Time
 }
 
-// Get returns the agent's repository.
+// Get returns the agent's current repository.
 func (c Remote) Get(ctx context.Context, org, agent pgtype.UUID) (Repository, error) {
+	return c.ask(ctx, org, agent, nil)
+}
+
+// At returns the agent's repository of the given epoch.
+func (c Remote) At(ctx context.Context, org, agent pgtype.UUID, epoch int32) (Repository, error) {
+	return c.ask(ctx, org, agent, &epoch)
+}
+
+func (c Remote) ask(ctx context.Context, org, agent pgtype.UUID, epoch *int32) (Repository, error) {
 	key, err := c.Key()
 	if err != nil || len(key) == 0 {
 		return Repository{}, errors.New("the key that signs repository requests is unreadable")
@@ -127,6 +165,9 @@ func (c Remote) Get(ctx context.Context, org, agent pgtype.UUID) (Repository, er
 	}
 	exp := now().Add(RepositoryTokenLifetime / 2).Unix()
 	q := url.Values{"org": {org.String()}, "agent": {agent.String()}, "exp": {strconv.FormatInt(exp, 10)}}
+	if epoch != nil {
+		q.Set("epoch", strconv.FormatInt(int64(*epoch), 10))
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(c.BaseURL, "/")+RepositoryPath+"?"+q.Encode(), nil)
 	if err != nil {
 		return Repository{}, err
@@ -142,6 +183,12 @@ func (c Remote) Get(ctx context.Context, org, agent pgtype.UUID) (Repository, er
 	}
 	defer func() { _ = res.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(res.Body, 4<<10))
+	if res.StatusCode == http.StatusNotFound && epoch != nil {
+		return Repository{}, fmt.Errorf("%w: agent %s, epoch %d", ErrNoRepository, agent, *epoch)
+	}
+	if res.StatusCode == http.StatusGone {
+		return Repository{}, fmt.Errorf("%w: agent %s", ErrRepositoryLost, agent)
+	}
 	if res.StatusCode != http.StatusOK {
 		return Repository{}, fmt.Errorf("koinon-api answered %d for the repository of agent %s", res.StatusCode, agent)
 	}
@@ -149,5 +196,9 @@ func (c Remote) Get(ctx context.Context, org, agent pgtype.UUID) (Repository, er
 	if err := json.Unmarshal(body, &out); err != nil || out.Prefix == "" || out.Password == "" {
 		return Repository{}, errors.New("koinon-api answered with an unreadable repository")
 	}
-	return Repository(out), nil
+	if epoch != nil && out.Epoch != *epoch {
+		// An older koinon-api ignores the parameter and answers with epoch 0.
+		return Repository{}, fmt.Errorf("koinon-api answered with repository epoch %d of agent %s, not %d; is it older than this koinon-agentd?", out.Epoch, agent, *epoch)
+	}
+	return Repository{Epoch: out.Epoch, Prefix: out.Prefix, Password: out.Password}, nil
 }
