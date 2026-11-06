@@ -265,6 +265,36 @@ var _ = Describe("koinon-api keys new-repositories", func() {
 		Expect(deadline(other, 0)).To(BeTemporally(">", time.Now().Add(time.Hour)), "another agent's retention is kept")
 	})
 
+	It("skips the epochs whose prefix koinon-agentd found taken, and seeds from the epoch it replaced (#262)", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		a := withRepository(ctx, org)
+		_, _, err := pw.NewEpoch(ctx, org, a, checkpoint.ReasonKeyLost, checkpoint.DefaultRetain) // epoch 1
+		Expect(err).NotTo(HaveOccurred())
+		// After a database restore, r2/ and r3/ hold repositories started after the dump: agentd
+		// raised the floor when it found them (checkpoints resync or a backup into r2/).
+		_, err = pool.Exec(ctx, `UPDATE home_repositories SET next_epoch_at_least = 4 WHERE org_id = $1 AND agent_id = $2`, org, a)
+		Expect(err).NotTo(HaveOccurred())
+
+		compromise(ctx)
+		tool.Yes = true
+		Expect(tool.NewRepositories(ctx, false, []string{a.String()})).To(Succeed())
+		e := latest(ctx, org, a)
+		Expect(e.RepositoryEpoch).To(Equal(int32(4)))
+		Expect(e.Prefix).To(Equal(checkpoint.EpochPrefix(org.String(), a.String(), 4)))
+		Expect(e.SeedFromEpoch).To(Equal(pgtype.Int4{Int32: 1, Valid: true}), "the epoch replaced, not 3, which this database never had")
+		var summary string
+		Expect(pool.QueryRow(ctx, `SELECT summary::text FROM audit_events WHERE action = $1 AND target_id = $2`, keyscli.NewRepositoriesAction, a.String()).Scan(&summary)).To(Succeed())
+		Expect(summary).To(And(ContainSubstring(`"repositoryEpoch": 4`), ContainSubstring(`"seedFromEpoch": 1`)))
+		r, err := pw.At(ctx, org, a, 4)
+		Expect(err).NotTo(HaveOccurred(), "the password is bound to epoch 4")
+		Expect(r.Password).NotTo(BeEmpty())
+
+		By("the next epoch after that follows on: the floor is below it now")
+		Expect(tool.NewRepositories(ctx, false, []string{a.String()})).To(Succeed())
+		Expect(latest(ctx, org, a).RepositoryEpoch).To(Equal(int32(5)))
+		Expect(latest(ctx, org, a).SeedFromEpoch).To(Equal(pgtype.Int4{Int32: 4, Valid: true}))
+	})
+
 	Describe("without a terminal", func() {
 		It("refuses without --yes, because the older checkpoints are dropped", func(ctx SpecContext) {
 			org, _, _ := pgtest.NewOrg(ctx, pool)

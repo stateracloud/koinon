@@ -17,7 +17,9 @@ import (
 
 	"github.com/kopia/kopia/fs/localfs"
 	"github.com/kopia/kopia/repo"
+	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/content"
+	"github.com/kopia/kopia/repo/format"
 	"github.com/kopia/kopia/repo/manifest"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
@@ -97,6 +99,44 @@ type Snapshot struct {
 // ErrNoRepositoryInBucket is returned by Snapshots for a prefix that holds no repository: one
 // that was never backed up into, or a bucket that is not the one the database belongs to.
 var ErrNoRepositoryInBucket = errors.New("checkpoint: the bucket holds no repository at that prefix")
+
+// ErrPrefixTaken is returned when the prefix holds a repository that the password does not open.
+// A repository's prefix follows from the agent and its epoch ([EpochPrefix]), so after a database
+// restore the prefix of a new epoch can hold one started after the dump, whose password only the
+// lost database had (#262). Nothing is written there: Backup does not create a repository over it.
+var ErrPrefixTaken = errors.New("checkpoint: the prefix holds a repository this password does not open")
+
+// PrefixTakenError is [ErrPrefixTaken] for one prefix, so that a caller that opens two
+// repositories (a seed's copy) tells which one it was.
+type PrefixTakenError struct{ Prefix string }
+
+func (e *PrefixTakenError) Error() string { return ErrPrefixTaken.Error() + ": " + e.Prefix }
+
+// Is makes errors.Is(err, ErrPrefixTaken) hold.
+func (e *PrefixTakenError) Is(target error) bool { return target == ErrPrefixTaken }
+
+// TakenPrefix reports whether err is [ErrPrefixTaken] for prefix.
+func TakenPrefix(err error, prefix string) bool {
+	var t *PrefixTakenError
+	return errors.As(err, &t) && t.Prefix == prefix
+}
+
+// HoldsRepository reports whether the bucket holds a repository at prefix (its kopia.repository
+// blob), whatever its password. It creates nothing.
+func (w *Writer) HoldsRepository(ctx context.Context, prefix string) (bool, error) {
+	st, err := w.Storage.Open(ctx, prefix, false)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil // a Dir prefix that was never written
+	} else if err != nil {
+		return false, fmt.Errorf("opening the storage: %w", err)
+	}
+	defer func() { _ = st.Close(ctx) }()
+	_, err = st.GetMetadata(ctx, format.KopiaRepositoryBlobID)
+	if errors.Is(err, blob.ErrBlobNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
 
 // Result is a finished snapshot.
 type Result struct {
@@ -314,6 +354,9 @@ func (w *Writer) open(ctx context.Context, work, prefix, password string, create
 		if err = connect(); err == nil {
 			err = w.setPolicy(ctx, cfg, password)
 		}
+	}
+	if errors.Is(err, repo.ErrInvalidPassword) {
+		return nil, &PrefixTakenError{Prefix: prefix}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("connecting to the repository: %w", err)

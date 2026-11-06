@@ -198,6 +198,10 @@ var _ = Describe("koinon-api keys forget", func() {
 		e3, _, err := pw.NewEpoch(ctx, org, agent3, checkpoint.ReasonKeyLost, checkpoint.DefaultRetain)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 11, nextKEK: 1}))
+		// agent2's r2/ holds a repository this database has no password for (started after a dump
+		// it was restored from): koinon-agentd found it and raised the floor (#262).
+		_, err = pool.Exec(ctx, `UPDATE home_repositories SET next_epoch_at_least = 3 WHERE org_id = $1 AND agent_id = $2`, org, agent2)
+		Expect(err).NotTo(HaveOccurred())
 
 		tool.Yes = true // no terminal: --yes is what lets it run
 		Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
@@ -239,7 +243,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			return e
 		}
 		Expect(latest(agent1).RepositoryEpoch).To(Equal(int32(1)))
-		Expect(latest(agent2).RepositoryEpoch).To(Equal(int32(2)))
+		Expect(latest(agent2).RepositoryEpoch).To(Equal(int32(3)), "r2/ is taken: skipped")
 		Expect(latest(agent3).RepositoryEpoch).To(Equal(int32(1)), "its current repository still opens")
 		for _, a := range []pgtype.UUID{agent1, agent2} {
 			cur, err := pw.Current(ctx, org, a)
@@ -281,7 +285,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(string(e.summary)).NotTo(ContainSubstring("not-a-real-token"))
 			if e.org == org {
 				Expect(string(e.summary)).To(And(ContainSubstring(`"retentionDays": 3`), ContainSubstring("newRepositoryEpochs"),
-					ContainSubstring(checkpoint.EpochRow(agent2.String(), 2))))
+					ContainSubstring(checkpoint.EpochRow(agent2.String(), 3))))
 			}
 		}
 

@@ -311,6 +311,31 @@ var _ = Describe("home repository seeds", func() {
 		Eventually(deleted0(ctx)).WithTimeout(10 * time.Second).Should(BeTrue())
 	})
 
+	It("gives up at once on a seed into a prefix that holds another password's repository, records the free epoch and keeps the source (#262)", func(ctx SpecContext) {
+		newest := backup(ctx, map[string]string{"notes/v.md": "newer home"}, 2*time.Minute)
+		// The new epoch's prefix holds a repository started after the dump the database came from.
+		foreign, err := writer.Backup(ctx, e1, "koinon_test_foreign-1", tarOf(map[string]string{"notes/v.md": "after the dump"}), checkpoint.Meta{CheckpointID: "x"})
+		Expect(err).NotTo(HaveOccurred())
+		newRepositories(ctx)
+		e.pool("agentd-a", cps())
+
+		Eventually(func() bool { return seedRow(ctx)().SeedFailedAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
+		r := seedRow(ctx)()
+		Expect(r.SeedAttempts).To(Equal(int32(1)), "another try cannot help")
+		Expect(r.SeedError.String).To(And(ContainSubstring(e1), ContainSubstring("keys new-repositories --agent "+e.agent.ID.String()), ContainSubstring("free epoch 2")))
+		Expect(r.PrefixTakenAt.Valid).To(BeTrue())
+		var floor pgtype.Int4
+		Expect(db.QueryRow(ctx, `SELECT next_epoch_at_least FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID).Scan(&floor)).To(Succeed())
+		Expect(floor).To(Equal(pgtype.Int4{Int32: 2, Valid: true}))
+		Expect(audited(ctx, agentd.PrefixTakenAction)).To(ConsistOf(ContainSubstring(`"repositoryEpoch": 1`)))
+		Expect(inEpoch1(ctx)).To(BeEmpty())
+
+		By("the source is kept, and so is the repository found")
+		Consistently(deleted0(ctx)).WithTimeout(time.Second).Should(BeFalse())
+		Expect(restored(ctx, e0, pw0, newest.SnapshotID.String)).To(ContainSubstring("newer home"))
+		Expect(restored(ctx, e1, "koinon_test_foreign-1", foreign.SnapshotID)).To(ContainSubstring("after the dump"))
+	})
+
 	It("tries again after a failed try and then records the seed", func(ctx SpecContext) {
 		newest := backup(ctx, map[string]string{"notes/v.md": "newer home"}, 2*time.Minute)
 		newRepositories(ctx)
