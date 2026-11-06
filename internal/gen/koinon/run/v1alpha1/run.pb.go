@@ -552,9 +552,11 @@ type RunEvent struct {
 	// Gap-free and strictly increasing per run, from 1.
 	Seq int64 `protobuf:"varint,2,opt,name=seq,proto3" json:"seq,omitempty"`
 	// For example "session.update" or "run.canceled".
-	Kind          string                 `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
-	Payload       *structpb.Struct       `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Kind      string                 `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	Payload   *structpb.Struct       `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// True when the org's retention has passed and the payload was removed; the event itself stays.
+	ContentPurged bool `protobuf:"varint,6,opt,name=content_purged,json=contentPurged,proto3" json:"content_purged,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -622,6 +624,13 @@ func (x *RunEvent) GetCreatedAt() *timestamppb.Timestamp {
 		return x.CreatedAt
 	}
 	return nil
+}
+
+func (x *RunEvent) GetContentPurged() bool {
+	if x != nil {
+		return x.ContentPurged
+	}
+	return false
 }
 
 // GetRunRequest names a run.
@@ -1201,14 +1210,15 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\x12estimated_requests\x18\x06 \x01(\x03R\x11estimatedRequests\x12*\n" +
 	"\x11cache_read_tokens\x18\a \x01(\x03R\x0fcacheReadTokens\x12,\n" +
 	"\x12cache_write_tokens\x18\b \x01(\x03R\x10cacheWriteTokens\x12)\n" +
-	"\x10reasoning_tokens\x18\t \x01(\x03R\x0freasoningTokens\"\xb5\x01\n" +
+	"\x10reasoning_tokens\x18\t \x01(\x03R\x0freasoningTokens\"\xdc\x01\n" +
 	"\bRunEvent\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x03R\x03seq\x12\x12\n" +
 	"\x04kind\x18\x03 \x01(\tR\x04kind\x121\n" +
 	"\apayload\x18\x04 \x01(\v2\x17.google.protobuf.StructR\apayload\x129\n" +
 	"\n" +
-	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"=\n" +
+	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12%\n" +
+	"\x0econtent_purged\x18\x06 \x01(\bR\rcontentPurged\"=\n" +
 	"\rGetRunRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x15\n" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\"<\n" +

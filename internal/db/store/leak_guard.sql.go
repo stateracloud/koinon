@@ -242,7 +242,7 @@ func (q *Queries) GetLeakGuardSession(ctx context.Context, arg GetLeakGuardSessi
 }
 
 const getLiveRunForAgent = `-- name: GetLiveRunForAgent :one
-SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd, traced, last_turn_seq FROM runs
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd, traced, last_turn_seq, content_purged_at FROM runs
 WHERE org_id = $1 AND agent_id = $2 AND state = 'running'
 `
 
@@ -294,6 +294,7 @@ func (q *Queries) GetLiveRunForAgent(ctx context.Context, arg GetLiveRunForAgent
 		&i.MaxSpendUsd,
 		&i.Traced,
 		&i.LastTurnSeq,
+		&i.ContentPurgedAt,
 	)
 	return i, err
 }

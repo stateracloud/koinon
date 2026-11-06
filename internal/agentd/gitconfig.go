@@ -85,6 +85,32 @@ func (r *runner) codeHost(ctx context.Context) (codeHost, error) {
 	return codeHost{connector: connector, loc: loc, site: site}, nil
 }
 
+// checkCodeHostCredential fails the run at once when the agent's code-host connection lost its
+// stored credential with a key (ADR 0085 decision 13): the reconciler cannot mint the sandbox's
+// token, so waiting for the sandbox would only end in a timeout that does not say why.
+func (r *runner) checkCodeHostCredential(ctx context.Context) error {
+	connector, b, ok := providers.Default().Binding(r.vcfg)
+	if !ok || b.ConnectionID == "" {
+		return nil
+	}
+	var id pgtype.UUID
+	if err := id.Scan(b.ConnectionID); err != nil || !id.Valid {
+		return nil // codeHost reports the bad ID
+	}
+	conn, err := r.q.GetConnection(ctx, store.GetConnectionParams{OrgID: r.run.OrgID, ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the %s connection: %w", connector, err)
+	}
+	if conn.CredentialLostAt.Valid {
+		return &failure{reason: fmt.Sprintf("the stored credential of the %s connection %q was lost; "+
+			"create the connection again on the Connections page and run the task again", connector, conn.DisplayName)}
+	}
+	return nil
+}
+
 // writeGitConfig renders the git configuration of the agent's code host into the sandbox. It is
 // written for the default host too, so a connection moved back to github.com loses the old
 // host's configuration.

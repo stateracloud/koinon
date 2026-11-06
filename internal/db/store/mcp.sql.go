@@ -66,7 +66,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
         COALESCE($15::boolean, true),
         COALESCE($16::boolean, true),
         $17)
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at
 `
 
 type CreateMCPServerParams struct {
@@ -145,6 +145,7 @@ func (q *Queries) CreateMCPServer(ctx context.Context, arg CreateMCPServerParams
 		&i.ExposesUntrustedInput,
 		&i.ExposesPrivateData,
 		&i.CodeHostConnectionID,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -206,7 +207,7 @@ func (q *Queries) GetAgentMCPServer(ctx context.Context, arg GetAgentMCPServerPa
 }
 
 const getMCPServer = `-- name: GetMCPServer :one
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id FROM mcp_servers
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at FROM mcp_servers
 WHERE org_id = $1 AND id = $2
 `
 
@@ -245,6 +246,7 @@ func (q *Queries) GetMCPServer(ctx context.Context, arg GetMCPServerParams) (Mcp
 		&i.ExposesUntrustedInput,
 		&i.ExposesPrivateData,
 		&i.CodeHostConnectionID,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -337,8 +339,8 @@ func (q *Queries) GetMCPToolForUpdate(ctx context.Context, arg GetMCPToolForUpda
 }
 
 const getServedMCPServerByName = `-- name: GetServedMCPServerByName :one
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id FROM mcp_servers
-WHERE org_id = $1 AND name = $2 AND disabled_reason IS NULL AND removed_at IS NULL
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at FROM mcp_servers
+WHERE org_id = $1 AND name = $2 AND disabled_reason IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
 `
 
 type GetServedMCPServerByNameParams struct {
@@ -376,6 +378,7 @@ func (q *Queries) GetServedMCPServerByName(ctx context.Context, arg GetServedMCP
 		&i.ExposesUntrustedInput,
 		&i.ExposesPrivateData,
 		&i.CodeHostConnectionID,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -563,7 +566,7 @@ func (q *Queries) ListAgentsAllowingMCPServer(ctx context.Context, arg ListAgent
 }
 
 const listMCPServers = `-- name: ListMCPServers :many
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id FROM mcp_servers
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at FROM mcp_servers
 WHERE org_id = $1
 ORDER BY name, source, id
 `
@@ -604,6 +607,7 @@ func (q *Queries) ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpS
 			&i.ExposesUntrustedInput,
 			&i.ExposesPrivateData,
 			&i.CodeHostConnectionID,
+			&i.CredentialLostAt,
 		); err != nil {
 			return nil, err
 		}
@@ -616,7 +620,7 @@ func (q *Queries) ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpS
 }
 
 const listMCPServersLinkedToConnectionForUpdate = `-- name: ListMCPServersLinkedToConnectionForUpdate :many
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id FROM mcp_servers
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at FROM mcp_servers
 WHERE org_id = $1 AND code_host_connection_id = $2
 ORDER BY name, id
 FOR UPDATE
@@ -665,6 +669,7 @@ func (q *Queries) ListMCPServersLinkedToConnectionForUpdate(ctx context.Context,
 			&i.ExposesUntrustedInput,
 			&i.ExposesPrivateData,
 			&i.CodeHostConnectionID,
+			&i.CredentialLostAt,
 		); err != nil {
 			return nil, err
 		}
@@ -686,7 +691,7 @@ JOIN orgs o ON o.id = s.org_id
 LEFT JOIN mcp_tools t ON t.org_id = s.org_id AND t.server_id = s.id AND t.present
   AND (a.tools IS NULL OR t.name = ANY(a.tools))
 WHERE a.org_id = $1 AND a.agent_id = $2
-  AND s.disabled_reason IS NULL AND s.removed_at IS NULL AND s.health <> 'unhealthy'
+  AND s.disabled_reason IS NULL AND s.removed_at IS NULL AND s.credential_lost_at IS NULL AND s.health <> 'unhealthy'
 GROUP BY s.id, s.name, o.slug
 ORDER BY s.name
 `
@@ -843,7 +848,7 @@ SELECT s.name, s.health::text AS health, s.health_reason, s.consecutive_failures
 FROM agent_mcp_servers a
 JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
 WHERE a.org_id = $1 AND a.agent_id = $2
-  AND s.disabled_reason IS NULL AND s.removed_at IS NULL
+  AND s.disabled_reason IS NULL AND s.removed_at IS NULL AND s.credential_lost_at IS NULL
   AND (s.health = 'unhealthy' OR (s.health = 'healthy' AND s.consecutive_failures > 0))
 ORDER BY s.name
 `
@@ -861,7 +866,7 @@ type ListMissingMCPServersOfAgentRow struct {
 }
 
 // The servers an agent may use that Koinon has found not serving tools right now, and has not
-// withdrawn on purpose (a disabled or removed server is only mentioned in the note, see
+// withdrawn on purpose (a disabled, removed or credential-lost server is only mentioned in the note, see
 // ListUnavailableMCPServersOfAgent): unhealthy, or failing probes that have not yet reached the
 // threshold, which is what a server overloaded for a minute looks like (issue koinon-private#326). agentd checks
 // this before it starts the harness; a server never probed (unknown) is not a miss.
@@ -891,12 +896,13 @@ func (q *Queries) ListMissingMCPServersOfAgent(ctx context.Context, arg ListMiss
 }
 
 const listServedMCPServers = `-- name: ListServedMCPServers :many
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id FROM mcp_servers
-WHERE org_id = $1 AND disabled_reason IS NULL AND removed_at IS NULL
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at FROM mcp_servers
+WHERE org_id = $1 AND disabled_reason IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
 ORDER BY name
 `
 
-// Enabled servers, for the gateway and the prober.
+// Enabled servers, for the gateway and the prober. A server whose credential was lost (#85) is not
+// served until the credential is entered again.
 func (q *Queries) ListServedMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpServer, error) {
 	rows, err := q.db.Query(ctx, listServedMCPServers, orgID)
 	if err != nil {
@@ -933,6 +939,7 @@ func (q *Queries) ListServedMCPServers(ctx context.Context, orgID pgtype.UUID) (
 			&i.ExposesUntrustedInput,
 			&i.ExposesPrivateData,
 			&i.CodeHostConnectionID,
+			&i.CredentialLostAt,
 		); err != nil {
 			return nil, err
 		}
@@ -945,11 +952,12 @@ func (q *Queries) ListServedMCPServers(ctx context.Context, orgID pgtype.UUID) (
 }
 
 const listUnavailableMCPServersOfAgent = `-- name: ListUnavailableMCPServersOfAgent :many
-SELECT s.name, s.health::text AS health, s.health_reason, s.disabled_reason
+SELECT s.name, s.health::text AS health, s.health_reason, s.disabled_reason,
+       (s.credential_lost_at IS NOT NULL)::boolean AS credential_lost
 FROM agent_mcp_servers a
 JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
 WHERE a.org_id = $1 AND a.agent_id = $2
-  AND (s.health = 'unhealthy' OR s.disabled_reason IS NOT NULL OR s.removed_at IS NOT NULL)
+  AND (s.health = 'unhealthy' OR s.disabled_reason IS NOT NULL OR s.removed_at IS NOT NULL OR s.credential_lost_at IS NOT NULL)
 ORDER BY s.name
 `
 
@@ -963,10 +971,11 @@ type ListUnavailableMCPServersOfAgentRow struct {
 	Health         string
 	HealthReason   pgtype.Text
 	DisabledReason pgtype.Text
+	CredentialLost bool
 }
 
 // The servers an agent may use that are down or disabled right now, for the note agentd gives the
-// agent when a session starts.
+// agent when a session starts. credential_lost: its credential was lost (#85), so it is not served.
 func (q *Queries) ListUnavailableMCPServersOfAgent(ctx context.Context, arg ListUnavailableMCPServersOfAgentParams) ([]ListUnavailableMCPServersOfAgentRow, error) {
 	rows, err := q.db.Query(ctx, listUnavailableMCPServersOfAgent, arg.OrgID, arg.AgentID)
 	if err != nil {
@@ -981,6 +990,7 @@ func (q *Queries) ListUnavailableMCPServersOfAgent(ctx context.Context, arg List
 			&i.Health,
 			&i.HealthReason,
 			&i.DisabledReason,
+			&i.CredentialLost,
 		); err != nil {
 			return nil, err
 		}
@@ -1047,7 +1057,7 @@ SET consecutive_failures = CASE WHEN $1::boolean THEN 0 ELSE consecutive_failure
     health_checked_at = now(),
     tools_synced_at = CASE WHEN $1::boolean AND $4::boolean THEN now() ELSE tools_synced_at END
 WHERE org_id = $5 AND id = $6
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at
 `
 
 type RecordMCPServerProbeParams struct {
@@ -1098,6 +1108,7 @@ func (q *Queries) RecordMCPServerProbe(ctx context.Context, arg RecordMCPServerP
 		&i.ExposesUntrustedInput,
 		&i.ExposesPrivateData,
 		&i.CodeHostConnectionID,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -1180,7 +1191,7 @@ SET kind = $1, exposes_untrusted_input = $2,
     exposes_private_data = $3,
     code_host_connection_id = $4
 WHERE org_id = $5 AND id = $6
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at
 `
 
 type SetMCPServerDataClassParams struct {
@@ -1231,6 +1242,7 @@ func (q *Queries) SetMCPServerDataClass(ctx context.Context, arg SetMCPServerDat
 		&i.ExposesUntrustedInput,
 		&i.ExposesPrivateData,
 		&i.CodeHostConnectionID,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -1452,7 +1464,7 @@ const updateDeclaredMCPServer = `-- name: UpdateDeclaredMCPServer :one
 UPDATE mcp_servers
 SET url = $1, transport = $2, credential_header = $3,
     credential_prefix = $4, credential = $5,
-    declared_version = $6, removed_at = NULL, disabled_reason = NULL,
+    declared_version = $6, removed_at = NULL, disabled_reason = NULL, credential_lost_at = NULL,
     -- A new URL is a different server: its data class goes back to the cautious default (kind other,
     -- both legs), so a class declared for the old endpoint cannot narrow the guard for the new one (ADR 0084).
     kind = CASE WHEN url IS DISTINCT FROM $1 THEN 'other'::mcp_server_kind ELSE kind END,
@@ -1463,7 +1475,7 @@ SET url = $1, transport = $2, credential_header = $3,
     code_host_connection_id = CASE WHEN url IS DISTINCT FROM $1 THEN NULL ELSE code_host_connection_id END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
 WHERE org_id = $7 AND id = $8 AND source = 'secret'
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at
 `
 
 type UpdateDeclaredMCPServerParams struct {
@@ -1516,6 +1528,7 @@ func (q *Queries) UpdateDeclaredMCPServer(ctx context.Context, arg UpdateDeclare
 		&i.ExposesUntrustedInput,
 		&i.ExposesPrivateData,
 		&i.CodeHostConnectionID,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }
@@ -1523,9 +1536,10 @@ func (q *Queries) UpdateDeclaredMCPServer(ctx context.Context, arg UpdateDeclare
 const updateMCPServer = `-- name: UpdateMCPServer :one
 UPDATE mcp_servers
 SET url = $1, transport = $2,
-    credential_header = CASE WHEN $3::boolean THEN $4 ELSE credential_header END,
-    credential_prefix = CASE WHEN $3::boolean THEN $5 ELSE credential_prefix END,
-    credential = CASE WHEN $6::boolean THEN $7 ELSE credential END,
+    credential_lost_at = CASE WHEN $3::boolean THEN NULL ELSE credential_lost_at END,
+    credential_header = CASE WHEN $4::boolean THEN $5 ELSE credential_header END,
+    credential_prefix = CASE WHEN $4::boolean THEN $6 ELSE credential_prefix END,
+    credential = CASE WHEN $3::boolean THEN $7 ELSE credential END,
     -- A new URL is a different server: its data class goes back to the cautious default (kind other,
     -- both legs), so a class declared for the old endpoint cannot narrow the guard for the new one (ADR 0084).
     kind = CASE WHEN url IS DISTINCT FROM $1 THEN 'other'::mcp_server_kind ELSE kind END,
@@ -1536,16 +1550,16 @@ SET url = $1, transport = $2,
     code_host_connection_id = CASE WHEN url IS DISTINCT FROM $1 THEN NULL ELSE code_host_connection_id END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
 WHERE org_id = $8 AND id = $9
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at
 `
 
 type UpdateMCPServerParams struct {
 	Url               string
 	Transport         McpTransport
+	SetCredential     bool
 	SetCredentialMeta bool
 	CredentialHeader  pgtype.Text
 	CredentialPrefix  string
-	SetCredential     bool
 	Credential        []byte
 	OrgID             pgtype.UUID
 	ID                pgtype.UUID
@@ -1557,15 +1571,17 @@ type UpdateMCPServerParams struct {
 // envelope since, so writing back the envelope that was read would undo it. credential_header and
 // credential_prefix go with it: they are written only when @set_credential_meta is true (the patch
 // touches the credential at all), so a URL-only patch cannot pair a concurrent change's envelope with
-// stale metadata, or break the CHECK that ties header and envelope together.
+// stale metadata, or break the CHECK that ties header and envelope together. Setting or removing
+// the credential ends a lost one (#85): the trigger credential_lost_clear covers a stored credential,
+// this a removed one.
 func (q *Queries) UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams) (McpServer, error) {
 	row := q.db.QueryRow(ctx, updateMCPServer,
 		arg.Url,
 		arg.Transport,
+		arg.SetCredential,
 		arg.SetCredentialMeta,
 		arg.CredentialHeader,
 		arg.CredentialPrefix,
-		arg.SetCredential,
 		arg.Credential,
 		arg.OrgID,
 		arg.ID,
@@ -1598,6 +1614,7 @@ func (q *Queries) UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams
 		&i.ExposesUntrustedInput,
 		&i.ExposesPrivateData,
 		&i.CodeHostConnectionID,
+		&i.CredentialLostAt,
 	)
 	return i, err
 }

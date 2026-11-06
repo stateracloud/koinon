@@ -125,6 +125,9 @@ type Provider struct {
 	DisabledReason  string `json:"disabledReason,omitempty"`
 	// Removed is set when the declaring Secret was deleted.
 	Removed bool `json:"removed,omitempty"`
+	// CredentialLostAt is set when the API key was lost with the KEK that encrypted it (keys forget,
+	// ADR 0085 decision 13): the provider is not served until the key is entered again.
+	CredentialLostAt *time.Time `json:"credentialLostAt,omitempty"`
 	// AnthropicWorkspaceID is the workspace the gateway names for the provider's models (type
 	// anthropic only). An identifier, not a credential.
 	AnthropicWorkspaceID string `json:"anthropicWorkspaceId,omitempty"`
@@ -201,8 +204,16 @@ func toProvider(p store.Provider) Provider {
 		ID: p.ID.String(), Name: p.Name, Type: p.Type, URL: p.Url, HasKey: len(p.ApiKey) > 0,
 		AnthropicWorkspaceID: p.AnthropicWorkspaceID.String, Formats: offered,
 		Source: string(p.Source), ManagedBySecret: p.ManagedBySecret.String, DisabledReason: p.DisabledReason.String,
-		Removed: p.RemovedAt.Valid, CreatedAt: p.CreatedAt.Time, UpdatedAt: p.UpdatedAt.Time,
+		Removed: p.RemovedAt.Valid, CredentialLostAt: optTime(p.CredentialLostAt), CreatedAt: p.CreatedAt.Time, UpdatedAt: p.UpdatedAt.Time,
 	}
+}
+
+// optTime is t, or nil when it is NULL.
+func optTime(t pgtype.Timestamptz) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	return &t.Time
 }
 
 func toModel(m store.Model) Model {

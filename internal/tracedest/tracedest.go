@@ -55,6 +55,9 @@ var (
 	ErrNotMember = errors.New("only a member of the org can raise its trace content level or the platform copy")
 	// ErrAboveCeiling means the level is above what the platform allows.
 	ErrAboveCeiling = errors.New("the content level is above the platform ceiling")
+	// ErrCredentialLost means the stored credentials were lost with a key (ADR 0085 decision 13):
+	// there is nothing to test until they are entered again.
+	ErrCredentialLost = &InvalidError{Msg: "the destination's credentials were lost; enter them again and save"}
 )
 
 // InvalidError is a validation failure.
@@ -179,6 +182,9 @@ type Destination struct {
 	Enabled            bool
 	LastTest           *TestResult
 	Health             Health
+	// CredentialLostAt is set when the stored credentials were lost with a key (ADR 0085 decision
+	// 13): nothing is exported to the destination until they are entered again.
+	CredentialLostAt *time.Time
 	// ConfigVersion changes with every change of the configuration and with nothing the router records.
 	ConfigVersion int64
 	CreatedAt     time.Time
@@ -429,6 +435,7 @@ func toDestination(d store.TraceDestination) Destination {
 		Enabled: d.Enabled, LastTest: toTest(d.LastTestAt, d.LastTestOk, d.LastTestMessage),
 		Health:        Health{LastSuccessAt: optTime(d.LastSuccessAt), LastErrorAt: optTime(d.LastErrorAt), LastError: d.LastError.String, SpansDropped: d.SpansDropped},
 		ConfigVersion: d.ConfigVersion, CreatedAt: d.CreatedAt.Time, UpdatedAt: d.UpdatedAt.Time,
+		CredentialLostAt: optTime(d.CredentialLostAt),
 	}
 }
 
@@ -439,6 +446,7 @@ func toPlatform(d store.PlatformTraceDestination) Destination {
 		LastTest:      toTest(d.LastTestAt, d.LastTestOk, d.LastTestMessage),
 		Health:        Health{LastSuccessAt: optTime(d.LastSuccessAt), LastErrorAt: optTime(d.LastErrorAt), LastError: d.LastError.String, SpansDropped: d.SpansDropped},
 		ConfigVersion: d.ConfigVersion, UpdatedAt: d.UpdatedAt.Time,
+		CredentialLostAt: optTime(d.CredentialLostAt),
 	}
 }
 
@@ -654,6 +662,9 @@ func (s *Service) Test(ctx context.Context, org pgtype.UUID, actor audit.Actor, 
 	cur, err := s.row(ctx, store.New(s.pool), org, id)
 	if err != nil {
 		return Destination{}, export.Outcome{}, err
+	}
+	if cur.CredentialLostAt.Valid {
+		return Destination{}, export.Outcome{}, ErrCredentialLost
 	}
 	secrets, err := s.open(cur.Credentials, Binding(org, cur.ID))
 	if err != nil {

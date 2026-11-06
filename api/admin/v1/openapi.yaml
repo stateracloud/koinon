@@ -32,6 +32,7 @@ tags:
   - name: models
   - name: mcp
   - name: leak-guard
+  - name: org-settings
   - name: tokens
   - name: prices
   - name: budgets
@@ -515,6 +516,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DefaultModel"
+        default:
+          $ref: "#/components/responses/Error"
+  /run-content-retention:
+    get:
+      tags: [org-settings]
+      operationId: getRunContentRetention
+      summary: How long a finished run's stored content is kept (issue #69), with the default and bounds.
+      responses:
+        "200":
+          description: The retention.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunContentRetention"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [org-settings]
+      operationId: setRunContentRetention
+      summary: Set the retention in days, or return it to the default (30) by leaving `days` out. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunContentRetentionSettings"
+      responses:
+        "200":
+          description: The retention.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunContentRetention"
         default:
           $ref: "#/components/responses/Error"
   /leak-guard:
@@ -1071,6 +1105,12 @@ components:
         hasKey:
           type: boolean
           description: Whether an API key is stored. The key itself is never returned.
+        credentialLostAt:
+          type: string
+          format: date-time
+          description: >-
+            Set when the API key was lost with the key that encrypted it (`koinon-api keys forget`):
+            the provider is not served until the key is entered again.
         anthropicWorkspaceId:
           type: string
           example: wrkspc_01AbCdEf
@@ -1267,6 +1307,12 @@ components:
         hasCredential:
           type: boolean
           description: Whether a credential is stored. The credential itself is never returned.
+        credentialLostAt:
+          type: string
+          format: date-time
+          description: >-
+            Set when the credential was lost with the key that encrypted it (`koinon-api keys forget`):
+            the server is not served until the credential is entered again.
         credentialHeader: {type: string, example: Authorization}
         credentialPrefix: {type: string, example: "Bearer "}
         source: {$ref: "#/components/schemas/Source"}
@@ -1384,6 +1430,24 @@ components:
         resultPrivateData:
           type: boolean
           description: The tool's results carry data the org does not want to leave. Leave out for the server's own leg.
+    RunContentRetention:
+      type: object
+      required: [days, defaultDays, minDays, maxDays]
+      description: >-
+        Once a finished run is older than `days`, the purge job blanks the payload of its content events
+        (messages, thoughts and tool calls) and strips the text from prompt, permission and refusal events,
+        whose state fields stay. Other events, the run's status, traces and the spend ledger stay.
+      properties:
+        days: {type: integer}
+        defaultDays: {type: integer}
+        minDays: {type: integer}
+        maxDays: {type: integer}
+    RunContentRetentionSettings:
+      type: object
+      properties:
+        days:
+          type: integer
+          description: Days to keep a finished run's content. Leave out for the default (30).
     LeakGuardSettings:
       type: object
       properties:

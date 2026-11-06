@@ -132,6 +132,7 @@ type Querier interface {
 	// Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
 	// no org-owned row, so it takes no @org_id.
 	CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error)
+	// A destination whose credentials were lost (#85) receives nothing, so it does not count.
 	CountEnabledTraceDestinations(ctx context.Context, orgID pgtype.UUID) (int64, error)
 	CountLeakGuardFingerprints(ctx context.Context, arg CountLeakGuardFingerprintsParams) (int64, error)
 	// Questions of the run that still wait for a person (asked or open).
@@ -410,6 +411,7 @@ type Querier interface {
 	// koinon-agentd, before a run starts its harness: the org's enabled model of this name, its
 	// provider and whether the gateway serves it (gateway_served_models). Enabled models have unique
 	// names in an org (a declared one disables a UI one of the same name), so there is one at most.
+	// credential_lost: the provider's key was lost (#85), so it is not served until entered again.
 	GetModelServing(ctx context.Context, arg GetModelServingParams) (GetModelServingRow, error)
 	GetOpenHomeCheckpoint(ctx context.Context, arg GetOpenHomeCheckpointParams) (HomeCheckpoint, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -650,7 +652,7 @@ type Querier interface {
 	ListMCPTools(ctx context.Context, orgID pgtype.UUID) ([]McpTool, error)
 	ListMCPToolsOfServer(ctx context.Context, arg ListMCPToolsOfServerParams) ([]McpTool, error)
 	// The servers an agent may use that Koinon has found not serving tools right now, and has not
-	// withdrawn on purpose (a disabled or removed server is only mentioned in the note, see
+	// withdrawn on purpose (a disabled, removed or credential-lost server is only mentioned in the note, see
 	// ListUnavailableMCPServersOfAgent): unhealthy, or failing probes that have not yet reached the
 	// threshold, which is what a server overloaded for a minute looks like (issue koinon-private#326). agentd checks
 	// this before it starts the harness; a server never probed (unknown) is not a miss.
@@ -753,11 +755,17 @@ type Querier interface {
 	ListRunModelCalls(ctx context.Context, arg ListRunModelCallsParams) ([]ListRunModelCallsRow, error)
 	ListRunTurns(ctx context.Context, arg ListRunTurnsParams) ([]RunTurn, error)
 	ListRunsForTask(ctx context.Context, arg ListRunsForTaskParams) ([]Run, error)
-	// Every enabled provider of the org with its enabled models, for the gateway.
+	// Finished runs of the org that finished before @cutoff and whose content the purge has not
+	// cleared yet (issue #69), oldest first and after the (finished_at, id) keyset the caller passes
+	// (the epoch and the nil UUID to start). It reads runs_content_unpurged only, never run_events.
+	ListRunsToPurgeContent(ctx context.Context, arg ListRunsToPurgeContentParams) ([]ListRunsToPurgeContentRow, error)
+	// Every enabled provider of the org with its enabled models, for the gateway. A provider whose key
+	// was lost (#85) is not served until the key is entered again.
 	ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]ListServedCatalogRow, error)
-	// Enabled servers, for the gateway and the prober.
+	// Enabled servers, for the gateway and the prober. A server whose credential was lost (#85) is not
+	// served until the credential is entered again.
 	ListServedMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpServer, error)
-	// Enabled providers (with or without models), for key delivery.
+	// Enabled providers (with or without models), for key delivery; not those whose key was lost.
 	ListServedProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
 	ListSpendEntryRevisions(ctx context.Context, arg ListSpendEntryRevisionsParams) ([]SpendEntryRevision, error)
 	// The timeline after a sequence number (0 for the start), in order.
@@ -780,7 +788,7 @@ type Querier interface {
 	// the turns of a run. Every query on an org-owned table takes @org_id (TestQueriesAreOrgScoped).
 	ListTraceDestinations(ctx context.Context, orgID pgtype.UUID) ([]TraceDestination, error)
 	// The servers an agent may use that are down or disabled right now, for the note agentd gives the
-	// agent when a session starts.
+	// agent when a session starts. credential_lost: its credential was lost (#85), so it is not served.
 	ListUnavailableMCPServersOfAgent(ctx context.Context, arg ListUnavailableMCPServersOfAgentParams) ([]ListUnavailableMCPServersOfAgentRow, error)
 	// A run's requests whose outcome the agent has not been sent yet.
 	ListUndeliveredApprovalRequestsForRun(ctx context.Context, arg ListUndeliveredApprovalRequestsForRunParams) ([]ApprovalRequest, error)
@@ -836,6 +844,9 @@ type Querier interface {
 	MarkQuestionReminded(ctx context.Context, arg MarkQuestionRemindedParams) (int64, error)
 	// Records that the outcomes were sent to the agent.
 	MarkQuestionsDelivered(ctx context.Context, arg MarkQuestionsDeliveredParams) (int64, error)
+	// Marks a finished run as purged once none of its content events carries content, so later passes
+	// skip it. A row still locked by another purger leaves the run unmarked; the next pass finishes it.
+	MarkRunContentPurged(ctx context.Context, arg MarkRunContentPurgedParams) (int64, error)
 	// starting -> running once the harness session is ready.
 	MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) (Run, error)
 	// Records when the run started waiting for its sandbox, once per wait (the first requeue keeps it).
@@ -872,6 +883,14 @@ type Querier interface {
 	// The same for an org whose model objects the gateway rejected: nothing new is recorded, rows of
 	// models the state no longer serves are removed.
 	PruneGatewayServedModels(ctx context.Context, arg PruneGatewayServedModelsParams) error
+	// Blanks the payload of up to @batch_size content events (@kinds: messages, thoughts, tool calls)
+	// of one run (issue #69). The row stays, so the run page keeps its skeleton and seq stays gap-free;
+	// only the payload goes and content_purged_at says when. A kind that is a key of @strip (a JSON
+	// object of kind -> content keys) loses only those keys and keeps its state fields (run.prompt keeps
+	// throughSeq, acp.permission keeps decision). Events of other kinds (state, park, cost notes) keep
+	// their payload. Rows are locked with SKIP LOCKED, so two purgers never
+	// wait for each other. Rows 0: nothing left to blank in this run.
+	PurgeRunEventContent(ctx context.Context, arg PurgeRunEventContentParams) (int64, error)
 	// A tool turned two-approver on after the request was recorded: the pending request needs two too.
 	RaiseApprovalsRequired(ctx context.Context, arg RaiseApprovalsRequiredParams) (ApprovalRequest, error)
 	// Records the observed sandbox. started_at and stopped_at are stamped on the
@@ -1013,6 +1032,9 @@ type Querier interface {
 	SetOrgMonthlyCap(ctx context.Context, arg SetOrgMonthlyCapParams) (SetOrgMonthlyCapRow, error)
 	// Sets or clears (NULL) the platform ceiling of an org, keeping its monthly cap.
 	SetOrgPlatformCeiling(ctx context.Context, arg SetOrgPlatformCeilingParams) (SetOrgPlatformCeilingRow, error)
+	// How many days a finished run's stored content is kept (issue #69); NULL is the platform default.
+	// It touches only this column, so the latency and limit overrides stay.
+	SetOrgRunContentRetention(ctx context.Context, arg SetOrgRunContentRetentionParams) error
 	SetPlatformTraceCeiling(ctx context.Context, arg SetPlatformTraceCeilingParams) (PlatformTraceSetting, error)
 	// Records the result of a re-test, only if the configuration is the one that was tested. A deleted
 	// destination matches nothing and is not brought back.
@@ -1093,7 +1115,9 @@ type Querier interface {
 	// envelope since, so writing back the envelope that was read would undo it. credential_header and
 	// credential_prefix go with it: they are written only when @set_credential_meta is true (the patch
 	// touches the credential at all), so a URL-only patch cannot pair a concurrent change's envelope with
-	// stale metadata, or break the CHECK that ties header and envelope together.
+	// stale metadata, or break the CHECK that ties header and envelope together. Setting or removing
+	// the credential ends a lost one (#85): the trigger credential_lost_clear covers a stored credential,
+	// this a removed one.
 	UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams) (McpServer, error)
 	// The server published a different description or schema for a known tool: remember it and flag
 	// the tool for review. An auto tool drops to ask until an admin reviews it; ask and never stay.
@@ -1101,11 +1125,15 @@ type Querier interface {
 	UpdateModel(ctx context.Context, arg UpdateModelParams) (Model, error)
 	// api_key is written only when @set_api_key is true (the patch sets it): the caller read the row
 	// without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the envelope since.
+	// Setting the key, or removing it, ends a lost key (#85): the trigger credential_lost_clear covers
+	// a stored key, this a removed one.
 	UpdateProvider(ctx context.Context, arg UpdateProviderParams) (Provider, error)
 	// Replaces the settings of a destination. Applies only to the version the caller read
 	// (@expected_version), so two admins editing at once do not overwrite each other's secrets, and bumps
 	// config_version. @set_test says the change was tested and the test columns are recorded; otherwise the
-	// previous test result stays. The router's health columns stay.
+	// previous test result stays. The router's health columns stay. A tested change ends lost credentials
+	// (#85): it carried every secret the backend needs (the trigger credential_lost_clear also clears the
+	// mark when credentials are stored).
 	UpdateTraceDestination(ctx context.Context, arg UpdateTraceDestinationParams) (TraceDestination, error)
 	// One connection's repositories, from parallel arrays (owner, repo and visibility at the same index).
 	UpsertCodeHostRepos(ctx context.Context, arg UpsertCodeHostReposParams) (int64, error)

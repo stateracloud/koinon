@@ -213,8 +213,13 @@ export type ServerFormState = {
 }
 
 /** initialMode is the credential mode a stored credential's header and prefix correspond to. */
+/** hadCredential: a credential is stored, or was and was lost with a key (its header and prefix stay). */
+function hadCredential(s?: Server): s is Server {
+  return !!s && (s.hasCredential || !!s.credentialLostAt)
+}
+
 export function initialMode(s?: Server): CredentialMode {
-  if (!s?.hasCredential) return 'none'
+  if (!hadCredential(s)) return 'none'
   return s.credentialHeader.toLowerCase() === bearerHeader.toLowerCase() && s.credentialPrefix === bearerPrefix ? 'bearer' : 'custom'
 }
 
@@ -224,7 +229,7 @@ export function initialForm(s?: Server): ServerFormState {
     url: s?.url ?? '',
     transport: s?.transport || 'streamable-http',
     mode: initialMode(s),
-    header: s?.hasCredential && initialMode(s) === 'custom' ? s.credentialHeader : '',
+    header: hadCredential(s) && initialMode(s) === 'custom' ? s.credentialHeader : '',
     value: '',
     removeCredential: false,
     kind: s?.kind || defaultKind,
@@ -296,7 +301,7 @@ export function buildUpdateRequest(s: Server, f: ServerFormState): UpdateServerI
   if (f.url.trim() !== s.url) out.url = f.url.trim()
   if (f.transport !== s.transport) out.transport = f.transport
   if (f.removeCredential || f.mode === 'none') {
-    if (s.hasCredential) out.removeCredential = true
+    if (hadCredential(s)) out.removeCredential = true
     return out
   }
   const c = credentialParts(f)

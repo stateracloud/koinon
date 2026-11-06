@@ -90,7 +90,8 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 				}
 			}
 		}
-		if cur != nil && cur.DeclaredVersion.String == d.Version && !cur.RemovedAt.Valid {
+		// A lost key (keys forget) is written again from the Secret, which still holds it.
+		if cur != nil && cur.DeclaredVersion.String == d.Version && !cur.RemovedAt.Valid && !cur.CredentialLostAt.Valid {
 			return nil
 		}
 		if err := q.ShadowUIProviders(ctx, store.ShadowUIProvidersParams{OrgID: org, Name: d.Name, Reason: pgtype.Text{String: ReasonShadowedProvider, Valid: true}}); err != nil {
