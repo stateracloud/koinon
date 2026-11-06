@@ -273,7 +273,9 @@ postgres:
 gateway:
   # The gateway modes are decided in ADR 0049 and ADR 0058.
   # standalone: the chart installs agentgateway, configured by the reconciler.
-  # kubernetes: use an existing agentgateway controller (v1.7.x, with its CRDs, and a GatewayClass).
+  # kubernetes: FROZEN (ADR 0097 decision 4, issue #274). It keeps passing the gateway behaviour suite
+  # and gets no new features; it is deleted with agentgateway in ADR 0097 step 3 (v0.3). Do not add values for it.
+  # Use an existing agentgateway controller (v1.7.x, with its CRDs, and a GatewayClass).
   # The chart renders no gateway; the reconciler creates Koinon's own Gateway, AgentgatewayModels,
   # AgentgatewayPolicies, AgentgatewayBackend, HTTPRoute and key ConfigMaps in this namespace and never
   # touches other gateways (plan item G2). There is no fallback to standalone: the install preflight

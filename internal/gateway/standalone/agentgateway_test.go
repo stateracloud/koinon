@@ -123,9 +123,10 @@ func startStandalone(ctx context.Context, hostPorts []int, files map[string]stri
 // The G1 suite (internal/gateway/gatewaytest), shared with the Kubernetes driver.
 var _ = func() bool {
 	gatewaytest.Register(gatewaytest.Env{
-		Name:    "standalone",
-		Host:    testcontainers.HostInternal,
-		KeyFile: func(name string) string { return "/secrets/upstream/" + name },
+		Name:      "standalone",
+		KnownGaps: gatewaytest.AgentgatewayV170Gaps,
+		Host:      testcontainers.HostInternal,
+		KeyFile:   func(name string) string { return "/secrets/upstream/" + name },
 		Start: func(ctx context.Context, ports []int, files map[string]string, guardURL string) (*gatewaytest.Gateway, error) {
 			r, err := startStandalone(ctx, ports, files, guardURL)
 			if err != nil {

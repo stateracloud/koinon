@@ -3,7 +3,11 @@
 - Status: Accepted; amended 2026-10-25 and 2026-10-26 (below)
 - Date: 2026-10-23
 - Amends: [0049](0049-v01-scope-decisions.md) (the two gateway modes become three)
-- Delivery: standalone and kubernetes (plan item G2, built 2026-10-25) in v0.1; shared in v0.2.
+- Note (2026-11-06, [0097](0097-koinon-owned-gateway.md) decision 4, #274): **kubernetes mode is
+  frozen.** It keeps passing the gateway behaviour suite and gets no new features; it is deleted with
+  agentgateway in ADR 0097 step 3 (v0.3). Shared mode is not built.
+- Delivery: standalone and kubernetes (plan item G2, built 2026-10-25) in v0.1. ~~shared in v0.2~~
+  (2026-11-06: shared is not built, [0097](0097-koinon-owned-gateway.md) decision 4).
 
 ## Context
 

@@ -69,6 +69,9 @@ type Env struct {
 	// marker contract (gateway.DoNotRetry) holds for every other refusal; a consumer treats these as
 	// final by their status.
 	Unmarked []string
+	// KnownGaps maps an issue ("#N") to why this driver's gateway fails the cases wrapped in
+	// [KnownGap] for it. A gateway without the gap leaves it out and the case runs plainly.
+	KnownGaps map[string]string
 }
 
 // Gateway is a started gateway under test.
@@ -78,6 +81,10 @@ type Gateway struct {
 	URL string
 	// Logs returns the gateway's recent log, for failure reports. Optional.
 	Logs func(ctx context.Context) string
+	// Observe returns what the gateway recorded about the requests of one key (Key.ID), oldest
+	// first. Optional: when nil the specs read it from Logs as agentgateway's access log
+	// ([ObservedFromAgentgatewayLog]); a gateway of Koinon's own sets it to read its usage record.
+	Observe func(ctx context.Context, keyID string) ([]Observed, error)
 	// Stop tears the gateway down. Optional.
 	Stop func(ctx context.Context) error
 }
@@ -97,6 +104,10 @@ func Register(env Env) {
 	mcpServersSpec(env)
 	loneTargetSpec(env)
 	guardSpec(env)
+	usageSpec(env)
+	mcpKindSpec(env)
+	budgetOvershootSpec(env)
+	revisionSpec(env)
 }
 
 func llmSpec(env Env) {

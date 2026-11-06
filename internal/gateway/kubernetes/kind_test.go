@@ -260,9 +260,10 @@ func (g *kubeGateway) proxyPods(ctx context.Context) []corev1.Pod {
 
 var _ = func() bool {
 	gatewaytest.Register(gatewaytest.Env{
-		Name:    "kubernetes",
-		Host:    func() string { return os.Getenv(envHost) }(),
-		KeyFile: func(name string) string { return "/provider-keys/" + name },
+		Name:      "kubernetes",
+		KnownGaps: gatewaytest.AgentgatewayV170Gaps,
+		Host:      func() string { return os.Getenv(envHost) }(),
+		KeyFile:   func(name string) string { return "/provider-keys/" + name },
 		// The key stage answers before any response policy runs (koinon-private#342).
 		Unmarked: []string{gatewaytest.RefusalLLMKey, gatewaytest.RefusalMCPKey},
 		Start: func(ctx context.Context, ports []int, files map[string]string, guardURL string) (*gatewaytest.Gateway, error) {
