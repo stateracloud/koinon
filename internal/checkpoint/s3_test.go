@@ -91,9 +91,15 @@ var _ = Describe("Writer on S3", Ordered, func() {
 		mc, err := minio.New(fmt.Sprintf("%s:%s", host, port.Port()), &minio.Options{Creds: credentials.NewStaticV4(s3.AccessKeyID, s3.SecretAccessKey, "")})
 		Expect(err).NotTo(HaveOccurred())
 		// The port answers before the S3 gateway, the filer and the volume servers are ready
-		// (koinon-private#37). Wait on real S3 calls succeeding, a bucket create and an object
+		// (#37). Wait on real S3 calls succeeding, a bucket create and an object
 		// write/read/delete, not on the bare port.
-		Eventually(func() error { return s3Ready(sctx, mc, s3.Bucket, s3.Region) }, 2*time.Minute, time.Second).Should(Succeed())
+		// Each attempt has its own deadline, so a hung call (a half-open connection after a reset)
+		// cannot stall Eventually past its window.
+		Eventually(func() error {
+			actx, cancel := context.WithTimeout(sctx, 10*time.Second)
+			defer cancel()
+			return s3Ready(actx, mc, s3.Bucket, s3.Region)
+		}, 2*time.Minute, time.Second).Should(Succeed())
 	})
 
 	It("backs up, restores and verifies through the S3 client", func() {
