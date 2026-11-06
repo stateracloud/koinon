@@ -34,12 +34,13 @@
 #              a workflow run that is still queued has no jobs yet, so its required checks are missing
 #              from the rollup (`waiting for required checks not on the head yet: ci,...`, koinon-private#562).
 #              A draft PR is never green (koinon-private#647): with --checks, `isDraft` exits 5 with `DRAFT` (a draft runs
-#              almost nothing, and `go`/`web` are red on purpose). After `ready_for_review`, only runs of the
-#              `ci` workflow that belong to the draft are ignored (koinon-private#661): a run created more than ~30 s before
-#              the last ready event (a by-hand re-run of a draft-era run replays draft=true and is ignored too, koinon-private#676; #133
-#              will filter on the `ci (draft)` display_title instead of this window). dco, gitleaks, claim and commit statuses (e2e-lab) keep
-#              their result. It prints `waiting for the ready run` until the ready run's checks exist. When gh
-#              cannot list the runs, each ci check run's own start time decides instead.
+#              almost nothing, and `go`/`web` are red on purpose). A PR that is not a draft ignores the check
+#              runs of its draft-era `ci` runs (#218, #133), in every mode: a run whose display title is `ci (draft)`
+#              (the run-name of ci.yml when the event payload says draft), matched by run id. There is no time
+#              window, and a by-hand re-run of a draft run is ignored too. A non-draft run is never dropped: red
+#              or cancelled it still fails. It prints `waiting for the ready run` until the ready run's checks
+#              exist. dco, gitleaks, claim and commit statuses (e2e-lab) keep their result. When gh cannot list
+#              the runs, nothing is dropped.
 #              A stale PR head (koinon-private#661): with --checks, when `git ls-remote origin refs/heads/<branch>` names
 #              another commit than the PR's headRefOid for PR_WAIT_STALE_GRACE seconds (default 120; GitHub
 #              lags a push by a few seconds), it exits 6 with `STALE-HEAD` instead of judging the old head.
@@ -310,32 +311,6 @@ while :; do
         continue
       fi
       stale_since=""
-      # The last ready_for_review event: runs of the `ci` workflow that started before it belong to the draft.
-      # Only ci re-runs on ready_for_review; dco, gitleaks and commit statuses (e2e-lab) keep their draft-era verdict.
-      ready=$(gh api "repos/{owner}/{repo}/issues/$pr/events" --paginate \
-        --jq '[.[] | select(.event == "ready_for_review") | .created_at] | max // empty' 2>/dev/null | sort | tail -n 1) || ready=""
-      if [ -n "$ready" ]; then
-        # Decide per workflow run, not per check run: a draft run cancelled by the ready run has check runs that
-        # start (and are cancelled) after the ready event, and `needs: changes` jobs of a cancelled run never ran.
-        # ready_ids: the ci runs on the head created at or after the ready event (30 s of clock skew allowed;
-        # a re-run of a draft-era run replays draft=true and does not count, koinon-private#676) ("none": the ready run is not there yet); empty: gh could not say, fall back to each check run's own start time.
-        ready_ids=""
-        hd=$(jq -r '.headRefOid // ""' <<<"$json")
-        if [ -n "$hd" ]; then
-          ready_ids=$(gh run list --commit "$hd" --workflow ci.yml --limit 50 --json databaseId,createdAt 2>/dev/null |
-            jq -r --arg r "$ready" '($r | fromdateiso8601 - 30 | todateiso8601) as $slack
-              | [.[] | select(.createdAt >= $slack) | .databaseId | tostring] | join(",") | if . == "" then "none" else . end' 2>/dev/null) || ready_ids=""
-        fi
-        # shellcheck disable=SC2016 # jq program
-        drop='def rid: ((.detailsUrl // "") | capture("/runs/(?<r>[0-9]+)")? | .r);
-          def draft($ids): (.workflowName // "") == "ci" and
-            (if $ids == "" or rid == null then (.startedAt // "") != "" and .startedAt < $r
-             else rid as $id | (($ids | split(",")) | index($id)) == null end);'
-        if jq -e --arg r "$ready" --arg ids "$ready_ids" "$drop any((.statusCheckRollup // [])[]; draft(\$ids))" <<<"$json" >/dev/null; then
-          ready_dropped=1
-          json=$(jq --arg r "$ready" --arg ids "$ready_ids" "$drop"' .statusCheckRollup |= map(select(draft($ids) | not))' <<<"$json")
-        fi
-      fi
     fi
     branch=$(jq -r '.headRefName // "<branch>"' <<<"$json")
     head=$(jq -r '.headRefOid // ""' <<<"$json")
@@ -349,6 +324,26 @@ while :; do
       extra=$(head_runs "$head")
       json=$(jq --argjson x "$extra" --argjson names "$(printf '%s\n' "${req_now[@]}" | jq -R . | jq -sc .)" \
         '.statusCheckRollup = ((.statusCheckRollup // []) + [$x[]? | select(.name | IN($names[]))])' <<<"$json")
+    fi
+    # A PR that is not a draft ignores the check runs of its draft-era `ci` runs (#218, #133). The draft flag
+    # comes from the event payload, and GitHub names such a run `ci (draft)` (ci.yml run-name): that display
+    # title, matched by run id, is the only test. No time window: a draft run can precede the ready run by 13 s
+    # or by 96 s, and a by-hand re-run of it replays draft=true. A non-draft run (green, red or cancelled) is
+    # never dropped, so a red ready run still fails; when every ci check was a draft one, the missing required
+    # contexts make it wait for the ready run. When gh cannot list the runs nothing is dropped (a draft run's
+    # red then shows as FAILED, never as green).
+    if [ -n "$head" ] && [ "$(jq -r '.isDraft // false' <<<"$json")" != true ]; then
+      draft_ids=$(gh run list --commit "$head" --workflow ci.yml --limit 50 --json databaseId,displayTitle 2>/dev/null |
+        jq -r '[.[] | select(.displayTitle == "ci (draft)") | .databaseId | tostring] | join(",")' 2>/dev/null) || draft_ids=""
+      if [ -n "$draft_ids" ]; then
+        # shellcheck disable=SC2016 # jq program
+        drop='def rid: (((.detailsUrl // "") | capture("/runs/(?<r>[0-9]+)")? | .r) // null);
+          def draft($ids): rid as $id | $id != null and ((($ids | split(",")) | index($id)) != null);'
+        if jq -e --arg ids "$draft_ids" "$drop any((.statusCheckRollup // [])[]; draft(\$ids))" <<<"$json" >/dev/null; then
+          ready_dropped=1
+          json=$(jq --arg ids "$draft_ids" "$drop"' .statusCheckRollup |= map(select(draft($ids) | not))' <<<"$json")
+        fi
+      fi
     fi
     if [ "$alias_e2e" = 1 ] && [ "$explicit_qs" = 0 ]; then
       # (An explicit `--require quickstart` stays required as it is: no alias relief.)
