@@ -61,6 +61,9 @@ func (l LeakGuard) Scope() sinkclass.Scope {
 //
 // Replacements of one connection are serialised, and a reading older than the stored one is dropped
 // (nil, nothing written): the newest reading wins whatever order the replicas finish in.
+// Known gap (#244): a reading is not tied to the credential that took it, and an empty newest
+// reading leaves nothing to compare with, so an older reading (one taken under a replaced secret
+// included) can still land; it ages out with the freshness window.
 //
 // Audited as org.code_host_scope.replace with counts, not the list: always for a person's (or any
 // non-system) actor, and for the system's periodic refresh only when the repositories or their
