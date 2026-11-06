@@ -4,7 +4,9 @@
 # Tests hack/migrate-lint.sh against a throwaway repository: a branch may add migrations and
 # may be behind its base, but must not edit, delete or rename a merged one, except an edit that
 # leaves a file listed in the lint's allowed_edits at exactly its allowed content. On a patch line
-# (base ref release/*, ADR 0085) a new migration must also not rename, drop or retype.
+# (the marker hack/migrate-patch-line names a shipped minor line, ADR 0085) a new migration must also
+# not rename, drop or retype. A release/* base is not a patch line by its name: while the marker is
+# "none" (no schema promise before v0.3, ADR 0099) it may contract like main.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -64,11 +66,28 @@ git checkout -qb allowed-more main
 cp "$allowed" "$dir/00002_agents.sql" && echo x >>"$dir/00002_agents.sql" && git commit -qam more
 expect 1 "edits an allowed migration past its allowed content"
 
-# Patch line: the base is a release branch, cut at the current main.
-git branch release/v0.1 main
+# Before v0.3 (ADR 0099) the marker is "none", so a release branch may contract like main.
+git branch release/v0.2 main
+base=release/v0.2
+git checkout -qb pre-v03-release release/v0.2
+echo 'ALTER TABLE t RENAME TO u;' >"$dir/00004_p.sql" && git add -A && git commit -qm pre
+expect 0 "rename on a release branch while the marker is absent (no promise before v0.3)"
+git checkout -qb pre-v03-marker-none release/v0.2
+mkdir -p hack && echo none >hack/migrate-patch-line && git add -A && git commit -qm "marker none"
+git branch release/v0.2-none
+git checkout -q pre-v03-marker-none
+echo 'DROP TABLE t;' >"$dir/00004_p.sql" && git add -A && git commit -qm drop
+base=release/v0.2-none
+expect 0 "drop on a release branch while the marker is none"
+
+# Patch line: the base is a release branch whose marker names the shipped line.
+git checkout -q main
+git checkout -qb release/v0.1 main
+mkdir -p hack && echo v0.1 >hack/migrate-patch-line && git add -A && git commit -qm "marker v0.1"
+git checkout -q main
 base=release/v0.1
 patch() { # patch <branch> <migration body> <description> <exit code>
-  git checkout -qb "$1" main
+  git checkout -qb "$1" release/v0.1
   printf '%b\n' "$2" >"$dir/00004_p.sql" && git add -A && git commit -qm "$1"
   expect "$4" "patch line: $3"
 }

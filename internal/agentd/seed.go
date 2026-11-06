@@ -267,6 +267,10 @@ func (p *Pool) copyNewestHome(ctx context.Context, e store.HomeRepositoryEpoch) 
 		if ctx.Err() != nil {
 			return store.HomeCheckpoint{}, nil, ctx.Err()
 		}
+		if checkpoint.TakenPrefix(err, dst.Prefix) {
+			// No source copies into it: the seed fails, and the old repository is kept.
+			return store.HomeCheckpoint{}, nil, p.prefixTaken(ctx, e.OrgID, e.AgentID, dst, err)
+		}
 		p.log.Warn("home repository seed: copying a checkpoint failed", "agent", e.AgentID.String(), "checkpoint", cp.ID.String(), "err", err)
 		errs = append(errs, fmt.Errorf("checkpoint %s: %w", cp.ID, err))
 	}

