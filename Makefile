@@ -86,7 +86,7 @@ adr-lint: ## Check ADR numbers and the README index; offline tests of hack/claim
 	hack/notes-expiry-test.sh
 
 .PHONY: migrate-lint
-migrate-lint: ## Check migration file names (and, with BASE=<ref>, that merged migrations are unchanged; on a patch line also bans RENAME/DROP/type changes: hack/migrate-patch-line set at the merge base, a release/* BASE, or MIGRATE_LINT_PATCH_LINE=1)
+migrate-lint: ## Check migration file names (and, with BASE=<ref>, that merged migrations are unchanged; on a patch line also bans RENAME/DROP/type changes: hack/migrate-patch-line naming a shipped line at the merge base, or MIGRATE_LINT_PATCH_LINE=1)
 	hack/migrate-lint-test.sh
 	hack/migrate-lint.sh $(BASE)
 
