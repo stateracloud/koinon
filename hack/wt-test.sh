@@ -193,6 +193,40 @@ check "rm left the outside worktree alone" test -d "$tmp/other/ext"
 git worktree remove --force "$tmp/other/ext"
 git worktree remove --force "$tmp/outside-wt"
 
+# a worktree created under another $TMPDIR (sandbox against host) is found by ls, path, rm and gc
+mkdir -p "$tmp/otherroot/kw"
+git worktree add -q -b feat/other "$tmp/otherroot/kw/otmp" origin/main 2>/dev/null
+git -C "$tmp/otherroot/kw/otmp" push -q origin feat/other
+wtx() { env -u KOINON_WT_ROOT TMPDIR="$tmp" KOINON_WT_TMP_BASES="$tmp/otherroot" "$repo/hack/wt.sh" "$@"; }
+check "path finds a worktree under another TMPDIR" eq "$(wtx path otmp)" "$tmp/otherroot/kw/otmp"
+check "ls lists a worktree under another TMPDIR" grep -q '^otmp feat/other ' <<<"$(wtx ls)"
+check "gc sees a worktree under another TMPDIR" grep -q '^keep otmp:' <<<"$(wtx gc --dry-run)"
+check "an explicit KOINON_WT_ROOT does not widen the managed set" refuses wt path otmp
+
+# the same name under two temp bases is ambiguous: refused, both paths listed, nothing removed
+mkdir -p "$tmp/kw"
+git worktree add -q --detach "$tmp/kw/dup" origin/main 2>/dev/null
+git worktree add -q --detach "$tmp/otherroot/kw/dup" origin/main 2>/dev/null
+err=$(wtx path dup 2>&1 >/dev/null) && err="succeeded"
+check "path of an ambiguous name fails and lists the first" grep -q "ambiguous name dup: .*$tmp/kw/dup" <<<"$err"
+check "path of an ambiguous name lists the second" grep -q "ambiguous name dup: .*$tmp/otherroot/kw/dup" <<<"$err"
+err=$(wtx rm dup 2>&1 >/dev/null) && err="succeeded"
+check "rm of an ambiguous name fails and lists both" grep -q "ambiguous name dup: " <<<"$err"
+check "rm left the first dup in place" test -d "$tmp/kw/dup"
+check "rm left the second dup in place" test -d "$tmp/otherroot/kw/dup"
+git worktree remove --force "$tmp/kw/dup"
+git worktree remove --force "$tmp/otherroot/kw/dup"
+check "rm removes a worktree under another TMPDIR" wtx rm otmp
+check "rm removed it" test ! -e "$tmp/otherroot/kw/otmp"
+
+# Claude Code's .claude/worktrees/<name> is left alone, also when the root ends in "worktrees"
+mkdir -p "$tmp/home/worktrees" "$tmp/proj/.claude/worktrees"
+git worktree add -q --detach "$tmp/proj/.claude/worktrees/cc" origin/main 2>/dev/null
+check "path ignores .claude/worktrees with a root named worktrees" refuses env KOINON_WT_ROOT="$tmp/home/worktrees" "$repo/hack/wt.sh" path cc
+check "rm ignores .claude/worktrees with a root named worktrees" refuses env KOINON_WT_ROOT="$tmp/home/worktrees" "$repo/hack/wt.sh" rm cc
+check "rm left .claude/worktrees alone" test -d "$tmp/proj/.claude/worktrees/cc"
+git worktree remove --force "$tmp/proj/.claude/worktrees/cc"
+
 # a malformed lease fails closed
 wt new badl --branch fix/703-badl >/dev/null 2>&1
 git -C "$tmp/kw/badl" push -q origin fix/703-badl
