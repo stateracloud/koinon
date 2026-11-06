@@ -6,8 +6,10 @@
 -- agents and runs triggers (00006), so every writer wakes it: the API, the declared-config path and
 -- the CLI.
 --
--- Only the columns that change the gateway target or the credential wake it. The prober's own
--- writes (health, tools_synced_at, consecutive_failures) are left out on purpose: a trigger on
+-- Only the columns that loadMCP reads to plan the gateway target or the credential wake it (name
+-- builds the target name, credential_lost_at takes a server out of the served list). The prober's own
+-- writes (health, tools_synced_at, consecutive_failures) are left out on purpose (UPDATE OF fires on every
+-- statement that names the column, changed or not, and RecordMCPServerProbe sets health each time): a trigger on
 -- them would wake the reconciler after every probe, which would wake the prober again.
 -- Expand only (ADR 0085): a trigger and a function; an N-1 binary is unaffected by an extra NOTIFY.
 
@@ -28,5 +30,5 @@ $$;
 -- +goose StatementEnd
 
 CREATE TRIGGER mcp_servers_notify_reconciler
-    AFTER INSERT OR DELETE OR UPDATE OF url, transport, credential_header, credential_prefix, credential, disabled_reason, removed_at ON mcp_servers
+    AFTER INSERT OR DELETE OR UPDATE OF name, url, transport, credential_header, credential_prefix, credential, disabled_reason, removed_at, credential_lost_at ON mcp_servers
     FOR EACH ROW EXECUTE FUNCTION notify_reconciler_mcp_server();

@@ -581,6 +581,18 @@ var _ = Describe("Service", func() {
 			Expect(woken(ctx, time.Second)).To(BeTrue(), "delete")
 		})
 
+		It("wakes it when a server is renamed or loses its credential", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "not-a-real-token")
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
+			// The name builds the gateway target name; no service call renames a server, so write it.
+			_, err := pool.Exec(ctx, `UPDATE mcp_servers SET name = 'wiki-renamed' WHERE org_id = $1 AND id = $2`, org, s.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "rename")
+			_, err = pool.Exec(ctx, `UPDATE mcp_servers SET credential = NULL, credential_header = NULL, credential_lost_at = now() WHERE org_id = $1 AND id = $2`, org, s.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "credential lost")
+		})
+
 		It("does not wake it for the prober's own health writes", func(ctx SpecContext) {
 			s := create(ctx, "wiki", "")
 			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
