@@ -48,10 +48,25 @@ render() { "$HELM" template koinon "$CHART" --namespace koinon --set openshell.i
 render_raw() { "$HELM" template koinon "$CHART" --namespace koinon --set "$ADDRESS" "$@"; }
 # Assertions capture the rendering before grepping it: piping into grep -q under pipefail fails
 # the pipeline when grep exits on the first match and helm then dies of SIGPIPE.
+# fail records into a file, not only a counter: an assertion that runs in a subshell (a pipe, $(...)
+# or a ( ... ) group) cannot bump a variable of this shell, and a FAIL that does not reach the exit
+# code makes every assertion advisory (koinon-private#323).
+failure_log="$out/failures"
+: >"$failure_log"
 failures=0
 fail() {
 	echo "FAIL: $*" >&2
+	echo "$*" >>"$failure_log"
 	failures=$((failures + 1))
+}
+# gate_failures exits non-zero when any assertion recorded a failure, from any shell level.
+gate_failures() {
+	local n
+	n=$(wc -l <"$failure_log" | tr -d ' ')
+	if [ "$n" -gt 0 ]; then
+		echo "$n assertion(s) failed" >&2
+		exit 1
+	fi
 }
 # has <description> <extended regexp> <helm args...>: the rendering matches the pattern.
 has() {
@@ -81,10 +96,12 @@ env_is() {
 echo "== assertions"
 # The assertions live in hack/chart-check.d/NN-<feature>.sh, sourced in order; add a new feature as
 # a new file (or append to the one that owns the feature) so concurrent changes do not collide here.
-for part in hack/chart-check.d/*.sh; do
+# CHART_CHECK_D points the loop at another directory (hack/chart-check-test.sh plants failures there).
+for part in "${CHART_CHECK_D:-hack/chart-check.d}"/*.sh; do
 	# shellcheck source=/dev/null
 	source "$part"
 done
+gate_failures
 # kubeconform's schemas do not make list entries unique; the API server rejects a pod spec
 # that repeats a volume, container, mount or env name.
 echo "== duplicate list entries"

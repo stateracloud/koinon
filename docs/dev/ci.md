@@ -129,7 +129,8 @@ commit that names the break.
 
 ## Chart and admission tests
 
-`hack/chart-check.sh` runs lint, every mode rendered, render assertions and kubeconform. Anything
+`hack/chart-check.sh` runs lint, every mode rendered, render assertions and kubeconform; any `FAIL` from an assertion (at any shell level) makes it exit
+non-zero, which `hack/chart-check-test.sh` (the `scripts` job) proves with planted failures. Anything
 that changes how a Koinon binary starts (a flag or env var it requires, a mount, a Secret key, an
 RBAC rule) is covered by `make test-chart-smoke` (`test/chartsmoke`: runs the rendered Jobs and
 Deployments as containers); extend it when you add a component or a startup input, since a unit
