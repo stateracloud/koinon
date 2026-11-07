@@ -50,7 +50,11 @@ env_problem() { # <log>: prints the reason when the log shows one
 	local log=$1
 	if grep -qiE 'cannot connect to the docker daemon|docker: command not found|docker\.sock.*(permission denied|no such file)|is the docker daemon running' "$log"; then
 		echo "docker unavailable"
-	elif grep -qiE 'operation not permitted|sandbox' "$log"; then
+	elif grep -qE 'deny\([0-9]+\)|Sandbox: .* deny' "$log"; then
+		echo "sandbox denial"
+	elif grep -qiE 'operation not permitted' "$log" && ! grep -qE -- '--- FAIL|\[FAIL\]|^FAIL[[:space:]]|Summarizing [0-9]+ Failure' "$log"; then
+		# A bare EPERM with no failed test in the log is the machine; a failing spec that
+		# mentions EPERM (or the word "sandbox") is a real failure. Never match the bare word.
 		echo "sandbox denial"
 	elif grep -qE 'INCOMPLETE \(missing' "$log"; then
 		sed -n 's/.*INCOMPLETE (missing \([^)]*\)).*/missing \1/p' "$log" | tail -1
@@ -88,9 +92,16 @@ run_cmd() {
 	fi
 }
 
-# 1. The preflight gates the diff selects. One preflight call per gate, so each has a time and a
-#    verdict of its own. A "skip (... not installed)" line is a gate that did not run.
-gates=$("$preflight" --base "$base" --list 2>/dev/null | sed -n 's/^\([a-z0-9]*\):.*/\1/p' | grep -vx e2e || true)
+# 1. The preflight gates the diff selects, plus the gate of every CI job ci-changes.sh turns on
+#    (ci-changes is wider than the preflight selection: go runs for a migration or pricing change).
+#    One preflight call per gate, so each has a time and a verdict of its own. A
+#    "skip (... not installed)" line is a gate that did not run.
+jobs=$("$changes" "$base" 2>/dev/null | sed -n 's/^\(.*\)=true$/\1/p')
+jobgates=""
+for j in $jobs; do
+	case $j in go | web | generate | chart | docs) jobgates="$jobgates $j" ;; esac
+done
+gates=$( { "$preflight" --base "$base" --list 2>/dev/null | sed -n 's/^\([a-z0-9]*\):.*/\1/p' | grep -vx e2e; for j in $jobgates; do echo "$j"; done; } | awk '!seen[$0]++' || true)
 for g in $gates; do
 	log=$logdir/$g.log
 	start=$SECONDS
@@ -109,7 +120,6 @@ for g in $gates; do
 done
 
 # 2. The heavy CI jobs the preflight does not run, picked by ci-changes.sh.
-jobs=$("$changes" "$base" 2>/dev/null | sed -n 's/^\(.*\)=true$/\1/p')
 for j in $jobs; do
 	case $j in
 	chartsmoke) run_cmd chartsmoke docker "$make_cmd" test-chart-smoke ;;

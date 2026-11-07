@@ -112,6 +112,24 @@ expect "job no docker" 3 '^gate=escape rc=1 .*verdict=notrun reason="docker unav
 run STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=sandbox
 expect "job sandbox" 3 '^gate=escape rc=1 .*verdict=notrun reason="sandbox denial"'
 
+# A failing log that merely says "Sandbox admission policy" is a failure, not a machine problem.
+cat >"$tmp/make-sbx" <<'EOF2'
+#!/usr/bin/env bash
+echo "=== RUN   TestEscape/Sandbox_admission_policy"
+echo "--- FAIL: TestEscape (0.1s)"
+echo "FAIL	github.com/stateracloud/koinon/internal/sandbox"
+exit 1
+EOF2
+chmod +x "$tmp/make-sbx"
+out=$(env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-sbx" STUB_GATES="" STUB_JOBS="escape" bash "$script" HEAD 2>&1); rc=$?
+expect "sandbox word is a failure" 1 '^gate=escape rc=1 .*verdict=fail'
+
+# ci-changes turns on go while preflight does not select it: the go gate still runs.
+run STUB_GATES="tidy" STUB_JOBS="go"
+expect "ci job go maps to gate go" 0 '^gate=go rc=0 .*verdict=pass' '^gate=tidy .*verdict=pass'
+run STUB_GATES="go" STUB_JOBS="go"
+[[ $(grep -c '^gate=go ' <<<"$out") -eq 1 ]] || { echo "FAIL: go gate must run once"; fails=$((fails + 1)); }
+
 # Usage errors.
 out=$(bash "$script" --nope 2>&1); rc=$?
 expect "unknown flag" 2 'unknown argument'
