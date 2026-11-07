@@ -18,12 +18,21 @@ var _ = Describe("00012_providers_audit_tokens", func() {
 	It("makes audit_events append-only, even for the table owner", func(ctx SpecContext) {
 		var id string
 		Expect(db.QueryRowContext(ctx,
-			`INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind) VALUES ($1, 'system', '', 'test.insert', 'test') RETURNING id`,
+			`INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind) VALUES ($1, 'system', 'koinon-test:spec', 'test.insert', 'test') RETURNING id`,
 			org).Scan(&id)).To(Succeed())
 		_, err := db.ExecContext(ctx, `UPDATE audit_events SET action = 'test.changed' WHERE id = $1`, id)
 		Expect(err).To(MatchError(ContainSubstring("append-only")))
 		_, err = db.ExecContext(ctx, `DELETE FROM audit_events WHERE id = $1`, id)
 		Expect(err).To(MatchError(ContainSubstring("append-only")))
+	})
+
+	It("refuses a new system event without a component ID, and keeps the other kinds as they were (00067, ADR 0100)", func(ctx SpecContext) {
+		_, err := db.ExecContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind) VALUES ($1, 'system', '', 'test.unnamed', 'test')`, org)
+		Expect(err).To(MatchError(ContainSubstring("audit_events_system_actor_named")))
+		_, err = db.ExecContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, action, target_kind) VALUES ($1, 'system', 'test.unnamed', 'test')`, org)
+		Expect(err).To(MatchError(ContainSubstring("audit_events_system_actor_named")), "no ID at all is an empty one")
+		_, err = db.ExecContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind) VALUES ($1, 'cli', '', 'test.cli', 'test')`, org)
+		Expect(err).NotTo(HaveOccurred(), "the rule is for system actors")
 	})
 
 	It("revokes UPDATE, DELETE and TRUNCATE on audit_events from koinon_app, when that role exists", func(ctx SpecContext) {

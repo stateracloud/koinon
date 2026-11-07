@@ -30,7 +30,7 @@ func chainMigrationVersion() int64 {
 var _ = Describe("the audit hash chain migration", func() {
 	It("blocks TRUNCATE of the audit log for every role, the owner included", func(ctx SpecContext) {
 		_, org := newUser(ctx)
-		_, err := db.ExecContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, action, target_kind) VALUES ($1, 'system', 'test.keep', 'test')`, org)
+		_, err := db.ExecContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind) VALUES ($1, 'system', 'koinon-test:spec', 'test.keep', 'test')`, org)
 		Expect(err).NotTo(HaveOccurred())
 		for _, stmt := range []string{`TRUNCATE audit_events`, `TRUNCATE orgs CASCADE`, `TRUNCATE audit_chain_heads`} {
 			_, err = db.ExecContext(ctx, stmt)
@@ -42,8 +42,8 @@ var _ = Describe("the audit hash chain migration", func() {
 		_, org := newUser(ctx)
 		var seq int64
 		var prev, hash []byte
-		Expect(db.QueryRowContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, action, target_kind, chain_seq, prev_hash, hash)
-			VALUES ($1, 'system', 'test.forged', 'test', 7, decode(repeat('11', 32), 'hex'), decode(repeat('22', 32), 'hex'))
+		Expect(db.QueryRowContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind, chain_seq, prev_hash, hash)
+			VALUES ($1, 'system', 'koinon-test:spec', 'test.forged', 'test', 7, decode(repeat('11', 32), 'hex'), decode(repeat('22', 32), 'hex'))
 			RETURNING chain_seq, prev_hash, hash`, org).Scan(&seq, &prev, &hash)).To(Succeed())
 		Expect(seq).To(BeEquivalentTo(1))
 		Expect(prev).To(Equal(make([]byte, 32)))
@@ -69,7 +69,7 @@ var _ = Describe("the audit hash chain migration", func() {
 		Expect(err).NotTo(HaveOccurred())
 		var seq int64
 		var prev []byte
-		Expect(tx.QueryRowContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, action, target_kind) VALUES ($1, 'system', 'test.shadow', 'test') RETURNING chain_seq, prev_hash`, org).
+		Expect(tx.QueryRowContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind) VALUES ($1, 'system', 'koinon-test:spec', 'test.shadow', 'test') RETURNING chain_seq, prev_hash`, org).
 			Scan(&seq, &prev)).To(Succeed())
 		Expect(seq).To(BeEquivalentTo(1), "the real head, not the temp table's")
 		Expect(prev).To(Equal(make([]byte, 32)))
@@ -88,7 +88,7 @@ var _ = Describe("the audit hash chain migration", func() {
 
 	It("gives the app role no write access to the chain heads", func(ctx SpecContext) {
 		_, org := newUser(ctx)
-		_, err := db.ExecContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, action, target_kind) VALUES ($1, 'system', 'test.head', 'test')`, org)
+		_, err := db.ExecContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind) VALUES ($1, 'system', 'koinon-test:spec', 'test.head', 'test')`, org)
 		Expect(err).NotTo(HaveOccurred())
 		err = pgtest.EnsureRole(ctx, db, "koinon_app_probe")
 		Expect(err).NotTo(HaveOccurred())
@@ -195,7 +195,7 @@ var _ = Describe("the audit hash chain migration", func() {
 		Expect(err).To(MatchError(ContainSubstring("append-only")))
 		var seq int64
 		var prev []byte
-		Expect(old.QueryRowContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, action, target_kind) VALUES ($1, 'system', 'test.a6', 'test') RETURNING chain_seq, prev_hash`, a).
+		Expect(old.QueryRowContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind) VALUES ($1, 'system', 'koinon-test:spec', 'test.a6', 'test') RETURNING chain_seq, prev_hash`, a).
 			Scan(&seq, &prev)).To(Succeed())
 		Expect(seq).To(BeEquivalentTo(4))
 		Expect(prev).To(Equal(perOrg[a][2].hash))

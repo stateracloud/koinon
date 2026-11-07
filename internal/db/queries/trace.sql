@@ -79,11 +79,14 @@ RETURNING *;
 
 -- name: LowerOrgTraceLevels :many
 -- Lowers every org above a new platform ceiling to it, and the platform copies that follow, in the
--- caller's transaction. Returns the orgs it changed with their levels before, for the audit log.
+-- caller's transaction. Returns the orgs it changed with their levels before, for the audit log, in org ID
+-- order: the row locks are taken in that order, and the caller writes one audit event per org in that
+-- order (ADR 0100 decision 1.7).
 WITH before AS (
     SELECT org_id, content_level AS old_level, platform_copy_level AS old_copy_level
     FROM org_trace_settings
     WHERE content_level > @ceiling::trace_content_level
+    ORDER BY org_id
     FOR UPDATE
 ), changed AS (
     UPDATE org_trace_settings s

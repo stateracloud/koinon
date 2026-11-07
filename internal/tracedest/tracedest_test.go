@@ -116,12 +116,11 @@ func uuidOf(s string) pgtype.UUID {
 
 var _ = Describe("Service", func() {
 	var (
-		svc     *tracedest.Service
-		be      *fakeBackend
-		org     pgtype.UUID
-		user    pgtype.UUID
-		actor   audit.Actor
-		auditor pgtype.UUID
+		svc   *tracedest.Service
+		be    *fakeBackend
+		org   pgtype.UUID
+		user  pgtype.UUID
+		actor audit.Actor
 	)
 	BeforeEach(func(ctx SpecContext) {
 		be = newFakeBackend()
@@ -131,10 +130,9 @@ var _ = Describe("Service", func() {
 		svc, err = tracedest.New(pool, ring, catalog.URLPolicy{Namespace: "koinon", AllowedHosts: []string{host}}, nil)
 		Expect(err).NotTo(HaveOccurred())
 		org, user, _ = pgtest.NewOrg(ctx, pool)
-		auditor, _, _ = pgtest.NewOrg(ctx, pool)
 		actor = audit.User(user)
 		// The ceiling is platform-wide: every spec starts from the default.
-		_, err = svc.SetPlatformCeiling(ctx, auditor, actor, tracedest.LevelFull)
+		_, err = svc.SetPlatformCeiling(ctx, actor, tracedest.LevelFull)
 		Expect(err).NotTo(HaveOccurred())
 		_, err = pool.Exec(ctx, `DELETE FROM platform_trace_destination`)
 		Expect(err).NotTo(HaveOccurred())
@@ -145,6 +143,17 @@ var _ = Describe("Service", func() {
 			Name: name, Backend: "langfuse", EndpointURL: be.URL + "/api/public/otel/v1/traces", Enabled: true,
 			Secrets: map[string]string{"public_key": "koinon_test_not-a-real-public", "secret_key": fakeKey},
 		}
+	}
+	// installEvents are the install chain's events of this spec's actor (a fresh user per spec) whose
+	// action starts with prefix, newest first.
+	installEvents := func(ctx SpecContext, prefix string) []store.InstallAuditEvent {
+		GinkgoHelper()
+		rows, err := store.New(pool).ListInstallAuditEventsFiltered(ctx, store.ListInstallAuditEventsFilteredParams{
+			ActionPrefix: pgtype.Text{String: prefix, Valid: true}, ActorKind: pgtype.Text{String: audit.KindUser, Valid: true},
+			ActorID: pgtype.Text{String: user.String(), Valid: true}, PageSize: 200,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		return rows
 	}
 	events := func(ctx SpecContext, org pgtype.UUID, prefix string) []store.AuditEvent {
 		GinkgoHelper()
@@ -370,14 +379,14 @@ var _ = Describe("Service", func() {
 		})
 
 		It("same for the platform destination", func(ctx SpecContext) {
-			_, err := svc.SetPlatformDestination(ctx, auditor, actor, nil, langfuse("platform"))
+			_, err := svc.SetPlatformDestination(ctx, actor, nil, langfuse("platform"))
 			Expect(err).NotTo(HaveOccurred())
 			evil := newFakeBackend()
 			DeferCleanup(evil.Close)
 			in := langfuse("platform")
 			in.EndpointURL = evil.URL
 			in.Secrets = nil
-			_, err = svc.SetPlatformDestination(ctx, auditor, actor, nil, in)
+			_, err = svc.SetPlatformDestination(ctx, actor, nil, in)
 			var inv *tracedest.InvalidError
 			Expect(err).To(BeAssignableToTypeOf(inv))
 			Expect(evil.calls()).To(BeZero())
@@ -463,7 +472,7 @@ var _ = Describe("Service", func() {
 		})
 
 		It("does not bring back a deleted platform destination", func(ctx SpecContext) {
-			_, err := svc.SetPlatformDestination(ctx, auditor, actor, nil, langfuse("platform"))
+			_, err := svc.SetPlatformDestination(ctx, actor, nil, langfuse("platform"))
 			Expect(err).NotTo(HaveOccurred())
 			be.set(func(b *fakeBackend) {
 				b.onHit = func() {
@@ -471,7 +480,7 @@ var _ = Describe("Service", func() {
 					Expect(err).NotTo(HaveOccurred())
 				}
 			})
-			_, _, err = svc.TestPlatform(ctx, auditor, actor)
+			_, _, err = svc.TestPlatform(ctx, actor)
 			Expect(err).To(MatchError(tracedest.ErrNotFound))
 			p, err := svc.GetPlatform(ctx)
 			Expect(err).NotTo(HaveOccurred())
@@ -481,18 +490,18 @@ var _ = Describe("Service", func() {
 
 	It("checks the platform destination's version", func(ctx SpecContext) {
 		zero := int64(0)
-		d, err := svc.SetPlatformDestination(ctx, auditor, actor, &zero, langfuse("platform"))
+		d, err := svc.SetPlatformDestination(ctx, actor, &zero, langfuse("platform"))
 		Expect(err).NotTo(HaveOccurred(), "version 0 is 'no destination yet'")
-		_, err = svc.SetPlatformDestination(ctx, auditor, actor, &zero, langfuse("platform"))
+		_, err = svc.SetPlatformDestination(ctx, actor, &zero, langfuse("platform"))
 		Expect(err).To(MatchError(tracedest.ErrChanged))
 		v := d.ConfigVersion
 		in := langfuse("platform")
 		in.Secrets = nil
 		in.Enabled = false
-		d2, err := svc.SetPlatformDestination(ctx, auditor, actor, &v, in)
+		d2, err := svc.SetPlatformDestination(ctx, actor, &v, in)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(d2.ConfigVersion).To(Equal(v + 1))
-		_, err = svc.SetPlatformDestination(ctx, auditor, actor, &v, in)
+		_, err = svc.SetPlatformDestination(ctx, actor, &v, in)
 		Expect(err).To(MatchError(tracedest.ErrChanged))
 	})
 
@@ -640,7 +649,7 @@ var _ = Describe("Service", func() {
 	})
 
 	It("sends no org's spans to a platform destination whose credentials were lost", func(ctx SpecContext) {
-		_, err := svc.SetPlatformDestination(ctx, auditor, actor, nil, langfuse("platform"))
+		_, err := svc.SetPlatformDestination(ctx, actor, nil, langfuse("platform"))
 		Expect(err).NotTo(HaveOccurred())
 		v0, _ := svc.ConfigVersion(ctx, org)
 		_, err = pool.Exec(ctx, `UPDATE platform_trace_destination SET credentials = NULL, credential_lost_at = now()`)
@@ -655,9 +664,9 @@ var _ = Describe("Service", func() {
 		Expect(routes).To(HaveLen(1))
 		Expect(routes[0].Platform).To(BeTrue())
 		Expect(routes[0].Unreadable).To(BeTrue())
-		_, _, err = svc.TestPlatform(ctx, auditor, actor)
+		_, _, err = svc.TestPlatform(ctx, actor)
 		Expect(err).To(MatchError(tracedest.ErrCredentialLost))
-		got, err := svc.SetPlatformDestination(ctx, auditor, actor, nil, langfuse("platform"))
+		got, err := svc.SetPlatformDestination(ctx, actor, nil, langfuse("platform"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.CredentialLostAt).To(BeNil())
 		st, _ = svc.GetSettings(ctx, org)
@@ -744,7 +753,7 @@ var _ = Describe("Service", func() {
 			_, err = svc.UpdateSettings(ctx, low, audit.User(lowUser), own, tracedest.SettingsInput{ContentLevel: "none", SampleRate: rate(1), PlatformCopyLevel: "none"})
 			Expect(err).NotTo(HaveOccurred())
 
-			n, err := svc.SetPlatformCeiling(ctx, auditor, actor, "redacted")
+			n, err := svc.SetPlatformCeiling(ctx, actor, "redacted")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(n).To(BeNumerically(">=", 1), "the org at full was above the ceiling")
 			st, _ := svc.GetSettings(ctx, org)
@@ -754,7 +763,7 @@ var _ = Describe("Service", func() {
 			st, _ = svc.GetSettings(ctx, other)
 			Expect(st.ContentLevel).To(Equal("redacted"))
 
-			By("the lowered org sees why, and the platform admin's org has the change")
+			By("the lowered org sees why, and the install chain has the change")
 			ev := events(ctx, org, "trace.settings.lowered")
 			Expect(ev).To(HaveLen(1))
 			var summary map[string]any
@@ -762,7 +771,10 @@ var _ = Describe("Service", func() {
 			Expect(summary["before"]).To(HaveKeyWithValue("contentLevel", "full"))
 			Expect(summary["after"]).To(HaveKeyWithValue("contentLevel", "redacted"))
 			Expect(events(ctx, other, "trace.settings.lowered")).To(BeEmpty())
-			Expect(events(ctx, auditor, "trace.platform_ceiling.set")).To(HaveLen(2), "the reset in BeforeEach and this change")
+			install := installEvents(ctx, "trace.platform_ceiling.set")
+			Expect(install).To(HaveLen(2), "the reset in BeforeEach and this change")
+			Expect(summary).To(HaveKeyWithValue("install_event_id", install[0].ID.String()), "the org event points back at the install event")
+			Expect(events(ctx, org, "trace.platform_ceiling")).To(BeEmpty(), "the platform event is in no org")
 
 			By("no org can pick a level above it")
 			_, err = svc.UpdateSettings(ctx, org, actor, own, tracedest.SettingsInput{ContentLevel: "full", SampleRate: rate(1), PlatformCopyLevel: "none"})
@@ -775,13 +787,13 @@ var _ = Describe("Service", func() {
 			Expect(routes[0].Level).To(Equal("redacted"))
 
 			By("raising the ceiling again lowers nobody")
-			n, err = svc.SetPlatformCeiling(ctx, auditor, actor, "full")
+			n, err = svc.SetPlatformCeiling(ctx, actor, "full")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(n).To(BeZero())
 			st, _ = svc.GetSettings(ctx, org)
 			Expect(st.ContentLevel).To(Equal("redacted"))
 
-			_, err = svc.SetPlatformCeiling(ctx, auditor, actor, "everything")
+			_, err = svc.SetPlatformCeiling(ctx, actor, "everything")
 			Expect(err).To(HaveOccurred())
 		})
 	})
@@ -792,8 +804,8 @@ var _ = Describe("Service", func() {
 			in.Secrets = map[string]string{"public_key": "koinon_test_not-a-real-public", "secret_key": fakeKeyTwo}
 			return in
 		}
-		It("is tested, sealed, audited in the admin's org, and receives the org's opt-in level", func(ctx SpecContext) {
-			d, err := svc.SetPlatformDestination(ctx, auditor, actor, nil, platform())
+		It("is tested, sealed, audited in the install chain, and receives the org's opt-in level", func(ctx SpecContext) {
+			d, err := svc.SetPlatformDestination(ctx, actor, nil, platform())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(d.LastTest.OK).To(BeTrue())
 			got, err := svc.GetPlatform(ctx)
@@ -821,18 +833,18 @@ var _ = Describe("Service", func() {
 			routes, _ = svc.Routes(ctx, org)
 			Expect(routes[0].Level).To(Equal("redacted"))
 
-			ev := events(ctx, auditor, "trace.platform_destination.set")
+			ev := installEvents(ctx, "trace.platform_destination.set")
 			Expect(ev).To(HaveLen(1))
 			Expect(string(ev[0].Summary)).NotTo(ContainSubstring(fakeKeyTwo))
 
 			By("a failing test leaves it alone, and it can be deleted")
 			be.set(func(b *fakeBackend) { b.status = 401 })
-			_, err = svc.SetPlatformDestination(ctx, auditor, actor, nil, platform())
+			_, err = svc.SetPlatformDestination(ctx, actor, nil, platform())
 			var failed *tracedest.TestFailedError
 			Expect(err).To(BeAssignableToTypeOf(failed))
 			be.set(func(b *fakeBackend) { b.status = 200 })
-			Expect(svc.DeletePlatformDestination(ctx, auditor, actor)).To(Succeed())
-			Expect(svc.DeletePlatformDestination(ctx, auditor, actor)).To(MatchError(tracedest.ErrNotFound))
+			Expect(svc.DeletePlatformDestination(ctx, actor)).To(Succeed())
+			Expect(svc.DeletePlatformDestination(ctx, actor)).To(MatchError(tracedest.ErrNotFound))
 		})
 	})
 
@@ -856,17 +868,17 @@ var _ = Describe("Service", func() {
 			v3, _ := svc.ConfigVersion(ctx, org)
 			Expect(v3).NotTo(Equal(v2), "the org's level")
 
-			_, err = svc.SetPlatformCeiling(ctx, auditor, actor, "none")
+			_, err = svc.SetPlatformCeiling(ctx, actor, "none")
 			Expect(err).NotTo(HaveOccurred())
 			v4, _ := svc.ConfigVersion(ctx, org)
 			Expect(v4).NotTo(Equal(v3), "the platform ceiling")
 
-			_, err = svc.SetPlatformDestination(ctx, auditor, actor, nil, langfuse("plat-a"))
+			_, err = svc.SetPlatformDestination(ctx, actor, nil, langfuse("plat-a"))
 			Expect(err).NotTo(HaveOccurred())
 			v5, _ := svc.ConfigVersion(ctx, org)
-			Expect(svc.DeletePlatformDestination(ctx, auditor, actor)).To(Succeed())
+			Expect(svc.DeletePlatformDestination(ctx, actor)).To(Succeed())
 			in := langfuse("plat-b")
-			_, err = svc.SetPlatformDestination(ctx, auditor, actor, nil, in)
+			_, err = svc.SetPlatformDestination(ctx, actor, nil, in)
 			Expect(err).NotTo(HaveOccurred())
 			v6, _ := svc.ConfigVersion(ctx, org)
 			Expect(v6).NotTo(Equal(v5), "delete and recreate resets config_version; the fingerprint must still change")
@@ -895,7 +907,7 @@ var _ = Describe("Service", func() {
 			other, _, _ := pgtest.NewOrg(ctx, pool)
 			ok, _ = svc.WouldTrace(ctx, other, 0)
 			Expect(ok).To(BeFalse())
-			_, err = svc.SetPlatformDestination(ctx, auditor, actor, nil, langfuse("platform"))
+			_, err = svc.SetPlatformDestination(ctx, actor, nil, langfuse("platform"))
 			Expect(err).NotTo(HaveOccurred())
 			ok, _ = svc.WouldTrace(ctx, other, 0)
 			Expect(ok).To(BeTrue())

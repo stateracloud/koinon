@@ -328,6 +328,11 @@ off). Those are org changes: they go in the default org's chain, actor `system
 koinon-api:bootstrap`, each written only when it changes something, with `install_event_id` when an
 install event in the same start caused it.
 
+The actions are `org.identity_mode.set`, `org.group_mappings.set` and `org.bootstrap_sessions.revoked`. On
+the first start the creation is the one event: `platform_admin.bootstrap` stands for the grant that
+comes with it, and `platform_admin.grant` is written only when the grant insert adds a row for an
+admin that already exists (maintainer decision 2026-11-07).
+
 **Keys: not atomic, so checked on start.** Key events are not atomic with the change they record,
 in three ways, and the ADR says so rather than pretending otherwise:
 

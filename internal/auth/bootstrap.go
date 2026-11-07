@@ -15,8 +15,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 )
+
+// BootstrapActor is the actor of everything the start-up bootstrap changes (ADR 0100 decision 2).
+var BootstrapActor = audit.System("koinon-api:bootstrap")
 
 // The bootstrap admin is a local user, not an OIDC one. users requires an
 // (issuer, subject) pair, so it gets a reserved non-URL issuer that no OIDC
@@ -136,9 +140,13 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 		if err != nil {
 			return fmt.Errorf("bootstrap admin: %w", err)
 		}
-		if err := q.GrantPlatformAdmin(ctx, store.GrantPlatformAdminParams{UserID: admin.ID}); err != nil {
+		grantedRows, err := q.GrantPlatformAdmin(ctx, store.GrantPlatformAdminParams{UserID: admin.ID})
+		if err != nil {
 			return fmt.Errorf("grant platform admin: %w", err)
 		}
+		// Audit events of the default org wait until the install events are written: the install
+		// chain's head is taken first (ADR 0100 decision 1.7).
+		var orgEvents []audit.Event
 
 		org, err := q.GetOrgBySlug(ctx, DefaultOrgSlug)
 		switch {
@@ -159,27 +167,77 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 		case err != nil:
 			return fmt.Errorf("load default org: %w", err)
 		default:
-			if err := q.SetOrgIdentityMode(ctx, store.SetOrgIdentityModeParams{
+			n, err := q.SetOrgIdentityMode(ctx, store.SetOrgIdentityModeParams{
 				ID: org.ID, IdentityMode: cfg.DefaultOrgIdentityMode,
-			}); err != nil {
+			})
+			if err != nil {
 				return fmt.Errorf("default org identity mode: %w", err)
 			}
+			if n > 0 {
+				orgEvents = append(orgEvents, bootstrapOrgEvent(org.ID, "org.identity_mode.set",
+					map[string]any{"identityMode": string(org.IdentityMode)}, map[string]any{"identityMode": string(cfg.DefaultOrgIdentityMode)}))
+			}
+		}
+
+		// The install events: the first admin's creation, or a grant that came back after it was
+		// removed. Written before any org event of this transaction.
+		var installID string
+		switch {
+		case res.CreatedAdmin:
+			ev, err := audit.RecordInstall(ctx, q, audit.InstallEvent{
+				Actor: BootstrapActor, Action: "platform_admin.bootstrap", TargetKind: "org", TargetID: org.ID.String(),
+				After: map[string]any{"userId": admin.ID.String(), "source": "bootstrap", "defaultOrgSlug": org.Slug},
+			})
+			if err != nil {
+				return err
+			}
+			installID = ev.ID.String()
+		case grantedRows > 0:
+			ev, err := audit.RecordInstall(ctx, q, audit.InstallEvent{
+				Actor: BootstrapActor, Action: "platform_admin.grant", TargetKind: "user", TargetID: admin.ID.String(),
+				After: map[string]any{"source": "bootstrap"},
+			})
+			if err != nil {
+				return err
+			}
+			installID = ev.ID.String()
+		}
+		flush := func() error {
+			for _, ev := range orgEvents {
+				ev.InstallEventID = installID
+				if err := audit.RecordErr(ctx, q, ev); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 
 		if cfg.OIDCIssuer != "" {
 			keep := make([]string, 0, len(cfg.GroupMappings))
+			var changed int64
 			for _, m := range cfg.GroupMappings {
-				if err := q.UpsertGroupMapping(ctx, store.UpsertGroupMappingParams{
+				n, err := q.UpsertGroupMapping(ctx, store.UpsertGroupMappingParams{
 					OrgID: org.ID, OidcIssuer: cfg.OIDCIssuer, GroupName: m.Group, Role: m.Role,
-				}); err != nil {
+				})
+				if err != nil {
 					return fmt.Errorf("group mapping %q: %w", m.Group, err)
 				}
+				changed += n
 				keep = append(keep, m.Group)
 			}
-			if err := q.DeleteGroupMappingsExcept(ctx, store.DeleteGroupMappingsExceptParams{
+			removed, err := q.DeleteGroupMappingsExcept(ctx, store.DeleteGroupMappingsExceptParams{
 				OrgID: org.ID, OidcIssuer: cfg.OIDCIssuer, KeepGroups: keep,
-			}); err != nil {
+			})
+			if err != nil {
 				return fmt.Errorf("prune group mappings: %w", err)
+			}
+			if changed+removed > 0 {
+				mappings := make([]string, 0, len(cfg.GroupMappings))
+				for _, m := range cfg.GroupMappings {
+					mappings = append(mappings, m.Group+"="+string(m.Role))
+				}
+				orgEvents = append(orgEvents, bootstrapOrgEvent(org.ID, "org.group_mappings.set", nil,
+					map[string]any{"issuer": cfg.OIDCIssuer, "mappings": mappings, "added": changed, "removed": removed}))
 			}
 		}
 
@@ -188,42 +246,63 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 				Now: ts(now), AuthMethod: store.AuthMethodPassword,
 			})
 			res.RevokedSessions = n
-			return err
-		}
-		_, err = q.GetLocalCredential(ctx, admin.ID)
-		if err == nil {
-			// Already set; the file is not read again.
-			if err := q.SetLocalUsername(ctx, store.SetLocalUsernameParams{
-				UserID: admin.ID, Username: cfg.Username,
-			}); err != nil {
-				return fmt.Errorf("rename bootstrap admin: %w", err)
+			if err != nil {
+				return err
 			}
-			return nil
+			if n > 0 {
+				orgEvents = append(orgEvents, bootstrapOrgEvent(org.ID, "org.bootstrap_sessions.revoked", nil, map[string]any{"revoked": n}))
+			}
+			return flush()
 		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("load credential: %w", err)
-		}
-		if cfg.PasswordFile == "" {
-			res.MissingPasswordFile = true
-			return nil
-		}
-		password, err := readPasswordFile(cfg.PasswordFile)
-		if err != nil {
+		if err := ensureCredential(ctx, q, cfg, admin.ID, &res); err != nil {
 			return err
 		}
-		hash, err := HashPasswordContext(ctx, password)
-		if err != nil {
-			return err
-		}
-		if err := q.CreateLocalCredential(ctx, store.CreateLocalCredentialParams{
-			UserID: admin.ID, Username: cfg.Username, PasswordHash: hash,
-		}); err != nil {
-			return fmt.Errorf("create credential: %w", err)
-		}
-		res.CreatedCredential = true
-		return nil
+		return flush()
 	})
 	return res, err
+}
+
+// bootstrapOrgEvent is a change bootstrap made to the default org, in that org's chain.
+func bootstrapOrgEvent(org pgtype.UUID, action string, before, after any) audit.Event {
+	return audit.Event{Org: org, Actor: BootstrapActor, Action: action, TargetKind: "org", TargetID: org.String(), Before: before, After: after}
+}
+
+// ensureCredential creates the bootstrap admin's login on the first start and keeps its username
+// current afterwards. The credential is not audited: it is the admin's own secret, and creating the
+// admin is the install event.
+func ensureCredential(ctx context.Context, q *store.Queries, cfg BootstrapConfig, admin pgtype.UUID, res *BootstrapResult) error {
+	_, err := q.GetLocalCredential(ctx, admin)
+	if err == nil {
+		// Already set; the file is not read again.
+		if err := q.SetLocalUsername(ctx, store.SetLocalUsernameParams{
+			UserID: admin, Username: cfg.Username,
+		}); err != nil {
+			return fmt.Errorf("rename bootstrap admin: %w", err)
+		}
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("load credential: %w", err)
+	}
+	if cfg.PasswordFile == "" {
+		res.MissingPasswordFile = true
+		return nil
+	}
+	password, err := readPasswordFile(cfg.PasswordFile)
+	if err != nil {
+		return err
+	}
+	hash, err := HashPasswordContext(ctx, password)
+	if err != nil {
+		return err
+	}
+	if err := q.CreateLocalCredential(ctx, store.CreateLocalCredentialParams{
+		UserID: admin, Username: cfg.Username, PasswordHash: hash,
+	}); err != nil {
+		return fmt.Errorf("create credential: %w", err)
+	}
+	res.CreatedCredential = true
+	return nil
 }
 
 func readPasswordFile(path string) (string, error) {

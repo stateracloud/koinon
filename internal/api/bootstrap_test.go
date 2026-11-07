@@ -117,6 +117,77 @@ var _ = Describe("bootstrap", func() {
 		Expect([]string{group, role}).To(Equal([]string{"staff", "viewer"}))
 	})
 
+	Describe("audit (ADR 0100)", func() {
+		install := func(ctx context.Context, e *env, action string) int {
+			return count(ctx, e, `SELECT count(*) FROM install_audit_events WHERE action = $1 AND actor_kind = 'system' AND actor_id = 'koinon-api:bootstrap'`, action)
+		}
+		orgEvents := func(ctx context.Context, e *env, action string) int {
+			return count(ctx, e, `SELECT count(*) FROM audit_events a JOIN orgs o ON o.id = a.org_id
+				WHERE o.slug = 'default' AND a.action = $1 AND a.actor_kind = 'system' AND a.actor_id = 'koinon-api:bootstrap'`, action)
+		}
+
+		It("writes platform_admin.bootstrap on the first start, targeting the default org, and nothing in a personal org", func(ctx SpecContext) {
+			e := newEnv(ctx, envOptions{})
+			Expect(install(ctx, e, "platform_admin.bootstrap")).To(Equal(1))
+			Expect(count(ctx, e, `SELECT count(*) FROM install_audit_events i JOIN orgs o ON o.id::text = i.target_id
+				WHERE i.action = 'platform_admin.bootstrap' AND o.slug = 'default'`)).To(Equal(1))
+			Expect(install(ctx, e, "platform_admin.grant")).To(BeZero(), "the creation is the one event of the first grant")
+			Expect(count(ctx, e, `SELECT count(*) FROM audit_events a JOIN orgs o ON o.id = a.org_id WHERE o.kind = 'personal' AND a.action LIKE 'platform_admin.%'`)).To(BeZero())
+		})
+
+		It("writes nothing on a restart with the grant present, and platform_admin.grant when it was removed", func(ctx SpecContext) {
+			e := newEnv(ctx, envOptions{})
+			total := func() int {
+				return count(ctx, e, `SELECT (SELECT count(*) FROM install_audit_events) + (SELECT count(*) FROM audit_events)`)
+			}
+			before := total()
+			e.bootstrap(ctx)
+			Expect(total()).To(Equal(before), "a restart changes nothing, so it records nothing")
+
+			_, err := e.pool.Exec(ctx, `DELETE FROM platform_admins`)
+			Expect(err).NotTo(HaveOccurred())
+			e.bootstrap(ctx)
+			Expect(install(ctx, e, "platform_admin.grant")).To(Equal(1))
+			Expect(install(ctx, e, "platform_admin.bootstrap")).To(Equal(1), "the admin was not created again")
+			e.bootstrap(ctx)
+			Expect(install(ctx, e, "platform_admin.grant")).To(Equal(1))
+		})
+
+		It("records a change to the default org in its chain, only when it changes something", func(ctx SpecContext) {
+			e := newEnv(ctx, envOptions{oidc: true, groupMappings: []auth.GroupMapping{{Group: "staff", Role: store.OrgRoleMember}}})
+			Expect(orgEvents(ctx, e, "org.group_mappings.set")).To(Equal(1), "the first start adds the mapping")
+			e.bootstrap(ctx)
+			Expect(orgEvents(ctx, e, "org.group_mappings.set")).To(Equal(1))
+
+			e.opts.groupMappings = []auth.GroupMapping{{Group: "staff", Role: store.OrgRoleViewer}}
+			e.opts.defaultOrgMode = store.IdentityModeIdp
+			e.bootstrap(ctx)
+			Expect(orgEvents(ctx, e, "org.group_mappings.set")).To(Equal(2))
+			Expect(orgEvents(ctx, e, "org.identity_mode.set")).To(Equal(1))
+			e.bootstrap(ctx)
+			Expect(orgEvents(ctx, e, "org.group_mappings.set")).To(Equal(2))
+			Expect(orgEvents(ctx, e, "org.identity_mode.set")).To(Equal(1))
+			Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE action = 'org.identity_mode.set' AND NOT (summary ? 'install_event_id')`)).To(Equal(1),
+				"no install event caused a later change")
+		})
+
+		It("points the default org's events back at the install event of the same start", func(ctx SpecContext) {
+			e := newEnv(ctx, envOptions{oidc: true, groupMappings: []auth.GroupMapping{{Group: "staff", Role: store.OrgRoleMember}}})
+			Expect(count(ctx, e, `SELECT count(*) FROM audit_events a JOIN install_audit_events i ON i.id::text = a.summary->>'install_event_id'
+				WHERE a.action = 'org.group_mappings.set' AND i.action = 'platform_admin.bootstrap'`)).To(Equal(1))
+		})
+
+		It("records the revocation of bootstrap sessions when bootstrap login is switched off", func(ctx SpecContext) {
+			e := newEnv(ctx, envOptions{})
+			b := e.browser()
+			Expect(b.login(ctx, "admin", bootstrapPassword).StatusCode).To(Equal(http.StatusOK))
+			off := newEnvOn(ctx, e, envOptions{bootstrapLoginDisabled: true})
+			Expect(orgEvents(ctx, off, "org.bootstrap_sessions.revoked")).To(Equal(1))
+			off.bootstrap(ctx)
+			Expect(orgEvents(ctx, off, "org.bootstrap_sessions.revoked")).To(Equal(1), "nothing left to revoke")
+		})
+	})
+
 	Describe("with bootstrap login disabled", func() {
 		It("refuses password login and ends existing bootstrap sessions", func(ctx SpecContext) {
 			e := newEnv(ctx, envOptions{})

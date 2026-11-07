@@ -86,8 +86,8 @@ var _ = Describe("the audit hash chain", func() {
 		first := record(ctx, org, "test.first")
 		var seq int64
 		var prev, hash []byte
-		Expect(pool.QueryRow(ctx, `INSERT INTO audit_events (org_id, actor_kind, action, target_kind, chain_seq, prev_hash, hash)
-			VALUES ($1, 'system', 'test.forged', 'test', 99, decode(repeat('11', 32), 'hex'), decode(repeat('22', 32), 'hex'))
+		Expect(pool.QueryRow(ctx, `INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind, chain_seq, prev_hash, hash)
+			VALUES ($1, 'system', 'koinon-test:spec', 'test.forged', 'test', 99, decode(repeat('11', 32), 'hex'), decode(repeat('22', 32), 'hex'))
 			RETURNING chain_seq, prev_hash, hash`, org).Scan(&seq, &prev, &hash)).To(Succeed())
 		Expect(seq).To(BeEquivalentTo(2))
 		Expect(prev).To(Equal(first.Hash))

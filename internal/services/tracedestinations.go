@@ -314,7 +314,7 @@ func (a traceAPI) SetPlatformDestination(ctx context.Context, req *tracev1alpha1
 		return nil, err
 	}
 	in.Name = "platform" // the platform destination has one row and no name
-	d, err := a.s.traces.SetPlatformDestination(requestCtx(ctx), p.PersonalOrgID, audit.User(p.UserID), req.ExpectedVersion, in)
+	d, err := a.s.traces.SetPlatformDestination(requestCtx(ctx), audit.User(p.UserID), req.ExpectedVersion, in)
 	if err != nil {
 		return nil, a.traceError(err)
 	}
@@ -326,7 +326,7 @@ func (a traceAPI) DeletePlatformDestination(ctx context.Context, _ *tracev1alpha
 	if err != nil {
 		return nil, err
 	}
-	if err := a.s.traces.DeletePlatformDestination(requestCtx(ctx), p.PersonalOrgID, audit.User(p.UserID)); err != nil {
+	if err := a.s.traces.DeletePlatformDestination(requestCtx(ctx), audit.User(p.UserID)); err != nil {
 		return nil, a.traceError(err)
 	}
 	return &tracev1alpha1.DeletePlatformDestinationResponse{}, nil
@@ -337,7 +337,7 @@ func (a traceAPI) TestPlatformDestination(ctx context.Context, _ *tracev1alpha1.
 	if err != nil {
 		return nil, err
 	}
-	d, outcome, err := a.s.traces.TestPlatform(requestCtx(ctx), p.PersonalOrgID, audit.User(p.UserID))
+	d, outcome, err := a.s.traces.TestPlatform(requestCtx(ctx), audit.User(p.UserID))
 	if err != nil {
 		return nil, a.traceError(err)
 	}
@@ -353,7 +353,7 @@ func (a traceAPI) SetPlatformCeiling(ctx context.Context, req *tracev1alpha1.Set
 	if level == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, "ceiling is required")
 	}
-	n, err := a.s.traces.SetPlatformCeiling(requestCtx(ctx), p.PersonalOrgID, audit.User(p.UserID), level)
+	n, err := a.s.traces.SetPlatformCeiling(requestCtx(ctx), audit.User(p.UserID), level)
 	if err != nil {
 		return nil, a.traceError(err)
 	}

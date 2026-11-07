@@ -91,6 +91,60 @@ var _ = Describe("the install audit chain", func() {
 		db = pgtest.StartTemplate(ctx, pgtest.Durable()).NewDB(ctx)
 	})
 
+	It("takes the install head before the org heads, so concurrent transactions with one install and two org events do not deadlock (ADR 0100 decision 1.7)", func(ctx SpecContext) {
+		a, _, _ := pgtest.NewOrg(ctx, db)
+		b, _, _ := pgtest.NewOrg(ctx, db)
+		orgs := []pgtype.UUID{a, b}
+		if orgs[0].String() > orgs[1].String() {
+			orgs[0], orgs[1] = orgs[1], orgs[0]
+		}
+		one := func(ctx context.Context, n int) error {
+			return pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+				q := store.New(tx)
+				install, err := audit.RecordInstall(ctx, q, audit.InstallEvent{Actor: priceActor, Action: "test.cause", TargetKind: "test", TargetID: fmt.Sprint(n)})
+				if err != nil {
+					return err
+				}
+				for _, org := range orgs { // org ID order
+					if err := audit.RecordErr(ctx, q, audit.Event{
+						Org: org, Actor: priceActor, Action: "test.effect", TargetKind: "test", TargetID: fmt.Sprint(n), InstallEventID: install.ID.String(),
+					}); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+		}
+		Expect(one(ctx, 0)).To(Succeed())
+
+		const workers, rounds = 6, 8
+		var wg sync.WaitGroup
+		errs := make(chan error, workers*rounds)
+		for w := range workers {
+			wg.Go(func() {
+				for r := range rounds {
+					errs <- one(ctx, 1+w*rounds+r)
+				}
+			})
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		var installs, effects, linked int
+		Expect(db.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'test.cause'`).Scan(&installs)).To(Succeed())
+		Expect(db.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE summary->>'install_event_id' IN (SELECT id::text FROM install_audit_events))
+			FROM audit_events WHERE action = 'test.effect'`).Scan(&effects, &linked)).To(Succeed())
+		Expect(installs).To(Equal(1 + workers*rounds))
+		Expect(effects).To(Equal(2 * installs))
+		Expect(linked).To(Equal(effects), "each org event points back at its install event")
+		res, err := audit.VerifyInstall(ctx, store.New(db))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.OK()).To(BeTrue())
+	})
+
 	It("starts with a head at 0 and 32 zero bytes, and links each event to the previous one", func(ctx SpecContext) {
 		var seq int64
 		var hash []byte

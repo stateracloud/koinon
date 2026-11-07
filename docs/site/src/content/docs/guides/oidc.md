@@ -59,7 +59,7 @@ oidc:
   from the IdP and never logs in again keeps platform admin. To remove one at once, delete the row
   (`DELETE FROM platform_admins WHERE user_id = '<id>'`, in Postgres) and disable the user (set
   `users.deleted_at`), which also blocks the login. Grants and revocations the login makes are audited
-  as `platform_admin.grant` and `platform_admin.revoke`.
+  as `platform_admin.grant` and `platform_admin.revoke` in the install audit log (actor `system koinon-api:oidc-sync`).
 - `defaultOrgIdentityMode` is `platform` (roles from Koinon only), `idp` (from `groupMappings`) or
   `hybrid` (both, and the highest role wins).
 
