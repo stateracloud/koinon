@@ -24,7 +24,7 @@ const t = timestampFromMs(Date.now())
 const uiProvider = create(ProviderSchema, { id: 'p-ui', name: 'openrouter', type: 'openrouter', url: 'https://openrouter.ai/api/v1', hasKey: true, source: 'ui', formats: [{ id: 'openai', label: 'OpenAI chat completions' }, { id: 'anthropic', label: 'Anthropic Messages' }], createdAt: t, updatedAt: timestampFromMs(Date.now() - 3_600_000) })
 const claude = create(ProviderSchema, { id: 'p-claude', name: 'claude', type: 'anthropic', url: 'https://api.anthropic.com/v1', source: 'ui', anthropicWorkspaceId: 'wrkspc_01Keep', formats: [{ id: 'anthropic', label: 'Anthropic Messages' }], createdAt: t, updatedAt: t })
 const single = [{ id: 'openai', label: 'OpenAI chat completions' }]
-const secretProvider = create(ProviderSchema, { id: 'p-sec', name: 'homelab', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'secret', managedBySecret: 'ollama-secret', createdAt: t })
+const secretProvider = create(ProviderSchema, { id: 'p-sec', name: 'local-ollama', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'secret', managedBySecret: 'ollama-secret', createdAt: t })
 const removedProvider = create(ProviderSchema, {
   id: 'p-gone',
   name: 'old',
@@ -104,7 +104,7 @@ describe('Providers page', () => {
     expect(ui.queryByText(/per million tokens/)).not.toBeInTheDocument()
     expect(ui.getByRole('link', { name: 'Prices page' })).toHaveAttribute('href', '/settings/prices')
 
-    const sec = within(within(list).getByRole('region', { name: 'homelab' }))
+    const sec = within(within(list).getByRole('region', { name: 'local-ollama' }))
     expect(sec.getByText('Managed by Secret ollama-secret')).toBeInTheDocument()
     expect(sec.queryByRole('button', { name: /Edit provider/ })).not.toBeInTheDocument()
     expect(sec.queryByRole('button', { name: /Delete provider/ })).not.toBeInTheDocument()

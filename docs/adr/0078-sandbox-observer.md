@@ -148,7 +148,7 @@ credentials, or a mirror that is down. Today the run fails after the cap with "t
 - **What the grant is not:** it is not `list`, `watch`, `exec`, a Secret read or any write, and it is not in
   Koinon's own namespace or any other. The reconciler cannot read or change a RoleBinding after creating it.
 - Koinon's reconciler is now a cluster-scoped actor (ADR 0048's amendment of 2026-10-26 removed an unused
-  cluster-wide Sandbox grant; this one is used and narrower). It is one grant for Rivet and platform teams
+  cluster-wide Sandbox grant; this one is used and narrower). It is one grant for platform teams
   to review: the binder ClusterRole and the policy, both in one template.
 - A RoleBinding exists in every workspace namespace until the namespace goes; deleting it by hand costs one
   `forbidden` count and is repaired on the next read.
@@ -227,3 +227,5 @@ Read from clones of NVIDIA/OpenShell (v0.1.5, v0.1.6, main d4e32263) and kuberne
   [0075](0075-isolation-tiers.md), [0077](0077-pinned-openshell-and-installer.md)
 - Chart: `charts/koinon/templates/sandbox-observer.yaml`. Code: `internal/execution/podcause.go`,
   `internal/reconciler/observer.go`. Tests: `test/escape/admission_observer_test.go`.
+
+Note (2026-11-07): private infrastructure detail removed; maintainer decision 2026-11-07.

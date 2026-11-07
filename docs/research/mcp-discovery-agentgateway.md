@@ -181,7 +181,7 @@ Limits:
 1. **Keep using `mcpAuthorization` with an `apiKey.agent` + `mcp.tool.target` + `mcp.tool.name` rule per agent.** It filters lists and rejects calls on the same rule. [E] Note that any `allow` rule switches on allowlist behaviour for everyone on that backend: callers not covered by a rule see nothing. [E] `RuleSets::validate`.
 2. **Hide whole servers with target `condition`s,** for example `apiKey.agent in ["acme/a1","acme/a2"]`, so that unauthorized targets are never contacted. This needs at least 2 targets. [E] Prefer this for org isolation, with `mcpAuthorization` for allowlists at tool level.
 3. **Hybrid API granularity:** the whole `mcpAuthorization` policy is one resource (`mcp.policy/mcpAuthorization`), so Koinon must read, modify and write it, and nothing prevents a lost update between writers. Two other options: give each org or tenant its own route or backend (a `traffic.route` resource each), or attach a policy per target with `AgentgatewayPolicy` `targetRefs.sectionName` in Kubernetes. [E] for the granularity; [I] for the mitigation.
-4. **On a shared gateway Koinon does not own,** Koinon cannot add rules unless the platform delegates. Options are a route or backend per org that Koinon may write, `AgentgatewayPolicy` objects in Koinon's namespace, or a platform request in Rivet's format. [I]
+4. **On a shared gateway Koinon does not own,** Koinon cannot add rules unless the platform delegates. Options are a route or backend per org that Koinon may write, `AgentgatewayPolicy` objects in Koinon's namespace, or a platform request in the platform team's format. [I]
 
 ### Gaps in agentgateway v1.6.0 (as far as these sources show)
 

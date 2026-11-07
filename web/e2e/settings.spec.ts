@@ -22,7 +22,7 @@ function api(role: string) {
   const offered = (type: string) => (type === 'anthropic' ? ['anthropic'] : type === 'openrouter' ? ['openai', 'anthropic'] : ['openai']).map((id) => ({ id, label: label[id] }))
   const providers: Json[] = [
     { id: 'p-1', name: 'openrouter', type: 'openrouter', url: 'https://openrouter.ai/api/v1', hasKey: true, source: 'ui', formats: offered('openrouter') },
-    { id: 'p-2', name: 'homelab', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'secret', managedBySecret: 'ollama-secret', formats: offered('ollama') },
+    { id: 'p-2', name: 'local-ollama', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'secret', managedBySecret: 'ollama-secret', formats: offered('ollama') },
     { id: 'p-3', name: 'old', type: 'openai', url: 'https://api.example.com/v1', source: 'secret', managedBySecret: 'old-secret', formats: offered('openai'), removed: true, disabledReason: 'its Kubernetes Secret was deleted; restore the Secret or delete this entry' },
   ]
   const models: Json[] = [

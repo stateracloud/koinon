@@ -5,7 +5,7 @@ package agentd
 // Home checkpoints (plan item HC1; ADRs 0032, 0051; practice B3).
 //
 // koinon-agentd is the writer: it alone holds the storage credentials and the repositories'
-// passwords (package checkpoint), and the home lab's Garage NetworkPolicy admits only agentd and
+// passwords (package checkpoint), and an S3 store's NetworkPolicy admits only agentd and
 // the API. It reads the home out of the sandbox as a tar stream over exec, as saved work is read
 // (savework.go), and streams it into the kopia writer.
 //

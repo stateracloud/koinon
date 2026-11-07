@@ -1,8 +1,8 @@
 # Spike provider profile: the koinon-spike-bot Gitea token, usable only against
-# the home-lab Gitea API (read-only) and git clone/fetch of the spike org. Modelled on upstream providers/github.yaml.
+# a local Gitea API (read-only) and git clone/fetch of the spike org. Modelled on upstream providers/github.yaml.
 id: gitea-spike
 display_name: Gitea (spike)
-description: koinon-spike-bot token for git.apps.lab.example.invalid
+description: koinon-spike-bot token for git.example.invalid
 category: source_control
 credentials:
   - name: api_token
@@ -14,14 +14,14 @@ credentials:
     # Koinon pushes rotated values (ADR 0043); running processes keep one placeholder.
     stable_placeholder: true
 endpoints:
-  - host: git.apps.lab.example.invalid
+  - host: git.example.invalid
     port: 443
     path: /api/v1/**
     protocol: rest
     access: read-only
     enforcement: enforce
   # Git smart HTTP for the spike org: clone and fetch only, push stays denied.
-  - host: git.apps.lab.example.invalid
+  - host: git.example.invalid
     port: 443
     path: /koinon-spike/**
     protocol: rest

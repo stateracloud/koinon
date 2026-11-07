@@ -23,7 +23,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const gitea = "https://git.apps.lab.example.invalid/api/v1"
+const gitea = "https://git.example.invalid/api/v1"
 
 // PullRequest is the exact call an agent asks for; its hash binds the approval.
 type PullRequest struct {

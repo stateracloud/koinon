@@ -23,7 +23,7 @@ grep -qF '    if: ${{ !cancelled() && !(github.event_name == '"'push'"' && needs
 # A draft is not tested: the gate must fail on it (koinon-private#593), or a vacuous green would be the newest run.
 # shellcheck disable=SC2016 # literal text of the workflow
 sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf" | grep -qF 'SKIP == true && $EVENT == pull_request' || { echo "FAIL: go gate must fail on a draft (skip=true on a pull_request)"; exit 1; }
-# go-test on the lab gate first (koinon-private#610): the job is skipped when `changes` found a green go-test-lab on
+# go-test satisfied by an external run (koinon-private#610): the job is skipped when `changes` found a green go-test-lab on
 # the head, and only then may the gate count that skip. Run the gate's own script with each outcome.
 # shellcheck disable=SC2016 # literal text of the workflow
 grep -qF "if: needs.changes.outputs.go == 'true' && needs.changes.outputs.go_test_lab != 'true'" <(sed -n '/^  go-test:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-test must be skipped when go_test_lab is true (and only then)"; exit 1; }
@@ -40,9 +40,9 @@ gate() { # gate NAME WANT_RC GO_TEST LAB RESULTS...: runs the extracted script
   [[ $rc == "$want" ]] || { echo "FAIL: $name (rc $rc, want $want)"; cat "$tmp/out"; exit 1; }
 }
 gate "all green" 0 success false success success success success success success
-gate "go-test skipped by the lab is a pass" 0 skipped true success success success skipped success success
-gate "go-test skipped without the lab is a failure" 1 skipped false success success success skipped success success
-gate "go-test skipped by the lab does not excuse another skipped job" 1 skipped true success skipped success skipped success success
-gate "a failed job still fails with the lab" 1 skipped true success failure success skipped success success
+gate "go-test skipped by an external run is a pass" 0 skipped true success success success skipped success success
+gate "go-test skipped without an external run is a failure" 1 skipped false success success success skipped success success
+gate "go-test skipped by an external run does not excuse another skipped job" 1 skipped true success skipped success skipped success success
+gate "a failed job still fails with an external run" 1 skipped true success failure success skipped success success
 gate "lab true but go-test ran and failed" 1 failure true success success success failure success success
 echo "ok: go gate covers $(echo "$jobs" | tr '\n' ' ')"

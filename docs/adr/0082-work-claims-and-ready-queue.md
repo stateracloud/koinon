@@ -105,7 +105,7 @@ claim ref could be deleted by hand.
     older than the ADR 0079 cooldown), held as secrets of an Environment limited to main; each job
     asks for the narrowest token permissions. Jobs skip with a notice while the secrets are absent.
 11. **People.** `@ovirandunu` stays admin with full trust in the repository. He gets no access to
-    procoduck's OpenBao, model budget, home lab or CI box; he uses his own setup for those. Both humans'
+    procoduck's secret store, model budget or private test infrastructure; he uses his own setup for those. Both humans'
     agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay procoduck's.
 
 Exit codes of `hack/claim.sh`: 0 success; 1 error; 2 refused (held by someone else, not takeable yet,
