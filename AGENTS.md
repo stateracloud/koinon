@@ -22,7 +22,7 @@ Instructions for coding agents working on Koinon.
 - Sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`): `make test-admission`; its
   OpenShell cases run on kind: `make dev-kind-up`, then `make test-escape-kind`.
 - Local cluster: kind is the dev loop (`make dev-kind-up`, `make dev`, `make test-e2e-kind`). Nothing
-  needs the maintainers' home lab, registry or secret store; see CONTRIBUTING.md and `docs/dev/loop.md`.
+  else (no registry, no secret store) is needed; see CONTRIBUTING.md and `docs/dev/loop.md`.
   Real-model runs on your own cluster and budget: `docs/dev/real-model-tests.md`.
 - Claims: `hack/claim.sh help`; `hack/claim_test.sh` (offline). ADRs: `hack/adr-lint.sh`, `hack/adr-index.sh`.
 - Before you hand over or push: `hack/lane-gates.sh` (blocks; the gates your change touches, one
@@ -37,12 +37,10 @@ Instructions for coding agents working on Koinon.
 - CI and e2e (details: `docs/dev/ci.md`). Mark the PR ready (`hack/ship.sh --ready`, `gh pr ready`)
   before you wait on it with `hack/pr-wait.sh`: a draft runs almost nothing (`go` and `web` show red
   on purpose) and its green is not merge evidence; get WIP feedback from `hack/preflight.sh`.
-  To run `go-test` on the lab gate instead of CI: `hack/ship.sh --ready --lab-go-test` (koinon-private#610).
   [Testing layers](docs/dev/ci.md#testing-layers) · [what `ci` runs when](docs/dev/ci.md#what-ci-runs-when)
 - Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. A needs-e2e PR needs a green
-  `e2e-lab` status or `quickstart` run on its head (`e2e result` is red without one). The PR's own
-  run runs the quickstart by itself; `hack/e2e-remote.sh --argo` (lab) is an optional faster path, and
-  you dispatch `gh workflow run e2e-kind.yml --ref <branch>` only to re-run. Exit 75/78/79 and `--local` (not merge evidence): [testing layers](docs/dev/ci.md#testing-layers).
+  `e2e-lab` commit status (an external e2e run that passed on this commit) or a green `quickstart` run on the head (`e2e result` is red without one).
+  The PR's own run runs the quickstart by itself; you dispatch `gh workflow run e2e-kind.yml --ref <branch>` only to re-run. `hack/e2e-remote.sh --local` is not merge evidence: [testing layers](docs/dev/ci.md#testing-layers).
 - When main's kind e2e goes red, fix forward within 2 hours or revert the merge (`hack/e2e-bisect.sh`
   opens an `e2e-regression` issue). RC and release tags are cut only from a commit whose `quickstart`
   job succeeded (`hack/release-gate.sh` checks it).
@@ -110,14 +108,7 @@ with `hack/claim.sh take N --lane L`, creates the lane's worktree with `hack/wt.
 the agent the issue, the worktree and `docs/agents/subagent-brief.md`. One issue per lane, at most
 eight claims per human. Pick the model from the brief's "Which model" section. The parent beats,
 ships (`hack/ship.sh`) and releases; agents never call `claim.sh`. Each lane tests its own
-worktree: `hack/e2e-remote.sh --repo` is an `--argo` option, so on the local Docker run the script
-from the lane's worktree.
-
-## Maintainer lab (optional)
-
-Only the maintainers have a home lab; nothing in the repository needs it. Settings, exit codes, the
-`e2e-lab` status and lane rules: `docs/dev/maintainer-homelab.md`. A lane runs
-`hack/e2e-remote.sh --argo --repo <its worktree>` with `KOINON_E2E_AGENT=<session>-<lane>` and keeps at most one kind run waiting.
+worktree: `hack/e2e-remote.sh` tests the checkout it is run from, so run it from the lane's worktree.
 
 ## Working alongside another human
 

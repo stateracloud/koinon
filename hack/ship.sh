@@ -5,7 +5,7 @@
 # origin/main, gitleaks, push, pull request, board, ready, auto-merge, claim review. One line per step.
 #
 #   hack/ship.sh [--message-file F | -m SUBJECT] [--pr-title T --pr-body FILE] [--draft] [--ready]
-#                [--e2e] [--lab-go-test] [--auto-merge] [--hold] [--review N[,M]] [--no-issue] [--dry-run]
+#                [--e2e] [--auto-merge] [--hold] [--review N[,M]] [--no-issue] [--dry-run]
 #
 # Before the push it looks up the branch's PR. A MERGED or CLOSED one is a refusal (exit 1): a push
 # cannot reach main through it; the message says how to continue on a new branch. Pushing to an open
@@ -14,19 +14,7 @@
 # --e2e adds the `e2e` label before the push (an open PR) or at PR creation. Creation labels in a
 # second call; e2e-kind's `opened` run reads the labels live and runs the e2e (koinon-private#468).
 #
-# --lab-go-test (with --ready, koinon-private#610) runs the go-test gate on the lab after the push and BEFORE the pull
-# request is marked ready: `hack/e2e-remote.sh --argo --gate go-test` posts the commit status go-test-lab
-# on the pushed head, and the ready run of ci.yml then skips its hosted go-test (a draft skips the
-# heavy jobs, so nothing is lost by running the lab first). Exit 75 (lab cannot run it now, no free slot),
-# 76 (NOT RUN), 78 (no lab configured) or 2 (the lab rejected the call) print the reason and go on: go-test runs on
-# the hosted runner, as it does for anyone without a lab. Only a failed gate (a posted failure status) stops.
-# A new pull request is created as a draft; one that is already ready skips the lab run (see below). A push to a pull request that is already ready runs CI
-# on the new head at once, before any lab status can exist, and ci.yml does not wait for one (a waiting
-# hosted job runs): that go-test runs on the hosted runner. To keep it on the lab, turn the pull
-# request back into a draft first (`gh pr ready --undo`), push, and ship with --ready --lab-go-test.
-# The lab run takes minutes; the claim must be renewed (hack/claim.sh beat) around it.
-#
-# --ready without --lab-go-test on a draft PR that exists marks it ready BEFORE the push (koinon-private#675): ready
+# --ready on a draft PR that exists marks it ready BEFORE the push (koinon-private#675): ready
 # after the push starts a second ci run on the same head. A new PR is created ready, so it has one run.
 #
 # Run it inside a checkout or worktree on a feature branch named <type>/<N>-<slug> (the claim and the
@@ -38,7 +26,7 @@
 #   KOINON_SHIP_MAX_BLOB_MIB    blob size limit in MiB (default 5)
 #
 # Steps: commit ok <sha> | blobs ok | merged origin/main | gitleaks ok (N commits) | pushed <branch> |
-#        PR #N <url> | board ok | lab go-test ok|skipped | ready | auto-merge on | review ok #N
+#        PR #N <url> | board ok | ready | auto-merge on | review ok #N
 # Exit: 0 ok, 1 a gate failed (named on stderr), 2 usage, 3 claim lost, 4 merge conflict.
 # The gitleaks gate is never skipped and nothing is ever force-pushed.
 
@@ -47,7 +35,7 @@
 
 set -euo pipefail
 
-msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 lab=0 auto=0 hold=0 review="" dry=0 no_issue=0 ready_done=0 cr_fresh=0
+msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 review="" dry=0 no_issue=0 ready_done=0 cr_fresh=0
 need() { [[ $# -ge 2 ]] || { echo "ship: $1 needs a value" >&2; exit 2; }; }
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -58,13 +46,12 @@ while [[ $# -gt 0 ]]; do
 	--draft) draft=1; shift ;;
 	--ready) ready=1; shift ;;
 	--e2e) e2e=1; shift ;;
-	--lab-go-test) lab=1; shift ;;
 	--auto-merge) auto=1; shift ;;
 	--hold) hold=1; shift ;;
 	--review) need "$@"; review=$2; shift 2 ;;
 	--no-issue) no_issue=1; shift ;;
 	--dry-run) dry=1; shift ;;
-	-h | --help) sed -n 4,39p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h | --help) sed -n 4,27p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "ship: unknown argument $1 (see --help)" >&2; exit 2 ;;
 	esac
 done
@@ -73,7 +60,6 @@ done
 [[ -z $pr_title && -z $pr_body ]] || [[ -n $pr_title && -n $pr_body ]] || { echo "ship: --pr-title and --pr-body go together" >&2; exit 2; }
 [[ -z $pr_body || -r $pr_body ]] || { echo "ship: cannot read $pr_body" >&2; exit 2; }
 [[ $draft == 0 || $ready == 0 ]] || { echo "ship: --draft and --ready contradict" >&2; exit 2; }
-[[ $lab == 0 || $ready == 1 ]] || { echo "ship: --lab-go-test goes with --ready (the lab status must exist before the ready run)" >&2; exit 2; }
 [[ $draft == 0 || -n $pr_title ]] || { echo "ship: --draft needs --pr-title/--pr-body" >&2; exit 2; }
 [[ -z $review || $review =~ ^[0-9]+(,[0-9]+)*$ ]] || { echo "ship: --review wants N or N,M" >&2; exit 2; }
 
@@ -213,8 +199,8 @@ else
 	# Ready BEFORE the push (koinon-private#675): a draft PR marked ready after the push runs the ci workflow twice on
 	# one head (the synchronize run, then the ready_for_review run), seconds apart. Marked ready first,
 	# the ready_for_review run starts on the old head and the push's run supersedes it (an older head is
-	# cancelled, ci.yml). Not with --lab-go-test: that gate needs the pushed head and runs before ready.
-	if [[ $ready == 1 && $lab != 1 && $pr_state == OPEN ]]; then
+	# cancelled, ci.yml).
+	if [[ $ready == 1 && $pr_state == OPEN ]]; then
 		if [[ $(gh pr view "$pr_num" --json isDraft --jq .isDraft 2>/dev/null || echo false) == true ]]; then
 			gh pr ready "$pr_num" >/dev/null || fail "gh pr ready failed"
 			ready_done=1
@@ -243,7 +229,6 @@ pr_url=""
 if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 	if [[ $dry == 1 ]]; then
 		say "dry-run: would create or update the PR${pr_title:+ \"$pr_title\"}$([[ $draft == 1 ]] && echo ' (draft)'), add it to the board"
-		[[ $lab == 1 ]] && say "dry-run: would run the go-test gate on the lab (hack/e2e-remote.sh --argo --gate go-test) before marking ready"
 		[[ $ready == 1 ]] && say "dry-run: would mark ready, then post @coderabbitai review once per head (stateracloud/koinon only)"
 		[[ $auto == 1 ]] && say "dry-run: would check hack/needs-e2e.sh and enable auto-merge"
 	else
@@ -253,7 +238,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 				gh pr edit "$pr_url" --title "$pr_title" --body-file "$pr_body" >/dev/null
 			else
 				args=(--head "$branch" --title "$pr_title" --body-file "$pr_body")
-				[[ $draft == 1 || $lab == 1 ]] && args+=(--draft)
+				[[ $draft == 1 ]] && args+=(--draft)
 				[[ $e2e == 1 ]] && args+=(--label e2e)
 				pr_url=$(gh pr create "${args[@]}" | tail -n 1)
 			fi
@@ -265,29 +250,6 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 		else
 			echo "ship: warning: could not add $pr_url to the board" >&2
 			say "board warn"
-		fi
-		if [[ $lab == 1 ]] && [[ $(gh pr view "$pr_url" --json isDraft --jq .isDraft 2>/dev/null || echo true) == false ]]; then
-			echo "ship: lab go-test: PR already ready: go-test runs on the hosted runner (CI started on the push); gh pr ready --undo to use the lab" >&2
-			say "lab go-test skipped (PR already ready)"
-		elif [[ $lab == 1 ]]; then
-			# The status must exist on the pushed head before the ready run reads it (koinon-private#610).
-			lab_rc=0
-			hack/e2e-remote.sh --argo --gate go-test || lab_rc=$?
-			case $lab_rc in
-			0)
-				if [[ $(hack/go-test-lab.sh state "$(git rev-parse HEAD)" 2>/dev/null || true) == success ]]; then
-					say "lab go-test ok (go-test-lab is success on $(git rev-parse --short HEAD); go-test is skipped in CI)"
-				else
-					echo "ship: warning: the lab go-test passed but go-test-lab is not visible on $(git rev-parse --short HEAD) (status not posted, or KOINON_E2E_NO_STATUS is set); go-test runs on the hosted runner" >&2
-					say "lab go-test skipped (no status)"
-				fi
-				;;
-			75) echo "ship: lab go-test: the lab cannot run it now (unreachable, no free gate slot, or no verdict); go-test runs on the hosted runner" >&2; say "lab go-test skipped (exit 75)" ;;
-			76) echo "ship: lab go-test: NOT RUN (the gate skipped what it expected to run); go-test runs on the hosted runner" >&2; say "lab go-test skipped (exit 76)" ;;
-			78) echo "ship: lab go-test: no lab configured; go-test runs on the hosted runner" >&2; say "lab go-test skipped (exit 78)" ;;
-			2) echo "ship: lab go-test: the lab rejected the request (exit 2: usage or a 4xx answer); go-test runs on the hosted runner" >&2; say "lab go-test skipped (exit 2)" ;;
-			*) fail "lab go-test failed (exit $lab_rc); fix it and run again (the pull request was not marked ready)" ;;
-			esac
 		fi
 		if [[ $ready == 1 && $ready_done != 1 ]]; then
 			gh pr ready "$pr_url" >/dev/null || fail "gh pr ready failed"

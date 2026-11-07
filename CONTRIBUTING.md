@@ -27,7 +27,7 @@ You may use AI tools. The rules are the same as for any contribution:
 
 ## Requirements
 
-You need nothing from the maintainers' infrastructure: no registry login, no home lab, no model
+You need nothing from the maintainers' infrastructure: no registry login, no model
 key. Everything below runs on your machine with anonymous image pulls. Versions are the ones CI
 uses; newer patch releases usually work, but if something differs from CI, match this table first.
 
@@ -78,8 +78,7 @@ make test-escape-kind # the sandbox escape suite's OpenShell cases on that clust
 
 The local development loop is kind: `make dev-kind-up`, then `make dev` (Tilt), and
 `make test-e2e-kind` for the quickstart end to end. [docs/dev/loop.md](docs/dev/loop.md) covers it,
-including how to point Tilt at a remote cluster of your own. The maintainer's home lab is described
-in [docs/dev/maintainer-homelab.md](docs/dev/maintainer-homelab.md); you do not need it.
+including how to point Tilt at a remote cluster of your own.
 
 ## Pull requests
 

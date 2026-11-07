@@ -35,7 +35,7 @@ hasnt() {
 
 # Existing content in the real format: a free first line, a log, a headed block.
 printf 'HANDOFF 2026-11-02 ~08:30 CET (session x)\nONE lane open:\n- #507 old\n\n- 2026-11-02 ~09:35 resumed\n' >"$lanes"
-printf 'Pending 2026-11-02 ~08:30 CET\n- Waiting on procoduck: move #510 to Ready\n\n- 2026-11-02 ~09:50 Rivet: order #511\n- 2026-11-02 ~10:00 other thing' >"$pending"
+printf 'Pending 2026-11-02 ~08:30 CET\n- Waiting on procoduck: move #510 to Ready\n\n- 2026-11-02 ~09:50 Ops: order #511\n- 2026-11-02 ~10:00 other thing' >"$pending"
 cp "$lanes" "$tmp/lanes.orig"
 cp "$pending" "$tmp/pending.orig"
 
@@ -45,12 +45,12 @@ expect "pending add" 0
 has "pending add appends a dated line" "$pending" "- $(date '+%Y-%m-%d') ~"
 has "pending add keeps the text (pipe cleaned)" "$pending" "check #517 / with pipe"
 has "pending add added the missing final newline" "$pending" "- 2026-11-02 ~10:00 other thing"
-run pending "done" "Rivet: order"
+run pending "done" "Ops: order"
 expect "pending done" 0 "marked done: 1"
-has "pending done marks in place" "$pending" "Rivet: order #511 [done $(date '+%Y-%m-%d') ~"
-has "pending done keeps the leading date" "$pending" "- 2026-11-02 ~09:50 Rivet: order #511"
+has "pending done marks in place" "$pending" "Ops: order #511 [done $(date '+%Y-%m-%d') ~"
+has "pending done keeps the leading date" "$pending" "- 2026-11-02 ~09:50 Ops: order #511"
 cp "$pending" "$tmp/pending.after1"
-run pending "done" "Rivet: order"
+run pending "done" "Ops: order"
 expect "pending done twice" 0 "already done"
 cmp -s "$pending" "$tmp/pending.after1" && ok "second done leaves the file identical" || bad "second done changed the file"
 run pending "done" "no such text anywhere"
@@ -98,7 +98,7 @@ grep -v '^$' "$tmp/lanes.orig" | cmp -s - "$tmp/lanes.now" && ok "original lanes
 # show
 KOINON_STATE_TODAY=2026-11-04 run show
 expect "show" 0 "#517 local feat/517-x PR #600 - ready for review" "#518"
-[[ $out == *"Open pending"* && $out == *"- Waiting on procoduck"* && $out != *"Rivet: order"* ]] && ok "show lists open pending only" || bad "show pending wrong: $out"
+[[ $out == *"Open pending"* && $out == *"- Waiting on procoduck"* && $out != *"Ops: order"* ]] && ok "show lists open pending only" || bad "show pending wrong: $out"
 rm -rf "$KOINON_STATE_DIR"
 mkdir "$KOINON_STATE_DIR"
 run show

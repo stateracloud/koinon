@@ -9,7 +9,7 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
-H=(helm --kube-context homelab)
+H=(helm --kube-context "${SPIKE_CONTEXT:?set SPIKE_CONTEXT}")
 "${H[@]}" upgrade --install agw-k8s-crds oci://cr.agentgateway.dev/charts/agentgateway-crds \
   --version v1.6.0 -n agentgateway-system --wait
 "${H[@]}" upgrade --install agw-k8s oci://cr.agentgateway.dev/charts/agentgateway \

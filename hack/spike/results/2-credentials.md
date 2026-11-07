@@ -3,11 +3,11 @@
 Run 2026-10-21. Setup: `hack/spike/gitea-setup.sh` (org `koinon-spike`, repo `hello` with protected
 `main`, restricted non-admin user `koinon-spike-bot` with write on that repo only; its 40-hex token
 goes straight into OpenBao at `secret/koinon-spike/gitea-bot`). Profile
-`hack/spike/profiles/gitea-spike.yaml` binds `SPIKE_TOKEN` to `git.apps.lab.example.invalid:443`
+`hack/spike/profiles/gitea-spike.yaml` binds `SPIKE_TOKEN` to `git.example.invalid:443`
 `/api/v1/**`, read-only, `enforcement: enforce`, for `/usr/bin/curl`, `/usr/bin/git`,
 `/usr/bin/python3.12`. Provider `gitea-bot` was created from the OpenBao value through the CLI's
 environment (`--credential SPIKE_TOKEN`, never in argv). Probe sandbox `p1` runs
-`zot.apps.lab.example.invalid/koinon/spike-probe:1` (`hack/spike/probe/`).
+`registry.example.invalid/koinon/spike-probe:1` (`hack/spike/probe/`).
 
 The probe (`hack/spike/probe/cred_probe.py`) never knows the real value: it hashes every 40-hex string
 (and base64 that decodes to one) it can find; the hashes are compared outside the sandbox.

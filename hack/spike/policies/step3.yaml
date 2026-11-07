@@ -12,7 +12,7 @@ network_policies:
   gitea_no_pr:
     name: gitea_no_pr
     endpoints:
-      - host: git.apps.lab.example.invalid
+      - host: git.example.invalid
         port: 443
         path: /api/v1/**
         protocol: rest

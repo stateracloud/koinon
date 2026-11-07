@@ -2,25 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Run the kind e2e (`make test-e2e-kind`, the go suite) of the committed HEAD somewhere other than
-# your shell's toolchain, three ways:
+# your shell's toolchain, two ways:
 #
 #   hack/e2e-remote.sh [--local] [--out DIR] [--dry-run]              the local Docker (default)
 #   hack/e2e-remote.sh --ssh [--out DIR] [--dry-run]                  a Docker host over SSH ($KOINON_E2E_REMOTE)
-#   hack/e2e-remote.sh --argo [--out DIR] [--no-wait] [--dry-run]     an Argo Workflows queue you operate
-#   hack/e2e-remote.sh --argo --gate <set> [--out DIR]                one gate set (hack/lab/gate-run.sh) on its koinon-gate template
 #
-# --argo (hack/e2e-argo.sh, see its header for options and settings): an Argo queue of your own, for
-# example a maintainer's home lab. Its endpoints and credentials are not in the repository: set them
-# in the environment or in the untracked lab config (hack/lab/lab.env.example); without them it
-# exits 78. Its options (--no-wait, --follow, --lane, --gate, --no-status, ...) are
-# --argo options and need --argo.
-# --argo exit status: 0 pass, 1 the run failed (the target's own status unless it collides with a code
-# below), 2 usage, 75 the lab cannot run it now (unreachable, no slot, Pending too long, no verdict):
-# fall back to GitHub's e2e-kind (the gate: run it locally), 76 NOT RUN (the gate skipped what it
-# expected to run, koinon-private#507), 78 no lab configured. A change under flavors/ runs on the lab like any other
-# (#200: the lab runner builds the flavor image with FLAVOR_BASE). A followed kind e2e posts the commit
-# status `e2e-lab` on the tested commit (success/failure, not on a fallback; --no-status or
-# KOINON_E2E_NO_STATUS=1 opts out; hack/e2e-status.sh). Details: the header of hack/e2e-argo.sh.
+# Other queues are not driven from this repository. What it accepts as e2e evidence is a green `e2e-lab`
+# commit status (an external e2e run that passed on this commit, hack/e2e-status.sh) or a green
+# `quickstart` run on the head (hack/e2e-gate.sh, hack/pr-wait.sh).
+#
 # --ssh and --local run the pinned toolchain image of hack/e2e-toolchain (the Go from go.mod and the
 # kind, ko, helm and kubectl versions CI uses) against that host's Docker socket, so the result does
 # not depend on what is installed on the machine you type this on. Setting KOINON_E2E_REMOTE alone
@@ -84,10 +74,6 @@ while [[ $# -gt 0 ]]; do
   case $1 in
   --local) mode=local ;;
   --ssh) mode=remote ;;
-  --argo) mode=argo ;;
-  --no-wait | --target | --slot | --follow | --repo | --lane | --gate | --no-status)
-    [[ ${mode:-} == argo ]] || { echo "e2e-remote: $1 is an --argo option; add --argo" >&2; exit 2; }
-    break ;;
   --out) out=${2:?--out needs a directory}; shift ;;
   --dry-run) dry=1 ;;
   --stage) mode=stage ;; # internal: runs on the remote, the script is piped in over ssh
@@ -352,11 +338,6 @@ client_local() {
 }
 
 case ${mode:-local} in
-argo)
-  args=()
-  [[ -z $out ]] || args+=(--out "$out")
-  [[ $dry == 0 ]] || args+=(--dry-run)
-  exec "$(dirname "$SELF")/e2e-argo.sh" ${args[@]+"${args[@]}"} "$@" ;;
 remote)
   [[ -n $REMOTE ]] || { echo "e2e-remote: --ssh needs KOINON_E2E_REMOTE (user@host)" >&2; exit 2; }
   client_remote ;;

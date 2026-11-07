@@ -81,7 +81,7 @@ request:
 
 The go-test job logs in to GHCR, pulls `ghcr.io/<owner>/agentgateway@<digest>` once, and sets
 `KOINON_AGENTGATEWAY_MIRROR` to that repository; `agentgatewayimage.Ref()` then returns the copy, and
-the chart's repository at the same digest when the variable is unset, so a laptop or the lab needs no
+the chart's repository at the same digest when the variable is unset, so a laptop needs no
 GHCR credentials. When the pull fails, go-test fails with a pointer to step 2, except in a fork's own
 CI, which cannot read the copy: there it warns and the tests pull the chart's repository.
 
@@ -158,14 +158,13 @@ after the driver: it runs the commands of `docs/site/src/content/docs/guides/bac
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
 observes (the rule lives only there). If yes, the PR's own run already runs the quickstart on GitHub;
-with a lab you can get there sooner: `hack/e2e-remote.sh --argo`, a green run posts the commit status
-`e2e-lab` on your pushed head and that is enough to merge once the PR's own quickstart has finished (a flaky red one does not hide a green lab run). When it exits 75 (the lab cannot run it
-now) or 78 (no lab configured), wait
+a green `e2e-lab` commit status (an external e2e run that passed on this commit) is enough to merge
+once the PR's own quickstart has finished (a flaky red one does not hide a green external run). Without
+one, wait
 for the PR's quickstart, or dispatch it earlier (`gh workflow run e2e-kind.yml --ref <branch>`). The
 `e2e` label is for a change the rule thinks irrelevant but you want tested.
 `hack/e2e-remote.sh` on your own Docker (`--local`) is a dev and debug tool only: it produces
-neither `e2e-lab` nor `quickstart`, so it is not merge evidence. `SUITE_LABEL=smoke` (not with
-`--argo`) runs steps 1-6 only.
+neither `e2e-lab` nor `quickstart`, so it is not merge evidence. `SUITE_LABEL=smoke` runs steps 1-6 only.
 
 ### The `e2e result` gate
 
@@ -173,13 +172,13 @@ The required check is `e2e result`: green when nothing needs the e2e, but for a 
 (`hack/needs-e2e.sh`) it is red until the head has a green `quickstart` (this run or a dispatched
 one) or `e2e-lab` success (`hack/e2e-gate.sh`, koinon-private#562); a later `e2e-lab` or a passing dispatch
 re-runs the `e2e result` job itself (not when the PR run is still in progress: then "Re-run failed
-jobs"). `e2e-lab` is not a required context of its own, contributors without a lab cannot produce
-it.
+jobs"). `e2e-lab` is not a required context of its own: the PR's own quickstart is the path every
+contributor has.
 
 Trust limit: `result` runs from the PR's own `e2e-kind.yml`, so a PR can edit the YAML to drop the
 gate; the guard is the ruleset's required review on `.github/**` (not CODEOWNERS), `e2e result` is
 not pinned to an app and anyone with write access can post `e2e-lab`: a guardrail against
-mistakes, not a malicious member (pinned integration_id / lab App: koinon-private#568).
+mistakes, not a malicious member (pinned integration_id: koinon-private#568).
 
 Why the e2e exists: koinon-private#281 (branch naming in githubtools) and koinon-private#284 (a startup flag the chart's
 migrate Job lacked) passed every package test and failed only in a full install.
@@ -214,17 +213,14 @@ koinon-private#594: every job pays a fixed start-up cost) and the other workflow
 are skipped only on a push to main whose heavy jobs are skipped. A skipped heavy job reports
 success, so every required check still reports.
 
-### go-test on the lab gate first (koinon-private#610)
+### go-test satisfied by an external run (koinon-private#610)
 
-`hack/ship.sh --ready --lab-go-test` runs `hack/e2e-remote.sh --argo --gate go-test` on the pushed
-draft head (a free gate slot) and the lab posts the commit status `go-test-lab`; `changes` reads
-it for the exact PR head SHA and the ready run skips `go-test`, which `go` accepts (the required
-name stays `go`; no change to the ruleset). Exit 75/78/76/2 or no status: `go-test` runs on
-the hosted runner, as it does without a lab. Nothing waits for a late status, so a push to a ready PR
-runs `go-test` on the hosted runner (go back to draft first to keep the lab). Push to main
+`changes` reads the commit status `go-test-lab` (an external go-test run that passed on exactly this
+head) for the exact PR head SHA; when it is success the ready run skips `go-test`, which `go` accepts
+(the required name stays `go`; no change to the ruleset). Nothing in this repository posts it and
+nothing waits for a late one: without the status `go-test` runs on the hosted runner. Push to main
 (`ci-skip-heavy.sh decide`) and `hack/release-gate.sh` count a skipped `go-test` only with that
-status or a change with no Go. Trust limit as `e2e-lab` (koinon-private#568). See also
-`docs/dev/maintainer-homelab.md`.
+status or a change with no Go. Trust limit as `e2e-lab` (koinon-private#568).
 
 ### Draft pull request (koinon-private#593)
 
@@ -265,9 +261,7 @@ another head SHA, and cancels its own run when the PR head has already moved on 
 It needs `actions: write` on `changes` and is best effort (a fork's read-only token cannot cancel).
 
 `hack/ship.sh --ready` on an existing draft PR marks it ready BEFORE the push, so the push is the only
-event that starts a run on the new head. With `--lab-go-test` the order stays push, lab gate, ready
-(the lab status must exist on the pushed head); the ready run is then the second run on that head and
-queues behind the first.
+event that starts a run on the new head.
 `hack/e2e-rerun-result.sh` does not re-run `e2e result` while the branch has a live `e2e-kind` run on
 another commit: that workflow's PR group still cancels in progress, and a re-run joins it. Tests:
 `hack/ci-concurrency-test.sh`, `hack/ci-supersede-test.sh`, `hack/e2e-rerun-result-test.sh`,
@@ -407,13 +401,10 @@ and fails a needs-e2e PR without a passing e2e on its head (koinon-private#562),
 skip it; still, a pull request that changes startup flags, chart Jobs or hooks, or anything the
 e2e expects does not get auto-merge until `hack/pr-wait.sh <PR> --checks --require e2e` passes
 (`--checks` also waits for every required context of the ruleset to exist on the head, so a
-queued `ci` run is not "green"): a green `e2e-lab` status on the head (from
-`hack/e2e-remote.sh --argo`, which needs the branch pushed) or a green `quickstart` run on the
+queued `ci` run is not "green"): a green `e2e-lab` commit status (an external e2e run that passed on this commit) or a green `quickstart` run on the
 head (it runs on its own for the paths in `.github/workflows/e2e-kind.yml`; otherwise dispatch it
 with `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
 `hack/claim.sh review <N>` (step 8 of "Picking up work" in `AGENTS.md`).
-
-The maintainer lab (`hack/e2e-remote.sh --argo`, `e2e-lab`, lanes): `docs/dev/maintainer-homelab.md`.
 
 `hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]` does all of this in one script (koinon-private#647): it refuses a
 draft, runs `pr-wait.sh --checks` (with `--require e2e` when `needs-e2e.sh` says so; it reads the PR's whole

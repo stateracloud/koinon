@@ -103,24 +103,24 @@ app, `strict_required_status_checks_policy: true`):
 | `claim` | `claims.yml`: `pull_request_target` only | `pull_request_target` is a pull request event, not a group one, so it does not run for the group **[unverified]**: the events page lists `merge_group` separately and says nothing either way. Two options: (a) a `merge_group` job that takes `<N>` from the queue ref and runs the base's `hack/claim.sh check-pr <N>`; (b) one that reports success, since the claim was checked on the PR before it could be queued. (a) keeps the check meaningful for a claim lost while queued. A group of several PRs needs every PR number, and whether the ref names all of them is **[unverified]**. |
 | `e2e result` | `e2e-kind.yml`: `pull_request`, `push`, schedule, dispatch | The hard one; see below. |
 
-**`e2e result` and the lab-first e2e.** `hack/e2e-gate.sh` looks for evidence on the PR's head SHA:
+**`e2e result` and the externally-run e2e.** `hack/e2e-gate.sh` looks for evidence on the PR's head SHA:
 
 1. this run's quickstart;
 2. another e2e-kind run on that head;
-3. the `e2e-lab` commit status that `hack/e2e-remote.sh --argo` posts.
+3. the `e2e-lab` commit status that an external e2e run posts (see the note at the end).
 
 A group's commit is a new SHA, so none of the three is there. Options:
 
 - **Map the group to its PRs** and accept evidence on each PR head. This is cheap, but the
-  meaning weakens. Today the strict rule makes the PR head's tree the merged tree, so the lab
-  tested exactly what lands. In a queue, the lab tested the PR without the other PRs in its group
+  meaning weakens. Today the strict rule makes the PR head's tree the merged tree, so an
+  external run tested exactly what lands. In a queue, it tested the PR without the other PRs in its group
   and without what main gained since. That gap is what the strict rule closes today, and #281 and
   #284 are the failures it exists for.
 - **Run the e2e in the queue** for groups that contain a needs-e2e PR. This is exact, but each
   run takes 15-25 minutes on a GitHub-hosted runner. It also holds the whole queue, unless
   build concurrency ("The maximum number of `merge_group` webhooks to dispatch (between `1` and
   `100`)") runs groups in parallel.
-  The lab cannot serve it: `hack/e2e-remote.sh --argo` takes a pushed branch, and the queue ref is
+  An external run cannot serve it: it takes a pushed branch, and the queue ref is
   read-only and short-lived.
 - **Recommended if a queue comes:** map to PR heads for the gate, and keep the batched e2e on main
   (`push`, as now) as the backstop. `hack/e2e-bisect.sh` already names the merge to revert within
@@ -281,3 +281,9 @@ Steps 1 and 2 need no rollback.
      merges meanwhile.
    - #595's tree-equality skip stops applying (the tree no longer equals a green head), so the
      push run goes back to full cost and eats the saving.
+
+## Note (2026-11-07, issue #300)
+
+When this was written, the third kind of evidence came from a maintainer's remote-run client
+(`hack/e2e-remote.sh --argo`). That client has left the repository; the repository's e2e path is kind, and
+`e2e-lab` is any external run that posts the commit status. The analysis above is unchanged.
