@@ -8,11 +8,14 @@ seriously. A sandbox escape suite covers the isolation promises (ADR 0025). What
   required check that reports on every pull request, but the job runs only when the change touches
   `charts/`, `test/escape/` or `internal/testing/testenv/`, and always on a push to main
   (`hack/ci-changes.sh`).
-- The reconciler, gateway and leak guard cases and the OpenShell cases (no direct egress, no cloud
-  metadata, no service account token, no secrets on disk) run only on kind (`make test-escape-kind`)
-  and on a maintainer's Kata cluster. No CI job runs them on pull requests yet: a follow-up to #66
-  tracks an escape-kind job on GitHub-hosted runners, and the leak guard escape case joins the PR
-  kind e2e in #348.
+- The OpenShell cases (no direct egress, no cloud metadata, no service account token, no secrets on
+  disk, and the gitea and github read and live admission cases) run only on kind
+  (`make test-escape-kind`) and on a maintainer's Kata cluster. No CI job runs them on pull requests
+  yet: the escape-kind job on GitHub-hosted runners that #66 listed is tracked in #109.
+- The leak guard escape case (`exfil_test.go`) runs only when someone points the
+  `KOINON_ESCAPE_MCP_*` variables at a guarded install (the e2e install or a maintainer's lab).
+  `make test-escape-kind` skips it, because that install has no gateway or leak guard. Adding it to
+  the PR kind e2e is tracked in #348.
 - The Kata isolation tier is tested only on a maintainer's Kata cluster, because kind cannot run Kata.
 
 ## Reporting a vulnerability
