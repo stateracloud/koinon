@@ -238,6 +238,14 @@ func TestEntryIDAndBuildEntry(t *testing.T) {
 	if err != nil || e.ID == "fake-wildcard" {
 		t.Errorf("a glob entry must not be overwritten: %+v, %v", e, err)
 	}
+	// A hand-set cache_write_1h survives a proposal: the source does not import it.
+	kept := entry("fake-model-a", "1", "2", "")
+	kept.Match = pricing.Match{Glob: "fake/model-a"}
+	kept.Provider = "openrouter"
+	kept.Spec.Prices.CacheWrite1h = "6"
+	if e, err = BuildEntry(o, &kept, SourceOpenRouter, now); err != nil || e.Spec.Prices.CacheWrite1h != "6" {
+		t.Errorf("cache_write_1h must be kept: %+v, %v", e.Spec.Prices, err)
+	}
 	// An offer with problems cannot become an entry.
 	if _, err := BuildEntry(Offer{Model: "fake/x", ProviderType: "openrouter", Problems: []string{"negative price"}}, nil, SourceOpenRouter, now); err == nil {
 		t.Error("an offer with problems must be refused")

@@ -216,6 +216,7 @@ func BuildEntry(o Offer, cur *pricing.Entry, source string, now time.Time) (pric
 	}
 	if cur != nil {
 		e.Tokenizer, e.Ratio, e.ToolOverheadTokens, e.HiddenThinking = cur.Tokenizer, cur.Ratio, cur.ToolOverheadTokens, cur.HiddenThinking
+		keepCacheWrite1h(&e.Spec, cur.Spec)
 		if cur.Provider == o.ProviderType && cur.Match.Glob == o.Model && cur.Match.Regex == "" {
 			e.ID = cur.ID
 			if cur.MaxOutput > 0 {
@@ -240,6 +241,27 @@ func BuildEntry(o Offer, cur *pricing.Entry, source string, now time.Time) (pric
 		return pricing.Entry{}, err
 	}
 	return e, nil
+}
+
+// keepCacheWrite1h carries a hand-set 1-hour cache write rate of cur into prop when the source
+// gives none (it is not imported, ADR 0098 section 8), for the base prices and for each tier with
+// the same ContextOver. Without it an applied proposal would bill 1-hour writes at the 5-minute rate.
+func keepCacheWrite1h(prop *pricing.Spec, cur pricing.Spec) {
+	if prop.Prices.CacheWrite1h == "" {
+		prop.Prices.CacheWrite1h = cur.Prices.CacheWrite1h
+	}
+	old := map[int64]string{}
+	for _, t := range cur.Tiers {
+		old[t.ContextOver] = t.Prices.CacheWrite1h
+	}
+	// Copy the tiers: the slice is shared with the offer.
+	tiers := append([]pricing.WireTier(nil), prop.Tiers...)
+	for i := range tiers {
+		if tiers[i].Prices.CacheWrite1h == "" {
+			tiers[i].Prices.CacheWrite1h = old[tiers[i].ContextOver]
+		}
+	}
+	prop.Tiers = tiers
 }
 
 // ErrNoMaxOutput is BuildEntry's error for an otherwise valid entry that has no max_output: the
