@@ -23,6 +23,8 @@ case $1 in
 esac
 if [[ $1 == --list ]]; then
 	for g in $STUB_GATES; do echo "$g: because"; done
+	[[ -n ${STUB_LIST_RC:-} ]] && { echo "list exploded" >&2; exit "$STUB_LIST_RC"; }
+	[[ -z ${STUB_EMPTY:-} ]] && echo "gitleaks: always"
 	echo "e2e: informational, always"
 	exit 0
 fi
@@ -106,8 +108,10 @@ expect "fail beats notrun" 1 'gate=go .*verdict=fail' 'gate=web .*verdict=notrun
 # A stub docker on PATH decides whether the Docker-needing jobs (chartsmoke, flavors) can run.
 mkdir "$tmp/bin-up" "$tmp/bin-down"
 printf '#!/bin/sh\nexit 0\n' >"$tmp/bin-up/docker"
+printf '#!/bin/sh\nexit 0\n' >"$tmp/bin-up/helm"
+printf '#!/bin/sh\nexit 0\n' >"$tmp/bin-up/go"
 printf '#!/bin/sh\nexit 1\n' >"$tmp/bin-down/docker"
-chmod +x "$tmp/bin-up/docker" "$tmp/bin-down/docker"
+chmod +x "$tmp/bin-up/helm" "$tmp/bin-up/go" "$tmp/bin-up/docker" "$tmp/bin-down/docker"
 run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="chartsmoke flavors escape"
 expect "jobs pass" 0 '^gate=chartsmoke .*verdict=pass' '^gate=flavors .*verdict=pass' '^gate=escape .*verdict=pass'
 run PATH="$tmp/bin-down:$PATH" STUB_GATES="" STUB_JOBS="chartsmoke escape"
@@ -161,8 +165,33 @@ expect "ci-changes fails" 1 'ci-changes.*failed|changes-bad failed' 'no merge ba
 # A missing tool for a heavy job is notrun with the tool named.
 run LANE_GATES_MISSING_TOOLS="helm" STUB_GATES="" STUB_JOBS="escape"
 expect "helm missing" 3 '^gate=escape .*verdict=notrun reason="helm not installed"'
-run LANE_GATES_MISSING_TOOLS="go" PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="chartsmoke"
-expect "go missing" 3 '^gate=chartsmoke .*verdict=notrun reason="go not installed"'
+run LANE_GATES_MISSING_TOOLS="go" PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="chartsmoke flavors escape"
+expect "go missing" 3 '^gate=chartsmoke .*verdict=notrun reason="go not installed"' '^gate=flavors .*verdict=notrun reason="go not installed"' '^gate=escape .*verdict=notrun reason="go not installed"'
+
+# preflight --list crashing is never "ok".
+run STUB_GATES="go" STUB_LIST_RC=2
+expect "list crash" 1 'list.* failed \(exit 2\)' 'list exploded'
+grep -q 'lane-gates ok' <<<"$out" && { echo "FAIL: list crash said ok"; fails=$((fails + 1)); }
+# An empty gate list (gitleaks is always selected) means something broke.
+run STUB_GATES="" STUB_EMPTY=1
+expect "empty list" 1 'selected no gate'
+# A CI job with no local gate is notrun, exit 3.
+run STUB_GATES="go" STUB_JOBS="mystery"
+expect "unknown job" 3 '^gate=mystery .*verdict=notrun reason="no local gate for CI job mystery"' '^lane-gates INCOMPLETE'
+# A pnpm sandbox denial next to a vitest failure is a failure.
+cat >"$tmp/make-vitest" <<'EOF2'
+#!/usr/bin/env bash
+echo "pnpm: operation not permitted"
+echo " FAIL  src/app.test.ts > renders"
+echo " Test Files  1 failed (1)"
+exit 1
+EOF2
+chmod +x "$tmp/make-vitest"
+out=$(env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-vitest" STUB_GATES="go" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" HEAD 2>&1); rc=$?
+expect "vitest failure beats sandbox denial" 1 '^gate=escape rc=1 .*verdict=fail'
+# Hooks print a warning.
+run STUB_GATES="go"
+expect "hook warning" 0 'warning: test hook LANE_GATES_PREFLIGHT is set'
 
 # Usage errors.
 out=$(bash "$script" --nope 2>&1); rc=$?

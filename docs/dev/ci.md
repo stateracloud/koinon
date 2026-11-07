@@ -198,7 +198,9 @@ gate=<name> rc=<n> seconds=<n> verdict=pass|fail|notrun [reason="..."] log=<path
 and exits 1 when a gate failed, 3 when none failed but a gate could not run on this machine, 0 when
 all passed. `notrun` (no Docker, a missing tool, a sandbox denial, a suite that skipped for a missing
 requirement) is never a `fail` and never a pass; exit 3 is not "verified", so rerun where the
-requirement exists. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
+requirement exists. It never says `ok` unless every selected gate passed and at least one ran: a
+crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, and a CI job with no
+local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
 its offline self-test (stubbed gates, run by the `scripts` job).
 
 ## What `ci` runs when

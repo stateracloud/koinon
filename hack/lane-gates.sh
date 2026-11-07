@@ -19,8 +19,13 @@
 # Exit: 1 when any gate failed, 3 when none failed but some did not run (do not read that as
 # verified), 0 when every selected gate passed, 2 on a usage error.
 #
+# "ok" is printed only when every selected gate passed and at least one gate ran. A crash of
+# preflight --list or ci-changes.sh, an empty gate list (gitleaks is always selected) and a CI job
+# with no local gate are never "ok": the first two exit 1, the last is notrun (exit 3).
+#
 # Test hooks (hack/lane-gates-test.sh): LANE_GATES_PREFLIGHT, LANE_GATES_CHANGES, LANE_GATES_MAKE
 # replace hack/preflight.sh, hack/ci-changes.sh and make; LANE_GATES_MISSING_TOOLS="helm go" hides tools.
+# Setting any of them prints a warning on stderr.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -28,7 +33,7 @@
 set -uo pipefail
 
 case ${1:-} in
--h | --help) sed -n 4,22p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+-h | --help) sed -n 4,27p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 -*) echo "lane-gates: unknown argument $1 (see --help)" >&2; exit 2 ;;
 esac
 [[ $# -le 1 ]] || { echo "lane-gates: at most one argument, the base ref" >&2; exit 2; }
@@ -41,14 +46,17 @@ preflight=${LANE_GATES_PREFLIGHT:-hack/preflight.sh}
 changes=${LANE_GATES_CHANGES:-hack/ci-changes.sh}
 make_cmd=${LANE_GATES_MAKE:-make}
 export KUBECONFIG=/dev/null
+for v in LANE_GATES_PREFLIGHT LANE_GATES_CHANGES LANE_GATES_MAKE LANE_GATES_MISSING_TOOLS; do
+	[[ -z ${!v:-} ]] || echo "lane-gates: warning: test hook $v is set; this run is not a real verdict" >&2
+done
 
 logdir=$(mktemp -d "${TMPDIR:-/tmp}/lane-gates.XXXXXX") || exit 2
-failed=0 notrun=0
+failed=0 notrun=0 ran=0
 
 # A real failure marker in a log: a gate with one of these failed, whatever else the log says
 # (go-test.sh logs "docker is not available" skips right next to real failures).
 has_failure() { # <log>
-	grep -qE -- '--- FAIL|\[FAIL\]|^FAIL|Summarizing [0-9]+ Failure|verdict: FAILED' "$1"
+	grep -qE -- '--- FAIL|\[FAIL\]|^FAIL|Summarizing [0-9]+ Failure|verdict: FAILED|^ FAIL |Test Files .*failed|error TS[0-9]+|^ *[0-9]+:[0-9]+ +error |\bSC[0-9]{4}\b|^[^ :]+\.go:[0-9]+:[0-9]+: ' "$1"
 }
 
 # Output that says the machine, not the change, was the problem. Failure markers win. Pass
@@ -79,6 +87,7 @@ report() { # <gate> <rc> <seconds> <verdict> <reason> <log>
 	local line="gate=$1 rc=$2 seconds=$3 verdict=$4"
 	[[ -n $5 ]] && line="$line reason=\"$5\""
 	echo "$line log=$6"
+	ran=$((ran + 1))
 	case $4 in fail) failed=1 ;; notrun) notrun=1 ;; esac
 }
 
@@ -128,7 +137,19 @@ jobgates=""
 for j in $jobs; do
 	case $j in go | web | generate | chart | docs) jobgates="$jobgates $j" ;; esac
 done
-gates=$( { "$preflight" --base "$base" --list 2>/dev/null | sed -n 's/^\([a-z0-9]*\):.*/\1/p' | grep -vx e2e; for j in $jobgates; do echo "$j"; done; } | awk '!seen[$0]++' || true)
+list_out=$("$preflight" --base "$base" --list 2>"$logdir/list.err")
+list_rc=$?
+if [[ $list_rc -ne 0 ]]; then
+	echo "lane-gates FAIL: $preflight --list failed (exit $list_rc), so the gates cannot be chosen; nothing was verified" >&2
+	sed 's/^/  | /' "$logdir/list.err" | head -5 >&2
+	exit 1
+fi
+pre_gates=$(sed -n 's/^\([a-z0-9]*\):.*/\1/p' <<<"$list_out" | grep -vx e2e)
+if [[ -z $pre_gates ]]; then
+	echo "lane-gates FAIL: $preflight --list selected no gate (gitleaks is always selected); nothing was verified" >&2
+	exit 1
+fi
+gates=$( { echo "$pre_gates"; for j in $jobgates; do echo "$j"; done; } | awk '!seen[$0]++')
 for g in $gates; do
 	log=$logdir/$g.log
 	start=$SECONDS
@@ -156,11 +177,17 @@ done
 for j in $jobs; do
 	case $j in
 	chartsmoke) run_cmd chartsmoke "docker helm go" "$make_cmd" test-chart-smoke ;;
-	flavors) run_cmd flavors docker "$make_cmd" test-flavors ;;
-	escape) run_cmd escape helm "$make_cmd" test-admission ;;
+	flavors) run_cmd flavors "docker go" "$make_cmd" test-flavors ;;
+	escape) run_cmd escape "helm go" "$make_cmd" test-admission ;;
+	go | web | generate | chart | docs) ;; # preflight gates, run above
+	*) report "$j" 0 0 notrun "no local gate for CI job $j" "$logdir/$j.log" ;;
 	esac
 done
 
+if [[ $ran == 0 ]]; then
+	echo "lane-gates FAIL: no gate ran; nothing was verified" >&2
+	exit 1
+fi
 if [[ $failed == 1 ]]; then
 	echo "lane-gates FAIL (logs in $logdir)"
 	exit 1
