@@ -585,6 +585,7 @@ func serve(ctx context.Context, cfg config) error {
 			}
 			if created {
 				slog.Warn("created the key-encryption key Secret; back it up now (docs/ops/secret-keys.md)", "secret", cfg.kekSecret)
+				keyAudits.generatedEvent(ctx, "secret", cfg.kekSecret)
 			}
 		}
 		if keyring, err = loadKeyring(ctx, kekStore, kekMonitor.Observer()); err != nil {

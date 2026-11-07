@@ -73,6 +73,15 @@ var _ = Describe("koinon-api's key events", func() {
 		Expect(raw).NotTo(ContainSubstring("koinon_test_not-a-real-secret"), "a Secret is read by metadata only")
 	})
 
+	It("records the KEK Secret koinon-api creates as one keys.generated, and the start-up check then writes nothing", func(ctx SpecContext) {
+		m := mark(ctx)
+		keyAud.generatedEvent(ctx, "secret", "koinon-kek")
+		Expect(count(ctx, "keys.generated", m)).To(Equal(1))
+		keyAud.startObserving(ctx, func() {})
+		Expect(count(ctx, "keys.observed", m)).To(BeZero())
+		Expect(count(ctx, "keys.generated", m)).To(Equal(1))
+	})
+
 	It("observes once, again when a generated Secret is re-created, and never records a value", func(ctx SpecContext) {
 		_, err := kube.CoreV1().Secrets(ns).Create(ctx, secretOf("koinon-session", "uid-1", true), metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
