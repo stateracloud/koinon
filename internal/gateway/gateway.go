@@ -831,17 +831,16 @@ type UsageRecord struct {
 	// the upstream cut).
 	Error string
 
-	// InputTokens is the total input as the gateway reports it and includes CacheReadTokens and
-	// CacheWriteTokens; OutputTokens includes ReasoningTokens. The record is therefore NOT disjoint:
-	// the ledger derives the disjoint buckets it prices (input without cache, output with reasoning)
-	// itself, in pricing.Split. ADR 0097 decision 3 intends disjoint buckets in the record; that
-	// change is a follow-up and alters this field's meaning. InputKnown and OutputKnown say the
-	// gateway reported the side.
+	// The token buckets are disjoint (ADR 0097 decision 3): InputTokens excludes CacheReadTokens and
+	// CacheWriteTokens, OutputTokens excludes ReasoningTokens, and every bucket is priced as it
+	// stands. A driver whose gateway reports totals subtracts the parts when it maps its log. When
+	// ReasoningKnown is false the reasoning is not split out and OutputTokens is the whole output.
+	// InputKnown and OutputKnown say the gateway reported the side.
 	InputTokens, OutputTokens         int64
 	InputKnown, OutputKnown           bool
 	CacheReadTokens, CacheWriteTokens int64
-	// ReasoningTokens is the part of OutputTokens the provider reported as reasoning. ReasoningKnown
-	// says the split was reported; without it the 0 means "not reported", not "no thinking".
+	// ReasoningTokens is the provider-reported reasoning part of the output. ReasoningKnown says the
+	// split was reported; without it the 0 means "not reported", not "no thinking".
 	ReasoningTokens int64
 	ReasoningKnown  bool
 
