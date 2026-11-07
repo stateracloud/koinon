@@ -38,10 +38,11 @@ End-to-end tests (kind), flavor contract tests and the sandbox escape suite (ADR
     `KOINON_OPENSHELL_ENDPOINT`; see the package comment for the variables.
 
   - Leak guard exfiltration (label `leakguard`, `exfil_test.go`): from a sandbox, a `write_item`
-    call carrying what `read_item` returned must be refused or parked and never reach the fake
-    receiver. Needs a guarded gateway the suite does not start (`KOINON_ESCAPE_MCP_HOST`,
-    `KOINON_ESCAPE_MCP_KEY`, `KOINON_ESCAPE_MCP_RECEIVER_URL`); skipped without them, and written
-    but not run in CI until #348 wires it. `docs/dev/ci.md` has the details.
+    call carrying what `read_item` returned, and a `fetch_url` to an attacker address, must be refused or
+    parked and never reach the fake receiver. Needs a guarded gateway the suite does not start
+    (`KOINON_ESCAPE_MCP_HOST`, `KOINON_ESCAPE_MCP_KEY`, `KOINON_ESCAPE_MCP_RECEIVER_URL`); skipped
+    without them. CI runs it inside the kind e2e (`ESCAPE_MCP=1`, `test/e2e/escape-mcp.sh`, #348).
+    `docs/dev/ci.md` has the details.
 
   Running the OpenShell cases against another cluster's gateway, port-forwarded:
 
