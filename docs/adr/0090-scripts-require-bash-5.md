@@ -82,5 +82,9 @@ it. That closes the gap at the source for the price of one prerequisite.
 
 ## Note (2026-11-07, issue #300)
 
-`hack/lab/config.sh`, named above as a sourced library without a guard, is no longer tracked (the maintainer
-lab's scripts live outside the repository). The scope rule is unchanged.
+The maintainer lab tooling left the repository: the remote-run client, its pod-side scripts, its
+configuration and the document that described the setup are no longer tracked. The repository's e2e path
+is kind (`make dev-kind-up`, `make test-e2e-kind`, the PR's own `quickstart` run). What the text above
+says about the lab's scripts, `--argo`, `--gate` or `hack/lab/` describes the history. The repository
+still reads two commit statuses, `e2e-lab` and `go-test-lab`, as evidence that an external run passed
+on a commit.

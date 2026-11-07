@@ -49,7 +49,7 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/internal/foo" "$seed/charts/koinon" "$seed/web" "$seed/docs/adr" "$seed/internal/db/queries" "$seed/internal/db/migrations"
-for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check mktemp-lint mktemp-lint-test bash5-lint bash5-lint-test versions-check versions-check-test lab-domain-lint lab-domain-lint-test; do
+for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check mktemp-lint mktemp-lint-test bash5-lint bash5-lint-test versions-check versions-check-test; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
 # The Go gate runs hack/go-test.sh (and its verdict, koinon-private#507), not bare go test.

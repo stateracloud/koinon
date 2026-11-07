@@ -65,14 +65,17 @@ own checkout (`hack/e2e-remote.sh --argo`) and posts the result as the commit st
 `e2e-lab` is not a check of the repository ruleset: contributors without a lab use GitHub's `e2e-kind`.
 The merge rule and the exit codes are in ADR [0025](0025-testing-strategy.md) (amendment).
 
-## Note (2026-11-07, issue #300)
-
-The lab client named above (`hack/e2e-remote.sh --argo`) is no longer in the repository; it lives with the lab,
-outside git. The rule is unchanged: a maintainer's own agent submits a run of the maintainer's own checkout and
-posts `e2e-lab`. See the note in ADR [0025](0025-testing-strategy.md).
-
 ## Links
 
 - [design.md](../design.md), decision 26
 - ADR [0025](0025-testing-strategy.md), [0038](0038-governance.md),
   [0039](0039-development-setup.md)
+
+## Note (2026-11-07, issue #300)
+
+The maintainer lab tooling left the repository: the remote-run client, its pod-side scripts, its
+configuration and the document that described the setup are no longer tracked. The repository's e2e path
+is kind (`make dev-kind-up`, `make test-e2e-kind`, the PR's own `quickstart` run). What the text above
+says about the lab's scripts, `--argo`, `--gate` or `hack/lab/` describes the history. The repository
+still reads two commit statuses, `e2e-lab` and `go-test-lab`, as evidence that an external run passed
+on a commit.

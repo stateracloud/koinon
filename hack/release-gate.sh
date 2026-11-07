@@ -126,7 +126,7 @@ for name in "${required[@]}"; do
 		failed=1
 	fi
 done
-# go-test (koinon-private#610): the job is skipped when the pull request head had a green lab gate (the commit status
+# go-test (koinon-private#610): the job is skipped when the pull request head had a green external go-test (the commit status
 # go-test-lab), and `go` accepts that. A go-test that was skipped is therefore checked once more: on the
 # merged pull request's head it must have succeeded, or have been skipped with a green go-test-lab status
 # on that head, or the change must touch nothing the go-* jobs run for. A go-test with no run at all is

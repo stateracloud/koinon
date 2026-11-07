@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Tilt profile "kind": a laptop without the home lab. Same shape as test/e2e/kind/koinon-values.yaml
+# Tilt profile "kind": a laptop with kind. Same shape as test/e2e/kind/koinon-values.yaml
 # (runc instead of Kata, the fake model server instead of a real upstream), with images loaded
 # straight into the kind node. The fake model is declared by test/e2e/kind/model-provider.yaml, which the
 # Tiltfile applies. Prerequisites: make dev-kind-up.

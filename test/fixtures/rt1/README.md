@@ -210,7 +210,7 @@ real policy.
 
 ## Manifests (`manifests/`)
 
-`manifests/` is the base: image names are bare (`rt1-motherduck:dev`) and an overlay says where the images come from. Apply an overlay, not the base: `overlays/kind` (`hack/rt1-fixtures-kind.sh`: images built locally and loaded into kind, fake Secrets), `overlays/remote` (your registry; see below) or `overlays/homelab` (the maintainer's Zot, pinned by digest). Together they create namespace `koinon-fixtures`, five
+`manifests/` is the base: image names are bare (`rt1-motherduck:dev`) and an overlay says where the images come from. Apply an overlay, not the base: `overlays/kind` (`hack/rt1-fixtures-kind.sh`: images built locally and loaded into kind, fake Secrets), `overlays/remote` (your registry; see below). Together they create namespace `koinon-fixtures`, five
 Deployments and Services (motherduck, fakecicost, prometheus with its MCP sidecar, searxng, searxng-mcp, and
 the escape-gateway-standin), and these NetworkPolicies: default deny ingress; ingress to the MCP ports only from Koinon's gateway pods in
 namespace `koinon`; ingress to the stand-in's port 4000 only from OpenShell sandbox namespaces; egress DNS only, except the two web-research pods (public internet, private ranges
@@ -221,13 +221,11 @@ names: in standalone mode the gateway pods carry `app.kubernetes.io/name=koinon`
 Every container has requests and limits, runs non-root with a read-only root file system, and no pod
 mounts a service account token. The overlays rewrite the image names: `overlays/kind` uses `kind.local/rt1-<name>:dev` and the upstream images
 by digest; `overlays/remote` uses `registry.example.test/koinon/rt1-<name>` with the tag `dev` (nodes cache it: pin digests or use a new tag after a rebuild), a placeholder you replace when
-you render (`kustomize build overlays/remote | sed "s#registry.example.test/koinon#$REGISTRY/koinon#g"`);
-`overlays/homelab` pins the maintainer's Zot images by digest (its `rt1-fakemodel` digest is still a
-`sha256:TODO` placeholder until the build script's output is pasted in).
+you render (`kustomize build overlays/remote | sed "s#registry.example.test/koinon#$REGISTRY/koinon#g"`).
 
 ### Secrets
 
-The base and the remote and home-lab overlays contain **no Secrets**: real values must not be in git, and
+The base and the remote overlay contain **no Secrets**: real values must not be in git, and
 an operator may revert hand-made ones. On a real cluster create them (or have your secret store deliver them)
 before the pods start. `overlays/kind/secrets.example.yaml` has obviously fake values and is part of
 `overlays/kind` only.

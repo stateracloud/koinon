@@ -7,10 +7,9 @@
 #   hack/e2e-remote.sh [--local] [--out DIR] [--dry-run]              the local Docker (default)
 #   hack/e2e-remote.sh --ssh [--out DIR] [--dry-run]                  a Docker host over SSH ($KOINON_E2E_REMOTE)
 #
-# A queue of your own (Argo Workflows, a maintainer's home lab) is not driven from this repository:
-# its client lives with the lab, outside git (issue #300; docs/dev/maintainer-homelab.md). What the
-# repository keeps of it is the contract: a green `e2e-lab` commit status (hack/e2e-status.sh) is
-# accepted as e2e evidence by hack/e2e-gate.sh and hack/pr-wait.sh, like a green `quickstart` run.
+# Other queues are not driven from this repository. What it accepts as e2e evidence is a green `e2e-lab`
+# commit status (an external e2e run that passed on this commit, hack/e2e-status.sh) or a green
+# `quickstart` run on the head (hack/e2e-gate.sh, hack/pr-wait.sh).
 #
 # --ssh and --local run the pinned toolchain image of hack/e2e-toolchain (the Go from go.mod and the
 # kind, ko, helm and kubectl versions CI uses) against that host's Docker socket, so the result does
@@ -75,9 +74,6 @@ while [[ $# -gt 0 ]]; do
   case $1 in
   --local) mode=local ;;
   --ssh) mode=remote ;;
-  --argo | --no-wait | --target | --slot | --follow | --repo | --lane | --gate | --no-status)
-    echo "e2e-remote: $1 drove a lab queue and is gone from this script; the lab client lives outside the repository (docs/dev/maintainer-homelab.md). Without a lab: --local, or the PR's own quickstart" >&2
-    exit 2 ;;
   --out) out=${2:?--out needs a directory}; shift ;;
   --dry-run) dry=1 ;;
   --stage) mode=stage ;; # internal: runs on the remote, the script is piped in over ssh

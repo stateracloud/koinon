@@ -154,23 +154,17 @@ decisions stand; only the cost reasoning changed. What runs where: CI runs the a
 escape suite (`escape (admission)`); the OpenShell cases run on kind (`make test-escape-kind`) and
 on the maintainers' lab, where the Kata tier can be tested.
 
-## Note (2026-11-07, issue #300): the lab's scripts leave the repository
-
-Decision of the maintainer: material that only the maintainer lab uses is not tracked. The remote-run
-client (`hack/e2e-argo.sh` and the `--argo` path of `hack/e2e-remote.sh`), the pod-side `hack/lab/` scripts
-(`gate-run.sh`, `light-run.sh`), the lab config and the light lane are gone from git. The client now lives
-with the lab, outside the repository, with the same exit codes (0 pass, 1 fail, 2 usage or a 4xx at the
-submit, 75 the lab cannot run it now, 76 NOT RUN, 78 no lab) and the same commit-status contract. The lab
-runs its gate sets from its own mounted copy of the gate script, no longer from the tested commit. What
-the amendments above say about `hack/e2e-remote.sh --argo`, `--gate` and `hack/lab/gate-run.sh` now refers
-to that external client and script. What stays in the repository is what a contributor or CI reads: the
-`e2e-lab` and `go-test-lab` statuses (`hack/e2e-status.sh`), `hack/e2e-gate.sh`, `hack/pr-wait.sh`,
-`hack/go-test-lab.sh`, `hack/ci-skip-heavy.sh` and the make targets the gate script calls. One change in
-behaviour: a client submitting at the same moment as another no longer queues behind it on the same slot;
-it moves to the next free slot. Details: `docs/dev/maintainer-homelab.md`.
-
 ## Links
 
 - [design.md](../design.md), decision 25
 - ADR [0026](0026-home-lab-and-license.md), [0035](0035-v01-flavors.md),
   [0040](0040-agentgateway-model-and-mcp-gateway.md)
+
+## Note (2026-11-07, issue #300)
+
+The maintainer lab tooling left the repository: the remote-run client, its pod-side scripts, its
+configuration and the document that described the setup are no longer tracked. The repository's e2e path
+is kind (`make dev-kind-up`, `make test-e2e-kind`, the PR's own `quickstart` run). What the text above
+says about the lab's scripts, `--argo`, `--gate` or `hack/lab/` describes the history. The repository
+still reads two commit statuses, `e2e-lab` and `go-test-lab`, as evidence that an external run passed
+on a commit.

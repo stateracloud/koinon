@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Publishes the images the home lab's Argo e2e queue (home-lab ADR 036) pulls by digest through its
-# registry mirror:
+# Publishes the e2e toolchain images, pulled by digest:
 #   ghcr.io/<owner>/<repo>/e2e-toolchain      hack/e2e-toolchain/Dockerfile, tag
 #       go<GO_VERSION>-<first 12 hex of the Dockerfile's sha256> (hack/e2e-remote.sh builds the
 #       same Dockerfile locally under the same tag, so a tag names exactly one Dockerfile)

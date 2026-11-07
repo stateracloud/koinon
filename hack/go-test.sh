@@ -41,8 +41,8 @@
 # The reports only record; nothing reruns a failed spec.
 #
 # KOINON_RC_FILE: when set, the final exit status is also written to that file. `make` turns every
-# failing recipe into exit 2, so the 3 (incomplete) would not survive `make test-go`; the lab gate
-# (the lab's gate script, outside git) reads the file to tell NOT RUN from a failure.
+# failing recipe into exit 2, so the 3 (incomplete) would not survive `make test-go`; a wrapper
+# script reads the file to tell NOT RUN from a failure.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }

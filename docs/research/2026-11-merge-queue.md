@@ -107,7 +107,7 @@ app, `strict_required_status_checks_policy: true`):
 
 1. this run's quickstart;
 2. another e2e-kind run on that head;
-3. the `e2e-lab` commit status that `hack/e2e-remote.sh --argo` posts.
+3. the `e2e-lab` commit status that an external e2e run posts (see the note at the end).
 
 A group's commit is a new SHA, so none of the three is there. Options:
 
@@ -120,7 +120,7 @@ A group's commit is a new SHA, so none of the three is there. Options:
   run takes 15-25 minutes on a GitHub-hosted runner. It also holds the whole queue, unless
   build concurrency ("The maximum number of `merge_group` webhooks to dispatch (between `1` and
   `100`)") runs groups in parallel.
-  The lab cannot serve it: `hack/e2e-remote.sh --argo` takes a pushed branch, and the queue ref is
+  An external run cannot serve it: it takes a pushed branch, and the queue ref is
   read-only and short-lived.
 - **Recommended if a queue comes:** map to PR heads for the gate, and keep the batched e2e on main
   (`push`, as now) as the backstop. `hack/e2e-bisect.sh` already names the merge to revert within
@@ -281,3 +281,9 @@ Steps 1 and 2 need no rollback.
      merges meanwhile.
    - #595's tree-equality skip stops applying (the tree no longer equals a green head), so the
      push run goes back to full cost and eats the saving.
+
+## Note (2026-11-07, issue #300)
+
+When this was written, the third kind of evidence came from the maintainer lab's remote-run client
+(`hack/e2e-remote.sh --argo`). That client has left the repository; the repository's e2e path is kind, and
+`e2e-lab` is any external run that posts the commit status. The analysis above is unchanged.

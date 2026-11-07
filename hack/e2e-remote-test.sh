@@ -148,21 +148,17 @@ check "the directory lock made --local wait" has 'waiting for the e2e lock' "$tm
 check "--local ran after the owner went away" test "$rc" -eq 0
 check "the directory lock is released" test ! -d "$tmp/lock.d"
 
-# 7. The lab's queue is not driven from here any more (issue #300; its client lives outside git): the
-# old --argo option and its companions are refused with a pointer, exit 2.
-rc=0
-(unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --argo --dry-run >"$tmp/log13" 2>&1) || rc=$?
-check "--argo exits 2" test "$rc" -eq 2
-check "... saying the lab client lives outside the repository" has 'outside the repository' "$tmp/log13"
+# 7. Only --local and --ssh exist: any other option is refused, exit 2.
 rc=0
 (unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --no-wait >"$tmp/log14" 2>&1) || rc=$?
-check "--no-wait (a lab option) exits 2" test "$rc" -eq 2
+check "an unknown option exits 2" test "$rc" -eq 2
+check "... naming the option" has 'unknown argument --no-wait' "$tmp/log14"
 rc=0
 (unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --dry-run >"$tmp/log15" 2>&1) || rc=$?
 check "no mode flag runs the local e2e (git archive plus docker run)" sh -c "test $rc -eq 0 && grep -q 'git archive' '$tmp/log15'"
 
 # 7g. hack/e2e-status.sh on its own (the e2e-lab / go-test-lab commit-status contract that pr-wait and
-# e2e-gate read; the lab client posts through it). gh is a recorder; FAKE_GH_FAIL=1 makes the post fail.
+# e2e-gate read). gh is a recorder; FAKE_GH_FAIL=1 makes the post fail.
 cat >"$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 echo "gh $*" >>"$FAKE_GH_LOG"
@@ -171,18 +167,18 @@ exit 0
 SH
 chmod +x "$tmp/bin/gh"
 export FAKE_GH_LOG="$tmp/gh.log"
-argo_sha=$sha
+status_sha=$sha
 : >"$FAKE_GH_LOG"
-rc=0; "$repo/hack/e2e-status.sh" "$argo_sha" success "a run" "https://argo.example.invalid/w/x" >/dev/null 2>&1 || rc=$?
-check "e2e-status posts a status" test "$rc" -eq 0 && check "... through gh api statuses with the context" has "statuses/$argo_sha -f state=success -f context=e2e-lab -f description=a run -f target_url=https://argo.example.invalid/w/x" "$FAKE_GH_LOG"
-rc=0; "$repo/hack/e2e-status.sh" "$argo_sha" maybe x >/dev/null 2>&1 || rc=$?
+rc=0; "$repo/hack/e2e-status.sh" "$status_sha" success "a run" "https://argo.example.invalid/w/x" >/dev/null 2>&1 || rc=$?
+check "e2e-status posts a status" test "$rc" -eq 0 && check "... through gh api statuses with the context" has "statuses/$status_sha -f state=success -f context=e2e-lab -f description=a run -f target_url=https://argo.example.invalid/w/x" "$FAKE_GH_LOG"
+rc=0; "$repo/hack/e2e-status.sh" "$status_sha" maybe x >/dev/null 2>&1 || rc=$?
 check "e2e-status refuses a state that is not success or failure (64)" test "$rc" -eq 64
 rc=0; "$repo/hack/e2e-status.sh" abc123 success x >/dev/null 2>&1 || rc=$?
 check "e2e-status refuses a short sha (64)" test "$rc" -eq 64
 : >"$FAKE_GH_LOG"
-rc=0; KOINON_E2E_NO_STATUS=1 "$repo/hack/e2e-status.sh" "$argo_sha" success x >/dev/null 2>&1 || rc=$?
+rc=0; KOINON_E2E_NO_STATUS=1 "$repo/hack/e2e-status.sh" "$status_sha" success x >/dev/null 2>&1 || rc=$?
 check "e2e-status with KOINON_E2E_NO_STATUS posts nothing" test "$rc" -eq 0 -a ! -s "$FAKE_GH_LOG"
-rc=0; FAKE_GH_FAIL=1 "$repo/hack/e2e-status.sh" "$argo_sha" failure x >/dev/null 2>&1 || rc=$?
+rc=0; FAKE_GH_FAIL=1 "$repo/hack/e2e-status.sh" "$status_sha" failure x >/dev/null 2>&1 || rc=$?
 check "e2e-status exits 1 when the post fails" test "$rc" -eq 1
 
 # 6. The toolchain image pins what hack/versions.env pins (kind, ko, helm, kubectl and their checksums).

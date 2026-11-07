@@ -8,10 +8,10 @@
 #   - pull requests: when the full rule (hack/needs-e2e.sh) says the change is e2e-relevant, the PR
 #     changes the e2e's own files or it carries the `e2e` label (read live, so `gh pr create --label e2e`
 #     counts on `opened`). Relevance alone runs it, so a fork PR (which cannot label, dispatch or post
-#     `e2e-lab`) can go green (issue #148). The label and the maintainer lab (its client lives outside git) are
+#     `e2e-lab`) can go green (issue #148). The label and an external run are
 #     accelerators: the label forces a run for a change the rule thinks irrelevant, a green `e2e-lab`
 #     satisfies `e2e result` once this run's quickstart has finished; if that quickstart
-#     fails or is cancelled, hack/e2e-gate.sh still passes on the lab status or another run's quickstart.
+#     fails or is cancelled, hack/e2e-gate.sh still passes on the `e2e-lab` status or another run's quickstart.
 #     Label events do not start this workflow (koinon-private#468): adding `e2e` later dispatches it
 #     once on the head (e2e-label.yml, hack/e2e-label.sh), unless a run there is live or passed the
 #     e2e. To retry a red e2e: "Re-run failed jobs", remove and add the label, or
@@ -24,11 +24,11 @@
 #   - manual dispatch, optionally on one commit (the bisect uses it).
 # The `e2e result` job is the one to require: it passes when the e2e was skipped because nothing needed
 # it, and for a pull request that needs one (hack/needs-e2e.sh) it fails until the head has a passing
-# e2e: a quickstart job here or in a dispatched run on the head, or the lab's `e2e-lab` commit status
+# e2e: a quickstart job here or in a dispatched run on the head, or the `e2e-lab` commit status (an external e2e run that passed on this commit)
 # (hack/e2e-gate.sh, koinon-private#562). Trust limit: `result` runs from this very file, so a PR can edit it to drop the
 # gate; the guard is the ruleset's required review on `.github/**` (not CODEOWNERS), `e2e result` is not
 # pinned to an app and anyone with write access can post `e2e-lab`: a guardrail against mistakes, not a
-# malicious member (pinned integration_id / lab App: koinon-private#568).
+# malicious member (pinned integration_id: koinon-private#568).
 name: e2e-kind
 run-name: e2e-kind${{ inputs.commit && format(' ({0}) bisect {1}', inputs.commit, inputs.bisect_id) || '' }}
 

@@ -11,7 +11,7 @@
 #
 #   hack/ci-skip-heavy.sh decide   prints skip=true|false and reason=<text> (lines for $GITHUB_OUTPUT)
 #   hack/ci-skip-heavy.sh lab      prints go_test_lab=true|false and go_test_lab_reason=<text>: whether the
-#                                  job go-test is satisfied by the lab (koinon-private#610), see below
+#                                  job go-test is satisfied by an external run (koinon-private#610), see below
 #   hack/ci-skip-heavy.sh apply    reads the name=value lines of hack/ci-changes.sh on stdin and
 #                                  prints them back: the heavy names become false when SKIP=true.
 #                                  Always adds flavors_publish=<the flavors value before the switch>,
@@ -48,10 +48,9 @@
 #                 check, a shallow clone, an unknown event) is skip=false.
 # lab (koinon-private#610): go_test_lab=true only for a pull_request event, not a draft (SKIP != true), whose head
 #   (HEAD_SHA: github.event.pull_request.head.sha, not the merge ref github.sha) has the commit status
-#   `go-test-lab` = success (hack/go-test-lab.sh; posted by the maintainer lab client, `--gate go-test`
-#   after a green lab run). ci.yml then skips the go-test job and the `go` gate accepts that skip.
+#   `go-test-lab` = success (hack/go-test-lab.sh; an external go-test run that passed on exactly this head). ci.yml then skips the go-test job and the `go` gate accepts that skip.
 #   Anything else, an API error included, is false: go-test runs on the hosted runner as before. There is no
-#   waiting for a status that arrives later; hack/ship.sh posts it before marking the pull request ready.
+#   waiting for a status that arrives later; a status posted before the pull request is marked ready counts.
 #   decide for a push also refuses to count a skipped go-test as green (see decide_push).
 # Environment CI_REQUIRED overrides the required list (tests). Needs bash 5, git, gh, jq.
 
@@ -153,7 +152,7 @@ decide_push() {
 			;;
 		esac
 	done <<<"$required"
-	# A go-test that was skipped (not "success") is a lab-satisfied one (koinon-private#610) or one for a change with no
+	# A go-test that was skipped (not "success") is an externally satisfied one (koinon-private#610) or one for a change with no
 	# Go in it. The `go` gate says so too; a skip that is neither must not pass on this path.
 	conclusion=$(awk -F'\t' '$1 == "go-test" && $3 == "completed" { print $4 }' <<<"$latest")
 	if [[ $conclusion == skipped ]]; then

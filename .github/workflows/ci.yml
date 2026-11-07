@@ -120,9 +120,8 @@ jobs:
           # No pipe: a failing step must fail the job, not leave outputs empty (empty reads as "nothing to gate").
           hack/ci-skip-heavy.sh apply <"$RUNNER_TEMP/changes.txt" >"$RUNNER_TEMP/outputs.txt"
           tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/outputs.txt"
-      # go-test on the lab gate first (koinon-private#610): a ready pull request whose head has the commit status
-      # go-test-lab = success (posted by the maintainer lab client, `--gate go-test`, through hack/ship.sh
-      # --lab-go-test, before the pull request is marked ready) does not run go-test on the runner; the
+      # go-test satisfied by an external run (koinon-private#610): a ready pull request whose head has the commit status
+      # go-test-lab = success (an external go-test run that passed on exactly this head) does not run go-test on the runner; the
       # `go` gate accepts that skip. No status, a draft, a push or an API error: go-test runs as before.
       # Trust limit as for e2e-lab (koinon-private#568): anyone with write access can post the status, and this job
       # runs from the pull request's own ci.yml; the guard is the required review on .github/**.
@@ -686,7 +685,7 @@ jobs:
       - run: make docs
 
   # Escape suite, admission part (plan item E2): the chart's ValidatingAdmissionPolicies against
-  # envtest's API server. The OpenShell cases need a gateway and run on the home lab only.
+  # envtest's API server. The OpenShell cases need a gateway and run on kind (make test-escape-kind).
   escape-admission:
     needs: changes
     if: needs.changes.outputs.escape == 'true'
@@ -792,6 +791,7 @@ jobs:
       - run: hack/ci-web-gate-test.sh
       - run: hack/ci-required-test.sh
       - run: hack/go-test-test.sh
+      - run: hack/repo-contract-test.sh
       - run: hack/wt-test.sh
       - run: hack/tmp-safety-test.sh
       - run: hack/wt-install-test.sh
@@ -809,8 +809,6 @@ jobs:
       - run: hack/e2e-decide-test.sh
       - run: hack/e2e-gate-test.sh
       - run: hack/e2e-label-test.sh
-      - run: hack/lab-domain-lint-test.sh
-      - run: hack/lab-domain-lint.sh
       - run: hack/e2e-bisect-test.sh
       - run: hack/hooks/agent-spawn-check_test.sh
       - run: hack/hooks/read-hooks_test.sh

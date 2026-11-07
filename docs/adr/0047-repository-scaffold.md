@@ -172,5 +172,5 @@ other job (docs/dev/ci.md#cache-ownership, issue #147).
 ## Links
 
 - ADR 0004, 0022, 0026, 0027, 0034, 0037, 0038, 0039
-- [docs/dev/maintainer-homelab.md](../dev/maintainer-homelab.md)
+- docs/dev/maintainer-homelab.md (left the repository, 2026-11-07)
 - Issue [koinon-private#2](https://github.com/stateracloud/koinon-private/issues/2)

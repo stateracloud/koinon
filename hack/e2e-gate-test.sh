@@ -62,7 +62,7 @@ gate 1 "not required, quickstart failed" DECIDE=success QUICKSTART=failure REQUI
 gate 1 "decide cancelled" DECIDE=cancelled QUICKSTART=skipped REQUIRED=false
 gate 0 "required, this run's quickstart passed" DECIDE=success QUICKSTART=success REQUIRED=true
 gate 1 "required, nothing on the head" "${G[@]}"
-has "posts the status e2e-lab"
+has "post the commit status e2e-lab"
 has "gh workflow run e2e-kind.yml --ref feat/x"
 has "Re-run failed jobs"
 

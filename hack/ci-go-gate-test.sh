@@ -23,7 +23,7 @@ grep -qF '    if: ${{ !cancelled() && !(github.event_name == '"'push'"' && needs
 # A draft is not tested: the gate must fail on it (koinon-private#593), or a vacuous green would be the newest run.
 # shellcheck disable=SC2016 # literal text of the workflow
 sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf" | grep -qF 'SKIP == true && $EVENT == pull_request' || { echo "FAIL: go gate must fail on a draft (skip=true on a pull_request)"; exit 1; }
-# go-test on the lab gate first (koinon-private#610): the job is skipped when `changes` found a green go-test-lab on
+# go-test satisfied by an external run (koinon-private#610): the job is skipped when `changes` found a green go-test-lab on
 # the head, and only then may the gate count that skip. Run the gate's own script with each outcome.
 # shellcheck disable=SC2016 # literal text of the workflow
 grep -qF "if: needs.changes.outputs.go == 'true' && needs.changes.outputs.go_test_lab != 'true'" <(sed -n '/^  go-test:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-test must be skipped when go_test_lab is true (and only then)"; exit 1; }
