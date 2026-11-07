@@ -148,7 +148,23 @@ asynchronously, and the migrate Job may already have run by then. Instead:
   auto-apply bounds, which the row records with the same event), so a change to `on` or to a looser
   bound runs only from the first tick after its `price.refresh.settings_changed` event is written. A
   change that does less (to `off`, a tighter bound) applies at once. The same rule keeps an old replica of a rolling upgrade to what a new one recorded
-  (maintainer decision 2026-11-07, after review).
+  (maintainer decision 2026-11-07, after review);
+- `koinon-api` checks its own membership, at startup and every 30 seconds on its own pool
+  (`SELECT current_user, pg_has_role(current_user, 'koinon_install_audit_writer', 'USAGE')`, a
+  missing role counting as not a member; `audit.InstallWriterCheck`). On a missing role or
+  membership it logs one error per change of state with the statement for its own login filled in
+  (`GRANT koinon_install_audit_writer TO "<current_user>"`, the identifier quoted) and sets the gauge
+  `koinon_install_audit_writer_ok` (no labels, ADR 0023) to 0, and never fails readiness; the
+  documented alert fires on the gauge as well as on refused writes, so a missing grant shows before
+  anything writes. `koinon-reconciler` and `koinon-agentd` warn at startup when their own login can
+  write the chain (a shared login). The check runs in the API, not in the migrate Job and not from a
+  chart value naming the api login (maintainer decision 2026-11-07, after research): the api login
+  already lives in the api URI Secret, and a second copy in a value drifts; the name in that value is
+  wrong where the server sees another role than the URI names (a Cloud SQL group login connects as
+  its own IAM user, an Azure Entra group connects as the group role, PgBouncer can force `user=`);
+  and under workload identity the migrate Job runs as another ServiceAccount and cannot log in as the
+  API. Only the process that connects knows its `current_user`. Cloud IAM token logins (RDS IAM,
+  Entra) are out of scope here (#353).
 
 With `postgres.mode: external` the roles are the operator's. `docs/ops/secret-keys.md` ("Append-only
 audit log with an external database") gains the lines to run once as the schema owner:
@@ -465,6 +481,8 @@ Run-content retention (ADR 0023, 2026-10-31 amendment) still never touches audit
 **Metrics** (fixed labels, ADR 0023 label rule; no org, user, key or actor ID):
 
 - `koinon_audit_writes_total{chain="org"|"install", result="ok"|"error"}`;
+- `koinon_install_audit_writer_ok` (gauge, no labels, koinon-api only): 1 while koinon-api's login
+  inherits the writer role, 0 otherwise (decision 1.1a, maintainer decision 2026-11-07);
 - `koinon_audit_anchor_age_seconds` (gauge, no labels, from v0.1), so an alert can say anchoring
   stopped, and, with checkpoints, `koinon_audit_checkpoint_age_seconds` (gauge, no labels).
 

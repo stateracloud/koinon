@@ -85,9 +85,13 @@ func TestChartContract(t *testing.T) {
 			}
 			// ADR 0100 decision 1.1a: on an external database (this render) nothing creates the install
 			// audit writer role after the migrate Job, so the Job requires it; the cnpg grant hook waits
-			// for it instead and must not.
+			// for it instead and must not. No Job checks koinon-api's membership: koinon-api checks its
+			// own login (maintainer decision 2026-11-07), the migration cannot know it.
 			for _, j := range r.Jobs {
 				args := j.Spec.Template.Spec.Containers[0].Args
+				if slices.Contains(args, "--install-writer-member") {
+					t.Errorf("Job %s checks koinon-api's membership; koinon-api checks its own: %v", j.Name, args)
+				}
 				switch j.Name {
 				case "koinon-migrate", "koinon-migrate-install":
 					if !slices.Contains(args, "--require-install-writer") {

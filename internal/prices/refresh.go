@@ -106,7 +106,7 @@ type RefreshConfig struct {
 }
 
 // Refresher fetches the public sources, makes proposals from them and applies the ones inside the
-// auto-apply bounds. Fetching happens only when a caller asks (the CLI) or Loop's Tick finds a
+// auto-apply bounds. Fetching happens only when a caller asks (the CLI) or a tick of Loop finds a
 // source its RefreshMode allows (ADR 0098 decision 2.2 and its 2026-11-07 amendment).
 type Refresher struct {
 	svc      *Service
@@ -218,9 +218,17 @@ type RunResult struct {
 }
 
 // Run fetches every adapter, records the fetch, makes proposals and, when auto is true, applies
-// the proposals inside the bounds. A failing source does not stop the others.
+// the proposals inside the held bounds (heldBounds: never looser than the recorded ones). A failing
+// source does not stop the others.
 func (r *Refresher) Run(ctx context.Context, trigger string, auto bool) (RunResult, error) {
-	return r.run(ctx, trigger, r.adapterNames(), auto, r.bounds)
+	b := r.bounds
+	if auto {
+		var err error
+		if b, err = r.heldBounds(ctx); err != nil {
+			return RunResult{Failed: map[string]string{}}, err
+		}
+	}
+	return r.run(ctx, trigger, r.adapterNames(), auto, b)
 }
 
 func (r *Refresher) adapterNames() []string {
@@ -234,8 +242,8 @@ func (r *Refresher) adapterNames() []string {
 
 // run fetches the named adapters. Auto-apply then considers only the proposals of the sources that
 // were fetched successfully in this run: a source that failed proposes nothing new, and its older
-// proposals wait for the next good fetch. Auto-apply holds the proposals to bounds b: the
-// Refresher's own, or for a scheduled tick the tighter of those and the recorded ones (Effective).
+// proposals wait for the next good fetch. Auto-apply holds the proposals to bounds b, which every
+// caller takes from the recorded setting (heldBounds, or Effective for a scheduled tick).
 func (r *Refresher) run(ctx context.Context, trigger string, names []string, auto bool, b pricefetch.Bounds) (RunResult, error) {
 	res := RunResult{Failed: map[string]string{}}
 	for _, name := range names {
@@ -462,15 +470,20 @@ func baselineOf(e *effective) *pricing.Spec {
 // AutoApply applies the open proposals of class auto in one platform version (actor system koinon-api:price-refresh), unless
 // the day's cap would be exceeded, in which case none applies and they wait for a person. With
 // sources, only those sources' proposals are considered. Each candidate is classified again here,
-// under this Refresher's bounds, against the price in use and the stored stability of its values:
-// a proposal classified earlier under looser bounds (a CLI fetch, another replica, an older
-// setting) applies only if it still is auto, and otherwise moves to the class it now has. It
-// returns how many it applied.
+// under the held bounds (the tighter of this Refresher's and the recorded ones, heldBounds), against
+// the price in use and the stored stability of its values: a proposal classified earlier under
+// looser bounds (a CLI fetch, another replica, an older setting) applies only if it still is auto,
+// and otherwise moves to the class it now has. No caller can apply under bounds looser than the
+// recorded setting says (#328 review). It returns how many it applied.
 func (r *Refresher) AutoApply(ctx context.Context, sources ...string) (int, error) {
-	return r.autoApply(ctx, r.bounds, sources...)
+	b, err := r.heldBounds(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return r.autoApply(ctx, b, sources...)
 }
 
-// autoApply is AutoApply under bounds b.
+// autoApply is AutoApply under bounds b, which the caller read from the recorded setting.
 func (r *Refresher) autoApply(ctx context.Context, b pricefetch.Bounds, sources ...string) (int, error) {
 	applied := 0
 	err := pgx.BeginFunc(ctx, r.svc.pool, func(tx pgx.Tx) error {

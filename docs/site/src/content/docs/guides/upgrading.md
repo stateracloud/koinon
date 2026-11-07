@@ -91,7 +91,9 @@ has no `CREATEROLE`, so it cannot create the role itself. The migration does not
 `INSERT` grant to it is made by `koinon-api migrate` after the migrations, on every run, and only when
 the role exists. In cnpg mode a missing role makes the Job log a warning, not fail; on an external
 database the chart passes `--require-install-writer` and the Job fails before any migration, naming
-the role to create (and, with `postgres.external.apiRole` set, a missing membership of that role).
+the role to create. The membership is checked by `koinon-api` itself, which alone knows the login it
+connects as: at startup and every 30 seconds it logs an error with the `GRANT` to run for its own
+login and reports `koinon_install_audit_writer_ok 0`, and it keeps serving.
 
 - **`postgres.mode: cnpg`.** Nothing to do. The chart lists the role as a CloudNativePG managed role,
   and `koinon_api` joins it. With Helm or Flux the migrate Job is a `pre-upgrade` hook, so it runs
@@ -121,8 +123,10 @@ the role to create (and, with `postgres.external.apiRole` set, a missing members
   GRANT SELECT ON install_audit_events, install_audit_chain_head TO <reconciler login role>, <agentd login role>;
   ```
 
-  Without the role the migrate Job fails (`the role koinon_install_audit_writer does not exist`):
-  create it as above and run the same `helm upgrade` again.
+  Without the role the migrate Job fails (`the role koinon_install_audit_writer does not exist`)
+  and changes nothing: create it as above and run the same `helm upgrade` again. Without the
+  membership `koinon-api` starts, logs `GRANT koinon_install_audit_writer TO "<its login>"`, and
+  picks the grant up within 30 seconds.
 
   Keep the `api`, `reconciler` and `agentd` logins separate. See "The install audit chain" in
   `docs/ops/secret-keys.md` in the repository.

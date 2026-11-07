@@ -684,6 +684,16 @@ func serve(ctx context.Context, cfg config) error {
 
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
+	// koinon-api checks its own login against the install audit writer role, at startup and every
+	// installWriteRetry: only it knows the login it connects as (the migrate Job may be another
+	// identity). A missing grant is logged with the GRANT to run and shows as
+	// koinon_install_audit_writer_ok 0; it never fails the start (ADR 0100 decision 1.1a).
+	audit.RegisterInstallWriterMetric(reg)
+	writerCheck := &audit.InstallWriterCheck{DB: pool, Log: slog.Default()}
+	writerCheck.Check(ctx)
+	safego.GoOrStop(bgCtx, slog.Default(), "install-audit-writer-check", stop, func(ctx context.Context) {
+		writerCheck.Run(ctx, installWriteRetry)
+	})
 	reg.MustRegister(kekMetrics.Collectors()...)
 	reg.MustRegister(guardMetrics.Collectors()...)
 	if durableRT != nil {
@@ -906,11 +916,6 @@ type migrateOptions struct {
 	// of warning. The chart passes it on an external database, where no hook will create the role
 	// later: the Job fails with the remedy rather than koinon-api logging a refused write forever.
 	requireWriter bool
-	// writerMember is koinon-api's login role; with requireWriter the migration also fails when it is
-	// not a member of the writer role. Empty: only the role is checked. The migration connects as the
-	// schema owner, a different role, and cannot see which role koinon-api logs in as; the chart passes
-	// postgres.external.apiRole.
-	writerMember string
 }
 
 // migrate applies pending migrations, first waiting up to wait for the database: on a fresh install
@@ -941,7 +946,7 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 	// passes --require-install-writer. The check needs no table and runs before any migration: a
 	// failed Job leaves the schema as it was.
 	if o.requireWriter {
-		if err := migrations.CheckInstallAuditWriter(ctx, db, o.writerMember); err != nil {
+		if err := migrations.CheckInstallAuditWriter(ctx, db); err != nil {
 			return fmt.Errorf("%w: create the role and add koinon-api's login role to it "+
 				"(docs/ops/secret-keys.md, The install audit chain), then run the migration again; no migration was applied; "+
 				"without it koinon-api records no install audit event", err)

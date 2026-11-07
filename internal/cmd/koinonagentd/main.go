@@ -213,6 +213,7 @@ func run(ctx context.Context, cfg config) error {
 		return fmt.Errorf("database: %w", err)
 	}
 	defer db.Close()
+	audit.WarnSharedWriterLogin(ctx, db, "koinon-agentd", slog.Default())
 
 	backend, err := cli.OpenShell{Address: cfg.openshellAddr, TLSDir: cfg.openshellTLSDir, ServerName: cfg.openshellName}.Dial()
 	if err != nil {

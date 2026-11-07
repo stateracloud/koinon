@@ -85,6 +85,7 @@ func serve(ctx context.Context, cfg config) error {
 		return fmt.Errorf("connect to postgres: %w", err)
 	}
 	defer pool.Close()
+	audit.WarnSharedWriterLogin(ctx, pool, "koinon-reconciler", slog.Default())
 
 	kube, err := kubeClient(cfg.kubeconfig)
 	if err != nil {

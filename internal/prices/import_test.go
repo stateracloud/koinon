@@ -126,14 +126,14 @@ var _ = Describe("what an import file says that the install cannot check", func(
 
 	It("does not delay the scheduled fetch, whatever fetch time the file carries", func(ctx SpecContext) {
 		pool, r, a, now := setup(ctx)
-		_, err := r.Tick(ctx, prices.RefreshOn, 24*time.Hour)
+		_, err := r.TickForTest(ctx, prices.RefreshOn, 24*time.Hour)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(a.calls).To(Equal(1))
 
 		*now = now.Add(25 * time.Hour)
 		_, err = importSnap(ctx, r, snapAt(*now, 1)) // the newest row of the source, by fetched_at
 		Expect(err).NotTo(HaveOccurred())
-		_, err = r.Tick(ctx, prices.RefreshOn, 24*time.Hour)
+		_, err = r.TickForTest(ctx, prices.RefreshOn, 24*time.Hour)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(a.calls).To(Equal(2), "the import is not the install's last fetch")
 		Expect(countRows(ctx, pool, `SELECT count(*) FROM price_source_fetches WHERE trigger = 'import' AND fetched_at = $1`, *now)).To(Equal(1),

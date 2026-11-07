@@ -124,7 +124,7 @@ var _ = Describe("the price refresh modes (maintainer decision 2026-11-07)", fun
 	tick := func(ctx context.Context, pool *pgxpool.Pool, mode prices.RefreshMode, url string) {
 		now := time.Now()
 		r := refresherOn(pool, defaultList("2000-01-01.1", model), &httpAdapter{url: url, model: model}, &now)
-		_, err := r.Tick(ctx, mode, 24*time.Hour)
+		_, err := r.TickForTest(ctx, mode, 24*time.Hour)
 		Expect(err).NotTo(HaveOccurred())
 	}
 
@@ -172,7 +172,7 @@ var _ = Describe("the price refresh modes (maintainer decision 2026-11-07)", fun
 			GinkgoHelper()
 			eff, err := r.Effective(ctx, mode, iv)
 			Expect(err).NotTo(HaveOccurred())
-			_, err = r.RunSchedule(ctx, eff)
+			_, err = r.RunScheduleForTest(ctx, eff)
 			Expect(err).NotTo(HaveOccurred())
 			return eff
 		}
@@ -329,10 +329,10 @@ var _ = Describe("price changes with no platform admin (a fresh install, ADR 010
 		Expect(retired).To(ConsistOf(id))
 		Expect(installCount(ctx, pool, "platform_price.retired")).To(Equal(1))
 
-		_, err = r.Tick(ctx, prices.RefreshOn, 12*time.Hour)
+		_, err = r.TickForTest(ctx, prices.RefreshOn, 12*time.Hour)
 		Expect(err).NotTo(HaveOccurred())
 		now = now.Add(25 * time.Hour)
-		res, err := r.Tick(ctx, prices.RefreshOn, 12*time.Hour)
+		res, err := r.TickForTest(ctx, prices.RefreshOn, 12*time.Hour)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Applied).To(Equal(1), "the auto-apply no longer waits for an admin: the install chain audits it")
 		const actor = "system koinon-api:price-refresh"
@@ -427,7 +427,7 @@ var _ = Describe("auto-apply under the Refresher's own bounds", func() {
 		eff, err := loose.Effective(ctx, prices.RefreshOn, 24*time.Hour)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(eff.Bounds).To(Equal(pricefetch.Bounds{MaxChangePercent: 10, MaxAutoPerDay: 10}))
-		res, err := loose.RunSchedule(ctx, eff)
+		res, err := loose.RunScheduleForTest(ctx, eff)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Applied).To(BeZero())
 		p := openProposal(ctx, loose, m)
@@ -451,14 +451,14 @@ var _ = Describe("auto-apply under the Refresher's own bounds", func() {
 		Expect(openProposal(ctx, r, m).Class).To(Equal(pricefetch.ClassAuto))
 
 		a.err = errors.New("fake source down")
-		res, err := r.Tick(ctx, prices.RefreshOn, 24*time.Hour)
+		res, err := r.TickForTest(ctx, prices.RefreshOn, 24*time.Hour)
 		Expect(err).To(HaveOccurred())
 		Expect(res.Applied).To(BeZero())
 		Expect(openProposal(ctx, r, m).Class).To(Equal(pricefetch.ClassAuto), "it waits for the next good fetch")
 
 		a.err = nil
 		now = now.Add(25 * time.Hour)
-		res, err = r.Tick(ctx, prices.RefreshOn, 24*time.Hour)
+		res, err = r.TickForTest(ctx, prices.RefreshOn, 24*time.Hour)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Applied).To(Equal(1))
 	})

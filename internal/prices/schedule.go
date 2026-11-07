@@ -106,6 +106,17 @@ func modeRank(m RefreshMode) int {
 	return 2
 }
 
+// heldBounds are the auto-apply bounds outside a scheduled tick: this Refresher's, held to the
+// recorded ones (StoredBounds; the defaults before any is recorded) wherever those are tighter, the
+// bounds rule of Effective.
+func (r *Refresher) heldBounds(ctx context.Context) (pricefetch.Bounds, error) {
+	stored, err := r.svc.StoredBounds(ctx)
+	if err != nil {
+		return pricefetch.Bounds{}, err
+	}
+	return Tighter(Schedule{Bounds: r.bounds}, Schedule{Bounds: stored}).Bounds, nil
+}
+
 // Schedule is what one scheduled tick runs with: the mode, the interval since a source's last fetch,
 // and the auto-apply bounds.
 type Schedule struct {
@@ -208,7 +219,7 @@ func (r *Refresher) Loop(ctx context.Context, mode RefreshMode, interval time.Du
 		case <-tick.C:
 		}
 		if eff, ok := effective(); ok {
-			if _, err := r.RunSchedule(ctx, eff); err != nil && ctx.Err() == nil {
+			if _, err := r.runSchedule(ctx, eff); err != nil && ctx.Err() == nil {
 				r.log.Warn("scheduled price refresh", "err", err)
 			}
 		}
@@ -217,15 +228,11 @@ func (r *Refresher) Loop(ctx context.Context, mode RefreshMode, interval time.Du
 	}
 }
 
-// Tick is one round of the schedule with this Refresher's own bounds (RunSchedule of Configured).
-func (r *Refresher) Tick(ctx context.Context, mode RefreshMode, interval time.Duration) (RunResult, error) {
-	return r.RunSchedule(ctx, r.Configured(mode, interval))
-}
-
-// RunSchedule is one round of the schedule: it reports the unpriced models, then fetches each source
+// runSchedule is one round of the schedule, with a schedule Loop read from Effective (unexported, so
+// no caller runs a round under a setting the recorded one does not allow): it reports the unpriced models, then fetches each source
 // the mode allows that was last fetched at least the interval ago (another replica may have fetched
 // it, or this one before a restart), and applies the proposals inside the schedule's bounds.
-func (r *Refresher) RunSchedule(ctx context.Context, sc Schedule) (RunResult, error) {
+func (r *Refresher) runSchedule(ctx context.Context, sc Schedule) (RunResult, error) {
 	if _, err := r.ReportUnpriced(ctx); err != nil && ctx.Err() == nil {
 		r.log.Warn("counting unpriced models", "err", err)
 	}

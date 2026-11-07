@@ -51,7 +51,9 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 Everyone else gets `PermissionDenied` (403). The automatic price changes are written as the actor
 `system koinon-api:price-refresh`. Koinon records writes to both logs in
-`koinon_audit_writes_total{chain="org|install",result="ok|error"}`.
+`koinon_audit_writes_total{chain="org|install",result="ok|error"}`. `koinon_install_audit_writer_ok`
+is 1 while `koinon-api`'s database login may write the install log and 0 otherwise; when it is 0,
+`koinon-api`'s log names the `GRANT` to run.
 
 ## Check that it was not changed
 

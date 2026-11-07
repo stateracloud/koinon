@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -315,6 +317,7 @@ func describeMode(name, valuesFile string) {
 			}
 
 			Expect(insertInstallEventAs(ctx, dbURL, "koinon_api")).To(Succeed(), "koinon_api is in the writer group")
+			Expect(installWriterOK(ctx, ready["koinon-api"][0])).To(Equal("1"), "koinon-api found its own login in the writer group")
 			for _, role := range []string{"koinon_reconciler", "koinon_agentd"} {
 				err := insertInstallEventAs(ctx, dbURL, role)
 				Expect(err).To(HaveOccurred(), "%s may not append to the install audit chain", role)
@@ -364,6 +367,10 @@ func describeMode(name, valuesFile string) {
 			Eventually(func(ctx context.Context) string { return api.Logs(ctx) }).WithContext(ctx).WithTimeout(30 * time.Second).Should(And(
 				ContainSubstring("the price refresh setting is not recorded yet"),
 				ContainSubstring("runs in the recorded mode until koinon-api's setting is recorded")))
+
+			By("koinon-api checked its own login: ready, the gauge reads 0, and the log names the GRANT for it")
+			Expect(installWriterOK(ctx, api)).To(Equal("0"))
+			Expect(api.Logs(ctx)).To(ContainSubstring(`GRANT koinon_install_audit_writer TO "koinon_api"`))
 			Expect(api.Logs(ctx)).NotTo(ContainSubstring("runs in the configured mode"), "no tick in mode on before the event")
 			Expect(storedMode(ctx)).To(Equal("auto"))
 			Expect(count(ctx)).To(Equal(before))
@@ -375,6 +382,8 @@ func describeMode(name, valuesFile string) {
 			Expect(storedMode(ctx)).To(Equal("on"))
 			Consistently(count).WithContext(ctx).WithTimeout(5 * time.Second).WithPolling(time.Second).Should(Equal(before + 1))
 			Expect(api.Logs(ctx)).To(ContainSubstring("recorded after a retry"))
+			Eventually(func(ctx context.Context) string { return installWriterOK(ctx, api) }).WithContext(ctx).WithTimeout(time.Minute).WithPolling(2*time.Second).
+				Should(Equal("1"), "the next 30-second check sees the grant")
 
 			By("the next scheduled tick runs in the configured mode")
 			Eventually(func(ctx context.Context) string { return api.Logs(ctx) }).WithContext(ctx).WithTimeout(90 * time.Second).WithPolling(2 * time.Second).
@@ -435,24 +444,6 @@ func describeMode(name, valuesFile string) {
 			Expect(w.Logs(ctx)).To(And(ContainSubstring("the role koinon_install_audit_writer does not exist"), ContainSubstring("docs/ops/secret-keys.md"),
 				ContainSubstring("no migration was applied")))
 			Expect(migrations()).To(Equal(before))
-
-			By("with postgres.external.apiRole it also fails while koinon_api is not a member of the role")
-			execAll(`CREATE ROLE koinon_install_audit_writer NOLOGIN`)
-			withRole := helmRenderWith(ctx, valuesFile, append(slices.Clone(externalDatabase), "--set", "postgres.external.apiRole=koinon_api")...)
-			var mm *batchv1.Job
-			for _, j := range withRole.Jobs {
-				if j.Name == "koinon-migrate" {
-					mm = j
-				}
-			}
-			Expect(mm).NotTo(BeNil())
-			mmc := mm.Spec.Template.Spec.Containers[0]
-			Expect(mmc.Args).To(ContainElements("--install-writer-member", "koinon_api"))
-			w = rn.start(ctx, mm.Name, mm.Spec.Template.Spec, mmc, jobDeadline)
-			Expect(w.ExitCode(ctx)).NotTo(BeZero(), "logs:\n%s", w.Logs(ctx))
-			Expect(w.Logs(ctx)).To(ContainSubstring("koinon_api is not a member of koinon_install_audit_writer"))
-			Expect(migrations()).To(Equal(before))
-			execAll(`DROP ROLE koinon_install_audit_writer`)
 
 			By("the cnpg pre-upgrade migrate Job finds no role, grants nothing and does not fail the upgrade")
 			// In cnpg mode the chart does not pass --require-install-writer (hack/chart-check.d/45 and
@@ -630,6 +621,27 @@ func runJob(ctx context.Context, rn *runner, job *batchv1.Job) {
 		}
 		Expect(code).To(Equal(0), "%s exited with code %d (args %q); logs:\n%s", w.Name, code, c.Args, logs)
 	}
+}
+
+// installWriterOK is the value of koinon_install_audit_writer_ok on the koinon-api container's
+// metrics port ("" when it is not exported).
+func installWriterOK(ctx context.Context, api *workload) string {
+	GinkgoHelper()
+	mapped, err := api.Ctr.MappedPort(ctx, fmt.Sprintf("%d/tcp", api.portNumber(intOrName{name: "metrics"})))
+	Expect(err).NotTo(HaveOccurred())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1:"+mapped.Port()+"/metrics", nil)
+	Expect(err).NotTo(HaveOccurred())
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	Expect(err).NotTo(HaveOccurred())
+	for _, line := range strings.Split(string(body), "\n") {
+		if v, ok := strings.CutPrefix(line, "koinon_install_audit_writer_ok "); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 // startDeployment starts each container of the Deployment's pod template and requires its

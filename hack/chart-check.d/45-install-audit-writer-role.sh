@@ -86,9 +86,9 @@ has "migrations.wait defaults below Helm's default --timeout" '"--wait", "4m"' -
 ext=(--set postgres.mode=external --set postgres.external.secretName=db --show-only templates/migrate-job.yaml)
 has "the external-database migrate Job requires the writer role" '^          args: \["migrate", "--wait", "4m", "--require-install-writer"\]$' "${ext[@]}"
 has "the external-database durable migrate Job requires the writer role" '^          args: \["migrate", "--wait", "4m", "--durable", "--require-install-writer"\]$' "${ext[@]}" --set api.durable.enabled=true
-# postgres.external.apiRole names koinon-api's login role: the Job then also requires its membership.
-has "the external-database migrate Job checks the api role's membership" '^          args: \["migrate", "--wait", "4m", "--durable", "--require-install-writer", "--install-writer-member", "koinon_api"\]$' "${ext[@]}" --set api.durable.enabled=true --set postgres.external.apiRole=koinon_api
-lacks "without apiRole the migrate Job checks no membership" 'install-writer-member' "${ext[@]}"
-lacks "the cnpg migrate Job ignores apiRole" 'install-writer-member' --show-only templates/migrate-job.yaml --set postgres.external.apiRole=koinon_api
+# koinon-api checks its own membership in the writer role (maintainer decision 2026-11-07): the chart
+# has no value naming the api login and passes the migration no member to check.
+lacks "the migrate Job checks no api login's membership" 'install-writer-member' "${ext[@]}" --set api.durable.enabled=true
+lacks "the chart has no postgres.external.apiRole" 'apiRole' "${ext[@]}"
 lacks "the cnpg migrate Job does not require the writer role" 'require-install-writer' --show-only templates/migrate-job.yaml
 lacks "the grant hook does not require the writer role" 'require-install-writer' "${grants[@]}"

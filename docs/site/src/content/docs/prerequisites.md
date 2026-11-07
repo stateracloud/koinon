@@ -59,8 +59,9 @@ With an external Postgres, create one libpq URI per role in a Secret and name it
 migrate role owns the schema. The other roles need only DML, except that the `api` login role must
 also be a member of a `koinon_install_audit_writer` group role, which is the only role that may write
 the install audit chain (ADR 0100). An administrator creates it once, before the first migration (the
-migrate role usually has no `CREATEROLE`; the migrate Job only warns when the role is missing, and
-grants it on its next run):
+migrate role usually has no `CREATEROLE`; without the role the migrate Job fails before it migrates
+anything). `koinon-api` checks its own membership when it starts: when it is missing it logs the
+`GRANT` to run for the login it connects as, and serves anyway:
 
 ```sql
 CREATE ROLE koinon_install_audit_writer NOLOGIN;

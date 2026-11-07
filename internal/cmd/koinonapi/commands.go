@@ -98,7 +98,6 @@ func newMigrateCommand() *cobra.Command {
 	var (
 		c                         config
 		grantsOnly, requireWriter bool
-		writerMember              string
 	)
 	cmd := &cobra.Command{
 		Use:   "migrate",
@@ -115,13 +114,10 @@ func newMigrateCommand() *cobra.Command {
 			if grantsOnly && requireWriter {
 				return errors.New("--grants-only and --require-install-writer are exclusive: --grants-only waits for the role")
 			}
-			if writerMember != "" && !requireWriter {
-				return errors.New("--install-writer-member needs --require-install-writer: only the required check fails on a missing membership")
-			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return migrate(cmd.Context(), c.databaseURL, c.wait, migrateOptions{durable: c.durable, grantsOnly: grantsOnly, requireWriter: requireWriter, writerMember: writerMember})
+			return migrate(cmd.Context(), c.databaseURL, c.wait, migrateOptions{durable: c.durable, grantsOnly: grantsOnly, requireWriter: requireWriter})
 		},
 	}
 	c.databaseFlag(cmd.Flags())
@@ -133,8 +129,6 @@ func newMigrateCommand() *cobra.Command {
 		"its privileges (the chart's post-upgrade hook in CloudNativePG mode)")
 	fs.BoolVar(&requireWriter, "require-install-writer", false, "fail when the install audit writer role does not exist, "+
 		"instead of warning (the chart passes it on an external database, where nothing creates the role later; ADR 0100 decision 1.1a). It runs before any migration")
-	fs.StringVar(&writerMember, "install-writer-member", "", "with --require-install-writer: koinon-api's login role, "+
-		"which must be a member of the install audit writer role (the chart passes postgres.external.apiRole); empty checks only the role")
 	cli.EnvAlias(cmd, "database-url", "DATABASE_URL")
 	mustRequire(cmd, "database-url")
 	return cmd

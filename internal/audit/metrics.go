@@ -39,3 +39,8 @@ func RegisterMetrics(reg prometheus.Registerer) {
 		reg.MustRegister(writes)
 	}
 }
+
+// RegisterInstallWriterMetric registers koinon_install_audit_writer_ok (InstallWriterCheck) on reg.
+// Only koinon-api writes the install chain, so only koinon-api registers it: a reconciler or agentd
+// series would read 0 and fire the alert of docs/ops/secret-keys.md.
+func RegisterInstallWriterMetric(reg prometheus.Registerer) { reg.MustRegister(installWriterOK) }

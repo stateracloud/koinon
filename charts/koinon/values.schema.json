@@ -290,7 +290,6 @@
           "additionalProperties": false,
           "properties": {
             "secretName": {"type": "string"},
-            "apiRole": {"type": "string", "maxLength": 63},
             "keys": {
               "type": "object",
               "additionalProperties": false,

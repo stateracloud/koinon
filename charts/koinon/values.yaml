@@ -279,11 +279,6 @@ postgres:
     # Secret with one libpq URI per role (sslmode=verify-full recommended). The migration role owns
     # the schema; the component roles need only DML. Components may share one role.
     secretName: ""
-    # The role koinon-api logs in as (the user of the api URI). Set, the migrate Job fails before any
-    # migration unless it is a member of koinon_install_audit_writer (ADR 0100 decision 1.1a); empty,
-    # it checks only that the writer role exists. The migration connects as the migration role and
-    # cannot see the api URI, so the chart passes this name (docs/ops/secret-keys.md).
-    apiRole: ""
     keys:
       migrate: migrate-uri
       api: api-uri

@@ -86,9 +86,9 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- /* External database: the operator creates the install audit writer role before the
           upgrade and no hook creates it later, so a missing role fails the Job with the remedy
-          (ADR 0100 decision 1.1a), checked before any migration; with postgres.external.apiRole also
-          koinon-api's membership in it. In cnpg mode the post-upgrade grant hook waits for it. */}}
-          args: ["migrate", "--wait", {{ .Values.migrations.wait | quote }}{{ if .Values.api.durable.enabled }}, "--durable"{{ end }}{{ if ne .Values.postgres.mode "cnpg" }}, "--require-install-writer"{{ with .Values.postgres.external.apiRole }}, "--install-writer-member", {{ . | quote }}{{ end }}{{ end }}]
+          (ADR 0100 decision 1.1a), checked before any migration. koinon-api checks its own membership
+          at startup. In cnpg mode the post-upgrade grant hook waits for it. */}}
+          args: ["migrate", "--wait", {{ .Values.migrations.wait | quote }}{{ if .Values.api.durable.enabled }}, "--durable"{{ end }}{{ if ne .Values.postgres.mode "cnpg" }}, "--require-install-writer"{{ end }}]
           env:
             {{- include "koinon.dbEnv" (list . "migrate") | nindent 12 }}
           securityContext:
