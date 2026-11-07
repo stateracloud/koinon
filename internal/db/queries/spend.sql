@@ -39,13 +39,13 @@ LIMIT 1;
 -- the provider's split or 0 for want of one (#78).
 INSERT INTO spend_entries (
     org_id, agent_id, principal, run_id, task_id, request_id, key_id, model,
-    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, reasoning_known,
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, reasoning_tokens, reasoning_known,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
     request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id,
     upstream_status, provider_id
 ) VALUES (
     @org_id, sqlc.narg(agent_id), @principal, sqlc.narg(run_id), sqlc.narg(task_id), @request_id, @key_id, @model,
-    @input_tokens, @output_tokens, @cache_read_tokens, @cache_write_tokens, @reasoning_tokens, @reasoning_known::boolean,
+    @input_tokens, @output_tokens, @cache_read_tokens, @cache_write_tokens, @cache_write_1h_tokens, @reasoning_tokens, @reasoning_known::boolean,
     (sqlc.arg(cost_usd)::text)::numeric, (sqlc.narg(gateway_cost_usd)::text)::numeric,
     sqlc.narg(price_ref), @priced, @estimated, sqlc.narg(estimate)::jsonb, @cost_flagged,
     sqlc.narg(request_bytes), sqlc.narg(response_bytes), @occurred_at,
@@ -213,7 +213,7 @@ ORDER BY min(next_attempt_at), org_id;
 -- The org's provisional entries due for an attempt, locked for this settler; another settler skips
 -- them. The row is the work item; the entry is read with it.
 SELECT st.entry_id, st.provider_id, st.provider_type, st.response_id, st.attempts, st.deadline,
-       e.agent_id, e.run_id, e.model, e.occurred_at, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_write_tokens,
+       e.agent_id, e.run_id, e.model, e.occurred_at, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_write_tokens, e.cache_write_1h_tokens,
        e.reasoning_tokens, coalesce(e.reasoning_known, e.reasoning_tokens > 0)::boolean AS reasoning_known,
        e.cost_usd::text AS cost_usd, e.reserve_usd::text AS reserve_usd, e.estimate,
        coalesce(e.price_ref, '')::text AS price_ref
@@ -238,7 +238,7 @@ DELETE FROM spend_settlements WHERE org_id = @org_id AND entry_id = @entry_id;
 -- reserve is released either way. No row: the entry was not provisional (settled already).
 UPDATE spend_entries
 SET input_tokens = @input_tokens, output_tokens = @output_tokens,
-    cache_read_tokens = @cache_read_tokens, cache_write_tokens = @cache_write_tokens,
+    cache_read_tokens = @cache_read_tokens, cache_write_tokens = @cache_write_tokens, cache_write_1h_tokens = @cache_write_1h_tokens,
     reasoning_tokens = @reasoning_tokens, reasoning_known = @reasoning_known::boolean,
     cost_usd = (sqlc.arg(cost_usd)::text)::numeric,
     price_ref = coalesce(sqlc.narg(price_ref), price_ref),

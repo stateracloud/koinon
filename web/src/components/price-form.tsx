@@ -17,7 +17,8 @@ const rateFields: { key: keyof RateFields; label: string }[] = [
   { key: 'input', label: 'Input' },
   { key: 'output', label: 'Output' },
   { key: 'cacheRead', label: 'Cache read (optional)' },
-  { key: 'cacheWrite', label: 'Cache write (optional)' },
+  { key: 'cacheWrite', label: 'Cache write, 5 minutes (optional)' },
+  { key: 'cacheWrite1h', label: 'Cache write, 1 hour (optional)' },
   { key: 'reasoning', label: 'Reasoning (optional)' },
 ]
 

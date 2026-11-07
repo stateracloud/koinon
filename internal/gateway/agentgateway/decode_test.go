@@ -277,6 +277,27 @@ var _ = Describe("Decode", func() {
 		Expect(got["r-over"]).To(And(HaveField("InputTokens", int64(0)), HaveField("OutputTokens", int64(0))))
 	})
 
+	// The 1-hour part of the cache writes is a subset of them (#270): it never exceeds the writes
+	// and leaves the input split as it was.
+	It("reads the 1-hour cache writes as a part of the cache writes", func() {
+		id := func(n string) *commonpb.KeyValue { return str(agentgateway.LogFieldRequest, n) }
+		entries, rejected, reason := agentgateway.Decode(export(
+			llmRecord(id("r-1h"), num(agentgateway.LogFieldInput, 100), num(agentgateway.LogFieldCacheWrite, 20),
+				num(agentgateway.LogFieldCacheWrite1h, 15), num(agentgateway.LogFieldOutput, 10)),
+			llmRecord(id("r-over"), num(agentgateway.LogFieldInput, 100), num(agentgateway.LogFieldCacheWrite, 20),
+				num(agentgateway.LogFieldCacheWrite1h, 90), num(agentgateway.LogFieldOutput, 10)),
+			llmRecord(id("r-none"), num(agentgateway.LogFieldInput, 100), num(agentgateway.LogFieldCacheWrite, 20), num(agentgateway.LogFieldOutput, 10)),
+		))
+		Expect(rejected).To(BeZero(), reason)
+		got := map[string]ledger.Entry{}
+		for _, e := range entries {
+			got[e.RequestID] = e
+		}
+		Expect(got["r-1h"]).To(And(HaveField("InputTokens", int64(80)), HaveField("CacheWriteTokens", int64(20)), HaveField("CacheWrite1hTokens", int64(15))))
+		Expect(got["r-over"]).To(HaveField("CacheWrite1hTokens", int64(20)))
+		Expect(got["r-none"]).To(HaveField("CacheWrite1hTokens", int64(0)))
+	})
+
 	It("still rejects a negative total instead of clamping it to zero", func() {
 		id := func(n string) *commonpb.KeyValue { return str(agentgateway.LogFieldRequest, n) }
 		entries, rejected, _ := agentgateway.Decode(export(

@@ -402,7 +402,9 @@ type Price struct {
 	Output     string
 	CacheRead  string
 	CacheWrite string
-	Reasoning  string
+	// CacheWrite1h prices cache writes with a 1-hour TTL; unset, the gateway bills them at CacheWrite.
+	CacheWrite1h string
+	Reasoning    string
 	// Tiers raise or lower rates once the input side of a request (input, cache
 	// reads and cache writes together) exceeds ContextOver tokens. A tier overlays
 	// the base rates: unset fields keep the base rate (agentgateway's model catalog).
@@ -411,12 +413,13 @@ type Price struct {
 
 // PriceTier is one context-length tier of a Price.
 type PriceTier struct {
-	ContextOver int64
-	Input       string
-	Output      string
-	CacheRead   string
-	CacheWrite  string
-	Reasoning   string
+	ContextOver  int64
+	Input        string
+	Output       string
+	CacheRead    string
+	CacheWrite   string
+	CacheWrite1h string
+	Reasoning    string
 }
 
 // Unpriced returns "<org>/<model>" for each model without a price; drivers do not serve them.
@@ -839,6 +842,11 @@ type UsageRecord struct {
 	InputTokens, OutputTokens         int64
 	InputKnown, OutputKnown           bool
 	CacheReadTokens, CacheWriteTokens int64
+	// CacheWrite1hTokens is the part of CacheWriteTokens written with a 1-hour TTL (Anthropic's
+	// cache_creation.ephemeral_1h_input_tokens), priced at the catalog's cache_write_1h rate; the
+	// rest are 5-minute writes. 0 when the gateway reports no split (the whole write is then priced
+	// as a 5-minute write).
+	CacheWrite1hTokens int64
 	// ReasoningTokens is the provider-reported reasoning part of the output. ReasoningKnown says the
 	// split was reported; without it the 0 means "not reported", not "no thinking".
 	ReasoningTokens int64

@@ -62,7 +62,7 @@ func CheckRecord(r Entry) (kind, reason string) {
 		return RejectInvalidReq, "missing or invalid request ID"
 	case r.KeyID == "":
 		return RejectMissingKey, "missing key ID"
-	case r.InputTokens < 0 || r.OutputTokens < 0 || r.CacheReadTokens < 0 || r.CacheWriteTokens < 0 || r.ReasoningTokens < 0:
+	case r.InputTokens < 0 || r.OutputTokens < 0 || r.CacheReadTokens < 0 || r.CacheWriteTokens < 0 || r.CacheWrite1hTokens < 0 || r.ReasoningTokens < 0:
 		return RejectNegativeToken, "negative token counts"
 	}
 	return "", ""

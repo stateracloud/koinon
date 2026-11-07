@@ -95,6 +95,9 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 				}
 				cacheRead, _ := intValue(attrs[LogFieldCacheRead])
 				cacheWrite, _ := intValue(attrs[LogFieldCacheWrite])
+				// A subset of cacheWrite: a larger figure would price more writes than happened.
+				cacheWrite1h, _ := intValue(attrs[LogFieldCacheWrite1h])
+				cacheWrite1h = min(max(cacheWrite1h, 0), max(cacheWrite, 0))
 				// The split is absent, not 0, when the gateway had none to log (agentgateway v1.7.0
 				// on Anthropic Messages, #78): the entry then records it as unknown. Interim until
 				// agentgateway sets llm.reasoningTokens from Messages usage; #78 links the upstream
@@ -149,7 +152,7 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 					InputTokens:  in,
 					OutputTokens: out,
 					InputKnown:   inOK, OutputKnown: outOK,
-					CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
+					CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite, CacheWrite1hTokens: cacheWrite1h,
 					ReasoningTokens: reasoning, ReasoningKnown: reasoningOK,
 					CostUSD: cost, Status: status,
 					UpstreamKnown: upstreamKnown, Upstream: upstream,

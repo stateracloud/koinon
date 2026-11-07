@@ -276,6 +276,8 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
   `cache_creation_1h_input_tokens`, which lifts the limit in the last consequence above. Koinon's
   price catalog has no 1-hour price yet (ADR 0070 plans `Cost.CacheWrite1h`), so nothing changes
   until it does; cache writes stay priced at the 5-minute rate.
+  The catalog and the ledger now have the rate and the column (ADR 0070, "Landed", #270); what is
+  still missing before Koinon may send 1-hour TTLs is a gateway log field with the 1-hour token count.
 
 ## Amendment (2026-10-28): what the gateway spec showed (PR 2)
 

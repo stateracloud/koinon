@@ -13,7 +13,7 @@ import (
 
 const claimDueSettlements = `-- name: ClaimDueSettlements :many
 SELECT st.entry_id, st.provider_id, st.provider_type, st.response_id, st.attempts, st.deadline,
-       e.agent_id, e.run_id, e.model, e.occurred_at, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_write_tokens,
+       e.agent_id, e.run_id, e.model, e.occurred_at, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_write_tokens, e.cache_write_1h_tokens,
        e.reasoning_tokens, coalesce(e.reasoning_known, e.reasoning_tokens > 0)::boolean AS reasoning_known,
        e.cost_usd::text AS cost_usd, e.reserve_usd::text AS reserve_usd, e.estimate,
        coalesce(e.price_ref, '')::text AS price_ref
@@ -32,26 +32,27 @@ type ClaimDueSettlementsParams struct {
 }
 
 type ClaimDueSettlementsRow struct {
-	EntryID          pgtype.UUID
-	ProviderID       pgtype.UUID
-	ProviderType     string
-	ResponseID       pgtype.Text
-	Attempts         int32
-	Deadline         pgtype.Timestamptz
-	AgentID          pgtype.UUID
-	RunID            pgtype.UUID
-	Model            string
-	OccurredAt       pgtype.Timestamptz
-	InputTokens      int64
-	OutputTokens     int64
-	CacheReadTokens  int64
-	CacheWriteTokens int64
-	ReasoningTokens  int64
-	ReasoningKnown   bool
-	CostUsd          string
-	ReserveUsd       string
-	Estimate         []byte
-	PriceRef         string
+	EntryID            pgtype.UUID
+	ProviderID         pgtype.UUID
+	ProviderType       string
+	ResponseID         pgtype.Text
+	Attempts           int32
+	Deadline           pgtype.Timestamptz
+	AgentID            pgtype.UUID
+	RunID              pgtype.UUID
+	Model              string
+	OccurredAt         pgtype.Timestamptz
+	InputTokens        int64
+	OutputTokens       int64
+	CacheReadTokens    int64
+	CacheWriteTokens   int64
+	CacheWrite1hTokens int64
+	ReasoningTokens    int64
+	ReasoningKnown     bool
+	CostUsd            string
+	ReserveUsd         string
+	Estimate           []byte
+	PriceRef           string
 }
 
 // The org's provisional entries due for an attempt, locked for this settler; another settler skips
@@ -80,6 +81,7 @@ func (q *Queries) ClaimDueSettlements(ctx context.Context, arg ClaimDueSettlemen
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+			&i.CacheWrite1hTokens,
 			&i.ReasoningTokens,
 			&i.ReasoningKnown,
 			&i.CostUsd,
@@ -388,53 +390,54 @@ func (q *Queries) GetSystemSpendSince(ctx context.Context, arg GetSystemSpendSin
 const insertSpendEntry = `-- name: InsertSpendEntry :one
 INSERT INTO spend_entries (
     org_id, agent_id, principal, run_id, task_id, request_id, key_id, model,
-    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, reasoning_known,
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, reasoning_tokens, reasoning_known,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
     request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id,
     upstream_status, provider_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8,
-    $9, $10, $11, $12, $13, $14::boolean,
-    ($15::text)::numeric, ($16::text)::numeric,
-    $17, $18, $19, $20::jsonb, $21,
-    $22, $23, $24,
-    $25, coalesce(($26::text)::numeric, 0), $27,
-    $28, $29
+    $9, $10, $11, $12, $13, $14, $15::boolean,
+    ($16::text)::numeric, ($17::text)::numeric,
+    $18, $19, $20, $21::jsonb, $22,
+    $23, $24, $25,
+    $26, coalesce(($27::text)::numeric, 0), $28,
+    $29, $30
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id
 `
 
 type InsertSpendEntryParams struct {
-	OrgID            pgtype.UUID
-	AgentID          pgtype.UUID
-	Principal        string
-	RunID            pgtype.UUID
-	TaskID           pgtype.UUID
-	RequestID        string
-	KeyID            string
-	Model            string
-	InputTokens      int64
-	OutputTokens     int64
-	CacheReadTokens  int64
-	CacheWriteTokens int64
-	ReasoningTokens  int64
-	ReasoningKnown   bool
-	CostUsd          string
-	GatewayCostUsd   pgtype.Text
-	PriceRef         pgtype.Text
-	Priced           bool
-	Estimated        bool
-	Estimate         []byte
-	CostFlagged      bool
-	RequestBytes     pgtype.Int8
-	ResponseBytes    pgtype.Int8
-	OccurredAt       pgtype.Timestamptz
-	Provisional      bool
-	ReserveUsd       pgtype.Text
-	ResponseID       pgtype.Text
-	UpstreamStatus   pgtype.Int2
-	ProviderID       pgtype.UUID
+	OrgID              pgtype.UUID
+	AgentID            pgtype.UUID
+	Principal          string
+	RunID              pgtype.UUID
+	TaskID             pgtype.UUID
+	RequestID          string
+	KeyID              string
+	Model              string
+	InputTokens        int64
+	OutputTokens       int64
+	CacheReadTokens    int64
+	CacheWriteTokens   int64
+	CacheWrite1hTokens int64
+	ReasoningTokens    int64
+	ReasoningKnown     bool
+	CostUsd            string
+	GatewayCostUsd     pgtype.Text
+	PriceRef           pgtype.Text
+	Priced             bool
+	Estimated          bool
+	Estimate           []byte
+	CostFlagged        bool
+	RequestBytes       pgtype.Int8
+	ResponseBytes      pgtype.Int8
+	OccurredAt         pgtype.Timestamptz
+	Provisional        bool
+	ReserveUsd         pgtype.Text
+	ResponseID         pgtype.Text
+	UpstreamStatus     pgtype.Int2
+	ProviderID         pgtype.UUID
 }
 
 // Records one request of an agent (principal 'agent', agent_id set) or of a system key of the org
@@ -460,6 +463,7 @@ func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryPara
 		arg.OutputTokens,
 		arg.CacheReadTokens,
 		arg.CacheWriteTokens,
+		arg.CacheWrite1hTokens,
 		arg.ReasoningTokens,
 		arg.ReasoningKnown,
 		arg.CostUsd,
@@ -696,31 +700,32 @@ func (q *Queries) ListSpendEntryRevisions(ctx context.Context, arg ListSpendEntr
 const settleSpendEntry = `-- name: SettleSpendEntry :one
 UPDATE spend_entries
 SET input_tokens = $1, output_tokens = $2,
-    cache_read_tokens = $3, cache_write_tokens = $4,
-    reasoning_tokens = $5, reasoning_known = $6::boolean,
-    cost_usd = ($7::text)::numeric,
-    price_ref = coalesce($8, price_ref),
-    estimated = $9, estimate = $10::jsonb,
-    cost_flagged = cost_flagged OR $11,
+    cache_read_tokens = $3, cache_write_tokens = $4, cache_write_1h_tokens = $5,
+    reasoning_tokens = $6, reasoning_known = $7::boolean,
+    cost_usd = ($8::text)::numeric,
+    price_ref = coalesce($9, price_ref),
+    estimated = $10, estimate = $11::jsonb,
+    cost_flagged = cost_flagged OR $12,
     provisional = false, reserve_usd = 0
-WHERE org_id = $12 AND id = $13 AND provisional
+WHERE org_id = $13 AND id = $14 AND provisional
 RETURNING id
 `
 
 type SettleSpendEntryParams struct {
-	InputTokens      int64
-	OutputTokens     int64
-	CacheReadTokens  int64
-	CacheWriteTokens int64
-	ReasoningTokens  int64
-	ReasoningKnown   bool
-	CostUsd          string
-	PriceRef         pgtype.Text
-	Estimated        bool
-	Estimate         []byte
-	CostFlagged      bool
-	OrgID            pgtype.UUID
-	ID               pgtype.UUID
+	InputTokens        int64
+	OutputTokens       int64
+	CacheReadTokens    int64
+	CacheWriteTokens   int64
+	CacheWrite1hTokens int64
+	ReasoningTokens    int64
+	ReasoningKnown     bool
+	CostUsd            string
+	PriceRef           pgtype.Text
+	Estimated          bool
+	Estimate           []byte
+	CostFlagged        bool
+	OrgID              pgtype.UUID
+	ID                 pgtype.UUID
 }
 
 // Makes a provisional entry final: with the provider's usage and cost, or (expired) as it is. The
@@ -731,6 +736,7 @@ func (q *Queries) SettleSpendEntry(ctx context.Context, arg SettleSpendEntryPara
 		arg.OutputTokens,
 		arg.CacheReadTokens,
 		arg.CacheWriteTokens,
+		arg.CacheWrite1hTokens,
 		arg.ReasoningTokens,
 		arg.ReasoningKnown,
 		arg.CostUsd,

@@ -35,7 +35,10 @@ type Wire struct {
 	Output     string `json:"output,omitempty" yaml:"output,omitempty"`
 	CacheRead  string `json:"cacheRead,omitempty" yaml:"cache_read,omitempty"`
 	CacheWrite string `json:"cacheWrite,omitempty" yaml:"cache_write,omitempty"`
-	Reasoning  string `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
+	// CacheWrite1h is the rate for cache writes with a 1-hour TTL; CacheWrite is the 5-minute rate.
+	// Unset, 1-hour writes are billed at CacheWrite.
+	CacheWrite1h string `json:"cacheWrite1h,omitempty" yaml:"cache_write_1h,omitempty"`
+	Reasoning    string `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
 }
 
 // WireTier is a tier as written.
@@ -52,11 +55,11 @@ type Spec struct {
 
 // Rates are parsed rates. Nil means unset.
 type Rates struct {
-	Input, Output, CacheRead, CacheWrite, Reasoning *money.Rate
+	Input, Output, CacheRead, CacheWrite, CacheWrite1h, Reasoning *money.Rate
 }
 
 func (r Rates) nonzero() bool {
-	for _, p := range []*money.Rate{r.Input, r.Output, r.CacheRead, r.CacheWrite, r.Reasoning} {
+	for _, p := range []*money.Rate{r.Input, r.Output, r.CacheRead, r.CacheWrite, r.CacheWrite1h, r.Reasoning} {
 		if p != nil && *p != 0 {
 			return true
 		}
@@ -80,13 +83,16 @@ type Price struct {
 type Usage struct {
 	Input      int64 // input tokens that were neither cache reads nor cache writes
 	CacheRead  int64
-	CacheWrite int64
-	Output     int64 // output tokens that were not reasoning
-	Reasoning  int64
+	CacheWrite int64 // 5-minute cache writes
+	// CacheWrite1h is cache writes with a 1-hour TTL, a bucket of its own so that the price
+	// version and the raw usage stay reproducible (ADR 0070 amendment).
+	CacheWrite1h int64
+	Output       int64 // output tokens that were not reasoning
+	Reasoning    int64
 }
 
 // Context is the input side of the request, which selects the tier.
-func (u Usage) Context() int64 { return u.Input + u.CacheRead + u.CacheWrite }
+func (u Usage) Context() int64 { return u.Input + u.CacheRead + u.CacheWrite + u.CacheWrite1h }
 
 // Total is every token.
 func (u Usage) Total() int64 { return u.Context() + u.Output + u.Reasoning }
@@ -115,6 +121,7 @@ func (w Wire) Parse() (Rates, error) {
 		{"output", w.Output, &r.Output},
 		{"cache_read", w.CacheRead, &r.CacheRead},
 		{"cache_write", w.CacheWrite, &r.CacheWrite},
+		{"cache_write_1h", w.CacheWrite1h, &r.CacheWrite1h},
 		{"reasoning", w.Reasoning, &r.Reasoning},
 	} {
 		v, err := parseRate(f.name, f.s)
@@ -134,7 +141,7 @@ func (r Rates) Wire() Wire {
 		}
 		return p.PerMillion()
 	}
-	return Wire{Input: f(r.Input), Output: f(r.Output), CacheRead: f(r.CacheRead), CacheWrite: f(r.CacheWrite), Reasoning: f(r.Reasoning)}
+	return Wire{Input: f(r.Input), Output: f(r.Output), CacheRead: f(r.CacheRead), CacheWrite: f(r.CacheWrite), CacheWrite1h: f(r.CacheWrite1h), Reasoning: f(r.Reasoning)}
 }
 
 // Parse validates s: input and output are required, tiers ascend and set at least one rate.
@@ -184,19 +191,19 @@ func (r Rates) overlay(t Rates) Rates {
 		}
 		return base
 	}
-	return Rates{pick(r.Input, t.Input), pick(r.Output, t.Output), pick(r.CacheRead, t.CacheRead), pick(r.CacheWrite, t.CacheWrite), pick(r.Reasoning, t.Reasoning)}
+	return Rates{pick(r.Input, t.Input), pick(r.Output, t.Output), pick(r.CacheRead, t.CacheRead), pick(r.CacheWrite, t.CacheWrite), pick(r.CacheWrite1h, t.CacheWrite1h), pick(r.Reasoning, t.Reasoning)}
 }
 
 // Breakdown is the cost of each bucket.
 type Breakdown struct {
-	Input, CacheRead, CacheWrite, Output, Reasoning money.USD
+	Input, CacheRead, CacheWrite, CacheWrite1h, Output, Reasoning money.USD
 }
 
 // Total adds the buckets.
 func (b Breakdown) Total() (money.USD, error) {
 	var sum money.USD
 	var err error
-	for _, v := range []money.USD{b.Input, b.CacheRead, b.CacheWrite, b.Output, b.Reasoning} {
+	for _, v := range []money.USD{b.Input, b.CacheRead, b.CacheWrite, b.CacheWrite1h, b.Output, b.Reasoning} {
 		if sum, err = sum.Add(v); err != nil {
 			return 0, err
 		}
@@ -206,7 +213,7 @@ func (b Breakdown) Total() (money.USD, error) {
 
 // Cost prices u. A bucket without its own rate is billed at the rate it would be if the
 // provider did not split it out, as agentgateway does: cache reads and writes at the input
-// rate, reasoning at the output rate. Nothing is billed twice because the buckets do not overlap.
+// rate, 1-hour cache writes at the cache-write rate, reasoning at the output rate. Nothing is billed twice because the buckets do not overlap.
 func (p Price) Cost(u Usage) (Breakdown, money.USD, error) {
 	r := p.Effective(u.Context())
 	rate := func(own, fallback *money.Rate) money.Rate {
@@ -215,6 +222,7 @@ func (p Price) Cost(u Usage) (Breakdown, money.USD, error) {
 		}
 		return *fallback
 	}
+	write5m := rate(r.CacheWrite, r.Input)
 	var b Breakdown
 	var err error
 	for _, l := range []struct {
@@ -225,6 +233,7 @@ func (p Price) Cost(u Usage) (Breakdown, money.USD, error) {
 		{&b.Input, u.Input, *r.Input},
 		{&b.CacheRead, u.CacheRead, rate(r.CacheRead, r.Input)},
 		{&b.CacheWrite, u.CacheWrite, rate(r.CacheWrite, r.Input)},
+		{&b.CacheWrite1h, u.CacheWrite1h, rate(r.CacheWrite1h, &write5m)},
 		{&b.Output, u.Output, *r.Output},
 		{&b.Reasoning, u.Reasoning, rate(r.Reasoning, r.Output)},
 	} {
@@ -239,12 +248,12 @@ func (p Price) Cost(u Usage) (Breakdown, money.USD, error) {
 // Gateway converts p for agentgateway's model catalog (the gateway's own budget backstop).
 func (p Price) Gateway() gateway.Price {
 	w := p.Base.Wire()
-	g := gateway.Price{Input: w.Input, Output: w.Output, CacheRead: w.CacheRead, CacheWrite: w.CacheWrite, Reasoning: w.Reasoning}
+	g := gateway.Price{Input: w.Input, Output: w.Output, CacheRead: w.CacheRead, CacheWrite: w.CacheWrite, CacheWrite1h: w.CacheWrite1h, Reasoning: w.Reasoning}
 	for _, t := range p.Tiers {
 		tw := t.Rates.Wire()
 		g.Tiers = append(g.Tiers, gateway.PriceTier{
 			ContextOver: t.ContextOver, Input: tw.Input, Output: tw.Output, CacheRead: tw.CacheRead,
-			CacheWrite: tw.CacheWrite, Reasoning: tw.Reasoning,
+			CacheWrite: tw.CacheWrite, CacheWrite1h: tw.CacheWrite1h, Reasoning: tw.Reasoning,
 		})
 	}
 	return g

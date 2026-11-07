@@ -251,7 +251,9 @@ type rates struct {
 	Output     string `yaml:"output,omitempty"`
 	CacheRead  string `yaml:"cacheRead,omitempty"`
 	CacheWrite string `yaml:"cacheWrite,omitempty"`
-	Reasoning  string `yaml:"reasoning,omitempty"`
+	// CacheWrite1h is agentgateway v1.7's separate 1-hour cache-write rate.
+	CacheWrite1h string `yaml:"cacheWrite1h,omitempty"`
+	Reasoning    string `yaml:"reasoning,omitempty"`
 }
 
 type frontendPolicies struct {
@@ -720,11 +722,11 @@ func build(s gateway.State, o Options) document {
 			}
 			cm := catalogModel{Rates: rates{
 				Input: m.Price.Input, Output: m.Price.Output, CacheRead: m.Price.CacheRead,
-				CacheWrite: m.Price.CacheWrite, Reasoning: m.Price.Reasoning,
+				CacheWrite: m.Price.CacheWrite, CacheWrite1h: m.Price.CacheWrite1h, Reasoning: m.Price.Reasoning,
 			}}
 			for _, t := range m.Price.Tiers {
 				cm.Tiers = append(cm.Tiers, catalogTier{ContextOver: t.ContextOver, Rates: rates{
-					Input: t.Input, Output: t.Output, CacheRead: t.CacheRead, CacheWrite: t.CacheWrite, Reasoning: t.Reasoning,
+					Input: t.Input, Output: t.Output, CacheRead: t.CacheRead, CacheWrite: t.CacheWrite, CacheWrite1h: t.CacheWrite1h, Reasoning: t.Reasoning,
 				}})
 			}
 			cp.Models[m.Name] = cm

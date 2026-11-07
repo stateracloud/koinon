@@ -50,6 +50,9 @@ message Rates {
   string cache_read = 3;
   string cache_write = 4;
   string reasoning = 5;
+  // cache_write_1h prices cache writes with a 1-hour TTL; cache_write is the 5-minute rate. Unset,
+  // 1-hour writes cost cache_write.
+  string cache_write_1h = 6;
 }
 
 // PriceTier replaces the rates it names once the input side of a request (input, cache reads

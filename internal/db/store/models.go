@@ -2453,37 +2453,38 @@ type Session struct {
 }
 
 type SpendEntry struct {
-	OrgID            pgtype.UUID
-	ID               pgtype.UUID
-	AgentID          pgtype.UUID
-	RunID            pgtype.UUID
-	TaskID           pgtype.UUID
-	RequestID        string
-	KeyID            string
-	Model            string
-	InputTokens      int64
-	OutputTokens     int64
-	CostUsd          pgtype.Numeric
-	Priced           bool
-	OccurredAt       pgtype.Timestamptz
-	CreatedAt        pgtype.Timestamptz
-	CacheReadTokens  int64
-	CacheWriteTokens int64
-	ReasoningTokens  int64
-	GatewayCostUsd   pgtype.Numeric
-	PriceRef         pgtype.Text
-	Estimated        bool
-	Estimate         []byte
-	CostFlagged      bool
-	RequestBytes     pgtype.Int8
-	ResponseBytes    pgtype.Int8
-	Provisional      bool
-	ReserveUsd       pgtype.Numeric
-	ResponseID       pgtype.Text
-	Principal        string
-	UpstreamStatus   pgtype.Int2
-	ProviderID       pgtype.UUID
-	ReasoningKnown   pgtype.Bool
+	OrgID              pgtype.UUID
+	ID                 pgtype.UUID
+	AgentID            pgtype.UUID
+	RunID              pgtype.UUID
+	TaskID             pgtype.UUID
+	RequestID          string
+	KeyID              string
+	Model              string
+	InputTokens        int64
+	OutputTokens       int64
+	CostUsd            pgtype.Numeric
+	Priced             bool
+	OccurredAt         pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	CacheReadTokens    int64
+	CacheWriteTokens   int64
+	ReasoningTokens    int64
+	GatewayCostUsd     pgtype.Numeric
+	PriceRef           pgtype.Text
+	Estimated          bool
+	Estimate           []byte
+	CostFlagged        bool
+	RequestBytes       pgtype.Int8
+	ResponseBytes      pgtype.Int8
+	Provisional        bool
+	ReserveUsd         pgtype.Numeric
+	ResponseID         pgtype.Text
+	Principal          string
+	UpstreamStatus     pgtype.Int2
+	ProviderID         pgtype.UUID
+	ReasoningKnown     pgtype.Bool
+	CacheWrite1hTokens int64
 }
 
 type SpendEntryRevision struct {

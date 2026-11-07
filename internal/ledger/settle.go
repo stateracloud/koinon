@@ -254,15 +254,17 @@ func (s *Settler) settleNext(ctx context.Context, org pgtype.UUID) (claimed, set
 
 // entrySnapshot is the part of an entry a settlement changes, for the revision.
 type entrySnapshot struct {
-	InputTokens      int64  `json:"input_tokens"`
-	OutputTokens     int64  `json:"output_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens"`
-	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	ReasoningTokens  int64  `json:"reasoning_tokens"`
-	ReasoningKnown   bool   `json:"reasoning_known"`
-	CostUSD          string `json:"cost_usd"`
-	ReserveUSD       string `json:"reserve_usd"`
-	Provisional      bool   `json:"provisional"`
+	InputTokens      int64 `json:"input_tokens"`
+	OutputTokens     int64 `json:"output_tokens"`
+	CacheReadTokens  int64 `json:"cache_read_tokens"`
+	CacheWriteTokens int64 `json:"cache_write_tokens"`
+	// CacheWrite1hTokens is the 1-hour part of CacheWriteTokens.
+	CacheWrite1hTokens int64  `json:"cache_write_1h_tokens"`
+	ReasoningTokens    int64  `json:"reasoning_tokens"`
+	ReasoningKnown     bool   `json:"reasoning_known"`
+	CostUSD            string `json:"cost_usd"`
+	ReserveUSD         string `json:"reserve_usd"`
+	Provisional        bool   `json:"provisional"`
 	// ProviderCostUSD is the provider's own cost figure, when it reported (with BYOK, the
 	// aggregator's fee; CostUSD then adds the upstream's cost).
 	ProviderCostUSD string `json:"provider_cost_usd,omitempty"`
@@ -277,7 +279,8 @@ func (s *Settler) settleOne(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row
 	q := store.New(tx)
 	before := entrySnapshot{
 		InputTokens: row.InputTokens, OutputTokens: row.OutputTokens, CacheReadTokens: row.CacheReadTokens,
-		CacheWriteTokens: row.CacheWriteTokens, ReasoningTokens: row.ReasoningTokens, ReasoningKnown: row.ReasoningKnown,
+		CacheWriteTokens: row.CacheWriteTokens, CacheWrite1hTokens: row.CacheWrite1hTokens,
+		ReasoningTokens: row.ReasoningTokens, ReasoningKnown: row.ReasoningKnown,
 		CostUSD: row.CostUsd, ReserveUSD: row.ReserveUsd, Provisional: true,
 	}
 	meta := map[string]any{}
@@ -294,6 +297,9 @@ func (s *Settler) settleOne(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row
 		if u.CacheWriteTokens == 0 && row.CacheWriteTokens > 0 {
 			u.CacheWriteTokens = min(row.CacheWriteTokens, max(u.InputTokens-u.CacheReadTokens, 0))
 		}
+		// No provider record splits the writes by TTL, so the 1-hour part the gateway logged is kept,
+		// within the writes now counted: otherwise it would be billed at the 5-minute rate (#270).
+		u.CacheWrite1hTokens = min(row.CacheWrite1hTokens, u.CacheWriteTokens)
 		// A generation without a reasoning figure keeps the split the gateway logged, within the
 		// provider's output count; when neither reported one it stays unknown (#78).
 		if !u.ReasoningKnown && row.ReasoningKnown {
@@ -305,7 +311,8 @@ func (s *Settler) settleOne(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row
 		}
 		after := entrySnapshot{
 			InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheReadTokens: u.CacheReadTokens,
-			CacheWriteTokens: u.CacheWriteTokens, ReasoningTokens: u.ReasoningTokens, ReasoningKnown: u.ReasoningKnown,
+			CacheWriteTokens: u.CacheWriteTokens, CacheWrite1hTokens: u.CacheWrite1hTokens,
+			ReasoningTokens: u.ReasoningTokens, ReasoningKnown: u.ReasoningKnown,
 			CostUSD: cost.Numeric(), ReserveUSD: money.USD(0).Numeric(), ProviderCostUSD: u.Cost.Numeric(),
 		}
 		settled := map[string]any{
@@ -482,7 +489,7 @@ func (s *Settler) finish(ctx context.Context, q *store.Queries, org pgtype.UUID,
 	if _, err := q.SettleSpendEntry(ctx, store.SettleSpendEntryParams{
 		OrgID: org, ID: row.EntryID,
 		InputTokens: after.InputTokens, OutputTokens: after.OutputTokens,
-		CacheReadTokens: after.CacheReadTokens, CacheWriteTokens: after.CacheWriteTokens, ReasoningTokens: after.ReasoningTokens,
+		CacheReadTokens: after.CacheReadTokens, CacheWriteTokens: after.CacheWriteTokens, CacheWrite1hTokens: after.CacheWrite1hTokens, ReasoningTokens: after.ReasoningTokens,
 		ReasoningKnown: after.ReasoningKnown,
 		CostUsd:        after.CostUSD, PriceRef: ref, Estimated: estimated, Estimate: meta, CostFlagged: flagged,
 	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {

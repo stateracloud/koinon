@@ -73,6 +73,47 @@ func TestMissingRatesFallBack(t *testing.T) {
 	}
 }
 
+func TestCacheWrite1hHasItsOwnRate(t *testing.T) {
+	p, err := pricing.Spec{
+		Prices: pricing.Wire{Input: "2", Output: "8", CacheWrite: "2.5", CacheWrite1h: "4"},
+		Tiers:  []pricing.WireTier{{ContextOver: 1_000_000, Prices: pricing.Wire{CacheWrite1h: "8"}}},
+	}.Parse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 1M 5-minute writes at 2.5 plus 1M 1-hour writes at 4 (a 1-hour write is not billed at the
+	// 5-minute rate, #270).
+	b, total, err := p.Cost(pricing.Usage{CacheWrite: 500_000, CacheWrite1h: 500_000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := money.MustParse("3.25"); total != want || b.CacheWrite1h != money.MustParse("2") {
+		t.Fatalf("total %s (1h %s), want 3.25 (1h 2)", total, b.CacheWrite1h)
+	}
+	// The 1-hour tokens count toward the context that selects a tier, and a tier may reprice them
+	// alone: the 5-minute rate keeps the base rate.
+	_, big, _ := p.Cost(pricing.Usage{CacheWrite: 1, CacheWrite1h: 1_000_000})
+	if want := money.MustParse("8.0000025"); big != want {
+		t.Fatalf("tier total %s want %s", big, want)
+	}
+	// The gateway catalog carries the rate.
+	if g := p.Gateway(); g.CacheWrite1h != "4" || g.Tiers[0].CacheWrite1h != "8" {
+		t.Fatalf("gateway price %+v", g)
+	}
+	// Unset, 1-hour writes cost what 5-minute writes cost (and without that, the input rate).
+	q, _ := pricing.Spec{Prices: pricing.Wire{Input: "2", Output: "8", CacheWrite: "2.5"}}.Parse()
+	if _, t1, _ := q.Cost(pricing.Usage{CacheWrite1h: 1_000_000}); t1 != money.MustParse("2.5") {
+		t.Fatalf("fallback to cache_write: got %s", t1)
+	}
+	r, _ := pricing.Spec{Prices: pricing.Wire{Input: "2", Output: "8"}}.Parse()
+	if _, t2, _ := r.Cost(pricing.Usage{CacheWrite1h: 1_000_000}); t2 != money.MustParse("2") {
+		t.Fatalf("fallback to input: got %s", t2)
+	}
+	if _, err := (pricing.Wire{CacheWrite1h: "x"}).Parse(); err == nil {
+		t.Fatal("a bad cache_write_1h parsed")
+	}
+}
+
 func TestSelectPrefersExactProviderThenSpecificThenLater(t *testing.T) {
 	mk := func(id, prov, glob, from, in string) pricing.Resolved {
 		r, err := pricing.Entry{

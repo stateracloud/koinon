@@ -27,12 +27,15 @@ const (
 // Rates are USD per million tokens as decimal strings with at most 6 fraction digits. Empty
 // means unset; a free model needs an explicit "0".
 type Rates struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Input         string                 `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"`
-	Output        string                 `protobuf:"bytes,2,opt,name=output,proto3" json:"output,omitempty"`
-	CacheRead     string                 `protobuf:"bytes,3,opt,name=cache_read,json=cacheRead,proto3" json:"cache_read,omitempty"`
-	CacheWrite    string                 `protobuf:"bytes,4,opt,name=cache_write,json=cacheWrite,proto3" json:"cache_write,omitempty"`
-	Reasoning     string                 `protobuf:"bytes,5,opt,name=reasoning,proto3" json:"reasoning,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Input      string                 `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"`
+	Output     string                 `protobuf:"bytes,2,opt,name=output,proto3" json:"output,omitempty"`
+	CacheRead  string                 `protobuf:"bytes,3,opt,name=cache_read,json=cacheRead,proto3" json:"cache_read,omitempty"`
+	CacheWrite string                 `protobuf:"bytes,4,opt,name=cache_write,json=cacheWrite,proto3" json:"cache_write,omitempty"`
+	Reasoning  string                 `protobuf:"bytes,5,opt,name=reasoning,proto3" json:"reasoning,omitempty"`
+	// cache_write_1h prices cache writes with a 1-hour TTL; cache_write is the 5-minute rate. Unset,
+	// 1-hour writes cost cache_write.
+	CacheWrite_1H string `protobuf:"bytes,6,opt,name=cache_write_1h,json=cacheWrite1h,proto3" json:"cache_write_1h,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -98,6 +101,13 @@ func (x *Rates) GetCacheWrite() string {
 func (x *Rates) GetReasoning() string {
 	if x != nil {
 		return x.Reasoning
+	}
+	return ""
+}
+
+func (x *Rates) GetCacheWrite_1H() string {
+	if x != nil {
+		return x.CacheWrite_1H
 	}
 	return ""
 }
@@ -1430,7 +1440,7 @@ var File_koinon_budget_v1alpha1_price_proto protoreflect.FileDescriptor
 
 const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\n" +
-	"\"koinon/budget/v1alpha1/price.proto\x12\x16koinon.budget.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x93\x01\n" +
+	"\"koinon/budget/v1alpha1/price.proto\x12\x16koinon.budget.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb9\x01\n" +
 	"\x05Rates\x12\x14\n" +
 	"\x05input\x18\x01 \x01(\tR\x05input\x12\x16\n" +
 	"\x06output\x18\x02 \x01(\tR\x06output\x12\x1d\n" +
@@ -1438,7 +1448,8 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"cache_read\x18\x03 \x01(\tR\tcacheRead\x12\x1f\n" +
 	"\vcache_write\x18\x04 \x01(\tR\n" +
 	"cacheWrite\x12\x1c\n" +
-	"\treasoning\x18\x05 \x01(\tR\treasoning\"c\n" +
+	"\treasoning\x18\x05 \x01(\tR\treasoning\x12$\n" +
+	"\x0ecache_write_1h\x18\x06 \x01(\tR\fcacheWrite1h\"c\n" +
 	"\tPriceTier\x12!\n" +
 	"\fcontext_over\x18\x01 \x01(\x03R\vcontextOver\x123\n" +
 	"\x05rates\x18\x02 \x01(\v2\x1d.koinon.budget.v1alpha1.RatesR\x05rates\"6\n" +

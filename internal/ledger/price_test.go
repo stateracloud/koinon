@@ -265,6 +265,38 @@ var _ = Describe("Cost truth", func() {
 		Expect(s.PriceRef).To(HavePrefix("org#"))
 	})
 
+	It("bills 1-hour cache writes at their own rate, the 5-minute rest at cache_write, and stores the split (#270)", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "10.00")
+		e.model(ctx, "openrouter", frontier)
+		_, err := prices.New(db, nil, priceList).SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
+			Entry: pricing.Entry{
+				ID: "sonnet-1h", Provider: "openrouter", Match: pricing.Match{Glob: frontier},
+				Spec:      pricing.Spec{Prices: pricing.Wire{Input: "2", Output: "10", CacheWrite: "2.5", CacheWrite1h: "4"}},
+				Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 4096,
+			},
+			ValidFrom: time.Now().Add(-time.Hour),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		u := e.usage(time.Now(), frontier, 0, 0, 0, "")
+		u.CacheWriteTokens, u.CacheWrite1hTokens = 1_000_000, 400_000
+		_, err = ing.Ingest(ctx, []ledger.Entry{u})
+		Expect(err).NotTo(HaveOccurred())
+		s := e.lastEntry(ctx)
+		// 600K at 2.5 plus 400K at 4 per million.
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("3.10"))
+		var total, oneHour int64
+		Expect(db.QueryRow(ctx, `SELECT input_tokens, cache_write_1h_tokens FROM spend_entries WHERE org_id = $1`, e.org).Scan(&total, &oneHour)).To(Succeed())
+		Expect(total).To(Equal(int64(1_000_000)), "input_tokens still counts every write once")
+		Expect(oneHour).To(Equal(int64(400_000)))
+
+		// A 1-hour figure above the writes is clamped to them.
+		over := e.usage(time.Now(), frontier, 0, 0, 0, "")
+		over.CacheWriteTokens, over.CacheWrite1hTokens = 1_000_000, 5_000_000
+		_, err = ing.Ingest(ctx, []ledger.Entry{over})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ledger.FormatUSD(e.lastEntry(ctx).CostUsd)).To(Equal("4.00"))
+	})
+
 	It("estimates missing usage, marks it and counts it toward the limit", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "0.01")
 		e.model(ctx, "openrouter", flash)

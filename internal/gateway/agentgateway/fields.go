@@ -28,7 +28,10 @@ const (
 	LogFieldOutput     = "koinon.out"
 	LogFieldCacheRead  = "koinon.cache_read"
 	LogFieldCacheWrite = "koinon.cache_write"
-	LogFieldReasoning  = "koinon.reasoning"
+	// LogFieldCacheWrite1h is the 1-hour part of LogFieldCacheWrite. The drivers do not render it
+	// yet: agentgateway exposes no CEL field for the 1-hour token count (#270).
+	LogFieldCacheWrite1h = "koinon.cache_write_1h"
+	LogFieldReasoning    = "koinon.reasoning"
 	// LogFieldStatus is the HTTP status the gateway answered; a 2xx LLM record without usage
 	// is a request whose usage must be estimated (an aborted stream, a provider that
 	// reports none).

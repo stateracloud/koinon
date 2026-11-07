@@ -1180,11 +1180,16 @@ type PriceMatch struct {
 
 // PriceRates USD per million tokens as decimal strings with at most 6 fraction digits. A free model needs an explicit "0".
 type PriceRates struct {
-	CacheRead  *string `json:"cacheRead,omitempty"`
+	CacheRead *string `json:"cacheRead,omitempty"`
+
+	// CacheWrite 5-minute cache writes.
 	CacheWrite *string `json:"cacheWrite,omitempty"`
-	Input      *string `json:"input,omitempty"`
-	Output     *string `json:"output,omitempty"`
-	Reasoning  *string `json:"reasoning,omitempty"`
+
+	// CacheWrite1h 1-hour cache writes. Unset, they are billed at cacheWrite.
+	CacheWrite1h *string `json:"cacheWrite1h,omitempty"`
+	Input        *string `json:"input,omitempty"`
+	Output       *string `json:"output,omitempty"`
+	Reasoning    *string `json:"reasoning,omitempty"`
 }
 
 // PriceSaved The price version just saved, with the warnings of the save.

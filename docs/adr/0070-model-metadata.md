@@ -425,3 +425,16 @@ agentgateway v1.7.0 accepts a `cacheWrite1h` rate in the model catalog and count
 it next to `cacheWrite` (ADR 0069 keeps writes at the 5-minute rate until then), and the ledger should
 store the 1-hour write tokens as their own column so that the price version and the raw usage stay
 reproducible.
+
+### Landed (2026-11-07, #270)
+
+The catalog (`pricing.Wire`) has `cache_write_1h` next to `cache_write`, in the base rates and in
+tiers; unset, 1-hour writes are billed at `cache_write`, and without that at the input rate, as
+before. `pricing.Usage.CacheWrite1h` is a bucket of its own and counts toward the tier context. Both
+gateway drivers render `cacheWrite1h` only when set. The ledger stores `spend_entries.cache_write_1h_tokens`
+(migration 00067) as a part of `cache_write_tokens`, as Anthropic's usage record does, so every sum
+and the input split stay as they were; `priced.usage` bills `cache_write_tokens - cache_write_1h_tokens`
+at the 5-minute rate. The settler keeps the gateway's 1-hour figure, clamped to the writes, because no provider
+record splits writes by TTL. `agentgateway.Decode` reads the optional log field `koinon.cache_write_1h`.
+Not done: agentgateway has no CEL field for the 1-hour token count (only `llm.cost.cacheWriteDetails.1h`,
+a USD figure), so neither driver renders that log field yet and the column stays 0 until one does.

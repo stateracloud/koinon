@@ -586,20 +586,20 @@ func celLiteral(v any) string {
 }
 
 func catalogModel(p *gateway.Price) map[string]any {
-	cm := map[string]any{"rates": rates(p.Input, p.Output, p.CacheRead, p.CacheWrite, p.Reasoning)}
+	cm := map[string]any{"rates": rates(p.Input, p.Output, p.CacheRead, p.CacheWrite, p.CacheWrite1h, p.Reasoning)}
 	if len(p.Tiers) > 0 {
 		var tiers []any
 		for _, t := range p.Tiers {
-			tiers = append(tiers, map[string]any{"contextOver": t.ContextOver, "rates": rates(t.Input, t.Output, t.CacheRead, t.CacheWrite, t.Reasoning)})
+			tiers = append(tiers, map[string]any{"contextOver": t.ContextOver, "rates": rates(t.Input, t.Output, t.CacheRead, t.CacheWrite, t.CacheWrite1h, t.Reasoning)})
 		}
 		cm["tiers"] = tiers
 	}
 	return cm
 }
 
-func rates(in, out, cr, cw, rs string) map[string]any {
+func rates(in, out, cr, cw, cw1h, rs string) map[string]any {
 	r := map[string]any{}
-	for k, v := range map[string]string{"input": in, "output": out, "cacheRead": cr, "cacheWrite": cw, "reasoning": rs} {
+	for k, v := range map[string]string{"input": in, "output": out, "cacheRead": cr, "cacheWrite": cw, "cacheWrite1h": cw1h, "reasoning": rs} {
 		if v != "" {
 			r[k] = v
 		}

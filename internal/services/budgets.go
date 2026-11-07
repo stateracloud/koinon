@@ -480,11 +480,11 @@ func (s *Server) MarkNotificationRead(ctx context.Context, req *budgetv1alpha1.M
 // ---- PriceService
 
 func ratesProto(w pricing.Wire) *budgetv1alpha1.Rates {
-	return &budgetv1alpha1.Rates{Input: w.Input, Output: w.Output, CacheRead: w.CacheRead, CacheWrite: w.CacheWrite, Reasoning: w.Reasoning}
+	return &budgetv1alpha1.Rates{Input: w.Input, Output: w.Output, CacheRead: w.CacheRead, CacheWrite: w.CacheWrite, CacheWrite_1H: w.CacheWrite1h, Reasoning: w.Reasoning}
 }
 
 func ratesWire(r *budgetv1alpha1.Rates) pricing.Wire {
-	return pricing.Wire{Input: r.GetInput(), Output: r.GetOutput(), CacheRead: r.GetCacheRead(), CacheWrite: r.GetCacheWrite(), Reasoning: r.GetReasoning()}
+	return pricing.Wire{Input: r.GetInput(), Output: r.GetOutput(), CacheRead: r.GetCacheRead(), CacheWrite: r.GetCacheWrite(), CacheWrite1h: r.GetCacheWrite_1H(), Reasoning: r.GetReasoning()}
 }
 
 func tiersProto(ts []pricing.WireTier) []*budgetv1alpha1.PriceTier {

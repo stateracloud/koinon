@@ -155,10 +155,21 @@ Several overrides combine as OpenRouter applies them: later ones win per rate, a
 does not set keeps the base price, and an override with a time condition is never a tier.
 
 **Known limits of this slice.** Time-of-day, batch, flex
-and priority prices, per-upstream prices and 1-hour cache writes are not imported. Not built yet (later
+and priority prices and per-upstream prices are not imported, and neither is OpenRouter's 1-hour cache-write
+price (an entry sets `cache_write_1h` by hand; see below). Not built yet (later
 slices of #265, tracked as separate issues): the models.dev, LiteLLM and genai-prices adapters, the
 admin API and the Platform Prices page, org-admin acceptance into org entries (with their retirement
 and the "source differs" mark), the in-app notice after an auto-apply, and the bill-gap view.
+
+## 1-hour cache writes
+
+An entry has two cache-write rates: `cache_write` for 5-minute writes and `cache_write_1h` for writes
+with a 1-hour TTL (Anthropic bills the second at twice the input rate). The ledger stores the 1-hour
+tokens in their own column (`spend_entries.cache_write_1h_tokens`, a part of `cache_write_tokens`),
+prices them at `cache_write_1h` and the rest of the writes at `cache_write`. Without a `cache_write_1h`
+rate they cost `cache_write`, and without that the input rate. Tiers may set `cache_write_1h` too. The
+gateway catalog gets `cacheWrite1h` next to `cacheWrite`. Koinon sends no 1-hour TTL today, so the
+column is 0 until a gateway logs the split (#270).
 
 ## Cost checks
 

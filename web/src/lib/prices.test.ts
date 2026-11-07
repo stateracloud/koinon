@@ -24,7 +24,7 @@ const valid = (patch: Partial<PriceFormValues> = {}): PriceFormValues => ({
   name: 'sonnet-mine',
   provider: 'openrouter',
   pattern: 'anthropic/claude-sonnet-*',
-  rates: { input: '3', output: '15', cacheRead: '', cacheWrite: '', reasoning: '' },
+  rates: { input: '3', output: '15', cacheRead: '', cacheWrite: '', cacheWrite1h: '', reasoning: '' },
   maxOutput: '64000',
   ...patch,
 })
@@ -35,7 +35,7 @@ describe('validatePrice (like the server)', () => {
   })
 
   it('requires input and output, and at most six fraction digits', () => {
-    const e = validatePrice(valid({ rates: { input: '', output: '1.1234567', cacheRead: 'x', cacheWrite: '', reasoning: '' } }))
+    const e = validatePrice(valid({ rates: { input: '', output: '1.1234567', cacheRead: 'x', cacheWrite: '', cacheWrite1h: '', reasoning: '' } }))
     expect(e.input).toMatch(/required/)
     expect(e.output).toMatch(/6 digits/)
     expect(e.cacheRead).toMatch(/decimal/)
@@ -43,7 +43,7 @@ describe('validatePrice (like the server)', () => {
 
   it('requires the largest output for a priced entry, not for a free one', () => {
     expect(validatePrice(valid({ maxOutput: '' })).maxOutput).toMatch(/required/)
-    expect(validatePrice(valid({ maxOutput: '', rates: { input: '0', output: '0', cacheRead: '', cacheWrite: '', reasoning: '' } })).maxOutput).toBeUndefined()
+    expect(validatePrice(valid({ maxOutput: '', rates: { input: '0', output: '0', cacheRead: '', cacheWrite: '', cacheWrite1h: '', reasoning: '' } })).maxOutput).toBeUndefined()
     expect(validatePrice(valid({ maxOutput: '20000000' })).maxOutput).toMatch(/up to/)
   })
 
@@ -57,7 +57,7 @@ describe('validatePrice (like the server)', () => {
   })
 
   it('wants tier thresholds that go up and tiers that set a price', () => {
-    const tier = (over: string, input = '6') => ({ contextOver: over, rates: { input, output: '', cacheRead: '', cacheWrite: '', reasoning: '' } })
+    const tier = (over: string, input = '6') => ({ contextOver: over, rates: { input, output: '', cacheRead: '', cacheWrite: '', cacheWrite1h: '', reasoning: '' } })
     expect(validatePrice(valid({ tiers: [tier('200000'), tier('100000')] })).tier1contextOver).toMatch(/go up/)
     expect(validatePrice(valid({ tiers: [tier('0')] })).tier0contextOver).toMatch(/positive/)
     expect(validatePrice(valid({ tiers: [tier('200000', '')] })).tier0contextOver).toMatch(/at least one price/)
@@ -76,7 +76,7 @@ describe('validatePrice (like the server)', () => {
 
 describe('toSetPrice', () => {
   it('builds the request, with a UTC start date', () => {
-    const req = toSetPrice('org-1', valid({ validFrom: '2026-11-01', tiers: [{ contextOver: '200000', rates: { input: '6', output: '', cacheRead: '', cacheWrite: '', reasoning: '' } }] }))
+    const req = toSetPrice('org-1', valid({ validFrom: '2026-11-01', tiers: [{ contextOver: '200000', rates: { input: '6', output: '', cacheRead: '', cacheWrite: '', cacheWrite1h: '', reasoning: '' } }] }))
     expect(req).toMatchObject({
       orgId: 'org-1',
       name: 'sonnet-mine',
@@ -138,7 +138,10 @@ describe('default list markers', () => {
   })
 
   it('writes a price line', () => {
-    expect(ratesLine({ input: '3', output: '15', cacheRead: '0.3', cacheWrite: '', reasoning: '' })).toBe('$3 in, $15 out, $0.3 cache read per million tokens')
+    expect(ratesLine({ input: '3', output: '15', cacheRead: '0.3', cacheWrite: '', cacheWrite1h: '', reasoning: '' })).toBe('$3 in, $15 out, $0.3 cache read per million tokens')
+    expect(ratesLine({ input: '3', output: '15', cacheRead: '0.3', cacheWrite: '3.75', cacheWrite1h: '6', reasoning: '' })).toBe(
+      '$3 in, $15 out, $0.3 cache read, $3.75 cache write, $6 1-hour cache write per million tokens',
+    )
   })
 })
 

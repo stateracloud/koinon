@@ -325,11 +325,12 @@ records the page URL and "manual" as its source.
 
 ### 8. Buckets the sources have and Koinon does not
 
-- **1-hour cache writes.** Koinon has one `cache_write` rate, the 5-minute one. OpenRouter and
-  LiteLLM also give a 1-hour write price. It is kept in the provenance but not imported, and a
-  difference only in it makes no proposal. It becomes a rate when Koinon sends 1-hour cache markers
-  and the ledger counts those tokens apart (ADR 0070 amendment of 2026-10-28). That is a separate
-  decision.
+- **1-hour cache writes.** Koinon has a `cache_write` rate (5-minute) and, since #270, a
+  `cache_write_1h` rate that the ledger applies to the 1-hour write tokens it counts apart. OpenRouter
+  and LiteLLM also give a 1-hour write price. It is kept in the provenance but not imported, and a
+  difference only in it makes no proposal. Importing it is a separate decision: it follows when
+  Koinon sends 1-hour cache markers, because an imported rate without usage to match is a number
+  nothing checks.
 - **Reasoning.** A reasoning rate is imported only when the source gives one that differs from the
   output rate. A missing one keeps today's rule: reasoning bills at output. Adding a reasoning
   rate is a new bucket, so it waits for a person.

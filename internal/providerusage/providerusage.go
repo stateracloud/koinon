@@ -30,6 +30,9 @@ type Usage struct {
 	InputTokens, OutputTokens         int64
 	CacheReadTokens, CacheWriteTokens int64
 	ReasoningTokens                   int64
+	// CacheWrite1hTokens is the part of CacheWriteTokens written with a 1-hour TTL. No provider
+	// record carries it today; settling fills it from the gateway's log (ledger.Settler).
+	CacheWrite1hTokens int64
 	// ReasoningKnown says the record reports the reasoning split (OpenRouter's
 	// native_tokens_reasoning above 0, ADR 0069 amendment of 2026-11-06); without it
 	// ReasoningTokens is 0 for want of a figure and settling keeps the gateway's split.
@@ -53,9 +56,10 @@ type Usage struct {
 // clamp at zero.
 func (u Usage) Buckets() pricing.Usage {
 	cacheRead, cacheWrite, reasoning := max(u.CacheReadTokens, 0), max(u.CacheWriteTokens, 0), max(u.ReasoningTokens, 0)
+	write1h := min(max(u.CacheWrite1hTokens, 0), cacheWrite)
 	return pricing.Usage{
 		Input:     max(u.InputTokens-cacheRead-cacheWrite, 0),
-		CacheRead: cacheRead, CacheWrite: cacheWrite,
+		CacheRead: cacheRead, CacheWrite: cacheWrite - write1h, CacheWrite1h: write1h,
 		Output:    max(u.OutputTokens-reasoning, 0),
 		Reasoning: reasoning,
 	}

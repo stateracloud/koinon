@@ -20,7 +20,7 @@ const ratioPattern = /^[0-9]{1,2}(\.[0-9]{1,3})?$/
 const maxOverheadTokens = 100_000
 const maxOutputTokens = 10_000_000
 
-export type RateFields = { input: string; output: string; cacheRead: string; cacheWrite: string; reasoning: string }
+export type RateFields = { input: string; output: string; cacheRead: string; cacheWrite: string; cacheWrite1h: string; reasoning: string }
 export type TierFields = { contextOver: string; rates: RateFields }
 export type PriceFormValues = {
   name: string
@@ -38,7 +38,7 @@ export type PriceFormValues = {
   validFrom: string
 }
 
-export const emptyRates: RateFields = { input: '', output: '', cacheRead: '', cacheWrite: '', reasoning: '' }
+export const emptyRates: RateFields = { input: '', output: '', cacheRead: '', cacheWrite: '', cacheWrite1h: '', reasoning: '' }
 
 export function emptyPriceForm(): PriceFormValues {
   return {
@@ -49,8 +49,8 @@ export function emptyPriceForm(): PriceFormValues {
 
 /** formFromVersion fills the form with a price's current version, to add a new version of it. */
 export function formFromVersion(v: PriceVersion): PriceFormValues {
-  const rates = (r?: { input: string; output: string; cacheRead: string; cacheWrite: string; reasoning: string }): RateFields => ({
-    input: r?.input ?? '', output: r?.output ?? '', cacheRead: r?.cacheRead ?? '', cacheWrite: r?.cacheWrite ?? '', reasoning: r?.reasoning ?? '',
+  const rates = (r?: { input: string; output: string; cacheRead: string; cacheWrite: string; cacheWrite1h: string; reasoning: string }): RateFields => ({
+    input: r?.input ?? '', output: r?.output ?? '', cacheRead: r?.cacheRead ?? '', cacheWrite: r?.cacheWrite ?? '', cacheWrite1h: r?.cacheWrite1h ?? '', reasoning: r?.reasoning ?? '',
   })
   return {
     name: v.name, provider: v.provider, matchKind: v.match?.regex ? 'regex' : 'glob', pattern: v.match?.regex || v.match?.glob || '',
@@ -60,9 +60,9 @@ export function formFromVersion(v: PriceVersion): PriceFormValues {
   }
 }
 
-const rateKeys = ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'] as const
+const rateKeys = ['input', 'output', 'cacheRead', 'cacheWrite', 'cacheWrite1h', 'reasoning'] as const
 const rateLabels: Record<(typeof rateKeys)[number], string> = {
-  input: 'Input', output: 'Output', cacheRead: 'Cache read', cacheWrite: 'Cache write', reasoning: 'Reasoning',
+  input: 'Input', output: 'Output', cacheRead: 'Cache read', cacheWrite: 'Cache write', cacheWrite1h: 'Cache write (1 hour)', reasoning: 'Reasoning',
 }
 
 function rateErrors(prefix: string, r: RateFields, required: boolean): Record<string, string> {
@@ -123,7 +123,7 @@ export function validatePrice(f: PriceFormValues, editing = false): Record<strin
   return e
 }
 
-const wire = (r: RateFields) => ({ input: r.input.trim(), output: r.output.trim(), cacheRead: r.cacheRead.trim(), cacheWrite: r.cacheWrite.trim(), reasoning: r.reasoning.trim() })
+const wire = (r: RateFields) => ({ input: r.input.trim(), output: r.output.trim(), cacheRead: r.cacheRead.trim(), cacheWrite: r.cacheWrite.trim(), cacheWrite1h: r.cacheWrite1h.trim(), reasoning: r.reasoning.trim() })
 
 /** toSetPrice builds the SetPrice request for a form that passed validatePrice. */
 export function toSetPrice(orgId: string, f: PriceFormValues): MessageInitShape<typeof SetPriceRequestSchema> {
@@ -171,11 +171,12 @@ export function matchLabel(m: { glob: string; regex: string } | undefined): stri
 }
 
 /** ratesLine: "$0.30 in, $1.20 out per million tokens", with the optional buckets when set. */
-export function ratesLine(r: { input: string; output: string; cacheRead: string; cacheWrite: string; reasoning: string } | undefined): string {
+export function ratesLine(r: { input: string; output: string; cacheRead: string; cacheWrite: string; cacheWrite1h: string; reasoning: string } | undefined): string {
   if (!r) return 'No prices'
   const parts = [`$${r.input} in`, `$${r.output} out`]
   if (r.cacheRead) parts.push(`$${r.cacheRead} cache read`)
   if (r.cacheWrite) parts.push(`$${r.cacheWrite} cache write`)
+  if (r.cacheWrite1h) parts.push(`$${r.cacheWrite1h} 1-hour cache write`)
   if (r.reasoning) parts.push(`$${r.reasoning} reasoning`)
   return `${parts.join(', ')} per million tokens`
 }

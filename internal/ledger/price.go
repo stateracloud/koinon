@@ -29,8 +29,11 @@ type priced struct {
 	// The token buckets are disjoint, as in the usage record (ADR 0097 decision 3): input excludes
 	// the cache parts, output excludes reasoning. The spend entry stores the provider's totals
 	// (migration 00013), [priced.totalIn] and [priced.totalOut].
-	input, output              int64
-	cacheRead, cacheWrite      int64
+	input, output         int64
+	cacheRead, cacheWrite int64
+	// cacheWrite1h is the part of cacheWrite written with a 1-hour TTL (migration 00067). cacheWrite
+	// stays the total, so totalIn and the stored sums are unchanged.
+	cacheWrite1h               int64
 	reasoning                  int64
 	reasoningKnown             bool
 	cost                       money.USD
@@ -59,7 +62,7 @@ func (p priced) totalOut() int64 { return p.output + p.reasoning }
 // usage is the priced buckets with the output replaced by out (the reserve bound prices a larger
 // output than the one charged).
 func (p priced) usage(output int64) pricing.Usage {
-	return pricing.Usage{Input: p.input, CacheRead: p.cacheRead, CacheWrite: p.cacheWrite, Output: output, Reasoning: p.reasoning}
+	return pricing.Usage{Input: p.input, CacheRead: p.cacheRead, CacheWrite: p.cacheWrite - p.cacheWrite1h, CacheWrite1h: p.cacheWrite1h, Output: output, Reasoning: p.reasoning}
 }
 
 // rejectedByUpstream: the provider answered with a 4xx and reported no usage, so it refused the
@@ -88,7 +91,7 @@ func waivesRejected(m prices.Model) bool {
 func (in *Ingester) price(ctx context.Context, q *store.Queries, org pgtype.UUID, e Entry) (priced, error) {
 	p := priced{
 		input: e.InputTokens, output: e.OutputTokens,
-		cacheRead: e.CacheReadTokens, cacheWrite: e.CacheWriteTokens, reasoning: e.ReasoningTokens,
+		cacheRead: e.CacheReadTokens, cacheWrite: e.CacheWriteTokens, cacheWrite1h: min(e.CacheWrite1hTokens, e.CacheWriteTokens), reasoning: e.ReasoningTokens,
 		reasoningKnown: e.ReasoningKnown,
 	}
 	if e.RequestBytes >= 0 {

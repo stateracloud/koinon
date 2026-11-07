@@ -1753,7 +1753,8 @@ components:
         input: {type: string}
         output: {type: string}
         cacheRead: {type: string}
-        cacheWrite: {type: string}
+        cacheWrite: {type: string, description: "5-minute cache writes."}
+        cacheWrite1h: {type: string, description: "1-hour cache writes. Unset, they are billed at cacheWrite."}
         reasoning: {type: string}
     PriceTier:
       type: object
