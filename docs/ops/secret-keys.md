@@ -58,6 +58,8 @@ kubectl -n koinon exec deploy/koinon-api -- koinon-api keys export > koinon-kek-
 `keys export` prints the key set as a Secret manifest without a namespace, with a comment line per
 KEK that gives its fingerprint (also in `keys status`), so you can tell which backup holds which key.
 Restore it with `kubectl -n <namespace> apply -f koinon-kek-backup.yaml`.
+The database backup that goes with it, and the full restore order, are in the
+[Back up and restore](../site/src/content/docs/guides/backup-restore.md) guide.
 
 **Check that the backup holds the active KEK.** The export is a snapshot: a `keys add` and
 `keys activate` after it makes a backup that cannot open the values sealed since. After each export,

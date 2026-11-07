@@ -29,6 +29,10 @@
 #   SUITE_LABEL=smoke runs only the Ginkgo specs with that label (SUITE=go; smoke is steps 1-6).
 #   FLAVOR_CACHE=<dir> imports the flavor build's layer cache from <dir>/opencode (needs the docker-container driver).
 #   FLAVOR_PULL_REPO=<repo> pulls the flavor image <repo>:<hack/flavor-tag.sh tag> instead of building it.
+#   BACKUP_RESTORE=1 (SUITE=go) adds test/e2e/backup-restore.sh after the driver: the guide
+#   docs/site/src/content/docs/guides/backup-restore.md backs up the keys and the database, the install is
+#   changed, then the guide restores both and the script checks the install is the one that was backed up
+#   (ADR 0085 decision 18, #90). The nightly run sets it; a pull request's run does not.
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 #
 # The quickstart opens the API on localhost:8080 (the doc's port-forward block), so that port must be
@@ -294,6 +298,14 @@ web)
   echo "Browser e2e (Playwright, web/e2e-real) passed in $(( $(date +%s) - ts )) s; details in web.log." >"$OUT/quickstart-timings.md"
   ;;
 esac
+
+if [[ ${BACKUP_RESTORE:-0} == 1 ]]; then
+  [[ $SUITE == go ]] || { echo "BACKUP_RESTORE=1 needs SUITE=go" >&2; exit 2; }
+  step "backup and restore (guides/backup-restore.md)"
+  OUT="$OUT" "$here/backup-restore.sh" 2>&1 | tee "$OUT/backup-restore.log"
+  done_step "Backup, keys export, restore and verify"
+  cat "$OUT/backup-restore/timings.md" >>"$OUT/quickstart-timings.md"
+fi
 
 status=0
 echo

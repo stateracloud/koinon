@@ -405,6 +405,12 @@ Implementation-level unknowns, to settle in the sub-issues:
     Job says so. The marker protects only databases that hold it; rotating the KEKs is what kills an
     old backup everywhere, so the docs tell operators to rotate as well if one may have leaked.
     `keys status` prints the marker; `koinon_kek_unbound` stays.
+- Built (#88, #90): the manual procedure is `docs/site/src/content/docs/guides/backup-restore.md` (cnpg and
+  external modes: `keys export`, `pg_dump --format=custom`, stop, restore, keys, start, `checkpoints resync`).
+  The nightly kind e2e runs its blocks through `test/e2e/backup-restore.sh` (`BACKUP_RESTORE=1`), changes the
+  install after the backup, restores, and requires the install ID, task and run counts and the keys to equal
+  the backed-up ones. Not covered by it: a provider key decrypting in a run, a schedule fire, a recovered
+  DBOS workflow, a restored agent home (the home-lab drill, decision 15).
 - Resolved (detection of the decision 6 rule): the lint reads a marker file, `hack/migrate-patch-line`
   (`none` or the shipped minor line, for example `v0.1`), at the merge base. Patch tags are cut from
   `main` (the release gate requires an ancestor of `origin/main`), so the marker, not a branch name,

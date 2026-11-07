@@ -249,7 +249,8 @@ the database does not help.
 kubectl -n koinon get secret koinon-kek -o yaml > koinon-kek-backup.yaml
 ```
 
-Keep the file where you keep your other secrets. Rotation and the compromise procedure are in the
+Keep the file where you keep your other secrets. The database needs a backup too, and the two must be
+taken together: [Back up and restore](/guides/backup-restore/) has both. Rotation and the compromise procedure are in the
 [runbook](https://github.com/stateracloud/koinon/blob/main/docs/ops/secret-keys.md).
 
 ## GitOps (Argo CD, Flux)
