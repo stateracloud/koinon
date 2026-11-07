@@ -47,8 +47,8 @@ config ConfigMap is created by the reconciler.
 
 Needs Docker, kind, kubectl, helm, jq, Go, ko, Tilt and pnpm (versions in
 [CONTRIBUTING.md](../../CONTRIBUTING.md#requirements)). Everything is pulled anonymously. If your
-Docker config uses a credential helper that is locked or hangs (a Mac with a locked keychain), see
-the `DOCKER_CONFIG` caveat in [maintainer-homelab.md](maintainer-homelab.md#docker-config-caveat).
+Docker config uses a credential helper that is locked or hangs (a Mac with a locked keychain), point
+`DOCKER_CONFIG` at a directory with an empty `config.json` for the Koinon commands: the pulls are anonymous.
 
 ```sh
 make dev-kind-up          # kind cluster kind-koinon-dev: CNPG, Agent Sandbox, runc RuntimeClass, OpenShell (about 1 minute)
@@ -102,8 +102,7 @@ cluster-wide) and `koinon-koinon-preflight` (read-only: the CRDs, the Agent Sand
 RuntimeClass and so on that the preflight checks; in cnpg mode `list` on
 `validatingwebhookconfigurations` and `endpointslices`).
 
-The maintainer's home lab is one such configuration; its profile is kept outside the repository
-and copied to `hack/dev/local.yaml` ([maintainer-homelab.md](maintainer-homelab.md)).
+A profile for your own cluster goes in `hack/dev/local.yaml`; it is not tracked.
 
 ## Logging in
 

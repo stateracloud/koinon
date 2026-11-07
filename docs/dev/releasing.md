@@ -77,7 +77,7 @@ Checklist for the v0.1.0 gate (ADR 0085 decision 1 and implementation item 22, A
 tracked in #313 ("release: v0.1.0 tag-time gate checklist"), separate from the docs change that
 added it. Tick it on the tag commit, not before:
 
-- [ ] The restore drill passed on the home lab (ADR 0085 decision 15), with RTO and RPO recorded
+- [ ] The restore drill passed on a real cluster (ADR 0085 decision 15), with RTO and RPO recorded
       (#275).
 - [ ] The ADR 0085 implementation issues still in the v0.1.0 gate (decisions 2-4 and 13-16, ADR 0099
       decision 2) are closed.
@@ -178,9 +178,7 @@ disabling the `immutable` ruleset in the repository settings lets anyone move or
 ## Mirror a release to a registry
 
 `hack/mirror-release.sh <version> <registry>` copies a release's images and chart to another
-registry, for example to test an rc from a registry your cluster can reach. The maintainer does this
-for the home lab: see [maintainer-homelab.md](maintainer-homelab.md#mirror-a-release-to-the-home-lab).
-Install the mirrored chart with
+registry, for example to test an rc from a registry your cluster can reach. Install the mirrored chart with
 `helm install koinon oci://<registry>/charts/koinon --version <version> --set image.registry=<registry>`.
 
 ### The flavor image when installing a release

@@ -62,7 +62,7 @@ gate 1 "not required, quickstart failed" DECIDE=success QUICKSTART=failure REQUI
 gate 1 "decide cancelled" DECIDE=cancelled QUICKSTART=skipped REQUIRED=false
 gate 0 "required, this run's quickstart passed" DECIDE=success QUICKSTART=success REQUIRED=true
 gate 1 "required, nothing on the head" "${G[@]}"
-has "hack/e2e-remote.sh --argo"
+has "post the commit status e2e-lab"
 has "gh workflow run e2e-kind.yml --ref feat/x"
 has "Re-run failed jobs"
 
@@ -95,7 +95,7 @@ has "e2e-lab is failure"
 echo '[{"context":"e2e-lab","state":"pending"}]' >"$tmp/lab.json"
 gate 1 "required, e2e-lab is pending" "${G[@]}"
 echo '[{"context":"e2e-lab","state":"success"}]' >"$tmp/lab.json"
-gate 0 "required, this run quickstart failed but e2e-lab is success (the lab is an accelerator)" DECIDE=success QUICKSTART=failure REQUIRED=true
+gate 0 "required, this run quickstart failed but e2e-lab is success (the external run is an accelerator)" DECIDE=success QUICKSTART=failure REQUIRED=true
 gate 0 "required, this run quickstart cancelled but e2e-lab is success" DECIDE=success QUICKSTART=cancelled REQUIRED=true
 gate 1 "required, no head sha is read as no evidence" "${G[@]}" SHA=
 rm -f "$tmp/lab.json"

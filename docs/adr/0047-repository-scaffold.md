@@ -10,12 +10,9 @@ Bootstrap deliverable 2 sets up the repository before any product code. The gril
 Claude made under the "decide small things yourself, record them in an ADR" rule; procoduck can
 overrule any of them by amending this ADR.
 
-Facts checked on 2026-10-21: the home lab runs Kubernetes 1.37 on Talos 1.14 with RuntimeClasses
-`kata` and `kata-qemu`, a Cilium Gateway serving `*.apps.lab.example.invalid` with a Let's Encrypt
-wildcard certificate, the `proxmox-zfs` storage class, and no image registry. GitHub user name
+Facts checked on 2026-10-21: a maintainer's cluster with Kata RuntimeClasses and no image registry. GitHub user name
 `koinon` is taken (an account from 2018), so an org move needs another name. Later the same day,
-procoduck's Argo CD-managed platform added Zot, OpenBao with External Secrets, CloudNativePG 1.30,
-Garage S3 and Gitea; items 6 and 12 reflect that.
+the cluster's platform added a registry, a secret store, CloudNativePG, an S3-compatible store and Gitea; items 6 and 12 reflect that.
 
 ## Decision
 
@@ -46,8 +43,7 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
    - A deferred constraint trigger keeps at least one **manual** owner per live org.
 5. **Personal orgs**: the org row is created at a user's first login; the namespace and OpenShell
    workspace are created lazily with the first agent.
-6. **Dev registry**: Zot v2.1.22 in namespace `zot` at `zot.apps.lab.example.invalid`, installed
-   by procoduck as part of the home-lab platform (`docs/dev/maintainer-homelab.md`, formerly `registry.md`). It is also the cluster's
+6. **Dev registry**: a registry on the maintainer's cluster, installed as part of its platform (the note on it left the repository, 2026-11-07). It is also the cluster's
    pull-through cache; anonymous reads cover only the mirrored upstreams, so `koinon/*` needs
    credentials for push and pull.
 
@@ -71,13 +67,13 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
     Ginkgo.
 11. **Makefile targets**: `build`, `test`, `lint`, `generate`, `breaking`, `migrate-lint`, `dev`,
     `web-deps`, `clean`, `help`.
-12. **Inner loop**: the Tiltfile allows only the `homelab` context, builds images with ko
+12. **Inner loop**: the Tiltfile allows only the maintainer's own context, builds images with ko
     (`custom_build`, pushing straight to the dev registry) and deploys `hack/dev/` with kustomize
     into namespace `koinon`: a dev-only single-instance CloudNativePG `Cluster` (Postgres 18.6,
     using the platform's operator; nothing cluster-wide installed by Koinon), `koinon-api` and
     `koinon-reconciler`. The Vite dev server runs locally.
     _Amended (2026-10-23):_ the Tiltfile now deploys `charts/koinon` with `hack/dev/values*.yaml`,
-    on the home lab or a kind profile; see [docs/dev/loop.md](../dev/loop.md).
+    on a maintainer cluster or a kind profile; see [docs/dev/loop.md](../dev/loop.md).
 13. **CI**: `.github/workflows/ci.yml` (jobs `go`, `web`, `proto`, `generated code`, `migrations`)
     and `dco.yml`, on free `ubuntu-latest` runners, every action pinned to a commit SHA.
     While the repository is private, runs use the account's free Actions minutes.
@@ -143,7 +139,7 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
 - Positive: cross-org references are impossible at the schema level; manual owners survive IdP
   changes; API changes are deliberate from the first proto; generated code can't drift.
 - Negative: composite keys make every foreign key two columns wide; Postgres 18 excludes older
-  managed offerings _(inferred)_; the dev loop depends on the home-lab registry and CloudNativePG operator.
+  managed offerings _(inferred)_; the dev loop depends on the dev registry and CloudNativePG operator.
 - Follow-ups: the branch ruleset is applied once the scaffold PR merges (so the checks exist);
   `docs/adr/README.md` needs this ADR in its index after PR koinon-private#12 merges; the Starlight site and the
   Helm chart content come later.
@@ -158,9 +154,9 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
 
 Checked 2026-10-21: Go 1.27.3, golangci-lint 2.15.0, buf 1.74.0, connect-go v2.0.1,
 protobuf-go 1.36.12, ginkgo 2.33.1, gomega 1.44.0, testcontainers-go 0.44.0, Tilt 0.37.8, Vite 8,
-React 19, Zot chart 0.1.128 / Zot v2.1.22, Helm 4.3.1. The migration suite passes against
-`postgres:18-alpine` (10 specs). `tilt ci` passes on the `homelab` context: ko pushes both images
-(with SBOMs) to Zot, the pods pull them through the `dev-registry` secret, and `koinon-pg` reaches
+React 19, Helm 4.3.1. The migration suite passes against
+`postgres:18-alpine` (10 specs). `tilt ci` passes on the maintainer's context: ko pushes both images
+(with SBOMs) to the registry, the pods pull them through a registry pull secret, and `koinon-pg` reaches
 a healthy state.
 
 ## Update 2026-11-05: CI cache ownership
@@ -172,5 +168,6 @@ other job (docs/dev/ci.md#cache-ownership, issue #147).
 ## Links
 
 - ADR 0004, 0022, 0026, 0027, 0034, 0037, 0038, 0039
-- [docs/dev/maintainer-homelab.md](../dev/maintainer-homelab.md)
 - Issue [koinon-private#2](https://github.com/stateracloud/koinon-private/issues/2)
+
+Note (2026-11-07): private infrastructure detail removed; maintainer decision 2026-11-07.

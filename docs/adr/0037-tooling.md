@@ -12,7 +12,7 @@ choices were left for the bootstrap:
 - schema migrations
 - the docs site
 - the ACP client library for `agentd`
-- the inner development loop against the home-lab cluster
+- the inner development loop against a maintainer's cluster
 
 Each should be open source, simple and fit the stack. Migrations must be plain SQL that sqlc can
 read, and forward-only with an upgrade test ([0027](0027-repo-and-versioning.md)).
@@ -31,8 +31,8 @@ read, and forward-only with an upgrade test ([0027](0027-repo-and-versioning.md)
   (Apache-2.0). It is pre-1.0 (v0.13.5, tags only). ACP has no official Go SDK, so the design's
   "the Go SDK" means this one. Koinon wraps it behind a small internal `acp` package so that a
   switch is local _(inferred)_.
-- **Inner loop: Tilt** against the home-lab Talos cluster.
-  - The Tiltfile allows the home-lab context explicitly with `allow_k8s_contexts`.
+- **Inner loop: Tilt** against a maintainer's Talos+Kata cluster.
+  - The Tiltfile allows the maintainer's context explicitly with `allow_k8s_contexts`.
   - It pushes images to a registry reachable from the cluster with `default_registry`.
   - Images are built with ko.
 
@@ -62,12 +62,12 @@ read, and forward-only with an upgrade test ([0027](0027-repo-and-versioning.md)
 - Follow-ups:
   - Scaffold: `internal/db/migrations/00001_orgs.sql` with `org_id`, a `sqlc.yaml` using
     `sql_package: pgx/v5`, a migration-upgrade test with testcontainers-go.
-  - Tiltfile: the home-lab context name and registry as variables, with no secrets in the file.
+  - Tiltfile: the maintainer's context name and registry as variables, with no secrets in the file.
   - A CI check that migration file names are zero-padded and only appended _(inferred)_.
 
 ## Open questions
 
-- Home-lab registry: an in-cluster registry, or GHCR with a pull secret?
+- Dev registry: an in-cluster registry, or GHCR with a pull secret?
 - ~~Run migrations at API start, or as a Helm pre-upgrade Job?~~ Closed by [0060](0060-migrations-as-a-job.md): as a Job.
 
 ## Upstream verification
@@ -91,3 +91,5 @@ Checked 2026-10-21:
 
 - [0016 Execution backend and agentd](0016-harness-and-deployment.md), [0027 Repo and versioning](0027-repo-and-versioning.md)
 - [0039 Development setup](0039-development-setup.md)
+
+Note (2026-11-07): private infrastructure detail removed; maintainer decision 2026-11-07.

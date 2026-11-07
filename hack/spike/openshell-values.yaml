@@ -3,8 +3,8 @@
 server:
   telemetryEnabled: false
   defaultRuntimeClassName: kata
-  # Copied by OpenShell into each managed workspace namespace; pulls koinon/* from Zot.
-  sandboxImagePullSecrets: [{name: zot-pull}]
+  # Copied by OpenShell into each managed workspace namespace; pulls koinon/* from the registry.
+  sandboxImagePullSecrets: [{name: <pull-secret>}]
   drivers:
     kubernetes:
       workspaceMode: managed
@@ -13,7 +13,7 @@ server:
       enabled: true
       # The vault driver refuses plain HTTP to non-loopback addresses, so the
       # spike uses the platform's public HTTPS route instead of the in-cluster service.
-      address: https://bao.apps.lab.example.invalid
+      address: https://secrets.example.invalid
       mount: openshell-spike
       kvVersion: "2"
       authMethod: kubernetes

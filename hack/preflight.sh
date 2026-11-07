@@ -253,8 +253,6 @@ g_actionlint() { actionlint; } # the whole tree, as CI does: a workflow's lint c
 g_mktemp() { # independent of shellcheck, so it runs where shellcheck is missing (koinon-private#535)
 	hack/mktemp-lint-test.sh
 	hack/mktemp-lint.sh
-	hack/lab-domain-lint-test.sh
-	hack/lab-domain-lint.sh
 }
 g_bash5() { # every bash script starts with the bash 5 guard (ADR 0090, koinon-private#553)
 	hack/bash5-lint-test.sh
@@ -290,7 +288,7 @@ run_gate() { # <gate>
 		hack/needs-e2e.sh "$base" >"$log" 2>&1
 		rc=$?
 		case $rc in
-		0) echo "e2e info needed (hack/e2e-remote.sh --argo on a lab posts e2e-lab; --local on your Docker; or the e2e label)" ;;
+		0) echo "e2e info needed (hack/e2e-remote.sh --local on your Docker; or the e2e label)" ;;
 		1) echo "e2e info not needed" ;;
 		*) echo "e2e info unknown, treat as needed (see $log)" ;;
 		esac

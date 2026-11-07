@@ -114,7 +114,7 @@ KOINON_RC_FILE=$rc_file REPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXX
 echo "ok: KOINON_RC_FILE carries the exit status past make"
 
 # koinon-private#512: a plain test that fails must fail the run and be named, even though the Ginkgo verdict over
-# the same run says "ok ... 0 failed" (the first lab gate run: a flaky plain test, exit 1, no hint).
+# the same run says "ok ... 0 failed" (the first external gate run: a flaky plain test, exit 1, no hint).
 fx=$(mktemp -d "$root/internal/zzfailfixture.XXXXXX")
 trap 'rm -rf "$fx"' EXIT
 printf '// SPDX-License-Identifier: Apache-2.0\npackage zzfail\n\nimport "testing"\n\nfunc TestFails(t *testing.T) { t.Fatal("deliberate") }\n' >"$fx/fail_test.go"

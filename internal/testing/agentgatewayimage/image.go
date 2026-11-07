@@ -6,7 +6,7 @@
 //
 // CI pulls the copy in GHCR that .github/workflows/mirror-agentgateway-test-image.yml keeps, so an
 // outage of an upstream registry does not turn every Go job red. The go-test job logs in, pulls the
-// copy once and sets [MirrorVar] to the copy's repository; everywhere else (a laptop, the lab, a
+// copy once and sets [MirrorVar] to the copy's repository; everywhere else (a laptop, an external cluster, a
 // fork's own CI without access to the copy) the tests pull the chart's repository, which needs no
 // credentials. docs/dev/ci.md, "The agentgateway test image".
 package agentgatewayimage

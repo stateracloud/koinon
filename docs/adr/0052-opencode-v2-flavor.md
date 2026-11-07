@@ -20,7 +20,7 @@ A spike on 2026-10-22 rebuilt the flavor on `@opencode/cli` 2.0.24 (tag `v2.0.24
 
 - The flavor contract suite (`test/flavors`) passed 17 of 17 after adapting tool argument names,
   the out-of-workspace permission check and the unknown-session error.
-- In the home lab (Kata, the real sandbox policy, workspace `kw-9f57984957089e62`) the loopback
+- In a maintainer cluster (Kata, the real sandbox policy) the loopback
   child server, `session/new`, `session/load` in a new harness process and a prompt through the
   fake model all passed; egress showed only the model and MCP endpoints.
 - What changed for Koinon in v2:
@@ -239,3 +239,5 @@ context small. This is a change to the image, not to the harness contract of dec
 
 Verification: `make flavor-opencode` and the flavor contract suite against the new image, as
 recorded in the pull request.
+
+Note (2026-11-07): private infrastructure detail removed; maintainer decision 2026-11-07.

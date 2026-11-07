@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Publishes the images the home lab's Argo e2e queue (home-lab ADR 036) pulls by digest through its
-# registry mirror:
+# Publishes the e2e toolchain images, pulled by digest:
 #   ghcr.io/<owner>/<repo>/e2e-toolchain      hack/e2e-toolchain/Dockerfile, tag
 #       go<GO_VERSION>-<first 12 hex of the Dockerfile's sha256> (hack/e2e-remote.sh builds the
 #       same Dockerfile locally under the same tag, so a tag names exactly one Dockerfile)
@@ -10,7 +9,7 @@
 # The names derive from github.repository (ghcr.io/stateracloud/koinon/...), so the repository that
 # builds them owns the packages (#167). The spike probe image is no longer built: no test pulls it
 # (test/escape/kind.sh builds or takes KOINON_OPENSHELL_IMAGE).
-# A tag that already exists is not rebuilt, so its digest stays what the lab pinned. The digests
+# A tag that already exists is not rebuilt, so its digest stays what an external run pinned. The digests
 # are in the job summary.
 #
 # Runs when one of them changes on main, and by hand. amd64 only: the e2e node is amd64.

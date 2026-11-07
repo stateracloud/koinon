@@ -13,9 +13,9 @@
 
 The spike (`docs/spikes/openshell.md`) asked whether the execution layer Koinon reuses keeps its
 core promise: an agent in a sandbox can do useful work, but cannot see real credentials, cannot
-leave its policy, and must get human approval for risky actions. It ran on 2026-10-21 on the home
-lab (Talos 1.14.4, Kubernetes 1.37.1, Cilium, Kata on two Proxmox workers) with OpenShell 0.1.5,
-Agent Sandbox v1.0.7, agentgateway 1.6.0, the home-lab OpenBao 2.7.1, Gitea 28.2 and Ollama
+leave its policy, and must get human approval for risky actions. It ran on 2026-10-21 on a
+maintainer's Talos+Kata cluster with OpenShell 0.1.5,
+Agent Sandbox v1.0.7, agentgateway 1.6.0, OpenBao, Gitea and Ollama
 (`qwen3.5:4b`). Evidence is in `hack/spike/results/` (one file per step, full command logs for
 re-runs in `raw/`).
 
@@ -175,7 +175,7 @@ Upstream (procoduck, 2026-10-21, after checking OpenShell's contribution rules a
 
 Every result above was observed on the cluster on 2026-10-21; versions: OpenShell 0.1.5 (chart
 digest `sha256:e88977ce…`, SDK commit `bdb956f`), Agent Sandbox v1.0.7 (manifest SHA-256
-`136c10c9…`), agentgateway 1.6.0, Kata from the Talos `kata-containers` extension with guest
+`136c10c9…`), agentgateway 1.6.0, Kata from the `kata-containers` extension with guest
 seccomp enabled, OpenCode 1.19.3, Hermes Agent 0.22.3, pi 1.3.0 with pi-acp 0.0.34,
 `coder/acp-go-sdk` v0.13.5, `modelcontextprotocol/go-sdk` v1.8.0.
 
@@ -207,3 +207,5 @@ keyed rules, extended). Nothing in sandbox namespaces is written by a new identi
 - [0045](0045-openshell-hardening-defaults.md), [0040](0040-agentgateway-model-and-mcp-gateway.md),
   [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0042](0042-ask-tier-park-and-execute.md),
   [0016](0016-harness-and-deployment.md)
+
+Note (2026-11-07): private infrastructure detail removed; maintainer decision 2026-11-07.

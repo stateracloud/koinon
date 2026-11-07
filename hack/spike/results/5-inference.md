@@ -3,7 +3,7 @@
 Run 2026-10-21. agentgateway 1.6.0 in standalone mode (`hack/spike/agentgateway.sh`, config
 `hack/spike/agentgateway/config.yaml`): one replica in `agentgateway-system`, SQLite on a PVC, a
 custom OpenAI-compatible provider (`providerOverride: ollama`) pointing at
-`http://ollama.lab.example.invalid:11434/v1`, model `qwen3.5:4b` priced nominally at $1 / $2 per 1M
+`http://ollama.example.invalid:11434/v1`, model `qwen3.5:4b` priced nominally at $1 / $2 per 1M
 input / output tokens in an inline model catalog. Two per-agent API keys (`agent-a`: $10/24h,
 `agent-b`: $0.0005/24h, both `Block`) appear in the config only as `keyHash: sha256:…`; the values
 are in OpenBao (`secret/koinon-spike/agentgateway`) and reach sandbox `p2` through the OpenShell

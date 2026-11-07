@@ -141,7 +141,7 @@ restore 7.2 s on a 186 MB home.
   exactly one container, and under Kata a sidecar would put the keys in the agent's VM.
   - *Normal path (built):* koinon-agentd, the writer, reads the home as tar over OpenShell exec
     (`tar -C /sandbox`, as saved work is read, ADR 0054) and writes it to kopia. The same writer
-    holds the S3 credentials, because the home lab's Garage NetworkPolicy admits only agentd and
+    holds the S3 credentials, because the S3 store's NetworkPolicy admits only agentd and
     API pods. The stream comes from a sandbox, so it is untrusted: it is extracted through an
     `os.Root` (no path, symbolic link included, leaves the scratch directory), with absolute
     names, links to other files, devices and anything over 4 GiB or 2 million entries refused.
@@ -178,9 +178,7 @@ restore 7.2 s on a 186 MB home.
   column `sandbox_id` carries the OpenShell ID the unhealthy mark compares with.
 - **Storage:** chart values `checkpoints.enabled` (default off) and `checkpoints.s3.*`: a Secret with
   `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `endpoint` and `region`, plus the bucket. The S3
-  client (minio-go) addresses path-style outside AWS and sends no checksum trailers. On the home
-  lab: Secret `koinon/koinon-homes-s3`, bucket `koinon-homes`, region `garage`, a plain HTTP
-  endpoint. No off-site copy in v0.1; one (for example R2) can be added later as configuration.
+  client (minio-go) addresses path-style outside AWS and sends no checksum trailers. A maintainer's cluster used an S3-compatible store over plain HTTP. No off-site copy in v0.1; one (for example R2) can be added later as configuration.
 
 - **2026-10-27, review fixes (HC1):**
   - *No KEK in agentd.* The writer holds the S3 credentials but not the key-encryption keys (ADR
@@ -205,7 +203,7 @@ restore 7.2 s on a 186 MB home.
 
 Still open: the fallback pod (above); an admin override of a blocked recreation with an audit
 entry; kopia maintenance (reclaiming space of expired snapshots) and a periodic test restore.
-Throughput was measured on the home lab on 2026-10-27; see the measurement amendment below.
+Throughput was measured on a maintainer's cluster on 2026-10-27; see the measurement amendment below.
 
 ## Links
 
@@ -274,20 +272,20 @@ subsystem (NVIDIA/OpenShell#4448, in v0.1.4 and later). The backup stays tar ove
   at once instead of waiting for kopia to finish staging the snapshot.
 - **Caveats.** Upstream calls the protocol internal, but the subsystem name is versioned. Extraction
   is not atomic, which is acceptable because the harness does not start unless the restore
-  succeeded. Throughput is bounded by 1 MiB per round trip; the home-lab numbers are below. The Go SDK has no upload transport (it returns `ErrTransportNotAvailable`), which is why
+  succeeded. Throughput is bounded by 1 MiB per round trip; the measured numbers are below. The Go SDK has no upload transport (it returns `ErrTransportNotAvailable`), which is why
   agentd carries the client.
 - **Tests.** The fake OpenShell gateway serves the subsystem as upstream does (window enforcement
   with exit 74, acknowledgments, plan parsing) and caps exec stdin at 4 MiB, so the old failure
   reproduces in a test.
 
-### 2026-10-27: measured on the home lab
+### 2026-10-27: measured on a maintainer's cluster
 
-Measured on main e520d87 on the home lab (Kata sandboxes, Garage S3, OpenShell v0.1.5), with
+Measured on main e520d87 on a maintainer's cluster (Kata sandboxes, an S3-compatible store), with
 200 MiB of random data in an agent's home (210 MB with the rest of the home), koinon-private#169:
 
 | | Time |
 | --- | --- |
-| Backup, first (tar over exec, kopia, Garage) | 11.4 s and 14.2 s on two runs |
+| Backup, first (tar over exec, kopia, S3-compatible store) | 11.4 s and 14.2 s on two runs |
 | Backup, unchanged home | 6.4–7.5 s |
 | Restore through `openshell-upload-v1` (kopia staging and upload, from run queued to `run.home_restored`) | 16 s |
 
@@ -348,3 +346,5 @@ exactly what the backup holds.
   checkpoints, and an unreadable one is recreated at once instead of blocking the agent.
 - agentd fails a run whose sandbox is in Error, Deleted or Retained with the agent unhealthy with
   the class `sandbox_unavailable` (it was `fatal`).
+
+Note (2026-11-07): private infrastructure detail removed; maintainer decision 2026-11-07.

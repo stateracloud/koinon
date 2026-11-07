@@ -46,7 +46,7 @@ var _ = Describe("the sandbox wait cap", func() {
 
 	It("fails a run whose sandbox never becomes ready within the cap, names the cause and marks the agent unhealthy", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.recordSandboxWith(ctx, store.SandboxStateStarting, "ImagePullBackOff", `Back-off pulling image "zot.example.test/x:1"`)
+		e.recordSandboxWith(ctx, store.SandboxStateStarting, "ImagePullBackOff", `Back-off pulling image "registry.example.test/x:1"`)
 		admin := addAdmin(ctx, e)
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
@@ -73,7 +73,7 @@ var _ = Describe("the sandbox wait cap", func() {
 		Expect(failed.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassSandboxUnavailable))
 		Expect(failed.OutcomeReason.String).To(ContainSubstring("the sandbox never became ready in 20m"))
 		Expect(failed.OutcomeReason.String).To(ContainSubstring("the image could not be pulled"))
-		Expect(failed.OutcomeReason.String).To(ContainSubstring(`(starting: ImagePullBackOff: Back-off pulling image "zot.example.test/x:1")`),
+		Expect(failed.OutcomeReason.String).To(ContainSubstring(`(starting: ImagePullBackOff: Back-off pulling image "registry.example.test/x:1")`),
 			"the detail carries the recorded reason and message")
 		var failEvent map[string]any
 		for _, ev := range taskEvents(ctx, e, t) {

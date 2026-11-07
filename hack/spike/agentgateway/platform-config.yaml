@@ -38,7 +38,7 @@ llm:
   models:
   - name: "qwen3.5:4b"
     provider: {custom: {providerOverride: ollama, formats: [{type: completions}]}}
-    params: {baseUrl: "http://ollama.lab.example.invalid:11434/v1"}
+    params: {baseUrl: "http://ollama.example.invalid:11434/v1"}
   - name: "deepseek/deepseek-v4.1-flash"
     provider: {custom: {providerOverride: openrouter, formats: [{type: completions}]}}
     params:

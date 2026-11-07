@@ -9,7 +9,7 @@ spike version of ADR 0045's ValidatingAdmissionPolicy bound only to namespaces l
 
 | # | Result | Evidence |
 | --- | --- | --- |
-| 8.1 | pass | TCP to `1.1.1.1:443`, LAN `10.20.0.1:443`, node `10.20.0.181:22`, the Cilium gateway IP, Ollama: `EACCES` at `connect`; UDP to `8.8.8.8:53`: `EDESTADDRREQ` |
+| 8.1 | pass | TCP to `1.1.1.1:443`, LAN `<lan-gw>:443`, node `<node>:22`, the Cilium gateway IP, Ollama: `EACCES` at `connect`; UDP to `8.8.8.8:53`: `EDESTADDRREQ` |
 | 8.2 | pass | `169.254.169.254:80`, `[fd00:ec2::254]:80`: `EACCES` |
 | 8.3 | pass | cluster DNS `10.96.0.10:53` over UDP and TCP: blocked. A 50-character random name resolves to synthetic `198.18.0.9` with **no upstream query**: the trusted resolver runs only after a name matches the active policy (`crates/openshell-supervisor-network/src/policy_dns/mod.rs:146-177`) |
 | 8.4 | pass | `10.96.0.1:443`, `kubernetes.default.svc:443`, control plane `:6443`, kubelet `:10250`: `EACCES` |
@@ -18,7 +18,7 @@ spike version of ADR 0045's ValidatingAdmissionPolicy bound only to namespaces l
 | 8.7 | pass | no ServiceAccount token mounted (`automountServiceAccountToken: false`); `/.openshell/pod-identity`: `EACCES` |
 | 8.8 | pass | step 2 (2.1-2.6) |
 | 8.9 | pass | `ptrace(PTRACE_ATTACH, 1)`: `EPERM`; `/proc/1/mem`: `EACCES`; the supervisor is in a separate pod |
-| 8.10 | pass | PID 1 is `openshell-sandbox`, guest kernel `6.18.35` vs node `6.18.57-talos` |
+| 8.10 | pass | PID 1 is `openshell-sandbox`, guest kernel `6.18.35` vs node `<node-kernel>` |
 | 8.11 | pass | `mount`: `EPERM`; `AF_PACKET` raw: `EPERM`; `AF_INET` raw: not supported; `CapEff = CapPrm = 0`, `NoNewPrivs = 1`; `setuid(0)`: `EPERM`; no setuid binaries |
 | 8.12 | **pass after platform fix** (first run: fail) | Landlock: writes to `/etc`, `/usr`, `/var` and via `/sandbox/../etc` denied. seccomp: `unshare(NEWUSER)`, `unshare(NEWNS)`, `bpf`, `perf_event_open` → `EPERM`, but **`keyctl` and `add_key` succeed**. Re-run 14:15Z after Kata guest seccomp was enabled on both workers: `keyctl` and `add_key` → `EPERM`, `Seccomp_filters: 6` (OpenShell's filter plus the pod's `RuntimeDefault`), 0 of 24 attempts open; sandbox start, credentialed Gitea call and chat completion unaffected (`raw/8.12-rerun.md`) |
 | 8.13 | pass | `kubectl debug p2 --profile=restricted`: denied by the VAP ("ephemeral containers are not allowed on sandbox pods"). With the default profile, Pod Security `baseline` already refuses (`SYS_PTRACE`) |
