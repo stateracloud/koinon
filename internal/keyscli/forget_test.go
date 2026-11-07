@@ -345,6 +345,58 @@ var _ = Describe("koinon-api keys forget", func() {
 		})
 	})
 
+	// Issue #322: IDs are never reused on any add path, not only in the recovery from a lost active KEK.
+	Describe("adding a KEK under an ID that database envelopes still carry", func() {
+		It("is refused by keys add and by the key-admin Job, with or without the recovery flag, and changes nothing", func(ctx SpecContext) {
+			const removed, freshKEK = "kek-20251201-eeee", "kek-20261201-ffff"
+			_, err := pool.Exec(ctx, `INSERT INTO platform_trace_destination (backend, endpoint_url) VALUES ('datadog', 'https://otlp.example.com')
+				ON CONFLICT (singleton) DO NOTHING`)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE platform_trace_destination SET credentials = jsonb_build_object('kek_id', $1::text)`, removed)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) {
+				_, err := pool.Exec(ctx, `UPDATE platform_trace_destination SET credentials = NULL`)
+				Expect(err).NotTo(HaveOccurred())
+			})
+			Expect(keyscli.UsedID(ctx, pool, removed)).To(BeTrue())
+
+			kms := &secretstoretest.FakeKMS{}
+			admin, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, kms)
+			Expect(err).NotTo(HaveOccurred())
+			admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
+			adminStore := keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek", Wrappers: admin}
+			probe := func(ctx context.Context, id string) (bool, error) { return keyscli.UsedID(ctx, pool, id) }
+			job := func(add string, recovery bool, used func(context.Context, string) (bool, error)) keyscli.KeyAdmin {
+				return keyscli.KeyAdmin{Store: adminStore, AddID: add, ActivateIfNoActive: recovery, UsedID: used, Out: out, Now: func() time.Time { return now }}
+			}
+			snapshot := func() map[string][]byte {
+				sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				return sec.Data
+			}
+			before := snapshot()
+
+			By("keys add")
+			Expect(tool.Add(ctx, removed)).To(MatchError(ContainSubstring("seals values in the database")))
+			By("the Job's plain add")
+			Expect(job(removed, false, probe).Run(ctx)).To(MatchError(ContainSubstring("seals values in the database")))
+			By("the Job's recovery flag while the active KEK works")
+			Expect(job(removed, true, probe).Run(ctx)).To(MatchError(ContainSubstring("seals values in the database")))
+			By("the Job without a probe fails closed")
+			Expect(job(removed, false, nil).Run(ctx)).To(MatchError(ContainSubstring("check that the new KEK ID is unused")))
+			Expect(snapshot()).To(Equal(before), "the Secret is unchanged")
+			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")
+
+			By("keys add fails closed without a database")
+			Expect((&keyscli.Tool{Store: ks, Out: out, Now: func() time.Time { return now }}).Add(ctx, freshKEK)).To(MatchError(ContainSubstring("check that KEK ID")))
+			Expect(snapshot()).To(Equal(before))
+
+			By("an unused ID still adds")
+			Expect(job(freshKEK, false, probe).Run(ctx)).To(Succeed())
+			Expect(snapshot()).To(HaveKey(freshKEK))
+		})
+	})
+
 	// Issue #255: the KMS key that wrapped the active KEK is gone for good, so the key set does not load
 	// (the active KEK is not among the keys). The key-admin Job adds a new active KEK, then keys forget runs.
 	Describe("when the lost KEK was the active one", func() {
@@ -477,7 +529,11 @@ var _ = Describe("koinon-api keys forget", func() {
 		})
 
 		It("has nothing to pick when every KEK in use is in the key set", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, lostKEK)).To(Succeed()) // restored from escrow after all
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			sec.Data[lostKEK] = secretstore.EncodeKey(lostKey) // restored from escrow after all
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
 			ask("1\n")
 			Expect(tool.Forget(ctx, "")).To(MatchError(ContainSubstring("nothing is lost")))
 		})

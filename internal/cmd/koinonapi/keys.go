@@ -152,8 +152,12 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 
 	tool := &keyscli.Tool{Store: store, Out: out, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, SecretName: o.kekSecret, Wrappers: wrappers}
 	// activate uses the database to record the activation and to show, in its picker, the values each KEK wraps.
-	if pool != nil && cmd != "add" && cmd != "export" {
+	if pool != nil && cmd != "export" {
 		tool.Pool = pool
+	}
+	if pool != nil {
+		// add refuses an ID the database still carries; a missing table fails closed (not migrated yet).
+		tool.UsedID = func(ctx context.Context, id string) (bool, error) { return kekIDUsedYet(ctx, pool, id) }
 	}
 	switch cmd {
 	case "status":
