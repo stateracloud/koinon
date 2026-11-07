@@ -99,7 +99,7 @@ claim write for an outside contributor": that issue is the signal to revisit dec
    the workflow passes `app-id`, so keep the numeric ID, and switch both when the input is removed.)
 9. Store the `.pem` in the secret store you use for such keys and delete the download.
 10. Verify: run the workflow `claims` by hand (Actions -> claims -> Run workflow). The `sweeper` job
-    must log `no claims` or its sweep output instead of the notice "are not set; ... skipped". Then
+    must log `no claims` or its sweep output (it runs on the workflow token and needs no App secrets). Then
     on a throwaway branch open a pull request and enable auto-merge; the `updater` job must run and
     report "no auto-merge pull request is behind main" or update the branch, and its merge commit
     must show `koinon-bot` as the author.

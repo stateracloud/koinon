@@ -33,6 +33,7 @@ forced 0 test/e2e/kind/up.sh
 forced 0 .github/workflows/e2e-kind.yml
 forced 0 hack/docs-e1.sh
 forced 0 docs/site/src/content/docs/quickstart.md
+forced 0 docs/site/src/content/docs/guides/backup-restore.md
 forced 0 flavors/opencode/prompt.md
 forced 0 hack/versions.env
 forced 0 hack/versions-env.sh
@@ -70,6 +71,7 @@ expect 0 go.sum
 expect 0 release/versions.yaml
 expect 0 hack/docs-e1.sh
 expect 0 docs/site/src/content/docs/quickstart.md
+expect 0 docs/site/src/content/docs/guides/backup-restore.md
 expect 0 docs/guide.md internal/api/server.go    # one relevant path among others is enough
 
 # Not needed.

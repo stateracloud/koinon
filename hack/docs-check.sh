@@ -8,6 +8,7 @@
 #      test/e2e/run.sh runs: test/e2e/quickstart.golden.sh. Update it with
 #      `hack/docs-check.sh --update` after you change a command on purpose.
 #   2. test/e2e/run.sh runs every e1 block, and only blocks that exist.
+#   2b. The backup and restore guide's e1 blocks parse and test/e2e/backup-restore.sh runs exactly them.
 #   3. Every `yaml chart-values` block in the docs is valid chart values (helm lint --strict).
 #   3b. Every `yaml model-provider` block, and the model-provider manifests of the e2e test and the dev
 #      profiles, parse as declarative Secrets (internal/declarative, TestDocumentedSecretsParse), and
@@ -78,6 +79,24 @@ for n in $names; do
   grep -qx "$n" <<<"$used" || fail "test/e2e/run.sh does not run e1 block '$n'"
 done
 [[ $failures -eq 0 ]] && ok "test/e2e/run.sh runs every e1 block: $(tr '\n' ' ' <<<"$used")"
+
+# 2b. The backup and restore guide's e1 blocks parse, and test/e2e/backup-restore.sh (the nightly
+# step, #90) runs exactly those blocks, so the guide's commands cannot drift from what is tested.
+guide=$docs/guides/backup-restore.md
+gnames=$(E1_DOC=$guide hack/docs-e1.sh names) || { fail "reading the e1 blocks of $guide"; gnames=""; }
+[[ -n $gnames ]] || fail "$guide has no e1 blocks"
+for n in $gnames; do
+  E1_DOC=$guide hack/docs-e1.sh show "$n" >"$tmp/guide-$n.sh" || { fail "e1 block $n of $guide is empty"; continue; }
+  bash -n "$tmp/guide-$n.sh" || fail "e1 block $n of $guide is not valid shell"
+done
+gused=$(grep -v '^[[:space:]]*#' test/e2e/backup-restore.sh | grep -oE '\bblk [a-z0-9-]+' | awk '{print $NF}' | sort -u)
+for n in $gused; do
+  grep -qx "$n" <<<"$gnames" || fail "test/e2e/backup-restore.sh runs e1 block '$n', which $guide does not have"
+done
+for n in $gnames; do
+  grep -qx "$n" <<<"$gused" || fail "test/e2e/backup-restore.sh does not run e1 block '$n' of $guide"
+done
+ok "test/e2e/backup-restore.sh runs every e1 block of the backup guide: $(tr '\n' ' ' <<<"$gused")"
 
 # 3. Chart values blocks. The block list goes through a file (see the golden check above).
 for d in "$docs"/*.md "$docs"/guides/*.md; do
