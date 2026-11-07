@@ -184,6 +184,24 @@ mistakes, not a malicious member (pinned integration_id / lab App: koinon-privat
 Why the e2e exists: koinon-private#281 (branch naming in githubtools) and koinon-private#284 (a startup flag the chart's
 migrate Job lacked) passed every package test and failed only in a full install.
 
+## The local gate command
+
+`hack/lane-gates.sh [<base>]` (base defaults to `origin/main`) runs the gates your change touches and
+blocks until it has a verdict: the gates of `hack/preflight.sh` that the diff selects, plus the heavy
+CI jobs `hack/ci-changes.sh` turns on for it (`chartsmoke`, `flavors`, `escape`; the e2e is not part
+of it, see [testing layers](#testing-layers)). It needs Docker for the container gates and nothing
+else: no lab, no external-run status. It prints one line per gate,
+
+```
+gate=<name> rc=<n> seconds=<n> verdict=pass|fail|notrun [reason="..."] log=<path>
+```
+
+and exits 1 when a gate failed, 3 when none failed but a gate could not run on this machine, 0 when
+all passed. `notrun` (no Docker, a missing tool, a sandbox denial, a suite that skipped for a missing
+requirement) is never a `fail` and never a pass; exit 3 is not "verified", so rerun where the
+requirement exists. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
+its offline self-test (stubbed gates, run by the `scripts` job).
+
 ## What `ci` runs when
 
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
