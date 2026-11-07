@@ -18,9 +18,10 @@ import (
 // seams carry what a client cannot see: [Observed], the gateway's own record of a request, and
 // [KnownGap], a case the driver's gateway fails and a named open issue tracks.
 
-// Observed is what a gateway recorded about one request: the usage record the spend ledger reads,
-// as a driver-neutral value. Counts follow agentgateway's consistent semantics, which Koinon's
-// ledger prices: Input includes cache reads and writes, Output includes reasoning.
+// Observed is what a gateway recorded about one request, as a driver-neutral value. Counts are the
+// gateway's own, in agentgateway's consistent semantics: Input includes cache reads and writes,
+// Output includes reasoning. The usage record the ledger reads is disjoint (ADR 0097 decision 3);
+// the driver maps these totals to it.
 type Observed struct {
 	// Format is "openai" (chat completions) or "anthropic" (Messages).
 	Format string
