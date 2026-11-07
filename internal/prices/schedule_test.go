@@ -327,3 +327,41 @@ var _ = Describe("a new model whose source reports no output limit", func() {
 		Expect(res.Entry.MaxOutput).To(Equal(4096))
 	})
 })
+
+var _ = Describe("a new model the source prices fully (ADR 0098, amendment of 2026-11-07)", func() {
+	BeforeEach(func() { needDocker() })
+
+	It("is applied by the scheduled auto-apply after two stable fetches, as actor auto", func(ctx SpecContext) {
+		pool := freshDB(ctx)
+		grantAdmin(ctx, pool)
+		const m = "fake/model-new"
+		addProvider(ctx, pool, "openrouter", m) // in the catalog, priced by no entry
+		now := time.Now()
+		r := refresherOn(pool, defaultList("2000-01-01.1"), &fakeAdapter{model: m, in: "1", out: "2", maxOutput: 8192}, &now)
+
+		res, err := r.Run(ctx, prices.TriggerSchedule, true)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Applied).To(BeZero(), "a value seen once is not stable")
+		p := openProposal(ctx, r, m)
+		Expect(p.Class).To(Equal(pricefetch.ClassNeedsReview))
+		Expect(p.FailedRules).To(ContainSubstring("pinning"))
+		Expect(p.FailedRules).NotTo(ContainSubstring("no Koinon price"))
+
+		now = now.Add(25 * time.Hour)
+		res, err = r.Run(ctx, prices.TriggerSchedule, true)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Applied).To(Equal(1))
+
+		var got prices.Resolution
+		Expect(pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			var err error
+			got, err = prices.NewResolver(defaultList("2000-01-01.1")).Resolve(ctx, store.New(tx), pgtype.UUID{}, prices.Model{Name: m, ProviderType: "openrouter"}, now)
+			return err
+		})).To(Succeed())
+		Expect(got.Source).To(Equal(prices.SourcePlatform))
+		Expect(got.Entry.ID).To(Equal(pricefetch.EntryID("openrouter", m)))
+		Expect(got.Entry.Spec.Prices.Input).To(Equal("1"))
+		Expect(got.Entry.MaxOutput).To(Equal(8192))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM price_proposals WHERE model = $1 AND state = 'accepted' AND decided_by = 'auto'`, m)).To(Equal(1))
+	})
+})

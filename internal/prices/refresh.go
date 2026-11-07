@@ -490,17 +490,22 @@ func (r *Refresher) AutoApply(ctx context.Context, sources ...string) (int, erro
 			if err != nil {
 				return err
 			}
-			// Only a proposal still diffed against the price in use applies.
+			// Only a proposal still diffed against the price in use applies; a new model's proposal
+			// applies only while the model still has no price.
 			cur := v.effective(p.ProviderType, p.Model, now)
-			if cur == nil || p.Current == nil || !sameSpec(cur.Entry.Spec, p.Current.Spec) || p.Proposed == nil {
+			if (cur == nil) != (p.Current == nil) || (cur != nil && !sameSpec(cur.Entry.Spec, p.Current.Spec)) || p.Proposed == nil {
 				continue
+			}
+			var curEntry *pricing.Entry
+			if cur != nil {
+				curEntry = &cur.Entry
 			}
 			stable, err := storedStable(ctx, q, row.Source, row.Model, row.ValuesHash)
 			if err != nil {
 				return err
 			}
 			verdict := pricefetch.Classify(pricefetch.Facts{
-				Origin: p.Origin, Source: p.Source, Current: &cur.Entry, Baseline: baselineOf(cur), Proposed: *p.Proposed,
+				Origin: p.Origin, Source: p.Source, Current: curEntry, Baseline: baselineOf(cur), Proposed: *p.Proposed,
 				Agreeing: p.Agreeing, Stable: stable,
 			}, r.bounds)
 			if verdict.Class != pricefetch.ClassAuto {
@@ -589,7 +594,9 @@ func parseUUID(s string) (pgtype.UUID, error) {
 
 // applyEntries returns the platform entries after applying the proposals to the current version:
 // each proposal's entry replaces the platform entry of its id or is added. A person's acceptance
-// sets the reviewed price to the proposed one; an automatic one keeps the last reviewed price.
+// sets the reviewed price to the proposed one; an automatic one keeps the last reviewed price. A
+// new model applied automatically has no reviewed price yet, so its first applied price becomes the
+// baseline later automatic changes are bounded against, until a person reviews one.
 func (r *Refresher) applyEntries(ctx context.Context, q *store.Queries, v priceView, ps []Proposal, actor audit.Actor, now time.Time) ([]PlatformEntry, []pgtype.UUID, []string, error) {
 	cur, err := currentPlatform(ctx, q)
 	if err != nil {

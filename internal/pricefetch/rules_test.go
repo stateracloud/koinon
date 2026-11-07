@@ -3,6 +3,7 @@
 package pricefetch
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -35,7 +36,7 @@ func TestClassify(t *testing.T) {
 		{"first sighting", entry(cur.ID, "1.1", "2.2", ""), &cur, nil, "fetch", false, []string{SourceOpenRouter}, ClassNeedsReview},
 		{"import is never auto", entry(cur.ID, "1.1", "2.2", ""), &cur, nil, "import", true, []string{SourceOpenRouter}, ClassNeedsReview},
 		{"a new priced bucket", entry(cur.ID, "1", "2", "0.1"), &cur, nil, "fetch", true, []string{SourceOpenRouter}, ClassNeedsReview},
-		{"no current price", entry(cur.ID, "1", "2", ""), nil, nil, "fetch", true, []string{SourceOpenRouter}, ClassNeedsReview},
+		{"no current price, stable", entry(cur.ID, "1", "2", ""), nil, nil, "fetch", true, []string{SourceOpenRouter}, ClassAuto},
 		{"another entry id", entry("other", "1.1", "2.2", ""), &cur, nil, "fetch", true, []string{SourceOpenRouter}, ClassNeedsReview},
 		{"over 3x", entry(cur.ID, "4", "8", ""), &cur, nil, "fetch", true, []string{SourceOpenRouter}, ClassConfirm},
 		{"under a third", entry(cur.ID, "0.3", "0.6", ""), &cur, nil, "fetch", true, []string{SourceOpenRouter}, ClassConfirm},
@@ -53,6 +54,76 @@ func TestClassify(t *testing.T) {
 		if v.Class != c.want {
 			t.Errorf("%s: class %s, want %s (rules: %v)", c.name, v.Class, c.want, v.Failed)
 		}
+	}
+}
+
+func tiered(e pricing.Entry, over int64, w pricing.Wire) pricing.Entry {
+	e.Tiers = []pricing.WireTier{{ContextOver: over, Prices: w}}
+	return e
+}
+
+// TestClassifyNewModel: a model with no Koinon price applies by itself once its values are stable,
+// within every bound that needs no baseline (ADR 0098, amendment of 2026-11-07).
+func TestClassifyNewModel(t *testing.T) {
+	id := EntryID("openrouter", "fake/model-new")
+	withReasoning := entry(id, "1", "2", "")
+	withReasoning.Prices.Reasoning = "3"
+	for _, c := range []struct {
+		name     string
+		prop     pricing.Entry
+		origin   string
+		stable   bool
+		agreeing []string
+		want     Class
+	}{
+		{"stable", entry(id, "1", "2", "0.1"), "fetch", true, []string{SourceOpenRouter}, ClassAuto},
+		{"stable, a 10x price is no change bound", entry(id, "10", "80", "1"), "fetch", true, []string{SourceOpenRouter}, ClassAuto},
+		{"stable, with a reasoning rate apart from output", withReasoning, "fetch", true, []string{SourceOpenRouter}, ClassAuto},
+		{"stable, with a tier", tiered(entry(id, "1", "2", ""), 200000, pricing.Wire{Input: "2", Output: "4"}), "fetch", true, []string{SourceOpenRouter}, ClassAuto},
+		{"one fetch or under 24 hours", entry(id, "1", "2", ""), "fetch", false, []string{SourceOpenRouter}, ClassNeedsReview},
+		{"an import", entry(id, "1", "2", ""), "import", true, []string{SourceOpenRouter}, ClassNeedsReview},
+		{"not the provider's own source", entry(id, "1", "2", ""), "fetch", true, []string{"models-dev"}, ClassNeedsReview},
+		{"a rate above 1000", entry(id, "1", "1001", ""), "fetch", true, []string{SourceOpenRouter}, ClassConfirm},
+		{"input per token, output per million", entry(id, "0.000001", "2", ""), "fetch", true, []string{SourceOpenRouter}, ClassConfirm},
+		{"cache read per thousand", entry(id, "1", "2", "1000"), "fetch", true, []string{SourceOpenRouter}, ClassConfirm},
+		{"a tier rate per token", tiered(entry(id, "1", "2", ""), 200000, pricing.Wire{Input: "0.000002"}), "fetch", true, []string{SourceOpenRouter}, ClassConfirm},
+		{"a zero rate", entry(id, "0", "2", ""), "fetch", true, []string{SourceOpenRouter}, ClassNeedsReview},
+		{"a free model", entry(id, "0", "0", ""), "fetch", true, []string{SourceOpenRouter}, ClassNeedsReview},
+		{"a zero tier rate", tiered(entry(id, "1", "2", ""), 200000, pricing.Wire{Input: "0"}), "fetch", true, []string{SourceOpenRouter}, ClassNeedsReview},
+	} {
+		c.prop.Match.Glob = "fake/model-new"
+		v := Classify(Facts{Origin: c.origin, Source: c.agreeing[0], Proposed: c.prop, Agreeing: c.agreeing, Stable: c.stable}, DefaultBounds)
+		if v.Class != c.want {
+			t.Errorf("%s: class %s, want %s (rules: %v)", c.name, v.Class, c.want, v.Failed)
+		}
+		if len(v.Changes) == 0 {
+			t.Errorf("%s: every rate of a new model is a change", c.name)
+		}
+	}
+}
+
+// A new model the source gives no output limit for builds an entry, but BuildEntry reports
+// ErrNoMaxOutput, which keeps it from auto (internal/prices sets needs_review for it).
+func TestNewModelWithoutMaxOutput(t *testing.T) {
+	o := Offer{Model: "fake/model-new", ProviderType: "openrouter", Spec: pricing.Spec{Prices: pricing.Wire{Input: "1", Output: "2"}}}
+	e, err := BuildEntry(o, nil, SourceOpenRouter, time.Unix(0, 0))
+	if !errors.Is(err, ErrNoMaxOutput) || e.ID == "" {
+		t.Fatalf("BuildEntry = %+v, %v; want the entry and ErrNoMaxOutput", e, err)
+	}
+}
+
+// A new model counts towards the daily cap like any other automatic change: with the day's ten
+// already applied under the default cap, an eleventh, new or not, waits for a person.
+func TestNewModelCountsTowardsCap(t *testing.T) {
+	prop := entry(EntryID("openrouter", "fake/model-new"), "1", "2", "")
+	if v := Classify(Facts{Origin: "fetch", Source: SourceOpenRouter, Proposed: prop, Agreeing: []string{SourceOpenRouter}, Stable: true}, DefaultBounds); v.Class != ClassAuto {
+		t.Fatalf("class %s: %v", v.Class, v.Failed)
+	}
+	if CapAllows(DefaultMaxAutoPerDay, 1, DefaultBounds.MaxAutoPerDay) {
+		t.Error("the 11th automatic change of the day must not apply under the default cap")
+	}
+	if !CapAllows(DefaultMaxAutoPerDay-1, 1, DefaultBounds.MaxAutoPerDay) {
+		t.Error("the 10th automatic change of the day applies")
 	}
 }
 

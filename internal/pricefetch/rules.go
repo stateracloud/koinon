@@ -299,7 +299,10 @@ func Classify(f Facts, b Bounds) Verdict {
 			review = append(review, "the tier boundaries differ from the current price")
 		}
 	} else {
-		review = append(review, "the model has no Koinon price yet")
+		// A model with no Koinon price has no baseline: every rate is added, the change bound does
+		// not apply, and the checks below that need no baseline (high rate, zero rate, unit mix-up
+		// within the entry, agreement, stability) decide (ADR 0098, amendment of 2026-11-07).
+		confirm, review = newModelChecks(f.Proposed.Spec)
 		for _, bk := range Buckets {
 			if to := wireBucket(f.Proposed.Prices, bk); to != "" {
 				v.Changes = append(v.Changes, Change{Bucket: bk, To: to})
@@ -386,6 +389,45 @@ func ratio(to, from money.Rate) string {
 	r := new(big.Rat).SetFrac64(int64(to), int64(from))
 	f, _ := r.Float64()
 	return fmt.Sprintf("%.3gx", f)
+}
+
+// newModelChecks are the rules for a model with no current price that stand in for the ones that
+// compare against it. A zero rate waits for a person (no rate is ever set to zero by itself). A
+// suspected unit mix-up is measured inside the entry: a base rate UnitMixupFactor or more away
+// from the input rate, or a tier rate that far from the base rate of its bucket, needs a typed
+// confirmation (per token against per million is 10^6, per thousand 10^3).
+func newModelChecks(s pricing.Spec) (confirm, review []string) {
+	mixup := func(where, a, b string, ra, rb money.Rate) {
+		if ra > 0 && rb > 0 && (rb >= ra*UnitMixupFactor || rb*UnitMixupFactor <= ra) {
+			confirm = append(confirm, fmt.Sprintf("%s: %s against %s (a ratio of %s): suspected unit mix-up, per token against per million is 10^6 and per thousand 10^3", where, b, a, ratio(rb, ra)))
+		}
+	}
+	zero := func(where, val string) {
+		if r, ok := rateOf(val); ok && r == 0 {
+			review = append(review, fmt.Sprintf("%s is zero: a new model's zero rate is never applied by itself", where))
+		}
+	}
+	in, inOK := rateOf(s.Prices.Input)
+	for _, bk := range Buckets {
+		v := wireBucket(s.Prices, bk)
+		zero(bk, v)
+		if r, ok := rateOf(v); ok && inOK && bk != "input" {
+			mixup(bk+" against input", s.Prices.Input, v, in, r)
+		}
+	}
+	for _, t := range s.Tiers {
+		for _, bk := range Buckets {
+			v := wireBucket(t.Prices, bk)
+			where := fmt.Sprintf("%s above %d tokens", bk, t.ContextOver)
+			zero(where, v)
+			base := wireBucket(s.Prices, bk)
+			rb, okB := rateOf(base)
+			if r, ok := rateOf(v); ok && okB {
+				mixup(where+" against the base rate", base, v, rb, r)
+			}
+		}
+	}
+	return confirm, review
 }
 
 // overBound lists the base and tier rates of prop that moved more than pct percent from base.

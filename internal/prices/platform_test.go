@@ -151,6 +151,8 @@ type fakeAdapter struct {
 	in    string
 	out   string
 	calls int
+	// maxOutput is the output limit the source reports; 0 reports none.
+	maxOutput int
 	// err, when set, fails the fetch.
 	err error
 }
@@ -163,7 +165,7 @@ func (f *fakeAdapter) Fetch(_ context.Context, now time.Time) (pricefetch.Snapsh
 	}
 	return pricefetch.Snapshot{
 		Source: pricefetch.SourceOpenRouter, URL: "https://example.com/fake", Licence: "fake", FetchedAt: now, SHA256: strings.Repeat("0", 64), Count: 1,
-		Offers: []pricefetch.Offer{{Model: f.model, ProviderType: "openrouter", Spec: pricing.Spec{Prices: pricing.Wire{Input: f.in, Output: f.out}}}},
+		Offers: []pricefetch.Offer{{Model: f.model, ProviderType: "openrouter", Spec: pricing.Spec{Prices: pricing.Wire{Input: f.in, Output: f.out}}, MaxOutput: f.maxOutput}},
 	}, nil
 }
 
