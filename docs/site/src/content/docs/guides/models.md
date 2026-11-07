@@ -33,7 +33,8 @@ Org admins and owners open **Providers** under Settings in the sidebar. Members 
 - If the URL is refused (a private, loopback or cluster-internal address), the form shows the reason.
   Ask a platform admin to allow the host ([Upstream hosts](#upstream-hosts)).
 - For an Anthropic provider the form also takes an optional **workspace ID**
-  ([below](#anthropic)).
+  ([below](#anthropic)). Anthropic and OpenAI providers take an optional **cost API key** and **cost
+  scope** for the daily comparison with the provider's bill ([Budgets](/guides/budgets/#comparing-a-direct-provider-with-its-bill)).
 - **Add model** on a provider takes the model name, its [API format](#api-formats) and, for OpenRouter
   providers only, the routing guard. The page shows the name the gateway serves, `<org>/<model>`. A model has no price of its own:
   see [Prices](/guides/prices/).
@@ -69,7 +70,9 @@ stringData:
 - `name` is the provider's name, unique in the org. `provider` is agentgateway's `providerOverride`
   (`openai`, `openrouter`, `ollama` and so on). `url` is the OpenAI-compatible base URL. `apiKey` is
   optional; leave it out for Ollama. A provider of type `anthropic` also takes an optional
-  `anthropicWorkspaceId` ([Anthropic](#anthropic)).
+  `anthropicWorkspaceId` ([Anthropic](#anthropic)). A provider of type `anthropic` or `openai` at its
+  own API URL also takes `costApiKey` and `costScope`, together
+  ([Budgets](/guides/budgets/#comparing-a-direct-provider-with-its-bill)).
 - `models` is a YAML list. Each model has a `name`, an optional `guard` and an optional `format`
   ([API formats](#api-formats)). Prices are not declared
   here: Koinon prices a model from [its default price list or a price you add](/guides/prices/). **Upgrading:** an

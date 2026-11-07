@@ -1135,7 +1135,7 @@ components:
       description: '`secret` entries are declared by a Kubernetes Secret and read-only here.'
     Provider:
       type: object
-      required: [id, name, type, url, hasKey, formats, source, createdAt, updatedAt]
+      required: [id, name, type, url, hasKey, hasCostKey, formats, source, createdAt, updatedAt]
       properties:
         id: {type: string, format: uuid}
         name: {type: string, example: openrouter}
@@ -1157,6 +1157,16 @@ components:
           type: string
           example: wrkspc_01AbCdEf
           description: The Anthropic workspace the gateway names for this provider's models. Only for type `anthropic`; unset when not given.
+        hasCostKey:
+          type: boolean
+          description: Whether a cost API key is stored. The key itself is never returned.
+        costScope:
+          type: string
+          description: The workspace, project or API key whose cost the daily reconciliation compares with the ledger. Unset without a cost API key.
+        costKeyLostAt:
+          type: string
+          format: date-time
+          description: Set when the cost API key was lost with the key that encrypted it; enter it again.
         formats:
           type: array
           items: {$ref: "#/components/schemas/ModelFormat"}
@@ -1327,6 +1337,18 @@ components:
           type: string
           pattern: '^wrkspc_[A-Za-z0-9]+$'
           description: Only for type `anthropic`.
+        costApiKey:
+          type: string
+          description: >-
+            An admin key with which the daily reconciliation reads the provider's cost API. Write-only,
+            never returned. Only for `anthropic` and `openai` providers at their own API URL; needs
+            `costScope`.
+        costScope:
+          type: string
+          example: wrkspc_01AbCdEf
+          description: >-
+            The part of the account whose cost is this provider's: the Anthropic workspace ID (or
+            `default`), or the OpenAI project ID (`proj_...`) or API key ID (`key_...`).
     ProviderUpdate:
       type: object
       properties:
@@ -1338,6 +1360,14 @@ components:
         anthropicWorkspaceId:
           type: string
           description: Replaces the workspace ID; an empty string removes it. Only for type `anthropic`.
+        costApiKey:
+          type: string
+          description: >-
+            Replaces the cost API key; an empty string removes it and its scope. Write-only, never
+            returned. Only for `anthropic` and `openai` providers at their own API URL.
+        costScope:
+          type: string
+          description: Replaces the cost scope. A cost API key needs one.
     McpServer:
       type: object
       required: [id, name, url, transport, hasCredential, source, health, kind, dataClass, createdAt, updatedAt]

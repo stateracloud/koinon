@@ -884,8 +884,14 @@ type CreateProviderRequest struct {
 	ApiKey string `protobuf:"bytes,5,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
 	// anthropic_workspace_id is allowed for type "anthropic" only: wrkspc_ followed by letters and digits.
 	AnthropicWorkspaceId string `protobuf:"bytes,6,opt,name=anthropic_workspace_id,json=anthropicWorkspaceId,proto3" json:"anthropic_workspace_id,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// cost_api_key is the optional cost API key (an Anthropic or OpenAI admin key that may read the
+	// cost API; write-only, never returned). anthropic and openai providers at their own API URL only;
+	// needs cost_scope.
+	CostApiKey string `protobuf:"bytes,7,opt,name=cost_api_key,json=costApiKey,proto3" json:"cost_api_key,omitempty"`
+	// cost_scope is the cost scope of that key (see Provider.cost_scope).
+	CostScope     string `protobuf:"bytes,8,opt,name=cost_scope,json=costScope,proto3" json:"cost_scope,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateProviderRequest) Reset() {
@@ -956,6 +962,20 @@ func (x *CreateProviderRequest) GetApiKey() string {
 func (x *CreateProviderRequest) GetAnthropicWorkspaceId() string {
 	if x != nil {
 		return x.AnthropicWorkspaceId
+	}
+	return ""
+}
+
+func (x *CreateProviderRequest) GetCostApiKey() string {
+	if x != nil {
+		return x.CostApiKey
+	}
+	return ""
+}
+
+func (x *CreateProviderRequest) GetCostScope() string {
+	if x != nil {
+		return x.CostScope
 	}
 	return ""
 }
@@ -1864,8 +1884,11 @@ type ProviderTypeInfoResponse struct {
 	Formats []*ModelFormat `protobuf:"bytes,1,rep,name=formats,proto3" json:"formats,omitempty"`
 	// takes_workspace_id is set when the type takes an Anthropic workspace ID.
 	TakesWorkspaceId bool `protobuf:"varint,2,opt,name=takes_workspace_id,json=takesWorkspaceId,proto3" json:"takes_workspace_id,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// takes_cost_key is set when Koinon reads the type's cost API (anthropic and openai, at their own
+	// API URL), so the provider takes a cost API key and a cost scope.
+	TakesCostKey  bool `protobuf:"varint,3,opt,name=takes_cost_key,json=takesCostKey,proto3" json:"takes_cost_key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ProviderTypeInfoResponse) Reset() {
@@ -1908,6 +1931,13 @@ func (x *ProviderTypeInfoResponse) GetFormats() []*ModelFormat {
 func (x *ProviderTypeInfoResponse) GetTakesWorkspaceId() bool {
 	if x != nil {
 		return x.TakesWorkspaceId
+	}
+	return false
+}
+
+func (x *ProviderTypeInfoResponse) GetTakesCostKey() bool {
+	if x != nil {
+		return x.TakesCostKey
 	}
 	return false
 }
@@ -2244,14 +2274,18 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"\x14ListProvidersRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"Y\n" +
 	"\x15ListProvidersResponse\x12@\n" +
-	"\tproviders\x18\x01 \x03(\v2\".koinon.provider.v1alpha1.ProviderR\tproviders\"\xbc\x01\n" +
+	"\tproviders\x18\x01 \x03(\v2\".koinon.provider.v1alpha1.ProviderR\tproviders\"\x82\x02\n" +
 	"\x15CreateProviderRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x03 \x01(\tR\x04type\x12\x10\n" +
 	"\x03url\x18\x04 \x01(\tR\x03url\x12\x1c\n" +
 	"\aapi_key\x18\x05 \x01(\tB\x03\x80\x01\x01R\x06apiKey\x124\n" +
-	"\x16anthropic_workspace_id\x18\x06 \x01(\tR\x14anthropicWorkspaceId\"X\n" +
+	"\x16anthropic_workspace_id\x18\x06 \x01(\tR\x14anthropicWorkspaceId\x12%\n" +
+	"\fcost_api_key\x18\a \x01(\tB\x03\x80\x01\x01R\n" +
+	"costApiKey\x12\x1d\n" +
+	"\n" +
+	"cost_scope\x18\b \x01(\tR\tcostScope\"X\n" +
 	"\x16CreateProviderResponse\x12>\n" +
 	"\bprovider\x18\x01 \x01(\v2\".koinon.provider.v1alpha1.ProviderR\bprovider\"\x85\x03\n" +
 	"\x15UpdateProviderRequest\x12\x15\n" +
@@ -2320,10 +2354,11 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"\x0edefault_format\x18\x01 \x01(\tR\rdefaultFormat\"D\n" +
 	"\x17ProviderTypeInfoRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
-	"\x04type\x18\x02 \x01(\tR\x04type\"\x89\x01\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\"\xaf\x01\n" +
 	"\x18ProviderTypeInfoResponse\x12?\n" +
 	"\aformats\x18\x01 \x03(\v2%.koinon.provider.v1alpha1.ModelFormatR\aformats\x12,\n" +
-	"\x12takes_workspace_id\x18\x02 \x01(\bR\x10takesWorkspaceId\"/\n" +
+	"\x12takes_workspace_id\x18\x02 \x01(\bR\x10takesWorkspaceId\x12$\n" +
+	"\x0etakes_cost_key\x18\x03 \x01(\bR\ftakesCostKey\"/\n" +
 	"\x16GetDefaultModelRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"D\n" +
 	"\x12DefaultModelChoice\x12\x12\n" +

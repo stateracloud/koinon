@@ -307,6 +307,11 @@ func toProvider(p catalog.Provider) Provider {
 		out.AnthropicWorkspaceId = &p.AnthropicWorkspaceID
 	}
 	out.CredentialLostAt = p.CredentialLostAt
+	out.HasCostKey = p.HasCostKey
+	if p.CostScope != "" {
+		out.CostScope = &p.CostScope
+	}
+	out.CostKeyLostAt = p.CostKeyLostAt
 	out.Formats = append([]ModelFormat{}, p.Formats...)
 	return out
 }
@@ -378,6 +383,12 @@ func (s *Server) CreateProvider(ctx context.Context, req CreateProviderRequestOb
 	if req.Body.AnthropicWorkspaceId != nil {
 		in.AnthropicWorkspaceID = *req.Body.AnthropicWorkspaceId
 	}
+	if req.Body.CostApiKey != nil {
+		in.CostAPIKey = *req.Body.CostApiKey
+	}
+	if req.Body.CostScope != nil {
+		in.CostScope = *req.Body.CostScope
+	}
 	got, err := s.catalog.CreateProvider(ctx, p.Org, actor, pgtype.UUID{}, in)
 	if err != nil {
 		st, e := s.problem(err)
@@ -409,7 +420,8 @@ func (s *Server) GetProvider(ctx context.Context, req GetProviderRequestObject) 
 func (s *Server) UpdateProvider(ctx context.Context, req UpdateProviderRequestObject) (UpdateProviderResponseObject, error) {
 	p, actor := s.actor(ctx)
 	got, err := s.catalog.UpdateProvider(ctx, p.Org, actor, uid(req.ProviderId),
-		catalog.ProviderPatch{Type: req.Body.Type, URL: req.Body.Url, APIKey: req.Body.ApiKey, AnthropicWorkspaceID: req.Body.AnthropicWorkspaceId})
+		catalog.ProviderPatch{Type: req.Body.Type, URL: req.Body.Url, APIKey: req.Body.ApiKey, AnthropicWorkspaceID: req.Body.AnthropicWorkspaceId,
+			CostAPIKey: req.Body.CostApiKey, CostScope: req.Body.CostScope})
 	if err != nil {
 		st, e := s.problem(err)
 		return UpdateProviderdefaultJSONResponse{Body: e, StatusCode: st}, nil

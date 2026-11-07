@@ -49,9 +49,9 @@ func OpenCostKey(keys Opener, org, id pgtype.UUID, envelope []byte) (string, err
 	return string(plain), nil
 }
 
-// validateCostKey checks the cost key and scope a provider of typ at rawURL would hold after a
+// ValidateCostKey checks the cost key and scope a provider of typ at rawURL would hold after a
 // change: none, or a scope the type's cost source can read, for a provider the source serves.
-func validateCostKey(typ, rawURL string, hasKey bool, scope string) error {
+func ValidateCostKey(typ, rawURL string, hasKey bool, scope string) error {
 	if !hasKey {
 		if scope != "" {
 			return invalid("a cost scope needs a cost API key")
@@ -102,7 +102,7 @@ func (s *Service) applyCostKey(ctx context.Context, q *store.Queries, org pgtype
 	if patch.CostScope != nil {
 		scope = *patch.CostScope
 	}
-	if err := validateCostKey(out.Type, out.Url, hasKey, scope); err != nil {
+	if err := ValidateCostKey(out.Type, out.Url, hasKey, scope); err != nil {
 		return out, err
 	}
 	if patch.CostAPIKey == nil && patch.CostScope == nil {

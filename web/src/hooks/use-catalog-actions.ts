@@ -12,8 +12,8 @@ import type { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 // and result in its cache, and these carry provider keys and the token secret, which must not outlive
 // the form that handled them.
 
-export type ProviderCreate = { name: string; type: string; url: string; apiKey: string; anthropicWorkspaceId?: string }
-export type ProviderChange = { type?: string; url?: string; apiKey?: string; anthropicWorkspaceId?: string }
+export type ProviderCreate = { name: string; type: string; url: string; apiKey: string; anthropicWorkspaceId?: string; costApiKey?: string; costScope?: string }
+export type ProviderChange = { type?: string; url?: string; apiKey?: string; anthropicWorkspaceId?: string; costApiKey?: string; costScope?: string }
 /** format "" is the default; a value overrides it (ADR 0069). */
 export type ModelCreate = { providerId: string; name: string; guard: boolean; format?: string }
 /** format "" goes back to the default; unset leaves it. */

@@ -35,7 +35,11 @@ type DeclaredProvider struct {
 	APIKey  string
 	// AnthropicWorkspaceID is for type anthropic only.
 	AnthropicWorkspaceID string
-	Models               []DeclaredModel
+	// CostAPIKey and CostScope are the optional cost API key and its scope (anthropic and openai at
+	// their own API URL). The Secret is the source of truth: leaving them out removes a stored one.
+	CostAPIKey string
+	CostScope  string
+	Models     []DeclaredModel
 	// Warnings are things the Secret declares that Koinon ignores (the removed per-model rates).
 	Warnings []string
 }
@@ -52,6 +56,9 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 		return false, err
 	}
 	if err := s.policy.Check(ctx, d.URL); err != nil {
+		return false, err
+	}
+	if err := ValidateCostKey(d.Type, d.URL, d.CostAPIKey != "", d.CostScope); err != nil {
 		return false, err
 	}
 	seen := map[string]bool{}
@@ -90,8 +97,8 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 				}
 			}
 		}
-		// A lost key (keys forget) is written again from the Secret, which still holds it.
-		if cur != nil && cur.DeclaredVersion.String == d.Version && !cur.RemovedAt.Valid && !cur.CredentialLostAt.Valid {
+		// A lost key or cost key (keys forget) is written again from the Secret, which still holds it.
+		if cur != nil && cur.DeclaredVersion.String == d.Version && !cur.RemovedAt.Valid && !cur.CredentialLostAt.Valid && !cur.CostApiKeyLostAt.Valid {
 			return nil
 		}
 		if err := q.ShadowUIProviders(ctx, store.ShadowUIProvidersParams{OrgID: org, Name: d.Name, Reason: pgtype.Text{String: ReasonShadowedProvider, Valid: true}}); err != nil {
@@ -130,6 +137,10 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 			if err != nil {
 				return err
 			}
+		}
+		// Always applied: a Secret that no longer declares a cost key removes the stored one.
+		if row, err = s.applyCostKey(ctx, q, org, row, ProviderPatch{CostAPIKey: &d.CostAPIKey, CostScope: &d.CostScope}); err != nil {
+			return err
 		}
 		if err := s.syncDeclaredModels(ctx, q, org, actor, row, d); err != nil {
 			return err

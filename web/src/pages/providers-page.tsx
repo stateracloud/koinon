@@ -179,6 +179,12 @@ function ProviderCard({
             <dd className="break-all">{p.anthropicWorkspaceId}</dd>
           </>
         )}
+        {(p.hasCostKey || p.costKeyLostAt) && (
+          <>
+            <dt className="text-muted-foreground">Cost API key</dt>
+            <dd className="break-all">{p.costKeyLostAt ? 'Lost; enter it again' : `Stored encrypted; it cannot be shown. Scope ${p.costScope}`}</dd>
+          </>
+        )}
       </dl>
       {disabled && (
         <Alert variant="destructive" role="note">
