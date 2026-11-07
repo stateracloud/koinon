@@ -42,7 +42,7 @@ are in [0046](0046-adr-conventions.md).
 | [0020](0020-agent-builder-and-templates.md) | Agent builder proposes, admins activate | Accepted |
 | [0021](0021-connector-setup-guides.md) | Machine-readable connector setup guides and secure inputs | Accepted |
 | [0022](0022-frontend-architecture.md) | React SPA served by the Go API over connect-rpc | Accepted |
-| [0023](0023-observability-and-audit.md) | Optional observability, hash-chained audit on by default | Accepted; amended 2026-10-26, 2026-10-28, 2026-10-30 and 2026-10-31 (below); run traces by [0074](0074-run-traces-trace-router.md) |
+| [0023](0023-observability-and-audit.md) | Optional observability, hash-chained audit on by default | Accepted; amended 2026-10-26, 2026-10-28, 2026-10-30 and 2026-10-31 (below); run traces by [0074](0074-run-traces-trace-router.md); install-level audit chain proposed in [0100](0100-install-audit-chain.md) (note of 2026-11-07 below) |
 | [0024](0024-roadmap.md) | Release roadmap from v0.1 to v1.0 | Accepted |
 | [0025](0025-testing-strategy.md) | Deterministic, free CI with a continuous sandbox escape suite | Accepted; amended 2026-11-02 (below) |
 | [0026](0026-home-lab-and-license.md) | Home lab for real isolation testing; Apache-2.0 with DCO | Accepted; amended 2026-11-02 (below) |
@@ -118,3 +118,4 @@ are in [0046](0046-adr-conventions.md).
 | [0097](0097-koinon-owned-gateway.md) | A Koinon-owned gateway, in three steps | Accepted (2026-11-06) |
 | [0098](0098-price-catalogue-updates-from-public-sources.md) | Update the model price catalogue from public sources | Accepted (2026-11-06) |
 | [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md) | No schema or upgrade promise before v0.3 | Accepted (maintainer decision 2026-11-07) |
+| [0100](0100-install-audit-chain.md) | An install-level audit chain for platform actions | Proposed |
