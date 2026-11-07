@@ -19,6 +19,6 @@ function same<T>(a: T, b: T): boolean {
  * person opened another form. Clearing the page's editing state unconditionally would close that
  * other form (old issue 520), so the callback clears it only while it still names mine.
  */
-export function closeOnly<T>(setEditing: Dispatch<SetStateAction<T | undefined>>, mine: T): () => void {
+export function closeOnly<T>(setEditing: Dispatch<SetStateAction<T | undefined>>, mine: NoInfer<T>): () => void {
   return () => setEditing((cur) => (cur !== undefined && same(cur, mine) ? undefined : cur))
 }
