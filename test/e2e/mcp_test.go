@@ -297,7 +297,7 @@ func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, 
 		cmd.Env = append(os.Environ(),
 			"KOINON_ESCAPE_MCP_HOST=koinon-gateway.koinon.svc.cluster.local",
 			"KOINON_ESCAPE_MCP_PORT=8080",
-			"KOINON_ESCAPE_MCP_KEY="+key,
+			fmt.Sprintf("KOINON_ESCAPE_MCP_KEY=%s", key),
 			"KOINON_ESCAPE_MCP_RECEIVER_URL="+fake,
 			"KOINON_REQUIRE=escape-mcp-gateway",
 		)

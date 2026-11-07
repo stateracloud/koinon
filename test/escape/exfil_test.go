@@ -214,6 +214,8 @@ var _ = Describe("Leak guard exfiltration", Label("escape", "openshell", "leakgu
 				read = name
 			case strings.HasSuffix(name, "_write_item"):
 				write = name
+			case strings.HasSuffix(name, "_fetch_url"):
+				fetch = name
 			}
 		}
 		Expect(read).NotTo(BeEmpty(), "the fixture serves read_item to the agent: "+listed[1].Text)
