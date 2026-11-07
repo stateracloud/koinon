@@ -141,7 +141,7 @@ Running it again finds nothing left to forget. Then check that `keys status` no 
 
 Do it once a year, or when `keys status` warns. No downtime, no restart.
 
-1. Add a key: `koinon-api keys add`. It prints the new ID and does not activate it. Back up the Secret.
+1. Add a key: `koinon-api keys add`. It prints the new ID and does not activate it. It reads the database (`--database-url`) to refuse an ID that stored values still carry. Back up the Secret.
 2. Activate it: `koinon-api keys activate <new-id>`. New values are wrapped by it once the pods have the
    changed Secret (kubelet takes up to about a minute; both pods reload their keys every minute).
 3. Wait two minutes, then re-wrap the old values: `koinon-api keys rewrap`. This wraps every stored

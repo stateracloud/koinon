@@ -55,7 +55,7 @@ func newKeysCommand() *cobra.Command {
 		Long:  "Run it in a koinon-api pod: kubectl exec deploy/koinon-api -- koinon-api keys status",
 	}
 	pf := keys.PersistentFlags()
-	pf.StringVar(&o.dbURL, "database-url", "", "Postgres connection string (status, rewrap, retire, reencrypt, forget and new-repositories; every command for the install ID that KMS-wrapped KEKs are bound to)")
+	pf.StringVar(&o.dbURL, "database-url", "", "Postgres connection string (add, status, rewrap, retire, reencrypt, forget and new-repositories; every command for the install ID that KMS-wrapped KEKs are bound to)")
 	pf.StringVar(&o.kekSecret, "kek-secret", "", "name of the KEK Secret; the key set is read and changed through the Kubernetes API")
 	pf.StringVar(&o.kekDir, "kek-dir", "", "mounted KEK directory, read-only; used when --kek-secret is not set")
 	pf.StringVar(&o.namespace, "namespace", "", "namespace of the KEK Secret")
@@ -89,7 +89,7 @@ func newKeysCommand() *cobra.Command {
 		c.Flags().BoolVar(&o.yes, "yes", false, "on a terminal, do not ask for confirmation")
 		return c
 	}
-	add := sub("add", "Generate a new KEK (not active yet)", cobra.NoArgs, false)
+	add := sub("add", "Generate a new KEK (not active yet)", cobra.NoArgs, true)
 	newRepos := confirmed(sub("new-repositories", "After a compromise: give agents new home repositories (new master keys) seeded with their newest checkpoint, and drop the older checkpoints", cobra.NoArgs, true))
 	newRepos.Flags().BoolVar(&o.all, "all", false, "every agent with a home repository")
 	newRepos.Flags().StringSliceVar(&o.agents, "agent", nil, "an agent ID (repeat it, or separate IDs with commas)")

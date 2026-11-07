@@ -74,7 +74,8 @@ var _ = Describe("koinon-api's startup", func() {
 
 	It("needs the database only for the keys commands that read it", func() {
 		kek := map[string]string{"KOINON_KEK_DIR": "/keys"}
-		Expect(start(kek, "keys", "add")).To(Succeed())
+		Expect(start(kek, "keys", "add")).To(MatchError(ContainSubstring("--database-url is required")))
+		Expect(start(map[string]string{"KOINON_KEK_DIR": "/keys", "DATABASE_URL": db}, "keys", "add")).To(Succeed())
 		Expect(start(kek, "keys", "status")).To(MatchError(ContainSubstring("--database-url is required")))
 		Expect(start(map[string]string{"KOINON_KEK_DIR": "/keys", "DATABASE_URL": db}, "keys", "status")).To(Succeed())
 		Expect(start(kek, "keys", "activate")).To(MatchError(ContainSubstring("accepts 1 arg")))
