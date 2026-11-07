@@ -2104,6 +2104,25 @@ type PlatformAdmin struct {
 	Source    PlatformAdminSource
 }
 
+type PlatformPriceEntry struct {
+	Version    int64
+	EntryID    string
+	Entry      []byte
+	Reviewed   []byte
+	Provenance []byte
+}
+
+type PlatformPriceVersion struct {
+	Version        int64
+	CreatedAt      pgtype.Timestamptz
+	ValidFrom      pgtype.Timestamptz
+	Actor          string
+	Reason         string
+	RuleSetVersion string
+	ProposalIds    []pgtype.UUID
+	RestoredFrom   pgtype.Int8
+}
+
 type PlatformTraceDestination struct {
 	Singleton          bool
 	Backend            TraceBackend
@@ -2143,6 +2162,61 @@ type PriceOverride struct {
 	RetiredAt pgtype.Timestamptz
 	CreatedBy string
 	CreatedAt pgtype.Timestamptz
+}
+
+type PriceProposal struct {
+	ID              pgtype.UUID
+	Source          string
+	Origin          string
+	ProviderType    string
+	Model           string
+	CurrentRef      string
+	CurrentEntry    []byte
+	ProposedEntry   []byte
+	Changes         []byte
+	Provenance      []byte
+	AgreeingSources []string
+	Class           string
+	FailedRules     string
+	State           string
+	ValuesHash      string
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+	DecidedAt       pgtype.Timestamptz
+	DecidedBy       string
+	AppliedVersion  pgtype.Int8
+}
+
+type PriceRefreshSetting struct {
+	Singleton        bool
+	Enabled          bool
+	Interval         string
+	MaxChangePercent int32
+	MaxAutoPerDay    int32
+	UpdatedAt        pgtype.Timestamptz
+}
+
+type PriceSourceFetch struct {
+	ID         pgtype.UUID
+	Source     string
+	Url        string
+	FetchedAt  pgtype.Timestamptz
+	Result     string
+	Error      string
+	Sha256     string
+	Etag       string
+	CommitSha  string
+	ModelCount int32
+	Trigger    string
+}
+
+type PriceSourceObservation struct {
+	Source     string
+	Model      string
+	ValuesHash string
+	FirstSeen  pgtype.Timestamptz
+	LastSeen   pgtype.Timestamptz
+	Fetches    int32
 }
 
 type Provider struct {

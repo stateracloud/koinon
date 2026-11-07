@@ -152,6 +152,7 @@ type Querier interface {
 	// Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
 	// no org-owned row, so it takes no @org_id.
 	CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error)
+	CountAutoAppliedPriceProposalsSince(ctx context.Context, since pgtype.Timestamptz) (int64, error)
 	// A destination whose credentials were lost (#85) receives nothing, so it does not count.
 	CountEnabledTraceDestinations(ctx context.Context, orgID pgtype.UUID) (int64, error)
 	// The org's resyncs still to do and those given up on, for koinon-agentd's gauge.
@@ -165,6 +166,7 @@ type Querier interface {
 	CountLeakGuardOpenCalls(ctx context.Context, arg CountLeakGuardOpenCallsParams) (int64, error)
 	// Questions of the run that still wait for a person (asked or open).
 	CountOpenQuestionsForRun(ctx context.Context, arg CountOpenQuestionsForRunParams) (int64, error)
+	CountPriceProposalsByClassState(ctx context.Context) ([]CountPriceProposalsByClassStateRow, error)
 	// Recreations in the last 24 hours, since the agent was last resumed: ADR 0054's loop guard,
 	// shared by agentd (stuck sandboxes) and the reconciler (sandboxes in Error or Completed). A
 	// stuck sandbox counts from its incident, which agentd records before the reconciler recreates
@@ -257,6 +259,8 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// pending -> approved | denied by a human. No row: already decided.
 	DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error)
+	// Accepts or dismisses an open proposal. No row: it was already decided.
+	DecidePriceProposal(ctx context.Context, arg DecidePriceProposalParams) (PriceProposal, error)
 	// Stores whether the run is traced, once: a run decided earlier keeps its decision (a resume after a
 	// park claims the run again). Returns the stored decision.
 	DecideRunTraced(ctx context.Context, arg DecideRunTracedParams) (bool, error)
@@ -439,6 +443,8 @@ type Querier interface {
 	GetInstallID(ctx context.Context) (pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
 	GetKEKBoundOnly(ctx context.Context) (GetKEKBoundOnlyRow, error)
+	GetLastGoodPriceSourceFetch(ctx context.Context, source string) (PriceSourceFetch, error)
+	GetLastPriceSourceFetch(ctx context.Context, source string) (PriceSourceFetch, error)
 	// The last request of a run that its provider answered with an error status at or after @since: the
 	// gateway's own record of why a model request failed (agentd reads it when a harness reports an
 	// error without a status). Only the statuses in @statuses count. No row when the provider
@@ -494,9 +500,14 @@ type Querier interface {
 	// The run an agent's key is serving now: the starting or running run (one per agent, ADR 0009).
 	// Its spend limit is the "run" level of the key's net limit (ADR 0041, decision 5). No row: none.
 	GetOwnedRunOfAgent(ctx context.Context, arg GetOwnedRunOfAgentParams) (Run, error)
+	GetPlatformPriceVersion(ctx context.Context, version int64) (PlatformPriceVersion, error)
+	// The platform price version valid at a time: the latest valid_from not after it.
+	GetPlatformPriceVersionAt(ctx context.Context, at pgtype.Timestamptz) (PlatformPriceVersion, error)
 	GetPlatformTraceDestination(ctx context.Context) (PlatformTraceDestination, error)
 	GetPlatformTraceSettings(ctx context.Context) (PlatformTraceSetting, error)
 	GetPriceOverride(ctx context.Context, arg GetPriceOverrideParams) (PriceOverride, error)
+	GetPriceProposal(ctx context.Context, id pgtype.UUID) (PriceProposal, error)
+	GetPriceRefreshSettings(ctx context.Context) (PriceRefreshSetting, error)
 	GetProvider(ctx context.Context, arg GetProviderParams) (Provider, error)
 	GetQuestion(ctx context.Context, arg GetQuestionParams) (Question, error)
 	GetQuestionByCall(ctx context.Context, arg GetQuestionByCallParams) (Question, error)
@@ -573,7 +584,12 @@ type Querier interface {
 	// running), so a fenced replica cannot add a turn. A turn row the previous owner left open (it died or
 	// lost the run) is ended as interrupted in the same statement, before the new one starts.
 	InsertOwnedRunTurn(ctx context.Context, arg InsertOwnedRunTurnParams) (RunTurn, error)
+	InsertPlatformPriceEntry(ctx context.Context, arg InsertPlatformPriceEntryParams) error
+	// valid_from NULL means now; a value before created_at violates the no-backdating check. The clock
+	// is read once, after the writer holds the platform lock, so versions are written in time order.
+	InsertPlatformPriceVersion(ctx context.Context, arg InsertPlatformPriceVersionParams) (PlatformPriceVersion, error)
 	InsertPriceOverride(ctx context.Context, arg InsertPriceOverrideParams) (PriceOverride, error)
+	InsertPriceSourceFetch(ctx context.Context, arg InsertPriceSourceFetchParams) (PriceSourceFetch, error)
 	// A complete checkpoint for a snapshot no checkpoint of the repository names. No row: one does (a
 	// backup recorded it since the listing), or @id is taken.
 	InsertResyncedHomeCheckpoint(ctx context.Context, arg InsertResyncedHomeCheckpointParams) (HomeCheckpoint, error)
@@ -625,6 +641,8 @@ type Querier interface {
 	LatestHomeCheckpointOfSandbox(ctx context.Context, arg LatestHomeCheckpointOfSandboxParams) (HomeCheckpoint, error)
 	// The agent's current repository when it has epochs; no row: epoch 0 (home_repositories) is current.
 	LatestHomeRepositoryEpoch(ctx context.Context, arg LatestHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
+	// The newest written version, valid or not yet; 0 when none was written.
+	LatestPlatformPriceVersion(ctx context.Context) (int64, error)
 	// The person who wrote the task's latest user message (the person on the other end of a chat thread).
 	LatestUserMessageActor(ctx context.Context, arg LatestUserMessageActorParams) (pgtype.UUID, error)
 	// A claimed settlement is not due again until @until, so the provider is asked outside any
@@ -768,6 +786,7 @@ type Querier interface {
 	// catalog.RederiveFormats applies internal/modelformat to them).
 	ListModelsToRederiveFormat(ctx context.Context) ([]ListModelsToRederiveFormatRow, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
+	ListOpenAutoPriceProposals(ctx context.Context) ([]PriceProposal, error)
 	// The inbox: open questions the user is an active recipient of, longest waiting on the user last
 	// (newest first), with the time it started waiting on the user.
 	// Only those whose run is still parked: a question outlives no run (the sweep closes it, this
@@ -835,12 +854,19 @@ type Querier interface {
 	// The personal orgs of the platform admins: where a platform change made by no user (a koinon-api
 	// command) is audited, as the platform API audits in the acting admin's personal org.
 	ListPlatformAdminPersonalOrgs(ctx context.Context) ([]pgtype.UUID, error)
+	ListPlatformPriceEntries(ctx context.Context, version int64) ([]PlatformPriceEntry, error)
+	ListPlatformPriceVersions(ctx context.Context, maxRows int32) ([]PlatformPriceVersion, error)
+	// The names of the enabled models of providers of one type, in every org (the fetch diffs a
+	// source against the catalog's models). Names only: no org, provider or secret.
+	ListPriceModelNames(ctx context.Context, providerType string) ([]string, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Org price overrides, default list versions and the model lookup that prices a request
 	// (plan item PV2). Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
 	ListPriceOverrides(ctx context.Context, orgID pgtype.UUID) ([]PriceOverride, error)
+	ListPriceProposals(ctx context.Context, arg ListPriceProposalsParams) ([]PriceProposal, error)
+	ListPriceSourceFetches(ctx context.Context, maxRows int32) ([]PriceSourceFetch, error)
 	// A provider's reconciled days from @since, newest first.
 	ListProviderCostReconciliations(ctx context.Context, arg ListProviderCostReconciliationsParams) ([]ProviderCostReconciliation, error)
 	ListProviderEchoChecks(ctx context.Context, orgID pgtype.UUID) ([]ProviderEchoCheck, error)
@@ -933,6 +959,12 @@ type Querier interface {
 	LockLeakGuardRun(ctx context.Context, arg LockLeakGuardRunParams) (LeakGuardRun, error)
 	// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
 	LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The platform price list and the price proposals (ADR 0098). None of these tables belongs to an org.
+	// Serializes writers of platform price versions and proposals' decisions: a transaction holds it to
+	// the commit. Version numbers are max + 1, so two writers must not interleave.
+	LockPlatformPrices(ctx context.Context) error
 	LockPlatformTraceDestination(ctx context.Context) (PlatformTraceDestination, error)
 	// Reads the ceiling and holds the row until the transaction ends, so an org's level and a lowering
 	// of the ceiling cannot pass each other.
@@ -1006,6 +1038,9 @@ type Querier interface {
 	// sends it while it waits for a sandbox that is not ready, so the reconciler
 	// starts it (the waiting run is the demand) without waiting for a resync.
 	NotifyReconciler(ctx context.Context, orgID pgtype.UUID) error
+	// Records that a fetch returned values_hash for the model. The same hash as before extends the run
+	// of unchanged fetches; a different one starts a new run.
+	ObservePriceValue(ctx context.Context, arg ObservePriceValueParams) (PriceSourceObservation, error)
 	// The turn ended: the run's asked questions become visible. Called in the transaction that parks
 	// the run.
 	OpenAskedQuestionsForRun(ctx context.Context, arg OpenAskedQuestionsForRunParams) ([]Question, error)
@@ -1204,6 +1239,8 @@ type Querier interface {
 	// Records the result of a re-test, only if the configuration is the one that was tested. A deleted
 	// destination matches nothing and is not brought back.
 	SetPlatformTraceDestinationTest(ctx context.Context, arg SetPlatformTraceDestinationTestParams) (int64, error)
+	// Moves an open proposal to another class with the rule that decided it (the daily cap).
+	SetPriceProposalClass(ctx context.Context, arg SetPriceProposalClassParams) error
 	// Sets, replaces or (both NULL) removes a provider's cost API key and scope. Writing the key ends a
 	// lost one. The scope can change alone (@set_key false keeps the envelope). A key stored where none
 	// was starts cost_reconcile_since; a replaced key keeps it; a removed key clears it.
@@ -1262,6 +1299,9 @@ type Querier interface {
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
 	// Totals per task, for the tasks in @task_ids that have spend.
 	SumTaskCosts(ctx context.Context, arg SumTaskCostsParams) ([]SumTaskCostsRow, error)
+	// A fetch that returned other values for a model, or the same as the effective price, replaces the
+	// source's open proposals for it.
+	SupersedeOpenPriceProposals(ctx context.Context, arg SupersedeOpenPriceProposalsParams) (int64, error)
 	// koinon-reconciler, after an applied gateway state: the org's models that state serves, with
 	// the provider and key file each is served with. Rows of models it does not serve are removed; a
 	// row whose key file is unchanged is left alone, so served_since stays.
@@ -1319,6 +1359,11 @@ type Querier interface {
 	// The platform destination has one writer at a time: a platform admin. A change bumps config_version.
 	// @set_test as for UpdateTraceDestination.
 	UpsertPlatformTraceDestination(ctx context.Context, arg UpsertPlatformTraceDestinationParams) (PlatformTraceDestination, error)
+	// A fetch's proposal. A live open one with the same source, model and values is refreshed (its
+	// class and the numbers can change as the stability and agreement facts do); a dismissed one is
+	// remembered and returns no row.
+	UpsertPriceProposal(ctx context.Context, arg UpsertPriceProposalParams) (PriceProposal, error)
+	UpsertPriceRefreshSettings(ctx context.Context, arg UpsertPriceRefreshSettingsParams) error
 	// Records (or, on a later pass, replaces) the reconciliation of one provider's day.
 	UpsertProviderCostReconciliation(ctx context.Context, arg UpsertProviderCostReconciliationParams) (ProviderCostReconciliation, error)
 	// The latest echo check of a provider replaces the one before it.

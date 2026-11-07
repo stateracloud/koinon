@@ -1,0 +1,21 @@
+# The default price list the prices specs run against. Fixed: made-up models, vendor "fake".
+# USD per 1,000,000 tokens.
+version: "2000-01-01.1"
+entries:
+  - id: fake-model-a
+    provider: openrouter
+    match: {glob: "fake/model-a"}
+    valid_from: 2000-01-01
+    prices: {input: "1", output: "2"}
+    tokenizer: bytes
+    ratio: "3.0"
+    max_output: 100000
+    source: {url: "https://example.com/test-prices", accessed: 2000-01-01}
+  - id: fake-wildcard
+    provider: openrouter
+    match: {glob: "fake/*"}
+    valid_from: 2000-01-01
+    prices: {input: "9", output: "9"}
+    tokenizer: bytes
+    ratio: "3.0"
+    source: {url: "https://example.com/test-prices", accessed: 2000-01-01}

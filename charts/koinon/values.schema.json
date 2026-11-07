@@ -460,6 +460,20 @@
         }
       }
     },
+    "prices": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "refresh": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "interval": {"type": "string", "pattern": "^[0-9]+(h|m)$"}
+          }
+        }
+      }
+    },
     "checkpoints": {
       "type": "object",
       "additionalProperties": false,

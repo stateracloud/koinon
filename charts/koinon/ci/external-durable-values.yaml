@@ -24,3 +24,8 @@ preflight:
 api:
   durable:
     enabled: true
+# The price refresh on (ADR 0098): koinon-api must start with its flags.
+prices:
+  refresh:
+    enabled: true
+    interval: 12h

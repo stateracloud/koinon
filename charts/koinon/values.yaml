@@ -439,6 +439,18 @@ secrets:
   # it off again afterwards.
   migrateLegacyConnections: false
 
+# Price refresh (ADR 0098). Off by default, and while it is off koinon-api makes no request to any
+# price source: prices change only with an upgrade or when an admin accepts a proposal ("koinon-api
+# prices fetch", then "prices proposals accept"). ENABLING IT LETS SMALL PRICE CHANGES APPLY BY
+# THEMSELVES: koinon-api fetches OpenRouter's public model list every interval, and a change of at
+# most 25% against the last reviewed price (and only after two fetches 24 hours apart returned it)
+# is written to the platform price list with no person involved, at most 10 a day. Larger changes
+# wait as proposals. Every change is audited and "koinon-api prices platform rollback" undoes it.
+prices:
+  refresh:
+    enabled: false
+    interval: 24h
+
 # Home checkpoints (plan item HC1, ADR 0032, practice B3). Off by default. When on, koinon-agentd saves
 # each agent's home (sessions, notes, scratch work; caches and node_modules excluded) to an
 # S3-compatible bucket with kopia: hourly while the sandbox runs, before an idle stop and before a

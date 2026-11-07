@@ -24,6 +24,13 @@ The rewrite starts from image.registry, so Koinon's images may not end up where 
 already under the mirror is left alone). Leave image.registry at its default when you use a global mirror.
 {{- end }}
 
+{{- if not .Values.prices.refresh.enabled }}
+
+Model prices: prices.refresh is off, so prices change only with an upgrade. Fetch and review newer ones with
+`kubectl -n {{ .Release.Namespace }} exec deploy/koinon-api -- koinon-api prices fetch`, or set prices.refresh.enabled=true
+to let small changes apply by themselves.
+{{- end }}
+
 {{- if .Values.openshell.insecure }}
 
 WARNING: openshell.insecure=true. Koinon dials the OpenShell gateway without TLS, so sandbox create,

@@ -90,6 +90,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/otlpauth"
+	"github.com/stateracloud/koinon/internal/pricefetch"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
@@ -111,6 +112,11 @@ import (
 )
 
 type config struct {
+	pricesRefresh         bool
+	pricesRefreshInterval time.Duration
+	pricesMaxChange       int
+	pricesMaxAutoPerDay   int
+
 	addr           string
 	databaseURL    string
 	migrate        bool
@@ -185,6 +191,14 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 			"the executors heartbeat into a table and one of them recovers the workflows of a dead one (ADR 0085). "+
 			"Empty is DBOS's default, \"local\", which is right for one process only")
 	c.waitFlag(fs)
+	fs.BoolVar(&c.pricesRefresh, "prices-refresh-enabled", false,
+		"fetch the public price source (OpenRouter) on a schedule and apply small, stable price changes by themselves (ADR 0098); "+
+			"off by default, and while off koinon-api makes no request to any price source")
+	fs.DurationVar(&c.pricesRefreshInterval, "prices-refresh-interval", 24*time.Hour, "how often the scheduled price refresh fetches")
+	fs.IntVar(&c.pricesMaxChange, "prices-refresh-max-change-percent", pricefetch.DefaultBounds.MaxChangePercent,
+		"largest change, in percent of the last reviewed rate, that applies without a person; it can only be lowered")
+	fs.IntVar(&c.pricesMaxAutoPerDay, "prices-refresh-max-auto-per-day", pricefetch.DefaultBounds.MaxAutoPerDay,
+		"most automatic price changes in 24 hours; it can only be lowered")
 	fs.StringVar(&c.trustedOrigins, "trusted-origins", "",
 		"comma-separated extra origins allowed to make state-changing requests (CSRF)")
 
@@ -412,6 +426,12 @@ func serve(ctx context.Context, cfg config) error {
 	}
 	if _, err := priceSvc.CompleteMigrated(ctx); err != nil {
 		return err
+	}
+	// A platform entry the new default list caught up with is retired (ADR 0098 decision 1.4).
+	if retired, err := priceSvc.RetireCaughtUp(ctx); err != nil {
+		return err
+	} else if len(retired) > 0 {
+		slog.Info("platform price entries retired: the default list caught up", "entries", retired)
 	}
 	// Orgs that existed before the stored default model (migration 00045) get the model they ran on.
 	if n, err := agentmodel.BackfillDefaults(ctx, pool, prices.NewResolver(pricing.Embedded()), time.Now()); err != nil {
@@ -655,6 +675,23 @@ func serve(ctx context.Context, cfg config) error {
 	if durableRT != nil {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
 		reg.MustRegister(durableRT.Collector())
+	}
+	// The price refresh (ADR 0098). Off, koinon-api makes no request to any price source.
+	priceMetrics := prices.NewMetrics(reg)
+	refresher, err := prices.NewRefresher(priceSvc, prices.RefreshConfig{
+		Adapters: []pricefetch.Adapter{pricefetch.NewOpenRouter(httpClient())},
+		Bounds:   pricefetch.Bounds{MaxChangePercent: cfg.pricesMaxChange, MaxAutoPerDay: cfg.pricesMaxAutoPerDay},
+		Metrics:  priceMetrics,
+	})
+	if err != nil {
+		return fmt.Errorf("price refresh: %w", err)
+	}
+	if err := refresher.SyncSettings(ctx, cfg.pricesRefresh, cfg.pricesRefreshInterval); err != nil {
+		return err
+	}
+	if cfg.pricesRefresh {
+		slog.Info("price refresh on: small, stable price changes apply by themselves", "interval", cfg.pricesRefreshInterval)
+		safego.GoOrStop(bgCtx, slog.Default(), "price-refresh", stop, func(ctx context.Context) { refresher.Loop(ctx, cfg.pricesRefreshInterval) })
 	}
 	if err := metrics.Serve(bgCtx, cfg.metricsAddr, reg, slog.Default()); err != nil {
 		return err
