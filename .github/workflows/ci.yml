@@ -407,6 +407,14 @@ jobs:
       - name: commit subjects
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: hack/commit-subject-check.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+      # Author and committer of every commit, merge commits included, must be in
+      # hack/git-identities.allowed (koinon#320).
+      - name: commit identities (tests)
+        if: ${{ !cancelled() }}
+        run: hack/git-identity-check-test.sh
+      - name: commit identities
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: hack/git-identity-check.sh range "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
       - id: waiver
         name: dependency age (waiver)
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}

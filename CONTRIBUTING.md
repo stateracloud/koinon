@@ -14,6 +14,11 @@ git commit -s -m "feat(api): add org lookup"
 The sign-off must match the commit author. CI rejects pull requests with unsigned commits; fix them
 with `git rebase --signoff main`. There is no CLA.
 
+Author and committer of every commit (merge commits too) must appear in `hack/git-identities.allowed`
+(`Name <email>` globs; GitHub noreply addresses are in it). CI checks the pull request's commits; add
+your own line in your first pull request. Agent worktrees made by `hack/wt.sh new` also refuse a
+commit under another identity (`hack/git-identity-check.sh install` does it for any worktree).
+
 ## AI-assisted contributions
 
 You may use AI tools. The rules are the same as for any contribution:

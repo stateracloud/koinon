@@ -109,6 +109,11 @@ cmd_new() {
   else
     git worktree add -q --detach "$dir" "$from" >&2
   fi
+  # Commits and merge commits in a lane worktree must carry the project identity (koinon#320). A base
+  # from before the hooks existed has no script; that is not an error.
+  if [ -x "$dir/hack/git-identity-check.sh" ]; then
+    "$dir/hack/git-identity-check.sh" install >&2 || echo "wt: could not install the identity hooks in $dir; run hack/git-identity-check.sh install there" >&2
+  fi
   install_web "$dir"
   echo "$dir"
 }
