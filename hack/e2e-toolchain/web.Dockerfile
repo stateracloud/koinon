@@ -9,7 +9,7 @@
 # Keep the versions in step with the repository: NODE_VERSION's major with actions/setup-node in
 # ci.yml, PNPM_VERSION with web/package.json's packageManager, PLAYWRIGHT_VERSION with its
 # @playwright/test (hack/e2e-remote-test.sh checks all three). A Playwright bump in web/ without one
-# here makes run.sh download the new browser, which the home-lab egress refuses.
+# here makes run.sh download the new browser, which a locked-down egress refuses.
 ARG BASE
 FROM ${BASE}
 ARG TARGETARCH

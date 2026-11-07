@@ -40,7 +40,7 @@ import (
 //
 // AllowedHosts is a platform-level setting (chart value egress.allowedInternalHosts; providers.allowedInternalHosts is a deprecated alias): exact
 // hostnames, IPs or CIDRs, each name optionally with a port, such as "ollama.lab.example.com:11434"
-// or "10.20.0.0/24". The gateway pod's egress NetworkPolicy is a separate allow list (see the chart).
+// or "10.7.0.0/24". The gateway pod's egress NetworkPolicy is a separate allow list (see the chart).
 type URLPolicy struct {
 	// Namespace is Koinon's namespace.
 	Namespace string

@@ -13,7 +13,7 @@ Terms used in the Northwind platform handbook.
 | RPO | Recovery point objective: the most data we accept losing. |
 | RTO | Recovery time objective: the longest we accept being down. |
 | Restore log | The table recording each restore test and its outcome. |
-| Secret store | Vault in production, SOPS-encrypted files in Git for the lab. |
+| Secret store | Vault in production, SOPS-encrypted files in Git for the test cluster. |
 | Severity | Incident level 1 to 4; 1 is the worst. |
 | Tier | A service's importance class; sets its RPO and RTO. |
 | WAL | Write-ahead log of a database, shipped for point-in-time recovery. |

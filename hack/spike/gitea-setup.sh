@@ -12,14 +12,14 @@
 
 set -euo pipefail
 
-GITEA=https://git.apps.lab.example.invalid/api/v1
+GITEA=https://git.example.invalid/api/v1
 ORG=koinon-spike
 REPO=hello
 BOT=koinon-spike-bot
-export BAO_ADDR=https://bao.apps.lab.example.invalid
-BAO_TOKEN=$(security find-generic-password -s openbao-kionon -w)
+export BAO_ADDR=https://secrets.example.invalid
+BAO_TOKEN=${BAO_TOKEN:?set BAO_TOKEN}
 export BAO_TOKEN
-ADMIN=$(security find-generic-password -s gitea-kionon -w)
+ADMIN=${GITEA_ADMIN_PASSWORD:?set GITEA_ADMIN_PASSWORD}
 
 # api METHOD PATH [JSON] prints the HTTP status; the body goes to $body. Statuses are
 # captured in $st first: bash 3.2 (macOS) mangles escaped quotes inside "$(...)".

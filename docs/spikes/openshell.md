@@ -1,4 +1,4 @@
-# Spike: OpenShell, Agent Sandbox and agentgateway on the home lab
+# Spike: OpenShell, Agent Sandbox and agentgateway on the maintainer cluster
 
 - Status: Run complete (steps 1–8, re-runs and gap checks on 2026-10-21); ADR 0048 proposed; teardown pending;
   results in `hack/spike/results/`)
@@ -29,25 +29,25 @@ approval for risky actions.** Each step below has pass/fail criteria. A result i
 - A criterion that fails and passes on re-run after a platform fix is recorded as **pass after
   platform fix**, keeps its fail history, and the fix becomes a Koinon install requirement.
 - Claude asks procoduck before any cluster-level change not listed here, including temporary ones.
-- The spike starts once procoduck reports that **Zot** (`docs/dev/maintainer-homelab.md`) and **OpenBao** are
+- The spike starts once procoduck reports that the spike registry and **OpenBao** are
   installed (both running since 2026-10-21) and gives the go-ahead. Nothing cluster-wide changes
   beyond the CRDs and namespaces listed below.
-- No paid model calls. Models come from the home-lab Ollama.
+- No paid model calls. Models come from a local Ollama.
 - Throwaway spike code lives in `hack/spike/`; nothing there is product code.
 
 ## Environment
 
 | Item | Value |
 | --- | --- |
-| Cluster | Talos 1.14, Kubernetes 1.37, 2 workers (Proxmox VMs), context `homelab` |
+| Cluster | a Talos+Kata cluster with 2 workers, the spike cluster context |
 | Runtime classes | `kata` (Cloud Hypervisor, default), `kata-qemu` (fallback if nested virtualization misbehaves) |
 | CNI | Cilium (Koinon must not depend on it; only standard NetworkPolicy is used) |
-| Storage | `proxmox-zfs` (default) |
-| Platform | Managed by procoduck's Argo CD; the spike does not modify it |
-| Registry | Zot v2.1.22 at `zot.apps.lab.example.invalid`, namespace `zot` |
-| Secret store | OpenBao 2.7.1 (`openbao-active.openbao.svc:8200`, raft); OpenShell `vault` credential driver |
-| Models | Ollama 0.40.6 at `http://ollama.lab.example.invalid:11434`, model `qwen3.5:4b`, OpenAI-compatible `/v1` |
-| Git target | The platform's Gitea 28.2 (namespace `gitea`, `gitea-http.gitea.svc:3000`, also at `git.apps.lab.example.invalid`). The spike works only inside a Gitea org `koinon-spike` |
+| Storage | the default storage class |
+| Platform | Managed by a maintainer's GitOps setup; the spike does not modify it |
+| Registry | A registry at `registry.example.invalid` |
+| Secret store | OpenBao (raft); OpenShell `vault` credential driver |
+| Models | Ollama at `http://ollama.example.invalid:11434`, model `qwen3.5:4b`, OpenAI-compatible `/v1` |
+| Git target | The platform's Gitea (in-cluster, also at `git.example.invalid`). The spike works only inside a Gitea org `koinon-spike` |
 
 ### Components installed by the spike
 
@@ -65,11 +65,11 @@ Recorded 2026-10-21 after the code review; all approved by procoduck.
 
 - Agent Sandbox ships plain manifests, not a Helm chart: `hack/spike/agent-sandbox.sh` applies the
   pinned release manifest after a SHA-256 check.
-- OpenBao: a dedicated KV mount `openshell-spike` and policy `openshell-spike-gateway` (see "OpenBao
+- OpenBao: a dedicated KV mount and policy (see "OpenBao
   setup"), set up by procoduck.
 - Platform repo (procoduck): label `openshell.ai/sandbox-attachable: "true"` on RuntimeClasses `kata`
-  and `kata-qemu`; Kata guest seccomp enabled on both workers through a Talos
-  `CRICustomizationConfig` (`kata-guest-seccomp`) pointing both handlers at copies of the Kata
+  and `kata-qemu`; Kata guest seccomp enabled on both workers through a node
+  node CRI customization pointing both handlers at copies of the Kata
   config with `disable_guest_seccomp = false`.
 - 8.14: Pod Security `enforce=privileged` was set on `openshell-openshell-spike-b` for a few
   minutes so that server-side dry runs reached the VAP, then removed.
@@ -80,7 +80,7 @@ org and the spike's OpenBao paths.
 
 ### Gitea setup
 
-- An admin token (procoduck's) is read from the macOS keychain entry `gitea-kionon` by the setup and
+- An admin token (procoduck's) is read from the a local keychain entry by the setup and
   teardown scripts on the Mac; it never enters a sandbox or the approval stub. (A copy in secret
   `koinon-spike/gitea-token` was created early on and is unused.)
 - Setup creates org `koinon-spike`, repo `koinon-spike/hello` with a protected `main`, and a
@@ -103,18 +103,18 @@ Created by procoduck on 2026-10-21; the spike changes nothing else in OpenBao.
   the random probe secrets for step 2).
 - The gateway does not read `koinon-spike/`. OpenShell's `vault` driver stores every credential it
   is given (and each sandbox's SSH identity) itself, under the fixed prefix
-  `openshell/provider-credentials/`, so it gets its own KV v2 mount `openshell-spike`, outside the
-  platform's ESO store. Policy `openshell-spike-gateway` (create, read, update on
-  `openshell-spike/data/openshell/provider-credentials/*`, delete on the matching metadata path) is
-  bound through Kubernetes auth role `openshell-spike` to service account `openshell/openshell`.
-  The driver requires HTTPS, so it uses `https://bao.apps.lab.example.invalid`. (Revised during
+  `openshell/provider-credentials/`, so it gets its own KV v2 mount, outside the
+  platform's secret store. A dedicated policy (create, read, update on
+  `<mount>/data/openshell/provider-credentials/*`, delete on the matching metadata path) is
+  bound through a dedicated Kubernetes auth role to service account `openshell/openshell`.
+  The driver requires HTTPS, so it uses `https://secrets.example.invalid`. (Revised during
   step 1; see `hack/spike/results/1-install.md`.)
-- Policy `koinon-spike-admin` (create, read, update, delete on that path only) backs an orphan token
-  with a 7-day TTL in the macOS keychain entry `openbao-kionon`. Setup, rotation (2.7) and teardown
+- A dedicated admin policy (create, read, update, delete on that path only) backs an orphan token
+  with a 7-day TTL in a local keychain entry. Setup, rotation (2.7) and teardown
   scripts on the Mac use it; it never enters the cluster.
-- Teardown deletes `secret/koinon-spike/`; the `openshell-spike` mount, the policies and the role are
+- Teardown deletes `secret/koinon-spike/`; the dedicated mount, policies and role are
   procoduck's to remove.
-- The platform's `openbao` ClusterSecretStore has no namespace conditions, so step 8 also checks that
+- The platform's secret store has no namespace conditions, so step 8 also checks that
   sandbox identities cannot create `ExternalSecret` objects.
 - Every rendered L7 endpoint uses `enforcement: enforce` (ADR 0045)
 - `agent_policy_proposals_enabled: false` (default)
@@ -218,7 +218,7 @@ and exposes `create_pull_request`. agentgateway routes that tool to the stub wit
 ### 7. Harnesses over ACP
 
 Flavor images for OpenCode, Hermes and pi (via `pi-acp`) are built on the OpenShell base image and
-pushed to Zot. Until `agentd` exists, `hack/spike/acpdrive` (Go, `github.com/coder/acp-go-sdk`)
+pushed to the registry. Until `agentd` exists, `hack/spike/acpdrive` (Go, `github.com/coder/acp-go-sdk`)
 starts the harness through the gateway exec stream and talks ACP over its stdin/stdout; if exec
 cannot carry stdin both ways, a small relay inside the sandbox is used instead. Each harness is
 configured with agentgateway as its OpenAI-compatible base URL and the approval stub as an MCP

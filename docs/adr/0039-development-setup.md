@@ -1,4 +1,4 @@
-# 0039. Development setup: procoduck's Mac plus the home-lab Talos cluster
+# 0039. Development setup: a maintainer's Mac plus a Talos+Kata cluster
 
 - Status: Accepted
 - Date: 2026-10-21
@@ -10,7 +10,7 @@ Koinon's core promise is isolation: Kata VMs, the OpenShell supervisor, and no c
 sandbox. That can only be tested properly on a cluster with a VM runtime. Free GitHub runners can't
 run Kata, and cloud clusters cost money.
 
-procoduck has a home-lab Talos cluster with the Kata Containers system extension installed. Development
+procoduck has a Talos cluster with the Kata Containers system extension installed. Development
 is done with Claude Code on procoduck's Mac, which has full cluster and GitHub access. Some actions are
 hard to undo and need a human check first.
 
@@ -19,7 +19,7 @@ hard to undo and need a human check first.
 - **Code:** development happens in a local git repository on procoduck's Mac.
 - **Remote:** pushed to the private `stateracloud/koinon` (amended 2026-10-26; it was `procoduck/koinon`, see [0034](0034-project-identity.md)). Work goes on branches with PRs, one per
   deliverable during the bootstrap.
-- **Tests:** tests that need real isolation deploy to the **home-lab Talos cluster** with Kata
+- **Tests:** tests that need real isolation deploy to the **maintainer's Talos+Kata cluster** with Kata
   (RuntimeClass `kata`). That cluster is for development and local testing only, never public CI
   ([0026](0026-home-lab-and-license.md)).
 - **What Claude Code may do:** it has full cluster and GitHub access, but **asks before**:
@@ -62,7 +62,7 @@ hard to undo and need a human check first.
 
 - Should a home-lab escape-suite run be required before releases (manually triggered), given it
   can't run in public CI?
-- Which RuntimeClass name does the home lab use? Talos's `kata` handler (Cloud Hypervisor) or
+- Which RuntimeClass name does the cluster use? Talos's `kata` handler (Cloud Hypervisor) or
   `kata-qemu`? OpenShell docs use `kata-containers` in examples.
 
 ## Upstream verification
@@ -84,3 +84,5 @@ Checked 2026-10-21:
 - [0025 Testing](0025-testing-strategy.md), [0026 Home lab and license](0026-home-lab-and-license.md)
 - [0037 Tooling](0037-tooling.md), [0045 OpenShell hardening defaults](0045-openshell-hardening-defaults.md)
 - [koinon-private#3 OpenShell spike](https://github.com/stateracloud/koinon-private/issues/3)
+
+Note (2026-11-07): private infrastructure detail removed; maintainer decision 2026-11-07.

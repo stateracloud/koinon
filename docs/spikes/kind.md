@@ -101,7 +101,7 @@ Cold path from nothing to a passing `exec` locally: about 100 s plus the node im
    properties matter for E2:
    - it runs with `--fail-open=true` and needs about 1–5 s after a pod is `Ready` before that
      pod's IP is in its nftables set; a probe in that window sees open egress. E2 must wait for
-     enforcement (as `smoke.sh` does) and must not treat kind as evidence for the home lab's
+     enforcement (as `smoke.sh` does) and must not treat kind as evidence for a maintainer cluster's
      Cilium.
    - the OpenShell supervisor's in-process proxy denies egress on its own (`wget` from the
      sandbox got `Permission denied`, log `Denied staged transparent connection`), so the

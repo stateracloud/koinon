@@ -8,11 +8,11 @@ spec:
   template:
     metadata: {labels: {app: extmcp}}
     spec:
-      imagePullSecrets: [{name: zot-pull}]
+      imagePullSecrets: [{name: <pull-secret>}]
       securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: extmcp
-          image: zot.apps.lab.example.invalid/koinon/spike-extmcp:1
+          image: registry.example.invalid/koinon/spike-extmcp:1
           ports: [{name: grpc, containerPort: 9000}]
           securityContext:
             allowPrivilegeEscalation: false

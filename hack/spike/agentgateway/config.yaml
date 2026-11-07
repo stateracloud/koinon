@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://agentgateway.dev/schema/config
-# Spike step 5: agentgateway 1.6.0 standalone mode in front of the home-lab Ollama.
+# Spike step 5: agentgateway 1.6.0 standalone mode in front of a local Ollama.
 # Per-agent API keys appear only as SHA-256 hashes; the values live in OpenBao at
 # secret/koinon-spike/agentgateway and reach sandboxes through OpenShell providers.
 config:
@@ -46,4 +46,4 @@ llm:
         providerOverride: ollama
         formats: [{type: completions}]
     params:
-      baseUrl: http://ollama.lab.example.invalid:11434/v1
+      baseUrl: http://ollama.example.invalid:11434/v1
