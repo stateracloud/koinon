@@ -678,6 +678,9 @@ func serve(ctx context.Context, cfg config) error {
 	}
 	// The price refresh (ADR 0098). Off, koinon-api makes no request to any price source.
 	priceMetrics := prices.NewMetrics(reg)
+	if cfg.pricesRefresh && cfg.pricesRefreshInterval < minPricesRefreshInterval {
+		return fmt.Errorf("--prices-refresh-interval %s is below the minimum %s", cfg.pricesRefreshInterval, minPricesRefreshInterval)
+	}
 	refresher, err := prices.NewRefresher(priceSvc, prices.RefreshConfig{
 		Adapters: []pricefetch.Adapter{pricefetch.NewOpenRouter(httpClient())},
 		Bounds:   pricefetch.Bounds{MaxChangePercent: cfg.pricesMaxChange, MaxAutoPerDay: cfg.pricesMaxAutoPerDay},
@@ -929,3 +932,7 @@ func savedWorkKey(ctx context.Context, kube kubernetes.Interface, namespace, nam
 	}
 	return get()
 }
+
+// minPricesRefreshInterval keeps a misconfigured interval (0, negative, minutes) from polling the public
+// source in a tight loop; the 24h stability rule gains nothing from faster polling.
+const minPricesRefreshInterval = time.Hour

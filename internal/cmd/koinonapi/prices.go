@@ -212,6 +212,11 @@ func newPricesCommand() *cobra.Command {
 	root.PersistentFlags().StringVar(&dbURL, "database-url", "", "Postgres connection string")
 	cli.EnvAlias(root, "database-url", "DATABASE_URL")
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		// This hook replaces the root's own, which resolves flags from the environment (cobra runs only the
+		// nearest persistent pre-run), so resolve here or DATABASE_URL is never read.
+		if err := cli.Resolve(cmd, nil); err != nil {
+			return err
+		}
 		if dbURL == "" && (cmd.Name() != "fetch" || out == "") {
 			return fmt.Errorf("--database-url is required (or KOINON_DATABASE_URL)")
 		}

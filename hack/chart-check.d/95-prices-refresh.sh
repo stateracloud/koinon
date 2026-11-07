@@ -13,4 +13,6 @@ notes_on=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set open
 if grep -q 'prices.refresh is off' <<<"$notes_on"; then fail "NOTES say the refresh is off when it is on"; fi
 has "enabled, koinon-api is told to refresh" '"--prices-refresh-enabled"' --set prices.refresh.enabled=true
 has "the interval is passed" '"--prices-refresh-interval", "6h"' --set prices.refresh.enabled=true --set prices.refresh.interval=6h
+if render --set prices.refresh.interval=0h >/dev/null 2>&1; then fail "a prices.refresh.interval of 0h must not render"; fi
+if render --set prices.refresh.interval=30m >/dev/null 2>&1; then fail "a prices.refresh.interval below one hour must not render"; fi
 if render --set prices.refresh.interval=daily >/dev/null 2>&1; then fail "a prices.refresh.interval that is not a duration of hours or minutes must not render"; fi
