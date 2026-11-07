@@ -54,10 +54,8 @@ func startStandalone(ctx context.Context, hostPorts []int, files map[string]stri
 	if err != nil {
 		return nil, err
 	}
-	for _, d := range []string{secretsDir} {
-		if err := os.Chmod(d, 0o755); err != nil {
-			return nil, err
-		}
+	if err := os.Chmod(secretsDir, 0o755); err != nil {
+		return nil, err
 	}
 	for name, v := range files {
 		if err := os.WriteFile(filepath.Join(secretsDir, name), []byte(v), 0o644); err != nil {
@@ -241,7 +239,7 @@ var _ = Describe("agentgateway v1.7.0 reload detection (standalone only)", Order
 		Expect(r.file.Deliver(ctx, []byte("llm: {models: [{name: 1, provider: nope}]}\n"), "")).To(Succeed())
 		failures := func() int { return strings.Count(r.Logs(ctx), "Failed to reload config") }
 		Eventually(failures).WithTimeout(30 * time.Second).Should(BeNumerically(">", 0))
-		// The file watcher can report one rename twice; let the second reload finish.
+		// The file watcher can report one delivery twice; let the second reload finish.
 		time.Sleep(time.Second)
 
 		extra, err := gateway.NewKey(agent)

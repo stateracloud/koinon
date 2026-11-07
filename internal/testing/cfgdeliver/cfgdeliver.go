@@ -46,6 +46,9 @@ func ContainerOptions(first []byte) []testcontainers.ContainerCustomizer {
 }
 
 // Deliverer copies each config into a running container. It satisfies standalone.Deliverer.
+//
+// The write is not atomic: Docker's archive extraction unlinks and recreates config.yaml, unlike
+// FileDeliverer's temp-file-plus-rename. agentgateway's watch debounce is what covers a partial read.
 type Deliverer struct {
 	Container testcontainers.Container
 }
