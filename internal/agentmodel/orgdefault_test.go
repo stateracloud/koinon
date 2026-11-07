@@ -61,9 +61,9 @@ entries:
     source: {url: "https://example.com/test-prices", accessed: 2000-01-01}
 `
 
-// The org default is stored (orgs.default_model, koinon-private#256), not derived from provider and model names.
+// The org default is stored (orgs.default_model, old issue 256), not derived from provider and model names.
 // The kind e2e found the derived rule moving the quickstart agent to another model when a provider
-// named "anthropic-fake" was added (koinon-private#257). These specs pin that only an explicit action changes it.
+// named "anthropic-fake" was added (old issue 257). These specs pin that only an explicit action changes it.
 var _ = Describe("the org default model", Ordered, func() {
 	var (
 		pool  *pgxpool.Pool
@@ -148,7 +148,7 @@ var _ = Describe("the org default model", Ordered, func() {
 		Expect(auditCount(ctx)).To(Equal(1), "setting the value it has is not a change")
 	})
 
-	It("does not move when a provider whose name sorts first is added (koinon-private#256)", func(ctx SpecContext) {
+	It("does not move when a provider whose name sorts first is added (old issue 256)", func(ctx SpecContext) {
 		provider(ctx, "aaa-new", "acme/newer")
 		got, src := effective(ctx)
 		Expect(got).To(Equal("acme/flash"))

@@ -15,7 +15,7 @@ import { useOrg } from '@/lib/org-context'
 import { dataLegs, kindLabel, legsText, serverKinds, toggleLeg } from '@/lib/mcp-servers'
 
 /**
- * ServerClass shows what a server exposes to the leak guard (ADR 0084, koinon-private#350) and lets an admin change
+ * ServerClass shows what a server exposes to the leak guard (ADR 0084, old issue 350) and lets an admin change
  * it. It works on every server, including one declared by a Secret: the Secret does not carry the
  * class, so the class is set here and survives the Secret being applied again.
  */

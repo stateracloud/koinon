@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # shellcheck shell=bash disable=SC2154,SC2046,SC2206,SC2015
-# Chart assertions: the supervisor image in the sandbox spec hash (ADR 0085 decision 9, koinon-private#410).
+# Chart assertions: the supervisor image in the sandbox spec hash (ADR 0085 decision 9, old issue 410).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
 # The reconciler is told which OpenShell gateway ConfigMap names the supervisor image, and the cap on

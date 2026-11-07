@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Helpers for the commit status `go-test-lab` (koinon-private#610): the record that an external run of go-test
+# Helpers for the commit status `go-test-lab` (old issue 610): the record that an external run of go-test
 # (posted through hack/e2e-status.sh) passed on exactly one commit. The ci.yml job go-test is satisfied
 # without running when the pull request head has a green one.
 #
@@ -14,7 +14,7 @@
 #
 # `state` reads the repository from REPO or GITHUB_REPOSITORY, else from the current directory. The
 # status is not a required context of the ruleset (not every contributor can produce it) and
-# anyone with write access can post it: the same trust limit as `e2e-lab` (hack/e2e-gate.sh, koinon-private#568), a
+# anyone with write access can post it: the same trust limit as `e2e-lab` (hack/e2e-gate.sh, old issue 568), a
 # guardrail against mistakes and not against a malicious member. Needs gh, jq (and git for touches-go).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.

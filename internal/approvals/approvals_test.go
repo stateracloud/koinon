@@ -397,7 +397,7 @@ var _ = Describe("Service", func() {
 		Expect(kinds(f.taskEvents(ctx))).To(ContainElement(approvals.KindFailed))
 	})
 
-	Describe("the branch namespace (koinon-private#268)", func() {
+	Describe("the branch namespace (old issue 268)", func() {
 		It("refuses, before any approval exists, a branch that is already on the code host", func(ctx SpecContext) {
 			f := newFixture(ctx, "standard")
 			f.gh.SetBranch("widgets", f.branch("fix-typo"), "a human's commit", map[string]string{"x.txt": "x"})

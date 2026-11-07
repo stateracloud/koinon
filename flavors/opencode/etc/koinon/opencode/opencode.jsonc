@@ -43,10 +43,10 @@
     // drops denied skills from the prompt, and the skill tool asserts action "skill" before loading
     // one (packages/core/src/skill.ts:33-34, packages/core/src/tool/plugin/skill.ts:50-55).
     { "action": "skill", "resource": "*", "effect": "deny" },
-    // No subagents (issue koinon-private#261). OpenCode 2.2.0's subagent tool is on for every agent (depth 1),
+    // No subagents (old issue 261). OpenCode 2.2.0's subagent tool is on for every agent (depth 1),
     // its children outlive a cancelled turn (packages/cli/src/acp/turn.ts:303-311) and their
     // messages reach agentd only through a private extension it does not advertise, so a wall-clock
-    // cancel (koinon-private#243) or wrap-up notice (koinon-private#183) would leave work running that no trace shows. Tool.snapshot
+    // cancel (old issue 243) or wrap-up notice (old issue 183) would leave work running that no trace shows. Tool.snapshot
     // drops a tool whose last matching rule has resource "*" and effect deny, so the model is not
     // offered it (packages/core/src/tool.ts:255, :326-329); the tool also asserts action "subagent"
     // before it starts a child (packages/core/src/tool/plugin/subagent.ts:140). Keep this rule last

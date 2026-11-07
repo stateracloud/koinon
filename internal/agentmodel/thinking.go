@@ -22,7 +22,7 @@ import (
 // audited with the old and new value. The precedence is the agent's setting, then the version's
 // (a template's spec.model.thinking), then the default, on (thinking.Choose). What it does is the
 // model's catalog capability (thinking.Of): a model that does not think ignores it, and a model
-// that always thinks refuses a new "off" and runs a stored one with thinking on (koinon-private#316).
+// that always thinks refuses a new "off" and runs a stored one with thinking on (old issue 316).
 
 // ThinkingView is an agent's thinking setting and what it resolves to.
 type ThinkingView struct {
@@ -109,7 +109,7 @@ func describeThinking(ctx context.Context, q *store.Queries, a store.Agent, vers
 // agent. "off" is refused when the model the agent's next run would use always thinks
 // (thinking.AlwaysThinksMsg). Nothing else is checked against the catalog: a model that cannot think
 // ignores the setting, and the view says so; and a model change is never refused for the setting,
-// because a stored "off" on a model that always thinks runs with thinking on (koinon-private#316).
+// because a stored "off" on a model that always thinks runs with thinking on (old issue 316).
 func (s *Service) SetThinking(ctx context.Context, org, agent pgtype.UUID, actor audit.Actor, value string) (store.Agent, error) {
 	want, err := thinking.ParseSetting(NormalizeThinking(value))
 	if err != nil {

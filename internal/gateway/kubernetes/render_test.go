@@ -83,7 +83,7 @@ func formatsState() gateway.State {
 			Models: []gateway.Model{
 				{Name: "claude-haiku-4-5", Format: modelformat.Anthropic, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
 				// A model whose thinking row pins a beta: the gateway sets it. No catalog row pins one
-				// since the explicit forms of koinon-private#316, so the capability is spelled out here.
+				// since the explicit forms of old issue 316, so the capability is spelled out here.
 				{Name: "claude-haiku-5-5", Format: modelformat.Anthropic, Thinking: thinking.Capability{
 					Thinks: thinking.Always, On: thinking.AdaptiveSummarized, Betas: []string{thinking.BindingBeta},
 				}, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
@@ -226,7 +226,7 @@ var _ = Describe("Render", func() {
 			"no stream_options; the agent's server tools are dropped")
 		Expect(pol["authorization"]).To(HaveKeyWithValue("policy", HaveKeyWithValue("matchExpressions", ConsistOf(
 			`apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-4-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers) && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")`))),
-			"mcp_servers is refused, and so is a gateway key in the URL or in a header but authorization (koinon-private#262)")
+			"mcp_servers is refused, and so is a gateway key in the URL or in a header but authorization (old issue 262)")
 		Expect(pol["headers"]).To(Equal(map[string]any{"request": map[string]any{
 			"set": []any{
 				map[string]any{"name": "anthropic-version", "value": "2023-06-01"},
@@ -397,7 +397,7 @@ var _ = Describe("Render", func() {
 		Expect(targets(gateway.State{MCP: []gateway.MCPTarget{{Name: "github", URL: "http://g.example.com/mcp"}}})).To(HaveLen(1))
 	})
 
-	It("refuses an MCP request with a gateway key in a header but authorization (koinon-private#262)", func() {
+	It("refuses an MCP request with a gateway key in a header but authorization (old issue 262)", func() {
 		r, err := gwk8s.Render(fullState(), opts())
 		Expect(err).NotTo(HaveOccurred())
 		spec := find(r, gwk8s.KindPolicy, "koinon-gateway-mcp").U.Object["spec"]

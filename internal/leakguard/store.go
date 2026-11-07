@@ -18,7 +18,7 @@ type Scope struct {
 
 // Store holds the fingerprints of private data, per scope. Implementations must be safe for
 // concurrent use. The in-memory MemoryStore is the reference; where the store lives in
-// production (koinon-api memory or Postgres, restarts, replicas) is decided in koinon-private#349.
+// production (koinon-api memory or Postgres, restarts, replicas) is decided in old issue 349.
 type Store interface {
 	// Add records fingerprints for scope.
 	Add(ctx context.Context, scope Scope, fps []Fingerprint) error

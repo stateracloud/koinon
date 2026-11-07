@@ -10,8 +10,8 @@
   [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0057](0057-mcp-servers.md),
   [0062](0062-code-host-connectors.md), [0063](0063-forge-credential-classes.md),
   [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md); issues
-  [koinon-private#58](https://github.com/stateracloud/koinon-private/issues/58) and
-  [koinon-private#84](https://github.com/stateracloud/koinon-private/issues/84)
+  old issue 58 and
+  old issue 84
 
 ## Context
 
@@ -21,22 +21,22 @@ loads when a task calls for it. Koinon has no skill concept today. Templates (`t
 `docs/design.md` drew "home volume: memory, skills, sessions", but skills were then shut out on
 purpose:
 
-- **The koinon-private#84 test.** `test/flavors/opencode_test.go` (`homeSeed`) plants `SKILL.md` files in
+- **The old issue 84 test.** `test/flavors/opencode_test.go` (`homeSeed`) plants `SKILL.md` files in
   `~/.claude/skills`, `~/.agents/skills`, `~/.opencode/skills` and `~/.config/opencode/skills`, and
   asserts that none of them reach the model ("None of it may reach the model or loosen the harness
-  (issue koinon-private#84)").
+  (old issue 84)").
 - **How.** `OPENCODE_CONFIG_DIR=/etc/koinon/opencode` is read-only, `OPENCODE_DISABLE_PROJECT_CONFIG=1`
   and `OPENCODE_DISABLE_CLAUDE_CODE=1` are set (`flavors/opencode/koinon-opencode`), and the plugin
   `opencode.config.compatibility`, which adds the `.claude` and `.agents` roots, is negated in
   `flavors/opencode/etc/koinon/opencode/opencode.jsonc`.
 - **The only extension switch is `harness.pluginInstalls`**, off in every template. With it on, the
   agent can write a plugin into its writable home and the plugin loads with OpenCode's full
-  privileges in every later run. That is issue koinon-private#58, which names two fixes: load only plugins whose
+  privileges in every later run. That is old issue 58, which names two fixes: load only plugins whose
   hash a person approved, or install them read-only from the agent version. Plugins are code that
   runs in-process; skills are content. They need the same two fixes.
 
 Users want skills, and most of the templates' stories (ADR 0020) would be better with one. The
-question is how to offer them without giving up what koinon-private#84 bought.
+question is how to offer them without giving up what old issue 84 bought.
 
 **The standard.** [Agent Skills](https://agentskills.io) is the open format Anthropic released; the
 repository is [agentskills/agentskills](https://github.com/agentskills/agentskills) (Apache-2.0
@@ -398,7 +398,7 @@ pinning and scoped grants limit the rest.
      be read before the after-turn check fails the run. That gives the agent nothing it could not do
      directly in the same turn; persistence, the real gain, is closed by the fresh write and the
      check.
-   - **koinon-private#58.** The same mechanism closes issue koinon-private#58: plugins become pinned, reviewed, digest-checked
+   - **old issue 58.** The same mechanism closes old issue 58: plugins become pinned, reviewed, digest-checked
      artifacts of the agent version that agentd writes beside the skills, instead of code loaded from
      the writable home. Which scanners apply to plugin code is decided in that issue's change.
    - **Removal condition.** OpenShell 0.1.5 removed custom volume claim templates
@@ -408,7 +408,7 @@ pinning and scoped grants limit the rest.
 
 9. **OpenCode's built-in skills are turned off.** `-opencode.skill` joins the plugin negations in
    `opencode.jsonc`, which removes `opencode` and `report`. That ships in rc.6, before this ADR's
-   build, and the koinon-private#84 test asserts that neither reaches the model.
+   build, and the old issue 84 test asserts that neither reaches the model.
 
 10. **UI.**
     - **Library page**, with Platform, Org and Browse tabs (platform admins edit Platform): name,
@@ -430,7 +430,7 @@ pinning and scoped grants limit the rest.
       the org page showing whether it overrides the platform.
 
 11. **Tests.** CI calls no paid model.
-    - The koinon-private#84 test stays as it is: skills in the home never load.
+    - The old issue 84 test stays as it is: skills in the home never load.
     - A flavor test: a pinned skill loads; a skill added to `/sandbox/.koinon/skills` is denied; a
       changed pinned file fails the run with `run.skills_mismatch`; the built-in skills and
       `/etc/koinon/opencode/skills` are absent.

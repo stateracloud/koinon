@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # shellcheck shell=bash disable=SC2154
-# Chart assertions: the DBOS executor ID of koinon-api is its pod name (ADR 0085, koinon-private#413).
+# Chart assertions: the DBOS executor ID of koinon-api is its pod name (ADR 0085, old issue 413).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
 # The ID comes from the downward API: unique per replica, never reused. With api.durable off there

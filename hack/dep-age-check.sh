@@ -347,7 +347,7 @@ while IFS=$'\t' read -r file line; do
 	done
 done < <(added_lines '**/Dockerfile*' 'Dockerfile*' 'hack/*.sh' 'test/e2e/**/*.sh' '.github/workflows/*.yml' '.github/workflows/*.yaml')
 
-# 4b. The tool versions of hack/versions.env (koinon-private#544): the release each <TOOL>_VERSION names. The file
+# 4b. The tool versions of hack/versions.env (old issue 544): the release each <TOOL>_VERSION names. The file
 # is also what the workflows, Dockerfile and CONTRIBUTING copies are checked against
 # (hack/versions-check.sh), so dating it dates the release assets they download.
 # tool_repo <TOOL>: the GitHub repository of the release; an unknown name warns (like pin_repo).

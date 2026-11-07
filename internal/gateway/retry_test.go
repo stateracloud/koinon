@@ -11,7 +11,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 )
 
-var _ = Describe("the do-not-retry marker (koinon-private#342)", func() {
+var _ = Describe("the do-not-retry marker (old issue 342)", func() {
 	It("reads the header the harnesses honour", func() {
 		Expect(gateway.DoNotRetryHeader).To(Equal("x-should-retry"))
 		Expect(gateway.DoNotRetryValue).To(Equal("false"))

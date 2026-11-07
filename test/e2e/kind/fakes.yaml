@@ -28,7 +28,7 @@ spec:
           image: kind.local/koinon-fakemodel:e2e
           imagePullPolicy: IfNotPresent
           # Strict Messages mode: the fake refuses what api.anthropic.com refuses (unknown fields, beta-only
-          # fields without their beta), so a body the gateway cannot vouch for fails the run (rc.7, koinon-private#240).
+          # fields without their beta), so a body the gateway cannot vouch for fails the run (rc.7, old issue 240).
           args: ["-addr", ":8080", "-strict-messages"]
           ports:
             - {name: http, containerPort: 8080}

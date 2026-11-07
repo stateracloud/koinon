@@ -20,11 +20,11 @@ import (
 // that.
 const DefaultModelServeTimeout = 5 * time.Minute
 
-// modelWaitKind is the run event recorded when a run starts waiting for its model (issue koinon-private#174).
+// modelWaitKind is the run event recorded when a run starts waiting for its model (old issue 174).
 const modelWaitKind = "run.waiting_for_model"
 
 // waitModel waits until the gateway serves the run's model, so the harness's first model call is
-// not refused (issue koinon-private#174). koinon-reconciler is the only component that knows: it leaves a new
+// not refused (old issue 174). koinon-reconciler is the only component that knows: it leaves a new
 // provider out of the gateway state until its key file has reached the gateway pod, and records in
 // gateway_served_models the models of every state it applied. A model the org's catalog does not
 // have is not waited for (the gateway answers for it as before). While the run waits it records

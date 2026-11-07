@@ -214,7 +214,7 @@ func newRouter(t *testing.T, cfg Config) *Router {
 
 // hangBound tells a hang from a slow machine: a test waits on state, never on a time, and this
 // deadline only ends a wait that would otherwise never end. A loaded 3-CPU external gate has taken
-// more than 2 s for a step that takes milliseconds alone (koinon-private#533, koinon-private#612).
+// more than 2 s for a step that takes milliseconds alone (old issue 533, old issue 612).
 const hangBound = time.Minute
 
 // manualClock is a router clock that moves only when a spec advances it, so an interval the spec is
@@ -364,7 +364,7 @@ func TestSecretsAreNotServedStaleAfterAKnownChange(t *testing.T) {
 }
 
 // Two roots of one trace arriving together make the model calls once. The spec waits on the router's
-// state, not on time (koinon-private#612): the second root arrives while the first is inside its ledger read (or
+// state, not on time (old issue 612): the second root arrives while the first is inside its ledger read (or
 // held), the gate opens only once the second has been dropped as a duplicate, and the sends are
 // counted when they have happened.
 func TestDuplicateRootsArrivingTogetherEmitOnce(t *testing.T) {
@@ -555,7 +555,7 @@ func (f *flight) waiting(key string) int {
 }
 
 // The leader panics while a second caller waits on its call: both get an error, neither hangs. The
-// spec waits on the flight's own state, not on time (koinon-private#533): the leader panics only once the second
+// spec waits on the flight's own state, not on time (old issue 533): the leader panics only once the second
 // caller has joined, and the deadline only tells a hang from a slow machine.
 func TestFlightReleasesWaitersWhenTheLeaderPanics(t *testing.T) {
 	var f flight
@@ -655,7 +655,7 @@ func TestEstimateChargesTheObjectsAroundTheBytes(t *testing.T) {
 
 // A database that does not answer must not stop the receiver, and is asked once, not once per span.
 // The database hangs until the spec releases it, far longer than any post may take, so a receiver that
-// waited for it could not answer; the reads are counted, not timed (koinon-private#612). The failure is
+// waited for it could not answer; the reads are counted, not timed (old issue 612). The failure is
 // remembered from when the read failed, not from when it started: a read that hung past ConfigCheck
 // used to be remembered until a time already past, so the next span asked again (#134).
 func TestHangingDatabaseDoesNotStopTheReceiver(t *testing.T) {
@@ -852,7 +852,7 @@ func TestSettingsReadFailureIsNotTheDestinationsFailure(t *testing.T) {
 	snd := &pSender{spans: map[string]int{}}
 	h := &cHealth{}
 	// The worker's first sleep is the linger before it makes the copy: it waits until the settings
-	// are broken, then lingers (longer than ConfigCheck, so the copy reads them again) (koinon-private#612).
+	// are broken, then lingers (longer than ConfigCheck, so the copy reads them again) (old issue 612).
 	broken := make(chan struct{})
 	var lingered atomic.Bool
 	r := newRouter(t, Config{

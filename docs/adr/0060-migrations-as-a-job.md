@@ -10,7 +10,7 @@
 [0037](0037-tooling.md) left open whether goose migrations run when `koinon-api` starts or as a
 Job. The chart already ran them as a Job (`koinon-api migrate`), but no ADR said why.
 
-Under Argo CD that Job was wrong in cnpg mode ([koinon-private#118](https://github.com/stateracloud/koinon-private/issues/118)).
+Under Argo CD that Job was wrong in cnpg mode (old issue 118).
 In cnpg mode the release creates the database, so on install the migration cannot be a Helm hook
 (a hook waits for a database that only appears once the hook has finished) and is an ordinary Job,
 `<release>-migrate-install`; on upgrade it is a `pre-upgrade` hook. Argo CD renders with

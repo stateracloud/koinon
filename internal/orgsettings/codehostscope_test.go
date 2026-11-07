@@ -20,7 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
-var _ = Describe("the org's code-host scope (ADR 0091, koinon-private#350)", func() {
+var _ = Describe("the org's code-host scope (ADR 0091, old issue 350)", func() {
 	var (
 		svc   *orgsettings.Service
 		q     *store.Queries

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package mcpcheck is the live check of an agent's MCP tools (issue koinon-private#488, ADR 0057 amendment
+// Package mcpcheck is the live check of an agent's MCP tools (old issue 488, ADR 0057 amendment
 // 2026-11-01).
 //
 // Before a run starts its harness, koinon-agentd wants to know which MCP tools the gateway really

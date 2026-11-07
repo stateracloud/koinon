@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package router is Koinon's trace router (ADR 0074, issue koinon-private#213). It lives in koinon-api and takes
+// Package router is Koinon's trace router (ADR 0074, old issue 213). It lives in koinon-api and takes
 // the spans koinon-agentd sends to the internal OTLP listener's /v1/traces, and for each org:
 //
 //   - attributes a span to a run it can prove (the run is in that org, the trace ID is one of the

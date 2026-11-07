@@ -14,7 +14,7 @@ import (
 )
 
 var _ = Describe("Of", func() {
-	// The truth table of koinon-private#316 (deep dive G4, 2026-10-31), one entry per catalog model and route.
+	// The truth table of old issue 316 (deep dive G4, 2026-10-31), one entry per catalog model and route.
 	DescribeTable("the catalog capability of a model",
 		func(provider, model string, format modelformat.Format, thinks thinking.Thinks, on, off thinking.Mode) {
 			c := thinking.Of(provider, model, format)

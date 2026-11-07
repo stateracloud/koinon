@@ -13,7 +13,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-test.XXXXXX") || exit 1 # explicit template: macOS mktemp -d ignores TMPDIR (koinon-private#466)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-test.XXXXXX") || exit 1 # explicit template: macOS mktemp -d ignores TMPDIR (old issue 466)
 trap '[[ -n ${KEEP_TMP:-} ]] || rm -rf "$tmp"' EXIT
 export FAKE_LOG="$tmp/calls.log" TMPDIR="$tmp/tmpdir" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 mkdir -p "$tmp/bin" "$tmp/tmpdir" "$tmp/limited"
@@ -52,7 +52,7 @@ mkdir -p "$seed/hack" "$seed/internal/foo" "$seed/charts/koinon" "$seed/web" "$s
 for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check mktemp-lint mktemp-lint-test bash5-lint bash5-lint-test versions-check versions-check-test; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
-# The Go gate runs hack/go-test.sh (and its verdict, koinon-private#507), not bare go test.
+# The Go gate runs hack/go-test.sh (and its verdict, old issue 507), not bare go test.
 printf '#!/usr/bin/env bash\necho "go-test.sh $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\ncase ${FAKE_GO_TEST_RC:-0} in 0) ;; 3) echo "go-test verdict: INCOMPLETE (missing docker): 1 passed, 0 partly skipped, 0 failed, 0 not run, 1 skipped (of 2 suites)" ;; *) echo "--- FAIL: TestX" ;; esac\nexit "${FAKE_GO_TEST_RC:-0}"\n' >"$seed/hack/go-test.sh"
 printf '#!/usr/bin/env bash\necho "needs-e2e.sh $*" >>"$FAKE_LOG"\nrc=${FAKE_NEEDS_RC:-1}\n[[ $rc -ne 0 ]] || echo "kind e2e needed"\nexit "$rc"\n' >"$seed/hack/needs-e2e.sh"
 cp "$repo/hack/golangci-lint.sh" "$seed/hack/golangci-lint.sh" # the real wrapper; it execs the golangci-lint stub
@@ -65,7 +65,7 @@ for d in internal/foo charts/koinon web docs/adr internal/db/queries internal/db
 
 fresh() { # a fresh clone on a feature branch, echoes its path
 	local w
-	# Fail hard (koinon-private#485): a failed mktemp or clone must never leave $w empty, or the git -C calls below
+	# Fail hard (old issue 485): a failed mktemp or clone must never leave $w empty, or the git -C calls below
 	# would run in the caller's own checkout and switch its branch.
 	w=$(mktemp -d "$tmp/w.XXXXXX") || exit 1
 	[[ -n $w && -d $w ]] || { echo "mktemp gave no directory" >&2; exit 1; }
@@ -76,7 +76,7 @@ fresh() { # a fresh clone on a feature branch, echoes its path
 	git -C "$w" checkout -q -b feat/x
 	echo "$w"
 }
-# koinon-private#485: when mktemp fails, fresh() must stop and leave the caller's checkout alone.
+# old issue 485: when mktemp fails, fresh() must stop and leave the caller's checkout alone.
 guard=$(mktemp -d "$tmp/guard.XXXXXX")
 git -C "$guard" init -q -b keep
 git -C "$guard" -c user.name=d -c user.email=d@example.invalid commit -q --allow-empty -m g
@@ -180,7 +180,7 @@ check "gitleaks ok line" has '^gitleaks ok [0-9]*s$' "$tmp/r1"
 check "e2e verdict printed, not failing" has '^e2e info not needed' "$tmp/r1"
 check "summary line" has '^preflight ok (' "$tmp/r1"
 check "golangci-lint on the changed package" has '^golangci-lint run ./internal/foo ' "$FAKE_LOG"
-check "go-test.sh (with its verdict, koinon-private#507) on the changed package" has '^go-test.sh ./internal/foo ' "$FAKE_LOG"
+check "go-test.sh (with its verdict, old issue 507) on the changed package" has '^go-test.sh ./internal/foo ' "$FAKE_LOG"
 check "every gate ran with KUBECONFIG=/dev/null" hasnt 'KUBECONFIG=\]' "$FAKE_LOG"
 check "gitleaks scans base..HEAD" has 'gitleaks git --redact --no-banner --log-opts=origin/main..HEAD' "$FAKE_LOG"
 check "chart gate did not run" hasnt 'chart-check' "$FAKE_LOG"

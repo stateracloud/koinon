@@ -182,7 +182,7 @@ curl -s localhost:8081/mcp -H "Authorization: Bearer $MCP_TOKEN" \
 ## Escape Gitea stand-in (`manifests/escape-gitea-standin.yaml`)
 
 The same binary over TLS (`-standin -tls-cert -tls-key`), on Service port 443, for the Gitea read-grant
-specs (koinon-private#371): OpenShell dials an allowed host before its L7 relay judges a request, so the grant's host
+specs (old issue 371): OpenShell dials an allowed host before its L7 relay judges a request, so the grant's host
 needs a TLS listener in the cluster. `test/escape/kind.sh` creates its Secret from a throwaway CA, appends
 that CA to a derived OpenShell supervisor image the gateway is pointed at (its supervisor verifies upstream TLS against its own image's bundle; #80 removes this), and sets `KOINON_ESCAPE_GITEA_URL`. Not in the kustomization.
 

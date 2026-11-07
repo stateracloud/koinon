@@ -13,7 +13,7 @@ import (
 	"github.com/stateracloud/koinon/internal/sinkclass"
 )
 
-// The one place the guard reads koinon-private#350's surface: the org's leak-guard settings, the code-host scope
+// The one place the guard reads old issue 350's surface: the org's leak-guard settings, the code-host scope
 // (per code-host connection) and sinkclass.Classify. Everything else in the package sees a class and a threshold only, so a
 // change to how the scope is keyed (org-wide or per connection) is an edit here.
 

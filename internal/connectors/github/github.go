@@ -91,7 +91,7 @@ type PrivateKey struct {
 // in PEM form. It never quotes the input.
 var ErrInvalidPrivateKey = errors.New("github: the private key is not an RSA private key in PEM form (the .pem file GitHub generates)")
 
-// ParsePrivateKey parses the .pem file GitHub generates (PKCS koinon-private#1), or a PKCS koinon-private#8
+// ParsePrivateKey parses the .pem file GitHub generates (PKCS old issue 1), or a PKCS old issue 8
 // RSA key.
 func ParsePrivateKey(data []byte) (*PrivateKey, error) {
 	block, rest := pem.Decode(bytes.TrimSpace(data))

@@ -344,7 +344,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Expect(string(risk)).To(ContainSubstring(`"taint"`))
 	})
 
-	Describe("a tool's declared result legs (ADR 0091 decision 4, koinon-private#643)", func() {
+	Describe("a tool's declared result legs (ADR 0091 decision 4, old issue 643)", func() {
 		legsOf := func(ctx SpecContext) mcpguard.Legs {
 			GinkgoHelper()
 			var l mcpguard.Legs

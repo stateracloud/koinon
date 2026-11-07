@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package pgtest gives Ginkgo suites migrated Postgres databases (koinon-private#224).
+// Package pgtest gives Ginkgo suites migrated Postgres databases (old issue 224).
 //
 // A test process starts at most one Postgres container per kind (the default fast one and the
 // Durable one), on first use, and every Run, Start, StartTemplate and Template.NewDB gets its own

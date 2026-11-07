@@ -13,7 +13,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 )
 
-// Per-org queues (plan item DB2, ADR 0066, koinon-private#146 2026-10-26). Trigger firings, webhook processing and
+// Per-org queues (plan item DB2, ADR 0066, old issue 146 2026-10-26). Trigger firings, webhook processing and
 // task creation run through one DBOS queue that is partitioned by org, so one org's burst waits in
 // its own partition and does not delay another org's work. Run concurrency is not here: it is
 // enforced where runs are claimed, in Postgres (run_claimable, migration 00023).

@@ -68,7 +68,7 @@ SBOMs.
 
 - Every published package moved under the public repository's namespace, `ghcr.io/stateracloud/koinon/*`,
   so the repository's own Actions token owns them: the packages created while the code lived in
-  `koinon-private` stayed linked to that repository, and Actions access to a package can only be
+  the old private repository stayed linked to that repository, and Actions access to a package can only be
   granted in the browser. The images are `koinon/api`, `koinon/reconciler`, `koinon/agentd` and
   `koinon/flavors/opencode`; the chart is `oci://ghcr.io/stateracloud/koinon/charts/koinon`; the e2e
   toolchain images are `koinon/e2e-toolchain` and `koinon/e2e-toolchain-web`. Where a workflow can,

@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Decides whether the `changes` job of ci.yml switches the heavy jobs off (koinon-private#593, koinon-private#595), and applies
+# Decides whether the `changes` job of ci.yml switches the heavy jobs off (old issue 593, old issue 595), and applies
 # the decision to the output of hack/ci-changes.sh. The heavy jobs are the ones `changes` gates: go-*
 # (through `go`), web-* (through `web`), generated code, chart, chart smoke, docs, escape (admission)
 # and flavors. A job switched off by its `if:` reports success, so every required check still reports.
-# On a push to main with skip=true, `scripts` and `lint-shell` are skipped too (koinon-private#594, their own `if:`
+# On a push to main with skip=true, `scripts` and `lint-shell` are skipped too (old issue 594, their own `if:`
 # in ci.yml, not an output of this script): the pull request head already passed them, as it must
 # for `decide` to say skip. `quick-checks` and `changes` always run.
 #
 #   hack/ci-skip-heavy.sh decide   prints skip=true|false and reason=<text> (lines for $GITHUB_OUTPUT)
 #   hack/ci-skip-heavy.sh lab      prints go_test_lab=true|false and go_test_lab_reason=<text>: whether the
-#                                  job go-test is satisfied by an external run (koinon-private#610), see below
+#                                  job go-test is satisfied by an external run (old issue 610), see below
 #   hack/ci-skip-heavy.sh apply    reads the name=value lines of hack/ci-changes.sh on stdin and
 #                                  prints them back: the heavy names become false when SKIP=true.
 #                                  Always adds flavors_publish=<the flavors value before the switch>,
@@ -21,7 +21,7 @@
 # decide, by event (EVENT_NAME, REPO, GH_TOKEN, and per event):
 #   pull_request  PR_DRAFT (github.event.pull_request.draft, true|false). skip=true while the event
 #                 says draft; the payload flag, not the live state, so the decision always matches the
-#                 run's name (`ci (draft)`, ci.yml run-name, koinon-private#676). A re-run replays the original
+#                 run's name (`ci (draft)`, ci.yml run-name, old issue 676). A re-run replays the original
 #                 event: a re-run of a draft run is a draft run again, even after the PR is ready
 #                 (red go/web, safe; re-run the ready_for_review run instead, see docs/dev/ci.md).
 #                 Marking it ready fires ready_for_review, which runs everything on the same
@@ -46,7 +46,7 @@
 #                     (hack/go-test-lab.sh): the `go` gate already demands this, this is the second look;
 #                 Only read rights are used (contents, checks, statuses). Any doubt (an API error, a missing
 #                 check, a shallow clone, an unknown event) is skip=false.
-# lab (koinon-private#610): go_test_lab=true only for a pull_request event, not a draft (SKIP != true), whose head
+# lab (old issue 610): go_test_lab=true only for a pull_request event, not a draft (SKIP != true), whose head
 #   (HEAD_SHA: github.event.pull_request.head.sha, not the merge ref github.sha) has the commit status
 #   `go-test-lab` = success (hack/go-test-lab.sh; an external go-test run that passed on exactly this head). ci.yml then skips the go-test job and the `go` gate accepts that skip.
 #   Anything else, an API error included, is false: go-test runs on the hosted runner as before. There is no
@@ -82,7 +82,7 @@ required_names() {
 	done <"$required_file"
 }
 
-# decide_pull_request: skip while the event says the pull request is a draft (koinon-private#676). The flag is
+# decide_pull_request: skip while the event says the pull request is a draft (old issue 676). The flag is
 # the one in the event payload (PR_DRAFT: github.event.pull_request.draft), the same one the
 # workflow's run-name labels the run with, so a run's behaviour and its label cannot disagree. No
 # API call: a re-run replays the original event, so a re-run of a draft run is a draft run again.
@@ -152,7 +152,7 @@ decide_push() {
 			;;
 		esac
 	done <<<"$required"
-	# A go-test that was skipped (not "success") is an externally satisfied one (koinon-private#610) or one for a change with no
+	# A go-test that was skipped (not "success") is an externally satisfied one (old issue 610) or one for a change with no
 	# Go in it. The `go` gate says so too; a skip that is neither must not pass on this path.
 	conclusion=$(awk -F'\t' '$1 == "go-test" && $3 == "completed" { print $4 }' <<<"$latest")
 	if [[ $conclusion == skipped ]]; then
@@ -179,7 +179,7 @@ decide_push() {
 	emit true "the merge tree equals the tree of $head, whose required checks passed"
 }
 
-# lab: is go-test satisfied by a green go-test-lab status on the pull request head (koinon-private#610)?
+# lab: is go-test satisfied by a green go-test-lab status on the pull request head (old issue 610)?
 lab() {
 	local state
 	if [[ ${EVENT_NAME:-} != pull_request ]]; then

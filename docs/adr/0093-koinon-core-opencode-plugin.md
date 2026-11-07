@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-03
 - Relates to: [0052](0052-opencode-v2-flavor.md) (the OpenCode flavor, its config and readiness), [0059](0059-v01-opencode-only.md) (one harness in v0.1), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (the `koinon.retry` plugin, amendment 2026-10-31), [0041](0041-koinon-spend-ledger-and-budget-stops.md) (the ledger counts the title request), [0074](0074-run-traces-trace-router.md) (run traces, tool names), [0023](0023-observability-and-audit.md) (fixed metric labels), [0045](0045-openshell-hardening-defaults.md) (OpenShell defaults), [0079](0079-dependency-cooldown.md) (pin age), [0084](0084-leak-guard.md) and [0091](0091-leak-guard-by-destination.md) (the guards outside the sandbox), [0051](0051-session-home-generations.md) (the home outlives a run)
-- Issue: #122 (koinon-private#644); the Go harness this contract feeds is #48
+- Issue: #122; the Go harness this contract feeds is #48
 
 ## Context
 
@@ -11,7 +11,7 @@ OpenCode is Koinon's only v0.1 harness (ADR 0059), pinned at 2.2.0 (ADR 0052, am
 2026-10-28). Koinon changes its behaviour today in three ways: the read-only global config
 (`/etc/koinon/opencode/opencode.jsonc`), the entry script (`flavors/opencode/koinon-opencode`), and
 one plugin, `koinon.retry` (`flavors/opencode/plugins/koinon-retry/index.js`, ADR 0056 amendment
-2026-10-31). Several open tickets want more: a mid-turn wrap-up notice (koinon-private#183), budget notices, loop
+2026-10-31). Several open tickets want more: a mid-turn wrap-up notice (old issue 183), budget notices, loop
 nudges (#119), a split of model cost by purpose, and the end of a silent failure mode.
 
 The research of 2026-11-03 (maintainers' store, checked against the 2.2.0 source) found that
@@ -33,7 +33,7 @@ What it also found:
   README, "Model retries", known limit). Only the flavor contract suite catches it.
 - **The permission hook can turn an allow into an ask**, including one that comes from a saved
   "always" answer, but it cannot overrule a configured deny. agentd never picks an "always" option
-  (koinon-private#260), but OpenCode's approval store lives in the agent's home, which outlives a run (ADR 0051),
+  (old issue 260), but OpenCode's approval store lives in the agent's home, which outlives a run (ADR 0051),
   and a plugin loaded with `harness.pluginInstalls` could answer one.
 - **OpenCode makes an extra model call per session for its title** (one-shot, its own retry path;
   ADR 0041 counts it). Nobody reads the title.
@@ -312,7 +312,7 @@ module; the re-ask (3.2) last. The `flavors` CI job becomes required (procoduck,
 
 ## Links
 
-- Issue #122 (koinon-private#644); related #48, #119, #121; koinon-private#53, #84, #183, #243, #260, #261, #341
+- Issue #122; related #48, #119, #121; old issue 53, #84, #183, #243, #260, #261, #341
 - OpenCode PRs #59437 (`experimental.idle`), #59649, #60315, #60647, #60660, #60687 (`bash` runs as
   `shell`), #60692
 - [flavors/opencode/README.md](../../flavors/opencode/README.md) ("Model retries", "Plugins")

@@ -749,7 +749,7 @@ type ListMCPServersToCheckLiveRow struct {
 }
 
 // The servers an agent may use that the gateway should serve right now, with the tools it should
-// list for each by tier, for the live check agentd runs before the harness starts (issue koinon-private#488). An
+// list for each by tier, for the live check agentd runs before the harness starts (old issue 488). An
 // unhealthy server is left out: ListMissingMCPServersOfAgent has it already and the planner withdraws
 // its tools. A server with no present, permitted tool (never probed, or all in the never tier) is
 // returned with empty lists and not expected to list anything.
@@ -908,7 +908,7 @@ type ListMissingMCPServersOfAgentRow struct {
 // The servers an agent may use that Koinon has found not serving tools right now, and has not
 // withdrawn on purpose (a disabled, removed or credential-lost server is only mentioned in the note, see
 // ListUnavailableMCPServersOfAgent): unhealthy, or failing probes that have not yet reached the
-// threshold, which is what a server overloaded for a minute looks like (issue koinon-private#326). agentd checks
+// threshold, which is what a server overloaded for a minute looks like (old issue 326). agentd checks
 // this before it starts the harness; a server never probed (unknown) is not a miss.
 func (q *Queries) ListMissingMCPServersOfAgent(ctx context.Context, arg ListMissingMCPServersOfAgentParams) ([]ListMissingMCPServersOfAgentRow, error) {
 	rows, err := q.db.Query(ctx, listMissingMCPServersOfAgent, arg.OrgID, arg.AgentID)

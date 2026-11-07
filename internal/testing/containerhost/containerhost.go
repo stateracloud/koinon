@@ -5,7 +5,7 @@
 // testcontainers reports "localhost", which resolves to ::1 first. Docker runtimes that publish a
 // port on both families (OrbStack) accept a connection to [::1] and then reset it when the
 // process in the container listens on IPv4 only, so the first request fails with ECONNRESET for
-// as long as the test retries (koinon-private#290). These helpers return the IPv4 loopback instead.
+// as long as the test retries (old issue 290). These helpers return the IPv4 loopback instead.
 package containerhost
 
 import (

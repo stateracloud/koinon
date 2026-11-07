@@ -76,7 +76,7 @@ const (
 // Defaults.
 const (
 	DefaultIdleTimeout = 10 * time.Minute
-	// DefaultKeepWarmPerOrg is the default cap of keep-warm sandboxes per org (koinon-private#315).
+	// DefaultKeepWarmPerOrg is the default cap of keep-warm sandboxes per org (old issue 315).
 	DefaultKeepWarmPerOrg = 2
 	DefaultResyncInterval = 30 * time.Second
 	// DefaultMCPProbeInterval is how often each org MCP server is probed (plan item MC1).
@@ -146,7 +146,7 @@ type Config struct {
 	ParkWarm time.Duration
 	// SandboxJobs bounds the per-sandbox jobs running at once. Default 8.
 	SandboxJobs int
-	// KeepWarmPerOrg caps the sandboxes an org's admins can keep warm (agents.keep_warm, koinon-private#315).
+	// KeepWarmPerOrg caps the sandboxes an org's admins can keep warm (agents.keep_warm, old issue 315).
 	// Default 2; a negative value grants none. Over the cap the oldest agents win.
 	KeepWarmPerOrg int
 	// ResyncInterval is the time between passes without a wake-up. Default 30 seconds.
@@ -216,7 +216,7 @@ type Reconciler struct {
 	recreates atomic.Int32
 
 	// probeMu guards probeDue: the MCP servers a pass newly applied, waiting for the prober (issue
-	// koinon-private#226). probeWake wakes the prober to take them.
+	// old issue 226). probeWake wakes the prober to take them.
 	probeMu   sync.Mutex
 	probeDue  []gatewayplan.Probe
 	probeWake chan struct{}
@@ -326,7 +326,7 @@ type work struct {
 	cfg agentconfig.Config
 	// tools are the MCP tools the active version's grants allow.
 	tools []gateway.ToolGrant
-	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (koinon-private#315).
+	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (old issue 315).
 	keepWarm bool
 }
 
@@ -494,7 +494,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	}
 	// A budget with nothing left stops the agent's runs (or the org's) with the budget reason before
 	// the Apply below blocks or revokes the key, so a run in flight records the budget stop and not the
-	// gateway's 401 or 429 (issue koinon-private#188).
+	// gateway's 401 or 429 (old issue 188).
 	for _, i := range draft.Stops {
 		w := items[i]
 		if n, err := ledger.StopSpent(ctx, r.pool, w.agent, now); err != nil {
@@ -703,7 +703,7 @@ func (r *Reconciler) mcpAllowancesOf(ctx context.Context, items []*work) (map[st
 }
 
 // recordServed writes, for every org, the models the applied state serves to gateway_served_models,
-// which koinon-agentd waits on before a run starts its harness (issue koinon-private#174). An org whose model objects
+// which koinon-agentd waits on before a run starts its harness (old issue 174). An org whose model objects
 // the gateway rejected gets nothing new recorded, but models no longer in state are removed. Only the
 // leader reconciles, so only the leader writes.
 func (r *Reconciler) recordServed(ctx context.Context, served []gatewayplan.ServedModels) error {
@@ -966,7 +966,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	sb, err := r.backend.GetSandbox(ctx, ws, names.Sandbox)
 	if errors.Is(err, execution.ErrNotFound) {
 		if !act.HasActive && !act.HasDemand && !r.woken(w.sb, tune) && !w.keepWarm {
-			// Nothing wants the agent, so no sandbox is created: it starts on demand (koinon-private#315). A
+			// Nothing wants the agent, so no sandbox is created: it starts on demand (old issue 315). A
 			// run, a claimable park, a pre-wake signal or a keep-warm setting creates one. An
 			// archived agent (archive.go) restores its home on the first run.
 			if w.sb.ArchivedAt.Valid {

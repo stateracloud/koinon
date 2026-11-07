@@ -76,7 +76,7 @@ type pullRequest struct {
 }
 
 // Branch is the branch Koinon files the pull request under for an agent: koinon/<agent
-// namespace>/<suggestion> (githubtools.FinalBranch, koinon-private#281). The e2e and the githubtools tests call
+// namespace>/<suggestion> (githubtools.FinalBranch, old issue 281). The e2e and the githubtools tests call
 // the same helper, so a naming change is made once and every expectation follows.
 func (p pullRequest) Branch(agentDisplayName, agentID string) (string, error) {
 	return githubtools.FinalBranch(githubtools.AgentNamespace(agentDisplayName, agentID), p.Suggestion)
@@ -88,10 +88,10 @@ func (p pullRequest) Branch(agentDisplayName, agentID string) (string, error) {
 // tokens, a cost, and it is not an estimate. The title request the fake model refuses is the
 // provider's refusal (4xx without usage): the ledger keeps the entry with the provider's status
 // and no tokens and no cost, marks the charge waived (the quickstart's provider type does not bill
-// a refusal), and it is not an estimate either (koinon-private#241, koinon-private#253).
+// a refusal), and it is not an estimate either (old issue 241, old issue 253).
 //
 // The two do not arrive in request order: the gateway exports its access log in batches, and the
-// refused entry can be ingested before the streamed ones (koinon-private#291).
+// refused entry can be ingested before the streamed ones (old issue 291).
 type Ledger struct {
 	StreamedInputTokens int64
 	RefusedStatus       int
@@ -163,7 +163,7 @@ func (l Ledger) CheckStreamed(e Entry) error {
 //
 // A run's Requests becoming positive does not mean its totals are final: the refused entry (no
 // tokens) can be the first one the ledger ingests. Anything that waits for the ledger must wait on
-// the tokens it expects, which is what this does (koinon-private#291).
+// the tokens it expects, which is what this does (old issue 291).
 func (l Ledger) Settled(t Totals) bool {
 	return t.Requests > 0 && t.InputTokens >= l.StreamedInputTokens
 }

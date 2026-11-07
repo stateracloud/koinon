@@ -73,7 +73,7 @@ var _ = Describe("the OpenBao transit wrapper", func() {
 		)
 	})
 
-	Describe("the install binding contract (koinon-private#615)", func() {
+	Describe("the install binding contract (old issue 615)", func() {
 		secretstoretest.InstallBindingContract(func() secretstore.Wrapper { return withToken(adminToken) })
 	})
 

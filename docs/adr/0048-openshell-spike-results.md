@@ -7,7 +7,7 @@
   [0045](0045-openshell-hardening-defaults.md); resolves the spike verification of
   [0006](0006-identity-layers.md), [0008](0008-approvals-and-risk-tiers.md),
   [0016](0016-harness-and-deployment.md), 0040, 0042 and 0045
-- Verification: done by the spike itself ([koinon-private#3](https://github.com/stateracloud/koinon-private/issues/3))
+- Verification: done by the spike itself (old issue 3)
 
 ## Context
 
@@ -128,7 +128,7 @@ network egress at all; the supervisor relays its traffic through a connection in
 - Negative: the supervisor pod has unrestricted egress and holds the per-sandbox interception CA
   key; it is OpenShell's trusted component and outside Koinon's VAP shape rules.
 - Follow-ups: issues below; update ADRs 0006, 0008, 0016, 0040, 0042, 0045 statuses ("Pending
-  verification" → verified by 0048) and the ADR index once PR koinon-private#12 merges; run
+  verification" → verified by 0048) and the ADR index once PR old issue 12 merges; run
   `hack/spike/teardown.sh` when procoduck says the spike is over.
 
 ## Gaps for Koinon to close or file upstream
@@ -187,7 +187,7 @@ or `cmd/` reads or deletes Sandbox objects (the only reference to the group is t
 check, `internal/preflight/preflight.go:37-44`). The reconciler learns sandbox status from the
 OpenShell gateway API. The chart still grants the reconciler read, watch and delete on Sandboxes
 cluster-wide (`charts/koinon/templates/rbac.yaml:131-133`). That grant is unused and is being
-removed (issue [koinon-private#110](https://github.com/stateracloud/koinon-private/issues/110)).
+removed (old issue 110).
 
 Orphan garbage collection is deferred. When it is built, it adds back only the Sandbox access it
 needs, scoped to the namespaces it works in, with its own tests.

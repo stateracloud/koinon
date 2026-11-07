@@ -272,7 +272,7 @@ var _ = Describe("Org MCP servers", func() {
 			Expect(after.ToolsSyncedAt).NotTo(BeNil())
 		})
 
-		It("probes a newly served server right after the pass that applied it, not at the next tick (koinon-private#226)", func(ctx SpecContext) {
+		It("probes a newly served server right after the pass that applied it, not at the next tick (old issue 226)", func(ctx SpecContext) {
 			s := server(ctx, org, "wiki", "", nil)
 			host, port, stop := fakeGateway(slug+"-wiki", "read")
 			DeferCleanup(stop)

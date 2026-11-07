@@ -110,7 +110,7 @@ var _ = Describe("strict Messages mode", func() {
 		Expect(message(out)).To(Equal("thinking.disabled.display: Extra inputs are not permitted"))
 	})
 
-	// koinon-private#316: of the Claude 5.x families only Haiku can stop thinking.
+	// old issue 316: of the Claude 5.x families only Haiku can stop thinking.
 	DescribeTable("refuses the thinking types a Claude 5.x family does not take",
 		func(ctx SpecContext, model string, accepted, refused []string) {
 			Expect(srv.Register(fakemodel.Script{Model: model, Turns: []fakemodel.Turn{{Text: "ok"}}})).To(Succeed())

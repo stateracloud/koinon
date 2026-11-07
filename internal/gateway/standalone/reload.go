@@ -99,7 +99,7 @@ type ProbeWaiter struct {
 
 // defaultRejectAfter is how long the gauge must read 0 before a waiter without a reload log gives
 // up. It counts time, not polls: the gauge also reads 0 from an earlier rejection until the next
-// file is loaded, and a ConfigMap takes 60 to 80 s to arrive (issue koinon-private#245: four polls, 3.5 s,
+// file is loaded, and a ConfigMap takes 60 to 80 s to arrive (old issue 245: four polls, 3.5 s,
 // misreported the good file that followed a rejected one).
 const defaultRejectAfter = 2 * time.Minute
 

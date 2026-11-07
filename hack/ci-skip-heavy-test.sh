@@ -86,7 +86,7 @@ checks() { # checks NAME:CONCLUSION[:ID] ... -> checks.json (status completed un
 }
 
 # --- pull requests ---------------------------------------------------------------------------------
-# The decision comes from the event payload flag (PR_DRAFT), never from the API (koinon-private#676): the fake
+# The decision comes from the event payload flag (PR_DRAFT), never from the API (old issue 676): the fake
 # pull.json says the opposite, and FAKE_FAIL=1 makes every gh call fail, to prove gh is not asked.
 echo '{"draft":false}' >"$tmp/pull.json"
 expect "draft event skips, whatever the live state" true "draft" EVENT_NAME=pull_request PR_DRAFT=true
@@ -206,7 +206,7 @@ expect "ready run cancelled: run everything" false "'go'" $(push "$merge_same")
 checks "quick checks:success" "generated code:success" go:success:1 go:failure:2 go:success:3 flavors:success
 # shellcheck disable=SC2046
 expect "ready, draft, push, ready again: the newest green go counts" true "equals the tree" $(push "$merge_same")
-# go-test-lab (koinon-private#610): a go-test skipped on the head must be a lab-satisfied one, or one with no Go in it
+# go-test-lab (old issue 610): a go-test skipped on the head must be a lab-satisfied one, or one with no Go in it
 statuses() { # statuses CONTEXT:STATE ... (newest first) -> statuses.json
 	local first=1 c st
 	printf '[' >"$tmp/statuses.json"
@@ -259,7 +259,7 @@ expect "a tag push runs everything" false "not a push to main" EVENT_NAME=push R
 expect "an unreadable required list runs everything" false "required checks" $(push "$merge_same") CI_REQUIRED="$tmp/missing.txt"
 : "$feat_head"
 
-# --- lab (koinon-private#610) -----------------------------------------------------------------------------------
+# --- lab (old issue 610) -----------------------------------------------------------------------------------
 cd "$tmp"
 head_sha=0123456789abcdef0123456789abcdef01234567
 expect_lab() { # expect_lab NAME WANT [env...]: runs `lab`
@@ -305,8 +305,8 @@ check_apply "flavors_publish keeps a false flavors" $'go=false\nflavors=false\nf
 # an unknown name passes through untouched
 check_apply "unknown outputs pass through" $'extra=true\nflavors_publish=true' true $'extra=true'
 
-# --- ci.yml wiring (koinon-private#594) --------------------------------------------------------------------------
-# `scripts` and `lint-shell` are skipped on a push to main whose heavy jobs are switched off (koinon-private#595):
+# --- ci.yml wiring (old issue 594) --------------------------------------------------------------------------
+# `scripts` and `lint-shell` are skipped on a push to main whose heavy jobs are switched off (old issue 595):
 # their job-level `if:` carries the condition. `quick-checks` never waits for `changes`, never skips,
 # and every step after its first check (buf lint) runs even when an earlier one failed.
 ci_yml=$(cd "$(dirname "$script")/.." && pwd)/.github/workflows/ci.yml

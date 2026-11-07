@@ -2,7 +2,7 @@
 
 package agentd
 
-// The warning before a run limit (issue koinon-private#183; ADR 0066 amendment 2026-10-28; ADR 0081).
+// The warning before a run limit (old issue 183; ADR 0066 amendment 2026-10-28; ADR 0081).
 //
 // A run ends at the first of its time limit, its model-request limit and its spend limit. Before
 // it does, agentd cancels the turn in progress (session/cancel) and sends the agent a wrap-up

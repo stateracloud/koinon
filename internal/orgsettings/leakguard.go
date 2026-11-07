@@ -23,8 +23,8 @@ import (
 	"github.com/stateracloud/koinon/internal/sinkclass"
 )
 
-// The org's leak-guard settings (ADR 0084 decisions 3 and 5, koinon-private#350): the match threshold and the
-// fetch-trusted host list. The guard (koinon-private#349) reads them through LeakGuardOf and Service.LeakGuard;
+// The org's leak-guard settings (ADR 0084 decisions 3 and 5, old issue 350): the match threshold and the
+// fetch-trusted host list. The guard (old issue 349) reads them through LeakGuardOf and Service.LeakGuard;
 // org admins change them through the Service, which audits every change.
 
 // InvalidError is a validation failure; ErrNotFound says the host is not on the list.
@@ -53,7 +53,7 @@ type LeakGuard struct {
 }
 
 // TrustsHost reports whether the URL rule exempts host. host is a URL's host name; case and a
-// trailing dot are ignored. This is the contract the guard (koinon-private#349) relies on (ADR 0084):
+// trailing dot are ignored. This is the contract the guard (old issue 349) relies on (ADR 0084):
 //   - an entry "docs.example.com" trusts exactly that host and nothing else, not its subdomains and
 //     not its parent;
 //   - an entry "*.example.com" trusts every subdomain of example.com at any depth (a.example.com,

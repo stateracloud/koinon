@@ -24,7 +24,7 @@ set -euo pipefail
 #
 # The e2e is needed for changes whose behaviour only a full install observes: startup, flags and
 # environment, chart objects including Jobs, the schema, cross-service flows, the harness, and the
-# e2e itself (koinon-private#281 changed branch naming in githubtools; koinon-private#284 a startup flag the chart's migrate Job
+# e2e itself (old issue 281 changed branch naming in githubtools; old issue 284 a startup flag the chart's migrate Job
 # lacked). Unit and package tests cannot see those.
 #
 # Go code is not listed by directory: BINARIES are the commands test/e2e/run.sh builds with ko and
@@ -62,7 +62,7 @@ FORCED=(
   '^hack/docs-e1\.sh$'      # run.sh runs the quickstart blocks through it
   '^hack/flavor-tag\.sh$'    # run.sh names the pulled flavor image with it
   '^hack/flavor-base\.sh$'   # run.sh sets the flavor's base image with it (FLAVOR_BASE, #200)
-  '^hack/versions\.env$'    # the kind, ko and helm versions e2e-kind.yml installs (koinon-private#565)
+  '^hack/versions\.env$'    # the kind, ko and helm versions e2e-kind.yml installs (old issue 565)
   '^hack/versions-env\.sh$' # the filter that loads them into the workflow's environment
   '^hack/e2e-toolchain/'    # the web toolchain image run.sh uses (Chromium for the browser suite)
   '^docs/site/src/content/docs/quickstart\.md$'

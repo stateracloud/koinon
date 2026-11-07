@@ -289,7 +289,7 @@ func HashKey(material string) string {
 type LimitUnit string
 
 // USD limits spend priced by the gateway's model cost catalog. It is the only unit a Limit
-// carries: Koinon budgets money, and the amount is an exact money.USD (issue koinon-private#245).
+// carries: Koinon budgets money, and the amount is an exact money.USD (old issue 245).
 const USD LimitUnit = "USD"
 
 // BudgetFractionDigits is how many fraction digits of a USD limit the gateway accepts: standalone

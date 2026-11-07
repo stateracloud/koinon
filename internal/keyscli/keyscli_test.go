@@ -462,7 +462,7 @@ var _ = Describe("koinon-api keys", func() {
 			Expect(out.String()).NotTo(ContainSubstring("not bound to the install"))
 		})
 
-		It("does not open a KEK Secret of another install, and says so (koinon-private#615)", func(ctx SpecContext) {
+		It("does not open a KEK Secret of another install, and says so (old issue 615)", func(ctx SpecContext) {
 			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
 			install, err := installid.Read(ctx, pool)
 			Expect(err).NotTo(HaveOccurred())
@@ -478,7 +478,7 @@ var _ = Describe("koinon-api keys", func() {
 			Expect(out.String()).To(BeEmpty())
 		})
 
-		It("names a KEK wrapped before the binding as unbound, and still opens it (koinon-private#615)", func(ctx SpecContext) {
+		It("names a KEK wrapped before the binding as unbound, and still opens it (old issue 615)", func(ctx SpecContext) {
 			legacy, err := kms.Wrap(ctx, newKey(), secretstoretest.LegacyKEKAAD("kek-20261001-old1"))
 			Expect(err).NotTo(HaveOccurred())
 			v, err := secretstore.StoredKEK{Backend: kms.Backend(), KeyID: kms.KeyID(), Wrapped: legacy}.Encode()
@@ -500,7 +500,7 @@ var _ = Describe("koinon-api keys", func() {
 			))
 		})
 
-		It("shows the bound-only marker, and once it is set refuses a KEK stored unbound (koinon-private#615)", func(ctx SpecContext) {
+		It("shows the bound-only marker, and once it is set refuses a KEK stored unbound (old issue 615)", func(ctx SpecContext) {
 			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
 			// Its own database: the suite's pool must stay without the marker for the other specs.
 			marked := pgtest.Start(ctx)
@@ -587,7 +587,7 @@ var _ = Describe("koinon-api keys", func() {
 		})
 	})
 
-	Describe("KEK fingerprints (koinon-private#591)", func() {
+	Describe("KEK fingerprints (old issue 591)", func() {
 		type row struct {
 			fp, backend string
 			activated   bool

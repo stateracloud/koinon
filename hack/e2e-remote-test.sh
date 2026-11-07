@@ -185,7 +185,7 @@ check "e2e-status exits 1 when the post fails" test "$rc" -eq 1
 df="$repo/hack/e2e-toolchain/Dockerfile"
 check "toolchain image and workflows match hack/versions.env" "$repo/hack/versions-check.sh"
 check "Go matches go.mod" test "$(sed -n 's/^ARG GO_VERSION=//p' "$df")" = "$(awk '/^go /{print $2; exit}' "$repo/go.mod")"
-# The web variant (koinon-private#358) pins what the web suite uses: a mismatch makes the run download a browser.
+# The web variant (old issue 358) pins what the web suite uses: a mismatch makes the run download a browser.
 wdf="$repo/hack/e2e-toolchain/web.Dockerfile" pkg="$repo/web/package.json"
 check "web image: Node major matches CI's setup-node" \
   test "$(sed -n 's/^ARG NODE_VERSION=\([0-9]*\)\..*/\1/p' "$wdf")" = "$(sed -n 's/^ *node-version: *//p' "$repo/.github/workflows/ci.yml" | sort -u)"

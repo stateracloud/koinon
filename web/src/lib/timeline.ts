@@ -69,7 +69,7 @@ function approvalTarget(p: JsonObject): string {
 }
 
 /**
- * approvalText describes an approval task event (koinon-private#34). The GitHub tools
+ * approvalText describes an approval task event (old issue 34). The GitHub tools
  * server writes approval.requested ({decision, risk}); package approvals
  * writes the decision ({note}) and the outcome (executed {result: {url}},
  * failed {error}, expired, canceled {reason}). Every payload carries
@@ -135,7 +135,7 @@ function taskItem(ev: TaskEvent): TimelineItem {
     case 'run.queued':
       return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} queued`, runId }
     case 'run.parked': {
-      // agentd parks a run whose turn ended with approvals outstanding (koinon-private#34):
+      // agentd parks a run whose turn ended with approvals outstanding (old issue 34):
       // {reason: "approval", approvals: [ids]}.
       const n = Array.isArray(p.approvals) ? p.approvals.length : 0
       return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} paused for ${n === 1 ? '1 approval' : `${n} approvals`}`, runId }
@@ -285,7 +285,7 @@ function runItem(ev: RunEvent, retentionDays?: number): TimelineItem | undefined
     }
     case 'run.waiting_for_model': {
       // agentd waits before it starts the harness until the gateway serves the run's model: a new
-      // provider's key is still reaching the gateway (koinon-private#174). {model, provider, reason}.
+      // provider's key is still reaching the gateway (old issue 174). {model, provider, reason}.
       const provider = str(p.provider)
       const model = str(p.model)
       const what = provider ? `the model provider ${provider}` : 'the model provider'
@@ -293,7 +293,7 @@ function runItem(ev: RunEvent, retentionDays?: number): TimelineItem | undefined
     }
     case 'run.mcp_server_missing': {
       // agentd found an MCP server the agent may use not serving tools before it started the harness
-      // (koinon-private#326). {attempt, servers: [{name, reason}], reason}: the first miss is retried, the second
+      // (old issue 326). {attempt, servers: [{name, reason}], reason}: the first miss is retried, the second
       // fails the run.
       const names = arr(p.servers)
         .map((s) => str(obj(s)?.name))

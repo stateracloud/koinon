@@ -392,14 +392,14 @@ var _ = Describe("the quickstart", Ordered, func() {
 			g.Expect(err).NotTo(HaveOccurred())
 			cost = got.GetRun().GetCost()
 			// The refused title request (no tokens) can reach the ledger before the streamed ones:
-			// wait until the streamed usage is in too, not only the first entry (koinon-private#291).
+			// wait until the streamed usage is in too, not only the first entry (old issue 291).
 			g.Expect(ledger.Settled(totalsOf(cost))).To(BeTrue(), "the ledger has the streamed usage: %v", cost)
 		}, 60*time.Second, time.Second).Should(Succeed())
 		// The streamed requests carry usage through the gateway, so none is an estimate. The title
 		// request the fake model refuses (a 400 without usage) is the provider's refusal, and the
 		// quickstart's provider type, openai, does not bill one: the ledger keeps its entry with no
 		// tokens and no cost and marks the charge waived; it is not an estimate either (ADR 0056,
-		// amendment 2026-10-29, point 3; koinon-private#241).
+		// amendment 2026-10-29, point 3; old issue 241).
 		Expect(ledger.CheckTotals(totalsOf(cost))).To(Succeed())
 
 		By("the refused title request is in the ledger, with the provider's status, and charged nothing")
@@ -756,7 +756,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			"the quickstart took %s from helm install, more than the plan's %s", total.Round(time.Second), quickstartBudget)
 	})
 
-	It("8. (not part of the quickstart, after its time check) explicit thinking on and off crosses the real gateway to the strict fake model (rc.7, koinon-private#240, koinon-private#316)", func(ctx SpecContext) {
+	It("8. (not part of the quickstart, after its time check) explicit thinking on and off crosses the real gateway to the strict fake model (rc.7, old issue 240, old issue 316)", func(ctx SpecContext) {
 		t.begin()
 		// The fake model server runs with -strict-messages (test/e2e/kind/fakes.yaml): it answers 400
 		// to a body field whose beta is missing or a thinking type the model does not take, as
@@ -837,9 +837,9 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}
 		t.end("8. Adaptive thinking on and off: strict fake behind the real gateway")
 	})
-	// Not part of the quickstart (koinon-private#262). An agent holds its gateway key and is untrusted, so it can put
+	// Not part of the quickstart (old issue 262). An agent holds its gateway key and is untrusted, so it can put
 	// the key in a header of its own or in the URL; the upstream is a third party that logs both.
-	It("8. the gateway sends the model upstream only the headers a format needs, and refuses an agent key in a header or the URL (koinon-private#262)", func(ctx SpecContext) {
+	It("8. the gateway sends the model upstream only the headers a format needs, and refuses an agent key in a header or the URL (old issue 262)", func(ctx SpecContext) {
 		t.begin()
 		// Step 8 priced claude-haiku-5-5 and the reconciler serves it. The request is what a sandbox
 		// would send, from here through the gateway's Service with the agent's own key.

@@ -15,7 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/thinking"
 )
 
-// ADR 0069 amendments 2026-10-29 (koinon-private#240) and 2026-10-31 (koinon-private#316): Koinon decides what a request says
+// ADR 0069 amendments 2026-10-29 (old issue 240) and 2026-10-31 (old issue 316): Koinon decides what a request says
 // about thinking, and neither OpenCode's model-ID regex nor a provider default does. OpenCode 2.2.0
 // adds adaptive thinking with block_binding for every ID that parses as Claude 5.1 or later (rc.7
 // sent that to Anthropic without its beta and every turn failed), and direct Anthropic hides Claude

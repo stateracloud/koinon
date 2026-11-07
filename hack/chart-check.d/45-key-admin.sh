@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # shellcheck shell=bash disable=SC2154
-# Chart assertions: wrapping the KEKs with a KMS and the key-admin Job (ADR 0085 decision 12, koinon-private#416).
+# Chart assertions: wrapping the KEKs with a KMS and the key-admin Job (ADR 0085 decision 12, old issue 416).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
 kms=(--set secrets.kek.kms.backend=openbao --set secrets.kek.kms.openbao.address=https://bao.example:8200
@@ -21,9 +21,9 @@ has "key-admin Job signs in as its role" 'value: "koinon-key-admin"' "${ka[@]}" 
 has "key-admin Job creates the KEK Secret" '^            - --kek-create$' "${ka[@]}" "${kms[@]}"
 has "key-admin Job reads the database (the install ID, the re-create guard)" 'name: DATABASE_URL' "${ka[@]}" "${kms[@]}"
 lacks "key-admin Job adds no KEK unless asked" 'add-key' "${ka[@]}" "${kms[@]}"
-# Binding the KEKs wrapped before koinon-private#615 is opt-in: a binary older than koinon-private#615 cannot read a bound KEK.
-lacks "key-admin Job binds no old KEK unless asked (koinon-private#615)" 'rewrap-unbound' "${ka[@]}" "${kms[@]}"
-has "key-admin Job binds the old KEKs when asked (koinon-private#615)" '^            - --rewrap-unbound$' "${ka[@]}" "${kms[@]}" \
+# Binding the KEKs wrapped before old issue 615 is opt-in: a binary older than old issue 615 cannot read a bound KEK.
+lacks "key-admin Job binds no old KEK unless asked (old issue 615)" 'rewrap-unbound' "${ka[@]}" "${kms[@]}"
+has "key-admin Job binds the old KEKs when asked (old issue 615)" '^            - --rewrap-unbound$' "${ka[@]}" "${kms[@]}" \
 	--set secrets.kek.kms.keyAdmin.rewrapUnbound=true
 has "key-admin Job adds the asked-for KEK" '"--add-key=kek-20261103-aaaa"' "${ka[@]}" "${kms[@]}" \
 	--set secrets.kek.kms.keyAdmin.addKey=kek-20261103-aaaa
@@ -75,11 +75,11 @@ if grep -Fq 'value: "koinon-key-admin"' <<<"$deploy"; then fail "no Deployment s
 env_is KOINON_OPENBAO_ROLE '"bao-api"' "${kms[@]}" --set secrets.kek.kms.openbao.roles.api=bao-api
 
 # The operator's own KEK Secret is never created: no --kek-create, no create right. The Job still
-# reads the database: every KEK it adds is bound to the install ID there (koinon-private#615).
+# reads the database: every KEK it adds is bound to the install ID there (old issue 615).
 ka_out=$(render "${ka[@]}" "${kms[@]}" --set secrets.kek.existingSecret=my-kek)
 if grep -q -- '--kek-create' <<<"$ka_out"; then fail "no --kek-create with secrets.kek.existingSecret"; fi
 if grep -Fq -- 'verbs: [create]' <<<"$ka_out"; then fail "no create right with secrets.kek.existingSecret"; fi
-grep -q 'name: DATABASE_URL' <<<"$ka_out" || fail "the Job reads the install ID with secrets.kek.existingSecret too (koinon-private#615)"
+grep -q 'name: DATABASE_URL' <<<"$ka_out" || fail "the Job reads the install ID with secrets.kek.existingSecret too (old issue 615)"
 grep -Fq -- '"--kek-secret=my-kek"' <<<"$ka_out" || fail "the Job adds to secrets.kek.existingSecret"
 
 # The OpenBao CA, when named, is mounted wherever the KMS is called.

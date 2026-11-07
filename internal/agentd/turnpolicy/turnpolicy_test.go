@@ -14,7 +14,7 @@ import (
 
 // These specs drive the Controller with events and times. They need no database, no clock and no
 // goroutines: each rule that the fixes to the turn policy added is one spec (the commits are named
-// in issue koinon-private#449).
+// in old issue 449).
 
 var t0 = time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 

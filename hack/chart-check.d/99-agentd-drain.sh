@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # shellcheck shell=bash disable=SC2154
-# Chart assertions: koinon-agentd drains on SIGTERM (ADR 0085, koinon-private#403).
+# Chart assertions: koinon-agentd drains on SIGTERM (ADR 0085, old issue 403).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
 # The drain deadline reaches agentd, and the pod's grace period outlasts it by 30 s: otherwise the
