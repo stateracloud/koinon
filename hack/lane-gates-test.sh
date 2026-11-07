@@ -137,6 +137,33 @@ expect "ci job go maps to gate go" 0 '^gate=go rc=0 .*verdict=pass' '^gate=tidy 
 run STUB_GATES="go" STUB_JOBS="go"
 [[ $(grep -c '^gate=go ' <<<"$out") -eq 1 ]] || { echo "FAIL: go gate must run once"; fails=$((fails + 1)); }
 
+# Real failure plus a Docker skip message in the same log: still a failure.
+cat >"$tmp/make-mixed" <<'EOF2'
+#!/usr/bin/env bash
+echo "SKIP: docker is not available (testenv)"
+echo "--- FAIL: TestReal (0.1s)"
+exit 1
+EOF2
+chmod +x "$tmp/make-mixed"
+out=$(env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-mixed" STUB_GATES="" STUB_JOBS="escape" bash "$script" HEAD 2>&1); rc=$?
+expect "failure beats docker text" 1 '^gate=escape rc=1 .*verdict=fail'
+
+# ci-changes failing: the command fails loudly, never passes.
+cat >"$tmp/changes-bad" <<'EOF2'
+#!/usr/bin/env bash
+echo "fatal: no merge base" >&2
+exit 128
+EOF2
+chmod +x "$tmp/changes-bad"
+out=$(env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes-bad" LANE_GATES_MAKE="$tmp/make" STUB_GATES="go" bash "$script" HEAD 2>&1); rc=$?
+expect "ci-changes fails" 1 'ci-changes.*failed|changes-bad failed' 'no merge base'
+
+# A missing tool for a heavy job is notrun with the tool named.
+run LANE_GATES_MISSING_TOOLS="helm" STUB_GATES="" STUB_JOBS="escape"
+expect "helm missing" 3 '^gate=escape .*verdict=notrun reason="helm not installed"'
+run LANE_GATES_MISSING_TOOLS="go" PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="chartsmoke"
+expect "go missing" 3 '^gate=chartsmoke .*verdict=notrun reason="go not installed"'
+
 # Usage errors.
 out=$(bash "$script" --nope 2>&1); rc=$?
 expect "unknown flag" 2 'unknown argument'

@@ -20,7 +20,7 @@
 # verified), 0 when every selected gate passed, 2 on a usage error.
 #
 # Test hooks (hack/lane-gates-test.sh): LANE_GATES_PREFLIGHT, LANE_GATES_CHANGES, LANE_GATES_MAKE
-# replace hack/preflight.sh, hack/ci-changes.sh and make.
+# replace hack/preflight.sh, hack/ci-changes.sh and make; LANE_GATES_MISSING_TOOLS="helm go" hides tools.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -45,20 +45,34 @@ export KUBECONFIG=/dev/null
 logdir=$(mktemp -d "${TMPDIR:-/tmp}/lane-gates.XXXXXX") || exit 2
 failed=0 notrun=0
 
-# Output that says the machine, not the change, was the problem.
-env_problem() { # <log>: prints the reason when the log shows one
+# A real failure marker in a log: a gate with one of these failed, whatever else the log says
+# (go-test.sh logs "docker is not available" skips right next to real failures).
+has_failure() { # <log>
+	grep -qE -- '--- FAIL|\[FAIL\]|^FAIL|Summarizing [0-9]+ Failure|verdict: FAILED' "$1"
+}
+
+# Output that says the machine, not the change, was the problem. Failure markers win. Pass
+# <ignore-failures> as the second argument when the exit code already says "missing requirement".
+env_problem() { # <log> [<ignore-failures>]: prints the reason when the log shows one
 	local log=$1
-	if grep -qiE 'cannot connect to the docker daemon|docker: command not found|docker\.sock.*(permission denied|no such file)|is the docker daemon running' "$log"; then
+	if [[ -z ${2:-} ]] && has_failure "$log"; then
+		return
+	fi
+	if grep -qiE 'cannot connect to the docker daemon|docker: command not found|docker\.sock.*(permission denied|no such file)|is the docker daemon running|docker is not available' "$log"; then
 		echo "docker unavailable"
 	elif grep -qE 'deny\([0-9]+\)|Sandbox: .* deny' "$log"; then
 		echo "sandbox denial"
-	elif grep -qiE 'operation not permitted' "$log" && ! grep -qE -- '--- FAIL|\[FAIL\]|^FAIL[[:space:]]|Summarizing [0-9]+ Failure|verdict: FAILED' "$log"; then
-		# A bare EPERM with no failed test in the log is the machine; a failing spec that
-		# mentions EPERM (or the word "sandbox") is a real failure. Never match the bare word.
+	elif grep -qiE 'operation not permitted' "$log"; then
 		echo "sandbox denial"
 	elif grep -qE 'INCOMPLETE \(missing' "$log"; then
 		sed -n 's/.*INCOMPLETE (missing \([^)]*\)).*/missing \1/p' "$log" | tail -1
 	fi
+}
+
+# have_tool <tool>: docker means a reachable daemon. LANE_GATES_MISSING_TOOLS (test hook) hides tools.
+have_tool() {
+	case " ${LANE_GATES_MISSING_TOOLS:-} " in *" $1 "*) return 1 ;; esac
+	if [[ $1 == docker ]]; then docker info >/dev/null 2>&1; else command -v "$1" >/dev/null 2>&1; fi
 }
 
 report() { # <gate> <rc> <seconds> <verdict> <reason> <log>
@@ -68,15 +82,21 @@ report() { # <gate> <rc> <seconds> <verdict> <reason> <log>
 	case $4 in fail) failed=1 ;; notrun) notrun=1 ;; esac
 }
 
-# run_cmd <gate> <needs> <command...>: <needs> is "docker" or "-". Runs the command, classifies it.
+# run_cmd <gate> <needs> <command...>: <needs> is a space-separated tool list (docker helm go) or "-".
+# A missing tool is notrun with its name; otherwise runs the command and classifies it.
 run_cmd() {
 	local g=$1 needs=$2 log start rc reason
 	shift 2
 	log=$logdir/$g.log
-	if [[ $needs == docker ]] && ! docker info >/dev/null 2>&1; then
-		report "$g" 0 0 notrun "docker unavailable" "$log"
-		return
-	fi
+	local t
+	for t in $needs; do
+		[[ $t == - ]] && continue
+		if ! have_tool "$t"; then
+			if [[ $t == docker ]]; then reason="docker unavailable"; else reason="$t not installed"; fi
+			report "$g" 0 0 notrun "$reason" "$log"
+			return
+		fi
+	done
 	start=$SECONDS
 	"$@" >"$log" 2>&1
 	rc=$?
@@ -96,7 +116,14 @@ run_cmd() {
 #    (ci-changes is wider than the preflight selection: go runs for a migration or pricing change).
 #    One preflight call per gate, so each has a time and a verdict of its own. A
 #    "skip (... not installed)" line is a gate that did not run.
-jobs=$("$changes" "$base" 2>/dev/null | sed -n 's/^\(.*\)=true$/\1/p')
+changes_out=$("$changes" "$base" 2>"$logdir/ci-changes.err")
+changes_rc=$?
+if [[ $changes_rc -ne 0 ]]; then
+	echo "lane-gates FAIL: $changes failed (exit $changes_rc), so the heavy gates cannot be chosen; nothing was verified" >&2
+	sed 's/^/  | /' "$logdir/ci-changes.err" | head -5 >&2
+	exit 1
+fi
+jobs=$(sed -n 's/^\(.*\)=true$/\1/p' <<<"$changes_out")
 jobgates=""
 for j in $jobs; do
 	case $j in go | web | generate | chart | docs) jobgates="$jobgates $j" ;; esac
@@ -115,7 +142,9 @@ for g in $gates; do
 	[[ -n $inner && -r $inner ]] && log=$inner
 	case $rc in
 	0) if [[ -n $reason ]]; then report "$g" 0 "$secs" notrun "$reason" "$log"; else report "$g" 0 "$secs" pass "" "$log"; fi ;;
-	3) report "$g" 3 "$secs" notrun "$(env_problem "$log")" "$log" ;;
+	3) # exit 3 is the missing-requirement code of go-test.sh and preflight: notrun by exit code
+		reason=$(env_problem "$log" ignore)
+		report "$g" 3 "$secs" notrun "${reason:-missing requirement}" "$log" ;;
 	*)
 		reason=$(env_problem "$log")
 		if [[ -n $reason ]]; then report "$g" "$rc" "$secs" notrun "$reason" "$log"; else report "$g" "$rc" "$secs" fail "" "$log"; fi
@@ -126,9 +155,9 @@ done
 # 2. The heavy CI jobs the preflight does not run, picked by ci-changes.sh.
 for j in $jobs; do
 	case $j in
-	chartsmoke) run_cmd chartsmoke docker "$make_cmd" test-chart-smoke ;;
+	chartsmoke) run_cmd chartsmoke "docker helm go" "$make_cmd" test-chart-smoke ;;
 	flavors) run_cmd flavors docker "$make_cmd" test-flavors ;;
-	escape) run_cmd escape - "$make_cmd" test-admission ;;
+	escape) run_cmd escape helm "$make_cmd" test-admission ;;
 	esac
 done
 
