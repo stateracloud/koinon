@@ -1339,7 +1339,7 @@ cmd_sweep() {
 # release-pr P: release the held claims of the issues pull request P closes, but only claims that
 # point at P (or that point at nothing while no other open pull request closes the issue).
 cmd_release_pr() {
-  local p=${1:-} body merged n rc others
+  local p=${1:-} body merged n rc others failed=0
   [[ $p =~ ^[0-9]+$ ]] || die "usage: release-pr <PR>"
   body=$(gh pr view "$p" -R "$REPO" --json body --jq '.body // ""')
   merged=0
@@ -1356,8 +1356,10 @@ cmd_release_pr() {
     else
       echo "#$n: claimed for pull request #$(jq -r .pr <<<"$C"), not #$p; keeping the claim"; continue
     fi
-    do_release_claim "$C" "pull request #$p closed" "$merged" pr-close || true
+    # A subshell: a failed write (write_failed dies under Actions) must not skip the other issues' claims.
+    ( do_release_claim "$C" "pull request #$p closed" "$merged" pr-close ) || failed=$((failed + 1))
   done
+  ((failed == 0)) || { echo "claim: $failed claim(s) failed to release" >&2; return 1; }
 }
 
 # pr_meta P -> {author, body} of pull request P (REST: the check runs on GITHUB_TOKEN).

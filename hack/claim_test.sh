@@ -896,6 +896,21 @@ if ((sweep_rc != 0)); then ok "sweep exits non-zero when a claim write dies"; el
 eq "sweep still tries every claim after a failure" "$(grep -c tried "$LOG")" 2
 rm -f "$LOG"
 
+# release-pr over a pull request that closes two issues: a write that dies in the first claim's release
+# (Actions) must not skip the second, and the job ends red.
+LOG=$(mktemp "${TMPDIR:-/tmp}/claim_relpr.XXXXXX")
+rp_rc=0
+(
+  GITHUB_ACTIONS=true; REPO=acme/koinon
+  gh() { case $* in *mergedAt*) echo "2026-11-07T10:00:00Z" ;; *--json\ body*) printf 'Closes #7\nFixes #8' ;; esac; }
+  load_claim() { C=$(jq -nc --argjson n "$1" '{issue:$n,state:"held",pr:"50"}'); }
+  do_release_claim() { echo "released $(jq -r .issue <<<"$1")" >>"$LOG"; unassign() { :; }; write_failed "cannot unassign alice from #$(jq -r .issue <<<"$1")"; }
+  cmd_release_pr 50
+) >/dev/null 2>&1 || rp_rc=$?
+if ((rp_rc != 0)); then ok "release-pr exits non-zero when a claim write dies"; else bad "release-pr exited 0 after a write died"; fi
+eq "release-pr still releases every closing issue after a failure" "$(grep -c released "$LOG")" 2
+rm -f "$LOG"
+
 if [[ -z ${KOINON_CLAIM_TEST_REPO:-} ]]; then
   echo "(set KOINON_CLAIM_TEST_REPO=owner/scratch-repo to run the live tests)"
   exit "$fail"
