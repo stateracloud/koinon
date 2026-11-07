@@ -312,7 +312,7 @@ module; the re-ask (3.2) last. The `flavors` CI job becomes required (procoduck,
 
 ## Links
 
-- Issue #122; related #48, #119, #121; old issue 53, #84, #183, #243, #260, #261, #341
+- Issue #122; related #48, #119, #121; old issues 53, 84, 183, 243, 260, 261 and 341
 - OpenCode PRs #59437 (`experimental.idle`), #59649, #60315, #60647, #60660, #60687 (`bash` runs as
   `shell`), #60692
 - [flavors/opencode/README.md](../../flavors/opencode/README.md) ("Model retries", "Plugins")
