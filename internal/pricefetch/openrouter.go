@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -34,13 +35,17 @@ const openRouterHost = "openrouter.ai"
 const OpenRouterMinModels = 50
 
 // TierBoundaryOffset converts OpenRouter's pricing.overrides[].min_prompt_tokens to Koinon's
-// context_over. Koinon bills a tier when the input side is greater than context_over (pricing.Price.Effective).
-// OpenRouter documents min_prompt_tokens as the smallest prompt size at which an override applies,
-// which reads "at least", but ADR 0098 open question 1 records that no test against a live
-// response has confirmed it. With "at least", a prompt of exactly min_prompt_tokens is in the
-// tier, so context_over is min_prompt_tokens - 1. If the boundary turns out to be "more than",
-// change this one constant to 0 and the test that pins it; nothing else depends on the choice.
-const TierBoundaryOffset = -1
+// context_over. Koinon bills a tier when the input side is greater than context_over
+// (pricing.Price.Effective). OpenRouter's own SDK, npm package @openrouter/sdk 1.5.64, file
+// esm/models/pricingoverride.d.ts (generated from OpenRouter's OpenAPI schema), documents
+// PricingOverride.min_prompt_tokens as "Condition: the entry applies when the total prompt tokens
+// of a request are strictly greater than this threshold". Both read "greater than", so
+// context_over is min_prompt_tokens itself (ADR 0098 open question 1, resolved 2026-11-07). The
+// same type documents how entries combine, which mergeTiers follows: "An entry applies only when
+// all of its condition fields (e.g. min_prompt_tokens, or the utc_start/utc_end time window) match
+// the request; among applicable entries, later entries win per price key; price keys absent from
+// an entry inherit the base price."
+const TierBoundaryOffset = 0
 
 // OpenRouter is the adapter for OpenRouter's model list. Build it with NewOpenRouter.
 type OpenRouter struct {
@@ -204,7 +209,8 @@ func perMillion(s string) (string, error) {
 // Per-token prices of the buckets Koinon bills: prompt (input), completion (output),
 // input_cache_read, input_cache_write (the 5-minute write), internal_reasoning. A reasoning price
 // is a rate only when it is positive and differs from the output price (ADR 0098 decision 8): "0"
-// means no separate charge, as it does for most models. A negative price (OpenRouter's -1 for a
+// means no separate charge, as it does for most models; rateSet returns it raw and
+// separateReasoning applies that rule. A negative price (OpenRouter's -1 for a
 // router model) or an unreadable one is a problem. Fields not billed by Koinon go to ignored.
 func rateSet(raw map[string]json.RawMessage, ignored map[string]string, prefix string) (w pricing.Wire, problems []string) {
 	str := func(key string) (string, bool) {
@@ -237,9 +243,9 @@ func rateSet(raw map[string]json.RawMessage, ignored map[string]string, prefix s
 	}
 	w.Input, w.Output = conv("prompt"), conv("completion")
 	w.CacheRead, w.CacheWrite = conv("input_cache_read"), conv("input_cache_write")
-	if r := conv("internal_reasoning"); r != "" && r != "0" && r != w.Output {
-		w.Reasoning = r
-	}
+	// The raw reasoning price; the caller applies separateReasoning once the output rate it is
+	// compared with is known (a tier's may be inherited from the base price).
+	w.Reasoning = conv("internal_reasoning")
 	// Kept for the provenance only (decision 8): everything that is a price but not one of the five
 	// buckets, such as the 1-hour cache write, per-request and per-image prices.
 	for k, v := range raw {
@@ -264,6 +270,7 @@ func normalizeOpenRouter(m orModel) Offer {
 		return o
 	}
 	w, probs := rateSet(m.Pricing, o.Ignored, "")
+	w.Reasoning = separateReasoning(w.Reasoning, w.Output)
 	o.Spec.Prices = w
 	o.Problems = append(o.Problems, probs...)
 	if w.Input == "" || w.Output == "" {
@@ -283,19 +290,15 @@ func normalizeOpenRouter(m orModel) Offer {
 			o.Problems = append(o.Problems, "pricing.overrides is not a list of objects")
 			return o
 		}
+		var applicable []sizeOverride
 		for i, ov := range ovs {
-			tier, ok, probs := overrideTier(ov, o.Ignored, i)
+			so, ok, probs := overrideTier(ov, o.Ignored, i)
 			o.Problems = append(o.Problems, probs...)
 			if ok {
-				o.Spec.Tiers = append(o.Spec.Tiers, tier)
+				applicable = append(applicable, so)
 			}
 		}
-		sort.Slice(o.Spec.Tiers, func(i, j int) bool { return o.Spec.Tiers[i].ContextOver < o.Spec.Tiers[j].ContextOver })
-		for i := 1; i < len(o.Spec.Tiers); i++ {
-			if o.Spec.Tiers[i].ContextOver == o.Spec.Tiers[i-1].ContextOver {
-				o.Problems = append(o.Problems, "two overrides start at the same prompt size")
-			}
-		}
+		o.Spec.Tiers = mergeTiers(o.Spec.Prices, applicable)
 	}
 	return o
 }
@@ -303,35 +306,43 @@ func normalizeOpenRouter(m orModel) Offer {
 // timeOfDayKeys mark an override as a time-of-day price, which Koinon cannot bill (decision 2.7).
 var timeOfDayKeys = []string{"utc_days", "utc_start", "utc_end"}
 
-// overrideTier converts one pricing.overrides entry to a tier. Only a prompt-size override
-// becomes a tier; time-of-day, batch, flex and priority overrides, and overrides with no prompt
-// size, are kept in the provenance and never imported.
-func overrideTier(ov map[string]json.RawMessage, ignored map[string]string, i int) (pricing.WireTier, bool, []string) {
+// sizeOverride is one pricing.overrides entry whose only condition is the prompt size, in list
+// order: its threshold and the raw rates it sets (rateSet, reasoning not yet resolved).
+type sizeOverride struct {
+	minPromptTokens int64
+	rates           pricing.Wire
+}
+
+// overrideTier reads one pricing.overrides entry. Only a prompt-size override can become a tier;
+// an entry with any time condition, a batch, flex or priority entry, and one with no prompt size
+// are kept in the provenance and never imported (decision 2.7): OpenRouter applies an entry only
+// when all of its conditions match, so a tier built from a time-windowed entry would bill that
+// price at every hour.
+func overrideTier(ov map[string]json.RawMessage, ignored map[string]string, i int) (sizeOverride, bool, []string) {
 	prefix := fmt.Sprintf("overrides[%d].", i)
 	for _, k := range timeOfDayKeys {
 		if _, ok := ov[k]; ok {
 			ignored[prefix+"skipped"] = "time-of-day override"
-			return pricing.WireTier{}, false, nil
+			return sizeOverride{}, false, nil
 		}
 	}
 	for _, k := range []string{"batch", "flex", "priority", "service_tier"} {
 		if _, ok := ov[k]; ok {
 			ignored[prefix+"skipped"] = k + " override"
-			return pricing.WireTier{}, false, nil
+			return sizeOverride{}, false, nil
 		}
 	}
 	rawMin, ok := ov["min_prompt_tokens"]
 	if !ok {
 		ignored[prefix+"skipped"] = "no min_prompt_tokens"
-		return pricing.WireTier{}, false, nil
+		return sizeOverride{}, false, nil
 	}
 	var minTokens int64
 	if err := json.Unmarshal(rawMin, &minTokens); err != nil || minTokens < 1 || minTokens > 1<<40 {
-		return pricing.WireTier{}, false, []string{prefix + "min_prompt_tokens is not a positive count"}
+		return sizeOverride{}, false, []string{prefix + "min_prompt_tokens is not a positive count"}
 	}
-	over := minTokens + TierBoundaryOffset
-	if over < 1 {
-		return pricing.WireTier{}, false, []string{prefix + "min_prompt_tokens leaves no tier boundary"}
+	if minTokens+TierBoundaryOffset < 1 {
+		return sizeOverride{}, false, []string{prefix + "min_prompt_tokens leaves no tier boundary"}
 	}
 	rates := map[string]json.RawMessage{}
 	for k, v := range ov {
@@ -342,7 +353,88 @@ func overrideTier(ov map[string]json.RawMessage, ignored map[string]string, i in
 	w, probs := rateSet(rates, ignored, prefix)
 	if w == (pricing.Wire{}) && len(probs) == 0 {
 		ignored[prefix+"skipped"] = "sets no billed rate"
-		return pricing.WireTier{}, false, nil
+		return sizeOverride{}, false, nil
 	}
-	return pricing.WireTier{ContextOver: over, Prices: w}, len(probs) == 0, probs
+	return sizeOverride{minPromptTokens: minTokens, rates: w}, len(probs) == 0, probs
+}
+
+// mergeTiers turns the prompt-size overrides into Koinon tiers with OpenRouter's rules: for a
+// request, every entry whose threshold the prompt exceeds applies, later entries in the list win
+// per price key, and a key no applicable entry sets keeps the base price. Koinon overlays its tiers
+// in ascending order (pricing.Price.Effective), so each tier carries the merged value of every key
+// any applicable entry sets: the result is the same whatever order the list has, and two entries
+// with one threshold merge instead of conflicting. A tier that prices exactly like the tier below
+// it is dropped.
+func mergeTiers(base pricing.Wire, ovs []sizeOverride) []pricing.WireTier {
+	thresholds := make([]int64, 0, len(ovs))
+	for _, ov := range ovs {
+		thresholds = append(thresholds, ov.minPromptTokens)
+	}
+	slices.Sort(thresholds)
+	thresholds = slices.Compact(thresholds)
+	var tiers []pricing.WireTier
+	prev := base
+	for _, t := range thresholds {
+		var w pricing.Wire
+		for _, ov := range ovs { // list order: a later entry overwrites an earlier one per key
+			if ov.minPromptTokens > t {
+				continue
+			}
+			for _, f := range []struct {
+				dst *string
+				src string
+			}{
+				{&w.Input, ov.rates.Input},
+				{&w.Output, ov.rates.Output},
+				{&w.CacheRead, ov.rates.CacheRead},
+				{&w.CacheWrite, ov.rates.CacheWrite},
+				{&w.Reasoning, ov.rates.Reasoning},
+			} {
+				if f.src != "" {
+					*f.dst = f.src
+				}
+			}
+		}
+		if w.Reasoning != "" {
+			out := w.Output
+			if out == "" {
+				out = base.Output
+			}
+			w.Reasoning = separateReasoning(w.Reasoning, out)
+			if w.Reasoning == "" && prev.Reasoning != "" {
+				// No separate charge in this tier, but the price below it has one: say so, or the
+				// tier would inherit that reasoning rate.
+				w.Reasoning = out
+			}
+		}
+		if w == (pricing.Wire{}) || effectiveWire(prev, w) == prev {
+			continue
+		}
+		tiers = append(tiers, pricing.WireTier{ContextOver: t + TierBoundaryOffset, Prices: w})
+		prev = effectiveWire(prev, w)
+	}
+	return tiers
+}
+
+// effectiveWire overlays the rates t sets on b, as pricing.Price.Effective does.
+func effectiveWire(b, t pricing.Wire) pricing.Wire {
+	pick := func(a, o string) string {
+		if o != "" {
+			return o
+		}
+		return a
+	}
+	return pricing.Wire{
+		Input: pick(b.Input, t.Input), Output: pick(b.Output, t.Output), CacheRead: pick(b.CacheRead, t.CacheRead),
+		CacheWrite: pick(b.CacheWrite, t.CacheWrite), Reasoning: pick(b.Reasoning, t.Reasoning),
+	}
+}
+
+// separateReasoning applies decision 8 to a raw reasoning price: it is a rate only when it is
+// positive and differs from the output rate it would otherwise bill at.
+func separateReasoning(raw, output string) string {
+	if raw == "" || raw == "0" || raw == output {
+		return ""
+	}
+	return raw
 }

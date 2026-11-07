@@ -8,10 +8,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stateracloud/koinon/pricing"
 )
 
 func TestPerMillion(t *testing.T) {
@@ -113,15 +116,15 @@ func TestParseOpenRouterNullMaxCompletionTokens(t *testing.T) {
 
 func TestParseOpenRouterTiers(t *testing.T) {
 	s := parse(t, `{"id":"fake/tiered","pricing":{"prompt":"0.000001","completion":"0.000002","overrides":[
-	  {"min_prompt_tokens":200001,"prompt":"0.000002","completion":"0.000003"},
+	  {"min_prompt_tokens":200000,"prompt":"0.000002","completion":"0.000003"},
 	  {"utc_days":[1],"utc_start":"00:00","utc_end":"06:00","prompt":"0.0000005"},
 	  {"batch":true,"prompt":"0.0000005"}]}}`)
 	o := offer(t, s, "fake/tiered")
 	if len(o.Spec.Tiers) != 1 {
 		t.Fatalf("only the prompt-size override is a tier: %+v (problems %v)", o.Spec.Tiers, o.Problems)
 	}
-	if got, want := o.Spec.Tiers[0].ContextOver, int64(200001+TierBoundaryOffset); got != want {
-		t.Errorf("context_over %d, want min_prompt_tokens%+d = %d", got, TierBoundaryOffset, want)
+	if got, want := o.Spec.Tiers[0].ContextOver, int64(200000); got != want {
+		t.Errorf("context_over %d, want min_prompt_tokens = %d", got, want)
 	}
 	if o.Spec.Tiers[0].Prices.Input != "2" || o.Spec.Tiers[0].Prices.Output != "3" {
 		t.Errorf("tier rates: %+v", o.Spec.Tiers[0].Prices)
@@ -131,11 +134,108 @@ func TestParseOpenRouterTiers(t *testing.T) {
 	}
 }
 
-// TestTierBoundaryOffset pins the open question of ADR 0098 (is min_prompt_tokens the first token
-// of the tier or the last of the one below?). Changing the constant must be a decision, not a drift.
+// TestTierBoundaryOffset pins ADR 0098 open question 1, resolved from OpenRouter's SDK
+// (@openrouter/sdk 1.5.64, esm/models/pricingoverride.d.ts): min_prompt_tokens applies when the
+// prompt is "strictly greater than this threshold", which is what context_over means. Changing the
+// constant changes every tiered price: it must be a decision, not a drift.
 func TestTierBoundaryOffset(t *testing.T) {
-	if TierBoundaryOffset != -1 {
-		t.Errorf("TierBoundaryOffset = %d; the tier reading is unverified (issue #265) and changing it changes every tiered price", TierBoundaryOffset)
+	if TierBoundaryOffset != 0 {
+		t.Errorf("TierBoundaryOffset = %d; OpenRouter documents min_prompt_tokens as strictly greater than, so context_over = min_prompt_tokens", TierBoundaryOffset)
+	}
+	s := parse(t, `{"id":"fake/tiered","pricing":{"prompt":"0.000001","completion":"0.000002","overrides":[{"min_prompt_tokens":200000,"prompt":"0.000002"}]}}`)
+	o := offer(t, s, "fake/tiered")
+	e, err := BuildEntry(Offer{Model: o.Model, ProviderType: o.ProviderType, Spec: o.Spec, MaxOutput: 1000}, nil, SourceOpenRouter, time.Unix(0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := e.Parse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in := *p.Effective(200000).Input; in.PerMillion() != "1" {
+		t.Errorf("a prompt of exactly min_prompt_tokens is not in the tier: input %s", in.PerMillion())
+	}
+	if in := *p.Effective(200001).Input; in.PerMillion() != "2" {
+		t.Errorf("a prompt one token above min_prompt_tokens is in the tier: input %s", in.PerMillion())
+	}
+}
+
+// TestParseOpenRouterOverrideRules covers the rules OpenRouter's PricingOverride documents: an entry
+// applies only when all of its conditions match (so one with a time condition is never a tier),
+// later applicable entries win per price key, and keys absent from an entry keep the base price.
+func TestParseOpenRouterOverrideRules(t *testing.T) {
+	base := `"prompt":"0.000001","completion":"0.000002"`
+	for _, c := range []struct {
+		name      string
+		overrides string
+		want      []pricing.WireTier
+	}{
+		{
+			"a time window with a prompt size is not a tier",
+			`{"min_prompt_tokens":1000,"utc_start":100,"utc_end":400,"prompt":"0.0000005"}`, nil,
+		},
+		{
+			"weekdays alone are a time condition",
+			`{"min_prompt_tokens":1000,"utc_days":["monday"],"prompt":"0.0000005"}`, nil,
+		},
+		{
+			"absent keys inherit the base price",
+			`{"min_prompt_tokens":1000,"prompt":"0.000003"}`,
+			[]pricing.WireTier{{ContextOver: 1000, Prices: pricing.Wire{Input: "3"}}},
+		},
+		{
+			"two entries at one threshold merge, the later wins per key",
+			`{"min_prompt_tokens":1000,"prompt":"0.000003","completion":"0.000004"},{"min_prompt_tokens":1000,"prompt":"0.000005"}`,
+			[]pricing.WireTier{{ContextOver: 1000, Prices: pricing.Wire{Input: "5", Output: "4"}}},
+		},
+		{
+			"a higher tier keeps a lower entry's key it does not set",
+			`{"min_prompt_tokens":1000,"prompt":"0.000003","completion":"0.000004"},{"min_prompt_tokens":2000,"prompt":"0.000005"}`,
+			[]pricing.WireTier{{ContextOver: 1000, Prices: pricing.Wire{Input: "3", Output: "4"}}, {ContextOver: 2000, Prices: pricing.Wire{Input: "5", Output: "4"}}},
+		},
+		{
+			"a later lower-threshold entry wins above a higher one too",
+			`{"min_prompt_tokens":2000,"prompt":"0.000005","completion":"0.000006"},{"min_prompt_tokens":1000,"prompt":"0.000003"}`,
+			[]pricing.WireTier{{ContextOver: 1000, Prices: pricing.Wire{Input: "3"}}, {ContextOver: 2000, Prices: pricing.Wire{Input: "3", Output: "6"}}},
+		},
+		{
+			"an entry that changes nothing above the tier below is no tier",
+			`{"min_prompt_tokens":2000,"prompt":"0.000005"},{"min_prompt_tokens":1000,"prompt":"0.000003"}`,
+			[]pricing.WireTier{{ContextOver: 1000, Prices: pricing.Wire{Input: "3"}}},
+		},
+	} {
+		s := parse(t, `{"id":"fake/model-a","pricing":{`+base+`,"overrides":[`+c.overrides+`]}}`)
+		o := offer(t, s, "fake/model-a")
+		if len(o.Problems) != 0 {
+			t.Errorf("%s: problems %v", c.name, o.Problems)
+		}
+		if !reflect.DeepEqual(o.Spec.Tiers, c.want) {
+			t.Errorf("%s: tiers %+v, want %+v", c.name, o.Spec.Tiers, c.want)
+		}
+		if o.Spec.Prices.Input != "1" || o.Spec.Prices.Output != "2" {
+			t.Errorf("%s: the base price is unchanged: %+v", c.name, o.Spec.Prices)
+		}
+	}
+}
+
+// A tier's reasoning price follows decision 8 against the tier's own output rate, inherited from
+// the base where the entry sets none, and a tier with no separate charge does not inherit one.
+func TestParseOpenRouterTierReasoning(t *testing.T) {
+	s := parse(t, `{"id":"fake/model-a","pricing":{"prompt":"0.000001","completion":"0.000002","internal_reasoning":"0.000003","overrides":[
+	  {"min_prompt_tokens":1000,"completion":"0.000004"},
+	  {"min_prompt_tokens":2000,"internal_reasoning":"0"}]}},
+	 {"id":"fake/model-b","pricing":{"prompt":"0.000001","completion":"0.000002","overrides":[
+	  {"min_prompt_tokens":1000,"internal_reasoning":"0.000002","prompt":"0.000003"}]}}`)
+	want := []pricing.WireTier{
+		{ContextOver: 1000, Prices: pricing.Wire{Output: "4"}},                 // reasoning 3 inherited from the base
+		{ContextOver: 2000, Prices: pricing.Wire{Output: "4", Reasoning: "4"}}, // "0": bills at output, not the base's 3
+	}
+	if got := offer(t, s, "fake/model-a").Spec.Tiers; !reflect.DeepEqual(got, want) {
+		t.Errorf("model-a tiers %+v, want %+v", got, want)
+	}
+	// Reasoning equal to the inherited base output is no separate rate.
+	if got := offer(t, s, "fake/model-b").Spec.Tiers; !reflect.DeepEqual(got, []pricing.WireTier{{ContextOver: 1000, Prices: pricing.Wire{Input: "3"}}}) {
+		t.Errorf("model-b tiers %+v", got)
 	}
 }
 
