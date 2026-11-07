@@ -73,6 +73,15 @@ with a new digest) and the chart tag is overwritten. Do not move a tag that was 
 Same steps with `vX.Y.Z` after the last rc was exercised (REL2). The final release also moves the
 `latest` image tag and is not marked as a prerelease.
 
+Checklist for the v0.1.0 gate (ADR 0085 decision 1 and implementation item 22, ADR 0099). Tick it on
+the tag commit, not before:
+
+- [ ] The restore drill passed on the home lab (ADR 0085 decision 15), with RTO and RPO recorded.
+- [ ] `hack/release-gate.sh` is green for the commit.
+- [ ] The `quickstart` job of the kind e2e succeeded on the tagged commit.
+- [ ] The release notes carry the pre-v0.3 notice (upgrade may need a reinstall or manual steps;
+      backups and the restore runbook are supported), from the template below.
+
 Checklist step for every `vX.Y.0` from v0.3.0 on (not for v0.1.0 or v0.2.0, ADR 0099): after the
 final tag is published, open a pull request that sets `hack/migrate-patch-line` to `vX.Y` (for
 v0.3.0: `v0.3`). Until it merges, main can still contract the schema that the shipped release runs
