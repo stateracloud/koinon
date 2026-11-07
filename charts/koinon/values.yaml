@@ -240,7 +240,19 @@ postgres:
   # external: connect to an existing Postgres 18+ through DSNs in a Secret.
   mode: cnpg
   cnpg:
+    # 1 is the default so a small install needs one node. CNPG's PodDisruptionBudget on a
+    # single-instance Cluster allows no eviction, so `kubectl drain` (a Talos, kubeadm or cloud node
+    # upgrade) stalls on the node that runs the primary. For production use instances >= 2 (the PDB
+    # then allows one eviction and the drain fails over), or set nodeMaintenanceWindow below for the
+    # drain. See the guide "Upgrading", section "Draining a node that runs the database".
     instances: 1
+    # Rendered as the Cluster's spec.nodeMaintenanceWindow when not empty. Off by default: it is a
+    # temporary switch for one drain, not a steady state. {inProgress: true, reusePVC: true} drops
+    # the PDB and lets the pod restart on another node with the same PVC (about 1-2 min of database
+    # downtime on a single instance; the API, agentd and reconciler log database errors meanwhile).
+    # Set it before the drain, remove it after. Leave reusePVC true on a single instance: false
+    # would delete the only copy of the data.
+    nodeMaintenanceWindow: {}
     # Pinned by digest (multi-arch index).
     imageName: ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie@sha256:f7e00138159bb45d70b624ba25e446924cb3ed1bf366d13e936c3f81b914064e
     database: koinon

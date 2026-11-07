@@ -184,6 +184,43 @@ migration 00020). Take the database backup first. An install older than rc.3 is 
 any upgrade path: Koinon ships no compatibility views for the tables that migration 00020 renamed,
 so re-install instead of upgrading.
 
+## Draining a node that runs the database
+
+This applies to `postgres.mode: cnpg` (the default). Node upgrades (Talos, kubeadm, a cloud node
+pool) drain each node in turn. CloudNativePG protects the Cluster with a PodDisruptionBudget, and for
+a single-instance Cluster (`postgres.cnpg.instances: 1`, the chart default) that budget allows no
+eviction. The drain of the node that runs `<name>-pg-1` then waits forever, and the node upgrade
+stalls. `external` mode is not affected by the chart; check your own database's disruption policy.
+
+Pick one:
+
+- **Run two or more instances for production.** Set `postgres.cnpg.instances: 2` (or 3). The budget then
+  allows one eviction at a time and CloudNativePG fails over to a replica. This is the recommended
+  setup: no maintenance switch, and about a failover's worth of interruption per drain. It costs a
+  second copy of the storage and the compute.
+- **Use a maintenance window on a single instance.** Set it before the drain and remove it after:
+
+  ```sh
+  helm upgrade <name> <chart> --reuse-values \
+    --set postgres.cnpg.nodeMaintenanceWindow.inProgress=true \
+    --set postgres.cnpg.nodeMaintenanceWindow.reusePVC=true
+  ```
+
+  The Cluster drops its budget, so the drain evicts the pod, and CloudNativePG recreates it on another
+  node with the same PersistentVolumeClaim. Plan for about 1 to 2 minutes without a database per
+  drain, and longer if the volume has to detach and re-attach. Keep `reusePVC: true` on a single
+  instance: `false` deletes the only copy of the data. Only a storage class that can attach the volume
+  on another node (network or replicated storage) can reuse it; node-local storage cannot.
+  Afterwards, set the value back to `{}`
+  (`--set postgres.cnpg.nodeMaintenanceWindow=null`) so the budget returns. If you manage the values
+  in Git, commit the window and its removal like any other change.
+
+During the window the API, the reconciler and agentd cannot reach the database. Their readiness
+probes fail and requests return errors; agentd cannot renew run leases, so a run in progress can be
+taken over by another worker once the database returns. Nothing is lost that was committed, and the
+components reconnect on their own. Do the drain when no run you care about is mid-turn, or scale
+agentd down first as in the minor upgrade steps above.
+
 ## Check afterwards
 
 ```sh
