@@ -382,6 +382,56 @@ var _ = Describe("home checkpoint resync", func() {
 		Expect(taken(ctx)).To(BeEquivalentTo(0))
 	})
 
+	It("re-checks every folder after the latest epoch under the lock, not the first only (#291)", func(ctx SpecContext) {
+		// The lost database started epochs 1 and 2 (r1/ and r2/ hold repositories).
+		for _, n := range []int32{1, 2} {
+			_, err := writer.Backup(ctx, prefix(n), fmt.Sprintf("koinon_test_foreign-%d", n), tarOf(map[string]string{"notes/v.md": "after the dump"}),
+				checkpoint.Meta{CheckpointID: "x"})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		request(ctx)
+		e.pool("agentd-a", cps(func(c *agentd.Checkpoints) {
+			c.Store = racingEpochs{HomeStore: writer, once: &sync.Once{}, before: func(ctx context.Context) {
+				// keys forget commits epoch 1 after the resync read the epochs; r2/ stays a foreign one.
+				newEpoch(ctx, 1, 7*24*time.Hour)
+			}}
+		}))
+
+		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		var floor pgtype.Int4
+		Expect(db.QueryRow(ctx, `SELECT next_epoch_at_least FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, agent).Scan(&floor)).To(Succeed())
+		Expect(floor).To(Equal(pgtype.Int4{Int32: 3, Valid: true}), "past r2/, which the first folder's re-check alone would have dropped")
+		Expect(audited(ctx, agentd.PrefixTakenAction)).To(ConsistOf(
+			And(ContainSubstring(`"repositoryEpoch": 2`), ContainSubstring(`"nextEpochAtLeast": 3`)),
+		))
+		Expect(taken(ctx)).To(BeEquivalentTo(1), "r2/ only: r1/ is the database's own")
+	})
+
+	It("lists the bucket before it takes the agent's repository row lock (#290)", func(ctx SpecContext) {
+		newEpoch(ctx, 1, 7*24*time.Hour)
+		_, err := writer.Backup(ctx, prefix(1), "koinon_test_foreign-1", tarOf(map[string]string{"notes/v.md": "after the dump"}),
+			checkpoint.Meta{CheckpointID: "x"})
+		Expect(err).NotTo(HaveOccurred())
+		var lockedDuringListing atomic.Bool
+		request(ctx)
+		e.pool("agentd-a", cps(func(c *agentd.Checkpoints) {
+			c.Store = racingEpochs{HomeStore: writer, once: &sync.Once{}, before: func(ctx context.Context) {
+				// A listing under the lock would find the row locked by this transaction's own pool
+				// connection; the probe is another one, so NOWAIT fails when the lock is held.
+				tx, err := db.Begin(ctx)
+				Expect(err).NotTo(HaveOccurred())
+				defer func() { _ = tx.Rollback(ctx) }()
+				if _, err := tx.Exec(ctx, `SELECT 1 FROM home_repositories WHERE org_id = $1 AND agent_id = $2 FOR UPDATE NOWAIT`, e.org, agent); err != nil {
+					lockedDuringListing.Store(true)
+				}
+			}}
+		}))
+
+		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Expect(lockedDuringListing.Load()).To(BeFalse(), "the bucket was listed while the row lock was held")
+		Expect(audited(ctx, agentd.PrefixTakenAction)).NotTo(BeEmpty())
+	})
+
 	It("leaves out a snapshot whose backup is still recording it or was given up, and keeps a copy as old as its source", func(ctx SpecContext) {
 		By("a running backup within its lease, and a request that is waiting to be tried again")
 		var running, failed pgtype.UUID

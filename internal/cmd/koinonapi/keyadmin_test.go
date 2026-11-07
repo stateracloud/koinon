@@ -3,9 +3,12 @@
 package koinonapi
 
 import (
+	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/cobra"
+
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
 var _ = Describe("the key-admin command", func() {
@@ -33,5 +36,20 @@ var _ = Describe("the key-admin command", func() {
 		f := cmd.Flags().Lookup("activate-if-no-active")
 		Expect(f).NotTo(BeNil())
 		Expect(f.DefValue).To(Equal("false"))
+	})
+
+	It("fails closed on a database that is not migrated, where a fresh install may carry on", func(ctx SpecContext) {
+		dsn := pgtest.Run(ctx) // empty: nothing migrated
+		pool, err := pgxpool.New(ctx, dsn)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(pool.Close)
+
+		found, err := anyEnvelopeYet(ctx, pool)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(found).To(BeFalse(), "a table that does not exist holds no values")
+
+		used, err := kekIDUsedYet(ctx, pool, "kek-20251201-eeee")
+		Expect(err).To(MatchError(ContainSubstring("rerun the recovery once the migrations have finished")))
+		Expect(used).To(BeFalse())
 	})
 })

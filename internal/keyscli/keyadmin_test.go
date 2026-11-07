@@ -192,9 +192,11 @@ var _ = Describe("the key-admin Job", func() {
 			}, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 		}
+		sealed := map[string]bool{} // KEK IDs that database envelopes still carry
 		recover := func(add string) keyscli.KeyAdmin {
 			a := job(true, add, none)
 			a.ActivateIfNoActive = true
+			a.UsedID = func(_ context.Context, id string) (bool, error) { return sealed[id], nil }
 			return a
 		}
 
@@ -250,6 +252,30 @@ var _ = Describe("the key-admin Job", func() {
 			Expect(sec.Data).To(HaveLen(2))
 			Expect(string(sec.Data[secretstore.ActiveFile])).To(Equal(lost))
 			Expect(sec.Data).NotTo(HaveKey(lost))
+			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")
+		})
+
+		It("refuses the ID of a removed KEK that database envelopes still carry, and changes nothing", func(ctx SpecContext) {
+			const removed = "kek-20251201-eeee"
+			seed(ctx, lost, survivor)
+			sealed[removed] = true
+			Expect(recover(removed).Run(ctx)).To(MatchError(ContainSubstring("seals values in the database")))
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, secret, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sec.Data).To(HaveLen(2))
+			Expect(string(sec.Data[secretstore.ActiveFile])).To(Equal(lost))
+			Expect(sec.Data).NotTo(HaveKey(removed))
+			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")
+			Expect(recover(fresh).Run(ctx)).To(Succeed(), "an unused ID still recovers")
+		})
+
+		It("stops when the usage check fails, and needs the check at all", func(ctx SpecContext) {
+			seed(ctx, lost, survivor)
+			a := recover(fresh)
+			a.UsedID = func(context.Context, string) (bool, error) { return false, errors.New("database down") }
+			Expect(a.Run(ctx)).To(MatchError(ContainSubstring("database down")))
+			a.UsedID = nil
+			Expect(a.Run(ctx)).To(MatchError(ContainSubstring("check that the new KEK ID is unused")))
 			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")
 		})
 

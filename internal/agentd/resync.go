@@ -228,7 +228,7 @@ func (p *Pool) listRepositories(ctx context.Context, r store.HomeCheckpointResyn
 		case checkpoint.TakenPrefix(err, repo.Prefix) && len(before) == 0:
 			// Another repository, started after the dump at a prefix this epoch reused (#262): none of
 			// the row's is there. Recorded, so the sweeper keeps those blobs and the next epoch skips it.
-			if _, err := p.recordTakenPrefix(ctx, r.OrgID, r.AgentID, e.RepositoryEpoch, true); err != nil {
+			if _, _, err := p.recordTakenPrefix(ctx, r.OrgID, r.AgentID, e.RepositoryEpoch, true, nil); err != nil {
 				return nil, 0, fmt.Errorf("repository epoch %d: %w", e.RepositoryEpoch, err)
 			}
 			taken++
@@ -258,13 +258,13 @@ func (p *Pool) listRepositories(ctx context.Context, r store.HomeCheckpointResyn
 			}
 		}
 		if len(after) > 0 {
-			free, err := p.recordTakenPrefix(ctx, r.OrgID, r.AgentID, after[0], false)
+			// Re-checked under the lock against every folder, not the first only: a keys command
+			// that started after[0] meanwhile leaves after[1:] taken.
+			_, recorded, err := p.recordTakenPrefix(ctx, r.OrgID, r.AgentID, after[0], false, after)
 			if err != nil {
 				return nil, 0, fmt.Errorf("repository epoch %d: %w", after[0], err)
 			}
-			if free > 0 { // 0: a keys command started that epoch meanwhile
-				taken += int32(len(after)) //nolint:gosec // a handful of folders
-			}
+			taken += recorded
 		}
 	}
 	return out, taken, nil
