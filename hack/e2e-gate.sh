@@ -42,8 +42,8 @@ echo "decide: $DECIDE, quickstart: $QUICKSTART, e2e required: ${REQUIRED:-false}
 case $DECIDE in success | skipped) ;; *) echo "::error::the e2e did not pass (decide: $DECIDE)"; exit 1 ;; esac
 case $QUICKSTART in
 success | skipped) ;;
-# This run's own quickstart failed or was cancelled (a flake, say). When the e2e is required, the
-# an external run stays an accelerator: fall through to the evidence checks (another run's quickstart, e2e-lab)
+# This run's own quickstart failed or was cancelled (a flake, say). When the e2e is required, an external
+# run stays an accelerator: fall through to the evidence checks (another run's quickstart, e2e-lab)
 # instead of failing here; with none, the gate still fails below.
 failure | cancelled) [[ $REQUIRED == true ]] || { echo "::error::the e2e did not pass (quickstart: $QUICKSTART)"; exit 1; } ;;
 *) echo "::error::the e2e did not pass (quickstart: $QUICKSTART)"; exit 1 ;;

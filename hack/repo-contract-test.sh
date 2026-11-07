@@ -27,8 +27,13 @@ for v in KOINON_RC_FILE REPORT_DIR PROCS; do
 	if grep -qE "\\$\{$v(:-|\})" hack/go-test.sh; then ok "hack/go-test.sh honours $v"; else bad "hack/go-test.sh no longer reads $v"; fi
 done
 
-# 3. KOINON_RC_FILE is written even when the run does nothing (--list is a run that must not).
-if [[ $(grep -c 'write_rc' hack/go-test.sh) -ge 2 ]]; then ok "hack/go-test.sh writes the status file"; else bad "hack/go-test.sh does not write KOINON_RC_FILE on exit"; fi
+# 3. KOINON_RC_FILE is written on exit even when the run does no work. --list cannot be used for this:
+# it exits before the EXIT trap is set, so it never writes the file. A package that does not exist makes
+# `go list` fail before any test starts, and that exit still goes through the trap.
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/rc.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+KOINON_RC_FILE=$tmp/rc bash hack/go-test.sh ./internal/contract-missing-package >/dev/null 2>&1 || true
+if [[ -s $tmp/rc && $(<"$tmp/rc") =~ ^[0-9]+$ ]]; then ok "hack/go-test.sh writes the status file on exit"; else bad "hack/go-test.sh does not write KOINON_RC_FILE on exit"; fi
 
 if [[ $fail -ne 0 ]]; then exit 1; fi
 echo "repo contract ok"
