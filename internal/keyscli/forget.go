@@ -88,8 +88,8 @@ type ForgetResult struct {
 // old repositories are deleted after the org's home backup retention.
 //
 // Each org changes in one transaction, audited there as [ForgetAction] with the cli actor; the
-// platform's trace destination, which belongs to no org, is audited in each platform admin's
-// personal org. A KEK still in the key set is not lost: Forget refuses it (rewrap, then retire it),
+// platform's trace destination, which belongs to no org, is one event in the install audit log
+// (actor `cli keys forget`, ADR 0100 decision 3). A KEK still in the key set is not lost: Forget refuses it (rewrap, then retire it),
 // also when it is restored while the confirmation is open. Without a terminal it needs --yes.
 // Running Forget again finds nothing left to do.
 func (t *Tool) Forget(ctx context.Context, id string) error {
@@ -364,7 +364,7 @@ func (t *Tool) reportForget(id string, res ForgetResult) {
 		_, _ = fmt.Fprintln(t.Out, "Org admins see \"credential lost\" on each provider, connection, MCP server and trace destination concerned; enter those credentials again.")
 	}
 	if res.Platform {
-		_, _ = fmt.Fprintln(t.Out, "The platform's trace destination lost its credentials: a platform admin enters them again. (Audited in each platform admin's personal org.)")
+		_, _ = fmt.Fprintln(t.Out, "The platform's trace destination lost its credentials: a platform admin enters them again. (Recorded in the install audit log.)")
 	}
 }
 
