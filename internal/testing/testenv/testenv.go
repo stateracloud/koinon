@@ -75,6 +75,23 @@ func Var(name, variable string) Requirement {
 	}}
 }
 
+// Vars is Var for a system named by several variables: one requirement name, met only when every
+// variable is set, so KOINON_REQUIRE=<name> fails on a partial setup instead of skipping.
+func Vars(name string, variables ...string) Requirement {
+	return Requirement{Name: name, check: func() error {
+		var missing []string
+		for _, v := range variables {
+			if os.Getenv(v) == "" {
+				missing = append(missing, v)
+			}
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("%s not set", strings.Join(missing, ", "))
+		}
+		return nil
+	}}
+}
+
 // Binary is a requirement met when the executable is on PATH; its name is the executable's.
 func Binary(bin string) Requirement { return BinaryNamed(bin, bin) }
 
