@@ -9,9 +9,11 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sdk "github.com/coder/acp-go-sdk"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -229,6 +231,22 @@ func (f *fencedFeed) Start(_ context.Context, _, _ pgtype.UUID, epoch int64) err
 	return mcpguard.ErrFeedFenced
 }
 
+// errFeed is a feed whose Report fails with err: every time, or only the first failFirst times.
+type errFeed struct {
+	recordingFeed
+	err       error
+	failFirst int32
+	reports   atomic.Int32
+}
+
+func (f *errFeed) Report(ctx context.Context, org, agent pgtype.UUID, legs mcpguard.Legs, texts []string) error {
+	n := f.reports.Add(1)
+	if f.failFirst == 0 || n <= f.failFirst {
+		return f.err
+	}
+	return f.recordingFeed.Report(ctx, org, agent, legs, texts)
+}
+
 // latest is the last counts written, or none.
 func (f *recordingFeed) latest() [2]int64 {
 	f.mu.Lock()
@@ -365,6 +383,43 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 			FROM leak_guard_sessions s WHERE s.org_id = $1 AND s.agent_id = $2`, e.org, e.agent.ID).Scan(&private, &fps)).To(Succeed())
 		Expect(private).To(BeTrue())
 		Expect(fps).To(BeNumerically(">", 0))
+	})
+
+	finishOneTool := func(e *env) {
+		e.harness.set(func(h *harness) {
+			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
+				defer GinkgoRecover()
+				Expect(say(sdk.StartToolCall("c1", "bash", sdk.WithStartKind(sdk.ToolKindExecute)))).To(Succeed())
+				_ = say(sdk.UpdateToolCall("c1", sdk.WithUpdateStatus(sdk.ToolCallStatusCompleted),
+					sdk.WithUpdateRawOutput(map[string]any{"output": "koinon-test private repository line"})))
+				return true
+			}
+		})
+	}
+
+	It("fails the run once, in one epoch, with a named reason when the feed's error is permanent (koinon#123)", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		finishOneTool(e)
+		feed := &errFeed{err: fmt.Errorf("upsert fingerprints: %w", &pgconn.PgError{Code: "21000", Message: "koinon-test cardinality"})}
+		r := e.enqueue(ctx, e.task(ctx, "feed"))
+		e.pool("agentd-feed-permanent", func(c *agentd.Config) { c.Taint = feed })
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		got := getRun(ctx, r)
+		Expect(got.Epoch).To(Equal(int64(1)), "no takeover per worker")
+		Expect(got.OutcomeReason.String).To(And(ContainSubstring("leak guard"), ContainSubstring("21000")))
+		Expect(feed.reports.Load()).To(Equal(int32(1)), "a permanent refusal is not retried")
+		Expect(kinds(events(ctx, r))).To(ContainElement("run.failed"))
+	})
+
+	It("retries a transient feed error and carries on", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		finishOneTool(e)
+		feed := &errFeed{err: &pgconn.PgError{Code: "40001", Message: "koinon-test serialization"}, failFirst: 2}
+		r := e.enqueue(ctx, e.task(ctx, "feed"))
+		e.pool("agentd-feed-transient", func(c *agentd.Config) { c.Taint = feed })
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Expect(getRun(ctx, r).Epoch).To(Equal(int64(1)))
+		Expect(feed.reports.Load()).To(Equal(int32(3)), "two failures, then the third try recorded it")
 	})
 
 	It("leaves the run to the newer worker when its feed is already fenced, as a takeover, not an interruption", func(ctx SpecContext) {

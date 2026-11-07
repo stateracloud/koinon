@@ -97,6 +97,7 @@ const (
 	fenceLost     = runoutcome.FenceLost     // a newer epoch owns the run, or it finished
 	fenceCanceled = runoutcome.FenceCanceled // the control plane canceled the run
 	fenceAbandon  = runoutcome.FenceAbandon  // the worker cannot reach the database and gives up
+	fenceFailed   = runoutcome.FenceFailed   // a permanent error: the run fails with runner.feedFailure
 )
 
 // resumeNote opens the prompt of a run resumed after the harness connection was lost.
@@ -133,6 +134,8 @@ type runner struct {
 	taint taintCalls
 	// feedCounts are the current harness's counts for the leak guard (taint.go); nil without a feed.
 	feedCounts atomic.Pointer[feedCounts]
+	// feedFailure is why the run fails when the feed met a permanent error (feedGiveUp).
+	feedFailure atomic.Pointer[failure]
 
 	// delivered are the approval requests whose outcomes this turn's prompt carries; they are
 	// marked delivered when the turn ends.
@@ -614,6 +617,10 @@ func (r *runner) execute(ctx context.Context) error {
 			r.own.Fence(fenceLost)
 			return errDropped
 		}
+		if code, ok := runoutcome.PermanentSQLState(err); ok {
+			// Another worker would meet the same refusal: fail once instead of one takeover per worker.
+			return &failure{reason: feedFailReason(code), class: classFatal}
+		}
 		// The leak guard could not be told this worker's epoch: resume later rather than run unwatched.
 		r.interrupted(ctx, "start the leak guard's feed: "+err.Error(), nil, "")
 		return errDropped
@@ -1053,6 +1060,12 @@ func (r *runner) concludeFenced(ctx context.Context, turn runoutcome.Turn) {
 	case fenceAbandon:
 		r.log.Warn("giving the run up")
 		r.own.Release(ctx, turn)
+	case fenceFailed:
+		f := r.feedFailure.Load()
+		if f == nil { // set before the fence; defensive
+			f = &failure{reason: "the leak guard's feed failed for good"}
+		}
+		r.fail(ctx, turn, f.reason, f.class)
 	default:
 		r.log.Info("run taken over or finished elsewhere")
 	}
