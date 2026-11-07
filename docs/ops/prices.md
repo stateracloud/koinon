@@ -104,8 +104,10 @@ and `koinon_price_auto_applied_total{source}`.
 
 **Known limits of this slice.** OpenRouter's tier boundary (`min_prompt_tokens`) is read as "at least
 that many tokens" and not yet checked against a live response (issue #265). Time-of-day, batch, flex
-and priority prices, per-upstream prices and 1-hour cache writes are not imported. Other sources, the
-admin API and the Platform Prices page follow in later slices.
+and priority prices, per-upstream prices and 1-hour cache writes are not imported. Not built yet (later
+slices of #265, tracked as separate issues): the models.dev, LiteLLM and genai-prices adapters, the
+admin API and the Platform Prices page, org-admin acceptance into org entries (with their retirement
+and the "source differs" mark), the in-app notice after an auto-apply, and the bill-gap view.
 
 ## Cost checks
 
