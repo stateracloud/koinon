@@ -1,7 +1,7 @@
 # Working notes
 
 Maintainers' working notes (an agent's memory directory, pending and lane logs) grow without bound
-unless something retires them. This is the convention (koinon-private#527); `hack/notes-expiry.sh` enforces it.
+unless something retires them. This is the convention (old issue 527); `hack/notes-expiry.sh` enforces it.
 
 ## Memory entries
 

@@ -72,7 +72,7 @@ var _ = Describe("Who refused the model request", func() {
 		Expect(got.OutcomeReason.String).To(ContainSubstring("provider's key in the catalog"))
 		task, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: r.TaskID})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(task.State).To(Equal(store.TaskStateFailed), "a fatal run fails its task (koinon-private#324)")
+		Expect(task.State).To(Equal(store.TaskStateFailed), "a fatal run fails its task (old issue 324)")
 	})
 
 	It("keeps a gateway-key fault when the gateway has no record of the provider refusing anything", func(ctx SpecContext) {

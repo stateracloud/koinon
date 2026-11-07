@@ -38,7 +38,7 @@ func serveModel(ctx context.Context, e *env, name string, priced bool) string {
 		e.org, "prov-"+strings.NewReplacer("/", "-").Replace(name)).Scan(&providerID)).To(Succeed())
 	_, err := pool.Exec(ctx, `INSERT INTO models (org_id, provider_id, name) VALUES ($1, $2, $3)`, e.org, providerID, name)
 	Expect(err).NotTo(HaveOccurred())
-	// The org's first model is its default, as catalog.CreateModel does (koinon-private#256).
+	// The org's first model is its default, as catalog.CreateModel does (old issue 256).
 	_, err = pool.Exec(ctx, `UPDATE orgs SET default_model = $2 WHERE id = $1 AND default_model IS NULL`, e.org, name)
 	Expect(err).NotTo(HaveOccurred())
 	if priced {
@@ -143,7 +143,7 @@ var _ = Describe("agents in the admin API (rc.6)", func() {
 			Expect(st).To(Equal(http.StatusNotFound))
 		})
 
-		// koinon-private#316: off exists only where the model can really stop thinking.
+		// old issue 316: off exists only where the model can really stop thinking.
 		It("refuses off for a model that always thinks, and keeps a stored off that a later model change overrides", func(ctx SpecContext) {
 			serveModel(ctx, e, "vendor/a-model", true)
 			serveModel(ctx, e, "gpt-6-astra", true)

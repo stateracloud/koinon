@@ -3,7 +3,7 @@
 - Status: Accepted; amended by [0048](0048-openshell-spike-results.md), [0065](0065-work-model-tasks-inbox.md) and [0084](0084-leak-guard.md)
 - Date: 2026-10-21
 - Amends: ADR 0008 (approvals)
-- Verification: Pending: agentgateway spike (routing ask-tier tools) and OpenShell spike ([koinon-private#3](https://github.com/stateracloud/koinon-private/issues/3))
+- Verification: Pending: agentgateway spike (routing ask-tier tools) and OpenShell spike (old issue 3)
 
 ## Context
 
@@ -96,7 +96,7 @@ Checked 2026-10-21: OpenShell policy docs (`docs/how-it-works/policies/schema.md
 `enforcement: audit`), RFC 0002 (accepted; agent proposals behind
 `agent_policy_proposals_enabled`, default false); agentgateway MCP authorization and ExtMCP docs.
 
-## Amendment (2026-10-26, koinon-private#146 A4): safe defaults and scoped approvals
+## Amendment (2026-10-26, old issue 146 A4): safe defaults and scoped approvals
 
 [0065](0065-work-model-tasks-inbox.md) changes two things:
 
@@ -133,7 +133,7 @@ Plan item AP1 builds the scopes above (migration `00028_approval_scopes.sql`):
   revoked by an admin (`RevokeApprovalScope`; calls already approved keep running), and ends at its
   date. Creating and revoking a scope are audited (`approval_scope.create`, `approval_scope.revoke`).
 
-## Amendment (2026-10-31, koinon-private#347): the leak guard is a second source of approvals
+## Amendment (2026-10-31, old issue 347): the leak guard is a second source of approvals
 
 [0084](0084-leak-guard.md) adds a source of approval requests besides the ask tier:
 

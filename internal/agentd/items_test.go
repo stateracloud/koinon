@@ -16,7 +16,7 @@ import (
 
 const markChunky = "CHUNKY"
 
-var _ = Describe("Items, not chunks (koinon-private#344)", func() {
+var _ = Describe("Items, not chunks (old issue 344)", func() {
 	It("stores a number of run events proportional to the items, not to the ACP chunks", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		const n = 400

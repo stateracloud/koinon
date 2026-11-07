@@ -406,7 +406,7 @@ var _ = Describe("ConnectionService", func() {
 		Expect(count(ctx, e, `SELECT count(*) FROM connections WHERE org_id = $1`, org)).To(BeZero(), "the envelope went with the row")
 	})
 
-	It("audits the unlinking of every MCP server linked to a connection it deletes (ADR 0091, koinon-private#350)", func(ctx SpecContext) {
+	It("audits the unlinking of every MCP server linked to a connection it deletes (ADR 0091, old issue 350)", func(ctx SpecContext) {
 		id := e.githubConnection(ctx, org)
 		for _, name := range []string{"tracker-a", "tracker-b"} {
 			_, err := e.pool.Exec(ctx, `INSERT INTO mcp_servers (org_id, name, url, code_host_connection_id) VALUES ($1, $2, 'https://mcp.example.com/'||$2, $3)`, org, name, id)

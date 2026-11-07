@@ -16,7 +16,7 @@ import (
 // A tool's declaration (ADR 0091 decision 2) says its sink class, which arguments are address
 // arguments and what its results carry for the session legs. A tool nobody declared is
 // sinkclass.Default: external-high with the server's legs. The declaration goes back to that default
-// when the server's URL changes (the koinon-private#350 rule, ReasonURLChanged) or when the tool's content hash
+// when the server's URL changes (the old issue 350 rule, ReasonURLChanged) or when the tool's content hash
 // changes (the ADR 0057 rule, ReasonContentChanged): it described the old tool.
 const (
 	// ReasonURLChanged is the reason of a reset caused by a change of the server's URL.

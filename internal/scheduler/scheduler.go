@@ -187,7 +187,7 @@ func isOpen(r store.Run) bool {
 
 // spendScope reads one spend limit that covers a run, as a budget level, with the spend inside it.
 // ok is false when the run is not in that scope. Run is the scope of rc.8; the per-task cap of
-// koinon-private#183 is another entry of spendScopes (a level named for the task, summing the task's entries),
+// old issue 183 is another entry of spendScopes (a level named for the task, summing the task's entries),
 // and the check and the cancel below need no change.
 type spendScope func(ctx context.Context, q *store.Queries, run store.Run) (l budget.Level, ok bool, err error)
 

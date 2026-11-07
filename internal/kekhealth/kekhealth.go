@@ -29,7 +29,7 @@ type Metrics struct {
 	// ActiveReachable is 1 while the wrapping key of the active KEK answers a probe, else 0. Only the
 	// active KEK's backend has a series.
 	ActiveReachable *prometheus.GaugeVec
-	// Unbound is the number of KEKs in the loaded key set that a KMS wrapped before koinon-private#615, so they
+	// Unbound is the number of KEKs in the loaded key set that a KMS wrapped before old issue 615, so they
 	// are not bound to the install ID. Local KEKs are not counted (they are not wrapped). No labels.
 	Unbound prometheus.Gauge
 }
@@ -43,7 +43,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}, []string{"backend"}),
 		Unbound: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "koinon_kek_unbound",
-			Help: "KEKs in the loaded key set wrapped by a KMS but not bound to the install ID (wrapped before koinon-private#615); local KEKs are not counted.",
+			Help: "KEKs in the loaded key set wrapped by a KMS but not bound to the install ID (wrapped before old issue 615); local KEKs are not counted.",
 		}),
 	}
 	if reg != nil {
@@ -196,7 +196,7 @@ func (m *Monitor) Observe(ctx context.Context, l secretstore.Loaded) {
 	}
 }
 
-// UnboundKEKs counts the KEKs of the key set that a KMS wrapped without the install binding (koinon-private#615).
+// UnboundKEKs counts the KEKs of the key set that a KMS wrapped without the install binding (old issue 615).
 func UnboundKEKs(stored map[string]secretstore.StoredKEK) int {
 	return len(secretstore.UnboundKEKs(stored))
 }
@@ -217,12 +217,12 @@ func (m *Monitor) observeUnbound(l secretstore.Loaded, log *slog.Logger) {
 	if errors.Is(l.Err, secretstore.ErrBoundOnly) {
 		// Rewrapping cannot help: the install accepts bound KEKs only, so the unbound ones are from a
 		// Secret restored from before the binding.
-		log.Warn("key-encryption keys stored unbound were refused by the bound-only policy of this install (koinon-private#615): "+
+		log.Warn("key-encryption keys stored unbound were refused by the bound-only policy of this install (old issue 615): "+
 			"restore a KEK Secret taken after the KEKs were bound, or, while the database holds no encrypted values, delete it and rerun the key-admin Job (docs/ops/secret-keys.md)",
 			"unbound", n, "err", l.Err)
 		return
 	}
-	log.Warn("key-encryption keys wrapped by a KMS are not bound to the install ID (wrapped before koinon-private#615): "+
+	log.Warn("key-encryption keys wrapped by a KMS are not bound to the install ID (wrapped before old issue 615): "+
 		"bind them with the key-admin Job (secrets.kek.kms.keyAdmin.rewrapUnbound, --rewrap-unbound) or rotate them out",
 		"unbound", n)
 }

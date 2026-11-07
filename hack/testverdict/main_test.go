@@ -32,7 +32,7 @@ func report(ok bool, specs ...types.SpecReport) []types.Report {
 const docker = "koinon:requires=docker: docker is not available: no socket"
 
 var _ = Describe("judge", func() {
-	It("is NOT RUN without a report (the ginkgo -p timeout of koinon-private#507)", func() {
+	It("is NOT RUN without a report (the ginkgo -p timeout of old issue 507)", func() {
 		Expect(judge("pkg", nil, "", "all").verdict).To(Equal(notRun))
 	})
 
@@ -263,7 +263,7 @@ var _ = Describe("go test events (testenv.RequireT in a plain test)", func() {
 
 var _ = Describe("loadGoTest", func() {
 	// Two gotestsum phases, as hack/go-test.sh writes them: the first fails, the second passes.
-	It("remembers a failing test of an earlier event file after a later file passed (koinon-private#512)", func() {
+	It("remembers a failing test of an earlier event file after a later file passed (old issue 512)", func() {
 		dir := GinkgoT().TempDir()
 		first := filepath.Join(dir, "plain.gotest.jsonl")
 		second := filepath.Join(dir, "ginkgo-rest.gotest.jsonl")

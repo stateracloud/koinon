@@ -39,7 +39,7 @@ func newKeyAdminCommand() *cobra.Command {
 		Long: "Runs as the chart's key-admin Job, with its own service account, the only one the KMS lets " +
 			"encrypt. It creates the KEK Secret with one active KEK wrapped by the KMS when the Secret does not " +
 			"exist (--kek-create), and adds the KEK --add-key names when the key set does not hold it. Every KEK " +
-			"it wraps is bound to the install ID in the database (koinon-private#615); with --rewrap-unbound it also wraps " +
+			"it wraps is bound to the install ID in the database (old issue 615); with --rewrap-unbound it also wraps " +
 			"again, bound, each KEK of the primary wrapping key that was wrapped before that. It is idempotent " +
 			"and never activates (except with --activate-if-no-active, when there is no active KEK to replace), retires or rewraps values: koinon-api keys does. Needs --kek-backend other " +
 			"than local and --database-url.",
@@ -56,12 +56,12 @@ func newKeyAdminCommand() *cobra.Command {
 	f.BoolVar(&o.create, "kek-create", false, "create the KEK Secret with one active KMS-wrapped KEK when it does not exist")
 	f.StringVar(&o.addID, "add-key", "", "ID of a KEK to add, wrapped by the KMS, unless the key set holds it already")
 	f.BoolVar(&o.activateIfNoActive, "activate-if-no-active", false, "with --add-key, when the KEK Secret has no usable active KEK (its active entry is missing or names a KEK the Secret no longer holds, after a lost KMS key), make the added KEK active; otherwise change nothing about which KEK is active")
-	f.BoolVar(&o.rewrapUnbound, "rewrap-unbound", false, "wrap again, bound to the install ID, every KEK of the primary wrapping key that is not bound yet (wrapped before koinon-private#615); a binary older than koinon-private#615 cannot read the result")
+	f.BoolVar(&o.rewrapUnbound, "rewrap-unbound", false, "wrap again, bound to the install ID, every KEK of the primary wrapping key that is not bound yet (wrapped before old issue 615); a binary older than old issue 615 cannot read the result")
 	f.DurationVar(&o.wait, "wait", 5*time.Minute, "how long to wait for the database to come up and be migrated")
 	o.wrapping.Flags(f)
 	cli.EnvAlias(cmd, "database-url", "DATABASE_URL")
 	cli.EnvAlias(cmd, "namespace", "POD_NAMESPACE")
-	// The database is required for the install ID every new KEK is bound to (koinon-private#615).
+	// The database is required for the install ID every new KEK is bound to (old issue 615).
 	mustRequire(cmd, "kek-secret", "namespace", "database-url")
 	return cmd
 }

@@ -1,6 +1,6 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
--- The leak guard's state (ADR 0084, ADR 0091; koinon-private#349): sessions per home generation with their legs,
+-- The leak guard's state (ADR 0084, ADR 0091; old issue 349): sessions per home generation with their legs,
 -- the taint store of fingerprints, and the budgets of a run. Every query takes @org_id and filters
 -- on it (TestQueriesAreOrgScoped).
 

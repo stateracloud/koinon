@@ -4,7 +4,7 @@
 - Date: 2026-11-01
 - Amended by: [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md)
 - Relates to: [0027](0027-repo-and-versioning.md) (forward-only migrations, upgrade test), [0030](0030-run-state-machine.md) (leases, epoch, takeover), [0032](0032-agent-home-checkpoints.md) (home checkpoints), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (KEK and envelopes), [0060](0060-migrations-as-a-job.md) (migration Job), [0066](0066-triggers-and-scheduling.md) (DBOS), [0076](0076-database-modes.md) (database modes, backups), [0077](0077-pinned-openshell-and-installer.md) (OpenShell pins), [0045](0045-openshell-hardening-defaults.md) (pinned supervisor image)
-- Issue: koinon-private#336; covers koinon-private#331 and #64
+- Issue: old issue 336; covers old issue 331 and #64
 
 ## Context
 
@@ -76,7 +76,7 @@ the commit this ADR was written on.
 - Verified for the decision: OpenShell 0.1.5 reads `[drivers.kubernetes].supervisor_image` live on
   every sandbox create and start and never touches running supervisor pods (decision 9).
 
-### 4. DBOS workflow version and executor ID (koinon-private#331)
+### 4. DBOS workflow version and executor ID (old issue 331)
 
 - koinon-api starts DBOS with `ApplicationVersion: project.Version`
   (`cmd/koinon-api/main.go:480-484`) and no `ExecutorID`, which DBOS v1.7.0 defaults to `local`
@@ -132,7 +132,7 @@ the commit this ADR was written on.
 ## Decision
 
 procoduck decided all of it in a grilling round on 2026-11-01 (the questions are numbered Q1 to Q18 in
-the draft of this ADR and in koinon-private#336). Where he chose against the recommendation, the Alternatives
+the draft of this ADR and in old issue 336). Where he chose against the recommendation, the Alternatives
 section says what the recommended option would have bought.
 
 1. **Gate.** v0.1.0 is not tagged until the implementation issues of this ADR are done and the
@@ -178,7 +178,7 @@ section says what the recommended option would have bought.
 8. **Binaries gate on the schema version** (procoduck, 2026-11-01). Each binary declares the range of
    goose versions it supports and stays not Ready, with a clear log line, outside it. The migration
    Job's own check (refusing to migrate past what running pods support) can follow.
-   Implemented (koinon-private#408): the schema declares who can read it. Migration 00046 adds the one-row table
+   Implemented (old issue 408): the schema declares who can read it. Migration 00046 adds the one-row table
    `schema_compat(min_reader_version)`, and `internal/schemagate` re-reads it and `goose_db_version`
    every 15 s. A binary is Ready iff the goose version is at least `migrations.MinSupported` (the
    oldest schema its code works against) and `min_reader_version` is at most the newest migration
@@ -204,7 +204,7 @@ section says what the recommended option would have bought.
    create and start (`crates/openshell-driver-kubernetes/src/driver.rs:2551` and `:3368` at v0.1.5)
    and never touches running supervisor pods. So a recreated sandbox always gets the gateway's
    current image, and only a recreate moves a sandbox to a new supervisor.
-   *Amendment (koinon-private#410).* The image is kept out of `specHash`, so an unreadable ConfigMap never hides a
+   *Amendment (old issue 410).* The image is kept out of `specHash`, so an unreadable ConfigMap never hides a
    flavor, resource, provider or filesystem change and existing hashes stay valid. The sandbox
    carries a separate label, `<domain>/supervisor-image`, holding the first 16 hex characters of
    the sha256 of the image ref (the ref has `/` and `:` and can pass 63 characters, so it is not a
@@ -218,7 +218,7 @@ section says what the recommended option would have bought.
 10. **OpenShell N and N-1** (procoduck, 2026-11-01). Each Koinon release supports its pinned OpenShell
     (ADR 0077) and the previous pin, tested in CI against both. Either can be upgraded first.
 
-### DBOS (koinon-private#331)
+### DBOS (old issue 331)
 
 11. **Workflow version and executor identity** (procoduck, 2026-11-01).
     - A fixed `durable.WorkflowVersion`, bumped only when a workflow's steps change incompatibly,
@@ -273,7 +273,7 @@ section says what the recommended option would have bought.
 
 Implementation-level unknowns, to settle in the sub-issues:
 
-- Resolved (koinon-private#412, decision 11): all four registered workflows are idempotent from step 0. Each is a
+- Resolved (old issue 412, decision 11): all four registered workflows are idempotent from step 0. Each is a
   single step whose effect carries its own key, so a carried-over run finds the first run's record:
   - `koinon.trigger-fire` (`create-task`): `CreateTriggeredTask` under dedupe source `trigger`, key
     `TriggerFireKey(trigger, due)`.
@@ -288,14 +288,14 @@ Implementation-level unknowns, to settle in the sub-issues:
   and every minute (an older pod that still runs during a rolling upgrade can enqueue after the
   first sweep); the fork ID is `<original>~v<version>`, so concurrent sweeps make one fork. The
   step lists are recorded in `internal/durable/testdata/workflow_steps.json`, and
-  `TestWorkflowSteps` fails on a change without a bump. Done under decision 11 (koinon-private#413): the executor
+  `TestWorkflowSteps` fails on a change without a bump. Done under decision 11 (old issue 413): the executor
   ID is the pod name (`-executor-id`, `KOINON_EXECUTOR_ID` from the downward API when
   `api.durable.enabled`); each executor heartbeats into `dbos.koinon_executors` (created by the
   migrate step); the holder of a Postgres advisory lock recovers the pending workflows of executors
   of its own version whose heartbeat is older than 90 s (`durable.Runtime.RecoverDeadExecutors`),
   forgets stale executors of older versions (the carry-over forks their workflows) and leaves those
   of newer versions to a process of that version. Still to do: the pending-by-version metric.
-- Resolved (koinon-private#415, decision 12; first slice 415a). A KMS is an option, not a mandate (procoduck,
+- Resolved (old issue 415, decision 12; first slice 415a). A KMS is an option, not a mandate (procoduck,
   2026-11-02): the local keyring, with the KEKs in a Kubernetes Secret, stays the default and is
   fully supported, with no migration warning and nothing deprecated. A KMS (OpenBao or AWS) is opt-in
   through configuration. What is decided:
@@ -311,14 +311,14 @@ Implementation-level unknowns, to settle in the sub-issues:
     wrapped KEK is bound to its ID. `Wrappers` reads each stored KEK with its own adapter (`Local` is
     always readable), so an install that opts in moves by add (wrapped by the KMS), `activate`,
     `rewrap`, `retire`.
-  - Remote adapters share `secretstore/remotekms` (koinon-private#416): the per-call bound, the error rules, and
+  - Remote adapters share `secretstore/remotekms` (old issue 416): the per-call bound, the error rules, and
     a frame (version, SHA-256 of the AAD, KEK) that the KMS encrypts, so the binding of a KEK to its
     ID does not depend on the KMS honouring associated data. OpenBao's key-admin policy grants
     `update` on `transit/encrypt/<key>` and `transit/decrypt/<key>`, never `create`: with `create`,
     encrypt makes a missing key on the spot, so a mistyped key name would wrap under a new key.
   - Identity: adapters sign in with the pod's identity (OpenBao Kubernetes auth, the AWS default
     chain with IRSA; procoduck, 2026-11-02), so no credential is in Helm values, env or a sandbox. The
-    AWS adapter (koinon-private#417, `secretstore/awskms`) narrows the default chain to pod identity: IRSA's web
+    AWS adapter (old issue 417, `secretstore/awskms`) narrows the default chain to pod identity: IRSA's web
     identity token or EKS Pod Identity, read again on each refresh. It never reads static keys
     (`AWS_ACCESS_KEY_ID` and friends are ignored with a warning), the shared config files or the
     instance metadata, so a node's role cannot stand in for the pod's.
@@ -328,9 +328,9 @@ Implementation-level unknowns, to settle in the sub-issues:
     and rotation (procoduck, 2026-11-02). The services refuse to wrap with a KMS
     (`secretstore.ErrKeyAdminWraps`, "new KEKs are wrapped by the key-admin Job") before they call
     it. A local install has no key-admin Job: koinon-api creates and adds KEKs exactly as before.
-    415a has the refusal; the Job, its service account and its chart wiring are part of koinon-private#416, with
+    415a has the refusal; the Job, its service account and its chart wiring are part of old issue 416, with
     the first adapter (OpenBao transit, `secretstore/openbao`).
-  - The key-admin Job (koinon-private#416) is `koinon-api key-admin`, rendered only with `secrets.kek.kms`. It is
+  - The key-admin Job (old issue 416) is `koinon-api key-admin`, rendered only with `secrets.kek.kms`. It is
     an ordinary release resource, not a hook: a post-install hook would deadlock `helm install
     --wait` (koinon-api is not ready before the KEK Secret exists) and in cnpg mode a pre-install
     hook has no database. Its name carries a hash of its pod template, so any change of its inputs
@@ -351,13 +351,13 @@ Implementation-level unknowns, to settle in the sub-issues:
     same however it is wrapped: a KEK's fingerprint does not depend on its wrapping, so an export
     matches the KEKs it holds whichever backend wraps them; a wrapping key's identity is already in the stored form (backend and key). `keys status`
     and `keys export` print it.
-  - Built (415b, koinon-private#591): koinon-api records each KEK's fingerprint in `kek_fingerprints` on load, on
+  - Built (415b, old issue 591): koinon-api records each KEK's fingerprint in `kek_fingerprints` on load, on
     reload and on `keys activate`; `keys status` warns when a loaded KEK differs from the recorded
     one, says whether the active KEK's wrapping key answers, and warns about a local active KEK only
     when a KMS is configured; `keys activate` refuses a local KEK while a KMS is the configured primary (procoduck, 2026-11-03; rollback: set the primary to local first). koinon-api and the reconciler probe the active KEK's wrapper on every
     reload and export `koinon_kek_active_reachable{backend}`; the reconciler records nothing. Rows of
     retired KEKs are kept: IDs are never reused and `keys forget` needs the history. Binding an
-    install ID into the KEK AAD is koinon-private#615 (split off koinon-private#416, procoduck 2026-11-03). If the KMS is down at start the pod exits (fail
+    install ID into the KEK AAD is old issue 615 (split off old issue 416, procoduck 2026-11-03). If the KMS is down at start the pod exits (fail
     closed) and the gauge never shows 0.
     agentd holds no keyring (it asks koinon-api for repository passwords), so it needs no adapter.
   - N-1 and rollback: once a KMS-wrapped KEK is in the Secret, a binary from before 415a cannot parse
@@ -367,7 +367,7 @@ Implementation-level unknowns, to settle in the sub-issues:
     retires every KMS-wrapped KEK, so the Secret holds local KEKs only. 415a itself cannot configure
     a KMS, so no install reaches that state before an adapter ships; a local install's Secret is
     byte-for-byte what N-1 reads.
-  - Amended (koinon-private#615, 2026-11-03): the install ID is bound into the KEK AAD. The install ID is a
+  - Amended (old issue 615, 2026-11-03): the install ID is bound into the KEK AAD. The install ID is a
     random UUID the first migration writes into `install_identity` (one row; triggers refuse
     update, delete and truncate as a guard against mistakes; the table owner, `pg_restore
     --disable-triggers` and `session_replication_role = replica` bypass them, which can only close
@@ -381,18 +381,18 @@ Implementation-level unknowns, to settle in the sub-issues:
     a reinstall, not born with the data), a generated Secret (restored with the KEK Secret, which
     defeats the binding) and a namespace or cluster UID (changes on a move) were rejected. The
     version lives in the stored KEK, not in the KMS frame (which is only readable after the KMS
-    call, while the AAD must be chosen before it): `"fmt":1` keeps the koinon-private#416 AAD and opens as
+    call, while the AAD must be chosen before it): `"fmt":1` keeps the old issue 416 AAD and opens as
     before; `"fmt":2` records the install ID and uses a separate AAD with the process's own install
     ID, never the recorded one (that only names both IDs in the error). Relabelling a KEK between
     the formats, or opening it in another install, is `ErrOpen`, never `ErrUnreachable`; a process
     without the install ID refuses a bound KEK with `ErrNoInstallID`. Every new KMS wrap is bound
     (the key-admin Job now always reads the database and waits for the first migration). Binding
     the KEKs wrapped before is opt-in, in the key-admin Job only (`keyAdmin.rewrapUnbound`,
-    idempotent, primary wrapping key only), because N-1: a binary before koinon-private#615 refuses `"fmt":2`
-    ("unsupported format 2") and fails closed, so rolling back below koinon-private#615 needs the 415a steps
+    idempotent, primary wrapping key only), because N-1: a binary before old issue 615 refuses `"fmt":2`
+    ("unsupported format 2") and fails closed, so rolling back below old issue 615 needs the 415a steps
     above. Local KEKs are not wrapped and stay unbound. `keys status` prints the install ID and
     marks each KMS KEK bound or unbound.
-  - Amended (koinon-private#615, 2026-11-03, procoduck): a strict switch after binding. Re-binding keeps the KEK
+  - Amended (old issue 615, 2026-11-03, procoduck): a strict switch after binding. Re-binding keeps the KEK
     material, so an old `"fmt":1` backup of the KEK Secret would open forever. A "bound only" marker,
     one row in its own table `kek_bound_only` (expand-only migration, triggers refuse UPDATE, DELETE
     and TRUNCATE; they guard against mistakes, not against the table owner), is set at first install
@@ -401,7 +401,7 @@ Implementation-level unknowns, to settle in the sub-issues:
     (`ErrBoundOnly`, an `ErrOpen`), naming when and how the marker was set; an unreadable marker
     refuses too. Koinon only sets it. A process reads it on every key-set load while it is unset
     (start and the reload about once a minute) and caches it once set, so one that loaded before the
-    switch refuses from its next load. Setting it ends rollback below koinon-private#615 for that key set, and the
+    switch refuses from its next load. Setting it ends rollback below old issue 615 for that key set, and the
     Job says so. The marker protects only databases that hold it; rotating the KEKs is what kills an
     old backup everywhere, so the docs tell operators to rotate as well if one may have leaked.
     `keys status` prints the marker; `koinon_kek_unbound` stays.
@@ -508,12 +508,12 @@ Titles only here; each is opened after this ADR is accepted.
 7. docs and release notes: minor upgrade as stop, migrate, start; rc to v0.1.0 stop; v0.1.0 as the baseline
 8. reconciler: supervisor image in the sandbox spec hash, with a recreate cap
 9. preflight and ci: support OpenShell pins N and N-1, tested against both
-10. durable: fixed workflow version, step-list test, startup carry-over sweep, idempotence check (koinon-private#331)
-11. durable: executor ID per pod, heartbeats and leader-elected dead-executor recovery (koinon-private#331)
-12. durable: `koinon_durable_workflows_pending{version}` metric and alert (koinon-private#331)
+10. durable: fixed workflow version, step-list test, startup carry-over sweep, idempotence check (old issue 331)
+11. durable: executor ID per pod, heartbeats and leader-elected dead-executor recovery (old issue 331)
+12. durable: `koinon_durable_workflows_pending{version}` metric and alert (old issue 331)
 13. security: key-wrapping interface, the local Secret adapter and its key export, fingerprints in the database and an unreachable-key metric (#64)
 14. security: Vault/OpenBao transit adapter
-15. security: AWS KMS adapter (koinon-private#417)
+15. security: AWS KMS adapter (old issue 417)
 16. keys: `keys forget` for a lost key (credentials marked lost, new kopia repositories, audited)
 17. keys: new kopia repository per agent after a compromise, with S3 credential rotation (#64)
 18. docs: secret-keys runbook covers home repositories, trace credentials, KMS, loss and compromise (#64)
@@ -524,7 +524,7 @@ Titles only here; each is opened after this ADR is accepted.
 
 ## Links
 
-- Issues koinon-private#336, koinon-private#331, #64; procoduck's scope decision of 2026-10-31 (in koinon-private#336)
+- Old issues 336, 331, #64; procoduck's scope decision of 2026-10-31 (in old issue 336)
 - Research store: deep dive G9, `g9-day2-operations`
 - DBOS Transact Go v1.7.0 (the module in `go.mod`): `dbos/dbos.go`, `dbos/recovery.go`,
   `dbos/workflow.go` (`ForkWorkflowsInput`)

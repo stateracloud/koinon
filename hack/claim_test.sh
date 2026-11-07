@@ -33,7 +33,7 @@ export CLAIM_LIB_ONLY=1
 source "$claim"
 unset CLAIM_LIB_ONLY
 
-# update_target: the updater only touches a ready, green pull request that is behind main (koinon-private#596).
+# update_target: the updater only touches a ready, green pull request that is behind main (old issue 596).
 ut_ok='[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"b","status":"COMPLETED","conclusion":"SKIPPED"},{"__typename":"StatusContext","context":"c","state":"SUCCESS"}]'
 ut_red='[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"FAILURE"}]'
 ut_run='[{"__typename":"CheckRun","name":"a","status":"IN_PROGRESS","conclusion":null}]'

@@ -132,7 +132,7 @@ does not mount the KEK Secret. koinon-api opens (or creates) the password and re
 per checkpoint, on the same listener and with the same kind of HMAC credential as saved work
 (`/internal/home-repository`).
 
-## Amendment (2026-10-30, koinon-private#260): savework reads the repositories with an isolated git config
+## Amendment (2026-10-30, old issue 260): savework reads the repositories with an isolated git config
 
 The repositories are the agent's, and savework runs outside any turn, so it must not run code the
 agent's git configuration names. `savework.sh` ignores the system, global and home configuration

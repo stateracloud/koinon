@@ -12,7 +12,7 @@ export type RunWatch = {
   status: WatchStatus
   error?: string
   /**
-   * The text of the message or thought the agent is typing, as far as it has been streamed (koinon-private#344).
+   * The text of the message or thought the agent is typing, as far as it has been streamed (old issue 344).
    * Every chunk names its item. The stored event of an item carries the same name in its payload
    * ("item") and the whole text, so it replaces that item's live text and that of every older item
    * (an item that was never stored is cleared by a later stored one); live text at or below the

@@ -17,7 +17,7 @@ import (
 
 // MCPTools lists the MCP tools the gateway offers an agent right now, as the agent itself sees them
 // (names with the gateway's <target>_ prefix). Its implementation holds or reaches the agent's own
-// gateway key; koinon-agentd never sees that key (issue koinon-private#488, ADR 0057 amendment 2026-11-01), so
+// gateway key; koinon-agentd never sees that key (old issue 488, ADR 0057 amendment 2026-11-01), so
 // the interface returns names only. mcpcheck.Remote asks koinon-api.
 type MCPTools interface {
 	Tools(ctx context.Context, org, agent pgtype.UUID) ([]string, error)
@@ -28,7 +28,7 @@ type MCPTools interface {
 const DefaultMCPRetryDelay = 75 * time.Second
 
 // Run events for an allowed MCP server that is missing when the harness is about to start (issue
-// koinon-private#326). The real-model-test validity gate reads them to mark a run invalid instead of counting the
+// old issue 326). The real-model-test validity gate reads them to mark a run invalid instead of counting the
 // missing tools as a model miss.
 const (
 	// mcpMissingKind is recorded at each miss. Payload: {attempt, servers: [{name, reason}], reason,
@@ -165,7 +165,7 @@ func mcpServerNames(ss []missingMCPServer) []string {
 }
 
 // waitMCPServers is the check before the harness starts, so the harness never connects to a gateway
-// that is missing a server's tools without anyone knowing (issue koinon-private#326; decision 2026-10-31). When an
+// that is missing a server's tools without anyone knowing (old issue 326; decision 2026-10-31). When an
 // MCP server the agent may use is not serving tools it records run.mcp_server_missing and a trace
 // attribute, waits MCPRetryDelay, and looks once more. If the servers are back it records
 // run.mcp_server_recovered and the harness starts, connecting to a gateway that has them. On a second

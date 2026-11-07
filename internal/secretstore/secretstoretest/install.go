@@ -23,14 +23,14 @@ const (
 	InstallB = "00000000-0000-4000-8000-00000000000b"
 )
 
-// BoundOnlySet is a set bound-only marker for tests (koinon-private#615).
+// BoundOnlySet is a set bound-only marker for tests (old issue 615).
 var BoundOnlySet = secretstore.BoundOnly{Set: true, At: time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC), How: secretstore.BoundOnlyRewrap}
 
 // BoundOnlyUnset is the bound-only marker source of an install that still accepts KEKs stored
 // unbound (format 1): tests pass it, or another explicit source, to the wrappers' constructors.
 var BoundOnlyUnset = secretstore.StaticBoundOnly(secretstore.BoundOnly{})
 
-// LegacyKEKAAD is the associated data of a KEK in stored format 1 (koinon-private#416), written out here apart
+// LegacyKEKAAD is the associated data of a KEK in stored format 1 (old issue 416), written out here apart
 // from secretstore, so that a change to it there fails the contract: KEKs wrapped with it are in
 // Secrets and backups and must keep unwrapping.
 func LegacyKEKAAD(id string) []byte {
@@ -42,7 +42,7 @@ func LegacyKEKAAD(id string) []byte {
 	return out
 }
 
-// InstallBindingContract declares the specs of the install binding (koinon-private#615) that every KMS adapter
+// InstallBindingContract declares the specs of the install binding (old issue 615) that every KMS adapter
 // passes through secretstore.Wrappers: call it inside a Describe of the adapter's suite with a
 // function that returns a wrapper over a reachable test key that may encrypt. [LocalBindingContract]
 // is the local KEK's side.
@@ -229,7 +229,7 @@ func InstallBindingContract(newWrapper func() secretstore.Wrapper) {
 	})
 }
 
-// LocalBindingContract declares what the install binding (koinon-private#615) means for the local KEK: nothing.
+// LocalBindingContract declares what the install binding (old issue 615) means for the local KEK: nothing.
 // A local KEK is stored as the key itself, exactly as before, and reads whatever the install ID.
 func LocalBindingContract() {
 	const id = "kek-20261103-test"

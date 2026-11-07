@@ -103,7 +103,7 @@ time they read the KEK Secret (at start and about once a minute).
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
 | `koinon_kek_active_reachable` | gauge | `backend`: the adapter name of the active KEK (`local`, or the KMS adapter) | 1 while the key that wraps the active KEK answers this process, else 0. With the default local KEK it is always 1. A 0 means stored secrets cannot be opened after the next restart. If the KMS is down when a pod starts, the pod does not start (fail closed) and never reports 0. |
-| `koinon_kek_unbound` | gauge | none | KEKs in the loaded key set that a KMS wrapped before the install binding (koinon-private#615), so they are not bound to the install ID; set on every load of the key set. Local KEKs are not counted. While it is above 0 the process logs a warning; bind them with `secrets.kek.kms.keyAdmin.rewrapUnbound` or rotate them out ([secret keys](https://github.com/stateracloud/koinon/blob/main/docs/ops/secret-keys.md)). |
+| `koinon_kek_unbound` | gauge | none | KEKs in the loaded key set that a KMS wrapped before the install binding (old issue 615), so they are not bound to the install ID; set on every load of the key set. Local KEKs are not counted. While it is above 0 the process logs a warning; bind them with `secrets.kek.kms.keyAdmin.rewrapUnbound` or rotate them out ([secret keys](https://github.com/stateracloud/koinon/blob/main/docs/ops/secret-keys.md)). |
 
 ### Durable workflows
 

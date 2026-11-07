@@ -95,7 +95,7 @@ rejecting pre-request reservation. What the data showed, and what changes:
    agent's gateway key limit only; budgets, notices and stops count the charge. So the bound in
    responses holds, the ledger converges on what the provider billed for that response, and the
    gateway key cannot hand out more than its `max_tokens` bound while the figure is pending.
-3. **Stop before the key goes (issue koinon-private#188).** When a budget has nothing left, the runs of its
+3. **Stop before the key goes (old issue 188).** When a budget has nothing left, the runs of its
    scope are canceled with `spend_limit` and the level before the key is blocked: the agent's open
    runs for its daily limit, the org's for the monthly cap or the platform ceiling. Cancel, not
    park (ADR 0030): it is the control plane's transition and needs no epoch, so the owner's later
@@ -212,7 +212,7 @@ of overshoot this ADR accepts. Counters of past days are removed by agentgateway
 
 Decision 5 named the **run** among the levels whose remaining amount is netted into the gateway key
 limit ("the minimum of run, ticket, agent, org and platform remaining") and it was never built. ADR
-0081 builds it, for the spend of one run (issue koinon-private#243):
+0081 builds it, for the spend of one run (old issue 243):
 
 - A run's spend limit, `limits.run.maxSpendUSD` (default per template, overridable per agent), is
   copied to the run when it is queued. While an agent has a starting or running run, the key's net
@@ -224,7 +224,7 @@ limit ("the minimum of run, ticket, agent, org and platform remaining") and it w
   checked: reason `run_spend_cap`, failure class `budget`. A run's limit covers that run only; it
   stops no other run of the agent or the org. It sends no notification to people, because a run
   limit is for the agent, which is told at 80% by the wrap-up notice.
-- The ticket level of the decision is the task level of ADR 0065; its cap (koinon-private#183) plugs into the same
+- The ticket level of the decision is the task level of ADR 0065; its cap (old issue 183) plugs into the same
   spend-scope check after v0.1.0.
 - The model-request limit is not a key level; it is checked by the ledger only.
 

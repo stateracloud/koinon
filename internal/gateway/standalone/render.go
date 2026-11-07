@@ -330,7 +330,7 @@ type budgetLimit struct {
 
 // decimal is a number (a whole one is an integer, as the Tokens budget takes) written exactly as it is held, in fixed-point notation: a float would write
 // its shortest round-trip form, which can have an exponent ("5e-05") or more digits than
-// agentgateway accepts (issue koinon-private#245).
+// agentgateway accepts (old issue 245).
 type decimal string
 
 // MarshalYAML implements yaml.Marshaler.
@@ -526,7 +526,7 @@ type responseTransform struct {
 }
 
 // doNotRetry is the response transformation of every section: the do-not-retry marker on a refusal
-// (gateway.DoNotRetryCEL, ADR 0056 amendment 2026-11-01, koinon-private#342).
+// (gateway.DoNotRetryCEL, ADR 0056 amendment 2026-11-01, old issue 342).
 func doNotRetry() responseTransform {
 	return responseTransform{Set: map[string]string{gateway.DoNotRetryHeader: gateway.DoNotRetryCEL}}
 }
@@ -654,7 +654,7 @@ func build(s gateway.State, o Options) document {
 		Policies: llmPolicies{
 			APIKey:        keyPolicy(keys, s, allowed),
 			Authorization: authorization{Rules: []string{admitRule()}},
-			// Only the allowlisted client headers go on (koinon-private#262); the org header is set after.
+			// Only the allowlisted client headers go on (old issue 262); the org header is set after.
 			Transformations: transformations{Request: headerTransform{
 				Replace: gateway.AllowHeadersExpr(gateway.ForwardedHeaders),
 				Set:     map[string]string{gateway.OrgHeader: `default(apiKey.org, "")`},

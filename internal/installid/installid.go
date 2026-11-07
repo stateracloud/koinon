@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package installid reads the install ID (koinon-private#615): the UUID a migration writes once into the
+// Package installid reads the install ID (old issue 615): the UUID a migration writes once into the
 // database (table install_identity) and nothing changes afterwards. KMS-wrapped KEKs are bound to
 // it (secretstore stored format 2), so a KEK Secret only unwraps next to the database it belongs to.
 //

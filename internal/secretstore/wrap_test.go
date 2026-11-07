@@ -28,12 +28,12 @@ var _ = Describe("Key wrapping", func() {
 			func() secretstore.Wrapper { return &secretstoretest.FakeKMS{} },
 			func() secretstore.Wrapper { f := &secretstoretest.FakeKMS{}; f.Hang.Store(true); return f },
 		)
-		Describe("the install binding (koinon-private#615)", func() {
+		Describe("the install binding (old issue 615)", func() {
 			secretstoretest.InstallBindingContract(func() secretstore.Wrapper { return &secretstoretest.FakeKMS{} })
 		})
 	})
 
-	Describe("the local KEK and the install binding (koinon-private#615)", func() {
+	Describe("the local KEK and the install binding (old issue 615)", func() {
 		secretstoretest.LocalBindingContract()
 	})
 
@@ -162,7 +162,7 @@ var _ = Describe("Key wrapping", func() {
 		}
 	})
 
-	It("writes a bound KEK in a form a binary from before koinon-private#615 refuses, and an unbound one it reads", func(ctx SpecContext) {
+	It("writes a bound KEK in a form a binary from before old issue 615 refuses, and an unbound one it reads", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
 		ws, err := keyAdmin(kms)
 		Expect(err).NotTo(HaveOccurred())
@@ -186,7 +186,7 @@ var _ = Describe("Key wrapping", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
-	It("refuses to build wrappers without a source for the bound-only marker (koinon-private#615): there is no mode that accepts format 1 unasked", func() {
+	It("refuses to build wrappers without a source for the bound-only marker (old issue 615): there is no mode that accepts format 1 unasked", func() {
 		for _, w := range []secretstore.Wrapper{secretstore.Local{}, &secretstoretest.FakeKMS{}} {
 			_, err := secretstore.NewWrappers(nil, w)
 			Expect(err).To(MatchError(secretstore.ErrNoBoundOnlySource), w.Backend())
@@ -264,7 +264,7 @@ var _ = Describe("Key wrapping", func() {
 	})
 })
 
-// decodeBefore615 is the check that the releases from koinon-private#416 to koinon-private#615 make on a wrapped KEK's Secret
+// decodeBefore615 is the check that the releases from old issue 416 to old issue 615 make on a wrapped KEK's Secret
 // value (secretstore.decodeStored as it was), kept here to show what such a binary does with the
 // forms this one writes.
 func decodeBefore615(v []byte) error {

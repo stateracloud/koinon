@@ -4,7 +4,7 @@
 # fake model server (test/fakemodel/scripts/claude-e2e.yaml), so its model runs in the Messages format
 # through the harness's koinon-anthropic entry, the gateway and the ledger. Steps 6d and 8 set the
 # agent's model explicitly.
-# The org default model is stored (koinon-private#256). Which provider's model is the org's first depends on the
+# The org default model is stored (old issue 256). Which provider's model is the org's first depends on the
 # order the importer reads the two Secrets, so the quickstart driver (step 3) sets the default to
 # repo-helper explicitly; this provider's name and models do not matter to it.
 # claude-haiku-5-5 is a Claude 5.x ID the thinking table matches (internal/thinking), so step 6e

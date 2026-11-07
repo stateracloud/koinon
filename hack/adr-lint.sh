@@ -9,7 +9,7 @@
 # Each ADR's `- Status:` starts with Proposed, Accepted, Deprecated, Superseded by or Rejected (free
 # text may follow); every [NNNN](file.md) link in the Status and `- Relates to:` lines names an ADR
 # file that exists; a superseded ADR names its successor and shows as superseded in the README index.
-# An ADR still Proposed is a warning, not a failure (koinon-private#525).
+# An ADR still Proposed is a warning, not a failure (old issue 525).
 #
 # Usage: hack/adr-lint.sh [adr-dir]    (default docs/adr)
 
@@ -41,7 +41,7 @@ items() {
   awk '/^- (Status|Relates to):/ { on = 1; print; next } on && /^  / { print; next } { on = 0 }' "$1"
 }
 
-# Status and links (koinon-private#525). The template (0000) lists the values; it is not checked.
+# Status and links (old issue 525). The template (0000) lists the values; it is not checked.
 proposed=()
 for f in "${files[@]}"; do
   n=${f:0:4}

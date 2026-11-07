@@ -18,7 +18,7 @@ Instructions for coding agents working on Koinon.
 - Chart: `hack/chart-check.sh`. Add an assertion for every chart behaviour you change, in the matching
   `hack/chart-check.d/NN-<feature>.sh`. Anything that changes how a Koinon binary starts (a flag or
   env var it requires, a mount, a Secret key, an RBAC rule) is covered by `make test-chart-smoke`;
-  extend it when you add a component or a startup input (koinon-private#284). Details: `docs/dev/ci.md#chart-and-admission-tests`.
+  extend it when you add a component or a startup input (old issue 284). Details: `docs/dev/ci.md#chart-and-admission-tests`.
 - Sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`): `make test-admission`; its
   OpenShell cases run on kind: `make dev-kind-up`, then `make test-escape-kind`.
 - Local cluster: kind is the dev loop (`make dev-kind-up`, `make dev`, `make test-e2e-kind`). Nothing

@@ -75,7 +75,7 @@ var _ = Describe("the install ID", func() {
 		Expect(src(ctx)).To(Equal(id), "kept: the database is not asked again")
 	})
 
-	Describe("the bound-only marker (koinon-private#615)", func() {
+	Describe("the bound-only marker (old issue 615)", func() {
 		It("is not set after the migrations, is set once, and keeps its first setting", func(ctx SpecContext) {
 			pool := pgtest.Start(ctx)
 			b, err := installid.ReadBoundOnly(ctx, pool)

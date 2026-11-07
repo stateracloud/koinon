@@ -53,7 +53,7 @@ hard to undo and need a human check first.
   - The home lab is a single environment: no multi-zone tests of home restore
     ([0032](0032-agent-home-checkpoints.md)) _(inferred)_.
 - Follow-ups:
-  - The OpenShell spike ([koinon-private#3](https://github.com/stateracloud/koinon-private/issues/3)) installs Agent Sandbox
+  - The OpenShell spike (old issue 3) installs Agent Sandbox
     and OpenShell on the home lab with `default_runtime_class_name` set to the Kata RuntimeClass.
   - Document the home-lab prerequisites (Talos version, Kata extension, registry) in
     `CONTRIBUTING.md` for other contributors with their own clusters _(inferred)_.
@@ -83,6 +83,6 @@ Checked 2026-10-21:
 
 - [0025 Testing](0025-testing-strategy.md), [0026 Home lab and license](0026-home-lab-and-license.md)
 - [0037 Tooling](0037-tooling.md), [0045 OpenShell hardening defaults](0045-openshell-hardening-defaults.md)
-- [koinon-private#3 OpenShell spike](https://github.com/stateracloud/koinon-private/issues/3)
+- [old issue 3 OpenShell spike](old issue 3)
 
 Note (2026-11-07): private infrastructure detail removed; maintainer decision 2026-11-07.

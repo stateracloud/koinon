@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto'
 
 import { expect, test } from '@playwright/test'
 
-// W1 acceptance (issue koinon-private#50): create a task and watch the run in the browser, against the real
+// W1 acceptance (old issue 50): create a task and watch the run in the browser, against the real
 // koinon-api, reconciler, agentd, Postgres, OpenShell (runc on kind) and the fake model server.
 // The only doubles are the ones in test/e2e/kind/fakes.yaml: the fake model (script
 // test/fakemodel/scripts/repo-helper.yaml) and the fake GitHub App API.
@@ -103,7 +103,7 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
   // 4. Agent from the repo-helper template, bound to the repository, activated.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Agents' }).click()
   await page.getByRole('link', { name: 'New agent' }).click()
-  // Anchored: "Repo helper (Gitea)" is a template too (koinon-private#370).
+  // Anchored: "Repo helper (Gitea)" is a template too (old issue 370).
   await page.getByRole('radio', { name: /^Repo helper v/ }).check()
   await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('radio', { name: /OpenCode/ }).check()

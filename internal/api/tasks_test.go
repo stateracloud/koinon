@@ -122,7 +122,7 @@ var _ = Describe("TaskService", func() {
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 	})
 
-	It("reopens a completed task for a follow-up message (koinon-private#324)", func(ctx SpecContext) {
+	It("reopens a completed task for a follow-up message (old issue 324)", func(ctx SpecContext) {
 		t, _ := create(ctx, member, "chat")
 		_, err := e.pool.Exec(ctx, `UPDATE tasks SET state = 'completed', finished_at = now() WHERE org_id = $1 AND id = $2`, org, t.GetId())
 		Expect(err).NotTo(HaveOccurred())

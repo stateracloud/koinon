@@ -15,7 +15,7 @@
 # the base branch and never run the pull request's code, so a pull request cannot weaken its own
 # check. They check out the base commit only, with minimal permissions.
 #
-# Job count (koinon-private#596): every job here pays a fixed start-up cost (runner, checkout). The `claim` job runs
+# Job count (old issue 596): every job here pays a fixed start-up cost (runner, checkout). The `claim` job runs
 # only for events that can change its answer (title, body, files, labels, state). A job skipped by
 # an `if:` reports "skipped", which a required check counts as passing and which replaces an earlier
 # failure of the same name, so the claim is never filtered at job level: unwanted events are left out

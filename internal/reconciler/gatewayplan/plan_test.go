@@ -447,7 +447,7 @@ var _ = Describe("MCP servers", func() {
 		Expect(names).To(ContainElements("acme-wiki", "acme-wiki-ask", "acme-sick"))
 		exec := gateway.AgentRef{Org: "acme", Name: gateway.MCPExecAgentName}
 		// The executor opens every tool a person can approve a call of, healthy server or not (as
-		// before koinon-private#455): the ask tier (ADR 0042) and the auto tier, whose external calls the leak
+		// before old issue 455): the ask tier (ADR 0042) and the auto tier, whose external calls the leak
 		// guard sends to a person (ADR 0091). Never a never-tier, absent or unnamable tool.
 		Expect(pl.State.Tools[exec]).To(Equal([]gateway.ToolGrant{
 			{Target: "acme-wiki", Tools: []string{"search", "edit"}},
@@ -535,7 +535,7 @@ var _ = Describe("MCP servers", func() {
 		Expect(lk.issued).To(Equal(2))
 	})
 
-	It("asks for a probe of a server that is newly served or whose credential or URL changed, and of none else (koinon-private#226)", func() {
+	It("asks for a probe of a server that is newly served or whose credential or URL changed, and of none else (old issue 226)", func() {
 		p := newPlanner(0)
 		apply := func(mut func(*gatewayplan.Input)) []string {
 			in := mcpInput()
@@ -598,7 +598,7 @@ var _ = Describe("MCP servers", func() {
 
 var _ = Describe("Rendered state", func() {
 	// The plan's state is what the gateway renders, so its rendering is the byte-level check that a
-	// change of the plan changes nothing the gateway would see (issue koinon-private#455: behaviour identical).
+	// change of the plan changes nothing the gateway would see (old issue 455: behaviour identical).
 	It("matches testdata/plan-state.yaml", func() {
 		lk := &fakeLookups{servedFile: map[pgtype.UUID]string{}}
 		in := mcpInput()

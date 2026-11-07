@@ -25,7 +25,7 @@ import (
 //   - a field that exists only behind a beta is refused unless the anthropic-beta header names that
 //     beta,
 //   - a thinking type the model does not take is refused: of the Claude 5.x families only Haiku
-//     takes "disabled", and Opus and Fable take only "adaptive" (koinon-private#316, see claudeThinkingTypes), and
+//     takes "disabled", and Opus and Fable take only "adaptive" (old issue 316, see claudeThinkingTypes), and
 //   - anthropic-version must be present.
 //
 // Strict mode also checks the reasoning object of a chat-completions request the way OpenRouter
@@ -62,7 +62,7 @@ var thinkingDisplays = []string{"summarized", "omitted"}
 // claudeThinkingTypes are the thinking types each Claude 5.x family takes, by the start of the
 // normalized model name (see claudeName); a model of no listed family takes every type. Sonnet 5.5
 // refuses "disabled"; Opus 5.5 and Fable 5.1 think always and refuse both "enabled" and
-// "disabled" (deep dive G4 of koinon-private#316, 2026-10-31). The fake keeps its own list rather than reading
+// "disabled" (deep dive G4 of old issue 316, 2026-10-31). The fake keeps its own list rather than reading
 // internal/thinking, so a wrong row there fails a spec here.
 var claudeThinkingTypes = []struct {
 	prefix string

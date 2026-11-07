@@ -49,7 +49,7 @@ const (
 	SystemDaily = "system_daily"
 	// RunSpend is the spend limit of the run an agent's key is serving (ADR 0081). It is a level of
 	// the key's net limit while the run is open, narrower than the agent's daily limit, and covers
-	// only that run. A task scope (koinon-private#183) is another level of the same kind.
+	// only that run. A task scope (old issue 183) is another level of the same kind.
 	RunSpend = "run_spend"
 )
 

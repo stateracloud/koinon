@@ -41,7 +41,7 @@ func fakeUpstream(hits *atomic.Int64) *httptest.Server {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		w.Header().Set("Content-Type", "application/json")
 		// A provider that answers with an error status, to tell its answers from the gateway's own
-		// refusals (the do-not-retry marker, koinon-private#342).
+		// refusals (the do-not-retry marker, old issue 342).
 		if status, ok := ProviderErrors[req.Model]; ok {
 			if req.Model == "provider-429-retry" {
 				w.Header().Set(gateway.DoNotRetryHeader, "true")

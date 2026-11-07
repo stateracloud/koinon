@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # The Go test run of CI (`make test-go`): the suites listed in PARALLEL_SUITES run with Ginkgo's
-# parallel mode (-p, one OS process per core), every other package with plain `go test` (koinon-private#222).
+# parallel mode (-p, one OS process per core), every other package with plain `go test` (old issue 222).
 #
 # A suite may be listed only when each parallel process is isolated: pgtest.Start and
 # pgtest.StartTemplate run in every process's BeforeSuite, so each process gets databases of its
 # own, and the suite binds no fixed port and writes no fixed path. Add a suite here after checking
 # that; do not serialise a suite to hide shared state, fix the state.
 #
-# One Postgres per run (koinon-private#224): this script starts one server (hack/pgserver) and passes its DSN in
+# One Postgres per run (old issue 224): this script starts one server (hack/pgserver) and passes its DSN in
 # KOINON_PGTEST_DSN, and every test process of the run, parallel or not, creates its databases there
 # as copies of one template migrated once per run (internal/testing/pgtest). The databases are
 # still per process (names unique on the server), so the isolation above holds for rows and
@@ -17,7 +17,7 @@
 # container per process. Without Docker no server starts and the suites skip as before (testenv);
 # with KOINON_PGTEST_DSN already set, that server is used.
 #
-# Exit codes alone do not show that a suite ran (koinon-private#507): a suite that skips as a whole exits 0, and
+# Exit codes alone do not show that a suite ran (old issue 507): a suite that skips as a whole exits 0, and
 # under -p a suite whose processes exit before reporting prints "Test Suite Passed" with no report.
 # So every Ginkgo suite also writes a JSON report, and hack/testverdict gives each one PASS, FAIL,
 # SKIPPED (a missing requirement declared with internal/testing/testenv, e.g. no Docker) or NOT RUN
@@ -33,7 +33,7 @@
 # Usage: hack/go-test.sh [PKG...] (default ./...; the parallel suites among PKG still run with -p).
 # Pass extra Ginkgo flags with GINKGO_FLAGS, a process count with PROCS.
 #
-# Per-spec reports (koinon-private#221): JUnit XML goes to REPORT_DIR (default reports/go, git-ignored), one file
+# Per-spec reports (old issue 221): JUnit XML goes to REPORT_DIR (default reports/go, git-ignored), one file
 # per Ginkgo suite (`ginkgo --junit-report` for the parallel ones, `go test -args
 # -ginkgo.junit-report` for the rest, one testcase per spec) and go-test.xml from `gotestsum --junitfile` for the packages with only plain tests, so a local run and CI produce the same files. CI uploads the directory as an artifact.
 # The Ginkgo JSON reports the verdict reads sit next to them (*_report.json), with the go test
@@ -186,7 +186,7 @@ if ((${#suites[@]} + ${#events[@]})); then
 fi
 
 # The verdict above counts Ginkgo specs only: a plain test that failed shows there as "0 failed".
-# Name the failing part, so "go-test verdict: ok" followed by a non-zero exit is not a mystery (koinon-private#512).
+# Name the failing part, so "go-test verdict: ok" followed by a non-zero exit is not a mystery (old issue 512).
 if ((${#failed[@]})); then
 	echo "go-test.sh: failing part(s): ${failed[*]}; the verdict line above counts Ginkgo specs only, see the '=== FAIL' lines of the go test output" >&2
 fi

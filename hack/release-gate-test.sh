@@ -172,7 +172,7 @@ run_on "$sha" go success
 check "quickstart missing on the commit fails" "$(gate_rc)" 1
 
 new_case
-# koinon-private#595: main skipped the heavy job because the merge tree is the PR head; the head is the evidence.
+# old issue 595: main skipped the heavy job because the merge tree is the PR head; the head is the evidence.
 echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 run_on "$sha" quickstart success
 run_on "$sha" go skipped
@@ -199,7 +199,7 @@ run_on "$sha" quickstart success
 run_on "$sha" go skipped
 check "a check skipped on main with no merged PR fails" "$(gate_rc)" 1
 
-# go-test (koinon-private#610): skipped on main (the merge tree is the PR head), the head decides.
+# go-test (old issue 610): skipped on main (the merge tree is the PR head), the head decides.
 go_test_case() { # a fresh case in which main skipped go-test, the head's go-test is $1 ("" = no run)
 	new_case
 	echo '{"check_runs":[]}' >"$FX/checks-$sha.json"

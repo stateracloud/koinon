@@ -137,7 +137,7 @@ func anthropicSpec(env Env) {
 						// A Claude-shaped ID the catalog says can think; claude-test has the same shape of
 						// provider and no thinking capability.
 						{Name: "claude-haiku-5-5", Format: modelformat.Anthropic, Thinking: thinking.Of("anthropic", "claude-haiku-5-5", modelformat.Anthropic), Price: price},
-						// No catalog row pins a beta today (koinon-private#316); this model's capability does, so the pin
+						// No catalog row pins a beta today (old issue 316); this model's capability does, so the pin
 						// itself stays covered for the row that will.
 						{Name: "claude-pinned", Format: modelformat.Anthropic, Thinking: thinking.Capability{
 							Thinks: thinking.Always, On: thinking.AdaptiveSummarized, Betas: []string{thinking.BindingBeta},
@@ -287,7 +287,7 @@ func anthropicSpec(env Env) {
 			Expect(string(lastUpstream("claude-test").Body)).NotTo(ContainSubstring("mcp_servers"), "no field is added to a plain request")
 		})
 
-		It("sends the catalog's explicit on and off forms to a strict upstream, without any beta (koinon-private#316)", func(ctx SpecContext) {
+		It("sends the catalog's explicit on and off forms to a strict upstream, without any beta (old issue 316)", func(ctx SpecContext) {
 			withThinking := func(model string, th map[string]any) map[string]any {
 				b := msgBody(model, false)
 				b["thinking"] = th
@@ -314,7 +314,7 @@ func anthropicSpec(env Env) {
 			Expect(out).To(ContainSubstring("thinking.adaptive.block_binding: Extra inputs are not permitted"))
 		})
 
-		It("pins a row's beta, so a beta-only field reaches a strict upstream (rc.7, koinon-private#240)", func(ctx SpecContext) {
+		It("pins a row's beta, so a beta-only field reaches a strict upstream (rc.7, old issue 240)", func(ctx SpecContext) {
 			adaptive := func(model string) map[string]any {
 				b := msgBody(model, false)
 				b["thinking"] = map[string]any{"type": "adaptive", "block_binding": map[string]any{"prefix_mismatch_behavior": "drop_block"}}
@@ -338,7 +338,7 @@ func anthropicSpec(env Env) {
 			Expect(lastUpstream("claude-test").Header).NotTo(HaveKey("Anthropic-Beta"))
 		})
 
-		It("drops the client's anthropic-beta for a model that thinks without a pinned beta (OpenRouter, koinon-private#240)", func(ctx SpecContext) {
+		It("drops the client's anthropic-beta for a model that thinks without a pinned beta (OpenRouter, old issue 240)", func(ctx SpecContext) {
 			// The catalog says the model thinks and lists no beta, so nothing replaces the client's
 			// header and the gateway must remove it: otherwise OpenCode's own betas reach the upstream
 			// and hide a request that only works because of them (rc.7).
@@ -392,7 +392,7 @@ func anthropicSpec(env Env) {
 			Expect(up.Header).NotTo(HaveKey("Anthropic-Version"), "an openai model gets no Anthropic headers")
 		})
 
-		It("refuses a request with the agent's key in any header but Authorization, and sends the upstream only the headers a format needs (koinon-private#262)", func(ctx SpecContext) {
+		It("refuses a request with the agent's key in any header but Authorization, and sends the upstream only the headers a format needs (old issue 262)", func(ctx SpecContext) {
 			// An agent is untrusted and holds its gateway key, so it can put the key in any header or in
 			// the query. The upstream is a third party that logs what it receives. Both modes refuse a key
 			// in a header but Authorization, including one the allowlist keeps (a client chooses its

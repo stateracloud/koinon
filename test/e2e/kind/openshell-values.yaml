@@ -10,7 +10,7 @@ server:
   drivers:
     kubernetes:
       workspaceMode: managed
-  # Pull secrets for sandbox pods from a private registry or mirror (koinon-private#130). OpenShell copies these
+  # Pull secrets for sandbox pods from a private registry or mirror (old issue 130). OpenShell copies these
   # Secrets, which must exist in its own namespace, into each sandbox's namespace and attaches them
   # to the workload and supervisor pods; Koinon's chart cannot do this. See the guide "Private
   # registries and mirrors".

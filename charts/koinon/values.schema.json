@@ -450,7 +450,7 @@
                   "properties": {
                     "addKey": {"type": "string", "pattern": "^(|[a-z0-9]([a-z0-9._-]{0,60}[a-z0-9])?)$", "not": {"const": "active"}, "description": "A KEK ID to add; \"active\" is the keyring's pointer, not an ID."},
                     "activateIfNoActive": {"type": "boolean", "description": "With addKey: make the added KEK active when the KEK Secret has no usable active KEK (recovery from a lost KMS key that wrapped it)."},
-                    "rewrapUnbound": {"type": "boolean", "description": "Bind the KEKs wrapped before koinon-private#615 to the install ID; a binary older than koinon-private#615 cannot read them then."},
+                    "rewrapUnbound": {"type": "boolean", "description": "Bind the KEKs wrapped before old issue 615 to the install ID; a binary older than old issue 615 cannot read them then."},
                     "resources": {"type": "object"}
                   }
                 }

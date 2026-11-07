@@ -83,7 +83,7 @@ var _ = Describe("Sandbox image checks", func() {
 		Expect(r.Message).To(ContainSubstring("does not set supervisor_image"))
 	})
 
-	DescribeTable("fails once when the gateway ConfigMap cannot be read and a supervisor image is configured (koinon-private#489)",
+	DescribeTable("fails once when the gateway ConfigMap cannot be read and a supervisor image is configured (old issue 489)",
 		func(ctx SpecContext, cm *corev1.ConfigMap, forbid string) {
 			c := withConfig(cm, func(c *preflight.Config) {
 				c.ExpectSandboxPullSecrets = true

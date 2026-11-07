@@ -13,7 +13,7 @@ flag-then-file-then-default precedence, and agentd its own flags. The chart's si
 (which `KOINON_*` variable each Job or Deployment gets) was checked by awk in `hack/chart-check.d`.
 
 Every fix of the kind below was a mismatch between what a binary needs at startup and what the chart
-gives it: koinon-private#284 and 43d2855e (the migrate Job inherited a check meant for the server, so every fresh
+gives it: old issue 284 and 43d2855e (the migrate Job inherited a check meant for the server, so every fresh
 install failed), 3151301a (`KOINON_KEK_DIR` was missing from the reconciler) and 8c5c8852
 (precedence). The binaries and the chart need one contract, written once and tested against what
 `helm template` renders.
@@ -59,7 +59,7 @@ install failed), 3151301a (`KOINON_KEK_DIR` was missing from the reconciler) and
 
 ## Interactive prompts
 
-(Decided 2026-11-02, koinon-private#459.) An operator subcommand may ask a person on a terminal for what the flags
+(Decided 2026-11-02, old issue 459.) An operator subcommand may ask a person on a terminal for what the flags
 and arguments left out, with huh (`internal/cli`: `Interactive`, `Prompter`).
 
 - **A prompt is a convenience over the flag form, never a replacement.** The gate is `cli.Interactive`:
@@ -88,11 +88,11 @@ and arguments left out, with huh (`internal/cli`: `Interactive`, `Prompter`).
   `make test`, not a fresh install.
 - Negative: a larger dependency set (cobra, viper, fang and their transitive modules, all past the
   ADR 0079 age check); the old argument order stops working.
-- Follow-ups: agentd (koinon-private#458) moves onto `internal/cli` and joins `commandTrees` (the reconciler did in
-  koinon-private#457, and the contract test writes the ConfigMap it mounts to disk, so its file settings are checked); the interactive prompts (koinon-private#459); operator subcommand output with lipgloss; moving
+- Follow-ups: agentd (old issue 458) moves onto `internal/cli` and joins `commandTrees` (the reconciler did in
+  old issue 457, and the contract test writes the ConfigMap it mounts to disk, so its file settings are checked); the interactive prompts (old issue 459); operator subcommand output with lipgloss; moving
   the remaining startup-input assertions of `hack/chart-check.d` into the contract test.
 
 ## Links
 
-- Issue koinon-private#456 and the 2026-11-01 architecture review.
+- Old issue 456 and the 2026-11-01 architecture review.
 - Dependency age check: `hack/dep-age-check.sh`.

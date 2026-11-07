@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# The KEKs wrapped by an AWS KMS key (ADR 0085 decision 12, koinon-private#417): the key-admin Job creates the KEK
+# The KEKs wrapped by an AWS KMS key (ADR 0085 decision 12, old issue 417): the key-admin Job creates the KEK
 # Secret and adds a second KEK; koinon-api and the reconciler only decrypt. Each signs in with IRSA
 # (its ServiceAccount's role). The chart smoke test runs LocalStack (KMS and STS) with TLS at this
 # endpoint, adds what the EKS Pod Identity Webhook would to the pods (and makes the database

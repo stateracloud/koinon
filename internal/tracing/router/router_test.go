@@ -192,7 +192,7 @@ var _ = Describe("Router", func() {
 			Eventually(func() int { return len(be.spans()) }).Should(Equal(1), "the tool span goes at once")
 			Expect(be.named("invoke_agent Support Bot")).To(BeNil(), "the root waits for the ledger")
 			// The root is held asynchronously, by another intake worker than the tool span's: a sweep
-			// before it is held finds nothing, and no later sweep would release it (koinon-private#396, koinon-private#612).
+			// before it is held finds nothing, and no later sweep would release it (old issue 396, old issue 612).
 			Eventually(func() int { return e.r.HeldRoots() }).Should(Equal(1))
 
 			settle(e) // the first poll finds two rows
@@ -229,7 +229,7 @@ var _ = Describe("Router", func() {
 			Expect(testutil.ToFloat64(e.r.Metrics().Received.WithLabelValues("ledger"))).To(Equal(2.0))
 		})
 
-		It("leaves the reasoning tokens out when no call reported a split, rather than write 0 (koinon-private#316)", func() {
+		It("leaves the reasoning tokens out when no call reported a split, rather than write 0 (old issue 316)", func() {
 			unsplit := func(id string, at time.Duration) router.ModelCall {
 				c := call(id, at, 0.25)
 				c.Reasoning = 0
@@ -239,7 +239,7 @@ var _ = Describe("Router", func() {
 			e.post(tr.root(false))
 			// The root is held asynchronously after the POST returns. A sweep that runs
 			// before it is held finds nothing, and the fake clock never sweeps again, so
-			// the spec would wait for spans that no later sweep releases (koinon-private#396).
+			// the spec would wait for spans that no later sweep releases (old issue 396).
 			Eventually(func() int { return e.r.HeldRoots() }).Should(Equal(1))
 			finishTurn(e)
 			Eventually(func() int { return len(be.spans()) }).Should(Equal(3))
@@ -454,7 +454,7 @@ var _ = Describe("Router", func() {
 			req := &coltracepb.ExportTraceServiceRequest{ResourceSpans: []*tracepb.ResourceSpans{{ScopeSpans: []*tracepb.ScopeSpans{{Spans: spans}}}}}
 			body, _ := proto.Marshal(req)
 			// Nothing drains the intake, so a handler that waited for room would never answer: the
-			// answer itself is the proof (httpDo gives up after hangBound) (koinon-private#612).
+			// answer itself is the proof (httpDo gives up after hangBound) (old issue 612).
 			resp := httpDo(http.MethodPost, srv.URL, "application/x-protobuf", bytes.NewReader(body))
 			defer func() { _ = resp.Body.Close() }()
 			var out coltracepb.ExportTraceServiceResponse

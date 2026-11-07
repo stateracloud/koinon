@@ -481,7 +481,7 @@ var _ = Describe("An unusable stored price", func() {
 			Expect(stored(ctx, e)).To(BeZero(), "without koinon.upstream the status is not known to be the provider's")
 		})
 
-		// Issue koinon-private#241: the per-provider-type flag decides, not the status. A provider type that
+		// Old issue 241: the per-provider-type flag decides, not the status. A provider type that
 		// documents it does not bill refused requests is charged nothing for any 4xx; an unknown or
 		// custom one keeps the conservative input charge for any 4xx, 401 and 403 included.
 		for _, status := range []int64{401, 402, 403, 404, 413, 429} {
@@ -510,7 +510,7 @@ var _ = Describe("An unusable stored price", func() {
 			})
 		}
 
-		It("charges a 5xx without usage its input estimate only: not waived, no reserve, the provider's status kept (koinon-private#340)", func(ctx SpecContext) {
+		It("charges a 5xx without usage its input estimate only: not waived, no reserve, the provider's status kept (old issue 340)", func(ctx SpecContext) {
 			e := newEnv(ctx, uniq("org"), "", "100.00")
 			e.model(ctx, "openrouter", flash)
 			x := rejected(e, 502)

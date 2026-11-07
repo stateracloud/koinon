@@ -37,7 +37,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 # loses a push trigger, move its context between the two cases.
 pr_only=(dco claim "e2e result")
 # Contexts that must succeed on the tagged commit AND on the merged pull request's head: `quick
-# checks` runs on main too, but its dependency age steps run on pull requests only (koinon-private#594; they were
+# checks` runs on main too, but its dependency age steps run on pull requests only (old issue 594; they were
 # the PR-only job `dependency age`), so main's green says nothing about them.
 both=("quick checks")
 
@@ -107,7 +107,7 @@ for name in "${required[@]}"; do
 		got=$(conclusion_of "$SHA" "$name")
 		where="on $SHA"
 		# A push to main skips the heavy jobs when the merge tree equals a pull request head whose
-		# required checks passed (hack/ci-skip-heavy.sh, koinon-private#595); they report `skipped` here. Then the
+		# required checks passed (hack/ci-skip-heavy.sh, old issue 595); they report `skipped` here. Then the
 		# merged pull request's head is the evidence, and it must have passed (or skipped) them.
 		if [[ $got == skipped ]]; then
 			got=$(from_pr_heads "$name")
@@ -126,7 +126,7 @@ for name in "${required[@]}"; do
 		failed=1
 	fi
 done
-# go-test (koinon-private#610): the job is skipped when the pull request head had a green external go-test (the commit status
+# go-test (old issue 610): the job is skipped when the pull request head had a green external go-test (the commit status
 # go-test-lab), and `go` accepts that. A go-test that was skipped is therefore checked once more: on the
 # merged pull request's head it must have succeeded, or have been skipped with a green go-test-lab status
 # on that head, or the change must touch nothing the go-* jobs run for. A go-test with no run at all is

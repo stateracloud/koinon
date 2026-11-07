@@ -174,7 +174,7 @@ expect "timeout" 2 "checks 0/1 pending: go
 TIMEOUT"
 
 # 10. --require: missing, skipped, failed, green
-# 10a. (koinon-private#392) two runs of one required check on the head: only the newest counts
+# 10a. (old issue 392) two runs of one required check on the head: only the newest counts
 q_skip=$(cr_at quickstart SKIPPED 21 2026-11-01T10:00:00Z)
 q_ok=$(cr_at quickstart SUCCESS 22 2026-11-01T10:05:00Z)
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$q_skip,$q_ok")"
@@ -185,7 +185,7 @@ run 7 --checks --require quickstart --interval 0
 expect "newest run wins whatever the rollup order" 0 "checks 2/2 green"
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$q_ok,$(cr_at quickstart SKIPPED 23 2026-11-01T10:10:00Z)")"
 run 7 --checks --require quickstart --interval 0
-expect "a success on the head wins over a newer skip (koinon-private#547: any run that passed counts)" 0 "checks 2/2 green"
+expect "a success on the head wins over a newer skip (old issue 547: any run that passed counts)" 0 "checks 2/2 green"
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$(cr_at quickstart CANCELLED 21 2026-11-01T10:00:00Z),$q_ok")"
 run 7 --checks --require quickstart --interval 0
 expect "later success supersedes an earlier cancel" 0 "checks 2/2 green"
@@ -195,7 +195,7 @@ expect "only a cancelled run: failed, with the dispatch hint" 1 "FAILED quicksta
 REQUIRED quickstart failed
 only cancelled runs of quickstart on this head; run: gh workflow run e2e-kind.yml --ref <branch>"
 
-# 10b. (koinon-private#431) cancelled and in progress with the same startedAt: keep waiting for the live run
+# 10b. (old issue 431) cancelled and in progress with the same startedAt: keep waiting for the live run
 t0=2026-11-01T10:00:00Z
 q_cancel=$(cr_at quickstart CANCELLED 41261362803 $t0)
 q_live=$(printf '{"name":"quickstart","status":"IN_PROGRESS","conclusion":"","startedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/41261363000/job/9"}' $t0)
@@ -211,7 +211,7 @@ expect "cancelled plus live that then fails: the failure is reported" 1 "checks 
 FAILED quickstart (run 41261363000)
 REQUIRED quickstart failed"
 
-# 10c. (koinon-private#468) the only quickstart on the head is cancelled while a second e2e-kind run has not created
+# 10c. (old issue 468) the only quickstart on the head is cancelled while a second e2e-kind run has not created
 # its jobs yet: wait for that run, then judge its result; with no live run, fail as before.
 prh() { # <rollup>: an open PR whose head is abc1234…
   printf '{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"headRefOid":"abc1234def","statusCheckRollup":[%s]}' "$1"
@@ -275,7 +275,7 @@ run 7 --checks --require "e2e result" --interval 0
 expect "all green while a dispatched e2e-kind run is queued: waits" 0 "waiting for e2e-kind run 41265167595 on abc1234
 checks 2/2 green"
 
-# 11. (koinon-private#547) --require looks at every check run of the head (gh api), not only the PR rollup, and
+# 11. (old issue 547) --require looks at every check run of the head (gh api), not only the PR rollup, and
 # `--require e2e` passes on a green e2e-lab status or a green quickstart run.
 row() { # <name> <status> <conclusion> <run id> <startedAt>: one row of head_runs' output
   printf '{"name":"%s","status":"%s","conclusion":"%s","startedAt":"%s","completedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/%s/job/9","workflowName":""}\n' "$1" "$2" "$3" "$5" "$5" "$4"
@@ -332,7 +332,7 @@ printf '\n' >"$FAKE_DIR/runs"
 run 7 --checks --require e2e --require go --interval 0
 expect "--require e2e together with another required check" 0 "checks 3/3 green"
 
-# success then a newer FAILURE stays red; success then a newer skip is green (koinon-private#392 intent for failures)
+# success then a newer FAILURE stays red; success then a newer skip is green (old issue 392 intent for failures)
 seq_set "$(prh "$lint_ok,$q_ok,$(cr_at quickstart FAILURE 24 2026-11-01T10:20:00Z)")"
 printf '\n' >"$FAKE_DIR/runs"
 run 7 --checks --require quickstart --interval 0
@@ -383,7 +383,7 @@ expect "required checks green" 0 "checks 3/3 green"
 run 7 --require go --interval 0
 expect "--require needs --checks" 64 "$usage_line"
 
-# 7b. koinon-private#562: the ruleset's required contexts must exist on the head. A queued workflow run has no
+# 7b. old issue 562: the ruleset's required contexts must exist on the head. A queued workflow run has no
 # jobs yet, so a rollup of finished checks is not "all green" while a required context is absent.
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")" "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
 printf 'lint\ngo\nweb\n' >"$FAKE_DIR/rules"
@@ -447,7 +447,7 @@ advisory go pending
 checks 0/0
 CLOSED"
 
-# 7c. (koinon-private#647) a draft is never green; after ready_for_review the draft's runs are ignored
+# 7c. (old issue 647) a draft is never green; after ready_for_review the draft's runs are ignored
 seq_set '{"state":"OPEN","isDraft":true,"mergeStateStatus":"BLOCKED","mergeCommit":null,"statusCheckRollup":[{"name":"quick checks","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-01T10:00:00Z"}]}'
 run 7 --checks --interval 0
 expect "--checks on a draft: DRAFT, exit 5" 5 "DRAFT: not tested, mark ready for review (hack/ship.sh --ready, gh pr ready)"
@@ -547,7 +547,7 @@ run 7 --checks --require e2e --interval 0
 expect "a draft-era e2e-lab status satisfies --require e2e" 0 "checks 2/2 green"
 rm -f "$FAKE_DIR/rules" "$FAKE_DIR/ciruns"
 
-# 7d. (koinon-private#661) a stale PR head: GitHub's headRefOid is not origin's branch tip
+# 7d. (old issue 661) a stale PR head: GitHub's headRefOid is not origin's branch tip
 cat >"$tmp/bin/git" <<'SH'
 #!/usr/bin/env bash
 [ "$1" = ls-remote ] && [ -f "$FAKE_DIR/remote" ] || exit 2

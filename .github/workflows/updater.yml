@@ -2,7 +2,7 @@
 #
 # Branch updater (ADR 0082, item 8): bring the oldest auto-merge pull request that is behind main up
 # to date (strict required checks, no merge queue). The logic is
-# hack/claim.sh update-oldest. Split from claims.yml (koinon-private#596) so that auto_merge_enabled starts only
+# hack/claim.sh update-oldest. Split from claims.yml (old issue 596) so that auto_merge_enabled starts only
 # this job and not the `claim` check.
 #
 # Triggers, each for a reason the others cannot cover:

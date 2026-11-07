@@ -77,7 +77,7 @@ var _ = Describe("Writer on S3", Ordered, func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func(ctx context.Context) error { return ctr.Terminate(ctx) })
-		// SeaweedFS listens on IPv4 only (koinon-private#290): dial the IPv4 loopback.
+		// SeaweedFS listens on IPv4 only (old issue 290): dial the IPv4 loopback.
 		host, err := containerhost.Host(sctx, ctr)
 		Expect(err).NotTo(HaveOccurred())
 		port, err := ctr.MappedPort(sctx, "8333/tcp")

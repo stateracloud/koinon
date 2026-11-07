@@ -15,7 +15,7 @@
 # not touched (git does write the new file contents as objects). Symbolic links, submodules and
 # paths git has to quote are left out and reported.
 #
-# The repositories are the agent's, so git runs with a config the agent cannot use to run code (koinon-private#260):
+# The repositories are the agent's, so git runs with a config the agent cannot use to run code (old issue 260):
 # no system, global or home config (GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL=/dev/null, which also
 # ignores the home include file /etc/gitconfig names), core.fsmonitor and core.hooksPath forced off
 # on the command line, no external diff or textconv, and every filter driver the repository defines

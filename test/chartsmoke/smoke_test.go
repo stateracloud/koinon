@@ -207,7 +207,7 @@ func describeMode(name, valuesFile string) {
 		// KEK Secret and added the KEK keyAdmin.addKey names, each wrapped by the KMS: the Secret
 		// holds no key in the clear, and koinon-api, which may only decrypt, starts from it below.
 		// Each KEK is bound (format 2) to the install ID the migration wrote into the database
-		// (koinon-private#615), which the Job reads with the database settings the chart gives it, and the Job
+		// (old issue 615), which the Job reads with the database settings the chart gives it, and the Job
 		// set the bound-only marker of the new install.
 		It("wraps every KEK with the KMS, bound to the install", func(ctx SpecContext) {
 			k := kmsOf(r)
@@ -512,7 +512,7 @@ func describeMode(name, valuesFile string) {
 		It("starts koinon-agentd and answers its probes", func(ctx SpecContext) {
 			ready["koinon-agentd"] = startDeployment(ctx, rn, r, "koinon-agentd")
 			accounted = append(accounted, "koinon-agentd")
-			// Its readiness probe is /readyz on the health port: the schema gate (ADR 0085, koinon-private#408)
+			// Its readiness probe is /readyz on the health port: the schema gate (ADR 0085, old issue 408)
 			// reads goose_db_version and schema_compat of the migrated database and must find the schema supported.
 			// The drain on SIGTERM must fit in the pod's grace period (ADR 0085): the kubelet
 			// would otherwise kill agentd mid-drain and the leases would not be released.

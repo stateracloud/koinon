@@ -20,7 +20,7 @@ import (
 )
 
 // One layer retries a failed model request, with Koinon's policy (ADR 0056 amendment 2026-10-31,
-// point 3; issue koinon-private#341). OpenCode 2.2.0 would retry 10 times on its own schedule, and koinon-agentd
+// point 3; old issue 341). OpenCode 2.2.0 would retry 10 times on its own schedule, and koinon-agentd
 // used to repeat the turn 3 more times on top: about 44 gateway requests for one failed step.
 // Koinon's koinon.retry plugin decides each of OpenCode's retries from koinon-opencode's switches,
 // and koinon-agentd repeats no turn for this flavor, so the requests counted here are all a failed
@@ -123,7 +123,7 @@ var _ = Describe("koinon-opencode model retries", func() {
 	)
 
 	It("ends at once on the standalone gateway's budget refusal, a 429 with a Retry-After of hours", func(ctx SpecContext) {
-		// koinon-private#342 cannot mark this one in standalone mode: Koinon's Retry-After cap makes it final, and
+		// old issue 342 cannot mark this one in standalone mode: Koinon's Retry-After cap makes it final, and
 		// koinon-agentd then fails the turn as throttled (internal/agentd failure_class_test.go).
 		rs, took := failing(ctx, fakemodel.Faults{RateLimit: 1000, RetryAfter: 11812})
 		Expect(rs).To(HaveLen(1))

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Command pgserver starts the Postgres server every process of a hack/go-test.sh run shares
-// (pgtest.ServerVar, koinon-private#224) and keeps it until it is told to stop.
+// (pgtest.ServerVar, old issue 224) and keeps it until it is told to stop.
 //
 // It writes the server's superuser DSN to -dsn-file once Postgres accepts connections, then waits
 // for SIGTERM or SIGINT and removes the container. If it dies without that, the testcontainers

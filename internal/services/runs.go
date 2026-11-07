@@ -97,9 +97,9 @@ func (s *Server) CancelRun(ctx context.Context, req *runv1alpha1.CancelRunReques
 // was typing after the cancel (ADR 0074 item 8), so a canceled run that was claimed keeps its stream
 // open until finished_at + cancelGrace (at once for an old canceled run), sends such late events and then a second final snapshot. The stream ends once the run has finished and its
 // last event and final snapshot have been sent. A stream that has sent nothing for
-// the heartbeat interval sends a heartbeat message (issue koinon-private#141). Live text, the chunks of the
+// the heartbeat interval sends a heartbeat message (old issue 141). Live text, the chunks of the
 // message or thought the agent is typing (runwatch/chunks.go), is forwarded as it arrives; it is not
-// stored, not replayed and not in seq order (koinon-private#344).
+// stored, not replayed and not in seq order (old issue 344).
 func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest, stream runv1alpha1connect.RunServiceWatchRunServerStream) error {
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleViewer)
 	if err != nil {
@@ -144,7 +144,7 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 	// events, so a batch handed over before an event was stored usually precedes that event. That is
 	// an optimisation only: a batch can still arrive after its item's event (the Hub hands over
 	// notifications and the store is read on separate paths). Every chunk names its item and the
-	// stored event carries the same name, so the client drops a late tail (koinon-private#344).
+	// stored event carries the same name, so the client drops a late tail (old issue 344).
 	drain := func() error {
 		for {
 			select {
@@ -192,7 +192,7 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 		if cursor < run.LastEventSeq {
 			// The run moved on after the events were read. Send the events
 			// first: a snapshot sent now would precede events it already
-			// includes, and the final one must follow the last event (koinon-private#140).
+			// includes, and the final one must follow the last event (old issue 140).
 			continue
 		}
 		// A finished run gets another snapshot when events arrived after the one it had.
@@ -234,7 +234,7 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 				graceOver = true
 				break wait
 			case cs := <-sub.Chunks:
-				// Live text (koinon-private#344): forwarded as it comes, without re-reading the events.
+				// Live text (old issue 344): forwarded as it comes, without re-reading the events.
 				if err := sent(liveProto(cs)); err != nil {
 					return err
 				}

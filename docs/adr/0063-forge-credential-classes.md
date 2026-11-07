@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-26
-- Relates to: [koinon-private#144](https://github.com/stateracloud/koinon-private/issues/144) (decided in conversation on
+- Relates to: old issue 144 (decided in conversation on
   2026-10-26), [0062](0062-code-host-connectors.md)
 - Amends: [0043](0043-workload-identity-adapters-and-koinon-issuer.md) (a narrow exception for
   static code-host tokens), [0007](0007-connector-model.md) (a static-token auth type),
@@ -37,7 +37,7 @@ Gitea's token row has `UID, Name, TokenHash, Scope` and no repository list
 accounts that sign in only with tokens (v28.0.0, #38966). Its deploy tokens are per repository but
 cover git and LFS only, not the REST API (#37306).
 
-Issue koinon-private#144 listed three credential policies to choose from: short-lived and narrowable (GitHub
+Old issue 144 listed three credential policies to choose from: short-lived and narrowable (GitHub
 App), static bot tokens (an exception to ADR 0043, with rotation), and delegated-user OAuth.
 
 ## Decision
@@ -152,7 +152,7 @@ Checked 2026-10-26 (research notes `gitea-overlap.md` §3, `forge-and-trackers.m
 
 ## Links
 
-- Issue [koinon-private#144](https://github.com/stateracloud/koinon-private/issues/144)
+- Old issue 144
 - ADRs [0006](0006-identity-layers.md), [0008](0008-approvals-and-risk-tiers.md),
   [0043](0043-workload-identity-adapters-and-koinon-issuer.md),
   [0044](0044-in-sandbox-credential-exception.md), [0045](0045-openshell-hardening-defaults.md),

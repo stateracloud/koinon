@@ -537,16 +537,16 @@ func serve(ctx context.Context, cfg config) error {
 	// cfg.kekWrapping says (ADR 0085 decision 12). koinon-api is decrypt-only: with a KMS, new KEKs
 	// come from the key-admin Job.
 	var keyring *secretstore.Keyring
-	// Once the install is bound-only (koinon-private#615), KEKs stored unbound are refused; the marker is read on
+	// Once the install is bound-only (old issue 615), KEKs stored unbound are refused; the marker is read on
 	// every load until it is set.
 	wrappers, err := wrapping.New(ctx, cfg.kekWrapping, wrapping.Service, installid.BoundOnlySource(pool))
 	if err != nil {
 		return err
 	}
-	// KMS-wrapped KEKs are bound to the install ID the database holds (koinon-private#615).
+	// KMS-wrapped KEKs are bound to the install ID the database holds (old issue 615).
 	wrappers = wrappers.WithInstallID(installid.Source(pool))
 	// On every load and reload: probe the active KEK's wrapping key (koinon_kek_active_reachable,
-	// registered below with the other metrics) and record the KEK fingerprints (koinon-private#591).
+	// registered below with the other metrics) and record the KEK fingerprints (old issue 591).
 	kekMetrics := kekhealth.NewMetrics(nil)
 	kekMonitor := &kekhealth.Monitor{Wrappers: wrappers, Metrics: kekMetrics, Recorder: &kekhealth.Recorder{Q: store.New(pool)}, Log: slog.Default()}
 	switch {
@@ -555,7 +555,7 @@ func serve(ctx context.Context, cfg config) error {
 		// KEK loses every stored secret): koinon-api creates the Secret once, and only reads it after.
 		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret, Wrappers: wrappers}
 		if cfg.kekCreate {
-			// The first KEK of an install makes it bound-only (koinon-private#615): no KEK stored unbound belongs here.
+			// The first KEK of an install makes it bound-only (old issue 615): no KEK stored unbound belongs here.
 			created, err := kekStore.EnsureWith(ctx, time.Now(),
 				func(ctx context.Context) (bool, error) { return keyscli.AnyEnvelope(ctx, pool) },
 				func(ctx context.Context) error {
@@ -843,7 +843,7 @@ func serve(ctx context.Context, cfg config) error {
 		}
 		mux := http.NewServeMux()
 		mux.Handle(savedwork.UploadPath, savedwork.NewReceiver(pool, keyring, keyFn, slog.Default()))
-		// The live check of an agent's MCP tools (issue koinon-private#488): koinon-api reads the agent's gateway key
+		// The live check of an agent's MCP tools (old issue 488): koinon-api reads the agent's gateway key
 		// and lists the tools as the agent; koinon-agentd gets names only, never the key.
 		if cfg.gatewayMCPURL != "" {
 			mux.Handle(mcpcheck.Path, mcpcheck.Server{Keys: mcpcheck.KubeAgentKeys{Client: kube, Namespace: cfg.secretsNamespace}, Gateway: cfg.gatewayMCPURL, Key: keyFn})

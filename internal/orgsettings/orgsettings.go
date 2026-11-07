@@ -3,7 +3,7 @@
 // Package orgsettings resolves the per-org latency tunables of plan item LT1 (ADRs 0049, 0065,
 // 0066): how long an idle sandbox stays up, how long one whose run waits on a person or another
 // agent stays warm, and how long a run waits for its sandbox before it goes back to the queue, and the most it waits for
-// it in total, across requeues, before it fails (issue koinon-private#160).
+// it in total, across requeues, before it fails (old issue 160).
 // A value the org did not set is the platform default, which the caller passes in (the
 // reconciler's and agentd's own configuration).
 package orgsettings
