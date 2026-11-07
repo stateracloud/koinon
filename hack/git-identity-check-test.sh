@@ -115,12 +115,15 @@ out=$(hack/git-identity-check.sh range "$base" nope 2>&1); check "range: an unkn
 out=$(hack/git-identity-check.sh range 2>&1); check "range: misuse exits 2" 2 $? "$out"
 out=$(hack/git-identity-check.sh bogus 2>&1); check "unknown mode exits 2" 2 $? "$out"
 
-# the shipped list is exactly the project identity, GitHub's own and the noreply glob: no personal name
-want=$'procoduck <coder@procodus.dev>
-GitHub <noreply@github.com>
-* <*@users.noreply.github.com>'
+# the shipped list keeps the project identity and the GitHub lines, and no scratch identity; extra lines
+# (a contributor's own, added in their first pull request) are allowed
 got=$(grep -vE '^[[:space:]]*(#|$)' "$repo/hack/git-identities.allowed")
-if [[ "$got" == "$want" ]]; then echo "ok   the allowed list is the shipped set only"; else echo "FAIL the allowed list differs from the shipped set"; fail=1; fi
+shipped_ok=1
+for line in 'procoduck <coder@procodus.dev>' 'GitHub <noreply@github.com>' '* <*@users.noreply.github.com>'; do
+	grep -qxF -- "$line" <<<"$got" || shipped_ok=0
+done
+grep -qF 'Some Person' <<<"$got" && shipped_ok=0
+if [[ $shipped_ok -eq 1 ]]; then echo "ok   the allowed list keeps the shipped lines"; else echo "FAIL the allowed list lacks a shipped line or holds the scratch identity"; fail=1; fi
 
 [[ $fail -eq 0 ]] && echo "git-identity-check tests passed"
 exit $fail
