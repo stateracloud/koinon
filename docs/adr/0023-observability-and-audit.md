@@ -111,8 +111,12 @@ length of a transaction. HMAC key custody and which OCSF events enter the log st
 **Note (2026-11-07).** [ADR 0100](0100-install-audit-chain.md) (Proposed) supersedes the sentence
 "there are no org-less events and no platform chain" above and the copies of platform actions into
 personal orgs: install-wide actions go to a separate install chain, read by platform admins only. It
-also proposes the install head as the anchor for the superuser gap of the previous paragraph. The
-text of this amendment is left as accepted.
+also proposes the install head as the anchor for the superuser gap of the previous paragraph, and
+extends the lock order: the install head first, then org heads in org ID order. The line "No current
+path audits two orgs in one transaction" above is wrong: `SetPlatformCeiling` writes
+`trace.settings.lowered` in every affected org in one transaction, and the query it uses
+(`LowerOrgTraceLevels`) does not order them by org ID; ADR 0100's implementation fixes both. The
+text of this amendment is otherwise left as accepted.
 
 ## Amendment (2026-10-26): metrics
 

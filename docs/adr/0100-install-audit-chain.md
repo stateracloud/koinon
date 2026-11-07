@@ -4,7 +4,8 @@
 - Date: 2026-11-07
 - Amends: [0023](0023-observability-and-audit.md) (the 2026-10-26 amendment's "no org-less events
   and no platform chain"; the lock order; the deferred superuser item and open question 1)
-- Relates to: [0004](0004-human-identity.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md),
+  and [0004](0004-human-identity.md) (where platform admin grants are audited)
+- Relates to: [0056](0056-model-providers-pricing-and-budgets-per-org.md),
   [0074](0074-run-traces-trace-router.md), [0085](0085-upgrade-compatibility-and-recovery-policy.md),
   [0098](0098-price-catalogue-updates-from-public-sources.md), [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md)
 - Issue: [#324](https://github.com/stateracloud/koinon/issues/324)
@@ -62,9 +63,9 @@ numbered when it is written):
 ```sql
 CREATE TABLE install_audit_events (
     id          uuid PRIMARY KEY DEFAULT uuidv7(),  -- the generator org audit_events uses
-    chain_seq   bigint NOT NULL UNIQUE,
-    prev_hash   bytea NOT NULL,
-    hash        bytea NOT NULL,
+    chain_seq   bigint NOT NULL UNIQUE CHECK (chain_seq >= 1),
+    prev_hash   bytea NOT NULL CHECK (length(prev_hash) = 32),
+    hash        bytea NOT NULL CHECK (length(hash) = 32),
     actor_kind  text NOT NULL CHECK (actor_kind IN ('user','token','agent','secret','system','cli')),
     actor_id    text NOT NULL CHECK (actor_id <> ''),
     action      text NOT NULL,
@@ -77,8 +78,8 @@ CREATE TABLE install_audit_events (
 
 CREATE TABLE install_audit_chain_head (
     singleton  boolean PRIMARY KEY DEFAULT true CHECK (singleton),
-    chain_seq  bigint NOT NULL,   -- 0 before the first event
-    hash       bytea NOT NULL     -- 32 zero bytes before the first event
+    seq        bigint NOT NULL CHECK (seq >= 0),          -- 0 before the first event
+    hash       bytea  NOT NULL CHECK (length(hash) = 32)  -- 32 zero bytes before the first event
 );
 -- the migration inserts the one head row
 ```
@@ -91,23 +92,63 @@ org owns these rows.
 
 **1.1 Guards, copied from migration `00019`.** A `BEFORE INSERT` trigger
 `install_audit_events_chain` (`SECURITY DEFINER`, fixed `search_path`) takes `FOR UPDATE` on the head
-row, sets `chain_seq = head.chain_seq + 1`, `prev_hash = head.hash`, `hash =
+row, sets `chain_seq = head.seq + 1`, `prev_hash = head.hash`, `hash =
 install_audit_event_hash(NEW)`, and moves the head. Values a writer supplies are overwritten. A
-row trigger refuses `UPDATE` and `DELETE` on both tables, and a statement trigger refuses
-`TRUNCATE` for every role, the owner included. `koinon_app` gets `SELECT` on both tables and nothing
-else; `INSERT` on `install_audit_events` is granted to the login role `koinon_api` only (when the
-role exists, as `00019` does for `koinon_app`), because only `koinon-api` writes this chain.
-`koinon-reconciler` and `koinon-agentd` cannot. `docs/ops/secret-keys.md` ("Append-only audit log
-with an external database") gains the matching `REVOKE` and `GRANT` lines for `postgres.mode:
-external`. Test resets that truncate it use `session_replication_role = replica`, as
-`pgtest.TruncateOrgs` does.
+row trigger refuses `UPDATE` and `DELETE` on both tables, except, on the head only, an update made
+from inside the chain trigger (`pg_trigger_depth() > 1`, as `audit_chain_heads_guard` in `00019`
+allows), so the chain trigger can move the head and nothing else can. A statement trigger refuses
+`TRUNCATE` on both tables for every role, the owner included. Test resets that truncate them use
+`session_replication_role = replica`, as `pgtest.TruncateOrgs` does.
 
-**1.2 Writer and transaction.** `koinon-api` writes the chain: its API handlers, its scheduler and
-its CLI subcommands run in its pod (`kubectl exec deploy/koinon-api -- koinon-api keys ...`). The
-Go entry point is `audit.RecordInstall(ctx, q, audit.InstallEvent{...})`, called with the
-transaction of the change it records. A failed write fails the change, as `audit.RecordErr` does
-for org events. It uses the same summary scrubber (`ErrSecretInSummary`) and request ID. Key
-material appears only as a KEK ID and fingerprint; a Secret only by name.
+**1.1a Who may insert.** Only the `koinon-api` binary writes this chain (decision 1.2);
+`koinon-reconciler` and `koinon-agentd` cannot. The grant cannot name the login role `koinon_api`
+directly: with the chart's CloudNativePG setup that role is a managed role the operator creates
+asynchronously, and the migrate Job may already have run by then, so a "grant when the role exists"
+would be skipped for good and `koinon-api` would fail its first install write. Instead:
+
+- the chart's `postInitApplicationSQL` creates a `NOLOGIN` group role
+  `koinon_install_audit_writer` next to `koinon_app`, so it exists before any migration runs;
+- the `koinon_api` managed role lists it in `inRoles` (`[koinon_app, koinon_install_audit_writer]`);
+  the reconciler and agentd roles do not;
+- the migration `REVOKE`s `INSERT, UPDATE, DELETE, TRUNCATE` on both tables from `koinon_app`
+  (which the default privileges would otherwise give it), `GRANT`s `SELECT` on both to
+  `koinon_app`, and `GRANT INSERT ON install_audit_events TO koinon_install_audit_writer`. The
+  migration creates the group role itself when it is missing (`CREATE ROLE ... NOLOGIN` in a `DO`
+  block), so a cluster initialised before this change still gets it; the managed role's `inRoles`
+  then picks it up on the operator's next reconcile.
+
+With `postgres.mode: external` the roles are the operator's. `docs/ops/secret-keys.md` ("Append-only
+audit log with an external database") gains the lines to run once as the schema owner:
+
+```sql
+CREATE ROLE koinon_install_audit_writer NOLOGIN;  -- when the migration could not
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON install_audit_events, install_audit_chain_head FROM <app role>;
+GRANT SELECT ON install_audit_events, install_audit_chain_head TO <app role>;
+GRANT koinon_install_audit_writer TO <koinon-api login role>;
+```
+
+and says plainly that when `koinon-api`, `koinon-reconciler` and `koinon-agentd` share one login
+role, that role holds the grant and the separation is lost: the reconciler and agentd could then
+append install events. The chain still detects edits and removals; only who may append is weaker.
+
+**1.2 Writer and transaction.** The `koinon-api` binary writes the chain, as the `koinon_api`
+database role: its API handlers, its scheduler, its CLI subcommands run in its pod (`kubectl exec
+deploy/koinon-api -- koinon-api keys ...`), and the key-admin Job (`charts/koinon/templates/
+key-admin.yaml`, `koinon-api key-admin`, only with a KMS), which creates the KEK Secret, adds a
+KEK and, with `activateIfNoActive`, activates one. The Go entry point is `audit.RecordInstall(ctx,
+q, audit.InstallEvent{...})`, called with the transaction of the database change it records. A
+failed write fails the change, as `audit.RecordErr` does for org events. Where the change is not a
+database change (a Secret update) or is spread over many transactions (decision 3, keys), the
+event is written right after it and is not atomic with it; decision 3 says how a lost event is
+caught. Key material appears only as a KEK ID and fingerprint; a Secret only by name.
+
+**1.2a The event type.** `audit.Event` today fills only `before` and `after` into the summary. Both
+`audit.Event` and the new `audit.InstallEvent` gain `Reason`, `KoinonVersion` (filled by
+`RecordInstall` and `Record` from the build, not by callers) and, on `Event`, `InstallEventID`; they
+land in the summary as `reason`, `koinon_version` and `install_event_id`. Every summary key still
+passes the same scrubber (`ErrSecretInSummary`) and the request ID is taken from the context as
+today. Keys must not look like a secret value to the scrubber: a Secret is named under
+`secret_name` (allowed), never under a bare `secret`, which is refused.
 
 **1.3 Hash input (version 1).** `hash = sha256(canonical_row || prev_hash)`, with the field
 encoding of the org chain: each field is an 8-byte big-endian byte length followed by its UTF-8
@@ -152,12 +193,21 @@ org stay so: `trace.settings.lowered`, `keys.forget` for each org's values,
 `home.repository_replaced`, `model.format_rederived`, org prices, and `admin_api.call` (an admin API
 token is bound to an org).
 
-**1.7 Lock order.** A transaction that writes both kinds of event writes the install event first,
-then its org events in org ID order. This extends the ADR 0023 lock order (org heads in org ID
-order) with one head that always comes first, so two such transactions cannot deadlock. A
-transaction that has already written an org event must not write an install event. Every install
-write serialises on the one head; the volume is small (a few rows on a quiet day, one per price
-version, one per key operation), and none of these transactions is long.
+**1.7 Lock order.** The audit heads are the last locks a transaction takes. A transaction first
+takes its domain locks (the platform price lock `LockPlatformPrices`, `LockPlatformTraceSettings`,
+row locks on what it changes), then writes the install event, then its org events in org ID order.
+This extends the ADR 0023 lock order (org heads in org ID order) with one head that always comes
+first among the heads, so two such transactions cannot deadlock. A transaction that has already
+written an org event must not write an install event. Every install write serialises on the one
+head; the volume is small (a few rows on a quiet day, one per price version, one per key
+operation), and none of these transactions is long.
+
+Two paths break this today and issue 2 fixes them: `SetPlatformCeiling`
+(`internal/tracedest/platform.go`) writes each org's `trace.settings.lowered` before the platform
+event, and must write the install event first; and `LowerOrgTraceLevels`
+(`internal/db/queries/trace.sql`) returns the lowered orgs in no fixed order, and gains `ORDER BY
+org_id` so their events are written in org ID order. The second also means ADR 0023's line "no
+current path audits two orgs in one transaction" is wrong; the 2026-11-07 note there corrects it.
 
 ### 2. Every entry has an actor; system actors are named by component
 
@@ -171,6 +221,7 @@ vocabulary:
 | `koinon-api:bootstrap` | the start-up step that creates the first admin and the default org |
 | `koinon-api:startup` | start-up observation of Helm-set settings and keys (decision 3) |
 | `koinon-api:keys` | key generation by `koinon-api` itself (the first KEK, the saved-work key) |
+| `koinon-api:key-admin` | the key-admin Job: KEK Secret creation, `addKey`, `activateIfNoActive`, install binding |
 | `koinon-api:oidc-sync` | the platform admin grant and revoke from IdP groups at login (today ID `oidc`) |
 | `koinon-api:price-refresh` | the price refresh and its bounded auto-apply (ADR 0098 decision 3) |
 | `koinon-api:audit-anchor` | the anchor and checkpoint job (decision 4) |
@@ -198,32 +249,69 @@ on `audit_events` holds new rows to it without touching old ones.
 | `platform_price.set`, `platform_price.rollback`, `platform_price.retired`, `price.proposal.accepted`, `price.proposal.dismissed`, `price.refresh.settings_changed` (ADR 0098 decision 5) | copies per admin, or `slog` only (#316) | user, `cli` or `system koinon-api:price-refresh` |
 | `platform_admin.grant`, `platform_admin.revoke` | the user's personal org | user, or the OIDC group sync (today `system oidc`, renamed `koinon-api:oidc-sync`) |
 | `platform_admin.bootstrap` (the first admin's creation, with the default org's ID as target) | not audited | `system koinon-api:bootstrap` |
+| `platform_admin.grant` by bootstrap (it re-grants the bootstrap admin on every start; an event whenever that grant inserts a row, so a removed grant coming back shows) | not audited | `system koinon-api:bootstrap` |
 | `trace.platform_destination.set`, `.delete`, `.test`; `trace.platform_ceiling.set` | the acting admin's personal org | user |
 | `keys.add`, `keys.activate`, `keys.rewrap`, `keys.reencrypt`, `keys.retire`, `keys.forget` (its platform part; each org's part stays per org) | `keys.forget` copies per admin; the rest not audited | `cli` |
 | `keys.generated` (a KEK or the saved-work key `koinon-api` makes) | not audited | `system koinon-api:keys` |
-| `keys.observed` (a key or generated Secret `koinon-api` sees for the first time, by ID and fingerprint or by name and UID) | not audited | `system koinon-api:startup` |
+| `keys.secret_created`, `keys.add`, `keys.activate`, `keys.bound` from the key-admin Job | not audited | `system koinon-api:key-admin` |
+| `keys.observed` (the key set or a generated Secret differs from the last recorded state) | not audited | `system koinon-api:startup` |
 | `platform.settings.observed` (Helm-set platform settings that differ from the last recorded ones) | not audited | `system koinon-api:startup` |
 
-**Keys.** Making a key is a Kubernetes API call, not a database write, so it cannot share a
-transaction with its event. `koinon-api` writes `keys.generated` right after it created the Secret,
-and on every start writes `keys.observed` for any KEK ID or generated Secret it has no event for,
-which also catches a crash between the two and keys made outside it (`secrets.kek.existingSecret`,
-the ensure-secrets Job, which runs as a Helm hook before the database may exist). A KEK is named by
-ID and fingerprint (as `keys status` prints it); another generated Secret by name, UID and creation
-time, never by a hash of its value. `keys.*` events from the CLI are written in the transaction of
-the database change they make (`rewrap`, `reencrypt`, `forget`) or, for a Secret-only change
-(`add`, `activate`, `retire`), right after the Secret update succeeded, with the KEK ID and
-fingerprint before and after.
+**The bootstrap admin's default org.** Bootstrap also changes the default org on every start (its
+identity mode, its group mappings, and the revocation of bootstrap sessions when bootstrap login is
+off). Those are org changes: they go in the default org's chain, actor `system
+koinon-api:bootstrap`, each written only when it changes something, with `install_event_id` when an
+install event in the same start caused it.
+
+**Keys: not atomic, so checked on start.** Key events are not atomic with the change they record,
+in three ways, and the ADR says so rather than pretending otherwise:
+
+- Making, adding, activating or retiring a key is a Kubernetes Secret update, not a database write.
+  The writer (`koinon-api`, the `keys` CLI, the key-admin Job) records the event right after the
+  update succeeded, with the KEK IDs and fingerprints before and after.
+- `keys rewrap` and `keys reencrypt` run one transaction per row (`Tool.each` and `Tool.one` in
+  `internal/keyscli/keyscli.go`). They write one `keys.rewrap` or `keys.reencrypt` install event per
+  run, after the loop, with the counts done and failed, the failures by kind, and the KEK before and
+  after; they may also write a `.started` event before the loop, so a run that dies half way shows.
+  A run that changes no row writes nothing.
+- `keys forget` keeps its per-org events in each org's transaction and writes its platform part
+  (the platform trace destination) as one install event.
+
+So a crash or a failed audit write after a Secret update must not leave the change unrecorded. On
+every start `koinon-api` writes `keys.observed` whenever the whole key-set state differs from the
+state in the last recorded key event (`keys.*` with a key-set `after`): the KEK IDs with their
+fingerprints, which one is active, which are retired, and for the generated Secrets their name, UID
+and creation time. This compares state, like `platform.settings.observed`, not just "an ID not seen
+before", so an `activate` or `retire` whose event was lost is still caught at the next start. It
+covers keys made outside Koinon too (`secrets.kek.existingSecret`, and the ensure-secrets Job, which
+runs as a Helm hook before the database may exist). `koinon-api` already has `get` and `list` on
+Secrets in its namespace (`charts/koinon/templates/rbac.yaml`); it reads the generated Secrets'
+metadata only, through a label-selected list, never their values, and never stores a hash of a
+value. A KEK is named by ID and fingerprint, as `keys status` prints it.
 
 **Helm-set settings.** `koinon-api` builds, on start, a fixed list of install-wide settings from its
-flags (price refresh mode, bootstrap login on or off, OIDC issuer and group mappings, the platform
-trace content maximum, retention maximums, isolation tier defaults, the chart and image version;
-names of Secrets, never their contents). In one transaction under a fixed advisory lock (so replicas
-starting together write once) it compares the list with the `after` of the newest
-`platform.settings.observed` event and, when they differ, writes one event with the changed keys in
-`before` and `after`. Settings an admin changes through the API are audited by that API call, not
-here. The list is a Go table next to the flags; adding a flag means deciding whether it is on it,
-and a test lists the flags that are not, so none is forgotten.
+flags. For a flag that names a Secret, a file or a directory it records the name only, never the
+contents. The list:
+
+- auth and sessions: `bootstrap-login`, `bootstrap-admin-username`, `bootstrap-password-file` (name
+  only), `default-org-identity-mode`, `default-org-group-mappings`, `oidc-issuer-url`,
+  `oidc-client-id`, `oidc-redirect-url`, `oidc-groups-claim`, `oidc-scopes`,
+  `oidc-platform-admin-groups`, `session-idle-timeout`, `session-max-lifetime`, `public-url`,
+  `trusted-origins`;
+- network and gateway: `egress-allowed-hosts`, `provider-allowed-hosts`, `guard-addr`,
+  `leak-guard-byte-cap`, `gateway-url`, `gateway-mcp-url`, `github-api-url`;
+- keys and secrets: `kek-secret`, `kek-dir`, `kek-create`, the wrapping flags (`kek-backend`,
+  `openbao-*`, `awskms-*`), `saved-work-secret`, `saved-work-addr`;
+- telemetry and scheduling: `otlp-addr`, `otlp-token-dir`, `durable`, `run-cap-sweep-interval`;
+- the chart and image version.
+
+The price refresh flags are not on it: #316 records them as `price.refresh.settings_changed` (ADR
+0098 decision 5), and one change is recorded once. In one transaction under a fixed advisory lock
+(so replicas starting together write once) `koinon-api` compares the list with the `after` of the
+newest `platform.settings.observed` event and, when they differ, writes one event with the changed
+keys in `before` and `after`. Settings an admin changes through the API are audited by that API
+call, not here. The list is a Go table next to the flags; adding a flag means deciding whether it is
+on it, and a test lists the flags that are not, so none is forgotten.
 
 ### 4. Anchors and signed checkpoints: designed now, built after v0.1
 
@@ -252,7 +340,10 @@ at the anchored `chain_seq`. An org chain rewritten or rolled back behind an anc
 long as the install chain is intact.
 
 **4.2 Signed checkpoints.** After each anchor, `koinon-api` signs the install head. The checkpoint is
-a C2SP signed note:
+a signed note in Koinon's own format. It borrows the layout of a C2SP signed note (origin line, body,
+signature lines), but it is not a transparency-log checkpoint in the tlog sense: its body is a
+hash-chain head, not a Merkle tree root, so it supports no inclusion or consistency proofs, and
+tools built for tlog checkpoints do not verify it.
 
 ```text
 <origin>                  e.g. koinon.dev/install/<install id>/audit (domain from internal/project)
@@ -283,8 +374,12 @@ RFC 3161 timestamp are a later step.
 (`AUDIT_SCOPE_ORG`, the default and today's behaviour, or `AUDIT_SCOPE_INSTALL`); install scope
 requires the caller to be a platform admin and an empty `org_id`, and takes the same filters
 (action prefix, actor, since, until, paging). The admin API follows: `GET
-/admin/v1/audit?scope=install`, under the same rule. The reply's `Event` gains `chain_seq`, and an
-install event has no `org_id`. Org admins and owners never see the install chain; they see the
+/admin/v1/audit?scope=install`, under the same rule. An admin API token is bound to an org, but a
+token whose root user is a platform admin may read and export install scope: it is a read, the
+token's chain is re-checked on every request (`docs/ops/secret-keys.md`, "Admin API tokens"), so
+it stops when the user stops being a platform admin, and no token writes to the install chain
+through this path. A token of anyone else gets `PermissionDenied`. The reply's `Event` gains
+`chain_seq`, and an install event has no `org_id`. Org admins and owners never see the install chain; they see the
 effects in their own chain, with the pointer back. A read-only platform auditor role and a web page
 may come later.
 
@@ -337,9 +432,10 @@ Run-content retention (ADR 0023, 2026-10-31 amendment) still never touches audit
   the shared Go encoder and a SQL/Go agreement test for each tag contain it.
 - Negative: one more lock order rule (install head first) that code review must hold; a test that
   writes both kinds in one transaction checks it.
-- Negative: Secret-only key operations are recorded right after the Secret change, not in one
-  transaction with it; the start-up `keys.observed` pass covers a crash in between, at the cost of
-  an event that says "observed" rather than "generated".
+- Negative: key events are not atomic with their change: Secret updates are recorded right after
+  them, and `rewrap` and `reencrypt` once per run after a loop of per-row transactions. The start-up
+  `keys.observed` pass compares the whole key-set state, so a lost event is caught at the next start,
+  at the cost of an event that says "observed" rather than what happened, and of the gap until then.
 - Negative: the existing platform rows in personal orgs stay there, so the history of platform
   actions before the cutover is split between personal orgs and the install chain. There is no
   schema promise before v0.3 (ADR 0099), so no backfill is owed; the cutover release notes say where
@@ -349,39 +445,52 @@ Run-content retention (ADR 0023, 2026-10-31 amendment) still never touches audit
 
 Each item is its own issue; the first blocks #316 and #305.
 
-1. **Install audit chain, and platform prices in it.** Migration (tables, hash function, triggers,
-   grants), `audit.RecordInstall`, the shared encoder, `audit verify` over both kinds, the
-   `koinon_audit_writes_total` metric, and `docs/ops/secret-keys.md`'s external-database lines.
-   Replace `auditPlatform` on #316 (or a follow-up that lands before #305) with install events,
-   rename `AutoActor` to `system koinon-api:price-refresh`, and align ADR 0098's actor wording.
-2. **Named system actors and the remaining install actions.** `audit.System(id)`; component IDs for
-   every system writer, the org chain's `NOT VALID` check; `platform_admin.grant/revoke/bootstrap`,
-   platform trace destination and ceiling, and `keys forget`'s platform part move to the install
-   chain, with `install_event_id` on their org effects. Retire `ListPlatformAdminPersonalOrgs` as an
-   audit target.
-3. **Key administration and key generation.** `keys.add/activate/rewrap/reencrypt/retire/forget`,
-   `keys.generated` and the start-up `keys.observed` pass, with RBAC for reading generated Secrets'
-   metadata if needed (chart smoke test).
-4. **Helm-set settings.** The settings list, `platform.settings.observed` under an advisory lock,
-   and the test that lists flags left off it.
-5. **Read and export.** `AuditService.List` scope, `GET /admin/v1/audit?scope=install`, JSON lines
-   export (CLI and admin API), `audit verify --file`, and the export format in the docs site.
+1. **Install audit chain, and platform prices in it.** Migration (tables, hash function, triggers
+   with the head's `pg_trigger_depth()` exception, grants), the `koinon_install_audit_writer` group
+   role in the chart's `postInitApplicationSQL` and in `koinon_api`'s `inRoles` (decision 1.1a),
+   `audit.RecordInstall`, the `Event` fields of decision 1.2a, `audit.System(id)`, the shared
+   encoder, `audit verify` over both kinds, the `koinon_audit_writes_total` metric, the
+   install-scope `AuditService.List` read and `GET /admin/v1/audit?scope=install`, and
+   `docs/ops/secret-keys.md`'s external-database lines. Replace `auditPlatform` on #316 (or a
+   follow-up that lands before #305) with install events, rename `AutoActor` to `system
+   koinon-api:price-refresh`, and align ADR 0098's actor wording. Checks: a new
+   `hack/chart-check.d/NN-install-audit-writer-role.sh` asserting that the CNPG render creates the
+   group role and that only the `koinon_api` managed role is in it; and `make test-chart-smoke`
+   extended so `koinon-api` writes an install event on its first start with the roles created in
+   the chart's order (group role before the migration, login role after), and an insert as the
+   reconciler's role is refused.
+2. **Named system actors elsewhere, the remaining install actions, lock order.** Component IDs for
+   every system writer in the org chain and its `NOT VALID` check; `platform_admin.grant/revoke`,
+   the bootstrap events and the default org's bootstrap changes, the platform trace destination and
+   ceiling, and `keys forget`'s platform part move to the install chain, with `install_event_id` on
+   their org effects. Reorder `SetPlatformCeiling` (install event first) and add `ORDER BY org_id`
+   to `LowerOrgTraceLevels` (decision 1.7). Retire `ListPlatformAdminPersonalOrgs` as an audit
+   target.
+3. **Key administration and key generation.** `keys.add/activate/rewrap/reencrypt/retire/forget`
+   with one event per `rewrap` or `reencrypt` run, the key-admin Job's events (actor
+   `koinon-api:key-admin`), `keys.generated`, and the start-up `keys.observed` pass that compares
+   the whole key-set state (decision 3). Generated Secrets are read by metadata only, through the
+   existing RBAC.
+4. **Helm-set settings.** The settings list of decision 3, `platform.settings.observed` under an
+   advisory lock, and the test that lists flags left off it.
+5. **Export.** JSON lines export (CLI and admin API), `audit verify --file`, and the export format
+   in the docs site.
 6. **Anchors** (after v0.1). `install_audit_anchor_heads`, the hourly job, verifier checks, anchor
    age gauge.
 7. **Signed checkpoints** (after v0.1). The signing Secret, `audit.signing_key.added`,
-   `audit.checkpoint`, the C2SP note, off-cluster verification, checkpoint age gauge, rotation.
+   `audit.checkpoint`, the signed note, off-cluster verification, checkpoint age gauge, rotation.
 
 Retention stays with #29 and is designed against decision 5.
 
 ## Open questions
 
-1. Does `koinon-api` need new RBAC (`get` on the named ensure-secrets Secrets) to record them in
-   `keys.observed`, or should the ensure-secrets Job leave its result where `koinon-api` can read it
-   without that? (Issue 3.)
-2. Should anchors (decision 4.1) ship in v0.1 after all? They need no key and close rollbacks of org
-   chains behind the install chain; the maintainer decision puts them after v0.1 with checkpoints.
-3. Which of today's start-up flags belong on the Helm-settings list (decision 3) is decided in issue
-   4; the list above is a first cut.
+1. Should anchors (decision 4.1) ship in v0.1 after all? They are database-only and about one pull
+   request, and they catch a rewrite or rollback of an org chain behind an anchor. The catch:
+   without an exported signed checkpoint they do not stop someone who can rewrite the install chain
+   itself, anchors included. The maintainer decision puts them after v0.1 with checkpoints.
+
+Answered while drafting: `koinon-api` already has `get` and `list` on Secrets in its namespace, so
+`keys.observed` needs no new RBAC (decision 3); the Helm-settings list is the one in decision 3.
 
 ## Links
 

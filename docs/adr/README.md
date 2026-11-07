@@ -23,7 +23,7 @@ are in [0046](0046-adr-conventions.md).
 | [0001](0001-full-multi-tenancy.md) | Full multi-tenancy from the start | Accepted |
 | [0002](0002-namespace-per-org-isolation.md) | One namespace per org, mapped to one OpenShell workspace | Accepted |
 | [0003](0003-postgres-source-of-truth.md) | Postgres via a Go API is the source of truth | Accepted; amended 2026-10-26 (below) |
-| [0004](0004-human-identity.md) | Human identity: generic OIDC with roles in Postgres | Accepted; amended 2026-10-23, 2026-10-26 and 2026-10-30 (below) |
+| [0004](0004-human-identity.md) | Human identity: generic OIDC with roles in Postgres | Accepted; amended 2026-10-23, 2026-10-26 and 2026-10-30 (below); platform admin audit moved by [0100](0100-install-audit-chain.md) (Proposed; note of 2026-11-07 below) |
 | [0005](0005-agent-identity.md) | Agents act as themselves | Accepted |
 | [0006](0006-identity-layers.md) | Identity layers: per-agent ServiceAccount, no usable token in the sandbox | Accepted; amended by [0043](0043-workload-identity-adapters-and-koinon-issuer.md), [0044](0044-in-sandbox-credential-exception.md), [0063](0063-forge-credential-classes.md), [0065](0065-work-model-tasks-inbox.md) and [0073](0073-agent-passport.md) |
 | [0007](0007-connector-model.md) | Connector model: type, connection, grant | Accepted |
