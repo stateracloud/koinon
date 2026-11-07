@@ -1,6 +1,6 @@
 # 0004. Human identity: generic OIDC with roles in Postgres
 
-- Status: Accepted; amended 2026-10-23, 2026-10-26 and 2026-10-30 (below)
+- Status: Accepted; amended 2026-10-23, 2026-10-26 and 2026-10-30 (below); platform admin audit moved by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below)
 - Date: 2026-10-21
 - Decision: [design.md#4](../design.md)
 
@@ -61,6 +61,11 @@ another source stay. Grants and revocations are audited as `platform_admin.grant
 `platform_admin.revoke` (actor `system oidc`), in the user's personal org because audit rows need an
 org. An empty setting changes nothing, so removing the setting does not revoke earlier grants.
 Operators set it and log in once before they disable the bootstrap admin.
+
+**Note (2026-11-07).** [ADR 0100](0100-install-audit-chain.md) (Accepted 2026-11-07) moves `platform_admin.grant`
+and `platform_admin.revoke` out of the user's personal org into the install-level audit chain, renames
+the actor `system koinon-api:oidc-sync`, and adds events for the bootstrap admin's creation and for each
+bootstrap re-grant that inserts a row. The text above is left as accepted.
 
 ## Open questions
 
