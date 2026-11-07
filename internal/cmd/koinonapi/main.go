@@ -379,17 +379,20 @@ func serve(ctx context.Context, cfg config) error {
 	bootstrapDenied := errors.Is(err, audit.ErrInstallWriteDenied)
 	if bootstrapDenied {
 		slog.Error("bootstrap is not recorded yet: the database refuses koinon-api's install audit event; "+
-			"grant the install audit writer role (koinon-api migrate --grants-only, the chart's post-upgrade hook)", "err", err)
+			"grant the install audit writer role (koinon-api migrate --grants-only, the chart's post-upgrade hook); "+
+			"the whole bootstrap transaction, including the bootstrap session revocation, is deferred until that grant arrives and the background retry succeeds", "err", err)
 		err = nil
 	}
 	if err != nil {
 		return fmt.Errorf("bootstrap: %w", err)
 	}
-	slog.Info("bootstrap done", "created_admin", res.CreatedAdmin, "created_org", res.CreatedOrg,
-		"created_credential", res.CreatedCredential, "revoked_bootstrap_sessions", res.RevokedSessions,
-		"bootstrap_login", cfg.bootstrapLogin)
+	if !bootstrapDenied {
+		slog.Info("bootstrap done", "created_admin", res.CreatedAdmin, "created_org", res.CreatedOrg,
+			"created_credential", res.CreatedCredential, "revoked_bootstrap_sessions", res.RevokedSessions,
+			"bootstrap_login", cfg.bootstrapLogin)
+	}
 
-	if res.MissingPasswordFile {
+	if !bootstrapDenied && res.MissingPasswordFile {
 		slog.Warn("bootstrap login is enabled but no password is set; set --bootstrap-password-file")
 	}
 

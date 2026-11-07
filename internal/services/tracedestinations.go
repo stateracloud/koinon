@@ -169,7 +169,7 @@ func (a traceAPI) orgCaller(ctx context.Context, orgID string) (caller, error) {
 	return c, nil
 }
 
-// platformCaller authorizes a platform admin. Platform changes are audited in the admin's personal org.
+// platformCaller authorizes a platform admin. Platform changes are audited in the install audit chain (ADR 0100).
 func (a traceAPI) platformCaller(ctx context.Context) (*auth.Principal, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {

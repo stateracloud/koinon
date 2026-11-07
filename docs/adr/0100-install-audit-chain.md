@@ -278,6 +278,8 @@ vocabulary:
 | `koinon-api:code-host-scope` | the code host connection scope sync, in each org's chain (`org.code_host_scope.replace`) |
 
 `audit.System()` takes the actor ID as an argument, so no caller can write an unnamed system actor.
+
+Rollout window: v0.1.0-rc.9 `audit.System()` returned an empty ID, and migration `00067` holds new `audit_events` rows to a named system actor. While old pods still run after the migration, their system audit inserts fail the CHECK. Those in a transaction (agentd stuck-run and sandbox-wait `agent.mark_unhealthy`, mcp sync and health, approval expiry, question retarget) roll back and are retried on the next loop pass; those outside one (the reconciler's `sandbox.recreate`, `sandbox.delete`, `sandbox.archive` and `agent.mark_unhealthy`, written after the deletion or mark they record) are not: the pass fails, the work is not repeated, and the event is lost; `token.use_failed` is best effort and dropped. The window ends when the last old pod is replaced.
 A `cli` actor keeps the command as its ID (`keys forget`).
 
 **The ID format is frozen** (maintainer decision 2026-11-07, after review): `<component>:<function>`,
@@ -333,7 +335,7 @@ install event in the same start caused it.
 The actions are `org.identity_mode.set`, `org.group_mappings.set` and `org.bootstrap_sessions.revoked`. On
 the first start the creation is the one event: `platform_admin.bootstrap` stands for the grant that
 comes with it, and `platform_admin.grant` is written only when the grant insert adds a row for an
-admin that already exists (maintainer decision 2026-11-07).
+admin that already exists (#329: the bootstrap event covers the grant made with it; this is the implementation's reading, open for review).
 
 **Keys: not atomic, so checked on start.** Key events are not atomic with the change they record,
 in three ways, and the ADR says so rather than pretending otherwise:

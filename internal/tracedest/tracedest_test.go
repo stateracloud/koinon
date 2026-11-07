@@ -3,6 +3,7 @@
 package tracedest_test
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -10,10 +11,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -746,7 +749,10 @@ var _ = Describe("Service", func() {
 		It("holds the level to the platform ceiling, and lowering the ceiling lowers every org above it", func(ctx SpecContext) {
 			other, otherUser, _ := pgtest.NewOrg(ctx, pool)
 			low, lowUser, _ := pgtest.NewOrg(ctx, pool)
+			high, highUser, _ := pgtest.NewOrg(ctx, pool)
 			_, err := svc.UpdateSettings(ctx, org, actor, own, tracedest.SettingsInput{ContentLevel: "full", SampleRate: rate(1), PlatformCopyLevel: "full"})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.UpdateSettings(ctx, high, audit.User(highUser), own, tracedest.SettingsInput{ContentLevel: "full", SampleRate: rate(1), PlatformCopyLevel: "full"})
 			Expect(err).NotTo(HaveOccurred())
 			_, err = svc.UpdateSettings(ctx, other, audit.User(otherUser), own, tracedest.SettingsInput{ContentLevel: "redacted", SampleRate: rate(1), PlatformCopyLevel: "redacted"})
 			Expect(err).NotTo(HaveOccurred())
@@ -755,7 +761,7 @@ var _ = Describe("Service", func() {
 
 			n, err := svc.SetPlatformCeiling(ctx, actor, "redacted")
 			Expect(err).NotTo(HaveOccurred())
-			Expect(n).To(BeNumerically(">=", 1), "the org at full was above the ceiling")
+			Expect(n).To(BeNumerically(">=", 2), "the two orgs at full were above the ceiling")
 			st, _ := svc.GetSettings(ctx, org)
 			Expect(st.ContentLevel).To(Equal("redacted"))
 			Expect(st.PlatformCopyLevel).To(Equal("redacted"))
@@ -774,6 +780,23 @@ var _ = Describe("Service", func() {
 			install := installEvents(ctx, "trace.platform_ceiling.set")
 			Expect(install).To(HaveLen(2), "the reset in BeforeEach and this change")
 			Expect(summary).To(HaveKeyWithValue("install_event_id", install[0].ID.String()), "the org event points back at the install event")
+
+			By("one install event, and both lowered orgs point at it, written in org ID order")
+			Expect(install[0].ID.Valid).To(BeTrue())
+			var highSummary map[string]any
+			highEv := events(ctx, high, "trace.settings.lowered")
+			Expect(highEv).To(HaveLen(1))
+			Expect(json.Unmarshal(highEv[0].Summary, &highSummary)).To(Succeed())
+			Expect(highSummary).To(HaveKeyWithValue("install_event_id", install[0].ID.String()))
+			// created_at is the transaction's time, so the insert order is the heap order of an append-only table.
+			rows, err := pool.Query(ctx, `SELECT org_id FROM audit_events WHERE action = 'trace.settings.lowered' AND org_id = ANY($1) ORDER BY ctid`,
+				[]pgtype.UUID{org, high})
+			Expect(err).NotTo(HaveOccurred())
+			inserted, err := pgx.CollectRows(rows, pgx.RowTo[pgtype.UUID])
+			Expect(err).NotTo(HaveOccurred())
+			want := []pgtype.UUID{org, high}
+			sort.Slice(want, func(i, j int) bool { return bytes.Compare(want[i].Bytes[:], want[j].Bytes[:]) < 0 })
+			Expect(inserted).To(Equal(want), "lowered in org ID order")
 			Expect(events(ctx, org, "trace.platform_ceiling")).To(BeEmpty(), "the platform event is in no org")
 
 			By("no org can pick a level above it")
