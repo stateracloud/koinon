@@ -185,7 +185,7 @@ Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides,
 `go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
 `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. `changes` and
 `quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check and the dependency age steps in one job,
-koinon-private#594: every job bills a whole minute) and the other workflows (`dco`, `gitleaks`, `claim`,
+koinon-private#594: every job pays a fixed start-up cost) and the other workflows (`dco`, `gitleaks`, `claim`,
 `e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
 are skipped only on a push to main whose heavy jobs are skipped. A skipped heavy job reports
 success, so every required check still reports.

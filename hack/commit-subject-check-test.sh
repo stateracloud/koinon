@@ -73,5 +73,23 @@ commit "fix: on main"
 git merge -q --no-ff -m "Merge branch 'side'" side
 expect "merge commit is exempt" 0
 
+# A range with no non-merge commits (base == head) has nothing to check and passes.
+out=$("$script" HEAD HEAD 2>&1)
+rc=$?
+if [[ $rc -eq 0 ]]; then echo "ok   empty range passes"; else echo "FAIL empty range: exit $rc, want 0"; echo "$out"; fail=1; fi
+
+# A failing git rev-list (unknown revision) must fail closed, not pass on an empty list.
+out=$("$script" "$base" does-not-exist 2>&1)
+rc=$?
+if [[ $rc -ne 0 && $out == *"rev-list"* ]]; then echo "ok   failing rev-list fails closed"; else echo "FAIL failing rev-list: exit $rc, want non-zero with a rev-list message"; echo "$out"; fail=1; fi
+
+# A rev-list warning on stderr (an ambiguous refname) is not read as a commit: the range still passes.
+commit "fix: ambiguous head"
+git tag amb
+git branch amb
+out=$("$script" "$base" amb 2>&1)
+rc=$?
+if [[ $rc -eq 0 && $out == *ambiguous* ]]; then echo "ok   rev-list warning is not a commit"; else echo "FAIL rev-list warning: exit $rc, want 0 with the warning in the log"; echo "$out"; fail=1; fi
+
 [[ $fail -eq 0 ]] && echo "commit-subject-check tests passed"
 exit $fail
