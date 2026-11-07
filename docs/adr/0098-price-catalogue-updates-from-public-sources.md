@@ -218,6 +218,29 @@ These are warnings with numbers, not silent refusals. The real DeepSeek drift wa
 - **OpenRouter tier boundaries** (open question 1, resolved): `context_over` is
   `min_prompt_tokens` itself, and several overrides combine as OpenRouter documents them (decision
   8).
+- **No auto-apply without an audit log.** Install-wide actions get an install-level audit chain of
+  their own, designed in an ADR through #324 and built later. Until the install-level audit chain
+  of #324 lands (it replaces this rule), platform-wide events are audited in every platform
+  admin's personal org, and with no platform admin (a fresh install) the auto-apply fails closed:
+  it applies nothing, leaves the proposals open in class `auto` and logs a warning with their
+  count; a later auto-apply run applies them once an admin exists. Start-up bookkeeping (the refresh
+  settings sync, retirement of entries a release caught up with) still goes ahead with a warning,
+  or koinon-api could not start on a fresh install; a person's decision is refused.
+- **Import and fetch stay apart.** A live proposal is keyed by source, origin, model and values,
+  so an import never rewrites a fetch proposal's provenance and never holds the key a fetch needs.
+  An import's fetch row keeps the file's time as provenance, but the due time of the scheduled
+  refresh and the half-of-last-good floor read only the install's own fetches. A file whose
+  `fetchedAt` is missing or in the future (beyond 5 minutes of clock skew), or whose model count is
+  below its offers or beyond 32 bits, is refused.
+- **A stored entry this binary refuses is skipped.** A platform entry that no longer decodes or
+  validates (a later binary's stricter rules) is left out and counted
+  (`koinon_price_platform_bad_entries`, no labels, and a warning with the count); its models fall
+  through to the default list. Auto-apply and retirement write no version that would silently drop
+  it (they wait, with a warning); a person's accept or rollback writes one without it and the audit
+  event says how many it dropped (`droppedBadEntries`). Retirement at start never fails the start.
+- **Reasoning compares as billed.** An unset reasoning rate bills at the output rate, so the diff
+  and the 25% bound read it as the output rate on both sides: a source that drops a reasoning rate
+  equal to output (decision 8) is no removed bucket against an entry that spells it out.
 
 **Refused** (structural): a rate that does not parse with `money.ParseRate`, a negative rate, tiers
 that do not ascend, or a non-zero price without `max_output` (today's rules).
@@ -257,7 +280,9 @@ records the page URL and "manual" as its source.
   never rewritten, and entries charged in between keep their `price_ref`.
 - **Metrics** (ADR 0023: fixed label sets, never an org, user, agent, ticket or run ID):
   `koinon_price_source_fetch_total{source,result}`, `koinon_price_proposals{class,state}` and
-  `koinon_price_auto_applied_total{source}`. `source` is the fixed set of adapters.
+  `koinon_price_auto_applied_total{source}`. `source` is the fixed set of adapters. Since the
+  2026-11-07 amendment also `koinon_price_unpriced_models{provider_type}` and
+  `koinon_price_platform_bad_entries` (no labels).
 
 ### 6. Air-gapped installs
 

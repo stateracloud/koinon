@@ -89,7 +89,10 @@ about your install is sent) and compares it with the price each of your models h
 **proposals** and applies nothing. For an install that cannot reach OpenRouter, run
 `koinon-api prices fetch --out prices.json` anywhere (it needs no database), carry the file over and
 load it with `koinon-api prices import prices.json`. You vouch for an imported file: its proposals
-are never applied by themselves.
+are never applied by themselves, and they are kept apart from the fetch proposals for the same
+values. The file's fetch time is recorded, but it never delays the scheduled fetch or moves the
+model-count floor of a live fetch. A file with no `fetchedAt`, one more than 5 minutes in the
+future, or a model count below its offers is refused.
 
 **Classes.** Every proposal has a class, from fixed rules in the code:
 
@@ -120,18 +123,31 @@ them; `koinon-api` stores them, and `prices fetch` on the command line classifie
 bounds too. Every change is audited; roll back with the command above.
 
 **When the default list catches up.** On start `koinon-api` retires a platform entry that equals the
-new default entry of the same id (`platform_price.retired`, the reason names the list version).
+new default entry of the same id (`platform_price.retired`, the reason names the list version). If
+that fails, `koinon-api` logs a warning and starts anyway.
+
+**A stored platform entry this version refuses** (one written under an older release's rules that
+no longer validates) is skipped: its models are priced from the default list, the rest of the
+version still applies, `koinon_price_platform_bad_entries` counts them and a warning says how many.
+Auto-apply and retirement then wait (they would drop the entry without a person deciding); roll
+back to a good version or accept a proposal, which writes a version without the bad entries and
+says in its audit event how many it dropped (`droppedBadEntries`).
 
 **Audit.** In the personal org of every platform admin: `price.proposal.accepted`,
 `price.proposal.dismissed`, `platform_price.set`, `platform_price.rollback`,
 `platform_price.retired`, `price.import.uploaded` and `price.refresh.settings_changed`. Before the
-first platform admin exists, `koinon-api`'s own bookkeeping (the stored refresh settings, an
-auto-apply, a retirement when the default list catches up) still happens: there is no org to audit
-it in, so it logs a warning and the append-only platform tables are the record. A person's command
-(`accept`, `dismiss`, `rollback`, `import`) is refused until a platform admin exists.
+first platform admin exists, `koinon-api`'s start-up bookkeeping (the stored refresh settings, a
+retirement when the default list catches up) still happens: there is no org to audit it in, so it
+logs a warning; the append-only platform version table is the record of a retirement, and the
+stored refresh settings are one row updated in place (the current setting only, not a history).
+**No price is applied automatically until a platform admin exists**: the `auto` proposals stay
+open, a warning gives their count, and the next scheduled refresh after an admin is granted applies them
+(until the install-level audit log of #324 replaces this). A person's command (`accept`,
+`dismiss`, `rollback`, `import`) is refused until a platform admin exists.
 
 **Metrics.** `koinon_price_source_fetch_total{source,result}`, `koinon_price_proposals{class,state}`,
-`koinon_price_auto_applied_total{source}` and `koinon_price_unpriced_models{provider_type}`.
+`koinon_price_auto_applied_total{source}`, `koinon_price_unpriced_models{provider_type}` and
+`koinon_price_platform_bad_entries` (no labels).
 
 **Tiers.** OpenRouter's `min_prompt_tokens` override applies to a prompt strictly greater than
 that many tokens, as OpenRouter's SDK documents (ADR 0098), so it becomes `context_over` unchanged.
