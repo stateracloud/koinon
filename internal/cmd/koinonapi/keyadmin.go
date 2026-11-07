@@ -144,14 +144,15 @@ func anyEnvelopeYet(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	return found, err
 }
 
-// kekIDUsedYet is keyscli.UsedID for the recovery path, which must not guess: treating a missing table
-// as empty (as anyEnvelopeYet does) would say "unused" for an ID that later tables still carry, so the
-// recovery fails closed instead, and the operator reruns it once the migrations are done.
+// kekIDUsedYet is keyscli.UsedID for every KEK add path (keys add, the Job's plain add and the recovery),
+// which must not guess: treating a missing table as empty (as anyEnvelopeYet does) would say "unused" for
+// an ID that later tables still carry, so the check fails closed instead and the operator reruns the
+// command once the migrations are done.
 func kekIDUsedYet(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
 	used, err := keyscli.UsedID(ctx, pool, id)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "42P01" { // undefined_table
-		return false, fmt.Errorf("the database is not fully migrated (%s), so it cannot be told whether KEK ID %s is still in use; rerun the recovery once the migrations have finished: %w", pgErr.Message, id, err)
+		return false, fmt.Errorf("cannot check whether KEK ID %q is still used: the database is not fully migrated yet; rerun this command once the migrations have finished (%s): %w", id, pgErr.Message, err)
 	}
 	return used, err
 }

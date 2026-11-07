@@ -49,7 +49,7 @@ var _ = Describe("the key-admin command", func() {
 		Expect(found).To(BeFalse(), "a table that does not exist holds no values")
 
 		used, err := kekIDUsedYet(ctx, pool, "kek-20251201-eeee")
-		Expect(err).To(MatchError(ContainSubstring("rerun the recovery once the migrations have finished")))
+		Expect(err).To(MatchError(ContainSubstring("rerun this command once the migrations have finished")))
 		Expect(used).To(BeFalse())
 	})
 })
