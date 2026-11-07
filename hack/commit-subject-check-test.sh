@@ -83,5 +83,13 @@ out=$("$script" "$base" does-not-exist 2>&1)
 rc=$?
 if [[ $rc -ne 0 && $out == *"rev-list"* ]]; then echo "ok   failing rev-list fails closed"; else echo "FAIL failing rev-list: exit $rc, want non-zero with a rev-list message"; echo "$out"; fail=1; fi
 
+# A rev-list warning on stderr (an ambiguous refname) is not read as a commit: the range still passes.
+commit "fix: ambiguous head"
+git tag amb
+git branch amb
+out=$("$script" "$base" amb 2>&1)
+rc=$?
+if [[ $rc -eq 0 && $out == *ambiguous* ]]; then echo "ok   rev-list warning is not a commit"; else echo "FAIL rev-list warning: exit $rc, want 0 with the warning in the log"; echo "$out"; fail=1; fi
+
 [[ $fail -eq 0 ]] && echo "commit-subject-check tests passed"
 exit $fail

@@ -24,9 +24,10 @@ base=$1 head=$2
 re='^(feat|fix|docs|chore|ci|test|refactor|build|perf|style|revert)(\([^)]*\))?!?: .'
 
 # List the commits first, apart from the loop: a failing rev-list (bad range, missing object) must
-# fail the check, not leave an empty list that passes.
-if ! commits=$(git rev-list --no-merges "$base..$head" 2>&1); then
-	echo "::error::git rev-list --no-merges $base..$head failed, cannot check commit subjects: $commits"
+# fail the check, not leave an empty list that passes. Its stderr goes to the log as it is, never into
+# the list (a warning such as "refname is ambiguous" must not be read as a commit).
+if ! commits=$(git rev-list --no-merges "$base..$head"); then
+	echo "::error::git rev-list --no-merges $base..$head failed (see its error above), cannot check commit subjects"
 	exit 2
 fi
 
