@@ -79,3 +79,12 @@ it. That closes the gap at the source for the price of one prerequisite.
 - The version in the message is whatever the old shell reports in `$BASH_VERSION`.
 - Raising the minimum later (6) is one edit of the guard line in every script plus the lint, done with
   the same mechanical change.
+
+## Note (2026-11-07, issue #300)
+
+The maintainer lab tooling left the repository: the remote-run client, its pod-side scripts, its
+configuration and the document that described the setup are no longer tracked. The repository's e2e path
+is kind (`make dev-kind-up`, `make test-e2e-kind`, the PR's own `quickstart` run). What the text above
+says about the lab's scripts, `--argo`, `--gate` or `hack/lab/` describes the history. The repository
+still reads two commit statuses, `e2e-lab` and `go-test-lab`, as evidence that an external run passed
+on a commit.

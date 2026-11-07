@@ -80,17 +80,10 @@ Checked 2026-10-21:
 CI stays free and public (above). This amendment records the lab lane a maintainer may add and the
 routing of the kind e2e. It does not change what CI requires.
 
-**What koinon-private#512 built.** `hack/e2e-remote.sh --argo --gate <set>` runs one gate set of `hack/lab/gate-run.sh`
-(go-test, agentd-ginkgo, ...) on an Argo Workflows queue the operator runs, in the WorkflowTemplate
-`koinon-gate` (the `koinon-gate` lane, replacing the light lane):
-
-- A gate pod is a main container of 3 CPU / 6 Gi and a Docker-in-Docker sidecar of 1 CPU / 2 Gi. One
-  lab node fits 4 gate runs, or 3 kind e2e runs and 1 gate run. A slot (`gate-1`..`gate-4`) is a mutex.
-- A run that is still Pending after 120 s is given up: every slot busy, the slot mutex, the namespace
-  limit (`namespace-limit`), a ResourceQuota (`quota`) or an unschedulable pod (`unschedulable`). It is
-  deleted, never stopped (a stopped run turns Failed and the lab pushes a false "Failed"), and the
-  script exits 75: the caller runs the gate locally.
-- Measured on the lab: go-test warm about 700 s, agentd-ginkgo about 175 s.
+**What koinon-private#512 built.** `hack/e2e-remote.sh --gate <set>` runs one gate set (go-test,
+agentd-ginkgo, ...) on an optional external queue a maintainer operates. A run that is still Pending after
+120 s is given up (no capacity, a quota or an unschedulable pod). It is deleted, never stopped (a stopped run
+turns Failed and the queue pushes a false "Failed"), and the script exits 75: the caller runs the gate locally.
 
 **Decision (procoduck, 2026-11-02, koinon-private#547): a green lab run is enough to merge a needs-e2e pull request.**
 The kind e2e of a pull request is tested like this, in this order:
@@ -100,8 +93,8 @@ The kind e2e of a pull request is tested like this, in this order:
    accepts a green `e2e-lab` on the head, or any green `quickstart` check run on the head.
 2. GitHub's `e2e-kind` runs on a pull request only when there is no green lab run: no lab (exit 78), the
    lab cannot run it now (exit 75: unreachable, no slot, Pending fallback, no verdict), the change touches
-   `flavors/` (exit 79: the lab cannot build a flavor image, `nvcr.io` is fenced there; refused up front
-   unless `--allow-flavors` because the image is already in the lab's registry), or the pull request
+   `flavors/` (exit 79: the external run cannot build a flavor image; refused up front unless
+   `--allow-flavors`), or the pull request
    changes the e2e's own files (already forced) or carries the `e2e` label.
 3. Main stays batched on GitHub, plus the nightly run, always.
 
@@ -124,10 +117,9 @@ Exit codes of `hack/e2e-remote.sh --argo` separate the cases a caller acts on di
 1 the e2e failed, 2 usage, 75 the lab cannot run it now (fall back), 76 not run, 78 no lab configured,
 79 refused for flavors.
 
-Note (2026-11-06, issue #200): exit 79 and `--allow-flavors` are gone. The lab builds the flavor image
-through its registry's mirror of `nvcr.io`: the base image is the build input `FLAVOR_BASE`, which must
-carry the digest the Dockerfile pins (`hack/flavor-base.sh`), and the lab's runner sets it from its own
-config. A change under `flavors/` is tested on the lab like any other (point 2's flavors case no longer
+Note (2026-11-06, issue #200): exit 79 and `--allow-flavors` are gone. The external run builds the flavor image
+through the build input `FLAVOR_BASE`, which must carry the digest the Dockerfile pins
+(`hack/flavor-base.sh`); the external runner sets it from its own configuration. A change under `flavors/` is tested externally like any other (point 2's flavors case no longer
 applies).
 
 ## Amendment (2026-11-03, koinon-private#610): CI's go-test on the lab gate first
@@ -143,7 +135,7 @@ pull request runs `go-test` on Blacksmith. `hack/ci-skip-heavy.sh decide` (push 
 `hack/release-gate.sh` treat a skipped `go-test` as green only with a green `go-test-lab` on the pull
 request head or a change with no Go in it. The required check name (`go`), the ruleset and the merge rule do
 not change. Trust limit as for `e2e-lab` (koinon-private#568): a status anyone with write access can post, behind the
-required review on `.github/**`. Details: `docs/dev/maintainer-homelab.md`.
+required review on `.github/**`. Details: the maintainer note (left the repository, 2026-11-07).
 
 ## Note (2026-11-05, public repository)
 
@@ -159,3 +151,12 @@ on the maintainers' lab, where the Kata tier can be tested.
 - [design.md](../design.md), decision 25
 - ADR [0026](0026-home-lab-and-license.md), [0035](0035-v01-flavors.md),
   [0040](0040-agentgateway-model-and-mcp-gateway.md)
+
+## Note (2026-11-07, issue #300)
+
+The maintainer lab tooling left the repository: the remote-run client, its pod-side scripts, its
+configuration and the document that described the setup are no longer tracked. The repository's e2e path
+is kind (`make dev-kind-up`, `make test-e2e-kind`, the PR's own `quickstart` run). What the text above
+says about the lab's scripts, `--argo`, `--gate` or `hack/lab/` describes the history. The repository
+still reads two commit statuses, `e2e-lab` and `go-test-lab`, as evidence that an external run passed
+on a commit.

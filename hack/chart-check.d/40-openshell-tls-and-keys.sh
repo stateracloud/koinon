@@ -64,7 +64,7 @@ n=$(render | grep -c 'secretName: koinon-gateway-providers$' || true)
 has "gateway egress policy" 'policyTypes: \[Ingress, Egress\]' --show-only templates/networkpolicy.yaml
 has "gateway egress carves out the private ranges" '10.0.0.0/8' --show-only templates/networkpolicy.yaml
 lacks "no egress policy with networkPolicy.enabled=false" 'policyTypes: \[Ingress, Egress\]' --set networkPolicy.enabled=false
-has "gatewayEgressTo is rendered" 'cidr: 10.20.0.0/24' --set 'networkPolicy.gatewayEgressTo[0].to[0].ipBlock.cidr=10.20.0.0/24' --show-only templates/networkpolicy.yaml
+has "gatewayEgressTo is rendered" 'cidr: 10.7.0.0/24' --set 'networkPolicy.gatewayEgressTo[0].to[0].ipBlock.cidr=10.7.0.0/24' --show-only templates/networkpolicy.yaml
 env_is KOINON_EGRESS_ALLOWED_HOSTS '"ollama.example.com:11434"' --set 'egress.allowedInternalHosts[0]=ollama.example.com:11434'
 # The old name still works, and both are joined.
 env_is KOINON_EGRESS_ALLOWED_HOSTS '"ollama.example.com:11434"' --set 'providers.allowedInternalHosts[0]=ollama.example.com:11434'

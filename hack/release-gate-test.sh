@@ -216,8 +216,8 @@ go_test_case success
 check "go-test green on the PR head passes" "$(gate_rc)" 0
 go_test_case skipped
 cp "$tmp/lab-ok.json" "$FX/statuses-$pr_head.json"
-check "go-test skipped by the lab (green go-test-lab on the PR head) passes" "$(gate_rc)" 0
-check "...and says it passed on the lab" "$(grep -c 'ok: go-test (passed on the lab' "$tmp/out")" 1
+check "go-test skipped by an external run (green go-test-lab on the PR head) passes" "$(gate_rc)" 0
+check "...and says it passed in an external run" "$(grep -c 'ok: go-test (passed in an external run' "$tmp/out")" 1
 go_test_case skipped
 check "go-test skipped with no go-test-lab status and Go in the change fails" "$(gate_rc)" 1
 check "...and names go-test" "$(grep -c 'FAIL: go-test: skipped on the merged pull request' "$tmp/err")" 1

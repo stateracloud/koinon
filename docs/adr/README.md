@@ -58,7 +58,7 @@ are in [0046](0046-adr-conventions.md).
 | [0036](0036-v01-demo.md) | v0.1 demo: a 15-minute quickstart ending in one approved GitHub action | Accepted |
 | [0037](0037-tooling.md) | Tooling: goose, Starlight, ACP Go SDK, Tilt | Accepted |
 | [0038](0038-governance.md) | Governance: BDFL with a written path to maintainership | Accepted |
-| [0039](0039-development-setup.md) | Development setup: procoduck's Mac plus the home-lab Talos cluster | Accepted |
+| [0039](0039-development-setup.md) | Development setup: a maintainer's Mac plus a Talos+Kata cluster | Accepted |
 | [0040](0040-agentgateway-model-and-mcp-gateway.md) | agentgateway as the model gateway and MCP gateway | Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 (below) |
 | [0041](0041-koinon-spend-ledger-and-budget-stops.md) | Koinon spend ledger and budget stops | Accepted; amended 2026-10-30 (below) |
 | [0042](0042-ask-tier-park-and-execute.md) | Ask tier: park the run, Koinon executes the approved call | Accepted; amended by [0048](0048-openshell-spike-results.md), [0065](0065-work-model-tasks-inbox.md) and [0084](0084-leak-guard.md) |

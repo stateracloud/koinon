@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The Koinon namespace. The Tiltfile adds the labels in `namespaceLabels` of hack/dev/local.yaml on a
-# remote cluster (the maintainer's home lab uses that for its secret store).
+# remote cluster (for a cluster with its own secret store).
 apiVersion: v1
 kind: Namespace
 metadata:

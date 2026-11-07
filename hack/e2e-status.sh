@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Post the commit status `e2e-lab` on a commit: the record that a lab run of the kind e2e passed (or
-# failed) on exactly that commit (koinon-private#547). hack/e2e-remote.sh --argo calls it after the run; run it by
+# Post the commit status `e2e-lab` on a commit: the record that an external run of the kind e2e passed (or
+# failed) on exactly that commit (koinon-private#547). The run's own driver calls it after the run; run it by
 # hand to post a result again, for example when the commit was not pushed yet at the time.
 #
 #   hack/e2e-status.sh <sha> <success|failure> <description> [target url]
@@ -10,14 +10,14 @@
 # On GitHub the required check `e2e result` (hack/e2e-gate.sh) accepts a green `e2e-lab` on the PR head
 # for a pull request that needs the e2e; a success here re-runs its failed `e2e result`
 # (hack/e2e-rerun-result.sh). `hack/pr-wait.sh <PR> --checks --require e2e` accepts a green `e2e-lab` on the PR head. The status is
-# not a required check of the ruleset (contributors without a lab cannot produce it).
+# not a required check of the ruleset (not every contributor can produce it).
 #
 # Posts with `gh api repos/{owner}/{repo}/statuses/<sha>` from the repository of the current directory.
 # KOINON_E2E_NO_STATUS=1 posts nothing (local experiments). Exit 0 posted or skipped on purpose; 1 the
 # post failed (most often: the commit is not on GitHub yet, push the branch and run this again);
 # 64 usage. The caller treats a failed post as a warning: the run's own result is not affected.
 #
-# KOINON_STATUS_CONTEXT names another context (default e2e-lab). The lab's go-test gate run posts
+# KOINON_STATUS_CONTEXT names another context (default e2e-lab). An external go-test run posts
 # `go-test-lab` this way (koinon-private#610, hack/go-test-lab.sh); only `e2e-lab` re-runs `e2e result` afterwards.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.

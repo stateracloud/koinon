@@ -9,6 +9,6 @@
 set -uo pipefail
 PORT=${PORT:-18080}
 while true; do
-  kubectl --context homelab -n openshell port-forward svc/openshell "${PORT}:8080"
+  kubectl --context "${SPIKE_CONTEXT:?set SPIKE_CONTEXT}" -n openshell port-forward svc/openshell "${PORT}:8080"
   sleep 2
 done
