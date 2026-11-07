@@ -168,7 +168,7 @@ Both use only the fake MCP server (`koinon-fakemcp`) as the receiver, and canari
   `go test ./test/escape/ -ginkgo.label-filter=leakguard`; set `KOINON_REQUIRE=escape-mcp-gateway` there
   so a missing gateway fails instead of skipping. Exit condition: `kind.sh` installs the Koinon chart
   with the fake MCP server (or the e2e job runs this suite against its install) and sets the variables;
-  tracked by a follow-up issue the maintainer files before #293 closes. The kind e2e case above is the
+  tracked by #348. The kind e2e case above is the
   one that runs in CI today.
 
 Both fail when the guard is bypassed: make `write_item` pass the guard (declare its sink class `none`)
