@@ -145,6 +145,9 @@ type Tool struct {
 	// RecordStarted writes the optional .started event before the per-row loop of rewrap and
 	// reencrypt, so a run that dies half way shows.
 	RecordStarted bool
+	// AuditOptional makes Add carry on, and return ErrNotAudited after the change, when the chain
+	// cannot be read for the "before" state (the key-admin Job).
+	AuditOptional bool
 }
 
 // auditor is the Auditor the commands write with, or nil.
@@ -158,13 +161,16 @@ func (t *Tool) auditor() *Auditor {
 	return nil
 }
 
-// snapshot is the "before" state of a change, taken before it. A nil Auditor takes none.
-func (t *Tool) snapshot(ctx context.Context, ks KeySet) (*Auditor, KeyState, error) {
+// snapshot is the "before" state of a change, taken before it: the live key set, loaded again under
+// the audit advisory lock. When the live KEKs differ from the last recorded state (an earlier change
+// whose event was lost), the Auditor first writes that difference as keys.observed, so this change's
+// event does not absorb it. A nil Auditor takes none.
+func (t *Tool) snapshot(ctx context.Context, command string) (*Auditor, KeyState, error) {
 	a := t.auditor()
 	if a == nil {
 		return nil, KeyState{}, nil
 	}
-	before, err := a.Snapshot(ctx, ks)
+	before, err := a.Baseline(ctx, t.Store.Load, command)
 	return a, before, err
 }
 
@@ -574,9 +580,15 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 	if err := RefuseUsedID(ctx, used, id); err != nil {
 		return err
 	}
-	a, before, err := t.snapshot(ctx, ks)
+	a, before, err := t.snapshot(ctx, "add")
+	var notAudited error
 	if err != nil {
-		return err
+		if !t.AuditOptional {
+			return err
+		}
+		// The key-admin Job: a chain it cannot read is a warning, not a failure. The Secret changes
+		// without an event and the next koinon-api start records the key set as keys.observed.
+		a, notAudited = nil, fmt.Errorf("%w: %w", ErrNotAudited, err)
 	}
 	key := make([]byte, secretstore.KeySize)
 	if _, err := rand.Read(key); err != nil {
@@ -587,7 +599,10 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 		return err
 	}
 	_, _ = fmt.Fprintf(t.Out, "Added KEK %s. Back up the KEK Secret now, then run: koinon-api keys activate %s\n", id, id)
-	return t.recordChange(ctx, a, before, "add", ActionAdd, "kek", id)
+	if err := t.recordChange(ctx, a, before, "add", ActionAdd, "kek", id); err != nil {
+		return err
+	}
+	return notAudited
 }
 
 // Activate makes id the wrapping KEK. New values use it once the pods have the changed Secret
@@ -615,7 +630,7 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 	if err := t.confirm(ctx, fmt.Sprintf("Activate %s?", id), "New values use it within about a minute."); err != nil {
 		return err
 	}
-	a, before, err := t.snapshot(ctx, ks)
+	a, before, err := t.snapshot(ctx, "activate")
 	if err != nil {
 		return err
 	}
@@ -779,6 +794,10 @@ type rowFn func(ring *secretstore.Keyring, b secretstore.Binding, env secretstor
 // errUnreadable is a stored envelope that is not JSON.
 var errUnreadable = errors.New("unreadable envelope")
 
+// errWrap marks a row whose new envelope could not be made: the data key could not be wrapped or the
+// value sealed (the KMS did not answer, no active KEK).
+var errWrap = errors.New("wrap or seal the value")
+
 // failureKind names why a row failed, for the audit event's failures-by-kind: a fixed set, never the
 // row, the org or the error text.
 func failureKind(err error) string {
@@ -789,6 +808,8 @@ func failureKind(err error) string {
 		return "open"
 	case errors.Is(err, secretstore.ErrUnknownKEK):
 		return "unknown_kek"
+	case errors.Is(err, errWrap):
+		return "wrap"
 	}
 	return "database"
 }
@@ -834,6 +855,7 @@ func (t *Tool) each(ctx context.Context, verb, command, action string, fn rowFn)
 				}); err != nil {
 					return fmt.Errorf("nothing was changed: %w", err)
 				}
+				started = true
 			}
 		}
 	}
@@ -925,7 +947,10 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 		}
 		out, err := fn(ring, secretstore.Binding{OrgID: r.org, Table: c.Table, RowID: r.id, Column: c.Column}, env, active)
 		if err != nil {
-			return err
+			if errors.Is(err, secretstore.ErrOpen) || errors.Is(err, secretstore.ErrUnknownKEK) {
+				return err
+			}
+			return fmt.Errorf("%w: %w", errWrap, err)
 		}
 		if out == nil {
 			return nil
@@ -967,7 +992,7 @@ func (t *Tool) Retire(ctx context.Context, id string) error {
 		"The KEK is removed from the key set. Keep a copy in your backup escrow for as long as database backups that used it exist."); err != nil {
 		return err
 	}
-	a, before, err := t.snapshot(ctx, ks)
+	a, before, err := t.snapshot(ctx, "retire")
 	if err != nil {
 		return err
 	}

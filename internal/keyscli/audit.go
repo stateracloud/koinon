@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -248,11 +249,26 @@ type Auditor struct {
 	// Otherwise they are merged over the ones the last recorded state held, so a writer that cannot
 	// see the saved-work key (the CLI, the Job) does not erase it from the state.
 	Authoritative bool
-	// Wait is how long record retries while the chain cannot take the event yet (the table is not
-	// migrated, the writer role is not granted): the key-admin Job runs next to the migration Job.
+	// Wait is how long the Auditor retries, in all its calls together, while the chain cannot take an
+	// event or be read yet (the table is not migrated, the writer role is not granted): the key-admin
+	// Job runs next to the migration Job. The clock starts at the first call, so a Job whose chain
+	// stays unreadable waits Wait once, not once per call.
 	Wait time.Duration
 	// Write replaces the insert, for tests.
 	Write func(ctx context.Context, e audit.InstallEvent) error
+
+	mu       sync.Mutex
+	deadline time.Time
+}
+
+// budget is the instant the retries of this Auditor end, the same for every call.
+func (a *Auditor) budget() time.Time {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.deadline.IsZero() {
+		a.deadline = time.Now().Add(a.Wait)
+	}
+	return a.deadline
 }
 
 func (a *Auditor) actor(command string) audit.Actor {
@@ -296,7 +312,7 @@ func (a *Auditor) LastState(ctx context.Context) (*KeyState, error) {
 // Snapshot describes ks against the last recorded state. Take it before a change, for the event's
 // "before", and pass it to After.
 func (a *Auditor) Snapshot(ctx context.Context, ks KeySet) (KeyState, error) {
-	prev, err := retryChain(ctx, a.Wait, a.LastState)
+	prev, err := retryChain(ctx, a.budget(), a.LastState)
 	if err != nil {
 		return KeyState{}, err
 	}
@@ -330,7 +346,7 @@ type Event struct {
 // Record writes e, retrying for Wait while the chain cannot take it yet.
 func (a *Auditor) Record(ctx context.Context, e Event) error {
 	ev := audit.InstallEvent{Actor: a.actor(e.Command), Action: e.Action, TargetKind: e.TargetKind, TargetID: e.TargetID, Before: e.Before, After: e.After}
-	_, err := retryChain(ctx, a.Wait, func(ctx context.Context) (struct{}, error) {
+	_, err := retryChain(ctx, a.budget(), func(ctx context.Context) (struct{}, error) {
 		if a.Write != nil {
 			return struct{}{}, a.Write(ctx, ev)
 		}
@@ -353,9 +369,8 @@ func notReady(err error) bool {
 	return false
 }
 
-// retryChain runs f, and again every two seconds while the chain is not ready and wait has not passed.
-func retryChain[T any](ctx context.Context, wait time.Duration, f func(context.Context) (T, error)) (T, error) {
-	deadline := time.Now().Add(wait)
+// retryChain runs f, and again every two seconds while the chain is not ready and deadline has not passed.
+func retryChain[T any](ctx context.Context, deadline time.Time, f func(context.Context) (T, error)) (T, error) {
 	for {
 		v, err := f(ctx)
 		if err == nil || !notReady(err) || ctx.Err() != nil || !time.Now().Before(deadline) {
@@ -377,20 +392,38 @@ type ObserveResult struct {
 	After  KeyState
 }
 
-// Observe is the start-up check (ADR 0100 decision 3): it compares the whole key-set state (KEK IDs
-// and fingerprints, the active KEK, the retired KEKs, the generated Secrets' name, UID and creation
-// time) with the "after" of the last recorded key event, and writes keys.observed when they differ.
-// It runs in one transaction under an advisory lock, so replicas that start together write once.
-// An unchanged state writes nothing. ks is the loaded key set (the zero KeySet when koinon-api has
-// none). A write the database refuses for lack of privilege returns audit.ErrInstallWriteDenied.
-func (a *Auditor) Observe(ctx context.Context, ks KeySet) (ObserveResult, error) {
-	gen, err := a.generated(ctx)
-	if err != nil {
-		return ObserveResult{}, err
-	}
+// KeyLoader loads the live key set. The checks call it inside their transaction, after the advisory
+// lock, so what they compare is never older than the last recorded event.
+type KeyLoader func(ctx context.Context) (KeySet, error)
+
+// sameKEKs reports whether two states hold the same KEKs, active KEK and retired KEKs.
+func sameKEKs(a, b KeyState) bool {
+	a, b = a.normalized(), b.normalized()
+	return a.Active == b.Active && slices.Equal(a.KEKs, b.KEKs) && slices.Equal(a.Retired, b.Retired)
+}
+
+// check loads the key set and the generated Secrets under the advisory lock and compares them with the
+// last recorded state. With full it compares the whole state, a first start included, and as the
+// authoritative list of generated Secrets; otherwise only the KEK part, and never when nothing was
+// recorded yet. It writes keys.observed, as actor, when they differ.
+func (a *Auditor) check(ctx context.Context, load KeyLoader, actor audit.Actor, full bool) (ObserveResult, error) {
 	var res ObserveResult
-	err = pgx.BeginFunc(ctx, a.Pool, func(tx pgx.Tx) error {
+	err := pgx.BeginFunc(ctx, a.Pool, func(tx pgx.Tx) error {
+		res = ObserveResult{}
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, advisoryLockName); err != nil {
+			return err
+		}
+		ks, err := load(ctx)
+		defer func() {
+			for _, k := range ks.Keys {
+				clear(k)
+			}
+		}()
+		if err != nil {
+			return fmt.Errorf("load the key set to observe it: %w", err)
+		}
+		gen, err := a.generated(ctx)
+		if err != nil {
 			return err
 		}
 		q := store.New(tx)
@@ -398,20 +431,48 @@ func (a *Auditor) Observe(ctx context.Context, ks KeySet) (ObserveResult, error)
 		if err != nil {
 			return err
 		}
-		cur := stateOf(ks, prev, gen, true)
+		cur := stateOf(ks, prev, gen, full || a.Authoritative)
 		res = ObserveResult{Before: prev, After: cur}
-		if prev != nil && prev.Equal(cur) {
-			return nil
+		if full && (prev == nil || !prev.Equal(cur)) || !full && prev != nil && !sameKEKs(*prev, cur) {
+			ev := audit.InstallEvent{Actor: actor, Action: ActionObserved, TargetKind: "keys", TargetID: "keyset", After: cur}
+			if prev != nil {
+				ev.Before = *prev
+			}
+			if err := audit.RecordInstallErr(ctx, q, ev); err != nil {
+				return err
+			}
+			res.Wrote = true
 		}
-		ev := audit.InstallEvent{Actor: ActorStartup, Action: ActionObserved, TargetKind: "keys", TargetID: "keyset", After: cur}
-		if prev != nil {
-			ev.Before = *prev
-		}
-		if err := audit.RecordInstallErr(ctx, q, ev); err != nil {
-			return err
-		}
-		res.Wrote = true
 		return nil
 	})
 	return res, err
+}
+
+// Observe is the start-up check (ADR 0100 decision 3): it compares the whole key-set state (KEK IDs
+// and fingerprints, the active KEK, the retired KEKs, the generated Secrets' name, UID and creation
+// time) with the "after" of the last recorded key event, and writes keys.observed when they differ.
+// It runs in one transaction under an advisory lock, and loads the key set and the generated Secrets
+// inside it, so replicas that start together write once and a change recorded meanwhile is not
+// mistaken for a missing event. An unchanged state writes nothing. load returns the loaded key set
+// (the zero KeySet when koinon-api has none). A write the database refuses for lack of privilege
+// returns audit.ErrInstallWriteDenied.
+func (a *Auditor) Observe(ctx context.Context, load KeyLoader) (ObserveResult, error) {
+	return a.check(ctx, load, ActorStartup, true)
+}
+
+// Baseline is the "before" of a key command: the live key-set state. A key change whose event was lost
+// (its Secret was saved, its write failed) leaves the live KEKs different from the last recorded
+// state; Baseline then writes keys.observed first, under the advisory lock and as the actor of the
+// command itself (the CLI's, or the Job's), so the command's own event starts from what was recorded
+// and the earlier change is not absorbed into it. The generated Secrets are not compared: a writer
+// that cannot list them merges the recorded ones, and the start-up check owns them. With no earlier
+// event there is nothing to compare. command names the keys subcommand for a CLI actor.
+func (a *Auditor) Baseline(ctx context.Context, load KeyLoader, command string) (KeyState, error) {
+	res, err := retryChain(ctx, a.budget(), func(ctx context.Context) (ObserveResult, error) {
+		return a.check(ctx, load, a.actor(command), false)
+	})
+	if err != nil {
+		return KeyState{}, err
+	}
+	return res.After, nil
 }

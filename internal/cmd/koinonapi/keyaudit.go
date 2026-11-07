@@ -4,7 +4,6 @@ package koinonapi
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -102,12 +101,8 @@ func (k *keyAudit) generatedEvent(ctx context.Context, kind, id string) {
 
 // observe is the start-up check: keys.observed when the key-set state differs from the last recorded.
 func (k *keyAudit) observe(ctx context.Context) error {
-	ks, err := k.load(ctx)
-	if err != nil {
-		return fmt.Errorf("load the key set to observe it: %w", err)
-	}
-	defer clearKeys(ks)
-	res, err := k.auditor(keyscli.ActorStartup).Observe(ctx, ks)
+	// The key set and the generated Secrets are loaded inside Observe, under its advisory lock.
+	res, err := k.auditor(keyscli.ActorStartup).Observe(ctx, k.load)
 	if err != nil {
 		return err
 	}
