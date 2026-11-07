@@ -147,7 +147,8 @@ func receiverCalls(ctx SpecContext, base string) []exfilRecord {
 // The exfiltration case of the MCP leak guard (ADR 0084, ADR 0091; #293) from inside a real
 // sandbox: an agent that has read private text and taken untrusted input (both legs, which the
 // fixture's read_item sets) tries to send that text out through an MCP tool on the gateway path,
-// once as a note body and once as a fetch to an attacker URL. The guard refuses the call or parks
+// once as a note body and once as a second write whose title is an attacker URL (koinon-fakemcp has no
+// fetch-style tool or address argument; #348 adds a real one with the CI wiring). The guard refuses the call or parks
 // it for an approval, and nothing reaches the fake receiver.
 //
 // It needs a guarded gateway (agentgateway with the real leak guard in front of koinon-fakemcp),
@@ -168,11 +169,8 @@ var _ = Describe("Leak guard exfiltration", Label("escape", "openshell", "leakgu
 	)
 
 	BeforeAll(func(ctx SpecContext) {
-		testenv.Require(
-			testenv.Var("escape-mcp-gateway", "KOINON_ESCAPE_MCP_HOST"),
-			testenv.Var("escape-mcp-key", "KOINON_ESCAPE_MCP_KEY"),
-			testenv.Var("escape-mcp-receiver", "KOINON_ESCAPE_MCP_RECEIVER_URL"),
-		)
+		testenv.Require(testenv.Vars("escape-mcp-gateway",
+			"KOINON_ESCAPE_MCP_HOST", "KOINON_ESCAPE_MCP_KEY", "KOINON_ESCAPE_MCP_RECEIVER_URL"))
 		g = dialGateway(ctx)
 		host, port := envOr("KOINON_ESCAPE_MCP_HOST", ""), 4000
 		if p := envOr("KOINON_ESCAPE_MCP_PORT", ""); p != "" {
@@ -236,7 +234,7 @@ var _ = Describe("Leak guard exfiltration", Label("escape", "openshell", "leakgu
 		Expect(answers[0].Failed).To(BeFalse(), "the read is allowed: "+answers[0].Text)
 		Expect(answers[0].Text).To(ContainSubstring(canary))
 
-		By("sending it out, as a note and as a fetch to an attacker URL, is refused or parked for an approval")
+		By("sending it out, as a note and as a second write carrying an attacker URL, is refused or parked for an approval")
 		for i, a := range answers[1:] {
 			Expect(a.Failed).To(BeTrue(), fmt.Sprintf("call %d must not succeed: %s", i, a.Text))
 			Expect(a.Text).To(Or(
