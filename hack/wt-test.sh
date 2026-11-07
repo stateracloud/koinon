@@ -89,6 +89,32 @@ check "new --from REF" eq "$(git -C "$out" rev-parse HEAD)" "$(git rev-parse HEA
 check "path prints the path" eq "$(wt path bar)" "$tmp/kw/bar"
 check "path of a missing worktree fails" refuses wt path nope
 
+# Both spellings are needed on macOS, where /tmp is a symlink to /private/tmp.
+check "sandbox allows the shared root and its macOS canonical path" jq -e '.sandbox.filesystem.allowWrite | index("/tmp/kw") != null and index("/private/tmp/kw") != null' "$repo/.claude/settings.json"
+
+# Creation must use the same writable root from parent and sandbox shells, whose TMPDIR differs.
+mkdir -p "$tmp/parent-temp" "$tmp/lane-temp"
+default_name=wt-test-${tmp##*/}
+out=$(env -u KOINON_WT_ROOT TMPDIR="$tmp/parent-temp" KOINON_WT_NO_INSTALL=1 "$repo/hack/wt.sh" new "$default_name" 2>/dev/null)
+default_root=$(cd /tmp/kw && pwd -P)
+check "new ignores the parent's TMPDIR by default" eq "$out" "$default_root/$default_name"
+check "lane with a different TMPDIR finds the same worktree" eq "$(env -u KOINON_WT_ROOT TMPDIR="$tmp/lane-temp" "$repo/hack/wt.sh" path "$default_name")" "$out"
+# shellcheck disable=SC2016 # $1 belongs to the child shell
+check "lane can remove a file in the shared worktree" env TMPDIR="$tmp/lane-temp" sh -c 'touch "$1/probe" && rm "$1/probe"' sh "$out"
+check "lane with a different TMPDIR removes the worktree" env -u KOINON_WT_ROOT TMPDIR="$tmp/lane-temp" "$repo/hack/wt.sh" rm "$default_name"
+
+# Overrides may be relative or pass through a symlink; stdout and Git must use the physical path.
+ln -s "$tmp/kw" "$tmp/root-link"
+out=$(KOINON_WT_ROOT="$tmp/root-link" wt new canonical 2>/dev/null)
+check "new canonicalizes a symlink root" eq "$out" "$tmp/kw/canonical"
+check "path agrees with the canonical new output" eq "$(wt path canonical)" "$out"
+check "rm accepts the canonical worktree through its root alias" env KOINON_WT_ROOT="$tmp/root-link" "$repo/hack/wt.sh" rm canonical
+mkdir -p relative-root
+out=$(KOINON_WT_ROOT=relative-root wt new relative 2>/dev/null)
+check "new makes a relative override absolute" eq "$out" "$tmp/main/relative-root/relative"
+check "rm finds the relative override" env KOINON_WT_ROOT=relative-root "$repo/hack/wt.sh" rm relative
+rmdir relative-root
+
 # ls
 echo three >"$tmp/kw/bar/b.txt"
 git -C "$tmp/kw/bar" add b.txt

@@ -30,6 +30,11 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
   hand-back of at most 60 lines that cites its sources.
 
 ## Work in your worktree
+- `hack/wt.sh new` uses `/tmp/kw` regardless of the parent's or lane's `TMPDIR` and prints the
+  canonical absolute path (`/private/tmp/kw/...` on macOS). The repository's Claude sandbox settings
+  allow writes to this root. Parents pass the printed path verbatim to the lane. An explicit
+  `KOINON_WT_ROOT` overrides the root; add that location to `sandbox.filesystem.allowWrite` in your
+  local Claude settings before starting lanes there. Keep the sandbox enabled.
 - The parent gives you a worktree. Run every command against it: `git -C <worktree> …`, or absolute
   paths. The shell's directory resets between calls.
 - Never call `hack/claim.sh`: the parent owns claims (one lane per subagent, ADR 0082).
