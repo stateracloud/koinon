@@ -163,6 +163,8 @@ type Server struct {
 
 	keys      Keys
 	scopeSync ScopeSyncer
+	// scopeJobs runs the background scope readings: one per connection, drained at shutdown.
+	scopeJobs *scopeJobs
 	tokens    *tokens.Service
 	budgets   *budget.Service
 	prices    *prices.Service
@@ -215,6 +217,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
 		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces, leakGuard: orgsettings.NewService(pool),
 	}
+	s.scopeJobs = newScopeJobs(opts.Logger, s.runScopeSync)
 	if s.dm != nil {
 		s.dm.bind(s)
 	}

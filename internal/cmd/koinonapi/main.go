@@ -894,7 +894,9 @@ func serve(ctx context.Context, cfg config) error {
 	} else {
 		slog.Warn("the MCP leak guard is off (--guard-addr empty): the gateway refuses every org MCP call")
 	}
+	shutdownDone := make(chan struct{})
 	safego.Go(ctx, slog.Default(), "shutdown", func(context.Context) {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		if guardSrv != nil {
 			guardSrv.GracefulStop()
@@ -904,6 +906,9 @@ func serve(ctx context.Context, cfg config) error {
 		for _, s := range servers {
 			_ = s.Shutdown(shutdownCtx)
 		}
+		// Then the background code-host scope readings: the requests that start them have ended, so
+		// they finish, or are canceled, inside the same deadline.
+		svc.Drain(shutdownCtx)
 	})
 
 	slog.Info("starting koinon-api", "version", project.Version, "addr", cfg.addr,
@@ -911,6 +916,8 @@ func serve(ctx context.Context, cfg config) error {
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+	// ListenAndServe returns as soon as Shutdown starts; the process must not exit before the drain.
+	<-shutdownDone
 	select {
 	case err := <-toolsErr:
 		return fmt.Errorf("github tools server: %w", err)

@@ -28,7 +28,6 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
-	"github.com/stateracloud/koinon/internal/safego"
 )
 
 var tierToProto = map[connectors.Tier]connectionv1alpha1.Tier{
@@ -675,14 +674,23 @@ func (s *Server) syncScope(ctx context.Context, row store.Connection, actor audi
 	if s.scopeSync == nil {
 		return
 	}
-	bg := context.WithoutCancel(ctx)
-	safego.Go(bg, s.log, "code-host-scope-sync", func(bg context.Context) {
-		bg, cancel := context.WithTimeout(bg, scopeSyncTimeout)
-		defer cancel()
-		if err := s.scopeSync.Sync(bg, row, actor); err != nil {
-			s.log.Warn("could not read the connection's repositories into the code-host scope", "org", row.OrgID.String(), "connection", row.ID.String(), "err", err)
-		}
-	})
+	s.scopeJobs.start(row, actor)
+}
+
+// runScopeSync is one bounded reading, run by scopeJobs.
+func (s *Server) runScopeSync(ctx context.Context, row store.Connection, actor audit.Actor) {
+	ctx, cancel := context.WithTimeout(ctx, scopeSyncTimeout)
+	defer cancel()
+	if err := s.scopeSync.Sync(ctx, row, actor); err != nil {
+		s.log.Warn("could not read the connection's repositories into the code-host scope", "org", row.OrgID.String(), "connection", row.ID.String(), "err", err)
+	}
+}
+
+// Drain stops the background code-host scope readings and waits for the running ones, until ctx
+// ends; then it cancels what still runs and waits for that to return. koinon-api calls it in its
+// shutdown, inside the shutdown deadline. After Drain no reading starts.
+func (s *Server) Drain(ctx context.Context) {
+	s.scopeJobs.drain(ctx)
 }
 
 // Paging of ListInstallationRepos. The page token is GitHub's page number, in pages of
