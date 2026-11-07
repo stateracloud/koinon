@@ -180,7 +180,31 @@ func (s *Server) enrichMCP(ctx context.Context, out *approvalv1alpha1.Approval, 
 			call.CurrentContentHash, call.ReviewReason, call.ToolDescription = t.ContentHash, t.ReviewReason.String, t.Description
 		}
 	}
+	call.LeakGuard = leakGuardProto(row.Risk)
 	out.Call = &approvalv1alpha1.Approval_Mcp{Mcp: call}
+}
+
+// leakGuardProto reads the leak guard's part of a card's risk (mcpguard's assessment.risk, under
+// "leak"); nil when the card is not the guard's.
+func leakGuardProto(risk []byte) *approvalv1alpha1.LeakGuard {
+	var r struct {
+		Leak *struct {
+			Reasons     []string          `json:"reasons"`
+			SinkClass   string            `json:"sink_class"`
+			Destination map[string]string `json:"destination"`
+			Legs        struct {
+				UntrustedInput bool `json:"untrusted_input"`
+				PrivateData    bool `json:"private_data"`
+			} `json:"legs"`
+		} `json:"leak"`
+	}
+	if json.Unmarshal(risk, &r) != nil || r.Leak == nil {
+		return nil
+	}
+	return &approvalv1alpha1.LeakGuard{
+		Reasons: r.Leak.Reasons, SinkClass: r.Leak.SinkClass, Destination: r.Leak.Destination,
+		UntrustedInput: r.Leak.Legs.UntrustedInput, PrivateData: r.Leak.Legs.PrivateData,
+	}
 }
 
 // enrichSavedWork fills the diffstat of a "push saved work" request from the saved work's manifest.

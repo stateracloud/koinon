@@ -21,6 +21,10 @@
 # with that CA appended. Interim until OpenShell >= 0.1.7 (supervisor.network.additionalCaConfigMapName),
 # #80. Nothing leaves the cluster.
 #
+# The leak guard exfiltration case (exfil_test.go, #293) needs a guarded gateway this script does not
+# start: it runs when KOINON_ESCAPE_MCP_HOST, KOINON_ESCAPE_MCP_KEY and KOINON_ESCAPE_MCP_RECEIVER_URL are
+# set in the environment (docs/dev/ci.md#leak-guard-exfiltration-cases) and skips otherwise.
+#
 # kind runs sandboxes under runc, so the Kata guest case skips (it needs KOINON_ESCAPE_HOST_KERNEL
 # and a Kata node, the maintainer's release gate). Cases that need other fixtures skip with their
 # reason; the rest run. Every kubectl call names the kind context and nothing else is touched.

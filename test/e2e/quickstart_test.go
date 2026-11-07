@@ -588,6 +588,13 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(ap.GetTool()).To(Equal("write_item"))
 		Expect(ap.GetTarget()).To(Equal(p.TrackerAskTarget))
 		Expect(ap.GetArgsJson()).To(Equal(p.TrackerGuardArgs))
+		// The card names why the guard held the call: both legs, on an external-high tool (#293).
+		lg := ap.GetMcp().GetLeakGuard()
+		Expect(lg).NotTo(BeNil(), "the approval is the leak guard's, and its card carries the guard's reading")
+		Expect(lg.GetReasons()).To(ContainElement("both_legs"))
+		Expect(lg.GetSinkClass()).To(Equal("external-high"))
+		Expect(lg.GetUntrustedInput()).To(BeTrue(), "the card names the untrusted-input leg")
+		Expect(lg.GetPrivateData()).To(BeTrue(), "the card names the private-data leg")
 		Expect(guarded()).To(BeEmpty(), "the guard held the call: nothing reached the server before the approval")
 
 		_, err = c.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: org, ApprovalId: ap.GetId(), ArgsSha256: ap.GetArgsSha256()})
