@@ -161,11 +161,19 @@ Both use only the fake MCP server (`koinon-fakemcp`) as the receiver, and canari
   `KOINON_ESCAPE_MCP_HOST` (and `_PORT`, default 4000), `KOINON_ESCAPE_MCP_KEY` (an agent's gateway key
   on it) and `KOINON_ESCAPE_MCP_RECEIVER_URL` (the fake server's base URL, as the test process
   reaches it); the fixture sets the tools up as `test/e2e/mcp_test.go` does. Without them it skips,
-  or fails when `KOINON_REQUIRE` lists `escape-mcp-gateway`. CI does not run the OpenShell cases (see
-  above): run it with `make test-escape-kind` after pointing those variables at the e2e install.
+  or fails when `KOINON_REQUIRE` lists `escape-mcp-gateway`. **Gap:** CI does not run the OpenShell cases
+  (see above), and `make test-escape-kind` does not set these variables, because `make dev-kind-up`
+  installs OpenShell only (no agentgateway, leak guard or fake server). So the escape case runs only
+  where someone points the variables at a guarded install (the e2e install or the lab) and runs
+  `go test ./test/escape/ -ginkgo.label-filter=leakguard`; set `KOINON_REQUIRE=escape-mcp-gateway` there
+  so a missing gateway fails instead of skipping. Exit condition: `kind.sh` installs the Koinon chart
+  with the fake MCP server (or the e2e job runs this suite against its install) and sets the variables;
+  tracked by a follow-up issue the maintainer files before #293 closes. The kind e2e case above is the
+  one that runs in CI today.
 
-Both fail when the guard is bypassed: make `write_item` pass the guard (declare its sink class `none`
-and see the call reach the server) and the assertion on the fake server's request log goes red.
+Both fail when the guard is bypassed: make `write_item` pass the guard (declare its sink class `none`)
+and the call reaches the server. The escape case sends the canary in `title`, the one argument the fake
+`write_item` accepts, so the bypassed call is recorded and the request-log assertion goes red.
 
 ## Testing layers
 

