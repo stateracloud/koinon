@@ -113,9 +113,20 @@ say what is specific to this release. Template:
 - **Other manual steps:** anything an operator must do before or after.
 ```
 
-For `v0.1.0` and `v0.2.0`, write that there is no schema or upgrade promise before v0.3 (ADR 0099)
-and that an upgrade, a patch upgrade included, may need a reinstall or the manual steps the notes
-list. For `v0.3.0`, write that it is the compatibility baseline, and how an earlier install reaches
+For a release before v0.3.0, open the section with this notice, then the list above:
+
+```markdown
+Until v0.3.0 there is no schema or upgrade promise (ADR 0099). An upgrade, a patch upgrade
+included, may need a reinstall or the manual steps below. Backups of the database and the encryption
+keys, and restoring from them, are supported: take both before you upgrade.
+```
+
+For `v0.1.0` and `v0.2.0`, use the notice above: there is no schema or upgrade promise before v0.3
+(ADR 0099), an upgrade, a patch upgrade included, may need a reinstall or the manual steps the notes
+list, and backups and the restore procedure are supported. v0.1.0 is a first release, so its
+"Upgrading from" section says there is nothing to upgrade from and keeps the notice. Name the restore
+runbook only if it exists on `main` when you publish the notes; otherwise link
+[Upgrading Koinon](../site/src/content/docs/guides/upgrading.md#roll-back). For `v0.3.0`, write that it is the compatibility baseline, and how an earlier install reaches
 it (stop, migrate, start, or a reinstall) and that it cannot roll back to an earlier release.
 
 ## Signing and SBOM attestations
