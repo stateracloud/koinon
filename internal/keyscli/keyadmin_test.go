@@ -62,10 +62,12 @@ var _ = Describe("the key-admin Job", func() {
 		marker *memMarker
 		clock  = func() time.Time { return time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC) }
 	)
+	sealedIDs := map[string]bool{} // KEK IDs that database envelopes still carry
 	job := func(create bool, add string, hasValues func(context.Context) (bool, error)) keyscli.KeyAdmin {
 		return keyscli.KeyAdmin{
 			Store:  keyscli.KubeStore{Client: kube, Namespace: ns, Name: secret, Wrappers: admin},
 			Create: create, AddID: add, HasValues: hasValues, Out: out, Now: clock, Marker: marker,
+			UsedID: func(_ context.Context, id string) (bool, error) { return sealedIDs[id], nil },
 		}
 	}
 	load := func(ctx context.Context) keyscli.KeySet {
@@ -85,6 +87,7 @@ var _ = Describe("the key-admin Job", func() {
 		Expect(err).NotTo(HaveOccurred())
 		admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 		out = &bytes.Buffer{}
+		clear(sealedIDs)
 	})
 
 	It("creates the first KEK, wrapped and active, and changes nothing when it runs again", func(ctx SpecContext) {
@@ -170,6 +173,18 @@ var _ = Describe("the key-admin Job", func() {
 		Expect(job(false, "not a valid id", none).Run(ctx)).To(MatchError(ContainSubstring("not a valid KEK ID")))
 	})
 
+	It("refuses to add an ID that database envelopes still carry, and needs the check at all", func(ctx SpecContext) {
+		const removed = "kek-20251201-eeee"
+		Expect(job(true, "", none).Run(ctx)).To(Succeed())
+		before := load(ctx)
+		sealedIDs[removed] = true
+		Expect(job(false, removed, none).Run(ctx)).To(MatchError(ContainSubstring("seals values in the database")))
+		a := job(false, "kek-20261103-bbbb", none)
+		a.UsedID = nil
+		Expect(a.Run(ctx)).To(MatchError(ContainSubstring("check that the new KEK ID is unused")))
+		Expect(load(ctx).Stored).To(HaveLen(len(before.Stored)), "nothing was added")
+	})
+
 	Describe("recovering from a lost active KEK (activateIfNoActive, issue #255)", func() {
 		const (
 			lost     = "kek-20260101-aaaa"
@@ -192,7 +207,7 @@ var _ = Describe("the key-admin Job", func() {
 			}, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 		}
-		sealed := map[string]bool{} // KEK IDs that database envelopes still carry
+		sealed := sealedIDs
 		recover := func(add string) keyscli.KeyAdmin {
 			a := job(true, add, none)
 			a.ActivateIfNoActive = true

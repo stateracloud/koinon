@@ -141,7 +141,7 @@ Running it again finds nothing left to forget. Then check that `keys status` no 
 
 Do it once a year, or when `keys status` warns. No downtime, no restart.
 
-1. Add a key: `koinon-api keys add`. It prints the new ID and does not activate it. Back up the Secret.
+1. Add a key: `koinon-api keys add`. It prints the new ID and does not activate it. It reads the database (`--database-url`) to refuse an ID that stored values still carry. Back up the Secret.
 2. Activate it: `koinon-api keys activate <new-id>`. New values are wrapped by it once the pods have the
    changed Secret (kubelet takes up to about a minute; both pods reload their keys every minute).
 3. Wait two minutes, then re-wrap the old values: `koinon-api keys rewrap`. This wraps every stored
@@ -509,10 +509,12 @@ the identity that may encrypt with the KMS, so it adds the new KEK and makes it 
    The Job adds the KEK, wrapped by the new key and bound to the install, and makes it active in the
    same write, but only when `active` is missing or names a KEK the Secret does not hold. If the
    Secret has a working active KEK it adds the KEK inactive, as without the flag, and changes nothing
-   else. It is safe to run twice. Set `activateIfNoActive` back to `false` afterwards. When it recovers (no usable active KEK), the Job
-   refuses an ID that the database still carries in any envelope (the lost active KEK, or any other
-   KEK you removed from the Secret; `keys status` shows them as MISSING with a count): IDs are never
-   reused, so pick another.
+   else. It is safe to run twice. Set `activateIfNoActive` back to `false` afterwards. Every add refuses an ID that the database
+   still carries in any envelope, whether the Job recovers or only adds, and so does `keys add --id`
+   (the lost active KEK, or any other KEK you removed from the Secret; `keys status` shows them as
+   MISSING with a count): IDs are never reused, so pick another. If the database cannot be asked (it
+   is down, or not fully migrated yet), the add stops without changing anything; rerun it once the
+   database is ready.
 4. **Wait for koinon-api and the reconciler to start** (they reload the Secret at least once a minute),
    then back it up: `keys export`. `keys status` now lists the removed KEKs as MISSING and the new
    one as active.

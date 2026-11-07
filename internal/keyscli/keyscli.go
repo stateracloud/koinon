@@ -136,6 +136,9 @@ type Tool struct {
 	// Wrappers are the key-wrapping keys, for the reachability line of status; the zero value is the
 	// local KEK alone.
 	Wrappers secretstore.Wrappers
+	// UsedID tells whether the database carries an envelope under a KEK ID. Add asks it; nil means
+	// the probe on Pool.
+	UsedID func(ctx context.Context, id string) (bool, error)
 }
 
 // confirm asks unless there is nobody to ask or --yes was given.
@@ -203,6 +206,23 @@ func UsedID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
 		return false, err
 	}
 	return usage[id] > 0, nil
+}
+
+// RefuseUsedID is the guard behind "IDs are never reused": it returns an error when the database
+// still carries an envelope under id (a KEK that was removed from the Secret, or lost with its
+// wrapping key), and when the probe cannot tell. A nil probe fails closed too.
+func RefuseUsedID(ctx context.Context, used func(context.Context, string) (bool, error), id string) error {
+	if used == nil {
+		return fmt.Errorf("check that KEK ID %s is unused: no database to ask; IDs are never reused", id)
+	}
+	u, err := used(ctx, id)
+	if err != nil {
+		return fmt.Errorf("check that KEK ID %s is unused: %w", id, err)
+	}
+	if u {
+		return fmt.Errorf("KEK %s seals values in the database although the Secret does not hold it; IDs are never reused: pick a new ID", id)
+	}
+	return nil
 }
 
 // AnyEnvelope reports whether any stored value is encrypted (so some KEK is needed to read it).
@@ -491,6 +511,16 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 	}
 	if _, ok := ks.Keys[id]; ok {
 		return fmt.Errorf("KEK %s already exists; IDs are never reused", id)
+	}
+	// A KEK removed from the Secret may still seal values: a new KEK under its ID would be tried
+	// against them, and keys forget would then refuse the ID.
+	used := t.UsedID
+	if used == nil && t.Pool != nil {
+		pool := t.Pool
+		used = func(ctx context.Context, id string) (bool, error) { return UsedID(ctx, pool, id) }
+	}
+	if err := RefuseUsedID(ctx, used, id); err != nil {
+		return err
 	}
 	key := make([]byte, secretstore.KeySize)
 	if _, err := rand.Read(key); err != nil {
