@@ -15,7 +15,7 @@
 # tokenizer/ratio estimate usage a provider did not report: ratio is UTF-8 bytes per token
 # (Claude before Opus 4.7: 3.0; Opus 4.7 and later: 2.3; others 3.0; see
 # docs/research/claude-token-estimation.md).
-version: "2026-10-29.1"
+version: "2026-11-07.1"
 entries:
   - id: ollama-local
     provider: ollama
@@ -46,6 +46,16 @@ entries:
     max_output: 131072
     source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-28}
     note: "OpenRouter models API 2026-10-28: prompt 0.00000014, completion 0.00000042, input_cache_read 0.0000000042 USD per token; max_output from top_provider.max_completion_tokens. models.dev agrees. The 2026-10-24 entry above stays for ledger history."
+  - id: openrouter-deepseek-v4-1-flash
+    provider: openrouter
+    match: {glob: "deepseek/deepseek-v4.1-flash"}
+    valid_from: 2026-11-07
+    prices: {input: "0.051", output: "0.567", cache_read: "0.018"}
+    tokenizer: bytes
+    ratio: "3.0"
+    max_output: 943718
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-11-07}
+    note: "OpenRouter models API 2026-11-07T00:18Z: prompt 0.000000051, completion 0.000000567, input_cache_read 0.000000018 USD per token (no cache write, no overrides); max_output from top_provider.max_completion_tokens 943718. The 2026-10-24 and 2026-10-28 entries above stay for ledger history. Note that OpenRouter routes to endpoints priced differently, so a list price can under-report (#47)."
   - id: openai-gpt-6-astra
     provider: openai
     match: {glob: "gpt-6-astra"}
