@@ -15,7 +15,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/wt-test.XXXXXX")
 tmp=$(cd "$tmp" && pwd -P)
 [[ -n $tmp && -d $tmp && $tmp != "$PWD" && $tmp != "$repo" ]] || exit 1
-trap 'rm -rf "$tmp"' EXIT
+trap '[ -n "${KEEP_TMP:-}" ] || rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export PATH="$tmp/bin:$PATH" FAKE_PRS="$tmp/prs" KOINON_WT_ROOT="$tmp/kw"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
@@ -45,7 +45,11 @@ git clone -q "$tmp/origin.git" "$tmp/main" 2>/dev/null
 cd "$tmp/main"
 git checkout -q -b main
 echo one >a.txt
-git add a.txt
+# The identity hooks (koinon#320): wt new installs them from the checkout's own hack/.
+mkdir -p hack
+cp -R "$repo/hack/githooks" hack/githooks
+cp "$repo/hack/git-identity-check.sh" "$repo/hack/git-identities.allowed" hack/
+git add a.txt hack
 git commit -q -m one
 git push -q origin main
 head_before=$(git rev-parse HEAD)
@@ -71,6 +75,15 @@ check "new prints only the path" eq "$out" "$tmp/kw/foo"
 check "new creates a detached worktree" test -z "$(git -C "$tmp/kw/foo" symbolic-ref -q HEAD || true)"
 check "new starts at origin/main" eq "$(git -C "$tmp/kw/foo" rev-parse HEAD)" "$(git rev-parse origin/main)"
 check "new refuses an existing name" refuses wt new foo
+check "new sets core.hooksPath in the worktree" eq "$(git -C "$tmp/kw/foo" config --get core.hooksPath)" hack/githooks
+check "main checkout hooksPath stays unset" eq "$(git config --get core.hooksPath || echo unset)" unset
+echo hooked >"$tmp/kw/foo/h.txt"
+git -C "$tmp/kw/foo" add h.txt
+check "a commit as t@example.invalid in the worktree is refused" refuses git -C "$tmp/kw/foo" commit -q -m refused
+git -C "$tmp/kw/foo" reset -q
+rm -f "$tmp/kw/foo/h.txt"
+# the rest of this test commits as t@example.invalid in worktrees on purpose
+export KOINON_SKIP_IDENTITY_CHECK=1
 check "new refuses a bad name" refuses wt new ../x
 
 # new --branch, --from

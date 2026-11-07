@@ -32,8 +32,8 @@
 # Run it inside a checkout or worktree on a feature branch named <type>/<N>-<slug> (the claim and the
 # PR hang off N); any other name is refused before anything is pushed (koinon-private#485). Work that needs no issue
 # (the claim check only fails on someone else's live claim, so a PR without Closes #N passes, ADR 0094
-# decision 2) passes --no-issue, which accepts <type>/<slug> instead. Environment:
-#   KOINON_SHIP_ALLOWED_EMAILS  comma list of user.email values that may commit (default: any)
+# decision 2) passes --no-issue, which accepts <type>/<slug> instead. The git identity must be on
+# hack/git-identities.allowed (hack/git-identity-check.sh commit, before anything is committed). Environment:
 #   KOINON_COMMIT_FOOTER        text appended to the commit message (attribution lines)
 #   KOINON_SHIP_MAX_BLOB_MIB    blob size limit in MiB (default 5)
 #
@@ -92,19 +92,13 @@ else
 	[[ $branch =~ ^[a-z]+/[0-9]+-[a-z0-9][a-z0-9._-]*$ ]] || fail "branch '$branch' is not <type>/<N>-<slug>; rename it (git branch -m), or pass --no-issue for work without an issue"
 fi
 
-# Identity: commits and the merge commit use git config; refuse an address that is not allowed.
+# Identity: commits and the merge commit use git config; refuse one that is not on the allowlist.
 name=$(git config user.name || true)
 email=$(git config user.email || true)
 [[ -n $name && -n $email ]] || fail "git user.name/user.email not set"
-allowed=${KOINON_SHIP_ALLOWED_EMAILS:-}
-if [[ -z $allowed ]]; then
-	say "identity $email (KOINON_SHIP_ALLOWED_EMAILS unset: any address allowed)"
-else
-	case ",${allowed// /}," in
-	*",$email,"*) say "identity $email" ;;
-	*) fail "identity: user.email $email is not in KOINON_SHIP_ALLOWED_EMAILS" ;;
-	esac
-fi
+# The same check the commit hooks and CI run (koinon#320): author and committer must be on the allowlist.
+id_out=$(hack/git-identity-check.sh commit 2>&1) || { echo "$id_out" >&2; fail "identity: $name <$email> is not allowed (hack/git-identities.allowed)"; }
+say "identity $email"
 
 limit_mib=${KOINON_SHIP_MAX_BLOB_MIB:-5}
 limit=$((limit_mib * 1024 * 1024))
@@ -150,11 +144,17 @@ else
 	git fetch -q origin
 	if git merge-base --is-ancestor origin/main HEAD; then
 		say "up to date with origin/main"
-	elif git merge -q --no-edit --signoff origin/main >/dev/null 2>&1; then
+	elif merge_out=$(git merge -q --no-edit --signoff origin/main 2>&1); then
 		say "merged origin/main"
 	else
 		conflicts=$(git diff --name-only --diff-filter=U)
-		if [[ $conflicts == docs/adr/README.md ]]; then
+		if [[ -z $conflicts ]]; then
+			# no unmerged files: a hook (pre-merge-commit identity check) refused, not a conflict
+			git merge --abort >/dev/null 2>&1 || true
+			echo "ship: merge of origin/main failed without conflicts (a git hook refused?):" >&2
+			echo "$merge_out" >&2
+			exit 1
+		elif [[ $conflicts == docs/adr/README.md ]]; then
 			hack/adr-index.sh >/dev/null
 			git add docs/adr/README.md
 			git commit -q --no-edit --signoff
