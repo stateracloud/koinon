@@ -33,6 +33,35 @@ func (q *Queries) GetInstallAuditChainHead(ctx context.Context) (InstallAuditCha
 	return i, err
 }
 
+const getLastInstallKeyEvent = `-- name: GetLastInstallKeyEvent :one
+SELECT id, chain_seq, prev_hash, hash, actor_kind, actor_id, action, target_kind, target_id, summary, request_id, created_at FROM install_audit_events
+WHERE starts_with(action, 'keys.') AND jsonb_exists(summary->'after', 'keks')
+ORDER BY chain_seq DESC
+LIMIT 1
+`
+
+// The newest key event whose "after" is a key-set state (ADR 0100 decision 3, "Keys: not atomic, so
+// checked on start"): keys.rewrap, keys.reencrypt and keys.forget carry counts, not a key set.
+func (q *Queries) GetLastInstallKeyEvent(ctx context.Context) (InstallAuditEvent, error) {
+	row := q.db.QueryRow(ctx, getLastInstallKeyEvent)
+	var i InstallAuditEvent
+	err := row.Scan(
+		&i.ID,
+		&i.ChainSeq,
+		&i.PrevHash,
+		&i.Hash,
+		&i.ActorKind,
+		&i.ActorID,
+		&i.Action,
+		&i.TargetKind,
+		&i.TargetID,
+		&i.Summary,
+		&i.RequestID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertAuditEvent = `-- name: InsertAuditEvent :one
 
 INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind, target_id, summary, request_id)

@@ -56,6 +56,25 @@ type KeyAdmin struct {
 	Marker BoundOnlyMarker
 	Out    io.Writer
 	Now    func() time.Time
+	// Audit records the Job's key events in the install audit chain, under the key-admin actor (ADR
+	// 0100 decision 3). Nil records nothing. A write the chain cannot take (in time) is a warning, not
+	// a failure: the Secret change stands and koinon-api records the key set as keys.observed on its
+	// next start.
+	Audit *Auditor
+}
+
+// warnNotAudited says a key event was not recorded and who will catch it.
+func (a KeyAdmin) warnNotAudited(err error) {
+	_, _ = fmt.Fprintf(a.Out, "WARNING: %v. koinon-api records the key set as keys.observed when it next starts.\n", err)
+}
+
+// recordSecretCreated records the creation of the KEK Secret: the Secret as it now is.
+func (a KeyAdmin) recordSecretCreated(ctx context.Context, before KeyState) {
+	t := &Tool{Store: a.Store, Out: io.Discard, Audit: a.Audit}
+	err := t.recordChange(ctx, a.Audit, before, "", ActionSecretCreated, "secret", a.Store.Name)
+	if err != nil {
+		a.warnNotAudited(err)
+	}
 }
 
 // BoundOnlyMarker reads and sets the install's bound-only marker (installid.Marker). It has no way
@@ -97,6 +116,14 @@ func (a KeyAdmin) Run(ctx context.Context) error {
 		return errors.New("keyscli: adding a KEK needs the database to check that the new KEK ID is unused")
 	}
 	if a.Create {
+		var before KeyState
+		if a.Audit != nil {
+			var err error
+			// The Secret does not exist yet, or the Job is a rerun: the state to compare is the last recorded one.
+			if before, err = a.Audit.Snapshot(ctx, KeySet{}); err != nil {
+				return err
+			}
+		}
 		// The first KEK of an install is bound, so the install is bound-only from the start: the
 		// marker is set before the Secret exists, and a failure leaves no Secret, so a rerun sets it.
 		created, err := a.Store.EnsureWith(ctx, now(), a.HasValues, func(ctx context.Context) error {
@@ -112,6 +139,7 @@ func (a KeyAdmin) Run(ctx context.Context) error {
 		}
 		if created {
 			_, _ = fmt.Fprintf(a.Out, "Created the KEK Secret %s with one active KEK wrapped by %s. Back it up now (koinon-api keys export).\n", a.Store.Name, wrappedBy)
+			a.recordSecretCreated(ctx, before)
 		}
 	}
 	if a.AddID == "" {
@@ -181,6 +209,12 @@ func (a KeyAdmin) recoverActive(ctx context.Context, now func() time.Time, prima
 		ks.Keys = map[string][]byte{}
 	}
 	lost := ks.Active
+	var before KeyState
+	if a.Audit != nil {
+		if before, err = a.Audit.Snapshot(ctx, ks); err != nil {
+			return false, err
+		}
+	}
 	ks.Keys[a.AddID], ks.Active, ks.ActivatedAt = key, a.AddID, now()
 	if err := a.Store.Save(ctx, ks); err != nil {
 		return false, err
@@ -190,7 +224,37 @@ func (a KeyAdmin) recoverActive(ctx context.Context, now func() time.Time, prima
 		was = "the Secret named " + lost + ", which it does not hold"
 	}
 	_, _ = fmt.Fprintf(a.Out, "Added KEK %s, wrapped by %s, and made it active (%s). Back up the KEK Secret now (koinon-api keys export), then forget the lost KEKs: keys forget <kek-id>.\n", a.AddID, wrappedBy, was)
+	a.recordAddAndActivate(ctx, before)
 	return true, nil
+}
+
+// recordAddAndActivate records the recovery's one write as the two operations it is: keys.add, then
+// keys.activate.
+func (a KeyAdmin) recordAddAndActivate(ctx context.Context, before KeyState) {
+	if a.Audit == nil {
+		return
+	}
+	ks, err := a.Store.Load(ctx)
+	defer func() {
+		for _, k := range ks.Keys {
+			clear(k)
+		}
+	}()
+	var after KeyState
+	if err == nil {
+		after, err = a.Audit.After(ctx, ks, before)
+	}
+	if err == nil {
+		added := after
+		added.Active = before.Active
+		err = a.Audit.Record(ctx, Event{Action: ActionAdd, TargetKind: "kek", TargetID: a.AddID, Before: before, After: added})
+		if err == nil {
+			err = a.Audit.Record(ctx, Event{Action: ActionActivate, TargetKind: "kek", TargetID: a.AddID, Before: added, After: after})
+		}
+	}
+	if err != nil {
+		a.warnNotAudited(fmt.Errorf("%w: %w", ErrNotAudited, err))
+	}
 }
 
 // add adds the KEK AddID names, wrapped by primary, unless the key set holds it.
@@ -212,8 +276,10 @@ func (a KeyAdmin) add(ctx context.Context, now func() time.Time, primary secrets
 	if err != nil {
 		return err
 	}
-	t := &Tool{Store: a.Store, Out: io.Discard, Wrappers: a.Store.Wrappers, Now: now, UsedID: a.UsedID}
-	if err := t.Add(ctx, a.AddID); err != nil {
+	t := &Tool{Store: a.Store, Out: io.Discard, Wrappers: a.Store.Wrappers, Now: now, UsedID: a.UsedID, Audit: a.Audit}
+	if err := t.Add(ctx, a.AddID); errors.Is(err, ErrNotAudited) {
+		a.warnNotAudited(err) // the KEK is added
+	} else if err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(a.Out, "Added KEK %s, wrapped by %s. Back up the KEK Secret, then in koinon-api: keys activate %s, keys rewrap.\n", a.AddID, wrappedBy, a.AddID)
@@ -241,6 +307,12 @@ func (a KeyAdmin) rewrapUnbound(ctx context.Context, primary secretstore.Wrapper
 		}
 	}()
 	wrappedBy := primary.Backend() + ":" + primary.KeyID()
+	var before KeyState
+	if a.Audit != nil {
+		if before, err = a.Audit.Snapshot(ctx, ks); err != nil {
+			return err
+		}
+	}
 	var ids []string
 	for _, id := range slices.Sorted(maps.Keys(ks.Stored)) {
 		s := ks.Stored[id]
@@ -260,6 +332,10 @@ func (a KeyAdmin) rewrapUnbound(ctx context.Context, primary secretstore.Wrapper
 			return fmt.Errorf("bind the KEKs to the install: %w", err)
 		}
 		_, _ = fmt.Fprintf(a.Out, "Bound %s to the install ID (wrapped again by %s; the KEKs are unchanged). Back up the KEK Secret now (koinon-api keys export).\n", strings.Join(ids, ", "), wrappedBy)
+		t := &Tool{Store: a.Store, Out: io.Discard, Audit: a.Audit}
+		if err := t.recordChange(ctx, a.Audit, before, "", ActionBound, "keys", "keyset"); err != nil {
+			a.warnNotAudited(err)
+		}
 	}
 	return a.markBoundOnly(ctx, b)
 }

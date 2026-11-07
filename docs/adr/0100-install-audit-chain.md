@@ -330,7 +330,7 @@ new `audit_events` rows to it, without touching old ones, follows in #359 (see t
 | `platform_admin.bootstrap` (the first admin's creation, with the default org's ID as target) | not audited | `system koinon-api:bootstrap` |
 | `platform_admin.grant` by bootstrap (it re-grants the bootstrap admin on every start; an event whenever that grant inserts a row, so a removed grant coming back shows) | not audited | `system koinon-api:bootstrap` |
 | `trace.platform_destination.set`, `.delete`, `.test`; `trace.platform_ceiling.set` | the acting admin's personal org | user |
-| `keys.add`, `keys.activate`, `keys.rewrap`, `keys.reencrypt`, `keys.retire`, `keys.forget` (its platform part; each org's part stays per org) | `keys.forget` copies per admin; the rest not audited | `cli` |
+| `keys.add`, `keys.activate`, `keys.rewrap`, `keys.reencrypt` (each with an optional `.started`), `keys.retire`, `keys.forget` (its platform part; each org's part stays per org) | `keys.forget` copies per admin; the rest not audited | `cli` |
 | `keys.generated` (a KEK or the saved-work key `koinon-api` makes) | not audited | `system koinon-api:keys` |
 | `keys.secret_created`, `keys.add`, `keys.activate`, `keys.bound` from the key-admin Job | not audited | `system koinon-api:key-admin` |
 | `keys.observed` (the key set or a generated Secret differs from the last recorded state) | not audited | `system koinon-api:startup` |
@@ -364,8 +364,9 @@ in three ways, and the ADR says so rather than pretending otherwise:
 - `keys rewrap` and `keys reencrypt` run one transaction per row (`Tool.each` and `Tool.one` in
   `internal/keyscli/keyscli.go`). They write one `keys.rewrap` or `keys.reencrypt` install event per
   run, after the loop, with the counts done and failed, the failures by kind, and the KEK before and
-  after; they may also write a `.started` event before the loop, so a run that dies half way shows.
-  A run that changes no row writes nothing.
+  after; they may also write a `.started` event before the loop (`keys.rewrap.started`,
+  `keys.reencrypt.started`, with `--record-started`), so a run that dies half way shows. A run that
+  changes no row writes nothing.
 - `keys forget` keeps its per-org events in each org's transaction and writes its platform part
   (the platform trace destination) as one install event.
 
@@ -380,6 +381,17 @@ runs as a Helm hook before the database may exist). `koinon-api` already has `ge
 Secrets in its namespace (`charts/koinon/templates/rbac.yaml`); it reads the generated Secrets'
 metadata only, through a label-selected list, never their values, and never stores a hash of a
 value. A KEK is named by ID and fingerprint, as `keys status` prints it.
+
+The key-set state that `after` (and `before`) carry is `{keks: [{id, fingerprint, wrapped_by,
+binding}], active, retired: [id], generated: [{secret_name, uid, created_at}]}`. A KEK that left the
+key set stays in `retired`, so `retire` is told from a KEK that never was there. The key events
+target `kek` (by ID), `secret` (by `secret_name`, for `keys.generated` and `keys.secret_created`) or
+`keys` (`keys.observed`, ID `keyset`). A writer that cannot list the generated Secrets (the CLI, and
+the key-admin Job, whose Role has `get` and `update` by name only) merges what it sees over the last
+recorded list, so it does not erase the saved-work key from the state. The key-admin Job retries
+the write while the chain is not ready and, when it still cannot write, warns and succeeds: the
+change stands and the next start records `keys.observed`. The CLI says so in an error
+(`ErrNotAudited`).
 
 **Helm-set settings.** `koinon-api` builds, on start, a fixed list of install-wide settings from its
 flags. For a flag that names a Secret, a file or a directory it records the name only, never the

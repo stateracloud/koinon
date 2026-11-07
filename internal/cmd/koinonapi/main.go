@@ -563,11 +563,15 @@ func serve(ctx context.Context, cfg config) error {
 	// registered below with the other metrics) and record the KEK fingerprints (old issue 591).
 	kekMetrics := kekhealth.NewMetrics(nil)
 	kekMonitor := &kekhealth.Monitor{Wrappers: wrappers, Metrics: kekMetrics, Recorder: &kekhealth.Recorder{Q: store.New(pool)}, Log: slog.Default()}
+	// The key events of the install audit chain (ADR 0100 decision 3): the keys this process generates,
+	// and the check on start that compares the whole key-set state with the last recorded one.
+	keyAudits := newKeyAudit(pool, kube, cfg.secretsNamespace, cfg.kekSecret, cfg.savedWorkSecret)
 	switch {
 	case cfg.kekSecret != "" && kube != nil:
 		// The chart renders no key material (a render would make new keys every time, and a new
 		// KEK loses every stored secret): koinon-api creates the Secret once, and only reads it after.
 		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret, Wrappers: wrappers}
+		keyAudits.keySet = kekStore
 		if cfg.kekCreate {
 			// The first KEK of an install makes it bound-only (old issue 615): no KEK stored unbound belongs here.
 			created, err := kekStore.EnsureWith(ctx, time.Now(),
@@ -588,6 +592,7 @@ func serve(ctx context.Context, cfg config) error {
 		}
 		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch", stop, func(ctx context.Context) { watchKeyring(ctx, keyring, kekStore, time.Minute, kekMonitor.Observer()) })
 	case cfg.kekDir != "":
+		keyAudits.keySet = keyscli.DirStore{Dir: cfg.kekDir, Wrappers: wrappers}
 		if keyring, err = secretstore.LoadDir(ctx, cfg.kekDir, wrappers, kekMonitor.Observer()); err != nil {
 			return err
 		}
@@ -852,8 +857,12 @@ func serve(ctx context.Context, cfg config) error {
 		keyFn := func(ctx context.Context) ([]byte, error) {
 			return savedWorkKey(ctx, kube, cfg.secretsNamespace, secretName)
 		}
-		if _, err := keyFn(ctx); err != nil {
+		_, created, err := ensureSavedWorkKey(ctx, kube, cfg.secretsNamespace, secretName)
+		if err != nil {
 			return fmt.Errorf("saved-work upload key: %w", err)
+		}
+		if created {
+			keyAudits.generatedEvent(ctx, "secret", secretName)
 		}
 		mux := http.NewServeMux()
 		mux.Handle(savedwork.UploadPath, savedwork.NewReceiver(pool, keyring, keyFn, slog.Default()))
@@ -876,6 +885,10 @@ func serve(ctx context.Context, cfg config) error {
 			}
 		})
 	}
+	// Every key this process could have generated exists now. Compare the whole key-set state with the last
+	// recorded key event and record the difference (ADR 0100 decision 3): a KEK made outside Koinon, a
+	// Secret the ensure-secrets Job generated, an activate or a retire whose event was lost.
+	keyAudits.startObserving(bgCtx, stop)
 	var guardSrv *grpc.Server
 	if cfg.guardAddr != "" {
 		lis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.guardAddr)
@@ -1048,6 +1061,13 @@ func waitForDatabase(ctx context.Context, db *sql.DB) error {
 // savedWorkKey returns the key that signs saved-work uploads, creating its Secret (32 random bytes
 // under "key") when it does not exist and never overwriting one that does.
 func savedWorkKey(ctx context.Context, kube kubernetes.Interface, namespace, name string) ([]byte, error) {
+	key, _, err := ensureSavedWorkKey(ctx, kube, namespace, name)
+	return key, err
+}
+
+// ensureSavedWorkKey is savedWorkKey that also reports whether this call created the Secret (not a
+// concurrent replica, not an earlier start), so the start records keys.generated once.
+func ensureSavedWorkKey(ctx context.Context, kube kubernetes.Interface, namespace, name string) ([]byte, bool, error) {
 	secrets := kube.CoreV1().Secrets(namespace)
 	get := func() ([]byte, error) {
 		sec, err := secrets.Get(ctx, name, metav1.GetOptions{})
@@ -1061,11 +1081,11 @@ func savedWorkKey(ctx context.Context, kube kubernetes.Interface, namespace, nam
 	}
 	key, err := get()
 	if err == nil || !apierrors.IsNotFound(err) {
-		return key, err
+		return key, false, err
 	}
 	k := make([]byte, 32)
 	if _, err := rand.Read(k); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	_, err = secrets.Create(ctx, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{project.Domain + "/managed-by": "koinon-api"}},
@@ -1073,9 +1093,11 @@ func savedWorkKey(ctx context.Context, kube kubernetes.Interface, namespace, nam
 		Data:       map[string][]byte{savedwork.KeyFile: k},
 	}, metav1.CreateOptions{FieldManager: "koinon-api"})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return nil, err
+		return nil, false, err
 	}
-	return get()
+	created := err == nil // not AlreadyExists: another replica made it
+	key, err = get()
+	return key, created && err == nil, err
 }
 
 // minPricesRefreshInterval keeps a misconfigured interval (0, negative, minutes) from polling the public

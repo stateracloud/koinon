@@ -139,6 +139,58 @@ type Tool struct {
 	// UsedID tells whether the database carries an envelope under a KEK ID. Add asks it; nil means
 	// the probe on Pool.
 	UsedID func(ctx context.Context, id string) (bool, error)
+	// Audit records the key events in the install audit chain (ADR 0100 decision 3). Nil means one
+	// on Pool, with the CLI actor; with no Pool nothing is recorded.
+	Audit *Auditor
+	// RecordStarted writes the optional .started event before the per-row loop of rewrap and
+	// reencrypt, so a run that dies half way shows.
+	RecordStarted bool
+}
+
+// auditor is the Auditor the commands write with, or nil.
+func (t *Tool) auditor() *Auditor {
+	if t.Audit != nil {
+		return t.Audit
+	}
+	if t.Pool != nil {
+		return &Auditor{Pool: t.Pool}
+	}
+	return nil
+}
+
+// snapshot is the "before" state of a change, taken before it. A nil Auditor takes none.
+func (t *Tool) snapshot(ctx context.Context, ks KeySet) (*Auditor, KeyState, error) {
+	a := t.auditor()
+	if a == nil {
+		return nil, KeyState{}, nil
+	}
+	before, err := a.Snapshot(ctx, ks)
+	return a, before, err
+}
+
+// recordChange writes the event of a key-set change that has just been saved: the key set is loaded
+// again, so "after" is what the Secret holds. A failure is ErrNotAudited: the change stands.
+func (t *Tool) recordChange(ctx context.Context, a *Auditor, before KeyState, command, action, kind, id string) error {
+	if a == nil {
+		return nil
+	}
+	ks, err := t.Store.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrNotAudited, err)
+	}
+	defer func() {
+		for _, k := range ks.Keys {
+			clear(k)
+		}
+	}()
+	after, err := a.After(ctx, ks, before)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrNotAudited, err)
+	}
+	if err := a.Record(ctx, Event{Command: command, Action: action, TargetKind: kind, TargetID: id, Before: before, After: after}); err != nil {
+		return fmt.Errorf("%w: %w", ErrNotAudited, err)
+	}
+	return nil
 }
 
 // confirm asks unless there is nobody to ask or --yes was given.
@@ -522,6 +574,10 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 	if err := RefuseUsedID(ctx, used, id); err != nil {
 		return err
 	}
+	a, before, err := t.snapshot(ctx, ks)
+	if err != nil {
+		return err
+	}
 	key := make([]byte, secretstore.KeySize)
 	if _, err := rand.Read(key); err != nil {
 		return err
@@ -531,7 +587,7 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 		return err
 	}
 	_, _ = fmt.Fprintf(t.Out, "Added KEK %s. Back up the KEK Secret now, then run: koinon-api keys activate %s\n", id, id)
-	return nil
+	return t.recordChange(ctx, a, before, "add", ActionAdd, "kek", id)
 }
 
 // Activate makes id the wrapping KEK. New values use it once the pods have the changed Secret
@@ -559,13 +615,17 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 	if err := t.confirm(ctx, fmt.Sprintf("Activate %s?", id), "New values use it within about a minute."); err != nil {
 		return err
 	}
+	a, before, err := t.snapshot(ctx, ks)
+	if err != nil {
+		return err
+	}
 	ks.Active, ks.ActivatedAt = id, t.now()
 	if err := t.Store.Save(ctx, ks); err != nil {
 		return err
 	}
 	t.recordActivation(ctx, ks)
 	_, _ = fmt.Fprintf(t.Out, "KEK %s is active. Wait for the pods to pick it up (about a minute), then run: koinon-api keys rewrap\n", id)
-	return nil
+	return t.recordChange(ctx, a, before, "activate", ActionActivate, "kek", id)
 }
 
 // recordActivation records the fingerprints of the key set and the activation time in the database,
@@ -656,7 +716,7 @@ func (t *Tool) Rewrap(ctx context.Context) error {
 			return err
 		}
 	}
-	return t.each(ctx, "rewrapped", func(ring *secretstore.Keyring, b secretstore.Binding, env secretstore.Envelope, active string) (*secretstore.Envelope, error) {
+	return t.each(ctx, "rewrapped", "rewrap", ActionRewrap, func(ring *secretstore.Keyring, b secretstore.Binding, env secretstore.Envelope, active string) (*secretstore.Envelope, error) {
 		if env.KEKID == active {
 			return nil, nil
 		}
@@ -694,7 +754,7 @@ func (t *Tool) Reencrypt(ctx context.Context) error {
 			return cli.ErrCancelled
 		}
 	}
-	return t.each(ctx, "re-encrypted", func(ring *secretstore.Keyring, b secretstore.Binding, env secretstore.Envelope, _ string) (*secretstore.Envelope, error) {
+	return t.each(ctx, "re-encrypted", "reencrypt", ActionReencrypt, func(ring *secretstore.Keyring, b secretstore.Binding, env secretstore.Envelope, _ string) (*secretstore.Envelope, error) {
 		plain, err := ring.Open(b, env)
 		if err != nil {
 			return nil, err
@@ -716,26 +776,80 @@ func (t *Tool) keysAndUsage(ctx context.Context) (KeySet, map[string]int, error)
 
 type rowFn func(ring *secretstore.Keyring, b secretstore.Binding, env secretstore.Envelope, active string) (*secretstore.Envelope, error)
 
-func (t *Tool) each(ctx context.Context, verb string, fn rowFn) error {
+// errUnreadable is a stored envelope that is not JSON.
+var errUnreadable = errors.New("unreadable envelope")
+
+// failureKind names why a row failed, for the audit event's failures-by-kind: a fixed set, never the
+// row, the org or the error text.
+func failureKind(err error) string {
+	switch {
+	case errors.Is(err, errUnreadable):
+		return "envelope"
+	case errors.Is(err, secretstore.ErrOpen):
+		return "open"
+	case errors.Is(err, secretstore.ErrUnknownKEK):
+		return "unknown_kek"
+	}
+	return "database"
+}
+
+// each runs fn over every stored envelope, one transaction per row, and writes one install audit
+// event for the run after the loop (ADR 0100 decision 3): the counts done and failed, the failures by
+// kind and the KEK usage before and after. A run that changes no row writes nothing. With
+// RecordStarted it also writes action+".started" before the loop, when there is a row to change.
+func (t *Tool) each(ctx context.Context, verb, command, action string, fn rowFn) error {
 	ks, err := t.Store.Load(ctx)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		for _, k := range ks.Keys {
+			clear(k)
+		}
+	}()
 	ring, err := t.ring(ks)
 	if err != nil {
 		return err
 	}
-	total := 0
+	a := t.auditor()
+	var usageBefore map[string]int
+	if a != nil {
+		if usageBefore, err = t.Usage(ctx); err != nil {
+			return err
+		}
+		if t.RecordStarted {
+			pending := 0
+			for id, n := range usageBefore {
+				if command == "reencrypt" || id != ks.Active {
+					pending += n
+				}
+			}
+			if pending > 0 {
+				if err := a.Record(ctx, Event{
+					Command: command, Action: action + StartedSuffix, TargetKind: "kek", TargetID: ks.Active,
+					Before: map[string]any{"kek_usage": usageBefore}, After: map[string]any{"rows": pending, "active": ks.Active},
+				}); err != nil {
+					return fmt.Errorf("nothing was changed: %w", err)
+				}
+			}
+		}
+	}
+	total, failed := 0, 0
+	failures := map[string]int{}
 	var errs []error
 	for _, c := range Columns {
 		ids, err := t.rowIDs(ctx, c)
 		if err != nil {
-			return err
+			errs, failed = append(errs, err), failed+1
+			failures["database"]++
+			break
 		}
 		for _, r := range ids {
 			changed, err := t.one(ctx, c, r, ring, ks.Active, fn)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s %s: %w", c.Table, r.id, err))
+				failed++
+				failures[failureKind(err)]++
 				continue
 			}
 			if changed {
@@ -744,6 +858,18 @@ func (t *Tool) each(ctx context.Context, verb string, fn rowFn) error {
 		}
 	}
 	_, _ = fmt.Fprintf(t.Out, "%d value(s) %s.\n", total, verb)
+	if a != nil && total > 0 {
+		after := map[string]any{"done": total, "failed": failed, "failures": failures, "active": ks.Active}
+		if usage, err := t.Usage(ctx); err == nil {
+			after["kek_usage"] = usage
+		}
+		if err := a.Record(ctx, Event{
+			Command: command, Action: action, TargetKind: "kek", TargetID: ks.Active,
+			Before: map[string]any{"kek_usage": usageBefore, "active": ks.Active}, After: after,
+		}); err != nil {
+			errs = append(errs, fmt.Errorf("%w: %w", ErrNotAudited, err))
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -792,7 +918,7 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 		}
 		var env secretstore.Envelope
 		if err := json.Unmarshal(raw, &env); err != nil {
-			return errors.New("unreadable envelope")
+			return errUnreadable
 		}
 		out, err := fn(ring, secretstore.Binding{OrgID: r.org, Table: c.Table, RowID: r.id, Column: c.Column}, env, active)
 		if err != nil {
@@ -838,12 +964,16 @@ func (t *Tool) Retire(ctx context.Context, id string) error {
 		"The KEK is removed from the key set. Keep a copy in your backup escrow for as long as database backups that used it exist."); err != nil {
 		return err
 	}
+	a, before, err := t.snapshot(ctx, ks)
+	if err != nil {
+		return err
+	}
 	delete(ks.Keys, id)
 	if err := t.Store.Save(ctx, ks); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(t.Out, "Retired KEK %s. Keep a copy in your backup escrow for as long as database backups that used it exist.\n", id)
-	return nil
+	return t.recordChange(ctx, a, before, "retire", ActionRetire, "kek", id)
 }
 
 // retireBlock is why id cannot be retired now, or nil.

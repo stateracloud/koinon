@@ -429,6 +429,32 @@ and any superuser, which can also rewrite the chain; signed checkpoints (ADR 010
 gap later. `koinon-api audit verify` walks the install chain and every org chain and exits non-zero
 at the first broken link (`--install` for the install chain alone).
 
+### Key events in the install audit chain
+
+Every change to the key set is written to the install audit chain (ADR 0100, "Keys: not atomic,
+so checked on start"). A Secret update is not a database write, so the event follows the update; if
+it cannot be written, the change stands (`koinon-api keys` prints that it was not recorded) and the
+next `koinon-api` start records the key set as `keys.observed`.
+
+| Action | Actor | When |
+| --- | --- | --- |
+| `keys.add`, `keys.activate`, `keys.retire` | `cli`, `keys add` / `keys activate` / `keys retire` | right after the Secret update |
+| `keys.rewrap`, `keys.reencrypt` | `cli`, `keys rewrap` / `keys reencrypt` | once per run, after the loop: rows done and failed, failures by kind (`unknown_kek`, `open`, `envelope`, `database`), the KEK usage before and after. A run that changes no row writes nothing |
+| `keys.rewrap.started`, `keys.reencrypt.started` | as above | only with `--record-started`, before the loop, when there is a row to change |
+| `keys.generated` | `system koinon-api:keys` | `koinon-api` made the first KEK Secret or the saved-work key |
+| `keys.secret_created`, `keys.add`, `keys.activate`, `keys.bound` | `system koinon-api:key-admin` | the key-admin Job created the KEK Secret, added a KEK, recovered a lost active KEK, or bound a KEK to the install |
+| `keys.observed` | `system koinon-api:startup` | a start found the key set different from the last recorded key event |
+
+The summary of a key event holds `before` and `after`, each `{keks: [{id, fingerprint, wrapped_by,
+binding}], active, retired, generated: [{secret_name, uid, created_at}]}`. It names KEKs by ID and
+fingerprint, as `keys status` does, and Secrets by `secret_name`, UID and creation time. It never
+holds a key, a value or a hash of one: Secrets are read by metadata only. A generated Secret that was
+deleted and created again has a new UID, so the start after it writes `keys.observed`.
+
+`keys.observed` also appears on the first start after a KEK came from `secrets.kek.existingSecret`
+or from the ensure-secrets Job, since no command wrote it. `keys activate` now needs
+`--database-url`, like `add`, `retire` and `rewrap`, so that it can record its event.
+
 ## Admin API tokens
 
 A token made from a session starts a chain: 30 days by default, at most 90. A token may create tokens
