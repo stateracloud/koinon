@@ -365,7 +365,8 @@ never appears. One `helm upgrade` is enough. Until the grant lands `koinon-api` 
 logs an error for each startup install event the database refuses
 (`koinon_audit_writes_total{chain="install",result="error"}` counts them) and retries it every
 30 seconds, and platform price changes fail with a permission error. The scheduled price refresh
-keeps the setting already recorded until its change is recorded. Do not let the api, reconciler and
+keeps the setting already recorded (mode, interval and auto-apply bounds) wherever it does less,
+until its change is recorded. Do not let the api, reconciler and
 agentd share one login: the reconciler would then be able to write this chain.
 
 A refused install write that lasts longer than an upgrade means the grant or the membership is
@@ -393,7 +394,16 @@ GRANT koinon_install_audit_writer TO <api role>;
 
 In this mode the chart runs the migrate Job with `--require-install-writer`: without the role the Job
 fails (`the role koinon_install_audit_writer does not exist`) and so does the install or upgrade, since
-no hook would create the role later. Create it as above and run the same `helm upgrade` again.
+no hook would create the role later. The check runs before any migration, so a failed Job leaves the
+schema as it was. Create the role as above and run the same `helm upgrade` again.
+
+The migrate Job connects as the migration role and never sees the api URI, so it cannot tell which
+role `koinon-api` logs in as. Set `postgres.external.apiRole` to that role and the Job also fails,
+before any migration, when it is not a member of `koinon_install_audit_writer` or does not inherit its
+privileges (`koinon-api's login role <api role> is not a member of koinon_install_audit_writer`);
+the chart passes it as `koinon-api migrate --install-writer-member <api role>`. Left empty, the Job
+checks only that the role exists, and a missing membership shows only as refused install writes
+(the alert above).
 
 And, if the migration role is not the one that owns the tables or `koinon_app` does not exist, after
 it:

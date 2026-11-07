@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"fmt"
 )
 
 // FS holds every migration file.
@@ -23,6 +24,36 @@ const InstallAuditWriterRole = "koinon_install_audit_writer"
 type Execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// CheckInstallAuditWriter reports what the database lacks for the install audit chain: the role
+// InstallAuditWriterRole and, when member is not empty, member's membership in it, with its
+// privileges inherited (koinon-api inserts as its login role, without SET ROLE). It needs no table,
+// so "koinon-api migrate --require-install-writer" runs it before the migrations: a failed Job leaves
+// the schema as it was. member is koinon-api's login role; the migration connects as another role and
+// knows it only when told (--install-writer-member). It returns nil when nothing is missing.
+func CheckInstallAuditWriter(ctx context.Context, db Execer, member string) error {
+	var writer, memberExists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1),
+		EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $2)`, InstallAuditWriterRole, member).Scan(&writer, &memberExists); err != nil {
+		return err
+	}
+	switch {
+	case !writer:
+		return fmt.Errorf("the role %s does not exist", InstallAuditWriterRole)
+	case member == "":
+		return nil
+	case !memberExists:
+		return fmt.Errorf("koinon-api's login role %s does not exist", member)
+	}
+	var inherits bool
+	if err := db.QueryRowContext(ctx, `SELECT pg_has_role($1, $2, 'USAGE')`, member, InstallAuditWriterRole).Scan(&inherits); err != nil {
+		return err
+	}
+	if !inherits {
+		return fmt.Errorf("koinon-api's login role %s is not a member of %s (or does not inherit its privileges)", member, InstallAuditWriterRole)
+	}
+	return nil
 }
 
 // GrantInstallAuditWriter gives InstallAuditWriterRole its privileges on the install audit tables

@@ -143,10 +143,11 @@ asynchronously, and the migrate Job may already have run by then. Instead:
   grant lands. Requests that write install events (platform price changes) fail with the permission
   error in that window, which is the hook's runtime. A setting whose event is not recorded does not
   take effect where it would widen what runs: the scheduled price refresh runs each tick in the
-  recorded setting (`price_refresh_settings`) wherever that fetches less, or less often, than the
-  configured one (`prices.Refresher.Effective`), so a change to `on` fetches only from the first tick
-  after its `price.refresh.settings_changed` event is written. A change that fetches less (to `off`)
-  applies at once. The same rule keeps an old replica of a rolling upgrade to what a new one recorded
+  recorded setting (`price_refresh_settings`) wherever that fetches less, less often or applies
+  less than the configured one (`prices.Refresher.Effective`: the mode, the interval and both
+  auto-apply bounds, which the row records with the same event), so a change to `on` or to a looser
+  bound runs only from the first tick after its `price.refresh.settings_changed` event is written. A
+  change that does less (to `off`, a tighter bound) applies at once. The same rule keeps an old replica of a rolling upgrade to what a new one recorded
   (maintainer decision 2026-11-07, after review).
 
 With `postgres.mode: external` the roles are the operator's. `docs/ops/secret-keys.md` ("Append-only

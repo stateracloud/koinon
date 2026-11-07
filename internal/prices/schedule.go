@@ -106,70 +106,99 @@ func modeRank(m RefreshMode) int {
 	return 2
 }
 
-// Effective is the mode and interval a scheduled tick runs with: the configured ones, held back to
-// the recorded setting (price_refresh_settings, written by SyncSettings together with its install
-// audit event) wherever that one fetches less or less often. The recorded row is what the install
-// audit chain, StoredBounds and the prices commands see, so a replica never fetches more than it
-// says: while its SyncSettings is refused (the install audit writer is not granted yet, ADR 0100
-// decision 1.1a) it runs the recorded setting, and switches at the first tick after its own setting
-// and event are recorded; in a rolling upgrade an old replica fetches no more than the setting a new
-// replica recorded. A change to fetching less (to off, a longer interval) takes effect at once,
-// before its event is recorded: it widens nothing. No row yet: the default, auto at the configured
-// interval, which a first start in auto records without an event.
-func (r *Refresher) Effective(ctx context.Context, mode RefreshMode, interval time.Duration) (RefreshMode, time.Duration, error) {
-	if _, err := ParseRefreshMode(string(mode)); err != nil {
-		return "", 0, err
+// Schedule is what one scheduled tick runs with: the mode, the interval since a source's last fetch,
+// and the auto-apply bounds.
+type Schedule struct {
+	Mode     RefreshMode
+	Interval time.Duration
+	Bounds   pricefetch.Bounds
+}
+
+// Configured is the schedule koinon-api was started with: mode, interval and this Refresher's bounds.
+func (r *Refresher) Configured(mode RefreshMode, interval time.Duration) Schedule {
+	return Schedule{Mode: mode, Interval: interval, Bounds: r.bounds}
+}
+
+// Tighter combines a configured schedule with the recorded one, field by field, to what does less:
+// the mode that fetches less (off, then auto, then on), the longer interval, and the smaller of each
+// auto-apply bound. It is the rule of Effective, without the database.
+func Tighter(configured, recorded Schedule) Schedule {
+	out := configured
+	if modeRank(recorded.Mode) < modeRank(out.Mode) {
+		out.Mode = recorded.Mode
 	}
+	out.Interval = max(out.Interval, recorded.Interval)
+	out.Bounds.MaxChangePercent = min(out.Bounds.MaxChangePercent, recorded.Bounds.MaxChangePercent)
+	out.Bounds.MaxAutoPerDay = min(out.Bounds.MaxAutoPerDay, recorded.Bounds.MaxAutoPerDay)
+	return out
+}
+
+// Effective is the schedule a scheduled tick runs with: the configured one, held back to the recorded
+// setting (price_refresh_settings, written by SyncSettings together with its install audit event)
+// wherever that one does less (Tighter): the mode, the interval and both auto-apply bounds, which
+// the row records with the same event. The recorded row is what the install audit chain,
+// StoredBounds and the prices commands see, so a replica never fetches or applies more than it says:
+// while its SyncSettings is refused (the install audit writer is not granted yet, ADR 0100 decision
+// 1.1a) it runs the recorded setting, and switches at the first tick after its own setting and event
+// are recorded; in a rolling upgrade an old replica does no more than the setting a new replica
+// recorded. A change to doing less (to off, a longer interval, a tighter bound) takes effect at once,
+// before its event is recorded: it widens nothing. No row yet: the default, auto at the configured
+// interval with the default bounds, which a first start in auto records without an event.
+func (r *Refresher) Effective(ctx context.Context, mode RefreshMode, interval time.Duration) (Schedule, error) {
+	if _, err := ParseRefreshMode(string(mode)); err != nil {
+		return Schedule{}, err
+	}
+	configured := r.Configured(mode, interval)
 	st, err := store.New(r.svc.pool).GetPriceRefreshSettings(ctx)
 	if errors.Is(err, pgx.ErrNoRows) {
-		if modeRank(RefreshAuto) < modeRank(mode) {
-			mode = RefreshAuto
-		}
-		return mode, interval, nil
+		return Tighter(configured, Schedule{Mode: RefreshAuto, Interval: interval, Bounds: pricefetch.DefaultBounds}), nil
 	} else if err != nil {
-		return "", 0, err
+		return Schedule{}, err
 	}
 	stored, err := ParseRefreshMode(st.Mode)
 	if err != nil {
-		return "", 0, fmt.Errorf("stored price refresh setting: %w", err)
+		return Schedule{}, fmt.Errorf("stored price refresh setting: %w", err)
 	}
 	storedInterval, err := time.ParseDuration(st.Interval)
 	if err != nil {
-		return "", 0, fmt.Errorf("stored price refresh interval: %w", err)
+		return Schedule{}, fmt.Errorf("stored price refresh interval: %w", err)
 	}
-	if modeRank(stored) < modeRank(mode) {
-		mode = stored
+	storedBounds := pricefetch.Bounds{MaxChangePercent: int(st.MaxChangePercent), MaxAutoPerDay: int(st.MaxAutoPerDay)}
+	if err := storedBounds.Validate(); err != nil {
+		return Schedule{}, fmt.Errorf("stored price refresh bounds: %w", err)
 	}
-	return mode, max(interval, storedInterval), nil
+	return Tighter(configured, Schedule{Mode: stored, Interval: storedInterval, Bounds: storedBounds}), nil
 }
 
-// Loop runs Tick on a schedule until ctx ends: first a minute after the start (a restart does not
-// fetch at once), then every interval, at most an hour apart, so that auto mode notices a new
-// provider and the unpriced-model count stays current. koinon-api runs it in every mode; in off it
-// only counts unpriced models and makes no request. Each tick runs in the Effective mode, read from
-// the recorded setting at that tick; a tick that cannot read it fetches nothing.
+// Loop runs a tick on a schedule until ctx ends: first a minute after the start (a restart does not
+// fetch at once), then every interval, at least a minute and at most an hour apart, so that auto mode
+// notices a new provider and the unpriced-model count stays current. koinon-api runs it in every
+// mode; in off it only counts unpriced models and makes no request. Each tick runs the Effective
+// schedule, read from the recorded setting at that tick; a tick that cannot read it fetches nothing.
 func (r *Refresher) Loop(ctx context.Context, mode RefreshMode, interval time.Duration) {
-	var last RefreshMode
-	effective := func() (RefreshMode, time.Duration, bool) {
-		eff, iv, err := r.Effective(ctx, mode, interval)
+	configured := r.Configured(mode, interval)
+	var last Schedule
+	effective := func() (Schedule, bool) {
+		eff, err := r.Effective(ctx, mode, interval)
 		if err != nil {
 			if ctx.Err() == nil {
 				r.log.Warn("scheduled price refresh: reading the recorded setting", "err", err)
 			}
-			return "", 0, false
+			return Schedule{}, false
 		}
 		if eff != last {
-			if eff != mode {
+			if eff != configured {
 				r.log.Warn("the scheduled price refresh runs in the recorded mode until koinon-api's setting is recorded",
-					"mode", eff, "configured", mode)
+					"mode", eff.Mode, "configured", mode, "interval", eff.Interval,
+					"maxChangePercent", eff.Bounds.MaxChangePercent, "maxAutoPerDay", eff.Bounds.MaxAutoPerDay)
 			} else {
-				r.log.Info("the scheduled price refresh runs in the configured mode", "mode", eff)
+				r.log.Info("the scheduled price refresh runs in the configured mode", "mode", eff.Mode)
 			}
 			last = eff
 		}
-		return eff, iv, true
+		return eff, true
 	}
-	effective() // says at the start which mode the first tick will run in
+	effective() // says at the start which schedule the first tick will run
 	tick := time.NewTimer(time.Minute)
 	defer tick.Stop()
 	for {
@@ -178,29 +207,35 @@ func (r *Refresher) Loop(ctx context.Context, mode RefreshMode, interval time.Du
 			return
 		case <-tick.C:
 		}
-		if eff, iv, ok := effective(); ok {
-			if _, err := r.Tick(ctx, eff, iv); err != nil && ctx.Err() == nil {
+		if eff, ok := effective(); ok {
+			if _, err := r.RunSchedule(ctx, eff); err != nil && ctx.Err() == nil {
 				r.log.Warn("scheduled price refresh", "err", err)
 			}
 		}
-		tick.Reset(min(interval, time.Hour))
+		// Off accepts any interval, zero included: never spin.
+		tick.Reset(min(max(interval, time.Minute), time.Hour))
 	}
 }
 
-// Tick is one round of the schedule: it reports the unpriced models, then fetches each source the
-// mode allows that was last fetched at least interval ago (another replica may have fetched it, or
-// this one before a restart), and applies the proposals inside the bounds.
+// Tick is one round of the schedule with this Refresher's own bounds (RunSchedule of Configured).
 func (r *Refresher) Tick(ctx context.Context, mode RefreshMode, interval time.Duration) (RunResult, error) {
+	return r.RunSchedule(ctx, r.Configured(mode, interval))
+}
+
+// RunSchedule is one round of the schedule: it reports the unpriced models, then fetches each source
+// the mode allows that was last fetched at least the interval ago (another replica may have fetched
+// it, or this one before a restart), and applies the proposals inside the schedule's bounds.
+func (r *Refresher) RunSchedule(ctx context.Context, sc Schedule) (RunResult, error) {
 	if _, err := r.ReportUnpriced(ctx); err != nil && ctx.Err() == nil {
 		r.log.Warn("counting unpriced models", "err", err)
 	}
-	names, err := r.activeSources(ctx, mode)
+	names, err := r.activeSources(ctx, sc.Mode)
 	if err != nil {
 		return RunResult{Failed: map[string]string{}}, err
 	}
 	var due []string
 	for _, n := range names {
-		ok, err := r.due(ctx, n, interval)
+		ok, err := r.due(ctx, n, sc.Interval)
 		if err != nil {
 			return RunResult{Failed: map[string]string{}}, err
 		}
@@ -211,7 +246,7 @@ func (r *Refresher) Tick(ctx context.Context, mode RefreshMode, interval time.Du
 	if len(due) == 0 {
 		return RunResult{Failed: map[string]string{}}, nil
 	}
-	return r.run(ctx, TriggerSchedule, due, true)
+	return r.run(ctx, TriggerSchedule, due, true, sc.Bounds)
 }
 
 // activeSources are the adapters the mode fetches now.

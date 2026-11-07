@@ -220,7 +220,7 @@ type RunResult struct {
 // Run fetches every adapter, records the fetch, makes proposals and, when auto is true, applies
 // the proposals inside the bounds. A failing source does not stop the others.
 func (r *Refresher) Run(ctx context.Context, trigger string, auto bool) (RunResult, error) {
-	return r.run(ctx, trigger, r.adapterNames(), auto)
+	return r.run(ctx, trigger, r.adapterNames(), auto, r.bounds)
 }
 
 func (r *Refresher) adapterNames() []string {
@@ -234,8 +234,9 @@ func (r *Refresher) adapterNames() []string {
 
 // run fetches the named adapters. Auto-apply then considers only the proposals of the sources that
 // were fetched successfully in this run: a source that failed proposes nothing new, and its older
-// proposals wait for the next good fetch.
-func (r *Refresher) run(ctx context.Context, trigger string, names []string, auto bool) (RunResult, error) {
+// proposals wait for the next good fetch. Auto-apply holds the proposals to bounds b: the
+// Refresher's own, or for a scheduled tick the tighter of those and the recorded ones (Effective).
+func (r *Refresher) run(ctx context.Context, trigger string, names []string, auto bool, b pricefetch.Bounds) (RunResult, error) {
 	res := RunResult{Failed: map[string]string{}}
 	for _, name := range names {
 		n, err := r.fetchOne(ctx, r.adapters[name], trigger)
@@ -248,7 +249,7 @@ func (r *Refresher) run(ctx context.Context, trigger string, names []string, aut
 		res.Proposals += n
 	}
 	if auto && len(res.Fetched) > 0 {
-		n, err := r.AutoApply(ctx, res.Fetched...)
+		n, err := r.autoApply(ctx, b, res.Fetched...)
 		res.Applied = n
 		if err != nil {
 			return res, err
@@ -466,6 +467,11 @@ func baselineOf(e *effective) *pricing.Spec {
 // setting) applies only if it still is auto, and otherwise moves to the class it now has. It
 // returns how many it applied.
 func (r *Refresher) AutoApply(ctx context.Context, sources ...string) (int, error) {
+	return r.autoApply(ctx, r.bounds, sources...)
+}
+
+// autoApply is AutoApply under bounds b.
+func (r *Refresher) autoApply(ctx context.Context, b pricefetch.Bounds, sources ...string) (int, error) {
 	applied := 0
 	err := pgx.BeginFunc(ctx, r.svc.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
@@ -507,7 +513,7 @@ func (r *Refresher) AutoApply(ctx context.Context, sources ...string) (int, erro
 			verdict := pricefetch.Classify(pricefetch.Facts{
 				Origin: p.Origin, Source: p.Source, Current: curEntry, Baseline: baselineOf(cur), Proposed: *p.Proposed,
 				Agreeing: p.Agreeing, Stable: stable,
-			}, r.bounds)
+			}, b)
 			if verdict.Class != pricefetch.ClassAuto {
 				if err := q.SetPriceProposalClass(ctx, store.SetPriceProposalClassParams{
 					ID: row.ID, Class: string(verdict.Class), FailedRules: truncate(strings.Join(verdict.Failed, "; "), 3900),
@@ -526,8 +532,8 @@ func (r *Refresher) AutoApply(ctx context.Context, sources ...string) (int, erro
 		if err != nil {
 			return err
 		}
-		if !pricefetch.CapAllows(int(today), len(cands), r.bounds.MaxAutoPerDay) {
-			why := fmt.Sprintf("daily cap: %d automatic change(s) in the last 24 hours and %d more waiting exceed the cap of %d; a large batch looks like a broken source, so all of them wait for a person", today, len(cands), r.bounds.MaxAutoPerDay)
+		if !pricefetch.CapAllows(int(today), len(cands), b.MaxAutoPerDay) {
+			why := fmt.Sprintf("daily cap: %d automatic change(s) in the last 24 hours and %d more waiting exceed the cap of %d; a large batch looks like a broken source, so all of them wait for a person", today, len(cands), b.MaxAutoPerDay)
 			for _, p := range cands {
 				id, _ := parseUUID(p.ID)
 				if err := q.SetPriceProposalClass(ctx, store.SetPriceProposalClassParams{ID: id, Class: string(pricefetch.ClassNeedsReview), FailedRules: why}); err != nil {

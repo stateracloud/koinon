@@ -100,22 +100,55 @@ var _ = Describe("startup install audit writes before the writer role is granted
 	})
 
 	// An external database: nothing creates the role after the migrate Job, so the chart passes
-	// --require-install-writer and the Job fails with the remedy (the cnpg upgrade only warns).
-	It("fails the migration without the role when it is required, and only warns otherwise", func(ctx SpecContext) {
+	// --require-install-writer and the Job fails with the remedy (the cnpg upgrade only warns). The
+	// check runs before any migration, so a failed Job leaves the schema as it was.
+	It("fails the migration without the role or the api role's membership when it is required, and only warns otherwise", func(ctx SpecContext) {
 		testenv.Require(testenv.Docker)
 		dsn, stop, err := pgtest.StartServer(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(stop)
-		err = migrate(ctx, dsn, time.Minute, migrateOptions{requireWriter: true})
-		Expect(err).To(MatchError(ContainSubstring("the role koinon_install_audit_writer does not exist")))
-		Expect(err).To(MatchError(ContainSubstring("docs/ops/secret-keys.md")))
-		Expect(migrate(ctx, dsn, time.Minute, migrateOptions{})).To(Succeed(), "the cnpg pre-upgrade run goes on")
-
 		conn, err := pgx.Connect(ctx, dsn)
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func(ctx SpecContext) { _ = conn.Close(ctx) })
-		_, err = conn.Exec(ctx, `CREATE ROLE koinon_install_audit_writer NOLOGIN`)
-		Expect(err).NotTo(HaveOccurred())
+		untouched := func() {
+			GinkgoHelper()
+			var goose, tables bool
+			Expect(conn.QueryRow(ctx, `SELECT to_regclass('goose_db_version') IS NOT NULL, to_regclass('install_audit_events') IS NOT NULL`).
+				Scan(&goose, &tables)).To(Succeed())
+			Expect(goose).To(BeFalse(), "no migration ran")
+			Expect(tables).To(BeFalse(), "no migration ran")
+		}
+		exec := func(stmt string) {
+			GinkgoHelper()
+			_, err := conn.Exec(ctx, stmt)
+			Expect(err).NotTo(HaveOccurred(), stmt)
+		}
+		required := migrateOptions{requireWriter: true, writerMember: "koinon_api_test"}
+
+		err = migrate(ctx, dsn, time.Minute, required)
+		Expect(err).To(MatchError(ContainSubstring("the role koinon_install_audit_writer does not exist")))
+		Expect(err).To(MatchError(ContainSubstring("docs/ops/secret-keys.md")))
+		Expect(err).To(MatchError(ContainSubstring("no migration was applied")))
+		untouched()
+
+		By("the role exists, but koinon-api's login role is missing, then not a member")
+		exec(`CREATE ROLE koinon_install_audit_writer NOLOGIN`)
+		Expect(migrate(ctx, dsn, time.Minute, required)).To(MatchError(ContainSubstring("koinon-api's login role koinon_api_test does not exist")))
+		exec(`CREATE ROLE koinon_api_test LOGIN`)
+		Expect(migrate(ctx, dsn, time.Minute, required)).To(MatchError(ContainSubstring("koinon_api_test is not a member of koinon_install_audit_writer")))
+		exec(`CREATE ROLE koinon_api_noinherit_test LOGIN NOINHERIT IN ROLE koinon_install_audit_writer`)
+		Expect(migrate(ctx, dsn, time.Minute, migrateOptions{requireWriter: true, writerMember: "koinon_api_noinherit_test"})).
+			To(MatchError(ContainSubstring("does not inherit its privileges")))
+		untouched()
+
+		By("without the member check the role alone is enough; without --require-install-writer nothing is checked")
+		exec(`DROP ROLE koinon_install_audit_writer`)
+		Expect(migrate(ctx, dsn, time.Minute, migrateOptions{})).To(Succeed(), "the cnpg pre-upgrade run goes on")
+		exec(`CREATE ROLE koinon_install_audit_writer NOLOGIN`)
 		Expect(migrate(ctx, dsn, time.Minute, migrateOptions{requireWriter: true})).To(Succeed(), "the operator created the role")
+
+		By("the operator added koinon-api's login role to it")
+		exec(`GRANT koinon_install_audit_writer TO koinon_api_test`)
+		Expect(migrate(ctx, dsn, time.Minute, required)).To(Succeed())
 	}, SpecTimeout(3*time.Minute))
 })

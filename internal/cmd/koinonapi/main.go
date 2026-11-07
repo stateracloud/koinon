@@ -906,6 +906,11 @@ type migrateOptions struct {
 	// of warning. The chart passes it on an external database, where no hook will create the role
 	// later: the Job fails with the remedy rather than koinon-api logging a refused write forever.
 	requireWriter bool
+	// writerMember is koinon-api's login role; with requireWriter the migration also fails when it is
+	// not a member of the writer role. Empty: only the role is checked. The migration connects as the
+	// schema owner, a different role, and cannot see which role koinon-api logs in as; the chart passes
+	// postgres.external.apiRole.
+	writerMember string
 }
 
 // migrate applies pending migrations, first waiting up to wait for the database: on a fresh install
@@ -932,6 +937,16 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 		})
 	}
 
+	// On an external database nothing creates the install audit writer role later, so the chart
+	// passes --require-install-writer. The check needs no table and runs before any migration: a
+	// failed Job leaves the schema as it was.
+	if o.requireWriter {
+		if err := migrations.CheckInstallAuditWriter(ctx, db, o.writerMember); err != nil {
+			return fmt.Errorf("%w: create the role and add koinon-api's login role to it "+
+				"(docs/ops/secret-keys.md, The install audit chain), then run the migration again; no migration was applied; "+
+				"without it koinon-api records no install audit event", err)
+		}
+	}
 	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
 	if err != nil {
 		return err
@@ -947,15 +962,14 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 	// external database). On a Helm upgrade of a CloudNativePG cluster it may appear only after this
 	// pre-upgrade hook, so a missing role is a warning, not a failure: the chart's post-upgrade hook
 	// (Argo CD: PostSync) runs "migrate --grants-only", which waits for it (ADR 0100 decision 1.1a).
-	// On an external database nothing creates it later, so the chart passes --require-install-writer.
 	granted, err := migrations.GrantInstallAuditWriter(ctx, db)
 	if err != nil {
 		return fmt.Errorf("grant the install audit writer: %w", err)
 	}
 	if !granted && o.requireWriter {
-		return fmt.Errorf("the role %s does not exist: create it and add koinon-api's database role to it "+
-			"(docs/ops/secret-keys.md, The install audit chain), then run the migration again; "+
-			"without it koinon-api records no install audit event", migrations.InstallAuditWriterRole)
+		// The role was there before the migrations (checked above): it was dropped meanwhile.
+		return fmt.Errorf("the role %s or the install audit tables disappeared during the migration: "+
+			"create the role (docs/ops/secret-keys.md, The install audit chain), then run the migration again", migrations.InstallAuditWriterRole)
 	}
 	if !granted {
 		slog.Warn("the role " + migrations.InstallAuditWriterRole + " does not exist yet, so it was granted nothing: " +

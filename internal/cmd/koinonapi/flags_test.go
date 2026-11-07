@@ -29,6 +29,9 @@ var _ = Describe("koinon-api's startup", func() {
 		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--require-install-writer", "--wait", "4m")).To(Succeed())
 		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--grants-only", "--require-install-writer")).
 			To(MatchError(ContainSubstring("--grants-only and --require-install-writer are exclusive")))
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--require-install-writer", "--install-writer-member", "koinon_api")).To(Succeed())
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--install-writer-member", "koinon_api")).
+			To(MatchError(ContainSubstring("--install-writer-member needs --require-install-writer")))
 	})
 
 	It("takes the database URL from the flag, KOINON_DATABASE_URL or DATABASE_URL", func() {

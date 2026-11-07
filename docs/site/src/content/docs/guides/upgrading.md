@@ -90,7 +90,8 @@ The release that adds the install audit chain (migration 00066) needs a `NOLOGIN
 has no `CREATEROLE`, so it cannot create the role itself. The migration does not need the role: the
 `INSERT` grant to it is made by `koinon-api migrate` after the migrations, on every run, and only when
 the role exists. In cnpg mode a missing role makes the Job log a warning, not fail; on an external
-database the chart passes `--require-install-writer` and the Job fails, naming the role to create.
+database the chart passes `--require-install-writer` and the Job fails before any migration, naming
+the role to create (and, with `postgres.external.apiRole` set, a missing membership of that role).
 
 - **`postgres.mode: cnpg`.** Nothing to do. The chart lists the role as a CloudNativePG managed role,
   and `koinon_api` joins it. With Helm or Flux the migrate Job is a `pre-upgrade` hook, so it runs

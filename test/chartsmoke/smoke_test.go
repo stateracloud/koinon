@@ -416,12 +416,43 @@ func describeMode(name, valuesFile string) {
 			}
 			Expect(migrate).NotTo(BeNil())
 
+			// The check runs before any migration (no migration was applied). This database is migrated
+			// already, so goose's version table is the witness that the failed Job left it as it was;
+			// the Docker spec of internal/cmd/koinonapi proves it on an empty database.
+			migrations := func() int {
+				GinkgoHelper()
+				var n int
+				Expect(conn.QueryRow(ctx, `SELECT count(*) FROM goose_db_version`).Scan(&n)).To(Succeed())
+				return n
+			}
+			before := migrations()
+
 			By("on an external database (this render) the migrate Job fails without the role, naming the remedy")
 			mc := migrate.Spec.Template.Spec.Containers[0]
 			Expect(mc.Args).To(ContainElement("--require-install-writer"))
 			w := rn.start(ctx, migrate.Name, migrate.Spec.Template.Spec, mc, jobDeadline)
 			Expect(w.ExitCode(ctx)).NotTo(BeZero(), "logs:\n%s", w.Logs(ctx))
-			Expect(w.Logs(ctx)).To(And(ContainSubstring("the role koinon_install_audit_writer does not exist"), ContainSubstring("docs/ops/secret-keys.md")))
+			Expect(w.Logs(ctx)).To(And(ContainSubstring("the role koinon_install_audit_writer does not exist"), ContainSubstring("docs/ops/secret-keys.md"),
+				ContainSubstring("no migration was applied")))
+			Expect(migrations()).To(Equal(before))
+
+			By("with postgres.external.apiRole it also fails while koinon_api is not a member of the role")
+			execAll(`CREATE ROLE koinon_install_audit_writer NOLOGIN`)
+			withRole := helmRenderWith(ctx, valuesFile, append(slices.Clone(externalDatabase), "--set", "postgres.external.apiRole=koinon_api")...)
+			var mm *batchv1.Job
+			for _, j := range withRole.Jobs {
+				if j.Name == "koinon-migrate" {
+					mm = j
+				}
+			}
+			Expect(mm).NotTo(BeNil())
+			mmc := mm.Spec.Template.Spec.Containers[0]
+			Expect(mmc.Args).To(ContainElements("--install-writer-member", "koinon_api"))
+			w = rn.start(ctx, mm.Name, mm.Spec.Template.Spec, mmc, jobDeadline)
+			Expect(w.ExitCode(ctx)).NotTo(BeZero(), "logs:\n%s", w.Logs(ctx))
+			Expect(w.Logs(ctx)).To(ContainSubstring("koinon_api is not a member of koinon_install_audit_writer"))
+			Expect(migrations()).To(Equal(before))
+			execAll(`DROP ROLE koinon_install_audit_writer`)
 
 			By("the cnpg pre-upgrade migrate Job finds no role, grants nothing and does not fail the upgrade")
 			// In cnpg mode the chart does not pass --require-install-writer (hack/chart-check.d/45 and

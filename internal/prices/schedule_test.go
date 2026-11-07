@@ -168,56 +168,77 @@ var _ = Describe("the price refresh modes (maintainer decision 2026-11-07)", fun
 		srv, hits := countingServer()
 		now := time.Now()
 		r := refresherOn(pool, defaultList("2000-01-01.1", model), &httpAdapter{url: srv.URL, model: model}, &now)
-		scheduled := func(mode prices.RefreshMode, iv time.Duration) (prices.RefreshMode, time.Duration) {
+		scheduled := func(mode prices.RefreshMode, iv time.Duration) prices.Schedule {
 			GinkgoHelper()
-			eff, eiv, err := r.Effective(ctx, mode, iv)
+			eff, err := r.Effective(ctx, mode, iv)
 			Expect(err).NotTo(HaveOccurred())
-			_, err = r.Tick(ctx, eff, eiv)
+			_, err = r.RunSchedule(ctx, eff)
 			Expect(err).NotTo(HaveOccurred())
-			return eff, eiv
+			return eff
+		}
+		effective := func(r *prices.Refresher, mode prices.RefreshMode, iv time.Duration) prices.Schedule {
+			GinkgoHelper()
+			eff, err := r.Effective(ctx, mode, iv)
+			Expect(err).NotTo(HaveOccurred())
+			return eff
+		}
+		denyInstallAudit := func() {
+			GinkgoHelper()
+			_, err := pool.Exec(ctx, `CREATE TRIGGER aaa_deny_install_audit BEFORE INSERT ON install_audit_events FOR EACH ROW EXECUTE FUNCTION deny_install_audit()`)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		allowInstallAudit := func() {
+			GinkgoHelper()
+			_, err := pool.Exec(ctx, `DROP TRIGGER aaa_deny_install_audit ON install_audit_events`)
+			Expect(err).NotTo(HaveOccurred())
 		}
 
 		By("nothing recorded yet: the default, auto, which fetches nothing without an openrouter provider")
-		eff, _ := scheduled(prices.RefreshOn, 12*time.Hour)
-		Expect(eff).To(Equal(prices.RefreshAuto))
+		eff := scheduled(prices.RefreshOn, 12*time.Hour)
+		Expect(eff.Mode).To(Equal(prices.RefreshAuto))
+		Expect(eff.Bounds).To(Equal(pricefetch.DefaultBounds))
 		Expect(hits.Load()).To(BeZero())
 
 		By("the database refuses the install event: the setting is not recorded and on does not run")
 		_, err := pool.Exec(ctx, `CREATE FUNCTION deny_install_audit() RETURNS trigger LANGUAGE plpgsql AS $$
 			BEGIN RAISE EXCEPTION 'permission denied for table install_audit_events' USING ERRCODE = '42501'; END $$`)
 		Expect(err).NotTo(HaveOccurred())
-		_, err = pool.Exec(ctx, `CREATE TRIGGER aaa_deny_install_audit BEFORE INSERT ON install_audit_events FOR EACH ROW EXECUTE FUNCTION deny_install_audit()`)
-		Expect(err).NotTo(HaveOccurred())
+		denyInstallAudit()
 		Expect(r.SyncSettings(ctx, prices.RefreshOn, 12*time.Hour)).To(MatchError(audit.ErrInstallWriteDenied))
 		Expect(countRows(ctx, pool, `SELECT count(*) FROM price_refresh_settings`)).To(BeZero(), "the setting rolled back with its event")
-		eff, _ = scheduled(prices.RefreshOn, 12*time.Hour)
-		Expect(eff).To(Equal(prices.RefreshAuto))
+		eff = scheduled(prices.RefreshOn, 12*time.Hour)
+		Expect(eff.Mode).To(Equal(prices.RefreshAuto))
 		Expect(hits.Load()).To(BeZero(), "no fetch without the event")
 
 		By("the grant lands: the retry records the setting and its event, and the next tick runs on")
-		_, err = pool.Exec(ctx, `DROP TRIGGER aaa_deny_install_audit ON install_audit_events`)
-		Expect(err).NotTo(HaveOccurred())
+		allowInstallAudit()
 		Expect(r.SyncSettings(ctx, prices.RefreshOn, 12*time.Hour)).To(Succeed())
 		Expect(countRows(ctx, pool, `SELECT count(*) FROM install_audit_events WHERE action = 'price.refresh.settings_changed'`)).To(Equal(1))
-		var iv time.Duration
-		eff, iv = scheduled(prices.RefreshOn, 12*time.Hour)
-		Expect(eff).To(Equal(prices.RefreshOn))
-		Expect(iv).To(Equal(12 * time.Hour))
+		eff = scheduled(prices.RefreshOn, 12*time.Hour)
+		Expect(eff).To(Equal(prices.Schedule{Mode: prices.RefreshOn, Interval: 12 * time.Hour, Bounds: pricefetch.DefaultBounds}))
 		Expect(hits.Load()).To(BeEquivalentTo(1))
 
 		By("a replica that fetches less runs its own setting at once; one that fetches more is held back")
-		eff, _, err = r.Effective(ctx, prices.RefreshOff, 12*time.Hour)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(eff).To(Equal(prices.RefreshOff))
-		eff, iv, err = r.Effective(ctx, prices.RefreshOn, 6*time.Hour)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(eff).To(Equal(prices.RefreshOn))
-		Expect(iv).To(Equal(12*time.Hour), "not more often than recorded")
+		Expect(effective(r, prices.RefreshOff, 12*time.Hour).Mode).To(Equal(prices.RefreshOff))
+		eff = effective(r, prices.RefreshOn, 6*time.Hour)
+		Expect(eff.Mode).To(Equal(prices.RefreshOn))
+		Expect(eff.Interval).To(Equal(12*time.Hour), "not more often than recorded")
 		Expect(r.SyncSettings(ctx, prices.RefreshAuto, 24*time.Hour)).To(Succeed())
-		eff, iv, err = r.Effective(ctx, prices.RefreshOn, 12*time.Hour)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(eff).To(Equal(prices.RefreshAuto), "an old replica during a rolling upgrade")
-		Expect(iv).To(Equal(24 * time.Hour))
+		eff = effective(r, prices.RefreshOn, 12*time.Hour)
+		Expect(eff.Mode).To(Equal(prices.RefreshAuto), "an old replica during a rolling upgrade")
+		Expect(eff.Interval).To(Equal(24 * time.Hour))
+
+		By("tighter bounds are recorded; a replica back at the default bounds, whose event is refused, applies no more than recorded")
+		tight := refresherOn(pool, defaultList("2000-01-01.1", model), &httpAdapter{url: srv.URL, model: model}, &now,
+			pricefetch.Bounds{MaxChangePercent: 5, MaxAutoPerDay: 2})
+		Expect(tight.SyncSettings(ctx, prices.RefreshAuto, 24*time.Hour)).To(Succeed())
+		denyInstallAudit()
+		Expect(r.SyncSettings(ctx, prices.RefreshAuto, 24*time.Hour)).To(MatchError(audit.ErrInstallWriteDenied))
+		Expect(effective(r, prices.RefreshAuto, 24*time.Hour).Bounds).To(Equal(pricefetch.Bounds{MaxChangePercent: 5, MaxAutoPerDay: 2}))
+		allowInstallAudit()
+		Expect(r.SyncSettings(ctx, prices.RefreshAuto, 24*time.Hour)).To(Succeed())
+		Expect(effective(r, prices.RefreshAuto, 24*time.Hour).Bounds).To(Equal(pricefetch.DefaultBounds), "the loosening runs once its event is recorded")
+		Expect(effective(tight, prices.RefreshAuto, 24*time.Hour).Bounds).To(Equal(pricefetch.Bounds{MaxChangePercent: 5, MaxAutoPerDay: 2}), "tightening takes effect at once")
 	})
 
 	It("parses only auto, off and on", func() {
@@ -241,6 +262,37 @@ var _ = Describe("the price refresh modes (maintainer decision 2026-11-07)", fun
 		Expect(testutil.ToFloat64(m.Unpriced.WithLabelValues("openrouter"))).To(BeEquivalentTo(2))
 	})
 })
+
+// The combine rule of Effective, without a database: each field takes what does less.
+var _ = DescribeTable("a scheduled tick's schedule is the tighter of the configured and the recorded one",
+	func(configured, recorded, want prices.Schedule) {
+		Expect(prices.Tighter(configured, recorded)).To(Equal(want))
+	},
+	Entry("the mode that fetches less: off over auto",
+		sched(prices.RefreshAuto, time.Hour, 25, 10), sched(prices.RefreshOff, time.Hour, 25, 10), sched(prices.RefreshOff, time.Hour, 25, 10)),
+	Entry("the mode that fetches less: auto over on",
+		sched(prices.RefreshOn, time.Hour, 25, 10), sched(prices.RefreshAuto, time.Hour, 25, 10), sched(prices.RefreshAuto, time.Hour, 25, 10)),
+	Entry("a configured mode that fetches less wins",
+		sched(prices.RefreshOff, time.Hour, 25, 10), sched(prices.RefreshOn, time.Hour, 25, 10), sched(prices.RefreshOff, time.Hour, 25, 10)),
+	Entry("the longer interval, recorded",
+		sched(prices.RefreshOn, 6*time.Hour, 25, 10), sched(prices.RefreshOn, 12*time.Hour, 25, 10), sched(prices.RefreshOn, 12*time.Hour, 25, 10)),
+	Entry("the longer interval, configured",
+		sched(prices.RefreshOn, 24*time.Hour, 25, 10), sched(prices.RefreshOn, 12*time.Hour, 25, 10), sched(prices.RefreshOn, 24*time.Hour, 25, 10)),
+	Entry("the smaller change bound, recorded",
+		sched(prices.RefreshOn, time.Hour, 25, 10), sched(prices.RefreshOn, time.Hour, 5, 10), sched(prices.RefreshOn, time.Hour, 5, 10)),
+	Entry("the smaller change bound, configured",
+		sched(prices.RefreshOn, time.Hour, 5, 10), sched(prices.RefreshOn, time.Hour, 25, 10), sched(prices.RefreshOn, time.Hour, 5, 10)),
+	Entry("the smaller daily cap, recorded",
+		sched(prices.RefreshOn, time.Hour, 25, 10), sched(prices.RefreshOn, time.Hour, 25, 2), sched(prices.RefreshOn, time.Hour, 25, 2)),
+	Entry("the smaller daily cap, configured",
+		sched(prices.RefreshOn, time.Hour, 25, 2), sched(prices.RefreshOn, time.Hour, 25, 10), sched(prices.RefreshOn, time.Hour, 25, 2)),
+	Entry("every field from a different side",
+		sched(prices.RefreshOn, 24*time.Hour, 5, 10), sched(prices.RefreshAuto, 12*time.Hour, 25, 2), sched(prices.RefreshAuto, 24*time.Hour, 5, 2)),
+)
+
+func sched(mode prices.RefreshMode, iv time.Duration, pct, perDay int) prices.Schedule {
+	return prices.Schedule{Mode: mode, Interval: iv, Bounds: pricefetch.Bounds{MaxChangePercent: pct, MaxAutoPerDay: perDay}}
+}
 
 var _ = Describe("price changes with no platform admin (a fresh install, ADR 0100)", func() {
 	BeforeEach(func() { needDocker() })
@@ -355,6 +407,33 @@ var _ = Describe("auto-apply under the Refresher's own bounds", func() {
 		r := refresherOn(pool, defaultList("2000-01-01.1"), &fakeAdapter{model: uniq()}, &now, pricefetch.Bounds{MaxChangePercent: 10, MaxAutoPerDay: 3})
 		Expect(r.SyncSettings(ctx, prices.RefreshAuto, 24*time.Hour)).To(Succeed())
 		Expect(svc.StoredBounds(ctx)).To(Equal(pricefetch.Bounds{MaxChangePercent: 10, MaxAutoPerDay: 3}))
+	})
+
+	// The recorded bounds belong to the same row and event as the mode (#328 review): a scheduled
+	// tick of a replica whose looser bounds are not recorded yet applies no more than recorded.
+	It("holds a scheduled tick to the recorded bounds while its own looser ones are not recorded", func(ctx SpecContext) {
+		pool := freshDB(ctx)
+		m := uniq()
+		src := defaultList("2000-01-01.1", m)
+		a := &fakeAdapter{model: m, in: "1.2", out: "2.4"} // +20%
+		now := time.Now()
+		tight := refresherOn(pool, src, a, &now, pricefetch.Bounds{MaxChangePercent: 10, MaxAutoPerDay: 10})
+		Expect(tight.SyncSettings(ctx, prices.RefreshOn, 24*time.Hour)).To(Succeed())
+
+		loose := refresherOn(pool, src, a, &now) // the default bounds, 25%; its SyncSettings never ran
+		_, err := loose.Run(ctx, prices.TriggerCLI, false)
+		Expect(err).NotTo(HaveOccurred())
+		now = now.Add(25 * time.Hour)
+		eff, err := loose.Effective(ctx, prices.RefreshOn, 24*time.Hour)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(eff.Bounds).To(Equal(pricefetch.Bounds{MaxChangePercent: 10, MaxAutoPerDay: 10}))
+		res, err := loose.RunSchedule(ctx, eff)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Applied).To(BeZero())
+		p := openProposal(ctx, loose, m)
+		Expect(p.Class).To(Equal(pricefetch.ClassNeedsReview))
+		Expect(p.FailedRules).To(ContainSubstring("more than 10%"))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM platform_price_versions`)).To(BeZero())
 	})
 
 	It("skips auto-apply for a source whose fetch failed this run", func(ctx SpecContext) {
