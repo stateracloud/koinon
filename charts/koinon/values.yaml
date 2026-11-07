@@ -181,8 +181,11 @@ agentd:
 migrations:
   backoffLimit: 4
   activeDeadlineSeconds: 900
-  # How long the Job waits for the database to accept connections.
-  wait: 5m
+  # How long the Job waits for the database to accept connections. In cnpg mode the post-upgrade
+  # grant hook (koinon-api migrate --grants-only) also waits this long for the CNPG Cluster to create
+  # the install audit writer role (ADR 0100). Keep it below helm's --timeout (default 5m), which
+  # bounds each hook: then the hook fails with its own message, not a Helm timeout.
+  wait: 4m
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 256Mi}

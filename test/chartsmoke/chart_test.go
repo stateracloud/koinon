@@ -61,12 +61,25 @@ var externalDatabase = []string{
 // helmRender renders the chart as chart-check.sh and the install do: release and namespace
 // "koinon", the values file as given, with the database overridden to external.
 func helmRender(ctx context.Context, valuesFile string) *rendered {
+	return helmRenderWith(ctx, valuesFile, externalDatabase...)
+}
+
+// cnpgUpgrade renders what a `helm upgrade` in cnpg mode runs after the release's objects: the
+// install audit writer's grant hook (templates/install-audit-grants.yaml), alone.
+var cnpgUpgrade = []string{
+	"--set", "postgres.mode=cnpg", "--is-upgrade",
+	"--set", "preflight.seccompProbe.enabled=false", "--set", "preflight.networkPolicyProbe.enabled=false",
+	"--show-only", "templates/install-audit-grants.yaml",
+}
+
+// helmRenderWith renders the chart with the values file and extra helm arguments.
+func helmRenderWith(ctx context.Context, valuesFile string, extra ...string) *rendered {
 	helm, err := exec.LookPath(envOr("HELM", "helm"))
 	if err != nil {
 		panic(fmt.Sprintf("helm is required to render the chart (set HELM): %v", err))
 	}
 	var out, stderr bytes.Buffer
-	args := append([]string{"template", release, chartDir, "--namespace", namespace, "-f", valuesFile}, externalDatabase...)
+	args := append([]string{"template", release, chartDir, "--namespace", namespace, "-f", valuesFile}, extra...)
 	cmd := exec.CommandContext(ctx, helm, args...)
 	cmd.Stdout, cmd.Stderr = &out, &stderr
 	if err := cmd.Run(); err != nil {

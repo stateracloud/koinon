@@ -426,7 +426,7 @@ func resolve(ctx context.Context, q *store.Queries, org, id pgtype.UUID, by pgty
 	if err != nil {
 		return cur, err
 	}
-	kind, action, actor := KindAnswered, "question.answer", audit.System()
+	kind, action, actor := KindAnswered, "question.answer", audit.System("koinon-api:questions")
 	switch state {
 	case store.QuestionStateDismissed:
 		kind, action = KindDismissed, "question.dismiss"

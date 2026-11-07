@@ -458,7 +458,7 @@ func baselineOf(e *effective) *pricing.Spec {
 	return &e.Reviewed
 }
 
-// AutoApply applies the open proposals of class auto in one platform version (actor auto), unless
+// AutoApply applies the open proposals of class auto in one platform version (actor system koinon-api:price-refresh), unless
 // the day's cap would be exceeded, in which case none applies and they wait for a person. With
 // sources, only those sources' proposals are considered. Each candidate is classified again here,
 // under this Refresher's bounds, against the price in use and the stored stability of its values:
@@ -522,7 +522,7 @@ func (r *Refresher) AutoApply(ctx context.Context, sources ...string) (int, erro
 			return nil
 		}
 		since := pgtype.Timestamptz{Time: now.Add(-24 * time.Hour), Valid: true}
-		today, err := q.CountAutoAppliedPriceProposalsSince(ctx, since)
+		today, err := q.CountAutoAppliedPriceProposalsSince(ctx, store.CountAutoAppliedPriceProposalsSinceParams{DecidedBy: AutoActor.String(), Since: since})
 		if err != nil {
 			return err
 		}
@@ -534,18 +534,6 @@ func (r *Refresher) AutoApply(ctx context.Context, sources ...string) (int, erro
 					return err
 				}
 			}
-			return nil
-		}
-		// An applied price changes what every org is charged, so it is never unaudited. Without a
-		// platform admin there is no audit log to write it in (auditPlatform): fail closed and leave
-		// the proposals open, until the install-level audit chain of #324 lands and replaces this.
-		admins, err := q.ListPlatformAdminPersonalOrgs(ctx)
-		if err != nil {
-			return err
-		}
-		if len(admins) == 0 {
-			r.log.Warn("automatic price updates wait: no platform admin exists yet to audit them in; they apply once one does",
-				"proposals", len(cands))
 			return nil
 		}
 		a, err := r.applyEntries(ctx, q, v, cands, AutoActor, now)
@@ -560,7 +548,7 @@ func (r *Refresher) AutoApply(ctx context.Context, sources ...string) (int, erro
 			return nil
 		}
 		pv, err := writeVersion(ctx, q, versionWrite{
-			Log: r.log, Actor: AutoActor, Action: "platform_price.set", Reason: fmt.Sprintf("%d automatic price update(s) within bounds", len(cands)),
+			Actor: AutoActor, Action: "platform_price.set", Reason: fmt.Sprintf("%d automatic price update(s) within bounds", len(cands)),
 			RuleSet: pricefetch.RuleSetVersion, ProposalIDs: a.IDs, Entries: a.Entries, Changed: a.Changed,
 		})
 		if err != nil {
@@ -641,7 +629,7 @@ func (r *Refresher) applyEntries(ctx context.Context, q *store.Queries, v priceV
 			}
 		}
 		prov := p.Provenance
-		prov.ProposalID, prov.Approver, prov.ApprovedAt = p.ID, actorText(actor), now.UTC()
+		prov.ProposalID, prov.Approver, prov.ApprovedAt = p.ID, actor.String(), now.UTC()
 		if actor == AutoActor {
 			prov.RuleSetVersion = pricefetch.RuleSetVersion
 		}
@@ -677,7 +665,7 @@ func (r *Refresher) decide(ctx context.Context, q *store.Queries, p Proposal, st
 	if err != nil {
 		return err
 	}
-	params := store.DecidePriceProposalParams{ID: id, State: state, DecidedBy: actorText(actor)}
+	params := store.DecidePriceProposalParams{ID: id, State: state, DecidedBy: actor.String()}
 	if version > 0 {
 		params.AppliedVersion = pgtype.Int8{Int64: version, Valid: true}
 	}
@@ -694,7 +682,7 @@ func (r *Refresher) decide(ctx context.Context, q *store.Queries, p Proposal, st
 	if version > 0 {
 		after["platformVersion"] = version
 	}
-	return auditPlatform(ctx, q, r.log, actor, action, "price_proposal", p.ID, nil, after)
+	return auditPlatform(ctx, q, actor, action, "price_proposal", p.ID, nil, after)
 }
 
 // ListProposals lists proposals, newest first; empty state or class mean all.
@@ -788,7 +776,7 @@ func (r *Refresher) Accept(ctx context.Context, actor audit.Actor, id string, op
 			return err
 		}
 		pv, err := writeVersion(ctx, q, versionWrite{
-			Log: r.log, Actor: actor, Action: "platform_price.set", Reason: reason,
+			Actor: actor, Action: "platform_price.set", Reason: reason,
 			ProposalIDs: a.IDs, Entries: a.Entries, Changed: a.Changed, Dropped: a.Dropped,
 		})
 		if err != nil {
@@ -868,14 +856,14 @@ func (r *Refresher) Import(ctx context.Context, actor audit.Actor, f pricefetch.
 			}); err != nil {
 				return err
 			}
-			n, err := r.propose(ctx, q, snap, OriginImport, actorText(actor), now)
+			n, err := r.propose(ctx, q, snap, OriginImport, actor.String(), now)
 			if err != nil {
 				return err
 			}
 			total += n
 			uploaded = append(uploaded, map[string]any{"source": snap.Source, "fetchedAt": snap.FetchedAt.Format(time.RFC3339), "sha256": snap.SHA256, "models": snap.Count, "proposals": n})
 		}
-		return auditPlatform(ctx, q, r.log, actor, "price.import.uploaded", "price_import", "", nil, map[string]any{"snapshots": uploaded, "vouchedBy": actorText(actor)})
+		return auditPlatform(ctx, q, actor, "price.import.uploaded", "price_import", "", nil, map[string]any{"snapshots": uploaded, "vouchedBy": actor.String()})
 	})
 	if err == nil {
 		_ = r.metrics.refreshProposals(ctx, store.New(r.svc.pool))

@@ -59,9 +59,9 @@ var seq atomic.Int64
 // uniq returns a model name no other spec uses: the platform tables are shared by all specs.
 func uniq() string { return fmt.Sprintf("fake/m-%d", seq.Add(1)) }
 
-// auditCount counts the admin org's audit events of an action.
+// auditCount counts the install chain's events of an action: platform changes belong to no org.
 func auditCount(ctx context.Context, action string) int {
 	var n int
-	Expect(db.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = $2`, adminOrg, action).Scan(&n)).To(Succeed())
+	Expect(db.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE action = $1`, action).Scan(&n)).To(Succeed())
 	return n
 }

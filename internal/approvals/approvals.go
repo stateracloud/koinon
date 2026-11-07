@@ -515,7 +515,7 @@ func (s *Service) sweepOrg(ctx context.Context, org pgtype.UUID, res *SweepResul
 			if err := taskEvent(ctx, q, r, KindExpired, pgtype.UUID{}, map[string]any{"expires_at": r.ExpiresAt.Time}); err != nil {
 				return err
 			}
-			if err := auditDecision(ctx, q, r, "approval.expire", audit.System(), ""); err != nil {
+			if err := auditDecision(ctx, q, r, "approval.expire", audit.System("koinon-api:approvals"), ""); err != nil {
 				return err
 			}
 			if !r.System { // Koinon's own request: no run waits for it

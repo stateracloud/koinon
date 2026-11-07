@@ -438,7 +438,7 @@ func BackfillDefaults(ctx context.Context, pool *pgxpool.Pool, rv prices.Resolve
 			}
 			set = true
 			return audit.RecordErr(ctx, q, audit.Event{
-				Org: org, Actor: audit.System(), Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
+				Org: org, Actor: audit.System("koinon-api:agent-model"), Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
 				Before: map[string]any{"model": ""}, After: map[string]any{"model": list[0].Name, "reason": "migrated"},
 			})
 		})

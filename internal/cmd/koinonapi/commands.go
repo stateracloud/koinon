@@ -95,20 +95,40 @@ func newServeCommand() *cobra.Command {
 }
 
 func newMigrateCommand() *cobra.Command {
-	var c config
+	var (
+		c                         config
+		grantsOnly, requireWriter bool
+	)
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Apply the database migrations and exit",
 		Long: "Waits for the database, applies the pending migrations and exits; the Helm chart runs it as a hook Job " +
-			"with the migration role (ADR 0060). It creates the DBOS tables only with --durable.",
+			"with the migration role (ADR 0060). It creates the DBOS tables only with --durable. With --grants-only it " +
+			"applies no migration: it waits for the install audit writer role and grants it its privileges, as the " +
+			"chart's post-upgrade hook does for a CloudNativePG cluster (ADR 0100 decision 1.1a).",
 		Args: cobra.NoArgs,
+		PreRunE: func(*cobra.Command, []string) error {
+			if grantsOnly && c.durable {
+				return errors.New("--grants-only and --durable are exclusive: --grants-only applies no migration")
+			}
+			if grantsOnly && requireWriter {
+				return errors.New("--grants-only and --require-install-writer are exclusive: --grants-only waits for the role")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return migrate(cmd.Context(), c.databaseURL, c.wait, c.durable)
+			return migrate(cmd.Context(), c.databaseURL, c.wait, migrateOptions{durable: c.durable, grantsOnly: grantsOnly, requireWriter: requireWriter})
 		},
 	}
 	c.databaseFlag(cmd.Flags())
-	c.waitFlag(cmd.Flags())
-	c.durableFlag(cmd.Flags(), "also create the DBOS runtime's tables (needed when the API runs with --durable; ADR 0066)")
+	fs := cmd.Flags()
+	fs.DurationVar(&c.wait, "wait", 5*time.Minute, "how long migrations wait for the database to come up "+
+		"(with --grants-only: for the database, the install audit writer role and its tables)")
+	c.durableFlag(fs, "also create the DBOS runtime's tables (needed when the API runs with --durable; ADR 0066)")
+	fs.BoolVar(&grantsOnly, "grants-only", false, "apply no migration; wait for the install audit writer role and grant it "+
+		"its privileges (the chart's post-upgrade hook in CloudNativePG mode)")
+	fs.BoolVar(&requireWriter, "require-install-writer", false, "fail when the install audit writer role does not exist, "+
+		"instead of warning (the chart passes it on an external database, where nothing creates the role later; ADR 0100 decision 1.1a)")
 	cli.EnvAlias(cmd, "database-url", "DATABASE_URL")
 	mustRequire(cmd, "database-url")
 	return cmd

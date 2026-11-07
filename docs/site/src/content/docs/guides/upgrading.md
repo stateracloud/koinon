@@ -83,6 +83,49 @@ encryption keys is `<name>-kek`, or the Secret you set in `secrets.kek.existingS
    kubectl -n koinon get pods
    ```
 
+## Upgrading to the install audit chain (ADR 0100)
+
+The release that adds the install audit chain (migration 00066) needs a `NOLOGIN` group role,
+`koinon_install_audit_writer`, and `koinon-api`'s login role must be a member of it. The migrate role
+has no `CREATEROLE`, so it cannot create the role itself. The migration does not need the role: the
+`INSERT` grant to it is made by `koinon-api migrate` after the migrations, on every run, and only when
+the role exists. In cnpg mode a missing role makes the Job log a warning, not fail; on an external
+database the chart passes `--require-install-writer` and the Job fails, naming the role to create.
+
+- **`postgres.mode: cnpg`.** Nothing to do. The chart lists the role as a CloudNativePG managed role,
+  and `koinon_api` joins it. With Helm or Flux the migrate Job is a `pre-upgrade` hook, so it runs
+  before the updated Cluster reaches the API server and finds no role yet. A second Job,
+  `<release>-migrate-grants`, is a `post-upgrade` hook (Argo CD: `PostSync`): it runs
+  `koinon-api migrate --grants-only`, waits (up to `migrations.wait`) until the operator has created
+  the role, and grants it. Until then `koinon-api` serves, logs an error for each install audit event
+  it cannot write yet and retries it, and platform price changes fail with a permission error; the
+  scheduled price refresh keeps the recorded setting until its change is recorded. If the operator
+  does not create the role in time, the hook fails and so does the upgrade: check
+  `kubectl get cluster` and the operator's log, then run the same `helm upgrade` again. Helm's
+  `--timeout` (default 5m) covers each hook, so it must be longer than `migrations.wait` (default
+  4m): otherwise Helm gives up on the hook before the hook gives up on the role, and reports a
+  timeout instead of the hook's message.
+- **`postgres.mode: external`.** Before you upgrade, as an administrator:
+
+  ```sql
+  CREATE ROLE koinon_install_audit_writer NOLOGIN;
+  GRANT koinon_install_audit_writer TO <api login role>;
+  ```
+
+  If the migration role is not the one that owns the tables, or the role `koinon_app` does not exist,
+  also run this after the upgrade's migration, so that only `koinon-api` can write the chain:
+
+  ```sql
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON install_audit_events, install_audit_chain_head FROM <reconciler login role>, <agentd login role>;
+  GRANT SELECT ON install_audit_events, install_audit_chain_head TO <reconciler login role>, <agentd login role>;
+  ```
+
+  Without the role the migrate Job fails (`the role koinon_install_audit_writer does not exist`):
+  create it as above and run the same `helm upgrade` again.
+
+  Keep the `api`, `reconciler` and `agentd` logins separate. See "The install audit chain" in
+  `docs/ops/secret-keys.md` in the repository.
+
 ## Patch upgrade (rolling)
 
 A patch release shares the schema with the one before it. Upgrade in place:

@@ -478,7 +478,7 @@ var _ = Describe("Service", func() {
 		evs := f.taskEvents(ctx)
 		Expect(kinds(evs)).To(Equal([]string{approvals.KindRequested, approvals.KindExpired, "run.canceled"}))
 		Expect(string(evs[2].Payload)).To(ContainSubstring(`approval_expired`))
-		Expect(f.decisions(ctx)).To(Equal([]string{"approval.expire system "}))
+		Expect(f.decisions(ctx)).To(Equal([]string{"approval.expire system koinon-api:approvals"}))
 
 		By("an expired request cannot be approved")
 		_, err = f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")

@@ -859,10 +859,10 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	// The leak-guard settings: a trusted host and a threshold of the org's own.
 	f.trustedHost = fmt.Sprintf("trusted-%d.example.com", dbSeq.Add(1))
 	lg := orgsettings.NewService(e.pool)
-	_, err = lg.AddTrustedHost(ctx, orgID, audit.System(), f.trustedHost)
+	_, err = lg.AddTrustedHost(ctx, orgID, audit.System("koinon-test:spec"), f.trustedHost)
 	Expect(err).NotTo(HaveOccurred())
 	thirty := 30
-	Expect(lg.SetMatchThreshold(ctx, orgID, audit.System(), &thirty)).To(Succeed())
+	Expect(lg.SetMatchThreshold(ctx, orgID, audit.System("koinon-test:spec"), &thirty)).To(Succeed())
 	// A trace destination, inserted directly: the isolation cases only name it.
 	Expect(e.pool.QueryRow(ctx,
 		`INSERT INTO trace_destinations (org_id, name, backend, endpoint_url) VALUES ($1, 'isolated', 'generic', 'https://otlp.example.com/v1/traces') RETURNING id`,

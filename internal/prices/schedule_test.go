@@ -160,6 +160,66 @@ var _ = Describe("the price refresh modes (maintainer decision 2026-11-07)", fun
 		Expect(hits.Load()).To(BeEquivalentTo(1))
 	})
 
+	// The scheduled tick runs no more than the recorded setting (#328 review): a koinon-api whose
+	// install audit event is refused (no writer grant yet, ADR 0100 decision 1.1a) keeps fetching as
+	// the recorded row says until its own setting and event are recorded.
+	It("holds the schedule to the recorded setting until the configured one and its event are recorded", func(ctx SpecContext) {
+		pool := freshDB(ctx)
+		srv, hits := countingServer()
+		now := time.Now()
+		r := refresherOn(pool, defaultList("2000-01-01.1", model), &httpAdapter{url: srv.URL, model: model}, &now)
+		scheduled := func(mode prices.RefreshMode, iv time.Duration) (prices.RefreshMode, time.Duration) {
+			GinkgoHelper()
+			eff, eiv, err := r.Effective(ctx, mode, iv)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = r.Tick(ctx, eff, eiv)
+			Expect(err).NotTo(HaveOccurred())
+			return eff, eiv
+		}
+
+		By("nothing recorded yet: the default, auto, which fetches nothing without an openrouter provider")
+		eff, _ := scheduled(prices.RefreshOn, 12*time.Hour)
+		Expect(eff).To(Equal(prices.RefreshAuto))
+		Expect(hits.Load()).To(BeZero())
+
+		By("the database refuses the install event: the setting is not recorded and on does not run")
+		_, err := pool.Exec(ctx, `CREATE FUNCTION deny_install_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN RAISE EXCEPTION 'permission denied for table install_audit_events' USING ERRCODE = '42501'; END $$`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `CREATE TRIGGER aaa_deny_install_audit BEFORE INSERT ON install_audit_events FOR EACH ROW EXECUTE FUNCTION deny_install_audit()`)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.SyncSettings(ctx, prices.RefreshOn, 12*time.Hour)).To(MatchError(audit.ErrInstallWriteDenied))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM price_refresh_settings`)).To(BeZero(), "the setting rolled back with its event")
+		eff, _ = scheduled(prices.RefreshOn, 12*time.Hour)
+		Expect(eff).To(Equal(prices.RefreshAuto))
+		Expect(hits.Load()).To(BeZero(), "no fetch without the event")
+
+		By("the grant lands: the retry records the setting and its event, and the next tick runs on")
+		_, err = pool.Exec(ctx, `DROP TRIGGER aaa_deny_install_audit ON install_audit_events`)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.SyncSettings(ctx, prices.RefreshOn, 12*time.Hour)).To(Succeed())
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM install_audit_events WHERE action = 'price.refresh.settings_changed'`)).To(Equal(1))
+		var iv time.Duration
+		eff, iv = scheduled(prices.RefreshOn, 12*time.Hour)
+		Expect(eff).To(Equal(prices.RefreshOn))
+		Expect(iv).To(Equal(12 * time.Hour))
+		Expect(hits.Load()).To(BeEquivalentTo(1))
+
+		By("a replica that fetches less runs its own setting at once; one that fetches more is held back")
+		eff, _, err = r.Effective(ctx, prices.RefreshOff, 12*time.Hour)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(eff).To(Equal(prices.RefreshOff))
+		eff, iv, err = r.Effective(ctx, prices.RefreshOn, 6*time.Hour)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(eff).To(Equal(prices.RefreshOn))
+		Expect(iv).To(Equal(12*time.Hour), "not more often than recorded")
+		Expect(r.SyncSettings(ctx, prices.RefreshAuto, 24*time.Hour)).To(Succeed())
+		eff, iv, err = r.Effective(ctx, prices.RefreshOn, 12*time.Hour)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(eff).To(Equal(prices.RefreshAuto), "an old replica during a rolling upgrade")
+		Expect(iv).To(Equal(24 * time.Hour))
+	})
+
 	It("parses only auto, off and on", func() {
 		for _, s := range []string{"auto", "off", "on"} {
 			Expect(prices.ParseRefreshMode(s)).To(BeEquivalentTo(s))
@@ -182,10 +242,14 @@ var _ = Describe("the price refresh modes (maintainer decision 2026-11-07)", fun
 	})
 })
 
-var _ = Describe("startup bookkeeping with no platform admin (a fresh install)", func() {
+var _ = Describe("price changes with no platform admin (a fresh install, ADR 0100)", func() {
 	BeforeEach(func() { needDocker() })
 
-	It("syncs the settings and retires caught-up entries, recording and not refusing, but auto-applies nothing", func(ctx SpecContext) {
+	installCount := func(ctx context.Context, pool *pgxpool.Pool, action string) int {
+		return countRows(ctx, pool, `SELECT count(*) FROM install_audit_events WHERE action = $1`, action)
+	}
+
+	It("syncs the settings, retires caught-up entries and auto-applies, each one install event of the named system actor", func(ctx SpecContext) {
 		pool := freshDB(ctx)
 		m := uniq()
 		id := "fake-0-" + strings.ReplaceAll(m, "/", "-")
@@ -195,7 +259,9 @@ var _ = Describe("startup bookkeeping with no platform admin (a fresh install)",
 		Expect(err).NotTo(HaveOccurred())
 		_, err = pool.Exec(ctx, `DELETE FROM platform_admins`)
 		Expect(err).NotTo(HaveOccurred())
-		audited := countRows(ctx, pool, `SELECT count(*) FROM audit_events`)
+		orgAudited := countRows(ctx, pool, `SELECT count(*) FROM audit_events`)
+		installBefore := countRows(ctx, pool, `SELECT count(*) FROM install_audit_events`)
+		setBefore := installCount(ctx, pool, "platform_price.set")
 
 		now := time.Now()
 		other := uniq()
@@ -204,33 +270,32 @@ var _ = Describe("startup bookkeeping with no platform admin (a fresh install)",
 
 		Expect(r.SyncSettings(ctx, prices.RefreshOn, 12*time.Hour)).To(Succeed(), "a changed setting is recorded without an admin")
 		Expect(countRows(ctx, pool, `SELECT count(*) FROM price_refresh_settings WHERE mode = 'on'`)).To(Equal(1))
+		Expect(installCount(ctx, pool, "price.refresh.settings_changed")).To(Equal(1))
 
 		retired, err := r.Service().RetireCaughtUp(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(retired).To(ConsistOf(id))
+		Expect(installCount(ctx, pool, "platform_price.retired")).To(Equal(1))
 
 		_, err = r.Tick(ctx, prices.RefreshOn, 12*time.Hour)
 		Expect(err).NotTo(HaveOccurred())
 		now = now.Add(25 * time.Hour)
 		res, err := r.Tick(ctx, prices.RefreshOn, 12*time.Hour)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Applied).To(BeZero(), "no audit log to write an applied price in: fail closed (until #324)")
-		Expect(countRows(ctx, pool, `SELECT count(*) FROM platform_price_versions WHERE actor = 'auto'`)).To(BeZero())
-		Expect(countRows(ctx, pool, `SELECT count(*) FROM audit_events`)).To(Equal(audited), "no org to audit in")
-		p := openProposal(ctx, r, other)
-		Expect(p.Class).To(BeEquivalentTo(pricefetch.ClassAuto), "the proposal stays open and auto, waiting for an admin")
-
-		// Once an admin exists the waiting proposal applies, audited.
-		set := countRows(ctx, pool, `SELECT count(*) FROM audit_events WHERE action = 'platform_price.set'`)
-		grantAdmin(ctx, pool)
-		n, err := r.AutoApply(ctx)
+		Expect(res.Applied).To(Equal(1), "the auto-apply no longer waits for an admin: the install chain audits it")
+		const actor = "system koinon-api:price-refresh"
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM platform_price_versions WHERE actor = $1`, actor)).To(BeNumerically(">=", 1))
+		Expect(installCount(ctx, pool, "platform_price.set")).To(Equal(setBefore + 1))
+		Expect(installCount(ctx, pool, "price.proposal.accepted")).To(Equal(1))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM install_audit_events WHERE actor_kind = 'system' AND actor_id = 'koinon-api:price-refresh'`)).
+			To(Equal(countRows(ctx, pool, `SELECT count(*) FROM install_audit_events`)-installBefore), "every event names the system actor")
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM audit_events`)).To(Equal(orgAudited), "nothing is written into any org")
+		verdict, err := audit.VerifyInstall(ctx, store.New(pool))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(n).To(Equal(1))
-		Expect(countRows(ctx, pool, `SELECT count(*) FROM platform_price_versions WHERE actor = 'auto'`)).To(Equal(1))
-		Expect(countRows(ctx, pool, `SELECT count(*) FROM audit_events WHERE action = 'platform_price.set'`)).To(Equal(set + 1))
+		Expect(verdict.OK()).To(BeTrue(), "%+v", verdict.Break)
 	})
 
-	It("still refuses a person's decision with no admin to audit it", func(ctx SpecContext) {
+	It("writes a person's decision as one install event of a cli actor, with no admin and no personal-org copy", func(ctx SpecContext) {
 		pool := freshDB(ctx)
 		m := uniq()
 		now := time.Now()
@@ -238,9 +303,22 @@ var _ = Describe("startup bookkeeping with no platform admin (a fresh install)",
 		_, err := r.Run(ctx, prices.TriggerCLI, false)
 		Expect(err).NotTo(HaveOccurred())
 		p := openProposal(ctx, r, m)
-		Expect(r.Dismiss(ctx, audit.CLI("test"), p.ID)).To(MatchError(ContainSubstring("no platform admin")))
-		_, err = r.Accept(ctx, audit.CLI("test"), p.ID, prices.AcceptOptions{})
-		Expect(err).To(MatchError(ContainSubstring("no platform admin")))
+		orgAudited := countRows(ctx, pool, `SELECT count(*) FROM audit_events`)
+
+		Expect(r.Dismiss(ctx, audit.CLI("prices dismiss"), p.ID)).To(Succeed())
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM install_audit_events WHERE action = 'price.proposal.dismissed' AND actor_kind = 'cli' AND actor_id = 'prices dismiss'`)).To(Equal(1))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM audit_events`)).To(Equal(orgAudited))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM price_proposals WHERE id = $1 AND decided_by = 'cli prices dismiss'`, p.ID)).To(Equal(1))
+
+		p2 := uniq()
+		a2 := &fakeAdapter{model: p2, in: "1.1", out: "2.2", maxOutput: 4096}
+		r2 := refresherOn(pool, defaultList("2000-01-01.1", m, p2), a2, &now)
+		_, err = r2.Run(ctx, prices.TriggerCLI, false)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = r2.Accept(ctx, audit.CLI("prices accept"), openProposal(ctx, r2, p2).ID, prices.AcceptOptions{MaxOutput: 4096})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM install_audit_events WHERE action = 'platform_price.set' AND actor_kind = 'cli'`)).To(Equal(1))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM audit_events`)).To(Equal(orgAudited))
 	})
 })
 
@@ -281,7 +359,6 @@ var _ = Describe("auto-apply under the Refresher's own bounds", func() {
 
 	It("skips auto-apply for a source whose fetch failed this run", func(ctx SpecContext) {
 		pool := freshDB(ctx)
-		grantAdmin(ctx, pool) // the auto-apply needs an audit log to write in
 		m := uniq()
 		src := defaultList("2000-01-01.1", m)
 		a := &fakeAdapter{model: m, in: "1.1", out: "2.2"}
@@ -343,7 +420,7 @@ var _ = Describe("a new model whose source reports no output limit", func() {
 var _ = Describe("a new model the source prices fully (ADR 0098, amendment of 2026-11-07)", func() {
 	BeforeEach(func() { needDocker() })
 
-	It("is applied by the scheduled auto-apply after two stable fetches, as actor auto", func(ctx SpecContext) {
+	It("is applied by the scheduled auto-apply after two stable fetches, as system koinon-api:price-refresh", func(ctx SpecContext) {
 		pool := freshDB(ctx)
 		grantAdmin(ctx, pool)
 		const m = "fake/model-new"
@@ -374,6 +451,6 @@ var _ = Describe("a new model the source prices fully (ADR 0098, amendment of 20
 		Expect(got.Entry.ID).To(Equal(pricefetch.EntryID("openrouter", m)))
 		Expect(got.Entry.Spec.Prices.Input).To(Equal("1"))
 		Expect(got.Entry.MaxOutput).To(Equal(8192))
-		Expect(countRows(ctx, pool, `SELECT count(*) FROM price_proposals WHERE model = $1 AND state = 'accepted' AND decided_by = 'auto'`, m)).To(Equal(1))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM price_proposals WHERE model = $1 AND state = 'accepted' AND decided_by = 'system koinon-api:price-refresh'`, m)).To(Equal(1))
 	})
 })

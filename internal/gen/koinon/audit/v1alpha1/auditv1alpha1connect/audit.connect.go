@@ -46,7 +46,8 @@ type AuditServiceClient interface {
 	// List returns audit events, newest first. An org admin or owner lists the events of their org
 	// (org_id is required for them). A platform admin names any org, or leaves org_id empty to read
 	// every org. A caller with a lower role in the org is refused, and an org the caller is not part
-	// of is NotFound.
+	// of is NotFound. With scope AUDIT_SCOPE_INSTALL it returns the install chain (ADR 0100): platform
+	// admins only, org_id must be empty, and everyone else gets PermissionDenied.
 	List(context.Context, *v1alpha1.ListRequest) (*v1alpha1.ListResponse, error)
 }
 
@@ -61,7 +62,8 @@ type AuditServiceHandler interface {
 	// List returns audit events, newest first. An org admin or owner lists the events of their org
 	// (org_id is required for them). A platform admin names any org, or leaves org_id empty to read
 	// every org. A caller with a lower role in the org is refused, and an org the caller is not part
-	// of is NotFound.
+	// of is NotFound. With scope AUDIT_SCOPE_INSTALL it returns the install chain (ADR 0100): platform
+	// admins only, org_id must be empty, and everyone else gets PermissionDenied.
 	List(context.Context, *v1alpha1.ListRequest) (*v1alpha1.ListResponse, error)
 }
 
