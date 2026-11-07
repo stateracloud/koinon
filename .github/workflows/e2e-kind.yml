@@ -18,7 +18,8 @@
 #     `gh workflow run e2e-kind.yml --ref <branch>`.
 #   - pushes to main: batched (one running, the newest pending) when anything e2e-relevant changed
 #     since the last green run. Nightly: always, once a day, to catch drift nothing in the tree
-#     explains (upstream images, the runner image, downloads). A red run after a green one opens
+#     explains (upstream images, the runner image, downloads). The nightly run also backs up and restores the
+#     install (test/e2e/backup-restore.sh, the guide's own commands) and checks it came back. A red run after a green one opens
 #     an issue naming the culprit merge (hack/e2e-bisect.sh): fix forward within 2 hours, else revert.
 #   - manual dispatch, optionally on one commit (the bisect uses it).
 # The `e2e result` job is the one to require: it passes when the e2e was skipped because nothing needed
@@ -52,6 +53,10 @@ on:
         type: choice
         options: [go, web]
         default: go
+      backup_restore:
+        description: 'Also run the backup-and-restore step (test/e2e/backup-restore.sh, go suite only). The nightly run always does.'
+        type: boolean
+        default: false
       commit:
         description: 'Run on this full commit sha instead of the ref (used by hack/e2e-bisect.sh).'
         type: string
@@ -235,6 +240,9 @@ jobs:
         env:
           OUT: ${{ runner.temp }}/e2e
           SUITE: ${{ inputs.suite || 'go' }}
+          # The nightly run (and a dispatch that asks) backs up, restores and verifies the install after the
+          # driver (ADR 0085 decision 18, #90); pull requests and pushes skip it to keep their run short.
+          BACKUP_RESTORE: ${{ (github.event_name == 'schedule' || inputs.backup_restore) && (inputs.suite || 'go') == 'go' && '1' || '0' }}
           # The workflow deletes the cluster in its own step, after collecting resource use.
           KEEP: "1"
           # Pull the flavor image the flavors job pushed for this flavors/ tree, if there is one.

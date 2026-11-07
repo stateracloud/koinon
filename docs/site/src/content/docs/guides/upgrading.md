@@ -57,7 +57,8 @@ encryption keys is `<name>-kek`, or the Secret you set in `secrets.kek.existingS
    kubectl -n koinon get secret <name>-kek -o yaml > koinon-kek-backup.yaml
    ```
 
-4. For a minor upgrade, back up the database too, because it is the only way back. Keep the dump with
+4. For a minor upgrade, back up the database too (the details, and how to check the dump, are on
+   [Back up and restore](/guides/backup-restore/)), because it is the only way back. Keep the dump with
    the key backup from the step above, and note the chart version you ran (`helm -n koinon list`).
    Without both, a minor upgrade cannot be undone.
 
@@ -258,7 +259,8 @@ Everything written after the backup is lost: runs, tasks and ledger entries made
 checkpoints in the bucket are not restored with the database, so the restored list of checkpoints is
 older than the bucket. Once koinon-agentd is up, rebuild that list from the bucket with
 `koinon-api checkpoints resync --all` (see
-[After a database restore](/guides/home-checkpoints/#after-a-database-restore)). A full, tested restore
-procedure with a drill is not part of this page yet; it is tracked in ADR 0085, implementation item 19.
+[After a database restore](/guides/home-checkpoints/#after-a-database-restore)). The whole procedure, with the checks that
+prove it worked, is on [Back up and restore](/guides/backup-restore/); a nightly test restores an install with
+it.
 
 If the migration failed halfway on your database, restoring the backup is the safe way back too.
