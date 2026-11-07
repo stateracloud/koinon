@@ -1835,6 +1835,27 @@ type HomeRepositoryEpoch struct {
 	PrefixTakenAt    pgtype.Timestamptz
 }
 
+type InstallAuditChainHead struct {
+	Singleton bool
+	Seq       int64
+	Hash      []byte
+}
+
+type InstallAuditEvent struct {
+	ID         pgtype.UUID
+	ChainSeq   int64
+	PrevHash   []byte
+	Hash       []byte
+	ActorKind  string
+	ActorID    string
+	Action     string
+	TargetKind string
+	TargetID   string
+	Summary    []byte
+	RequestID  string
+	CreatedAt  pgtype.Timestamptz
+}
+
 type InstallIdentity struct {
 	Singleton bool
 	InstallID pgtype.UUID

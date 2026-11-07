@@ -64,7 +64,7 @@ var _ = Describe("Provider delivery", func() {
 	cleanup := func(ctx SpecContext, org pgtype.UUID, ids ...string) {
 		DeferCleanup(func(ctx SpecContext) {
 			for _, id := range ids {
-				_ = svc.DeleteProvider(ctx, org, audit.System(), id)
+				_ = svc.DeleteProvider(ctx, org, audit.System("koinon-test:spec"), id)
 			}
 		})
 	}
@@ -346,7 +346,7 @@ var _ = Describe("Provider delivery", func() {
 			Expect(servedRows(ctx, org)).To(HaveKey("keyed-model"))
 			Expect(servedRows(ctx, org)).NotTo(HaveKey("keyless-model"))
 
-			Expect(svc.DeleteProvider(ctx, org, audit.System(), keyed.ID)).To(Succeed())
+			Expect(svc.DeleteProvider(ctx, org, audit.System("koinon-test:spec"), keyed.ID)).To(Succeed())
 			Expect(servedRows(ctx, org)).To(BeEmpty(), "deleting the provider deletes its rows")
 			Expect(r.ReconcileAll(ctx)).To(Succeed())
 			Expect(servedRows(ctx, org)).To(BeEmpty())

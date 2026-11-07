@@ -33,8 +33,23 @@ func auditEventProto(e store.AuditEvent) *auditv1alpha1.AuditEvent {
 	return out
 }
 
+// installEventProto converts an install-chain event; it has no org.
+func installEventProto(e store.InstallAuditEvent) *auditv1alpha1.AuditEvent {
+	out := &auditv1alpha1.AuditEvent{
+		Id: e.ID.String(), ActorKind: e.ActorKind, ActorId: e.ActorID,
+		Action: e.Action, TargetKind: e.TargetKind, TargetId: e.TargetID, RequestId: e.RequestID,
+		CreatedAt: timestamppb.New(e.CreatedAt.Time), ChainSeq: e.ChainSeq,
+		PrevHash: hex.EncodeToString(e.PrevHash), Hash: hex.EncodeToString(e.Hash),
+	}
+	var m map[string]any
+	if json.Unmarshal(e.Summary, &m) == nil {
+		out.Summary, _ = structpb.NewStruct(m)
+	}
+	return out
+}
+
 // List implements AuditService: an admin or owner reads their org's log, a platform admin any
-// org's or every org's.
+// org's or every org's, and with scope AUDIT_SCOPE_INSTALL the install chain (platform admins only).
 func (s *Server) List(ctx context.Context, req *auditv1alpha1.ListRequest) (*auditv1alpha1.ListResponse, error) {
 	f := audit.Filter{
 		ActionPrefix: req.GetActionPrefix(), ActorKind: req.GetActorKind(), ActorID: req.GetActorId(),
@@ -45,6 +60,30 @@ func (s *Server) List(ctx context.Context, req *auditv1alpha1.ListRequest) (*aud
 	}
 	if req.GetUntil() != nil {
 		f.Until = req.GetUntil().AsTime()
+	}
+	if req.GetScope() == auditv1alpha1.AuditScope_AUDIT_SCOPE_INSTALL {
+		p, ok := auth.PrincipalFrom(ctx)
+		if !ok {
+			return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
+		}
+		if !p.PlatformAdmin {
+			return nil, connect.NewError(connect.CodePermissionDenied, "only a platform admin reads the install audit log")
+		}
+		if req.GetOrgId() != "" {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "org_id must be empty for the install scope")
+		}
+		rows, next, err := audit.ListInstall(ctx, s.q, f)
+		if errors.Is(err, audit.ErrBadFilter) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
+		}
+		if err != nil {
+			return nil, s.dbError(err, "install audit events")
+		}
+		res := &auditv1alpha1.ListResponse{NextPageToken: next}
+		for _, e := range rows {
+			res.Events = append(res.Events, installEventProto(e))
+		}
+		return res, nil
 	}
 	if req.GetOrgId() == "" {
 		p, ok := auth.PrincipalFrom(ctx)

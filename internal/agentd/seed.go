@@ -156,7 +156,7 @@ func (p *Pool) seedRepository(ctx context.Context, e store.HomeRepositoryEpoch) 
 				return whySeedNotRecorded(ctx, q, e)
 			}
 			return audit.RecordErr(ctx, q, audit.Event{
-				Org: e.OrgID, Actor: audit.System(), Action: SeededAction, TargetKind: "agent", TargetID: e.AgentID.String(), After: after,
+				Org: e.OrgID, Actor: audit.System("koinon-agentd:home-seed"), Action: SeededAction, TargetKind: "agent", TargetID: e.AgentID.String(), After: after,
 			})
 		})
 		if err == nil {
@@ -193,7 +193,7 @@ func (p *Pool) seedRepository(ctx context.Context, e store.HomeRepositoryEpoch) 
 				return whySeedNotRecorded(ctx, q, e)
 			}
 			return audit.RecordErr(ctx, q, audit.Event{
-				Org: e.OrgID, Actor: audit.System(), Action: SeedFailedAction, TargetKind: "agent", TargetID: e.AgentID.String(),
+				Org: e.OrgID, Actor: audit.System("koinon-agentd:home-seed"), Action: SeedFailedAction, TargetKind: "agent", TargetID: e.AgentID.String(),
 				After: map[string]any{"repositoryEpoch": e.RepositoryEpoch, "attempts": e.SeedAttempts, "error": msg},
 			})
 		}); errors.Is(err, errSeedSuperseded) || errors.Is(err, errSeedClaimLost) {

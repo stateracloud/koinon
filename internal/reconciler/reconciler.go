@@ -1011,7 +1011,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		r.m.SandboxRepairs.Inc()
 		r.log.Warn("deleting a stuck sandbox to recreate it", append(w.logAttrs(), "reason", w.sb.UnhealthyReason.String)...)
 		if err := audit.RecordErr(ctx, r.q, audit.Event{
-			Org: w.org.ID, Actor: audit.System(), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
+			Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
 			After: map[string]any{"sandbox": names.Sandbox, "reason": w.sb.UnhealthyReason.String, "home_generation": sb.ID},
 		}); err != nil {
 			return err
@@ -1112,7 +1112,7 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 		r.m.AgentsUnhealthy.Inc()
 		r.log.Error("the sandbox keeps failing; the agent is marked unhealthy", append(w.logAttrs(), "recreations_in_24h", n, "last", detail)...)
 		if err := audit.RecordErr(ctx, r.q, audit.Event{
-			Org: w.org.ID, Actor: audit.System(), Action: "agent.mark_unhealthy", TargetKind: "agent", TargetID: w.agent.ID.String(),
+			Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "agent.mark_unhealthy", TargetKind: "agent", TargetID: w.agent.ID.String(),
 			After: map[string]any{"sandbox": name, "reason": reason, "recreations_in_24h": n},
 		}); err != nil {
 			return err
@@ -1131,7 +1131,7 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 	r.m.SandboxRepairs.Inc()
 	r.log.Warn("deleting a failed sandbox to recreate it", append(w.logAttrs(), "detail", detail)...)
 	if err := audit.RecordErr(ctx, r.q, audit.Event{
-		Org: w.org.ID, Actor: audit.System(), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
+		Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
 		After: map[string]any{"sandbox": name, "reason": "sandbox " + detail, "phase": string(sb.Phase), "message": truncate(sb.Message, 300), "home_generation": sb.ID},
 	}); err != nil {
 		return err

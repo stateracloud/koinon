@@ -20,8 +20,8 @@
 // second Deployment would add an image, a database role and RBAC without
 // separating any secret.
 //
-// "koinon-api audit verify [--org ID]" walks the audit hash chain (ADR 0023) and exits non-zero at
-// the first broken link.
+// "koinon-api audit verify [--org ID | --install]" walks the install audit chain (ADR 0100) and the
+// org chains (ADR 0023) and exits non-zero at the first broken link.
 //
 // "koinon-api preflight [flags]" checks the cluster for Koinon's install
 // prerequisites and exits non-zero when one is missing (plan item H2); the chart
@@ -61,6 +61,7 @@ import (
 	"github.com/stateracloud/koinon/internal/api"
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/askuser"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
@@ -428,7 +429,7 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	// A platform entry the new default list caught up with is retired (ADR 0098 decision 1.5). It
-	// logs what it retired, and needs no platform admin (a fresh install has none yet). It is
+	// writes an install audit event for what it retired (ADR 0100), so a fresh install with no admin is covered. It is
 	// bookkeeping: a failure (a stored entry this binary refuses, a database hiccup) is a warning,
 	// never a reason not to serve; the next start tries again.
 	if _, err := priceSvc.RetireCaughtUp(ctx); err != nil {
@@ -671,6 +672,7 @@ func serve(ctx context.Context, cfg config) error {
 	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithTriggers(svc).WithModelCheck(echo)
 
 	reg := metrics.NewRegistry()
+	audit.RegisterMetrics(reg)
 	reg.MustRegister(kekMetrics.Collectors()...)
 	reg.MustRegister(guardMetrics.Collectors()...)
 	if durableRT != nil {

@@ -166,7 +166,7 @@ var _ = Describe("the code-host scope beside changes of its connection (#115)", 
 		for range 25 {
 			rerr, cerr := race(
 				func() error {
-					return svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System(), conn, reading, time.Now())
+					return svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, reading, time.Now())
 				},
 				func() error {
 					_, err := owner.conns.SetConnectionSecret(ctx, &connectionv1alpha1.SetConnectionSecretRequest{
@@ -187,10 +187,10 @@ var _ = Describe("the code-host scope beside changes of its connection (#115)", 
 		for range 15 {
 			conn := create(ctx)
 			// Rows for the delete's cascade to remove, so it waits on the replacement's.
-			Expect(svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System(), conn, reading, time.Now())).To(Succeed())
+			Expect(svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, reading, time.Now())).To(Succeed())
 			rerr, cerr := race(
 				func() error {
-					return svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System(), conn, reading, time.Now())
+					return svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, reading, time.Now())
 				},
 				func() error {
 					_, err := owner.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: conn})

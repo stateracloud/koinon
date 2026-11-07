@@ -4,6 +4,7 @@ package koinonapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -24,6 +25,7 @@ func newAuditCommand() *cobra.Command {
 		Long:  "Run it in a koinon-api pod: kubectl exec deploy/koinon-api -- koinon-api audit verify",
 	}
 	var dbURL, orgID string
+	var installOnly bool
 	verify := &cobra.Command{
 		Use:   "verify",
 		Short: "Walk the audit hash chain (ADR 0023) and report the first broken link",
@@ -36,31 +38,50 @@ func newAuditCommand() *cobra.Command {
 				return fmt.Errorf("connect to postgres: %w", err)
 			}
 			defer pool.Close()
-			return verifyAudit(cmd.Context(), pool, orgID, cmd.OutOrStdout())
+			return verifyAudit(cmd.Context(), pool, orgID, installOnly, cmd.OutOrStdout())
 		},
 	}
 	verify.Flags().StringVar(&dbURL, "database-url", "", "Postgres connection string")
-	verify.Flags().StringVar(&orgID, "org", "", "verify only this org's chain (default every org)")
+	verify.Flags().StringVar(&orgID, "org", "", "verify only this org's chain (default: the install chain and every org)")
+	verify.Flags().BoolVar(&installOnly, "install", false, "verify only the install chain")
 	cli.EnvAlias(verify, "database-url", "DATABASE_URL")
 	mustRequire(verify, "database-url")
 	audit.AddCommand(verify)
 	return audit
 }
 
-// verifyAudit verifies the chain of org (every org when empty) and prints the result. It returns
-// audit.ErrBroken when a chain does not hold.
-func verifyAudit(ctx context.Context, pool *pgxpool.Pool, orgID string, out io.Writer) error {
+// verifyAudit verifies the install chain and every org's chain, or one org's with orgID, or the
+// install chain alone with installOnly, and prints the result. It returns audit.ErrBroken when a
+// chain does not hold.
+func verifyAudit(ctx context.Context, pool *pgxpool.Pool, orgID string, installOnly bool, out io.Writer) error {
+	if installOnly && orgID != "" {
+		return errors.New("--install and --org are exclusive")
+	}
 	var org pgtype.UUID
 	if orgID != "" {
 		if err := org.Scan(orgID); err != nil || !org.Valid {
 			return fmt.Errorf("--org %q is not a UUID", orgID)
 		}
 	}
-	results, err := audit.Verify(ctx, store.New(pool), org)
-	if err != nil {
-		return err
+	q := store.New(pool)
+	ok := true
+	if orgID == "" {
+		res, err := audit.VerifyInstall(ctx, q)
+		if err != nil {
+			return err
+		}
+		ok = audit.WriteInstallReport(out, res)
 	}
-	if !audit.WriteReport(out, results) {
+	if !installOnly {
+		results, err := audit.Verify(ctx, q, org)
+		if err != nil {
+			return err
+		}
+		if !audit.WriteReport(out, results) {
+			ok = false
+		}
+	}
+	if !ok {
 		return audit.ErrBroken
 	}
 	return nil

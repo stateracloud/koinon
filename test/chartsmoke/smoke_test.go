@@ -90,6 +90,8 @@ func describeMode(name, valuesFile string) {
 			dbURL, err = pg.ConnectionString(ctx, "sslmode=disable")
 			Expect(err).NotTo(HaveOccurred())
 
+			bootstrapDatabase(ctx, dbURL)
+
 			cl = startCluster()
 
 			docker, err := testcontainers.NewDockerClientWithOpts(ctx)
@@ -163,6 +165,11 @@ func describeMode(name, valuesFile string) {
 					By(fmt.Sprintf("hook weight %d: %s", w, j.Name))
 					runJob(ctx, rn, j)
 					ran = append(ran, j.Name)
+					if j.Name == "koinon-migrate" {
+						// CNPG reconciles its managed roles on its own schedule, after the migration
+						// may have run: the login roles appear here, never before.
+						createComponentRoles(ctx, dbURL)
+					}
 				}
 			}
 			AddReportEntry("hook Jobs, in order", fmt.Sprint(ran))
@@ -289,6 +296,40 @@ func describeMode(name, valuesFile string) {
 			// The KEK Secret is created by the API on its first start (KOINON_KEK_CREATE).
 			Expect(cl.Secret(ctx, kekSecretName(r))).NotTo(BeNil(), "the key-encryption Secret exists")
 		}, SpecTimeout(3*time.Minute))
+
+		// The install audit chain (ADR 0100): the group role existed before the migration, the login
+		// roles came after it, and koinon-api, which connects as koinon_api, can append to the chain.
+		// A first start in mode auto records nothing (the default is not a change), so the event is
+		// asserted where the values file turns the refresh on; the privilege checks run in every mode.
+		It("lets koinon-api, and only it, append to the install audit chain", func(ctx SpecContext) {
+			conn, err := pgx.Connect(ctx, dbURL)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(conn.Close)
+
+			var n int
+			args := r.deployment("koinon-api").Spec.Template.Spec.Containers[0].Args
+			if i := slices.Index(args, "--prices-refresh"); i >= 0 && i+1 < len(args) && args[i+1] != "auto" {
+				Expect(conn.QueryRow(ctx, `SELECT count(*) FROM install_audit_events
+					WHERE action = 'price.refresh.settings_changed' AND actor_kind = 'system' AND actor_id = 'koinon-api:price-refresh'`).Scan(&n)).To(Succeed())
+				Expect(n).To(Equal(1), "koinon-api wrote an install event on its first start, as koinon_api")
+			}
+
+			insert := `INSERT INTO install_audit_events (actor_kind, actor_id, action, target_kind, target_id, summary)
+				VALUES ('system', 'koinon-test:chartsmoke', 'chartsmoke.probe', 'probe', 'x', '{}')`
+			as := func(role string) error {
+				c, err := pgx.Connect(ctx, strings.Replace(dbURL, "//koinon:", "//"+role+":", 1))
+				Expect(err).NotTo(HaveOccurred())
+				defer func() { _ = c.Close(ctx) }()
+				_, err = c.Exec(ctx, insert)
+				return err
+			}
+			Expect(as("koinon_api")).To(Succeed(), "koinon_api is in the writer group")
+			for _, role := range []string{"koinon_reconciler", "koinon_agentd"} {
+				err := as(role)
+				Expect(err).To(HaveOccurred(), "%s may not append to the install audit chain", role)
+				Expect(err.Error()).To(ContainSubstring("permission denied"), role)
+			}
+		}, SpecTimeout(time.Minute))
 
 		// The MCP leak guard (ADR 0091): agentgateway fails every org MCP call closed when it cannot
 		// reach the guard, so the guard koinon-api serves must be where the chart's reconciler config
@@ -478,4 +519,45 @@ func applyObject(ctx context.Context, cl *cluster, o runtime.Object) error {
 		return fmt.Errorf("applyObject: %T is not modelled", o)
 	}
 	return err
+}
+
+// bootstrapDatabase is what the chart's CNPG bootstrap (postInitApplicationSQL in
+// templates/postgres-cnpg.yaml) does before any migration runs: the group roles, in the chart's
+// order, and the owner's default privileges. hack/chart-check.d/45-install-audit-writer-role.sh
+// pins the chart side of the roles.
+func bootstrapDatabase(ctx context.Context, dbURL string) {
+	GinkgoHelper()
+	conn, err := pgx.Connect(ctx, dbURL)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = conn.Close(ctx) }()
+	for _, stmt := range []string{
+		`CREATE ROLE koinon_app NOLOGIN`,
+		`CREATE ROLE koinon_install_audit_writer NOLOGIN`,
+		`GRANT CONNECT ON DATABASE koinon TO koinon_app`,
+		`GRANT USAGE ON SCHEMA public TO koinon_app`,
+		`ALTER DEFAULT PRIVILEGES FOR ROLE koinon IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO koinon_app`,
+		`ALTER DEFAULT PRIVILEGES FOR ROLE koinon IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO koinon_app`,
+		`ALTER DEFAULT PRIVILEGES FOR ROLE koinon IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO koinon_app`,
+	} {
+		_, err := conn.Exec(ctx, stmt)
+		Expect(err).NotTo(HaveOccurred(), stmt)
+	}
+}
+
+// createComponentRoles creates the managed login roles of the chart (inRoles as rendered): all in
+// koinon_app, koinon_api also in the install audit writer group.
+func createComponentRoles(ctx context.Context, dbURL string) {
+	GinkgoHelper()
+	conn, err := pgx.Connect(ctx, dbURL)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = conn.Close(ctx) }()
+	for _, c := range []struct{ role, groups string }{
+		{"koinon_api", "koinon_app, koinon_install_audit_writer"},
+		{"koinon_reconciler", "koinon_app"},
+		{"koinon_agentd", "koinon_app"},
+	} {
+		stmt := fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD '%s' IN ROLE %s`, c.role, dbSecretPassword, c.groups)
+		_, err := conn.Exec(ctx, stmt)
+		Expect(err).NotTo(HaveOccurred(), c.role)
+	}
 }

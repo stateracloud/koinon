@@ -11,7 +11,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/pricefetch"
 )
@@ -41,9 +40,9 @@ func ParseRefreshMode(s string) (RefreshMode, error) {
 }
 
 // SyncSettings records the refresh setting koinon-api started with and audits a change
-// (price.refresh.settings_changed). The first start with the default mode (auto) records and
-// audits nothing. A bound looser than the default never gets here: NewRefresher refuses it. With
-// no platform admin yet the change is recorded and logged, not refused (auditPlatform).
+// (price.refresh.settings_changed, an install event of system koinon-api:price-refresh). The first
+// start with the default mode (auto) records and audits nothing. A bound looser than the default
+// never gets here: NewRefresher refuses it. No platform admin is needed.
 func (r *Refresher) SyncSettings(ctx context.Context, mode RefreshMode, interval time.Duration) error {
 	if _, err := ParseRefreshMode(string(mode)); err != nil {
 		return err
@@ -74,7 +73,7 @@ func (r *Refresher) SyncSettings(ctx context.Context, mode RefreshMode, interval
 		if !first {
 			before = fmtSettings(old.Mode, old.Interval, old.MaxChangePercent, old.MaxAutoPerDay)
 		}
-		return auditPlatform(ctx, q, r.log, audit.System(), "price.refresh.settings_changed", "price_refresh", "", before,
+		return auditPlatform(ctx, q, AutoActor, "price.refresh.settings_changed", "price_refresh", "", before,
 			fmtSettings(want.Mode, want.Interval, want.MaxChangePercent, want.MaxAutoPerDay))
 	})
 }

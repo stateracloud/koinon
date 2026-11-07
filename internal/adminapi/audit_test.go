@@ -13,6 +13,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/tokens"
 )
 
 type auditPage struct {
@@ -117,5 +118,48 @@ var _ = Describe("GET /admin/v1/audit without an org", func() {
 		Expect(err).To(MatchError(audit.ErrBadFilter))
 		st, _ := e.call(ctx, e.token, http.MethodGet, "/audit", nil)
 		Expect(st).To(Equal(http.StatusOK))
+	})
+})
+
+var _ = Describe("GET /admin/v1/audit?scope=install", func() {
+	It("serves the install chain to a token rooted at a platform admin, checked on every request", func(ctx SpecContext) {
+		e := newEnv(ctx)
+		q := store.New(pool)
+		Expect(audit.RecordInstallErr(ctx, q, audit.InstallEvent{
+			Actor: audit.System("koinon-test:spec"), Action: "platform_price.set", TargetKind: "platform_price", TargetID: "adminapi-install-scope",
+		})).To(Succeed())
+
+		By("an org-admin token whose root user is no platform admin gets 403, owner or admin role")
+		st, raw := e.call(ctx, e.token, http.MethodGet, "/audit?scope=install", nil)
+		Expect(st).To(Equal(http.StatusForbidden), string(raw))
+		adminTok, err := e.tokens.Create(ctx, e.org, audit.User(e.user), tokens.Creator{User: e.user, Role: store.OrgRoleOwner}, "admin", store.OrgRoleAdmin, 0)
+		Expect(err).NotTo(HaveOccurred())
+		st, raw = e.call(ctx, adminTok.Secret, http.MethodGet, "/audit?scope=install", nil)
+		Expect(st).To(Equal(http.StatusForbidden), string(raw))
+
+		By("the org scope is unchanged, and scope=org names it")
+		st, _ = e.call(ctx, e.token, http.MethodGet, "/audit?scope=org", nil)
+		Expect(st).To(Equal(http.StatusOK))
+
+		By("once the root user is a platform admin the same token reads the install chain")
+		_, err = pool.Exec(ctx, `INSERT INTO platform_admins (user_id) VALUES ($1)`, e.user)
+		Expect(err).NotTo(HaveOccurred())
+		st, raw = e.call(ctx, e.token, http.MethodGet, "/audit?scope=install&actionPrefix=platform_price.", nil)
+		Expect(st).To(Equal(http.StatusOK), string(raw))
+		page := decode[auditPage](raw)
+		Expect(page.Events).NotTo(BeEmpty())
+		Expect(page.Events[0].ActorID).To(Equal("koinon-test:spec"))
+		Expect(page.Events[0].ChainSeq).To(BeNumerically(">", 0))
+		Expect(string(raw)).NotTo(ContainSubstring("orgId"))
+
+		By("and loses it the moment the admin is removed")
+		_, err = pool.Exec(ctx, `DELETE FROM platform_admins WHERE user_id = $1`, e.user)
+		Expect(err).NotTo(HaveOccurred())
+		st, _ = e.call(ctx, e.token, http.MethodGet, "/audit?scope=install", nil)
+		Expect(st).To(Equal(http.StatusForbidden))
+
+		By("an unknown scope is a bad request")
+		st, _ = e.call(ctx, e.token, http.MethodGet, "/audit?scope=all", nil)
+		Expect(st).To(Equal(http.StatusBadRequest))
 	})
 })

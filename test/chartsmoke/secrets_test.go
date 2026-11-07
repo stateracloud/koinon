@@ -39,6 +39,24 @@ var wholeSecretKeys = map[string][]string{
 // databaseKeys are the keys of the operator's database Secret, as values.yaml documents them
 // (postgres.external.keys), not as the templates read them: a template that reads another key
 // must fail.
+// databaseKeyComponents maps each key of the operator's database Secret to the component it is for
+// (postgres.external.keys: migrate, api, reconciler, agentd).
+func databaseKeyComponents() map[string]string {
+	b, err := os.ReadFile(filepath.Join(chartDir, "values.yaml"))
+	must(err)
+	var v struct {
+		Postgres struct {
+			External struct{ Keys map[string]string } `json:"external"`
+		} `json:"postgres"`
+	}
+	must(yaml.Unmarshal(b, &v))
+	out := map[string]string{}
+	for component, key := range v.Postgres.External.Keys {
+		out[key] = component
+	}
+	return out
+}
+
 func databaseKeys() []string {
 	b, err := os.ReadFile(filepath.Join(chartDir, "values.yaml"))
 	must(err)
@@ -107,7 +125,17 @@ func provisionOperatorSecrets(ctx context.Context, cl *cluster, r *rendered) []s
 			have[s.Name] = true
 		}
 	}
-	dsn := fmt.Sprintf("postgres://koinon:%s@postgres:5432/koinon?sslmode=disable", dbSecretPassword)
+	// The migration role is the database owner. The other components connect as the login roles
+	// the chart's CNPG cluster gives them (createComponentRoles), not as the owner, so a grant a
+	// component needs and the chart does not give fails here as it would in an install.
+	dsnFor := func(component string) string {
+		user := "koinon"
+		if component != "migrate" {
+			user = "koinon_" + component
+		}
+		return fmt.Sprintf("postgres://%s:%s@postgres:5432/koinon?sslmode=disable", user, dbSecretPassword)
+	}
+	components := databaseKeyComponents()
 	needs := map[string]map[string]string{}
 	want := func(name, key, value string) {
 		if have[name] {
@@ -135,7 +163,7 @@ func provisionOperatorSecrets(ctx context.Context, cl *cluster, r *rendered) []s
 					if e.Name == "DATABASE_URL" {
 						// Every documented key, whichever one this container reads.
 						for _, k := range databaseKeys() {
-							want(ref.Name, k, dsn)
+							want(ref.Name, k, dsnFor(components[k]))
 						}
 						continue
 					}

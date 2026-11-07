@@ -86,7 +86,7 @@ func (r *Reconciler) archive(ctx context.Context, w *work, ws string, sb executi
 	}
 	r.log.Info("archived a stopped sandbox and its volume", w.logAttrs()...)
 	if err := audit.RecordErr(ctx, r.q, audit.Event{
-		Org: w.org.ID, Actor: audit.System(), Action: "sandbox.archive", TargetKind: "agent", TargetID: w.agent.ID.String(),
+		Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-archive"), Action: "sandbox.archive", TargetKind: "agent", TargetID: w.agent.ID.String(),
 		After: map[string]any{"sandbox": w.names().Sandbox, "stopped_for": r.cfg.Now().Sub(w.sb.StoppedAt.Time).Round(time.Second).String(), "home_generation": w.sb.HomeGeneration.String},
 	}); err != nil {
 		return false, err

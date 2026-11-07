@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // Actor kinds.
@@ -51,8 +52,15 @@ func Agent(id pgtype.UUID) Actor { return Actor{Kind: KindAgent, ID: id.String()
 // Secret is a declarative Kubernetes Secret ("secret <name>" in the log).
 func Secret(name string) Actor { return Actor{Kind: KindSecret, ID: name} }
 
-// System is Koinon itself.
-func System() Actor { return Actor{Kind: KindSystem} }
+// System is Koinon itself, named by the component and function that acted, as
+// "<component>:<function>" ("koinon-api:price-refresh", ADR 0100 decision 2). The ID is required:
+// no caller can write an unnamed system actor, and the install chain refuses an empty one.
+func System(id string) Actor {
+	if id == "" {
+		panic("audit: a system actor needs an ID, <component>:<function>")
+	}
+	return Actor{Kind: KindSystem, ID: id}
+}
 
 // CLI is an operator's koinon-api command, named by command ("keys forget"). The command runs in
 // the pod with the database's credentials, so there is no signed-in person to name.
@@ -77,6 +85,31 @@ type Event struct {
 	Before     any
 	After      any
 	RequestID  string
+	// Reason is the reason a person gave, when the action takes one; it lands in the summary as "reason".
+	Reason string
+	// KoinonVersion is the build that wrote the entry. Record fills it from the build; callers leave
+	// it empty. It lands in the summary as "koinon_version".
+	KoinonVersion string
+	// InstallEventID is the install event that caused this org event (ADR 0100 decision 1.6); it
+	// lands in the summary as "install_event_id".
+	InstallEventID string
+}
+
+// InstallEvent is one entry of the install chain, an action that belongs to no org (ADR 0100).
+// Before and After describe the target without secret values; RecordInstall refuses a summary with a
+// field that looks like one.
+type InstallEvent struct {
+	Actor      Actor
+	Action     string
+	TargetKind string
+	TargetID   string
+	Before     any
+	After      any
+	RequestID  string
+	// Reason is the reason a person gave, when the action takes one ("reason" in the summary).
+	Reason string
+	// KoinonVersion is filled by RecordInstall from the build; callers leave it empty.
+	KoinonVersion string
 }
 
 type requestIDKey struct{}
@@ -141,24 +174,44 @@ func scrub(v any) error {
 	return nil
 }
 
-// Record writes e with q, which belongs to the transaction of the change being audited.
-func Record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, error) {
+// buildSummary renders the summary of an event: before and after, and the keys of ADR 0100
+// decision 1.2a. It goes through the secret scrubber like any other summary.
+func buildSummary(before, after any, reason, version, installEventID string) ([]byte, error) {
 	summary := map[string]any{}
-	if e.Before != nil {
-		summary["before"] = e.Before
+	if before != nil {
+		summary["before"] = before
 	}
-	if e.After != nil {
-		summary["after"] = e.After
+	if after != nil {
+		summary["after"] = after
+	}
+	if reason != "" {
+		summary["reason"] = reason
+	}
+	if version == "" {
+		version = project.Version
+	}
+	summary["koinon_version"] = version
+	if installEventID != "" {
+		summary["install_event_id"] = installEventID
 	}
 	raw, err := json.Marshal(summary)
 	if err != nil {
-		return store.AuditEvent{}, fmt.Errorf("audit: summary: %w", err)
+		return nil, fmt.Errorf("audit: summary: %w", err)
 	}
 	var generic map[string]any
 	if err := json.Unmarshal(raw, &generic); err != nil {
-		return store.AuditEvent{}, err
+		return nil, err
 	}
 	if err := scrub(generic); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// Record writes e with q, which belongs to the transaction of the change being audited.
+func Record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, error) {
+	raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, e.InstallEventID)
+	if err != nil {
 		return store.AuditEvent{}, err
 	}
 	if e.RequestID == "" {
@@ -168,6 +221,7 @@ func Record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, e
 		OrgID: e.Org, ActorKind: e.Actor.Kind, ActorID: e.Actor.ID, Action: e.Action,
 		TargetKind: e.TargetKind, TargetID: e.TargetID, Summary: raw, RequestID: e.RequestID,
 	})
+	countWrite(ChainOrg, err)
 	if err != nil {
 		return store.AuditEvent{}, fmt.Errorf("audit: record %s: %w", e.Action, err)
 	}
@@ -177,5 +231,37 @@ func Record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, e
 // RecordErr is Record for callers that only need the error.
 func RecordErr(ctx context.Context, q *store.Queries, e Event) error {
 	_, err := Record(ctx, q, e)
+	return err
+}
+
+// RecordInstall writes e to the install chain with q, which belongs to the transaction of the change
+// being audited (ADR 0100 decision 1.2). Only koinon-api may call it: the database refuses the insert
+// to any other role. The actor must be named (the chain refuses an empty ID). Lock order (decision
+// 1.7): write the install event before the org events of the same transaction, never after.
+func RecordInstall(ctx context.Context, q *store.Queries, e InstallEvent) (store.InstallAuditEvent, error) {
+	if e.Actor.Kind == "" || e.Actor.ID == "" {
+		return store.InstallAuditEvent{}, errors.New("audit: an install event needs a named actor")
+	}
+	raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, "")
+	if err != nil {
+		return store.InstallAuditEvent{}, err
+	}
+	if e.RequestID == "" {
+		e.RequestID = RequestID(ctx)
+	}
+	row, err := q.InsertInstallAuditEvent(ctx, store.InsertInstallAuditEventParams{
+		ActorKind: e.Actor.Kind, ActorID: e.Actor.ID, Action: e.Action,
+		TargetKind: e.TargetKind, TargetID: e.TargetID, Summary: raw, RequestID: e.RequestID,
+	})
+	countWrite(ChainInstall, err)
+	if err != nil {
+		return store.InstallAuditEvent{}, fmt.Errorf("audit: record install event %s: %w", e.Action, err)
+	}
+	return row, nil
+}
+
+// RecordInstallErr is RecordInstall for callers that only need the error.
+func RecordInstallErr(ctx context.Context, q *store.Queries, e InstallEvent) error {
+	_, err := RecordInstall(ctx, q, e)
 	return err
 }

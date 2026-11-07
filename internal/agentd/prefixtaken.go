@@ -151,7 +151,7 @@ func (p *Pool) recordTakenPrefix(ctx context.Context, org, agent pgtype.UUID, ep
 		}
 		changed = true
 		return audit.RecordErr(ctx, q, audit.Event{
-			Org: org, Actor: audit.System(), Action: PrefixTakenAction, TargetKind: "agent", TargetID: agent.String(),
+			Org: org, Actor: audit.System("koinon-agentd:prefix-taken"), Action: PrefixTakenAction, TargetKind: "agent", TargetID: agent.String(),
 			After: map[string]any{
 				"repositoryEpoch": epoch, "prefix": prefix, "knownToDatabase": markRow, "nextEpochAtLeast": floor,
 			},

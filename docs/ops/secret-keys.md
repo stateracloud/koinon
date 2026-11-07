@@ -348,6 +348,39 @@ REVOKE UPDATE, DELETE, TRUNCATE ON audit_events FROM <app role>;
 
 and make sure that role is not the table owner.
 
+### The install audit chain (ADR 0100)
+
+Actions that belong to no org (platform prices first) go to a second chain, `install_audit_events`.
+Only `koinon-api` writes it. The migration grants INSERT to the group role
+`koinon_install_audit_writer` and takes every write privilege on both install tables away from
+`koinon_app`; it creates the group role itself when it is missing, which needs CREATEROLE, so create
+the role first as an administrator. The chart's CloudNativePG setup creates the role in
+`postInitApplicationSQL` and makes only the `koinon_api` managed role a member.
+
+With `postgres.mode: external` the roles are yours. Run this once as an administrator **before the
+first migration**, with `<api role>` the role `koinon-api` logs in as:
+
+```sql
+CREATE ROLE koinon_install_audit_writer NOLOGIN;
+GRANT koinon_install_audit_writer TO <api role>;
+```
+
+and, if the migration role is not the one that owns the tables or `koinon_app` does not exist, after
+it:
+
+```sql
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON install_audit_events, install_audit_chain_head FROM <reconciler role>, <agentd role>;
+GRANT SELECT ON install_audit_events, install_audit_chain_head TO <reconciler role>, <agentd role>;
+```
+
+**Do not let `koinon-reconciler` or `koinon-agentd` share the `koinon-api` login role.** The
+privilege is the role's: a process that connects as the writer role can append install events
+under any actor name (the chain's hash stops edits, not a forged first write), and the only
+separation between the components is that their roles differ. The same holds for the table owner
+and any superuser, which can also rewrite the chain; signed checkpoints (ADR 0100) will close that
+gap later. `koinon-api audit verify` walks the install chain and every org chain and exits non-zero
+at the first broken link (`--install` for the install chain alone).
+
 ## Admin API tokens
 
 A token made from a session starts a chain: 30 days by default, at most 90. A token may create tokens
