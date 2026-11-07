@@ -50,14 +50,12 @@ render_raw() { "$HELM" template koinon "$CHART" --namespace koinon --set "$ADDRE
 # the pipeline when grep exits on the first match and helm then dies of SIGPIPE.
 # fail records into a file, not only a counter: an assertion that runs in a subshell (a pipe, $(...)
 # or a ( ... ) group) cannot bump a variable of this shell, and a FAIL that does not reach the exit
-# code makes every assertion advisory (koinon-private#323).
+# code makes every assertion advisory (#323).
 failure_log="$out/failures"
 : >"$failure_log"
-failures=0
 fail() {
 	echo "FAIL: $*" >&2
 	echo "$*" >>"$failure_log"
-	failures=$((failures + 1))
 }
 # gate_failures exits non-zero when any assertion recorded a failure, from any shell level.
 gate_failures() {

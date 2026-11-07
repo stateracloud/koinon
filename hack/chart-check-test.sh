@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Offline test of hack/chart-check.sh's failure gate (koinon-private#323): a FAIL from any
+# Offline test of hack/chart-check.sh's failure gate (#323): a FAIL from any
 # assertion file, in any shell level, or an assertion file that exits non-zero, must fail the
 # script. Helm and Go are stubbed, so this needs only bash.
 

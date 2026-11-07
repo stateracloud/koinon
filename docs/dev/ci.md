@@ -129,12 +129,13 @@ commit that names the break.
 
 ## Chart and admission tests
 
-`hack/chart-check.sh` runs lint, every mode rendered, render assertions and kubeconform; any `FAIL` from an assertion (at any shell level) makes it exit
-non-zero, which `hack/chart-check-test.sh` (the `scripts` job) proves with planted failures. Anything
-that changes how a Koinon binary starts (a flag or env var it requires, a mount, a Secret key, an
-RBAC rule) is covered by `make test-chart-smoke` (`test/chartsmoke`: runs the rendered Jobs and
-Deployments as containers); extend it when you add a component or a startup input, since a unit
-test of the flag parser does not see what the chart really passes (koinon-private#284).
+`hack/chart-check.sh` runs lint, every mode rendered, render assertions and kubeconform; any `FAIL`
+from an assertion (at any shell level) makes it exit non-zero, which `hack/chart-check-test.sh`
+(the `scripts` job) proves with planted failures. Anything that changes how a Koinon binary starts
+(a flag or env var it requires, a mount, a Secret key, an RBAC rule) is covered by
+`make test-chart-smoke` (`test/chartsmoke`: runs the rendered Jobs and Deployments as containers);
+extend it when you add a component or a startup input, since a unit test of the flag parser does
+not see what the chart really passes (koinon-private#284).
 
 The sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`) is tested by the
 escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./test/escape/ -ginkgo.label-filter=admission`
