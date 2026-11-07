@@ -274,6 +274,8 @@ vocabulary:
 | `koinon-api:oidc-sync` | the platform admin grant and revoke from IdP groups at login (today ID `oidc`) |
 | `koinon-api:price-refresh` | the price refresh and its bounded auto-apply (ADR 0098 decision 3) |
 | `koinon-api:audit-anchor` | the anchor and checkpoint job (decision 4) |
+| `koinon-api:model-formats` | the start-up re-derivation of model formats, in each org's chain (`model.format_rederived`) |
+| `koinon-api:code-host-scope` | the code host connection scope sync, in each org's chain (`org.code_host_scope.replace`) |
 
 `audit.System()` takes the actor ID as an argument, so no caller can write an unnamed system actor.
 A `cli` actor keeps the command as its ID (`keys forget`).

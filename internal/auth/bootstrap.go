@@ -144,8 +144,9 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 		if err != nil {
 			return fmt.Errorf("grant platform admin: %w", err)
 		}
-		// Audit events of the default org wait until the install events are written: the install
-		// chain's head is taken first (ADR 0100 decision 1.7).
+		// Audit events wait until every domain write of this transaction is done: the lock order is
+		// domain locks first, then the install event, then org events (ADR 0100 decision 1.7). An OIDC
+		// login takes its group-mapping locks before the install head, so bootstrap must too.
 		var orgEvents []audit.Event
 
 		org, err := q.GetOrgBySlug(ctx, DefaultOrgSlug)
@@ -179,30 +180,30 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 			}
 		}
 
-		// The install events: the first admin's creation, or a grant that came back after it was
-		// removed. Written before any org event of this transaction.
-		var installID string
-		switch {
-		case res.CreatedAdmin:
-			ev, err := audit.RecordInstall(ctx, q, audit.InstallEvent{
-				Actor: BootstrapActor, Action: "platform_admin.bootstrap", TargetKind: "org", TargetID: org.ID.String(),
-				After: map[string]any{"userId": admin.ID.String(), "source": "bootstrap", "defaultOrgSlug": org.Slug},
-			})
-			if err != nil {
-				return err
-			}
-			installID = ev.ID.String()
-		case grantedRows > 0:
-			ev, err := audit.RecordInstall(ctx, q, audit.InstallEvent{
-				Actor: BootstrapActor, Action: "platform_admin.grant", TargetKind: "user", TargetID: admin.ID.String(),
-				After: map[string]any{"source": "bootstrap"},
-			})
-			if err != nil {
-				return err
-			}
-			installID = ev.ID.String()
-		}
+		// flush writes the install event (the first admin's creation, or a grant that came back
+		// after it was removed), then the org events of this transaction.
 		flush := func() error {
+			var installID string
+			switch {
+			case res.CreatedAdmin:
+				ev, err := audit.RecordInstall(ctx, q, audit.InstallEvent{
+					Actor: BootstrapActor, Action: "platform_admin.bootstrap", TargetKind: "org", TargetID: org.ID.String(),
+					After: map[string]any{"userId": admin.ID.String(), "source": "bootstrap", "defaultOrgSlug": org.Slug},
+				})
+				if err != nil {
+					return err
+				}
+				installID = ev.ID.String()
+			case grantedRows > 0:
+				ev, err := audit.RecordInstall(ctx, q, audit.InstallEvent{
+					Actor: BootstrapActor, Action: "platform_admin.grant", TargetKind: "user", TargetID: admin.ID.String(),
+					After: map[string]any{"source": "bootstrap"},
+				})
+				if err != nil {
+					return err
+				}
+				installID = ev.ID.String()
+			}
 			for _, ev := range orgEvents {
 				ev.InstallEventID = installID
 				if err := audit.RecordErr(ctx, q, ev); err != nil {
